@@ -3814,6 +3814,183 @@ HIPAPI hipError_t hipMemcpyWithStream(void* dst, const void* src,
   return hipMemcpyAsync(dst, src, sizeBytes, kind, stream);
 }
 
+// Copies 2D pitched data between host and device asynchronously.
+//
+// Parameters:
+//  - dst: [OUT] Destination pointer (host or device).
+//  - dpitch: [IN] Pitch (stride in bytes) of destination memory.
+//  - src: [IN] Source pointer (host or device).
+//  - spitch: [IN] Pitch (stride in bytes) of source memory.
+//  - width: [IN] Width of the 2D copy region in bytes.
+//  - height: [IN] Height of the 2D copy region (number of rows).
+//  - kind: [IN] Type of copy (hipMemcpyHostToDevice, etc.).
+//  - stream: [IN] Stream for asynchronous execution (NULL = default stream).
+//
+// Returns:
+//  - hipSuccess: Copy was successfully queued.
+//  - hipErrorInvalidValue: Invalid parameters.
+//  - hipErrorInvalidPitchValue: Invalid pitch values.
+//  - hipErrorInvalidMemcpyDirection: Invalid copy direction.
+//
+// Synchronization: This operation is asynchronous on the specified stream.
+//
+// Threading: Thread-safe.
+//
+// Notes:
+// - The copy region is defined as a rectangle of `height` rows, each `width`
+//   bytes wide.
+// - For each row, `width` bytes are copied; remaining bytes up to the pitch
+//   are not accessed.
+// - Host memory should be pinned for best async performance.
+//
+// See also: hipMemcpy2D, hipMemcpyAsync, hipMallocPitch.
+HIPAPI hipError_t hipMemcpy2DAsync(void* dst, size_t dpitch, const void* src,
+                                   size_t spitch, size_t width, size_t height,
+                                   hipMemcpyKind kind, hipStream_t stream) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  // Validate pointers.
+  if (!dst || !src) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  // Validate pitch values - width cannot exceed pitch.
+  if (width > dpitch || width > spitch) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidPitchValue);
+  }
+
+  // Zero-size copy is a no-op.
+  if (width == 0 || height == 0) {
+    IREE_TRACE_ZONE_END(z0);
+    return hipSuccess;
+  }
+
+  // Ensure initialization and get context.
+  iree_hal_streaming_context_t* context = NULL;
+  hipError_t init_result = iree_hip_ensure_context(&context);
+  if (init_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(init_result);
+  }
+
+  // Resolve NULL stream to default stream.
+  if (!stream) {
+    stream = (hipStream_t)context->default_stream;
+  }
+
+  // Handle hipMemcpyDefault by detecting pointer types.
+  if (kind == hipMemcpyDefault) {
+    iree_hal_streaming_buffer_ref_t dst_ref;
+    iree_status_t dst_status = iree_hal_streaming_memory_lookup(
+        context, (iree_hal_streaming_deviceptr_t)dst, &dst_ref);
+    bool dst_is_device = iree_status_is_ok(dst_status);
+    iree_status_ignore(dst_status);
+
+    iree_hal_streaming_buffer_ref_t src_ref;
+    iree_status_t src_status = iree_hal_streaming_memory_lookup(
+        context, (iree_hal_streaming_deviceptr_t)src, &src_ref);
+    bool src_is_device = iree_status_is_ok(src_status);
+    iree_status_ignore(src_status);
+
+    if (dst_is_device && src_is_device) {
+      kind = hipMemcpyDeviceToDevice;
+    } else if (dst_is_device && !src_is_device) {
+      kind = hipMemcpyHostToDevice;
+    } else if (!dst_is_device && src_is_device) {
+      kind = hipMemcpyDeviceToHost;
+    } else {
+      kind = hipMemcpyHostToHost;
+    }
+  }
+
+  // Copy row by row.
+  iree_status_t status = iree_ok_status();
+  const uint8_t* src_ptr = (const uint8_t*)src;
+  uint8_t* dst_ptr = (uint8_t*)dst;
+
+  for (size_t row = 0; row < height && iree_status_is_ok(status); ++row) {
+    switch (kind) {
+      case hipMemcpyHostToDevice:
+        status = iree_hal_streaming_memcpy_host_to_device(
+            context, (iree_hal_streaming_deviceptr_t)dst_ptr, src_ptr, width,
+            (iree_hal_streaming_stream_t*)stream);
+        break;
+      case hipMemcpyDeviceToHost:
+        status = iree_hal_streaming_memcpy_device_to_host(
+            context, dst_ptr, (iree_hal_streaming_deviceptr_t)src_ptr, width,
+            (iree_hal_streaming_stream_t*)stream);
+        break;
+      case hipMemcpyDeviceToDevice:
+        status = iree_hal_streaming_memcpy_device_to_device(
+            context, (iree_hal_streaming_deviceptr_t)dst_ptr,
+            (iree_hal_streaming_deviceptr_t)src_ptr, width,
+            (iree_hal_streaming_stream_t*)stream);
+        break;
+      case hipMemcpyHostToHost:
+        memcpy(dst_ptr, src_ptr, width);
+        break;
+      default:
+        status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "invalid memory copy direction");
+        break;
+    }
+    src_ptr += spitch;
+    dst_ptr += dpitch;
+  }
+
+  hipError_t result = iree_status_to_hip_result(status);
+  IREE_TRACE_ZONE_END(z0);
+  return result;
+}
+
+// Copies 2D pitched data between host and device synchronously.
+//
+// Parameters:
+//  - dst: [OUT] Destination pointer (host or device).
+//  - dpitch: [IN] Pitch (stride in bytes) of destination memory.
+//  - src: [IN] Source pointer (host or device).
+//  - spitch: [IN] Pitch (stride in bytes) of source memory.
+//  - width: [IN] Width of the 2D copy region in bytes.
+//  - height: [IN] Height of the 2D copy region (number of rows).
+//  - kind: [IN] Type of copy (hipMemcpyHostToDevice, etc.).
+//
+// Returns:
+//  - hipSuccess: Copy completed successfully.
+//  - hipErrorInvalidValue: Invalid parameters.
+//  - hipErrorInvalidPitchValue: Invalid pitch values.
+//  - hipErrorInvalidMemcpyDirection: Invalid copy direction.
+//
+// Synchronization: This operation is synchronous - it blocks until complete.
+//
+// Threading: Thread-safe.
+//
+// Notes:
+// - The copy region is defined as a rectangle of `height` rows, each `width`
+//   bytes wide.
+// - For each row, `width` bytes are copied; remaining bytes up to the pitch
+//   are not accessed.
+//
+// See also: hipMemcpy2DAsync, hipMemcpy, hipMallocPitch.
+HIPAPI hipError_t hipMemcpy2D(void* dst, size_t dpitch, const void* src,
+                              size_t spitch, size_t width, size_t height,
+                              hipMemcpyKind kind) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  // Call async version with NULL stream (default stream).
+  hipError_t result =
+      hipMemcpy2DAsync(dst, dpitch, src, spitch, width, height, kind, NULL);
+
+  if (result == hipSuccess) {
+    // Synchronize to make it blocking.
+    result = hipDeviceSynchronize();
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+  return result;
+}
+
 // Copies data from host memory to device memory (synchronous).
 //
 // Parameters:
