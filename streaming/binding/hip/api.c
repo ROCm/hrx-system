@@ -4838,6 +4838,48 @@ HIPAPI hipError_t hipStreamGetDevice(hipStream_t stream, hipDevice_t* device) {
   return hipSuccess;
 }
 
+// Returns the device ID associated with a stream.
+//
+// Parameters:
+//  - stream: [IN] Stream to query (NULL = default stream).
+//
+// Returns:
+//  - Device ordinal (>= 0) on success.
+//  - -1 on error (sets last error).
+//
+// Synchronization: This operation is synchronous and immediate.
+//
+// Threading: Thread-safe.
+//
+// Multi-GPU Notes:
+// - Each stream is bound to a specific device at creation time.
+// - The NULL stream is bound to the current context's device.
+//
+// See also: hipStreamGetDevice, hipGetDevice, hipSetDevice.
+HIPAPI int hipGetStreamDeviceId(hipStream_t stream) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  // Resolve NULL stream to default stream.
+  if (!stream) {
+    // Ensure initialization and get context.
+    iree_hal_streaming_context_t* context = NULL;
+    hipError_t init_result = iree_hip_ensure_context(&context);
+    if (init_result != hipSuccess) {
+      IREE_TRACE_ZONE_END(z0);
+      iree_hip_thread_error_set(init_result, false);
+      return -1;
+    }
+    stream = (hipStream_t)context->default_stream;
+  }
+
+  iree_hal_streaming_stream_t* stream_obj =
+      (iree_hal_streaming_stream_t*)stream;
+  int device_id = (int)stream_obj->context->device_ordinal;
+
+  IREE_TRACE_ZONE_END(z0);
+  return device_id;
+}
+
 // Waits for all operations in a stream to complete.
 //
 // Parameters:
