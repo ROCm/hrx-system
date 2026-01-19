@@ -4183,6 +4183,283 @@ HIPAPI hipError_t hipMemcpyDtoDAsync(hipDeviceptr_t dst, hipDeviceptr_t src,
   return hipMemcpyAsync(dst, src, sizeBytes, hipMemcpyDeviceToDevice, stream);
 }
 
+//===----------------------------------------------------------------------===//
+// Symbol Memory Operations
+//===----------------------------------------------------------------------===//
+
+// Gets the device address of a symbol (device variable).
+//
+// Parameters:
+//  - devPtr: [OUT] Pointer to receive the device address.
+//  - symbol: [IN] Pointer to the host shadow variable.
+//
+// Returns:
+//  - hipSuccess: Address retrieved successfully.
+//  - hipErrorInvalidValue: devPtr or symbol is NULL.
+//  - hipErrorInvalidSymbol: Symbol not found in registry.
+//
+// Notes:
+// - The symbol must have been registered via __hipRegisterVar.
+// - The returned address can be used with hipMemcpy functions.
+//
+// See also: hipGetSymbolSize, hipMemcpyToSymbol, hipMemcpyFromSymbol.
+HIPAPI hipError_t hipGetSymbolAddress(void** devPtr, const void* symbol) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  if (!devPtr || !symbol) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  // Ensure initialization and get context.
+  iree_hal_streaming_context_t* context = NULL;
+  hipError_t init_result = iree_hip_ensure_context(&context);
+  if (init_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(init_result);
+  }
+
+  // Look up the symbol in the context's symbol map.
+  iree_hal_streaming_symbol_t* sym = NULL;
+  iree_status_t status = iree_hal_streaming_context_symbol_map_lookup(
+      &context->symbol_map, (void*)symbol, &sym);
+
+  if (!iree_status_is_ok(status) || !sym) {
+    iree_status_ignore(status);
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidSymbol);
+  }
+
+  // Check that this is a variable (GLOBAL or DATA type).
+  if (sym->type != IREE_HAL_STREAMING_SYMBOL_TYPE_GLOBAL &&
+      sym->type != IREE_HAL_STREAMING_SYMBOL_TYPE_DATA) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidSymbol);
+  }
+
+  *devPtr = (void*)sym->device_address;
+  IREE_TRACE_ZONE_END(z0);
+  return hipSuccess;
+}
+
+// Gets the size of a symbol (device variable).
+//
+// Parameters:
+//  - size: [OUT] Pointer to receive the size in bytes.
+//  - symbol: [IN] Pointer to the host shadow variable.
+//
+// Returns:
+//  - hipSuccess: Size retrieved successfully.
+//  - hipErrorInvalidValue: size or symbol is NULL.
+//  - hipErrorInvalidSymbol: Symbol not found in registry.
+//
+// See also: hipGetSymbolAddress, hipMemcpyToSymbol, hipMemcpyFromSymbol.
+HIPAPI hipError_t hipGetSymbolSize(size_t* size, const void* symbol) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  if (!size || !symbol) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  // Ensure initialization and get context.
+  iree_hal_streaming_context_t* context = NULL;
+  hipError_t init_result = iree_hip_ensure_context(&context);
+  if (init_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(init_result);
+  }
+
+  // Look up the symbol in the context's symbol map.
+  iree_hal_streaming_symbol_t* sym = NULL;
+  iree_status_t status = iree_hal_streaming_context_symbol_map_lookup(
+      &context->symbol_map, (void*)symbol, &sym);
+
+  if (!iree_status_is_ok(status) || !sym) {
+    iree_status_ignore(status);
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidSymbol);
+  }
+
+  if (sym->type != IREE_HAL_STREAMING_SYMBOL_TYPE_GLOBAL &&
+      sym->type != IREE_HAL_STREAMING_SYMBOL_TYPE_DATA) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidSymbol);
+  }
+
+  *size = (size_t)sym->size_bytes;
+  IREE_TRACE_ZONE_END(z0);
+  return hipSuccess;
+}
+
+// Copies data to a symbol (device variable) asynchronously.
+//
+// Parameters:
+//  - symbol: [IN] Pointer to the host shadow variable.
+//  - src: [IN] Source host pointer.
+//  - sizeBytes: [IN] Number of bytes to copy.
+//  - offset: [IN] Offset in bytes from start of symbol.
+//  - kind: [IN] Type of copy (must be hipMemcpyHostToDevice or default).
+//  - stream: [IN] Stream for asynchronous execution.
+//
+// Returns:
+//  - hipSuccess: Copy enqueued successfully.
+//  - hipErrorInvalidValue: Invalid parameters.
+//  - hipErrorInvalidSymbol: Symbol not found.
+//  - hipErrorInvalidMemcpyDirection: Invalid copy direction.
+//
+// See also: hipMemcpyToSymbol, hipMemcpyFromSymbolAsync.
+HIPAPI hipError_t hipMemcpyToSymbolAsync(const void* symbol, const void* src,
+                                         size_t sizeBytes, size_t offset,
+                                         hipMemcpyKind kind,
+                                         hipStream_t stream) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  if (!symbol || !src) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  // Get the device address of the symbol.
+  void* devPtr = NULL;
+  hipError_t result = hipGetSymbolAddress(&devPtr, symbol);
+  if (result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(result);
+  }
+
+  // Validate the copy direction.
+  if (kind != hipMemcpyHostToDevice && kind != hipMemcpyDefault) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidMemcpyDirection);
+  }
+
+  // Perform the copy with offset.
+  result = hipMemcpyAsync((uint8_t*)devPtr + offset, src, sizeBytes,
+                          hipMemcpyHostToDevice, stream);
+
+  IREE_TRACE_ZONE_END(z0);
+  return result;
+}
+
+// Copies data to a symbol (device variable) synchronously.
+//
+// Parameters:
+//  - symbol: [IN] Pointer to the host shadow variable.
+//  - src: [IN] Source host pointer.
+//  - sizeBytes: [IN] Number of bytes to copy.
+//  - offset: [IN] Offset in bytes from start of symbol.
+//  - kind: [IN] Type of copy (default: hipMemcpyHostToDevice).
+//
+// Returns:
+//  - hipSuccess: Copy completed successfully.
+//  - hipErrorInvalidValue: Invalid parameters.
+//  - hipErrorInvalidSymbol: Symbol not found.
+//  - hipErrorInvalidMemcpyDirection: Invalid copy direction.
+//
+// Synchronization: This operation is synchronous.
+//
+// See also: hipMemcpyToSymbolAsync, hipMemcpyFromSymbol.
+HIPAPI hipError_t hipMemcpyToSymbol(const void* symbol, const void* src,
+                                    size_t sizeBytes, size_t offset,
+                                    hipMemcpyKind kind) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  hipError_t result =
+      hipMemcpyToSymbolAsync(symbol, src, sizeBytes, offset, kind, NULL);
+
+  if (result == hipSuccess) {
+    result = hipDeviceSynchronize();
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+  return result;
+}
+
+// Copies data from a symbol (device variable) asynchronously.
+//
+// Parameters:
+//  - dst: [OUT] Destination host pointer.
+//  - symbol: [IN] Pointer to the host shadow variable.
+//  - sizeBytes: [IN] Number of bytes to copy.
+//  - offset: [IN] Offset in bytes from start of symbol.
+//  - kind: [IN] Type of copy (must be hipMemcpyDeviceToHost or default).
+//  - stream: [IN] Stream for asynchronous execution.
+//
+// Returns:
+//  - hipSuccess: Copy enqueued successfully.
+//  - hipErrorInvalidValue: Invalid parameters.
+//  - hipErrorInvalidSymbol: Symbol not found.
+//  - hipErrorInvalidMemcpyDirection: Invalid copy direction.
+//
+// See also: hipMemcpyFromSymbol, hipMemcpyToSymbolAsync.
+HIPAPI hipError_t hipMemcpyFromSymbolAsync(void* dst, const void* symbol,
+                                           size_t sizeBytes, size_t offset,
+                                           hipMemcpyKind kind,
+                                           hipStream_t stream) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  if (!dst || !symbol) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  // Get the device address of the symbol.
+  void* devPtr = NULL;
+  hipError_t result = hipGetSymbolAddress(&devPtr, symbol);
+  if (result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(result);
+  }
+
+  // Validate the copy direction.
+  if (kind != hipMemcpyDeviceToHost && kind != hipMemcpyDefault) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidMemcpyDirection);
+  }
+
+  // Perform the copy with offset.
+  result = hipMemcpyAsync(dst, (const uint8_t*)devPtr + offset, sizeBytes,
+                          hipMemcpyDeviceToHost, stream);
+
+  IREE_TRACE_ZONE_END(z0);
+  return result;
+}
+
+// Copies data from a symbol (device variable) synchronously.
+//
+// Parameters:
+//  - dst: [OUT] Destination host pointer.
+//  - symbol: [IN] Pointer to the host shadow variable.
+//  - sizeBytes: [IN] Number of bytes to copy.
+//  - offset: [IN] Offset in bytes from start of symbol.
+//  - kind: [IN] Type of copy (default: hipMemcpyDeviceToHost).
+//
+// Returns:
+//  - hipSuccess: Copy completed successfully.
+//  - hipErrorInvalidValue: Invalid parameters.
+//  - hipErrorInvalidSymbol: Symbol not found.
+//  - hipErrorInvalidMemcpyDirection: Invalid copy direction.
+//
+// Synchronization: This operation is synchronous.
+//
+// See also: hipMemcpyFromSymbolAsync, hipMemcpyToSymbol.
+HIPAPI hipError_t hipMemcpyFromSymbol(void* dst, const void* symbol,
+                                      size_t sizeBytes, size_t offset,
+                                      hipMemcpyKind kind) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  hipError_t result =
+      hipMemcpyFromSymbolAsync(dst, symbol, sizeBytes, offset, kind, NULL);
+
+  if (result == hipSuccess) {
+    result = hipDeviceSynchronize();
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+  return result;
+}
+
 // Sets device memory to a value.
 //
 // Parameters:
@@ -10479,6 +10756,43 @@ HIPAPI void __hipRegisterManagedVar(void* hipModule, void** pointer,
       iree_hal_streaming_global_symbol_registry_insert_variable(
           registry, (iree_hal_streaming_module_registration_t*)hipModule,
           *pointer, name, size, align);
+  iree_status_ignore(status);
+}
+
+// Registers a __device__ or __constant__ variable with the HIP runtime.
+//
+// Parameters:
+//  - modules: [IN] Handle from __hipRegisterFatBinary for the containing
+//                  module.
+//  - var: [IN] Host-side shadow variable address.
+//  - hostVar: [IN] Host variable name (typically same as deviceVar).
+//  - deviceVar: [IN] Device variable name (for symbol lookup).
+//  - ext: [IN] 1 if externally visible, 0 otherwise.
+//  - size: [IN] Size of the variable in bytes.
+//  - constant: [IN] 1 if __constant__ memory, 0 if __device__ memory.
+//  - global: [IN] 1 if globally visible, 0 otherwise.
+//
+// Calling context:
+// - Called during program startup after __hipRegisterFatBinary.
+// - Called once per __device__ or __constant__ variable in the module.
+//
+// Lifetime:
+// - The variable remains valid until __hipUnregisterFatBinary.
+HIPAPI void __hipRegisterVar(void** modules, void* var, char* hostVar,
+                             char* deviceVar, int ext, size_t size,
+                             int constant, int global) {
+  if (!modules || !var || !deviceVar) return;
+
+  iree_hal_streaming_global_symbol_registry_t* registry =
+      iree_hal_streaming_global_symbol_registry();
+  if (!registry) return;
+
+  // Register the variable with a default alignment of 8 bytes.
+  // The actual alignment is determined by the device variable type.
+  iree_status_t status =
+      iree_hal_streaming_global_symbol_registry_insert_variable(
+          registry, (iree_hal_streaming_module_registration_t*)modules, var,
+          deviceVar, size, 8);
   iree_status_ignore(status);
 }
 
