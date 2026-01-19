@@ -56,6 +56,7 @@ IREE_HAL_HSA_REQUIRED_PFN_DECL(hsa_signal_subtract_screlease, hsa_signal_t,
                                hsa_signal_value_t)
 
 // Memory management (core)
+IREE_HAL_HSA_REQUIRED_PFN_DECL(hsa_memory_copy, void*, const void*, size_t)
 IREE_HAL_HSA_REQUIRED_PFN_DECL(hsa_memory_register, void*, size_t)
 IREE_HAL_HSA_REQUIRED_PFN_DECL(hsa_memory_deregister, void*, size_t)
 

@@ -7,6 +7,8 @@
 #include "streaming/internal.h"
 #include "streaming/util/buffer_table.h"
 
+#include "iree/hal/buffer_transfer.h"
+
 //===----------------------------------------------------------------------===//
 // Memory management
 //===----------------------------------------------------------------------===//
@@ -718,9 +720,19 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device(
 
   // Look up destination buffer from device pointer.
   iree_hal_streaming_buffer_ref_t dst_ref;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_streaming_memory_lookup(context, dst, &dst_ref),
-      "resolving `dst` buffer ref %p", (void*)dst);
+  iree_status_t dst_status =
+      iree_hal_streaming_memory_lookup(context, dst, &dst_ref);
+
+  // If destination is not in our buffer table, try raw device transfer.
+  // This handles global symbols from loaded modules.
+  if (!iree_status_is_ok(dst_status)) {
+    iree_status_ignore(dst_status);
+    // Attempt raw H2D transfer (synchronous).
+    iree_status_t raw_status = iree_hal_device_transfer_h2d_raw(
+        context->device, src, (uint64_t)dst, size, iree_infinite_timeout());
+    IREE_TRACE_ZONE_END(z0);
+    return raw_status;
+  }
 
   // Check if src is pinned host memory backed by a HAL buffer.
   // For true async transfers, we need a HAL buffer to record commands.
@@ -812,9 +824,19 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host(
 
   // Look up source buffer from device pointer.
   iree_hal_streaming_buffer_ref_t src_ref;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_streaming_memory_lookup(context, src, &src_ref),
-      "resolving `src` buffer ref %p", (void*)src);
+  iree_status_t src_status =
+      iree_hal_streaming_memory_lookup(context, src, &src_ref);
+
+  // If source is not in our buffer table, try raw device transfer.
+  // This handles global symbols from loaded modules.
+  if (!iree_status_is_ok(src_status)) {
+    iree_status_ignore(src_status);
+    // Attempt raw D2H transfer (synchronous).
+    iree_status_t raw_status = iree_hal_device_transfer_d2h_raw(
+        context->device, (uint64_t)src, dst, size, iree_infinite_timeout());
+    IREE_TRACE_ZONE_END(z0);
+    return raw_status;
+  }
 
   // Check if dst is pinned host memory backed by a HAL buffer.
   // For true async transfers, we need a HAL buffer to record commands.

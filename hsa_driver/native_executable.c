@@ -24,6 +24,9 @@
 #include "iree/schemas/hip_executable_def_verifier.h"
 
 typedef struct iree_hal_hsa_native_executable_per_device_data_t {
+  // HSA agent handle for this device (needed for symbol lookups).
+  hsa_agent_t agent;
+
   // Loaded HSA executables.
   iree_host_size_t executable_count;
   hsa_executable_t* executables;
@@ -256,6 +259,7 @@ static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
         executable->per_device_data[j];
     hsa_agent_t agent = topology.devices[j].agent;
 
+    per_device_data->agent = agent;
     per_device_data->executable_count = module_count;
     per_device_data->executables =
         (hsa_executable_t*)((uint8_t*)per_device_data + sizeof(*per_device_data) +
@@ -707,6 +711,7 @@ static iree_status_t iree_hal_hsa_native_executable_create_fpih(
 
     // Set up per-device data structure.
     // Layout in memory: [per_device_data_struct][exports[export_count]][executables[1]]
+    data->agent = topology.devices[device_idx].agent;
     data->export_count = export_count;
     data->executable_count = 1;
     data->executables = (hsa_executable_t*)(
@@ -971,6 +976,84 @@ static iree_status_t iree_hal_hsa_native_executable_lookup_export_by_name(
                           "reflection not implemented");
 }
 
+static iree_status_t iree_hal_hsa_native_executable_lookup_global(
+    iree_hal_executable_t* base_executable, iree_string_view_t name,
+    iree_hal_queue_affinity_t queue_affinity, uint64_t* out_device_address,
+    iree_device_size_t* out_size) {
+  IREE_ASSERT_ARGUMENT(base_executable);
+  IREE_ASSERT_ARGUMENT(out_device_address);
+  *out_device_address = 0;
+  if (out_size) *out_size = 0;
+
+  iree_hal_hsa_native_executable_t* executable =
+      iree_hal_hsa_native_executable_cast(base_executable);
+
+  int device_ordinal = 0;
+  if (queue_affinity) {
+    device_ordinal = iree_math_count_trailing_zeros_u64(queue_affinity);
+  }
+  if (device_ordinal >= (int)executable->num_devices) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "affinity for non-existent device was provided.");
+  }
+
+  const iree_hal_hsa_native_executable_per_device_data_t* data =
+      executable->per_device_data[device_ordinal];
+  const iree_hal_hsa_dynamic_symbols_t* symbols = executable->symbols;
+
+  // Create a null-terminated copy of the name.
+  char name_cstr[1024];
+  if (name.size >= sizeof(name_cstr)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "global name too long: %.*s", (int)name.size,
+                            name.data);
+  }
+  memcpy(name_cstr, name.data, name.size);
+  name_cstr[name.size] = '\0';
+
+  // Try to find the symbol in each HSA executable.
+  for (iree_host_size_t i = 0; i < data->executable_count; ++i) {
+    hsa_executable_t hsa_exec = data->executables[i];
+    hsa_executable_symbol_t symbol;
+
+    // Try to get the symbol by name using the device agent.
+    hsa_status_t hsa_status = symbols->hsa_executable_get_symbol_by_name(
+        hsa_exec, name_cstr, &data->agent, &symbol);
+    if (hsa_status != HSA_STATUS_SUCCESS) {
+      // Symbol not found in this executable, try the next one.
+      continue;
+    }
+
+    // Get the variable address.
+    uint64_t address = 0;
+    hsa_status = symbols->hsa_executable_symbol_get_info(
+        symbol, HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_ADDRESS, &address);
+    if (hsa_status != HSA_STATUS_SUCCESS) {
+      return iree_make_status(IREE_STATUS_INTERNAL,
+                              "failed to get variable address for '%.*s'",
+                              (int)name.size, name.data);
+    }
+
+    // Get the variable size.
+    uint32_t size = 0;
+    hsa_status = symbols->hsa_executable_symbol_get_info(
+        symbol, HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_SIZE, &size);
+    if (hsa_status != HSA_STATUS_SUCCESS) {
+      return iree_make_status(IREE_STATUS_INTERNAL,
+                              "failed to get variable size for '%.*s'",
+                              (int)name.size, name.data);
+    }
+
+    *out_device_address = address;
+    if (out_size) *out_size = size;
+    return iree_ok_status();
+  }
+
+  return iree_make_status(IREE_STATUS_NOT_FOUND,
+                          "global variable '%.*s' not found in executable",
+                          (int)name.size, name.data);
+}
+
 static const iree_hal_executable_vtable_t
     iree_hal_hsa_native_executable_vtable = {
         .destroy = iree_hal_hsa_native_executable_destroy,
@@ -979,5 +1062,6 @@ static const iree_hal_executable_vtable_t
         .export_parameters = iree_hal_hsa_native_executable_export_parameters,
         .lookup_export_by_name =
             iree_hal_hsa_native_executable_lookup_export_by_name,
+        .lookup_global = iree_hal_hsa_native_executable_lookup_global,
 };
 

@@ -432,6 +432,7 @@ iree_status_t iree_hal_streaming_module_global(
   *out_device_ptr = 0;
   if (out_size) *out_size = 0;
 
+  // First try to find in pre-extracted symbols.
   iree_hal_streaming_symbol_t* symbol = NULL;
   iree_status_t status = iree_hal_streaming_module_symbol(
       module, name, IREE_HAL_STREAMING_SYMBOL_TYPE_GLOBAL, &symbol);
@@ -439,6 +440,25 @@ iree_status_t iree_hal_streaming_module_global(
   if (iree_status_is_ok(status)) {
     *out_device_ptr = symbol->device_address;
     if (out_size) *out_size = symbol->size_bytes;
+    return status;
   }
+
+  // If not found, try the HAL executable's lookup_global interface.
+  if (iree_status_is_not_found(status) && module->executable) {
+    iree_status_ignore(status);
+    uint64_t device_address = 0;
+    iree_device_size_t size = 0;
+    iree_hal_queue_affinity_t queue_affinity =
+        module->context ? module->context->queue_affinity : 0;
+    status = iree_hal_executable_lookup_global(
+        module->executable, iree_make_cstring_view(name), queue_affinity,
+        &device_address, &size);
+    if (iree_status_is_ok(status)) {
+      *out_device_ptr = (iree_hal_streaming_deviceptr_t)device_address;
+      if (out_size) *out_size = size;
+    }
+  }
+
   return status;
 }
+
