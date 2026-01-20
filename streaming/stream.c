@@ -326,6 +326,9 @@ iree_status_t iree_hal_streaming_unpack_parameters(
   }
 
   // Resolve bindings, if any.
+  // For native kernels with NULL or external device pointers, we can't use
+  // IREE's binding mechanism. In that case, the caller should use
+  // CUSTOM_DIRECT_ARGUMENTS to pass the raw parameter buffer directly.
   iree_hal_buffer_ref_t* bindings =
       (iree_hal_buffer_ref_t*)out_bindings->values;
   for (uint32_t i = 0; i < parameters->binding_count; ++i, ++op) {
@@ -334,9 +337,22 @@ iree_status_t iree_hal_streaming_unpack_parameters(
     // TODO(benvanik): possibly calculate proper range here? We could easily
     // (at only the cost of a cache miss) get the total buffer size and then
     // subtract the offset to get the remaining size.
+    
+    // Handle NULL device pointers - some kernels pass NULL for optional buffers.
+    // Return NOT_FOUND to signal that this kernel needs raw argument passing.
+    if (!device_ptr) {
+      return iree_make_status(IREE_STATUS_NOT_FOUND,
+                              "binding %u has NULL device pointer", i);
+    }
+    
     iree_hal_streaming_buffer_ref_t stream_ref;
-    IREE_RETURN_IF_ERROR(iree_hal_streaming_memory_lookup(
-        context, (iree_hal_streaming_deviceptr_t)device_ptr, &stream_ref));
+    iree_status_t lookup_status = iree_hal_streaming_memory_lookup(
+        context, (iree_hal_streaming_deviceptr_t)device_ptr, &stream_ref);
+    // If lookup fails, the kernel uses external device pointers.
+    // Return NOT_FOUND to signal that this kernel needs raw argument passing.
+    if (!iree_status_is_ok(lookup_status)) {
+      return lookup_status;
+    }
     bindings[resolve_op.dst_ordinal] = iree_hal_make_buffer_ref(
         stream_ref.buffer->buffer, stream_ref.offset, IREE_HAL_WHOLE_BUFFER);
   }
@@ -377,6 +393,9 @@ iree_status_t iree_hal_streaming_unpack_parameter_list(
 
   // Resolve bindings, if any.
   // For bindings, each parameter in the list is a pointer to a device pointer.
+  // For native kernels with NULL or external device pointers, we can't use
+  // IREE's binding mechanism. In that case, the caller should use
+  // CUSTOM_DIRECT_ARGUMENTS to pass the raw parameter buffer directly.
   iree_hal_buffer_ref_t* bindings =
       (iree_hal_buffer_ref_t*)out_bindings->values;
   for (uint32_t i = 0; i < parameters->binding_count; ++i, ++op) {
@@ -388,9 +407,22 @@ iree_status_t iree_hal_streaming_unpack_parameter_list(
     // TODO(benvanik): possibly calculate proper range here? We could easily
     // (at only the cost of a cache miss) get the total buffer size and then
     // subtract the offset to get the remaining size.
+    
+    // Handle NULL device pointers - some kernels pass NULL for optional buffers.
+    // Return NOT_FOUND to signal that this kernel needs raw argument passing.
+    if (!device_ptr) {
+      return iree_make_status(IREE_STATUS_NOT_FOUND,
+                              "binding %u has NULL device pointer", i);
+    }
+    
     iree_hal_streaming_buffer_ref_t stream_ref;
-    IREE_RETURN_IF_ERROR(iree_hal_streaming_memory_lookup(
-        context, (iree_hal_streaming_deviceptr_t)device_ptr, &stream_ref));
+    iree_status_t lookup_status = iree_hal_streaming_memory_lookup(
+        context, (iree_hal_streaming_deviceptr_t)device_ptr, &stream_ref);
+    // If lookup fails, the kernel uses external device pointers.
+    // Return NOT_FOUND to signal that this kernel needs raw argument passing.
+    if (!iree_status_is_ok(lookup_status)) {
+      return lookup_status;
+    }
     bindings[resolve_op.dst_ordinal] = iree_hal_make_buffer_ref(
         stream_ref.buffer->buffer, stream_ref.offset, IREE_HAL_WHOLE_BUFFER);
   }
@@ -463,18 +495,65 @@ iree_status_t iree_hal_streaming_launch_kernel(
                     : NULL,
   };
 
-  if (params->flags & IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY) {
+  // Check if this is a "native" kernel without IREE parameter metadata.
+  // Native kernels have no bindings and no copy operations.
+  bool is_native_kernel = (symbol->parameters.binding_count == 0 &&
+                           symbol->parameters.copy_count == 0);
+  size_t constants_size = symbol->parameters.constant_bytes;
+  // Track if we need to use raw argument passing (e.g., for external pointers).
+  bool use_raw_arguments = false;
+
+  if (is_native_kernel && params->buffer) {
+    // Native kernel: pass raw arguments directly without unpacking.
+    // For native kernels, params->buffer contains the pre-packed kernel
+    // arguments that should be passed as-is to the GPU.
+    constants = params->buffer;
+    // Use params->buffer_size if provided, otherwise use constant_bytes
+    if (params->buffer_size > 0) {
+      constants_size = params->buffer_size;
+    }
+    use_raw_arguments = true;
+  } else if (params->flags & IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY) {
     // Unpack parameters from array of pointers (void**).
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_streaming_unpack_parameter_list(
+    iree_status_t unpack_status = iree_hal_streaming_unpack_parameter_list(
                 stream->context, &symbol->parameters, (void**)params->buffer,
-                constants, &binding_list));
+                constants, &binding_list);
+    if (!iree_status_is_ok(unpack_status)) {
+      // If unpack fails due to NULL or external device pointers, fall back
+      // to raw argument passing. This handles native kernels with optional
+      // parameters or external allocations.
+      if (iree_status_code(unpack_status) == IREE_STATUS_NOT_FOUND) {
+        iree_status_ignore(unpack_status);
+        // TODO: Convert void** to packed buffer format.
+        // For now, this path isn't fully supported.
+        IREE_TRACE_ZONE_END(z0);
+        return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+            "raw argument fallback for pointer arrays not yet implemented");
+      }
+      IREE_TRACE_ZONE_END(z0);
+      return unpack_status;
+    }
   } else {
     // Unpack parameters from packed buffer.
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_streaming_unpack_parameters(
+    iree_status_t unpack_status = iree_hal_streaming_unpack_parameters(
                 stream->context, &symbol->parameters, params->buffer, constants,
-                &binding_list));
+                &binding_list);
+    if (!iree_status_is_ok(unpack_status)) {
+      // If unpack fails due to NULL or external device pointers, fall back
+      // to raw argument passing. This handles native kernels with optional
+      // parameters or external allocations (e.g., hipBLASLt workspace).
+      if (iree_status_code(unpack_status) == IREE_STATUS_NOT_FOUND) {
+        iree_status_ignore(unpack_status);
+        // Use the raw packed buffer directly.
+        constants = params->buffer;
+        constants_size = params->buffer_size;
+        binding_list.count = 0;  // No IREE bindings, using raw pointers.
+        use_raw_arguments = true;
+      } else {
+        IREE_TRACE_ZONE_END(z0);
+        return unpack_status;
+      }
+    }
   }
 
   // Create IREE dispatch config.
@@ -501,7 +580,7 @@ iree_status_t iree_hal_streaming_launch_kernel(
   iree_status_t status = iree_hal_command_buffer_dispatch(
       stream->command_buffer, symbol->module->executable,
       symbol->export_ordinal, config,
-      iree_make_const_byte_span(constants, symbol->parameters.constant_bytes),
+      iree_make_const_byte_span(constants, constants_size),
       binding_list, flags);
 
   IREE_TRACE_ZONE_END(z0);

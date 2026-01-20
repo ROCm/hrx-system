@@ -1,0 +1,76 @@
+# Version script for passthrough HIP library
+# Exports all HIP symbols
+
+PASSTHROUGH_1.0 {
+  global:
+    # Device Management
+    hipInit;
+    hipDriverGetVersion;
+    hipRuntimeGetVersion;
+    hipGetDevice;
+    hipGetDeviceCount;
+    hipSetDevice;
+    hipDeviceReset;
+    hipDeviceSynchronize;
+    hipGetDeviceProperties;
+    hipDeviceGetAttribute;
+    hipDeviceGetName;
+
+    # Memory Management
+    hipMalloc;
+    hipFree;
+    hipHostMalloc;
+    hipHostFree;
+    hipMemGetInfo;
+
+    # Memory Copy
+    hipMemcpy;
+    hipMemcpyAsync;
+    hipMemset;
+    hipMemsetAsync;
+
+    # Stream Management
+    hipStreamCreate;
+    hipStreamCreateWithFlags;
+    hipStreamDestroy;
+    hipStreamSynchronize;
+    hipStreamQuery;
+    hipStreamWaitEvent;
+
+    # Event Management
+    hipEventCreate;
+    hipEventCreateWithFlags;
+    hipEventDestroy;
+    hipEventRecord;
+    hipEventSynchronize;
+    hipEventQuery;
+    hipEventElapsedTime;
+
+    # Module Management
+    hipModuleLoad;
+    hipModuleLoadData;
+    hipModuleUnload;
+    hipModuleGetFunction;
+    hipModuleGetGlobal;
+    hipModuleLaunchKernel;
+    hipLaunchKernel;
+
+    # Fat Binary Registration
+    __hipRegisterFatBinary;
+    __hipUnregisterFatBinary;
+    __hipRegisterFunction;
+    __hipRegisterVar;
+
+    # Error Handling
+    hipGetErrorString;
+    hipGetErrorName;
+    hipGetLastError;
+    hipPeekAtLastError;
+
+    # Passthrough API
+    hip_passthrough_get_real_table;
+    hip_passthrough_get_active_table;
+
+  local:
+    *;
+};

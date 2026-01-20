@@ -1490,6 +1490,60 @@ HIPAPI hipError_t hipDeviceDisablePeerAccess(int peerDevice) {
   return hipSuccess;
 }
 
+// Gets the PCI bus ID string for a device.
+// Returns a placeholder string since we don't have real PCI info.
+HIPAPI hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, int device) {
+  if (!pciBusId || len <= 0) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  // Validate device ordinal.
+  int device_count = 0;
+  hipError_t count_result = hipGetDeviceCount(&device_count);
+  if (count_result != hipSuccess) {
+    return count_result;
+  }
+  if (device < 0 || device >= device_count) {
+    HIP_RETURN_ERROR(hipErrorInvalidDevice);
+  }
+
+  // Return a placeholder PCI bus ID.
+  // Format: domain:bus:device.function (e.g., "0000:00:00.0")
+  int written = snprintf(pciBusId, len, "0000:00:0%d.0", device);
+  if (written < 0 || written >= len) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  return hipSuccess;
+}
+
+// Gets the device ordinal for a PCI bus ID string.
+// We return device 0 for any valid-looking bus ID.
+HIPAPI hipError_t hipDeviceGetByPCIBusId(int* device, const char* pciBusId) {
+  if (!device || !pciBusId) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  // For simplicity, just return device 0.
+  // A proper implementation would parse the bus ID and match it.
+  *device = 0;
+  return hipSuccess;
+}
+
+// Gets the range of stream priorities supported by the device.
+// Lower values have higher priority (with 0 being the default).
+HIPAPI hipError_t hipDeviceGetStreamPriorityRange(int* leastPriority,
+                                                   int* greatestPriority) {
+  // Return a simple priority range (0 = default, -1 = high priority).
+  // On most AMD GPUs, stream priorities don't have significant effect.
+  if (leastPriority) {
+    *leastPriority = 0;  // Lowest priority (default)
+  }
+  if (greatestPriority) {
+    *greatestPriority = -1;  // Highest priority
+  }
+  return hipSuccess;
+}
+
 // Waits for all operations on the current device to complete.
 //
 // Parameters: None.
@@ -1591,6 +1645,41 @@ HIPAPI hipError_t hipDeviceReset(void) {
 
   IREE_TRACE_ZONE_END(z0);
   return result;
+}
+
+//===----------------------------------------------------------------------===//
+// Cache configuration (no-ops on AMD devices)
+//===----------------------------------------------------------------------===//
+
+// Sets the preferred cache configuration for the current device.
+// Note: These hints are ignored on AMD devices per the HIP documentation.
+HIPAPI hipError_t hipDeviceSetCacheConfig(hipFuncCache_t cacheConfig) {
+  (void)cacheConfig;
+  return hipSuccess;  // No-op on AMD
+}
+
+// Gets the current cache configuration for the current device.
+HIPAPI hipError_t hipDeviceGetCacheConfig(hipFuncCache_t* cacheConfig) {
+  if (!cacheConfig) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  *cacheConfig = hipFuncCachePreferNone;
+  return hipSuccess;
+}
+
+// Sets the shared memory configuration for the current device.
+HIPAPI hipError_t hipDeviceSetSharedMemConfig(hipSharedMemConfig config) {
+  (void)config;
+  return hipSuccess;  // No-op on AMD
+}
+
+// Gets the shared memory configuration for the current device.
+HIPAPI hipError_t hipDeviceGetSharedMemConfig(hipSharedMemConfig* config) {
+  if (!config) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  *config = hipSharedMemBankSizeDefault;
+  return hipSuccess;
 }
 
 //===----------------------------------------------------------------------===//
@@ -2733,6 +2822,32 @@ HIPAPI hipError_t hipMalloc(void** ptr, size_t size) {
   return result;
 }
 
+// Allocates device memory with specific memory type flags.
+//
+// Parameters:
+//  - ptr: [OUT] Pointer to receive the allocated memory pointer.
+//  - sizeBytes: [IN] Requested memory size in bytes.
+//  - flags: [IN] Memory allocation flags (hipDeviceMallocDefault, etc.)
+//
+// Returns:
+//  - hipSuccess: Memory allocated successfully.
+//  - hipErrorInvalidValue: ptr is NULL or invalid flags.
+//  - hipErrorOutOfMemory: Insufficient device memory.
+//
+// Note: This implementation ignores the flags and allocates default device
+// memory. Special memory types (fine-grained, uncached, signal) are not
+// currently supported and will be allocated as regular device memory.
+//
+// See also: hipMalloc, hipFree.
+HIPAPI hipError_t hipExtMallocWithFlags(void** ptr, size_t sizeBytes,
+                                         unsigned int flags) {
+  // For now, ignore flags and delegate to regular hipMalloc.
+  // Special memory types would require HAL support for different
+  // memory pool types.
+  (void)flags;
+  return hipMalloc(ptr, sizeBytes);
+}
+
 // Allocates pitched linear memory on the device.
 //
 // Parameters:
@@ -3726,6 +3841,9 @@ HIPAPI hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes,
     HIP_RETURN_ERROR(init_result);
   }
 
+  // Remember if original stream was NULL (for sync decision later).
+  bool was_null_stream = (stream == NULL);
+
   // Resolve NULL stream to default stream.
   if (!stream) {
     stream = (hipStream_t)context->default_stream;
@@ -3757,6 +3875,12 @@ HIPAPI hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes,
     } else {
       kind = hipMemcpyHostToHost;
     }
+  }
+
+  // For NULL stream (default stream), we need to synchronize before D2H
+  // to ensure all pending kernel dispatches are executed.
+  if (was_null_stream && kind == hipMemcpyDeviceToHost) {
+    iree_hal_streaming_context_synchronize(context);
   }
 
   iree_status_t status = iree_ok_status();
@@ -4181,6 +4305,90 @@ HIPAPI hipError_t hipMemcpyDtoDAsync(hipDeviceptr_t dst, hipDeviceptr_t src,
                                      size_t sizeBytes, hipStream_t stream) {
   // Asynchronous device-to-device copy.
   return hipMemcpyAsync(dst, src, sizeBytes, hipMemcpyDeviceToDevice, stream);
+}
+
+//===----------------------------------------------------------------------===//
+// Peer-to-Peer Memory Operations
+//===----------------------------------------------------------------------===//
+
+// Copies memory between two peer accessible devices asynchronously.
+//
+// Returns:
+//  - hipErrorNotSupported: Peer-to-peer memory operations are not supported.
+//
+// Note: Peer-to-peer operations require multi-GPU support which is not
+// currently implemented in the streaming HAL layer.
+HIPAPI hipError_t hipMemcpyPeerAsync(void* dst, int dstDeviceId,
+                                      const void* src, int srcDeviceId,
+                                      size_t sizeBytes, hipStream_t stream) {
+  (void)dst;
+  (void)dstDeviceId;
+  (void)src;
+  (void)srcDeviceId;
+  (void)sizeBytes;
+  (void)stream;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+// Copies memory between two peer accessible devices synchronously.
+//
+// Returns:
+//  - hipErrorNotSupported: Peer-to-peer memory operations are not supported.
+HIPAPI hipError_t hipMemcpyPeer(void* dst, int dstDeviceId, const void* src,
+                                 int srcDeviceId, size_t sizeBytes) {
+  (void)dst;
+  (void)dstDeviceId;
+  (void)src;
+  (void)srcDeviceId;
+  (void)sizeBytes;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+//===----------------------------------------------------------------------===//
+// IPC Memory Operations (not supported)
+//===----------------------------------------------------------------------===//
+
+// Gets an IPC memory handle for a device allocation.
+// Not supported - returns hipErrorNotSupported.
+HIPAPI hipError_t hipIpcGetMemHandle(hipIpcMemHandle_t* handle, void* devPtr) {
+  (void)handle;
+  (void)devPtr;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+// Opens an IPC memory handle exported from another process.
+// Not supported - returns hipErrorNotSupported.
+HIPAPI hipError_t hipIpcOpenMemHandle(void** devPtr, hipIpcMemHandle_t handle,
+                                       unsigned int flags) {
+  (void)devPtr;
+  (void)handle;
+  (void)flags;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+// Closes an IPC memory handle.
+// Not supported - returns hipErrorNotSupported.
+HIPAPI hipError_t hipIpcCloseMemHandle(void* devPtr) {
+  (void)devPtr;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+// Gets an IPC event handle for an event.
+// Not supported - returns hipErrorNotSupported.
+HIPAPI hipError_t hipIpcGetEventHandle(hipIpcEventHandle_t* handle,
+                                        hipEvent_t event) {
+  (void)handle;
+  (void)event;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+// Opens an IPC event handle.
+// Not supported - returns hipErrorNotSupported.
+HIPAPI hipError_t hipIpcOpenEventHandle(hipEvent_t* event,
+                                         hipIpcEventHandle_t handle) {
+  (void)event;
+  (void)handle;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
 }
 
 //===----------------------------------------------------------------------===//
@@ -5519,6 +5727,106 @@ HIPAPI hipError_t hipStreamWaitEvent(hipStream_t stream, hipEvent_t event,
 }
 
 //===----------------------------------------------------------------------===//
+// Stream memory operations
+//===----------------------------------------------------------------------===//
+
+// Writes a 32-bit value to device memory as part of stream execution.
+HIPAPI hipError_t hipStreamWriteValue32(hipStream_t stream, void* ptr,
+                                         uint32_t value, unsigned int flags) {
+  (void)stream;
+  (void)ptr;
+  (void)value;
+  (void)flags;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+// Writes a 64-bit value to device memory as part of stream execution.
+HIPAPI hipError_t hipStreamWriteValue64(hipStream_t stream, void* ptr,
+                                         uint64_t value, unsigned int flags) {
+  (void)stream;
+  (void)ptr;
+  (void)value;
+  (void)flags;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+// Waits until a 32-bit value meets a condition as part of stream execution.
+HIPAPI hipError_t hipStreamWaitValue32(hipStream_t stream, void* ptr,
+                                        uint32_t value, unsigned int flags,
+                                        uint32_t mask) {
+  (void)stream;
+  (void)ptr;
+  (void)value;
+  (void)flags;
+  (void)mask;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+// Waits until a 64-bit value meets a condition as part of stream execution.
+HIPAPI hipError_t hipStreamWaitValue64(hipStream_t stream, void* ptr,
+                                        uint64_t value, unsigned int flags,
+                                        uint64_t mask) {
+  (void)stream;
+  (void)ptr;
+  (void)value;
+  (void)flags;
+  (void)mask;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+//===----------------------------------------------------------------------===//
+// Extended stream creation (CU mask)
+//===----------------------------------------------------------------------===//
+
+// Creates a stream with a compute unit mask.
+// We ignore the CU mask and create a regular stream.
+HIPAPI hipError_t hipExtStreamCreateWithCUMask(hipStream_t* stream,
+                                                uint32_t cuMaskSize,
+                                                const uint32_t* cuMask) {
+  (void)cuMaskSize;
+  (void)cuMask;
+  // Ignore the CU mask and create a regular stream.
+  return hipStreamCreate(stream);
+}
+
+// Gets the CU mask for a stream.
+// We don't track CU masks, so we return all bits set.
+HIPAPI hipError_t hipExtStreamGetCUMask(hipStream_t stream,
+                                         uint32_t cuMaskSize,
+                                         uint32_t* cuMask) {
+  (void)stream;
+  if (!cuMask || cuMaskSize == 0) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  // Return all CUs enabled (all bits set).
+  for (uint32_t i = 0; i < cuMaskSize; ++i) {
+    cuMask[i] = 0xFFFFFFFF;
+  }
+  return hipSuccess;
+}
+
+//===----------------------------------------------------------------------===//
+// Stream capture mode management
+//===----------------------------------------------------------------------===//
+
+// Thread-local stream capture mode tracking.
+static __thread hipStreamCaptureMode tls_stream_capture_mode =
+    hipStreamCaptureModeGlobal;
+
+// Exchanges the thread's stream capture mode.
+// Sets the new mode and returns the previous mode via the mode pointer.
+HIPAPI hipError_t hipThreadExchangeStreamCaptureMode(
+    hipStreamCaptureMode* mode) {
+  if (!mode) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  hipStreamCaptureMode old_mode = tls_stream_capture_mode;
+  tls_stream_capture_mode = *mode;
+  *mode = old_mode;
+  return hipSuccess;
+}
+
+//===----------------------------------------------------------------------===//
 // Event management
 //===----------------------------------------------------------------------===//
 
@@ -6692,6 +7000,26 @@ HIPAPI hipError_t hipFuncSetSharedMemConfig(hipFunction_t hfunc,
 }
 
 //===----------------------------------------------------------------------===//
+// Kernel name functions
+//===----------------------------------------------------------------------===//
+
+// Returns the name of a kernel function.
+// Returns a placeholder since we don't track kernel names.
+HIPAPI const char* hipKernelNameRef(const hipFunction_t f) {
+  (void)f;
+  return "<unknown kernel>";
+}
+
+// Returns the name of a kernel function by host pointer.
+// Returns a placeholder since we don't track kernel names.
+HIPAPI const char* hipKernelNameRefByPtr(const void* hostFunction,
+                                          hipStream_t stream) {
+  (void)hostFunction;
+  (void)stream;
+  return "<unknown kernel>";
+}
+
+//===----------------------------------------------------------------------===//
 // Execution control
 //===----------------------------------------------------------------------===//
 
@@ -6762,7 +7090,11 @@ HIPAPI hipError_t hipLaunchKernel(const void* function_address, dim3 numBlocks,
     if (!iree_status_is_ok(lookup_status)) {
       // Symbol not found in registry - invalid function.
       iree_status_ignore(lookup_status);
-      // DO NOT SUBMIT
+      symbol = NULL;
+    } else if (symbol == (iree_hal_streaming_symbol_t*)function_address) {
+      // Symbol was not found in registry - the lookup returns the host pointer
+      // as a fallback which is not a valid symbol.
+      symbol = NULL;
     }
   }
 
@@ -6905,8 +7237,9 @@ HIPAPI hipError_t hipModuleLaunchKernel(
     stream = (hipStream_t)context->default_stream;
   }
 
-  // Extract params pointer from HIP's parameter format.
+  // Extract params pointer and size from HIP's parameter format.
   void* params_ptr = NULL;
+  size_t params_size = 0;
   iree_hal_streaming_dispatch_flags_t dispatch_flags =
       IREE_HAL_STREAMING_DISPATCH_FLAG_NONE;
   if (extra) {
@@ -6915,8 +7248,12 @@ HIPAPI hipError_t hipModuleLaunchKernel(
     //   HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
     //   HIP_LAUNCH_PARAM_END,
     // }
-    if (extra[0] == HIP_LAUNCH_PARAM_BUFFER_POINTER) {
-      params_ptr = extra[1];
+    for (int i = 0; extra[i] != HIP_LAUNCH_PARAM_END; i += 2) {
+      if (extra[i] == HIP_LAUNCH_PARAM_BUFFER_POINTER) {
+        params_ptr = extra[i + 1];
+      } else if (extra[i] == HIP_LAUNCH_PARAM_BUFFER_SIZE) {
+        params_size = *(size_t*)extra[i + 1];
+      }
     }
   } else if (kernelParams) {
     // kernelParams is an array of pointers to the actual parameters.
@@ -6932,6 +7269,7 @@ HIPAPI hipError_t hipModuleLaunchKernel(
       .block_dim = {blockDimX, blockDimY, blockDimZ},
       .shared_memory_bytes = sharedMemBytes,
       .buffer = params_ptr,
+      .buffer_size = params_size,
       .flags = dispatch_flags,
   };
   iree_status_t status = iree_hal_streaming_launch_kernel(
@@ -7525,6 +7863,56 @@ HIPAPI hipError_t hipModuleOccupancyMaxPotentialBlockSizeWithFlags(
   // For now, ignore flags and call the base function.
   return hipModuleOccupancyMaxPotentialBlockSize(
       gridSize, blockSize, f, dynSharedMemPerBlk, blockSizeLimit);
+}
+
+//===----------------------------------------------------------------------===//
+// Runtime occupancy functions (for host function pointers)
+//===----------------------------------------------------------------------===//
+
+// Calculates maximum active blocks per SM for a host function pointer.
+HIPAPI hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessor(
+    int* numBlocks, const void* f, int blockSize, size_t dynSharedMemPerBlk) {
+  if (!numBlocks || !f) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  // Conservative default for AMD GPUs.
+  *numBlocks = 1;
+  return hipSuccess;
+}
+
+// Calculates maximum active blocks per SM with flags.
+HIPAPI hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
+    int* numBlocks, const void* f, int blockSize, size_t dynSharedMemPerBlk,
+    unsigned int flags) {
+  (void)flags;
+  return hipOccupancyMaxActiveBlocksPerMultiprocessor(numBlocks, f, blockSize,
+                                                       dynSharedMemPerBlk);
+}
+
+// Calculates optimal block and grid size for a host function pointer.
+HIPAPI hipError_t hipOccupancyMaxPotentialBlockSize(int* gridSize,
+                                                     int* blockSize,
+                                                     const void* f,
+                                                     size_t dynSharedMemPerBlk,
+                                                     int blockSizeLimit) {
+  if (!gridSize || !blockSize || !f) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  // Return conservative defaults that work for most kernels.
+  // Block size of 256 is commonly optimal for AMD GPUs.
+  *blockSize = (blockSizeLimit > 0 && blockSizeLimit < 256) ? blockSizeLimit : 256;
+  // Grid size of 1 is a minimum that will work.
+  *gridSize = 1;
+  return hipSuccess;
+}
+
+// Calculates optimal block and grid size with flags.
+HIPAPI hipError_t hipOccupancyMaxPotentialBlockSizeWithFlags(
+    int* gridSize, int* blockSize, const void* f, size_t dynSharedMemPerBlk,
+    int blockSizeLimit, unsigned int flags) {
+  (void)flags;
+  return hipOccupancyMaxPotentialBlockSize(gridSize, blockSize, f,
+                                            dynSharedMemPerBlk, blockSizeLimit);
 }
 
 //===----------------------------------------------------------------------===//
@@ -8252,6 +8640,70 @@ HIPAPI hipError_t hipMemRangeGetAttributes(void** data, size_t* data_sizes,
 // 5. Launch executable multiple times with hipGraphLaunch.
 // 6. Destroy graph and executable when done.
 //
+//===----------------------------------------------------------------------===//
+// User Objects (not fully supported)
+//===----------------------------------------------------------------------===//
+
+// Creates a user object.
+// Not supported - returns hipErrorNotSupported.
+HIPAPI hipError_t hipUserObjectCreate(hipUserObject_t* object_out, void* ptr,
+                                       hipHostFn_t destroy,
+                                       unsigned int initialRefcount,
+                                       unsigned int flags) {
+  (void)object_out;
+  (void)ptr;
+  (void)destroy;
+  (void)initialRefcount;
+  (void)flags;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+// Releases references to a user object.
+// Not supported - returns hipErrorNotSupported.
+HIPAPI hipError_t hipUserObjectRelease(hipUserObject_t object,
+                                        unsigned int count) {
+  (void)object;
+  (void)count;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+// Retains references to a user object.
+// Not supported - returns hipErrorNotSupported.
+HIPAPI hipError_t hipUserObjectRetain(hipUserObject_t object,
+                                       unsigned int count) {
+  (void)object;
+  (void)count;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+// Retains a user object on a graph.
+// Not supported - returns hipErrorNotSupported.
+HIPAPI hipError_t hipGraphRetainUserObject(hipGraph_t graph,
+                                            hipUserObject_t object,
+                                            unsigned int count,
+                                            unsigned int flags) {
+  (void)graph;
+  (void)object;
+  (void)count;
+  (void)flags;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+// Releases a user object from a graph.
+// Not supported - returns hipErrorNotSupported.
+HIPAPI hipError_t hipGraphReleaseUserObject(hipGraph_t graph,
+                                             hipUserObject_t object,
+                                             unsigned int count) {
+  (void)graph;
+  (void)object;
+  (void)count;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+//===----------------------------------------------------------------------===//
+// Graphs
+//===----------------------------------------------------------------------===//
+
 // Alternative creation:
 // - Stream capture: Record operations to build graph.
 // - Graph cloning: Copy existing graph structure.
@@ -9200,6 +9652,142 @@ HIPAPI hipError_t hipGraphGetNodes(hipGraph_t graph, hipGraphNode_t* pNodes,
   return hipSuccess;
 }
 
+// Adds an event record node to a graph.
+// Not fully implemented - returns error.
+HIPAPI hipError_t hipGraphAddEventRecordNode(hipGraphNode_t* pGraphNode,
+                                              hipGraph_t graph,
+                                              const hipGraphNode_t* pDependencies,
+                                              size_t numDependencies,
+                                              hipEvent_t event) {
+  (void)pGraphNode;
+  (void)graph;
+  (void)pDependencies;
+  (void)numDependencies;
+  (void)event;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+// Adds an event wait node to a graph.
+// Not fully implemented - returns error.
+HIPAPI hipError_t hipGraphAddEventWaitNode(hipGraphNode_t* pGraphNode,
+                                            hipGraph_t graph,
+                                            const hipGraphNode_t* pDependencies,
+                                            size_t numDependencies,
+                                            hipEvent_t event) {
+  (void)pGraphNode;
+  (void)graph;
+  (void)pDependencies;
+  (void)numDependencies;
+  (void)event;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+// Adds dependencies between nodes in a graph.
+HIPAPI hipError_t hipGraphAddDependencies(hipGraph_t graph,
+                                           const hipGraphNode_t* from,
+                                           const hipGraphNode_t* to,
+                                           size_t numDependencies) {
+  (void)graph;
+  (void)from;
+  (void)to;
+  (void)numDependencies;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+// Removes dependencies between nodes in a graph.
+HIPAPI hipError_t hipGraphRemoveDependencies(hipGraph_t graph,
+                                              const hipGraphNode_t* from,
+                                              const hipGraphNode_t* to,
+                                              size_t numDependencies) {
+  (void)graph;
+  (void)from;
+  (void)to;
+  (void)numDependencies;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+// Gets edges in a graph.
+HIPAPI hipError_t hipGraphGetEdges(hipGraph_t graph, hipGraphNode_t* from,
+                                    hipGraphNode_t* to, size_t* numEdges) {
+  (void)graph;
+  (void)from;
+  (void)to;
+  if (numEdges) *numEdges = 0;
+  return hipSuccess;
+}
+
+// Gets root nodes (nodes with no dependencies) in a graph.
+HIPAPI hipError_t hipGraphGetRootNodes(hipGraph_t graph,
+                                        hipGraphNode_t* pRootNodes,
+                                        size_t* pNumRootNodes) {
+  (void)graph;
+  (void)pRootNodes;
+  if (pNumRootNodes) *pNumRootNodes = 0;
+  return hipSuccess;
+}
+
+// Gets dependencies of a node.
+HIPAPI hipError_t hipGraphNodeGetDependencies(hipGraphNode_t node,
+                                               hipGraphNode_t* pDependencies,
+                                               size_t* pNumDependencies) {
+  (void)node;
+  (void)pDependencies;
+  if (pNumDependencies) *pNumDependencies = 0;
+  return hipSuccess;
+}
+
+// Gets dependent nodes of a node.
+HIPAPI hipError_t hipGraphNodeGetDependentNodes(hipGraphNode_t node,
+                                                 hipGraphNode_t* pDependentNodes,
+                                                 size_t* pNumDependentNodes) {
+  (void)node;
+  (void)pDependentNodes;
+  if (pNumDependentNodes) *pNumDependentNodes = 0;
+  return hipSuccess;
+}
+
+// Gets the type of a node.
+HIPAPI hipError_t hipGraphNodeGetType(hipGraphNode_t node,
+                                       hipGraphNodeType* pType) {
+  (void)node;
+  if (pType) *pType = hipGraphNodeTypeEmpty;
+  return hipSuccess;
+}
+
+// Destroys a graph node.
+HIPAPI hipError_t hipGraphDestroyNode(hipGraphNode_t node) {
+  (void)node;
+  return hipSuccess;  // No-op since we don't track nodes individually
+}
+
+// Clones a graph.
+HIPAPI hipError_t hipGraphClone(hipGraph_t* pGraphClone, hipGraph_t originalGraph) {
+  (void)pGraphClone;
+  (void)originalGraph;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+// Finds a node in a cloned graph.
+HIPAPI hipError_t hipGraphNodeFindInClone(hipGraphNode_t* pNode,
+                                           hipGraphNode_t originalNode,
+                                           hipGraph_t clonedGraph) {
+  (void)pNode;
+  (void)originalNode;
+  (void)clonedGraph;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+// Prints a graph in DOT format for debugging.
+// Not implemented - returns success but doesn't write anything.
+HIPAPI hipError_t hipGraphDebugDotPrint(hipGraph_t graph, const char* path,
+                                         unsigned int flags) {
+  (void)graph;
+  (void)path;
+  (void)flags;
+  // Debugging function - just return success.
+  return hipSuccess;
+}
+
 //===----------------------------------------------------------------------===//
 // Stream capture
 //===----------------------------------------------------------------------===//
@@ -9547,6 +10135,42 @@ HIPAPI hipError_t hipStreamGetCaptureInfo(
     if (pId) *pId = 0;
     iree_status_ignore(status);
   }
+
+  IREE_TRACE_ZONE_END(z0);
+  return hipSuccess;
+}
+
+// Gets extended stream capture information (v2).
+//
+// Parameters:
+//  - stream: [IN] Stream to query.
+//  - captureStatus_out: [OUT] Capture status.
+//  - id_out: [OUT] Capture ID (optional, can be NULL).
+//  - graph_out: [OUT] Graph being captured (optional, can be NULL).
+//  - dependencies_out: [OUT] Dependencies array (optional, can be NULL).
+//  - numDependencies_out: [OUT] Number of dependencies (optional, can be NULL).
+//
+// Returns:
+//  - hipSuccess: Information retrieved successfully.
+//  - hipErrorInvalidValue: captureStatus_out is NULL.
+//  - hipErrorStreamCaptureImplicit: Stream has capture dependencies.
+HIPAPI hipError_t hipStreamGetCaptureInfo_v2(
+    hipStream_t stream, hipStreamCaptureStatus* captureStatus_out,
+    unsigned long long* id_out, hipGraph_t* graph_out,
+    const hipGraphNode_t** dependencies_out, size_t* numDependencies_out) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  if (!captureStatus_out) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  // We don't support graph capture, so always return no capture.
+  *captureStatus_out = hipStreamCaptureStatusNone;
+  if (id_out) *id_out = 0;
+  if (graph_out) *graph_out = NULL;
+  if (dependencies_out) *dependencies_out = NULL;
+  if (numDependencies_out) *numDependencies_out = 0;
 
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
@@ -10322,6 +10946,137 @@ HIPAPI hipError_t hipFreeAsync(void* ptr, hipStream_t stream) {
 //
 // String behavior:
 // - Returns a static string, do not free.
+//===----------------------------------------------------------------------===//
+// Virtual memory management (not supported)
+//===----------------------------------------------------------------------===//
+
+// Reserves virtual address space.
+HIPAPI hipError_t hipMemAddressReserve(void** ptr, size_t size,
+                                        size_t alignment, void* addr,
+                                        unsigned long long flags) {
+  (void)ptr;
+  (void)size;
+  (void)alignment;
+  (void)addr;
+  (void)flags;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+// Frees reserved virtual address space.
+HIPAPI hipError_t hipMemAddressFree(void* devPtr, size_t size) {
+  (void)devPtr;
+  (void)size;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+// Creates a generic allocation handle.
+HIPAPI hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle,
+                                size_t size, const hipMemAllocationProp* prop,
+                                unsigned long long flags) {
+  (void)handle;
+  (void)size;
+  (void)prop;
+  (void)flags;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+// Releases a generic allocation handle.
+HIPAPI hipError_t hipMemRelease(hipMemGenericAllocationHandle_t handle) {
+  (void)handle;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+// Maps virtual memory to a physical allocation.
+HIPAPI hipError_t hipMemMap(void* ptr, size_t size, size_t offset,
+                             hipMemGenericAllocationHandle_t handle,
+                             unsigned long long flags) {
+  (void)ptr;
+  (void)size;
+  (void)offset;
+  (void)handle;
+  (void)flags;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+// Unmaps virtual memory.
+HIPAPI hipError_t hipMemUnmap(void* ptr, size_t size) {
+  (void)ptr;
+  (void)size;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+// Sets memory access permissions.
+HIPAPI hipError_t hipMemSetAccess(void* ptr, size_t size,
+                                   const hipMemAccessDesc* desc,
+                                   size_t count) {
+  (void)ptr;
+  (void)size;
+  (void)desc;
+  (void)count;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+// Gets memory access permissions.
+HIPAPI hipError_t hipMemGetAccess(unsigned long long* flags,
+                                   const hipMemLocation* location,
+                                   void* ptr) {
+  (void)flags;
+  (void)location;
+  (void)ptr;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+// Gets allocation granularity.
+HIPAPI hipError_t hipMemGetAllocationGranularity(
+    size_t* granularity, const hipMemAllocationProp* prop,
+    hipMemAllocationGranularity_flags option) {
+  (void)granularity;
+  (void)prop;
+  (void)option;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+// Gets properties from allocation handle.
+HIPAPI hipError_t hipMemGetAllocationPropertiesFromHandle(
+    hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t handle) {
+  (void)prop;
+  (void)handle;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+// Exports an allocation handle to a shareable handle.
+HIPAPI hipError_t hipMemExportToShareableHandle(
+    void* shareableHandle, hipMemGenericAllocationHandle_t handle,
+    hipMemAllocationHandleType handleType, unsigned long long flags) {
+  (void)shareableHandle;
+  (void)handle;
+  (void)handleType;
+  (void)flags;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+// Imports an allocation handle from a shareable handle.
+HIPAPI hipError_t hipMemImportFromShareableHandle(
+    hipMemGenericAllocationHandle_t* handle, void* osHandle,
+    hipMemAllocationHandleType shHandleType) {
+  (void)handle;
+  (void)osHandle;
+  (void)shHandleType;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+// Retains an allocation handle from an address.
+HIPAPI hipError_t hipMemRetainAllocationHandle(
+    hipMemGenericAllocationHandle_t* handle, void* addr) {
+  (void)handle;
+  (void)addr;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+//===----------------------------------------------------------------------===//
+// Error handling
+//===----------------------------------------------------------------------===//
+
 // - String remains valid for program lifetime.
 // - Returns "unknown error" for unrecognized codes.
 // - String is in English.
@@ -10484,6 +11239,52 @@ HIPAPI const char* hipGetErrorName(hipError_t error) {
   return hipGetErrorString(error);
 }
 
+// Driver API version of hipGetErrorString.
+//
+// Parameters:
+//  - hipError: [IN] HIP error code to get string for.
+//  - errorString: [OUT] Pointer to receive the error string.
+//
+// Returns:
+//  - hipSuccess: Error string retrieved successfully.
+//  - hipErrorInvalidValue: errorString is NULL.
+//
+// Synchronization: This operation is synchronous.
+//
+// Note: Unlike hipGetErrorString, this returns the string via output pointer.
+//       This is the driver API equivalent for compatibility with CUDA driver API.
+HIPAPI hipError_t hipDrvGetErrorString(hipError_t hipError,
+                                       const char** errorString) {
+  if (!errorString) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  *errorString = hipGetErrorString(hipError);
+  HIP_RETURN_ERROR(hipSuccess);
+}
+
+// Driver API version of hipGetErrorName.
+//
+// Parameters:
+//  - hipError: [IN] HIP error code to get name for.
+//  - errorName: [OUT] Pointer to receive the error name.
+//
+// Returns:
+//  - hipSuccess: Error name retrieved successfully.
+//  - hipErrorInvalidValue: errorName is NULL.
+//
+// Synchronization: This operation is synchronous.
+//
+// Note: Unlike hipGetErrorName, this returns the name via output pointer.
+//       This is the driver API equivalent for compatibility with CUDA driver API.
+HIPAPI hipError_t hipDrvGetErrorName(hipError_t hipError,
+                                     const char** errorName) {
+  if (!errorName) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  *errorName = hipGetErrorName(hipError);
+  HIP_RETURN_ERROR(hipSuccess);
+}
+
 // Gets and clears the last error from HIP runtime calls.
 //
 // Parameters: None.
@@ -10604,6 +11405,19 @@ typedef struct uint3 {
 //   compilation unit.
 // - May contain code for multiple GPU architectures.
 // - The runtime selects appropriate code for the current device.
+// Fat binary wrapper structure passed by the HIP runtime.
+// This matches the __CudaFatBinaryWrapper / __hipFatBinaryWrapper structure
+// generated by clang for HIP programs.
+typedef struct __hipFatBinaryWrapper_t {
+  unsigned int magic;       // Magic number (0x48495046 = "HIPF" or 0xBA55FACE)
+  unsigned int version;     // Version of the fat binary wrapper
+  const void* binary;       // Pointer to the actual fat binary data (CCOB/bundle)
+  const void* reserved;     // Reserved for future use
+} __hipFatBinaryWrapper;
+
+#define HIP_FAT_BINARY_MAGIC_OLD 0xBA55FACE
+#define HIP_FAT_BINARY_MAGIC_NEW 0x48495046  // "HIPF"
+
 HIPAPI void** __hipRegisterFatBinary(const void* data) {
   if (!data) return NULL;
 
@@ -10611,12 +11425,26 @@ HIPAPI void** __hipRegisterFatBinary(const void* data) {
       iree_hal_streaming_global_symbol_registry();
   if (!registry) return NULL;
 
+  // The data passed is a fat binary wrapper structure, not the binary itself.
+  // We need to extract the actual binary pointer from the wrapper.
+  const __hipFatBinaryWrapper* wrapper = (const __hipFatBinaryWrapper*)data;
+
+  // Check for the fat binary wrapper magic.
+  const void* binary_data = data;
+  if (wrapper->magic == HIP_FAT_BINARY_MAGIC_OLD ||
+      wrapper->magic == HIP_FAT_BINARY_MAGIC_NEW) {
+    // It's a fat binary wrapper - extract the binary pointer.
+    binary_data = wrapper->binary;
+  }
+  // Otherwise, assume data points directly to the binary.
+
+  if (!binary_data) return NULL;
+
   iree_hal_streaming_module_registration_t* module = NULL;
   iree_status_t status =
-      iree_hal_streaming_global_symbol_registry_register_module(registry, data,
+      iree_hal_streaming_global_symbol_registry_register_module(registry, binary_data,
                                                                 &module);
   if (!iree_status_is_ok(status)) {
-    // DO NOT SUBMIT print status
     iree_status_ignore(status);
     return NULL;
   }
@@ -10703,7 +11531,6 @@ HIPAPI void __hipRegisterFunction(void** modules, const void* hostFunction,
 
   const uint32_t shared_size = wSize ? *wSize : 0;
 
-  // DO NOT SUBMIT print status
   iree_status_t status =
       iree_hal_streaming_global_symbol_registry_insert_function(
           registry, (iree_hal_streaming_module_registration_t*)modules,

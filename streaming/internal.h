@@ -680,6 +680,7 @@ typedef struct iree_hal_streaming_dispatch_params_t {
   uint32_t block_dim[3];
   uint32_t shared_memory_bytes;
   void* buffer;
+  size_t buffer_size;  // Size of the buffer in bytes (for native kernels)
   iree_hal_streaming_dispatch_flags_t flags;
 } iree_hal_streaming_dispatch_params_t;
 

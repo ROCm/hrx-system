@@ -95,4 +95,10 @@ add_subdirectory(streaming)
 unset(IREE_PACKAGE_ROOT_DIR)
 unset(IREE_PACKAGE_ROOT_PREFIX)
 
+#-------------------------------------------------------------------------------
+# Passthrough library
+#-------------------------------------------------------------------------------
+
+add_subdirectory(passthrough)
+
 add_subdirectory(third_party/hip-cts)

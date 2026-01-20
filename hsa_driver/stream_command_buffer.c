@@ -458,7 +458,11 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
     if (wg_size_z == 0) wg_size_z = 1;
 
     // If we have parameter info, use the designated offsets.
-    if (kernel_params->parameters && kernel_params->parameter_count > 0) {
+    // EXCEPT for CUSTOM_DIRECT_ARGUMENTS - in that case, the constants buffer
+    // already contains the complete packed arguments (including device pointers),
+    // so we should NOT remap bindings.
+    bool use_direct_copy = iree_all_bits_set(flags, IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS);
+    if (kernel_params->parameters && kernel_params->parameter_count > 0 && !use_direct_copy) {
       iree_host_size_t binding_idx = 0;
 
       for (uint32_t i = 0; i < kernel_params->parameter_count; ++i) {
@@ -481,6 +485,10 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
             }
             memcpy(dest, &buffer_ptr, sizeof(buffer_ptr));
             ++binding_idx;
+          } else {
+            // No binding available - write NULL pointer.
+            void* null_ptr = NULL;
+            memcpy(dest, &null_ptr, sizeof(null_ptr));
           }
         } else {
           // This is a constant parameter - copy from constants buffer.
@@ -490,6 +498,12 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
             memcpy(dest, constants.data + param->offset, param->size);
           }
         }
+      }
+    } else if (use_direct_copy) {
+      // CUSTOM_DIRECT_ARGUMENTS: copy the raw constants buffer directly.
+      // The buffer already contains the complete packed kernel arguments.
+      if (constants.data_length > 0) {
+        memcpy(kernarg_address, constants.data, constants.data_length);
       }
     } else {
       // Fallback: pack buffers then constants sequentially.

@@ -569,12 +569,15 @@ static iree_status_t iree_hal_streaming_context_symbol_map_prepare_module(
   if (iree_status_is_ok(status)) {
     // Insert all symbols from the module into the hash table.
     for (iree_host_size_t i = 0; i < registration->symbol_count; ++i) {
-      iree_string_view_t symbol_name = entry->module->symbols[i].name;
+      // Get the registered symbol's device name
+      iree_string_view_t registered_name =
+          iree_make_cstring_view(registration->symbols[i].device_name);
       void* symbol_host_ptr = registration->symbols[i].host_pointer;
-      // Find the corresponding compiled symbol in the module.
+      
+      // Find the corresponding compiled symbol in the module by name.
       iree_hal_streaming_symbol_t* symbol = NULL;
       for (iree_host_size_t j = 0; j < entry->module->symbol_count; ++j) {
-        if (iree_string_view_equal(symbol_name,
+        if (iree_string_view_equal(registered_name,
                                    entry->module->symbols[j].name)) {
           symbol = &entry->module->symbols[j];
           break;
@@ -585,7 +588,7 @@ static iree_status_t iree_hal_streaming_context_symbol_map_prepare_module(
         status = iree_make_status(
             IREE_STATUS_NOT_FOUND,
             "registered symbol `%.*s` not found in loaded module",
-            (int)symbol_name.size, symbol_name.data);
+            (int)registered_name.size, registered_name.data);
         break;
       }
 
@@ -724,6 +727,9 @@ iree_status_t iree_hal_streaming_context_symbol_map_lookup(
 
   // Now look up again in the hash table using the original hash.
   // The symbol should be there now after module preparation.
+  // Note: We must recompute the index because the hash table may have been
+  // resized during prepare_module.
+  index = hash & (map->capacity - 1);
   for (iree_host_size_t i = 0; i < map->capacity; ++i) {
     const void* entry_key = map->entries[index].key;
     if (entry_key == host_pointer) {

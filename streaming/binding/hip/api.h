@@ -66,6 +66,12 @@ typedef struct hipPitchedPtr {
 #define hipDeviceLmemResizeToMax 0x10
 #define hipDeviceScheduleMask 0x07  // Mask for scheduling mode bits
 
+// Device memory allocation flags for hipExtMallocWithFlags
+#define hipDeviceMallocDefault 0x0
+#define hipDeviceMallocFinegrained 0x1
+#define hipMallocSignalMemory 0x2
+#define hipDeviceMallocUncached 0x3
+
 typedef enum __attribute__((annotate("HIP_nodiscard"))) hipError_t {
   hipSuccess = 0,
   hipErrorInvalidValue = 1,
@@ -676,6 +682,17 @@ typedef size_t (*hipOccupancyB2DSize)(int blockSize);
 typedef struct hipGraph_st* hipGraph_t;
 typedef struct hipGraphExec_st* hipGraphExec_t;
 typedef struct hipGraphNode_st* hipGraphNode_t;
+typedef struct hipUserObject* hipUserObject_t;
+
+// User object creation flags.
+typedef enum hipUserObjectFlags {
+  hipUserObjectNoDestructorSync = 0x1
+} hipUserObjectFlags;
+
+// User object retain flags.
+typedef enum hipUserObjectRetainFlags {
+  hipGraphUserObjectMove = 0x1
+} hipUserObjectRetainFlags;
 
 // Memory advice enum.
 typedef enum hipMemAdvise_enum {
@@ -841,6 +858,10 @@ HIPAPI hipError_t hipDeviceCanAccessPeer(int* canAccessPeer, hipDevice_t dev,
                                          hipDevice_t peerDev);
 HIPAPI hipError_t hipDeviceGetP2PAttribute(int* value, hipDeviceP2PAttr attrib,
                                            int srcDevice, int dstDevice);
+HIPAPI hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, int device);
+HIPAPI hipError_t hipDeviceGetByPCIBusId(int* device, const char* pciBusId);
+HIPAPI hipError_t hipDeviceGetStreamPriorityRange(int* leastPriority,
+                                                   int* greatestPriority);
 HIPAPI hipError_t hipDeviceSynchronize(void);
 HIPAPI hipError_t hipDeviceReset(void);
 
@@ -885,6 +906,8 @@ HIPAPI hipError_t hipModuleGetGlobal(hipDeviceptr_t* dptr, size_t* bytes,
 // Memory management
 HIPAPI hipError_t hipMemGetInfo(size_t* free, size_t* total);
 HIPAPI hipError_t hipMalloc(hipDeviceptr_t* dptr, size_t bytesize);
+HIPAPI hipError_t hipExtMallocWithFlags(void** ptr, size_t sizeBytes,
+                                         unsigned int flags);
 HIPAPI hipError_t hipMallocPitch(void** devPtr, size_t* pitch, size_t width,
                                  size_t height);
 HIPAPI hipError_t hipFree(hipDeviceptr_t dptr);
@@ -902,15 +925,27 @@ HIPAPI hipError_t hipMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize,
 HIPAPI hipError_t hipHostGetFlags(unsigned int* flagsPtr, void* hostPtr);
 HIPAPI hipError_t hipMemPtrGetInfo(void* ptr, size_t* size);
 
+// IPC memory operations (not supported - return error)
+HIPAPI hipError_t hipIpcGetMemHandle(hipIpcMemHandle_t* handle, void* devPtr);
+HIPAPI hipError_t hipIpcOpenMemHandle(void** devPtr, hipIpcMemHandle_t handle,
+                                       unsigned int flags);
+HIPAPI hipError_t hipIpcCloseMemHandle(void* devPtr);
+HIPAPI hipError_t hipIpcGetEventHandle(hipIpcEventHandle_t* handle,
+                                        hipEvent_t event);
+HIPAPI hipError_t hipIpcOpenEventHandle(hipEvent_t* event,
+                                         hipIpcEventHandle_t handle);
+
 // Memory transfers
 HIPAPI hipError_t hipMemcpy(void* dst, const void* src, size_t sizeBytes,
                             hipMemcpyKind kind);
 HIPAPI hipError_t hipMemcpyWithStream(void* dst, const void* src,
                                       size_t sizeBytes, hipMemcpyKind kind,
                                       hipStream_t stream);
-HIPAPI hipError_t hipMemcpyPeer(hipDeviceptr_t dstDevice, hipCtx_t dstContext,
-                                hipDeviceptr_t srcDevice, hipCtx_t srcContext,
-                                size_t ByteCount);
+HIPAPI hipError_t hipMemcpyPeer(void* dst, int dstDeviceId, const void* src,
+                                int srcDeviceId, size_t sizeBytes);
+HIPAPI hipError_t hipMemcpyPeerAsync(void* dst, int dstDeviceId,
+                                      const void* src, int srcDeviceId,
+                                      size_t sizeBytes, hipStream_t stream);
 HIPAPI hipError_t hipMemcpyHtoD(hipDeviceptr_t dst, void* src,
                                 size_t sizeBytes);
 HIPAPI hipError_t hipMemcpyDtoH(void* dst, hipDeviceptr_t src,
@@ -958,6 +993,30 @@ HIPAPI hipError_t hipStreamDestroy(hipStream_t hStream);
 HIPAPI hipError_t hipStreamGetPriority(hipStream_t stream, int* priority);
 HIPAPI hipError_t hipStreamGetFlags(hipStream_t stream, unsigned int* flags);
 HIPAPI hipError_t hipStreamGetDevice(hipStream_t stream, hipDevice_t* device);
+HIPAPI hipError_t hipStreamWriteValue32(hipStream_t stream, void* ptr,
+                                         uint32_t value, unsigned int flags);
+HIPAPI hipError_t hipStreamWriteValue64(hipStream_t stream, void* ptr,
+                                         uint64_t value, unsigned int flags);
+HIPAPI hipError_t hipStreamWaitValue32(hipStream_t stream, void* ptr,
+                                        uint32_t value, unsigned int flags,
+                                        uint32_t mask);
+HIPAPI hipError_t hipStreamWaitValue64(hipStream_t stream, void* ptr,
+                                        uint64_t value, unsigned int flags,
+                                        uint64_t mask);
+HIPAPI hipError_t hipExtStreamCreateWithCUMask(hipStream_t* stream,
+                                                uint32_t cuMaskSize,
+                                                const uint32_t* cuMask);
+HIPAPI hipError_t hipExtStreamGetCUMask(hipStream_t stream,
+                                         uint32_t cuMaskSize,
+                                         uint32_t* cuMask);
+HIPAPI hipError_t hipThreadExchangeStreamCaptureMode(
+    hipStreamCaptureMode* mode);
+HIPAPI hipError_t hipStreamIsCapturing(hipStream_t stream,
+                                        hipStreamCaptureStatus* pCaptureStatus);
+HIPAPI hipError_t hipStreamGetCaptureInfo_v2(
+    hipStream_t stream, hipStreamCaptureStatus* captureStatus_out,
+    unsigned long long* id_out, hipGraph_t* graph_out,
+    const hipGraphNode_t** dependencies_out, size_t* numDependencies_out);
 
 // Event management
 HIPAPI hipError_t hipEventCreate(hipEvent_t* phEvent);
@@ -980,6 +1039,11 @@ HIPAPI hipError_t hipFuncSetCacheConfig(hipFunction_t hfunc,
                                         hipFuncCache_t config);
 HIPAPI hipError_t hipFuncSetSharedMemConfig(hipFunction_t hfunc,
                                             hipSharedMemConfig config);
+
+// Kernel name functions
+HIPAPI const char* hipKernelNameRef(const hipFunction_t f);
+HIPAPI const char* hipKernelNameRefByPtr(const void* hostFunction,
+                                          hipStream_t stream);
 
 // Execution control
 HIPAPI hipError_t hipLaunchKernel(const void* function_address,
@@ -1021,6 +1085,21 @@ HIPAPI hipError_t hipModuleOccupancyMaxPotentialBlockSizeWithFlags(
     int* gridSize, int* blockSize, hipFunction_t f, size_t dynSharedMemPerBlk,
     int blockSizeLimit, unsigned int flags);
 
+// Runtime occupancy functions (for host function pointers)
+HIPAPI hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessor(
+    int* numBlocks, const void* f, int blockSize, size_t dynSharedMemPerBlk);
+HIPAPI hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
+    int* numBlocks, const void* f, int blockSize, size_t dynSharedMemPerBlk,
+    unsigned int flags);
+HIPAPI hipError_t hipOccupancyMaxPotentialBlockSize(int* gridSize,
+                                                     int* blockSize,
+                                                     const void* f,
+                                                     size_t dynSharedMemPerBlk,
+                                                     int blockSizeLimit);
+HIPAPI hipError_t hipOccupancyMaxPotentialBlockSizeWithFlags(
+    int* gridSize, int* blockSize, const void* f, size_t dynSharedMemPerBlk,
+    int blockSizeLimit, unsigned int flags);
+
 // Unified memory management
 HIPAPI hipError_t hipMemAdvise(const void* dev_ptr, size_t count,
                                hipMemAdvise_t advice, int device);
@@ -1042,6 +1121,23 @@ HIPAPI hipError_t hipMemRangeGetAttributes(void** data, size_t* data_sizes,
                                            hipMemRangeAttribute* attributes,
                                            size_t num_attributes,
                                            const void* dev_ptr, size_t count);
+
+// User objects (not supported - return error)
+HIPAPI hipError_t hipUserObjectCreate(hipUserObject_t* object_out, void* ptr,
+                                       hipHostFn_t destroy,
+                                       unsigned int initialRefcount,
+                                       unsigned int flags);
+HIPAPI hipError_t hipUserObjectRelease(hipUserObject_t object,
+                                        unsigned int count);
+HIPAPI hipError_t hipUserObjectRetain(hipUserObject_t object,
+                                       unsigned int count);
+HIPAPI hipError_t hipGraphRetainUserObject(hipGraph_t graph,
+                                            hipUserObject_t object,
+                                            unsigned int count,
+                                            unsigned int flags);
+HIPAPI hipError_t hipGraphReleaseUserObject(hipGraph_t graph,
+                                             hipUserObject_t object,
+                                             unsigned int count);
 
 // HIP graphs
 HIPAPI hipError_t hipGraphCreate(hipGraph_t* pGraph, unsigned int flags);
@@ -1085,6 +1181,44 @@ HIPAPI hipError_t hipGraphAddEmptyNode(hipGraphNode_t* pGraphNode,
                                        size_t numDependencies);
 HIPAPI hipError_t hipGraphGetNodes(hipGraph_t graph, hipGraphNode_t* pNodes,
                                    size_t* numNodes);
+HIPAPI hipError_t hipGraphAddEventRecordNode(hipGraphNode_t* pGraphNode,
+                                              hipGraph_t graph,
+                                              const hipGraphNode_t* pDependencies,
+                                              size_t numDependencies,
+                                              hipEvent_t event);
+HIPAPI hipError_t hipGraphAddEventWaitNode(hipGraphNode_t* pGraphNode,
+                                            hipGraph_t graph,
+                                            const hipGraphNode_t* pDependencies,
+                                            size_t numDependencies,
+                                            hipEvent_t event);
+HIPAPI hipError_t hipGraphAddDependencies(hipGraph_t graph,
+                                           const hipGraphNode_t* from,
+                                           const hipGraphNode_t* to,
+                                           size_t numDependencies);
+HIPAPI hipError_t hipGraphRemoveDependencies(hipGraph_t graph,
+                                              const hipGraphNode_t* from,
+                                              const hipGraphNode_t* to,
+                                              size_t numDependencies);
+HIPAPI hipError_t hipGraphGetEdges(hipGraph_t graph, hipGraphNode_t* from,
+                                    hipGraphNode_t* to, size_t* numEdges);
+HIPAPI hipError_t hipGraphGetRootNodes(hipGraph_t graph,
+                                        hipGraphNode_t* pRootNodes,
+                                        size_t* pNumRootNodes);
+HIPAPI hipError_t hipGraphNodeGetDependencies(hipGraphNode_t node,
+                                               hipGraphNode_t* pDependencies,
+                                               size_t* pNumDependencies);
+HIPAPI hipError_t hipGraphNodeGetDependentNodes(hipGraphNode_t node,
+                                                 hipGraphNode_t* pDependentNodes,
+                                                 size_t* pNumDependentNodes);
+HIPAPI hipError_t hipGraphNodeGetType(hipGraphNode_t node,
+                                       hipGraphNodeType* pType);
+HIPAPI hipError_t hipGraphDestroyNode(hipGraphNode_t node);
+HIPAPI hipError_t hipGraphClone(hipGraph_t* pGraphClone, hipGraph_t originalGraph);
+HIPAPI hipError_t hipGraphNodeFindInClone(hipGraphNode_t* pNode,
+                                           hipGraphNode_t originalNode,
+                                           hipGraph_t clonedGraph);
+HIPAPI hipError_t hipGraphDebugDotPrint(hipGraph_t graph, const char* path,
+                                         unsigned int flags);
 
 // Stream capture
 HIPAPI hipError_t hipStreamBeginCapture(hipStream_t stream,
@@ -1176,6 +1310,28 @@ typedef struct hipMemAccessDesc {
   hipMemAccessFlags flags;
 } hipMemAccessDesc;
 
+// Generic allocation handle for virtual memory.
+typedef struct ihipMemGenericAllocationHandle* hipMemGenericAllocationHandle_t;
+
+// Memory allocation granularity flags.
+typedef enum hipMemAllocationGranularity_flags {
+  hipMemAllocationGranularityMinimum = 0x0,
+  hipMemAllocationGranularityRecommended = 0x1
+} hipMemAllocationGranularity_flags;
+
+// Memory allocation properties for virtual memory.
+typedef struct hipMemAllocationProp {
+  hipMemAllocationType type;
+  hipMemAllocationHandleType requestedHandleType;
+  hipMemLocation location;
+  void* win32HandleMetaData;
+  struct {
+    unsigned char compressionType;
+    unsigned char gpuDirectRDMACapable;
+    unsigned short usage;
+  } allocFlags;
+} hipMemAllocationProp;
+
 //===----------------------------------------------------------------------===//
 // Memory pool API function declarations
 //===----------------------------------------------------------------------===//
@@ -1220,12 +1376,49 @@ HIPAPI hipError_t hipMallocFromPoolAsync(void** ptr, size_t size,
                                          hipMemPool_t pool, hipStream_t stream);
 HIPAPI hipError_t hipFreeAsync(void* ptr, hipStream_t stream);
 
+// Virtual memory management (not supported - return error)
+HIPAPI hipError_t hipMemAddressReserve(void** ptr, size_t size,
+                                        size_t alignment, void* addr,
+                                        unsigned long long flags);
+HIPAPI hipError_t hipMemAddressFree(void* devPtr, size_t size);
+HIPAPI hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle,
+                                size_t size, const hipMemAllocationProp* prop,
+                                unsigned long long flags);
+HIPAPI hipError_t hipMemRelease(hipMemGenericAllocationHandle_t handle);
+HIPAPI hipError_t hipMemMap(void* ptr, size_t size, size_t offset,
+                             hipMemGenericAllocationHandle_t handle,
+                             unsigned long long flags);
+HIPAPI hipError_t hipMemUnmap(void* ptr, size_t size);
+HIPAPI hipError_t hipMemSetAccess(void* ptr, size_t size,
+                                   const hipMemAccessDesc* desc,
+                                   size_t count);
+HIPAPI hipError_t hipMemGetAccess(unsigned long long* flags,
+                                   const hipMemLocation* location,
+                                   void* ptr);
+HIPAPI hipError_t hipMemGetAllocationGranularity(
+    size_t* granularity, const hipMemAllocationProp* prop,
+    hipMemAllocationGranularity_flags option);
+HIPAPI hipError_t hipMemGetAllocationPropertiesFromHandle(
+    hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t handle);
+HIPAPI hipError_t hipMemExportToShareableHandle(
+    void* shareableHandle, hipMemGenericAllocationHandle_t handle,
+    hipMemAllocationHandleType handleType, unsigned long long flags);
+HIPAPI hipError_t hipMemImportFromShareableHandle(
+    hipMemGenericAllocationHandle_t* handle, void* osHandle,
+    hipMemAllocationHandleType shHandleType);
+HIPAPI hipError_t hipMemRetainAllocationHandle(
+    hipMemGenericAllocationHandle_t* handle, void* addr);
+
 //===----------------------------------------------------------------------===//
 // Error handling
 //===----------------------------------------------------------------------===//
 
 HIPAPI const char* hipGetErrorString(hipError_t error);
 HIPAPI const char* hipGetErrorName(hipError_t error);
+HIPAPI hipError_t hipDrvGetErrorString(hipError_t hipError,
+                                        const char** errorString);
+HIPAPI hipError_t hipDrvGetErrorName(hipError_t hipError,
+                                      const char** errorString);
 HIPAPI hipError_t hipGetLastError(void);
 HIPAPI hipError_t hipExtGetLastError(void);
 HIPAPI hipError_t hipPeekAtLastError(void);
