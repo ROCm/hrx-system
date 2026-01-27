@@ -188,6 +188,13 @@ iree_status_t iree_hal_streaming_event_elapsed_time(
   IREE_ASSERT_ARGUMENT(start);
   IREE_ASSERT_ARGUMENT(stop);
 
+  // Check if either event has timing disabled.
+  if ((start->flags & IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING) ||
+      (stop->flags & IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "cannot measure elapsed time with timing disabled");
+  }
+
   // Ensure both events have been recorded.
   if (start->record_time_ns == 0 || stop->record_time_ns == 0) {
     return iree_make_status(

@@ -6152,8 +6152,9 @@ HIPAPI hipError_t hipEventQuery(hipEvent_t event) {
   int is_complete = 0;
   iree_status_t status = iree_hal_streaming_event_query(
       (iree_hal_streaming_event_t*)event, &is_complete);
+  // is_complete == 0 means complete, is_complete == 1 means not complete.
   hipError_t result = iree_status_is_ok(status)
-                          ? (is_complete == 1 ? hipSuccess : hipErrorNotReady)
+                          ? (is_complete == 0 ? hipSuccess : hipErrorNotReady)
                           : iree_status_to_hip_result(status);
   return result;
 }
@@ -6201,9 +6202,15 @@ HIPAPI hipError_t hipEventElapsedTime(float* ms, hipEvent_t start,
   if (!ms) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
+  // Check if either event has timing disabled.
+  iree_hal_streaming_event_t* start_event = (iree_hal_streaming_event_t*)start;
+  iree_hal_streaming_event_t* stop_event = (iree_hal_streaming_event_t*)stop;
+  if ((start_event->flags & IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING) ||
+      (stop_event->flags & IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING)) {
+    HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  }
   iree_status_t status = iree_hal_streaming_event_elapsed_time(
-      ms, (iree_hal_streaming_event_t*)start,
-      (iree_hal_streaming_event_t*)stop);
+      ms, start_event, stop_event);
   hipError_t result = iree_status_to_hip_result(status);
   return result;
 }
