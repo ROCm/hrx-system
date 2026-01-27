@@ -653,13 +653,28 @@ iree_status_t iree_hal_streaming_context_synchronize(
     iree_hal_streaming_context_t* context) {
   IREE_ASSERT_ARGUMENT(context);
   IREE_TRACE_ZONE_BEGIN(z0);
-  // TODO we should probably be synchronizing any stream
-  // that is not marked as nonblocking.
-  // Synchronize default stream.
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_streaming_stream_synchronize(context->default_stream));
 
-  // Could also synchronize any other active streams if we track them?
+  // Synchronize all registered streams.
+  // Per CUDA/HIP semantics, hipDeviceSynchronize waits for all streams.
+  iree_slim_mutex_lock(&context->stream_list_mutex);
+  for (iree_host_size_t i = 0; i < context->stream_count; ++i) {
+    iree_hal_streaming_stream_t* stream = context->streams[i];
+    if (stream) {
+      iree_status_t status = iree_hal_streaming_stream_synchronize(stream);
+      if (!iree_status_is_ok(status)) {
+        iree_slim_mutex_unlock(&context->stream_list_mutex);
+        IREE_TRACE_ZONE_END(z0);
+        return status;
+      }
+    }
+  }
+  iree_slim_mutex_unlock(&context->stream_list_mutex);
+
+  // Also synchronize the default stream (which may not be in the streams list).
+  if (context->default_stream) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_hal_streaming_stream_synchronize(context->default_stream));
+  }
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
