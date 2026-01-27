@@ -4717,6 +4717,11 @@ HIPAPI hipError_t hipMemset(void* dst, int value, size_t sizeBytes) {
       context, (iree_hal_streaming_deviceptr_t)dst, sizeBytes, &value, 1,
       context->default_stream);
 
+  if (iree_status_is_ok(status)) {
+    // hipMemset is synchronous - wait for completion on the default stream.
+    status = iree_hal_streaming_stream_synchronize(context->default_stream);
+  }
+
   hipError_t result = iree_status_to_hip_result(status);
   IREE_TRACE_ZONE_END(z0);
   return result;
@@ -4825,6 +4830,11 @@ HIPAPI hipError_t hipMemsetD8(hipDeviceptr_t dstDevice, unsigned char uc,
       context, (iree_hal_streaming_deviceptr_t)dstDevice, N, &uc, 1,
       context->default_stream);
 
+  if (iree_status_is_ok(status)) {
+    // hipMemsetD8 is synchronous - wait for completion on the default stream.
+    status = iree_hal_streaming_stream_synchronize(context->default_stream);
+  }
+
   hipError_t result = iree_status_to_hip_result(status);
   IREE_TRACE_ZONE_END(z0);
   return result;
@@ -4878,6 +4888,11 @@ HIPAPI hipError_t hipMemsetD16(hipDeviceptr_t dstDevice, unsigned short us,
       context, (iree_hal_streaming_deviceptr_t)dstDevice, N * 2, &us, 2,
       context->default_stream);
 
+  if (iree_status_is_ok(status)) {
+    // hipMemsetD16 is synchronous - wait for completion on the default stream.
+    status = iree_hal_streaming_stream_synchronize(context->default_stream);
+  }
+
   hipError_t result = iree_status_to_hip_result(status);
   IREE_TRACE_ZONE_END(z0);
   return result;
@@ -4929,6 +4944,11 @@ HIPAPI hipError_t hipMemsetD32(hipDeviceptr_t dstDevice, int i, size_t N) {
   iree_status_t status = iree_hal_streaming_memory_memset(
       context, (iree_hal_streaming_deviceptr_t)dstDevice, N * 4, &i, 4,
       context->default_stream);
+
+  if (iree_status_is_ok(status)) {
+    // hipMemsetD32 is synchronous - wait for completion on the default stream.
+    status = iree_hal_streaming_stream_synchronize(context->default_stream);
+  }
 
   hipError_t result = iree_status_to_hip_result(status);
   IREE_TRACE_ZONE_END(z0);
