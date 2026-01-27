@@ -57,6 +57,13 @@ typedef struct hipPitchedPtr {
   size_t ysize;
 } hipPitchedPtr;
 
+// 3D extent for memory allocation.
+typedef struct hipExtent {
+  size_t width;   // Width in bytes for memory allocation.
+  size_t height;  // Height in elements.
+  size_t depth;   // Depth in elements.
+} hipExtent;
+
 // Context scheduling flags (matching CUDA).
 #define hipDeviceScheduleAuto 0x00
 #define hipDeviceScheduleSpin 0x01
@@ -910,6 +917,7 @@ HIPAPI hipError_t hipExtMallocWithFlags(void** ptr, size_t sizeBytes,
                                          unsigned int flags);
 HIPAPI hipError_t hipMallocPitch(void** devPtr, size_t* pitch, size_t width,
                                  size_t height);
+HIPAPI hipError_t hipMalloc3D(hipPitchedPtr* pitchedDevPtr, hipExtent extent);
 HIPAPI hipError_t hipFree(hipDeviceptr_t dptr);
 HIPAPI hipError_t hipMallocHost(void** pp, size_t bytesize);
 HIPAPI hipError_t hipFreeHost(void* p);
@@ -978,6 +986,11 @@ HIPAPI hipError_t hipMemsetD16Async(hipDeviceptr_t dest, unsigned short value,
                                     size_t count, hipStream_t stream);
 HIPAPI hipError_t hipMemsetD32Async(hipDeviceptr_t dst, int value, size_t count,
                                     hipStream_t stream);
+HIPAPI hipError_t hipMemset2D(void* dst, size_t pitch, int value, size_t width,
+                              size_t height);
+HIPAPI hipError_t hipMemset2DAsync(void* dst, size_t pitch, int value,
+                                   size_t width, size_t height,
+                                   hipStream_t stream);
 
 // Stream management
 HIPAPI hipError_t hipStreamCreate(hipStream_t* phStream);

@@ -4115,6 +4115,162 @@ HIPAPI hipError_t hipMemcpy2D(void* dst, size_t dpitch, const void* src,
   return result;
 }
 
+// Sets 2D device memory to a value (asynchronous).
+//
+// Parameters:
+//  - dst: [OUT] Device pointer to 2D memory to set.
+//  - pitch: [IN] Pitch in bytes of the 2D memory.
+//  - value: [IN] Value to set (interpreted as unsigned char).
+//  - width: [IN] Width in bytes to set.
+//  - height: [IN] Number of rows to set.
+//  - stream: [IN] Stream for asynchronous execution.
+//
+// Returns:
+//  - hipSuccess: Operation enqueued successfully.
+//  - hipErrorInvalidValue: dst is NULL or dimensions invalid.
+HIPAPI hipError_t hipMemset2DAsync(void* dst, size_t pitch, int value,
+                                   size_t width, size_t height,
+                                   hipStream_t stream) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  if (!dst) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  if (width == 0 || height == 0) {
+    IREE_TRACE_ZONE_END(z0);
+    return hipSuccess;
+  }
+
+  if (width > pitch) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  // Ensure initialization and get context.
+  iree_hal_streaming_context_t* context = NULL;
+  hipError_t init_result = iree_hip_ensure_context(&context);
+  if (init_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(init_result);
+  }
+
+  // Get or create stream.
+  iree_hal_streaming_stream_t* stream_obj =
+      (iree_hal_streaming_stream_t*)stream;
+  if (!stream_obj) {
+    stream_obj = context->default_stream;
+  }
+
+  // Perform row-by-row memset.
+  uint8_t* dst_ptr = (uint8_t*)dst;
+  for (size_t row = 0; row < height; ++row) {
+    iree_status_t status = iree_hal_streaming_memory_memset(
+        context, (iree_hal_streaming_deviceptr_t)(dst_ptr + row * pitch), width,
+        &value, 1, stream_obj);
+    if (!iree_status_is_ok(status)) {
+      IREE_TRACE_ZONE_END(z0);
+      return iree_status_to_hip_result(status);
+    }
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+  return hipSuccess;
+}
+
+// Sets 2D device memory to a value (synchronous).
+//
+// Parameters:
+//  - dst: [OUT] Device pointer to 2D memory to set.
+//  - pitch: [IN] Pitch in bytes of the 2D memory.
+//  - value: [IN] Value to set (interpreted as unsigned char).
+//  - width: [IN] Width in bytes to set.
+//  - height: [IN] Number of rows to set.
+//
+// Returns:
+//  - hipSuccess: Operation completed successfully.
+//  - hipErrorInvalidValue: dst is NULL or dimensions invalid.
+HIPAPI hipError_t hipMemset2D(void* dst, size_t pitch, int value, size_t width,
+                              size_t height) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  hipError_t result = hipMemset2DAsync(dst, pitch, value, width, height, NULL);
+
+  if (result == hipSuccess) {
+    result = hipDeviceSynchronize();
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+  return result;
+}
+
+// Allocates 3D device memory.
+//
+// Parameters:
+//  - pitchedDevPtr: [OUT] Pointer to receive the pitched pointer structure.
+//  - extent: [IN] Extent of the 3D allocation (width, height, depth).
+//
+// Returns:
+//  - hipSuccess: Allocation successful.
+//  - hipErrorInvalidValue: pitchedDevPtr is NULL.
+//  - hipErrorOutOfMemory: Allocation failed.
+HIPAPI hipError_t hipMalloc3D(hipPitchedPtr* pitchedDevPtr, hipExtent extent) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  if (!pitchedDevPtr) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  // Initialize output.
+  pitchedDevPtr->ptr = NULL;
+  pitchedDevPtr->pitch = 0;
+  pitchedDevPtr->xsize = 0;
+  pitchedDevPtr->ysize = 0;
+
+  // Zero extent is technically valid but produces NULL allocation.
+  if (extent.width == 0 || extent.height == 0 || extent.depth == 0) {
+    IREE_TRACE_ZONE_END(z0);
+    return hipSuccess;
+  }
+
+  // Ensure initialization and get context.
+  iree_hal_streaming_context_t* context = NULL;
+  hipError_t init_result = iree_hip_ensure_context(&context);
+  if (init_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(init_result);
+  }
+
+  // Calculate pitch for 2D slices (128-byte alignment for optimal access).
+  const size_t alignment = 128;
+  size_t pitch = (extent.width + alignment - 1) / alignment * alignment;
+
+  // Calculate total size: pitch * height * depth.
+  size_t slice_size = pitch * extent.height;
+  size_t total_size = slice_size * extent.depth;
+
+  // Allocate the memory.
+  iree_hal_streaming_buffer_t* buffer = NULL;
+  iree_status_t status =
+      iree_hal_streaming_memory_allocate_device(context, total_size, 0, &buffer);
+
+  if (!iree_status_is_ok(status)) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_status_to_hip_result(status);
+  }
+
+  // Fill in the pitched pointer structure.
+  pitchedDevPtr->ptr = (void*)iree_hal_streaming_buffer_device_pointer(buffer);
+  pitchedDevPtr->pitch = pitch;
+  pitchedDevPtr->xsize = extent.width;
+  pitchedDevPtr->ysize = extent.height;
+
+  IREE_TRACE_ZONE_END(z0);
+  return hipSuccess;
+}
+
 // Copies data from host memory to device memory (synchronous).
 //
 // Parameters:

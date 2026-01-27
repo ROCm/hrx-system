@@ -663,10 +663,11 @@ iree_status_t iree_hal_streaming_launch_host_function(
   uint64_t args[4] = {0, 0, 0, 0};
 
   // Enqueue the host call on the device queue.
-  // Use NON_BLOCKING flag as CUDA/HIP host functions don't block the stream.
+  // Use blocking mode so that stream synchronization waits for the host
+  // function to complete before returning.
   iree_status_t status = iree_hal_device_queue_host_call(
       stream->context->device, stream->queue_affinity, wait_semaphores,
-      signal_semaphores, call, args, IREE_HAL_HOST_CALL_FLAG_NON_BLOCKING);
+      signal_semaphores, call, args, /*flags=*/0);
 
   if (!iree_status_is_ok(status)) {
     iree_allocator_free(iree_allocator_system(), callback);
