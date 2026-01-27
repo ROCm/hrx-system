@@ -5347,6 +5347,11 @@ HIPAPI hipError_t hipStreamCreateWithPriority(hipStream_t* stream,
 //           hipStreamCreateWithPriority.
 HIPAPI hipError_t hipStreamDestroy(hipStream_t stream) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  // NULL stream (default stream) cannot be destroyed.
+  if (!stream) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidResourceHandle);
+  }
   iree_hal_streaming_stream_release((iree_hal_streaming_stream_t*)stream);
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
@@ -5661,8 +5666,9 @@ HIPAPI hipError_t hipStreamQuery(hipStream_t stream) {
   int is_complete = 0;
   iree_status_t status = iree_hal_streaming_stream_query(
       (iree_hal_streaming_stream_t*)stream, &is_complete);
+  // is_complete == 0 means complete, is_complete == 1 means not complete.
   hipError_t result = iree_status_is_ok(status)
-                          ? (is_complete == 1 ? hipSuccess : hipErrorNotReady)
+                          ? (is_complete == 0 ? hipSuccess : hipErrorNotReady)
                           : iree_status_to_hip_result(status);
   return result;
 }

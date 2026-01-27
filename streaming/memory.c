@@ -858,6 +858,13 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host(
   // Pageable memory requires synchronous transfer.
   if (!stream || !dst_is_pinned) {
     // Synchronous transfer - used for NULL stream or pageable host memory.
+    // If a stream is provided, we must flush it first to ensure any pending
+    // operations (like memset) that write to the source buffer are completed
+    // before we read from it.
+    if (stream) {
+      IREE_RETURN_AND_END_ZONE_IF_ERROR(
+          z0, iree_hal_streaming_stream_synchronize(stream));
+    }
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
         z0,
         iree_hal_device_transfer_d2h(
