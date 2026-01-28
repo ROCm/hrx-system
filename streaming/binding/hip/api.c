@@ -8572,9 +8572,9 @@ HIPAPI hipError_t hipPointerSetAttribute(const void* value,
 //
 // See also: hipPointerGetAttribute, hipPointerSetAttribute,
 //           hipMemGetInfo.
-HIPAPI hipError_t hipPointerGetAttributes(unsigned int numAttributes,
-                                          hipPointer_attribute_t* attributes,
-                                          void** data, const void* ptr) {
+HIPAPI hipError_t hipDrvPointerGetAttributes(unsigned int numAttributes,
+                                             hipPointer_attribute_t* attributes,
+                                             void** data, const void* ptr) {
   IREE_TRACE_ZONE_BEGIN(z0);
   if (!attributes || !data || numAttributes == 0) {
     IREE_TRACE_ZONE_END(z0);
@@ -8596,6 +8596,84 @@ HIPAPI hipError_t hipPointerGetAttributes(unsigned int numAttributes,
 
   IREE_TRACE_ZONE_END(z0);
   HIP_RETURN_ERROR(result);
+}
+
+// Queries pointer attributes (runtime API).
+//
+// Parameters:
+//  - attributes: [OUT] Structure to receive pointer attributes.
+//  - ptr: [IN] Pointer to query.
+//
+// Returns:
+//  - hipSuccess: Attributes queried successfully.
+//  - hipErrorInvalidValue: Null attributes pointer.
+//  - hipErrorInvalidDevice: Pointer not found in any device context.
+//
+// The attributes structure includes:
+//  - type: Memory type (host, device, managed, unified).
+//  - device: Device ordinal where memory resides.
+//  - devicePointer: Device pointer (same as ptr for device memory).
+//  - hostPointer: Host pointer (if available).
+//  - isManaged: Whether memory is managed (unified memory).
+//  - allocationFlags: Flags used during allocation.
+//
+// See also: hipPointerGetAttribute, hipMalloc, hipHostMalloc.
+HIPAPI hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attributes,
+                                          const void* ptr) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  if (!attributes) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  // Initialize with defaults.
+  memset(attributes, 0, sizeof(*attributes));
+
+  // Get the context.
+  iree_hal_streaming_context_t* context = NULL;
+  hipError_t init_result = iree_hip_ensure_context(&context);
+  if (init_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(init_result);
+  }
+
+  // Look up buffer from pointer.
+  iree_hal_streaming_buffer_ref_t buffer_ref;
+  iree_status_t status = iree_hal_streaming_memory_lookup(
+      context, (iree_hal_streaming_deviceptr_t)(uintptr_t)ptr, &buffer_ref);
+  if (!iree_status_is_ok(status)) {
+    iree_status_ignore(status);
+    // Pointer not found - return error.
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidDevice);
+  }
+
+  // Fill in the attributes based on buffer.
+  // Check if this is host memory based on the host_ptr being set
+  if (buffer_ref.buffer->host_ptr != NULL) {
+    attributes->type = hipMemoryTypeHost;
+    attributes->hostPointer = (void*)((iree_host_size_t)buffer_ref.buffer->host_ptr +
+                                      buffer_ref.offset);
+    attributes->devicePointer = (void*)((iree_device_size_t)buffer_ref.buffer->device_ptr +
+                                        buffer_ref.offset);
+  } else {
+    attributes->type = hipMemoryTypeDevice;
+    attributes->devicePointer = (void*)((iree_device_size_t)buffer_ref.buffer->device_ptr +
+                                        buffer_ref.offset);
+    attributes->hostPointer = NULL;
+  }
+
+  // Get the device ordinal from the context.
+  attributes->device = (int)context->device_ordinal;
+
+  // Managed memory check - we don't support managed memory yet.
+  attributes->isManaged = 0;
+
+  // Store allocation flags - convert from our internal flags.
+  attributes->allocationFlags = (unsigned int)buffer_ref.buffer->host_register_flags;
+
+  IREE_TRACE_ZONE_END(z0);
+  HIP_RETURN_ERROR(hipSuccess);
 }
 
 // Queries an attribute of a memory range.

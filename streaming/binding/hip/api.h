@@ -732,6 +732,16 @@ typedef enum hipPointer_attribute {
   HIP_POINTER_ATTRIBUTE_MEMPOOL_HANDLE = 17,
 } hipPointer_attribute_t;
 
+// Pointer attributes structure (runtime API).
+typedef struct hipPointerAttribute_t {
+  hipMemoryType type;
+  int device;
+  void* devicePointer;
+  void* hostPointer;
+  int isManaged;
+  unsigned int allocationFlags;
+} hipPointerAttribute_t;
+
 // Memory range attribute enum.
 typedef enum hipMemRangeAttribute {
   hipMemRangeAttributeReadMostly = 1,
@@ -1124,9 +1134,14 @@ HIPAPI hipError_t hipPointerGetAttribute(void* data,
 HIPAPI hipError_t hipPointerSetAttribute(const void* value,
                                          hipPointer_attribute_t attribute,
                                          hipDeviceptr_t ptr);
-HIPAPI hipError_t hipPointerGetAttributes(unsigned int numAttributes,
-                                          hipPointer_attribute_t* attributes,
-                                          void** data, const void* ptr);
+// Driver API: Query multiple pointer attributes (batch version).
+HIPAPI hipError_t hipDrvPointerGetAttributes(unsigned int numAttributes,
+                                             hipPointer_attribute_t* attributes,
+                                             void** data, const void* ptr);
+
+// Runtime API: Query pointer attributes (fills struct).
+HIPAPI hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attributes,
+                                          const void* ptr);
 HIPAPI hipError_t hipMemRangeGetAttribute(void* data, size_t data_size,
                                           hipMemRangeAttribute attribute,
                                           const void* dev_ptr, size_t count);
