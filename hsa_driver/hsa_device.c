@@ -286,6 +286,9 @@ iree_status_t iree_hal_hsa_device_create(
         symbols,
         hsa_signal_create(1, 0, NULL, &device->device_info.completion_signal),
         "hsa_signal_create");
+    if (iree_status_is_ok(status)) {
+      iree_slim_mutex_initialize(&device->device_info.completion_signal_mutex);
+    }
   }
 
   // Create device allocator.
@@ -337,6 +340,7 @@ static void iree_hal_hsa_device_destroy(iree_hal_device_t* base_device) {
 
   // Destroy completion signal.
   if (device->device_info.completion_signal.handle) {
+    iree_slim_mutex_deinitialize(&device->device_info.completion_signal_mutex);
     IREE_HSA_IGNORE_ERROR(
         device->hsa_symbols,
         hsa_signal_destroy(device->device_info.completion_signal));

@@ -409,8 +409,9 @@ typedef struct iree_hal_streaming_stream_t {
 
   // Semaphore chain for synchronization.
   iree_hal_semaphore_t* timeline_semaphore;
-  uint64_t pending_value;
-  uint64_t completed_value;
+  uint64_t pending_value;    // Next value to be used for signaling
+  uint64_t submitted_value;  // Last value that was actually submitted (for wait_submitted)
+  uint64_t completed_value;  // Last value we've verified as completed
 
   // Queue affinity.
   iree_hal_queue_affinity_t queue_affinity;
@@ -1002,8 +1003,15 @@ void iree_hal_streaming_context_unregister_stream(
 iree_status_t iree_hal_streaming_context_wait_idle(
     iree_hal_streaming_context_t* context, iree_timeout_t timeout);
 
-// Synchronization: default stream (blocks until stream idle).
+// Synchronization: all streams (blocks until all streams idle).
+// This flushes and waits for all streams on the device.
 iree_status_t iree_hal_streaming_context_synchronize(
+    iree_hal_streaming_context_t* context);
+
+// Wait for all already-submitted work on all streams to complete.
+// Unlike context_synchronize, this does NOT flush in-progress recordings.
+// Safe to call from any thread without interfering with other threads.
+iree_status_t iree_hal_streaming_context_wait_all_submitted(
     iree_hal_streaming_context_t* context);
 
 //===----------------------------------------------------------------------===//
@@ -1075,6 +1083,11 @@ iree_status_t iree_hal_streaming_stream_query(
 
 // Synchronization: stream (blocks until stream idle).
 iree_status_t iree_hal_streaming_stream_synchronize(
+    iree_hal_streaming_stream_t* stream);
+
+// Wait for already-submitted work on this stream to complete.
+// Does NOT flush in-progress recordings - safe to call from other threads.
+iree_status_t iree_hal_streaming_stream_wait_submitted(
     iree_hal_streaming_stream_t* stream);
 
 // Waits for an event on a stream.

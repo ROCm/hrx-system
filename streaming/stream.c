@@ -33,6 +33,7 @@ iree_status_t iree_hal_streaming_stream_create(
   stream->command_buffer = NULL;
   stream->timeline_semaphore = NULL;
   stream->pending_value = 0;
+  stream->submitted_value = 0;
   stream->completed_value = 0;
   stream->queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
   stream->recorded_events = NULL;
@@ -73,13 +74,19 @@ static void iree_hal_streaming_stream_destroy(
     iree_hal_streaming_stream_t* stream) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  // Capture and clear context pointer to prevent re-entry during unregister.
+  iree_hal_streaming_context_t* context = stream->context;
+  stream->context = NULL;
+
   // Synchronize stream before cleanup to ensure all operations complete.
   // This is important to avoid leaking resources from pending operations.
   iree_status_ignore(iree_hal_streaming_stream_synchronize(stream));
 
   // Unregister from context before cleanup.
-  if (stream->context) {
-    iree_hal_streaming_context_unregister_stream(stream->context, stream);
+  // Note: We already cleared stream->context, so if unregister tries to
+  // release and that triggers another destroy, it will be a no-op.
+  if (context) {
+    iree_hal_streaming_context_unregister_stream(context, stream);
   }
 
   // Clean up recorded events.
@@ -126,6 +133,8 @@ iree_status_t iree_hal_streaming_stream_begin(
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_slim_mutex_lock(&stream->mutex);
 
+  iree_status_t status = iree_ok_status();
+
   // Create command buffer if not already created.
   // Note that we set UNRETAINED as we ensure the resources we have to track are
   // retained at the graph exec level and CUDA/HIP don't make any statements
@@ -135,17 +144,21 @@ iree_status_t iree_hal_streaming_stream_begin(
   // ALLOW_INLINE_EXECUTION. I'm not exactly sure how to maintain that, though,
   // so for now we err on the side of deferring.
   if (!stream->command_buffer) {
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_command_buffer_create(
-                stream->context->device,
-                IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT |
-                    IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED,
-                IREE_HAL_COMMAND_CATEGORY_ANY, stream->queue_affinity,
-                /*binding_capacity=*/0, &stream->command_buffer));
+    status = iree_hal_command_buffer_create(
+        stream->context->device,
+        IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT |
+            IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED,
+        IREE_HAL_COMMAND_CATEGORY_ANY, stream->queue_affinity,
+        /*binding_capacity=*/0, &stream->command_buffer);
+    if (!iree_status_is_ok(status)) {
+      iree_slim_mutex_unlock(&stream->mutex);
+      IREE_TRACE_ZONE_END(z0);
+      return status;
+    }
   }
 
   // Begin recording.
-  iree_status_t status = iree_hal_command_buffer_begin(stream->command_buffer);
+  status = iree_hal_command_buffer_begin(stream->command_buffer);
 
   iree_slim_mutex_unlock(&stream->mutex);
   IREE_TRACE_ZONE_END(z0);
@@ -161,8 +174,12 @@ iree_status_t iree_hal_streaming_stream_flush(
   iree_status_t status = iree_ok_status();
   if (stream->command_buffer) {
     // End recording and submit command buffer.
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_command_buffer_end(stream->command_buffer));
+    status = iree_hal_command_buffer_end(stream->command_buffer);
+    if (!iree_status_is_ok(status)) {
+      iree_slim_mutex_unlock(&stream->mutex);
+      IREE_TRACE_ZONE_END(z0);
+      return status;
+    }
 
     // Use the completed value as wait to ensure sequential execution.
     uint64_t wait_value = stream->completed_value;
@@ -190,6 +207,11 @@ iree_status_t iree_hal_streaming_stream_flush(
         stream->context->device, queue_affinity, wait_semaphores,
         signal_semaphores, stream->command_buffer,
         iree_hal_buffer_binding_table_empty(), IREE_HAL_EXECUTE_FLAG_NONE);
+
+    // Track the submitted value for wait_submitted.
+    if (iree_status_is_ok(status)) {
+      stream->submitted_value = stream->pending_value;
+    }
 
     // Release command buffer (we're done with it).
     iree_hal_command_buffer_release(stream->command_buffer);
@@ -240,6 +262,25 @@ iree_status_t iree_hal_streaming_stream_synchronize(
                 stream->timeline_semaphore, stream->pending_value,
                 iree_infinite_timeout(), IREE_HAL_WAIT_FLAG_DEFAULT));
     stream->completed_value = stream->pending_value;
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_streaming_stream_wait_submitted(
+    iree_hal_streaming_stream_t* stream) {
+  IREE_ASSERT_ARGUMENT(stream);
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  // Wait for already-submitted work to complete WITHOUT flushing.
+  // This is safe to call from other threads as it doesn't modify stream state.
+  // We wait for submitted_value (the last value that was actually submitted).
+  if (stream->submitted_value > 0) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_hal_semaphore_wait(
+                stream->timeline_semaphore, stream->submitted_value,
+                iree_infinite_timeout(), IREE_HAL_WAIT_FLAG_DEFAULT));
   }
 
   IREE_TRACE_ZONE_END(z0);

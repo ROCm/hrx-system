@@ -175,16 +175,29 @@ static void iree_hal_streaming_context_destroy(
   // Free buffer mapping table.
   iree_hal_streaming_buffer_table_free(context->buffer_table);
 
-  // Release default stream FIRST before cleaning up stream list.
-  if (context->default_stream) {
-    iree_hal_streaming_stream_release(context->default_stream);
-    context->default_stream = NULL;
+  // Release default stream.
+  // This releases the context's reference but not the list's reference.
+  iree_hal_streaming_stream_t* default_stream = context->default_stream;
+  context->default_stream = NULL;
+
+  // Unregister all remaining streams.
+  // This releases the list's references, which may trigger stream destruction.
+  while (context->stream_count > 0) {
+    iree_hal_streaming_stream_t* stream = context->streams[0];
+    // Clear context pointer to prevent unregister from being called again
+    // during stream destruction.
+    stream->context = NULL;
+    // Remove from list (swap with last).
+    context->streams[0] = context->streams[context->stream_count - 1];
+    --context->stream_count;
+    // Release the list's reference.
+    iree_hal_streaming_stream_release(stream);
   }
 
-  // Assert all streams have been unregistered.
-  IREE_ASSERT_EQ(context->stream_count, 0,
-                 "context destroyed with %u streams still registered",
-                 context->stream_count);
+  // Now release the context's reference to default stream.
+  if (default_stream) {
+    iree_hal_streaming_stream_release(default_stream);
+  }
 
   // Free stream tracking resources.
   if (context->streams) {
@@ -585,7 +598,9 @@ iree_status_t iree_hal_streaming_context_register_stream(
   }
 
   if (iree_status_is_ok(status)) {
-    context->streams[context->stream_count++] = stream;  // Non-owning.
+    // Retain the stream - the context's stream list owns a reference.
+    iree_hal_streaming_stream_retain(stream);
+    context->streams[context->stream_count++] = stream;
   }
 
   iree_slim_mutex_unlock(&context->stream_list_mutex);
@@ -600,6 +615,7 @@ void iree_hal_streaming_context_unregister_stream(
   if (!context || !stream) return;
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  bool found = false;
   iree_slim_mutex_lock(&context->stream_list_mutex);
 
   for (iree_host_size_t i = 0; i < context->stream_count; ++i) {
@@ -607,11 +623,19 @@ void iree_hal_streaming_context_unregister_stream(
       // Swap with last and remove.
       context->streams[i] = context->streams[context->stream_count - 1];
       --context->stream_count;
+      found = true;
       break;
     }
   }
 
   iree_slim_mutex_unlock(&context->stream_list_mutex);
+
+  // Release the list's reference to the stream.
+  // This is safe because stream->context was cleared before calling unregister,
+  // so if this release triggers destroy, it won't try to unregister again.
+  if (found) {
+    iree_hal_streaming_stream_release(stream);
+  }
 
   IREE_TRACE_ZONE_END(z0);
 }
@@ -625,17 +649,27 @@ iree_status_t iree_hal_streaming_context_wait_idle(
   // thread comes in and tries to delete the stream.
   iree_slim_mutex_lock(&context->stream_list_mutex);
   const iree_host_size_t count = context->stream_count;
-  iree_hal_streaming_stream_t** temp_streams =
-      (iree_hal_streaming_stream_t**)iree_alloca(sizeof(temp_streams[0]) *
-                                                 count);
-  for (iree_host_size_t i = 0; i < count; ++i) {
-    temp_streams[i] = context->streams[i];
-    iree_hal_streaming_stream_retain(temp_streams[i]);
+  iree_hal_streaming_stream_t** temp_streams = NULL;
+  iree_status_t status = iree_ok_status();
+  if (count > 0) {
+    status = iree_allocator_malloc(context->host_allocator,
+                                   sizeof(temp_streams[0]) * count,
+                                   (void**)&temp_streams);
+    if (iree_status_is_ok(status)) {
+      for (iree_host_size_t i = 0; i < count; ++i) {
+        temp_streams[i] = context->streams[i];
+        iree_hal_streaming_stream_retain(temp_streams[i]);
+      }
+    }
   }
   iree_slim_mutex_unlock(&context->stream_list_mutex);
 
+  if (!iree_status_is_ok(status)) {
+    IREE_TRACE_ZONE_END(z0);
+    return status;
+  }
+
   // Synchronize all streams. Bail on the first failure.
-  iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; iree_status_is_ok(status) && i < count; ++i) {
     status = iree_hal_streaming_stream_synchronize(temp_streams[i]);
   }
@@ -643,6 +677,10 @@ iree_status_t iree_hal_streaming_context_wait_idle(
   // Release temporary references.
   for (iree_host_size_t i = 0; i < count; ++i) {
     iree_hal_streaming_stream_release(temp_streams[i]);
+  }
+
+  if (temp_streams) {
+    iree_allocator_free(context->host_allocator, temp_streams);
   }
 
   IREE_TRACE_ZONE_END(z0);
@@ -656,21 +694,113 @@ iree_status_t iree_hal_streaming_context_synchronize(
 
   // Synchronize all registered streams.
   // Per CUDA/HIP semantics, hipDeviceSynchronize waits for all streams.
+  // Make a copy of stream pointers and retain them to avoid use-after-free
+  // if another thread destroys a stream while we're synchronizing.
   iree_slim_mutex_lock(&context->stream_list_mutex);
-  for (iree_host_size_t i = 0; i < context->stream_count; ++i) {
-    iree_hal_streaming_stream_t* stream = context->streams[i];
-    if (stream) {
-      iree_status_t status = iree_hal_streaming_stream_synchronize(stream);
-      if (!iree_status_is_ok(status)) {
-        iree_slim_mutex_unlock(&context->stream_list_mutex);
-        IREE_TRACE_ZONE_END(z0);
-        return status;
+  const iree_host_size_t count = context->stream_count;
+  iree_hal_streaming_stream_t** streams_copy = NULL;
+  iree_status_t status = iree_ok_status();
+  if (count > 0) {
+    status = iree_allocator_malloc(context->host_allocator,
+                                   sizeof(streams_copy[0]) * count,
+                                   (void**)&streams_copy);
+    if (iree_status_is_ok(status)) {
+      for (iree_host_size_t i = 0; i < count; ++i) {
+        streams_copy[i] = context->streams[i];
+        if (streams_copy[i]) {
+          iree_hal_streaming_stream_retain(streams_copy[i]);
+        }
       }
     }
   }
   iree_slim_mutex_unlock(&context->stream_list_mutex);
 
+  if (!iree_status_is_ok(status)) {
+    IREE_TRACE_ZONE_END(z0);
+    return status;
+  }
+
+  // Synchronize all streams (now safe since we hold references).
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    if (streams_copy[i]) {
+      if (iree_status_is_ok(status)) {
+        status = iree_hal_streaming_stream_synchronize(streams_copy[i]);
+      }
+      iree_hal_streaming_stream_release(streams_copy[i]);
+    }
+  }
+
+  if (streams_copy) {
+    iree_allocator_free(context->host_allocator, streams_copy);
+  }
+
+  if (!iree_status_is_ok(status)) {
+    IREE_TRACE_ZONE_END(z0);
+    return status;
+  }
+
   // Also synchronize the default stream (which may not be in the streams list).
+  if (context->default_stream) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_hal_streaming_stream_synchronize(context->default_stream));
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_streaming_context_wait_all_submitted(
+    iree_hal_streaming_context_t* context) {
+  IREE_ASSERT_ARGUMENT(context);
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  // Wait for all already-submitted work on all streams WITHOUT flushing.
+  // This is safe to call from any thread and won't interfere with other
+  // threads' in-progress recordings.
+  iree_slim_mutex_lock(&context->stream_list_mutex);
+  const iree_host_size_t count = context->stream_count;
+  iree_hal_streaming_stream_t** streams_copy = NULL;
+  iree_status_t status = iree_ok_status();
+  if (count > 0) {
+    status = iree_allocator_malloc(context->host_allocator,
+                                   sizeof(streams_copy[0]) * count,
+                                   (void**)&streams_copy);
+    if (iree_status_is_ok(status)) {
+      for (iree_host_size_t i = 0; i < count; ++i) {
+        streams_copy[i] = context->streams[i];
+        if (streams_copy[i]) {
+          iree_hal_streaming_stream_retain(streams_copy[i]);
+        }
+      }
+    }
+  }
+  iree_slim_mutex_unlock(&context->stream_list_mutex);
+
+  if (!iree_status_is_ok(status)) {
+    IREE_TRACE_ZONE_END(z0);
+    return status;
+  }
+
+  // Wait for submitted work on all streams (doesn't flush).
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    if (streams_copy[i]) {
+      if (iree_status_is_ok(status)) {
+        status = iree_hal_streaming_stream_wait_submitted(streams_copy[i]);
+      }
+      iree_hal_streaming_stream_release(streams_copy[i]);
+    }
+  }
+
+  if (streams_copy) {
+    iree_allocator_free(context->host_allocator, streams_copy);
+  }
+
+  if (!iree_status_is_ok(status)) {
+    IREE_TRACE_ZONE_END(z0);
+    return status;
+  }
+
+  // For the default stream, synchronize fully since caller needs it complete.
   if (context->default_stream) {
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
         z0, iree_hal_streaming_stream_synchronize(context->default_stream));

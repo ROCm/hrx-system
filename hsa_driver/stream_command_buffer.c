@@ -194,6 +194,9 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_execution_barrier(
 
   // HSA uses AQL packets with barriers - for now we use signal-based sync.
   // Wait for all previous work to complete.
+  // Lock mutex to protect completion signal from concurrent access.
+  iree_slim_mutex_lock(&command_buffer->device_info->completion_signal_mutex);
+  
   command_buffer->hsa_symbols->hsa_signal_store_screlease(
       command_buffer->device_info->completion_signal, 1);
 
@@ -203,6 +206,7 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_execution_barrier(
       command_buffer->device_info->completion_signal, HSA_SIGNAL_CONDITION_EQ,
       0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
 
+  iree_slim_mutex_unlock(&command_buffer->device_info->completion_signal_mutex);
   return iree_ok_status();
 }
 
@@ -323,6 +327,9 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_copy_buffer(
   void* target_ptr = (uint8_t*)target_device_buffer + target_offset;
 
   // Use async copy with completion signal.
+  // Lock mutex to protect completion signal from concurrent access.
+  iree_slim_mutex_lock(&command_buffer->device_info->completion_signal_mutex);
+  
   hsa_signal_t completion_signal =
       command_buffer->device_info->completion_signal;
   command_buffer->hsa_symbols->hsa_signal_store_screlease(completion_signal, 1);
@@ -341,6 +348,7 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_copy_buffer(
         HSA_WAIT_STATE_BLOCKED);
   }
 
+  iree_slim_mutex_unlock(&command_buffer->device_info->completion_signal_mutex);
   return status;
 }
 
@@ -631,6 +639,9 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
   packet->kernarg_address = kernarg_address;
 
   // Set up completion signal.
+  // Lock mutex to protect completion signal from concurrent access.
+  iree_slim_mutex_lock(&command_buffer->device_info->completion_signal_mutex);
+  
   hsa_signal_t completion_signal =
       command_buffer->device_info->completion_signal;
   command_buffer->hsa_symbols->hsa_signal_store_screlease(completion_signal, 1);
@@ -658,6 +669,8 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
   command_buffer->hsa_symbols->hsa_signal_wait_scacquire(
       completion_signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX,
       HSA_WAIT_STATE_BLOCKED);
+  
+  iree_slim_mutex_unlock(&command_buffer->device_info->completion_signal_mutex);
 
   // Free kernarg memory.
   if (kernarg_address) {

@@ -37,7 +37,9 @@ typedef struct iree_hal_hsa_per_device_info_t {
   bool kernarg_memory_pool_valid;
 
   // Completion signal for synchronization.
+  // Protected by completion_signal_mutex for thread-safety.
   hsa_signal_t completion_signal;
+  iree_slim_mutex_t completion_signal_mutex;
 
   // Tracing context for this device.
   iree_hal_stream_tracing_context_t* tracing_context;

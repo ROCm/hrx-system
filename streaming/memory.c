@@ -266,10 +266,11 @@ iree_status_t iree_hal_streaming_memory_free_device(
   if (!ptr) return iree_ok_status();
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  // Synchronize context to ensure all operations using this memory complete.
-  // This matches CUDA/HIP behavior where free operations are blocking.
+  // Wait for all submitted work to complete before freeing.
+  // We use wait_all_submitted instead of synchronize to avoid flushing
+  // other threads' in-progress recordings.
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_streaming_context_synchronize(context));
+      z0, iree_hal_streaming_context_wait_all_submitted(context));
 
   // Look up buffer from device pointer.
   iree_hal_streaming_buffer_t* wrapper = NULL;
@@ -357,10 +358,11 @@ iree_status_t iree_hal_streaming_memory_free_host(
   if (!ptr) return iree_ok_status();
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  // Synchronize context to ensure all operations using this memory complete.
-  // This matches CUDA/HIP behavior where free operations are blocking.
+  // Wait for all submitted work to complete before freeing.
+  // We use wait_all_submitted instead of synchronize to avoid flushing
+  // other threads' in-progress recordings.
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_streaming_context_synchronize(context));
+      z0, iree_hal_streaming_context_wait_all_submitted(context));
 
   // For host memory, we need to find the buffer by host pointer.
   // Since we store host pointers as device pointers for host allocations,
