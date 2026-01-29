@@ -835,13 +835,14 @@ typedef struct hipMemcpy3DParms {
 } hipMemcpy3DParms;
 
 // Memset node parameters.
+// NOTE: Field order must match HIP API exactly.
 typedef struct hipMemsetParams {
   void* dst;                 // Destination pointer.
-  unsigned int value;        // Value to set.
   unsigned int elementSize;  // Element size (1, 2, or 4 bytes).
-  size_t width;              // Width in elements.
   size_t height;             // Height in elements.
   size_t pitch;              // Pitch in bytes.
+  unsigned int value;        // Value to set.
+  size_t width;              // Width in elements.
 } hipMemsetParams;
 
 // Host node parameters.
