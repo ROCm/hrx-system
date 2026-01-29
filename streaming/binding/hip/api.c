@@ -9678,6 +9678,59 @@ HIPAPI hipError_t hipGraphAddMemcpyNode(hipGraphNode_t* pGraphNode,
   return hipSuccess;
 }
 
+// Adds a 1D memory copy node to a graph.
+//
+// Parameters:
+//  - pGraphNode: [OUT] Pointer to receive the created node handle.
+//  - graph: [IN] Graph to add the node to.
+//  - pDependencies: [IN] Array of nodes this node depends on (can be NULL).
+//  - numDependencies: [IN] Number of dependencies.
+//  - dst: [IN] Destination memory address.
+//  - src: [IN] Source memory address.
+//  - count: [IN] Number of bytes to copy.
+//  - kind: [IN] Type of transfer (host/device).
+//
+// Returns:
+//  - hipSuccess: Node added successfully.
+//  - hipErrorInvalidValue: Invalid parameters.
+//
+// See also: hipGraphAddMemcpyNode.
+HIPAPI hipError_t hipGraphAddMemcpyNode1D(hipGraphNode_t* pGraphNode,
+                                          hipGraph_t graph,
+                                          const hipGraphNode_t* pDependencies,
+                                          size_t numDependencies, void* dst,
+                                          const void* src, size_t count,
+                                          hipMemcpyKind kind) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  if (!pGraphNode || !graph || !dst || !src) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  iree_hal_streaming_graph_t* stream_graph = (iree_hal_streaming_graph_t*)graph;
+
+  // Convert dependencies.
+  iree_hal_streaming_graph_node_t** deps =
+      (numDependencies > 0 && pDependencies)
+          ? (iree_hal_streaming_graph_node_t**)pDependencies
+          : NULL;
+
+  // Add memcpy node to graph.
+  iree_hal_streaming_graph_node_t* node = NULL;
+  HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
+      z0,
+      iree_hal_streaming_graph_add_memcpy_node(
+          stream_graph, deps, numDependencies,
+          (iree_hal_streaming_deviceptr_t)dst,
+          (iree_hal_streaming_deviceptr_t)src, count, &node),
+      hipErrorInvalidValue);
+
+  *pGraphNode = (hipGraphNode_t)node;
+  IREE_TRACE_ZONE_END(z0);
+  return hipSuccess;
+}
+
 // Adds a memory set node to a graph.
 //
 // Parameters:

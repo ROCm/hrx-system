@@ -1195,6 +1195,12 @@ HIPAPI hipError_t hipGraphAddMemcpyNode(hipGraphNode_t* pGraphNode,
                                         const hipGraphNode_t* pDependencies,
                                         size_t numDependencies,
                                         const void* pCopyParams);
+HIPAPI hipError_t hipGraphAddMemcpyNode1D(hipGraphNode_t* pGraphNode,
+                                          hipGraph_t graph,
+                                          const hipGraphNode_t* pDependencies,
+                                          size_t numDependencies, void* dst,
+                                          const void* src, size_t count,
+                                          hipMemcpyKind kind);
 HIPAPI hipError_t hipGraphAddMemsetNode(hipGraphNode_t* pGraphNode,
                                         hipGraph_t graph,
                                         const hipGraphNode_t* pDependencies,
