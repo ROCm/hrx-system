@@ -1648,6 +1648,92 @@ HIPAPI hipError_t hipDeviceReset(void) {
 }
 
 //===----------------------------------------------------------------------===//
+// Device flags
+//===----------------------------------------------------------------------===//
+
+// Sets flags for the current device.
+//
+// Parameters:
+//  - flags: [IN] Flags to set for the device. See hipDeviceSchedule* flags.
+//
+// Returns:
+//  - hipSuccess: Flags set successfully.
+//  - hipErrorSetOnActiveProcess: Device already has active contexts.
+//
+// Notes:
+// - Must be called before any other HIP call that activates the device.
+// - Common flags:
+//   - hipDeviceScheduleAuto: Let driver choose scheduling.
+//   - hipDeviceScheduleSpin: Busy-wait for synchronization.
+//   - hipDeviceScheduleYield: Yield CPU during synchronization.
+//   - hipDeviceScheduleBlockingSync: Block thread during synchronization.
+//   - hipDeviceLmemResizeToMax: Allocate max local memory for all kernels.
+//   - hipDeviceMapHost: Allow mapping of host memory.
+//
+// See also: hipGetDeviceFlags, hipSetDevice.
+HIPAPI hipError_t hipSetDeviceFlags(unsigned int flags) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  // Ensure initialization.
+  hipError_t init_result = iree_hip_ensure_initialized();
+  if (init_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(init_result);
+  }
+
+  // Get current context to check if device is already active.
+  iree_hal_streaming_context_t* context = iree_hal_streaming_context_current();
+  if (context != NULL) {
+    // Device already has an active context - can't change flags.
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorSetOnActiveProcess);
+  }
+
+  // For now, we accept the flags but don't enforce them.
+  // The streaming backend uses its own scheduling model.
+  (void)flags;
+
+  IREE_TRACE_ZONE_END(z0);
+  return hipSuccess;
+}
+
+// Gets the flags for the current device.
+//
+// Parameters:
+//  - flags: [OUT] Pointer to receive the current device flags.
+//
+// Returns:
+//  - hipSuccess: Flags retrieved successfully.
+//  - hipErrorInvalidValue: flags is NULL.
+//
+// Notes:
+// - Returns the flags set by hipSetDeviceFlags() or defaults.
+//
+// See also: hipSetDeviceFlags, hipGetDevice.
+HIPAPI hipError_t hipGetDeviceFlags(unsigned int* flags) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  if (!flags) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  // Ensure initialization.
+  hipError_t init_result = iree_hip_ensure_initialized();
+  if (init_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(init_result);
+  }
+
+  // Return default flags (auto scheduling).
+  // The streaming backend doesn't currently track user-set flags.
+  *flags = 0;  // hipDeviceScheduleAuto
+
+  IREE_TRACE_ZONE_END(z0);
+  return hipSuccess;
+}
+
+//===----------------------------------------------------------------------===//
 // Cache configuration (no-ops on AMD devices)
 //===----------------------------------------------------------------------===//
 

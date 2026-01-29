@@ -881,6 +881,8 @@ HIPAPI hipError_t hipDeviceGetStreamPriorityRange(int* leastPriority,
                                                    int* greatestPriority);
 HIPAPI hipError_t hipDeviceSynchronize(void);
 HIPAPI hipError_t hipDeviceReset(void);
+HIPAPI hipError_t hipSetDeviceFlags(unsigned int flags);
+HIPAPI hipError_t hipGetDeviceFlags(unsigned int* flags);
 
 // Primary context
 HIPAPI hipError_t hipDevicePrimaryCtxRetain(hipCtx_t* pctx, hipDevice_t dev);
