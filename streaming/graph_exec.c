@@ -775,6 +775,17 @@ iree_status_t iree_hal_streaming_graph_exec_instantiate_locked(
                               exec->block_count * sizeof(*exec->blocks),
                               (void**)&exec->blocks));
 
+  // Handle empty graph case.
+  if (schedule.partition_count == 0) {
+    exec->block_count = 0;
+    exec->blocks = NULL;
+    exec->semaphore_count = 0;
+    exec->semaphores = NULL;
+    exec->semaphore_base_values = NULL;
+    IREE_TRACE_ZONE_END(z0);
+    return iree_ok_status();
+  }
+
   // Calculate semaphore count needed.
   // We need semaphores at partition boundaries for synchronization.
   // Multi-stream partitions need join semaphores.
@@ -783,13 +794,15 @@ iree_status_t iree_hal_streaming_graph_exec_instantiate_locked(
   // we can use timelines to advance between them?
   // this is bad
   uint32_t semaphore_count = 0;
-  for (iree_host_size_t i = 0; i < schedule.partition_count - 1; i++) {
-    if (schedule.partitions[i].stream_count > 1) {
-      // Multi-stream partition needs one semaphore per stream for join.
-      semaphore_count += schedule.partitions[i].stream_count;
-    } else {
-      // Single stream needs one semaphore.
-      semaphore_count += 1;
+  if (schedule.partition_count > 1) {
+    for (iree_host_size_t i = 0; i < schedule.partition_count - 1; i++) {
+      if (schedule.partitions[i].stream_count > 1) {
+        // Multi-stream partition needs one semaphore per stream for join.
+        semaphore_count += schedule.partitions[i].stream_count;
+      } else {
+        // Single stream needs one semaphore.
+        semaphore_count += 1;
+      }
     }
   }
   exec->semaphore_count = semaphore_count;
@@ -985,6 +998,12 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
   IREE_ASSERT_ARGUMENT(exec);
   IREE_ASSERT_ARGUMENT(stream);
   IREE_TRACE_ZONE_BEGIN(z0);
+
+  // Handle empty graph - nothing to do.
+  if (exec->block_count == 0) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_ok_status();
+  }
 
   // Flush stream to ensure all prior operations are submitted.
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0,
