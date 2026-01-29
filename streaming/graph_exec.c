@@ -761,9 +761,12 @@ iree_status_t iree_hal_streaming_graph_exec_instantiate_locked(
 
   // Use the new scheduler to analyze and partition the graph.
   iree_hal_streaming_graph_schedule_t schedule;
+  iree_hal_streaming_graph_edge_t* additional_edges =
+      exec->graph ? exec->graph->additional_edges : NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_streaming_graph_schedule_nodes(
-              node_blocks, node_count, &exec->arena_allocator, &schedule));
+              node_blocks, node_count, additional_edges, &exec->arena_allocator,
+              &schedule));
 
   // Allocate block array.
   exec->block_count = schedule.block_count;

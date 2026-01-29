@@ -145,7 +145,8 @@ IREE_BENCHMARK_FN(BM_GraphSchedule_Linear) {
     // Schedule the nodes using the graph's internal node blocks.
     iree_hal_streaming_graph_schedule_t schedule = {};
     IREE_RETURN_IF_ERROR(iree_hal_streaming_graph_schedule_nodes(
-        graph->node_blocks, graph->node_count, &arena, &schedule));
+        graph->node_blocks, graph->node_count, graph->additional_edges, &arena,
+        &schedule));
 
     iree_optimization_barrier(&schedule);
     iree_arena_deinitialize(&arena);
@@ -197,7 +198,8 @@ IREE_BENCHMARK_FN(BM_GraphSchedule_Fanout) {
     // Schedule the nodes using the graph's internal node blocks.
     iree_hal_streaming_graph_schedule_t schedule = {};
     IREE_RETURN_IF_ERROR(iree_hal_streaming_graph_schedule_nodes(
-        graph->node_blocks, graph->node_count, &arena, &schedule));
+        graph->node_blocks, graph->node_count, graph->additional_edges, &arena,
+        &schedule));
 
     iree_optimization_barrier(&schedule);
     iree_arena_deinitialize(&arena);
@@ -247,7 +249,8 @@ IREE_BENCHMARK_FN(BM_GraphSchedule_Diamond) {
     // Schedule the nodes using the graph's internal node blocks.
     iree_hal_streaming_graph_schedule_t schedule = {};
     IREE_RETURN_IF_ERROR(iree_hal_streaming_graph_schedule_nodes(
-        graph->node_blocks, graph->node_count, &arena, &schedule));
+        graph->node_blocks, graph->node_count, graph->additional_edges, &arena,
+        &schedule));
 
     iree_optimization_barrier(&schedule);
     iree_arena_deinitialize(&arena);
@@ -296,7 +299,8 @@ IREE_BENCHMARK_FN(BM_GraphSchedule_Mixed) {
     // Schedule the nodes using the graph's internal node blocks.
     iree_hal_streaming_graph_schedule_t schedule = {};
     IREE_RETURN_IF_ERROR(iree_hal_streaming_graph_schedule_nodes(
-        graph->node_blocks, graph->node_count, &arena, &schedule));
+        graph->node_blocks, graph->node_count, graph->additional_edges, &arena,
+        &schedule));
 
     iree_optimization_barrier(&schedule);
     iree_arena_deinitialize(&arena);
@@ -346,7 +350,8 @@ IREE_BENCHMARK_FN(BM_GraphSchedule_Interleaved) {
     // Schedule the nodes using the graph's internal node blocks.
     iree_hal_streaming_graph_schedule_t schedule = {};
     IREE_RETURN_IF_ERROR(iree_hal_streaming_graph_schedule_nodes(
-        graph->node_blocks, graph->node_count, &arena, &schedule));
+        graph->node_blocks, graph->node_count, graph->additional_edges, &arena,
+        &schedule));
 
     iree_optimization_barrier(&schedule);
     iree_arena_deinitialize(&arena);

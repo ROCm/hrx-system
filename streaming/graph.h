@@ -26,6 +26,13 @@ typedef struct iree_hal_streaming_node_block_t {
   iree_hal_streaming_graph_node_t* nodes[];
 } iree_hal_streaming_node_block_t;
 
+// Edge structure for additional dependencies added after node creation.
+typedef struct iree_hal_streaming_graph_edge_t {
+  struct iree_hal_streaming_graph_edge_t* next;
+  iree_hal_streaming_graph_node_t* from;  // Dependency (must complete first)
+  iree_hal_streaming_graph_node_t* to;    // Dependent (waits for 'from')
+} iree_hal_streaming_graph_edge_t;
+
 // Graph structure (template).
 typedef struct iree_hal_streaming_graph_t {
   iree_atomic_ref_count_t ref_count;
@@ -43,6 +50,10 @@ typedef struct iree_hal_streaming_graph_t {
   iree_hal_streaming_node_block_t* root_blocks;
   iree_hal_streaming_node_block_t* current_root_block;
   iree_host_size_t root_count;
+
+  // Additional edges added after node creation via hipGraphAddDependencies.
+  iree_hal_streaming_graph_edge_t* additional_edges;
+  iree_host_size_t additional_edge_count;
 
   uint32_t flags;
   iree_hal_streaming_context_t* context;
@@ -142,10 +153,21 @@ typedef struct iree_hal_streaming_graph_schedule_t {
 // |out_total_block_count| is the total number of graph blocks required
 // calculated as the number of non-recordable partitions + the total number of
 // streams in all recordable partitions.
+// |additional_edges| is an optional linked list of extra dependencies added
+// after node creation (can be NULL if none).
 iree_status_t iree_hal_streaming_graph_schedule_nodes(
     iree_hal_streaming_node_block_t* node_blocks, iree_host_size_t node_count,
+    iree_hal_streaming_graph_edge_t* additional_edges,
     iree_arena_allocator_t* arena,
     iree_hal_streaming_graph_schedule_t* out_schedule);
+
+// Adds dependencies between nodes in the graph.
+// For each index i in [0, count), adds an edge from from_nodes[i] to
+// to_nodes[i], meaning to_nodes[i] will wait for from_nodes[i] to complete.
+iree_status_t iree_hal_streaming_graph_add_dependencies(
+    iree_hal_streaming_graph_t* graph,
+    iree_hal_streaming_graph_node_t** from_nodes,
+    iree_hal_streaming_graph_node_t** to_nodes, iree_host_size_t count);
 
 #ifdef __cplusplus
 }

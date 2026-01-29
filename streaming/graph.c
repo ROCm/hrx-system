@@ -466,6 +466,46 @@ iree_status_t iree_hal_streaming_graph_add_host_call_node(
   return status;
 }
 
+iree_status_t iree_hal_streaming_graph_add_dependencies(
+    iree_hal_streaming_graph_t* graph,
+    iree_hal_streaming_graph_node_t** from_nodes,
+    iree_hal_streaming_graph_node_t** to_nodes, iree_host_size_t count) {
+  IREE_ASSERT_ARGUMENT(graph);
+  if (count == 0) return iree_ok_status();
+  IREE_ASSERT_ARGUMENT(from_nodes);
+  IREE_ASSERT_ARGUMENT(to_nodes);
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    if (!from_nodes[i] || !to_nodes[i]) {
+      IREE_TRACE_ZONE_END(z0);
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "null node in dependency list at index %" PRIhsz,
+                              i);
+    }
+
+    // Allocate edge from arena.
+    iree_hal_streaming_graph_edge_t* edge = NULL;
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_allocator_malloc(graph->arena_allocator,
+                                  sizeof(iree_hal_streaming_graph_edge_t),
+                                  (void**)&edge));
+
+    edge->from = from_nodes[i];
+    edge->to = to_nodes[i];
+    edge->next = graph->additional_edges;
+    graph->additional_edges = edge;
+    ++graph->additional_edge_count;
+
+    // If 'to' node was a root (no dependencies), it's no longer a root.
+    // We need to remove it from the root blocks.
+    // For simplicity, we'll handle this during graph analysis instead.
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+  return iree_ok_status();
+}
+
 //===----------------------------------------------------------------------===//
 // iree_hal_streaming_graph_exec_t (instantiation)
 //===----------------------------------------------------------------------===//

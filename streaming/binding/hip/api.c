@@ -10224,11 +10224,32 @@ HIPAPI hipError_t hipGraphAddDependencies(hipGraph_t graph,
                                            const hipGraphNode_t* from,
                                            const hipGraphNode_t* to,
                                            size_t numDependencies) {
-  (void)graph;
-  (void)from;
-  (void)to;
-  (void)numDependencies;
-  HIP_RETURN_ERROR(hipErrorNotSupported);
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  if (!graph) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  if (numDependencies == 0) {
+    IREE_TRACE_ZONE_END(z0);
+    return hipSuccess;
+  }
+  if (!from || !to) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  iree_hal_streaming_graph_t* stream_graph = (iree_hal_streaming_graph_t*)graph;
+
+  HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
+      z0,
+      iree_hal_streaming_graph_add_dependencies(
+          stream_graph, (iree_hal_streaming_graph_node_t**)from,
+          (iree_hal_streaming_graph_node_t**)to, numDependencies),
+      hipErrorInvalidValue);
+
+  IREE_TRACE_ZONE_END(z0);
+  return hipSuccess;
 }
 
 // Removes dependencies between nodes in a graph.
@@ -10257,9 +10278,70 @@ HIPAPI hipError_t hipGraphGetEdges(hipGraph_t graph, hipGraphNode_t* from,
 HIPAPI hipError_t hipGraphGetRootNodes(hipGraph_t graph,
                                         hipGraphNode_t* pRootNodes,
                                         size_t* pNumRootNodes) {
-  (void)graph;
-  (void)pRootNodes;
-  if (pNumRootNodes) *pNumRootNodes = 0;
+  IREE_TRACE_ZONE_BEGIN(z0);
+  if (!graph || !pNumRootNodes) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  iree_hal_streaming_graph_t* stream_graph = (iree_hal_streaming_graph_t*)graph;
+
+  // First, count all nodes and build a set of nodes that have incoming edges.
+  const size_t total_nodes = iree_hal_streaming_graph_size(stream_graph);
+
+  // Iterate through all nodes to find those with no incoming dependencies.
+  // A node is a root if:
+  // 1. It has no embedded dependencies (node->dependency_count == 0)
+  // 2. It has no incoming additional edges
+
+  // Build a set of nodes that have incoming edges from additional_edges.
+  // For simplicity, we use a linear search approach for small graphs.
+  size_t root_count = 0;
+  size_t node_index = 0;
+
+  iree_hal_streaming_node_block_t* block = stream_graph->node_blocks;
+  while (block) {
+    for (size_t i = 0; i < block->count; ++i) {
+      iree_hal_streaming_graph_node_t* node = block->nodes[i];
+
+      // Check if node has any embedded dependencies.
+      if (node->dependency_count > 0) {
+        ++node_index;
+        continue;
+      }
+
+      // Check if node has any incoming additional edges.
+      bool has_incoming_edge = false;
+      iree_hal_streaming_graph_edge_t* edge = stream_graph->additional_edges;
+      while (edge) {
+        if (edge->to == node) {
+          has_incoming_edge = true;
+          break;
+        }
+        edge = edge->next;
+      }
+
+      if (!has_incoming_edge) {
+        // This is a root node.
+        if (pRootNodes && root_count < *pNumRootNodes) {
+          pRootNodes[root_count] = (hipGraphNode_t)node;
+        }
+        ++root_count;
+      }
+      ++node_index;
+    }
+    block = block->next;
+  }
+
+  // If pRootNodes is NULL, just return the count.
+  if (!pRootNodes) {
+    *pNumRootNodes = root_count;
+  } else {
+    // Return the actual number of root nodes copied.
+    *pNumRootNodes = (root_count < *pNumRootNodes) ? root_count : *pNumRootNodes;
+  }
+
+  IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
 }
 

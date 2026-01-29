@@ -207,19 +207,21 @@ static bool iree_hal_streaming_graph_prepare_nodes(
 // Fast path for already-sorted graphs (common case).
 //
 // Algorithm when sorting needed:
-// 1. Calculate in-degrees for all nodes
+// 1. Calculate in-degrees for all nodes (including additional edges)
 // 2. Queue nodes with zero in-degree
 // 3. Process queue, updating in-degrees
 // 4. Reorder array in-place using cycle detection
 //
-// Complexity: O(N + E) where E = total edges
+// Complexity: O(N + E) where E = total edges (embedded + additional)
 static iree_status_t iree_hal_streaming_graph_topological_sort(
     iree_hal_streaming_graph_sort_node_t* nodes, uint32_t node_count,
-    uint32_t* node_index_map, iree_arena_allocator_t* arena,
-    bool is_already_sorted) {
-  if (is_already_sorted) {
+    uint32_t* node_index_map, iree_hal_streaming_graph_edge_t* additional_edges,
+    iree_arena_allocator_t* arena, bool is_already_sorted) {
+  if (is_already_sorted && !additional_edges) {
     // Fast path: just compute max dependencies.
     // This is needed for partition boundary detection.
+    // Note: Cannot use fast path if there are additional edges since they
+    // may change the order.
     for (uint32_t i = 0; i < node_count; ++i) {
       uint32_t max_dep = 0;
       for (uint32_t j = 0; j < nodes[i].node->dependency_count; ++j) {
@@ -240,9 +242,20 @@ static iree_status_t iree_hal_streaming_graph_topological_sort(
   const iree_host_size_t queue_size = node_count * sizeof(*queue);
   IREE_RETURN_IF_ERROR(iree_arena_allocate(arena, queue_size, (void**)&queue));
 
-  // Step 1: Calculate in-degrees.
+  // Step 1: Calculate in-degrees from embedded dependencies.
   for (uint32_t i = 0; i < node_count; ++i) {
     nodes[i].in_degree = (uint16_t)nodes[i].node->dependency_count;
+  }
+
+  // Step 1b: Add in-degrees from additional edges.
+  iree_hal_streaming_graph_edge_t* edge = additional_edges;
+  while (edge) {
+    // Find the 'to' node in our nodes array and increment its in-degree.
+    uint32_t to_index = node_index_map[edge->to->node_index];
+    if (to_index < node_count) {
+      ++nodes[to_index].in_degree;
+    }
+    edge = edge->next;
   }
 
   // Step 2: Find zero in-degree nodes.
@@ -260,7 +273,7 @@ static iree_status_t iree_hal_streaming_graph_topological_sort(
     uint32_t current = queue[queue_head++];
     nodes[current].sorted_index = sorted_count++;
 
-    // Update max dependency for this node.
+    // Update max dependency for this node from embedded dependencies.
     uint32_t max_dep = 0;
     for (uint32_t j = 0; j < nodes[current].node->dependency_count; ++j) {
       // Use the mapping for O(1) lookup.
@@ -271,10 +284,24 @@ static iree_status_t iree_hal_streaming_graph_topological_sort(
         max_dep = iree_max(max_dep, dep_sorted_index);
       }
     }
+
+    // Also check additional edges for max dependency.
+    edge = additional_edges;
+    while (edge) {
+      if (edge->to == nodes[current].node) {
+        uint32_t from_index = node_index_map[edge->from->node_index];
+        if (from_index != UINT32_MAX) {
+          uint32_t from_sorted_index = nodes[from_index].sorted_index;
+          max_dep = iree_max(max_dep, from_sorted_index);
+        }
+      }
+      edge = edge->next;
+    }
     nodes[current].max_dependency_index = max_dep;
 
     // Decrement in-degrees of nodes that depend on current.
     // This requires finding reverse edges (who depends on current).
+    // First check embedded dependencies.
     for (uint32_t i = 0; i < node_count; ++i) {
       if (i == current) continue;
       iree_hal_streaming_graph_node_t* node = nodes[i].node;
@@ -286,6 +313,20 @@ static iree_status_t iree_hal_streaming_graph_topological_sort(
           break;  // Each node appears at most once in dependency list.
         }
       }
+    }
+
+    // Also check additional edges for reverse dependencies.
+    edge = additional_edges;
+    while (edge) {
+      if (edge->from == nodes[current].node) {
+        uint32_t to_index = node_index_map[edge->to->node_index];
+        if (to_index < node_count && to_index != current) {
+          if (--nodes[to_index].in_degree == 0) {
+            queue[queue_tail++] = to_index;
+          }
+        }
+      }
+      edge = edge->next;
     }
   }
 
@@ -524,6 +565,7 @@ static iree_uint32x2_t iree_hal_streaming_graph_partition_with_streams(
 
 iree_status_t iree_hal_streaming_graph_schedule_nodes(
     iree_hal_streaming_node_block_t* node_blocks, iree_host_size_t node_count,
+    iree_hal_streaming_graph_edge_t* additional_edges,
     iree_arena_allocator_t* arena,
     iree_hal_streaming_graph_schedule_t* out_schedule) {
   IREE_ASSERT_ARGUMENT(out_schedule);
@@ -556,7 +598,8 @@ iree_status_t iree_hal_streaming_graph_schedule_nodes(
   // Phase 2: Sort - topological ordering.
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_streaming_graph_topological_sort(
-              sorted_nodes, node_count, node_index_map, arena, is_sorted));
+              sorted_nodes, node_count, node_index_map, additional_edges, arena,
+              is_sorted));
 
   // TODO: try to avoid allocating an O(node) partition capacity? We could use
   // linked blocks, though it does make walking the partitions slightly more
