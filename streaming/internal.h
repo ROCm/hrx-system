@@ -464,7 +464,11 @@ typedef struct iree_hal_streaming_parameter_copy_op_t {
 
 // Binding resolve operation: lookup and construct iree_hal_buffer_ref_t.
 typedef struct iree_hal_streaming_parameter_resolve_op_t {
-  uint32_t reserved;
+  // Destination offset in constants buffer for native kernels.
+  // For native kernels with CUSTOM_DIRECT_ARGUMENTS, pointers are copied
+  // directly to the constants buffer at this offset.
+  uint16_t dst_offset;
+  uint16_t reserved;
   // Source offset in parameters buffer, in bytes.
   uint16_t src_offset;
   // Source binding ordinal (for parameter arrays);

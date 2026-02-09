@@ -152,6 +152,25 @@ typedef struct iree_hal_hip_kernel_param_t {
   uint8_t type;     // Parameter type (0=value, 1=pointer, etc.)
 } iree_hal_hip_kernel_param_t;
 
+// Hidden argument offsets for native HIP kernels.
+// These are filled in from kernel metadata during fat binary parsing.
+// An offset of UINT32_MAX means the hidden arg is not used by this kernel.
+typedef struct iree_hal_hip_hidden_args_t {
+  uint32_t block_count_x;   // hidden_block_count_x offset (uint32_t)
+  uint32_t block_count_y;   // hidden_block_count_y offset (uint32_t)
+  uint32_t block_count_z;   // hidden_block_count_z offset (uint32_t)
+  uint32_t group_size_x;    // hidden_group_size_x offset (uint16_t)
+  uint32_t group_size_y;    // hidden_group_size_y offset (uint16_t)
+  uint32_t group_size_z;    // hidden_group_size_z offset (uint16_t)
+  uint32_t remainder_x;     // hidden_remainder_x offset (uint16_t)
+  uint32_t remainder_y;     // hidden_remainder_y offset (uint16_t)
+  uint32_t remainder_z;     // hidden_remainder_z offset (uint16_t)
+  uint32_t grid_dims;       // hidden_grid_dims offset (uint16_t)
+  uint32_t global_offset_x; // hidden_global_offset_x offset (uint64_t)
+  uint32_t global_offset_y; // hidden_global_offset_y offset (uint64_t)
+  uint32_t global_offset_z; // hidden_global_offset_z offset (uint64_t)
+} iree_hal_hip_hidden_args_t;
+
 // Kernel information extracted from an ELF file.
 typedef struct iree_hal_hip_kernel_info_t {
   iree_string_view_t name;  // Kernel function name
@@ -169,9 +188,18 @@ typedef struct iree_hal_hip_kernel_info_t {
   // Number of push constants (typically value parameters).
   uint32_t constant_count;
 
-  // Array of parameter information (allocated inline after this struct).
-  // Total count is binding_count + constant_count.
+  // Actual number of parameters in the 'parameters' array.
+  // This is the total count of all parsed arguments from metadata.
+  uint32_t parameter_count;
+
+  // Array of parameter information (allocated separately).
+  // Total count is 'parameter_count'.
   iree_hal_hip_kernel_param_t* parameters;
+  
+  // Hidden argument offsets for native HIP kernels.
+  // These are the offsets within the kernarg buffer where hidden args should
+  // be written. Offsets are UINT32_MAX if the arg is not used.
+  iree_hal_hip_hidden_args_t hidden_args;
 } iree_hal_hip_kernel_info_t;
 
 // Parsed fat binary information.

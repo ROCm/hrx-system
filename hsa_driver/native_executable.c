@@ -770,10 +770,11 @@ static iree_status_t iree_hal_hsa_native_executable_create_fpih(
       export_info->block_dims[2] = fat_binary_info.kernels[export_idx].block_dims[2];
       export_info->binding_count = fat_binary_info.kernels[export_idx].binding_count;
       export_info->constant_count = fat_binary_info.kernels[export_idx].constant_count;
+      export_info->hidden_args = fat_binary_info.kernels[export_idx].hidden_args;
 
       // Copy parameter info from fat binary.
       iree_hal_hip_kernel_info_t* kernel_info = &fat_binary_info.kernels[export_idx];
-      export_info->parameter_count = kernel_info->binding_count + kernel_info->constant_count;
+      export_info->parameter_count = kernel_info->parameter_count;
       export_info->parameters = NULL;
 
       // Calculate explicit kernarg size from parameters.

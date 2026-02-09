@@ -73,10 +73,47 @@ set_target_properties(hip_logging PROPERTIES
 )
 
 #-------------------------------------------------------------------------------
+# HIP Buffer Tracer Library (libhip_buffer_tracer)
+#
+# Interception library that tracks memory allocations and can dump buffer
+# contents before and after kernel launches for debugging/comparison.
+# Load via HIP_INTERCEPTION_LIBRARY environment variable.
+#
+# Environment variables:
+# - HIP_TRACE_FILE: Path to trace output file (default: stderr)
+# - HIP_TRACE_LEVEL: 0=off, 1=errors, 2=calls, 3=buffers, 4=verbose (default: 2)
+# - HIP_TRACE_SYNC: 1=sync before/after kernel launches (default: 0)
+# - HIP_TRACE_DUMP: 1=dump buffer contents, 2=dump hash only (default: 0)
+# - HIP_TRACE_DUMP_MAX: Max bytes to dump per buffer (default: 1024)
+# - HIP_TRACE_KERNEL_FILTER: Substring to match kernel names (empty=all)
+# - HIP_TRACE_KERNEL_COUNT: Only trace first N kernels (default: 0=unlimited)
+#-------------------------------------------------------------------------------
+
+add_library(hip_buffer_tracer SHARED
+  hip_buffer_tracer.c
+)
+
+target_include_directories(hip_buffer_tracer
+  PUBLIC
+    ${CMAKE_SOURCE_DIR}
+)
+
+target_link_libraries(hip_buffer_tracer
+  PRIVATE
+    pthread
+)
+
+set_target_properties(hip_buffer_tracer PROPERTIES
+  OUTPUT_NAME "hip_buffer_tracer"
+  VERSION 1.0.0
+  SOVERSION 1
+)
+
+#-------------------------------------------------------------------------------
 # Installation
 #-------------------------------------------------------------------------------
 
-install(TARGETS hip_intercept hip_logging
+install(TARGETS hip_intercept hip_logging hip_buffer_tracer
   LIBRARY DESTINATION lib
 )
 

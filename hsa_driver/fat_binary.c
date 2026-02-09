@@ -1376,7 +1376,8 @@ static iree_status_t iree_hal_hip_parse_amd_kernel_metadata(
     iree_string_view_t kernel_name, iree_allocator_t allocator,
     uint32_t* out_workgroup_size_x, uint32_t* out_workgroup_size_y,
     uint32_t* out_workgroup_size_z, iree_host_size_t* out_arg_count,
-    iree_hal_hip_parsed_arg_t** out_args) {
+    iree_hal_hip_parsed_arg_t** out_args,
+    iree_hal_hip_hidden_args_t* hidden_args) {
   // Default values
   *out_workgroup_size_x = 1;
   *out_workgroup_size_y = 1;
@@ -1620,6 +1621,7 @@ static iree_status_t iree_hal_hip_parse_amd_kernel_metadata(
                 bool is_hidden = false;
                 uint32_t arg_offset_val = 0;
                 uint32_t arg_size_val = 0;
+                iree_string_view_t arg_value_kind_str = iree_string_view_empty();
                 iree_hal_hip_arg_value_kind_t value_kind =
                     IREE_HAL_HIP_ARG_KIND_UNKNOWN;
 
@@ -1678,6 +1680,7 @@ static iree_status_t iree_hal_hip_parse_amd_kernel_metadata(
                                     vk_str, iree_make_cstring_view("hidden_"))) {
                         is_hidden = true;
                         value_kind = IREE_HAL_HIP_ARG_KIND_HIDDEN;
+                        arg_value_kind_str = vk_str;
                       }
                     }
                     arg_offset += consumed;
@@ -1702,7 +1705,52 @@ static iree_status_t iree_hal_hip_parse_amd_kernel_metadata(
                   }
                 }
 
-                // Only store explicit (non-hidden) arguments
+                // For hidden arguments, store their offsets in the hidden_args structure.
+                if (is_hidden && arg_value_kind_str.size > 0) {
+                  // Parse the hidden arg type from the value_kind string.
+                  if (iree_string_view_equal(arg_value_kind_str, 
+                          iree_make_cstring_view("hidden_block_count_x"))) {
+                    hidden_args->block_count_x = arg_offset_val;
+                  } else if (iree_string_view_equal(arg_value_kind_str,
+                          iree_make_cstring_view("hidden_block_count_y"))) {
+                    hidden_args->block_count_y = arg_offset_val;
+                  } else if (iree_string_view_equal(arg_value_kind_str,
+                          iree_make_cstring_view("hidden_block_count_z"))) {
+                    hidden_args->block_count_z = arg_offset_val;
+                  } else if (iree_string_view_equal(arg_value_kind_str,
+                          iree_make_cstring_view("hidden_group_size_x"))) {
+                    hidden_args->group_size_x = arg_offset_val;
+                  } else if (iree_string_view_equal(arg_value_kind_str,
+                          iree_make_cstring_view("hidden_group_size_y"))) {
+                    hidden_args->group_size_y = arg_offset_val;
+                  } else if (iree_string_view_equal(arg_value_kind_str,
+                          iree_make_cstring_view("hidden_group_size_z"))) {
+                    hidden_args->group_size_z = arg_offset_val;
+                  } else if (iree_string_view_equal(arg_value_kind_str,
+                          iree_make_cstring_view("hidden_remainder_x"))) {
+                    hidden_args->remainder_x = arg_offset_val;
+                  } else if (iree_string_view_equal(arg_value_kind_str,
+                          iree_make_cstring_view("hidden_remainder_y"))) {
+                    hidden_args->remainder_y = arg_offset_val;
+                  } else if (iree_string_view_equal(arg_value_kind_str,
+                          iree_make_cstring_view("hidden_remainder_z"))) {
+                    hidden_args->remainder_z = arg_offset_val;
+                  } else if (iree_string_view_equal(arg_value_kind_str,
+                          iree_make_cstring_view("hidden_grid_dims"))) {
+                    hidden_args->grid_dims = arg_offset_val;
+                  } else if (iree_string_view_equal(arg_value_kind_str,
+                          iree_make_cstring_view("hidden_global_offset_x"))) {
+                    hidden_args->global_offset_x = arg_offset_val;
+                  } else if (iree_string_view_equal(arg_value_kind_str,
+                          iree_make_cstring_view("hidden_global_offset_y"))) {
+                    hidden_args->global_offset_y = arg_offset_val;
+                  } else if (iree_string_view_equal(arg_value_kind_str,
+                          iree_make_cstring_view("hidden_global_offset_z"))) {
+                    hidden_args->global_offset_z = arg_offset_val;
+                  }
+                }
+                
+                // Only store explicit (non-hidden) arguments in the args array
                 if (!is_hidden && value_kind != IREE_HAL_HIP_ARG_KIND_UNKNOWN) {
                   args[explicit_count].offset = arg_offset_val;
                   args[explicit_count].size = arg_size_val;
@@ -2037,11 +2085,15 @@ static iree_status_t iree_hal_hip_parse_elf_kernels(
       uint32_t wg_size_x, wg_size_y, wg_size_z;
       iree_host_size_t arg_count = 0;
       iree_hal_hip_parsed_arg_t* parsed_args = NULL;
+      
+      // Initialize hidden args to UINT32_MAX (not used).
+      iree_hal_hip_hidden_args_t hidden_args;
+      memset(&hidden_args, 0xFF, sizeof(hidden_args));
 
       // Parse metadata for this specific kernel
       iree_status_t status = iree_hal_hip_parse_amd_kernel_metadata(
           note_data, note_size, kernels[k].name, allocator, &wg_size_x,
-          &wg_size_y, &wg_size_z, &arg_count, &parsed_args);
+          &wg_size_y, &wg_size_z, &arg_count, &parsed_args, &hidden_args);
 
       if (iree_status_is_ok(status) && arg_count > 0) {
         // Store workgroup size
@@ -2064,6 +2116,8 @@ static iree_status_t iree_hal_hip_parse_elf_kernels(
 
         kernels[k].binding_count = binding_count;
         kernels[k].constant_count = constant_count;
+        kernels[k].parameter_count = (uint32_t)arg_count;
+        kernels[k].hidden_args = hidden_args;
 
         // Allocate and fill parameter array with actual metadata
         iree_hal_hip_kernel_param_t* params = NULL;
@@ -2091,7 +2145,9 @@ static iree_status_t iree_hal_hip_parse_elf_kernels(
         kernels[k].block_dims[2] = 1;
         kernels[k].binding_count = 0;
         kernels[k].constant_count = 0;
+        kernels[k].parameter_count = 0;
         kernels[k].parameters = NULL;
+        kernels[k].hidden_args = hidden_args;  // All UINT32_MAX (not used)
       }
     }
   }

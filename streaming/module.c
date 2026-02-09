@@ -155,13 +155,13 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
 
     // Initialize parameter info.
     iree_hal_streaming_parameter_info_t* parameter_info = &symbol->parameters;
-    parameter_info->constant_bytes = constants_size;
     parameter_info->binding_count = export_infos[i].binding_count;
     parameter_info->copy_count = symbol_op_counts[i].copy_count;
     parameter_info->ops = current_ops;
     const uint16_t parameter_count = export_infos[i].parameter_count;
     if (parameter_count == 0) {
       // No parameters.
+      parameter_info->constant_bytes = 0;
       parameter_info->buffer_size = 0;
       continue;
     }
@@ -170,6 +170,7 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
     // Copy ops go first, then resolve ops.
     uint16_t src_offset = 0;
     uint16_t buffer_size = 0;
+    size_t this_kernel_constants_size = 0;  // Per-kernel constants size
     iree_hal_streaming_parameter_op_t* copy_ops_start = current_ops;
     iree_hal_streaming_parameter_op_t* resolve_ops_start =
         current_ops + symbol_op_counts[i].copy_count;
@@ -186,10 +187,18 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
         op->src_offset = src_offset;
         op->dst_ordinal = resolve_count;  // binding ordinal
         op->src_ordinal = j;
+        op->dst_offset = parameter->offset;  // kernel ABI offset for native kernels
         src_offset += parameter->size;
         buffer_size = src_offset;
         ++resolve_count;
         // active_copy = NULL;  // break any active copy operation
+        
+        // For native kernels with CUSTOM_DIRECT_ARGUMENTS, bindings are also
+        // part of the constants buffer. Track their extent as well.
+        size_t param_extent = parameter->offset + parameter->size;
+        if (param_extent > this_kernel_constants_size) {
+          this_kernel_constants_size = param_extent;
+        }
       } else {
         // TODO: fix coalescing. It does not work when we have
         // parameter arrays because each constant comes in as a
@@ -212,9 +221,16 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
         // }
         src_offset += parameter->size;
         buffer_size = src_offset;
+        
+        // Track per-kernel constants size based on actual parameter extent
+        size_t param_extent = parameter->offset + parameter->size;
+        if (param_extent > this_kernel_constants_size) {
+          this_kernel_constants_size = param_extent;
+        }
       }
     }
     parameter_info->buffer_size = buffer_size;
+    parameter_info->constant_bytes = this_kernel_constants_size;
 
     // Advance to next symbol's ops.
     parameter_base += parameter_count;

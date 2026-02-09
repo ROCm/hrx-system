@@ -13,6 +13,7 @@
 #include "iree/base/tracing.h"
 #include "iree/hal/api.h"
 #include "hsa_driver/dynamic_symbols.h"
+#include "hsa_driver/fat_binary.h"
 #include "hsa_driver/hsa_headers.h"
 #include "hsa_driver/per_device_information.h"
 
@@ -45,6 +46,9 @@ typedef struct iree_hal_hsa_kernel_params_t {
   // Parameter info for reflection.
   uint32_t parameter_count;
   iree_hal_executable_export_parameter_t* parameters;
+  
+  // Hidden argument offsets for native HIP kernels (all UINT32_MAX if not used).
+  iree_hal_hip_hidden_args_t hidden_args;
 
   IREE_TRACE(iree_hal_hsa_kernel_debug_info_t debug_info;)
 } iree_hal_hsa_kernel_params_t;
