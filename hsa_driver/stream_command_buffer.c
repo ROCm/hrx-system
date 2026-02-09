@@ -361,10 +361,14 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_collective(
                           "collectives not implemented");
 }
 
-// Debug flag for HSA dispatch
+// Debug flags for HSA dispatch - flip these to enable debug logging
 #ifndef IREE_HSA_DEBUG_DISPATCH
-#define IREE_HSA_DEBUG_DISPATCH 0
+#define IREE_HSA_DEBUG_DISPATCH 0  // General dispatch info (kernel name, grid, etc.)
 #endif
+#ifndef IREE_HSA_DEBUG_HIDDEN_ARGS
+#define IREE_HSA_DEBUG_HIDDEN_ARGS 0  // Hidden/implicit argument filling
+#endif
+
 #if IREE_HSA_DEBUG_DISPATCH
 // Optional filter for debugging specific kernels (set to NULL to log all)
 static const char* IREE_HSA_DEBUG_DISPATCH_FILTER = NULL;
@@ -763,12 +767,12 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
 
     // Use the actual allocated kernarg_size, not the kernel's reported size,
     // since we may have enlarged it for CUSTOM_DIRECT_ARGUMENTS.
-#if 0  // Debug logging
+#if IREE_HSA_DEBUG_HIDDEN_ARGS
     fprintf(stderr, "[HSA_HIDDEN_ARGS] explicit_size=%u implicit_offset=%u kernarg_size=%zu need=%u\n",
             explicit_size, implicit_offset, kernarg_size, implicit_offset + 256);
 #endif
     if (implicit_offset + 256 <= kernarg_size) {
-#if 0  // Debug logging
+#if IREE_HSA_DEBUG_HIDDEN_ARGS
       fprintf(stderr, "[HSA_HIDDEN_ARGS] Filling implicit args at offset %u\n", implicit_offset);
 #endif
       uint8_t* implicit_args = (uint8_t*)kernarg_address + implicit_offset;
