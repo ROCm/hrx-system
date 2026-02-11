@@ -702,6 +702,10 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
     bool has_embedded_hidden = (ha->block_count_x != UINT32_MAX ||
                                 ha->group_size_x != UINT32_MAX ||
                                 ha->grid_dims != UINT32_MAX);
+#if IREE_HSA_DEBUG_HIDDEN_ARGS
+    fprintf(stderr, "[HSA_HIDDEN_ARGS] Embedded hidden check: block_x=%u group_x=%u grid_dims=%u => has=%d\n",
+            ha->block_count_x, ha->group_size_x, ha->grid_dims, has_embedded_hidden);
+#endif
     if (has_embedded_hidden) {
       uint8_t* ka = (uint8_t*)kernarg_address;
       // BlockCountX/Y/Z (uint32_t)
@@ -865,6 +869,16 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
   packet->private_segment_size = kernel_params->private_segment_size;
   packet->kernel_object = kernel_params->kernel_object;
   packet->kernarg_address = kernarg_address;
+#if IREE_HSA_DEBUG_DISPATCH
+  if (hsa_debug_should_log) {
+    fprintf(stderr, "[HSA_DISPATCH] AQL packet: grid=(%u,%u,%u) wg=(%u,%u,%u) grp_seg=%u priv_seg=%u\n",
+            packet->grid_size_x, packet->grid_size_y, packet->grid_size_z,
+            packet->workgroup_size_x, packet->workgroup_size_y, packet->workgroup_size_z,
+            packet->group_segment_size, packet->private_segment_size);
+    fprintf(stderr, "[HSA_DISPATCH] AQL packet: kernel_object=0x%lx kernarg_addr=%p\n",
+            (unsigned long)packet->kernel_object, packet->kernarg_address);
+  }
+#endif
 
   // Set up completion signal.
   // Lock mutex to protect completion signal from concurrent access.

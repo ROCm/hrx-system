@@ -84,8 +84,24 @@ static iree_status_t iree_hal_streaming_query_device_info(
   device->max_grid_dim[2] = 65535;
 
   // Query hardware properties.
+  // Keep warp_size = 32 for compatibility (CUDA semantics, even on AMD).
   device->warp_size = 32;
-  device->multiprocessor_count = 80;
+  
+  // Query multiprocessor (compute unit) count from the device.
+  int64_t mp_count = 0;
+  status = iree_hal_device_query_i64(
+      device->hal_device, IREE_SV("hal.dispatch"), IREE_SV("concurrency"),
+      &mp_count);
+  if (iree_status_is_ok(status) && mp_count > 0) {
+    device->multiprocessor_count = (uint32_t)mp_count;
+  } else {
+    // Fall back to generic value if query fails.
+    // The HSA backend supports hal.dispatch.concurrency and will return
+    // the actual CU count. For HIP backend, we use a generic fallback
+    // which may cause different kernel variants to be selected.
+    iree_status_ignore(status);
+    device->multiprocessor_count = 80;
+  }
 
   // Query occupancy calculation properties.
   // These are typical values for modern GPUs.

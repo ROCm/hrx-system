@@ -474,7 +474,7 @@ iree_status_t iree_hal_streaming_unpack_parameter_list(
 
 // Debug flag - set to 1 to enable verbose kernel launch debugging
 #ifndef IREE_STREAMING_DEBUG_KERNEL_LAUNCH
-#define IREE_STREAMING_DEBUG_KERNEL_LAUNCH 0
+#define IREE_STREAMING_DEBUG_KERNEL_LAUNCH 1
 #endif
 
 // Filter to only log kernels matching this substring (NULL = log all)

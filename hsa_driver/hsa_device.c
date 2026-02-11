@@ -436,6 +436,22 @@ static iree_status_t iree_hal_hsa_device_query_i64(
     }
   }
 
+  if (iree_string_view_equal(category, IREE_SV("hal.dispatch"))) {
+    if (iree_string_view_equal(key, IREE_SV("concurrency"))) {
+      // Query compute unit count from the HSA agent.
+      uint32_t compute_unit_count = 0;
+      IREE_RETURN_IF_ERROR(IREE_HSA_CALL_TO_STATUS(
+          device->hsa_symbols,
+          hsa_agent_get_info(
+              device->device_info.agent,
+              (hsa_agent_info_t)HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT,
+              &compute_unit_count),
+          "hsa_agent_get_info(COMPUTE_UNIT_COUNT)"));
+      *out_value = (int64_t)compute_unit_count;
+      return iree_ok_status();
+    }
+  }
+
   return iree_make_status(
       IREE_STATUS_NOT_FOUND,
       "unknown device configuration key value '%.*s :: %.*s'",
