@@ -677,6 +677,10 @@ typedef enum iree_hal_streaming_dispatch_flag_bits_e {
   IREE_HAL_STREAMING_DISPATCH_FLAG_COOPERATIVE = 1ull << 0,
   // The parameters are an array of pointers to values.
   IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY = 1ull << 1,
+  // The parameter buffer is pre-packed in the kernel's native ABI format.
+  // This is used when HIP_LAUNCH_PARAM_BUFFER_POINTER is used to pass arguments.
+  // The buffer should be passed directly to the kernel without unpacking.
+  IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED = 1ull << 2,
 } iree_hal_streaming_dispatch_flags_t;
 
 // Dispatch parameters for kernel launches.

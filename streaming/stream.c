@@ -474,7 +474,7 @@ iree_status_t iree_hal_streaming_unpack_parameter_list(
 
 // Debug flag - set to 1 to enable verbose kernel launch debugging
 #ifndef IREE_STREAMING_DEBUG_KERNEL_LAUNCH
-#define IREE_STREAMING_DEBUG_KERNEL_LAUNCH 1
+#define IREE_STREAMING_DEBUG_KERNEL_LAUNCH 0
 #endif
 
 // Filter to only log kernels matching this substring (NULL = log all)
@@ -598,7 +598,26 @@ iree_status_t iree_hal_streaming_launch_kernel(
   // Track if we need to use raw argument passing (e.g., for external pointers).
   bool use_raw_arguments = false;
 
-  if (is_native_args_array && params->buffer) {
+  // Check if this is a pre-packed buffer (HIP_LAUNCH_PARAM_BUFFER format).
+  // Pre-packed buffers are already in the kernel's native ABI format and should
+  // be passed directly without any unpacking or translation.
+  bool is_pre_packed = (params->flags & IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED) != 0;
+
+  if (is_pre_packed && params->buffer) {
+    // Pre-packed buffer: pass the raw buffer directly to the kernel.
+    // This is used for kernels launched via HIP_LAUNCH_PARAM_BUFFER_POINTER
+    // (e.g., hipBLASLt GEMM kernels) where the buffer is already packed.
+    constants = params->buffer;
+    constants_size = params->buffer_size;
+    binding_list.count = 0;  // No IREE bindings, using raw pointers.
+    use_raw_arguments = true;
+#if IREE_STREAMING_DEBUG_KERNEL_LAUNCH
+    if (debug_should_log) {
+      fprintf(stderr, "[LAUNCH]   PATH: is_pre_packed (buffer=%p size=%zu)\n",
+              params->buffer, params->buffer_size);
+    }
+#endif
+  } else if (is_native_args_array && params->buffer) {
     // Native ARGS_ARRAY kernel: pack the void** args into a constants buffer.
     // These are external HIP/CUDA kernels where parameters may contain device
     // pointers that we pass through directly without IREE buffer translation.

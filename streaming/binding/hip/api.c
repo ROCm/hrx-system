@@ -7531,6 +7531,9 @@ HIPAPI hipError_t hipModuleLaunchKernel(
         params_size = *(size_t*)extra[i + 1];
       }
     }
+    // The extra format provides a pre-packed buffer in the kernel's native ABI.
+    // Mark it as pre-packed so the streaming layer passes it through directly.
+    dispatch_flags |= IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED;
   } else if (kernelParams) {
     // kernelParams is an array of pointers to the actual parameters.
     params_ptr = kernelParams;
