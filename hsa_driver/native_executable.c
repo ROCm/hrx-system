@@ -810,6 +810,14 @@ static iree_status_t iree_hal_hsa_native_executable_create_fpih(
               &kernarg_segment_size),
           "hsa_executable_symbol_get_info(KERNARG_SEGMENT_SIZE)");
       if (!iree_status_is_ok(status)) break;
+      
+      // If HSA returns 0 for kernarg_segment_size but we have a valid
+      // explicit_kernarg_size from our fat binary parsing, use that instead.
+      // This happens with some code objects (e.g., hipBLASLt's Tensile kernels)
+      // where the HSA runtime doesn't correctly report the size.
+      if (kernarg_segment_size == 0 && export_info->explicit_kernarg_size > 0) {
+        kernarg_segment_size = export_info->explicit_kernarg_size;
+      }
       export_info->kernarg_segment_size = kernarg_segment_size;
 
       // Get group segment size.

@@ -584,14 +584,23 @@ static iree_status_t iree_hal_streaming_context_symbol_map_prepare_module(
         }
       }
       if (!symbol) {
-        // Registered symbol not found.
-        status = iree_make_status(
-            IREE_STATUS_NOT_FOUND,
-            "registered symbol `%.*s` not found in loaded module",
-            (int)registered_name.size, registered_name.data);
-        break;
+        // Registered symbol not found - log a warning but don't fail.
+        // Some PyTorch modules may register functions that aren't in the fat binary.
+        fprintf(stderr, "[WARN] registered symbol `%.*s` not found in module with %zu symbols\n",
+                (int)registered_name.size, registered_name.data, entry->module->symbol_count);
+        // Skip this symbol and continue with the rest.
+        continue;
       }
 
+      // Debug: print symbol metadata when inserting
+#if 1
+      if (strstr(registered_name.data, "indexSelect")) {
+        fprintf(stderr, "[DEBUG] Inserting symbol '%.*s' copy=%u bind=%u const=%u\n",
+                (int)registered_name.size, registered_name.data,
+                symbol->parameters.copy_count, symbol->parameters.binding_count,
+                (unsigned)symbol->parameters.constant_bytes);
+      }
+#endif
       // Insert into hash table.
       const uint64_t hash =
           iree_hal_streaming_symbol_pointer_hash(symbol_host_ptr);
@@ -703,6 +712,16 @@ iree_status_t iree_hal_streaming_context_symbol_map_lookup(
     const void* entry_key = map->entries[index].key;
     if (entry_key == host_pointer) {
       *out_symbol = map->entries[index].symbol;  // hit
+#if 1
+      // Debug: check if this is an indexSelect kernel by looking at name
+      if ((*out_symbol)->name.data && strstr((*out_symbol)->name.data, "indexSelect")) {
+        fprintf(stderr, "[DEBUG_FAST] Found indexSelect: copy=%u bind=%u const=%u name=%.*s\n",
+                (*out_symbol)->parameters.copy_count, (*out_symbol)->parameters.binding_count,
+                (unsigned)(*out_symbol)->parameters.constant_bytes,
+                (int)((*out_symbol)->name.size > 80 ? 80 : (*out_symbol)->name.size),
+                (*out_symbol)->name.data);
+      }
+#endif
       return iree_ok_status();
     } else if (entry_key == IREE_HAL_STREAMING_SYMBOL_MAP_EMPTY_KEY) {
       break;  // not found in local map
@@ -716,6 +735,7 @@ iree_status_t iree_hal_streaming_context_symbol_map_lookup(
                                                        host_pointer);
   if (!registration) {
     // Not found - return identity.
+    fprintf(stderr, "[WARN] Symbol %p not found in global registry, returning identity\n", host_pointer);
     *out_symbol = (iree_hal_streaming_symbol_t*)host_pointer;
     return iree_ok_status();
   }
@@ -734,6 +754,13 @@ iree_status_t iree_hal_streaming_context_symbol_map_lookup(
     const void* entry_key = map->entries[index].key;
     if (entry_key == host_pointer) {
       *out_symbol = map->entries[index].symbol;  // hit
+#if 1
+      if (strstr(registration->device_name, "indexSelect")) {
+        fprintf(stderr, "[DEBUG] Found indexSelect in hash: copy=%u bind=%u const=%u\n",
+                (*out_symbol)->parameters.copy_count, (*out_symbol)->parameters.binding_count,
+                (unsigned)(*out_symbol)->parameters.constant_bytes);
+      }
+#endif
       return iree_ok_status();
     } else if (entry_key == IREE_HAL_STREAMING_SYMBOL_MAP_EMPTY_KEY) {
       break;  // still not found (shouldn't happen)
@@ -742,6 +769,8 @@ iree_status_t iree_hal_streaming_context_symbol_map_lookup(
   }
 
   // Symbol not found even after loading module (shouldn't happen).
+  fprintf(stderr, "[WARN] Symbol %p (name=%s) not found in hash table after prepare_module\n", 
+          host_pointer, registration->device_name);
   *out_symbol = (iree_hal_streaming_symbol_t*)host_pointer;
   return iree_ok_status();
 }

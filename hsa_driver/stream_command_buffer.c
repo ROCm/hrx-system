@@ -363,16 +363,22 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_collective(
 
 // Debug flags for HSA dispatch - flip these to enable debug logging
 #ifndef IREE_HSA_DEBUG_DISPATCH
-#define IREE_HSA_DEBUG_DISPATCH 0  // General dispatch info (kernel name, grid, etc.)
+#define IREE_HSA_DEBUG_DISPATCH 1  // General dispatch info (kernel name, grid, etc.)
 #endif
 #ifndef IREE_HSA_DEBUG_HIDDEN_ARGS
-#define IREE_HSA_DEBUG_HIDDEN_ARGS 0  // Hidden/implicit argument filling
+#define IREE_HSA_DEBUG_HIDDEN_ARGS 1  // Hidden/implicit argument filling
 #endif
 
-#if IREE_HSA_DEBUG_DISPATCH
-// Optional filter for debugging specific kernels (set to NULL to log all)
-static const char* IREE_HSA_DEBUG_DISPATCH_FILTER = NULL;
+// Special debug: dump full kernarg hex for CUSTOM_DIRECT_ARGUMENTS kernels
+#ifndef IREE_HSA_DEBUG_KERNARG_HEX
+#define IREE_HSA_DEBUG_KERNARG_HEX 1  // Hex dump of kernarg for native kernels
 #endif
+
+// VALIDATION: Check if device pointers in kernarg are within our pool range
+#ifndef IREE_HSA_VALIDATE_KERNARG_POINTERS
+#define IREE_HSA_VALIDATE_KERNARG_POINTERS 0  // Disabled - too many false positives
+#endif
+
 
 static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
     iree_hal_command_buffer_t* base_command_buffer,
@@ -418,16 +424,10 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
               &kernel_params));
 
 #if IREE_HSA_DEBUG_DISPATCH
-  // Note: Without IREE_TRACING_FEATURES, we can't filter by kernel name.
-  bool hsa_debug_should_log = true;  // Log by default for debugging
-  (void)IREE_HSA_DEBUG_DISPATCH_FILTER;  // Suppress unused warning
-  IREE_TRACE({
-    if (kernel_params->debug_info.function_name.size > 0) {
-      fprintf(stderr, "[HSA_DISPATCH] kernel: %.*s\n",
-              (int)kernel_params->debug_info.function_name.size,
-              kernel_params->debug_info.function_name.data);
-    }
-  });
+  // Log dispatch info when debugging.
+  // For CUSTOM_DIRECT_ARGUMENTS, always log since those are native HIP kernels.
+  bool use_direct_copy_check = iree_all_bits_set(flags, IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS);
+  bool hsa_debug_should_log = use_direct_copy_check;  // Always log native HIP kernels
   fprintf(stderr, "[HSA_DISPATCH]   export=%u flags=0x%lx constants_len=%zu bindings=%zu\n",
           export_ordinal, (unsigned long)flags, constants.data_length, bindings.count);
   fprintf(stderr, "[HSA_DISPATCH]   workgroup=(%u,%u,%u) grid=(%u,%u,%u) local_mem=%u\n",
@@ -486,20 +486,32 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
     explicit_size = (uint32_t)(bindings.count * sizeof(void*) + constants.data_length);
   }
   uint32_t implicit_offset = (explicit_size + 7) & ~7u;
-  iree_host_size_t min_size_for_implicit = implicit_offset + 256;
+  
+  // Kernels with kernarg_segment_size=0 are typically precompiled library kernels
+  // (e.g., hipBLASLt/rocBLAS GEMM) that don't use COV5 implicit args.
+  // For these, allocate only the explicit arguments size.
+  bool uses_implicit_args = (kernel_params->kernarg_segment_size > 0);
+  iree_host_size_t min_size_for_implicit = uses_implicit_args ? (implicit_offset + 256) : explicit_size;
   
   // For CUSTOM_DIRECT_ARGUMENTS, ensure we allocate enough space for the
   // constants buffer. Native HIP/CUDA kernels may have incorrect metadata.
   if (use_direct_copy && constants.data_length > 0) {
     // The constants contain packed kernel arguments including device pointers.
-    // We need at least constants.data_length + 256 bytes for implicit args.
-    iree_host_size_t required_size = constants.data_length + 256;
-    if (kernarg_size < required_size) {
-      kernarg_size = required_size;
+    if (uses_implicit_args) {
+      // We need at least constants.data_length + 256 bytes for implicit args.
+      iree_host_size_t required_size = constants.data_length + 256;
+      if (kernarg_size < required_size) {
+        kernarg_size = required_size;
+      }
+    } else {
+      // No implicit args - just allocate what we need for the constants.
+      if (kernarg_size < constants.data_length) {
+        kernarg_size = constants.data_length;
+      }
     }
   }
   
-  // Always ensure we have enough space for implicit args (256 bytes).
+  // Ensure minimum size for implicit args (if kernel uses them).
   if (kernarg_size < min_size_for_implicit) {
     kernarg_size = min_size_for_implicit;
   }
@@ -601,6 +613,52 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
           copy_size = kernel_params->explicit_kernarg_size;
         }
         memcpy(kernarg_address, constants.data, copy_size);
+        
+        // Ensure kernarg write is visible to GPU before dispatch.
+        __atomic_thread_fence(__ATOMIC_SEQ_CST);
+        
+#if IREE_HSA_VALIDATE_KERNARG_POINTERS
+        // Validate that pointers in kernarg look reasonable.
+        // GEMM kernels have pointers at offsets 32-56 (A, B, C, D).
+        // Check that they're not NULL and look like device memory addresses.
+        if (copy_size >= 64) {
+          void** ptrs = (void**)((uint8_t*)kernarg_address + 32);
+          for (int ptrIdx = 0; ptrIdx < 4; ++ptrIdx) {
+            void* ptr = ptrs[ptrIdx];
+            // Check for suspicious pointer values (< 4KB likely invalid, > 0x8000000000000000 likely invalid)
+            uintptr_t addr = (uintptr_t)ptr;
+            if (addr != 0 && (addr < 0x1000 || addr > 0x8000000000000000ULL)) {
+              fprintf(stderr, "[HSA_VALIDATE] WARNING: Suspicious pointer at kernarg+%d: %p\n",
+                      32 + ptrIdx * 8, ptr);
+            }
+          }
+        }
+#endif
+// ALWAYS dump kernarg info to debug GEMM consistency issue
+        {
+          static int kernarg_dump_count = 0;
+          ++kernarg_dump_count;
+          fprintf(stderr, "[KERNARG #%d] copied %zu bytes to %p (kernel explicit_size=%u kernarg_seg=%u)\n", 
+                  kernarg_dump_count, copy_size, kernarg_address,
+                  kernel_params->explicit_kernarg_size, kernel_params->kernarg_segment_size);
+          // Also print kernarg_size we allocated
+          fprintf(stderr, "[KERNARG #%d]   allocated kernarg_size=%zu uses_implicit=%d\n",
+                  kernarg_dump_count, kernarg_size, uses_implicit_args ? 1 : 0);
+        }
+#if IREE_HSA_DEBUG_KERNARG_HEX
+        // Always dump kernarg hex for CUSTOM_DIRECT_ARGUMENTS to compare M=224 vs M=256
+        fprintf(stderr, "[KERNARG_HEX] export=%u size=%zu\n", export_ordinal, copy_size);
+        {
+          const uint8_t* bytes = (const uint8_t*)constants.data;
+          for (size_t i = 0; i < copy_size; i += 16) {
+            fprintf(stderr, "[KERNARG_HEX] %04zx:", i);
+            for (size_t j = 0; j < 16 && (i+j) < copy_size; ++j) {
+              fprintf(stderr, " %02x", bytes[i+j]);
+            }
+            fprintf(stderr, "\n");
+          }
+        }
+#endif
 #if IREE_HSA_DEBUG_DISPATCH
         if (hsa_debug_should_log) {
           fprintf(stderr, "[HSA_DISPATCH]   DIRECT_COPY: copied %zu bytes (of %zu) to kernarg at %p\n",
@@ -771,11 +829,17 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
 
     // Use the actual allocated kernarg_size, not the kernel's reported size,
     // since we may have enlarged it for CUSTOM_DIRECT_ARGUMENTS.
+    //
+    // Skip implicit args filling for kernels that report kernarg_segment_size=0
+    // OR for CUSTOM_DIRECT_ARGUMENTS kernels (precompiled library kernels like
+    // hipBLASLt/rocBLAS GEMM that don't use the COV5 implicit args format).
+    bool should_fill_implicit = (kernel_params->kernarg_segment_size > 0) &&
+                                !use_direct_copy;
 #if IREE_HSA_DEBUG_HIDDEN_ARGS
-    fprintf(stderr, "[HSA_HIDDEN_ARGS] explicit_size=%u implicit_offset=%u kernarg_size=%zu need=%u\n",
-            explicit_size, implicit_offset, kernarg_size, implicit_offset + 256);
+    fprintf(stderr, "[HSA_HIDDEN_ARGS] explicit_size=%u implicit_offset=%u kernarg_size=%zu need=%u should_fill=%d\n",
+            explicit_size, implicit_offset, kernarg_size, implicit_offset + 256, should_fill_implicit);
 #endif
-    if (implicit_offset + 256 <= kernarg_size) {
+    if (should_fill_implicit && implicit_offset + 256 <= kernarg_size) {
 #if IREE_HSA_DEBUG_HIDDEN_ARGS
       fprintf(stderr, "[HSA_HIDDEN_ARGS] Filling implicit args at offset %u\n", implicit_offset);
 #endif
@@ -830,6 +894,51 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
 
   // Create and submit AQL dispatch packet.
   hsa_queue_t* queue = command_buffer->device_info->queue;
+
+  // AGGRESSIVE_SYNC: Submit a barrier packet before each kernel dispatch.
+  // This ensures all previous memory operations are complete before the kernel
+  // reads any data. The barrier uses system-scope fences for maximum coherence.
+#ifndef IREE_HSA_USE_BARRIER_PACKETS
+#define IREE_HSA_USE_BARRIER_PACKETS 0  // Disabled - doesn't fix 160-byte kernel corruption
+#endif
+#if IREE_HSA_USE_BARRIER_PACKETS
+  {
+    // Reserve a slot for the barrier packet.
+    uint64_t barrier_index =
+        command_buffer->hsa_symbols->hsa_queue_add_write_index_relaxed(queue, 1);
+    
+    // Wait for queue space.
+    while (barrier_index -
+               command_buffer->hsa_symbols->hsa_queue_load_read_index_relaxed(
+                   queue) >=
+           queue->size) {
+      // Busy wait for space.
+    }
+    
+    // Get barrier packet address.
+    hsa_barrier_and_packet_t* barrier =
+        (hsa_barrier_and_packet_t*)queue->base_address +
+        (barrier_index & (queue->size - 1));
+    
+    // Initialize barrier packet.
+    memset(barrier, 0, sizeof(*barrier));
+    // No dependent signals - we just want a memory fence.
+    // The barrier will complete immediately but enforce memory ordering.
+    barrier->completion_signal.handle = 0;  // No signal to wait on.
+    
+    // Set header with system-scope fences.
+    uint16_t barrier_header =
+        HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE |
+        HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE |
+        HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE |
+        1 << HSA_PACKET_HEADER_BARRIER;  // Block until barrier completes.
+    __atomic_store_n(&barrier->header, barrier_header, __ATOMIC_RELEASE);
+    
+    // Ring doorbell for the barrier packet.
+    command_buffer->hsa_symbols->hsa_signal_store_screlease(
+        queue->doorbell_signal, barrier_index);
+  }
+#endif
 
   // Get write index for the queue.
   uint64_t write_index =
@@ -889,6 +998,11 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
   command_buffer->hsa_symbols->hsa_signal_store_screlease(completion_signal, 1);
   packet->completion_signal = completion_signal;
 
+  // Ensure all writes to kernarg memory are visible before submitting the packet.
+  // This is critical for correctness - without this barrier, the GPU might read
+  // stale or uninitialized data from the kernarg buffer.
+  __atomic_thread_fence(__ATOMIC_SEQ_CST);
+
   // Set header and setup atomically as a single 32-bit word.
   // The header and setup fields are the first 32 bits of the packet:
   // - bits[15:0]: header
@@ -909,11 +1023,28 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
 
   // Wait for completion (synchronous for simplicity).
   // Use a 10 second timeout to avoid hanging forever on kernel failures.
+  // Debug: check signal value before wait
+  hsa_signal_value_t pre_wait_val = command_buffer->hsa_symbols->hsa_signal_load_scacquire(completion_signal);
+  
   hsa_signal_value_t wait_result =
       command_buffer->hsa_symbols->hsa_signal_wait_scacquire(
           completion_signal, HSA_SIGNAL_CONDITION_EQ, 0,
           10ULL * 1000 * 1000 * 1000,  // 10 seconds in nanoseconds
           HSA_WAIT_STATE_BLOCKED);
+  
+  // Debug: check signal value after wait
+  hsa_signal_value_t post_wait_val = command_buffer->hsa_symbols->hsa_signal_load_scacquire(completion_signal);
+  static int wait_debug_count = 0;
+  ++wait_debug_count;
+  if (wait_result != 0 || post_wait_val != 0) {
+    fprintf(stderr, "[SIGNAL_WAIT #%d] ANOMALY! pre=%ld post=%ld result=%ld\n",
+            wait_debug_count, (long)pre_wait_val, (long)post_wait_val, (long)wait_result);
+  }
+  
+  // Full memory barrier to ensure GPU writes are visible to CPU and subsequent
+  // kernel dispatches. The signal wait provides acquire semantics for the
+  // completion signal, but we need an explicit fence for device memory coherence.
+  __atomic_thread_fence(__ATOMIC_SEQ_CST);
   
   iree_slim_mutex_unlock(&command_buffer->device_info->completion_signal_mutex);
   
@@ -934,10 +1065,18 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
   }
 
   // Free kernarg memory.
+  // Enable IREE_HSA_LEAK_KERNARG=1 to test if kernarg reuse causes issues.
+#ifndef IREE_HSA_LEAK_KERNARG
+#define IREE_HSA_LEAK_KERNARG 0
+#endif
+#if !IREE_HSA_LEAK_KERNARG
   if (kernarg_address) {
     IREE_HSA_IGNORE_ERROR(command_buffer->hsa_symbols,
                           hsa_amd_memory_pool_free(kernarg_address));
   }
+#else
+  (void)kernarg_address;  // Intentionally leak for debugging
+#endif
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();

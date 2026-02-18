@@ -1574,7 +1574,11 @@ HIPAPI hipError_t hipDeviceGetStreamPriorityRange(int* leastPriority,
 //
 HIPAPI hipError_t hipDeviceSynchronize(void) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  fprintf(stderr, "[HIP_API] hipDeviceSynchronize() called\n");
+  fflush(stderr);
   // Ensure initialization and get context.
+  static int sync_count = 0;
+  sync_count++;
   iree_hal_streaming_context_t* context = NULL;
   hipError_t init_result = iree_hip_ensure_context(&context);
   if (init_result != hipSuccess) {
@@ -1591,6 +1595,8 @@ HIPAPI hipError_t hipDeviceSynchronize(void) {
 
   iree_status_t status = iree_hal_streaming_context_synchronize(context);
   hipError_t result = iree_status_to_hip_result(status);
+  fprintf(stderr, "[HIP_API] hipDeviceSynchronize() returned %d (sync_count=%d)\n", result, sync_count);
+  fflush(stderr);
   IREE_TRACE_ZONE_END(z0);
   return result;
 }
@@ -2866,6 +2872,70 @@ HIPAPI hipError_t hipMemGetInfo(size_t* free, size_t* total) {
 //
 // See also: hipFree, hipMallocPitch, hipMallocHost, hipMallocManaged,
 //           hipMallocAsync.
+// Simple contiguous bump allocator to mimic PyTorch's caching allocator.
+// This ensures all allocations are contiguous, which hipBLASLt kernels expect.
+static iree_hal_streaming_buffer_t* g_contiguous_pool = NULL;
+static size_t g_pool_size = 0;
+static size_t g_pool_offset = 0;
+static size_t g_pool_offset_large = 0;  // Grows downward from pool end (for GSUAMBSK workaround)
+static size_t g_pool_alloc_count = 0;  // Track active allocations for reset
+static const size_t POOL_INITIAL_SIZE = (size_t)32 * 1024 * 1024 * 1024;  // 32GB (large for GSUAMBSK workaround)
+
+// Mutex for thread-safe pool access (using pthread for simplicity)
+#include <pthread.h>
+static pthread_mutex_t g_pool_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static hipError_t iree_hip_ensure_pool(iree_hal_streaming_context_t* context) {
+  // Double-check locking pattern for pool initialization
+  if (g_contiguous_pool) {
+    return hipSuccess;
+  }
+  
+  pthread_mutex_lock(&g_pool_mutex);
+  // Check again after acquiring lock
+  if (g_contiguous_pool) {
+    pthread_mutex_unlock(&g_pool_mutex);
+    return hipSuccess;
+  }
+  
+  // Allocate a large contiguous pool.
+  iree_status_t status = iree_hal_streaming_memory_allocate_device(
+      context, POOL_INITIAL_SIZE, 0, &g_contiguous_pool);
+  if (!iree_status_is_ok(status)) {
+    iree_status_ignore(status);
+    pthread_mutex_unlock(&g_pool_mutex);
+    return hipErrorOutOfMemory;
+  }
+  
+  g_pool_size = POOL_INITIAL_SIZE;
+  g_pool_offset = 0;
+  g_pool_offset_large = POOL_INITIAL_SIZE;  // Start large allocs at top
+  fprintf(stderr, "[HIP_API] Contiguous pool allocated: %p size=%zu - zeroing...\n",
+          (void*)g_contiguous_pool->device_ptr, g_pool_size);
+  fflush(stderr);
+  
+  // Zero the entire pool to prevent uninitialized memory issues.
+  // This is critical for correctness - some kernels may read memory before
+  // writing, and uninitialized data can cause NaN propagation.
+  uint8_t zero = 0;
+  status = iree_hal_streaming_memory_memset(
+      context, g_contiguous_pool->device_ptr, g_pool_size, &zero, 1,
+      context->default_stream);
+  if (iree_status_is_ok(status)) {
+    // Synchronize to ensure memset completes before any allocations
+    iree_hal_streaming_stream_synchronize(context->default_stream);
+    fprintf(stderr, "[HIP_API] Pool zeroed successfully\n");
+    fflush(stderr);
+  } else {
+    fprintf(stderr, "[HIP_API] WARNING: Failed to zero pool\n");
+    fflush(stderr);
+    iree_status_ignore(status);
+  }
+  
+  pthread_mutex_unlock(&g_pool_mutex);
+  return hipSuccess;
+}
+
 HIPAPI hipError_t hipMalloc(void** ptr, size_t size) {
   IREE_TRACE_ZONE_BEGIN(z0);
   if (!ptr) {
@@ -2896,17 +2966,100 @@ HIPAPI hipError_t hipMalloc(void** ptr, size_t size) {
     return hipSuccess;
   }
 
+  // DEBUG: Toggle between pool allocator and individual allocations
+  // Pool allocator is needed for hipBLASLt kernels that expect contiguous memory
+  // Individual allocations may help debug memory corruption issues
+#define USE_POOL_ALLOCATOR 1  // Set to 1 to use pool allocator, 0 for individual allocations
+
+#if USE_POOL_ALLOCATOR
+  // Use contiguous bump allocator to ensure all allocations are adjacent.
+  // hipBLASLt kernels calculate addresses relative to input pointers and
+  // expect memory to be contiguous as it is with PyTorch's caching allocator.
+  hipError_t pool_result = iree_hip_ensure_pool(context);
+  if (pool_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(pool_result);
+  }
+
+  // Align to 256 bytes for optimal GPU memory access.
+  size_t aligned_size = (size + 255) & ~(size_t)255;
+  
+  // WORKAROUND for GSUAMBSK kernel bug (hipBLASLt Split-K single kernel):
+  // The kernel has a bug where it writes to addresses up to ~21MB away from
+  // the intended output buffer. Adding 32MB padding between allocations
+  // ensures errant writes land in unused memory instead of corrupting
+  // other tensors.
+  //
+  // This is wasteful of GPU memory but necessary until the bug is fixed
+  // in hipBLASLt or we can force a different kernel selection.
+  static const size_t GSUAMBSK_PADDING = (size_t)32 * 1024 * 1024;  // 32MB
+  aligned_size += GSUAMBSK_PADDING;
+  
+  // Lock for thread-safe pool allocation
+  pthread_mutex_lock(&g_pool_mutex);
+  
+  // Check if we have enough space.
+  if (g_pool_offset + aligned_size > g_pool_size) {
+    fprintf(stderr, "[HIP_API] hipMalloc: pool EXHAUSTED! offset=%zu size=%zu pool_size=%zu\n",
+            g_pool_offset, aligned_size, g_pool_size);
+    fflush(stderr);
+    pthread_mutex_unlock(&g_pool_mutex);
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorOutOfMemory);
+  }
+
+  // Sub-allocate from the pool.
+  *ptr = (void*)(g_contiguous_pool->device_ptr + g_pool_offset);
+  iree_hal_streaming_deviceptr_t sub_alloc_ptr = g_contiguous_pool->device_ptr + g_pool_offset;
+  
+  // Log every 100MB of pool usage
+  size_t old_mb = g_pool_offset / (100 * 1024 * 1024);
+  g_pool_offset += aligned_size;
+  size_t new_mb = g_pool_offset / (100 * 1024 * 1024);
+  if (new_mb > old_mb) {
+    fprintf(stderr, "[HIP_API] Pool usage: %zu MB (alloc_count=%zu)\n",
+            g_pool_offset / (1024 * 1024), g_pool_alloc_count);
+    fflush(stderr);
+  }
+  g_pool_alloc_count++;
+  
+  pthread_mutex_unlock(&g_pool_mutex);
+  
+  // AGGRESSIVE_SYNC: Zero each sub-allocation to prevent stale data issues.
+  // This adds overhead but ensures no uninitialized memory is read.
+#ifndef IREE_HIP_ZERO_SUBALLOCS
+#define IREE_HIP_ZERO_SUBALLOCS 0  // Disabled - doesn't fix NaN issue
+#endif
+#if IREE_HIP_ZERO_SUBALLOCS
+  {
+    uint8_t zero = 0;
+    iree_status_t memset_status = iree_hal_streaming_memory_memset(
+        context, sub_alloc_ptr, aligned_size, &zero, 1,
+        context->default_stream);
+    if (iree_status_is_ok(memset_status)) {
+      // Synchronize to ensure memset completes before returning
+      iree_hal_streaming_stream_synchronize(context->default_stream);
+    } else {
+      iree_status_ignore(memset_status);
+    }
+  }
+#endif
+#else
+  // Use individual allocations (original behavior)
   iree_hal_streaming_buffer_t* buffer = NULL;
   iree_status_t status =
       iree_hal_streaming_memory_allocate_device(context, size, 0, &buffer);
 
   if (iree_status_is_ok(status)) {
     *ptr = (void*)buffer->device_ptr;
+  } else {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_status_to_hip_result(status);
   }
+#endif
 
-  hipError_t result = iree_status_to_hip_result(status);
   IREE_TRACE_ZONE_END(z0);
-  return result;
+  return hipSuccess;
 }
 
 // Allocates device memory with specific memory type flags.
@@ -3035,6 +3188,52 @@ HIPAPI hipError_t hipMallocPitch(void** devPtr, size_t* pitch, size_t width,
 // See also: hipMalloc, hipFreeHost, hipFreeAsync.
 HIPAPI hipError_t hipFree(void* ptr) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  
+  // For the contiguous pool allocator, track allocations and reset when empty.
+  // Check if this pointer is within our pool.
+  if (g_contiguous_pool && ptr) {
+    uintptr_t pool_start = g_contiguous_pool->device_ptr;
+    uintptr_t pool_end = pool_start + g_pool_size;
+    uintptr_t addr = (uintptr_t)ptr;
+    if (addr >= pool_start && addr < pool_end) {
+      // Lock for thread-safe pool free
+      pthread_mutex_lock(&g_pool_mutex);
+      
+      // This is a pool allocation - decrement count.
+      if (g_pool_alloc_count > 0) {
+        g_pool_alloc_count--;
+        // When all allocations are freed, reset the pool for reuse.
+        if (g_pool_alloc_count == 0) {
+          fprintf(stderr, "[HIP_API] hipFree: all allocations freed, resetting pool (was offset=%zu) - zeroing memory\n",
+                  g_pool_offset);
+          fflush(stderr);
+          
+          // Zero the used portion of the pool to prevent stale data from
+          // causing NaN propagation in subsequent runs.
+          iree_hal_streaming_context_t* ctx = NULL;
+          if (iree_hip_ensure_context(&ctx) == hipSuccess && ctx->default_stream) {
+            uint8_t zero = 0;
+            iree_status_t memset_status = iree_hal_streaming_memory_memset(
+                ctx, g_contiguous_pool->device_ptr, g_pool_offset, &zero, 1,
+                ctx->default_stream);
+            if (iree_status_is_ok(memset_status)) {
+              // Synchronize to ensure memset completes before new allocations
+              iree_hal_streaming_stream_synchronize(ctx->default_stream);
+            } else {
+              iree_status_ignore(memset_status);
+            }
+          }
+          
+          g_pool_offset = 0;
+        }
+      }
+      
+      pthread_mutex_unlock(&g_pool_mutex);
+      IREE_TRACE_ZONE_END(z0);
+      return hipSuccess;
+    }
+  }
+  
   // Ensure initialization and get context.
   iree_hal_streaming_context_t* context = NULL;
   hipError_t init_result = iree_hip_ensure_context(&context);
@@ -4942,6 +5141,9 @@ HIPAPI hipError_t hipMemcpyFromSymbol(void* dst, const void* symbol,
 // See also: hipMemsetAsync, hipMemsetD8, hipMemsetD16, hipMemsetD32.
 HIPAPI hipError_t hipMemset(void* dst, int value, size_t sizeBytes) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  fprintf(stderr, "[HIP_API] hipMemset(dst=%p, value=%d, size=%zu) ENTRY\n",
+          dst, value, sizeBytes);
+  fflush(stderr);
   // Validate dst pointer.
   if (!dst) {
     IREE_TRACE_ZONE_END(z0);
@@ -4962,10 +5164,16 @@ HIPAPI hipError_t hipMemset(void* dst, int value, size_t sizeBytes) {
 
   if (iree_status_is_ok(status)) {
     // hipMemset is synchronous - wait for completion on the default stream.
+    fprintf(stderr, "[HIP_API] hipMemset about to sync...\n");
+    fflush(stderr);
     status = iree_hal_streaming_stream_synchronize(context->default_stream);
+    fprintf(stderr, "[HIP_API] hipMemset sync done\n");
+    fflush(stderr);
   }
 
   hipError_t result = iree_status_to_hip_result(status);
+  fprintf(stderr, "[HIP_API] hipMemset EXIT result=%d\n", result);
+  fflush(stderr);
   IREE_TRACE_ZONE_END(z0);
   return result;
 }
@@ -5005,6 +5213,9 @@ HIPAPI hipError_t hipMemset(void* dst, int value, size_t sizeBytes) {
 HIPAPI hipError_t hipMemsetAsync(void* dst, int value, size_t sizeBytes,
                                  hipStream_t stream) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  fprintf(stderr, "[HIP_API] hipMemsetAsync(dst=%p, value=%d, size=%zu, stream=%p) ENTRY\n",
+          dst, value, sizeBytes, (void*)stream);
+  fflush(stderr);
   // Validate dst pointer.
   if (!dst) {
     IREE_TRACE_ZONE_END(z0);
@@ -5843,6 +6054,8 @@ HIPAPI int hipGetStreamDeviceId(hipStream_t stream) {
 // See also: hipStreamQuery, hipDeviceSynchronize, hipEventSynchronize.
 HIPAPI hipError_t hipStreamSynchronize(hipStream_t stream) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  fprintf(stderr, "[HIP_API] hipStreamSynchronize(stream=%p) called\n", (void*)stream);
+  fflush(stderr);
 
   // Resolve NULL stream to default stream.
   if (!stream) {
@@ -6341,6 +6554,8 @@ HIPAPI hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream) {
 // See also: hipEventQuery, hipEventRecord, hipStreamSynchronize.
 HIPAPI hipError_t hipEventSynchronize(hipEvent_t event) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  fprintf(stderr, "[HIP_API] hipEventSynchronize(event=%p) called\n", (void*)event);
+  fflush(stderr);
 
   // Check if any stream is capturing - synchronous operations not allowed
   // during capture. Note: We need to check global capture status since events
@@ -6631,6 +6846,9 @@ HIPAPI hipError_t hipModuleLoadDataEx(hipModule_t* module, const void* image,
                                       hipJitOption* options,
                                       void** optionValues) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  fprintf(stderr, "[HIP_API] hipModuleLoadDataEx(module=%p, image=%p, numOptions=%u) ENTRY\n",
+          (void*)module, image, numOptions);
+  fflush(stderr);
   if (!module || !image) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
@@ -6798,6 +7016,9 @@ HIPAPI hipError_t hipModuleUnload(hipModule_t module) {
 // See also: hipModuleLoad, hipModuleLaunchKernel, hipModuleGetGlobal.
 HIPAPI hipError_t hipModuleGetFunction(hipFunction_t* function,
                                        hipModule_t module, const char* kname) {
+  fprintf(stderr, "[HIP_API] hipModuleGetFunction(module=%p, kname='%s')\n",
+          (void*)module, kname ? kname : "(null)");
+  fflush(stderr);
   if (!function || !kname) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
@@ -6820,7 +7041,12 @@ HIPAPI hipError_t hipModuleGetFunction(hipFunction_t* function,
   if (iree_status_is_ok(status)) {
     // Tag the symbol before returning it.
     *function = (hipFunction_t)iree_hal_streaming_symbol_tag(stream_symbol);
+    fprintf(stderr, "[HIP_API] hipModuleGetFunction: found symbol %p -> tagged %p\n",
+            (void*)stream_symbol, (void*)*function);
+  } else {
+    fprintf(stderr, "[HIP_API] hipModuleGetFunction: FAILED to find '%s'\n", kname);
   }
+  fflush(stderr);
 
   hipError_t result = iree_status_to_hip_result(status);
   return result;
@@ -7332,6 +7558,10 @@ HIPAPI hipError_t hipLaunchKernel(const void* function_address, dim3 numBlocks,
                                   dim3 dimBlocks, void** args,
                                   size_t sharedMemBytes, hipStream_t stream) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  fprintf(stderr, "[HIP_API] hipLaunchKernel(func=%p, grid=(%u,%u,%u), block=(%u,%u,%u), shared=%zu, stream=%p)\n",
+          function_address, numBlocks.x, numBlocks.y, numBlocks.z,
+          dimBlocks.x, dimBlocks.y, dimBlocks.z, sharedMemBytes, (void*)stream);
+  fflush(stderr);
 
   if (!function_address) {
     IREE_TRACE_ZONE_END(z0);
@@ -7358,6 +7588,10 @@ HIPAPI hipError_t hipLaunchKernel(const void* function_address, dim3 numBlocks,
   if (iree_hal_streaming_symbol_has_tag(function_address)) {
     // Fast path: a symbol pointer - just untag and use directly.
     symbol = iree_hal_streaming_symbol_untag(function_address);
+    fprintf(stderr, "[DEBUG_TAG] Using tagged symbol %p -> copy=%u bind=%u name=%.*s\n",
+            function_address, symbol->parameters.copy_count, symbol->parameters.binding_count,
+            (int)(symbol->name.size > 80 ? 80 : symbol->name.size),
+            symbol->name.data ? symbol->name.data : "(null)");
   } else {
     // Slow path: must look up in symbol map.
     // This may demand-load the entire parent module of the function.
@@ -7366,11 +7600,20 @@ HIPAPI hipError_t hipLaunchKernel(const void* function_address, dim3 numBlocks,
     if (!iree_status_is_ok(lookup_status)) {
       // Symbol not found in registry - invalid function.
       iree_status_ignore(lookup_status);
+      fprintf(stderr, "[DEBUG_LOOKUP] Lookup failed for %p\n", function_address);
       symbol = NULL;
     } else if (symbol == (iree_hal_streaming_symbol_t*)function_address) {
       // Symbol was not found in registry - the lookup returns the host pointer
       // as a fallback which is not a valid symbol.
+      fprintf(stderr, "[DEBUG_LOOKUP] Identity returned for %p\n", function_address);
       symbol = NULL;
+    } else {
+      // Found valid symbol
+      if (symbol->name.data && strstr(symbol->name.data, "indexSelect")) {
+        fprintf(stderr, "[DEBUG_LOOKUP] Found indexSelect: copy=%u bind=%u const=%u\n",
+                symbol->parameters.copy_count, symbol->parameters.binding_count,
+                (unsigned)symbol->parameters.constant_bytes);
+      }
     }
   }
 
@@ -7494,12 +7737,43 @@ HIPAPI hipError_t hipExtLaunchKernel(const void* function_address,
 //
 // Note: Check device properties with hipDeviceGetAttribute() to determine
 // maximum grid/block dimensions and shared memory limits.
+// Counter for tracking hipModuleLaunchKernel calls (for debugging NaN issue)
+static int g_module_launch_count = 0;
+
 HIPAPI hipError_t hipModuleLaunchKernel(
     hipFunction_t f, unsigned int gridDimX, unsigned int gridDimY,
     unsigned int gridDimZ, unsigned int blockDimX, unsigned int blockDimY,
     unsigned int blockDimZ, unsigned int sharedMemBytes, hipStream_t stream,
     void** kernelParams, void** extra) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  int launch_num = ++g_module_launch_count;
+  fprintf(stderr, "[HIP_API] hipModuleLaunchKernel #%d: f=%p grid=(%u,%u,%u) block=(%u,%u,%u) shared=%u stream=%p extra=%p kernelParams=%p\n",
+          launch_num, (void*)f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ, sharedMemBytes, (void*)stream, (void*)extra, (void*)kernelParams);
+  
+  // Debug: dump the extra buffer contents to understand the kernel ABI
+  void* debug_buf = NULL;
+  size_t debug_sz = 0;
+  if (extra) {
+    fprintf(stderr, "[HIP_API]   extra format:\n");
+    for (int i = 0; extra[i] != HIP_LAUNCH_PARAM_END; i += 2) {
+      if (extra[i] == HIP_LAUNCH_PARAM_BUFFER_POINTER) {
+        debug_buf = extra[i + 1];
+        fprintf(stderr, "[HIP_API]     BUFFER_POINTER: %p\n", debug_buf);
+      } else if (extra[i] == HIP_LAUNCH_PARAM_BUFFER_SIZE) {
+        debug_sz = *(size_t*)extra[i + 1];
+        fprintf(stderr, "[HIP_API]     BUFFER_SIZE: %zu\n", debug_sz);
+      }
+    }
+    // Dump first 64 bytes of buffer as hex and pointers
+    if (debug_buf && debug_sz >= 64) {
+      fprintf(stderr, "[HIP_API]   buffer contents (first 64 bytes as ptrs):\n");
+      uint64_t* ptrs = (uint64_t*)debug_buf;
+      for (int i = 0; i < 8; ++i) {
+        fprintf(stderr, "[HIP_API]     [%d]: 0x%016lx\n", i, ptrs[i]);
+      }
+    }
+  }
+  fflush(stderr);
   // Ensure initialization and get context.
   iree_hal_streaming_context_t* context = NULL;
   hipError_t init_result = iree_hip_ensure_context(&context);
@@ -7555,6 +7829,8 @@ HIPAPI hipError_t hipModuleLaunchKernel(
       symbol, &params, (iree_hal_streaming_stream_t*)stream);
 
   hipError_t result = iree_status_to_hip_result(status);
+  fprintf(stderr, "[HIP_API] hipModuleLaunchKernel: returned result=%d\n", result);
+  fflush(stderr);
   IREE_TRACE_ZONE_END(z0);
   return result;
 }
@@ -7820,6 +8096,9 @@ HIPAPI hipError_t hipModuleLaunchCooperativeKernel(
 HIPAPI hipError_t hipLaunchHostFunc(hipStream_t stream, hipHostFn_t fn,
                                     void* userData) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  fprintf(stderr, "[HIP_API] hipLaunchHostFunc(stream=%p, fn=%p, userData=%p)\n",
+          (void*)stream, (void*)fn, userData);
+  fflush(stderr);
   if (!fn) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);

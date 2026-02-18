@@ -474,7 +474,7 @@ iree_status_t iree_hal_streaming_unpack_parameter_list(
 
 // Debug flag - set to 1 to enable verbose kernel launch debugging
 #ifndef IREE_STREAMING_DEBUG_KERNEL_LAUNCH
-#define IREE_STREAMING_DEBUG_KERNEL_LAUNCH 0
+#define IREE_STREAMING_DEBUG_KERNEL_LAUNCH 0  // Disabled
 #endif
 
 // Filter to only log kernels matching this substring (NULL = log all)
@@ -855,6 +855,18 @@ iree_status_t iree_hal_streaming_launch_kernel(
     } else {
       fprintf(stderr, "[LAUNCH]   RESULT: OK (dispatch recorded)\n");
     }
+  }
+#endif
+
+  // AGGRESSIVE_SYNC: Flush and synchronize after every kernel dispatch.
+  // This is very slow but ensures all operations complete before the next one.
+  // Set IREE_STREAMING_AGGRESSIVE_SYNC=1 to enable.
+#ifndef IREE_STREAMING_AGGRESSIVE_SYNC
+#define IREE_STREAMING_AGGRESSIVE_SYNC 0  // Disabled - too slow
+#endif
+#if IREE_STREAMING_AGGRESSIVE_SYNC
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_stream_synchronize(stream);
   }
 #endif
 
