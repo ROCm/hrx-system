@@ -418,6 +418,11 @@ static iree_status_t iree_hal_hsa_device_query_i64(
   }
 
   if (iree_string_view_equal(category, IREE_SV("hal.device"))) {
+    if (iree_string_view_equal(key, IREE_SV("concurrency"))) {
+      // For HSA, device concurrency is 1 (single device).
+      *out_value = 1;
+      return iree_ok_status();
+    }
     if (iree_string_view_equal(key, IREE_SV("memory.total"))) {
       // Query total memory from the device-local memory pool.
       if (!device->device_info.device_local_memory_pool_valid) {
@@ -432,6 +437,19 @@ static iree_status_t iree_hal_hsa_device_query_i64(
               HSA_AMD_MEMORY_POOL_INFO_SIZE, &pool_size),
           "hsa_amd_memory_pool_get_info(SIZE)"));
       *out_value = (int64_t)pool_size;
+      return iree_ok_status();
+    }
+    if (iree_string_view_equal(key, IREE_SV("warp_size"))) {
+      // Query wavefront (warp) size from the HSA agent.
+      // AMD GPUs typically use 64, RDNA may use 32.
+      uint32_t wavefront_size = 0;
+      IREE_RETURN_IF_ERROR(IREE_HSA_CALL_TO_STATUS(
+          device->hsa_symbols,
+          hsa_agent_get_info(device->device_info.agent,
+                             HSA_AGENT_INFO_WAVEFRONT_SIZE,
+                             &wavefront_size),
+          "hsa_agent_get_info(WAVEFRONT_SIZE)"));
+      *out_value = (int64_t)wavefront_size;
       return iree_ok_status();
     }
   }

@@ -291,6 +291,9 @@ typedef struct iree_hal_streaming_device_t {
   iree_device_size_t free_memory;
   bool supports_cooperative_launch;
 
+  // GCN architecture name (e.g., "gfx942:sramecc+:xnack-").
+  char gcn_arch_name[64];
+
   // Device properties cache.
   uint32_t max_threads_per_block;
   uint32_t max_block_dim[3];

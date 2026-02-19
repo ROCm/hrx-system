@@ -6,7 +6,8 @@
 
 #include "iree/hal/drivers/init.h"
 
-#include <string.h>  // for memset
+#include <stdio.h>   // for sscanf
+#include <string.h>  // for memset, memcpy
 
 #include "streaming/internal.h"
 #include "iree/hal/drivers/hip/registration/driver_module.h"
@@ -50,10 +51,49 @@ static iree_status_t iree_hal_streaming_query_device_info(
   IREE_ASSERT_ARGUMENT(device);
   IREE_ASSERT_ARGUMENT(device->hal_device);
 
-  // Query compute capability.
-  // TODO: Query from actual device properties.
-  device->compute_capability_major = 7;
-  device->compute_capability_minor = 5;
+  // Query compute capability from the device architecture string.
+  // AMD GCN/CDNA/RDNA architectures map to HIP compute capability:
+  //   gfx900 -> 9.0, gfx906 -> 9.0, gfx908 -> 9.0, gfx90a -> 9.0
+  //   gfx942 -> 9.4, gfx950 -> 9.5
+  //   gfx1030 -> 10.3, gfx1100 -> 11.0
+  char arch_name[64] = {0};
+  iree_status_t arch_status = iree_hal_device_query_string(
+      device->hal_device, IREE_SV("hal.device"), IREE_SV("architecture"),
+      sizeof(arch_name), arch_name);
+  if (iree_status_is_ok(arch_status) && arch_name[0] != '\0') {
+    // Parse "gfxNNNN" to extract major.minor.
+    // gfx9xx -> major=9, minor=x (e.g., gfx942 -> 9.4)
+    // gfx10xx -> major=10, minor=x
+    // gfx11xx -> major=11, minor=x
+    int gfx_num = 0;
+    if (sscanf(arch_name, "gfx%d", &gfx_num) == 1) {
+      if (gfx_num >= 1000) {
+        device->compute_capability_major = gfx_num / 100;
+        device->compute_capability_minor = (gfx_num / 10) % 10;
+      } else if (gfx_num >= 900) {
+        device->compute_capability_major = gfx_num / 100;
+        device->compute_capability_minor = (gfx_num / 10) % 10;
+      } else {
+        device->compute_capability_major = 7;
+        device->compute_capability_minor = 5;
+      }
+    } else {
+      device->compute_capability_major = 7;
+      device->compute_capability_minor = 5;
+    }
+    // Store the architecture name for hipGetDeviceProperties.
+    size_t name_len = strlen(arch_name);
+    if (name_len >= sizeof(device->gcn_arch_name)) {
+      name_len = sizeof(device->gcn_arch_name) - 1;
+    }
+    memcpy(device->gcn_arch_name, arch_name, name_len);
+    device->gcn_arch_name[name_len] = '\0';
+  } else {
+    iree_status_ignore(arch_status);
+    device->compute_capability_major = 9;
+    device->compute_capability_minor = 4;
+    memcpy(device->gcn_arch_name, "gfx942", 7);
+  }
 
   // Query memory info from the HAL device.
   int64_t total_memory = 0;
@@ -83,9 +123,20 @@ static iree_status_t iree_hal_streaming_query_device_info(
   device->max_grid_dim[1] = 65535;
   device->max_grid_dim[2] = 65535;
 
-  // Query hardware properties.
-  // Keep warp_size = 32 for compatibility (CUDA semantics, even on AMD).
-  device->warp_size = 32;
+  // Query warp/wavefront size from the HAL device.
+  // AMD GPUs use 64, NVIDIA uses 32, RDNA may use 32 or 64.
+  int64_t warp_size = 0;
+  status = iree_hal_device_query_i64(
+      device->hal_device, IREE_SV("hal.device"), IREE_SV("warp_size"),
+      &warp_size);
+  if (iree_status_is_ok(status) && warp_size > 0) {
+    device->warp_size = (uint32_t)warp_size;
+  } else {
+    // Fall back to 64 for AMD (HIP) or 32 for CUDA.
+    // Since this streaming layer is primarily used with HIP/AMD, default to 64.
+    iree_status_ignore(status);
+    device->warp_size = 64;
+  }
   
   // Query multiprocessor (compute unit) count from the device.
   int64_t mp_count = 0;
