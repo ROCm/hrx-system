@@ -375,9 +375,29 @@ static hipError_t wrap_hipModuleLaunchKernel(
       f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ,
       sharedMemBytes, stream, kernelParams, extra);
   log_msg(2, "hipModuleLaunchKernel(func=%p, grid=(%u,%u,%u), block=(%u,%u,%u), "
-          "shared=%u, stream=%p) -> %d",
+          "shared=%u, stream=%p, extra=%p) -> %d",
           (void*)f, gridDimX, gridDimY, gridDimZ,
-          blockDimX, blockDimY, blockDimZ, sharedMemBytes, (void*)stream, err);
+          blockDimX, blockDimY, blockDimZ, sharedMemBytes, (void*)stream,
+          (void*)extra, err);
+  return err;
+}
+
+static hipError_t wrap_hipExtModuleLaunchKernel(
+    hipFunction_t f, unsigned int globalWorkSizeX, unsigned int globalWorkSizeY,
+    unsigned int globalWorkSizeZ, unsigned int localWorkSizeX, unsigned int localWorkSizeY,
+    unsigned int localWorkSizeZ, size_t sharedMemBytes, hipStream_t stream,
+    void** kernelParams, void** extra,
+    hipEvent_t startEvent, hipEvent_t stopEvent, unsigned int flags) {
+  hipError_t err = g_real->hipExtModuleLaunchKernel(
+      f, globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ,
+      localWorkSizeX, localWorkSizeY, localWorkSizeZ,
+      sharedMemBytes, stream, kernelParams, extra,
+      startEvent, stopEvent, flags);
+  log_msg(2, "hipExtModuleLaunchKernel(func=%p, grid=(%u,%u,%u), block=(%u,%u,%u), "
+          "shared=%zu, stream=%p, flags=0x%x) -> %d",
+          (void*)f, globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ,
+          localWorkSizeX, localWorkSizeY, localWorkSizeZ,
+          sharedMemBytes, (void*)stream, flags, err);
   return err;
 }
 
@@ -490,6 +510,7 @@ hip_function_table_t* hip_interceptor_init(hip_function_table_t* real_functions)
   g_wrapper.hipEventQuery = wrap_hipEventQuery;
   g_wrapper.hipEventElapsedTime = wrap_hipEventElapsedTime;
   g_wrapper.hipModuleLaunchKernel = wrap_hipModuleLaunchKernel;
+  g_wrapper.hipExtModuleLaunchKernel = wrap_hipExtModuleLaunchKernel;
   g_wrapper.hipLaunchKernel = wrap_hipLaunchKernel;
   g_wrapper.__hipRegisterFatBinary = wrap___hipRegisterFatBinary;
   g_wrapper.__hipUnregisterFatBinary = wrap___hipUnregisterFatBinary;
@@ -499,6 +520,11 @@ hip_function_table_t* hip_interceptor_init(hip_function_table_t* real_functions)
   g_wrapper.hipPeekAtLastError = wrap_hipPeekAtLastError;
   
   return &g_wrapper;
+}
+
+__attribute__((visibility("default")))
+pfn_hip_log_fn hip_interceptor_get_log_fn(void) {
+  return (pfn_hip_log_fn)log_msg;
 }
 
 __attribute__((visibility("default")))

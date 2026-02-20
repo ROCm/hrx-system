@@ -802,10 +802,14 @@ typedef enum hipGraphInstantiate_flags {
 // Graph node parameter structures
 //===----------------------------------------------------------------------===//
 
-// Kernel launch parameter markers (same as CUDA).
-#define HIP_LAUNCH_PARAM_END ((void*)0x00)
+// Kernel launch parameter markers (must match real HIP API values).
+// NOTE: These were previously 0x00, 0x01, 0x02 which is WRONG.
+// The real HIP API uses 0x01, 0x02, 0x03. The mismatch caused the
+// extra[] array parsing loop to read past the terminator when hipBLASLt
+// (compiled against real HIP) passed extra arrays with END=0x03.
 #define HIP_LAUNCH_PARAM_BUFFER_POINTER ((void*)0x01)
 #define HIP_LAUNCH_PARAM_BUFFER_SIZE ((void*)0x02)
+#define HIP_LAUNCH_PARAM_END ((void*)0x03)
 
 // Kernel node parameters.
 typedef struct hipKernelNodeParams {

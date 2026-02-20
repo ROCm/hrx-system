@@ -288,6 +288,12 @@ typedef hip_function_table_t* (*pfn_hip_interceptor_init)(
 // Function signature for interceptor cleanup.
 typedef void (*pfn_hip_interceptor_shutdown)(void);
 
+// Log callback signature for pass-through function logging.
+// The interceptor can optionally export hip_interceptor_get_log_fn()
+// to provide a log function for functions that bypass the function table.
+typedef void (*pfn_hip_log_fn)(int level, const char* fmt, ...);
+typedef pfn_hip_log_fn (*pfn_hip_interceptor_get_log_fn)(void);
+
 //===----------------------------------------------------------------------===//
 // Passthrough API
 //===----------------------------------------------------------------------===//

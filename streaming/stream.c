@@ -140,10 +140,6 @@ iree_status_t iree_hal_streaming_stream_begin(
   // Note that we set UNRETAINED as we ensure the resources we have to track are
   // retained at the graph exec level and CUDA/HIP don't make any statements
   // about resource lifetime.
-  //
-  // TODO: if we are beginning with an idle stream or no waits we _could_
-  // ALLOW_INLINE_EXECUTION. I'm not exactly sure how to maintain that, though,
-  // so for now we err on the side of deferring.
   if (!stream->command_buffer) {
     status = iree_hal_command_buffer_create(
         stream->context->device,
@@ -608,7 +604,9 @@ iree_status_t iree_hal_streaming_launch_kernel(
     // This is used for kernels launched via HIP_LAUNCH_PARAM_BUFFER_POINTER
     // (e.g., hipBLASLt GEMM kernels) where the buffer is already packed.
     constants = params->buffer;
-    constants_size = params->buffer_size;
+    if (params->buffer_size != 0) {
+      constants_size = params->buffer_size;
+    }
     binding_list.count = 0;  // No IREE bindings, using raw pointers.
     use_raw_arguments = true;
 #if IREE_STREAMING_DEBUG_KERNEL_LAUNCH
@@ -704,7 +702,6 @@ iree_status_t iree_hal_streaming_launch_kernel(
     // For native kernels, params->buffer contains the pre-packed kernel
     // arguments that should be passed as-is to the GPU.
     constants = params->buffer;
-    // Use params->buffer_size if provided, otherwise use constant_bytes
     if (params->buffer_size > 0) {
       constants_size = params->buffer_size;
     }
@@ -750,15 +747,11 @@ iree_status_t iree_hal_streaming_launch_kernel(
           void* param_ptr = args_array[resolve_op.src_ordinal];
           // The parameter points to a device pointer (void*)
           void* device_ptr = *(void**)param_ptr;
-          // Copy the raw device pointer value into the constants buffer.
-          // The dst_ordinal is the binding index, but for raw args we need the offset.
-          // We need to figure out where this pointer should go in the packed buffer.
-          // For now, we'll assume pointers are at their natural offset.
-          // Since we don't have the offset info for bindings, we'll compute it
-          // based on the src_ordinal and assume 8-byte pointers.
-          // Actually, the binding doesn't have offset info in resolve_op.
-          // We need to store it in the right place - let's use src_offset.
-          memcpy((uint8_t*)constants + resolve_op.src_offset, &device_ptr, sizeof(void*));
+          // Copy the raw device pointer value into the constants buffer at the
+          // correct kernel ABI offset. dst_offset is the kernel's argument offset
+          // (from the code object metadata), NOT src_offset (which is a running
+          // total used for source buffer layout in non-args-array mode).
+          memcpy((uint8_t*)constants + resolve_op.dst_offset, &device_ptr, sizeof(void*));
         }
         
         binding_list.count = 0;  // No IREE bindings, using raw pointers.
@@ -809,9 +802,17 @@ iree_status_t iree_hal_streaming_launch_kernel(
   };
 
   // Dispatch through command buffer.
-  const iree_hal_dispatch_flags_t flags =
+  // Use a high bit to indicate the constants are a pre-packed kernarg buffer
+  // that should be passed via HIP_LAUNCH_PARAM_BUFFER (not void** kernelParams).
+  // This is used for hipBLASLt GEMM kernels dispatched via hipModuleLaunchKernel
+  // with the HIP_LAUNCH_PARAM_BUFFER_POINTER extra parameter.
+  #define IREE_HAL_DISPATCH_FLAG_PRE_PACKED_BUFFER (1ull << 16)
+  iree_hal_dispatch_flags_t flags =
       binding_list.count ? IREE_HAL_DISPATCH_FLAG_NONE
                          : IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS;
+  if (is_pre_packed) {
+    flags |= IREE_HAL_DISPATCH_FLAG_PRE_PACKED_BUFFER;
+  }
   
   // Ensure constants_size is 4-byte aligned as required by HAL.
   constants_size = (constants_size + 3) & ~(size_t)3;
@@ -862,7 +863,7 @@ iree_status_t iree_hal_streaming_launch_kernel(
   // This is very slow but ensures all operations complete before the next one.
   // Set IREE_STREAMING_AGGRESSIVE_SYNC=1 to enable.
 #ifndef IREE_STREAMING_AGGRESSIVE_SYNC
-#define IREE_STREAMING_AGGRESSIVE_SYNC 0  // Disabled - too slow
+#define IREE_STREAMING_AGGRESSIVE_SYNC 0
 #endif
 #if IREE_STREAMING_AGGRESSIVE_SYNC
   if (iree_status_is_ok(status)) {

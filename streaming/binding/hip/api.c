@@ -6,6 +6,8 @@
 
 #include "streaming/binding/hip/api.h"
 
+#include <dlfcn.h>
+
 #include "streaming/graph.h"
 #include "streaming/internal.h"
 
@@ -3059,7 +3061,7 @@ HIPAPI hipError_t hipMalloc(void** ptr, size_t size) {
   // AGGRESSIVE_SYNC: Zero each sub-allocation to prevent stale data issues.
   // This adds overhead but ensures no uninitialized memory is read.
 #ifndef IREE_HIP_ZERO_SUBALLOCS
-#define IREE_HIP_ZERO_SUBALLOCS 0  // Disabled - doesn't fix NaN issue
+#define IREE_HIP_ZERO_SUBALLOCS 1
 #endif
 #if IREE_HIP_ZERO_SUBALLOCS
   {
@@ -4206,11 +4208,30 @@ HIPAPI hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes,
           context, (iree_hal_streaming_deviceptr_t)dst, src, sizeBytes,
           (iree_hal_streaming_stream_t*)stream);
       break;
-    case hipMemcpyDeviceToHost:
+    case hipMemcpyDeviceToHost: {
+      // Sync ALL IREE HAL streams first.
+      iree_hal_streaming_context_synchronize(context);
+      // ALSO sync the real HIP device to ensure non-blocking streams are done.
+      // The IREE HAL uses hipStreamNonBlocking, and the real hipMemcpy may
+      // not implicitly wait for non-blocking streams.
+      {
+        static hipError_t (*real_device_sync)(void) = NULL;
+        if (!real_device_sync) {
+          const char* dylib_path = getenv("IREE_HIP_DYLIB_PATH");
+          if (dylib_path && strncmp(dylib_path, "file:", 5) == 0) dylib_path += 5;
+          if (dylib_path) {
+            void* h = dlopen(dylib_path, RTLD_NOW | RTLD_NOLOAD);
+            if (!h) h = dlopen(dylib_path, RTLD_NOW);
+            if (h) real_device_sync = dlsym(h, "hipDeviceSynchronize");
+          }
+        }
+        if (real_device_sync) real_device_sync();
+      }
       status = iree_hal_streaming_memcpy_device_to_host(
           context, dst, (iree_hal_streaming_deviceptr_t)src, sizeBytes,
           (iree_hal_streaming_stream_t*)stream);
       break;
+    }
     case hipMemcpyDeviceToDevice:
       status = iree_hal_streaming_memcpy_device_to_device(
           context, (iree_hal_streaming_deviceptr_t)dst,
@@ -7956,8 +7977,9 @@ HIPAPI hipError_t hipExtModuleLaunchKernel(
     unsigned int blockDimZ, unsigned int sharedMemBytes, hipStream_t stream,
     void** kernelParams, void** extra, hipEvent_t startEvent,
     hipEvent_t stopEvent, int flags) {
-  return hipModuleLaunchKernel(f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY,
-    blockDimZ, sharedMemBytes, stream, kernelParams, extra);
+  return hipModuleLaunchKernel(f, gridDimX, gridDimY, gridDimZ, blockDimX,
+                               blockDimY, blockDimZ, sharedMemBytes, stream,
+                               kernelParams, extra);
 }
 
 // Launches a cooperative kernel with grid-wide synchronization support.

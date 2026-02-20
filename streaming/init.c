@@ -181,16 +181,15 @@ static iree_status_t iree_hal_streaming_initialize_device(
   memset(out_device, 0, sizeof(*out_device));
 
   // Create HAL device from driver.
-  // This is the most likely place we could fail.
-  // For HIP backend, use the default stream (0) so that operations are
-  // synchronized with PyTorch which also uses the default stream.
-  iree_string_pair_t hal_device_params[1];
-  hal_device_params[0].key = IREE_SV("hip_external_stream");
-  hal_device_params[0].value = IREE_SV("0");
+  // Let the HAL create its own dispatch stream rather than using the
+  // default stream (0). The default stream (NULL) can cause issues with
+  // GPU cache coherency for atomic operations in split-K GEMM kernels.
+  // A dedicated stream created with hipStreamNonBlocking ensures proper
+  // ordering and visibility.
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_driver_create_device_by_id(
               driver, device_info->device_id,
-              /*param_count=*/1, /*params=*/hal_device_params,
+              /*param_count=*/0, /*params=*/NULL,
               registry->host_allocator, &out_device->hal_device));
 
   // Set driver and retain.
