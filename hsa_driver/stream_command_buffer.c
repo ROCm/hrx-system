@@ -586,8 +586,9 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
           }
         } else {
           // This is a constant parameter - copy from constants buffer.
-          // The streaming layer packs constants at their kernarg offsets within
-          // the constants buffer, so we use param->offset to read.
+          // Constants are packed at their ABI offsets (param->offset) in the
+          // constants buffer, matching how they appear in the kernel argument
+          // buffer.
           if (param->offset + param->size <= constants.data_length) {
             memcpy(dest, constants.data + param->offset, param->size);
           }
