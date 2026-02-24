@@ -361,17 +361,19 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_collective(
                           "collectives not implemented");
 }
 
-// Debug flags for HSA dispatch - flip these to enable debug logging
+// Debug flags for HSA dispatch - flip these to enable debug logging.
+// Set to 1 to enable, 0 to disable. Override via compiler flags:
+//   -DIREE_HSA_DEBUG_DISPATCH=1
 #ifndef IREE_HSA_DEBUG_DISPATCH
-#define IREE_HSA_DEBUG_DISPATCH 1  // General dispatch info (kernel name, grid, etc.)
+#define IREE_HSA_DEBUG_DISPATCH 0  // General dispatch info (kernel name, grid, etc.)
 #endif
 #ifndef IREE_HSA_DEBUG_HIDDEN_ARGS
-#define IREE_HSA_DEBUG_HIDDEN_ARGS 1  // Hidden/implicit argument filling
+#define IREE_HSA_DEBUG_HIDDEN_ARGS 0  // Hidden/implicit argument filling
 #endif
 
 // Special debug: dump full kernarg hex for CUSTOM_DIRECT_ARGUMENTS kernels
 #ifndef IREE_HSA_DEBUG_KERNARG_HEX
-#define IREE_HSA_DEBUG_KERNARG_HEX 1  // Hex dump of kernarg for native kernels
+#define IREE_HSA_DEBUG_KERNARG_HEX 0  // Hex dump of kernarg for native kernels
 #endif
 
 // VALIDATION: Check if device pointers in kernarg are within our pool range
@@ -634,17 +636,17 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
           }
         }
 #endif
-// ALWAYS dump kernarg info to debug GEMM consistency issue
+#if IREE_HSA_DEBUG_DISPATCH
         {
           static int kernarg_dump_count = 0;
           ++kernarg_dump_count;
           fprintf(stderr, "[KERNARG #%d] copied %zu bytes to %p (kernel explicit_size=%u kernarg_seg=%u)\n", 
                   kernarg_dump_count, copy_size, kernarg_address,
                   kernel_params->explicit_kernarg_size, kernel_params->kernarg_segment_size);
-          // Also print kernarg_size we allocated
           fprintf(stderr, "[KERNARG #%d]   allocated kernarg_size=%zu uses_implicit=%d\n",
                   kernarg_dump_count, kernarg_size, uses_implicit_args ? 1 : 0);
         }
+#endif
 #if IREE_HSA_DEBUG_KERNARG_HEX
         // Always dump kernarg hex for CUSTOM_DIRECT_ARGUMENTS to compare M=224 vs M=256
         fprintf(stderr, "[KERNARG_HEX] export=%u size=%zu\n", export_ordinal, copy_size);

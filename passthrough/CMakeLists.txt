@@ -73,6 +73,29 @@ set_target_properties(hip_logging PROPERTIES
 )
 
 #-------------------------------------------------------------------------------
+# HIP No-Op Interceptor Library (libhip_noop)
+#
+# Interception library that does nothing — all HIP calls pass through directly.
+# Use this when you want interception plumbing active but no logging overhead.
+# Load via HIP_INTERCEPTION_LIBRARY environment variable.
+#-------------------------------------------------------------------------------
+
+add_library(hip_noop SHARED
+  interceptors/passthrough_interceptor.c
+)
+
+target_include_directories(hip_noop
+  PUBLIC
+    ${CMAKE_SOURCE_DIR}
+)
+
+set_target_properties(hip_noop PROPERTIES
+  OUTPUT_NAME "hip_noop"
+  VERSION 1.0.0
+  SOVERSION 1
+)
+
+#-------------------------------------------------------------------------------
 # HIP Buffer Tracer Library (libhip_buffer_tracer)
 #
 # Interception library that tracks memory allocations and can dump buffer
@@ -113,7 +136,7 @@ set_target_properties(hip_buffer_tracer PROPERTIES
 # Installation
 #-------------------------------------------------------------------------------
 
-install(TARGETS hip_intercept hip_logging hip_buffer_tracer
+install(TARGETS hip_intercept hip_logging hip_noop hip_buffer_tracer
   LIBRARY DESTINATION lib
 )
 

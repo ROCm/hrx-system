@@ -7942,43 +7942,47 @@ HIPAPI hipError_t hipModuleLaunchKernel(
 //
 // Synchronization: This operation is asynchronous.
 //
-// Stream behavior:
-// - Kernel execution is enqueued in the specified stream.
-// - If stream is NULL, uses the default stream.
-// - Kernel executes after all previously enqueued operations in the stream.
-// - Use hipStreamSynchronize() to wait for kernel completion.
-// - Use hipEventRecord() after launch to mark completion point.
-// - Graph capture: Supported. Creates kernel node when capturing.
+// Extended kernel launch with OpenCL-style global/local work sizes.
 //
-// Launch configuration:
-// - Total threads = gridDim * blockDim.
-// - Grid dimensions must be > 0 and within device limits.
-// - Block dimensions must be > 0 and within device limits.
-// - Total threads per block must not exceed device maximum.
-// - Shared memory size must not exceed device maximum.
+// IMPORTANT: Unlike hipModuleLaunchKernel which takes grid dimensions
+// (number of workgroups), this function takes GLOBAL work sizes
+// (total number of threads). The relationship is:
+//   gridDim = globalWorkSize / localWorkSize
 //
-// Kernel parameters:
-// - kernelParams is an array of void* pointers to actual arguments.
-// - Array must be NULL-terminated.
-// - Each pointer points to the argument value (not a pointer to pointer).
-// - Arguments are passed by value to the kernel.
+// Parameters:
+//  - f: [IN] Kernel function handle from hipModuleGetFunction().
+//  - globalWorkSizeX: [IN] Total threads in X (NOT number of workgroups).
+//  - globalWorkSizeY: [IN] Total threads in Y.
+//  - globalWorkSizeZ: [IN] Total threads in Z.
+//  - localWorkSizeX: [IN] Threads per workgroup in X (same as blockDimX).
+//  - localWorkSizeY: [IN] Threads per workgroup in Y.
+//  - localWorkSizeZ: [IN] Threads per workgroup in Z.
+//  - sharedMemBytes: [IN] Dynamic shared memory size per block in bytes.
+//  - stream: [IN] Stream for kernel execution (NULL = default stream).
+//  - kernelParams: [IN] Array of kernel parameters, NULL-terminated.
+//  - extra: [IN] Extra launch parameters (HIP_LAUNCH_PARAM_BUFFER).
+//  - startEvent: [IN] Event to record at kernel start (can be NULL).
+//  - stopEvent: [IN] Event to record at kernel end (can be NULL).
+//  - flags: [IN] Launch flags (e.g., hipExtAnyOrderLaunch).
 //
-// Multi-GPU: Kernel executes on the device associated with the current
-// context.
-//
-// WARNING: Ensure all kernel arguments remain valid until kernel completes.
-// Do not modify or free argument memory while kernel is executing.
-//
-// Note: Check device properties with hipDeviceGetAttribute() to determine
-// maximum grid/block dimensions and shared memory limits.
+// Note: This converts globalWorkSize to gridDim before calling
+// hipModuleLaunchKernel: gridDim = ceil(globalWorkSize / localWorkSize).
 HIPAPI hipError_t hipExtModuleLaunchKernel(
-    hipFunction_t f, unsigned int gridDimX, unsigned int gridDimY,
-    unsigned int gridDimZ, unsigned int blockDimX, unsigned int blockDimY,
-    unsigned int blockDimZ, unsigned int sharedMemBytes, hipStream_t stream,
+    hipFunction_t f, unsigned int globalWorkSizeX, unsigned int globalWorkSizeY,
+    unsigned int globalWorkSizeZ, unsigned int localWorkSizeX,
+    unsigned int localWorkSizeY, unsigned int localWorkSizeZ,
+    unsigned int sharedMemBytes, hipStream_t stream,
     void** kernelParams, void** extra, hipEvent_t startEvent,
     hipEvent_t stopEvent, int flags) {
-  return hipModuleLaunchKernel(f, gridDimX, gridDimY, gridDimZ, blockDimX,
-                               blockDimY, blockDimZ, sharedMemBytes, stream,
+  // Convert OpenCL-style global/local work sizes to CUDA-style grid/block
+  // dimensions. hipModuleLaunchKernel expects gridDim (number of workgroups),
+  // but hipExtModuleLaunchKernel receives globalWorkSize (total threads).
+  unsigned int gridDimX = localWorkSizeX ? ((globalWorkSizeX + localWorkSizeX - 1) / localWorkSizeX) : 1;
+  unsigned int gridDimY = localWorkSizeY ? ((globalWorkSizeY + localWorkSizeY - 1) / localWorkSizeY) : 1;
+  unsigned int gridDimZ = localWorkSizeZ ? ((globalWorkSizeZ + localWorkSizeZ - 1) / localWorkSizeZ) : 1;
+  return hipModuleLaunchKernel(f, gridDimX, gridDimY, gridDimZ,
+                               localWorkSizeX, localWorkSizeY, localWorkSizeZ,
+                               sharedMemBytes, stream,
                                kernelParams, extra);
 }
 

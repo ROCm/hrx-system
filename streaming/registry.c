@@ -593,7 +593,7 @@ static iree_status_t iree_hal_streaming_context_symbol_map_prepare_module(
       }
 
       // Debug: print symbol metadata when inserting
-#if 1
+#if 0
       if (strstr(registered_name.data, "indexSelect")) {
         fprintf(stderr, "[DEBUG] Inserting symbol '%.*s' copy=%u bind=%u const=%u\n",
                 (int)registered_name.size, registered_name.data,
@@ -712,7 +712,7 @@ iree_status_t iree_hal_streaming_context_symbol_map_lookup(
     const void* entry_key = map->entries[index].key;
     if (entry_key == host_pointer) {
       *out_symbol = map->entries[index].symbol;  // hit
-#if 1
+#if 0
       // Debug: check if this is an indexSelect kernel by looking at name
       if ((*out_symbol)->name.data && strstr((*out_symbol)->name.data, "indexSelect")) {
         fprintf(stderr, "[DEBUG_FAST] Found indexSelect: copy=%u bind=%u const=%u name=%.*s\n",
@@ -754,7 +754,7 @@ iree_status_t iree_hal_streaming_context_symbol_map_lookup(
     const void* entry_key = map->entries[index].key;
     if (entry_key == host_pointer) {
       *out_symbol = map->entries[index].symbol;  // hit
-#if 1
+#if 0
       if (strstr(registration->device_name, "indexSelect")) {
         fprintf(stderr, "[DEBUG] Found indexSelect in hash: copy=%u bind=%u const=%u\n",
                 (*out_symbol)->parameters.copy_count, (*out_symbol)->parameters.binding_count,
