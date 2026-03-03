@@ -12,6 +12,8 @@ load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
 # via CtsRegistry::RegisterBackend(). main.cc calls InstantiateAll() to create
 # gtest parameterized test instances.
 
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+
 package(
     default_visibility = ["//visibility:public"],
     features = ["layering_check"],
@@ -150,11 +152,25 @@ iree_runtime_cc_library(
     alwayslink = True,
 )
 
+# Latency benchmark: cold (notification) vs warm (poll) delivery latency.
+iree_runtime_cc_library(
+    name = "latency_benchmark_lib",
+    testonly = True,
+    srcs = ["latency_benchmark.cc"],
+    deps = [
+        "//runtime/src/iree/net/carrier/cts/util:benchmark_base",
+        "//runtime/src/iree/net/carrier/cts/util:registry",
+        "@com_google_benchmark//:benchmark",
+    ],
+    alwayslink = True,
+)
+
 # Combined library of all benchmark suites.
 iree_runtime_cc_library(
     name = "all_benchmarks",
     testonly = True,
     deps = [
+        ":latency_benchmark_lib",
         ":roundtrip_benchmark_lib",
         ":throughput_benchmark_lib",
     ],
