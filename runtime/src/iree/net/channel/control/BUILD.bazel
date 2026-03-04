@@ -5,6 +5,8 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:cc_fuzz.bzl", "iree_runtime_cc_fuzz")
+load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -17,5 +19,44 @@ iree_runtime_cc_library(
     hdrs = ["frame.h"],
     deps = [
         "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "control_channel",
+    srcs = ["control_channel.c"],
+    hdrs = ["control_channel.h"],
+    deps = [
+        ":frame",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/net:message_endpoint",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "control_channel_test",
+    srcs = ["control_channel_test.cc"],
+    deps = [
+        ":control_channel",
+        ":frame",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/net:message_endpoint",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_fuzz(
+    name = "control_channel_fuzz",
+    srcs = ["control_channel_fuzz.cc"],
+    deps = [
+        ":control_channel",
+        ":frame",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/net:message_endpoint",
     ],
 )
