@@ -110,8 +110,8 @@ struct XProcContext {
       DeactivateAndDrain();
       iree_net_carrier_release(carrier);
     }
-    if (shared_wake) iree_net_shm_shared_wake_release(shared_wake);
-    if (proactor) iree_async_proactor_release(proactor);
+    iree_net_shm_shared_wake_release(shared_wake);
+    iree_async_proactor_release(proactor);
 #if defined(IREE_PLATFORM_WINDOWS)
     if (pipe_handle != INVALID_HANDLE_VALUE) CloseHandle(pipe_handle);
 #else

@@ -422,10 +422,12 @@ static inline void iree_net_carrier_initialize(
 }
 
 static inline void iree_net_carrier_retain(iree_net_carrier_t* carrier) {
+  if (!carrier) return;
   iree_atomic_ref_count_inc(&carrier->ref_count);
 }
 
 static inline void iree_net_carrier_release(iree_net_carrier_t* carrier) {
+  if (!carrier) return;
   if (iree_atomic_ref_count_dec(&carrier->ref_count) == 1) {
     carrier->vtable->destroy(carrier);
   }

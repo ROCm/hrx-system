@@ -135,9 +135,7 @@ inline void DestroyBenchmarkContext(BenchmarkContext* ctx) {
   if (ctx->pair.cleanup) {
     ctx->pair.cleanup(ctx->pair.context);
   }
-  if (ctx->proactor) {
-    iree_async_proactor_release(ctx->proactor);
-  }
+  iree_async_proactor_release(ctx->proactor);
   delete ctx;
 }
 

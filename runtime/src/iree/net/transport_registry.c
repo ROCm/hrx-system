@@ -89,9 +89,7 @@ IREE_API_EXPORT void iree_net_transport_registry_free(
   // Release all entries and their factories.
   for (iree_host_size_t i = 0; i < registry->entry_count; ++i) {
     iree_net_transport_registry_entry_t* entry = registry->entries[i];
-    if (entry->factory) {
-      iree_net_transport_factory_release(entry->factory);
-    }
+    iree_net_transport_factory_release(entry->factory);
     iree_allocator_free(host_allocator, entry);
   }
 

@@ -258,26 +258,23 @@ static iree_status_t iree_net_session_register_remote_axes(
     session->remote_axes[i] = (iree_async_axis_t)entries[i].axis;
     session->remote_epochs[i] = entries[i].current_epoch;
 
-    // Create a software proxy semaphore initialized to the remote's current
-    // epoch. When the HAL layer receives ADVANCE frames, it calls
-    // frontier_tracker_advance() which signals this semaphore.
-    // Proxy semaphores are created without a proactor for now; the HAL remote
-    // device will provide one from its proactor pool when it wires through.
+    // Create a software proxy semaphore and register it as the bridge for this
+    // remote axis. Bootstrap advances through the frontier tracker below so
+    // the tracker epoch and semaphore timeline are initialized by the same
+    // path used for later remote ADVANCE frames.
     status = iree_async_semaphore_create(
-        /*proactor=*/NULL, entries[i].current_epoch,
+        session->proactor, /*initial_value=*/0,
         IREE_ASYNC_SEMAPHORE_DEFAULT_FRONTIER_CAPACITY, session->host_allocator,
         &session->proxy_semaphores[i]);
     if (!iree_status_is_ok(status)) break;
 
-    // Register in the frontier tracker's axis table.
-    int32_t index = iree_async_axis_table_add(
-        &session->frontier_tracker->axis_table,
-        (iree_async_axis_t)entries[i].axis, session->proxy_semaphores[i]);
-    if (index < 0) {
-      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                                "frontier tracker axis table full (axis %d/%d)",
-                                i, axis_count);
-      break;
+    status = iree_async_frontier_tracker_register_axis(
+        session->frontier_tracker, session->remote_axes[i],
+        session->proxy_semaphores[i]);
+    if (iree_status_is_ok(status) && entries[i].current_epoch > 0) {
+      iree_async_frontier_tracker_advance(session->frontier_tracker,
+                                          session->remote_axes[i],
+                                          entries[i].current_epoch);
     }
   }
 
@@ -298,10 +295,9 @@ static void iree_net_session_cleanup_remote_axes(iree_net_session_t* session) {
 
   for (uint32_t i = 0; i < session->remote_axis_count; ++i) {
     if (session->proxy_semaphores[i]) {
-      // Fail the axis in the tracker — this propagates errors to all local
-      // waiters that depend on this remote axis.
+      // Retire the axis before releasing the borrowed proxy semaphore.
       if (session->frontier_tracker) {
-        iree_async_frontier_tracker_fail_axis(
+        iree_async_frontier_tracker_retire_axis(
             session->frontier_tracker, session->remote_axes[i],
             iree_make_status(IREE_STATUS_UNAVAILABLE,
                              "remote session disconnected"));
@@ -689,14 +685,10 @@ static void iree_net_session_on_goaway(void* user_data, uint32_t reason_code,
 // Control channel ERROR handler.
 // Retains the session to protect against re-entrant release from on_error.
 static void iree_net_session_on_control_error(void* user_data,
-                                              uint32_t error_code,
-                                              iree_string_view_t message) {
+                                              iree_status_t status) {
   iree_net_session_t* session = (iree_net_session_t*)user_data;
   iree_net_session_retain(session);
-  iree_net_session_fail(
-      session,
-      iree_make_status((iree_status_code_t)error_code, "remote error: %.*s",
-                       (int)message.size, message.data));
+  iree_net_session_fail(session, status);
   iree_net_session_release(session);
 }
 
@@ -954,14 +946,10 @@ static void iree_net_session_destroy(iree_net_session_t* session) {
   }
 
   // Release connection.
-  if (session->connection) {
-    iree_net_connection_release(session->connection);
-  }
+  iree_net_connection_release(session->connection);
 
   // Release transport factory (client path only).
-  if (session->transport_factory) {
-    iree_net_transport_factory_release(session->transport_factory);
-  }
+  iree_net_transport_factory_release(session->transport_factory);
 
   // Free server address storage (client path only).
   if (session->server_address_storage) {
@@ -1065,6 +1053,13 @@ IREE_API_EXPORT iree_status_t iree_net_session_accept(
 
   // Store borrowed references.
   session->frontier_tracker = frontier_tracker;
+  session->proactor = iree_net_connection_proactor(connection);
+  if (!session->proactor) {
+    iree_net_session_destroy(session);
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "connection does not expose a proactor");
+  }
 
   // Open control endpoint to begin bootstrap.
   iree_status_t status = iree_net_connection_open_endpoint(
@@ -1085,11 +1080,13 @@ IREE_API_EXPORT iree_status_t iree_net_session_accept(
 //===----------------------------------------------------------------------===//
 
 IREE_API_EXPORT void iree_net_session_retain(iree_net_session_t* session) {
-  if (session) iree_atomic_ref_count_inc(&session->ref_count);
+  if (!session) return;
+  iree_atomic_ref_count_inc(&session->ref_count);
 }
 
 IREE_API_EXPORT void iree_net_session_release(iree_net_session_t* session) {
-  if (session && iree_atomic_ref_count_dec(&session->ref_count) == 1) {
+  if (!session) return;
+  if (iree_atomic_ref_count_dec(&session->ref_count) == 1) {
     iree_net_session_destroy(session);
   }
 }

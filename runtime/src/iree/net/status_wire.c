@@ -6,6 +6,7 @@
 
 #include "iree/net/status_wire.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 //===----------------------------------------------------------------------===//
@@ -60,7 +61,7 @@ static iree_status_t iree_net_status_wire_size_payload_visitor(
   return iree_ok_status();
 }
 
-void iree_net_status_wire_size(iree_status_t status,
+void iree_net_status_wire_size(const iree_status_t status,
                                iree_host_size_t* out_size) {
   // Header is always present.
   iree_host_size_t size = sizeof(iree_net_status_wire_header_t);
@@ -162,18 +163,44 @@ static iree_status_t iree_net_status_wire_serialize_payload_visitor(
   memcpy(context->buffer + context->offset, &entry, sizeof(entry));
   context->offset += sizeof(entry);
 
-  // Format payload text directly into the buffer (clamped capacity).
+  // Formatters follow the public two-pass convention and may reserve a byte
+  // for a NUL terminator. The wire payload is exact-length data, so format
+  // through a temporary buffer and copy only the declared payload bytes.
+  char stack_buffer[512];
+  char* temporary_buffer = stack_buffer;
+  iree_host_size_t temporary_capacity = sizeof(stack_buffer);
+  const iree_host_size_t required_capacity = payload_length + 1;
+  bool heap_allocated = false;
+  if (required_capacity > temporary_capacity) {
+    temporary_buffer = (char*)malloc(required_capacity);
+    if (IREE_UNLIKELY(!temporary_buffer)) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "status wire payload scratch allocation failed: "
+                              "%" PRIhsz " bytes",
+                              required_capacity);
+    }
+    temporary_capacity = required_capacity;
+    heap_allocated = true;
+  }
   iree_host_size_t written = 0;
-  iree_status_payload_format(payload, payload_length + 1,
-                             (char*)(context->buffer + context->offset),
+  iree_status_payload_format(payload, temporary_capacity, temporary_buffer,
                              &written);
+  if (IREE_UNLIKELY(written < payload_length)) {
+    if (heap_allocated) free(temporary_buffer);
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "status payload formatter produced %" PRIhsz
+                            " of %" PRIhsz " bytes",
+                            written, payload_length);
+  }
+  memcpy(context->buffer + context->offset, temporary_buffer, payload_length);
+  if (heap_allocated) free(temporary_buffer);
   context->offset += iree_net_align8(payload_length);
   context->entry_count++;
 
   return iree_ok_status();
 }
 
-iree_status_t iree_net_status_wire_serialize(iree_status_t status,
+iree_status_t iree_net_status_wire_serialize(const iree_status_t status,
                                              iree_byte_span_t buffer) {
   iree_host_size_t required_size = 0;
   iree_net_status_wire_size(status, &required_size);
@@ -212,7 +239,7 @@ iree_status_t iree_net_status_wire_serialize(iree_status_t status,
     }
 
     // Payload entries (annotations, stack traces).
-    iree_status_ignore(iree_status_enumerate_payloads(
+    IREE_RETURN_IF_ERROR(iree_status_enumerate_payloads(
         status, iree_net_status_wire_serialize_payload_visitor, &context));
   }
 

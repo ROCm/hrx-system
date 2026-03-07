@@ -15,9 +15,6 @@ load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
 #   Layer 2: Carriers (loopback, TCP, shared memory, RDMA) - raw transport
 #   Layer 1: Proactor (iree/async/) - completion-based I/O
 
-load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
-load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
-
 package(
     default_visibility = ["//visibility:public"],
     features = ["layering_check"],

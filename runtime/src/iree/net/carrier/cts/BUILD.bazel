@@ -12,8 +12,6 @@ load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
 # via CtsRegistry::RegisterBackend(). main.cc calls InstantiateAll() to create
 # gtest parameterized test instances.
 
-load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
-
 package(
     default_visibility = ["//visibility:public"],
     features = ["layering_check"],
@@ -176,7 +174,7 @@ iree_runtime_cc_library(
     deps = [
         "//runtime/src/iree/net/carrier/cts/util:benchmark_base",
         "//runtime/src/iree/net/carrier/cts/util:registry",
-        "@com_google_benchmark//:benchmark",
+        "//third_party:google_benchmark",
     ],
     alwayslink = True,
 )

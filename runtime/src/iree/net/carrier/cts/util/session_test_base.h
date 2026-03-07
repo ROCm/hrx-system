@@ -10,11 +10,10 @@
 // and server sides, session callback tracking, and helpers to establish a
 // bootstrapped session pair across any transport backend.
 //
-// The frontier tracker uses the initialize/deinitialize pattern with
-// pre-allocated axis table entries. Each side gets its own tracker because in
-// production, client and server are separate machines with separate trackers.
-// The session registers the peer's axes (as proxy semaphores) in its local
-// tracker.
+// The frontier tracker owns its axis table. Each side gets its own tracker
+// because in production, client and server are separate machines with separate
+// trackers. The session registers the peer's axes (as proxy semaphores) in its
+// local tracker.
 //
 // Session tests require the "factory" tag because they need the full
 // factory -> listener -> connection -> session pipeline.
@@ -132,15 +131,17 @@ class SessionTestBase : public FactoryTestBase {
   void SetUp() override {
     FactoryTestBase::SetUp();
 
-    memset(client_axis_entries_, 0, sizeof(client_axis_entries_));
-    memset(server_axis_entries_, 0, sizeof(server_axis_entries_));
+    iree_async_frontier_tracker_options_t client_options =
+        iree_async_frontier_tracker_options_default();
+    client_options.axis_table_capacity = kAxisTableCapacity;
+    IREE_ASSERT_OK(iree_async_frontier_tracker_create(
+        client_options, iree_allocator_system(), &client_tracker_));
 
-    IREE_ASSERT_OK(iree_async_frontier_tracker_initialize(
-        &client_tracker_, client_axis_entries_, kAxisTableCapacity,
-        iree_allocator_system()));
-    IREE_ASSERT_OK(iree_async_frontier_tracker_initialize(
-        &server_tracker_, server_axis_entries_, kAxisTableCapacity,
-        iree_allocator_system()));
+    iree_async_frontier_tracker_options_t server_options =
+        iree_async_frontier_tracker_options_default();
+    server_options.axis_table_capacity = kAxisTableCapacity;
+    IREE_ASSERT_OK(iree_async_frontier_tracker_create(
+        server_options, iree_allocator_system(), &server_tracker_));
   }
 
   void TearDown() override {
@@ -167,14 +168,10 @@ class SessionTestBase : public FactoryTestBase {
     // window lets those NOPs complete while the carrier is still alive.
     PollUntil([&]() { return false; }, iree_make_duration_ms(100));
 
-    if (server_session_) {
-      iree_net_session_release(server_session_);
-      server_session_ = nullptr;
-    }
-    if (client_session_) {
-      iree_net_session_release(client_session_);
-      client_session_ = nullptr;
-    }
+    iree_net_session_release(server_session_);
+    server_session_ = nullptr;
+    iree_net_session_release(client_session_);
+    client_session_ = nullptr;
 
     // Second drain: process async cleanup from session/connection teardown.
     // Releasing sessions may trigger deactivation callbacks, listener stop
@@ -187,8 +184,10 @@ class SessionTestBase : public FactoryTestBase {
       listener_ = nullptr;
     }
 
-    iree_async_frontier_tracker_deinitialize(&server_tracker_);
-    iree_async_frontier_tracker_deinitialize(&client_tracker_);
+    iree_async_frontier_tracker_release(server_tracker_);
+    server_tracker_ = nullptr;
+    iree_async_frontier_tracker_release(client_tracker_);
+    client_tracker_ = nullptr;
 
     FactoryTestBase::TearDown();
   }
@@ -240,7 +239,7 @@ class SessionTestBase : public FactoryTestBase {
           server_options.session_id = ctx->server_session_id;
 
           IREE_CHECK_OK(iree_net_session_accept(
-              connection, &ctx->test->server_tracker_, &server_options,
+              connection, ctx->test->server_tracker_, &server_options,
               ctx->test->server_callbacks_.MakeCallbacks(),
               iree_allocator_system(), &ctx->test->server_session_));
 
@@ -260,7 +259,7 @@ class SessionTestBase : public FactoryTestBase {
     IREE_CHECK_OK(iree_net_session_connect(
         factory_,
         iree_make_string_view(connect_str.c_str(), connect_str.size()),
-        proactor_, recv_pool_, &client_tracker_, &client_options,
+        proactor_, recv_pool_, client_tracker_, &client_options,
         client_callbacks_.MakeCallbacks(), iree_allocator_system(),
         &client_session_));
 
@@ -299,11 +298,8 @@ class SessionTestBase : public FactoryTestBase {
   // Test state
   //===--------------------------------------------------------------------===//
 
-  iree_async_axis_table_entry_t client_axis_entries_[kAxisTableCapacity];
-  iree_async_frontier_tracker_t client_tracker_;
-
-  iree_async_axis_table_entry_t server_axis_entries_[kAxisTableCapacity];
-  iree_async_frontier_tracker_t server_tracker_;
+  iree_async_frontier_tracker_t* client_tracker_ = nullptr;
+  iree_async_frontier_tracker_t* server_tracker_ = nullptr;
 
   SessionCallbackTracker client_callbacks_;
   SessionCallbackTracker server_callbacks_;

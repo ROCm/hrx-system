@@ -72,6 +72,7 @@ static inline iree_status_t iree_net_shm_xproc_context_create(
 // Retains a reference to the xproc context.
 static inline void iree_net_shm_xproc_context_retain(
     iree_net_shm_xproc_context_t* context) {
+  if (!context) return;
   iree_atomic_ref_count_inc(&context->ref_count);
 }
 
@@ -79,6 +80,7 @@ static inline void iree_net_shm_xproc_context_retain(
 // unmaps both SHM regions, releases the proxy notification, and closes the
 // owned peer signal primitive.
 static inline void iree_net_shm_xproc_context_release(void* opaque) {
+  if (!opaque) return;
   iree_net_shm_xproc_context_t* context = (iree_net_shm_xproc_context_t*)opaque;
   if (iree_atomic_ref_count_dec(&context->ref_count) == 1) {
     iree_async_notification_release(context->peer_notification);

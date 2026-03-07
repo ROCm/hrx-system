@@ -10,6 +10,7 @@
 
 #include "iree/base/internal/atomics.h"
 #include "iree/net/channel/util/frame_sender.h"
+#include "iree/net/status_wire.h"
 
 //===----------------------------------------------------------------------===//
 // iree_net_control_channel_t
@@ -34,6 +35,13 @@ struct iree_net_control_channel_t {
   iree_atomic_int32_t state;
 };
 
+typedef struct iree_net_control_send_context_t {
+  // Application-provided completion value forwarded to on_send_complete.
+  uint64_t operation_user_data;
+  // Optional heap buffer kept alive until the send completion fires.
+  void* owned_buffer;
+} iree_net_control_send_context_t;
+
 //===----------------------------------------------------------------------===//
 // Internal helpers
 //===----------------------------------------------------------------------===//
@@ -50,6 +58,28 @@ static void iree_net_control_channel_set_state(
     iree_net_control_channel_state_t new_state) {
   iree_atomic_store(&channel->state, (int32_t)new_state,
                     iree_memory_order_release);
+}
+
+static iree_status_t iree_net_control_send_context_allocate(
+    iree_net_control_channel_t* channel, uint64_t operation_user_data,
+    void* owned_buffer, iree_net_control_send_context_t** out_context) {
+  iree_net_control_send_context_t* context = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
+      channel->host_allocator, sizeof(*context), (void**)&context));
+  context->operation_user_data = operation_user_data;
+  context->owned_buffer = owned_buffer;
+  *out_context = context;
+  return iree_ok_status();
+}
+
+static void iree_net_control_send_context_free(
+    iree_net_control_channel_t* channel,
+    iree_net_control_send_context_t* context) {
+  if (!context) return;
+  if (context->owned_buffer) {
+    iree_allocator_free(channel->host_allocator, context->owned_buffer);
+  }
+  iree_allocator_free(channel->host_allocator, context);
 }
 
 // Submit callback for frame_sender: routes sends through the message endpoint.
@@ -76,9 +106,14 @@ static void iree_net_control_channel_on_sender_complete(
     iree_status_t status) {
   iree_net_control_channel_t* channel =
       (iree_net_control_channel_t*)callback_user_data;
+  iree_net_control_send_context_t* context =
+      (iree_net_control_send_context_t*)(uintptr_t)operation_user_data;
+  uint64_t user_operation_user_data =
+      context ? context->operation_user_data : operation_user_data;
+  iree_net_control_send_context_free(channel, context);
   if (channel->callbacks.on_send_complete) {
     channel->callbacks.on_send_complete(channel->callbacks.user_data,
-                                        operation_user_data, status);
+                                        user_operation_user_data, status);
   } else {
     iree_status_ignore(status);
   }
@@ -251,29 +286,21 @@ static iree_status_t iree_net_control_channel_handle_goaway(
   return iree_ok_status();
 }
 
-// Handles a received ERROR frame.
+// Handles a received ERROR frame. The payload is a status_wire blob.
 static iree_status_t iree_net_control_channel_handle_error_frame(
     iree_net_control_channel_t* channel, iree_const_byte_span_t payload) {
-  if (payload.data_length < sizeof(iree_net_control_error_payload_t)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "ERROR payload too short: %" PRIhsz " bytes (need at least %zu)",
-        payload.data_length, sizeof(iree_net_control_error_payload_t));
-  }
-
-  iree_net_control_error_payload_t error;
-  memcpy(&error, payload.data, sizeof(error));
-
-  iree_string_view_t message =
-      iree_make_string_view((const char*)payload.data + sizeof(error),
-                            payload.data_length - sizeof(error));
+  iree_status_t deserialized_status = iree_ok_status();
+  IREE_RETURN_IF_ERROR(
+      iree_net_status_wire_deserialize(payload, &deserialized_status));
 
   iree_net_control_channel_set_state(channel,
                                      IREE_NET_CONTROL_CHANNEL_STATE_ERROR);
 
   if (channel->callbacks.on_error) {
-    channel->callbacks.on_error(channel->callbacks.user_data, error.error_code,
-                                message);
+    channel->callbacks.on_error(channel->callbacks.user_data,
+                                deserialized_status);
+  } else {
+    iree_status_ignore(deserialized_status);
   }
   return iree_ok_status();
 }
@@ -414,11 +441,13 @@ iree_status_t iree_net_control_channel_create(
 }
 
 void iree_net_control_channel_retain(iree_net_control_channel_t* channel) {
-  if (channel) iree_atomic_ref_count_inc(&channel->ref_count);
+  if (!channel) return;
+  iree_atomic_ref_count_inc(&channel->ref_count);
 }
 
 void iree_net_control_channel_release(iree_net_control_channel_t* channel) {
-  if (channel && iree_atomic_ref_count_dec(&channel->ref_count) == 1) {
+  if (!channel) return;
+  if (iree_atomic_ref_count_dec(&channel->ref_count) == 1) {
     iree_net_control_channel_destroy(channel);
   }
 }
@@ -431,6 +460,13 @@ static void iree_net_control_channel_destroy(
   iree_net_message_endpoint_callbacks_t empty_callbacks;
   memset(&empty_callbacks, 0, sizeof(empty_callbacks));
   iree_net_message_endpoint_set_callbacks(channel->endpoint, empty_callbacks);
+
+  iree_net_control_channel_state_t state =
+      iree_net_control_channel_load_state(channel);
+  if (state != IREE_NET_CONTROL_CHANNEL_STATE_CREATED) {
+    iree_status_ignore(iree_net_message_endpoint_deactivate(
+        channel->endpoint, /*callback=*/NULL, /*user_data=*/NULL));
+  }
 
   // Deinitialize the frame sender. Asserts no sends in flight.
   iree_net_frame_sender_deinitialize(&channel->sender);
@@ -508,10 +544,18 @@ iree_status_t iree_net_control_channel_send_data(
   iree_net_control_frame_header_initialize(IREE_NET_CONTROL_FRAME_TYPE_DATA,
                                            flags, &header);
 
+  iree_net_control_send_context_t* context = NULL;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_net_control_send_context_allocate(
+              channel, operation_user_data, /*owned_buffer=*/NULL, &context));
+
   iree_status_t status = iree_net_frame_sender_send(
       &channel->sender,
       iree_make_const_byte_span((const uint8_t*)&header, sizeof(header)),
-      payload, operation_user_data);
+      payload, (uint64_t)(uintptr_t)context);
+  if (!iree_status_is_ok(status)) {
+    iree_net_control_send_context_free(channel, context);
+  }
 
   IREE_TRACE_ZONE_END(z0);
   return status;
@@ -539,11 +583,19 @@ iree_status_t iree_net_control_channel_send_ping(
       frame_buffer, IREE_NET_CONTROL_FRAME_TYPE_PING, 0, NULL, 0, payload.data,
       payload.data_length);
 
+  iree_net_control_send_context_t* context = NULL;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, iree_net_control_send_context_allocate(
+                                            channel, /*operation_user_data=*/0,
+                                            /*owned_buffer=*/NULL, &context));
+
   iree_status_t status = iree_net_frame_sender_queue(
       &channel->sender, iree_make_const_byte_span(frame_buffer, frame_size));
   if (iree_status_is_ok(status)) {
     status = iree_net_frame_sender_flush(&channel->sender,
-                                         /*operation_user_data=*/0);
+                                         (uint64_t)(uintptr_t)context);
+  }
+  if (!iree_status_is_ok(status)) {
+    iree_net_control_send_context_free(channel, context);
   }
 
   IREE_TRACE_ZONE_END(z0);
@@ -576,11 +628,19 @@ iree_status_t iree_net_control_channel_send_goaway(
       frame_buffer, IREE_NET_CONTROL_FRAME_TYPE_GOAWAY, 0, &goaway_payload,
       sizeof(goaway_payload), message.data, message.size);
 
+  iree_net_control_send_context_t* context = NULL;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, iree_net_control_send_context_allocate(
+                                            channel, /*operation_user_data=*/0,
+                                            /*owned_buffer=*/NULL, &context));
+
   iree_status_t status = iree_net_frame_sender_queue(
       &channel->sender, iree_make_const_byte_span(frame_buffer, frame_size));
   if (iree_status_is_ok(status)) {
     status = iree_net_frame_sender_flush(&channel->sender,
-                                         /*operation_user_data=*/0);
+                                         (uint64_t)(uintptr_t)context);
+  }
+  if (!iree_status_is_ok(status)) {
+    iree_net_control_send_context_free(channel, context);
   }
   if (iree_status_is_ok(status)) {
     iree_net_control_channel_set_state(channel,
@@ -591,8 +651,7 @@ iree_status_t iree_net_control_channel_send_goaway(
 }
 
 iree_status_t iree_net_control_channel_send_error(
-    iree_net_control_channel_t* channel, iree_status_code_t error_code,
-    iree_string_view_t message) {
+    iree_net_control_channel_t* channel, iree_status_t error_status) {
   IREE_ASSERT_ARGUMENT(channel);
   IREE_TRACE_ZONE_BEGIN(z0);
 
@@ -600,32 +659,63 @@ iree_status_t iree_net_control_channel_send_error(
       iree_net_control_channel_load_state(channel);
   if (state == IREE_NET_CONTROL_CHANNEL_STATE_ERROR ||
       state == IREE_NET_CONTROL_CHANNEL_STATE_CREATED) {
+    iree_status_ignore(error_status);
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "cannot send ERROR: channel state is %d",
                             (int)state);
   }
 
-  // Serialize complete ERROR frame contiguously.
-  iree_net_control_error_payload_t error_payload;
-  memset(&error_payload, 0, sizeof(error_payload));
-  error_payload.error_code = (uint32_t)error_code;
+  // Compute status wire size.
+  iree_host_size_t status_wire_size = 0;
+  iree_net_status_wire_size(error_status, &status_wire_size);
 
-  uint8_t frame_buffer[IREE_NET_CONTROL_FRAME_HEADER_SIZE +
-                       sizeof(iree_net_control_error_payload_t) + 256];
-  iree_host_size_t frame_size = iree_net_control_channel_serialize_frame(
-      frame_buffer, IREE_NET_CONTROL_FRAME_TYPE_ERROR, 0, &error_payload,
-      sizeof(error_payload), message.data, message.size);
+  uint8_t* status_wire_buffer = NULL;
+  iree_status_t status = iree_allocator_malloc(
+      channel->host_allocator, status_wire_size, (void**)&status_wire_buffer);
+  if (!iree_status_is_ok(status)) {
+    iree_status_ignore(error_status);
+    IREE_TRACE_ZONE_END(z0);
+    return status;
+  }
 
-  iree_status_t status = iree_net_frame_sender_queue(
-      &channel->sender, iree_make_const_byte_span(frame_buffer, frame_size));
+  iree_net_control_send_context_t* context = NULL;
+  status = iree_net_control_send_context_allocate(
+      channel, /*operation_user_data=*/0, status_wire_buffer, &context);
+  if (!iree_status_is_ok(status)) {
+    iree_allocator_free(channel->host_allocator, status_wire_buffer);
+    iree_status_ignore(error_status);
+    IREE_TRACE_ZONE_END(z0);
+    return status;
+  }
+
+  // Serialize the control frame header.
+  iree_net_control_frame_header_t header;
+  iree_net_control_frame_header_initialize(IREE_NET_CONTROL_FRAME_TYPE_ERROR, 0,
+                                           &header);
+
+  // Serialize the status_wire blob into the frame payload.
+  status = iree_net_status_wire_serialize(
+      error_status, iree_make_byte_span(status_wire_buffer, status_wire_size));
+  iree_status_ignore(error_status);
+  error_status = iree_ok_status();
+
   if (iree_status_is_ok(status)) {
-    status = iree_net_frame_sender_flush(&channel->sender,
-                                         /*operation_user_data=*/0);
+    iree_async_span_t status_span =
+        iree_async_span_from_ptr(status_wire_buffer, status_wire_size);
+    iree_async_span_list_t payload = iree_async_span_list_make(&status_span, 1);
+    status = iree_net_frame_sender_send(
+        &channel->sender,
+        iree_make_const_byte_span((const uint8_t*)&header, sizeof(header)),
+        payload, (uint64_t)(uintptr_t)context);
   }
   if (iree_status_is_ok(status)) {
     iree_net_control_channel_set_state(channel,
                                        IREE_NET_CONTROL_CHANNEL_STATE_ERROR);
+  }
+
+  if (!iree_status_is_ok(status)) {
+    iree_net_control_send_context_free(channel, context);
   }
   IREE_TRACE_ZONE_END(z0);
   return status;

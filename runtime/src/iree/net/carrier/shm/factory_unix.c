@@ -164,10 +164,8 @@ static void iree_net_shm_unix_listener_accept_complete(
 
   // Handle stopping: clean up and fire stopped callback on final CQE.
   if (listener->state == IREE_NET_SHM_UNIX_LISTENER_STATE_STOPPING) {
-    if (accept_op->accepted_socket) {
-      iree_async_socket_release(accept_op->accepted_socket);
-      accept_op->accepted_socket = NULL;
-    }
+    iree_async_socket_release(accept_op->accepted_socket);
+    accept_op->accepted_socket = NULL;
     iree_status_ignore(status);
     if (!(flags & IREE_ASYNC_COMPLETION_FLAG_MORE)) {
       listener->stopped_callback.fn(listener->stopped_callback.user_data);
@@ -181,10 +179,8 @@ static void iree_net_shm_unix_listener_accept_complete(
                                                accept_op->accepted_socket);
     accept_op->accepted_socket = NULL;
   } else {
-    if (accept_op->accepted_socket) {
-      iree_async_socket_release(accept_op->accepted_socket);
-      accept_op->accepted_socket = NULL;
-    }
+    iree_async_socket_release(accept_op->accepted_socket);
+    accept_op->accepted_socket = NULL;
     listener->accept.fn(listener->accept.user_data, status, NULL);
   }
 
@@ -201,9 +197,7 @@ static void iree_net_shm_unix_listener_free(
   iree_net_shm_unix_listener_t* listener =
       (iree_net_shm_unix_listener_t*)base_listener;
   IREE_TRACE_ZONE_BEGIN(z0);
-  if (listener->listen_socket) {
-    iree_async_socket_release(listener->listen_socket);
-  }
+  iree_async_socket_release(listener->listen_socket);
   iree_allocator_t host_allocator = listener->host_allocator;
   iree_allocator_free(host_allocator, listener);
   IREE_TRACE_ZONE_END(z0);

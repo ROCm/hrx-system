@@ -161,10 +161,8 @@ class CarrierTestBase : public BaseType {
     }
 
     // Release the proactor last.
-    if (proactor_) {
-      iree_async_proactor_release(proactor_);
-      proactor_ = nullptr;
-    }
+    iree_async_proactor_release(proactor_);
+    proactor_ = nullptr;
   }
 
   //===--------------------------------------------------------------------===//

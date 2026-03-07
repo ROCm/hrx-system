@@ -60,6 +60,5 @@ iree_runtime_cc_benchmark(
         ":backends",
         "//runtime/src/iree/net/carrier/cts:all_benchmarks",
         "//runtime/src/iree/net/carrier/cts/util:registry",
-        "@com_google_benchmark//:benchmark",
     ],
 )

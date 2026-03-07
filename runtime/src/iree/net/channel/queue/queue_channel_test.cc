@@ -337,7 +337,7 @@ class QueueChannelTest : public ::testing::Test {
   }
 
   void TearDown() override {
-    if (channel_) iree_net_queue_channel_release(channel_);
+    iree_net_queue_channel_release(channel_);
     channel_ = nullptr;
   }
 

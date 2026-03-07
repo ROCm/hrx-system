@@ -320,11 +320,13 @@ iree_status_t iree_net_queue_channel_create(
 }
 
 void iree_net_queue_channel_retain(iree_net_queue_channel_t* channel) {
-  if (channel) iree_atomic_ref_count_inc(&channel->ref_count);
+  if (!channel) return;
+  iree_atomic_ref_count_inc(&channel->ref_count);
 }
 
 void iree_net_queue_channel_release(iree_net_queue_channel_t* channel) {
-  if (channel && iree_atomic_ref_count_dec(&channel->ref_count) == 1) {
+  if (!channel) return;
+  if (iree_atomic_ref_count_dec(&channel->ref_count) == 1) {
     iree_net_queue_channel_destroy(channel);
   }
 }
@@ -336,6 +338,13 @@ static void iree_net_queue_channel_destroy(iree_net_queue_channel_t* channel) {
   iree_net_message_endpoint_callbacks_t empty_callbacks;
   memset(&empty_callbacks, 0, sizeof(empty_callbacks));
   iree_net_message_endpoint_set_callbacks(channel->endpoint, empty_callbacks);
+
+  iree_net_queue_channel_state_t state =
+      iree_net_queue_channel_load_state(channel);
+  if (state != IREE_NET_QUEUE_CHANNEL_STATE_CREATED) {
+    iree_status_ignore(iree_net_message_endpoint_deactivate(
+        channel->endpoint, /*callback=*/NULL, /*user_data=*/NULL));
+  }
 
   // Deinitialize the frame sender. Asserts no sends in flight.
   iree_net_frame_sender_deinitialize(&channel->sender);

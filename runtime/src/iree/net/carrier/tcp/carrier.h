@@ -21,7 +21,7 @@
 //   - All completions fire on the proactor poll thread
 //
 // Lifecycle:
-//   1. allocate() - Create carrier with socket and options
+//   1. create() - Create carrier with socket and options
 //   2. set_recv_handler() - Register data handler
 //   3. activate() - Begin receiving data
 //   4. send() - Send data (any thread)
@@ -90,7 +90,7 @@ iree_net_tcp_carrier_options_default(void) {
 //   - ORDERED: Always set (TCP guarantees ordering)
 //   - ZERO_COPY_TX: Set if SEND_ZC available
 //   - ZERO_COPY_RX: Set if PBUF_RING available
-IREE_API_EXPORT iree_status_t iree_net_tcp_carrier_allocate(
+IREE_API_EXPORT iree_status_t iree_net_tcp_carrier_create(
     iree_async_proactor_t* proactor, iree_async_socket_t* socket,
     iree_async_buffer_pool_t* recv_pool, iree_net_tcp_carrier_options_t options,
     iree_net_carrier_callback_t callback, iree_allocator_t host_allocator,

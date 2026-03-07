@@ -187,8 +187,8 @@ IREE_API_EXPORT iree_status_t iree_net_shm_handshake_server(
   iree_shm_mapping_t region_mapping;
   memset(&region_mapping, 0, sizeof(region_mapping));
   region_mapping.handle = IREE_SHM_HANDLE_INVALID;
-  iree_status_t status = iree_shm_create(iree_shm_options_default(),
-                                         total_region_size, &region_mapping);
+  iree_status_t status =
+      iree_shm_create(/*options=*/NULL, total_region_size, &region_mapping);
 
   // Write the immutable header and initialize SPSC rings.
   if (iree_status_is_ok(status)) {
@@ -278,9 +278,9 @@ IREE_API_EXPORT iree_status_t iree_net_shm_handshake_server(
   memset(&peer_epoch_mapping, 0, sizeof(peer_epoch_mapping));
   peer_epoch_mapping.handle = IREE_SHM_HANDLE_INVALID;
   if (iree_status_is_ok(status)) {
-    status = iree_shm_open_handle(
-        accept_handles.wake_epoch_shm, iree_shm_options_default(),
-        accept_header.wake_epoch_size, &peer_epoch_mapping);
+    status = iree_shm_open_handle(accept_handles.wake_epoch_shm,
+                                  accept_header.wake_epoch_size,
+                                  &peer_epoch_mapping);
   }
 
   // Create peer notification proxy.
@@ -315,7 +315,7 @@ IREE_API_EXPORT iree_status_t iree_net_shm_handshake_server(
         shared_wake, peer_notification, context);
     iree_shm_handle_close(&accept_handles.wake_epoch_shm);
   } else {
-    if (context) iree_net_shm_xproc_context_release(context);
+    iree_net_shm_xproc_context_release(context);
     iree_async_notification_release(peer_notification);
     iree_shm_close(&peer_epoch_mapping);
     iree_net_shm_handshake_handles_close(&accept_handles);
@@ -359,7 +359,6 @@ IREE_API_EXPORT iree_status_t iree_net_shm_handshake_client(
   region_mapping.handle = IREE_SHM_HANDLE_INVALID;
   if (iree_status_is_ok(status)) {
     status = iree_shm_open_handle(offer_handles.shm_region,
-                                  iree_shm_options_default(),
                                   offer_header.region_size, &region_mapping);
   }
 
@@ -386,9 +385,9 @@ IREE_API_EXPORT iree_status_t iree_net_shm_handshake_client(
   memset(&peer_epoch_mapping, 0, sizeof(peer_epoch_mapping));
   peer_epoch_mapping.handle = IREE_SHM_HANDLE_INVALID;
   if (iree_status_is_ok(status)) {
-    status = iree_shm_open_handle(
-        offer_handles.wake_epoch_shm, iree_shm_options_default(),
-        offer_header.wake_epoch_size, &peer_epoch_mapping);
+    status =
+        iree_shm_open_handle(offer_handles.wake_epoch_shm,
+                             offer_header.wake_epoch_size, &peer_epoch_mapping);
   }
 
   // Export our shared_wake handles for the ACCEPT.
@@ -464,7 +463,7 @@ IREE_API_EXPORT iree_status_t iree_net_shm_handshake_client(
     // Cleanup on failure. All close/release functions are NULL/invalid-safe.
     // Context fields are zero-initialized — resources haven't been transferred
     // yet, so release the context (if allocated) and each resource separately.
-    if (context) iree_net_shm_xproc_context_release(context);
+    iree_net_shm_xproc_context_release(context);
     iree_async_notification_release(peer_notification);
     iree_shm_close(&peer_epoch_mapping);
     iree_shm_close(&region_mapping);

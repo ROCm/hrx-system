@@ -67,7 +67,7 @@ struct LatencyRecvState {
   std::atomic<int> recv_count{0};
 
   static iree_status_t Handler(void* user_data, iree_async_span_t data,
-                                iree_async_buffer_lease_t* lease) {
+                               iree_async_buffer_lease_t* lease) {
     auto* self = static_cast<LatencyRecvState*>(user_data);
     self->recv_time = Clock::now();
     self->recv_count.fetch_add(1, std::memory_order_release);
@@ -79,8 +79,7 @@ struct LatencyRecvState {
 };
 
 // Polls the proactor once. Returns false on fatal error.
-static bool PollOnce(iree_async_proactor_t* proactor,
-                     iree_timeout_t timeout) {
+static bool PollOnce(iree_async_proactor_t* proactor, iree_timeout_t timeout) {
   iree_host_size_t completed = 0;
   iree_status_t status =
       iree_async_proactor_poll(proactor, timeout, &completed);
@@ -100,7 +99,7 @@ static bool PollOnce(iree_async_proactor_t* proactor,
 // → proactor dispatches the notification (inside epoll_wait processing) →
 // drain callback fires → recv handler fires (timestamp captured here).
 static void BM_ColdLatency(::benchmark::State& state,
-                            const CarrierPairFactory& factory) {
+                           const CarrierPairFactory& factory) {
   int64_t message_size = state.range(0);
 
   auto* ctx = CreateBenchmarkContext(factory, state);
@@ -154,13 +153,16 @@ static void BM_ColdLatency(::benchmark::State& state,
     }
 
     // Spin-poll until the recv handler fires (timestamps inside handler).
+    bool poll_failed = false;
     while (recv_state.recv_count.load(std::memory_order_acquire) <
            expected_recv) {
       if (!PollOnce(ctx->proactor, iree_immediate_timeout())) {
         state.SkipWithError("Poll failed");
-        goto done;
+        poll_failed = true;
+        break;
       }
     }
+    if (poll_failed) break;
 
     // Report send → recv handler timestamp, excluding trailing kernel poll.
     state.SetIterationTime(
@@ -168,7 +170,6 @@ static void BM_ColdLatency(::benchmark::State& state,
             .count());
   }
 
-done:
   iree_net_carrier_set_recv_handler(ctx->server, MakeNullRecvHandler());
   DestroyBenchmarkContext(ctx);
 }
@@ -180,7 +181,7 @@ done:
 // acquire-load before the kernel poll syscall — the recv handler fires and
 // timestamps this early delivery point.
 static void BM_WarmLatency(::benchmark::State& state,
-                            const CarrierPairFactory& factory) {
+                           const CarrierPairFactory& factory) {
   int64_t message_size = state.range(0);
 
   auto* ctx = CreateBenchmarkContext(factory, state);
@@ -247,13 +248,16 @@ static void BM_WarmLatency(::benchmark::State& state,
       break;
     }
 
+    bool poll_failed = false;
     while (recv_state.recv_count.load(std::memory_order_acquire) <
            expected_recv) {
       if (!PollOnce(ctx->proactor, iree_immediate_timeout())) {
         state.SkipWithError("Poll failed");
-        goto done;
+        poll_failed = true;
+        break;
       }
     }
+    if (poll_failed) break;
 
     // Report send → recv handler timestamp, excluding trailing kernel poll.
     state.SetIterationTime(
@@ -261,7 +265,6 @@ static void BM_WarmLatency(::benchmark::State& state,
             .count());
   }
 
-done:
   iree_net_carrier_set_recv_handler(ctx->server, MakeNullRecvHandler());
   DestroyBenchmarkContext(ctx);
 }

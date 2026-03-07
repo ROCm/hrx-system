@@ -39,14 +39,10 @@ class LoopbackFactoryTest : public ::testing::Test {
   }
 
   void TearDown() override {
-    if (factory_) {
-      iree_net_transport_factory_release(factory_);
-      factory_ = nullptr;
-    }
-    if (proactor_) {
-      iree_async_proactor_release(proactor_);
-      proactor_ = nullptr;
-    }
+    iree_net_transport_factory_release(factory_);
+    factory_ = nullptr;
+    iree_async_proactor_release(proactor_);
+    proactor_ = nullptr;
   }
 
   template <typename Fn>
@@ -90,7 +86,7 @@ TEST_F(LoopbackFactoryTest, DuplicateListenerName) {
          iree_net_connection_t* connection) {
         *static_cast<bool*>(user_data) = true;
         iree_status_ignore(status);
-        if (connection) iree_net_connection_release(connection);
+        iree_net_connection_release(connection);
       },
       &accept_fired, iree_allocator_system(), &listener1));
 

@@ -54,18 +54,12 @@ class HandshakeTest : public ::testing::Test {
   }
 
   void TearDown() override {
-    if (client_wake_) {
-      iree_net_shm_shared_wake_release(client_wake_);
-      client_wake_ = nullptr;
-    }
-    if (server_wake_) {
-      iree_net_shm_shared_wake_release(server_wake_);
-      server_wake_ = nullptr;
-    }
-    if (proactor_) {
-      iree_async_proactor_release(proactor_);
-      proactor_ = nullptr;
-    }
+    iree_net_shm_shared_wake_release(client_wake_);
+    client_wake_ = nullptr;
+    iree_net_shm_shared_wake_release(server_wake_);
+    server_wake_ = nullptr;
+    iree_async_proactor_release(proactor_);
+    proactor_ = nullptr;
   }
 
   // Creates a connected channel pair and wraps both ends as primitives.

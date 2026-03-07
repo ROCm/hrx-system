@@ -16,7 +16,7 @@
 namespace {
 
 // Helper to serialize a status and return the wire bytes.
-static std::vector<uint8_t> Serialize(iree_status_t status) {
+static std::vector<uint8_t> Serialize(const iree_status_t status) {
   iree_host_size_t size = 0;
   iree_net_status_wire_size(status, &size);
   std::vector<uint8_t> buffer(size);
@@ -33,6 +33,17 @@ static iree_status_t Deserialize(const std::vector<uint8_t>& buffer) {
       iree_make_const_byte_span(buffer.data(), buffer.size()), &out_status);
   IREE_CHECK_OK(deserialize_status);
   return out_status;
+}
+
+// Formats the complete status text into an owned string.
+static std::string FormatStatus(const iree_status_t status) {
+  iree_host_size_t format_length = 0;
+  iree_status_format(status, /*buffer_capacity=*/0, /*buffer=*/nullptr,
+                     &format_length);
+  std::vector<char> format_buffer(format_length + 1);
+  iree_status_format(status, format_buffer.size(), format_buffer.data(),
+                     &format_length);
+  return std::string(format_buffer.data(), format_length);
 }
 
 //===----------------------------------------------------------------------===//
@@ -58,7 +69,7 @@ TEST(StatusWire, OkStatusRoundTrip) {
   EXPECT_EQ(header.total_size, sizeof(iree_net_status_wire_header_t));
 
   iree_status_t result = Deserialize(buffer);
-  EXPECT_TRUE(iree_status_is_ok(result));
+  IREE_EXPECT_OK(result);
 }
 
 //===----------------------------------------------------------------------===//
@@ -120,11 +131,7 @@ TEST(StatusWire, StatusWithAnnotationsRoundTrip) {
   EXPECT_TRUE(iree_status_is_internal(result));
 
   // Format the full status to check both message and annotation are present.
-  char format_buffer[512];
-  iree_host_size_t format_length = 0;
-  iree_status_format(result, sizeof(format_buffer), format_buffer,
-                     &format_length);
-  std::string formatted(format_buffer, format_length);
+  std::string formatted = FormatStatus(result);
   EXPECT_NE(formatted.find("root cause"), std::string::npos);
   EXPECT_NE(formatted.find("additional context"), std::string::npos);
 
@@ -152,11 +159,13 @@ TEST(StatusWire, SourceLocationPreserved) {
 
   if (original_location.file) {
     // When source location is available, verify it round-trips.
-    ASSERT_NE(deserialized_location.file, nullptr);
-    // The filename might be the full path or just the basename — as long as it
-    // matches what was serialized.
-    EXPECT_STREQ(deserialized_location.file, original_location.file);
-    EXPECT_EQ(deserialized_location.line, original_location.line);
+    EXPECT_NE(deserialized_location.file, nullptr);
+    if (deserialized_location.file) {
+      // The filename might be the full path or just the basename — as long as
+      // it matches what was serialized.
+      EXPECT_STREQ(deserialized_location.file, original_location.file);
+      EXPECT_EQ(deserialized_location.line, original_location.line);
+    }
   }
 
   iree_status_ignore(result);

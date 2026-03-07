@@ -123,14 +123,10 @@ class ShmCarrierTest : public ::testing::Test {
       iree_net_carrier_release(server_);
       server_ = nullptr;
     }
-    if (shared_wake_) {
-      iree_net_shm_shared_wake_release(shared_wake_);
-      shared_wake_ = nullptr;
-    }
-    if (proactor_) {
-      iree_async_proactor_release(proactor_);
-      proactor_ = nullptr;
-    }
+    iree_net_shm_shared_wake_release(shared_wake_);
+    shared_wake_ = nullptr;
+    iree_async_proactor_release(proactor_);
+    proactor_ = nullptr;
   }
 
   void ActivateBoth(iree_net_carrier_recv_handler_t client_handler,

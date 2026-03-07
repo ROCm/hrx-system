@@ -60,6 +60,7 @@ typedef void (*iree_net_endpoint_ready_callback_t)(
 
 typedef struct iree_net_connection_t iree_net_connection_t;
 typedef struct iree_net_connection_vtable_t iree_net_connection_vtable_t;
+typedef struct iree_async_proactor_t iree_async_proactor_t;
 
 // A polymorphic connection to a remote endpoint.
 //
@@ -80,6 +81,9 @@ struct iree_net_connection_vtable_t {
   iree_status_t (*open_endpoint)(iree_net_connection_t* connection,
                                  iree_net_endpoint_ready_callback_t callback,
                                  void* user_data);
+  // Returns the proactor that dispatches connection endpoint callbacks.
+  // The proactor is borrowed — valid for the connection's lifetime.
+  iree_async_proactor_t* (*proactor)(iree_net_connection_t* connection);
   // Returns the carrier backing this connection's endpoints.
   // The carrier is borrowed — valid for the connection's lifetime.
   // May be NULL for connections that don't expose a carrier directly.
@@ -98,6 +102,7 @@ static inline void iree_net_connection_initialize(
 // Retains a reference to the connection (thread-safe).
 static inline void iree_net_connection_retain(
     iree_net_connection_t* connection) {
+  if (!connection) return;
   iree_atomic_ref_count_inc(&connection->ref_count);
 }
 
@@ -105,6 +110,7 @@ static inline void iree_net_connection_retain(
 // When the last reference is released, the connection is destroyed.
 static inline void iree_net_connection_release(
     iree_net_connection_t* connection) {
+  if (!connection) return;
   if (iree_atomic_ref_count_dec(&connection->ref_count) == 1) {
     connection->vtable->destroy(connection);
   }
@@ -142,6 +148,15 @@ static inline iree_net_carrier_t* iree_net_connection_carrier(
     iree_net_connection_t* connection) {
   if (connection->vtable->carrier) {
     return connection->vtable->carrier(connection);
+  }
+  return NULL;
+}
+
+// Returns the proactor dispatching this connection's async callbacks.
+static inline iree_async_proactor_t* iree_net_connection_proactor(
+    iree_net_connection_t* connection) {
+  if (connection->vtable->proactor) {
+    return connection->vtable->proactor(connection);
   }
   return NULL;
 }

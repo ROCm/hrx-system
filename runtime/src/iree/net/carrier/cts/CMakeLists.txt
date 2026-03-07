@@ -174,9 +174,9 @@ iree_cc_library(
   SRCS
     "latency_benchmark.cc"
   DEPS
-    benchmark
     iree::net::carrier::cts::util::benchmark_base
     iree::net::carrier::cts::util::registry
+    iree::third_party::google_benchmark
   TESTONLY
   ALWAYSLINK
   PUBLIC

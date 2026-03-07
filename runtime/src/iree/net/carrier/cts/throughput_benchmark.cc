@@ -118,9 +118,9 @@ static void BM_Throughput(::benchmark::State& state,
     PollOnce(ctx->proactor, iree_immediate_timeout());
   }
 
-  // Drain remaining recv completions. PauseTiming excludes this from the
-  // measured throughput — we only want to measure the steady-state pipeline.
-  state.PauseTiming();
+  // Drain remaining recv completions after the benchmark loop. The measured
+  // steady-state pipeline ends when the loop finishes; this cleanup only keeps
+  // the transport lifecycle honest before teardown.
   {
     int64_t expected_bytes = state.iterations() * message_size;
     iree_time_t deadline = iree_time_now() + kDefaultPollBudget;
@@ -133,7 +133,6 @@ static void BM_Throughput(::benchmark::State& state,
       PollOnce(ctx->proactor, iree_make_timeout_ms(100));
     }
   }
-  state.ResumeTiming();
 
   state.SetBytesProcessed(state.iterations() * message_size);
   state.SetItemsProcessed(state.iterations());

@@ -260,7 +260,7 @@ static void iree_net_loopback_connection_destroy(
     if (slot->adapter) {
       // Adapter owns the carrier.
       iree_net_loopback_endpoint_adapter_free(slot->adapter, host_allocator);
-    } else if (slot->carrier) {
+    } else {
       // Carrier not yet consumed by an adapter.
       iree_net_carrier_release(slot->carrier);
     }
@@ -359,10 +359,18 @@ static iree_net_carrier_t* iree_net_loopback_connection_carrier(
   return slot->carrier;
 }
 
+static iree_async_proactor_t* iree_net_loopback_connection_proactor(
+    iree_net_connection_t* base_connection) {
+  iree_net_loopback_connection_t* connection =
+      (iree_net_loopback_connection_t*)base_connection;
+  return connection->proactor;
+}
+
 static const iree_net_connection_vtable_t iree_net_loopback_connection_vtable =
     {
         .destroy = iree_net_loopback_connection_destroy,
         .open_endpoint = iree_net_loopback_connection_open_endpoint,
+        .proactor = iree_net_loopback_connection_proactor,
         .carrier = iree_net_loopback_connection_carrier,
 };
 
@@ -668,12 +676,8 @@ static iree_status_t iree_net_loopback_factory_connect(
   status = iree_async_proactor_submit_one(proactor, &deferred->nop.base);
   if (!iree_status_is_ok(status)) {
     iree_status_ignore(deferred->error_status);
-    if (deferred->client_connection) {
-      iree_net_connection_release(deferred->client_connection);
-    }
-    if (deferred->server_connection) {
-      iree_net_connection_release(deferred->server_connection);
-    }
+    iree_net_connection_release(deferred->client_connection);
+    iree_net_connection_release(deferred->server_connection);
     iree_allocator_free(factory->host_allocator, deferred);
   }
 

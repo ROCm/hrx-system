@@ -108,7 +108,7 @@ static_assert(sizeof(iree_net_status_wire_entry_t) == 8, "");
 //
 // OK statuses serialize to just the 8-byte header with status_code=0 and
 // entry_count=0. Non-OK statuses include all available structured information.
-void iree_net_status_wire_size(iree_status_t status,
+void iree_net_status_wire_size(const iree_status_t status,
                                iree_host_size_t* out_size);
 
 // Serializes |status| into |buffer|.
@@ -117,7 +117,7 @@ void iree_net_status_wire_size(iree_status_t status,
 // The status is not consumed (caller still owns it).
 //
 // Returns IREE_STATUS_RESOURCE_EXHAUSTED if the buffer is too small.
-iree_status_t iree_net_status_wire_serialize(iree_status_t status,
+iree_status_t iree_net_status_wire_serialize(const iree_status_t status,
                                              iree_byte_span_t buffer);
 
 //===----------------------------------------------------------------------===//

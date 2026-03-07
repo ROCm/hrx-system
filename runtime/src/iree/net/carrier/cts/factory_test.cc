@@ -79,7 +79,7 @@ TEST_P(FactoryTest, CallbackNotFiredBeforePoll) {
          iree_net_connection_t* connection) {
         *static_cast<bool*>(user_data) = true;
         iree_status_ignore(status);
-        if (connection) iree_net_connection_release(connection);
+        iree_net_connection_release(connection);
       },
       &accept_fired, iree_allocator_system(), &listener));
 
@@ -100,7 +100,7 @@ TEST_P(FactoryTest, CallbackNotFiredBeforePoll) {
   EXPECT_TRUE(result.fired);
   EXPECT_TRUE(accept_fired);
 
-  if (result.connection) iree_net_connection_release(result.connection);
+  iree_net_connection_release(result.connection);
   StopAndWait(listener);
   iree_net_listener_free(listener);
 }
@@ -135,9 +135,8 @@ TEST_P(FactoryTest, MultipleConnections) {
   }
 
   ASSERT_TRUE(PollUntil([&]() {
-    return accept_ctx.connections.size() >= 3 &&
-           connect_results[0].fired && connect_results[1].fired &&
-           connect_results[2].fired;
+    return accept_ctx.connections.size() >= 3 && connect_results[0].fired &&
+           connect_results[1].fired && connect_results[2].fired;
   })) << "Not all connections completed";
   for (int i = 0; i < 3; ++i) {
     EXPECT_EQ(connect_results[i].status_code, IREE_STATUS_OK);
@@ -162,7 +161,7 @@ TEST_P(FactoryTest, ListenerStop) {
       [](void* user_data, iree_status_t status,
          iree_net_connection_t* connection) {
         iree_status_ignore(status);
-        if (connection) iree_net_connection_release(connection);
+        iree_net_connection_release(connection);
       },
       nullptr, iree_allocator_system(), &listener));
 
@@ -268,7 +267,7 @@ TEST_P(FactoryTest, BidirectionalSendRecv) {
           recv_ctx->data.insert(recv_ctx->data.end(), message.data,
                                 message.data + message.data_length);
           recv_ctx->received = true;
-          if (lease) iree_async_buffer_lease_release(lease);
+          iree_async_buffer_lease_release(lease);
           return iree_ok_status();
         },
         nullptr,  // on_error

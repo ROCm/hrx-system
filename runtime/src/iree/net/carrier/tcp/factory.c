@@ -122,10 +122,6 @@ typedef struct iree_net_tcp_endpoint_deferred_t {
   iree_allocator_t host_allocator;
 } iree_net_tcp_endpoint_deferred_t;
 
-//===----------------------------------------------------------------------===//
-// Frame header
-//===----------------------------------------------------------------------===//
-
 // All IREE frames share a 16-byte header layout:
 //   [0..3]   magic (4 bytes)
 //   [4..7]   flags/version (4 bytes)
@@ -135,6 +131,35 @@ typedef struct iree_net_tcp_endpoint_deferred_t {
 //
 // Total frame size = header + payload_length.
 #define IREE_NET_TCP_FRAME_HEADER_SIZE 16
+
+// Maximum number of spans in the original send params that we can handle
+// without a separate span-list allocation. The +1 accounts for the prepended
+// header span.
+#define IREE_NET_TCP_STREAM_SEND_MAX_INLINE_SPANS 15
+
+typedef struct iree_net_tcp_stream_send_context_t {
+  // Allocator used for this context.
+  iree_allocator_t host_allocator;
+  // User data from the endpoint send request.
+  uint64_t operation_user_data;
+  // Stable storage for the TCP mux frame header.
+  uint8_t header[IREE_NET_TCP_FRAME_HEADER_SIZE];
+  // Stable storage for the send scatter-gather list.
+  iree_async_span_t spans[IREE_NET_TCP_STREAM_SEND_MAX_INLINE_SPANS + 1];
+} iree_net_tcp_stream_send_context_t;
+
+typedef struct iree_net_tcp_stream_deactivate_context_t {
+  // NOP operation used to deliver a non-last-stream deactivate asynchronously.
+  iree_async_nop_operation_t nop;
+  // Stream whose deactivate callback should be delivered.
+  iree_net_tcp_stream_t* stream;
+  // Allocator used for this context.
+  iree_allocator_t host_allocator;
+} iree_net_tcp_stream_deactivate_context_t;
+
+//===----------------------------------------------------------------------===//
+// Frame header
+//===----------------------------------------------------------------------===//
 
 // Determines frame boundaries from the header's payload_length field.
 static iree_host_size_t iree_net_tcp_frame_length(
@@ -199,6 +224,30 @@ static void iree_net_tcp_mux_error(void* user_data, iree_status_t status) {
   iree_status_ignore(status);
 }
 
+static void iree_net_tcp_connection_on_send_complete(
+    void* callback_user_data, uint64_t operation_user_data,
+    iree_status_t status, iree_host_size_t bytes_transferred,
+    iree_async_buffer_lease_t* recv_lease) {
+  (void)callback_user_data;
+  if (operation_user_data == 0) {
+    iree_status_ignore(status);
+    return;
+  }
+  iree_net_tcp_stream_send_context_t* context =
+      (iree_net_tcp_stream_send_context_t*)(uintptr_t)operation_user_data;
+  uint64_t nested_operation_user_data = context->operation_user_data;
+  iree_allocator_t host_allocator = context->host_allocator;
+  iree_allocator_free(host_allocator, context);
+
+  if (nested_operation_user_data != 0) {
+    iree_net_frame_sender_dispatch_carrier_completion(
+        /*callback_user_data=*/NULL, nested_operation_user_data, status,
+        bytes_transferred, recv_lease);
+  } else {
+    iree_status_ignore(status);
+  }
+}
+
 //===----------------------------------------------------------------------===//
 // Per-stream endpoint vtable
 //===----------------------------------------------------------------------===//
@@ -231,10 +280,16 @@ static iree_status_t iree_net_tcp_stream_activate(void* self) {
 static void iree_net_tcp_stream_deactivate_nop_complete(
     void* user_data, iree_async_operation_t* operation, iree_status_t status,
     iree_async_completion_flags_t flags) {
-  iree_net_tcp_stream_t* stream = (iree_net_tcp_stream_t*)user_data;
+  iree_net_tcp_stream_deactivate_context_t* context =
+      (iree_net_tcp_stream_deactivate_context_t*)user_data;
+  iree_net_tcp_stream_t* stream = context->stream;
+  iree_net_message_endpoint_deactivate_fn_t callback = stream->deactivate.fn;
+  void* callback_user_data = stream->deactivate.user_data;
+  iree_allocator_t host_allocator = context->host_allocator;
   iree_status_ignore(status);
-  if (stream->deactivate.fn) {
-    stream->deactivate.fn(stream->deactivate.user_data);
+  iree_allocator_free(host_allocator, context);
+  if (callback) {
+    callback(callback_user_data);
   }
 }
 
@@ -259,27 +314,26 @@ static iree_status_t iree_net_tcp_stream_deactivate(
   }
 
   // Non-last: deliver callback asynchronously via NOP.
-  // We heap-allocate a NOP operation since the stream struct has no room for
-  // an inline operation and the stream may be reused.
+  // We heap-allocate a NOP context since the stream struct has no room for an
+  // inline operation and the stream may be reused.
   iree_allocator_t host_allocator = connection->base.host_allocator;
-  iree_async_nop_operation_t* nop = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_allocator_malloc(host_allocator, sizeof(*nop), (void**)&nop));
-  memset(nop, 0, sizeof(*nop));
+  iree_net_tcp_stream_deactivate_context_t* context = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof(*context),
+                                             (void**)&context));
+  memset(context, 0, sizeof(*context));
+  context->stream = stream;
+  context->host_allocator = host_allocator;
   iree_async_operation_initialize(
-      &nop->base, IREE_ASYNC_OPERATION_TYPE_NOP, IREE_ASYNC_OPERATION_FLAG_NONE,
-      iree_net_tcp_stream_deactivate_nop_complete, stream);
+      &context->nop.base, IREE_ASYNC_OPERATION_TYPE_NOP,
+      IREE_ASYNC_OPERATION_FLAG_NONE,
+      iree_net_tcp_stream_deactivate_nop_complete, context);
   iree_status_t status =
-      iree_async_proactor_submit_one(connection->proactor, &nop->base);
+      iree_async_proactor_submit_one(connection->proactor, &context->nop.base);
   if (!iree_status_is_ok(status)) {
-    iree_allocator_free(host_allocator, nop);
+    iree_allocator_free(host_allocator, context);
   }
   return status;
 }
-
-// Maximum number of spans in the original send params that we can handle
-// without heap allocation. The +1 accounts for the prepended header span.
-#define IREE_NET_TCP_STREAM_SEND_MAX_INLINE_SPANS 15
 
 static iree_status_t iree_net_tcp_stream_send(
     void* self, const iree_net_message_endpoint_send_params_t* params) {
@@ -292,33 +346,43 @@ static iree_status_t iree_net_tcp_stream_send(
     payload_length += (uint32_t)params->data.values[i].length;
   }
 
-  // Build the 16-byte frame header on the stack.
-  uint8_t header[IREE_NET_TCP_FRAME_HEADER_SIZE];
-  memset(header, 0, sizeof(header));
-  memcpy(header + 8, &payload_length, sizeof(payload_length));
-  uint16_t stream_id =
-      (uint16_t)(stream - connection->streams);  // Index from FAM base.
-  memcpy(header + 12, &stream_id, sizeof(stream_id));
-
-  // Build a new span list with header prepended to the original spans.
   if (params->data.count > IREE_NET_TCP_STREAM_SEND_MAX_INLINE_SPANS) {
     return iree_make_status(
         IREE_STATUS_RESOURCE_EXHAUSTED,
         "send span count %" PRIhsz " exceeds inline limit %d",
         params->data.count, IREE_NET_TCP_STREAM_SEND_MAX_INLINE_SPANS);
   }
-  iree_async_span_t spans[IREE_NET_TCP_STREAM_SEND_MAX_INLINE_SPANS + 1];
-  spans[0] = iree_async_span_from_ptr(header, sizeof(header));
+
+  iree_allocator_t host_allocator = connection->base.host_allocator;
+  iree_net_tcp_stream_send_context_t* context = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof(*context),
+                                             (void**)&context));
+  memset(context, 0, sizeof(*context));
+  context->host_allocator = host_allocator;
+  context->operation_user_data = params->user_data;
+
+  memcpy(context->header + 8, &payload_length, sizeof(payload_length));
+  uint16_t stream_id =
+      (uint16_t)(stream - connection->streams);  // Index from FAM base.
+  memcpy(context->header + 12, &stream_id, sizeof(stream_id));
+
+  context->spans[0] =
+      iree_async_span_from_ptr(context->header, sizeof(context->header));
   for (iree_host_size_t i = 0; i < params->data.count; ++i) {
-    spans[i + 1] = params->data.values[i];
+    context->spans[i + 1] = params->data.values[i];
   }
 
+  iree_host_size_t total_span_count = params->data.count + 1;
   iree_net_message_endpoint_send_params_t framed_params = {
-      .data = iree_async_span_list_make(spans, params->data.count + 1),
-      .user_data = params->user_data,
+      .data = iree_async_span_list_make(context->spans, total_span_count),
+      .user_data = (uint64_t)(uintptr_t)context,
   };
-  return iree_net_message_endpoint_send(connection->shared_endpoint,
-                                        &framed_params);
+  iree_status_t status = iree_net_message_endpoint_send(
+      connection->shared_endpoint, &framed_params);
+  if (!iree_status_is_ok(status)) {
+    iree_allocator_free(host_allocator, context);
+  }
+  return status;
 }
 
 static iree_net_carrier_send_budget_t iree_net_tcp_stream_query_send_budget(
@@ -396,10 +460,10 @@ static iree_status_t iree_net_tcp_connection_create(
     // The send completion callback dispatches to frame_sender for channels that
     // use completion-tracked sends.
     iree_net_carrier_callback_t send_callback = {
-        .fn = iree_net_frame_sender_dispatch_carrier_completion,
-        .user_data = NULL,
+        .fn = iree_net_tcp_connection_on_send_complete,
+        .user_data = connection,
     };
-    status = iree_net_tcp_carrier_allocate(
+    status = iree_net_tcp_carrier_create(
         proactor, socket, recv_pool, factory->default_options, send_callback,
         host_allocator, &carrier);
   }
@@ -439,7 +503,7 @@ static iree_status_t iree_net_tcp_connection_create(
   } else {
     // Cleanup on failure. Carrier may or may not have been transferred to the
     // adapter, so release whichever still exists.
-    if (carrier) iree_net_carrier_release(carrier);
+    iree_net_carrier_release(carrier);
     if (connection) iree_net_tcp_connection_destroy(&connection->base);
   }
 
@@ -508,9 +572,17 @@ static iree_net_carrier_t* iree_net_tcp_connection_carrier(
   return iree_net_framing_adapter_carrier(connection->adapter);
 }
 
+static iree_async_proactor_t* iree_net_tcp_connection_proactor(
+    iree_net_connection_t* base_connection) {
+  iree_net_tcp_connection_t* connection =
+      (iree_net_tcp_connection_t*)base_connection;
+  return connection->proactor;
+}
+
 static const iree_net_connection_vtable_t iree_net_tcp_connection_vtable = {
     .destroy = iree_net_tcp_connection_destroy,
     .open_endpoint = iree_net_tcp_connection_open_endpoint,
+    .proactor = iree_net_tcp_connection_proactor,
     .carrier = iree_net_tcp_connection_carrier,
 };
 
@@ -523,9 +595,7 @@ static const iree_net_listener_vtable_t iree_net_tcp_listener_vtable;
 static void iree_net_tcp_listener_free(iree_net_listener_t* base_listener) {
   iree_net_tcp_listener_t* listener = (iree_net_tcp_listener_t*)base_listener;
   iree_allocator_t host_allocator = listener->host_allocator;
-  if (listener->listen_socket) {
-    iree_async_socket_release(listener->listen_socket);
-  }
+  iree_async_socket_release(listener->listen_socket);
   iree_allocator_free(host_allocator, listener);
 }
 

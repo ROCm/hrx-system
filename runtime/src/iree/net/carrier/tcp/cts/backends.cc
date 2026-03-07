@@ -208,9 +208,7 @@ static iree::StatusOr<CarrierPair> CreateTcpCarrierPairImpl(
   }
   if (!iree_status_is_ok(conn_state.connect_status)) {
     iree_async_socket_release(client_socket);
-    if (conn_state.accepted_socket) {
-      iree_async_socket_release(conn_state.accepted_socket);
-    }
+    iree_async_socket_release(conn_state.accepted_socket);
     return iree::Status(std::move(conn_state.connect_status));
   }
 
@@ -228,7 +226,7 @@ static iree::StatusOr<CarrierPair> CreateTcpCarrierPairImpl(
   iree_net_carrier_t* server_carrier = nullptr;
   iree_net_carrier_callback_t callback = {nullptr, nullptr};
 
-  iree_status_t status = iree_net_tcp_carrier_allocate(
+  iree_status_t status = iree_net_tcp_carrier_create(
       proactor, client_socket, ctx->client_pool,
       iree_net_tcp_carrier_options_default(), callback, iree_allocator_system(),
       &client_carrier);
@@ -238,7 +236,7 @@ static iree::StatusOr<CarrierPair> CreateTcpCarrierPairImpl(
     return iree::Status(std::move(status));
   }
 
-  status = iree_net_tcp_carrier_allocate(
+  status = iree_net_tcp_carrier_create(
       proactor, server_socket, ctx->server_pool,
       iree_net_tcp_carrier_options_default(), callback, iree_allocator_system(),
       &server_carrier);

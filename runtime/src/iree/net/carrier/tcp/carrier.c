@@ -865,7 +865,7 @@ static const iree_net_carrier_vtable_t iree_net_tcp_carrier_vtable = {
 // Public API
 //===----------------------------------------------------------------------===//
 
-IREE_API_EXPORT iree_status_t iree_net_tcp_carrier_allocate(
+IREE_API_EXPORT iree_status_t iree_net_tcp_carrier_create(
     iree_async_proactor_t* proactor, iree_async_socket_t* socket,
     iree_async_buffer_pool_t* recv_pool, iree_net_tcp_carrier_options_t options,
     iree_net_carrier_callback_t callback, iree_allocator_t host_allocator,

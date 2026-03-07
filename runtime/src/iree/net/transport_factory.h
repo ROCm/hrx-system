@@ -230,9 +230,8 @@ struct iree_net_transport_factory_vtable_t {
 // Retains a reference to the factory.
 static inline void iree_net_transport_factory_retain(
     iree_net_transport_factory_t* factory) {
-  if (IREE_LIKELY(factory)) {
-    iree_atomic_ref_count_inc(&factory->ref_count);
-  }
+  if (!factory) return;
+  iree_atomic_ref_count_inc(&factory->ref_count);
 }
 
 // Releases a reference to the factory.
@@ -240,8 +239,8 @@ static inline void iree_net_transport_factory_retain(
 // associated resources are freed.
 static inline void iree_net_transport_factory_release(
     iree_net_transport_factory_t* factory) {
-  if (IREE_LIKELY(factory) &&
-      iree_atomic_ref_count_dec(&factory->ref_count) == 1) {
+  if (!factory) return;
+  if (iree_atomic_ref_count_dec(&factory->ref_count) == 1) {
     factory->vtable->destroy(factory);
   }
 }

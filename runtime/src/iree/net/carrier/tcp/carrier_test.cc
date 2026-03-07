@@ -61,18 +61,12 @@ class TcpCarrierTest : public ::testing::Test {
       iree_async_buffer_pool_free(recv_pool_);
       recv_pool_ = nullptr;
     }
-    if (region_) {
-      iree_async_region_release(region_);
-      region_ = nullptr;
-    }
-    if (slab_) {
-      iree_async_slab_release(slab_);
-      slab_ = nullptr;
-    }
-    if (proactor_) {
-      iree_async_proactor_release(proactor_);
-      proactor_ = nullptr;
-    }
+    iree_async_region_release(region_);
+    region_ = nullptr;
+    iree_async_slab_release(slab_);
+    slab_ = nullptr;
+    iree_async_proactor_release(proactor_);
+    proactor_ = nullptr;
   }
 
   // Creates a TCP listener bound to localhost on an ephemeral port.
@@ -249,7 +243,7 @@ TEST_F(TcpCarrierTest, AllocateWithCustomOptions) {
   options.single_shot_recv_count = 16;
 
   iree_net_carrier_t* carrier = nullptr;
-  IREE_ASSERT_OK(iree_net_tcp_carrier_allocate(
+  IREE_ASSERT_OK(iree_net_tcp_carrier_create(
       proactor_, server, recv_pool_, options, {nullptr, nullptr},
       iree_allocator_system(), &carrier));
   ASSERT_NE(carrier, nullptr);
@@ -278,9 +272,9 @@ TEST_F(TcpCarrierTest, AllocateRejectsBadSendSlotCount) {
   iree_net_carrier_t* carrier = nullptr;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      iree_net_tcp_carrier_allocate(proactor_, server, recv_pool_, options,
-                                    {nullptr, nullptr}, iree_allocator_system(),
-                                    &carrier));
+      iree_net_tcp_carrier_create(proactor_, server, recv_pool_, options,
+                                  {nullptr, nullptr}, iree_allocator_system(),
+                                  &carrier));
   EXPECT_EQ(carrier, nullptr);
 
   // On validation failure the socket is NOT consumed, so we release it.
@@ -302,9 +296,9 @@ TEST_F(TcpCarrierTest, AllocateRejectsBadRecvCount) {
   iree_net_carrier_t* carrier = nullptr;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      iree_net_tcp_carrier_allocate(proactor_, server, recv_pool_, options,
-                                    {nullptr, nullptr}, iree_allocator_system(),
-                                    &carrier));
+      iree_net_tcp_carrier_create(proactor_, server, recv_pool_, options,
+                                  {nullptr, nullptr}, iree_allocator_system(),
+                                  &carrier));
   EXPECT_EQ(carrier, nullptr);
 
   iree_async_socket_release(server);
@@ -323,7 +317,7 @@ TEST_F(TcpCarrierTest, ShutdownBeforeActivate) {
   EstablishConnection(&client, &server, &listener);
 
   iree_net_carrier_t* carrier = nullptr;
-  IREE_ASSERT_OK(iree_net_tcp_carrier_allocate(
+  IREE_ASSERT_OK(iree_net_tcp_carrier_create(
       proactor_, server, recv_pool_, iree_net_tcp_carrier_options_default(),
       {nullptr, nullptr}, iree_allocator_system(), &carrier));
 
@@ -348,7 +342,7 @@ TEST_F(TcpCarrierTest, GracefulShutdown) {
   EstablishConnection(&client, &server, &listener);
 
   iree_net_carrier_t* carrier = nullptr;
-  IREE_ASSERT_OK(iree_net_tcp_carrier_allocate(
+  IREE_ASSERT_OK(iree_net_tcp_carrier_create(
       proactor_, server, recv_pool_, iree_net_tcp_carrier_options_default(),
       {nullptr, nullptr}, iree_allocator_system(), &carrier));
 
@@ -412,7 +406,7 @@ TEST_F(TcpCarrierTest, ShutdownThenSendFails) {
   EstablishConnection(&client, &server, &listener);
 
   iree_net_carrier_t* carrier = nullptr;
-  IREE_ASSERT_OK(iree_net_tcp_carrier_allocate(
+  IREE_ASSERT_OK(iree_net_tcp_carrier_create(
       proactor_, server, recv_pool_, iree_net_tcp_carrier_options_default(),
       {nullptr, nullptr}, iree_allocator_system(), &carrier));
 
@@ -464,7 +458,7 @@ TEST_F(TcpCarrierTest, StickyErrorClonedCorrectly) {
   EstablishConnection(&client, &server, &listener);
 
   iree_net_carrier_t* carrier = nullptr;
-  IREE_ASSERT_OK(iree_net_tcp_carrier_allocate(
+  IREE_ASSERT_OK(iree_net_tcp_carrier_create(
       proactor_, server, recv_pool_, iree_net_tcp_carrier_options_default(),
       {nullptr, nullptr}, iree_allocator_system(), &carrier));
 
@@ -511,20 +505,14 @@ TEST_F(TcpCarrierTest, StickyErrorClonedCorrectly) {
   memset(&params, 0, sizeof(params));
   params.data = iree_async_span_list_make(&span, 1);
 
-  std::vector<iree_status_t> errors;
+  std::vector<iree::Status> errors;
   for (int i = 0; i < 5; ++i) {
-    iree_status_t err = iree_net_carrier_send(carrier, &params);
-    errors.push_back(err);
+    errors.push_back(iree::Status(iree_net_carrier_send(carrier, &params)));
   }
 
   // All errors should be INTERNAL.
-  for (auto& err : errors) {
-    EXPECT_EQ(iree_status_code(err), IREE_STATUS_INTERNAL);
-  }
-
-  // Ignoring each error individually should work (no double-free).
-  for (auto& err : errors) {
-    iree_status_ignore(err);
+  for (const auto& error : errors) {
+    EXPECT_EQ(error.code(), iree::StatusCode::kInternal);
   }
 
   DeactivateAndWait(proactor_, carrier);
@@ -547,7 +535,7 @@ TEST_F(TcpCarrierTest, RapidConnectDisconnect) {
     EstablishConnection(&client, &server, &listener);
 
     iree_net_carrier_t* carrier = nullptr;
-    IREE_ASSERT_OK(iree_net_tcp_carrier_allocate(
+    IREE_ASSERT_OK(iree_net_tcp_carrier_create(
         proactor_, server, recv_pool_, iree_net_tcp_carrier_options_default(),
         {nullptr, nullptr}, iree_allocator_system(), &carrier));
 

@@ -110,26 +110,18 @@ class FactoryTestBase : public ::testing::TestWithParam<BackendInfo> {
   }
 
   void TearDown() override {
-    if (factory_) {
-      iree_net_transport_factory_release(factory_);
-      factory_ = nullptr;
-    }
+    iree_net_transport_factory_release(factory_);
+    factory_ = nullptr;
     if (recv_pool_) {
       iree_async_buffer_pool_free(recv_pool_);
       recv_pool_ = nullptr;
     }
-    if (region_) {
-      iree_async_region_release(region_);
-      region_ = nullptr;
-    }
-    if (slab_) {
-      iree_async_slab_release(slab_);
-      slab_ = nullptr;
-    }
-    if (proactor_) {
-      iree_async_proactor_release(proactor_);
-      proactor_ = nullptr;
-    }
+    iree_async_region_release(region_);
+    region_ = nullptr;
+    iree_async_slab_release(slab_);
+    slab_ = nullptr;
+    iree_async_proactor_release(proactor_);
+    proactor_ = nullptr;
   }
 
   //===--------------------------------------------------------------------===//
