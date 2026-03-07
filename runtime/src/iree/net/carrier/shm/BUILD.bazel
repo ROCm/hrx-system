@@ -1,4 +1,3 @@
-load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
 # Copyright 2026 The IREE Authors
 #
 # Licensed under the Apache License v2.0 with LLVM Exceptions.
@@ -7,6 +6,8 @@ load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
 
 # Shared memory carrier: high-performance IPC via SPSC rings in shared memory.
 
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+
 package(
     default_visibility = ["//visibility:public"],
     features = ["layering_check"],
@@ -14,10 +15,21 @@ package(
 )
 
 iree_runtime_cc_library(
+    name = "shared_wake",
+    srcs = ["shared_wake.c"],
+    hdrs = ["shared_wake.h"],
+    deps = [
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "shm",
     srcs = ["carrier.c"],
     hdrs = ["carrier.h"],
     deps = [
+        ":shared_wake",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:spsc_queue",
@@ -31,6 +43,7 @@ iree_runtime_cc_library(
     srcs = ["carrier_pair.c"],
     hdrs = ["carrier_pair.h"],
     deps = [
+        ":shared_wake",
         ":shm",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
@@ -45,6 +58,7 @@ iree_runtime_cc_library(
     srcs = ["factory.c"],
     hdrs = ["factory.h"],
     deps = [
+        ":shared_wake",
         ":shm",
         ":shm_pair",
         "//runtime/src/iree/async",
