@@ -31,6 +31,7 @@ iree_cc_library(
     iree::async
     iree::base
     iree::base::internal
+    iree::net::channel::util::frame_sender
     iree::net::message_endpoint
   PUBLIC
 )
@@ -45,6 +46,8 @@ iree_cc_test(
     ::frame
     iree::async
     iree::base
+    iree::net::carrier
+    iree::net::channel::util::frame_sender
     iree::net::message_endpoint
     iree::testing::gtest
     iree::testing::gtest_main
@@ -60,6 +63,8 @@ iree_cc_fuzz(
     ::frame
     iree::async
     iree::base
+    iree::net::carrier
+    iree::net::channel::util::frame_sender
     iree::net::message_endpoint
 )
 

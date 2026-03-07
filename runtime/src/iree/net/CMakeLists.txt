@@ -81,6 +81,7 @@ iree_cc_library(
     iree::base::internal
     iree::net::channel::control::control_channel
     iree::net::channel::control::frame
+    iree::net::channel::util::frame_sender
   PUBLIC
 )
 
