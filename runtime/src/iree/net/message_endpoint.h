@@ -52,7 +52,8 @@ extern "C" {
 // Called on the proactor thread for each complete message. The handler receives
 // a view of the message data and a lease to the backing storage. The lease is
 // always valid (non-NULL) whether the message came from a recv buffer or was
-// reassembled from fragments.
+// reassembled from fragments. |message.data| is aligned to
+// IREE_NET_MESSAGE_ALIGNMENT.
 //
 // To keep the message data valid beyond the callback, retain the lease via
 // iree_async_buffer_lease_retain(). Release it when done processing.

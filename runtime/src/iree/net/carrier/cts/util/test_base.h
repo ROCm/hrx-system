@@ -39,8 +39,12 @@ namespace iree::net::carrier::cts {
 // Captures received data for test verification.
 // Thread-safe for use as recv handler user_data.
 struct RecvCapture {
+  // Destination receiving copies of all callback data.
   std::vector<uint8_t>* buffer;
+  // Total callback data length observed.
   std::atomic<iree_host_size_t> total_bytes{0};
+  // True when every non-empty callback pointer satisfied the carrier contract.
+  std::atomic<bool> all_data_aligned{true};
 
   explicit RecvCapture(std::vector<uint8_t>* out_buffer) : buffer(out_buffer) {}
 
@@ -48,6 +52,9 @@ struct RecvCapture {
                                iree_async_buffer_lease_t* lease) {
     auto* capture = static_cast<RecvCapture*>(user_data);
     uint8_t* ptr = iree_async_span_ptr(data);
+    if (((uintptr_t)ptr % IREE_NET_MESSAGE_ALIGNMENT) != 0) {
+      capture->all_data_aligned.store(false, std::memory_order_relaxed);
+    }
     capture->buffer->insert(capture->buffer->end(), ptr, ptr + data.length);
     capture->total_bytes.fetch_add(data.length, std::memory_order_relaxed);
     // Release lease to return buffer to pool for reuse.

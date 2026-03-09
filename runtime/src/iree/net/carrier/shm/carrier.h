@@ -34,11 +34,16 @@
 //   cross-process operation via a factory. The only difference is how handles
 //   and SHM are exchanged — the carrier-level code is identical.
 //
-// Ring entry framing (layered on SPSC queue's length-prefixed entries):
-//   length == 0: shutdown marker (peer initiated graceful shutdown)
-//   length > 0:  [uint8_t type][type-specific payload]
+// Ring entry framing (layered on MPSC queue's length-prefixed entries):
+//   length >= 4: [uint32_t type][type-specific payload]
 //     type 0x00 (INLINE):    data bytes (memcpy'd from scatter-gather spans)
 //     type 0x01 (REFERENCE): region descriptor for zero-copy direct_write
+//     type 0x02 (SHUTDOWN):  peer initiated graceful shutdown
+//
+// MPSC entries begin on 8-byte boundaries and have a 4-byte length prefix. The
+// 4-byte SHM type header therefore places type-specific payloads on the next
+// 8-byte boundary, satisfying IREE_NET_MESSAGE_ALIGNMENT for inline data and
+// naturally aligning reference descriptors.
 //
 // Capabilities:
 //   - RELIABLE: no drops (shared memory, single producer/consumer per ring).
@@ -89,16 +94,23 @@ extern "C" {
 #define IREE_NET_SHM_POLL_WINDOW_DEFAULT IREE_NET_SHM_POLL_WINDOW_MAX
 
 // Inline data: payload bytes follow the type tag directly.
-#define IREE_NET_SHM_ENTRY_TYPE_INLINE ((uint8_t)0x00)
+#define IREE_NET_SHM_ENTRY_TYPE_INLINE ((uint32_t)0x00)
 
 // Reference descriptor: a region ID + offset + length identifying data in a
 // registered shared memory region. The consumer resolves the reference to a
 // pointer without any data copy.
-#define IREE_NET_SHM_ENTRY_TYPE_REFERENCE ((uint8_t)0x01)
+#define IREE_NET_SHM_ENTRY_TYPE_REFERENCE ((uint32_t)0x01)
 
 // Shutdown marker: signals the peer that no more data will be sent. The
 // consumer stops draining upon encountering this entry.
-#define IREE_NET_SHM_ENTRY_TYPE_SHUTDOWN ((uint8_t)0x02)
+#define IREE_NET_SHM_ENTRY_TYPE_SHUTDOWN ((uint32_t)0x02)
+
+// Fixed ring entry header preceding every type-specific payload.
+typedef struct iree_net_shm_entry_header_t {
+  // IREE_NET_SHM_ENTRY_TYPE_* value identifying the payload representation.
+  uint32_t type;
+} iree_net_shm_entry_header_t;
+static_assert(sizeof(iree_net_shm_entry_header_t) == 4, "");
 
 // Reference descriptor for zero-copy sends via registered shared memory
 // regions. Written into the ring as the payload of a REFERENCE entry.

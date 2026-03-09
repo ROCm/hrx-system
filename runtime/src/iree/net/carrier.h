@@ -52,6 +52,11 @@ extern "C" {
 // Carrier properties and capabilities
 //===----------------------------------------------------------------------===//
 
+// Minimum alignment of buffers returned by begin_send and data passed to recv
+// handlers. This permits protocols to directly access naturally aligned
+// 64-bit scalar fields without copying transport-owned messages first.
+#define IREE_NET_MESSAGE_ALIGNMENT ((iree_host_size_t)8)
+
 // Carrier lifecycle state for deactivate-before-destroy enforcement.
 typedef enum iree_net_carrier_state_e {
   IREE_NET_CARRIER_STATE_CREATED = 0,      // Not yet activated.
@@ -276,6 +281,8 @@ typedef struct iree_net_carrier_send_budget_t {
 // Called from the proactor thread for each received message/chunk. The handler
 // receives a view into the receive buffer and optionally a lease that can be
 // retained if the data is needed beyond the callback.
+// iree_async_span_ptr(data) is aligned to IREE_NET_MESSAGE_ALIGNMENT when
+// |data.length| is non-zero.
 //
 // |lease| may be NULL for carriers that don't use buffer pools (e.g., loopback
 // where data comes from the sender's buffer). When non-NULL, the carrier
@@ -614,7 +621,7 @@ static inline iree_status_t iree_net_carrier_send(
 // On success, |*out_ptr| points to a buffer of at least |size| bytes where the
 // caller writes directly. |*out_handle| receives an opaque handle that must be
 // passed to either commit_send (to publish the data) or abort_send (to discard
-// the reservation).
+// the reservation). |*out_ptr| is aligned to IREE_NET_MESSAGE_ALIGNMENT.
 //
 // This is the zero-allocation send path for data being generated (protocol
 // headers, serialized frontiers, bootstrap messages). For pre-existing data

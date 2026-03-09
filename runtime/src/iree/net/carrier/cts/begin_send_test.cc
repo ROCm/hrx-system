@@ -38,6 +38,7 @@ TEST_P(BeginSendTest, BasicBeginSend) {
   iree_net_carrier_send_handle_t handle = 0;
   IREE_ASSERT_OK(iree_net_carrier_begin_send(client_, size, &ptr, &handle));
   ASSERT_NE(ptr, nullptr);
+  EXPECT_EQ((uintptr_t)ptr % IREE_NET_MESSAGE_ALIGNMENT, 0u);
 
   memcpy(ptr, msg, size);
   IREE_ASSERT_OK(iree_net_carrier_commit_send(client_, handle));
@@ -47,6 +48,7 @@ TEST_P(BeginSendTest, BasicBeginSend) {
 
   ASSERT_EQ(server_received.size(), size);
   EXPECT_EQ(memcmp(server_received.data(), msg, size), 0);
+  EXPECT_TRUE(server_capture.all_data_aligned.load(std::memory_order_relaxed));
 }
 
 // Multiple sequential begin+write+commit cycles. Verify all received in order.

@@ -181,9 +181,14 @@ static bool iree_net_shm_carrier_dispatch_rx_entry(
     iree_net_shm_carrier_t* carrier, const void* payload,
     iree_host_size_t entry_length) {
   const uint8_t* data = (const uint8_t*)payload;
-  uint8_t entry_type = data[0];
-  const uint8_t* entry_data = data + 1;
-  iree_host_size_t data_length = entry_length - 1;
+  if (entry_length < sizeof(iree_net_shm_entry_header_t)) {
+    return false;
+  }
+  const iree_net_shm_entry_header_t* header =
+      (const iree_net_shm_entry_header_t*)data;
+  uint32_t entry_type = header->type;
+  const uint8_t* entry_data = data + sizeof(*header);
+  iree_host_size_t data_length = entry_length - sizeof(*header);
 
   if (entry_type == IREE_NET_SHM_ENTRY_TYPE_INLINE) {
     if (carrier->base.recv_handler.fn) {
@@ -202,25 +207,27 @@ static bool iree_net_shm_carrier_dispatch_rx_entry(
     if (data_length != sizeof(iree_net_shm_reference_descriptor_t)) {
       return false;
     }
-    const iree_net_shm_reference_descriptor_t* descriptor =
-        (const iree_net_shm_reference_descriptor_t*)entry_data;
-    if (descriptor->region_id >= carrier->region_count ||
-        descriptor->offset + descriptor->length >
-            carrier->regions[descriptor->region_id].size) {
+    const iree_net_shm_reference_descriptor_t descriptor =
+        *(const iree_net_shm_reference_descriptor_t*)entry_data;
+    uint64_t range_end = 0;
+    if (descriptor.region_id >= carrier->region_count ||
+        !iree_checked_add_u64(descriptor.offset, descriptor.length,
+                              &range_end) ||
+        range_end > carrier->regions[descriptor.region_id].size) {
       return false;
     }
     uint8_t* resolved =
-        (uint8_t*)carrier->regions[descriptor->region_id].base_ptr +
-        descriptor->offset;
+        (uint8_t*)carrier->regions[descriptor.region_id].base_ptr +
+        descriptor.offset;
     if (carrier->base.recv_handler.fn) {
       iree_async_span_t span = iree_async_span_from_ptr(
-          resolved, (iree_host_size_t)descriptor->length);
+          resolved, (iree_host_size_t)descriptor.length);
       iree_status_t recv_status = carrier->base.recv_handler.fn(
           carrier->base.recv_handler.user_data, span, NULL);
       iree_status_ignore(recv_status);
     }
     iree_atomic_fetch_add(&carrier->base.bytes_received,
-                          (int64_t)descriptor->length,
+                          (int64_t)descriptor.length,
                           iree_memory_order_relaxed);
     return true;
   }
@@ -238,9 +245,10 @@ static iree_net_shm_drain_rx_result_t iree_net_shm_carrier_drain_rx(
   const void* payload = NULL;
   while ((payload = iree_mpsc_queue_peek(&carrier->rx_queue, &entry_length)) !=
          NULL) {
-    // Check for shutdown marker (1-byte entry with SHUTDOWN type tag).
-    if (entry_length == 1 &&
-        *(const uint8_t*)payload == IREE_NET_SHM_ENTRY_TYPE_SHUTDOWN) {
+    // Check for a header-only shutdown marker.
+    if (entry_length == sizeof(iree_net_shm_entry_header_t) &&
+        ((const iree_net_shm_entry_header_t*)payload)->type ==
+            IREE_NET_SHM_ENTRY_TYPE_SHUTDOWN) {
       iree_mpsc_queue_consume(&carrier->rx_queue);
       iree_net_shm_signal_peer(carrier);
       carrier->peer_shutdown_received = true;
@@ -724,15 +732,16 @@ static iree_net_carrier_send_budget_t iree_net_shm_carrier_query_send_budget(
     iree_net_carrier_t* base_carrier) {
   iree_net_shm_carrier_t* carrier = iree_net_shm_carrier_cast(base_carrier);
 
-  // Ring buffer available bytes, adjusted for per-entry overhead. Each SPSC
+  // Ring buffer available bytes, adjusted for per-entry overhead. Each MPSC
   // entry consumes align_up(4 + payload, entry_alignment) bytes where the 4 is
-  // the uint32_t length header. Our payload includes a 1-byte type tag before
-  // the user data, so the total ring cost for a send of N data bytes is
-  // align_up(4 + 1 + N, 8). We subtract the maximum overhead (4 + 1 + 7 = 12)
+  // the uint32_t length header. Our payload includes a 4-byte type header
+  // before the user data, so the total ring cost for a send of N data bytes is
+  // align_up(4 + 4 + N, 8). We subtract the maximum overhead (4 + 4 + 7 = 15)
   // so the reported budget is always achievable in a single send.
   iree_host_size_t ring_bytes =
       iree_mpsc_queue_write_available(&carrier->tx_queue);
-  iree_host_size_t per_entry_overhead = sizeof(uint32_t) + 1 + 7;
+  iree_host_size_t per_entry_overhead =
+      sizeof(uint32_t) + sizeof(iree_net_shm_entry_header_t) + 7;
 
   // Slots are unlimited — send completions fire synchronously after data is
   // committed to the ring, so there are no in-flight completion entries.
@@ -762,8 +771,8 @@ static iree_status_t iree_net_shm_carrier_send(
                             "empty sends are not allowed");
   }
   iree_host_size_t ring_entry_size = 0;
-  if (IREE_UNLIKELY(
-          !iree_host_size_checked_add(1, total_size, &ring_entry_size))) {
+  if (IREE_UNLIKELY(!iree_host_size_checked_add(
+          sizeof(iree_net_shm_entry_header_t), total_size, &ring_entry_size))) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "ring entry size overflow");
   }
@@ -817,8 +826,9 @@ static iree_status_t iree_net_shm_carrier_send(
                             "carrier has been shut down for sending");
   }
 
-  payload[0] = IREE_NET_SHM_ENTRY_TYPE_INLINE;
-  uint8_t* write_ptr = payload + 1;
+  iree_net_shm_entry_header_t* header = (iree_net_shm_entry_header_t*)payload;
+  header->type = IREE_NET_SHM_ENTRY_TYPE_INLINE;
+  uint8_t* write_ptr = payload + sizeof(*header);
   for (iree_host_size_t i = 0; i < params->data.count; ++i) {
     memcpy(write_ptr, iree_async_span_ptr(params->data.values[i]),
            params->data.values[i].length);
@@ -859,7 +869,8 @@ static iree_status_t iree_net_shm_carrier_begin_send(
                             "empty sends are not allowed");
   }
   iree_host_size_t ring_entry_size = 0;
-  if (IREE_UNLIKELY(!iree_host_size_checked_add(1, size, &ring_entry_size))) {
+  if (IREE_UNLIKELY(!iree_host_size_checked_add(
+          sizeof(iree_net_shm_entry_header_t), size, &ring_entry_size))) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "ring entry size overflow");
   }
@@ -909,8 +920,9 @@ static iree_status_t iree_net_shm_carrier_begin_send(
                             "carrier has been shut down for sending");
   }
 
-  payload[0] = IREE_NET_SHM_ENTRY_TYPE_INLINE;
-  *out_ptr = payload + 1;
+  iree_net_shm_entry_header_t* header = (iree_net_shm_entry_header_t*)payload;
+  header->type = IREE_NET_SHM_ENTRY_TYPE_INLINE;
+  *out_ptr = payload + sizeof(*header);
 
   // Pack the MPSC reservation into the handle. The reservation is 8 bytes
   // (two uint32_t fields), same size as the uint64_t handle.
@@ -933,9 +945,10 @@ static iree_status_t iree_net_shm_carrier_commit_send(
   iree_net_shm_signal_peer(carrier);
 
   // Update stats: reservation.payload_length is ring_entry_size which includes
-  // the 1-byte type tag, so user data = payload_length - 1.
+  // the SHM entry header, so subtract it to recover the user data size.
   iree_host_size_t data_size =
-      (iree_host_size_t)(reservation.payload_length - 1);
+      (iree_host_size_t)(reservation.payload_length -
+                         sizeof(iree_net_shm_entry_header_t));
   iree_atomic_fetch_add(&base_carrier->bytes_sent, (int64_t)data_size,
                         iree_memory_order_relaxed);
 
@@ -980,16 +993,16 @@ static iree_status_t iree_net_shm_carrier_shutdown(
   // have failed to enqueue the marker), we try the marker again.
   iree_atomic_store(&carrier->shutdown_initiated, 1, iree_memory_order_seq_cst);
 
-  // Write a 1-byte shutdown marker to the TX ring. The marker is a single byte
-  // containing the SHUTDOWN entry type tag.
+  // Write a header-only shutdown marker to the TX ring.
   iree_mpsc_queue_reservation_t reservation;
-  uint8_t* marker_payload = (uint8_t*)iree_mpsc_queue_begin_write(
-      &carrier->tx_queue, 1, &reservation);
-  if (!marker_payload) {
+  iree_net_shm_entry_header_t* marker_header =
+      (iree_net_shm_entry_header_t*)iree_mpsc_queue_begin_write(
+          &carrier->tx_queue, sizeof(*marker_header), &reservation);
+  if (!marker_header) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "TX ring full, cannot enqueue shutdown marker");
   }
-  marker_payload[0] = IREE_NET_SHM_ENTRY_TYPE_SHUTDOWN;
+  marker_header->type = IREE_NET_SHM_ENTRY_TYPE_SHUTDOWN;
   iree_mpsc_queue_commit_write(&carrier->tx_queue, reservation);
 
   iree_net_shm_signal_peer(carrier);
@@ -1069,7 +1082,10 @@ static uint8_t* iree_net_shm_resolve_handle(iree_net_shm_carrier_t* carrier,
     return NULL;
   }
   iree_net_shm_region_info_t* region = &carrier->regions[region_id];
-  if (IREE_UNLIKELY(offset + length > region->size)) {
+  uint64_t range_end = 0;
+  if (IREE_UNLIKELY(
+          !iree_checked_add_u64(offset, (uint64_t)length, &range_end) ||
+          range_end > region->size)) {
     *out_status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                                    "offset %" PRIu64 " + length %" PRIhsz
                                    " exceeds region size %" PRIhsz,
@@ -1104,7 +1120,8 @@ static iree_status_t iree_net_shm_carrier_direct_write(
   // drain callback discovers the data. Completion fires synchronously after
   // the reference entry is committed to the ring.
   iree_host_size_t ring_entry_size =
-      1 + sizeof(iree_net_shm_reference_descriptor_t);
+      sizeof(iree_net_shm_entry_header_t) +
+      sizeof(iree_net_shm_reference_descriptor_t);
 
   iree_atomic_fetch_add(&base_carrier->pending_operations, 1,
                         iree_memory_order_acq_rel);
@@ -1130,13 +1147,16 @@ static iree_status_t iree_net_shm_carrier_direct_write(
                             "TX ring buffer full");
   }
 
-  payload[0] = IREE_NET_SHM_ENTRY_TYPE_REFERENCE;
+  iree_net_shm_entry_header_t* header = (iree_net_shm_entry_header_t*)payload;
+  header->type = IREE_NET_SHM_ENTRY_TYPE_REFERENCE;
   iree_net_shm_reference_descriptor_t* descriptor =
-      (iree_net_shm_reference_descriptor_t*)(payload + 1);
-  descriptor->region_id = (uint32_t)params->remote.opaque[0];
-  descriptor->reserved = params->immediate;
-  descriptor->offset = params->remote.opaque[1];
-  descriptor->length = params->local.length;
+      (iree_net_shm_reference_descriptor_t*)(payload + sizeof(*header));
+  *descriptor = (iree_net_shm_reference_descriptor_t){
+      .region_id = (uint32_t)params->remote.opaque[0],
+      .reserved = params->immediate,
+      .offset = params->remote.opaque[1],
+      .length = params->local.length,
+  };
 
   iree_mpsc_queue_commit_write(&carrier->tx_queue, reservation);
 
