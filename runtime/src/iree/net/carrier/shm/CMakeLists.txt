@@ -50,8 +50,8 @@ iree_cc_library(
     ::xproc_context
     iree::async
     iree::base
+    iree::base::internal::mpsc_queue
     iree::base::internal::shm
-    iree::base::internal::spsc_queue
   PUBLIC
 )
 
@@ -66,8 +66,7 @@ iree_cc_library(
     ::shared_wake
     iree::async
     iree::base
-    iree::base::internal::spsc_queue
-    iree::base::threading
+    iree::base::internal::mpsc_queue
     iree::net::carrier
   PUBLIC
 )
@@ -84,8 +83,8 @@ iree_cc_library(
     ::shm
     iree::async
     iree::base
+    iree::base::internal::mpsc_queue
     iree::base::internal::shm
-    iree::base::internal::spsc_queue
     iree::net::carrier
   PUBLIC
 )
