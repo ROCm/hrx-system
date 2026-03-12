@@ -88,34 +88,23 @@ static iree_status_t iree_serve_device_run(void) {
   iree_status_t status = iree_serve_device_parse_bind_uri(
       iree_make_cstring_view(FLAG_bind), &transport_name, &bind_address);
 
-  // Configure server options.
+  // Server transport/proactor/pool/tracker setup will be wired when the
+  // transport registry is integrated. Fail loudly until then instead of
+  // passing null infrastructure to the server API.
   iree_hal_remote_server_t* server = NULL;
   if (iree_status_is_ok(status)) {
-    iree_hal_remote_server_options_t options;
-    iree_hal_remote_server_options_initialize(&options);
-    options.bind_address = bind_address;
-    options.max_connections = (uint32_t)FLAG_max_connections;
-    if (FLAG_rdma) {
-      options.flags |= IREE_HAL_REMOTE_SERVER_FLAG_ENABLE_RDMA;
-    }
-    if (FLAG_trace) {
-      options.flags |= IREE_HAL_REMOTE_SERVER_FLAG_TRACE_SERVER_OPS;
-    }
-
-    // Transport factory creation will be wired up when the server
-    // implementation is complete. For now, server_create will fail because
-    // transport_factory is NULL (the options_verify check catches this).
     fprintf(stdout, "Creating server: transport=%.*s address=%.*s\n",
             (int)transport_name.size, transport_name.data,
             (int)bind_address.size, bind_address.data);
-    status = iree_hal_remote_server_create(&options, device, host_allocator,
-                                           &server);
+    status = iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "iree-serve-device transport setup is not yet implemented");
   }
 
-  // Run the server event loop.
+  // Start the server and run the proactor event loop.
   if (iree_status_is_ok(status)) {
     fprintf(stdout, "Server starting...\n");
-    status = iree_hal_remote_server_run(server);
+    status = iree_hal_remote_server_start(server);
   }
 
   // Cleanup.
