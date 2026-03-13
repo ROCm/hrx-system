@@ -205,6 +205,13 @@ APIs on top of IREE's HAL. It supports:
 - **Occupancy queries** — max active blocks, potential block size.
 - **Memory pools** — stream-ordered allocation.
 
+The HIP binding is built as a shared library at
+`build/streaming/binding/hip/libstreaming_binding_hip_hip.so` and can be used
+as a **drop-in replacement for `libamdhip64.so`**. Point `LD_LIBRARY_PATH` (or
+`LD_PRELOAD`) at the directory containing this library and any application
+that links against `libamdhip64.so` will transparently use the streaming
+implementation instead.
+
 See [`streaming/README.md`](streaming/README.md) for the full API support
 matrix and usage examples.
 
