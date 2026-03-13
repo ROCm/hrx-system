@@ -6,7 +6,7 @@
 
 #include "streaming/util/buffer_table.h"
 
-#include "iree/base/internal/synchronization.h"
+#include "iree/base/threading/mutex.h"
 #include "streaming/internal.h"
 
 // Initial capacity for the buffer table in entries.

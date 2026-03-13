@@ -16,7 +16,7 @@ iree_cc_library(
   DEPS
     iree::base
     iree::base::internal::arena
-    iree::base::internal::synchronization
+    iree::base::threading
     streaming::internal
     iree::hal
     iree::hal::drivers

@@ -81,8 +81,8 @@ iree_cc_library(
     iree::base::internal
     iree::base::internal::arena
     iree::base::internal::atomic_slist
-    iree::base::internal::synchronization
-    iree::base::internal::threading
+    iree::base::threading
+    iree::base::threading::thread
     iree::base::internal::wait_handle
     iree::base::internal::flatcc::parsing
     iree::hal

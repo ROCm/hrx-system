@@ -33,7 +33,7 @@ iree_cc_library(
     iree::base
     iree::base::internal
     iree::base::internal::arena
-    iree::base::internal::synchronization
+    iree::base::threading
     streaming::util
     iree::hal
     iree::hal::drivers
@@ -49,7 +49,7 @@ iree_cc_library(
   DEPS
     iree::base
     iree::base::internal::arena
-    iree::base::internal::synchronization
+    iree::base::threading
     iree::hal
   PUBLIC
 )

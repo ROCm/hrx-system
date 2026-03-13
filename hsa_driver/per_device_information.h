@@ -7,7 +7,8 @@
 #ifndef IREE_HAL_DRIVERS_HSA_PER_DEVICE_INFORMATION_H_
 #define IREE_HAL_DRIVERS_HSA_PER_DEVICE_INFORMATION_H_
 
-#include "iree/base/internal/synchronization.h"
+#include "iree/base/threading/mutex.h"
+#include "iree/base/threading/notification.h"
 #include "hsa_driver/hsa_headers.h"
 
 typedef struct iree_hal_stream_tracing_context_t

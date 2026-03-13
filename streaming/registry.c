@@ -8,9 +8,9 @@
 #include <string.h>
 
 #include "streaming/internal.h"
-#include "iree/base/internal/call_once.h"
 #include "iree/base/internal/math.h"
-#include "iree/base/internal/synchronization.h"
+#include "iree/base/threading/call_once.h"
+#include "iree/base/threading/mutex.h"
 
 static void iree_hal_streaming_context_symbol_map_expunge_module(
     iree_hal_streaming_context_symbol_map_t* map,

@@ -11,7 +11,7 @@
 #include <stdlib.h>
 
 #include "iree/base/api.h"
-#include "iree/base/internal/flags.h"
+#include "iree/base/tooling/flags.h"
 #include "iree/base/status.h"
 #include "iree/base/tracing.h"
 #include "hsa_driver/api.h"
