@@ -17,7 +17,6 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Forward declarations.
 typedef struct iree_hal_device_t iree_hal_device_t;
 
 //===----------------------------------------------------------------------===//
