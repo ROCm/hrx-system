@@ -60,14 +60,17 @@ class RemoteSessionTest : public ::testing::Test {
         region_, iree_allocator_system(), &recv_pool_));
 
     // Create frontier trackers for client and server.
-    memset(client_axis_entries_, 0, sizeof(client_axis_entries_));
-    memset(server_axis_entries_, 0, sizeof(server_axis_entries_));
-    IREE_ASSERT_OK(iree_async_frontier_tracker_initialize(
-        &client_tracker_, client_axis_entries_, kAxisTableCapacity,
-        iree_allocator_system()));
-    IREE_ASSERT_OK(iree_async_frontier_tracker_initialize(
-        &server_tracker_, server_axis_entries_, kAxisTableCapacity,
-        iree_allocator_system()));
+    iree_async_frontier_tracker_options_t client_tracker_options =
+        iree_async_frontier_tracker_options_default();
+    client_tracker_options.axis_table_capacity = kAxisTableCapacity;
+    IREE_ASSERT_OK(iree_async_frontier_tracker_create(
+        client_tracker_options, iree_allocator_system(), &client_tracker_));
+
+    iree_async_frontier_tracker_options_t server_tracker_options =
+        iree_async_frontier_tracker_options_default();
+    server_tracker_options.axis_table_capacity = kAxisTableCapacity;
+    IREE_ASSERT_OK(iree_async_frontier_tracker_create(
+        server_tracker_options, iree_allocator_system(), &server_tracker_));
 
     // Create loopback transport factory.
     iree_net_loopback_factory_options_t factory_options =
@@ -80,50 +83,38 @@ class RemoteSessionTest : public ::testing::Test {
     // Drain proactor to let any pending operations complete.
     PollFor(iree_make_duration_ms(100));
 
-    if (client_device_) {
-      iree_hal_device_release(client_device_);
-      client_device_ = nullptr;
-    }
+    iree_hal_device_release(client_device_);
+    client_device_ = nullptr;
 
     // Drain again after client device release (session teardown).
     PollFor(iree_make_duration_ms(100));
 
-    if (server_) {
-      iree_hal_remote_server_release(server_);
-      server_ = nullptr;
-    }
+    iree_hal_remote_server_release(server_);
+    server_ = nullptr;
 
     // Drain after server release.
     PollFor(iree_make_duration_ms(100));
 
-    if (mock_device_) {
-      iree_hal_device_release(mock_device_);
-      mock_device_ = nullptr;
-    }
-    if (factory_) {
-      iree_net_transport_factory_release(factory_);
-      factory_ = nullptr;
-    }
+    iree_hal_device_release(mock_device_);
+    mock_device_ = nullptr;
+    iree_net_transport_factory_release(factory_);
+    factory_ = nullptr;
 
-    iree_async_frontier_tracker_deinitialize(&server_tracker_);
-    iree_async_frontier_tracker_deinitialize(&client_tracker_);
+    iree_async_frontier_tracker_release(server_tracker_);
+    server_tracker_ = nullptr;
+    iree_async_frontier_tracker_release(client_tracker_);
+    client_tracker_ = nullptr;
 
     if (recv_pool_) {
       iree_async_buffer_pool_free(recv_pool_);
       recv_pool_ = nullptr;
     }
-    if (region_) {
-      iree_async_region_release(region_);
-      region_ = nullptr;
-    }
-    if (slab_) {
-      iree_async_slab_release(slab_);
-      slab_ = nullptr;
-    }
-    if (proactor_) {
-      iree_async_proactor_release(proactor_);
-      proactor_ = nullptr;
-    }
+    iree_async_region_release(region_);
+    region_ = nullptr;
+    iree_async_slab_release(slab_);
+    slab_ = nullptr;
+    iree_async_proactor_release(proactor_);
+    proactor_ = nullptr;
   }
 
   //===--------------------------------------------------------------------===//
@@ -191,7 +182,7 @@ class RemoteSessionTest : public ::testing::Test {
 
     iree_hal_device_t* devices[] = {mock_device_};
     IREE_ASSERT_OK(iree_hal_remote_server_create(
-        &server_options, devices, 1, proactor_, &server_tracker_, recv_pool_,
+        &server_options, devices, 1, proactor_, server_tracker_, recv_pool_,
         iree_allocator_system(), &server_));
 
     IREE_ASSERT_OK(iree_hal_remote_server_start(server_));
@@ -210,7 +201,7 @@ class RemoteSessionTest : public ::testing::Test {
 
     IREE_ASSERT_OK(iree_hal_remote_client_device_create(
         IREE_SV("remote"), &client_options, /*create_params=*/nullptr,
-        proactor_, &client_tracker_, recv_pool_, iree_allocator_system(),
+        proactor_, client_tracker_, recv_pool_, iree_allocator_system(),
         &client_device_));
   }
 
@@ -283,10 +274,8 @@ class RemoteSessionTest : public ::testing::Test {
   iree_net_transport_factory_t* factory_ = nullptr;
 
   // Frontier trackers (separate, as they would be on different machines).
-  iree_async_axis_table_entry_t client_axis_entries_[kAxisTableCapacity];
-  iree_async_frontier_tracker_t client_tracker_;
-  iree_async_axis_table_entry_t server_axis_entries_[kAxisTableCapacity];
-  iree_async_frontier_tracker_t server_tracker_;
+  iree_async_frontier_tracker_t* client_tracker_ = nullptr;
+  iree_async_frontier_tracker_t* server_tracker_ = nullptr;
 
   // Server side.
   iree_hal_device_t* mock_device_ = nullptr;
@@ -388,6 +377,13 @@ TEST_F(RemoteSessionTest, MultipleClientsConnect) {
   // Create and connect two separate client devices.
   iree_hal_device_t* client_a = nullptr;
   iree_hal_device_t* client_b = nullptr;
+  iree_async_frontier_tracker_t* client_b_tracker = nullptr;
+
+  iree_async_frontier_tracker_options_t client_b_tracker_options =
+      iree_async_frontier_tracker_options_default();
+  client_b_tracker_options.axis_table_capacity = kAxisTableCapacity;
+  IREE_ASSERT_OK(iree_async_frontier_tracker_create(
+      client_b_tracker_options, iree_allocator_system(), &client_b_tracker));
 
   iree_hal_remote_client_device_options_t options;
   iree_hal_remote_client_device_options_initialize(&options);
@@ -396,10 +392,10 @@ TEST_F(RemoteSessionTest, MultipleClientsConnect) {
 
   IREE_ASSERT_OK(iree_hal_remote_client_device_create(
       IREE_SV("remote-a"), &options, /*create_params=*/nullptr, proactor_,
-      &client_tracker_, recv_pool_, iree_allocator_system(), &client_a));
+      client_tracker_, recv_pool_, iree_allocator_system(), &client_a));
   IREE_ASSERT_OK(iree_hal_remote_client_device_create(
       IREE_SV("remote-b"), &options, /*create_params=*/nullptr, proactor_,
-      &client_tracker_, recv_pool_, iree_allocator_system(), &client_b));
+      client_b_tracker, recv_pool_, iree_allocator_system(), &client_b));
 
   // Connect both.
   struct ConnectCtx {
@@ -440,6 +436,7 @@ TEST_F(RemoteSessionTest, MultipleClientsConnect) {
 
   iree_hal_device_release(client_b);
   PollFor(iree_make_duration_ms(100));
+  iree_async_frontier_tracker_release(client_b_tracker);
   iree_hal_device_release(client_a);
   PollFor(iree_make_duration_ms(100));
 }
@@ -460,8 +457,8 @@ TEST_F(RemoteSessionTest, QueueOpsFailWhenDisconnected) {
   buffer_params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
   iree_status_t status = iree_hal_device_queue_alloca(
       client_device_, /*queue_affinity=*/0, empty_list, empty_list,
-      IREE_HAL_ALLOCATOR_POOL_DEFAULT, buffer_params,
-      /*allocation_size=*/1024, IREE_HAL_ALLOCA_FLAG_NONE, &buffer);
+      /*pool=*/nullptr, buffer_params, /*allocation_size=*/1024,
+      IREE_HAL_ALLOCA_FLAG_NONE, &buffer);
   EXPECT_TRUE(iree_status_is_failed_precondition(status))
       << "Expected FAILED_PRECONDITION for queue op while disconnected";
   iree_status_ignore(status);

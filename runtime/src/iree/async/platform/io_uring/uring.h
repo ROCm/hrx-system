@@ -91,12 +91,13 @@ typedef struct iree_io_uring_ring_t {
   // Zero is unlocked and one is locked; waiters poll without modifying it.
   iree_atomic_int32_t sq_lock;
 
-  // True if the ring was created with R_DISABLED and needs
+  // Non-zero if the ring was created with R_DISABLED and needs
   // REGISTER_ENABLE_RINGS before io_uring_enter can be called. When
   // SINGLE_ISSUER is active, REGISTER_ENABLE_RINGS also binds the calling
-  // thread as the exclusive submitter — deferring this binding from
-  // io_uring_setup to the first poll() call on the proactor thread.
-  bool needs_enable;
+  // thread as the exclusive submitter — the kernel defers this binding when
+  // R_DISABLED is set during io_uring_setup. Read by cross-proactor submitters
+  // before targeting this ring with MSG_RING.
+  iree_atomic_int32_t needs_enable;
 } iree_io_uring_ring_t;
 
 //===----------------------------------------------------------------------===//
@@ -116,6 +117,11 @@ static inline void iree_io_uring_ring_sq_lock(iree_io_uring_ring_t* ring) {
 // Releases the SQ lock.
 static inline void iree_io_uring_ring_sq_unlock(iree_io_uring_ring_t* ring) {
   iree_atomic_store(&ring->sq_lock, 0, iree_memory_order_release);
+}
+
+// Returns true if the ring needs REGISTER_ENABLE_RINGS before io_uring_enter.
+static inline bool iree_io_uring_ring_needs_enable(iree_io_uring_ring_t* ring) {
+  return iree_atomic_load(&ring->needs_enable, iree_memory_order_acquire) != 0;
 }
 
 //===----------------------------------------------------------------------===//
@@ -174,9 +180,13 @@ iree_status_t iree_io_uring_ring_initialize(
 void iree_io_uring_ring_deinitialize(iree_io_uring_ring_t* ring);
 
 // Enables a ring that was created with R_DISABLED. Must be called from the
-// thread that will serve as the exclusive submitter (poll thread). With
-// SINGLE_ISSUER, this binds the calling thread as the ring's exclusive
+// thread that will own all subsequent io_uring_enter calls (the poll thread).
+// When SINGLE_ISSUER is active, this binds the calling thread as the exclusive
 // submitter. No-op if the ring was not created with R_DISABLED.
+//
+// All io_uring_register operations (buffer registration, probing, etc.) work
+// on a disabled ring without restriction — only io_uring_enter (submission)
+// is blocked until enable.
 iree_status_t iree_io_uring_ring_enable(iree_io_uring_ring_t* ring);
 
 //===----------------------------------------------------------------------===//

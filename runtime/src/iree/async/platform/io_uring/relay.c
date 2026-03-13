@@ -401,12 +401,9 @@ iree_status_t iree_async_io_uring_register_relay(
     return status;
   }
 
-  // Flush the SQE to the kernel so monitoring begins and the SQ slot is
-  // reclaimed. ring_submit errors are ignored because the SQE is already
-  // committed via *sq_tail (see register_event_source for full rationale).
-  iree_status_ignore(iree_io_uring_ring_submit(&proactor->ring,
-                                               /*min_complete=*/0,
-                                               /*flags=*/0));
+  // Wake the poll thread to submit the SQE. Do not call ring_submit() here:
+  // SINGLE_ISSUER rings are enabled and entered only by the poll thread.
+  iree_async_proactor_wake(&proactor->base);
 
   // The FUTEX_WAIT (or POLL_ADD) is now in-flight. Track it so the
   // notification signal path wakes the precise number of futex waiters.
@@ -497,6 +494,13 @@ void iree_async_io_uring_unregister_relay(
         IREE_ASYNC_IO_URING_RELAY_STATE_UNREGISTRATION_SUBMITTED;
   }
   iree_io_uring_ring_sq_unlock(&proactor->ring);
+
+  if (sqe) {
+    // Wake the poll thread to submit the cancellation SQE. Do not call
+    // ring_submit() here: SINGLE_ISSUER rings are entered only by the poll
+    // thread.
+    iree_async_proactor_wake(&proactor->base);
+  }
 
   // The relay stays in the list until its final source CQE arrives. If SQ
   // pressure prevented cancellation submission, the poll loop retries after

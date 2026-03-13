@@ -2006,16 +2006,9 @@ static iree_status_t iree_async_proactor_io_uring_register_event_source(
                                                  (uintptr_t)source);
   iree_io_uring_ring_sq_unlock(&proactor->ring);
 
-  // Flush the SQE to the kernel so the POLL_ADD begins monitoring and the SQ
-  // slot is reclaimed for subsequent submissions. If ring_submit fails, the
-  // SQE is already committed to the kernel via *sq_tail (which ring_submit
-  // advances before calling io_uring_enter) and will be processed on the next
-  // successful io_uring_enter. We must NOT attempt to rollback the SQE after
-  // ring_submit because *sq_tail has already been advanced — rollback would
-  // desync sq_local_tail from *sq_tail, corrupting the ring.
-  iree_status_ignore(iree_io_uring_ring_submit(&proactor->ring,
-                                               /*min_complete=*/0,
-                                               /*flags=*/0));
+  // Wake the poll thread to submit the SQE. Do not call ring_submit() here:
+  // SINGLE_ISSUER rings are enabled and entered only by the poll thread.
+  iree_async_proactor_wake(&proactor->base);
 
   // Link into the proactor's event source list.
   source->next = proactor->event_sources;
@@ -2064,7 +2057,14 @@ static void iree_async_proactor_io_uring_unregister_event_source(
   }
   iree_io_uring_ring_sq_unlock(&proactor->ring);
 
-  // The next poll flushes the cancellation and owns the source until the
+  if (sqe) {
+    // Wake the poll thread to submit the cancellation SQE. Do not call
+    // ring_submit() here: SINGLE_ISSUER rings are entered only by the poll
+    // thread.
+    iree_async_proactor_wake(&proactor->base);
+  }
+
+  // The poll thread flushes the cancellation and owns the source until the
   // terminal CQE. Proactor destruction closes the ring before freeing any
   // remaining source state.
   IREE_TRACE_ZONE_END(z0);
@@ -2122,13 +2122,11 @@ static iree_status_t iree_async_proactor_io_uring_submit_signal_poll(
   }
   iree_io_uring_ring_sq_unlock(&proactor->ring);
 
-  // Flush the SQE to the kernel (see register_event_source for rationale).
-  // ring_submit errors are ignored because the SQE is already committed via
-  // *sq_tail and will be processed on the next successful io_uring_enter.
   if (iree_status_is_ok(status)) {
-    iree_status_ignore(iree_io_uring_ring_submit(&proactor->ring,
-                                                 /*min_complete=*/0,
-                                                 /*flags=*/0));
+    // Wake the poll thread to submit the signal POLL_ADD. Do not call
+    // ring_submit() here: SINGLE_ISSUER rings are entered only by the poll
+    // thread.
+    iree_async_proactor_wake(&proactor->base);
     proactor->signal.initialized = true;
   }
 

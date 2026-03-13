@@ -55,6 +55,16 @@ static iree_status_t iree_io_uring_ring_try_setup(
     iree_io_uring_params_t* out_params) {
   memset(out_params, 0, sizeof(*out_params));
 
+  // When SINGLE_ISSUER is requested, add R_DISABLED so the ring starts without
+  // binding the creating thread as the submitter. The caller must call
+  // ring_enable() from the poll thread to bind that thread instead.
+  // R_DISABLED blocks io_uring_enter until REGISTER_ENABLE_RINGS, but all
+  // io_uring_register operations (buffer registration, probing) work normally
+  // on the disabled ring — no restrictions are installed.
+  if (requested_flags & IREE_IORING_SETUP_SINGLE_ISSUER) {
+    requested_flags |= IREE_IORING_SETUP_R_DISABLED;
+  }
+
   // Attempt 1: Try with all requested flags.
   out_params->flags = requested_flags;
   int fd = iree_io_uring_setup(entries, out_params);
@@ -296,7 +306,9 @@ iree_status_t iree_io_uring_ring_initialize(
 
   // Record whether the ring needs enabling before io_uring_enter can be
   // called. The actual flags used may differ from requested (fallback path).
-  out_ring->needs_enable = (params.flags & IREE_IORING_SETUP_R_DISABLED) != 0;
+  iree_atomic_store(&out_ring->needs_enable,
+                    (params.flags & IREE_IORING_SETUP_R_DISABLED) != 0,
+                    iree_memory_order_relaxed);
 
   iree_status_t status = iree_io_uring_ring_map_buffers(out_ring, &params);
   if (!iree_status_is_ok(status)) {
@@ -308,7 +320,7 @@ iree_status_t iree_io_uring_ring_initialize(
 }
 
 iree_status_t iree_io_uring_ring_enable(iree_io_uring_ring_t* ring) {
-  if (!ring->needs_enable) return iree_ok_status();
+  if (!iree_io_uring_ring_needs_enable(ring)) return iree_ok_status();
 
   // REGISTER_ENABLE_RINGS transitions the ring from disabled to operational.
   // When SINGLE_ISSUER is active, this binds the calling thread as the
@@ -325,7 +337,7 @@ iree_status_t iree_io_uring_ring_enable(iree_io_uring_ring_t* ring) {
                             "IORING_REGISTER_ENABLE_RINGS failed (%d)", errno);
   }
 
-  ring->needs_enable = false;
+  iree_atomic_store(&ring->needs_enable, 0, iree_memory_order_release);
   return iree_ok_status();
 }
 
