@@ -144,8 +144,8 @@ static RemoteBackendEnvironment* GetEnvironment() {
 
 // Creates the server-side local-task device.
 static iree_status_t CreateLocalTaskServerDevice(
-    const iree_hal_device_create_params_t* create_params,
-    iree_hal_driver_t** out_driver, iree_hal_device_t** out_device) {
+    iree_async_proactor_pool_t* proactor_pool, iree_hal_driver_t** out_driver,
+    iree_hal_device_t** out_device) {
   iree_status_t status = iree_hal_local_task_driver_module_register(
       iree_hal_driver_registry_default());
   if (iree_status_is_already_exists(status)) {
@@ -162,8 +162,11 @@ static iree_status_t CreateLocalTaskServerDevice(
 
   iree_hal_device_t* device = nullptr;
   if (iree_status_is_ok(status)) {
+    iree_hal_device_create_params_t create_params =
+        iree_hal_device_create_params_default();
+    create_params.proactor_pool = proactor_pool;
     status = iree_hal_driver_create_default_device(
-        driver, create_params, iree_allocator_system(), &device);
+        driver, &create_params, iree_allocator_system(), &device);
   }
 
   if (iree_status_is_ok(status)) {
@@ -177,12 +180,12 @@ static iree_status_t CreateLocalTaskServerDevice(
 }
 
 // Creates a remote client device connected to a server via loopback.
-// |create_server_device| creates the server-side device+driver pair.
+// |create_server_device| creates the server-side device+driver pair using
+// the shared proactor pool.
 static iree_status_t CreateRemoteDevice(
-    const iree_hal_device_create_params_t* create_params,
-    iree_status_t (*create_server_device)(
-        const iree_hal_device_create_params_t*, iree_hal_driver_t**,
-        iree_hal_device_t**),
+    iree_status_t (*create_server_device)(iree_async_proactor_pool_t*,
+                                          iree_hal_driver_t**,
+                                          iree_hal_device_t**),
     iree_hal_driver_t** out_driver, iree_hal_device_t** out_device) {
   RemoteBackendContext* ctx = GetEnvironment()->context();
   *out_driver = nullptr;
@@ -232,7 +235,7 @@ static iree_status_t CreateRemoteDevice(
 
   // Create the server-side device.
   if (iree_status_is_ok(status)) {
-    status = create_server_device(create_params, &ctx->server_driver,
+    status = create_server_device(ctx->proactor_pool, &ctx->server_driver,
                                   &ctx->server_device);
   }
   if (iree_status_is_ok(status)) {
@@ -337,8 +340,9 @@ static iree_status_t CreateRemoteDevice(
 static iree_status_t CreateRemoteLocalTask(
     const iree_hal_device_create_params_t* create_params,
     iree_hal_driver_t** out_driver, iree_hal_device_t** out_device) {
-  return CreateRemoteDevice(create_params, CreateLocalTaskServerDevice,
-                            out_driver, out_device);
+  (void)create_params;
+  return CreateRemoteDevice(CreateLocalTaskServerDevice, out_driver,
+                            out_device);
 }
 
 static bool remote_local_task_registered_ = [] {
