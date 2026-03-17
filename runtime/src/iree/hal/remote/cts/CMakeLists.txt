@@ -16,14 +16,15 @@ iree_cc_library(
     "backends.cc"
   DEPS
     iree::async
-    iree::async::platform
-    iree::async::util::proactor_thread
+    iree::async::util::proactor_pool
     iree::base
+    iree::base::threading
     iree::hal
     iree::hal::cts::util::registry
     iree::hal::drivers::local_task::registration
     iree::hal::remote::client
     iree::hal::remote::server
+    iree::hal::remote::util::recv_pool
     iree::net::carrier::loopback::factory
     iree::net::session
   TESTONLY

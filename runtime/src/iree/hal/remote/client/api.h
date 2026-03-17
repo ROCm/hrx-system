@@ -34,8 +34,7 @@
 //   iree_hal_device_t* device = NULL;
 //   IREE_RETURN_IF_ERROR(iree_hal_remote_client_device_create(
 //       IREE_SV("remote"), &options, /*create_params=*/NULL,
-//       proactor, frontier_tracker, recv_pool,
-//       host_allocator, &device));
+//       frontier_tracker, recv_pool, host_allocator, &device));
 //
 //   // Connection is mandatory — device is unusable until connected.
 //   // connect() is async: fires callback on the proactor thread when ready.
@@ -77,6 +76,7 @@ typedef struct iree_net_transport_factory_t iree_net_transport_factory_t;
 typedef struct iree_async_proactor_t iree_async_proactor_t;
 typedef struct iree_async_frontier_tracker_t iree_async_frontier_tracker_t;
 typedef struct iree_async_buffer_pool_t iree_async_buffer_pool_t;
+typedef struct iree_hal_remote_recv_pool_t iree_hal_remote_recv_pool_t;
 
 //===----------------------------------------------------------------------===//
 // iree_hal_remote_client_device_t
@@ -205,23 +205,22 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_options_parse(
 // iree_hal_remote_client_device_connect() to establish the connection.
 // Operations performed before connection will fail with FAILED_PRECONDITION.
 //
-// |proactor| drives all device I/O (session, callbacks). Borrowed — must
-// outlive the device.
+// |create_params| provides optional creation context for future extensions.
+// May be NULL.
 //
-// |frontier_tracker| tracks axis progress for cross-device causal ordering.
-// Borrowed — must outlive the device.
+// |frontier_tracker| tracks cross-device causal ordering. Retained by the
+// device.
 //
-// |recv_pool| provides buffers for incoming network data. Borrowed — must
-// outlive the device.
+// |recv_pool| provides buffers for incoming network data. Ref-counted and
+// retained by the device.
 //
 // |out_device| must be released by the caller (see iree_hal_device_release).
 IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_create(
     iree_string_view_t identifier,
     const iree_hal_remote_client_device_options_t* options,
     const iree_hal_device_create_params_t* create_params,
-    iree_async_proactor_t* proactor,
     iree_async_frontier_tracker_t* frontier_tracker,
-    iree_async_buffer_pool_t* recv_pool, iree_allocator_t host_allocator,
+    iree_hal_remote_recv_pool_t* recv_pool, iree_allocator_t host_allocator,
     iree_hal_device_t** out_device);
 
 // Initiates asynchronous connection to the remote server.
@@ -250,14 +249,12 @@ iree_hal_remote_client_device_state(iree_hal_device_t* device);
 typedef struct iree_hal_remote_client_driver_options_t {
   // Transport factory for creating connections. Propagated to device options.
   // The driver retains this factory and releases it on destroy.
-  // Required — must not be NULL.
   iree_net_transport_factory_t* transport_factory;
 
-  // Borrowed infrastructure propagated to all devices created by this driver.
-  // Must outlive the driver and all devices created from it.
-  iree_async_proactor_t* proactor;
-  iree_async_frontier_tracker_t* frontier_tracker;
-  iree_async_buffer_pool_t* recv_pool;
+  // NUMA node for receive buffer placement. The driver creates a shared
+  // recv_pool on first device creation from the proactor pool's proactor
+  // for this node. Use IREE_ASYNC_AFFINITY_NUMA_NODE_ANY for no preference.
+  uint32_t numa_node_id;
 
   // Default device options when none are provided during device creation.
   iree_hal_remote_client_device_options_t default_device_options;
