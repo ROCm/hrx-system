@@ -19,6 +19,8 @@ iree_cc_library(
     "allocator.h"
     "buffer.c"
     "buffer.h"
+    "command_buffer.c"
+    "command_buffer.h"
     "device.c"
     "device.h"
     "driver.c"
@@ -37,6 +39,7 @@ iree_cc_library(
     iree::base::internal
     iree::base::threading
     iree::hal
+    iree::hal::remote::protocol::commands
     iree::hal::remote::protocol::common
     iree::hal::remote::protocol::control
     iree::hal::remote::protocol::queue

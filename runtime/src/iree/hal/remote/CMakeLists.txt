@@ -9,12 +9,30 @@
 
 iree_add_all_subdirs()
 
+iree_hal_cts_testdata(
+  FORMAT_NAME
+    vmvx
+  TARGET_DEVICE
+    "local"
+  IDENTIFIER
+    "iree_remote_testdata_vmvx"
+  BACKEND_NAME
+    "remote_local_task"
+  FORMAT_STRING
+    [=["vmvx-bytecode-fb"]=]
+  TESTDATA_DIR
+    "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/testdata"
+  FLAGS
+    "--iree-hal-local-target-device-backends=vmvx"
+)
+
 iree_cc_test(
   NAME
     remote_session_test
   SRCS
     "remote_session_test.cc"
   DEPS
+    ::testdata_vmvx
     iree::async
     iree::async::platform
     iree::async::util::proactor_pool
