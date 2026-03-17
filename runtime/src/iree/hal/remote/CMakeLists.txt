@@ -17,8 +17,12 @@ iree_cc_test(
   DEPS
     iree::async
     iree::async::platform
+    iree::async::util::proactor_pool
+    iree::async::util::proactor_thread
     iree::base
+    iree::base::threading
     iree::hal
+    iree::hal::drivers::local_task::registration
     iree::hal::remote::client
     iree::hal::remote::server
     iree::hal::testing::mock_device

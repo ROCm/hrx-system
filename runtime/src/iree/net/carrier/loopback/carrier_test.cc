@@ -43,9 +43,7 @@ class LoopbackCarrierTest : public ::testing::Test {
       DeactivateAndDrain(server_);
       iree_net_carrier_release(server_);
     }
-    if (proactor_) {
-      iree_async_proactor_release(proactor_);
-    }
+    iree_async_proactor_release(proactor_);
   }
 
   void DeactivateAndDrain(iree_net_carrier_t* carrier) {
