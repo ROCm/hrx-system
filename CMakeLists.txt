@@ -194,6 +194,11 @@ if(IREE_HAL_DRIVER_VULKAN)
   message(STATUS "  - vulkan")
 endif()
 
+if(IREE_HAL_DRIVER_REMOTE)
+  message(STATUS "  - remote")
+endif()
+
+add_subdirectory(build_tools/third_party/rdma-core-headers EXCLUDE_FROM_ALL)
 add_subdirectory(build_tools/embed_data)
 add_subdirectory(build_tools/spirv)
 add_subdirectory(runtime/src)

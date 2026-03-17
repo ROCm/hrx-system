@@ -19,6 +19,7 @@ set(IREE_DEPENDENCY_IDS
   "spirv_tools"
   "vulkan_headers"
   "flatcc"
+  "rdma_core_headers"
   "hsa_runtime_headers"
   "hip_api_headers"
 )
@@ -134,6 +135,20 @@ set(IREE_DEP_FLATCC_URLS
 set(IREE_DEP_FLATCC_SHA256 "f77f842e996f5bbfa25305a7b38b40d1325fb44154f2bf9880c58356ece92c62")
 set(IREE_DEP_FLATCC_STRIP_PREFIX "flatcc-9362cd00f0007d8cbee7bff86e90fb4b6b227ff3")
 set(IREE_DEP_FLATCC_BUILD_FILE "//build_tools/third_party/flatcc:flatcc.BUILD.bazel")
+
+set(IREE_DEP_RDMA_CORE_HEADERS_KIND "http_archive")
+set(IREE_DEP_RDMA_CORE_HEADERS_OWNER "shared")
+set(IREE_DEP_RDMA_CORE_HEADERS_MODULE_NAME "rdma_core_headers")
+set(IREE_DEP_RDMA_CORE_HEADERS_REPO_NAME "rdma_core_headers")
+set(IREE_DEP_RDMA_CORE_HEADERS_VERSION "")
+set(IREE_DEP_RDMA_CORE_HEADERS_DEV_DEPENDENCY "FALSE")
+set(IREE_DEP_RDMA_CORE_HEADERS_SOURCE_URL "")
+set(IREE_DEP_RDMA_CORE_HEADERS_URLS
+  "https://github.com/iree-org/rdma-core-headers/archive/2d587c653b5b4b48ad1df0d74f0a6bac18c1c9b7.tar.gz"
+)
+set(IREE_DEP_RDMA_CORE_HEADERS_SHA256 "42aaf7129fab9fee0bdd1e94fe74d3b75038055d86e164d8c153f9091cd5ab90")
+set(IREE_DEP_RDMA_CORE_HEADERS_STRIP_PREFIX "rdma-core-headers-2d587c653b5b4b48ad1df0d74f0a6bac18c1c9b7")
+set(IREE_DEP_RDMA_CORE_HEADERS_BUILD_FILE "//build_tools/third_party/rdma-core-headers:BUILD.overlay")
 
 set(IREE_DEP_HSA_RUNTIME_HEADERS_KIND "rocm_repository")
 set(IREE_DEP_HSA_RUNTIME_HEADERS_OWNER "shared")

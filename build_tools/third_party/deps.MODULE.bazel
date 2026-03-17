@@ -59,6 +59,14 @@ http_archive(
     url = "https://github.com/dvidelabs/flatcc/archive/9362cd00f0007d8cbee7bff86e90fb4b6b227ff3.tar.gz",
 )
 
+http_archive(
+    name = "rdma_core_headers",
+    build_file = "//build_tools/third_party/rdma-core-headers:BUILD.overlay",
+    sha256 = "42aaf7129fab9fee0bdd1e94fe74d3b75038055d86e164d8c153f9091cd5ab90",
+    strip_prefix = "rdma-core-headers-2d587c653b5b4b48ad1df0d74f0a6bac18c1c9b7",
+    url = "https://github.com/iree-org/rdma-core-headers/archive/2d587c653b5b4b48ad1df0d74f0a6bac18c1c9b7.tar.gz",
+)
+
 rocm_repository(
     name = "hsa_runtime_headers",
     build_file = "//build_tools/third_party/rocm:hsa_runtime_headers.BUILD.bazel",

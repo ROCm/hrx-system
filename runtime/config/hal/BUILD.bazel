@@ -15,6 +15,7 @@ DEFAULT_DRIVERS = [
     "local-sync",
     "local-task",
     "null",
+    "remote",
 ]
 
 SUPPORTED_DRIVERS = [
@@ -24,6 +25,7 @@ SUPPORTED_DRIVERS = [
     "local-sync",
     "local-task",
     "null",
+    "remote",
     "vulkan",
     "webgpu",
 ]

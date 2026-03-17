@@ -40,3 +40,8 @@ alias(
     name = "iree-run-replay",
     actual = "//runtime/src/iree/tools/iree-run-replay",
 )
+
+alias(
+    name = "iree-serve-device",
+    actual = "//runtime/src/iree/tools/iree-serve-device",
+)

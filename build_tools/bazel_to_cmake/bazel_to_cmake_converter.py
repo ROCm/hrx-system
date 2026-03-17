@@ -62,11 +62,14 @@ _RUNTIME_HAL_DRIVER_CMAKE_OPTIONS = {
     "//runtime/config/hal:driver_local_sync": "IREE_HAL_DRIVER_LOCAL_SYNC",
     "//runtime/config/hal:driver_local_task": "IREE_HAL_DRIVER_LOCAL_TASK",
     "//runtime/config/hal:driver_null": "IREE_HAL_DRIVER_NULL",
+    "//runtime/config/hal:driver_remote": "IREE_HAL_DRIVER_REMOTE",
     "//runtime/config/hal:driver_vulkan": "IREE_HAL_DRIVER_VULKAN",
     "//runtime/config/hal:driver_webgpu": "IREE_HAL_DRIVER_WEBGPU",
     "//runtime/config/hal:executable_loader_embedded_elf": "IREE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF",
     "//runtime/config/hal:executable_loader_system_library": "IREE_HAL_EXECUTABLE_LOADER_SYSTEM_LIBRARY",
     "//runtime/config/hal:executable_loader_vmvx_module": "IREE_HAL_EXECUTABLE_LOADER_VMVX_MODULE",
+    "//runtime/config/hal:executable_plugin_embedded_elf": "IREE_HAL_EXECUTABLE_PLUGIN_EMBEDDED_ELF",
+    "//runtime/config/hal:executable_plugin_system_library": "IREE_HAL_EXECUTABLE_PLUGIN_SYSTEM_LIBRARY",
     "//runtime/src/iree/hal/drivers/hip:rccl_enabled": "IREE_HAL_DRIVER_HIP_RCCL",
 }
 
@@ -195,6 +198,7 @@ class BuildFileFunctions(object):
         self._filegroup_srcs = {}
         self._target_file_labels = set()
         self._target_file_paths = {}
+        self.native = self
         self.selects = _SelectsModule()
         self._custom_initialize()
 
@@ -1182,6 +1186,9 @@ class BuildFileFunctions(object):
 
     def exports_files(self, *args, **kwargs):
         pass
+
+    def iree_checked_glob(self, sources, include=None, exclude=None, **kwargs):
+        return sources
 
     def iree_td_library(self, *args, **kwargs):
         """Ignores iree_td_library - no CMake equivalent needed.
@@ -2893,6 +2900,29 @@ class BuildFileFunctions(object):
 
         self._converter.body += (
             f"iree_genrule(\n{name_block}{srcs_block}{outs_block}{cmd_block})\n\n"
+        )
+
+    def iree_generated_files(
+        self,
+        name,
+        srcs,
+        outs,
+        args=None,
+        output_args=None,
+        tool=None,
+        **kwargs,
+    ):
+        cmd_parts = []
+        if tool:
+            cmd_parts.append(f"$(location {tool})")
+        cmd_parts.extend(args or [])
+        for output, output_arg in (output_args or {}).items():
+            cmd_parts.extend([output_arg, f"$(@D)/{output}"])
+        self.iree_genrule(
+            name=name,
+            srcs=(srcs or []) + ([tool] if tool else []),
+            outs=outs,
+            cmd=" ".join(cmd_parts),
         )
 
 
