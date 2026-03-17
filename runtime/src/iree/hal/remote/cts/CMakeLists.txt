@@ -16,7 +16,9 @@ iree_cc_library(
     "backends.cc"
   DEPS
     iree::async
+    iree::async::platform
     iree::async::util::proactor_pool
+    iree::async::util::proactor_thread
     iree::base
     iree::base::threading
     iree::hal

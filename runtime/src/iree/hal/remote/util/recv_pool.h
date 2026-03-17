@@ -24,6 +24,7 @@
 extern "C" {
 #endif  // __cplusplus
 
+typedef struct iree_async_slab_t iree_async_slab_t;
 typedef struct iree_hal_remote_recv_pool_t iree_hal_remote_recv_pool_t;
 
 // Creates a receive buffer pool for remote HAL network I/O.
@@ -36,6 +37,17 @@ typedef struct iree_hal_remote_recv_pool_t iree_hal_remote_recv_pool_t;
 // The returned pool must be released with iree_hal_remote_recv_pool_release.
 iree_status_t iree_hal_remote_recv_pool_create(
     iree_async_proactor_pool_t* proactor_pool, uint32_t numa_node_id,
+    iree_allocator_t host_allocator,
+    iree_hal_remote_recv_pool_t** out_recv_pool);
+
+// Wraps pre-created components into a recv_pool.
+//
+// Retains |proactor|, |slab|, and |region|, and takes ownership of
+// |buffer_pool|. Callers use this when slab registration must complete before
+// the proactor's poll thread starts.
+iree_status_t iree_hal_remote_recv_pool_wrap(
+    iree_async_proactor_t* proactor, iree_async_slab_t* slab,
+    iree_async_region_t* region, iree_async_buffer_pool_t* buffer_pool,
     iree_allocator_t host_allocator,
     iree_hal_remote_recv_pool_t** out_recv_pool);
 
