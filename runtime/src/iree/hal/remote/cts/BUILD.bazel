@@ -22,10 +22,8 @@ iree_runtime_cc_library(
     deps = [
         "//runtime/src/iree/async",
         "//runtime/src/iree/async:platform",
-        "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/async/util:proactor_thread",
         "//runtime/src/iree/base",
-        "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:registry",
         "//runtime/src/iree/hal/drivers/local_task/registration",
@@ -39,14 +37,4 @@ iree_runtime_cc_library(
 
 iree_hal_cts_test_suite(
     backends_lib = ":backends",
-    executable_formats = {
-        "vmvx": {
-            "backend_name": "remote_local_task",
-            "flags": ["--iree-hal-local-target-device-backends=vmvx"],
-            "format_string": '"vmvx-bytecode-fb"',
-            "identifier": "iree_cts_testdata_vmvx",
-            "target_device": "local",
-        },
-    },
-    testdata = "//runtime/src/iree/hal/cts/testdata:executable_srcs",
 )

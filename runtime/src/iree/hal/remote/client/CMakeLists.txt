@@ -35,6 +35,7 @@ iree_cc_library(
     "semaphore.h"
   DEPS
     iree::async
+    iree::async::util::proactor_pool
     iree::base
     iree::base::internal
     iree::base::threading

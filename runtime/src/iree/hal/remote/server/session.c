@@ -1504,8 +1504,9 @@ static iree_status_t iree_hal_remote_server_replay_dispatch_cmd(
       .values = local_bindings,
   };
   return iree_hal_command_buffer_dispatch(
-      local_command_buffer, executable, cmd->export_ordinal, config, constants,
-      bindings, (iree_hal_dispatch_flags_t)cmd->dispatch_flags);
+      local_command_buffer, executable,
+      iree_hal_executable_function_from_index(cmd->export_ordinal), config,
+      constants, bindings, (iree_hal_dispatch_flags_t)cmd->dispatch_flags);
 }
 
 // Replays a serialized command stream into a local command buffer. Iterates

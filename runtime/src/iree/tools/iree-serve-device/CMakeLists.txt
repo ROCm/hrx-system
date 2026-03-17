@@ -15,10 +15,18 @@ iree_cc_binary(
   SRCS
     "iree-serve-device-main.c"
   DEPS
+    iree::async
+    iree::async::platform
+    iree::async::util::proactor_pool
+    iree::async::util::proactor_thread
     iree::base
+    iree::base::threading
     iree::base::tooling::flags
     iree::hal
     iree::hal::remote::server
+    iree::net::carrier::shm::factory
+    iree::net::carrier::tcp::factory
+    iree::net::session
     iree::tooling::device_util
 )
 

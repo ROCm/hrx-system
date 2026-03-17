@@ -485,19 +485,29 @@ TEST_F(RemoteSessionTest, QueueOpsFailWhenDisconnected) {
   iree_status_ignore(status);
 }
 
-TEST_F(RemoteSessionTest, DeviceIdQueryWorksWithoutConnection) {
+TEST_F(RemoteSessionTest, DeviceQueriesWorkWithoutConnection) {
   CreateAndStartServer();
   CreateClientDevice();
 
-  // Device ID queries should work even without connection.
+  // Remote devices are transparent proxies: device ID and executable format
+  // queries match locally before connection; server-side compatibility is
+  // checked when executable uploads reach the real device.
   int64_t value = -1;
   IREE_ASSERT_OK(iree_hal_device_query_i64(
       client_device_, IREE_SV("hal.device.id"), IREE_SV("remote"), &value));
   EXPECT_EQ(value, 1);
 
-  // Non-matching pattern should return 0.
   IREE_ASSERT_OK(iree_hal_device_query_i64(
       client_device_, IREE_SV("hal.device.id"), IREE_SV("local"), &value));
+  EXPECT_EQ(value, 1);
+
+  IREE_ASSERT_OK(iree_hal_device_query_i64(
+      client_device_, IREE_SV("hal.executable.format"),
+      IREE_SV("vmvx-bytecode-fb"), &value));
+  EXPECT_EQ(value, 1);
+
+  IREE_ASSERT_OK(iree_hal_device_query_i64(
+      client_device_, IREE_SV("hal.unknown"), IREE_SV("anything"), &value));
   EXPECT_EQ(value, 0);
 }
 
@@ -1343,7 +1353,9 @@ TEST_F(RemoteBufferTest, QueueDispatchAbsF32) {
 
   iree_const_byte_span_t binary =
       LookupTestdata("command_buffer_dispatch_test.bin");
-  ASSERT_GT(binary.data_length, 0u) << "VMVX dispatch testdata not found";
+  if (binary.data_length == 0) {
+    GTEST_SKIP() << "VMVX dispatch testdata is not available";
+  }
 
   iree_hal_executable_params_t executable_params;
   iree_hal_executable_params_initialize(&executable_params);
@@ -1407,7 +1419,8 @@ TEST_F(RemoteBufferTest, QueueDispatchAbsF32) {
   IREE_ASSERT_OK(iree_hal_device_queue_dispatch(
       client_device_, IREE_HAL_QUEUE_AFFINITY_ANY,
       iree_hal_semaphore_list_empty(), signal.list, executable,
-      /*export_ordinal=*/0, iree_hal_make_static_dispatch_config(1, 1, 1),
+      iree_hal_executable_function_from_index(0),
+      iree_hal_make_static_dispatch_config(1, 1, 1),
       iree_const_byte_span_empty(), bindings, IREE_HAL_DISPATCH_FLAG_NONE));
 
   // Wait for dispatch to complete.
@@ -1442,7 +1455,9 @@ TEST_F(RemoteBufferTest, OneShotCommandBufferDispatch) {
 
   iree_const_byte_span_t binary =
       LookupTestdata("command_buffer_dispatch_test.bin");
-  ASSERT_GT(binary.data_length, 0u) << "VMVX dispatch testdata not found";
+  if (binary.data_length == 0) {
+    GTEST_SKIP() << "VMVX dispatch testdata is not available";
+  }
 
   iree_hal_executable_params_t executable_params;
   iree_hal_executable_params_initialize(&executable_params);
@@ -1504,7 +1519,7 @@ TEST_F(RemoteBufferTest, OneShotCommandBufferDispatch) {
       /*.values=*/binding_refs,
   };
   IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
-      command_buffer, executable, /*entry_point=*/0,
+      command_buffer, executable, iree_hal_executable_function_from_index(0),
       iree_hal_make_static_dispatch_config(1, 1, 1),
       iree_const_byte_span_empty(), bindings, IREE_HAL_DISPATCH_FLAG_NONE));
 

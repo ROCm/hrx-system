@@ -73,6 +73,13 @@ static iree_status_t iree_net_loopback_endpoint_on_recv(
   memset(&bridged, 0, sizeof(bridged));
   IREE_RETURN_IF_ERROR(
       iree_async_buffer_pool_acquire(adapter->recv_pool, &bridged));
+  if (data.length > bridged.span.length) {
+    iree_async_buffer_lease_release(&bridged);
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "loopback receive message length %" PRIhsz
+                            " exceeds receive buffer length %" PRIhsz,
+                            data.length, bridged.span.length);
+  }
   uint8_t* destination = iree_async_span_ptr(bridged.span);
   memcpy(destination, iree_async_span_ptr(data), data.length);
   iree_const_byte_span_t message =

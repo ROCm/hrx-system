@@ -20,10 +20,8 @@
 #include "iree/async/proactor.h"
 #include "iree/async/proactor_platform.h"
 #include "iree/async/slab.h"
-#include "iree/async/util/proactor_pool.h"
 #include "iree/async/util/proactor_thread.h"
 #include "iree/base/api.h"
-#include "iree/base/threading/numa.h"
 #include "iree/hal/api.h"
 #include "iree/hal/cts/util/registry.h"
 #include "iree/hal/drivers/local_task/registration/driver_module.h"
@@ -36,6 +34,7 @@ namespace iree::hal::cts {
 namespace {
 
 static constexpr uint32_t kAxisTableCapacity = 16;
+static constexpr iree_host_size_t kRecvBufferSize = 128 * 1024;
 
 // Supporting infrastructure that must outlive the remote client device.
 // The CTS caches one device per backend (global GTest environment), so
@@ -47,12 +46,11 @@ struct RemoteBackendContext {
   iree_async_region_t* region = nullptr;
   iree_async_buffer_pool_t* recv_pool = nullptr;
   iree_net_transport_factory_t* factory = nullptr;
-  iree_async_axis_table_entry_t client_axis_entries[kAxisTableCapacity] = {};
-  iree_async_frontier_tracker_t client_tracker = {};
-  iree_async_axis_table_entry_t server_axis_entries[kAxisTableCapacity] = {};
-  iree_async_frontier_tracker_t server_tracker = {};
+  iree_async_frontier_tracker_t* client_tracker = nullptr;
+  iree_async_frontier_tracker_t* server_tracker = nullptr;
   iree_hal_driver_t* server_driver = nullptr;
   iree_hal_device_t* server_device = nullptr;
+  iree_hal_device_group_t* server_device_group = nullptr;
   iree_hal_remote_server_t* server = nullptr;
   bool initialized = false;
 
@@ -105,24 +103,20 @@ struct RemoteBackendContext {
         std::this_thread::yield();
       }
     }
-    if (server) {
-      iree_hal_remote_server_release(server);
-      server = nullptr;
-    }
-    if (server_device) {
-      iree_hal_device_release(server_device);
-      server_device = nullptr;
-    }
-    if (server_driver) {
-      iree_hal_driver_release(server_driver);
-      server_driver = nullptr;
-    }
-    if (factory) {
-      iree_net_transport_factory_release(factory);
-      factory = nullptr;
-    }
-    iree_async_frontier_tracker_deinitialize(&server_tracker);
-    iree_async_frontier_tracker_deinitialize(&client_tracker);
+    iree_hal_remote_server_release(server);
+    server = nullptr;
+    iree_hal_device_group_release(server_device_group);
+    server_device_group = nullptr;
+    iree_hal_device_release(server_device);
+    server_device = nullptr;
+    iree_hal_driver_release(server_driver);
+    server_driver = nullptr;
+    iree_net_transport_factory_release(factory);
+    factory = nullptr;
+    iree_async_frontier_tracker_release(server_tracker);
+    server_tracker = nullptr;
+    iree_async_frontier_tracker_release(client_tracker);
+    client_tracker = nullptr;
     // Stop the proactor thread after all session/carrier teardown is complete
     // but before releasing the proactor and its registered buffers.
     if (proactor_thread) {
@@ -138,18 +132,12 @@ struct RemoteBackendContext {
       iree_async_buffer_pool_free(recv_pool);
       recv_pool = nullptr;
     }
-    if (region) {
-      iree_async_region_release(region);
-      region = nullptr;
-    }
-    if (slab) {
-      iree_async_slab_release(slab);
-      slab = nullptr;
-    }
-    if (proactor) {
-      iree_async_proactor_release(proactor);
-      proactor = nullptr;
-    }
+    iree_async_region_release(region);
+    region = nullptr;
+    iree_async_slab_release(slab);
+    slab = nullptr;
+    iree_async_proactor_release(proactor);
+    proactor = nullptr;
     initialized = false;
   }
 };
@@ -175,6 +163,7 @@ static RemoteBackendEnvironment* GetEnvironment() {
 
 // Creates the server-side local-task device.
 static iree_status_t CreateLocalTaskServerDevice(
+    const iree_hal_device_create_params_t* create_params,
     iree_hal_driver_t** out_driver, iree_hal_device_t** out_device) {
   iree_status_t status = iree_hal_local_task_driver_module_register(
       iree_hal_driver_registry_default());
@@ -190,24 +179,11 @@ static iree_status_t CreateLocalTaskServerDevice(
         iree_make_cstring_view("local-task"), iree_allocator_system(), &driver);
   }
 
-  iree_async_proactor_pool_t* proactor_pool = NULL;
-  if (iree_status_is_ok(status)) {
-    status = iree_async_proactor_pool_create(
-        iree_numa_node_count(), /*node_ids=*/NULL,
-        iree_async_proactor_pool_options_default(), iree_allocator_system(),
-        &proactor_pool);
-  }
-
   iree_hal_device_t* device = nullptr;
   if (iree_status_is_ok(status)) {
-    iree_hal_device_create_params_t create_params =
-        iree_hal_device_create_params_default();
-    create_params.proactor_pool = proactor_pool;
     status = iree_hal_driver_create_default_device(
-        driver, &create_params, iree_allocator_system(), &device);
+        driver, create_params, iree_allocator_system(), &device);
   }
-
-  iree_async_proactor_pool_release(proactor_pool);
 
   if (iree_status_is_ok(status)) {
     *out_driver = driver;
@@ -222,8 +198,10 @@ static iree_status_t CreateLocalTaskServerDevice(
 // Creates a remote client device connected to a server via loopback.
 // |create_server_device| creates the server-side device+driver pair.
 static iree_status_t CreateRemoteDevice(
-    iree_status_t (*create_server_device)(iree_hal_driver_t**,
-                                          iree_hal_device_t**),
+    const iree_hal_device_create_params_t* create_params,
+    iree_status_t (*create_server_device)(
+        const iree_hal_device_create_params_t*, iree_hal_driver_t**,
+        iree_hal_device_t**),
     iree_hal_driver_t** out_driver, iree_hal_device_t** out_device) {
   RemoteBackendContext* ctx = GetEnvironment()->context();
   *out_driver = nullptr;
@@ -239,7 +217,7 @@ static iree_status_t CreateRemoteDevice(
   // Create slab/region/recv_pool.
   if (iree_status_is_ok(status)) {
     iree_async_slab_options_t slab_options = {0};
-    slab_options.buffer_size = 4096;
+    slab_options.buffer_size = kRecvBufferSize;
     slab_options.buffer_count = 16;
     status = iree_async_slab_create(slab_options, iree_allocator_system(),
                                     &ctx->slab);
@@ -263,14 +241,18 @@ static iree_status_t CreateRemoteDevice(
 
   // Create frontier trackers.
   if (iree_status_is_ok(status)) {
-    status = iree_async_frontier_tracker_initialize(
-        &ctx->client_tracker, ctx->client_axis_entries, kAxisTableCapacity,
-        iree_allocator_system());
+    iree_async_frontier_tracker_options_t tracker_options =
+        iree_async_frontier_tracker_options_default();
+    tracker_options.axis_table_capacity = kAxisTableCapacity;
+    status = iree_async_frontier_tracker_create(
+        tracker_options, iree_allocator_system(), &ctx->client_tracker);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_async_frontier_tracker_initialize(
-        &ctx->server_tracker, ctx->server_axis_entries, kAxisTableCapacity,
-        iree_allocator_system());
+    iree_async_frontier_tracker_options_t tracker_options =
+        iree_async_frontier_tracker_options_default();
+    tracker_options.axis_table_capacity = kAxisTableCapacity;
+    status = iree_async_frontier_tracker_create(
+        tracker_options, iree_allocator_system(), &ctx->server_tracker);
   }
 
   // Create loopback transport.
@@ -283,7 +265,13 @@ static iree_status_t CreateRemoteDevice(
 
   // Create the server-side device.
   if (iree_status_is_ok(status)) {
-    status = create_server_device(&ctx->server_driver, &ctx->server_device);
+    status = create_server_device(create_params, &ctx->server_driver,
+                                  &ctx->server_device);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_device_group_create_from_device(
+        ctx->server_device, ctx->server_tracker, iree_allocator_system(),
+        &ctx->server_device_group);
   }
 
   // Create and start the server.
@@ -306,7 +294,7 @@ static iree_status_t CreateRemoteDevice(
 
     iree_hal_device_t* devices[] = {ctx->server_device};
     status = iree_hal_remote_server_create(
-        &server_options, devices, 1, ctx->proactor, &ctx->server_tracker,
+        &server_options, devices, 1, ctx->proactor, ctx->server_tracker,
         ctx->recv_pool, iree_allocator_system(), &ctx->server);
   }
   if (iree_status_is_ok(status)) {
@@ -323,7 +311,7 @@ static iree_status_t CreateRemoteDevice(
 
     status = iree_hal_remote_client_device_create(
         IREE_SV("remote"), &client_options, /*create_params=*/nullptr,
-        ctx->proactor, &ctx->client_tracker, ctx->recv_pool,
+        ctx->proactor, ctx->client_tracker, ctx->recv_pool,
         iree_allocator_system(), &client_device);
   }
 
@@ -374,10 +362,11 @@ static iree_status_t CreateRemoteDevice(
   return status;
 }
 
-static iree_status_t CreateRemoteLocalTask(iree_hal_driver_t** out_driver,
-                                           iree_hal_device_t** out_device) {
-  return CreateRemoteDevice(CreateLocalTaskServerDevice, out_driver,
-                            out_device);
+static iree_status_t CreateRemoteLocalTask(
+    const iree_hal_device_create_params_t* create_params,
+    iree_hal_driver_t** out_driver, iree_hal_device_t** out_device) {
+  return CreateRemoteDevice(create_params, CreateLocalTaskServerDevice,
+                            out_driver, out_device);
 }
 
 static bool remote_local_task_registered_ = [] {
@@ -393,7 +382,21 @@ static bool remote_local_task_registered_ = [] {
       {"ExecutableTest.*",
        "export info queries require EXECUTABLE_QUERY_EXPORT RPC"},
       {"FileTest.*", "file I/O not implemented"},
+      {"CommandBufferCopyBufferTest.*",
+       "command buffer copy CTS verifies device-local buffers through file "
+       "import, which remote devices do not implement"},
+      {"CommandBufferStressTest.*",
+       "command buffer stress CTS verifies device-local buffers through file "
+       "import, which remote devices do not implement"},
+      {"QueueAllocaTest.*",
+       "queue alloca CTS verifies device-local buffers through file import, "
+       "which remote devices do not implement"},
+      {"QueueTransferTest.*",
+       "queue transfer CTS verifies device-local buffers through file import, "
+       "which remote devices do not implement"},
       {"QueueHostCallTest.*", "host calls not implemented"},
+      {"TransientBufferTest.*",
+       "transient command buffer allocations not implemented"},
   };
   CtsRegistry::RegisterBackend({
       "remote_local_task",
