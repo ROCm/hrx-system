@@ -36,7 +36,7 @@ option(IREE_STREAMING_BUILD_HSA_DRIVER "Build external HSA HAL driver" ON)
 
 # Disable the compiler build - we only need the runtime
 set(IREE_BUILD_COMPILER OFF CACHE BOOL "" FORCE)
-set(IREE_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(IREE_BUILD_TESTS ON CACHE BOOL "" FORCE)
 set(IREE_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
 set(IREE_BUILD_PYTHON_BINDINGS OFF CACHE BOOL "" FORCE)
 set(IREE_BUILD_BINDINGS_TFLITE OFF CACHE BOOL "" FORCE)
@@ -48,6 +48,10 @@ set(IREE_HAL_DRIVER_LOCAL_SYNC ON CACHE BOOL "" FORCE)
 set(IREE_HAL_DRIVER_LOCAL_TASK ON CACHE BOOL "" FORCE)
 set(IREE_HAL_DRIVER_CUDA ON CACHE BOOL "" FORCE)
 set(IREE_HAL_DRIVER_HIP ON CACHE BOOL "" FORCE)
+set(IREE_HAL_DRIVER_REMOTE ON CACHE BOOL "" FORCE)
+
+# Force POSIX proactor (epoll) to avoid io_uring issues.
+add_compile_definitions(IREE_ASYNC_FORCE_POSIX_PROACTOR=1)
 
 # Enable zstd for decompressing compressed HIP fat binaries (required for rocBLAS/hipBLAS)
 set(IREE_HAL_DRIVER_ENABLE_ZSTD ON CACHE BOOL "" FORCE)
@@ -70,6 +74,8 @@ if(IREE_STREAMING_BUILD_HSA_DRIVER)
     "iree_hal_hsa_driver_module_register")
   set(IREE_EXTERNAL_HAL_DRIVERS "hsa" CACHE STRING "" FORCE)
 endif()
+
+enable_testing()
 
 # Add IREE as a subdirectory
 add_subdirectory(third_party/iree EXCLUDE_FROM_ALL)

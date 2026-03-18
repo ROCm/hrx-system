@@ -96,7 +96,7 @@ iree_status_t iree_hal_streaming_context_create(
   // Create executable cache for this context.
   iree_status_t status = iree_hal_executable_cache_create(
       context->device, IREE_SV("stream_hal_cache"),
-      iree_loop_inline(&context->loop_status), &context->executable_cache);
+      &context->executable_cache);
 
   // Create buffer mapping table.
   if (iree_status_is_ok(status)) {

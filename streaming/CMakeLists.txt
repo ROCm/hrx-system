@@ -30,6 +30,8 @@ iree_cc_library(
     "-fPIC"
   DEPS
     ::internal
+    iree::async::async
+    iree::async::util::proactor_pool
     iree::base
     iree::base::internal
     iree::base::internal::arena
@@ -37,6 +39,7 @@ iree_cc_library(
     streaming::util
     iree::hal
     iree::hal::drivers
+    iree::hal::remote::client::registration
     iree::hal::utils::resource_set
   PUBLIC
 )

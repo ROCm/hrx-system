@@ -19,8 +19,9 @@ iree_status_t iree_hal_hsa_device_create(
     iree_hal_driver_t* driver, iree_string_view_t identifier,
     const iree_hal_hsa_device_params_t* params,
     const iree_hal_hsa_dynamic_symbols_t* symbols, hsa_agent_t gpu_agent,
-    hsa_agent_t cpu_agent, iree_allocator_t host_allocator,
-    iree_hal_device_t** out_device);
+    hsa_agent_t cpu_agent,
+    const iree_hal_device_create_params_t* create_params,
+    iree_allocator_t host_allocator, iree_hal_device_t** out_device);
 
 // Returns the dynamic symbol table from the |device| if it is an HSA device
 // and otherwise returns NULL.

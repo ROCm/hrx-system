@@ -10,7 +10,10 @@
 #include <string.h>  // for memset, memcpy
 
 #include "streaming/internal.h"
+#include "iree/async/util/proactor_pool.h"
+#include "iree/base/threading/numa.h"
 #include "iree/hal/drivers/hip/registration/driver_module.h"
+#include "iree/hal/remote/client/registration/driver_module.h"
 #include "hsa_driver/registration/driver_module.h"
 //===----------------------------------------------------------------------===//
 // Global state
@@ -186,11 +189,16 @@ static iree_status_t iree_hal_streaming_initialize_device(
   // GPU cache coherency for atomic operations in split-K GEMM kernels.
   // A dedicated stream created with hipStreamNonBlocking ensures proper
   // ordering and visibility.
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_driver_create_device_by_id(
-              driver, device_info->device_id,
-              /*param_count=*/0, /*params=*/NULL,
-              registry->host_allocator, &out_device->hal_device));
+  {
+    iree_hal_device_create_params_t create_params =
+        iree_hal_device_create_params_default();
+    create_params.proactor_pool = registry->proactor_pool;
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_hal_driver_create_device_by_id(
+                driver, device_info->device_id,
+                /*param_count=*/0, /*params=*/NULL, &create_params,
+                registry->host_allocator, &out_device->hal_device));
+  }
 
   // Set driver and retain.
   out_device->driver = driver;
@@ -593,6 +601,94 @@ iree_status_t iree_hal_local_sync_driver_module_register(
 iree_status_t iree_hal_local_task_driver_module_register(
     iree_hal_driver_registry_t* registry);
 
+// Creates a remote device via the remote-tcp driver.
+// The |driver_uri| should be like "remote-tcp://host:port".
+static iree_status_t iree_hal_streaming_create_remote_device(
+    iree_hal_streaming_device_registry_t* registry,
+    const char* driver_name_str, const char* server_address) {
+  IREE_ASSERT_ARGUMENT(registry);
+  IREE_ASSERT_ARGUMENT(driver_name_str);
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  // Parse driver name from the URI (everything before "://").
+  iree_string_view_t driver_name = iree_make_cstring_view("remote-tcp");
+
+  // Create the driver.
+  iree_hal_driver_t* driver = NULL;
+  iree_status_t status = iree_hal_driver_registry_try_create(
+      registry->driver_registry, driver_name, registry->host_allocator,
+      &driver);
+
+  // Create the device by path (the full URI).
+  iree_hal_streaming_device_t* out_device = NULL;
+  if (iree_status_is_ok(status)) {
+    if (registry->device_count >= IREE_HAL_STREAMING_MAX_DEVICES) {
+      iree_hal_driver_release(driver);
+      IREE_TRACE_ZONE_END(z0);
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "too many devices");
+    }
+    out_device = &registry->devices[registry->device_count];
+    memset(out_device, 0, sizeof(*out_device));
+    out_device->ordinal = registry->device_count;
+
+    iree_hal_device_create_params_t create_params =
+        iree_hal_device_create_params_default();
+    create_params.proactor_pool = registry->proactor_pool;
+    create_params.frontier.tracker = &registry->client_tracker;
+
+    status = iree_hal_driver_create_device_by_path(
+        driver, driver_name, iree_make_cstring_view(server_address),
+        /*param_count=*/0, /*params=*/NULL, &create_params,
+        registry->host_allocator, &out_device->hal_device);
+  }
+
+  if (iree_status_is_ok(status)) {
+    out_device->driver = driver;
+    iree_hal_driver_retain(driver);
+
+    // Set basic device info.
+    out_device->info.device_id = 0;
+    out_device->info.path = iree_string_view_empty();
+    char* name_copy = NULL;
+    iree_status_t name_status = iree_allocator_malloc(
+        registry->host_allocator, strlen("Remote Device") + 1,
+        (void**)&name_copy);
+    if (iree_status_is_ok(name_status)) {
+      memcpy(name_copy, "Remote Device", strlen("Remote Device") + 1);
+      out_device->info.name =
+          iree_make_string_view(name_copy, strlen("Remote Device"));
+    } else {
+      iree_status_ignore(name_status);
+      out_device->info.name = iree_string_view_empty();
+    }
+
+    // Query device info.
+    iree_status_t query_status =
+        iree_hal_streaming_query_device_info(out_device);
+    iree_status_ignore(query_status);  // Non-fatal.
+
+    // Initialize primary context state.
+    out_device->primary_context_flags.scheduling_mode =
+        IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO;
+    out_device->primary_context_flags.map_host_memory = true;
+    out_device->primary_context_flags.resize_local_mem_to_max = false;
+    iree_slim_mutex_initialize(&out_device->primary_context_mutex);
+    out_device->primary_context_ref_count = 0;
+    iree_arena_block_pool_initialize(64 * 1024, registry->host_allocator,
+                                     &out_device->block_pool);
+    out_device->primary_context = NULL;
+    out_device->default_mem_pool = NULL;
+    out_device->current_mem_pool = NULL;
+
+    registry->device_count++;
+  }
+
+  iree_hal_driver_release(driver);
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
 iree_status_t iree_hal_streaming_init_global(
     iree_hal_streaming_init_flags_t flags, iree_allocator_t host_allocator) {
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -622,6 +718,22 @@ iree_status_t iree_hal_streaming_init_global(
   iree_status_t status = iree_hal_driver_registry_allocate(
       host_allocator, &device_registry->driver_registry);
 
+  // Create proactor pool for async operations.
+  if (iree_status_is_ok(status)) {
+    status = iree_async_proactor_pool_create(
+        iree_numa_node_count(), /*node_ids=*/NULL,
+        iree_async_proactor_pool_options_default(), host_allocator,
+        &device_registry->proactor_pool);
+  }
+
+  // Initialize frontier tracker for remote HAL.
+  if (iree_status_is_ok(status)) {
+    iree_async_frontier_tracker_initialize(
+        &device_registry->client_tracker,
+        IREE_ARRAYSIZE(device_registry->client_axis_entries),
+        device_registry->client_axis_entries, host_allocator);
+  }
+
   // Register all available HAL drivers.
   if (iree_status_is_ok(status)) {
     // DO NOT SUBMIT env vars?
@@ -637,6 +749,10 @@ iree_status_t iree_hal_streaming_init_global(
     } else if (driver_name && strcmp(driver_name, "local-sync") == 0) {
       status = iree_hal_local_sync_driver_module_register(
           device_registry->driver_registry);
+    } else if (driver_name &&
+               strncmp(driver_name, "remote-tcp", 10) == 0) {
+      status = iree_hal_remote_client_driver_module_register(
+          device_registry->driver_registry);
     } else if (!driver_name ||
                (driver_name && strcmp(driver_name, "local-task") == 0)) {
       status = iree_hal_local_task_driver_module_register(
@@ -644,9 +760,15 @@ iree_status_t iree_hal_streaming_init_global(
     }
   }
 
-  // Enumerate devices.
+  // Enumerate devices (or create remote device).
   if (iree_status_is_ok(status)) {
-    status = iree_hal_streaming_enumerate_devices(device_registry);
+    const char* driver_name = getenv("IREE_HAL_DRIVER");
+    if (driver_name && strncmp(driver_name, "remote-tcp", 10) == 0) {
+      status = iree_hal_streaming_create_remote_device(
+          device_registry, driver_name, driver_name);
+    } else {
+      status = iree_hal_streaming_enumerate_devices(device_registry);
+    }
   }
 
   if (iree_status_is_ok(status)) {
@@ -719,6 +841,13 @@ void iree_hal_streaming_cleanup_global(void) {
 
   // Release driver registry.
   iree_hal_driver_registry_free(device_registry->driver_registry);
+
+  // Deinitialize frontier tracker.
+  iree_async_frontier_tracker_deinitialize(&device_registry->client_tracker);
+
+  // Release proactor pool.
+  iree_async_proactor_pool_release(device_registry->proactor_pool);
+  device_registry->proactor_pool = NULL;
 
   iree_slim_mutex_unlock(&device_registry->mutex);
   iree_slim_mutex_deinitialize(&device_registry->mutex);

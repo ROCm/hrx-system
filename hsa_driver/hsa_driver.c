@@ -335,6 +335,7 @@ static iree_status_t iree_hal_hsa_driver_select_default_device(
 static iree_status_t iree_hal_hsa_driver_create_device_by_id(
     iree_hal_driver_t* base_driver, iree_hal_device_id_t device_id,
     iree_host_size_t param_count, const iree_string_pair_t* params,
+    const iree_hal_device_create_params_t* create_params,
     iree_allocator_t host_allocator, iree_hal_device_t** out_device) {
   IREE_ASSERT_ARGUMENT(base_driver);
   IREE_ASSERT_ARGUMENT(out_device);
@@ -359,7 +360,7 @@ static iree_status_t iree_hal_hsa_driver_create_device_by_id(
   // Attempt to create the device now.
   iree_status_t status = iree_hal_hsa_device_create(
       base_driver, device_name, &driver->device_params, &driver->hsa_symbols,
-      agent, driver->cpu_agent, host_allocator, out_device);
+      agent, driver->cpu_agent, create_params, host_allocator, out_device);
 
   IREE_TRACE_ZONE_END(z0);
   return status;
@@ -368,15 +369,16 @@ static iree_status_t iree_hal_hsa_driver_create_device_by_id(
 static iree_status_t iree_hal_hsa_driver_create_device_by_path(
     iree_hal_driver_t* base_driver, iree_string_view_t driver_name,
     iree_string_view_t device_path, iree_host_size_t param_count,
-    const iree_string_pair_t* params, iree_allocator_t host_allocator,
-    iree_hal_device_t** out_device) {
+    const iree_string_pair_t* params,
+    const iree_hal_device_create_params_t* create_params,
+    iree_allocator_t host_allocator, iree_hal_device_t** out_device) {
   IREE_ASSERT_ARGUMENT(base_driver);
   IREE_ASSERT_ARGUMENT(out_device);
 
   if (iree_string_view_is_empty(device_path)) {
     return iree_hal_hsa_driver_create_device_by_id(
         base_driver, IREE_HAL_DEVICE_ID_DEFAULT, param_count, params,
-        host_allocator, out_device);
+        create_params, host_allocator, out_device);
   }
 
   // Try to parse as an index.
@@ -387,7 +389,7 @@ static iree_status_t iree_hal_hsa_driver_create_device_by_path(
       hsa_agent_t agent = driver->gpu_agents[device_index];
       return iree_hal_hsa_driver_create_device_by_id(
           base_driver, (iree_hal_device_id_t)agent.handle, param_count, params,
-          host_allocator, out_device);
+          create_params, host_allocator, out_device);
     }
   }
 

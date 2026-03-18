@@ -257,7 +257,7 @@ iree_status_t iree_hal_streaming_stream_synchronize(
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
         z0, iree_hal_semaphore_wait(
                 stream->timeline_semaphore, stream->pending_value,
-                iree_infinite_timeout(), IREE_HAL_WAIT_FLAG_DEFAULT));
+                iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
     stream->completed_value = stream->pending_value;
   }
 
@@ -277,7 +277,7 @@ iree_status_t iree_hal_streaming_stream_wait_submitted(
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
         z0, iree_hal_semaphore_wait(
                 stream->timeline_semaphore, stream->submitted_value,
-                iree_infinite_timeout(), IREE_HAL_WAIT_FLAG_DEFAULT));
+                iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
   }
 
   IREE_TRACE_ZONE_END(z0);

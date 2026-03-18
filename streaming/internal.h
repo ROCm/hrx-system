@@ -7,6 +7,8 @@
 #ifndef IREE_EXPERIMENTAL_STREAMING_INTERNAL_H_
 #define IREE_EXPERIMENTAL_STREAMING_INTERNAL_H_
 
+#include "iree/async/frontier_tracker.h"
+#include "iree/async/util/proactor_pool.h"
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "iree/base/threading/mutex.h"
@@ -345,6 +347,13 @@ typedef struct iree_hal_streaming_device_registry_t {
 
   // HAL driver registry.
   iree_hal_driver_registry_t* driver_registry;
+
+  // Proactor pool for async operations (semaphore waits, etc.).
+  iree_async_proactor_pool_t* proactor_pool;
+
+  // Frontier tracker for remote HAL client cross-device causal ordering.
+  iree_async_axis_table_entry_t client_axis_entries[16];
+  iree_async_frontier_tracker_t client_tracker;
 
   // P2P topology: array of links between all device pairs.
   iree_hal_streaming_p2p_link_t* p2p_topology;

@@ -83,7 +83,8 @@ iree_cc_library(
     iree::base::internal::atomic_slist
     iree::base::threading
     iree::base::threading::thread
-    iree::base::internal::wait_handle
+    iree::async::async
+    iree::async::util::proactor_pool
     iree::base::internal::flatcc::parsing
     iree::hal
     iree::hal::utils::collective_batch
@@ -95,7 +96,6 @@ iree_cc_library(
     iree::hal::utils::queue_emulation
     iree::hal::utils::queue_host_call_emulation
     iree::hal::utils::resource_set
-    iree::hal::utils::semaphore_base
     iree::schemas::executable_debug_info_c_fbs
     iree::schemas::hip_executable_def_c_fbs
     ${ADDITIONAL_HSA_LIBS}
@@ -137,6 +137,10 @@ iree_cc_test(
   LABELS
     "driver=hsa"
 )
+
+if(IREE_BUILD_TESTS)
+  add_subdirectory(cts)
+endif()
 
 # Clear the package root settings
 unset(IREE_PACKAGE_ROOT_DIR)

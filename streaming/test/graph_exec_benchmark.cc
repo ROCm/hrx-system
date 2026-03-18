@@ -8,6 +8,7 @@
 #include "streaming/test/graph_util.h"
 #include "iree/base/api.h"
 #include "iree/testing/benchmark.h"
+#include "streaming/test/benchmark_compat.h"
 
 //===----------------------------------------------------------------------===//
 // Graph execution launch benchmarks
