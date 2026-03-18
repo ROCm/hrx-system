@@ -297,6 +297,13 @@ static iree_status_t iree_async_proactor_io_uring_fill_socket_recv_pool(
         "proactor; buffer group IDs are ring-local and cannot be used "
         "across proactors");
   }
+  if (IREE_UNLIKELY(!iree_any_bit_set(region->access_flags,
+                                      IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE))) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "SOCKET_RECV_POOL requires a buffer pool with WRITE access; "
+        "this pool was registered with read-only access");
+  }
   // Clear output fields.
   recv_pool->bytes_received = 0;
   memset(&recv_pool->lease, 0, sizeof(recv_pool->lease));
