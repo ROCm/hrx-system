@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <stdbool.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "streaming/internal.h"
@@ -557,6 +558,8 @@ static iree_status_t iree_hal_streaming_context_symbol_map_prepare_module(
 
   // Module not loaded yet - load it now.
   // This requires creating the module from the fat binary.
+  // fprintf(stderr, "[REGISTRY] lazy module load from binary %p\n",
+  //         registration->module_binary);
   iree_hal_executable_caching_mode_t caching_mode =
       IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA |
       IREE_HAL_EXECUTABLE_CACHING_MODE_ALLOW_OPTIMIZATION;
@@ -566,6 +569,8 @@ static iree_status_t iree_hal_streaming_context_symbol_map_prepare_module(
   iree_status_t status = iree_hal_streaming_module_create_from_memory(
       map->context, caching_mode, module_data, map->host_allocator,
       &entry->module);
+  // fprintf(stderr, "[REGISTRY] module load %s\n",
+  //         iree_status_is_ok(status) ? "OK" : "FAILED");
   if (iree_status_is_ok(status)) {
     // Insert all symbols from the module into the hash table.
     for (iree_host_size_t i = 0; i < registration->symbol_count; ++i) {

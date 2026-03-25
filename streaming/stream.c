@@ -6,6 +6,9 @@
 
 #include "streaming/internal.h"
 
+#include <inttypes.h>
+#include <stdio.h>
+
 
 //===----------------------------------------------------------------------===//
 // Stream management
@@ -178,10 +181,11 @@ iree_status_t iree_hal_streaming_stream_flush(
       return status;
     }
 
-    // Use the completed value as wait to ensure sequential execution.
-    uint64_t wait_value = stream->completed_value;
-
-    // Increment pending value for this submission.
+    // Wait for the previous submission (pending_value before increment).
+    // This chains each flush after the one before it, so that operations
+    // split across multiple command buffers (e.g. by an intervening
+    // hipMemcpy) still execute in order.
+    uint64_t wait_value = stream->pending_value;
     stream->pending_value++;
 
     // Submit to device queue with timeline semaphore.
@@ -204,6 +208,10 @@ iree_status_t iree_hal_streaming_stream_flush(
         stream->context->device, queue_affinity, wait_semaphores,
         signal_semaphores, stream->command_buffer,
         iree_hal_buffer_binding_table_empty(), IREE_HAL_EXECUTE_FLAG_NONE);
+
+    if (!iree_status_is_ok(status)) {
+      // Error will propagate via iree_status_t return.
+    }
 
     // Track the submitted value for wait_submitted.
     if (iree_status_is_ok(status)) {
@@ -254,10 +262,16 @@ iree_status_t iree_hal_streaming_stream_synchronize(
 
   // Wait for timeline semaphore to reach pending value.
   if (stream->pending_value > stream->completed_value) {
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_semaphore_wait(
+    // fprintf(stderr, "[STREAM] sync: waiting for semaphore pending=%"PRIu64" completed=%"PRIu64"\n",
+    //         stream->pending_value, stream->completed_value);
+    iree_status_t wait_status = iree_hal_semaphore_wait(
                 stream->timeline_semaphore, stream->pending_value,
-                iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+                iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE);
+    if (!iree_status_is_ok(wait_status)) {
+      IREE_TRACE_ZONE_END(z0);
+      return wait_status;
+    }
+    // fprintf(stderr, "[STREAM] sync: wait OK\n");
     stream->completed_value = stream->pending_value;
   }
 
@@ -471,7 +485,7 @@ iree_status_t iree_hal_streaming_unpack_parameter_list(
 
 // Debug flag - set to 1 to enable verbose kernel launch debugging
 #ifndef IREE_STREAMING_DEBUG_KERNEL_LAUNCH
-#define IREE_STREAMING_DEBUG_KERNEL_LAUNCH 0  // Disabled
+#define IREE_STREAMING_DEBUG_KERNEL_LAUNCH 0
 #endif
 
 // Filter to only log kernels matching this substring (NULL = log all)
@@ -565,9 +579,12 @@ iree_status_t iree_hal_streaming_launch_kernel(
   }
 
   // Stack allocate arrays based on cached sizes.
+  // Zero-initialize constants to prevent uninitialized padding bytes from
+  // being misinterpreted as device pointers by the overlay scan.
   void* constants = symbol->parameters.constant_bytes
                         ? iree_alloca(symbol->parameters.constant_bytes)
                         : NULL;
+  if (constants) memset(constants, 0, symbol->parameters.constant_bytes);
   iree_hal_buffer_ref_list_t binding_list = {
       .count = symbol->parameters.binding_count,
       .values = symbol->parameters.binding_count
@@ -614,40 +631,6 @@ iree_status_t iree_hal_streaming_launch_kernel(
     if (params->buffer_size > 0) {
       constants_size = params->buffer_size;
     }
-    use_raw_arguments = true;
-  } else if ((params->flags & IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY) &&
-             (symbol->parameters.copy_count > 0 ||
-              symbol->parameters.binding_count > 0) &&
-             params->buffer) {
-    // Native args array: pack void** args directly into constants buffer.
-    // This is used for native kernels launched via hipLaunchKernel or
-    // hipModuleLaunchKernel with void** kernelParams, where we have parameter
-    // metadata but want to pass raw arguments directly.
-    // TODO: Try buffer resolution first and only fall back to raw args if
-    // unpack fails. This would enable proper IREE buffer tracking for native
-    // kernels while maintaining correctness for external device pointers.
-    const iree_hal_streaming_parameter_info_t* params_info =
-        &symbol->parameters;
-    void** args_array = (void**)params->buffer;
-    constants = iree_alloca(params_info->constant_bytes);
-    memset(constants, 0, params_info->constant_bytes);
-    constants_size = params_info->constant_bytes;
-    // Process all copy operations (constants/scalars).
-    const iree_hal_streaming_parameter_op_t* op = &params_info->ops[0];
-    for (uint32_t i = 0; i < params_info->copy_count; ++i, ++op) {
-      const iree_hal_streaming_parameter_copy_op_t copy_op = op->copy;
-      void* param_ptr = args_array[copy_op.src_ordinal];
-      memcpy((uint8_t*)constants + copy_op.dst_offset, param_ptr, copy_op.size);
-    }
-    // Process all resolve operations (bindings/pointers) - copy the raw pointer.
-    for (uint32_t i = 0; i < params_info->binding_count; ++i, ++op) {
-      const iree_hal_streaming_parameter_resolve_op_t resolve_op = op->resolve;
-      void* param_ptr = args_array[resolve_op.src_ordinal];
-      void* device_ptr = *(void**)param_ptr;
-      memcpy((uint8_t*)constants + resolve_op.dst_offset, &device_ptr,
-             sizeof(void*));
-    }
-    binding_list.count = 0;
     use_raw_arguments = true;
   } else if (params->flags & IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY) {
     // Unpack parameters from array of pointers (void**).
@@ -744,22 +727,103 @@ iree_status_t iree_hal_streaming_launch_kernel(
       .dynamic_workgroup_local_memory = params->shared_memory_bytes,
   };
 
-  // Dispatch through command buffer.
-  // Use a high bit to indicate the constants are a pre-packed kernarg buffer
-  // that should be passed via HIP_LAUNCH_PARAM_BUFFER (not void** kernelParams).
-  // This is used for hipBLASLt GEMM kernels dispatched via hipModuleLaunchKernel
-  // with the HIP_LAUNCH_PARAM_BUFFER_POINTER extra parameter.
+  // Ensure constants_size is 4-byte aligned as required by HAL.
+  constants_size = (constants_size + 3) & ~(size_t)3;
+
+  // --- Resolve pointer-valued constants to overlay bindings ---
+  // The constants buffer may contain device pointers passed as raw values
+  // (e.g., embedded in struct-typed copy parameters like CatArrInputTensor).
+  // For the remote HAL, these are synthetic addresses (0xDEAD...) that the
+  // remote device cannot use. We scan the constants for known buffer table
+  // entries and convert them to HAL buffer bindings. The dispatch handler
+  // overlays the resolved device pointers on top of the constants in the
+  // kernarg buffer.
+  //
+  // When the kernel also has regular bindings (binding_count > 0), we must
+  // convert those to overlay format too: write their device pointer values
+  // into the constants at their ABI offsets so the scan can find them.
+  if (constants && constants_size >= sizeof(void*)) {
+    // If we have regular bindings, convert them to overlay format by writing
+    // the device pointer values into the constants buffer at their ABI
+    // offsets. This allows the overlay scan below to find them alongside
+    // any pointers embedded in copy data.
+    if (binding_list.count > 0 && !use_raw_arguments && !is_pre_packed) {
+      bool is_args_array =
+          (params->flags & IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY) != 0;
+      const iree_hal_streaming_parameter_op_t* op =
+          &symbol->parameters.ops[symbol->parameters.copy_count];
+      for (uint32_t i = 0; i < symbol->parameters.binding_count; ++i, ++op) {
+        const iree_hal_streaming_parameter_resolve_op_t resolve_op =
+            op->resolve;
+        void* device_ptr;
+        if (is_args_array) {
+          void** args_array = (void**)params->buffer;
+          device_ptr = *(void**)args_array[resolve_op.src_ordinal];
+        } else {
+          const uint8_t* parameter_buffer = (const uint8_t*)params->buffer;
+          device_ptr =
+              *(void**)(parameter_buffer + resolve_op.src_offset);
+        }
+        if (device_ptr && resolve_op.dst_offset + sizeof(void*) <=
+                              constants_size) {
+          memcpy((uint8_t*)constants + resolve_op.dst_offset, &device_ptr,
+                 sizeof(void*));
+        }
+      }
+      binding_list.count = 0;
+    }
+
+    iree_host_size_t max_overlay = constants_size / sizeof(void*);
+    if (max_overlay > 64) max_overlay = 64;
+    iree_hal_buffer_ref_t* overlay_refs = (iree_hal_buffer_ref_t*)iree_alloca(
+        max_overlay * sizeof(iree_hal_buffer_ref_t));
+    iree_host_size_t overlay_count = 0;
+
+    // Make a mutable copy of constants so we can zero out resolved pointers.
+    void* mutable_constants = iree_alloca(constants_size);
+    memcpy(mutable_constants, constants, constants_size);
+    constants = mutable_constants;
+
+    // Scan all 8-byte aligned positions in the constants buffer.
+    // Device pointers may be embedded in struct-typed parameters (e.g.,
+    // std::array<char*, 3> appears as a single 24-byte copy op), so we
+    // cannot rely on individual copy op sizes to find pointers.
+    for (iree_host_size_t off = 0;
+         off + sizeof(void*) <= constants_size && overlay_count < max_overlay;
+         off += sizeof(void*)) {
+      void* ptr_val;
+      memcpy(&ptr_val, (uint8_t*)constants + off, sizeof(void*));
+      if (!ptr_val) continue;
+
+      iree_hal_streaming_buffer_ref_t sref;
+      iree_status_t s = iree_hal_streaming_memory_lookup(
+          stream->context, (iree_hal_streaming_deviceptr_t)ptr_val, &sref);
+      if (iree_status_is_ok(s)) {
+        overlay_refs[overlay_count] = iree_hal_make_buffer_ref(
+            sref.buffer->buffer, sref.offset, IREE_HAL_WHOLE_BUFFER);
+        overlay_refs[overlay_count].buffer_slot = (int32_t)off;
+        ++overlay_count;
+        memset((uint8_t*)constants + off, 0, sizeof(void*));
+      } else {
+        iree_status_ignore(s);
+      }
+    }
+
+    if (overlay_count > 0) {
+      binding_list.count = overlay_count;
+      binding_list.values = overlay_refs;
+    }
+  }
+
+  // After the overlay scan, all bindings are in overlay format (buffer_slot
+  // encodes the constant byte offset). Always use CUSTOM_DIRECT_ARGUMENTS
+  // so the server overlays resolved device pointers into the constants.
   #define IREE_HAL_DISPATCH_FLAG_PRE_PACKED_BUFFER (1ull << 16)
-  iree_hal_dispatch_flags_t flags =
-      binding_list.count ? IREE_HAL_DISPATCH_FLAG_NONE
-                         : IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS;
+  iree_hal_dispatch_flags_t flags = IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS;
   if (is_pre_packed) {
     flags |= IREE_HAL_DISPATCH_FLAG_PRE_PACKED_BUFFER;
   }
-  
-  // Ensure constants_size is 4-byte aligned as required by HAL.
-  constants_size = (constants_size + 3) & ~(size_t)3;
-  
+
 #if IREE_STREAMING_DEBUG_KERNEL_LAUNCH
   if (debug_should_log) {
     fprintf(stderr, "[LAUNCH]   DISPATCH: constants_size=%zu bindings=%zu flags=0x%lx use_raw=%d\n",
@@ -802,17 +866,20 @@ iree_status_t iree_hal_streaming_launch_kernel(
   }
 #endif
 
-  // AGGRESSIVE_SYNC: Flush and synchronize after every kernel dispatch.
-  // This is very slow but ensures all operations complete before the next one.
-  // Set IREE_STREAMING_AGGRESSIVE_SYNC=1 to enable.
-#ifndef IREE_STREAMING_AGGRESSIVE_SYNC
-#define IREE_STREAMING_AGGRESSIVE_SYNC 0
-#endif
-#if IREE_STREAMING_AGGRESSIVE_SYNC
+  // Insert an execution barrier after each dispatch to enforce serial
+  // ordering within the command buffer, emulating HIP stream semantics.
+  // This allows batching multiple dispatches per CB submission while
+  // maintaining correctness. Inter-CB ordering is handled by timeline
+  // semaphore chaining in iree_hal_streaming_stream_flush.
   if (iree_status_is_ok(status)) {
-    status = iree_hal_streaming_stream_synchronize(stream);
+    status = iree_hal_command_buffer_execution_barrier(
+        stream->command_buffer,
+        IREE_HAL_EXECUTION_STAGE_DISPATCH |
+            IREE_HAL_EXECUTION_STAGE_TRANSFER,
+        IREE_HAL_EXECUTION_STAGE_DISPATCH |
+            IREE_HAL_EXECUTION_STAGE_TRANSFER,
+        IREE_HAL_EXECUTION_BARRIER_FLAG_NONE, 0, NULL, 0, NULL);
   }
-#endif
 
   IREE_TRACE_ZONE_END(z0);
   return status;

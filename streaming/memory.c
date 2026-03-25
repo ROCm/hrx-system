@@ -7,6 +7,8 @@
 #include "streaming/internal.h"
 #include "streaming/util/buffer_table.h"
 
+#include <stdatomic.h>
+
 #include "iree/hal/buffer_transfer.h"
 
 //===----------------------------------------------------------------------===//
@@ -84,9 +86,17 @@ static iree_status_t iree_hal_streaming_buffer_wrap(
   }
 
   // We need at least a device pointer for the buffer table.
+  // For remote HAL buffers the allocator may not support export_buffer;
+  // generate a synthetic device pointer so the buffer table can still map
+  // this wrapper.
   if (!have_device_ptr) {
-    status = iree_make_status(IREE_STATUS_UNAVAILABLE,
-                              "failed to export buffer pointer");
+    static atomic_uintptr_t g_next_synthetic =
+        ATOMIC_VAR_INIT(0xDEAD000000000000ULL);
+    iree_device_size_t buf_size = iree_hal_buffer_byte_length(buffer);
+    iree_device_size_t aligned_size = (buf_size + 255) & ~(iree_device_size_t)255;
+    uintptr_t synthetic = atomic_fetch_add(&g_next_synthetic, aligned_size);
+    wrapper->device_ptr = (iree_hal_streaming_deviceptr_t)synthetic;
+    have_device_ptr = true;
   }
 
   if (iree_status_is_ok(status)) {
@@ -756,12 +766,60 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device(
   // or copy command if stream is provided AND source is pinned memory.
   // Pageable memory requires synchronous transfer.
   if (!stream || !src_is_pinned) {
-    // Synchronous transfer - used for NULL stream or pageable host memory.
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0,
-        iree_hal_device_transfer_h2d(
-            context->device, src, dst_ref.buffer->buffer, dst_ref.offset, size,
-            IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout()));
+    // Flush pending dispatches before the H2D transfer.
+    if (stream && stream->command_buffer) {
+      iree_status_t flush_status = iree_hal_streaming_stream_flush(stream);
+      if (!iree_status_is_ok(flush_status)) {
+        IREE_TRACE_ZONE_END(z0);
+        return flush_status;
+      }
+    }
+
+    // Chunk large transfers into pieces that fit within the inline
+    // BUFFER_UPDATE path (<=64KB per chunk). The remote HAL wire format
+    // uses uint16_t for command length (max 65535). The BUFFER_UPDATE
+    // header is 40 bytes, so max payload is ~65495. Use 63KB to be safe.
+    const iree_device_size_t h2d_chunk_size = 63 * 1024;
+    const uint8_t* src_ptr = (const uint8_t*)src;
+    iree_device_size_t remaining = size;
+    iree_device_size_t chunk_offset = 0;
+
+    // Use synchronous iree_hal_device_transfer_h2d for both hipMemcpy
+    // (stream==NULL) and hipMemcpyAsync with pageable host memory.
+    // Pageable memory can't do true async DMA; the HIP spec falls back
+    // to synchronous copy. Using the direct transfer path avoids flooding
+    // the remote HAL's async buffer pool (32 slots) with thousands of
+    // BUFFER_UPDATE submissions for large tensors.
+    // Ordering is guaranteed because we already flushed pending dispatches
+    // above, and iree_hal_device_transfer_h2d blocks until each chunk
+    // completes.
+    {
+      while (remaining > 0) {
+        iree_device_size_t this_chunk =
+            remaining < h2d_chunk_size ? remaining : h2d_chunk_size;
+        iree_status_t chunk_status = iree_hal_device_transfer_h2d(
+            context->device, src_ptr + chunk_offset, dst_ref.buffer->buffer,
+            dst_ref.offset + chunk_offset, this_chunk,
+            IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout());
+        if (!iree_status_is_ok(chunk_status)) {
+          fprintf(stderr,
+                  "[H2D] chunk %d failed: buf_offset=%" PRIu64
+                  " chunk_offset=%" PRIu64 " size=%" PRIu64 " total=%" PRIu64
+                  " buf_len=%" PRIu64 "\n",
+                  (int)(chunk_offset / h2d_chunk_size),
+                  (uint64_t)dst_ref.offset, (uint64_t)chunk_offset,
+                  (uint64_t)this_chunk, (uint64_t)size,
+                  (uint64_t)iree_hal_buffer_byte_length(
+                      dst_ref.buffer->buffer));
+          iree_status_fprint(stderr, chunk_status);
+          fprintf(stderr, "\n");
+          IREE_TRACE_ZONE_END(z0);
+          return chunk_status;
+        }
+        chunk_offset += this_chunk;
+        remaining -= this_chunk;
+      }
+    }
   } else {
     // Async: create a host buffer view and copy via command buffer.
     // Only used when source is pinned memory.
@@ -867,11 +925,29 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host(
       IREE_RETURN_AND_END_ZONE_IF_ERROR(
           z0, iree_hal_streaming_stream_synchronize(stream));
     }
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0,
-        iree_hal_device_transfer_d2h(
-            context->device, src_ref.buffer->buffer, src_ref.offset, dst, size,
-            IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout()));
+    // Chunk large transfers to avoid staging buffer map responses that
+    // exceed the remote HAL receive buffer size. Each chunk allocates a
+    // temporary staging buffer, copies device→staging, then maps the
+    // staging buffer to pull data from the server. Keeping chunks small
+    // ensures the map response fits within the receive buffer.
+    const iree_device_size_t d2h_chunk_size = 4 * 1024 * 1024;  // 4MB
+    uint8_t* dst_ptr = (uint8_t*)dst;
+    iree_device_size_t remaining = size;
+    iree_device_size_t chunk_offset = 0;
+    while (remaining > 0) {
+      iree_device_size_t this_chunk =
+          remaining < d2h_chunk_size ? remaining : d2h_chunk_size;
+      iree_status_t chunk_status = iree_hal_device_transfer_d2h(
+          context->device, src_ref.buffer->buffer,
+          src_ref.offset + chunk_offset, dst_ptr + chunk_offset, this_chunk,
+          IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout());
+      if (!iree_status_is_ok(chunk_status)) {
+        IREE_TRACE_ZONE_END(z0);
+        return chunk_status;
+      }
+      chunk_offset += this_chunk;
+      remaining -= this_chunk;
+    }
   } else {
     // Async: create a host buffer view and copy via command buffer.
     // Only used when destination is pinned memory.

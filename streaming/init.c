@@ -610,8 +610,12 @@ static iree_status_t iree_hal_streaming_create_remote_device(
   IREE_ASSERT_ARGUMENT(driver_name_str);
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  // Parse driver name from the URI (everything before "://").
+  // Parse driver name and device path from the URI.
+  // "remote-tcp://host:port" → driver_name="remote-tcp", device_path="host:port"
   iree_string_view_t driver_name = iree_make_cstring_view("remote-tcp");
+  const char* sep = strstr(server_address, "://");
+  const char* path_str = sep ? sep + 3 : server_address;
+  iree_string_view_t device_path = iree_make_cstring_view(path_str);
 
   // Create the driver.
   iree_hal_driver_t* driver = NULL;
@@ -619,7 +623,7 @@ static iree_status_t iree_hal_streaming_create_remote_device(
       registry->driver_registry, driver_name, registry->host_allocator,
       &driver);
 
-  // Create the device by path (the full URI).
+  // Create the device by path (just the host:port portion).
   iree_hal_streaming_device_t* out_device = NULL;
   if (iree_status_is_ok(status)) {
     if (registry->device_count >= IREE_HAL_STREAMING_MAX_DEVICES) {
@@ -638,7 +642,7 @@ static iree_status_t iree_hal_streaming_create_remote_device(
     create_params.frontier.tracker = &registry->client_tracker;
 
     status = iree_hal_driver_create_device_by_path(
-        driver, driver_name, iree_make_cstring_view(server_address),
+        driver, driver_name, device_path,
         /*param_count=*/0, /*params=*/NULL, &create_params,
         registry->host_allocator, &out_device->hal_device);
   }
@@ -650,23 +654,44 @@ static iree_status_t iree_hal_streaming_create_remote_device(
     // Set basic device info.
     out_device->info.device_id = 0;
     out_device->info.path = iree_string_view_empty();
-    char* name_copy = NULL;
-    iree_status_t name_status = iree_allocator_malloc(
-        registry->host_allocator, strlen("Remote Device") + 1,
-        (void**)&name_copy);
-    if (iree_status_is_ok(name_status)) {
-      memcpy(name_copy, "Remote Device", strlen("Remote Device") + 1);
-      out_device->info.name =
-          iree_make_string_view(name_copy, strlen("Remote Device"));
-    } else {
-      iree_status_ignore(name_status);
-      out_device->info.name = iree_string_view_empty();
-    }
+    out_device->info.name = iree_string_view_empty();
 
-    // Query device info.
+    // Query device info (architecture, memory, etc.) from the remote server.
     iree_status_t query_status =
         iree_hal_streaming_query_device_info(out_device);
     iree_status_ignore(query_status);  // Non-fatal.
+
+    // Use the queried architecture name as the device name so that
+    // hipDeviceGetName / torch.cuda.get_device_name returns the GPU ISA
+    // (e.g. "gfx942") instead of a generic "Remote Device".  This is
+    // also what rocBLAS uses to locate TensileLibrary files.
+    if (out_device->gcn_arch_name[0] != '\0') {
+      size_t arch_len = strlen(out_device->gcn_arch_name);
+      char* name_copy = NULL;
+      iree_status_t name_status = iree_allocator_malloc(
+          registry->host_allocator, arch_len + 1, (void**)&name_copy);
+      if (iree_status_is_ok(name_status)) {
+        memcpy(name_copy, out_device->gcn_arch_name, arch_len + 1);
+        out_device->info.name =
+            iree_make_string_view(name_copy, arch_len);
+      } else {
+        iree_status_ignore(name_status);
+      }
+    }
+    // Fallback if architecture query didn't produce a name.
+    if (out_device->info.name.size == 0) {
+      char* name_copy = NULL;
+      iree_status_t name_status = iree_allocator_malloc(
+          registry->host_allocator, strlen("Remote Device") + 1,
+          (void**)&name_copy);
+      if (iree_status_is_ok(name_status)) {
+        memcpy(name_copy, "Remote Device", strlen("Remote Device") + 1);
+        out_device->info.name =
+            iree_make_string_view(name_copy, strlen("Remote Device"));
+      } else {
+        iree_status_ignore(name_status);
+      }
+    }
 
     // Initialize primary context state.
     out_device->primary_context_flags.scheduling_mode =
@@ -728,10 +753,11 @@ iree_status_t iree_hal_streaming_init_global(
 
   // Initialize frontier tracker for remote HAL.
   if (iree_status_is_ok(status)) {
-    iree_async_frontier_tracker_initialize(
+    status = iree_async_frontier_tracker_initialize(
         &device_registry->client_tracker,
+        device_registry->client_axis_entries,
         IREE_ARRAYSIZE(device_registry->client_axis_entries),
-        device_registry->client_axis_entries, host_allocator);
+        host_allocator);
   }
 
   // Register all available HAL drivers.

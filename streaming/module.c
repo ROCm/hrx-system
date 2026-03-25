@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <stdio.h>
 #include <string.h>
 
 #include "streaming/internal.h"
@@ -277,11 +278,11 @@ iree_status_t iree_hal_streaming_module_create_from_memory(
   // data.
   iree_const_byte_span_t executable_data = image;
   char executable_format[64];
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_executable_cache_infer_format(
+  iree_status_t infer_status = iree_hal_executable_cache_infer_format(
               context->executable_cache, caching_mode, executable_data,
               sizeof(executable_format), executable_format,
-              &executable_data.data_length));
+              &executable_data.data_length);
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, infer_status);
 
   // Allocate module structure.
   iree_hal_streaming_module_t* module = NULL;

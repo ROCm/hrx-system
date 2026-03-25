@@ -178,9 +178,6 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_execution_barrier(
     const iree_hal_memory_barrier_t* memory_barriers,
     iree_host_size_t buffer_barrier_count,
     const iree_hal_buffer_barrier_t* buffer_barriers) {
-  iree_hal_hsa_stream_command_buffer_t* command_buffer =
-      iree_hal_hsa_stream_command_buffer_cast(base_command_buffer);
-
   if (iree_any_bit_set(source_stage_mask, IREE_HAL_EXECUTION_STAGE_HOST) ||
       iree_any_bit_set(target_stage_mask, IREE_HAL_EXECUTION_STAGE_HOST)) {
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
@@ -192,21 +189,10 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_execution_barrier(
                             "non-zero barrier flag not yet supported");
   }
 
-  // HSA uses AQL packets with barriers - for now we use signal-based sync.
-  // Wait for all previous work to complete.
-  // Lock mutex to protect completion signal from concurrent access.
-  iree_slim_mutex_lock(&command_buffer->device_info->completion_signal_mutex);
-  
-  command_buffer->hsa_symbols->hsa_signal_store_screlease(
-      command_buffer->device_info->completion_signal, 1);
-
-  // In a full implementation, we would use a barrier packet here.
-  // For simplicity, we do a blocking wait.
-  command_buffer->hsa_symbols->hsa_signal_wait_scacquire(
-      command_buffer->device_info->completion_signal, HSA_SIGNAL_CONDITION_EQ,
-      0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
-
-  iree_slim_mutex_unlock(&command_buffer->device_info->completion_signal_mutex);
+  // Each HSA dispatch already waits synchronously for its completion signal
+  // before returning, so all prior work is finished by the time a barrier
+  // is reached.  Nothing extra to do here — ordering and memory visibility
+  // are already guaranteed.
   return iree_ok_status();
 }
 
@@ -296,9 +282,19 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_update_buffer(
       iree_hal_buffer_byte_offset(target_ref.buffer) + target_ref.offset;
   void* target_ptr = (uint8_t*)target_device_buffer + target_offset;
 
-  // Simple memcpy for now - assumes host-visible memory.
+  // Lock the completion signal mutex to serialize with concurrent dispatches
+  // and copies on other threads. Without this, a dispatch on a worker thread
+  // could submit an AQL packet that reads from target_ptr before our write
+  // is visible to the GPU.
+  iree_slim_mutex_lock(&command_buffer->device_info->completion_signal_mutex);
+
   memcpy(target_ptr, (const uint8_t*)source_buffer + source_offset,
          target_ref.length);
+
+  // Ensure the CPU write is globally visible before any subsequent GPU work.
+  __atomic_thread_fence(__ATOMIC_SEQ_CST);
+
+  iree_slim_mutex_unlock(&command_buffer->device_info->completion_signal_mutex);
 
   return iree_ok_status();
 }
@@ -616,6 +612,34 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
           copy_size = kernel_params->explicit_kernarg_size;
         }
         memcpy(kernarg_address, constants.data, copy_size);
+
+        // Overlay binding pointers on top of the constants in kernarg.
+        // When CUSTOM_DIRECT_ARGUMENTS is used with bindings, the bindings
+        // represent device buffer pointers that were originally embedded as
+        // raw values in the constants (e.g., for native HIP kernels whose
+        // metadata classifies pointer args as by_value). The streaming layer
+        // resolved these to proper HAL buffer bindings and zeroed the pointer
+        // positions in the constants. Now we write the real device pointers
+        // back at their kernarg offsets (carried in buffer_slot).
+        for (iree_host_size_t i = 0; i < bindings.count; ++i) {
+          int32_t kernarg_offset = bindings.values[i].buffer_slot;
+          if (kernarg_offset < 0 ||
+              (iree_host_size_t)(kernarg_offset + sizeof(void*)) > kernarg_size) {
+            continue;  // Invalid or out-of-range offset - skip.
+          }
+          void* buffer_ptr = NULL;
+          if (bindings.values[i].buffer) {
+            void* device_buffer = iree_hal_hsa_buffer_device_pointer(
+                iree_hal_buffer_allocated_buffer(
+                    bindings.values[i].buffer));
+            buffer_ptr =
+                (uint8_t*)device_buffer +
+                iree_hal_buffer_byte_offset(bindings.values[i].buffer) +
+                bindings.values[i].offset;
+          }
+          memcpy((uint8_t*)kernarg_address + kernarg_offset, &buffer_ptr,
+                 sizeof(buffer_ptr));
+        }
         
         // Ensure kernarg write is visible to GPU before dispatch.
         __atomic_thread_fence(__ATOMIC_SEQ_CST);
@@ -1026,23 +1050,11 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
 
   // Wait for completion (synchronous for simplicity).
   // Use a 10 second timeout to avoid hanging forever on kernel failures.
-  // Debug: check signal value before wait
-  hsa_signal_value_t pre_wait_val = command_buffer->hsa_symbols->hsa_signal_load_scacquire(completion_signal);
-  
   hsa_signal_value_t wait_result =
       command_buffer->hsa_symbols->hsa_signal_wait_scacquire(
           completion_signal, HSA_SIGNAL_CONDITION_EQ, 0,
           10ULL * 1000 * 1000 * 1000,  // 10 seconds in nanoseconds
           HSA_WAIT_STATE_BLOCKED);
-  
-  // Debug: check signal value after wait
-  hsa_signal_value_t post_wait_val = command_buffer->hsa_symbols->hsa_signal_load_scacquire(completion_signal);
-  static int wait_debug_count = 0;
-  ++wait_debug_count;
-  if (wait_result != 0 || post_wait_val != 0) {
-    fprintf(stderr, "[SIGNAL_WAIT #%d] ANOMALY! pre=%ld post=%ld result=%ld\n",
-            wait_debug_count, (long)pre_wait_val, (long)post_wait_val, (long)wait_result);
-  }
   
   // Full memory barrier to ensure GPU writes are visible to CPU and subsequent
   // kernel dispatches. The signal wait provides acquire semantics for the
