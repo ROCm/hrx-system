@@ -4265,30 +4265,12 @@ HIPAPI hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes,
           context, (iree_hal_streaming_deviceptr_t)dst, src, sizeBytes,
           (iree_hal_streaming_stream_t*)stream);
       break;
-    case hipMemcpyDeviceToHost: {
-      // Sync ALL IREE HAL streams first.
+    case hipMemcpyDeviceToHost:
       iree_hal_streaming_context_synchronize(context);
-      // ALSO sync the real HIP device to ensure non-blocking streams are done.
-      // The IREE HAL uses hipStreamNonBlocking, and the real hipMemcpy may
-      // not implicitly wait for non-blocking streams.
-      {
-        static hipError_t (*real_device_sync)(void) = NULL;
-        if (!real_device_sync) {
-          const char* dylib_path = getenv("IREE_HIP_DYLIB_PATH");
-          if (dylib_path && strncmp(dylib_path, "file:", 5) == 0) dylib_path += 5;
-          if (dylib_path) {
-            void* h = dlopen(dylib_path, RTLD_NOW | RTLD_NOLOAD);
-            if (!h) h = dlopen(dylib_path, RTLD_NOW);
-            if (h) real_device_sync = dlsym(h, "hipDeviceSynchronize");
-          }
-        }
-        if (real_device_sync) real_device_sync();
-      }
       status = iree_hal_streaming_memcpy_device_to_host(
           context, dst, (iree_hal_streaming_deviceptr_t)src, sizeBytes,
           (iree_hal_streaming_stream_t*)stream);
       break;
-    }
     case hipMemcpyDeviceToDevice:
       status = iree_hal_streaming_memcpy_device_to_device(
           context, (iree_hal_streaming_deviceptr_t)dst,
