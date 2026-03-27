@@ -1,0 +1,6 @@
+{
+  global:
+    pyre_*;
+  local:
+    *;
+};
