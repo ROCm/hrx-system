@@ -33,6 +33,13 @@ endif()
 message(STATUS "pyre-runtime: using IREE at ${PYRE_IREE_SOURCE_DIR}")
 
 #===------------------------------------------------------------------------===#
+# HSA runtime (direct link, part of ROCm)
+#===------------------------------------------------------------------------===#
+
+find_package(hsa-runtime64 REQUIRED)
+message(STATUS "pyre-runtime: found HSA runtime")
+
+#===------------------------------------------------------------------------===#
 # IREE as source dependency (static build, runtime-only)
 #===------------------------------------------------------------------------===#
 
@@ -88,7 +95,7 @@ target_include_directories(pyre
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
-target_link_libraries(pyre PRIVATE iree_runtime_unified)
+target_link_libraries(pyre PRIVATE iree_runtime_unified hsa-runtime64::hsa-runtime64)
 target_compile_definitions(pyre PRIVATE PYRE_BUILDING_SHARED)
 set_target_properties(pyre PROPERTIES
     OUTPUT_NAME pyre
@@ -125,7 +132,7 @@ target_include_directories(pyre_internal
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
-target_link_libraries(pyre_internal PUBLIC iree_runtime_unified)
+target_link_libraries(pyre_internal PUBLIC iree_runtime_unified hsa-runtime64::hsa-runtime64)
 target_compile_definitions(pyre_internal PUBLIC PYRE_STATIC)
 set_target_properties(pyre_internal PROPERTIES
     POSITION_INDEPENDENT_CODE ON

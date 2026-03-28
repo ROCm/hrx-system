@@ -12,6 +12,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "hsa/hsa.h"
+
 //===----------------------------------------------------------------------===//
 // Global singletons
 //===----------------------------------------------------------------------===//
@@ -44,6 +46,13 @@ pyre_status_t pyre_ensure_shared_state(void) {
     return pyre_ok_status();
   }
   g_shared.host_allocator = iree_allocator_system();
+
+  // Initialize HSA runtime (idempotent — safe to call multiple times).
+  hsa_status_t hsa_status = hsa_init();
+  if (hsa_status != HSA_STATUS_SUCCESS) {
+    return pyre_make_status(PYRE_STATUS_UNAVAILABLE,
+                            "hsa_init() failed");
+  }
 
   iree_status_t status =
       iree_vm_instance_create(IREE_VM_TYPE_CAPACITY_DEFAULT,
@@ -82,6 +91,7 @@ static void pyre_release_shared_state(void) {
     iree_vm_instance_release(g_shared.vm_instance);
     g_shared.vm_instance = NULL;
   }
+  hsa_shut_down();
   g_shared.shared_initialized = false;
 }
 
@@ -107,6 +117,10 @@ static pyre_status_t pyre_create_local_task_device(
 
   iree_task_executor_options_t exec_options;
   iree_task_executor_options_initialize(&exec_options);
+  // The HSA runtime adds TLS that raises the effective minimum pthread stack
+  // size from 16KB to ~48KB. IREE's default 32KB is too small when HSA is
+  // linked. Use 256KB which is safe for ASAN builds too.
+  exec_options.worker_stack_size = 256 * 1024;
 
   iree_task_executor_t* executor = NULL;
   iree_status_t status =
