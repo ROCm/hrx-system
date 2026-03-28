@@ -25,6 +25,29 @@ extern "C" {
 #endif
 
 //===----------------------------------------------------------------------===//
+// Host allocator
+//
+// Two-word value type, layout-compatible with iree_allocator_t.
+// Used for host-side memory allocation (not device memory).
+// pyre_host_allocator_system() returns the process-wide system allocator,
+// backed by mimalloc when available.
+//===----------------------------------------------------------------------===//
+
+typedef struct pyre_host_allocator_t {
+  void* self;
+  void* ctl;
+} pyre_host_allocator_t;
+
+// Pre-initialized system allocator. Valid as soon as libpyre.so is loaded
+// (no pyre_*_initialize() required). On ELF this is a direct data export;
+// Windows will need __declspec(dllimport) when we get there.
+PYRE_API extern pyre_host_allocator_t pyre_host_allocator_system_value;
+
+static inline pyre_host_allocator_t pyre_host_allocator_system(void) {
+  return pyre_host_allocator_system_value;
+}
+
+//===----------------------------------------------------------------------===//
 // Version
 //===----------------------------------------------------------------------===//
 

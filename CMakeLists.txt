@@ -22,6 +22,10 @@ option(PYRE_ENABLE_TRACY
     "Build with IREE Tracy tracing integration" OFF)
 option(PYRE_BUILD_CTS
     "Build conformance test suite" ON)
+option(PYRE_ENABLE_ASAN "Enable address sanitizer" OFF)
+option(PYRE_ENABLE_MSAN "Enable memory sanitizer" OFF)
+option(PYRE_ENABLE_TSAN "Enable thread sanitizer" OFF)
+option(PYRE_ENABLE_UBSAN "Enable undefined behavior sanitizer" OFF)
 
 # Validate IREE source directory.
 if(NOT PYRE_IREE_SOURCE_DIR OR
@@ -52,12 +56,27 @@ endif()
 set(IREE_BUILD_SAMPLES OFF)
 set(IREE_ERROR_ON_MISSING_SUBMODULES OFF)
 set(IREE_VISIBILITY_HIDDEN OFF)
+set(IREE_ALLOCATOR_SYSTEM "mimalloc" CACHE STRING "" FORCE)
 
 # CPU drivers only (local-sync + local-task).
 set(IREE_HAL_DRIVER_DEFAULTS OFF)
 set(IREE_HAL_DRIVER_LOCAL_SYNC ON)
 set(IREE_HAL_DRIVER_LOCAL_TASK ON)
 set(IREE_HAL_DRIVER_REMOTE ON)
+
+# Sanitizers — propagate flags to IREE (before add_subdirectory).
+if(PYRE_ENABLE_ASAN)
+  set(IREE_ENABLE_ASAN ON)
+endif()
+if(PYRE_ENABLE_MSAN)
+  set(IREE_ENABLE_MSAN ON)
+endif()
+if(PYRE_ENABLE_TSAN)
+  set(IREE_ENABLE_TSAN ON)
+endif()
+if(PYRE_ENABLE_UBSAN)
+  set(IREE_ENABLE_UBSAN ON)
+endif()
 
 # Enable Tracy if requested.
 if(PYRE_ENABLE_TRACY)
@@ -70,6 +89,24 @@ set(_pyre_saved_bsl ${BUILD_SHARED_LIBS})
 set(BUILD_SHARED_LIBS OFF)
 add_subdirectory(${PYRE_IREE_SOURCE_DIR} pyre_iree SYSTEM EXCLUDE_FROM_ALL)
 set(BUILD_SHARED_LIBS ${_pyre_saved_bsl})
+
+# Sanitizer flags for pyre targets (after IREE, which manages its own).
+if(PYRE_ENABLE_ASAN)
+  add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
+  add_link_options(-fsanitize=address -shared-libasan)
+endif()
+if(PYRE_ENABLE_MSAN)
+  add_compile_options(-fsanitize=memory -fno-omit-frame-pointer)
+  add_link_options(-fsanitize=memory)
+endif()
+if(PYRE_ENABLE_TSAN)
+  add_compile_options(-fsanitize=thread -fno-omit-frame-pointer)
+  add_link_options(-fsanitize=thread)
+endif()
+if(PYRE_ENABLE_UBSAN)
+  add_compile_options(-fsanitize=undefined -fno-omit-frame-pointer)
+  add_link_options(-fsanitize=undefined)
+endif()
 
 #===------------------------------------------------------------------------===#
 # HSA HAL driver (from iree-hal-streaming, plain cmake build)

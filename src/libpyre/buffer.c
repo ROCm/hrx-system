@@ -6,7 +6,7 @@
 
 #include "pyre_internal.h"
 
-#include <stdlib.h>
+#include <string.h>
 
 pyre_status_t pyre_buffer_allocate(pyre_stream_t stream, size_t size,
                                    pyre_memory_type_t mem_type,
@@ -21,11 +21,13 @@ pyre_status_t pyre_buffer_allocate(pyre_stream_t stream, size_t size,
                             "allocation size must be > 0");
   }
 
-  pyre_buffer_s* buf = (pyre_buffer_s*)calloc(1, sizeof(pyre_buffer_s));
-  if (!buf) {
-    return pyre_make_status(PYRE_STATUS_OUT_OF_MEMORY,
-                            "failed to allocate buffer wrapper");
+  pyre_buffer_s* buf = NULL;
+  iree_status_t alloc_s = iree_allocator_malloc(
+      iree_allocator_system(), sizeof(pyre_buffer_s), (void**)&buf);
+  if (!iree_status_is_ok(alloc_s)) {
+    return pyre_status_from_iree(alloc_s);
   }
+  memset(buf, 0, sizeof(*buf));
 
   iree_hal_buffer_params_t params = {
       .type = (iree_hal_memory_type_t)mem_type,
@@ -36,7 +38,7 @@ pyre_status_t pyre_buffer_allocate(pyre_stream_t stream, size_t size,
       stream->device->allocator.hal_allocator, params, (iree_device_size_t)size,
       &buf->hal_buffer);
   if (!iree_status_is_ok(status)) {
-    free(buf);
+    iree_allocator_free(iree_allocator_system(), buf);
     return pyre_status_from_iree(status);
   }
 
@@ -73,7 +75,7 @@ pyre_status_t pyre_buffer_release(pyre_buffer_t buffer) {
     if (buffer->hal_buffer) {
       iree_hal_buffer_release(buffer->hal_buffer);
     }
-    free(buffer);
+    iree_allocator_free(iree_allocator_system(), buffer);
   }
   return pyre_ok_status();
 }

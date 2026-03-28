@@ -12,6 +12,7 @@ set(PYRE_SOURCES
     stream.c
     buffer.c
     transfer.c
+    host_allocator.c
     queue_ops.c
 )
 
