@@ -43,3 +43,22 @@ set_target_properties(pyre_streaming PROPERTIES
     POSITION_INDEPENDENT_CODE ON
     INTERPROCEDURAL_OPTIMIZATION TRUE
 )
+
+if(BUILD_TESTING)
+  add_executable(buffer_table_test util/buffer_table_test.cc)
+  target_link_libraries(buffer_table_test PRIVATE
+      pyre_streaming
+      iree_base_base
+      iree_testing_gtest
+      iree_testing_gtest_main
+  )
+  add_test(NAME buffer_table_test COMMAND buffer_table_test)
+
+  add_executable(buffer_table_benchmark util/buffer_table_benchmark.cc)
+  target_link_libraries(buffer_table_benchmark PRIVATE
+      pyre_streaming
+      iree_base_base
+      iree_testing_benchmark
+      iree_testing_benchmark_main
+  )
+endif()

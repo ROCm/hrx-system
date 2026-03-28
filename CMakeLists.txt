@@ -44,7 +44,11 @@ message(STATUS "pyre-runtime: found HSA runtime")
 #===------------------------------------------------------------------------===#
 
 set(IREE_BUILD_COMPILER OFF)
-set(IREE_BUILD_TESTS OFF)
+if(BUILD_TESTING)
+  set(IREE_BUILD_TESTS ON)
+else()
+  set(IREE_BUILD_TESTS OFF)
+endif()
 set(IREE_BUILD_SAMPLES OFF)
 set(IREE_ERROR_ON_MISSING_SUBMODULES OFF)
 set(IREE_VISIBILITY_HIDDEN OFF)
