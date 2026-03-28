@@ -17,7 +17,7 @@ if(NOT TARGET pyre)
 endif()
 
 # Catch2.
-add_subdirectory(third_party/Catch2)
+find_package(Catch2 3 REQUIRED)
 include(CTest)
 
 #===------------------------------------------------------------------------===#
