@@ -1,0 +1,6 @@
+[submodule "third_party/hip-cts"]
+	path = third_party/hip-cts
+	url = git@github.com:iree-org/hip-cts.git
+[submodule "third_party/iree"]
+	path = third_party/iree
+	url = https://github.com/iree-org/iree.git
