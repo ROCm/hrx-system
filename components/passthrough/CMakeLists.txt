@@ -26,7 +26,7 @@ add_library(hip_intercept SHARED
 
 target_include_directories(hip_intercept
   PUBLIC
-    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
 )
 
 target_link_libraries(hip_intercept
@@ -58,7 +58,7 @@ add_library(hip_logging SHARED
 
 target_include_directories(hip_logging
   PUBLIC
-    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
 )
 
 target_link_libraries(hip_logging
@@ -86,7 +86,7 @@ add_library(hip_noop SHARED
 
 target_include_directories(hip_noop
   PUBLIC
-    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
 )
 
 set_target_properties(hip_noop PROPERTIES
@@ -118,7 +118,7 @@ add_library(hip_buffer_tracer SHARED
 
 target_include_directories(hip_buffer_tracer
   PUBLIC
-    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
 )
 
 target_link_libraries(hip_buffer_tracer
