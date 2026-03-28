@@ -19,6 +19,89 @@ extern "C" {
 #endif
 
 //===----------------------------------------------------------------------===//
+// Enum value compatibility asserts
+//
+// Pyre enums match IREE values by convention. These asserts guarantee it.
+//===----------------------------------------------------------------------===//
+
+_Static_assert(PYRE_STATUS_OK == IREE_STATUS_OK, "status mismatch");
+_Static_assert(PYRE_STATUS_CANCELLED == IREE_STATUS_CANCELLED, "status mismatch");
+_Static_assert(PYRE_STATUS_UNKNOWN == IREE_STATUS_UNKNOWN, "status mismatch");
+_Static_assert(PYRE_STATUS_INVALID_ARGUMENT == IREE_STATUS_INVALID_ARGUMENT,
+               "status mismatch");
+_Static_assert(PYRE_STATUS_DEADLINE_EXCEEDED == IREE_STATUS_DEADLINE_EXCEEDED,
+               "status mismatch");
+_Static_assert(PYRE_STATUS_NOT_FOUND == IREE_STATUS_NOT_FOUND, "status mismatch");
+_Static_assert(PYRE_STATUS_ALREADY_EXISTS == IREE_STATUS_ALREADY_EXISTS,
+               "status mismatch");
+_Static_assert(PYRE_STATUS_OUT_OF_MEMORY == IREE_STATUS_RESOURCE_EXHAUSTED,
+               "status mismatch");
+_Static_assert(PYRE_STATUS_OUT_OF_RANGE == IREE_STATUS_OUT_OF_RANGE,
+               "status mismatch");
+_Static_assert(PYRE_STATUS_UNIMPLEMENTED == IREE_STATUS_UNIMPLEMENTED,
+               "status mismatch");
+_Static_assert(PYRE_STATUS_INTERNAL == IREE_STATUS_INTERNAL, "status mismatch");
+_Static_assert(PYRE_STATUS_UNAVAILABLE == IREE_STATUS_UNAVAILABLE,
+               "status mismatch");
+
+// Memory type bitfield.
+_Static_assert(PYRE_MEMORY_TYPE_NONE == IREE_HAL_MEMORY_TYPE_NONE,
+               "memory type mismatch");
+_Static_assert(PYRE_MEMORY_TYPE_OPTIMAL == IREE_HAL_MEMORY_TYPE_OPTIMAL,
+               "memory type mismatch");
+_Static_assert(PYRE_MEMORY_TYPE_HOST_VISIBLE == IREE_HAL_MEMORY_TYPE_HOST_VISIBLE,
+               "memory type mismatch");
+_Static_assert(PYRE_MEMORY_TYPE_HOST_COHERENT == IREE_HAL_MEMORY_TYPE_HOST_COHERENT,
+               "memory type mismatch");
+_Static_assert(PYRE_MEMORY_TYPE_HOST_CACHED == IREE_HAL_MEMORY_TYPE_HOST_CACHED,
+               "memory type mismatch");
+_Static_assert(PYRE_MEMORY_TYPE_HOST_LOCAL == IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
+               "memory type mismatch");
+_Static_assert(PYRE_MEMORY_TYPE_DEVICE_VISIBLE == IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+               "memory type mismatch");
+_Static_assert(PYRE_MEMORY_TYPE_DEVICE_LOCAL == IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+               "memory type mismatch");
+
+// Memory access bitfield.
+_Static_assert(PYRE_MEMORY_ACCESS_NONE == IREE_HAL_MEMORY_ACCESS_NONE,
+               "memory access mismatch");
+_Static_assert(PYRE_MEMORY_ACCESS_READ == IREE_HAL_MEMORY_ACCESS_READ,
+               "memory access mismatch");
+_Static_assert(PYRE_MEMORY_ACCESS_WRITE == IREE_HAL_MEMORY_ACCESS_WRITE,
+               "memory access mismatch");
+_Static_assert(PYRE_MEMORY_ACCESS_DISCARD == IREE_HAL_MEMORY_ACCESS_DISCARD,
+               "memory access mismatch");
+_Static_assert(PYRE_MEMORY_ACCESS_ALL == IREE_HAL_MEMORY_ACCESS_ALL,
+               "memory access mismatch");
+
+// Buffer usage bitfield.
+_Static_assert(PYRE_BUFFER_USAGE_NONE == IREE_HAL_BUFFER_USAGE_NONE,
+               "buffer usage mismatch");
+_Static_assert(PYRE_BUFFER_USAGE_TRANSFER == IREE_HAL_BUFFER_USAGE_TRANSFER,
+               "buffer usage mismatch");
+_Static_assert(PYRE_BUFFER_USAGE_DISPATCH_STORAGE ==
+                   IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE,
+               "buffer usage mismatch");
+_Static_assert(PYRE_BUFFER_USAGE_DEFAULT == IREE_HAL_BUFFER_USAGE_DEFAULT,
+               "buffer usage mismatch");
+
+// Memory protection bitfield.
+_Static_assert(PYRE_MEMORY_PROTECTION_NONE == IREE_HAL_MEMORY_PROTECTION_NONE,
+               "memory protection mismatch");
+_Static_assert(PYRE_MEMORY_PROTECTION_READ == IREE_HAL_MEMORY_PROTECTION_READ,
+               "memory protection mismatch");
+_Static_assert(PYRE_MEMORY_PROTECTION_WRITE == IREE_HAL_MEMORY_PROTECTION_WRITE,
+               "memory protection mismatch");
+
+// Map flags reuse memory access values.
+_Static_assert(PYRE_MAP_READ == IREE_HAL_MEMORY_ACCESS_READ,
+               "map flags mismatch");
+_Static_assert(PYRE_MAP_WRITE == IREE_HAL_MEMORY_ACCESS_WRITE,
+               "map flags mismatch");
+_Static_assert(PYRE_MAP_DISCARD == IREE_HAL_MEMORY_ACCESS_DISCARD,
+               "map flags mismatch");
+
+//===----------------------------------------------------------------------===//
 // Internal types backing opaque handles
 //===----------------------------------------------------------------------===//
 
@@ -30,13 +113,20 @@ typedef struct pyre_status_s {
   char* message;
 } pyre_status_s;
 
+// Allocator (wraps iree_hal_allocator_t, owned by device).
+typedef struct pyre_allocator_s {
+  iree_atomic_ref_count_t ref_count;
+  iree_hal_allocator_t* hal_allocator;
+  pyre_device_t device;
+} pyre_allocator_s;
+
 // Device instance.
 typedef struct pyre_device_s {
   iree_atomic_ref_count_t ref_count;
   pyre_accelerator_type_t type;
   int ordinal;
   iree_hal_device_t* hal_device;
-  iree_hal_allocator_t* allocator;
+  pyre_allocator_s allocator;  // Inline, owned by device.
   char name[128];
   char architecture[64];
 } pyre_device_s;
@@ -103,7 +193,7 @@ pyre_cpu_state_t* pyre_get_cpu_state(void);
 // Ensure shared infrastructure is created (idempotent).
 pyre_status_t pyre_ensure_shared_state(void);
 
-// Map pyre_status_code_t to iree_status_code_t equivalent.
+// Convert iree_status_t to pyre_status_t.
 pyre_status_t pyre_status_from_iree(iree_status_t iree_status);
 
 #ifdef __cplusplus

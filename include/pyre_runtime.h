@@ -36,19 +36,28 @@ PYRE_API void pyre_runtime_version(int* major, int* minor, int* patch);
 
 //===----------------------------------------------------------------------===//
 // Status
+//
+// Values match iree_status_code_t. Verified by _Static_assert in
+// implementation.
 //===----------------------------------------------------------------------===//
 
 typedef enum pyre_status_code_t {
   PYRE_STATUS_OK = 0,
-  PYRE_STATUS_INVALID_ARGUMENT,
-  PYRE_STATUS_NOT_FOUND,
-  PYRE_STATUS_ALREADY_EXISTS,
-  PYRE_STATUS_OUT_OF_RANGE,
-  PYRE_STATUS_UNIMPLEMENTED,
-  PYRE_STATUS_INTERNAL,
-  PYRE_STATUS_UNAVAILABLE,
-  PYRE_STATUS_OUT_OF_MEMORY,
-  PYRE_STATUS_DEADLINE_EXCEEDED,
+  PYRE_STATUS_CANCELLED = 1,
+  PYRE_STATUS_UNKNOWN = 2,
+  PYRE_STATUS_INVALID_ARGUMENT = 3,
+  PYRE_STATUS_DEADLINE_EXCEEDED = 4,
+  PYRE_STATUS_NOT_FOUND = 5,
+  PYRE_STATUS_ALREADY_EXISTS = 6,
+  PYRE_STATUS_PERMISSION_DENIED = 7,
+  PYRE_STATUS_OUT_OF_MEMORY = 8,  // IREE: RESOURCE_EXHAUSTED
+  PYRE_STATUS_FAILED_PRECONDITION = 9,
+  PYRE_STATUS_ABORTED = 10,
+  PYRE_STATUS_OUT_OF_RANGE = 11,
+  PYRE_STATUS_UNIMPLEMENTED = 12,
+  PYRE_STATUS_INTERNAL = 13,
+  PYRE_STATUS_UNAVAILABLE = 14,
+  PYRE_STATUS_DATA_LOSS = 15,
 } pyre_status_code_t;
 
 // Status is an opaque pointer. NULL = OK, non-NULL = error with payload.
@@ -78,14 +87,19 @@ PYRE_API void pyre_status_ignore(pyre_status_t status);
 //===----------------------------------------------------------------------===//
 
 typedef struct pyre_device_s* pyre_device_t;
+typedef struct pyre_allocator_s* pyre_allocator_t;
 typedef struct pyre_semaphore_s* pyre_semaphore_t;
 typedef struct pyre_stream_s* pyre_stream_t;
 typedef struct pyre_buffer_s* pyre_buffer_t;
 typedef struct pyre_module_s* pyre_module_t;
 typedef struct pyre_executable_s* pyre_executable_t;
+typedef struct pyre_physical_memory_s* pyre_physical_memory_t;
 
 //===----------------------------------------------------------------------===//
 // Enums and flags
+//
+// All values match their IREE counterparts. Verified by _Static_assert
+// in the implementation. Bitfield types use typedef + #define.
 //===----------------------------------------------------------------------===//
 
 typedef enum pyre_accelerator_type_t {
@@ -99,20 +113,51 @@ typedef enum pyre_device_property_t {
   PYRE_DEVICE_PROPERTY_TOTAL_MEMORY,
   PYRE_DEVICE_PROPERTY_COMPUTE_UNITS,
   PYRE_DEVICE_PROPERTY_MAX_WORKGROUP_SIZE,
+  PYRE_DEVICE_PROPERTY_WARP_SIZE,
+  PYRE_DEVICE_PROPERTY_MAX_SHARED_MEMORY,
+  PYRE_DEVICE_PROPERTY_CLOCK_RATE,
+  PYRE_DEVICE_PROPERTY_PCI_BUS_ID,
 } pyre_device_property_t;
 
-typedef enum pyre_memory_type_t {
-  PYRE_MEMORY_DEVICE_LOCAL = 0,
-  PYRE_MEMORY_HOST_VISIBLE = 1,
-  PYRE_MEMORY_HOST_LOCAL = 2,
-} pyre_memory_type_t;
+// Memory type bitfield. Values match iree_hal_memory_type_t.
+typedef uint32_t pyre_memory_type_t;
+#define PYRE_MEMORY_TYPE_NONE            0x00000000u
+#define PYRE_MEMORY_TYPE_OPTIMAL         0x00000001u
+#define PYRE_MEMORY_TYPE_HOST_VISIBLE    0x00000002u
+#define PYRE_MEMORY_TYPE_HOST_COHERENT   0x00000004u
+#define PYRE_MEMORY_TYPE_HOST_CACHED     0x00000008u
+#define PYRE_MEMORY_TYPE_HOST_LOCAL      0x00000046u
+#define PYRE_MEMORY_TYPE_DEVICE_VISIBLE  0x00000010u
+#define PYRE_MEMORY_TYPE_DEVICE_LOCAL    0x00000030u
 
-typedef enum pyre_map_flags_t {
-  PYRE_MAP_READ = 1 << 0,
-  PYRE_MAP_WRITE = 1 << 1,
-  PYRE_MAP_DISCARD = 1 << 2,
-} pyre_map_flags_t;
+// Memory access bitfield. Values match iree_hal_memory_access_t.
+typedef uint16_t pyre_memory_access_t;
+#define PYRE_MEMORY_ACCESS_NONE    0x00
+#define PYRE_MEMORY_ACCESS_READ    0x01
+#define PYRE_MEMORY_ACCESS_WRITE   0x02
+#define PYRE_MEMORY_ACCESS_DISCARD 0x04
+#define PYRE_MEMORY_ACCESS_ALL     0x07
 
+// Buffer usage bitfield. Values match iree_hal_buffer_usage_t.
+typedef uint32_t pyre_buffer_usage_t;
+#define PYRE_BUFFER_USAGE_NONE             0x00000000u
+#define PYRE_BUFFER_USAGE_TRANSFER_SOURCE  0x00000001u
+#define PYRE_BUFFER_USAGE_TRANSFER_TARGET  0x00000002u
+#define PYRE_BUFFER_USAGE_TRANSFER         0x00000003u
+#define PYRE_BUFFER_USAGE_DISPATCH_STORAGE_READ  0x00000400u
+#define PYRE_BUFFER_USAGE_DISPATCH_STORAGE_WRITE 0x00000800u
+#define PYRE_BUFFER_USAGE_DISPATCH_STORAGE       0x00000C00u
+#define PYRE_BUFFER_USAGE_MAPPING_SCOPED         0x01000000u
+#define PYRE_BUFFER_USAGE_MAPPING_PERSISTENT     0x02000000u
+#define PYRE_BUFFER_USAGE_DEFAULT                0x00000C03u
+
+// Map flags for pyre_buffer_map. Values match iree_hal_memory_access_t.
+typedef uint16_t pyre_map_flags_t;
+#define PYRE_MAP_READ    PYRE_MEMORY_ACCESS_READ
+#define PYRE_MAP_WRITE   PYRE_MEMORY_ACCESS_WRITE
+#define PYRE_MAP_DISCARD PYRE_MEMORY_ACCESS_DISCARD
+
+// Dispatch flags (pyre-specific, no IREE equivalent).
 typedef enum pyre_dispatch_flags_t {
   PYRE_DISPATCH_FLAG_NONE = 0,
   PYRE_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS = 1 << 0,
@@ -135,6 +180,14 @@ typedef struct pyre_semaphore_list_t {
 } pyre_semaphore_list_t;
 
 typedef uint64_t pyre_queue_affinity_t;
+
+// Buffer parameters for allocator operations.
+typedef struct pyre_buffer_params_t {
+  pyre_memory_type_t type;
+  pyre_memory_access_t access;
+  pyre_buffer_usage_t usage;
+  pyre_queue_affinity_t queue_affinity;
+} pyre_buffer_params_t;
 
 //===----------------------------------------------------------------------===//
 // GPU accelerator lifecycle
@@ -170,6 +223,31 @@ PYRE_API pyre_status_t pyre_device_get_type(pyre_device_t device,
 
 PYRE_API pyre_status_t pyre_device_retain(pyre_device_t device);
 PYRE_API pyre_status_t pyre_device_release(pyre_device_t device);
+
+//===----------------------------------------------------------------------===//
+// Allocator
+//
+// Each device owns an allocator. pyre_device_allocator() returns a
+// borrowed reference — valid for the lifetime of the device. Do NOT
+// call pyre_allocator_release() unless you first called
+// pyre_allocator_retain().
+//===----------------------------------------------------------------------===//
+
+// Returns borrowed reference. Always succeeds (every device has an allocator).
+PYRE_API pyre_allocator_t pyre_device_allocator(pyre_device_t device);
+
+PYRE_API pyre_status_t pyre_allocator_retain(pyre_allocator_t allocator);
+PYRE_API pyre_status_t pyre_allocator_release(pyre_allocator_t allocator);
+
+// Allocate buffer with explicit params. No stream ordering.
+PYRE_API pyre_status_t pyre_allocator_allocate_buffer(
+    pyre_allocator_t allocator, pyre_buffer_params_t params, size_t size,
+    pyre_buffer_t* buffer);
+
+// Import external host pointer as a pyre buffer.
+PYRE_API pyre_status_t pyre_allocator_import_buffer(
+    pyre_allocator_t allocator, pyre_buffer_params_t params,
+    void* host_ptr, size_t size, pyre_buffer_t* buffer);
 
 //===----------------------------------------------------------------------===//
 // Semaphores (timeline synchronization primitives)
@@ -218,11 +296,13 @@ PYRE_API pyre_status_t pyre_stream_wait_on(pyre_stream_t stream,
                                            pyre_timeline_point_t position);
 
 //===----------------------------------------------------------------------===//
-// Memory management
+// Buffer
 //===----------------------------------------------------------------------===//
 
+// Stream-ordered allocation (convenience over allocator).
 PYRE_API pyre_status_t pyre_buffer_allocate(pyre_stream_t stream, size_t size,
                                             pyre_memory_type_t mem_type,
+                                            pyre_buffer_usage_t usage,
                                             pyre_buffer_t* buffer);
 
 PYRE_API pyre_status_t pyre_buffer_retain(pyre_buffer_t buffer);
@@ -236,6 +316,26 @@ PYRE_API pyre_status_t pyre_buffer_unmap(pyre_buffer_t buffer);
 
 PYRE_API pyre_status_t pyre_buffer_get_device_ptr(pyre_buffer_t buffer,
                                                   void** device_ptr);
+
+PYRE_API pyre_status_t pyre_buffer_get_size(pyre_buffer_t buffer,
+                                            size_t* size);
+
+//===----------------------------------------------------------------------===//
+// Synchronous data transfer
+//
+// These block until the transfer completes. For async transfers, use
+// stream operations (pyre_stream_copy_buffer, etc).
+//===----------------------------------------------------------------------===//
+
+PYRE_API pyre_status_t pyre_synchronous_h2d(pyre_device_t device,
+                                            const void* host_src,
+                                            pyre_buffer_t dst,
+                                            size_t dst_offset, size_t size);
+
+PYRE_API pyre_status_t pyre_synchronous_d2h(pyre_device_t device,
+                                            pyre_buffer_t src,
+                                            size_t src_offset, void* host_dst,
+                                            size_t size);
 
 //===----------------------------------------------------------------------===//
 // Stream operations (batched via pending command buffer)
@@ -277,6 +377,49 @@ PYRE_API pyre_status_t pyre_queue_barrier(
     pyre_device_t device, pyre_queue_affinity_t affinity,
     const pyre_semaphore_list_t* wait_semaphores,
     const pyre_semaphore_list_t* signal_semaphores);
+
+//===----------------------------------------------------------------------===//
+// Virtual memory (allocator methods)
+//===----------------------------------------------------------------------===//
+
+PYRE_API pyre_status_t pyre_allocator_query_virtual_memory(
+    pyre_allocator_t allocator, pyre_memory_type_t mem_type, bool* supported,
+    size_t* min_page_size, size_t* recommended_page_size);
+
+PYRE_API pyre_status_t pyre_allocator_virtual_memory_reserve(
+    pyre_allocator_t allocator, pyre_queue_affinity_t affinity, size_t size,
+    pyre_buffer_t* virtual_buffer);
+
+PYRE_API pyre_status_t pyre_allocator_virtual_memory_release(
+    pyre_allocator_t allocator, pyre_buffer_t virtual_buffer);
+
+PYRE_API pyre_status_t pyre_allocator_physical_memory_allocate(
+    pyre_allocator_t allocator, pyre_memory_type_t mem_type, size_t size,
+    pyre_physical_memory_t* physical);
+
+PYRE_API pyre_status_t pyre_allocator_physical_memory_free(
+    pyre_allocator_t allocator, pyre_physical_memory_t physical);
+
+PYRE_API pyre_status_t pyre_allocator_virtual_memory_map(
+    pyre_allocator_t allocator, pyre_buffer_t virtual_buffer,
+    size_t virtual_offset, pyre_physical_memory_t physical,
+    size_t physical_offset, size_t size);
+
+PYRE_API pyre_status_t pyre_allocator_virtual_memory_unmap(
+    pyre_allocator_t allocator, pyre_buffer_t virtual_buffer,
+    size_t virtual_offset, size_t size);
+
+// Memory protection bitfield. Values match iree_hal_memory_protection_t.
+typedef uint64_t pyre_memory_protection_t;
+#define PYRE_MEMORY_PROTECTION_NONE       0ull
+#define PYRE_MEMORY_PROTECTION_READ       (1ull << 0)
+#define PYRE_MEMORY_PROTECTION_WRITE      (1ull << 1)
+#define PYRE_MEMORY_PROTECTION_READ_WRITE \
+    (PYRE_MEMORY_PROTECTION_READ | PYRE_MEMORY_PROTECTION_WRITE)
+
+PYRE_API pyre_status_t pyre_allocator_virtual_memory_protect(
+    pyre_allocator_t allocator, pyre_buffer_t virtual_buffer,
+    size_t virtual_offset, size_t size, pyre_memory_protection_t protection);
 
 #ifdef __cplusplus
 }

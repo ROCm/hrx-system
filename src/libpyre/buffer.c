@@ -8,41 +8,9 @@
 
 #include <stdlib.h>
 
-static iree_hal_buffer_params_t pyre_mem_type_to_hal_params(
-    pyre_memory_type_t mem_type) {
-  iree_hal_buffer_params_t params = {0};
-  params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER |
-                 IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE;
-
-  // All memory types include DEVICE_VISIBLE so the heap allocator grants
-  // QUEUE_TRANSFER compatibility (required for command buffer fill/copy).
-  switch (mem_type) {
-    case PYRE_MEMORY_DEVICE_LOCAL:
-      params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
-                    IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
-      break;
-    case PYRE_MEMORY_HOST_VISIBLE:
-      params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
-                    IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE |
-                    IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
-      params.usage |= IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED;
-      break;
-    case PYRE_MEMORY_HOST_LOCAL:
-      params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
-                    IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
-                    IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
-      params.usage |= IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED;
-      break;
-    default:
-      params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
-                    IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
-      break;
-  }
-  return params;
-}
-
 pyre_status_t pyre_buffer_allocate(pyre_stream_t stream, size_t size,
                                    pyre_memory_type_t mem_type,
+                                   pyre_buffer_usage_t usage,
                                    pyre_buffer_t* buffer) {
   if (!stream || !buffer) {
     return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT,
@@ -59,10 +27,13 @@ pyre_status_t pyre_buffer_allocate(pyre_stream_t stream, size_t size,
                             "failed to allocate buffer wrapper");
   }
 
-  iree_hal_buffer_params_t params = pyre_mem_type_to_hal_params(mem_type);
+  iree_hal_buffer_params_t params = {
+      .type = (iree_hal_memory_type_t)mem_type,
+      .usage = (iree_hal_buffer_usage_t)usage,
+  };
 
   iree_status_t status = iree_hal_allocator_allocate_buffer(
-      stream->device->allocator, params, (iree_device_size_t)size,
+      stream->device->allocator.hal_allocator, params, (iree_device_size_t)size,
       &buf->hal_buffer);
   if (!iree_status_is_ok(status)) {
     free(buf);
@@ -181,4 +152,13 @@ pyre_status_t pyre_buffer_get_device_ptr(pyre_buffer_t buffer,
   *device_ptr = NULL;
   return pyre_make_status(PYRE_STATUS_UNAVAILABLE,
                           "cannot get device pointer for this buffer type");
+}
+
+pyre_status_t pyre_buffer_get_size(pyre_buffer_t buffer, size_t* size) {
+  if (!buffer || !size) {
+    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT,
+                            "buffer or size is NULL");
+  }
+  *size = buffer->size;
+  return pyre_ok_status();
 }

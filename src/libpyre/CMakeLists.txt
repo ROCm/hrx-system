@@ -7,9 +7,11 @@ set(PYRE_SOURCES
     status.c
     runtime.c
     device.c
+    allocator.c
     semaphore.c
     stream.c
     buffer.c
+    transfer.c
     queue_ops.c
 )
 

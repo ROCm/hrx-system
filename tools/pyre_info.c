@@ -91,8 +91,10 @@ static int run_device_smoke_test(pyre_device_t device, const char* label) {
   // Allocate a 1 MiB host-visible buffer.
   const size_t size = 1024 * 1024;
   pyre_buffer_t buffer = NULL;
-  CHECK_STATUS(
-      pyre_buffer_allocate(stream, size, PYRE_MEMORY_HOST_LOCAL, &buffer));
+  CHECK_STATUS(pyre_buffer_allocate(
+      stream, size,
+      PYRE_MEMORY_TYPE_HOST_LOCAL | PYRE_MEMORY_TYPE_DEVICE_VISIBLE,
+      PYRE_BUFFER_USAGE_DEFAULT | PYRE_BUFFER_USAGE_MAPPING_SCOPED, &buffer));
   printf("  Allocate 1 MiB buffer: OK\n");
 
   // Fill with pattern.
@@ -107,8 +109,10 @@ static int run_device_smoke_test(pyre_device_t device, const char* label) {
 
   // Allocate a second buffer and copy.
   pyre_buffer_t buffer2 = NULL;
-  CHECK_STATUS(
-      pyre_buffer_allocate(stream, size, PYRE_MEMORY_HOST_LOCAL, &buffer2));
+  CHECK_STATUS(pyre_buffer_allocate(
+      stream, size,
+      PYRE_MEMORY_TYPE_HOST_LOCAL | PYRE_MEMORY_TYPE_DEVICE_VISIBLE,
+      PYRE_BUFFER_USAGE_DEFAULT | PYRE_BUFFER_USAGE_MAPPING_SCOPED, &buffer2));
   CHECK_STATUS(pyre_stream_copy_buffer(stream, buffer, 0, buffer2, 0, size));
   CHECK_STATUS(pyre_stream_flush(stream));
   CHECK_STATUS(pyre_stream_synchronize(stream));
