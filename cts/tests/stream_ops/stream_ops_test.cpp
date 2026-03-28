@@ -11,7 +11,7 @@ TEST_CASE_METHOD(PyreTestFixture, "Stream fill buffer",
   REQUIRE_OK(pyre().stream_create(device_, 0, &stream));
 
   pyre_buffer_t buf = nullptr;
-  REQUIRE_OK(pyre().buffer_allocate(stream, 1024, PYRE_MEMORY_HOST_LOCAL, &buf));
+  REQUIRE_OK(pyre().buffer_allocate(stream, 1024, PYRE_MEMORY_TYPE_HOST_LOCAL | PYRE_MEMORY_TYPE_DEVICE_VISIBLE, PYRE_BUFFER_USAGE_DEFAULT | PYRE_BUFFER_USAGE_MAPPING_SCOPED, &buf));
 
   uint32_t pattern = 0xCAFEBABE;
   REQUIRE_OK(pyre().stream_fill_buffer(
@@ -39,8 +39,8 @@ TEST_CASE_METHOD(PyreTestFixture, "Stream copy buffer",
 
   pyre_buffer_t src = nullptr;
   pyre_buffer_t dst = nullptr;
-  REQUIRE_OK(pyre().buffer_allocate(stream, 512, PYRE_MEMORY_HOST_LOCAL, &src));
-  REQUIRE_OK(pyre().buffer_allocate(stream, 512, PYRE_MEMORY_HOST_LOCAL, &dst));
+  REQUIRE_OK(pyre().buffer_allocate(stream, 512, PYRE_MEMORY_TYPE_HOST_LOCAL | PYRE_MEMORY_TYPE_DEVICE_VISIBLE, PYRE_BUFFER_USAGE_DEFAULT | PYRE_BUFFER_USAGE_MAPPING_SCOPED, &src));
+  REQUIRE_OK(pyre().buffer_allocate(stream, 512, PYRE_MEMORY_TYPE_HOST_LOCAL | PYRE_MEMORY_TYPE_DEVICE_VISIBLE, PYRE_BUFFER_USAGE_DEFAULT | PYRE_BUFFER_USAGE_MAPPING_SCOPED, &dst));
 
   // Fill source and flush (intra-CB RAW hazard requires separate submission).
   uint32_t pattern = 0x12345678;
@@ -74,7 +74,7 @@ TEST_CASE_METHOD(PyreTestFixture, "Stream update buffer",
   REQUIRE_OK(pyre().stream_create(device_, 0, &stream));
 
   pyre_buffer_t buf = nullptr;
-  REQUIRE_OK(pyre().buffer_allocate(stream, 64, PYRE_MEMORY_HOST_LOCAL, &buf));
+  REQUIRE_OK(pyre().buffer_allocate(stream, 64, PYRE_MEMORY_TYPE_HOST_LOCAL | PYRE_MEMORY_TYPE_DEVICE_VISIBLE, PYRE_BUFFER_USAGE_DEFAULT | PYRE_BUFFER_USAGE_MAPPING_SCOPED, &buf));
 
   // Upload host data.
   uint8_t host_data[64];

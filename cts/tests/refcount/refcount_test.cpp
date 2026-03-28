@@ -33,7 +33,7 @@ TEST_CASE_METHOD(PyreTestFixture, "Buffer retain and release",
   REQUIRE_OK(pyre().stream_create(device_, 0, &stream));
 
   pyre_buffer_t buf = nullptr;
-  REQUIRE_OK(pyre().buffer_allocate(stream, 256, PYRE_MEMORY_HOST_LOCAL, &buf));
+  REQUIRE_OK(pyre().buffer_allocate(stream, 256, PYRE_MEMORY_TYPE_HOST_LOCAL | PYRE_MEMORY_TYPE_DEVICE_VISIBLE, PYRE_BUFFER_USAGE_DEFAULT | PYRE_BUFFER_USAGE_MAPPING_SCOPED, &buf));
 
   REQUIRE_OK(pyre().buffer_retain(buf));
   REQUIRE_OK(pyre().buffer_release(buf));

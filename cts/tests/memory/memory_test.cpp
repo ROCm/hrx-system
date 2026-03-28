@@ -11,7 +11,7 @@ TEST_CASE_METHOD(PyreTestFixture, "Buffer allocate and release",
   REQUIRE_OK(pyre().stream_create(device_, 0, &stream));
 
   pyre_buffer_t buf = nullptr;
-  REQUIRE_OK(pyre().buffer_allocate(stream, 4096, PYRE_MEMORY_HOST_LOCAL, &buf));
+  REQUIRE_OK(pyre().buffer_allocate(stream, 4096, PYRE_MEMORY_TYPE_HOST_LOCAL | PYRE_MEMORY_TYPE_DEVICE_VISIBLE, PYRE_BUFFER_USAGE_DEFAULT | PYRE_BUFFER_USAGE_MAPPING_SCOPED, &buf));
   REQUIRE(buf != nullptr);
 
   REQUIRE_OK(pyre().buffer_release(buf));
@@ -24,7 +24,7 @@ TEST_CASE_METHOD(PyreTestFixture, "Buffer map and unmap",
   REQUIRE_OK(pyre().stream_create(device_, 0, &stream));
 
   pyre_buffer_t buf = nullptr;
-  REQUIRE_OK(pyre().buffer_allocate(stream, 4096, PYRE_MEMORY_HOST_LOCAL, &buf));
+  REQUIRE_OK(pyre().buffer_allocate(stream, 4096, PYRE_MEMORY_TYPE_HOST_LOCAL | PYRE_MEMORY_TYPE_DEVICE_VISIBLE, PYRE_BUFFER_USAGE_DEFAULT | PYRE_BUFFER_USAGE_MAPPING_SCOPED, &buf));
 
   void* ptr = nullptr;
   REQUIRE_OK(pyre().buffer_map(buf, PYRE_MAP_WRITE, 0, 4096, &ptr));
@@ -44,7 +44,7 @@ TEST_CASE_METHOD(PyreTestFixture, "Buffer map read back written data",
   REQUIRE_OK(pyre().stream_create(device_, 0, &stream));
 
   pyre_buffer_t buf = nullptr;
-  REQUIRE_OK(pyre().buffer_allocate(stream, 256, PYRE_MEMORY_HOST_LOCAL, &buf));
+  REQUIRE_OK(pyre().buffer_allocate(stream, 256, PYRE_MEMORY_TYPE_HOST_LOCAL | PYRE_MEMORY_TYPE_DEVICE_VISIBLE, PYRE_BUFFER_USAGE_DEFAULT | PYRE_BUFFER_USAGE_MAPPING_SCOPED, &buf));
 
   // Write.
   void* wptr = nullptr;
@@ -72,9 +72,28 @@ TEST_CASE_METHOD(PyreTestFixture, "Zero-size buffer allocation fails",
 
   pyre_buffer_t buf = nullptr;
   pyre_status_t status =
-      pyre().buffer_allocate(stream, 0, PYRE_MEMORY_HOST_LOCAL, &buf);
+      pyre().buffer_allocate(stream, 0, PYRE_MEMORY_TYPE_HOST_LOCAL | PYRE_MEMORY_TYPE_DEVICE_VISIBLE, PYRE_BUFFER_USAGE_DEFAULT | PYRE_BUFFER_USAGE_MAPPING_SCOPED, &buf);
   REQUIRE(!pyre_status_is_ok(status));
   pyre().status_ignore(status);
 
+  REQUIRE_OK(pyre().stream_release(stream));
+}
+
+TEST_CASE_METHOD(PyreTestFixture, "Buffer get_size returns correct size",
+                 "[memory][size]") {
+  pyre_stream_t stream = nullptr;
+  REQUIRE_OK(pyre().stream_create(device_, 0, &stream));
+
+  pyre_buffer_t buf = nullptr;
+  REQUIRE_OK(pyre().buffer_allocate(
+      stream, 8192,
+      PYRE_MEMORY_TYPE_HOST_LOCAL | PYRE_MEMORY_TYPE_DEVICE_VISIBLE,
+      PYRE_BUFFER_USAGE_DEFAULT | PYRE_BUFFER_USAGE_MAPPING_SCOPED, &buf));
+
+  size_t size = 0;
+  REQUIRE_OK(pyre().buffer_get_size(buf, &size));
+  REQUIRE(size == 8192);
+
+  REQUIRE_OK(pyre().buffer_release(buf));
   REQUIRE_OK(pyre().stream_release(stream));
 }

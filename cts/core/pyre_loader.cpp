@@ -93,12 +93,22 @@ void PyreLoader::load(const std::string& path) {
   LOAD(stream_get_timeline_position);
   LOAD(stream_wait_on);
 
+  LOAD(device_allocator);
+  LOAD(allocator_retain);
+  LOAD(allocator_release);
+  LOAD(allocator_allocate_buffer);
+  LOAD(allocator_import_buffer);
+
   LOAD(buffer_allocate);
   LOAD(buffer_retain);
   LOAD(buffer_release);
   LOAD(buffer_map);
   LOAD(buffer_unmap);
   LOAD(buffer_get_device_ptr);
+  LOAD(buffer_get_size);
+
+  LOAD(synchronous_h2d);
+  LOAD(synchronous_d2h);
 
   LOAD(stream_fill_buffer);
   LOAD(stream_copy_buffer);
@@ -107,6 +117,15 @@ void PyreLoader::load(const std::string& path) {
   LOAD(queue_fill);
   LOAD(queue_copy);
   LOAD(queue_barrier);
+
+  LOAD(allocator_query_virtual_memory);
+  LOAD(allocator_virtual_memory_reserve);
+  LOAD(allocator_virtual_memory_release);
+  LOAD(allocator_physical_memory_allocate);
+  LOAD(allocator_physical_memory_free);
+  LOAD(allocator_virtual_memory_map);
+  LOAD(allocator_virtual_memory_unmap);
+  LOAD(allocator_virtual_memory_protect);
 
 #undef LOAD
 #undef LOAD_FULL

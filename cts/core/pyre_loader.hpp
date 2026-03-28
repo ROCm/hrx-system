@@ -70,6 +70,13 @@ class PyreLoader {
   decltype(&pyre_stream_get_timeline_position) stream_get_timeline_position;
   decltype(&pyre_stream_wait_on) stream_wait_on;
 
+  // Allocator.
+  decltype(&pyre_device_allocator) device_allocator;
+  decltype(&pyre_allocator_retain) allocator_retain;
+  decltype(&pyre_allocator_release) allocator_release;
+  decltype(&pyre_allocator_allocate_buffer) allocator_allocate_buffer;
+  decltype(&pyre_allocator_import_buffer) allocator_import_buffer;
+
   // Buffers.
   decltype(&pyre_buffer_allocate) buffer_allocate;
   decltype(&pyre_buffer_retain) buffer_retain;
@@ -77,6 +84,11 @@ class PyreLoader {
   decltype(&pyre_buffer_map) buffer_map;
   decltype(&pyre_buffer_unmap) buffer_unmap;
   decltype(&pyre_buffer_get_device_ptr) buffer_get_device_ptr;
+  decltype(&pyre_buffer_get_size) buffer_get_size;
+
+  // Synchronous transfers.
+  decltype(&pyre_synchronous_h2d) synchronous_h2d;
+  decltype(&pyre_synchronous_d2h) synchronous_d2h;
 
   // Stream ops.
   decltype(&pyre_stream_fill_buffer) stream_fill_buffer;
@@ -87,6 +99,16 @@ class PyreLoader {
   decltype(&pyre_queue_fill) queue_fill;
   decltype(&pyre_queue_copy) queue_copy;
   decltype(&pyre_queue_barrier) queue_barrier;
+
+  // Virtual memory.
+  decltype(&pyre_allocator_query_virtual_memory) allocator_query_virtual_memory;
+  decltype(&pyre_allocator_virtual_memory_reserve) allocator_virtual_memory_reserve;
+  decltype(&pyre_allocator_virtual_memory_release) allocator_virtual_memory_release;
+  decltype(&pyre_allocator_physical_memory_allocate) allocator_physical_memory_allocate;
+  decltype(&pyre_allocator_physical_memory_free) allocator_physical_memory_free;
+  decltype(&pyre_allocator_virtual_memory_map) allocator_virtual_memory_map;
+  decltype(&pyre_allocator_virtual_memory_unmap) allocator_virtual_memory_unmap;
+  decltype(&pyre_allocator_virtual_memory_protect) allocator_virtual_memory_protect;
 
  private:
   PyreLoader();
