@@ -71,19 +71,19 @@ set(BUILD_SHARED_LIBS ${_pyre_saved_bsl})
 #===------------------------------------------------------------------------===#
 
 add_library(pyre_hsa_driver STATIC
-    components/hsa_driver/status_util.c
-    components/hsa_driver/fat_binary.c
-    components/hsa_driver/hsa_allocator.c
-    components/hsa_driver/hsa_buffer.c
-    components/hsa_driver/hsa_driver.c
-    components/hsa_driver/hsa_device.c
-    components/hsa_driver/hsa_semaphore.c
-    components/hsa_driver/native_executable.c
-    components/hsa_driver/nop_executable_cache.c
-    components/hsa_driver/stream_command_buffer.c
+    src/hsa_driver/status_util.c
+    src/hsa_driver/fat_binary.c
+    src/hsa_driver/hsa_allocator.c
+    src/hsa_driver/hsa_buffer.c
+    src/hsa_driver/hsa_driver.c
+    src/hsa_driver/hsa_device.c
+    src/hsa_driver/hsa_semaphore.c
+    src/hsa_driver/native_executable.c
+    src/hsa_driver/nop_executable_cache.c
+    src/hsa_driver/stream_command_buffer.c
 )
 target_include_directories(pyre_hsa_driver PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/components
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 target_link_libraries(pyre_hsa_driver PUBLIC
     hsa-runtime64::hsa-runtime64
@@ -113,10 +113,10 @@ set_target_properties(pyre_hsa_driver PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # HSA driver registration module.
 add_library(pyre_hsa_registration STATIC
-    components/hsa_driver/registration/driver_module.c
+    src/hsa_driver/registration/driver_module.c
 )
 target_include_directories(pyre_hsa_registration PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/components
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 target_link_libraries(pyre_hsa_registration PUBLIC
     pyre_hsa_driver
@@ -164,7 +164,7 @@ endif()
 option(PYRE_BUILD_PASSTHROUGH
     "Build HIP passthrough/interception tools" ON)
 if(PYRE_BUILD_PASSTHROUGH)
-  add_subdirectory(components/passthrough)
+  add_subdirectory(src/passthrough)
 endif()
 
 #===------------------------------------------------------------------------===#

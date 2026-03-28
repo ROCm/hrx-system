@@ -22,7 +22,7 @@ target_include_directories(pyre
         $<INSTALL_INTERFACE:include/pyre>
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
-        ${PROJECT_SOURCE_DIR}/components
+        ${PROJECT_SOURCE_DIR}/src
 )
 target_link_libraries(pyre PRIVATE
     hsa-runtime64::hsa-runtime64
