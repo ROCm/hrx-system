@@ -4,18 +4,10 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "iree/hal/drivers/init.h"
-
-#include <stdio.h>   // for sscanf
-#include <string.h>  // for memset, memcpy
+#include <stdio.h>
+#include <string.h>
 
 #include "streaming/internal.h"
-#include "iree/async/util/proactor_pool.h"
-#include "iree/base/threading/numa.h"
-// TODO(pyre): remove when init.c is replaced by libpyre global state
-// #include "iree/hal/drivers/hip/registration/driver_module.h"
-#include "iree/hal/remote/client/registration/driver_module.h"
-#include "hsa_driver/registration/driver_module.h"
 //===----------------------------------------------------------------------===//
 // Global state
 //===----------------------------------------------------------------------===//
@@ -170,87 +162,62 @@ static iree_status_t iree_hal_streaming_query_device_info(
   return iree_ok_status();
 }
 
-// Initializes a single device.
+// Initializes a single device from a pyre device handle.
 static iree_status_t iree_hal_streaming_initialize_device(
-    iree_hal_streaming_device_registry_t* registry, iree_hal_driver_t* driver,
-    const iree_hal_device_info_t* device_info,
+    iree_hal_streaming_device_registry_t* registry,
+    pyre_device_t pyre_dev,
     iree_hal_streaming_device_t* out_device) {
   IREE_ASSERT_ARGUMENT(registry);
-  IREE_ASSERT_ARGUMENT(driver);
-  IREE_ASSERT_ARGUMENT(device_info);
+  IREE_ASSERT_ARGUMENT(pyre_dev);
   IREE_ASSERT_ARGUMENT(out_device);
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  // Clear the entry.
   memset(out_device, 0, sizeof(*out_device));
 
-  // Create HAL device from driver.
-  // Let the HAL create its own dispatch stream rather than using the
-  // default stream (0). The default stream (NULL) can cause issues with
-  // GPU cache coherency for atomic operations in split-K GEMM kernels.
-  // A dedicated stream created with hipStreamNonBlocking ensures proper
-  // ordering and visibility.
-  {
-    iree_hal_device_create_params_t create_params =
-        iree_hal_device_create_params_default();
-    create_params.proactor_pool = registry->proactor_pool;
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_driver_create_device_by_id(
-                driver, device_info->device_id,
-                /*param_count=*/0, /*params=*/NULL, &create_params,
-                registry->host_allocator, &out_device->hal_device));
-  }
+  // Store pyre device and extract HAL device for direct HAL usage.
+  out_device->pyre_device = pyre_dev;
+  out_device->hal_device = pyre_device_hal(pyre_dev);
 
-  // Set driver and retain.
-  out_device->driver = driver;
-  iree_hal_driver_retain(driver);
-
-  // Copy device info with deep copies of strings.
-  // The device_info struct contains iree_string_view_t fields that point into
-  // a buffer that will be freed after device enumeration, so we need to make
-  // our own copies.
-  out_device->info.device_id = device_info->device_id;
-
-  // Allocate and copy the path string.
-  if (device_info->path.size > 0) {
-    char* path_copy = NULL;
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_allocator_malloc(registry->host_allocator,
-                                  device_info->path.size + 1,
-                                  (void**)&path_copy));
-    memcpy(path_copy, device_info->path.data, device_info->path.size);
-    path_copy[device_info->path.size] = '\0';
-    out_device->info.path =
-        iree_make_string_view(path_copy, device_info->path.size);
-  } else {
-    out_device->info.path = iree_string_view_empty();
-  }
-
-  // Allocate and copy the name string.
-  if (device_info->name.size > 0) {
+  // Get device name from pyre.
+  char name_buf[128] = {0};
+  iree_status_t status = PYRE_CALL(pyre_device_get_property(
+      pyre_dev, PYRE_DEVICE_PROPERTY_NAME, name_buf, sizeof(name_buf)));
+  if (iree_status_is_ok(status) && name_buf[0] != '\0') {
+    size_t len = strlen(name_buf);
     char* name_copy = NULL;
-    iree_status_t name_status = iree_allocator_malloc(
-        registry->host_allocator, device_info->name.size + 1,
-        (void**)&name_copy);
-    if (!iree_status_is_ok(name_status)) {
-      // Clean up path if name allocation fails.
-      if (out_device->info.path.size > 0) {
-        iree_allocator_free(registry->host_allocator,
-                            (void*)out_device->info.path.data);
-      }
-      IREE_TRACE_ZONE_END(z0);
-      return name_status;
-    }
-    memcpy(name_copy, device_info->name.data, device_info->name.size);
-    name_copy[device_info->name.size] = '\0';
-    out_device->info.name =
-        iree_make_string_view(name_copy, device_info->name.size);
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_allocator_malloc(registry->host_allocator, len + 1,
+                                  (void**)&name_copy));
+    memcpy(name_copy, name_buf, len + 1);
+    out_device->info.name = iree_make_string_view(name_copy, len);
   } else {
+    iree_status_ignore(status);
     out_device->info.name = iree_string_view_empty();
   }
 
+  // Use architecture as path.
+  char arch_buf[64] = {0};
+  status = PYRE_CALL(pyre_device_get_property(
+      pyre_dev, PYRE_DEVICE_PROPERTY_ARCHITECTURE, arch_buf, sizeof(arch_buf)));
+  if (iree_status_is_ok(status) && arch_buf[0] != '\0') {
+    size_t len = strlen(arch_buf);
+    char* path_copy = NULL;
+    iree_status_t path_status = iree_allocator_malloc(
+        registry->host_allocator, len + 1, (void**)&path_copy);
+    if (iree_status_is_ok(path_status)) {
+      memcpy(path_copy, arch_buf, len + 1);
+      out_device->info.path = iree_make_string_view(path_copy, len);
+    } else {
+      iree_status_ignore(path_status);
+      out_device->info.path = iree_string_view_empty();
+    }
+  } else {
+    iree_status_ignore(status);
+    out_device->info.path = iree_string_view_empty();
+  }
+
   // Query and initialize all device properties.
-  iree_status_t status = iree_hal_streaming_query_device_info(out_device);
+  status = iree_hal_streaming_query_device_info(out_device);
 
   // Initialize primary context flags with defaults.
   out_device->primary_context_flags.scheduling_mode =
@@ -334,17 +301,10 @@ static void iree_hal_streaming_deinitialize_device(
   // Deinitialize the arena block pool.
   iree_arena_block_pool_deinitialize(&device->block_pool);
 
-  // Release HAL device if created.
-  if (device->hal_device) {
-    iree_hal_device_release(device->hal_device);
-    device->hal_device = NULL;
-  }
-
-  // Release driver.
-  if (device->driver) {
-    iree_hal_driver_release(device->driver);
-    device->driver = NULL;
-  }
+  // HAL device and driver are owned by pyre — don't release here.
+  // pyre_gpu_shutdown() handles cleanup.
+  device->hal_device = NULL;
+  device->pyre_device = NULL;
 
   IREE_TRACE_ZONE_END(z0);
 }
@@ -379,17 +339,8 @@ static iree_status_t iree_hal_streaming_query_p2p_capabilities(
         link->performance_rank = 100;   // Highest rank for same device.
         link->bandwidth_mbps = 900000;  // 900 GB/s typical for device memory.
         link->latency_ns = 10;          // Very low latency.
-      } else if (registry->devices[i].driver == registry->devices[j].driver) {
-        // Same driver might support P2P.
-        // TODO: Query actual P2P capabilities from driver.
-        link->access_supported = false;  // Conservative default.
-        link->native_atomic_supported = false;
-        link->cuda_array_access_supported = false;
-        link->performance_rank = 0;
-        link->bandwidth_mbps = 0;
-        link->latency_ns = 0;
       } else {
-        // Different drivers: no P2P.
+        // TODO: Query actual P2P capabilities from pyre/HSA.
         link->access_supported = false;
         link->native_atomic_supported = false;
         link->cuda_array_access_supported = false;
@@ -399,105 +350,6 @@ static iree_status_t iree_hal_streaming_query_p2p_capabilities(
       }
     }
   }
-
-  IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
-}
-
-// Enumerates and registers all available devices.
-static iree_status_t iree_hal_streaming_enumerate_devices(
-    iree_hal_streaming_device_registry_t* registry) {
-  IREE_ASSERT_ARGUMENT(registry);
-  IREE_TRACE_ZONE_BEGIN(z0);
-
-  iree_host_size_t driver_info_count = 0;
-  iree_hal_driver_info_t* driver_infos = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_driver_registry_enumerate(
-      registry->driver_registry, registry->host_allocator, &driver_info_count,
-      &driver_infos));
-
-  // Initialize device array (fixed-size in struct, no allocation needed).
-  memset(registry->devices, 0,
-         IREE_HAL_STREAMING_MAX_DEVICES * sizeof(iree_hal_streaming_device_t));
-  registry->device_count = 0;
-
-  // DO NOT SUBMIT rewrite this
-
-  // Enumerate and register all devices in a single pass.
-  for (iree_host_size_t i = 0; i < driver_info_count; ++i) {
-    iree_hal_driver_t* driver = NULL;
-    iree_status_t status = iree_hal_driver_registry_try_create(
-        registry->driver_registry, driver_infos[i].driver_name,
-        registry->host_allocator, &driver);
-    if (!iree_status_is_ok(status)) {
-      iree_status_ignore(status);
-      continue;
-    }
-
-    iree_host_size_t device_info_count = 0;
-    iree_hal_device_info_t* device_infos = NULL;
-    status = iree_hal_driver_query_available_devices(
-        driver, registry->host_allocator, &device_info_count, &device_infos);
-    if (!iree_status_is_ok(status)) {
-      iree_hal_driver_release(driver);
-      iree_status_ignore(status);
-      continue;
-    }
-
-    // Register each device.
-    for (iree_host_size_t j = 0; j < device_info_count; ++j) {
-      // Check if we've exceeded the maximum device count.
-      if (registry->device_count >= IREE_HAL_STREAMING_MAX_DEVICES) {
-        // TODO: make this part of a common path.
-        iree_allocator_free(registry->host_allocator, device_infos);
-        iree_hal_driver_release(driver);
-        iree_allocator_free(registry->host_allocator, driver_infos);
-
-        // Clean up already initialized devices.
-        for (iree_host_size_t k = 0; k < registry->device_count; ++k) {
-          iree_hal_streaming_deinitialize_device(&registry->devices[k]);
-        }
-        registry->device_count = 0;
-
-        IREE_TRACE_ZONE_END(z0);
-        return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                                "too many devices found (limit is %d)",
-                                IREE_HAL_STREAMING_MAX_DEVICES);
-      }
-
-      iree_hal_streaming_device_t* device =
-          &registry->devices[registry->device_count];
-
-      // Set the device ordinal.
-      device->ordinal = registry->device_count;
-
-      // Initialize the device.
-      status = iree_hal_streaming_initialize_device(registry, driver,
-                                                    &device_infos[j], device);
-      if (!iree_status_is_ok(status)) {
-        // DO NOT SUBMIT
-        iree_status_ignore(status);
-        // Skip this device if we can't initialize it.
-        continue;
-      }
-
-      registry->device_count++;
-    }
-
-    iree_allocator_free(registry->host_allocator, device_infos);
-    iree_hal_driver_release(driver);
-  }
-
-  iree_allocator_free(registry->host_allocator, driver_infos);
-
-  // Check if we found any devices.
-  if (registry->device_count == 0) {
-    IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(IREE_STATUS_NOT_FOUND, "no HAL devices found");
-  }
-
-  // Query P2P capabilities and populate topology.
-  IREE_RETURN_IF_ERROR(iree_hal_streaming_query_p2p_capabilities(registry));
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
@@ -593,127 +445,8 @@ void iree_hal_streaming_unregister_context(
 }
 
 //===----------------------------------------------------------------------===//
-// Global initialization
+// Global initialization via pyre
 //===----------------------------------------------------------------------===//
-
-// DO NOT SUBMIT
-iree_status_t iree_hal_local_sync_driver_module_register(
-    iree_hal_driver_registry_t* registry);
-iree_status_t iree_hal_local_task_driver_module_register(
-    iree_hal_driver_registry_t* registry);
-
-// Creates a remote device via the remote-tcp driver.
-// The |driver_uri| should be like "remote-tcp://host:port".
-static iree_status_t iree_hal_streaming_create_remote_device(
-    iree_hal_streaming_device_registry_t* registry,
-    const char* driver_name_str, const char* server_address) {
-  IREE_ASSERT_ARGUMENT(registry);
-  IREE_ASSERT_ARGUMENT(driver_name_str);
-  IREE_TRACE_ZONE_BEGIN(z0);
-
-  // Parse driver name and device path from the URI.
-  // "remote-tcp://host:port" → driver_name="remote-tcp", device_path="host:port"
-  iree_string_view_t driver_name = iree_make_cstring_view("remote-tcp");
-  const char* sep = strstr(server_address, "://");
-  const char* path_str = sep ? sep + 3 : server_address;
-  iree_string_view_t device_path = iree_make_cstring_view(path_str);
-
-  // Create the driver.
-  iree_hal_driver_t* driver = NULL;
-  iree_status_t status = iree_hal_driver_registry_try_create(
-      registry->driver_registry, driver_name, registry->host_allocator,
-      &driver);
-
-  // Create the device by path (just the host:port portion).
-  iree_hal_streaming_device_t* out_device = NULL;
-  if (iree_status_is_ok(status)) {
-    if (registry->device_count >= IREE_HAL_STREAMING_MAX_DEVICES) {
-      iree_hal_driver_release(driver);
-      IREE_TRACE_ZONE_END(z0);
-      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                              "too many devices");
-    }
-    out_device = &registry->devices[registry->device_count];
-    memset(out_device, 0, sizeof(*out_device));
-    out_device->ordinal = registry->device_count;
-
-    iree_hal_device_create_params_t create_params =
-        iree_hal_device_create_params_default();
-    create_params.proactor_pool = registry->proactor_pool;
-    create_params.frontier.tracker = &registry->client_tracker;
-
-    status = iree_hal_driver_create_device_by_path(
-        driver, driver_name, device_path,
-        /*param_count=*/0, /*params=*/NULL, &create_params,
-        registry->host_allocator, &out_device->hal_device);
-  }
-
-  if (iree_status_is_ok(status)) {
-    out_device->driver = driver;
-    iree_hal_driver_retain(driver);
-
-    // Set basic device info.
-    out_device->info.device_id = 0;
-    out_device->info.path = iree_string_view_empty();
-    out_device->info.name = iree_string_view_empty();
-
-    // Query device info (architecture, memory, etc.) from the remote server.
-    iree_status_t query_status =
-        iree_hal_streaming_query_device_info(out_device);
-    iree_status_ignore(query_status);  // Non-fatal.
-
-    // Use the queried architecture name as the device name so that
-    // hipDeviceGetName / torch.cuda.get_device_name returns the GPU ISA
-    // (e.g. "gfx942") instead of a generic "Remote Device".  This is
-    // also what rocBLAS uses to locate TensileLibrary files.
-    if (out_device->gcn_arch_name[0] != '\0') {
-      size_t arch_len = strlen(out_device->gcn_arch_name);
-      char* name_copy = NULL;
-      iree_status_t name_status = iree_allocator_malloc(
-          registry->host_allocator, arch_len + 1, (void**)&name_copy);
-      if (iree_status_is_ok(name_status)) {
-        memcpy(name_copy, out_device->gcn_arch_name, arch_len + 1);
-        out_device->info.name =
-            iree_make_string_view(name_copy, arch_len);
-      } else {
-        iree_status_ignore(name_status);
-      }
-    }
-    // Fallback if architecture query didn't produce a name.
-    if (out_device->info.name.size == 0) {
-      char* name_copy = NULL;
-      iree_status_t name_status = iree_allocator_malloc(
-          registry->host_allocator, strlen("Remote Device") + 1,
-          (void**)&name_copy);
-      if (iree_status_is_ok(name_status)) {
-        memcpy(name_copy, "Remote Device", strlen("Remote Device") + 1);
-        out_device->info.name =
-            iree_make_string_view(name_copy, strlen("Remote Device"));
-      } else {
-        iree_status_ignore(name_status);
-      }
-    }
-
-    // Initialize primary context state.
-    out_device->primary_context_flags.scheduling_mode =
-        IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO;
-    out_device->primary_context_flags.map_host_memory = true;
-    out_device->primary_context_flags.resize_local_mem_to_max = false;
-    iree_slim_mutex_initialize(&out_device->primary_context_mutex);
-    out_device->primary_context_ref_count = 0;
-    iree_arena_block_pool_initialize(64 * 1024, registry->host_allocator,
-                                     &out_device->block_pool);
-    out_device->primary_context = NULL;
-    out_device->default_mem_pool = NULL;
-    out_device->current_mem_pool = NULL;
-
-    registry->device_count++;
-  }
-
-  iree_hal_driver_release(driver);
-  IREE_TRACE_ZONE_END(z0);
-  return status;
-}
 
 iree_status_t iree_hal_streaming_init_global(
     iree_hal_streaming_init_flags_t flags, iree_allocator_t host_allocator) {
@@ -724,6 +457,11 @@ iree_status_t iree_hal_streaming_init_global(
     return iree_ok_status();
   }
 
+  // Initialize pyre GPU subsystem (idempotent — handles HSA init,
+  // driver registration, device enumeration).
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, PYRE_CALL(pyre_gpu_initialize(0)));
+
   // Create global registry.
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_allocator_malloc(host_allocator,
@@ -732,6 +470,7 @@ iree_status_t iree_hal_streaming_init_global(
 
   iree_hal_streaming_device_registry_t* device_registry =
       iree_hal_streaming_device_registry();
+  memset(device_registry, 0, sizeof(*device_registry));
   device_registry->host_allocator = host_allocator;
   iree_slim_mutex_initialize(&device_registry->mutex);
 
@@ -740,62 +479,47 @@ iree_status_t iree_hal_streaming_init_global(
   device_registry->context_list.head = NULL;
   device_registry->context_list.tail = NULL;
 
-  // Create HAL driver registry.
-  iree_status_t status = iree_hal_driver_registry_allocate(
-      host_allocator, &device_registry->driver_registry);
+  // Enumerate GPU devices from pyre.
+  int gpu_count = 0;
+  iree_status_t status = PYRE_CALL(pyre_gpu_device_count(&gpu_count));
 
-  // Create proactor pool for async operations.
   if (iree_status_is_ok(status)) {
-    status = iree_async_proactor_pool_create(
-        iree_numa_node_count(), /*node_ids=*/NULL,
-        iree_async_proactor_pool_options_default(), host_allocator,
-        &device_registry->proactor_pool);
-  }
+    memset(device_registry->devices, 0, sizeof(device_registry->devices));
+    device_registry->device_count = 0;
 
-  // Initialize frontier tracker for remote HAL.
-  if (iree_status_is_ok(status)) {
-    status = iree_async_frontier_tracker_initialize(
-        &device_registry->client_tracker,
-        device_registry->client_axis_entries,
-        IREE_ARRAYSIZE(device_registry->client_axis_entries),
-        host_allocator);
-  }
+    for (int i = 0; i < gpu_count && i < IREE_HAL_STREAMING_MAX_DEVICES; ++i) {
+      pyre_device_t pyre_dev = NULL;
+      iree_status_t dev_status =
+          PYRE_CALL(pyre_gpu_device_get(i, &pyre_dev));
+      if (!iree_status_is_ok(dev_status)) {
+        iree_status_ignore(dev_status);
+        continue;
+      }
 
-  // Register all available HAL drivers.
-  if (iree_status_is_ok(status)) {
-    // DO NOT SUBMIT env vars?
-    // status = iree_hal_register_all_available_drivers(
-    //     device_registry->driver_registry);
-    const char* driver_name = getenv("IREE_HAL_DRIVER");
-    if (driver_name && strcmp(driver_name, "hip") == 0) {
-      // TODO(pyre): HIP driver removed, will be replaced by libpyre
-      status = iree_make_status(IREE_STATUS_UNAVAILABLE, "HIP driver not available");
-    } else if (driver_name && strcmp(driver_name, "hsa") == 0) {
-      status =
-          iree_hal_hsa_driver_module_register(device_registry->driver_registry);
-    } else if (driver_name && strcmp(driver_name, "local-sync") == 0) {
-      status = iree_hal_local_sync_driver_module_register(
-          device_registry->driver_registry);
-    } else if (driver_name &&
-               strncmp(driver_name, "remote-tcp", 10) == 0) {
-      status = iree_hal_remote_client_driver_module_register(
-          device_registry->driver_registry);
-    } else if (!driver_name ||
-               (driver_name && strcmp(driver_name, "local-task") == 0)) {
-      status = iree_hal_local_task_driver_module_register(
-          device_registry->driver_registry);
+      iree_hal_streaming_device_t* device =
+          &device_registry->devices[device_registry->device_count];
+      device->ordinal = device_registry->device_count;
+
+      dev_status = iree_hal_streaming_initialize_device(
+          device_registry, pyre_dev, device);
+      if (!iree_status_is_ok(dev_status)) {
+        iree_status_ignore(dev_status);
+        continue;
+      }
+
+      device_registry->device_count++;
     }
   }
 
-  // Enumerate devices (or create remote device).
+  // Must have at least one device.
+  if (iree_status_is_ok(status) && device_registry->device_count == 0) {
+    status = iree_make_status(IREE_STATUS_NOT_FOUND,
+                              "no GPU devices found via pyre");
+  }
+
+  // Query P2P capabilities.
   if (iree_status_is_ok(status)) {
-    const char* driver_name = getenv("IREE_HAL_DRIVER");
-    if (driver_name && strncmp(driver_name, "remote-tcp", 10) == 0) {
-      status = iree_hal_streaming_create_remote_device(
-          device_registry, driver_name, driver_name);
-    } else {
-      status = iree_hal_streaming_enumerate_devices(device_registry);
-    }
+    status = iree_hal_streaming_query_p2p_capabilities(device_registry);
   }
 
   if (iree_status_is_ok(status)) {
@@ -818,14 +542,9 @@ void iree_hal_streaming_cleanup_global(void) {
   }
 
   // Clear the TLS current context first to avoid dangling references.
-  // This is important because contexts may be destroyed below.
   iree_hal_streaming_context_set_current(NULL);
 
   // Force destroy all remaining contexts from the global list.
-  // This ensures all contexts are properly destroyed even if the user
-  // forgot to explicitly release them.
-  // We grab the whole context list locally so we aren't in the lock (which
-  // _shouldn't_ matter, but calling synchronize within a lock is bad form).
   iree_slim_mutex_lock(&device_registry->context_list.mutex);
   iree_hal_streaming_context_t* context_head =
       device_registry->context_list.head;
@@ -834,47 +553,27 @@ void iree_hal_streaming_cleanup_global(void) {
   iree_slim_mutex_unlock(&device_registry->context_list.mutex);
   while (context_head) {
     iree_hal_streaming_context_t* context = context_head;
-
-    // Move to next before releasing (release may modify the list).
     context_head = context->context_list_entry.next;
-
-    // Clear the context's list pointers.
     context->context_list_entry.next = NULL;
     context->context_list_entry.prev = NULL;
-
-    // Synchronize the context to ensure all operations complete.
     iree_status_ignore(iree_hal_streaming_context_synchronize(context));
-
-    // Release the global list's reference.
-    // Note: The user should have already released their reference via
-    // hipCtxDestroy/cuCtxDestroy. If not, this is a user error but we
-    // still need to clean up our reference.
     iree_hal_streaming_context_release(context);
   }
 
   iree_slim_mutex_lock(&device_registry->mutex);
-
   iree_slim_mutex_deinitialize(&device_registry->context_list.mutex);
 
   // Release all device resources.
   for (iree_host_size_t i = 0; i < device_registry->device_count; ++i) {
-    iree_hal_streaming_device_t* device = &device_registry->devices[i];
-    iree_hal_streaming_deinitialize_device(device);
+    iree_hal_streaming_deinitialize_device(&device_registry->devices[i]);
   }
 
-  // Free P2P topology array (devices array is fixed-size in struct).
+  // Free P2P topology.
   iree_allocator_free(device_registry->host_allocator,
                       device_registry->p2p_topology);
 
-  // Release driver registry.
-  iree_hal_driver_registry_free(device_registry->driver_registry);
-
-  // Deinitialize frontier tracker.
-  iree_async_frontier_tracker_deinitialize(&device_registry->client_tracker);
-
-  // Release proactor pool.
-  iree_async_proactor_pool_release(device_registry->proactor_pool);
-  device_registry->proactor_pool = NULL;
+  // Shutdown pyre GPU subsystem.
+  pyre_status_ignore(pyre_gpu_shutdown());
 
   iree_slim_mutex_unlock(&device_registry->mutex);
   iree_slim_mutex_deinitialize(&device_registry->mutex);

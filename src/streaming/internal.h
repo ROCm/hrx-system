@@ -7,6 +7,7 @@
 #ifndef IREE_EXPERIMENTAL_STREAMING_INTERNAL_H_
 #define IREE_EXPERIMENTAL_STREAMING_INTERNAL_H_
 
+#include "streaming/pyre_bridge.h"
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/api.h"
@@ -282,7 +283,12 @@ typedef struct iree_hal_streaming_device_t {
   // Device ordinal in the global registry.
   iree_host_size_t ordinal;
 
-  iree_hal_driver_t* driver;
+  // Pyre device handle (owns the HAL device and driver).
+  pyre_device_t pyre_device;
+
+  // HAL device extracted from pyre_device for direct HAL calls.
+  // Streaming is always built from the same source tree as libpyre and
+  // shares internal representations. Accessed via pyre_device_hal().
   iree_hal_device_t* hal_device;
   iree_hal_device_info_t info;
 
@@ -344,16 +350,6 @@ typedef struct iree_hal_streaming_device_registry_t {
   bool initialized;
 
   iree_slim_mutex_t mutex;
-
-  // HAL driver registry.
-  iree_hal_driver_registry_t* driver_registry;
-
-  // Proactor pool for async operations (semaphore waits, etc.).
-  iree_async_proactor_pool_t* proactor_pool;
-
-  // Frontier tracker for remote HAL client cross-device causal ordering.
-  iree_async_axis_table_entry_t client_axis_entries[16];
-  iree_async_frontier_tracker_t client_tracker;
 
   // P2P topology: array of links between all device pairs.
   iree_hal_streaming_p2p_link_t* p2p_topology;

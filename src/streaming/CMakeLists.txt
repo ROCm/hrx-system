@@ -23,18 +23,19 @@ add_library(pyre_streaming STATIC
 target_include_directories(pyre_streaming PUBLIC
     ${PROJECT_SOURCE_DIR}/src
 )
+target_include_directories(pyre_streaming PUBLIC
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src/libpyre>
+)
 
 target_link_libraries(pyre_streaming PUBLIC
-    hsa-runtime64::hsa-runtime64
-    pyre_hsa_registration
+    pyre
     iree_async_async
     iree_async_util_proactor_pool
     iree_base_base
     iree_base_internal_arena
     iree_base_threading_threading
     iree_hal_hal
-    iree_hal_drivers_drivers
-    iree_hal_remote_client_registration_registration
     iree_hal_utils_resource_set
     iree_io_file_handle
 )

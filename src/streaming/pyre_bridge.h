@@ -4,9 +4,9 @@
 // Bridge header for streaming code that calls pyre APIs while remaining
 // canonical IREE code (iree_status_t returns, IREE_RETURN_IF_ERROR, etc).
 //
-// Streaming is always compiled to mate with libpyre.so, so type punning
-// between pyre and IREE types is valid (verified by _Static_assert in
-// pyre_internal.h).
+// Streaming is always built from the same source tree as libpyre and
+// shares internal type representations. Type punning between pyre and
+// IREE types is valid (verified by _Static_assert in pyre_internal.h).
 
 #ifndef PYRE_STREAMING_BRIDGE_H_
 #define PYRE_STREAMING_BRIDGE_H_
@@ -64,5 +64,26 @@ static inline pyre_host_allocator_t iree_to_pyre_allocator(
 //===----------------------------------------------------------------------===//
 
 #define PYRE_CALL(expr) pyre_to_iree_status(expr)
+
+//===----------------------------------------------------------------------===//
+// Internal accessors
+//
+// Streaming shares internal type representations with libpyre (always
+// built from the same source tree). These accessors extract IREE HAL
+// handles from pyre types for direct HAL usage. NOT part of the public
+// pyre API — only for code that mates with libpyre.
+//===----------------------------------------------------------------------===//
+
+#include "pyre_internal.h"
+
+// Get the HAL device from a pyre device (for HAL calls not wrapped by pyre).
+static inline iree_hal_device_t* pyre_device_hal(pyre_device_t dev) {
+  return dev ? dev->hal_device : NULL;
+}
+
+// Get the system allocator as iree_allocator_t (shares mimalloc heap).
+static inline iree_allocator_t pyre_system_iree_allocator(void) {
+  return pyre_to_iree_allocator(pyre_host_allocator_system());
+}
 
 #endif  // PYRE_STREAMING_BRIDGE_H_
