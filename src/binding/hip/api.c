@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "streaming/binding/hip/api.h"
+#include "binding/hip/api.h"
 
 #include <dlfcn.h>
 

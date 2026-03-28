@@ -145,6 +145,13 @@ add_subdirectory(src/libpyre)
 add_subdirectory(src/streaming)
 
 #===------------------------------------------------------------------------===#
+# API bindings
+#===------------------------------------------------------------------------===#
+
+add_subdirectory(src/binding/hip)
+add_subdirectory(src/binding/cuda)
+
+#===------------------------------------------------------------------------===#
 # pyre-info — CLI tool, dual-links libpyre.so + IREE static (for flags)
 #===------------------------------------------------------------------------===#
 

@@ -4,12 +4,12 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "streaming/binding/cuda/runtime.h"
+#include "binding/cuda/runtime.h"
 
 #include <stddef.h>
 #include <string.h>
 
-#include "streaming/binding/cuda/driver.h"
+#include "binding/cuda/driver.h"
 #include "streaming/internal.h"
 
 // Thread-local storage for the last CUDA error.
