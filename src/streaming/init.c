@@ -12,7 +12,8 @@
 #include "streaming/internal.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/threading/numa.h"
-#include "iree/hal/drivers/hip/registration/driver_module.h"
+// TODO(pyre): remove when init.c is replaced by libpyre global state
+// #include "iree/hal/drivers/hip/registration/driver_module.h"
 #include "iree/hal/remote/client/registration/driver_module.h"
 #include "hsa_driver/registration/driver_module.h"
 //===----------------------------------------------------------------------===//
@@ -767,8 +768,8 @@ iree_status_t iree_hal_streaming_init_global(
     //     device_registry->driver_registry);
     const char* driver_name = getenv("IREE_HAL_DRIVER");
     if (driver_name && strcmp(driver_name, "hip") == 0) {
-      status =
-          iree_hal_hip_driver_module_register(device_registry->driver_registry);
+      // TODO(pyre): HIP driver removed, will be replaced by libpyre
+      status = iree_make_status(IREE_STATUS_UNAVAILABLE, "HIP driver not available");
     } else if (driver_name && strcmp(driver_name, "hsa") == 0) {
       status =
           iree_hal_hsa_driver_module_register(device_registry->driver_registry);

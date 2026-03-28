@@ -53,6 +53,7 @@ set(IREE_VISIBILITY_HIDDEN OFF)
 set(IREE_HAL_DRIVER_DEFAULTS OFF)
 set(IREE_HAL_DRIVER_LOCAL_SYNC ON)
 set(IREE_HAL_DRIVER_LOCAL_TASK ON)
+set(IREE_HAL_DRIVER_REMOTE ON)
 
 # Enable Tracy if requested.
 if(PYRE_ENABLE_TRACY)
@@ -132,6 +133,12 @@ set_target_properties(pyre_hsa_registration PROPERTIES POSITION_INDEPENDENT_CODE
 #===------------------------------------------------------------------------===#
 
 add_subdirectory(src/libpyre)
+
+#===------------------------------------------------------------------------===#
+# Streaming HIP runtime (internal static library)
+#===------------------------------------------------------------------------===#
+
+add_subdirectory(src/streaming)
 
 #===------------------------------------------------------------------------===#
 # pyre-info — CLI tool, dual-links libpyre.so + IREE static (for flags)
