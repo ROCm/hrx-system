@@ -14,6 +14,11 @@
 
 #include "hsa/hsa.h"
 
+#ifdef PYRE_HAS_HSA_DRIVER
+#include "hsa_driver/api.h"
+#include "hsa_driver/registration/driver_module.h"
+#endif
+
 //===----------------------------------------------------------------------===//
 // Global singletons
 //===----------------------------------------------------------------------===//
@@ -300,7 +305,7 @@ pyre_status_t pyre_cpu_device_get(int index, pyre_device_t* device) {
 }
 
 //===----------------------------------------------------------------------===//
-// GPU accelerator (uses local-task for spike — no HSA required)
+// GPU accelerator
 //===----------------------------------------------------------------------===//
 
 pyre_status_t pyre_gpu_initialize(uint32_t flags) {
@@ -310,35 +315,110 @@ pyre_status_t pyre_gpu_initialize(uint32_t flags) {
                             "GPU accelerator already initialized");
   }
 
+#ifndef PYRE_HAS_HSA_DRIVER
+  return pyre_make_status(PYRE_STATUS_UNAVAILABLE,
+                          "no GPU driver available (built without HSA support)");
+#else
   pyre_status_t status = pyre_ensure_shared_state();
   if (!pyre_status_is_ok(status)) return status;
 
-  // For the initial spike, GPU uses local-task driver (no real GPU required).
-  // Real HSA/AMDGPU driver integration comes in a later phase.
-  iree_hal_driver_t* driver = NULL;
-  iree_hal_device_t* hal_device = NULL;
-  iree_task_executor_t* executor = NULL;
-  status = pyre_create_local_task_device(2, &executor, &driver, &hal_device);
-  if (!pyre_status_is_ok(status)) {
+  iree_allocator_t alloc = g_shared.host_allocator;
+
+  // Register the HSA driver factory.
+  iree_status_t iree_status =
+      iree_hal_hsa_driver_module_register(iree_hal_driver_registry_default());
+  if (!iree_status_is_ok(iree_status)) {
     pyre_release_shared_state();
-    return status;
+    return pyre_status_from_iree(iree_status);
   }
 
-  pyre_device_s* dev = &g_gpu.devices[0];
-  memset(dev, 0, sizeof(*dev));
-  iree_atomic_ref_count_init(&dev->ref_count);
-  dev->type = PYRE_ACCELERATOR_GPU;
-  dev->ordinal = 0;
-  dev->hal_device = hal_device;
-  dev->allocator = iree_hal_device_allocator(hal_device);
-  iree_hal_allocator_retain(dev->allocator);
-  snprintf(dev->name, sizeof(dev->name), "GPU 0 (local-task, spike)");
-  snprintf(dev->architecture, sizeof(dev->architecture), "local-task");
+  // Create HSA driver with default options.
+  iree_hal_hsa_driver_options_t driver_options;
+  iree_hal_hsa_driver_options_initialize(&driver_options);
+  iree_hal_hsa_device_params_t device_params;
+  iree_hal_hsa_device_params_initialize(&device_params);
 
+  iree_hal_driver_t* driver = NULL;
+  iree_status = iree_hal_hsa_driver_create(
+      iree_make_cstring_view("hsa"), &driver_options, &device_params,
+      alloc, &driver);
+  if (!iree_status_is_ok(iree_status)) {
+    pyre_release_shared_state();
+    return pyre_status_from_iree(iree_status);
+  }
+
+  // Enumerate available GPU devices.
+  iree_host_size_t device_info_count = 0;
+  iree_hal_device_info_t* device_infos = NULL;
+  iree_status = iree_hal_driver_query_available_devices(
+      driver, alloc, &device_info_count, &device_infos);
+  if (!iree_status_is_ok(iree_status)) {
+    iree_hal_driver_release(driver);
+    pyre_release_shared_state();
+    return pyre_status_from_iree(iree_status);
+  }
+
+  if (device_info_count == 0) {
+    iree_allocator_free(alloc, device_infos);
+    iree_hal_driver_release(driver);
+    pyre_release_shared_state();
+    return pyre_make_status(PYRE_STATUS_UNAVAILABLE, "no GPU devices found");
+  }
+
+  // Create a HAL device for each GPU (up to PYRE_MAX_DEVICES).
+  int count = (int)(device_info_count < PYRE_MAX_DEVICES
+                        ? device_info_count
+                        : PYRE_MAX_DEVICES);
+
+  iree_hal_device_create_params_t create_params =
+      iree_hal_device_create_params_default();
+  create_params.proactor_pool = g_shared.proactor_pool;
+
+  for (int i = 0; i < count; i++) {
+    iree_hal_device_t* hal_device = NULL;
+    iree_status = iree_hal_driver_create_device_by_ordinal(
+        driver, (iree_host_size_t)i, /*param_count=*/0, /*params=*/NULL,
+        &create_params, alloc, &hal_device);
+    if (!iree_status_is_ok(iree_status)) {
+      for (int j = 0; j < i; j++) {
+        iree_hal_allocator_release(g_gpu.devices[j].allocator);
+        iree_hal_device_release(g_gpu.devices[j].hal_device);
+      }
+      iree_allocator_free(alloc, device_infos);
+      iree_hal_driver_release(driver);
+      pyre_release_shared_state();
+      return pyre_status_from_iree(iree_status);
+    }
+
+    pyre_device_s* dev = &g_gpu.devices[i];
+    memset(dev, 0, sizeof(*dev));
+    iree_atomic_ref_count_init(&dev->ref_count);
+    dev->type = PYRE_ACCELERATOR_GPU;
+    dev->ordinal = i;
+    dev->hal_device = hal_device;
+    dev->allocator = iree_hal_device_allocator(hal_device);
+    iree_hal_allocator_retain(dev->allocator);
+
+    iree_host_size_t name_len = device_infos[i].name.size;
+    if (name_len >= sizeof(dev->name)) name_len = sizeof(dev->name) - 1;
+    memcpy(dev->name, device_infos[i].name.data, name_len);
+    dev->name[name_len] = '\0';
+
+    iree_host_size_t path_len = device_infos[i].path.size;
+    if (path_len > 0 && path_len < sizeof(dev->architecture)) {
+      memcpy(dev->architecture, device_infos[i].path.data, path_len);
+      dev->architecture[path_len] = '\0';
+    } else {
+      snprintf(dev->architecture, sizeof(dev->architecture), "unknown");
+    }
+  }
+
+  iree_allocator_free(alloc, device_infos);
   g_gpu.driver = driver;
-  g_gpu.device_count = 1;
+  g_gpu.device_count = count;
   g_gpu.initialized = true;
   return pyre_ok_status();
+#endif  // PYRE_HAS_HSA_DRIVER
 }
 
 pyre_status_t pyre_gpu_shutdown(void) {

@@ -3,13 +3,14 @@
 // Licensed under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// Direct HSA linkage.
 
 #include "hsa_driver/status_util.h"
 
 #include <stddef.h>
 
 #include "iree/base/status.h"
-#include "hsa_driver/dynamic_symbols.h"
 
 // Converts HSA status code to the corresponding IREE status code.
 static iree_status_code_t iree_hal_hsa_status_to_iree_code(
@@ -72,17 +73,14 @@ static iree_status_code_t iree_hal_hsa_status_to_iree_code(
   }
 }
 
-iree_status_t iree_hal_hsa_result_to_status(
-    const iree_hal_hsa_dynamic_symbols_t* syms, hsa_status_t result,
-    const char* file, uint32_t line) {
+iree_status_t iree_hal_hsa_result_to_status(hsa_status_t result,
+                                            const char* file, uint32_t line) {
   if (IREE_LIKELY(result == HSA_STATUS_SUCCESS)) {
     return iree_ok_status();
   }
 
   const char* status_string = NULL;
-  if (syms->hsa_status_string) {
-    syms->hsa_status_string(result, &status_string);
-  }
+  hsa_status_string(result, &status_string);
   if (!status_string) {
     status_string = "unknown HSA error";
   }

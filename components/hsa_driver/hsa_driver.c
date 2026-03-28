@@ -12,7 +12,6 @@
 #include "iree/base/tracing.h"
 #include "iree/hal/api.h"
 #include "hsa_driver/api.h"
-#include "hsa_driver/dynamic_symbols.h"
 #include "hsa_driver/hsa_device.h"
 #include "hsa_driver/status_util.h"
 
@@ -32,7 +31,6 @@ typedef struct iree_hal_hsa_driver_t {
   // Identifier used for registering the driver in the IREE driver registry.
   iree_string_view_t identifier;
   // HSA runtime API dynamic symbols to interact with the HSA system.
-  iree_hal_hsa_dynamic_symbols_t hsa_symbols;
 
   // The default parameters for creating devices using this driver.
   iree_hal_hsa_device_params_t device_params;
@@ -71,7 +69,7 @@ static hsa_status_t iree_hal_hsa_find_gpu_agents_callback(hsa_agent_t agent,
 
   hsa_device_type_t device_type;
   hsa_status_t status =
-      driver->hsa_symbols.hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &device_type);
+      hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &device_type);
   if (status != HSA_STATUS_SUCCESS) {
     return status;
   }
@@ -93,14 +91,13 @@ static iree_status_t iree_hal_hsa_init(iree_hal_hsa_driver_t* driver) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_status_t status = IREE_HSA_CALL_TO_STATUS(
-      &driver->hsa_symbols, hsa_init(), "hsa_init");
+      hsa_init(), "hsa_init");
 
   if (iree_status_is_ok(status)) {
     // Iterate agents to find GPU and CPU agents.
     driver->gpu_agent_count = 0;
     driver->has_cpu_agent = false;
     status = IREE_HSA_CALL_TO_STATUS(
-        &driver->hsa_symbols,
         hsa_iterate_agents(iree_hal_hsa_find_gpu_agents_callback, driver),
         "hsa_iterate_agents");
   }
@@ -125,11 +122,9 @@ static iree_status_t iree_hal_hsa_driver_create_internal(
       (char*)driver + iree_sizeof_struct(*driver));
   driver->default_device_index = options->default_device_index;
 
-  iree_status_t status = iree_hal_hsa_dynamic_symbols_initialize(
-      host_allocator, options->hsa_lib_search_path_count,
-      options->hsa_lib_search_paths, &driver->hsa_symbols);
-
   memcpy(&driver->device_params, device_params, sizeof(driver->device_params));
+
+  iree_status_t status = iree_ok_status();
 
   if (iree_status_is_ok(status)) {
     status = iree_hal_hsa_init(driver);
@@ -167,11 +162,7 @@ static void iree_hal_hsa_driver_destroy(iree_hal_driver_t* base_driver) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   // Shutdown HSA runtime.
-  if (driver->hsa_symbols.hsa_shut_down) {
-    IREE_HSA_IGNORE_ERROR(&driver->hsa_symbols, hsa_shut_down());
-  }
-
-  iree_hal_hsa_dynamic_symbols_deinitialize(&driver->hsa_symbols);
+  IREE_HSA_IGNORE_ERROR(hsa_shut_down());
   iree_allocator_free(host_allocator, driver);
 
   IREE_TRACE_ZONE_END(z0);
@@ -179,14 +170,14 @@ static void iree_hal_hsa_driver_destroy(iree_hal_driver_t* base_driver) {
 
 // Populates device information from the given HSA GPU agent.
 static iree_status_t iree_hal_hsa_populate_device_info(
-    hsa_agent_t agent, iree_hal_hsa_dynamic_symbols_t* syms,
+    hsa_agent_t agent,
     uint8_t* buffer_ptr, uint8_t** out_buffer_ptr,
     iree_hal_device_info_t* out_device_info) {
   *out_buffer_ptr = buffer_ptr;
 
   char device_name[IREE_HAL_HSA_MAX_DEVICE_NAME_LENGTH];
   hsa_status_t status =
-      syms->hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, device_name);
+      hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, device_name);
   if (status != HSA_STATUS_SUCCESS) {
     return iree_make_status(IREE_STATUS_INTERNAL,
                             "failed to get HSA agent name");
@@ -246,7 +237,7 @@ static iree_status_t iree_hal_hsa_driver_query_available_devices(
         (uint8_t*)device_infos + device_count * sizeof(*device_infos);
     for (iree_host_size_t i = 0; i < device_count; ++i) {
       status = iree_hal_hsa_populate_device_info(
-          driver->gpu_agents[i], &driver->hsa_symbols, buffer_ptr, &buffer_ptr,
+          driver->gpu_agents[i], buffer_ptr, &buffer_ptr,
           &device_infos[valid_device_count]);
       if (!iree_status_is_ok(status)) break;
       ++valid_device_count;
@@ -268,27 +259,14 @@ static iree_status_t iree_hal_hsa_driver_dump_device_info(
     iree_string_builder_t* builder) {
   iree_hal_hsa_driver_t* driver = iree_hal_hsa_driver_cast(base_driver);
 
-  // Report path to the runtime library.
-  iree_string_builder_t path_builder;
-  iree_string_builder_initialize(builder->allocator, &path_builder);
-  iree_status_t status = iree_hal_hsa_dynamic_symbols_append_path_to_builder(
-      &driver->hsa_symbols, &path_builder);
-  if (iree_status_is_ok(status)) {
-    status = iree_string_builder_append_format(
-        builder, "\n- hsa_runtime_dylib_path: %s", path_builder.buffer);
-    iree_string_builder_deinitialize(&path_builder);
-    IREE_RETURN_IF_ERROR(status);
-  }
-
   // Find the agent for this device_id.
   hsa_agent_t agent;
   agent.handle = (uint64_t)device_id;
 
   // Get agent info.
   char agent_name[64] = {0};
-  status = IREE_HSA_RESULT_TO_STATUS(
-      &driver->hsa_symbols,
-      driver->hsa_symbols.hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME,
+  iree_status_t status = IREE_HSA_RESULT_TO_STATUS(
+      hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME,
                                              agent_name),
       "hsa_agent_get_info(NAME)");
   if (iree_status_is_ok(status)) {
@@ -299,8 +277,7 @@ static iree_status_t iree_hal_hsa_driver_dump_device_info(
   // Get ISA name via AMD extension.
   char isa_name[128] = {0};
   status = IREE_HSA_RESULT_TO_STATUS(
-      &driver->hsa_symbols,
-      driver->hsa_symbols.hsa_agent_get_info(
+      hsa_agent_get_info(
           agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_PRODUCT_NAME, isa_name),
       "hsa_agent_get_info(PRODUCT_NAME)");
   if (iree_status_is_ok(status)) {
@@ -313,7 +290,7 @@ static iree_status_t iree_hal_hsa_driver_dump_device_info(
 }
 
 static iree_status_t iree_hal_hsa_driver_select_default_device(
-    iree_hal_driver_t* base_driver, iree_hal_hsa_dynamic_symbols_t* syms,
+    iree_hal_driver_t* base_driver,
     int default_device_index, iree_allocator_t host_allocator,
     hsa_agent_t* out_agent) {
   iree_hal_hsa_driver_t* driver = iree_hal_hsa_driver_cast(base_driver);
@@ -349,7 +326,7 @@ static iree_status_t iree_hal_hsa_driver_create_device_by_id(
   if (device_id == IREE_HAL_DEVICE_ID_DEFAULT) {
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
         z0, iree_hal_hsa_driver_select_default_device(
-                base_driver, &driver->hsa_symbols, driver->default_device_index,
+                base_driver, driver->default_device_index,
                 host_allocator, &agent));
   } else {
     agent.handle = (uint64_t)device_id;
@@ -359,7 +336,7 @@ static iree_status_t iree_hal_hsa_driver_create_device_by_id(
 
   // Attempt to create the device now.
   iree_status_t status = iree_hal_hsa_device_create(
-      base_driver, device_name, &driver->device_params, &driver->hsa_symbols,
+      base_driver, device_name, &driver->device_params,
       agent, driver->cpu_agent, create_params, host_allocator, out_device);
 
   IREE_TRACE_ZONE_END(z0);

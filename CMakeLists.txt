@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Pyre Runtime: standalone shared library wrapping IREE HAL.
-# Produces libpyre.so (LTO, hidden visibility, only pyre_* exported),
-# pyre_internal (static, all symbols), and pyre-info (CLI tool).
+# Produces libpyre.so (LTO, hidden visibility, only pyre_* exported)
+# and pyre-info (CLI tool).
 
 cmake_minimum_required(VERSION 3.20)
 project(pyre-runtime VERSION 0.1.0 LANGUAGES C CXX)
@@ -67,6 +67,67 @@ add_subdirectory(${PYRE_IREE_SOURCE_DIR} pyre_iree SYSTEM EXCLUDE_FROM_ALL)
 set(BUILD_SHARED_LIBS ${_pyre_saved_bsl})
 
 #===------------------------------------------------------------------------===#
+# HSA HAL driver (from iree-hal-streaming, plain cmake build)
+#===------------------------------------------------------------------------===#
+
+add_library(pyre_hsa_driver STATIC
+    components/hsa_driver/status_util.c
+    components/hsa_driver/fat_binary.c
+    components/hsa_driver/hsa_allocator.c
+    components/hsa_driver/hsa_buffer.c
+    components/hsa_driver/hsa_driver.c
+    components/hsa_driver/hsa_device.c
+    components/hsa_driver/hsa_semaphore.c
+    components/hsa_driver/native_executable.c
+    components/hsa_driver/nop_executable_cache.c
+    components/hsa_driver/stream_command_buffer.c
+)
+target_include_directories(pyre_hsa_driver PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/components
+)
+target_link_libraries(pyre_hsa_driver PUBLIC
+    hsa-runtime64::hsa-runtime64
+    iree_base_base
+    iree_base_core_headers
+    iree_base_internal_arena
+    iree_base_internal_atomic_slist
+    iree_base_internal_flatcc_parsing
+    iree_base_threading_threading
+    iree_base_threading_thread
+    iree_async_async
+    iree_async_util_proactor_pool
+    iree_hal_hal
+    iree_hal_utils_collective_batch
+    iree_hal_utils_deferred_command_buffer
+    iree_hal_utils_executable_debug_info
+    iree_hal_utils_executable_header
+    iree_hal_utils_file_transfer
+    iree_hal_utils_files
+    iree_hal_utils_queue_emulation
+    iree_hal_utils_queue_host_call_emulation
+    iree_hal_utils_resource_set
+    iree_schemas_executable_debug_info_c_fbs
+    iree_schemas_hip_executable_def_c_fbs
+)
+set_target_properties(pyre_hsa_driver PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+# HSA driver registration module.
+add_library(pyre_hsa_registration STATIC
+    components/hsa_driver/registration/driver_module.c
+)
+target_include_directories(pyre_hsa_registration PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/components
+)
+target_link_libraries(pyre_hsa_registration PUBLIC
+    pyre_hsa_driver
+    iree_base_base
+    iree_base_core_headers
+    iree_base_tooling_flags
+    iree_hal_hal
+)
+set_target_properties(pyre_hsa_registration PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+#===------------------------------------------------------------------------===#
 # Source files
 #===------------------------------------------------------------------------===#
 
@@ -81,7 +142,6 @@ set(PYRE_SOURCES
 )
 
 set(PYRE_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
-set(PYRE_IREE_INCLUDE_DIR ${PYRE_IREE_SOURCE_DIR}/runtime/src)
 
 #===------------------------------------------------------------------------===#
 # libpyre.so — LTO'd shared library, only pyre_* symbols exported
@@ -94,9 +154,17 @@ target_include_directories(pyre
         $<INSTALL_INTERFACE:include/pyre>
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/components
 )
-target_link_libraries(pyre PRIVATE iree_runtime_unified hsa-runtime64::hsa-runtime64)
-target_compile_definitions(pyre PRIVATE PYRE_BUILDING_SHARED)
+target_link_libraries(pyre PRIVATE
+    hsa-runtime64::hsa-runtime64
+    pyre_hsa_registration
+    iree_async_util_proactor_pool
+    iree_hal_drivers_local_task_task_driver
+    iree_hal_local_loaders_registration_registration
+    iree_vm_vm
+)
+target_compile_definitions(pyre PRIVATE PYRE_BUILDING_SHARED PYRE_HAS_HSA_DRIVER)
 set_target_properties(pyre PROPERTIES
     OUTPUT_NAME pyre
     VERSION ${PROJECT_VERSION}
@@ -120,25 +188,6 @@ else()
 endif()
 
 #===------------------------------------------------------------------------===#
-# pyre_internal — static library, no LTO, no hidden visibility
-# For in-tree tools that need both pyre API and IREE internals.
-#===------------------------------------------------------------------------===#
-
-add_library(pyre_internal STATIC ${PYRE_SOURCES})
-target_include_directories(pyre_internal
-    PUBLIC
-        $<BUILD_INTERFACE:${PYRE_INCLUDE_DIR}>
-        $<INSTALL_INTERFACE:include/pyre>
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
-target_link_libraries(pyre_internal PUBLIC iree_runtime_unified hsa-runtime64::hsa-runtime64)
-target_compile_definitions(pyre_internal PUBLIC PYRE_STATIC)
-set_target_properties(pyre_internal PROPERTIES
-    POSITION_INDEPENDENT_CODE ON
-)
-
-#===------------------------------------------------------------------------===#
 # pyre-info — CLI tool, dual-links libpyre.so + IREE static (for flags)
 #===------------------------------------------------------------------------===#
 
@@ -160,6 +209,16 @@ target_link_libraries(pyre-info PRIVATE iree_base_tooling_flags)
 if(PYRE_BUILD_CTS)
   enable_testing()
   add_subdirectory(cts)
+endif()
+
+#===------------------------------------------------------------------------===#
+# Passthrough / interception tools
+#===------------------------------------------------------------------------===#
+
+option(PYRE_BUILD_PASSTHROUGH
+    "Build HIP passthrough/interception tools" ON)
+if(PYRE_BUILD_PASSTHROUGH)
+  add_subdirectory(components/passthrough)
 endif()
 
 #===------------------------------------------------------------------------===#

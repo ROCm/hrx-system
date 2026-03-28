@@ -12,21 +12,15 @@
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
 #include "hsa_driver/api.h"
-#include "hsa_driver/dynamic_symbols.h"
+#include "hsa_driver/hsa_headers.h"
 
 // Creates a device that manages an HSA GPU agent.
 iree_status_t iree_hal_hsa_device_create(
     iree_hal_driver_t* driver, iree_string_view_t identifier,
-    const iree_hal_hsa_device_params_t* params,
-    const iree_hal_hsa_dynamic_symbols_t* symbols, hsa_agent_t gpu_agent,
+    const iree_hal_hsa_device_params_t* params, hsa_agent_t gpu_agent,
     hsa_agent_t cpu_agent,
     const iree_hal_device_create_params_t* create_params,
     iree_allocator_t host_allocator, iree_hal_device_t** out_device);
-
-// Returns the dynamic symbol table from the |device| if it is an HSA device
-// and otherwise returns NULL.
-const iree_hal_hsa_dynamic_symbols_t* iree_hal_hsa_device_dynamic_symbols(
-    iree_hal_device_t* device);
 
 // Hide the cast in a function.
 static inline iree_device_size_t iree_hal_hsa_device_ptr_to_device_size(

@@ -10,7 +10,6 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/math.h"
-#include "hsa_driver/dynamic_symbols.h"
 #include "hsa_driver/native_executable_hsaf.h"
 #include "hsa_driver/status_util.h"
 #include "iree/hal/utils/executable_debug_info.h"
@@ -57,7 +56,6 @@ typedef struct iree_hal_hsa_native_executable_t {
   iree_hal_resource_t resource;
   iree_allocator_t host_allocator;
 
-  const iree_hal_hsa_dynamic_symbols_t* symbols;
 
   // Number of exported kernels.
   iree_host_size_t export_count;
@@ -126,24 +124,20 @@ iree_status_t iree_hal_hsa_native_executable_infer_format(
 
 // Forward declaration for FPIH format loader.
 static iree_status_t iree_hal_hsa_native_executable_create_fpih(
-    const iree_hal_hsa_dynamic_symbols_t* symbols,
     iree_hal_hsa_device_topology_t topology,
     const iree_hal_executable_params_t* executable_params,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable);
 
 // Forward declaration for flatbuffer format loader.
 static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
-    const iree_hal_hsa_dynamic_symbols_t* symbols,
     iree_hal_hsa_device_topology_t topology,
     const iree_hal_executable_params_t* executable_params,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable);
 
 iree_status_t iree_hal_hsa_native_executable_create(
-    const iree_hal_hsa_dynamic_symbols_t* symbols,
     iree_hal_hsa_device_topology_t topology,
     const iree_hal_executable_params_t* executable_params,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable) {
-  IREE_ASSERT_ARGUMENT(symbols);
   IREE_ASSERT_ARGUMENT(executable_params);
   IREE_ASSERT_ARGUMENT(out_executable);
   if (topology.count < 1) {
@@ -160,16 +154,15 @@ iree_status_t iree_hal_hsa_native_executable_create(
   if (iree_string_view_equal(executable_format, IREE_SV("FPIH"))) {
     // FPIH (Fat Binary / native HSACO) format.
     return iree_hal_hsa_native_executable_create_fpih(
-        symbols, topology, executable_params, host_allocator, out_executable);
+        topology, executable_params, host_allocator, out_executable);
   }
 
   // HSACO (flatbuffer) format.
   return iree_hal_hsa_native_executable_create_flatbuffer(
-      symbols, topology, executable_params, host_allocator, out_executable);
+      topology, executable_params, host_allocator, out_executable);
 }
 
 static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
-    const iree_hal_hsa_dynamic_symbols_t* symbols,
     iree_hal_hsa_device_topology_t topology,
     const iree_hal_executable_params_t* executable_params,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable) {
@@ -231,7 +224,6 @@ static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
   iree_hal_resource_initialize(&iree_hal_hsa_native_executable_vtable,
                                &executable->resource);
   executable->host_allocator = host_allocator;
-  executable->symbols = symbols;
   executable->num_devices = topology.count;
 
   const iree_host_size_t per_device_data_size =
@@ -281,7 +273,6 @@ static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
       // Create code object reader.
       hsa_code_object_reader_t code_reader;
       status = IREE_HSA_CALL_TO_STATUS(
-          symbols,
           hsa_code_object_reader_create_from_memory(hsaco_image, hsaco_size,
                                                     &code_reader),
           "hsa_code_object_reader_create_from_memory");
@@ -290,34 +281,32 @@ static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
       // Create executable.
       hsa_executable_t hsa_executable;
       status = IREE_HSA_CALL_TO_STATUS(
-          symbols,
           hsa_executable_create_alt(HSA_PROFILE_FULL,
                                     HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT,
                                     NULL, &hsa_executable),
           "hsa_executable_create_alt");
       if (!iree_status_is_ok(status)) {
-        symbols->hsa_code_object_reader_destroy(code_reader);
+        hsa_code_object_reader_destroy(code_reader);
         break;
       }
 
       // Load code object.
       status = IREE_HSA_CALL_TO_STATUS(
-          symbols,
           hsa_executable_load_agent_code_object(hsa_executable, agent,
                                                 code_reader, NULL, NULL),
           "hsa_executable_load_agent_code_object");
-      symbols->hsa_code_object_reader_destroy(code_reader);
+      hsa_code_object_reader_destroy(code_reader);
       if (!iree_status_is_ok(status)) {
-        symbols->hsa_executable_destroy(hsa_executable);
+        hsa_executable_destroy(hsa_executable);
         break;
       }
 
       // Freeze executable.
       status = IREE_HSA_CALL_TO_STATUS(
-          symbols, hsa_executable_freeze(hsa_executable, NULL),
+          hsa_executable_freeze(hsa_executable, NULL),
           "hsa_executable_freeze");
       if (!iree_status_is_ok(status)) {
-        symbols->hsa_executable_destroy(hsa_executable);
+        hsa_executable_destroy(hsa_executable);
         break;
       }
 
@@ -338,7 +327,6 @@ static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
       // Look up kernel symbol.
       hsa_executable_symbol_t kernel_symbol;
       status = IREE_HSA_CALL_TO_STATUS(
-          symbols,
           hsa_executable_get_symbol_by_name(hsa_executable, kernel_name,
                                             &agent, &kernel_symbol),
           "hsa_executable_get_symbol_by_name");
@@ -351,7 +339,6 @@ static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
       // Get kernel object (entry point address).
       uint64_t kernel_object = 0;
       status = IREE_HSA_CALL_TO_STATUS(
-          symbols,
           hsa_executable_symbol_get_info(
               kernel_symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT,
               &kernel_object),
@@ -361,7 +348,6 @@ static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
       // Get kernarg segment size.
       uint32_t kernarg_segment_size = 0;
       status = IREE_HSA_CALL_TO_STATUS(
-          symbols,
           hsa_executable_symbol_get_info(
               kernel_symbol,
               HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE,
@@ -372,7 +358,6 @@ static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
       // Get group segment size.
       uint32_t group_segment_size = 0;
       status = IREE_HSA_CALL_TO_STATUS(
-          symbols,
           hsa_executable_symbol_get_info(
               kernel_symbol,
               HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE,
@@ -383,7 +368,6 @@ static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
       // Get private segment size.
       uint32_t private_segment_size = 0;
       status = IREE_HSA_CALL_TO_STATUS(
-          symbols,
           hsa_executable_symbol_get_info(
               kernel_symbol,
               HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE,
@@ -510,7 +494,6 @@ static iree_status_t iree_hal_hsa_extract_elf_from_bundle(
 }
 
 static iree_status_t iree_hal_hsa_native_executable_create_fpih(
-    const iree_hal_hsa_dynamic_symbols_t* symbols,
     iree_hal_hsa_device_topology_t topology,
     const iree_hal_executable_params_t* executable_params,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable) {
@@ -519,7 +502,6 @@ static iree_status_t iree_hal_hsa_native_executable_create_fpih(
   // Get device architecture name for target matching.
   char device_name[64] = {0};
   iree_status_t status = IREE_HSA_CALL_TO_STATUS(
-      symbols,
       hsa_agent_get_info(topology.devices[0].agent, HSA_AGENT_INFO_NAME,
                          device_name),
       "hsa_agent_get_info(HSA_AGENT_INFO_NAME)");
@@ -616,7 +598,6 @@ static iree_status_t iree_hal_hsa_native_executable_create_fpih(
                                &executable->resource);
   executable->host_allocator = host_allocator;
   executable->export_count = export_count;
-  executable->symbols = symbols;
   executable->num_devices = topology.count;
   const iree_host_size_t per_device_data_size =
       topology.count * sizeof(executable->per_device_data[0]);
@@ -666,7 +647,6 @@ static iree_status_t iree_hal_hsa_native_executable_create_fpih(
     // HSA requires raw ELF, not the offload bundle format.
     hsa_code_object_reader_t code_reader;
     status = IREE_HSA_CALL_TO_STATUS(
-        symbols,
         hsa_code_object_reader_create_from_memory(
             elf_data.data, elf_data.data_length, &code_reader),
         "hsa_code_object_reader_create_from_memory");
@@ -675,37 +655,35 @@ static iree_status_t iree_hal_hsa_native_executable_create_fpih(
     // Create HSA executable.
     hsa_executable_t hsa_exec;
     status = IREE_HSA_CALL_TO_STATUS(
-        symbols,
         hsa_executable_create_alt(HSA_PROFILE_FULL,
                                    HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT,
                                    NULL, &hsa_exec),
         "hsa_executable_create_alt");
     if (!iree_status_is_ok(status)) {
-      symbols->hsa_code_object_reader_destroy(code_reader);
+      hsa_code_object_reader_destroy(code_reader);
       break;
     }
 
     // Load code object into executable.
     status = IREE_HSA_CALL_TO_STATUS(
-        symbols,
         hsa_executable_load_agent_code_object(
             hsa_exec, topology.devices[device_idx].agent, code_reader, NULL,
             NULL),
         "hsa_executable_load_agent_code_object");
     // Destroy the code reader now that we're done with it.
-    symbols->hsa_code_object_reader_destroy(code_reader);
+    hsa_code_object_reader_destroy(code_reader);
     if (!iree_status_is_ok(status)) {
-      symbols->hsa_executable_destroy(hsa_exec);
+      hsa_executable_destroy(hsa_exec);
       break;
     }
 
     // Freeze the executable.
-    status = IREE_HSA_CALL_TO_STATUS(symbols,
+    status = IREE_HSA_CALL_TO_STATUS(
                                       hsa_executable_freeze(hsa_exec, NULL),
                                       "hsa_executable_freeze");
     if (!iree_status_is_ok(status)) {
-      symbols->hsa_executable_destroy(hsa_exec);
-      symbols->hsa_code_object_reader_destroy(code_reader);
+      hsa_executable_destroy(hsa_exec);
+      hsa_code_object_reader_destroy(code_reader);
       break;
     }
 
@@ -744,7 +722,6 @@ static iree_status_t iree_hal_hsa_native_executable_create_fpih(
       // Get kernel symbol from executable.
       hsa_executable_symbol_t symbol;
       status = IREE_HSA_CALL_TO_STATUS(
-          symbols,
           hsa_executable_get_symbol_by_name(
               hsa_exec, kernel_symbol_name,
               &topology.devices[device_idx].agent, &symbol),
@@ -758,7 +735,6 @@ static iree_status_t iree_hal_hsa_native_executable_create_fpih(
       // Get kernel object (GPU address of kernel descriptor).
       uint64_t kernel_object = 0;
       status = IREE_HSA_CALL_TO_STATUS(
-          symbols,
           hsa_executable_symbol_get_info(
               symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &kernel_object),
           "hsa_executable_symbol_get_info(KERNEL_OBJECT)");
@@ -804,7 +780,6 @@ static iree_status_t iree_hal_hsa_native_executable_create_fpih(
       // Get kernarg segment size.
       uint32_t kernarg_segment_size = 0;
       status = IREE_HSA_CALL_TO_STATUS(
-          symbols,
           hsa_executable_symbol_get_info(
               symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE,
               &kernarg_segment_size),
@@ -823,7 +798,6 @@ static iree_status_t iree_hal_hsa_native_executable_create_fpih(
       // Get group segment size.
       uint32_t group_segment_size = 0;
       status = IREE_HSA_CALL_TO_STATUS(
-          symbols,
           hsa_executable_symbol_get_info(
               symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE,
               &group_segment_size),
@@ -834,7 +808,6 @@ static iree_status_t iree_hal_hsa_native_executable_create_fpih(
       // Get private segment size.
       uint32_t private_segment_size = 0;
       status = IREE_HSA_CALL_TO_STATUS(
-          symbols,
           hsa_executable_symbol_get_info(
               symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE,
               &private_segment_size),
@@ -870,7 +843,7 @@ static void iree_hal_hsa_native_executable_destroy(
         executable->per_device_data[i];
     for (iree_host_size_t j = 0; j < data->executable_count; ++j) {
       if (data->executables[j].handle) {
-        IREE_HSA_IGNORE_ERROR(executable->symbols,
+        IREE_HSA_IGNORE_ERROR(
                               hsa_executable_destroy(data->executables[j]));
       }
     }
@@ -1008,7 +981,6 @@ static iree_status_t iree_hal_hsa_native_executable_lookup_global(
 
   const iree_hal_hsa_native_executable_per_device_data_t* data =
       executable->per_device_data[device_ordinal];
-  const iree_hal_hsa_dynamic_symbols_t* symbols = executable->symbols;
 
   // Create a null-terminated copy of the name.
   char name_cstr[1024];
@@ -1026,7 +998,7 @@ static iree_status_t iree_hal_hsa_native_executable_lookup_global(
     hsa_executable_symbol_t symbol;
 
     // Try to get the symbol by name using the device agent.
-    hsa_status_t hsa_status = symbols->hsa_executable_get_symbol_by_name(
+    hsa_status_t hsa_status = hsa_executable_get_symbol_by_name(
         hsa_exec, name_cstr, &data->agent, &symbol);
     if (hsa_status != HSA_STATUS_SUCCESS) {
       // Symbol not found in this executable, try the next one.
@@ -1035,7 +1007,7 @@ static iree_status_t iree_hal_hsa_native_executable_lookup_global(
 
     // Get the variable address.
     uint64_t address = 0;
-    hsa_status = symbols->hsa_executable_symbol_get_info(
+    hsa_status = hsa_executable_symbol_get_info(
         symbol, HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_ADDRESS, &address);
     if (hsa_status != HSA_STATUS_SUCCESS) {
       return iree_make_status(IREE_STATUS_INTERNAL,
@@ -1045,7 +1017,7 @@ static iree_status_t iree_hal_hsa_native_executable_lookup_global(
 
     // Get the variable size.
     uint32_t size = 0;
-    hsa_status = symbols->hsa_executable_symbol_get_info(
+    hsa_status = hsa_executable_symbol_get_info(
         symbol, HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_SIZE, &size);
     if (hsa_status != HSA_STATUS_SUCCESS) {
       return iree_make_status(IREE_STATUS_INTERNAL,

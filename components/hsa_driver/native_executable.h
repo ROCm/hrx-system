@@ -12,7 +12,6 @@
 #include "iree/base/api.h"
 #include "iree/base/tracing.h"
 #include "iree/hal/api.h"
-#include "hsa_driver/dynamic_symbols.h"
 #include "hsa_driver/fat_binary.h"
 #include "hsa_driver/hsa_headers.h"
 #include "hsa_driver/per_device_information.h"
@@ -63,7 +62,6 @@ iree_status_t iree_hal_hsa_native_executable_infer_format(
 
 // Creates an IREE executable from an HSACO (HSA Code Object).
 iree_status_t iree_hal_hsa_native_executable_create(
-    const iree_hal_hsa_dynamic_symbols_t* symbols,
     iree_hal_hsa_device_topology_t topology,
     const iree_hal_executable_params_t* executable_params,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable);

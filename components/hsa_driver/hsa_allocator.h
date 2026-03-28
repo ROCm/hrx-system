@@ -16,7 +16,6 @@ typedef struct iree_hal_hsa_device_topology_t iree_hal_hsa_device_topology_t;
 // Creates an HSA memory allocator.
 iree_status_t iree_hal_hsa_allocator_create(
     iree_hal_device_t* parent_device,
-    const iree_hal_hsa_dynamic_symbols_t* hsa_symbols,
     iree_hal_hsa_device_topology_t topology,
     iree_allocator_t host_allocator, iree_hal_allocator_t** out_allocator);
 

@@ -15,7 +15,6 @@
 
 typedef struct iree_hal_hsa_nop_executable_cache_t {
   iree_hal_resource_t resource;
-  const iree_hal_hsa_dynamic_symbols_t* symbols;
   iree_hal_hsa_device_topology_t topology;
   iree_allocator_t host_allocator;
   iree_string_view_t identifier;
@@ -32,11 +31,9 @@ iree_hal_hsa_nop_executable_cache_cast(iree_hal_executable_cache_t* base_value) 
 
 iree_status_t iree_hal_hsa_nop_executable_cache_create(
     iree_string_view_t identifier,
-    const iree_hal_hsa_dynamic_symbols_t* symbols,
     iree_hal_hsa_device_topology_t topology,
     iree_allocator_t host_allocator,
     iree_hal_executable_cache_t** out_executable_cache) {
-  IREE_ASSERT_ARGUMENT(symbols);
   IREE_ASSERT_ARGUMENT(out_executable_cache);
   *out_executable_cache = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -50,7 +47,6 @@ iree_status_t iree_hal_hsa_nop_executable_cache_create(
 
   iree_hal_resource_initialize(&iree_hal_hsa_nop_executable_cache_vtable,
                                &executable_cache->resource);
-  executable_cache->symbols = symbols;
   executable_cache->topology = topology;
   executable_cache->host_allocator = host_allocator;
   iree_string_view_append_to_buffer(
@@ -103,7 +99,7 @@ static iree_status_t iree_hal_hsa_nop_executable_cache_prepare_executable(
   iree_hal_hsa_nop_executable_cache_t* executable_cache =
       iree_hal_hsa_nop_executable_cache_cast(base_executable_cache);
   return iree_hal_hsa_native_executable_create(
-      executable_cache->symbols, executable_cache->topology, executable_params,
+      executable_cache->topology, executable_params,
       executable_cache->host_allocator, out_executable);
 }
 

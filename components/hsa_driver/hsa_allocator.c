@@ -11,7 +11,6 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/math.h"
 #include "iree/base/tracing.h"
-#include "hsa_driver/dynamic_symbols.h"
 #include "hsa_driver/hsa_buffer.h"
 #include "hsa_driver/per_device_information.h"
 #include "hsa_driver/status_util.h"
@@ -30,7 +29,6 @@ typedef struct iree_hal_hsa_allocator_t {
 
   iree_hal_hsa_device_topology_t topology;
 
-  const iree_hal_hsa_dynamic_symbols_t* symbols;
 
   iree_allocator_t host_allocator;
 
@@ -47,11 +45,9 @@ static iree_hal_hsa_allocator_t* iree_hal_hsa_allocator_cast(
 
 iree_status_t iree_hal_hsa_allocator_create(
     iree_hal_device_t* parent_device,
-    const iree_hal_hsa_dynamic_symbols_t* hsa_symbols,
     iree_hal_hsa_device_topology_t topology,
     iree_allocator_t host_allocator, iree_hal_allocator_t** out_allocator) {
   IREE_ASSERT_ARGUMENT(parent_device);
-  IREE_ASSERT_ARGUMENT(hsa_symbols);
   IREE_ASSERT_ARGUMENT(out_allocator);
   IREE_TRACE_ZONE_BEGIN(z0);
   *out_allocator = NULL;
@@ -70,7 +66,6 @@ iree_status_t iree_hal_hsa_allocator_create(
   iree_hal_resource_initialize(&iree_hal_hsa_allocator_vtable,
                                &allocator->resource);
   allocator->parent_device = parent_device;
-  allocator->symbols = hsa_symbols;
   allocator->host_allocator = host_allocator;
   allocator->topology = topology;
 
@@ -220,23 +215,22 @@ iree_hal_hsa_allocator_query_buffer_compatibility(
 }
 
 static void iree_hal_hsa_buffer_free(
-    const iree_hal_hsa_dynamic_symbols_t* hsa_symbols,
     iree_hal_hsa_buffer_type_t buffer_type, void* device_ptr, void* host_ptr) {
   IREE_TRACE_ZONE_BEGIN(z0);
   switch (buffer_type) {
     case IREE_HAL_HSA_BUFFER_TYPE_DEVICE: {
       IREE_TRACE_ZONE_APPEND_TEXT(z0, "hsa_amd_memory_pool_free");
-      IREE_HSA_IGNORE_ERROR(hsa_symbols, hsa_amd_memory_pool_free(device_ptr));
+      IREE_HSA_IGNORE_ERROR(hsa_amd_memory_pool_free(device_ptr));
       break;
     }
     case IREE_HAL_HSA_BUFFER_TYPE_HOST: {
       IREE_TRACE_ZONE_APPEND_TEXT(z0, "hsa_amd_memory_pool_free (host)");
-      IREE_HSA_IGNORE_ERROR(hsa_symbols, hsa_amd_memory_pool_free(host_ptr));
+      IREE_HSA_IGNORE_ERROR(hsa_amd_memory_pool_free(host_ptr));
       break;
     }
     case IREE_HAL_HSA_BUFFER_TYPE_HOST_REGISTERED: {
       IREE_TRACE_ZONE_APPEND_TEXT(z0, "hsa_amd_memory_unlock");
-      IREE_HSA_IGNORE_ERROR(hsa_symbols, hsa_amd_memory_unlock(host_ptr));
+      IREE_HSA_IGNORE_ERROR(hsa_amd_memory_unlock(host_ptr));
       break;
     }
     case IREE_HAL_HSA_BUFFER_TYPE_EXTERNAL: {
@@ -293,14 +287,13 @@ static iree_status_t iree_hal_hsa_allocator_allocate_buffer(
     buffer_type = IREE_HAL_HSA_BUFFER_TYPE_DEVICE;
     if (device_info->device_local_memory_pool_valid) {
       status = IREE_HSA_CALL_TO_STATUS(
-          allocator->symbols,
           hsa_amd_memory_pool_allocate(device_info->device_local_memory_pool,
                                        allocation_size, 0, &device_ptr),
           "hsa_amd_memory_pool_allocate");
       // Allow access from all agents.
       if (iree_status_is_ok(status) && device_info->cpu_agent.handle) {
         hsa_agent_t agents[2] = {device_info->agent, device_info->cpu_agent};
-        IREE_HSA_IGNORE_ERROR(allocator->symbols,
+        IREE_HSA_IGNORE_ERROR(
                               hsa_amd_agents_allow_access(2, agents, NULL,
                                                           device_ptr));
       }
@@ -313,7 +306,6 @@ static iree_status_t iree_hal_hsa_allocator_allocate_buffer(
     buffer_type = IREE_HAL_HSA_BUFFER_TYPE_HOST;
     if (device_info->host_visible_memory_pool_valid) {
       status = IREE_HSA_CALL_TO_STATUS(
-          allocator->symbols,
           hsa_amd_memory_pool_allocate(device_info->host_visible_memory_pool,
                                        allocation_size, 0, &host_ptr),
           "hsa_amd_memory_pool_allocate (host)");
@@ -321,7 +313,7 @@ static iree_status_t iree_hal_hsa_allocator_allocate_buffer(
       // Allow access from GPU.
       if (iree_status_is_ok(status)) {
         hsa_agent_t agents[1] = {device_info->agent};
-        IREE_HSA_IGNORE_ERROR(allocator->symbols,
+        IREE_HSA_IGNORE_ERROR(
                               hsa_amd_agents_allow_access(1, agents, NULL,
                                                           host_ptr));
       }
@@ -360,7 +352,7 @@ static iree_status_t iree_hal_hsa_allocator_allocate_buffer(
     *out_buffer = buffer;
   } else {
     if (!buffer && (device_ptr || host_ptr)) {
-      iree_hal_hsa_buffer_free(allocator->symbols, buffer_type, device_ptr,
+      iree_hal_hsa_buffer_free(buffer_type, device_ptr,
                                host_ptr);
     } else {
       iree_hal_buffer_release(buffer);
@@ -380,7 +372,7 @@ static void iree_hal_hsa_buffer_release_callback(void* user_data,
                                                  iree_hal_buffer_t* buffer) {
   iree_hal_hsa_allocator_t* allocator = (iree_hal_hsa_allocator_t*)user_data;
 
-  iree_hal_hsa_buffer_free(allocator->symbols, iree_hal_hsa_buffer_type(buffer),
+  iree_hal_hsa_buffer_free(iree_hal_hsa_buffer_type(buffer),
                            iree_hal_hsa_buffer_device_pointer(buffer),
                            iree_hal_hsa_buffer_host_pointer(buffer));
 
@@ -434,7 +426,6 @@ static iree_status_t iree_hal_hsa_allocator_import_buffer(
       host_ptr = external_buffer->handle.host_allocation.ptr;
       // Lock host memory and get device pointer.
       status = IREE_HSA_CALL_TO_STATUS(
-          allocator->symbols,
           hsa_amd_memory_lock(host_ptr, external_buffer->size,
                               &device_info->agent, 1, &device_ptr),
           "hsa_amd_memory_lock");
@@ -471,7 +462,7 @@ static iree_status_t iree_hal_hsa_allocator_import_buffer(
     *out_buffer = buffer;
   } else {
     if (!buffer && (device_ptr || host_ptr)) {
-      iree_hal_hsa_buffer_free(allocator->symbols, buffer_type, device_ptr,
+      iree_hal_hsa_buffer_free(buffer_type, device_ptr,
                                host_ptr);
     } else {
       iree_hal_buffer_release(buffer);

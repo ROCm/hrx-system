@@ -9,7 +9,6 @@
 
 #include "iree/base/internal/arena.h"
 #include "iree/hal/api.h"
-#include "hsa_driver/dynamic_symbols.h"
 #include "hsa_driver/hsa_headers.h"
 #include "iree/hal/utils/stream_tracing.h"
 
@@ -19,7 +18,6 @@ typedef struct iree_hal_hsa_per_device_info_t iree_hal_hsa_per_device_info_t;
 // queue.
 iree_status_t iree_hal_hsa_stream_command_buffer_create(
     iree_hal_allocator_t* device_allocator,
-    const iree_hal_hsa_dynamic_symbols_t* hsa_symbols,
     iree_hal_stream_tracing_context_t* tracing_context,
     iree_hal_command_buffer_mode_t mode,
     iree_hal_command_category_t command_categories,

@@ -25,7 +25,6 @@ typedef struct iree_hal_hsa_stream_command_buffer_t {
   iree_hal_command_buffer_t base;
   iree_allocator_t host_allocator;
 
-  const iree_hal_hsa_dynamic_symbols_t* hsa_symbols;
 
   // Per-device information for the target device.
   iree_hal_hsa_per_device_info_t* device_info;
@@ -54,7 +53,6 @@ iree_hal_hsa_stream_command_buffer_cast(iree_hal_command_buffer_t* base_value) {
 
 iree_status_t iree_hal_hsa_stream_command_buffer_create(
     iree_hal_allocator_t* device_allocator,
-    const iree_hal_hsa_dynamic_symbols_t* hsa_symbols,
     iree_hal_stream_tracing_context_t* tracing_context,
     iree_hal_command_buffer_mode_t mode,
     iree_hal_command_category_t command_categories,
@@ -62,7 +60,6 @@ iree_status_t iree_hal_hsa_stream_command_buffer_create(
     iree_hal_hsa_per_device_info_t* device_info,
     iree_arena_block_pool_t* block_pool, iree_allocator_t host_allocator,
     iree_hal_command_buffer_t** out_command_buffer) {
-  IREE_ASSERT_ARGUMENT(hsa_symbols);
   IREE_ASSERT_ARGUMENT(device_info);
   IREE_ASSERT_ARGUMENT(out_command_buffer);
   *out_command_buffer = NULL;
@@ -89,7 +86,6 @@ iree_status_t iree_hal_hsa_stream_command_buffer_create(
       binding_capacity, (uint8_t*)command_buffer + sizeof(*command_buffer),
       &iree_hal_hsa_stream_command_buffer_vtable, &command_buffer->base);
   command_buffer->host_allocator = host_allocator;
-  command_buffer->hsa_symbols = hsa_symbols;
   command_buffer->device_info = device_info;
   command_buffer->device_allocator = device_allocator;
   command_buffer->tracing_context = tracing_context;
@@ -250,7 +246,6 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_fill_buffer(
     uint32_t pattern32 = *(const uint32_t*)pattern;
     size_t count = target_ref.length / sizeof(uint32_t);
     return IREE_HSA_CALL_TO_STATUS(
-        command_buffer->hsa_symbols,
         hsa_amd_memory_fill(target_ptr, pattern32, count),
         "hsa_amd_memory_fill");
   }
@@ -328,10 +323,9 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_copy_buffer(
   
   hsa_signal_t completion_signal =
       command_buffer->device_info->completion_signal;
-  command_buffer->hsa_symbols->hsa_signal_store_screlease(completion_signal, 1);
+  hsa_signal_store_screlease(completion_signal, 1);
 
   iree_status_t status = IREE_HSA_CALL_TO_STATUS(
-      command_buffer->hsa_symbols,
       hsa_amd_memory_async_copy(target_ptr, command_buffer->device_info->agent,
                                 source_ptr, command_buffer->device_info->agent,
                                 source_ref.length, 0, NULL, completion_signal),
@@ -339,7 +333,7 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_copy_buffer(
 
   if (iree_status_is_ok(status)) {
     // Wait for copy to complete (synchronous for simplicity).
-    command_buffer->hsa_symbols->hsa_signal_wait_scacquire(
+    hsa_signal_wait_scacquire(
         completion_signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX,
         HSA_WAIT_STATE_BLOCKED);
   }
@@ -517,7 +511,6 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
   if (kernarg_size > 0 &&
       command_buffer->device_info->kernarg_memory_pool_valid) {
     iree_status_t status = IREE_HSA_CALL_TO_STATUS(
-        command_buffer->hsa_symbols,
         hsa_amd_memory_pool_allocate(
             command_buffer->device_info->kernarg_memory_pool,
             kernarg_size, 0, &kernarg_address),
@@ -932,11 +925,11 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
   {
     // Reserve a slot for the barrier packet.
     uint64_t barrier_index =
-        command_buffer->hsa_symbols->hsa_queue_add_write_index_relaxed(queue, 1);
+        hsa_queue_add_write_index_relaxed(queue, 1);
     
     // Wait for queue space.
     while (barrier_index -
-               command_buffer->hsa_symbols->hsa_queue_load_read_index_relaxed(
+               hsa_queue_load_read_index_relaxed(
                    queue) >=
            queue->size) {
       // Busy wait for space.
@@ -962,18 +955,18 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
     __atomic_store_n(&barrier->header, barrier_header, __ATOMIC_RELEASE);
     
     // Ring doorbell for the barrier packet.
-    command_buffer->hsa_symbols->hsa_signal_store_screlease(
+    hsa_signal_store_screlease(
         queue->doorbell_signal, barrier_index);
   }
 #endif
 
   // Get write index for the queue.
   uint64_t write_index =
-      command_buffer->hsa_symbols->hsa_queue_add_write_index_relaxed(queue, 1);
+      hsa_queue_add_write_index_relaxed(queue, 1);
 
   // Wait for queue space.
   while (write_index -
-             command_buffer->hsa_symbols->hsa_queue_load_read_index_relaxed(
+             hsa_queue_load_read_index_relaxed(
                  queue) >=
          queue->size) {
     // Busy wait for space.
@@ -1022,7 +1015,7 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
   
   hsa_signal_t completion_signal =
       command_buffer->device_info->completion_signal;
-  command_buffer->hsa_symbols->hsa_signal_store_screlease(completion_signal, 1);
+  hsa_signal_store_screlease(completion_signal, 1);
   packet->completion_signal = completion_signal;
 
   // Ensure all writes to kernarg memory are visible before submitting the packet.
@@ -1045,13 +1038,13 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
   __atomic_store_n((uint32_t*)packet, header_setup, __ATOMIC_RELEASE);
 
   // Ring doorbell.
-  command_buffer->hsa_symbols->hsa_signal_store_screlease(queue->doorbell_signal,
+  hsa_signal_store_screlease(queue->doorbell_signal,
                                                           write_index);
 
   // Wait for completion (synchronous for simplicity).
   // Use a 10 second timeout to avoid hanging forever on kernel failures.
   hsa_signal_value_t wait_result =
-      command_buffer->hsa_symbols->hsa_signal_wait_scacquire(
+      hsa_signal_wait_scacquire(
           completion_signal, HSA_SIGNAL_CONDITION_EQ, 0,
           10ULL * 1000 * 1000 * 1000,  // 10 seconds in nanoseconds
           HSA_WAIT_STATE_BLOCKED);
@@ -1086,7 +1079,7 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
 #endif
 #if !IREE_HSA_LEAK_KERNARG
   if (kernarg_address) {
-    IREE_HSA_IGNORE_ERROR(command_buffer->hsa_symbols,
+    IREE_HSA_IGNORE_ERROR(
                           hsa_amd_memory_pool_free(kernarg_address));
   }
 #else

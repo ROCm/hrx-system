@@ -15,7 +15,6 @@
 #include "iree/base/internal/math.h"
 #include "iree/base/threading/thread.h"
 #include "iree/base/tracing.h"
-#include "hsa_driver/dynamic_symbols.h"
 #include "hsa_driver/hsa_allocator.h"
 #include "hsa_driver/hsa_buffer.h"
 #include "hsa_driver/native_executable.h"
@@ -46,10 +45,8 @@ typedef struct iree_hal_hsa_device_t {
   // Block pool used for command buffers with a larger block size.
   iree_arena_block_pool_t block_pool;
 
-  // Optional driver that owns the HSA symbols.
   iree_hal_driver_t* driver;
 
-  const iree_hal_hsa_dynamic_symbols_t* hsa_symbols;
 
   // Parameters used to control device behavior.
   iree_hal_hsa_device_params_t params;
@@ -112,7 +109,6 @@ static iree_status_t iree_hal_hsa_device_check_params(
 
 // Callback for finding memory pools on an agent.
 typedef struct iree_hal_hsa_memory_pool_search_t {
-  iree_hal_hsa_dynamic_symbols_t* symbols;
   iree_hal_hsa_per_device_info_t* device_info;
   hsa_agent_t agent;
 } iree_hal_hsa_memory_pool_search_t;
@@ -124,7 +120,7 @@ static hsa_status_t iree_hal_hsa_find_memory_pools_callback(
 
   // Check if pool is valid for allocations.
   bool alloc_allowed = false;
-  hsa_status_t status = search->symbols->hsa_amd_memory_pool_get_info(
+  hsa_status_t status = hsa_amd_memory_pool_get_info(
       pool, HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED, &alloc_allowed);
   if (status != HSA_STATUS_SUCCESS || !alloc_allowed) {
     return HSA_STATUS_SUCCESS;  // Skip this pool.
@@ -132,7 +128,7 @@ static hsa_status_t iree_hal_hsa_find_memory_pools_callback(
 
   // Get pool segment type.
   hsa_amd_segment_t segment;
-  status = search->symbols->hsa_amd_memory_pool_get_info(
+  status = hsa_amd_memory_pool_get_info(
       pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &segment);
   if (status != HSA_STATUS_SUCCESS) {
     return HSA_STATUS_SUCCESS;  // Skip this pool.
@@ -141,7 +137,7 @@ static hsa_status_t iree_hal_hsa_find_memory_pools_callback(
   // Get global flags for global segment.
   if (segment == HSA_AMD_SEGMENT_GLOBAL) {
     uint32_t global_flags = 0;
-    status = search->symbols->hsa_amd_memory_pool_get_info(
+    status = hsa_amd_memory_pool_get_info(
         pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &global_flags);
     if (status != HSA_STATUS_SUCCESS) {
       return HSA_STATUS_SUCCESS;
@@ -186,12 +182,10 @@ static iree_status_t iree_hal_hsa_device_initialize_memory_pools(
     hsa_agent_t cpu_agent) {
   // Find memory pools on the GPU agent.
   iree_hal_hsa_memory_pool_search_t gpu_search = {
-      .symbols = (iree_hal_hsa_dynamic_symbols_t*)device->hsa_symbols,
       .device_info = &device->device_info,
       .agent = gpu_agent,
   };
   IREE_HSA_RETURN_IF_ERROR(
-      device->hsa_symbols,
       hsa_amd_agent_iterate_memory_pools(
           gpu_agent, iree_hal_hsa_find_memory_pools_callback, &gpu_search),
       "hsa_amd_agent_iterate_memory_pools (GPU)");
@@ -199,12 +193,10 @@ static iree_status_t iree_hal_hsa_device_initialize_memory_pools(
   // Find fine-grained memory pool on CPU agent if not found on GPU.
   if (!device->device_info.host_visible_memory_pool_valid) {
     iree_hal_hsa_memory_pool_search_t cpu_search = {
-        .symbols = (iree_hal_hsa_dynamic_symbols_t*)device->hsa_symbols,
         .device_info = &device->device_info,
         .agent = cpu_agent,
     };
     IREE_HSA_RETURN_IF_ERROR(
-        device->hsa_symbols,
         hsa_amd_agent_iterate_memory_pools(
             cpu_agent, iree_hal_hsa_find_memory_pools_callback, &cpu_search),
         "hsa_amd_agent_iterate_memory_pools (CPU)");
@@ -220,12 +212,10 @@ static iree_status_t iree_hal_hsa_device_initialize_memory_pools(
 
 iree_status_t iree_hal_hsa_device_create(
     iree_hal_driver_t* driver, iree_string_view_t identifier,
-    const iree_hal_hsa_device_params_t* params,
-    const iree_hal_hsa_dynamic_symbols_t* symbols, hsa_agent_t gpu_agent,
+    const iree_hal_hsa_device_params_t* params, hsa_agent_t gpu_agent,
     hsa_agent_t cpu_agent,
     const iree_hal_device_create_params_t* create_params,
     iree_allocator_t host_allocator, iree_hal_device_t** out_device) {
-  IREE_ASSERT_ARGUMENT(symbols);
   IREE_ASSERT_ARGUMENT(params);
   IREE_ASSERT_ARGUMENT(out_device);
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -248,7 +238,6 @@ iree_status_t iree_hal_hsa_device_create(
                                    &device->block_pool);
   device->driver = driver;
   iree_hal_driver_retain(device->driver);
-  device->hsa_symbols = symbols;
   memcpy(&device->params, params, sizeof(*params));
   device->host_allocator = host_allocator;
 
@@ -287,7 +276,6 @@ iree_status_t iree_hal_hsa_device_create(
   if (iree_status_is_ok(status)) {
     uint32_t queue_size = 0;
     status = IREE_HSA_CALL_TO_STATUS(
-        symbols,
         hsa_agent_get_info(gpu_agent, HSA_AGENT_INFO_QUEUE_MAX_SIZE,
                            &queue_size),
         "hsa_agent_get_info(QUEUE_MAX_SIZE)");
@@ -295,7 +283,6 @@ iree_status_t iree_hal_hsa_device_create(
       // Use a reasonable default queue size.
       if (queue_size > 4096) queue_size = 4096;
       status = IREE_HSA_CALL_TO_STATUS(
-          symbols,
           hsa_queue_create(gpu_agent, queue_size, HSA_QUEUE_TYPE_SINGLE, NULL,
                            NULL, UINT32_MAX, UINT32_MAX,
                            &device->device_info.queue),
@@ -306,7 +293,6 @@ iree_status_t iree_hal_hsa_device_create(
   // Create completion signal.
   if (iree_status_is_ok(status)) {
     status = IREE_HSA_CALL_TO_STATUS(
-        symbols,
         hsa_signal_create(1, 0, NULL, &device->device_info.completion_signal),
         "hsa_signal_create");
     if (iree_status_is_ok(status)) {
@@ -320,7 +306,7 @@ iree_status_t iree_hal_hsa_device_create(
         .count = 1,
         .devices = &device->device_info,
     };
-    status = iree_hal_hsa_allocator_create((iree_hal_device_t*)device, symbols,
+    status = iree_hal_hsa_allocator_create((iree_hal_device_t*)device,
                                            topology, host_allocator,
                                            &device->device_allocator);
   }
@@ -335,11 +321,6 @@ iree_status_t iree_hal_hsa_device_create(
   return status;
 }
 
-const iree_hal_hsa_dynamic_symbols_t* iree_hal_hsa_device_dynamic_symbols(
-    iree_hal_device_t* base_device) {
-  iree_hal_hsa_device_t* device = iree_hal_hsa_device_cast(base_device);
-  return device->hsa_symbols;
-}
 
 static void iree_hal_hsa_device_destroy(iree_hal_device_t* base_device) {
   iree_hal_hsa_device_t* device = iree_hal_hsa_device_cast(base_device);
@@ -354,7 +335,7 @@ static void iree_hal_hsa_device_destroy(iree_hal_device_t* base_device) {
   if (device->device_info.queue && device->device_info.completion_signal.handle) {
     // Wait for the completion signal to reach its expected value.
     // A short timeout helps avoid hanging if something went wrong.
-    device->hsa_symbols->hsa_signal_wait_scacquire(
+    hsa_signal_wait_scacquire(
         device->device_info.completion_signal,
         HSA_SIGNAL_CONDITION_EQ, 1,
         /*timeout_hint=*/1000000000ull,  // 1 second timeout
@@ -365,13 +346,12 @@ static void iree_hal_hsa_device_destroy(iree_hal_device_t* base_device) {
   if (device->device_info.completion_signal.handle) {
     iree_slim_mutex_deinitialize(&device->device_info.completion_signal_mutex);
     IREE_HSA_IGNORE_ERROR(
-        device->hsa_symbols,
         hsa_signal_destroy(device->device_info.completion_signal));
   }
 
   // Destroy queue.
   if (device->device_info.queue) {
-    IREE_HSA_IGNORE_ERROR(device->hsa_symbols,
+    IREE_HSA_IGNORE_ERROR(
                           hsa_queue_destroy(device->device_info.queue));
   }
 
@@ -454,7 +434,6 @@ static iree_status_t iree_hal_hsa_device_query_i64(
       }
       size_t pool_size = 0;
       IREE_RETURN_IF_ERROR(IREE_HSA_CALL_TO_STATUS(
-          device->hsa_symbols,
           hsa_amd_memory_pool_get_info(
               device->device_info.device_local_memory_pool,
               HSA_AMD_MEMORY_POOL_INFO_SIZE, &pool_size),
@@ -467,7 +446,6 @@ static iree_status_t iree_hal_hsa_device_query_i64(
       // AMD GPUs typically use 64, RDNA may use 32.
       uint32_t wavefront_size = 0;
       IREE_RETURN_IF_ERROR(IREE_HSA_CALL_TO_STATUS(
-          device->hsa_symbols,
           hsa_agent_get_info(device->device_info.agent,
                              HSA_AGENT_INFO_WAVEFRONT_SIZE,
                              &wavefront_size),
@@ -482,7 +460,6 @@ static iree_status_t iree_hal_hsa_device_query_i64(
       // Query compute unit count from the HSA agent.
       uint32_t compute_unit_count = 0;
       IREE_RETURN_IF_ERROR(IREE_HSA_CALL_TO_STATUS(
-          device->hsa_symbols,
           hsa_agent_get_info(
               device->device_info.agent,
               (hsa_agent_info_t)HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT,
@@ -515,7 +492,6 @@ static iree_status_t iree_hal_hsa_device_query_string(
       // Get the device name from HSA which is the architecture (e.g., "gfx942").
       char device_name[64] = {0};
       IREE_RETURN_IF_ERROR(IREE_HSA_CALL_TO_STATUS(
-          device->hsa_symbols,
           hsa_agent_get_info(device->device_info.agent, HSA_AGENT_INFO_NAME,
                              device_name),
           "hsa_agent_get_info(HSA_AGENT_INFO_NAME)"));
@@ -555,7 +531,7 @@ static iree_status_t iree_hal_hsa_device_create_command_buffer(
       device->params.allow_inline_execution) {
     // Use stream command buffer for inline execution.
     return iree_hal_hsa_stream_command_buffer_create(
-        device->device_allocator, device->hsa_symbols,
+        device->device_allocator,
         device->device_info.tracing_context, mode, command_categories,
         queue_affinity, binding_capacity, &device->device_info,
         &device->block_pool, device->host_allocator, out_command_buffer);
@@ -584,7 +560,7 @@ static iree_status_t iree_hal_hsa_device_create_executable_cache(
       .devices = &device->device_info,
   };
   return iree_hal_hsa_nop_executable_cache_create(
-      identifier, device->hsa_symbols, topology, device->host_allocator,
+      identifier, topology, device->host_allocator,
       out_executable_cache);
 }
 
@@ -674,7 +650,7 @@ static iree_status_t iree_hal_hsa_device_queue_execute_inline(
       // Create a stream command buffer and replay the deferred commands.
       iree_hal_command_buffer_t* stream_command_buffer = NULL;
       status = iree_hal_hsa_stream_command_buffer_create(
-          device->device_allocator, device->hsa_symbols,
+          device->device_allocator,
           device->device_info.tracing_context,
           IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
           iree_hal_command_buffer_allowed_categories(command_buffer),
@@ -931,7 +907,7 @@ static iree_status_t iree_hal_hsa_device_transfer_h2d_raw(
   // Use hsa_memory_copy for synchronous host-to-device transfer.
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0,
-      IREE_HSA_CALL_TO_STATUS(device->hsa_symbols,
+      IREE_HSA_CALL_TO_STATUS(
                                hsa_memory_copy((void*)target_device_ptr, source,
                                                data_length),
                                "hsa_memory_copy(H2D)"));
@@ -950,7 +926,6 @@ static iree_status_t iree_hal_hsa_device_transfer_d2h_raw(
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0,
       IREE_HSA_CALL_TO_STATUS(
-          device->hsa_symbols,
           hsa_memory_copy(target, (void*)source_device_ptr, data_length),
           "hsa_memory_copy(D2H)"));
 
