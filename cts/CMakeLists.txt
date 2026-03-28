@@ -52,6 +52,7 @@ endfunction()
 # Test categories
 #===------------------------------------------------------------------------===#
 
+add_pyre_cts_test(host_allocator SOURCES tests/host_allocator/host_allocator_test.cpp)
 add_pyre_cts_test(lifecycle SOURCES tests/lifecycle/lifecycle_test.cpp)
 add_pyre_cts_test(device SOURCES tests/device/device_test.cpp)
 add_pyre_cts_test(allocator SOURCES tests/allocator/allocator_test.cpp)

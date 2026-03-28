@@ -54,6 +54,18 @@ void PyreLoader::load(const std::string& path) {
 #define LOAD(name) name = (decltype(name))loadSymbol("pyre_" #name)
 #define LOAD_FULL(field, sym) field = (decltype(field))loadSymbol(#sym)
 
+  host_allocator_system_ptr = (pyre_host_allocator_t*)loadSymbol(
+      "pyre_host_allocator_system_value");
+
+  LOAD(host_allocator_malloc);
+  LOAD(host_allocator_malloc_uninitialized);
+  LOAD(host_allocator_realloc);
+  LOAD(host_allocator_clone);
+  LOAD(host_allocator_free);
+  LOAD(host_allocator_malloc_aligned);
+  LOAD(host_allocator_realloc_aligned);
+  LOAD(host_allocator_free_aligned);
+
   LOAD_FULL(runtime_version, pyre_runtime_version);
   LOAD_FULL(make_status, pyre_make_status);
   LOAD_FULL(status_code, pyre_status_code);

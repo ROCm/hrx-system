@@ -3,7 +3,6 @@
 
 #include "pyre_test_fixture.hpp"
 #include <catch2/catch_test_macros.hpp>
-#include <cstdlib>
 #include <cstring>
 
 TEST_CASE_METHOD(PyreTestFixture, "device_allocator returns non-null",
@@ -64,8 +63,9 @@ TEST_CASE_METHOD(PyreTestFixture, "allocator_import_buffer from host ptr",
   pyre_allocator_t alloc = pyre().device_allocator(device_);
 
   // Heap allocator requires 64-byte alignment.
+  pyre_host_allocator_t ha = pyre().host_allocator_system();
   void* host_raw = nullptr;
-  REQUIRE(posix_memalign(&host_raw, 64, 128) == 0);
+  REQUIRE_OK(pyre().host_allocator_malloc_aligned(ha, 128, 64, 0, &host_raw));
   uint8_t* host_data = (uint8_t*)host_raw;
   memset(host_data, 0xAA, 128);
 
@@ -83,7 +83,7 @@ TEST_CASE_METHOD(PyreTestFixture, "allocator_import_buffer from host ptr",
   REQUIRE(size == 128);
 
   REQUIRE_OK(pyre().buffer_release(buf));
-  free(host_raw);
+  pyre().host_allocator_free_aligned(ha, host_raw);
 }
 
 TEST_CASE_METHOD(PyreTestFixture, "allocator retain/release",

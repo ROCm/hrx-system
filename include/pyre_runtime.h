@@ -25,7 +25,7 @@ extern "C" {
 #endif
 
 //===----------------------------------------------------------------------===//
-// Host allocator
+// Host allocator (type + system getter only — functions after Status)
 //
 // Two-word value type, layout-compatible with iree_allocator_t.
 // Used for host-side memory allocation (not device memory).
@@ -104,6 +104,46 @@ PYRE_API pyre_status_t pyre_status_to_string(pyre_status_t status,
 PYRE_API void pyre_status_free_message(char* message);
 
 PYRE_API void pyre_status_ignore(pyre_status_t status);
+
+//===----------------------------------------------------------------------===//
+// Host allocator functions
+//===----------------------------------------------------------------------===//
+
+// Allocates zeroed memory.
+PYRE_API pyre_status_t pyre_host_allocator_malloc(
+    pyre_host_allocator_t allocator, size_t byte_length, void** out_ptr);
+
+// Allocates uninitialized memory. Only use when immediately overwriting.
+PYRE_API pyre_status_t pyre_host_allocator_malloc_uninitialized(
+    pyre_host_allocator_t allocator, size_t byte_length, void** out_ptr);
+
+// Reallocates to |byte_length|. Extended bytes are undefined.
+PYRE_API pyre_status_t pyre_host_allocator_realloc(
+    pyre_host_allocator_t allocator, size_t byte_length, void** inout_ptr);
+
+// Duplicates a byte block.
+PYRE_API pyre_status_t pyre_host_allocator_clone(
+    pyre_host_allocator_t allocator, const void* src, size_t byte_length,
+    void** out_ptr);
+
+// Frees memory. NULL is a no-op.
+PYRE_API void pyre_host_allocator_free(pyre_host_allocator_t allocator,
+                                       void* ptr);
+
+// Allocates zeroed, aligned memory. The byte at |offset| within the
+// allocation will be aligned to at least |min_alignment|.
+PYRE_API pyre_status_t pyre_host_allocator_malloc_aligned(
+    pyre_host_allocator_t allocator, size_t byte_length, size_t min_alignment,
+    size_t offset, void** out_ptr);
+
+// Reallocates aligned memory.
+PYRE_API pyre_status_t pyre_host_allocator_realloc_aligned(
+    pyre_host_allocator_t allocator, size_t byte_length, size_t min_alignment,
+    size_t offset, void** inout_ptr);
+
+// Frees memory from pyre_host_allocator_malloc_aligned. NULL is a no-op.
+PYRE_API void pyre_host_allocator_free_aligned(pyre_host_allocator_t allocator,
+                                               void* ptr);
 
 //===----------------------------------------------------------------------===//
 // Opaque handle types

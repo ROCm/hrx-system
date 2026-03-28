@@ -22,6 +22,21 @@ class PyreLoader {
   static PyreLoader& instance();
   static void setLibraryPath(const std::string& path);
 
+  // Host allocator. system_value is a data symbol loaded via dlsym.
+  pyre_host_allocator_t* host_allocator_system_ptr;
+  pyre_host_allocator_t host_allocator_system() {
+    return *host_allocator_system_ptr;
+  }
+
+  decltype(&pyre_host_allocator_malloc) host_allocator_malloc;
+  decltype(&pyre_host_allocator_malloc_uninitialized) host_allocator_malloc_uninitialized;
+  decltype(&pyre_host_allocator_realloc) host_allocator_realloc;
+  decltype(&pyre_host_allocator_clone) host_allocator_clone;
+  decltype(&pyre_host_allocator_free) host_allocator_free;
+  decltype(&pyre_host_allocator_malloc_aligned) host_allocator_malloc_aligned;
+  decltype(&pyre_host_allocator_realloc_aligned) host_allocator_realloc_aligned;
+  decltype(&pyre_host_allocator_free_aligned) host_allocator_free_aligned;
+
   // Runtime version.
   decltype(&pyre_runtime_version) runtime_version;
 
