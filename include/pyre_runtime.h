@@ -441,6 +441,50 @@ PYRE_API pyre_status_t pyre_queue_barrier(
     const pyre_semaphore_list_t* wait_semaphores,
     const pyre_semaphore_list_t* signal_semaphores);
 
+// TODO(pyre): Stubs — declared for streaming rebase, not yet implemented.
+
+// Dispatch config for kernel launch.
+typedef struct pyre_dispatch_config_t {
+  uint32_t workgroup_count[3];
+  uint32_t workgroup_size[3];
+  uint32_t subgroup_size;
+} pyre_dispatch_config_t;
+
+// Buffer binding reference for dispatch.
+typedef struct pyre_buffer_ref_t {
+  pyre_buffer_t buffer;
+  size_t offset;
+  size_t length;
+} pyre_buffer_ref_t;
+
+PYRE_API pyre_status_t pyre_queue_dispatch(
+    pyre_device_t device, pyre_queue_affinity_t affinity,
+    const pyre_semaphore_list_t* wait_semaphores,
+    const pyre_semaphore_list_t* signal_semaphores,
+    pyre_executable_t executable, uint32_t export_ordinal,
+    const pyre_dispatch_config_t* config,
+    const void* constants, size_t constants_size,
+    const pyre_buffer_ref_t* bindings, size_t binding_count,
+    uint32_t flags);
+
+PYRE_API pyre_status_t pyre_stream_dispatch(
+    pyre_stream_t stream, pyre_executable_t executable,
+    uint32_t export_ordinal, const pyre_dispatch_config_t* config,
+    const void* constants, size_t constants_size,
+    const pyre_buffer_ref_t* bindings, size_t binding_count,
+    uint32_t flags);
+
+// Host callback in queue execution order.
+typedef pyre_status_t (*pyre_host_call_fn_t)(void* user_data);
+
+PYRE_API pyre_status_t pyre_queue_host_call(
+    pyre_device_t device, pyre_queue_affinity_t affinity,
+    const pyre_semaphore_list_t* wait_semaphores,
+    const pyre_semaphore_list_t* signal_semaphores,
+    pyre_host_call_fn_t callback, void* user_data);
+
+PYRE_API pyre_status_t pyre_stream_execution_barrier(pyre_stream_t stream);
+
 //===----------------------------------------------------------------------===//
 // Virtual memory (allocator methods)
 //===----------------------------------------------------------------------===//

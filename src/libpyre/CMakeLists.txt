@@ -14,6 +14,7 @@ set(PYRE_SOURCES
     transfer.c
     host_allocator.c
     queue_ops.c
+    stubs.c
 )
 
 set(PYRE_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/include)
