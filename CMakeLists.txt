@@ -84,6 +84,9 @@ if(PYRE_ENABLE_TRACY)
   message(STATUS "pyre-runtime: Tracy tracing ENABLED")
 endif()
 
+# Enable zstd for decompressing compressed HIP fat binaries (rocBLAS/hipBLAS).
+set(IREE_HAL_DRIVER_ENABLE_ZSTD ON CACHE BOOL "" FORCE)
+
 # Force IREE to build static libs.
 set(_pyre_saved_bsl ${BUILD_SHARED_LIBS})
 set(BUILD_SHARED_LIBS OFF)
@@ -151,6 +154,8 @@ target_link_libraries(pyre_hsa_driver PUBLIC
     iree_schemas_executable_debug_info_c_fbs
     iree_schemas_hip_executable_def_c_fbs
 )
+target_compile_definitions(pyre_hsa_driver PRIVATE IREE_HAL_HIP_ENABLE_ZSTD=1)
+target_link_libraries(pyre_hsa_driver PUBLIC zstd)
 set_target_properties(pyre_hsa_driver PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # HSA driver registration module.
