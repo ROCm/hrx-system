@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "streaming/internal.h"
+#include "common/internal.h"
 #include "iree/base/internal/math.h"
 #include "iree/base/threading/call_once.h"
 #include "iree/base/threading/mutex.h"

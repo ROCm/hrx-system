@@ -4,8 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "streaming/internal.h"
-#include "streaming/util/buffer_table.h"
+#include "common/internal.h"
 
 #include <stdatomic.h>
 
@@ -101,8 +100,9 @@ static iree_status_t iree_hal_streaming_buffer_wrap(
 
   if (iree_status_is_ok(status)) {
     // Register buffer in context's mapping table.
-    status =
-        iree_hal_streaming_buffer_table_insert(context->buffer_table, wrapper);
+    status = PYRE_CALL(pyre_buffer_table_insert(
+        &context->buffer_table, wrapper->device_ptr, wrapper->host_ptr,
+        wrapper->size, NULL, wrapper));
   }
 
   if (iree_status_is_ok(status)) {
@@ -146,18 +146,11 @@ iree_status_t iree_hal_streaming_memory_lookup(
   IREE_ASSERT_ARGUMENT(context);
   IREE_ASSERT_ARGUMENT(out_ref);
   memset(out_ref, 0, sizeof(*out_ref));
-  IREE_RETURN_IF_ERROR(iree_hal_streaming_buffer_table_lookup(
-      context->buffer_table, device_ptr, &out_ref->buffer));
-  // TODO(benvanik): make the buffer table return a ref so we can hide this?
-  if (IREE_LIKELY(out_ref->buffer->device_ptr <= device_ptr &&
-                  device_ptr <
-                      out_ref->buffer->device_ptr + out_ref->buffer->size)) {
-    out_ref->offset = (iree_device_size_t)device_ptr -
-                      (iree_device_size_t)out_ref->buffer->device_ptr;
-  } else {
-    out_ref->offset = (iree_device_size_t)device_ptr -
-                      (iree_device_size_t)out_ref->buffer->host_ptr;
-  }
+  size_t offset = 0;
+  IREE_RETURN_IF_ERROR(PYRE_CALL(pyre_buffer_table_find(
+      &context->buffer_table, device_ptr, NULL, &offset,
+      (void**)&out_ref->buffer)));
+  out_ref->offset = (iree_device_size_t)offset;
   return iree_ok_status();
 }
 
@@ -168,18 +161,11 @@ iree_status_t iree_hal_streaming_memory_lookup_range(
   IREE_ASSERT_ARGUMENT(context);
   IREE_ASSERT_ARGUMENT(out_ref);
   memset(out_ref, 0, sizeof(*out_ref));
-  IREE_RETURN_IF_ERROR(iree_hal_streaming_buffer_table_lookup_range(
-      context->buffer_table, device_ptr, size, &out_ref->buffer));
-  // TODO(benvanik): make the buffer table return a ref so we can hide this?
-  if (IREE_LIKELY(out_ref->buffer->device_ptr <= device_ptr &&
-                  device_ptr <
-                      out_ref->buffer->device_ptr + out_ref->buffer->size)) {
-    out_ref->offset = (iree_device_size_t)device_ptr -
-                      (iree_device_size_t)out_ref->buffer->device_ptr;
-  } else {
-    out_ref->offset = (iree_device_size_t)device_ptr -
-                      (iree_device_size_t)out_ref->buffer->host_ptr;
-  }
+  size_t offset = 0;
+  IREE_RETURN_IF_ERROR(PYRE_CALL(pyre_buffer_table_find_range(
+      &context->buffer_table, device_ptr, (size_t)size, NULL, &offset,
+      (void**)&out_ref->buffer)));
+  out_ref->offset = (iree_device_size_t)offset;
   return iree_ok_status();
 }
 
@@ -285,14 +271,11 @@ iree_status_t iree_hal_streaming_memory_free_device(
   // Look up buffer from device pointer.
   iree_hal_streaming_buffer_t* wrapper = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_streaming_buffer_table_lookup(context->buffer_table, ptr,
-                                                 &wrapper));
+      z0, PYRE_CALL(pyre_buffer_table_find(&context->buffer_table, ptr, NULL,
+                                            NULL, (void**)&wrapper)));
 
   // Remove from mapping table.
-  if (wrapper->context && wrapper->context->buffer_table) {
-    iree_hal_streaming_buffer_table_remove(wrapper->context->buffer_table,
-                                           wrapper->device_ptr);
-  }
+  pyre_buffer_table_remove(&context->buffer_table, wrapper->device_ptr);
 
   // Update free memory tracking.
   if (wrapper->context && wrapper->context->device_entry) {
@@ -349,8 +332,9 @@ iree_status_t iree_hal_streaming_memory_allocate_host(
   wrapper->last_prefetch_location = -2;
 
   // Register in buffer table using host pointer as key.
-  status = iree_hal_streaming_buffer_table_insert(context->buffer_table,
-                                                  wrapper);
+  status = PYRE_CALL(pyre_buffer_table_insert(
+      &context->buffer_table, wrapper->device_ptr, wrapper->host_ptr,
+      wrapper->size, NULL, wrapper));
 
   if (iree_status_is_ok(status)) {
     *out_buffer = wrapper;
@@ -379,15 +363,12 @@ iree_status_t iree_hal_streaming_memory_free_host(
   // we can look it up directly.
   iree_hal_streaming_buffer_t* wrapper = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_streaming_buffer_table_lookup(
-              context->buffer_table, (iree_hal_streaming_deviceptr_t)ptr,
-              &wrapper));
+      z0, PYRE_CALL(pyre_buffer_table_find(
+              &context->buffer_table, (uint64_t)(uintptr_t)ptr, NULL, NULL,
+              (void**)&wrapper)));
 
   // Remove from mapping table.
-  if (wrapper->context && wrapper->context->buffer_table) {
-    iree_hal_streaming_buffer_table_remove(wrapper->context->buffer_table,
-                                           wrapper->device_ptr);
-  }
+  pyre_buffer_table_remove(&context->buffer_table, wrapper->device_ptr);
 
   // For host allocations (no HAL buffer), free the host pointer directly.
   if (wrapper->buffer == NULL && wrapper->host_ptr != NULL) {
@@ -440,8 +421,9 @@ iree_status_t iree_hal_streaming_memory_register_host(
   wrapper->last_prefetch_location = -2;
 
   // Register in buffer table using host pointer as key.
-  iree_status_t status =
-      iree_hal_streaming_buffer_table_insert(context->buffer_table, wrapper);
+  iree_status_t status = PYRE_CALL(pyre_buffer_table_insert(
+      &context->buffer_table, wrapper->device_ptr, wrapper->host_ptr,
+      wrapper->size, NULL, wrapper));
 
   if (iree_status_is_ok(status)) {
     *out_buffer = wrapper;
@@ -467,15 +449,13 @@ iree_status_t iree_hal_streaming_memory_unregister_host(
   // Look up buffer from host pointer.
   iree_hal_streaming_buffer_t* wrapper = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_streaming_buffer_table_lookup(
-              context->buffer_table, (iree_hal_streaming_deviceptr_t)ptr,
-              &wrapper));
+      z0, PYRE_CALL(pyre_buffer_table_find(
+              &context->buffer_table, (uint64_t)(uintptr_t)ptr, NULL, NULL,
+              (void**)&wrapper)));
 
   // Remove from buffer table.
-  if (wrapper->context && wrapper->context->buffer_table) {
-    iree_hal_streaming_buffer_table_remove(wrapper->context->buffer_table,
-                                           (iree_hal_streaming_deviceptr_t)ptr);
-  }
+  pyre_buffer_table_remove(&context->buffer_table,
+                           (uint64_t)(uintptr_t)ptr);
 
   // Free wrapper (this will release the HAL buffer and context references).
   iree_hal_streaming_buffer_free(wrapper);
@@ -495,8 +475,8 @@ iree_status_t iree_hal_streaming_memory_address_range(
 
   // Look up buffer from pointer.
   iree_hal_streaming_buffer_t* wrapper = NULL;
-  iree_status_t status = iree_hal_streaming_buffer_table_lookup(
-      context->buffer_table, ptr, &wrapper);
+  iree_status_t status = PYRE_CALL(pyre_buffer_table_find(
+      &context->buffer_table, ptr, NULL, NULL, (void**)&wrapper));
   if (!iree_status_is_ok(status)) {
     return status;
   }
@@ -523,8 +503,9 @@ iree_status_t iree_hal_streaming_memory_host_flags(
 
   // Look up buffer from host pointer.
   iree_hal_streaming_buffer_t* wrapper = NULL;
-  iree_status_t status = iree_hal_streaming_buffer_table_lookup(
-      context->buffer_table, (iree_hal_streaming_deviceptr_t)ptr, &wrapper);
+  iree_status_t status = PYRE_CALL(pyre_buffer_table_find(
+      &context->buffer_table, (uint64_t)(uintptr_t)ptr, NULL, NULL,
+      (void**)&wrapper));
   if (iree_status_is_ok(status)) {
     *out_flags = wrapper->host_register_flags;
   }

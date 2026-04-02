@@ -164,3 +164,67 @@ pyre_status_t pyre_buffer_get_size(pyre_buffer_t buffer, size_t* size) {
   *size = buffer->size;
   return pyre_ok_status();
 }
+
+pyre_status_t pyre_host_memory_register(pyre_device_t device,
+                                       void* host_ptr, size_t size,
+                                       uint32_t flags) {
+  (void)flags;
+  if (!device || !host_ptr || size == 0) {
+    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT, "NULL argument");
+  }
+
+  pyre_buffer_s* buf = NULL;
+  iree_status_t alloc_s = iree_allocator_malloc(
+      iree_allocator_system(), sizeof(pyre_buffer_s), (void**)&buf);
+  if (!iree_status_is_ok(alloc_s)) {
+    return pyre_status_from_iree(alloc_s);
+  }
+  memset(buf, 0, sizeof(*buf));
+  iree_atomic_ref_count_init(&buf->ref_count);
+  buf->device = device;
+  buf->mem_type = PYRE_MEMORY_TYPE_HOST_LOCAL;
+  buf->size = size;
+  buf->mapped_ptr = host_ptr;
+  buf->hal_buffer = NULL;
+
+  uint64_t key = (uint64_t)(uintptr_t)host_ptr;
+  pyre_status_t status = pyre_buffer_table_insert(
+      &device->buffer_table, key, host_ptr, size, buf, NULL);
+  if (!pyre_status_is_ok(status)) {
+    iree_allocator_free(iree_allocator_system(), buf);
+    return status;
+  }
+  return pyre_ok_status();
+}
+
+pyre_status_t pyre_host_memory_unregister(pyre_device_t device,
+                                          void* host_ptr) {
+  if (!device || !host_ptr) {
+    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT, "NULL argument");
+  }
+
+  uint64_t key = (uint64_t)(uintptr_t)host_ptr;
+  pyre_buffer_t buf = NULL;
+  size_t offset = 0;
+  pyre_status_t status =
+      pyre_buffer_table_find(&device->buffer_table, key, &buf, &offset, NULL);
+  if (!pyre_status_is_ok(status)) return status;
+
+  pyre_buffer_table_remove(&device->buffer_table, key);
+  if (buf) {
+    iree_allocator_free(iree_allocator_system(), buf);
+  }
+  return pyre_ok_status();
+}
+
+pyre_status_t pyre_buffer_lookup(pyre_device_t device,
+                                 const void* device_ptr,
+                                 pyre_buffer_t* buffer,
+                                 size_t* offset) {
+  if (!device || !device_ptr) {
+    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT, "NULL argument");
+  }
+  return pyre_buffer_table_find(&device->buffer_table,
+                                (uint64_t)(uintptr_t)device_ptr,
+                                buffer, offset, NULL);
+}

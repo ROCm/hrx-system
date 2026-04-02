@@ -3,16 +3,12 @@
 #
 # HIP binding — libamdhip64.so drop-in replacement.
 
-add_library(amdhip64 SHARED api.c)
-
-target_include_directories(amdhip64 PRIVATE
-    ${PROJECT_SOURCE_DIR}/src
+add_library(amdhip64 SHARED
+    api.c
 )
 
 target_link_libraries(amdhip64 PRIVATE
-    pyre_streaming
-    iree_base_base
-    iree_hal_hal
+    pyre_binding_common
 )
 
 target_compile_definitions(amdhip64 PRIVATE IREE_HAL_STREAMING_HIP_EXPORTS)

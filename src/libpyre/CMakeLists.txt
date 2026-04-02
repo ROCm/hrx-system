@@ -11,9 +11,13 @@ set(PYRE_SOURCES
     semaphore.c
     stream.c
     buffer.c
+    buffer_table.c
+    module.c
     transfer.c
     host_allocator.c
     queue_ops.c
+    mem_pool.c
+    graph.c
     stubs.c
 )
 
@@ -34,6 +38,7 @@ target_link_libraries(pyre PRIVATE
     iree_async_util_proactor_pool
     iree_hal_drivers_local_task_task_driver
     iree_hal_local_loaders_registration_registration
+    iree_io_file_handle
     iree_vm_vm
 )
 target_compile_definitions(pyre PRIVATE PYRE_BUILDING_SHARED PYRE_HAS_HSA_DRIVER)

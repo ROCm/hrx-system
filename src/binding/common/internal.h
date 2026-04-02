@@ -7,7 +7,7 @@
 #ifndef IREE_EXPERIMENTAL_STREAMING_INTERNAL_H_
 #define IREE_EXPERIMENTAL_STREAMING_INTERNAL_H_
 
-#include "streaming/pyre_bridge.h"
+#include "common/pyre_bridge.h"
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/api.h"
@@ -36,8 +36,6 @@ typedef uint64_t iree_hal_streaming_deviceptr_t;
 typedef iree_host_size_t iree_hal_streaming_device_ordinal_t;
 
 typedef struct iree_hal_streaming_buffer_t iree_hal_streaming_buffer_t;
-typedef struct iree_hal_streaming_buffer_table_t
-    iree_hal_streaming_buffer_table_t;
 typedef struct iree_hal_streaming_context_t iree_hal_streaming_context_t;
 typedef struct iree_hal_streaming_context_module_entry_t
     iree_hal_streaming_context_module_entry_t;
@@ -217,8 +215,8 @@ struct iree_hal_streaming_context_t {
   iree_host_size_t peer_count;
   iree_host_size_t peer_capacity;
 
-  // Buffer mapping table.
-  iree_hal_streaming_buffer_table_t* buffer_table;
+  // Buffer mapping table (pyre unified implementation).
+  pyre_buffer_table_t buffer_table;
 
   // Context resource limits.
   iree_hal_streaming_limits_t limits;

@@ -157,6 +157,10 @@ typedef struct pyre_buffer_s* pyre_buffer_t;
 typedef struct pyre_module_s* pyre_module_t;
 typedef struct pyre_executable_s* pyre_executable_t;
 typedef struct pyre_physical_memory_s* pyre_physical_memory_t;
+typedef struct pyre_mem_pool_s* pyre_mem_pool_t;
+typedef struct pyre_graph_s* pyre_graph_t;
+typedef struct pyre_graph_exec_s* pyre_graph_exec_t;
+typedef struct pyre_graph_node_s* pyre_graph_node_t;
 
 //===----------------------------------------------------------------------===//
 // Enums and flags
@@ -287,6 +291,14 @@ PYRE_API pyre_status_t pyre_device_get_type(pyre_device_t device,
 PYRE_API pyre_status_t pyre_device_retain(pyre_device_t device);
 PYRE_API pyre_status_t pyre_device_release(pyre_device_t device);
 
+PYRE_API pyre_status_t pyre_device_memory_info(pyre_device_t device,
+                                               size_t* free_bytes,
+                                               size_t* total_bytes);
+
+PYRE_API pyre_status_t pyre_device_can_access_peer(pyre_device_t device_a,
+                                                   pyre_device_t device_b,
+                                                   bool* can_access);
+
 //===----------------------------------------------------------------------===//
 // Allocator
 //
@@ -383,6 +395,23 @@ PYRE_API pyre_status_t pyre_buffer_get_device_ptr(pyre_buffer_t buffer,
 PYRE_API pyre_status_t pyre_buffer_get_size(pyre_buffer_t buffer,
                                             size_t* size);
 
+// Register host memory with the device for use in transfers.
+// The memory is not copied; the pointer must remain valid until unregistered.
+PYRE_API pyre_status_t pyre_host_memory_register(pyre_device_t device,
+                                                 void* host_ptr, size_t size,
+                                                 uint32_t flags);
+
+PYRE_API pyre_status_t pyre_host_memory_unregister(pyre_device_t device,
+                                                   void* host_ptr);
+
+// Resolve a device pointer back to the pyre_buffer_t that contains it.
+// On success, *buffer receives a borrowed reference and *offset receives
+// the byte offset of |device_ptr| within that buffer.
+PYRE_API pyre_status_t pyre_buffer_lookup(pyre_device_t device,
+                                          const void* device_ptr,
+                                          pyre_buffer_t* buffer,
+                                          size_t* offset);
+
 //===----------------------------------------------------------------------===//
 // Synchronous data transfer
 //
@@ -420,6 +449,18 @@ PYRE_API pyre_status_t pyre_stream_update_buffer(pyre_stream_t stream,
                                                  pyre_buffer_t dst,
                                                  size_t dst_offset);
 
+// Async host-to-device copy on a stream. Synchronous if stream is NULL.
+PYRE_API pyre_status_t pyre_stream_copy_h2d(pyre_stream_t stream,
+                                            const void* host_src,
+                                            pyre_buffer_t dst,
+                                            size_t dst_offset, size_t size);
+
+// Async device-to-host copy on a stream. Synchronous if stream is NULL.
+PYRE_API pyre_status_t pyre_stream_copy_d2h(pyre_stream_t stream,
+                                            pyre_buffer_t src,
+                                            size_t src_offset, void* host_dst,
+                                            size_t size);
+
 //===----------------------------------------------------------------------===//
 // Direct queue operations (single-op, no command buffer)
 //===----------------------------------------------------------------------===//
@@ -440,8 +481,6 @@ PYRE_API pyre_status_t pyre_queue_barrier(
     pyre_device_t device, pyre_queue_affinity_t affinity,
     const pyre_semaphore_list_t* wait_semaphores,
     const pyre_semaphore_list_t* signal_semaphores);
-
-// TODO(pyre): Stubs — declared for streaming rebase, not yet implemented.
 
 // Dispatch config for kernel launch.
 typedef struct pyre_dispatch_config_t {
@@ -484,6 +523,188 @@ PYRE_API pyre_status_t pyre_queue_host_call(
     pyre_host_call_fn_t callback, void* user_data);
 
 PYRE_API pyre_status_t pyre_stream_execution_barrier(pyre_stream_t stream);
+
+//===----------------------------------------------------------------------===//
+// Module loading (GPU executable / kernel images)
+//===----------------------------------------------------------------------===//
+
+PYRE_API pyre_status_t pyre_module_load_data(pyre_device_t device,
+                                             const void* data, size_t size,
+                                             pyre_module_t* module);
+
+PYRE_API pyre_status_t pyre_module_load_file(pyre_device_t device,
+                                             const char* path,
+                                             pyre_module_t* module);
+
+PYRE_API pyre_status_t pyre_module_retain(pyre_module_t module);
+PYRE_API pyre_status_t pyre_module_release(pyre_module_t module);
+
+// Looks up a kernel function by name. On success, *executable and *ordinal
+// can be passed to pyre_stream_dispatch / pyre_queue_dispatch.
+PYRE_API pyre_status_t pyre_module_lookup_function(
+    pyre_module_t module, const char* name, pyre_executable_t* executable,
+    uint32_t* ordinal);
+
+// Looks up a global variable by name. Returns the device pointer and size.
+PYRE_API pyre_status_t pyre_module_lookup_global(
+    pyre_module_t module, const char* name, void** device_ptr, size_t* size);
+
+//===----------------------------------------------------------------------===//
+// Memory pools (stream-ordered memory management)
+//===----------------------------------------------------------------------===//
+
+typedef enum pyre_mem_pool_attr_t {
+  PYRE_MEM_POOL_ATTR_REUSE_FOLLOW_EVENT_DEPENDENCIES = 0,
+  PYRE_MEM_POOL_ATTR_REUSE_ALLOW_INTERNAL_DEPENDENCIES = 1,
+  PYRE_MEM_POOL_ATTR_REUSE_ALLOW_OPPORTUNISTIC = 2,
+  PYRE_MEM_POOL_ATTR_RELEASE_THRESHOLD = 3,
+  PYRE_MEM_POOL_ATTR_RESERVED_MEM_CURRENT = 4,
+  PYRE_MEM_POOL_ATTR_RESERVED_MEM_HIGH = 5,
+  PYRE_MEM_POOL_ATTR_USED_MEM_CURRENT = 6,
+  PYRE_MEM_POOL_ATTR_USED_MEM_HIGH = 7,
+} pyre_mem_pool_attr_t;
+
+typedef struct pyre_mem_pool_props_t {
+  uint32_t alloc_handle_type;
+  uint32_t location_type;
+  int location_id;
+} pyre_mem_pool_props_t;
+
+PYRE_API pyre_status_t pyre_mem_pool_create(
+    pyre_device_t device, const pyre_mem_pool_props_t* props,
+    pyre_mem_pool_t* out_pool);
+
+PYRE_API void pyre_mem_pool_retain(pyre_mem_pool_t pool);
+PYRE_API void pyre_mem_pool_release(pyre_mem_pool_t pool);
+
+PYRE_API pyre_status_t pyre_mem_pool_get_attribute(
+    pyre_mem_pool_t pool, pyre_mem_pool_attr_t attr, uint64_t* out_value);
+
+PYRE_API pyre_status_t pyre_mem_pool_set_attribute(
+    pyre_mem_pool_t pool, pyre_mem_pool_attr_t attr, uint64_t value);
+
+PYRE_API pyre_status_t pyre_mem_pool_trim(pyre_mem_pool_t pool,
+                                          size_t min_bytes_to_keep);
+
+//===----------------------------------------------------------------------===//
+// Graphs (CUDA/HIP-style execution graphs)
+//===----------------------------------------------------------------------===//
+
+typedef enum pyre_graph_node_type_t {
+  PYRE_GRAPH_NODE_EMPTY = 0,
+  PYRE_GRAPH_NODE_KERNEL = 1,
+  PYRE_GRAPH_NODE_MEMCPY = 2,
+  PYRE_GRAPH_NODE_MEMSET = 3,
+  PYRE_GRAPH_NODE_HOST_CALL = 4,
+  PYRE_GRAPH_NODE_GRAPH = 5,
+} pyre_graph_node_type_t;
+
+typedef struct pyre_graph_kernel_node_attrs_t {
+  pyre_executable_t executable;
+  uint32_t export_ordinal;
+  pyre_dispatch_config_t config;
+  const void* constants;
+  size_t constants_size;
+  const pyre_buffer_ref_t* bindings;
+  size_t binding_count;
+  uint32_t flags;
+} pyre_graph_kernel_node_attrs_t;
+
+typedef struct pyre_graph_memcpy_node_attrs_t {
+  void* dst;
+  const void* src;
+  size_t size;
+  uint32_t kind;
+} pyre_graph_memcpy_node_attrs_t;
+
+typedef struct pyre_graph_memset_node_attrs_t {
+  void* dst;
+  uint32_t value;
+  size_t count;
+} pyre_graph_memset_node_attrs_t;
+
+typedef struct pyre_graph_host_call_node_attrs_t {
+  pyre_host_call_fn_t fn;
+  void* user_data;
+} pyre_graph_host_call_node_attrs_t;
+
+PYRE_API pyre_status_t pyre_graph_create(pyre_device_t device,
+                                         uint32_t flags,
+                                         pyre_graph_t* out_graph);
+
+PYRE_API void pyre_graph_retain(pyre_graph_t graph);
+PYRE_API void pyre_graph_release(pyre_graph_t graph);
+
+PYRE_API pyre_status_t pyre_graph_add_empty_node(
+    pyre_graph_t graph, const pyre_graph_node_t* deps, size_t dep_count,
+    pyre_graph_node_t* out_node);
+
+PYRE_API pyre_status_t pyre_graph_add_kernel_node(
+    pyre_graph_t graph, const pyre_graph_node_t* deps, size_t dep_count,
+    const pyre_graph_kernel_node_attrs_t* attrs,
+    pyre_graph_node_t* out_node);
+
+PYRE_API pyre_status_t pyre_graph_add_memcpy_node(
+    pyre_graph_t graph, const pyre_graph_node_t* deps, size_t dep_count,
+    const pyre_graph_memcpy_node_attrs_t* attrs,
+    pyre_graph_node_t* out_node);
+
+PYRE_API pyre_status_t pyre_graph_add_memset_node(
+    pyre_graph_t graph, const pyre_graph_node_t* deps, size_t dep_count,
+    const pyre_graph_memset_node_attrs_t* attrs,
+    pyre_graph_node_t* out_node);
+
+PYRE_API pyre_status_t pyre_graph_add_host_call_node(
+    pyre_graph_t graph, const pyre_graph_node_t* deps, size_t dep_count,
+    const pyre_graph_host_call_node_attrs_t* attrs,
+    pyre_graph_node_t* out_node);
+
+PYRE_API pyre_status_t pyre_graph_add_dependencies(
+    pyre_graph_t graph, const pyre_graph_node_t* from_nodes,
+    const pyre_graph_node_t* to_nodes, size_t count);
+
+PYRE_API pyre_status_t pyre_graph_size(pyre_graph_t graph, size_t* out_count);
+
+PYRE_API pyre_status_t pyre_graph_get_nodes(pyre_graph_t graph,
+                                            pyre_graph_node_t* nodes,
+                                            size_t* inout_count);
+
+PYRE_API pyre_status_t pyre_graph_instantiate(pyre_graph_t graph,
+                                              uint32_t flags,
+                                              pyre_graph_exec_t* out_exec);
+
+PYRE_API void pyre_graph_exec_retain(pyre_graph_exec_t exec);
+PYRE_API void pyre_graph_exec_release(pyre_graph_exec_t exec);
+
+PYRE_API pyre_status_t pyre_graph_exec_launch(pyre_graph_exec_t exec,
+                                              pyre_stream_t stream);
+
+PYRE_API pyre_status_t pyre_graph_exec_update(pyre_graph_exec_t exec,
+                                              pyre_graph_t graph);
+
+// Stream capture (record stream operations into a graph).
+typedef enum pyre_capture_mode_t {
+  PYRE_CAPTURE_MODE_GLOBAL = 0,
+  PYRE_CAPTURE_MODE_THREAD_LOCAL = 1,
+  PYRE_CAPTURE_MODE_RELAXED = 2,
+} pyre_capture_mode_t;
+
+typedef enum pyre_capture_status_t {
+  PYRE_CAPTURE_STATUS_NONE = 0,
+  PYRE_CAPTURE_STATUS_ACTIVE = 1,
+  PYRE_CAPTURE_STATUS_INVALIDATED = 2,
+} pyre_capture_status_t;
+
+PYRE_API pyre_status_t pyre_stream_begin_capture(pyre_stream_t stream,
+                                                 pyre_capture_mode_t mode);
+
+PYRE_API pyre_status_t pyre_stream_end_capture(pyre_stream_t stream,
+                                               pyre_graph_t* out_graph);
+
+PYRE_API pyre_capture_status_t pyre_stream_capture_status(
+    pyre_stream_t stream);
+
+PYRE_API bool pyre_stream_is_capturing(pyre_stream_t stream);
 
 //===----------------------------------------------------------------------===//
 // Virtual memory (allocator methods)
