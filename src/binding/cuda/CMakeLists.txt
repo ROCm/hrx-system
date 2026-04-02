@@ -8,14 +8,8 @@ add_library(cuda SHARED
     runtime.c
 )
 
-target_include_directories(cuda PRIVATE
-    ${PROJECT_SOURCE_DIR}/src
-)
-
 target_link_libraries(cuda PRIVATE
-    pyre_streaming
-    iree_base_base
-    iree_hal_hal
+    pyre_binding_common
 )
 
 target_compile_definitions(cuda PRIVATE IREE_HAL_STREAMING_CUDA_EXPORTS)

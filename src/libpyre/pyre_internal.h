@@ -5,6 +5,7 @@
 #define PYRE_INTERNAL_H_
 
 #include "pyre_runtime.h"
+#include "buffer_table.h"
 
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/api.h"
@@ -127,6 +128,7 @@ typedef struct pyre_device_s {
   int ordinal;
   iree_hal_device_t* hal_device;
   pyre_allocator_s allocator;  // Inline, owned by device.
+  pyre_buffer_table_t buffer_table;  // Device-pointer-to-buffer lookup.
   char name[128];
   char architecture[64];
 } pyre_device_s;
@@ -158,6 +160,21 @@ typedef struct pyre_buffer_s {
   size_t size;
   void* mapped_ptr;
 } pyre_buffer_s;
+
+// Module: wraps an IREE executable cache + executable with symbol metadata.
+typedef struct pyre_module_s {
+  iree_atomic_ref_count_t ref_count;
+  pyre_device_t device;
+  iree_hal_executable_cache_t* cache;
+  iree_hal_executable_t* executable;
+  uint32_t export_count;
+  iree_allocator_t host_allocator;
+} pyre_module_s;
+
+// Executable handle (wraps the HAL executable from a module).
+typedef struct pyre_executable_s {
+  iree_hal_executable_t* hal_executable;
+} pyre_executable_s;
 
 //===----------------------------------------------------------------------===//
 // Global state

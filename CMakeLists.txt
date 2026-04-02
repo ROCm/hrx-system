@@ -181,15 +181,10 @@ set_target_properties(pyre_hsa_registration PROPERTIES POSITION_INDEPENDENT_CODE
 add_subdirectory(src/libpyre)
 
 #===------------------------------------------------------------------------===#
-# Streaming HIP runtime (internal static library)
-#===------------------------------------------------------------------------===#
-
-add_subdirectory(src/streaming)
-
-#===------------------------------------------------------------------------===#
 # API bindings
 #===------------------------------------------------------------------------===#
 
+add_subdirectory(src/binding/common)
 add_subdirectory(src/binding/hip)
 add_subdirectory(src/binding/cuda)
 

@@ -4,10 +4,10 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "streaming/util/buffer_table.h"
+#include "common/util/buffer_table.h"
 
 #include "iree/base/threading/mutex.h"
-#include "streaming/internal.h"
+#include "common/internal.h"
 
 // Initial capacity for the buffer table in entries.
 #define IREE_HAL_STREAMING_BUFFER_TABLE_INITIAL_CAPACITY 256

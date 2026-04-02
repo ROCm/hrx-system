@@ -6,7 +6,7 @@
 
 #include "binding/cuda/driver.h"
 
-#include "streaming/internal.h"
+#include "common/internal.h"
 
 //===----------------------------------------------------------------------===//
 // Flag translation functions

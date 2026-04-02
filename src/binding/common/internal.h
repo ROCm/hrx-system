@@ -7,7 +7,7 @@
 #ifndef IREE_EXPERIMENTAL_STREAMING_INTERNAL_H_
 #define IREE_EXPERIMENTAL_STREAMING_INTERNAL_H_
 
-#include "streaming/pyre_bridge.h"
+#include "common/pyre_bridge.h"
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/api.h"

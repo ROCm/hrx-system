@@ -4,8 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "streaming/internal.h"
-#include "streaming/util/buffer_table.h"
+#include "common/internal.h"
+#include "common/util/buffer_table.h"
 
 #include <stdatomic.h>
 

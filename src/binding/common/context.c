@@ -6,8 +6,8 @@
 
 #include <string.h>
 
-#include "streaming/internal.h"
-#include "streaming/util/buffer_table.h"
+#include "common/internal.h"
+#include "common/util/buffer_table.h"
 
 //===----------------------------------------------------------------------===//
 // Global state
