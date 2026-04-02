@@ -17,7 +17,6 @@ add_library(pyre_binding_common STATIC
     peer.c
     registry.c
     stream.c
-    util/buffer_table.c
 )
 
 target_include_directories(pyre_binding_common PUBLIC

@@ -7,7 +7,6 @@
 #include <string.h>
 
 #include "common/internal.h"
-#include "common/util/buffer_table.h"
 
 //===----------------------------------------------------------------------===//
 // Global state
@@ -64,7 +63,7 @@ iree_status_t iree_hal_streaming_context_create(
   context->peer_contexts = NULL;
   context->peer_count = 0;
   context->peer_capacity = 0;
-  context->buffer_table = NULL;
+  memset(&context->buffer_table, 0, sizeof(context->buffer_table));
   context->host_allocator = host_allocator;
   iree_slim_mutex_initialize(&context->mutex);
 
@@ -98,10 +97,9 @@ iree_status_t iree_hal_streaming_context_create(
       context->device, IREE_SV("stream_hal_cache"),
       &context->executable_cache);
 
-  // Create buffer mapping table.
+  // Initialize buffer mapping table.
   if (iree_status_is_ok(status)) {
-    status = iree_hal_streaming_buffer_table_allocate(host_allocator,
-                                                      &context->buffer_table);
+    pyre_buffer_table_initialize(&context->buffer_table);
   }
 
   // Initialize symbol map with global registry as the backing store.
@@ -172,8 +170,8 @@ static void iree_hal_streaming_context_destroy(
   // were on-demand loaded for this context.
   iree_hal_streaming_context_symbol_map_deinitialize(&context->symbol_map);
 
-  // Free buffer mapping table.
-  iree_hal_streaming_buffer_table_free(context->buffer_table);
+  // Deinitialize buffer mapping table.
+  pyre_buffer_table_deinitialize(&context->buffer_table);
 
   // Release default stream.
   // This releases the context's reference but not the list's reference.
