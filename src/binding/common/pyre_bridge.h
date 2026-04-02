@@ -20,18 +20,27 @@
 //===----------------------------------------------------------------------===//
 // Status bridging: pyre_status_t <-> iree_status_t
 //
-// Both are opaque pointers with NULL = OK. Cast is valid because:
-// 1. Both use NULL to signal success
-// 2. Both are pointer-sized
-// 3. Streaming lives inside the pyre DSO boundary
+// pyre_status_t and iree_status_t have incompatible internal layouts
+// (pyre uses pyre_status_s*, IREE uses iree_status_storage_t*).
+// Conversion must extract the code, free the source, and create a new
+// status in the target format.
+//
+// Both use NULL = success, and both follow gRPC status code numbering
+// (PYRE_STATUS_* values == IREE_STATUS_* values for the same semantics).
 //===----------------------------------------------------------------------===//
 
 static inline iree_status_t pyre_to_iree_status(pyre_status_t s) {
-  return (iree_status_t)(uintptr_t)s;
+  if (pyre_status_is_ok(s)) return iree_ok_status();
+  iree_status_code_t code = (iree_status_code_t)pyre_status_code(s);
+  pyre_status_ignore(s);
+  return iree_make_status(code);
 }
 
 static inline pyre_status_t iree_to_pyre_status(iree_status_t s) {
-  return (pyre_status_t)(uintptr_t)s;
+  if (iree_status_is_ok(s)) return pyre_ok_status();
+  pyre_status_code_t code = (pyre_status_code_t)iree_status_code(s);
+  iree_status_ignore(s);
+  return pyre_make_status(code, NULL);
 }
 
 //===----------------------------------------------------------------------===//
