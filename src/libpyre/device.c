@@ -87,8 +87,52 @@ pyre_status_t pyre_device_get_type(pyre_device_t device,
   return pyre_ok_status();
 }
 
+pyre_status_t pyre_device_memory_info(pyre_device_t device,
+                                     size_t* free_bytes,
+                                     size_t* total_bytes) {
+  if (!device || !free_bytes || !total_bytes) {
+    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT, "NULL argument");
+  }
+
+  int64_t total = 0;
+  iree_status_t s = iree_hal_device_query_i64(
+      device->hal_device, iree_make_cstring_view("hal.device"),
+      iree_make_cstring_view("memory.total"), &total);
+  if (!iree_status_is_ok(s)) {
+    iree_status_ignore(s);
+    total = 0;
+  }
+
+  int64_t free_mem = 0;
+  s = iree_hal_device_query_i64(
+      device->hal_device, iree_make_cstring_view("hal.device"),
+      iree_make_cstring_view("memory.free"), &free_mem);
+  if (!iree_status_is_ok(s)) {
+    iree_status_ignore(s);
+    free_mem = total;
+  }
+
+  *total_bytes = (size_t)total;
+  *free_bytes = (size_t)free_mem;
+  return pyre_ok_status();
+}
+
+pyre_status_t pyre_device_can_access_peer(pyre_device_t device_a,
+                                          pyre_device_t device_b,
+                                          bool* can_access) {
+  if (!device_a || !device_b || !can_access) {
+    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT, "NULL argument");
+  }
+  if (device_a == device_b) {
+    *can_access = true;
+    return pyre_ok_status();
+  }
+  *can_access = (device_a->type == PYRE_ACCELERATOR_GPU &&
+                 device_b->type == PYRE_ACCELERATOR_GPU);
+  return pyre_ok_status();
+}
+
 void pyre_device_retain(pyre_device_t device) {
-  iree_hal_device_retain(device->hal_device);
   iree_atomic_ref_count_inc(&device->ref_count);
 }
 

@@ -8,8 +8,9 @@
 
 #include <dlfcn.h>
 
-#include "streaming/graph.h"
-#include "streaming/internal.h"
+#include "pyre_runtime.h"
+#include "common/graph.h"
+#include "common/internal.h"
 
 //===----------------------------------------------------------------------===//
 // Debug logging
@@ -25,6 +26,37 @@
 #else
 #define HIP_DEBUG_LOG(fmt, ...) ((void)0)
 #endif
+
+//===----------------------------------------------------------------------===//
+// Pyre binding identification
+//===----------------------------------------------------------------------===//
+
+typedef struct pyre_hip_info_t {
+  int version_major;
+  int version_minor;
+  int version_patch;
+  const char* build_type;
+  const char* iree_hal_driver;
+  const char* backend_lib;
+} pyre_hip_info_t;
+
+HIPAPI int pyre_hip_binding_active(void) { return 1; }
+
+HIPAPI void pyre_hip_binding_info(pyre_hip_info_t* out_info) {
+  if (!out_info) return;
+  out_info->version_major = PYRE_VERSION_MAJOR;
+  out_info->version_minor = PYRE_VERSION_MINOR;
+  out_info->version_patch = PYRE_VERSION_PATCH;
+#ifdef NDEBUG
+  out_info->build_type = "Release";
+#else
+  out_info->build_type = "Debug";
+#endif
+  const char* driver = getenv("IREE_HAL_DRIVER");
+  out_info->iree_hal_driver = driver ? driver : "(default)";
+  const char* backend = getenv("HIP_PASSTHROUGH_BACKEND_LIB");
+  out_info->backend_lib = backend ? backend : "(none)";
+}
 
 //===----------------------------------------------------------------------===//
 // Flag translation functions
@@ -206,6 +238,26 @@ static iree_hal_streaming_context_limit_t iree_hip_limit_to_internal(
       // Return an invalid value that will trigger error in internal API.
       return (iree_hal_streaming_context_limit_t)-1;
   }
+}
+
+//===----------------------------------------------------------------------===//
+// pyre_device_t helpers
+//===----------------------------------------------------------------------===//
+
+// Gets the pyre_device_t for a given device ordinal. The streaming device
+// registry holds a pyre_device_t per device that we can use to call libpyre
+// APIs directly, bypassing the streaming layer.
+static inline pyre_device_t iree_hip_pyre_device(int device_ordinal) {
+  iree_hal_streaming_device_t* entry =
+      iree_hal_streaming_device_entry((iree_hal_streaming_device_ordinal_t)device_ordinal);
+  return entry ? entry->pyre_device : NULL;
+}
+
+// Gets the pyre_device_t from a streaming context.
+static inline pyre_device_t iree_hip_pyre_device_from_context(
+    iree_hal_streaming_context_t* context) {
+  return context && context->device_entry ? context->device_entry->pyre_device
+                                          : NULL;
 }
 
 //===----------------------------------------------------------------------===//
@@ -816,13 +868,13 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
     HIP_RETURN_ERROR(hipErrorInvalidDevice);
   }
 
-  // Get memory information using the internal API.
-  iree_device_size_t free_memory = 0;
-  iree_device_size_t total_memory = 0;
+  // Get memory information using libpyre.
+  size_t free_memory = 0;
+  size_t total_memory = 0;
   HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
       z0,
-      iree_hal_streaming_device_memory_info(device, &free_memory,
-                                            &total_memory),
+      PYRE_CALL(pyre_device_memory_info(device_obj->pyre_device, &free_memory,
+                                        &total_memory)),
       hipErrorInvalidDevice);
 
   // Fill device properties from device entry.
@@ -1251,15 +1303,15 @@ HIPAPI hipError_t hipDeviceTotalMem(size_t* bytes, int device) {
     HIP_RETURN_ERROR(init_result);
   }
 
-  iree_device_size_t free_memory = 0;
-  iree_device_size_t total_memory = 0;
+  size_t free_memory = 0;
+  size_t total_memory = 0;
   HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
       z0,
-      iree_hal_streaming_device_memory_info(device, &free_memory,
-                                            &total_memory),
+      PYRE_CALL(pyre_device_memory_info(iree_hip_pyre_device(device),
+                                        &free_memory, &total_memory)),
       hipErrorInvalidDevice);
 
-  *bytes = (size_t)total_memory;
+  *bytes = total_memory;
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
 }
@@ -1312,10 +1364,11 @@ HIPAPI hipError_t hipDeviceCanAccessPeer(int* canAccessPeer, int device,
     HIP_RETURN_ERROR(hipErrorInvalidDevice);
   }
 
-  // Use the P2P query function.
+  // Use libpyre P2P query.
   bool can_access = false;
-  HIP_RETURN_STATUS(iree_hal_streaming_device_can_access_peer(
-                        device, peerDevice, &can_access),
+  HIP_RETURN_STATUS(PYRE_CALL(pyre_device_can_access_peer(
+                        iree_hip_pyre_device(device),
+                        iree_hip_pyre_device(peerDevice), &can_access)),
                     hipErrorInvalidDevice);
 
   *canAccessPeer = can_access ? 1 : 0;
@@ -2875,8 +2928,9 @@ HIPAPI hipError_t hipMemGetInfo(size_t* free, size_t* total) {
   size_t total_memory = 0;
   HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
       z0,
-      iree_hal_streaming_device_memory_info(context->device_ordinal,
-                                            &free_memory, &total_memory),
+      PYRE_CALL(pyre_device_memory_info(
+          iree_hip_pyre_device_from_context(context),
+          &free_memory, &total_memory)),
       hipErrorInvalidDevice);
 
   if (free) *free = (size_t)free_memory;
@@ -2976,8 +3030,8 @@ static hipError_t iree_hip_ensure_pool(iree_hal_streaming_context_t* context) {
   size_t actual_pool_size = POOL_INITIAL_SIZE;
   {
     size_t free_mem = 0, total_mem = 0;
-    iree_status_t mem_status = iree_hal_streaming_device_memory_info(
-        context->device_ordinal, &free_mem, &total_mem);
+    iree_status_t mem_status = PYRE_CALL(pyre_device_memory_info(
+        iree_hip_pyre_device_from_context(context), &free_mem, &total_mem));
     if (iree_status_is_ok(mem_status) && total_mem > 0) {
       actual_pool_size = (size_t)(total_mem * 0.75);
       if (actual_pool_size < 256 * 1024 * 1024) {
@@ -6298,7 +6352,7 @@ HIPAPI hipError_t hipStreamWaitEvent(hipStream_t stream, hipEvent_t event,
 // Stream memory operations
 //===----------------------------------------------------------------------===//
 
-// Writes a 32-bit value to device memory as part of stream execution.
+// Writes a 32-bit value to device memory as part of ` execution.
 HIPAPI hipError_t hipStreamWriteValue32(hipStream_t stream, void* ptr,
                                          uint32_t value, unsigned int flags) {
   (void)stream;

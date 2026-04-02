@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "streaming/internal.h"
+#include "common/internal.h"
 //===----------------------------------------------------------------------===//
 // Global state
 //===----------------------------------------------------------------------===//

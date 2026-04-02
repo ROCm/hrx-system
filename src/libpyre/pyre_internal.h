@@ -6,6 +6,7 @@
 
 #include "pyre_runtime.h"
 #include "pyre_compiler.h"
+#include "buffer_table.h"
 
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/api.h"
@@ -168,6 +169,7 @@ typedef struct pyre_device_s {
   int ordinal;
   iree_hal_device_t* hal_device;
   pyre_allocator_s allocator;  // Inline, owned by device.
+  pyre_buffer_table_t buffer_table;  // Device-pointer-to-buffer lookup.
   char name[128];
   char architecture[64];
 } pyre_device_s;

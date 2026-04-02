@@ -4,8 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "streaming/graph.h"
-#include "streaming/internal.h"
+#include "common/graph.h"
+#include "common/internal.h"
 #include "iree/base/internal/math.h"
 
 // IREE_PREFETCH_RO was removed from main IREE. Provide a fallback definition.
