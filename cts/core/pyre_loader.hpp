@@ -84,6 +84,8 @@ class PyreLoader {
   decltype(&pyre_stream_get_semaphore) stream_get_semaphore;
   decltype(&pyre_stream_get_timeline_position) stream_get_timeline_position;
   decltype(&pyre_stream_wait_on) stream_wait_on;
+  decltype(&pyre_stream_dispatch) stream_dispatch;
+  decltype(&pyre_stream_execution_barrier) stream_execution_barrier;
 
   // Allocator.
   decltype(&pyre_device_allocator) device_allocator;
@@ -114,6 +116,46 @@ class PyreLoader {
   decltype(&pyre_queue_fill) queue_fill;
   decltype(&pyre_queue_copy) queue_copy;
   decltype(&pyre_queue_barrier) queue_barrier;
+  decltype(&pyre_queue_dispatch) queue_dispatch;
+  decltype(&pyre_queue_host_call) queue_host_call;
+
+  // VM modules/functions.
+  decltype(&pyre_module_load_vmfb) module_load_vmfb;
+  decltype(&pyre_module_retain) module_retain;
+  decltype(&pyre_module_release) module_release;
+  decltype(&pyre_module_lookup_function) module_lookup_function;
+  decltype(&pyre_function_retain) function_retain;
+  decltype(&pyre_function_release) function_release;
+  decltype(&pyre_function_invoke) function_invoke;
+
+  // VM value lists.
+  decltype(&pyre_value_list_create) value_list_create;
+  decltype(&pyre_value_list_retain) value_list_retain;
+  decltype(&pyre_value_list_release) value_list_release;
+  decltype(&pyre_value_list_size) value_list_size;
+  decltype(&pyre_value_list_push_i64) value_list_push_i64;
+  decltype(&pyre_value_list_get_i64) value_list_get_i64;
+  decltype(&pyre_value_list_push_null_ref) value_list_push_null_ref;
+  decltype(&pyre_value_list_push_buffer) value_list_push_buffer;
+  decltype(&pyre_value_list_push_buffer_view) value_list_push_buffer_view;
+  decltype(&pyre_value_list_push_fence) value_list_push_fence;
+
+  // Fences.
+  decltype(&pyre_fence_create) fence_create;
+  decltype(&pyre_fence_create_at) fence_create_at;
+  decltype(&pyre_fence_retain) fence_retain;
+  decltype(&pyre_fence_release) fence_release;
+  decltype(&pyre_fence_insert) fence_insert;
+  decltype(&pyre_fence_extend) fence_extend;
+  decltype(&pyre_fence_signal) fence_signal;
+  decltype(&pyre_fence_wait) fence_wait;
+
+  // Buffer views.
+  decltype(&pyre_buffer_view_create) buffer_view_create;
+  decltype(&pyre_buffer_view_retain) buffer_view_retain;
+  decltype(&pyre_buffer_view_release) buffer_view_release;
+  decltype(&pyre_buffer_view_rank) buffer_view_rank;
+  decltype(&pyre_buffer_view_dim) buffer_view_dim;
 
   // Virtual memory.
   decltype(&pyre_allocator_query_virtual_memory) allocator_query_virtual_memory;

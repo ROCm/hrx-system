@@ -155,7 +155,12 @@ typedef struct pyre_semaphore_s* pyre_semaphore_t;
 typedef struct pyre_stream_s* pyre_stream_t;
 typedef struct pyre_buffer_s* pyre_buffer_t;
 typedef struct pyre_module_s* pyre_module_t;
+typedef struct pyre_function_s* pyre_function_t;
+typedef struct pyre_value_list_s* pyre_value_list_t;
+typedef struct pyre_fence_s* pyre_fence_t;
+typedef struct pyre_buffer_view_s* pyre_buffer_view_t;
 typedef struct pyre_executable_s* pyre_executable_t;
+typedef struct pyre_compiler_output_s* pyre_compiler_output_t;
 typedef struct pyre_physical_memory_s* pyre_physical_memory_t;
 
 //===----------------------------------------------------------------------===//
@@ -284,8 +289,8 @@ PYRE_API pyre_status_t pyre_device_synchronize(pyre_device_t device);
 PYRE_API pyre_status_t pyre_device_get_type(pyre_device_t device,
                                             pyre_accelerator_type_t* type);
 
-PYRE_API pyre_status_t pyre_device_retain(pyre_device_t device);
-PYRE_API pyre_status_t pyre_device_release(pyre_device_t device);
+PYRE_API void pyre_device_retain(pyre_device_t device);
+PYRE_API void pyre_device_release(pyre_device_t device);
 
 //===----------------------------------------------------------------------===//
 // Allocator
@@ -299,8 +304,8 @@ PYRE_API pyre_status_t pyre_device_release(pyre_device_t device);
 // Returns borrowed reference. Always succeeds (every device has an allocator).
 PYRE_API pyre_allocator_t pyre_device_allocator(pyre_device_t device);
 
-PYRE_API pyre_status_t pyre_allocator_retain(pyre_allocator_t allocator);
-PYRE_API pyre_status_t pyre_allocator_release(pyre_allocator_t allocator);
+PYRE_API void pyre_allocator_retain(pyre_allocator_t allocator);
+PYRE_API void pyre_allocator_release(pyre_allocator_t allocator);
 
 // Allocate buffer with explicit params. No stream ordering.
 PYRE_API pyre_status_t pyre_allocator_allocate_buffer(
@@ -320,8 +325,8 @@ PYRE_API pyre_status_t pyre_semaphore_create(pyre_device_t device,
                                              uint64_t initial_value,
                                              pyre_semaphore_t* semaphore);
 
-PYRE_API pyre_status_t pyre_semaphore_retain(pyre_semaphore_t semaphore);
-PYRE_API pyre_status_t pyre_semaphore_release(pyre_semaphore_t semaphore);
+PYRE_API void pyre_semaphore_retain(pyre_semaphore_t semaphore);
+PYRE_API void pyre_semaphore_release(pyre_semaphore_t semaphore);
 
 PYRE_API pyre_status_t pyre_semaphore_query(pyre_semaphore_t semaphore,
                                             uint64_t* value);
@@ -340,8 +345,8 @@ PYRE_API pyre_status_t pyre_semaphore_signal(pyre_semaphore_t semaphore,
 PYRE_API pyre_status_t pyre_stream_create(pyre_device_t device, uint32_t flags,
                                           pyre_stream_t* stream);
 
-PYRE_API pyre_status_t pyre_stream_retain(pyre_stream_t stream);
-PYRE_API pyre_status_t pyre_stream_release(pyre_stream_t stream);
+PYRE_API void pyre_stream_retain(pyre_stream_t stream);
+PYRE_API void pyre_stream_release(pyre_stream_t stream);
 
 PYRE_API pyre_status_t pyre_stream_synchronize(pyre_stream_t stream);
 
@@ -354,6 +359,12 @@ PYRE_API pyre_status_t pyre_stream_get_semaphore(
 
 PYRE_API pyre_status_t pyre_stream_get_timeline_position(
     pyre_stream_t stream, pyre_timeline_point_t* position);
+
+// Advances the stream's owned timeline to the next value and returns it.
+// Use when out-of-band work (e.g. VM invocation with a signal fence) will
+// eventually signal the stream semaphore at the returned timepoint.
+PYRE_API pyre_status_t pyre_stream_advance_timeline(
+    pyre_stream_t stream, uint64_t* value);
 
 PYRE_API pyre_status_t pyre_stream_wait_on(pyre_stream_t stream,
                                            pyre_timeline_point_t position);
@@ -368,8 +379,8 @@ PYRE_API pyre_status_t pyre_buffer_allocate(pyre_stream_t stream, size_t size,
                                             pyre_buffer_usage_t usage,
                                             pyre_buffer_t* buffer);
 
-PYRE_API pyre_status_t pyre_buffer_retain(pyre_buffer_t buffer);
-PYRE_API pyre_status_t pyre_buffer_release(pyre_buffer_t buffer);
+PYRE_API void pyre_buffer_retain(pyre_buffer_t buffer);
+PYRE_API void pyre_buffer_release(pyre_buffer_t buffer);
 
 PYRE_API pyre_status_t pyre_buffer_map(pyre_buffer_t buffer,
                                        pyre_map_flags_t flags, size_t offset,
@@ -484,6 +495,139 @@ PYRE_API pyre_status_t pyre_queue_host_call(
     pyre_host_call_fn_t callback, void* user_data);
 
 PYRE_API pyre_status_t pyre_stream_execution_barrier(pyre_stream_t stream);
+
+//===----------------------------------------------------------------------===//
+// VM modules and invocation
+//===----------------------------------------------------------------------===//
+
+// Loads a VMFB bytecode module and instantiates an invocation context with the
+// device-backed HAL module. |vmfb_data| must outlive |module|.
+PYRE_API pyre_status_t pyre_module_load_vmfb(pyre_device_t device,
+                                             const void* vmfb_data,
+                                             size_t vmfb_size,
+                                             pyre_module_t* module);
+
+// Loads a VMFB bytecode module from compiler-owned output. The module retains
+// |compiler_output| and releases that backing store when the bytecode module is
+// destroyed. The original |compiler_output| handle may be released as soon as
+// this returns successfully.
+PYRE_API pyre_status_t pyre_module_load_compiler_output(
+    pyre_device_t device, pyre_compiler_output_t compiler_output,
+    pyre_module_t* module);
+
+PYRE_API void pyre_module_retain(pyre_module_t module);
+PYRE_API void pyre_module_release(pyre_module_t module);
+
+// Resolves an exported function by fully-qualified name. The returned function
+// retains |module|, so it remains valid until pyre_function_release().
+PYRE_API pyre_status_t pyre_module_lookup_function(
+    pyre_module_t module, const char* name, pyre_function_t* function);
+
+PYRE_API void pyre_function_retain(pyre_function_t function);
+PYRE_API void pyre_function_release(pyre_function_t function);
+
+PYRE_API pyre_status_t pyre_function_invoke(pyre_module_t module,
+                                            pyre_function_t function,
+                                            pyre_value_list_t args,
+                                            pyre_value_list_t rets);
+
+//===----------------------------------------------------------------------===//
+// VM value lists
+//===----------------------------------------------------------------------===//
+
+PYRE_API pyre_status_t pyre_value_list_create(size_t capacity,
+                                              pyre_value_list_t* list);
+
+PYRE_API void pyre_value_list_retain(pyre_value_list_t list);
+PYRE_API void pyre_value_list_release(pyre_value_list_t list);
+
+PYRE_API pyre_status_t pyre_value_list_size(pyre_value_list_t list,
+                                            size_t* size);
+
+PYRE_API pyre_status_t pyre_value_list_push_i64(pyre_value_list_t list,
+                                                int64_t value);
+
+PYRE_API pyre_status_t pyre_value_list_get_i64(pyre_value_list_t list,
+                                               size_t index,
+                                               int64_t* value);
+
+PYRE_API pyre_status_t pyre_value_list_push_null_ref(pyre_value_list_t list);
+
+PYRE_API pyre_status_t pyre_value_list_push_buffer(pyre_value_list_t list,
+                                                   pyre_buffer_t buffer);
+
+PYRE_API pyre_status_t pyre_value_list_push_buffer_view(
+    pyre_value_list_t list, pyre_buffer_view_t buffer_view);
+
+PYRE_API pyre_status_t pyre_value_list_push_fence(pyre_value_list_t list,
+                                                  pyre_fence_t fence);
+
+//===----------------------------------------------------------------------===//
+// Fences
+//===----------------------------------------------------------------------===//
+
+PYRE_API pyre_status_t pyre_fence_create(size_t capacity,
+                                         pyre_fence_t* fence);
+
+PYRE_API pyre_status_t pyre_fence_create_at(pyre_semaphore_t semaphore,
+                                            uint64_t value,
+                                            pyre_fence_t* fence);
+
+PYRE_API void pyre_fence_retain(pyre_fence_t fence);
+PYRE_API void pyre_fence_release(pyre_fence_t fence);
+
+PYRE_API pyre_status_t pyre_fence_insert(pyre_fence_t fence,
+                                         pyre_semaphore_t semaphore,
+                                         uint64_t value);
+
+PYRE_API pyre_status_t pyre_fence_extend(pyre_fence_t into_fence,
+                                         pyre_fence_t from_fence);
+
+PYRE_API pyre_status_t pyre_fence_signal(pyre_fence_t fence);
+
+PYRE_API pyre_status_t pyre_fence_wait(pyre_fence_t fence,
+                                       uint64_t timeout_ns);
+
+//===----------------------------------------------------------------------===//
+// Buffer views
+//===----------------------------------------------------------------------===//
+
+typedef uint32_t pyre_element_type_t;
+#define PYRE_ELEMENT_TYPE_NONE      0x00000000u
+#define PYRE_ELEMENT_TYPE_OPAQUE_8  0x00000008u
+#define PYRE_ELEMENT_TYPE_BOOL_8    0x13000008u
+#define PYRE_ELEMENT_TYPE_INT_16    0x10000010u
+#define PYRE_ELEMENT_TYPE_UINT_8    0x12000008u
+#define PYRE_ELEMENT_TYPE_INT_32    0x10000020u
+#define PYRE_ELEMENT_TYPE_INT_64    0x10000040u
+#define PYRE_ELEMENT_TYPE_SINT_8    0x11000008u
+#define PYRE_ELEMENT_TYPE_SINT_16   0x11000010u
+#define PYRE_ELEMENT_TYPE_SINT_32   0x11000020u
+#define PYRE_ELEMENT_TYPE_SINT_64   0x11000040u
+#define PYRE_ELEMENT_TYPE_FLOAT_16  0x21000010u
+#define PYRE_ELEMENT_TYPE_FLOAT_32  0x21000020u
+#define PYRE_ELEMENT_TYPE_FLOAT_64  0x21000040u
+#define PYRE_ELEMENT_TYPE_BFLOAT_16 0x22000010u
+
+typedef uint32_t pyre_encoding_type_t;
+#define PYRE_ENCODING_TYPE_OPAQUE          0u
+#define PYRE_ENCODING_TYPE_DENSE_ROW_MAJOR 1u
+
+PYRE_API pyre_status_t pyre_buffer_view_create(
+    pyre_buffer_t buffer, size_t shape_rank, const int64_t* shape,
+    pyre_element_type_t element_type, pyre_encoding_type_t encoding_type,
+    pyre_buffer_view_t* buffer_view);
+
+PYRE_API void pyre_buffer_view_retain(pyre_buffer_view_t buffer_view);
+
+PYRE_API void pyre_buffer_view_release(pyre_buffer_view_t buffer_view);
+
+PYRE_API pyre_status_t pyre_buffer_view_rank(pyre_buffer_view_t buffer_view,
+                                             size_t* rank);
+
+PYRE_API pyre_status_t pyre_buffer_view_dim(pyre_buffer_view_t buffer_view,
+                                            size_t dim,
+                                            int64_t* value);
 
 //===----------------------------------------------------------------------===//
 // Virtual memory (allocator methods)

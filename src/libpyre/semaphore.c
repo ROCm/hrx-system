@@ -32,31 +32,23 @@ pyre_status_t pyre_semaphore_create(pyre_device_t device,
 
   iree_atomic_ref_count_init(&sem->ref_count);
   sem->device = device;
+  pyre_device_retain(sem->device);
   *semaphore = sem;
   return pyre_ok_status();
 }
 
-pyre_status_t pyre_semaphore_retain(pyre_semaphore_t semaphore) {
-  if (!semaphore) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT,
-                            "semaphore is NULL");
-  }
+void pyre_semaphore_retain(pyre_semaphore_t semaphore) {
+  iree_hal_semaphore_retain(semaphore->hal_semaphore);
+  pyre_device_retain(semaphore->device);
   iree_atomic_ref_count_inc(&semaphore->ref_count);
-  return pyre_ok_status();
 }
 
-pyre_status_t pyre_semaphore_release(pyre_semaphore_t semaphore) {
-  if (!semaphore) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT,
-                            "semaphore is NULL");
-  }
+void pyre_semaphore_release(pyre_semaphore_t semaphore) {
+  iree_hal_semaphore_release(semaphore->hal_semaphore);
+  pyre_device_release(semaphore->device);
   if (iree_atomic_ref_count_dec(&semaphore->ref_count) == 1) {
-    if (semaphore->hal_semaphore) {
-      iree_hal_semaphore_release(semaphore->hal_semaphore);
-    }
     free(semaphore);
   }
-  return pyre_ok_status();
 }
 
 pyre_status_t pyre_semaphore_query(pyre_semaphore_t semaphore,

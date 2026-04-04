@@ -32,6 +32,8 @@ target_include_directories(pyre_cts_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/core
     $<TARGET_PROPERTY:pyre,INTERFACE_INCLUDE_DIRECTORIES>
 )
+target_compile_definitions(pyre_cts_core PUBLIC
+    PYRE_CTS_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(pyre_cts_core PUBLIC Catch2::Catch2 ${CMAKE_DL_LIBS})
 
 #===------------------------------------------------------------------------===#
@@ -42,6 +44,9 @@ function(add_pyre_cts_test name)
   cmake_parse_arguments(ARG "" "" "SOURCES" ${ARGN})
   add_executable(pyre_cts_${name} ${ARG_SOURCES})
   target_link_libraries(pyre_cts_${name} PRIVATE pyre_cts_core Catch2::Catch2)
+  if(TARGET pyre)
+    add_dependencies(pyre_cts_${name} pyre)
+  endif()
   add_test(NAME pyre_cts_${name} COMMAND pyre_cts_${name})
   # Pass library path for dlopen.
   set_tests_properties(pyre_cts_${name} PROPERTIES
@@ -61,6 +66,19 @@ add_pyre_cts_test(stream SOURCES tests/stream/stream_test.cpp)
 add_pyre_cts_test(memory SOURCES tests/memory/memory_test.cpp)
 add_pyre_cts_test(transfer SOURCES tests/transfer/transfer_test.cpp)
 add_pyre_cts_test(stream_ops SOURCES tests/stream_ops/stream_ops_test.cpp)
+add_pyre_cts_test(queue_ops SOURCES tests/queue_ops/queue_ops_test.cpp)
 add_pyre_cts_test(status SOURCES tests/status/status_test.cpp)
 add_pyre_cts_test(refcount SOURCES tests/refcount/refcount_test.cpp)
 add_pyre_cts_test(virtual_memory SOURCES tests/virtual_memory/virtual_memory_test.cpp)
+add_pyre_cts_test(vm SOURCES tests/vm/vm_test.cpp)
+
+add_executable(pyre_cts_cxx_api tests/cxx_api/cxx_api_test.cpp)
+target_link_libraries(pyre_cts_cxx_api PRIVATE pyre pyre_cts_core Catch2::Catch2)
+add_test(NAME pyre_cts_cxx_api COMMAND pyre_cts_cxx_api)
+
+add_executable(pyre_cts_compiler tests/compiler/compiler_test.cpp)
+target_link_libraries(
+    pyre_cts_compiler PRIVATE pyre pyre_cts_core Catch2::Catch2)
+add_test(NAME pyre_cts_compiler COMMAND pyre_cts_compiler)
+set_tests_properties(pyre_cts_compiler PROPERTIES
+    ENVIRONMENT "PYRE_LIBRARY=$<TARGET_FILE:pyre>")

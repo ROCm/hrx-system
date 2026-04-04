@@ -34,7 +34,7 @@ TEST_CASE_METHOD(PyreTestFixture, "allocator_allocate_buffer device local",
   REQUIRE_OK(pyre().buffer_get_size(buf, &size));
   REQUIRE(size == 4096);
 
-  REQUIRE_OK(pyre().buffer_release(buf));
+  pyre().buffer_release(buf);
 }
 
 TEST_CASE_METHOD(PyreTestFixture, "allocator_allocate_buffer host mappable",
@@ -55,7 +55,7 @@ TEST_CASE_METHOD(PyreTestFixture, "allocator_allocate_buffer host mappable",
   memset(ptr, 0xCD, 256);
   REQUIRE_OK(pyre().buffer_unmap(buf));
 
-  REQUIRE_OK(pyre().buffer_release(buf));
+  pyre().buffer_release(buf);
 }
 
 TEST_CASE_METHOD(PyreTestFixture, "allocator_import_buffer from host ptr",
@@ -82,7 +82,7 @@ TEST_CASE_METHOD(PyreTestFixture, "allocator_import_buffer from host ptr",
   REQUIRE_OK(pyre().buffer_get_size(buf, &size));
   REQUIRE(size == 128);
 
-  REQUIRE_OK(pyre().buffer_release(buf));
+  pyre().buffer_release(buf);
   pyre().host_allocator_free_aligned(ha, host_raw);
 }
 
@@ -90,6 +90,6 @@ TEST_CASE_METHOD(PyreTestFixture, "allocator retain/release",
                  "[allocator][refcount]") {
   pyre_allocator_t alloc = pyre().device_allocator(device_);
   // Retain then release — should not crash.
-  REQUIRE_OK(pyre().allocator_retain(alloc));
-  REQUIRE_OK(pyre().allocator_release(alloc));
+  pyre().allocator_retain(alloc);
+  pyre().allocator_release(alloc);
 }

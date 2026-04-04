@@ -5,33 +5,18 @@
 
 #include <string.h>
 
-//===----------------------------------------------------------------------===//
-// Allocator
-//===----------------------------------------------------------------------===//
-
 pyre_allocator_t pyre_device_allocator(pyre_device_t device) {
   return &device->allocator;
 }
 
-pyre_status_t pyre_allocator_retain(pyre_allocator_t allocator) {
-  if (!allocator) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT, "allocator is NULL");
-  }
-  iree_atomic_ref_count_inc(&allocator->ref_count);
-  return pyre_ok_status();
+void pyre_allocator_retain(pyre_allocator_t allocator) {
+  iree_hal_allocator_retain(allocator->hal_allocator);
+  pyre_device_retain(allocator->device);
 }
 
-pyre_status_t pyre_allocator_release(pyre_allocator_t allocator) {
-  if (!allocator) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT, "allocator is NULL");
-  }
-  // The allocator is inline in the device — release just decrements the
-  // refcount. The actual hal_allocator is released when the device is
-  // destroyed. This release is only for explicit retain/release pairs.
-  if (iree_atomic_ref_count_dec(&allocator->ref_count) == 1) {
-    // Refcount hit zero — but allocator is owned by device, not freed here.
-  }
-  return pyre_ok_status();
+void pyre_allocator_release(pyre_allocator_t allocator) {
+  iree_hal_allocator_release(allocator->hal_allocator);
+  pyre_device_release(allocator->device);
 }
 
 pyre_status_t pyre_allocator_allocate_buffer(pyre_allocator_t allocator,
@@ -70,6 +55,7 @@ pyre_status_t pyre_allocator_allocate_buffer(pyre_allocator_t allocator,
   iree_atomic_ref_count_init(&buf->ref_count);
   buf->hal_buffer = hal_buffer;
   buf->device = allocator->device;
+  pyre_device_retain(buf->device);
   buf->mem_type = params.type;
   buf->size = size;
   *buffer = buf;
@@ -119,6 +105,7 @@ pyre_status_t pyre_allocator_import_buffer(pyre_allocator_t allocator,
   iree_atomic_ref_count_init(&buf->ref_count);
   buf->hal_buffer = hal_buffer;
   buf->device = allocator->device;
+  pyre_device_retain(buf->device);
   buf->mem_type = params.type;
   buf->size = size;
   *buffer = buf;
@@ -195,6 +182,7 @@ pyre_status_t pyre_allocator_virtual_memory_reserve(
   iree_atomic_ref_count_init(&buf->ref_count);
   buf->hal_buffer = hal_buffer;
   buf->device = allocator->device;
+  pyre_device_retain(buf->device);
   buf->mem_type = PYRE_MEMORY_TYPE_DEVICE_LOCAL;
   buf->size = size;
   *virtual_buffer = buf;
@@ -210,6 +198,7 @@ pyre_status_t pyre_allocator_virtual_memory_release(
       allocator->hal_allocator, virtual_buffer->hal_buffer);
   // Free the pyre wrapper (hal_buffer ownership transferred).
   virtual_buffer->hal_buffer = NULL;
+  pyre_device_release(virtual_buffer->device);
   iree_allocator_free(iree_allocator_system(), virtual_buffer);
   return pyre_status_from_iree(status);
 }

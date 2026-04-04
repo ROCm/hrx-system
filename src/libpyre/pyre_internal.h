@@ -5,14 +5,18 @@
 #define PYRE_INTERNAL_H_
 
 #include "pyre_runtime.h"
+#include "pyre_compiler.h"
 
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/local_task/task_driver.h"
 #include "iree/hal/local/loaders/registration/init.h"
+#include "iree/modules/hal/module.h"
+#include "iree/modules/hal/types.h"
 #include "iree/task/api.h"
 #include "iree/vm/api.h"
+#include "iree/vm/bytecode/module.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -84,6 +88,43 @@ _Static_assert(PYRE_BUFFER_USAGE_DISPATCH_STORAGE ==
                "buffer usage mismatch");
 _Static_assert(PYRE_BUFFER_USAGE_DEFAULT == IREE_HAL_BUFFER_USAGE_DEFAULT,
                "buffer usage mismatch");
+
+// Buffer view metadata.
+_Static_assert(PYRE_ELEMENT_TYPE_NONE == IREE_HAL_ELEMENT_TYPE_NONE,
+               "element type mismatch");
+_Static_assert(PYRE_ELEMENT_TYPE_OPAQUE_8 == IREE_HAL_ELEMENT_TYPE_OPAQUE_8,
+               "element type mismatch");
+_Static_assert(PYRE_ELEMENT_TYPE_BOOL_8 == IREE_HAL_ELEMENT_TYPE_BOOL_8,
+               "element type mismatch");
+_Static_assert(PYRE_ELEMENT_TYPE_INT_16 == IREE_HAL_ELEMENT_TYPE_INT_16,
+               "element type mismatch");
+_Static_assert(PYRE_ELEMENT_TYPE_UINT_8 == IREE_HAL_ELEMENT_TYPE_UINT_8,
+               "element type mismatch");
+_Static_assert(PYRE_ELEMENT_TYPE_INT_32 == IREE_HAL_ELEMENT_TYPE_INT_32,
+               "element type mismatch");
+_Static_assert(PYRE_ELEMENT_TYPE_INT_64 == IREE_HAL_ELEMENT_TYPE_INT_64,
+               "element type mismatch");
+_Static_assert(PYRE_ELEMENT_TYPE_SINT_8 == IREE_HAL_ELEMENT_TYPE_SINT_8,
+               "element type mismatch");
+_Static_assert(PYRE_ELEMENT_TYPE_SINT_16 == IREE_HAL_ELEMENT_TYPE_SINT_16,
+               "element type mismatch");
+_Static_assert(PYRE_ELEMENT_TYPE_SINT_32 == IREE_HAL_ELEMENT_TYPE_SINT_32,
+               "element type mismatch");
+_Static_assert(PYRE_ELEMENT_TYPE_SINT_64 == IREE_HAL_ELEMENT_TYPE_SINT_64,
+               "element type mismatch");
+_Static_assert(PYRE_ELEMENT_TYPE_FLOAT_16 == IREE_HAL_ELEMENT_TYPE_FLOAT_16,
+               "element type mismatch");
+_Static_assert(PYRE_ELEMENT_TYPE_FLOAT_32 == IREE_HAL_ELEMENT_TYPE_FLOAT_32,
+               "element type mismatch");
+_Static_assert(PYRE_ELEMENT_TYPE_FLOAT_64 == IREE_HAL_ELEMENT_TYPE_FLOAT_64,
+               "element type mismatch");
+_Static_assert(PYRE_ELEMENT_TYPE_BFLOAT_16 == IREE_HAL_ELEMENT_TYPE_BFLOAT_16,
+               "element type mismatch");
+_Static_assert(PYRE_ENCODING_TYPE_OPAQUE == IREE_HAL_ENCODING_TYPE_OPAQUE,
+               "encoding type mismatch");
+_Static_assert(PYRE_ENCODING_TYPE_DENSE_ROW_MAJOR ==
+                   IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
+               "encoding type mismatch");
 
 // Memory protection bitfield.
 _Static_assert(PYRE_MEMORY_PROTECTION_NONE == IREE_HAL_MEMORY_PROTECTION_NONE,
@@ -159,6 +200,85 @@ typedef struct pyre_buffer_s {
   void* mapped_ptr;
 } pyre_buffer_s;
 
+// Loaded VM module with a context containing HAL + bytecode modules.
+typedef struct pyre_module_s {
+  iree_atomic_ref_count_t ref_count;
+  pyre_device_t device;
+  iree_vm_module_t* bytecode_module;
+  iree_vm_module_t* hal_module;
+  iree_vm_context_t* context;
+} pyre_module_s;
+
+// Resolved VM function retained with its parent module.
+typedef struct pyre_function_s {
+  iree_atomic_ref_count_t ref_count;
+  pyre_module_t module;
+  iree_vm_function_t vm_function;
+} pyre_function_s;
+
+// Growable VM argument/result list.
+typedef struct pyre_value_list_s {
+  iree_atomic_ref_count_t ref_count;
+  iree_vm_list_t* vm_list;
+} pyre_value_list_s;
+
+// Timeline fence wrapper.
+typedef struct pyre_fence_s {
+  iree_atomic_ref_count_t ref_count;
+  iree_hal_fence_t* hal_fence;
+} pyre_fence_s;
+
+// Buffer view wrapper.
+typedef struct pyre_buffer_view_s {
+  iree_atomic_ref_count_t ref_count;
+  iree_hal_buffer_view_t* hal_buffer_view;
+} pyre_buffer_view_s;
+
+// HAL executable wrapper for direct queue/stream dispatch.
+typedef struct pyre_executable_s {
+  iree_atomic_ref_count_t ref_count;
+  iree_hal_executable_t* hal_executable;
+  pyre_device_t device;
+} pyre_executable_s;
+
+// Forward declarations from the IREE compiler embedding API. The concrete
+// definitions stay private to the compiler implementation TU.
+typedef struct iree_compiler_session_t iree_compiler_session_t;
+typedef struct iree_compiler_output_t iree_compiler_output_t;
+
+// Compiler frontend configuration.
+typedef struct pyre_compiler_s {
+  iree_atomic_ref_count_t ref_count;
+  pyre_compiler_backend_t backend;
+  char* cli_path;
+} pyre_compiler_s;
+
+// Session-local compiler state. For the dylib backend this owns an
+// iree_compiler_session_t with its MLIRContext and flags. For the CLI backend
+// this stores copied flags used when launching iree-compile.
+typedef struct pyre_compiler_session_s {
+  iree_atomic_ref_count_t ref_count;
+  pyre_compiler_t compiler;
+  iree_compiler_session_t* iree_session;
+  char** flags;
+  size_t flag_count;
+} pyre_compiler_session_s;
+
+// Compiled VMFB artifact. The payload is either an IREE compiler output object
+// with mapped in-memory storage or a host-allocated byte buffer from the CLI
+// backend.
+typedef void (*pyre_compiler_output_destroy_fn_t)(
+    pyre_compiler_output_t output);
+
+typedef struct pyre_compiler_output_s {
+  iree_atomic_ref_count_t ref_count;
+  const uint8_t* data;
+  size_t size;
+  void* impl;
+  pyre_compiler_output_destroy_fn_t destroy;
+  pyre_host_allocator_t host_allocator;
+} pyre_compiler_output_s;
+
 //===----------------------------------------------------------------------===//
 // Global state
 //===----------------------------------------------------------------------===//
@@ -195,6 +315,9 @@ pyre_status_t pyre_ensure_shared_state(void);
 
 // Convert iree_status_t to pyre_status_t.
 pyre_status_t pyre_status_from_iree(iree_status_t iree_status);
+
+// Convert pyre_status_t back to iree_status_t and consume the pyre status.
+iree_status_t pyre_status_to_iree(pyre_status_t status);
 
 #ifdef __cplusplus
 }

@@ -11,10 +11,15 @@ set(PYRE_SOURCES
     semaphore.c
     stream.c
     buffer.c
+    buffer_view.c
+    fence.c
+    module.c
     transfer.c
     host_allocator.c
     queue_ops.c
-    stubs.c
+    value_list.c
+    compiler.cpp
+    ${PYRE_IREE_SOURCE_DIR}/compiler/bindings/c/iree/compiler/loader/loader.cpp
 )
 
 set(PYRE_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/include)
@@ -27,13 +32,16 @@ target_include_directories(pyre
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${PROJECT_SOURCE_DIR}/src
+        ${PYRE_IREE_SOURCE_DIR}/compiler/bindings/c
 )
 target_link_libraries(pyre PRIVATE
+    ${CMAKE_DL_LIBS}
     hsa-runtime64::hsa-runtime64
     pyre_hsa_registration
     iree_async_util_proactor_pool
     iree_hal_drivers_local_task_task_driver
     iree_hal_local_loaders_registration_registration
+    iree_modules_hal_hal
     iree_vm_vm
 )
 target_compile_definitions(pyre PRIVATE PYRE_BUILDING_SHARED PYRE_HAS_HSA_DRIVER)

@@ -257,15 +257,7 @@ pyre_status_t pyre_cpu_shutdown(void) {
   }
 
   for (int i = 0; i < g_cpu.device_count; i++) {
-    pyre_device_s* dev = &g_cpu.devices[i];
-    if (dev->allocator.hal_allocator) {
-      iree_hal_allocator_release(dev->allocator.hal_allocator);
-      dev->allocator.hal_allocator = NULL;
-    }
-    if (dev->hal_device) {
-      iree_hal_device_release(dev->hal_device);
-      dev->hal_device = NULL;
-    }
+    pyre_device_release(&g_cpu.devices[i]);
   }
   if (g_cpu.driver) {
     iree_hal_driver_release(g_cpu.driver);
@@ -383,8 +375,7 @@ pyre_status_t pyre_gpu_initialize(uint32_t flags) {
         &create_params, alloc, &hal_device);
     if (!iree_status_is_ok(iree_status)) {
       for (int j = 0; j < i; j++) {
-        iree_hal_allocator_release(g_gpu.devices[j].allocator.hal_allocator);
-        iree_hal_device_release(g_gpu.devices[j].hal_device);
+        pyre_device_release(&g_gpu.devices[j]);
       }
       iree_allocator_free(alloc, device_infos);
       iree_hal_driver_release(driver);
@@ -400,8 +391,8 @@ pyre_status_t pyre_gpu_initialize(uint32_t flags) {
     dev->hal_device = hal_device;
     dev->allocator.hal_allocator = iree_hal_device_allocator(hal_device);
     iree_hal_allocator_retain(dev->allocator.hal_allocator);
-  iree_atomic_ref_count_init(&dev->allocator.ref_count);
-  dev->allocator.device = dev;
+    iree_atomic_ref_count_init(&dev->allocator.ref_count);
+    dev->allocator.device = dev;
 
     iree_host_size_t name_len = device_infos[i].name.size;
     if (name_len >= sizeof(dev->name)) name_len = sizeof(dev->name) - 1;
@@ -432,15 +423,7 @@ pyre_status_t pyre_gpu_shutdown(void) {
   }
 
   for (int i = 0; i < g_gpu.device_count; i++) {
-    pyre_device_s* dev = &g_gpu.devices[i];
-    if (dev->allocator.hal_allocator) {
-      iree_hal_allocator_release(dev->allocator.hal_allocator);
-      dev->allocator.hal_allocator = NULL;
-    }
-    if (dev->hal_device) {
-      iree_hal_device_release(dev->hal_device);
-      dev->hal_device = NULL;
-    }
+    pyre_device_release(&g_gpu.devices[i]);
   }
   if (g_gpu.driver) {
     iree_hal_driver_release(g_gpu.driver);

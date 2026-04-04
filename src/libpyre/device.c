@@ -87,20 +87,17 @@ pyre_status_t pyre_device_get_type(pyre_device_t device,
   return pyre_ok_status();
 }
 
-pyre_status_t pyre_device_retain(pyre_device_t device) {
-  if (!device) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT, "device is NULL");
-  }
+void pyre_device_retain(pyre_device_t device) {
+  iree_hal_device_retain(device->hal_device);
   iree_atomic_ref_count_inc(&device->ref_count);
-  return pyre_ok_status();
 }
 
-pyre_status_t pyre_device_release(pyre_device_t device) {
-  if (!device) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT, "device is NULL");
+void pyre_device_release(pyre_device_t device) {
+  iree_hal_device_t* hal_device = device->hal_device;
+  if (iree_atomic_ref_count_dec(&device->ref_count) == 1) {
+    iree_hal_allocator_release(device->allocator.hal_allocator);
+    device->allocator.hal_allocator = NULL;
+    device->hal_device = NULL;
   }
-  // Devices are owned by the accelerator state, not individually freed.
-  // Release just decrements the refcount for tracking.
-  // Actual cleanup happens in pyre_{cpu,gpu}_shutdown.
-  return pyre_ok_status();
+  iree_hal_device_release(hal_device);
 }

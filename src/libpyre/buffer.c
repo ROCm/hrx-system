@@ -31,11 +31,34 @@ pyre_status_t pyre_buffer_allocate(pyre_stream_t stream, size_t size,
 
   iree_hal_buffer_params_t params = {
       .type = (iree_hal_memory_type_t)mem_type,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
       .usage = (iree_hal_buffer_usage_t)usage,
   };
 
-  iree_status_t status = iree_hal_allocator_allocate_buffer(
-      stream->device->allocator.hal_allocator, params, (iree_device_size_t)size,
+  pyre_status_t flush_status = pyre_stream_flush(stream);
+  if (!pyre_status_is_ok(flush_status)) {
+    iree_allocator_free(iree_allocator_system(), buf);
+    return flush_status;
+  }
+
+  uint64_t wait_value = stream->timepoint;
+  uint64_t signal_value = stream->timepoint + 1;
+  iree_hal_semaphore_t* sem = stream->semaphore->hal_semaphore;
+  iree_hal_semaphore_list_t wait_list = {
+      .count = (stream->timepoint > 0) ? 1 : 0,
+      .semaphores = &sem,
+      .payload_values = &wait_value,
+  };
+  iree_hal_semaphore_list_t signal_list = {
+      .count = 1,
+      .semaphores = &sem,
+      .payload_values = &signal_value,
+  };
+
+  iree_status_t status = iree_hal_device_queue_alloca(
+      stream->device->hal_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_list,
+      signal_list, IREE_HAL_ALLOCATOR_POOL_DEFAULT, params,
+      (iree_device_size_t)size, IREE_HAL_ALLOCA_FLAG_NONE,
       &buf->hal_buffer);
   if (!iree_status_is_ok(status)) {
     iree_allocator_free(iree_allocator_system(), buf);
@@ -44,26 +67,25 @@ pyre_status_t pyre_buffer_allocate(pyre_stream_t stream, size_t size,
 
   iree_atomic_ref_count_init(&buf->ref_count);
   buf->device = stream->device;
+  pyre_device_retain(buf->device);
   buf->mem_type = mem_type;
   buf->size = size;
   buf->mapped_ptr = NULL;
+  stream->timepoint = signal_value;
 
   *buffer = buf;
   return pyre_ok_status();
 }
 
-pyre_status_t pyre_buffer_retain(pyre_buffer_t buffer) {
-  if (!buffer) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT, "buffer is NULL");
-  }
+void pyre_buffer_retain(pyre_buffer_t buffer) {
+  iree_hal_buffer_retain(buffer->hal_buffer);
+  pyre_device_retain(buffer->device);
   iree_atomic_ref_count_inc(&buffer->ref_count);
-  return pyre_ok_status();
 }
 
-pyre_status_t pyre_buffer_release(pyre_buffer_t buffer) {
-  if (!buffer) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT, "buffer is NULL");
-  }
+void pyre_buffer_release(pyre_buffer_t buffer) {
+  iree_hal_buffer_t* hal_buffer = buffer->hal_buffer;
+  pyre_device_t device = buffer->device;
   if (iree_atomic_ref_count_dec(&buffer->ref_count) == 1) {
     if (buffer->mapped_ptr) {
       iree_hal_buffer_unmap_range(
@@ -72,12 +94,10 @@ pyre_status_t pyre_buffer_release(pyre_buffer_t buffer) {
               .data_length = buffer->size,
           }});
     }
-    if (buffer->hal_buffer) {
-      iree_hal_buffer_release(buffer->hal_buffer);
-    }
     iree_allocator_free(iree_allocator_system(), buffer);
   }
-  return pyre_ok_status();
+  iree_hal_buffer_release(hal_buffer);
+  pyre_device_release(device);
 }
 
 pyre_status_t pyre_buffer_map(pyre_buffer_t buffer, pyre_map_flags_t flags,

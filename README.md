@@ -19,6 +19,29 @@ cmake -B build sources/pyre-runtime \
 cmake --build build
 ```
 
+## Consuming with CMake
+
+`pyre-runtime` exports `pyre::pyre` from both the build tree and an install
+prefix.
+
+```bash
+# Build-tree package
+cmake -S sources/pyre-runtime/cts/package_smoke \
+  -B build/pyre-package-smoke \
+  -Dpyre_DIR=build/cmake/pyre
+cmake --build build/pyre-package-smoke
+
+# Install-tree package
+cmake --install build --prefix build/pyre-runtime-install
+cmake -S sources/pyre-runtime/cts/package_smoke \
+  -B build/pyre-package-smoke-install \
+  -DCMAKE_PREFIX_PATH=build/pyre-runtime-install
+cmake --build build/pyre-package-smoke-install
+
+# If libhsa-runtime64.so.1 is not in the default loader path:
+LD_LIBRARY_PATH=/path/to/rocm/lib ./build/pyre-package-smoke-install/pyre_package_smoke
+```
+
 ### CMake Options
 
 | Option | Default | Description |
@@ -73,6 +96,8 @@ ctest --test-dir build --output-on-failure
 ### API Surface
 
 - **Status**: error codes, messages, ignore
+- **C++ helpers**: `pyre_runtime_cxx.h` provides status formatting and RAII
+  wrappers for all retained handles.
 - **Accelerator namespaces**: GPU and CPU init/shutdown/enumerate independently
 - **Device**: properties, sync, type query. Generic once obtained.
 - **Semaphores**: timeline synchronization primitives (create/signal/wait/query)
@@ -103,5 +128,6 @@ src/                        Implementation
 tools/pyre_info.c           CLI tool
 cmake/                      Build config, version script, find_package
 cts/                        Conformance test suite (Catch2 v3)
+  package_smoke/            Standalone find_package(pyre) smoke consumer
 docs/                       SOURCE_PROVENANCE.md
 ```

@@ -227,17 +227,40 @@ endif()
 #===------------------------------------------------------------------------===#
 
 include(CMakePackageConfigHelpers)
+include(GNUInstallDirs)
+
+add_library(pyre::pyre ALIAS pyre)
+
+set(_pyre_cmake_package_dir "${CMAKE_INSTALL_LIBDIR}/cmake/pyre")
+set(_pyre_build_package_dir "${CMAKE_CURRENT_BINARY_DIR}/cmake/pyre")
+
 install(TARGETS pyre EXPORT pyre-targets
-    LIBRARY DESTINATION lib
-    ARCHIVE DESTINATION lib
-    INCLUDES DESTINATION include/pyre)
-install(FILES include/pyre_runtime.h DESTINATION include/pyre)
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/pyre)
+install(FILES
+    include/pyre_compiler.h
+    include/pyre_compiler_cxx.h
+    include/pyre_runtime.h
+    include/pyre_runtime_cxx.h
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/pyre)
 install(EXPORT pyre-targets
     NAMESPACE pyre::
-    DESTINATION lib/cmake/pyre)
+    DESTINATION ${_pyre_cmake_package_dir})
+
 configure_package_config_file(
     cmake/pyre-config.cmake.in
-    ${CMAKE_CURRENT_BINARY_DIR}/pyre-config.cmake
-    INSTALL_DESTINATION lib/cmake/pyre)
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/pyre-config.cmake
-    DESTINATION lib/cmake/pyre)
+    ${_pyre_build_package_dir}/pyre-config.cmake
+    INSTALL_DESTINATION ${_pyre_cmake_package_dir})
+write_basic_package_version_file(
+    ${_pyre_build_package_dir}/pyre-config-version.cmake
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion)
+export(EXPORT pyre-targets
+    NAMESPACE pyre::
+    FILE ${_pyre_build_package_dir}/pyre-targets.cmake)
+
+install(FILES
+    ${_pyre_build_package_dir}/pyre-config.cmake
+    ${_pyre_build_package_dir}/pyre-config-version.cmake
+    DESTINATION ${_pyre_cmake_package_dir})

@@ -28,8 +28,8 @@ TEST_CASE_METHOD(PyreTestFixture, "Stream fill buffer",
   }
   REQUIRE_OK(pyre().buffer_unmap(buf));
 
-  REQUIRE_OK(pyre().buffer_release(buf));
-  REQUIRE_OK(pyre().stream_release(stream));
+  pyre().buffer_release(buf);
+  pyre().stream_release(stream);
 }
 
 TEST_CASE_METHOD(PyreTestFixture, "Stream copy buffer",
@@ -63,9 +63,9 @@ TEST_CASE_METHOD(PyreTestFixture, "Stream copy buffer",
   }
   REQUIRE_OK(pyre().buffer_unmap(dst));
 
-  REQUIRE_OK(pyre().buffer_release(dst));
-  REQUIRE_OK(pyre().buffer_release(src));
-  REQUIRE_OK(pyre().stream_release(stream));
+  pyre().buffer_release(dst);
+  pyre().buffer_release(src);
+  pyre().stream_release(stream);
 }
 
 TEST_CASE_METHOD(PyreTestFixture, "Stream update buffer",
@@ -92,6 +92,40 @@ TEST_CASE_METHOD(PyreTestFixture, "Stream update buffer",
   }
   REQUIRE_OK(pyre().buffer_unmap(buf));
 
-  REQUIRE_OK(pyre().buffer_release(buf));
-  REQUIRE_OK(pyre().stream_release(stream));
+  pyre().buffer_release(buf);
+  pyre().stream_release(stream);
+}
+
+TEST_CASE_METHOD(PyreTestFixture, "Stream execution barrier",
+                 "[stream_ops][barrier]") {
+  pyre_stream_t stream = nullptr;
+  REQUIRE_OK(pyre().stream_create(device_, 0, &stream));
+
+  pyre_buffer_t buf = nullptr;
+  REQUIRE_OK(pyre().buffer_allocate(
+      stream, 64,
+      PYRE_MEMORY_TYPE_HOST_LOCAL | PYRE_MEMORY_TYPE_DEVICE_VISIBLE,
+      PYRE_BUFFER_USAGE_DEFAULT | PYRE_BUFFER_USAGE_MAPPING_SCOPED, &buf));
+
+  uint32_t first = 0x11223344;
+  uint32_t second = 0x55667788;
+  REQUIRE_OK(pyre().stream_fill_buffer(
+      stream, buf, 0, 32, &first, sizeof(first)));
+  REQUIRE_OK(pyre().stream_execution_barrier(stream));
+  REQUIRE_OK(pyre().stream_fill_buffer(
+      stream, buf, 32, 32, &second, sizeof(second)));
+  REQUIRE_OK(pyre().stream_flush(stream));
+  REQUIRE_OK(pyre().stream_synchronize(stream));
+
+  void* ptr = nullptr;
+  REQUIRE_OK(pyre().buffer_map(buf, PYRE_MAP_READ, 0, 64, &ptr));
+  const uint32_t* data = static_cast<const uint32_t*>(ptr);
+  for (int i = 0; i < 8; ++i) {
+    REQUIRE(data[i] == first);
+    REQUIRE(data[8 + i] == second);
+  }
+  REQUIRE_OK(pyre().buffer_unmap(buf));
+
+  pyre().buffer_release(buf);
+  pyre().stream_release(stream);
 }

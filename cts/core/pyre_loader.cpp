@@ -104,6 +104,8 @@ void PyreLoader::load(const std::string& path) {
   LOAD(stream_get_semaphore);
   LOAD(stream_get_timeline_position);
   LOAD(stream_wait_on);
+  LOAD(stream_dispatch);
+  LOAD(stream_execution_barrier);
 
   LOAD(device_allocator);
   LOAD(allocator_retain);
@@ -129,6 +131,42 @@ void PyreLoader::load(const std::string& path) {
   LOAD(queue_fill);
   LOAD(queue_copy);
   LOAD(queue_barrier);
+  LOAD(queue_dispatch);
+  LOAD(queue_host_call);
+
+  LOAD(module_load_vmfb);
+  LOAD(module_retain);
+  LOAD(module_release);
+  LOAD(module_lookup_function);
+  LOAD(function_retain);
+  LOAD(function_release);
+  LOAD(function_invoke);
+
+  LOAD(value_list_create);
+  LOAD(value_list_retain);
+  LOAD(value_list_release);
+  LOAD(value_list_size);
+  LOAD(value_list_push_i64);
+  LOAD(value_list_get_i64);
+  LOAD(value_list_push_null_ref);
+  LOAD(value_list_push_buffer);
+  LOAD(value_list_push_buffer_view);
+  LOAD(value_list_push_fence);
+
+  LOAD(fence_create);
+  LOAD(fence_create_at);
+  LOAD(fence_retain);
+  LOAD(fence_release);
+  LOAD(fence_insert);
+  LOAD(fence_extend);
+  LOAD(fence_signal);
+  LOAD(fence_wait);
+
+  LOAD(buffer_view_create);
+  LOAD(buffer_view_retain);
+  LOAD(buffer_view_release);
+  LOAD(buffer_view_rank);
+  LOAD(buffer_view_dim);
 
   LOAD(allocator_query_virtual_memory);
   LOAD(allocator_virtual_memory_reserve);

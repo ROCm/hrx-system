@@ -13,7 +13,7 @@ TEST_CASE_METHOD(PyreTestFixture, "Semaphore create and query",
   REQUIRE_OK(pyre().semaphore_query(sem, &value));
   REQUIRE(value == 0);
 
-  REQUIRE_OK(pyre().semaphore_release(sem));
+  pyre().semaphore_release(sem);
 }
 
 TEST_CASE_METHOD(PyreTestFixture, "Semaphore signal and query",
@@ -27,7 +27,7 @@ TEST_CASE_METHOD(PyreTestFixture, "Semaphore signal and query",
   REQUIRE_OK(pyre().semaphore_query(sem, &value));
   REQUIRE(value == 42);
 
-  REQUIRE_OK(pyre().semaphore_release(sem));
+  pyre().semaphore_release(sem);
 }
 
 TEST_CASE_METHOD(PyreTestFixture, "Semaphore wait after signal",
@@ -38,7 +38,7 @@ TEST_CASE_METHOD(PyreTestFixture, "Semaphore wait after signal",
   REQUIRE_OK(pyre().semaphore_signal(sem, 1));
   REQUIRE_OK(pyre().semaphore_wait(sem, 1, UINT64_MAX));
 
-  REQUIRE_OK(pyre().semaphore_release(sem));
+  pyre().semaphore_release(sem);
 }
 
 TEST_CASE_METHOD(PyreTestFixture, "Semaphore poll returns immediately",
@@ -49,5 +49,5 @@ TEST_CASE_METHOD(PyreTestFixture, "Semaphore poll returns immediately",
   // Wait with timeout=0 (poll) for already-reached value.
   REQUIRE_OK(pyre().semaphore_wait(sem, 5, 0));
 
-  REQUIRE_OK(pyre().semaphore_release(sem));
+  pyre().semaphore_release(sem);
 }

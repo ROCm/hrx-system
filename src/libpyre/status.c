@@ -101,3 +101,16 @@ pyre_status_t pyre_status_from_iree(iree_status_t iree_status) {
   iree_status_ignore(iree_status);
   return result;
 }
+
+iree_status_t pyre_status_to_iree(pyre_status_t status) {
+  if (pyre_status_is_ok(status)) return iree_ok_status();
+  iree_status_code_t code = (iree_status_code_t)status->code;
+  if (status->code == PYRE_STATUS_OUT_OF_MEMORY) {
+    code = IREE_STATUS_RESOURCE_EXHAUSTED;
+  }
+  iree_status_t result = iree_make_status(code, "%s",
+                                          status->message ? status->message
+                                                          : "(no message)");
+  pyre_status_ignore(status);
+  return result;
+}

@@ -135,9 +135,9 @@ static int run_device_smoke_test(pyre_device_t device, const char* label) {
   if (ok) printf("  Verify data: OK\n");
 
   // Release.
-  CHECK_STATUS(pyre_buffer_release(buffer2));
-  CHECK_STATUS(pyre_buffer_release(buffer));
-  CHECK_STATUS(pyre_stream_release(stream));
+  pyre_buffer_release(buffer2);
+  pyre_buffer_release(buffer);
+  pyre_stream_release(stream);
   printf("  Release: OK\n");
 
   return ok ? 0 : 1;

@@ -27,7 +27,7 @@ TEST_CASE_METHOD(PyreTestFixture, "synchronous_h2d basic",
   REQUIRE(memcmp(mapped, src, 256) == 0);
   REQUIRE_OK(pyre().buffer_unmap(buf));
 
-  REQUIRE_OK(pyre().buffer_release(buf));
+  pyre().buffer_release(buf);
 }
 
 TEST_CASE_METHOD(PyreTestFixture, "synchronous_d2h basic",
@@ -55,7 +55,7 @@ TEST_CASE_METHOD(PyreTestFixture, "synchronous_d2h basic",
     REQUIRE(dst[i] == 0x99);
   }
 
-  REQUIRE_OK(pyre().buffer_release(buf));
+  pyre().buffer_release(buf);
 }
 
 TEST_CASE_METHOD(PyreTestFixture, "synchronous h2d then d2h roundtrip",
@@ -81,7 +81,7 @@ TEST_CASE_METHOD(PyreTestFixture, "synchronous h2d then d2h roundtrip",
 
   REQUIRE(memcmp(pattern, readback, sizeof(pattern)) == 0);
 
-  REQUIRE_OK(pyre().buffer_release(buf));
+  pyre().buffer_release(buf);
 }
 
 TEST_CASE_METHOD(PyreTestFixture, "synchronous_h2d out of range fails",
@@ -101,5 +101,5 @@ TEST_CASE_METHOD(PyreTestFixture, "synchronous_h2d out of range fails",
   REQUIRE(!pyre_status_is_ok(s));
   pyre().status_ignore(s);
 
-  REQUIRE_OK(pyre().buffer_release(buf));
+  pyre().buffer_release(buf);
 }
