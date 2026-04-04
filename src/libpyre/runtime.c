@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "hsa/hsa.h"
+#include "iree/modules/hal/types.h"
 
 #ifdef PYRE_HAS_HSA_DRIVER
 #include "hsa_driver/api.h"
@@ -63,6 +64,12 @@ pyre_status_t pyre_ensure_shared_state(void) {
       iree_vm_instance_create(IREE_VM_TYPE_CAPACITY_DEFAULT,
                               g_shared.host_allocator, &g_shared.vm_instance);
   if (!iree_status_is_ok(status)) {
+    return pyre_status_from_iree(status);
+  }
+  status = iree_hal_module_register_all_types(g_shared.vm_instance);
+  if (!iree_status_is_ok(status)) {
+    iree_vm_instance_release(g_shared.vm_instance);
+    g_shared.vm_instance = NULL;
     return pyre_status_from_iree(status);
   }
 
