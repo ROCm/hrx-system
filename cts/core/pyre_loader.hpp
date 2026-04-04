@@ -82,6 +82,7 @@ class PyreLoader {
   decltype(&pyre_stream_query) stream_query;
   decltype(&pyre_stream_flush) stream_flush;
   decltype(&pyre_stream_get_semaphore) stream_get_semaphore;
+  decltype(&pyre_stream_get_device) stream_get_device;
   decltype(&pyre_stream_get_timeline_position) stream_get_timeline_position;
   decltype(&pyre_stream_wait_on) stream_wait_on;
   decltype(&pyre_stream_dispatch) stream_dispatch;

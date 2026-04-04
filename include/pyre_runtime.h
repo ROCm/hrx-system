@@ -340,6 +340,11 @@ PYRE_API pyre_status_t pyre_semaphore_signal(pyre_semaphore_t semaphore,
 
 //===----------------------------------------------------------------------===//
 // Streams (high-level execution contexts)
+//
+// pyre_stream_t is the canonical owner of a stream timeline/semaphore inside
+// libpyre. Frontend stream objects should retain a pyre_stream_t and query the
+// owning device or timeline via accessors instead of creating a second backend
+// timeline universe.
 //===----------------------------------------------------------------------===//
 
 PYRE_API pyre_status_t pyre_stream_create(pyre_device_t device, uint32_t flags,
@@ -356,6 +361,12 @@ PYRE_API pyre_status_t pyre_stream_flush(pyre_stream_t stream);
 
 PYRE_API pyre_status_t pyre_stream_get_semaphore(
     pyre_stream_t stream, pyre_semaphore_t* semaphore);
+
+// Returns the device that owns this stream. The returned pointer is borrowed
+// and remains valid while |stream| is retained. Call pyre_device_retain() if a
+// longer-lived reference is needed.
+PYRE_API pyre_status_t pyre_stream_get_device(pyre_stream_t stream,
+                                              pyre_device_t* device);
 
 PYRE_API pyre_status_t pyre_stream_get_timeline_position(
     pyre_stream_t stream, pyre_timeline_point_t* position);

@@ -11,6 +11,17 @@ TEST_CASE_METHOD(PyreTestFixture, "Stream create and release", "[stream]") {
   pyre().stream_release(stream);
 }
 
+TEST_CASE_METHOD(PyreTestFixture, "Stream reports owning device", "[stream]") {
+  pyre_stream_t stream = nullptr;
+  REQUIRE_OK(pyre().stream_create(device_, 0, &stream));
+
+  pyre_device_t stream_device = nullptr;
+  REQUIRE_OK(pyre().stream_get_device(stream, &stream_device));
+  REQUIRE(stream_device == device_);
+
+  pyre().stream_release(stream);
+}
+
 TEST_CASE_METHOD(PyreTestFixture, "Stream flush with no work", "[stream]") {
   pyre_stream_t stream = nullptr;
   REQUIRE_OK(pyre().stream_create(device_, 0, &stream));
