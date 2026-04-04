@@ -148,6 +148,7 @@ target_link_libraries(pyre_hsa_driver PUBLIC
     iree_hal_utils_queue_emulation
     iree_hal_utils_queue_host_call_emulation
     iree_hal_utils_resource_set
+    iree_schemas_amdgpu_executable_def_c_fbs
     iree_schemas_executable_debug_info_c_fbs
     iree_schemas_hip_executable_def_c_fbs
 )

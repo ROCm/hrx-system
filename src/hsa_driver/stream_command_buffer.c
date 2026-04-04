@@ -419,7 +419,7 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
   // Log dispatch info when debugging.
   // For CUSTOM_DIRECT_ARGUMENTS, always log since those are native HIP kernels.
   bool use_direct_copy_check = iree_all_bits_set(flags, IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS);
-  bool hsa_debug_should_log = use_direct_copy_check;  // Always log native HIP kernels
+  bool hsa_debug_should_log = true;
   fprintf(stderr, "[HSA_DISPATCH]   export=%u flags=0x%lx constants_len=%zu bindings=%zu\n",
           export_ordinal, (unsigned long)flags, constants.data_length, bindings.count);
   fprintf(stderr, "[HSA_DISPATCH]   workgroup=(%u,%u,%u) grid=(%u,%u,%u) local_mem=%u\n",
@@ -519,6 +519,13 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
       IREE_TRACE_ZONE_END(z0);
       return status;
     }
+    hsa_agent_t kernarg_agents[2] = {
+        command_buffer->device_info->agent,
+        command_buffer->device_info->cpu_agent,
+    };
+    IREE_HSA_IGNORE_ERROR(hsa_amd_agents_allow_access(
+        command_buffer->device_info->cpu_agent.handle ? 2 : 1, kernarg_agents,
+        NULL, kernarg_address));
   }
 
   // Set up kernarg using parameter offsets from kernel metadata.
@@ -547,6 +554,7 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
     bool use_direct_copy = iree_all_bits_set(flags, IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS);
     if (kernel_params->parameters && kernel_params->parameter_count > 0 && !use_direct_copy) {
       iree_host_size_t binding_idx = 0;
+      iree_host_size_t constant_offset = 0;
 
       for (uint32_t i = 0; i < kernel_params->parameter_count; ++i) {
         const iree_hal_executable_export_parameter_t* param =
@@ -567,6 +575,11 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
                   bindings.values[binding_idx].offset;
             }
             memcpy(dest, &buffer_ptr, sizeof(buffer_ptr));
+#if IREE_HSA_DEBUG_DISPATCH
+            fprintf(stderr,
+                    "[HSA_DISPATCH]   bind[%zu] -> kernarg+%u ptr=%p\n",
+                    binding_idx, param->offset, buffer_ptr);
+#endif
             ++binding_idx;
           } else {
             // No binding available - write NULL pointer.
@@ -575,12 +588,21 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
           }
         } else {
           // This is a constant parameter - copy from constants buffer.
-          // Constants are packed at their ABI offsets (param->offset) in the
-          // constants buffer, matching how they appear in the kernel argument
-          // buffer.
-          if (param->offset + param->size <= constants.data_length) {
-            memcpy(dest, constants.data + param->offset, param->size);
+          // Constants are packed densely in `constants`; `param->offset` is
+          // only the destination ABI offset in kernarg.
+          if (constant_offset + param->size <= constants.data_length) {
+            memcpy(dest, constants.data + constant_offset, param->size);
+#if IREE_HSA_DEBUG_DISPATCH
+            uint32_t value32 = 0;
+            if (param->size <= sizeof(value32)) {
+              memcpy(&value32, constants.data + constant_offset, param->size);
+            }
+            fprintf(stderr,
+                    "[HSA_DISPATCH]   const kernarg+%u size=%u value32=%u\n",
+                    param->offset, param->size, value32);
+#endif
           }
+          constant_offset += param->size;
         }
       }
     } else if (use_direct_copy) {
@@ -1000,12 +1022,30 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
   packet->kernarg_address = kernarg_address;
 #if IREE_HSA_DEBUG_DISPATCH
   if (hsa_debug_should_log) {
-    fprintf(stderr, "[HSA_DISPATCH] AQL packet: grid=(%u,%u,%u) wg=(%u,%u,%u) grp_seg=%u priv_seg=%u\n",
+    fprintf(stderr,
+            "[HSA_DISPATCH] AQL packet: grid=(%u,%u,%u) wg=(%u,%u,%u) "
+            "grp_seg=%u priv_seg=%u\n",
             packet->grid_size_x, packet->grid_size_y, packet->grid_size_z,
-            packet->workgroup_size_x, packet->workgroup_size_y, packet->workgroup_size_z,
-            packet->group_segment_size, packet->private_segment_size);
-    fprintf(stderr, "[HSA_DISPATCH] AQL packet: kernel_object=0x%lx kernarg_addr=%p\n",
-            (unsigned long)packet->kernel_object, packet->kernarg_address);
+            packet->workgroup_size_x, packet->workgroup_size_y,
+            packet->workgroup_size_z, packet->group_segment_size,
+            packet->private_segment_size);
+    fprintf(stderr,
+            "[HSA_DISPATCH] AQL packet: kernel_object=0x%lx "
+            "kernarg_addr=%p kernarg_size=%zu\n",
+            (unsigned long)packet->kernel_object, packet->kernarg_address,
+            kernarg_size);
+    if (kernarg_address) {
+      const uint8_t* bytes = (const uint8_t*)kernarg_address;
+      iree_host_size_t dump_size =
+          kernarg_size < 128 ? kernarg_size : (iree_host_size_t)128;
+      for (iree_host_size_t i = 0; i < dump_size; i += 16) {
+        fprintf(stderr, "[HSA_DISPATCH]   kernarg %04zu:", i);
+        for (iree_host_size_t j = 0; j < 16 && i + j < dump_size; ++j) {
+          fprintf(stderr, " %02x", bytes[i + j]);
+        }
+        fprintf(stderr, "\n");
+      }
+    }
   }
 #endif
 

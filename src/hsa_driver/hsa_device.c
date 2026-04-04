@@ -410,8 +410,14 @@ static iree_status_t iree_hal_hsa_device_query_i64(
   *out_value = 0;
 
   if (iree_string_view_equal(category, IREE_SV("hal.device.id"))) {
-    *out_value = iree_string_view_match_pattern(device->identifier, key) ? 1
-                                                                         : 0;
+    bool is_match = iree_string_view_match_pattern(device->identifier, key);
+    if (!is_match) {
+      // HACK: VMFBs compiled for IREE's ROCm backend target `hip`, but this
+      // experimental HSA driver currently identifies devices as `hsa`.
+      is_match = iree_string_view_equal(device->identifier, IREE_SV("hsa")) &&
+                 iree_string_view_match_pattern(IREE_SV("hip"), key);
+    }
+    *out_value = is_match ? 1 : 0;
     return iree_ok_status();
   }
 

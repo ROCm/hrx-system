@@ -2167,6 +2167,9 @@ void iree_hal_hsa_free_fat_binary_kernel_info(iree_allocator_t allocator,
 
   // Free any individually allocated kernel names
   for (iree_host_size_t i = 0; i < kernel_count; ++i) {
+    if (kernels[i].parameters) {
+      iree_allocator_free(allocator, kernels[i].parameters);
+    }
     if (kernels[i].allocated_name) {
       iree_allocator_free(allocator, kernels[i].allocated_name);
     }
