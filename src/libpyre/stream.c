@@ -183,6 +183,16 @@ pyre_status_t pyre_stream_get_semaphore(pyre_stream_t stream,
   return pyre_ok_status();
 }
 
+pyre_status_t pyre_stream_get_device(pyre_stream_t stream,
+                                     pyre_device_t* device) {
+  if (!stream || !device) {
+    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT,
+                            "stream or device is NULL");
+  }
+  *device = stream->device;
+  return pyre_ok_status();
+}
+
 pyre_status_t pyre_stream_get_timeline_position(
     pyre_stream_t stream, pyre_timeline_point_t* position) {
   if (!stream || !position) {

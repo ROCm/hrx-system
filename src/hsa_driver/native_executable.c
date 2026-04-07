@@ -74,6 +74,56 @@ static iree_hal_hsa_native_executable_t* iree_hal_hsa_native_executable_cast(
   return (iree_hal_hsa_native_executable_t*)base_value;
 }
 
+static iree_status_t iree_hal_hsa_read_native_flatbuffer_header(
+    iree_const_byte_span_t executable_data, bool unsafe_infer_size,
+    iree_const_byte_span_t* out_flatbuffer_data) {
+  IREE_ASSERT_ARGUMENT(out_flatbuffer_data);
+  *out_flatbuffer_data = iree_const_byte_span_empty();
+  return iree_hal_read_executable_flatbuffer_header(
+      executable_data, unsafe_infer_size,
+      iree_hal_hip_ExecutableDef_file_identifier, out_flatbuffer_data);
+}
+
+static void iree_hal_hsa_apply_parsed_kernel_metadata(
+    const iree_hal_hip_fat_binary_info_t* module_info,
+    flatbuffers_string_t kernel_name, iree_allocator_t host_allocator,
+    iree_hal_hsa_kernel_params_t* kernel_info) {
+  if (!module_info || !kernel_name || !kernel_info) return;
+  iree_string_view_t export_name = iree_make_string_view(
+      kernel_name, flatbuffers_string_len(kernel_name));
+  for (iree_host_size_t i = 0; i < module_info->kernel_count; ++i) {
+    const iree_hal_hip_kernel_info_t* parsed_kernel = &module_info->kernels[i];
+    if (!iree_string_view_equal(parsed_kernel->name, export_name)) continue;
+
+    kernel_info->hidden_args = parsed_kernel->hidden_args;
+    kernel_info->parameter_count = parsed_kernel->parameter_count;
+    if (parsed_kernel->parameter_count == 0 || !parsed_kernel->parameters) {
+      return;
+    }
+
+    if (iree_status_is_ok(iree_allocator_malloc(
+            host_allocator,
+            parsed_kernel->parameter_count * sizeof(*kernel_info->parameters),
+            (void**)&kernel_info->parameters))) {
+      kernel_info->explicit_kernarg_size = 0;
+      for (uint32_t j = 0; j < parsed_kernel->parameter_count; ++j) {
+        const iree_hal_hip_kernel_param_t* src = &parsed_kernel->parameters[j];
+        kernel_info->parameters[j].offset = src->offset;
+        kernel_info->parameters[j].size = src->size;
+        kernel_info->parameters[j].type =
+            src->type == 1
+                ? IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_BINDING
+                : IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_CONSTANT;
+        uint32_t end = src->offset + src->size;
+        if (end > kernel_info->explicit_kernarg_size) {
+          kernel_info->explicit_kernarg_size = end;
+        }
+      }
+    }
+    return;
+  }
+}
+
 iree_status_t iree_hal_hsa_native_executable_infer_format(
     iree_const_byte_span_t executable_data,
     iree_host_size_t executable_format_capacity, char* executable_format,
@@ -97,15 +147,17 @@ iree_status_t iree_hal_hsa_native_executable_infer_format(
   }
   iree_status_ignore(native_hsa);
 
-  IREE_RETURN_IF_ERROR(iree_hal_read_executable_flatbuffer_header(
-      executable_data, unsafe_infer_size,
-      iree_hal_hip_ExecutableDef_file_identifier, &contained_data));
+  IREE_RETURN_IF_ERROR(iree_hal_hsa_read_native_flatbuffer_header(
+      executable_data, unsafe_infer_size, &contained_data));
 
   // Verify the flatbuffer structure.
-  if (!iree_hal_hip_ExecutableDef_verify_as_root(contained_data.data,
-                                                 contained_data.data_length)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "failed to verify executable flatbuffer structure");
+  int verify_ret = iree_hal_hip_ExecutableDef_verify_as_root(
+      contained_data.data, contained_data.data_length);
+  if (verify_ret != flatcc_verify_ok) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "flatbuffer verification failed: %s",
+        flatcc_verify_error_string(verify_ret));
   }
 
   // Write the format string.
@@ -171,37 +223,41 @@ static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
   // Read and strip the flatbuffer header prefix.
   iree_const_byte_span_t executable_flatbuffer = iree_const_byte_span_empty();
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0,
-      iree_hal_read_executable_flatbuffer_header(
-          executable_params->executable_data, /*unsafe_infer_size=*/false,
-          iree_hal_hip_ExecutableDef_file_identifier, &executable_flatbuffer));
+      z0, iree_hal_hsa_read_native_flatbuffer_header(
+              executable_params->executable_data, /*unsafe_infer_size=*/false,
+              &executable_flatbuffer));
 
   // Verify the flatbuffer structure.
-  if (!iree_hal_hip_ExecutableDef_verify_as_root(executable_flatbuffer.data,
-                                                 executable_flatbuffer.data_length)) {
+  int verify_ret = iree_hal_hip_ExecutableDef_verify_as_root(
+      executable_flatbuffer.data, executable_flatbuffer.data_length);
+  if (verify_ret != flatcc_verify_ok) {
     IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "failed to verify executable flatbuffer structure");
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "flatbuffer verification failed: %s",
+        flatcc_verify_error_string(verify_ret));
   }
 
-  iree_hal_hip_ExecutableDef_table_t executable_def =
+  iree_hal_hip_ExecutableDef_table_t hip_executable_def = NULL;
+  iree_hal_hip_ModuleDef_vec_t hip_modules_vec = NULL;
+  iree_hal_hip_ExportDef_vec_t hip_exports_vec = NULL;
+  hip_executable_def =
       iree_hal_hip_ExecutableDef_as_root(executable_flatbuffer.data);
-
-  iree_hal_hip_ModuleDef_vec_t modules_vec =
-      iree_hal_hip_ExecutableDef_modules_get(executable_def);
-  iree_host_size_t module_count = iree_hal_hip_ModuleDef_vec_len(modules_vec);
-  iree_hal_hip_ExportDef_vec_t exports_vec =
-      iree_hal_hip_ExecutableDef_exports_get(executable_def);
-  iree_host_size_t export_count = iree_hal_hip_ExportDef_vec_len(exports_vec);
+  hip_modules_vec = iree_hal_hip_ExecutableDef_modules_get(hip_executable_def);
+  iree_host_size_t module_count = iree_hal_hip_ModuleDef_vec_len(hip_modules_vec);
+  hip_exports_vec = iree_hal_hip_ExecutableDef_exports_get(hip_executable_def);
+  iree_host_size_t export_count = iree_hal_hip_ExportDef_vec_len(hip_exports_vec);
 
   // Calculate the total number of characters across all entry point names.
   iree_host_size_t total_export_info_length = 0;
   IREE_TRACE({
     for (iree_host_size_t i = 0; i < export_count; ++i) {
       iree_hal_hip_ExportDef_table_t export_def =
-          iree_hal_hip_ExportDef_vec_at(exports_vec, i);
-      total_export_info_length += iree_hal_debug_calculate_export_info_size(
-          iree_hal_hip_ExportDef_debug_info_get(export_def));
+          iree_hal_hip_ExportDef_vec_at(hip_exports_vec, i);
+      iree_hal_debug_ExportDef_table_t export_debug_info =
+          iree_hal_hip_ExportDef_debug_info_get(export_def);
+      total_export_info_length +=
+          iree_hal_debug_calculate_export_info_size(export_debug_info);
     }
   });
 
@@ -221,6 +277,7 @@ static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0,
       iree_allocator_malloc(host_allocator, total_size, (void**)&executable));
+  memset(executable, 0, total_size);
   iree_hal_resource_initialize(&iree_hal_hsa_native_executable_vtable,
                                &executable->resource);
   executable->host_allocator = host_allocator;
@@ -242,9 +299,30 @@ static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
 
   // Publish any embedded source files to the tracing infrastructure.
   iree_hal_debug_publish_source_files(
-      iree_hal_hip_ExecutableDef_source_files_get(executable_def));
+      iree_hal_hip_ExecutableDef_source_files_get(hip_executable_def));
 
   iree_status_t status = iree_ok_status();
+  iree_hal_hip_fat_binary_info_t* module_infos = NULL;
+  if (module_count > 0) {
+    status = iree_allocator_malloc(
+        host_allocator, module_count * sizeof(*module_infos),
+        (void**)&module_infos);
+    if (iree_status_is_ok(status)) {
+      memset(module_infos, 0, module_count * sizeof(*module_infos));
+      for (iree_host_size_t i = 0; i < module_count && iree_status_is_ok(status);
+           ++i) {
+        iree_hal_hip_ModuleDef_table_t module_def =
+            iree_hal_hip_ModuleDef_vec_at(hip_modules_vec, i);
+        flatbuffers_string_t hsaco_image =
+            iree_hal_hip_ModuleDef_hsaco_image_get(module_def);
+        status = iree_hal_hsa_parse_fat_binary_kernels(
+            iree_make_const_byte_span(
+                (const uint8_t*)hsaco_image,
+                flatbuffers_string_len(hsaco_image)),
+            iree_string_view_empty(), host_allocator, &module_infos[i]);
+      }
+    }
+  }
   for (iree_host_size_t j = 0; j < topology.count && iree_status_is_ok(status);
        ++j) {
     iree_hal_hsa_native_executable_per_device_data_t* per_device_data =
@@ -264,8 +342,7 @@ static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
     // Load each module first so that exports can reference them.
     for (iree_host_size_t i = 0; i < module_count && iree_status_is_ok(status); ++i) {
       iree_hal_hip_ModuleDef_table_t module_def =
-          iree_hal_hip_ModuleDef_vec_at(modules_vec, i);
-
+          iree_hal_hip_ModuleDef_vec_at(hip_modules_vec, i);
       flatbuffers_string_t hsaco_image =
           iree_hal_hip_ModuleDef_hsaco_image_get(module_def);
       size_t hsaco_size = flatbuffers_string_len(hsaco_image);
@@ -315,21 +392,32 @@ static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
 
     // Look up kernel symbols and populate export info.
     for (iree_host_size_t i = 0; i < export_count && iree_status_is_ok(status); ++i) {
-      iree_hal_hip_ExportDef_table_t export_def =
-          iree_hal_hip_ExportDef_vec_at(exports_vec, i);
-
+      iree_hal_hip_ExportDef_table_t hip_export_def =
+          iree_hal_hip_ExportDef_vec_at(hip_exports_vec, i);
       uint32_t module_ordinal =
-          iree_hal_hip_ExportDef_module_ordinal_get(export_def);
-      hsa_executable_t hsa_executable = per_device_data->executables[module_ordinal];
+          iree_hal_hip_ExportDef_module_ordinal_get(hip_export_def);
       flatbuffers_string_t kernel_name =
-          iree_hal_hip_ExportDef_kernel_name_get(export_def);
+          iree_hal_hip_ExportDef_kernel_name_get(hip_export_def);
 
       // Look up kernel symbol.
       hsa_executable_symbol_t kernel_symbol;
+      hsa_executable_t hsa_executable =
+          per_device_data->executables[module_ordinal];
       status = IREE_HSA_CALL_TO_STATUS(
           hsa_executable_get_symbol_by_name(hsa_executable, kernel_name,
                                             &agent, &kernel_symbol),
           "hsa_executable_get_symbol_by_name");
+      if (!iree_status_is_ok(status)) {
+        iree_status_ignore(status);
+        char kernel_symbol_name[1030];
+        snprintf(kernel_symbol_name, sizeof(kernel_symbol_name), "%s.kd",
+                 kernel_name);
+        status = IREE_HSA_CALL_TO_STATUS(
+            hsa_executable_get_symbol_by_name(hsa_executable,
+                                              kernel_symbol_name, &agent,
+                                              &kernel_symbol),
+            "hsa_executable_get_symbol_by_name");
+      }
       if (!iree_status_is_ok(status)) {
         status = iree_status_annotate_f(
             status, "failed to find kernel '%s' in executable", kernel_name);
@@ -385,7 +473,7 @@ static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
       kernel_info->private_segment_size = private_segment_size;
 
       const iree_hal_hip_BlockDims_t* block_dims =
-          iree_hal_hip_ExportDef_block_dims_get(export_def);
+          iree_hal_hip_ExportDef_block_dims_get(hip_export_def);
       if (block_dims) {
         kernel_info->block_dims[0] = block_dims->x;
         kernel_info->block_dims[1] = block_dims->y;
@@ -395,25 +483,49 @@ static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
         kernel_info->block_dims[1] = 1;
         kernel_info->block_dims[2] = 1;
       }
-
       kernel_info->constant_count =
-          iree_hal_hip_ExportDef_constant_count_get(export_def);
+          iree_hal_hip_ExportDef_constant_count_get(hip_export_def);
       iree_hal_hip_BindingBits_vec_t binding_flags_vec =
-          iree_hal_hip_ExportDef_binding_flags_get(export_def);
+          iree_hal_hip_ExportDef_binding_flags_get(hip_export_def);
       kernel_info->binding_count =
           iree_hal_hip_BindingBits_vec_len(binding_flags_vec);
+
+      kernel_info->hidden_args = (iree_hal_hip_hidden_args_t){
+          .block_count_x = UINT32_MAX,
+          .block_count_y = UINT32_MAX,
+          .block_count_z = UINT32_MAX,
+          .group_size_x = UINT32_MAX,
+          .group_size_y = UINT32_MAX,
+          .group_size_z = UINT32_MAX,
+          .remainder_x = UINT32_MAX,
+          .remainder_y = UINT32_MAX,
+          .remainder_z = UINT32_MAX,
+          .grid_dims = UINT32_MAX,
+          .global_offset_x = UINT32_MAX,
+          .global_offset_y = UINT32_MAX,
+          .global_offset_z = UINT32_MAX,
+      };
 
       // Estimate explicit kernarg size: pointers for bindings + 4 bytes per constant.
       // This is a rough estimate; precise size comes from flatbuffer parameters.
       kernel_info->explicit_kernarg_size =
           kernel_info->binding_count * sizeof(void*) +
           kernel_info->constant_count * sizeof(uint32_t);
+      if (module_infos) {
+        if (module_ordinal < module_count) {
+          iree_hal_hsa_apply_parsed_kernel_metadata(
+              &module_infos[module_ordinal], kernel_name, host_allocator,
+              kernel_info);
+        }
+      }
 
       IREE_TRACE({
         iree_hal_debug_export_info_t* export_info =
             (iree_hal_debug_export_info_t*)export_info_ptr;
-        export_info_ptr += iree_hal_debug_copy_export_info(
-            iree_hal_hip_ExportDef_debug_info_get(export_def), export_info);
+        iree_hal_debug_ExportDef_table_t export_debug_info =
+            iree_hal_hip_ExportDef_debug_info_get(hip_export_def);
+        export_info_ptr +=
+            iree_hal_debug_copy_export_info(export_debug_info, export_info);
         kernel_info->debug_info.function_name = export_info->function_name;
         kernel_info->debug_info.source_filename = export_info->source_filename;
         kernel_info->debug_info.source_line = export_info->source_line;
@@ -425,6 +537,14 @@ static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
     *out_executable = (iree_hal_executable_t*)executable;
   } else {
     iree_hal_executable_destroy((iree_hal_executable_t*)executable);
+  }
+  if (module_infos) {
+    for (iree_host_size_t i = 0; i < module_count; ++i) {
+      iree_hal_hsa_free_fat_binary_kernel_info(
+          host_allocator, module_infos[i].kernel_count,
+          module_infos[i].kernels);
+    }
+    iree_allocator_free(host_allocator, module_infos);
   }
 
   IREE_TRACE_ZONE_END(z0);
@@ -593,6 +713,7 @@ static iree_status_t iree_hal_hsa_native_executable_create_fpih(
     IREE_TRACE_ZONE_END(z0);
     return status;
   }
+  memset(executable, 0, total_size);
 
   iree_hal_resource_initialize(&iree_hal_hsa_native_executable_vtable,
                                &executable->resource);
@@ -839,8 +960,13 @@ static void iree_hal_hsa_native_executable_destroy(
   IREE_TRACE_ZONE_BEGIN(z0);
 
   for (iree_host_size_t i = 0; i < executable->num_devices; ++i) {
-    const iree_hal_hsa_native_executable_per_device_data_t* data =
+    iree_hal_hsa_native_executable_per_device_data_t* data =
         executable->per_device_data[i];
+    for (iree_host_size_t j = 0; j < data->export_count; ++j) {
+      if (data->exports[j].parameters) {
+        iree_allocator_free(host_allocator, data->exports[j].parameters);
+      }
+    }
     for (iree_host_size_t j = 0; j < data->executable_count; ++j) {
       if (data->executables[j].handle) {
         IREE_HSA_IGNORE_ERROR(
@@ -1045,4 +1171,3 @@ static const iree_hal_executable_vtable_t
             iree_hal_hsa_native_executable_lookup_export_by_name,
         .lookup_global = iree_hal_hsa_native_executable_lookup_global,
 };
-

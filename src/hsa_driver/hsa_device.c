@@ -410,8 +410,14 @@ static iree_status_t iree_hal_hsa_device_query_i64(
   *out_value = 0;
 
   if (iree_string_view_equal(category, IREE_SV("hal.device.id"))) {
-    *out_value = iree_string_view_match_pattern(device->identifier, key) ? 1
-                                                                         : 0;
+    bool is_match = iree_string_view_match_pattern(device->identifier, key);
+    if (!is_match) {
+      // HACK: VMFBs compiled for IREE's ROCm backend target `hip`, but this
+      // experimental HSA driver currently identifies devices as `hsa`.
+      is_match = iree_string_view_equal(device->identifier, IREE_SV("hsa")) &&
+                 iree_string_view_match_pattern(IREE_SV("hip"), key);
+    }
+    *out_value = is_match ? 1 : 0;
     return iree_ok_status();
   }
 
@@ -594,6 +600,26 @@ iree_hal_hsa_device_query_semaphore_compatibility(
   return IREE_HAL_SEMAPHORE_COMPATIBILITY_HOST_ONLY;
 }
 
+static iree_status_t iree_hal_hsa_device_wait_semaphore_list(
+    const iree_hal_semaphore_list_t semaphore_list) {
+  if (semaphore_list.count == 0 ||
+      iree_hal_semaphore_list_poll(semaphore_list)) {
+    return iree_ok_status();
+  }
+  return iree_hal_semaphore_list_wait(
+      semaphore_list, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE);
+}
+
+static iree_status_t iree_hal_hsa_device_signal_or_fail_semaphore_list(
+    const iree_hal_semaphore_list_t semaphore_list, iree_status_t status) {
+  if (iree_status_is_ok(status)) {
+    iree_hal_semaphore_list_signal(semaphore_list);
+    return iree_ok_status();
+  }
+  iree_hal_semaphore_list_fail(semaphore_list, status);
+  return status;
+}
+
 static iree_status_t iree_hal_hsa_device_queue_alloca(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -601,8 +627,13 @@ static iree_status_t iree_hal_hsa_device_queue_alloca(
     iree_hal_allocator_pool_t pool, iree_hal_buffer_params_t params,
     iree_device_size_t allocation_size, iree_hal_alloca_flags_t flags,
     iree_hal_buffer_t** IREE_RESTRICT out_buffer) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "queue alloca not yet implemented");
+  iree_hal_hsa_device_t* device = iree_hal_hsa_device_cast(base_device);
+  IREE_RETURN_IF_ERROR(
+      iree_hal_hsa_device_wait_semaphore_list(wait_semaphore_list));
+  iree_status_t status = iree_hal_allocator_allocate_buffer(
+      device->device_allocator, params, allocation_size, out_buffer);
+  return iree_hal_hsa_device_signal_or_fail_semaphore_list(
+      signal_semaphore_list, status);
 }
 
 static iree_status_t iree_hal_hsa_device_queue_dealloca(
@@ -610,8 +641,12 @@ static iree_status_t iree_hal_hsa_device_queue_dealloca(
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* buffer, iree_hal_dealloca_flags_t flags) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "queue dealloca not yet implemented");
+  iree_hal_hsa_device_t* device = iree_hal_hsa_device_cast(base_device);
+  IREE_RETURN_IF_ERROR(
+      iree_hal_hsa_device_wait_semaphore_list(wait_semaphore_list));
+  iree_hal_allocator_deallocate_buffer(device->device_allocator, buffer);
+  return iree_hal_hsa_device_signal_or_fail_semaphore_list(
+      signal_semaphore_list, iree_ok_status());
 }
 
 static iree_status_t iree_hal_hsa_device_queue_read(
@@ -772,12 +807,8 @@ static iree_status_t iree_hal_hsa_device_queue_execute(
       iree_hal_semaphore_list_poll(wait_semaphore_list)) {
     iree_status_t status = iree_hal_hsa_device_queue_execute_inline(
         device, queue_affinity, command_buffer, binding_table);
-    if (iree_status_is_ok(status)) {
-      iree_hal_semaphore_list_signal(signal_semaphore_list);
-    } else {
-      iree_hal_semaphore_list_fail(signal_semaphore_list, status);
-    }
-    return status;
+    return iree_hal_hsa_device_signal_or_fail_semaphore_list(
+        signal_semaphore_list, status);
   }
 
   // Slow path: spawn a thread to wait and then execute.

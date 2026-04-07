@@ -102,6 +102,7 @@ void PyreLoader::load(const std::string& path) {
   LOAD(stream_query);
   LOAD(stream_flush);
   LOAD(stream_get_semaphore);
+  LOAD(stream_get_device);
   LOAD(stream_get_timeline_position);
   LOAD(stream_wait_on);
   LOAD(stream_dispatch);

@@ -19,6 +19,19 @@ TEST_CASE_METHOD(PyreTestFixture, "Device has an architecture", "[device]") {
   REQUIRE(strlen(arch) > 0);
 }
 
+TEST_CASE_METHOD(PyreTestFixture,
+                 "GPU device architecture is a compiler target ISA",
+                 "[device][gpu]") {
+  if (!is_gpu()) {
+    SKIP("GPU architecture query is only validated on GPU devices");
+  }
+
+  char arch[64] = {0};
+  REQUIRE_OK(pyre().device_get_property(
+      device_, PYRE_DEVICE_PROPERTY_ARCHITECTURE, arch, sizeof(arch)));
+  REQUIRE(strncmp(arch, "gfx", 3) == 0);
+}
+
 TEST_CASE_METHOD(PyreTestFixture, "Device get_type matches accelerator",
                  "[device]") {
   pyre_accelerator_type_t type;

@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "hsa/hsa.h"
+#include "iree/modules/hal/types.h"
 
 #ifdef PYRE_HAS_HSA_DRIVER
 #include "hsa_driver/api.h"
@@ -63,6 +64,12 @@ pyre_status_t pyre_ensure_shared_state(void) {
       iree_vm_instance_create(IREE_VM_TYPE_CAPACITY_DEFAULT,
                               g_shared.host_allocator, &g_shared.vm_instance);
   if (!iree_status_is_ok(status)) {
+    return pyre_status_from_iree(status);
+  }
+  status = iree_hal_module_register_all_types(g_shared.vm_instance);
+  if (!iree_status_is_ok(status)) {
+    iree_vm_instance_release(g_shared.vm_instance);
+    g_shared.vm_instance = NULL;
     return pyre_status_from_iree(status);
   }
 
@@ -206,6 +213,23 @@ static pyre_status_t pyre_create_local_task_device(
   *out_driver = driver;
   *out_hal_device = hal_device;
   return pyre_ok_status();
+}
+
+static void pyre_query_device_architecture(
+    iree_hal_device_t* hal_device, char* architecture,
+    size_t architecture_size) {
+  if (!architecture || architecture_size == 0) return;
+  architecture[0] = '\0';
+
+  iree_status_t status = iree_hal_device_query_string(
+      hal_device, IREE_SV("hal.device"), IREE_SV("architecture"),
+      architecture_size, architecture);
+  if (iree_status_is_ok(status) && architecture[0] != '\0') {
+    return;
+  }
+
+  iree_status_ignore(status);
+  snprintf(architecture, architecture_size, "unknown");
 }
 
 //===----------------------------------------------------------------------===//
@@ -399,13 +423,8 @@ pyre_status_t pyre_gpu_initialize(uint32_t flags) {
     memcpy(dev->name, device_infos[i].name.data, name_len);
     dev->name[name_len] = '\0';
 
-    iree_host_size_t path_len = device_infos[i].path.size;
-    if (path_len > 0 && path_len < sizeof(dev->architecture)) {
-      memcpy(dev->architecture, device_infos[i].path.data, path_len);
-      dev->architecture[path_len] = '\0';
-    } else {
-      snprintf(dev->architecture, sizeof(dev->architecture), "unknown");
-    }
+    pyre_query_device_architecture(
+        hal_device, dev->architecture, sizeof(dev->architecture));
   }
 
   iree_allocator_free(alloc, device_infos);
