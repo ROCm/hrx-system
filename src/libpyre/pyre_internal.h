@@ -181,6 +181,17 @@ typedef struct pyre_semaphore_s {
   pyre_device_t device;
 } pyre_semaphore_s;
 
+// Event: marks a point in a stream's timeline for cross-stream sync.
+typedef struct pyre_event_s {
+  iree_atomic_ref_count_t ref_count;
+  pyre_event_flags_t flags;
+  pyre_semaphore_t semaphore;   // Dedicated semaphore for this event.
+  uint64_t signal_value;        // Timeline value the semaphore must reach.
+  pyre_stream_t recording_stream;
+  pyre_device_t device;
+  int64_t record_time_ns;       // Host-side timestamp at record time.
+} pyre_event_s;
+
 // Stream with pending command buffer.
 typedef struct pyre_stream_s {
   iree_atomic_ref_count_t ref_count;

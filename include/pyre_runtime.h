@@ -152,6 +152,7 @@ PYRE_API void pyre_host_allocator_free_aligned(pyre_host_allocator_t allocator,
 typedef struct pyre_device_s* pyre_device_t;
 typedef struct pyre_allocator_s* pyre_allocator_t;
 typedef struct pyre_semaphore_s* pyre_semaphore_t;
+typedef struct pyre_event_s* pyre_event_t;
 typedef struct pyre_stream_s* pyre_stream_t;
 typedef struct pyre_buffer_s* pyre_buffer_t;
 typedef struct pyre_module_s* pyre_module_t;
@@ -235,6 +236,14 @@ typedef enum pyre_dispatch_flags_t {
   PYRE_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS = 1 << 0,
   PYRE_DISPATCH_FLAG_ALLOW_INLINE_EXECUTION = 1 << 1,
 } pyre_dispatch_flags_t;
+
+// Event creation flags.
+typedef enum pyre_event_flags_t {
+  PYRE_EVENT_FLAG_NONE = 0,
+  PYRE_EVENT_FLAG_BLOCKING_SYNC = 1 << 0,
+  PYRE_EVENT_FLAG_DISABLE_TIMING = 1 << 1,
+  PYRE_EVENT_FLAG_INTERPROCESS = 1 << 2,
+} pyre_event_flags_t;
 
 //===----------------------------------------------------------------------===//
 // Composite types
@@ -362,6 +371,44 @@ PYRE_API pyre_status_t pyre_semaphore_wait(pyre_semaphore_t semaphore,
 
 PYRE_API pyre_status_t pyre_semaphore_signal(pyre_semaphore_t semaphore,
                                              uint64_t value);
+
+//===----------------------------------------------------------------------===//
+// Events (stream synchronization points)
+//
+// Events mark a point in a stream's execution timeline. An event can be
+// recorded on one stream and waited on by another, enabling cross-stream
+// synchronization. Each event owns a dedicated semaphore that is signaled
+// when the recorded point in the stream completes.
+//===----------------------------------------------------------------------===//
+
+PYRE_API pyre_status_t pyre_event_create(pyre_device_t device,
+                                         pyre_event_flags_t flags,
+                                         pyre_event_t* out_event);
+
+PYRE_API pyre_status_t pyre_event_retain(pyre_event_t event);
+PYRE_API pyre_status_t pyre_event_release(pyre_event_t event);
+
+// Records the event on |stream|. The event will be signaled when all
+// previously enqueued work on the stream completes. Flushes the stream.
+PYRE_API pyre_status_t pyre_event_record(pyre_event_t event,
+                                         pyre_stream_t stream);
+
+// Queries whether the event has completed.
+// Sets |*complete| to true if all work up to the recorded point has finished.
+PYRE_API pyre_status_t pyre_event_query(pyre_event_t event, bool* complete);
+
+// Blocks the calling thread until the event completes.
+PYRE_API pyre_status_t pyre_event_synchronize(pyre_event_t event);
+
+// Computes elapsed time in milliseconds between two recorded events.
+// Both events must have completed. Uses host-side timestamps.
+PYRE_API pyre_status_t pyre_event_elapsed_time(pyre_event_t start,
+                                               pyre_event_t stop, float* ms);
+
+// Makes |stream| wait for |event| before executing subsequent work.
+// Non-blocking: enqueues a barrier on the stream's device queue.
+PYRE_API pyre_status_t pyre_stream_wait_event(pyre_stream_t stream,
+                                              pyre_event_t event);
 
 //===----------------------------------------------------------------------===//
 // Streams (high-level execution contexts)

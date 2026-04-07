@@ -9,6 +9,7 @@ set(PYRE_SOURCES
     device.c
     allocator.c
     semaphore.c
+    event.c
     stream.c
     buffer.c
     buffer_view.c
