@@ -113,6 +113,15 @@ class PyreLoader {
   decltype(&pyre_stream_copy_buffer) stream_copy_buffer;
   decltype(&pyre_stream_update_buffer) stream_update_buffer;
 
+  // Direct executables.
+  decltype(&pyre_executable_load_data) executable_load_data;
+  decltype(&pyre_executable_load_file) executable_load_file;
+  decltype(&pyre_executable_retain) executable_retain;
+  decltype(&pyre_executable_release) executable_release;
+  decltype(&pyre_executable_export_count) executable_export_count;
+  decltype(&pyre_executable_export_info) executable_export_info;
+  decltype(&pyre_executable_lookup_export_by_name) executable_lookup_export_by_name;
+
   // Queue ops.
   decltype(&pyre_queue_fill) queue_fill;
   decltype(&pyre_queue_copy) queue_copy;

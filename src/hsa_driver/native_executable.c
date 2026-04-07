@@ -1080,8 +1080,23 @@ static iree_status_t iree_hal_hsa_native_executable_export_parameters(
 static iree_status_t iree_hal_hsa_native_executable_lookup_export_by_name(
     iree_hal_executable_t* base_executable, iree_string_view_t name,
     iree_hal_executable_export_ordinal_t* out_export_ordinal) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "reflection not implemented");
+  IREE_ASSERT_ARGUMENT(base_executable);
+  IREE_ASSERT_ARGUMENT(out_export_ordinal);
+
+  iree_hal_hsa_native_executable_t* executable =
+      iree_hal_hsa_native_executable_cast(base_executable);
+  for (iree_host_size_t i = 0; i < executable->export_count; ++i) {
+    iree_string_view_t export_name =
+        iree_make_cstring_view(executable->export_infos[i].name);
+    if (iree_string_view_equal(name, export_name)) {
+      *out_export_ordinal = (iree_hal_executable_export_ordinal_t)i;
+      return iree_ok_status();
+    }
+  }
+
+  return iree_make_status(IREE_STATUS_NOT_FOUND,
+                          "export '%.*s' not found",
+                          (int)name.size, name.data);
 }
 
 static iree_status_t iree_hal_hsa_native_executable_lookup_global(

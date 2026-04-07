@@ -257,6 +257,19 @@ typedef struct pyre_buffer_params_t {
   pyre_queue_affinity_t queue_affinity;
 } pyre_buffer_params_t;
 
+// Export metadata for direct executable dispatch. |name| is owned by the
+// executable and remains valid until pyre_executable_release() drops the last
+// reference. |constant_count| is measured in uint32_t elements, matching
+// pyre_queue_dispatch()/pyre_stream_dispatch() constants packing.
+typedef struct pyre_executable_export_info_t {
+  const char* name;
+  uint32_t flags;
+  uint32_t constant_count;
+  uint32_t binding_count;
+  uint32_t parameter_count;
+  uint32_t workgroup_size[3];
+} pyre_executable_export_info_t;
+
 //===----------------------------------------------------------------------===//
 // GPU accelerator lifecycle
 //===----------------------------------------------------------------------===//
@@ -506,6 +519,37 @@ PYRE_API pyre_status_t pyre_queue_host_call(
     pyre_host_call_fn_t callback, void* user_data);
 
 PYRE_API pyre_status_t pyre_stream_execution_barrier(pyre_stream_t stream);
+
+//===----------------------------------------------------------------------===//
+// Direct executables
+//
+// Load native executable packages and inspect export metadata for direct
+// dispatch. Kernel tensor/storage arguments should be passed as bindings;
+// scalars, strides, and sizes should be packed into the constants block.
+//===----------------------------------------------------------------------===//
+
+PYRE_API pyre_status_t pyre_executable_load_data(
+    pyre_device_t device, const void* executable_data,
+    size_t executable_data_size, const char* executable_format,
+    pyre_executable_t* executable);
+
+PYRE_API pyre_status_t pyre_executable_load_file(
+    pyre_device_t device, const char* path, const char* executable_format,
+    pyre_executable_t* executable);
+
+PYRE_API void pyre_executable_retain(pyre_executable_t executable);
+PYRE_API void pyre_executable_release(pyre_executable_t executable);
+
+PYRE_API pyre_status_t pyre_executable_export_count(
+    pyre_executable_t executable, size_t* count);
+
+PYRE_API pyre_status_t pyre_executable_export_info(
+    pyre_executable_t executable, uint32_t export_ordinal,
+    pyre_executable_export_info_t* out_info);
+
+PYRE_API pyre_status_t pyre_executable_lookup_export_by_name(
+    pyre_executable_t executable, const char* name,
+    uint32_t* export_ordinal);
 
 //===----------------------------------------------------------------------===//
 // VM modules and invocation

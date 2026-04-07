@@ -129,6 +129,14 @@ void PyreLoader::load(const std::string& path) {
   LOAD(stream_copy_buffer);
   LOAD(stream_update_buffer);
 
+  LOAD(executable_load_data);
+  LOAD(executable_load_file);
+  LOAD(executable_retain);
+  LOAD(executable_release);
+  LOAD(executable_export_count);
+  LOAD(executable_export_info);
+  LOAD(executable_lookup_export_by_name);
+
   LOAD(queue_fill);
   LOAD(queue_copy);
   LOAD(queue_barrier);

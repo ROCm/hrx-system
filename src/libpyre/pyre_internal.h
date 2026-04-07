@@ -237,6 +237,7 @@ typedef struct pyre_buffer_view_s {
 // HAL executable wrapper for direct queue/stream dispatch.
 typedef struct pyre_executable_s {
   iree_atomic_ref_count_t ref_count;
+  iree_hal_executable_cache_t* hal_executable_cache;
   iree_hal_executable_t* hal_executable;
   pyre_device_t device;
 } pyre_executable_s;

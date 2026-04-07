@@ -12,6 +12,7 @@ set(PYRE_SOURCES
     stream.c
     buffer.c
     buffer_view.c
+    executable.c
     fence.c
     module.c
     transfer.c
