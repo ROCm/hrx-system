@@ -145,48 +145,36 @@ iree_hip_graph_instantiate_flags_to_internal(unsigned long long hip_flags) {
   return flags;
 }
 
-static iree_hal_streaming_mem_pool_attr_t iree_hip_mempool_attr_to_internal(
+static pyre_mem_pool_attr_t iree_hip_mempool_attr_to_pyre(
     hipMemPool_attribute attr) {
   switch (attr) {
     case hipMemPoolAttrReuseFollowEventDependencies:
-      return IREE_HAL_STREAMING_MEM_POOL_ATTR_REUSE_FOLLOW_EVENT_DEPENDENCIES;
+      return PYRE_MEM_POOL_ATTR_REUSE_FOLLOW_EVENT_DEPENDENCIES;
     case hipMemPoolAttrReuseAllowOpportunistic:
-      return IREE_HAL_STREAMING_MEM_POOL_ATTR_REUSE_ALLOW_OPPORTUNISTIC;
+      return PYRE_MEM_POOL_ATTR_REUSE_ALLOW_OPPORTUNISTIC;
     case hipMemPoolAttrReuseAllowInternalDependencies:
-      return IREE_HAL_STREAMING_MEM_POOL_ATTR_REUSE_ALLOW_INTERNAL_DEPENDENCIES;
+      return PYRE_MEM_POOL_ATTR_REUSE_ALLOW_INTERNAL_DEPENDENCIES;
     case hipMemPoolAttrReleaseThreshold:
-      return IREE_HAL_STREAMING_MEM_POOL_ATTR_RELEASE_THRESHOLD;
+      return PYRE_MEM_POOL_ATTR_RELEASE_THRESHOLD;
     case hipMemPoolAttrReservedMemCurrent:
-      return IREE_HAL_STREAMING_MEM_POOL_ATTR_RESERVED_MEM_CURRENT;
+      return PYRE_MEM_POOL_ATTR_RESERVED_MEM_CURRENT;
     case hipMemPoolAttrReservedMemHigh:
-      return IREE_HAL_STREAMING_MEM_POOL_ATTR_RESERVED_MEM_HIGH;
+      return PYRE_MEM_POOL_ATTR_RESERVED_MEM_HIGH;
     case hipMemPoolAttrUsedMemCurrent:
-      return IREE_HAL_STREAMING_MEM_POOL_ATTR_USED_MEM_CURRENT;
+      return PYRE_MEM_POOL_ATTR_USED_MEM_CURRENT;
     case hipMemPoolAttrUsedMemHigh:
-      return IREE_HAL_STREAMING_MEM_POOL_ATTR_USED_MEM_HIGH;
+      return PYRE_MEM_POOL_ATTR_USED_MEM_HIGH;
     default:
-      return IREE_HAL_STREAMING_MEM_POOL_ATTR_RESERVED_MEM_CURRENT;
+      return PYRE_MEM_POOL_ATTR_RESERVED_MEM_CURRENT;
   }
 }
 
-static iree_hal_streaming_mem_handle_type_t
-iree_hip_mem_handle_type_to_internal(hipMemAllocationHandleType handle_type) {
-  switch (handle_type) {
-    case hipMemHandleTypeNone:
-      return IREE_HAL_STREAMING_MEM_HANDLE_TYPE_NONE;
-    case hipMemHandleTypePosixFileDescriptor:
-      return IREE_HAL_STREAMING_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
-    case hipMemHandleTypeWin32:
-      return IREE_HAL_STREAMING_MEM_HANDLE_TYPE_WIN32;
-    case hipMemHandleTypeWin32Kmt:
-      return IREE_HAL_STREAMING_MEM_HANDLE_TYPE_WIN32_KMT;
-    default:
-      return IREE_HAL_STREAMING_MEM_HANDLE_TYPE_NONE;
-  }
+static uint32_t iree_hip_mem_handle_type_to_uint(
+    hipMemAllocationHandleType handle_type) {
+  return (uint32_t)handle_type;
 }
 
-static iree_hal_streaming_mem_location_type_t
-iree_hip_mem_location_type_to_internal(hipMemLocationType type) {
+static uint32_t iree_hip_mem_location_type_to_uint(hipMemLocationType type) {
   switch (type) {
     case hipMemLocationTypeInvalid:
       return IREE_HAL_STREAMING_MEM_LOCATION_TYPE_INVALID;
@@ -2227,13 +2215,13 @@ HIPAPI hipError_t hipDevicePrimaryCtxReset(hipDevice_t dev) {
     device->primary_context_ref_count = 0;
 
     // Also clear memory pools.
-    if (device->default_mem_pool) {
-      iree_hal_streaming_mem_pool_release(device->default_mem_pool);
-      device->default_mem_pool = NULL;
-    }
     if (device->current_mem_pool) {
-      iree_hal_streaming_mem_pool_release(device->current_mem_pool);
+      pyre_mem_pool_release(device->current_mem_pool);
       device->current_mem_pool = NULL;
+    }
+    if (device->default_mem_pool) {
+      pyre_mem_pool_release(device->default_mem_pool);
+      device->default_mem_pool = NULL;
     }
 
     iree_slim_mutex_unlock(&device->primary_context_mutex);
@@ -11413,18 +11401,16 @@ HIPAPI hipError_t hipMemPoolCreate(hipMemPool_t* pool,
     HIP_RETURN_ERROR(init_result);
   }
 
-  // Convert HIP pool props to internal props.
-  iree_hal_streaming_mem_pool_props_t props = {
-      .alloc_handle_type =
-          iree_hip_mem_handle_type_to_internal(poolProps->handleTypes),
-      .location_type =
-          iree_hip_mem_location_type_to_internal(poolProps->location.type),
+  pyre_mem_pool_props_t props = {
+      .alloc_handle_type = iree_hip_mem_handle_type_to_uint(poolProps->handleTypes),
+      .location_type = iree_hip_mem_location_type_to_uint(poolProps->location.type),
       .location_id = poolProps->location.id,
   };
 
-  iree_hal_streaming_mem_pool_t* mem_pool = NULL;
-  iree_status_t status = iree_hal_streaming_mem_pool_create(
-      context, &props, context->host_allocator, &mem_pool);
+  pyre_mem_pool_t mem_pool = NULL;
+  iree_status_t status = PYRE_CALL(
+      pyre_mem_pool_create(context->device_entry->pyre_device, &props,
+                           &mem_pool));
 
   if (iree_status_is_ok(status)) {
     *pool = (hipMemPool_t)mem_pool;
@@ -11469,7 +11455,7 @@ HIPAPI hipError_t hipMemPoolDestroy(hipMemPool_t pool) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  iree_hal_streaming_mem_pool_release((iree_hal_streaming_mem_pool_t*)pool);
+  pyre_mem_pool_release((pyre_mem_pool_t)pool);
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
 }
@@ -11538,10 +11524,10 @@ HIPAPI hipError_t hipMemPoolSetAttribute(hipMemPool_t pool,
       HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  iree_hal_streaming_mem_pool_attr_t internal_attr =
-      iree_hip_mempool_attr_to_internal(attr);
-  iree_status_t status = iree_hal_streaming_mem_pool_set_attribute(
-      (iree_hal_streaming_mem_pool_t*)pool, internal_attr, attr_value);
+  pyre_mem_pool_attr_t pyre_attr = iree_hip_mempool_attr_to_pyre(attr);
+  iree_status_t status = PYRE_CALL(
+      pyre_mem_pool_set_attribute((pyre_mem_pool_t)pool, pyre_attr,
+                                  attr_value));
 
   hipError_t result = iree_status_to_hip_result(status);
   IREE_TRACE_ZONE_END(z0);
@@ -11593,10 +11579,10 @@ HIPAPI hipError_t hipMemPoolGetAttribute(hipMemPool_t pool,
   }
 
   uint64_t attr_value = 0;
-  iree_hal_streaming_mem_pool_attr_t internal_attr =
-      iree_hip_mempool_attr_to_internal(attr);
-  iree_status_t status = iree_hal_streaming_mem_pool_get_attribute(
-      (iree_hal_streaming_mem_pool_t*)pool, internal_attr, &attr_value);
+  pyre_mem_pool_attr_t pyre_attr = iree_hip_mempool_attr_to_pyre(attr);
+  iree_status_t status = PYRE_CALL(
+      pyre_mem_pool_get_attribute((pyre_mem_pool_t)pool, pyre_attr,
+                                  &attr_value));
 
   if (iree_status_is_ok(status)) {
     switch (attr) {
@@ -11685,8 +11671,8 @@ HIPAPI hipError_t hipMemPoolTrimTo(hipMemPool_t pool, size_t minBytesToKeep) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  iree_status_t status = iree_hal_streaming_mem_pool_trim_to(
-      (iree_hal_streaming_mem_pool_t*)pool, minBytesToKeep);
+  iree_status_t status = PYRE_CALL(
+      pyre_mem_pool_trim((pyre_mem_pool_t)pool, minBytesToKeep));
 
   hipError_t result = iree_status_to_hip_result(status);
   IREE_TRACE_ZONE_END(z0);
@@ -11792,12 +11778,9 @@ HIPAPI hipError_t hipDeviceSetMemPool(int device, hipMemPool_t pool) {
     HIP_RETURN_ERROR(hipErrorInvalidDevice);
   }
 
-  iree_status_t status = iree_hal_streaming_device_set_mem_pool(
-      device_obj, (iree_hal_streaming_mem_pool_t*)pool);
-
-  hipError_t result = iree_status_to_hip_result(status);
+  iree_hal_streaming_device_set_mem_pool(device_obj, (pyre_mem_pool_t)pool);
   IREE_TRACE_ZONE_END(z0);
-  HIP_RETURN_ERROR(result);
+  return hipSuccess;
 }
 
 // Gets the current memory pool for a device.

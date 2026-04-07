@@ -213,6 +213,36 @@ typedef struct pyre_buffer_s {
   void* mapped_ptr;
 } pyre_buffer_s;
 
+// Memory pool (stream-ordered memory management).
+typedef struct pyre_mem_pool_s {
+  iree_atomic_ref_count_t ref_count;
+  pyre_device_t device;
+  pyre_mem_pool_props_t props;
+
+  // Pool attributes.
+  uint64_t release_threshold;
+  bool reuse_allow_internal_dependencies;
+  bool reuse_follow_event_dependencies;
+  bool reuse_allow_opportunistic;
+
+  // Statistics.
+  uint64_t reserved_mem_current;
+  uint64_t reserved_mem_high;
+  uint64_t used_mem_current;
+  uint64_t used_mem_high;
+
+  // Platform-specific handle (IPC).
+  void* platform_handle;
+
+  // Synchronization.
+  iree_slim_mutex_t mutex;
+
+  // Virtual memory support.
+  bool supports_virtual_memory;
+  iree_device_size_t vm_page_size_min;
+  iree_device_size_t vm_page_size_recommended;
+} pyre_mem_pool_s;
+
 // Loaded VM module with a context containing HAL + bytecode modules.
 typedef struct pyre_module_s {
   iree_atomic_ref_count_t ref_count;

@@ -274,21 +274,17 @@ iree_status_t iree_hal_streaming_device_get_or_create_primary_context(
       device, device->primary_context_flags, device_registry->host_allocator,
       &device->primary_context);
 
-  // Create default memory pool for this device if context was created
-  // successfully.
+  // Create default memory pool via pyre.
   if (iree_status_is_ok(status)) {
-    // Get device ordinal from registry.
     iree_host_size_t device_ordinal = device - device_registry->devices;
-
-    iree_hal_streaming_mem_pool_props_t props = {
-        .alloc_handle_type = IREE_HAL_STREAMING_MEM_HANDLE_TYPE_NONE,
-        .location_type = IREE_HAL_STREAMING_MEM_LOCATION_TYPE_DEVICE,
-        .location_id = device_ordinal,
+    pyre_mem_pool_props_t props = {
+        .alloc_handle_type = 0,
+        .location_type = 1,  // device
+        .location_id = (int)device_ordinal,
     };
-
-    status = iree_hal_streaming_mem_pool_create(device->primary_context, &props,
-                                                device_registry->host_allocator,
-                                                &device->default_mem_pool);
+    status = PYRE_CALL(
+        pyre_mem_pool_create(device->pyre_device, &props,
+                             &device->default_mem_pool));
   }
 
   if (iree_status_is_ok(status)) {
@@ -328,25 +324,20 @@ iree_status_t iree_hal_streaming_device_retain_primary_context(
         device, device->primary_context_flags, device_registry->host_allocator,
         &device->primary_context);
 
-    // Create default memory pool if context was created successfully.
+    // Create default memory pool via pyre if context was created successfully.
     if (iree_status_is_ok(status) && !device->default_mem_pool) {
-      // Get device ordinal from registry.
       iree_host_size_t device_ordinal = device - device_registry->devices;
-
-      iree_hal_streaming_mem_pool_props_t props = {
-          .alloc_handle_type = IREE_HAL_STREAMING_MEM_HANDLE_TYPE_NONE,
-          .location_type = IREE_HAL_STREAMING_MEM_LOCATION_TYPE_DEVICE,
-          .location_id = device_ordinal,
+      pyre_mem_pool_props_t props = {
+          .alloc_handle_type = 0,
+          .location_type = 1,  // device
+          .location_id = (int)device_ordinal,
       };
-
-      status = iree_hal_streaming_mem_pool_create(
-          device->primary_context, &props, device_registry->host_allocator,
-          &device->default_mem_pool);
-
+      status = PYRE_CALL(
+          pyre_mem_pool_create(device->pyre_device, &props,
+                               &device->default_mem_pool));
       if (iree_status_is_ok(status)) {
-        // Set current pool to default pool.
         device->current_mem_pool = device->default_mem_pool;
-        iree_hal_streaming_mem_pool_retain(device->current_mem_pool);
+        pyre_mem_pool_retain(device->current_mem_pool);
       }
     }
 
@@ -403,13 +394,13 @@ iree_status_t iree_hal_streaming_device_release_primary_context(
     device->primary_context = NULL;
 
     // Also clear memory pools.
-    if (device->default_mem_pool) {
-      iree_hal_streaming_mem_pool_release(device->default_mem_pool);
-      device->default_mem_pool = NULL;
-    }
     if (device->current_mem_pool) {
-      iree_hal_streaming_mem_pool_release(device->current_mem_pool);
+      pyre_mem_pool_release(device->current_mem_pool);
       device->current_mem_pool = NULL;
+    }
+    if (device->default_mem_pool) {
+      pyre_mem_pool_release(device->default_mem_pool);
+      device->default_mem_pool = NULL;
     }
 
     // Clear current context if it was the primary context.

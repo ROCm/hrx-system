@@ -281,11 +281,11 @@ static void iree_hal_streaming_deinitialize_device(
 
   // Release memory pools.
   if (device->current_mem_pool) {
-    iree_hal_streaming_mem_pool_release(device->current_mem_pool);
+    pyre_mem_pool_release(device->current_mem_pool);
     device->current_mem_pool = NULL;
   }
   if (device->default_mem_pool) {
-    iree_hal_streaming_mem_pool_release(device->default_mem_pool);
+    pyre_mem_pool_release(device->default_mem_pool);
     device->default_mem_pool = NULL;
   }
 

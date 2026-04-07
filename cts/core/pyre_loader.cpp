@@ -177,6 +177,22 @@ void PyreLoader::load(const std::string& path) {
   LOAD(buffer_view_rank);
   LOAD(buffer_view_dim);
 
+  LOAD(event_create);
+  LOAD(event_retain);
+  LOAD(event_release);
+  LOAD(event_record);
+  LOAD(event_query);
+  LOAD(event_synchronize);
+  LOAD(event_elapsed_time);
+  LOAD(stream_wait_event);
+
+  LOAD(mem_pool_create);
+  LOAD(mem_pool_retain);
+  LOAD(mem_pool_release);
+  LOAD(mem_pool_get_attribute);
+  LOAD(mem_pool_set_attribute);
+  LOAD(mem_pool_trim);
+
   LOAD(allocator_query_virtual_memory);
   LOAD(allocator_virtual_memory_reserve);
   LOAD(allocator_virtual_memory_release);

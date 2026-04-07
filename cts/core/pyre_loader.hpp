@@ -167,6 +167,24 @@ class PyreLoader {
   decltype(&pyre_buffer_view_rank) buffer_view_rank;
   decltype(&pyre_buffer_view_dim) buffer_view_dim;
 
+  // Events.
+  decltype(&pyre_event_create) event_create;
+  decltype(&pyre_event_retain) event_retain;
+  decltype(&pyre_event_release) event_release;
+  decltype(&pyre_event_record) event_record;
+  decltype(&pyre_event_query) event_query;
+  decltype(&pyre_event_synchronize) event_synchronize;
+  decltype(&pyre_event_elapsed_time) event_elapsed_time;
+  decltype(&pyre_stream_wait_event) stream_wait_event;
+
+  // Memory pools.
+  decltype(&pyre_mem_pool_create) mem_pool_create;
+  decltype(&pyre_mem_pool_retain) mem_pool_retain;
+  decltype(&pyre_mem_pool_release) mem_pool_release;
+  decltype(&pyre_mem_pool_get_attribute) mem_pool_get_attribute;
+  decltype(&pyre_mem_pool_set_attribute) mem_pool_set_attribute;
+  decltype(&pyre_mem_pool_trim) mem_pool_trim;
+
   // Virtual memory.
   decltype(&pyre_allocator_query_virtual_memory) allocator_query_virtual_memory;
   decltype(&pyre_allocator_virtual_memory_reserve) allocator_virtual_memory_reserve;
