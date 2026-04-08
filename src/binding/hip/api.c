@@ -2164,6 +2164,8 @@ HIPAPI hipError_t hipDevicePrimaryCtxGetState(hipDevice_t dev,
 // primary context. Use with caution in multi-threaded applications.
 //
 // See also: hipDeviceReset, hipDevicePrimaryCtxRelease, hipCtxDestroy.
+static void iree_hip_free_and_reset_contiguous_pool(
+    iree_hal_streaming_context_t* context);
 HIPAPI hipError_t hipDevicePrimaryCtxReset(hipDevice_t dev) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
@@ -2204,6 +2206,21 @@ HIPAPI hipError_t hipDevicePrimaryCtxReset(hipDevice_t dev) {
           iree_status_to_fixed_hip_result(status, hipErrorUnknown));
     }
 
+    // Clear current context if it was the primary context (before release).
+    iree_hal_streaming_context_t* current_context =
+        iree_hal_streaming_context_current();
+    if (current_context == device->primary_context) {
+      iree_hal_streaming_context_set_current(NULL);
+    }
+
+    // Free the contiguous pool buffer through the context before releasing it.
+    // The pool was allocated via iree_hal_streaming_memory_allocate_device,
+    // so we must free it the same way to release the underlying HSA memory.
+    iree_hip_free_and_reset_contiguous_pool(device->primary_context);
+
+    // All allocations are released with the context — reset free memory.
+    device->free_memory = device->total_memory;
+
     // Lock to ensure thread safety during reset.
     iree_slim_mutex_lock(&device->primary_context_mutex);
 
@@ -2225,13 +2242,6 @@ HIPAPI hipError_t hipDevicePrimaryCtxReset(hipDevice_t dev) {
     }
 
     iree_slim_mutex_unlock(&device->primary_context_mutex);
-
-    // Clear current context if it was the primary context.
-    iree_hal_streaming_context_t* current_context =
-        iree_hal_streaming_context_current();
-    if (current_context == device->primary_context) {
-      iree_hal_streaming_context_set_current(NULL);
-    }
   }
 
   IREE_TRACE_ZONE_END(z0);
@@ -2921,6 +2931,12 @@ HIPAPI hipError_t hipMemGetInfo(size_t* free, size_t* total) {
           &free_memory, &total_memory)),
       hipErrorInvalidDevice);
 
+  // Use the binding's tracked free memory instead of the static HAL value.
+  // The HAL reports a snapshot from driver init and doesn't track our allocs.
+  if (context->device_entry) {
+    free_memory = context->device_entry->free_memory;
+  }
+
   if (free) *free = (size_t)free_memory;
   if (total) *total = (size_t)total_memory;
 
@@ -2998,6 +3014,28 @@ static size_t g_pool_allocs_top = 0;  // Next free slot (stack top)
 #include <pthread.h>
 static pthread_mutex_t g_pool_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+static void iree_hip_free_and_reset_contiguous_pool(
+    iree_hal_streaming_context_t* context) {
+  pthread_mutex_lock(&g_pool_mutex);
+  if (g_contiguous_pool && context) {
+    // Remove from buffer table and release the underlying HAL buffer.
+    pyre_buffer_table_remove(&context->buffer_table,
+                             g_contiguous_pool->device_ptr);
+    if (g_contiguous_pool->buffer) {
+      iree_hal_buffer_release(g_contiguous_pool->buffer);
+      g_contiguous_pool->buffer = NULL;
+    }
+    iree_allocator_free(context->host_allocator, g_contiguous_pool);
+  }
+  g_contiguous_pool = NULL;
+  g_pool_size = 0;
+  g_pool_raw_size = 0;
+  g_pool_offset = 0;
+  g_pool_alloc_count = 0;
+  g_pool_allocs_top = 0;
+  pthread_mutex_unlock(&g_pool_mutex);
+}
+
 static hipError_t iree_hip_ensure_pool(iree_hal_streaming_context_t* context) {
   // Double-check locking pattern for pool initialization
   if (g_contiguous_pool) {
@@ -3056,10 +3094,14 @@ static hipError_t iree_hip_ensure_pool(iree_hal_streaming_context_t* context) {
   HIP_DEBUG_LOG("[HIP_API] Pool allocated: ptr=%p raw=%zu usable=%zu tail_guard=%zu\n",
           (void*)g_contiguous_pool->device_ptr, g_pool_raw_size,
           g_pool_size, POOL_TAIL_GUARD);
-  
-  // Skip pool zeroing: it's slow over remote HAL (~30s for 6GB) and PyTorch
-  // will overwrite memory before reading it in normal operation.
-  // TODO: optionally zero on first use or use a smaller initial pool.
+
+  // The pool is an internal optimization invisible to the user.
+  // iree_hal_streaming_memory_allocate_device already decremented free_memory
+  // by actual_pool_size — undo that so individual sub-allocations can track
+  // free_memory accurately via hipMalloc/hipFree.
+  if (context->device_entry) {
+    context->device_entry->free_memory += actual_pool_size;
+  }
   
   pthread_mutex_unlock(&g_pool_mutex);
   return hipSuccess;
@@ -3094,6 +3136,18 @@ HIPAPI hipError_t hipMalloc(void** ptr, size_t size) {
     *ptr = NULL;
     IREE_TRACE_ZONE_END(z0);
     return hipSuccess;
+  }
+
+  // Reject absurdly large sizes that can't possibly succeed.
+  {
+    size_t free_mem = 0, total_mem = 0;
+    pyre_status_t ps = pyre_device_memory_info(
+        iree_hip_pyre_device_from_context(context), &free_mem, &total_mem);
+    if (pyre_status_is_ok(ps) && size > total_mem) {
+      IREE_TRACE_ZONE_END(z0);
+      HIP_RETURN_ERROR(hipErrorOutOfMemory);
+    }
+    pyre_status_ignore(ps);
   }
 
   // DEBUG: Toggle between pool allocator and individual allocations
@@ -3149,6 +3203,16 @@ HIPAPI hipError_t hipMalloc(void** ptr, size_t size) {
 
   g_pool_offset += aligned_size;
   g_pool_alloc_count++;
+
+  // Track free memory for hipMemGetInfo.
+  if (context->device_entry) {
+    if (context->device_entry->free_memory >= aligned_size) {
+      context->device_entry->free_memory -= aligned_size;
+    } else {
+      context->device_entry->free_memory = 0;
+    }
+  }
+
   POOL_LOG("[POOL] malloc #%zu: size=%zu aligned=%zu offset=%zu/%zu (%.1f%%) top=%zu\n",
            g_pool_alloc_count, size, aligned_size,
            g_pool_offset, g_pool_size,
@@ -3329,36 +3393,40 @@ HIPAPI hipError_t hipFree(void* ptr) {
     uintptr_t addr = (uintptr_t)ptr;
     if (addr >= pool_start && addr < pool_end) {
       pthread_mutex_lock(&g_pool_mutex);
-      
-      if (g_pool_alloc_count > 0) {
-        g_pool_alloc_count--;
-      }
 
       // Mark this allocation as dead in the tracking table.
       bool found = false;
+      size_t freed_size = 0;
       for (size_t i = 0; i < g_pool_allocs_top; i++) {
         if (g_pool_allocs[i].addr == addr && g_pool_allocs[i].live) {
           g_pool_allocs[i].live = false;
+          freed_size = g_pool_allocs[i].size;
           found = true;
+          if (g_pool_alloc_count > 0) {
+            g_pool_alloc_count--;
+          }
           break;
         }
       }
 
-      // NOTE: We intentionally do NOT perform LIFO compaction here.
-      // GPU kernels execute asynchronously, so memory freed via hipFree
-      // may still be in use by an in-flight kernel (e.g., hipBLASLt
-      // workspace). Reclaiming pool space immediately would allow new
-      // allocations to overlap with data still being read/written by
-      // the GPU, causing silent data corruption.
-      //
-      // The pool is large enough to hold all allocations for a typical
-      // forward pass. If pool exhaustion becomes an issue, compaction
-      // should be deferred until after a device synchronize.
       POOL_LOG("[POOL] free %p: marked-dead offset=%zu top=%zu found=%d live=%zu\n",
                ptr, g_pool_offset, g_pool_allocs_top, found, g_pool_alloc_count);
 
       pthread_mutex_unlock(&g_pool_mutex);
+
+      // Restore free memory tracking for hipMemGetInfo.
+      if (found && freed_size > 0) {
+        iree_hal_streaming_context_t* ctx =
+            iree_hal_streaming_context_current();
+        if (ctx && ctx->device_entry) {
+          ctx->device_entry->free_memory += freed_size;
+        }
+      }
+
       IREE_TRACE_ZONE_END(z0);
+      if (!found) {
+        HIP_RETURN_ERROR(hipErrorInvalidValue);
+      }
       return hipSuccess;
     }
   }
@@ -3874,6 +3942,36 @@ HIPAPI hipError_t hipMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize,
   if (init_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(init_result);
+  }
+
+  // When the contiguous pool is active, sub-allocations share one HAL buffer.
+  // The buffer table would return the pool base, not the sub-allocation base.
+  // Look up the specific sub-allocation from g_pool_allocs instead.
+  if (g_contiguous_pool) {
+    uintptr_t pool_start = g_contiguous_pool->device_ptr;
+    uintptr_t pool_end = pool_start + g_pool_raw_size;
+    uintptr_t addr = (uintptr_t)dptr;
+    if (addr >= pool_start && addr < pool_end) {
+      pthread_mutex_lock(&g_pool_mutex);
+      bool found = false;
+      for (size_t i = 0; i < g_pool_allocs_top; i++) {
+        if (!g_pool_allocs[i].live) continue;
+        uintptr_t alloc_start = g_pool_allocs[i].addr;
+        uintptr_t alloc_end = alloc_start + g_pool_allocs[i].size;
+        if (addr >= alloc_start && addr < alloc_end) {
+          *pbase = (hipDeviceptr_t)alloc_start;
+          *psize = g_pool_allocs[i].size;
+          found = true;
+          break;
+        }
+      }
+      pthread_mutex_unlock(&g_pool_mutex);
+      IREE_TRACE_ZONE_END(z0);
+      if (!found) {
+        HIP_RETURN_ERROR(hipErrorInvalidValue);
+      }
+      return hipSuccess;
+    }
   }
 
   iree_hal_streaming_deviceptr_t base = 0;
