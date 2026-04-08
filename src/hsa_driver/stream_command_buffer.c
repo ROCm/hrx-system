@@ -40,6 +40,11 @@ typedef struct iree_hal_hsa_stream_command_buffer_t {
 
   // Tracing context for this command buffer.
   iree_hal_stream_tracing_context_t* tracing_context;
+
+  // Reused across synchronous dispatches to avoid per-dispatch kernarg
+  // allocation/free overhead in this bringup-level stream command buffer.
+  void* kernarg_scratch;
+  iree_host_size_t kernarg_scratch_size;
 } iree_hal_hsa_stream_command_buffer_t;
 
 static const iree_hal_command_buffer_vtable_t
@@ -89,6 +94,8 @@ iree_status_t iree_hal_hsa_stream_command_buffer_create(
   command_buffer->device_info = device_info;
   command_buffer->device_allocator = device_allocator;
   command_buffer->tracing_context = tracing_context;
+  command_buffer->kernarg_scratch = NULL;
+  command_buffer->kernarg_scratch_size = 0;
   iree_arena_initialize(block_pool, &command_buffer->arena);
 
   iree_status_t status = iree_ok_status();
@@ -120,6 +127,10 @@ static void iree_hal_hsa_stream_command_buffer_destroy(
   iree_allocator_t host_allocator = command_buffer->host_allocator;
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  if (command_buffer->kernarg_scratch) {
+    IREE_HSA_IGNORE_ERROR(
+        hsa_amd_memory_pool_free(command_buffer->kernarg_scratch));
+  }
   iree_hal_resource_set_free(command_buffer->resource_set);
   iree_arena_deinitialize(&command_buffer->arena);
   iree_allocator_free(host_allocator, command_buffer);
@@ -298,11 +309,16 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_copy_buffer(
     iree_hal_command_buffer_t* base_command_buffer,
     iree_hal_buffer_ref_t source_ref, iree_hal_buffer_ref_t target_ref,
     iree_hal_copy_flags_t flags) {
+  IREE_TRACE_ZONE_BEGIN_NAMED(z0,
+                              "iree_hal_hsa_stream_command_buffer_copy_buffer");
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, (int64_t)source_ref.length);
+
   iree_hal_hsa_stream_command_buffer_t* command_buffer =
       iree_hal_hsa_stream_command_buffer_cast(base_command_buffer);
 
   iree_hal_buffer_t* buffers[2] = {source_ref.buffer, target_ref.buffer};
-  IREE_RETURN_IF_ERROR(
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0,
       iree_hal_resource_set_insert(command_buffer->resource_set, 2, buffers));
 
   void* source_device_buffer = iree_hal_hsa_buffer_device_pointer(
@@ -319,26 +335,36 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_copy_buffer(
 
   // Use async copy with completion signal.
   // Lock mutex to protect completion signal from concurrent access.
+  IREE_TRACE_ZONE_BEGIN_NAMED(z_lock, "hsa_copy_lock");
   iree_slim_mutex_lock(&command_buffer->device_info->completion_signal_mutex);
+  IREE_TRACE_ZONE_END(z_lock);
   
   hsa_signal_t completion_signal =
       command_buffer->device_info->completion_signal;
   hsa_signal_store_screlease(completion_signal, 1);
 
-  iree_status_t status = IREE_HSA_CALL_TO_STATUS(
-      hsa_amd_memory_async_copy(target_ptr, command_buffer->device_info->agent,
-                                source_ptr, command_buffer->device_info->agent,
-                                source_ref.length, 0, NULL, completion_signal),
-      "hsa_amd_memory_async_copy");
+  IREE_TRACE_ZONE_BEGIN_NAMED(z_copy, "hsa_amd_memory_async_copy");
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z_copy, (int64_t)source_ref.length);
+  iree_status_t status =
+      IREE_HSA_CALL_TO_STATUS(hsa_amd_memory_async_copy(
+                                  target_ptr, command_buffer->device_info->agent,
+                                  source_ptr, command_buffer->device_info->agent,
+                                  source_ref.length, 0, NULL,
+                                  completion_signal),
+                              "hsa_amd_memory_async_copy");
+  IREE_TRACE_ZONE_END(z_copy);
 
   if (iree_status_is_ok(status)) {
     // Wait for copy to complete (synchronous for simplicity).
+    IREE_TRACE_ZONE_BEGIN_NAMED(z_wait, "hsa_copy_signal_wait");
     hsa_signal_wait_scacquire(
         completion_signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX,
         HSA_WAIT_STATE_BLOCKED);
+    IREE_TRACE_ZONE_END(z_wait);
   }
 
   iree_slim_mutex_unlock(&command_buffer->device_info->completion_signal_mutex);
+  IREE_TRACE_ZONE_END(z0);
   return status;
 }
 
@@ -459,22 +485,38 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
   void* kernarg_address = NULL;
   if (kernarg_size > 0 &&
       command_buffer->device_info->kernarg_memory_pool_valid) {
-    iree_status_t status = IREE_HSA_CALL_TO_STATUS(
-        hsa_amd_memory_pool_allocate(
-            command_buffer->device_info->kernarg_memory_pool,
-            kernarg_size, 0, &kernarg_address),
-        "hsa_amd_memory_pool_allocate (kernarg)");
-    if (!iree_status_is_ok(status)) {
-      IREE_TRACE_ZONE_END(z0);
-      return status;
+    if (command_buffer->kernarg_scratch_size >= kernarg_size) {
+      kernarg_address = command_buffer->kernarg_scratch;
+    } else {
+      void* new_kernarg_address = NULL;
+      IREE_TRACE_ZONE_BEGIN_NAMED(z_kernarg_alloc,
+                                  "hsa_kernarg_memory_pool_allocate");
+      IREE_TRACE_ZONE_APPEND_VALUE_I64(z_kernarg_alloc, (int64_t)kernarg_size);
+      iree_status_t status = IREE_HSA_CALL_TO_STATUS(
+          hsa_amd_memory_pool_allocate(
+              command_buffer->device_info->kernarg_memory_pool,
+              kernarg_size, 0, &new_kernarg_address),
+          "hsa_amd_memory_pool_allocate (kernarg)");
+      IREE_TRACE_ZONE_END(z_kernarg_alloc);
+      if (!iree_status_is_ok(status)) {
+        IREE_TRACE_ZONE_END(z0);
+        return status;
+      }
+      hsa_agent_t kernarg_agents[2] = {
+          command_buffer->device_info->agent,
+          command_buffer->device_info->cpu_agent,
+      };
+      IREE_HSA_IGNORE_ERROR(hsa_amd_agents_allow_access(
+          command_buffer->device_info->cpu_agent.handle ? 2 : 1, kernarg_agents,
+          NULL, new_kernarg_address));
+      if (command_buffer->kernarg_scratch) {
+        IREE_HSA_IGNORE_ERROR(
+            hsa_amd_memory_pool_free(command_buffer->kernarg_scratch));
+      }
+      command_buffer->kernarg_scratch = new_kernarg_address;
+      command_buffer->kernarg_scratch_size = kernarg_size;
+      kernarg_address = command_buffer->kernarg_scratch;
     }
-    hsa_agent_t kernarg_agents[2] = {
-        command_buffer->device_info->agent,
-        command_buffer->device_info->cpu_agent,
-    };
-    IREE_HSA_IGNORE_ERROR(hsa_amd_agents_allow_access(
-        command_buffer->device_info->cpu_agent.handle ? 2 : 1, kernarg_agents,
-        NULL, kernarg_address));
   }
 
   // Set up kernarg using parameter offsets from kernel metadata.
@@ -831,6 +873,7 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
 #endif
 
   // Get write index for the queue.
+  IREE_TRACE_ZONE_BEGIN_NAMED(z_queue_reserve, "hsa_dispatch_queue_reserve");
   uint64_t write_index =
       hsa_queue_add_write_index_relaxed(queue, 1);
 
@@ -841,6 +884,7 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
          queue->size) {
     // Busy wait for space.
   }
+  IREE_TRACE_ZONE_END(z_queue_reserve);
 
   // Get packet address.
   hsa_kernel_dispatch_packet_t* packet =
@@ -898,16 +942,19 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
   __atomic_store_n((uint32_t*)packet, header_setup, __ATOMIC_RELEASE);
 
   // Ring doorbell.
+  IREE_TRACE_ZONE_BEGIN_NAMED(z_doorbell, "hsa_dispatch_ring_doorbell");
   hsa_signal_store_screlease(queue->doorbell_signal,
                                                           write_index);
+  IREE_TRACE_ZONE_END(z_doorbell);
 
   // Wait for completion (synchronous for simplicity).
   // Use a 10 second timeout to avoid hanging forever on kernel failures.
-  hsa_signal_value_t wait_result =
-      hsa_signal_wait_scacquire(
-          completion_signal, HSA_SIGNAL_CONDITION_EQ, 0,
-          10ULL * 1000 * 1000 * 1000,  // 10 seconds in nanoseconds
-          HSA_WAIT_STATE_BLOCKED);
+  IREE_TRACE_ZONE_BEGIN_NAMED(z_wait, "hsa_dispatch_signal_wait");
+  hsa_signal_value_t wait_result = hsa_signal_wait_scacquire(
+      completion_signal, HSA_SIGNAL_CONDITION_EQ, 0,
+      10ULL * 1000 * 1000 * 1000,  // 10 seconds in nanoseconds
+      HSA_WAIT_STATE_BLOCKED);
+  IREE_TRACE_ZONE_END(z_wait);
   
   // Full memory barrier to ensure GPU writes are visible to CPU and subsequent
   // kernel dispatches. The signal wait provides acquire semantics for the
@@ -924,20 +971,6 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
                             "HSA kernel dispatch timed out (native kernels may "
                             "require HIP backend - set IREE_HAL_DRIVER=hip)");
   }
-
-  // Free kernarg memory.
-  // Enable IREE_HSA_LEAK_KERNARG=1 to test if kernarg reuse causes issues.
-#ifndef IREE_HSA_LEAK_KERNARG
-#define IREE_HSA_LEAK_KERNARG 0
-#endif
-#if !IREE_HSA_LEAK_KERNARG
-  if (kernarg_address) {
-    IREE_HSA_IGNORE_ERROR(
-                          hsa_amd_memory_pool_free(kernarg_address));
-  }
-#else
-  (void)kernarg_address;  // Intentionally leak for debugging
-#endif
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
