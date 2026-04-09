@@ -1099,14 +1099,13 @@ static iree_status_t iree_hal_hsa_native_executable_lookup_export_by_name(
                           (int)name.size, name.data);
 }
 
-static iree_status_t iree_hal_hsa_native_executable_lookup_global(
+static iree_status_t iree_hal_hsa_native_executable_lookup_global_by_name(
     iree_hal_executable_t* base_executable, iree_string_view_t name,
-    iree_hal_queue_affinity_t queue_affinity, uint64_t* out_device_address,
-    iree_device_size_t* out_size) {
+    iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_buffer_t** out_buffer) {
   IREE_ASSERT_ARGUMENT(base_executable);
-  IREE_ASSERT_ARGUMENT(out_device_address);
-  *out_device_address = 0;
-  if (out_size) *out_size = 0;
+  IREE_ASSERT_ARGUMENT(out_buffer);
+  *out_buffer = NULL;
 
   iree_hal_hsa_native_executable_t* executable =
       iree_hal_hsa_native_executable_cast(base_executable);
@@ -1123,7 +1122,6 @@ static iree_status_t iree_hal_hsa_native_executable_lookup_global(
   const iree_hal_hsa_native_executable_per_device_data_t* data =
       executable->per_device_data[device_ordinal];
 
-  // Create a null-terminated copy of the name.
   char name_cstr[1024];
   if (name.size >= sizeof(name_cstr)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -1133,20 +1131,16 @@ static iree_status_t iree_hal_hsa_native_executable_lookup_global(
   memcpy(name_cstr, name.data, name.size);
   name_cstr[name.size] = '\0';
 
-  // Try to find the symbol in each HSA executable.
   for (iree_host_size_t i = 0; i < data->executable_count; ++i) {
     hsa_executable_t hsa_exec = data->executables[i];
     hsa_executable_symbol_t symbol;
 
-    // Try to get the symbol by name using the device agent.
     hsa_status_t hsa_status = hsa_executable_get_symbol_by_name(
         hsa_exec, name_cstr, &data->agent, &symbol);
     if (hsa_status != HSA_STATUS_SUCCESS) {
-      // Symbol not found in this executable, try the next one.
       continue;
     }
 
-    // Get the variable address.
     uint64_t address = 0;
     hsa_status = hsa_executable_symbol_get_info(
         symbol, HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_ADDRESS, &address);
@@ -1156,7 +1150,6 @@ static iree_status_t iree_hal_hsa_native_executable_lookup_global(
                               (int)name.size, name.data);
     }
 
-    // Get the variable size.
     uint32_t size = 0;
     hsa_status = hsa_executable_symbol_get_info(
         symbol, HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_SIZE, &size);
@@ -1166,9 +1159,23 @@ static iree_status_t iree_hal_hsa_native_executable_lookup_global(
                               (int)name.size, name.data);
     }
 
-    *out_device_address = address;
-    if (out_size) *out_size = size;
-    return iree_ok_status();
+    iree_hal_buffer_placement_t placement = {
+        .device = NULL,
+        .queue_affinity = queue_affinity,
+        .flags = IREE_HAL_BUFFER_PLACEMENT_FLAG_NONE,
+    };
+    return iree_hal_heap_buffer_wrap(
+        placement,
+        IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+        IREE_HAL_MEMORY_ACCESS_ALL,
+        IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE |
+            IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET |
+            IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED |
+            IREE_HAL_BUFFER_USAGE_MAPPING_ACCESS_RANDOM,
+        size,
+        iree_make_byte_span((void*)(uintptr_t)address, size),
+        iree_hal_buffer_release_callback_null(),
+        executable->host_allocator, out_buffer);
   }
 
   return iree_make_status(IREE_STATUS_NOT_FOUND,
@@ -1184,5 +1191,6 @@ static const iree_hal_executable_vtable_t
         .export_parameters = iree_hal_hsa_native_executable_export_parameters,
         .lookup_export_by_name =
             iree_hal_hsa_native_executable_lookup_export_by_name,
-        .lookup_global = iree_hal_hsa_native_executable_lookup_global,
+        .lookup_global_by_name =
+            iree_hal_hsa_native_executable_lookup_global_by_name,
 };

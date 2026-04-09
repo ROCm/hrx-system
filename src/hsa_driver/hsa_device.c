@@ -613,7 +613,7 @@ static iree_status_t iree_hal_hsa_device_wait_semaphore_list(
 static iree_status_t iree_hal_hsa_device_signal_or_fail_semaphore_list(
     const iree_hal_semaphore_list_t semaphore_list, iree_status_t status) {
   if (iree_status_is_ok(status)) {
-    iree_hal_semaphore_list_signal(semaphore_list);
+    iree_hal_semaphore_list_signal(semaphore_list, /*frontier=*/NULL);
     return iree_ok_status();
   }
   iree_hal_semaphore_list_fail(semaphore_list, status);
@@ -766,7 +766,7 @@ static int iree_hal_hsa_deferred_queue_execute_main(void* param) {
 
   // Signal or fail the signal semaphores.
   if (iree_status_is_ok(status)) {
-    iree_hal_semaphore_list_signal(signal_list);
+    iree_hal_semaphore_list_signal(signal_list, /*frontier=*/NULL);
   } else {
     iree_hal_semaphore_list_fail(signal_list, status);
   }
@@ -928,42 +928,6 @@ static iree_status_t iree_hal_hsa_device_profiling_end(
   return iree_ok_status();
 }
 
-static iree_status_t iree_hal_hsa_device_transfer_h2d_raw(
-    iree_hal_device_t* base_device, const void* source,
-    uint64_t target_device_ptr, iree_device_size_t data_length,
-    iree_timeout_t timeout) {
-  iree_hal_hsa_device_t* device = iree_hal_hsa_device_cast(base_device);
-  IREE_TRACE_ZONE_BEGIN(z0);
-
-  // Use hsa_memory_copy for synchronous host-to-device transfer.
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0,
-      IREE_HSA_CALL_TO_STATUS(
-                               hsa_memory_copy((void*)target_device_ptr, source,
-                                               data_length),
-                               "hsa_memory_copy(H2D)"));
-
-  IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
-}
-
-static iree_status_t iree_hal_hsa_device_transfer_d2h_raw(
-    iree_hal_device_t* base_device, uint64_t source_device_ptr, void* target,
-    iree_device_size_t data_length, iree_timeout_t timeout) {
-  iree_hal_hsa_device_t* device = iree_hal_hsa_device_cast(base_device);
-  IREE_TRACE_ZONE_BEGIN(z0);
-
-  // Use hsa_memory_copy for synchronous device-to-host transfer.
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0,
-      IREE_HSA_CALL_TO_STATUS(
-          hsa_memory_copy(target, (void*)source_device_ptr, data_length),
-          "hsa_memory_copy(D2H)"));
-
-  IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
-}
-
 static const iree_hal_device_vtable_t iree_hal_hsa_device_vtable = {
     .destroy = iree_hal_hsa_device_destroy,
     .id = iree_hal_hsa_device_id,
@@ -973,11 +937,11 @@ static const iree_hal_device_vtable_t iree_hal_hsa_device_vtable = {
     .replace_channel_provider = iree_hal_hsa_replace_channel_provider,
     .trim = iree_hal_hsa_device_trim,
     .query_i64 = iree_hal_hsa_device_query_i64,
+    .query_string = iree_hal_hsa_device_query_string,
     .query_capabilities = iree_hal_hsa_device_query_capabilities,
     .topology_info = iree_hal_hsa_device_topology_info,
     .refine_topology_edge = iree_hal_hsa_device_refine_topology_edge,
     .assign_topology_info = iree_hal_hsa_device_assign_topology_info,
-    .query_string = iree_hal_hsa_device_query_string,
     .create_channel = iree_hal_hsa_device_create_channel,
     .create_command_buffer = iree_hal_hsa_device_create_command_buffer,
     .create_event = iree_hal_hsa_device_create_event,
@@ -1000,6 +964,4 @@ static const iree_hal_device_vtable_t iree_hal_hsa_device_vtable = {
     .profiling_begin = iree_hal_hsa_device_profiling_begin,
     .profiling_flush = iree_hal_hsa_device_profiling_flush,
     .profiling_end = iree_hal_hsa_device_profiling_end,
-    .transfer_h2d_raw = iree_hal_hsa_device_transfer_h2d_raw,
-    .transfer_d2h_raw = iree_hal_hsa_device_transfer_d2h_raw,
 };

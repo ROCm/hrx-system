@@ -475,19 +475,62 @@ iree_status_t iree_hal_streaming_module_global(
     return status;
   }
 
-  // If not found, try the HAL executable's lookup_global interface.
+  // If not found, try the HAL executable's lookup_global_by_name interface.
   if (iree_status_is_not_found(status) && module->executable) {
     iree_status_ignore(status);
-    uint64_t device_address = 0;
-    iree_device_size_t size = 0;
     iree_hal_queue_affinity_t queue_affinity =
         module->context ? module->context->queue_affinity : 0;
-    status = iree_hal_executable_lookup_global(
+    iree_hal_buffer_t* buffer = NULL;
+    status = iree_hal_executable_lookup_global_by_name(
         module->executable, iree_make_cstring_view(name), queue_affinity,
-        &device_address, &size);
+        &buffer);
     if (iree_status_is_ok(status)) {
-      *out_device_ptr = (iree_hal_streaming_deviceptr_t)device_address;
-      if (out_size) *out_size = size;
+      iree_hal_buffer_mapping_t mapping;
+      status = iree_hal_buffer_map_range(
+          buffer, IREE_HAL_MAPPING_MODE_SCOPED, IREE_HAL_MEMORY_ACCESS_ALL,
+          0, iree_hal_buffer_byte_length(buffer), &mapping);
+      if (iree_status_is_ok(status)) {
+        iree_hal_streaming_deviceptr_t device_ptr =
+            (iree_hal_streaming_deviceptr_t)(uintptr_t)mapping.contents.data;
+        iree_device_size_t buf_size = mapping.contents.data_length;
+        iree_hal_buffer_unmap_range(&mapping);
+
+        // Register the buffer in the context's buffer table so that
+        // subsequent memcpy operations (e.g. hipMemcpyToSymbol) can resolve
+        // this device pointer through the normal HAL transfer path.
+        if (module->context) {
+          iree_hal_streaming_buffer_t* wrapper = NULL;
+          status = iree_allocator_malloc(module->context->host_allocator,
+                                         sizeof(*wrapper), (void**)&wrapper);
+          if (iree_status_is_ok(status)) {
+            memset(wrapper, 0, sizeof(*wrapper));
+            wrapper->buffer = buffer;
+            iree_hal_buffer_retain(buffer);
+            wrapper->context = module->context;
+            iree_hal_streaming_context_retain(module->context);
+            wrapper->device_ptr = device_ptr;
+            wrapper->host_ptr = (void*)(uintptr_t)device_ptr;
+            wrapper->size = buf_size;
+            wrapper->memory_type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+            wrapper->preferred_location = -2;
+            wrapper->last_prefetch_location = -2;
+            status = PYRE_CALL(pyre_buffer_table_insert(
+                &module->context->buffer_table, wrapper->device_ptr,
+                wrapper->host_ptr, wrapper->size, NULL, wrapper));
+            if (!iree_status_is_ok(status)) {
+              iree_hal_buffer_release(wrapper->buffer);
+              iree_hal_streaming_context_release(wrapper->context);
+              iree_allocator_free(module->context->host_allocator, wrapper);
+            }
+          }
+        }
+
+        if (iree_status_is_ok(status)) {
+          *out_device_ptr = device_ptr;
+          if (out_size) *out_size = buf_size;
+        }
+      }
+      iree_hal_buffer_release(buffer);
     }
   }
 

@@ -90,6 +90,7 @@ pyre_status_t pyre_semaphore_signal(pyre_semaphore_t semaphore,
                             "semaphore is NULL");
   }
   iree_status_t status =
-      iree_hal_semaphore_signal(semaphore->hal_semaphore, value);
+      iree_hal_semaphore_signal(semaphore->hal_semaphore, value,
+                               /*frontier=*/NULL);
   return pyre_status_from_iree(status);
 }
