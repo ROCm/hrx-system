@@ -25,7 +25,6 @@ set(PYRE_SOURCES
     ${PYRE_IREE_SOURCE_DIR}/compiler/bindings/c/iree/compiler/loader/loader.cpp
     mem_pool.c
     graph.c
-    stubs.c
 )
 
 set(PYRE_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/include)

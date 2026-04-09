@@ -60,10 +60,10 @@ pyre_status_t pyre_event_release(pyre_event_t event) {
   }
   if (iree_atomic_ref_count_dec(&event->ref_count) == 1) {
     if (event->semaphore) {
-      pyre_status_ignore(pyre_semaphore_release(event->semaphore));
+      pyre_semaphore_release(event->semaphore);
     }
     if (event->recording_stream) {
-      pyre_status_ignore(pyre_stream_release(event->recording_stream));
+      pyre_stream_release(event->recording_stream);
     }
     free(event);
   }
@@ -85,10 +85,10 @@ pyre_status_t pyre_event_record(pyre_event_t event, pyre_stream_t stream) {
   // Track recording stream (retain new, release old).
   if (event->recording_stream != stream) {
     if (event->recording_stream) {
-      pyre_status_ignore(pyre_stream_release(event->recording_stream));
+      pyre_stream_release(event->recording_stream);
     }
     event->recording_stream = stream;
-    pyre_status_ignore(pyre_stream_retain(stream));
+    pyre_stream_retain(stream);
   }
 
   // Flush pending work so it's submitted before the barrier.
