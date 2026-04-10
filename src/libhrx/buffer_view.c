@@ -1,28 +1,28 @@
-// Copyright 2026 The Pyre Authors
+// Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 
-#include "pyre_internal.h"
+#include "hrx_internal.h"
 
 #include <stdlib.h>
 
-pyre_status_t pyre_buffer_view_create(
-    pyre_buffer_t buffer, size_t shape_rank, const int64_t* shape,
-    pyre_element_type_t element_type, pyre_encoding_type_t encoding_type,
-    pyre_buffer_view_t* buffer_view) {
+hrx_status_t hrx_buffer_view_create(
+    hrx_buffer_t buffer, size_t shape_rank, const int64_t* shape,
+    hrx_element_type_t element_type, hrx_encoding_type_t encoding_type,
+    hrx_buffer_view_t* buffer_view) {
   if (!buffer || !buffer_view) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT,
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                             "buffer or buffer_view is NULL");
   }
   *buffer_view = NULL;
   if (shape_rank > 0 && !shape) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT,
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                             "shape is NULL for non-zero rank");
   }
 
-  pyre_buffer_view_t created =
-      (pyre_buffer_view_t)calloc(1, sizeof(*created));
+  hrx_buffer_view_t created =
+      (hrx_buffer_view_t)calloc(1, sizeof(*created));
   if (!created) {
-    return pyre_make_status(PYRE_STATUS_OUT_OF_MEMORY,
+    return hrx_make_status(HRX_STATUS_OUT_OF_MEMORY,
                             "failed to allocate buffer_view");
   }
 
@@ -34,7 +34,7 @@ pyre_status_t pyre_buffer_view_create(
         (void**)&iree_shape);
     if (!iree_status_is_ok(alloc_status)) {
       free(created);
-      return pyre_status_from_iree(alloc_status);
+      return hrx_status_from_iree(alloc_status);
     }
   }
 
@@ -44,7 +44,7 @@ pyre_status_t pyre_buffer_view_create(
         iree_allocator_free(iree_allocator_system(), iree_shape);
       }
       free(created);
-      return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT,
+      return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                               "shape dimensions must be non-negative");
     }
     iree_shape[i] = (iree_hal_dim_t)shape[i];
@@ -62,51 +62,51 @@ pyre_status_t pyre_buffer_view_create(
 
   if (!iree_status_is_ok(status)) {
     free(created);
-    return pyre_status_from_iree(status);
+    return hrx_status_from_iree(status);
   }
 
   iree_atomic_ref_count_init(&created->ref_count);
   *buffer_view = created;
-  return pyre_ok_status();
+  return hrx_ok_status();
 }
 
-void pyre_buffer_view_retain(pyre_buffer_view_t buffer_view) {
+void hrx_buffer_view_retain(hrx_buffer_view_t buffer_view) {
   iree_hal_buffer_view_retain(buffer_view->hal_buffer_view);
   iree_atomic_ref_count_inc(&buffer_view->ref_count);
 }
 
-void pyre_buffer_view_release(pyre_buffer_view_t buffer_view) {
+void hrx_buffer_view_release(hrx_buffer_view_t buffer_view) {
   iree_hal_buffer_view_release(buffer_view->hal_buffer_view);
   if (iree_atomic_ref_count_dec(&buffer_view->ref_count) == 1) {
     free(buffer_view);
   }
 }
 
-pyre_status_t pyre_buffer_view_rank(pyre_buffer_view_t buffer_view,
+hrx_status_t hrx_buffer_view_rank(hrx_buffer_view_t buffer_view,
                                     size_t* rank) {
   if (!buffer_view || !rank) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT,
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                             "buffer_view or rank is NULL");
   }
   *rank = (size_t)iree_hal_buffer_view_shape_rank(
       buffer_view->hal_buffer_view);
-  return pyre_ok_status();
+  return hrx_ok_status();
 }
 
-pyre_status_t pyre_buffer_view_dim(pyre_buffer_view_t buffer_view,
+hrx_status_t hrx_buffer_view_dim(hrx_buffer_view_t buffer_view,
                                    size_t dim,
                                    int64_t* value) {
   if (!buffer_view || !value) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT,
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                             "buffer_view or value is NULL");
   }
   size_t rank = (size_t)iree_hal_buffer_view_shape_rank(
       buffer_view->hal_buffer_view);
   if (dim >= rank) {
-    return pyre_make_status(PYRE_STATUS_OUT_OF_RANGE,
+    return hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
                             "buffer_view dim out of range");
   }
   *value = (int64_t)iree_hal_buffer_view_shape_dim(
       buffer_view->hal_buffer_view, (iree_host_size_t)dim);
-  return pyre_ok_status();
+  return hrx_ok_status();
 }

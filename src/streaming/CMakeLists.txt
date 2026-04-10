@@ -1,9 +1,9 @@
-# Copyright 2026 The Pyre Authors
+# Copyright 2026 The HRX Authors
 # SPDX-License-Identifier: Apache-2.0
 #
 # Streaming HIP runtime library (internal, static, LTO'd into consumers).
 
-add_library(pyre_streaming STATIC
+add_library(hrx_streaming STATIC
     context.c
     device.c
     event.c
@@ -20,16 +20,16 @@ add_library(pyre_streaming STATIC
     util/buffer_table.c
 )
 
-target_include_directories(pyre_streaming PUBLIC
+target_include_directories(hrx_streaming PUBLIC
     ${PROJECT_SOURCE_DIR}/src
 )
-target_include_directories(pyre_streaming PUBLIC
+target_include_directories(hrx_streaming PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
-    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src/libpyre>
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src/libhrx>
 )
 
-target_link_libraries(pyre_streaming PUBLIC
-    pyre
+target_link_libraries(hrx_streaming PUBLIC
+    hrx
     iree_async_async
     iree_async_util_proactor_pool
     iree_base_base
@@ -40,7 +40,7 @@ target_link_libraries(pyre_streaming PUBLIC
     iree_io_file_handle
 )
 
-set_target_properties(pyre_streaming PROPERTIES
+set_target_properties(hrx_streaming PROPERTIES
     POSITION_INDEPENDENT_CODE ON
     INTERPROCEDURAL_OPTIMIZATION TRUE
 )
@@ -48,7 +48,7 @@ set_target_properties(pyre_streaming PROPERTIES
 if(BUILD_TESTING)
   add_executable(buffer_table_test util/buffer_table_test.cc)
   target_link_libraries(buffer_table_test PRIVATE
-      pyre_streaming
+      hrx_streaming
       iree_base_base
       iree_testing_gtest
       iree_testing_gtest_main
@@ -57,7 +57,7 @@ if(BUILD_TESTING)
 
   add_executable(buffer_table_benchmark util/buffer_table_benchmark.cc)
   target_link_libraries(buffer_table_benchmark PRIVATE
-      pyre_streaming
+      hrx_streaming
       iree_base_base
       iree_testing_benchmark
       iree_testing_benchmark_main

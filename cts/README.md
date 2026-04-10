@@ -1,4 +1,4 @@
-# Pyre CTS (Conformance Test Suite)
+# HRX CTS (Conformance Test Suite)
 
 ## Test Coverage
 
@@ -26,7 +26,7 @@
 | `executable_load` / `export_count` / `export_info` | Needs kernel binary to load |
 | `executable_lookup_global` | Needs executable with global variables |
 | `queue_host_call` | Needs dispatch ordering infrastructure |
-| `stream_execution_barrier` | Not yet implemented in libpyre |
+| `stream_execution_barrier` | Not yet implemented in libhrx |
 | `multithread` | Concurrent stream/semaphore stress tests |
 | `multidevice` | Cross-device copy, cross-device semaphore (needs multi-GPU) |
 | `fork` | fork() safety for DataLoader scenarios |
@@ -36,12 +36,12 @@
 
 ```bash
 # Build with CTS enabled
-cmake -B build/pyre-runtime ... -DPYRE_BUILD_CTS=ON -DBUILD_TESTING=ON
+cmake -B build/hrx-runtime ... -DHRX_BUILD_CTS=ON -DBUILD_TESTING=ON
 
 # Run all CTS tests
-ctest --test-dir build/pyre-runtime --output-on-failure
+ctest --test-dir build/hrx-runtime --output-on-failure
 
 # Run a specific category
-build/pyre-runtime/cts/pyre_cts_allocator
-build/pyre-runtime/cts/pyre_cts_transfer
+build/hrx-runtime/cts/hrx_cts_allocator
+build/hrx-runtime/cts/hrx_cts_transfer
 ```

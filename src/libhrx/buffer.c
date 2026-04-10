@@ -1,31 +1,31 @@
-// Copyright 2026 The Pyre Authors
+// Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 //
 // Buffer allocation, mapping, and lifecycle.
 // Adapted from iree-hal-streaming's memory.c allocation patterns.
 
-#include "pyre_internal.h"
+#include "hrx_internal.h"
 
 #include <string.h>
 
-pyre_status_t pyre_buffer_allocate(pyre_stream_t stream, size_t size,
-                                   pyre_memory_type_t mem_type,
-                                   pyre_buffer_usage_t usage,
-                                   pyre_buffer_t* buffer) {
+hrx_status_t hrx_buffer_allocate(hrx_stream_t stream, size_t size,
+                                   hrx_memory_type_t mem_type,
+                                   hrx_buffer_usage_t usage,
+                                   hrx_buffer_t* buffer) {
   if (!stream || !buffer) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT,
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                             "stream or buffer is NULL");
   }
   if (size == 0) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT,
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                             "allocation size must be > 0");
   }
 
-  pyre_buffer_s* buf = NULL;
+  hrx_buffer_s* buf = NULL;
   iree_status_t alloc_s = iree_allocator_malloc(
-      iree_allocator_system(), sizeof(pyre_buffer_s), (void**)&buf);
+      iree_allocator_system(), sizeof(hrx_buffer_s), (void**)&buf);
   if (!iree_status_is_ok(alloc_s)) {
-    return pyre_status_from_iree(alloc_s);
+    return hrx_status_from_iree(alloc_s);
   }
   memset(buf, 0, sizeof(*buf));
 
@@ -35,8 +35,8 @@ pyre_status_t pyre_buffer_allocate(pyre_stream_t stream, size_t size,
       .usage = (iree_hal_buffer_usage_t)usage,
   };
 
-  pyre_status_t flush_status = pyre_stream_flush(stream);
-  if (!pyre_status_is_ok(flush_status)) {
+  hrx_status_t flush_status = hrx_stream_flush(stream);
+  if (!hrx_status_is_ok(flush_status)) {
     iree_allocator_free(iree_allocator_system(), buf);
     return flush_status;
   }
@@ -62,30 +62,30 @@ pyre_status_t pyre_buffer_allocate(pyre_stream_t stream, size_t size,
       &buf->hal_buffer);
   if (!iree_status_is_ok(status)) {
     iree_allocator_free(iree_allocator_system(), buf);
-    return pyre_status_from_iree(status);
+    return hrx_status_from_iree(status);
   }
 
   iree_atomic_ref_count_init(&buf->ref_count);
   buf->device = stream->device;
-  pyre_device_retain(buf->device);
+  hrx_device_retain(buf->device);
   buf->mem_type = mem_type;
   buf->size = size;
   buf->mapped_ptr = NULL;
   stream->timepoint = signal_value;
 
   *buffer = buf;
-  return pyre_ok_status();
+  return hrx_ok_status();
 }
 
-void pyre_buffer_retain(pyre_buffer_t buffer) {
+void hrx_buffer_retain(hrx_buffer_t buffer) {
   iree_hal_buffer_retain(buffer->hal_buffer);
-  pyre_device_retain(buffer->device);
+  hrx_device_retain(buffer->device);
   iree_atomic_ref_count_inc(&buffer->ref_count);
 }
 
-void pyre_buffer_release(pyre_buffer_t buffer) {
+void hrx_buffer_release(hrx_buffer_t buffer) {
   iree_hal_buffer_t* hal_buffer = buffer->hal_buffer;
-  pyre_device_t device = buffer->device;
+  hrx_device_t device = buffer->device;
   if (iree_atomic_ref_count_dec(&buffer->ref_count) == 1) {
     if (buffer->mapped_ptr) {
       iree_hal_buffer_unmap_range(
@@ -97,40 +97,40 @@ void pyre_buffer_release(pyre_buffer_t buffer) {
     iree_allocator_free(iree_allocator_system(), buffer);
   }
   iree_hal_buffer_release(hal_buffer);
-  pyre_device_release(device);
+  hrx_device_release(device);
 }
 
-pyre_status_t pyre_buffer_map(pyre_buffer_t buffer, pyre_map_flags_t flags,
+hrx_status_t hrx_buffer_map(hrx_buffer_t buffer, hrx_map_flags_t flags,
                               size_t offset, size_t size, void** mapped_ptr) {
   if (!buffer || !mapped_ptr) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT,
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                             "buffer or mapped_ptr is NULL");
   }
 
   iree_hal_memory_access_t access = 0;
-  if (flags & PYRE_MAP_READ) access |= IREE_HAL_MEMORY_ACCESS_READ;
-  if (flags & PYRE_MAP_WRITE) access |= IREE_HAL_MEMORY_ACCESS_WRITE;
-  if (flags & PYRE_MAP_DISCARD) access |= IREE_HAL_MEMORY_ACCESS_DISCARD_WRITE;
+  if (flags & HRX_MAP_READ) access |= IREE_HAL_MEMORY_ACCESS_READ;
+  if (flags & HRX_MAP_WRITE) access |= IREE_HAL_MEMORY_ACCESS_WRITE;
+  if (flags & HRX_MAP_DISCARD) access |= IREE_HAL_MEMORY_ACCESS_DISCARD_WRITE;
 
   iree_hal_buffer_mapping_t mapping;
   iree_status_t status = iree_hal_buffer_map_range(
       buffer->hal_buffer, IREE_HAL_MAPPING_MODE_SCOPED, access,
       (iree_device_size_t)offset, (iree_device_size_t)size, &mapping);
   if (!iree_status_is_ok(status)) {
-    return pyre_status_from_iree(status);
+    return hrx_status_from_iree(status);
   }
 
   buffer->mapped_ptr = mapping.contents.data;
   *mapped_ptr = mapping.contents.data;
-  return pyre_ok_status();
+  return hrx_ok_status();
 }
 
-pyre_status_t pyre_buffer_unmap(pyre_buffer_t buffer) {
+hrx_status_t hrx_buffer_unmap(hrx_buffer_t buffer) {
   if (!buffer) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT, "buffer is NULL");
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "buffer is NULL");
   }
   if (!buffer->mapped_ptr) {
-    return pyre_ok_status();  // Not mapped, no-op.
+    return hrx_ok_status();  // Not mapped, no-op.
   }
 
   iree_hal_buffer_mapping_t mapping = {
@@ -141,13 +141,13 @@ pyre_status_t pyre_buffer_unmap(pyre_buffer_t buffer) {
   };
   iree_hal_buffer_unmap_range(&mapping);
   buffer->mapped_ptr = NULL;
-  return pyre_ok_status();
+  return hrx_ok_status();
 }
 
-pyre_status_t pyre_buffer_get_device_ptr(pyre_buffer_t buffer,
+hrx_status_t hrx_buffer_get_device_ptr(hrx_buffer_t buffer,
                                          void** device_ptr) {
   if (!buffer || !device_ptr) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT,
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                             "buffer or device_ptr is NULL");
   }
   // For local-task (CPU) devices, the device pointer is available via mapping.
@@ -155,7 +155,7 @@ pyre_status_t pyre_buffer_get_device_ptr(pyre_buffer_t buffer,
   // For now, map the buffer to get a usable pointer.
   if (buffer->mapped_ptr) {
     *device_ptr = buffer->mapped_ptr;
-    return pyre_ok_status();
+    return hrx_ok_status();
   }
 
   // Try to get a native allocation pointer.
@@ -167,20 +167,20 @@ pyre_status_t pyre_buffer_get_device_ptr(pyre_buffer_t buffer,
   if (iree_status_is_ok(status)) {
     *device_ptr = mapping.contents.data;
     buffer->mapped_ptr = mapping.contents.data;
-    return pyre_ok_status();
+    return hrx_ok_status();
   }
 
   iree_status_ignore(status);
   *device_ptr = NULL;
-  return pyre_make_status(PYRE_STATUS_UNAVAILABLE,
+  return hrx_make_status(HRX_STATUS_UNAVAILABLE,
                           "cannot get device pointer for this buffer type");
 }
 
-pyre_status_t pyre_buffer_get_size(pyre_buffer_t buffer, size_t* size) {
+hrx_status_t hrx_buffer_get_size(hrx_buffer_t buffer, size_t* size) {
   if (!buffer || !size) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT,
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                             "buffer or size is NULL");
   }
   *size = buffer->size;
-  return pyre_ok_status();
+  return hrx_ok_status();
 }

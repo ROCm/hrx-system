@@ -1,28 +1,28 @@
-// Copyright 2026 The Pyre Authors
+// Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 
-#include <pyre_runtime_cxx.h>
+#include <hrx_runtime_cxx.h>
 
 #include <catch2/catch_test_macros.hpp>
 #include <type_traits>
 
-TEST_CASE("pyre_runtime_cxx.h handle wrappers compile and default to null",
+TEST_CASE("hrx_runtime_cxx.h handle wrappers compile and default to null",
           "[cxx_api]") {
-  static_assert(std::is_copy_constructible_v<pyre::runtime::device_ptr>);
-  static_assert(std::is_copy_assignable_v<pyre::runtime::device_ptr>);
-  static_assert(std::is_move_constructible_v<pyre::runtime::device_ptr>);
-  static_assert(std::is_move_assignable_v<pyre::runtime::device_ptr>);
+  static_assert(std::is_copy_constructible_v<hrx::runtime::device_ptr>);
+  static_assert(std::is_copy_assignable_v<hrx::runtime::device_ptr>);
+  static_assert(std::is_move_constructible_v<hrx::runtime::device_ptr>);
+  static_assert(std::is_move_assignable_v<hrx::runtime::device_ptr>);
 
-  pyre::runtime::device_ptr device;
-  pyre::runtime::allocator_ptr allocator;
-  pyre::runtime::semaphore_ptr semaphore;
-  pyre::runtime::stream_ptr stream;
-  pyre::runtime::buffer_ptr buffer;
-  pyre::runtime::module_ptr module;
-  pyre::runtime::function_ptr function;
-  pyre::runtime::value_list_ptr value_list;
-  pyre::runtime::fence_ptr fence;
-  pyre::runtime::buffer_view_ptr buffer_view;
+  hrx::runtime::device_ptr device;
+  hrx::runtime::allocator_ptr allocator;
+  hrx::runtime::semaphore_ptr semaphore;
+  hrx::runtime::stream_ptr stream;
+  hrx::runtime::buffer_ptr buffer;
+  hrx::runtime::module_ptr module;
+  hrx::runtime::function_ptr function;
+  hrx::runtime::value_list_ptr value_list;
+  hrx::runtime::fence_ptr fence;
+  hrx::runtime::buffer_view_ptr buffer_view;
 
   CHECK(!device);
   CHECK(!allocator);
@@ -35,8 +35,8 @@ TEST_CASE("pyre_runtime_cxx.h handle wrappers compile and default to null",
   CHECK(!fence);
   CHECK(!buffer_view);
 
-  pyre::runtime::device_ptr copied = device;
-  pyre::runtime::device_ptr moved = std::move(copied);
+  hrx::runtime::device_ptr copied = device;
+  hrx::runtime::device_ptr moved = std::move(copied);
   CHECK(!copied);
   CHECK(!moved);
   CHECK(moved.get() == nullptr);
@@ -44,6 +44,6 @@ TEST_CASE("pyre_runtime_cxx.h handle wrappers compile and default to null",
   CHECK(moved.for_output() != nullptr);
 }
 
-TEST_CASE("pyre_runtime_cxx.h status formatter handles OK", "[cxx_api]") {
-  CHECK(pyre::runtime::format_status(pyre_ok_status()) == "OK");
+TEST_CASE("hrx_runtime_cxx.h status formatter handles OK", "[cxx_api]") {
+  CHECK(hrx::runtime::format_status(hrx_ok_status()) == "OK");
 }

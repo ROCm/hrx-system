@@ -1,4 +1,4 @@
-# Copyright 2026 The Pyre Authors
+# Copyright 2026 The HRX Authors
 # SPDX-License-Identifier: Apache-2.0
 #
 # CUDA binding — CUDA runtime/driver API compatibility layer.
@@ -13,7 +13,7 @@ target_include_directories(cuda PRIVATE
 )
 
 target_link_libraries(cuda PRIVATE
-    pyre_streaming
+    hrx_streaming
     iree_base_base
     iree_hal_hal
 )

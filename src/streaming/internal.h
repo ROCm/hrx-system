@@ -7,7 +7,7 @@
 #ifndef IREE_EXPERIMENTAL_STREAMING_INTERNAL_H_
 #define IREE_EXPERIMENTAL_STREAMING_INTERNAL_H_
 
-#include "streaming/pyre_bridge.h"
+#include "streaming/hrx_bridge.h"
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/api.h"
@@ -283,12 +283,12 @@ typedef struct iree_hal_streaming_device_t {
   // Device ordinal in the global registry.
   iree_host_size_t ordinal;
 
-  // Pyre device handle (owns the HAL device and driver).
-  pyre_device_t pyre_device;
+  // HRX device handle (owns the HAL device and driver).
+  hrx_device_t hrx_device;
 
-  // HAL device extracted from pyre_device for direct HAL calls.
-  // Streaming is always built from the same source tree as libpyre and
-  // shares internal representations. Accessed via pyre_device_hal().
+  // HAL device extracted from hrx_device for direct HAL calls.
+  // Streaming is always built from the same source tree as libhrx and
+  // shares internal representations. Accessed via hrx_device_hal().
   iree_hal_device_t* hal_device;
   iree_hal_device_info_t info;
 
