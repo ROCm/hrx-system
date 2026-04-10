@@ -9,12 +9,11 @@
 
 #if defined(IREE_PTR_SIZE_32)
 #error "32-bit not supported on HSA backend"
-#endif  // defined(IREE_PTR_SIZE_32)
+#endif // defined(IREE_PTR_SIZE_32)
 
 // HSA runtime headers
-#include "hsa/hsa.h"                  // IWYU pragma: export
-#include "hsa/hsa_ext_amd.h"          // IWYU pragma: export
-#include "hsa/hsa_ext_finalize.h"     // IWYU pragma: export
+#include "hsa/hsa.h"              // IWYU pragma: export
+#include "hsa/hsa_ext_amd.h"      // IWYU pragma: export
+#include "hsa/hsa_ext_finalize.h" // IWYU pragma: export
 
-#endif  // IREE_HAL_DRIVERS_HSA_HSA_HEADERS_H_
-
+#endif // IREE_HAL_DRIVERS_HSA_HSA_HEADERS_H_

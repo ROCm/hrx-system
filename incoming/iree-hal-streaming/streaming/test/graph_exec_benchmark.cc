@@ -4,11 +4,11 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "streaming/internal.h"
-#include "streaming/test/graph_util.h"
 #include "iree/base/api.h"
 #include "iree/testing/benchmark.h"
+#include "streaming/internal.h"
 #include "streaming/test/benchmark_compat.h"
+#include "streaming/test/graph_util.h"
 
 //===----------------------------------------------------------------------===//
 // Graph execution launch benchmarks
@@ -16,8 +16,8 @@
 
 namespace {
 
-static iree_status_t InitializeStreamingContext(
-    iree_hal_streaming_context_t** out_context) {
+static iree_status_t
+InitializeStreamingContext(iree_hal_streaming_context_t **out_context) {
   IREE_RETURN_IF_ERROR(iree_hal_streaming_init_global(
       IREE_HAL_STREAMING_INIT_FLAG_NONE, iree_allocator_system()));
   iree_host_size_t device_count = 0;
@@ -25,7 +25,7 @@ static iree_status_t InitializeStreamingContext(
   if (device_count == 0) {
     return iree_make_status(IREE_STATUS_UNAVAILABLE, "no devices available");
   }
-  iree_hal_streaming_device_t* device = iree_hal_streaming_device_entry(0);
+  iree_hal_streaming_device_t *device = iree_hal_streaming_device_entry(0);
   IREE_RETURN_IF_ERROR(iree_hal_streaming_device_get_or_create_primary_context(
       device, out_context));
   return iree_ok_status();
@@ -35,21 +35,22 @@ static void CleanupStreamingContext() { iree_hal_streaming_cleanup_global(); }
 
 // State structure to manage all benchmark resources.
 struct ExecBenchmarkState {
-  iree_hal_streaming_graph_t* graph = nullptr;
-  iree_hal_streaming_graph_exec_t* exec = nullptr;
-  iree_hal_streaming_module_t* module = nullptr;
-  iree_hal_streaming_buffer_t* buffer_a = nullptr;
-  iree_hal_streaming_buffer_t* buffer_b = nullptr;
-  iree_hal_streaming_buffer_t* buffer_c = nullptr;
-  iree_hal_streaming_context_t* context = nullptr;
+  iree_hal_streaming_graph_t *graph = nullptr;
+  iree_hal_streaming_graph_exec_t *exec = nullptr;
+  iree_hal_streaming_module_t *module = nullptr;
+  iree_hal_streaming_buffer_t *buffer_a = nullptr;
+  iree_hal_streaming_buffer_t *buffer_b = nullptr;
+  iree_hal_streaming_buffer_t *buffer_c = nullptr;
+  iree_hal_streaming_context_t *context = nullptr;
 };
 
 // Helper to create, populate, and instantiate a test graph.
-static iree_status_t CreateExecBenchmarkState(
-    iree_hal_streaming_context_t* context, iree_hal_streaming_stream_t* stream,
-    const char* pattern, iree_host_size_t node_count,
-    ExecBenchmarkState** out_state) {
-  ExecBenchmarkState* state = new ExecBenchmarkState();
+static iree_status_t
+CreateExecBenchmarkState(iree_hal_streaming_context_t *context,
+                         iree_hal_streaming_stream_t *stream,
+                         const char *pattern, iree_host_size_t node_count,
+                         ExecBenchmarkState **out_state) {
+  ExecBenchmarkState *state = new ExecBenchmarkState();
   state->context = context;
   *out_state = state;
 
@@ -129,8 +130,9 @@ static iree_status_t CreateExecBenchmarkState(
 }
 
 // Destroys the benchmark state and releases all resources.
-static void DestroyExecBenchmarkState(ExecBenchmarkState* state) {
-  if (!state) return;
+static void DestroyExecBenchmarkState(ExecBenchmarkState *state) {
+  if (!state)
+    return;
 
   // Release in reverse order of creation.
   iree_hal_streaming_graph_exec_release(state->exec);
@@ -150,19 +152,19 @@ static void DestroyExecBenchmarkState(ExecBenchmarkState* state) {
 
 // Benchmark launching a linear sequence graph.
 IREE_BENCHMARK_FN(BM_GraphExecLaunch_Linear) {
-  iree_hal_streaming_context_t* context = nullptr;
+  iree_hal_streaming_context_t *context = nullptr;
   IREE_RETURN_IF_ERROR(InitializeStreamingContext(&context));
 
   int64_t node_count = iree_benchmark_get_range(benchmark_state, 0);
 
   // Create a stream for execution.
-  iree_hal_streaming_stream_t* stream = nullptr;
+  iree_hal_streaming_stream_t *stream = nullptr;
   IREE_RETURN_IF_ERROR(iree_hal_streaming_stream_create(
       context, IREE_HAL_STREAMING_STREAM_FLAG_NONE, 0, iree_allocator_system(),
       &stream));
 
   // Pre-create and instantiate the graph outside timing loop.
-  ExecBenchmarkState* state = nullptr;
+  ExecBenchmarkState *state = nullptr;
   IREE_RETURN_IF_ERROR(
       CreateExecBenchmarkState(context, stream, "linear", node_count, &state));
 
@@ -194,17 +196,17 @@ IREE_BENCHMARK_REGISTER_ARGS(BM_GraphExecLaunch_Linear, 10000);
 
 // Benchmark launching a diamond pattern graph.
 IREE_BENCHMARK_FN(BM_GraphExecLaunch_Diamond) {
-  iree_hal_streaming_context_t* context = nullptr;
+  iree_hal_streaming_context_t *context = nullptr;
   IREE_RETURN_IF_ERROR(InitializeStreamingContext(&context));
 
   int64_t parallel_count = iree_benchmark_get_range(benchmark_state, 0);
 
-  iree_hal_streaming_stream_t* stream = nullptr;
+  iree_hal_streaming_stream_t *stream = nullptr;
   IREE_RETURN_IF_ERROR(iree_hal_streaming_stream_create(
       context, IREE_HAL_STREAMING_STREAM_FLAG_NONE, 0, iree_allocator_system(),
       &stream));
 
-  ExecBenchmarkState* state = nullptr;
+  ExecBenchmarkState *state = nullptr;
   IREE_RETURN_IF_ERROR(CreateExecBenchmarkState(context, stream, "diamond",
                                                 parallel_count * 2, &state));
 
@@ -229,17 +231,17 @@ IREE_BENCHMARK_REGISTER_ARGS(BM_GraphExecLaunch_Diamond, 1000);
 
 // Benchmark launching a mixed node type graph.
 IREE_BENCHMARK_FN(BM_GraphExecLaunch_Mixed) {
-  iree_hal_streaming_context_t* context = nullptr;
+  iree_hal_streaming_context_t *context = nullptr;
   IREE_RETURN_IF_ERROR(InitializeStreamingContext(&context));
 
   int64_t node_count = iree_benchmark_get_range(benchmark_state, 0);
 
-  iree_hal_streaming_stream_t* stream = nullptr;
+  iree_hal_streaming_stream_t *stream = nullptr;
   IREE_RETURN_IF_ERROR(iree_hal_streaming_stream_create(
       context, IREE_HAL_STREAMING_STREAM_FLAG_NONE, 0, iree_allocator_system(),
       &stream));
 
-  ExecBenchmarkState* state = nullptr;
+  ExecBenchmarkState *state = nullptr;
   IREE_RETURN_IF_ERROR(
       CreateExecBenchmarkState(context, stream, "mixed", node_count, &state));
 
@@ -264,17 +266,17 @@ IREE_BENCHMARK_REGISTER_ARGS(BM_GraphExecLaunch_Mixed, 10000);
 
 // Benchmark launching an interleaved pattern graph.
 IREE_BENCHMARK_FN(BM_GraphExecLaunch_Interleaved) {
-  iree_hal_streaming_context_t* context = nullptr;
+  iree_hal_streaming_context_t *context = nullptr;
   IREE_RETURN_IF_ERROR(InitializeStreamingContext(&context));
 
   int64_t node_count = iree_benchmark_get_range(benchmark_state, 0);
 
-  iree_hal_streaming_stream_t* stream = nullptr;
+  iree_hal_streaming_stream_t *stream = nullptr;
   IREE_RETURN_IF_ERROR(iree_hal_streaming_stream_create(
       context, IREE_HAL_STREAMING_STREAM_FLAG_NONE, 0, iree_allocator_system(),
       &stream));
 
-  ExecBenchmarkState* state = nullptr;
+  ExecBenchmarkState *state = nullptr;
   IREE_RETURN_IF_ERROR(CreateExecBenchmarkState(context, stream, "interleaved",
                                                 node_count, &state));
 
@@ -299,17 +301,17 @@ IREE_BENCHMARK_REGISTER_ARGS(BM_GraphExecLaunch_Interleaved, 10000);
 
 // Benchmark repeated launches of the same graph exec.
 IREE_BENCHMARK_FN(BM_GraphExecLaunch_Repeated) {
-  iree_hal_streaming_context_t* context = nullptr;
+  iree_hal_streaming_context_t *context = nullptr;
   IREE_RETURN_IF_ERROR(InitializeStreamingContext(&context));
 
   int64_t launch_count = iree_benchmark_get_range(benchmark_state, 0);
 
-  iree_hal_streaming_stream_t* stream = nullptr;
+  iree_hal_streaming_stream_t *stream = nullptr;
   IREE_RETURN_IF_ERROR(iree_hal_streaming_stream_create(
       context, IREE_HAL_STREAMING_STREAM_FLAG_NONE, 0, iree_allocator_system(),
       &stream));
 
-  ExecBenchmarkState* state = nullptr;
+  ExecBenchmarkState *state = nullptr;
   IREE_RETURN_IF_ERROR(
       CreateExecBenchmarkState(context, stream, "mixed", 100, &state));
 
@@ -335,16 +337,16 @@ IREE_BENCHMARK_REGISTER_ARGS(BM_GraphExecLaunch_Repeated, 1000);
 
 // Benchmark launch overhead for tiny graphs.
 IREE_BENCHMARK_FN(BM_GraphExecLaunch_Tiny) {
-  iree_hal_streaming_context_t* context = nullptr;
+  iree_hal_streaming_context_t *context = nullptr;
   IREE_RETURN_IF_ERROR(InitializeStreamingContext(&context));
 
-  iree_hal_streaming_stream_t* stream = nullptr;
+  iree_hal_streaming_stream_t *stream = nullptr;
   IREE_RETURN_IF_ERROR(iree_hal_streaming_stream_create(
       context, IREE_HAL_STREAMING_STREAM_FLAG_NONE, 0, iree_allocator_system(),
       &stream));
 
   // Create a single-node graph.
-  ExecBenchmarkState* state = nullptr;
+  ExecBenchmarkState *state = nullptr;
   IREE_RETURN_IF_ERROR(
       CreateExecBenchmarkState(context, stream, "linear", 1, &state));
 
@@ -367,16 +369,16 @@ IREE_BENCHMARK_REGISTER(BM_GraphExecLaunch_Tiny);
 
 // Benchmark launch overhead for large graphs.
 IREE_BENCHMARK_FN(BM_GraphExecLaunch_Large) {
-  iree_hal_streaming_context_t* context = nullptr;
+  iree_hal_streaming_context_t *context = nullptr;
   IREE_RETURN_IF_ERROR(InitializeStreamingContext(&context));
 
-  iree_hal_streaming_stream_t* stream = nullptr;
+  iree_hal_streaming_stream_t *stream = nullptr;
   IREE_RETURN_IF_ERROR(iree_hal_streaming_stream_create(
       context, IREE_HAL_STREAMING_STREAM_FLAG_NONE, 0, iree_allocator_system(),
       &stream));
 
   // Create a 50,000 node graph.
-  ExecBenchmarkState* state = nullptr;
+  ExecBenchmarkState *state = nullptr;
   IREE_RETURN_IF_ERROR(
       CreateExecBenchmarkState(context, stream, "mixed", 50000, &state));
 
@@ -397,4 +399,4 @@ IREE_BENCHMARK_FN(BM_GraphExecLaunch_Large) {
 }
 IREE_BENCHMARK_REGISTER(BM_GraphExecLaunch_Large);
 
-}  // namespace
+} // namespace

@@ -14,22 +14,23 @@
 hrx_device_t g_test_device = nullptr;
 hrx_accelerator_type_t g_test_device_type = HRX_ACCELERATOR_CPU;
 
-int main(int argc, char* argv[]) {
+int main(int argc, char *argv[]) {
   Catch::Session session;
 
   std::string hrx_library;
   std::string hrx_device_spec = "cpu:0";
 
   // Parse custom args.
-  auto cli = session.cli()
-      | Catch::Clara::Opt(hrx_library, "path")
-            ["--hrx-library"]("Path to libhrx.so")
-      | Catch::Clara::Opt(hrx_device_spec, "spec")
-            ["--hrx-device"]("Device spec (gpu:N or cpu:N)");
+  auto cli = session.cli() |
+             Catch::Clara::Opt(hrx_library,
+                               "path")["--hrx-library"]("Path to libhrx.so") |
+             Catch::Clara::Opt(hrx_device_spec, "spec")["--hrx-device"](
+                 "Device spec (gpu:N or cpu:N)");
   session.cli(cli);
 
   int ret = session.applyCommandLine(argc, argv);
-  if (ret != 0) return ret;
+  if (ret != 0)
+    return ret;
 
   // Load library.
   if (!hrx_library.empty()) {
@@ -37,7 +38,7 @@ int main(int argc, char* argv[]) {
   }
 
   try {
-    auto& loader = HrxLoader::instance();
+    auto &loader = HrxLoader::instance();
 
     // Print version.
     int major, minor, patch;
@@ -82,11 +83,11 @@ int main(int argc, char* argv[]) {
     g_test_device_type = type;
 
     char name[128] = {0};
-    loader.device_get_property(g_test_device, HRX_DEVICE_PROPERTY_NAME,
-                               name, sizeof(name));
+    loader.device_get_property(g_test_device, HRX_DEVICE_PROPERTY_NAME, name,
+                               sizeof(name));
     printf("Test device: %s (%s)\n", hrx_device_spec.c_str(), name);
 
-  } catch (const HrxLoaderError& e) {
+  } catch (const HrxLoaderError &e) {
     fprintf(stderr, "Loader error: %s\n", e.what());
     return 1;
   }

@@ -23,13 +23,14 @@ static void hrx_module_destroy_partial(hrx_module_t module) {
 }
 
 static iree_status_t hrx_compiler_output_archive_allocator_ctl(
-    void* self, iree_allocator_command_t command, const void* params,
-    void** inout_ptr) {
+    void *self, iree_allocator_command_t command, const void *params,
+    void **inout_ptr) {
   (void)params;
   (void)inout_ptr;
   if (command != IREE_ALLOCATOR_COMMAND_FREE) {
-    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                            "compiler output archive allocator only supports FREE");
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "compiler output archive allocator only supports FREE");
   }
   hrx_compiler_output_release((hrx_compiler_output_t)self);
   return iree_ok_status();
@@ -37,55 +38,54 @@ static iree_status_t hrx_compiler_output_archive_allocator_ctl(
 
 static hrx_status_t hrx_module_load_archive(
     hrx_device_t device, iree_const_byte_span_t archive_contents,
-    iree_allocator_t archive_allocator, hrx_module_t* module) {
+    iree_allocator_t archive_allocator, hrx_module_t *module) {
   *module = NULL;
   if (archive_contents.data_length == 0) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                            "vmfb_size must be > 0");
+                           "vmfb_size must be > 0");
   }
 
-  hrx_shared_state_t* shared = hrx_get_shared_state();
+  hrx_shared_state_t *shared = hrx_get_shared_state();
   if (!shared->shared_initialized || !shared->vm_instance) {
     return hrx_make_status(HRX_STATUS_UNAVAILABLE,
-                            "runtime is not initialized");
+                           "runtime is not initialized");
   }
 
   hrx_module_t loaded = (hrx_module_t)calloc(1, sizeof(*loaded));
   if (!loaded) {
     return hrx_make_status(HRX_STATUS_OUT_OF_MEMORY,
-                            "failed to allocate module");
+                           "failed to allocate module");
   }
 
   iree_allocator_t alloc = iree_allocator_system();
   iree_status_t status = iree_vm_bytecode_module_create(
       hrx_get_shared_state()->vm_instance, IREE_VM_BYTECODE_MODULE_FLAG_NONE,
-      archive_contents, archive_allocator, alloc,
-      &loaded->bytecode_module);
+      archive_contents, archive_allocator, alloc, &loaded->bytecode_module);
   if (!iree_status_is_ok(status)) {
     hrx_module_destroy_partial(loaded);
     return hrx_status_from_iree(status);
   }
 
-  iree_hal_device_group_t* device_group = NULL;
-  status = iree_hal_device_group_create_from_device(
-      device->hal_device, alloc, &device_group);
+  iree_hal_device_group_t *device_group = NULL;
+  status = iree_hal_device_group_create_from_device(device->hal_device, alloc,
+                                                    &device_group);
   if (!iree_status_is_ok(status)) {
     hrx_module_destroy_partial(loaded);
     return hrx_status_from_iree(status);
   }
 
-  status = iree_hal_module_create(
-      hrx_get_shared_state()->vm_instance,
-      iree_hal_module_device_policy_default(), device_group,
-      IREE_HAL_MODULE_FLAG_NONE, iree_hal_module_debug_sink_null(), alloc,
-      &loaded->hal_module);
+  status = iree_hal_module_create(hrx_get_shared_state()->vm_instance,
+                                  iree_hal_module_device_policy_default(),
+                                  device_group, IREE_HAL_MODULE_FLAG_NONE,
+                                  iree_hal_module_debug_sink_null(), alloc,
+                                  &loaded->hal_module);
   iree_hal_device_group_release(device_group);
   if (!iree_status_is_ok(status)) {
     hrx_module_destroy_partial(loaded);
     return hrx_status_from_iree(status);
   }
 
-  iree_vm_module_t* modules[] = {
+  iree_vm_module_t *modules[] = {
       loaded->hal_module,
       loaded->bytecode_module,
   };
@@ -104,28 +104,27 @@ static hrx_status_t hrx_module_load_archive(
   return hrx_ok_status();
 }
 
-hrx_status_t hrx_module_load_vmfb(hrx_device_t device, const void* vmfb_data,
-                                    size_t vmfb_size,
-                                    hrx_module_t* module) {
+hrx_status_t hrx_module_load_vmfb(hrx_device_t device, const void *vmfb_data,
+                                  size_t vmfb_size, hrx_module_t *module) {
   if (!device || !vmfb_data || !module) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                            "device, vmfb_data, or module is NULL");
+                           "device, vmfb_data, or module is NULL");
   }
   iree_const_byte_span_t archive_contents = {
-      .data = (const uint8_t*)vmfb_data,
+      .data = (const uint8_t *)vmfb_data,
       .data_length = vmfb_size,
   };
-  return hrx_module_load_archive(
-      device, archive_contents, iree_allocator_null(), module);
+  return hrx_module_load_archive(device, archive_contents,
+                                 iree_allocator_null(), module);
 }
 
-hrx_status_t hrx_module_load_compiler_output(
-    hrx_device_t device, hrx_compiler_output_t compiler_output,
-    hrx_module_t* module) {
+hrx_status_t
+hrx_module_load_compiler_output(hrx_device_t device,
+                                hrx_compiler_output_t compiler_output,
+                                hrx_module_t *module) {
   if (!device || !compiler_output || !module) {
-    return hrx_make_status(
-        HRX_STATUS_INVALID_ARGUMENT,
-        "device, compiler_output, or module is NULL");
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "device, compiler_output, or module is NULL");
   }
   iree_const_byte_span_t archive_contents = {
       .data = compiler_output->data,
@@ -136,9 +135,8 @@ hrx_status_t hrx_module_load_compiler_output(
       .ctl = hrx_compiler_output_archive_allocator_ctl,
   };
   hrx_compiler_output_retain(compiler_output);
-  hrx_status_t status =
-      hrx_module_load_archive(device, archive_contents, archive_allocator,
-                               module);
+  hrx_status_t status = hrx_module_load_archive(device, archive_contents,
+                                                archive_allocator, module);
   if (!hrx_status_is_ok(status)) {
     hrx_compiler_output_release(compiler_output);
   }
@@ -165,18 +163,18 @@ void hrx_module_release(hrx_module_t module) {
   }
 }
 
-hrx_status_t hrx_module_lookup_function(
-    hrx_module_t module, const char* name, hrx_function_t* function) {
+hrx_status_t hrx_module_lookup_function(hrx_module_t module, const char *name,
+                                        hrx_function_t *function) {
   if (!module || !name || !function) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                            "module, name, or function is NULL");
+                           "module, name, or function is NULL");
   }
   *function = NULL;
 
   hrx_function_t resolved = (hrx_function_t)calloc(1, sizeof(*resolved));
   if (!resolved) {
     return hrx_make_status(HRX_STATUS_OUT_OF_MEMORY,
-                            "failed to allocate function");
+                           "failed to allocate function");
   }
 
   iree_string_view_t function_name = iree_make_cstring_view(name);
@@ -206,23 +204,21 @@ void hrx_function_release(hrx_function_t function) {
   }
 }
 
-hrx_status_t hrx_function_invoke(hrx_module_t module,
-                                   hrx_function_t function,
-                                   hrx_value_list_t args,
-                                   hrx_value_list_t rets) {
+hrx_status_t hrx_function_invoke(hrx_module_t module, hrx_function_t function,
+                                 hrx_value_list_t args, hrx_value_list_t rets) {
   if (!module || !function) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                            "module or function is NULL");
+                           "module or function is NULL");
   }
   if (function->module != module) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                            "function does not belong to module");
+                           "function does not belong to module");
   }
 
   iree_allocator_t alloc = iree_allocator_system();
   iree_status_t status = iree_vm_invoke(
       module->context, function->vm_function, IREE_VM_INVOCATION_FLAG_NONE,
-      /*policy=*/NULL, args ? args->vm_list : NULL,
-      rets ? rets->vm_list : NULL, alloc);
+      /*policy=*/NULL, args ? args->vm_list : NULL, rets ? rets->vm_list : NULL,
+      alloc);
   return hrx_status_from_iree(status);
 }

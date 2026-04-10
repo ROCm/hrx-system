@@ -13,13 +13,12 @@
 
 namespace {
 
-std::vector<char> loadVmfb(const char* relative_path) {
+std::vector<char> loadVmfb(const char *relative_path) {
   std::string path = std::string(HRX_CTS_SOURCE_DIR) + "/" + relative_path;
   std::ifstream file(path, std::ios::binary);
   REQUIRE(file.is_open());
-  return std::vector<char>(
-      std::istreambuf_iterator<char>(file),
-      std::istreambuf_iterator<char>());
+  return std::vector<char>(std::istreambuf_iterator<char>(file),
+                           std::istreambuf_iterator<char>());
 }
 
 } // namespace
@@ -45,8 +44,7 @@ TEST_CASE_METHOD(HrxTestFixture, "Value list i64 round-trip",
   hrx().value_list_release(list);
 }
 
-TEST_CASE_METHOD(HrxTestFixture, "Fence create/extend/signal",
-                 "[vm][fence]") {
+TEST_CASE_METHOD(HrxTestFixture, "Fence create/extend/signal", "[vm][fence]") {
   hrx_semaphore_t sem0 = nullptr;
   hrx_semaphore_t sem1 = nullptr;
   REQUIRE_OK(hrx().semaphore_create(device_, 0, &sem0));
@@ -69,8 +67,7 @@ TEST_CASE_METHOD(HrxTestFixture, "Fence create/extend/signal",
   hrx().semaphore_release(sem0);
 }
 
-TEST_CASE_METHOD(HrxTestFixture, "Buffer view metadata",
-                 "[vm][buffer_view]") {
+TEST_CASE_METHOD(HrxTestFixture, "Buffer view metadata", "[vm][buffer_view]") {
   hrx_stream_t stream = nullptr;
   REQUIRE_OK(hrx().stream_create(device_, 0, &stream));
 
@@ -78,14 +75,13 @@ TEST_CASE_METHOD(HrxTestFixture, "Buffer view metadata",
   REQUIRE_OK(hrx().buffer_allocate(
       stream, 6 * sizeof(int32_t),
       HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_DEVICE_VISIBLE,
-      HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED,
-      &buffer));
+      HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED, &buffer));
 
   int64_t shape[] = {2, 3};
   hrx_buffer_view_t view = nullptr;
-  REQUIRE_OK(hrx().buffer_view_create(
-      buffer, 2, shape, HRX_ELEMENT_TYPE_SINT_32,
-      HRX_ENCODING_TYPE_DENSE_ROW_MAJOR, &view));
+  REQUIRE_OK(
+      hrx().buffer_view_create(buffer, 2, shape, HRX_ELEMENT_TYPE_SINT_32,
+                               HRX_ENCODING_TYPE_DENSE_ROW_MAJOR, &view));
 
   size_t rank = 0;
   REQUIRE_OK(hrx().buffer_view_rank(view, &rank));
@@ -115,12 +111,11 @@ TEST_CASE_METHOD(HrxTestFixture, "Load VMFB and invoke function",
   REQUIRE(!vmfb.empty());
 
   hrx_module_t module = nullptr;
-  REQUIRE_OK(hrx().module_load_vmfb(
-      device_, vmfb.data(), vmfb.size(), &module));
+  REQUIRE_OK(
+      hrx().module_load_vmfb(device_, vmfb.data(), vmfb.size(), &module));
 
   hrx_function_t function = nullptr;
-  REQUIRE_OK(hrx().module_lookup_function(module, "module.add_i64",
-                                           &function));
+  REQUIRE_OK(hrx().module_lookup_function(module, "module.add_i64", &function));
 
   hrx_value_list_t args = nullptr;
   hrx_value_list_t rets = nullptr;

@@ -24,15 +24,15 @@ extern "C" {
 #define CUDART_VERSION 13000
 
 // Forward declarations
-typedef struct cudaStream_st* cudaStream_t;
-typedef struct cudaEvent_st* cudaEvent_t;
-typedef struct cudaArray* cudaArray_t;
-typedef struct cudaArray* cudaArray_const_t;
-typedef struct cudaMipmappedArray* cudaMipmappedArray_t;
-typedef struct cudaMipmappedArray* cudaMipmappedArray_const_t;
-typedef struct cudaGraphicsResource* cudaGraphicsResource_t;
-typedef struct cudaExternalMemory_st* cudaExternalMemory_t;
-typedef struct cudaExternalSemaphore_st* cudaExternalSemaphore_t;
+typedef struct cudaStream_st *cudaStream_t;
+typedef struct cudaEvent_st *cudaEvent_t;
+typedef struct cudaArray *cudaArray_t;
+typedef struct cudaArray *cudaArray_const_t;
+typedef struct cudaMipmappedArray *cudaMipmappedArray_t;
+typedef struct cudaMipmappedArray *cudaMipmappedArray_const_t;
+typedef struct cudaGraphicsResource *cudaGraphicsResource_t;
+typedef struct cudaExternalMemory_st *cudaExternalMemory_t;
+typedef struct cudaExternalSemaphore_st *cudaExternalSemaphore_t;
 
 // dim3 type for kernel launch dimensions.
 typedef struct dim3 {
@@ -564,8 +564,8 @@ typedef struct cudaPointerAttributes {
     cudaMemoryTypeManaged = 3
   } type;
   int device;
-  void* devicePointer;
-  void* hostPointer;
+  void *devicePointer;
+  void *hostPointer;
   int isManaged;
 } cudaPointerAttributes;
 
@@ -583,7 +583,7 @@ typedef struct cudaExtent {
 } cudaExtent;
 
 typedef struct cudaPitchedPtr {
-  void* ptr;
+  void *ptr;
   size_t pitch;
   size_t xsize;
   size_t ysize;
@@ -602,8 +602,8 @@ typedef struct cudaMemcpy3DParms {
 
 // Callback types
 typedef void (*cudaStreamCallback_t)(cudaStream_t stream, cudaError_t status,
-                                      void* userData);
-typedef void (*cudaHostFn_t)(void* userData);
+                                     void *userData);
+typedef void (*cudaHostFn_t)(void *userData);
 
 // IPC handles
 typedef struct cudaIpcEventHandle_st {
@@ -615,7 +615,7 @@ typedef struct cudaIpcMemHandle_st {
 } cudaIpcMemHandle_t;
 
 // Memory pool types
-typedef struct cudaMemPool_st* cudaMemPool_t;
+typedef struct cudaMemPool_st *cudaMemPool_t;
 
 typedef enum cudaMemPoolAttr {
   cudaMemPoolReuseFollowEventDependencies = 0x1,
@@ -632,7 +632,7 @@ typedef struct cudaMemPoolProps {
   int allocType;
   int handleTypes;
   int location;
-  void* win32SecurityAttributes;
+  void *win32SecurityAttributes;
   size_t maxSize;
   unsigned short usage;
   unsigned char reserved[54];
@@ -672,9 +672,9 @@ typedef struct cudaMemAccessDesc {
 typedef size_t (*cudaOccupancyB2DSize)(int blockSize);
 
 // Graph types
-typedef struct cudaGraph_st* cudaGraph_t;
-typedef struct cudaGraphExec_st* cudaGraphExec_t;
-typedef struct cudaGraphNode_st* cudaGraphNode_t;
+typedef struct cudaGraph_st *cudaGraph_t;
+typedef struct cudaGraphExec_st *cudaGraphExec_t;
+typedef struct cudaGraphNode_st *cudaGraphNode_t;
 
 typedef enum cudaGraphNodeType {
   cudaGraphNodeTypeKernel = 0x00,
@@ -749,16 +749,16 @@ typedef struct cudaGraphEdgeData {
 
 // Graph node parameters
 typedef struct cudaKernelNodeParams {
-  void* func;
+  void *func;
   dim3 gridDim;
   dim3 blockDim;
   unsigned int sharedMemBytes;
-  void** kernelParams;
-  void** extra;
+  void **kernelParams;
+  void **extra;
 } cudaKernelNodeParams;
 
 typedef struct cudaMemsetParams {
-  void* dst;
+  void *dst;
   size_t pitch;
   unsigned int value;
   unsigned int elementSize;
@@ -768,120 +768,121 @@ typedef struct cudaMemsetParams {
 
 typedef struct cudaHostNodeParams {
   cudaHostFn_t fn;
-  void* userData;
+  void *userData;
 } cudaHostNodeParams;
 
 //===----------------------------------------------------------------------===//
 // Initialization and Version Management
 //===----------------------------------------------------------------------===//
 
-CUDAAPI cudaError_t cudaDriverGetVersion(int* driverVersion);
-CUDAAPI cudaError_t cudaRuntimeGetVersion(int* runtimeVersion);
+CUDAAPI cudaError_t cudaDriverGetVersion(int *driverVersion);
+CUDAAPI cudaError_t cudaRuntimeGetVersion(int *runtimeVersion);
 CUDAAPI cudaError_t
-cudaGetDriverEntryPoint(const char* symbol, void** funcPtr, uint64_t flags,
-                        cudaDriverEntryPointQueryResult* driverStatus);
+cudaGetDriverEntryPoint(const char *symbol, void **funcPtr, uint64_t flags,
+                        cudaDriverEntryPointQueryResult *driverStatus);
 CUDAAPI cudaError_t cudaGetDriverEntryPointByVersion(
-    const char* symbol, void** funcPtr, unsigned int cudaVersion,
-    uint64_t flags, cudaDriverEntryPointQueryResult* driverStatus);
+    const char *symbol, void **funcPtr, unsigned int cudaVersion,
+    uint64_t flags, cudaDriverEntryPointQueryResult *driverStatus);
 
 //===----------------------------------------------------------------------===//
 // Device Management
 //===----------------------------------------------------------------------===//
 
-CUDAAPI cudaError_t cudaGetDevice(int* device);
+CUDAAPI cudaError_t cudaGetDevice(int *device);
 CUDAAPI cudaError_t cudaSetDevice(int device);
-CUDAAPI cudaError_t cudaGetDeviceCount(int* count);
-CUDAAPI cudaError_t cudaGetDeviceProperties(cudaDeviceProp* prop, int device);
-CUDAAPI cudaError_t cudaDeviceGetAttribute(int* value, cudaDeviceAttr attr,
+CUDAAPI cudaError_t cudaGetDeviceCount(int *count);
+CUDAAPI cudaError_t cudaGetDeviceProperties(cudaDeviceProp *prop, int device);
+CUDAAPI cudaError_t cudaDeviceGetAttribute(int *value, cudaDeviceAttr attr,
                                            int device);
-CUDAAPI cudaError_t cudaDeviceGetDefaultMemPool(cudaMemPool_t* memPool,
+CUDAAPI cudaError_t cudaDeviceGetDefaultMemPool(cudaMemPool_t *memPool,
                                                 int device);
 CUDAAPI cudaError_t cudaDeviceSetMemPool(int device, cudaMemPool_t memPool);
-CUDAAPI cudaError_t cudaDeviceGetMemPool(cudaMemPool_t* memPool, int device);
+CUDAAPI cudaError_t cudaDeviceGetMemPool(cudaMemPool_t *memPool, int device);
 CUDAAPI cudaError_t cudaSetDeviceFlags(unsigned int flags);
-CUDAAPI cudaError_t cudaGetDeviceFlags(unsigned int* flags);
+CUDAAPI cudaError_t cudaGetDeviceFlags(unsigned int *flags);
 CUDAAPI cudaError_t cudaDeviceReset(void);
 CUDAAPI cudaError_t cudaDeviceSynchronize(void);
 CUDAAPI cudaError_t cudaDeviceSetLimit(cudaLimit limit, size_t value);
-CUDAAPI cudaError_t cudaDeviceGetLimit(size_t* value, cudaLimit limit);
-CUDAAPI cudaError_t cudaDeviceGetPCIBusId(char* pciBusId, int len, int device);
-CUDAAPI cudaError_t cudaDeviceGetByPCIBusId(int* device, const char* pciBusId);
-CUDAAPI cudaError_t cudaDeviceGetCacheConfig(cudaFuncCache* cacheConfig);
+CUDAAPI cudaError_t cudaDeviceGetLimit(size_t *value, cudaLimit limit);
+CUDAAPI cudaError_t cudaDeviceGetPCIBusId(char *pciBusId, int len, int device);
+CUDAAPI cudaError_t cudaDeviceGetByPCIBusId(int *device, const char *pciBusId);
+CUDAAPI cudaError_t cudaDeviceGetCacheConfig(cudaFuncCache *cacheConfig);
 CUDAAPI cudaError_t cudaDeviceSetCacheConfig(cudaFuncCache cacheConfig);
-CUDAAPI cudaError_t cudaDeviceGetSharedMemConfig(cudaSharedMemConfig* config);
+CUDAAPI cudaError_t cudaDeviceGetSharedMemConfig(cudaSharedMemConfig *config);
 CUDAAPI cudaError_t cudaDeviceSetSharedMemConfig(cudaSharedMemConfig config);
-CUDAAPI cudaError_t cudaDeviceGetStreamPriorityRange(int* leastPriority,
-                                                     int* greatestPriority);
+CUDAAPI cudaError_t cudaDeviceGetStreamPriorityRange(int *leastPriority,
+                                                     int *greatestPriority);
 
 //===----------------------------------------------------------------------===//
 // Memory Management
 //===----------------------------------------------------------------------===//
 
 // Basic allocation
-CUDAAPI cudaError_t cudaMalloc(void** devPtr, size_t size);
-CUDAAPI cudaError_t cudaFree(void* devPtr);
-CUDAAPI cudaError_t cudaMemGetInfo(size_t* free, size_t* total);
-CUDAAPI cudaError_t cudaMallocHost(void** ptr, size_t size);
-CUDAAPI cudaError_t cudaFreeHost(void* ptr);
-CUDAAPI cudaError_t cudaHostAlloc(void** ptr, size_t size, unsigned int flags);
-CUDAAPI cudaError_t cudaMallocPitch(void** devPtr, size_t* pitch, size_t width,
+CUDAAPI cudaError_t cudaMalloc(void **devPtr, size_t size);
+CUDAAPI cudaError_t cudaFree(void *devPtr);
+CUDAAPI cudaError_t cudaMemGetInfo(size_t *free, size_t *total);
+CUDAAPI cudaError_t cudaMallocHost(void **ptr, size_t size);
+CUDAAPI cudaError_t cudaFreeHost(void *ptr);
+CUDAAPI cudaError_t cudaHostAlloc(void **ptr, size_t size, unsigned int flags);
+CUDAAPI cudaError_t cudaMallocPitch(void **devPtr, size_t *pitch, size_t width,
                                     size_t height);
-CUDAAPI cudaError_t cudaMallocManaged(void** devPtr, size_t size,
+CUDAAPI cudaError_t cudaMallocManaged(void **devPtr, size_t size,
                                       unsigned int flags);
 
 // Memory transfer
-CUDAAPI cudaError_t cudaMemcpy(void* dst, const void* src, size_t count,
+CUDAAPI cudaError_t cudaMemcpy(void *dst, const void *src, size_t count,
                                cudaMemcpyKind kind);
-CUDAAPI cudaError_t cudaMemcpyAsync(void* dst, const void* src, size_t count,
+CUDAAPI cudaError_t cudaMemcpyAsync(void *dst, const void *src, size_t count,
                                     cudaMemcpyKind kind, cudaStream_t stream);
-CUDAAPI cudaError_t cudaMemcpy2D(void* dst, size_t dpitch, const void* src,
+CUDAAPI cudaError_t cudaMemcpy2D(void *dst, size_t dpitch, const void *src,
                                  size_t spitch, size_t width, size_t height,
                                  cudaMemcpyKind kind);
-CUDAAPI cudaError_t cudaMemcpy2DAsync(void* dst, size_t dpitch, const void* src,
+CUDAAPI cudaError_t cudaMemcpy2DAsync(void *dst, size_t dpitch, const void *src,
                                       size_t spitch, size_t width,
                                       size_t height, cudaMemcpyKind kind,
                                       cudaStream_t stream);
-CUDAAPI cudaError_t cudaMemcpyPeer(void* dst, int dstDevice, const void* src,
+CUDAAPI cudaError_t cudaMemcpyPeer(void *dst, int dstDevice, const void *src,
                                    int srcDevice, size_t count);
-CUDAAPI cudaError_t cudaMemcpyPeerAsync(void* dst, int dstDevice,
-                                        const void* src, int srcDevice,
+CUDAAPI cudaError_t cudaMemcpyPeerAsync(void *dst, int dstDevice,
+                                        const void *src, int srcDevice,
                                         size_t count, cudaStream_t stream);
-CUDAAPI cudaError_t cudaMemset(void* devPtr, int value, size_t count);
-CUDAAPI cudaError_t cudaMemsetAsync(void* devPtr, int value, size_t count,
+CUDAAPI cudaError_t cudaMemset(void *devPtr, int value, size_t count);
+CUDAAPI cudaError_t cudaMemsetAsync(void *devPtr, int value, size_t count,
                                     cudaStream_t stream);
-CUDAAPI cudaError_t cudaMemset2D(void* devPtr, size_t pitch, int value,
+CUDAAPI cudaError_t cudaMemset2D(void *devPtr, size_t pitch, int value,
                                  size_t width, size_t height);
-CUDAAPI cudaError_t cudaMemset2DAsync(void* devPtr, size_t pitch, int value,
+CUDAAPI cudaError_t cudaMemset2DAsync(void *devPtr, size_t pitch, int value,
                                       size_t width, size_t height,
                                       cudaStream_t stream);
 
 // Pinned memory
-CUDAAPI cudaError_t cudaHostRegister(void* ptr, size_t size,
+CUDAAPI cudaError_t cudaHostRegister(void *ptr, size_t size,
                                      unsigned int flags);
-CUDAAPI cudaError_t cudaHostUnregister(void* ptr);
-CUDAAPI cudaError_t cudaHostGetDevicePointer(void** devicePtr, void* hostPtr,
+CUDAAPI cudaError_t cudaHostUnregister(void *ptr);
+CUDAAPI cudaError_t cudaHostGetDevicePointer(void **devicePtr, void *hostPtr,
                                              unsigned int flags);
-CUDAAPI cudaError_t cudaHostGetFlags(unsigned int* flags, void* hostPtr);
+CUDAAPI cudaError_t cudaHostGetFlags(unsigned int *flags, void *hostPtr);
 
 // Unified memory
-CUDAAPI cudaError_t cudaMemAdvise(const void* devPtr, size_t count,
+CUDAAPI cudaError_t cudaMemAdvise(const void *devPtr, size_t count,
                                   cudaMemoryAdvise advice, int device);
-CUDAAPI cudaError_t cudaMemPrefetchAsync(const void* devPtr, size_t count,
+CUDAAPI cudaError_t cudaMemPrefetchAsync(const void *devPtr, size_t count,
                                          cudaMemLocation location,
-                                         unsigned int flags, cudaStream_t stream);
+                                         unsigned int flags,
+                                         cudaStream_t stream);
 
 // Pointer queries
-CUDAAPI cudaError_t cudaPointerGetAttributes(cudaPointerAttributes* attributes,
-                                             const void* ptr);
+CUDAAPI cudaError_t cudaPointerGetAttributes(cudaPointerAttributes *attributes,
+                                             const void *ptr);
 
 //===----------------------------------------------------------------------===//
 // Stream Management
 //===----------------------------------------------------------------------===//
 
-CUDAAPI cudaError_t cudaStreamCreate(cudaStream_t* stream);
-CUDAAPI cudaError_t cudaStreamCreateWithFlags(cudaStream_t* stream,
+CUDAAPI cudaError_t cudaStreamCreate(cudaStream_t *stream);
+CUDAAPI cudaError_t cudaStreamCreateWithFlags(cudaStream_t *stream,
                                               unsigned int flags);
-CUDAAPI cudaError_t cudaStreamCreateWithPriority(cudaStream_t* stream,
+CUDAAPI cudaError_t cudaStreamCreateWithPriority(cudaStream_t *stream,
                                                  unsigned int flags,
                                                  int priority);
 CUDAAPI cudaError_t cudaStreamDestroy(cudaStream_t stream);
@@ -890,35 +891,35 @@ CUDAAPI cudaError_t cudaStreamQuery(cudaStream_t stream);
 CUDAAPI cudaError_t cudaStreamWaitEvent(cudaStream_t stream, cudaEvent_t event,
                                         unsigned int flags);
 CUDAAPI cudaError_t cudaStreamGetFlags(cudaStream_t stream,
-                                       unsigned int* flags);
-CUDAAPI cudaError_t cudaStreamGetPriority(cudaStream_t stream, int* priority);
+                                       unsigned int *flags);
+CUDAAPI cudaError_t cudaStreamGetPriority(cudaStream_t stream, int *priority);
 CUDAAPI cudaError_t cudaStreamGetId(cudaStream_t stream,
-                                    unsigned long long* streamId);
+                                    unsigned long long *streamId);
 CUDAAPI cudaError_t cudaStreamCopyAttributes(cudaStream_t dst,
                                              cudaStream_t src);
 CUDAAPI cudaError_t cudaStreamGetCaptureInfo(
-    cudaStream_t stream, cudaStreamCaptureStatus* captureStatus_out,
-    unsigned long long* id_out, cudaGraph_t* graph_out,
-    const cudaGraphNode_t** dependencies_out,
-    const cudaGraphEdgeData** edgeData_out, size_t* numDependencies_out);
+    cudaStream_t stream, cudaStreamCaptureStatus *captureStatus_out,
+    unsigned long long *id_out, cudaGraph_t *graph_out,
+    const cudaGraphNode_t **dependencies_out,
+    const cudaGraphEdgeData **edgeData_out, size_t *numDependencies_out);
 CUDAAPI cudaError_t cudaStreamIsCapturing(
-    cudaStream_t stream, cudaStreamCaptureStatus* captureStatus);
+    cudaStream_t stream, cudaStreamCaptureStatus *captureStatus);
 CUDAAPI cudaError_t cudaStreamBeginCapture(cudaStream_t stream,
                                            cudaStreamCaptureMode mode);
 CUDAAPI cudaError_t cudaStreamEndCapture(cudaStream_t stream,
-                                         cudaGraph_t* graph);
+                                         cudaGraph_t *graph);
 CUDAAPI cudaError_t cudaStreamUpdateCaptureDependencies(
-    cudaStream_t stream, cudaGraphNode_t* dependencies, size_t numDependencies,
+    cudaStream_t stream, cudaGraphNode_t *dependencies, size_t numDependencies,
     unsigned int flags);
 CUDAAPI cudaError_t
-cudaThreadExchangeStreamCaptureMode(cudaStreamCaptureMode* mode);
+cudaThreadExchangeStreamCaptureMode(cudaStreamCaptureMode *mode);
 
 //===----------------------------------------------------------------------===//
 // Event Management
 //===----------------------------------------------------------------------===//
 
-CUDAAPI cudaError_t cudaEventCreate(cudaEvent_t* event);
-CUDAAPI cudaError_t cudaEventCreateWithFlags(cudaEvent_t* event,
+CUDAAPI cudaError_t cudaEventCreate(cudaEvent_t *event);
+CUDAAPI cudaError_t cudaEventCreateWithFlags(cudaEvent_t *event,
                                              unsigned int flags);
 CUDAAPI cudaError_t cudaEventDestroy(cudaEvent_t event);
 CUDAAPI cudaError_t cudaEventRecord(cudaEvent_t event, cudaStream_t stream);
@@ -927,7 +928,7 @@ CUDAAPI cudaError_t cudaEventRecordWithFlags(cudaEvent_t event,
                                              unsigned int flags);
 CUDAAPI cudaError_t cudaEventQuery(cudaEvent_t event);
 CUDAAPI cudaError_t cudaEventSynchronize(cudaEvent_t event);
-CUDAAPI cudaError_t cudaEventElapsedTime(float* ms, cudaEvent_t start,
+CUDAAPI cudaError_t cudaEventElapsedTime(float *ms, cudaEvent_t start,
                                          cudaEvent_t end);
 
 //===----------------------------------------------------------------------===//
@@ -936,42 +937,41 @@ CUDAAPI cudaError_t cudaEventElapsedTime(float* ms, cudaEvent_t start,
 
 CUDAAPI cudaError_t cudaGetLastError(void);
 CUDAAPI cudaError_t cudaPeekAtLastError(void);
-CUDAAPI const char* cudaGetErrorString(cudaError_t error);
-CUDAAPI const char* cudaGetErrorName(cudaError_t error);
+CUDAAPI const char *cudaGetErrorString(cudaError_t error);
+CUDAAPI const char *cudaGetErrorName(cudaError_t error);
 
 //===----------------------------------------------------------------------===//
 // Execution Control
 //===----------------------------------------------------------------------===//
 
-CUDAAPI cudaError_t cudaLaunchKernel(const void* func, dim3 gridDim,
-                                     dim3 blockDim, void** args,
+CUDAAPI cudaError_t cudaLaunchKernel(const void *func, dim3 gridDim,
+                                     dim3 blockDim, void **args,
                                      size_t sharedMem, cudaStream_t stream);
-CUDAAPI cudaError_t cudaLaunchCooperativeKernel(const void* func, dim3 gridDim,
-                                                dim3 blockDim, void** args,
+CUDAAPI cudaError_t cudaLaunchCooperativeKernel(const void *func, dim3 gridDim,
+                                                dim3 blockDim, void **args,
                                                 size_t sharedMem,
                                                 cudaStream_t stream);
 CUDAAPI cudaError_t cudaLaunchHostFunc(cudaStream_t stream, cudaHostFn_t fn,
-                                       void* userData);
-CUDAAPI cudaError_t cudaFuncGetAttributes(cudaFuncAttributes* attr,
-                                          const void* func);
-CUDAAPI cudaError_t cudaFuncSetAttribute(const void* func,
-                                         cudaFuncAttribute attr,
-                                         int value);
-CUDAAPI cudaError_t cudaFuncSetCacheConfig(const void* func,
+                                       void *userData);
+CUDAAPI cudaError_t cudaFuncGetAttributes(cudaFuncAttributes *attr,
+                                          const void *func);
+CUDAAPI cudaError_t cudaFuncSetAttribute(const void *func,
+                                         cudaFuncAttribute attr, int value);
+CUDAAPI cudaError_t cudaFuncSetCacheConfig(const void *func,
                                            cudaFuncCache config);
-CUDAAPI cudaError_t cudaFuncSetSharedMemConfig(const void* func,
+CUDAAPI cudaError_t cudaFuncSetSharedMemConfig(const void *func,
                                                cudaSharedMemConfig config);
 CUDAAPI cudaError_t cudaOccupancyMaxActiveBlocksPerMultiprocessor(
-    int* numBlocks, const void* func, int blockSize, size_t dynamicSmemSize);
+    int *numBlocks, const void *func, int blockSize, size_t dynamicSmemSize);
 CUDAAPI cudaError_t cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
-    int* numBlocks, const void* func, int blockSize, size_t dynamicSmemSize,
+    int *numBlocks, const void *func, int blockSize, size_t dynamicSmemSize,
     unsigned int flags);
 CUDAAPI cudaError_t cudaOccupancyMaxPotentialBlockSize(
-    int* minGridSize, int* blockSize, const void* func,
+    int *minGridSize, int *blockSize, const void *func,
     cudaOccupancyB2DSize blockSizeToDynamicSMemSize, size_t dynamicSmemSize,
     int blockSizeLimit);
 CUDAAPI cudaError_t cudaOccupancyMaxPotentialBlockSizeWithFlags(
-    int* minGridSize, int* blockSize, const void* func,
+    int *minGridSize, int *blockSize, const void *func,
     cudaOccupancyB2DSize blockSizeToDynamicSMemSize, size_t dynamicSmemSize,
     int blockSizeLimit, unsigned int flags);
 
@@ -979,7 +979,7 @@ CUDAAPI cudaError_t cudaOccupancyMaxPotentialBlockSizeWithFlags(
 // Peer Access
 //===----------------------------------------------------------------------===//
 
-CUDAAPI cudaError_t cudaDeviceCanAccessPeer(int* canAccessPeer, int device,
+CUDAAPI cudaError_t cudaDeviceCanAccessPeer(int *canAccessPeer, int device,
                                             int peerDevice);
 CUDAAPI cudaError_t cudaDeviceEnablePeerAccess(int peerDevice,
                                                unsigned int flags);
@@ -989,25 +989,25 @@ CUDAAPI cudaError_t cudaDeviceDisablePeerAccess(int peerDevice);
 // Memory Pools
 //===----------------------------------------------------------------------===//
 
-CUDAAPI cudaError_t cudaMemPoolCreate(cudaMemPool_t* memPool,
-                                      const cudaMemPoolProps* poolProps);
+CUDAAPI cudaError_t cudaMemPoolCreate(cudaMemPool_t *memPool,
+                                      const cudaMemPoolProps *poolProps);
 CUDAAPI cudaError_t cudaMemPoolDestroy(cudaMemPool_t memPool);
 CUDAAPI cudaError_t cudaMemPoolSetAttribute(cudaMemPool_t pool,
-                                            cudaMemPoolAttr attr, void* value);
+                                            cudaMemPoolAttr attr, void *value);
 CUDAAPI cudaError_t cudaMemPoolGetAttribute(cudaMemPool_t pool,
-                                            cudaMemPoolAttr attr, void* value);
+                                            cudaMemPoolAttr attr, void *value);
 CUDAAPI cudaError_t cudaMemPoolSetAccess(cudaMemPool_t pool,
-                                         const cudaMemAccessDesc* map,
+                                         const cudaMemAccessDesc *map,
                                          size_t count);
-CUDAAPI cudaError_t cudaMemPoolGetAccess(cudaMemAccessFlags* flags,
+CUDAAPI cudaError_t cudaMemPoolGetAccess(cudaMemAccessFlags *flags,
                                          cudaMemPool_t memPool,
-                                         cudaMemLocation* location);
+                                         cudaMemLocation *location);
 CUDAAPI cudaError_t cudaMemPoolTrimTo(cudaMemPool_t pool,
                                       size_t minBytesToKeep);
-CUDAAPI cudaError_t cudaMallocAsync(void** ptr, size_t size,
+CUDAAPI cudaError_t cudaMallocAsync(void **ptr, size_t size,
                                     cudaStream_t stream);
-CUDAAPI cudaError_t cudaFreeAsync(void* ptr, cudaStream_t stream);
-CUDAAPI cudaError_t cudaMallocFromPoolAsync(void** ptr, size_t size,
+CUDAAPI cudaError_t cudaFreeAsync(void *ptr, cudaStream_t stream);
+CUDAAPI cudaError_t cudaMallocFromPoolAsync(void **ptr, size_t size,
                                             cudaMemPool_t pool,
                                             cudaStream_t stream);
 
@@ -1015,43 +1015,43 @@ CUDAAPI cudaError_t cudaMallocFromPoolAsync(void** ptr, size_t size,
 // Graph Management
 //===----------------------------------------------------------------------===//
 
-CUDAAPI cudaError_t cudaGraphCreate(cudaGraph_t* graph, unsigned int flags);
+CUDAAPI cudaError_t cudaGraphCreate(cudaGraph_t *graph, unsigned int flags);
 CUDAAPI cudaError_t cudaGraphDestroy(cudaGraph_t graph);
-CUDAAPI cudaError_t cudaGraphInstantiate(cudaGraphExec_t* pGraphExec,
+CUDAAPI cudaError_t cudaGraphInstantiate(cudaGraphExec_t *pGraphExec,
                                          cudaGraph_t graph,
                                          unsigned long long flags);
-CUDAAPI cudaError_t cudaGraphInstantiateWithFlags(cudaGraphExec_t* pGraphExec,
+CUDAAPI cudaError_t cudaGraphInstantiateWithFlags(cudaGraphExec_t *pGraphExec,
                                                   cudaGraph_t graph,
                                                   unsigned long long flags);
-CUDAAPI cudaError_t cudaGraphInstantiateWithParams(
-    cudaGraphExec_t* pGraphExec, cudaGraph_t graph,
-    cudaGraphInstantiateParams* instantiateParams);
+CUDAAPI cudaError_t
+cudaGraphInstantiateWithParams(cudaGraphExec_t *pGraphExec, cudaGraph_t graph,
+                               cudaGraphInstantiateParams *instantiateParams);
 CUDAAPI cudaError_t cudaGraphExecDestroy(cudaGraphExec_t graphExec);
 CUDAAPI cudaError_t cudaGraphLaunch(cudaGraphExec_t graphExec,
                                     cudaStream_t stream);
-CUDAAPI cudaError_t cudaGraphExecUpdate(cudaGraphExec_t hGraphExec,
-                                        cudaGraph_t hGraph,
-                                        cudaGraphExecUpdateResultInfo* resultInfo);
-CUDAAPI cudaError_t cudaGraphGetNodes(cudaGraph_t graph, cudaGraphNode_t* nodes,
-                                      size_t* numNodes);
+CUDAAPI cudaError_t
+cudaGraphExecUpdate(cudaGraphExec_t hGraphExec, cudaGraph_t hGraph,
+                    cudaGraphExecUpdateResultInfo *resultInfo);
+CUDAAPI cudaError_t cudaGraphGetNodes(cudaGraph_t graph, cudaGraphNode_t *nodes,
+                                      size_t *numNodes);
 
 //===----------------------------------------------------------------------===//
 // IPC (Inter-Process Communication)
 //===----------------------------------------------------------------------===//
 
-CUDAAPI cudaError_t cudaIpcGetEventHandle(cudaIpcEventHandle_t* handle,
+CUDAAPI cudaError_t cudaIpcGetEventHandle(cudaIpcEventHandle_t *handle,
                                           cudaEvent_t event);
-CUDAAPI cudaError_t cudaIpcOpenEventHandle(cudaEvent_t* event,
+CUDAAPI cudaError_t cudaIpcOpenEventHandle(cudaEvent_t *event,
                                            cudaIpcEventHandle_t handle);
-CUDAAPI cudaError_t cudaIpcGetMemHandle(cudaIpcMemHandle_t* handle,
-                                        void* devPtr);
-CUDAAPI cudaError_t cudaIpcOpenMemHandle(void** devPtr,
+CUDAAPI cudaError_t cudaIpcGetMemHandle(cudaIpcMemHandle_t *handle,
+                                        void *devPtr);
+CUDAAPI cudaError_t cudaIpcOpenMemHandle(void **devPtr,
                                          cudaIpcMemHandle_t handle,
                                          unsigned int flags);
-CUDAAPI cudaError_t cudaIpcCloseMemHandle(void* devPtr);
+CUDAAPI cudaError_t cudaIpcCloseMemHandle(void *devPtr);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif  // IREE_EXPERIMENTAL_STREAMING_BINDING_CUDA_RUNTIME_H_
+#endif // IREE_EXPERIMENTAL_STREAMING_BINDING_CUDA_RUNTIME_H_

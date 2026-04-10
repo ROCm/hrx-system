@@ -10,13 +10,13 @@
 // Memory pool management
 //===----------------------------------------------------------------------===//
 
-static void iree_hal_streaming_mem_pool_destroy(
-    iree_hal_streaming_mem_pool_t* pool);
+static void
+iree_hal_streaming_mem_pool_destroy(iree_hal_streaming_mem_pool_t *pool);
 
 iree_status_t iree_hal_streaming_mem_pool_create(
-    iree_hal_streaming_context_t* context,
-    const iree_hal_streaming_mem_pool_props_t* props,
-    iree_allocator_t host_allocator, iree_hal_streaming_mem_pool_t** out_pool) {
+    iree_hal_streaming_context_t *context,
+    const iree_hal_streaming_mem_pool_props_t *props,
+    iree_allocator_t host_allocator, iree_hal_streaming_mem_pool_t **out_pool) {
   IREE_ASSERT_ARGUMENT(context);
   IREE_ASSERT_ARGUMENT(props);
   IREE_ASSERT_ARGUMENT(out_pool);
@@ -24,9 +24,9 @@ iree_status_t iree_hal_streaming_mem_pool_create(
   IREE_TRACE_ZONE_BEGIN(z0);
 
   // Allocate memory pool structure.
-  iree_hal_streaming_mem_pool_t* pool = NULL;
+  iree_hal_streaming_mem_pool_t *pool = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_allocator_malloc(host_allocator, sizeof(*pool), (void**)&pool));
+      z0, iree_allocator_malloc(host_allocator, sizeof(*pool), (void **)&pool));
 
   // Initialize pool.
   iree_atomic_ref_count_init(&pool->ref_count);
@@ -80,8 +80,8 @@ iree_status_t iree_hal_streaming_mem_pool_create(
   return iree_ok_status();
 }
 
-static void iree_hal_streaming_mem_pool_destroy(
-    iree_hal_streaming_mem_pool_t* pool) {
+static void
+iree_hal_streaming_mem_pool_destroy(iree_hal_streaming_mem_pool_t *pool) {
   IREE_ASSERT_ARGUMENT(pool);
   IREE_TRACE_ZONE_BEGIN(z0);
 
@@ -97,21 +97,21 @@ static void iree_hal_streaming_mem_pool_destroy(
   IREE_TRACE_ZONE_END(z0);
 }
 
-void iree_hal_streaming_mem_pool_retain(iree_hal_streaming_mem_pool_t* pool) {
+void iree_hal_streaming_mem_pool_retain(iree_hal_streaming_mem_pool_t *pool) {
   if (pool) {
     iree_atomic_ref_count_inc(&pool->ref_count);
   }
 }
 
-void iree_hal_streaming_mem_pool_release(iree_hal_streaming_mem_pool_t* pool) {
+void iree_hal_streaming_mem_pool_release(iree_hal_streaming_mem_pool_t *pool) {
   if (pool && iree_atomic_ref_count_dec(&pool->ref_count) == 1) {
     iree_hal_streaming_mem_pool_destroy(pool);
   }
 }
 
 iree_status_t iree_hal_streaming_mem_pool_get_attribute(
-    iree_hal_streaming_mem_pool_t* pool,
-    iree_hal_streaming_mem_pool_attr_t attr, uint64_t* out_value) {
+    iree_hal_streaming_mem_pool_t *pool,
+    iree_hal_streaming_mem_pool_attr_t attr, uint64_t *out_value) {
   IREE_ASSERT_ARGUMENT(pool);
   IREE_ASSERT_ARGUMENT(out_value);
   *out_value = 0;
@@ -121,34 +121,34 @@ iree_status_t iree_hal_streaming_mem_pool_get_attribute(
 
   iree_status_t status = iree_ok_status();
   switch (attr) {
-    case IREE_HAL_STREAMING_MEM_POOL_ATTR_RELEASE_THRESHOLD:
-      *out_value = pool->release_threshold;
-      break;
-    case IREE_HAL_STREAMING_MEM_POOL_ATTR_REUSE_ALLOW_INTERNAL_DEPENDENCIES:
-      *out_value = pool->reuse_allow_internal_dependencies ? 1 : 0;
-      break;
-    case IREE_HAL_STREAMING_MEM_POOL_ATTR_REUSE_FOLLOW_EVENT_DEPENDENCIES:
-      *out_value = pool->reuse_follow_event_dependencies ? 1 : 0;
-      break;
-    case IREE_HAL_STREAMING_MEM_POOL_ATTR_REUSE_ALLOW_OPPORTUNISTIC:
-      *out_value = pool->reuse_allow_opportunistic ? 1 : 0;
-      break;
-    case IREE_HAL_STREAMING_MEM_POOL_ATTR_RESERVED_MEM_CURRENT:
-      *out_value = pool->reserved_mem_current;
-      break;
-    case IREE_HAL_STREAMING_MEM_POOL_ATTR_RESERVED_MEM_HIGH:
-      *out_value = pool->reserved_mem_high;
-      break;
-    case IREE_HAL_STREAMING_MEM_POOL_ATTR_USED_MEM_CURRENT:
-      *out_value = pool->used_mem_current;
-      break;
-    case IREE_HAL_STREAMING_MEM_POOL_ATTR_USED_MEM_HIGH:
-      *out_value = pool->used_mem_high;
-      break;
-    default:
-      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "invalid memory pool attribute");
-      break;
+  case IREE_HAL_STREAMING_MEM_POOL_ATTR_RELEASE_THRESHOLD:
+    *out_value = pool->release_threshold;
+    break;
+  case IREE_HAL_STREAMING_MEM_POOL_ATTR_REUSE_ALLOW_INTERNAL_DEPENDENCIES:
+    *out_value = pool->reuse_allow_internal_dependencies ? 1 : 0;
+    break;
+  case IREE_HAL_STREAMING_MEM_POOL_ATTR_REUSE_FOLLOW_EVENT_DEPENDENCIES:
+    *out_value = pool->reuse_follow_event_dependencies ? 1 : 0;
+    break;
+  case IREE_HAL_STREAMING_MEM_POOL_ATTR_REUSE_ALLOW_OPPORTUNISTIC:
+    *out_value = pool->reuse_allow_opportunistic ? 1 : 0;
+    break;
+  case IREE_HAL_STREAMING_MEM_POOL_ATTR_RESERVED_MEM_CURRENT:
+    *out_value = pool->reserved_mem_current;
+    break;
+  case IREE_HAL_STREAMING_MEM_POOL_ATTR_RESERVED_MEM_HIGH:
+    *out_value = pool->reserved_mem_high;
+    break;
+  case IREE_HAL_STREAMING_MEM_POOL_ATTR_USED_MEM_CURRENT:
+    *out_value = pool->used_mem_current;
+    break;
+  case IREE_HAL_STREAMING_MEM_POOL_ATTR_USED_MEM_HIGH:
+    *out_value = pool->used_mem_high;
+    break;
+  default:
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "invalid memory pool attribute");
+    break;
   }
 
   iree_slim_mutex_unlock(&pool->mutex);
@@ -158,7 +158,7 @@ iree_status_t iree_hal_streaming_mem_pool_get_attribute(
 }
 
 iree_status_t iree_hal_streaming_mem_pool_set_attribute(
-    iree_hal_streaming_mem_pool_t* pool,
+    iree_hal_streaming_mem_pool_t *pool,
     iree_hal_streaming_mem_pool_attr_t attr, uint64_t value) {
   IREE_ASSERT_ARGUMENT(pool);
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -167,22 +167,22 @@ iree_status_t iree_hal_streaming_mem_pool_set_attribute(
 
   iree_status_t status = iree_ok_status();
   switch (attr) {
-    case IREE_HAL_STREAMING_MEM_POOL_ATTR_RELEASE_THRESHOLD:
-      pool->release_threshold = value;
-      break;
-    case IREE_HAL_STREAMING_MEM_POOL_ATTR_REUSE_ALLOW_INTERNAL_DEPENDENCIES:
-      pool->reuse_allow_internal_dependencies = value != 0;
-      break;
-    case IREE_HAL_STREAMING_MEM_POOL_ATTR_REUSE_FOLLOW_EVENT_DEPENDENCIES:
-      pool->reuse_follow_event_dependencies = value != 0;
-      break;
-    case IREE_HAL_STREAMING_MEM_POOL_ATTR_REUSE_ALLOW_OPPORTUNISTIC:
-      pool->reuse_allow_opportunistic = value != 0;
-      break;
-    default:
-      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "invalid memory pool attribute");
-      break;
+  case IREE_HAL_STREAMING_MEM_POOL_ATTR_RELEASE_THRESHOLD:
+    pool->release_threshold = value;
+    break;
+  case IREE_HAL_STREAMING_MEM_POOL_ATTR_REUSE_ALLOW_INTERNAL_DEPENDENCIES:
+    pool->reuse_allow_internal_dependencies = value != 0;
+    break;
+  case IREE_HAL_STREAMING_MEM_POOL_ATTR_REUSE_FOLLOW_EVENT_DEPENDENCIES:
+    pool->reuse_follow_event_dependencies = value != 0;
+    break;
+  case IREE_HAL_STREAMING_MEM_POOL_ATTR_REUSE_ALLOW_OPPORTUNISTIC:
+    pool->reuse_allow_opportunistic = value != 0;
+    break;
+  default:
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "invalid memory pool attribute");
+    break;
   }
 
   iree_slim_mutex_unlock(&pool->mutex);
@@ -191,8 +191,9 @@ iree_status_t iree_hal_streaming_mem_pool_set_attribute(
   return status;
 }
 
-iree_status_t iree_hal_streaming_mem_pool_trim_to(
-    iree_hal_streaming_mem_pool_t* pool, iree_device_size_t min_bytes_to_keep) {
+iree_status_t
+iree_hal_streaming_mem_pool_trim_to(iree_hal_streaming_mem_pool_t *pool,
+                                    iree_device_size_t min_bytes_to_keep) {
   IREE_ASSERT_ARGUMENT(pool);
   IREE_TRACE_ZONE_BEGIN(z0);
 
@@ -203,20 +204,21 @@ iree_status_t iree_hal_streaming_mem_pool_trim_to(
   return iree_ok_status();
 }
 
-iree_hal_streaming_mem_pool_t* iree_hal_streaming_device_default_mem_pool(
-    iree_hal_streaming_device_t* device) {
+iree_hal_streaming_mem_pool_t *iree_hal_streaming_device_default_mem_pool(
+    iree_hal_streaming_device_t *device) {
   IREE_ASSERT_ARGUMENT(device);
   return device->default_mem_pool;
 }
 
-iree_hal_streaming_mem_pool_t* iree_hal_streaming_device_mem_pool(
-    iree_hal_streaming_device_t* device) {
+iree_hal_streaming_mem_pool_t *
+iree_hal_streaming_device_mem_pool(iree_hal_streaming_device_t *device) {
   IREE_ASSERT_ARGUMENT(device);
   return device->current_mem_pool;
 }
 
-iree_status_t iree_hal_streaming_device_set_mem_pool(
-    iree_hal_streaming_device_t* device, iree_hal_streaming_mem_pool_t* pool) {
+iree_status_t
+iree_hal_streaming_device_set_mem_pool(iree_hal_streaming_device_t *device,
+                                       iree_hal_streaming_mem_pool_t *pool) {
   IREE_ASSERT_ARGUMENT(device);
   IREE_TRACE_ZONE_BEGIN(z0);
 
@@ -241,13 +243,13 @@ iree_status_t iree_hal_streaming_device_set_mem_pool(
 
 // Cleanup async allocation after decommit.
 static void iree_hal_streaming_async_allocation_cleanup(
-    iree_hal_streaming_mem_pool_t* pool,
-    iree_hal_streaming_async_allocation_t* alloc) {
+    iree_hal_streaming_mem_pool_t *pool,
+    iree_hal_streaming_async_allocation_t *alloc) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   // Remove from pending list.
   iree_slim_mutex_lock(&pool->mutex);
-  iree_hal_streaming_async_allocation_t** prev = &pool->pending_allocations;
+  iree_hal_streaming_async_allocation_t **prev = &pool->pending_allocations;
   while (*prev) {
     if (*prev == alloc) {
       *prev = alloc->next;
@@ -261,7 +263,7 @@ static void iree_hal_streaming_async_allocation_cleanup(
   // Release virtual buffer.
   if (alloc->virtual_buffer) {
     iree_hal_allocator_virtual_memory_release(pool->context->device_allocator,
-                                               alloc->virtual_buffer);
+                                              alloc->virtual_buffer);
     iree_hal_buffer_release(alloc->virtual_buffer);
     alloc->virtual_buffer = NULL;
   }
@@ -273,12 +275,12 @@ static void iree_hal_streaming_async_allocation_cleanup(
 }
 
 // Host callback: Commit physical memory to virtual range or decommit.
-void iree_hal_streaming_async_commit_callback(void* user_data) {
-  iree_hal_streaming_async_commit_context_t* ctx =
-      (iree_hal_streaming_async_commit_context_t*)user_data;
+void iree_hal_streaming_async_commit_callback(void *user_data) {
+  iree_hal_streaming_async_commit_context_t *ctx =
+      (iree_hal_streaming_async_commit_context_t *)user_data;
 
-  iree_hal_streaming_async_allocation_t* alloc = ctx->allocation;
-  iree_hal_streaming_context_t* context = ctx->context;
+  iree_hal_streaming_async_allocation_t *alloc = ctx->allocation;
+  iree_hal_streaming_context_t *context = ctx->context;
 
   if (ctx->is_commit) {
     // COMMIT: Allocate physical memory and map.
@@ -304,7 +306,7 @@ void iree_hal_streaming_async_commit_callback(void* user_data) {
         if (!iree_status_is_ok(status)) {
           iree_status_ignore(status);
           iree_hal_allocator_physical_memory_free(context->device_allocator,
-                                                   alloc->physical_memory);
+                                                  alloc->physical_memory);
           alloc->physical_memory = NULL;
         } else {
           // 3. Set memory permissions (READ|WRITE).
@@ -337,7 +339,7 @@ void iree_hal_streaming_async_commit_callback(void* user_data) {
       // 2. Free physical memory.
       if (alloc->physical_memory) {
         iree_hal_allocator_physical_memory_free(context->device_allocator,
-                                                 alloc->physical_memory);
+                                                alloc->physical_memory);
         alloc->physical_memory = NULL;
       }
 
@@ -357,16 +359,16 @@ void iree_hal_streaming_async_commit_callback(void* user_data) {
 //===----------------------------------------------------------------------===//
 
 iree_status_t iree_hal_streaming_memory_allocate_async(
-    iree_hal_streaming_context_t* context, iree_device_size_t size,
-    iree_hal_streaming_stream_t* stream,
-    iree_hal_streaming_deviceptr_t* out_ptr) {
+    iree_hal_streaming_context_t *context, iree_device_size_t size,
+    iree_hal_streaming_stream_t *stream,
+    iree_hal_streaming_deviceptr_t *out_ptr) {
   IREE_ASSERT_ARGUMENT(context);
   IREE_ASSERT_ARGUMENT(out_ptr);
   *out_ptr = 0;
   IREE_TRACE_ZONE_BEGIN(z0);
 
   // Get the default memory pool from the device.
-  iree_hal_streaming_mem_pool_t* default_pool =
+  iree_hal_streaming_mem_pool_t *default_pool =
       iree_hal_streaming_device_default_mem_pool(context->device_entry);
 
   if (!default_pool) {
@@ -384,10 +386,9 @@ iree_status_t iree_hal_streaming_memory_allocate_async(
 }
 
 iree_status_t iree_hal_streaming_memory_allocate_from_pool_async(
-    iree_hal_streaming_context_t* context,
-    iree_hal_streaming_mem_pool_t* pool, iree_device_size_t size,
-    iree_hal_streaming_stream_t* stream,
-    iree_hal_streaming_deviceptr_t* out_ptr) {
+    iree_hal_streaming_context_t *context, iree_hal_streaming_mem_pool_t *pool,
+    iree_device_size_t size, iree_hal_streaming_stream_t *stream,
+    iree_hal_streaming_deviceptr_t *out_ptr) {
   IREE_ASSERT_ARGUMENT(pool);
   IREE_ASSERT_ARGUMENT(out_ptr);
   *out_ptr = 0;
@@ -397,9 +398,10 @@ iree_status_t iree_hal_streaming_memory_allocate_from_pool_async(
   if (!pool->supports_virtual_memory) {
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
         z0, iree_hal_streaming_stream_synchronize(stream));
-    iree_hal_streaming_buffer_t* buffer = NULL;
+    iree_hal_streaming_buffer_t *buffer = NULL;
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_streaming_memory_allocate_device(context, size, 0, &buffer));
+        z0,
+        iree_hal_streaming_memory_allocate_device(context, size, 0, &buffer));
     *out_ptr = (iree_hal_streaming_deviceptr_t)buffer->device_ptr;
     IREE_TRACE_ZONE_END(z0);
     return iree_ok_status();
@@ -408,10 +410,10 @@ iree_status_t iree_hal_streaming_memory_allocate_from_pool_async(
   // NEW: Async path with virtual memory.
 
   // 1. Allocate tracking structure.
-  iree_hal_streaming_async_allocation_t* async_alloc = NULL;
+  iree_hal_streaming_async_allocation_t *async_alloc = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_allocator_malloc(pool->host_allocator, sizeof(*async_alloc),
-                                (void**)&async_alloc));
+                                (void **)&async_alloc));
 
   // 2. Round size up to page boundary.
   iree_device_size_t aligned_size =
@@ -436,16 +438,15 @@ iree_status_t iree_hal_streaming_memory_allocate_from_pool_async(
       IREE_HAL_EXTERNAL_BUFFER_FLAG_NONE, &external_buffer);
   if (!iree_status_is_ok(status)) {
     iree_hal_allocator_virtual_memory_release(context->device_allocator,
-                                               async_alloc->virtual_buffer);
+                                              async_alloc->virtual_buffer);
     iree_hal_buffer_release(async_alloc->virtual_buffer);
     iree_allocator_free(pool->host_allocator, async_alloc);
     IREE_TRACE_ZONE_END(z0);
     return status;
   }
 
-  async_alloc->virtual_ptr =
-      (iree_hal_streaming_deviceptr_t)external_buffer.handle.device_allocation
-          .ptr;
+  async_alloc->virtual_ptr = (iree_hal_streaming_deviceptr_t)
+                                 external_buffer.handle.device_allocation.ptr;
   async_alloc->size = aligned_size;
   async_alloc->physical_memory = NULL;
   async_alloc->state = IREE_HAL_STREAMING_ASYNC_ALLOC_RESERVED;
@@ -468,13 +469,13 @@ iree_status_t iree_hal_streaming_memory_allocate_from_pool_async(
 
   // 7. Schedule commit callback to execute before next work submission.
   // Allocate callback context.
-  iree_hal_streaming_async_commit_context_t* commit_ctx = NULL;
+  iree_hal_streaming_async_commit_context_t *commit_ctx = NULL;
   status = iree_allocator_malloc(pool->host_allocator, sizeof(*commit_ctx),
-                                  (void**)&commit_ctx);
+                                 (void **)&commit_ctx);
   if (!iree_status_is_ok(status)) {
     // Remove from pending list on error.
     iree_slim_mutex_lock(&pool->mutex);
-    iree_hal_streaming_async_allocation_t** prev = &pool->pending_allocations;
+    iree_hal_streaming_async_allocation_t **prev = &pool->pending_allocations;
     while (*prev) {
       if (*prev == async_alloc) {
         *prev = async_alloc->next;
@@ -486,7 +487,7 @@ iree_status_t iree_hal_streaming_memory_allocate_from_pool_async(
     iree_slim_mutex_unlock(&pool->mutex);
 
     iree_hal_allocator_virtual_memory_release(context->device_allocator,
-                                               async_alloc->virtual_buffer);
+                                              async_alloc->virtual_buffer);
     iree_hal_buffer_release(async_alloc->virtual_buffer);
     iree_allocator_free(pool->host_allocator, async_alloc);
     IREE_TRACE_ZONE_END(z0);
@@ -498,15 +499,14 @@ iree_status_t iree_hal_streaming_memory_allocate_from_pool_async(
   commit_ctx->is_commit = true;
 
   // Launch host function to commit physical memory.
-  status =
-      iree_hal_streaming_launch_host_function(
-          stream, iree_hal_streaming_async_commit_callback, commit_ctx);
+  status = iree_hal_streaming_launch_host_function(
+      stream, iree_hal_streaming_async_commit_callback, commit_ctx);
   if (!iree_status_is_ok(status)) {
     iree_allocator_free(pool->host_allocator, commit_ctx);
 
     // Remove from pending list on error.
     iree_slim_mutex_lock(&pool->mutex);
-    iree_hal_streaming_async_allocation_t** prev = &pool->pending_allocations;
+    iree_hal_streaming_async_allocation_t **prev = &pool->pending_allocations;
     while (*prev) {
       if (*prev == async_alloc) {
         *prev = async_alloc->next;
@@ -518,7 +518,7 @@ iree_status_t iree_hal_streaming_memory_allocate_from_pool_async(
     iree_slim_mutex_unlock(&pool->mutex);
 
     iree_hal_allocator_virtual_memory_release(context->device_allocator,
-                                               async_alloc->virtual_buffer);
+                                              async_alloc->virtual_buffer);
     iree_hal_buffer_release(async_alloc->virtual_buffer);
     iree_allocator_free(pool->host_allocator, async_alloc);
     IREE_TRACE_ZONE_END(z0);
@@ -530,14 +530,15 @@ iree_status_t iree_hal_streaming_memory_allocate_from_pool_async(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_streaming_memory_free_async(
-    iree_hal_streaming_context_t* context, iree_hal_streaming_deviceptr_t ptr,
-    iree_hal_streaming_stream_t* stream) {
+iree_status_t
+iree_hal_streaming_memory_free_async(iree_hal_streaming_context_t *context,
+                                     iree_hal_streaming_deviceptr_t ptr,
+                                     iree_hal_streaming_stream_t *stream) {
   IREE_ASSERT_ARGUMENT(context);
   IREE_TRACE_ZONE_BEGIN(z0);
 
   // Look up allocation from device pointer.
-  iree_hal_streaming_mem_pool_t* pool =
+  iree_hal_streaming_mem_pool_t *pool =
       iree_hal_streaming_device_mem_pool(context->device_entry);
 
   if (!pool) {
@@ -554,9 +555,9 @@ iree_status_t iree_hal_streaming_memory_free_async(
   }
 
   // Find allocation in pending list.
-  iree_hal_streaming_async_allocation_t* alloc = NULL;
+  iree_hal_streaming_async_allocation_t *alloc = NULL;
   iree_slim_mutex_lock(&pool->mutex);
-  for (iree_hal_streaming_async_allocation_t* curr = pool->pending_allocations;
+  for (iree_hal_streaming_async_allocation_t *curr = pool->pending_allocations;
        curr != NULL; curr = curr->next) {
     if (curr->virtual_ptr == ptr) {
       alloc = curr;
@@ -581,9 +582,9 @@ iree_status_t iree_hal_streaming_memory_free_async(
   iree_slim_mutex_unlock(&stream->mutex);
 
   // Allocate decommit context.
-  iree_hal_streaming_async_commit_context_t* decommit_ctx = NULL;
+  iree_hal_streaming_async_commit_context_t *decommit_ctx = NULL;
   iree_status_t status = iree_allocator_malloc(
-      pool->host_allocator, sizeof(*decommit_ctx), (void**)&decommit_ctx);
+      pool->host_allocator, sizeof(*decommit_ctx), (void **)&decommit_ctx);
   if (!iree_status_is_ok(status)) {
     IREE_TRACE_ZONE_END(z0);
     return status;
@@ -613,8 +614,8 @@ iree_status_t iree_hal_streaming_memory_free_async(
 // Analyze if two async allocations have overlapping lifetimes.
 // This is used for future physical memory reuse optimization.
 static bool iree_hal_streaming_async_allocations_overlap(
-    const iree_hal_streaming_async_allocation_t* a,
-    const iree_hal_streaming_async_allocation_t* b) {
+    const iree_hal_streaming_async_allocation_t *a,
+    const iree_hal_streaming_async_allocation_t *b) {
   // If either hasn't been used yet, assume overlap.
   if (a->first_use_value == UINT64_MAX || b->first_use_value == UINT64_MAX) {
     return true;
@@ -630,12 +631,12 @@ static bool iree_hal_streaming_async_allocations_overlap(
 
 // Find non-overlapping allocations that can share physical memory.
 // This is a stub for future physical memory reuse optimization.
-static iree_hal_physical_memory_t*
+static iree_hal_physical_memory_t *
 iree_hal_streaming_mem_pool_find_reusable_physical(
-    iree_hal_streaming_mem_pool_t* pool, iree_device_size_t size,
+    iree_hal_streaming_mem_pool_t *pool, iree_device_size_t size,
     uint64_t first_use_value) {
   // Scan free physical blocks.
-  for (iree_hal_streaming_physical_memory_block_t* block =
+  for (iree_hal_streaming_physical_memory_block_t *block =
            pool->free_physical_blocks;
        block; block = block->next) {
     // Check if block is available and large enough.
@@ -645,17 +646,17 @@ iree_hal_streaming_mem_pool_find_reusable_physical(
     }
   }
 
-  return NULL;  // No reusable physical memory found.
+  return NULL; // No reusable physical memory found.
 }
 
 // Add freed physical memory to reuse pool.
 // This is a stub for future physical memory reuse optimization.
 static void iree_hal_streaming_mem_pool_recycle_physical(
-    iree_hal_streaming_mem_pool_t* pool,
-    iree_hal_physical_memory_t* physical_memory, iree_device_size_t size,
+    iree_hal_streaming_mem_pool_t *pool,
+    iree_hal_physical_memory_t *physical_memory, iree_device_size_t size,
     uint64_t available_after_value) {
   // TODO: Implement in future optimization phase.
   // For now, just free immediately.
   iree_hal_allocator_physical_memory_free(pool->context->device_allocator,
-                                           physical_memory);
+                                          physical_memory);
 }

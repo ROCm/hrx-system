@@ -31,31 +31,31 @@ typedef struct iree_hal_hsa_semaphore_t {
 
 static const iree_hal_semaphore_vtable_t iree_hal_hsa_semaphore_vtable;
 
-static iree_hal_hsa_semaphore_t* iree_hal_hsa_semaphore_cast(
-    iree_hal_semaphore_t* base_value) {
+static iree_hal_hsa_semaphore_t *
+iree_hal_hsa_semaphore_cast(iree_hal_semaphore_t *base_value) {
   IREE_HAL_ASSERT_TYPE(base_value, &iree_hal_hsa_semaphore_vtable);
-  return (iree_hal_hsa_semaphore_t*)base_value;
+  return (iree_hal_hsa_semaphore_t *)base_value;
 }
 
 iree_status_t iree_hal_hsa_semaphore_create(
-    iree_async_proactor_t* proactor, uint64_t initial_value,
-    iree_allocator_t host_allocator, iree_hal_semaphore_t** out_semaphore) {
+    iree_async_proactor_t *proactor, uint64_t initial_value,
+    iree_allocator_t host_allocator, iree_hal_semaphore_t **out_semaphore) {
   IREE_ASSERT_ARGUMENT(proactor);
   IREE_ASSERT_ARGUMENT(out_semaphore);
   *out_semaphore = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  iree_hal_hsa_semaphore_t* semaphore = NULL;
+  iree_hal_hsa_semaphore_t *semaphore = NULL;
   iree_host_size_t frontier_offset = 0, total_size = 0;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_async_semaphore_layout(sizeof(*semaphore), 0, &frontier_offset,
                                       &total_size));
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0,
-      iree_allocator_malloc(host_allocator, total_size, (void**)&semaphore));
+      iree_allocator_malloc(host_allocator, total_size, (void **)&semaphore));
   memset(semaphore, 0, total_size);
   iree_async_semaphore_initialize(
-      (const iree_async_semaphore_vtable_t*)&iree_hal_hsa_semaphore_vtable,
+      (const iree_async_semaphore_vtable_t *)&iree_hal_hsa_semaphore_vtable,
       proactor, initial_value, frontier_offset, 0, &semaphore->async);
   semaphore->host_allocator = host_allocator;
 
@@ -65,9 +65,9 @@ iree_status_t iree_hal_hsa_semaphore_create(
   return iree_ok_status();
 }
 
-static void iree_hal_hsa_semaphore_destroy(
-    iree_async_semaphore_t* base_semaphore) {
-  iree_hal_hsa_semaphore_t* semaphore =
+static void
+iree_hal_hsa_semaphore_destroy(iree_async_semaphore_t *base_semaphore) {
+  iree_hal_hsa_semaphore_t *semaphore =
       iree_hal_hsa_semaphore_cast(iree_hal_semaphore_cast(base_semaphore));
   iree_allocator_t host_allocator = semaphore->host_allocator;
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -78,8 +78,8 @@ static void iree_hal_hsa_semaphore_destroy(
   IREE_TRACE_ZONE_END(z0);
 }
 
-static uint64_t iree_hal_hsa_semaphore_query(
-    iree_async_semaphore_t* base_semaphore) {
+static uint64_t
+iree_hal_hsa_semaphore_query(iree_async_semaphore_t *base_semaphore) {
   // Pure software semaphore: just read the atomic timeline value.
   // Check for failure first.
   iree_status_t failure = (iree_status_t)iree_atomic_load(
@@ -91,13 +91,13 @@ static uint64_t iree_hal_hsa_semaphore_query(
                                     iree_memory_order_acquire);
 }
 
-static iree_status_t iree_hal_hsa_semaphore_signal(
-    iree_async_semaphore_t* base_semaphore, uint64_t new_value,
-    const iree_async_frontier_t* frontier) {
+static iree_status_t
+iree_hal_hsa_semaphore_signal(iree_async_semaphore_t *base_semaphore,
+                              uint64_t new_value,
+                              const iree_async_frontier_t *frontier) {
   // Advance timeline value and merge frontier.
-  IREE_RETURN_IF_ERROR(
-      iree_async_semaphore_advance_timeline(base_semaphore, new_value,
-                                            frontier));
+  IREE_RETURN_IF_ERROR(iree_async_semaphore_advance_timeline(
+      base_semaphore, new_value, frontier));
   // Dispatch satisfied timepoints.
   iree_async_semaphore_dispatch_timepoints(base_semaphore, new_value);
   return iree_ok_status();
@@ -105,17 +105,18 @@ static iree_status_t iree_hal_hsa_semaphore_signal(
 
 // on_fail is optional for pure-software semaphores. We set it to NULL below.
 
-static iree_status_t iree_hal_hsa_semaphore_wait(
-    iree_hal_semaphore_t* base_semaphore, uint64_t value,
-    iree_timeout_t timeout, iree_async_wait_flags_t flags) {
+static iree_status_t
+iree_hal_hsa_semaphore_wait(iree_hal_semaphore_t *base_semaphore,
+                            uint64_t value, iree_timeout_t timeout,
+                            iree_async_wait_flags_t flags) {
   // Delegate to the centralized async semaphore multi-wait.
   return iree_async_semaphore_multi_wait(
-      IREE_ASYNC_WAIT_MODE_ALL, (iree_async_semaphore_t**)&base_semaphore,
+      IREE_ASYNC_WAIT_MODE_ALL, (iree_async_semaphore_t **)&base_semaphore,
       &value, 1, timeout, flags, iree_allocator_system());
 }
 
 static iree_status_t iree_hal_hsa_semaphore_import_timepoint(
-    iree_hal_semaphore_t* base_semaphore, uint64_t value,
+    iree_hal_semaphore_t *base_semaphore, uint64_t value,
     iree_hal_queue_affinity_t queue_affinity,
     iree_hal_external_timepoint_t external_timepoint) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
@@ -123,11 +124,11 @@ static iree_status_t iree_hal_hsa_semaphore_import_timepoint(
 }
 
 static iree_status_t iree_hal_hsa_semaphore_export_timepoint(
-    iree_hal_semaphore_t* base_semaphore, uint64_t value,
+    iree_hal_semaphore_t *base_semaphore, uint64_t value,
     iree_hal_queue_affinity_t queue_affinity,
     iree_hal_external_timepoint_type_t requested_type,
     iree_hal_external_timepoint_flags_t requested_flags,
-    iree_hal_external_timepoint_t* IREE_RESTRICT out_external_timepoint) {
+    iree_hal_external_timepoint_t *IREE_RESTRICT out_external_timepoint) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                           "timepoint export is not yet implemented");
 }
@@ -138,7 +139,7 @@ static const iree_hal_semaphore_vtable_t iree_hal_hsa_semaphore_vtable = {
             .destroy = iree_hal_hsa_semaphore_destroy,
             .query = iree_hal_hsa_semaphore_query,
             .signal = iree_hal_hsa_semaphore_signal,
-            .on_fail = NULL,  // Pure software semaphore, no device to notify.
+            .on_fail = NULL, // Pure software semaphore, no device to notify.
         },
     .wait = iree_hal_hsa_semaphore_wait,
     .import_timepoint = iree_hal_hsa_semaphore_import_timepoint,

@@ -10,21 +10,21 @@
 #include <cstdio>
 #include <cstdlib>
 
-#define HIP_CHECK(call)                                                 \
-  do {                                                                  \
-    hipError_t err = (call);                                            \
-    if (err != hipSuccess) {                                            \
-      fprintf(stderr, "HIP error at %s:%d: %s returned %d\n", __FILE__, \
-              __LINE__, #call, err);                                    \
-      exit(1);                                                          \
-    }                                                                   \
+#define HIP_CHECK(call)                                                        \
+  do {                                                                         \
+    hipError_t err = (call);                                                   \
+    if (err != hipSuccess) {                                                   \
+      fprintf(stderr, "HIP error at %s:%d: %s returned %d\n", __FILE__,        \
+              __LINE__, #call, err);                                           \
+      exit(1);                                                                 \
+    }                                                                          \
   } while (0)
 
 // Simple device function for addition.
 __device__ float device_add(float a, float b) { return a + b; }
 
 // Vector addition kernel using HIP C++ syntax.
-__global__ void vector_add_kernel(const float* a, const float* b, float* c,
+__global__ void vector_add_kernel(const float *a, const float *b, float *c,
                                   int n) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx < n) {
@@ -33,7 +33,7 @@ __global__ void vector_add_kernel(const float* a, const float* b, float* c,
 }
 
 int main() {
-  const int n = 1024;  // number of elements
+  const int n = 1024; // number of elements
   const size_t size = n * sizeof(float);
 
   printf("HIP C++ Vector Addition Demo\n");
@@ -63,9 +63,9 @@ int main() {
 
   // Allocate host memory.
   printf("\n3. Allocating host memory...\n");
-  float* h_A = (float*)malloc(size);
-  float* h_B = (float*)malloc(size);
-  float* h_C = (float*)malloc(size);
+  float *h_A = (float *)malloc(size);
+  float *h_B = (float *)malloc(size);
+  float *h_C = (float *)malloc(size);
   if (!h_A || !h_B || !h_C) {
     fprintf(stderr, "Error: Failed to allocate host memory\n");
     return 1;
@@ -74,16 +74,16 @@ int main() {
   // Initialize input vectors with predictable pattern.
   printf("   Initializing input vectors...\n");
   for (int i = 0; i < n; i++) {
-    h_A[i] = i * 2.0f;  // A[i] = i * 2
-    h_B[i] = i * 3.0f;  // B[i] = i * 3
+    h_A[i] = i * 2.0f; // A[i] = i * 2
+    h_B[i] = i * 3.0f; // B[i] = i * 3
   }
 
   // Allocate device memory.
   printf("\n4. Allocating device memory...\n");
   float *d_A, *d_B, *d_C;
-  HIP_CHECK(hipMalloc((void**)&d_A, size));
-  HIP_CHECK(hipMalloc((void**)&d_B, size));
-  HIP_CHECK(hipMalloc((void**)&d_C, size));
+  HIP_CHECK(hipMalloc((void **)&d_A, size));
+  HIP_CHECK(hipMalloc((void **)&d_B, size));
+  HIP_CHECK(hipMalloc((void **)&d_C, size));
 
   // Copy input data to device.
   printf("\n5. Copying input data to device...\n");
@@ -118,7 +118,7 @@ int main() {
   for (int i = 0; i < n; i++) {
     float expected = h_A[i] + h_B[i];
     if (fabs(h_C[i] - expected) > 1e-5) {
-      if (errors < 5) {  // Only print first 5 errors.
+      if (errors < 5) { // Only print first 5 errors.
         printf("   Error at index %d: expected %.2f, got %.2f\n", i, expected,
                h_C[i]);
       }

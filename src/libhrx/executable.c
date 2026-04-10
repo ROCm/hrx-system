@@ -7,11 +7,11 @@
 #include <string.h>
 
 static hrx_status_t hrx_executable_wrap(
-    hrx_device_t device, iree_hal_executable_cache_t* hal_executable_cache,
-    iree_hal_executable_t* hal_executable, hrx_executable_t* executable) {
+    hrx_device_t device, iree_hal_executable_cache_t *hal_executable_cache,
+    iree_hal_executable_t *hal_executable, hrx_executable_t *executable) {
   hrx_executable_t value = NULL;
   iree_status_t alloc_status = iree_allocator_malloc(
-      iree_allocator_system(), sizeof(*value), (void**)&value);
+      iree_allocator_system(), sizeof(*value), (void **)&value);
   if (!iree_status_is_ok(alloc_status)) {
     iree_hal_executable_release(hal_executable);
     iree_hal_executable_cache_release(hal_executable_cache);
@@ -28,18 +28,18 @@ static hrx_status_t hrx_executable_wrap(
   return hrx_ok_status();
 }
 
-hrx_status_t hrx_executable_load_data(
-    hrx_device_t device, const void* executable_data,
-    size_t executable_data_size, const char* executable_format,
-    hrx_executable_t* executable) {
+hrx_status_t hrx_executable_load_data(hrx_device_t device,
+                                      const void *executable_data,
+                                      size_t executable_data_size,
+                                      const char *executable_format,
+                                      hrx_executable_t *executable) {
   if (!device || !executable || !executable_data || executable_data_size == 0) {
-    return hrx_make_status(
-        HRX_STATUS_INVALID_ARGUMENT,
-        "device, executable_data, or executable is invalid");
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "device, executable_data, or executable is invalid");
   }
   *executable = NULL;
 
-  iree_hal_executable_cache_t* hal_executable_cache = NULL;
+  iree_hal_executable_cache_t *hal_executable_cache = NULL;
   iree_status_t status = iree_hal_executable_cache_create(
       device->hal_device, IREE_SV("hrx"), &hal_executable_cache);
   if (!iree_status_is_ok(status)) {
@@ -67,7 +67,7 @@ hrx_status_t hrx_executable_load_data(
       iree_make_const_byte_span(executable_data, inferred_size);
   params.caching_mode = 0;
 
-  iree_hal_executable_t* hal_executable = NULL;
+  iree_hal_executable_t *hal_executable = NULL;
   status = iree_hal_executable_cache_prepare_executable(
       hal_executable_cache, &params, &hal_executable);
   if (!iree_status_is_ok(status)) {
@@ -75,43 +75,43 @@ hrx_status_t hrx_executable_load_data(
     return hrx_status_from_iree(status);
   }
 
-  return hrx_executable_wrap(
-      device, hal_executable_cache, hal_executable, executable);
+  return hrx_executable_wrap(device, hal_executable_cache, hal_executable,
+                             executable);
 }
 
-hrx_status_t hrx_executable_load_file(
-    hrx_device_t device, const char* path, const char* executable_format,
-    hrx_executable_t* executable) {
+hrx_status_t hrx_executable_load_file(hrx_device_t device, const char *path,
+                                      const char *executable_format,
+                                      hrx_executable_t *executable) {
   if (!device || !path || !executable) {
-    return hrx_make_status(
-        HRX_STATUS_INVALID_ARGUMENT, "device, path, or executable is NULL");
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "device, path, or executable is NULL");
   }
   *executable = NULL;
 
-  FILE* file = fopen(path, "rb");
+  FILE *file = fopen(path, "rb");
   if (!file) {
-    return hrx_make_status(
-        HRX_STATUS_NOT_FOUND, "failed to open executable file");
+    return hrx_make_status(HRX_STATUS_NOT_FOUND,
+                           "failed to open executable file");
   }
 
   if (fseek(file, 0, SEEK_END) != 0) {
     fclose(file);
-    return hrx_make_status(
-        HRX_STATUS_INTERNAL, "failed to seek executable file");
+    return hrx_make_status(HRX_STATUS_INTERNAL,
+                           "failed to seek executable file");
   }
   long file_size = ftell(file);
   if (file_size <= 0) {
     fclose(file);
-    return hrx_make_status(
-        HRX_STATUS_INVALID_ARGUMENT, "empty executable file");
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "empty executable file");
   }
   if (fseek(file, 0, SEEK_SET) != 0) {
     fclose(file);
-    return hrx_make_status(
-        HRX_STATUS_INTERNAL, "failed to rewind executable file");
+    return hrx_make_status(HRX_STATUS_INTERNAL,
+                           "failed to rewind executable file");
   }
 
-  void* file_data = NULL;
+  void *file_data = NULL;
   hrx_status_t status = hrx_host_allocator_malloc_uninitialized(
       hrx_host_allocator_system(), (size_t)file_size, &file_data);
   if (!hrx_status_is_ok(status)) {
@@ -123,18 +123,19 @@ hrx_status_t hrx_executable_load_file(
   fclose(file);
   if (read_size != (size_t)file_size) {
     hrx_host_allocator_free(hrx_host_allocator_system(), file_data);
-    return hrx_make_status(
-        HRX_STATUS_DATA_LOSS, "short read while loading executable file");
+    return hrx_make_status(HRX_STATUS_DATA_LOSS,
+                           "short read while loading executable file");
   }
 
-  status = hrx_executable_load_data(
-      device, file_data, (size_t)file_size, executable_format, executable);
+  status = hrx_executable_load_data(device, file_data, (size_t)file_size,
+                                    executable_format, executable);
   hrx_host_allocator_free(hrx_host_allocator_system(), file_data);
   return status;
 }
 
 void hrx_executable_retain(hrx_executable_t executable) {
-  if (!executable) return;
+  if (!executable)
+    return;
   iree_hal_executable_cache_retain(executable->hal_executable_cache);
   iree_hal_executable_retain(executable->hal_executable);
   hrx_device_retain(executable->device);
@@ -142,10 +143,11 @@ void hrx_executable_retain(hrx_executable_t executable) {
 }
 
 void hrx_executable_release(hrx_executable_t executable) {
-  if (!executable) return;
-  iree_hal_executable_cache_t* hal_executable_cache =
+  if (!executable)
+    return;
+  iree_hal_executable_cache_t *hal_executable_cache =
       executable->hal_executable_cache;
-  iree_hal_executable_t* hal_executable = executable->hal_executable;
+  iree_hal_executable_t *hal_executable = executable->hal_executable;
   hrx_device_t device = executable->device;
   if (iree_atomic_ref_count_dec(&executable->ref_count) == 1) {
     iree_allocator_free(iree_allocator_system(), executable);
@@ -155,22 +157,22 @@ void hrx_executable_release(hrx_executable_t executable) {
   hrx_device_release(device);
 }
 
-hrx_status_t hrx_executable_export_count(
-    hrx_executable_t executable, size_t* count) {
+hrx_status_t hrx_executable_export_count(hrx_executable_t executable,
+                                         size_t *count) {
   if (!executable || !count) {
-    return hrx_make_status(
-        HRX_STATUS_INVALID_ARGUMENT, "executable or count is NULL");
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "executable or count is NULL");
   }
   *count = iree_hal_executable_export_count(executable->hal_executable);
   return hrx_ok_status();
 }
 
-hrx_status_t hrx_executable_export_info(
-    hrx_executable_t executable, uint32_t export_ordinal,
-    hrx_executable_export_info_t* out_info) {
+hrx_status_t
+hrx_executable_export_info(hrx_executable_t executable, uint32_t export_ordinal,
+                           hrx_executable_export_info_t *out_info) {
   if (!executable || !out_info) {
-    return hrx_make_status(
-        HRX_STATUS_INVALID_ARGUMENT, "executable or out_info is NULL");
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "executable or out_info is NULL");
   }
 
   iree_hal_executable_export_info_t hal_info;
@@ -193,13 +195,12 @@ hrx_status_t hrx_executable_export_info(
   return hrx_ok_status();
 }
 
-hrx_status_t hrx_executable_lookup_export_by_name(
-    hrx_executable_t executable, const char* name,
-    uint32_t* export_ordinal) {
+hrx_status_t hrx_executable_lookup_export_by_name(hrx_executable_t executable,
+                                                  const char *name,
+                                                  uint32_t *export_ordinal) {
   if (!executable || !name || !export_ordinal) {
-    return hrx_make_status(
-        HRX_STATUS_INVALID_ARGUMENT,
-        "executable, name, or export_ordinal is NULL");
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "executable, name, or export_ordinal is NULL");
   }
 
   iree_hal_executable_export_ordinal_t ordinal = 0;

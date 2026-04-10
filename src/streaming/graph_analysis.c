@@ -4,18 +4,19 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "iree/base/internal/math.h"
 #include "streaming/graph.h"
 #include "streaming/internal.h"
-#include "iree/base/internal/math.h"
 
 // IREE_PREFETCH_RO was removed from main IREE. Provide a fallback definition.
 #ifndef IREE_PREFETCH_RO
 #if defined(__GNUC__) || defined(__clang__)
-#define IREE_PREFETCH_RO(ptr, locality) __builtin_prefetch((ptr), /*rw=*/0, locality)
+#define IREE_PREFETCH_RO(ptr, locality)                                        \
+  __builtin_prefetch((ptr), /*rw=*/0, locality)
 #else
 #define IREE_PREFETCH_RO(ptr, locality) ((void)0)
 #endif
-#endif  // IREE_PREFETCH_RO
+#endif // IREE_PREFETCH_RO
 
 //===----------------------------------------------------------------------===//
 // Tuning Parameters and Heuristics
@@ -145,24 +146,24 @@
 //
 // Complexity: O(N * avg_deps) ~= O(N) for sparse graphs
 static bool iree_hal_streaming_graph_prepare_nodes(
-    iree_hal_streaming_node_block_t* node_blocks, iree_host_size_t node_count,
-    iree_hal_streaming_graph_sort_node_t* sort_nodes,
-    uint32_t* node_index_map) {
+    iree_hal_streaming_node_block_t *node_blocks, iree_host_size_t node_count,
+    iree_hal_streaming_graph_sort_node_t *sort_nodes,
+    uint32_t *node_index_map) {
   // Linearize from chained blocks.
   uint32_t index = 0;
-  for (iree_hal_streaming_node_block_t* block = node_blocks; block;
+  for (iree_hal_streaming_node_block_t *block = node_blocks; block;
        block = block->next) {
     if (block->next) {
-      IREE_PREFETCH_RO(block->next, 1);  // Prefetch next block.
+      IREE_PREFETCH_RO(block->next, 1); // Prefetch next block.
     }
 
     for (iree_host_size_t i = 0; i < block->count; ++i) {
-      iree_hal_streaming_graph_node_t* node = block->nodes[i];
+      iree_hal_streaming_graph_node_t *node = block->nodes[i];
       // TODO(benvanik): see if the allocation is guaranteed calloc - if so, we
       // can initialize fewer fields.
       sort_nodes[index] = (iree_hal_streaming_graph_sort_node_t){
           .original_index = index,
-          .sorted_index = index,  // Initially assume sorted.
+          .sorted_index = index, // Initially assume sorted.
           .max_dependency_index = 0,
           .partition_id = 0,
           .in_degree = 0,
@@ -183,7 +184,7 @@ static bool iree_hal_streaming_graph_prepare_nodes(
   // on subsequent instantiations.
   bool is_sorted = true;
   for (uint32_t i = 0; is_sorted && i < node_count; ++i) {
-    iree_hal_streaming_graph_node_t* node = sort_nodes[i].node;
+    iree_hal_streaming_graph_node_t *node = sort_nodes[i].node;
     if (node->dependency_count > 0) {
       for (uint32_t j = 0; j < node->dependency_count; ++j) {
         // Look up dependency's position in sort_nodes using the mapping.
@@ -214,9 +215,9 @@ static bool iree_hal_streaming_graph_prepare_nodes(
 //
 // Complexity: O(N + E) where E = total edges (embedded + additional)
 static iree_status_t iree_hal_streaming_graph_topological_sort(
-    iree_hal_streaming_graph_sort_node_t* nodes, uint32_t node_count,
-    uint32_t* node_index_map, iree_hal_streaming_graph_edge_t* additional_edges,
-    iree_arena_allocator_t* arena, bool is_already_sorted) {
+    iree_hal_streaming_graph_sort_node_t *nodes, uint32_t node_count,
+    uint32_t *node_index_map, iree_hal_streaming_graph_edge_t *additional_edges,
+    iree_arena_allocator_t *arena, bool is_already_sorted) {
   if (is_already_sorted && !additional_edges) {
     // Fast path: just compute max dependencies.
     // This is needed for partition boundary detection.
@@ -238,9 +239,9 @@ static iree_status_t iree_hal_streaming_graph_topological_sort(
   }
 
   // Full topological sort using Kahn's algorithm.
-  uint32_t* queue = NULL;
+  uint32_t *queue = NULL;
   const iree_host_size_t queue_size = node_count * sizeof(*queue);
-  IREE_RETURN_IF_ERROR(iree_arena_allocate(arena, queue_size, (void**)&queue));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(arena, queue_size, (void **)&queue));
 
   // Step 1: Calculate in-degrees from embedded dependencies.
   for (uint32_t i = 0; i < node_count; ++i) {
@@ -248,7 +249,7 @@ static iree_status_t iree_hal_streaming_graph_topological_sort(
   }
 
   // Step 1b: Add in-degrees from additional edges.
-  iree_hal_streaming_graph_edge_t* edge = additional_edges;
+  iree_hal_streaming_graph_edge_t *edge = additional_edges;
   while (edge) {
     // Find the 'to' node in our nodes array and increment its in-degree.
     uint32_t to_index = node_index_map[edge->to->node_index];
@@ -303,14 +304,15 @@ static iree_status_t iree_hal_streaming_graph_topological_sort(
     // This requires finding reverse edges (who depends on current).
     // First check embedded dependencies.
     for (uint32_t i = 0; i < node_count; ++i) {
-      if (i == current) continue;
-      iree_hal_streaming_graph_node_t* node = nodes[i].node;
+      if (i == current)
+        continue;
+      iree_hal_streaming_graph_node_t *node = nodes[i].node;
       for (uint32_t j = 0; j < node->dependency_count; ++j) {
         if (node->dependencies[j] == nodes[current].node) {
           if (--nodes[i].in_degree == 0) {
             queue[queue_tail++] = i;
           }
-          break;  // Each node appears at most once in dependency list.
+          break; // Each node appears at most once in dependency list.
         }
       }
     }
@@ -394,9 +396,9 @@ typedef struct iree_uint32x2_t {
 //
 // Returns [partition_count, block_count].
 static iree_uint32x2_t iree_hal_streaming_graph_partition_with_streams(
-    iree_hal_streaming_graph_sort_node_t* nodes, uint32_t node_count,
-    uint32_t* node_index_map,
-    iree_hal_streaming_graph_partition_t* partitions) {
+    iree_hal_streaming_graph_sort_node_t *nodes, uint32_t node_count,
+    uint32_t *node_index_map,
+    iree_hal_streaming_graph_partition_t *partitions) {
   uint32_t partition_count = 0;
   uint32_t block_count = 0;
 
@@ -412,15 +414,15 @@ static iree_uint32x2_t iree_hal_streaming_graph_partition_with_streams(
       // Non-recordable node gets its own partition.
       iree_hal_streaming_graph_partition_type_t partition_type;
       switch (nodes[i].type) {
-        case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EMPTY:
-          partition_type = IREE_HAL_STREAMING_GRAPH_PARTITION_TYPE_EMPTY;
-          break;
-        case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_HOST_CALL:
-          partition_type = IREE_HAL_STREAMING_GRAPH_PARTITION_TYPE_HOST_CALL;
-          break;
-        default:
-          partition_type = IREE_HAL_STREAMING_GRAPH_PARTITION_TYPE_EMPTY;
-          break;
+      case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EMPTY:
+        partition_type = IREE_HAL_STREAMING_GRAPH_PARTITION_TYPE_EMPTY;
+        break;
+      case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_HOST_CALL:
+        partition_type = IREE_HAL_STREAMING_GRAPH_PARTITION_TYPE_HOST_CALL;
+        break;
+      default:
+        partition_type = IREE_HAL_STREAMING_GRAPH_PARTITION_TYPE_EMPTY;
+        break;
       }
       partitions[partition_count] = (iree_hal_streaming_graph_partition_t){
           .start_index = i,
@@ -462,7 +464,7 @@ static iree_uint32x2_t iree_hal_streaming_graph_partition_with_streams(
           }
         }
         if (!deps_satisfied) {
-          break;  // End this partition.
+          break; // End this partition.
         }
 
         // Only perform workstream detection for sufficiently large partitions.
@@ -504,7 +506,8 @@ static iree_uint32x2_t iree_hal_streaming_graph_partition_with_streams(
           } else {
             // Not enough nodes - use stream 0.
             assigned_stream = 0;
-            if (active_streams == 0) active_streams = 1;
+            if (active_streams == 0)
+              active_streams = 1;
           }
         } else if (use_workstreams &&
                    iree_math_count_ones_u32(connected_streams) == 1) {
@@ -528,13 +531,14 @@ static iree_uint32x2_t iree_hal_streaming_graph_partition_with_streams(
             // Collapse to single stream.
             assigned_stream = 0;
             for (uint32_t k = recordable_start; k < i; ++k) {
-              nodes[k].stream_id = 0;  // Reset all to stream 0.
+              nodes[k].stream_id = 0; // Reset all to stream 0.
             }
             active_streams = 1;
           } else {
             // Single dependency or first node - use stream 0.
             assigned_stream = 0;
-            if (active_streams == 0) active_streams = 1;
+            if (active_streams == 0)
+              active_streams = 1;
           }
         }
 
@@ -564,10 +568,10 @@ static iree_uint32x2_t iree_hal_streaming_graph_partition_with_streams(
 //===----------------------------------------------------------------------===//
 
 iree_status_t iree_hal_streaming_graph_schedule_nodes(
-    iree_hal_streaming_node_block_t* node_blocks, iree_host_size_t node_count,
-    iree_hal_streaming_graph_edge_t* additional_edges,
-    iree_arena_allocator_t* arena,
-    iree_hal_streaming_graph_schedule_t* out_schedule) {
+    iree_hal_streaming_node_block_t *node_blocks, iree_host_size_t node_count,
+    iree_hal_streaming_graph_edge_t *additional_edges,
+    iree_arena_allocator_t *arena,
+    iree_hal_streaming_graph_schedule_t *out_schedule) {
   IREE_ASSERT_ARGUMENT(out_schedule);
 
   if (node_count == 0) {
@@ -579,16 +583,17 @@ iree_status_t iree_hal_streaming_graph_schedule_nodes(
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, node_count);
 
   // Allocate all working memory from arena.
-  iree_hal_streaming_graph_sort_node_t* sorted_nodes = NULL;
+  iree_hal_streaming_graph_sort_node_t *sorted_nodes = NULL;
   const iree_host_size_t sorted_nodes_size = node_count * sizeof(*sorted_nodes);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_arena_allocate(arena, sorted_nodes_size, (void**)&sorted_nodes));
+      z0,
+      iree_arena_allocate(arena, sorted_nodes_size, (void **)&sorted_nodes));
 
   // Allocate mapping from original node_index to sorted position.
-  uint32_t* node_index_map = NULL;
+  uint32_t *node_index_map = NULL;
   const iree_host_size_t map_size = node_count * sizeof(*node_index_map);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_arena_allocate(arena, map_size, (void**)&node_index_map));
+      z0, iree_arena_allocate(arena, map_size, (void **)&node_index_map));
 
   // Phase 1: Prepare - linearize and detect if sorted.
   const bool is_sorted = iree_hal_streaming_graph_prepare_nodes(
@@ -604,10 +609,10 @@ iree_status_t iree_hal_streaming_graph_schedule_nodes(
   // TODO: try to avoid allocating an O(node) partition capacity? We could use
   // linked blocks, though it does make walking the partitions slightly more
   // complicated.
-  iree_hal_streaming_graph_partition_t* partitions = NULL;
+  iree_hal_streaming_graph_partition_t *partitions = NULL;
   const iree_host_size_t partitions_size = node_count * sizeof(*partitions);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_arena_allocate(arena, partitions_size, (void**)&partitions));
+      z0, iree_arena_allocate(arena, partitions_size, (void **)&partitions));
 
   // Phase 3: Partition - group into executable blocks.
   const iree_uint32x2_t partition_block_counts =

@@ -10,8 +10,8 @@
 #ifdef __AMDGCN__
 // AMDGPU specific attributes and intrinsics
 #define KERNEL_ATTR __attribute__((amdgpu_kernel))
-#define GET_GLOBAL_ID()              \
-  __builtin_amdgcn_workitem_id_x() + \
+#define GET_GLOBAL_ID()                                                        \
+  __builtin_amdgcn_workitem_id_x() +                                           \
       __builtin_amdgcn_workgroup_id_x() * __builtin_amdgcn_workgroup_size_x()
 #elif defined(__SPIRV__)
 // SPIR-V specific attributes
@@ -22,12 +22,12 @@ extern unsigned get_global_id(unsigned dim);
 #else
 // CPU fallback - standard C
 #define KERNEL_ATTR
-#define GET_GLOBAL_ID() 0  // Will be set by host
+#define GET_GLOBAL_ID() 0 // Will be set by host
 #endif
 
 // Simple vector addition: C = A + B
 KERNEL_ATTR
-void vector_add(const float* a, const float* b, float* c, unsigned int n) {
+void vector_add(const float *a, const float *b, float *c, unsigned int n) {
 #ifdef __AMDGCN__
   unsigned int idx = GET_GLOBAL_ID();
   if (idx < n) {
@@ -48,7 +48,7 @@ void vector_add(const float* a, const float* b, float* c, unsigned int n) {
 
 // Vector addition with scalar multiplication: C = alpha * A + beta * B
 KERNEL_ATTR
-void vector_add_scaled(const float* a, const float* b, float* c, float alpha,
+void vector_add_scaled(const float *a, const float *b, float *c, float alpha,
                        float beta, unsigned int n) {
 #ifdef __AMDGCN__
   unsigned int idx = GET_GLOBAL_ID();
@@ -70,7 +70,7 @@ void vector_add_scaled(const float* a, const float* b, float* c, float alpha,
 
 // Element-wise vector multiplication: C = A * B
 KERNEL_ATTR
-void vector_multiply(const float* a, const float* b, float* c, unsigned int n) {
+void vector_multiply(const float *a, const float *b, float *c, unsigned int n) {
 #ifdef __AMDGCN__
   unsigned int idx = GET_GLOBAL_ID();
   if (idx < n) {

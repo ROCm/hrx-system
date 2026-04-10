@@ -13,23 +13,24 @@
 #include <string>
 
 class HrxLoaderError : public std::runtime_error {
- public:
+public:
   using std::runtime_error::runtime_error;
 };
 
 class HrxLoader {
- public:
-  static HrxLoader& instance();
-  static void setLibraryPath(const std::string& path);
+public:
+  static HrxLoader &instance();
+  static void setLibraryPath(const std::string &path);
 
   // Host allocator. system_value is a data symbol loaded via dlsym.
-  hrx_host_allocator_t* host_allocator_system_ptr;
+  hrx_host_allocator_t *host_allocator_system_ptr;
   hrx_host_allocator_t host_allocator_system() {
     return *host_allocator_system_ptr;
   }
 
   decltype(&hrx_host_allocator_malloc) host_allocator_malloc;
-  decltype(&hrx_host_allocator_malloc_uninitialized) host_allocator_malloc_uninitialized;
+  decltype(&hrx_host_allocator_malloc_uninitialized)
+      host_allocator_malloc_uninitialized;
   decltype(&hrx_host_allocator_realloc) host_allocator_realloc;
   decltype(&hrx_host_allocator_clone) host_allocator_clone;
   decltype(&hrx_host_allocator_free) host_allocator_free;
@@ -120,7 +121,8 @@ class HrxLoader {
   decltype(&hrx_executable_release) executable_release;
   decltype(&hrx_executable_export_count) executable_export_count;
   decltype(&hrx_executable_export_info) executable_export_info;
-  decltype(&hrx_executable_lookup_export_by_name) executable_lookup_export_by_name;
+  decltype(&hrx_executable_lookup_export_by_name)
+      executable_lookup_export_by_name;
 
   // Queue ops.
   decltype(&hrx_queue_fill) queue_fill;
@@ -169,24 +171,28 @@ class HrxLoader {
 
   // Virtual memory.
   decltype(&hrx_allocator_query_virtual_memory) allocator_query_virtual_memory;
-  decltype(&hrx_allocator_virtual_memory_reserve) allocator_virtual_memory_reserve;
-  decltype(&hrx_allocator_virtual_memory_release) allocator_virtual_memory_release;
-  decltype(&hrx_allocator_physical_memory_allocate) allocator_physical_memory_allocate;
+  decltype(&hrx_allocator_virtual_memory_reserve)
+      allocator_virtual_memory_reserve;
+  decltype(&hrx_allocator_virtual_memory_release)
+      allocator_virtual_memory_release;
+  decltype(&hrx_allocator_physical_memory_allocate)
+      allocator_physical_memory_allocate;
   decltype(&hrx_allocator_physical_memory_free) allocator_physical_memory_free;
   decltype(&hrx_allocator_virtual_memory_map) allocator_virtual_memory_map;
   decltype(&hrx_allocator_virtual_memory_unmap) allocator_virtual_memory_unmap;
-  decltype(&hrx_allocator_virtual_memory_protect) allocator_virtual_memory_protect;
+  decltype(&hrx_allocator_virtual_memory_protect)
+      allocator_virtual_memory_protect;
 
- private:
+private:
   HrxLoader();
   ~HrxLoader();
-  void load(const std::string& path);
-  void* loadSymbol(const char* name);
+  void load(const std::string &path);
+  void *loadSymbol(const char *name);
 
-  void* handle_ = nullptr;
+  void *handle_ = nullptr;
   static std::string library_path_;
 };
 
-inline HrxLoader& hrx() { return HrxLoader::instance(); }
+inline HrxLoader &hrx() { return HrxLoader::instance(); }
 
-#endif  // HRX_CTS_LOADER_HPP
+#endif // HRX_CTS_LOADER_HPP

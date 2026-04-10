@@ -22,10 +22,9 @@ void requireOk(hrx_status_t status) {
     return;
   }
 
-  char* message = nullptr;
+  char *message = nullptr;
   size_t length = 0;
-  hrx_status_t format_status =
-      hrx_status_to_string(status, &message, &length);
+  hrx_status_t format_status = hrx_status_to_string(status, &message, &length);
   INFO("hrx error: " << (message ? message : "?"));
   hrx_status_free_message(message);
   hrx_status_ignore(format_status);
@@ -35,7 +34,7 @@ void requireOk(hrx_status_t status) {
 
 #define REQUIRE_HRX_OK(expr) requireOk((expr))
 
-std::string loadMlir(const char* relative_path) {
+std::string loadMlir(const char *relative_path) {
   std::string path = std::string(HRX_CTS_SOURCE_DIR) + "/" + relative_path;
   std::ifstream file(path);
   REQUIRE(file.is_open());
@@ -44,7 +43,7 @@ std::string loadMlir(const char* relative_path) {
 }
 
 bool cliCompilerConfigured() {
-  const char* cli_path = std::getenv("HRX_IREE_COMPILER_CLI");
+  const char *cli_path = std::getenv("HRX_IREE_COMPILER_CLI");
   if (!cli_path || !*cli_path) {
     return false;
   }
@@ -52,29 +51,29 @@ bool cliCompilerConfigured() {
   return file.good();
 }
 
-std::unique_ptr<hrx::compiler::HrxGraphCompiler> createCompilerIfAvailable(
-    hrx_compiler_backend_t backend) {
+std::unique_ptr<hrx::compiler::HrxGraphCompiler>
+createCompilerIfAvailable(hrx_compiler_backend_t backend) {
   try {
     return std::make_unique<hrx::compiler::HrxGraphCompiler>(backend);
-  } catch (const std::runtime_error& e) {
+  } catch (const std::runtime_error &e) {
     INFO("compiler backend unavailable: " << e.what());
     return nullptr;
   }
 }
 
 void verifyAddI64(hrx_device_t device,
-                  const hrx::compiler::compiler_output_ptr& output) {
+                  const hrx::compiler::compiler_output_ptr &output) {
   REQUIRE(output);
   REQUIRE(hrx_compiler_output_data(output.get()) != nullptr);
   REQUIRE(hrx_compiler_output_size(output.get()) > 0);
 
   hrx::runtime::module_ptr module;
-  REQUIRE_HRX_OK(hrx_module_load_compiler_output(
-      device, output.get(), module.for_output()));
+  REQUIRE_HRX_OK(hrx_module_load_compiler_output(device, output.get(),
+                                                 module.for_output()));
 
   hrx::runtime::function_ptr function;
-  REQUIRE_HRX_OK(hrx_module_lookup_function(
-      module.get(), "module.add_i64", function.for_output()));
+  REQUIRE_HRX_OK(hrx_module_lookup_function(module.get(), "module.add_i64",
+                                            function.for_output()));
 
   hrx::runtime::value_list_ptr args;
   hrx::runtime::value_list_ptr rets;
@@ -82,15 +81,15 @@ void verifyAddI64(hrx_device_t device,
   REQUIRE_HRX_OK(hrx_value_list_create(1, rets.for_output()));
   REQUIRE_HRX_OK(hrx_value_list_push_i64(args.get(), 40));
   REQUIRE_HRX_OK(hrx_value_list_push_i64(args.get(), 2));
-  REQUIRE_HRX_OK(hrx_function_invoke(
-      module.get(), function.get(), args.get(), rets.get()));
+  REQUIRE_HRX_OK(hrx_function_invoke(module.get(), function.get(), args.get(),
+                                     rets.get()));
 
   int64_t result = 0;
   REQUIRE_HRX_OK(hrx_value_list_get_i64(rets.get(), 0, &result));
   REQUIRE(result == 42);
 }
 
-void verifyBadMlirDiagnostics(hrx::compiler::HrxGraphCompiler& compiler) {
+void verifyBadMlirDiagnostics(hrx::compiler::HrxGraphCompiler &compiler) {
   auto session = compiler.createSession();
   session.setFlags({
       "--iree-hal-target-backends=llvm-cpu",
@@ -99,25 +98,24 @@ void verifyBadMlirDiagnostics(hrx::compiler::HrxGraphCompiler& compiler) {
   try {
     (void)session.compileMlir("module { util.func public @broken(");
     FAIL("expected malformed MLIR to fail");
-  } catch (const std::runtime_error& e) {
+  } catch (const std::runtime_error &e) {
     std::string message = e.what();
     INFO("diagnostics: " << message);
     REQUIRE(message.find("failed to parse MLIR") != std::string::npos);
   }
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("Compile MLIR with default dylib backend", "[compiler][dylib]") {
-  auto compiler =
-      createCompilerIfAvailable(HRX_COMPILER_BACKEND_DEFAULT);
+  auto compiler = createCompilerIfAvailable(HRX_COMPILER_BACKEND_DEFAULT);
   if (!compiler) {
     SKIP("IREE compiler dylib unavailable");
   }
 
-  hrx::compiler::compiler_output_ptr output = compiler->compileMlir(
-      loadMlir("testdata/add_i64.mlir"),
-      {"--iree-hal-target-backends=llvm-cpu"});
+  hrx::compiler::compiler_output_ptr output =
+      compiler->compileMlir(loadMlir("testdata/add_i64.mlir"),
+                            {"--iree-hal-target-backends=llvm-cpu"});
   verifyAddI64(g_test_device, output);
 }
 
@@ -129,16 +127,15 @@ TEST_CASE("Compile MLIR with explicit CLI backend", "[compiler][cli]") {
   auto compiler = createCompilerIfAvailable(HRX_COMPILER_BACKEND_CLI);
   REQUIRE(compiler != nullptr);
 
-  hrx::compiler::compiler_output_ptr output = compiler->compileMlir(
-      loadMlir("testdata/add_i64.mlir"),
-      {"--iree-hal-target-backends=llvm-cpu"});
+  hrx::compiler::compiler_output_ptr output =
+      compiler->compileMlir(loadMlir("testdata/add_i64.mlir"),
+                            {"--iree-hal-target-backends=llvm-cpu"});
   verifyAddI64(g_test_device, output);
 }
 
 TEST_CASE("Compiler reports diagnostics for bad MLIR",
           "[compiler][diagnostics]") {
-  auto compiler =
-      createCompilerIfAvailable(HRX_COMPILER_BACKEND_DEFAULT);
+  auto compiler = createCompilerIfAvailable(HRX_COMPILER_BACKEND_DEFAULT);
   if (!compiler) {
     if (!cliCompilerConfigured()) {
       SKIP("no compiler backend available");

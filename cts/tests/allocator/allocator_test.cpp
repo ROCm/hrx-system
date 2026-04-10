@@ -49,7 +49,7 @@ TEST_CASE_METHOD(HrxTestFixture, "allocator_allocate_buffer host mappable",
   REQUIRE_OK(hrx().allocator_allocate_buffer(alloc, params, 256, &buf));
 
   // Should be mappable.
-  void* ptr = nullptr;
+  void *ptr = nullptr;
   REQUIRE_OK(hrx().buffer_map(buf, HRX_MAP_WRITE, 0, 256, &ptr));
   REQUIRE(ptr != nullptr);
   memset(ptr, 0xCD, 256);
@@ -64,9 +64,9 @@ TEST_CASE_METHOD(HrxTestFixture, "allocator_import_buffer from host ptr",
 
   // Heap allocator requires 64-byte alignment.
   hrx_host_allocator_t ha = hrx().host_allocator_system();
-  void* host_raw = nullptr;
+  void *host_raw = nullptr;
   REQUIRE_OK(hrx().host_allocator_malloc_aligned(ha, 128, 64, 0, &host_raw));
-  uint8_t* host_data = (uint8_t*)host_raw;
+  uint8_t *host_data = (uint8_t *)host_raw;
   memset(host_data, 0xAA, 128);
 
   hrx_buffer_params_t params = {};
@@ -74,8 +74,8 @@ TEST_CASE_METHOD(HrxTestFixture, "allocator_import_buffer from host ptr",
   params.usage = HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED;
 
   hrx_buffer_t buf = nullptr;
-  REQUIRE_OK(hrx().allocator_import_buffer(alloc, params, host_data,
-                                            128, &buf));
+  REQUIRE_OK(
+      hrx().allocator_import_buffer(alloc, params, host_data, 128, &buf));
   REQUIRE(buf != nullptr);
 
   size_t size = 0;

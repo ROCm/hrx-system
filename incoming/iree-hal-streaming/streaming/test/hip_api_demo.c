@@ -11,25 +11,25 @@
 
 #include "streaming/binding/hip/api.h"
 
-#define HIP_CHECK(call)                                                 \
-  do {                                                                  \
-    hipError_t err = (call);                                            \
-    if (err != hipSuccess) {                                            \
-      fprintf(stderr, "HIP error at %s:%d: %s returned %d\n", __FILE__, \
-              __LINE__, #call, err);                                    \
-      exit(1);                                                          \
-    }                                                                   \
+#define HIP_CHECK(call)                                                        \
+  do {                                                                         \
+    hipError_t err = (call);                                                   \
+    if (err != hipSuccess) {                                                   \
+      fprintf(stderr, "HIP error at %s:%d: %s returned %d\n", __FILE__,        \
+              __LINE__, #call, err);                                           \
+      exit(1);                                                                 \
+    }                                                                          \
   } while (0)
 
-int main(int argc, char** argv) {
+int main(int argc, char **argv) {
   if (argc < 2) {
     fprintf(stderr, "Usage: %s <module_file>\n", argv[0]);
     fprintf(stderr, "Example: %s kernels/compiled/vector_add.hsaco\n", argv[0]);
     return 1;
   }
 
-  const char* module_path = argv[1];
-  const int n = 1024;  // number of elements
+  const char *module_path = argv[1];
+  const int n = 1024; // number of elements
   const size_t size = n * sizeof(float);
 
   printf("HIP API Vector Addition Demo\n");
@@ -70,9 +70,9 @@ int main(int argc, char** argv) {
 
   // Allocate host memory.
   printf("\n5. Allocating host memory...\n");
-  float* h_A = (float*)malloc(size);
-  float* h_B = (float*)malloc(size);
-  float* h_C = (float*)malloc(size);
+  float *h_A = (float *)malloc(size);
+  float *h_B = (float *)malloc(size);
+  float *h_C = (float *)malloc(size);
   if (!h_A || !h_B || !h_C) {
     fprintf(stderr, "Error: Failed to allocate host memory\n");
     return 1;
@@ -81,8 +81,8 @@ int main(int argc, char** argv) {
   // Initialize input vectors with predictable pattern.
   printf("   Initializing input vectors...\n");
   for (int i = 0; i < n; i++) {
-    h_A[i] = i * 2.0f;  // A[i] = i * 2
-    h_B[i] = i * 3.0f;  // B[i] = i * 3
+    h_A[i] = i * 2.0f; // A[i] = i * 2
+    h_B[i] = i * 3.0f; // B[i] = i * 3
   }
 
   // Allocate device memory.
@@ -102,7 +102,7 @@ int main(int argc, char** argv) {
 
   // The vector_add kernel takes: (const float* a, const float* b, float* c,
   // uint32_t n).
-  void* kernel_params[] = {d_A, d_B, d_C, (void*)(uintptr_t)n};
+  void *kernel_params[] = {d_A, d_B, d_C, (void *)(uintptr_t)n};
 
   // Launch configuration.
   int threads_per_block = 256;
@@ -112,12 +112,12 @@ int main(int argc, char** argv) {
 
   // Launch kernel.
   HIP_CHECK(hipModuleLaunchKernel(vector_add_func, blocks_per_grid, 1,
-                                  1,                        // grid dimensions
-                                  threads_per_block, 1, 1,  // block dimensions
-                                  0,                        // shared memory
-                                  0,              // stream (0 = default)
-                                  kernel_params,  // kernel parameters
-                                  NULL            // extra options
+                                  1,                       // grid dimensions
+                                  threads_per_block, 1, 1, // block dimensions
+                                  0,                       // shared memory
+                                  0,             // stream (0 = default)
+                                  kernel_params, // kernel parameters
+                                  NULL           // extra options
                                   ));
 
   // Wait for kernel to complete.
@@ -134,7 +134,7 @@ int main(int argc, char** argv) {
   for (int i = 0; i < n; i++) {
     float expected = h_A[i] + h_B[i];
     if (fabs(h_C[i] - expected) > 1e-5) {
-      if (errors < 5) {  // Only print first 5 errors
+      if (errors < 5) { // Only print first 5 errors
         printf("   Error at index %d: expected %.2f, got %.2f\n", i, expected,
                h_C[i]);
       }

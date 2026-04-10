@@ -7,15 +7,15 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "streaming/internal.h"
 #include "iree/io/file_handle.h"
+#include "streaming/internal.h"
 
 //===----------------------------------------------------------------------===//
 // Module management
 //===----------------------------------------------------------------------===//
 
 static iree_status_t iree_hal_streaming_module_extract_metadata(
-    iree_hal_streaming_module_t* module) {
+    iree_hal_streaming_module_t *module) {
   IREE_ASSERT_ARGUMENT(module);
   IREE_TRACE_ZONE_BEGIN(z0);
 
@@ -39,15 +39,15 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
       module->symbol_count * sizeof(iree_hal_executable_export_info_t);
   const iree_host_size_t op_counts_size =
       module->symbol_count * sizeof(op_counts_t);
-  uint8_t* temp_buffer = NULL;
+  uint8_t *temp_buffer = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_allocator_malloc(module->host_allocator,
                                 export_infos_size + op_counts_size,
-                                (void**)&temp_buffer));
-  iree_hal_executable_export_info_t* export_infos =
-      (iree_hal_executable_export_info_t*)temp_buffer;
-  op_counts_t* symbol_op_counts =
-      (op_counts_t*)(temp_buffer + export_infos_size);
+                                (void **)&temp_buffer));
+  iree_hal_executable_export_info_t *export_infos =
+      (iree_hal_executable_export_info_t *)temp_buffer;
+  op_counts_t *symbol_op_counts =
+      (op_counts_t *)(temp_buffer + export_infos_size);
 
   // Count all parameters in all exports so we can allocate one buffer to
   // fetch them all. This is somewhat wasteful as we'll be allocating quite a
@@ -58,19 +58,20 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
     status = iree_hal_executable_export_info(
         module->executable, (iree_hal_executable_export_ordinal_t)i,
         &export_infos[i]);
-    if (!iree_status_is_ok(status)) break;
+    if (!iree_status_is_ok(status))
+      break;
     total_parameter_count += export_infos[i].parameter_count;
   }
 
   // Allocate the scratch space for querying parameter info.
-  iree_hal_executable_export_parameter_t* parameters = NULL;
+  iree_hal_executable_export_parameter_t *parameters = NULL;
   if (iree_status_is_ok(status) && total_parameter_count > 0) {
     status = iree_allocator_malloc(module->host_allocator,
                                    total_parameter_count * sizeof(*parameters),
-                                   (void**)&parameters);
+                                   (void **)&parameters);
   }
 
-  iree_host_size_t constants_size =  0;
+  iree_host_size_t constants_size = 0;
 
   // Analyze each export to determine operation counts.
   // We count the total operations per symbol with copy coalescing.
@@ -78,18 +79,20 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
   for (iree_host_size_t i = 0, parameter_base = 0;
        iree_status_is_ok(status) && i < module->symbol_count; ++i) {
     const iree_host_size_t parameter_count = export_infos[i].parameter_count;
-    if (!parameter_count) continue;
+    if (!parameter_count)
+      continue;
     // Query parameters to analyze coalescing opportunities.
     status = iree_hal_executable_export_parameters(
         module->executable, (iree_hal_executable_export_ordinal_t)i,
         parameter_count, &parameters[parameter_base]);
-    if (!iree_status_is_ok(status)) break;
+    if (!iree_status_is_ok(status))
+      break;
     // TOOD re-enable coalescing, which doesn't work for
     //      args arrays
     // uint32_t src_offset = 0;
     //  int32_t last_constant_end = -1;
     for (uint16_t j = 0; j < parameter_count; ++j) {
-      const iree_hal_executable_export_parameter_t* parameter =
+      const iree_hal_executable_export_parameter_t *parameter =
           &parameters[parameter_base + j];
       if (parameter->type ==
           IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_BINDING) {
@@ -104,13 +107,14 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
         //  New copy operation needed.
         ++symbol_op_counts[i].copy_count;
         ++total_ops;
-        
-        if (parameters[parameter_base + j].offset + 
-          parameters[parameter_base + j].size > constants_size) {
-            // Track the maximum extent needed for the constants buffer.
-            // Constants are packed at their kernarg offsets within the buffer.
-            constants_size = parameters[parameter_base + j].offset +
-                             parameters[parameter_base + j].size;
+
+        if (parameters[parameter_base + j].offset +
+                parameters[parameter_base + j].size >
+            constants_size) {
+          // Track the maximum extent needed for the constants buffer.
+          // Constants are packed at their kernarg offsets within the buffer.
+          constants_size = parameters[parameter_base + j].offset +
+                           parameters[parameter_base + j].size;
         }
         //}
         // src_offset += parameter->size;
@@ -127,19 +131,19 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
   const iree_host_size_t ops_size =
       total_ops * sizeof(iree_hal_streaming_parameter_op_t);
   const iree_host_size_t total_size = symbols_size + ops_size;
-  uint8_t* buffer = NULL;
+  uint8_t *buffer = NULL;
   if (iree_status_is_ok(status)) {
     status = iree_allocator_malloc(module->host_allocator, total_size,
-                                   (void**)&buffer);
+                                   (void **)&buffer);
   }
-  module->symbols = (iree_hal_streaming_symbol_t*)buffer;
-  iree_hal_streaming_parameter_op_t* ops_base =
-      (iree_hal_streaming_parameter_op_t*)(buffer + symbols_size);
+  module->symbols = (iree_hal_streaming_symbol_t *)buffer;
+  iree_hal_streaming_parameter_op_t *ops_base =
+      (iree_hal_streaming_parameter_op_t *)(buffer + symbols_size);
 
-  iree_hal_streaming_parameter_op_t* current_ops = ops_base;
+  iree_hal_streaming_parameter_op_t *current_ops = ops_base;
   for (iree_host_size_t i = 0, parameter_base = 0;
        iree_status_is_ok(status) && i < module->symbol_count; ++i) {
-    iree_hal_streaming_symbol_t* symbol = &module->symbols[i];
+    iree_hal_streaming_symbol_t *symbol = &module->symbols[i];
     symbol->module = module;
     symbol->name = export_infos[i].name;
     symbol->type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION;
@@ -148,14 +152,14 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
     // Function attributes - TODO: Query from export metadata when available.
     // TODO(benvanik): populate from occupancy_info when available.
     symbol->occupancy_info = export_infos[i].occupancy_info;
-    symbol->max_threads_per_block = 1024;       // TODO: from metadata.
-    symbol->shared_size_bytes = 0;              // TODO: from metadata.
-    symbol->local_size_bytes = 0;               // TODO: from metadata.
-    symbol->num_regs = 32;                      // TODO: from metadata.
-    symbol->max_dynamic_shared_size_bytes = 0;  // TODO: from metadata.
+    symbol->max_threads_per_block = 1024;      // TODO: from metadata.
+    symbol->shared_size_bytes = 0;             // TODO: from metadata.
+    symbol->local_size_bytes = 0;              // TODO: from metadata.
+    symbol->num_regs = 32;                     // TODO: from metadata.
+    symbol->max_dynamic_shared_size_bytes = 0; // TODO: from metadata.
 
     // Initialize parameter info.
-    iree_hal_streaming_parameter_info_t* parameter_info = &symbol->parameters;
+    iree_hal_streaming_parameter_info_t *parameter_info = &symbol->parameters;
     parameter_info->binding_count = export_infos[i].binding_count;
     parameter_info->copy_count = symbol_op_counts[i].copy_count;
     parameter_info->ops = current_ops;
@@ -171,29 +175,30 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
     // Copy ops go first, then resolve ops.
     uint16_t src_offset = 0;
     uint16_t buffer_size = 0;
-    size_t this_kernel_constants_size = 0;  // Per-kernel constants size
-    iree_hal_streaming_parameter_op_t* copy_ops_start = current_ops;
-    iree_hal_streaming_parameter_op_t* resolve_ops_start =
+    size_t this_kernel_constants_size = 0; // Per-kernel constants size
+    iree_hal_streaming_parameter_op_t *copy_ops_start = current_ops;
+    iree_hal_streaming_parameter_op_t *resolve_ops_start =
         current_ops + symbol_op_counts[i].copy_count;
     uint16_t copy_count = 0;
     uint16_t resolve_count = 0;
     for (uint16_t j = 0; j < parameter_count; ++j) {
-      const iree_hal_executable_export_parameter_t* parameter =
+      const iree_hal_executable_export_parameter_t *parameter =
           &parameters[parameter_base + j];
       if (parameter->type ==
           IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_BINDING) {
         // Update offsets. Bindings are passed as pointers.
-        iree_hal_streaming_parameter_resolve_op_t* op =
+        iree_hal_streaming_parameter_resolve_op_t *op =
             &resolve_ops_start[resolve_count].resolve;
         op->src_offset = src_offset;
-        op->dst_ordinal = resolve_count;  // binding ordinal
+        op->dst_ordinal = resolve_count; // binding ordinal
         op->src_ordinal = j;
-        op->dst_offset = parameter->offset;  // kernel ABI offset for native kernels
+        op->dst_offset =
+            parameter->offset; // kernel ABI offset for native kernels
         src_offset += parameter->size;
         buffer_size = src_offset;
         ++resolve_count;
         // active_copy = NULL;  // break any active copy operation
-        
+
         // For native kernels with CUSTOM_DIRECT_ARGUMENTS, bindings are also
         // part of the constants buffer. Track their extent as well.
         size_t param_extent = parameter->offset + parameter->size;
@@ -211,18 +216,18 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
         //   active_copy->size += parameter->size;
         // } else {
         //  Start a new copy operation.
-        iree_hal_streaming_parameter_copy_op_t* op =
+        iree_hal_streaming_parameter_copy_op_t *op =
             &copy_ops_start[copy_count].copy;
         op->size = parameter->size;
         op->src_offset = src_offset;
         op->src_ordinal = j;
-        op->dst_offset = parameter->offset;  // offset in constants
+        op->dst_offset = parameter->offset; // offset in constants
         ++copy_count;
         // active_copy = op;
         // }
         src_offset += parameter->size;
         buffer_size = src_offset;
-        
+
         // Track per-kernel constants size based on actual parameter extent
         size_t param_extent = parameter->offset + parameter->size;
         if (param_extent > this_kernel_constants_size) {
@@ -232,7 +237,7 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
     }
     parameter_info->buffer_size = buffer_size;
     parameter_info->constant_bytes = this_kernel_constants_size;
-    
+
     // Debug: log parameter layout for each kernel (disabled for performance)
 #if 0
     fprintf(stderr, "[MODULE] kernel[%zu] '%.*s': param_count=%u copy=%u bind=%u constant_bytes=%zu buffer_size=%u\n",
@@ -259,14 +264,14 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
   return status;
 }
 
-static void iree_hal_streaming_module_destroy(
-    iree_hal_streaming_module_t* module);
+static void
+iree_hal_streaming_module_destroy(iree_hal_streaming_module_t *module);
 
 iree_status_t iree_hal_streaming_module_create_from_memory(
-    iree_hal_streaming_context_t* context,
+    iree_hal_streaming_context_t *context,
     iree_hal_executable_caching_mode_t caching_mode,
     iree_const_byte_span_t image, iree_allocator_t host_allocator,
-    iree_hal_streaming_module_t** out_module) {
+    iree_hal_streaming_module_t **out_module) {
   IREE_ASSERT_ARGUMENT(context);
   IREE_ASSERT_ARGUMENT(image.data);
   IREE_ASSERT_ARGUMENT(out_module);
@@ -279,16 +284,16 @@ iree_status_t iree_hal_streaming_module_create_from_memory(
   iree_const_byte_span_t executable_data = image;
   char executable_format[64];
   iree_status_t infer_status = iree_hal_executable_cache_infer_format(
-              context->executable_cache, caching_mode, executable_data,
-              sizeof(executable_format), executable_format,
-              &executable_data.data_length);
+      context->executable_cache, caching_mode, executable_data,
+      sizeof(executable_format), executable_format,
+      &executable_data.data_length);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, infer_status);
 
   // Allocate module structure.
-  iree_hal_streaming_module_t* module = NULL;
+  iree_hal_streaming_module_t *module = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0,
-      iree_allocator_malloc(host_allocator, sizeof(*module), (void**)&module));
+      iree_allocator_malloc(host_allocator, sizeof(*module), (void **)&module));
   iree_atomic_ref_count_init(&module->ref_count);
   module->cache = NULL;
   module->executable = NULL;
@@ -327,22 +332,22 @@ iree_status_t iree_hal_streaming_module_create_from_memory(
 }
 
 iree_status_t iree_hal_streaming_module_create_from_file(
-    iree_hal_streaming_context_t* context,
+    iree_hal_streaming_context_t *context,
     iree_hal_executable_caching_mode_t caching_mode, iree_string_view_t path,
-    iree_allocator_t host_allocator, iree_hal_streaming_module_t** out_module) {
+    iree_allocator_t host_allocator, iree_hal_streaming_module_t **out_module) {
   IREE_ASSERT_ARGUMENT(context);
   IREE_ASSERT_ARGUMENT(out_module);
   *out_module = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
 
   // Open the file for reading.
-  iree_io_file_handle_t* file_handle = NULL;
+  iree_io_file_handle_t *file_handle = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_io_file_handle_open(IREE_IO_FILE_MODE_READ, path, host_allocator,
                                    &file_handle));
 
   // Map the entire file for read access.
-  iree_io_file_mapping_t* file_mapping = NULL;
+  iree_io_file_mapping_t *file_mapping = NULL;
   iree_status_t status = iree_io_file_map_view(
       file_handle, IREE_IO_FILE_ACCESS_READ, 0, IREE_HOST_SIZE_MAX,
       IREE_IO_FILE_MAPPING_FLAG_NONE, host_allocator, &file_mapping);
@@ -359,7 +364,7 @@ iree_status_t iree_hal_streaming_module_create_from_file(
   iree_const_byte_span_t image = iree_io_file_mapping_contents_ro(file_mapping);
 
   // Create the module from the mapped memory.
-  iree_hal_streaming_module_t* module = NULL;
+  iree_hal_streaming_module_t *module = NULL;
   status = iree_hal_streaming_module_create_from_memory(
       context,
       caching_mode | IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA,
@@ -376,8 +381,8 @@ iree_status_t iree_hal_streaming_module_create_from_file(
   return status;
 }
 
-static void iree_hal_streaming_module_destroy(
-    iree_hal_streaming_module_t* module) {
+static void
+iree_hal_streaming_module_destroy(iree_hal_streaming_module_t *module) {
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_allocator_t host_allocator = module->host_allocator;
 
@@ -402,22 +407,23 @@ static void iree_hal_streaming_module_destroy(
   IREE_TRACE_ZONE_END(z0);
 }
 
-void iree_hal_streaming_module_retain(iree_hal_streaming_module_t* module) {
+void iree_hal_streaming_module_retain(iree_hal_streaming_module_t *module) {
   if (module) {
     iree_atomic_ref_count_inc(&module->ref_count);
   }
 }
 
-void iree_hal_streaming_module_release(iree_hal_streaming_module_t* module) {
+void iree_hal_streaming_module_release(iree_hal_streaming_module_t *module) {
   if (module && iree_atomic_ref_count_dec(&module->ref_count) == 1) {
     iree_hal_streaming_module_destroy(module);
   }
 }
 
-iree_status_t iree_hal_streaming_module_symbol(
-    iree_hal_streaming_module_t* module, const char* name,
-    iree_hal_streaming_symbol_type_t expected_type,
-    iree_hal_streaming_symbol_t** out_symbol) {
+iree_status_t
+iree_hal_streaming_module_symbol(iree_hal_streaming_module_t *module,
+                                 const char *name,
+                                 iree_hal_streaming_symbol_type_t expected_type,
+                                 iree_hal_streaming_symbol_t **out_symbol) {
   IREE_ASSERT_ARGUMENT(module);
   IREE_ASSERT_ARGUMENT(name);
   IREE_ASSERT_ARGUMENT(out_symbol);
@@ -447,31 +453,35 @@ iree_status_t iree_hal_streaming_module_symbol(
                           (int)name_view.size, name_view.data);
 }
 
-iree_status_t iree_hal_streaming_module_function(
-    iree_hal_streaming_module_t* module, const char* name,
-    iree_hal_streaming_symbol_t** out_function) {
+iree_status_t
+iree_hal_streaming_module_function(iree_hal_streaming_module_t *module,
+                                   const char *name,
+                                   iree_hal_streaming_symbol_t **out_function) {
   return iree_hal_streaming_module_symbol(
       module, name, IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION, out_function);
 }
 
-iree_status_t iree_hal_streaming_module_global(
-    iree_hal_streaming_module_t* module, const char* name,
-    iree_hal_streaming_deviceptr_t* out_device_ptr,
-    iree_device_size_t* out_size) {
+iree_status_t
+iree_hal_streaming_module_global(iree_hal_streaming_module_t *module,
+                                 const char *name,
+                                 iree_hal_streaming_deviceptr_t *out_device_ptr,
+                                 iree_device_size_t *out_size) {
   IREE_ASSERT_ARGUMENT(module);
   IREE_ASSERT_ARGUMENT(name);
   IREE_ASSERT_ARGUMENT(out_device_ptr);
   *out_device_ptr = 0;
-  if (out_size) *out_size = 0;
+  if (out_size)
+    *out_size = 0;
 
   // First try to find in pre-extracted symbols.
-  iree_hal_streaming_symbol_t* symbol = NULL;
+  iree_hal_streaming_symbol_t *symbol = NULL;
   iree_status_t status = iree_hal_streaming_module_symbol(
       module, name, IREE_HAL_STREAMING_SYMBOL_TYPE_GLOBAL, &symbol);
 
   if (iree_status_is_ok(status)) {
     *out_device_ptr = symbol->device_address;
-    if (out_size) *out_size = symbol->size_bytes;
+    if (out_size)
+      *out_size = symbol->size_bytes;
     return status;
   }
 
@@ -487,10 +497,10 @@ iree_status_t iree_hal_streaming_module_global(
         &device_address, &size);
     if (iree_status_is_ok(status)) {
       *out_device_ptr = (iree_hal_streaming_deviceptr_t)device_address;
-      if (out_size) *out_size = size;
+      if (out_size)
+        *out_size = size;
     }
   }
 
   return status;
 }
-

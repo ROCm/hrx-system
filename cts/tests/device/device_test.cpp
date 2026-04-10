@@ -7,8 +7,8 @@
 
 TEST_CASE_METHOD(HrxTestFixture, "Device has a name", "[device]") {
   char name[128] = {0};
-  REQUIRE_OK(hrx().device_get_property(
-      device_, HRX_DEVICE_PROPERTY_NAME, name, sizeof(name)));
+  REQUIRE_OK(hrx().device_get_property(device_, HRX_DEVICE_PROPERTY_NAME, name,
+                                       sizeof(name)));
   REQUIRE(strlen(name) > 0);
 }
 

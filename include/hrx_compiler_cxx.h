@@ -15,29 +15,26 @@
 namespace hrx::compiler {
 
 using compiler_ptr =
-    runtime::hrx_ptr<hrx_compiler_t, hrx_compiler_retain,
-                      hrx_compiler_release>;
+    runtime::hrx_ptr<hrx_compiler_t, hrx_compiler_retain, hrx_compiler_release>;
 using compiler_session_ptr =
-    runtime::hrx_ptr<hrx_compiler_session_t,
-                      hrx_compiler_session_retain,
-                      hrx_compiler_session_release>;
+    runtime::hrx_ptr<hrx_compiler_session_t, hrx_compiler_session_retain,
+                     hrx_compiler_session_release>;
 using compiler_output_ptr =
-    runtime::hrx_ptr<hrx_compiler_output_t,
-                      hrx_compiler_output_retain,
-                      hrx_compiler_output_release>;
+    runtime::hrx_ptr<hrx_compiler_output_t, hrx_compiler_output_retain,
+                     hrx_compiler_output_release>;
 
 class HrxGraphCompiler {
- public:
+public:
   class Session {
-   public:
+  public:
     Session() = default;
     explicit Session(compiler_session_ptr session)
         : session_(std::move(session)) {}
 
-    void setFlags(const std::vector<std::string>& flags) {
-      std::vector<const char*> c_flags;
+    void setFlags(const std::vector<std::string> &flags) {
+      std::vector<const char *> c_flags;
       c_flags.reserve(flags.size());
-      for (const std::string& flag : flags) {
+      for (const std::string &flag : flags) {
         c_flags.push_back(flag.c_str());
       }
       hrx_status_t status = hrx_compiler_session_set_flags(
@@ -64,14 +61,13 @@ class HrxGraphCompiler {
     hrx_compiler_session_t get() const { return session_.get(); }
     explicit operator bool() const { return static_cast<bool>(session_); }
 
-   private:
+  private:
     compiler_session_ptr session_;
   };
 
   explicit HrxGraphCompiler(
       hrx_compiler_backend_t backend = HRX_COMPILER_BACKEND_AUTO) {
-    hrx_status_t status =
-        hrx_compiler_create(backend, compiler_.for_output());
+    hrx_status_t status = hrx_compiler_create(backend, compiler_.for_output());
     if (!hrx_status_is_ok(status)) {
       std::string message = runtime::format_status(status);
       hrx_status_ignore(status);
@@ -81,8 +77,8 @@ class HrxGraphCompiler {
 
   Session createSession() const {
     compiler_session_ptr session;
-    hrx_status_t status = hrx_compiler_session_create(
-        compiler_.get(), session.for_output());
+    hrx_status_t status =
+        hrx_compiler_session_create(compiler_.get(), session.for_output());
     if (!hrx_status_is_ok(status)) {
       std::string message = runtime::format_status(status);
       hrx_status_ignore(status);
@@ -91,9 +87,9 @@ class HrxGraphCompiler {
     return Session(std::move(session));
   }
 
-  compiler_output_ptr compileMlir(
-      std::string_view mlir,
-      const std::vector<std::string>& flags = {}) const {
+  compiler_output_ptr
+  compileMlir(std::string_view mlir,
+              const std::vector<std::string> &flags = {}) const {
     Session session = createSession();
     if (!flags.empty()) {
       session.setFlags(flags);
@@ -107,10 +103,10 @@ class HrxGraphCompiler {
 
   hrx_compiler_t get() const { return compiler_.get(); }
 
- private:
+private:
   compiler_ptr compiler_;
 };
 
-}  // namespace hrx::compiler
+} // namespace hrx::compiler
 
-#endif  // HRX_COMPILER_CXX_H_
+#endif // HRX_COMPILER_CXX_H_

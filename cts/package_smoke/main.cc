@@ -8,7 +8,7 @@ int main() {
   hrx::compiler::compiler_ptr compiler;
   hrx::runtime::device_ptr device;
   return !compiler && !device &&
-          hrx::runtime::format_status(hrx_ok_status()) == "OK"
-      ? 0
-      : 1;
+                 hrx::runtime::format_status(hrx_ok_status()) == "OK"
+             ? 0
+             : 1;
 }

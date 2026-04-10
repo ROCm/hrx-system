@@ -11,25 +11,25 @@
 
 #include "streaming/binding/hip/api.h"
 
-#define HIP_CHECK(call)                                                 \
-  do {                                                                  \
-    hipError_t err = (call);                                            \
-    if (err != hipSuccess) {                                            \
-      fprintf(stderr, "HIP error at %s:%d: %s returned %d\n", __FILE__, \
-              __LINE__, #call, err);                                    \
-      exit(1);                                                          \
-    }                                                                   \
+#define HIP_CHECK(call)                                                        \
+  do {                                                                         \
+    hipError_t err = (call);                                                   \
+    if (err != hipSuccess) {                                                   \
+      fprintf(stderr, "HIP error at %s:%d: %s returned %d\n", __FILE__,        \
+              __LINE__, #call, err);                                           \
+      exit(1);                                                                 \
+    }                                                                          \
   } while (0)
 
-int main(int argc, char** argv) {
+int main(int argc, char **argv) {
   if (argc < 2) {
     fprintf(stderr, "Usage: %s <module_file>\n", argv[0]);
     fprintf(stderr, "Example: %s kernels/compiled/vector_add.hsaco\n", argv[0]);
     return 1;
   }
 
-  const char* module_path = argv[1];
-  const int n = 1024;  // number of elements
+  const char *module_path = argv[1];
+  const int n = 1024; // number of elements
   const size_t size = n * sizeof(float);
 
   printf("HIP Graph Capture API Demo\n");
@@ -70,10 +70,10 @@ int main(int argc, char** argv) {
 
   // Allocate host memory.
   printf("\n5. Allocating host memory...\n");
-  float* h_A = (float*)malloc(size);
-  float* h_B = (float*)malloc(size);
-  float* h_C = (float*)malloc(size);
-  float* h_C2 = (float*)malloc(size);  // For second launch verification
+  float *h_A = (float *)malloc(size);
+  float *h_B = (float *)malloc(size);
+  float *h_C = (float *)malloc(size);
+  float *h_C2 = (float *)malloc(size); // For second launch verification
   if (!h_A || !h_B || !h_C || !h_C2) {
     fprintf(stderr, "Error: Failed to allocate host memory\n");
     return 1;
@@ -82,8 +82,8 @@ int main(int argc, char** argv) {
   // Initialize input vectors with predictable pattern.
   printf("   Initializing input vectors...\n");
   for (int i = 0; i < n; i++) {
-    h_A[i] = i * 2.0f;  // A[i] = i * 2
-    h_B[i] = i * 3.0f;  // B[i] = i * 3
+    h_A[i] = i * 2.0f; // A[i] = i * 2
+    h_B[i] = i * 3.0f; // B[i] = i * 3
   }
 
   // Allocate device memory.
@@ -118,16 +118,16 @@ int main(int argc, char** argv) {
   printf("    Block: %d threads\n", threads_per_block);
 
   // Prepare kernel parameters.
-  void* kernel_params[] = {d_A, d_B, d_C, (void*)(uintptr_t)n};
+  void *kernel_params[] = {d_A, d_B, d_C, (void *)(uintptr_t)n};
 
   // Launch kernel (this gets captured into the graph).
   HIP_CHECK(hipModuleLaunchKernel(vector_add_func, blocks_per_grid, 1,
-                                  1,                        // grid dimensions
-                                  threads_per_block, 1, 1,  // block dimensions
-                                  0,                        // shared memory
-                                  stream,                   // stream
-                                  kernel_params,            // kernel parameters
-                                  NULL                      // extra options
+                                  1,                       // grid dimensions
+                                  threads_per_block, 1, 1, // block dimensions
+                                  0,                       // shared memory
+                                  stream,                  // stream
+                                  kernel_params,           // kernel parameters
+                                  NULL                     // extra options
                                   ));
 
   // End stream capture to get the graph.
@@ -171,7 +171,7 @@ int main(int argc, char** argv) {
   const float epsilon = 1e-5f;
 
   for (int i = 0; i < n; i++) {
-    float expected = h_A[i] + h_B[i];  // should be i * 5.0f
+    float expected = h_A[i] + h_B[i]; // should be i * 5.0f
     float actual = h_C[i];
     float diff = fabsf(expected - actual);
 
@@ -185,10 +185,9 @@ int main(int argc, char** argv) {
   }
 
   if (errors1 == 0) {
-    printf(
-        "     SUCCESS: First execution - all %d elements computed "
-        "correctly!\n",
-        n);
+    printf("     SUCCESS: First execution - all %d elements computed "
+           "correctly!\n",
+           n);
   } else {
     printf(
         "     FAILURE: First execution - %d errors found out of %d elements\n",
@@ -198,8 +197,8 @@ int main(int argc, char** argv) {
   // Modify input data for second execution.
   printf("\n14. Modifying input data for second execution...\n");
   for (int i = 0; i < n; i++) {
-    h_A[i] = i * 4.0f;  // A[i] = i * 4
-    h_B[i] = i * 2.0f;  // B[i] = i * 2
+    h_A[i] = i * 4.0f; // A[i] = i * 4
+    h_B[i] = i * 2.0f; // B[i] = i * 2
   }
   HIP_CHECK(hipMemcpyHtoD(d_A, h_A, size));
   HIP_CHECK(hipMemcpyHtoD(d_B, h_B, size));
@@ -222,7 +221,7 @@ int main(int argc, char** argv) {
 
   for (int i = 0; i < n; i++) {
     float expected =
-        h_A[i] + h_B[i];  // should be i * 6.0f (different calculation)
+        h_A[i] + h_B[i]; // should be i * 6.0f (different calculation)
     float actual = h_C2[i];
     float diff = fabsf(expected - actual);
     if (diff > epsilon) {
@@ -234,15 +233,13 @@ int main(int argc, char** argv) {
     }
   }
   if (errors2 == 0) {
-    printf(
-        "     SUCCESS: Second execution - all %d elements computed "
-        "correctly!\n",
-        n);
+    printf("     SUCCESS: Second execution - all %d elements computed "
+           "correctly!\n",
+           n);
   } else {
-    printf(
-        "     FAILURE: Second execution - %d errors found out of %d "
-        "elements\n",
-        errors2, n);
+    printf("     FAILURE: Second execution - %d errors found out of %d "
+           "elements\n",
+           errors2, n);
   }
 
   // Print sample results from both executions.

@@ -4,8 +4,8 @@
 #ifndef HRX_INTERNAL_H_
 #define HRX_INTERNAL_H_
 
-#include "hrx_runtime.h"
 #include "hrx_compiler.h"
+#include "hrx_runtime.h"
 
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/api.h"
@@ -29,13 +29,15 @@ extern "C" {
 //===----------------------------------------------------------------------===//
 
 _Static_assert(HRX_STATUS_OK == IREE_STATUS_OK, "status mismatch");
-_Static_assert(HRX_STATUS_CANCELLED == IREE_STATUS_CANCELLED, "status mismatch");
+_Static_assert(HRX_STATUS_CANCELLED == IREE_STATUS_CANCELLED,
+               "status mismatch");
 _Static_assert(HRX_STATUS_UNKNOWN == IREE_STATUS_UNKNOWN, "status mismatch");
 _Static_assert(HRX_STATUS_INVALID_ARGUMENT == IREE_STATUS_INVALID_ARGUMENT,
                "status mismatch");
 _Static_assert(HRX_STATUS_DEADLINE_EXCEEDED == IREE_STATUS_DEADLINE_EXCEEDED,
                "status mismatch");
-_Static_assert(HRX_STATUS_NOT_FOUND == IREE_STATUS_NOT_FOUND, "status mismatch");
+_Static_assert(HRX_STATUS_NOT_FOUND == IREE_STATUS_NOT_FOUND,
+               "status mismatch");
 _Static_assert(HRX_STATUS_ALREADY_EXISTS == IREE_STATUS_ALREADY_EXISTS,
                "status mismatch");
 _Static_assert(HRX_STATUS_OUT_OF_MEMORY == IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -53,17 +55,21 @@ _Static_assert(HRX_MEMORY_TYPE_NONE == IREE_HAL_MEMORY_TYPE_NONE,
                "memory type mismatch");
 _Static_assert(HRX_MEMORY_TYPE_OPTIMAL == IREE_HAL_MEMORY_TYPE_OPTIMAL,
                "memory type mismatch");
-_Static_assert(HRX_MEMORY_TYPE_HOST_VISIBLE == IREE_HAL_MEMORY_TYPE_HOST_VISIBLE,
+_Static_assert(HRX_MEMORY_TYPE_HOST_VISIBLE ==
+                   IREE_HAL_MEMORY_TYPE_HOST_VISIBLE,
                "memory type mismatch");
-_Static_assert(HRX_MEMORY_TYPE_HOST_COHERENT == IREE_HAL_MEMORY_TYPE_HOST_COHERENT,
+_Static_assert(HRX_MEMORY_TYPE_HOST_COHERENT ==
+                   IREE_HAL_MEMORY_TYPE_HOST_COHERENT,
                "memory type mismatch");
 _Static_assert(HRX_MEMORY_TYPE_HOST_CACHED == IREE_HAL_MEMORY_TYPE_HOST_CACHED,
                "memory type mismatch");
 _Static_assert(HRX_MEMORY_TYPE_HOST_LOCAL == IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
                "memory type mismatch");
-_Static_assert(HRX_MEMORY_TYPE_DEVICE_VISIBLE == IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+_Static_assert(HRX_MEMORY_TYPE_DEVICE_VISIBLE ==
+                   IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
                "memory type mismatch");
-_Static_assert(HRX_MEMORY_TYPE_DEVICE_LOCAL == IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+_Static_assert(HRX_MEMORY_TYPE_DEVICE_LOCAL ==
+                   IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
                "memory type mismatch");
 
 // Memory access bitfield.
@@ -151,13 +157,13 @@ _Static_assert(HRX_MAP_DISCARD == IREE_HAL_MEMORY_ACCESS_DISCARD,
 // Status payload (allocated on error, NULL = OK).
 typedef struct hrx_status_s {
   hrx_status_code_t code;
-  char* message;
+  char *message;
 } hrx_status_s;
 
 // Allocator (wraps iree_hal_allocator_t, owned by device).
 typedef struct hrx_allocator_s {
   iree_atomic_ref_count_t ref_count;
-  iree_hal_allocator_t* hal_allocator;
+  iree_hal_allocator_t *hal_allocator;
   hrx_device_t device;
 } hrx_allocator_s;
 
@@ -166,8 +172,8 @@ typedef struct hrx_device_s {
   iree_atomic_ref_count_t ref_count;
   hrx_accelerator_type_t type;
   int ordinal;
-  iree_hal_device_t* hal_device;
-  hrx_allocator_s allocator;  // Inline, owned by device.
+  iree_hal_device_t *hal_device;
+  hrx_allocator_s allocator; // Inline, owned by device.
   char name[128];
   char architecture[64];
 } hrx_device_s;
@@ -175,7 +181,7 @@ typedef struct hrx_device_s {
 // Timeline semaphore.
 typedef struct hrx_semaphore_s {
   iree_atomic_ref_count_t ref_count;
-  iree_hal_semaphore_t* hal_semaphore;
+  iree_hal_semaphore_t *hal_semaphore;
   hrx_device_t device;
 } hrx_semaphore_s;
 
@@ -185,7 +191,7 @@ typedef struct hrx_stream_s {
   hrx_device_t device;
   hrx_semaphore_t semaphore;
   uint64_t timepoint;
-  iree_hal_command_buffer_t* pending_cb;
+  iree_hal_command_buffer_t *pending_cb;
   bool has_pending_work;
   uint32_t flags;
 } hrx_stream_s;
@@ -193,20 +199,20 @@ typedef struct hrx_stream_s {
 // Buffer allocation.
 typedef struct hrx_buffer_s {
   iree_atomic_ref_count_t ref_count;
-  iree_hal_buffer_t* hal_buffer;
+  iree_hal_buffer_t *hal_buffer;
   hrx_device_t device;
   hrx_memory_type_t mem_type;
   size_t size;
-  void* mapped_ptr;
+  void *mapped_ptr;
 } hrx_buffer_s;
 
 // Loaded VM module with a context containing HAL + bytecode modules.
 typedef struct hrx_module_s {
   iree_atomic_ref_count_t ref_count;
   hrx_device_t device;
-  iree_vm_module_t* bytecode_module;
-  iree_vm_module_t* hal_module;
-  iree_vm_context_t* context;
+  iree_vm_module_t *bytecode_module;
+  iree_vm_module_t *hal_module;
+  iree_vm_context_t *context;
 } hrx_module_s;
 
 // Resolved VM function retained with its parent module.
@@ -219,26 +225,26 @@ typedef struct hrx_function_s {
 // Growable VM argument/result list.
 typedef struct hrx_value_list_s {
   iree_atomic_ref_count_t ref_count;
-  iree_vm_list_t* vm_list;
+  iree_vm_list_t *vm_list;
 } hrx_value_list_s;
 
 // Timeline fence wrapper.
 typedef struct hrx_fence_s {
   iree_atomic_ref_count_t ref_count;
-  iree_hal_fence_t* hal_fence;
+  iree_hal_fence_t *hal_fence;
 } hrx_fence_s;
 
 // Buffer view wrapper.
 typedef struct hrx_buffer_view_s {
   iree_atomic_ref_count_t ref_count;
-  iree_hal_buffer_view_t* hal_buffer_view;
+  iree_hal_buffer_view_t *hal_buffer_view;
 } hrx_buffer_view_s;
 
 // HAL executable wrapper for direct queue/stream dispatch.
 typedef struct hrx_executable_s {
   iree_atomic_ref_count_t ref_count;
-  iree_hal_executable_cache_t* hal_executable_cache;
-  iree_hal_executable_t* hal_executable;
+  iree_hal_executable_cache_t *hal_executable_cache;
+  iree_hal_executable_t *hal_executable;
   hrx_device_t device;
 } hrx_executable_s;
 
@@ -251,7 +257,7 @@ typedef struct iree_compiler_output_t iree_compiler_output_t;
 typedef struct hrx_compiler_s {
   iree_atomic_ref_count_t ref_count;
   hrx_compiler_backend_t backend;
-  char* cli_path;
+  char *cli_path;
 } hrx_compiler_s;
 
 // Session-local compiler state. For the dylib backend this owns an
@@ -260,22 +266,21 @@ typedef struct hrx_compiler_s {
 typedef struct hrx_compiler_session_s {
   iree_atomic_ref_count_t ref_count;
   hrx_compiler_t compiler;
-  iree_compiler_session_t* iree_session;
-  char** flags;
+  iree_compiler_session_t *iree_session;
+  char **flags;
   size_t flag_count;
 } hrx_compiler_session_s;
 
 // Compiled VMFB artifact. The payload is either an IREE compiler output object
 // with mapped in-memory storage or a host-allocated byte buffer from the CLI
 // backend.
-typedef void (*hrx_compiler_output_destroy_fn_t)(
-    hrx_compiler_output_t output);
+typedef void (*hrx_compiler_output_destroy_fn_t)(hrx_compiler_output_t output);
 
 typedef struct hrx_compiler_output_s {
   iree_atomic_ref_count_t ref_count;
-  const uint8_t* data;
+  const uint8_t *data;
   size_t size;
-  void* impl;
+  void *impl;
   hrx_compiler_output_destroy_fn_t destroy;
   hrx_host_allocator_t host_allocator;
 } hrx_compiler_output_s;
@@ -288,28 +293,28 @@ typedef struct hrx_cpu_state_t {
   hrx_device_s devices[HRX_MAX_DEVICES];
   int device_count;
   bool initialized;
-  iree_hal_driver_t* driver;
+  iree_hal_driver_t *driver;
 } hrx_cpu_state_t;
 
 typedef struct hrx_gpu_state_t {
   hrx_device_s devices[HRX_MAX_DEVICES];
   int device_count;
   bool initialized;
-  iree_hal_driver_t* driver;
+  iree_hal_driver_t *driver;
 } hrx_gpu_state_t;
 
 typedef struct hrx_shared_state_t {
-  iree_vm_instance_t* vm_instance;
-  iree_async_proactor_pool_t* proactor_pool;
+  iree_vm_instance_t *vm_instance;
+  iree_async_proactor_pool_t *proactor_pool;
   iree_allocator_t host_allocator;
   int init_count;
   bool shared_initialized;
 } hrx_shared_state_t;
 
 // Access global state (defined in runtime.c).
-hrx_shared_state_t* hrx_get_shared_state(void);
-hrx_gpu_state_t* hrx_get_gpu_state(void);
-hrx_cpu_state_t* hrx_get_cpu_state(void);
+hrx_shared_state_t *hrx_get_shared_state(void);
+hrx_gpu_state_t *hrx_get_gpu_state(void);
+hrx_cpu_state_t *hrx_get_cpu_state(void);
 
 // Ensure shared infrastructure is created (idempotent).
 hrx_status_t hrx_ensure_shared_state(void);
@@ -324,4 +329,4 @@ iree_status_t hrx_status_to_iree(hrx_status_t status);
 }
 #endif
 
-#endif  // HRX_INTERNAL_H_
+#endif // HRX_INTERNAL_H_
