@@ -1,13 +1,13 @@
-// Copyright 2026 The Pyre Authors
+// Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 //
 // Global runtime state management. Shared infrastructure (VM instance) is
 // created on first accelerator init and destroyed when last shuts down.
-// Device creation follows the proven pattern from PyTorch's pyre backend:
+// Device creation follows the proven pattern from PyTorch's hrx backend:
 // driver-based creation via iree_hal_task_driver_create +
 // iree_hal_driver_create_default_device.
 
-#include "pyre_internal.h"
+#include "hrx_internal.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -15,7 +15,7 @@
 #include "hsa/hsa.h"
 #include "iree/modules/hal/types.h"
 
-#ifdef PYRE_HAS_HSA_DRIVER
+#ifdef HRX_HAS_HSA_DRIVER
 #include "hsa_driver/api.h"
 #include "hsa_driver/registration/driver_module.h"
 #endif
@@ -24,39 +24,39 @@
 // Global singletons
 //===----------------------------------------------------------------------===//
 
-static pyre_shared_state_t g_shared = {0};
-static pyre_gpu_state_t g_gpu = {0};
-static pyre_cpu_state_t g_cpu = {0};
+static hrx_shared_state_t g_shared = {0};
+static hrx_gpu_state_t g_gpu = {0};
+static hrx_cpu_state_t g_cpu = {0};
 
-pyre_shared_state_t* pyre_get_shared_state(void) { return &g_shared; }
-pyre_gpu_state_t* pyre_get_gpu_state(void) { return &g_gpu; }
-pyre_cpu_state_t* pyre_get_cpu_state(void) { return &g_cpu; }
+hrx_shared_state_t* hrx_get_shared_state(void) { return &g_shared; }
+hrx_gpu_state_t* hrx_get_gpu_state(void) { return &g_gpu; }
+hrx_cpu_state_t* hrx_get_cpu_state(void) { return &g_cpu; }
 
 //===----------------------------------------------------------------------===//
 // Version
 //===----------------------------------------------------------------------===//
 
-void pyre_runtime_version(int* major, int* minor, int* patch) {
-  if (major) *major = PYRE_VERSION_MAJOR;
-  if (minor) *minor = PYRE_VERSION_MINOR;
-  if (patch) *patch = PYRE_VERSION_PATCH;
+void hrx_runtime_version(int* major, int* minor, int* patch) {
+  if (major) *major = HRX_VERSION_MAJOR;
+  if (minor) *minor = HRX_VERSION_MINOR;
+  if (patch) *patch = HRX_VERSION_PATCH;
 }
 
 //===----------------------------------------------------------------------===//
 // Shared state init/teardown
 //===----------------------------------------------------------------------===//
 
-pyre_status_t pyre_ensure_shared_state(void) {
+hrx_status_t hrx_ensure_shared_state(void) {
   if (g_shared.shared_initialized) {
     g_shared.init_count++;
-    return pyre_ok_status();
+    return hrx_ok_status();
   }
   g_shared.host_allocator = iree_allocator_system();
 
   // Initialize HSA runtime (idempotent — safe to call multiple times).
   hsa_status_t hsa_status = hsa_init();
   if (hsa_status != HSA_STATUS_SUCCESS) {
-    return pyre_make_status(PYRE_STATUS_UNAVAILABLE,
+    return hrx_make_status(HRX_STATUS_UNAVAILABLE,
                             "hsa_init() failed");
   }
 
@@ -64,13 +64,13 @@ pyre_status_t pyre_ensure_shared_state(void) {
       iree_vm_instance_create(IREE_VM_TYPE_CAPACITY_DEFAULT,
                               g_shared.host_allocator, &g_shared.vm_instance);
   if (!iree_status_is_ok(status)) {
-    return pyre_status_from_iree(status);
+    return hrx_status_from_iree(status);
   }
   status = iree_hal_module_register_all_types(g_shared.vm_instance);
   if (!iree_status_is_ok(status)) {
     iree_vm_instance_release(g_shared.vm_instance);
     g_shared.vm_instance = NULL;
-    return pyre_status_from_iree(status);
+    return hrx_status_from_iree(status);
   }
 
   // Create proactor pool for async I/O (required by local-task devices).
@@ -82,15 +82,15 @@ pyre_status_t pyre_ensure_shared_state(void) {
   if (!iree_status_is_ok(status)) {
     iree_vm_instance_release(g_shared.vm_instance);
     g_shared.vm_instance = NULL;
-    return pyre_status_from_iree(status);
+    return hrx_status_from_iree(status);
   }
 
   g_shared.shared_initialized = true;
   g_shared.init_count = 1;
-  return pyre_ok_status();
+  return hrx_ok_status();
 }
 
-static void pyre_release_shared_state(void) {
+static void hrx_release_shared_state(void) {
   if (!g_shared.shared_initialized) return;
   g_shared.init_count--;
   if (g_shared.init_count > 0) return;
@@ -112,9 +112,9 @@ static void pyre_release_shared_state(void) {
 //===----------------------------------------------------------------------===//
 
 // Creates a local-task HAL device using the driver-based creation pattern.
-// This matches the proven path in PyTorch's PyreRuntime::initialize().
+// This matches the proven path in PyTorch's HrxRuntime::initialize().
 // group_count controls the task executor parallelism.
-static pyre_status_t pyre_create_local_task_device(
+static hrx_status_t hrx_create_local_task_device(
     int group_count,
     iree_task_executor_t** out_executor,
     iree_hal_driver_t** out_driver,
@@ -139,7 +139,7 @@ static pyre_status_t pyre_create_local_task_device(
       iree_task_executor_create(exec_options, &topology, alloc, &executor);
   iree_task_topology_deinitialize(&topology);
   if (!iree_status_is_ok(status)) {
-    return pyre_status_from_iree(status);
+    return hrx_status_from_iree(status);
   }
 
   // Executable loaders.
@@ -150,18 +150,18 @@ static pyre_status_t pyre_create_local_task_device(
       IREE_ARRAYSIZE(loaders), &loader_count, loaders, alloc);
   if (!iree_status_is_ok(status)) {
     iree_task_executor_release(executor);
-    return pyre_status_from_iree(status);
+    return hrx_status_from_iree(status);
   }
 
   // Heap allocator for host-accessible buffers.
   iree_hal_allocator_t* device_allocator = NULL;
   status = iree_hal_allocator_create_heap(
-      iree_make_cstring_view("pyre"), alloc, alloc, &device_allocator);
+      iree_make_cstring_view("hrx"), alloc, alloc, &device_allocator);
   if (!iree_status_is_ok(status)) {
     for (iree_host_size_t i = 0; i < loader_count; i++)
       iree_hal_executable_loader_release(loaders[i]);
     iree_task_executor_release(executor);
-    return pyre_status_from_iree(status);
+    return hrx_status_from_iree(status);
   }
 
   // Assemble the local-task driver.
@@ -182,7 +182,7 @@ static pyre_status_t pyre_create_local_task_device(
   iree_hal_allocator_release(device_allocator);
 
   if (!iree_status_is_ok(status)) {
-    return pyre_status_from_iree(status);
+    return hrx_status_from_iree(status);
   }
 
   // Create device from driver. Must provide proactor pool.
@@ -195,7 +195,7 @@ static pyre_status_t pyre_create_local_task_device(
       driver, &device_params, alloc, &hal_device);
   if (!iree_status_is_ok(status)) {
     iree_hal_driver_release(driver);
-    return pyre_status_from_iree(status);
+    return hrx_status_from_iree(status);
   }
 
   // Re-create executor for caller tracking (driver took ownership of original).
@@ -212,10 +212,10 @@ static pyre_status_t pyre_create_local_task_device(
   *out_executor = NULL;  // Driver manages executor lifetime.
   *out_driver = driver;
   *out_hal_device = hal_device;
-  return pyre_ok_status();
+  return hrx_ok_status();
 }
 
-static void pyre_query_device_architecture(
+static void hrx_query_device_architecture(
     iree_hal_device_t* hal_device, char* architecture,
     size_t architecture_size) {
   if (!architecture || architecture_size == 0) return;
@@ -236,29 +236,29 @@ static void pyre_query_device_architecture(
 // CPU accelerator
 //===----------------------------------------------------------------------===//
 
-pyre_status_t pyre_cpu_initialize(uint32_t flags) {
+hrx_status_t hrx_cpu_initialize(uint32_t flags) {
   (void)flags;
   if (g_cpu.initialized) {
-    return pyre_make_status(PYRE_STATUS_ALREADY_EXISTS,
+    return hrx_make_status(HRX_STATUS_ALREADY_EXISTS,
                             "CPU accelerator already initialized");
   }
 
-  pyre_status_t status = pyre_ensure_shared_state();
-  if (!pyre_status_is_ok(status)) return status;
+  hrx_status_t status = hrx_ensure_shared_state();
+  if (!hrx_status_is_ok(status)) return status;
 
   iree_hal_driver_t* driver = NULL;
   iree_hal_device_t* hal_device = NULL;
   iree_task_executor_t* executor = NULL;
-  status = pyre_create_local_task_device(4, &executor, &driver, &hal_device);
-  if (!pyre_status_is_ok(status)) {
-    pyre_release_shared_state();
+  status = hrx_create_local_task_device(4, &executor, &driver, &hal_device);
+  if (!hrx_status_is_ok(status)) {
+    hrx_release_shared_state();
     return status;
   }
 
-  pyre_device_s* dev = &g_cpu.devices[0];
+  hrx_device_s* dev = &g_cpu.devices[0];
   memset(dev, 0, sizeof(*dev));
   iree_atomic_ref_count_init(&dev->ref_count);
-  dev->type = PYRE_ACCELERATOR_CPU;
+  dev->type = HRX_ACCELERATOR_CPU;
   dev->ordinal = 0;
   dev->hal_device = hal_device;
   dev->allocator.hal_allocator = iree_hal_device_allocator(hal_device);
@@ -271,17 +271,17 @@ pyre_status_t pyre_cpu_initialize(uint32_t flags) {
   g_cpu.driver = driver;
   g_cpu.device_count = 1;
   g_cpu.initialized = true;
-  return pyre_ok_status();
+  return hrx_ok_status();
 }
 
-pyre_status_t pyre_cpu_shutdown(void) {
+hrx_status_t hrx_cpu_shutdown(void) {
   if (!g_cpu.initialized) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT,
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                             "CPU accelerator not initialized");
   }
 
   for (int i = 0; i < g_cpu.device_count; i++) {
-    pyre_device_release(&g_cpu.devices[i]);
+    hrx_device_release(&g_cpu.devices[i]);
   }
   if (g_cpu.driver) {
     iree_hal_driver_release(g_cpu.driver);
@@ -290,55 +290,55 @@ pyre_status_t pyre_cpu_shutdown(void) {
 
   g_cpu.device_count = 0;
   g_cpu.initialized = false;
-  pyre_release_shared_state();
-  return pyre_ok_status();
+  hrx_release_shared_state();
+  return hrx_ok_status();
 }
 
-pyre_status_t pyre_cpu_device_count(int* count) {
+hrx_status_t hrx_cpu_device_count(int* count) {
   if (!count) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT, "count is NULL");
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "count is NULL");
   }
   if (!g_cpu.initialized) {
-    return pyre_make_status(PYRE_STATUS_UNAVAILABLE,
+    return hrx_make_status(HRX_STATUS_UNAVAILABLE,
                             "CPU accelerator not initialized");
   }
   *count = g_cpu.device_count;
-  return pyre_ok_status();
+  return hrx_ok_status();
 }
 
-pyre_status_t pyre_cpu_device_get(int index, pyre_device_t* device) {
+hrx_status_t hrx_cpu_device_get(int index, hrx_device_t* device) {
   if (!device) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT, "device is NULL");
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "device is NULL");
   }
   if (!g_cpu.initialized) {
-    return pyre_make_status(PYRE_STATUS_UNAVAILABLE,
+    return hrx_make_status(HRX_STATUS_UNAVAILABLE,
                             "CPU accelerator not initialized");
   }
   if (index < 0 || index >= g_cpu.device_count) {
-    return pyre_make_status(PYRE_STATUS_OUT_OF_RANGE,
+    return hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
                             "CPU device index out of range");
   }
   *device = &g_cpu.devices[index];
-  return pyre_ok_status();
+  return hrx_ok_status();
 }
 
 //===----------------------------------------------------------------------===//
 // GPU accelerator
 //===----------------------------------------------------------------------===//
 
-pyre_status_t pyre_gpu_initialize(uint32_t flags) {
+hrx_status_t hrx_gpu_initialize(uint32_t flags) {
   (void)flags;
   if (g_gpu.initialized) {
-    return pyre_make_status(PYRE_STATUS_ALREADY_EXISTS,
+    return hrx_make_status(HRX_STATUS_ALREADY_EXISTS,
                             "GPU accelerator already initialized");
   }
 
-#ifndef PYRE_HAS_HSA_DRIVER
-  return pyre_make_status(PYRE_STATUS_UNAVAILABLE,
+#ifndef HRX_HAS_HSA_DRIVER
+  return hrx_make_status(HRX_STATUS_UNAVAILABLE,
                           "no GPU driver available (built without HSA support)");
 #else
-  pyre_status_t status = pyre_ensure_shared_state();
-  if (!pyre_status_is_ok(status)) return status;
+  hrx_status_t status = hrx_ensure_shared_state();
+  if (!hrx_status_is_ok(status)) return status;
 
   iree_allocator_t alloc = g_shared.host_allocator;
 
@@ -346,8 +346,8 @@ pyre_status_t pyre_gpu_initialize(uint32_t flags) {
   iree_status_t iree_status =
       iree_hal_hsa_driver_module_register(iree_hal_driver_registry_default());
   if (!iree_status_is_ok(iree_status)) {
-    pyre_release_shared_state();
-    return pyre_status_from_iree(iree_status);
+    hrx_release_shared_state();
+    return hrx_status_from_iree(iree_status);
   }
 
   // Create HSA driver with default options.
@@ -361,8 +361,8 @@ pyre_status_t pyre_gpu_initialize(uint32_t flags) {
       iree_make_cstring_view("hsa"), &driver_options, &device_params,
       alloc, &driver);
   if (!iree_status_is_ok(iree_status)) {
-    pyre_release_shared_state();
-    return pyre_status_from_iree(iree_status);
+    hrx_release_shared_state();
+    return hrx_status_from_iree(iree_status);
   }
 
   // Enumerate available GPU devices.
@@ -372,21 +372,21 @@ pyre_status_t pyre_gpu_initialize(uint32_t flags) {
       driver, alloc, &device_info_count, &device_infos);
   if (!iree_status_is_ok(iree_status)) {
     iree_hal_driver_release(driver);
-    pyre_release_shared_state();
-    return pyre_status_from_iree(iree_status);
+    hrx_release_shared_state();
+    return hrx_status_from_iree(iree_status);
   }
 
   if (device_info_count == 0) {
     iree_allocator_free(alloc, device_infos);
     iree_hal_driver_release(driver);
-    pyre_release_shared_state();
-    return pyre_make_status(PYRE_STATUS_UNAVAILABLE, "no GPU devices found");
+    hrx_release_shared_state();
+    return hrx_make_status(HRX_STATUS_UNAVAILABLE, "no GPU devices found");
   }
 
-  // Create a HAL device for each GPU (up to PYRE_MAX_DEVICES).
-  int count = (int)(device_info_count < PYRE_MAX_DEVICES
+  // Create a HAL device for each GPU (up to HRX_MAX_DEVICES).
+  int count = (int)(device_info_count < HRX_MAX_DEVICES
                         ? device_info_count
-                        : PYRE_MAX_DEVICES);
+                        : HRX_MAX_DEVICES);
 
   iree_hal_device_create_params_t create_params =
       iree_hal_device_create_params_default();
@@ -399,18 +399,18 @@ pyre_status_t pyre_gpu_initialize(uint32_t flags) {
         &create_params, alloc, &hal_device);
     if (!iree_status_is_ok(iree_status)) {
       for (int j = 0; j < i; j++) {
-        pyre_device_release(&g_gpu.devices[j]);
+        hrx_device_release(&g_gpu.devices[j]);
       }
       iree_allocator_free(alloc, device_infos);
       iree_hal_driver_release(driver);
-      pyre_release_shared_state();
-      return pyre_status_from_iree(iree_status);
+      hrx_release_shared_state();
+      return hrx_status_from_iree(iree_status);
     }
 
-    pyre_device_s* dev = &g_gpu.devices[i];
+    hrx_device_s* dev = &g_gpu.devices[i];
     memset(dev, 0, sizeof(*dev));
     iree_atomic_ref_count_init(&dev->ref_count);
-    dev->type = PYRE_ACCELERATOR_GPU;
+    dev->type = HRX_ACCELERATOR_GPU;
     dev->ordinal = i;
     dev->hal_device = hal_device;
     dev->allocator.hal_allocator = iree_hal_device_allocator(hal_device);
@@ -423,7 +423,7 @@ pyre_status_t pyre_gpu_initialize(uint32_t flags) {
     memcpy(dev->name, device_infos[i].name.data, name_len);
     dev->name[name_len] = '\0';
 
-    pyre_query_device_architecture(
+    hrx_query_device_architecture(
         hal_device, dev->architecture, sizeof(dev->architecture));
   }
 
@@ -431,18 +431,18 @@ pyre_status_t pyre_gpu_initialize(uint32_t flags) {
   g_gpu.driver = driver;
   g_gpu.device_count = count;
   g_gpu.initialized = true;
-  return pyre_ok_status();
-#endif  // PYRE_HAS_HSA_DRIVER
+  return hrx_ok_status();
+#endif  // HRX_HAS_HSA_DRIVER
 }
 
-pyre_status_t pyre_gpu_shutdown(void) {
+hrx_status_t hrx_gpu_shutdown(void) {
   if (!g_gpu.initialized) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT,
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                             "GPU accelerator not initialized");
   }
 
   for (int i = 0; i < g_gpu.device_count; i++) {
-    pyre_device_release(&g_gpu.devices[i]);
+    hrx_device_release(&g_gpu.devices[i]);
   }
   if (g_gpu.driver) {
     iree_hal_driver_release(g_gpu.driver);
@@ -451,34 +451,34 @@ pyre_status_t pyre_gpu_shutdown(void) {
 
   g_gpu.device_count = 0;
   g_gpu.initialized = false;
-  pyre_release_shared_state();
-  return pyre_ok_status();
+  hrx_release_shared_state();
+  return hrx_ok_status();
 }
 
-pyre_status_t pyre_gpu_device_count(int* count) {
+hrx_status_t hrx_gpu_device_count(int* count) {
   if (!count) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT, "count is NULL");
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "count is NULL");
   }
   if (!g_gpu.initialized) {
-    return pyre_make_status(PYRE_STATUS_UNAVAILABLE,
+    return hrx_make_status(HRX_STATUS_UNAVAILABLE,
                             "GPU accelerator not initialized");
   }
   *count = g_gpu.device_count;
-  return pyre_ok_status();
+  return hrx_ok_status();
 }
 
-pyre_status_t pyre_gpu_device_get(int index, pyre_device_t* device) {
+hrx_status_t hrx_gpu_device_get(int index, hrx_device_t* device) {
   if (!device) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT, "device is NULL");
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "device is NULL");
   }
   if (!g_gpu.initialized) {
-    return pyre_make_status(PYRE_STATUS_UNAVAILABLE,
+    return hrx_make_status(HRX_STATUS_UNAVAILABLE,
                             "GPU accelerator not initialized");
   }
   if (index < 0 || index >= g_gpu.device_count) {
-    return pyre_make_status(PYRE_STATUS_OUT_OF_RANGE,
+    return hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
                             "GPU device index out of range");
   }
   *device = &g_gpu.devices[index];
-  return pyre_ok_status();
+  return hrx_ok_status();
 }

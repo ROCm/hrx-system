@@ -1,14 +1,14 @@
-// Copyright 2026 The Pyre Authors
+// Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 
-#include <pyre_compiler_cxx.h>
-#include <pyre_runtime_cxx.h>
+#include <hrx_compiler_cxx.h>
+#include <hrx_runtime_cxx.h>
 
 int main() {
-  pyre::compiler::compiler_ptr compiler;
-  pyre::runtime::device_ptr device;
+  hrx::compiler::compiler_ptr compiler;
+  hrx::runtime::device_ptr device;
   return !compiler && !device &&
-          pyre::runtime::format_status(pyre_ok_status()) == "OK"
+          hrx::runtime::format_status(hrx_ok_status()) == "OK"
       ? 0
       : 1;
 }

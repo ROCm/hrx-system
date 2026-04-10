@@ -162,26 +162,26 @@ static iree_status_t iree_hal_streaming_query_device_info(
   return iree_ok_status();
 }
 
-// Initializes a single device from a pyre device handle.
+// Initializes a single device from a hrx device handle.
 static iree_status_t iree_hal_streaming_initialize_device(
     iree_hal_streaming_device_registry_t* registry,
-    pyre_device_t pyre_dev,
+    hrx_device_t hrx_dev,
     iree_hal_streaming_device_t* out_device) {
   IREE_ASSERT_ARGUMENT(registry);
-  IREE_ASSERT_ARGUMENT(pyre_dev);
+  IREE_ASSERT_ARGUMENT(hrx_dev);
   IREE_ASSERT_ARGUMENT(out_device);
   IREE_TRACE_ZONE_BEGIN(z0);
 
   memset(out_device, 0, sizeof(*out_device));
 
-  // Store pyre device and extract HAL device for direct HAL usage.
-  out_device->pyre_device = pyre_dev;
-  out_device->hal_device = pyre_device_hal(pyre_dev);
+  // Store hrx device and extract HAL device for direct HAL usage.
+  out_device->hrx_device = hrx_dev;
+  out_device->hal_device = hrx_device_hal(hrx_dev);
 
-  // Get device name from pyre.
+  // Get device name from hrx.
   char name_buf[128] = {0};
-  iree_status_t status = PYRE_CALL(pyre_device_get_property(
-      pyre_dev, PYRE_DEVICE_PROPERTY_NAME, name_buf, sizeof(name_buf)));
+  iree_status_t status = HRX_CALL(hrx_device_get_property(
+      hrx_dev, HRX_DEVICE_PROPERTY_NAME, name_buf, sizeof(name_buf)));
   if (iree_status_is_ok(status) && name_buf[0] != '\0') {
     size_t len = strlen(name_buf);
     char* name_copy = NULL;
@@ -197,8 +197,8 @@ static iree_status_t iree_hal_streaming_initialize_device(
 
   // Use architecture as path.
   char arch_buf[64] = {0};
-  status = PYRE_CALL(pyre_device_get_property(
-      pyre_dev, PYRE_DEVICE_PROPERTY_ARCHITECTURE, arch_buf, sizeof(arch_buf)));
+  status = HRX_CALL(hrx_device_get_property(
+      hrx_dev, HRX_DEVICE_PROPERTY_ARCHITECTURE, arch_buf, sizeof(arch_buf)));
   if (iree_status_is_ok(status) && arch_buf[0] != '\0') {
     size_t len = strlen(arch_buf);
     char* path_copy = NULL;
@@ -301,10 +301,10 @@ static void iree_hal_streaming_deinitialize_device(
   // Deinitialize the arena block pool.
   iree_arena_block_pool_deinitialize(&device->block_pool);
 
-  // HAL device and driver are owned by pyre — don't release here.
-  // pyre_gpu_shutdown() handles cleanup.
+  // HAL device and driver are owned by hrx — don't release here.
+  // hrx_gpu_shutdown() handles cleanup.
   device->hal_device = NULL;
-  device->pyre_device = NULL;
+  device->hrx_device = NULL;
 
   IREE_TRACE_ZONE_END(z0);
 }
@@ -340,7 +340,7 @@ static iree_status_t iree_hal_streaming_query_p2p_capabilities(
         link->bandwidth_mbps = 900000;  // 900 GB/s typical for device memory.
         link->latency_ns = 10;          // Very low latency.
       } else {
-        // TODO: Query actual P2P capabilities from pyre/HSA.
+        // TODO: Query actual P2P capabilities from hrx/HSA.
         link->access_supported = false;
         link->native_atomic_supported = false;
         link->cuda_array_access_supported = false;
@@ -445,7 +445,7 @@ void iree_hal_streaming_unregister_context(
 }
 
 //===----------------------------------------------------------------------===//
-// Global initialization via pyre
+// Global initialization via hrx
 //===----------------------------------------------------------------------===//
 
 iree_status_t iree_hal_streaming_init_global(
@@ -457,10 +457,10 @@ iree_status_t iree_hal_streaming_init_global(
     return iree_ok_status();
   }
 
-  // Initialize pyre GPU subsystem (idempotent — handles HSA init,
+  // Initialize hrx GPU subsystem (idempotent — handles HSA init,
   // driver registration, device enumeration).
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, PYRE_CALL(pyre_gpu_initialize(0)));
+      z0, HRX_CALL(hrx_gpu_initialize(0)));
 
   // Create global registry.
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
@@ -479,18 +479,18 @@ iree_status_t iree_hal_streaming_init_global(
   device_registry->context_list.head = NULL;
   device_registry->context_list.tail = NULL;
 
-  // Enumerate GPU devices from pyre.
+  // Enumerate GPU devices from hrx.
   int gpu_count = 0;
-  iree_status_t status = PYRE_CALL(pyre_gpu_device_count(&gpu_count));
+  iree_status_t status = HRX_CALL(hrx_gpu_device_count(&gpu_count));
 
   if (iree_status_is_ok(status)) {
     memset(device_registry->devices, 0, sizeof(device_registry->devices));
     device_registry->device_count = 0;
 
     for (int i = 0; i < gpu_count && i < IREE_HAL_STREAMING_MAX_DEVICES; ++i) {
-      pyre_device_t pyre_dev = NULL;
+      hrx_device_t hrx_dev = NULL;
       iree_status_t dev_status =
-          PYRE_CALL(pyre_gpu_device_get(i, &pyre_dev));
+          HRX_CALL(hrx_gpu_device_get(i, &hrx_dev));
       if (!iree_status_is_ok(dev_status)) {
         iree_status_ignore(dev_status);
         continue;
@@ -501,7 +501,7 @@ iree_status_t iree_hal_streaming_init_global(
       device->ordinal = device_registry->device_count;
 
       dev_status = iree_hal_streaming_initialize_device(
-          device_registry, pyre_dev, device);
+          device_registry, hrx_dev, device);
       if (!iree_status_is_ok(dev_status)) {
         iree_status_ignore(dev_status);
         continue;
@@ -514,7 +514,7 @@ iree_status_t iree_hal_streaming_init_global(
   // Must have at least one device.
   if (iree_status_is_ok(status) && device_registry->device_count == 0) {
     status = iree_make_status(IREE_STATUS_NOT_FOUND,
-                              "no GPU devices found via pyre");
+                              "no GPU devices found via hrx");
   }
 
   // Query P2P capabilities.
@@ -572,8 +572,8 @@ void iree_hal_streaming_cleanup_global(void) {
   iree_allocator_free(device_registry->host_allocator,
                       device_registry->p2p_topology);
 
-  // Shutdown pyre GPU subsystem.
-  pyre_status_ignore(pyre_gpu_shutdown());
+  // Shutdown hrx GPU subsystem.
+  hrx_status_ignore(hrx_gpu_shutdown());
 
   iree_slim_mutex_unlock(&device_registry->mutex);
   iree_slim_mutex_deinitialize(&device_registry->mutex);

@@ -1,6 +1,6 @@
 {
   global:
-    pyre_*;
+    hrx_*;
   local:
     *;
 };

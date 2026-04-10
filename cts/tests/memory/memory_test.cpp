@@ -1,99 +1,99 @@
-// Copyright 2026 The Pyre Authors
+// Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 
-#include "pyre_test_fixture.hpp"
+#include "hrx_test_fixture.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <cstring>
 
-TEST_CASE_METHOD(PyreTestFixture, "Buffer allocate and release",
+TEST_CASE_METHOD(HrxTestFixture, "Buffer allocate and release",
                  "[memory][alloc]") {
-  pyre_stream_t stream = nullptr;
-  REQUIRE_OK(pyre().stream_create(device_, 0, &stream));
+  hrx_stream_t stream = nullptr;
+  REQUIRE_OK(hrx().stream_create(device_, 0, &stream));
 
-  pyre_buffer_t buf = nullptr;
-  REQUIRE_OK(pyre().buffer_allocate(stream, 4096, PYRE_MEMORY_TYPE_HOST_LOCAL | PYRE_MEMORY_TYPE_DEVICE_VISIBLE, PYRE_BUFFER_USAGE_DEFAULT | PYRE_BUFFER_USAGE_MAPPING_SCOPED, &buf));
+  hrx_buffer_t buf = nullptr;
+  REQUIRE_OK(hrx().buffer_allocate(stream, 4096, HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_DEVICE_VISIBLE, HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED, &buf));
   REQUIRE(buf != nullptr);
 
-  pyre().buffer_release(buf);
-  pyre().stream_release(stream);
+  hrx().buffer_release(buf);
+  hrx().stream_release(stream);
 }
 
-TEST_CASE_METHOD(PyreTestFixture, "Buffer map and unmap",
+TEST_CASE_METHOD(HrxTestFixture, "Buffer map and unmap",
                  "[memory][map]") {
-  pyre_stream_t stream = nullptr;
-  REQUIRE_OK(pyre().stream_create(device_, 0, &stream));
+  hrx_stream_t stream = nullptr;
+  REQUIRE_OK(hrx().stream_create(device_, 0, &stream));
 
-  pyre_buffer_t buf = nullptr;
-  REQUIRE_OK(pyre().buffer_allocate(stream, 4096, PYRE_MEMORY_TYPE_HOST_LOCAL | PYRE_MEMORY_TYPE_DEVICE_VISIBLE, PYRE_BUFFER_USAGE_DEFAULT | PYRE_BUFFER_USAGE_MAPPING_SCOPED, &buf));
+  hrx_buffer_t buf = nullptr;
+  REQUIRE_OK(hrx().buffer_allocate(stream, 4096, HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_DEVICE_VISIBLE, HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED, &buf));
 
   void* ptr = nullptr;
-  REQUIRE_OK(pyre().buffer_map(buf, PYRE_MAP_WRITE, 0, 4096, &ptr));
+  REQUIRE_OK(hrx().buffer_map(buf, HRX_MAP_WRITE, 0, 4096, &ptr));
   REQUIRE(ptr != nullptr);
 
   // Write pattern.
   memset(ptr, 0xAB, 4096);
 
-  REQUIRE_OK(pyre().buffer_unmap(buf));
-  pyre().buffer_release(buf);
-  pyre().stream_release(stream);
+  REQUIRE_OK(hrx().buffer_unmap(buf));
+  hrx().buffer_release(buf);
+  hrx().stream_release(stream);
 }
 
-TEST_CASE_METHOD(PyreTestFixture, "Buffer map read back written data",
+TEST_CASE_METHOD(HrxTestFixture, "Buffer map read back written data",
                  "[memory][map]") {
-  pyre_stream_t stream = nullptr;
-  REQUIRE_OK(pyre().stream_create(device_, 0, &stream));
+  hrx_stream_t stream = nullptr;
+  REQUIRE_OK(hrx().stream_create(device_, 0, &stream));
 
-  pyre_buffer_t buf = nullptr;
-  REQUIRE_OK(pyre().buffer_allocate(stream, 256, PYRE_MEMORY_TYPE_HOST_LOCAL | PYRE_MEMORY_TYPE_DEVICE_VISIBLE, PYRE_BUFFER_USAGE_DEFAULT | PYRE_BUFFER_USAGE_MAPPING_SCOPED, &buf));
+  hrx_buffer_t buf = nullptr;
+  REQUIRE_OK(hrx().buffer_allocate(stream, 256, HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_DEVICE_VISIBLE, HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED, &buf));
 
   // Write.
   void* wptr = nullptr;
-  REQUIRE_OK(pyre().buffer_map(buf, PYRE_MAP_WRITE, 0, 256, &wptr));
+  REQUIRE_OK(hrx().buffer_map(buf, HRX_MAP_WRITE, 0, 256, &wptr));
   memset(wptr, 0x42, 256);
-  REQUIRE_OK(pyre().buffer_unmap(buf));
+  REQUIRE_OK(hrx().buffer_unmap(buf));
 
   // Read back.
   void* rptr = nullptr;
-  REQUIRE_OK(pyre().buffer_map(buf, PYRE_MAP_READ, 0, 256, &rptr));
+  REQUIRE_OK(hrx().buffer_map(buf, HRX_MAP_READ, 0, 256, &rptr));
   unsigned char* data = (unsigned char*)rptr;
   for (int i = 0; i < 256; i++) {
     REQUIRE(data[i] == 0x42);
   }
-  REQUIRE_OK(pyre().buffer_unmap(buf));
+  REQUIRE_OK(hrx().buffer_unmap(buf));
 
-  pyre().buffer_release(buf);
-  pyre().stream_release(stream);
+  hrx().buffer_release(buf);
+  hrx().stream_release(stream);
 }
 
-TEST_CASE_METHOD(PyreTestFixture, "Zero-size buffer allocation fails",
+TEST_CASE_METHOD(HrxTestFixture, "Zero-size buffer allocation fails",
                  "[memory][alloc]") {
-  pyre_stream_t stream = nullptr;
-  REQUIRE_OK(pyre().stream_create(device_, 0, &stream));
+  hrx_stream_t stream = nullptr;
+  REQUIRE_OK(hrx().stream_create(device_, 0, &stream));
 
-  pyre_buffer_t buf = nullptr;
-  pyre_status_t status =
-      pyre().buffer_allocate(stream, 0, PYRE_MEMORY_TYPE_HOST_LOCAL | PYRE_MEMORY_TYPE_DEVICE_VISIBLE, PYRE_BUFFER_USAGE_DEFAULT | PYRE_BUFFER_USAGE_MAPPING_SCOPED, &buf);
-  REQUIRE(!pyre_status_is_ok(status));
-  pyre().status_ignore(status);
+  hrx_buffer_t buf = nullptr;
+  hrx_status_t status =
+      hrx().buffer_allocate(stream, 0, HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_DEVICE_VISIBLE, HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED, &buf);
+  REQUIRE(!hrx_status_is_ok(status));
+  hrx().status_ignore(status);
 
-  pyre().stream_release(stream);
+  hrx().stream_release(stream);
 }
 
-TEST_CASE_METHOD(PyreTestFixture, "Buffer get_size returns correct size",
+TEST_CASE_METHOD(HrxTestFixture, "Buffer get_size returns correct size",
                  "[memory][size]") {
-  pyre_stream_t stream = nullptr;
-  REQUIRE_OK(pyre().stream_create(device_, 0, &stream));
+  hrx_stream_t stream = nullptr;
+  REQUIRE_OK(hrx().stream_create(device_, 0, &stream));
 
-  pyre_buffer_t buf = nullptr;
-  REQUIRE_OK(pyre().buffer_allocate(
+  hrx_buffer_t buf = nullptr;
+  REQUIRE_OK(hrx().buffer_allocate(
       stream, 8192,
-      PYRE_MEMORY_TYPE_HOST_LOCAL | PYRE_MEMORY_TYPE_DEVICE_VISIBLE,
-      PYRE_BUFFER_USAGE_DEFAULT | PYRE_BUFFER_USAGE_MAPPING_SCOPED, &buf));
+      HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_DEVICE_VISIBLE,
+      HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED, &buf));
 
   size_t size = 0;
-  REQUIRE_OK(pyre().buffer_get_size(buf, &size));
+  REQUIRE_OK(hrx().buffer_get_size(buf, &size));
   REQUIRE(size == 8192);
 
-  pyre().buffer_release(buf);
-  pyre().stream_release(stream);
+  hrx().buffer_release(buf);
+  hrx().stream_release(stream);
 }

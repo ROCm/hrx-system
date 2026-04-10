@@ -1,28 +1,28 @@
 # Source Provenance
 
-Documents the origin of all code in `sources/pyre-runtime/`. Required for
+Documents the origin of all code in `sources/hrx-runtime/`. Required for
 coordination with Andrew (iree-hal-streaming author).
 
 ## Files Written from Scratch
 
 All files in this initial spike are **new code**, not copies or adaptations
 of iree-hal-streaming. The API design and architecture are informed by the
-design document (`docs/design/pyre_runtime_extraction.md`) and by studying
+design document (`docs/design/hrx_runtime_extraction.md`) and by studying
 iree-hal-streaming's patterns, but no source code was copied.
 
 ### Public API
 
 | File | Origin | Notes |
 |------|--------|-------|
-| `include/pyre_runtime.h` | New | C API from design doc. Opaque handles, status pattern from IREE conventions. |
+| `include/hrx_runtime.h` | New | C API from design doc. Opaque handles, status pattern from IREE conventions. |
 
 ### Implementation
 
 | File | Origin | Notes |
 |------|--------|-------|
-| `src/pyre_internal.h` | New | Internal struct definitions. Struct layout influenced by iree-hal-streaming's `internal.h` (device registry, stream with timeline semaphore + pending CB, buffer with hal_buffer). |
-| `src/status.c` | New | Status API. Follows IREE's NULL=OK pattern. `pyre_status_from_iree()` maps IREE status codes. |
-| `src/runtime.c` | New | Global state + accelerator init. Device creation pattern adapted from PyTorch's `PyreRuntime::initialize()` (driver-based creation via `iree_hal_task_driver_create` + `iree_hal_driver_create_default_device`). |
+| `src/hrx_internal.h` | New | Internal struct definitions. Struct layout influenced by iree-hal-streaming's `internal.h` (device registry, stream with timeline semaphore + pending CB, buffer with hal_buffer). |
+| `src/status.c` | New | Status API. Follows IREE's NULL=OK pattern. `hrx_status_from_iree()` maps IREE status codes. |
+| `src/runtime.c` | New | Global state + accelerator init. Device creation pattern adapted from PyTorch's `HrxRuntime::initialize()` (driver-based creation via `iree_hal_task_driver_create` + `iree_hal_driver_create_default_device`). |
 | `src/device.c` | New | Device property queries and sync. |
 | `src/semaphore.c` | New | Timeline semaphore wrapper. Follows IREE retain/release pattern (atomic ref count, `== 1` check for last release). |
 | `src/stream.c` | New | Stream with pending command buffer. The stream-owns-semaphore + pending-CB pattern is inspired by iree-hal-streaming's `stream.c`, but the implementation is independent. |
@@ -33,16 +33,16 @@ iree-hal-streaming's patterns, but no source code was copied.
 
 | File | Origin | Notes |
 |------|--------|-------|
-| `tools/pyre_info.c` | New | CLI tool. Dual-links libpyre.so + IREE static (for `iree_flags_parse`). |
+| `tools/hrx_info.c` | New | CLI tool. Dual-links libhrx.so + IREE static (for `iree_flags_parse`). |
 
 ### CTS
 
 | File | Origin | Notes |
 |------|--------|-------|
-| `cts/core/pyre_loader.hpp` | New, pattern from hip-cts | dlopen-based loader. Mirrors hip-cts `HipLoader` pattern (Meyers singleton, loadSymbol). |
-| `cts/core/pyre_loader.cpp` | New, pattern from hip-cts | Symbol loading implementation. |
-| `cts/core/pyre_test_fixture.hpp` | New, pattern from hip-cts | Catch2 fixture. Mirrors hip-cts `HipTestFixture`. |
-| `cts/core/main.cpp` | New, pattern from hip-cts | Custom Catch2 main with `--pyre-library` and `--pyre-device` args. |
+| `cts/core/hrx_loader.hpp` | New, pattern from hip-cts | dlopen-based loader. Mirrors hip-cts `HipLoader` pattern (Meyers singleton, loadSymbol). |
+| `cts/core/hrx_loader.cpp` | New, pattern from hip-cts | Symbol loading implementation. |
+| `cts/core/hrx_test_fixture.hpp` | New, pattern from hip-cts | Catch2 fixture. Mirrors hip-cts `HipTestFixture`. |
+| `cts/core/main.cpp` | New, pattern from hip-cts | Custom Catch2 main with `--hrx-library` and `--hrx-device` args. |
 | `cts/tests/*/` | New | All test files are new. |
 | `cts/third_party/Catch2/` | Symlink | Points to `hip-cts/third_party/Catch2` (same version). |
 
@@ -50,34 +50,34 @@ iree-hal-streaming's patterns, but no source code was copied.
 
 | File | Origin | Notes |
 |------|--------|-------|
-| `CMakeLists.txt` | New | IREE integration pattern adapted from `pytorch/cmake/public/pyre.cmake`. |
-| `cmake/pyre_exports.lds` | New | Version script limiting exports to `pyre_*`. |
-| `cmake/pyre-config.cmake.in` | New | find_package template. |
+| `CMakeLists.txt` | New | IREE integration pattern adapted from `pytorch/cmake/public/hrx.cmake`. |
+| `cmake/hrx_exports.lds` | New | Version script limiting exports to `hrx_*`. |
+| `cmake/hrx-config.cmake.in` | New | find_package template. |
 | `cts/CMakeLists.txt` | New | Standalone/in-tree dual-mode CTS build. |
 
 ## Patterns Adapted from iree-hal-streaming
 
 The following architectural patterns were studied in iree-hal-streaming and
-informed the pyre-runtime design, without copying code:
+informed the hrx-runtime design, without copying code:
 
 1. **Global device registry** — iree-hal-streaming uses a global
-   `iree_hal_streaming_device_registry_t` singleton. Pyre uses
-   `pyre_gpu_state_t` / `pyre_cpu_state_t` statics with per-accelerator
+   `iree_hal_streaming_device_registry_t` singleton. HRX uses
+   `hrx_gpu_state_t` / `hrx_cpu_state_t` statics with per-accelerator
    namespace isolation.
 
 2. **Stream with timeline semaphore** — iree-hal-streaming's `stream.c`
    tracks `timeline_semaphore` + `command_buffer` + `recorded_events`.
-   Pyre's `pyre_stream_s` tracks `semaphore` + `pending_cb` + `timepoint`.
+   HRX's `hrx_stream_s` tracks `semaphore` + `pending_cb` + `timepoint`.
 
 3. **Buffer table / pointer mapping** — iree-hal-streaming's
-   `buffer_table.{h,c}` maps device pointers to HAL buffers. Pyre stores
-   the HAL buffer directly in `pyre_buffer_s` (no global table yet).
+   `buffer_table.{h,c}` maps device pointers to HAL buffers. HRX stores
+   the HAL buffer directly in `hrx_buffer_s` (no global table yet).
 
 4. **Reference counting** — Both use `iree_atomic_ref_count_t` with
    retain/release semantics.
 
 5. **Context / primary context** — iree-hal-streaming has per-device
-   contexts with lazy initialization. Pyre's devices are simpler (no
+   contexts with lazy initialization. HRX's devices are simpler (no
    context layer yet).
 
 ## What Was NOT Taken

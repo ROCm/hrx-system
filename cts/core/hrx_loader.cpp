@@ -1,61 +1,61 @@
-// Copyright 2026 The Pyre Authors
+// Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 
-#include "pyre_loader.hpp"
+#include "hrx_loader.hpp"
 
 #include <dlfcn.h>
 #include <cstdlib>
 
-std::string PyreLoader::library_path_;
+std::string HrxLoader::library_path_;
 
-void PyreLoader::setLibraryPath(const std::string& path) {
+void HrxLoader::setLibraryPath(const std::string& path) {
   library_path_ = path;
 }
 
-PyreLoader& PyreLoader::instance() {
-  static PyreLoader loader;
+HrxLoader& HrxLoader::instance() {
+  static HrxLoader loader;
   return loader;
 }
 
-PyreLoader::PyreLoader() {
+HrxLoader::HrxLoader() {
   std::string path = library_path_;
   if (path.empty()) {
-    const char* env = std::getenv("PYRE_LIBRARY");
+    const char* env = std::getenv("HRX_LIBRARY");
     if (env) path = env;
   }
   if (path.empty()) {
-    path = "libpyre.so";
+    path = "libhrx.so";
   }
   load(path);
 }
 
-PyreLoader::~PyreLoader() {
+HrxLoader::~HrxLoader() {
   if (handle_) {
     dlclose(handle_);
   }
 }
 
-void* PyreLoader::loadSymbol(const char* name) {
+void* HrxLoader::loadSymbol(const char* name) {
   void* sym = dlsym(handle_, name);
   if (!sym) {
-    throw PyreLoaderError(std::string("Failed to load symbol: ") + name +
+    throw HrxLoaderError(std::string("Failed to load symbol: ") + name +
                           " (" + dlerror() + ")");
   }
   return sym;
 }
 
-void PyreLoader::load(const std::string& path) {
+void HrxLoader::load(const std::string& path) {
   handle_ = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
   if (!handle_) {
-    throw PyreLoaderError(std::string("Failed to load ") + path +
+    throw HrxLoaderError(std::string("Failed to load ") + path +
                           ": " + dlerror());
   }
 
-#define LOAD(name) name = (decltype(name))loadSymbol("pyre_" #name)
+#define LOAD(name) name = (decltype(name))loadSymbol("hrx_" #name)
 #define LOAD_FULL(field, sym) field = (decltype(field))loadSymbol(#sym)
 
-  host_allocator_system_ptr = (pyre_host_allocator_t*)loadSymbol(
-      "pyre_host_allocator_system_value");
+  host_allocator_system_ptr = (hrx_host_allocator_t*)loadSymbol(
+      "hrx_host_allocator_system_value");
 
   LOAD(host_allocator_malloc);
   LOAD(host_allocator_malloc_uninitialized);
@@ -66,12 +66,12 @@ void PyreLoader::load(const std::string& path) {
   LOAD(host_allocator_realloc_aligned);
   LOAD(host_allocator_free_aligned);
 
-  LOAD_FULL(runtime_version, pyre_runtime_version);
-  LOAD_FULL(make_status, pyre_make_status);
-  LOAD_FULL(status_code, pyre_status_code);
-  LOAD_FULL(status_to_string, pyre_status_to_string);
-  LOAD_FULL(status_free_message, pyre_status_free_message);
-  LOAD_FULL(status_ignore, pyre_status_ignore);
+  LOAD_FULL(runtime_version, hrx_runtime_version);
+  LOAD_FULL(make_status, hrx_make_status);
+  LOAD_FULL(status_code, hrx_status_code);
+  LOAD_FULL(status_to_string, hrx_status_to_string);
+  LOAD_FULL(status_free_message, hrx_status_free_message);
+  LOAD_FULL(status_ignore, hrx_status_ignore);
 
   LOAD(gpu_initialize);
   LOAD(gpu_shutdown);

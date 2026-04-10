@@ -1,12 +1,12 @@
-// Copyright 2026 The Pyre Authors
+// Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 
-#include "pyre_internal.h"
+#include "hrx_internal.h"
 
 #include <stdlib.h>
 #include <string.h>
 
-static void pyre_module_destroy_partial(pyre_module_t module) {
+static void hrx_module_destroy_partial(hrx_module_t module) {
   if (module->context) {
     iree_vm_context_release(module->context);
   }
@@ -17,12 +17,12 @@ static void pyre_module_destroy_partial(pyre_module_t module) {
     iree_vm_module_release(module->bytecode_module);
   }
   if (module->device) {
-    pyre_device_release(module->device);
+    hrx_device_release(module->device);
   }
   free(module);
 }
 
-static iree_status_t pyre_compiler_output_archive_allocator_ctl(
+static iree_status_t hrx_compiler_output_archive_allocator_ctl(
     void* self, iree_allocator_command_t command, const void* params,
     void** inout_ptr) {
   (void)params;
@@ -31,58 +31,58 @@ static iree_status_t pyre_compiler_output_archive_allocator_ctl(
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                             "compiler output archive allocator only supports FREE");
   }
-  pyre_compiler_output_release((pyre_compiler_output_t)self);
+  hrx_compiler_output_release((hrx_compiler_output_t)self);
   return iree_ok_status();
 }
 
-static pyre_status_t pyre_module_load_archive(
-    pyre_device_t device, iree_const_byte_span_t archive_contents,
-    iree_allocator_t archive_allocator, pyre_module_t* module) {
+static hrx_status_t hrx_module_load_archive(
+    hrx_device_t device, iree_const_byte_span_t archive_contents,
+    iree_allocator_t archive_allocator, hrx_module_t* module) {
   *module = NULL;
   if (archive_contents.data_length == 0) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT,
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                             "vmfb_size must be > 0");
   }
 
-  pyre_shared_state_t* shared = pyre_get_shared_state();
+  hrx_shared_state_t* shared = hrx_get_shared_state();
   if (!shared->shared_initialized || !shared->vm_instance) {
-    return pyre_make_status(PYRE_STATUS_UNAVAILABLE,
+    return hrx_make_status(HRX_STATUS_UNAVAILABLE,
                             "runtime is not initialized");
   }
 
-  pyre_module_t loaded = (pyre_module_t)calloc(1, sizeof(*loaded));
+  hrx_module_t loaded = (hrx_module_t)calloc(1, sizeof(*loaded));
   if (!loaded) {
-    return pyre_make_status(PYRE_STATUS_OUT_OF_MEMORY,
+    return hrx_make_status(HRX_STATUS_OUT_OF_MEMORY,
                             "failed to allocate module");
   }
 
   iree_allocator_t alloc = iree_allocator_system();
   iree_status_t status = iree_vm_bytecode_module_create(
-      pyre_get_shared_state()->vm_instance, IREE_VM_BYTECODE_MODULE_FLAG_NONE,
+      hrx_get_shared_state()->vm_instance, IREE_VM_BYTECODE_MODULE_FLAG_NONE,
       archive_contents, archive_allocator, alloc,
       &loaded->bytecode_module);
   if (!iree_status_is_ok(status)) {
-    pyre_module_destroy_partial(loaded);
-    return pyre_status_from_iree(status);
+    hrx_module_destroy_partial(loaded);
+    return hrx_status_from_iree(status);
   }
 
   iree_hal_device_group_t* device_group = NULL;
   status = iree_hal_device_group_create_from_device(
       device->hal_device, alloc, &device_group);
   if (!iree_status_is_ok(status)) {
-    pyre_module_destroy_partial(loaded);
-    return pyre_status_from_iree(status);
+    hrx_module_destroy_partial(loaded);
+    return hrx_status_from_iree(status);
   }
 
   status = iree_hal_module_create(
-      pyre_get_shared_state()->vm_instance,
+      hrx_get_shared_state()->vm_instance,
       iree_hal_module_device_policy_default(), device_group,
       IREE_HAL_MODULE_FLAG_NONE, iree_hal_module_debug_sink_null(), alloc,
       &loaded->hal_module);
   iree_hal_device_group_release(device_group);
   if (!iree_status_is_ok(status)) {
-    pyre_module_destroy_partial(loaded);
-    return pyre_status_from_iree(status);
+    hrx_module_destroy_partial(loaded);
+    return hrx_status_from_iree(status);
   }
 
   iree_vm_module_t* modules[] = {
@@ -90,41 +90,41 @@ static pyre_status_t pyre_module_load_archive(
       loaded->bytecode_module,
   };
   status = iree_vm_context_create_with_modules(
-      pyre_get_shared_state()->vm_instance, IREE_VM_CONTEXT_FLAG_NONE, 2,
+      hrx_get_shared_state()->vm_instance, IREE_VM_CONTEXT_FLAG_NONE, 2,
       modules, alloc, &loaded->context);
   if (!iree_status_is_ok(status)) {
-    pyre_module_destroy_partial(loaded);
-    return pyre_status_from_iree(status);
+    hrx_module_destroy_partial(loaded);
+    return hrx_status_from_iree(status);
   }
 
   iree_atomic_ref_count_init(&loaded->ref_count);
   loaded->device = device;
-  pyre_device_retain(loaded->device);
+  hrx_device_retain(loaded->device);
   *module = loaded;
-  return pyre_ok_status();
+  return hrx_ok_status();
 }
 
-pyre_status_t pyre_module_load_vmfb(pyre_device_t device, const void* vmfb_data,
+hrx_status_t hrx_module_load_vmfb(hrx_device_t device, const void* vmfb_data,
                                     size_t vmfb_size,
-                                    pyre_module_t* module) {
+                                    hrx_module_t* module) {
   if (!device || !vmfb_data || !module) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT,
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                             "device, vmfb_data, or module is NULL");
   }
   iree_const_byte_span_t archive_contents = {
       .data = (const uint8_t*)vmfb_data,
       .data_length = vmfb_size,
   };
-  return pyre_module_load_archive(
+  return hrx_module_load_archive(
       device, archive_contents, iree_allocator_null(), module);
 }
 
-pyre_status_t pyre_module_load_compiler_output(
-    pyre_device_t device, pyre_compiler_output_t compiler_output,
-    pyre_module_t* module) {
+hrx_status_t hrx_module_load_compiler_output(
+    hrx_device_t device, hrx_compiler_output_t compiler_output,
+    hrx_module_t* module) {
   if (!device || !compiler_output || !module) {
-    return pyre_make_status(
-        PYRE_STATUS_INVALID_ARGUMENT,
+    return hrx_make_status(
+        HRX_STATUS_INVALID_ARGUMENT,
         "device, compiler_output, or module is NULL");
   }
   iree_const_byte_span_t archive_contents = {
@@ -133,49 +133,49 @@ pyre_status_t pyre_module_load_compiler_output(
   };
   iree_allocator_t archive_allocator = {
       .self = compiler_output,
-      .ctl = pyre_compiler_output_archive_allocator_ctl,
+      .ctl = hrx_compiler_output_archive_allocator_ctl,
   };
-  pyre_compiler_output_retain(compiler_output);
-  pyre_status_t status =
-      pyre_module_load_archive(device, archive_contents, archive_allocator,
+  hrx_compiler_output_retain(compiler_output);
+  hrx_status_t status =
+      hrx_module_load_archive(device, archive_contents, archive_allocator,
                                module);
-  if (!pyre_status_is_ok(status)) {
-    pyre_compiler_output_release(compiler_output);
+  if (!hrx_status_is_ok(status)) {
+    hrx_compiler_output_release(compiler_output);
   }
   return status;
 }
 
-void pyre_module_retain(pyre_module_t module) {
+void hrx_module_retain(hrx_module_t module) {
   iree_vm_context_retain(module->context);
   iree_vm_module_retain(module->hal_module);
   iree_vm_module_retain(module->bytecode_module);
-  pyre_device_retain(module->device);
+  hrx_device_retain(module->device);
   iree_atomic_ref_count_inc(&module->ref_count);
 }
 
-void pyre_module_release(pyre_module_t module) {
+void hrx_module_release(hrx_module_t module) {
   iree_vm_context_release(module->context);
   iree_vm_module_release(module->hal_module);
   iree_vm_module_release(module->bytecode_module);
   if (iree_atomic_ref_count_dec(&module->ref_count) == 1) {
-    pyre_device_release(module->device);
+    hrx_device_release(module->device);
     free(module);
   } else {
-    pyre_device_release(module->device);
+    hrx_device_release(module->device);
   }
 }
 
-pyre_status_t pyre_module_lookup_function(
-    pyre_module_t module, const char* name, pyre_function_t* function) {
+hrx_status_t hrx_module_lookup_function(
+    hrx_module_t module, const char* name, hrx_function_t* function) {
   if (!module || !name || !function) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT,
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                             "module, name, or function is NULL");
   }
   *function = NULL;
 
-  pyre_function_t resolved = (pyre_function_t)calloc(1, sizeof(*resolved));
+  hrx_function_t resolved = (hrx_function_t)calloc(1, sizeof(*resolved));
   if (!resolved) {
-    return pyre_make_status(PYRE_STATUS_OUT_OF_MEMORY,
+    return hrx_make_status(HRX_STATUS_OUT_OF_MEMORY,
                             "failed to allocate function");
   }
 
@@ -184,38 +184,38 @@ pyre_status_t pyre_module_lookup_function(
       module->context, function_name, &resolved->vm_function);
   if (!iree_status_is_ok(status)) {
     free(resolved);
-    return pyre_status_from_iree(status);
+    return hrx_status_from_iree(status);
   }
 
   iree_atomic_ref_count_init(&resolved->ref_count);
   resolved->module = module;
-  pyre_module_retain(module);
+  hrx_module_retain(module);
   *function = resolved;
-  return pyre_ok_status();
+  return hrx_ok_status();
 }
 
-void pyre_function_retain(pyre_function_t function) {
-  pyre_module_retain(function->module);
+void hrx_function_retain(hrx_function_t function) {
+  hrx_module_retain(function->module);
   iree_atomic_ref_count_inc(&function->ref_count);
 }
 
-void pyre_function_release(pyre_function_t function) {
-  pyre_module_release(function->module);
+void hrx_function_release(hrx_function_t function) {
+  hrx_module_release(function->module);
   if (iree_atomic_ref_count_dec(&function->ref_count) == 1) {
     free(function);
   }
 }
 
-pyre_status_t pyre_function_invoke(pyre_module_t module,
-                                   pyre_function_t function,
-                                   pyre_value_list_t args,
-                                   pyre_value_list_t rets) {
+hrx_status_t hrx_function_invoke(hrx_module_t module,
+                                   hrx_function_t function,
+                                   hrx_value_list_t args,
+                                   hrx_value_list_t rets) {
   if (!module || !function) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT,
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                             "module or function is NULL");
   }
   if (function->module != module) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT,
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                             "function does not belong to module");
   }
 
@@ -224,5 +224,5 @@ pyre_status_t pyre_function_invoke(pyre_module_t module,
       module->context, function->vm_function, IREE_VM_INVOCATION_FLAG_NONE,
       /*policy=*/NULL, args ? args->vm_list : NULL,
       rets ? rets->vm_list : NULL, alloc);
-  return pyre_status_from_iree(status);
+  return hrx_status_from_iree(status);
 }

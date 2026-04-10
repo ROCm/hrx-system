@@ -1,24 +1,24 @@
-// Copyright 2026 The Pyre Authors
+// Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 //
 // Timeline semaphore operations.
 
-#include "pyre_internal.h"
+#include "hrx_internal.h"
 
 #include <stdlib.h>
 
-pyre_status_t pyre_semaphore_create(pyre_device_t device,
+hrx_status_t hrx_semaphore_create(hrx_device_t device,
                                     uint64_t initial_value,
-                                    pyre_semaphore_t* semaphore) {
+                                    hrx_semaphore_t* semaphore) {
   if (!device || !semaphore) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT,
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                             "device or semaphore is NULL");
   }
 
-  pyre_semaphore_s* sem =
-      (pyre_semaphore_s*)calloc(1, sizeof(pyre_semaphore_s));
+  hrx_semaphore_s* sem =
+      (hrx_semaphore_s*)calloc(1, sizeof(hrx_semaphore_s));
   if (!sem) {
-    return pyre_make_status(PYRE_STATUS_OUT_OF_MEMORY,
+    return hrx_make_status(HRX_STATUS_OUT_OF_MEMORY,
                             "failed to allocate semaphore");
   }
 
@@ -27,45 +27,45 @@ pyre_status_t pyre_semaphore_create(pyre_device_t device,
       initial_value, IREE_HAL_SEMAPHORE_FLAG_NONE, &sem->hal_semaphore);
   if (!iree_status_is_ok(status)) {
     free(sem);
-    return pyre_status_from_iree(status);
+    return hrx_status_from_iree(status);
   }
 
   iree_atomic_ref_count_init(&sem->ref_count);
   sem->device = device;
-  pyre_device_retain(sem->device);
+  hrx_device_retain(sem->device);
   *semaphore = sem;
-  return pyre_ok_status();
+  return hrx_ok_status();
 }
 
-void pyre_semaphore_retain(pyre_semaphore_t semaphore) {
+void hrx_semaphore_retain(hrx_semaphore_t semaphore) {
   iree_hal_semaphore_retain(semaphore->hal_semaphore);
-  pyre_device_retain(semaphore->device);
+  hrx_device_retain(semaphore->device);
   iree_atomic_ref_count_inc(&semaphore->ref_count);
 }
 
-void pyre_semaphore_release(pyre_semaphore_t semaphore) {
+void hrx_semaphore_release(hrx_semaphore_t semaphore) {
   iree_hal_semaphore_release(semaphore->hal_semaphore);
-  pyre_device_release(semaphore->device);
+  hrx_device_release(semaphore->device);
   if (iree_atomic_ref_count_dec(&semaphore->ref_count) == 1) {
     free(semaphore);
   }
 }
 
-pyre_status_t pyre_semaphore_query(pyre_semaphore_t semaphore,
+hrx_status_t hrx_semaphore_query(hrx_semaphore_t semaphore,
                                    uint64_t* value) {
   if (!semaphore || !value) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT,
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                             "semaphore or value is NULL");
   }
   iree_status_t status =
       iree_hal_semaphore_query(semaphore->hal_semaphore, value);
-  return pyre_status_from_iree(status);
+  return hrx_status_from_iree(status);
 }
 
-pyre_status_t pyre_semaphore_wait(pyre_semaphore_t semaphore, uint64_t value,
+hrx_status_t hrx_semaphore_wait(hrx_semaphore_t semaphore, uint64_t value,
                                   uint64_t timeout_ns) {
   if (!semaphore) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT,
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                             "semaphore is NULL");
   }
   iree_timeout_t timeout;
@@ -80,16 +80,16 @@ pyre_status_t pyre_semaphore_wait(pyre_semaphore_t semaphore, uint64_t value,
   iree_status_t status =
       iree_hal_semaphore_wait(semaphore->hal_semaphore, value, timeout,
                               /*flags=*/0);
-  return pyre_status_from_iree(status);
+  return hrx_status_from_iree(status);
 }
 
-pyre_status_t pyre_semaphore_signal(pyre_semaphore_t semaphore,
+hrx_status_t hrx_semaphore_signal(hrx_semaphore_t semaphore,
                                     uint64_t value) {
   if (!semaphore) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT,
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                             "semaphore is NULL");
   }
   iree_status_t status =
       iree_hal_semaphore_signal(semaphore->hal_semaphore, value);
-  return pyre_status_from_iree(status);
+  return hrx_status_from_iree(status);
 }

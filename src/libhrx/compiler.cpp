@@ -1,7 +1,7 @@
-// Copyright 2026 The Pyre Authors
+// Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 
-#include "pyre_internal.h"
+#include "hrx_internal.h"
 
 #include "iree/compiler/embedding_api.h"
 #include "iree/compiler/loader.h"
@@ -34,11 +34,11 @@ constexpr bool kIsPosix = !kIsWindows;
 class CompilerDiscovery {
  public:
   CompilerDiscovery() {
-    if (const char* path = std::getenv("PYRE_IREE_COMPILE")) {
+    if (const char* path = std::getenv("HRX_IREE_COMPILE")) {
       dylib_path_ = path;
       has_dylib_override_ = true;
     }
-    if (const char* path = std::getenv("PYRE_IREE_COMPILER_CLI")) {
+    if (const char* path = std::getenv("HRX_IREE_COMPILER_CLI")) {
       cli_path_ = path;
     }
   }
@@ -48,21 +48,21 @@ class CompilerDiscovery {
   const std::string& cliPath() const { return cli_path_; }
   bool hasCliOverride() const { return !cli_path_.empty(); }
 
-  pyre_status_t requireCliPath() {
+  hrx_status_t requireCliPath() {
     if (cli_path_.empty()) {
-      return pyre_make_status(
-          PYRE_STATUS_UNAVAILABLE,
-          "PYRE_IREE_COMPILER_CLI is unset");
+      return hrx_make_status(
+          HRX_STATUS_UNAVAILABLE,
+          "HRX_IREE_COMPILER_CLI is unset");
     }
     std::optional<std::filesystem::path> executable_path =
         resolveExecutablePath(cli_path_);
     if (!executable_path) {
-      return pyre_make_status(
-          PYRE_STATUS_UNAVAILABLE,
-          "PYRE_IREE_COMPILER_CLI does not point to an executable file");
+      return hrx_make_status(
+          HRX_STATUS_UNAVAILABLE,
+          "HRX_IREE_COMPILER_CLI does not point to an executable file");
     }
     cli_path_ = executable_path->string();
-    return pyre_ok_status();
+    return hrx_ok_status();
   }
 
  private:
@@ -126,7 +126,7 @@ void initializeCompilerDylib() {
   };
 
   CompilerDiscovery discovery;
-  // TODO(pyre): on Windows, probe the directory containing libpyre and look
+  // TODO(hrx): on Windows, probe the directory containing libhrx and look
   // for an adjacent libIREECompiler DLL before falling back to the default
   // loader search path.
   if (discovery.hasDylibOverride()) {
@@ -135,7 +135,7 @@ void initializeCompilerDylib() {
       dylibState().available = true;
       return;
     }
-    dylibState().error_message = "failed to load PYRE_IREE_COMPILE=" +
+    dylibState().error_message = "failed to load HRX_IREE_COMPILE=" +
         discovery.dylibPath();
     return;
   }
@@ -152,16 +152,16 @@ void initializeCompilerDylib() {
       "failed to load libIREECompiler.so from the default search path";
 }
 
-pyre_status_t ensureCompilerDylibLoaded() {
+hrx_status_t ensureCompilerDylibLoaded() {
   CompilerDylibState& state = dylibState();
   std::call_once(state.init_once, initializeCompilerDylib);
   if (state.available) {
-    return pyre_ok_status();
+    return hrx_ok_status();
   }
-  return pyre_make_status(PYRE_STATUS_UNAVAILABLE, state.error_message.c_str());
+  return hrx_make_status(HRX_STATUS_UNAVAILABLE, state.error_message.c_str());
 }
 
-pyre_status_t statusFromCompilerError(
+hrx_status_t statusFromCompilerError(
     const char* context, iree_compiler_error_t* error,
     const std::string& diagnostics = std::string()) {
   std::string message(context);
@@ -174,17 +174,17 @@ pyre_status_t statusFromCompilerError(
     message.append("\n");
     message.append(diagnostics);
   }
-  return pyre_make_status(PYRE_STATUS_INTERNAL, message.c_str());
+  return hrx_make_status(HRX_STATUS_INTERNAL, message.c_str());
 }
 
-void destroyDylibOutput(pyre_compiler_output_t output) {
+void destroyDylibOutput(hrx_compiler_output_t output) {
   ireeCompilerOutputDestroy(
       static_cast<iree_compiler_output_t*>(output->impl));
   free(output);
 }
 
-void destroyCliOutput(pyre_compiler_output_t output) {
-  pyre_host_allocator_free_aligned(output->host_allocator,
+void destroyCliOutput(hrx_compiler_output_t output) {
+  hrx_host_allocator_free_aligned(output->host_allocator,
                                    const_cast<uint8_t*>(output->data));
   free(output);
 }
@@ -196,40 +196,40 @@ void freeFlags(char** flags, size_t flag_count) {
   free(flags);
 }
 
-pyre_status_t cloneFlags(const char* const* flags, size_t flag_count,
+hrx_status_t cloneFlags(const char* const* flags, size_t flag_count,
                          char*** out_flags) {
   *out_flags = nullptr;
   if (flag_count == 0) {
-    return pyre_ok_status();
+    return hrx_ok_status();
   }
 
   char** cloned = static_cast<char**>(calloc(flag_count, sizeof(char*)));
   if (!cloned) {
-    return pyre_make_status(PYRE_STATUS_OUT_OF_MEMORY,
+    return hrx_make_status(HRX_STATUS_OUT_OF_MEMORY,
                             "failed to allocate compiler flags");
   }
 
   for (size_t i = 0; i < flag_count; ++i) {
     if (!flags || !flags[i]) {
       freeFlags(cloned, flag_count);
-      return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT,
+      return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                               "compiler flag is NULL");
     }
     cloned[i] = strdup(flags[i]);
     if (!cloned[i]) {
       freeFlags(cloned, flag_count);
-      return pyre_make_status(PYRE_STATUS_OUT_OF_MEMORY,
+      return hrx_make_status(HRX_STATUS_OUT_OF_MEMORY,
                               "failed to copy compiler flag");
     }
   }
 
   *out_flags = cloned;
-  return pyre_ok_status();
+  return hrx_ok_status();
 }
 
-pyre_status_t compileWithDylib(
-    pyre_compiler_session_t session, std::string_view mlir,
-    pyre_compiler_output_t* output) {
+hrx_status_t compileWithDylib(
+    hrx_compiler_session_t session, std::string_view mlir,
+    hrx_compiler_output_t* output) {
   struct InvocationState {
     iree_compiler_invocation_t* invocation = nullptr;
     iree_compiler_source_t* source = nullptr;
@@ -263,7 +263,7 @@ pyre_status_t compileWithDylib(
 
   std::string mlir_copy(mlir.data(), mlir.size());
   if (iree_compiler_error_t* error = ireeCompilerSourceWrapBuffer(
-          session->iree_session, "pyre_graph.mlir", mlir_copy.c_str(),
+          session->iree_session, "hrx_graph.mlir", mlir_copy.c_str(),
           mlir_copy.size() + 1, /*isNullTerminated=*/true, &state.source)) {
     return statusFromCompilerError("failed to create compiler source", error);
   }
@@ -299,11 +299,11 @@ pyre_status_t compileWithDylib(
     return statusFromCompilerError("failed to map compiler output", error);
   }
 
-  pyre_compiler_output_t compiled =
-      static_cast<pyre_compiler_output_t>(calloc(1, sizeof(*compiled)));
+  hrx_compiler_output_t compiled =
+      static_cast<hrx_compiler_output_t>(calloc(1, sizeof(*compiled)));
   if (!compiled) {
     ireeCompilerOutputDestroy(state.iree_output);
-    return pyre_make_status(PYRE_STATUS_OUT_OF_MEMORY,
+    return hrx_make_status(HRX_STATUS_OUT_OF_MEMORY,
                             "failed to allocate compiler output");
   }
 
@@ -312,41 +312,41 @@ pyre_status_t compileWithDylib(
   compiled->size = static_cast<size_t>(size);
   compiled->impl = state.iree_output;
   compiled->destroy = destroyDylibOutput;
-  compiled->host_allocator = pyre_host_allocator_system();
+  compiled->host_allocator = hrx_host_allocator_system();
   *output = compiled;
-  return pyre_ok_status();
+  return hrx_ok_status();
 }
 
-pyre_status_t readCliVmfb(const std::filesystem::path& path,
-                          pyre_compiler_output_t* output) {
+hrx_status_t readCliVmfb(const std::filesystem::path& path,
+                          hrx_compiler_output_t* output) {
   FILE* file = fopen(path.c_str(), "rb");
   if (!file) {
-    return pyre_make_status(PYRE_STATUS_UNAVAILABLE,
+    return hrx_make_status(HRX_STATUS_UNAVAILABLE,
                             "failed to open iree-compile output");
   }
   if (fseek(file, 0, SEEK_END) != 0) {
     fclose(file);
-    return pyre_make_status(PYRE_STATUS_UNAVAILABLE,
+    return hrx_make_status(HRX_STATUS_UNAVAILABLE,
                             "failed to seek iree-compile output");
   }
   long size = ftell(file);
   if (size < 0) {
     fclose(file);
-    return pyre_make_status(PYRE_STATUS_UNAVAILABLE,
+    return hrx_make_status(HRX_STATUS_UNAVAILABLE,
                             "failed to stat iree-compile output");
   }
   if (fseek(file, 0, SEEK_SET) != 0) {
     fclose(file);
-    return pyre_make_status(PYRE_STATUS_UNAVAILABLE,
+    return hrx_make_status(HRX_STATUS_UNAVAILABLE,
                             "failed to rewind iree-compile output");
   }
 
-  pyre_host_allocator_t host_allocator = pyre_host_allocator_system();
+  hrx_host_allocator_t host_allocator = hrx_host_allocator_system();
   uint8_t* data = nullptr;
-  pyre_status_t status = pyre_host_allocator_malloc_aligned(
+  hrx_status_t status = hrx_host_allocator_malloc_aligned(
       host_allocator, static_cast<size_t>(size) + 1, 4096, 0,
       reinterpret_cast<void**>(&data));
-  if (!pyre_status_is_ok(status)) {
+  if (!hrx_status_is_ok(status)) {
     fclose(file);
     return status;
   }
@@ -357,17 +357,17 @@ pyre_status_t readCliVmfb(const std::filesystem::path& path,
   }
   fclose(file);
   if (bytes_read != static_cast<size_t>(size)) {
-    pyre_host_allocator_free_aligned(host_allocator, data);
-    return pyre_make_status(PYRE_STATUS_UNAVAILABLE,
+    hrx_host_allocator_free_aligned(host_allocator, data);
+    return hrx_make_status(HRX_STATUS_UNAVAILABLE,
                             "failed to read iree-compile output");
   }
   data[size] = 0;
 
-  pyre_compiler_output_t compiled =
-      static_cast<pyre_compiler_output_t>(calloc(1, sizeof(*compiled)));
+  hrx_compiler_output_t compiled =
+      static_cast<hrx_compiler_output_t>(calloc(1, sizeof(*compiled)));
   if (!compiled) {
-    pyre_host_allocator_free_aligned(host_allocator, data);
-    return pyre_make_status(PYRE_STATUS_OUT_OF_MEMORY,
+    hrx_host_allocator_free_aligned(host_allocator, data);
+    return hrx_make_status(HRX_STATUS_OUT_OF_MEMORY,
                             "failed to allocate compiler output");
   }
 
@@ -378,26 +378,26 @@ pyre_status_t readCliVmfb(const std::filesystem::path& path,
   compiled->destroy = destroyCliOutput;
   compiled->host_allocator = host_allocator;
   *output = compiled;
-  return pyre_ok_status();
+  return hrx_ok_status();
 }
 
-pyre_status_t compileWithCli(
-    pyre_compiler_session_t session, std::string_view mlir,
-    pyre_compiler_output_t* output) {
+hrx_status_t compileWithCli(
+    hrx_compiler_session_t session, std::string_view mlir,
+    hrx_compiler_output_t* output) {
   std::filesystem::path temp_dir = std::filesystem::temp_directory_path();
-  std::string mlir_template = (temp_dir / "pyre_graph_XXXXXX.mlir").string();
-  std::string vmfb_template = (temp_dir / "pyre_graph_XXXXXX.vmfb").string();
+  std::string mlir_template = (temp_dir / "hrx_graph_XXXXXX.mlir").string();
+  std::string vmfb_template = (temp_dir / "hrx_graph_XXXXXX.vmfb").string();
 
   int mlir_fd = mkstemps(mlir_template.data(), 5);
   if (mlir_fd < 0) {
-    return pyre_make_status(PYRE_STATUS_UNAVAILABLE,
+    return hrx_make_status(HRX_STATUS_UNAVAILABLE,
                             "failed to create temporary MLIR input");
   }
   int vmfb_fd = mkstemps(vmfb_template.data(), 5);
   if (vmfb_fd < 0) {
     close(mlir_fd);
     std::filesystem::remove(mlir_template);
-    return pyre_make_status(PYRE_STATUS_UNAVAILABLE,
+    return hrx_make_status(HRX_STATUS_UNAVAILABLE,
                             "failed to create temporary VMFB output");
   }
 
@@ -413,7 +413,7 @@ pyre_status_t compileWithCli(
       close(vmfb_fd);
       std::filesystem::remove(mlir_template);
       std::filesystem::remove(vmfb_template);
-      return pyre_make_status(PYRE_STATUS_UNAVAILABLE,
+      return hrx_make_status(HRX_STATUS_UNAVAILABLE,
                               "failed to write temporary MLIR input");
     }
     total_written += static_cast<size_t>(wrote);
@@ -441,7 +441,7 @@ pyre_status_t compileWithCli(
   if (pipe(output_pipe) != 0) {
     std::filesystem::remove(mlir_template);
     std::filesystem::remove(vmfb_template);
-    return pyre_make_status(PYRE_STATUS_UNAVAILABLE,
+    return hrx_make_status(HRX_STATUS_UNAVAILABLE,
                             "failed to create compiler diagnostics pipe");
   }
 
@@ -478,7 +478,7 @@ pyre_status_t compileWithCli(
     std::filesystem::remove(vmfb_template);
     std::string message =
         "failed to launch iree-compile: " + std::to_string(spawn_rc);
-    return pyre_make_status(PYRE_STATUS_UNAVAILABLE, message.c_str());
+    return hrx_make_status(HRX_STATUS_UNAVAILABLE, message.c_str());
   }
 
   int child_status = 0;
@@ -487,7 +487,7 @@ pyre_status_t compileWithCli(
       continue;
     }
     std::filesystem::remove(vmfb_template);
-    return pyre_make_status(PYRE_STATUS_UNAVAILABLE,
+    return hrx_make_status(HRX_STATUS_UNAVAILABLE,
                             "failed to wait for iree-compile");
   }
 
@@ -503,10 +503,10 @@ pyre_status_t compileWithCli(
       message.append(":\n");
       message.append(diagnostics);
     }
-    return pyre_make_status(PYRE_STATUS_INTERNAL, message.c_str());
+    return hrx_make_status(HRX_STATUS_INTERNAL, message.c_str());
   }
 
-  pyre_status_t status = readCliVmfb(vmfb_template, output);
+  hrx_status_t status = readCliVmfb(vmfb_template, output);
   std::filesystem::remove(vmfb_template);
   return status;
 }
@@ -515,140 +515,140 @@ pyre_status_t compileWithCli(
 
 extern "C" {
 
-pyre_status_t pyre_compiler_create(
-    pyre_compiler_backend_t backend, pyre_compiler_t* compiler) {
+hrx_status_t hrx_compiler_create(
+    hrx_compiler_backend_t backend, hrx_compiler_t* compiler) {
   if (!compiler) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT,
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                             "compiler is NULL");
   }
   *compiler = nullptr;
 
   CompilerDiscovery discovery;
-  pyre_status_t status = pyre_ok_status();
-  if (backend == PYRE_COMPILER_BACKEND_AUTO ||
-      backend == PYRE_COMPILER_BACKEND_DYLIB) {
+  hrx_status_t status = hrx_ok_status();
+  if (backend == HRX_COMPILER_BACKEND_AUTO ||
+      backend == HRX_COMPILER_BACKEND_DYLIB) {
     status = ensureCompilerDylibLoaded();
-    if (!pyre_status_is_ok(status)) {
-      if (backend == PYRE_COMPILER_BACKEND_AUTO &&
+    if (!hrx_status_is_ok(status)) {
+      if (backend == HRX_COMPILER_BACKEND_AUTO &&
           discovery.hasCliOverride()) {
-        pyre_status_ignore(status);
+        hrx_status_ignore(status);
         status = discovery.requireCliPath();
-        if (!pyre_status_is_ok(status)) {
+        if (!hrx_status_is_ok(status)) {
           return status;
         }
-        backend = PYRE_COMPILER_BACKEND_CLI;
+        backend = HRX_COMPILER_BACKEND_CLI;
       } else {
         return status;
       }
     } else {
-      backend = PYRE_COMPILER_BACKEND_DYLIB;
+      backend = HRX_COMPILER_BACKEND_DYLIB;
     }
-  } else if (backend == PYRE_COMPILER_BACKEND_CLI) {
+  } else if (backend == HRX_COMPILER_BACKEND_CLI) {
     status = discovery.requireCliPath();
-    if (!pyre_status_is_ok(status)) {
+    if (!hrx_status_is_ok(status)) {
       return status;
     }
-  } else if (backend != PYRE_COMPILER_BACKEND_CLI) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT,
+  } else if (backend != HRX_COMPILER_BACKEND_CLI) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                             "unknown compiler backend");
   }
 
-  pyre_compiler_t created =
-      static_cast<pyre_compiler_t>(calloc(1, sizeof(*created)));
+  hrx_compiler_t created =
+      static_cast<hrx_compiler_t>(calloc(1, sizeof(*created)));
   if (!created) {
-    return pyre_make_status(PYRE_STATUS_OUT_OF_MEMORY,
+    return hrx_make_status(HRX_STATUS_OUT_OF_MEMORY,
                             "failed to allocate compiler");
   }
 
   iree_atomic_ref_count_init(&created->ref_count);
   created->backend = backend;
-  if (backend == PYRE_COMPILER_BACKEND_CLI) {
+  if (backend == HRX_COMPILER_BACKEND_CLI) {
     created->cli_path = strdup(discovery.cliPath().c_str());
     if (!created->cli_path) {
       free(created);
-      return pyre_make_status(PYRE_STATUS_OUT_OF_MEMORY,
+      return hrx_make_status(HRX_STATUS_OUT_OF_MEMORY,
                               "failed to copy compiler CLI path");
     }
   }
 
   *compiler = created;
-  return pyre_ok_status();
+  return hrx_ok_status();
 }
 
-void pyre_compiler_retain(pyre_compiler_t compiler) {
+void hrx_compiler_retain(hrx_compiler_t compiler) {
   iree_atomic_ref_count_inc(&compiler->ref_count);
 }
 
-void pyre_compiler_release(pyre_compiler_t compiler) {
+void hrx_compiler_release(hrx_compiler_t compiler) {
   if (iree_atomic_ref_count_dec(&compiler->ref_count) == 1) {
     free(compiler->cli_path);
     free(compiler);
   }
 }
 
-pyre_compiler_backend_t pyre_compiler_backend(pyre_compiler_t compiler) {
+hrx_compiler_backend_t hrx_compiler_backend(hrx_compiler_t compiler) {
   return compiler->backend;
 }
 
-pyre_status_t pyre_compiler_session_create(
-    pyre_compiler_t compiler, pyre_compiler_session_t* session) {
+hrx_status_t hrx_compiler_session_create(
+    hrx_compiler_t compiler, hrx_compiler_session_t* session) {
   if (!compiler || !session) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT,
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                             "compiler or session is NULL");
   }
   *session = nullptr;
 
-  pyre_compiler_session_t created =
-      static_cast<pyre_compiler_session_t>(calloc(1, sizeof(*created)));
+  hrx_compiler_session_t created =
+      static_cast<hrx_compiler_session_t>(calloc(1, sizeof(*created)));
   if (!created) {
-    return pyre_make_status(PYRE_STATUS_OUT_OF_MEMORY,
+    return hrx_make_status(HRX_STATUS_OUT_OF_MEMORY,
                             "failed to allocate compiler session");
   }
 
   iree_atomic_ref_count_init(&created->ref_count);
   created->compiler = compiler;
-  pyre_compiler_retain(compiler);
-  if (compiler->backend == PYRE_COMPILER_BACKEND_DYLIB) {
+  hrx_compiler_retain(compiler);
+  if (compiler->backend == HRX_COMPILER_BACKEND_DYLIB) {
     created->iree_session = ireeCompilerSessionCreate();
   }
 
   *session = created;
-  return pyre_ok_status();
+  return hrx_ok_status();
 }
 
-void pyre_compiler_session_retain(pyre_compiler_session_t session) {
-  pyre_compiler_retain(session->compiler);
+void hrx_compiler_session_retain(hrx_compiler_session_t session) {
+  hrx_compiler_retain(session->compiler);
   iree_atomic_ref_count_inc(&session->ref_count);
 }
 
-void pyre_compiler_session_release(pyre_compiler_session_t session) {
+void hrx_compiler_session_release(hrx_compiler_session_t session) {
   if (iree_atomic_ref_count_dec(&session->ref_count) == 1) {
     if (session->iree_session) {
       ireeCompilerSessionDestroy(session->iree_session);
     }
     freeFlags(session->flags, session->flag_count);
-    pyre_compiler_release(session->compiler);
+    hrx_compiler_release(session->compiler);
     free(session);
   } else {
-    pyre_compiler_release(session->compiler);
+    hrx_compiler_release(session->compiler);
   }
 }
 
-pyre_status_t pyre_compiler_session_set_flags(
-    pyre_compiler_session_t session, const char* const* flags,
+hrx_status_t hrx_compiler_session_set_flags(
+    hrx_compiler_session_t session, const char* const* flags,
     size_t flag_count) {
   if (!session || (flag_count > 0 && !flags)) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT,
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                             "session or flags is NULL");
   }
 
   char** cloned_flags = nullptr;
-  pyre_status_t status = cloneFlags(flags, flag_count, &cloned_flags);
-  if (!pyre_status_is_ok(status)) {
+  hrx_status_t status = cloneFlags(flags, flag_count, &cloned_flags);
+  if (!hrx_status_is_ok(status)) {
     return status;
   }
 
-  if (session->compiler->backend == PYRE_COMPILER_BACKEND_DYLIB) {
+  if (session->compiler->backend == HRX_COMPILER_BACKEND_DYLIB) {
     if (iree_compiler_error_t* error = ireeCompilerSessionSetFlags(
             session->iree_session, static_cast<int>(flag_count), flags)) {
       freeFlags(cloned_flags, flag_count);
@@ -659,45 +659,45 @@ pyre_status_t pyre_compiler_session_set_flags(
   freeFlags(session->flags, session->flag_count);
   session->flags = cloned_flags;
   session->flag_count = flag_count;
-  return pyre_ok_status();
+  return hrx_ok_status();
 }
 
-pyre_status_t pyre_compiler_session_compile_mlir(
-    pyre_compiler_session_t session, const char* mlir_data, size_t mlir_size,
-    pyre_compiler_output_t* output) {
+hrx_status_t hrx_compiler_session_compile_mlir(
+    hrx_compiler_session_t session, const char* mlir_data, size_t mlir_size,
+    hrx_compiler_output_t* output) {
   if (!session || !mlir_data || !output) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT,
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                             "session, mlir_data, or output is NULL");
   }
   *output = nullptr;
   if (mlir_size == 0) {
-    return pyre_make_status(PYRE_STATUS_INVALID_ARGUMENT,
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                             "mlir_size must be > 0");
   }
 
   std::string_view mlir(mlir_data, mlir_size);
-  if (session->compiler->backend == PYRE_COMPILER_BACKEND_CLI) {
+  if (session->compiler->backend == HRX_COMPILER_BACKEND_CLI) {
     return compileWithCli(session, mlir, output);
   }
   return compileWithDylib(session, mlir, output);
 }
 
-void pyre_compiler_output_retain(pyre_compiler_output_t output) {
+void hrx_compiler_output_retain(hrx_compiler_output_t output) {
   iree_atomic_ref_count_inc(&output->ref_count);
 }
 
-void pyre_compiler_output_release(pyre_compiler_output_t output) {
+void hrx_compiler_output_release(hrx_compiler_output_t output) {
   if (iree_atomic_ref_count_dec(&output->ref_count) == 1) {
     output->destroy(output);
   }
 }
 
-const uint8_t* pyre_compiler_output_data(
-    pyre_compiler_output_t output) {
+const uint8_t* hrx_compiler_output_data(
+    hrx_compiler_output_t output) {
   return output ? output->data : nullptr;
 }
 
-size_t pyre_compiler_output_size(pyre_compiler_output_t output) {
+size_t hrx_compiler_output_size(hrx_compiler_output_t output) {
   return output ? output->size : 0;
 }
 

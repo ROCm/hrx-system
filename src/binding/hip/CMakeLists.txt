@@ -1,4 +1,4 @@
-# Copyright 2026 The Pyre Authors
+# Copyright 2026 The HRX Authors
 # SPDX-License-Identifier: Apache-2.0
 #
 # HIP binding — libamdhip64.so drop-in replacement.
@@ -10,7 +10,7 @@ target_include_directories(amdhip64 PRIVATE
 )
 
 target_link_libraries(amdhip64 PRIVATE
-    pyre_streaming
+    hrx_streaming
     iree_base_base
     iree_hal_hal
 )
