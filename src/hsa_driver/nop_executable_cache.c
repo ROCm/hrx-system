@@ -23,44 +23,44 @@ typedef struct iree_hal_hsa_nop_executable_cache_t {
 static const iree_hal_executable_cache_vtable_t
     iree_hal_hsa_nop_executable_cache_vtable;
 
-static iree_hal_hsa_nop_executable_cache_t*
-iree_hal_hsa_nop_executable_cache_cast(iree_hal_executable_cache_t* base_value) {
+static iree_hal_hsa_nop_executable_cache_t *
+iree_hal_hsa_nop_executable_cache_cast(
+    iree_hal_executable_cache_t *base_value) {
   IREE_HAL_ASSERT_TYPE(base_value, &iree_hal_hsa_nop_executable_cache_vtable);
-  return (iree_hal_hsa_nop_executable_cache_t*)base_value;
+  return (iree_hal_hsa_nop_executable_cache_t *)base_value;
 }
 
 iree_status_t iree_hal_hsa_nop_executable_cache_create(
-    iree_string_view_t identifier,
-    iree_hal_hsa_device_topology_t topology,
+    iree_string_view_t identifier, iree_hal_hsa_device_topology_t topology,
     iree_allocator_t host_allocator,
-    iree_hal_executable_cache_t** out_executable_cache) {
+    iree_hal_executable_cache_t **out_executable_cache) {
   IREE_ASSERT_ARGUMENT(out_executable_cache);
   *out_executable_cache = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  iree_hal_hsa_nop_executable_cache_t* executable_cache = NULL;
+  iree_hal_hsa_nop_executable_cache_t *executable_cache = NULL;
   iree_host_size_t total_size =
       iree_sizeof_struct(*executable_cache) + identifier.size;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_allocator_malloc(host_allocator, total_size,
-                                (void**)&executable_cache));
+                                (void **)&executable_cache));
 
   iree_hal_resource_initialize(&iree_hal_hsa_nop_executable_cache_vtable,
                                &executable_cache->resource);
   executable_cache->topology = topology;
   executable_cache->host_allocator = host_allocator;
-  iree_string_view_append_to_buffer(
-      identifier, &executable_cache->identifier,
-      (char*)executable_cache + iree_sizeof_struct(*executable_cache));
+  iree_string_view_append_to_buffer(identifier, &executable_cache->identifier,
+                                    (char *)executable_cache +
+                                        iree_sizeof_struct(*executable_cache));
 
-  *out_executable_cache = (iree_hal_executable_cache_t*)executable_cache;
+  *out_executable_cache = (iree_hal_executable_cache_t *)executable_cache;
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
 }
 
 static void iree_hal_hsa_nop_executable_cache_destroy(
-    iree_hal_executable_cache_t* base_executable_cache) {
-  iree_hal_hsa_nop_executable_cache_t* executable_cache =
+    iree_hal_executable_cache_t *base_executable_cache) {
+  iree_hal_hsa_nop_executable_cache_t *executable_cache =
       iree_hal_hsa_nop_executable_cache_cast(base_executable_cache);
   iree_allocator_t host_allocator = executable_cache->host_allocator;
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -71,11 +71,11 @@ static void iree_hal_hsa_nop_executable_cache_destroy(
 }
 
 static iree_status_t iree_hal_hsa_nop_executable_cache_infer_format(
-    iree_hal_executable_cache_t* base_executable_cache,
+    iree_hal_executable_cache_t *base_executable_cache,
     iree_hal_executable_caching_mode_t caching_mode,
     iree_const_byte_span_t executable_data,
-    iree_host_size_t executable_format_capacity, char* executable_format,
-    iree_host_size_t* out_inferred_size) {
+    iree_host_size_t executable_format_capacity, char *executable_format,
+    iree_host_size_t *out_inferred_size) {
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_status_t status = iree_hal_hsa_native_executable_infer_format(
       executable_data, executable_format_capacity, executable_format,
@@ -85,7 +85,7 @@ static iree_status_t iree_hal_hsa_nop_executable_cache_infer_format(
 }
 
 static bool iree_hal_hsa_nop_executable_cache_can_prepare_format(
-    iree_hal_executable_cache_t* base_executable_cache,
+    iree_hal_executable_cache_t *base_executable_cache,
     iree_hal_executable_caching_mode_t caching_mode,
     iree_string_view_t executable_format) {
   // We support HSACO format (same as HIP).
@@ -93,10 +93,10 @@ static bool iree_hal_hsa_nop_executable_cache_can_prepare_format(
 }
 
 static iree_status_t iree_hal_hsa_nop_executable_cache_prepare_executable(
-    iree_hal_executable_cache_t* base_executable_cache,
-    const iree_hal_executable_params_t* executable_params,
-    iree_hal_executable_t** out_executable) {
-  iree_hal_hsa_nop_executable_cache_t* executable_cache =
+    iree_hal_executable_cache_t *base_executable_cache,
+    const iree_hal_executable_params_t *executable_params,
+    iree_hal_executable_t **out_executable) {
+  iree_hal_hsa_nop_executable_cache_t *executable_cache =
       iree_hal_hsa_nop_executable_cache_cast(base_executable_cache);
   return iree_hal_hsa_native_executable_create(
       executable_cache->topology, executable_params,
@@ -107,7 +107,8 @@ static const iree_hal_executable_cache_vtable_t
     iree_hal_hsa_nop_executable_cache_vtable = {
         .destroy = iree_hal_hsa_nop_executable_cache_destroy,
         .infer_format = iree_hal_hsa_nop_executable_cache_infer_format,
-        .can_prepare_format = iree_hal_hsa_nop_executable_cache_can_prepare_format,
-        .prepare_executable = iree_hal_hsa_nop_executable_cache_prepare_executable,
+        .can_prepare_format =
+            iree_hal_hsa_nop_executable_cache_can_prepare_format,
+        .prepare_executable =
+            iree_hal_hsa_nop_executable_cache_prepare_executable,
 };
-

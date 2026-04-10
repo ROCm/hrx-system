@@ -23,10 +23,10 @@ extern "C" {
 #define CUDAAPI __declspec(dllexport)
 #else
 #define CUDAAPI __declspec(dllimport)
-#endif  // IREE_HAL_STREAMING_CUDA_EXPORTS
+#endif // IREE_HAL_STREAMING_CUDA_EXPORTS
 #else
 #define CUDAAPI __attribute__((visibility("default")))
-#endif  // _WIN32
+#endif // _WIN32
 
 //===----------------------------------------------------------------------===//
 // CUDA API types and definitions
@@ -128,12 +128,12 @@ typedef enum cudaError_enum {
   CUDA_ERROR_UNKNOWN = 999
 } CUresult;
 
-typedef struct CUctx_st* CUcontext;
-typedef struct CUmod_st* CUmodule;
-typedef struct CUfunc_st* CUfunction;
-typedef struct CUstream_st* CUstream;
-typedef struct CUevent_st* CUevent;
-typedef struct CUarray_st* CUarray;
+typedef struct CUctx_st *CUcontext;
+typedef struct CUmod_st *CUmodule;
+typedef struct CUfunc_st *CUfunction;
+typedef struct CUstream_st *CUstream;
+typedef struct CUevent_st *CUevent;
+typedef struct CUarray_st *CUarray;
 typedef int CUdevice;
 typedef uintptr_t CUdeviceptr;
 
@@ -148,7 +148,7 @@ typedef enum CUmemorytype {
 #define CU_CTX_SCHED_SPIN 0x01
 #define CU_CTX_SCHED_YIELD 0x02
 #define CU_CTX_SCHED_BLOCKING_SYNC 0x04
-#define CU_CTX_SCHED_MASK 0x07  // Mask for scheduling mode bits
+#define CU_CTX_SCHED_MASK 0x07 // Mask for scheduling mode bits
 #define CU_CTX_MAP_HOST 0x08
 #define CU_CTX_LMEM_RESIZE_TO_MAX 0x10
 
@@ -284,7 +284,7 @@ typedef struct CUDA_LAUNCH_PARAMS {
   unsigned int blockDimZ;
   unsigned int sharedMemBytes;
   CUstream hStream;
-  void** kernelParams;
+  void **kernelParams;
 } CUDA_LAUNCH_PARAMS;
 
 typedef struct CUuuid {
@@ -299,7 +299,7 @@ typedef struct CUipcMemHandle_st {
   char reserved[64];
 } CUipcMemHandle;
 
-typedef void (*CUhostFn)(void* userData);
+typedef void (*CUhostFn)(void *userData);
 
 typedef size_t (*CUoccupancyB2DSize)(int blockSize);
 
@@ -310,9 +310,9 @@ typedef size_t (*CUoccupancyB2DSize)(int blockSize);
 #define CU_MEMHOSTREGISTER_READ_ONLY 0x08
 
 // Graph types.
-typedef struct CUgraph_st* CUgraph;
-typedef struct CUgraphExec_st* CUgraphExec;
-typedef struct CUgraphNode_st* CUgraphNode;
+typedef struct CUgraph_st *CUgraph;
+typedef struct CUgraphExec_st *CUgraphExec;
+typedef struct CUgraphNode_st *CUgraphNode;
 
 // Memory advice enum.
 typedef enum CUmem_advise_enum {
@@ -396,9 +396,9 @@ typedef enum CUgraphInstantiate_flags_enum {
 #define CU_STREAM_SET_CAPTURE_DEPENDENCIES 0x2
 
 // Kernel launch parameter markers.
-#define CU_LAUNCH_PARAM_END ((void*)0x00)
-#define CU_LAUNCH_PARAM_BUFFER_POINTER ((void*)0x01)
-#define CU_LAUNCH_PARAM_BUFFER_SIZE ((void*)0x02)
+#define CU_LAUNCH_PARAM_END ((void *)0x00)
+#define CU_LAUNCH_PARAM_BUFFER_POINTER ((void *)0x01)
+#define CU_LAUNCH_PARAM_BUFFER_SIZE ((void *)0x02)
 
 //===----------------------------------------------------------------------===//
 // Graph node parameter structures
@@ -406,67 +406,67 @@ typedef enum CUgraphInstantiate_flags_enum {
 
 // Kernel node parameters.
 typedef struct CUDA_KERNEL_NODE_PARAMS_st {
-  CUfunction func;              // Kernel function.
-  unsigned int gridDimX;        // Grid X dimension.
-  unsigned int gridDimY;        // Grid Y dimension.
-  unsigned int gridDimZ;        // Grid Z dimension.
-  unsigned int blockDimX;       // Block X dimension.
-  unsigned int blockDimY;       // Block Y dimension.
-  unsigned int blockDimZ;       // Block Z dimension.
-  unsigned int sharedMemBytes;  // Dynamic shared memory size.
-  void** kernelParams;          // Array of kernel parameters.
-  void** extra;                 // Extra options.
+  CUfunction func;             // Kernel function.
+  unsigned int gridDimX;       // Grid X dimension.
+  unsigned int gridDimY;       // Grid Y dimension.
+  unsigned int gridDimZ;       // Grid Z dimension.
+  unsigned int blockDimX;      // Block X dimension.
+  unsigned int blockDimY;      // Block Y dimension.
+  unsigned int blockDimZ;      // Block Z dimension.
+  unsigned int sharedMemBytes; // Dynamic shared memory size.
+  void **kernelParams;         // Array of kernel parameters.
+  void **extra;                // Extra options.
 } CUDA_KERNEL_NODE_PARAMS;
 
 // Memory copy node parameters.
 typedef struct CUDA_MEMCPY3D_st {
-  size_t srcXInBytes;          // Source X in bytes.
-  size_t srcY;                 // Source Y.
-  size_t srcZ;                 // Source Z.
-  size_t srcLOD;               // Source LOD.
-  CUmemorytype srcMemoryType;  // Source memory type.
-  const void* srcHost;         // Source host pointer.
-  CUdeviceptr srcDevice;       // Source device pointer.
-  CUarray srcArray;            // Source array.
-  void* reserved0;             // Reserved, must be NULL.
-  size_t srcPitch;             // Source pitch.
-  size_t srcHeight;            // Source height.
+  size_t srcXInBytes;         // Source X in bytes.
+  size_t srcY;                // Source Y.
+  size_t srcZ;                // Source Z.
+  size_t srcLOD;              // Source LOD.
+  CUmemorytype srcMemoryType; // Source memory type.
+  const void *srcHost;        // Source host pointer.
+  CUdeviceptr srcDevice;      // Source device pointer.
+  CUarray srcArray;           // Source array.
+  void *reserved0;            // Reserved, must be NULL.
+  size_t srcPitch;            // Source pitch.
+  size_t srcHeight;           // Source height.
 
-  size_t dstXInBytes;          // Destination X in bytes.
-  size_t dstY;                 // Destination Y.
-  size_t dstZ;                 // Destination Z.
-  size_t dstLOD;               // Destination LOD.
-  CUmemorytype dstMemoryType;  // Destination memory type.
-  void* dstHost;               // Destination host pointer.
-  CUdeviceptr dstDevice;       // Destination device pointer.
-  CUarray dstArray;            // Destination array.
-  void* reserved1;             // Reserved, must be NULL.
-  size_t dstPitch;             // Destination pitch.
-  size_t dstHeight;            // Destination height.
+  size_t dstXInBytes;         // Destination X in bytes.
+  size_t dstY;                // Destination Y.
+  size_t dstZ;                // Destination Z.
+  size_t dstLOD;              // Destination LOD.
+  CUmemorytype dstMemoryType; // Destination memory type.
+  void *dstHost;              // Destination host pointer.
+  CUdeviceptr dstDevice;      // Destination device pointer.
+  CUarray dstArray;           // Destination array.
+  void *reserved1;            // Reserved, must be NULL.
+  size_t dstPitch;            // Destination pitch.
+  size_t dstHeight;           // Destination height.
 
-  size_t WidthInBytes;  // Width in bytes.
-  size_t Height;        // Height.
-  size_t Depth;         // Depth.
+  size_t WidthInBytes; // Width in bytes.
+  size_t Height;       // Height.
+  size_t Depth;        // Depth.
 } CUDA_MEMCPY3D;
 
 // Memset node parameters.
 typedef struct CUDA_MEMSET_NODE_PARAMS_st {
-  CUdeviceptr dst;           // Destination device pointer.
-  size_t pitch;              // Pitch (0 for 1D).
-  unsigned int value;        // Value to set.
-  unsigned int elementSize;  // Size of each element (1, 2, or 4 bytes).
-  size_t width;              // Width in elements.
-  size_t height;             // Height in elements.
+  CUdeviceptr dst;          // Destination device pointer.
+  size_t pitch;             // Pitch (0 for 1D).
+  unsigned int value;       // Value to set.
+  unsigned int elementSize; // Size of each element (1, 2, or 4 bytes).
+  size_t width;             // Width in elements.
+  size_t height;            // Height in elements.
 } CUDA_MEMSET_NODE_PARAMS;
 
 // Host node parameters.
 typedef struct CUDA_HOST_NODE_PARAMS_st {
-  CUhostFn fn;     // Host function to call.
-  void* userData;  // User data for the function.
+  CUhostFn fn;    // Host function to call.
+  void *userData; // User data for the function.
 } CUDA_HOST_NODE_PARAMS;
 
 // Memory pool handle type.
-typedef struct CUmemPoolHandle_st* CUmemoryPool;
+typedef struct CUmemPoolHandle_st *CUmemoryPool;
 
 // Memory allocation handle types.
 typedef enum CUmemAllocationHandleType_enum {
@@ -505,7 +505,7 @@ typedef struct CUmemPoolProps_st {
   CUmemAllocationType allocType;
   CUmemAllocationHandleType handleTypes;
   CUmemLocation location;
-  void* win32SecurityAttributes;
+  void *win32SecurityAttributes;
   size_t maxSize;
   unsigned char reserved[16];
 } CUmemPoolProps;
@@ -547,95 +547,95 @@ typedef struct CUmemAccessDesc_st {
 
 // Initialization
 CUDAAPI CUresult cuInit(unsigned int Flags);
-CUDAAPI CUresult cuHALDeinit(void);  // HAL extension
-CUDAAPI CUresult cuDriverGetVersion(int* driverVersion);
+CUDAAPI CUresult cuHALDeinit(void); // HAL extension
+CUDAAPI CUresult cuDriverGetVersion(int *driverVersion);
 
 // Device management
-CUDAAPI CUresult cuDeviceGet(CUdevice* device, int ordinal);
-CUDAAPI CUresult cuDeviceGetCount(int* count);
-CUDAAPI CUresult cuDeviceGetName(char* name, int len, CUdevice dev);
-CUDAAPI CUresult cuDeviceGetUuid(CUuuid* uuid, CUdevice dev);
-CUDAAPI CUresult cuDeviceTotalMem(size_t* bytes, CUdevice dev);
-CUDAAPI CUresult cuDeviceGetAttribute(int* pi, CUdevice_attribute attrib,
+CUDAAPI CUresult cuDeviceGet(CUdevice *device, int ordinal);
+CUDAAPI CUresult cuDeviceGetCount(int *count);
+CUDAAPI CUresult cuDeviceGetName(char *name, int len, CUdevice dev);
+CUDAAPI CUresult cuDeviceGetUuid(CUuuid *uuid, CUdevice dev);
+CUDAAPI CUresult cuDeviceTotalMem(size_t *bytes, CUdevice dev);
+CUDAAPI CUresult cuDeviceGetAttribute(int *pi, CUdevice_attribute attrib,
                                       CUdevice dev);
-CUDAAPI CUresult cuDeviceCanAccessPeer(int* canAccessPeer, CUdevice dev,
+CUDAAPI CUresult cuDeviceCanAccessPeer(int *canAccessPeer, CUdevice dev,
                                        CUdevice peerDev);
-CUDAAPI CUresult cuDeviceGetP2PAttribute(int* value,
+CUDAAPI CUresult cuDeviceGetP2PAttribute(int *value,
                                          CUdevice_P2PAttribute attrib,
                                          CUdevice srcDevice,
                                          CUdevice dstDevice);
-CUDAAPI CUresult cuDeviceGetByPCIBusId(CUdevice* dev, const char* pciBusId);
-CUDAAPI CUresult cuDeviceGetPCIBusId(char* pciBusId, int len, CUdevice dev);
+CUDAAPI CUresult cuDeviceGetByPCIBusId(CUdevice *dev, const char *pciBusId);
+CUDAAPI CUresult cuDeviceGetPCIBusId(char *pciBusId, int len, CUdevice dev);
 
 // Primary context management
-CUDAAPI CUresult cuDevicePrimaryCtxRetain(CUcontext* pctx, CUdevice dev);
+CUDAAPI CUresult cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev);
 CUDAAPI CUresult cuDevicePrimaryCtxRelease(CUdevice dev);
 CUDAAPI CUresult cuDevicePrimaryCtxSetFlags(CUdevice dev, unsigned int flags);
-CUDAAPI CUresult cuDevicePrimaryCtxGetState(CUdevice dev, unsigned int* flags,
-                                            int* active);
+CUDAAPI CUresult cuDevicePrimaryCtxGetState(CUdevice dev, unsigned int *flags,
+                                            int *active);
 CUDAAPI CUresult cuDevicePrimaryCtxReset(CUdevice dev);
 
 // Context management
-CUDAAPI CUresult cuCtxCreate(CUcontext* pctx, unsigned int flags, CUdevice dev);
+CUDAAPI CUresult cuCtxCreate(CUcontext *pctx, unsigned int flags, CUdevice dev);
 CUDAAPI CUresult cuCtxDestroy(CUcontext ctx);
 CUDAAPI CUresult cuCtxPushCurrent(CUcontext ctx);
-CUDAAPI CUresult cuCtxPopCurrent(CUcontext* pctx);
+CUDAAPI CUresult cuCtxPopCurrent(CUcontext *pctx);
 CUDAAPI CUresult cuCtxSetCurrent(CUcontext ctx);
-CUDAAPI CUresult cuCtxGetCurrent(CUcontext* pctx);
-CUDAAPI CUresult cuCtxGetDevice(CUdevice* device);
-CUDAAPI CUresult cuCtxGetFlags(unsigned int* flags);
+CUDAAPI CUresult cuCtxGetCurrent(CUcontext *pctx);
+CUDAAPI CUresult cuCtxGetDevice(CUdevice *device);
+CUDAAPI CUresult cuCtxGetFlags(unsigned int *flags);
 CUDAAPI CUresult cuCtxSynchronize(void);
 CUDAAPI CUresult cuCtxSetLimit(CUlimit limit, size_t value);
-CUDAAPI CUresult cuCtxGetLimit(size_t* pvalue, CUlimit limit);
-CUDAAPI CUresult cuCtxGetApiVersion(CUcontext ctx, unsigned int* version);
-CUDAAPI CUresult cuCtxGetStreamPriorityRange(int* leastPriority,
-                                             int* greatestPriority);
+CUDAAPI CUresult cuCtxGetLimit(size_t *pvalue, CUlimit limit);
+CUDAAPI CUresult cuCtxGetApiVersion(CUcontext ctx, unsigned int *version);
+CUDAAPI CUresult cuCtxGetStreamPriorityRange(int *leastPriority,
+                                             int *greatestPriority);
 CUDAAPI CUresult cuCtxEnablePeerAccess(CUcontext peerContext,
                                        unsigned int Flags);
 CUDAAPI CUresult cuCtxDisablePeerAccess(CUcontext peerContext);
 
 // Module management
-CUDAAPI CUresult cuModuleLoad(CUmodule* module, const char* fname);
-CUDAAPI CUresult cuModuleLoadData(CUmodule* module, const void* image);
-CUDAAPI CUresult cuModuleLoadDataEx(CUmodule* module, const void* image,
+CUDAAPI CUresult cuModuleLoad(CUmodule *module, const char *fname);
+CUDAAPI CUresult cuModuleLoadData(CUmodule *module, const void *image);
+CUDAAPI CUresult cuModuleLoadDataEx(CUmodule *module, const void *image,
                                     unsigned int numOptions,
-                                    CUjit_option* options, void** optionValues);
-CUDAAPI CUresult cuModuleLoadFatBinary(CUmodule* module, const void* fatCubin);
+                                    CUjit_option *options, void **optionValues);
+CUDAAPI CUresult cuModuleLoadFatBinary(CUmodule *module, const void *fatCubin);
 CUDAAPI CUresult cuModuleUnload(CUmodule hmod);
-CUDAAPI CUresult cuModuleGetFunction(CUfunction* hfunc, CUmodule hmod,
-                                     const char* name);
-CUDAAPI CUresult cuModuleGetGlobal(CUdeviceptr* dptr, size_t* bytes,
-                                   CUmodule hmod, const char* name);
+CUDAAPI CUresult cuModuleGetFunction(CUfunction *hfunc, CUmodule hmod,
+                                     const char *name);
+CUDAAPI CUresult cuModuleGetGlobal(CUdeviceptr *dptr, size_t *bytes,
+                                   CUmodule hmod, const char *name);
 
 // Memory management
-CUDAAPI CUresult cuMemGetInfo(size_t* free, size_t* total);
-CUDAAPI CUresult cuMemAlloc(CUdeviceptr* dptr, size_t bytesize);
-CUDAAPI CUresult cuMemAllocPitch(CUdeviceptr* dptr, size_t* pPitch,
+CUDAAPI CUresult cuMemGetInfo(size_t *free, size_t *total);
+CUDAAPI CUresult cuMemAlloc(CUdeviceptr *dptr, size_t bytesize);
+CUDAAPI CUresult cuMemAllocPitch(CUdeviceptr *dptr, size_t *pPitch,
                                  size_t WidthInBytes, size_t Height,
                                  unsigned int ElementSizeBytes);
 CUDAAPI CUresult cuMemFree(CUdeviceptr dptr);
-CUDAAPI CUresult cuMemGetAddressRange(CUdeviceptr* pbase, size_t* psize,
+CUDAAPI CUresult cuMemGetAddressRange(CUdeviceptr *pbase, size_t *psize,
                                       CUdeviceptr dptr);
-CUDAAPI CUresult cuMemAllocHost(void** pp, size_t bytesize);
-CUDAAPI CUresult cuMemFreeHost(void* p);
-CUDAAPI CUresult cuMemHostAlloc(void** pp, size_t bytesize, unsigned int Flags);
-CUDAAPI CUresult cuMemHostGetDevicePointer(CUdeviceptr* pdptr, void* p,
+CUDAAPI CUresult cuMemAllocHost(void **pp, size_t bytesize);
+CUDAAPI CUresult cuMemFreeHost(void *p);
+CUDAAPI CUresult cuMemHostAlloc(void **pp, size_t bytesize, unsigned int Flags);
+CUDAAPI CUresult cuMemHostGetDevicePointer(CUdeviceptr *pdptr, void *p,
                                            unsigned int Flags);
-CUDAAPI CUresult cuMemHostGetFlags(unsigned int* pFlags, void* p);
-CUDAAPI CUresult cuMemAllocManaged(CUdeviceptr* dptr, size_t bytesize,
+CUDAAPI CUresult cuMemHostGetFlags(unsigned int *pFlags, void *p);
+CUDAAPI CUresult cuMemAllocManaged(CUdeviceptr *dptr, size_t bytesize,
                                    unsigned int flags);
-CUDAAPI CUresult cuMemHostRegister(void* p, size_t bytesize,
+CUDAAPI CUresult cuMemHostRegister(void *p, size_t bytesize,
                                    unsigned int Flags);
-CUDAAPI CUresult cuMemHostUnregister(void* p);
+CUDAAPI CUresult cuMemHostUnregister(void *p);
 
 // Synchronous memory copies
 CUDAAPI CUresult cuMemcpy(CUdeviceptr dst, CUdeviceptr src, size_t ByteCount);
 CUDAAPI CUresult cuMemcpyPeer(CUdeviceptr dstDevice, CUcontext dstContext,
                               CUdeviceptr srcDevice, CUcontext srcContext,
                               size_t ByteCount);
-CUDAAPI CUresult cuMemcpyHtoD(CUdeviceptr dstDevice, const void* srcHost,
+CUDAAPI CUresult cuMemcpyHtoD(CUdeviceptr dstDevice, const void *srcHost,
                               size_t ByteCount);
-CUDAAPI CUresult cuMemcpyDtoH(void* dstHost, CUdeviceptr srcDevice,
+CUDAAPI CUresult cuMemcpyDtoH(void *dstHost, CUdeviceptr srcDevice,
                               size_t ByteCount);
 CUDAAPI CUresult cuMemcpyDtoD(CUdeviceptr dstDevice, CUdeviceptr srcDevice,
                               size_t ByteCount);
@@ -646,9 +646,9 @@ CUDAAPI CUresult cuMemcpyAsync(CUdeviceptr dst, CUdeviceptr src,
 CUDAAPI CUresult cuMemcpyPeerAsync(CUdeviceptr dstDevice, CUcontext dstContext,
                                    CUdeviceptr srcDevice, CUcontext srcContext,
                                    size_t ByteCount, CUstream hStream);
-CUDAAPI CUresult cuMemcpyHtoDAsync(CUdeviceptr dstDevice, const void* srcHost,
+CUDAAPI CUresult cuMemcpyHtoDAsync(CUdeviceptr dstDevice, const void *srcHost,
                                    size_t ByteCount, CUstream hStream);
-CUDAAPI CUresult cuMemcpyDtoHAsync(void* dstHost, CUdeviceptr srcDevice,
+CUDAAPI CUresult cuMemcpyDtoHAsync(void *dstHost, CUdeviceptr srcDevice,
                                    size_t ByteCount, CUstream hStream);
 CUDAAPI CUresult cuMemcpyDtoDAsync(CUdeviceptr dstDevice, CUdeviceptr srcDevice,
                                    size_t ByteCount, CUstream hStream);
@@ -666,50 +666,50 @@ CUDAAPI CUresult cuMemsetD32Async(CUdeviceptr dstDevice, unsigned int ui,
                                   size_t N, CUstream hStream);
 
 // IPC memory handles
-CUDAAPI CUresult cuIpcGetMemHandle(CUipcMemHandle* pHandle, CUdeviceptr dptr);
-CUDAAPI CUresult cuIpcOpenMemHandle(CUdeviceptr* pdptr, CUipcMemHandle handle,
+CUDAAPI CUresult cuIpcGetMemHandle(CUipcMemHandle *pHandle, CUdeviceptr dptr);
+CUDAAPI CUresult cuIpcOpenMemHandle(CUdeviceptr *pdptr, CUipcMemHandle handle,
                                     unsigned int Flags);
 CUDAAPI CUresult cuIpcCloseMemHandle(CUdeviceptr dptr);
 
 // Memory pool management
-CUDAAPI CUresult cuMemPoolCreate(CUmemoryPool* pool,
-                                 const CUmemPoolProps* poolProps);
+CUDAAPI CUresult cuMemPoolCreate(CUmemoryPool *pool,
+                                 const CUmemPoolProps *poolProps);
 CUDAAPI CUresult cuMemPoolDestroy(CUmemoryPool pool);
 CUDAAPI CUresult cuMemPoolSetAttribute(CUmemoryPool pool,
-                                       CUmemPool_attribute attr, void* value);
+                                       CUmemPool_attribute attr, void *value);
 CUDAAPI CUresult cuMemPoolGetAttribute(CUmemoryPool pool,
-                                       CUmemPool_attribute attr, void* value);
+                                       CUmemPool_attribute attr, void *value);
 CUDAAPI CUresult cuMemPoolSetAccess(CUmemoryPool pool,
-                                    const CUmemAccessDesc* map, size_t count);
-CUDAAPI CUresult cuMemPoolGetAccess(CUmemAccess_flags* flags, CUmemoryPool pool,
-                                    CUmemLocation* location);
+                                    const CUmemAccessDesc *map, size_t count);
+CUDAAPI CUresult cuMemPoolGetAccess(CUmemAccess_flags *flags, CUmemoryPool pool,
+                                    CUmemLocation *location);
 CUDAAPI CUresult cuMemPoolTrimTo(CUmemoryPool pool, size_t minBytesToKeep);
 CUDAAPI CUresult cuMemPoolExportToShareableHandle(
-    void* handle_out, CUmemoryPool pool, CUmemAllocationHandleType handleType,
+    void *handle_out, CUmemoryPool pool, CUmemAllocationHandleType handleType,
     unsigned long long flags);
 CUDAAPI CUresult cuMemPoolImportFromShareableHandle(
-    CUmemoryPool* pool_out, void* handle, CUmemAllocationHandleType handleType,
+    CUmemoryPool *pool_out, void *handle, CUmemAllocationHandleType handleType,
     unsigned long long flags);
-CUDAAPI CUresult cuMemPoolExportPointer(CUmemPoolPtrExportData* shareData_out,
+CUDAAPI CUresult cuMemPoolExportPointer(CUmemPoolPtrExportData *shareData_out,
                                         CUdeviceptr ptr);
-CUDAAPI CUresult cuMemPoolImportPointer(CUdeviceptr* ptr_out, CUmemoryPool pool,
-                                        CUmemPoolPtrExportData* shareData);
+CUDAAPI CUresult cuMemPoolImportPointer(CUdeviceptr *ptr_out, CUmemoryPool pool,
+                                        CUmemPoolPtrExportData *shareData);
 
 // Device memory pool management
 CUDAAPI CUresult cuDeviceSetMemPool(CUdevice dev, CUmemoryPool pool);
-CUDAAPI CUresult cuDeviceGetMemPool(CUmemoryPool* pool, CUdevice dev);
-CUDAAPI CUresult cuDeviceGetDefaultMemPool(CUmemoryPool* pool_out,
+CUDAAPI CUresult cuDeviceGetMemPool(CUmemoryPool *pool, CUdevice dev);
+CUDAAPI CUresult cuDeviceGetDefaultMemPool(CUmemoryPool *pool_out,
                                            CUdevice dev);
 
 // Async memory allocation
-CUDAAPI CUresult cuMemAllocAsync(CUdeviceptr* dptr, size_t bytesize,
+CUDAAPI CUresult cuMemAllocAsync(CUdeviceptr *dptr, size_t bytesize,
                                  CUstream hStream);
-CUDAAPI CUresult cuMemAllocFromPoolAsync(CUdeviceptr* dptr, size_t bytesize,
+CUDAAPI CUresult cuMemAllocFromPoolAsync(CUdeviceptr *dptr, size_t bytesize,
                                          CUmemoryPool pool, CUstream hStream);
 CUDAAPI CUresult cuMemFreeAsync(CUdeviceptr dptr, CUstream hStream);
 
 // Function management
-CUDAAPI CUresult cuFuncGetAttribute(int* pi, CUfunction_attribute attrib,
+CUDAAPI CUresult cuFuncGetAttribute(int *pi, CUfunction_attribute attrib,
                                     CUfunction hfunc);
 CUDAAPI CUresult cuFuncSetAttribute(CUfunction hfunc,
                                     CUfunction_attribute attrib, int value);
@@ -723,45 +723,45 @@ CUDAAPI CUresult cuLaunchKernel(CUfunction f, unsigned int gridDimX,
                                 unsigned int blockDimX, unsigned int blockDimY,
                                 unsigned int blockDimZ,
                                 unsigned int sharedMemBytes, CUstream hStream,
-                                void** kernelParams, void** extra);
+                                void **kernelParams, void **extra);
 CUDAAPI CUresult cuLaunchCooperativeKernel(
     CUfunction f, unsigned int gridDimX, unsigned int gridDimY,
     unsigned int gridDimZ, unsigned int blockDimX, unsigned int blockDimY,
     unsigned int blockDimZ, unsigned int sharedMemBytes, CUstream hStream,
-    void** kernelParams);
+    void **kernelParams);
 CUDAAPI CUresult cuLaunchHostFunc(CUstream hStream, CUhostFn fn,
-                                  void* userData);
+                                  void *userData);
 
 // Occupancy
 CUDAAPI CUresult cuOccupancyMaxActiveBlocksPerMultiprocessor(
-    int* numBlocks, CUfunction func, int blockSize, size_t dynamicSMemSize);
+    int *numBlocks, CUfunction func, int blockSize, size_t dynamicSMemSize);
 CUDAAPI CUresult cuOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
-    int* numBlocks, CUfunction func, int blockSize, size_t dynamicSMemSize,
+    int *numBlocks, CUfunction func, int blockSize, size_t dynamicSMemSize,
     unsigned int flags);
 CUDAAPI CUresult cuOccupancyMaxPotentialBlockSize(
-    int* minGridSize, int* blockSize, CUfunction func,
+    int *minGridSize, int *blockSize, CUfunction func,
     CUoccupancyB2DSize blockSizeToDynamicSMemSize, size_t dynamicSMemSize,
     int blockSizeLimit);
 
 // Event management
-CUDAAPI CUresult cuEventCreate(CUevent* phEvent, unsigned int Flags);
+CUDAAPI CUresult cuEventCreate(CUevent *phEvent, unsigned int Flags);
 CUDAAPI CUresult cuEventRecord(CUevent hEvent, CUstream hStream);
 CUDAAPI CUresult cuEventQuery(CUevent hEvent);
 CUDAAPI CUresult cuEventSynchronize(CUevent hEvent);
 CUDAAPI CUresult cuEventDestroy(CUevent hEvent);
-CUDAAPI CUresult cuEventElapsedTime(float* pMilliseconds, CUevent hStart,
+CUDAAPI CUresult cuEventElapsedTime(float *pMilliseconds, CUevent hStart,
                                     CUevent hEnd);
-CUDAAPI CUresult cuIpcGetEventHandle(CUipcEventHandle* pHandle, CUevent event);
-CUDAAPI CUresult cuIpcOpenEventHandle(CUevent* phEvent,
+CUDAAPI CUresult cuIpcGetEventHandle(CUipcEventHandle *pHandle, CUevent event);
+CUDAAPI CUresult cuIpcOpenEventHandle(CUevent *phEvent,
                                       CUipcEventHandle handle);
 
 // Stream management
-CUDAAPI CUresult cuStreamCreate(CUstream* phStream, unsigned int Flags);
-CUDAAPI CUresult cuStreamCreateWithPriority(CUstream* phStream,
+CUDAAPI CUresult cuStreamCreate(CUstream *phStream, unsigned int Flags);
+CUDAAPI CUresult cuStreamCreateWithPriority(CUstream *phStream,
                                             unsigned int flags, int priority);
-CUDAAPI CUresult cuStreamGetPriority(CUstream hStream, int* priority);
-CUDAAPI CUresult cuStreamGetFlags(CUstream hStream, unsigned int* flags);
-CUDAAPI CUresult cuStreamGetCtx(CUstream hStream, CUcontext* pctx);
+CUDAAPI CUresult cuStreamGetPriority(CUstream hStream, int *priority);
+CUDAAPI CUresult cuStreamGetFlags(CUstream hStream, unsigned int *flags);
+CUDAAPI CUresult cuStreamGetCtx(CUstream hStream, CUcontext *pctx);
 CUDAAPI CUresult cuStreamWaitEvent(CUstream hStream, CUevent hEvent,
                                    unsigned int Flags);
 CUDAAPI CUresult cuStreamQuery(CUstream hStream);
@@ -774,68 +774,68 @@ CUDAAPI CUresult cuMemAdvise(CUdeviceptr devPtr, size_t count,
                              CUmem_advise advice, CUdevice device);
 CUDAAPI CUresult cuMemPrefetchAsync(CUdeviceptr devPtr, size_t count,
                                     CUdevice dstDevice, CUstream hStream);
-CUDAAPI CUresult cuPointerGetAttribute(void* data,
+CUDAAPI CUresult cuPointerGetAttribute(void *data,
                                        CUpointer_attribute attribute,
                                        CUdeviceptr ptr);
-CUDAAPI CUresult cuPointerSetAttribute(const void* value,
+CUDAAPI CUresult cuPointerSetAttribute(const void *value,
                                        CUpointer_attribute attribute,
                                        CUdeviceptr ptr);
 CUDAAPI CUresult cuPointerGetAttributes(unsigned int numAttributes,
-                                        CUpointer_attribute* attributes,
-                                        void** data, CUdeviceptr ptr);
-CUDAAPI CUresult cuMemRangeGetAttribute(void* data, size_t dataSize,
+                                        CUpointer_attribute *attributes,
+                                        void **data, CUdeviceptr ptr);
+CUDAAPI CUresult cuMemRangeGetAttribute(void *data, size_t dataSize,
                                         CUmem_range_attribute attribute,
                                         CUdeviceptr devPtr, size_t count);
-CUDAAPI CUresult cuMemRangeGetAttributes(void** data, size_t* dataSizes,
-                                         CUmem_range_attribute* attributes,
+CUDAAPI CUresult cuMemRangeGetAttributes(void **data, size_t *dataSizes,
+                                         CUmem_range_attribute *attributes,
                                          size_t numAttributes,
                                          CUdeviceptr devPtr, size_t count);
 
 // CUDA graphs
-CUDAAPI CUresult cuGraphCreate(CUgraph* phGraph, unsigned int flags);
+CUDAAPI CUresult cuGraphCreate(CUgraph *phGraph, unsigned int flags);
 CUDAAPI CUresult cuGraphDestroy(CUgraph hGraph);
-CUDAAPI CUresult cuGraphInstantiate(CUgraphExec* phGraphExec, CUgraph hGraph,
-                                    CUgraphNode* phErrorNode, char* logBuffer,
+CUDAAPI CUresult cuGraphInstantiate(CUgraphExec *phGraphExec, CUgraph hGraph,
+                                    CUgraphNode *phErrorNode, char *logBuffer,
                                     size_t bufferSize);
-CUDAAPI CUresult cuGraphInstantiateWithFlags(CUgraphExec* phGraphExec,
+CUDAAPI CUresult cuGraphInstantiateWithFlags(CUgraphExec *phGraphExec,
                                              CUgraph hGraph,
                                              unsigned long long flags);
 CUDAAPI CUresult cuGraphExecDestroy(CUgraphExec hGraphExec);
 CUDAAPI CUresult cuGraphLaunch(CUgraphExec hGraphExec, CUstream hStream);
 CUDAAPI CUresult cuGraphExecUpdate(CUgraphExec hGraphExec, CUgraph hGraph,
-                                   CUgraphNode* hErrorNode_out,
+                                   CUgraphNode *hErrorNode_out,
                                    unsigned int flags);
-CUDAAPI CUresult cuGraphAddKernelNode(CUgraphNode* phGraphNode, CUgraph hGraph,
-                                      const CUgraphNode* dependencies,
+CUDAAPI CUresult cuGraphAddKernelNode(CUgraphNode *phGraphNode, CUgraph hGraph,
+                                      const CUgraphNode *dependencies,
                                       size_t numDependencies,
-                                      const void* nodeParams);
-CUDAAPI CUresult cuGraphAddMemcpyNode(CUgraphNode* phGraphNode, CUgraph hGraph,
-                                      const CUgraphNode* dependencies,
+                                      const void *nodeParams);
+CUDAAPI CUresult cuGraphAddMemcpyNode(CUgraphNode *phGraphNode, CUgraph hGraph,
+                                      const CUgraphNode *dependencies,
                                       size_t numDependencies,
-                                      const void* copyParams, CUcontext ctx);
-CUDAAPI CUresult cuGraphAddMemsetNode(CUgraphNode* phGraphNode, CUgraph hGraph,
-                                      const CUgraphNode* dependencies,
+                                      const void *copyParams, CUcontext ctx);
+CUDAAPI CUresult cuGraphAddMemsetNode(CUgraphNode *phGraphNode, CUgraph hGraph,
+                                      const CUgraphNode *dependencies,
                                       size_t numDependencies,
-                                      const void* memsetParams, CUcontext ctx);
-CUDAAPI CUresult cuGraphAddHostNode(CUgraphNode* phGraphNode, CUgraph hGraph,
-                                    const CUgraphNode* dependencies,
+                                      const void *memsetParams, CUcontext ctx);
+CUDAAPI CUresult cuGraphAddHostNode(CUgraphNode *phGraphNode, CUgraph hGraph,
+                                    const CUgraphNode *dependencies,
                                     size_t numDependencies,
-                                    const void* hostParams);
-CUDAAPI CUresult cuGraphAddEmptyNode(CUgraphNode* phGraphNode, CUgraph hGraph,
-                                     const CUgraphNode* dependencies,
+                                    const void *hostParams);
+CUDAAPI CUresult cuGraphAddEmptyNode(CUgraphNode *phGraphNode, CUgraph hGraph,
+                                     const CUgraphNode *dependencies,
                                      size_t numDependencies);
 
 // Stream capture
 CUDAAPI CUresult cuStreamBeginCapture(CUstream hStream,
                                       CUstreamCaptureMode mode);
-CUDAAPI CUresult cuStreamEndCapture(CUstream hStream, CUgraph* phGraph);
+CUDAAPI CUresult cuStreamEndCapture(CUstream hStream, CUgraph *phGraph);
 CUDAAPI CUresult cuStreamIsCapturing(CUstream hStream,
-                                     CUstreamCaptureStatus* captureStatus);
+                                     CUstreamCaptureStatus *captureStatus);
 CUDAAPI CUresult cuStreamGetCaptureInfo(CUstream hStream,
-                                        CUstreamCaptureStatus* captureStatus,
-                                        unsigned long long* id);
+                                        CUstreamCaptureStatus *captureStatus,
+                                        unsigned long long *id);
 CUDAAPI CUresult cuStreamUpdateCaptureDependencies(CUstream hStream,
-                                                   CUgraphNode* dependencies,
+                                                   CUgraphNode *dependencies,
                                                    size_t numDependencies,
                                                    unsigned int flags);
 
@@ -843,4 +843,4 @@ CUDAAPI CUresult cuStreamUpdateCaptureDependencies(CUstream hStream,
 }
 #endif
 
-#endif  // IREE_EXPERIMENTAL_STREAMING_BINDING_CUDA_DRIVER_H_
+#endif // IREE_EXPERIMENTAL_STREAMING_BINDING_CUDA_DRIVER_H_

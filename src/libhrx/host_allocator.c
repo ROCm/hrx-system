@@ -14,16 +14,14 @@ _Static_assert(_Alignof(hrx_host_allocator_t) == _Alignof(iree_allocator_t),
 // safe to call at load time (it's an inline returning two constants).
 hrx_host_allocator_t hrx_host_allocator_system_value;
 
-__attribute__((constructor))
-static void hrx_host_allocator_init(void) {
+__attribute__((constructor)) static void hrx_host_allocator_init(void) {
   iree_allocator_t sys = iree_allocator_system();
   hrx_host_allocator_system_value.self = sys.self;
-  hrx_host_allocator_system_value.ctl = (void*)sys.ctl;
+  hrx_host_allocator_system_value.ctl = (void *)sys.ctl;
 }
 
 // Type-pun hrx_host_allocator_t to iree_allocator_t.
-static inline iree_allocator_t hrx_to_iree_allocator(
-    hrx_host_allocator_t a) {
+static inline iree_allocator_t hrx_to_iree_allocator(hrx_host_allocator_t a) {
   iree_allocator_t v;
   memcpy(&v, &a, sizeof(v));
   return v;
@@ -34,39 +32,39 @@ static inline iree_allocator_t hrx_to_iree_allocator(
 //===----------------------------------------------------------------------===//
 
 hrx_status_t hrx_host_allocator_malloc(hrx_host_allocator_t allocator,
-                                         size_t byte_length, void** out_ptr) {
-  return hrx_status_from_iree(iree_allocator_malloc(
-      hrx_to_iree_allocator(allocator), (iree_host_size_t)byte_length,
-      out_ptr));
+                                       size_t byte_length, void **out_ptr) {
+  return hrx_status_from_iree(
+      iree_allocator_malloc(hrx_to_iree_allocator(allocator),
+                            (iree_host_size_t)byte_length, out_ptr));
 }
 
-hrx_status_t hrx_host_allocator_malloc_uninitialized(
-    hrx_host_allocator_t allocator, size_t byte_length, void** out_ptr) {
+hrx_status_t
+hrx_host_allocator_malloc_uninitialized(hrx_host_allocator_t allocator,
+                                        size_t byte_length, void **out_ptr) {
   return hrx_status_from_iree(iree_allocator_malloc_uninitialized(
       hrx_to_iree_allocator(allocator), (iree_host_size_t)byte_length,
       out_ptr));
 }
 
 hrx_status_t hrx_host_allocator_realloc(hrx_host_allocator_t allocator,
-                                          size_t byte_length,
-                                          void** inout_ptr) {
-  return hrx_status_from_iree(iree_allocator_realloc(
-      hrx_to_iree_allocator(allocator), (iree_host_size_t)byte_length,
-      inout_ptr));
+                                        size_t byte_length, void **inout_ptr) {
+  return hrx_status_from_iree(
+      iree_allocator_realloc(hrx_to_iree_allocator(allocator),
+                             (iree_host_size_t)byte_length, inout_ptr));
 }
 
 hrx_status_t hrx_host_allocator_clone(hrx_host_allocator_t allocator,
-                                        const void* src, size_t byte_length,
-                                        void** out_ptr) {
+                                      const void *src, size_t byte_length,
+                                      void **out_ptr) {
   iree_const_byte_span_t span = {
-      .data = (const uint8_t*)src,
+      .data = (const uint8_t *)src,
       .data_length = (iree_host_size_t)byte_length,
   };
   return hrx_status_from_iree(
       iree_allocator_clone(hrx_to_iree_allocator(allocator), span, out_ptr));
 }
 
-void hrx_host_allocator_free(hrx_host_allocator_t allocator, void* ptr) {
+void hrx_host_allocator_free(hrx_host_allocator_t allocator, void *ptr) {
   iree_allocator_free(hrx_to_iree_allocator(allocator), ptr);
 }
 
@@ -74,23 +72,26 @@ void hrx_host_allocator_free(hrx_host_allocator_t allocator, void* ptr) {
 // Aligned allocation
 //===----------------------------------------------------------------------===//
 
-hrx_status_t hrx_host_allocator_malloc_aligned(
-    hrx_host_allocator_t allocator, size_t byte_length, size_t min_alignment,
-    size_t offset, void** out_ptr) {
+hrx_status_t hrx_host_allocator_malloc_aligned(hrx_host_allocator_t allocator,
+                                               size_t byte_length,
+                                               size_t min_alignment,
+                                               size_t offset, void **out_ptr) {
   return hrx_status_from_iree(iree_allocator_malloc_aligned(
       hrx_to_iree_allocator(allocator), (iree_host_size_t)byte_length,
       (iree_host_size_t)min_alignment, (iree_host_size_t)offset, out_ptr));
 }
 
-hrx_status_t hrx_host_allocator_realloc_aligned(
-    hrx_host_allocator_t allocator, size_t byte_length, size_t min_alignment,
-    size_t offset, void** inout_ptr) {
+hrx_status_t hrx_host_allocator_realloc_aligned(hrx_host_allocator_t allocator,
+                                                size_t byte_length,
+                                                size_t min_alignment,
+                                                size_t offset,
+                                                void **inout_ptr) {
   return hrx_status_from_iree(iree_allocator_realloc_aligned(
       hrx_to_iree_allocator(allocator), (iree_host_size_t)byte_length,
       (iree_host_size_t)min_alignment, (iree_host_size_t)offset, inout_ptr));
 }
 
 void hrx_host_allocator_free_aligned(hrx_host_allocator_t allocator,
-                                      void* ptr) {
+                                     void *ptr) {
   iree_allocator_free_aligned(hrx_to_iree_allocator(allocator), ptr);
 }

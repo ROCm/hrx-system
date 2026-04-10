@@ -10,4 +10,4 @@
 #include "driver.h"
 #include "runtime.h"
 
-#endif  // IREE_EXPERIMENTAL_STREAMING_BINDING_CUDA_API_H_
+#endif // IREE_EXPERIMENTAL_STREAMING_BINDING_CUDA_API_H_

@@ -7,8 +7,8 @@
 #ifndef IREE_EXPERIMENTAL_STREAMING_GRAPH_H_
 #define IREE_EXPERIMENTAL_STREAMING_GRAPH_H_
 
-#include "streaming/internal.h"
 #include "iree/base/api.h"
+#include "streaming/internal.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -20,17 +20,17 @@ extern "C" {
 
 // Chained block for growing arrays without reallocation.
 typedef struct iree_hal_streaming_node_block_t {
-  struct iree_hal_streaming_node_block_t* next;
+  struct iree_hal_streaming_node_block_t *next;
   iree_host_size_t capacity;
   iree_host_size_t count;
-  iree_hal_streaming_graph_node_t* nodes[];
+  iree_hal_streaming_graph_node_t *nodes[];
 } iree_hal_streaming_node_block_t;
 
 // Edge structure for additional dependencies added after node creation.
 typedef struct iree_hal_streaming_graph_edge_t {
-  struct iree_hal_streaming_graph_edge_t* next;
-  iree_hal_streaming_graph_node_t* from;  // Dependency (must complete first)
-  iree_hal_streaming_graph_node_t* to;    // Dependent (waits for 'from')
+  struct iree_hal_streaming_graph_edge_t *next;
+  iree_hal_streaming_graph_node_t *from; // Dependency (must complete first)
+  iree_hal_streaming_graph_node_t *to;   // Dependent (waits for 'from')
 } iree_hal_streaming_graph_edge_t;
 
 // Graph structure (template).
@@ -42,21 +42,21 @@ typedef struct iree_hal_streaming_graph_t {
   iree_allocator_t arena_allocator;
 
   // Graph nodes stored in chained blocks.
-  iree_hal_streaming_node_block_t* node_blocks;
-  iree_hal_streaming_node_block_t* current_node_block;
+  iree_hal_streaming_node_block_t *node_blocks;
+  iree_hal_streaming_node_block_t *current_node_block;
   iree_host_size_t node_count;
 
   // Root nodes stored in chained blocks.
-  iree_hal_streaming_node_block_t* root_blocks;
-  iree_hal_streaming_node_block_t* current_root_block;
+  iree_hal_streaming_node_block_t *root_blocks;
+  iree_hal_streaming_node_block_t *current_root_block;
   iree_host_size_t root_count;
 
   // Additional edges added after node creation via hipGraphAddDependencies.
-  iree_hal_streaming_graph_edge_t* additional_edges;
+  iree_hal_streaming_graph_edge_t *additional_edges;
   iree_host_size_t additional_edge_count;
 
   uint32_t flags;
-  iree_hal_streaming_context_t* context;
+  iree_hal_streaming_context_t *context;
 
   // Mutex only needed for instantiate/clone operations per CUDA docs.
   iree_slim_mutex_t mutex;
@@ -87,26 +87,26 @@ typedef struct iree_hal_streaming_graph_partition_t {
 
 // Chained block for growing partition arrays without reallocation.
 typedef struct iree_hal_streaming_graph_partition_block_t {
-  struct iree_hal_streaming_graph_partition_block_t* next;
+  struct iree_hal_streaming_graph_partition_block_t *next;
   iree_host_size_t capacity;
   iree_host_size_t count;
   iree_hal_streaming_graph_partition_t partitions[];
 } iree_hal_streaming_graph_partition_block_t;
 
 iree_status_t iree_hal_streaming_graph_exec_create(
-    iree_hal_streaming_context_t* context, iree_hal_streaming_graph_t* graph,
+    iree_hal_streaming_context_t *context, iree_hal_streaming_graph_t *graph,
     iree_hal_streaming_graph_instantiate_flags_t flags,
     iree_allocator_t host_allocator,
-    iree_hal_streaming_graph_exec_t** out_exec);
+    iree_hal_streaming_graph_exec_t **out_exec);
 
 iree_status_t iree_hal_streaming_graph_exec_instantiate_locked(
-    iree_hal_streaming_graph_exec_t* exec,
-    iree_hal_streaming_node_block_t* node_blocks, iree_host_size_t node_count);
+    iree_hal_streaming_graph_exec_t *exec,
+    iree_hal_streaming_node_block_t *node_blocks, iree_host_size_t node_count);
 
 // Augmented node for sorting and partitioning.
 typedef struct iree_hal_streaming_graph_sort_node_t {
   // Pointer to original node.
-  iree_hal_streaming_graph_node_t* node;
+  iree_hal_streaming_graph_node_t *node;
   // Index in original linked list.
   uint32_t original_index;
   // Position in topological order.
@@ -130,11 +130,11 @@ static_assert(sizeof(iree_hal_streaming_graph_sort_node_t) <= 32,
 // as it is.
 typedef struct iree_hal_streaming_graph_schedule_t {
   // Sorted nodes with some additional information from analysis.
-  iree_hal_streaming_graph_sort_node_t* sorted_nodes;
+  iree_hal_streaming_graph_sort_node_t *sorted_nodes;
   // A map of original unsorted graph node_index to sorted_nodes index.
-  uint32_t* node_index_map;
+  uint32_t *node_index_map;
   // Partition descriptors in execution order.
-  iree_hal_streaming_graph_partition_t* partitions;
+  iree_hal_streaming_graph_partition_t *partitions;
   // Total number of partitions.
   iree_host_size_t partition_count;
   // Total number of blocks across all partitions.
@@ -156,21 +156,21 @@ typedef struct iree_hal_streaming_graph_schedule_t {
 // |additional_edges| is an optional linked list of extra dependencies added
 // after node creation (can be NULL if none).
 iree_status_t iree_hal_streaming_graph_schedule_nodes(
-    iree_hal_streaming_node_block_t* node_blocks, iree_host_size_t node_count,
-    iree_hal_streaming_graph_edge_t* additional_edges,
-    iree_arena_allocator_t* arena,
-    iree_hal_streaming_graph_schedule_t* out_schedule);
+    iree_hal_streaming_node_block_t *node_blocks, iree_host_size_t node_count,
+    iree_hal_streaming_graph_edge_t *additional_edges,
+    iree_arena_allocator_t *arena,
+    iree_hal_streaming_graph_schedule_t *out_schedule);
 
 // Adds dependencies between nodes in the graph.
 // For each index i in [0, count), adds an edge from from_nodes[i] to
 // to_nodes[i], meaning to_nodes[i] will wait for from_nodes[i] to complete.
 iree_status_t iree_hal_streaming_graph_add_dependencies(
-    iree_hal_streaming_graph_t* graph,
-    iree_hal_streaming_graph_node_t** from_nodes,
-    iree_hal_streaming_graph_node_t** to_nodes, iree_host_size_t count);
+    iree_hal_streaming_graph_t *graph,
+    iree_hal_streaming_graph_node_t **from_nodes,
+    iree_hal_streaming_graph_node_t **to_nodes, iree_host_size_t count);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif  // IREE_EXPERIMENTAL_STREAMING_GRAPH_H_
+#endif // IREE_EXPERIMENTAL_STREAMING_GRAPH_H_

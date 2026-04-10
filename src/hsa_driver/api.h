@@ -14,7 +14,7 @@
 
 #ifdef __cplusplus
 extern "C" {
-#endif  // __cplusplus
+#endif // __cplusplus
 
 //===----------------------------------------------------------------------===//
 // iree_hal_hsa_device_t
@@ -70,8 +70,8 @@ typedef struct iree_hal_hsa_device_params_t {
 } iree_hal_hsa_device_params_t;
 
 // Initializes |out_params| to default values.
-IREE_API_EXPORT void iree_hal_hsa_device_params_initialize(
-    iree_hal_hsa_device_params_t* out_params);
+IREE_API_EXPORT void
+iree_hal_hsa_device_params_initialize(iree_hal_hsa_device_params_t *out_params);
 
 //===----------------------------------------------------------------------===//
 // iree_hal_hsa_driver_t
@@ -85,26 +85,25 @@ typedef struct iree_hal_hsa_driver_options_t {
 
   // List of paths to guide searching for the dynamic libhsa-runtime64.so,
   // which contains the backing HSA runtime library.
-  iree_string_view_t* hsa_lib_search_paths;
+  iree_string_view_t *hsa_lib_search_paths;
   iree_host_size_t hsa_lib_search_path_count;
 } iree_hal_hsa_driver_options_t;
 
 // Initializes the given |out_options| with default driver creation options.
 IREE_API_EXPORT void iree_hal_hsa_driver_options_initialize(
-    iree_hal_hsa_driver_options_t* out_options);
+    iree_hal_hsa_driver_options_t *out_options);
 
 // Creates an HSA HAL driver with the given |options|, from which HSA devices
 // can be enumerated and created with specific parameters.
 //
 // |out_driver| must be released by the caller (see iree_hal_driver_release).
 IREE_API_EXPORT iree_status_t iree_hal_hsa_driver_create(
-    iree_string_view_t identifier, const iree_hal_hsa_driver_options_t* options,
-    const iree_hal_hsa_device_params_t* default_params,
-    iree_allocator_t host_allocator, iree_hal_driver_t** out_driver);
+    iree_string_view_t identifier, const iree_hal_hsa_driver_options_t *options,
+    const iree_hal_hsa_device_params_t *default_params,
+    iree_allocator_t host_allocator, iree_hal_driver_t **out_driver);
 
 #ifdef __cplusplus
-}  // extern "C"
-#endif  // __cplusplus
+} // extern "C"
+#endif // __cplusplus
 
-#endif  // IREE_HAL_DRIVERS_HSA_API_H_
-
+#endif // IREE_HAL_DRIVERS_HSA_API_H_

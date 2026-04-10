@@ -590,4 +590,3 @@ hip_7.2 {
     hipLibraryLoadFromFile;
     hipLibraryUnload;
 } hip_7.1;
-

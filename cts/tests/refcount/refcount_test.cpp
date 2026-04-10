@@ -33,7 +33,9 @@ TEST_CASE_METHOD(HrxTestFixture, "Buffer retain and release",
   REQUIRE_OK(hrx().stream_create(device_, 0, &stream));
 
   hrx_buffer_t buf = nullptr;
-  REQUIRE_OK(hrx().buffer_allocate(stream, 256, HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_DEVICE_VISIBLE, HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED, &buf));
+  REQUIRE_OK(hrx().buffer_allocate(
+      stream, 256, HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_DEVICE_VISIBLE,
+      HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED, &buf));
 
   hrx().buffer_retain(buf);
   hrx().buffer_release(buf);

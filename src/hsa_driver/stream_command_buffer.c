@@ -11,60 +11,59 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "iree/base/api.h"
-#include "iree/base/internal/arena.h"
-#include "iree/base/internal/math.h"
-#include "iree/base/tracing.h"
 #include "hsa_driver/hsa_buffer.h"
 #include "hsa_driver/native_executable.h"
 #include "hsa_driver/per_device_information.h"
 #include "hsa_driver/status_util.h"
+#include "iree/base/api.h"
+#include "iree/base/internal/arena.h"
+#include "iree/base/internal/math.h"
+#include "iree/base/tracing.h"
 #include "iree/hal/utils/resource_set.h"
 
 typedef struct iree_hal_hsa_stream_command_buffer_t {
   iree_hal_command_buffer_t base;
   iree_allocator_t host_allocator;
 
-
   // Per-device information for the target device.
-  iree_hal_hsa_per_device_info_t* device_info;
+  iree_hal_hsa_per_device_info_t *device_info;
 
   // Arena used for all allocations; references the block pool.
   iree_arena_allocator_t arena;
 
   // Maintains a reference to all resources used within the command buffer.
-  iree_hal_resource_set_t* resource_set;
+  iree_hal_resource_set_t *resource_set;
 
   // Device allocator for transient allocations.
-  iree_hal_allocator_t* device_allocator;
+  iree_hal_allocator_t *device_allocator;
 
   // Tracing context for this command buffer.
-  iree_hal_stream_tracing_context_t* tracing_context;
+  iree_hal_stream_tracing_context_t *tracing_context;
 
   // Reused across synchronous dispatches to avoid per-dispatch kernarg
   // allocation/free overhead in this bringup-level stream command buffer.
-  void* kernarg_scratch;
+  void *kernarg_scratch;
   iree_host_size_t kernarg_scratch_size;
 } iree_hal_hsa_stream_command_buffer_t;
 
 static const iree_hal_command_buffer_vtable_t
     iree_hal_hsa_stream_command_buffer_vtable;
 
-static iree_hal_hsa_stream_command_buffer_t*
-iree_hal_hsa_stream_command_buffer_cast(iree_hal_command_buffer_t* base_value) {
+static iree_hal_hsa_stream_command_buffer_t *
+iree_hal_hsa_stream_command_buffer_cast(iree_hal_command_buffer_t *base_value) {
   IREE_HAL_ASSERT_TYPE(base_value, &iree_hal_hsa_stream_command_buffer_vtable);
-  return (iree_hal_hsa_stream_command_buffer_t*)base_value;
+  return (iree_hal_hsa_stream_command_buffer_t *)base_value;
 }
 
 iree_status_t iree_hal_hsa_stream_command_buffer_create(
-    iree_hal_allocator_t* device_allocator,
-    iree_hal_stream_tracing_context_t* tracing_context,
+    iree_hal_allocator_t *device_allocator,
+    iree_hal_stream_tracing_context_t *tracing_context,
     iree_hal_command_buffer_mode_t mode,
     iree_hal_command_category_t command_categories,
     iree_hal_queue_affinity_t queue_affinity, iree_host_size_t binding_capacity,
-    iree_hal_hsa_per_device_info_t* device_info,
-    iree_arena_block_pool_t* block_pool, iree_allocator_t host_allocator,
-    iree_hal_command_buffer_t** out_command_buffer) {
+    iree_hal_hsa_per_device_info_t *device_info,
+    iree_arena_block_pool_t *block_pool, iree_allocator_t host_allocator,
+    iree_hal_command_buffer_t **out_command_buffer) {
   IREE_ASSERT_ARGUMENT(device_info);
   IREE_ASSERT_ARGUMENT(out_command_buffer);
   *out_command_buffer = NULL;
@@ -77,18 +76,18 @@ iree_status_t iree_hal_hsa_stream_command_buffer_create(
 
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  iree_hal_hsa_stream_command_buffer_t* command_buffer = NULL;
+  iree_hal_hsa_stream_command_buffer_t *command_buffer = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0,
       iree_allocator_malloc(host_allocator,
                             sizeof(*command_buffer) +
                                 iree_hal_command_buffer_validation_state_size(
                                     mode, binding_capacity),
-                            (void**)&command_buffer));
+                            (void **)&command_buffer));
 
   iree_hal_command_buffer_initialize(
       device_allocator, mode, command_categories, queue_affinity,
-      binding_capacity, (uint8_t*)command_buffer + sizeof(*command_buffer),
+      binding_capacity, (uint8_t *)command_buffer + sizeof(*command_buffer),
       &iree_hal_hsa_stream_command_buffer_vtable, &command_buffer->base);
   command_buffer->host_allocator = host_allocator;
   command_buffer->device_info = device_info;
@@ -115,14 +114,14 @@ iree_status_t iree_hal_hsa_stream_command_buffer_create(
 }
 
 bool iree_hal_hsa_stream_command_buffer_isa(
-    iree_hal_command_buffer_t* command_buffer) {
+    iree_hal_command_buffer_t *command_buffer) {
   return iree_hal_resource_is(command_buffer,
                               &iree_hal_hsa_stream_command_buffer_vtable);
 }
 
 static void iree_hal_hsa_stream_command_buffer_destroy(
-    iree_hal_command_buffer_t* base_command_buffer) {
-  iree_hal_hsa_stream_command_buffer_t* command_buffer =
+    iree_hal_command_buffer_t *base_command_buffer) {
+  iree_hal_hsa_stream_command_buffer_t *command_buffer =
       iree_hal_hsa_stream_command_buffer_cast(base_command_buffer);
   iree_allocator_t host_allocator = command_buffer->host_allocator;
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -139,14 +138,14 @@ static void iree_hal_hsa_stream_command_buffer_destroy(
 }
 
 static iree_status_t iree_hal_hsa_stream_command_buffer_begin(
-    iree_hal_command_buffer_t* base_command_buffer) {
+    iree_hal_command_buffer_t *base_command_buffer) {
   // Nothing to do - commands are executed immediately.
   return iree_ok_status();
 }
 
 static iree_status_t iree_hal_hsa_stream_command_buffer_end(
-    iree_hal_command_buffer_t* base_command_buffer) {
-  iree_hal_hsa_stream_command_buffer_t* command_buffer =
+    iree_hal_command_buffer_t *base_command_buffer) {
+  iree_hal_hsa_stream_command_buffer_t *command_buffer =
       iree_hal_hsa_stream_command_buffer_cast(base_command_buffer);
   IREE_TRACE_ZONE_BEGIN(z0);
 
@@ -163,28 +162,28 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_end(
 }
 
 static iree_status_t iree_hal_hsa_stream_command_buffer_begin_debug_group(
-    iree_hal_command_buffer_t* base_command_buffer, iree_string_view_t label,
+    iree_hal_command_buffer_t *base_command_buffer, iree_string_view_t label,
     iree_hal_label_color_t label_color,
-    const iree_hal_label_location_t* location) {
+    const iree_hal_label_location_t *location) {
   // No-op for now.
   return iree_ok_status();
 }
 
 static iree_status_t iree_hal_hsa_stream_command_buffer_end_debug_group(
-    iree_hal_command_buffer_t* base_command_buffer) {
+    iree_hal_command_buffer_t *base_command_buffer) {
   // No-op for now.
   return iree_ok_status();
 }
 
 static iree_status_t iree_hal_hsa_stream_command_buffer_execution_barrier(
-    iree_hal_command_buffer_t* base_command_buffer,
+    iree_hal_command_buffer_t *base_command_buffer,
     iree_hal_execution_stage_t source_stage_mask,
     iree_hal_execution_stage_t target_stage_mask,
     iree_hal_execution_barrier_flags_t flags,
     iree_host_size_t memory_barrier_count,
-    const iree_hal_memory_barrier_t* memory_barriers,
+    const iree_hal_memory_barrier_t *memory_barriers,
     iree_host_size_t buffer_barrier_count,
-    const iree_hal_buffer_barrier_t* buffer_barriers) {
+    const iree_hal_buffer_barrier_t *buffer_barriers) {
   if (iree_any_bit_set(source_stage_mask, IREE_HAL_EXECUTION_STAGE_HOST) ||
       iree_any_bit_set(target_stage_mask, IREE_HAL_EXECUTION_STAGE_HOST)) {
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
@@ -204,31 +203,31 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_execution_barrier(
 }
 
 static iree_status_t iree_hal_hsa_stream_command_buffer_signal_event(
-    iree_hal_command_buffer_t* base_command_buffer, iree_hal_event_t* event,
+    iree_hal_command_buffer_t *base_command_buffer, iree_hal_event_t *event,
     iree_hal_execution_stage_t source_stage_mask) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, "events not implemented");
 }
 
 static iree_status_t iree_hal_hsa_stream_command_buffer_reset_event(
-    iree_hal_command_buffer_t* base_command_buffer, iree_hal_event_t* event,
+    iree_hal_command_buffer_t *base_command_buffer, iree_hal_event_t *event,
     iree_hal_execution_stage_t source_stage_mask) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, "events not implemented");
 }
 
 static iree_status_t iree_hal_hsa_stream_command_buffer_wait_events(
-    iree_hal_command_buffer_t* base_command_buffer,
-    iree_host_size_t event_count, const iree_hal_event_t** events,
+    iree_hal_command_buffer_t *base_command_buffer,
+    iree_host_size_t event_count, const iree_hal_event_t **events,
     iree_hal_execution_stage_t source_stage_mask,
     iree_hal_execution_stage_t target_stage_mask,
     iree_host_size_t memory_barrier_count,
-    const iree_hal_memory_barrier_t* memory_barriers,
+    const iree_hal_memory_barrier_t *memory_barriers,
     iree_host_size_t buffer_barrier_count,
-    const iree_hal_buffer_barrier_t* buffer_barriers) {
+    const iree_hal_buffer_barrier_t *buffer_barriers) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, "events not implemented");
 }
 
 static iree_status_t iree_hal_hsa_stream_command_buffer_advise_buffer(
-    iree_hal_command_buffer_t* base_command_buffer,
+    iree_hal_command_buffer_t *base_command_buffer,
     iree_hal_buffer_ref_t buffer_ref, iree_hal_memory_advise_flags_t flags,
     uint64_t arg0, uint64_t arg1) {
   // We could mark the memory as invalidated so that if managed HSA does not
@@ -237,24 +236,24 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_advise_buffer(
 }
 
 static iree_status_t iree_hal_hsa_stream_command_buffer_fill_buffer(
-    iree_hal_command_buffer_t* base_command_buffer,
-    iree_hal_buffer_ref_t target_ref, const void* pattern,
+    iree_hal_command_buffer_t *base_command_buffer,
+    iree_hal_buffer_ref_t target_ref, const void *pattern,
     iree_host_size_t pattern_length, iree_hal_fill_flags_t flags) {
-  iree_hal_hsa_stream_command_buffer_t* command_buffer =
+  iree_hal_hsa_stream_command_buffer_t *command_buffer =
       iree_hal_hsa_stream_command_buffer_cast(base_command_buffer);
 
   IREE_RETURN_IF_ERROR(iree_hal_resource_set_insert(
       command_buffer->resource_set, 1, &target_ref.buffer));
 
-  void* target_device_buffer = iree_hal_hsa_buffer_device_pointer(
+  void *target_device_buffer = iree_hal_hsa_buffer_device_pointer(
       iree_hal_buffer_allocated_buffer(target_ref.buffer));
   iree_device_size_t target_offset =
       iree_hal_buffer_byte_offset(target_ref.buffer) + target_ref.offset;
-  void* target_ptr = (uint8_t*)target_device_buffer + target_offset;
+  void *target_ptr = (uint8_t *)target_device_buffer + target_offset;
 
   // Use hsa_amd_memory_fill for 32-bit patterns.
   if (pattern_length == 4) {
-    uint32_t pattern32 = *(const uint32_t*)pattern;
+    uint32_t pattern32 = *(const uint32_t *)pattern;
     size_t count = target_ref.length / sizeof(uint32_t);
     return IREE_HSA_CALL_TO_STATUS(
         hsa_amd_memory_fill(target_ptr, pattern32, count),
@@ -263,7 +262,7 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_fill_buffer(
 
   // For other pattern sizes, we need to do a manual fill.
   // This is a simple synchronous implementation.
-  uint8_t* target_bytes = (uint8_t*)target_ptr;
+  uint8_t *target_bytes = (uint8_t *)target_ptr;
   for (iree_device_size_t i = 0; i < target_ref.length; i += pattern_length) {
     memcpy(target_bytes + i, pattern,
            iree_min(pattern_length, target_ref.length - i));
@@ -273,20 +272,20 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_fill_buffer(
 }
 
 static iree_status_t iree_hal_hsa_stream_command_buffer_update_buffer(
-    iree_hal_command_buffer_t* base_command_buffer, const void* source_buffer,
+    iree_hal_command_buffer_t *base_command_buffer, const void *source_buffer,
     iree_host_size_t source_offset, iree_hal_buffer_ref_t target_ref,
     iree_hal_update_flags_t flags) {
-  iree_hal_hsa_stream_command_buffer_t* command_buffer =
+  iree_hal_hsa_stream_command_buffer_t *command_buffer =
       iree_hal_hsa_stream_command_buffer_cast(base_command_buffer);
 
   IREE_RETURN_IF_ERROR(iree_hal_resource_set_insert(
       command_buffer->resource_set, 1, &target_ref.buffer));
 
-  void* target_device_buffer = iree_hal_hsa_buffer_device_pointer(
+  void *target_device_buffer = iree_hal_hsa_buffer_device_pointer(
       iree_hal_buffer_allocated_buffer(target_ref.buffer));
   iree_device_size_t target_offset =
       iree_hal_buffer_byte_offset(target_ref.buffer) + target_ref.offset;
-  void* target_ptr = (uint8_t*)target_device_buffer + target_offset;
+  void *target_ptr = (uint8_t *)target_device_buffer + target_offset;
 
   // Lock the completion signal mutex to serialize with concurrent dispatches
   // and copies on other threads. Without this, a dispatch on a worker thread
@@ -294,7 +293,7 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_update_buffer(
   // is visible to the GPU.
   iree_slim_mutex_lock(&command_buffer->device_info->completion_signal_mutex);
 
-  memcpy(target_ptr, (const uint8_t*)source_buffer + source_offset,
+  memcpy(target_ptr, (const uint8_t *)source_buffer + source_offset,
          target_ref.length);
 
   // Ensure the CPU write is globally visible before any subsequent GPU work.
@@ -306,60 +305,58 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_update_buffer(
 }
 
 static iree_status_t iree_hal_hsa_stream_command_buffer_copy_buffer(
-    iree_hal_command_buffer_t* base_command_buffer,
+    iree_hal_command_buffer_t *base_command_buffer,
     iree_hal_buffer_ref_t source_ref, iree_hal_buffer_ref_t target_ref,
     iree_hal_copy_flags_t flags) {
   IREE_TRACE_ZONE_BEGIN_NAMED(z0,
                               "iree_hal_hsa_stream_command_buffer_copy_buffer");
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, (int64_t)source_ref.length);
 
-  iree_hal_hsa_stream_command_buffer_t* command_buffer =
+  iree_hal_hsa_stream_command_buffer_t *command_buffer =
       iree_hal_hsa_stream_command_buffer_cast(base_command_buffer);
 
-  iree_hal_buffer_t* buffers[2] = {source_ref.buffer, target_ref.buffer};
+  iree_hal_buffer_t *buffers[2] = {source_ref.buffer, target_ref.buffer};
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0,
       iree_hal_resource_set_insert(command_buffer->resource_set, 2, buffers));
 
-  void* source_device_buffer = iree_hal_hsa_buffer_device_pointer(
+  void *source_device_buffer = iree_hal_hsa_buffer_device_pointer(
       iree_hal_buffer_allocated_buffer(source_ref.buffer));
   iree_device_size_t source_offset =
       iree_hal_buffer_byte_offset(source_ref.buffer) + source_ref.offset;
-  const void* source_ptr = (const uint8_t*)source_device_buffer + source_offset;
+  const void *source_ptr =
+      (const uint8_t *)source_device_buffer + source_offset;
 
-  void* target_device_buffer = iree_hal_hsa_buffer_device_pointer(
+  void *target_device_buffer = iree_hal_hsa_buffer_device_pointer(
       iree_hal_buffer_allocated_buffer(target_ref.buffer));
   iree_device_size_t target_offset =
       iree_hal_buffer_byte_offset(target_ref.buffer) + target_ref.offset;
-  void* target_ptr = (uint8_t*)target_device_buffer + target_offset;
+  void *target_ptr = (uint8_t *)target_device_buffer + target_offset;
 
   // Use async copy with completion signal.
   // Lock mutex to protect completion signal from concurrent access.
   IREE_TRACE_ZONE_BEGIN_NAMED(z_lock, "hsa_copy_lock");
   iree_slim_mutex_lock(&command_buffer->device_info->completion_signal_mutex);
   IREE_TRACE_ZONE_END(z_lock);
-  
+
   hsa_signal_t completion_signal =
       command_buffer->device_info->completion_signal;
   hsa_signal_store_screlease(completion_signal, 1);
 
   IREE_TRACE_ZONE_BEGIN_NAMED(z_copy, "hsa_amd_memory_async_copy");
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z_copy, (int64_t)source_ref.length);
-  iree_status_t status =
-      IREE_HSA_CALL_TO_STATUS(hsa_amd_memory_async_copy(
-                                  target_ptr, command_buffer->device_info->agent,
-                                  source_ptr, command_buffer->device_info->agent,
-                                  source_ref.length, 0, NULL,
-                                  completion_signal),
-                              "hsa_amd_memory_async_copy");
+  iree_status_t status = IREE_HSA_CALL_TO_STATUS(
+      hsa_amd_memory_async_copy(target_ptr, command_buffer->device_info->agent,
+                                source_ptr, command_buffer->device_info->agent,
+                                source_ref.length, 0, NULL, completion_signal),
+      "hsa_amd_memory_async_copy");
   IREE_TRACE_ZONE_END(z_copy);
 
   if (iree_status_is_ok(status)) {
     // Wait for copy to complete (synchronous for simplicity).
     IREE_TRACE_ZONE_BEGIN_NAMED(z_wait, "hsa_copy_signal_wait");
-    hsa_signal_wait_scacquire(
-        completion_signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX,
-        HSA_WAIT_STATE_BLOCKED);
+    hsa_signal_wait_scacquire(completion_signal, HSA_SIGNAL_CONDITION_EQ, 0,
+                              UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
     IREE_TRACE_ZONE_END(z_wait);
   }
 
@@ -369,21 +366,20 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_copy_buffer(
 }
 
 static iree_status_t iree_hal_hsa_stream_command_buffer_collective(
-    iree_hal_command_buffer_t* base_command_buffer, iree_hal_channel_t* channel,
-    iree_hal_collective_op_t op, uint32_t param,
-    iree_hal_buffer_ref_t send_ref, iree_hal_buffer_ref_t recv_ref,
-    iree_device_size_t element_count) {
+    iree_hal_command_buffer_t *base_command_buffer, iree_hal_channel_t *channel,
+    iree_hal_collective_op_t op, uint32_t param, iree_hal_buffer_ref_t send_ref,
+    iree_hal_buffer_ref_t recv_ref, iree_device_size_t element_count) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                           "collectives not implemented");
 }
 
 static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
-    iree_hal_command_buffer_t* base_command_buffer,
-    iree_hal_executable_t* executable,
+    iree_hal_command_buffer_t *base_command_buffer,
+    iree_hal_executable_t *executable,
     iree_hal_executable_export_ordinal_t export_ordinal,
     const iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
     iree_hal_buffer_ref_list_t bindings, iree_hal_dispatch_flags_t flags) {
-  iree_hal_hsa_stream_command_buffer_t* command_buffer =
+  iree_hal_hsa_stream_command_buffer_t *command_buffer =
       iree_hal_hsa_stream_command_buffer_cast(base_command_buffer);
   IREE_TRACE_ZONE_BEGIN(z0);
 
@@ -412,7 +408,7 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
   }
 
   // Get kernel params.
-  const iree_hal_hsa_kernel_params_t* kernel_params = NULL;
+  const iree_hal_hsa_kernel_params_t *kernel_params = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_hsa_native_executable_lookup_kernel_params(
               executable, export_ordinal, command_buffer->base.queue_affinity,
@@ -443,23 +439,26 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
   // kernel arguments. We need to allocate kernarg memory based on the
   // constants size if kernarg_segment_size is 0 or smaller than constants.
   iree_host_size_t kernarg_size = kernel_params->kernarg_segment_size;
-  bool use_direct_copy = iree_all_bits_set(flags, IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS);
-  
+  bool use_direct_copy =
+      iree_all_bits_set(flags, IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS);
+
   // Calculate the minimum kernarg size needed for implicit args (256 bytes).
   // The implicit args start at explicit_kernarg_size aligned to 8 bytes.
   uint32_t explicit_size = kernel_params->explicit_kernarg_size;
   if (explicit_size == 0) {
     // Estimate from constants or bindings if not provided.
-    explicit_size = (uint32_t)(bindings.count * sizeof(void*) + constants.data_length);
+    explicit_size =
+        (uint32_t)(bindings.count * sizeof(void *) + constants.data_length);
   }
   uint32_t implicit_offset = (explicit_size + 7) & ~7u;
-  
-  // Kernels with kernarg_segment_size=0 are typically precompiled library kernels
-  // (e.g., hipBLASLt/rocBLAS GEMM) that don't use COV5 implicit args.
+
+  // Kernels with kernarg_segment_size=0 are typically precompiled library
+  // kernels (e.g., hipBLASLt/rocBLAS GEMM) that don't use COV5 implicit args.
   // For these, allocate only the explicit arguments size.
   bool uses_implicit_args = (kernel_params->kernarg_segment_size > 0);
-  iree_host_size_t min_size_for_implicit = uses_implicit_args ? (implicit_offset + 256) : explicit_size;
-  
+  iree_host_size_t min_size_for_implicit =
+      uses_implicit_args ? (implicit_offset + 256) : explicit_size;
+
   // For CUSTOM_DIRECT_ARGUMENTS, ensure we allocate enough space for the
   // constants buffer. Native HIP/CUDA kernels may have incorrect metadata.
   if (use_direct_copy && constants.data_length > 0) {
@@ -477,25 +476,25 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
       }
     }
   }
-  
+
   // Ensure minimum size for implicit args (if kernel uses them).
   if (kernarg_size < min_size_for_implicit) {
     kernarg_size = min_size_for_implicit;
   }
-  void* kernarg_address = NULL;
+  void *kernarg_address = NULL;
   if (kernarg_size > 0 &&
       command_buffer->device_info->kernarg_memory_pool_valid) {
     if (command_buffer->kernarg_scratch_size >= kernarg_size) {
       kernarg_address = command_buffer->kernarg_scratch;
     } else {
-      void* new_kernarg_address = NULL;
+      void *new_kernarg_address = NULL;
       IREE_TRACE_ZONE_BEGIN_NAMED(z_kernarg_alloc,
                                   "hsa_kernarg_memory_pool_allocate");
       IREE_TRACE_ZONE_APPEND_VALUE_I64(z_kernarg_alloc, (int64_t)kernarg_size);
       iree_status_t status = IREE_HSA_CALL_TO_STATUS(
           hsa_amd_memory_pool_allocate(
-              command_buffer->device_info->kernarg_memory_pool,
-              kernarg_size, 0, &new_kernarg_address),
+              command_buffer->device_info->kernarg_memory_pool, kernarg_size, 0,
+              &new_kernarg_address),
           "hsa_amd_memory_pool_allocate (kernarg)");
       IREE_TRACE_ZONE_END(z_kernarg_alloc);
       if (!iree_status_is_ok(status)) {
@@ -534,42 +533,47 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
     uint32_t wg_size_z = config.workgroup_size[2]
                              ? config.workgroup_size[2]
                              : kernel_params->block_dims[2];
-    if (wg_size_x == 0) wg_size_x = 1;
-    if (wg_size_y == 0) wg_size_y = 1;
-    if (wg_size_z == 0) wg_size_z = 1;
+    if (wg_size_x == 0)
+      wg_size_x = 1;
+    if (wg_size_y == 0)
+      wg_size_y = 1;
+    if (wg_size_z == 0)
+      wg_size_z = 1;
 
     // If we have parameter info, use the designated offsets.
     // EXCEPT for CUSTOM_DIRECT_ARGUMENTS - in that case, the constants buffer
-    // already contains the complete packed arguments (including device pointers),
-    // so we should NOT remap bindings.
-    bool use_direct_copy = iree_all_bits_set(flags, IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS);
-    if (kernel_params->parameters && kernel_params->parameter_count > 0 && !use_direct_copy) {
+    // already contains the complete packed arguments (including device
+    // pointers), so we should NOT remap bindings.
+    bool use_direct_copy = iree_all_bits_set(
+        flags, IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS);
+    if (kernel_params->parameters && kernel_params->parameter_count > 0 &&
+        !use_direct_copy) {
       iree_host_size_t binding_idx = 0;
       iree_host_size_t constant_offset = 0;
 
       for (uint32_t i = 0; i < kernel_params->parameter_count; ++i) {
-        const iree_hal_executable_export_parameter_t* param =
+        const iree_hal_executable_export_parameter_t *param =
             &kernel_params->parameters[i];
-        uint8_t* dest = (uint8_t*)kernarg_address + param->offset;
+        uint8_t *dest = (uint8_t *)kernarg_address + param->offset;
 
         if (param->type == IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_BINDING) {
           // This is a buffer pointer parameter.
           if (binding_idx < bindings.count) {
-            void* buffer_ptr = NULL;
+            void *buffer_ptr = NULL;
             if (bindings.values[binding_idx].buffer) {
-              void* device_buffer = iree_hal_hsa_buffer_device_pointer(
+              void *device_buffer = iree_hal_hsa_buffer_device_pointer(
                   iree_hal_buffer_allocated_buffer(
                       bindings.values[binding_idx].buffer));
-              buffer_ptr =
-                  (uint8_t*)device_buffer +
-                  iree_hal_buffer_byte_offset(bindings.values[binding_idx].buffer) +
-                  bindings.values[binding_idx].offset;
+              buffer_ptr = (uint8_t *)device_buffer +
+                           iree_hal_buffer_byte_offset(
+                               bindings.values[binding_idx].buffer) +
+                           bindings.values[binding_idx].offset;
             }
             memcpy(dest, &buffer_ptr, sizeof(buffer_ptr));
             ++binding_idx;
           } else {
             // No binding available - write NULL pointer.
-            void* null_ptr = NULL;
+            void *null_ptr = NULL;
             memcpy(dest, &null_ptr, sizeof(null_ptr));
           }
         } else {
@@ -585,7 +589,7 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
     } else if (use_direct_copy) {
       // CUSTOM_DIRECT_ARGUMENTS: copy the raw constants buffer directly.
       // The buffer already contains the complete packed kernel arguments.
-      // 
+      //
       // For native HIP/CUDA kernels, the streaming layer's parameter metadata
       // may not accurately reflect the kernel's actual argument requirements.
       // The HSA kernel's explicit_kernarg_size is authoritative.
@@ -594,12 +598,13 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
       //   Copy only explicit_kernarg_size (avoid copying garbage).
       // If constants.data_length < explicit_kernarg_size:
       //   Copy what we have (kernel may access uninitialized memory, but
-      //   this matches what the caller provided - they know the kernel's needs).
+      //   this matches what the caller provided - they know the kernel's
+      //   needs).
       // If constants.data_length == explicit_kernarg_size:
       //   Perfect match.
       if (constants.data_length > 0) {
         iree_host_size_t copy_size = constants.data_length;
-        if (kernel_params->explicit_kernarg_size > 0 && 
+        if (kernel_params->explicit_kernarg_size > 0 &&
             kernel_params->explicit_kernarg_size < copy_size) {
           copy_size = kernel_params->explicit_kernarg_size;
         }
@@ -616,37 +621,36 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
         for (iree_host_size_t i = 0; i < bindings.count; ++i) {
           int32_t kernarg_offset = bindings.values[i].buffer_slot;
           if (kernarg_offset < 0 ||
-              (iree_host_size_t)(kernarg_offset + sizeof(void*)) > kernarg_size) {
-            continue;  // Invalid or out-of-range offset - skip.
+              (iree_host_size_t)(kernarg_offset + sizeof(void *)) >
+                  kernarg_size) {
+            continue; // Invalid or out-of-range offset - skip.
           }
-          void* buffer_ptr = NULL;
+          void *buffer_ptr = NULL;
           if (bindings.values[i].buffer) {
-            void* device_buffer = iree_hal_hsa_buffer_device_pointer(
-                iree_hal_buffer_allocated_buffer(
-                    bindings.values[i].buffer));
+            void *device_buffer = iree_hal_hsa_buffer_device_pointer(
+                iree_hal_buffer_allocated_buffer(bindings.values[i].buffer));
             buffer_ptr =
-                (uint8_t*)device_buffer +
+                (uint8_t *)device_buffer +
                 iree_hal_buffer_byte_offset(bindings.values[i].buffer) +
                 bindings.values[i].offset;
           }
-          memcpy((uint8_t*)kernarg_address + kernarg_offset, &buffer_ptr,
+          memcpy((uint8_t *)kernarg_address + kernarg_offset, &buffer_ptr,
                  sizeof(buffer_ptr));
         }
-        
+
         // Ensure kernarg write is visible to GPU before dispatch.
         __atomic_thread_fence(__ATOMIC_SEQ_CST);
-        
       }
     } else {
       // Fallback: pack buffers then constants sequentially.
-      uint8_t* kernarg_ptr = (uint8_t*)kernarg_address;
+      uint8_t *kernarg_ptr = (uint8_t *)kernarg_address;
 
       for (iree_host_size_t i = 0; i < bindings.count; ++i) {
-        void* buffer_ptr = NULL;
+        void *buffer_ptr = NULL;
         if (bindings.values[i].buffer) {
-          void* device_buffer = iree_hal_hsa_buffer_device_pointer(
+          void *device_buffer = iree_hal_hsa_buffer_device_pointer(
               iree_hal_buffer_allocated_buffer(bindings.values[i].buffer));
-          buffer_ptr = (uint8_t*)device_buffer +
+          buffer_ptr = (uint8_t *)device_buffer +
                        iree_hal_buffer_byte_offset(bindings.values[i].buffer) +
                        bindings.values[i].offset;
         }
@@ -679,32 +683,35 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
       // Estimate explicit size from parameters if not provided.
       if (kernel_params->parameters && kernel_params->parameter_count > 0) {
         for (uint32_t i = 0; i < kernel_params->parameter_count; ++i) {
-          uint32_t end =
-              kernel_params->parameters[i].offset + kernel_params->parameters[i].size;
-          if (end > explicit_size) explicit_size = end;
+          uint32_t end = kernel_params->parameters[i].offset +
+                         kernel_params->parameters[i].size;
+          if (end > explicit_size)
+            explicit_size = end;
         }
       } else {
-        explicit_size = (uint32_t)(bindings.count * sizeof(void*) + constants.data_length);
+        explicit_size =
+            (uint32_t)(bindings.count * sizeof(void *) + constants.data_length);
       }
     }
-    // For CUSTOM_DIRECT_ARGUMENTS, the constants contain the actual kernel args.
-    // However, the kernel's explicit_kernarg_size is authoritative - it tells us
-    // where implicit arguments should start. We should NOT use constants.data_length
-    // to compute implicit_offset when we have valid kernel metadata, because
-    // constants.data_length might be larger than actual kernel arguments.
-    // (We already handle copying only min(constants.data_length, explicit_kernarg_size)
-    // in the DIRECT_COPY path above.)
+    // For CUSTOM_DIRECT_ARGUMENTS, the constants contain the actual kernel
+    // args. However, the kernel's explicit_kernarg_size is authoritative - it
+    // tells us where implicit arguments should start. We should NOT use
+    // constants.data_length to compute implicit_offset when we have valid
+    // kernel metadata, because constants.data_length might be larger than
+    // actual kernel arguments. (We already handle copying only
+    // min(constants.data_length, explicit_kernarg_size) in the DIRECT_COPY path
+    // above.)
 
     // Align to 8 bytes for implicit args.
     uint32_t implicit_offset = (explicit_size + 7) & ~7u;
     // Fill native HIP kernel hidden args at metadata-specified offsets.
     // These are hidden args that are part of the explicit kernarg buffer.
-    const iree_hal_hip_hidden_args_t* ha = &kernel_params->hidden_args;
-    bool has_embedded_hidden = (ha->block_count_x != UINT32_MAX ||
-                                ha->group_size_x != UINT32_MAX ||
-                                ha->grid_dims != UINT32_MAX);
+    const iree_hal_hip_hidden_args_t *ha = &kernel_params->hidden_args;
+    bool has_embedded_hidden =
+        (ha->block_count_x != UINT32_MAX || ha->group_size_x != UINT32_MAX ||
+         ha->grid_dims != UINT32_MAX);
     if (has_embedded_hidden) {
-      uint8_t* ka = (uint8_t*)kernarg_address;
+      uint8_t *ka = (uint8_t *)kernarg_address;
       // BlockCountX/Y/Z (uint32_t)
       if (ha->block_count_x != UINT32_MAX) {
         uint32_t val = config.workgroup_count[0];
@@ -772,10 +779,10 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
     // Skip implicit args filling for kernels that report kernarg_segment_size=0
     // OR for CUSTOM_DIRECT_ARGUMENTS kernels (precompiled library kernels like
     // hipBLASLt/rocBLAS GEMM that don't use the COV5 implicit args format).
-    bool should_fill_implicit = (kernel_params->kernarg_segment_size > 0) &&
-                                !use_direct_copy;
+    bool should_fill_implicit =
+        (kernel_params->kernarg_segment_size > 0) && !use_direct_copy;
     if (should_fill_implicit && implicit_offset + 256 <= kernarg_size) {
-      uint8_t* implicit_args = (uint8_t*)kernarg_address + implicit_offset;
+      uint8_t *implicit_args = (uint8_t *)kernarg_address + implicit_offset;
 
       // BlockCountX/Y/Z (uint32_t at offsets 0, 4, 8)
       uint32_t block_count_x = config.workgroup_count[0];
@@ -794,7 +801,8 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
       memcpy(implicit_args + 16, &group_size_z, sizeof(uint16_t));
 
       // RemainderX/Y/Z (uint16_t at offsets 18, 20, 22)
-      // These are for partial workgroups at grid edges (usually 0 for full grids)
+      // These are for partial workgroups at grid edges (usually 0 for full
+      // grids)
       uint16_t remainder_x = 0;
       uint16_t remainder_y = 0;
       uint16_t remainder_z = 0;
@@ -825,70 +833,64 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
   }
 
   // Create and submit AQL dispatch packet.
-  hsa_queue_t* queue = command_buffer->device_info->queue;
+  hsa_queue_t *queue = command_buffer->device_info->queue;
 
   // AGGRESSIVE_SYNC: Submit a barrier packet before each kernel dispatch.
   // This ensures all previous memory operations are complete before the kernel
   // reads any data. The barrier uses system-scope fences for maximum coherence.
 #ifndef IREE_HSA_USE_BARRIER_PACKETS
-#define IREE_HSA_USE_BARRIER_PACKETS 0  // Disabled - doesn't fix 160-byte kernel corruption
+#define IREE_HSA_USE_BARRIER_PACKETS                                           \
+  0 // Disabled - doesn't fix 160-byte kernel corruption
 #endif
 #if IREE_HSA_USE_BARRIER_PACKETS
   {
     // Reserve a slot for the barrier packet.
-    uint64_t barrier_index =
-        hsa_queue_add_write_index_relaxed(queue, 1);
-    
+    uint64_t barrier_index = hsa_queue_add_write_index_relaxed(queue, 1);
+
     // Wait for queue space.
-    while (barrier_index -
-               hsa_queue_load_read_index_relaxed(
-                   queue) >=
+    while (barrier_index - hsa_queue_load_read_index_relaxed(queue) >=
            queue->size) {
       // Busy wait for space.
     }
-    
+
     // Get barrier packet address.
-    hsa_barrier_and_packet_t* barrier =
-        (hsa_barrier_and_packet_t*)queue->base_address +
+    hsa_barrier_and_packet_t *barrier =
+        (hsa_barrier_and_packet_t *)queue->base_address +
         (barrier_index & (queue->size - 1));
-    
+
     // Initialize barrier packet.
     memset(barrier, 0, sizeof(*barrier));
     // No dependent signals - we just want a memory fence.
     // The barrier will complete immediately but enforce memory ordering.
-    barrier->completion_signal.handle = 0;  // No signal to wait on.
-    
+    barrier->completion_signal.handle = 0; // No signal to wait on.
+
     // Set header with system-scope fences.
     uint16_t barrier_header =
         HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE |
         HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE |
         HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE |
-        1 << HSA_PACKET_HEADER_BARRIER;  // Block until barrier completes.
+        1 << HSA_PACKET_HEADER_BARRIER; // Block until barrier completes.
     __atomic_store_n(&barrier->header, barrier_header, __ATOMIC_RELEASE);
-    
+
     // Ring doorbell for the barrier packet.
-    hsa_signal_store_screlease(
-        queue->doorbell_signal, barrier_index);
+    hsa_signal_store_screlease(queue->doorbell_signal, barrier_index);
   }
 #endif
 
   // Get write index for the queue.
   IREE_TRACE_ZONE_BEGIN_NAMED(z_queue_reserve, "hsa_dispatch_queue_reserve");
-  uint64_t write_index =
-      hsa_queue_add_write_index_relaxed(queue, 1);
+  uint64_t write_index = hsa_queue_add_write_index_relaxed(queue, 1);
 
   // Wait for queue space.
-  while (write_index -
-             hsa_queue_load_read_index_relaxed(
-                 queue) >=
+  while (write_index - hsa_queue_load_read_index_relaxed(queue) >=
          queue->size) {
     // Busy wait for space.
   }
   IREE_TRACE_ZONE_END(z_queue_reserve);
 
   // Get packet address.
-  hsa_kernel_dispatch_packet_t* packet =
-      (hsa_kernel_dispatch_packet_t*)queue->base_address +
+  hsa_kernel_dispatch_packet_t *packet =
+      (hsa_kernel_dispatch_packet_t *)queue->base_address +
       (write_index & (queue->size - 1));
 
   // Initialize packet fields (except header/setup which will be written
@@ -906,9 +908,10 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
   packet->grid_size_x = config.workgroup_count[0] * packet->workgroup_size_x;
   packet->grid_size_y = config.workgroup_count[1] * packet->workgroup_size_y;
   packet->grid_size_z = config.workgroup_count[2] * packet->workgroup_size_z;
-  // group_segment_size = static (from kernel metadata) + dynamic (from launch config)
-  packet->group_segment_size = kernel_params->group_segment_size + 
-                                config.dynamic_workgroup_local_memory;
+  // group_segment_size = static (from kernel metadata) + dynamic (from launch
+  // config)
+  packet->group_segment_size =
+      kernel_params->group_segment_size + config.dynamic_workgroup_local_memory;
   packet->private_segment_size = kernel_params->private_segment_size;
   packet->kernel_object = kernel_params->kernel_object;
   packet->kernarg_address = kernarg_address;
@@ -916,15 +919,15 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
   // Set up completion signal.
   // Lock mutex to protect completion signal from concurrent access.
   iree_slim_mutex_lock(&command_buffer->device_info->completion_signal_mutex);
-  
+
   hsa_signal_t completion_signal =
       command_buffer->device_info->completion_signal;
   hsa_signal_store_screlease(completion_signal, 1);
   packet->completion_signal = completion_signal;
 
-  // Ensure all writes to kernarg memory are visible before submitting the packet.
-  // This is critical for correctness - without this barrier, the GPU might read
-  // stale or uninitialized data from the kernarg buffer.
+  // Ensure all writes to kernarg memory are visible before submitting the
+  // packet. This is critical for correctness - without this barrier, the GPU
+  // might read stale or uninitialized data from the kernarg buffer.
   __atomic_thread_fence(__ATOMIC_SEQ_CST);
 
   // Set header and setup atomically as a single 32-bit word.
@@ -937,14 +940,13 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
       HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE |
       HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE |
       HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE;
-  uint16_t setup = 3;  // 3 dimensions
+  uint16_t setup = 3; // 3 dimensions
   uint32_t header_setup = ((uint32_t)setup << 16) | header;
-  __atomic_store_n((uint32_t*)packet, header_setup, __ATOMIC_RELEASE);
+  __atomic_store_n((uint32_t *)packet, header_setup, __ATOMIC_RELEASE);
 
   // Ring doorbell.
   IREE_TRACE_ZONE_BEGIN_NAMED(z_doorbell, "hsa_dispatch_ring_doorbell");
-  hsa_signal_store_screlease(queue->doorbell_signal,
-                                                          write_index);
+  hsa_signal_store_screlease(queue->doorbell_signal, write_index);
   IREE_TRACE_ZONE_END(z_doorbell);
 
   // Wait for completion (synchronous for simplicity).
@@ -952,17 +954,18 @@ static iree_status_t iree_hal_hsa_stream_command_buffer_dispatch(
   IREE_TRACE_ZONE_BEGIN_NAMED(z_wait, "hsa_dispatch_signal_wait");
   hsa_signal_value_t wait_result = hsa_signal_wait_scacquire(
       completion_signal, HSA_SIGNAL_CONDITION_EQ, 0,
-      10ULL * 1000 * 1000 * 1000,  // 10 seconds in nanoseconds
+      10ULL * 1000 * 1000 * 1000, // 10 seconds in nanoseconds
       HSA_WAIT_STATE_BLOCKED);
   IREE_TRACE_ZONE_END(z_wait);
-  
+
   // Full memory barrier to ensure GPU writes are visible to CPU and subsequent
   // kernel dispatches. The signal wait provides acquire semantics for the
-  // completion signal, but we need an explicit fence for device memory coherence.
+  // completion signal, but we need an explicit fence for device memory
+  // coherence.
   __atomic_thread_fence(__ATOMIC_SEQ_CST);
-  
+
   iree_slim_mutex_unlock(&command_buffer->device_info->completion_signal_mutex);
-  
+
   if (wait_result != 0) {
     // NOTE: Native HIP/CUDA kernels may require hidden kernel arguments that
     // the HSA backend cannot provide. Use IREE_HAL_DRIVER=hip for native

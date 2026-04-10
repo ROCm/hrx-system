@@ -36,8 +36,8 @@ TEST_CASE_METHOD(HrxTestFixture, "reserve fails gracefully without VM support",
   if (!supported) {
     // Reserve should fail with UNAVAILABLE.
     hrx_buffer_t vbuf = nullptr;
-    hrx_status_t s = hrx().allocator_virtual_memory_reserve(
-        alloc, 0, 1024 * 1024, &vbuf);
+    hrx_status_t s =
+        hrx().allocator_virtual_memory_reserve(alloc, 0, 1024 * 1024, &vbuf);
     REQUIRE(!hrx_status_is_ok(s));
     hrx().status_ignore(s);
   }

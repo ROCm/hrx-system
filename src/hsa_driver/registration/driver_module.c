@@ -10,11 +10,11 @@
 #include <stddef.h>
 #include <stdlib.h>
 
-#include "iree/base/api.h"
-#include "iree/base/tooling/flags.h"
-#include "iree/base/status.h"
-#include "iree/base/tracing.h"
 #include "hsa_driver/api.h"
+#include "iree/base/api.h"
+#include "iree/base/status.h"
+#include "iree/base/tooling/flags.h"
+#include "iree/base/tracing.h"
 
 IREE_FLAG_LIST(
     string, hsa_dylib_path,
@@ -39,8 +39,8 @@ IREE_FLAG(int32_t, hsa_default_index, 0,
           "Specifies the index of the default HSA device to use");
 
 static iree_status_t iree_hal_hsa_driver_factory_enumerate(
-    void* self, iree_host_size_t* out_driver_info_count,
-    const iree_hal_driver_info_t** out_driver_infos) {
+    void *self, iree_host_size_t *out_driver_info_count,
+    const iree_hal_driver_info_t **out_driver_infos) {
   IREE_ASSERT_ARGUMENT(out_driver_info_count);
   IREE_ASSERT_ARGUMENT(out_driver_infos);
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -57,8 +57,8 @@ static iree_status_t iree_hal_hsa_driver_factory_enumerate(
 }
 
 // Parses flags and environment variables into a string pair builder.
-static iree_status_t iree_hal_hsa_driver_parse_flags(
-    iree_string_pair_builder_t* builder) {
+static iree_status_t
+iree_hal_hsa_driver_parse_flags(iree_string_pair_builder_t *builder) {
   const iree_flag_string_list_t dylib_path_list = FLAG_hsa_dylib_path_list();
 
   // hsa_dylib_path
@@ -79,7 +79,7 @@ static iree_status_t iree_hal_hsa_driver_parse_flags(
 
   // If there were no flag-based dylib paths, consult the environment variable.
   if (dylib_path_list.count == 0) {
-    char* raw_dylib_path_env = getenv("IREE_HSA_DYLIB_PATH");
+    char *raw_dylib_path_env = getenv("IREE_HSA_DYLIB_PATH");
     if (raw_dylib_path_env) {
       iree_string_view_t dylib_path_env =
           iree_make_cstring_view(raw_dylib_path_env);
@@ -100,7 +100,7 @@ static iree_status_t iree_hal_hsa_driver_parse_flags(
 }
 
 static iree_status_t iree_hal_hsa_try_parse_int32_option(
-    iree_string_view_t name, iree_string_view_t value, int32_t* out_value) {
+    iree_string_view_t name, iree_string_view_t value, int32_t *out_value) {
   if (!iree_string_view_atoi_int32(value, out_value)) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
@@ -110,8 +110,9 @@ static iree_status_t iree_hal_hsa_try_parse_int32_option(
   return iree_ok_status();
 }
 
-static iree_status_t iree_hal_hsa_try_parse_bool_option(
-    iree_string_view_t name, iree_string_view_t value, bool* out_value) {
+static iree_status_t
+iree_hal_hsa_try_parse_bool_option(iree_string_view_t name,
+                                   iree_string_view_t value, bool *out_value) {
   if (iree_string_view_equal(value, IREE_SV("true"))) {
     *out_value = 1;
     return iree_ok_status();
@@ -128,9 +129,9 @@ static iree_status_t iree_hal_hsa_try_parse_bool_option(
 
 static iree_status_t iree_hal_hsa_driver_populate_options(
     iree_allocator_t host_allocator,
-    iree_hal_hsa_driver_options_t* driver_options,
-    iree_hal_hsa_device_params_t* device_params, iree_host_size_t pairs_size,
-    iree_string_pair_t* pairs) {
+    iree_hal_hsa_driver_options_t *driver_options,
+    iree_hal_hsa_device_params_t *device_params, iree_host_size_t pairs_size,
+    iree_string_pair_t *pairs) {
   // On the first loop, we just count dynamic sized values.
   int dylib_path_count = 0;
   for (iree_host_size_t i = 0; i < pairs_size; ++i) {
@@ -160,7 +161,7 @@ static iree_status_t iree_hal_hsa_driver_populate_options(
     IREE_RETURN_IF_ERROR(iree_allocator_malloc(
         host_allocator,
         dylib_path_count * sizeof(driver_options->hsa_lib_search_paths[0]),
-        (void**)&driver_options->hsa_lib_search_paths));
+        (void **)&driver_options->hsa_lib_search_paths));
     for (iree_host_size_t i = 0; i < pairs_size; ++i) {
       iree_string_view_t key = pairs[i].key;
       iree_string_view_t value = pairs[i].value;
@@ -175,8 +176,8 @@ static iree_status_t iree_hal_hsa_driver_populate_options(
 }
 
 static iree_status_t iree_hal_hsa_driver_factory_try_create(
-    void* self, iree_string_view_t driver_name, iree_allocator_t host_allocator,
-    iree_hal_driver_t** out_driver) {
+    void *self, iree_string_view_t driver_name, iree_allocator_t host_allocator,
+    iree_hal_driver_t **out_driver) {
   IREE_ASSERT_ARGUMENT(out_driver);
 
   if (!iree_string_view_equal(driver_name, IREE_SV("hsa"))) {
@@ -221,7 +222,7 @@ static iree_status_t iree_hal_hsa_driver_factory_try_create(
 }
 
 IREE_API_EXPORT iree_status_t
-iree_hal_hsa_driver_module_register(iree_hal_driver_registry_t* registry) {
+iree_hal_hsa_driver_module_register(iree_hal_driver_registry_t *registry) {
   static const iree_hal_driver_factory_t factory = {
       .self = NULL,
       .enumerate = iree_hal_hsa_driver_factory_enumerate,
@@ -229,4 +230,3 @@ iree_hal_hsa_driver_module_register(iree_hal_driver_registry_t* registry) {
   };
   return iree_hal_driver_registry_register_factory(registry, &factory);
 }
-

@@ -9,12 +9,12 @@
 
 #include <stdint.h>
 
-#include "iree/base/api.h"
-#include "iree/base/tracing.h"
-#include "iree/hal/api.h"
 #include "hsa_driver/fat_binary.h"
 #include "hsa_driver/hsa_headers.h"
 #include "hsa_driver/per_device_information.h"
+#include "iree/base/api.h"
+#include "iree/base/tracing.h"
+#include "iree/hal/api.h"
 
 // The max number of per-dispatch bindings allowed in the HSA HAL
 // implementation.
@@ -33,7 +33,7 @@ typedef struct iree_hal_hsa_kernel_debug_info_t {
 typedef struct iree_hal_hsa_kernel_params_t {
   uint64_t kernel_object;
   uint32_t kernarg_segment_size;
-  uint32_t explicit_kernarg_size;  // Size of explicit (user) arguments only.
+  uint32_t explicit_kernarg_size; // Size of explicit (user) arguments only.
   uint32_t group_segment_size;
   uint32_t private_segment_size;
 
@@ -44,9 +44,10 @@ typedef struct iree_hal_hsa_kernel_params_t {
 
   // Parameter info for reflection.
   uint32_t parameter_count;
-  iree_hal_executable_export_parameter_t* parameters;
-  
-  // Hidden argument offsets for native HIP kernels (all UINT32_MAX if not used).
+  iree_hal_executable_export_parameter_t *parameters;
+
+  // Hidden argument offsets for native HIP kernels (all UINT32_MAX if not
+  // used).
   iree_hal_hip_hidden_args_t hidden_args;
 
   IREE_TRACE(iree_hal_hsa_kernel_debug_info_t debug_info;)
@@ -57,22 +58,21 @@ typedef struct iree_hal_hsa_kernel_params_t {
 // Returns the canonical format string and total size of the executable data.
 iree_status_t iree_hal_hsa_native_executable_infer_format(
     iree_const_byte_span_t executable_data,
-    iree_host_size_t executable_format_capacity, char* executable_format,
-    iree_host_size_t* out_inferred_size);
+    iree_host_size_t executable_format_capacity, char *executable_format,
+    iree_host_size_t *out_inferred_size);
 
 // Creates an IREE executable from an HSACO (HSA Code Object).
 iree_status_t iree_hal_hsa_native_executable_create(
     iree_hal_hsa_device_topology_t topology,
-    const iree_hal_executable_params_t* executable_params,
-    iree_allocator_t host_allocator, iree_hal_executable_t** out_executable);
+    const iree_hal_executable_params_t *executable_params,
+    iree_allocator_t host_allocator, iree_hal_executable_t **out_executable);
 
 // Returns the kernel launch parameters for the given |entry_point| in the
 // |executable|.
 iree_status_t iree_hal_hsa_native_executable_lookup_kernel_params(
-    iree_hal_executable_t* executable,
+    iree_hal_executable_t *executable,
     iree_hal_executable_export_ordinal_t export_ordinal,
     iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_hsa_kernel_params_t** out_params);
+    const iree_hal_hsa_kernel_params_t **out_params);
 
-#endif  // IREE_HAL_DRIVERS_HSA_NATIVE_EXECUTABLE_H_
-
+#endif // IREE_HAL_DRIVERS_HSA_NATIVE_EXECUTABLE_H_

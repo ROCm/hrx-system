@@ -7,9 +7,9 @@
 #ifndef IREE_HAL_DRIVERS_HSA_BUFFER_H_
 #define IREE_HAL_DRIVERS_HSA_BUFFER_H_
 
+#include "hsa_driver/hsa_headers.h"
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
-#include "hsa_driver/hsa_headers.h"
 
 typedef enum iree_hal_hsa_buffer_type_e {
   // Device local buffer; allocated with hsa_amd_memory_pool_allocate, freed
@@ -32,19 +32,18 @@ iree_status_t iree_hal_hsa_buffer_wrap(
     iree_hal_memory_access_t allowed_access,
     iree_hal_buffer_usage_t allowed_usage, iree_device_size_t allocation_size,
     iree_device_size_t byte_offset, iree_device_size_t byte_length,
-    iree_hal_hsa_buffer_type_t buffer_type, void* device_ptr, void* host_ptr,
+    iree_hal_hsa_buffer_type_t buffer_type, void *device_ptr, void *host_ptr,
     iree_hal_buffer_release_callback_t release_callback,
-    iree_allocator_t host_allocator, iree_hal_buffer_t** out_buffer);
+    iree_allocator_t host_allocator, iree_hal_buffer_t **out_buffer);
 
 // Returns the underlying HSA buffer type.
-iree_hal_hsa_buffer_type_t iree_hal_hsa_buffer_type(
-    const iree_hal_buffer_t* buffer);
+iree_hal_hsa_buffer_type_t
+iree_hal_hsa_buffer_type(const iree_hal_buffer_t *buffer);
 
 // Returns the HSA device pointer for the given |buffer|.
-void* iree_hal_hsa_buffer_device_pointer(iree_hal_buffer_t* buffer);
+void *iree_hal_hsa_buffer_device_pointer(iree_hal_buffer_t *buffer);
 
 // Returns the HSA host pointer for the given |buffer|, if available.
-void* iree_hal_hsa_buffer_host_pointer(const iree_hal_buffer_t* buffer);
+void *iree_hal_hsa_buffer_host_pointer(const iree_hal_buffer_t *buffer);
 
-#endif  // IREE_HAL_DRIVERS_HSA_BUFFER_H_
-
+#endif // IREE_HAL_DRIVERS_HSA_BUFFER_H_

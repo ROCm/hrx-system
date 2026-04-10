@@ -4,12 +4,12 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "streaming/graph.h"
-#include "streaming/internal.h"
-#include "streaming/test/graph_util.h"
 #include "iree/base/api.h"
 #include "iree/testing/benchmark.h"
+#include "streaming/graph.h"
+#include "streaming/internal.h"
 #include "streaming/test/benchmark_compat.h"
+#include "streaming/test/graph_util.h"
 
 //===----------------------------------------------------------------------===//
 // Graph scheduling benchmarks
@@ -17,8 +17,8 @@
 
 namespace {
 
-static iree_status_t InitializeStreamingContext(
-    iree_hal_streaming_context_t** out_context) {
+static iree_status_t
+InitializeStreamingContext(iree_hal_streaming_context_t **out_context) {
   IREE_RETURN_IF_ERROR(iree_hal_streaming_init_global(
       IREE_HAL_STREAMING_INIT_FLAG_NONE, iree_allocator_system()));
   iree_host_size_t device_count = 0;
@@ -26,7 +26,7 @@ static iree_status_t InitializeStreamingContext(
   if (device_count == 0) {
     return iree_make_status(IREE_STATUS_UNAVAILABLE, "no devices available");
   }
-  iree_hal_streaming_device_t* device = iree_hal_streaming_device_entry(0);
+  iree_hal_streaming_device_t *device = iree_hal_streaming_device_entry(0);
   IREE_RETURN_IF_ERROR(iree_hal_streaming_device_get_or_create_primary_context(
       device, out_context));
   return iree_ok_status();
@@ -35,21 +35,22 @@ static iree_status_t InitializeStreamingContext(
 static void CleanupStreamingContext() { iree_hal_streaming_cleanup_global(); }
 
 // Creates a graph with the specified pattern and node count.
-static iree_status_t create_test_graph(
-    iree_hal_streaming_context_t* context, const char* pattern,
-    iree_host_size_t node_count, iree_hal_streaming_graph_t** out_graph,
-    iree_hal_streaming_buffer_t** out_buffer_a,
-    iree_hal_streaming_buffer_t** out_buffer_b,
-    iree_hal_streaming_buffer_t** out_buffer_c) {
+static iree_status_t
+create_test_graph(iree_hal_streaming_context_t *context, const char *pattern,
+                  iree_host_size_t node_count,
+                  iree_hal_streaming_graph_t **out_graph,
+                  iree_hal_streaming_buffer_t **out_buffer_a,
+                  iree_hal_streaming_buffer_t **out_buffer_b,
+                  iree_hal_streaming_buffer_t **out_buffer_c) {
   IREE_RETURN_IF_ERROR(iree_hal_streaming_graph_create(
       context, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
       out_graph));
 
   // Allocate device buffers needed for SIMPLE_ADD_RAW and memcpy/memset.
   const iree_device_size_t buffer_size = 256 * sizeof(float);
-  iree_hal_streaming_buffer_t* buffer_a = nullptr;
-  iree_hal_streaming_buffer_t* buffer_b = nullptr;
-  iree_hal_streaming_buffer_t* buffer_c = nullptr;
+  iree_hal_streaming_buffer_t *buffer_a = nullptr;
+  iree_hal_streaming_buffer_t *buffer_b = nullptr;
+  iree_hal_streaming_buffer_t *buffer_c = nullptr;
   IREE_RETURN_IF_ERROR(iree_hal_streaming_memory_allocate_device(
       context, buffer_size, IREE_HAL_STREAMING_MEMORY_FLAG_NONE, &buffer_a));
   IREE_RETURN_IF_ERROR(iree_hal_streaming_memory_allocate_device(
@@ -58,7 +59,7 @@ static iree_status_t create_test_graph(
       context, buffer_size, IREE_HAL_STREAMING_MEMORY_FLAG_NONE, &buffer_c));
 
   // Load the test kernel module.
-  iree_hal_streaming_module_t* test_module = nullptr;
+  iree_hal_streaming_module_t *test_module = nullptr;
   IREE_RETURN_IF_ERROR(iree_hal_streaming_test_module_load(
       context, iree_allocator_system(), &test_module));
 
@@ -113,24 +114,27 @@ static iree_status_t create_test_graph(
   iree_hal_streaming_module_release(test_module);
 
   // Return buffers to caller for cleanup after graph is released.
-  if (out_buffer_a) *out_buffer_a = buffer_a;
-  if (out_buffer_b) *out_buffer_b = buffer_b;
-  if (out_buffer_c) *out_buffer_c = buffer_c;
+  if (out_buffer_a)
+    *out_buffer_a = buffer_a;
+  if (out_buffer_b)
+    *out_buffer_b = buffer_b;
+  if (out_buffer_c)
+    *out_buffer_c = buffer_c;
 
   return status;
 }
 
 // Benchmark scheduling for linear chain of nodes.
 IREE_BENCHMARK_FN(BM_GraphSchedule_Linear) {
-  iree_hal_streaming_context_t* context = nullptr;
+  iree_hal_streaming_context_t *context = nullptr;
   IREE_RETURN_IF_ERROR(InitializeStreamingContext(&context));
 
   int64_t node_count = iree_benchmark_get_range(benchmark_state, 0);
 
-  iree_hal_streaming_graph_t* graph = nullptr;
-  iree_hal_streaming_buffer_t* buffer_a = nullptr;
-  iree_hal_streaming_buffer_t* buffer_b = nullptr;
-  iree_hal_streaming_buffer_t* buffer_c = nullptr;
+  iree_hal_streaming_graph_t *graph = nullptr;
+  iree_hal_streaming_buffer_t *buffer_a = nullptr;
+  iree_hal_streaming_buffer_t *buffer_b = nullptr;
+  iree_hal_streaming_buffer_t *buffer_c = nullptr;
   IREE_RETURN_IF_ERROR(create_test_graph(context, "linear", node_count, &graph,
                                          &buffer_a, &buffer_b, &buffer_c));
 
@@ -175,15 +179,15 @@ IREE_BENCHMARK_REGISTER_ARGS(BM_GraphSchedule_Linear, 10000);
 
 // Benchmark scheduling for fanout pattern.
 IREE_BENCHMARK_FN(BM_GraphSchedule_Fanout) {
-  iree_hal_streaming_context_t* context = nullptr;
+  iree_hal_streaming_context_t *context = nullptr;
   IREE_RETURN_IF_ERROR(InitializeStreamingContext(&context));
 
   int64_t fanout_count = iree_benchmark_get_range(benchmark_state, 0);
 
-  iree_hal_streaming_graph_t* graph = nullptr;
-  iree_hal_streaming_buffer_t* buffer_a = nullptr;
-  iree_hal_streaming_buffer_t* buffer_b = nullptr;
-  iree_hal_streaming_buffer_t* buffer_c = nullptr;
+  iree_hal_streaming_graph_t *graph = nullptr;
+  iree_hal_streaming_buffer_t *buffer_a = nullptr;
+  iree_hal_streaming_buffer_t *buffer_b = nullptr;
+  iree_hal_streaming_buffer_t *buffer_c = nullptr;
   IREE_RETURN_IF_ERROR(create_test_graph(context, "fanout", fanout_count,
                                          &graph, &buffer_a, &buffer_b,
                                          &buffer_c));
@@ -226,15 +230,15 @@ IREE_BENCHMARK_REGISTER_ARGS(BM_GraphSchedule_Fanout, 1000);
 
 // Benchmark scheduling for diamond pattern.
 IREE_BENCHMARK_FN(BM_GraphSchedule_Diamond) {
-  iree_hal_streaming_context_t* context = nullptr;
+  iree_hal_streaming_context_t *context = nullptr;
   IREE_RETURN_IF_ERROR(InitializeStreamingContext(&context));
 
   int64_t parallel_count = iree_benchmark_get_range(benchmark_state, 0);
 
-  iree_hal_streaming_graph_t* graph = nullptr;
-  iree_hal_streaming_buffer_t* buffer_a = nullptr;
-  iree_hal_streaming_buffer_t* buffer_b = nullptr;
-  iree_hal_streaming_buffer_t* buffer_c = nullptr;
+  iree_hal_streaming_graph_t *graph = nullptr;
+  iree_hal_streaming_buffer_t *buffer_a = nullptr;
+  iree_hal_streaming_buffer_t *buffer_b = nullptr;
+  iree_hal_streaming_buffer_t *buffer_c = nullptr;
   IREE_RETURN_IF_ERROR(create_test_graph(context, "diamond", parallel_count * 2,
                                          &graph, &buffer_a, &buffer_b,
                                          &buffer_c));
@@ -277,15 +281,15 @@ IREE_BENCHMARK_REGISTER_ARGS(BM_GraphSchedule_Diamond, 1000);
 
 // Benchmark scheduling for mixed node types.
 IREE_BENCHMARK_FN(BM_GraphSchedule_Mixed) {
-  iree_hal_streaming_context_t* context = nullptr;
+  iree_hal_streaming_context_t *context = nullptr;
   IREE_RETURN_IF_ERROR(InitializeStreamingContext(&context));
 
   int64_t node_count = iree_benchmark_get_range(benchmark_state, 0);
 
-  iree_hal_streaming_graph_t* graph = nullptr;
-  iree_hal_streaming_buffer_t* buffer_a = nullptr;
-  iree_hal_streaming_buffer_t* buffer_b = nullptr;
-  iree_hal_streaming_buffer_t* buffer_c = nullptr;
+  iree_hal_streaming_graph_t *graph = nullptr;
+  iree_hal_streaming_buffer_t *buffer_a = nullptr;
+  iree_hal_streaming_buffer_t *buffer_b = nullptr;
+  iree_hal_streaming_buffer_t *buffer_c = nullptr;
   IREE_RETURN_IF_ERROR(create_test_graph(context, "mixed", node_count, &graph,
                                          &buffer_a, &buffer_b, &buffer_c));
 
@@ -327,15 +331,15 @@ IREE_BENCHMARK_REGISTER_ARGS(BM_GraphSchedule_Mixed, 10000);
 
 // Benchmark scheduling for interleaved pattern.
 IREE_BENCHMARK_FN(BM_GraphSchedule_Interleaved) {
-  iree_hal_streaming_context_t* context = nullptr;
+  iree_hal_streaming_context_t *context = nullptr;
   IREE_RETURN_IF_ERROR(InitializeStreamingContext(&context));
 
   int64_t node_count = iree_benchmark_get_range(benchmark_state, 0);
 
-  iree_hal_streaming_graph_t* graph = nullptr;
-  iree_hal_streaming_buffer_t* buffer_a = nullptr;
-  iree_hal_streaming_buffer_t* buffer_b = nullptr;
-  iree_hal_streaming_buffer_t* buffer_c = nullptr;
+  iree_hal_streaming_graph_t *graph = nullptr;
+  iree_hal_streaming_buffer_t *buffer_a = nullptr;
+  iree_hal_streaming_buffer_t *buffer_b = nullptr;
+  iree_hal_streaming_buffer_t *buffer_c = nullptr;
   IREE_RETURN_IF_ERROR(create_test_graph(context, "interleaved", node_count,
                                          &graph, &buffer_a, &buffer_b,
                                          &buffer_c));
@@ -376,4 +380,4 @@ IREE_BENCHMARK_REGISTER_ARGS(BM_GraphSchedule_Interleaved, 100);
 IREE_BENCHMARK_REGISTER_ARGS(BM_GraphSchedule_Interleaved, 1000);
 IREE_BENCHMARK_REGISTER_ARGS(BM_GraphSchedule_Interleaved, 10000);
 
-}  // namespace
+} // namespace

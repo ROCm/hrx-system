@@ -4,8 +4,7 @@
 #include "hrx_test_fixture.hpp"
 #include <catch2/catch_test_macros.hpp>
 
-TEST_CASE_METHOD(HrxTestFixture, "Semaphore create and query",
-                 "[semaphore]") {
+TEST_CASE_METHOD(HrxTestFixture, "Semaphore create and query", "[semaphore]") {
   hrx_semaphore_t sem = nullptr;
   REQUIRE_OK(hrx().semaphore_create(device_, 0, &sem));
 

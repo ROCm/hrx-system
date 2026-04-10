@@ -25,7 +25,7 @@
 // different. At least we have tests!
 struct iree_hal_streaming_buffer_t {
   iree_hal_streaming_deviceptr_t device_ptr;
-  void* host_ptr;
+  void *host_ptr;
   size_t size;
   // Padding to make allocation pattern impacts a bit more realistic.
   uint64_t padding[5];
@@ -37,12 +37,12 @@ namespace {
 using ::iree::testing::status::StatusIs;
 
 // Helper to create a dummy buffer with the given device pointer.
-static iree_hal_streaming_buffer_t* CreateDummyBuffer(
-    iree_hal_streaming_deviceptr_t device_ptr, size_t size,
-    iree_allocator_t allocator, void* host_ptr = nullptr) {
-  iree_hal_streaming_buffer_t* buffer = nullptr;
+static iree_hal_streaming_buffer_t *
+CreateDummyBuffer(iree_hal_streaming_deviceptr_t device_ptr, size_t size,
+                  iree_allocator_t allocator, void *host_ptr = nullptr) {
+  iree_hal_streaming_buffer_t *buffer = nullptr;
   IREE_CHECK_OK(
-      iree_allocator_malloc(allocator, sizeof(*buffer), (void**)&buffer));
+      iree_allocator_malloc(allocator, sizeof(*buffer), (void **)&buffer));
   buffer->device_ptr = device_ptr;
   buffer->host_ptr = host_ptr;
   buffer->size = size;
@@ -50,7 +50,7 @@ static iree_hal_streaming_buffer_t* CreateDummyBuffer(
 }
 
 // Helper to free a dummy buffer.
-static void FreeDummyBuffer(iree_hal_streaming_buffer_t* buffer,
+static void FreeDummyBuffer(iree_hal_streaming_buffer_t *buffer,
                             iree_allocator_t allocator) {
   iree_allocator_free(allocator, buffer);
 }
@@ -61,7 +61,7 @@ static void FreeDummyBuffer(iree_hal_streaming_buffer_t* buffer,
 
 TEST(BufferTableTest, AllocateAndFree) {
   iree_allocator_t allocator = iree_allocator_system();
-  iree_hal_streaming_buffer_table_t* table = nullptr;
+  iree_hal_streaming_buffer_table_t *table = nullptr;
 
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_allocate(allocator, &table));
   EXPECT_NE(table, nullptr);
@@ -77,10 +77,10 @@ TEST(BufferTableTest, FreeNull) {
 
 TEST(BufferTableTest, InsertSingle) {
   iree_allocator_t allocator = iree_allocator_system();
-  iree_hal_streaming_buffer_table_t* table = nullptr;
+  iree_hal_streaming_buffer_table_t *table = nullptr;
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_allocate(allocator, &table));
 
-  auto* buffer = CreateDummyBuffer(0x100000000ULL, 4096, allocator);
+  auto *buffer = CreateDummyBuffer(0x100000000ULL, 4096, allocator);
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_insert(table, buffer));
 
   iree_hal_streaming_buffer_table_free(table);
@@ -89,13 +89,13 @@ TEST(BufferTableTest, InsertSingle) {
 
 TEST(BufferTableTest, LookupExact) {
   iree_allocator_t allocator = iree_allocator_system();
-  iree_hal_streaming_buffer_table_t* table = nullptr;
+  iree_hal_streaming_buffer_table_t *table = nullptr;
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_allocate(allocator, &table));
 
-  auto* buffer = CreateDummyBuffer(0x100000000ULL, 4096, allocator);
+  auto *buffer = CreateDummyBuffer(0x100000000ULL, 4096, allocator);
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_insert(table, buffer));
 
-  iree_hal_streaming_buffer_t* found = nullptr;
+  iree_hal_streaming_buffer_t *found = nullptr;
   IREE_EXPECT_OK(
       iree_hal_streaming_buffer_table_lookup(table, 0x100000000ULL, &found));
   EXPECT_EQ(found, buffer);
@@ -106,15 +106,15 @@ TEST(BufferTableTest, LookupExact) {
 
 TEST(BufferTableTest, RemoveSingle) {
   iree_allocator_t allocator = iree_allocator_system();
-  iree_hal_streaming_buffer_table_t* table = nullptr;
+  iree_hal_streaming_buffer_table_t *table = nullptr;
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_allocate(allocator, &table));
 
-  auto* buffer = CreateDummyBuffer(0x100000000ULL, 4096, allocator);
+  auto *buffer = CreateDummyBuffer(0x100000000ULL, 4096, allocator);
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_insert(table, buffer));
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_remove(table, 0x100000000ULL));
 
   // Should not be found after removal.
-  iree_hal_streaming_buffer_t* found = nullptr;
+  iree_hal_streaming_buffer_t *found = nullptr;
   EXPECT_THAT(Status(iree_hal_streaming_buffer_table_lookup(
                   table, 0x100000000ULL, &found)),
               StatusIs(StatusCode::kNotFound));
@@ -129,11 +129,11 @@ TEST(BufferTableTest, RemoveSingle) {
 
 TEST(BufferTableTest, DoubleInsert) {
   iree_allocator_t allocator = iree_allocator_system();
-  iree_hal_streaming_buffer_table_t* table = nullptr;
+  iree_hal_streaming_buffer_table_t *table = nullptr;
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_allocate(allocator, &table));
 
-  auto* buffer1 = CreateDummyBuffer(0x100000000ULL, 4096, allocator);
-  auto* buffer2 = CreateDummyBuffer(0x100000000ULL, 8192, allocator);
+  auto *buffer1 = CreateDummyBuffer(0x100000000ULL, 4096, allocator);
+  auto *buffer2 = CreateDummyBuffer(0x100000000ULL, 8192, allocator);
 
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_insert(table, buffer1));
 
@@ -148,10 +148,10 @@ TEST(BufferTableTest, DoubleInsert) {
 
 TEST(BufferTableTest, LookupMissing) {
   iree_allocator_t allocator = iree_allocator_system();
-  iree_hal_streaming_buffer_table_t* table = nullptr;
+  iree_hal_streaming_buffer_table_t *table = nullptr;
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_allocate(allocator, &table));
 
-  iree_hal_streaming_buffer_t* found = nullptr;
+  iree_hal_streaming_buffer_t *found = nullptr;
   EXPECT_THAT(Status(iree_hal_streaming_buffer_table_lookup(
                   table, 0x100000000ULL, &found)),
               StatusIs(StatusCode::kNotFound));
@@ -162,7 +162,7 @@ TEST(BufferTableTest, LookupMissing) {
 
 TEST(BufferTableTest, RemoveMissing) {
   iree_allocator_t allocator = iree_allocator_system();
-  iree_hal_streaming_buffer_table_t* table = nullptr;
+  iree_hal_streaming_buffer_table_t *table = nullptr;
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_allocate(allocator, &table));
 
   EXPECT_THAT(
@@ -174,10 +174,10 @@ TEST(BufferTableTest, RemoveMissing) {
 
 TEST(BufferTableTest, LookupRangeInvalidSize) {
   iree_allocator_t allocator = iree_allocator_system();
-  iree_hal_streaming_buffer_table_t* table = nullptr;
+  iree_hal_streaming_buffer_table_t *table = nullptr;
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_allocate(allocator, &table));
 
-  iree_hal_streaming_buffer_t* found = nullptr;
+  iree_hal_streaming_buffer_t *found = nullptr;
   EXPECT_THAT(Status(iree_hal_streaming_buffer_table_lookup_range(
                   table, 0x100000000ULL, 0, &found)),
               StatusIs(StatusCode::kInvalidArgument));
@@ -187,10 +187,10 @@ TEST(BufferTableTest, LookupRangeInvalidSize) {
 
 TEST(BufferTableTest, LookupRangeOverflow) {
   iree_allocator_t allocator = iree_allocator_system();
-  iree_hal_streaming_buffer_table_t* table = nullptr;
+  iree_hal_streaming_buffer_table_t *table = nullptr;
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_allocate(allocator, &table));
 
-  iree_hal_streaming_buffer_t* found = nullptr;
+  iree_hal_streaming_buffer_t *found = nullptr;
   // Request a range that would overflow.
   EXPECT_THAT(Status(iree_hal_streaming_buffer_table_lookup_range(
                   table, UINT64_MAX - 10, 20, &found)),
@@ -205,16 +205,16 @@ TEST(BufferTableTest, LookupRangeOverflow) {
 
 TEST(BufferTableTest, InsertMultiple) {
   iree_allocator_t allocator = iree_allocator_system();
-  iree_hal_streaming_buffer_table_t* table = nullptr;
+  iree_hal_streaming_buffer_table_t *table = nullptr;
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_allocate(allocator, &table));
 
   const size_t count = 100;
-  std::vector<iree_hal_streaming_buffer_t*> buffers;
+  std::vector<iree_hal_streaming_buffer_t *> buffers;
 
   // Insert multiple buffers.
   for (size_t i = 0; i < count; ++i) {
     iree_hal_streaming_deviceptr_t addr = 0x100000000ULL + i * 0x10000;
-    auto* buffer = CreateDummyBuffer(addr, 4096, allocator);
+    auto *buffer = CreateDummyBuffer(addr, 4096, allocator);
     buffers.push_back(buffer);
     IREE_EXPECT_OK(iree_hal_streaming_buffer_table_insert(table, buffer));
   }
@@ -222,31 +222,31 @@ TEST(BufferTableTest, InsertMultiple) {
   // Verify all can be looked up.
   for (size_t i = 0; i < count; ++i) {
     iree_hal_streaming_deviceptr_t addr = 0x100000000ULL + i * 0x10000;
-    iree_hal_streaming_buffer_t* found = nullptr;
+    iree_hal_streaming_buffer_t *found = nullptr;
     IREE_EXPECT_OK(iree_hal_streaming_buffer_table_lookup(table, addr, &found));
     EXPECT_EQ(found, buffers[i]);
   }
 
   iree_hal_streaming_buffer_table_free(table);
-  for (auto* buffer : buffers) {
+  for (auto *buffer : buffers) {
     FreeDummyBuffer(buffer, allocator);
   }
 }
 
 TEST(BufferTableTest, RemoveFIFO) {
   iree_allocator_t allocator = iree_allocator_system();
-  iree_hal_streaming_buffer_table_t* table = nullptr;
+  iree_hal_streaming_buffer_table_t *table = nullptr;
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_allocate(allocator, &table));
 
   const size_t count = 50;
-  std::vector<iree_hal_streaming_buffer_t*> buffers;
+  std::vector<iree_hal_streaming_buffer_t *> buffers;
   std::vector<iree_hal_streaming_deviceptr_t> addresses;
 
   // Insert buffers.
   for (size_t i = 0; i < count; ++i) {
     iree_hal_streaming_deviceptr_t addr = 0x100000000ULL + i * 0x10000;
     addresses.push_back(addr);
-    auto* buffer = CreateDummyBuffer(addr, 4096, allocator);
+    auto *buffer = CreateDummyBuffer(addr, 4096, allocator);
     buffers.push_back(buffer);
     IREE_EXPECT_OK(iree_hal_streaming_buffer_table_insert(table, buffer));
   }
@@ -256,32 +256,32 @@ TEST(BufferTableTest, RemoveFIFO) {
     IREE_EXPECT_OK(iree_hal_streaming_buffer_table_remove(table, addresses[i]));
 
     // Verify it's gone.
-    iree_hal_streaming_buffer_t* found = nullptr;
+    iree_hal_streaming_buffer_t *found = nullptr;
     EXPECT_THAT(Status(iree_hal_streaming_buffer_table_lookup(
                     table, addresses[i], &found)),
                 StatusIs(StatusCode::kNotFound));
   }
 
   iree_hal_streaming_buffer_table_free(table);
-  for (auto* buffer : buffers) {
+  for (auto *buffer : buffers) {
     FreeDummyBuffer(buffer, allocator);
   }
 }
 
 TEST(BufferTableTest, RemoveLIFO) {
   iree_allocator_t allocator = iree_allocator_system();
-  iree_hal_streaming_buffer_table_t* table = nullptr;
+  iree_hal_streaming_buffer_table_t *table = nullptr;
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_allocate(allocator, &table));
 
   const size_t count = 50;
-  std::vector<iree_hal_streaming_buffer_t*> buffers;
+  std::vector<iree_hal_streaming_buffer_t *> buffers;
   std::vector<iree_hal_streaming_deviceptr_t> addresses;
 
   // Insert buffers.
   for (size_t i = 0; i < count; ++i) {
     iree_hal_streaming_deviceptr_t addr = 0x100000000ULL + i * 0x10000;
     addresses.push_back(addr);
-    auto* buffer = CreateDummyBuffer(addr, 4096, allocator);
+    auto *buffer = CreateDummyBuffer(addr, 4096, allocator);
     buffers.push_back(buffer);
     IREE_EXPECT_OK(iree_hal_streaming_buffer_table_insert(table, buffer));
   }
@@ -292,32 +292,32 @@ TEST(BufferTableTest, RemoveLIFO) {
         iree_hal_streaming_buffer_table_remove(table, addresses[i - 1]));
 
     // Verify it's gone.
-    iree_hal_streaming_buffer_t* found = nullptr;
+    iree_hal_streaming_buffer_t *found = nullptr;
     EXPECT_THAT(Status(iree_hal_streaming_buffer_table_lookup(
                     table, addresses[i - 1], &found)),
                 StatusIs(StatusCode::kNotFound));
   }
 
   iree_hal_streaming_buffer_table_free(table);
-  for (auto* buffer : buffers) {
+  for (auto *buffer : buffers) {
     FreeDummyBuffer(buffer, allocator);
   }
 }
 
 TEST(BufferTableTest, RemoveRandom) {
   iree_allocator_t allocator = iree_allocator_system();
-  iree_hal_streaming_buffer_table_t* table = nullptr;
+  iree_hal_streaming_buffer_table_t *table = nullptr;
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_allocate(allocator, &table));
 
   const size_t count = 50;
-  std::vector<iree_hal_streaming_buffer_t*> buffers;
+  std::vector<iree_hal_streaming_buffer_t *> buffers;
   std::vector<iree_hal_streaming_deviceptr_t> addresses;
 
   // Insert buffers.
   for (size_t i = 0; i < count; ++i) {
     iree_hal_streaming_deviceptr_t addr = 0x100000000ULL + i * 0x10000;
     addresses.push_back(addr);
-    auto* buffer = CreateDummyBuffer(addr, 4096, allocator);
+    auto *buffer = CreateDummyBuffer(addr, 4096, allocator);
     buffers.push_back(buffer);
     IREE_EXPECT_OK(iree_hal_streaming_buffer_table_insert(table, buffer));
   }
@@ -334,14 +334,14 @@ TEST(BufferTableTest, RemoveRandom) {
         iree_hal_streaming_buffer_table_remove(table, addresses[index]));
 
     // Verify it's gone.
-    iree_hal_streaming_buffer_t* found = nullptr;
+    iree_hal_streaming_buffer_t *found = nullptr;
     EXPECT_THAT(Status(iree_hal_streaming_buffer_table_lookup(
                     table, addresses[index], &found)),
                 StatusIs(StatusCode::kNotFound));
   }
 
   iree_hal_streaming_buffer_table_free(table);
-  for (auto* buffer : buffers) {
+  for (auto *buffer : buffers) {
     FreeDummyBuffer(buffer, allocator);
   }
 }
@@ -352,14 +352,14 @@ TEST(BufferTableTest, RemoveRandom) {
 
 TEST(BufferTableTest, LookupRangeExact) {
   iree_allocator_t allocator = iree_allocator_system();
-  iree_hal_streaming_buffer_table_t* table = nullptr;
+  iree_hal_streaming_buffer_table_t *table = nullptr;
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_allocate(allocator, &table));
 
-  auto* buffer = CreateDummyBuffer(0x100000000ULL, 0x8000, allocator);
+  auto *buffer = CreateDummyBuffer(0x100000000ULL, 0x8000, allocator);
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_insert(table, buffer));
 
   // Lookup exact range.
-  iree_hal_streaming_buffer_t* found = nullptr;
+  iree_hal_streaming_buffer_t *found = nullptr;
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_lookup_range(
       table, 0x100000000ULL, 0x8000, &found));
   EXPECT_EQ(found, buffer);
@@ -370,14 +370,14 @@ TEST(BufferTableTest, LookupRangeExact) {
 
 TEST(BufferTableTest, LookupRangeWithin) {
   iree_allocator_t allocator = iree_allocator_system();
-  iree_hal_streaming_buffer_table_t* table = nullptr;
+  iree_hal_streaming_buffer_table_t *table = nullptr;
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_allocate(allocator, &table));
 
-  auto* buffer = CreateDummyBuffer(0x100000000ULL, 0x8000, allocator);
+  auto *buffer = CreateDummyBuffer(0x100000000ULL, 0x8000, allocator);
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_insert(table, buffer));
 
   // Lookup range within buffer.
-  iree_hal_streaming_buffer_t* found = nullptr;
+  iree_hal_streaming_buffer_t *found = nullptr;
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_lookup_range(
       table, 0x100001000ULL, 0x2000, &found));
   EXPECT_EQ(found, buffer);
@@ -393,13 +393,13 @@ TEST(BufferTableTest, LookupRangeWithin) {
 
 TEST(BufferTableTest, LookupRangeOutOfBounds) {
   iree_allocator_t allocator = iree_allocator_system();
-  iree_hal_streaming_buffer_table_t* table = nullptr;
+  iree_hal_streaming_buffer_table_t *table = nullptr;
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_allocate(allocator, &table));
 
-  auto* buffer = CreateDummyBuffer(0x100000000ULL, 0x8000, allocator);
+  auto *buffer = CreateDummyBuffer(0x100000000ULL, 0x8000, allocator);
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_insert(table, buffer));
 
-  iree_hal_streaming_buffer_t* found = nullptr;
+  iree_hal_streaming_buffer_t *found = nullptr;
 
   // Range starts before buffer.
   EXPECT_THAT(Status(iree_hal_streaming_buffer_table_lookup_range(
@@ -422,19 +422,19 @@ TEST(BufferTableTest, LookupRangeOutOfBounds) {
 
 TEST(BufferTableTest, LookupRangeMultipleBuffers) {
   iree_allocator_t allocator = iree_allocator_system();
-  iree_hal_streaming_buffer_table_t* table = nullptr;
+  iree_hal_streaming_buffer_table_t *table = nullptr;
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_allocate(allocator, &table));
 
   // Create adjacent buffers.
-  auto* buffer1 = CreateDummyBuffer(0x100000000ULL, 0x4000, allocator);
-  auto* buffer2 = CreateDummyBuffer(0x100004000ULL, 0x4000, allocator);
-  auto* buffer3 = CreateDummyBuffer(0x100008000ULL, 0x4000, allocator);
+  auto *buffer1 = CreateDummyBuffer(0x100000000ULL, 0x4000, allocator);
+  auto *buffer2 = CreateDummyBuffer(0x100004000ULL, 0x4000, allocator);
+  auto *buffer3 = CreateDummyBuffer(0x100008000ULL, 0x4000, allocator);
 
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_insert(table, buffer1));
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_insert(table, buffer2));
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_insert(table, buffer3));
 
-  iree_hal_streaming_buffer_t* found = nullptr;
+  iree_hal_streaming_buffer_t *found = nullptr;
 
   // Range within first buffer.
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_lookup_range(
@@ -463,10 +463,10 @@ TEST(BufferTableTest, LookupRangeMultipleBuffers) {
 
 TEST(BufferTableTest, EmptyTableOperations) {
   iree_allocator_t allocator = iree_allocator_system();
-  iree_hal_streaming_buffer_table_t* table = nullptr;
+  iree_hal_streaming_buffer_table_t *table = nullptr;
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_allocate(allocator, &table));
 
-  iree_hal_streaming_buffer_t* found = nullptr;
+  iree_hal_streaming_buffer_t *found = nullptr;
 
   // All operations should fail gracefully on empty table.
   EXPECT_THAT(Status(iree_hal_streaming_buffer_table_lookup(
@@ -486,11 +486,11 @@ TEST(BufferTableTest, EmptyTableOperations) {
 
 TEST(BufferTableTest, LargeScale) {
   iree_allocator_t allocator = iree_allocator_system();
-  iree_hal_streaming_buffer_table_t* table = nullptr;
+  iree_hal_streaming_buffer_table_t *table = nullptr;
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_allocate(allocator, &table));
 
   const size_t count = 10000;
-  std::vector<iree_hal_streaming_buffer_t*> buffers;
+  std::vector<iree_hal_streaming_buffer_t *> buffers;
   std::vector<iree_hal_streaming_deviceptr_t> addresses;
 
   // Generate random addresses.
@@ -499,9 +499,9 @@ TEST(BufferTableTest, LargeScale) {
       0x100000000ULL, 0x700000000000ULL);
 
   for (size_t i = 0; i < count; ++i) {
-    iree_hal_streaming_deviceptr_t addr = dist(gen) & ~0xFULL;  // Align to 16.
+    iree_hal_streaming_deviceptr_t addr = dist(gen) & ~0xFULL; // Align to 16.
     addresses.push_back(addr);
-    auto* buffer = CreateDummyBuffer(addr, 0x1000, allocator);
+    auto *buffer = CreateDummyBuffer(addr, 0x1000, allocator);
     buffers.push_back(buffer);
     IREE_EXPECT_OK(iree_hal_streaming_buffer_table_insert(table, buffer));
   }
@@ -510,58 +510,58 @@ TEST(BufferTableTest, LargeScale) {
   std::uniform_int_distribution<size_t> index_dist(0, count - 1);
   for (size_t i = 0; i < 100; ++i) {
     size_t index = index_dist(gen);
-    iree_hal_streaming_buffer_t* found = nullptr;
+    iree_hal_streaming_buffer_t *found = nullptr;
     IREE_EXPECT_OK(iree_hal_streaming_buffer_table_lookup(
         table, addresses[index], &found));
     EXPECT_EQ(found, buffers[index]);
   }
 
   iree_hal_streaming_buffer_table_free(table);
-  for (auto* buffer : buffers) {
+  for (auto *buffer : buffers) {
     FreeDummyBuffer(buffer, allocator);
   }
 }
 
 TEST(BufferTableTest, SparseAddresses) {
   iree_allocator_t allocator = iree_allocator_system();
-  iree_hal_streaming_buffer_table_t* table = nullptr;
+  iree_hal_streaming_buffer_table_t *table = nullptr;
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_allocate(allocator, &table));
 
   const size_t count = 100;
-  std::vector<iree_hal_streaming_buffer_t*> buffers;
+  std::vector<iree_hal_streaming_buffer_t *> buffers;
   std::vector<iree_hal_streaming_deviceptr_t> addresses;
 
   // Create sparse addresses with exponentially growing gaps.
   iree_hal_streaming_deviceptr_t base = 0x100000000ULL;
   for (size_t i = 0; i < count; ++i) {
-    base += 0x10000 * (i + 1);  // Gaps: 0x10000, 0x20000, 0x30000, etc.
+    base += 0x10000 * (i + 1); // Gaps: 0x10000, 0x20000, 0x30000, etc.
     addresses.push_back(base);
-    auto* buffer = CreateDummyBuffer(base, 0x1000, allocator);
+    auto *buffer = CreateDummyBuffer(base, 0x1000, allocator);
     buffers.push_back(buffer);
     IREE_ASSERT_OK(iree_hal_streaming_buffer_table_insert(table, buffer));
   }
 
   // Verify all can be looked up.
   for (size_t i = 0; i < count; ++i) {
-    iree_hal_streaming_buffer_t* found = nullptr;
+    iree_hal_streaming_buffer_t *found = nullptr;
     IREE_EXPECT_OK(
         iree_hal_streaming_buffer_table_lookup(table, addresses[i], &found));
     EXPECT_EQ(found, buffers[i]);
   }
 
   iree_hal_streaming_buffer_table_free(table);
-  for (auto* buffer : buffers) {
+  for (auto *buffer : buffers) {
     FreeDummyBuffer(buffer, allocator);
   }
 }
 
 TEST(BufferTableTest, InsertRemoveInsert) {
   iree_allocator_t allocator = iree_allocator_system();
-  iree_hal_streaming_buffer_table_t* table = nullptr;
+  iree_hal_streaming_buffer_table_t *table = nullptr;
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_allocate(allocator, &table));
 
-  auto* buffer1 = CreateDummyBuffer(0x100000000ULL, 0x1000, allocator);
-  auto* buffer2 = CreateDummyBuffer(0x100000000ULL, 0x2000, allocator);
+  auto *buffer1 = CreateDummyBuffer(0x100000000ULL, 0x1000, allocator);
+  auto *buffer2 = CreateDummyBuffer(0x100000000ULL, 0x2000, allocator);
 
   // Insert, remove, then insert again with same address.
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_insert(table, buffer1));
@@ -569,7 +569,7 @@ TEST(BufferTableTest, InsertRemoveInsert) {
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_insert(table, buffer2));
 
   // Should find the second buffer.
-  iree_hal_streaming_buffer_t* found = nullptr;
+  iree_hal_streaming_buffer_t *found = nullptr;
   IREE_EXPECT_OK(
       iree_hal_streaming_buffer_table_lookup(table, 0x100000000ULL, &found));
   EXPECT_EQ(found, buffer2);
@@ -581,18 +581,18 @@ TEST(BufferTableTest, InsertRemoveInsert) {
 
 TEST(BufferTableTest, MixedOperations) {
   iree_allocator_t allocator = iree_allocator_system();
-  iree_hal_streaming_buffer_table_t* table = nullptr;
+  iree_hal_streaming_buffer_table_t *table = nullptr;
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_allocate(allocator, &table));
 
   const size_t count = 100;
-  std::vector<iree_hal_streaming_buffer_t*> buffers;
+  std::vector<iree_hal_streaming_buffer_t *> buffers;
   std::vector<iree_hal_streaming_deviceptr_t> addresses;
 
   // Insert initial set.
   for (size_t i = 0; i < count; ++i) {
     iree_hal_streaming_deviceptr_t addr = 0x100000000ULL + i * 0x10000;
     addresses.push_back(addr);
-    auto* buffer = CreateDummyBuffer(addr, 0x4000, allocator);
+    auto *buffer = CreateDummyBuffer(addr, 0x4000, allocator);
     buffers.push_back(buffer);
     IREE_EXPECT_OK(iree_hal_streaming_buffer_table_insert(table, buffer));
   }
@@ -604,7 +604,7 @@ TEST(BufferTableTest, MixedOperations) {
 
   // Verify remaining buffers can be found.
   for (size_t i = 1; i < count; i += 2) {
-    iree_hal_streaming_buffer_t* found = nullptr;
+    iree_hal_streaming_buffer_t *found = nullptr;
     IREE_EXPECT_OK(
         iree_hal_streaming_buffer_table_lookup(table, addresses[i], &found));
     EXPECT_EQ(found, buffers[i]);
@@ -612,23 +612,23 @@ TEST(BufferTableTest, MixedOperations) {
 
   // Verify removed buffers cannot be found.
   for (size_t i = 0; i < count; i += 2) {
-    iree_hal_streaming_buffer_t* found = nullptr;
+    iree_hal_streaming_buffer_t *found = nullptr;
     EXPECT_THAT(Status(iree_hal_streaming_buffer_table_lookup(
                     table, addresses[i], &found)),
                 StatusIs(StatusCode::kNotFound));
   }
 
   // Add new buffers at removed addresses.
-  std::vector<iree_hal_streaming_buffer_t*> new_buffers;
+  std::vector<iree_hal_streaming_buffer_t *> new_buffers;
   for (size_t i = 0; i < count; i += 2) {
-    auto* buffer = CreateDummyBuffer(addresses[i], 0x8000, allocator);
+    auto *buffer = CreateDummyBuffer(addresses[i], 0x8000, allocator);
     new_buffers.push_back(buffer);
     IREE_EXPECT_OK(iree_hal_streaming_buffer_table_insert(table, buffer));
   }
 
   // Verify all buffers can now be found.
   for (size_t i = 0; i < count; ++i) {
-    iree_hal_streaming_buffer_t* found = nullptr;
+    iree_hal_streaming_buffer_t *found = nullptr;
     IREE_EXPECT_OK(
         iree_hal_streaming_buffer_table_lookup(table, addresses[i], &found));
     if (i % 2 == 0) {
@@ -641,10 +641,10 @@ TEST(BufferTableTest, MixedOperations) {
   }
 
   iree_hal_streaming_buffer_table_free(table);
-  for (auto* buffer : buffers) {
+  for (auto *buffer : buffers) {
     FreeDummyBuffer(buffer, allocator);
   }
-  for (auto* buffer : new_buffers) {
+  for (auto *buffer : new_buffers) {
     FreeDummyBuffer(buffer, allocator);
   }
 }
@@ -655,16 +655,16 @@ TEST(BufferTableTest, MixedOperations) {
 
 TEST(BufferTableTest, InsertWithHostPointer) {
   iree_allocator_t allocator = iree_allocator_system();
-  iree_hal_streaming_buffer_table_t* table = nullptr;
+  iree_hal_streaming_buffer_table_t *table = nullptr;
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_allocate(allocator, &table));
 
   // Create a buffer with both device and host pointers.
-  void* host_ptr = reinterpret_cast<void*>(0x200000000ULL);
-  auto* buffer = CreateDummyBuffer(0x100000000ULL, 4096, allocator, host_ptr);
+  void *host_ptr = reinterpret_cast<void *>(0x200000000ULL);
+  auto *buffer = CreateDummyBuffer(0x100000000ULL, 4096, allocator, host_ptr);
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_insert(table, buffer));
 
   // Should be able to lookup by device pointer.
-  iree_hal_streaming_buffer_t* found = nullptr;
+  iree_hal_streaming_buffer_t *found = nullptr;
   IREE_EXPECT_OK(
       iree_hal_streaming_buffer_table_lookup(table, 0x100000000ULL, &found));
   EXPECT_EQ(found, buffer);
@@ -682,11 +682,11 @@ TEST(BufferTableTest, InsertWithHostPointer) {
 
 TEST(BufferTableTest, RemoveByHostPointer) {
   iree_allocator_t allocator = iree_allocator_system();
-  iree_hal_streaming_buffer_table_t* table = nullptr;
+  iree_hal_streaming_buffer_table_t *table = nullptr;
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_allocate(allocator, &table));
 
-  void* host_ptr = reinterpret_cast<void*>(0x200000000ULL);
-  auto* buffer = CreateDummyBuffer(0x100000000ULL, 4096, allocator, host_ptr);
+  void *host_ptr = reinterpret_cast<void *>(0x200000000ULL);
+  auto *buffer = CreateDummyBuffer(0x100000000ULL, 4096, allocator, host_ptr);
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_insert(table, buffer));
 
   // Remove using host pointer.
@@ -694,7 +694,7 @@ TEST(BufferTableTest, RemoveByHostPointer) {
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_remove(table, host_addr));
 
   // Should not be found by either pointer.
-  iree_hal_streaming_buffer_t* found = nullptr;
+  iree_hal_streaming_buffer_t *found = nullptr;
   EXPECT_THAT(Status(iree_hal_streaming_buffer_table_lookup(
                   table, 0x100000000ULL, &found)),
               StatusIs(StatusCode::kNotFound));
@@ -708,15 +708,15 @@ TEST(BufferTableTest, RemoveByHostPointer) {
 
 TEST(BufferTableTest, LookupRangeWithHostPointer) {
   iree_allocator_t allocator = iree_allocator_system();
-  iree_hal_streaming_buffer_table_t* table = nullptr;
+  iree_hal_streaming_buffer_table_t *table = nullptr;
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_allocate(allocator, &table));
 
-  void* host_ptr = reinterpret_cast<void*>(0x200000000ULL);
-  auto* buffer = CreateDummyBuffer(0x100000000ULL, 0x4000, allocator, host_ptr);
+  void *host_ptr = reinterpret_cast<void *>(0x200000000ULL);
+  auto *buffer = CreateDummyBuffer(0x100000000ULL, 0x4000, allocator, host_ptr);
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_insert(table, buffer));
 
   // Lookup range using host pointer.
-  iree_hal_streaming_buffer_t* found = nullptr;
+  iree_hal_streaming_buffer_t *found = nullptr;
   uint64_t host_addr = (uint64_t)(uintptr_t)host_ptr;
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_lookup_range(
       table, host_addr + 0x1000, 0x2000, &found));
@@ -733,21 +733,21 @@ TEST(BufferTableTest, LookupRangeWithHostPointer) {
 
 TEST(BufferTableTest, MixedHostPointers) {
   iree_allocator_t allocator = iree_allocator_system();
-  iree_hal_streaming_buffer_table_t* table = nullptr;
+  iree_hal_streaming_buffer_table_t *table = nullptr;
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_allocate(allocator, &table));
 
   // Insert buffers with and without host pointers.
-  auto* buffer1 = CreateDummyBuffer(0x100000000ULL, 4096, allocator);
-  void* host_ptr2 = reinterpret_cast<void*>(0x200000000ULL);
-  auto* buffer2 = CreateDummyBuffer(0x110000000ULL, 4096, allocator, host_ptr2);
-  auto* buffer3 = CreateDummyBuffer(0x120000000ULL, 4096, allocator);
+  auto *buffer1 = CreateDummyBuffer(0x100000000ULL, 4096, allocator);
+  void *host_ptr2 = reinterpret_cast<void *>(0x200000000ULL);
+  auto *buffer2 = CreateDummyBuffer(0x110000000ULL, 4096, allocator, host_ptr2);
+  auto *buffer3 = CreateDummyBuffer(0x120000000ULL, 4096, allocator);
 
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_insert(table, buffer1));
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_insert(table, buffer2));
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_insert(table, buffer3));
 
   // Verify all can be looked up by device pointer.
-  iree_hal_streaming_buffer_t* found = nullptr;
+  iree_hal_streaming_buffer_t *found = nullptr;
   IREE_EXPECT_OK(
       iree_hal_streaming_buffer_table_lookup(table, 0x100000000ULL, &found));
   EXPECT_EQ(found, buffer1);
@@ -776,22 +776,22 @@ TEST(BufferTableTest, MixedHostPointers) {
 
 TEST(BufferTableTest, LookupMidBufferDevice) {
   iree_allocator_t allocator = iree_allocator_system();
-  iree_hal_streaming_buffer_table_t* table = nullptr;
+  iree_hal_streaming_buffer_table_t *table = nullptr;
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_allocate(allocator, &table));
 
-  auto* buffer = CreateDummyBuffer(0x100000000ULL, 0x4000, allocator);
+  auto *buffer = CreateDummyBuffer(0x100000000ULL, 0x4000, allocator);
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_insert(table, buffer));
 
   // Lookup at various offsets within the buffer.
-  iree_hal_streaming_buffer_t* found = nullptr;
+  iree_hal_streaming_buffer_t *found = nullptr;
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_lookup(table, 0x100000000ULL,
-                                                        &found));  // Start
+                                                        &found)); // Start
   EXPECT_EQ(found, buffer);
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_lookup(table, 0x100001000ULL,
-                                                        &found));  // Middle
+                                                        &found)); // Middle
   EXPECT_EQ(found, buffer);
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_lookup(table, 0x100003FFFULL,
-                                                        &found));  // Last byte
+                                                        &found)); // Last byte
   EXPECT_EQ(found, buffer);
 
   // Just past the end should fail.
@@ -805,24 +805,24 @@ TEST(BufferTableTest, LookupMidBufferDevice) {
 
 TEST(BufferTableTest, LookupMidBufferHost) {
   iree_allocator_t allocator = iree_allocator_system();
-  iree_hal_streaming_buffer_table_t* table = nullptr;
+  iree_hal_streaming_buffer_table_t *table = nullptr;
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_allocate(allocator, &table));
 
-  void* host_ptr = reinterpret_cast<void*>(0x200000000ULL);
-  auto* buffer = CreateDummyBuffer(0x100000000ULL, 0x4000, allocator, host_ptr);
+  void *host_ptr = reinterpret_cast<void *>(0x200000000ULL);
+  auto *buffer = CreateDummyBuffer(0x100000000ULL, 0x4000, allocator, host_ptr);
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_insert(table, buffer));
 
   // Lookup at various offsets within the host buffer range.
   uint64_t host_addr = (uint64_t)(uintptr_t)host_ptr;
-  iree_hal_streaming_buffer_t* found = nullptr;
+  iree_hal_streaming_buffer_t *found = nullptr;
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_lookup(table, host_addr,
-                                                        &found));  // Start
+                                                        &found)); // Start
   EXPECT_EQ(found, buffer);
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_lookup(
-      table, host_addr + 0x1000, &found));  // Middle
+      table, host_addr + 0x1000, &found)); // Middle
   EXPECT_EQ(found, buffer);
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_lookup(
-      table, host_addr + 0x3FFF, &found));  // Last byte
+      table, host_addr + 0x3FFF, &found)); // Last byte
   EXPECT_EQ(found, buffer);
 
   // Just past the end should fail.
@@ -836,17 +836,17 @@ TEST(BufferTableTest, LookupMidBufferHost) {
 
 TEST(BufferTableTest, RemoveMidBuffer) {
   iree_allocator_t allocator = iree_allocator_system();
-  iree_hal_streaming_buffer_table_t* table = nullptr;
+  iree_hal_streaming_buffer_table_t *table = nullptr;
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_allocate(allocator, &table));
 
-  auto* buffer = CreateDummyBuffer(0x100000000ULL, 0x4000, allocator);
+  auto *buffer = CreateDummyBuffer(0x100000000ULL, 0x4000, allocator);
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_insert(table, buffer));
 
   // Remove using a pointer in the middle of the buffer.
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_remove(table, 0x100002000ULL));
 
   // Buffer should be gone.
-  iree_hal_streaming_buffer_t* found = nullptr;
+  iree_hal_streaming_buffer_t *found = nullptr;
   EXPECT_THAT(Status(iree_hal_streaming_buffer_table_lookup(
                   table, 0x100000000ULL, &found)),
               StatusIs(StatusCode::kNotFound));
@@ -857,13 +857,13 @@ TEST(BufferTableTest, RemoveMidBuffer) {
 
 TEST(BufferTableTest, DoubleInsertHostPointer) {
   iree_allocator_t allocator = iree_allocator_system();
-  iree_hal_streaming_buffer_table_t* table = nullptr;
+  iree_hal_streaming_buffer_table_t *table = nullptr;
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_allocate(allocator, &table));
 
-  void* host_ptr = reinterpret_cast<void*>(0x200000000ULL);
-  auto* buffer1 = CreateDummyBuffer(0x100000000ULL, 4096, allocator, host_ptr);
+  void *host_ptr = reinterpret_cast<void *>(0x200000000ULL);
+  auto *buffer1 = CreateDummyBuffer(0x100000000ULL, 4096, allocator, host_ptr);
   // Different device pointer but same host pointer.
-  auto* buffer2 = CreateDummyBuffer(0x110000000ULL, 4096, allocator, host_ptr);
+  auto *buffer2 = CreateDummyBuffer(0x110000000ULL, 4096, allocator, host_ptr);
 
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_insert(table, buffer1));
 
@@ -876,5 +876,5 @@ TEST(BufferTableTest, DoubleInsertHostPointer) {
   FreeDummyBuffer(buffer2, allocator);
 }
 
-}  // namespace
-}  // namespace iree::hal::stream
+} // namespace
+} // namespace iree::hal::stream

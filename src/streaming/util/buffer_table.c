@@ -16,7 +16,7 @@ struct iree_hal_streaming_buffer_table_t {
   // Mutex protecting all table operations.
   iree_slim_mutex_t mutex;
   // Array of buffer pointers.
-  iree_hal_streaming_buffer_t** buffers;
+  iree_hal_streaming_buffer_t **buffers;
   // Current number of buffers in the table.
   iree_host_size_t count;
   // Capacity of the buffers array.
@@ -30,23 +30,24 @@ struct iree_hal_streaming_buffer_table_t {
 //===----------------------------------------------------------------------===//
 
 // Calculates storage size needed for the given capacity.
-static iree_host_size_t iree_hal_streaming_buffer_table_calculate_storage(
-    iree_host_size_t capacity) {
-  return capacity * sizeof(iree_hal_streaming_buffer_t*);
+static iree_host_size_t
+iree_hal_streaming_buffer_table_calculate_storage(iree_host_size_t capacity) {
+  return capacity * sizeof(iree_hal_streaming_buffer_t *);
 }
 
 // Finds the index of a buffer containing the given pointer.
 // The pointer may be a host or device pointer, and may be anywhere within
 // the buffer's range. Returns count if not found.
 static iree_host_size_t iree_hal_streaming_buffer_table_find_index(
-    iree_hal_streaming_buffer_table_t* table,
+    iree_hal_streaming_buffer_table_t *table,
     iree_hal_streaming_any_ptr_t any_ptr) {
   // Linear search through the table.
   // This is acceptable for typical buffer counts.
   // Can be replaced with binary search or hash lookup if needed.
   for (iree_host_size_t i = 0; i < table->count; ++i) {
-    iree_hal_streaming_buffer_t* buffer = table->buffers[i];
-    if (!buffer) continue;
+    iree_hal_streaming_buffer_t *buffer = table->buffers[i];
+    if (!buffer)
+      continue;
 
     // Check device pointer range first (98% case).
     if (any_ptr >= buffer->device_ptr &&
@@ -62,12 +63,12 @@ static iree_host_size_t iree_hal_streaming_buffer_table_find_index(
       }
     }
   }
-  return table->count;  // Not found.
+  return table->count; // Not found.
 }
 
 // Grows the table capacity by 2x.
-static iree_status_t iree_hal_streaming_buffer_table_grow(
-    iree_hal_streaming_buffer_table_t* table) {
+static iree_status_t
+iree_hal_streaming_buffer_table_grow(iree_hal_streaming_buffer_table_t *table) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   const iree_host_size_t new_capacity =
@@ -80,7 +81,7 @@ static iree_status_t iree_hal_streaming_buffer_table_grow(
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0,
       iree_allocator_realloc(table->host_allocator, new_size,
-                             (void**)&table->buffers),
+                             (void **)&table->buffers),
       "growing buffer table");
 
   table->capacity = new_capacity;
@@ -92,15 +93,15 @@ static iree_status_t iree_hal_streaming_buffer_table_grow(
 // Inserts a buffer at the given index.
 // Assumes the index is valid and there is capacity.
 static void iree_hal_streaming_buffer_table_insert_at(
-    iree_hal_streaming_buffer_table_t* table, iree_host_size_t index,
-    iree_hal_streaming_buffer_t* buffer) {
+    iree_hal_streaming_buffer_table_t *table, iree_host_size_t index,
+    iree_hal_streaming_buffer_t *buffer) {
   IREE_ASSERT(index <= table->count);
   IREE_ASSERT(table->count < table->capacity);
 
   // Shift elements if inserting in the middle.
   if (index < table->count) {
     memmove(&table->buffers[index + 1], &table->buffers[index],
-            (table->count - index) * sizeof(iree_hal_streaming_buffer_t*));
+            (table->count - index) * sizeof(iree_hal_streaming_buffer_t *));
   }
 
   table->buffers[index] = buffer;
@@ -110,13 +111,13 @@ static void iree_hal_streaming_buffer_table_insert_at(
 // Erases a buffer at the given index.
 // Assumes the index is valid.
 static void iree_hal_streaming_buffer_table_erase_at(
-    iree_hal_streaming_buffer_table_t* table, iree_host_size_t index) {
+    iree_hal_streaming_buffer_table_t *table, iree_host_size_t index) {
   IREE_ASSERT(index < table->count);
 
   // Shift elements if erasing from the middle.
   if (index < table->count - 1) {
     memmove(&table->buffers[index], &table->buffers[index + 1],
-            (table->count - index - 1) * sizeof(iree_hal_streaming_buffer_t*));
+            (table->count - index - 1) * sizeof(iree_hal_streaming_buffer_t *));
   }
 
   table->count--;
@@ -128,15 +129,15 @@ static void iree_hal_streaming_buffer_table_erase_at(
 
 iree_status_t iree_hal_streaming_buffer_table_allocate(
     iree_allocator_t host_allocator,
-    iree_hal_streaming_buffer_table_t** out_table) {
+    iree_hal_streaming_buffer_table_t **out_table) {
   IREE_ASSERT_ARGUMENT(out_table);
   IREE_TRACE_ZONE_BEGIN(z0);
   *out_table = NULL;
 
-  iree_hal_streaming_buffer_table_t* table = NULL;
+  iree_hal_streaming_buffer_table_t *table = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0,
-      iree_allocator_malloc(host_allocator, sizeof(*table), (void**)&table));
+      iree_allocator_malloc(host_allocator, sizeof(*table), (void **)&table));
   iree_slim_mutex_initialize(&table->mutex);
   table->host_allocator = host_allocator;
 
@@ -146,8 +147,9 @@ iree_status_t iree_hal_streaming_buffer_table_allocate(
 }
 
 void iree_hal_streaming_buffer_table_free(
-    iree_hal_streaming_buffer_table_t* table) {
-  if (!table) return;
+    iree_hal_streaming_buffer_table_t *table) {
+  if (!table)
+    return;
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_allocator_t host_allocator = table->host_allocator;
@@ -159,9 +161,9 @@ void iree_hal_streaming_buffer_table_free(
   IREE_TRACE_ZONE_END(z0);
 }
 
-iree_status_t iree_hal_streaming_buffer_table_insert(
-    iree_hal_streaming_buffer_table_t* table,
-    iree_hal_streaming_buffer_t* buffer) {
+iree_status_t
+iree_hal_streaming_buffer_table_insert(iree_hal_streaming_buffer_table_t *table,
+                                       iree_hal_streaming_buffer_t *buffer) {
   IREE_ASSERT_ARGUMENT(table);
   IREE_ASSERT_ARGUMENT(buffer);
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -176,7 +178,7 @@ iree_status_t iree_hal_streaming_buffer_table_insert(
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
         z0, iree_make_status(IREE_STATUS_ALREADY_EXISTS,
                              "device pointer %p already registered",
-                             (void*)buffer->device_ptr));
+                             (void *)buffer->device_ptr));
   }
 
   // Check if host pointer already exists (if assigned).
@@ -213,9 +215,9 @@ iree_status_t iree_hal_streaming_buffer_table_insert(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_streaming_buffer_table_remove(
-    iree_hal_streaming_buffer_table_t* table,
-    iree_hal_streaming_any_ptr_t any_ptr) {
+iree_status_t
+iree_hal_streaming_buffer_table_remove(iree_hal_streaming_buffer_table_t *table,
+                                       iree_hal_streaming_any_ptr_t any_ptr) {
   IREE_ASSERT_ARGUMENT(table);
   IREE_TRACE_ZONE_BEGIN(z0);
 
@@ -227,7 +229,7 @@ iree_status_t iree_hal_streaming_buffer_table_remove(
     iree_slim_mutex_unlock(&table->mutex);
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
         z0, iree_make_status(IREE_STATUS_NOT_FOUND,
-                             "pointer %p not found in table", (void*)any_ptr));
+                             "pointer %p not found in table", (void *)any_ptr));
   }
 
   // Remove from table.
@@ -239,9 +241,9 @@ iree_status_t iree_hal_streaming_buffer_table_remove(
 }
 
 iree_status_t iree_hal_streaming_buffer_table_lookup(
-    iree_hal_streaming_buffer_table_t* table,
+    iree_hal_streaming_buffer_table_t *table,
     iree_hal_streaming_any_ptr_t any_ptr,
-    iree_hal_streaming_buffer_t** out_buffer) {
+    iree_hal_streaming_buffer_t **out_buffer) {
   IREE_ASSERT_ARGUMENT(table);
   IREE_ASSERT_ARGUMENT(out_buffer);
   *out_buffer = NULL;
@@ -253,7 +255,7 @@ iree_status_t iree_hal_streaming_buffer_table_lookup(
   if (index >= table->count) {
     iree_slim_mutex_unlock(&table->mutex);
     return iree_make_status(IREE_STATUS_NOT_FOUND,
-                            "pointer %p not found in table", (void*)any_ptr);
+                            "pointer %p not found in table", (void *)any_ptr);
   }
 
   *out_buffer = table->buffers[index];
@@ -262,9 +264,9 @@ iree_status_t iree_hal_streaming_buffer_table_lookup(
 }
 
 iree_status_t iree_hal_streaming_buffer_table_lookup_range(
-    iree_hal_streaming_buffer_table_t* table,
+    iree_hal_streaming_buffer_table_t *table,
     iree_hal_streaming_any_ptr_t any_ptr, iree_device_size_t size,
-    iree_hal_streaming_buffer_t** out_buffer) {
+    iree_hal_streaming_buffer_t **out_buffer) {
   IREE_ASSERT_ARGUMENT(table);
   IREE_ASSERT_ARGUMENT(out_buffer);
   *out_buffer = NULL;
@@ -278,16 +280,17 @@ iree_status_t iree_hal_streaming_buffer_table_lookup_range(
   iree_hal_streaming_any_ptr_t range_end = any_ptr + size;
   if (range_end < any_ptr) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "range [%p, %p) would overflow", (void*)any_ptr,
-                            (void*)range_end);
+                            "range [%p, %p) would overflow", (void *)any_ptr,
+                            (void *)range_end);
   }
 
   iree_slim_mutex_lock(&table->mutex);
 
   // Linear search through all buffers to find one that contains the range.
   for (iree_host_size_t i = 0; i < table->count; ++i) {
-    iree_hal_streaming_buffer_t* buffer = table->buffers[i];
-    if (!buffer) continue;
+    iree_hal_streaming_buffer_t *buffer = table->buffers[i];
+    if (!buffer)
+      continue;
 
     // Check device pointer range first (98% case).
     iree_hal_streaming_deviceptr_t buffer_start = buffer->device_ptr;
@@ -312,6 +315,6 @@ iree_status_t iree_hal_streaming_buffer_table_lookup_range(
 
   iree_slim_mutex_unlock(&table->mutex);
   return iree_make_status(IREE_STATUS_NOT_FOUND,
-                          "no buffer contains range [%p, %p)", (void*)any_ptr,
-                          (void*)range_end);
+                          "no buffer contains range [%p, %p)", (void *)any_ptr,
+                          (void *)range_end);
 }

@@ -20,7 +20,7 @@
 #include <string_view>
 #include <vector>
 
-extern char** environ;
+extern char **environ;
 
 namespace {
 
@@ -32,27 +32,26 @@ constexpr bool kIsWindows = false;
 constexpr bool kIsPosix = !kIsWindows;
 
 class CompilerDiscovery {
- public:
+public:
   CompilerDiscovery() {
-    if (const char* path = std::getenv("HRX_IREE_COMPILE")) {
+    if (const char *path = std::getenv("HRX_IREE_COMPILE")) {
       dylib_path_ = path;
       has_dylib_override_ = true;
     }
-    if (const char* path = std::getenv("HRX_IREE_COMPILER_CLI")) {
+    if (const char *path = std::getenv("HRX_IREE_COMPILER_CLI")) {
       cli_path_ = path;
     }
   }
 
-  const std::string& dylibPath() const { return dylib_path_; }
+  const std::string &dylibPath() const { return dylib_path_; }
   bool hasDylibOverride() const { return has_dylib_override_; }
-  const std::string& cliPath() const { return cli_path_; }
+  const std::string &cliPath() const { return cli_path_; }
   bool hasCliOverride() const { return !cli_path_.empty(); }
 
   hrx_status_t requireCliPath() {
     if (cli_path_.empty()) {
-      return hrx_make_status(
-          HRX_STATUS_UNAVAILABLE,
-          "HRX_IREE_COMPILER_CLI is unset");
+      return hrx_make_status(HRX_STATUS_UNAVAILABLE,
+                             "HRX_IREE_COMPILER_CLI is unset");
     }
     std::optional<std::filesystem::path> executable_path =
         resolveExecutablePath(cli_path_);
@@ -65,8 +64,8 @@ class CompilerDiscovery {
     return hrx_ok_status();
   }
 
- private:
-  static bool isExecutableFile(const std::filesystem::file_status& status) {
+private:
+  static bool isExecutableFile(const std::filesystem::file_status &status) {
     if (!std::filesystem::is_regular_file(status)) {
       return false;
     }
@@ -80,11 +79,11 @@ class CompilerDiscovery {
     return (perms & (std::filesystem::perms::owner_exec |
                      std::filesystem::perms::group_exec |
                      std::filesystem::perms::others_exec)) !=
-        std::filesystem::perms::none;
+           std::filesystem::perms::none;
   }
 
-  static std::optional<std::filesystem::path> resolveExecutablePath(
-      const std::filesystem::path& path) {
+  static std::optional<std::filesystem::path>
+  resolveExecutablePath(const std::filesystem::path &path) {
     std::error_code ec;
     std::filesystem::file_status status = std::filesystem::status(path, ec);
     if (!ec && isExecutableFile(status)) {
@@ -114,13 +113,13 @@ struct CompilerDylibState {
   std::string error_message;
 };
 
-CompilerDylibState& dylibState() {
+CompilerDylibState &dylibState() {
   static CompilerDylibState state;
   return state;
 }
 
 void initializeCompilerDylib() {
-  static constexpr const char* kDefaultLibs[] = {
+  static constexpr const char *kDefaultLibs[] = {
       "libIREECompiler.so",
       "libIREECompiler.so.0",
   };
@@ -135,12 +134,12 @@ void initializeCompilerDylib() {
       dylibState().available = true;
       return;
     }
-    dylibState().error_message = "failed to load HRX_IREE_COMPILE=" +
-        discovery.dylibPath();
+    dylibState().error_message =
+        "failed to load HRX_IREE_COMPILE=" + discovery.dylibPath();
     return;
   }
 
-  for (const char* lib_path : kDefaultLibs) {
+  for (const char *lib_path : kDefaultLibs) {
     if (ireeCompilerLoadLibrary(lib_path)) {
       ireeCompilerGlobalInitialize();
       dylibState().available = true;
@@ -153,7 +152,7 @@ void initializeCompilerDylib() {
 }
 
 hrx_status_t ensureCompilerDylibLoaded() {
-  CompilerDylibState& state = dylibState();
+  CompilerDylibState &state = dylibState();
   std::call_once(state.init_once, initializeCompilerDylib);
   if (state.available) {
     return hrx_ok_status();
@@ -161,9 +160,9 @@ hrx_status_t ensureCompilerDylibLoaded() {
   return hrx_make_status(HRX_STATUS_UNAVAILABLE, state.error_message.c_str());
 }
 
-hrx_status_t statusFromCompilerError(
-    const char* context, iree_compiler_error_t* error,
-    const std::string& diagnostics = std::string()) {
+hrx_status_t
+statusFromCompilerError(const char *context, iree_compiler_error_t *error,
+                        const std::string &diagnostics = std::string()) {
   std::string message(context);
   if (error) {
     message.append(": ");
@@ -179,47 +178,47 @@ hrx_status_t statusFromCompilerError(
 
 void destroyDylibOutput(hrx_compiler_output_t output) {
   ireeCompilerOutputDestroy(
-      static_cast<iree_compiler_output_t*>(output->impl));
+      static_cast<iree_compiler_output_t *>(output->impl));
   free(output);
 }
 
 void destroyCliOutput(hrx_compiler_output_t output) {
   hrx_host_allocator_free_aligned(output->host_allocator,
-                                   const_cast<uint8_t*>(output->data));
+                                  const_cast<uint8_t *>(output->data));
   free(output);
 }
 
-void freeFlags(char** flags, size_t flag_count) {
+void freeFlags(char **flags, size_t flag_count) {
   for (size_t i = 0; i < flag_count; ++i) {
     free(flags[i]);
   }
   free(flags);
 }
 
-hrx_status_t cloneFlags(const char* const* flags, size_t flag_count,
-                         char*** out_flags) {
+hrx_status_t cloneFlags(const char *const *flags, size_t flag_count,
+                        char ***out_flags) {
   *out_flags = nullptr;
   if (flag_count == 0) {
     return hrx_ok_status();
   }
 
-  char** cloned = static_cast<char**>(calloc(flag_count, sizeof(char*)));
+  char **cloned = static_cast<char **>(calloc(flag_count, sizeof(char *)));
   if (!cloned) {
     return hrx_make_status(HRX_STATUS_OUT_OF_MEMORY,
-                            "failed to allocate compiler flags");
+                           "failed to allocate compiler flags");
   }
 
   for (size_t i = 0; i < flag_count; ++i) {
     if (!flags || !flags[i]) {
       freeFlags(cloned, flag_count);
       return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                              "compiler flag is NULL");
+                             "compiler flag is NULL");
     }
     cloned[i] = strdup(flags[i]);
     if (!cloned[i]) {
       freeFlags(cloned, flag_count);
       return hrx_make_status(HRX_STATUS_OUT_OF_MEMORY,
-                              "failed to copy compiler flag");
+                             "failed to copy compiler flag");
     }
   }
 
@@ -227,13 +226,13 @@ hrx_status_t cloneFlags(const char* const* flags, size_t flag_count,
   return hrx_ok_status();
 }
 
-hrx_status_t compileWithDylib(
-    hrx_compiler_session_t session, std::string_view mlir,
-    hrx_compiler_output_t* output) {
+hrx_status_t compileWithDylib(hrx_compiler_session_t session,
+                              std::string_view mlir,
+                              hrx_compiler_output_t *output) {
   struct InvocationState {
-    iree_compiler_invocation_t* invocation = nullptr;
-    iree_compiler_source_t* source = nullptr;
-    iree_compiler_output_t* iree_output = nullptr;
+    iree_compiler_invocation_t *invocation = nullptr;
+    iree_compiler_source_t *source = nullptr;
+    iree_compiler_output_t *iree_output = nullptr;
     std::string diagnostics;
     ~InvocationState() {
       if (source) {
@@ -248,12 +247,12 @@ hrx_status_t compileWithDylib(
   state.invocation = ireeCompilerInvocationCreate(session->iree_session);
   ireeCompilerInvocationEnableCallbackDiagnostics(
       state.invocation, 0,
-      [](iree_compiler_diagnostic_severity_t severity, const char* message,
-         size_t message_size, void* user_data) {
+      [](iree_compiler_diagnostic_severity_t severity, const char *message,
+         size_t message_size, void *user_data) {
         if (severity < IREE_COMPILER_DIAGNOSTIC_SEVERITY_ERROR) {
           return;
         }
-        auto* diagnostics = static_cast<std::string*>(user_data);
+        auto *diagnostics = static_cast<std::string *>(user_data);
         if (!diagnostics->empty()) {
           diagnostics->push_back('\n');
         }
@@ -262,38 +261,38 @@ hrx_status_t compileWithDylib(
       &state.diagnostics);
 
   std::string mlir_copy(mlir.data(), mlir.size());
-  if (iree_compiler_error_t* error = ireeCompilerSourceWrapBuffer(
+  if (iree_compiler_error_t *error = ireeCompilerSourceWrapBuffer(
           session->iree_session, "hrx_graph.mlir", mlir_copy.c_str(),
           mlir_copy.size() + 1, /*isNullTerminated=*/true, &state.source)) {
     return statusFromCompilerError("failed to create compiler source", error);
   }
 
   if (!ireeCompilerInvocationParseSource(state.invocation, state.source)) {
-    return statusFromCompilerError(
-        "failed to parse MLIR", nullptr, state.diagnostics);
+    return statusFromCompilerError("failed to parse MLIR", nullptr,
+                                   state.diagnostics);
   }
 
-  if (!ireeCompilerInvocationPipeline(
-          state.invocation, IREE_COMPILER_PIPELINE_STD)) {
-    return statusFromCompilerError(
-        "IREE compilation failed", nullptr, state.diagnostics);
+  if (!ireeCompilerInvocationPipeline(state.invocation,
+                                      IREE_COMPILER_PIPELINE_STD)) {
+    return statusFromCompilerError("IREE compilation failed", nullptr,
+                                   state.diagnostics);
   }
 
-  if (iree_compiler_error_t* error =
+  if (iree_compiler_error_t *error =
           ireeCompilerOutputOpenMembuffer(&state.iree_output)) {
     return statusFromCompilerError("failed to create compiler output", error);
   }
 
-  if (iree_compiler_error_t* error = ireeCompilerInvocationOutputVMBytecode(
+  if (iree_compiler_error_t *error = ireeCompilerInvocationOutputVMBytecode(
           state.invocation, state.iree_output)) {
     ireeCompilerOutputDestroy(state.iree_output);
     return statusFromCompilerError("failed to emit VMFB", error,
                                    state.diagnostics);
   }
 
-  void* contents = nullptr;
+  void *contents = nullptr;
   uint64_t size = 0;
-  if (iree_compiler_error_t* error =
+  if (iree_compiler_error_t *error =
           ireeCompilerOutputMapMemory(state.iree_output, &contents, &size)) {
     ireeCompilerOutputDestroy(state.iree_output);
     return statusFromCompilerError("failed to map compiler output", error);
@@ -304,11 +303,11 @@ hrx_status_t compileWithDylib(
   if (!compiled) {
     ireeCompilerOutputDestroy(state.iree_output);
     return hrx_make_status(HRX_STATUS_OUT_OF_MEMORY,
-                            "failed to allocate compiler output");
+                           "failed to allocate compiler output");
   }
 
   iree_atomic_ref_count_init(&compiled->ref_count);
-  compiled->data = static_cast<const uint8_t*>(contents);
+  compiled->data = static_cast<const uint8_t *>(contents);
   compiled->size = static_cast<size_t>(size);
   compiled->impl = state.iree_output;
   compiled->destroy = destroyDylibOutput;
@@ -317,35 +316,35 @@ hrx_status_t compileWithDylib(
   return hrx_ok_status();
 }
 
-hrx_status_t readCliVmfb(const std::filesystem::path& path,
-                          hrx_compiler_output_t* output) {
-  FILE* file = fopen(path.c_str(), "rb");
+hrx_status_t readCliVmfb(const std::filesystem::path &path,
+                         hrx_compiler_output_t *output) {
+  FILE *file = fopen(path.c_str(), "rb");
   if (!file) {
     return hrx_make_status(HRX_STATUS_UNAVAILABLE,
-                            "failed to open iree-compile output");
+                           "failed to open iree-compile output");
   }
   if (fseek(file, 0, SEEK_END) != 0) {
     fclose(file);
     return hrx_make_status(HRX_STATUS_UNAVAILABLE,
-                            "failed to seek iree-compile output");
+                           "failed to seek iree-compile output");
   }
   long size = ftell(file);
   if (size < 0) {
     fclose(file);
     return hrx_make_status(HRX_STATUS_UNAVAILABLE,
-                            "failed to stat iree-compile output");
+                           "failed to stat iree-compile output");
   }
   if (fseek(file, 0, SEEK_SET) != 0) {
     fclose(file);
     return hrx_make_status(HRX_STATUS_UNAVAILABLE,
-                            "failed to rewind iree-compile output");
+                           "failed to rewind iree-compile output");
   }
 
   hrx_host_allocator_t host_allocator = hrx_host_allocator_system();
-  uint8_t* data = nullptr;
+  uint8_t *data = nullptr;
   hrx_status_t status = hrx_host_allocator_malloc_aligned(
       host_allocator, static_cast<size_t>(size) + 1, 4096, 0,
-      reinterpret_cast<void**>(&data));
+      reinterpret_cast<void **>(&data));
   if (!hrx_status_is_ok(status)) {
     fclose(file);
     return status;
@@ -359,7 +358,7 @@ hrx_status_t readCliVmfb(const std::filesystem::path& path,
   if (bytes_read != static_cast<size_t>(size)) {
     hrx_host_allocator_free_aligned(host_allocator, data);
     return hrx_make_status(HRX_STATUS_UNAVAILABLE,
-                            "failed to read iree-compile output");
+                           "failed to read iree-compile output");
   }
   data[size] = 0;
 
@@ -368,7 +367,7 @@ hrx_status_t readCliVmfb(const std::filesystem::path& path,
   if (!compiled) {
     hrx_host_allocator_free_aligned(host_allocator, data);
     return hrx_make_status(HRX_STATUS_OUT_OF_MEMORY,
-                            "failed to allocate compiler output");
+                           "failed to allocate compiler output");
   }
 
   iree_atomic_ref_count_init(&compiled->ref_count);
@@ -381,9 +380,9 @@ hrx_status_t readCliVmfb(const std::filesystem::path& path,
   return hrx_ok_status();
 }
 
-hrx_status_t compileWithCli(
-    hrx_compiler_session_t session, std::string_view mlir,
-    hrx_compiler_output_t* output) {
+hrx_status_t compileWithCli(hrx_compiler_session_t session,
+                            std::string_view mlir,
+                            hrx_compiler_output_t *output) {
   std::filesystem::path temp_dir = std::filesystem::temp_directory_path();
   std::string mlir_template = (temp_dir / "hrx_graph_XXXXXX.mlir").string();
   std::string vmfb_template = (temp_dir / "hrx_graph_XXXXXX.vmfb").string();
@@ -391,20 +390,20 @@ hrx_status_t compileWithCli(
   int mlir_fd = mkstemps(mlir_template.data(), 5);
   if (mlir_fd < 0) {
     return hrx_make_status(HRX_STATUS_UNAVAILABLE,
-                            "failed to create temporary MLIR input");
+                           "failed to create temporary MLIR input");
   }
   int vmfb_fd = mkstemps(vmfb_template.data(), 5);
   if (vmfb_fd < 0) {
     close(mlir_fd);
     std::filesystem::remove(mlir_template);
     return hrx_make_status(HRX_STATUS_UNAVAILABLE,
-                            "failed to create temporary VMFB output");
+                           "failed to create temporary VMFB output");
   }
 
   size_t total_written = 0;
   while (total_written < mlir.size()) {
-    ssize_t wrote =
-        write(mlir_fd, mlir.data() + total_written, mlir.size() - total_written);
+    ssize_t wrote = write(mlir_fd, mlir.data() + total_written,
+                          mlir.size() - total_written);
     if (wrote < 0 && errno == EINTR) {
       continue;
     }
@@ -414,7 +413,7 @@ hrx_status_t compileWithCli(
       std::filesystem::remove(mlir_template);
       std::filesystem::remove(vmfb_template);
       return hrx_make_status(HRX_STATUS_UNAVAILABLE,
-                              "failed to write temporary MLIR input");
+                             "failed to write temporary MLIR input");
     }
     total_written += static_cast<size_t>(wrote);
   }
@@ -430,9 +429,9 @@ hrx_status_t compileWithCli(
   argv_storage.emplace_back(vmfb_template);
   argv_storage.emplace_back(mlir_template);
 
-  std::vector<char*> argv;
+  std::vector<char *> argv;
   argv.reserve(argv_storage.size() + 1);
-  for (std::string& arg : argv_storage) {
+  for (std::string &arg : argv_storage) {
     argv.push_back(arg.data());
   }
   argv.push_back(nullptr);
@@ -442,7 +441,7 @@ hrx_status_t compileWithCli(
     std::filesystem::remove(mlir_template);
     std::filesystem::remove(vmfb_template);
     return hrx_make_status(HRX_STATUS_UNAVAILABLE,
-                            "failed to create compiler diagnostics pipe");
+                           "failed to create compiler diagnostics pipe");
   }
 
   posix_spawn_file_actions_t actions;
@@ -488,7 +487,7 @@ hrx_status_t compileWithCli(
     }
     std::filesystem::remove(vmfb_template);
     return hrx_make_status(HRX_STATUS_UNAVAILABLE,
-                            "failed to wait for iree-compile");
+                           "failed to wait for iree-compile");
   }
 
   if (!WIFEXITED(child_status) || WEXITSTATUS(child_status) != 0) {
@@ -511,15 +510,14 @@ hrx_status_t compileWithCli(
   return status;
 }
 
-}  // namespace
+} // namespace
 
 extern "C" {
 
-hrx_status_t hrx_compiler_create(
-    hrx_compiler_backend_t backend, hrx_compiler_t* compiler) {
+hrx_status_t hrx_compiler_create(hrx_compiler_backend_t backend,
+                                 hrx_compiler_t *compiler) {
   if (!compiler) {
-    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                            "compiler is NULL");
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "compiler is NULL");
   }
   *compiler = nullptr;
 
@@ -529,8 +527,7 @@ hrx_status_t hrx_compiler_create(
       backend == HRX_COMPILER_BACKEND_DYLIB) {
     status = ensureCompilerDylibLoaded();
     if (!hrx_status_is_ok(status)) {
-      if (backend == HRX_COMPILER_BACKEND_AUTO &&
-          discovery.hasCliOverride()) {
+      if (backend == HRX_COMPILER_BACKEND_AUTO && discovery.hasCliOverride()) {
         hrx_status_ignore(status);
         status = discovery.requireCliPath();
         if (!hrx_status_is_ok(status)) {
@@ -550,14 +547,14 @@ hrx_status_t hrx_compiler_create(
     }
   } else if (backend != HRX_COMPILER_BACKEND_CLI) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                            "unknown compiler backend");
+                           "unknown compiler backend");
   }
 
   hrx_compiler_t created =
       static_cast<hrx_compiler_t>(calloc(1, sizeof(*created)));
   if (!created) {
     return hrx_make_status(HRX_STATUS_OUT_OF_MEMORY,
-                            "failed to allocate compiler");
+                           "failed to allocate compiler");
   }
 
   iree_atomic_ref_count_init(&created->ref_count);
@@ -567,7 +564,7 @@ hrx_status_t hrx_compiler_create(
     if (!created->cli_path) {
       free(created);
       return hrx_make_status(HRX_STATUS_OUT_OF_MEMORY,
-                              "failed to copy compiler CLI path");
+                             "failed to copy compiler CLI path");
     }
   }
 
@@ -590,11 +587,11 @@ hrx_compiler_backend_t hrx_compiler_backend(hrx_compiler_t compiler) {
   return compiler->backend;
 }
 
-hrx_status_t hrx_compiler_session_create(
-    hrx_compiler_t compiler, hrx_compiler_session_t* session) {
+hrx_status_t hrx_compiler_session_create(hrx_compiler_t compiler,
+                                         hrx_compiler_session_t *session) {
   if (!compiler || !session) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                            "compiler or session is NULL");
+                           "compiler or session is NULL");
   }
   *session = nullptr;
 
@@ -602,7 +599,7 @@ hrx_status_t hrx_compiler_session_create(
       static_cast<hrx_compiler_session_t>(calloc(1, sizeof(*created)));
   if (!created) {
     return hrx_make_status(HRX_STATUS_OUT_OF_MEMORY,
-                            "failed to allocate compiler session");
+                           "failed to allocate compiler session");
   }
 
   iree_atomic_ref_count_init(&created->ref_count);
@@ -634,22 +631,22 @@ void hrx_compiler_session_release(hrx_compiler_session_t session) {
   }
 }
 
-hrx_status_t hrx_compiler_session_set_flags(
-    hrx_compiler_session_t session, const char* const* flags,
-    size_t flag_count) {
+hrx_status_t hrx_compiler_session_set_flags(hrx_compiler_session_t session,
+                                            const char *const *flags,
+                                            size_t flag_count) {
   if (!session || (flag_count > 0 && !flags)) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                            "session or flags is NULL");
+                           "session or flags is NULL");
   }
 
-  char** cloned_flags = nullptr;
+  char **cloned_flags = nullptr;
   hrx_status_t status = cloneFlags(flags, flag_count, &cloned_flags);
   if (!hrx_status_is_ok(status)) {
     return status;
   }
 
   if (session->compiler->backend == HRX_COMPILER_BACKEND_DYLIB) {
-    if (iree_compiler_error_t* error = ireeCompilerSessionSetFlags(
+    if (iree_compiler_error_t *error = ireeCompilerSessionSetFlags(
             session->iree_session, static_cast<int>(flag_count), flags)) {
       freeFlags(cloned_flags, flag_count);
       return statusFromCompilerError("failed to set compiler flags", error);
@@ -662,17 +659,18 @@ hrx_status_t hrx_compiler_session_set_flags(
   return hrx_ok_status();
 }
 
-hrx_status_t hrx_compiler_session_compile_mlir(
-    hrx_compiler_session_t session, const char* mlir_data, size_t mlir_size,
-    hrx_compiler_output_t* output) {
+hrx_status_t hrx_compiler_session_compile_mlir(hrx_compiler_session_t session,
+                                               const char *mlir_data,
+                                               size_t mlir_size,
+                                               hrx_compiler_output_t *output) {
   if (!session || !mlir_data || !output) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                            "session, mlir_data, or output is NULL");
+                           "session, mlir_data, or output is NULL");
   }
   *output = nullptr;
   if (mlir_size == 0) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                            "mlir_size must be > 0");
+                           "mlir_size must be > 0");
   }
 
   std::string_view mlir(mlir_data, mlir_size);
@@ -692,8 +690,7 @@ void hrx_compiler_output_release(hrx_compiler_output_t output) {
   }
 }
 
-const uint8_t* hrx_compiler_output_data(
-    hrx_compiler_output_t output) {
+const uint8_t *hrx_compiler_output_data(hrx_compiler_output_t output) {
   return output ? output->data : nullptr;
 }
 
@@ -701,4 +698,4 @@ size_t hrx_compiler_output_size(hrx_compiler_output_t output) {
   return output ? output->size : 0;
 }
 
-}  // extern "C"
+} // extern "C"

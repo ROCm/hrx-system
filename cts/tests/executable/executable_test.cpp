@@ -17,8 +17,8 @@ namespace {
 
 std::string gpu_architecture(hrx_device_t device) {
   std::array<char, 64> arch = {};
-  REQUIRE_OK(hrx().device_get_property(
-      device, HRX_DEVICE_PROPERTY_ARCHITECTURE, arch.data(), arch.size()));
+  REQUIRE_OK(hrx().device_get_property(device, HRX_DEVICE_PROPERTY_ARCHITECTURE,
+                                       arch.data(), arch.size()));
   std::string value(arch.data());
   for (char c : value) {
     REQUIRE((std::isalnum(static_cast<unsigned char>(c)) || c == '_'));
@@ -36,15 +36,15 @@ std::filesystem::path write_noop_kernel_source() {
   return src_path;
 }
 
-std::filesystem::path build_noop_hsaco(const std::string& arch) {
+std::filesystem::path build_noop_hsaco(const std::string &arch) {
   std::filesystem::path src_path = write_noop_kernel_source();
   std::filesystem::path hsaco_path =
       std::filesystem::temp_directory_path() / "hrx_noop_kernel.hsaco";
 
   std::string command =
       "clang++ -x hip --offload-device-only --offload-arch=" + arch +
-      " -nogpuinc -nogpulib -c " + src_path.string() +
-      " -o " + hsaco_path.string();
+      " -nogpuinc -nogpulib -c " + src_path.string() + " -o " +
+      hsaco_path.string();
   int rc = std::system(command.c_str());
   INFO("command: " << command);
   REQUIRE(rc == 0);
@@ -53,7 +53,7 @@ std::filesystem::path build_noop_hsaco(const std::string& arch) {
   return hsaco_path;
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE_METHOD(HrxTestFixture, "executable_load_lookup_dispatch_noop") {
   if (!is_gpu()) {
@@ -70,8 +70,8 @@ TEST_CASE_METHOD(HrxTestFixture, "executable_load_lookup_dispatch_noop") {
   std::filesystem::path hsaco_path = build_noop_hsaco(arch);
 
   hrx_executable_t executable = nullptr;
-  REQUIRE_OK(hrx().executable_load_file(
-      device_, hsaco_path.c_str(), nullptr, &executable));
+  REQUIRE_OK(hrx().executable_load_file(device_, hsaco_path.c_str(), nullptr,
+                                        &executable));
   REQUIRE(executable != nullptr);
 
   hrx().executable_retain(executable);
@@ -82,8 +82,8 @@ TEST_CASE_METHOD(HrxTestFixture, "executable_load_lookup_dispatch_noop") {
   REQUIRE(export_count == 1);
 
   uint32_t ordinal = UINT32_MAX;
-  REQUIRE_OK(hrx().executable_lookup_export_by_name(
-      executable, "hrx_noop", &ordinal));
+  REQUIRE_OK(
+      hrx().executable_lookup_export_by_name(executable, "hrx_noop", &ordinal));
   REQUIRE(ordinal == 0);
 
   hrx_executable_export_info_t info = {};
@@ -102,18 +102,18 @@ TEST_CASE_METHOD(HrxTestFixture, "executable_load_lookup_dispatch_noop") {
 
   hrx_dispatch_config_t config = {
       /* .workgroup_count = */ {1, 1, 1},
-      /* .workgroup_size = */ {
+      /* .workgroup_size = */
+      {
           info.workgroup_size[0],
           info.workgroup_size[1],
           info.workgroup_size[2],
       },
       /* .subgroup_size = */ 0,
   };
-  REQUIRE_OK(hrx().stream_dispatch(
-      stream, executable, ordinal, &config,
-      /*constants=*/nullptr, /*constants_size=*/0,
-      /*bindings=*/nullptr, /*binding_count=*/0,
-      HRX_DISPATCH_FLAG_NONE));
+  REQUIRE_OK(hrx().stream_dispatch(stream, executable, ordinal, &config,
+                                   /*constants=*/nullptr, /*constants_size=*/0,
+                                   /*bindings=*/nullptr, /*binding_count=*/0,
+                                   HRX_DISPATCH_FLAG_NONE));
   REQUIRE_OK(hrx().stream_synchronize(stream));
 
   hrx().stream_release(stream);

@@ -11,7 +11,7 @@ extern hrx_device_t g_test_device;
 extern hrx_accelerator_type_t g_test_device_type;
 
 class HrxTestFixture {
- protected:
+protected:
   hrx_device_t device_ = nullptr;
 
   HrxTestFixture() { device_ = g_test_device; }
@@ -27,18 +27,18 @@ class HrxTestFixture {
 };
 
 // Convenience: check hrx_status_t in tests.
-#define REQUIRE_OK(expr)                                      \
-  do {                                                        \
-    hrx_status_t _s = (expr);                                \
-    if (!hrx_status_is_ok(_s)) {                             \
-      char* msg = nullptr;                                    \
-      size_t len = 0;                                         \
-      hrx().status_to_string(_s, &msg, &len);                \
-      INFO("hrx error: " << (msg ? msg : "?"));              \
-      hrx().status_free_message(msg);                        \
-      hrx().status_ignore(_s);                               \
-      REQUIRE(false);                                         \
-    }                                                         \
+#define REQUIRE_OK(expr)                                                       \
+  do {                                                                         \
+    hrx_status_t _s = (expr);                                                  \
+    if (!hrx_status_is_ok(_s)) {                                               \
+      char *msg = nullptr;                                                     \
+      size_t len = 0;                                                          \
+      hrx().status_to_string(_s, &msg, &len);                                  \
+      INFO("hrx error: " << (msg ? msg : "?"));                                \
+      hrx().status_free_message(msg);                                          \
+      hrx().status_ignore(_s);                                                 \
+      REQUIRE(false);                                                          \
+    }                                                                          \
   } while (0)
 
-#endif  // HRX_CTS_TEST_FIXTURE_HPP
+#endif // HRX_CTS_TEST_FIXTURE_HPP

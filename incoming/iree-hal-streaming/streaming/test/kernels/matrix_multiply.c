@@ -10,11 +10,11 @@
 #ifdef __AMDGCN__
 // AMDGPU specific
 #define KERNEL_ATTR __attribute__((amdgpu_kernel))
-#define GET_GLOBAL_ID_X()             \
-  (__builtin_amdgcn_workitem_id_x() + \
+#define GET_GLOBAL_ID_X()                                                      \
+  (__builtin_amdgcn_workitem_id_x() +                                          \
    __builtin_amdgcn_workgroup_id_x() * __builtin_amdgcn_workgroup_size_x())
-#define GET_GLOBAL_ID_Y()             \
-  (__builtin_amdgcn_workitem_id_y() + \
+#define GET_GLOBAL_ID_Y()                                                      \
+  (__builtin_amdgcn_workitem_id_y() +                                          \
    __builtin_amdgcn_workgroup_id_y() * __builtin_amdgcn_workgroup_size_y())
 #define GET_LOCAL_ID_X() __builtin_amdgcn_workitem_id_x()
 #define GET_LOCAL_ID_Y() __builtin_amdgcn_workitem_id_y()
@@ -29,7 +29,7 @@ extern void barrier(unsigned flags);
 #define GET_GLOBAL_ID_Y() get_global_id(1)
 #define GET_LOCAL_ID_X() get_local_id(0)
 #define GET_LOCAL_ID_Y() get_local_id(1)
-#define BARRIER() barrier(1)  // CLK_LOCAL_MEM_FENCE
+#define BARRIER() barrier(1) // CLK_LOCAL_MEM_FENCE
 #else
 // CPU fallback
 #define KERNEL_ATTR
@@ -43,7 +43,7 @@ extern void barrier(unsigned flags);
 // Simple matrix multiplication: C = A * B
 // A is M x K, B is K x N, C is M x N
 KERNEL_ATTR
-void matrix_multiply(const float* a, const float* b, float* c, unsigned int m,
+void matrix_multiply(const float *a, const float *b, float *c, unsigned int m,
                      unsigned int n, unsigned int k) {
 #if defined(__AMDGCN__) || defined(__SPIRV__)
   unsigned int row = GET_GLOBAL_ID_Y();
@@ -87,7 +87,7 @@ void matrix_multiply(const float* a, const float* b, float* c, unsigned int m,
 #endif
 
 KERNEL_ATTR
-void matrix_multiply_tiled(const float* a, const float* b, float* c,
+void matrix_multiply_tiled(const float *a, const float *b, float *c,
                            unsigned int m, unsigned int n, unsigned int k) {
 #if defined(__AMDGCN__) || defined(__SPIRV__)
   // Shared memory tiles
@@ -143,7 +143,7 @@ void matrix_multiply_tiled(const float* a, const float* b, float* c,
 // Matrix-vector multiplication: y = A * x
 // A is M x N, x is N x 1, y is M x 1
 KERNEL_ATTR
-void matrix_vector_multiply(const float* a, const float* x, float* y,
+void matrix_vector_multiply(const float *a, const float *x, float *y,
                             unsigned int m, unsigned int n) {
 #if defined(__AMDGCN__) || defined(__SPIRV__)
   unsigned int row = GET_GLOBAL_ID_X();

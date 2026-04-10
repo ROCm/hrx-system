@@ -7,20 +7,19 @@
 
 // Host allocator tests don't need a device — just the loader.
 
-TEST_CASE("host_allocator_system returns non-null ctl",
-          "[host_allocator]") {
+TEST_CASE("host_allocator_system returns non-null ctl", "[host_allocator]") {
   hrx_host_allocator_t ha = hrx().host_allocator_system();
   REQUIRE(ha.ctl != nullptr);
 }
 
 TEST_CASE("host_allocator_malloc zeroed", "[host_allocator][malloc]") {
   hrx_host_allocator_t ha = hrx().host_allocator_system();
-  void* ptr = nullptr;
+  void *ptr = nullptr;
   REQUIRE_OK(hrx().host_allocator_malloc(ha, 256, &ptr));
   REQUIRE(ptr != nullptr);
 
   // Must be zeroed.
-  unsigned char* data = (unsigned char*)ptr;
+  unsigned char *data = (unsigned char *)ptr;
   for (int i = 0; i < 256; i++) {
     REQUIRE(data[i] == 0);
   }
@@ -30,7 +29,7 @@ TEST_CASE("host_allocator_malloc zeroed", "[host_allocator][malloc]") {
 
 TEST_CASE("host_allocator_malloc_uninitialized", "[host_allocator][malloc]") {
   hrx_host_allocator_t ha = hrx().host_allocator_system();
-  void* ptr = nullptr;
+  void *ptr = nullptr;
   REQUIRE_OK(hrx().host_allocator_malloc_uninitialized(ha, 1024, &ptr));
   REQUIRE(ptr != nullptr);
 
@@ -42,7 +41,7 @@ TEST_CASE("host_allocator_malloc_uninitialized", "[host_allocator][malloc]") {
 
 TEST_CASE("host_allocator_realloc grow", "[host_allocator][realloc]") {
   hrx_host_allocator_t ha = hrx().host_allocator_system();
-  void* ptr = nullptr;
+  void *ptr = nullptr;
   REQUIRE_OK(hrx().host_allocator_malloc(ha, 64, &ptr));
   memset(ptr, 0x42, 64);
 
@@ -50,7 +49,7 @@ TEST_CASE("host_allocator_realloc grow", "[host_allocator][realloc]") {
   REQUIRE(ptr != nullptr);
 
   // Original 64 bytes preserved.
-  unsigned char* data = (unsigned char*)ptr;
+  unsigned char *data = (unsigned char *)ptr;
   for (int i = 0; i < 64; i++) {
     REQUIRE(data[i] == 0x42);
   }
@@ -63,7 +62,7 @@ TEST_CASE("host_allocator_clone", "[host_allocator][clone]") {
   unsigned char src[128];
   memset(src, 0xCD, sizeof(src));
 
-  void* dst = nullptr;
+  void *dst = nullptr;
   REQUIRE_OK(hrx().host_allocator_clone(ha, src, sizeof(src), &dst));
   REQUIRE(dst != nullptr);
   REQUIRE(memcmp(src, dst, sizeof(src)) == 0);
@@ -73,19 +72,19 @@ TEST_CASE("host_allocator_clone", "[host_allocator][clone]") {
 
 TEST_CASE("host_allocator_free null is no-op", "[host_allocator][free]") {
   hrx_host_allocator_t ha = hrx().host_allocator_system();
-  hrx().host_allocator_free(ha, nullptr);  // Must not crash.
+  hrx().host_allocator_free(ha, nullptr); // Must not crash.
 }
 
 TEST_CASE("host_allocator_malloc_aligned 64-byte",
           "[host_allocator][aligned]") {
   hrx_host_allocator_t ha = hrx().host_allocator_system();
-  void* ptr = nullptr;
+  void *ptr = nullptr;
   REQUIRE_OK(hrx().host_allocator_malloc_aligned(ha, 256, 64, 0, &ptr));
   REQUIRE(ptr != nullptr);
   REQUIRE(((uintptr_t)ptr % 64) == 0);
 
   // Must be zeroed.
-  unsigned char* data = (unsigned char*)ptr;
+  unsigned char *data = (unsigned char *)ptr;
   for (int i = 0; i < 256; i++) {
     REQUIRE(data[i] == 0);
   }
@@ -96,7 +95,7 @@ TEST_CASE("host_allocator_malloc_aligned 64-byte",
 TEST_CASE("host_allocator_malloc_aligned 4096-byte page",
           "[host_allocator][aligned]") {
   hrx_host_allocator_t ha = hrx().host_allocator_system();
-  void* ptr = nullptr;
+  void *ptr = nullptr;
   REQUIRE_OK(hrx().host_allocator_malloc_aligned(ha, 8192, 4096, 0, &ptr));
   REQUIRE(ptr != nullptr);
   REQUIRE(((uintptr_t)ptr % 4096) == 0);
@@ -106,7 +105,7 @@ TEST_CASE("host_allocator_malloc_aligned 4096-byte page",
 
 TEST_CASE("host_allocator_realloc_aligned", "[host_allocator][aligned]") {
   hrx_host_allocator_t ha = hrx().host_allocator_system();
-  void* ptr = nullptr;
+  void *ptr = nullptr;
   REQUIRE_OK(hrx().host_allocator_malloc_aligned(ha, 64, 64, 0, &ptr));
   memset(ptr, 0x99, 64);
 
@@ -115,7 +114,7 @@ TEST_CASE("host_allocator_realloc_aligned", "[host_allocator][aligned]") {
   REQUIRE(((uintptr_t)ptr % 64) == 0);
 
   // Original bytes preserved.
-  unsigned char* data = (unsigned char*)ptr;
+  unsigned char *data = (unsigned char *)ptr;
   for (int i = 0; i < 64; i++) {
     REQUIRE(data[i] == 0x99);
   }
@@ -126,5 +125,5 @@ TEST_CASE("host_allocator_realloc_aligned", "[host_allocator][aligned]") {
 TEST_CASE("host_allocator_free_aligned null is no-op",
           "[host_allocator][aligned]") {
   hrx_host_allocator_t ha = hrx().host_allocator_system();
-  hrx().host_allocator_free_aligned(ha, nullptr);  // Must not crash.
+  hrx().host_allocator_free_aligned(ha, nullptr); // Must not crash.
 }

@@ -7,9 +7,9 @@
 #ifndef IREE_HAL_DRIVERS_HSA_PER_DEVICE_INFORMATION_H_
 #define IREE_HAL_DRIVERS_HSA_PER_DEVICE_INFORMATION_H_
 
+#include "hsa_driver/hsa_headers.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/base/threading/notification.h"
-#include "hsa_driver/hsa_headers.h"
 
 typedef struct iree_hal_stream_tracing_context_t
     iree_hal_stream_tracing_context_t;
@@ -23,7 +23,7 @@ typedef struct iree_hal_hsa_per_device_info_t {
   hsa_agent_t cpu_agent;
 
   // The HSA queue used for kernel dispatch.
-  hsa_queue_t* queue;
+  hsa_queue_t *queue;
 
   // Memory pools for device-local memory.
   hsa_amd_memory_pool_t device_local_memory_pool;
@@ -43,11 +43,11 @@ typedef struct iree_hal_hsa_per_device_info_t {
   iree_slim_mutex_t completion_signal_mutex;
 
   // Tracing context for this device.
-  iree_hal_stream_tracing_context_t* tracing_context;
+  iree_hal_stream_tracing_context_t *tracing_context;
 
   // File transfer staging buffer info.
   struct {
-    iree_hal_buffer_t* buffer;
+    iree_hal_buffer_t *buffer;
     iree_host_size_t head;
     iree_host_size_t tail;
     iree_slim_mutex_t mutex;
@@ -57,8 +57,7 @@ typedef struct iree_hal_hsa_per_device_info_t {
 
 typedef struct iree_hal_hsa_device_topology_t {
   iree_host_size_t count;
-  iree_hal_hsa_per_device_info_t* devices;
+  iree_hal_hsa_per_device_info_t *devices;
 } iree_hal_hsa_device_topology_t;
 
-#endif  // IREE_HAL_DRIVERS_HSA_PER_DEVICE_INFORMATION_H_
-
+#endif // IREE_HAL_DRIVERS_HSA_PER_DEVICE_INFORMATION_H_

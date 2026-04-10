@@ -14,7 +14,7 @@
 
 #ifdef __cplusplus
 extern "C" {
-#endif  // __cplusplus
+#endif // __cplusplus
 
 // Alias HIP's fat binary structures for HSA use.
 // Both HIP and HSA target AMD GPUs and use compatible binary formats.
@@ -23,7 +23,8 @@ typedef iree_hal_hip_bundle_entry_t iree_hal_hsa_bundle_entry_t;
 typedef iree_hal_hip_elf64_header_t iree_hal_hsa_elf64_header_t;
 typedef iree_hal_hip_elf64_section_header_t iree_hal_hsa_elf64_section_header_t;
 typedef iree_hal_hip_elf64_symbol_t iree_hal_hsa_elf64_symbol_t;
-typedef iree_hal_hip_amd_kernel_descriptor_t iree_hal_hsa_amd_kernel_descriptor_t;
+typedef iree_hal_hip_amd_kernel_descriptor_t
+    iree_hal_hsa_amd_kernel_descriptor_t;
 typedef iree_hal_hip_kernel_param_t iree_hal_hsa_kernel_param_t;
 typedef iree_hal_hip_kernel_info_t iree_hal_hsa_kernel_info_t;
 typedef iree_hal_hip_fat_binary_info_t iree_hal_hsa_fat_binary_info_t;
@@ -32,10 +33,14 @@ typedef iree_hal_hip_fat_binary_info_t iree_hal_hsa_fat_binary_info_t;
 #define IREE_HAL_HSA_FAT_BINARY_MAGIC IREE_HAL_HIP_FAT_BINARY_MAGIC
 #define IREE_HAL_HSA_FAT_BINARY_VERSION IREE_HAL_HIP_FAT_BINARY_VERSION
 #define IREE_HAL_HSA_OFFLOAD_BUNDLE_MAGIC IREE_HAL_HIP_OFFLOAD_BUNDLE_MAGIC
-#define IREE_HAL_HSA_OFFLOAD_BUNDLE_MAGIC_SIZE IREE_HAL_HIP_OFFLOAD_BUNDLE_MAGIC_SIZE
-#define IREE_HAL_HSA_OFFLOAD_BUNDLE_COMPRESSED_MAGIC IREE_HAL_HIP_OFFLOAD_BUNDLE_COMPRESSED_MAGIC
-#define IREE_HAL_HSA_OFFLOAD_BUNDLE_COMPRESSED_MAGIC_SIZE IREE_HAL_HIP_OFFLOAD_BUNDLE_COMPRESSED_MAGIC_SIZE
-#define IREE_HAL_HSA_OFFLOAD_BUNDLE_COMPRESSED_MAGIC_INT IREE_HAL_HIP_OFFLOAD_BUNDLE_COMPRESSED_MAGIC_INT
+#define IREE_HAL_HSA_OFFLOAD_BUNDLE_MAGIC_SIZE                                 \
+  IREE_HAL_HIP_OFFLOAD_BUNDLE_MAGIC_SIZE
+#define IREE_HAL_HSA_OFFLOAD_BUNDLE_COMPRESSED_MAGIC                           \
+  IREE_HAL_HIP_OFFLOAD_BUNDLE_COMPRESSED_MAGIC
+#define IREE_HAL_HSA_OFFLOAD_BUNDLE_COMPRESSED_MAGIC_SIZE                      \
+  IREE_HAL_HIP_OFFLOAD_BUNDLE_COMPRESSED_MAGIC_SIZE
+#define IREE_HAL_HSA_OFFLOAD_BUNDLE_COMPRESSED_MAGIC_INT                       \
+  IREE_HAL_HIP_OFFLOAD_BUNDLE_COMPRESSED_MAGIC_INT
 #define IREE_HAL_HSA_ELF_MAGIC IREE_HAL_HIP_ELF_MAGIC
 #define IREE_HAL_HSA_ELF_MAGIC0 IREE_HAL_HIP_ELF_MAGIC0
 #define IREE_HAL_HSA_ELF_MAGIC1 IREE_HAL_HIP_ELF_MAGIC1
@@ -55,35 +60,36 @@ typedef iree_hal_hip_fat_binary_info_t iree_hal_hsa_fat_binary_info_t;
 
 // Reads and validates native HSA executable data wrapped in a fat binary.
 // This uses the HSA driver's implementation to avoid symbol conflicts with HIP.
-static inline iree_status_t iree_hal_hsa_read_native_header(
-    iree_const_byte_span_t executable_data, bool unsafe_infer_size,
-    iree_const_byte_span_t* out_elf_data) {
-  return iree_hal_hsa_read_native_header_impl(executable_data, unsafe_infer_size,
-                                              out_elf_data);
+static inline iree_status_t
+iree_hal_hsa_read_native_header(iree_const_byte_span_t executable_data,
+                                bool unsafe_infer_size,
+                                iree_const_byte_span_t *out_elf_data) {
+  return iree_hal_hsa_read_native_header_impl(executable_data,
+                                              unsafe_infer_size, out_elf_data);
 }
 
 // Parses a fat binary and extracts kernel names from the ELF file matching
 // the specified triple. This uses the HSA driver's implementation.
 static inline iree_status_t iree_hal_hsa_parse_fat_binary_kernels(
     iree_const_byte_span_t executable_data, iree_string_view_t target_triple,
-    iree_allocator_t allocator, iree_hal_hsa_fat_binary_info_t* out_info) {
+    iree_allocator_t allocator, iree_hal_hsa_fat_binary_info_t *out_info) {
   return iree_hal_hsa_parse_fat_binary_kernels_impl(
       executable_data, target_triple, allocator,
-      (iree_hal_hip_fat_binary_info_t*)out_info);
+      (iree_hal_hip_fat_binary_info_t *)out_info);
 }
 
 // Frees kernel info array and any allocated kernel names.
 // This uses the HSA driver's implementation.
-static inline void iree_hal_hsa_free_kernel_info(
-    iree_allocator_t allocator, iree_host_size_t kernel_count,
-    iree_hal_hsa_kernel_info_t* kernels) {
-  iree_hal_hsa_free_fat_binary_kernel_info(allocator, kernel_count,
-                                 (iree_hal_hip_kernel_info_t*)kernels);
+static inline void
+iree_hal_hsa_free_kernel_info(iree_allocator_t allocator,
+                              iree_host_size_t kernel_count,
+                              iree_hal_hsa_kernel_info_t *kernels) {
+  iree_hal_hsa_free_fat_binary_kernel_info(
+      allocator, kernel_count, (iree_hal_hip_kernel_info_t *)kernels);
 }
 
 #ifdef __cplusplus
-}  // extern "C"
-#endif  // __cplusplus
+} // extern "C"
+#endif // __cplusplus
 
-#endif  // IREE_HAL_DRIVERS_HSA_NATIVE_EXECUTABLE_HSAF_H_
-
+#endif // IREE_HAL_DRIVERS_HSA_NATIVE_EXECUTABLE_HSAF_H_

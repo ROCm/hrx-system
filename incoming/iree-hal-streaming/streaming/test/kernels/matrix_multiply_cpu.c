@@ -18,13 +18,13 @@
 // Simple matrix multiplication: C = A * B
 // A is M x K, B is K x N, C is M x N
 static int matrix_multiply_impl(
-    const iree_hal_executable_environment_v0_t* environment,
-    const iree_hal_executable_dispatch_state_v0_t* dispatch_state,
-    const iree_hal_executable_workgroup_state_v0_t* workgroup_state) {
+    const iree_hal_executable_environment_v0_t *environment,
+    const iree_hal_executable_dispatch_state_v0_t *dispatch_state,
+    const iree_hal_executable_workgroup_state_v0_t *workgroup_state) {
   // Get pointers to buffers
-  const float* a = (const float*)dispatch_state->binding_ptrs[0];
-  const float* b = (const float*)dispatch_state->binding_ptrs[1];
-  float* c = (float*)dispatch_state->binding_ptrs[2];
+  const float *a = (const float *)dispatch_state->binding_ptrs[0];
+  const float *b = (const float *)dispatch_state->binding_ptrs[1];
+  float *c = (float *)dispatch_state->binding_ptrs[2];
 
   // Get dimensions from push constants
   // Layout: [m, n, k]
@@ -44,11 +44,13 @@ static int matrix_multiply_impl(
 
   uint32_t row_start = workgroup_id_y * rows_per_workgroup;
   uint32_t row_end = row_start + rows_per_workgroup;
-  if (row_end > m) row_end = m;
+  if (row_end > m)
+    row_end = m;
 
   uint32_t col_start = workgroup_id_x * cols_per_workgroup;
   uint32_t col_end = col_start + cols_per_workgroup;
-  if (col_end > n) col_end = n;
+  if (col_end > n)
+    col_end = n;
 
   // Perform matrix multiplication for this tile
   for (uint32_t i = row_start; i < row_end; i++) {
@@ -67,13 +69,13 @@ static int matrix_multiply_impl(
 // Tiled matrix multiplication with local memory optimization
 // Uses blocking to improve cache performance
 static int matrix_multiply_tiled_impl(
-    const iree_hal_executable_environment_v0_t* environment,
-    const iree_hal_executable_dispatch_state_v0_t* dispatch_state,
-    const iree_hal_executable_workgroup_state_v0_t* workgroup_state) {
+    const iree_hal_executable_environment_v0_t *environment,
+    const iree_hal_executable_dispatch_state_v0_t *dispatch_state,
+    const iree_hal_executable_workgroup_state_v0_t *workgroup_state) {
   // Get pointers to buffers
-  const float* a = (const float*)dispatch_state->binding_ptrs[0];
-  const float* b = (const float*)dispatch_state->binding_ptrs[1];
-  float* c = (float*)dispatch_state->binding_ptrs[2];
+  const float *a = (const float *)dispatch_state->binding_ptrs[0];
+  const float *b = (const float *)dispatch_state->binding_ptrs[1];
+  float *c = (float *)dispatch_state->binding_ptrs[2];
 
   // Get dimensions from push constants
   uint32_t m = dispatch_state->constants[0];
@@ -92,7 +94,7 @@ static int matrix_multiply_tiled_impl(
   uint32_t tile_col = workgroup_id_x * TILE_SIZE;
 
   // Use local memory if available for tile caching
-  float* local_mem = (float*)workgroup_state->local_memory;
+  float *local_mem = (float *)workgroup_state->local_memory;
   float tile_a[TILE_SIZE][TILE_SIZE];
   float tile_b[TILE_SIZE][TILE_SIZE];
   float tile_c[TILE_SIZE][TILE_SIZE] = {{0}};
@@ -170,13 +172,13 @@ static int matrix_multiply_tiled_impl(
 // Matrix-vector multiplication: y = A * x
 // A is M x N, x is N x 1, y is M x 1
 static int matrix_vector_multiply_impl(
-    const iree_hal_executable_environment_v0_t* environment,
-    const iree_hal_executable_dispatch_state_v0_t* dispatch_state,
-    const iree_hal_executable_workgroup_state_v0_t* workgroup_state) {
+    const iree_hal_executable_environment_v0_t *environment,
+    const iree_hal_executable_dispatch_state_v0_t *dispatch_state,
+    const iree_hal_executable_workgroup_state_v0_t *workgroup_state) {
   // Get pointers to buffers
-  const float* a = (const float*)dispatch_state->binding_ptrs[0];
-  const float* x = (const float*)dispatch_state->binding_ptrs[1];
-  float* y = (float*)dispatch_state->binding_ptrs[2];
+  const float *a = (const float *)dispatch_state->binding_ptrs[0];
+  const float *x = (const float *)dispatch_state->binding_ptrs[1];
+  float *y = (float *)dispatch_state->binding_ptrs[2];
 
   // Get dimensions from push constants
   // Layout: [m, n]
@@ -191,7 +193,8 @@ static int matrix_vector_multiply_impl(
   uint32_t rows_per_workgroup = (m + workgroup_count - 1) / workgroup_count;
   uint32_t row_start = workgroup_id * rows_per_workgroup;
   uint32_t row_end = row_start + rows_per_workgroup;
-  if (row_end > m) row_end = m;
+  if (row_end > m)
+    row_end = m;
 
   // Perform matrix-vector multiplication
   for (uint32_t i = row_start; i < row_end; i++) {
@@ -232,7 +235,7 @@ static const iree_hal_executable_dispatch_parameter_v0_t
             .type = IREE_HAL_EXECUTABLE_DISPATCH_PARAM_TYPE_V0_BINDING,
             .size = 0,
             .flags = IREE_HAL_EXECUTABLE_DISPATCH_PARAM_FLAG_V0_NONE,
-            .name = 0,  // "a"
+            .name = 0, // "a"
             .offset = 0,
         },
         {
@@ -240,7 +243,7 @@ static const iree_hal_executable_dispatch_parameter_v0_t
             .type = IREE_HAL_EXECUTABLE_DISPATCH_PARAM_TYPE_V0_BINDING,
             .size = 0,
             .flags = IREE_HAL_EXECUTABLE_DISPATCH_PARAM_FLAG_V0_NONE,
-            .name = 1,  // "b"
+            .name = 1, // "b"
             .offset = 1,
         },
         {
@@ -248,7 +251,7 @@ static const iree_hal_executable_dispatch_parameter_v0_t
             .type = IREE_HAL_EXECUTABLE_DISPATCH_PARAM_TYPE_V0_BINDING,
             .size = 0,
             .flags = IREE_HAL_EXECUTABLE_DISPATCH_PARAM_FLAG_V0_NONE,
-            .name = 2,  // "c"
+            .name = 2, // "c"
             .offset = 2,
         },
         {
@@ -256,7 +259,7 @@ static const iree_hal_executable_dispatch_parameter_v0_t
             .type = IREE_HAL_EXECUTABLE_DISPATCH_PARAM_TYPE_V0_CONSTANT,
             .size = sizeof(uint32_t),
             .flags = IREE_HAL_EXECUTABLE_DISPATCH_PARAM_FLAG_V0_NONE,
-            .name = 3,  // "m"
+            .name = 3, // "m"
             .offset = 0,
         },
         {
@@ -264,7 +267,7 @@ static const iree_hal_executable_dispatch_parameter_v0_t
             .type = IREE_HAL_EXECUTABLE_DISPATCH_PARAM_TYPE_V0_CONSTANT,
             .size = sizeof(uint32_t),
             .flags = IREE_HAL_EXECUTABLE_DISPATCH_PARAM_FLAG_V0_NONE,
-            .name = 4,  // "n"
+            .name = 4, // "n"
             .offset = 4,
         },
         {
@@ -272,7 +275,7 @@ static const iree_hal_executable_dispatch_parameter_v0_t
             .type = IREE_HAL_EXECUTABLE_DISPATCH_PARAM_TYPE_V0_CONSTANT,
             .size = sizeof(uint32_t),
             .flags = IREE_HAL_EXECUTABLE_DISPATCH_PARAM_FLAG_V0_NONE,
-            .name = 5,  // "k"
+            .name = 5, // "k"
             .offset = 8,
         },
 };
@@ -285,7 +288,7 @@ static const iree_hal_executable_dispatch_parameter_v0_t
             .type = IREE_HAL_EXECUTABLE_DISPATCH_PARAM_TYPE_V0_BINDING,
             .size = 0,
             .flags = IREE_HAL_EXECUTABLE_DISPATCH_PARAM_FLAG_V0_NONE,
-            .name = 0,  // "a"
+            .name = 0, // "a"
             .offset = 0,
         },
         {
@@ -293,7 +296,7 @@ static const iree_hal_executable_dispatch_parameter_v0_t
             .type = IREE_HAL_EXECUTABLE_DISPATCH_PARAM_TYPE_V0_BINDING,
             .size = 0,
             .flags = IREE_HAL_EXECUTABLE_DISPATCH_PARAM_FLAG_V0_NONE,
-            .name = 1,  // "b"
+            .name = 1, // "b"
             .offset = 1,
         },
         {
@@ -301,7 +304,7 @@ static const iree_hal_executable_dispatch_parameter_v0_t
             .type = IREE_HAL_EXECUTABLE_DISPATCH_PARAM_TYPE_V0_BINDING,
             .size = 0,
             .flags = IREE_HAL_EXECUTABLE_DISPATCH_PARAM_FLAG_V0_NONE,
-            .name = 2,  // "c"
+            .name = 2, // "c"
             .offset = 2,
         },
         {
@@ -309,7 +312,7 @@ static const iree_hal_executable_dispatch_parameter_v0_t
             .type = IREE_HAL_EXECUTABLE_DISPATCH_PARAM_TYPE_V0_CONSTANT,
             .size = sizeof(uint32_t),
             .flags = IREE_HAL_EXECUTABLE_DISPATCH_PARAM_FLAG_V0_NONE,
-            .name = 3,  // "m"
+            .name = 3, // "m"
             .offset = 0,
         },
         {
@@ -317,7 +320,7 @@ static const iree_hal_executable_dispatch_parameter_v0_t
             .type = IREE_HAL_EXECUTABLE_DISPATCH_PARAM_TYPE_V0_CONSTANT,
             .size = sizeof(uint32_t),
             .flags = IREE_HAL_EXECUTABLE_DISPATCH_PARAM_FLAG_V0_NONE,
-            .name = 4,  // "n"
+            .name = 4, // "n"
             .offset = 4,
         },
         {
@@ -325,7 +328,7 @@ static const iree_hal_executable_dispatch_parameter_v0_t
             .type = IREE_HAL_EXECUTABLE_DISPATCH_PARAM_TYPE_V0_CONSTANT,
             .size = sizeof(uint32_t),
             .flags = IREE_HAL_EXECUTABLE_DISPATCH_PARAM_FLAG_V0_NONE,
-            .name = 5,  // "k"
+            .name = 5, // "k"
             .offset = 8,
         },
 };
@@ -338,7 +341,7 @@ static const iree_hal_executable_dispatch_parameter_v0_t
             .type = IREE_HAL_EXECUTABLE_DISPATCH_PARAM_TYPE_V0_BINDING,
             .size = 0,
             .flags = IREE_HAL_EXECUTABLE_DISPATCH_PARAM_FLAG_V0_NONE,
-            .name = 0,  // "a"
+            .name = 0, // "a"
             .offset = 0,
         },
         {
@@ -346,7 +349,7 @@ static const iree_hal_executable_dispatch_parameter_v0_t
             .type = IREE_HAL_EXECUTABLE_DISPATCH_PARAM_TYPE_V0_BINDING,
             .size = 0,
             .flags = IREE_HAL_EXECUTABLE_DISPATCH_PARAM_FLAG_V0_NONE,
-            .name = 6,  // "x"
+            .name = 6, // "x"
             .offset = 1,
         },
         {
@@ -354,7 +357,7 @@ static const iree_hal_executable_dispatch_parameter_v0_t
             .type = IREE_HAL_EXECUTABLE_DISPATCH_PARAM_TYPE_V0_BINDING,
             .size = 0,
             .flags = IREE_HAL_EXECUTABLE_DISPATCH_PARAM_FLAG_V0_NONE,
-            .name = 7,  // "y"
+            .name = 7, // "y"
             .offset = 2,
         },
         {
@@ -362,7 +365,7 @@ static const iree_hal_executable_dispatch_parameter_v0_t
             .type = IREE_HAL_EXECUTABLE_DISPATCH_PARAM_TYPE_V0_CONSTANT,
             .size = sizeof(uint32_t),
             .flags = IREE_HAL_EXECUTABLE_DISPATCH_PARAM_FLAG_V0_NONE,
-            .name = 3,  // "m"
+            .name = 3, // "m"
             .offset = 0,
         },
         {
@@ -370,20 +373,20 @@ static const iree_hal_executable_dispatch_parameter_v0_t
             .type = IREE_HAL_EXECUTABLE_DISPATCH_PARAM_TYPE_V0_CONSTANT,
             .size = sizeof(uint32_t),
             .flags = IREE_HAL_EXECUTABLE_DISPATCH_PARAM_FLAG_V0_NONE,
-            .name = 4,  // "n"
+            .name = 4, // "n"
             .offset = 4,
         },
 };
 
 // Parameter table - one array per dispatch entry point.
-static const iree_hal_executable_dispatch_parameter_v0_t* entry_params[] = {
+static const iree_hal_executable_dispatch_parameter_v0_t *entry_params[] = {
     matrix_multiply_params,
     matrix_multiply_tiled_params,
     matrix_vector_multiply_params,
 };
 
 // String table for parameter names.
-static const char* parameter_names[] = {
+static const char *parameter_names[] = {
     "a", "b", "c", "m", "n", "k", "x", "y",
 };
 
@@ -393,23 +396,23 @@ static const iree_hal_executable_dispatch_attrs_v0_t entry_attrs[] = {
         // matrix_multiply
         .flags = IREE_HAL_EXECUTABLE_DISPATCH_FLAG_V0_NONE,
         .local_memory_pages = 0,
-        .constant_count = 3,    // m, n, k
-        .binding_count = 3,     // a, b, c
-        .workgroup_size_x = 0,  // runtime specified
-        .workgroup_size_y = 0,  // runtime specified
-        .workgroup_size_z = 0,  // runtime specified
+        .constant_count = 3,   // m, n, k
+        .binding_count = 3,    // a, b, c
+        .workgroup_size_x = 0, // runtime specified
+        .workgroup_size_y = 0, // runtime specified
+        .workgroup_size_z = 0, // runtime specified
         .parameter_count =
             sizeof(matrix_multiply_params) / sizeof(matrix_multiply_params[0]),
     },
     {
         // matrix_multiply_tiled
         .flags = IREE_HAL_EXECUTABLE_DISPATCH_FLAG_V0_NONE,
-        .local_memory_pages = 3,  // 3 tiles of 16x16 floats = 3*256*4 = 3KB
-        .constant_count = 3,      // m, n, k
-        .binding_count = 3,       // a, b, c
-        .workgroup_size_x = 0,    // runtime specified
-        .workgroup_size_y = 0,    // runtime specified
-        .workgroup_size_z = 0,    // runtime specified
+        .local_memory_pages = 3, // 3 tiles of 16x16 floats = 3*256*4 = 3KB
+        .constant_count = 3,     // m, n, k
+        .binding_count = 3,      // a, b, c
+        .workgroup_size_x = 0,   // runtime specified
+        .workgroup_size_y = 0,   // runtime specified
+        .workgroup_size_z = 0,   // runtime specified
         .parameter_count = sizeof(matrix_multiply_tiled_params) /
                            sizeof(matrix_multiply_tiled_params[0]),
     },
@@ -417,25 +420,25 @@ static const iree_hal_executable_dispatch_attrs_v0_t entry_attrs[] = {
         // matrix_vector_multiply
         .flags = IREE_HAL_EXECUTABLE_DISPATCH_FLAG_V0_NONE,
         .local_memory_pages = 0,
-        .constant_count = 2,    // m, n
-        .binding_count = 3,     // a, x, y
-        .workgroup_size_x = 0,  // runtime specified
-        .workgroup_size_y = 0,  // runtime specified
-        .workgroup_size_z = 0,  // runtime specified
+        .constant_count = 2,   // m, n
+        .binding_count = 3,    // a, x, y
+        .workgroup_size_x = 0, // runtime specified
+        .workgroup_size_y = 0, // runtime specified
+        .workgroup_size_z = 0, // runtime specified
         .parameter_count = sizeof(matrix_vector_multiply_params) /
                            sizeof(matrix_vector_multiply_params[0]),
     },
 };
 
 // Names for each entry point (must match kernel names in GPU versions)
-static const char* entry_point_names[] = {
+static const char *entry_point_names[] = {
     "matrix_multiply",
     "matrix_multiply_tiled",
     "matrix_vector_multiply",
 };
 
 // Optional tags for debugging
-static const char* entry_point_tags[] = {
+static const char *entry_point_tags[] = {
     "matmul_simple",
     "matmul_tiled",
     "matvec",
@@ -455,7 +458,7 @@ static const iree_hal_executable_library_v0_t library = {
             .ptrs = entry_points,
             .attrs = entry_attrs,
             .params = entry_params,
-            .occupancy = NULL,  // no occupancy info provided
+            .occupancy = NULL, // no occupancy info provided
             .names = entry_point_names,
             .tags = entry_point_tags,
             .parameter_names = parameter_names,
@@ -478,11 +481,11 @@ static const iree_hal_executable_library_v0_t library = {
 //===----------------------------------------------------------------------===//
 
 // This is the main entry point for querying the library.
-const iree_hal_executable_library_header_t** matrix_multiply_library_query(
+const iree_hal_executable_library_header_t **matrix_multiply_library_query(
     iree_hal_executable_library_version_t max_version,
-    const iree_hal_executable_environment_v0_t* environment) {
+    const iree_hal_executable_environment_v0_t *environment) {
   return max_version <= IREE_HAL_EXECUTABLE_LIBRARY_VERSION_LATEST
-             ? (const iree_hal_executable_library_header_t**)&library
+             ? (const iree_hal_executable_library_header_t **)&library
              : NULL;
 }
 
@@ -491,9 +494,9 @@ const iree_hal_executable_library_header_t** matrix_multiply_library_query(
 extern "C" {
 #endif
 
-const iree_hal_executable_library_header_t** iree_hal_executable_library_query(
+const iree_hal_executable_library_header_t **iree_hal_executable_library_query(
     iree_hal_executable_library_version_t max_version,
-    const iree_hal_executable_environment_v0_t* environment) {
+    const iree_hal_executable_environment_v0_t *environment) {
   return matrix_multiply_library_query(max_version, environment);
 }
 

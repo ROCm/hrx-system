@@ -11,35 +11,35 @@
 
 #include "streaming/binding/cuda/api.h"
 
-#define CUDA_CHECK(call)                                                      \
-  do {                                                                        \
-    cudaError_t err = (call);                                                 \
-    if (err != cudaSuccess) {                                                 \
-      fprintf(stderr, "CUDA error at %s:%d: %s returned %s (%d)\n", __FILE__, \
-              __LINE__, #call, cudaGetErrorString(err), err);                 \
-      exit(1);                                                                \
-    }                                                                         \
+#define CUDA_CHECK(call)                                                       \
+  do {                                                                         \
+    cudaError_t err = (call);                                                  \
+    if (err != cudaSuccess) {                                                  \
+      fprintf(stderr, "CUDA error at %s:%d: %s returned %s (%d)\n", __FILE__,  \
+              __LINE__, #call, cudaGetErrorString(err), err);                  \
+      exit(1);                                                                 \
+    }                                                                          \
   } while (0)
 
-#define CU_CHECK(call)                                                \
-  do {                                                                \
-    CUresult err = (call);                                            \
-    if (err != CUDA_SUCCESS) {                                        \
-      fprintf(stderr, "CUDA driver error at %s:%d: %s returned %d\n", \
-              __FILE__, __LINE__, #call, err);                        \
-      exit(1);                                                        \
-    }                                                                 \
+#define CU_CHECK(call)                                                         \
+  do {                                                                         \
+    CUresult err = (call);                                                     \
+    if (err != CUDA_SUCCESS) {                                                 \
+      fprintf(stderr, "CUDA driver error at %s:%d: %s returned %d\n",          \
+              __FILE__, __LINE__, #call, err);                                 \
+      exit(1);                                                                 \
+    }                                                                          \
   } while (0)
 
-int main(int argc, char** argv) {
+int main(int argc, char **argv) {
   if (argc < 2) {
     fprintf(stderr, "Usage: %s <module_file>\n", argv[0]);
     fprintf(stderr, "Example: %s kernels/compiled/vector_add.hsaco\n", argv[0]);
     return 1;
   }
 
-  const char* module_path = argv[1];
-  const int n = 1024;  // number of elements
+  const char *module_path = argv[1];
+  const int n = 1024; // number of elements
   const size_t size = n * sizeof(float);
 
   printf("CUDA Runtime API Vector Addition Demo\n");
@@ -87,9 +87,9 @@ int main(int argc, char** argv) {
 
   // Allocate host memory using standard malloc.
   printf("\n6. Allocating host memory...\n");
-  float* h_A = (float*)malloc(size);
-  float* h_B = (float*)malloc(size);
-  float* h_C = (float*)malloc(size);
+  float *h_A = (float *)malloc(size);
+  float *h_B = (float *)malloc(size);
+  float *h_C = (float *)malloc(size);
   if (!h_A || !h_B || !h_C) {
     fprintf(stderr, "Error: Failed to allocate host memory\n");
     return 1;
@@ -98,16 +98,16 @@ int main(int argc, char** argv) {
   // Initialize input vectors with predictable pattern.
   printf("   Initializing input vectors...\n");
   for (int i = 0; i < n; i++) {
-    h_A[i] = i * 2.0f;  // A[i] = i * 2
-    h_B[i] = i * 3.0f;  // B[i] = i * 3
+    h_A[i] = i * 2.0f; // A[i] = i * 2
+    h_B[i] = i * 3.0f; // B[i] = i * 3
   }
 
   // Allocate device memory using Runtime API.
   printf("\n7. Allocating device memory (Runtime API)...\n");
   float *d_A, *d_B, *d_C;
-  CUDA_CHECK(cudaMalloc((void**)&d_A, size));
-  CUDA_CHECK(cudaMalloc((void**)&d_B, size));
-  CUDA_CHECK(cudaMalloc((void**)&d_C, size));
+  CUDA_CHECK(cudaMalloc((void **)&d_A, size));
+  CUDA_CHECK(cudaMalloc((void **)&d_B, size));
+  CUDA_CHECK(cudaMalloc((void **)&d_C, size));
 
   // Copy input data to device using Runtime API.
   printf("\n8. Copying input data to device (Runtime API)...\n");
@@ -126,7 +126,7 @@ int main(int argc, char** argv) {
   // Set up kernel parameters.
   // The vector_add kernel takes: (const float* a, const float* b, float* c, int
   // n).
-  void* kernel_params[] = {&d_A, &d_B, &d_C, (void*)&n};
+  void *kernel_params[] = {&d_A, &d_B, &d_C, (void *)&n};
 
   // Launch kernel using cudaLaunchKernel.
   // Note: cudaLaunchKernel expects a function pointer from a linked kernel,
@@ -135,7 +135,7 @@ int main(int argc, char** argv) {
   dim3 block_dim = {threads_per_block, 1, 1};
 
   CUDA_CHECK(cudaLaunchKernel(
-      (const void*)vector_add_func,  // kernel function (cast from CUfunction)
+      (const void *)vector_add_func, // kernel function (cast from CUfunction)
       grid_dim,                      // grid dimensions
       block_dim,                     // block dimensions
       kernel_params,                 // kernel arguments
@@ -160,7 +160,7 @@ int main(int argc, char** argv) {
   const float epsilon = 1e-5f;
 
   for (int i = 0; i < n; i++) {
-    float expected = h_A[i] + h_B[i];  // should be i * 5.0f
+    float expected = h_A[i] + h_B[i]; // should be i * 5.0f
     float actual = h_C[i];
     float diff = fabsf(expected - actual);
 

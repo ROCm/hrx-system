@@ -8,10 +8,10 @@
 
 #include <stddef.h>
 
-#include "iree/base/api.h"
-#include "iree/base/internal/math.h"
 #include "hsa_driver/native_executable_hsaf.h"
 #include "hsa_driver/status_util.h"
+#include "iree/base/api.h"
+#include "iree/base/internal/math.h"
 #include "iree/hal/utils/executable_debug_info.h"
 #include "iree/hal/utils/executable_header.h"
 
@@ -28,7 +28,7 @@ typedef struct iree_hal_hsa_native_executable_per_device_data_t {
 
   // Loaded HSA executables.
   iree_host_size_t executable_count;
-  hsa_executable_t* executables;
+  hsa_executable_t *executables;
 
   // Exported kernels referencing the loaded executables.
   iree_host_size_t export_count;
@@ -56,27 +56,26 @@ typedef struct iree_hal_hsa_native_executable_t {
   iree_hal_resource_t resource;
   iree_allocator_t host_allocator;
 
-
   // Number of exported kernels.
   iree_host_size_t export_count;
   // Export information for each kernel (allocated after per_device_data).
-  iree_hal_hsa_export_info_t* export_infos;
+  iree_hal_hsa_export_info_t *export_infos;
 
   iree_host_size_t num_devices;
-  iree_hal_hsa_native_executable_per_device_data_t* per_device_data[];
+  iree_hal_hsa_native_executable_per_device_data_t *per_device_data[];
 } iree_hal_hsa_native_executable_t;
 
 static const iree_hal_executable_vtable_t iree_hal_hsa_native_executable_vtable;
 
-static iree_hal_hsa_native_executable_t* iree_hal_hsa_native_executable_cast(
-    iree_hal_executable_t* base_value) {
+static iree_hal_hsa_native_executable_t *
+iree_hal_hsa_native_executable_cast(iree_hal_executable_t *base_value) {
   IREE_HAL_ASSERT_TYPE(base_value, &iree_hal_hsa_native_executable_vtable);
-  return (iree_hal_hsa_native_executable_t*)base_value;
+  return (iree_hal_hsa_native_executable_t *)base_value;
 }
 
 static iree_status_t iree_hal_hsa_read_native_flatbuffer_header(
     iree_const_byte_span_t executable_data, bool unsafe_infer_size,
-    iree_const_byte_span_t* out_flatbuffer_data) {
+    iree_const_byte_span_t *out_flatbuffer_data) {
   IREE_ASSERT_ARGUMENT(out_flatbuffer_data);
   *out_flatbuffer_data = iree_const_byte_span_empty();
   return iree_hal_read_executable_flatbuffer_header(
@@ -85,15 +84,17 @@ static iree_status_t iree_hal_hsa_read_native_flatbuffer_header(
 }
 
 static void iree_hal_hsa_apply_parsed_kernel_metadata(
-    const iree_hal_hip_fat_binary_info_t* module_info,
+    const iree_hal_hip_fat_binary_info_t *module_info,
     flatbuffers_string_t kernel_name, iree_allocator_t host_allocator,
-    iree_hal_hsa_kernel_params_t* kernel_info) {
-  if (!module_info || !kernel_name || !kernel_info) return;
-  iree_string_view_t export_name = iree_make_string_view(
-      kernel_name, flatbuffers_string_len(kernel_name));
+    iree_hal_hsa_kernel_params_t *kernel_info) {
+  if (!module_info || !kernel_name || !kernel_info)
+    return;
+  iree_string_view_t export_name =
+      iree_make_string_view(kernel_name, flatbuffers_string_len(kernel_name));
   for (iree_host_size_t i = 0; i < module_info->kernel_count; ++i) {
-    const iree_hal_hip_kernel_info_t* parsed_kernel = &module_info->kernels[i];
-    if (!iree_string_view_equal(parsed_kernel->name, export_name)) continue;
+    const iree_hal_hip_kernel_info_t *parsed_kernel = &module_info->kernels[i];
+    if (!iree_string_view_equal(parsed_kernel->name, export_name))
+      continue;
 
     kernel_info->hidden_args = parsed_kernel->hidden_args;
     kernel_info->parameter_count = parsed_kernel->parameter_count;
@@ -104,16 +105,15 @@ static void iree_hal_hsa_apply_parsed_kernel_metadata(
     if (iree_status_is_ok(iree_allocator_malloc(
             host_allocator,
             parsed_kernel->parameter_count * sizeof(*kernel_info->parameters),
-            (void**)&kernel_info->parameters))) {
+            (void **)&kernel_info->parameters))) {
       kernel_info->explicit_kernarg_size = 0;
       for (uint32_t j = 0; j < parsed_kernel->parameter_count; ++j) {
-        const iree_hal_hip_kernel_param_t* src = &parsed_kernel->parameters[j];
+        const iree_hal_hip_kernel_param_t *src = &parsed_kernel->parameters[j];
         kernel_info->parameters[j].offset = src->offset;
         kernel_info->parameters[j].size = src->size;
         kernel_info->parameters[j].type =
-            src->type == 1
-                ? IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_BINDING
-                : IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_CONSTANT;
+            src->type == 1 ? IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_BINDING
+                           : IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_CONSTANT;
         uint32_t end = src->offset + src->size;
         if (end > kernel_info->explicit_kernarg_size) {
           kernel_info->explicit_kernarg_size = end;
@@ -126,8 +126,8 @@ static void iree_hal_hsa_apply_parsed_kernel_metadata(
 
 iree_status_t iree_hal_hsa_native_executable_infer_format(
     iree_const_byte_span_t executable_data,
-    iree_host_size_t executable_format_capacity, char* executable_format,
-    iree_host_size_t* out_inferred_size) {
+    iree_host_size_t executable_format_capacity, char *executable_format,
+    iree_host_size_t *out_inferred_size) {
   // Read the size prefix (with unsafe inference if size is unknown).
   const bool unsafe_infer_size = (executable_data.data_length == 0);
   iree_const_byte_span_t contained_data = iree_const_byte_span_empty();
@@ -136,7 +136,7 @@ iree_status_t iree_hal_hsa_native_executable_infer_format(
       executable_data, unsafe_infer_size, &contained_data);
   if (iree_status_is_ok(native_hsa)) {
     // Successfully read as native HSA executable (fat binary format).
-    iree_string_view_t format = IREE_SV("FPIH");  // Use same format as HIP
+    iree_string_view_t format = IREE_SV("FPIH"); // Use same format as HIP
     if (format.size >= executable_format_capacity) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "executable format buffer too small");
@@ -154,10 +154,9 @@ iree_status_t iree_hal_hsa_native_executable_infer_format(
   int verify_ret = iree_hal_hip_ExecutableDef_verify_as_root(
       contained_data.data, contained_data.data_length);
   if (verify_ret != flatcc_verify_ok) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "flatbuffer verification failed: %s",
-        flatcc_verify_error_string(verify_ret));
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "flatbuffer verification failed: %s",
+                            flatcc_verify_error_string(verify_ret));
   }
 
   // Write the format string.
@@ -177,19 +176,19 @@ iree_status_t iree_hal_hsa_native_executable_infer_format(
 // Forward declaration for FPIH format loader.
 static iree_status_t iree_hal_hsa_native_executable_create_fpih(
     iree_hal_hsa_device_topology_t topology,
-    const iree_hal_executable_params_t* executable_params,
-    iree_allocator_t host_allocator, iree_hal_executable_t** out_executable);
+    const iree_hal_executable_params_t *executable_params,
+    iree_allocator_t host_allocator, iree_hal_executable_t **out_executable);
 
 // Forward declaration for flatbuffer format loader.
 static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
     iree_hal_hsa_device_topology_t topology,
-    const iree_hal_executable_params_t* executable_params,
-    iree_allocator_t host_allocator, iree_hal_executable_t** out_executable);
+    const iree_hal_executable_params_t *executable_params,
+    iree_allocator_t host_allocator, iree_hal_executable_t **out_executable);
 
 iree_status_t iree_hal_hsa_native_executable_create(
     iree_hal_hsa_device_topology_t topology,
-    const iree_hal_executable_params_t* executable_params,
-    iree_allocator_t host_allocator, iree_hal_executable_t** out_executable) {
+    const iree_hal_executable_params_t *executable_params,
+    iree_allocator_t host_allocator, iree_hal_executable_t **out_executable) {
   IREE_ASSERT_ARGUMENT(executable_params);
   IREE_ASSERT_ARGUMENT(out_executable);
   if (topology.count < 1) {
@@ -216,8 +215,8 @@ iree_status_t iree_hal_hsa_native_executable_create(
 
 static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
     iree_hal_hsa_device_topology_t topology,
-    const iree_hal_executable_params_t* executable_params,
-    iree_allocator_t host_allocator, iree_hal_executable_t** out_executable) {
+    const iree_hal_executable_params_t *executable_params,
+    iree_allocator_t host_allocator, iree_hal_executable_t **out_executable) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   // Read and strip the flatbuffer header prefix.
@@ -232,10 +231,9 @@ static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
       executable_flatbuffer.data, executable_flatbuffer.data_length);
   if (verify_ret != flatcc_verify_ok) {
     IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "flatbuffer verification failed: %s",
-        flatcc_verify_error_string(verify_ret));
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "flatbuffer verification failed: %s",
+                            flatcc_verify_error_string(verify_ret));
   }
 
   iree_hal_hip_ExecutableDef_table_t hip_executable_def = NULL;
@@ -244,9 +242,11 @@ static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
   hip_executable_def =
       iree_hal_hip_ExecutableDef_as_root(executable_flatbuffer.data);
   hip_modules_vec = iree_hal_hip_ExecutableDef_modules_get(hip_executable_def);
-  iree_host_size_t module_count = iree_hal_hip_ModuleDef_vec_len(hip_modules_vec);
+  iree_host_size_t module_count =
+      iree_hal_hip_ModuleDef_vec_len(hip_modules_vec);
   hip_exports_vec = iree_hal_hip_ExecutableDef_exports_get(hip_executable_def);
-  iree_host_size_t export_count = iree_hal_hip_ExportDef_vec_len(hip_exports_vec);
+  iree_host_size_t export_count =
+      iree_hal_hip_ExportDef_vec_len(hip_exports_vec);
 
   // Calculate the total number of characters across all entry point names.
   iree_host_size_t total_export_info_length = 0;
@@ -262,7 +262,7 @@ static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
   });
 
   // Allocate storage for the executable and its associated data structures.
-  iree_hal_hsa_native_executable_t* executable = NULL;
+  iree_hal_hsa_native_executable_t *executable = NULL;
   iree_host_size_t native_executable_device_info_size =
       sizeof(*executable->per_device_data[0]) +
       module_count * sizeof(executable->per_device_data[0]->executables[0]) +
@@ -276,7 +276,7 @@ static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
       topology.count * native_executable_device_info_size;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0,
-      iree_allocator_malloc(host_allocator, total_size, (void**)&executable));
+      iree_allocator_malloc(host_allocator, total_size, (void **)&executable));
   memset(executable, 0, total_size);
   iree_hal_resource_initialize(&iree_hal_hsa_native_executable_vtable,
                                &executable->resource);
@@ -285,16 +285,16 @@ static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
 
   const iree_host_size_t per_device_data_size =
       topology.count * sizeof(executable->per_device_data[0]);
-  const uint8_t* per_device_data_location =
-      (uint8_t*)executable + sizeof(*executable);
+  const uint8_t *per_device_data_location =
+      (uint8_t *)executable + sizeof(*executable);
 
   for (iree_host_size_t i = 0; i < topology.count; ++i) {
     const iree_host_size_t native_executable_device_info_size_offset =
         (i * native_executable_device_info_size);
     executable->per_device_data[i] =
-        (iree_hal_hsa_native_executable_per_device_data_t*)(per_device_data_location +
-                                                            per_device_data_size +
-                                                            native_executable_device_info_size_offset);
+        (iree_hal_hsa_native_executable_per_device_data_t
+             *)(per_device_data_location + per_device_data_size +
+                native_executable_device_info_size_offset);
   }
 
   // Publish any embedded source files to the tracing infrastructure.
@@ -302,45 +302,47 @@ static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
       iree_hal_hip_ExecutableDef_source_files_get(hip_executable_def));
 
   iree_status_t status = iree_ok_status();
-  iree_hal_hip_fat_binary_info_t* module_infos = NULL;
+  iree_hal_hip_fat_binary_info_t *module_infos = NULL;
   if (module_count > 0) {
-    status = iree_allocator_malloc(
-        host_allocator, module_count * sizeof(*module_infos),
-        (void**)&module_infos);
+    status = iree_allocator_malloc(host_allocator,
+                                   module_count * sizeof(*module_infos),
+                                   (void **)&module_infos);
     if (iree_status_is_ok(status)) {
       memset(module_infos, 0, module_count * sizeof(*module_infos));
-      for (iree_host_size_t i = 0; i < module_count && iree_status_is_ok(status);
-           ++i) {
+      for (iree_host_size_t i = 0;
+           i < module_count && iree_status_is_ok(status); ++i) {
         iree_hal_hip_ModuleDef_table_t module_def =
             iree_hal_hip_ModuleDef_vec_at(hip_modules_vec, i);
         flatbuffers_string_t hsaco_image =
             iree_hal_hip_ModuleDef_hsaco_image_get(module_def);
         status = iree_hal_hsa_parse_fat_binary_kernels(
-            iree_make_const_byte_span(
-                (const uint8_t*)hsaco_image,
-                flatbuffers_string_len(hsaco_image)),
+            iree_make_const_byte_span((const uint8_t *)hsaco_image,
+                                      flatbuffers_string_len(hsaco_image)),
             iree_string_view_empty(), host_allocator, &module_infos[i]);
       }
     }
   }
   for (iree_host_size_t j = 0; j < topology.count && iree_status_is_ok(status);
        ++j) {
-    iree_hal_hsa_native_executable_per_device_data_t* per_device_data =
+    iree_hal_hsa_native_executable_per_device_data_t *per_device_data =
         executable->per_device_data[j];
     hsa_agent_t agent = topology.devices[j].agent;
 
     per_device_data->agent = agent;
     per_device_data->executable_count = module_count;
     per_device_data->executables =
-        (hsa_executable_t*)((uint8_t*)per_device_data + sizeof(*per_device_data) +
-                            (export_count * sizeof(per_device_data->exports[0])));
+        (hsa_executable_t *)((uint8_t *)per_device_data +
+                             sizeof(*per_device_data) +
+                             (export_count *
+                              sizeof(per_device_data->exports[0])));
     per_device_data->export_count = export_count;
-    IREE_TRACE(uint8_t* export_info_ptr =
-                   ((uint8_t*)per_device_data->executables +
+    IREE_TRACE(uint8_t *export_info_ptr =
+                   ((uint8_t *)per_device_data->executables +
                     module_count * sizeof(per_device_data->executables[0])));
 
     // Load each module first so that exports can reference them.
-    for (iree_host_size_t i = 0; i < module_count && iree_status_is_ok(status); ++i) {
+    for (iree_host_size_t i = 0; i < module_count && iree_status_is_ok(status);
+         ++i) {
       iree_hal_hip_ModuleDef_table_t module_def =
           iree_hal_hip_ModuleDef_vec_at(hip_modules_vec, i);
       flatbuffers_string_t hsaco_image =
@@ -349,11 +351,12 @@ static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
 
       // Create code object reader.
       hsa_code_object_reader_t code_reader;
-      status = IREE_HSA_CALL_TO_STATUS(
-          hsa_code_object_reader_create_from_memory(hsaco_image, hsaco_size,
-                                                    &code_reader),
-          "hsa_code_object_reader_create_from_memory");
-      if (!iree_status_is_ok(status)) break;
+      status =
+          IREE_HSA_CALL_TO_STATUS(hsa_code_object_reader_create_from_memory(
+                                      hsaco_image, hsaco_size, &code_reader),
+                                  "hsa_code_object_reader_create_from_memory");
+      if (!iree_status_is_ok(status))
+        break;
 
       // Create executable.
       hsa_executable_t hsa_executable;
@@ -380,8 +383,7 @@ static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
 
       // Freeze executable.
       status = IREE_HSA_CALL_TO_STATUS(
-          hsa_executable_freeze(hsa_executable, NULL),
-          "hsa_executable_freeze");
+          hsa_executable_freeze(hsa_executable, NULL), "hsa_executable_freeze");
       if (!iree_status_is_ok(status)) {
         hsa_executable_destroy(hsa_executable);
         break;
@@ -391,7 +393,8 @@ static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
     }
 
     // Look up kernel symbols and populate export info.
-    for (iree_host_size_t i = 0; i < export_count && iree_status_is_ok(status); ++i) {
+    for (iree_host_size_t i = 0; i < export_count && iree_status_is_ok(status);
+         ++i) {
       iree_hal_hip_ExportDef_table_t hip_export_def =
           iree_hal_hip_ExportDef_vec_at(hip_exports_vec, i);
       uint32_t module_ordinal =
@@ -404,8 +407,8 @@ static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
       hsa_executable_t hsa_executable =
           per_device_data->executables[module_ordinal];
       status = IREE_HSA_CALL_TO_STATUS(
-          hsa_executable_get_symbol_by_name(hsa_executable, kernel_name,
-                                            &agent, &kernel_symbol),
+          hsa_executable_get_symbol_by_name(hsa_executable, kernel_name, &agent,
+                                            &kernel_symbol),
           "hsa_executable_get_symbol_by_name");
       if (!iree_status_is_ok(status)) {
         iree_status_ignore(status);
@@ -413,9 +416,8 @@ static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
         snprintf(kernel_symbol_name, sizeof(kernel_symbol_name), "%s.kd",
                  kernel_name);
         status = IREE_HSA_CALL_TO_STATUS(
-            hsa_executable_get_symbol_by_name(hsa_executable,
-                                              kernel_symbol_name, &agent,
-                                              &kernel_symbol),
+            hsa_executable_get_symbol_by_name(
+                hsa_executable, kernel_symbol_name, &agent, &kernel_symbol),
             "hsa_executable_get_symbol_by_name");
       }
       if (!iree_status_is_ok(status)) {
@@ -431,7 +433,8 @@ static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
               kernel_symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT,
               &kernel_object),
           "hsa_executable_symbol_get_info(KERNEL_OBJECT)");
-      if (!iree_status_is_ok(status)) break;
+      if (!iree_status_is_ok(status))
+        break;
 
       // Get kernarg segment size.
       uint32_t kernarg_segment_size = 0;
@@ -441,7 +444,8 @@ static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
               HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE,
               &kernarg_segment_size),
           "hsa_executable_symbol_get_info(KERNARG_SEGMENT_SIZE)");
-      if (!iree_status_is_ok(status)) break;
+      if (!iree_status_is_ok(status))
+        break;
 
       // Get group segment size.
       uint32_t group_segment_size = 0;
@@ -451,7 +455,8 @@ static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
               HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE,
               &group_segment_size),
           "hsa_executable_symbol_get_info(GROUP_SEGMENT_SIZE)");
-      if (!iree_status_is_ok(status)) break;
+      if (!iree_status_is_ok(status))
+        break;
 
       // Get private segment size.
       uint32_t private_segment_size = 0;
@@ -461,18 +466,19 @@ static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
               HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE,
               &private_segment_size),
           "hsa_executable_symbol_get_info(PRIVATE_SEGMENT_SIZE)");
-      if (!iree_status_is_ok(status)) break;
+      if (!iree_status_is_ok(status))
+        break;
 
       // Package required parameters for kernel launches.
-      iree_hal_hsa_kernel_params_t* kernel_info = &per_device_data->exports[i];
+      iree_hal_hsa_kernel_params_t *kernel_info = &per_device_data->exports[i];
       kernel_info->kernel_object = kernel_object;
       kernel_info->kernarg_segment_size = kernarg_segment_size;
       // Explicit kernarg size will be calculated from flatbuffer parameters.
-      kernel_info->explicit_kernarg_size = 0;  // Will be set below
+      kernel_info->explicit_kernarg_size = 0; // Will be set below
       kernel_info->group_segment_size = group_segment_size;
       kernel_info->private_segment_size = private_segment_size;
 
-      const iree_hal_hip_BlockDims_t* block_dims =
+      const iree_hal_hip_BlockDims_t *block_dims =
           iree_hal_hip_ExportDef_block_dims_get(hip_export_def);
       if (block_dims) {
         kernel_info->block_dims[0] = block_dims->x;
@@ -506,10 +512,11 @@ static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
           .global_offset_z = UINT32_MAX,
       };
 
-      // Estimate explicit kernarg size: pointers for bindings + 4 bytes per constant.
-      // This is a rough estimate; precise size comes from flatbuffer parameters.
+      // Estimate explicit kernarg size: pointers for bindings + 4 bytes per
+      // constant. This is a rough estimate; precise size comes from flatbuffer
+      // parameters.
       kernel_info->explicit_kernarg_size =
-          kernel_info->binding_count * sizeof(void*) +
+          kernel_info->binding_count * sizeof(void *) +
           kernel_info->constant_count * sizeof(uint32_t);
       if (module_infos) {
         if (module_ordinal < module_count) {
@@ -520,8 +527,8 @@ static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
       }
 
       IREE_TRACE({
-        iree_hal_debug_export_info_t* export_info =
-            (iree_hal_debug_export_info_t*)export_info_ptr;
+        iree_hal_debug_export_info_t *export_info =
+            (iree_hal_debug_export_info_t *)export_info_ptr;
         iree_hal_debug_ExportDef_table_t export_debug_info =
             iree_hal_hip_ExportDef_debug_info_get(hip_export_def);
         export_info_ptr +=
@@ -534,15 +541,15 @@ static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
   }
 
   if (iree_status_is_ok(status)) {
-    *out_executable = (iree_hal_executable_t*)executable;
+    *out_executable = (iree_hal_executable_t *)executable;
   } else {
-    iree_hal_executable_destroy((iree_hal_executable_t*)executable);
+    iree_hal_executable_destroy((iree_hal_executable_t *)executable);
   }
   if (module_infos) {
     for (iree_host_size_t i = 0; i < module_count; ++i) {
-      iree_hal_hsa_free_fat_binary_kernel_info(
-          host_allocator, module_infos[i].kernel_count,
-          module_infos[i].kernels);
+      iree_hal_hsa_free_fat_binary_kernel_info(host_allocator,
+                                               module_infos[i].kernel_count,
+                                               module_infos[i].kernels);
     }
     iree_allocator_free(host_allocator, module_infos);
   }
@@ -551,24 +558,26 @@ static iree_status_t iree_hal_hsa_native_executable_create_flatbuffer(
   return status;
 }
 
-// Helper to extract the matching ELF data from an offload bundle for a given target.
-// Returns the ELF data span within the bundle.
-static iree_status_t iree_hal_hsa_extract_elf_from_bundle(
-    iree_const_byte_span_t bundle_data, iree_string_view_t target_triple,
-    iree_const_byte_span_t* out_elf_data) {
+// Helper to extract the matching ELF data from an offload bundle for a given
+// target. Returns the ELF data span within the bundle.
+static iree_status_t
+iree_hal_hsa_extract_elf_from_bundle(iree_const_byte_span_t bundle_data,
+                                     iree_string_view_t target_triple,
+                                     iree_const_byte_span_t *out_elf_data) {
   // Skip magic (should be "__CLANG_OFFLOAD_BUNDLE__").
-  const size_t magic_size = 24;  // strlen("__CLANG_OFFLOAD_BUNDLE__")
+  const size_t magic_size = 24; // strlen("__CLANG_OFFLOAD_BUNDLE__")
   if (bundle_data.data_length < magic_size + sizeof(uint64_t)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "bundle too small for header");
   }
 
-  const uint8_t* ptr = bundle_data.data + magic_size;
+  const uint8_t *ptr = bundle_data.data + magic_size;
   uint64_t num_bundles;
   memcpy(&num_bundles, ptr, sizeof(num_bundles));
   ptr += sizeof(num_bundles);
 
-  // Each entry: uint64_t offset, uint64_t size, uint64_t triple_size, char triple[]
+  // Each entry: uint64_t offset, uint64_t size, uint64_t triple_size, char
+  // triple[]
   for (uint64_t i = 0; i < num_bundles; ++i) {
     typedef struct {
       uint64_t offset;
@@ -579,7 +588,8 @@ static iree_status_t iree_hal_hsa_extract_elf_from_bundle(
     if ((size_t)(ptr - bundle_data.data) + sizeof(bundle_entry_t) >
         bundle_data.data_length) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "bundle entry %" PRIu64 " header out of bounds", i);
+                              "bundle entry %" PRIu64 " header out of bounds",
+                              i);
     }
 
     bundle_entry_t entry;
@@ -589,21 +599,23 @@ static iree_status_t iree_hal_hsa_extract_elf_from_bundle(
     if ((size_t)(ptr - bundle_data.data) + entry.triple_size >
         bundle_data.data_length) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "bundle entry %" PRIu64 " triple out of bounds", i);
+                              "bundle entry %" PRIu64 " triple out of bounds",
+                              i);
     }
 
     iree_string_view_t entry_triple =
-        iree_make_string_view((const char*)ptr, entry.triple_size);
+        iree_make_string_view((const char *)ptr, entry.triple_size);
     ptr += entry.triple_size;
 
     // Check if this triple matches.
     if (iree_string_view_equal(entry_triple, target_triple)) {
       if (entry.offset + entry.size > bundle_data.data_length) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "bundle entry %" PRIu64 " data out of bounds", i);
+                                "bundle entry %" PRIu64 " data out of bounds",
+                                i);
       }
-      *out_elf_data =
-          iree_make_const_byte_span(bundle_data.data + entry.offset, entry.size);
+      *out_elf_data = iree_make_const_byte_span(bundle_data.data + entry.offset,
+                                                entry.size);
       return iree_ok_status();
     }
   }
@@ -615,8 +627,8 @@ static iree_status_t iree_hal_hsa_extract_elf_from_bundle(
 
 static iree_status_t iree_hal_hsa_native_executable_create_fpih(
     iree_hal_hsa_device_topology_t topology,
-    const iree_hal_executable_params_t* executable_params,
-    iree_allocator_t host_allocator, iree_hal_executable_t** out_executable) {
+    const iree_hal_executable_params_t *executable_params,
+    iree_allocator_t host_allocator, iree_hal_executable_t **out_executable) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   // Get device architecture name for target matching.
@@ -656,7 +668,8 @@ static iree_status_t iree_hal_hsa_native_executable_create_fpih(
   iree_const_byte_span_t elf_data = iree_const_byte_span_empty();
 
   // Check if bundle_data is already a raw ELF (starts with \x7fELF).
-  // This happens when the executable is a single ELF without offload bundle wrapper.
+  // This happens when the executable is a single ELF without offload bundle
+  // wrapper.
   if (fat_binary_info.bundle_size >= 4 &&
       fat_binary_info.bundle_data[0] == 0x7f &&
       fat_binary_info.bundle_data[1] == 'E' &&
@@ -665,33 +678,34 @@ static iree_status_t iree_hal_hsa_native_executable_create_fpih(
     // It's already a raw ELF - use it directly.
     elf_data = bundle_span;
   } else if (fat_binary_info.bundle_size >= 24 &&
-             memcmp(fat_binary_info.bundle_data, "__CLANG_OFFLOAD_BUNDLE__", 24) == 0) {
+             memcmp(fat_binary_info.bundle_data, "__CLANG_OFFLOAD_BUNDLE__",
+                    24) == 0) {
     // It's an offload bundle - extract the matching ELF.
-    status = iree_hal_hsa_extract_elf_from_bundle(
-        bundle_span, target_triple, &elf_data);
+    status = iree_hal_hsa_extract_elf_from_bundle(bundle_span, target_triple,
+                                                  &elf_data);
     if (!iree_status_is_ok(status)) {
-      iree_hal_hsa_free_kernel_info(host_allocator, fat_binary_info.kernel_count,
-                                     fat_binary_info.kernels);
+      iree_hal_hsa_free_kernel_info(host_allocator,
+                                    fat_binary_info.kernel_count,
+                                    fat_binary_info.kernels);
       IREE_TRACE_ZONE_END(z0);
       return status;
     }
   } else {
     // Unknown format - try to extract anyway but this will likely fail.
     iree_hal_hsa_free_kernel_info(host_allocator, fat_binary_info.kernel_count,
-                                   fat_binary_info.kernels);
+                                  fat_binary_info.kernels);
     IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "unrecognized bundle format (magic: 0x%02x%02x%02x%02x)",
-                            fat_binary_info.bundle_data[0],
-                            fat_binary_info.bundle_data[1],
-                            fat_binary_info.bundle_data[2],
-                            fat_binary_info.bundle_data[3]);
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "unrecognized bundle format (magic: 0x%02x%02x%02x%02x)",
+        fat_binary_info.bundle_data[0], fat_binary_info.bundle_data[1],
+        fat_binary_info.bundle_data[2], fat_binary_info.bundle_data[3]);
   }
 
   iree_host_size_t export_count = fat_binary_info.kernel_count;
 
   // Allocate storage for the executable and its associated data structures.
-  iree_hal_hsa_native_executable_t* executable = NULL;
+  iree_hal_hsa_native_executable_t *executable = NULL;
   iree_host_size_t native_executable_device_info_size =
       sizeof(*executable->per_device_data[0]) +
       1 * sizeof(executable->per_device_data[0]->executables[0]) +
@@ -703,13 +717,13 @@ static iree_status_t iree_hal_hsa_native_executable_create_fpih(
   const iree_host_size_t total_size =
       sizeof(*executable) +
       topology.count * sizeof(executable->per_device_data[0]) +
-      topology.count * native_executable_device_info_size +
-      export_infos_size;
+      topology.count * native_executable_device_info_size + export_infos_size;
 
-  status = iree_allocator_malloc(host_allocator, total_size, (void**)&executable);
+  status =
+      iree_allocator_malloc(host_allocator, total_size, (void **)&executable);
   if (!iree_status_is_ok(status)) {
     iree_hal_hsa_free_kernel_info(host_allocator, fat_binary_info.kernel_count,
-                                   fat_binary_info.kernels);
+                                  fat_binary_info.kernels);
     IREE_TRACE_ZONE_END(z0);
     return status;
   }
@@ -722,25 +736,27 @@ static iree_status_t iree_hal_hsa_native_executable_create_fpih(
   executable->num_devices = topology.count;
   const iree_host_size_t per_device_data_size =
       topology.count * sizeof(executable->per_device_data[0]);
-  const uint8_t* per_device_data_location =
-      (uint8_t*)executable + sizeof(*executable);
+  const uint8_t *per_device_data_location =
+      (uint8_t *)executable + sizeof(*executable);
 
   for (iree_host_size_t i = 0; i < topology.count; ++i) {
     const iree_host_size_t offset = i * native_executable_device_info_size;
     executable->per_device_data[i] =
-        (iree_hal_hsa_native_executable_per_device_data_t*)(
-            per_device_data_location + per_device_data_size + offset);
+        (iree_hal_hsa_native_executable_per_device_data_t
+             *)(per_device_data_location + per_device_data_size + offset);
   }
 
   // Set up export_infos pointer (after all per-device data).
-  executable->export_infos = (iree_hal_hsa_export_info_t*)(
-      per_device_data_location + per_device_data_size +
-      topology.count * native_executable_device_info_size);
+  executable->export_infos =
+      (iree_hal_hsa_export_info_t *)(per_device_data_location +
+                                     per_device_data_size +
+                                     topology.count *
+                                         native_executable_device_info_size);
 
   // Populate export info from fat binary info.
   for (iree_host_size_t i = 0; i < export_count; ++i) {
-    iree_hal_hsa_export_info_t* info = &executable->export_infos[i];
-    iree_hal_hip_kernel_info_t* kernel = &fat_binary_info.kernels[i];
+    iree_hal_hsa_export_info_t *info = &executable->export_infos[i];
+    iree_hal_hip_kernel_info_t *kernel = &fat_binary_info.kernels[i];
 
     // Copy kernel name (truncate if necessary).
     iree_host_size_t name_len = kernel->name.size < sizeof(info->name) - 1
@@ -752,16 +768,15 @@ static iree_status_t iree_hal_hsa_native_executable_create_fpih(
     info->block_dims[0] = kernel->block_dims[0];
     info->block_dims[1] = kernel->block_dims[1];
     info->block_dims[2] = kernel->block_dims[2];
-    info->shared_memory_size = 0;  // Will be queried from HSA later if needed.
+    info->shared_memory_size = 0; // Will be queried from HSA later if needed.
     info->constant_count = kernel->constant_count;
     info->binding_count = kernel->binding_count;
   }
 
   // Load the code object for each device.
   for (iree_host_size_t device_idx = 0;
-       device_idx < topology.count && iree_status_is_ok(status);
-       ++device_idx) {
-    iree_hal_hsa_native_executable_per_device_data_t* data =
+       device_idx < topology.count && iree_status_is_ok(status); ++device_idx) {
+    iree_hal_hsa_native_executable_per_device_data_t *data =
         executable->per_device_data[device_idx];
 
     // Create HSA code object reader from the extracted ELF data.
@@ -771,14 +786,15 @@ static iree_status_t iree_hal_hsa_native_executable_create_fpih(
         hsa_code_object_reader_create_from_memory(
             elf_data.data, elf_data.data_length, &code_reader),
         "hsa_code_object_reader_create_from_memory");
-    if (!iree_status_is_ok(status)) break;
+    if (!iree_status_is_ok(status))
+      break;
 
     // Create HSA executable.
     hsa_executable_t hsa_exec;
     status = IREE_HSA_CALL_TO_STATUS(
         hsa_executable_create_alt(HSA_PROFILE_FULL,
-                                   HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT,
-                                   NULL, &hsa_exec),
+                                  HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT, NULL,
+                                  &hsa_exec),
         "hsa_executable_create_alt");
     if (!iree_status_is_ok(status)) {
       hsa_code_object_reader_destroy(code_reader);
@@ -786,11 +802,11 @@ static iree_status_t iree_hal_hsa_native_executable_create_fpih(
     }
 
     // Load code object into executable.
-    status = IREE_HSA_CALL_TO_STATUS(
-        hsa_executable_load_agent_code_object(
-            hsa_exec, topology.devices[device_idx].agent, code_reader, NULL,
-            NULL),
-        "hsa_executable_load_agent_code_object");
+    status = IREE_HSA_CALL_TO_STATUS(hsa_executable_load_agent_code_object(
+                                         hsa_exec,
+                                         topology.devices[device_idx].agent,
+                                         code_reader, NULL, NULL),
+                                     "hsa_executable_load_agent_code_object");
     // Destroy the code reader now that we're done with it.
     hsa_code_object_reader_destroy(code_reader);
     if (!iree_status_is_ok(status)) {
@@ -799,9 +815,8 @@ static iree_status_t iree_hal_hsa_native_executable_create_fpih(
     }
 
     // Freeze the executable.
-    status = IREE_HSA_CALL_TO_STATUS(
-                                      hsa_executable_freeze(hsa_exec, NULL),
-                                      "hsa_executable_freeze");
+    status = IREE_HSA_CALL_TO_STATUS(hsa_executable_freeze(hsa_exec, NULL),
+                                     "hsa_executable_freeze");
     if (!iree_status_is_ok(status)) {
       hsa_executable_destroy(hsa_exec);
       hsa_code_object_reader_destroy(code_reader);
@@ -809,20 +824,20 @@ static iree_status_t iree_hal_hsa_native_executable_create_fpih(
     }
 
     // Set up per-device data structure.
-    // Layout in memory: [per_device_data_struct][exports[export_count]][executables[1]]
+    // Layout in memory:
+    // [per_device_data_struct][exports[export_count]][executables[1]]
     data->agent = topology.devices[device_idx].agent;
     data->export_count = export_count;
     data->executable_count = 1;
-    data->executables = (hsa_executable_t*)(
-        (uint8_t*)data + sizeof(*data) +
-        export_count * sizeof(data->exports[0]));
+    data->executables =
+        (hsa_executable_t *)((uint8_t *)data + sizeof(*data) +
+                             export_count * sizeof(data->exports[0]));
     data->executables[0] = hsa_exec;
 
     // Look up kernel symbols and set up export info.
     for (iree_host_size_t export_idx = 0;
-         export_idx < export_count && iree_status_is_ok(status);
-         ++export_idx) {
-      iree_hal_hsa_kernel_params_t* export_info = &data->exports[export_idx];
+         export_idx < export_count && iree_status_is_ok(status); ++export_idx) {
+      iree_hal_hsa_kernel_params_t *export_info = &data->exports[export_idx];
       iree_string_view_t kernel_name = fat_binary_info.kernels[export_idx].name;
 
       // Copy kernel name to a null-terminated buffer.
@@ -843,13 +858,14 @@ static iree_status_t iree_hal_hsa_native_executable_create_fpih(
       // Get kernel symbol from executable.
       hsa_executable_symbol_t symbol;
       status = IREE_HSA_CALL_TO_STATUS(
-          hsa_executable_get_symbol_by_name(
-              hsa_exec, kernel_symbol_name,
-              &topology.devices[device_idx].agent, &symbol),
+          hsa_executable_get_symbol_by_name(hsa_exec, kernel_symbol_name,
+                                            &topology.devices[device_idx].agent,
+                                            &symbol),
           "hsa_executable_get_symbol_by_name");
       if (!iree_status_is_ok(status)) {
         status = iree_status_annotate_f(
-            status, "failed to find kernel '%s' in executable", kernel_symbol_name);
+            status, "failed to find kernel '%s' in executable",
+            kernel_symbol_name);
         break;
       }
 
@@ -859,18 +875,26 @@ static iree_status_t iree_hal_hsa_native_executable_create_fpih(
           hsa_executable_symbol_get_info(
               symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &kernel_object),
           "hsa_executable_symbol_get_info(KERNEL_OBJECT)");
-      if (!iree_status_is_ok(status)) break;
+      if (!iree_status_is_ok(status))
+        break;
 
       export_info->kernel_object = kernel_object;
-      export_info->block_dims[0] = fat_binary_info.kernels[export_idx].block_dims[0];
-      export_info->block_dims[1] = fat_binary_info.kernels[export_idx].block_dims[1];
-      export_info->block_dims[2] = fat_binary_info.kernels[export_idx].block_dims[2];
-      export_info->binding_count = fat_binary_info.kernels[export_idx].binding_count;
-      export_info->constant_count = fat_binary_info.kernels[export_idx].constant_count;
-      export_info->hidden_args = fat_binary_info.kernels[export_idx].hidden_args;
+      export_info->block_dims[0] =
+          fat_binary_info.kernels[export_idx].block_dims[0];
+      export_info->block_dims[1] =
+          fat_binary_info.kernels[export_idx].block_dims[1];
+      export_info->block_dims[2] =
+          fat_binary_info.kernels[export_idx].block_dims[2];
+      export_info->binding_count =
+          fat_binary_info.kernels[export_idx].binding_count;
+      export_info->constant_count =
+          fat_binary_info.kernels[export_idx].constant_count;
+      export_info->hidden_args =
+          fat_binary_info.kernels[export_idx].hidden_args;
 
       // Copy parameter info from fat binary.
-      iree_hal_hip_kernel_info_t* kernel_info = &fat_binary_info.kernels[export_idx];
+      iree_hal_hip_kernel_info_t *kernel_info =
+          &fat_binary_info.kernels[export_idx];
       export_info->parameter_count = kernel_info->parameter_count;
       export_info->parameters = NULL;
 
@@ -879,11 +903,13 @@ static iree_status_t iree_hal_hsa_native_executable_create_fpih(
       if (export_info->parameter_count > 0 && kernel_info->parameters) {
         iree_status_t param_status = iree_allocator_malloc(
             host_allocator,
-            export_info->parameter_count * sizeof(iree_hal_executable_export_parameter_t),
-            (void**)&export_info->parameters);
+            export_info->parameter_count *
+                sizeof(iree_hal_executable_export_parameter_t),
+            (void **)&export_info->parameters);
         if (iree_status_is_ok(param_status)) {
           for (uint32_t p = 0; p < export_info->parameter_count; ++p) {
-            export_info->parameters[p].offset = kernel_info->parameters[p].offset;
+            export_info->parameters[p].offset =
+                kernel_info->parameters[p].offset;
             export_info->parameters[p].size = kernel_info->parameters[p].size;
             // Map the type: 0=value (constant), 1=pointer (binding)
             export_info->parameters[p].type =
@@ -891,8 +917,10 @@ static iree_status_t iree_hal_hsa_native_executable_create_fpih(
                     ? IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_BINDING
                     : IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_CONSTANT;
             // Track maximum extent of explicit arguments.
-            uint32_t end = kernel_info->parameters[p].offset + kernel_info->parameters[p].size;
-            if (end > explicit_size) explicit_size = end;
+            uint32_t end = kernel_info->parameters[p].offset +
+                           kernel_info->parameters[p].size;
+            if (end > explicit_size)
+              explicit_size = end;
           }
         }
       }
@@ -905,8 +933,9 @@ static iree_status_t iree_hal_hsa_native_executable_create_fpih(
               symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE,
               &kernarg_segment_size),
           "hsa_executable_symbol_get_info(KERNARG_SEGMENT_SIZE)");
-      if (!iree_status_is_ok(status)) break;
-      
+      if (!iree_status_is_ok(status))
+        break;
+
       // If HSA returns 0 for kernarg_segment_size but we have a valid
       // explicit_kernarg_size from our fat binary parsing, use that instead.
       // This happens with some code objects (e.g., hipBLASLt's Tensile kernels)
@@ -923,7 +952,8 @@ static iree_status_t iree_hal_hsa_native_executable_create_fpih(
               symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE,
               &group_segment_size),
           "hsa_executable_symbol_get_info(GROUP_SEGMENT_SIZE)");
-      if (!iree_status_is_ok(status)) break;
+      if (!iree_status_is_ok(status))
+        break;
       export_info->group_segment_size = group_segment_size;
 
       // Get private segment size.
@@ -933,34 +963,35 @@ static iree_status_t iree_hal_hsa_native_executable_create_fpih(
               symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE,
               &private_segment_size),
           "hsa_executable_symbol_get_info(PRIVATE_SEGMENT_SIZE)");
-      if (!iree_status_is_ok(status)) break;
+      if (!iree_status_is_ok(status))
+        break;
       export_info->private_segment_size = private_segment_size;
     }
   }
 
   // Free the kernel info from fat binary parsing.
   iree_hal_hsa_free_kernel_info(host_allocator, fat_binary_info.kernel_count,
-                                 fat_binary_info.kernels);
+                                fat_binary_info.kernels);
 
   if (iree_status_is_ok(status)) {
-    *out_executable = (iree_hal_executable_t*)executable;
+    *out_executable = (iree_hal_executable_t *)executable;
   } else {
-    iree_hal_executable_destroy((iree_hal_executable_t*)executable);
+    iree_hal_executable_destroy((iree_hal_executable_t *)executable);
   }
 
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
 
-static void iree_hal_hsa_native_executable_destroy(
-    iree_hal_executable_t* base_executable) {
-  iree_hal_hsa_native_executable_t* executable =
+static void
+iree_hal_hsa_native_executable_destroy(iree_hal_executable_t *base_executable) {
+  iree_hal_hsa_native_executable_t *executable =
       iree_hal_hsa_native_executable_cast(base_executable);
   iree_allocator_t host_allocator = executable->host_allocator;
   IREE_TRACE_ZONE_BEGIN(z0);
 
   for (iree_host_size_t i = 0; i < executable->num_devices; ++i) {
-    iree_hal_hsa_native_executable_per_device_data_t* data =
+    iree_hal_hsa_native_executable_per_device_data_t *data =
         executable->per_device_data[i];
     for (iree_host_size_t j = 0; j < data->export_count; ++j) {
       if (data->exports[j].parameters) {
@@ -969,8 +1000,7 @@ static void iree_hal_hsa_native_executable_destroy(
     }
     for (iree_host_size_t j = 0; j < data->executable_count; ++j) {
       if (data->executables[j].handle) {
-        IREE_HSA_IGNORE_ERROR(
-                              hsa_executable_destroy(data->executables[j]));
+        IREE_HSA_IGNORE_ERROR(hsa_executable_destroy(data->executables[j]));
       }
     }
   }
@@ -981,12 +1011,12 @@ static void iree_hal_hsa_native_executable_destroy(
 }
 
 iree_status_t iree_hal_hsa_native_executable_lookup_kernel_params(
-    iree_hal_executable_t* base_executable,
+    iree_hal_executable_t *base_executable,
     iree_hal_executable_export_ordinal_t ordinal,
     iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_hsa_kernel_params_t** out_params) {
+    const iree_hal_hsa_kernel_params_t **out_params) {
   *out_params = NULL;
-  iree_hal_hsa_native_executable_t* executable =
+  iree_hal_hsa_native_executable_t *executable =
       iree_hal_hsa_native_executable_cast(base_executable);
   int device_ordinal = 0;
   if (queue_affinity) {
@@ -997,7 +1027,7 @@ iree_status_t iree_hal_hsa_native_executable_lookup_kernel_params(
                             "affinity for non-existent queue was provided.");
   }
 
-  const iree_hal_hsa_native_executable_per_device_data_t* data =
+  const iree_hal_hsa_native_executable_per_device_data_t *data =
       executable->per_device_data[device_ordinal];
   if (ordinal >= data->export_count) {
     return iree_make_status(
@@ -1011,26 +1041,27 @@ iree_status_t iree_hal_hsa_native_executable_lookup_kernel_params(
 }
 
 static iree_host_size_t iree_hal_hsa_native_executable_export_count(
-    iree_hal_executable_t* base_executable) {
-  iree_hal_hsa_native_executable_t* executable =
+    iree_hal_executable_t *base_executable) {
+  iree_hal_hsa_native_executable_t *executable =
       iree_hal_hsa_native_executable_cast(base_executable);
   return executable->export_count;
 }
 
 static iree_status_t iree_hal_hsa_native_executable_export_info(
-    iree_hal_executable_t* base_executable,
+    iree_hal_executable_t *base_executable,
     iree_hal_executable_export_ordinal_t export_ordinal,
-    iree_hal_executable_export_info_t* out_info) {
-  iree_hal_hsa_native_executable_t* executable =
+    iree_hal_executable_export_info_t *out_info) {
+  iree_hal_hsa_native_executable_t *executable =
       iree_hal_hsa_native_executable_cast(base_executable);
   if (export_ordinal >= executable->export_count) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "export ordinal %" PRIu32 " out of range",
                             export_ordinal);
   }
-  iree_hal_hsa_export_info_t* export = &executable->export_infos[export_ordinal];
+  iree_hal_hsa_export_info_t *export =
+      &executable->export_infos[export_ordinal];
   // Get parameter info from per-device data (same for all devices).
-  iree_hal_hsa_kernel_params_t* kernel_params =
+  iree_hal_hsa_kernel_params_t *kernel_params =
       &executable->per_device_data[0]->exports[export_ordinal];
 
   memset(out_info, 0, sizeof(*out_info));
@@ -1045,11 +1076,11 @@ static iree_status_t iree_hal_hsa_native_executable_export_info(
 }
 
 static iree_status_t iree_hal_hsa_native_executable_export_parameters(
-    iree_hal_executable_t* base_executable,
+    iree_hal_executable_t *base_executable,
     iree_hal_executable_export_ordinal_t export_ordinal,
     iree_host_size_t capacity,
-    iree_hal_executable_export_parameter_t* out_parameters) {
-  iree_hal_hsa_native_executable_t* executable =
+    iree_hal_executable_export_parameter_t *out_parameters) {
+  iree_hal_hsa_native_executable_t *executable =
       iree_hal_hsa_native_executable_cast(base_executable);
   if (export_ordinal >= executable->export_count) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
@@ -1058,7 +1089,7 @@ static iree_status_t iree_hal_hsa_native_executable_export_parameters(
   }
 
   // Get parameter info from per-device data (same for all devices).
-  iree_hal_hsa_kernel_params_t* kernel_params =
+  iree_hal_hsa_kernel_params_t *kernel_params =
       &executable->per_device_data[0]->exports[export_ordinal];
 
   if (!kernel_params->parameters) {
@@ -1078,12 +1109,12 @@ static iree_status_t iree_hal_hsa_native_executable_export_parameters(
 }
 
 static iree_status_t iree_hal_hsa_native_executable_lookup_export_by_name(
-    iree_hal_executable_t* base_executable, iree_string_view_t name,
-    iree_hal_executable_export_ordinal_t* out_export_ordinal) {
+    iree_hal_executable_t *base_executable, iree_string_view_t name,
+    iree_hal_executable_export_ordinal_t *out_export_ordinal) {
   IREE_ASSERT_ARGUMENT(base_executable);
   IREE_ASSERT_ARGUMENT(out_export_ordinal);
 
-  iree_hal_hsa_native_executable_t* executable =
+  iree_hal_hsa_native_executable_t *executable =
       iree_hal_hsa_native_executable_cast(base_executable);
   for (iree_host_size_t i = 0; i < executable->export_count; ++i) {
     iree_string_view_t export_name =
@@ -1094,21 +1125,21 @@ static iree_status_t iree_hal_hsa_native_executable_lookup_export_by_name(
     }
   }
 
-  return iree_make_status(IREE_STATUS_NOT_FOUND,
-                          "export '%.*s' not found",
+  return iree_make_status(IREE_STATUS_NOT_FOUND, "export '%.*s' not found",
                           (int)name.size, name.data);
 }
 
 static iree_status_t iree_hal_hsa_native_executable_lookup_global(
-    iree_hal_executable_t* base_executable, iree_string_view_t name,
-    iree_hal_queue_affinity_t queue_affinity, uint64_t* out_device_address,
-    iree_device_size_t* out_size) {
+    iree_hal_executable_t *base_executable, iree_string_view_t name,
+    iree_hal_queue_affinity_t queue_affinity, uint64_t *out_device_address,
+    iree_device_size_t *out_size) {
   IREE_ASSERT_ARGUMENT(base_executable);
   IREE_ASSERT_ARGUMENT(out_device_address);
   *out_device_address = 0;
-  if (out_size) *out_size = 0;
+  if (out_size)
+    *out_size = 0;
 
-  iree_hal_hsa_native_executable_t* executable =
+  iree_hal_hsa_native_executable_t *executable =
       iree_hal_hsa_native_executable_cast(base_executable);
 
   int device_ordinal = 0;
@@ -1120,7 +1151,7 @@ static iree_status_t iree_hal_hsa_native_executable_lookup_global(
                             "affinity for non-existent device was provided.");
   }
 
-  const iree_hal_hsa_native_executable_per_device_data_t* data =
+  const iree_hal_hsa_native_executable_per_device_data_t *data =
       executable->per_device_data[device_ordinal];
 
   // Create a null-terminated copy of the name.
@@ -1167,7 +1198,8 @@ static iree_status_t iree_hal_hsa_native_executable_lookup_global(
     }
 
     *out_device_address = address;
-    if (out_size) *out_size = size;
+    if (out_size)
+      *out_size = size;
     return iree_ok_status();
   }
 

@@ -16,18 +16,18 @@
 // IREE flags for CLI parsing (linked statically into this binary).
 #include "iree/base/tooling/flags.h"
 
-#define CHECK_STATUS(expr)                              \
-  do {                                                  \
-    hrx_status_t _s = (expr);                          \
-    if (!hrx_status_is_ok(_s)) {                       \
-      char* msg = NULL;                                 \
-      size_t len = 0;                                   \
-      hrx_status_to_string(_s, &msg, &len);            \
-      fprintf(stderr, "ERROR: %s\n", msg ? msg : "?");  \
-      hrx_status_free_message(msg);                    \
-      hrx_status_ignore(_s);                           \
-      return 1;                                         \
-    }                                                   \
+#define CHECK_STATUS(expr)                                                     \
+  do {                                                                         \
+    hrx_status_t _s = (expr);                                                  \
+    if (!hrx_status_is_ok(_s)) {                                               \
+      char *msg = NULL;                                                        \
+      size_t len = 0;                                                          \
+      hrx_status_to_string(_s, &msg, &len);                                    \
+      fprintf(stderr, "ERROR: %s\n", msg ? msg : "?");                         \
+      hrx_status_free_message(msg);                                            \
+      hrx_status_ignore(_s);                                                   \
+      return 1;                                                                \
+    }                                                                          \
   } while (0)
 
 static int print_devices(void) {
@@ -46,8 +46,8 @@ static int print_devices(void) {
       hrx_device_t dev = NULL;
       CHECK_STATUS(hrx_gpu_device_get(i, &dev));
       char name[128] = {0};
-      CHECK_STATUS(hrx_device_get_property(
-          dev, HRX_DEVICE_PROPERTY_NAME, name, sizeof(name)));
+      CHECK_STATUS(hrx_device_get_property(dev, HRX_DEVICE_PROPERTY_NAME, name,
+                                           sizeof(name)));
       char arch[64] = {0};
       CHECK_STATUS(hrx_device_get_property(
           dev, HRX_DEVICE_PROPERTY_ARCHITECTURE, arch, sizeof(arch)));
@@ -69,8 +69,8 @@ static int print_devices(void) {
       hrx_device_t dev = NULL;
       CHECK_STATUS(hrx_cpu_device_get(i, &dev));
       char name[128] = {0};
-      CHECK_STATUS(hrx_device_get_property(
-          dev, HRX_DEVICE_PROPERTY_NAME, name, sizeof(name)));
+      CHECK_STATUS(hrx_device_get_property(dev, HRX_DEVICE_PROPERTY_NAME, name,
+                                           sizeof(name)));
       printf("  [%d] %s\n", i, name);
     }
   } else {
@@ -81,7 +81,7 @@ static int print_devices(void) {
   return 0;
 }
 
-static int run_device_smoke_test(hrx_device_t device, const char* label) {
+static int run_device_smoke_test(hrx_device_t device, const char *label) {
   printf("Opening %s...\n", label);
 
   // Create a stream.
@@ -92,15 +92,14 @@ static int run_device_smoke_test(hrx_device_t device, const char* label) {
   const size_t size = 1024 * 1024;
   hrx_buffer_t buffer = NULL;
   CHECK_STATUS(hrx_buffer_allocate(
-      stream, size,
-      HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_DEVICE_VISIBLE,
+      stream, size, HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_DEVICE_VISIBLE,
       HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED, &buffer));
   printf("  Allocate 1 MiB buffer: OK\n");
 
   // Fill with pattern.
   uint32_t pattern = 0xDEADBEEF;
-  CHECK_STATUS(
-      hrx_stream_fill_buffer(stream, buffer, 0, size, &pattern, sizeof(pattern)));
+  CHECK_STATUS(hrx_stream_fill_buffer(stream, buffer, 0, size, &pattern,
+                                      sizeof(pattern)));
   // Flush fill before copy — the heap allocator's task CB doesn't guarantee
   // intra-CB ordering for transfer ops on the same buffer.
   CHECK_STATUS(hrx_stream_flush(stream));
@@ -110,8 +109,7 @@ static int run_device_smoke_test(hrx_device_t device, const char* label) {
   // Allocate a second buffer and copy.
   hrx_buffer_t buffer2 = NULL;
   CHECK_STATUS(hrx_buffer_allocate(
-      stream, size,
-      HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_DEVICE_VISIBLE,
+      stream, size, HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_DEVICE_VISIBLE,
       HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED, &buffer2));
   CHECK_STATUS(hrx_stream_copy_buffer(stream, buffer, 0, buffer2, 0, size));
   CHECK_STATUS(hrx_stream_flush(stream));
@@ -119,9 +117,9 @@ static int run_device_smoke_test(hrx_device_t device, const char* label) {
   printf("  Copy buffer: OK\n");
 
   // Verify data.
-  void* mapped = NULL;
+  void *mapped = NULL;
   CHECK_STATUS(hrx_buffer_map(buffer2, HRX_MAP_READ, 0, size, &mapped));
-  uint32_t* data = (uint32_t*)mapped;
+  uint32_t *data = (uint32_t *)mapped;
   bool ok = true;
   for (size_t i = 0; i < size / sizeof(uint32_t); i++) {
     if (data[i] != 0xDEADBEEF) {
@@ -132,7 +130,8 @@ static int run_device_smoke_test(hrx_device_t device, const char* label) {
     }
   }
   CHECK_STATUS(hrx_buffer_unmap(buffer2));
-  if (ok) printf("  Verify data: OK\n");
+  if (ok)
+    printf("  Verify data: OK\n");
 
   // Release.
   hrx_buffer_release(buffer2);
@@ -143,8 +142,8 @@ static int run_device_smoke_test(hrx_device_t device, const char* label) {
   return ok ? 0 : 1;
 }
 
-static int parse_device_spec(const char* spec,
-                             hrx_accelerator_type_t* type, int* index) {
+static int parse_device_spec(const char *spec, hrx_accelerator_type_t *type,
+                             int *index) {
   if (strncmp(spec, "gpu:", 4) == 0) {
     *type = HRX_ACCELERATOR_GPU;
     *index = atoi(spec + 4);
@@ -158,8 +157,8 @@ static int parse_device_spec(const char* spec,
   return 1;
 }
 
-int main(int argc, char** argv) {
-  const char* device_spec = NULL;
+int main(int argc, char **argv) {
+  const char *device_spec = NULL;
   bool test_all = false;
 
   // Parse our args first, then let IREE have the rest.
@@ -195,7 +194,8 @@ int main(int argc, char** argv) {
   if (device_spec) {
     hrx_accelerator_type_t type;
     int index;
-    if (parse_device_spec(device_spec, &type, &index) != 0) return 1;
+    if (parse_device_spec(device_spec, &type, &index) != 0)
+      return 1;
 
     hrx_device_t dev = NULL;
     if (type == HRX_ACCELERATOR_GPU) {
@@ -227,7 +227,8 @@ int main(int argc, char** argv) {
         char label[32];
         snprintf(label, sizeof(label), "gpu:%d", i);
         int r = run_device_smoke_test(dev, label);
-        if (r != 0) result = r;
+        if (r != 0)
+          result = r;
       }
     } else {
       hrx_status_ignore(gpu_status);
@@ -243,7 +244,8 @@ int main(int argc, char** argv) {
         char label[32];
         snprintf(label, sizeof(label), "cpu:%d", i);
         int r = run_device_smoke_test(dev, label);
-        if (r != 0) result = r;
+        if (r != 0)
+          result = r;
       }
     } else {
       hrx_status_ignore(cpu_status);

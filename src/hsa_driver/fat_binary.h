@@ -13,10 +13,10 @@
 
 #ifdef __cplusplus
 extern "C" {
-#endif  // __cplusplus
+#endif // __cplusplus
 
 // Fat binary wrapper magic and version (matching CUDA/HIP fat binary format).
-#define IREE_HAL_HIP_FAT_BINARY_MAGIC 0x48495046u  // Magic for fat binary
+#define IREE_HAL_HIP_FAT_BINARY_MAGIC 0x48495046u // Magic for fat binary
 #define IREE_HAL_HIP_FAT_BINARY_VERSION 1
 
 // Clang offload bundle magic strings (matching HIP runtime).
@@ -40,17 +40,17 @@ extern "C" {
 #define IREE_HAL_HIP_ELFCLASS64 2
 
 // ELF data encoding.
-#define IREE_HAL_HIP_ELFDATA2LSB 1  // Little-endian
+#define IREE_HAL_HIP_ELFDATA2LSB 1 // Little-endian
 
 // ELF machine types.
-#define IREE_HAL_HIP_EM_AMDGPU 224  // AMD GPU architecture
+#define IREE_HAL_HIP_EM_AMDGPU 224 // AMD GPU architecture
 
 // Offload bundle entry structure.
 // This describes a single device-specific binary within an offload bundle.
 typedef struct iree_hal_hip_bundle_entry_t {
-  uint64_t offset;       // Offset of the bundle entry in the file
-  uint64_t size;         // Size of the bundle entry
-  uint64_t triple_size;  // Size of the triple string
+  uint64_t offset;      // Offset of the bundle entry in the file
+  uint64_t size;        // Size of the bundle entry
+  uint64_t triple_size; // Size of the triple string
 } iree_hal_hip_bundle_entry_t;
 
 // Fat binary wrapper structure.
@@ -58,10 +58,10 @@ typedef struct iree_hal_hip_bundle_entry_t {
 // uncompressed bundle, or raw ELF). Similar to __CudaFatBinaryWrapper but
 // cleaner for IREE's usage.
 typedef struct iree_hal_hip_fat_binary_header_t {
-  uint32_t magic;    // Magic number (IREE_HAL_HIP_FAT_BINARY_MAGIC)
-  uint32_t version;  // Version of the fat binary format
-  void* binary;      // Offset to the binary data from start of this structure
-  void* reserved;    // Reserved for future use
+  uint32_t magic;   // Magic number (IREE_HAL_HIP_FAT_BINARY_MAGIC)
+  uint32_t version; // Version of the fat binary format
+  void *binary;     // Offset to the binary data from start of this structure
+  void *reserved;   // Reserved for future use
 } iree_hal_hip_fat_binary_header_t;
 static_assert(sizeof(iree_hal_hip_fat_binary_header_t) == 24,
               "Fat binary header must be 24 bytes");
@@ -69,50 +69,50 @@ static_assert(sizeof(iree_hal_hip_fat_binary_header_t) == 24,
 // ELF64 header structure.
 // Based on the ELF64 specification for determining file size.
 typedef struct iree_hal_hip_elf64_header_t {
-  uint8_t magic[4];      // ELF magic: 0x7f, 'E', 'L', 'F'
-  uint8_t class;         // 1=32-bit, 2=64-bit
-  uint8_t data;          // 1=little-endian, 2=big-endian
-  uint8_t version;       // ELF version (should be 1)
-  uint8_t osabi;         // OS/ABI identification
-  uint8_t abiversion;    // ABI version
-  uint8_t padding[7];    // Padding to 16 bytes
-  uint16_t type;         // Object file type
-  uint16_t machine;      // Machine architecture
-  uint32_t elf_version;  // Object file version
-  uint64_t entry;        // Entry point address
-  uint64_t phoff;        // Program header offset
-  uint64_t shoff;        // Section header offset
-  uint32_t flags;        // Processor-specific flags
-  uint16_t ehsize;       // ELF header size
-  uint16_t phentsize;    // Program header entry size
-  uint16_t phnum;        // Number of program header entries
-  uint16_t shentsize;    // Section header entry size
-  uint16_t shnum;        // Number of section header entries
-  uint16_t shstrndx;     // Section header string table index
+  uint8_t magic[4];     // ELF magic: 0x7f, 'E', 'L', 'F'
+  uint8_t class;        // 1=32-bit, 2=64-bit
+  uint8_t data;         // 1=little-endian, 2=big-endian
+  uint8_t version;      // ELF version (should be 1)
+  uint8_t osabi;        // OS/ABI identification
+  uint8_t abiversion;   // ABI version
+  uint8_t padding[7];   // Padding to 16 bytes
+  uint16_t type;        // Object file type
+  uint16_t machine;     // Machine architecture
+  uint32_t elf_version; // Object file version
+  uint64_t entry;       // Entry point address
+  uint64_t phoff;       // Program header offset
+  uint64_t shoff;       // Section header offset
+  uint32_t flags;       // Processor-specific flags
+  uint16_t ehsize;      // ELF header size
+  uint16_t phentsize;   // Program header entry size
+  uint16_t phnum;       // Number of program header entries
+  uint16_t shentsize;   // Section header entry size
+  uint16_t shnum;       // Number of section header entries
+  uint16_t shstrndx;    // Section header string table index
 } iree_hal_hip_elf64_header_t;
 
 // ELF64 section header structure.
 typedef struct iree_hal_hip_elf64_section_header_t {
-  uint32_t sh_name;       // Section name (index into string table)
-  uint32_t sh_type;       // Section type
-  uint64_t sh_flags;      // Section flags
-  uint64_t sh_addr;       // Virtual address in memory
-  uint64_t sh_offset;     // Offset in file
-  uint64_t sh_size;       // Size of section
-  uint32_t sh_link;       // Link to other section
-  uint32_t sh_info;       // Miscellaneous information
-  uint64_t sh_addralign;  // Address alignment boundary
-  uint64_t sh_entsize;    // Size of entries, if section has table
+  uint32_t sh_name;      // Section name (index into string table)
+  uint32_t sh_type;      // Section type
+  uint64_t sh_flags;     // Section flags
+  uint64_t sh_addr;      // Virtual address in memory
+  uint64_t sh_offset;    // Offset in file
+  uint64_t sh_size;      // Size of section
+  uint32_t sh_link;      // Link to other section
+  uint32_t sh_info;      // Miscellaneous information
+  uint64_t sh_addralign; // Address alignment boundary
+  uint64_t sh_entsize;   // Size of entries, if section has table
 } iree_hal_hip_elf64_section_header_t;
 
 // ELF64 symbol table entry structure.
 typedef struct iree_hal_hip_elf64_symbol_t {
-  uint32_t st_name;   // Symbol name (index into string table)
-  uint8_t st_info;    // Symbol type and binding
-  uint8_t st_other;   // Symbol visibility
-  uint16_t st_shndx;  // Section index
-  uint64_t st_value;  // Symbol value
-  uint64_t st_size;   // Symbol size
+  uint32_t st_name;  // Symbol name (index into string table)
+  uint8_t st_info;   // Symbol type and binding
+  uint8_t st_other;  // Symbol visibility
+  uint16_t st_shndx; // Section index
+  uint64_t st_value; // Symbol value
+  uint64_t st_size;  // Symbol size
 } iree_hal_hip_elf64_symbol_t;
 
 // ELF section types
@@ -133,7 +133,7 @@ typedef struct iree_hal_hip_elf64_symbol_t {
 typedef struct iree_hal_hip_amd_kernel_descriptor_t {
   uint32_t group_segment_fixed_size;
   uint32_t private_segment_fixed_size;
-  uint32_t kernarg_size;  // Total size of kernel arguments
+  uint32_t kernarg_size; // Total size of kernel arguments
   uint8_t reserved0[4];
   int64_t kernel_code_entry_byte_offset;
   uint8_t reserved1[20];
@@ -147,9 +147,9 @@ typedef struct iree_hal_hip_amd_kernel_descriptor_t {
 // Kernel parameter information.
 // Each kernel parameter has a type, size, and offset within the kernarg buffer.
 typedef struct iree_hal_hip_kernel_param_t {
-  uint32_t offset;  // Offset within kernarg buffer
-  uint32_t size;    // Size in bytes
-  uint8_t type;     // Parameter type (0=value, 1=pointer, etc.)
+  uint32_t offset; // Offset within kernarg buffer
+  uint32_t size;   // Size in bytes
+  uint8_t type;    // Parameter type (0=value, 1=pointer, etc.)
 } iree_hal_hip_kernel_param_t;
 
 // Hidden argument offsets for native HIP kernels.
@@ -173,11 +173,11 @@ typedef struct iree_hal_hip_hidden_args_t {
 
 // Kernel information extracted from an ELF file.
 typedef struct iree_hal_hip_kernel_info_t {
-  iree_string_view_t name;  // Kernel function name
+  iree_string_view_t name; // Kernel function name
 
   // Pointer to allocated name storage (NULL if name is not owned/copied).
   // When non-NULL, this memory must be freed when the kernel info is destroyed.
-  char* allocated_name;
+  char *allocated_name;
 
   // Block dimensions (workgroup size hints from metadata).
   uint32_t block_dims[3];
@@ -194,8 +194,8 @@ typedef struct iree_hal_hip_kernel_info_t {
 
   // Array of parameter information (allocated separately).
   // Total count is 'parameter_count'.
-  iree_hal_hip_kernel_param_t* parameters;
-  
+  iree_hal_hip_kernel_param_t *parameters;
+
   // Hidden argument offsets for native HIP kernels.
   // These are the offsets within the kernarg buffer where hidden args should
   // be written. Offsets are UINT32_MAX if the arg is not used.
@@ -205,13 +205,13 @@ typedef struct iree_hal_hip_kernel_info_t {
 // Parsed fat binary information.
 typedef struct iree_hal_hip_fat_binary_info_t {
   // Pointer to the bundle data (within the original executable data).
-  const uint8_t* bundle_data;
+  const uint8_t *bundle_data;
   // Size of the entire bundle.
   iree_host_size_t bundle_size;
   // Number of kernels found across all ELF files.
   iree_host_size_t kernel_count;
   // Array of kernel information (allocated separately).
-  iree_hal_hip_kernel_info_t* kernels;
+  iree_hal_hip_kernel_info_t *kernels;
 } iree_hal_hip_fat_binary_info_t;
 
 // Reads and validates native HIP executable data wrapped in a fat binary.
@@ -251,30 +251,32 @@ typedef struct iree_hal_hip_fat_binary_info_t {
 //   - bundle_data: Pointer to the bundle data within executable_data
 //   - bundle_size: Total size of the bundle
 //   - kernel_count: Number of kernels found in the matching ELF
-//   - kernels: Array of kernel info (must be freed with iree_hal_hsa_free_fat_binary_kernel_info)
+//   - kernels: Array of kernel info (must be freed with
+//   iree_hal_hsa_free_fat_binary_kernel_info)
 //
-// Note: This is the HSA driver's implementation. The function is named differently
-// from the HIP driver's version to avoid symbol conflicts when both drivers
-// are linked in the same binary.
+// Note: This is the HSA driver's implementation. The function is named
+// differently from the HIP driver's version to avoid symbol conflicts when both
+// drivers are linked in the same binary.
 iree_status_t iree_hal_hsa_parse_fat_binary_kernels_impl(
     iree_const_byte_span_t executable_data, iree_string_view_t target_triple,
-    iree_allocator_t allocator, iree_hal_hip_fat_binary_info_t* out_info);
+    iree_allocator_t allocator, iree_hal_hip_fat_binary_info_t *out_info);
 
 // Frees kernel info array and any allocated kernel names.
 // Walks through the kernel array and frees any individual allocated names
 // (where allocated_name is non-NULL), then frees the array itself.
-void iree_hal_hsa_free_fat_binary_kernel_info(iree_allocator_t allocator,
-                                    iree_host_size_t kernel_count,
-                                    iree_hal_hip_kernel_info_t* kernels);
+void iree_hal_hsa_free_fat_binary_kernel_info(
+    iree_allocator_t allocator, iree_host_size_t kernel_count,
+    iree_hal_hip_kernel_info_t *kernels);
 
 // Reads and validates native HIP/HSA executable data wrapped in a fat binary.
 // This is the HSA driver's implementation.
-iree_status_t iree_hal_hsa_read_native_header_impl(
-    iree_const_byte_span_t executable_data, bool unsafe_infer_size,
-    iree_const_byte_span_t* out_elf_data);
+iree_status_t
+iree_hal_hsa_read_native_header_impl(iree_const_byte_span_t executable_data,
+                                     bool unsafe_infer_size,
+                                     iree_const_byte_span_t *out_elf_data);
 
 #ifdef __cplusplus
-}  // extern "C"
-#endif  // __cplusplus
+} // extern "C"
+#endif // __cplusplus
 
-#endif  // IREE_HAL_DRIVERS_HIP_NATIVE_EXECUTABLE_ELF_H_
+#endif // IREE_HAL_DRIVERS_HIP_NATIVE_EXECUTABLE_ELF_H_
