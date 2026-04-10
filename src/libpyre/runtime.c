@@ -266,6 +266,8 @@ pyre_status_t pyre_cpu_initialize(uint32_t flags) {
   iree_atomic_ref_count_init(&dev->allocator.ref_count);
   dev->allocator.device = dev;
     pyre_buffer_table_initialize(&dev->buffer_table);
+    iree_arena_block_pool_initialize(
+        /*block_size=*/32 * 1024, iree_allocator_system(), &dev->block_pool);
     snprintf(dev->name, sizeof(dev->name), "CPU 0 (local-task)");
     snprintf(dev->architecture, sizeof(dev->architecture), "host");
 
@@ -284,6 +286,7 @@ pyre_status_t pyre_cpu_shutdown(void) {
   for (int i = 0; i < g_cpu.device_count; i++) {
     pyre_device_s* dev = &g_cpu.devices[i];
     pyre_buffer_table_deinitialize(&dev->buffer_table);
+    iree_arena_block_pool_deinitialize(&dev->block_pool);
     pyre_device_release(dev);
   }
   if (g_cpu.driver) {
@@ -422,6 +425,8 @@ pyre_status_t pyre_gpu_initialize(uint32_t flags) {
     dev->allocator.device = dev;
 
     pyre_buffer_table_initialize(&dev->buffer_table);
+    iree_arena_block_pool_initialize(
+        /*block_size=*/32 * 1024, iree_allocator_system(), &dev->block_pool);
 
     iree_host_size_t name_len = device_infos[i].name.size;
     if (name_len >= sizeof(dev->name)) name_len = sizeof(dev->name) - 1;
@@ -449,6 +454,7 @@ pyre_status_t pyre_gpu_shutdown(void) {
   for (int i = 0; i < g_gpu.device_count; i++) {
     pyre_device_s* dev = &g_gpu.devices[i];
     pyre_buffer_table_deinitialize(&dev->buffer_table);
+    iree_arena_block_pool_deinitialize(&dev->block_pool);
     pyre_device_release(dev);
   }
   if (g_gpu.driver) {

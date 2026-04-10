@@ -16,7 +16,9 @@
 
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/api.h"
+#include "iree/base/internal/arena.h"
 #include "iree/hal/api.h"
+#include "iree/hal/utils/resource_set.h"
 #include "iree/hal/drivers/local_task/task_driver.h"
 #include "iree/hal/local/loaders/registration/init.h"
 #include "iree/modules/hal/module.h"
@@ -176,6 +178,7 @@ typedef struct pyre_device_s {
   iree_hal_device_t* hal_device;
   pyre_allocator_s allocator;  // Inline, owned by device.
   pyre_buffer_table_t buffer_table;  // Device-pointer-to-buffer lookup.
+  iree_arena_block_pool_t block_pool;  // Shared arena pool for graphs.
   char name[128];
   char architecture[64];
 } pyre_device_s;
@@ -208,6 +211,189 @@ typedef struct pyre_stream_s {
   bool has_pending_work;
   uint32_t flags;
 } pyre_stream_s;
+
+//===----------------------------------------------------------------------===//
+// Graph internals
+//===----------------------------------------------------------------------===//
+
+// Graph node type flags.
+enum pyre_graph_node_type_internal_e {
+  PYRE_GRAPH_NODE_TYPE_RECORDABLE_BIT = 1u << 7,
+  PYRE_GRAPH_NODE_TYPE_INTERNAL_EMPTY = 0,
+  PYRE_GRAPH_NODE_TYPE_INTERNAL_KERNEL =
+      1 | PYRE_GRAPH_NODE_TYPE_RECORDABLE_BIT,
+  PYRE_GRAPH_NODE_TYPE_INTERNAL_MEMCPY =
+      2 | PYRE_GRAPH_NODE_TYPE_RECORDABLE_BIT,
+  PYRE_GRAPH_NODE_TYPE_INTERNAL_MEMSET =
+      3 | PYRE_GRAPH_NODE_TYPE_RECORDABLE_BIT,
+  PYRE_GRAPH_NODE_TYPE_INTERNAL_HOST_CALL = 4,
+  PYRE_GRAPH_NODE_TYPE_INTERNAL_GRAPH = 5,
+};
+typedef uint8_t pyre_graph_node_type_internal_t;
+
+static inline bool pyre_graph_node_is_recordable(
+    pyre_graph_node_type_internal_t type) {
+  return (type & PYRE_GRAPH_NODE_TYPE_RECORDABLE_BIT) != 0;
+}
+
+// Kernel node attributes stored in graph nodes.
+typedef struct pyre_graph_kernel_node_attrs_internal_t {
+  iree_hal_executable_t* executable;
+  uint32_t export_ordinal;
+  uint32_t grid_dim[3];
+  uint32_t block_dim[3];
+  uint32_t shared_memory_bytes;
+  iree_const_byte_span_t constants;
+  iree_hal_buffer_ref_list_t bindings;
+} pyre_graph_kernel_node_attrs_internal_t;
+
+// Memcpy node attributes.
+typedef struct pyre_graph_memcpy_node_attrs_internal_t {
+  iree_hal_buffer_ref_t dst_ref;
+  iree_hal_buffer_ref_t src_ref;
+  iree_device_size_t size;
+  iree_hal_copy_flags_t flags;
+} pyre_graph_memcpy_node_attrs_internal_t;
+
+// Memset node attributes.
+typedef struct pyre_graph_memset_node_attrs_internal_t {
+  iree_hal_buffer_ref_t dst_ref;
+  uint32_t pattern;
+  uint8_t pattern_size;
+  iree_device_size_t count;
+  iree_hal_fill_flags_t flags;
+} pyre_graph_memset_node_attrs_internal_t;
+
+// Host call node attributes.
+typedef struct pyre_graph_host_call_node_attrs_internal_t {
+  void (*fn)(void* user_data);
+  void* user_data;
+} pyre_graph_host_call_node_attrs_internal_t;
+
+// Graph node with trailing dependency array.
+// Defined as pyre_graph_node_s to match the public opaque pyre_graph_node_t.
+typedef struct pyre_graph_node_s {
+  pyre_graph_node_type_internal_t type;
+  uint32_t node_index;
+  uint32_t dependency_count;
+  union {
+    pyre_graph_kernel_node_attrs_internal_t kernel;
+    pyre_graph_memcpy_node_attrs_internal_t memcpy;
+    pyre_graph_memset_node_attrs_internal_t memset;
+    pyre_graph_host_call_node_attrs_internal_t host;
+  } attrs;
+  struct pyre_graph_node_s* dependencies[];
+} pyre_graph_node_s;
+
+// Chained block for growing node arrays without reallocation.
+typedef struct pyre_graph_node_block_t {
+  struct pyre_graph_node_block_t* next;
+  iree_host_size_t capacity;
+  iree_host_size_t count;
+  pyre_graph_node_s* nodes[];
+} pyre_graph_node_block_t;
+
+// Edge for post-creation dependencies.
+typedef struct pyre_graph_edge_t {
+  struct pyre_graph_edge_t* next;
+  pyre_graph_node_s* from;
+  pyre_graph_node_s* to;
+} pyre_graph_edge_t;
+
+// Graph template.
+typedef struct pyre_graph_s {
+  iree_atomic_ref_count_t ref_count;
+  pyre_device_t device;
+
+  iree_arena_allocator_t arena;
+  iree_allocator_t arena_allocator;
+
+  pyre_graph_node_block_t* node_blocks;
+  pyre_graph_node_block_t* current_node_block;
+  iree_host_size_t node_count;
+
+  pyre_graph_node_block_t* root_blocks;
+  pyre_graph_node_block_t* current_root_block;
+  iree_host_size_t root_count;
+
+  pyre_graph_edge_t* additional_edges;
+  iree_host_size_t additional_edge_count;
+
+  uint32_t flags;
+  iree_slim_mutex_t mutex;
+} pyre_graph_s;
+
+// Augmented node for sorting and partitioning.
+typedef struct pyre_graph_sort_node_t {
+  pyre_graph_node_s* node;
+  uint32_t original_index;
+  uint32_t sorted_index;
+  uint32_t max_dependency_index;
+  uint32_t partition_id;
+  uint16_t in_degree;
+  uint8_t type;
+  uint8_t stream_id;
+} pyre_graph_sort_node_t;
+
+// Partition type.
+enum pyre_graph_partition_type_e {
+  PYRE_GRAPH_PARTITION_TYPE_RECORDABLE = 0,
+  PYRE_GRAPH_PARTITION_TYPE_HOST_CALL,
+  PYRE_GRAPH_PARTITION_TYPE_EMPTY,
+};
+typedef uint8_t pyre_graph_partition_type_t;
+
+// Partition descriptor.
+typedef struct pyre_graph_partition_t {
+  uint32_t start_index;
+  uint32_t count;
+  pyre_graph_partition_type_t type;
+  uint8_t stream_count;
+} pyre_graph_partition_t;
+
+// Scheduling result.
+typedef struct pyre_graph_schedule_t {
+  pyre_graph_sort_node_t* sorted_nodes;
+  uint32_t* node_index_map;
+  pyre_graph_partition_t* partitions;
+  iree_host_size_t partition_count;
+  iree_host_size_t block_count;
+} pyre_graph_schedule_t;
+
+// Graph exec instance.
+typedef struct pyre_graph_exec_s {
+  iree_atomic_ref_count_t ref_count;
+  pyre_device_t device;
+  pyre_graph_t graph;  // retained
+
+  iree_arena_allocator_t arena_allocator;
+
+  struct pyre_graph_exec_block_t** blocks;
+  uint32_t block_count;
+
+  uint32_t semaphore_count;
+  iree_hal_semaphore_t** semaphores;
+  uint64_t* semaphore_base_values;
+
+  iree_hal_resource_set_t* resource_set;
+  uint32_t flags;
+  iree_slim_mutex_t mutex;
+} pyre_graph_exec_s;
+
+// Internal graph scheduling API (implemented in graph_analysis.c).
+pyre_status_t pyre_graph_schedule_nodes(
+    pyre_graph_node_block_t* node_blocks, iree_host_size_t node_count,
+    pyre_graph_edge_t* additional_edges, iree_arena_allocator_t* arena,
+    pyre_graph_schedule_t* out_schedule);
+
+// Internal graph exec APIs (implemented in graph_exec.c).
+pyre_status_t pyre_graph_exec_instantiate_locked(
+    pyre_graph_exec_t exec, pyre_graph_node_block_t* node_blocks,
+    iree_host_size_t node_count);
+
+//===----------------------------------------------------------------------===//
+// Buffer
+//===----------------------------------------------------------------------===//
 
 // Buffer allocation.
 typedef struct pyre_buffer_s {

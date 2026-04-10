@@ -25,6 +25,8 @@ set(PYRE_SOURCES
     ${PYRE_IREE_SOURCE_DIR}/compiler/bindings/c/iree/compiler/loader/loader.cpp
     mem_pool.c
     graph.c
+    graph_analysis.c
+    graph_exec.c
 )
 
 set(PYRE_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/include)
@@ -48,6 +50,7 @@ target_link_libraries(pyre PRIVATE
     iree_hal_local_loaders_registration_registration
     iree_modules_hal_hal
     iree_io_file_handle
+    iree_hal_utils_resource_set
     iree_vm_vm
 )
 target_compile_definitions(pyre PRIVATE PYRE_BUILDING_SHARED PYRE_HAS_HSA_DRIVER)
