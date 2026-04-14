@@ -223,7 +223,7 @@ static void pyre_query_device_architecture(
 
   iree_status_t status = iree_hal_device_query_string(
       hal_device, IREE_SV("hal.device"), IREE_SV("architecture"),
-      architecture_size, architecture);
+      architecture_size, architecture, NULL);
   if (iree_status_is_ok(status) && architecture[0] != '\0') {
     return;
   }

@@ -29,9 +29,23 @@ static iree_status_t iree_hal_streaming_buffer_wrap(
       z0, iree_allocator_malloc(context->host_allocator, sizeof(*wrapper),
                                 (void**)&wrapper));
 
+  // Create the pyre buffer that wraps the HAL buffer.
+  pyre_buffer_t pyre_buf = NULL;
+  pyre_device_t pyre_dev = context->device_entry
+                               ? context->device_entry->pyre_device
+                               : NULL;
+  iree_status_t pyre_status = pyre_buffer_create_from_hal(
+      buffer, pyre_dev, (pyre_memory_type_t)memory_type,
+      (size_t)iree_hal_buffer_byte_length(buffer), NULL, &pyre_buf);
+  if (!iree_status_is_ok(pyre_status)) {
+    iree_allocator_free(context->host_allocator, wrapper);
+    IREE_TRACE_ZONE_END(z0);
+    return pyre_status;
+  }
+
   // Initialize wrapper.
-  wrapper->buffer = buffer;
-  iree_hal_buffer_retain(buffer);
+  wrapper->pyre_buf = pyre_buf;
+  wrapper->buffer = pyre_buf->hal_buffer;
   wrapper->context = context;
   iree_hal_streaming_context_retain(context);
   wrapper->memory_type = memory_type;
@@ -102,15 +116,17 @@ static iree_status_t iree_hal_streaming_buffer_wrap(
     // Register buffer in context's mapping table.
     status = PYRE_CALL(pyre_buffer_table_insert(
         &context->buffer_table, wrapper->device_ptr, wrapper->host_ptr,
-        wrapper->size, NULL, wrapper));
+        wrapper->size, wrapper->pyre_buf, wrapper));
   }
 
   if (iree_status_is_ok(status)) {
     *out_wrapper = wrapper;
   } else {
     // Clean up on failure.
-    if (wrapper->buffer) {
-      iree_hal_buffer_release(wrapper->buffer);
+    if (wrapper->pyre_buf) {
+      pyre_buffer_release(wrapper->pyre_buf);
+      wrapper->pyre_buf = NULL;
+      wrapper->buffer = NULL;
     }
     iree_hal_streaming_context_release(wrapper->context);
     iree_allocator_free(context->host_allocator, wrapper);
@@ -119,15 +135,16 @@ static iree_status_t iree_hal_streaming_buffer_wrap(
   return status;
 }
 
-// Frees a buffer wrapper and releases the underlying buffer.
+// Frees a buffer wrapper and releases the underlying pyre buffer.
 static void iree_hal_streaming_buffer_free(
     iree_hal_streaming_buffer_t* buffer) {
   if (!buffer) return;
   IREE_TRACE_ZONE_BEGIN(z0);
   const iree_allocator_t host_allocator = buffer->context->host_allocator;
-  // Release HAL buffer if present (may be NULL for registered/host memory).
-  if (buffer->buffer) {
-    iree_hal_buffer_release(buffer->buffer);
+  if (buffer->pyre_buf) {
+    pyre_buffer_release(buffer->pyre_buf);
+    buffer->pyre_buf = NULL;
+    buffer->buffer = NULL;
   }
   iree_hal_streaming_context_release(buffer->context);
   iree_allocator_free(host_allocator, buffer);
@@ -317,9 +334,25 @@ iree_status_t iree_hal_streaming_memory_allocate_host(
     return status;
   }
 
+  // Create pyre buffer for host memory (no HAL buffer).
+  pyre_buffer_t pyre_buf = NULL;
+  pyre_device_t pyre_dev = context->device_entry
+                               ? context->device_entry->pyre_device
+                               : NULL;
+  status = pyre_buffer_create_from_hal(
+      NULL, pyre_dev, PYRE_MEMORY_TYPE_HOST_LOCAL,
+      size, host_ptr, &pyre_buf);
+  if (!iree_status_is_ok(status)) {
+    iree_allocator_free(context->host_allocator, host_ptr);
+    iree_allocator_free(context->host_allocator, wrapper);
+    IREE_TRACE_ZONE_END(z0);
+    return status;
+  }
+
   // Initialize wrapper for host memory.
   memset(wrapper, 0, sizeof(*wrapper));
-  wrapper->buffer = NULL;  // No HAL buffer for host allocations.
+  wrapper->pyre_buf = pyre_buf;
+  wrapper->buffer = NULL;
   wrapper->context = context;
   iree_hal_streaming_context_retain(context);
   wrapper->memory_type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
@@ -334,11 +367,12 @@ iree_status_t iree_hal_streaming_memory_allocate_host(
   // Register in buffer table using host pointer as key.
   status = PYRE_CALL(pyre_buffer_table_insert(
       &context->buffer_table, wrapper->device_ptr, wrapper->host_ptr,
-      wrapper->size, NULL, wrapper));
+      wrapper->size, wrapper->pyre_buf, wrapper));
 
   if (iree_status_is_ok(status)) {
     *out_buffer = wrapper;
   } else {
+    pyre_buffer_release(pyre_buf);
     iree_allocator_free(context->host_allocator, host_ptr);
     iree_hal_streaming_context_release(context);
     iree_allocator_free(context->host_allocator, wrapper);
@@ -376,10 +410,12 @@ iree_status_t iree_hal_streaming_memory_free_host(
     wrapper->host_ptr = NULL;
   }
 
-  // Free wrapper (this handles HAL buffer release if present).
+  // Free wrapper — release pyre_buf (which handles HAL buffer + device refs).
   iree_hal_streaming_context_t* ctx = wrapper->context;
-  if (wrapper->buffer) {
-    iree_hal_buffer_release(wrapper->buffer);
+  if (wrapper->pyre_buf) {
+    pyre_buffer_release(wrapper->pyre_buf);
+    wrapper->pyre_buf = NULL;
+    wrapper->buffer = NULL;
   }
   iree_hal_streaming_context_release(ctx);
   iree_allocator_free(context->host_allocator, wrapper);
@@ -406,9 +442,24 @@ iree_status_t iree_hal_streaming_memory_register_host(
       z0, iree_allocator_malloc(context->host_allocator, sizeof(*wrapper),
                                 (void**)&wrapper));
 
+  // Create pyre buffer for registered host memory (no HAL buffer).
+  pyre_buffer_t pyre_buf = NULL;
+  pyre_device_t pyre_dev = context->device_entry
+                               ? context->device_entry->pyre_device
+                               : NULL;
+  iree_status_t status = pyre_buffer_create_from_hal(
+      NULL, pyre_dev, PYRE_MEMORY_TYPE_HOST_LOCAL,
+      size, ptr, &pyre_buf);
+  if (!iree_status_is_ok(status)) {
+    iree_allocator_free(context->host_allocator, wrapper);
+    IREE_TRACE_ZONE_END(z0);
+    return status;
+  }
+
   // Initialize wrapper for registered host memory.
   memset(wrapper, 0, sizeof(*wrapper));
-  wrapper->buffer = NULL;  // No HAL buffer - we don't own this memory.
+  wrapper->pyre_buf = pyre_buf;
+  wrapper->buffer = NULL;
   wrapper->context = context;
   iree_hal_streaming_context_retain(context);
   wrapper->memory_type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
@@ -421,13 +472,14 @@ iree_status_t iree_hal_streaming_memory_register_host(
   wrapper->last_prefetch_location = -2;
 
   // Register in buffer table using host pointer as key.
-  iree_status_t status = PYRE_CALL(pyre_buffer_table_insert(
+  status = PYRE_CALL(pyre_buffer_table_insert(
       &context->buffer_table, wrapper->device_ptr, wrapper->host_ptr,
-      wrapper->size, NULL, wrapper));
+      wrapper->size, wrapper->pyre_buf, wrapper));
 
   if (iree_status_is_ok(status)) {
     *out_buffer = wrapper;
   } else {
+    pyre_buffer_release(pyre_buf);
     iree_hal_streaming_context_release(context);
     iree_allocator_free(context->host_allocator, wrapper);
   }

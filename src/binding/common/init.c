@@ -55,7 +55,7 @@ static iree_status_t iree_hal_streaming_query_device_info(
   char arch_name[64] = {0};
   iree_status_t arch_status = iree_hal_device_query_string(
       device->hal_device, IREE_SV("hal.device"), IREE_SV("architecture"),
-      sizeof(arch_name), arch_name);
+      sizeof(arch_name), arch_name, NULL);
   if (iree_status_is_ok(arch_status) && arch_name[0] != '\0') {
     // Parse "gfxNNNN" to extract major.minor.
     // gfx9xx -> major=9, minor=x (e.g., gfx942 -> 9.4)

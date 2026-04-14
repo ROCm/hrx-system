@@ -106,7 +106,7 @@ iree_status_t iree_hal_streaming_device_get_string_property(
     return status;
   }
   return iree_hal_device_query_string(device->hal_device,
-      iree_make_cstring_view(category), iree_make_cstring_view(key), property_size, property);
+      iree_make_cstring_view(category), iree_make_cstring_view(key), property_size, property, NULL);
 }
 
 iree_hal_streaming_p2p_link_t* iree_hal_streaming_device_lookup_p2p_link(

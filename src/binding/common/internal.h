@@ -625,8 +625,13 @@ typedef struct iree_hal_streaming_buffer_t {
   // Total size in bytes of the buffer.
   iree_device_size_t size;
 
-  // HAL buffer.
+  // HAL buffer (alias for pyre_buf->hal_buffer when pyre_buf is set).
   iree_hal_buffer_t* buffer;
+
+  // Pyre buffer wrapping the HAL buffer. Enables interop between the HIP
+  // binding path and native pyre code. When set, |buffer| above is an
+  // alias pointing to pyre_buf->hal_buffer.
+  pyre_buffer_t pyre_buf;
 
   // Owning context.
   iree_hal_streaming_context_t* context;

@@ -3021,8 +3021,9 @@ static void iree_hip_free_and_reset_contiguous_pool(
     // Remove from buffer table and release the underlying HAL buffer.
     pyre_buffer_table_remove(&context->buffer_table,
                              g_contiguous_pool->device_ptr);
-    if (g_contiguous_pool->buffer) {
-      iree_hal_buffer_release(g_contiguous_pool->buffer);
+    if (g_contiguous_pool->pyre_buf) {
+      pyre_buffer_release(g_contiguous_pool->pyre_buf);
+      g_contiguous_pool->pyre_buf = NULL;
       g_contiguous_pool->buffer = NULL;
     }
     iree_allocator_free(context->host_allocator, g_contiguous_pool);

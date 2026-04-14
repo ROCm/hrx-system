@@ -95,4 +95,28 @@ static inline iree_allocator_t pyre_system_iree_allocator(void) {
   return pyre_to_iree_allocator(pyre_host_allocator_system());
 }
 
+// Create a pyre_buffer_s wrapping a HAL buffer for buffer interop.
+// The pyre_buf retains the HAL buffer and the device; caller owns the
+// returned pyre_buffer_t with ref_count=1.  |hal_buffer| may be NULL
+// for host-only allocations.
+static inline iree_status_t pyre_buffer_create_from_hal(
+    iree_hal_buffer_t* hal_buffer, pyre_device_t device,
+    pyre_memory_type_t mem_type, size_t size, void* mapped_ptr,
+    pyre_buffer_t* out_buffer) {
+  pyre_buffer_s* buf = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
+      iree_allocator_system(), sizeof(*buf), (void**)&buf));
+  memset(buf, 0, sizeof(*buf));
+  iree_atomic_ref_count_init(&buf->ref_count);
+  buf->hal_buffer = hal_buffer;
+  if (hal_buffer) iree_hal_buffer_retain(hal_buffer);
+  buf->device = device;
+  if (device) pyre_device_retain(device);
+  buf->mem_type = mem_type;
+  buf->size = size;
+  buf->mapped_ptr = mapped_ptr;
+  *out_buffer = buf;
+  return iree_ok_status();
+}
+
 #endif  // PYRE_STREAMING_BRIDGE_H_

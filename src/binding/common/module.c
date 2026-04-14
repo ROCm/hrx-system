@@ -504,22 +504,34 @@ iree_status_t iree_hal_streaming_module_global(
                                          sizeof(*wrapper), (void**)&wrapper);
           if (iree_status_is_ok(status)) {
             memset(wrapper, 0, sizeof(*wrapper));
-            wrapper->buffer = buffer;
-            iree_hal_buffer_retain(buffer);
-            wrapper->context = module->context;
-            iree_hal_streaming_context_retain(module->context);
-            wrapper->device_ptr = device_ptr;
-            wrapper->host_ptr = (void*)(uintptr_t)device_ptr;
-            wrapper->size = buf_size;
-            wrapper->memory_type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-            wrapper->preferred_location = -2;
-            wrapper->last_prefetch_location = -2;
-            status = PYRE_CALL(pyre_buffer_table_insert(
-                &module->context->buffer_table, wrapper->device_ptr,
-                wrapper->host_ptr, wrapper->size, NULL, wrapper));
-            if (!iree_status_is_ok(status)) {
-              iree_hal_buffer_release(wrapper->buffer);
-              iree_hal_streaming_context_release(wrapper->context);
+            pyre_buffer_t pyre_buf = NULL;
+            pyre_device_t pyre_dev = module->context->device_entry
+                                         ? module->context->device_entry->pyre_device
+                                         : NULL;
+            status = pyre_buffer_create_from_hal(
+                buffer, pyre_dev, PYRE_MEMORY_TYPE_DEVICE_LOCAL,
+                (size_t)buf_size, NULL, &pyre_buf);
+            if (iree_status_is_ok(status)) {
+              wrapper->pyre_buf = pyre_buf;
+              wrapper->buffer = pyre_buf->hal_buffer;
+              wrapper->context = module->context;
+              iree_hal_streaming_context_retain(module->context);
+              wrapper->device_ptr = device_ptr;
+              wrapper->host_ptr = (void*)(uintptr_t)device_ptr;
+              wrapper->size = buf_size;
+              wrapper->memory_type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+              wrapper->preferred_location = -2;
+              wrapper->last_prefetch_location = -2;
+              status = PYRE_CALL(pyre_buffer_table_insert(
+                  &module->context->buffer_table, wrapper->device_ptr,
+                  wrapper->host_ptr, wrapper->size, wrapper->pyre_buf,
+                  wrapper));
+              if (!iree_status_is_ok(status)) {
+                pyre_buffer_release(wrapper->pyre_buf);
+                iree_hal_streaming_context_release(wrapper->context);
+                iree_allocator_free(module->context->host_allocator, wrapper);
+              }
+            } else {
               iree_allocator_free(module->context->host_allocator, wrapper);
             }
           }
