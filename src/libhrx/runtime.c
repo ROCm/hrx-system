@@ -10,6 +10,7 @@
 #include "hrx_internal.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "hsa/hsa.h"
@@ -22,6 +23,9 @@
 #ifdef HRX_HAS_HSA_DRIVER
 #include "hsa_driver/api.h"
 #include "hsa_driver/registration/driver_module.h"
+#endif
+#ifdef HRX_HAS_IREE_AMDGPU_DRIVER
+#include "iree/hal/drivers/amdgpu/registration/driver_module.h"
 #endif
 
 //===----------------------------------------------------------------------===//
@@ -237,6 +241,102 @@ static hrx_status_t hrx_create_local_task_device(
   return hrx_ok_status();
 }
 
+static const char* hrx_get_gpu_driver_name(void) {
+  const char* value = getenv("HRX_GPU_DRIVER");
+  return (value && value[0]) ? value : "hsa";
+}
+
+static bool hrx_gpu_debug_enabled(void) {
+  const char* value = getenv("HRX_GPU_DEBUG");
+  return value && value[0] && strcmp(value, "0") != 0;
+}
+
+static void hrx_debug_print_iree_status(const char* label,
+                                        iree_status_t status) {
+  if (!hrx_gpu_debug_enabled() || iree_status_is_ok(status)) return;
+  iree_allocator_t allocator = iree_allocator_system();
+  char* message = NULL;
+  iree_host_size_t message_length = 0;
+  if (iree_status_to_string(status, &allocator, &message, &message_length)) {
+    fprintf(stderr, "hrx gpu debug: %s: %s\n", label,
+            message ? message : "(no message)");
+    iree_allocator_free(allocator, message);
+  } else {
+    fprintf(stderr, "hrx gpu debug: %s: (could not format status)\n", label);
+  }
+}
+
+static hrx_status_t hrx_create_hsa_gpu_driver(iree_allocator_t alloc,
+                                              iree_hal_driver_t** out_driver) {
+  iree_hal_hsa_driver_options_t driver_options;
+  iree_hal_hsa_driver_options_initialize(&driver_options);
+  iree_hal_hsa_device_params_t device_params;
+  iree_hal_hsa_device_params_initialize(&device_params);
+
+  iree_hal_driver_t* driver = NULL;
+  iree_status_t status =
+      iree_hal_hsa_driver_create(iree_make_cstring_view("hsa"), &driver_options,
+                                 &device_params, alloc, &driver);
+  hrx_debug_print_iree_status("hsa driver create", status);
+  if (!iree_status_is_ok(status)) {
+    return hrx_status_from_iree(status);
+  }
+
+  *out_driver = driver;
+  return hrx_ok_status();
+}
+
+#ifdef HRX_HAS_IREE_AMDGPU_DRIVER
+static hrx_status_t hrx_create_iree_amdgpu_driver(
+    iree_allocator_t alloc, iree_hal_driver_t** out_driver) {
+  iree_status_t status = iree_hal_amdgpu_driver_module_register(
+      iree_hal_driver_registry_default());
+  if (iree_status_is_already_exists(status)) {
+    iree_status_ignore(status);
+    status = iree_ok_status();
+  }
+  hrx_debug_print_iree_status("amdgpu driver module register", status);
+  if (!iree_status_is_ok(status)) {
+    return hrx_status_from_iree(status);
+  }
+
+  iree_hal_driver_t* driver = NULL;
+  status = iree_hal_driver_registry_try_create(
+      iree_hal_driver_registry_default(), iree_make_cstring_view("amdgpu"),
+      alloc, &driver);
+  hrx_debug_print_iree_status("amdgpu driver create", status);
+  if (!iree_status_is_ok(status)) {
+    return hrx_status_from_iree(status);
+  }
+
+  *out_driver = driver;
+  return hrx_ok_status();
+}
+#endif
+
+static hrx_status_t hrx_create_gpu_driver(iree_allocator_t alloc,
+                                          iree_hal_driver_t** out_driver) {
+  const char* driver_name = hrx_get_gpu_driver_name();
+  if (strcmp(driver_name, "hsa") == 0) {
+    return hrx_create_hsa_gpu_driver(alloc, out_driver);
+  }
+#ifdef HRX_HAS_IREE_AMDGPU_DRIVER
+  if (strcmp(driver_name, "amdgpu") == 0) {
+    return hrx_create_iree_amdgpu_driver(alloc, out_driver);
+  }
+  char message[128];
+  snprintf(message, sizeof(message),
+           "unknown HRX_GPU_DRIVER '%s' (expected 'hsa' or 'amdgpu')",
+           driver_name);
+  return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, message);
+#else
+  char message[96];
+  snprintf(message, sizeof(message),
+           "unknown HRX_GPU_DRIVER '%s' (expected 'hsa')", driver_name);
+  return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, message);
+#endif
+}
+
 //===----------------------------------------------------------------------===//
 // CPU accelerator
 //===----------------------------------------------------------------------===//
@@ -360,34 +460,20 @@ hrx_status_t hrx_gpu_initialize(uint32_t flags) {
 
   iree_allocator_t alloc = g_shared.host_allocator;
 
-  // Register the HSA driver factory.
-  iree_status_t iree_status =
-      iree_hal_hsa_driver_module_register(iree_hal_driver_registry_default());
-  if (!iree_status_is_ok(iree_status)) {
-    hrx_release_shared_state();
-    return hrx_status_from_iree(iree_status);
-  }
-
-  // Create HSA driver with default options.
-  iree_hal_hsa_driver_options_t driver_options;
-  iree_hal_hsa_driver_options_initialize(&driver_options);
-  iree_hal_hsa_device_params_t device_params;
-  iree_hal_hsa_device_params_initialize(&device_params);
-
   iree_hal_driver_t *driver = NULL;
-  iree_status =
-      iree_hal_hsa_driver_create(iree_make_cstring_view("hsa"), &driver_options,
-                                 &device_params, alloc, &driver);
-  if (!iree_status_is_ok(iree_status)) {
+  status = hrx_create_gpu_driver(alloc, &driver);
+  if (!hrx_status_is_ok(status)) {
     hrx_release_shared_state();
-    return hrx_status_from_iree(iree_status);
+    return status;
   }
 
   // Enumerate available GPU devices.
+  iree_status_t iree_status = iree_ok_status();
   iree_host_size_t device_info_count = 0;
   iree_hal_device_info_t *device_infos = NULL;
   iree_status = iree_hal_driver_query_available_devices(
       driver, alloc, &device_info_count, &device_infos);
+  hrx_debug_print_iree_status("query available devices", iree_status);
   if (!iree_status_is_ok(iree_status)) {
     iree_hal_driver_release(driver);
     hrx_release_shared_state();
@@ -399,6 +485,10 @@ hrx_status_t hrx_gpu_initialize(uint32_t flags) {
     iree_hal_driver_release(driver);
     hrx_release_shared_state();
     return hrx_make_status(HRX_STATUS_UNAVAILABLE, "no GPU devices found");
+  }
+  if (hrx_gpu_debug_enabled()) {
+    fprintf(stderr, "hrx gpu debug: found %zu available GPU device entries\n",
+            (size_t)device_info_count);
   }
 
   // Create a HAL device for each GPU (up to HRX_MAX_DEVICES).
@@ -414,6 +504,7 @@ hrx_status_t hrx_gpu_initialize(uint32_t flags) {
     iree_status = iree_hal_driver_create_device_by_ordinal(
         driver, (iree_host_size_t)i, /*param_count=*/0, /*params=*/NULL,
         &create_params, alloc, &hal_device);
+    hrx_debug_print_iree_status("create device by ordinal", iree_status);
     if (!iree_status_is_ok(iree_status)) {
       for (int j = 0; j < i; j++) {
         hrx_device_release(&g_gpu.devices[j]);

@@ -18,6 +18,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(HRX_IREE_SOURCE_DIR "" CACHE PATH
     "Path to IREE source tree (required)")
+option(HRX_ENABLE_IREE_AMDGPU
+    "Enable IREE's built-in AMDGPU HAL driver" ON)
 option(HRX_ENABLE_TRACY
     "Build with IREE Tracy tracing integration" OFF)
 option(HRX_BUILD_CTS
@@ -40,6 +42,11 @@ message(STATUS "hrx-runtime: using IREE at ${HRX_IREE_SOURCE_DIR}")
 # HSA runtime (direct link, part of ROCm)
 #===------------------------------------------------------------------------===#
 
+# Help CMake find ROCm package configs in the common default install location.
+if(NOT hsa-runtime64_DIR AND EXISTS "/opt/rocm/lib/cmake/hsa-runtime64")
+  list(PREPEND CMAKE_PREFIX_PATH "/opt/rocm")
+endif()
+
 find_package(hsa-runtime64 REQUIRED)
 message(STATUS "hrx-runtime: found HSA runtime")
 
@@ -60,6 +67,61 @@ set(IREE_ALLOCATOR_SYSTEM "mimalloc" CACHE STRING "" FORCE)
 
 # CPU drivers only (local-sync + local-task).
 set(IREE_HAL_DRIVER_DEFAULTS OFF)
+if(HRX_ENABLE_IREE_AMDGPU)
+  set(IREE_HAL_DRIVER_AMDGPU ON)
+  if(NOT DEFINED IREE_ROCM_TEST_TARGET_CHIP)
+    set(IREE_ROCM_TEST_TARGET_CHIP "" CACHE STRING
+        "ROCm test target chip for the embedded IREE build" FORCE)
+  endif()
+  # Runtime-only IREE builds skip LLVM setup, but the AMDGPU driver still needs
+  # host clang/llvm-link/lld to compile its embedded device libraries.
+  if(NOT IREE_BUILD_COMPILER)
+    if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
+      set(IREE_CLANG_BINARY "${CMAKE_C_COMPILER}" CACHE FILEPATH
+          "Host clang used by the embedded IREE AMDGPU build" FORCE)
+    else()
+      find_program(_hrx_clang_binary clang REQUIRED)
+      set(IREE_CLANG_BINARY "${_hrx_clang_binary}" CACHE FILEPATH
+          "Host clang used by the embedded IREE AMDGPU build" FORCE)
+    endif()
+    execute_process(
+        COMMAND "${IREE_CLANG_BINARY}" -print-prog-name=llvm-link
+        OUTPUT_VARIABLE _hrx_llvm_link_binary
+        OUTPUT_STRIP_TRAILING_WHITESPACE)
+    execute_process(
+        COMMAND "${IREE_CLANG_BINARY}" -print-prog-name=ld.lld
+        OUTPUT_VARIABLE _hrx_lld_binary
+        OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(EXISTS "${_hrx_llvm_link_binary}")
+      set(IREE_LLVM_LINK_BINARY "${_hrx_llvm_link_binary}" CACHE FILEPATH
+          "Host llvm-link used by the embedded IREE AMDGPU build" FORCE)
+    else()
+      find_program(_hrx_llvm_link_fallback llvm-link REQUIRED)
+      set(IREE_LLVM_LINK_BINARY "${_hrx_llvm_link_fallback}" CACHE FILEPATH
+          "Host llvm-link used by the embedded IREE AMDGPU build" FORCE)
+    endif()
+    if(EXISTS "${_hrx_lld_binary}")
+      set(IREE_LLD_BINARY "${_hrx_lld_binary}" CACHE FILEPATH
+          "Host lld used by the embedded IREE AMDGPU build" FORCE)
+    else()
+      find_program(_hrx_lld_fallback NAMES lld ld.lld REQUIRED)
+      set(IREE_LLD_BINARY "${_hrx_lld_fallback}" CACHE FILEPATH
+          "Host lld used by the embedded IREE AMDGPU build" FORCE)
+    endif()
+    if(NOT IREE_CLANG_BUILTIN_HEADERS_PATH)
+      execute_process(
+          COMMAND "${IREE_CLANG_BINARY}" -print-resource-dir
+          OUTPUT_VARIABLE _hrx_clang_resource_dir
+          OUTPUT_STRIP_TRAILING_WHITESPACE)
+      if(NOT _hrx_clang_resource_dir)
+        message(FATAL_ERROR
+          "Failed to determine clang resource dir for ${IREE_CLANG_BINARY}")
+      endif()
+      set(IREE_CLANG_BUILTIN_HEADERS_PATH
+          "${_hrx_clang_resource_dir}/include")
+    endif()
+  endif()
+endif()
 set(IREE_HAL_DRIVER_LOCAL_SYNC ON)
 set(IREE_HAL_DRIVER_LOCAL_TASK ON)
 set(IREE_HAL_DRIVER_REMOTE ON)

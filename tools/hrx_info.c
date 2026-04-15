@@ -30,6 +30,15 @@
     }                                                                          \
   } while (0)
 
+static void print_status_message(FILE *stream, const char *prefix,
+                                 hrx_status_t status) {
+  char *msg = NULL;
+  size_t len = 0;
+  hrx_status_to_string(status, &msg, &len);
+  fprintf(stream, "%s%s", prefix, msg ? msg : "?");
+  hrx_status_free_message(msg);
+}
+
 static int print_devices(void) {
   int major, minor, patch;
   hrx_runtime_version(&major, &minor, &patch);
@@ -54,7 +63,9 @@ static int print_devices(void) {
       printf("  [%d] %s (%s)\n", i, name, arch);
     }
   } else {
-    printf("GPU accelerator: unavailable\n");
+    printf("GPU accelerator: unavailable (");
+    print_status_message(stdout, "", gpu_status);
+    printf(")\n");
     hrx_status_ignore(gpu_status);
   }
 
@@ -74,7 +85,9 @@ static int print_devices(void) {
       printf("  [%d] %s\n", i, name);
     }
   } else {
-    printf("CPU accelerator: unavailable\n");
+    printf("CPU accelerator: unavailable (");
+    print_status_message(stdout, "", cpu_status);
+    printf(")\n");
     hrx_status_ignore(cpu_status);
   }
 
@@ -200,7 +213,9 @@ int main(int argc, char **argv) {
     hrx_device_t dev = NULL;
     if (type == HRX_ACCELERATOR_GPU) {
       if (!hrx_status_is_ok(gpu_status)) {
-        fprintf(stderr, "GPU accelerator not available\n");
+        print_status_message(stderr, "GPU accelerator not available: ",
+                             gpu_status);
+        fprintf(stderr, "\n");
         hrx_status_ignore(gpu_status);
         hrx_status_ignore(cpu_status);
         return 1;
@@ -208,7 +223,9 @@ int main(int argc, char **argv) {
       CHECK_STATUS(hrx_gpu_device_get(index, &dev));
     } else {
       if (!hrx_status_is_ok(cpu_status)) {
-        fprintf(stderr, "CPU accelerator not available\n");
+        print_status_message(stderr, "CPU accelerator not available: ",
+                             cpu_status);
+        fprintf(stderr, "\n");
         hrx_status_ignore(gpu_status);
         hrx_status_ignore(cpu_status);
         return 1;

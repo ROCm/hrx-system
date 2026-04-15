@@ -46,7 +46,15 @@ target_link_libraries(hrx PRIVATE
     iree_modules_hal_hal
     iree_vm_vm
 )
+if(HRX_ENABLE_IREE_AMDGPU)
+  target_link_libraries(hrx PRIVATE
+      iree_hal_drivers_amdgpu_registration_registration
+  )
+endif()
 target_compile_definitions(hrx PRIVATE HRX_BUILDING_SHARED HRX_HAS_HSA_DRIVER)
+if(HRX_ENABLE_IREE_AMDGPU)
+  target_compile_definitions(hrx PRIVATE HRX_HAS_IREE_AMDGPU_DRIVER)
+endif()
 set_target_properties(hrx PROPERTIES
     OUTPUT_NAME hrx
     VERSION ${PROJECT_VERSION}
