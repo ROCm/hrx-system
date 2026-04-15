@@ -1129,7 +1129,7 @@ static iree_status_t iree_hal_hsa_native_executable_lookup_export_by_name(
                           (int)name.size, name.data);
 }
 
-static iree_status_t iree_hal_hsa_native_executable_lookup_global(
+static iree_status_t iree_hal_hsa_native_executable_lookup_global_impl(
     iree_hal_executable_t *base_executable, iree_string_view_t name,
     iree_hal_queue_affinity_t queue_affinity, uint64_t *out_device_address,
     iree_device_size_t *out_size) {
@@ -1216,5 +1216,4 @@ static const iree_hal_executable_vtable_t
         .export_parameters = iree_hal_hsa_native_executable_export_parameters,
         .lookup_export_by_name =
             iree_hal_hsa_native_executable_lookup_export_by_name,
-        .lookup_global = iree_hal_hsa_native_executable_lookup_global,
 };

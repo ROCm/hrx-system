@@ -747,12 +747,9 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device(
   // If destination is not in our buffer table, try raw device transfer.
   // This handles global symbols from loaded modules.
   if (!iree_status_is_ok(dst_status)) {
-    iree_status_ignore(dst_status);
-    // Attempt raw H2D transfer (synchronous).
-    iree_status_t raw_status = iree_hal_device_transfer_h2d_raw(
-        context->device, src, (uint64_t)dst, size, iree_infinite_timeout());
-    IREE_TRACE_ZONE_END(z0);
-    return raw_status;
+    return iree_make_status(
+      IREE_STATUS_INVALID_ARGUMENT,
+        "unknown destination pointer");
   }
 
   // Check if src is pinned host memory backed by a HAL buffer.
@@ -898,12 +895,9 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host(
   // If source is not in our buffer table, try raw device transfer.
   // This handles global symbols from loaded modules.
   if (!iree_status_is_ok(src_status)) {
-    iree_status_ignore(src_status);
-    // Attempt raw D2H transfer (synchronous).
-    iree_status_t raw_status = iree_hal_device_transfer_d2h_raw(
-        context->device, (uint64_t)src, dst, size, iree_infinite_timeout());
-    IREE_TRACE_ZONE_END(z0);
-    return raw_status;
+    return iree_make_status(
+      IREE_STATUS_INVALID_ARGUMENT,
+        "unknown source pointer");
   }
 
   // Check if dst is pinned host memory backed by a HAL buffer.

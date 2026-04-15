@@ -66,13 +66,13 @@ static hrx_status_t hrx_module_load_archive(
     return hrx_status_from_iree(status);
   }
 
-  iree_hal_device_group_t *device_group = NULL;
-  status = iree_hal_device_group_create_from_device(device->hal_device, alloc,
-                                                    &device_group);
-  if (!iree_status_is_ok(status)) {
+  iree_hal_device_group_t *device_group = device->hal_device_group;
+  if (!device_group) {
     hrx_module_destroy_partial(loaded);
-    return hrx_status_from_iree(status);
+    return hrx_make_status(HRX_STATUS_FAILED_PRECONDITION,
+                           "device is missing its HAL device group");
   }
+  iree_hal_device_group_retain(device_group);
 
   status = iree_hal_module_create(hrx_get_shared_state()->vm_instance,
                                   iree_hal_module_device_policy_default(),

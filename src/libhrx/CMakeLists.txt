@@ -11,6 +11,7 @@ set(HRX_SOURCES
     semaphore.c
     stream.c
     buffer.c
+    pool.c
     buffer_view.c
     executable.c
     fence.c

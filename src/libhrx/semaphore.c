@@ -84,6 +84,7 @@ hrx_status_t hrx_semaphore_signal(hrx_semaphore_t semaphore, uint64_t value) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "semaphore is NULL");
   }
   iree_status_t status =
-      iree_hal_semaphore_signal(semaphore->hal_semaphore, value);
+      iree_hal_semaphore_signal(semaphore->hal_semaphore, value,
+                                /*frontier=*/NULL);
   return hrx_status_from_iree(status);
 }

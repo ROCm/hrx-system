@@ -13,7 +13,11 @@
 #include <string.h>
 
 #include "hsa/hsa.h"
+#include "iree/async/frontier_tracker.h"
+#include "iree/async/util/proactor_pool.h"
+#include "iree/hal/drivers/local_task/task_driver.h"
 #include "iree/modules/hal/types.h"
+#include "iree/task/api.h"
 
 #ifdef HRX_HAS_HSA_DRIVER
 #include "hsa_driver/api.h"
@@ -31,6 +35,24 @@ static hrx_cpu_state_t g_cpu = {0};
 hrx_shared_state_t *hrx_get_shared_state(void) { return &g_shared; }
 hrx_gpu_state_t *hrx_get_gpu_state(void) { return &g_gpu; }
 hrx_cpu_state_t *hrx_get_cpu_state(void) { return &g_cpu; }
+
+static iree_status_t hrx_create_single_device_group(
+    iree_hal_device_t *device, iree_allocator_t host_allocator,
+    iree_hal_device_group_t **out_device_group) {
+  IREE_ASSERT_ARGUMENT(device);
+  IREE_ASSERT_ARGUMENT(out_device_group);
+  *out_device_group = NULL;
+
+  iree_async_frontier_tracker_t *frontier_tracker = NULL;
+  IREE_RETURN_IF_ERROR(iree_async_frontier_tracker_create(
+      iree_async_frontier_tracker_options_default(), host_allocator,
+      &frontier_tracker));
+
+  iree_status_t status = iree_hal_device_group_create_from_device(
+      device, frontier_tracker, host_allocator, out_device_group);
+  iree_async_frontier_tracker_release(frontier_tracker);
+  return status;
+}
 
 //===----------------------------------------------------------------------===//
 // Version
@@ -215,24 +237,6 @@ static hrx_status_t hrx_create_local_task_device(
   return hrx_ok_status();
 }
 
-static void hrx_query_device_architecture(iree_hal_device_t *hal_device,
-                                          char *architecture,
-                                          size_t architecture_size) {
-  if (!architecture || architecture_size == 0)
-    return;
-  architecture[0] = '\0';
-
-  iree_status_t status = iree_hal_device_query_string(
-      hal_device, IREE_SV("hal.device"), IREE_SV("architecture"),
-      architecture_size, architecture);
-  if (iree_status_is_ok(status) && architecture[0] != '\0') {
-    return;
-  }
-
-  iree_status_ignore(status);
-  snprintf(architecture, architecture_size, "unknown");
-}
-
 //===----------------------------------------------------------------------===//
 // CPU accelerator
 //===----------------------------------------------------------------------===//
@@ -257,12 +261,23 @@ hrx_status_t hrx_cpu_initialize(uint32_t flags) {
     return status;
   }
 
+  iree_hal_device_group_t *device_group = NULL;
+  iree_status_t iree_status = hrx_create_single_device_group(
+      hal_device, g_shared.host_allocator, &device_group);
+  if (!iree_status_is_ok(iree_status)) {
+    iree_hal_device_release(hal_device);
+    iree_hal_driver_release(driver);
+    hrx_release_shared_state();
+    return hrx_status_from_iree(iree_status);
+  }
+
   hrx_device_s *dev = &g_cpu.devices[0];
   memset(dev, 0, sizeof(*dev));
   iree_atomic_ref_count_init(&dev->ref_count);
   dev->type = HRX_ACCELERATOR_CPU;
   dev->ordinal = 0;
   dev->hal_device = hal_device;
+  dev->hal_device_group = device_group;
   dev->allocator.hal_allocator = iree_hal_device_allocator(hal_device);
   iree_hal_allocator_retain(dev->allocator.hal_allocator);
   iree_atomic_ref_count_init(&dev->allocator.ref_count);
@@ -409,12 +424,27 @@ hrx_status_t hrx_gpu_initialize(uint32_t flags) {
       return hrx_status_from_iree(iree_status);
     }
 
+    iree_hal_device_group_t *device_group = NULL;
+    iree_status = hrx_create_single_device_group(hal_device, alloc,
+                                                 &device_group);
+    if (!iree_status_is_ok(iree_status)) {
+      iree_hal_device_release(hal_device);
+      for (int j = 0; j < i; j++) {
+        hrx_device_release(&g_gpu.devices[j]);
+      }
+      iree_allocator_free(alloc, device_infos);
+      iree_hal_driver_release(driver);
+      hrx_release_shared_state();
+      return hrx_status_from_iree(iree_status);
+    }
+
     hrx_device_s *dev = &g_gpu.devices[i];
     memset(dev, 0, sizeof(*dev));
     iree_atomic_ref_count_init(&dev->ref_count);
     dev->type = HRX_ACCELERATOR_GPU;
     dev->ordinal = i;
     dev->hal_device = hal_device;
+    dev->hal_device_group = device_group;
     dev->allocator.hal_allocator = iree_hal_device_allocator(hal_device);
     iree_hal_allocator_retain(dev->allocator.hal_allocator);
     iree_atomic_ref_count_init(&dev->allocator.ref_count);
@@ -426,8 +456,12 @@ hrx_status_t hrx_gpu_initialize(uint32_t flags) {
     memcpy(dev->name, device_infos[i].name.data, name_len);
     dev->name[name_len] = '\0';
 
-    hrx_query_device_architecture(hal_device, dev->architecture,
-                                  sizeof(dev->architecture));
+    iree_host_size_t arch_len = device_infos[i].name.size;
+    if (arch_len >= sizeof(dev->architecture)) {
+      arch_len = sizeof(dev->architecture) - 1;
+    }
+    memcpy(dev->architecture, device_infos[i].name.data, arch_len);
+    dev->architecture[arch_len] = '\0';
   }
 
   iree_allocator_free(alloc, device_infos);

@@ -23,6 +23,7 @@
 #include "iree/base/internal/math.h"
 #include "iree/base/threading/thread.h"
 #include "iree/base/tracing.h"
+#include "iree/hal/pool.h"
 #include "iree/hal/utils/deferred_command_buffer.h"
 #include "iree/hal/utils/file_transfer.h"
 #include "iree/hal/utils/memory_file.h"
@@ -483,33 +484,58 @@ iree_hal_hsa_device_query_i64(iree_hal_device_t *base_device,
       (int)category.size, category.data, (int)key.size, key.data);
 }
 
+static iree_status_t iree_hal_hsa_device_query_architecture_string(
+    iree_hal_hsa_device_t *device, iree_host_size_t out_string_capacity,
+    char *out_string, iree_host_size_t *out_string_length) {
+  if (out_string_length) {
+    *out_string_length = 0;
+  }
+  if (out_string_capacity > 0 && out_string) {
+    out_string[0] = '\0';
+  }
+
+  char device_name[64] = {0};
+  IREE_RETURN_IF_ERROR(IREE_HSA_CALL_TO_STATUS(
+      hsa_agent_get_info(device->device_info.agent, HSA_AGENT_INFO_NAME,
+                         device_name),
+      "hsa_agent_get_info(HSA_AGENT_INFO_NAME)"));
+  const iree_host_size_t name_len = strlen(device_name);
+  if (out_string_length) {
+    *out_string_length = name_len;
+  }
+
+  if (!out_string) {
+    return iree_ok_status();
+  }
+  if (out_string_capacity <= name_len) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "output string too small");
+  }
+  memcpy(out_string, device_name, name_len);
+  out_string[name_len] = '\0';
+  return iree_ok_status();
+}
+
 static iree_status_t iree_hal_hsa_device_query_string(
     iree_hal_device_t *base_device, iree_string_view_t category,
-    iree_string_view_t key, iree_host_size_t out_string_size,
-    char *out_string) {
+    iree_string_view_t key, iree_host_size_t out_string_capacity,
+    char *out_string, iree_host_size_t *out_string_length) {
   iree_hal_hsa_device_t *device = iree_hal_hsa_device_cast(base_device);
-  if (out_string_size == 0) {
+  if (out_string_capacity == 0 && out_string) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "output string too small");
   }
-  out_string[0] = '\0';
+  if (out_string_capacity > 0 && out_string) {
+    out_string[0] = '\0';
+  }
+  if (out_string_length) {
+    *out_string_length = 0;
+  }
 
   if (iree_string_view_equal(category, IREE_SV("hal.device"))) {
     if (iree_string_view_equal(key, IREE_SV("architecture"))) {
-      // Get the device name from HSA which is the architecture (e.g.,
-      // "gfx942").
-      char device_name[64] = {0};
-      IREE_RETURN_IF_ERROR(IREE_HSA_CALL_TO_STATUS(
-          hsa_agent_get_info(device->device_info.agent, HSA_AGENT_INFO_NAME,
-                             device_name),
-          "hsa_agent_get_info(HSA_AGENT_INFO_NAME)"));
-      size_t name_len = strlen(device_name);
-      if (out_string_size <= name_len) {
-        return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                                "output string too small");
-      }
-      memcpy(out_string, device_name, name_len + 1);
-      return iree_ok_status();
+      return iree_hal_hsa_device_query_architecture_string(
+          device, out_string_capacity, out_string, out_string_length);
     }
   }
 
@@ -614,21 +640,42 @@ static iree_status_t iree_hal_hsa_device_wait_semaphore_list(
 static iree_status_t iree_hal_hsa_device_signal_or_fail_semaphore_list(
     const iree_hal_semaphore_list_t semaphore_list, iree_status_t status) {
   if (iree_status_is_ok(status)) {
-    iree_hal_semaphore_list_signal(semaphore_list);
-    return iree_ok_status();
+    return iree_hal_semaphore_list_signal(semaphore_list, /*frontier=*/NULL);
   }
   iree_hal_semaphore_list_fail(semaphore_list, status);
   return status;
+}
+
+static iree_status_t iree_hal_hsa_device_query_queue_pool_backend(
+    iree_hal_device_t *base_device, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_queue_pool_backend_t *out_backend) {
+  (void)base_device;
+  (void)queue_affinity;
+  memset(out_backend, 0, sizeof(*out_backend));
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "TODO: plumb HSA queue allocation into the rebased iree_hal_pool_t API");
 }
 
 static iree_status_t iree_hal_hsa_device_queue_alloca(
     iree_hal_device_t *base_device, iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_allocator_pool_t pool, iree_hal_buffer_params_t params,
+    iree_hal_pool_t *pool, iree_hal_buffer_params_t params,
     iree_device_size_t allocation_size, iree_hal_alloca_flags_t flags,
     iree_hal_buffer_t **IREE_RESTRICT out_buffer) {
   iree_hal_hsa_device_t *device = iree_hal_hsa_device_cast(base_device);
+  (void)queue_affinity;
+  (void)flags;
+  if (pool != NULL) {
+    IREE_RETURN_IF_ERROR(
+        iree_hal_hsa_device_wait_semaphore_list(wait_semaphore_list));
+    iree_status_t status = iree_hal_pool_allocate_buffer(
+        pool, params, allocation_size, /*requester_frontier=*/NULL,
+        iree_immediate_timeout(), out_buffer);
+    return iree_hal_hsa_device_signal_or_fail_semaphore_list(
+        signal_semaphore_list, status);
+  }
   IREE_RETURN_IF_ERROR(
       iree_hal_hsa_device_wait_semaphore_list(wait_semaphore_list));
   iree_status_t status = iree_hal_allocator_allocate_buffer(
@@ -765,7 +812,8 @@ static int iree_hal_hsa_deferred_queue_execute_main(void *param) {
 
   // Signal or fail the signal semaphores.
   if (iree_status_is_ok(status)) {
-    iree_hal_semaphore_list_signal(signal_list);
+    status =
+        iree_hal_semaphore_list_signal(signal_list, /*frontier=*/NULL);
   } else {
     iree_hal_semaphore_list_fail(signal_list, status);
   }
@@ -908,6 +956,10 @@ static iree_status_t iree_hal_hsa_device_assign_topology_info(
     iree_hal_device_t *base_device,
     const iree_hal_device_topology_info_t *topology_info) {
   iree_hal_hsa_device_t *device = iree_hal_hsa_device_cast(base_device);
+  if (!topology_info) {
+    memset(&device->topology_info, 0, sizeof(device->topology_info));
+    return iree_ok_status();
+  }
   memcpy(&device->topology_info, topology_info, sizeof(*topology_info));
   return iree_ok_status();
 }
@@ -975,7 +1027,6 @@ static const iree_hal_device_vtable_t iree_hal_hsa_device_vtable = {
     .topology_info = iree_hal_hsa_device_topology_info,
     .refine_topology_edge = iree_hal_hsa_device_refine_topology_edge,
     .assign_topology_info = iree_hal_hsa_device_assign_topology_info,
-    .query_string = iree_hal_hsa_device_query_string,
     .create_channel = iree_hal_hsa_device_create_channel,
     .create_command_buffer = iree_hal_hsa_device_create_command_buffer,
     .create_event = iree_hal_hsa_device_create_event,
@@ -984,6 +1035,7 @@ static const iree_hal_device_vtable_t iree_hal_hsa_device_vtable = {
     .create_semaphore = iree_hal_hsa_device_create_semaphore,
     .query_semaphore_compatibility =
         iree_hal_hsa_device_query_semaphore_compatibility,
+    .query_queue_pool_backend = iree_hal_hsa_device_query_queue_pool_backend,
     .queue_alloca = iree_hal_hsa_device_queue_alloca,
     .queue_dealloca = iree_hal_hsa_device_queue_dealloca,
     .queue_fill = iree_hal_device_queue_emulated_fill,
@@ -998,6 +1050,4 @@ static const iree_hal_device_vtable_t iree_hal_hsa_device_vtable = {
     .profiling_begin = iree_hal_hsa_device_profiling_begin,
     .profiling_flush = iree_hal_hsa_device_profiling_flush,
     .profiling_end = iree_hal_hsa_device_profiling_end,
-    .transfer_h2d_raw = iree_hal_hsa_device_transfer_h2d_raw,
-    .transfer_d2h_raw = iree_hal_hsa_device_transfer_d2h_raw,
 };

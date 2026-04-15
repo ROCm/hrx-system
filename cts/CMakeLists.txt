@@ -80,6 +80,11 @@ add_test(NAME hrx_cts_cxx_api COMMAND hrx_cts_cxx_api)
 add_executable(hrx_cts_compiler tests/compiler/compiler_test.cpp)
 target_link_libraries(
     hrx_cts_compiler PRIVATE hrx hrx_cts_core Catch2::Catch2)
-add_test(NAME hrx_cts_compiler COMMAND hrx_cts_compiler)
-set_tests_properties(hrx_cts_compiler PROPERTIES
+add_test(NAME hrx_cts_compiler_dylib
+         COMMAND hrx_cts_compiler "[dylib],[diagnostics]")
+set_tests_properties(hrx_cts_compiler_dylib PROPERTIES
+    ENVIRONMENT "HRX_LIBRARY=$<TARGET_FILE:hrx>")
+add_test(NAME hrx_cts_compiler_cli
+         COMMAND hrx_cts_compiler "[cli]")
+set_tests_properties(hrx_cts_compiler_cli PROPERTIES
     ENVIRONMENT "HRX_LIBRARY=$<TARGET_FILE:hrx>")

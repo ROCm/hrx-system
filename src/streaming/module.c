@@ -485,9 +485,10 @@ iree_hal_streaming_module_global(iree_hal_streaming_module_t *module,
     return status;
   }
 
-  // If not found, try the HAL executable's lookup_global interface.
+  // If not found, fail instead of depending on public executable-global lookup.
   if (iree_status_is_not_found(status) && module->executable) {
     iree_status_ignore(status);
+#if 0
     uint64_t device_address = 0;
     iree_device_size_t size = 0;
     iree_hal_queue_affinity_t queue_affinity =
@@ -500,6 +501,10 @@ iree_hal_streaming_module_global(iree_hal_streaming_module_t *module,
       if (out_size)
         *out_size = size;
     }
+#endif
+    status = iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "streaming executable-global lookup is not implemented");
   }
 
   return status;

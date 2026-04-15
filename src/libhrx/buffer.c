@@ -34,6 +34,17 @@ hrx_status_t hrx_buffer_allocate(hrx_stream_t stream, size_t size,
       .access = IREE_HAL_MEMORY_ACCESS_ALL,
       .usage = (iree_hal_buffer_usage_t)usage,
   };
+  const iree_hal_buffer_compatibility_t compatibility =
+      iree_hal_allocator_query_buffer_compatibility(
+          stream->device->allocator.hal_allocator, params,
+          (iree_device_size_t)size, &params,
+          /*out_allocation_size=*/NULL);
+  if (!iree_all_bits_set(compatibility,
+                         IREE_HAL_BUFFER_COMPATIBILITY_ALLOCATABLE)) {
+    iree_allocator_free(iree_allocator_system(), buf);
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "buffer params are not allocatable on this device");
+  }
 
   hrx_status_t flush_status = hrx_stream_flush(stream);
   if (!hrx_status_is_ok(flush_status)) {
@@ -55,11 +66,17 @@ hrx_status_t hrx_buffer_allocate(hrx_stream_t stream, size_t size,
       .payload_values = &signal_value,
   };
 
-  iree_status_t status = iree_hal_device_queue_alloca(
-      stream->device->hal_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_list,
-      signal_list, IREE_HAL_ALLOCATOR_POOL_DEFAULT, params,
-      (iree_device_size_t)size, IREE_HAL_ALLOCA_FLAG_NONE, &buf->hal_buffer);
+  iree_status_t status = iree_ok_status();
+  status = hrx_iree_exact_pool_create(stream->device->allocator.hal_allocator,
+                                      params, &buf->hal_pool);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_device_queue_alloca(
+        stream->device->hal_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_list,
+        signal_list, buf->hal_pool, params, (iree_device_size_t)size,
+        IREE_HAL_ALLOCA_FLAG_NONE, &buf->hal_buffer);
+  }
   if (!iree_status_is_ok(status)) {
+    iree_hal_pool_release(buf->hal_pool);
     iree_allocator_free(iree_allocator_system(), buf);
     return hrx_status_from_iree(status);
   }
@@ -78,12 +95,14 @@ hrx_status_t hrx_buffer_allocate(hrx_stream_t stream, size_t size,
 
 void hrx_buffer_retain(hrx_buffer_t buffer) {
   iree_hal_buffer_retain(buffer->hal_buffer);
+  iree_hal_pool_retain(buffer->hal_pool);
   hrx_device_retain(buffer->device);
   iree_atomic_ref_count_inc(&buffer->ref_count);
 }
 
 void hrx_buffer_release(hrx_buffer_t buffer) {
   iree_hal_buffer_t *hal_buffer = buffer->hal_buffer;
+  iree_hal_pool_t *hal_pool = buffer->hal_pool;
   hrx_device_t device = buffer->device;
   if (iree_atomic_ref_count_dec(&buffer->ref_count) == 1) {
     if (buffer->mapped_ptr) {
@@ -96,6 +115,7 @@ void hrx_buffer_release(hrx_buffer_t buffer) {
     iree_allocator_free(iree_allocator_system(), buffer);
   }
   iree_hal_buffer_release(hal_buffer);
+  iree_hal_pool_release(hal_pool);
   hrx_device_release(device);
 }
 

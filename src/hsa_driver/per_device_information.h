@@ -8,6 +8,7 @@
 #define IREE_HAL_DRIVERS_HSA_PER_DEVICE_INFORMATION_H_
 
 #include "hsa_driver/hsa_headers.h"
+#include "iree/hal/api.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/base/threading/notification.h"
 

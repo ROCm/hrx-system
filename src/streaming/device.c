@@ -102,9 +102,22 @@ iree_status_t iree_hal_streaming_device_get_string_property(
   if (!iree_status_is_ok(status)) {
     return status;
   }
-  return iree_hal_device_query_string(
+  property[0] = '\0';
+  // TODO(#rebase): restore full string-property support once streaming has a
+  // replacement for public device string queries.
+#if 0
+  iree_host_size_t out_string_length = 0;
+  status = iree_hal_device_query_string(
       device->hal_device, iree_make_cstring_view(category),
-      iree_make_cstring_view(key), property_size, property);
+      iree_make_cstring_view(key), property_size - 1, property,
+      &out_string_length);
+  property[out_string_length < (property_size - 1) ? out_string_length
+                                                   : (property_size - 1)] = '\0';
+  return status;
+#endif
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "streaming string property queries are not implemented on the rebased path");
 }
 
 iree_hal_streaming_p2p_link_t *iree_hal_streaming_device_lookup_p2p_link(
