@@ -46,7 +46,7 @@ hrx_status_t hrx_executable_load_data(hrx_device_t device,
     return hrx_status_from_iree(status);
   }
 
-  char inferred_format[16] = {0};
+  char inferred_format[64] = {0};
   iree_host_size_t inferred_size = executable_data_size;
   if (!executable_format || executable_format[0] == '\0') {
     status = iree_hal_executable_cache_infer_format(

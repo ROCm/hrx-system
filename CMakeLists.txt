@@ -39,18 +39,6 @@ endif()
 message(STATUS "hrx-runtime: using IREE at ${HRX_IREE_SOURCE_DIR}")
 
 #===------------------------------------------------------------------------===#
-# HSA runtime (direct link, part of ROCm)
-#===------------------------------------------------------------------------===#
-
-# Help CMake find ROCm package configs in the common default install location.
-if(NOT hsa-runtime64_DIR AND EXISTS "/opt/rocm/lib/cmake/hsa-runtime64")
-  list(PREPEND CMAKE_PREFIX_PATH "/opt/rocm")
-endif()
-
-find_package(hsa-runtime64 REQUIRED)
-message(STATUS "hrx-runtime: found HSA runtime")
-
-#===------------------------------------------------------------------------===#
 # IREE as source dependency (static build, runtime-only)
 #===------------------------------------------------------------------------===#
 
@@ -169,67 +157,6 @@ if(HRX_ENABLE_UBSAN)
   add_compile_options(-fsanitize=undefined -fno-omit-frame-pointer)
   add_link_options(-fsanitize=undefined)
 endif()
-
-#===------------------------------------------------------------------------===#
-# HSA HAL driver (from iree-hal-streaming, plain cmake build)
-#===------------------------------------------------------------------------===#
-
-add_library(hrx_hsa_driver STATIC
-    src/hsa_driver/status_util.c
-    src/hsa_driver/fat_binary.c
-    src/hsa_driver/hsa_allocator.c
-    src/hsa_driver/hsa_buffer.c
-    src/hsa_driver/hsa_driver.c
-    src/hsa_driver/hsa_device.c
-    src/hsa_driver/hsa_semaphore.c
-    src/hsa_driver/native_executable.c
-    src/hsa_driver/nop_executable_cache.c
-    src/hsa_driver/stream_command_buffer.c
-)
-target_include_directories(hrx_hsa_driver PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
-target_link_libraries(hrx_hsa_driver PUBLIC
-    hsa-runtime64::hsa-runtime64
-    iree_base_base
-    iree_base_core_headers
-    iree_base_internal_arena
-    iree_base_internal_atomic_slist
-    iree_base_internal_flatcc_parsing
-    iree_base_threading_threading
-    iree_base_threading_thread
-    iree_async_async
-    iree_async_util_proactor_pool
-    iree_hal_hal
-    iree_hal_utils_collective_batch
-    iree_hal_utils_deferred_command_buffer
-    iree_hal_utils_executable_debug_info
-    iree_hal_utils_executable_header
-    iree_hal_utils_file_transfer
-    iree_hal_utils_files
-    iree_hal_utils_queue_emulation
-    iree_hal_utils_queue_host_call_emulation
-    iree_hal_utils_resource_set
-    iree_schemas_executable_debug_info_c_fbs
-    iree_schemas_hip_executable_def_c_fbs
-)
-set_target_properties(hrx_hsa_driver PROPERTIES POSITION_INDEPENDENT_CODE ON)
-
-# HSA driver registration module.
-add_library(hrx_hsa_registration STATIC
-    src/hsa_driver/registration/driver_module.c
-)
-target_include_directories(hrx_hsa_registration PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
-target_link_libraries(hrx_hsa_registration PUBLIC
-    hrx_hsa_driver
-    iree_base_base
-    iree_base_core_headers
-    iree_base_tooling_flags
-    iree_hal_hal
-)
-set_target_properties(hrx_hsa_registration PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 #===------------------------------------------------------------------------===#
 # libhrx.so

@@ -39,7 +39,7 @@ cmake -S sources/hrx-runtime/cts/package_smoke \
   -DCMAKE_PREFIX_PATH=build/hrx-runtime-install
 cmake --build build/hrx-package-smoke-install
 
-# If libhsa-runtime64.so.1 is not in the default loader path:
+# If ROCm shared libraries are not in the default loader path:
 LD_LIBRARY_PATH=/path/to/rocm/lib ./build/hrx-package-smoke-install/hrx_package_smoke
 ```
 

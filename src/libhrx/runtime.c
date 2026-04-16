@@ -13,17 +13,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "hsa/hsa.h"
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/hal/drivers/local_task/task_driver.h"
 #include "iree/modules/hal/types.h"
 #include "iree/task/api.h"
 
-#ifdef HRX_HAS_HSA_DRIVER
-#include "hsa_driver/api.h"
-#include "hsa_driver/registration/driver_module.h"
-#endif
 #ifdef HRX_HAS_IREE_AMDGPU_DRIVER
 #include "iree/hal/drivers/amdgpu/registration/driver_module.h"
 #endif
@@ -40,9 +35,10 @@ hrx_shared_state_t *hrx_get_shared_state(void) { return &g_shared; }
 hrx_gpu_state_t *hrx_get_gpu_state(void) { return &g_gpu; }
 hrx_cpu_state_t *hrx_get_cpu_state(void) { return &g_cpu; }
 
-static iree_status_t hrx_create_single_device_group(
-    iree_hal_device_t *device, iree_allocator_t host_allocator,
-    iree_hal_device_group_t **out_device_group) {
+static iree_status_t
+hrx_create_single_device_group(iree_hal_device_t *device,
+                               iree_allocator_t host_allocator,
+                               iree_hal_device_group_t **out_device_group) {
   IREE_ASSERT_ARGUMENT(device);
   IREE_ASSERT_ARGUMENT(out_device_group);
   *out_device_group = NULL;
@@ -81,12 +77,6 @@ hrx_status_t hrx_ensure_shared_state(void) {
     return hrx_ok_status();
   }
   g_shared.host_allocator = iree_allocator_system();
-
-  // Initialize HSA runtime (idempotent — safe to call multiple times).
-  hsa_status_t hsa_status = hsa_init();
-  if (hsa_status != HSA_STATUS_SUCCESS) {
-    return hrx_make_status(HRX_STATUS_UNAVAILABLE, "hsa_init() failed");
-  }
 
   iree_status_t status =
       iree_vm_instance_create(IREE_VM_TYPE_CAPACITY_DEFAULT,
@@ -132,7 +122,6 @@ static void hrx_release_shared_state(void) {
     iree_vm_instance_release(g_shared.vm_instance);
     g_shared.vm_instance = NULL;
   }
-  hsa_shut_down();
   g_shared.shared_initialized = false;
 }
 
@@ -156,9 +145,8 @@ static hrx_status_t hrx_create_local_task_device(
 
   iree_task_executor_options_t exec_options;
   iree_task_executor_options_initialize(&exec_options);
-  // The HSA runtime adds TLS that raises the effective minimum pthread stack
-  // size from 16KB to ~48KB. IREE's default 32KB is too small when HSA is
-  // linked. Use 256KB which is safe for ASAN builds too.
+  // GPU runtimes may add TLS that raises the effective minimum pthread stack
+  // size from 16KB. Use 256KB which is safe for ASAN builds too.
   exec_options.worker_stack_size = 256 * 1024;
 
   iree_task_executor_t *executor = NULL;
@@ -241,21 +229,22 @@ static hrx_status_t hrx_create_local_task_device(
   return hrx_ok_status();
 }
 
-static const char* hrx_get_gpu_driver_name(void) {
-  const char* value = getenv("HRX_GPU_DRIVER");
-  return (value && value[0]) ? value : "hsa";
+static const char *hrx_get_gpu_driver_name(void) {
+  const char *value = getenv("HRX_GPU_DRIVER");
+  return (value && value[0]) ? value : "amdgpu";
 }
 
 static bool hrx_gpu_debug_enabled(void) {
-  const char* value = getenv("HRX_GPU_DEBUG");
+  const char *value = getenv("HRX_GPU_DEBUG");
   return value && value[0] && strcmp(value, "0") != 0;
 }
 
-static void hrx_debug_print_iree_status(const char* label,
+static void hrx_debug_print_iree_status(const char *label,
                                         iree_status_t status) {
-  if (!hrx_gpu_debug_enabled() || iree_status_is_ok(status)) return;
+  if (!hrx_gpu_debug_enabled() || iree_status_is_ok(status))
+    return;
   iree_allocator_t allocator = iree_allocator_system();
-  char* message = NULL;
+  char *message = NULL;
   iree_host_size_t message_length = 0;
   if (iree_status_to_string(status, &allocator, &message, &message_length)) {
     fprintf(stderr, "hrx gpu debug: %s: %s\n", label,
@@ -266,29 +255,10 @@ static void hrx_debug_print_iree_status(const char* label,
   }
 }
 
-static hrx_status_t hrx_create_hsa_gpu_driver(iree_allocator_t alloc,
-                                              iree_hal_driver_t** out_driver) {
-  iree_hal_hsa_driver_options_t driver_options;
-  iree_hal_hsa_driver_options_initialize(&driver_options);
-  iree_hal_hsa_device_params_t device_params;
-  iree_hal_hsa_device_params_initialize(&device_params);
-
-  iree_hal_driver_t* driver = NULL;
-  iree_status_t status =
-      iree_hal_hsa_driver_create(iree_make_cstring_view("hsa"), &driver_options,
-                                 &device_params, alloc, &driver);
-  hrx_debug_print_iree_status("hsa driver create", status);
-  if (!iree_status_is_ok(status)) {
-    return hrx_status_from_iree(status);
-  }
-
-  *out_driver = driver;
-  return hrx_ok_status();
-}
-
 #ifdef HRX_HAS_IREE_AMDGPU_DRIVER
-static hrx_status_t hrx_create_iree_amdgpu_driver(
-    iree_allocator_t alloc, iree_hal_driver_t** out_driver) {
+static hrx_status_t
+hrx_create_iree_amdgpu_driver(iree_allocator_t alloc,
+                              iree_hal_driver_t **out_driver) {
   iree_status_t status = iree_hal_amdgpu_driver_module_register(
       iree_hal_driver_registry_default());
   if (iree_status_is_already_exists(status)) {
@@ -300,7 +270,7 @@ static hrx_status_t hrx_create_iree_amdgpu_driver(
     return hrx_status_from_iree(status);
   }
 
-  iree_hal_driver_t* driver = NULL;
+  iree_hal_driver_t *driver = NULL;
   status = iree_hal_driver_registry_try_create(
       iree_hal_driver_registry_default(), iree_make_cstring_view("amdgpu"),
       alloc, &driver);
@@ -315,24 +285,21 @@ static hrx_status_t hrx_create_iree_amdgpu_driver(
 #endif
 
 static hrx_status_t hrx_create_gpu_driver(iree_allocator_t alloc,
-                                          iree_hal_driver_t** out_driver) {
-  const char* driver_name = hrx_get_gpu_driver_name();
-  if (strcmp(driver_name, "hsa") == 0) {
-    return hrx_create_hsa_gpu_driver(alloc, out_driver);
-  }
+                                          iree_hal_driver_t **out_driver) {
+  const char *driver_name = hrx_get_gpu_driver_name();
 #ifdef HRX_HAS_IREE_AMDGPU_DRIVER
   if (strcmp(driver_name, "amdgpu") == 0) {
     return hrx_create_iree_amdgpu_driver(alloc, out_driver);
   }
   char message[128];
   snprintf(message, sizeof(message),
-           "unknown HRX_GPU_DRIVER '%s' (expected 'hsa' or 'amdgpu')",
-           driver_name);
+           "unknown HRX_GPU_DRIVER '%s' (expected 'amdgpu')", driver_name);
   return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, message);
 #else
   char message[96];
   snprintf(message, sizeof(message),
-           "unknown HRX_GPU_DRIVER '%s' (expected 'hsa')", driver_name);
+           "unknown HRX_GPU_DRIVER '%s' (built without AMDGPU support)",
+           driver_name);
   return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, message);
 #endif
 }
@@ -450,9 +417,10 @@ hrx_status_t hrx_gpu_initialize(uint32_t flags) {
                            "GPU accelerator already initialized");
   }
 
-#ifndef HRX_HAS_HSA_DRIVER
-  return hrx_make_status(HRX_STATUS_UNAVAILABLE,
-                         "no GPU driver available (built without HSA support)");
+#ifndef HRX_HAS_IREE_AMDGPU_DRIVER
+  return hrx_make_status(
+      HRX_STATUS_UNAVAILABLE,
+      "no GPU driver available (built without AMDGPU support)");
 #else
   hrx_status_t status = hrx_ensure_shared_state();
   if (!hrx_status_is_ok(status))
@@ -491,22 +459,43 @@ hrx_status_t hrx_gpu_initialize(uint32_t flags) {
             (size_t)device_info_count);
   }
 
-  // Create a HAL device for each GPU (up to HRX_MAX_DEVICES).
-  int count = (int)(device_info_count < HRX_MAX_DEVICES ? device_info_count
-                                                        : HRX_MAX_DEVICES);
+  // IREE AMDGPU reports a pseudo-device with an empty path at ordinal 0 that
+  // represents all visible GPUs as one logical device, then one entry per
+  // physical device. HRX exposes physical devices to callers.
+  int physical_count = 0;
+  for (iree_host_size_t i = 0; i < device_info_count; ++i) {
+    if (device_infos[i].path.size == 0)
+      continue;
+    physical_count++;
+  }
+  if (physical_count == 0) {
+    iree_allocator_free(alloc, device_infos);
+    iree_hal_driver_release(driver);
+    hrx_release_shared_state();
+    return hrx_make_status(HRX_STATUS_UNAVAILABLE,
+                           "no physical GPU devices found");
+  }
+
+  int count =
+      physical_count < HRX_MAX_DEVICES ? physical_count : HRX_MAX_DEVICES;
 
   iree_hal_device_create_params_t create_params =
       iree_hal_device_create_params_default();
   create_params.proactor_pool = g_shared.proactor_pool;
 
-  for (int i = 0; i < count; i++) {
+  int created_count = 0;
+  for (iree_host_size_t info_index = 0;
+       info_index < device_info_count && created_count < count; ++info_index) {
+    if (device_infos[info_index].path.size == 0)
+      continue;
+
     iree_hal_device_t *hal_device = NULL;
     iree_status = iree_hal_driver_create_device_by_ordinal(
-        driver, (iree_host_size_t)i, /*param_count=*/0, /*params=*/NULL,
-        &create_params, alloc, &hal_device);
+        driver, info_index, /*param_count=*/0, /*params=*/NULL, &create_params,
+        alloc, &hal_device);
     hrx_debug_print_iree_status("create device by ordinal", iree_status);
     if (!iree_status_is_ok(iree_status)) {
-      for (int j = 0; j < i; j++) {
+      for (int j = 0; j < created_count; j++) {
         hrx_device_release(&g_gpu.devices[j]);
       }
       iree_allocator_free(alloc, device_infos);
@@ -516,11 +505,11 @@ hrx_status_t hrx_gpu_initialize(uint32_t flags) {
     }
 
     iree_hal_device_group_t *device_group = NULL;
-    iree_status = hrx_create_single_device_group(hal_device, alloc,
-                                                 &device_group);
+    iree_status =
+        hrx_create_single_device_group(hal_device, alloc, &device_group);
     if (!iree_status_is_ok(iree_status)) {
       iree_hal_device_release(hal_device);
-      for (int j = 0; j < i; j++) {
+      for (int j = 0; j < created_count; j++) {
         hrx_device_release(&g_gpu.devices[j]);
       }
       iree_allocator_free(alloc, device_infos);
@@ -529,11 +518,11 @@ hrx_status_t hrx_gpu_initialize(uint32_t flags) {
       return hrx_status_from_iree(iree_status);
     }
 
-    hrx_device_s *dev = &g_gpu.devices[i];
+    hrx_device_s *dev = &g_gpu.devices[created_count];
     memset(dev, 0, sizeof(*dev));
     iree_atomic_ref_count_init(&dev->ref_count);
     dev->type = HRX_ACCELERATOR_GPU;
-    dev->ordinal = i;
+    dev->ordinal = created_count;
     dev->hal_device = hal_device;
     dev->hal_device_group = device_group;
     dev->allocator.hal_allocator = iree_hal_device_allocator(hal_device);
@@ -541,26 +530,27 @@ hrx_status_t hrx_gpu_initialize(uint32_t flags) {
     iree_atomic_ref_count_init(&dev->allocator.ref_count);
     dev->allocator.device = dev;
 
-    iree_host_size_t name_len = device_infos[i].name.size;
+    iree_host_size_t name_len = device_infos[info_index].name.size;
     if (name_len >= sizeof(dev->name))
       name_len = sizeof(dev->name) - 1;
-    memcpy(dev->name, device_infos[i].name.data, name_len);
+    memcpy(dev->name, device_infos[info_index].name.data, name_len);
     dev->name[name_len] = '\0';
 
-    iree_host_size_t arch_len = device_infos[i].name.size;
+    iree_host_size_t arch_len = device_infos[info_index].name.size;
     if (arch_len >= sizeof(dev->architecture)) {
       arch_len = sizeof(dev->architecture) - 1;
     }
-    memcpy(dev->architecture, device_infos[i].name.data, arch_len);
+    memcpy(dev->architecture, device_infos[info_index].name.data, arch_len);
     dev->architecture[arch_len] = '\0';
+    created_count++;
   }
 
   iree_allocator_free(alloc, device_infos);
   g_gpu.driver = driver;
-  g_gpu.device_count = count;
+  g_gpu.device_count = created_count;
   g_gpu.initialized = true;
   return hrx_ok_status();
-#endif // HRX_HAS_HSA_DRIVER
+#endif // HRX_HAS_IREE_AMDGPU_DRIVER
 }
 
 hrx_status_t hrx_gpu_shutdown(void) {
