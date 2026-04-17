@@ -57,9 +57,12 @@ hrx_status_t hrx_queue_fill(hrx_device_t device, hrx_queue_affinity_t affinity,
                             const hrx_semaphore_list_t *signal_semaphores,
                             hrx_buffer_t buffer, size_t offset, size_t size,
                             const void *pattern, size_t pattern_size) {
+  HRX_TRACE_ZONE_BEGIN(z0, "hrx_queue_fill");
+  HRX_TRACE_ZONE_APPEND_BYTES(z0, size);
   if (!device || !buffer || !pattern) {
-    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                           "device, buffer, or pattern is NULL");
+    HRX_RETURN_AND_END_ZONE(
+        z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                            "device, buffer, or pattern is NULL"));
   }
 
   iree_hal_queue_affinity_t queue_affinity =
@@ -72,12 +75,12 @@ hrx_status_t hrx_queue_fill(hrx_device_t device, hrx_queue_affinity_t affinity,
       IREE_HAL_COMMAND_CATEGORY_TRANSFER, queue_affinity,
       /*binding_capacity=*/0, &cb);
   if (!iree_status_is_ok(status))
-    return hrx_status_from_iree(status);
+    HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
 
   status = iree_hal_command_buffer_begin(cb);
   if (!iree_status_is_ok(status)) {
     iree_hal_command_buffer_release(cb);
-    return hrx_status_from_iree(status);
+    HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
   }
 
   iree_hal_buffer_ref_t target_ref = iree_hal_make_buffer_ref(
@@ -86,13 +89,13 @@ hrx_status_t hrx_queue_fill(hrx_device_t device, hrx_queue_affinity_t affinity,
       cb, target_ref, pattern, (iree_host_size_t)pattern_size, /*flags=*/0);
   if (!iree_status_is_ok(status)) {
     iree_hal_command_buffer_release(cb);
-    return hrx_status_from_iree(status);
+    HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
   }
 
   status = iree_hal_command_buffer_end(cb);
   if (!iree_status_is_ok(status)) {
     iree_hal_command_buffer_release(cb);
-    return hrx_status_from_iree(status);
+    HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
   }
 
   // Build semaphore lists.
@@ -111,7 +114,7 @@ hrx_status_t hrx_queue_fill(hrx_device_t device, hrx_queue_affinity_t affinity,
                                          wait_list, sig_list, cb, bt,
                                          /*flags=*/0);
   iree_hal_command_buffer_release(cb);
-  return hrx_status_from_iree(status);
+  HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
 }
 
 hrx_status_t hrx_queue_copy(hrx_device_t device, hrx_queue_affinity_t affinity,
@@ -119,9 +122,11 @@ hrx_status_t hrx_queue_copy(hrx_device_t device, hrx_queue_affinity_t affinity,
                             const hrx_semaphore_list_t *signal_semaphores,
                             hrx_buffer_t src, size_t src_offset,
                             hrx_buffer_t dst, size_t dst_offset, size_t size) {
+  HRX_TRACE_ZONE_BEGIN(z0, "hrx_queue_copy");
+  HRX_TRACE_ZONE_APPEND_BYTES(z0, size);
   if (!device || !src || !dst) {
-    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                           "device, src, or dst is NULL");
+    HRX_RETURN_AND_END_ZONE(z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                                                "device, src, or dst is NULL"));
   }
 
   iree_hal_queue_affinity_t queue_affinity =
@@ -132,12 +137,12 @@ hrx_status_t hrx_queue_copy(hrx_device_t device, hrx_queue_affinity_t affinity,
       device->hal_device, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
       IREE_HAL_COMMAND_CATEGORY_TRANSFER, queue_affinity, 0, &cb);
   if (!iree_status_is_ok(status))
-    return hrx_status_from_iree(status);
+    HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
 
   status = iree_hal_command_buffer_begin(cb);
   if (!iree_status_is_ok(status)) {
     iree_hal_command_buffer_release(cb);
-    return hrx_status_from_iree(status);
+    HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
   }
 
   iree_hal_buffer_ref_t src_ref =
@@ -150,13 +155,13 @@ hrx_status_t hrx_queue_copy(hrx_device_t device, hrx_queue_affinity_t affinity,
       iree_hal_command_buffer_copy_buffer(cb, src_ref, dst_ref, /*flags=*/0);
   if (!iree_status_is_ok(status)) {
     iree_hal_command_buffer_release(cb);
-    return hrx_status_from_iree(status);
+    HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
   }
 
   status = iree_hal_command_buffer_end(cb);
   if (!iree_status_is_ok(status)) {
     iree_hal_command_buffer_release(cb);
-    return hrx_status_from_iree(status);
+    HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
   }
 
   iree_hal_semaphore_t *wait_hal[HRX_MAX_QUEUE_SEMAPHORES];
@@ -174,15 +179,17 @@ hrx_status_t hrx_queue_copy(hrx_device_t device, hrx_queue_affinity_t affinity,
                                          wait_list, sig_list, cb, bt,
                                          /*flags=*/0);
   iree_hal_command_buffer_release(cb);
-  return hrx_status_from_iree(status);
+  HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
 }
 
 hrx_status_t hrx_queue_barrier(hrx_device_t device,
                                hrx_queue_affinity_t affinity,
                                const hrx_semaphore_list_t *wait_semaphores,
                                const hrx_semaphore_list_t *signal_semaphores) {
+  HRX_TRACE_ZONE_BEGIN(z0, "hrx_queue_barrier");
   if (!device) {
-    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "device is NULL");
+    HRX_RETURN_AND_END_ZONE(
+        z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "device is NULL"));
   }
 
   iree_hal_semaphore_t *wait_hal[HRX_MAX_QUEUE_SEMAPHORES];
@@ -198,7 +205,7 @@ hrx_status_t hrx_queue_barrier(hrx_device_t device,
   iree_status_t status = iree_hal_device_queue_barrier(
       device->hal_device, hrx_normalize_queue_affinity(affinity), wait_list,
       sig_list, /*flags=*/0);
-  return hrx_status_from_iree(status);
+  HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
 }
 
 hrx_status_t
@@ -209,11 +216,16 @@ hrx_queue_dispatch(hrx_device_t device, hrx_queue_affinity_t affinity,
                    const hrx_dispatch_config_t *config, const void *constants,
                    size_t constants_size, const hrx_buffer_ref_t *bindings,
                    size_t binding_count, uint32_t flags) {
+  HRX_TRACE_ZONE_BEGIN(z0, "hrx_queue_dispatch");
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, export_ordinal);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, binding_count);
   if (!device || !executable || !config || (binding_count > 0 && !bindings) ||
       (constants_size > 0 && !constants)) {
-    return hrx_make_status(
-        HRX_STATUS_INVALID_ARGUMENT,
-        "device, executable, config, constants, or bindings are invalid");
+    HRX_RETURN_AND_END_ZONE(
+        z0,
+        hrx_make_status(
+            HRX_STATUS_INVALID_ARGUMENT,
+            "device, executable, config, constants, or bindings are invalid"));
   }
 
   iree_hal_buffer_ref_t *hal_bindings = NULL;
@@ -221,14 +233,15 @@ hrx_queue_dispatch(hrx_device_t device, hrx_queue_affinity_t affinity,
     hal_bindings = (iree_hal_buffer_ref_t *)calloc(
         binding_count, sizeof(iree_hal_buffer_ref_t));
     if (!hal_bindings) {
-      return hrx_make_status(HRX_STATUS_OUT_OF_MEMORY,
-                             "failed to allocate dispatch bindings");
+      HRX_RETURN_AND_END_ZONE(
+          z0, hrx_make_status(HRX_STATUS_OUT_OF_MEMORY,
+                              "failed to allocate dispatch bindings"));
     }
     for (size_t i = 0; i < binding_count; ++i) {
       if (!bindings[i].buffer) {
         free(hal_bindings);
-        return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                               "binding buffer is NULL");
+        HRX_RETURN_AND_END_ZONE(z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                                                    "binding buffer is NULL"));
       }
       hal_bindings[i] =
           iree_hal_make_buffer_ref(bindings[i].buffer->hal_buffer,
@@ -274,7 +287,7 @@ hrx_queue_dispatch(hrx_device_t device, hrx_queue_affinity_t affinity,
       (iree_hal_executable_export_ordinal_t)export_ordinal, hal_config,
       hal_constants, hal_binding_list, (iree_hal_dispatch_flags_t)flags);
   free(hal_bindings);
-  return hrx_status_from_iree(status);
+  HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
 }
 
 hrx_status_t hrx_queue_host_call(hrx_device_t device,

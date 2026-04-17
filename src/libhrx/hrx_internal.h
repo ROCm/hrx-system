@@ -7,6 +7,7 @@
 #include "hrx_compiler.h"
 #include "hrx_runtime.h"
 #include "iree/base/api.h"
+#include "iree/base/tracing.h"
 #include "iree/hal/api.h"
 #include "iree/hal/device_group.h"
 #include "iree/hal/local/loaders/registration/init.h"
@@ -22,6 +23,27 @@ extern "C" {
 #define _Static_assert static_assert
 #endif
 #endif
+
+//===----------------------------------------------------------------------===//
+// Tracing helpers
+//===----------------------------------------------------------------------===//
+
+#define HRX_TRACE_ZONE_BEGIN(zone_id, name_literal)                            \
+  IREE_TRACE_ZONE_BEGIN_NAMED(zone_id, name_literal)
+#define HRX_TRACE_ZONE_END(zone_id) IREE_TRACE_ZONE_END(zone_id)
+#define HRX_TRACE_ZONE_APPEND_BYTES(zone_id, byte_count)                       \
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(zone_id, (int64_t)(byte_count))
+#define HRX_RETURN_AND_END_ZONE(zone_id, expr)                                 \
+  do {                                                                         \
+    hrx_status_t hrx_status__ = (expr);                                        \
+    HRX_TRACE_ZONE_END(zone_id);                                               \
+    return hrx_status__;                                                       \
+  } while (0)
+#define HRX_RETURN_VOID_AND_END_ZONE(zone_id)                                  \
+  do {                                                                         \
+    HRX_TRACE_ZONE_END(zone_id);                                               \
+    return;                                                                    \
+  } while (0)
 
 //===----------------------------------------------------------------------===//
 // Enum value compatibility asserts
