@@ -159,9 +159,15 @@ hrx_status_t hrx_stream_synchronize(hrx_stream_t stream) {
   if (!hrx_status_is_ok(status))
     return status;
 
+  return hrx_stream_wait(stream);
+}
+
+hrx_status_t hrx_stream_wait(hrx_stream_t stream) {
+  if (!stream) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "stream is NULL");
+  }
   if (stream->timepoint == 0)
     return hrx_ok_status();
-
   return hrx_semaphore_wait(stream->semaphore, stream->timepoint, UINT64_MAX);
 }
 

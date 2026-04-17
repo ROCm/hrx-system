@@ -69,7 +69,8 @@ hrx_status_t hrx_device_synchronize(hrx_device_t device) {
   if (!device) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "device is NULL");
   }
-  // Wait for all queues to drain.
+  // Deprecated no-op compatibility shim. IREE requires callers to wait on
+  // explicit semaphore payloads; an empty wait list returns immediately.
   iree_hal_semaphore_list_t empty = {0};
   iree_status_t status = iree_hal_device_wait_semaphores(
       device->hal_device, IREE_ASYNC_WAIT_MODE_ALL, empty,

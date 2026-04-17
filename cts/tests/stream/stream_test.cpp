@@ -36,6 +36,13 @@ TEST_CASE_METHOD(HrxTestFixture, "Stream sync with no work", "[stream]") {
   hrx().stream_release(stream);
 }
 
+TEST_CASE_METHOD(HrxTestFixture, "Stream wait with no work", "[stream]") {
+  hrx_stream_t stream = nullptr;
+  REQUIRE_OK(hrx().stream_create(device_, 0, &stream));
+  REQUIRE_OK(hrx().stream_wait(stream));
+  hrx().stream_release(stream);
+}
+
 TEST_CASE_METHOD(HrxTestFixture, "Stream query empty is complete", "[stream]") {
   hrx_stream_t stream = nullptr;
   REQUIRE_OK(hrx().stream_create(device_, 0, &stream));
