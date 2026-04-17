@@ -32,6 +32,17 @@ static hrx_status_t hrx_stream_begin_cb(hrx_stream_t stream) {
   return hrx_ok_status();
 }
 
+static iree_status_t hrx_stream_record_ordering_barrier(hrx_stream_t stream) {
+  iree_hal_memory_barrier_t memory_barrier = {
+      .source_scope = IREE_HAL_MEMORY_ACCESS_ALL,
+      .target_scope = IREE_HAL_MEMORY_ACCESS_ALL,
+  };
+  return iree_hal_command_buffer_execution_barrier(
+      stream->pending_cb, IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+      IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
+      IREE_HAL_EXECUTION_BARRIER_FLAG_NONE, 1, &memory_barrier, 0, NULL);
+}
+
 hrx_status_t hrx_stream_create(hrx_device_t device, uint32_t flags,
                                hrx_stream_t *stream) {
   if (!device || !stream) {
@@ -279,6 +290,11 @@ hrx_status_t hrx_stream_fill_buffer(hrx_stream_t stream, hrx_buffer_t buffer,
     return hrx_status_from_iree(iree_status);
   }
 
+  iree_status = hrx_stream_record_ordering_barrier(stream);
+  if (!iree_status_is_ok(iree_status)) {
+    return hrx_status_from_iree(iree_status);
+  }
+
   stream->has_pending_work = true;
   return hrx_ok_status();
 }
@@ -307,6 +323,11 @@ hrx_status_t hrx_stream_copy_buffer(hrx_stream_t stream, hrx_buffer_t src,
     return hrx_status_from_iree(iree_status);
   }
 
+  iree_status = hrx_stream_record_ordering_barrier(stream);
+  if (!iree_status_is_ok(iree_status)) {
+    return hrx_status_from_iree(iree_status);
+  }
+
   stream->has_pending_work = true;
   return hrx_ok_status();
 }
@@ -330,6 +351,11 @@ hrx_status_t hrx_stream_update_buffer(hrx_stream_t stream,
   iree_status_t iree_status = iree_hal_command_buffer_update_buffer(
       stream->pending_cb, host_data, (iree_host_size_t)0, target_ref,
       /*flags=*/0);
+  if (!iree_status_is_ok(iree_status)) {
+    return hrx_status_from_iree(iree_status);
+  }
+
+  iree_status = hrx_stream_record_ordering_barrier(stream);
   if (!iree_status_is_ok(iree_status)) {
     return hrx_status_from_iree(iree_status);
   }
@@ -403,6 +429,11 @@ hrx_status_t hrx_stream_dispatch(hrx_stream_t stream,
       (iree_hal_executable_export_ordinal_t)export_ordinal, hal_config,
       hal_constants, hal_binding_list, (iree_hal_dispatch_flags_t)flags);
   free(hal_bindings);
+  if (!iree_status_is_ok(iree_status)) {
+    return hrx_status_from_iree(iree_status);
+  }
+
+  iree_status = hrx_stream_record_ordering_barrier(stream);
   if (!iree_status_is_ok(iree_status)) {
     return hrx_status_from_iree(iree_status);
   }

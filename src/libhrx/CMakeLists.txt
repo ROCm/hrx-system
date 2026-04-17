@@ -41,6 +41,7 @@ target_link_libraries(hrx PRIVATE
     iree_async_util_proactor_pool
     iree_hal_drivers_local_task_task_driver
     iree_hal_local_loaders_registration_registration
+    iree_hal_utils_profile_file
     iree_modules_hal_hal
     iree_vm_vm
 )

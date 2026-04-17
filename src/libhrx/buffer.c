@@ -75,7 +75,14 @@ hrx_status_t hrx_buffer_allocate(hrx_stream_t stream, size_t size,
         signal_list, buf->hal_pool, params, (iree_device_size_t)size,
         IREE_HAL_ALLOCA_FLAG_NONE, &buf->hal_buffer);
   }
+  if (iree_status_is_ok(status)) {
+    // The AMDGPU transient allocator resolves committed backing while recording
+    // later command buffer operations, so make the queued alloca visible now.
+    status = iree_hal_semaphore_wait(sem, signal_value, iree_infinite_timeout(),
+                                     /*flags=*/0);
+  }
   if (!iree_status_is_ok(status)) {
+    iree_hal_buffer_release(buf->hal_buffer);
     iree_hal_pool_release(buf->hal_pool);
     iree_allocator_free(iree_allocator_system(), buf);
     return hrx_status_from_iree(status);

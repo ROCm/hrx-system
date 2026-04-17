@@ -16,6 +16,8 @@
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/hal/drivers/local_task/task_driver.h"
+#include "iree/hal/utils/profile_file.h"
+#include "iree/io/file_handle.h"
 #include "iree/modules/hal/types.h"
 #include "iree/task/api.h"
 
@@ -237,6 +239,106 @@ static const char *hrx_get_gpu_driver_name(void) {
 static bool hrx_gpu_debug_enabled(void) {
   const char *value = getenv("HRX_GPU_DEBUG");
   return value && value[0] && strcmp(value, "0") != 0;
+}
+
+static const char *hrx_get_profile_file_path(void) {
+  const char *value = getenv("HRX_PROFILE_FILE");
+  return (value && value[0]) ? value : NULL;
+}
+
+static iree_status_t
+hrx_profile_file_sink_create(const char *file_path,
+                             iree_allocator_t host_allocator,
+                             iree_hal_profile_sink_t **out_sink) {
+  IREE_ASSERT_ARGUMENT(out_sink);
+  *out_sink = NULL;
+  if (!file_path || !file_path[0]) {
+    return iree_ok_status();
+  }
+
+  iree_io_file_handle_t *file_handle = NULL;
+  iree_status_t status = iree_io_file_handle_create(
+      IREE_IO_FILE_MODE_WRITE | IREE_IO_FILE_MODE_SEQUENTIAL_SCAN |
+          IREE_IO_FILE_MODE_SHARE_READ,
+      iree_make_cstring_view(file_path), /*initial_size=*/0, host_allocator,
+      &file_handle);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_profile_file_sink_create(file_handle, host_allocator,
+                                               out_sink);
+  }
+  iree_io_file_handle_release(file_handle);
+  return status;
+}
+
+static iree_status_t
+hrx_get_profile_mode(iree_hal_device_profiling_mode_t *out_mode) {
+  IREE_ASSERT_ARGUMENT(out_mode);
+
+  const char *value = getenv("HRX_PROFILE_MODE");
+  if (!value || !value[0] || strcmp(value, "queue") == 0) {
+    *out_mode = IREE_HAL_DEVICE_PROFILING_MODE_QUEUE_OPERATIONS;
+  } else if (strcmp(value, "dispatch") == 0) {
+    *out_mode = IREE_HAL_DEVICE_PROFILING_MODE_DISPATCH_COUNTERS;
+  } else if (strcmp(value, "executable") == 0) {
+    *out_mode = IREE_HAL_DEVICE_PROFILING_MODE_EXECUTABLE_COUNTERS;
+  } else if (strcmp(value, "all") == 0) {
+    *out_mode = IREE_HAL_DEVICE_PROFILING_MODE_QUEUE_OPERATIONS |
+                IREE_HAL_DEVICE_PROFILING_MODE_DISPATCH_COUNTERS |
+                IREE_HAL_DEVICE_PROFILING_MODE_EXECUTABLE_COUNTERS;
+  } else {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported HRX_PROFILE_MODE '%s'", value);
+  }
+
+  return iree_ok_status();
+}
+
+static iree_status_t hrx_device_profile_begin(hrx_device_s *device,
+                                              iree_hal_profile_sink_t *sink) {
+  if (!device || !sink) {
+    return iree_ok_status();
+  }
+
+  iree_hal_device_profiling_options_t options = {0};
+  IREE_RETURN_IF_ERROR(hrx_get_profile_mode(&options.mode));
+  options.sink = sink;
+  iree_status_t status =
+      iree_hal_device_profiling_begin(device->hal_device, &options);
+  if (iree_status_is_ok(status)) {
+    device->profiling_active = true;
+  }
+  return status;
+}
+
+static iree_status_t hrx_device_profile_end(hrx_device_s *device) {
+  if (!device || !device->profiling_active || !device->hal_device) {
+    return iree_ok_status();
+  }
+
+  iree_hal_semaphore_list_t empty = {0};
+  iree_status_t status = iree_hal_device_wait_semaphores(
+      device->hal_device, IREE_ASYNC_WAIT_MODE_ALL, empty,
+      iree_infinite_timeout(), /*flags=*/0);
+  status = iree_status_join(status,
+                            iree_hal_device_profiling_end(device->hal_device));
+  device->profiling_active = false;
+  return status;
+}
+
+static iree_status_t hrx_gpu_end_all_profiling(void) {
+  iree_status_t status = iree_ok_status();
+  for (int i = 0; i < g_gpu.device_count; ++i) {
+    status =
+        iree_status_join(status, hrx_device_profile_end(&g_gpu.devices[i]));
+  }
+  return status;
+}
+
+static void hrx_gpu_release_created_devices(int count) {
+  for (int i = 0; i < count; ++i) {
+    iree_status_ignore(hrx_device_profile_end(&g_gpu.devices[i]));
+    hrx_device_release(&g_gpu.devices[i]);
+  }
 }
 
 static void hrx_debug_print_iree_status(const char *label,
@@ -483,6 +585,20 @@ hrx_status_t hrx_gpu_initialize(uint32_t flags) {
       iree_hal_device_create_params_default();
   create_params.proactor_pool = g_shared.proactor_pool;
 
+  iree_hal_profile_sink_t *profile_sink = NULL;
+  const char *profile_file_path = hrx_get_profile_file_path();
+  if (profile_file_path) {
+    iree_status =
+        hrx_profile_file_sink_create(profile_file_path, alloc, &profile_sink);
+    hrx_debug_print_iree_status("create profile file sink", iree_status);
+    if (!iree_status_is_ok(iree_status)) {
+      iree_allocator_free(alloc, device_infos);
+      iree_hal_driver_release(driver);
+      hrx_release_shared_state();
+      return hrx_status_from_iree(iree_status);
+    }
+  }
+
   int created_count = 0;
   for (iree_host_size_t info_index = 0;
        info_index < device_info_count && created_count < count; ++info_index) {
@@ -495,9 +611,8 @@ hrx_status_t hrx_gpu_initialize(uint32_t flags) {
         alloc, &hal_device);
     hrx_debug_print_iree_status("create device by ordinal", iree_status);
     if (!iree_status_is_ok(iree_status)) {
-      for (int j = 0; j < created_count; j++) {
-        hrx_device_release(&g_gpu.devices[j]);
-      }
+      hrx_gpu_release_created_devices(created_count);
+      iree_hal_profile_sink_release(profile_sink);
       iree_allocator_free(alloc, device_infos);
       iree_hal_driver_release(driver);
       hrx_release_shared_state();
@@ -509,9 +624,8 @@ hrx_status_t hrx_gpu_initialize(uint32_t flags) {
         hrx_create_single_device_group(hal_device, alloc, &device_group);
     if (!iree_status_is_ok(iree_status)) {
       iree_hal_device_release(hal_device);
-      for (int j = 0; j < created_count; j++) {
-        hrx_device_release(&g_gpu.devices[j]);
-      }
+      hrx_gpu_release_created_devices(created_count);
+      iree_hal_profile_sink_release(profile_sink);
       iree_allocator_free(alloc, device_infos);
       iree_hal_driver_release(driver);
       hrx_release_shared_state();
@@ -542,9 +656,23 @@ hrx_status_t hrx_gpu_initialize(uint32_t flags) {
     }
     memcpy(dev->architecture, device_infos[info_index].name.data, arch_len);
     dev->architecture[arch_len] = '\0';
+
+    iree_status = hrx_device_profile_begin(dev, profile_sink);
+    hrx_debug_print_iree_status("begin device profiling", iree_status);
+    if (!iree_status_is_ok(iree_status)) {
+      hrx_device_release(dev);
+      hrx_gpu_release_created_devices(created_count);
+      iree_hal_profile_sink_release(profile_sink);
+      iree_allocator_free(alloc, device_infos);
+      iree_hal_driver_release(driver);
+      hrx_release_shared_state();
+      return hrx_status_from_iree(iree_status);
+    }
+
     created_count++;
   }
 
+  iree_hal_profile_sink_release(profile_sink);
   iree_allocator_free(alloc, device_infos);
   g_gpu.driver = driver;
   g_gpu.device_count = created_count;
@@ -559,6 +687,7 @@ hrx_status_t hrx_gpu_shutdown(void) {
                            "GPU accelerator not initialized");
   }
 
+  iree_status_t profiling_status = hrx_gpu_end_all_profiling();
   for (int i = 0; i < g_gpu.device_count; i++) {
     hrx_device_release(&g_gpu.devices[i]);
   }
@@ -570,6 +699,9 @@ hrx_status_t hrx_gpu_shutdown(void) {
   g_gpu.device_count = 0;
   g_gpu.initialized = false;
   hrx_release_shared_state();
+  if (!iree_status_is_ok(profiling_status)) {
+    return hrx_status_from_iree(profiling_status);
+  }
   return hrx_ok_status();
 }
 

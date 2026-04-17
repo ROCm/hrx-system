@@ -9,8 +9,8 @@
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
 #include "iree/hal/device_group.h"
-#include "iree/hal/pool.h"
 #include "iree/hal/local/loaders/registration/init.h"
+#include "iree/hal/pool.h"
 #include "iree/modules/hal/module.h"
 #include "iree/modules/hal/types.h"
 #include "iree/vm/api.h"
@@ -175,6 +175,7 @@ typedef struct hrx_device_s {
   int ordinal;
   iree_hal_device_t *hal_device;
   iree_hal_device_group_t *hal_device_group;
+  bool profiling_active;
   hrx_allocator_s allocator; // Inline, owned by device.
   char name[128];
   char architecture[64];
