@@ -94,6 +94,7 @@ add_hrx_cts_test(queue_ops SOURCES tests/queue_ops/queue_ops_test.cpp)
 add_hrx_cts_test(status SOURCES tests/status/status_test.cpp)
 add_hrx_cts_test(refcount SOURCES tests/refcount/refcount_test.cpp)
 add_hrx_cts_test(virtual_memory SOURCES tests/virtual_memory/virtual_memory_test.cpp)
+add_hrx_cts_test(mem_pool SOURCES tests/mem_pool/mem_pool_test.cpp)
 add_hrx_cts_test(vm SOURCES tests/vm/vm_test.cpp)
 
 add_executable(hrx_cts_cxx_api tests/cxx_api/cxx_api_test.cpp)
