@@ -164,6 +164,11 @@ typedef struct hrx_buffer_view_s *hrx_buffer_view_t;
 typedef struct hrx_executable_s *hrx_executable_t;
 typedef struct hrx_compiler_output_s *hrx_compiler_output_t;
 typedef struct hrx_physical_memory_s *hrx_physical_memory_t;
+typedef struct hrx_event_s *hrx_event_t;
+typedef struct hrx_mem_pool_s *hrx_mem_pool_t;
+typedef struct hrx_graph_s *hrx_graph_t;
+typedef struct hrx_graph_exec_s *hrx_graph_exec_t;
+typedef struct hrx_graph_node_s *hrx_graph_node_t;
 
 //===----------------------------------------------------------------------===//
 // Enums and flags
@@ -726,6 +731,198 @@ typedef uint64_t hrx_memory_protection_t;
 HRX_API hrx_status_t hrx_allocator_virtual_memory_protect(
     hrx_allocator_t allocator, hrx_buffer_t virtual_buffer,
     size_t virtual_offset, size_t size, hrx_memory_protection_t protection);
+
+//===----------------------------------------------------------------------===//
+// Events (stream synchronization points)
+//===----------------------------------------------------------------------===//
+
+typedef enum hrx_event_flags_t {
+  HRX_EVENT_FLAG_NONE = 0,
+  HRX_EVENT_FLAG_BLOCKING_SYNC = 1 << 0,
+  HRX_EVENT_FLAG_DISABLE_TIMING = 1 << 1,
+  HRX_EVENT_FLAG_INTERPROCESS = 1 << 2,
+} hrx_event_flags_t;
+
+HRX_API hrx_status_t hrx_event_create(hrx_device_t device,
+                                      hrx_event_flags_t flags,
+                                      hrx_event_t *out_event);
+HRX_API hrx_status_t hrx_event_retain(hrx_event_t event);
+HRX_API hrx_status_t hrx_event_release(hrx_event_t event);
+HRX_API hrx_status_t hrx_event_record(hrx_event_t event, hrx_stream_t stream);
+HRX_API hrx_status_t hrx_event_query(hrx_event_t event, bool *complete);
+HRX_API hrx_status_t hrx_event_synchronize(hrx_event_t event);
+HRX_API hrx_status_t hrx_event_elapsed_time(hrx_event_t start, hrx_event_t stop,
+                                            float *ms);
+HRX_API hrx_status_t hrx_stream_wait_event(hrx_stream_t stream,
+                                           hrx_event_t event);
+
+//===----------------------------------------------------------------------===//
+// Device memory/peer info
+//===----------------------------------------------------------------------===//
+
+HRX_API hrx_status_t hrx_device_memory_info(hrx_device_t device,
+                                            size_t *free_bytes,
+                                            size_t *total_bytes);
+HRX_API hrx_status_t hrx_device_can_access_peer(hrx_device_t device_a,
+                                                hrx_device_t device_b,
+                                                bool *can_access);
+
+//===----------------------------------------------------------------------===//
+// Host memory registration / buffer lookup
+//===----------------------------------------------------------------------===//
+
+HRX_API hrx_status_t hrx_host_memory_register(hrx_device_t device,
+                                              void *host_ptr, size_t size,
+                                              uint32_t flags);
+HRX_API hrx_status_t hrx_host_memory_unregister(hrx_device_t device,
+                                                void *host_ptr);
+HRX_API hrx_status_t hrx_buffer_lookup(hrx_device_t device,
+                                       const void *device_ptr,
+                                       hrx_buffer_t *buffer, size_t *offset);
+
+//===----------------------------------------------------------------------===//
+// Async host/device transfers
+//===----------------------------------------------------------------------===//
+
+HRX_API hrx_status_t hrx_stream_copy_h2d(hrx_stream_t stream,
+                                         const void *host_src, hrx_buffer_t dst,
+                                         size_t dst_offset, size_t size);
+HRX_API hrx_status_t hrx_stream_copy_d2h(hrx_stream_t stream, hrx_buffer_t src,
+                                         size_t src_offset, void *host_dst,
+                                         size_t size);
+
+//===----------------------------------------------------------------------===//
+// Memory pools (stream-ordered memory management)
+//===----------------------------------------------------------------------===//
+
+typedef enum hrx_mem_pool_attr_t {
+  HRX_MEM_POOL_ATTR_REUSE_FOLLOW_EVENT_DEPENDENCIES = 0,
+  HRX_MEM_POOL_ATTR_REUSE_ALLOW_INTERNAL_DEPENDENCIES = 1,
+  HRX_MEM_POOL_ATTR_REUSE_ALLOW_OPPORTUNISTIC = 2,
+  HRX_MEM_POOL_ATTR_RELEASE_THRESHOLD = 3,
+  HRX_MEM_POOL_ATTR_RESERVED_MEM_CURRENT = 4,
+  HRX_MEM_POOL_ATTR_RESERVED_MEM_HIGH = 5,
+  HRX_MEM_POOL_ATTR_USED_MEM_CURRENT = 6,
+  HRX_MEM_POOL_ATTR_USED_MEM_HIGH = 7,
+} hrx_mem_pool_attr_t;
+
+typedef struct hrx_mem_pool_props_t {
+  uint32_t alloc_handle_type;
+  uint32_t location_type;
+  int location_id;
+} hrx_mem_pool_props_t;
+
+HRX_API hrx_status_t hrx_mem_pool_create(hrx_device_t device,
+                                         const hrx_mem_pool_props_t *props,
+                                         hrx_mem_pool_t *out_pool);
+HRX_API void hrx_mem_pool_retain(hrx_mem_pool_t pool);
+HRX_API void hrx_mem_pool_release(hrx_mem_pool_t pool);
+HRX_API hrx_status_t hrx_mem_pool_get_attribute(hrx_mem_pool_t pool,
+                                                hrx_mem_pool_attr_t attr,
+                                                uint64_t *out_value);
+HRX_API hrx_status_t hrx_mem_pool_set_attribute(hrx_mem_pool_t pool,
+                                                hrx_mem_pool_attr_t attr,
+                                                uint64_t value);
+HRX_API hrx_status_t hrx_mem_pool_trim(hrx_mem_pool_t pool,
+                                       size_t min_bytes_to_keep);
+
+//===----------------------------------------------------------------------===//
+// Graphs (CUDA/HIP-style execution graphs)
+//===----------------------------------------------------------------------===//
+
+typedef enum hrx_graph_node_type_t {
+  HRX_GRAPH_NODE_EMPTY = 0,
+  HRX_GRAPH_NODE_KERNEL = 1,
+  HRX_GRAPH_NODE_MEMCPY = 2,
+  HRX_GRAPH_NODE_MEMSET = 3,
+  HRX_GRAPH_NODE_HOST_CALL = 4,
+  HRX_GRAPH_NODE_GRAPH = 5,
+} hrx_graph_node_type_t;
+
+typedef struct hrx_graph_kernel_node_attrs_t {
+  hrx_executable_t executable;
+  uint32_t export_ordinal;
+  hrx_dispatch_config_t config;
+  const void *constants;
+  size_t constants_size;
+  const hrx_buffer_ref_t *bindings;
+  size_t binding_count;
+  uint32_t flags;
+} hrx_graph_kernel_node_attrs_t;
+
+typedef struct hrx_graph_memcpy_node_attrs_t {
+  void *dst;
+  const void *src;
+  size_t size;
+  uint32_t kind;
+} hrx_graph_memcpy_node_attrs_t;
+
+typedef struct hrx_graph_memset_node_attrs_t {
+  void *dst;
+  uint32_t value;
+  size_t count;
+} hrx_graph_memset_node_attrs_t;
+
+typedef struct hrx_graph_host_call_node_attrs_t {
+  hrx_host_call_fn_t fn;
+  void *user_data;
+} hrx_graph_host_call_node_attrs_t;
+
+HRX_API hrx_status_t hrx_graph_create(hrx_device_t device, uint32_t flags,
+                                      hrx_graph_t *out_graph);
+HRX_API void hrx_graph_retain(hrx_graph_t graph);
+HRX_API void hrx_graph_release(hrx_graph_t graph);
+
+HRX_API hrx_status_t hrx_graph_add_empty_node(hrx_graph_t graph,
+                                              const hrx_graph_node_t *deps,
+                                              size_t dep_count,
+                                              hrx_graph_node_t *out_node);
+HRX_API hrx_status_t hrx_graph_add_kernel_node(
+    hrx_graph_t graph, const hrx_graph_node_t *deps, size_t dep_count,
+    const hrx_graph_kernel_node_attrs_t *attrs, hrx_graph_node_t *out_node);
+HRX_API hrx_status_t hrx_graph_add_memcpy_node(
+    hrx_graph_t graph, const hrx_graph_node_t *deps, size_t dep_count,
+    const hrx_graph_memcpy_node_attrs_t *attrs, hrx_graph_node_t *out_node);
+HRX_API hrx_status_t hrx_graph_add_memset_node(
+    hrx_graph_t graph, const hrx_graph_node_t *deps, size_t dep_count,
+    const hrx_graph_memset_node_attrs_t *attrs, hrx_graph_node_t *out_node);
+HRX_API hrx_status_t hrx_graph_add_host_call_node(
+    hrx_graph_t graph, const hrx_graph_node_t *deps, size_t dep_count,
+    const hrx_graph_host_call_node_attrs_t *attrs, hrx_graph_node_t *out_node);
+HRX_API hrx_status_t hrx_graph_add_dependencies(
+    hrx_graph_t graph, const hrx_graph_node_t *from_nodes,
+    const hrx_graph_node_t *to_nodes, size_t count);
+HRX_API hrx_status_t hrx_graph_size(hrx_graph_t graph, size_t *out_count);
+HRX_API hrx_status_t hrx_graph_get_nodes(hrx_graph_t graph,
+                                         hrx_graph_node_t *nodes,
+                                         size_t *inout_count);
+HRX_API hrx_status_t hrx_graph_instantiate(hrx_graph_t graph, uint32_t flags,
+                                           hrx_graph_exec_t *out_exec);
+HRX_API void hrx_graph_exec_retain(hrx_graph_exec_t exec);
+HRX_API void hrx_graph_exec_release(hrx_graph_exec_t exec);
+HRX_API hrx_status_t hrx_graph_exec_launch(hrx_graph_exec_t exec,
+                                           hrx_stream_t stream);
+HRX_API hrx_status_t hrx_graph_exec_update(hrx_graph_exec_t exec,
+                                           hrx_graph_t graph);
+
+typedef enum hrx_capture_mode_t {
+  HRX_CAPTURE_MODE_GLOBAL = 0,
+  HRX_CAPTURE_MODE_THREAD_LOCAL = 1,
+  HRX_CAPTURE_MODE_RELAXED = 2,
+} hrx_capture_mode_t;
+
+typedef enum hrx_capture_status_t {
+  HRX_CAPTURE_STATUS_NONE = 0,
+  HRX_CAPTURE_STATUS_ACTIVE = 1,
+  HRX_CAPTURE_STATUS_INVALIDATED = 2,
+} hrx_capture_status_t;
+
+HRX_API hrx_status_t hrx_stream_begin_capture(hrx_stream_t stream,
+                                              hrx_capture_mode_t mode);
+HRX_API hrx_status_t hrx_stream_end_capture(hrx_stream_t stream,
+                                            hrx_graph_t *out_graph);
+HRX_API hrx_capture_status_t hrx_stream_capture_status(hrx_stream_t stream);
+HRX_API bool hrx_stream_is_capturing(hrx_stream_t stream);
 
 #ifdef __cplusplus
 }

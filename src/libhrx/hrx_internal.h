@@ -4,14 +4,17 @@
 #ifndef HRX_INTERNAL_H_
 #define HRX_INTERNAL_H_
 
+#include "buffer_table.h"
 #include "hrx_compiler.h"
 #include "hrx_runtime.h"
 #include "iree/base/api.h"
+#include "iree/base/internal/arena.h"
 #include "iree/base/tracing.h"
 #include "iree/hal/api.h"
 #include "iree/hal/device_group.h"
 #include "iree/hal/local/loaders/registration/init.h"
 #include "iree/hal/pool.h"
+#include "iree/hal/utils/resource_set.h"
 #include "iree/modules/hal/module.h"
 #include "iree/modules/hal/types.h"
 #include "iree/vm/api.h"
@@ -43,6 +46,27 @@ extern "C" {
   do {                                                                         \
     HRX_TRACE_ZONE_END(zone_id);                                               \
     return;                                                                    \
+  } while (0)
+
+// Internal helpers for libhrx code that uses IREE primitives to implement
+// functions returning hrx_status_t. iree_status_t and hrx_status_t have
+// different storage representations so results of IREE calls must be
+// converted at the return boundary.
+#define HRX_RETURN_IF_IREE_ERROR(...)                                          \
+  do {                                                                         \
+    iree_status_t hrx__iree_status = (__VA_ARGS__);                            \
+    if (IREE_UNLIKELY(!iree_status_is_ok(hrx__iree_status))) {                 \
+      return hrx_status_from_iree(hrx__iree_status);                           \
+    }                                                                          \
+  } while (0)
+
+#define HRX_RETURN_AND_END_ZONE_IF_IREE_ERROR(zone_id, ...)                    \
+  do {                                                                         \
+    iree_status_t hrx__iree_status = (__VA_ARGS__);                            \
+    if (IREE_UNLIKELY(!iree_status_is_ok(hrx__iree_status))) {                 \
+      IREE_TRACE_ZONE_END(zone_id);                                            \
+      return hrx_status_from_iree(hrx__iree_status);                           \
+    }                                                                          \
   } while (0)
 
 //===----------------------------------------------------------------------===//
@@ -199,6 +223,8 @@ typedef struct hrx_device_s {
   iree_hal_device_group_t *hal_device_group;
   bool profiling_active;
   hrx_allocator_s allocator; // Inline, owned by device.
+  hrx_buffer_table_t buffer_table;    // Device-pointer-to-buffer lookup.
+  iree_arena_block_pool_t block_pool; // Shared arena pool for graphs.
   char name[128];
   char architecture[64];
 } hrx_device_s;
@@ -209,6 +235,17 @@ typedef struct hrx_semaphore_s {
   iree_hal_semaphore_t *hal_semaphore;
   hrx_device_t device;
 } hrx_semaphore_s;
+
+// Event: marks a point in a stream's timeline for cross-stream sync.
+typedef struct hrx_event_s {
+  iree_atomic_ref_count_t ref_count;
+  hrx_event_flags_t flags;
+  hrx_semaphore_t semaphore;  // Dedicated semaphore for this event.
+  uint64_t signal_value;      // Timeline value the semaphore must reach.
+  hrx_stream_t recording_stream;
+  hrx_device_t device;
+  int64_t record_time_ns;  // Host-side timestamp at record time.
+} hrx_event_s;
 
 // Stream with pending command buffer.
 typedef struct hrx_stream_s {
@@ -221,6 +258,174 @@ typedef struct hrx_stream_s {
   uint32_t flags;
 } hrx_stream_s;
 
+//===----------------------------------------------------------------------===//
+// Graph internals
+//===----------------------------------------------------------------------===//
+
+enum hrx_graph_node_type_internal_e {
+  HRX_GRAPH_NODE_TYPE_RECORDABLE_BIT = 1u << 7,
+  HRX_GRAPH_NODE_TYPE_INTERNAL_EMPTY = 0,
+  HRX_GRAPH_NODE_TYPE_INTERNAL_KERNEL =
+      1 | HRX_GRAPH_NODE_TYPE_RECORDABLE_BIT,
+  HRX_GRAPH_NODE_TYPE_INTERNAL_MEMCPY =
+      2 | HRX_GRAPH_NODE_TYPE_RECORDABLE_BIT,
+  HRX_GRAPH_NODE_TYPE_INTERNAL_MEMSET =
+      3 | HRX_GRAPH_NODE_TYPE_RECORDABLE_BIT,
+  HRX_GRAPH_NODE_TYPE_INTERNAL_HOST_CALL = 4,
+  HRX_GRAPH_NODE_TYPE_INTERNAL_GRAPH = 5,
+};
+typedef uint8_t hrx_graph_node_type_internal_t;
+
+static inline bool hrx_graph_node_is_recordable(
+    hrx_graph_node_type_internal_t type) {
+  return (type & HRX_GRAPH_NODE_TYPE_RECORDABLE_BIT) != 0;
+}
+
+typedef struct hrx_graph_kernel_node_attrs_internal_t {
+  iree_hal_executable_t *executable;
+  uint32_t export_ordinal;
+  uint32_t grid_dim[3];
+  uint32_t block_dim[3];
+  uint32_t shared_memory_bytes;
+  iree_const_byte_span_t constants;
+  iree_hal_buffer_ref_list_t bindings;
+} hrx_graph_kernel_node_attrs_internal_t;
+
+typedef struct hrx_graph_memcpy_node_attrs_internal_t {
+  iree_hal_buffer_ref_t dst_ref;
+  iree_hal_buffer_ref_t src_ref;
+  iree_device_size_t size;
+  iree_hal_copy_flags_t flags;
+} hrx_graph_memcpy_node_attrs_internal_t;
+
+typedef struct hrx_graph_memset_node_attrs_internal_t {
+  iree_hal_buffer_ref_t dst_ref;
+  uint32_t pattern;
+  uint8_t pattern_size;
+  iree_device_size_t count;
+  iree_hal_fill_flags_t flags;
+} hrx_graph_memset_node_attrs_internal_t;
+
+typedef struct hrx_graph_host_call_node_attrs_internal_t {
+  void (*fn)(void *user_data);
+  void *user_data;
+} hrx_graph_host_call_node_attrs_internal_t;
+
+typedef struct hrx_graph_node_s {
+  hrx_graph_node_type_internal_t type;
+  uint32_t node_index;
+  uint32_t dependency_count;
+  union {
+    hrx_graph_kernel_node_attrs_internal_t kernel;
+    hrx_graph_memcpy_node_attrs_internal_t memcpy;
+    hrx_graph_memset_node_attrs_internal_t memset;
+    hrx_graph_host_call_node_attrs_internal_t host;
+  } attrs;
+  struct hrx_graph_node_s *dependencies[];
+} hrx_graph_node_s;
+
+typedef struct hrx_graph_node_block_t {
+  struct hrx_graph_node_block_t *next;
+  iree_host_size_t capacity;
+  iree_host_size_t count;
+  hrx_graph_node_s *nodes[];
+} hrx_graph_node_block_t;
+
+typedef struct hrx_graph_edge_t {
+  struct hrx_graph_edge_t *next;
+  hrx_graph_node_s *from;
+  hrx_graph_node_s *to;
+} hrx_graph_edge_t;
+
+typedef struct hrx_graph_s {
+  iree_atomic_ref_count_t ref_count;
+  hrx_device_t device;
+
+  iree_arena_allocator_t arena;
+  iree_allocator_t arena_allocator;
+
+  hrx_graph_node_block_t *node_blocks;
+  hrx_graph_node_block_t *current_node_block;
+  iree_host_size_t node_count;
+
+  hrx_graph_node_block_t *root_blocks;
+  hrx_graph_node_block_t *current_root_block;
+  iree_host_size_t root_count;
+
+  hrx_graph_edge_t *additional_edges;
+  iree_host_size_t additional_edge_count;
+
+  uint32_t flags;
+  iree_slim_mutex_t mutex;
+} hrx_graph_s;
+
+typedef struct hrx_graph_sort_node_t {
+  hrx_graph_node_s *node;
+  uint32_t original_index;
+  uint32_t sorted_index;
+  uint32_t max_dependency_index;
+  uint32_t partition_id;
+  uint16_t in_degree;
+  uint8_t type;
+  uint8_t stream_id;
+} hrx_graph_sort_node_t;
+
+enum hrx_graph_partition_type_e {
+  HRX_GRAPH_PARTITION_TYPE_RECORDABLE = 0,
+  HRX_GRAPH_PARTITION_TYPE_HOST_CALL,
+  HRX_GRAPH_PARTITION_TYPE_EMPTY,
+};
+typedef uint8_t hrx_graph_partition_type_t;
+
+typedef struct hrx_graph_partition_t {
+  uint32_t start_index;
+  uint32_t count;
+  hrx_graph_partition_type_t type;
+  uint8_t stream_count;
+} hrx_graph_partition_t;
+
+typedef struct hrx_graph_schedule_t {
+  hrx_graph_sort_node_t *sorted_nodes;
+  uint32_t *node_index_map;
+  hrx_graph_partition_t *partitions;
+  iree_host_size_t partition_count;
+  iree_host_size_t block_count;
+} hrx_graph_schedule_t;
+
+typedef struct hrx_graph_exec_s {
+  iree_atomic_ref_count_t ref_count;
+  hrx_device_t device;
+  hrx_graph_t graph;  // retained
+
+  iree_arena_allocator_t arena_allocator;
+
+  struct hrx_graph_exec_block_t **blocks;
+  uint32_t block_count;
+
+  uint32_t semaphore_count;
+  iree_hal_semaphore_t **semaphores;
+  uint64_t *semaphore_base_values;
+
+  iree_hal_resource_set_t *resource_set;
+  uint32_t flags;
+  iree_slim_mutex_t mutex;
+} hrx_graph_exec_s;
+
+// Internal graph scheduling API (implemented in graph_analysis.c).
+iree_status_t hrx_graph_schedule_nodes(
+    hrx_graph_node_block_t *node_blocks, iree_host_size_t node_count,
+    hrx_graph_edge_t *additional_edges, iree_arena_allocator_t *arena,
+    hrx_graph_schedule_t *out_schedule);
+
+// Internal graph exec APIs (implemented in graph_exec.c).
+iree_status_t hrx_graph_exec_instantiate_locked(
+    hrx_graph_exec_t exec, hrx_graph_node_block_t *node_blocks,
+    iree_host_size_t node_count);
+
+//===----------------------------------------------------------------------===//
+// Buffer
+//===----------------------------------------------------------------------===//
+
 // Buffer allocation.
 typedef struct hrx_buffer_s {
   iree_atomic_ref_count_t ref_count;
@@ -232,6 +437,31 @@ typedef struct hrx_buffer_s {
   void *mapped_ptr;
   iree_hal_buffer_mapping_t mapping;
 } hrx_buffer_s;
+
+// Memory pool (stream-ordered memory management).
+typedef struct hrx_mem_pool_s {
+  iree_atomic_ref_count_t ref_count;
+  hrx_device_t device;
+  hrx_mem_pool_props_t props;
+
+  uint64_t release_threshold;
+  bool reuse_allow_internal_dependencies;
+  bool reuse_follow_event_dependencies;
+  bool reuse_allow_opportunistic;
+
+  uint64_t reserved_mem_current;
+  uint64_t reserved_mem_high;
+  uint64_t used_mem_current;
+  uint64_t used_mem_high;
+
+  void *platform_handle;
+
+  iree_slim_mutex_t mutex;
+
+  bool supports_virtual_memory;
+  iree_device_size_t vm_page_size_min;
+  iree_device_size_t vm_page_size_recommended;
+} hrx_mem_pool_s;
 
 // Loaded VM module with a context containing HAL + bytecode modules.
 typedef struct hrx_module_s {

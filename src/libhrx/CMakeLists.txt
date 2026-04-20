@@ -11,6 +11,12 @@ set(HRX_SOURCES
     semaphore.c
     stream.c
     buffer.c
+    buffer_table.c
+    event.c
+    graph.c
+    graph_analysis.c
+    graph_exec.c
+    mem_pool.c
     pool.c
     buffer_view.c
     executable.c
