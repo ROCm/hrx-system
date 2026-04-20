@@ -7,17 +7,17 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "streaming/internal.h"
+#include "common/internal.h"
 //===----------------------------------------------------------------------===//
 // Global state
 //===----------------------------------------------------------------------===//
 
 // Global device registry.
-static iree_hal_streaming_device_registry_t
-    *iree_hal_streaming_global_registry = NULL;
+static iree_hal_streaming_device_registry_t*
+    iree_hal_streaming_global_registry = NULL;
 
 // Accessor function for the global device registry.
-iree_hal_streaming_device_registry_t *iree_hal_streaming_device_registry(void) {
+iree_hal_streaming_device_registry_t* iree_hal_streaming_device_registry(void) {
   return iree_hal_streaming_global_registry;
 }
 
@@ -25,14 +25,14 @@ iree_hal_streaming_device_registry_t *iree_hal_streaming_device_registry(void) {
 // Device enumeration and management
 //===----------------------------------------------------------------------===//
 
-static void
-iree_hal_streaming_deinitialize_device(iree_hal_streaming_device_t *device);
+static void iree_hal_streaming_deinitialize_device(
+    iree_hal_streaming_device_t* device);
 
-iree_hal_streaming_device_t *
-iree_hal_streaming_device_entry(iree_hal_streaming_device_ordinal_t ordinal) {
-  iree_hal_streaming_device_registry_t *device_registry =
+iree_hal_streaming_device_t* iree_hal_streaming_device_entry(
+    iree_hal_streaming_device_ordinal_t ordinal) {
+  iree_hal_streaming_device_registry_t* device_registry =
       iree_hal_streaming_device_registry();
-  iree_hal_streaming_device_t *device = NULL;
+  iree_hal_streaming_device_t* device = NULL;
   if (!device_registry || ordinal >= device_registry->device_count) {
     device = NULL;
   } else {
@@ -42,8 +42,8 @@ iree_hal_streaming_device_entry(iree_hal_streaming_device_ordinal_t ordinal) {
 }
 
 // Queries device info and populates device properties.
-static iree_status_t
-iree_hal_streaming_query_device_info(iree_hal_streaming_device_t *device) {
+static iree_status_t iree_hal_streaming_query_device_info(
+    iree_hal_streaming_device_t* device) {
   IREE_ASSERT_ARGUMENT(device);
   IREE_ASSERT_ARGUMENT(device->hal_device);
 
@@ -53,25 +53,10 @@ iree_hal_streaming_query_device_info(iree_hal_streaming_device_t *device) {
   //   gfx942 -> 9.4, gfx950 -> 9.5
   //   gfx1030 -> 10.3, gfx1100 -> 11.0
   char arch_name[64] = {0};
-  // TODO(#rebase): replace this with a streaming-owned architecture query path.
-  // We intentionally do not depend on public device string queries anymore.
-  iree_status_t arch_status = iree_make_status(
-      IREE_STATUS_UNIMPLEMENTED,
-      "streaming architecture queries are not implemented on the rebased path");
-#if 0
-  if (sizeof(arch_name) == 0) {
-    arch_status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                                   "output string buffer is empty");
-  } else {
-    iree_host_size_t out_string_length = 0;
-    arch_name[0] = '\0';
-    arch_status = iree_hal_device_query_string(
-        device->hal_device, IREE_SV("hal.device"), IREE_SV("architecture"),
-        sizeof(arch_name) - 1, arch_name, &out_string_length);
-    arch_name[out_string_length < (sizeof(arch_name) - 1) ? out_string_length
-                                                          : (sizeof(arch_name) - 1)] = '\0';
-  }
-#endif
+  iree_status_t arch_status =
+      hrx_to_iree_status(hrx_device_get_property(device->hrx_device,
+                                                 HRX_DEVICE_PROPERTY_ARCHITECTURE,
+                                                 arch_name, sizeof(arch_name)));
   if (iree_status_is_ok(arch_status) && arch_name[0] != '\0') {
     // Parse "gfxNNNN" to extract major.minor.
     // gfx9xx -> major=9, minor=x (e.g., gfx942 -> 9.4)
@@ -109,9 +94,9 @@ iree_hal_streaming_query_device_info(iree_hal_streaming_device_t *device) {
 
   // Query memory info from the HAL device.
   int64_t total_memory = 0;
-  iree_status_t status =
-      iree_hal_device_query_i64(device->hal_device, IREE_SV("hal.device"),
-                                IREE_SV("memory.total"), &total_memory);
+  iree_status_t status = iree_hal_device_query_i64(
+      device->hal_device, IREE_SV("hal.device"), IREE_SV("memory.total"),
+      &total_memory);
   if (iree_status_is_ok(status) && total_memory > 0) {
     device->total_memory = (iree_device_size_t)total_memory;
   } else {
@@ -138,8 +123,9 @@ iree_hal_streaming_query_device_info(iree_hal_streaming_device_t *device) {
   // Query warp/wavefront size from the HAL device.
   // AMD GPUs use 64, NVIDIA uses 32, RDNA may use 32 or 64.
   int64_t warp_size = 0;
-  status = iree_hal_device_query_i64(device->hal_device, IREE_SV("hal.device"),
-                                     IREE_SV("warp_size"), &warp_size);
+  status = iree_hal_device_query_i64(
+      device->hal_device, IREE_SV("hal.device"), IREE_SV("warp_size"),
+      &warp_size);
   if (iree_status_is_ok(status) && warp_size > 0) {
     device->warp_size = (uint32_t)warp_size;
   } else {
@@ -148,12 +134,12 @@ iree_hal_streaming_query_device_info(iree_hal_streaming_device_t *device) {
     iree_status_ignore(status);
     device->warp_size = 64;
   }
-
+  
   // Query multiprocessor (compute unit) count from the device.
   int64_t mp_count = 0;
-  status =
-      iree_hal_device_query_i64(device->hal_device, IREE_SV("hal.dispatch"),
-                                IREE_SV("concurrency"), &mp_count);
+  status = iree_hal_device_query_i64(
+      device->hal_device, IREE_SV("hal.dispatch"), IREE_SV("concurrency"),
+      &mp_count);
   if (iree_status_is_ok(status) && mp_count > 0) {
     device->multiprocessor_count = (uint32_t)mp_count;
   } else {
@@ -170,17 +156,18 @@ iree_hal_streaming_query_device_info(iree_hal_streaming_device_t *device) {
   device->max_threads_per_multiprocessor = 2048;
   device->max_blocks_per_multiprocessor = 32;
   device->max_registers_per_multiprocessor = 65536;
-  device->max_shared_memory_per_multiprocessor = 49152; // 48KB.
+  device->max_shared_memory_per_multiprocessor = 49152;  // 48KB.
   device->max_registers_per_block = 65536;
-  device->max_shared_memory_per_block = 49152; // 48KB.
+  device->max_shared_memory_per_block = 49152;  // 48KB.
 
   return iree_ok_status();
 }
 
-// Initializes a single device from a hrx device handle.
+// Initializes a single device from a pyre device handle.
 static iree_status_t iree_hal_streaming_initialize_device(
-    iree_hal_streaming_device_registry_t *registry, hrx_device_t hrx_dev,
-    iree_hal_streaming_device_t *out_device) {
+    iree_hal_streaming_device_registry_t* registry,
+    hrx_device_t hrx_dev,
+    iree_hal_streaming_device_t* out_device) {
   IREE_ASSERT_ARGUMENT(registry);
   IREE_ASSERT_ARGUMENT(hrx_dev);
   IREE_ASSERT_ARGUMENT(out_device);
@@ -188,20 +175,20 @@ static iree_status_t iree_hal_streaming_initialize_device(
 
   memset(out_device, 0, sizeof(*out_device));
 
-  // Store hrx device and extract HAL device for direct HAL usage.
+  // Store pyre device and extract HAL device for direct HAL usage.
   out_device->hrx_device = hrx_dev;
   out_device->hal_device = hrx_device_hal(hrx_dev);
 
-  // Get device name from hrx.
+  // Get device name from pyre.
   char name_buf[128] = {0};
   iree_status_t status = HRX_CALL(hrx_device_get_property(
       hrx_dev, HRX_DEVICE_PROPERTY_NAME, name_buf, sizeof(name_buf)));
   if (iree_status_is_ok(status) && name_buf[0] != '\0') {
     size_t len = strlen(name_buf);
-    char *name_copy = NULL;
+    char* name_copy = NULL;
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
         z0, iree_allocator_malloc(registry->host_allocator, len + 1,
-                                  (void **)&name_copy));
+                                  (void**)&name_copy));
     memcpy(name_copy, name_buf, len + 1);
     out_device->info.name = iree_make_string_view(name_copy, len);
   } else {
@@ -215,9 +202,9 @@ static iree_status_t iree_hal_streaming_initialize_device(
       hrx_dev, HRX_DEVICE_PROPERTY_ARCHITECTURE, arch_buf, sizeof(arch_buf)));
   if (iree_status_is_ok(status) && arch_buf[0] != '\0') {
     size_t len = strlen(arch_buf);
-    char *path_copy = NULL;
+    char* path_copy = NULL;
     iree_status_t path_status = iree_allocator_malloc(
-        registry->host_allocator, len + 1, (void **)&path_copy);
+        registry->host_allocator, len + 1, (void**)&path_copy);
     if (iree_status_is_ok(path_status)) {
       memcpy(path_copy, arch_buf, len + 1);
       out_device->info.path = iree_make_string_view(path_copy, len);
@@ -248,7 +235,7 @@ static iree_status_t iree_hal_streaming_initialize_device(
   // Initialize the arena block pool for graph allocations.
   // Use 64KB blocks as a good balance.
   if (iree_status_is_ok(status)) {
-    const iree_host_size_t block_size = 64 * 1024; // 64KB blocks
+    const iree_host_size_t block_size = 64 * 1024;  // 64KB blocks
     iree_arena_block_pool_initialize(block_size, registry->host_allocator,
                                      &out_device->block_pool);
     status = iree_arena_block_pool_preallocate(&out_device->block_pool, 16);
@@ -271,36 +258,35 @@ static iree_status_t iree_hal_streaming_initialize_device(
 }
 
 // Deinitializes a device, releasing all its resources.
-static void
-iree_hal_streaming_deinitialize_device(iree_hal_streaming_device_t *device) {
-  if (!device)
-    return;
+static void iree_hal_streaming_deinitialize_device(
+    iree_hal_streaming_device_t* device) {
+  if (!device) return;
   IREE_TRACE_ZONE_BEGIN(z0);
 
   // Get allocator from global registry for freeing string copies.
-  iree_hal_streaming_device_registry_t *registry =
+  iree_hal_streaming_device_registry_t* registry =
       iree_hal_streaming_device_registry();
-  iree_allocator_t host_allocator =
-      registry ? registry->host_allocator : iree_allocator_system();
+  iree_allocator_t host_allocator = registry ? registry->host_allocator
+                                             : iree_allocator_system();
 
   // Free the device name and path strings that were allocated during
   // initialization.
   if (device->info.path.size > 0 && device->info.path.data) {
-    iree_allocator_free(host_allocator, (void *)device->info.path.data);
+    iree_allocator_free(host_allocator, (void*)device->info.path.data);
   }
   if (device->info.name.size > 0 && device->info.name.data) {
-    iree_allocator_free(host_allocator, (void *)device->info.name.data);
+    iree_allocator_free(host_allocator, (void*)device->info.name.data);
   }
   device->info.path = iree_string_view_empty();
   device->info.name = iree_string_view_empty();
 
   // Release memory pools.
   if (device->current_mem_pool) {
-    iree_hal_streaming_mem_pool_release(device->current_mem_pool);
+    hrx_mem_pool_release(device->current_mem_pool);
     device->current_mem_pool = NULL;
   }
   if (device->default_mem_pool) {
-    iree_hal_streaming_mem_pool_release(device->default_mem_pool);
+    hrx_mem_pool_release(device->default_mem_pool);
     device->default_mem_pool = NULL;
   }
 
@@ -316,7 +302,7 @@ iree_hal_streaming_deinitialize_device(iree_hal_streaming_device_t *device) {
   // Deinitialize the arena block pool.
   iree_arena_block_pool_deinitialize(&device->block_pool);
 
-  // HAL device and driver are owned by hrx — don't release here.
+  // HAL device and driver are owned by pyre — don't release here.
   // hrx_gpu_shutdown() handles cleanup.
   device->hal_device = NULL;
   device->hrx_device = NULL;
@@ -326,7 +312,7 @@ iree_hal_streaming_deinitialize_device(iree_hal_streaming_device_t *device) {
 
 // Queries device P2P capabilities and populates topology.
 static iree_status_t iree_hal_streaming_query_p2p_capabilities(
-    iree_hal_streaming_device_registry_t *registry) {
+    iree_hal_streaming_device_registry_t* registry) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   // Allocate P2P topology array.
@@ -335,14 +321,14 @@ static iree_status_t iree_hal_streaming_query_p2p_capabilities(
       registry->p2p_link_count * sizeof(iree_hal_streaming_p2p_link_t);
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(registry->host_allocator,
                                              topology_size,
-                                             (void **)&registry->p2p_topology));
+                                             (void**)&registry->p2p_topology));
   memset(registry->p2p_topology, 0, topology_size);
 
   // Populate P2P links for all device pairs.
   iree_host_size_t link_index = 0;
   for (iree_host_size_t i = 0; i < registry->device_count; ++i) {
     for (iree_host_size_t j = 0; j < registry->device_count; ++j) {
-      iree_hal_streaming_p2p_link_t *link =
+      iree_hal_streaming_p2p_link_t* link =
           &registry->p2p_topology[link_index++];
       link->src_device = i;
       link->dst_device = j;
@@ -351,15 +337,15 @@ static iree_status_t iree_hal_streaming_query_p2p_capabilities(
         link->access_supported = true;
         link->native_atomic_supported = true;
         link->cuda_array_access_supported = true;
-        link->performance_rank = 100;  // Highest rank for same device.
-        link->bandwidth_mbps = 900000; // 900 GB/s typical for device memory.
-        link->latency_ns = 10;         // Very low latency.
+        link->performance_rank = 100;   // Highest rank for same device.
+        link->bandwidth_mbps = 900000;  // 900 GB/s typical for device memory.
+        link->latency_ns = 10;          // Very low latency.
       } else {
-        // TODO: Query actual P2P capabilities from hrx/HSA.
+        // TODO: Query actual P2P capabilities from pyre/HSA.
         link->access_supported = false;
         link->native_atomic_supported = false;
         link->cuda_array_access_supported = false;
-        link->performance_rank = -1; // Not supported.
+        link->performance_rank = -1;  // Not supported.
         link->bandwidth_mbps = 0;
         link->latency_ns = 0;
       }
@@ -375,14 +361,12 @@ static iree_status_t iree_hal_streaming_query_p2p_capabilities(
 //===----------------------------------------------------------------------===//
 
 void iree_hal_streaming_register_context(
-    iree_hal_streaming_context_t *context) {
-  if (!context)
-    return;
+    iree_hal_streaming_context_t* context) {
+  if (!context) return;
 
-  iree_hal_streaming_device_registry_t *device_registry =
+  iree_hal_streaming_device_registry_t* device_registry =
       iree_hal_streaming_device_registry();
-  if (!device_registry)
-    return;
+  if (!device_registry) return;
 
   IREE_TRACE_ZONE_BEGIN(z0);
 
@@ -408,14 +392,12 @@ void iree_hal_streaming_register_context(
 }
 
 void iree_hal_streaming_unregister_context(
-    iree_hal_streaming_context_t *context) {
-  if (!context)
-    return;
+    iree_hal_streaming_context_t* context) {
+  if (!context) return;
 
-  iree_hal_streaming_device_registry_t *device_registry =
+  iree_hal_streaming_device_registry_t* device_registry =
       iree_hal_streaming_device_registry();
-  if (!device_registry)
-    return;
+  if (!device_registry) return;
 
   IREE_TRACE_ZONE_BEGIN(z0);
 
@@ -464,12 +446,11 @@ void iree_hal_streaming_unregister_context(
 }
 
 //===----------------------------------------------------------------------===//
-// Global initialization via hrx
+// Global initialization via pyre
 //===----------------------------------------------------------------------===//
 
-iree_status_t
-iree_hal_streaming_init_global(iree_hal_streaming_init_flags_t flags,
-                               iree_allocator_t host_allocator) {
+iree_status_t iree_hal_streaming_init_global(
+    iree_hal_streaming_init_flags_t flags, iree_allocator_t host_allocator) {
   IREE_TRACE_ZONE_BEGIN(z0);
   if (iree_hal_streaming_global_registry &&
       iree_hal_streaming_global_registry->initialized) {
@@ -477,17 +458,18 @@ iree_hal_streaming_init_global(iree_hal_streaming_init_flags_t flags,
     return iree_ok_status();
   }
 
-  // Initialize hrx GPU subsystem (idempotent — handles HSA init,
+  // Initialize pyre GPU subsystem (idempotent — handles HSA init,
   // driver registration, device enumeration).
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, HRX_CALL(hrx_gpu_initialize(0)));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, HRX_CALL(hrx_gpu_initialize(0)));
 
   // Create global registry.
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_allocator_malloc(host_allocator,
                                 sizeof(iree_hal_streaming_device_registry_t),
-                                (void **)&iree_hal_streaming_global_registry));
+                                (void**)&iree_hal_streaming_global_registry));
 
-  iree_hal_streaming_device_registry_t *device_registry =
+  iree_hal_streaming_device_registry_t* device_registry =
       iree_hal_streaming_device_registry();
   memset(device_registry, 0, sizeof(*device_registry));
   device_registry->host_allocator = host_allocator;
@@ -498,7 +480,7 @@ iree_hal_streaming_init_global(iree_hal_streaming_init_flags_t flags,
   device_registry->context_list.head = NULL;
   device_registry->context_list.tail = NULL;
 
-  // Enumerate GPU devices from hrx.
+  // Enumerate GPU devices from pyre.
   int gpu_count = 0;
   iree_status_t status = HRX_CALL(hrx_gpu_device_count(&gpu_count));
 
@@ -508,18 +490,19 @@ iree_hal_streaming_init_global(iree_hal_streaming_init_flags_t flags,
 
     for (int i = 0; i < gpu_count && i < IREE_HAL_STREAMING_MAX_DEVICES; ++i) {
       hrx_device_t hrx_dev = NULL;
-      iree_status_t dev_status = HRX_CALL(hrx_gpu_device_get(i, &hrx_dev));
+      iree_status_t dev_status =
+          HRX_CALL(hrx_gpu_device_get(i, &hrx_dev));
       if (!iree_status_is_ok(dev_status)) {
         iree_status_ignore(dev_status);
         continue;
       }
 
-      iree_hal_streaming_device_t *device =
+      iree_hal_streaming_device_t* device =
           &device_registry->devices[device_registry->device_count];
       device->ordinal = device_registry->device_count;
 
-      dev_status = iree_hal_streaming_initialize_device(device_registry,
-                                                        hrx_dev, device);
+      dev_status = iree_hal_streaming_initialize_device(
+          device_registry, hrx_dev, device);
       if (!iree_status_is_ok(dev_status)) {
         iree_status_ignore(dev_status);
         continue;
@@ -531,8 +514,8 @@ iree_hal_streaming_init_global(iree_hal_streaming_init_flags_t flags,
 
   // Must have at least one device.
   if (iree_status_is_ok(status) && device_registry->device_count == 0) {
-    status =
-        iree_make_status(IREE_STATUS_NOT_FOUND, "no GPU devices found via hrx");
+    status = iree_make_status(IREE_STATUS_NOT_FOUND,
+                              "no GPU devices found via pyre");
   }
 
   // Query P2P capabilities.
@@ -552,7 +535,7 @@ iree_hal_streaming_init_global(iree_hal_streaming_init_flags_t flags,
 
 void iree_hal_streaming_cleanup_global(void) {
   IREE_TRACE_ZONE_BEGIN(z0);
-  iree_hal_streaming_device_registry_t *device_registry =
+  iree_hal_streaming_device_registry_t* device_registry =
       iree_hal_streaming_device_registry();
   if (!device_registry) {
     IREE_TRACE_ZONE_END(z0);
@@ -564,13 +547,13 @@ void iree_hal_streaming_cleanup_global(void) {
 
   // Force destroy all remaining contexts from the global list.
   iree_slim_mutex_lock(&device_registry->context_list.mutex);
-  iree_hal_streaming_context_t *context_head =
+  iree_hal_streaming_context_t* context_head =
       device_registry->context_list.head;
   device_registry->context_list.head = NULL;
   device_registry->context_list.tail = NULL;
   iree_slim_mutex_unlock(&device_registry->context_list.mutex);
   while (context_head) {
-    iree_hal_streaming_context_t *context = context_head;
+    iree_hal_streaming_context_t* context = context_head;
     context_head = context->context_list_entry.next;
     context->context_list_entry.next = NULL;
     context->context_list_entry.prev = NULL;
@@ -590,7 +573,7 @@ void iree_hal_streaming_cleanup_global(void) {
   iree_allocator_free(device_registry->host_allocator,
                       device_registry->p2p_topology);
 
-  // Shutdown hrx GPU subsystem.
+  // Shutdown pyre GPU subsystem.
   hrx_status_ignore(hrx_gpu_shutdown());
 
   iree_slim_mutex_unlock(&device_registry->mutex);

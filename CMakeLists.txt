@@ -147,6 +147,9 @@ if(HRX_ENABLE_TRACY)
   message(STATUS "hrx-runtime: Tracy tracing ENABLED")
 endif()
 
+# Enable zstd for decompressing compressed HIP fat binaries (rocBLAS/hipBLAS).
+set(IREE_HAL_DRIVER_ENABLE_ZSTD ON CACHE BOOL "" FORCE)
+
 # Force IREE to build static libs.
 set(_hrx_saved_bsl ${BUILD_SHARED_LIBS})
 set(BUILD_SHARED_LIBS OFF)
@@ -188,15 +191,10 @@ endif()
 add_subdirectory(src/libhrx)
 
 #===------------------------------------------------------------------------===#
-# Streaming HIP runtime (internal static library)
-#===------------------------------------------------------------------------===#
-
-add_subdirectory(src/streaming)
-
-#===------------------------------------------------------------------------===#
 # API bindings
 #===------------------------------------------------------------------------===#
 
+add_subdirectory(src/binding/common)
 add_subdirectory(src/binding/hip)
 if(HRX_BUILD_CUDA_BINDING)
   add_subdirectory(src/binding/cuda)

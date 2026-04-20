@@ -6,15 +6,15 @@
 
 #include <string.h>
 
-#include "streaming/internal.h"
+#include "common/internal.h"
 
 //===----------------------------------------------------------------------===//
 // Device management
 //===----------------------------------------------------------------------===//
 
-iree_status_t iree_hal_streaming_device_count(iree_host_size_t *out_count) {
+iree_status_t iree_hal_streaming_device_count(iree_host_size_t* out_count) {
   IREE_ASSERT_ARGUMENT(out_count);
-  iree_hal_streaming_device_registry_t *device_registry =
+  iree_hal_streaming_device_registry_t* device_registry =
       iree_hal_streaming_device_registry();
   if (!device_registry) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
@@ -27,11 +27,11 @@ iree_status_t iree_hal_streaming_device_count(iree_host_size_t *out_count) {
 
 static iree_status_t iree_hal_streaming_device_by_ordinal(
     iree_hal_streaming_device_ordinal_t ordinal,
-    iree_hal_streaming_device_t **out_device) {
+    iree_hal_streaming_device_t** out_device) {
   IREE_ASSERT_ARGUMENT(out_device);
   *out_device = NULL;
 
-  iree_hal_streaming_device_registry_t *device_registry =
+  iree_hal_streaming_device_registry_t* device_registry =
       iree_hal_streaming_device_registry();
   if (!device_registry) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
@@ -44,7 +44,7 @@ static iree_status_t iree_hal_streaming_device_by_ordinal(
                             device_registry->device_count);
   }
 
-  iree_hal_streaming_device_t *device = &device_registry->devices[ordinal];
+  iree_hal_streaming_device_t* device = &device_registry->devices[ordinal];
 
   // Device is always created during initialization.
   // Primary context is created lazily on first access.
@@ -55,16 +55,16 @@ static iree_status_t iree_hal_streaming_device_by_ordinal(
   return iree_ok_status();
 }
 
-iree_status_t
-iree_hal_streaming_device_name(iree_hal_streaming_device_ordinal_t ordinal,
-                               char *name, iree_host_size_t name_size) {
+iree_status_t iree_hal_streaming_device_name(
+    iree_hal_streaming_device_ordinal_t ordinal, char* name,
+    iree_host_size_t name_size) {
   IREE_ASSERT_ARGUMENT(name);
   if (name_size == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "name_size must be > 0");
   }
 
-  iree_hal_streaming_device_t *device = NULL;
+  iree_hal_streaming_device_t* device = NULL;
   iree_status_t status = iree_hal_streaming_device_by_ordinal(ordinal, &device);
   if (!iree_status_is_ok(status)) {
     return status;
@@ -87,43 +87,62 @@ iree_hal_streaming_device_name(iree_hal_streaming_device_ordinal_t ordinal,
 }
 
 iree_status_t iree_hal_streaming_device_get_string_property(
-    iree_hal_streaming_device_ordinal_t ordinal, char *category, char *key,
-    char *property, iree_host_size_t property_size) {
-  IREE_ASSERT_ARGUMENT(property);
-  IREE_ASSERT_ARGUMENT(key);
+    iree_hal_streaming_device_ordinal_t ordinal,
+    const char* category,
+    const char* key,
+    char* value,
+    iree_host_size_t value_size) {
   IREE_ASSERT_ARGUMENT(category);
-  if (property_size == 0) {
+  IREE_ASSERT_ARGUMENT(key);
+  IREE_ASSERT_ARGUMENT(value);
+  if (value_size == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "property_size must be > 0");
+                            "value_size must be > 0");
   }
 
-  iree_hal_streaming_device_t *device = NULL;
-  iree_status_t status = iree_hal_streaming_device_by_ordinal(ordinal, &device);
-  if (!iree_status_is_ok(status)) {
-    return status;
+  iree_hal_streaming_device_t* device = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_streaming_device_by_ordinal(ordinal, &device));
+
+  // The streaming layer owns the set of string-valued device properties and
+  // resolves them from values cached on iree_hal_streaming_device_t during
+  // device initialization. The underlying IREE HAL intentionally does not
+  // expose a string-property query; callers must go through this API.
+  iree_string_view_t source = iree_string_view_empty();
+  if (iree_string_view_equal(iree_make_cstring_view(category),
+                             IREE_SV("hal.device"))) {
+    const iree_string_view_t key_sv = iree_make_cstring_view(key);
+    if (iree_string_view_equal(key_sv, IREE_SV("name"))) {
+      source = device->info.name;
+    } else if (iree_string_view_equal(key_sv, IREE_SV("path"))) {
+      source = device->info.path;
+    } else if (iree_string_view_equal(key_sv, IREE_SV("architecture")) ||
+               iree_string_view_equal(key_sv, IREE_SV("gcn_arch_name"))) {
+      source = iree_make_cstring_view(device->gcn_arch_name);
+    }
   }
-  property[0] = '\0';
-  // TODO(#rebase): restore full string-property support once streaming has a
-  // replacement for public device string queries.
-#if 0
-  iree_host_size_t out_string_length = 0;
-  status = iree_hal_device_query_string(
-      device->hal_device, iree_make_cstring_view(category),
-      iree_make_cstring_view(key), property_size - 1, property,
-      &out_string_length);
-  property[out_string_length < (property_size - 1) ? out_string_length
-                                                   : (property_size - 1)] = '\0';
-  return status;
-#endif
-  return iree_make_status(
-      IREE_STATUS_UNIMPLEMENTED,
-      "streaming string property queries are not implemented on the rebased path");
+
+  if (iree_string_view_is_empty(source)) {
+    return iree_make_status(
+        IREE_STATUS_NOT_FOUND,
+        "unknown string device property '%s' in category '%s'", key, category);
+  }
+
+  if (source.size + 1 > value_size) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "buffer of %" PRIhsz
+                            " bytes is too small for property '%s:%s' "
+                            "(requires %" PRIhsz " bytes including NUL)",
+                            value_size, category, key, source.size + 1);
+  }
+  memcpy(value, source.data, source.size);
+  value[source.size] = '\0';
+  return iree_ok_status();
 }
 
-iree_hal_streaming_p2p_link_t *iree_hal_streaming_device_lookup_p2p_link(
+iree_hal_streaming_p2p_link_t* iree_hal_streaming_device_lookup_p2p_link(
     iree_hal_streaming_device_ordinal_t src_device,
     iree_hal_streaming_device_ordinal_t dst_device) {
-  iree_hal_streaming_device_registry_t *device_registry =
+  iree_hal_streaming_device_registry_t* device_registry =
       iree_hal_streaming_device_registry();
   if (!device_registry || !device_registry->p2p_topology) {
     return NULL;
@@ -141,13 +160,13 @@ iree_hal_streaming_p2p_link_t *iree_hal_streaming_device_lookup_p2p_link(
 
 iree_status_t iree_hal_streaming_device_memory_info(
     iree_hal_streaming_device_ordinal_t ordinal,
-    iree_device_size_t *out_free_memory, iree_device_size_t *out_total_memory) {
+    iree_device_size_t* out_free_memory, iree_device_size_t* out_total_memory) {
   IREE_ASSERT_ARGUMENT(out_free_memory);
   IREE_ASSERT_ARGUMENT(out_total_memory);
   *out_free_memory = 0;
   *out_total_memory = 0;
 
-  iree_hal_streaming_device_t *device = NULL;
+  iree_hal_streaming_device_t* device = NULL;
   iree_status_t status = iree_hal_streaming_device_by_ordinal(ordinal, &device);
   if (iree_status_is_ok(status)) {
     *out_free_memory = device->free_memory;
@@ -158,12 +177,12 @@ iree_status_t iree_hal_streaming_device_memory_info(
 
 iree_status_t iree_hal_streaming_device_can_access_peer(
     iree_hal_streaming_device_ordinal_t device_ordinal,
-    iree_hal_streaming_device_ordinal_t peer_device_ordinal, bool *can_access) {
+    iree_hal_streaming_device_ordinal_t peer_device_ordinal, bool* can_access) {
   IREE_ASSERT_ARGUMENT(can_access);
   IREE_TRACE_ZONE_BEGIN(z0);
   *can_access = false;
 
-  iree_hal_streaming_device_registry_t *device_registry =
+  iree_hal_streaming_device_registry_t* device_registry =
       iree_hal_streaming_device_registry();
   if (!device_registry) {
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
@@ -179,7 +198,7 @@ iree_status_t iree_hal_streaming_device_can_access_peer(
   }
 
   // Look up P2P link in topology.
-  iree_hal_streaming_p2p_link_t *link =
+  iree_hal_streaming_p2p_link_t* link =
       iree_hal_streaming_device_lookup_p2p_link(device_ordinal,
                                                 peer_device_ordinal);
   if (!link) {
@@ -194,11 +213,11 @@ iree_status_t iree_hal_streaming_device_can_access_peer(
 
 iree_status_t iree_hal_streaming_device_set_primary_context_flags(
     iree_hal_streaming_device_ordinal_t device_ordinal,
-    const iree_hal_streaming_context_flags_t *flags) {
+    const iree_hal_streaming_context_flags_t* flags) {
   IREE_ASSERT_ARGUMENT(flags);
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  iree_hal_streaming_device_t *device =
+  iree_hal_streaming_device_t* device =
       iree_hal_streaming_device_entry(device_ordinal);
   if (!device) {
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
@@ -219,10 +238,10 @@ iree_status_t iree_hal_streaming_device_set_primary_context_flags(
 
 iree_status_t iree_hal_streaming_device_primary_context_state(
     iree_hal_streaming_device_ordinal_t device_ordinal,
-    iree_hal_streaming_context_flags_t *out_flags, bool *out_active) {
+    iree_hal_streaming_context_flags_t* out_flags, bool* out_active) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  iree_hal_streaming_device_t *device =
+  iree_hal_streaming_device_t* device =
       iree_hal_streaming_device_entry(device_ordinal);
   if (!device) {
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
@@ -247,8 +266,8 @@ iree_status_t iree_hal_streaming_device_primary_context_state(
 }
 
 iree_status_t iree_hal_streaming_device_get_or_create_primary_context(
-    iree_hal_streaming_device_t *device,
-    iree_hal_streaming_context_t **out_context) {
+    iree_hal_streaming_device_t* device,
+    iree_hal_streaming_context_t** out_context) {
   IREE_ASSERT_ARGUMENT(device);
   IREE_ASSERT_ARGUMENT(out_context);
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -272,7 +291,7 @@ iree_status_t iree_hal_streaming_device_get_or_create_primary_context(
   }
 
   // Create the primary context.
-  iree_hal_streaming_device_registry_t *device_registry =
+  iree_hal_streaming_device_registry_t* device_registry =
       iree_hal_streaming_device_registry();
   if (!device_registry) {
     iree_slim_mutex_unlock(&device->primary_context_mutex);
@@ -285,21 +304,17 @@ iree_status_t iree_hal_streaming_device_get_or_create_primary_context(
       device, device->primary_context_flags, device_registry->host_allocator,
       &device->primary_context);
 
-  // Create default memory pool for this device if context was created
-  // successfully.
+  // Create default memory pool via pyre.
   if (iree_status_is_ok(status)) {
-    // Get device ordinal from registry.
     iree_host_size_t device_ordinal = device - device_registry->devices;
-
-    iree_hal_streaming_mem_pool_props_t props = {
-        .alloc_handle_type = IREE_HAL_STREAMING_MEM_HANDLE_TYPE_NONE,
-        .location_type = IREE_HAL_STREAMING_MEM_LOCATION_TYPE_DEVICE,
-        .location_id = device_ordinal,
+    hrx_mem_pool_props_t props = {
+        .alloc_handle_type = 0,
+        .location_type = 1,  // device
+        .location_id = (int)device_ordinal,
     };
-
-    status = iree_hal_streaming_mem_pool_create(device->primary_context, &props,
-                                                device_registry->host_allocator,
-                                                &device->default_mem_pool);
+    status = HRX_CALL(
+        hrx_mem_pool_create(device->hrx_device, &props,
+                             &device->default_mem_pool));
   }
 
   if (iree_status_is_ok(status)) {
@@ -312,8 +327,8 @@ iree_status_t iree_hal_streaming_device_get_or_create_primary_context(
 }
 
 iree_status_t iree_hal_streaming_device_retain_primary_context(
-    iree_hal_streaming_device_t *device,
-    iree_hal_streaming_context_t **out_context) {
+    iree_hal_streaming_device_t* device,
+    iree_hal_streaming_context_t** out_context) {
   IREE_ASSERT_ARGUMENT(device);
   IREE_ASSERT_ARGUMENT(out_context);
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -325,7 +340,7 @@ iree_status_t iree_hal_streaming_device_retain_primary_context(
 
   // If this is the first retain (count went from 0 to 1), create the context.
   if (device->primary_context_ref_count == 1 && !device->primary_context) {
-    iree_hal_streaming_device_registry_t *device_registry =
+    iree_hal_streaming_device_registry_t* device_registry =
         iree_hal_streaming_device_registry();
     if (!device_registry) {
       device->primary_context_ref_count--;
@@ -339,25 +354,20 @@ iree_status_t iree_hal_streaming_device_retain_primary_context(
         device, device->primary_context_flags, device_registry->host_allocator,
         &device->primary_context);
 
-    // Create default memory pool if context was created successfully.
+    // Create default memory pool via pyre if context was created successfully.
     if (iree_status_is_ok(status) && !device->default_mem_pool) {
-      // Get device ordinal from registry.
       iree_host_size_t device_ordinal = device - device_registry->devices;
-
-      iree_hal_streaming_mem_pool_props_t props = {
-          .alloc_handle_type = IREE_HAL_STREAMING_MEM_HANDLE_TYPE_NONE,
-          .location_type = IREE_HAL_STREAMING_MEM_LOCATION_TYPE_DEVICE,
-          .location_id = device_ordinal,
+      hrx_mem_pool_props_t props = {
+          .alloc_handle_type = 0,
+          .location_type = 1,  // device
+          .location_id = (int)device_ordinal,
       };
-
-      status = iree_hal_streaming_mem_pool_create(
-          device->primary_context, &props, device_registry->host_allocator,
-          &device->default_mem_pool);
-
+      status = HRX_CALL(
+          hrx_mem_pool_create(device->hrx_device, &props,
+                               &device->default_mem_pool));
       if (iree_status_is_ok(status)) {
-        // Set current pool to default pool.
         device->current_mem_pool = device->default_mem_pool;
-        iree_hal_streaming_mem_pool_retain(device->current_mem_pool);
+        hrx_mem_pool_retain(device->current_mem_pool);
       }
     }
 
@@ -383,7 +393,7 @@ iree_status_t iree_hal_streaming_device_retain_primary_context(
 }
 
 iree_status_t iree_hal_streaming_device_release_primary_context(
-    iree_hal_streaming_device_t *device) {
+    iree_hal_streaming_device_t* device) {
   IREE_ASSERT_ARGUMENT(device);
   IREE_TRACE_ZONE_BEGIN(z0);
 
@@ -414,17 +424,17 @@ iree_status_t iree_hal_streaming_device_release_primary_context(
     device->primary_context = NULL;
 
     // Also clear memory pools.
-    if (device->default_mem_pool) {
-      iree_hal_streaming_mem_pool_release(device->default_mem_pool);
-      device->default_mem_pool = NULL;
-    }
     if (device->current_mem_pool) {
-      iree_hal_streaming_mem_pool_release(device->current_mem_pool);
+      hrx_mem_pool_release(device->current_mem_pool);
       device->current_mem_pool = NULL;
+    }
+    if (device->default_mem_pool) {
+      hrx_mem_pool_release(device->default_mem_pool);
+      device->default_mem_pool = NULL;
     }
 
     // Clear current context if it was the primary context.
-    iree_hal_streaming_context_t *current_context =
+    iree_hal_streaming_context_t* current_context =
         iree_hal_streaming_context_current();
     if (current_context && current_context == device->primary_context) {
       iree_hal_streaming_context_set_current(NULL);
@@ -441,9 +451,9 @@ iree_status_t iree_hal_streaming_device_release_primary_context(
 //===----------------------------------------------------------------------===//
 
 iree_status_t iree_hal_streaming_calculate_max_active_blocks_per_multiprocessor(
-    iree_hal_streaming_device_t *device, iree_hal_streaming_symbol_t *symbol,
+    iree_hal_streaming_device_t* device, iree_hal_streaming_symbol_t* symbol,
     uint32_t block_size, uint32_t dynamic_shared_mem_size,
-    uint32_t *out_max_blocks) {
+    uint32_t* out_max_blocks) {
   IREE_ASSERT_ARGUMENT(device);
   IREE_ASSERT_ARGUMENT(symbol);
   IREE_ASSERT_ARGUMENT(out_max_blocks);
@@ -468,7 +478,7 @@ iree_status_t iree_hal_streaming_calculate_max_active_blocks_per_multiprocessor(
   const int blocks_by_limit = device->max_blocks_per_multiprocessor;
 
   // 3. Register constraint: blocks limited by register usage.
-  uint32_t blocks_by_regs = 1000000; // Large number as default.
+  uint32_t blocks_by_regs = 1000000;  // Large number as default.
   if (symbol->num_regs > 0) {
     // Round up register allocation to warp granularity.
     const int warps_per_block =
@@ -482,7 +492,7 @@ iree_status_t iree_hal_streaming_calculate_max_active_blocks_per_multiprocessor(
   }
 
   // 4. Shared memory constraint.
-  uint32_t blocks_by_smem = 1000000; // Large number as default.
+  uint32_t blocks_by_smem = 1000000;  // Large number as default.
   const uint32_t total_smem =
       symbol->shared_size_bytes + dynamic_shared_mem_size;
   if (total_smem > 0) {
@@ -491,27 +501,23 @@ iree_status_t iree_hal_streaming_calculate_max_active_blocks_per_multiprocessor(
 
   // Take the minimum of all constraints.
   uint32_t max_blocks = blocks_by_threads;
-  if (blocks_by_limit < max_blocks)
-    max_blocks = blocks_by_limit;
-  if (blocks_by_regs < max_blocks)
-    max_blocks = blocks_by_regs;
-  if (blocks_by_smem < max_blocks)
-    max_blocks = blocks_by_smem;
+  if (blocks_by_limit < max_blocks) max_blocks = blocks_by_limit;
+  if (blocks_by_regs < max_blocks) max_blocks = blocks_by_regs;
+  if (blocks_by_smem < max_blocks) max_blocks = blocks_by_smem;
 
   // Ensure at least 0 blocks.
-  if (max_blocks < 0)
-    max_blocks = 0;
+  if (max_blocks < 0) max_blocks = 0;
 
   *out_max_blocks = max_blocks;
   return iree_ok_status();
 }
 
 iree_status_t iree_hal_streaming_calculate_optimal_block_size(
-    iree_hal_streaming_device_t *device, iree_hal_streaming_symbol_t *symbol,
+    iree_hal_streaming_device_t* device, iree_hal_streaming_symbol_t* symbol,
     uint32_t dynamic_shared_mem_size,
     iree_hal_streaming_block_to_dynamic_smem_fn_t dynamic_shared_mem_callback,
-    uint32_t block_size_limit, uint32_t *out_block_size,
-    uint32_t *out_min_grid_size) {
+    uint32_t block_size_limit, uint32_t* out_block_size,
+    uint32_t* out_min_grid_size) {
   IREE_ASSERT_ARGUMENT(device);
   IREE_ASSERT_ARGUMENT(symbol);
   IREE_ASSERT_ARGUMENT(out_block_size);
@@ -528,8 +534,7 @@ iree_status_t iree_hal_streaming_calculate_optimal_block_size(
   if (block_size_limit > 0 && block_size_limit < max_block_size) {
     max_block_size = block_size_limit;
   }
-  if (max_block_size > 1024)
-    max_block_size = 1024; // Hardware limit.
+  if (max_block_size > 1024) max_block_size = 1024;  // Hardware limit.
 
   // Try different block sizes and find the one with best occupancy.
   uint32_t best_block_size = 32;
@@ -539,8 +544,7 @@ iree_status_t iree_hal_streaming_calculate_optimal_block_size(
   const uint32_t block_sizes[] = {32, 64, 128, 256, 512, 768, 1024};
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(block_sizes); ++i) {
     const uint32_t test_size = block_sizes[i];
-    if (test_size > max_block_size)
-      break;
+    if (test_size > max_block_size) break;
 
     // Calculate dynamic shared memory size for this block size.
     const uint32_t dynamic_smem = dynamic_shared_mem_callback
@@ -592,9 +596,9 @@ iree_status_t iree_hal_streaming_calculate_optimal_block_size(
 //===----------------------------------------------------------------------===//
 
 iree_status_t iree_hal_streaming_calculate_max_cooperative_blocks(
-    iree_hal_streaming_device_t *device, iree_hal_streaming_symbol_t *symbol,
+    iree_hal_streaming_device_t* device, iree_hal_streaming_symbol_t* symbol,
     uint32_t block_size, uint32_t dynamic_shared_mem_size,
-    uint32_t *out_max_blocks) {
+    uint32_t* out_max_blocks) {
   IREE_ASSERT_ARGUMENT(device);
   IREE_ASSERT_ARGUMENT(symbol);
   IREE_ASSERT_ARGUMENT(out_max_blocks);
