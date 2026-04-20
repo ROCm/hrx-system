@@ -8,12 +8,8 @@ add_library(cuda SHARED
     runtime.c
 )
 
-target_include_directories(cuda PRIVATE
-    ${PROJECT_SOURCE_DIR}/src
-)
-
 target_link_libraries(cuda PRIVATE
-    hrx_streaming
+    hrx_binding_common
     iree_base_base
     iree_hal_hal
 )
