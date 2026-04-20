@@ -121,11 +121,7 @@ void hrx_buffer_release(hrx_buffer_t buffer) {
   hrx_device_t device = buffer->device;
   if (iree_atomic_ref_count_dec(&buffer->ref_count) == 1) {
     if (buffer->mapped_ptr) {
-      iree_hal_buffer_unmap_range(
-          &(iree_hal_buffer_mapping_t){.contents = {
-                                           .data = buffer->mapped_ptr,
-                                           .data_length = buffer->size,
-                                       }});
+      iree_hal_buffer_unmap_range(&buffer->mapping);
     }
     iree_allocator_free(iree_allocator_system(), buffer);
   }
@@ -153,16 +149,15 @@ hrx_status_t hrx_buffer_map(hrx_buffer_t buffer, hrx_map_flags_t flags,
   if (flags & HRX_MAP_DISCARD)
     access |= IREE_HAL_MEMORY_ACCESS_DISCARD_WRITE;
 
-  iree_hal_buffer_mapping_t mapping;
   iree_status_t status = iree_hal_buffer_map_range(
       buffer->hal_buffer, IREE_HAL_MAPPING_MODE_SCOPED, access,
-      (iree_device_size_t)offset, (iree_device_size_t)size, &mapping);
+      (iree_device_size_t)offset, (iree_device_size_t)size, &buffer->mapping);
   if (!iree_status_is_ok(status)) {
     HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
   }
 
-  buffer->mapped_ptr = mapping.contents.data;
-  *mapped_ptr = mapping.contents.data;
+  buffer->mapped_ptr = buffer->mapping.contents.data;
+  *mapped_ptr = buffer->mapping.contents.data;
   HRX_RETURN_AND_END_ZONE(z0, hrx_ok_status());
 }
 
@@ -179,14 +174,8 @@ hrx_status_t hrx_buffer_unmap(hrx_buffer_t buffer) {
     HRX_RETURN_AND_END_ZONE(z0, hrx_ok_status()); // Not mapped, no-op.
   }
 
-  iree_hal_buffer_mapping_t mapping = {
-      .contents =
-          {
-              .data = buffer->mapped_ptr,
-              .data_length = buffer->size,
-          },
-  };
-  iree_hal_buffer_unmap_range(&mapping);
+  iree_hal_buffer_unmap_range(&buffer->mapping);
+  memset(&buffer->mapping, 0, sizeof(buffer->mapping));
   buffer->mapped_ptr = NULL;
   HRX_RETURN_AND_END_ZONE(z0, hrx_ok_status());
 }
@@ -210,13 +199,12 @@ hrx_status_t hrx_buffer_get_device_ptr(hrx_buffer_t buffer, void **device_ptr) {
   }
 
   // Try to get a native allocation pointer.
-  iree_hal_buffer_mapping_t mapping;
   iree_status_t status = iree_hal_buffer_map_range(
       buffer->hal_buffer, IREE_HAL_MAPPING_MODE_SCOPED,
-      IREE_HAL_MEMORY_ACCESS_ALL, 0, buffer->size, &mapping);
+      IREE_HAL_MEMORY_ACCESS_ALL, 0, buffer->size, &buffer->mapping);
   if (iree_status_is_ok(status)) {
-    *device_ptr = mapping.contents.data;
-    buffer->mapped_ptr = mapping.contents.data;
+    *device_ptr = buffer->mapping.contents.data;
+    buffer->mapped_ptr = buffer->mapping.contents.data;
     HRX_RETURN_AND_END_ZONE(z0, hrx_ok_status());
   }
 

@@ -90,6 +90,7 @@ hrx_status_t hrx_device_get_type(hrx_device_t device,
 
 void hrx_device_retain(hrx_device_t device) {
   iree_hal_device_retain(device->hal_device);
+  iree_hal_device_group_retain(device->hal_device_group);
   iree_atomic_ref_count_inc(&device->ref_count);
 }
 

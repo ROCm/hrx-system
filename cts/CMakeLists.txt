@@ -16,8 +16,18 @@ if(NOT TARGET hrx)
   find_package(hrx REQUIRED)
 endif()
 
+Include(FetchContent)
+
+FetchContent_Declare(
+  Catch2
+  GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+  GIT_TAG        v3.8.1 # or a later release
+)
+
+FetchContent_MakeAvailable(Catch2)
+
 # Catch2.
-find_package(Catch2 3 REQUIRED)
+#find_package(Catch2 3 REQUIRED)
 include(CTest)
 include(GNUInstallDirs)
 

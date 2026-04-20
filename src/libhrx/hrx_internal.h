@@ -230,6 +230,7 @@ typedef struct hrx_buffer_s {
   hrx_memory_type_t mem_type;
   size_t size;
   void *mapped_ptr;
+  iree_hal_buffer_mapping_t mapping;
 } hrx_buffer_s;
 
 // Loaded VM module with a context containing HAL + bytecode modules.
