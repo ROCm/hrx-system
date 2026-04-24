@@ -665,12 +665,35 @@ hrx_status_t hrx_gpu_initialize(uint32_t flags) {
     memcpy(dev->name, device_infos[info_index].name.data, name_len);
     dev->name[name_len] = '\0';
 
-    iree_host_size_t arch_len = device_infos[info_index].name.size;
-    if (arch_len >= sizeof(dev->architecture)) {
-      arch_len = sizeof(dev->architecture) - 1;
+    // Query the actual gfx ISA version from the HAL device. HSA exposes
+    // strings like "gfx1100" via HSA_ISA_INFO_NAME, but the HAL only offers
+    // int64 queries, so the amdgpu driver encodes the parsed (major, minor,
+    // stepping) as ((major << 16) | (minor << 8) | stepping). Reconstruct the
+    // canonical "gfx<M><m><s>" form here so downstream binding code and HIP
+    // clients see e.g. "gfx1100" instead of the marketing product name.
+    dev->architecture[0] = '\0';
+    int64_t gfxip_encoded = 0;
+    iree_status_t gfxip_status = iree_hal_device_query_i64(
+        hal_device, iree_make_cstring_view("hal.device"),
+        iree_make_cstring_view("gfxip"), &gfxip_encoded);
+    if (iree_status_is_ok(gfxip_status) && gfxip_encoded > 0) {
+      uint32_t gfx_major = (uint32_t)((gfxip_encoded >> 16) & 0xFF);
+      uint32_t gfx_minor = (uint32_t)((gfxip_encoded >> 8) & 0xFF);
+      uint32_t gfx_stepping = (uint32_t)(gfxip_encoded & 0xFF);
+      snprintf(dev->architecture, sizeof(dev->architecture), "gfx%u%u%x",
+               gfx_major, gfx_minor, gfx_stepping);
+    } else {
+      // Fall back to the device name if the gfxip query isn't available
+      // (e.g. non-AMDGPU drivers). Modules that depend on arch matching will
+      // almost certainly fail but at least we preserve pre-existing behavior.
+      iree_status_ignore(gfxip_status);
+      iree_host_size_t arch_len = device_infos[info_index].name.size;
+      if (arch_len >= sizeof(dev->architecture)) {
+        arch_len = sizeof(dev->architecture) - 1;
+      }
+      memcpy(dev->architecture, device_infos[info_index].name.data, arch_len);
+      dev->architecture[arch_len] = '\0';
     }
-    memcpy(dev->architecture, device_infos[info_index].name.data, arch_len);
-    dev->architecture[arch_len] = '\0';
 
     iree_status = hrx_device_profile_begin(dev, profile_sink);
     hrx_debug_print_iree_status("begin device profiling", iree_status);

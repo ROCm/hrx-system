@@ -7165,6 +7165,14 @@ HIPAPI hipError_t hipModuleLoadDataEx(hipModule_t* module, const void* image,
 
   if (iree_status_is_ok(status)) {
     *module = (hipModule_t)stream_module;
+  } else {
+    char buf[512] = {0};
+    iree_host_size_t buf_len = 0;
+    iree_status_format(status, sizeof(buf), buf, &buf_len);
+    fprintf(stderr,
+            "[HRX] hipModuleLoadDataEx FAILED image=%p numOptions=%u: %.*s\n",
+            image, numOptions, (int)buf_len, buf);
+    fflush(stderr);
   }
 
   hipError_t result = iree_status_to_hip_result(status);
@@ -7264,11 +7272,13 @@ HIPAPI hipError_t hipModuleGetFunction(hipFunction_t* function,
   iree_status_t status =
       iree_hal_streaming_module_function(stream_module, kname, &stream_symbol);
   if (iree_status_is_ok(status)) {
-    // Tag the symbol before returning it.
     *function = (hipFunction_t)iree_hal_streaming_symbol_tag(stream_symbol);
     HIP_DEBUG_LOG("[HIP_API] hipModuleGetFunction: found symbol %p -> tagged %p\n",
             (void*)stream_symbol, (void*)*function);
   } else {
+    // NOT_FOUND is common and expected: rocBLAS scans multiple modules and
+    // relies on this call to probe for kernels. Leave normal error signalling
+    // via the return value and avoid spamming stderr.
     HIP_DEBUG_LOG("[HIP_API] hipModuleGetFunction: FAILED to find '%s'\n", kname);
   }
 
@@ -8069,6 +8079,19 @@ HIPAPI hipError_t hipModuleLaunchKernel(
   };
   iree_status_t status = iree_hal_streaming_launch_kernel(
       symbol, &params, (iree_hal_streaming_stream_t*)stream);
+
+  if (!iree_status_is_ok(status)) {
+    char buf[512] = {0};
+    iree_host_size_t buf_len = 0;
+    iree_status_format(status, sizeof(buf), buf, &buf_len);
+    fprintf(stderr,
+            "[HRX] hipModuleLaunchKernel FAILED #%d symbol=%p buffer=%p "
+            "buffer_size=%zu grid=(%u,%u,%u) block=(%u,%u,%u): %.*s\n",
+            launch_num, (void*)symbol, params_ptr, params_size, gridDimX,
+            gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ, (int)buf_len,
+            buf);
+    fflush(stderr);
+  }
 
   hipError_t result = iree_status_to_hip_result(status);
   HIP_DEBUG_LOG("[HIP_API] hipModuleLaunchKernel: returned result=%d\n", result);

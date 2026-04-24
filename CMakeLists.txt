@@ -35,6 +35,9 @@ option(HRX_ENABLE_ASAN "Enable address sanitizer" OFF)
 option(HRX_ENABLE_MSAN "Enable memory sanitizer" OFF)
 option(HRX_ENABLE_TSAN "Enable thread sanitizer" OFF)
 option(HRX_ENABLE_UBSAN "Enable undefined behavior sanitizer" OFF)
+option(HRX_ENABLE_ZSTD
+    "Enable zstd decompression of CCOB fat binaries at the streaming layer (needed for most rocBLAS/hipBLAS/pytorch kernels)"
+    ON)
 
 # Validate IREE source directory.
 if(NOT HRX_IREE_SOURCE_DIR OR
@@ -146,9 +149,6 @@ if(HRX_ENABLE_TRACY)
   set(IREE_BUILD_TRACY ON)
   message(STATUS "hrx-runtime: Tracy tracing ENABLED")
 endif()
-
-# Enable zstd for decompressing compressed HIP fat binaries (rocBLAS/hipBLAS).
-set(IREE_HAL_DRIVER_ENABLE_ZSTD ON CACHE BOOL "" FORCE)
 
 # Force IREE to build static libs.
 set(_hrx_saved_bsl ${BUILD_SHARED_LIBS})

@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "common/fat_binary.h"
 #include "common/internal.h"
 #include "iree/io/file_handle.h"
 
@@ -188,15 +189,21 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
         op->src_offset = src_offset;
         op->dst_ordinal = resolve_count;  // binding ordinal
         op->src_ordinal = j;
-        op->dst_offset = parameter->offset;  // kernel ABI offset for native kernels
+        // For the CUSTOM_DIRECT_ARGUMENTS path used by HIP kernels we overlay
+        // the resolved device pointer into the raw kernarg blob, so we need
+        // the true kernarg byte offset. The HAL's |parameter->offset| on a
+        // BINDING is a binding ordinal, not a byte offset; the real kernarg
+        // offset lives in |kernarg_offset| when the backend populates it.
+        op->dst_offset = parameter->kernarg_offset;
         src_offset += parameter->size;
         buffer_size = src_offset;
         ++resolve_count;
         // active_copy = NULL;  // break any active copy operation
-        
+
         // For native kernels with CUSTOM_DIRECT_ARGUMENTS, bindings are also
         // part of the constants buffer. Track their extent as well.
-        size_t param_extent = parameter->offset + parameter->size;
+        size_t param_extent =
+            (size_t)parameter->kernarg_offset + parameter->size;
         if (param_extent > this_kernel_constants_size) {
           this_kernel_constants_size = param_extent;
         }
@@ -231,9 +238,18 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
       }
     }
     parameter_info->buffer_size = buffer_size;
+    // The HAL expects the constants buffer to span the entire kernarg
+    // segment reported by the export (includes padding between args and
+    // trailing alignment). The per-parameter extent we tracked above
+    // typically matches, but pad up to the export's declared size to
+    // satisfy the strict length check in the dispatch code path.
+    size_t export_constant_bytes =
+        (size_t)export_infos[i].constant_count * sizeof(uint32_t);
+    if (export_constant_bytes > this_kernel_constants_size) {
+      this_kernel_constants_size = export_constant_bytes;
+    }
     parameter_info->constant_bytes = this_kernel_constants_size;
     
-    // Debug: log parameter layout for each kernel (disabled for performance)
 #if 0
     fprintf(stderr, "[MODULE] kernel[%zu] '%.*s': param_count=%u copy=%u bind=%u constant_bytes=%zu buffer_size=%u\n",
             i, (int)(symbol->name.size > 80 ? 80 : symbol->name.size),
@@ -243,8 +259,9 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
     for (uint16_t j = 0; j < parameter_count; ++j) {
       const iree_hal_executable_export_parameter_t* parameter =
           &parameters[parameter_base + j];
-      fprintf(stderr, "[MODULE]   param[%u]: offset=%u size=%u type=%u\n",
-              j, parameter->offset, parameter->size, parameter->type);
+      fprintf(stderr, "[MODULE]   param[%u]: offset=%u size=%u kernarg_offset=%u type=%u name='%.*s'\n",
+              j, parameter->offset, parameter->size, parameter->kernarg_offset, parameter->type,
+              (int)parameter->name.size, parameter->name.data ? parameter->name.data : "");
     }
 #endif
 
@@ -273,44 +290,66 @@ iree_status_t iree_hal_streaming_module_create_from_memory(
   *out_module = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  // Attempt to infer the file format and size.
-  // A good API would take that in as otherwise we're trusting arbitrary user
-  // data.
-  iree_const_byte_span_t executable_data = image;
-  char executable_format[64];
-  iree_status_t infer_status = iree_hal_executable_cache_infer_format(
-              context->executable_cache, caching_mode, executable_data,
-              sizeof(executable_format), executable_format,
-              &executable_data.data_length);
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, infer_status);
-
-  // Allocate module structure.
+  // Allocate module structure up-front — we stash the fat-binary extract
+  // directly on it so the (possibly decompressed) ELF backing store lives
+  // as long as the HAL executable that may still alias it.
   iree_hal_streaming_module_t* module = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0,
       iree_allocator_malloc(host_allocator, sizeof(*module), (void**)&module));
+  memset(module, 0, sizeof(*module));
   iree_atomic_ref_count_init(&module->ref_count);
-  module->cache = NULL;
-  module->executable = NULL;
-  module->symbols = NULL;
-  module->symbol_count = 0;
-  module->file_mapping = NULL;
   module->context = context;
   iree_hal_streaming_context_retain(context);
   module->host_allocator = host_allocator;
-
-  // Use the context's executable cache.
   module->cache = context->executable_cache;
   iree_hal_executable_cache_retain(module->cache);
 
+  // HIP / CUDA hand us anything the toolchain emits — raw AMDGPU ELFs,
+  // __CLANG_OFFLOAD_BUNDLE__ archives, CCOB (zstd-compressed bundles), and
+  // __hipFatBinaryWrapper-wrapped combinations of all of the above. Unwrap
+  // everything here and only forward a raw ELF (or native flatbuffer) to
+  // the HAL executable cache, which knows how to deal with just those two.
+  iree_const_byte_span_t executable_data = image;
+  const bool try_fat_unwrap =
+      context->device_entry != NULL &&
+      iree_hal_streaming_fat_binary_is_supported(image);
+  iree_status_t status = iree_ok_status();
+  if (try_fat_unwrap) {
+    iree_string_view_t target_arch =
+        iree_make_cstring_view(context->device_entry->gcn_arch_name);
+    status = iree_hal_streaming_fat_binary_extract_for_target(
+        image, target_arch, host_allocator, &module->fat_extract);
+    if (iree_status_is_ok(status)) {
+      // Multiple matches are possible (e.g. feature-specialized kernels).
+      // We currently forward the first match; if the bundle contains
+      // richer per-feature variants we can lift this into a multi-module
+      // executable later.
+      executable_data = module->fat_extract.matches[0].data;
+    }
+  }
+
+  // Attempt to infer the file format and size.
+  // A good API would take that in as otherwise we're trusting arbitrary user
+  // data.
+  char executable_format[64];
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_executable_cache_infer_format(
+        context->executable_cache, caching_mode, executable_data,
+        sizeof(executable_format), executable_format,
+        &executable_data.data_length);
+  }
+
   // Create HAL executable from binary.
-  iree_hal_executable_params_t params;
-  iree_hal_executable_params_initialize(&params);
-  params.caching_mode = caching_mode;
-  params.executable_format = iree_make_cstring_view(executable_format);
-  params.executable_data = executable_data;
-  iree_status_t status = iree_hal_executable_cache_prepare_executable(
-      module->cache, &params, &module->executable);
+  if (iree_status_is_ok(status)) {
+    iree_hal_executable_params_t params;
+    iree_hal_executable_params_initialize(&params);
+    params.caching_mode = caching_mode;
+    params.executable_format = iree_make_cstring_view(executable_format);
+    params.executable_data = executable_data;
+    status = iree_hal_executable_cache_prepare_executable(
+        module->cache, &params, &module->executable);
+  }
 
   // Extract kernel metadata.
   if (iree_status_is_ok(status)) {
@@ -387,8 +426,13 @@ static void iree_hal_streaming_module_destroy(
   // Release symbol metadata.
   iree_allocator_free(module->host_allocator, module->symbols);
 
-  // Release executable.
+  // Release executable before the fat-binary extract: the HAL's code
+  // object reader may still alias pointers into the (possibly owned)
+  // backing store held by the extract until the executable drops.
   iree_hal_executable_release(module->executable);
+
+  // Drop fat-binary / offload-bundle unpacking buffers.
+  iree_hal_streaming_fat_binary_extract_reset(&module->fat_extract);
 
   // Release executable cache.
   iree_hal_executable_cache_release(module->cache);

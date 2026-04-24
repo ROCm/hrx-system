@@ -20,14 +20,38 @@
 //===----------------------------------------------------------------------===//
 // Status bridging: hrx_status_t <-> iree_status_t
 //
-// Both are opaque pointers with NULL = OK. Cast is valid because:
-// 1. Both use NULL to signal success
-// 2. Both are pointer-sized
-// 3. Streaming lives inside the hrx DSO boundary
+// NULL is OK for both types so the success path is free. For non-OK
+// statuses we cannot simply reinterpret-cast: hrx_status_t is a pointer
+// to a heap-allocated hrx_status_s, while iree_status_t is a tagged
+// pointer whose low bits hold the status code and whose high bits hold
+// optional iree_status_storage_t. Feeding a hrx pointer to
+// iree_status_free/_ignore would mask off the low bits and dereference
+// garbage (which is exactly the crash we used to hit in the kernel-
+// launch pointer scan).
+//
+// hrx_status_code_t values are the same as iree_status_code_t so we can
+// safely pass the code along; we also copy the message so iree callers
+// can format the error cleanly. The incoming hrx status is consumed
+// (freed) since ownership is transferred.
 //===----------------------------------------------------------------------===//
 
 static inline iree_status_t hrx_to_iree_status(hrx_status_t s) {
-  return (iree_status_t)(uintptr_t)s;
+  if (hrx_status_is_ok(s)) return iree_ok_status();
+  iree_status_code_t code = (iree_status_code_t)hrx_status_code(s);
+  char* message_buf = NULL;
+  size_t message_len = 0;
+  hrx_status_t to_str_status =
+      hrx_status_to_string(s, &message_buf, &message_len);
+  iree_status_t iree_s;
+  if (hrx_status_is_ok(to_str_status) && message_buf) {
+    iree_s = iree_make_status(code, "%.*s", (int)message_len, message_buf);
+  } else {
+    iree_s = iree_status_from_code(code);
+  }
+  if (message_buf) free(message_buf);
+  if (!hrx_status_is_ok(to_str_status)) hrx_status_ignore(to_str_status);
+  hrx_status_ignore(s);
+  return iree_s;
 }
 
 static inline hrx_status_t iree_to_hrx_status(iree_status_t s) {

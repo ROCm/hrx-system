@@ -164,9 +164,18 @@ iree_status_t iree_hal_streaming_memory_lookup(
   IREE_ASSERT_ARGUMENT(out_ref);
   memset(out_ref, 0, sizeof(*out_ref));
   size_t offset = 0;
-  IREE_RETURN_IF_ERROR(HRX_CALL(hrx_buffer_table_find(
+  // Hot path: this is called in a tight loop during kernel launch to probe
+  // every 8-byte word in the kernarg buffer for potential device pointers,
+  // so the vast majority of calls are expected to miss. Handle the miss
+  // directly without allocating an error message.
+  hrx_status_t hs = hrx_buffer_table_find(
       &context->buffer_table, device_ptr, NULL, &offset,
-      (void**)&out_ref->buffer)));
+      (void**)&out_ref->buffer);
+  if (!hrx_status_is_ok(hs)) {
+    iree_status_code_t code = (iree_status_code_t)hrx_status_code(hs);
+    hrx_status_ignore(hs);
+    return iree_status_from_code(code);
+  }
   out_ref->offset = (iree_device_size_t)offset;
   return iree_ok_status();
 }

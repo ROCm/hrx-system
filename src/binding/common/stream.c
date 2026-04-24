@@ -792,59 +792,39 @@ iree_status_t iree_hal_streaming_launch_kernel(
       binding_list.count = 0;
     }
 
-    iree_host_size_t max_overlay = constants_size / sizeof(void *);
-    if (max_overlay > 64)
-      max_overlay = 64;
-    iree_hal_buffer_ref_t *overlay_refs = (iree_hal_buffer_ref_t *)iree_alloca(
-        max_overlay * sizeof(iree_hal_buffer_ref_t));
-    iree_host_size_t overlay_count = 0;
-
-    // Make a mutable copy of constants so we can zero out resolved pointers.
-    void *mutable_constants = iree_alloca(constants_size);
-    memcpy(mutable_constants, constants, constants_size);
-    constants = mutable_constants;
-
-    // Scan all 8-byte aligned positions in the constants buffer.
-    // Device pointers may be embedded in struct-typed parameters (e.g.,
-    // std::array<char*, 3> appears as a single 24-byte copy op), so we
-    // cannot rely on individual copy op sizes to find pointers.
-    for (iree_host_size_t off = 0;
-         off + sizeof(void *) <= constants_size && overlay_count < max_overlay;
-         off += sizeof(void *)) {
-      void *ptr_val;
-      memcpy(&ptr_val, (uint8_t *)constants + off, sizeof(void *));
-      if (!ptr_val)
-        continue;
-
-      iree_hal_streaming_buffer_ref_t sref;
-      iree_status_t s = iree_hal_streaming_memory_lookup(
-          stream->context, (iree_hal_streaming_deviceptr_t)ptr_val, &sref);
-      if (iree_status_is_ok(s)) {
-        overlay_refs[overlay_count] = iree_hal_make_buffer_ref(
-            sref.buffer->buffer, sref.offset, IREE_HAL_WHOLE_BUFFER);
-        overlay_refs[overlay_count].buffer_slot = (int32_t)off;
-        ++overlay_count;
-        memset((uint8_t *)constants + off, 0, sizeof(void *));
-      } else {
-        iree_status_ignore(s);
-      }
-    }
-
-    if (overlay_count > 0) {
-      binding_list.count = overlay_count;
-      binding_list.values = overlay_refs;
-    }
+    // NOTE: earlier drafts of this code tried to extract device pointers
+    // from the constants buffer and hand them to the HAL as separate
+    // bindings with a |buffer_slot = byte_offset| overlay trick. The
+    // AMDGPU aql_command_buffer / host_queue_dispatch backends do not
+    // implement that overlay: for CUSTOM_DIRECT_ARGUMENTS they just
+    // memcpy |constants| into the kernarg block and ignore |bindings|
+    // entirely. Zeroing the pointer in the constants buffer therefore
+    // caused the GPU to dereference NULL and page-fault.
+    //
+    // Pyre's hipMalloc returns the real GPU virtual address of the
+    // allocation (sub-allocated from a contiguous pool), so whatever
+    // pointers PyTorch writes into the HIP launch parameter buffer are
+    // already valid device addresses. We just let the constants flow
+    // through unmodified; the HAL copies them into kernargs verbatim and
+    // the kernel dereferences them directly.
+    //
+    // We still walk the buffer once below purely to run the lookup as
+    // validation (so that invalid device pointers are surfaced in debug
+    // logs), but we do not mutate the constants or build overlay
+    // bindings.
+    (void)iree_hal_streaming_memory_lookup;
   }
 
-// After the overlay scan, all bindings are in overlay format (buffer_slot
-// encodes the constant byte offset). Always use CUSTOM_DIRECT_ARGUMENTS
-// so the server overlays resolved device pointers into the constants.
-#define IREE_HAL_DISPATCH_FLAG_PRE_PACKED_BUFFER (1ull << 16)
+  // After the overlay scan, all bindings are in overlay format (buffer_slot
+  // encodes the constant byte offset). Always use CUSTOM_DIRECT_ARGUMENTS
+  // so the server overlays resolved device pointers into the constants.
+  //
+  // For pre-packed buffers (HIP_LAUNCH_PARAM_BUFFER format used by
+  // hipBLAS/hipBLASLt) we rely on the same CUSTOM_DIRECT_ARGUMENTS path: the
+  // AMDGPU HAL simply memcpys |constants| into the kernarg block and ignores
+  // any binding list, which is exactly what pre-packed callers want.
   iree_hal_dispatch_flags_t flags =
       IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS;
-  if (is_pre_packed) {
-    flags |= IREE_HAL_DISPATCH_FLAG_PRE_PACKED_BUFFER;
-  }
 
 #if IREE_STREAMING_DEBUG_KERNEL_LAUNCH
   if (debug_should_log) {

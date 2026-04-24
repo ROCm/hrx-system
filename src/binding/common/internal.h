@@ -7,6 +7,7 @@
 #ifndef IREE_EXPERIMENTAL_STREAMING_INTERNAL_H_
 #define IREE_EXPERIMENTAL_STREAMING_INTERNAL_H_
 
+#include "common/fat_binary.h"
 #include "common/hrx_bridge.h"
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
@@ -552,6 +553,12 @@ typedef struct iree_hal_streaming_module_t {
 
   // File mapping if loaded from file.
   iree_io_file_mapping_t* file_mapping;
+
+  // Fat-binary / Clang offload bundle unpacking state. Holds the
+  // decompressed ELF backing buffer (CCOB) and/or the matched-entry
+  // table — both referenced by the HAL executable's code-object reader,
+  // so they must live at least as long as the executable itself.
+  iree_hal_streaming_fat_binary_extract_t fat_extract;
 
   // Context that loaded this module.
   iree_hal_streaming_context_t* context;
