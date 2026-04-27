@@ -697,11 +697,11 @@ iree_status_t iree_hal_remote_client_device_queue_alloca(
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, (int64_t)allocation_size);
 
-  if (pool) {
+  if (IREE_UNLIKELY(pool)) {
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
-        "remote queue allocations do not support explicit pools yet");
+        "remote queue_alloca does not support client-side pool handles");
   }
 
   // Assign a unique provisional resource ID for this allocation.

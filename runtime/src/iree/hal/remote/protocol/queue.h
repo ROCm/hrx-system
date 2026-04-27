@@ -122,7 +122,7 @@ static_assert(sizeof(iree_hal_remote_queue_op_header_t) == 8, "");
 // resolves it and piggybacks the resolution on a later ADVANCE.
 typedef struct iree_hal_remote_buffer_alloca_op_t {
   iree_hal_remote_queue_op_header_t header;
-  uint32_t pool;       // iree_hal_allocator_pool_t
+  uint32_t pool;       // Reserved until remote pool handles are defined.
   uint32_t reserved0;  // Must be 0.
   iree_hal_remote_buffer_params_t params;
   uint64_t allocation_size;

@@ -131,17 +131,13 @@ class SessionTestBase : public FactoryTestBase {
   void SetUp() override {
     FactoryTestBase::SetUp();
 
-    iree_async_frontier_tracker_options_t client_options =
+    iree_async_frontier_tracker_options_t tracker_options =
         iree_async_frontier_tracker_options_default();
-    client_options.axis_table_capacity = kAxisTableCapacity;
+    tracker_options.axis_table_capacity = kAxisTableCapacity;
     IREE_ASSERT_OK(iree_async_frontier_tracker_create(
-        client_options, iree_allocator_system(), &client_tracker_));
-
-    iree_async_frontier_tracker_options_t server_options =
-        iree_async_frontier_tracker_options_default();
-    server_options.axis_table_capacity = kAxisTableCapacity;
+        tracker_options, iree_allocator_system(), &client_tracker_));
     IREE_ASSERT_OK(iree_async_frontier_tracker_create(
-        server_options, iree_allocator_system(), &server_tracker_));
+        tracker_options, iree_allocator_system(), &server_tracker_));
   }
 
   void TearDown() override {

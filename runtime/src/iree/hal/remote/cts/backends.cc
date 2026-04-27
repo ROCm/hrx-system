@@ -162,7 +162,8 @@ class RemoteBackendEnvironment : public ::testing::Environment {
 static RemoteBackendEnvironment* GetEnvironment() {
   static RemoteBackendEnvironment* env = [] {
     auto* e = new RemoteBackendEnvironment();
-    ::testing::AddGlobalTestEnvironment(e);
+    ::testing::AddGlobalTestEnvironment(
+        static_cast<::testing::Environment*>(e));
     return e;
   }();
   return env;

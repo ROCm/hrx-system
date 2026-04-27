@@ -61,17 +61,13 @@ class RemoteSessionTest : public ::testing::Test {
     proactor_ = iree_hal_remote_recv_pool_proactor(recv_pool_);
 
     // Create frontier trackers for client and server.
-    iree_async_frontier_tracker_options_t client_tracker_options =
+    iree_async_frontier_tracker_options_t tracker_options =
         iree_async_frontier_tracker_options_default();
-    client_tracker_options.axis_table_capacity = kAxisTableCapacity;
+    tracker_options.axis_table_capacity = kAxisTableCapacity;
     IREE_ASSERT_OK(iree_async_frontier_tracker_create(
-        client_tracker_options, iree_allocator_system(), &client_tracker_));
-
-    iree_async_frontier_tracker_options_t server_tracker_options =
-        iree_async_frontier_tracker_options_default();
-    server_tracker_options.axis_table_capacity = kAxisTableCapacity;
+        tracker_options, iree_allocator_system(), &client_tracker_));
     IREE_ASSERT_OK(iree_async_frontier_tracker_create(
-        server_tracker_options, iree_allocator_system(), &server_tracker_));
+        tracker_options, iree_allocator_system(), &server_tracker_));
 
     // Create loopback transport factory.
     iree_net_loopback_factory_options_t factory_options =
@@ -386,12 +382,11 @@ TEST_F(RemoteSessionTest, MultipleClientsConnect) {
   iree_hal_device_t* client_a = nullptr;
   iree_hal_device_t* client_b = nullptr;
   iree_async_frontier_tracker_t* client_b_tracker = nullptr;
-
-  iree_async_frontier_tracker_options_t client_b_tracker_options =
+  iree_async_frontier_tracker_options_t tracker_options =
       iree_async_frontier_tracker_options_default();
-  client_b_tracker_options.axis_table_capacity = kAxisTableCapacity;
+  tracker_options.axis_table_capacity = kAxisTableCapacity;
   IREE_ASSERT_OK(iree_async_frontier_tracker_create(
-      client_b_tracker_options, iree_allocator_system(), &client_b_tracker));
+      tracker_options, iree_allocator_system(), &client_b_tracker));
 
   iree_hal_remote_client_device_options_t options;
   iree_hal_remote_client_device_options_initialize(&options);
@@ -530,17 +525,13 @@ class RemoteBufferTest : public ::testing::Test {
         iree_allocator_system(), &proactor_thread_));
 
     // Create frontier trackers.
-    iree_async_frontier_tracker_options_t client_tracker_options =
+    iree_async_frontier_tracker_options_t tracker_options =
         iree_async_frontier_tracker_options_default();
-    client_tracker_options.axis_table_capacity = kAxisTableCapacity;
+    tracker_options.axis_table_capacity = kAxisTableCapacity;
     IREE_ASSERT_OK(iree_async_frontier_tracker_create(
-        client_tracker_options, iree_allocator_system(), &client_tracker_));
-
-    iree_async_frontier_tracker_options_t server_tracker_options =
-        iree_async_frontier_tracker_options_default();
-    server_tracker_options.axis_table_capacity = kAxisTableCapacity;
+        tracker_options, iree_allocator_system(), &client_tracker_));
     IREE_ASSERT_OK(iree_async_frontier_tracker_create(
-        server_tracker_options, iree_allocator_system(), &server_tracker_));
+        tracker_options, iree_allocator_system(), &server_tracker_));
 
     // Create loopback transport factory.
     iree_net_loopback_factory_options_t factory_options =
@@ -1152,11 +1143,11 @@ TEST_F(RemoteBufferTest, QueueAllocaAndVerify) {
 
   iree_hal_buffer_t* buffer = nullptr;
   SemaphoreListHelper signal(sem, 1);
-  IREE_ASSERT_OK(
-      iree_hal_device_queue_alloca(client_device_, IREE_HAL_QUEUE_AFFINITY_ANY,
-                                   iree_hal_semaphore_list_empty(), signal.list,
-                                   /*pool=*/0, params, /*allocation_size=*/256,
-                                   IREE_HAL_ALLOCA_FLAG_NONE, &buffer));
+  IREE_ASSERT_OK(iree_hal_device_queue_alloca(
+      client_device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+      iree_hal_semaphore_list_empty(), signal.list,
+      /*pool=*/NULL, params,
+      /*allocation_size=*/256, IREE_HAL_ALLOCA_FLAG_NONE, &buffer));
   ASSERT_NE(buffer, nullptr);
   EXPECT_EQ(iree_hal_buffer_allocation_size(buffer), 256);
 
@@ -1198,8 +1189,8 @@ TEST_F(RemoteBufferTest, QueueAllocaFillChained) {
   IREE_ASSERT_OK(iree_hal_device_queue_alloca(
       client_device_, IREE_HAL_QUEUE_AFFINITY_ANY,
       iree_hal_semaphore_list_empty(), alloca_signal.list,
-      /*pool=*/0, params, /*allocation_size=*/1024, IREE_HAL_ALLOCA_FLAG_NONE,
-      &buffer));
+      /*pool=*/NULL, params, /*allocation_size=*/1024,
+      IREE_HAL_ALLOCA_FLAG_NONE, &buffer));
 
   // Fill the alloca'd buffer, waiting on the alloca semaphore.
   uint32_t fill_pattern = 0xCAFEBABE;
@@ -1257,7 +1248,7 @@ TEST_F(RemoteBufferTest, QueueDeallocaOrdering) {
   IREE_ASSERT_OK(iree_hal_device_queue_alloca(
       client_device_, IREE_HAL_QUEUE_AFFINITY_ANY,
       iree_hal_semaphore_list_empty(), alloca_signal.list,
-      /*pool=*/0, params, /*allocation_size=*/512, IREE_HAL_ALLOCA_FLAG_NONE,
+      /*pool=*/NULL, params, /*allocation_size=*/512, IREE_HAL_ALLOCA_FLAG_NONE,
       &buffer));
 
   uint8_t fill_pattern = 0x55;

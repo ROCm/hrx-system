@@ -739,6 +739,11 @@ static iree_status_t iree_hal_remote_server_submit_buffer_alloca(
   }
   const iree_hal_remote_buffer_alloca_op_t* op =
       (const iree_hal_remote_buffer_alloca_op_t*)context->command_data.data;
+  if (op->pool != 0) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "remote BUFFER_ALLOCA pool handles are not supported");
+  }
 
   // Translate wire buffer params to HAL buffer params.
   iree_hal_buffer_params_t params = {0};
