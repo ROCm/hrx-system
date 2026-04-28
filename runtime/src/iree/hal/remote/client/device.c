@@ -7,6 +7,7 @@
 #include "iree/hal/remote/client/device.h"
 
 #include "iree/async/frontier_tracker.h"
+#include "iree/async/notification.h"
 #include "iree/base/threading/notification.h"
 #include "iree/base/threading/processor.h"
 #include "iree/hal/remote/client/allocator.h"
@@ -14,8 +15,10 @@
 #include "iree/hal/remote/client/executable_cache.h"
 #include "iree/hal/remote/client/queue.h"
 #include "iree/hal/remote/client/semaphore.h"
+#include "iree/hal/remote/client/slab_provider.h"
 #include "iree/hal/remote/protocol/control.h"
 #include "iree/hal/remote/util/recv_pool.h"
+#include "iree/hal/utils/file_registry.h"
 #include "iree/net/channel/queue/queue_channel.h"
 #include "iree/net/status_wire.h"
 #include "iree/net/transport_factory.h"
@@ -115,11 +118,10 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_create(
     iree_string_view_t identifier,
     const iree_hal_remote_client_device_options_t* options,
     const iree_hal_device_create_params_t* create_params,
-    iree_async_frontier_tracker_t* frontier_tracker,
     iree_hal_remote_recv_pool_t* recv_pool, iree_allocator_t host_allocator,
     iree_hal_device_t** out_device) {
   IREE_ASSERT_ARGUMENT(options);
-  IREE_ASSERT_ARGUMENT(frontier_tracker);
+  IREE_ASSERT_ARGUMENT(create_params);
   IREE_ASSERT_ARGUMENT(recv_pool);
   IREE_ASSERT_ARGUMENT(out_device);
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -162,17 +164,30 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_create(
   device->channel_provider = NULL;
   device->device_allocator = NULL;
 
-  // Retain proactor from the pool, frontier tracker, and recv_pool.
+  // Retain the receive-pool proactor, create the session frontier tracker, and
+  // retain recv_pool.
   device->proactor = iree_hal_remote_recv_pool_proactor(recv_pool);
   iree_async_proactor_retain(device->proactor);
-  device->frontier_tracker = frontier_tracker;
-  iree_async_frontier_tracker_retain(device->frontier_tracker);
+  iree_async_frontier_tracker_options_t tracker_options =
+      iree_async_frontier_tracker_options_default();
+  tracker_options.axis_table_capacity = 256;
+  iree_status_t tracker_status = iree_async_frontier_tracker_create(
+      tracker_options, host_allocator, &device->frontier_tracker);
+  if (!iree_status_is_ok(tracker_status)) {
+    iree_async_proactor_release(device->proactor);
+    iree_net_transport_factory_release(options->transport_factory);
+    iree_allocator_free(host_allocator, device);
+    IREE_TRACE_ZONE_END(z0);
+    return tracker_status;
+  }
   device->recv_pool = recv_pool;
   iree_hal_remote_recv_pool_retain(recv_pool);
 
   device->session = NULL;
+  memset(&device->topology_info, 0, sizeof(device->topology_info));
+  device->queue_slab_provider = NULL;
+  device->queue_pool_notification = NULL;
   iree_atomic_store(&device->queue_channel, 0, iree_memory_order_relaxed);
-  iree_atomic_store(&device->channel_users, 0, iree_memory_order_relaxed);
   device->remote_queue_axis = 0;
   iree_atomic_store(&device->next_submission_epoch, 0,
                     iree_memory_order_relaxed);
@@ -193,10 +208,34 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_create(
       device, identifier, host_allocator, &device->device_allocator);
   if (!iree_status_is_ok(allocator_status)) {
     iree_slim_mutex_deinitialize(&device->rpc_mutex);
+    iree_async_frontier_tracker_release(device->frontier_tracker);
+    iree_hal_remote_recv_pool_release(device->recv_pool);
+    iree_async_proactor_release(device->proactor);
     iree_net_transport_factory_release(options->transport_factory);
     iree_allocator_free(host_allocator, device);
     IREE_TRACE_ZONE_END(z0);
     return allocator_status;
+  }
+
+  iree_status_t pool_backend_status =
+      iree_hal_remote_client_slab_provider_create(device, host_allocator,
+                                                  &device->queue_slab_provider);
+  if (iree_status_is_ok(pool_backend_status)) {
+    pool_backend_status = iree_async_notification_create(
+        device->proactor, IREE_ASYNC_NOTIFICATION_FLAG_NONE,
+        &device->queue_pool_notification);
+  }
+  if (!iree_status_is_ok(pool_backend_status)) {
+    iree_hal_slab_provider_release(device->queue_slab_provider);
+    iree_hal_allocator_release(device->device_allocator);
+    iree_slim_mutex_deinitialize(&device->rpc_mutex);
+    iree_async_frontier_tracker_release(device->frontier_tracker);
+    iree_hal_remote_recv_pool_release(device->recv_pool);
+    iree_async_proactor_release(device->proactor);
+    iree_net_transport_factory_release(options->transport_factory);
+    iree_allocator_free(host_allocator, device);
+    IREE_TRACE_ZONE_END(z0);
+    return pool_backend_status;
   }
 
   *out_device = (iree_hal_device_t*)device;
@@ -205,25 +244,39 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_create(
   return iree_ok_status();
 }
 
-// Atomically detaches the queue channel using the Dekker drain pattern.
-// Zeroes device->queue_channel (seq_cst), then spins until all in-flight
-// channel_users have drained. Returns the old channel pointer (or NULL if
-// already detached). The caller must detach and release the returned channel.
 static iree_net_queue_channel_t*
-iree_hal_remote_client_device_drain_queue_channel(
+iree_hal_remote_client_device_exchange_queue_channel(
+    iree_hal_remote_client_device_t* device,
+    iree_net_queue_channel_t* new_queue_channel) {
+  return (iree_net_queue_channel_t*)iree_atomic_exchange(
+      &device->queue_channel, (intptr_t)new_queue_channel,
+      iree_memory_order_acq_rel);
+}
+
+// Detaches the current queue channel from its endpoint without dropping the
+// device's owning reference. This keeps concurrent submitters that already
+// acquired the pointer on the hot path from racing channel destruction.
+static void iree_hal_remote_client_device_detach_queue_channel(
     iree_hal_remote_client_device_t* device) {
   iree_net_queue_channel_t* queue_channel =
-      (iree_net_queue_channel_t*)iree_atomic_exchange(
-          &device->queue_channel, 0, iree_memory_order_seq_cst);
-  // Drain in-flight users. The seq_cst exchange above is ordered before any
-  // subsequent load of channel_users in the total order, so if a user
-  // incremented channel_users before we zeroed queue_channel, we will see
-  // their increment here.
-  while (iree_atomic_load(&device->channel_users, iree_memory_order_acquire) !=
-         0) {
-    iree_processor_yield();
-  }
-  return queue_channel;
+      (iree_net_queue_channel_t*)iree_atomic_load(&device->queue_channel,
+                                                  iree_memory_order_acquire);
+  iree_net_queue_channel_detach(queue_channel);
+}
+
+static void iree_hal_remote_client_device_release_queue_channel(
+    iree_hal_remote_client_device_t* device) {
+  iree_net_queue_channel_t* queue_channel =
+      iree_hal_remote_client_device_exchange_queue_channel(device, NULL);
+  iree_net_queue_channel_detach(queue_channel);
+  iree_net_queue_channel_release(queue_channel);
+}
+
+iree_net_queue_channel_t* iree_hal_remote_client_device_publish_queue_channel(
+    iree_hal_remote_client_device_t* device,
+    iree_net_queue_channel_t* queue_channel) {
+  return iree_hal_remote_client_device_exchange_queue_channel(device,
+                                                              queue_channel);
 }
 
 static void iree_hal_remote_client_device_destroy(
@@ -248,16 +301,15 @@ static void iree_hal_remote_client_device_destroy(
   // callbacks while the endpoint is still alive and zeroes the endpoint
   // reference, preventing UAF if retained references (barrier completions)
   // later drop the last channel ref after the session is freed.
-  iree_net_queue_channel_t* queue_channel =
-      iree_hal_remote_client_device_drain_queue_channel(device);
-  iree_net_queue_channel_detach(queue_channel);
-  iree_net_queue_channel_release(queue_channel);
+  iree_hal_remote_client_device_release_queue_channel(device);
 
   // Clear session before releasing to prevent re-entrancy.
   iree_net_session_t* session = device->session;
   device->session = NULL;
   iree_net_session_release(session);
 
+  iree_async_notification_release(device->queue_pool_notification);
+  iree_hal_slab_provider_release(device->queue_slab_provider);
   iree_hal_allocator_release(device->device_allocator);
   iree_hal_channel_provider_release(device->channel_provider);
   iree_net_transport_factory_release(device->options.transport_factory);
@@ -272,8 +324,8 @@ static void iree_hal_remote_client_device_destroy(
   iree_allocator_free(host_allocator, device->provisional_buffers.buffers);
   iree_slim_mutex_deinitialize(&device->provisional_mutex);
 
-  iree_async_frontier_tracker_release(device->frontier_tracker);
   iree_hal_remote_recv_pool_release(device->recv_pool);
+  iree_async_frontier_tracker_release(device->frontier_tracker);
   iree_async_proactor_release(device->proactor);
 
   iree_slim_mutex_deinitialize(&device->rpc_mutex);
@@ -362,7 +414,9 @@ static iree_status_t iree_hal_remote_client_device_query_capabilities(
 
 static const iree_hal_device_topology_info_t*
 iree_hal_remote_client_device_topology_info(iree_hal_device_t* base_device) {
-  return NULL;
+  iree_hal_remote_client_device_t* device =
+      iree_hal_remote_client_device_cast(base_device);
+  return &device->topology_info;
 }
 
 static iree_status_t iree_hal_remote_client_device_refine_topology_edge(
@@ -374,6 +428,13 @@ static iree_status_t iree_hal_remote_client_device_refine_topology_edge(
 static iree_status_t iree_hal_remote_client_device_assign_topology_info(
     iree_hal_device_t* base_device,
     const iree_hal_device_topology_info_t* topology_info) {
+  iree_hal_remote_client_device_t* device =
+      iree_hal_remote_client_device_cast(base_device);
+  if (!topology_info) {
+    memset(&device->topology_info, 0, sizeof(device->topology_info));
+  } else {
+    device->topology_info = *topology_info;
+  }
   return iree_ok_status();
 }
 
@@ -416,8 +477,11 @@ static iree_status_t iree_hal_remote_client_device_import_file(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
     iree_hal_memory_access_t access, iree_io_file_handle_t* handle,
     iree_hal_external_file_flags_t flags, iree_hal_file_t** out_file) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "remote file import not yet implemented");
+  iree_hal_remote_client_device_t* device =
+      iree_hal_remote_client_device_cast(base_device);
+  return iree_hal_file_from_handle(device->device_allocator, queue_affinity,
+                                   access, handle, device->proactor,
+                                   device->host_allocator, out_file);
 }
 
 static iree_status_t iree_hal_remote_client_device_create_semaphore(
@@ -435,6 +499,28 @@ iree_hal_remote_client_device_query_semaphore_compatibility(
     iree_hal_device_t* base_device, iree_hal_semaphore_t* semaphore) {
   return IREE_HAL_SEMAPHORE_COMPATIBILITY_HOST_WAIT |
          IREE_HAL_SEMAPHORE_COMPATIBILITY_HOST_SIGNAL;
+}
+
+static bool iree_hal_remote_client_device_query_pool_epoch(
+    void* user_data, iree_async_axis_t axis, uint64_t epoch) {
+  iree_hal_remote_client_device_t* device =
+      (iree_hal_remote_client_device_t*)user_data;
+  return iree_async_frontier_tracker_query_epoch(device->frontier_tracker, axis,
+                                                 epoch);
+}
+
+static iree_status_t iree_hal_remote_client_device_query_queue_pool_backend(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_queue_pool_backend_t* out_backend) {
+  iree_hal_remote_client_device_t* device =
+      iree_hal_remote_client_device_cast(base_device);
+  out_backend->slab_provider = device->queue_slab_provider;
+  out_backend->notification = device->queue_pool_notification;
+  out_backend->epoch_query = (iree_hal_pool_epoch_query_t){
+      .fn = iree_hal_remote_client_device_query_pool_epoch,
+      .user_data = device,
+  };
+  return iree_ok_status();
 }
 
 static iree_status_t iree_hal_remote_client_device_profiling_begin(
@@ -495,12 +581,10 @@ static void iree_hal_remote_client_device_on_session_ready(
   iree_atomic_store(&device->next_provisional_generation, 1,
                     iree_memory_order_relaxed);
 
-  iree_hal_remote_client_device_store_state(
-      device, IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_CONNECTED);
-
   // The connect callback is NOT fired here — it is deferred to
   // on_queue_endpoint_ready so the application receives the callback only
-  // after the queue channel is published and queue operations are usable.
+  // after the queue channel is published, the state becomes CONNECTED, and
+  // queue operations are usable.
   iree_net_endpoint_ready_callback_t endpoint_callback = {
       .fn = iree_hal_remote_client_device_on_queue_endpoint_ready,
       .user_data = device,
@@ -559,12 +643,10 @@ static void iree_hal_remote_client_device_on_session_goaway(
                          "server sent GOAWAY; remote queue axis failed"));
   }
 
-  // Drain in-flight channel users then detach and release. Detach while the
-  // endpoint is still alive to clear callbacks safely.
-  iree_net_queue_channel_t* queue_channel =
-      iree_hal_remote_client_device_drain_queue_channel(device);
-  iree_net_queue_channel_detach(queue_channel);
-  iree_net_queue_channel_release(queue_channel);
+  // Detach while the endpoint is still alive to clear callbacks safely. The
+  // channel object stays retained by the device so concurrent submitters that
+  // already acquired the pointer only observe a detached channel.
+  iree_hal_remote_client_device_detach_queue_channel(device);
 
   // Clear session before releasing to prevent re-entrancy.
   iree_net_session_t* device_session = device->session;
@@ -618,11 +700,7 @@ static void iree_hal_remote_client_device_on_session_error(
                                           iree_status_clone(status));
   }
 
-  // Drain in-flight channel users then detach and release.
-  iree_net_queue_channel_t* queue_channel =
-      iree_hal_remote_client_device_drain_queue_channel(device);
-  iree_net_queue_channel_detach(queue_channel);
-  iree_net_queue_channel_release(queue_channel);
+  iree_hal_remote_client_device_detach_queue_channel(device);
 
   // Clear session before releasing to prevent re-entrancy.
   iree_net_session_t* device_session = device->session;
@@ -806,9 +884,9 @@ iree_status_t iree_hal_remote_client_device_send_fire_and_forget(
   iree_async_span_t span =
       iree_async_span_from_ptr((void*)message.data, message.data_length);
   iree_async_span_list_t payload = {&span, 1};
-  return iree_net_session_send_control_data(device->session, /*flags=*/0,
-                                            payload,
-                                            /*operation_user_data=*/0);
+  return iree_net_session_send_control_data_copy(device->session, /*flags=*/0,
+                                                 payload,
+                                                 /*operation_user_data=*/0);
 }
 
 // Returns the device's session (for use by the allocator module).
@@ -1057,6 +1135,8 @@ static const iree_hal_device_vtable_t iree_hal_remote_client_device_vtable = {
     .create_semaphore = iree_hal_remote_client_device_create_semaphore,
     .query_semaphore_compatibility =
         iree_hal_remote_client_device_query_semaphore_compatibility,
+    .query_queue_pool_backend =
+        iree_hal_remote_client_device_query_queue_pool_backend,
     .queue_alloca = iree_hal_remote_client_device_queue_alloca,
     .queue_dealloca = iree_hal_remote_client_device_queue_dealloca,
     .queue_fill = iree_hal_remote_client_device_queue_fill,

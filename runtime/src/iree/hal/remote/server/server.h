@@ -22,10 +22,11 @@ extern "C" {
 // Server lifecycle states.
 //
 // State transitions are monotonic (forward-only):
-//   STOPPED → RUNNING → STOPPING → STOPPED
+//   STOPPED → STARTING → RUNNING → STOPPING → STOPPED
 //   Any state → ERROR (terminal)
 typedef enum iree_hal_remote_server_state_e {
   IREE_HAL_REMOTE_SERVER_STATE_STOPPED = 0,
+  IREE_HAL_REMOTE_SERVER_STATE_STARTING,
   IREE_HAL_REMOTE_SERVER_STATE_RUNNING,
   IREE_HAL_REMOTE_SERVER_STATE_STOPPING,
   IREE_HAL_REMOTE_SERVER_STATE_ERROR,

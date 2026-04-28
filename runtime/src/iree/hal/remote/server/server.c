@@ -330,6 +330,7 @@ static void iree_hal_remote_server_on_accept(
   uint64_t session_id = 0;
   iree_slim_mutex_lock(&server->session_mutex);
   if (iree_status_is_ok(status) &&
+      server->state != IREE_HAL_REMOTE_SERVER_STATE_STARTING &&
       server->state != IREE_HAL_REMOTE_SERVER_STATE_RUNNING) {
     status = iree_status_from_code(IREE_STATUS_ABORTED);
   }
@@ -373,6 +374,7 @@ static void iree_hal_remote_server_on_accept(
         .on_goaway = iree_hal_remote_server_on_session_goaway,
         .on_error = iree_hal_remote_server_on_session_error,
         .on_control_data = iree_hal_remote_server_on_control_data,
+        .on_send_complete = iree_hal_remote_server_on_session_send_complete,
         .user_data = &server->sessions[slot],
     };
 
@@ -451,8 +453,13 @@ iree_hal_remote_server_start(iree_hal_remote_server_t* server) {
                             (int)current_state);
   }
 
+  iree_slim_mutex_lock(&server->session_mutex);
+  server->state = IREE_HAL_REMOTE_SERVER_STATE_STARTING;
+  iree_slim_mutex_unlock(&server->session_mutex);
+
   // Create the listener via the transport factory (outside lock — allocation
-  // and network setup).
+  // and network setup). Accept completions may arrive before this call returns,
+  // so the state is STARTING while the listener becomes visible to the kernel.
   iree_status_t status = iree_net_transport_factory_create_listener(
       server->options.transport_factory, server->options.bind_address,
       server->proactor, server->recv_pool, iree_hal_remote_server_on_accept,

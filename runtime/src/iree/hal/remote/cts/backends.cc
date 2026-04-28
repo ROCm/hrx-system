@@ -20,7 +20,6 @@
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/api.h"
 #include "iree/base/threading/notification.h"
-#include "iree/base/threading/numa.h"
 #include "iree/hal/api.h"
 #include "iree/hal/cts/util/registry.h"
 #include "iree/hal/drivers/local_task/registration/driver_module.h"
@@ -47,9 +46,6 @@ struct RemoteBackendContext {
 
   // Loopback transport factory shared by server and client.
   iree_net_transport_factory_t* factory = nullptr;
-
-  // Frontier tracker used by the remote client device.
-  iree_async_frontier_tracker_t* client_tracker = nullptr;
 
   // Frontier tracker assigned to the server-side local-task device group.
   iree_async_frontier_tracker_t* server_tracker = nullptr;
@@ -130,18 +126,16 @@ struct RemoteBackendContext {
     }
     iree_hal_remote_server_release(server);
     server = nullptr;
-    iree_hal_device_release(server_device);
-    server_device = nullptr;
     iree_hal_device_group_release(server_device_group);
     server_device_group = nullptr;
+    iree_hal_device_release(server_device);
+    server_device = nullptr;
     iree_hal_driver_release(server_driver);
     server_driver = nullptr;
     iree_net_transport_factory_release(factory);
     factory = nullptr;
     iree_async_frontier_tracker_release(server_tracker);
     server_tracker = nullptr;
-    iree_async_frontier_tracker_release(client_tracker);
-    client_tracker = nullptr;
     iree_hal_remote_recv_pool_release(recv_pool);
     recv_pool = nullptr;
     iree_async_proactor_pool_release(proactor_pool);
@@ -210,6 +204,7 @@ static iree_status_t CreateLocalTaskServerDevice(
 // |create_server_device| creates the server-side device+driver pair using
 // the shared proactor pool.
 static iree_status_t CreateRemoteDevice(
+    const iree_hal_device_create_params_t* create_params,
     iree_status_t (*create_server_device)(iree_async_proactor_pool_t*,
                                           iree_hal_driver_t**,
                                           iree_hal_device_t**),
@@ -218,11 +213,15 @@ static iree_status_t CreateRemoteDevice(
   *out_driver = nullptr;
   *out_device = nullptr;
 
-  // Create proactor pool (shared by server device and client device).
-  iree_status_t status = iree_async_proactor_pool_create(
-      iree_numa_node_count(), /*node_ids=*/NULL,
-      iree_async_proactor_pool_options_default(), iree_allocator_system(),
-      &ctx->proactor_pool);
+  if (!create_params || !create_params->proactor_pool) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "remote CTS backend requires a proactor pool");
+  }
+
+  // Share the CTS-owned proactor pool between the server and client.
+  ctx->proactor_pool = create_params->proactor_pool;
+  iree_async_proactor_pool_retain(ctx->proactor_pool);
+  iree_status_t status = iree_ok_status();
 
   // Create recv_pool from the proactor pool (shared by client and server).
   if (iree_status_is_ok(status)) {
@@ -235,14 +234,7 @@ static iree_status_t CreateRemoteDevice(
       ctx->recv_pool ? iree_hal_remote_recv_pool_proactor(ctx->recv_pool)
                      : NULL;
 
-  // Create frontier trackers.
-  if (iree_status_is_ok(status)) {
-    iree_async_frontier_tracker_options_t tracker_options =
-        iree_async_frontier_tracker_options_default();
-    tracker_options.axis_table_capacity = kAxisTableCapacity;
-    status = iree_async_frontier_tracker_create(
-        tracker_options, iree_allocator_system(), &ctx->client_tracker);
-  }
+  // Create the server-side frontier tracker used by the remote session.
   if (iree_status_is_ok(status)) {
     iree_async_frontier_tracker_options_t tracker_options =
         iree_async_frontier_tracker_options_default();
@@ -305,14 +297,9 @@ static iree_status_t CreateRemoteDevice(
     client_options.transport_factory = ctx->factory;
     client_options.server_address = IREE_SV("cts-server");
 
-    iree_hal_device_create_params_t client_create_params =
-        iree_hal_device_create_params_default();
-    client_create_params.proactor_pool = ctx->proactor_pool;
-
     status = iree_hal_remote_client_device_create(
-        IREE_SV("remote"), &client_options, &client_create_params,
-        ctx->client_tracker, ctx->recv_pool, iree_allocator_system(),
-        &client_device);
+        IREE_SV("remote"), &client_options, create_params, ctx->recv_pool,
+        iree_allocator_system(), &client_device);
   }
 
   // Connect and wait.
@@ -367,9 +354,8 @@ static iree_status_t CreateRemoteDevice(
 static iree_status_t CreateRemoteLocalTask(
     const iree_hal_device_create_params_t* create_params,
     iree_hal_driver_t** out_driver, iree_hal_device_t** out_device) {
-  (void)create_params;
-  return CreateRemoteDevice(CreateLocalTaskServerDevice, out_driver,
-                            out_device);
+  return CreateRemoteDevice(create_params, CreateLocalTaskServerDevice,
+                            out_driver, out_device);
 }
 
 static bool remote_local_task_registered_ = [] {

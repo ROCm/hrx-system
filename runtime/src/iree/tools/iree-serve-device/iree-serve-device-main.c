@@ -42,9 +42,12 @@ IREE_FLAG(bool, rdma, false, "Enable RDMA for bulk transfers when available.");
 typedef struct iree_serve_device_state_t {
   iree_allocator_t host_allocator;
   iree_hal_device_t* device;
+  // Single-device group that assigns topology/frontier metadata to |device|.
+  iree_hal_device_group_t* device_group;
   iree_async_proactor_pool_t* device_proactor_pool;
   iree_async_proactor_pool_t* server_proactor_pool;
   iree_hal_remote_recv_pool_t* recv_pool;
+  // Tracks server-side frontier axes for remote queue ordering.
   iree_async_frontier_tracker_t* tracker;
   iree_net_transport_factory_t* factory;
   iree_hal_remote_server_t* server;
@@ -199,6 +202,7 @@ static iree_status_t iree_serve_device_teardown(
   iree_net_transport_factory_release(state->factory);
   iree_hal_remote_recv_pool_release(state->recv_pool);
   iree_async_proactor_pool_release(state->server_proactor_pool);
+  iree_hal_device_group_release(state->device_group);
   iree_hal_device_release(state->device);
   iree_async_frontier_tracker_release(state->tracker);
   iree_async_proactor_pool_release(state->device_proactor_pool);
@@ -270,6 +274,14 @@ static iree_status_t iree_serve_device_run(void) {
     tracker_options.axis_table_capacity = 16;
     status = iree_async_frontier_tracker_create(
         tracker_options, state.host_allocator, &state.tracker);
+  }
+
+  // Assign topology/frontier metadata to the served device. Queue-ordered
+  // allocation pools use the device frontier tracker to publish reservation
+  // lifetimes, so a raw device without topology is not a valid served device.
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_device_group_create_from_device(
+        state.device, state.tracker, state.host_allocator, &state.device_group);
   }
 
   if (iree_status_is_ok(status)) {

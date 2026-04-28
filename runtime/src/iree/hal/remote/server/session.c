@@ -406,6 +406,31 @@ static iree_hal_remote_resource_id_t iree_hal_remote_server_resolve_resource_id(
   return resource_id;  // Not found — return as-is (will fail in table lookup).
 }
 
+static iree_status_t iree_hal_remote_server_resolve_command_buffer_ref(
+    iree_hal_remote_server_session_t* session_slot,
+    iree_hal_remote_resource_id_t buffer_id, uint32_t buffer_slot,
+    uint64_t offset, uint64_t length, const char* command_name,
+    iree_hal_buffer_ref_t* out_ref) {
+  if (buffer_id == 0) {
+    *out_ref = iree_hal_make_indirect_buffer_ref(buffer_slot, offset, length);
+    return iree_ok_status();
+  }
+
+  iree_hal_remote_resource_id_t resolved_id =
+      iree_hal_remote_server_resolve_resource_id(session_slot, buffer_id);
+  iree_hal_buffer_t* buffer =
+      (iree_hal_buffer_t*)iree_hal_remote_resource_table_lookup(
+          &session_slot->resource_table, IREE_HAL_REMOTE_RESOURCE_TYPE_BUFFER,
+          resolved_id);
+  if (!buffer) {
+    return iree_make_status(IREE_STATUS_NOT_FOUND,
+                            "%s buffer 0x%016" PRIx64 " not found",
+                            command_name, resolved_id);
+  }
+  *out_ref = iree_hal_make_buffer_ref(buffer, offset, length);
+  return iree_ok_status();
+}
+
 // Resolves a wire wait_frontier to a local wait semaphore list. For each
 // (axis, epoch) entry in the wait frontier, looks up the corresponding local
 // semaphore from the epoch mapping. All resolved semaphores use payload_value=1
@@ -752,49 +777,45 @@ static iree_status_t iree_hal_remote_server_submit_buffer_alloca(
   params.type = (iree_hal_memory_type_t)op->params.type;
   params.queue_affinity = (iree_hal_queue_affinity_t)op->params.queue_affinity;
   params.min_alignment = (iree_device_size_t)op->params.min_alignment;
-  if (op->pool != 0) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "remote queue allocations do not support explicit pools yet");
-  }
+  const iree_hal_queue_affinity_t queue_affinity =
+      iree_hal_queue_affinity_is_empty(params.queue_affinity)
+          ? IREE_HAL_QUEUE_AFFINITY_ANY
+          : params.queue_affinity;
 
   // Allocate on the local device. queue_alloca returns a buffer handle
   // immediately (synchronous allocation, async queue ordering).
   iree_hal_buffer_t* local_buffer = NULL;
   iree_status_t status = iree_hal_device_queue_alloca(
-      local_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_list, signal_list,
-      /*pool=*/NULL, params, (iree_device_size_t)op->allocation_size,
+      local_device, queue_affinity, wait_list, signal_list, /*pool=*/NULL,
+      params, (iree_device_size_t)op->allocation_size,
       (iree_hal_alloca_flags_t)op->alloca_flags, &local_buffer);
-  if (!iree_status_is_ok(status)) return status;
 
   // Assign the buffer to the resource table to get a canonical resolved ID.
   iree_hal_remote_resource_id_t resolved_id = 0;
-  status = iree_hal_remote_resource_table_assign(
-      &context->session_slot->resource_table,
-      IREE_HAL_REMOTE_RESOURCE_TYPE_BUFFER, local_buffer, &resolved_id);
-  if (!iree_status_is_ok(status)) {
-    iree_hal_buffer_release(local_buffer);
-    return status;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_resource_table_assign(
+        &context->session_slot->resource_table,
+        IREE_HAL_REMOTE_RESOURCE_TYPE_BUFFER, local_buffer, &resolved_id);
   }
 
   // Store the provisional→resolved mapping so subsequent commands referencing
   // the provisional ID can be resolved.
-  status = iree_hal_remote_server_store_provisional(
-      context->session_slot, op->provisional_buffer_id, resolved_id,
-      context->session_slot->server->host_allocator);
-  if (!iree_status_is_ok(status)) {
-    iree_hal_buffer_release(local_buffer);
-    return status;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_server_store_provisional(
+        context->session_slot, op->provisional_buffer_id, resolved_id,
+        context->session_slot->server->host_allocator);
   }
 
   // Store the resolution entry in the op context so submit_command can
   // populate the completion's resolution field.
-  context->resolution_count = 1;
-  context->resolution.provisional_id = op->provisional_buffer_id;
-  context->resolution.resolved_id = resolved_id;
+  if (iree_status_is_ok(status)) {
+    context->resolution_count = 1;
+    context->resolution.provisional_id = op->provisional_buffer_id;
+    context->resolution.resolved_id = resolved_id;
+  }
 
   iree_hal_buffer_release(local_buffer);
-  return iree_ok_status();
+  return status;
 }
 
 static iree_status_t iree_hal_remote_server_submit_buffer_dealloca(
@@ -831,6 +852,53 @@ static iree_status_t iree_hal_remote_server_submit_buffer_dealloca(
   return iree_hal_device_queue_dealloca(
       local_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_list, signal_list, buffer,
       (iree_hal_dealloca_flags_t)op->dealloca_flags);
+}
+
+static iree_status_t iree_hal_remote_server_resolve_dispatch_config(
+    iree_hal_remote_server_session_t* session_slot,
+    const iree_hal_remote_dispatch_config_t* wire_config,
+    iree_hal_dispatch_flags_t flags, bool allow_indirect_buffer_ref,
+    const char* label, iree_hal_dispatch_config_t* out_config) {
+  memset(out_config, 0, sizeof(*out_config));
+  memcpy(out_config->workgroup_size, wire_config->workgroup_size,
+         sizeof(out_config->workgroup_size));
+  memcpy(out_config->workgroup_count, wire_config->workgroup_count,
+         sizeof(out_config->workgroup_count));
+  out_config->dynamic_workgroup_local_memory =
+      wire_config->dynamic_workgroup_local_memory;
+
+  if (wire_config->workgroup_count_buffer_id != 0) {
+    iree_hal_remote_resource_id_t buffer_id =
+        iree_hal_remote_server_resolve_resource_id(
+            session_slot, wire_config->workgroup_count_buffer_id);
+    iree_hal_buffer_t* buffer =
+        (iree_hal_buffer_t*)iree_hal_remote_resource_table_lookup(
+            &session_slot->resource_table, IREE_HAL_REMOTE_RESOURCE_TYPE_BUFFER,
+            buffer_id);
+    if (!buffer) {
+      return iree_make_status(IREE_STATUS_NOT_FOUND,
+                              "%s workgroup count buffer 0x%016" PRIx64
+                              " not found",
+                              label, buffer_id);
+    }
+    out_config->workgroup_count_ref =
+        iree_hal_make_buffer_ref(buffer, wire_config->workgroup_count_offset,
+                                 wire_config->workgroup_count_length);
+  } else if (allow_indirect_buffer_ref &&
+             iree_hal_dispatch_uses_indirect_parameters(flags)) {
+    out_config->workgroup_count_ref = iree_hal_make_indirect_buffer_ref(
+        wire_config->workgroup_count_buffer_slot,
+        wire_config->workgroup_count_offset,
+        wire_config->workgroup_count_length);
+  } else {
+    out_config->workgroup_count_ref.offset =
+        wire_config->workgroup_count_offset;
+    out_config->workgroup_count_ref.length =
+        wire_config->workgroup_count_length;
+    out_config->workgroup_count_ref.buffer_slot =
+        wire_config->workgroup_count_buffer_slot;
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t iree_hal_remote_server_submit_dispatch(
@@ -933,15 +1001,11 @@ static iree_status_t iree_hal_remote_server_submit_dispatch(
     local_bindings[i].length = (iree_device_size_t)wire_bindings[i].length;
   }
 
-  // Translate wire dispatch config to HAL dispatch config.
   iree_hal_dispatch_config_t local_config;
-  memset(&local_config, 0, sizeof(local_config));
-  memcpy(local_config.workgroup_size, op->config.workgroup_size,
-         sizeof(local_config.workgroup_size));
-  memcpy(local_config.workgroup_count, op->config.workgroup_count,
-         sizeof(local_config.workgroup_count));
-  local_config.dynamic_workgroup_local_memory =
-      op->config.dynamic_workgroup_local_memory;
+  IREE_RETURN_IF_ERROR(iree_hal_remote_server_resolve_dispatch_config(
+      context->session_slot, &op->config,
+      (iree_hal_dispatch_flags_t)op->dispatch_flags,
+      /*allow_indirect_buffer_ref=*/false, "DISPATCH", &local_config));
 
   iree_hal_buffer_ref_list_t binding_list = {
       .count = op->binding_count,
@@ -959,11 +1023,16 @@ static iree_status_t iree_hal_remote_server_submit_dispatch(
 // Control channel dispatch
 //===----------------------------------------------------------------------===//
 
+typedef struct iree_hal_remote_control_send_allocation_t {
+  iree_allocator_t host_allocator;
+  // Trailing response frame bytes.
+} iree_hal_remote_control_send_allocation_t;
+
 // Sends a control channel response. Builds envelope + response_prefix + body
-// on the stack and sends via the session. The request envelope is used to echo
-// the request_id and message_type.
+// in retained storage and sends via the session. The request envelope is used
+// to echo the request_id and message_type.
 static iree_status_t iree_hal_remote_server_send_response(
-    iree_net_session_t* session,
+    iree_allocator_t host_allocator, iree_net_session_t* session,
     const iree_hal_remote_control_envelope_t* request_envelope,
     iree_status_code_t status_code, const void* body,
     iree_host_size_t body_length) {
@@ -971,14 +1040,22 @@ static iree_status_t iree_hal_remote_server_send_response(
       sizeof(iree_hal_remote_control_envelope_t) +
       sizeof(iree_hal_remote_control_response_prefix_t) + body_length;
 
-  // Stack-allocate up to a reasonable limit. All current responses are small.
-  uint8_t response_storage[256];
-  if (response_length > sizeof(response_storage)) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "control response too large for stack buffer: "
-                            "%" PRIhsz " bytes",
-                            response_length);
+  iree_host_size_t allocation_size = 0;
+  iree_status_t status =
+      iree_host_size_checked_add(
+          sizeof(iree_hal_remote_control_send_allocation_t), response_length,
+          &allocation_size)
+          ? iree_ok_status()
+          : iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                             "control response allocation size overflow");
+  iree_hal_remote_control_send_allocation_t* allocation = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc(host_allocator, allocation_size,
+                                   (void**)&allocation);
   }
+  if (!iree_status_is_ok(status)) return status;
+  allocation->host_allocator = host_allocator;
+  uint8_t* response_storage = (uint8_t*)(allocation + 1);
   memset(response_storage, 0, response_length);
 
   // Envelope.
@@ -1005,8 +1082,12 @@ static iree_status_t iree_hal_remote_server_send_response(
   iree_async_span_t span =
       iree_async_span_from_ptr(response_storage, response_length);
   iree_async_span_list_t payload = {&span, 1};
-  return iree_net_session_send_control_data(session, /*flags=*/0, payload,
-                                            /*operation_user_data=*/0);
+  status = iree_net_session_send_control_data(session, /*flags=*/0, payload,
+                                              (uint64_t)(uintptr_t)allocation);
+  if (!iree_status_is_ok(status)) {
+    iree_allocator_free(host_allocator, allocation);
+  }
+  return status;
 }
 
 // Sends an error response with the full serialized status as body.
@@ -1014,7 +1095,7 @@ static iree_status_t iree_hal_remote_server_send_response(
 // The response prefix carries the status code for fast-path checking; the body
 // carries the full wire-format status (source location, message, annotations).
 static iree_status_t iree_hal_remote_server_send_error_response(
-    iree_net_session_t* session,
+    iree_allocator_t host_allocator, iree_net_session_t* session,
     const iree_hal_remote_control_envelope_t* request_envelope,
     iree_status_t status) {
   iree_status_code_t code = iree_status_code(status);
@@ -1030,17 +1111,18 @@ static iree_status_t iree_hal_remote_server_send_error_response(
         status, iree_make_byte_span(wire_buffer, wire_size));
     if (iree_status_is_ok(serialize_status)) {
       send_status = iree_hal_remote_server_send_response(
-          session, request_envelope, code, wire_buffer, wire_size);
+          host_allocator, session, request_envelope, code, wire_buffer,
+          wire_size);
     } else {
       // Serialization failed; send code-only response.
       iree_status_ignore(serialize_status);
       send_status = iree_hal_remote_server_send_response(
-          session, request_envelope, code, NULL, 0);
+          host_allocator, session, request_envelope, code, NULL, 0);
     }
   } else {
     // Status too large for stack buffer; send code-only response.
     send_status = iree_hal_remote_server_send_response(
-        session, request_envelope, code, NULL, 0);
+        host_allocator, session, request_envelope, code, NULL, 0);
   }
 
   iree_status_ignore(status);
@@ -1055,7 +1137,7 @@ static iree_status_t iree_hal_remote_server_handle_buffer_alloc(
     iree_host_size_t body_length) {
   if (body_length < sizeof(iree_hal_remote_buffer_alloc_request_t)) {
     return iree_hal_remote_server_send_error_response(
-        entry->session, envelope,
+        entry->server->host_allocator, entry->session, envelope,
         iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                          "BUFFER_ALLOC body too small: %" PRIhsz " bytes",
                          body_length));
@@ -1086,8 +1168,8 @@ static iree_status_t iree_hal_remote_server_handle_buffer_alloc(
   iree_status_t status = iree_hal_allocator_allocate_buffer(
       allocator, params, allocation_size, &buffer);
   if (!iree_status_is_ok(status)) {
-    return iree_hal_remote_server_send_error_response(entry->session, envelope,
-                                                      status);
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope, status);
   }
 
   // Assign a slot in the session's resource table.
@@ -1098,8 +1180,8 @@ static iree_status_t iree_hal_remote_server_handle_buffer_alloc(
   // The table retains the buffer; release our allocation reference.
   iree_hal_buffer_release(buffer);
   if (!iree_status_is_ok(status)) {
-    return iree_hal_remote_server_send_error_response(entry->session, envelope,
-                                                      status);
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope, status);
   }
 
   // Send success response with the resolved resource_id.
@@ -1107,7 +1189,8 @@ static iree_status_t iree_hal_remote_server_handle_buffer_alloc(
       .resolved_id = resolved_id,
   };
   return iree_hal_remote_server_send_response(
-      entry->session, envelope, IREE_STATUS_OK, &response, sizeof(response));
+      entry->server->host_allocator, entry->session, envelope, IREE_STATUS_OK,
+      &response, sizeof(response));
 }
 
 // Handles BUFFER_QUERY_HEAPS: queries the local device's memory heap topology
@@ -1131,23 +1214,23 @@ static iree_status_t iree_hal_remote_server_handle_buffer_query_heaps(
     status = iree_ok_status();
   }
   if (!iree_status_is_ok(status)) {
-    return iree_hal_remote_server_send_error_response(entry->session, envelope,
-                                                      status);
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope, status);
   }
 
   // Query full heap descriptions (stack-allocated for reasonable counts).
   iree_hal_allocator_memory_heap_t heaps_storage[16];
   if (heap_count > IREE_ARRAYSIZE(heaps_storage)) {
     return iree_hal_remote_server_send_error_response(
-        entry->session, envelope,
+        entry->server->host_allocator, entry->session, envelope,
         iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                          "too many heaps: %" PRIhsz, heap_count));
   }
   status = iree_hal_allocator_query_memory_heaps(allocator, heap_count,
                                                  heaps_storage, &heap_count);
   if (!iree_status_is_ok(status)) {
-    return iree_hal_remote_server_send_error_response(entry->session, envelope,
-                                                      status);
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope, status);
   }
 
   // Build response: header + wire heap descriptions.
@@ -1174,57 +1257,89 @@ static iree_status_t iree_hal_remote_server_handle_buffer_query_heaps(
   iree_host_size_t response_body_length =
       sizeof(iree_hal_remote_buffer_query_heaps_response_t) +
       heap_count * sizeof(iree_hal_remote_memory_heap_t);
-  return iree_hal_remote_server_send_response(entry->session, envelope,
-                                              IREE_STATUS_OK, response_body,
-                                              response_body_length);
+  return iree_hal_remote_server_send_response(
+      entry->server->host_allocator, entry->session, envelope, IREE_STATUS_OK,
+      response_body, response_body_length);
 }
 
-// Sends a control channel response with a variable-length data payload using
-// scatter-gather. The header (envelope + prefix + body_header) is
-// stack-allocated; the data payload points directly at the source buffer
-// (avoiding a copy). Used for BUFFER_MAP responses with inline buffer data.
+// Sends a control channel response with a variable-length data payload.
+// The response is copied into one retained allocation because control sends are
+// asynchronous and callers usually hold mapped or staging memory only for this
+// function's dynamic extent. The session send-complete callback frees the
+// allocation.
 static iree_status_t iree_hal_remote_server_send_response_with_data(
-    iree_net_session_t* session,
+    iree_hal_remote_server_session_t* entry,
     const iree_hal_remote_control_envelope_t* request_envelope,
     iree_status_code_t status_code, const void* body_header,
     iree_host_size_t body_header_length, const void* data,
     iree_host_size_t data_length) {
-  // Build envelope + prefix + body header on the stack.
-  uint8_t header_storage[256];
   iree_host_size_t header_length =
       sizeof(iree_hal_remote_control_envelope_t) +
       sizeof(iree_hal_remote_control_response_prefix_t) + body_header_length;
-  if (header_length > sizeof(header_storage)) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "response header too large for stack buffer");
+  iree_host_size_t response_length = 0;
+  iree_status_t status =
+      iree_host_size_checked_add(header_length, data_length, &response_length)
+          ? iree_ok_status()
+          : iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                             "response payload size overflow");
+
+  iree_host_size_t allocation_size = 0;
+  if (iree_status_is_ok(status) &&
+      !iree_host_size_checked_add(
+          sizeof(iree_hal_remote_control_send_allocation_t), response_length,
+          &allocation_size)) {
+    status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "response allocation size overflow");
   }
-  memset(header_storage, 0, header_length);
+
+  iree_hal_remote_control_send_allocation_t* allocation = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc(entry->server->host_allocator,
+                                   allocation_size, (void**)&allocation);
+  }
+  if (!iree_status_is_ok(status)) {
+    return status;
+  }
+  allocation->host_allocator = entry->server->host_allocator;
+  uint8_t* response_data = (uint8_t*)(allocation + 1);
+  memset(response_data, 0, response_length);
 
   iree_hal_remote_control_envelope_t* envelope =
-      (iree_hal_remote_control_envelope_t*)header_storage;
+      (iree_hal_remote_control_envelope_t*)response_data;
   envelope->message_type = request_envelope->message_type;
   envelope->message_flags = IREE_HAL_REMOTE_CONTROL_FLAG_IS_RESPONSE;
   envelope->request_id = request_envelope->request_id;
 
   iree_hal_remote_control_response_prefix_t* prefix =
-      (iree_hal_remote_control_response_prefix_t*)(header_storage +
+      (iree_hal_remote_control_response_prefix_t*)(response_data +
                                                    sizeof(*envelope));
   prefix->status_code = (uint32_t)status_code;
 
   if (body_header && body_header_length > 0) {
-    memcpy(header_storage + sizeof(*envelope) + sizeof(*prefix), body_header,
+    memcpy(response_data + sizeof(*envelope) + sizeof(*prefix), body_header,
            body_header_length);
   }
+  if (data && data_length > 0) {
+    memcpy(response_data + header_length, data, data_length);
+  }
 
-  // Scatter-gather: header span + data span.
-  iree_async_span_t spans[2] = {
-      iree_async_span_from_ptr(header_storage, header_length),
-      iree_async_span_from_ptr((void*)data, data_length),
-  };
-  iree_host_size_t span_count = data_length > 0 ? 2 : 1;
-  iree_async_span_list_t payload = {spans, span_count};
-  return iree_net_session_send_control_data(session, /*flags=*/0, payload,
-                                            /*operation_user_data=*/0);
+  iree_async_span_t span =
+      iree_async_span_from_ptr(response_data, response_length);
+  iree_async_span_list_t payload = {&span, 1};
+  status = iree_net_session_send_control_data(
+      entry->session, /*flags=*/0, payload, (uint64_t)(uintptr_t)allocation);
+  if (!iree_status_is_ok(status)) {
+    iree_allocator_free(entry->server->host_allocator, allocation);
+  }
+  return status;
+}
+
+static bool iree_hal_remote_server_buffer_supports_scoped_mapping(
+    iree_hal_buffer_t* buffer) {
+  return iree_all_bits_set(iree_hal_buffer_memory_type(buffer),
+                           IREE_HAL_MEMORY_TYPE_HOST_VISIBLE) &&
+         iree_all_bits_set(iree_hal_buffer_allowed_usage(buffer),
+                           IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED);
 }
 
 // Handles BUFFER_MAP: maps a buffer on the local device, reads the requested
@@ -1237,7 +1352,7 @@ static iree_status_t iree_hal_remote_server_handle_buffer_map(
     iree_host_size_t body_length) {
   if (body_length < sizeof(iree_hal_remote_buffer_map_request_t)) {
     return iree_hal_remote_server_send_error_response(
-        entry->session, envelope,
+        entry->server->host_allocator, entry->session, envelope,
         iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                          "BUFFER_MAP body too small: %" PRIhsz " bytes",
                          body_length));
@@ -1245,18 +1360,20 @@ static iree_status_t iree_hal_remote_server_handle_buffer_map(
 
   const iree_hal_remote_buffer_map_request_t* request =
       (const iree_hal_remote_buffer_map_request_t*)body;
+  iree_hal_remote_resource_id_t buffer_id =
+      iree_hal_remote_server_resolve_resource_id(entry, request->buffer_id);
 
   // Look up the buffer in the resource table.
   iree_hal_buffer_t* buffer =
       (iree_hal_buffer_t*)iree_hal_remote_resource_table_lookup(
           &entry->resource_table, IREE_HAL_REMOTE_RESOURCE_TYPE_BUFFER,
-          request->buffer_id);
+          buffer_id);
   if (!buffer) {
     return iree_hal_remote_server_send_error_response(
-        entry->session, envelope,
+        entry->server->host_allocator, entry->session, envelope,
         iree_make_status(IREE_STATUS_NOT_FOUND,
                          "BUFFER_MAP: buffer_id 0x%016" PRIx64 " not found",
-                         request->buffer_id));
+                         buffer_id));
   }
   iree_hal_memory_access_t memory_access =
       (iree_hal_memory_access_t)request->memory_access;
@@ -1265,35 +1382,79 @@ static iree_status_t iree_hal_remote_server_handle_buffer_map(
 
   // Only perform the local map+read if READ access was requested.
   if (iree_all_bits_set(memory_access, IREE_HAL_MEMORY_ACCESS_READ)) {
+    const void* response_data = NULL;
+    iree_host_size_t response_data_length = (iree_host_size_t)length;
     iree_hal_buffer_mapping_t mapping;
-    iree_status_t status = iree_hal_buffer_map_range(
-        buffer, IREE_HAL_MAPPING_MODE_SCOPED, IREE_HAL_MEMORY_ACCESS_READ,
-        offset, length, &mapping);
-    if (!iree_status_is_ok(status)) {
-      return iree_hal_remote_server_send_error_response(entry->session,
-                                                        envelope, status);
+    memset(&mapping, 0, sizeof(mapping));
+    bool did_map = false;
+
+    iree_status_t status = iree_ok_status();
+    if (length > IREE_HOST_SIZE_MAX) {
+      status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "BUFFER_MAP length %" PRIdsz
+                                " exceeds host size max %" PRIhsz,
+                                length, IREE_HOST_SIZE_MAX);
+    } else if (length == 0) {
+      response_data = NULL;
+      response_data_length = 0;
+    } else if (iree_hal_remote_server_buffer_supports_scoped_mapping(buffer)) {
+      status = iree_hal_buffer_map_range(buffer, IREE_HAL_MAPPING_MODE_SCOPED,
+                                         IREE_HAL_MEMORY_ACCESS_READ, offset,
+                                         length, &mapping);
+      if (iree_status_is_ok(status)) {
+        did_map = true;
+        response_data = mapping.contents.data;
+        response_data_length = mapping.contents.data_length;
+      }
+    } else {
+      status =
+          iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                           "BUFFER_MAP of non-host-visible buffer 0x%016" PRIx64
+                           " requires async remote staging",
+                           buffer_id);
     }
 
-    // Send response header + inline data via scatter-gather.
+    if (!iree_status_is_ok(status)) {
+      if (did_map) {
+        status =
+            iree_status_join(status, iree_hal_buffer_unmap_range(&mapping));
+      }
+      return iree_hal_remote_server_send_error_response(
+          entry->server->host_allocator, entry->session, envelope, status);
+    }
+
     iree_hal_remote_buffer_map_response_t response = {
         .mapped_offset = offset,
-        .mapped_length = mapping.contents.data_length,
+        .mapped_length = response_data_length,
     };
     iree_status_t send_status = iree_hal_remote_server_send_response_with_data(
-        entry->session, envelope, IREE_STATUS_OK, &response, sizeof(response),
-        mapping.contents.data, mapping.contents.data_length);
+        entry, envelope, IREE_STATUS_OK, &response, sizeof(response),
+        response_data, response_data_length);
 
-    iree_status_ignore(iree_hal_buffer_unmap_range(&mapping));
+    if (did_map) {
+      iree_status_ignore(iree_hal_buffer_unmap_range(&mapping));
+    }
     return send_status;
+  }
+
+  if (length > 0 &&
+      !iree_hal_remote_server_buffer_supports_scoped_mapping(buffer)) {
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope,
+        iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                         "BUFFER_MAP write of non-host-visible buffer "
+                         "0x%016" PRIx64 " requires async remote staging",
+                         buffer_id));
   }
 
   // WRITE-only or DISCARD: no data to send, just acknowledge.
   iree_hal_remote_buffer_map_response_t response = {
       .mapped_offset = offset,
-      .mapped_length = length,
+      .mapped_length = 0,
   };
   return iree_hal_remote_server_send_response(
-      entry->session, envelope, IREE_STATUS_OK, &response, sizeof(response));
+      entry->server->host_allocator, entry->session, envelope, IREE_STATUS_OK,
+      &response, sizeof(response));
 }
 
 // Handles BUFFER_UNMAP: writes inline data from the client into a buffer on
@@ -1304,7 +1465,7 @@ static iree_status_t iree_hal_remote_server_handle_buffer_unmap(
     iree_host_size_t body_length) {
   if (body_length < sizeof(iree_hal_remote_buffer_unmap_request_t)) {
     return iree_hal_remote_server_send_error_response(
-        entry->session, envelope,
+        entry->server->host_allocator, entry->session, envelope,
         iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                          "BUFFER_UNMAP body too small: %" PRIhsz " bytes",
                          body_length));
@@ -1312,6 +1473,8 @@ static iree_status_t iree_hal_remote_server_handle_buffer_unmap(
 
   const iree_hal_remote_buffer_unmap_request_t* request =
       (const iree_hal_remote_buffer_unmap_request_t*)body;
+  iree_hal_remote_resource_id_t buffer_id =
+      iree_hal_remote_server_resolve_resource_id(entry, request->buffer_id);
   iree_device_size_t offset = (iree_device_size_t)request->offset;
   iree_device_size_t length = (iree_device_size_t)request->length;
 
@@ -1321,7 +1484,7 @@ static iree_status_t iree_hal_remote_server_handle_buffer_unmap(
       body_length - sizeof(iree_hal_remote_buffer_unmap_request_t);
   if (data_length < length) {
     return iree_hal_remote_server_send_error_response(
-        entry->session, envelope,
+        entry->server->host_allocator, entry->session, envelope,
         iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                          "BUFFER_UNMAP data truncated: %" PRIhsz
                          " bytes, expected %" PRIdsz,
@@ -1332,30 +1495,48 @@ static iree_status_t iree_hal_remote_server_handle_buffer_unmap(
   iree_hal_buffer_t* buffer =
       (iree_hal_buffer_t*)iree_hal_remote_resource_table_lookup(
           &entry->resource_table, IREE_HAL_REMOTE_RESOURCE_TYPE_BUFFER,
-          request->buffer_id);
+          buffer_id);
   if (!buffer) {
     return iree_hal_remote_server_send_error_response(
-        entry->session, envelope,
+        entry->server->host_allocator, entry->session, envelope,
         iree_make_status(IREE_STATUS_NOT_FOUND,
                          "BUFFER_UNMAP: buffer_id 0x%016" PRIx64 " not found",
-                         request->buffer_id));
+                         buffer_id));
   }
 
-  // Map the buffer for writing and copy the client data in.
-  iree_hal_buffer_mapping_t mapping;
-  iree_status_t status = iree_hal_buffer_map_range(
-      buffer, IREE_HAL_MAPPING_MODE_SCOPED,
-      IREE_HAL_MEMORY_ACCESS_DISCARD_WRITE, offset, length, &mapping);
+  iree_status_t status = iree_ok_status();
+  if (length > IREE_HOST_SIZE_MAX) {
+    status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "BUFFER_UNMAP length %" PRIdsz
+                              " exceeds host size max %" PRIhsz,
+                              length, IREE_HOST_SIZE_MAX);
+  } else if (length == 0) {
+    // No-op.
+  } else if (iree_hal_remote_server_buffer_supports_scoped_mapping(buffer)) {
+    iree_hal_buffer_mapping_t mapping;
+    memset(&mapping, 0, sizeof(mapping));
+    status = iree_hal_buffer_map_range(buffer, IREE_HAL_MAPPING_MODE_SCOPED,
+                                       IREE_HAL_MEMORY_ACCESS_DISCARD_WRITE,
+                                       offset, length, &mapping);
+    if (iree_status_is_ok(status)) {
+      memcpy(mapping.contents.data, data, (iree_host_size_t)length);
+      status = iree_status_join(status, iree_hal_buffer_unmap_range(&mapping));
+    }
+  } else {
+    status =
+        iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                         "BUFFER_UNMAP of non-host-visible buffer 0x%016" PRIx64
+                         " requires async remote staging",
+                         buffer_id);
+  }
   if (!iree_status_is_ok(status)) {
-    return iree_hal_remote_server_send_error_response(entry->session, envelope,
-                                                      status);
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope, status);
   }
-
-  memcpy(mapping.contents.data, data, length);
-  iree_status_ignore(iree_hal_buffer_unmap_range(&mapping));
 
   // Status-only response (no body).
-  return iree_hal_remote_server_send_response(entry->session, envelope,
+  return iree_hal_remote_server_send_response(entry->server->host_allocator,
+                                              entry->session, envelope,
                                               IREE_STATUS_OK, NULL, 0);
 }
 
@@ -1366,7 +1547,7 @@ static iree_status_t iree_hal_remote_server_handle_executable_upload(
     iree_host_size_t body_length) {
   if (body_length < sizeof(iree_hal_remote_executable_upload_request_t)) {
     return iree_hal_remote_server_send_error_response(
-        entry->session, envelope,
+        entry->server->host_allocator, entry->session, envelope,
         iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                          "EXECUTABLE_UPLOAD body too small: %" PRIhsz " bytes",
                          body_length));
@@ -1378,7 +1559,7 @@ static iree_status_t iree_hal_remote_server_handle_executable_upload(
   // Validate INLINE_DATA flag (bulk transfer not yet supported).
   if (!(request->upload_flags & IREE_HAL_REMOTE_UPLOAD_FLAG_INLINE_DATA)) {
     return iree_hal_remote_server_send_error_response(
-        entry->session, envelope,
+        entry->server->host_allocator, entry->session, envelope,
         iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                          "EXECUTABLE_UPLOAD: only INLINE_DATA is supported"));
   }
@@ -1387,7 +1568,7 @@ static iree_status_t iree_hal_remote_server_handle_executable_upload(
   // on 32-bit platforms where uint64_t data_length exceeds SIZE_MAX).
   if (request->data_length > IREE_HOST_SIZE_MAX) {
     return iree_hal_remote_server_send_error_response(
-        entry->session, envelope,
+        entry->server->host_allocator, entry->session, envelope,
         iree_make_status(
             IREE_STATUS_OUT_OF_RANGE,
             "EXECUTABLE_UPLOAD data_length exceeds host capacity"));
@@ -1402,7 +1583,7 @@ static iree_status_t iree_hal_remote_server_handle_executable_upload(
   if (!iree_host_size_checked_mul((iree_host_size_t)request->constant_count,
                                   sizeof(uint32_t), &constants_size)) {
     return iree_hal_remote_server_send_error_response(
-        entry->session, envelope,
+        entry->server->host_allocator, entry->session, envelope,
         iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                          "EXECUTABLE_UPLOAD constants size overflow"));
   }
@@ -1416,7 +1597,7 @@ static iree_status_t iree_hal_remote_server_handle_executable_upload(
   if (!iree_host_size_checked_add(format_offset, format_padded, &format_end) ||
       format_end > body_length) {
     return iree_hal_remote_server_send_error_response(
-        entry->session, envelope,
+        entry->server->host_allocator, entry->session, envelope,
         iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                          "EXECUTABLE_UPLOAD format string truncated"));
   }
@@ -1428,7 +1609,7 @@ static iree_status_t iree_hal_remote_server_handle_executable_upload(
   if (!iree_host_size_checked_add(format_end, constants_padded,
                                   &constants_data_offset)) {
     return iree_hal_remote_server_send_error_response(
-        entry->session, envelope,
+        entry->server->host_allocator, entry->session, envelope,
         iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                          "EXECUTABLE_UPLOAD data offset overflow"));
   }
@@ -1438,7 +1619,7 @@ static iree_status_t iree_hal_remote_server_handle_executable_upload(
                                   &total_required) ||
       body_length < total_required) {
     return iree_hal_remote_server_send_error_response(
-        entry->session, envelope,
+        entry->server->host_allocator, entry->session, envelope,
         iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                          "EXECUTABLE_UPLOAD inline data truncated"));
   }
@@ -1459,8 +1640,8 @@ static iree_status_t iree_hal_remote_server_handle_executable_upload(
   iree_status_t status = iree_hal_executable_cache_prepare_executable(
       server->executable_caches[0], &params, &executable);
   if (!iree_status_is_ok(status)) {
-    return iree_hal_remote_server_send_error_response(entry->session, envelope,
-                                                      status);
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope, status);
   }
 
   // Query function count from the loaded executable.
@@ -1474,8 +1655,8 @@ static iree_status_t iree_hal_remote_server_handle_executable_upload(
       executable, &resolved_id);
   iree_hal_executable_release(executable);
   if (!iree_status_is_ok(status)) {
-    return iree_hal_remote_server_send_error_response(entry->session, envelope,
-                                                      status);
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope, status);
   }
 
   // Send success response.
@@ -1484,7 +1665,8 @@ static iree_status_t iree_hal_remote_server_handle_executable_upload(
   response.resolved_id = resolved_id;
   response.export_count = (uint32_t)export_count;
   return iree_hal_remote_server_send_response(
-      entry->session, envelope, IREE_STATUS_OK, &response, sizeof(response));
+      entry->server->host_allocator, entry->session, envelope, IREE_STATUS_OK,
+      &response, sizeof(response));
 }
 
 //===----------------------------------------------------------------------===//
@@ -1582,13 +1764,11 @@ static iree_status_t iree_hal_remote_server_replay_dispatch_cmd(
     }
   }
 
-  iree_hal_dispatch_config_t config = {0};
-  memcpy(config.workgroup_size, cmd->config.workgroup_size,
-         sizeof(config.workgroup_size));
-  memcpy(config.workgroup_count, cmd->config.workgroup_count,
-         sizeof(config.workgroup_count));
-  config.dynamic_workgroup_local_memory =
-      cmd->config.dynamic_workgroup_local_memory;
+  iree_hal_dispatch_config_t config;
+  IREE_RETURN_IF_ERROR(iree_hal_remote_server_resolve_dispatch_config(
+      session_slot, &cmd->config,
+      (iree_hal_dispatch_flags_t)cmd->dispatch_flags,
+      /*allow_indirect_buffer_ref=*/true, "DISPATCH (cmd stream)", &config));
 
   iree_hal_buffer_ref_list_t bindings = {
       .count = cmd->binding_count,
@@ -1655,18 +1835,11 @@ static iree_status_t iree_hal_remote_server_replay_command_stream(
         }
         const iree_hal_remote_buffer_fill_cmd_t* cmd =
             (const iree_hal_remote_buffer_fill_cmd_t*)(stream_data + offset);
-        iree_hal_buffer_t* target_buffer =
-            (iree_hal_buffer_t*)iree_hal_remote_resource_table_lookup(
-                &session_slot->resource_table,
-                IREE_HAL_REMOTE_RESOURCE_TYPE_BUFFER, cmd->target_buffer_id);
-        if (!target_buffer) {
-          return iree_make_status(IREE_STATUS_NOT_FOUND,
-                                  "BUFFER_FILL (cmd stream) target buffer "
-                                  "0x%016" PRIx64 " not found",
-                                  cmd->target_buffer_id);
-        }
-        iree_hal_buffer_ref_t target_ref = iree_hal_make_buffer_ref(
-            target_buffer, cmd->target_offset, cmd->target_length);
+        iree_hal_buffer_ref_t target_ref;
+        status = iree_hal_remote_server_resolve_command_buffer_ref(
+            session_slot, cmd->target_buffer_id, cmd->target_buffer_slot,
+            cmd->target_offset, cmd->target_length, "BUFFER_FILL", &target_ref);
+        if (!iree_status_is_ok(status)) break;
         status = iree_hal_command_buffer_fill_buffer(
             local_command_buffer, target_ref, &cmd->pattern,
             (iree_host_size_t)cmd->pattern_length,
@@ -1692,19 +1865,13 @@ static iree_status_t iree_hal_remote_server_replay_command_stream(
               IREE_STATUS_INVALID_ARGUMENT,
               "BUFFER_UPDATE payload exceeds command length");
         }
-        iree_hal_buffer_t* target_buffer =
-            (iree_hal_buffer_t*)iree_hal_remote_resource_table_lookup(
-                &session_slot->resource_table,
-                IREE_HAL_REMOTE_RESOURCE_TYPE_BUFFER, cmd->target_buffer_id);
-        if (!target_buffer) {
-          return iree_make_status(IREE_STATUS_NOT_FOUND,
-                                  "BUFFER_UPDATE (cmd stream) target buffer "
-                                  "0x%016" PRIx64 " not found",
-                                  cmd->target_buffer_id);
-        }
         const void* source_data = (const void*)(cmd + 1);
-        iree_hal_buffer_ref_t target_ref = iree_hal_make_buffer_ref(
-            target_buffer, cmd->target_offset, cmd->target_length);
+        iree_hal_buffer_ref_t target_ref;
+        status = iree_hal_remote_server_resolve_command_buffer_ref(
+            session_slot, cmd->target_buffer_id, cmd->target_buffer_slot,
+            cmd->target_offset, cmd->target_length, "BUFFER_UPDATE",
+            &target_ref);
+        if (!iree_status_is_ok(status)) break;
         status = iree_hal_command_buffer_update_buffer(
             local_command_buffer, source_data, /*source_offset=*/0, target_ref,
             (iree_hal_update_flags_t)cmd->update_flags);
@@ -1718,26 +1885,16 @@ static iree_status_t iree_hal_remote_server_replay_command_stream(
         }
         const iree_hal_remote_buffer_copy_cmd_t* cmd =
             (const iree_hal_remote_buffer_copy_cmd_t*)(stream_data + offset);
-        iree_hal_buffer_t* source_buffer =
-            (iree_hal_buffer_t*)iree_hal_remote_resource_table_lookup(
-                &session_slot->resource_table,
-                IREE_HAL_REMOTE_RESOURCE_TYPE_BUFFER, cmd->source_buffer_id);
-        iree_hal_buffer_t* target_buffer =
-            (iree_hal_buffer_t*)iree_hal_remote_resource_table_lookup(
-                &session_slot->resource_table,
-                IREE_HAL_REMOTE_RESOURCE_TYPE_BUFFER, cmd->target_buffer_id);
-        if (!source_buffer || !target_buffer) {
-          return iree_make_status(
-              IREE_STATUS_NOT_FOUND,
-              "BUFFER_COPY buffer not found (source=0x%016" PRIx64
-              " %s, target=0x%016" PRIx64 " %s)",
-              cmd->source_buffer_id, source_buffer ? "ok" : "MISSING",
-              cmd->target_buffer_id, target_buffer ? "ok" : "MISSING");
-        }
-        iree_hal_buffer_ref_t source_ref = iree_hal_make_buffer_ref(
-            source_buffer, cmd->source_offset, cmd->length);
-        iree_hal_buffer_ref_t target_ref = iree_hal_make_buffer_ref(
-            target_buffer, cmd->target_offset, cmd->length);
+        iree_hal_buffer_ref_t source_ref;
+        status = iree_hal_remote_server_resolve_command_buffer_ref(
+            session_slot, cmd->source_buffer_id, cmd->source_buffer_slot,
+            cmd->source_offset, cmd->length, "BUFFER_COPY source", &source_ref);
+        if (!iree_status_is_ok(status)) break;
+        iree_hal_buffer_ref_t target_ref;
+        status = iree_hal_remote_server_resolve_command_buffer_ref(
+            session_slot, cmd->target_buffer_id, cmd->target_buffer_slot,
+            cmd->target_offset, cmd->length, "BUFFER_COPY target", &target_ref);
+        if (!iree_status_is_ok(status)) break;
         status = iree_hal_command_buffer_copy_buffer(
             local_command_buffer, source_ref, target_ref,
             (iree_hal_copy_flags_t)cmd->copy_flags);
@@ -1781,7 +1938,7 @@ static iree_status_t iree_hal_remote_server_handle_command_buffer_upload(
     iree_host_size_t body_length) {
   if (body_length < sizeof(iree_hal_remote_command_buffer_upload_request_t)) {
     return iree_hal_remote_server_send_error_response(
-        entry->session, envelope,
+        entry->server->host_allocator, entry->session, envelope,
         iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                          "COMMAND_BUFFER_UPLOAD body too small: %" PRIhsz
                          " bytes",
@@ -1793,7 +1950,7 @@ static iree_status_t iree_hal_remote_server_handle_command_buffer_upload(
 
   if (!(request->upload_flags & IREE_HAL_REMOTE_UPLOAD_FLAG_INLINE_DATA)) {
     return iree_hal_remote_server_send_error_response(
-        entry->session, envelope,
+        entry->server->host_allocator, entry->session, envelope,
         iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                          "COMMAND_BUFFER_UPLOAD: only INLINE_DATA supported"));
   }
@@ -1802,7 +1959,7 @@ static iree_status_t iree_hal_remote_server_handle_command_buffer_upload(
   // on 32-bit platforms where uint64_t data_length exceeds SIZE_MAX).
   if (request->data_length > IREE_HOST_SIZE_MAX) {
     return iree_hal_remote_server_send_error_response(
-        entry->session, envelope,
+        entry->server->host_allocator, entry->session, envelope,
         iree_make_status(
             IREE_STATUS_OUT_OF_RANGE,
             "COMMAND_BUFFER_UPLOAD data_length exceeds host capacity"));
@@ -1817,7 +1974,7 @@ static iree_status_t iree_hal_remote_server_handle_command_buffer_upload(
                                   &required_length) ||
       body_length < required_length) {
     return iree_hal_remote_server_send_error_response(
-        entry->session, envelope,
+        entry->server->host_allocator, entry->session, envelope,
         iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                          "COMMAND_BUFFER_UPLOAD inline data truncated"));
   }
@@ -1856,8 +2013,8 @@ static iree_status_t iree_hal_remote_server_handle_command_buffer_upload(
 
   if (!iree_status_is_ok(status)) {
     iree_hal_command_buffer_release(command_buffer);
-    return iree_hal_remote_server_send_error_response(entry->session, envelope,
-                                                      status);
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope, status);
   }
 
   // The resource table retains the command buffer; release our creation ref.
@@ -1868,7 +2025,8 @@ static iree_status_t iree_hal_remote_server_handle_command_buffer_upload(
   memset(&response, 0, sizeof(response));
   response.resolved_id = resolved_id;
   return iree_hal_remote_server_send_response(
-      entry->session, envelope, IREE_STATUS_OK, &response, sizeof(response));
+      entry->server->host_allocator, entry->session, envelope, IREE_STATUS_OK,
+      &response, sizeof(response));
 }
 
 //===----------------------------------------------------------------------===//
@@ -2268,7 +2426,8 @@ void iree_hal_remote_server_on_session_ready(
 
   // If we're shutting down, immediately GOAWAY this newly-ready session.
   iree_slim_mutex_lock(&server->session_mutex);
-  bool is_stopping = server->state != IREE_HAL_REMOTE_SERVER_STATE_RUNNING;
+  bool is_stopping = server->state != IREE_HAL_REMOTE_SERVER_STATE_STARTING &&
+                     server->state != IREE_HAL_REMOTE_SERVER_STATE_RUNNING;
   iree_slim_mutex_unlock(&server->session_mutex);
   if (is_stopping) {
     iree_status_t goaway_status = iree_net_session_shutdown(
@@ -2343,6 +2502,19 @@ void iree_hal_remote_server_on_session_error(void* user_data,
   IREE_TRACE_ZONE_END(z0);
 }
 
+void iree_hal_remote_server_on_session_send_complete(
+    void* user_data, uint64_t operation_user_data, iree_status_t status) {
+  (void)user_data;
+  iree_hal_remote_control_send_allocation_t* allocation =
+      (iree_hal_remote_control_send_allocation_t*)(uintptr_t)
+          operation_user_data;
+  if (allocation) {
+    iree_allocator_t host_allocator = allocation->host_allocator;
+    iree_allocator_free(host_allocator, allocation);
+  }
+  iree_status_ignore(status);
+}
+
 iree_status_t iree_hal_remote_server_on_control_data(
     void* user_data, iree_net_control_frame_flags_t flags,
     iree_const_byte_span_t payload, iree_async_buffer_lease_t* lease) {
@@ -2400,7 +2572,7 @@ iree_status_t iree_hal_remote_server_on_control_data(
       if (!(envelope->message_flags &
             IREE_HAL_REMOTE_CONTROL_FLAG_FIRE_AND_FORGET)) {
         return iree_hal_remote_server_send_error_response(
-            entry->session, envelope,
+            entry->server->host_allocator, entry->session, envelope,
             iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                              "unhandled control message type 0x%04x",
                              envelope->message_type));

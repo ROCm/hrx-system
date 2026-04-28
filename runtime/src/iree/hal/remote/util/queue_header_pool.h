@@ -18,9 +18,10 @@ extern "C" {
 #endif  // __cplusplus
 
 // Default buffer count and size for queue channel header pools.
-// 32 buffers at 256 bytes each handles queue frame headers (16 bytes) plus
-// frontier pairs with up to ~7 entries each.
-#define IREE_HAL_REMOTE_QUEUE_HEADER_POOL_BUFFER_COUNT 32
+// 256 buffers at 256 bytes each handles queue frame headers (16 bytes) plus
+// frontier pairs with up to ~7 entries each while allowing bursty queue submit
+// tests to have many independent sends in flight before completions drain.
+#define IREE_HAL_REMOTE_QUEUE_HEADER_POOL_BUFFER_COUNT 256
 #define IREE_HAL_REMOTE_QUEUE_HEADER_POOL_BUFFER_SIZE 256
 
 // Creates a buffer pool for queue channel frame_sender header encoding.

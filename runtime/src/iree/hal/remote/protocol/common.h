@@ -136,11 +136,14 @@ static_assert(offsetof(iree_hal_remote_binding_t, buffer_slot) == 24, "");
 typedef struct iree_hal_remote_dispatch_config_t {
   uint32_t workgroup_size[3];
   uint32_t workgroup_count[3];
-  iree_hal_remote_resource_id_t workgroup_count_buffer_id;  // 0 = static.
+  // Workgroup count buffer resource ID. 0 means static counts or indirect via
+  // workgroup_count_buffer_slot.
+  iree_hal_remote_resource_id_t workgroup_count_buffer_id;
   uint64_t workgroup_count_offset;
   uint64_t workgroup_count_length;
   uint32_t dynamic_workgroup_local_memory;
-  uint32_t reserved;  // Must be 0.
+  // Binding table index when workgroup_count_buffer_id is 0.
+  uint32_t workgroup_count_buffer_slot;
 } iree_hal_remote_dispatch_config_t;
 static_assert(sizeof(iree_hal_remote_dispatch_config_t) == 56, "");
 static_assert(offsetof(iree_hal_remote_dispatch_config_t,

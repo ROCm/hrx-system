@@ -282,7 +282,8 @@ static iree_status_t iree_hal_remote_client_allocator_allocate_buffer(
   if (iree_status_is_ok(status)) {
     status = iree_hal_remote_client_buffer_create(
         allocator->device, resolved_id, params, allocation_size,
-        allocator->host_allocator, out_buffer);
+        IREE_HAL_BUFFER_PLACEMENT_FLAG_NONE, allocator->host_allocator,
+        out_buffer);
   }
 
   IREE_TRACE_ZONE_END(z0);

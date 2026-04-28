@@ -10,7 +10,7 @@
 #include "iree/async/proactor.h"
 #include "iree/async/slab.h"
 
-#define IREE_HAL_REMOTE_RECV_POOL_BUFFER_SIZE (128 * 1024)
+#define IREE_HAL_REMOTE_RECV_POOL_BUFFER_SIZE (2 * 1024 * 1024)
 #define IREE_HAL_REMOTE_RECV_POOL_BUFFER_COUNT 32
 
 struct iree_hal_remote_recv_pool_t {
@@ -87,6 +87,7 @@ iree_status_t iree_hal_remote_recv_pool_create(
     iree_async_affinity_t affinity = iree_async_affinity_any();
     affinity.numa_node = numa_node_id;
     iree_async_slab_options_t slab_options = {
+        // Large enough for current inline queue update frames.
         .buffer_size = IREE_HAL_REMOTE_RECV_POOL_BUFFER_SIZE,
         .buffer_count = IREE_HAL_REMOTE_RECV_POOL_BUFFER_COUNT,
         .affinity = &affinity,

@@ -22,6 +22,8 @@ extern "C" {
 
 typedef struct iree_async_proactor_t iree_async_proactor_t;
 typedef struct iree_async_frontier_tracker_t iree_async_frontier_tracker_t;
+typedef struct iree_async_notification_t iree_async_notification_t;
+typedef struct iree_hal_slab_provider_t iree_hal_slab_provider_t;
 typedef struct iree_hal_remote_recv_pool_t iree_hal_remote_recv_pool_t;
 typedef struct iree_net_queue_channel_t iree_net_queue_channel_t;
 typedef struct iree_hal_remote_pending_rpc_t iree_hal_remote_pending_rpc_t;
@@ -39,12 +41,21 @@ typedef struct iree_hal_remote_client_device_t {
   // Device configuration options.
   iree_hal_remote_client_device_options_t options;
 
-  // Proactor driving async I/O for this device. Retained from the
-  // proactor pool provided at creation time.
+  // Proactor driving async I/O for this device. Retained from recv_pool.
   iree_async_proactor_t* proactor;
 
-  // Frontier tracker for cross-device causal ordering.
+  // Frontier tracker for remote session axes and queue ordering.
+  // Owned by the device and used by the network session.
   iree_async_frontier_tracker_t* frontier_tracker;
+
+  // Topology metadata assigned when the device joins a HAL device group.
+  iree_hal_device_topology_info_t topology_info;
+
+  // Slab provider used by client-side queue allocation pools.
+  iree_hal_slab_provider_t* queue_slab_provider;
+
+  // Notification shared by client-side queue allocation pools.
+  iree_async_notification_t* queue_pool_notification;
 
   // Receive buffer pool for network I/O. Ref-counted and shared across
   // all devices created by the same driver.
@@ -54,22 +65,11 @@ typedef struct iree_hal_remote_client_device_t {
   iree_net_session_t* session;
 
   // Queue channel for HAL command dispatch (0 until queue endpoint opens).
-  // The channel owns the header pool for its frame_sender (freed on channel
-  // destroy).
-  //
-  // Accessed lock-free using the Dekker pattern: the hot path (queue_execute)
-  // increments channel_users then reads queue_channel; the teardown path
-  // (goaway/error) zeroes queue_channel then drains channel_users. The seq_cst
-  // total order guarantees at least one side sees the other's update: either
-  // the hot path sees the zeroed channel and bails, or teardown sees in-flight
-  // users and waits for them to finish.
+  // Published with release ordering and read with acquire ordering by queue
+  // submissions. Disconnect detaches the channel from its endpoint but leaves
+  // the channel object alive until device destroy or replacement so submitters
+  // do not need per-operation lifetime fences.
   iree_atomic_intptr_t queue_channel;
-
-  // Count of in-flight queue_execute calls currently using queue_channel.
-  // Incremented before reading queue_channel, decremented after the send
-  // completes. Teardown spins until this reaches zero before releasing the
-  // channel.
-  iree_atomic_int32_t channel_users;
 
   // Remote queue axis from the server's topology. Used to build signal
   // frontiers for queue submissions. Valid after on_session_ready.
@@ -145,6 +145,13 @@ static inline void iree_hal_remote_client_device_store_state(
 
 iree_hal_remote_client_device_t* iree_hal_remote_client_device_cast(
     iree_hal_device_t* base_value);
+
+// Publishes |queue_channel| for queue submissions and returns the previously
+// published channel, if any. The caller owns and must detach/release the
+// returned channel.
+iree_net_queue_channel_t* iree_hal_remote_client_device_publish_queue_channel(
+    iree_hal_remote_client_device_t* device,
+    iree_net_queue_channel_t* queue_channel);
 
 // All queue operations require the device to be connected.
 #define IREE_HAL_REMOTE_REQUIRE_CONNECTED(device)            \

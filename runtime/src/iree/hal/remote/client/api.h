@@ -33,8 +33,8 @@
 //
 //   iree_hal_device_t* device = NULL;
 //   IREE_RETURN_IF_ERROR(iree_hal_remote_client_device_create(
-//       IREE_SV("remote"), &options, /*create_params=*/NULL,
-//       frontier_tracker, recv_pool, host_allocator, &device));
+//       IREE_SV("remote"), &options, create_params, recv_pool,
+//       host_allocator, &device));
 //
 //   // Connection is mandatory — device is unusable until connected.
 //   // connect() is async: fires callback on the proactor thread when ready.
@@ -74,7 +74,6 @@ extern "C" {
 
 typedef struct iree_net_transport_factory_t iree_net_transport_factory_t;
 typedef struct iree_async_proactor_t iree_async_proactor_t;
-typedef struct iree_async_frontier_tracker_t iree_async_frontier_tracker_t;
 typedef struct iree_async_buffer_pool_t iree_async_buffer_pool_t;
 typedef struct iree_hal_remote_recv_pool_t iree_hal_remote_recv_pool_t;
 
@@ -205,11 +204,9 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_options_parse(
 // iree_hal_remote_client_device_connect() to establish the connection.
 // Operations performed before connection will fail with FAILED_PRECONDITION.
 //
-// |create_params| provides optional creation context for future extensions.
-// May be NULL.
-//
-// |frontier_tracker| tracks cross-device causal ordering. Retained by the
-// device.
+// |create_params| is required for parity with HAL device creation. The remote
+// client uses |recv_pool| for network I/O and owns the frontier tracker used by
+// its network session.
 //
 // |recv_pool| provides buffers for incoming network data. Ref-counted and
 // retained by the device.
@@ -219,7 +216,6 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_create(
     iree_string_view_t identifier,
     const iree_hal_remote_client_device_options_t* options,
     const iree_hal_device_create_params_t* create_params,
-    iree_async_frontier_tracker_t* frontier_tracker,
     iree_hal_remote_recv_pool_t* recv_pool, iree_allocator_t host_allocator,
     iree_hal_device_t** out_device);
 

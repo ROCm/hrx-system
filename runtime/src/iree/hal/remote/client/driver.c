@@ -6,7 +6,6 @@
 
 #include "iree/hal/remote/client/driver.h"
 
-#include "iree/async/frontier_tracker.h"
 #include "iree/base/threading/notification.h"
 #include "iree/hal/remote/client/api.h"
 #include "iree/hal/remote/client/device.h"
@@ -60,16 +59,6 @@ typedef struct iree_hal_remote_client_driver_t {
   // from the proactor pool. All child devices retain this pool.
   iree_hal_remote_recv_pool_t* recv_pool;
 } iree_hal_remote_client_driver_t;
-
-static iree_status_t iree_hal_remote_client_driver_create_frontier_tracker(
-    iree_allocator_t host_allocator,
-    iree_async_frontier_tracker_t** out_frontier_tracker) {
-  iree_async_frontier_tracker_options_t options =
-      iree_async_frontier_tracker_options_default();
-  options.axis_table_capacity = 16;
-  return iree_async_frontier_tracker_create(options, host_allocator,
-                                            out_frontier_tracker);
-}
 
 static const iree_hal_driver_vtable_t iree_hal_remote_client_driver_vtable;
 
@@ -186,16 +175,9 @@ static iree_status_t iree_hal_remote_client_driver_create_device_by_id(
   IREE_RETURN_IF_ERROR(
       iree_hal_remote_client_driver_ensure_recv_pool(driver, create_params));
 
-  iree_async_frontier_tracker_t* frontier_tracker = NULL;
-  iree_status_t status = iree_hal_remote_client_driver_create_frontier_tracker(
-      host_allocator, &frontier_tracker);
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_remote_client_device_create(
-        driver->identifier, &options, create_params, frontier_tracker,
-        driver->recv_pool, host_allocator, out_device);
-  }
-  iree_async_frontier_tracker_release(frontier_tracker);
-  return status;
+  return iree_hal_remote_client_device_create(driver->identifier, &options,
+                                              create_params, driver->recv_pool,
+                                              host_allocator, out_device);
 }
 
 static iree_status_t iree_hal_remote_client_driver_create_device_by_path(
@@ -223,15 +205,9 @@ static iree_status_t iree_hal_remote_client_driver_create_device_by_path(
       z0,
       iree_hal_remote_client_driver_ensure_recv_pool(driver, create_params));
 
-  iree_async_frontier_tracker_t* frontier_tracker = NULL;
-  iree_status_t status = iree_hal_remote_client_driver_create_frontier_tracker(
-      host_allocator, &frontier_tracker);
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_remote_client_device_create(
-        driver->identifier, &options, create_params, frontier_tracker,
-        driver->recv_pool, host_allocator, out_device);
-  }
-  iree_async_frontier_tracker_release(frontier_tracker);
+  iree_status_t status = iree_hal_remote_client_device_create(
+      driver->identifier, &options, create_params, driver->recv_pool,
+      host_allocator, out_device);
 
   // Auto-connect and wait synchronously. Callers (tooling, VM) expect
   // create_device to return a ready device.

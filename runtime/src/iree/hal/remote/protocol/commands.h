@@ -92,13 +92,15 @@ static_assert(sizeof(iree_hal_remote_memory_barrier_t) == 8, "");
 
 // Buffer barrier entry for EXECUTION_BARRIER commands.
 typedef struct iree_hal_remote_buffer_barrier_t {
-  uint32_t source_scope;  // iree_hal_access_scope_t
-  uint32_t target_scope;  // iree_hal_access_scope_t
-  iree_hal_remote_resource_id_t buffer_id;
-  uint64_t offset;
-  uint64_t length;
+  uint32_t source_scope;                    // iree_hal_access_scope_t
+  uint32_t target_scope;                    // iree_hal_access_scope_t
+  iree_hal_remote_resource_id_t buffer_id;  // 0 = indirect via buffer_slot.
+  uint64_t offset;                          // Byte offset into the buffer.
+  uint64_t length;                          // Byte length of the barrier.
+  uint32_t buffer_slot;  // Binding table index when buffer_id == 0.
+  uint32_t reserved;     // Must be 0.
 } iree_hal_remote_buffer_barrier_t;
-static_assert(sizeof(iree_hal_remote_buffer_barrier_t) == 32, "");
+static_assert(sizeof(iree_hal_remote_buffer_barrier_t) == 40, "");
 static_assert(offsetof(iree_hal_remote_buffer_barrier_t, buffer_id) == 8, "");
 
 //===----------------------------------------------------------------------===//
@@ -124,13 +126,13 @@ static_assert(sizeof(iree_hal_remote_execution_barrier_cmd_t) == 24, "");
 // BUFFER_ADVISE: Provide a hint about buffer usage.
 typedef struct iree_hal_remote_buffer_advise_cmd_t {
   iree_hal_remote_cmd_header_t header;
-  iree_hal_remote_resource_id_t buffer_id;
-  uint64_t offset;
-  uint64_t length;
-  uint32_t advise_flags;
-  uint32_t reserved;   // Must be 0.
-  uint64_t argument0;  // Advise-specific.
-  uint64_t argument1;  // Advise-specific.
+  iree_hal_remote_resource_id_t buffer_id;  // 0 = indirect via buffer_slot.
+  uint64_t offset;                          // Byte offset into the buffer.
+  uint64_t length;                          // Byte length of the range.
+  uint32_t advise_flags;                    // iree_hal_memory_advise_flags_t
+  uint32_t buffer_slot;  // Binding table index when buffer_id == 0.
+  uint64_t argument0;    // Advise-specific.
+  uint64_t argument1;    // Advise-specific.
 } iree_hal_remote_buffer_advise_cmd_t;
 static_assert(sizeof(iree_hal_remote_buffer_advise_cmd_t) == 56, "");
 
@@ -138,14 +140,14 @@ static_assert(sizeof(iree_hal_remote_buffer_advise_cmd_t) == 56, "");
 // command buffer recording).
 typedef struct iree_hal_remote_buffer_fill_cmd_t {
   iree_hal_remote_cmd_header_t header;
-  iree_hal_remote_resource_id_t target_buffer_id;
-  uint64_t target_offset;
-  uint64_t target_length;
-  uint8_t pattern_length;  // 1, 2, or 4 bytes.
-  uint8_t reserved0[3];    // Must be 0.
-  uint32_t pattern;        // Zero-extended if pattern_length < 4.
+  iree_hal_remote_resource_id_t target_buffer_id;  // 0 = indirect via slot.
+  uint64_t target_offset;                          // Byte offset to fill.
+  uint64_t target_length;                          // Byte length to fill.
+  uint8_t pattern_length;                          // 1, 2, or 4 bytes.
+  uint8_t reserved0[3];                            // Must be 0.
+  uint32_t pattern;  // Zero-extended if pattern_length < 4.
   uint32_t fill_flags;
-  uint32_t reserved1;  // Must be 0.
+  uint32_t target_buffer_slot;  // Binding table index when target_buffer_id=0.
 } iree_hal_remote_buffer_fill_cmd_t;
 static_assert(sizeof(iree_hal_remote_buffer_fill_cmd_t) == 48, "");
 
@@ -153,11 +155,11 @@ static_assert(sizeof(iree_hal_remote_buffer_fill_cmd_t) == 48, "");
 // command buffer recording). Variable-length tail: source data.
 typedef struct iree_hal_remote_buffer_update_cmd_t {
   iree_hal_remote_cmd_header_t header;
-  iree_hal_remote_resource_id_t target_buffer_id;
-  uint64_t target_offset;
-  uint64_t target_length;
+  iree_hal_remote_resource_id_t target_buffer_id;  // 0 = indirect via slot.
+  uint64_t target_offset;                          // Byte offset to update.
+  uint64_t target_length;                          // Byte length to update.
   uint32_t update_flags;
-  uint32_t reserved;  // Must be 0.
+  uint32_t target_buffer_slot;  // Binding table index when target_buffer_id=0.
   // Followed by:
   //   uint8_t source_data[target_length]  (padded to 8-byte alignment)
 } iree_hal_remote_buffer_update_cmd_t;
@@ -167,15 +169,17 @@ static_assert(sizeof(iree_hal_remote_buffer_update_cmd_t) == 40, "");
 // recording).
 typedef struct iree_hal_remote_buffer_copy_cmd_t {
   iree_hal_remote_cmd_header_t header;
-  iree_hal_remote_resource_id_t source_buffer_id;
-  uint64_t source_offset;
-  iree_hal_remote_resource_id_t target_buffer_id;
-  uint64_t target_offset;
-  uint64_t length;
+  iree_hal_remote_resource_id_t source_buffer_id;  // 0 = indirect via slot.
+  uint64_t source_offset;                          // Byte source offset.
+  iree_hal_remote_resource_id_t target_buffer_id;  // 0 = indirect via slot.
+  uint64_t target_offset;                          // Byte target offset.
+  uint64_t length;                                 // Byte length to copy.
   uint32_t copy_flags;
-  uint32_t reserved;  // Must be 0.
+  uint32_t source_buffer_slot;  // Binding table index when source_buffer_id=0.
+  uint32_t target_buffer_slot;  // Binding table index when target_buffer_id=0.
+  uint32_t reserved;            // Must be 0.
 } iree_hal_remote_buffer_copy_cmd_t;
-static_assert(sizeof(iree_hal_remote_buffer_copy_cmd_t) == 56, "");
+static_assert(sizeof(iree_hal_remote_buffer_copy_cmd_t) == 64, "");
 
 // DISPATCH: Execute a compute dispatch (within a command buffer recording).
 // Variable-length tail: constants array followed by bindings array.

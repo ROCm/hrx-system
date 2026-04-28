@@ -85,6 +85,10 @@ void iree_hal_remote_server_on_session_error(void* user_data,
                                              iree_net_session_t* session,
                                              iree_status_t status);
 
+// Called when a control-channel send completes.
+void iree_hal_remote_server_on_session_send_complete(
+    void* user_data, uint64_t operation_user_data, iree_status_t status);
+
 // Dispatches an incoming control channel frame to the appropriate handler
 // (buffer alloc, query heaps, resource release, etc.).
 iree_status_t iree_hal_remote_server_on_control_data(

@@ -33,6 +33,8 @@ iree_cc_library(
     "queue.h"
     "semaphore.c"
     "semaphore.h"
+    "slab_provider.c"
+    "slab_provider.h"
   DEPS
     iree::async
     iree::async::util::proactor_pool
@@ -40,12 +42,14 @@ iree_cc_library(
     iree::base::internal
     iree::base::threading
     iree::hal
+    iree::hal::memory::slab_provider
     iree::hal::remote::protocol::commands
     iree::hal::remote::protocol::common
     iree::hal::remote::protocol::control
     iree::hal::remote::protocol::queue
     iree::hal::remote::util::queue_header_pool
     iree::hal::remote::util::recv_pool
+    iree::hal::utils::files
     iree::net::channel::queue::queue_channel
     iree::net::channel::util::frame_sender
     iree::net::session
