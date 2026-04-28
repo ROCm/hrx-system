@@ -228,7 +228,8 @@ typedef struct iree_net_direct_write_params_t {
 // Returned by iree_net_carrier_begin_send() and passed to commit_send or
 // abort_send. Each carrier interprets the handle differently:
 //   - SHM: ring entry size (for commit_write; tx_lock serializes access).
-//   - Loopback/TCP: slot index and size packed into a uint64_t.
+//   - Loopback: pending send pointer.
+//   - TCP: send slot index.
 //
 // The handle is only valid between the begin_send that returned it and the
 // subsequent commit_send or abort_send call. Using a handle after commit/abort
@@ -629,8 +630,9 @@ static inline iree_status_t iree_net_carrier_send(
 // with scatter-gather instead.
 //
 // Between begin_send and commit/abort, the caller holds carrier-specific
-// resources (SHM: tx_lock + ring reservation; loopback/TCP: send slot +
-// allocated buffer). The caller must call commit_send or abort_send promptly.
+// resources (SHM: tx_lock + ring reservation; loopback: pending send
+// allocation; TCP: send slot + allocated buffer). The caller must call
+// commit_send or abort_send promptly.
 //
 // No completion callback fires for begin_send/commit_send — the data is fully
 // consumed on commit. This is fundamentally different from send(), where the

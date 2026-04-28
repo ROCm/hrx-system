@@ -29,19 +29,20 @@
 //
 // ## Send modes
 //
-// Two modes are supported:
+// Three modes are supported:
 //
 // 1. **send()**: Scatter-gather send with header from pool, payload zero-copy.
 //    Header is copied to a pool buffer, payload spans are passed directly.
 //    Used for all sends with application payloads (queue command payloads
 //    are typically 64KB-512KB; control DATA payloads can be many megabytes).
 //
-// 2. **queue() + flush()**: Batched send for small frames.
+// 2. **send_copy()**: Single-buffer send with header and payload copied to a
+//    pool buffer before submission. Used for small messages whose source
+//    storage cannot outlive the asynchronous send.
+//
+// 3. **queue() + flush()**: Batched send for small frames.
 //    Frames are copied to a batch buffer, then sent together on flush().
 //    Reduces syscall overhead for many small control messages.
-//
-// When mixing modes, send() automatically flushes pending batched frames first
-// to maintain ordering.
 //
 // ## Backpressure
 //
@@ -224,6 +225,25 @@ iree_status_t iree_net_frame_sender_send(iree_net_frame_sender_t* sender,
                                          iree_const_byte_span_t header,
                                          iree_async_span_list_t payload,
                                          uint64_t operation_user_data);
+
+// Sends a frame with header and payload copied into one pool buffer.
+// THREAD-SAFE.
+//
+// Unlike send(), all payload bytes are copied before this function returns.
+// Callers may pass stack or otherwise short-lived payload spans. This is
+// intended only for small control messages; large payloads should use send()
+// and keep their backing storage alive until completion.
+//
+// Returns OK if the operation was submitted (callback will fire).
+// Returns OUT_OF_RANGE if the combined header+payload is larger than the
+// frame sender's pool buffer.
+// Returns FAILED_PRECONDITION if any payload span is not CPU-accessible.
+//
+// On non-OK return, the callback is NOT called.
+iree_status_t iree_net_frame_sender_send_copy(iree_net_frame_sender_t* sender,
+                                              iree_const_byte_span_t header,
+                                              iree_async_span_list_t payload,
+                                              uint64_t operation_user_data);
 
 // Queues a small frame for batched send. NOT THREAD-SAFE.
 //

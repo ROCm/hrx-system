@@ -896,6 +896,16 @@ static iree_status_t iree_async_proactor_io_uring_cqe_to_status(
     return iree_ok_status();
   }
 
+  // Multishot recv may terminate with EAGAIN without consuming data. Report
+  // that as a deferred receive so the carrier can re-arm the operation without
+  // poisoning the socket's sticky failure status.
+  if (cqe->res == -EAGAIN &&
+      (operation->type == IREE_ASYNC_OPERATION_TYPE_SOCKET_RECV ||
+       operation->type == IREE_ASYNC_OPERATION_TYPE_SOCKET_RECV_POOL) &&
+      iree_any_bit_set(operation->flags, IREE_ASYNC_OPERATION_FLAG_MULTISHOT)) {
+    return iree_status_from_code(IREE_STATUS_DEFERRED);
+  }
+
   // NOTIF CQE for ZC send: res indicates whether ZC was achieved, not error.
   // res=0 means true zero-copy; res=IORING_NOTIF_USAGE_ZC_COPIED (0x80000000)
   // means the kernel fell back to copying. Both are success.
@@ -1289,8 +1299,14 @@ static iree_host_size_t iree_async_proactor_io_uring_process_cqe(
         iree_async_proactor_io_uring_populate_result(proactor, cqe, operation);
   }
 
-  // Propagate error to socket's sticky failure status.
-  if (!iree_status_is_ok(status)) {
+  // Propagate stream failures to the socket's sticky failure status. Receive
+  // pool exhaustion is backpressure, not a broken socket.
+  iree_status_code_t status_code = iree_status_code(status);
+  bool is_recv_pool_backpressure =
+      operation->type == IREE_ASYNC_OPERATION_TYPE_SOCKET_RECV_POOL &&
+      status_code == IREE_STATUS_RESOURCE_EXHAUSTED;
+  if (!iree_status_is_ok(status) && status_code != IREE_STATUS_DEFERRED &&
+      !is_recv_pool_backpressure) {
     iree_async_socket_t* socket =
         iree_async_proactor_io_uring_socket_from_io_operation(operation);
     if (socket) {
@@ -1941,6 +1957,20 @@ static iree_status_t iree_async_proactor_io_uring_export_fence(
 // Event source registration
 //===----------------------------------------------------------------------===//
 
+static void iree_async_proactor_io_uring_submit_internal_sqe(
+    iree_async_proactor_io_uring_t* proactor) {
+  int32_t poll_tid =
+      iree_atomic_load(&proactor->poll_tid, iree_memory_order_relaxed);
+  int32_t current_tid = (int32_t)syscall(__NR_gettid);
+  if (poll_tid != 0 && poll_tid == current_tid) {
+    iree_status_ignore(iree_io_uring_ring_submit(&proactor->ring,
+                                                 /*min_complete=*/0,
+                                                 /*flags=*/0));
+  } else {
+    iree_async_proactor_wake(&proactor->base);
+  }
+}
+
 static iree_status_t iree_async_proactor_io_uring_register_event_source(
     iree_async_proactor_t* base_proactor, iree_async_primitive_t handle,
     iree_async_event_source_callback_t callback,
@@ -2011,9 +2041,12 @@ static iree_status_t iree_async_proactor_io_uring_register_event_source(
                                                  (uintptr_t)source);
   iree_io_uring_ring_sq_unlock(&proactor->ring);
 
-  // Wake the poll thread to submit the SQE. Do not call ring_submit() here:
-  // SINGLE_ISSUER rings are enabled and entered only by the poll thread.
-  iree_async_proactor_wake(&proactor->base);
+  // Flush the SQE to the kernel if already on the poll thread, otherwise wake
+  // the poll thread to submit it. io_uring is created with SINGLE_ISSUER, so
+  // only the poll thread may call io_uring_enter after polling starts. Any
+  // ring_submit failure is ignored here: the SQE tail may already be published
+  // and rolling back or freeing |source| would race a later successful enter.
+  iree_async_proactor_io_uring_submit_internal_sqe(proactor);
 
   // Link into the proactor's event source list.
   source->next = proactor->event_sources;
@@ -2063,10 +2096,7 @@ static void iree_async_proactor_io_uring_unregister_event_source(
   iree_io_uring_ring_sq_unlock(&proactor->ring);
 
   if (sqe) {
-    // Wake the poll thread to submit the cancellation SQE. Do not call
-    // ring_submit() here: SINGLE_ISSUER rings are entered only by the poll
-    // thread.
-    iree_async_proactor_wake(&proactor->base);
+    iree_async_proactor_io_uring_submit_internal_sqe(proactor);
   }
 
   // The poll thread flushes the cancellation and owns the source until the
@@ -2127,11 +2157,11 @@ static iree_status_t iree_async_proactor_io_uring_submit_signal_poll(
   }
   iree_io_uring_ring_sq_unlock(&proactor->ring);
 
+  // Queue the SQE for the poll thread to flush. io_uring is created with
+  // SINGLE_ISSUER, so only the poll thread may call io_uring_enter after it
+  // starts polling.
   if (iree_status_is_ok(status)) {
-    // Wake the poll thread to submit the signal POLL_ADD. Do not call
-    // ring_submit() here: SINGLE_ISSUER rings are entered only by the poll
-    // thread.
-    iree_async_proactor_wake(&proactor->base);
+    iree_async_proactor_io_uring_submit_internal_sqe(proactor);
     proactor->signal.initialized = true;
   }
 

@@ -227,7 +227,7 @@ TEST(TcpCarrierOptionsTest, DefaultOptions) {
 
   EXPECT_EQ(options.send_slot_count, 32u);
   EXPECT_EQ(options.single_shot_recv_count, 8u);
-  EXPECT_TRUE(options.prefer_multishot_recv);
+  EXPECT_FALSE(options.prefer_multishot_recv);
   EXPECT_TRUE(options.prefer_zero_copy_send);
 }
 

@@ -50,7 +50,10 @@ typedef struct iree_net_tcp_carrier_options_t {
   // Ignored when multishot PBUF_RING is available. Must be power of 2.
   uint32_t single_shot_recv_count;
 
-  // If true, prefer multishot recv with PBUF_RING when available.
+  // If true, prefer multishot recv with PBUF_RING when available. Disabled by
+  // default because supported kernels can report terminal no-data completions
+  // for multishot receives; the single-shot path keeps multiple receives
+  // posted and preserves pipelining without depending on that behavior.
   bool prefer_multishot_recv;
 
   // If true, prefer zero-copy send when available. May have higher latency
@@ -70,7 +73,7 @@ iree_net_tcp_carrier_options_default(void) {
   memset(&options, 0, sizeof(options));
   options.send_slot_count = 32;
   options.single_shot_recv_count = 8;
-  options.prefer_multishot_recv = true;
+  options.prefer_multishot_recv = false;
   options.prefer_zero_copy_send = true;
   options.max_endpoint_count = 1;
   return options;

@@ -165,6 +165,84 @@ iree_status_t iree_net_frame_sender_send(iree_net_frame_sender_t* sender,
   return iree_ok_status();
 }
 
+iree_status_t iree_net_frame_sender_send_copy(iree_net_frame_sender_t* sender,
+                                              iree_const_byte_span_t header,
+                                              iree_async_span_list_t payload,
+                                              uint64_t operation_user_data) {
+  IREE_ASSERT_ARGUMENT(sender);
+
+  iree_host_size_t frame_length = header.data_length;
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; iree_status_is_ok(status) && i < payload.count;
+       ++i) {
+    iree_async_span_t span = payload.values[i];
+    if (!iree_async_span_is_cpu_accessible(span)) {
+      status = iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "send_copy requires CPU-accessible payload span %" PRIhsz, i);
+    } else if (!iree_host_size_checked_add(frame_length, span.length,
+                                           &frame_length)) {
+      status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "copied frame size overflow");
+    }
+  }
+
+  iree_async_buffer_lease_t frame_lease;
+  memset(&frame_lease, 0, sizeof(frame_lease));
+  bool has_frame_lease = false;
+  if (iree_status_is_ok(status)) {
+    status = iree_async_buffer_pool_acquire(sender->header_pool, &frame_lease);
+    has_frame_lease = iree_status_is_ok(status);
+  }
+
+  if (iree_status_is_ok(status) && frame_length > frame_lease.span.length) {
+    status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "copied frame size %" PRIhsz
+                              " exceeds pool buffer size %" PRIhsz,
+                              frame_length, frame_lease.span.length);
+  }
+
+  iree_net_frame_send_context_t* context = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_net_frame_sender_allocate_context(sender, operation_user_data,
+                                                    &context);
+  }
+
+  if (iree_status_is_ok(status)) {
+    uint8_t* target = iree_async_span_ptr(frame_lease.span);
+    if (header.data_length > 0) {
+      memcpy(target, header.data, header.data_length);
+      target += header.data_length;
+    }
+    for (iree_host_size_t i = 0; i < payload.count; ++i) {
+      iree_async_span_t span = payload.values[i];
+      if (span.length > 0) {
+        memcpy(target, iree_async_span_ptr(span), span.length);
+        target += span.length;
+      }
+    }
+
+    context->buffer_lease = frame_lease;
+    has_frame_lease = false;
+    context->spans[0] = iree_async_span_make(
+        frame_lease.span.region, frame_lease.span.offset, frame_length);
+    context->span_count = 1;
+
+    status = iree_net_frame_sender_submit(sender, context);
+  }
+
+  if (!iree_status_is_ok(status)) {
+    if (context) {
+      iree_async_buffer_lease_release(&context->buffer_lease);
+      iree_allocator_free(sender->context_allocator, context);
+    }
+    if (has_frame_lease) {
+      iree_async_buffer_lease_release(&frame_lease);
+    }
+  }
+  return status;
+}
+
 iree_status_t iree_net_frame_sender_queue(iree_net_frame_sender_t* sender,
                                           iree_const_byte_span_t frame) {
   IREE_ASSERT_ARGUMENT(sender);

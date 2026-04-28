@@ -76,8 +76,8 @@ static iree_status_t iree_net_loopback_endpoint_on_recv(
   if (data.length > bridged.span.length) {
     iree_async_buffer_lease_release(&bridged);
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "loopback receive message length %" PRIhsz
-                            " exceeds receive buffer length %" PRIhsz,
+                            "loopback recv frame length %" PRIhsz
+                            " exceeds receive buffer capacity %" PRIhsz,
                             data.length, bridged.span.length);
   }
   uint8_t* destination = iree_async_span_ptr(bridged.span);
@@ -384,7 +384,7 @@ static void iree_net_loopback_connection_destroy(
     if (slot->adapter) {
       // Adapter's carrier must be deactivated (or never activated) before
       // release. Active carriers may have pending NOP operations in the
-      // proactor that reference the carrier's send slot memory.
+      // proactor that reference carrier state.
       IREE_ASSERT(!slot->adapter->activated,
                   "connection destroyed with active adapter at slot %u; "
                   "call iree_net_connection_deactivate before releasing",

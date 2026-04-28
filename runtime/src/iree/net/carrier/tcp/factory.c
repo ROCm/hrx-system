@@ -207,6 +207,11 @@ static iree_status_t iree_net_tcp_mux_dispatch(
     return iree_make_status(IREE_STATUS_NOT_FOUND,
                             "no handler for stream_id %u", (unsigned)stream_id);
   }
+  if (!connection->streams[stream_id].callbacks.on_message) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "stream_id %u has no message handler",
+                            (unsigned)stream_id);
+  }
   // Strip the frame header — deliver only the payload to the consumer.
   iree_const_byte_span_t payload = iree_make_const_byte_span(
       message.data + IREE_NET_TCP_FRAME_HEADER_SIZE,
@@ -1002,14 +1007,10 @@ static iree_status_t iree_net_tcp_factory_create_listener(
   listener->state = IREE_NET_TCP_LISTENER_STATE_LISTENING;
   listener->host_allocator = host_allocator;
 
-  // Submit the first accept operation. Use multishot if the proactor supports
-  // it for reduced syscall overhead.
-  iree_async_proactor_capabilities_t proactor_capabilities =
-      iree_async_proactor_query_capabilities(proactor);
+  // Submit the first accept operation. Accept completions write results back
+  // into listener->accept_operation and the callback consumes those fields, so
+  // use single-shot accepts and resubmit after each accepted connection.
   iree_async_operation_flags_t accept_flags = IREE_ASYNC_OPERATION_FLAG_NONE;
-  if (proactor_capabilities & IREE_ASYNC_PROACTOR_CAPABILITY_MULTISHOT) {
-    accept_flags |= IREE_ASYNC_OPERATION_FLAG_MULTISHOT;
-  }
   iree_async_operation_initialize(
       &listener->accept_operation.base, IREE_ASYNC_OPERATION_TYPE_SOCKET_ACCEPT,
       accept_flags, iree_net_tcp_listener_accept_complete, listener);

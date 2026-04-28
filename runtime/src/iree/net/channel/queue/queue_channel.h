@@ -24,9 +24,9 @@
 // pointers delivered to the callback point directly into the recv buffer
 // (zero-copy). The callback can retain the lease to extend data lifetime.
 //
-// On send, the channel accepts frontier pointers and encodes them into the
-// frame header region. The queue frame header + frontier data are copied
-// into a pool buffer; the command payload is sent zero-copy.
+// On send, callers may either provide a stable payload span list for zero-copy
+// send_command(), or reserve a transport-owned command buffer with
+// begin_command() and write the payload directly before commit.
 //
 // ## Stream multiplexing
 //
@@ -243,6 +243,37 @@ iree_status_t iree_net_queue_channel_send_command(
     const iree_async_frontier_t* wait_frontier,
     const iree_async_frontier_t* signal_frontier,
     iree_async_span_list_t command_payload, uint64_t operation_user_data);
+
+// Opaque handle for a direct-write COMMAND reservation.
+typedef iree_net_carrier_send_handle_t iree_net_queue_channel_send_handle_t;
+
+// Reserves a transport-owned COMMAND frame buffer and returns the writable
+// command payload region.
+//
+// This path is for payloads assembled on the submit path that should not be
+// kept alive after the submit function returns. The queue frame header and
+// frontier metadata are written by the channel before returning; the caller
+// writes exactly |command_payload_length| bytes to |*out_command_payload| and
+// then commits or aborts the handle promptly.
+//
+// No on_send_complete callback is produced for direct-write sends: ownership
+// transfers to the transport at commit time.
+iree_status_t iree_net_queue_channel_begin_command(
+    iree_net_queue_channel_t* channel, uint32_t stream_id,
+    const iree_async_frontier_t* wait_frontier,
+    const iree_async_frontier_t* signal_frontier,
+    iree_host_size_t command_payload_length, uint8_t** out_command_payload,
+    iree_net_queue_channel_send_handle_t* out_handle);
+
+// Commits a direct-write COMMAND reservation returned by begin_command().
+iree_status_t iree_net_queue_channel_commit_send(
+    iree_net_queue_channel_t* channel,
+    iree_net_queue_channel_send_handle_t handle);
+
+// Aborts a direct-write COMMAND reservation returned by begin_command().
+void iree_net_queue_channel_abort_send(
+    iree_net_queue_channel_t* channel,
+    iree_net_queue_channel_send_handle_t handle);
 
 // Sends an ADVANCE frame with a signal frontier and optional advance payload.
 //

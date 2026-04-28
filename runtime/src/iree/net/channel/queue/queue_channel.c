@@ -152,6 +152,52 @@ static iree_host_size_t iree_net_queue_channel_frontier_wire_size(
              sizeof(iree_async_frontier_entry_t);
 }
 
+static iree_status_t iree_net_queue_channel_calculate_send_layout(
+    const iree_async_frontier_t* wait_frontier,
+    const iree_async_frontier_t* signal_frontier,
+    iree_host_size_t command_payload_size,
+    iree_net_queue_frame_flags_t* out_flags, iree_host_size_t* out_wait_size,
+    iree_host_size_t* out_signal_size, uint32_t* out_payload_length,
+    iree_host_size_t* out_frame_size) {
+  iree_host_size_t wait_size =
+      iree_net_queue_channel_frontier_wire_size(wait_frontier);
+  iree_host_size_t signal_size =
+      iree_net_queue_channel_frontier_wire_size(signal_frontier);
+
+  iree_host_size_t total_payload_size = 0;
+  if (!iree_host_size_checked_add(wait_size, signal_size,
+                                  &total_payload_size) ||
+      !iree_host_size_checked_add(total_payload_size, command_payload_size,
+                                  &total_payload_size)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "queue frame payload size overflow");
+  }
+  if (total_payload_size > UINT32_MAX) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "queue frame payload too large: %" PRIhsz
+                            " bytes (max %" PRIu32 ")",
+                            total_payload_size, UINT32_MAX);
+  }
+
+  iree_host_size_t frame_size = 0;
+  if (!iree_host_size_checked_add(IREE_NET_QUEUE_FRAME_HEADER_SIZE,
+                                  total_payload_size, &frame_size)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "queue frame size overflow");
+  }
+
+  iree_net_queue_frame_flags_t flags = IREE_NET_QUEUE_FRAME_FLAG_NONE;
+  if (wait_size > 0) flags |= IREE_NET_QUEUE_FRAME_FLAG_HAS_WAIT_FRONTIER;
+  if (signal_size > 0) flags |= IREE_NET_QUEUE_FRAME_FLAG_HAS_SIGNAL_FRONTIER;
+
+  *out_flags = flags;
+  *out_wait_size = wait_size;
+  *out_signal_size = signal_size;
+  *out_payload_length = (uint32_t)total_payload_size;
+  *out_frame_size = frame_size;
+  return iree_ok_status();
+}
+
 // Parses a frontier from a byte span, advancing the cursor past the parsed
 // data. Returns NULL frontier (via out_frontier) if the flag is not set.
 //
@@ -526,7 +572,10 @@ iree_net_queue_channel_state_t iree_net_queue_channel_state(
 bool iree_net_queue_channel_has_pending_sends(
     const iree_net_queue_channel_t* channel) {
   IREE_ASSERT_ARGUMENT(channel);
-  return iree_net_frame_sender_has_pending(&channel->sender);
+  return iree_net_frame_sender_has_pending(&channel->sender) ||
+         iree_atomic_load(
+             &((iree_net_queue_channel_t*)channel)->sends_in_flight,
+             iree_memory_order_acquire) > 0;
 }
 
 //===----------------------------------------------------------------------===//
@@ -550,35 +599,30 @@ iree_status_t iree_net_queue_channel_send_command(
                             (int)state);
   }
 
-  // Compute frontier wire sizes and frame flags.
-  iree_host_size_t wait_size =
-      iree_net_queue_channel_frontier_wire_size(wait_frontier);
-  iree_host_size_t signal_size =
-      iree_net_queue_channel_frontier_wire_size(signal_frontier);
-  iree_host_size_t header_total =
-      IREE_NET_QUEUE_FRAME_HEADER_SIZE + wait_size + signal_size;
-
-  iree_net_queue_frame_flags_t flags = IREE_NET_QUEUE_FRAME_FLAG_NONE;
-  if (wait_size > 0) flags |= IREE_NET_QUEUE_FRAME_FLAG_HAS_WAIT_FRONTIER;
-  if (signal_size > 0) flags |= IREE_NET_QUEUE_FRAME_FLAG_HAS_SIGNAL_FRONTIER;
-
-  // Compute total payload_length for the frame header (frontier data +
-  // command payload). The frontier data is part of the payload from the wire
-  // format perspective, even though it's encoded in the header pool buffer.
   iree_host_size_t command_payload_size = 0;
   for (iree_host_size_t i = 0; i < command_payload.count; ++i) {
-    command_payload_size += command_payload.values[i].length;
+    if (!iree_host_size_checked_add(command_payload_size,
+                                    command_payload.values[i].length,
+                                    &command_payload_size)) {
+      IREE_TRACE_ZONE_END(z0);
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "queue command payload size overflow");
+    }
   }
-  iree_host_size_t total_payload_size =
-      wait_size + signal_size + command_payload_size;
-  if (total_payload_size > UINT32_MAX) {
+
+  iree_net_queue_frame_flags_t flags = IREE_NET_QUEUE_FRAME_FLAG_NONE;
+  iree_host_size_t wait_size = 0;
+  iree_host_size_t signal_size = 0;
+  uint32_t payload_length = 0;
+  iree_host_size_t frame_size = 0;
+  iree_status_t status = iree_net_queue_channel_calculate_send_layout(
+      wait_frontier, signal_frontier, command_payload_size, &flags, &wait_size,
+      &signal_size, &payload_length, &frame_size);
+  if (!iree_status_is_ok(status)) {
     IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "queue frame payload too large: %" PRIhsz
-                            " bytes (max %" PRIu32 ")",
-                            total_payload_size, UINT32_MAX);
+    return status;
   }
-  uint32_t payload_length = (uint32_t)total_payload_size;
+  iree_host_size_t header_total = frame_size - command_payload_size;
 
   // Build header + frontier data contiguously. The frame_sender copies this
   // into a pool buffer, so stack allocation is safe.
@@ -612,12 +656,102 @@ iree_status_t iree_net_queue_channel_send_command(
   offset += iree_net_queue_channel_serialize_frontier(header_buffer + offset,
                                                       signal_frontier);
 
-  iree_status_t status = iree_net_frame_sender_send(
+  status = iree_net_frame_sender_send(
       &channel->sender, iree_make_const_byte_span(header_buffer, offset),
       command_payload, operation_user_data);
 
   IREE_TRACE_ZONE_END(z0);
   return status;
+}
+
+iree_status_t iree_net_queue_channel_begin_command(
+    iree_net_queue_channel_t* channel, uint32_t stream_id,
+    const iree_async_frontier_t* wait_frontier,
+    const iree_async_frontier_t* signal_frontier,
+    iree_host_size_t command_payload_length, uint8_t** out_command_payload,
+    iree_net_queue_channel_send_handle_t* out_handle) {
+  IREE_ASSERT_ARGUMENT(channel);
+  IREE_ASSERT_ARGUMENT(out_command_payload);
+  IREE_ASSERT_ARGUMENT(out_handle);
+  *out_command_payload = NULL;
+  *out_handle = 0;
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  iree_net_queue_channel_state_t state =
+      iree_net_queue_channel_load_state(channel);
+  if (state != IREE_NET_QUEUE_CHANNEL_STATE_OPERATIONAL) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "cannot send COMMAND: channel state is %d",
+                            (int)state);
+  }
+
+  iree_net_queue_frame_flags_t flags = IREE_NET_QUEUE_FRAME_FLAG_NONE;
+  iree_host_size_t wait_size = 0;
+  iree_host_size_t signal_size = 0;
+  uint32_t payload_length = 0;
+  iree_host_size_t frame_size = 0;
+  iree_status_t status = iree_net_queue_channel_calculate_send_layout(
+      wait_frontier, signal_frontier, command_payload_length, &flags,
+      &wait_size, &signal_size, &payload_length, &frame_size);
+
+  iree_atomic_fetch_add(&channel->sends_in_flight, 1,
+                        iree_memory_order_seq_cst);
+  if (iree_status_is_ok(status) &&
+      iree_atomic_load(&channel->detached, iree_memory_order_seq_cst)) {
+    status = iree_make_status(IREE_STATUS_UNAVAILABLE,
+                              "queue channel endpoint detached");
+  }
+
+  void* frame_data = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_net_message_endpoint_begin_send(channel->endpoint, frame_size,
+                                                  &frame_data, out_handle);
+  }
+
+  if (iree_status_is_ok(status)) {
+    iree_net_queue_frame_header_t frame_header;
+    iree_net_queue_frame_header_initialize(IREE_NET_QUEUE_FRAME_TYPE_COMMAND,
+                                           flags, payload_length, stream_id,
+                                           &frame_header);
+    iree_host_size_t offset = 0;
+    uint8_t* frame_bytes = (uint8_t*)frame_data;
+    memcpy(frame_bytes + offset, &frame_header, sizeof(frame_header));
+    offset += sizeof(frame_header);
+    offset += iree_net_queue_channel_serialize_frontier(frame_bytes + offset,
+                                                        wait_frontier);
+    offset += iree_net_queue_channel_serialize_frontier(frame_bytes + offset,
+                                                        signal_frontier);
+    *out_command_payload = frame_bytes + offset;
+  } else {
+    iree_atomic_fetch_sub(&channel->sends_in_flight, 1,
+                          iree_memory_order_release);
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+iree_status_t iree_net_queue_channel_commit_send(
+    iree_net_queue_channel_t* channel,
+    iree_net_queue_channel_send_handle_t handle) {
+  IREE_ASSERT_ARGUMENT(channel);
+  IREE_TRACE_ZONE_BEGIN(z0);
+  iree_status_t status =
+      iree_net_message_endpoint_commit_send(channel->endpoint, handle);
+  iree_atomic_fetch_sub(&channel->sends_in_flight, 1,
+                        iree_memory_order_release);
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+void iree_net_queue_channel_abort_send(
+    iree_net_queue_channel_t* channel,
+    iree_net_queue_channel_send_handle_t handle) {
+  if (!channel) return;
+  iree_net_message_endpoint_abort_send(channel->endpoint, handle);
+  iree_atomic_fetch_sub(&channel->sends_in_flight, 1,
+                        iree_memory_order_release);
 }
 
 iree_status_t iree_net_queue_channel_send_advance(

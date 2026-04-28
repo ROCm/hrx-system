@@ -1382,6 +1382,25 @@ IREE_API_EXPORT iree_status_t iree_net_session_send_control_data(
                                             payload, operation_user_data);
 }
 
+IREE_API_EXPORT iree_status_t iree_net_session_send_control_data_copy(
+    iree_net_session_t* session, iree_net_control_frame_flags_t flags,
+    iree_async_span_list_t payload, uint64_t operation_user_data) {
+  IREE_ASSERT_ARGUMENT(session);
+  iree_net_session_state_t state = iree_net_session_load_state(session);
+  iree_status_t status = iree_ok_status();
+  if (state != IREE_NET_SESSION_STATE_OPERATIONAL) {
+    status = iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "cannot send control data: session state is %d (need OPERATIONAL)",
+        (int)state);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_net_control_channel_send_data_copy(
+        session->control_channel, flags, payload, operation_user_data);
+  }
+  return status;
+}
+
 IREE_API_EXPORT iree_status_t
 iree_net_session_shutdown(iree_net_session_t* session, uint32_t reason_code,
                           iree_string_view_t message) {

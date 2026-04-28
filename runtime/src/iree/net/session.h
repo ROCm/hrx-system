@@ -360,6 +360,18 @@ IREE_API_EXPORT iree_status_t iree_net_session_send_control_data(
     iree_net_session_t* session, iree_net_control_frame_flags_t flags,
     iree_async_span_list_t payload, uint64_t operation_user_data);
 
+// Sends a DATA frame on the control channel, copying payload before returning.
+//
+// Use this for small messages backed by stack or otherwise short-lived storage.
+// The payload does not need to remain valid after this call returns. Large
+// payloads should use iree_net_session_send_control_data() to avoid copying.
+//
+// Requires OPERATIONAL state. Returns FAILED_PRECONDITION in BOOTSTRAPPING
+// or terminal states. On non-OK return, on_send_complete is NOT called.
+IREE_API_EXPORT iree_status_t iree_net_session_send_control_data_copy(
+    iree_net_session_t* session, iree_net_control_frame_flags_t flags,
+    iree_async_span_list_t payload, uint64_t operation_user_data);
+
 // Initiates graceful shutdown.
 //
 // Sends GOAWAY on the control channel with the given reason. Transitions to

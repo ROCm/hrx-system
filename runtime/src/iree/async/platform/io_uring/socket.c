@@ -211,8 +211,9 @@ iree_status_t iree_async_io_uring_socket_create(
                             "invalid socket type %d", type);
   }
 
-  // Create the platform socket.
-  // Use SOCK_NONBLOCK and SOCK_CLOEXEC for efficiency (avoids separate fcntl).
+  // Create the platform socket non-blocking. The shared proactor must never
+  // inherit a descriptor that can block an executor thread on accidental
+  // fallback I/O.
   int fd = socket(domain, socktype | SOCK_NONBLOCK | SOCK_CLOEXEC, protocol);
   if (fd < 0) {
     IREE_TRACE_ZONE_END(z0);

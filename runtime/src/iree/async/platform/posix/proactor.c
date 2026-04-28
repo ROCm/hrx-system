@@ -1866,9 +1866,9 @@ static iree_status_t iree_async_proactor_posix_execute_send(
 // Acquires a buffer from the pool, performs readv into it, and populates the
 // operation's lease and bytes_received on success. On EAGAIN the lease is
 // released back to the pool and UNAVAILABLE is returned for re-arm. On pool
-// exhaustion, returns the error which terminates multishot (safe because pool
-// exhaustion cannot occur in normal multishot flow — callbacks drain between
-// poll iterations, releasing buffers before the next execution).
+// exhaustion, returns RESOURCE_EXHAUSTED as receive-side backpressure; higher
+// layers that retain leases can pause the logical receive and re-submit when a
+// buffer is returned.
 static iree_status_t iree_async_proactor_posix_execute_recv_pool(
     iree_async_socket_recv_pool_operation_t* recv_pool,
     iree_async_io_result_t* out_result) {
@@ -2235,8 +2235,13 @@ static void iree_async_proactor_posix_process_operation_chain(
       continue;
     }
 
-    // Propagate error to socket's sticky failure status.
-    if (!iree_status_is_ok(op_status)) {
+    // Propagate stream failures to the socket's sticky failure status. Receive
+    // pool exhaustion is backpressure, not a broken socket.
+    iree_status_code_t status_code = iree_status_code(op_status);
+    bool is_recv_pool_backpressure =
+        current->type == IREE_ASYNC_OPERATION_TYPE_SOCKET_RECV_POOL &&
+        status_code == IREE_STATUS_RESOURCE_EXHAUSTED;
+    if (!iree_status_is_ok(op_status) && !is_recv_pool_backpressure) {
       iree_async_socket_t* socket =
           iree_async_proactor_posix_socket_from_io_operation(current);
       if (socket) {

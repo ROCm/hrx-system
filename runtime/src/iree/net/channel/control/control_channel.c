@@ -561,6 +561,35 @@ iree_status_t iree_net_control_channel_send_data(
   return status;
 }
 
+iree_status_t iree_net_control_channel_send_data_copy(
+    iree_net_control_channel_t* channel, iree_net_control_frame_flags_t flags,
+    iree_async_span_list_t payload, uint64_t operation_user_data) {
+  IREE_ASSERT_ARGUMENT(channel);
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  iree_net_control_channel_state_t state =
+      iree_net_control_channel_load_state(channel);
+  iree_status_t status = iree_ok_status();
+  if (state != IREE_NET_CONTROL_CHANNEL_STATE_OPERATIONAL) {
+    status =
+        iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                         "cannot send DATA: channel state is %d", (int)state);
+  }
+
+  iree_net_control_frame_header_t header;
+  if (iree_status_is_ok(status)) {
+    iree_net_control_frame_header_initialize(IREE_NET_CONTROL_FRAME_TYPE_DATA,
+                                             flags, &header);
+    status = iree_net_frame_sender_send_copy(
+        &channel->sender,
+        iree_make_const_byte_span((const uint8_t*)&header, sizeof(header)),
+        payload, operation_user_data);
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
 iree_status_t iree_net_control_channel_send_ping(
     iree_net_control_channel_t* channel, iree_const_byte_span_t payload) {
   IREE_ASSERT_ARGUMENT(channel);

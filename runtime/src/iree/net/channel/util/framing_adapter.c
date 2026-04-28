@@ -65,6 +65,14 @@ static iree_status_t iree_net_framing_adapter_on_frame_complete(
 static iree_status_t iree_net_framing_adapter_on_recv(
     void* user_data, iree_async_span_t data, iree_async_buffer_lease_t* lease) {
   iree_net_framing_adapter_t* adapter = (iree_net_framing_adapter_t*)user_data;
+  if (data.length == 0) {
+    if (adapter->callbacks.on_error) {
+      adapter->callbacks.on_error(
+          adapter->callbacks.user_data,
+          iree_make_status(IREE_STATUS_UNAVAILABLE, "transport closed"));
+    }
+    return iree_ok_status();
+  }
   return iree_net_frame_accumulator_push_lease(&adapter->accumulator, lease,
                                                data.length);
 }

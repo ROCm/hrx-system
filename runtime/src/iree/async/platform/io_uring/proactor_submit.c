@@ -324,8 +324,10 @@ static iree_status_t iree_async_proactor_io_uring_fill_socket_recv_pool(
     sqe->buf_group = (uint16_t)region->handles.iouring.buffer_group_id;
     if (multishot) {
       // Multishot recv (kernel 5.19+): one SQE generates multiple CQEs.
-      // len=0 tells the kernel to use the buffer ring's buffer size.
-      sqe->ioprio |= IREE_IORING_RECV_MULTISHOT;
+      // Provided-buffer multishot receives must use len=0. Poll first avoids
+      // an immediate zero-byte recv attempt before any data is available.
+      sqe->ioprio |=
+          IREE_IORING_RECV_MULTISHOT | IREE_IORING_RECVSEND_POLL_FIRST;
       sqe->len = 0;
     } else {
       sqe->len = (uint32_t)region->buffer_size;

@@ -7,36 +7,42 @@
 #include "iree/net/carrier/loopback/carrier.h"
 
 #include "iree/async/operations/scheduling.h"
-#include "iree/base/internal/math.h"
 
-// Number of concurrent send operations per carrier. Must be power of 2
-// and at most 32 (tracked by a uint32_t bitmap).
+static_assert(sizeof(uintptr_t) <= sizeof(iree_net_carrier_send_handle_t),
+              "send handle cannot round-trip pending send pointers");
+
+// Maximum concurrent loopback sends per carrier. This is an explicit async
+// delivery budget: begin_send reserves one slot so commit_send cannot discover
+// proactor backpressure after the caller has already written the payload.
 #define IREE_NET_LOOPBACK_SEND_SLOT_COUNT 32
-static_assert(IREE_NET_LOOPBACK_SEND_SLOT_COUNT <= 32,
-              "send slot count exceeds uint32_t bitmap capacity");
 
-// A pending send operation awaiting delivery during the next poll() cycle.
-// Each slot holds a NOP operation that, when completed by the proactor,
-// triggers data delivery to the peer's recv handler.
-typedef struct iree_net_loopback_send_slot_t {
+// A pending send operation awaiting delivery during the next poll() cycle. The
+// trailing storage contains the payload copied from send() or written by
+// begin_send() before commit_send().
+typedef struct iree_net_loopback_pending_send_t {
   // NOP operation submitted to the proactor. Must be the first field so that
-  // the completion callback can cast (iree_net_loopback_send_slot_t*)operation.
+  // the completion callback can cast (iree_net_loopback_pending_send_t*).
   iree_async_nop_operation_t nop;
 
-  // Data to deliver to the peer's recv handler when the NOP completes.
-  // Always points at coalesce_buffer (data is copied during send).
-  iree_async_span_t delivery_span;
+  // Carrier that owns the send. Retained until the send completes or aborts.
+  struct iree_net_loopback_carrier_t* carrier;
 
-  // Heap-allocated copy of the sender's data. Owned by this slot and freed
-  // in the NOP completion callback.
-  uint8_t* coalesce_buffer;
+  // Data to deliver to the peer's recv handler when the NOP completes. Points
+  // into trailing storage.
+  iree_async_span_t delivery_span;
 
   // Total byte count for statistics and completion callback.
   iree_host_size_t total_size;
 
   // User data from iree_net_send_params_t, echoed to send completion callback.
   uint64_t user_data;
-} iree_net_loopback_send_slot_t;
+
+  // True when completion should invoke the carrier callback.
+  bool notify_completion;
+
+  // Payload bytes delivered to the peer.
+  uint8_t storage[];
+} iree_net_loopback_pending_send_t;
 
 typedef struct iree_net_loopback_carrier_t {
   // Base carrier (must be first for safe upcasting).
@@ -52,15 +58,8 @@ typedef struct iree_net_loopback_carrier_t {
   // True if shutdown() was called (future sends fail).
   bool shutdown_initiated;
 
-  // Send slot bitmap. Bit i set = slot i is free.
-  // Claim: find first set bit (ctz), CAS-clear it.
-  // Release: atomic OR to set bit.
-  // No ordering dependency between slots — out-of-order completion is correct.
-  struct {
-    uint32_t slot_count;
-    iree_atomic_uint32_t free_bitmap;
-    iree_net_loopback_send_slot_t* slots;  // Points into trailing allocation.
-  } send;
+  // Number of committed or reserved sends awaiting completion/abort.
+  iree_atomic_int32_t sends_in_flight;
 
   // Deactivation callback (stored during deactivate, fired when drained).
   struct {
@@ -82,6 +81,10 @@ static inline iree_net_loopback_carrier_t* iree_net_loopback_carrier_cast(
 //===----------------------------------------------------------------------===//
 // Internal helpers
 //===----------------------------------------------------------------------===//
+
+static void iree_net_loopback_carrier_nop_completion(
+    void* user_data, iree_async_operation_t* operation, iree_status_t status,
+    iree_async_completion_flags_t flags);
 
 // Checks if deactivation has completed and invokes callback if so.
 // Called after every pending_operations decrement.
@@ -171,17 +174,119 @@ static void iree_net_loopback_carrier_notify_peer_disconnect(
   }
 }
 
+static iree_status_t iree_net_loopback_pending_send_allocate(
+    iree_net_loopback_carrier_t* carrier, iree_host_size_t total_size,
+    iree_net_loopback_pending_send_t** out_pending_send) {
+  *out_pending_send = NULL;
+
+  iree_host_size_t allocation_size = 0;
+  iree_status_t status = IREE_STRUCT_LAYOUT(
+      sizeof(iree_net_loopback_pending_send_t), &allocation_size,
+      IREE_STRUCT_FIELD_FAM(total_size, uint8_t));
+
+  iree_net_loopback_pending_send_t* pending_send = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc(carrier->base.host_allocator,
+                                   allocation_size, (void**)&pending_send);
+  }
+  if (iree_status_is_ok(status)) {
+    memset(pending_send, 0, allocation_size);
+    pending_send->carrier = carrier;
+    iree_net_carrier_retain(&carrier->base);
+    pending_send->delivery_span =
+        iree_async_span_from_ptr(pending_send->storage, total_size);
+    pending_send->total_size = total_size;
+    *out_pending_send = pending_send;
+  }
+  return status;
+}
+
+static void iree_net_loopback_pending_send_free(
+    iree_net_loopback_pending_send_t* pending_send) {
+  if (!pending_send) return;
+  iree_net_loopback_carrier_t* carrier = pending_send->carrier;
+  iree_allocator_t host_allocator = carrier->base.host_allocator;
+  iree_allocator_free(host_allocator, pending_send);
+  iree_net_carrier_release(&carrier->base);
+}
+
+static iree_status_t iree_net_loopback_pending_send_submit(
+    iree_net_loopback_pending_send_t* pending_send) {
+  iree_async_operation_zero(&pending_send->nop.base, sizeof(pending_send->nop));
+  iree_async_operation_initialize(
+      &pending_send->nop.base, IREE_ASYNC_OPERATION_TYPE_NOP,
+      IREE_ASYNC_OPERATION_FLAG_NONE, iree_net_loopback_carrier_nop_completion,
+      NULL);
+  return iree_async_proactor_submit_one(pending_send->carrier->proactor,
+                                        &pending_send->nop.base);
+}
+
+static iree_status_t iree_net_loopback_carrier_begin_send_operation(
+    iree_net_loopback_carrier_t* carrier) {
+  iree_net_carrier_t* base_carrier = &carrier->base;
+  iree_atomic_fetch_add(&base_carrier->pending_operations, 1,
+                        iree_memory_order_acq_rel);
+
+  iree_status_t status = iree_ok_status();
+  bool send_slot_reserved = false;
+  iree_net_carrier_state_t state = iree_net_carrier_state(base_carrier);
+  if (state != IREE_NET_CARRIER_STATE_ACTIVE) {
+    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "carrier must be in ACTIVE state to send");
+  }
+  if (iree_status_is_ok(status) && carrier->shutdown_initiated) {
+    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "carrier has been shut down for sending");
+  }
+  if (iree_status_is_ok(status) && !carrier->peer) {
+    status = iree_make_status(IREE_STATUS_UNAVAILABLE, "peer disconnected");
+  }
+  if (iree_status_is_ok(status)) {
+    int32_t previous_count = iree_atomic_fetch_add(&carrier->sends_in_flight, 1,
+                                                   iree_memory_order_acq_rel);
+    if (previous_count >= IREE_NET_LOOPBACK_SEND_SLOT_COUNT) {
+      iree_atomic_fetch_sub(&carrier->sends_in_flight, 1,
+                            iree_memory_order_release);
+      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                "loopback send slots exhausted (%d in flight)",
+                                IREE_NET_LOOPBACK_SEND_SLOT_COUNT);
+    } else {
+      send_slot_reserved = true;
+    }
+  }
+
+  if (!iree_status_is_ok(status)) {
+    if (send_slot_reserved) {
+      iree_atomic_fetch_sub(&carrier->sends_in_flight, 1,
+                            iree_memory_order_release);
+    }
+    iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
+                          iree_memory_order_release);
+    iree_net_loopback_carrier_maybe_complete_deactivation(carrier);
+  }
+  return status;
+}
+
+static void iree_net_loopback_carrier_end_send_operation(
+    iree_net_loopback_carrier_t* carrier) {
+  iree_atomic_fetch_sub(&carrier->sends_in_flight, 1,
+                        iree_memory_order_release);
+  iree_atomic_fetch_sub(&carrier->base.pending_operations, 1,
+                        iree_memory_order_release);
+  iree_net_loopback_carrier_maybe_complete_deactivation(carrier);
+}
+
 // Fires from within iree_async_proactor_poll() on the proactor thread.
 // Delivers data to the peer's recv handler and fires the sender's send
 // completion callback.
 static void iree_net_loopback_carrier_nop_completion(
     void* user_data, iree_async_operation_t* operation, iree_status_t status,
     iree_async_completion_flags_t flags) {
+  (void)user_data;
   (void)flags;  // NOP is never multishot.
-  iree_net_loopback_carrier_t* carrier =
-      (iree_net_loopback_carrier_t*)user_data;
-  iree_net_loopback_send_slot_t* slot =
-      (iree_net_loopback_send_slot_t*)operation;
+  iree_net_loopback_pending_send_t* pending_send =
+      (iree_net_loopback_pending_send_t*)operation;
+  iree_net_loopback_carrier_t* carrier = pending_send->carrier;
 
   // Consume NOP status (always OK for NOP, but be correct about ownership).
   iree_status_ignore(status);
@@ -203,23 +308,20 @@ static void iree_net_loopback_carrier_nop_completion(
       iree_net_carrier_state(&peer->base) == IREE_NET_CARRIER_STATE_ACTIVE &&
       peer->base.recv_handler.fn) {
     delivery_status = peer->base.recv_handler.fn(
-        peer->base.recv_handler.user_data, slot->delivery_span, NULL);
+        peer->base.recv_handler.user_data, pending_send->delivery_span, NULL);
   } else {
     delivery_status =
         iree_make_status(IREE_STATUS_UNAVAILABLE, "peer disconnected");
   }
 
-  // Free coalesce buffer if allocated (scatter-gather sends).
-  iree_allocator_free(carrier->base.host_allocator, slot->coalesce_buffer);
-  slot->coalesce_buffer = NULL;
-
   // Update statistics on successful delivery.
   if (iree_status_is_ok(delivery_status)) {
-    iree_atomic_fetch_add(&carrier->base.bytes_sent, (int64_t)slot->total_size,
+    iree_atomic_fetch_add(&carrier->base.bytes_sent,
+                          (int64_t)pending_send->total_size,
                           iree_memory_order_relaxed);
     if (peer) {
       iree_atomic_fetch_add(&peer->base.bytes_received,
-                            (int64_t)slot->total_size,
+                            (int64_t)pending_send->total_size,
                             iree_memory_order_relaxed);
     }
   }
@@ -228,25 +330,16 @@ static void iree_net_loopback_carrier_nop_completion(
   if (peer) iree_net_carrier_release(&peer->base);
 
   // Fire sender's send completion callback if set.
-  if (carrier->base.callback.fn) {
-    carrier->base.callback.fn(carrier->base.callback.user_data, slot->user_data,
-                              delivery_status, slot->total_size, NULL);
+  if (pending_send->notify_completion && carrier->base.callback.fn) {
+    carrier->base.callback.fn(carrier->base.callback.user_data,
+                              pending_send->user_data, delivery_status,
+                              pending_send->total_size, NULL);
   } else {
     iree_status_ignore(delivery_status);
   }
 
-  // Release send slot by setting its bit in the free bitmap.
-  int slot_index =
-      (int)((iree_net_loopback_send_slot_t*)operation - carrier->send.slots);
-  iree_atomic_fetch_or(&carrier->send.free_bitmap, (uint32_t)1 << slot_index,
-                       iree_memory_order_release);
-
-  // Decrement pending operations.
-  iree_atomic_fetch_sub(&carrier->base.pending_operations, 1,
-                        iree_memory_order_release);
-
-  // Check for deactivation completion.
-  iree_net_loopback_carrier_maybe_complete_deactivation(carrier);
+  iree_net_loopback_carrier_end_send_operation(carrier);
+  iree_net_loopback_pending_send_free(pending_send);
 }
 
 //===----------------------------------------------------------------------===//
@@ -275,16 +368,10 @@ static void iree_net_loopback_carrier_destroy(
     carrier->peer = NULL;
   }
 
-  // Defensive cleanup of any remaining coalesce buffers in slots.
-  for (uint32_t i = 0; i < carrier->send.slot_count; ++i) {
-    iree_allocator_free(carrier->base.host_allocator,
-                        carrier->send.slots[i].coalesce_buffer);
-  }
-
   // Release proactor reference.
   iree_async_proactor_release(carrier->proactor);
 
-  // Free carrier memory (single allocation includes trailing slots).
+  // Free carrier memory.
   iree_allocator_t allocator = carrier->base.host_allocator;
   iree_allocator_free(allocator, carrier);
   IREE_TRACE_ZONE_END(z0);
@@ -383,14 +470,16 @@ iree_net_loopback_carrier_query_send_budget(iree_net_carrier_t* base_carrier) {
     return budget;
   }
 
-  // Available slots = popcount of free bitmap.
-  uint32_t bitmap =
-      iree_atomic_load(&carrier->send.free_bitmap, iree_memory_order_acquire);
-  uint32_t available = iree_math_count_ones_u32(bitmap);
+  int32_t sends_in_flight =
+      iree_atomic_load(&carrier->sends_in_flight, iree_memory_order_acquire);
+  uint32_t available_slots =
+      sends_in_flight >= IREE_NET_LOOPBACK_SEND_SLOT_COUNT
+          ? 0
+          : (uint32_t)(IREE_NET_LOOPBACK_SEND_SLOT_COUNT - sends_in_flight);
 
   iree_net_carrier_send_budget_t budget;
-  budget.slots = available;
-  budget.bytes = available > 0 ? IREE_HOST_SIZE_MAX : 0;
+  budget.slots = available_slots;
+  budget.bytes = available_slots > 0 ? IREE_HOST_SIZE_MAX : 0;
   return budget;
 }
 
@@ -403,117 +492,49 @@ static iree_status_t iree_net_loopback_carrier_send(
   // increment to avoid unnecessary rollback).
   iree_host_size_t total_size = 0;
   for (iree_host_size_t i = 0; i < params->data.count; ++i) {
-    total_size += params->data.values[i].length;
+    if (!iree_host_size_checked_add(total_size, params->data.values[i].length,
+                                    &total_size)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "send payload size overflow");
+    }
   }
   if (total_size == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "empty sends are not allowed");
   }
 
-  // Increment pending_operations FIRST to prevent TOCTOU race with deactivate.
-  iree_atomic_fetch_add(&base_carrier->pending_operations, 1,
-                        iree_memory_order_acq_rel);
+  iree_status_t status =
+      iree_net_loopback_carrier_begin_send_operation(carrier);
+  bool send_operation_active = iree_status_is_ok(status);
 
-  // Verify state is ACTIVE after incrementing.
-  iree_net_carrier_state_t state = iree_net_carrier_state(base_carrier);
-  if (state != IREE_NET_CARRIER_STATE_ACTIVE) {
-    iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
-                          iree_memory_order_release);
-    iree_net_loopback_carrier_maybe_complete_deactivation(carrier);
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "carrier must be in ACTIVE state to send");
+  iree_net_loopback_pending_send_t* pending_send = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_net_loopback_pending_send_allocate(carrier, total_size,
+                                                     &pending_send);
   }
-
-  // Check if shutdown was initiated.
-  if (carrier->shutdown_initiated) {
-    iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
-                          iree_memory_order_release);
-    iree_net_loopback_carrier_maybe_complete_deactivation(carrier);
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "carrier has been shut down for sending");
-  }
-
-  // Check peer is still connected.
-  if (!carrier->peer) {
-    iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
-                          iree_memory_order_release);
-    iree_net_loopback_carrier_maybe_complete_deactivation(carrier);
-    return iree_make_status(IREE_STATUS_UNAVAILABLE, "peer disconnected");
-  }
-
-  // Claim a free send slot from the bitmap.
-  uint32_t slot_index;
-  uint32_t bitmap =
-      iree_atomic_load(&carrier->send.free_bitmap, iree_memory_order_acquire);
-  for (;;) {
-    if (bitmap == 0) {
-      iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
-                            iree_memory_order_release);
-      iree_net_loopback_carrier_maybe_complete_deactivation(carrier);
-      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                              "no send slots available");
+  if (iree_status_is_ok(status)) {
+    uint8_t* write_ptr = pending_send->storage;
+    for (iree_host_size_t i = 0; i < params->data.count; ++i) {
+      memcpy(write_ptr, iree_async_span_ptr(params->data.values[i]),
+             params->data.values[i].length);
+      write_ptr += params->data.values[i].length;
     }
-    slot_index = (uint32_t)iree_math_count_trailing_zeros_u32(bitmap);
-    uint32_t cleared = bitmap & ~((uint32_t)1 << slot_index);
-    if (iree_atomic_compare_exchange_weak(&carrier->send.free_bitmap, &bitmap,
-                                          cleared, iree_memory_order_acq_rel,
-                                          iree_memory_order_acquire)) {
-      break;
+    pending_send->user_data = params->user_data;
+    pending_send->notify_completion = true;
+    status = iree_net_loopback_pending_send_submit(pending_send);
+    if (iree_status_is_ok(status)) {
+      pending_send = NULL;
+      send_operation_active = false;
     }
   }
 
-  // Get the slot and populate it.
-  iree_net_loopback_send_slot_t* slot = &carrier->send.slots[slot_index];
-
-  // Copy data into a carrier-owned buffer. This ensures the sender's buffer
-  // can be freed immediately after send() returns. Loopback delivers
-  // asynchronously via the proactor's progress callback, so the original
-  // span data is not available at delivery time.
-  iree_status_t alloc_status = iree_allocator_malloc(
-      carrier->base.host_allocator, total_size, (void**)&slot->coalesce_buffer);
-  if (!iree_status_is_ok(alloc_status)) {
-    iree_atomic_fetch_or(&carrier->send.free_bitmap, (uint32_t)1 << slot_index,
-                         iree_memory_order_release);
-    iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
-                          iree_memory_order_release);
-    iree_net_loopback_carrier_maybe_complete_deactivation(carrier);
-    return alloc_status;
+  if (!iree_status_is_ok(status)) {
+    if (send_operation_active) {
+      iree_net_loopback_carrier_end_send_operation(carrier);
+    }
+    iree_net_loopback_pending_send_free(pending_send);
   }
-  uint8_t* write_ptr = slot->coalesce_buffer;
-  for (iree_host_size_t i = 0; i < params->data.count; ++i) {
-    memcpy(write_ptr, iree_async_span_ptr(params->data.values[i]),
-           params->data.values[i].length);
-    write_ptr += params->data.values[i].length;
-  }
-  slot->delivery_span =
-      iree_async_span_from_ptr(slot->coalesce_buffer, total_size);
-
-  slot->total_size = total_size;
-  slot->user_data = params->user_data;
-
-  // Initialize NOP operation.
-  memset(&slot->nop, 0, sizeof(slot->nop));
-  iree_async_operation_initialize(
-      &slot->nop.base, IREE_ASYNC_OPERATION_TYPE_NOP,
-      IREE_ASYNC_OPERATION_FLAG_NONE, iree_net_loopback_carrier_nop_completion,
-      carrier);
-
-  // Submit NOP to proactor. Completes on the next poll() cycle.
-  iree_status_t submit_status =
-      iree_async_proactor_submit_one(carrier->proactor, &slot->nop.base);
-  if (!iree_status_is_ok(submit_status)) {
-    // Rollback everything.
-    iree_allocator_free(carrier->base.host_allocator, slot->coalesce_buffer);
-    slot->coalesce_buffer = NULL;
-    iree_atomic_fetch_or(&carrier->send.free_bitmap, (uint32_t)1 << slot_index,
-                         iree_memory_order_release);
-    iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
-                          iree_memory_order_release);
-    iree_net_loopback_carrier_maybe_complete_deactivation(carrier);
-    return submit_status;
-  }
-
-  return iree_ok_status();
+  return status;
 }
 
 static iree_status_t iree_net_loopback_carrier_begin_send(
@@ -528,138 +549,53 @@ static iree_status_t iree_net_loopback_carrier_begin_send(
                             "empty sends are not allowed");
   }
 
-  // Increment pending_operations FIRST to prevent TOCTOU race with deactivate.
-  iree_atomic_fetch_add(&base_carrier->pending_operations, 1,
-                        iree_memory_order_acq_rel);
+  iree_status_t status =
+      iree_net_loopback_carrier_begin_send_operation(carrier);
+  bool send_operation_active = iree_status_is_ok(status);
 
-  // Verify state is ACTIVE after incrementing.
-  iree_net_carrier_state_t state = iree_net_carrier_state(base_carrier);
-  if (state != IREE_NET_CARRIER_STATE_ACTIVE) {
-    iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
-                          iree_memory_order_release);
-    iree_net_loopback_carrier_maybe_complete_deactivation(carrier);
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "carrier must be in ACTIVE state to send");
+  iree_net_loopback_pending_send_t* pending_send = NULL;
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_net_loopback_pending_send_allocate(carrier, size, &pending_send);
+  }
+  if (iree_status_is_ok(status)) {
+    *out_ptr = pending_send->storage;
+    *out_handle = (iree_net_carrier_send_handle_t)(uintptr_t)pending_send;
+    pending_send = NULL;
+    send_operation_active = false;
   }
 
-  // Check if shutdown was initiated.
-  if (carrier->shutdown_initiated) {
-    iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
-                          iree_memory_order_release);
-    iree_net_loopback_carrier_maybe_complete_deactivation(carrier);
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "carrier has been shut down for sending");
-  }
-
-  // Check peer is still connected.
-  if (!carrier->peer) {
-    iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
-                          iree_memory_order_release);
-    iree_net_loopback_carrier_maybe_complete_deactivation(carrier);
-    return iree_make_status(IREE_STATUS_UNAVAILABLE, "peer disconnected");
-  }
-
-  // Claim a free send slot from the bitmap.
-  uint32_t slot_index;
-  uint32_t bitmap =
-      iree_atomic_load(&carrier->send.free_bitmap, iree_memory_order_acquire);
-  for (;;) {
-    if (bitmap == 0) {
-      iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
-                            iree_memory_order_release);
-      iree_net_loopback_carrier_maybe_complete_deactivation(carrier);
-      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                              "no send slots available");
+  if (!iree_status_is_ok(status)) {
+    if (send_operation_active) {
+      iree_net_loopback_carrier_end_send_operation(carrier);
     }
-    slot_index = (uint32_t)iree_math_count_trailing_zeros_u32(bitmap);
-    uint32_t cleared = bitmap & ~((uint32_t)1 << slot_index);
-    if (iree_atomic_compare_exchange_weak(&carrier->send.free_bitmap, &bitmap,
-                                          cleared, iree_memory_order_acq_rel,
-                                          iree_memory_order_acquire)) {
-      break;
-    }
+    iree_net_loopback_pending_send_free(pending_send);
   }
-
-  // Allocate coalesce buffer for the caller to write into.
-  iree_net_loopback_send_slot_t* slot = &carrier->send.slots[slot_index];
-  iree_status_t alloc_status = iree_allocator_malloc(
-      carrier->base.host_allocator, size, (void**)&slot->coalesce_buffer);
-  if (!iree_status_is_ok(alloc_status)) {
-    iree_atomic_fetch_or(&carrier->send.free_bitmap, (uint32_t)1 << slot_index,
-                         iree_memory_order_release);
-    iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
-                          iree_memory_order_release);
-    iree_net_loopback_carrier_maybe_complete_deactivation(carrier);
-    return alloc_status;
-  }
-
-  // Store size in the slot for commit_send. The handle carries only the slot
-  // index — packing size into the handle truncates at 32 bits.
-  slot->total_size = size;
-  *out_ptr = slot->coalesce_buffer;
-  *out_handle = (iree_net_carrier_send_handle_t)slot_index;
-  return iree_ok_status();
+  return status;
 }
 
 static iree_status_t iree_net_loopback_carrier_commit_send(
     iree_net_carrier_t* base_carrier, iree_net_carrier_send_handle_t handle) {
-  iree_net_loopback_carrier_t* carrier =
-      iree_net_loopback_carrier_cast(base_carrier);
-
-  uint32_t slot_index = (uint32_t)handle;
-
-  // Read size from the slot (stored by begin_send).
-  iree_net_loopback_send_slot_t* slot = &carrier->send.slots[slot_index];
-  iree_host_size_t size = slot->total_size;
-  slot->delivery_span = iree_async_span_from_ptr(slot->coalesce_buffer, size);
-  slot->user_data = 0;
-
-  // Initialize NOP operation.
-  memset(&slot->nop, 0, sizeof(slot->nop));
-  iree_async_operation_initialize(
-      &slot->nop.base, IREE_ASYNC_OPERATION_TYPE_NOP,
-      IREE_ASYNC_OPERATION_FLAG_NONE, iree_net_loopback_carrier_nop_completion,
-      carrier);
-
-  // Submit NOP to proactor. Completes on the next poll() cycle.
-  iree_status_t submit_status =
-      iree_async_proactor_submit_one(carrier->proactor, &slot->nop.base);
-  if (!iree_status_is_ok(submit_status)) {
-    iree_allocator_free(carrier->base.host_allocator, slot->coalesce_buffer);
-    slot->coalesce_buffer = NULL;
-    iree_atomic_fetch_or(&carrier->send.free_bitmap, (uint32_t)1 << slot_index,
-                         iree_memory_order_release);
-    iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
-                          iree_memory_order_release);
-    iree_net_loopback_carrier_maybe_complete_deactivation(carrier);
-    return submit_status;
+  (void)base_carrier;
+  iree_net_loopback_pending_send_t* pending_send =
+      (iree_net_loopback_pending_send_t*)(uintptr_t)handle;
+  iree_net_loopback_carrier_t* carrier = pending_send->carrier;
+  iree_status_t status = iree_net_loopback_pending_send_submit(pending_send);
+  if (!iree_status_is_ok(status)) {
+    iree_net_loopback_carrier_end_send_operation(carrier);
+    iree_net_loopback_pending_send_free(pending_send);
   }
-
-  return iree_ok_status();
+  return status;
 }
 
 static void iree_net_loopback_carrier_abort_send(
     iree_net_carrier_t* base_carrier, iree_net_carrier_send_handle_t handle) {
-  iree_net_loopback_carrier_t* carrier =
-      iree_net_loopback_carrier_cast(base_carrier);
-
-  uint32_t slot_index = (uint32_t)handle;
-  iree_net_loopback_send_slot_t* slot = &carrier->send.slots[slot_index];
-
-  // Free the coalesce buffer allocated in begin_send.
-  iree_allocator_free(carrier->base.host_allocator, slot->coalesce_buffer);
-  slot->coalesce_buffer = NULL;
-
-  // Release send slot by setting its bit in the free bitmap.
-  iree_atomic_fetch_or(&carrier->send.free_bitmap, (uint32_t)1 << slot_index,
-                       iree_memory_order_release);
-
-  // Decrement pending operations.
-  iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
-                        iree_memory_order_release);
-
-  // Check for deactivation completion.
-  iree_net_loopback_carrier_maybe_complete_deactivation(carrier);
+  (void)base_carrier;
+  iree_net_loopback_pending_send_t* pending_send =
+      (iree_net_loopback_pending_send_t*)(uintptr_t)handle;
+  iree_net_loopback_carrier_t* carrier = pending_send->carrier;
+  iree_net_loopback_carrier_end_send_operation(carrier);
+  iree_net_loopback_pending_send_free(pending_send);
 }
 
 static iree_status_t iree_net_loopback_carrier_direct_write(
@@ -735,13 +671,12 @@ static const iree_net_carrier_vtable_t iree_net_loopback_carrier_vtable = {
 // Public API
 //===----------------------------------------------------------------------===//
 
-// Initializes a single loopback carrier with trailing send slot storage.
+// Initializes a single loopback carrier.
 static void iree_net_loopback_carrier_init(
-    iree_net_loopback_carrier_t* carrier, iree_host_size_t total_size,
-    iree_host_size_t send_slots_offset, iree_async_proactor_t* proactor,
+    iree_net_loopback_carrier_t* carrier, iree_async_proactor_t* proactor,
     iree_net_carrier_capabilities_t capabilities,
     iree_net_carrier_callback_t callback, iree_allocator_t host_allocator) {
-  memset(carrier, 0, total_size);
+  memset(carrier, 0, sizeof(*carrier));
   iree_net_carrier_initialize(&iree_net_loopback_carrier_vtable, capabilities,
                               0,         // No MTU (stream-like).
                               SIZE_MAX,  // Unlimited scatter-gather.
@@ -749,12 +684,6 @@ static void iree_net_loopback_carrier_init(
   carrier->proactor = proactor;
   iree_async_proactor_retain(proactor);
   carrier->shutdown_initiated = false;
-  carrier->send.slot_count = IREE_NET_LOOPBACK_SEND_SLOT_COUNT;
-  // All slots start free.
-  iree_atomic_store(&carrier->send.free_bitmap, UINT32_MAX,
-                    iree_memory_order_relaxed);
-  carrier->send.slots =
-      (iree_net_loopback_send_slot_t*)((uint8_t*)carrier + send_slots_offset);
 }
 
 IREE_API_EXPORT void iree_net_loopback_carrier_set_peer_disconnect_handler(
@@ -776,24 +705,14 @@ IREE_API_EXPORT iree_status_t iree_net_loopback_carrier_create_pair(
   *out_client = NULL;
   *out_server = NULL;
 
-  // Calculate allocation size with trailing send slot array.
-  iree_host_size_t total_size = 0;
-  iree_host_size_t send_slots_offset = 0;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, IREE_STRUCT_LAYOUT(sizeof(iree_net_loopback_carrier_t), &total_size,
-                             IREE_STRUCT_FIELD_ALIGNED(
-                                 IREE_NET_LOOPBACK_SEND_SLOT_COUNT,
-                                 iree_net_loopback_send_slot_t,
-                                 iree_alignof(iree_net_loopback_send_slot_t),
-                                 &send_slots_offset)));
-
   // Allocate both carriers.
   iree_net_loopback_carrier_t* client = NULL;
   iree_net_loopback_carrier_t* server = NULL;
   iree_status_t status =
-      iree_allocator_malloc(host_allocator, total_size, (void**)&client);
+      iree_allocator_malloc(host_allocator, sizeof(*client), (void**)&client);
   if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc(host_allocator, total_size, (void**)&server);
+    status =
+        iree_allocator_malloc(host_allocator, sizeof(*server), (void**)&server);
   }
 
   if (iree_status_is_ok(status)) {
@@ -805,11 +724,9 @@ IREE_API_EXPORT iree_status_t iree_net_loopback_carrier_create_pair(
         IREE_NET_CARRIER_CAPABILITY_ORDERED;
 
     // Initialize both carriers.
-    iree_net_loopback_carrier_init(client, total_size, send_slots_offset,
-                                   proactor, capabilities, callback,
+    iree_net_loopback_carrier_init(client, proactor, capabilities, callback,
                                    host_allocator);
-    iree_net_loopback_carrier_init(server, total_size, send_slots_offset,
-                                   proactor, capabilities, callback,
+    iree_net_loopback_carrier_init(server, proactor, capabilities, callback,
                                    host_allocator);
 
     // Set up peer links.
@@ -819,11 +736,8 @@ IREE_API_EXPORT iree_status_t iree_net_loopback_carrier_create_pair(
     *out_client = &client->base;
     *out_server = &server->base;
   } else {
-    // Cleanup on allocation failure. If client was allocated, it was
-    // initialized so we need to release its proactor reference.
-    if (client) {
-      iree_async_proactor_release(proactor);
-    }
+    // Cleanup on allocation failure. Carriers are initialized only after both
+    // allocations succeed, so there is no proactor reference to release here.
     iree_allocator_free(host_allocator, client);
     iree_allocator_free(host_allocator, server);
   }

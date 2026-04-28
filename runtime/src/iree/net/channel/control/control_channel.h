@@ -271,6 +271,19 @@ iree_status_t iree_net_control_channel_send_data(
     iree_net_control_channel_t* channel, iree_net_control_frame_flags_t flags,
     iree_async_span_list_t payload, uint64_t operation_user_data);
 
+// Sends a DATA frame with payload copied before returning.
+//
+// This is for small control messages whose backing storage cannot remain live
+// until asynchronous send completion. Large payloads should use
+// iree_net_control_channel_send_data() and keep their spans valid until
+// on_send_complete fires.
+//
+// Requires OPERATIONAL state. Returns FAILED_PRECONDITION in CREATED,
+// DRAINING, or ERROR. On non-OK return, on_send_complete is NOT called.
+iree_status_t iree_net_control_channel_send_data_copy(
+    iree_net_control_channel_t* channel, iree_net_control_frame_flags_t flags,
+    iree_async_span_list_t payload, uint64_t operation_user_data);
+
 // Sends a PING frame for liveness detection and RTT measurement.
 //
 // |payload| is echoed back in the PONG response. The recommended payload

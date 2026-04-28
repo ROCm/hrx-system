@@ -19,7 +19,8 @@
 //   - Data is always copied during send() (no zero-copy TX), matching real
 //     carriers where send() consumes data into kernel/hardware buffers. The
 //     sender's buffer can be freed immediately after send() returns.
-//   - Send budget is finite (32 slots) to provide realistic backpressure.
+//   - Send budget has no fixed slot ceiling; payloads are copied into
+//     per-send allocations and backpressure is host allocation failure.
 //
 // Capabilities:
 //   - RELIABLE: No drops (in-memory).
