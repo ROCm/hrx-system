@@ -53,9 +53,25 @@ iree_hal_streaming_query_device_info(iree_hal_streaming_device_t *device) {
   //   gfx942 -> 9.4, gfx950 -> 9.5
   //   gfx1030 -> 10.3, gfx1100 -> 11.0
   char arch_name[64] = {0};
-  iree_status_t arch_status = iree_hal_device_query_string(
-      device->hal_device, IREE_SV("hal.device"), IREE_SV("architecture"),
-      sizeof(arch_name), arch_name);
+  // TODO(#rebase): replace this with a streaming-owned architecture query path.
+  // We intentionally do not depend on public device string queries anymore.
+  iree_status_t arch_status = iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "streaming architecture queries are not implemented on the rebased path");
+#if 0
+  if (sizeof(arch_name) == 0) {
+    arch_status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                   "output string buffer is empty");
+  } else {
+    iree_host_size_t out_string_length = 0;
+    arch_name[0] = '\0';
+    arch_status = iree_hal_device_query_string(
+        device->hal_device, IREE_SV("hal.device"), IREE_SV("architecture"),
+        sizeof(arch_name) - 1, arch_name, &out_string_length);
+    arch_name[out_string_length < (sizeof(arch_name) - 1) ? out_string_length
+                                                          : (sizeof(arch_name) - 1)] = '\0';
+  }
+#endif
   if (iree_status_is_ok(arch_status) && arch_name[0] != '\0') {
     // Parse "gfxNNNN" to extract major.minor.
     // gfx9xx -> major=9, minor=x (e.g., gfx942 -> 9.4)

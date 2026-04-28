@@ -6,21 +6,44 @@
 
 #include "hrx_compiler.h"
 #include "hrx_runtime.h"
-
-#include "iree/async/util/proactor_pool.h"
 #include "iree/base/api.h"
+#include "iree/base/tracing.h"
 #include "iree/hal/api.h"
-#include "iree/hal/drivers/local_task/task_driver.h"
+#include "iree/hal/device_group.h"
 #include "iree/hal/local/loaders/registration/init.h"
+#include "iree/hal/pool.h"
 #include "iree/modules/hal/module.h"
 #include "iree/modules/hal/types.h"
-#include "iree/task/api.h"
 #include "iree/vm/api.h"
 #include "iree/vm/bytecode/module.h"
 
 #ifdef __cplusplus
 extern "C" {
+#ifndef _Static_assert
+#define _Static_assert static_assert
 #endif
+#endif
+
+//===----------------------------------------------------------------------===//
+// Tracing helpers
+//===----------------------------------------------------------------------===//
+
+#define HRX_TRACE_ZONE_BEGIN(zone_id, name_literal)                            \
+  IREE_TRACE_ZONE_BEGIN_NAMED(zone_id, name_literal)
+#define HRX_TRACE_ZONE_END(zone_id) IREE_TRACE_ZONE_END(zone_id)
+#define HRX_TRACE_ZONE_APPEND_BYTES(zone_id, byte_count)                       \
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(zone_id, (int64_t)(byte_count))
+#define HRX_RETURN_AND_END_ZONE(zone_id, expr)                                 \
+  do {                                                                         \
+    hrx_status_t hrx_status__ = (expr);                                        \
+    HRX_TRACE_ZONE_END(zone_id);                                               \
+    return hrx_status__;                                                       \
+  } while (0)
+#define HRX_RETURN_VOID_AND_END_ZONE(zone_id)                                  \
+  do {                                                                         \
+    HRX_TRACE_ZONE_END(zone_id);                                               \
+    return;                                                                    \
+  } while (0)
 
 //===----------------------------------------------------------------------===//
 // Enum value compatibility asserts
@@ -173,6 +196,8 @@ typedef struct hrx_device_s {
   hrx_accelerator_type_t type;
   int ordinal;
   iree_hal_device_t *hal_device;
+  iree_hal_device_group_t *hal_device_group;
+  bool profiling_active;
   hrx_allocator_s allocator; // Inline, owned by device.
   char name[128];
   char architecture[64];
@@ -200,6 +225,7 @@ typedef struct hrx_stream_s {
 typedef struct hrx_buffer_s {
   iree_atomic_ref_count_t ref_count;
   iree_hal_buffer_t *hal_buffer;
+  iree_hal_pool_t *hal_pool;
   hrx_device_t device;
   hrx_memory_type_t mem_type;
   size_t size;
@@ -252,6 +278,7 @@ typedef struct hrx_executable_s {
 // definitions stay private to the compiler implementation TU.
 typedef struct iree_compiler_session_t iree_compiler_session_t;
 typedef struct iree_compiler_output_t iree_compiler_output_t;
+typedef struct iree_async_proactor_pool_t iree_async_proactor_pool_t;
 
 // Compiler frontend configuration.
 typedef struct hrx_compiler_s {
@@ -324,6 +351,10 @@ hrx_status_t hrx_status_from_iree(iree_status_t iree_status);
 
 // Convert hrx_status_t back to iree_status_t and consume the hrx status.
 iree_status_t hrx_status_to_iree(hrx_status_t status);
+
+iree_status_t hrx_iree_exact_pool_create(iree_hal_allocator_t *allocator,
+                                         iree_hal_buffer_params_t params,
+                                         iree_hal_pool_t **out_pool);
 
 #ifdef __cplusplus
 }

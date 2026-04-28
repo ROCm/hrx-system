@@ -80,6 +80,7 @@ public:
   decltype(&hrx_stream_retain) stream_retain;
   decltype(&hrx_stream_release) stream_release;
   decltype(&hrx_stream_synchronize) stream_synchronize;
+  decltype(&hrx_stream_wait) stream_wait;
   decltype(&hrx_stream_query) stream_query;
   decltype(&hrx_stream_flush) stream_flush;
   decltype(&hrx_stream_get_semaphore) stream_get_semaphore;

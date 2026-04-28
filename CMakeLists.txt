@@ -18,6 +18,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(HRX_IREE_SOURCE_DIR "" CACHE PATH
     "Path to IREE source tree (required)")
+option(HRX_ENABLE_IREE_AMDGPU
+    "Enable IREE's built-in AMDGPU HAL driver" ON)
 option(HRX_ENABLE_TRACY
     "Build with IREE Tracy tracing integration" OFF)
 option(HRX_BUILD_CTS
@@ -37,13 +39,6 @@ endif()
 message(STATUS "hrx-runtime: using IREE at ${HRX_IREE_SOURCE_DIR}")
 
 #===------------------------------------------------------------------------===#
-# HSA runtime (direct link, part of ROCm)
-#===------------------------------------------------------------------------===#
-
-find_package(hsa-runtime64 REQUIRED)
-message(STATUS "hrx-runtime: found HSA runtime")
-
-#===------------------------------------------------------------------------===#
 # IREE as source dependency (static build, runtime-only)
 #===------------------------------------------------------------------------===#
 
@@ -60,6 +55,61 @@ set(IREE_ALLOCATOR_SYSTEM "mimalloc" CACHE STRING "" FORCE)
 
 # CPU drivers only (local-sync + local-task).
 set(IREE_HAL_DRIVER_DEFAULTS OFF)
+if(HRX_ENABLE_IREE_AMDGPU)
+  set(IREE_HAL_DRIVER_AMDGPU ON)
+  if(NOT DEFINED IREE_ROCM_TEST_TARGET_CHIP)
+    set(IREE_ROCM_TEST_TARGET_CHIP "" CACHE STRING
+        "ROCm test target chip for the embedded IREE build" FORCE)
+  endif()
+  # Runtime-only IREE builds skip LLVM setup, but the AMDGPU driver still needs
+  # host clang/llvm-link/lld to compile its embedded device libraries.
+  if(NOT IREE_BUILD_COMPILER)
+    if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
+      set(IREE_CLANG_BINARY "${CMAKE_C_COMPILER}" CACHE FILEPATH
+          "Host clang used by the embedded IREE AMDGPU build" FORCE)
+    else()
+      find_program(_hrx_clang_binary clang REQUIRED)
+      set(IREE_CLANG_BINARY "${_hrx_clang_binary}" CACHE FILEPATH
+          "Host clang used by the embedded IREE AMDGPU build" FORCE)
+    endif()
+    execute_process(
+        COMMAND "${IREE_CLANG_BINARY}" -print-prog-name=llvm-link
+        OUTPUT_VARIABLE _hrx_llvm_link_binary
+        OUTPUT_STRIP_TRAILING_WHITESPACE)
+    execute_process(
+        COMMAND "${IREE_CLANG_BINARY}" -print-prog-name=ld.lld
+        OUTPUT_VARIABLE _hrx_lld_binary
+        OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(EXISTS "${_hrx_llvm_link_binary}")
+      set(IREE_LLVM_LINK_BINARY "${_hrx_llvm_link_binary}" CACHE FILEPATH
+          "Host llvm-link used by the embedded IREE AMDGPU build" FORCE)
+    else()
+      find_program(_hrx_llvm_link_fallback llvm-link REQUIRED)
+      set(IREE_LLVM_LINK_BINARY "${_hrx_llvm_link_fallback}" CACHE FILEPATH
+          "Host llvm-link used by the embedded IREE AMDGPU build" FORCE)
+    endif()
+    if(EXISTS "${_hrx_lld_binary}")
+      set(IREE_LLD_BINARY "${_hrx_lld_binary}" CACHE FILEPATH
+          "Host lld used by the embedded IREE AMDGPU build" FORCE)
+    else()
+      find_program(_hrx_lld_fallback NAMES lld ld.lld REQUIRED)
+      set(IREE_LLD_BINARY "${_hrx_lld_fallback}" CACHE FILEPATH
+          "Host lld used by the embedded IREE AMDGPU build" FORCE)
+    endif()
+    if(NOT IREE_CLANG_BUILTIN_HEADERS_PATH)
+      execute_process(
+          COMMAND "${IREE_CLANG_BINARY}" -print-resource-dir
+          OUTPUT_VARIABLE _hrx_clang_resource_dir
+          OUTPUT_STRIP_TRAILING_WHITESPACE)
+      if(NOT _hrx_clang_resource_dir)
+        message(FATAL_ERROR
+          "Failed to determine clang resource dir for ${IREE_CLANG_BINARY}")
+      endif()
+      set(IREE_CLANG_BUILTIN_HEADERS_PATH
+          "${_hrx_clang_resource_dir}/include")
+    endif()
+  endif()
+endif()
 set(IREE_HAL_DRIVER_LOCAL_SYNC ON)
 set(IREE_HAL_DRIVER_LOCAL_TASK ON)
 set(IREE_HAL_DRIVER_REMOTE ON)
@@ -107,67 +157,6 @@ if(HRX_ENABLE_UBSAN)
   add_compile_options(-fsanitize=undefined -fno-omit-frame-pointer)
   add_link_options(-fsanitize=undefined)
 endif()
-
-#===------------------------------------------------------------------------===#
-# HSA HAL driver (from iree-hal-streaming, plain cmake build)
-#===------------------------------------------------------------------------===#
-
-add_library(hrx_hsa_driver STATIC
-    src/hsa_driver/status_util.c
-    src/hsa_driver/fat_binary.c
-    src/hsa_driver/hsa_allocator.c
-    src/hsa_driver/hsa_buffer.c
-    src/hsa_driver/hsa_driver.c
-    src/hsa_driver/hsa_device.c
-    src/hsa_driver/hsa_semaphore.c
-    src/hsa_driver/native_executable.c
-    src/hsa_driver/nop_executable_cache.c
-    src/hsa_driver/stream_command_buffer.c
-)
-target_include_directories(hrx_hsa_driver PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
-target_link_libraries(hrx_hsa_driver PUBLIC
-    hsa-runtime64::hsa-runtime64
-    iree_base_base
-    iree_base_core_headers
-    iree_base_internal_arena
-    iree_base_internal_atomic_slist
-    iree_base_internal_flatcc_parsing
-    iree_base_threading_threading
-    iree_base_threading_thread
-    iree_async_async
-    iree_async_util_proactor_pool
-    iree_hal_hal
-    iree_hal_utils_collective_batch
-    iree_hal_utils_deferred_command_buffer
-    iree_hal_utils_executable_debug_info
-    iree_hal_utils_executable_header
-    iree_hal_utils_file_transfer
-    iree_hal_utils_files
-    iree_hal_utils_queue_emulation
-    iree_hal_utils_queue_host_call_emulation
-    iree_hal_utils_resource_set
-    iree_schemas_executable_debug_info_c_fbs
-    iree_schemas_hip_executable_def_c_fbs
-)
-set_target_properties(hrx_hsa_driver PROPERTIES POSITION_INDEPENDENT_CODE ON)
-
-# HSA driver registration module.
-add_library(hrx_hsa_registration STATIC
-    src/hsa_driver/registration/driver_module.c
-)
-target_include_directories(hrx_hsa_registration PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
-target_link_libraries(hrx_hsa_registration PUBLIC
-    hrx_hsa_driver
-    iree_base_base
-    iree_base_core_headers
-    iree_base_tooling_flags
-    iree_hal_hal
-)
-set_target_properties(hrx_hsa_registration PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 #===------------------------------------------------------------------------===#
 # libhrx.so

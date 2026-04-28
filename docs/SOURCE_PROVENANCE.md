@@ -86,7 +86,7 @@ informed the hrx-runtime design, without copying code:
 - Module/symbol registry (`module.c`, `registry.c`)
 - Memory pool management (`mem_pool.c`)
 - HIP/CUDA binding layer (`binding/hip/`, `binding/cuda/`)
-- HSA driver (`hsa_driver/`)
+- Reference HSA driver (`hsa_driver/`); HRX now uses IREE's AMDGPU HAL driver
 - Event system (`event.c`)
 - Peer-to-peer (`peer.c`, P2P topology)
 - Pointer tagging for symbol identification

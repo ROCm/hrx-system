@@ -9,7 +9,7 @@ allocation, and command dispatch.
 Requires: clang/clang++, ccache, lld, cmake 3.20+, ninja.
 
 ```bash
-cmake -B build sources/hrx-runtime \
+cmake -B build sources/hrx \
   -DHRX_IREE_SOURCE_DIR=/path/to/iree \
   -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
   -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
@@ -22,24 +22,24 @@ cmake --build build
 
 ## Consuming with CMake
 
-`hrx-runtime` exports `hrx::hrx` from both the build tree and an install
+`hrx` exports `hrx::hrx` from both the build tree and an install
 prefix.
 
 ```bash
 # Build-tree package
-cmake -S sources/hrx-runtime/cts/package_smoke \
+cmake -S sources/hrx/cts/package_smoke \
   -B build/hrx-package-smoke \
   -Dhrx_DIR=build/cmake/hrx
 cmake --build build/hrx-package-smoke
 
 # Install-tree package
-cmake --install build --prefix build/hrx-runtime-install
-cmake -S sources/hrx-runtime/cts/package_smoke \
+cmake --install build --prefix build/hrx-install
+cmake -S sources/hrx/cts/package_smoke \
   -B build/hrx-package-smoke-install \
-  -DCMAKE_PREFIX_PATH=build/hrx-runtime-install
+  -DCMAKE_PREFIX_PATH=build/hrx-install
 cmake --build build/hrx-package-smoke-install
 
-# If libhsa-runtime64.so.1 is not in the default loader path:
+# If ROCm shared libraries are not in the default loader path:
 LD_LIBRARY_PATH=/path/to/rocm/lib ./build/hrx-package-smoke-install/hrx_package_smoke
 ```
 
@@ -78,6 +78,21 @@ hrx-info --test=all
 ctest --test-dir build --output-on-failure
 ```
 
+### Profiling Environment
+
+```bash
+# Capture an IREE HAL profile for GPU work.
+HRX_PROFILE_FILE=/tmp/hrx.ireeprof hrx-info --device=gpu:0
+iree-profile summary /tmp/hrx.ireeprof
+```
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HRX_PROFILE_FILE` | unset | Enables IREE HAL profiling for GPU devices and writes the profile to this path. |
+| `HRX_PROFILE_MODE` | `queue` | Profiling mode: `queue`, `dispatch`, `executable`, or `all`. Use `queue` for normal llama.cpp runs on the current AMDGPU branch; `dispatch`/`all` exercise newer counter paths and may perturb some backend unit tests. |
+| `HRX_GPU_DRIVER` | `amdgpu` | GPU HAL driver name. |
+| `HRX_GPU_DEBUG` | unset | Print IREE status details from GPU initialization and profiling setup. |
+
 ## Architecture
 
 ```
@@ -110,9 +125,8 @@ ctest --test-dir build --output-on-failure
 
 ### Current State (Initial Spike)
 
-GPU init uses local-task driver (no HSA required). This validates the API
-surface and build architecture. Real HSA/AMDGPU driver integration comes
-in a later phase.
+GPU init uses IREE's AMDGPU HAL driver when HRX is built with
+`HRX_ENABLE_IREE_AMDGPU=ON`. CPU init uses the local-task driver.
 
 ## Source Layout
 

@@ -32,6 +32,17 @@ static hrx_status_t hrx_stream_begin_cb(hrx_stream_t stream) {
   return hrx_ok_status();
 }
 
+static iree_status_t hrx_stream_record_ordering_barrier(hrx_stream_t stream) {
+  iree_hal_memory_barrier_t memory_barrier = {
+      .source_scope = IREE_HAL_MEMORY_ACCESS_ALL,
+      .target_scope = IREE_HAL_MEMORY_ACCESS_ALL,
+  };
+  return iree_hal_command_buffer_execution_barrier(
+      stream->pending_cb, IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+      IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
+      IREE_HAL_EXECUTION_BARRIER_FLAG_NONE, 1, &memory_barrier, 0, NULL);
+}
+
 hrx_status_t hrx_stream_create(hrx_device_t device, uint32_t flags,
                                hrx_stream_t *stream) {
   if (!device || !stream) {
@@ -92,17 +103,20 @@ void hrx_stream_release(hrx_stream_t stream) {
 }
 
 hrx_status_t hrx_stream_flush(hrx_stream_t stream) {
+  HRX_TRACE_ZONE_BEGIN(z0, "hrx_stream_flush");
   if (!stream) {
-    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "stream is NULL");
+    HRX_RETURN_AND_END_ZONE(
+        z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "stream is NULL"));
   }
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, stream->has_pending_work ? 1 : 0);
   if (!stream->has_pending_work || !stream->pending_cb) {
-    return hrx_ok_status();
+    HRX_RETURN_AND_END_ZONE(z0, hrx_ok_status());
   }
 
   // End the command buffer recording.
   iree_status_t status = iree_hal_command_buffer_end(stream->pending_cb);
   if (!iree_status_is_ok(status)) {
-    return hrx_status_from_iree(status);
+    HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
   }
 
   // Build wait/signal semaphore lists.
@@ -128,30 +142,42 @@ hrx_status_t hrx_stream_flush(hrx_stream_t stream) {
       stream->device->hal_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_list,
       signal_list, stream->pending_cb, binding_table, /*flags=*/0);
   if (!iree_status_is_ok(status)) {
-    return hrx_status_from_iree(status);
+    HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
   }
 
   stream->timepoint = signal_value;
   iree_hal_command_buffer_release(stream->pending_cb);
   stream->pending_cb = NULL;
   stream->has_pending_work = false;
-  return hrx_ok_status();
+  HRX_RETURN_AND_END_ZONE(z0, hrx_ok_status());
 }
 
 hrx_status_t hrx_stream_synchronize(hrx_stream_t stream) {
+  HRX_TRACE_ZONE_BEGIN(z0, "hrx_stream_synchronize");
   if (!stream) {
-    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "stream is NULL");
+    HRX_RETURN_AND_END_ZONE(
+        z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "stream is NULL"));
   }
 
   // Flush any pending work first.
   hrx_status_t status = hrx_stream_flush(stream);
   if (!hrx_status_is_ok(status))
-    return status;
+    HRX_RETURN_AND_END_ZONE(z0, status);
 
+  HRX_RETURN_AND_END_ZONE(z0, hrx_stream_wait(stream));
+}
+
+hrx_status_t hrx_stream_wait(hrx_stream_t stream) {
+  HRX_TRACE_ZONE_BEGIN(z0, "hrx_stream_wait");
+  if (!stream) {
+    HRX_RETURN_AND_END_ZONE(
+        z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "stream is NULL"));
+  }
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, stream->timepoint);
   if (stream->timepoint == 0)
-    return hrx_ok_status();
-
-  return hrx_semaphore_wait(stream->semaphore, stream->timepoint, UINT64_MAX);
+    HRX_RETURN_AND_END_ZONE(z0, hrx_ok_status());
+  HRX_RETURN_AND_END_ZONE(
+      z0, hrx_semaphore_wait(stream->semaphore, stream->timepoint, UINT64_MAX));
 }
 
 hrx_status_t hrx_stream_query(hrx_stream_t stream, bool *complete) {
@@ -212,18 +238,21 @@ hrx_status_t hrx_stream_advance_timeline(hrx_stream_t stream, uint64_t *value) {
 
 hrx_status_t hrx_stream_wait_on(hrx_stream_t stream,
                                 hrx_timeline_point_t position) {
+  HRX_TRACE_ZONE_BEGIN(z0, "hrx_stream_wait_on");
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, position.value);
   if (!stream) {
-    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "stream is NULL");
+    HRX_RETURN_AND_END_ZONE(
+        z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "stream is NULL"));
   }
   if (!position.semaphore) {
-    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                           "position semaphore is NULL");
+    HRX_RETURN_AND_END_ZONE(z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                                                "position semaphore is NULL"));
   }
 
   // Flush current pending work with a barrier that waits on the given point.
   hrx_status_t status = hrx_stream_flush(stream);
   if (!hrx_status_is_ok(status))
-    return status;
+    HRX_RETURN_AND_END_ZONE(z0, status);
 
   // Insert a queue barrier that waits on the external semaphore
   // and signals our next timepoint.
@@ -247,11 +276,11 @@ hrx_status_t hrx_stream_wait_on(hrx_stream_t stream,
       stream->device->hal_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_list,
       signal_list, /*flags=*/0);
   if (!iree_status_is_ok(iree_status)) {
-    return hrx_status_from_iree(iree_status);
+    HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(iree_status));
   }
 
   stream->timepoint = signal_value;
-  return hrx_ok_status();
+  HRX_RETURN_AND_END_ZONE(z0, hrx_ok_status());
 }
 
 //===----------------------------------------------------------------------===//
@@ -261,14 +290,17 @@ hrx_status_t hrx_stream_wait_on(hrx_stream_t stream,
 hrx_status_t hrx_stream_fill_buffer(hrx_stream_t stream, hrx_buffer_t buffer,
                                     size_t offset, size_t size,
                                     const void *pattern, size_t pattern_size) {
+  HRX_TRACE_ZONE_BEGIN(z0, "hrx_stream_fill_buffer");
+  HRX_TRACE_ZONE_APPEND_BYTES(z0, size);
   if (!stream || !buffer || !pattern) {
-    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                           "stream, buffer, or pattern is NULL");
+    HRX_RETURN_AND_END_ZONE(
+        z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                            "stream, buffer, or pattern is NULL"));
   }
 
   hrx_status_t status = hrx_stream_begin_cb(stream);
   if (!hrx_status_is_ok(status))
-    return status;
+    HRX_RETURN_AND_END_ZONE(z0, status);
 
   iree_hal_buffer_ref_t target_ref = iree_hal_make_buffer_ref(
       buffer->hal_buffer, (iree_device_size_t)offset, (iree_device_size_t)size);
@@ -276,24 +308,31 @@ hrx_status_t hrx_stream_fill_buffer(hrx_stream_t stream, hrx_buffer_t buffer,
       stream->pending_cb, target_ref, pattern, (iree_host_size_t)pattern_size,
       /*flags=*/0);
   if (!iree_status_is_ok(iree_status)) {
-    return hrx_status_from_iree(iree_status);
+    HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(iree_status));
+  }
+
+  iree_status = hrx_stream_record_ordering_barrier(stream);
+  if (!iree_status_is_ok(iree_status)) {
+    HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(iree_status));
   }
 
   stream->has_pending_work = true;
-  return hrx_ok_status();
+  HRX_RETURN_AND_END_ZONE(z0, hrx_ok_status());
 }
 
 hrx_status_t hrx_stream_copy_buffer(hrx_stream_t stream, hrx_buffer_t src,
                                     size_t src_offset, hrx_buffer_t dst,
                                     size_t dst_offset, size_t size) {
+  HRX_TRACE_ZONE_BEGIN(z0, "hrx_stream_copy_buffer");
+  HRX_TRACE_ZONE_APPEND_BYTES(z0, size);
   if (!stream || !src || !dst) {
-    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                           "stream, src, or dst is NULL");
+    HRX_RETURN_AND_END_ZONE(z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                                                "stream, src, or dst is NULL"));
   }
 
   hrx_status_t status = hrx_stream_begin_cb(stream);
   if (!hrx_status_is_ok(status))
-    return status;
+    HRX_RETURN_AND_END_ZONE(z0, status);
 
   iree_hal_buffer_ref_t source_ref =
       iree_hal_make_buffer_ref(src->hal_buffer, (iree_device_size_t)src_offset,
@@ -304,25 +343,33 @@ hrx_status_t hrx_stream_copy_buffer(hrx_stream_t stream, hrx_buffer_t src,
   iree_status_t iree_status = iree_hal_command_buffer_copy_buffer(
       stream->pending_cb, source_ref, target_ref, /*flags=*/0);
   if (!iree_status_is_ok(iree_status)) {
-    return hrx_status_from_iree(iree_status);
+    HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(iree_status));
+  }
+
+  iree_status = hrx_stream_record_ordering_barrier(stream);
+  if (!iree_status_is_ok(iree_status)) {
+    HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(iree_status));
   }
 
   stream->has_pending_work = true;
-  return hrx_ok_status();
+  HRX_RETURN_AND_END_ZONE(z0, hrx_ok_status());
 }
 
 hrx_status_t hrx_stream_update_buffer(hrx_stream_t stream,
                                       const void *host_data,
                                       size_t host_data_size, hrx_buffer_t dst,
                                       size_t dst_offset) {
+  HRX_TRACE_ZONE_BEGIN(z0, "hrx_stream_update_buffer");
+  HRX_TRACE_ZONE_APPEND_BYTES(z0, host_data_size);
   if (!stream || !host_data || !dst) {
-    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                           "stream, host_data, or dst is NULL");
+    HRX_RETURN_AND_END_ZONE(
+        z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                            "stream, host_data, or dst is NULL"));
   }
 
   hrx_status_t status = hrx_stream_begin_cb(stream);
   if (!hrx_status_is_ok(status))
-    return status;
+    HRX_RETURN_AND_END_ZONE(z0, status);
 
   iree_hal_buffer_ref_t target_ref =
       iree_hal_make_buffer_ref(dst->hal_buffer, (iree_device_size_t)dst_offset,
@@ -331,11 +378,16 @@ hrx_status_t hrx_stream_update_buffer(hrx_stream_t stream,
       stream->pending_cb, host_data, (iree_host_size_t)0, target_ref,
       /*flags=*/0);
   if (!iree_status_is_ok(iree_status)) {
-    return hrx_status_from_iree(iree_status);
+    HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(iree_status));
+  }
+
+  iree_status = hrx_stream_record_ordering_barrier(stream);
+  if (!iree_status_is_ok(iree_status)) {
+    HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(iree_status));
   }
 
   stream->has_pending_work = true;
-  return hrx_ok_status();
+  HRX_RETURN_AND_END_ZONE(z0, hrx_ok_status());
 }
 
 hrx_status_t hrx_stream_dispatch(hrx_stream_t stream,
@@ -345,30 +397,36 @@ hrx_status_t hrx_stream_dispatch(hrx_stream_t stream,
                                  const void *constants, size_t constants_size,
                                  const hrx_buffer_ref_t *bindings,
                                  size_t binding_count, uint32_t flags) {
+  HRX_TRACE_ZONE_BEGIN(z0, "hrx_stream_dispatch");
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, export_ordinal);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, binding_count);
   if (!stream || !executable || !config || (binding_count > 0 && !bindings) ||
       (constants_size > 0 && !constants)) {
-    return hrx_make_status(
-        HRX_STATUS_INVALID_ARGUMENT,
-        "stream, executable, config, constants, or bindings are invalid");
+    HRX_RETURN_AND_END_ZONE(
+        z0,
+        hrx_make_status(
+            HRX_STATUS_INVALID_ARGUMENT,
+            "stream, executable, config, constants, or bindings are invalid"));
   }
 
   hrx_status_t status = hrx_stream_begin_cb(stream);
   if (!hrx_status_is_ok(status))
-    return status;
+    HRX_RETURN_AND_END_ZONE(z0, status);
 
   iree_hal_buffer_ref_t *hal_bindings = NULL;
   if (binding_count > 0) {
     hal_bindings = (iree_hal_buffer_ref_t *)calloc(
         binding_count, sizeof(iree_hal_buffer_ref_t));
     if (!hal_bindings) {
-      return hrx_make_status(HRX_STATUS_OUT_OF_MEMORY,
-                             "failed to allocate dispatch bindings");
+      HRX_RETURN_AND_END_ZONE(
+          z0, hrx_make_status(HRX_STATUS_OUT_OF_MEMORY,
+                              "failed to allocate dispatch bindings"));
     }
     for (size_t i = 0; i < binding_count; ++i) {
       if (!bindings[i].buffer) {
         free(hal_bindings);
-        return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                               "binding buffer is NULL");
+        HRX_RETURN_AND_END_ZONE(z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                                                    "binding buffer is NULL"));
       }
       hal_bindings[i] =
           iree_hal_make_buffer_ref(bindings[i].buffer->hal_buffer,
@@ -404,21 +462,28 @@ hrx_status_t hrx_stream_dispatch(hrx_stream_t stream,
       hal_constants, hal_binding_list, (iree_hal_dispatch_flags_t)flags);
   free(hal_bindings);
   if (!iree_status_is_ok(iree_status)) {
-    return hrx_status_from_iree(iree_status);
+    HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(iree_status));
+  }
+
+  iree_status = hrx_stream_record_ordering_barrier(stream);
+  if (!iree_status_is_ok(iree_status)) {
+    HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(iree_status));
   }
 
   stream->has_pending_work = true;
-  return hrx_ok_status();
+  HRX_RETURN_AND_END_ZONE(z0, hrx_ok_status());
 }
 
 hrx_status_t hrx_stream_execution_barrier(hrx_stream_t stream) {
+  HRX_TRACE_ZONE_BEGIN(z0, "hrx_stream_execution_barrier");
   if (!stream) {
-    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "stream is NULL");
+    HRX_RETURN_AND_END_ZONE(
+        z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "stream is NULL"));
   }
 
   hrx_status_t status = hrx_stream_begin_cb(stream);
   if (!hrx_status_is_ok(status))
-    return status;
+    HRX_RETURN_AND_END_ZONE(z0, status);
 
   iree_hal_memory_barrier_t memory_barrier = {
       .source_scope = IREE_HAL_MEMORY_ACCESS_ALL,
@@ -429,9 +494,9 @@ hrx_status_t hrx_stream_execution_barrier(hrx_stream_t stream) {
       IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
       IREE_HAL_EXECUTION_BARRIER_FLAG_NONE, 1, &memory_barrier, 0, NULL);
   if (!iree_status_is_ok(iree_status)) {
-    return hrx_status_from_iree(iree_status);
+    HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(iree_status));
   }
 
   stream->has_pending_work = true;
-  return hrx_ok_status();
+  HRX_RETURN_AND_END_ZONE(z0, hrx_ok_status());
 }

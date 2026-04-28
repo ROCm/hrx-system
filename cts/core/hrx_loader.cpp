@@ -100,6 +100,7 @@ void HrxLoader::load(const std::string &path) {
   LOAD(stream_retain);
   LOAD(stream_release);
   LOAD(stream_synchronize);
+  LOAD(stream_wait);
   LOAD(stream_query);
   LOAD(stream_flush);
   LOAD(stream_get_semaphore);

@@ -33,6 +33,34 @@ TEST_CASE_METHOD(HrxTestFixture, "Stream fill buffer", "[stream_ops][fill]") {
   hrx().stream_release(stream);
 }
 
+TEST_CASE_METHOD(HrxTestFixture, "Stream wait observes flushed work",
+                 "[stream_ops][wait]") {
+  hrx_stream_t stream = nullptr;
+  REQUIRE_OK(hrx().stream_create(device_, 0, &stream));
+
+  hrx_buffer_t buf = nullptr;
+  REQUIRE_OK(hrx().buffer_allocate(
+      stream, 1024, HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_DEVICE_VISIBLE,
+      HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED, &buf));
+
+  uint32_t pattern = 0x0F0E0D0C;
+  REQUIRE_OK(hrx().stream_fill_buffer(stream, buf, 0, 1024, &pattern,
+                                      sizeof(pattern)));
+  REQUIRE_OK(hrx().stream_flush(stream));
+  REQUIRE_OK(hrx().stream_wait(stream));
+
+  void *ptr = nullptr;
+  REQUIRE_OK(hrx().buffer_map(buf, HRX_MAP_READ, 0, 1024, &ptr));
+  const uint32_t *data = static_cast<const uint32_t *>(ptr);
+  for (int i = 0; i < 256; ++i) {
+    REQUIRE(data[i] == pattern);
+  }
+  REQUIRE_OK(hrx().buffer_unmap(buf));
+
+  hrx().buffer_release(buf);
+  hrx().stream_release(stream);
+}
+
 TEST_CASE_METHOD(HrxTestFixture, "Stream copy buffer", "[stream_ops][copy]") {
   hrx_stream_t stream = nullptr;
   REQUIRE_OK(hrx().stream_create(device_, 0, &stream));

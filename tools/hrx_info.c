@@ -30,55 +30,111 @@
     }                                                                          \
   } while (0)
 
+#define CHECK_STATUS_CLEANUP(expr)                                             \
+  do {                                                                         \
+    hrx_status_t _s = (expr);                                                  \
+    if (!hrx_status_is_ok(_s)) {                                               \
+      char *msg = NULL;                                                        \
+      size_t len = 0;                                                          \
+      hrx_status_to_string(_s, &msg, &len);                                    \
+      fprintf(stderr, "ERROR: %s\n", msg ? msg : "?");                         \
+      hrx_status_free_message(msg);                                            \
+      hrx_status_ignore(_s);                                                   \
+      result = 1;                                                              \
+      goto cleanup;                                                            \
+    }                                                                          \
+  } while (0)
+
+static void print_status_message(FILE *stream, const char *prefix,
+                                 hrx_status_t status) {
+  char *msg = NULL;
+  size_t len = 0;
+  hrx_status_to_string(status, &msg, &len);
+  fprintf(stream, "%s%s", prefix, msg ? msg : "?");
+  hrx_status_free_message(msg);
+}
+
 static int print_devices(void) {
+  int result = 0;
+  bool gpu_initialized = false;
+  bool cpu_initialized = false;
+  hrx_status_t gpu_status = hrx_ok_status();
+  hrx_status_t cpu_status = hrx_ok_status();
   int major, minor, patch;
   hrx_runtime_version(&major, &minor, &patch);
   printf("HRX (HIP Runtime Extended) v%d.%d.%d\n", major, minor, patch);
 
   // Try GPU.
-  hrx_status_t gpu_status = hrx_gpu_initialize(0);
+  gpu_status = hrx_gpu_initialize(0);
   if (hrx_status_is_ok(gpu_status)) {
+    gpu_initialized = true;
     int gpu_count = 0;
-    CHECK_STATUS(hrx_gpu_device_count(&gpu_count));
+    CHECK_STATUS_CLEANUP(hrx_gpu_device_count(&gpu_count));
     printf("GPU accelerator: %d device%s\n", gpu_count,
            gpu_count != 1 ? "s" : "");
     for (int i = 0; i < gpu_count; i++) {
       hrx_device_t dev = NULL;
-      CHECK_STATUS(hrx_gpu_device_get(i, &dev));
+      CHECK_STATUS_CLEANUP(hrx_gpu_device_get(i, &dev));
       char name[128] = {0};
-      CHECK_STATUS(hrx_device_get_property(dev, HRX_DEVICE_PROPERTY_NAME, name,
-                                           sizeof(name)));
+      CHECK_STATUS_CLEANUP(hrx_device_get_property(
+          dev, HRX_DEVICE_PROPERTY_NAME, name, sizeof(name)));
       char arch[64] = {0};
-      CHECK_STATUS(hrx_device_get_property(
+      CHECK_STATUS_CLEANUP(hrx_device_get_property(
           dev, HRX_DEVICE_PROPERTY_ARCHITECTURE, arch, sizeof(arch)));
       printf("  [%d] %s (%s)\n", i, name, arch);
     }
   } else {
-    printf("GPU accelerator: unavailable\n");
+    printf("GPU accelerator: unavailable (");
+    print_status_message(stdout, "", gpu_status);
+    printf(")\n");
     hrx_status_ignore(gpu_status);
   }
 
   // Try CPU.
-  hrx_status_t cpu_status = hrx_cpu_initialize(0);
+  cpu_status = hrx_cpu_initialize(0);
   if (hrx_status_is_ok(cpu_status)) {
+    cpu_initialized = true;
     int cpu_count = 0;
-    CHECK_STATUS(hrx_cpu_device_count(&cpu_count));
+    CHECK_STATUS_CLEANUP(hrx_cpu_device_count(&cpu_count));
     printf("CPU accelerator: %d device%s\n", cpu_count,
            cpu_count != 1 ? "s" : "");
     for (int i = 0; i < cpu_count; i++) {
       hrx_device_t dev = NULL;
-      CHECK_STATUS(hrx_cpu_device_get(i, &dev));
+      CHECK_STATUS_CLEANUP(hrx_cpu_device_get(i, &dev));
       char name[128] = {0};
-      CHECK_STATUS(hrx_device_get_property(dev, HRX_DEVICE_PROPERTY_NAME, name,
-                                           sizeof(name)));
+      CHECK_STATUS_CLEANUP(hrx_device_get_property(
+          dev, HRX_DEVICE_PROPERTY_NAME, name, sizeof(name)));
       printf("  [%d] %s\n", i, name);
     }
   } else {
-    printf("CPU accelerator: unavailable\n");
+    printf("CPU accelerator: unavailable (");
+    print_status_message(stdout, "", cpu_status);
+    printf(")\n");
     hrx_status_ignore(cpu_status);
   }
 
-  return 0;
+cleanup:
+  if (gpu_initialized) {
+    hrx_status_t shutdown_status = hrx_gpu_shutdown();
+    if (!hrx_status_is_ok(shutdown_status)) {
+      print_status_message(
+          stderr, "GPU accelerator shutdown failed: ", shutdown_status);
+      fprintf(stderr, "\n");
+      hrx_status_ignore(shutdown_status);
+      result = 1;
+    }
+  }
+  if (cpu_initialized) {
+    hrx_status_t shutdown_status = hrx_cpu_shutdown();
+    if (!hrx_status_is_ok(shutdown_status)) {
+      print_status_message(
+          stderr, "CPU accelerator shutdown failed: ", shutdown_status);
+      fprintf(stderr, "\n");
+      hrx_status_ignore(shutdown_status);
+      result = 1;
+    }
+  }
+  return result;
 }
 
 static int run_device_smoke_test(hrx_device_t device, const char *label) {
@@ -200,7 +256,9 @@ int main(int argc, char **argv) {
     hrx_device_t dev = NULL;
     if (type == HRX_ACCELERATOR_GPU) {
       if (!hrx_status_is_ok(gpu_status)) {
-        fprintf(stderr, "GPU accelerator not available\n");
+        print_status_message(stderr,
+                             "GPU accelerator not available: ", gpu_status);
+        fprintf(stderr, "\n");
         hrx_status_ignore(gpu_status);
         hrx_status_ignore(cpu_status);
         return 1;
@@ -208,7 +266,9 @@ int main(int argc, char **argv) {
       CHECK_STATUS(hrx_gpu_device_get(index, &dev));
     } else {
       if (!hrx_status_is_ok(cpu_status)) {
-        fprintf(stderr, "CPU accelerator not available\n");
+        print_status_message(stderr,
+                             "CPU accelerator not available: ", cpu_status);
+        fprintf(stderr, "\n");
         hrx_status_ignore(gpu_status);
         hrx_status_ignore(cpu_status);
         return 1;

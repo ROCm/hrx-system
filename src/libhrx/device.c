@@ -69,7 +69,8 @@ hrx_status_t hrx_device_synchronize(hrx_device_t device) {
   if (!device) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "device is NULL");
   }
-  // Wait for all queues to drain.
+  // Deprecated no-op compatibility shim. IREE requires callers to wait on
+  // explicit semaphore payloads; an empty wait list returns immediately.
   iree_hal_semaphore_list_t empty = {0};
   iree_status_t status = iree_hal_device_wait_semaphores(
       device->hal_device, IREE_ASYNC_WAIT_MODE_ALL, empty,
@@ -94,10 +95,13 @@ void hrx_device_retain(hrx_device_t device) {
 
 void hrx_device_release(hrx_device_t device) {
   iree_hal_device_t *hal_device = device->hal_device;
+  iree_hal_device_group_t *hal_device_group = device->hal_device_group;
   if (iree_atomic_ref_count_dec(&device->ref_count) == 1) {
     iree_hal_allocator_release(device->allocator.hal_allocator);
     device->allocator.hal_allocator = NULL;
     device->hal_device = NULL;
+    device->hal_device_group = NULL;
   }
   iree_hal_device_release(hal_device);
+  iree_hal_device_group_release(hal_device_group);
 }
