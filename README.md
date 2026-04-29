@@ -2,7 +2,12 @@
 
 HRX (HIP Runtime Extended) is a standalone shared library (`libhrx.so`)
 wrapping IREE's HAL for device management, timeline synchronization, memory
-allocation, and command dispatch.
+allocation, and command dispatch. It provides a HIP implementation and profiler
+integration on this same backplane.
+
+> [!CAUTION]
+> This release is an *early-access* software technology preview. Running
+> production workloads is *not* recommended.
 
 ## Building
 
