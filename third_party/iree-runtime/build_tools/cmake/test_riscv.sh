@@ -1,0 +1,74 @@
+#!/bin/bash
+
+# Copyright 2021 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+# Test the cross-compiled RISCV 64-bit Linux targets.
+#
+# The desired build directory can be passed as the first argument. Otherwise, it
+# uses the environment variable IREE_TARGET_BUILD_DIR, defaulting to
+# "build-riscv". Designed for CI, but can be run manually. Expects to be run
+# from the root of the IREE repository.
+
+set -xeuo pipefail
+
+BUILD_DIR="${1:-${IREE_TARGET_BUILD_DIR:-build-riscv}}"
+RISCV_PLATFORM="${IREE_TARGET_PLATFORM:-linux}"
+RISCV_ARCH="${IREE_TARGET_ARCH:-riscv_64}"
+
+export CTEST_PARALLEL_LEVEL=${CTEST_PARALLEL_LEVEL:-$(nproc)}
+
+ctest_args=(
+  "--timeout 900"
+  "--output-on-failure"
+  "--no-tests=error"
+)
+
+declare -a label_exclude_args=(
+  "^nodocker$"
+  "^driver=vulkan$"
+  "^driver=metal$"
+  "^driver=cuda$"
+  "^driver=hip$"
+  "^vulkan_uses_vk_khr_shader_float16_int8$"
+  "^requires-filesystem$"
+  "^requires-dtz$"
+  "^noriscv$"
+)
+
+# TODO(#10462): Investigate the lowering_config test issue.
+declare -a test_exclude_args=(
+  "regression_llvm-cpu_lowering_config"
+)
+
+# Test runtime unit tests
+runtime_label_exclude_regex="($(IFS="|" ; echo "${label_exclude_args[*]}"))"
+runtime_ctest_args=(
+  "--test-dir ${BUILD_DIR}/runtime/"
+  ${ctest_args[@]}
+  "--label-exclude ${runtime_label_exclude_regex}"
+)
+echo "******** Running runtime CTest ********"
+ctest ${runtime_ctest_args[@]}
+
+if [[ "${RISCV_PLATFORM}-${RISCV_ARCH}" == "linux-riscv_32" ]]; then
+  # stablehlo.power is also disabled because musl math library is not compiled for
+  # 32-bit.
+  test_exclude_args+=(
+    "stablehlo.*llvm-cpu.*pow"
+  )
+fi
+
+tests_label_exclude_regex="($(IFS="|" ; echo "${label_exclude_args[*]}"))"
+tests_exclude_regex="($(IFS="|" ; echo "${test_exclude_args[*]}"))"
+test_ctest_args=(
+  "--test-dir ${BUILD_DIR}/tests/e2e"
+  ${ctest_args[@]}
+  "--label-exclude ${tests_label_exclude_regex}"
+  "--exclude-regex ${tests_exclude_regex}"
+)
+echo "******** Running e2e CTest ********"
+ctest  ${test_ctest_args[@]}

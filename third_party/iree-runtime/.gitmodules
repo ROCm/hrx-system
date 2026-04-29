@@ -1,0 +1,39 @@
+[submodule "third_party/googletest"]
+	path = third_party/googletest
+	url = https://github.com/google/googletest.git
+[submodule "third_party/llvm-project"]
+	path = third_party/llvm-project
+	url = https://github.com/iree-org/llvm-project.git
+[submodule "third_party/vulkan_headers"]
+	path = third_party/vulkan_headers
+	url = https://github.com/KhronosGroup/Vulkan-Headers.git
+[submodule "third_party/benchmark"]
+	path = third_party/benchmark
+	url = https://github.com/google/benchmark.git
+[submodule "third_party/tracy"]
+	path = third_party/tracy
+	url = https://github.com/wolfpld/tracy.git
+[submodule "third_party/flatcc"]
+	path = third_party/flatcc
+	url = https://github.com/dvidelabs/flatcc.git
+[submodule "third_party/spirv_cross"]
+	path = third_party/spirv_cross
+	url = https://github.com/KhronosGroup/SPIRV-Cross.git
+[submodule "third_party/webgpu-headers"]
+	path = third_party/webgpu-headers
+	url = https://github.com/webgpu-native/webgpu-headers.git
+[submodule "third_party/musl"]
+	path = third_party/musl
+	url = https://github.com/powderluv/musl.git
+[submodule "third_party/stablehlo"]
+	path = third_party/stablehlo
+	url = https://github.com/iree-org/stablehlo.git
+[submodule "third_party/torch-mlir"]
+	path = third_party/torch-mlir
+	url = https://github.com/iree-org/torch-mlir.git
+[submodule "third_party/hip-build-deps"]
+	path = third_party/hip-build-deps
+	url = https://github.com/iree-org/hip-build-deps.git
+[submodule "third_party/hsa-runtime-headers"]
+	path = third_party/hsa-runtime-headers
+	url = https://github.com/iree-org/hsa-runtime-headers.git

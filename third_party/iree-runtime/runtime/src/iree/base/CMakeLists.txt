@@ -1,0 +1,180 @@
+# Copyright 2019 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+iree_add_all_subdirs()
+
+iree_cc_library(
+  NAME
+    core_headers
+  HDRS
+    "alignment.h"
+    "attributes.h"
+    "config.h"
+    "target_platform.h"
+    "time.h"
+    "tracing.h"
+  PUBLIC
+)
+
+# Users providing their own allocators can have their sources live out-of-tree.
+# Note that with out of tree sources they must be absolute paths in order to be
+# found in this directory.
+set(IREE_ALLOCATOR_LIBC_SRCS "allocator_libc.c")
+set(IREE_ALLOCATOR_MIMALLOC_SRCS "allocator_mimalloc.c")
+
+# IREE_ALLOCATOR_SYSTEM -> variable expansion.
+string(TOUPPER ${IREE_ALLOCATOR_SYSTEM} _IREE_ALLOCATOR_SYSTEM)
+string(REGEX REPLACE "-" "_" _IREE_ALLOCATOR_SYSTEM ${_IREE_ALLOCATOR_SYSTEM})
+message(STATUS "iree_allocator_system() using `IREE_ALLOCATOR_${_IREE_ALLOCATOR_SYSTEM}_*`")
+get_property(_IREE_ALLOCATOR_SYSTEM_SRCS VARIABLE PROPERTY IREE_ALLOCATOR_${_IREE_ALLOCATOR_SYSTEM}_SRCS)
+get_property(_IREE_ALLOCATOR_SYSTEM_COPTS VARIABLE PROPERTY IREE_ALLOCATOR_${_IREE_ALLOCATOR_SYSTEM}_COPTS)
+get_property(_IREE_ALLOCATOR_SYSTEM_DEPS VARIABLE PROPERTY IREE_ALLOCATOR_${_IREE_ALLOCATOR_SYSTEM}_DEPS)
+get_property(_IREE_ALLOCATOR_SYSTEM_CTL VARIABLE PROPERTY IREE_ALLOCATOR_${_IREE_ALLOCATOR_SYSTEM}_CTL)
+get_property(_IREE_ALLOCATOR_SYSTEM_SELF VARIABLE PROPERTY IREE_ALLOCATOR_${_IREE_ALLOCATOR_SYSTEM}_SELF)
+if(IREE_ALLOCATOR_SYSTEM_CTL)
+  list(APPEND _IREE_ALLOCATOR_SYSTEM_DEFINES
+    "-DIREE_ALLOCATOR_SYSTEM_CTL=${_IREE_ALLOCATOR_SYSTEM_CTL}"
+  )
+else()
+  list(APPEND _IREE_ALLOCATOR_SYSTEM_DEFINES
+    "-DIREE_ALLOCATOR_SYSTEM_CTL=iree_allocator_${IREE_ALLOCATOR_SYSTEM}_ctl"
+  )
+endif()
+if(IREE_ALLOCATOR_SYSTEM_SELF)
+  list(APPEND _IREE_ALLOCATOR_SYSTEM_DEFINES
+    "-DIREE_ALLOCATOR_SYSTEM_SELF=${_IREE_ALLOCATOR_SYSTEM_SELF}"
+  )
+endif()
+
+iree_cc_library(
+  NAME
+    base
+  HDRS
+    "api.h"
+  SRCS
+    "allocator.c"
+    "allocator.h"
+    "assert.h"
+    "bitfield.c"
+    "bitfield.h"
+    "bitmap.c"
+    "bitmap.h"
+    "printf.c"
+    "printf.h"
+    "status.c"
+    "status.h"
+    "status_cc.h"
+    "status_payload.h"
+    "status_stack_trace.c"
+    "string_builder.c"
+    "string_builder.h"
+    "string_view.c"
+    "string_view.h"
+    "time.c"
+    "wait_source.c"
+    "wait_source.h"
+    ${_IREE_ALLOCATOR_SYSTEM_SRCS}
+  COPTS
+    ${_IREE_ALLOCATOR_SYSTEM_COPTS}
+  DEFINES
+    ${_IREE_ALLOCATOR_SYSTEM_DEFINES}
+  DEPS
+    ::core_headers
+    iree::base::internal
+    iree::base::internal::time
+    iree::base::tracing::provider
+    ${IREE_LIBBACKTRACE_TARGET}
+    ${_IREE_ALLOCATOR_SYSTEM_DEPS}
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    allocator_test
+  SRCS
+    "allocator_test.cc"
+  DEPS
+    ::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    bitfield_test
+  SRCS
+    "bitfield_test.cc"
+  DEPS
+    ::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_binary_benchmark(
+  NAME
+    bitmap_benchmark
+  SRCS
+    "bitmap_benchmark.cc"
+  DEPS
+    ::base
+    iree::base
+    iree::testing::benchmark
+    iree::testing::benchmark_main
+  TESTONLY
+)
+
+iree_cc_test(
+  NAME
+    bitmap_test
+  SRCS
+    "bitmap_test.cc"
+  DEPS
+    ::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    status_test
+  SRCS
+    "status_test.cc"
+  DEPS
+    ::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    string_builder_test
+  SRCS
+    "string_builder_test.cc"
+  DEPS
+    ::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_fuzz(
+  NAME
+    string_view_fuzz
+  SRCS
+    "string_view_fuzz.cc"
+  DEPS
+    ::base
+)
+
+iree_cc_test(
+  NAME
+    string_view_test
+  SRCS
+    "string_view_test.cc"
+  DEPS
+    ::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)

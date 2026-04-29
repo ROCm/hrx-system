@@ -1,0 +1,196 @@
+// Copyright 2024 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#include "iree/hal/drivers/null/semaphore.h"
+
+//===----------------------------------------------------------------------===//
+// iree_hal_null_semaphore_t
+//===----------------------------------------------------------------------===//
+
+typedef struct iree_hal_null_semaphore_t {
+  iree_async_semaphore_t async;
+  iree_allocator_t host_allocator;
+} iree_hal_null_semaphore_t;
+
+static const iree_hal_semaphore_vtable_t iree_hal_null_semaphore_vtable;
+
+static iree_hal_null_semaphore_t* iree_hal_null_semaphore_cast(
+    iree_hal_semaphore_t* base_value) {
+  IREE_HAL_ASSERT_TYPE(base_value, &iree_hal_null_semaphore_vtable);
+  return (iree_hal_null_semaphore_t*)base_value;
+}
+
+iree_status_t iree_hal_null_semaphore_create(
+    iree_async_proactor_t* proactor, iree_hal_queue_affinity_t queue_affinity,
+    uint64_t initial_value, iree_hal_semaphore_flags_t flags,
+    iree_allocator_t host_allocator, iree_hal_semaphore_t** out_semaphore) {
+  IREE_ASSERT_ARGUMENT(proactor);
+  IREE_ASSERT_ARGUMENT(out_semaphore);
+  IREE_TRACE_ZONE_BEGIN(z0);
+  *out_semaphore = NULL;
+
+  iree_hal_null_semaphore_t* semaphore = NULL;
+  iree_host_size_t frontier_offset = 0, total_size = 0;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_async_semaphore_layout(sizeof(*semaphore), 0, &frontier_offset,
+                                      &total_size));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0,
+      iree_allocator_malloc(host_allocator, total_size, (void**)&semaphore));
+  iree_async_semaphore_initialize(
+      (const iree_async_semaphore_vtable_t*)&iree_hal_null_semaphore_vtable,
+      proactor, initial_value, frontier_offset, 0, &semaphore->async);
+  semaphore->host_allocator = host_allocator;
+
+  // TODO(null): implement semaphores. The iree/async/semaphore.h layer
+  // provides timeline value tracking, frontier accumulation, failure tracking,
+  // and timepoint dispatch. The actual synchronization aspects are handled by
+  // the implementation.
+  //
+  // If the DEVICE_LOCAL flag and a |queue_affinity| is assigned (and not just
+  // IREE_HAL_QUEUE_AFFINITY_ANY) then the implementation can assume that it is
+  // only used on that set of queues (never waited/signaled from anywhere else).
+  // If DEVICE_LOCAL is not set then other devices may signal or wait.
+  //
+  // If the IREE_HAL_SEMAPHORE_FLAG_HOST_INTERRUPT flag is not set then waits
+  // from the host are allowed to spin instead of performing optimized platform
+  // blocking (via interrupt mechanisms).
+  iree_status_t status =
+      iree_make_status(IREE_STATUS_UNIMPLEMENTED, "semaphore not implemented");
+
+  if (iree_status_is_ok(status)) {
+    *out_semaphore = iree_hal_semaphore_cast(&semaphore->async);
+  } else {
+    iree_hal_semaphore_release(iree_hal_semaphore_cast(&semaphore->async));
+  }
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+static void iree_hal_null_semaphore_destroy(
+    iree_async_semaphore_t* base_semaphore) {
+  iree_hal_null_semaphore_t* semaphore =
+      iree_hal_null_semaphore_cast(iree_hal_semaphore_cast(base_semaphore));
+  iree_allocator_t host_allocator = semaphore->host_allocator;
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  iree_async_semaphore_deinitialize(&semaphore->async);
+  iree_allocator_free(host_allocator, semaphore);
+
+  IREE_TRACE_ZONE_END(z0);
+}
+
+static uint64_t iree_hal_null_semaphore_query(
+    iree_async_semaphore_t* base_semaphore) {
+  iree_hal_null_semaphore_t* semaphore =
+      iree_hal_null_semaphore_cast(iree_hal_semaphore_cast(base_semaphore));
+
+  // TODO(null): return the current value of the semaphore by (depending on the
+  // implementation) making a syscall to get it. It's expected that the value
+  // may immediately change after being queried here.
+
+  // TODO(null): if the semaphore has failed, encode the failure status in the
+  // return value using iree_hal_status_as_semaphore_failure(failure_status).
+  // The HAL dispatch layer decodes this back to the original status code.
+  // Returning the bare IREE_HAL_SEMAPHORE_FAILURE_VALUE sentinel without
+  // encoding will lose the status code (it decodes to IREE_STATUS_INTERNAL).
+  // Example:
+  //   if (!iree_status_is_ok(semaphore->failure_status)) {
+  //     return iree_hal_status_as_semaphore_failure(
+  //         semaphore->failure_status);
+  //   }
+
+  (void)semaphore;
+  return 0;
+}
+
+static iree_status_t iree_hal_null_semaphore_signal(
+    iree_async_semaphore_t* base_semaphore, uint64_t new_value,
+    const iree_async_frontier_t* frontier) {
+  iree_hal_null_semaphore_t* semaphore =
+      iree_hal_null_semaphore_cast(iree_hal_semaphore_cast(base_semaphore));
+
+  // TODO(null): validation is optional but encouraged if cheap: semaphores
+  // must always be signaled to a value that is greater than the previous value
+  // (not less-than-or-equal).
+
+  // TODO(null): signals when the semaphore have failed should also fail and
+  // because failed semaphores have their value set to
+  // IREE_HAL_SEMAPHORE_FAILURE_VALUE that should happen naturally during
+  // validation. If not then an IREE_STATUS_DATA_LOSS or IREE_STATUS_ABORTED
+  // depending on how fatal such an occurrence is in the implementation.
+  // Data-loss usually indicates an abort()-worthy situation where graceful
+  // handling is not possible while Aborted indicates that an individual work
+  // stream may be invalid but unrelated work streams may still progress.
+
+  // TODO(null): if |frontier| is non-NULL, merge it into the semaphore's
+  // accumulated frontier for causal tracking.
+
+  (void)semaphore;
+  (void)frontier;
+  iree_status_t status = iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                                          "semaphore signal not implemented");
+
+  return status;
+}
+
+static iree_status_t iree_hal_null_semaphore_wait(
+    iree_hal_semaphore_t* base_semaphore, uint64_t value,
+    iree_timeout_t timeout, iree_async_wait_flags_t flags) {
+  iree_hal_null_semaphore_t* semaphore =
+      iree_hal_null_semaphore_cast(base_semaphore);
+
+  // TODO(null): if a failure status is set return
+  // `iree_status_from_code(IREE_STATUS_ABORTED)`. Avoid a full status as it may
+  // capture a backtrace and allocate and callers are expected to follow up a
+  // failed wait with a query to get the status.
+
+  // TODO(null): prefer having a fast-path for if the semaphore is
+  // known-signaled in user-mode. This can usually avoid syscalls/ioctls and
+  // potential context switches in polling cases.
+
+  // TODO(null): check for `iree_timeout_is_immediate(timeout)` and return
+  // immediately if the condition is not satisfied before waiting with
+  // `iree_status_from_code(IREE_STATUS_DEADLINE_EXCEEDED)`. Prefer the raw code
+  // status instead of a full status object as immediate timeouts are used when
+  // polling and a full status may capture a backtrace and allocate.
+
+  (void)semaphore;
+  iree_status_t status = iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                                          "semaphore wait not implemented");
+
+  return status;
+}
+
+static iree_status_t iree_hal_null_semaphore_import_timepoint(
+    iree_hal_semaphore_t* base_semaphore, uint64_t value,
+    iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_external_timepoint_t external_timepoint) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "timepoint import is not yet implemented");
+}
+
+static iree_status_t iree_hal_null_semaphore_export_timepoint(
+    iree_hal_semaphore_t* base_semaphore, uint64_t value,
+    iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_external_timepoint_type_t requested_type,
+    iree_hal_external_timepoint_flags_t requested_flags,
+    iree_hal_external_timepoint_t* IREE_RESTRICT out_external_timepoint) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "timepoint export is not yet implemented");
+}
+
+static const iree_hal_semaphore_vtable_t iree_hal_null_semaphore_vtable = {
+    .async =
+        {
+            .destroy = iree_hal_null_semaphore_destroy,
+            .query = iree_hal_null_semaphore_query,
+            .signal = iree_hal_null_semaphore_signal,
+        },
+    .wait = iree_hal_null_semaphore_wait,
+    .import_timepoint = iree_hal_null_semaphore_import_timepoint,
+    .export_timepoint = iree_hal_null_semaphore_export_timepoint,
+};

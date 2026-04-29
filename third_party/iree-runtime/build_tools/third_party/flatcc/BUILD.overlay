@@ -1,0 +1,137 @@
+# Copyright 2020 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+package(default_visibility = ["//visibility:public"])
+
+cc_library(
+    name = "runtime",
+    srcs = [
+        "config/config.h",
+        "src/runtime/builder.c",
+        "src/runtime/emitter.c",
+        "src/runtime/json_parser.c",
+        "src/runtime/json_printer.c",
+        "src/runtime/refmap.c",
+    ],
+    hdrs = [
+        "include/flatcc/flatcc_accessors.h",
+        "include/flatcc/flatcc_alloc.h",
+        "include/flatcc/flatcc_assert.h",
+        "include/flatcc/flatcc_builder.h",
+        "include/flatcc/flatcc_emitter.h",
+        "include/flatcc/flatcc_endian.h",
+        "include/flatcc/flatcc_epilogue.h",
+        "include/flatcc/flatcc_flatbuffers.h",
+        "include/flatcc/flatcc_identifier.h",
+        "include/flatcc/flatcc_iov.h",
+        "include/flatcc/flatcc_portable.h",
+        "include/flatcc/flatcc_prologue.h",
+        "include/flatcc/flatcc_refmap.h",
+        "include/flatcc/flatcc_rtconfig.h",
+        "include/flatcc/flatcc_types.h",
+        "include/flatcc/flatcc_unaligned.h",
+        "include/flatcc/flatcc_verifier.h",
+        "include/flatcc/reflection/flatbuffers_common_builder.h",
+        "include/flatcc/reflection/flatbuffers_common_reader.h",
+    ] + glob(["include/flatcc/portable/**/*.h"]),
+    textual_hdrs = [
+        "include/flatcc/flatcc_json_parser.h",
+        "include/flatcc/flatcc_json_printer.h",
+    ],
+    copts = select({
+        "@bazel_tools//src/conditions:windows": [],
+        "//conditions:default": [
+            "-Wno-implicit-fallthrough",
+        ],
+    }),
+    includes = [
+        "config/",
+        "include/",
+    ],
+    deps = [
+        ":parsing",
+    ],
+    strip_include_prefix = "include",
+)
+
+# A limited version of :runtime with only enough to parse and verify.
+cc_library(
+    name = "parsing",
+    srcs = [
+        "config/config.h",
+        "src/runtime/verifier.c",
+    ],
+    hdrs = [
+        "include/flatcc/flatcc_accessors.h",
+        "include/flatcc/flatcc_alloc.h",
+        "include/flatcc/flatcc_assert.h",
+        "include/flatcc/flatcc_endian.h",
+        "include/flatcc/flatcc_epilogue.h",
+        "include/flatcc/flatcc_flatbuffers.h",
+        "include/flatcc/flatcc_identifier.h",
+        "include/flatcc/flatcc_portable.h",
+        "include/flatcc/flatcc_prologue.h",
+        "include/flatcc/flatcc_rtconfig.h",
+        "include/flatcc/flatcc_types.h",
+        "include/flatcc/flatcc_unaligned.h",
+        "include/flatcc/flatcc_verifier.h",
+        "include/flatcc/reflection/flatbuffers_common_reader.h",
+    ] + glob(["include/flatcc/portable/**/*.h"]),
+    copts = select({
+        "@bazel_tools//src/conditions:windows": [],
+        "//conditions:default": [
+            "-Wno-implicit-fallthrough",
+        ],
+    }),
+    includes = [
+        "config/",
+        "include/",
+    ],
+    strip_include_prefix = "include",
+)
+
+cc_library(
+    name = "compiler",
+    srcs = glob([
+        "external/**/*.c",
+        "external/**/*.h",
+        "src/compiler/**/*.c",
+        "src/compiler/**/*.h",
+    ], exclude = [
+        "external/lex/luthor.c",
+        "**/*_test.c",
+    ]),
+    hdrs = glob([
+        "config/config.h",
+        "include/**/*.h",
+    ]),
+    textual_hdrs = [
+        "external/lex/luthor.c",
+    ] + glob([
+        "external/**/*.h",
+    ]),
+    includes = [
+      "config/",
+      "external/",
+      "include/",
+    ],
+)
+
+cc_binary(
+    name = "flatcc",
+    srcs = [
+        "src/cli/flatcc_cli.c",
+    ],
+    deps = [
+        ":compiler",
+        ":runtime",
+    ],
+    includes = [
+      "config/",
+      "external/",
+      "include/",
+    ],
+)
