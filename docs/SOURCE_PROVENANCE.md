@@ -3,6 +3,34 @@
 Documents the origin of all code in `sources/hrx-runtime/`. Required for
 coordination with Andrew (iree-hal-streaming author).
 
+## Vendored IREE Runtime
+
+`third_party/iree-runtime/` starts as a generated, pruned import of IREE runtime
+sources. The pristine import is committed first, and HRX-local IREE changes are
+then layered as one commit per patch. Regenerate the pristine import with:
+
+```bash
+python scripts/vendor_iree_runtime.py \
+  --iree-repo ../iree \
+  --ref 6e34728ce15889222b73d0348932882f6fef54bd \
+  import-pristine
+```
+
+The exact upstream commit, copied paths, submodule commits, and external
+dependencies are recorded beside the import in
+`third_party/iree-runtime.HRX_VENDOR.json`. HRX-generated provenance stays out
+of `third_party/iree-runtime/` so that tree remains a replayable import.
+Patch files are dumped from the commits after the pristine import with
+`vendor_iree_runtime.py dump-patches --diffbase <pristine-import-commit>`.
+
+The initial snapshot is based on IREE commit
+`6e34728ce15889222b73d0348932882f6fef54bd`. It vendors `third_party/flatcc`
+from IREE's recorded submodule commit and intentionally excludes
+`third_party/hsa-runtime-headers`; HSA is provided by ROCm's
+`hsa-runtime64` CMake package. HRX-local IREE changes belong in
+`scripts/iree-runtime-patches/*.patch` so they remain replayable across future
+imports.
+
 ## Files Written from Scratch
 
 All files in this initial spike are **new code**, not copies or adaptations

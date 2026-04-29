@@ -271,20 +271,26 @@ hrx_profile_file_sink_create(const char *file_path,
 }
 
 static iree_status_t
-hrx_get_profile_mode(iree_hal_device_profiling_mode_t *out_mode) {
-  IREE_ASSERT_ARGUMENT(out_mode);
+hrx_get_profile_data_families(
+    iree_hal_device_profiling_data_families_t *out_data_families) {
+  IREE_ASSERT_ARGUMENT(out_data_families);
 
   const char *value = getenv("HRX_PROFILE_MODE");
   if (!value || !value[0] || strcmp(value, "queue") == 0) {
-    *out_mode = IREE_HAL_DEVICE_PROFILING_MODE_QUEUE_OPERATIONS;
+    *out_data_families = IREE_HAL_DEVICE_PROFILING_DATA_QUEUE_EVENTS;
   } else if (strcmp(value, "dispatch") == 0) {
-    *out_mode = IREE_HAL_DEVICE_PROFILING_MODE_DISPATCH_COUNTERS;
+    *out_data_families = IREE_HAL_DEVICE_PROFILING_DATA_EXECUTABLE_METADATA |
+                         IREE_HAL_DEVICE_PROFILING_DATA_DEVICE_QUEUE_EVENTS |
+                         IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS;
   } else if (strcmp(value, "executable") == 0) {
-    *out_mode = IREE_HAL_DEVICE_PROFILING_MODE_EXECUTABLE_COUNTERS;
+    *out_data_families = IREE_HAL_DEVICE_PROFILING_DATA_EXECUTABLE_METADATA |
+                         IREE_HAL_DEVICE_PROFILING_DATA_EXECUTABLE_TRACES;
   } else if (strcmp(value, "all") == 0) {
-    *out_mode = IREE_HAL_DEVICE_PROFILING_MODE_QUEUE_OPERATIONS |
-                IREE_HAL_DEVICE_PROFILING_MODE_DISPATCH_COUNTERS |
-                IREE_HAL_DEVICE_PROFILING_MODE_EXECUTABLE_COUNTERS;
+    *out_data_families = IREE_HAL_DEVICE_PROFILING_DATA_QUEUE_EVENTS |
+                         IREE_HAL_DEVICE_PROFILING_DATA_EXECUTABLE_METADATA |
+                         IREE_HAL_DEVICE_PROFILING_DATA_DEVICE_QUEUE_EVENTS |
+                         IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS |
+                         IREE_HAL_DEVICE_PROFILING_DATA_EXECUTABLE_TRACES;
   } else {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "unsupported HRX_PROFILE_MODE '%s'", value);
@@ -300,7 +306,8 @@ static iree_status_t hrx_device_profile_begin(hrx_device_s *device,
   }
 
   iree_hal_device_profiling_options_t options = {0};
-  IREE_RETURN_IF_ERROR(hrx_get_profile_mode(&options.mode));
+  IREE_RETURN_IF_ERROR(
+      hrx_get_profile_data_families(&options.data_families));
   options.sink = sink;
   iree_status_t status =
       iree_hal_device_profiling_begin(device->hal_device, &options);

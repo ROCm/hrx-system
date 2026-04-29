@@ -1,0 +1,208 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 83f8602e81..0e658fca3c 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -977,8 +977,26 @@ endif()
+ 
+ if(IREE_BUILD_TESTS)
+   iree_set_googletest_cmake_options()
+-  add_subdirectory(third_party/googletest EXCLUDE_FROM_ALL)
++  find_package(GTest REQUIRED)
++  if(NOT TARGET gtest AND TARGET GTest::gtest)
++    add_library(gtest ALIAS GTest::gtest)
++  endif()
++  if(NOT TARGET gtest_main AND TARGET GTest::gtest_main)
++    add_library(gtest_main ALIAS GTest::gtest_main)
++  endif()
++  if(NOT TARGET gmock AND TARGET GTest::gmock)
++    add_library(gmock ALIAS GTest::gmock)
++  endif()
++  if(NOT TARGET gmock_main AND TARGET GTest::gmock_main)
++    add_library(gmock_main ALIAS GTest::gmock_main)
++  endif()
++  if(NOT TARGET gtest OR NOT TARGET gtest_main OR
++     NOT TARGET gmock OR NOT TARGET gmock_main)
++    message(FATAL_ERROR
++      "IREE_BUILD_TESTS requires external GTest targets: "
++      "GTest::gtest, GTest::gtest_main, GTest::gmock, and GTest::gmock_main")
++  endif()
+ endif()
+ 
+ if(IREE_ENABLE_THREADING)
+   # Benchmark.
+@@ -1053,7 +1071,24 @@ if(IREE_ALLOCATOR_SYSTEM STREQUAL "mimalloc")
+ endif()
+ 
+ if(IREE_HAL_DRIVER_AMDGPU)
+-  add_subdirectory(build_tools/third_party/hsa-runtime-headers EXCLUDE_FROM_ALL)
++  find_package(hsa-runtime64 CONFIG REQUIRED)
++  if(NOT TARGET hsa_runtime::headers)
++    get_target_property(_IREE_HSA_RUNTIME_INCLUDE_DIRS
++      hsa-runtime64::hsa-runtime64 INTERFACE_INCLUDE_DIRECTORIES)
++    if(NOT _IREE_HSA_RUNTIME_INCLUDE_DIRS)
++      message(FATAL_ERROR
++        "hsa-runtime64::hsa-runtime64 does not publish include directories")
++    endif()
++    add_library(hsa_runtime_headers INTERFACE)
++    target_include_directories(hsa_runtime_headers SYSTEM INTERFACE
++      ${_IREE_HSA_RUNTIME_INCLUDE_DIRS})
++    add_library(hsa_runtime::headers ALIAS hsa_runtime_headers)
++    iree_install_targets(
++      TARGETS hsa_runtime_headers
++      COMPONENT IREEBundledLibraries
++      EXPORT_SET Runtime
++    )
++  endif()
+ endif()
+ 
+ if(IREE_HAL_DRIVER_CUDA)
+diff --git a/build_tools/cmake/iree_install_support.cmake b/build_tools/cmake/iree_install_support.cmake
+index e79b083f4a..052e78d76f 100644
+--- a/build_tools/cmake/iree_install_support.cmake
++++ b/build_tools/cmake/iree_install_support.cmake
+@@ -128,6 +128,7 @@ function(iree_generate_export_targets)
+   get_property(_export_targets GLOBAL PROPERTY "IREE_EXPORT_TARGETS_${_RULE_EXPORT_SET}")
+   if(NOT _export_targets)
+     message(STATUS "Skipping generation of export set ${_RULE_EXPORT_SET} (no targets matched)")
++    return()
+   endif()
+ 
+   set(_component "${_RULE_COMPONENT}")
+diff --git a/build_tools/cmake/iree_check_test.cmake b/build_tools/cmake/iree_check_test.cmake
+index 96271e240..b588a8ce0 100644
+--- a/build_tools/cmake/iree_check_test.cmake
++++ b/build_tools/cmake/iree_check_test.cmake
+@@ -55,6 +55,10 @@ function(iree_check_test)
+     ${ARGN}
+   )
+ 
++  if(NOT TARGET iree-check-module)
++    return()
++  endif()
++
+   # Normalize some variables before using them.
+   string(TOUPPER ${_RULE_TARGET_BACKEND} _UPPERCASE_TARGET_BACKEND)
+   string(REPLACE "-" "_" _NORMALIZED_TARGET_BACKEND ${_UPPERCASE_TARGET_BACKEND})
+diff --git a/runtime/src/iree/hal/drivers/amdgpu/CMakeLists.txt b/runtime/src/iree/hal/drivers/amdgpu/CMakeLists.txt
+index 24675228e..6d4b3cd9f 100644
+--- a/runtime/src/iree/hal/drivers/amdgpu/CMakeLists.txt
++++ b/runtime/src/iree/hal/drivers/amdgpu/CMakeLists.txt
+@@ -345,29 +345,31 @@ iree_cc_test(
+     "iree-hal-drivers-amdgpu-tests"
+ )
+ 
+-iree_cc_test(
+-  NAME
+-    host_queue_command_buffer_test
+-  SRCS
+-    "host_queue_command_buffer_internal.h"
+-    "host_queue_command_buffer_test.cc"
+-  DEPS
+-    ::amdgpu
+-    ::headers
+-    ::queue_affinity
+-    iree::base
+-    iree::hal
+-    iree::hal::cts::util::test_base
+-    iree::hal::drivers::amdgpu::cts::testdata_amdgpu
+-    iree::hal::drivers::amdgpu::util::packet
+-    iree::testing::gtest
+-    iree::testing::gtest_main
+-  LABELS
+-    "driver=amdgpu"
+-    "nodocker"
+-  GROUP
+-    "iree-hal-drivers-amdgpu-tests"
+-)
++if(TARGET iree::hal::drivers::amdgpu::cts::testdata_amdgpu)
++  iree_cc_test(
++    NAME
++      host_queue_command_buffer_test
++    SRCS
++      "host_queue_command_buffer_internal.h"
++      "host_queue_command_buffer_test.cc"
++    DEPS
++      ::amdgpu
++      ::headers
++      ::queue_affinity
++      iree::base
++      iree::hal
++      iree::hal::cts::util::test_base
++      iree::hal::drivers::amdgpu::cts::testdata_amdgpu
++      iree::hal::drivers::amdgpu::util::packet
++      iree::testing::gtest
++      iree::testing::gtest_main
++    LABELS
++      "driver=amdgpu"
++      "nodocker"
++    GROUP
++      "iree-hal-drivers-amdgpu-tests"
++  )
++endif()
+ 
+ iree_cc_test(
+   NAME
+diff --git a/runtime/src/iree/hal/drivers/amdgpu/util/CMakeLists.txt b/runtime/src/iree/hal/drivers/amdgpu/util/CMakeLists.txt
+index 97d3b018fe..b20c068e69 100644
+--- a/runtime/src/iree/hal/drivers/amdgpu/util/CMakeLists.txt
++++ b/runtime/src/iree/hal/drivers/amdgpu/util/CMakeLists.txt
+@@ -29,6 +29,10 @@ iree_cc_library(
+   PUBLIC
+ )
+ 
++# ROCm's packaged aqlprofile SDK header currently has C++-only declarations:
++# https://github.com/ROCm/rocm-systems/issues/5576
++set_source_files_properties("libaqlprofile.c" PROPERTIES LANGUAGE CXX)
++
+ iree_cc_library(
+   NAME
+     libaqlprofile
+diff --git a/runtime/src/iree/hal/drivers/amdgpu/abi/common.h b/runtime/src/iree/hal/drivers/amdgpu/abi/common.h
+index 166e4fef89..e1aec4259d 100644
+--- a/runtime/src/iree/hal/drivers/amdgpu/abi/common.h
++++ b/runtime/src/iree/hal/drivers/amdgpu/abi/common.h
+@@ -58,9 +58,9 @@
+ #include <stddef.h>
+ #include <stdint.h>
+ 
+ // HSA system type definitions. On the host side several abi/ types are
+ // typedef'd directly to their HSA equivalents (e.g. iree_hsa_signal_t) so
+ // that they can be used interchangeably with HSA API calls.
+-#include "third_party/hsa-runtime-headers/include/hsa/hsa.h"  // IWYU pragma: export
++#include "hsa/hsa.h"  // IWYU pragma: export
+ 
+ #endif  // IREE_AMDGPU_TARGET_DEVICE
+diff --git a/runtime/src/iree/hal/drivers/amdgpu/util/libaqlprofile.c b/runtime/src/iree/hal/drivers/amdgpu/util/libaqlprofile.c
+index 631f67b2a2..6d87a77786 100644
+--- a/runtime/src/iree/hal/drivers/amdgpu/util/libaqlprofile.c
++++ b/runtime/src/iree/hal/drivers/amdgpu/util/libaqlprofile.c
+@@ -7,7 +7,7 @@
+ #include "iree/hal/drivers/amdgpu/util/libaqlprofile.h"
+ 
+ #include "iree/base/internal/dynamic_library.h"
+ #include "iree/base/internal/path.h"
+-#include "third_party/hsa-runtime-headers/include/aqlprofile-sdk/aql_profile_v2.h"
++#include "aqlprofile-sdk/aql_profile_v2.h"
+ 
+ // Keep vendor aqlprofile headers private to this translation unit. The public
+diff --git a/runtime/src/iree/hal/drivers/amdgpu/util/libhsa.h b/runtime/src/iree/hal/drivers/amdgpu/util/libhsa.h
+index 42ac2f6914..b5b5f8c0cf 100644
+--- a/runtime/src/iree/hal/drivers/amdgpu/util/libhsa.h
++++ b/runtime/src/iree/hal/drivers/amdgpu/util/libhsa.h
+@@ -18,11 +18,11 @@
+ // TODO(benvanik): fork or upstream changes to the headers to make this safer?
+ // Similar to Vulkan we could have all the function declarations hidden and also
+ // include proper typed function pointers to aid in shared library use.
+-#include "third_party/hsa-runtime-headers/include/hsa/amd_hsa_queue.h"  // IWYU pragma: export
+-#include "third_party/hsa-runtime-headers/include/hsa/amd_hsa_signal.h"  // IWYU pragma: export
+-#include "third_party/hsa-runtime-headers/include/hsa/hsa.h"  // IWYU pragma: export
+-#include "third_party/hsa-runtime-headers/include/hsa/hsa_ext_amd.h"  // IWYU pragma: export
+-#include "third_party/hsa-runtime-headers/include/hsa/hsa_ven_amd_loader.h"  // IWYU pragma: export
++#include "hsa/amd_hsa_queue.h"  // IWYU pragma: export
++#include "hsa/amd_hsa_signal.h"  // IWYU pragma: export
++#include "hsa/hsa.h"  // IWYU pragma: export
++#include "hsa/hsa_ext_amd.h"  // IWYU pragma: export
++#include "hsa/hsa_ven_amd_loader.h"  // IWYU pragma: export
+ 
+ #ifdef __cplusplus
+ extern "C" {

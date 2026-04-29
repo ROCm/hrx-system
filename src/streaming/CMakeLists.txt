@@ -45,7 +45,11 @@ set_target_properties(hrx_streaming PROPERTIES
     INTERPROCEDURAL_OPTIMIZATION TRUE
 )
 
-if(BUILD_TESTING)
+if(BUILD_TESTING AND IREE_BUILD_TESTS)
+  if(NOT TARGET iree_testing_gtest OR NOT TARGET iree_testing_gtest_main)
+    message(FATAL_ERROR
+      "IREE_BUILD_TESTS is ON, but IREE gtest wrapper targets are missing")
+  endif()
   add_executable(buffer_table_test util/buffer_table_test.cc)
   target_link_libraries(buffer_table_test PRIVATE
       hrx_streaming
@@ -54,7 +58,10 @@ if(BUILD_TESTING)
       iree_testing_gtest_main
   )
   add_test(NAME buffer_table_test COMMAND buffer_table_test)
-
+  if(NOT TARGET iree_testing_benchmark OR NOT TARGET iree_testing_benchmark_main)
+    message(FATAL_ERROR
+      "IREE_BUILD_TESTS is ON, but IREE benchmark wrapper targets are missing")
+  endif()
   add_executable(buffer_table_benchmark util/buffer_table_benchmark.cc)
   target_link_libraries(buffer_table_benchmark PRIVATE
       hrx_streaming

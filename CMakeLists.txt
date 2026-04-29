@@ -11,19 +11,23 @@ project(hrx-runtime VERSION 0.1.0 LANGUAGES C CXX)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+include(CTest)
 
 #===------------------------------------------------------------------------===#
 # Options
 #===------------------------------------------------------------------------===#
 
-set(HRX_IREE_SOURCE_DIR "" CACHE PATH
-    "Path to IREE source tree (required)")
+set(HRX_IREE_SOURCE_DIR
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/iree-runtime"
+    CACHE PATH "Path to IREE source tree")
 option(HRX_ENABLE_IREE_AMDGPU
     "Enable IREE's built-in AMDGPU HAL driver" ON)
 option(HRX_ENABLE_TRACY
     "Build with IREE Tracy tracing integration" OFF)
 option(HRX_BUILD_CTS
     "Build conformance test suite" ON)
+option(IREE_BUILD_TESTS
+    "Build embedded IREE testing support used by HRX developer tests" OFF)
 option(HRX_ENABLE_ASAN "Enable address sanitizer" OFF)
 option(HRX_ENABLE_MSAN "Enable memory sanitizer" OFF)
 option(HRX_ENABLE_TSAN "Enable thread sanitizer" OFF)
@@ -43,15 +47,20 @@ message(STATUS "hrx-runtime: using IREE at ${HRX_IREE_SOURCE_DIR}")
 #===------------------------------------------------------------------------===#
 
 set(IREE_BUILD_COMPILER OFF)
-if(BUILD_TESTING)
-  set(IREE_BUILD_TESTS ON)
-else()
-  set(IREE_BUILD_TESTS OFF)
-endif()
 set(IREE_BUILD_SAMPLES OFF)
 set(IREE_ERROR_ON_MISSING_SUBMODULES OFF)
 set(IREE_VISIBILITY_HIDDEN OFF)
 set(IREE_ALLOCATOR_SYSTEM "mimalloc" CACHE STRING "" FORCE)
+set(FETCHCONTENT_SOURCE_DIR_MIMALLOC
+    "${HRX_IREE_SOURCE_DIR}/third_party/mimalloc"
+    CACHE PATH "Vendored mimalloc source for embedded IREE" FORCE)
+set(FETCHCONTENT_SOURCE_DIR_LIBBACKTRACE_SRC
+    "${HRX_IREE_SOURCE_DIR}/third_party/libbacktrace"
+    CACHE PATH "Vendored libbacktrace source for embedded IREE" FORCE)
+
+if(IREE_BUILD_TESTS)
+  find_package(GTest REQUIRED)
+endif()
 
 # CPU drivers only (local-sync + local-task).
 set(IREE_HAL_DRIVER_DEFAULTS OFF)
@@ -131,6 +140,7 @@ endif()
 # Enable Tracy if requested.
 if(HRX_ENABLE_TRACY)
   set(IREE_ENABLE_RUNTIME_TRACING ON)
+  set(IREE_BUILD_TRACY ON)
   message(STATUS "hrx-runtime: Tracy tracing ENABLED")
 endif()
 

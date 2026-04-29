@@ -82,9 +82,16 @@ target_link_libraries(
     hrx_cts_compiler PRIVATE hrx hrx_cts_core Catch2::Catch2)
 add_test(NAME hrx_cts_compiler_dylib
          COMMAND hrx_cts_compiler "[dylib],[diagnostics]")
+# Catch2 returns 4 when every selected test case calls SKIP. These CTest
+# entries cover optional compiler backends; do not copy this to ordinary CTS
+# tests or real failures could be hidden.
 set_tests_properties(hrx_cts_compiler_dylib PROPERTIES
-    ENVIRONMENT "HRX_LIBRARY=$<TARGET_FILE:hrx>")
+    ENVIRONMENT "HRX_LIBRARY=$<TARGET_FILE:hrx>"
+    SKIP_RETURN_CODE 4)
 add_test(NAME hrx_cts_compiler_cli
          COMMAND hrx_cts_compiler "[cli]")
+# Same Catch2 all-skipped code as above; the CLI backend is optional in
+# runtime-only builds.
 set_tests_properties(hrx_cts_compiler_cli PROPERTIES
-    ENVIRONMENT "HRX_LIBRARY=$<TARGET_FILE:hrx>")
+    ENVIRONMENT "HRX_LIBRARY=$<TARGET_FILE:hrx>"
+    SKIP_RETURN_CODE 4)

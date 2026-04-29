@@ -1,0 +1,98 @@
+{
+  "excluded": {
+    "directory_names": [
+      ".git",
+      ".github",
+      "__pycache__"
+    ],
+    "file_names": [
+      "BUILD",
+      "BUILD.bazel",
+      "MODULE.bazel",
+      "WORKSPACE"
+    ],
+    "file_suffixes": [],
+    "path_suffixes": [
+      [
+        "bindings",
+        "python"
+      ],
+      [
+        "runtime",
+        "demo"
+      ],
+      [
+        "tokenizer"
+      ]
+    ]
+  },
+  "external_dependencies": [
+    {
+      "kind": "cmake-package",
+      "name": "hsa-runtime64",
+      "reason": "ROCm supplies HSA headers and libhsa-runtime64.",
+      "replaces_iree_path": "third_party/hsa-runtime-headers"
+    }
+  ],
+  "git_dependencies": [
+    {
+      "commit": "51c09e7b6a0ac5feeba998710f00c7dd7aa67bbf",
+      "destination": "third_party/mimalloc",
+      "name": "mimalloc",
+      "reason": "IREE_ALLOCATOR_SYSTEM=mimalloc consumes include/ and src/static.c.",
+      "url": "https://github.com/microsoft/mimalloc.git"
+    },
+    {
+      "commit": "b9e40069c0b47a722286b94eb5231f7f05c08713",
+      "destination": "third_party/libbacktrace",
+      "name": "libbacktrace",
+      "reason": "IREE_ENABLE_LIBBACKTRACE builds this source with IREE's CMake wrapper.",
+      "url": "https://github.com/ianlancetaylor/libbacktrace.git"
+    }
+  ],
+  "paths": [
+    ".gitmodules",
+    "CMakeLists.txt",
+    "LICENSE",
+    "README.md",
+    "build_tools/cmake",
+    "build_tools/embed_data",
+    "build_tools/third_party/flatcc",
+    "build_tools/third_party/libbacktrace",
+    "build_tools/third_party/tracy",
+    "build_tools/third_party/llvm-project/CMakeLists.txt",
+    "build_tools/tracing",
+    "compiler/bindings/c",
+    "runtime"
+  ],
+  "schema": 1,
+  "script_version": 1,
+  "stub_cmake_dirs": [
+    "compiler",
+    "tests",
+    "tools"
+  ],
+  "submodules": [
+    {
+      "commit": "192ef10025eb2c4cdd392bc502f0c852196baa48",
+      "path": "third_party/benchmark",
+      "url": "https://github.com/google/benchmark.git"
+    },
+    {
+      "commit": "9362cd00f0007d8cbee7bff86e90fb4b6b227ff3",
+      "path": "third_party/flatcc",
+      "url": "https://github.com/dvidelabs/flatcc.git"
+    },
+    {
+      "commit": "5479a42ef9346b64e6d1b860ae58aa8abdb0c7f6",
+      "path": "third_party/tracy",
+      "url": "https://github.com/wolfpld/tracy.git"
+    }
+  ],
+  "upstream": {
+    "commit": "6e34728ce15889222b73d0348932882f6fef54bd",
+    "commit_date": "2026-04-21T13:07:08-07:00",
+    "repository": "https://github.com/iree-org/iree.git",
+    "requested_ref": "6e34728ce15889222b73d0348932882f6fef54bd"
+  }
+}
