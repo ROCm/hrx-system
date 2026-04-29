@@ -61,7 +61,7 @@ typedef uint64_t uintptr_t;
 // HSA system type definitions. On the host side several abi/ types are
 // typedef'd directly to their HSA equivalents (e.g. iree_hsa_signal_t) so
 // that they can be used interchangeably with HSA API calls.
-#include "third_party/hsa-runtime-headers/include/hsa/hsa.h"  // IWYU pragma: export
+#include "hsa/hsa.h"  // IWYU pragma: export
 
 #endif  // IREE_AMDGPU_TARGET_DEVICE
 

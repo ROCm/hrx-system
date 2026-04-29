@@ -15,11 +15,11 @@
 // TODO(benvanik): fork or upstream changes to the headers to make this safer?
 // Similar to Vulkan we could have all the function declarations hidden and also
 // include proper typed function pointers to aid in shared library use.
-#include "third_party/hsa-runtime-headers/include/hsa/amd_hsa_queue.h"  // IWYU pragma: export
-#include "third_party/hsa-runtime-headers/include/hsa/amd_hsa_signal.h"  // IWYU pragma: export
-#include "third_party/hsa-runtime-headers/include/hsa/hsa.h"  // IWYU pragma: export
-#include "third_party/hsa-runtime-headers/include/hsa/hsa_ext_amd.h"  // IWYU pragma: export
-#include "third_party/hsa-runtime-headers/include/hsa/hsa_ven_amd_loader.h"  // IWYU pragma: export
+#include "hsa/amd_hsa_queue.h"  // IWYU pragma: export
+#include "hsa/amd_hsa_signal.h"  // IWYU pragma: export
+#include "hsa/hsa.h"  // IWYU pragma: export
+#include "hsa/hsa_ext_amd.h"  // IWYU pragma: export
+#include "hsa/hsa_ven_amd_loader.h"  // IWYU pragma: export
 
 #ifdef __cplusplus
 extern "C" {
