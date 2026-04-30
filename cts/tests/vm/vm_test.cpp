@@ -6,6 +6,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstdint>
+#include <cstdlib>
 #include <fstream>
 #include <iterator>
 #include <string>
@@ -14,7 +15,11 @@
 namespace {
 
 std::vector<char> loadVmfb(const char *relative_path) {
-  std::string path = std::string(HRX_CTS_SOURCE_DIR) + "/" + relative_path;
+  const char *source_dir = std::getenv("HRX_CTS_SOURCE_DIR");
+  std::string path =
+      std::string((source_dir && source_dir[0]) ? source_dir
+                                                : HRX_CTS_SOURCE_DIR) +
+      "/" + relative_path;
   std::ifstream file(path, std::ios::binary);
   REQUIRE(file.is_open());
   return std::vector<char>(std::istreambuf_iterator<char>(file),

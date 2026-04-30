@@ -12,6 +12,7 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 include(CTest)
+include(GNUInstallDirs)
 
 #===------------------------------------------------------------------------===#
 # Options
@@ -26,6 +27,8 @@ option(HRX_ENABLE_TRACY
     "Build with IREE Tracy tracing integration" OFF)
 option(HRX_BUILD_CTS
     "Build conformance test suite" ON)
+option(HRX_BUILD_CUDA_BINDING
+    "Build CUDA runtime/driver API compatibility binding" OFF)
 option(IREE_BUILD_TESTS
     "Build embedded IREE testing support used by HRX developer tests" OFF)
 option(HRX_ENABLE_ASAN "Enable address sanitizer" OFF)
@@ -185,7 +188,9 @@ add_subdirectory(src/streaming)
 #===------------------------------------------------------------------------===#
 
 add_subdirectory(src/binding/hip)
-add_subdirectory(src/binding/cuda)
+if(HRX_BUILD_CUDA_BINDING)
+  add_subdirectory(src/binding/cuda)
+endif()
 
 #===------------------------------------------------------------------------===#
 # hrx-info — CLI tool, dual-links libhrx.so + IREE static (for flags)
@@ -201,6 +206,10 @@ target_link_libraries(hrx-info PRIVATE hrx)
 # Also link IREE flags directly (static, in the binary itself).
 # This forces dual-linkage: IREE inside libhrx.so AND in the binary.
 target_link_libraries(hrx-info PRIVATE iree_base_tooling_flags)
+set_target_properties(hrx-info PROPERTIES
+    INSTALL_RPATH "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
+install(TARGETS hrx-info
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 #===------------------------------------------------------------------------===#
 # CTS (conformance test suite)
@@ -226,7 +235,6 @@ endif()
 #===------------------------------------------------------------------------===#
 
 include(CMakePackageConfigHelpers)
-include(GNUInstallDirs)
 
 add_library(hrx::hrx ALIAS hrx)
 

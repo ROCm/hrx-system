@@ -35,7 +35,11 @@ void requireOk(hrx_status_t status) {
 #define REQUIRE_HRX_OK(expr) requireOk((expr))
 
 std::string loadMlir(const char *relative_path) {
-  std::string path = std::string(HRX_CTS_SOURCE_DIR) + "/" + relative_path;
+  const char *source_dir = std::getenv("HRX_CTS_SOURCE_DIR");
+  std::string path =
+      std::string((source_dir && source_dir[0]) ? source_dir
+                                                : HRX_CTS_SOURCE_DIR) +
+      "/" + relative_path;
   std::ifstream file(path);
   REQUIRE(file.is_open());
   return std::string(std::istreambuf_iterator<char>(file),
