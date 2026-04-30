@@ -153,6 +153,16 @@ set(BUILD_SHARED_LIBS OFF)
 add_subdirectory(${HRX_IREE_SOURCE_DIR} hrx_iree SYSTEM EXCLUDE_FROM_ALL)
 set(BUILD_SHARED_LIBS ${_hrx_saved_bsl})
 
+# IREE's AMDGPU driver includes <aqlprofile-sdk/aql_profile_v2.h>, which is
+# part of the rocprofiler-sdk distribution rather than the base ROCm runtime.
+# Many ROCm installs (including system /opt/rocm) don't ship that header, so
+# vendor it under third_party/aqlprofile-sdk and expose it through the
+# hsa_runtime_headers interface target that our patch creates.
+if(HRX_ENABLE_IREE_AMDGPU AND TARGET hsa_runtime_headers)
+  target_include_directories(hsa_runtime_headers SYSTEM INTERFACE
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third_party/aqlprofile-sdk/include>")
+endif()
+
 # Sanitizer flags for hrx targets (after IREE, which manages its own).
 if(HRX_ENABLE_ASAN)
   add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
