@@ -7855,7 +7855,6 @@ HIPAPI hipError_t hipLaunchKernel(const void* function_address, dim3 numBlocks,
   }
 
   if (!symbol) {
-    // This shouldn't happen but handle it just in case.
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidDeviceFunction);
   }

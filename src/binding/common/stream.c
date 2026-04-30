@@ -488,29 +488,6 @@ iree_status_t iree_hal_streaming_unpack_parameter_list(
   return iree_ok_status();
 }
 
-// Debug flag - set to 1 to enable verbose kernel launch debugging
-#ifndef IREE_STREAMING_DEBUG_KERNEL_LAUNCH
-#define IREE_STREAMING_DEBUG_KERNEL_LAUNCH 0
-#endif
-
-// Filter to only log kernels matching this substring (NULL = log all)
-static const char *IREE_STREAMING_DEBUG_KERNEL_FILTER = NULL;
-
-// Helper to dump buffer contents
-static void debug_dump_buffer(const char *label, const void *buf, size_t len) {
-  fprintf(stderr, "[LAUNCH] %s (%zu bytes):\n", label, len);
-  const uint8_t *p = (const uint8_t *)buf;
-  for (size_t i = 0; i < len && i < 256; i += 16) {
-    fprintf(stderr, "  %04zx: ", i);
-    for (size_t j = 0; j < 16 && i + j < len; ++j) {
-      fprintf(stderr, "%02x", p[i + j]);
-      if (j == 7)
-        fprintf(stderr, " ");
-    }
-    fprintf(stderr, "\n");
-  }
-}
-
 iree_status_t iree_hal_streaming_launch_kernel(
     iree_hal_streaming_symbol_t *symbol,
     const iree_hal_streaming_dispatch_params_t *params,
@@ -519,32 +496,6 @@ iree_status_t iree_hal_streaming_launch_kernel(
   IREE_ASSERT_ARGUMENT(params);
   IREE_ASSERT_ARGUMENT(stream);
   IREE_TRACE_ZONE_BEGIN(z0);
-
-#if IREE_STREAMING_DEBUG_KERNEL_LAUNCH
-  bool debug_should_log =
-      !IREE_STREAMING_DEBUG_KERNEL_FILTER ||
-      (symbol->name.data &&
-       strstr(symbol->name.data, IREE_STREAMING_DEBUG_KERNEL_FILTER));
-  if (debug_should_log) {
-    fprintf(stderr, "[LAUNCH] Kernel: %.*s\n",
-            (int)(symbol->name.size > 120 ? 120 : symbol->name.size),
-            symbol->name.data ? symbol->name.data : "(null)");
-    fprintf(stderr, "[LAUNCH]   grid=(%u,%u,%u) block=(%u,%u,%u) shared=%u\n",
-            params->grid_dim[0], params->grid_dim[1], params->grid_dim[2],
-            params->block_dim[0], params->block_dim[1], params->block_dim[2],
-            (unsigned)params->shared_memory_bytes);
-    fprintf(stderr, "[LAUNCH]   flags=0x%x buffer=%p\n", params->flags,
-            params->buffer);
-    fprintf(stderr,
-            "[LAUNCH]   symbol: copy_count=%u binding_count=%u "
-            "constant_bytes=%u buffer_size=%u\n",
-            symbol->parameters.copy_count, symbol->parameters.binding_count,
-            (unsigned)symbol->parameters.constant_bytes,
-            (unsigned)symbol->parameters.buffer_size);
-  }
-#else
-  (void)0; // Suppress unused variable warning
-#endif
 
   // Verify the symbol is a function.
   if (symbol->type != IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION) {
@@ -631,12 +582,6 @@ iree_status_t iree_hal_streaming_launch_kernel(
     }
     binding_list.count = 0; // No IREE bindings, using raw pointers.
     use_raw_arguments = true;
-#if IREE_STREAMING_DEBUG_KERNEL_LAUNCH
-    if (debug_should_log) {
-      fprintf(stderr, "[LAUNCH]   PATH: is_pre_packed (buffer=%p size=%zu)\n",
-              params->buffer, params->buffer_size);
-    }
-#endif
   } else if (is_native_kernel && params->buffer) {
     // Native kernel with pre-packed buffer: pass raw arguments directly.
     // For native kernels, params->buffer contains the pre-packed kernel
@@ -826,63 +771,43 @@ iree_status_t iree_hal_streaming_launch_kernel(
   iree_hal_dispatch_flags_t flags =
       IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS;
 
-#if IREE_STREAMING_DEBUG_KERNEL_LAUNCH
-  if (debug_should_log) {
-    fprintf(stderr,
-            "[LAUNCH]   DISPATCH: constants_size=%zu bindings=%zu flags=0x%lx "
-            "use_raw=%d\n",
-            constants_size, binding_list.count, (unsigned long)flags,
-            use_raw_arguments);
-    // Dump first few pointer-sized values from constants
-    if (constants && constants_size >= sizeof(void *)) {
-      size_t num_ptrs = constants_size / sizeof(void *);
-      if (num_ptrs > 16)
-        num_ptrs = 16;
-      fprintf(stderr, "[LAUNCH]   constants (first %zu ptrs):", num_ptrs);
-      for (size_t i = 0; i < num_ptrs; ++i) {
-        void *ptr_val = ((void **)constants)[i];
-        fprintf(stderr, " %p", ptr_val);
-      }
-      fprintf(stderr, "\n");
-    }
-  }
-#endif
-
   iree_status_t status = iree_hal_command_buffer_dispatch(
       stream->command_buffer, symbol->module->executable,
       symbol->export_ordinal, config,
       iree_make_const_byte_span(constants, constants_size), binding_list,
       flags);
 
-#if IREE_STREAMING_DEBUG_KERNEL_LAUNCH
-  if (debug_should_log) {
-    if (!iree_status_is_ok(status)) {
-      iree_allocator_t allocator = iree_allocator_system();
-      char *status_str = NULL;
-      iree_host_size_t status_len = 0;
-      if (iree_status_to_string(status, &allocator, &status_str, &status_len)) {
-        fprintf(stderr, "[LAUNCH]   RESULT: FAILED - %s\n", status_str);
-        iree_allocator_free(allocator, status_str);
-      } else {
-        fprintf(stderr, "[LAUNCH]   RESULT: FAILED - (unknown error)\n");
-      }
-    } else {
-      fprintf(stderr, "[LAUNCH]   RESULT: OK (dispatch recorded)\n");
-    }
-  }
-#endif
-
-  // Insert an execution barrier after each dispatch to enforce serial
-  // ordering within the command buffer, emulating HIP stream semantics.
-  // This allows batching multiple dispatches per CB submission while
-  // maintaining correctness. Inter-CB ordering is handled by timeline
+  // Insert an execution + memory barrier after each dispatch to enforce
+  // serial ordering within the command buffer, emulating HIP stream
+  // semantics. This allows batching multiple dispatches per CB submission
+  // while maintaining correctness. Inter-CB ordering is handled by timeline
   // semaphore chaining in iree_hal_streaming_stream_flush.
+  //
+  // The memory barrier with non-host (DISPATCH/TRANSFER) access scopes is
+  // important: under the AMDGPU HAL backend it resolves to an AGENT-scoped
+  // AQL release+acquire fence between this dispatch and the next, which
+  // flushes the GPU L1/L2 caches so the next dispatch sees this dispatch's
+  // writes. A bare execution barrier with no memory_barriers (count=0)
+  // resolves to NONE/NONE scopes after upstream IREE commit 48af1651a1
+  // ("Preserve command-buffer barrier scopes") and lets later dispatches
+  // launch with stale cache state, producing garbage output (e.g. NaN
+  // logits in GPT-2 forward).
   if (iree_status_is_ok(status)) {
+    static const iree_hal_memory_barrier_t memory_barrier = {
+        .source_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
+                        IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
+                        IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
+                        IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+        .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
+                        IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
+                        IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
+                        IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+    };
     status = iree_hal_command_buffer_execution_barrier(
         stream->command_buffer,
         IREE_HAL_EXECUTION_STAGE_DISPATCH | IREE_HAL_EXECUTION_STAGE_TRANSFER,
         IREE_HAL_EXECUTION_STAGE_DISPATCH | IREE_HAL_EXECUTION_STAGE_TRANSFER,
-        IREE_HAL_EXECUTION_BARRIER_FLAG_NONE, 0, NULL, 0, NULL);
+        IREE_HAL_EXECUTION_BARRIER_FLAG_NONE, 1, &memory_barrier, 0, NULL);
   }
 
   IREE_TRACE_ZONE_END(z0);

@@ -184,26 +184,24 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
       if (parameter->type ==
           IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_BINDING) {
         // Update offsets. Bindings are passed as pointers.
+        // |parameter->offset| is the kernarg byte offset for all parameter
+        // types when the backend populates it (e.g. AMDGPU HSACO). The
+        // binding-list ordinal is recovered by iteration: |resolve_count|
+        // is the running count of BINDING parameters seen so far, which is
+        // exactly the index of this parameter in the bindings list.
         iree_hal_streaming_parameter_resolve_op_t* op =
             &resolve_ops_start[resolve_count].resolve;
         op->src_offset = src_offset;
-        op->dst_ordinal = resolve_count;  // binding ordinal
+        op->dst_ordinal = resolve_count;
         op->src_ordinal = j;
-        // For the CUSTOM_DIRECT_ARGUMENTS path used by HIP kernels we overlay
-        // the resolved device pointer into the raw kernarg blob, so we need
-        // the true kernarg byte offset. The HAL's |parameter->offset| on a
-        // BINDING is a binding ordinal, not a byte offset; the real kernarg
-        // offset lives in |kernarg_offset| when the backend populates it.
-        op->dst_offset = parameter->kernarg_offset;
+        op->dst_offset = parameter->offset;
         src_offset += parameter->size;
         buffer_size = src_offset;
         ++resolve_count;
-        // active_copy = NULL;  // break any active copy operation
 
         // For native kernels with CUSTOM_DIRECT_ARGUMENTS, bindings are also
         // part of the constants buffer. Track their extent as well.
-        size_t param_extent =
-            (size_t)parameter->kernarg_offset + parameter->size;
+        size_t param_extent = (size_t)parameter->offset + parameter->size;
         if (param_extent > this_kernel_constants_size) {
           this_kernel_constants_size = param_extent;
         }
