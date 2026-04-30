@@ -8,7 +8,7 @@
 // Lifecycle
 //===----------------------------------------------------------------------===//
 
-TEST_CASE_METHOD(HRXTestFixture, "Mem pool create and release",
+TEST_CASE_METHOD(HrxTestFixture, "Mem pool create and release",
                  "[mem_pool][lifecycle]") {
   hrx_mem_pool_props_t props = {};
   props.location_type = 1;  // device
@@ -21,7 +21,7 @@ TEST_CASE_METHOD(HRXTestFixture, "Mem pool create and release",
   hrx().mem_pool_release(pool);
 }
 
-TEST_CASE_METHOD(HRXTestFixture, "Mem pool retain and release",
+TEST_CASE_METHOD(HrxTestFixture, "Mem pool retain and release",
                  "[mem_pool][lifecycle]") {
   hrx_mem_pool_props_t props = {};
   hrx_mem_pool_t pool = nullptr;
@@ -32,7 +32,7 @@ TEST_CASE_METHOD(HRXTestFixture, "Mem pool retain and release",
   hrx().mem_pool_release(pool);
 }
 
-TEST_CASE_METHOD(HRXTestFixture, "Mem pool create with NULL device fails",
+TEST_CASE_METHOD(HrxTestFixture, "Mem pool create with NULL device fails",
                  "[mem_pool][lifecycle]") {
   hrx_mem_pool_props_t props = {};
   hrx_mem_pool_t pool = nullptr;
@@ -41,7 +41,7 @@ TEST_CASE_METHOD(HRXTestFixture, "Mem pool create with NULL device fails",
   hrx().status_ignore(status);
 }
 
-TEST_CASE_METHOD(HRXTestFixture, "Mem pool create with NULL props fails",
+TEST_CASE_METHOD(HrxTestFixture, "Mem pool create with NULL props fails",
                  "[mem_pool][lifecycle]") {
   hrx_mem_pool_t pool = nullptr;
   hrx_status_t status = hrx().mem_pool_create(device_, nullptr, &pool);
@@ -53,7 +53,7 @@ TEST_CASE_METHOD(HRXTestFixture, "Mem pool create with NULL props fails",
 // Default attribute values
 //===----------------------------------------------------------------------===//
 
-TEST_CASE_METHOD(HRXTestFixture, "Mem pool default attributes",
+TEST_CASE_METHOD(HrxTestFixture, "Mem pool default attributes",
                  "[mem_pool][attr]") {
   hrx_mem_pool_props_t props = {};
   hrx_mem_pool_t pool = nullptr;
@@ -100,7 +100,7 @@ TEST_CASE_METHOD(HRXTestFixture, "Mem pool default attributes",
 // Attribute set and get
 //===----------------------------------------------------------------------===//
 
-TEST_CASE_METHOD(HRXTestFixture, "Mem pool set release threshold",
+TEST_CASE_METHOD(HrxTestFixture, "Mem pool set release threshold",
                  "[mem_pool][attr]") {
   hrx_mem_pool_props_t props = {};
   hrx_mem_pool_t pool = nullptr;
@@ -117,7 +117,7 @@ TEST_CASE_METHOD(HRXTestFixture, "Mem pool set release threshold",
   hrx().mem_pool_release(pool);
 }
 
-TEST_CASE_METHOD(HRXTestFixture, "Mem pool set reuse flags",
+TEST_CASE_METHOD(HrxTestFixture, "Mem pool set reuse flags",
                  "[mem_pool][attr]") {
   hrx_mem_pool_props_t props = {};
   hrx_mem_pool_t pool = nullptr;
@@ -148,7 +148,7 @@ TEST_CASE_METHOD(HRXTestFixture, "Mem pool set reuse flags",
   hrx().mem_pool_release(pool);
 }
 
-TEST_CASE_METHOD(HRXTestFixture, "Mem pool set read-only attribute fails",
+TEST_CASE_METHOD(HrxTestFixture, "Mem pool set read-only attribute fails",
                  "[mem_pool][attr]") {
   hrx_mem_pool_props_t props = {};
   hrx_mem_pool_t pool = nullptr;
@@ -168,7 +168,7 @@ TEST_CASE_METHOD(HRXTestFixture, "Mem pool set read-only attribute fails",
   hrx().mem_pool_release(pool);
 }
 
-TEST_CASE_METHOD(HRXTestFixture, "Mem pool get with NULL pool fails",
+TEST_CASE_METHOD(HrxTestFixture, "Mem pool get with NULL pool fails",
                  "[mem_pool][attr]") {
   uint64_t val = 0;
   hrx_status_t status = hrx().mem_pool_get_attribute(
@@ -177,7 +177,7 @@ TEST_CASE_METHOD(HRXTestFixture, "Mem pool get with NULL pool fails",
   hrx().status_ignore(status);
 }
 
-TEST_CASE_METHOD(HRXTestFixture, "Mem pool set with NULL pool fails",
+TEST_CASE_METHOD(HrxTestFixture, "Mem pool set with NULL pool fails",
                  "[mem_pool][attr]") {
   hrx_status_t status = hrx().mem_pool_set_attribute(
       nullptr, HRX_MEM_POOL_ATTR_RELEASE_THRESHOLD, 0);
@@ -189,7 +189,7 @@ TEST_CASE_METHOD(HRXTestFixture, "Mem pool set with NULL pool fails",
 // Trim
 //===----------------------------------------------------------------------===//
 
-TEST_CASE_METHOD(HRXTestFixture, "Mem pool trim succeeds",
+TEST_CASE_METHOD(HrxTestFixture, "Mem pool trim succeeds",
                  "[mem_pool][trim]") {
   hrx_mem_pool_props_t props = {};
   hrx_mem_pool_t pool = nullptr;
@@ -201,7 +201,7 @@ TEST_CASE_METHOD(HRXTestFixture, "Mem pool trim succeeds",
   hrx().mem_pool_release(pool);
 }
 
-TEST_CASE_METHOD(HRXTestFixture, "Mem pool trim with NULL pool fails",
+TEST_CASE_METHOD(HrxTestFixture, "Mem pool trim with NULL pool fails",
                  "[mem_pool][trim]") {
   hrx_status_t status = hrx().mem_pool_trim(nullptr, 0);
   REQUIRE(!hrx_status_is_ok(status));
@@ -212,7 +212,7 @@ TEST_CASE_METHOD(HRXTestFixture, "Mem pool trim with NULL pool fails",
 // Multiple pools
 //===----------------------------------------------------------------------===//
 
-TEST_CASE_METHOD(HRXTestFixture, "Multiple pools are independent",
+TEST_CASE_METHOD(HrxTestFixture, "Multiple pools are independent",
                  "[mem_pool][lifecycle]") {
   hrx_mem_pool_props_t props = {};
   hrx_mem_pool_t pool_a = nullptr;
@@ -242,7 +242,7 @@ TEST_CASE_METHOD(HRXTestFixture, "Multiple pools are independent",
 // Attribute toggle round-trip
 //===----------------------------------------------------------------------===//
 
-TEST_CASE_METHOD(HRXTestFixture, "Mem pool attribute toggle round-trip",
+TEST_CASE_METHOD(HrxTestFixture, "Mem pool attribute toggle round-trip",
                  "[mem_pool][attr]") {
   hrx_mem_pool_props_t props = {};
   hrx_mem_pool_t pool = nullptr;
