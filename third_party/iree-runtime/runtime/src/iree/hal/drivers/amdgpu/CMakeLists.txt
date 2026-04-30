@@ -444,29 +444,31 @@ iree_cc_test(
     "iree-hal-drivers-amdgpu-tests"
 )
 
-iree_cc_test(
-  NAME
-    host_queue_command_buffer_test
-  SRCS
-    "host_queue_command_buffer_packet.h"
-    "host_queue_command_buffer_test.cc"
-  DEPS
-    ::amdgpu
-    ::headers
-    ::queue_affinity
-    iree::base
-    iree::hal
-    iree::hal::cts::util::test_base
-    iree::hal::drivers::amdgpu::cts::testdata_amdgpu
-    iree::hal::drivers::amdgpu::util::packet
-    iree::testing::gtest
-    iree::testing::gtest_main
-  LABELS
-    "driver=amdgpu"
-    "nodocker"
-  GROUP
-    "iree-hal-drivers-amdgpu-tests"
-)
+if(TARGET iree::hal::drivers::amdgpu::cts::testdata_amdgpu)
+  iree_cc_test(
+    NAME
+      host_queue_command_buffer_test
+    SRCS
+      "host_queue_command_buffer_packet.h"
+      "host_queue_command_buffer_test.cc"
+    DEPS
+      ::amdgpu
+      ::headers
+      ::queue_affinity
+      iree::base
+      iree::hal
+      iree::hal::cts::util::test_base
+      iree::hal::drivers::amdgpu::cts::testdata_amdgpu
+      iree::hal::drivers::amdgpu::util::packet
+      iree::testing::gtest
+      iree::testing::gtest_main
+    LABELS
+      "driver=amdgpu"
+      "nodocker"
+    GROUP
+      "iree-hal-drivers-amdgpu-tests"
+  )
+endif()
 
 iree_cc_test(
   NAME

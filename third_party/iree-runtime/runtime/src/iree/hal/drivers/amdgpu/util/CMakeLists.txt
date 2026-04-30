@@ -28,6 +28,10 @@ iree_cc_library(
   PUBLIC
 )
 
+# ROCm's packaged aqlprofile SDK header currently has C++-only declarations:
+# https://github.com/ROCm/rocm-systems/issues/5576
+set_source_files_properties("libaqlprofile.c" PROPERTIES LANGUAGE CXX)
+
 iree_cc_library(
   NAME
     libaqlprofile

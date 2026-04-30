@@ -981,7 +981,25 @@ endif()
 
 if(IREE_BUILD_TESTS)
   iree_set_googletest_cmake_options()
-  add_subdirectory(third_party/googletest EXCLUDE_FROM_ALL)
+  find_package(GTest REQUIRED)
+  if(NOT TARGET gtest AND TARGET GTest::gtest)
+    add_library(gtest ALIAS GTest::gtest)
+  endif()
+  if(NOT TARGET gtest_main AND TARGET GTest::gtest_main)
+    add_library(gtest_main ALIAS GTest::gtest_main)
+  endif()
+  if(NOT TARGET gmock AND TARGET GTest::gmock)
+    add_library(gmock ALIAS GTest::gmock)
+  endif()
+  if(NOT TARGET gmock_main AND TARGET GTest::gmock_main)
+    add_library(gmock_main ALIAS GTest::gmock_main)
+  endif()
+  if(NOT TARGET gtest OR NOT TARGET gtest_main OR
+     NOT TARGET gmock OR NOT TARGET gmock_main)
+    message(FATAL_ERROR
+      "IREE_BUILD_TESTS requires external GTest targets: "
+      "GTest::gtest, GTest::gtest_main, GTest::gmock, and GTest::gmock_main")
+  endif()
 endif()
 
 if(IREE_ENABLE_THREADING)
@@ -1057,7 +1075,24 @@ if(IREE_ALLOCATOR_SYSTEM STREQUAL "mimalloc")
 endif()
 
 if(IREE_HAL_DRIVER_AMDGPU)
-  add_subdirectory(build_tools/third_party/hsa-runtime-headers EXCLUDE_FROM_ALL)
+  find_package(hsa-runtime64 CONFIG REQUIRED)
+  if(NOT TARGET hsa_runtime::headers)
+    get_target_property(_IREE_HSA_RUNTIME_INCLUDE_DIRS
+      hsa-runtime64::hsa-runtime64 INTERFACE_INCLUDE_DIRECTORIES)
+    if(NOT _IREE_HSA_RUNTIME_INCLUDE_DIRS)
+      message(FATAL_ERROR
+        "hsa-runtime64::hsa-runtime64 does not publish include directories")
+    endif()
+    add_library(hsa_runtime_headers INTERFACE)
+    target_include_directories(hsa_runtime_headers SYSTEM INTERFACE
+      ${_IREE_HSA_RUNTIME_INCLUDE_DIRS})
+    add_library(hsa_runtime::headers ALIAS hsa_runtime_headers)
+    iree_install_targets(
+      TARGETS hsa_runtime_headers
+      COMPONENT IREEBundledLibraries
+      EXPORT_SET Runtime
+    )
+  endif()
 endif()
 
 if(IREE_HAL_DRIVER_CUDA)
