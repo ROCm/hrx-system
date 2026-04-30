@@ -35,11 +35,15 @@ uint32_t iree_hal_amdgpu_host_queue_profile_semaphore_count(
                                            : (uint32_t)semaphore_list.count;
 }
 
-void iree_hal_amdgpu_host_queue_set_profile_events_enabled(
-    iree_hal_amdgpu_host_queue_t* queue, bool queue_events_enabled,
-    bool queue_device_events_enabled) {
-  queue->profiling.queue_events_enabled = queue_events_enabled;
-  queue->profiling.queue_device_events_enabled = queue_device_events_enabled;
+void iree_hal_amdgpu_host_queue_set_profile_flags(
+    iree_hal_amdgpu_host_queue_t* queue,
+    iree_hal_amdgpu_host_queue_profile_flags_t flags) {
+  queue->profiling.queue_events_enabled = iree_any_bit_set(
+      flags, IREE_HAL_AMDGPU_HOST_QUEUE_PROFILE_FLAG_QUEUE_EVENTS);
+  queue->profiling.queue_device_events_enabled = iree_any_bit_set(
+      flags, IREE_HAL_AMDGPU_HOST_QUEUE_PROFILE_FLAG_QUEUE_DEVICE_EVENTS);
+  queue->profiling.dispatch_profiling_enabled = iree_any_bit_set(
+      flags, IREE_HAL_AMDGPU_HOST_QUEUE_PROFILE_FLAG_DISPATCHES);
 }
 
 iree_hal_amdgpu_profile_queue_device_event_t*

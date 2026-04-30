@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <atomic>
+#include <cstdio>
 #include <thread>
 #include <vector>
 
@@ -32,14 +33,9 @@ static void BM_AcquireRelease(benchmark::State& state) {
 
   for (auto _ : state) {
     iree_hal_memory_fixed_block_allocator_allocation_t alloc;
-    iree_status_t status =
-        iree_hal_memory_fixed_block_allocator_acquire(pool, &alloc);
-    if (iree_status_is_ok(status)) {
-      iree_hal_memory_fixed_block_allocator_release(pool, alloc.block_index,
-                                                    NULL);
-    } else {
-      iree_status_ignore(status);
-    }
+    IREE_CHECK_OK(iree_hal_memory_fixed_block_allocator_acquire(pool, &alloc));
+    iree_hal_memory_fixed_block_allocator_release(pool, alloc.block_index,
+                                                  NULL);
   }
 
   iree_hal_memory_fixed_block_allocator_free(pool);
@@ -57,20 +53,23 @@ static void BM_AcquireBurst(benchmark::State& state) {
   std::vector<uint32_t> indices(block_count);
   for (auto _ : state) {
     // Acquire all.
+    int acquired_count = 0;
     for (int i = 0; i < block_count; ++i) {
       iree_hal_memory_fixed_block_allocator_allocation_t alloc;
       iree_status_t status =
           iree_hal_memory_fixed_block_allocator_acquire(pool, &alloc);
       if (iree_status_is_ok(status)) {
         indices[i] = alloc.block_index;
+        ++acquired_count;
       } else {
-        iree_status_ignore(status);
+        iree_status_fprint(stderr, status);
+        iree_status_free(status);
         state.SkipWithError("unexpected exhaustion");
         break;
       }
     }
     // Release all.
-    for (int i = 0; i < block_count; ++i) {
+    for (int i = 0; i < acquired_count; ++i) {
       iree_hal_memory_fixed_block_allocator_release(pool, indices[i], NULL);
     }
   }
@@ -93,14 +92,10 @@ static void BM_ContendedAcquireRelease(benchmark::State& state) {
 
   for (auto _ : state) {
     iree_hal_memory_fixed_block_allocator_allocation_t alloc;
-    iree_status_t status =
-        iree_hal_memory_fixed_block_allocator_acquire(shared_pool, &alloc);
-    if (iree_status_is_ok(status)) {
-      iree_hal_memory_fixed_block_allocator_release(shared_pool,
-                                                    alloc.block_index, NULL);
-    } else {
-      iree_status_ignore(status);
-    }
+    IREE_CHECK_OK(
+        iree_hal_memory_fixed_block_allocator_acquire(shared_pool, &alloc));
+    iree_hal_memory_fixed_block_allocator_release(shared_pool,
+                                                  alloc.block_index, NULL);
   }
 
   if (state.thread_index() == 0) {

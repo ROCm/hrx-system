@@ -169,6 +169,7 @@ iree_cc_library(
     iree::base
     iree::base::threading
     iree::hal
+    iree::hal::utils::profile_event_ring
   PUBLIC
 )
 
@@ -218,6 +219,7 @@ iree_cc_library(
   DEPS
     iree::async
     iree::base
+    iree::base::threading
     iree::hal
   PUBLIC
 )

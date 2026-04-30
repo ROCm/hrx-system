@@ -1721,7 +1721,7 @@ iree_status_t iree_profile_export_file(iree_string_view_t path,
     const int open_errno = errno;
     iree_allocator_free(host_allocator, c_path);
     if (!file) {
-      return iree_make_status(IREE_STATUS_UNAVAILABLE,
+      return iree_make_status(iree_status_code_from_errno(open_errno),
                               "failed to open export output file: %s",
                               strerror(open_errno));
     }
@@ -1732,9 +1732,10 @@ iree_status_t iree_profile_export_file(iree_string_view_t path,
       iree_profile_export_ireeperf_jsonl_file(path, file, host_allocator);
   if (should_close_file) {
     if (fclose(file) != 0 && iree_status_is_ok(status)) {
-      status = iree_make_status(IREE_STATUS_UNAVAILABLE,
+      const int close_errno = errno;
+      status = iree_make_status(iree_status_code_from_errno(close_errno),
                                 "failed to close export output file: %s",
-                                strerror(errno));
+                                strerror(close_errno));
     }
   }
   return status;

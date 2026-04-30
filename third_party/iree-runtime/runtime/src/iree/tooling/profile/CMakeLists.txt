@@ -345,4 +345,40 @@ iree_cc_test(
     iree::testing::gtest_main
 )
 
+iree_cc_binary(
+  NAME
+    test_fixture_generator
+  SRCS
+    "test_fixture_generator.c"
+  DEPS
+    iree::base
+    iree::hal
+    iree::hal::utils::profile_file
+    iree::io::file_handle
+  TESTONLY
+)
+
+iree_local_py_test(
+  NAME
+    render_test
+  SRC
+    "render_test.py"
+  PACKAGE_DIRS
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
+iree_local_py_test(
+  NAME
+    cli_test
+  SRC
+    "cli_test.py"
+  ARGS
+    "--fixture-generator=$<TARGET_FILE:iree_tooling_profile_test_fixture_generator>"
+    "--iree-profile=$<TARGET_FILE:iree-profile>"
+  LABELS
+    "noriscv"
+  PACKAGE_DIRS
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

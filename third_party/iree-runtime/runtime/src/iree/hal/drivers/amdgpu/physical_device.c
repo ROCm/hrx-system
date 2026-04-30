@@ -56,12 +56,6 @@ static hsa_status_t iree_hal_amdgpu_record_first_isa(hsa_isa_t isa,
   return HSA_STATUS_SUCCESS;
 }
 
-static bool iree_hal_amdgpu_parse_decimal_digit(char c, uint32_t* out_value) {
-  if (c < '0' || c > '9') return false;
-  *out_value = (uint32_t)(c - '0');
-  return true;
-}
-
 static bool iree_hal_amdgpu_parse_hex_digit(char c, uint32_t* out_value) {
   if (c >= '0' && c <= '9') {
     *out_value = (uint32_t)(c - '0');
@@ -76,60 +70,14 @@ static bool iree_hal_amdgpu_parse_hex_digit(char c, uint32_t* out_value) {
   return false;
 }
 
-static iree_status_t iree_hal_amdgpu_parse_gfxip_version(
-    iree_string_view_t isa_name, iree_hal_amdgpu_gfxip_version_t* out_version) {
-  IREE_ASSERT_ARGUMENT(out_version);
-  memset(out_version, 0, sizeof(*out_version));
-
-  iree_host_size_t gfx_ordinal = isa_name.size;
-  for (iree_host_size_t i = 0; i + 3 <= isa_name.size; ++i) {
-    if (isa_name.data[i] == 'g' && isa_name.data[i + 1] == 'f' &&
-        isa_name.data[i + 2] == 'x') {
-      gfx_ordinal = i + 3;
-      break;
-    }
-  }
-  if (gfx_ordinal >= isa_name.size) {
-    return iree_make_status(IREE_STATUS_NOT_FOUND,
-                            "ISA name does not contain gfx version: %.*s",
-                            (int)isa_name.size, isa_name.data);
-  }
-
-  const char* version = isa_name.data + gfx_ordinal;
-  const iree_host_size_t version_length = isa_name.size - gfx_ordinal;
-  uint32_t major0 = 0;
-  uint32_t major1 = 0;
-  uint32_t minor = 0;
-  uint32_t stepping = 0;
-  if (version_length >= 4 &&
-      iree_hal_amdgpu_parse_decimal_digit(version[0], &major0) && major0 == 1 &&
-      iree_hal_amdgpu_parse_decimal_digit(version[1], &major1) &&
-      iree_hal_amdgpu_parse_decimal_digit(version[2], &minor) &&
-      iree_hal_amdgpu_parse_hex_digit(version[3], &stepping)) {
-    out_version->major = 10 + major1;
-    out_version->minor = minor;
-    out_version->stepping = stepping;
-    return iree_ok_status();
-  }
-  if (version_length >= 3 &&
-      iree_hal_amdgpu_parse_decimal_digit(version[0], &major0) &&
-      iree_hal_amdgpu_parse_decimal_digit(version[1], &minor) &&
-      iree_hal_amdgpu_parse_hex_digit(version[2], &stepping)) {
-    out_version->major = major0;
-    out_version->minor = minor;
-    out_version->stepping = stepping;
-    return iree_ok_status();
-  }
-  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                          "unsupported ISA gfx version syntax: %.*s",
-                          (int)isa_name.size, isa_name.data);
-}
-
-static iree_status_t iree_hal_amdgpu_query_agent_gfxip_version(
+static iree_status_t iree_hal_amdgpu_query_agent_target_id(
     const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t agent,
-    iree_hal_amdgpu_gfxip_version_t* out_version) {
+    iree_host_size_t target_id_processor_capacity,
+    char* target_id_processor_storage,
+    iree_hal_amdgpu_target_id_t* out_target_id) {
   IREE_ASSERT_ARGUMENT(libhsa);
-  IREE_ASSERT_ARGUMENT(out_version);
+  IREE_ASSERT_ARGUMENT(target_id_processor_storage);
+  IREE_ASSERT_ARGUMENT(out_target_id);
 
   iree_hal_amdgpu_agent_first_isa_t first_isa;
   memset(&first_isa, 0, sizeof(first_isa));
@@ -154,9 +102,21 @@ static iree_status_t iree_hal_amdgpu_query_agent_gfxip_version(
   IREE_RETURN_IF_ERROR(
       iree_hsa_isa_get_info_alt(IREE_LIBHSA(libhsa), first_isa.value,
                                 HSA_ISA_INFO_NAME, isa_name_buffer));
-  return iree_hal_amdgpu_parse_gfxip_version(
+  iree_hal_amdgpu_target_id_t target_id;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_id_parse_hsa_isa_name(
       iree_make_string_view(isa_name_buffer, isa_name_length - /*NUL*/ 1),
-      out_version);
+      &target_id));
+  if (target_id.processor.size >= target_id_processor_capacity) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "target ID processor storage too small");
+  }
+  memcpy(target_id_processor_storage, target_id.processor.data,
+         target_id.processor.size);
+  target_id_processor_storage[target_id.processor.size] = 0;
+  target_id.processor = iree_make_string_view(target_id_processor_storage,
+                                              target_id.processor.size);
+  *out_target_id = target_id;
+  return iree_ok_status();
 }
 
 static iree_status_t iree_hal_amdgpu_query_agent_uuid(
@@ -230,55 +190,6 @@ static iree_status_t iree_hal_amdgpu_query_agent_pci_identity(
   return iree_ok_status();
 }
 
-static iree_hal_amdgpu_vendor_packet_capability_flags_t
-iree_hal_amdgpu_select_vendor_packet_capabilities(
-    iree_hal_amdgpu_gfxip_version_t version) {
-  iree_hal_amdgpu_vendor_packet_capability_flags_t capabilities = 0;
-  // Matches CLR's barrier_value_packet_ gate:
-  //   gfx9.0.10 or gfx9.[minor >= 4].[stepping 0..2]
-  if (version.major == 9 && ((version.minor == 0 && version.stepping == 10) ||
-                             (version.minor >= 4 && version.stepping <= 2))) {
-    capabilities |= IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_AQL_PM4_IB |
-                    IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_AQL_BARRIER_VALUE;
-  }
-  // WAIT_REG_MEM64 is present in the gfx10+ PM4 packet tables. Gfx9 has only
-  // the 32-bit WAIT_REG_MEM variant, and non-CDNA gfx9 therefore defers. The
-  // gfx10+ memory WRITE_DATA/COPY_DATA and profiling families here have local
-  // gfx1100 evidence; CDNA/gfx9 stays on the narrower AQL_PM4_IB-only path
-  // until each packet family has hardware validation.
-  if (version.major >= 10) {
-    capabilities |=
-        IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_AQL_PM4_IB |
-        IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_WAIT_REG_MEM64 |
-        IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_WRITE_DATA_MEMORY |
-        IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_COPY_DATA_MEMORY |
-        IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_COPY_TIMESTAMP |
-        IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_RELEASE_MEM_TIMESTAMP |
-        IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_EVENT_WRITE |
-        IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_SET_SH_REG |
-        IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_SET_UCONFIG_REG |
-        IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_REGISTER_READBACK |
-        IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_PERFCOUNTER_READBACK |
-        IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_IMMEDIATE_WRITE;
-  }
-  return capabilities;
-}
-
-static iree_hal_amdgpu_wait_barrier_strategy_t
-iree_hal_amdgpu_select_wait_barrier_strategy(
-    iree_hal_amdgpu_vendor_packet_capability_flags_t
-        vendor_packet_capabilities) {
-  if (vendor_packet_capabilities &
-      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_AQL_BARRIER_VALUE) {
-    return IREE_HAL_AMDGPU_WAIT_BARRIER_STRATEGY_AQL_BARRIER_VALUE;
-  }
-  if (vendor_packet_capabilities &
-      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_WAIT_REG_MEM64) {
-    return IREE_HAL_AMDGPU_WAIT_BARRIER_STRATEGY_PM4_WAIT_REG_MEM64;
-  }
-  return IREE_HAL_AMDGPU_WAIT_BARRIER_STRATEGY_DEFER;
-}
-
 static bool iree_hal_amdgpu_physical_device_query_pool_epoch(
     void* user_data, iree_async_axis_t axis, uint64_t epoch) {
   iree_hal_amdgpu_epoch_signal_table_t* epoch_signal_table =
@@ -314,6 +225,20 @@ static iree_string_view_t iree_hal_amdgpu_format_pool_trace_name(
   return iree_make_string_view(buffer, safe_length);
 }
 
+static iree_hal_buffer_usage_t
+iree_hal_amdgpu_physical_device_mappable_pool_supported_usage(void) {
+  const iree_hal_buffer_usage_t sharing_usage =
+      IREE_HAL_BUFFER_USAGE_SHARING_REPLICATE |
+      IREE_HAL_BUFFER_USAGE_SHARING_CONCURRENT |
+      IREE_HAL_BUFFER_USAGE_SHARING_IMMUTABLE;
+  return IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH |
+         sharing_usage | IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED |
+         IREE_HAL_BUFFER_USAGE_MAPPING_PERSISTENT |
+         IREE_HAL_BUFFER_USAGE_MAPPING_OPTIONAL |
+         IREE_HAL_BUFFER_USAGE_MAPPING_ACCESS_RANDOM |
+         IREE_HAL_BUFFER_USAGE_MAPPING_ACCESS_SEQUENTIAL_WRITE;
+}
+
 void iree_hal_amdgpu_physical_device_options_initialize(
     iree_hal_amdgpu_physical_device_options_t* out_options) {
   IREE_ASSERT_ARGUMENT(out_options);
@@ -344,6 +269,8 @@ void iree_hal_amdgpu_physical_device_options_initialize(
       IREE_HAL_AMDGPU_PHYSICAL_DEVICE_DEFAULT_HOST_QUEUE_NOTIFICATION_CAPACITY;
   out_options->host_queue_kernarg_capacity =
       IREE_HAL_AMDGPU_PHYSICAL_DEVICE_DEFAULT_HOST_QUEUE_KERNARG_CAPACITY;
+  out_options->host_queue_upload_capacity =
+      IREE_HAL_AMDGPU_PHYSICAL_DEVICE_DEFAULT_HOST_QUEUE_UPLOAD_CAPACITY;
 
   out_options->default_pool.range_length =
       IREE_HAL_AMDGPU_PHYSICAL_DEVICE_DEFAULT_POOL_RANGE_LENGTH_DEFAULT;
@@ -396,14 +323,18 @@ iree_status_t iree_hal_amdgpu_physical_device_options_verify(
   if (!iree_host_size_is_power_of_two(options->host_queue_aql_capacity) ||
       !iree_host_size_is_power_of_two(
           options->host_queue_notification_capacity) ||
-      !iree_host_size_is_power_of_two(options->host_queue_kernarg_capacity)) {
+      !iree_host_size_is_power_of_two(options->host_queue_kernarg_capacity) ||
+      (options->host_queue_upload_capacity != 0 &&
+       !iree_host_size_is_power_of_two(options->host_queue_upload_capacity))) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
-        "host queue AQL, notification, and kernarg capacities must all be "
-        "powers of two (got aql=%u, notification=%u, kernarg_blocks=%u)",
+        "host queue AQL, notification, kernarg, and upload capacities must all "
+        "be powers of two, with zero allowed for disabled upload capacity (got "
+        "aql=%u, notification=%u, kernarg_blocks=%u, upload_bytes=%u)",
         options->host_queue_aql_capacity,
         options->host_queue_notification_capacity,
-        options->host_queue_kernarg_capacity);
+        options->host_queue_kernarg_capacity,
+        options->host_queue_upload_capacity);
   }
   if (options->host_queue_kernarg_capacity / 2u <
       options->host_queue_aql_capacity) {
@@ -483,11 +414,13 @@ static iree_status_t iree_hal_amdgpu_physical_device_initialize_identity(
       options->host_queue_notification_capacity;
   out_physical_device->host_queue_kernarg_capacity =
       options->host_queue_kernarg_capacity;
+  out_physical_device->host_queue_upload_capacity =
+      options->host_queue_upload_capacity;
 
   IREE_RETURN_IF_ERROR(
       iree_hsa_agent_get_info(IREE_LIBHSA(libhsa), device_agent,
                               (hsa_agent_info_t)HSA_AMD_AGENT_INFO_DRIVER_UID,
-                              &out_physical_device->kfd_gpu_uid));
+                              &out_physical_device->driver_uid));
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_query_agent_pci_identity(
       libhsa, device_agent, out_physical_device));
   bool has_physical_device_uuid = false;
@@ -524,10 +457,192 @@ static iree_status_t iree_hal_amdgpu_physical_device_query_global_memory_pools(
     iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t device_agent,
     hsa_amd_memory_pool_t* out_coarse_block_memory_pool,
     hsa_amd_memory_pool_t* out_fine_block_memory_pool) {
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_find_coarse_global_memory_pool(
-      libhsa, device_agent, out_coarse_block_memory_pool));
-  return iree_hal_amdgpu_find_fine_global_memory_pool(
-      libhsa, device_agent, out_fine_block_memory_pool);
+  iree_status_t status = iree_hal_amdgpu_find_coarse_global_memory_pool(
+      libhsa, device_agent, out_coarse_block_memory_pool);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amdgpu_find_fine_global_memory_pool(
+        libhsa, device_agent, out_fine_block_memory_pool);
+  }
+  if (!iree_status_is_ok(status)) {
+    status = iree_status_annotate(
+        status, IREE_SV("AMDGPU physical device requires coarse and fine "
+                        "device-local global memory pools"));
+  }
+  return status;
+}
+
+typedef struct iree_hal_amdgpu_physical_device_kernarg_ring_memory_t {
+  // Descriptor consumed by host queue initialization.
+  iree_hal_amdgpu_kernarg_ring_memory_t descriptor;
+  // Host fallback access-agent list referenced by |descriptor|.
+  hsa_agent_t host_access_agents[1];
+} iree_hal_amdgpu_physical_device_kernarg_ring_memory_t;
+
+static iree_status_t iree_hal_amdgpu_physical_device_query_memory_pool_access(
+    const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t agent,
+    hsa_amd_memory_pool_t memory_pool,
+    hsa_amd_memory_pool_access_t* out_access) {
+  *out_access = HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED;
+  return iree_hsa_amd_agent_memory_pool_get_info(
+      IREE_LIBHSA(libhsa), agent, memory_pool,
+      HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS, out_access);
+}
+
+static void iree_hal_amdgpu_physical_device_use_host_kernarg_memory(
+    const iree_hal_amdgpu_host_memory_pools_t* host_memory_pools,
+    hsa_agent_t device_agent,
+    iree_hal_amdgpu_physical_device_kernarg_ring_memory_t* out_memory) {
+  memset(out_memory, 0, sizeof(*out_memory));
+  out_memory->host_access_agents[0] = device_agent;
+  out_memory->descriptor = (iree_hal_amdgpu_kernarg_ring_memory_t){
+      .memory_pool = host_memory_pools->kernarg_pool,
+      .access_agents = out_memory->host_access_agents,
+      .access_agent_count = 1,
+  };
+}
+
+static void iree_hal_amdgpu_physical_device_use_cpu_visible_kernarg_memory(
+    const iree_hal_amdgpu_cpu_visible_device_coarse_memory_t* capability,
+    iree_hal_amdgpu_physical_device_kernarg_ring_memory_t* out_memory) {
+  memset(out_memory, 0, sizeof(*out_memory));
+  out_memory->descriptor = (iree_hal_amdgpu_kernarg_ring_memory_t){
+      .memory_pool = capability->memory_pool,
+      .access_agents = capability->access_agents,
+      .access_agent_count = capability->access_agent_count,
+      .publication = capability->host_write_publication,
+  };
+}
+
+static hsa_amd_hdp_flush_t
+iree_hal_amdgpu_physical_device_query_hdp_flush_registers(
+    const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t device_agent) {
+  hsa_amd_hdp_flush_t hdp_flush = {0};
+  const hsa_status_t hsa_status = iree_hsa_agent_get_info_raw(
+      libhsa, device_agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_HDP_FLUSH,
+      &hdp_flush);
+  if (hsa_status != HSA_STATUS_SUCCESS) {
+    memset(&hdp_flush, 0, sizeof(hdp_flush));
+  }
+  return hdp_flush;
+}
+
+static iree_status_t
+iree_hal_amdgpu_physical_device_query_svm_direct_host_access(
+    const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t device_agent,
+    bool* out_direct_host_access) {
+  *out_direct_host_access = false;
+  return iree_hsa_agent_get_info(
+      IREE_LIBHSA(libhsa), device_agent,
+      (hsa_agent_info_t)HSA_AMD_AGENT_INFO_SVM_DIRECT_HOST_ACCESS,
+      out_direct_host_access);
+}
+
+static iree_status_t
+iree_hal_amdgpu_physical_device_initialize_cpu_visible_device_coarse_memory(
+    const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t device_agent,
+    hsa_amd_memory_pool_t device_coarse_memory_pool,
+    iree_hal_amdgpu_gfxip_version_t gfxip_version,
+    const iree_hal_amdgpu_topology_t* topology,
+    iree_hal_amdgpu_cpu_visible_device_coarse_memory_t* out_memory) {
+  memset(out_memory, 0, sizeof(*out_memory));
+  if (!device_coarse_memory_pool.handle || topology->cpu_agent_count == 0) {
+    return iree_ok_status();
+  }
+  if (IREE_UNLIKELY(topology->cpu_agent_count >
+                    IREE_HAL_AMDGPU_MAX_CPU_AGENT)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "AMDGPU topology has %" PRIhsz
+        " CPU agents but CPU-visible coarse memory tracks at most %d",
+        topology->cpu_agent_count, IREE_HAL_AMDGPU_MAX_CPU_AGENT);
+  }
+  if (!iree_hal_amdgpu_kernarg_ring_supports_host_write_publication()) {
+    return iree_ok_status();
+  }
+  if (!iree_hal_amdgpu_gfxip_allows_hdp_kernarg_publication(gfxip_version)) {
+    return iree_ok_status();
+  }
+
+  const hsa_amd_hdp_flush_t hdp_flush =
+      iree_hal_amdgpu_physical_device_query_hdp_flush_registers(libhsa,
+                                                                device_agent);
+  if (!hdp_flush.HDP_MEM_FLUSH_CNTL || !hdp_flush.HDP_REG_FLUSH_CNTL) {
+    return iree_ok_status();
+  }
+
+  hsa_amd_memory_pool_access_t cpu_access[IREE_HAL_AMDGPU_MAX_CPU_AGENT] = {0};
+  for (iree_host_size_t i = 0; i < topology->cpu_agent_count; ++i) {
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amdgpu_physical_device_query_memory_pool_access(
+            libhsa, topology->cpu_agents[i], device_coarse_memory_pool,
+            &cpu_access[i]));
+  }
+
+  const iree_hal_amdgpu_cpu_visible_device_coarse_memory_selection_t selection = {
+      .device_agent = device_agent,
+      .memory_pool = device_coarse_memory_pool,
+      .gfxip_version = gfxip_version,
+      .cpu =
+          {
+              .agents = topology->cpu_agents,
+              .access = cpu_access,
+              .count = topology->cpu_agent_count,
+          },
+      .hdp =
+          {
+              .registers = hdp_flush,
+          },
+      .flags =
+          IREE_HAL_AMDGPU_CPU_VISIBLE_DEVICE_COARSE_MEMORY_SELECTION_FLAG_HOST_WRITE_PUBLICATION_SUPPORTED,
+  };
+  return iree_hal_amdgpu_select_cpu_visible_device_coarse_memory(&selection,
+                                                                 out_memory);
+}
+
+static iree_status_t
+iree_hal_amdgpu_physical_device_initialize_memory_system_capabilities(
+    const iree_hal_amdgpu_libhsa_t* libhsa,
+    const iree_hal_amdgpu_system_info_t* system_info, hsa_agent_t device_agent,
+    hsa_amd_memory_pool_t fine_block_memory_pool,
+    const iree_hal_amdgpu_cpu_visible_device_coarse_memory_t*
+        cpu_visible_device_coarse_memory,
+    iree_hal_amdgpu_memory_system_capabilities_t* out_capabilities) {
+  bool svm_direct_host_access = false;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_physical_device_query_svm_direct_host_access(
+          libhsa, device_agent, &svm_direct_host_access));
+
+  const iree_hal_amdgpu_memory_system_capabilities_selection_t selection = {
+      .svm =
+          {
+              .supported = system_info->svm.supported,
+              .accessible_by_default = system_info->svm.accessible_by_default,
+              .xnack_enabled = system_info->svm.xnack_enabled,
+              .direct_host_access = svm_direct_host_access ? 1u : 0u,
+          },
+      .device_local =
+          {
+              .fine_memory_pool = fine_block_memory_pool,
+              .coarse_cpu_visible_memory = cpu_visible_device_coarse_memory,
+          },
+  };
+  iree_hal_amdgpu_select_memory_system_capabilities(&selection,
+                                                    out_capabilities);
+  return iree_ok_status();
+}
+
+static void iree_hal_amdgpu_physical_device_select_kernarg_ring_memory(
+    const iree_hal_amdgpu_physical_device_t* physical_device,
+    const iree_hal_amdgpu_host_memory_pools_t* host_memory_pools,
+    iree_hal_amdgpu_physical_device_kernarg_ring_memory_t* out_memory) {
+  iree_hal_amdgpu_physical_device_use_host_kernarg_memory(
+      host_memory_pools, physical_device->device_agent, out_memory);
+  if (!iree_hal_amdgpu_cpu_visible_device_coarse_memory_is_available(
+          &physical_device->cpu_visible_device_coarse_memory)) {
+    return;
+  }
+  iree_hal_amdgpu_physical_device_use_cpu_visible_kernarg_memory(
+      &physical_device->cpu_visible_device_coarse_memory, out_memory);
 }
 
 static iree_status_t iree_hal_amdgpu_physical_device_initialize_block_pool(
@@ -616,16 +731,21 @@ iree_hal_amdgpu_physical_device_initialize_default_pool_resources(
   char trace_name[64] = {0};
   iree_string_view_t slab_trace_name = iree_hal_amdgpu_format_pool_trace_name(
       trace_name, IREE_ARRAYSIZE(trace_name), "default-slab", device_ordinal);
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_slab_provider_create(
-      logical_device, libhsa, &system->topology, coarse_block_memory_pool,
-      device_ordinal, queue_affinity_mask,
-      &out_physical_device->materialized_buffer_pool, slab_trace_name,
-      host_allocator, &out_physical_device->default_slab_provider));
-
   iree_hal_amdgpu_slab_provider_memory_pool_properties_t properties;
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_slab_provider_query_memory_pool_properties(
           libhsa, coarse_block_memory_pool, &properties));
+  const iree_hal_amdgpu_slab_provider_options_t default_slab_options = {
+      .memory_pool = coarse_block_memory_pool,
+      .memory_type = properties.memory_type,
+      .supported_usage = properties.supported_usage,
+  };
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_slab_provider_create(
+      logical_device, libhsa, &system->topology, default_slab_options,
+      device_ordinal, queue_affinity_mask,
+      &out_physical_device->materialized_buffer_pool, slab_trace_name,
+      host_allocator, &out_physical_device->default_slab_provider));
+
   if (properties.allocation_alignment < options->default_pool.alignment) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
@@ -653,6 +773,37 @@ iree_hal_amdgpu_physical_device_initialize_default_pool_resources(
           },
       .budget_limit = 0,
   };
+
+  iree_hal_amdgpu_slab_provider_memory_pool_properties_t host_properties;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_slab_provider_query_memory_pool_properties(
+          libhsa, out_physical_device->host_memory_pools.fine_pool,
+          &host_properties));
+  if (host_properties.allocation_alignment < options->default_pool.alignment) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "host queue allocation pool alignment %" PRIu64
+        " exceeds HSA host memory pool allocation alignment %" PRIu64,
+        (uint64_t)options->default_pool.alignment,
+        (uint64_t)host_properties.allocation_alignment);
+  }
+  char host_trace_name[64] = {0};
+  iree_string_view_t host_slab_trace_name =
+      iree_hal_amdgpu_format_pool_trace_name(host_trace_name,
+                                             IREE_ARRAYSIZE(host_trace_name),
+                                             "host-slab", device_ordinal);
+  const iree_hal_amdgpu_slab_provider_options_t host_slab_options = {
+      .memory_pool = out_physical_device->host_memory_pools.fine_pool,
+      .memory_type =
+          IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+      .supported_usage =
+          iree_hal_amdgpu_physical_device_mappable_pool_supported_usage(),
+  };
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_slab_provider_create(
+      logical_device, libhsa, &system->topology, host_slab_options,
+      device_ordinal, queue_affinity_mask,
+      &out_physical_device->materialized_buffer_pool, host_slab_trace_name,
+      host_allocator, &out_physical_device->default_host_slab_provider));
   return iree_ok_status();
 }
 
@@ -714,6 +865,7 @@ iree_hal_amdgpu_physical_device_initialize_device_library_and_blit_context(
         "%" PRIhsz " (expected 32 or 64)",
         wavefront_size, device_ordinal);
   }
+  out_physical_device->wavefront_size = wavefront_size;
   iree_hal_amdgpu_device_buffer_transfer_context_initialize(
       &out_physical_device->device_kernels, compute_unit_count, wavefront_size,
       &out_physical_device->buffer_transfer_context);
@@ -726,9 +878,12 @@ iree_hal_amdgpu_physical_device_initialize_vendor_packet_strategy(
     const iree_hal_amdgpu_physical_device_options_t* options,
     hsa_agent_t device_agent,
     iree_hal_amdgpu_physical_device_t* out_physical_device) {
-  iree_hal_amdgpu_gfxip_version_t gfxip_version = {0};
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_query_agent_gfxip_version(
-      libhsa, device_agent, &gfxip_version));
+  iree_hal_amdgpu_target_id_t target_id;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_query_agent_target_id(
+      libhsa, device_agent,
+      sizeof(out_physical_device->isa.target_id_processor),
+      out_physical_device->isa.target_id_processor, &target_id));
+  iree_hal_amdgpu_gfxip_version_t gfxip_version = target_id.version;
 
   iree_hal_amdgpu_vendor_packet_capability_flags_t vendor_packet_capabilities =
       iree_hal_amdgpu_select_vendor_packet_capabilities(gfxip_version);
@@ -738,7 +893,7 @@ iree_hal_amdgpu_physical_device_initialize_vendor_packet_strategy(
     wait_barrier_strategy = iree_hal_amdgpu_select_wait_barrier_strategy(
         vendor_packet_capabilities);
   }
-  out_physical_device->gfxip_version = gfxip_version;
+  out_physical_device->isa.target_id = target_id;
   out_physical_device->vendor_packet_capabilities = vendor_packet_capabilities;
   out_physical_device->wait_barrier_strategy = wait_barrier_strategy;
   return iree_ok_status();
@@ -777,6 +932,11 @@ iree_status_t iree_hal_amdgpu_physical_device_initialize(
     status = iree_hal_amdgpu_physical_device_query_global_memory_pools(
         libhsa, device_agent, &coarse_block_memory_pool,
         &fine_block_memory_pool);
+  }
+  if (iree_status_is_ok(status)) {
+    out_physical_device->prepublished_kernarg_storage =
+        iree_hal_amdgpu_select_prepublished_kernarg_storage(
+            fine_block_memory_pool);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_amdgpu_physical_device_preallocate_host_pool(
@@ -828,6 +988,20 @@ iree_status_t iree_hal_amdgpu_physical_device_initialize(
     status = iree_hal_amdgpu_physical_device_initialize_vendor_packet_strategy(
         libhsa, options, device_agent, out_physical_device);
   }
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_hal_amdgpu_physical_device_initialize_cpu_visible_device_coarse_memory(
+            libhsa, device_agent, coarse_block_memory_pool,
+            out_physical_device->isa.target_id.version, &system->topology,
+            &out_physical_device->cpu_visible_device_coarse_memory);
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_hal_amdgpu_physical_device_initialize_memory_system_capabilities(
+            libhsa, &system->info, device_agent, fine_block_memory_pool,
+            &out_physical_device->cpu_visible_device_coarse_memory,
+            &out_physical_device->memory_system);
+  }
 
   if (!iree_status_is_ok(status)) {
     iree_hal_amdgpu_physical_device_deinitialize(out_physical_device);
@@ -837,40 +1011,66 @@ iree_status_t iree_hal_amdgpu_physical_device_initialize(
   return status;
 }
 
+static iree_status_t iree_hal_amdgpu_physical_device_create_pool_pair(
+    iree_hal_amdgpu_physical_device_t* physical_device,
+    iree_hal_amdgpu_epoch_signal_table_t* epoch_signal_table,
+    iree_hal_slab_provider_t* slab_provider,
+    iree_hal_tlsf_pool_options_t pool_options, const char* pool_name,
+    const char* oversized_pool_name, iree_allocator_t host_allocator,
+    iree_hal_pool_t** out_pool, iree_hal_pool_t** out_oversized_pool) {
+  char pool_trace_name[64] = {0};
+  pool_options.trace_name = iree_hal_amdgpu_format_pool_trace_name(
+      pool_trace_name, IREE_ARRAYSIZE(pool_trace_name), pool_name,
+      physical_device->device_ordinal);
+  iree_status_t status = iree_hal_tlsf_pool_create(
+      pool_options, slab_provider, physical_device->default_pool_notification,
+      (iree_hal_pool_epoch_query_t){
+          .fn = iree_hal_amdgpu_physical_device_query_pool_epoch,
+          .user_data = epoch_signal_table,
+      },
+      host_allocator, out_pool);
+
+  char oversized_pool_trace_name[64] = {0};
+  if (iree_status_is_ok(status)) {
+    iree_hal_passthrough_pool_options_t oversized_pool_options = {
+        .trace_name = iree_hal_amdgpu_format_pool_trace_name(
+            oversized_pool_trace_name,
+            IREE_ARRAYSIZE(oversized_pool_trace_name), oversized_pool_name,
+            physical_device->device_ordinal),
+    };
+    status = iree_hal_passthrough_pool_create(
+        oversized_pool_options, slab_provider,
+        physical_device->default_pool_notification, host_allocator,
+        out_oversized_pool);
+  }
+  return status;
+}
+
 static iree_status_t iree_hal_amdgpu_physical_device_create_default_pools(
     iree_hal_amdgpu_physical_device_t* physical_device,
     iree_hal_amdgpu_epoch_signal_table_t* epoch_signal_table,
     iree_allocator_t host_allocator) {
   IREE_RETURN_IF_ERROR(iree_hal_pool_set_initialize(
-      /*initial_capacity=*/2, host_allocator,
+      /*initial_capacity=*/4, host_allocator,
       &physical_device->default_pool_set));
 
-  char tlsf_trace_name[64] = {0};
-  iree_hal_tlsf_pool_options_t default_pool_options =
+  iree_status_t status = iree_hal_amdgpu_physical_device_create_pool_pair(
+      physical_device, epoch_signal_table,
+      physical_device->default_slab_provider,
+      physical_device->default_pool_options, "tlsf", "oversized",
+      host_allocator, &physical_device->default_pool,
+      &physical_device->default_oversized_pool);
+  iree_hal_tlsf_pool_options_t host_pool_options =
       physical_device->default_pool_options;
-  default_pool_options.trace_name = iree_hal_amdgpu_format_pool_trace_name(
-      tlsf_trace_name, IREE_ARRAYSIZE(tlsf_trace_name), "tlsf",
-      physical_device->device_ordinal);
-  iree_status_t status = iree_hal_tlsf_pool_create(
-      default_pool_options, physical_device->default_slab_provider,
-      physical_device->default_pool_notification,
-      (iree_hal_pool_epoch_query_t){
-          .fn = iree_hal_amdgpu_physical_device_query_pool_epoch,
-          .user_data = epoch_signal_table,
-      },
-      host_allocator, &physical_device->default_pool);
-
-  char oversized_trace_name[64] = {0};
+  host_pool_options.tlsf_options.range_length =
+      IREE_HAL_AMDGPU_PHYSICAL_DEVICE_HOST_POOL_RANGE_LENGTH_DEFAULT;
   if (iree_status_is_ok(status)) {
-    iree_hal_passthrough_pool_options_t oversized_pool_options = {
-        .trace_name = iree_hal_amdgpu_format_pool_trace_name(
-            oversized_trace_name, IREE_ARRAYSIZE(oversized_trace_name),
-            "oversized", physical_device->device_ordinal),
-    };
-    status = iree_hal_passthrough_pool_create(
-        oversized_pool_options, physical_device->default_slab_provider,
-        physical_device->default_pool_notification, host_allocator,
-        &physical_device->default_oversized_pool);
+    status = iree_hal_amdgpu_physical_device_create_pool_pair(
+        physical_device, epoch_signal_table,
+        physical_device->default_host_slab_provider, host_pool_options,
+        "host-tlsf", "host-oversized", host_allocator,
+        &physical_device->default_host_pool,
+        &physical_device->default_host_oversized_pool);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_pool_set_register(
@@ -881,8 +1081,20 @@ static iree_status_t iree_hal_amdgpu_physical_device_create_default_pools(
   if (iree_status_is_ok(status)) {
     status = iree_hal_pool_set_register(
         &physical_device->default_pool_set,
+        IREE_HAL_AMDGPU_PHYSICAL_DEVICE_DEFAULT_POOL_PRIORITY_OVERSIZED,
+        physical_device->default_host_oversized_pool);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_pool_set_register(
+        &physical_device->default_pool_set,
         IREE_HAL_AMDGPU_PHYSICAL_DEVICE_DEFAULT_POOL_PRIORITY_TLSF,
         physical_device->default_pool);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_pool_set_register(
+        &physical_device->default_pool_set,
+        IREE_HAL_AMDGPU_PHYSICAL_DEVICE_DEFAULT_POOL_PRIORITY_TLSF,
+        physical_device->default_host_pool);
   }
   return status;
 }
@@ -908,6 +1120,9 @@ iree_status_t iree_hal_amdgpu_physical_device_assign_frontier(
       .physical_device_count = system->topology.gpu_agent_count,
       .queue_count_per_physical_device = physical_device->host_queue_capacity,
   };
+  iree_hal_amdgpu_physical_device_kernarg_ring_memory_t kernarg_ring_memory;
+  iree_hal_amdgpu_physical_device_select_kernarg_ring_memory(
+      physical_device, host_memory_pools, &kernarg_ring_memory);
   for (iree_host_size_t queue_ordinal = 0;
        queue_ordinal < physical_device->host_queue_capacity &&
        iree_status_is_ok(status);
@@ -927,7 +1142,7 @@ iree_status_t iree_hal_amdgpu_physical_device_assign_frontier(
                                        &completion_thread_affinity);
     status = iree_hal_amdgpu_host_queue_initialize(
         libhsa, logical_device, proactor, physical_device->device_agent,
-        host_memory_pools->kernarg_pool, host_memory_pools->fine_pool,
+        &kernarg_ring_memory.descriptor, host_memory_pools->fine_pool,
         frontier_tracker, queue_axis, resolved.queue_affinity,
         completion_thread_affinity, physical_device->wait_barrier_strategy,
         physical_device->vendor_packet_capabilities, epoch_signal_table,
@@ -939,7 +1154,8 @@ iree_status_t iree_hal_amdgpu_physical_device_assign_frontier(
         &physical_device->file_staging_pool, physical_device->device_ordinal,
         physical_device->host_queue_aql_capacity,
         physical_device->host_queue_notification_capacity,
-        physical_device->host_queue_kernarg_capacity, host_allocator,
+        physical_device->host_queue_kernarg_capacity,
+        physical_device->host_queue_upload_capacity, host_allocator,
         &physical_device->host_queues[queue_ordinal]);
     if (iree_status_is_ok(status)) {
       physical_device->host_queue_count = queue_ordinal + 1;
@@ -964,6 +1180,10 @@ void iree_hal_amdgpu_physical_device_deassign_frontier(
   if (physical_device->default_pool_set.entries) {
     iree_hal_pool_set_deinitialize(&physical_device->default_pool_set);
   }
+  iree_hal_pool_release(physical_device->default_host_oversized_pool);
+  physical_device->default_host_oversized_pool = NULL;
+  iree_hal_pool_release(physical_device->default_host_pool);
+  physical_device->default_host_pool = NULL;
   iree_hal_pool_release(physical_device->default_oversized_pool);
   physical_device->default_oversized_pool = NULL;
   iree_hal_pool_release(physical_device->default_pool);
@@ -1019,6 +1239,7 @@ void iree_hal_amdgpu_physical_device_deinitialize(
       &physical_device->host_signal_pool);
 
   iree_hal_slab_provider_release(physical_device->default_slab_provider);
+  iree_hal_slab_provider_release(physical_device->default_host_slab_provider);
   iree_async_notification_release(physical_device->default_pool_notification);
 
   iree_hal_amdgpu_staging_pool_deinitialize(
@@ -1076,6 +1297,13 @@ iree_status_t iree_hal_amdgpu_physical_device_trim(
   }
   if (iree_status_is_ok(status) && physical_device->default_oversized_pool) {
     status = iree_hal_pool_trim(physical_device->default_oversized_pool);
+  }
+  if (iree_status_is_ok(status) && physical_device->default_host_pool) {
+    status = iree_hal_pool_trim(physical_device->default_host_pool);
+  }
+  if (iree_status_is_ok(status) &&
+      physical_device->default_host_oversized_pool) {
+    status = iree_hal_pool_trim(physical_device->default_host_oversized_pool);
   }
 
   IREE_TRACE_ZONE_END(z0);

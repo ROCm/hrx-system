@@ -24,6 +24,7 @@
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
 #include "iree/hal/drivers/amdgpu/util/notification_ring.h"
 #include "iree/hal/drivers/amdgpu/util/pm4_capabilities.h"
+#include "iree/hal/drivers/amdgpu/util/queue_upload_ring.h"
 #include "iree/hal/drivers/amdgpu/virtual_queue.h"
 #include "iree/hal/pool.h"
 #include "iree/hal/profile_schema.h"
@@ -35,8 +36,12 @@ extern "C" {
 
 typedef struct iree_hal_amdgpu_pending_op_t iree_hal_amdgpu_pending_op_t;
 typedef struct iree_hal_amdgpu_pm4_ib_slot_t iree_hal_amdgpu_pm4_ib_slot_t;
+typedef struct iree_hal_amdgpu_host_queue_command_buffer_scratch_t
+    iree_hal_amdgpu_host_queue_command_buffer_scratch_t;
 typedef struct iree_hal_amdgpu_profile_counter_sample_slot_t
     iree_hal_amdgpu_profile_counter_sample_slot_t;
+typedef struct iree_hal_amdgpu_profile_counter_range_slot_t
+    iree_hal_amdgpu_profile_counter_range_slot_t;
 typedef struct iree_hal_amdgpu_profile_counter_session_t
     iree_hal_amdgpu_profile_counter_session_t;
 typedef struct iree_hal_amdgpu_profile_trace_session_t
@@ -125,16 +130,6 @@ IREE_ASYNC_FIXED_FRONTIER_TYPE(iree_hal_amdgpu_host_queue_frontier_t,
 #define IREE_HAL_AMDGPU_HOST_QUEUE_DISPATCH_SCRATCH_RESOURCE_CAPACITY \
   (2u + IREE_HAL_AMDGPU_HOST_QUEUE_DISPATCH_SCRATCH_BINDING_CAPACITY)
 
-// Queue_execute binding table prefix cached inline as raw device pointers under
-// submission_mutex while replaying an AQL command buffer. Larger tables use a
-// temporary arena block for the current submission.
-#define IREE_HAL_AMDGPU_HOST_QUEUE_COMMAND_BUFFER_BINDING_SCRATCH_CAPACITY 4096u
-
-// Queue_execute packet metadata cached inline under submission_mutex while
-// replaying an AQL command buffer. Larger packet-bearing blocks use a temporary
-// arena block for the current submission.
-#define IREE_HAL_AMDGPU_HOST_QUEUE_COMMAND_BUFFER_PACKET_SCRATCH_CAPACITY 512u
-
 // Host-driven queue with per-queue epoch signal and wait-backed
 // notification ring. Embeds iree_hal_amdgpu_virtual_queue_t at offset 0.
 //
@@ -180,6 +175,11 @@ typedef struct iree_hal_amdgpu_host_queue_t {
   // Per-queue kernarg bump allocator backed by HSA kernarg-init memory.
   iree_hal_amdgpu_kernarg_ring_t kernarg_ring;
 
+  // Per-queue upload ring for device-visible control records.
+  // Submission paths reserve from this only when they have queue-ordered
+  // metadata such as device-side fixup inputs.
+  iree_hal_amdgpu_queue_upload_ring_t queue_upload_ring;
+
   // Optional per-AQL-slot PM4 IB buffer used by PM4-backed wait, transfer, and
   // profiling snippets. This is not an independent scheduling ring: each slot
   // is indexed by the matching AQL packet id and inherits the AQL ring's
@@ -190,14 +190,17 @@ typedef struct iree_hal_amdgpu_host_queue_t {
   // semaphore signals. The completion thread drains this ring.
   iree_hal_amdgpu_notification_ring_t notification_ring;
 
-  // Host thread blocked on the queue epoch signal and draining completed
-  // notification-ring entries.
-  iree_thread_t* completion_thread;
-
-  // HSA signal used to wake the completion thread during teardown or after an
-  // unrecoverable HSA queue error. Value 0 means the thread should continue
-  // waiting for completions; any other value requests exit after a final drain.
-  hsa_signal_t completion_thread_stop_signal;
+  // Completion-thread state for queue epoch drain and teardown/error wakeups.
+  struct {
+    // Host thread blocked on the queue epoch signal and draining completed
+    // notification-ring entries.
+    iree_thread_t* thread;
+    // HSA signal used to wake the completion thread during teardown or after
+    // an unrecoverable HSA queue error. Value 0 means the thread should
+    // continue waiting for completions; any other value requests exit after a
+    // final drain.
+    hsa_signal_t stop_signal;
+  } completion;
 
   //--- Submission pipeline state -------------------------------------------//
   //
@@ -217,7 +220,7 @@ typedef struct iree_hal_amdgpu_host_queue_t {
   //
   //   HSA error callback (HSA runtime thread):
   //     Writes error_status via atomic CAS. Signals
-  //     completion_thread_stop_signal so the completion thread wakes and fails
+  //     completion.stop_signal so the completion thread wakes and fails
   //     outstanding notifications.
   //
   // Wait-resolution fast-path contract:
@@ -249,47 +252,40 @@ typedef struct iree_hal_amdgpu_host_queue_t {
   //     sufficient because all transitive waits are encoded before the
   //     producer queue epoch can complete.
 
-  // Serializes the submission path. All queue operations (dispatch, copy,
-  // fill, execute, etc.) acquire this before touching submission state and
-  // release after signal commit. The proactor thread does not acquire this.
-  iree_slim_mutex_t submission_mutex;
+  // Queue-local locks. Keep the 4-byte slim mutexes packed before pointer-sized
+  // continuation state.
+  struct {
+    // Serializes the submission path. All queue operations (dispatch, copy,
+    // fill, execute, etc.) acquire this before touching submission state and
+    // release after signal commit. The proactor thread does not acquire this.
+    iree_slim_mutex_t submission_mutex;
+    // Serializes the post-drain continuation list.
+    iree_slim_mutex_t post_drain_mutex;
+  } locks;
 
-  // Serializes the post-drain continuation list.
-  iree_slim_mutex_t post_drain_mutex;
+  // Post-drain continuation queue for work that cannot run while notification
+  // drain is still publishing or reclaiming ring state.
+  struct {
+    // First queued post-drain continuation.
+    iree_hal_amdgpu_host_queue_post_drain_action_t* head;
+    // Tail pointer for appending post-drain continuations.
+    iree_hal_amdgpu_host_queue_post_drain_action_t* tail;
+  } post_drain;
 
-  // First queued post-drain continuation. Protected by post_drain_mutex.
-  iree_hal_amdgpu_host_queue_post_drain_action_t* post_drain_head;
+  // Queue-local scratch used by queue_dispatch under submission_mutex.
+  struct {
+    // Operation resources copied into the notification reclaim entry.
+    iree_hal_resource_t* operation_resources
+        [IREE_HAL_AMDGPU_HOST_QUEUE_DISPATCH_SCRATCH_RESOURCE_CAPACITY];
+    // Resolved device pointers written into final dispatch kernargs.
+    uint64_t binding_ptrs
+        [IREE_HAL_AMDGPU_HOST_QUEUE_DISPATCH_SCRATCH_BINDING_CAPACITY];
+  } dispatch_scratch;
 
-  // Tail pointer for appending post-drain continuations. Protected by
-  // post_drain_mutex.
-  iree_hal_amdgpu_host_queue_post_drain_action_t* post_drain_tail;
-
-  // Queue-local resource channel used by queue_dispatch under
-  // submission_mutex before finish_dispatch_submission copies entries into the
-  // notification reclaim entry.
-  iree_hal_resource_t* dispatch_operation_resource_scratch
-      [IREE_HAL_AMDGPU_HOST_QUEUE_DISPATCH_SCRATCH_RESOURCE_CAPACITY];
-
-  // Queue-local resolved device-pointer channel used by queue_dispatch under
-  // submission_mutex before final kernargs are written to the kernarg ring.
-  uint64_t dispatch_binding_ptr_scratch
-      [IREE_HAL_AMDGPU_HOST_QUEUE_DISPATCH_SCRATCH_BINDING_CAPACITY];
-
-  // Queue-local resolved device-pointer table used by common command-buffer
-  // replays under submission_mutex. Entries map queue_execute binding slots to
-  // raw device pointers before per-dispatch recorded offsets are added.
-  uint64_t command_buffer_binding_ptr_scratch
-      [IREE_HAL_AMDGPU_HOST_QUEUE_COMMAND_BUFFER_BINDING_SCRATCH_CAPACITY];
-
-  // Queue-local packet header channel used by common command-buffer replays
-  // under submission_mutex before packet headers are committed to the AQL ring.
-  uint16_t command_buffer_packet_header_scratch
-      [IREE_HAL_AMDGPU_HOST_QUEUE_COMMAND_BUFFER_PACKET_SCRATCH_CAPACITY];
-
-  // Queue-local packet setup channel used by common command-buffer replays
-  // under submission_mutex before packet headers are committed to the AQL ring.
-  uint16_t command_buffer_packet_setup_scratch
-      [IREE_HAL_AMDGPU_HOST_QUEUE_COMMAND_BUFFER_PACKET_SCRATCH_CAPACITY];
+  // Lazily allocated queue_execute scratch storage. Kept out of the host queue
+  // object so direct-dispatch hot state does not carry command-buffer sideband
+  // arrays.
+  iree_hal_amdgpu_host_queue_command_buffer_scratch_t* command_buffer_scratch;
 
   // Set under submission_mutex when queue teardown begins. Deferred ops whose
   // waits race to completion after this point are failed with CANCELLED instead
@@ -306,63 +302,97 @@ typedef struct iree_hal_amdgpu_host_queue_t {
     uint32_t queue_events_enabled : 1;
     // True when device-timestamped queue operation events should be recorded.
     uint32_t queue_device_events_enabled : 1;
-    // Serializes dispatch event batch mutation and flush.
+    // True when selected dispatches may receive profile packet augmentation.
+    uint32_t dispatch_profiling_enabled : 1;
+    // Serializes profile event ring mutation and flush.
     iree_slim_mutex_t event_mutex;
-    // Borrowed fine-grained GPU-agent block pool backing raw signal storage.
-    iree_hal_amdgpu_block_pool_t* signal_block_pool;
-    // Host-side table of queue-owned GPU-agent raw signal blocks indexed by
-    // dispatch event ring slot.
-    iree_hal_amdgpu_block_t** signal_blocks;
-    // Number of entries in |signal_blocks|.
-    uint32_t signal_block_count;
-    // Number of iree_amd_signal_t records in each signal block.
-    uint32_t signals_per_block;
-    // Allocation backing the queue-local dispatch event ring.
-    void* event_storage;
-    // Byte length of |event_storage|.
-    iree_host_size_t event_storage_size;
-    // Device-visible dispatch event records waiting for a sink flush.
-    iree_hal_amdgpu_profile_dispatch_event_t* dispatch_events;
-    // Power-of-two capacity of |dispatch_events| in records.
-    uint32_t dispatch_event_capacity;
-    // Capacity minus one, for mapping logical positions to physical slots.
-    uint32_t dispatch_event_mask;
-    // Logical ring position of the next event to write to the sink.
-    uint64_t dispatch_event_read_position;
-    // Logical ring position one past the last event ready to write.
-    uint64_t dispatch_event_ready_position;
-    // Logical ring position one past the last reserved event.
-    uint64_t dispatch_event_write_position;
-    // Next queue-local dispatch event id assigned during submission.
-    uint64_t next_dispatch_event_id;
-    // Device-visible queue operation records waiting for a sink flush.
-    iree_hal_amdgpu_profile_queue_device_event_t* queue_device_events;
-    // Power-of-two capacity of |queue_device_events| in records.
-    uint32_t queue_device_event_capacity;
-    // Capacity minus one, for mapping logical positions to physical slots.
-    uint32_t queue_device_event_mask;
-    // Logical ring position of the next queue device event to write to sink.
-    uint64_t queue_device_event_read_position;
-    // Logical ring position one past the last queue device event ready to
-    // write.
-    uint64_t queue_device_event_ready_position;
-    // Logical ring position one past the last reserved queue device event.
-    uint64_t queue_device_event_write_position;
-    // Next queue-local device event id assigned during submission.
-    uint64_t next_queue_device_event_id;
-    // Borrowed hardware counter session active for this queue, or NULL.
-    iree_hal_amdgpu_profile_counter_session_t* counter_session;
-    // Host-side slot table pairing dispatch event ring slots with reusable
-    // aqlprofile handles. One logical dispatch event owns |counter_set_count|
-    // contiguous slots until its event ring position is flushed.
-    iree_hal_amdgpu_profile_counter_sample_slot_t* counter_sample_slots;
-    // Number of counter sample slots associated with each dispatch event slot.
-    uint32_t counter_set_count;
-    // Borrowed executable trace session active for this queue, or NULL.
-    iree_hal_amdgpu_profile_trace_session_t* trace_session;
-    // Host-side slot table pairing dispatch event ring slots with per-use
-    // aqlprofile ATT handles retained only until each trace is flushed.
-    iree_hal_amdgpu_profile_trace_slot_t* trace_slots;
+    // Raw completion-signal storage paired with dispatch event slots.
+    struct {
+      // Borrowed fine-grained GPU-agent block pool backing raw signal storage.
+      iree_hal_amdgpu_block_pool_t* block_pool;
+      // Host-side table of queue-owned GPU-agent raw signal blocks.
+      iree_hal_amdgpu_block_t** blocks;
+      // Number of entries in |blocks|.
+      uint32_t block_count;
+      // Number of iree_amd_signal_t records in each block.
+      uint32_t signals_per_block;
+    } signals;
+    // Shared device-visible allocation backing queue-local event rings.
+    struct {
+      // Allocation base returned by HSA memory pool allocation.
+      void* base;
+      // Byte length of |base|.
+      iree_host_size_t size;
+    } event_allocation;
+    // Device-visible dispatch event ring waiting for sink flush.
+    struct {
+      // Dispatch event record storage in the shared event allocation.
+      iree_hal_amdgpu_profile_dispatch_event_t* values;
+      // Power-of-two capacity of |values| in records.
+      uint32_t capacity;
+      // Capacity minus one, for mapping logical positions to physical slots.
+      uint32_t mask;
+      // Logical ring position of the next event to write to the sink.
+      uint64_t read_position;
+      // Logical ring position one past the last event ready to write.
+      uint64_t ready_position;
+      // Logical ring position one past the last reserved event.
+      uint64_t write_position;
+      // Next queue-local dispatch event id assigned during submission.
+      uint64_t next_event_id;
+    } dispatch_events;
+    // Device-visible queue operation event ring waiting for sink flush.
+    struct {
+      // Queue device event record storage in the shared event allocation.
+      iree_hal_amdgpu_profile_queue_device_event_t* values;
+      // Power-of-two capacity of |values| in records.
+      uint32_t capacity;
+      // Capacity minus one, for mapping logical positions to physical slots.
+      uint32_t mask;
+      // Logical ring position of the next event to write to the sink.
+      uint64_t read_position;
+      // Logical ring position one past the last event ready to write.
+      uint64_t ready_position;
+      // Logical ring position one past the last reserved event.
+      uint64_t write_position;
+      // Next queue-local queue-device event id assigned during submission.
+      uint64_t next_event_id;
+    } queue_device_events;
+    // Queue-local hardware counter profile resources.
+    struct {
+      // Borrowed hardware counter session active for this queue, or NULL.
+      iree_hal_amdgpu_profile_counter_session_t* session;
+      // Number of selected counter sets in |session|.
+      uint32_t set_count;
+      // Dispatch-attributed counter sample storage.
+      struct {
+        // Host-side slot table pairing dispatch event slots with aqlprofile
+        // handles.
+        iree_hal_amdgpu_profile_counter_sample_slot_t* slots;
+      } dispatch_samples;
+      // Queue-range counter sample storage.
+      struct {
+        // Host-side slot table pairing range banks with aqlprofile handles.
+        iree_hal_amdgpu_profile_counter_range_slot_t* slots;
+        // Device-visible timing records for each range bank.
+        uint64_t* ticks;
+        // Byte length of |ticks|.
+        iree_host_size_t tick_storage_size;
+        // Bank currently capturing queue work.
+        uint32_t active_bank;
+        // Number of reusable range banks in |slots| and |ticks|.
+        uint32_t bank_count;
+        // True when a range bank has been started and must be stopped.
+        bool is_active;
+      } ranges;
+    } counters;
+    // Queue-local executable trace profile resources.
+    struct {
+      // Borrowed executable trace session active for this queue, or NULL.
+      iree_hal_amdgpu_profile_trace_session_t* session;
+      // Host-side slot table pairing dispatch event slots with ATT handles.
+      iree_hal_amdgpu_profile_trace_slot_t* slots;
+    } traces;
   } profiling;
 
   // False once this queue's accumulated frontier overflows while merging waited
@@ -537,7 +567,7 @@ void iree_hal_amdgpu_host_queue_enqueue_post_drain_action(
 // The caller must allocate at least sizeof(iree_hal_amdgpu_host_queue_t).
 //
 // Creates an HSA hardware queue on |gpu_agent|, initializes the AQL ring from
-// it, allocates a kernarg ring from |kernarg_pool|, creates the epoch signal
+// it, allocates a kernarg ring from |kernarg_memory|, creates the epoch signal
 // and notification ring, and starts the completion thread.
 //
 // |axis| is this queue's identity in the causal graph, constructed by the
@@ -559,6 +589,9 @@ void iree_hal_amdgpu_host_queue_enqueue_post_drain_action(
 // 64-byte blocks, at least 2x |aql_queue_capacity| to cover one tail-padding
 // gap at wrap. Submission admission proves space in both the AQL and kernarg
 // rings before publishing packets.
+// |upload_capacity| is the byte capacity of the device-visible control upload
+// ring used for queue-ordered submission metadata. Zero disables the optional
+// upload ring; non-zero values must be powers of two.
 //
 // |vendor_packet_capabilities| describes the AQL/PM4 vendor-packet support
 // selected from the physical device ISA. Queues allocate dynamic PM4 IB slots
@@ -572,7 +605,8 @@ void iree_hal_amdgpu_host_queue_enqueue_post_drain_action(
 iree_status_t iree_hal_amdgpu_host_queue_initialize(
     const iree_hal_amdgpu_libhsa_t* libhsa, iree_hal_device_t* logical_device,
     iree_async_proactor_t* proactor, hsa_agent_t gpu_agent,
-    hsa_amd_memory_pool_t kernarg_pool, hsa_amd_memory_pool_t pm4_ib_pool,
+    const iree_hal_amdgpu_kernarg_ring_memory_t* kernarg_memory,
+    hsa_amd_memory_pool_t pm4_ib_pool,
     iree_async_frontier_tracker_t* frontier_tracker, iree_async_axis_t axis,
     iree_hal_queue_affinity_t queue_affinity,
     iree_thread_affinity_t completion_thread_affinity,
@@ -587,7 +621,8 @@ iree_status_t iree_hal_amdgpu_host_queue_initialize(
     iree_hal_amdgpu_staging_pool_t* staging_pool,
     iree_host_size_t device_ordinal, uint32_t aql_queue_capacity,
     uint32_t notification_capacity, uint32_t kernarg_capacity_in_blocks,
-    iree_allocator_t host_allocator, iree_hal_amdgpu_host_queue_t* out_queue);
+    uint32_t upload_capacity, iree_allocator_t host_allocator,
+    iree_hal_amdgpu_host_queue_t* out_queue);
 
 // Deinitializes the queue. Destroys all owned resources and stops the
 // completion thread.

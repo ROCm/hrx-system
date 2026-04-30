@@ -23,6 +23,14 @@ enum iree_hal_replay_execute_flag_bits_t {
   IREE_HAL_REPLAY_EXECUTE_FLAG_NONE = 0u,
 };
 
+// Prepared replay program created from a serialized `.ireereplay` file.
+//
+// Plans borrow the original file contents passed to
+// iree_hal_replay_plan_create and must not outlive that storage. Building a
+// plan performs cold file-structure validation and prepares record descriptors
+// for repeated execution.
+typedef struct iree_hal_replay_plan_t iree_hal_replay_plan_t;
+
 typedef struct iree_hal_replay_file_path_remap_t {
   // Captured external file path prefix to replace.
   iree_string_view_t captured_prefix;
@@ -54,6 +62,24 @@ typedef struct iree_hal_replay_executable_substitution_t {
   iree_const_byte_span_t executable_data;
 } iree_hal_replay_executable_substitution_t;
 
+// Type of replay scope marker observed during replay execution.
+typedef uint32_t iree_hal_replay_scope_event_type_t;
+enum iree_hal_replay_scope_event_type_e {
+  IREE_HAL_REPLAY_SCOPE_EVENT_TYPE_BEGIN = 1u,
+  IREE_HAL_REPLAY_SCOPE_EVENT_TYPE_END = 2u,
+};
+
+typedef struct iree_hal_replay_scope_event_t {
+  // Capture-order sequence ordinal of the scope marker record.
+  uint64_t sequence_ordinal;
+  // Type of scope event being reported.
+  iree_hal_replay_scope_event_type_t type;
+  // Reserved for future scope event metadata; must be zero.
+  uint32_t reserved0;
+  // Scope name borrowed from the replay file.
+  iree_string_view_t name;
+} iree_hal_replay_scope_event_t;
+
 // Callback allowing callers to substitute captured executable payloads.
 //
 // The callback receives the captured executable ids and parameters. It may
@@ -73,6 +99,21 @@ typedef struct iree_hal_replay_executable_substitution_callback_t {
   void* user_data;
 } iree_hal_replay_executable_substitution_callback_t;
 
+// Callback allowing callers to observe named replay scope markers.
+//
+// The callback is invoked in replay file order. Scope markers are annotations;
+// returning OK leaves replay execution unchanged, while returning an error
+// aborts replay immediately.
+typedef iree_status_t (*iree_hal_replay_scope_event_fn_t)(
+    void* user_data, const iree_hal_replay_scope_event_t* event);
+
+typedef struct iree_hal_replay_scope_event_callback_t {
+  // Callback invoked for each replay scope marker.
+  iree_hal_replay_scope_event_fn_t fn;
+  // Opaque callback state passed to |fn|.
+  void* user_data;
+} iree_hal_replay_scope_event_callback_t;
+
 typedef struct iree_hal_replay_execute_options_t {
   // Execution flags controlling replay behavior.
   iree_hal_replay_execute_flags_t flags;
@@ -83,6 +124,8 @@ typedef struct iree_hal_replay_execute_options_t {
   // Optional callback used to replace captured executable payloads.
   iree_hal_replay_executable_substitution_callback_t
       executable_substitution_callback;
+  // Optional callback used to observe named replay scope markers.
+  iree_hal_replay_scope_event_callback_t scope_event_callback;
 } iree_hal_replay_execute_options_t;
 
 static inline iree_hal_replay_execute_options_t
@@ -92,12 +135,39 @@ iree_hal_replay_execute_options_default(void) {
   return options;
 }
 
+// Creates a prepared replay plan from |file_contents|.
+//
+// The plan borrows |file_contents| and must be destroyed before the bytes are
+// unmapped or freed. Planning validates the replay file envelope, sequence
+// ordinals, object-table capacity, and selected hot operation layouts so that
+// repeated execution can avoid reparsing the serialized stream.
+IREE_API_EXPORT iree_status_t iree_hal_replay_plan_create(
+    iree_const_byte_span_t file_contents, iree_allocator_t host_allocator,
+    iree_hal_replay_plan_t** out_plan);
+
+// Destroys a prepared replay plan.
+IREE_API_EXPORT void iree_hal_replay_plan_destroy(iree_hal_replay_plan_t* plan);
+
+// Executes a prepared replay plan against |device_group|.
+//
+// Each execution creates fresh replay object state and reissues the captured
+// HAL stream in file order. |options| supplies execution-time callbacks and
+// path remaps; callers may pass NULL for defaults.
+IREE_API_EXPORT iree_status_t iree_hal_replay_plan_execute(
+    const iree_hal_replay_plan_t* plan, iree_hal_device_group_t* device_group,
+    const iree_hal_replay_execute_options_t* options,
+    iree_allocator_t host_allocator);
+
 // Executes the HAL operations in |file_contents| against |device_group|.
 //
 // Replay execution intentionally serializes the captured stream in file order.
 // This preserves the program-order behavior needed for deterministic
 // reproducers while leaving parallel replay strategies as an execution policy
 // that can be added later without changing the file format.
+//
+// This is a convenience wrapper that creates a temporary replay plan, executes
+// it once, and destroys it. Repeated execution should use
+// iree_hal_replay_plan_create and iree_hal_replay_plan_execute directly.
 IREE_API_EXPORT iree_status_t iree_hal_replay_execute_file(
     iree_const_byte_span_t file_contents, iree_hal_device_group_t* device_group,
     const iree_hal_replay_execute_options_t* options,

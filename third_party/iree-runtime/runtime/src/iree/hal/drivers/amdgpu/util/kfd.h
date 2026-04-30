@@ -42,7 +42,7 @@ int iree_hal_amdgpu_ioctl(int fd, unsigned long request, void* arg);
 // Tracking for adding AMDKFD_IOC_GET_CLOCK_COUNTERS to the API:
 // https://github.com/ROCm/ROCR-Runtime/issues/278
 
-typedef struct iree_hal_amdgpu_clock_counters_t {
+typedef struct iree_hal_amdgpu_kfd_clock_counters_t {
   // GPU clock counter sampled by KFD for the requested GPU.
   uint64_t gpu_clock_counter;
 
@@ -54,21 +54,14 @@ typedef struct iree_hal_amdgpu_clock_counters_t {
 
   // Frequency in Hz for system_clock_counter.
   uint64_t system_clock_freq;
-} iree_hal_amdgpu_clock_counters_t;
-
-// Validates that |counters| contains a usable KFD clock-counter sample.
-//
-// AMDKFD_IOC_GET_CLOCK_COUNTERS can succeed while returning zeroed counters
-// for an invalid GPU UID. Callers must validate the sample before publishing
-// any clock-correlation flags derived from it.
-iree_status_t iree_hal_amdgpu_kfd_validate_clock_counters(
-    uint32_t gpu_uid, const iree_hal_amdgpu_clock_counters_t* counters);
+} iree_hal_amdgpu_kfd_clock_counters_t;
 
 // Equivalent to `hsaKmtGetClockCounters` in the ROCR KMT.
 // |fd| must be an open /dev/kfd file handle.
-// |gpu_uid| must be the HSA_AMD_AGENT_INFO_DRIVER_UID of the node to query.
+// |driver_uid| must be the HSA_AMD_AGENT_INFO_DRIVER_UID of the node to query.
 iree_status_t iree_hal_amdgpu_kfd_get_clock_counters(
-    int fd, uint32_t gpu_uid, iree_hal_amdgpu_clock_counters_t* out_counters);
+    int fd, uint32_t driver_uid,
+    iree_hal_amdgpu_kfd_clock_counters_t* out_counters);
 
 #ifdef __cplusplus
 }  // extern "C"

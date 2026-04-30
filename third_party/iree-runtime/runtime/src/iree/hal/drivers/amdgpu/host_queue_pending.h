@@ -28,7 +28,7 @@ void iree_hal_amdgpu_host_queue_cancel_pending(
     const char* status_message);
 
 // Captures a queue_alloca operation for later issue. Caller must hold
-// queue->submission_mutex.
+// queue->locks.submission_mutex.
 iree_status_t iree_hal_amdgpu_host_queue_defer_alloca(
     iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t* wait_semaphore_list,
@@ -39,8 +39,9 @@ iree_status_t iree_hal_amdgpu_host_queue_defer_alloca(
     iree_hal_amdgpu_pending_op_t** out_op);
 
 // Submits an alloca operation after wait resolution. Caller must hold
-// queue->submission_mutex. If memory readiness must wait, |out_memory_wait_op|
-// receives the operation that owns the prepared wait sidecar.
+// queue->locks.submission_mutex. If memory readiness must wait,
+// |out_memory_wait_op| receives the operation that owns the prepared wait
+// sidecar.
 iree_status_t iree_hal_amdgpu_host_queue_submit_alloca(
     iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_amdgpu_wait_resolution_t* resolution,
@@ -53,7 +54,7 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_alloca(
     iree_hal_amdgpu_pending_op_t** out_memory_wait_op, bool* out_ready);
 
 // Captures a queue_dealloca operation for later issue. Caller must hold
-// queue->submission_mutex.
+// queue->locks.submission_mutex.
 iree_status_t iree_hal_amdgpu_host_queue_defer_dealloca(
     iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t* wait_semaphore_list,
@@ -61,7 +62,7 @@ iree_status_t iree_hal_amdgpu_host_queue_defer_dealloca(
     iree_hal_buffer_t* buffer, iree_hal_amdgpu_pending_op_t** out_op);
 
 // Captures a queue_fill operation for later issue. Caller must hold
-// queue->submission_mutex.
+// queue->locks.submission_mutex.
 iree_status_t iree_hal_amdgpu_host_queue_defer_fill(
     iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t* wait_semaphore_list,
@@ -72,7 +73,7 @@ iree_status_t iree_hal_amdgpu_host_queue_defer_fill(
     iree_hal_amdgpu_pending_op_t** out_op);
 
 // Captures a queue_copy/read/write operation for later issue. Caller must hold
-// queue->submission_mutex.
+// queue->locks.submission_mutex.
 iree_status_t iree_hal_amdgpu_host_queue_defer_copy(
     iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t* wait_semaphore_list,
@@ -84,7 +85,7 @@ iree_status_t iree_hal_amdgpu_host_queue_defer_copy(
     iree_hal_amdgpu_pending_op_t** out_op);
 
 // Captures a queue_update operation for later issue. Caller must hold
-// queue->submission_mutex.
+// queue->locks.submission_mutex.
 iree_status_t iree_hal_amdgpu_host_queue_defer_update(
     iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t* wait_semaphore_list,
@@ -95,7 +96,7 @@ iree_status_t iree_hal_amdgpu_host_queue_defer_update(
     iree_hal_amdgpu_pending_op_t** out_op);
 
 // Captures a queue_execute operation for later issue. Caller must hold
-// queue->submission_mutex.
+// queue->locks.submission_mutex.
 iree_status_t iree_hal_amdgpu_host_queue_defer_execute(
     iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t* wait_semaphore_list,
@@ -105,7 +106,7 @@ iree_status_t iree_hal_amdgpu_host_queue_defer_execute(
     iree_hal_execute_flags_t flags, iree_hal_amdgpu_pending_op_t** out_op);
 
 // Captures a queue_dispatch operation for later issue. Caller must hold
-// queue->submission_mutex.
+// queue->locks.submission_mutex.
 iree_status_t iree_hal_amdgpu_host_queue_defer_dispatch(
     iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t* wait_semaphore_list,
@@ -117,7 +118,7 @@ iree_status_t iree_hal_amdgpu_host_queue_defer_dispatch(
     iree_hal_amdgpu_pending_op_t** out_op);
 
 // Captures a driver host action for later issue. Caller must hold
-// queue->submission_mutex.
+// queue->locks.submission_mutex.
 iree_status_t iree_hal_amdgpu_host_queue_defer_host_action(
     iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t* wait_semaphore_list,
@@ -127,7 +128,7 @@ iree_status_t iree_hal_amdgpu_host_queue_defer_host_action(
     iree_hal_amdgpu_pending_op_t** out_op);
 
 // Captures a queue_host_call operation for later issue. Caller must hold
-// queue->submission_mutex.
+// queue->locks.submission_mutex.
 iree_status_t iree_hal_amdgpu_host_queue_defer_host_call(
     iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t* wait_semaphore_list,

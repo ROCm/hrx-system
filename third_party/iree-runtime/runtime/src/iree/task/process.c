@@ -47,6 +47,8 @@ void iree_task_process_initialize(iree_task_process_drain_fn_t drain_fn,
   iree_atomic_store(&out_process->error_status, 0, iree_memory_order_relaxed);
   iree_atomic_store(&out_process->wake_budget, wake_budget,
                     iree_memory_order_relaxed);
+  iree_atomic_store(&out_process->placement_epoch, 0,
+                    iree_memory_order_relaxed);
   iree_atomic_store(&out_process->schedule_state, 0, iree_memory_order_relaxed);
   iree_atomic_store(&out_process->needs_drain, 0, iree_memory_order_relaxed);
   iree_atomic_store(&out_process->retain_drain, 0, iree_memory_order_relaxed);
@@ -59,6 +61,11 @@ void iree_task_process_initialize(iree_task_process_drain_fn_t drain_fn,
                     iree_memory_order_relaxed);
 
   IREE_TRACE_ZONE_END(z0);
+}
+
+void iree_task_process_set_flags(iree_task_process_t* process,
+                                 iree_task_process_flags_t flags) {
+  process->flags = flags;
 }
 
 bool iree_task_process_wake(iree_task_process_t* process) {

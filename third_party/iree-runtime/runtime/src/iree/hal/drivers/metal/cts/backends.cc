@@ -90,6 +90,9 @@ static bool metal_registered_ =
                "Blocked by the same iree_hal_metal_device_queue_alloca "
                "non-NULL pool rejection as "
                "ExplicitPassthroughPoolAllocaDealloca."},
+              {"QueueAllocaTest.ExplicitTLSFPoolCrossQueueStaleBlockGrows",
+               "Blocked by the same Metal queue pool backend UNIMPLEMENTED "
+               "path as ExplicitTLSFPoolCrossQueueWaitFrontier."},
               {"QueueAllocaTest.ExplicitFixedBlockPoolNotificationRetry",
                "Blocked by the same iree_hal_metal_device_queue_alloca "
                "non-NULL pool rejection as "

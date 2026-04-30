@@ -380,16 +380,17 @@ static void iree_hal_block_command_buffer_profile_append_dispatch(
 //===----------------------------------------------------------------------===//
 
 // Returns true when |buffer| must be mapped at queue-execute time instead of
-// command-buffer record time.
+// command-buffer record time. Transient buffers are queue-owned memory with a
+// dealloca operation, so their mappings must be scoped to queue execution even
+// if the backing is already committed while the command buffer records.
 static bool iree_hal_block_command_buffer_needs_late_binding(
     iree_hal_buffer_t* buffer) {
-  return iree_hal_local_transient_buffer_isa(buffer) &&
-         !iree_hal_local_transient_buffer_is_committed(buffer);
+  return iree_hal_local_transient_buffer_isa(buffer);
 }
 
-// Finds or appends a late direct binding for an uncommitted transient buffer.
-// Late slots are placed after the command buffer's external binding capacity so
-// ordinary indirect binding table slots keep their original indices.
+// Finds or appends a late direct binding for a transient buffer. Late slots are
+// placed after the command buffer's external binding capacity so ordinary
+// indirect binding table slots keep their original indices.
 static iree_status_t iree_hal_block_command_buffer_get_late_binding_slot(
     iree_hal_block_command_buffer_t* command_buffer,
     iree_hal_buffer_ref_t buffer_ref, uint16_t* out_slot) {
@@ -449,17 +450,17 @@ const iree_hal_buffer_binding_t* iree_hal_block_command_buffer_late_bindings(
 }
 
 // Resolves |count| buffer references into fixup entries. For each ref:
-//   - Direct ready buffer: maps the buffer persistently and stores the host
-//     pointer inline in the fixup.
-//   - Direct uncommitted transient: records a late binding slot that the queue
-//     maps after waits resolve.
+//   - Direct ready non-transient buffer: maps the buffer persistently and
+//     stores the host pointer inline in the fixup.
+//   - Direct transient buffer: records a late binding slot that the queue maps
+//     after waits resolve.
 //   - Indirect buffer: records the binding table slot and offset for runtime
 //     resolution by the processor.
 //
-// Direct buffers use PERSISTENT mapping: the buffer is retained by the
-// resource_set for the CB's lifetime, so the pointer is stable. Uncommitted
-// queue_alloca transients are retained but mapped only when queue execution
-// has observed the alloca completion signal.
+// Direct non-transient buffers use PERSISTENT mapping: the buffer is retained
+// by the resource_set for the CB's lifetime, so the pointer is stable.
+// Queue-owned transients are retained but mapped only during queue execution so
+// dealloca can be ordered against the scoped mapping lifetime.
 //
 // The fixup data_index fields are pre-filled by the builder and preserved.
 static iree_status_t iree_hal_block_command_buffer_resolve_refs(

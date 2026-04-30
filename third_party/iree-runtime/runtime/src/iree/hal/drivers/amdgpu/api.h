@@ -109,6 +109,11 @@ typedef struct iree_hal_amdgpu_logical_device_options_t {
     // gap at wrap. Submission admission checks kernarg and AQL capacity
     // together before publishing packets.
     uint32_t kernarg_capacity;
+    // Device-visible control upload ring capacity in bytes for each host queue.
+    // Zero disables the optional upload ring; non-zero values must be powers of
+    // two. This carries queue-ordered metadata such as device-side
+    // command-buffer fixup inputs without using the file staging pool.
+    uint32_t upload_capacity;
   } host_queues;
 
   // Preallocates a reasonable number of resources in pools to reduce initial

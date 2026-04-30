@@ -56,6 +56,12 @@ iree_status_t iree_hal_device_set_default_channel_provider(
 // requested by command line flags.
 typedef struct iree_hal_profiling_from_flags_t iree_hal_profiling_from_flags_t;
 
+// Returns true when command line flags request profiling data that needs
+// command buffers to retain profile metadata from creation time.
+iree_status_t
+iree_hal_profiling_from_flags_requires_retained_command_buffer_metadata(
+    bool* out_required);
+
 // Begins any HAL-native profiling and external capture ranges requested by
 // command line flags. No-op if neither profiling nor external capture is
 // enabled.

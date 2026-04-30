@@ -22,10 +22,30 @@ typedef struct iree_hal_amdgpu_logical_device_t
     iree_hal_amdgpu_logical_device_t;
 typedef struct iree_hal_amdgpu_profile_counter_sample_slot_t
     iree_hal_amdgpu_profile_counter_sample_slot_t;
+typedef struct iree_hal_amdgpu_profile_counter_range_slot_t
+    iree_hal_amdgpu_profile_counter_range_slot_t;
 typedef struct iree_hal_amdgpu_profile_counter_session_t
     iree_hal_amdgpu_profile_counter_session_t;
 typedef struct iree_hal_amdgpu_profile_dispatch_event_reservation_t
     iree_hal_amdgpu_profile_dispatch_event_reservation_t;
+
+// Flags selecting which counter resources to enable on a host queue.
+typedef uint32_t iree_hal_amdgpu_profile_counter_enable_flags_t;
+enum iree_hal_amdgpu_profile_counter_enable_flag_bits_t {
+  IREE_HAL_AMDGPU_PROFILE_COUNTER_ENABLE_FLAG_NONE = 0u,
+  // Enables dispatch-attributed counter sample resources.
+  IREE_HAL_AMDGPU_PROFILE_COUNTER_ENABLE_FLAG_DISPATCH_SAMPLES = 1u << 0,
+  // Enables queue-carried physical-device range counter resources.
+  IREE_HAL_AMDGPU_PROFILE_COUNTER_ENABLE_FLAG_QUEUE_RANGES = 1u << 1,
+};
+
+// Flags controlling queue-range counter flush behavior.
+typedef uint32_t iree_hal_amdgpu_profile_counter_range_flush_flags_t;
+enum iree_hal_amdgpu_profile_counter_range_flush_flag_bits_t {
+  IREE_HAL_AMDGPU_PROFILE_COUNTER_RANGE_FLUSH_FLAG_NONE = 0u,
+  // Starts a new range on the queue after stopping the current range.
+  IREE_HAL_AMDGPU_PROFILE_COUNTER_RANGE_FLUSH_FLAG_RESTART = 1u << 0,
+};
 
 // Allocates a hardware counter profiling session from |options|.
 //
@@ -46,25 +66,46 @@ void iree_hal_amdgpu_profile_counter_session_free(
 bool iree_hal_amdgpu_profile_counter_session_is_active(
     const iree_hal_amdgpu_profile_counter_session_t* session);
 
+// Returns true when |session| captures dispatch-attributed samples.
+bool iree_hal_amdgpu_profile_counter_session_captures_dispatch_samples(
+    const iree_hal_amdgpu_profile_counter_session_t* session);
+
+// Returns true when |session| captures queue-level counter ranges.
+bool iree_hal_amdgpu_profile_counter_session_captures_queue_ranges(
+    const iree_hal_amdgpu_profile_counter_session_t* session);
+
 // Writes counter-set and counter metadata chunks for |session|.
 iree_status_t iree_hal_amdgpu_profile_counter_session_write_metadata(
     const iree_hal_amdgpu_profile_counter_session_t* session,
     iree_hal_profile_sink_t* sink, uint64_t session_id,
     iree_string_view_t stream_name);
 
-// Enables queue-local counter sample storage for |queue|.
+// Enables host-queue-carried counter sample storage for |queue|.
 //
-// Allocates one host-side slot for each dispatch event ring entry and selected
-// counter set. Slots create aqlprofile handles lazily and retain them until
+// |flags| selects which session capture resources are materialized on this
+// queue. Dispatch slots create aqlprofile handles lazily and retain them until
 // profiling is disabled so steady counter captures reuse packet/output storage
-// after the dispatch event cursor advances past each slot.
+// after the dispatch event cursor advances past each slot. Range resources are
+// pre-created because range flush/restart is cold but should not allocate while
+// the queue is stopped waiting for samples.
 iree_status_t iree_hal_amdgpu_host_queue_enable_profile_counters(
     iree_hal_amdgpu_host_queue_t* queue,
-    iree_hal_amdgpu_profile_counter_session_t* session);
+    iree_hal_amdgpu_profile_counter_session_t* session,
+    iree_hal_amdgpu_profile_counter_enable_flags_t flags);
 
 // Disables queue-local counter sample storage and deletes all slot handles.
 void iree_hal_amdgpu_host_queue_disable_profile_counters(
     iree_hal_amdgpu_host_queue_t* queue);
+
+// Starts queue-carried physical-device counter ranges for |queue|.
+iree_status_t iree_hal_amdgpu_host_queue_start_profile_counter_ranges(
+    iree_hal_amdgpu_host_queue_t* queue);
+
+// Stops, optionally writes, and optionally restarts physical-device ranges.
+iree_status_t iree_hal_amdgpu_host_queue_flush_profile_counter_ranges(
+    iree_hal_amdgpu_host_queue_t* queue, iree_hal_profile_sink_t* sink,
+    uint64_t session_id,
+    iree_hal_amdgpu_profile_counter_range_flush_flags_t flags);
 
 // Returns the number of additional AQL packets needed for |reservation|.
 uint32_t iree_hal_amdgpu_host_queue_profile_counter_packet_count(
@@ -78,9 +119,9 @@ uint32_t iree_hal_amdgpu_host_queue_profile_counter_set_count(
 
 // Prepares counter sample slots for |reservation|.
 //
-// Caller must hold queue->submission_mutex and must call this only after the
-// dispatch profile events have been reserved. Handles are created lazily per
-// event-ring slot and then reused only after the dispatch event cursor has
+// Caller must hold queue->locks.submission_mutex and must call this only after
+// the dispatch profile events have been reserved. Handles are created lazily
+// per event-ring slot and then reused only after the dispatch event cursor has
 // advanced past the slot.
 iree_status_t iree_hal_amdgpu_host_queue_prepare_profile_counter_samples(
     iree_hal_amdgpu_host_queue_t* queue,

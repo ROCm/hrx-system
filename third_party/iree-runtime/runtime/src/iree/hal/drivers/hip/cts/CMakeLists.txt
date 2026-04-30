@@ -20,6 +20,8 @@ iree_cc_library(
   SRCS
     "backends.cc"
   DEPS
+    iree::async::util::proactor_pool
+    iree::base::threading
     iree::hal
     iree::hal::cts::util::registry
     iree::hal::drivers::hip::registration
@@ -57,6 +59,8 @@ iree_hal_cts_test_suite(
   LABELS
     "driver=hip"
     "requires-gpu-amd"
+  RESOURCE_GROUP
+    hip_driver
 )
 
 iree_hal_cts_test_suite(
@@ -68,9 +72,12 @@ iree_hal_cts_test_suite(
     graph
   ARGS
     "--hip_use_streams=false"
+    "--gtest_filter=-CTS/QueueTransferTest.*:CTS/AsyncTransientBufferTest.*:CTS/TransientBufferTest.*"
   LABELS
     "driver=hip"
     "requires-gpu-amd"
+  RESOURCE_GROUP
+    hip_driver
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

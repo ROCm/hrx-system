@@ -513,6 +513,65 @@ static inline uint16_t iree_hal_amdgpu_aql_emit_pm4_ib(
                                                 completion_signal, out_setup);
 }
 
+// Emits an AQL PM4-IB packet that writes a top-of-pipe timestamp to
+// |start_tick|. The caller owns packet publication.
+static inline uint16_t iree_hal_amdgpu_aql_emit_timestamp_start(
+    iree_hsa_amd_aql_pm4_ib_packet_t* packet,
+    iree_hal_amdgpu_pm4_ib_slot_t* ib_slot,
+    iree_hal_amdgpu_aql_packet_control_t packet_control, uint64_t* start_tick,
+    uint16_t* out_setup) {
+  iree_hal_amdgpu_pm4_ib_builder_t builder;
+  iree_hal_amdgpu_pm4_ib_builder_initialize(ib_slot, &builder);
+  const bool did_emit =
+      iree_hal_amdgpu_pm4_ib_builder_emit_copy_timestamp_to_memory(&builder,
+                                                                   start_tick);
+  IREE_ASSERT(did_emit, "PM4 start timestamp must fit PM4 IB slot");
+  (void)did_emit;
+  return iree_hal_amdgpu_aql_emit_pm4_ib(
+      packet, ib_slot, iree_hal_amdgpu_pm4_ib_builder_dword_count(&builder),
+      packet_control, iree_hsa_signal_null(), out_setup);
+}
+
+// Emits an AQL PM4-IB packet that writes a bottom-of-pipe timestamp to
+// |end_tick|. The caller owns packet publication.
+static inline uint16_t iree_hal_amdgpu_aql_emit_timestamp_end(
+    iree_hsa_amd_aql_pm4_ib_packet_t* packet,
+    iree_hal_amdgpu_pm4_ib_slot_t* ib_slot,
+    iree_hal_amdgpu_aql_packet_control_t packet_control,
+    iree_hsa_signal_t completion_signal, uint64_t* end_tick,
+    uint16_t* out_setup) {
+  iree_hal_amdgpu_pm4_ib_builder_t builder;
+  iree_hal_amdgpu_pm4_ib_builder_initialize(ib_slot, &builder);
+  const bool did_emit =
+      iree_hal_amdgpu_pm4_ib_builder_emit_release_mem_timestamp_to_memory(
+          &builder, end_tick);
+  IREE_ASSERT(did_emit, "PM4 end timestamp must fit PM4 IB slot");
+  (void)did_emit;
+  return iree_hal_amdgpu_aql_emit_pm4_ib(
+      packet, ib_slot, iree_hal_amdgpu_pm4_ib_builder_dword_count(&builder),
+      packet_control, completion_signal, out_setup);
+}
+
+// Emits one AQL PM4-IB packet that writes both start and end timestamp fields.
+// The caller owns packet publication.
+static inline uint16_t iree_hal_amdgpu_aql_emit_timestamp_range(
+    iree_hsa_amd_aql_pm4_ib_packet_t* packet,
+    iree_hal_amdgpu_pm4_ib_slot_t* ib_slot,
+    iree_hal_amdgpu_aql_packet_control_t packet_control,
+    iree_hsa_signal_t completion_signal, uint64_t* start_tick,
+    uint64_t* end_tick, uint16_t* out_setup) {
+  iree_hal_amdgpu_pm4_ib_builder_t builder;
+  iree_hal_amdgpu_pm4_ib_builder_initialize(ib_slot, &builder);
+  const bool did_emit =
+      iree_hal_amdgpu_pm4_ib_builder_emit_timestamp_range_to_memory(
+          &builder, start_tick, end_tick);
+  IREE_ASSERT(did_emit, "PM4 timestamp range must fit PM4 IB slot");
+  (void)did_emit;
+  return iree_hal_amdgpu_aql_emit_pm4_ib(
+      packet, ib_slot, iree_hal_amdgpu_pm4_ib_builder_dword_count(&builder),
+      packet_control, completion_signal, out_setup);
+}
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

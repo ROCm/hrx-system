@@ -321,7 +321,7 @@ static iree_status_t iree_hal_vulkan_driver_enumerate_physical_devices(
   VK_RETURN_IF_ERROR(query_result, "vkEnumeratePhysicalDevices");
   VkPhysicalDevice* physical_devices = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-      host_allocator, physical_device_count * sizeof(physical_devices),
+      host_allocator, physical_device_count * sizeof(*physical_devices),
       (void**)&physical_devices));
   IREE_LEAK_CHECK_DISABLE_PUSH();
   VkResult enumerate_result = instance_syms->vkEnumeratePhysicalDevices(

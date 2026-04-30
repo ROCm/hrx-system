@@ -54,9 +54,10 @@ struct CountingProcessContext {
   iree_status_code_t completion_status_code = IREE_STATUS_OK;
 };
 
-static iree_status_t counting_drain(iree_task_process_t* process,
-                                    uint32_t worker_index,
-                                    iree_task_process_drain_result_t* result) {
+static iree_status_t counting_drain(
+    iree_task_process_t* process,
+    const iree_task_worker_context_t* worker_context,
+    iree_task_process_drain_result_t* result) {
   auto* context = reinterpret_cast<CountingProcessContext*>(process->user_data);
   int32_t count = context->drain_count.fetch_add(1, std::memory_order_relaxed);
   result->did_work = true;
@@ -69,14 +70,15 @@ static void counting_completion(iree_task_process_t* process,
   auto* context = reinterpret_cast<CountingProcessContext*>(process->user_data);
   context->completion_status_code = iree_status_code(status);
   context->completed.store(true, std::memory_order_release);
-  iree_status_ignore(status);
+  iree_status_free(status);
 }
 
 // Drain function that always returns an error on the first call.
 // Uses CountingProcessContext: completes immediately with DATA_LOSS.
-static iree_status_t failing_drain(iree_task_process_t* process,
-                                   uint32_t worker_index,
-                                   iree_task_process_drain_result_t* result) {
+static iree_status_t failing_drain(
+    iree_task_process_t* process,
+    const iree_task_worker_context_t* worker_context,
+    iree_task_process_drain_result_t* result) {
   result->did_work = true;
   result->completed = true;
   return iree_make_status(IREE_STATUS_DATA_LOSS, "oops");
@@ -94,9 +96,10 @@ struct SleepingProcessContext {
   std::atomic<bool> entered_sleep{false};
 };
 
-static iree_status_t sleeping_drain(iree_task_process_t* process,
-                                    uint32_t worker_index,
-                                    iree_task_process_drain_result_t* result) {
+static iree_status_t sleeping_drain(
+    iree_task_process_t* process,
+    const iree_task_worker_context_t* worker_context,
+    iree_task_process_drain_result_t* result) {
   auto* context = reinterpret_cast<SleepingProcessContext*>(process->user_data);
   context->drain_count.fetch_add(1, std::memory_order_relaxed);
   if (context->ready.load(std::memory_order_acquire)) {
@@ -114,7 +117,7 @@ static void sleeping_completion(iree_task_process_t* process,
                                 iree_status_t status) {
   auto* context = reinterpret_cast<SleepingProcessContext*>(process->user_data);
   context->completed.store(true, std::memory_order_release);
-  iree_status_ignore(status);
+  iree_status_free(status);
 }
 
 // Spins until a condition is true, with a timeout to prevent hangs.
@@ -535,15 +538,16 @@ struct ComputeProcessContext {
       {};
 };
 
-static iree_status_t compute_drain(iree_task_process_t* process,
-                                   uint32_t worker_index,
-                                   iree_task_process_drain_result_t* result) {
+static iree_status_t compute_drain(
+    iree_task_process_t* process,
+    const iree_task_worker_context_t* worker_context,
+    iree_task_process_drain_result_t* result) {
   auto* context = reinterpret_cast<ComputeProcessContext*>(process->user_data);
   context->active_drainers.fetch_add(1, std::memory_order_acq_rel);
 
   // Record this worker's participation.
-  context->worker_participated[worker_index].store(true,
-                                                   std::memory_order_relaxed);
+  context->worker_participated[worker_context->worker_index].store(
+      true, std::memory_order_relaxed);
 
   // Try to claim a tile.
   int32_t remaining =
@@ -576,7 +580,7 @@ static void compute_completion(iree_task_process_t* process,
   auto* context = reinterpret_cast<ComputeProcessContext*>(process->user_data);
   context->completion_status_code = iree_status_code(status);
   context->completed.store(true, std::memory_order_release);
-  iree_status_ignore(status);
+  iree_status_free(status);
 }
 
 // Context for a persistent wake_budget > 1 process that repeatedly goes idle
@@ -592,9 +596,10 @@ struct RepeatedComputeWakeContext {
 };
 
 static iree_status_t repeated_compute_wake_drain(
-    iree_task_process_t* process, uint32_t worker_index,
+    iree_task_process_t* process,
+    const iree_task_worker_context_t* worker_context,
     iree_task_process_drain_result_t* result) {
-  (void)worker_index;
+  (void)worker_context;
   auto* context =
       reinterpret_cast<RepeatedComputeWakeContext*>(process->user_data);
   context->active_drainers.fetch_add(1, std::memory_order_acq_rel);
@@ -628,7 +633,7 @@ static void repeated_compute_wake_completion(iree_task_process_t* process,
   auto* context =
       reinterpret_cast<RepeatedComputeWakeContext*>(process->user_data);
   context->completed.store(true, std::memory_order_release);
-  iree_status_ignore(status);
+  iree_status_free(status);
 }
 
 // Context for a compute process that first publishes a shared keep-active
@@ -642,9 +647,10 @@ struct SharedKeepActiveContext {
 };
 
 static iree_status_t shared_keep_active_drain(
-    iree_task_process_t* process, uint32_t worker_index,
+    iree_task_process_t* process,
+    const iree_task_worker_context_t* worker_context,
     iree_task_process_drain_result_t* result) {
-  (void)worker_index;
+  (void)worker_context;
   auto* context =
       reinterpret_cast<SharedKeepActiveContext*>(process->user_data);
   int32_t count = context->drain_count.fetch_add(1, std::memory_order_relaxed);
@@ -682,9 +688,10 @@ struct WarmRetainerContext {
 };
 
 static iree_status_t warm_retainer_drain(
-    iree_task_process_t* process, uint32_t worker_index,
+    iree_task_process_t* process,
+    const iree_task_worker_context_t* worker_context,
     iree_task_process_drain_result_t* result) {
-  (void)worker_index;
+  (void)worker_context;
   auto* context = reinterpret_cast<WarmRetainerContext*>(process->user_data);
   int32_t count = context->drain_count.fetch_add(1, std::memory_order_acq_rel);
   if (count == 0) {

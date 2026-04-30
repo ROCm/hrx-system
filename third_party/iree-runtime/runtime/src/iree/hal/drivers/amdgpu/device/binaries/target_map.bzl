@@ -8,15 +8,21 @@ IREE_HAL_AMDGPU_DEVICE_LIBRARY_DEFAULT_TARGETS = [
 
 IREE_HAL_AMDGPU_DEVICE_LIBRARY_EXACT_TARGETS = [
     "gfx900",
+    "gfx902",
+    "gfx904",
     "gfx90c",
     "gfx906",
     "gfx908",
+    "gfx909",
     "gfx90a",
+    "gfx940",
+    "gfx941",
     "gfx942",
     "gfx950",
     "gfx1010",
     "gfx1011",
     "gfx1012",
+    "gfx1013",
     "gfx1030",
     "gfx1031",
     "gfx1032",
@@ -32,8 +38,13 @@ IREE_HAL_AMDGPU_DEVICE_LIBRARY_EXACT_TARGETS = [
     "gfx1151",
     "gfx1152",
     "gfx1153",
+    "gfx1170",
+    "gfx1171",
+    "gfx1172",
     "gfx1200",
     "gfx1201",
+    "gfx1250",
+    "gfx1251",
 ]
 
 IREE_HAL_AMDGPU_DEVICE_LIBRARY_CODE_OBJECT_TARGETS = [
@@ -45,19 +56,26 @@ IREE_HAL_AMDGPU_DEVICE_LIBRARY_CODE_OBJECT_TARGETS = [
     "gfx10-3-generic",
     "gfx11-generic",
     "gfx12-generic",
+    "gfx12-5-generic",
 ]
 
 IREE_HAL_AMDGPU_DEVICE_LIBRARY_EXACT_TARGET_CODE_OBJECTS = {
     "gfx900": "gfx9-generic",
+    "gfx902": "gfx9-generic",
+    "gfx904": "gfx9-generic",
     "gfx90c": "gfx9-generic",
     "gfx906": "gfx9-generic",
     "gfx908": "gfx908",
+    "gfx909": "gfx9-generic",
     "gfx90a": "gfx90a",
+    "gfx940": "gfx9-4-generic",
+    "gfx941": "gfx9-4-generic",
     "gfx942": "gfx9-4-generic",
     "gfx950": "gfx9-4-generic",
     "gfx1010": "gfx10-1-generic",
     "gfx1011": "gfx10-1-generic",
     "gfx1012": "gfx10-1-generic",
+    "gfx1013": "gfx10-1-generic",
     "gfx1030": "gfx10-3-generic",
     "gfx1031": "gfx10-3-generic",
     "gfx1032": "gfx10-3-generic",
@@ -73,8 +91,13 @@ IREE_HAL_AMDGPU_DEVICE_LIBRARY_EXACT_TARGET_CODE_OBJECTS = {
     "gfx1151": "gfx11-generic",
     "gfx1152": "gfx11-generic",
     "gfx1153": "gfx11-generic",
+    "gfx1170": "gfx11-generic",
+    "gfx1171": "gfx11-generic",
+    "gfx1172": "gfx11-generic",
     "gfx1200": "gfx12-generic",
     "gfx1201": "gfx12-generic",
+    "gfx1250": "gfx12-5-generic",
+    "gfx1251": "gfx12-5-generic",
 }
 
 IREE_HAL_AMDGPU_DEVICE_LIBRARY_TARGET_FAMILY_NAMES = [
@@ -100,7 +123,9 @@ IREE_HAL_AMDGPU_DEVICE_LIBRARY_TARGET_FAMILY_NAMES = [
     "gfx110X-igpu",
     "gfx115X-all",
     "gfx115X-igpu",
+    "gfx117X-all",
     "gfx120X-all",
+    "gfx125X-all",
     "igpu-all",
 ]
 
@@ -109,15 +134,21 @@ IREE_HAL_AMDGPU_DEVICE_LIBRARY_TARGET_FAMILIES = {
     "dcgpu-all": [
         "gfx908",
         "gfx90a",
+        "gfx940",
+        "gfx941",
         "gfx942",
         "gfx950",
     ],
     "dgpu-all": [
         "gfx900",
+        "gfx902",
+        "gfx904",
         "gfx906",
+        "gfx909",
         "gfx1010",
         "gfx1011",
         "gfx1012",
+        "gfx1013",
         "gfx1030",
         "gfx1031",
         "gfx1032",
@@ -133,19 +164,29 @@ IREE_HAL_AMDGPU_DEVICE_LIBRARY_TARGET_FAMILIES = {
     "gfx908-dcgpu": ["gfx908"],
     "gfx90a-dcgpu": ["gfx90a"],
     "gfx90c-igpu": ["gfx90c"],
-    "gfx94X-all": ["gfx942"],
-    "gfx94X-dcgpu": ["gfx942"],
+    "gfx94X-all": [
+        "gfx940",
+        "gfx941",
+        "gfx942",
+    ],
+    "gfx94X-dcgpu": [
+        "gfx940",
+        "gfx941",
+        "gfx942",
+    ],
     "gfx950-all": ["gfx950"],
     "gfx950-dcgpu": ["gfx950"],
     "gfx101X-all": [
         "gfx1010",
         "gfx1011",
         "gfx1012",
+        "gfx1013",
     ],
     "gfx101X-dgpu": [
         "gfx1010",
         "gfx1011",
         "gfx1012",
+        "gfx1013",
     ],
     "gfx103X-all": [
         "gfx1030",
@@ -191,9 +232,18 @@ IREE_HAL_AMDGPU_DEVICE_LIBRARY_TARGET_FAMILIES = {
         "gfx1152",
         "gfx1153",
     ],
+    "gfx117X-all": [
+        "gfx1170",
+        "gfx1171",
+        "gfx1172",
+    ],
     "gfx120X-all": [
         "gfx1200",
         "gfx1201",
+    ],
+    "gfx125X-all": [
+        "gfx1250",
+        "gfx1251",
     ],
     "igpu-all": [
         "gfx90c",

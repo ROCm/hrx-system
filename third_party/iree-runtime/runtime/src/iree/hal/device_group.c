@@ -283,8 +283,8 @@ IREE_API_EXPORT iree_status_t iree_hal_device_group_create_with_replacements(
     *out_group = group;
   } else {
     for (iree_host_size_t i = 0; i < assigned_device_count; ++i) {
-      iree_status_ignore(
-          iree_hal_device_assign_topology_info(group->devices[i], NULL));
+      status = iree_status_join(status, iree_hal_device_assign_topology_info(
+                                            group->devices[i], NULL));
     }
     iree_hal_device_group_release(group);
   }
@@ -420,8 +420,8 @@ IREE_API_EXPORT iree_status_t iree_hal_device_group_builder_finalize(
     *out_group = group;
   } else {
     for (iree_host_size_t i = 0; i < assigned_device_count; ++i) {
-      iree_status_ignore(
-          iree_hal_device_assign_topology_info(group->devices[i], NULL));
+      status = iree_status_join(status, iree_hal_device_assign_topology_info(
+                                            group->devices[i], NULL));
     }
     iree_hal_device_group_release(group);
   }

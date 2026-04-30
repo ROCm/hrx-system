@@ -43,8 +43,23 @@ typedef enum iree_hal_amdgpu_command_buffer_opcode_e {
 // Command flags shared by all command records.
 typedef enum iree_hal_amdgpu_command_buffer_command_flag_bits_e {
   IREE_HAL_AMDGPU_COMMAND_BUFFER_COMMAND_FLAG_NONE = 0u,
-  IREE_HAL_AMDGPU_COMMAND_BUFFER_COMMAND_FLAG_HAS_BARRIER = 1u << 0,
+  // The command writes queue-owned kernarg memory at replay time.
+  IREE_HAL_AMDGPU_COMMAND_BUFFER_COMMAND_FLAG_USES_QUEUE_KERNARGS = 1u << 0,
+  // The command's first payload packet must participate in the command-buffer
+  // execution dependency chain.
+  IREE_HAL_AMDGPU_COMMAND_BUFFER_COMMAND_FLAG_HAS_BARRIER = 1u << 1,
 } iree_hal_amdgpu_command_buffer_command_flag_bits_t;
+
+enum {
+  // First bit of the two-bit acquire fence scope field in command flags.
+  IREE_HAL_AMDGPU_COMMAND_BUFFER_COMMAND_ACQUIRE_SCOPE_SHIFT = 2,
+  // Bit mask of the two-bit acquire fence scope field in command flags.
+  IREE_HAL_AMDGPU_COMMAND_BUFFER_COMMAND_ACQUIRE_SCOPE_MASK = 0x0Cu,
+  // First bit of the two-bit release fence scope field in command flags.
+  IREE_HAL_AMDGPU_COMMAND_BUFFER_COMMAND_RELEASE_SCOPE_SHIFT = 4,
+  // Bit mask of the two-bit release fence scope field in command flags.
+  IREE_HAL_AMDGPU_COMMAND_BUFFER_COMMAND_RELEASE_SCOPE_MASK = 0x30u,
+};
 
 // Binding source flags used to form HAL dispatch kernarg pointer prefixes.
 typedef enum iree_hal_amdgpu_command_buffer_binding_source_flag_bits_e {
@@ -52,6 +67,7 @@ typedef enum iree_hal_amdgpu_command_buffer_binding_source_flag_bits_e {
   IREE_HAL_AMDGPU_COMMAND_BUFFER_BINDING_SOURCE_FLAG_DYNAMIC = 1u << 0,
   IREE_HAL_AMDGPU_COMMAND_BUFFER_BINDING_SOURCE_FLAG_INDIRECT_PARAMETERS = 1u
                                                                            << 1,
+  IREE_HAL_AMDGPU_COMMAND_BUFFER_BINDING_SOURCE_FLAG_STATIC_BUFFER = 1u << 2,
 } iree_hal_amdgpu_command_buffer_binding_source_flag_bits_t;
 
 // Dispatch command flags.
@@ -66,6 +82,8 @@ typedef enum iree_hal_amdgpu_command_buffer_kernarg_strategy_e {
   IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STRATEGY_CUSTOM_DIRECT = 1,
   IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STRATEGY_INDIRECT = 2,
   IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STRATEGY_PREPUBLISHED = 3,
+  IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STRATEGY_PATCHED_TEMPLATE = 4,
+  IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STRATEGY_DYNAMIC_BINDINGS = 5,
 } iree_hal_amdgpu_command_buffer_kernarg_strategy_t;
 
 // Binding reference kind constants embedded in command records.
@@ -76,6 +94,13 @@ enum iree_hal_amdgpu_command_buffer_binding_kind_e {
 };
 // Compact binding reference kind storage.
 typedef uint8_t iree_hal_amdgpu_command_buffer_binding_kind_t;
+
+// Block flags reserved for optional block metadata.
+typedef enum iree_hal_amdgpu_command_buffer_block_flag_bits_e {
+  IREE_HAL_AMDGPU_COMMAND_BUFFER_BLOCK_FLAG_NONE = 0u,
+} iree_hal_amdgpu_command_buffer_block_flag_bits_t;
+// Compact block flag storage.
+typedef uint8_t iree_hal_amdgpu_command_buffer_block_flags_t;
 
 // Header stored at byte 0 of every command-buffer block.
 typedef struct IREE_AMDGPU_ALIGNAS(8)
@@ -88,8 +113,8 @@ typedef struct IREE_AMDGPU_ALIGNAS(8)
   uint16_t header_length;
   // Ordinal of this block within the command-buffer program.
   uint32_t block_ordinal;
-  // Block flags reserved for replay strategy selection.
-  uint32_t flags;
+  // Branch target block ordinal when |terminator_opcode| is BRANCH, or zero.
+  uint32_t terminator_target_block_ordinal;
   // Total byte capacity of this block, including this header.
   uint32_t block_length;
   // Byte offset from this header to the first command record.
@@ -106,12 +131,24 @@ typedef struct IREE_AMDGPU_ALIGNAS(8)
   uint32_t aql_packet_count;
   // Worst-case kernarg bytes emitted when replaying this block.
   uint32_t kernarg_length;
+  // Number of leading AQL payload packets in the initial unordered span,
+  // including the first packet with a barrier edge. Zero when the block emits
+  // no AQL packets.
+  uint32_t initial_barrier_packet_count;
   // Byte offset from this header to block-local read-only payload data.
   uint32_t rodata_offset;
   // Total bytes occupied by block-local read-only payload data.
   uint32_t rodata_length;
-  // Reserved bytes that must be zero in version 0.
-  uint32_t reserved0[3];
+  // Number of dispatch command records in this block.
+  uint16_t dispatch_count;
+  // Number of dispatch command records using indirect parameters.
+  uint16_t indirect_dispatch_count;
+  // Number of profile marker command records in this block.
+  uint16_t profile_marker_count;
+  // Terminator opcode from iree_hal_amdgpu_command_buffer_opcode_t.
+  uint8_t terminator_opcode;
+  // Block flags from iree_hal_amdgpu_command_buffer_block_flag_bits_t.
+  iree_hal_amdgpu_command_buffer_block_flags_t flags;
 } iree_hal_amdgpu_command_buffer_block_header_t;
 IREE_AMDGPU_STATIC_ASSERT(
     sizeof(iree_hal_amdgpu_command_buffer_block_header_t) == 64,
@@ -133,19 +170,65 @@ IREE_AMDGPU_STATIC_ASSERT(
     sizeof(iree_hal_amdgpu_command_buffer_command_header_t) == 8,
     "command header size is part of the command-buffer ABI");
 
+// Returns |flags| with its encoded fence scope fields replaced.
+static inline uint8_t
+iree_hal_amdgpu_command_buffer_command_flags_set_fence_scopes(
+    uint8_t flags, uint8_t acquire_scope, uint8_t release_scope) {
+  flags &=
+      (uint8_t)~(IREE_HAL_AMDGPU_COMMAND_BUFFER_COMMAND_ACQUIRE_SCOPE_MASK |
+                 IREE_HAL_AMDGPU_COMMAND_BUFFER_COMMAND_RELEASE_SCOPE_MASK);
+  flags |=
+      (uint8_t)((acquire_scope & 0x3u)
+                << IREE_HAL_AMDGPU_COMMAND_BUFFER_COMMAND_ACQUIRE_SCOPE_SHIFT);
+  flags |=
+      (uint8_t)((release_scope & 0x3u)
+                << IREE_HAL_AMDGPU_COMMAND_BUFFER_COMMAND_RELEASE_SCOPE_SHIFT);
+  return flags;
+}
+
+// Returns one encoded fence scope field from a command's flag byte.
+static inline uint8_t iree_hal_amdgpu_command_buffer_command_flags_fence_scope(
+    uint8_t flags, uint8_t mask, uint8_t shift) {
+  return (uint8_t)((flags & mask) >> shift);
+}
+
+// Returns the acquire fence scope encoded in a command's flag byte.
+static inline uint8_t
+iree_hal_amdgpu_command_buffer_command_flags_acquire_scope(uint8_t flags) {
+  return iree_hal_amdgpu_command_buffer_command_flags_fence_scope(
+      flags, IREE_HAL_AMDGPU_COMMAND_BUFFER_COMMAND_ACQUIRE_SCOPE_MASK,
+      IREE_HAL_AMDGPU_COMMAND_BUFFER_COMMAND_ACQUIRE_SCOPE_SHIFT);
+}
+
+// Returns the release fence scope encoded in a command's flag byte.
+static inline uint8_t
+iree_hal_amdgpu_command_buffer_command_flags_release_scope(uint8_t flags) {
+  return iree_hal_amdgpu_command_buffer_command_flags_fence_scope(
+      flags, IREE_HAL_AMDGPU_COMMAND_BUFFER_COMMAND_RELEASE_SCOPE_MASK,
+      IREE_HAL_AMDGPU_COMMAND_BUFFER_COMMAND_RELEASE_SCOPE_SHIFT);
+}
+
 // Source record used to emit one HAL ABI dispatch binding pointer.
 typedef struct IREE_AMDGPU_ALIGNAS(8)
     iree_hal_amdgpu_command_buffer_binding_source_t {
-  // Static source: final raw device pointer. Dynamic source: byte offset added
-  // to the queue_execute binding table slot.
+  // Static raw source: final raw device pointer.
+  //
+  // Dynamic source: byte offset added to the queue_execute binding table entry
+  // in |slot|.
+  //
+  // Static-buffer source: byte offset added to the command-buffer static buffer
+  // ordinal in |slot|.
   uint64_t offset_or_pointer;
-  // Dynamic source binding table slot. Must be zero for static sources.
+  // Dynamic source queue_execute binding table slot or static buffer ordinal.
+  // Must be zero for raw static sources.
   uint32_t slot;
+  // Destination HAL ABI binding pointer ordinal for compact patch lists.
+  uint16_t target_binding_ordinal;
   // Source flags from
   // iree_hal_amdgpu_command_buffer_binding_source_flag_bits_t.
   uint8_t flags;
-  // Reserved bytes that must be zero in version 0.
-  uint8_t reserved0[3];
+  // Reserved byte that must be zero in version 0.
+  uint8_t reserved0;
 } iree_hal_amdgpu_command_buffer_binding_source_t;
 IREE_AMDGPU_STATIC_ASSERT(
     sizeof(iree_hal_amdgpu_command_buffer_binding_source_t) == 16,
@@ -182,15 +265,22 @@ typedef struct IREE_AMDGPU_ALIGNAS(8)
   // Strategy-specific payload reference.
   // HAL/CUSTOM_DIRECT/INDIRECT: byte offset from this command record to
   // constants/implicit tail bytes.
-  // PREPUBLISHED: command-buffer rodata segment ordinal containing the final
-  // kernargs.
+  // PATCHED_TEMPLATE: command-buffer rodata ordinal for the immutable kernarg
+  // template copied into queue-owned kernargs before dynamic binding patches.
+  // PREPUBLISHED: byte offset from the command-buffer prepublished kernarg
+  // storage to the final kernargs.
   uint32_t payload_reference;
   // Number of HAL ABI binding pointer slots emitted before the tail payload.
   uint16_t binding_count;
   // Total kernarg reservation size in 8-byte qwords.
   uint16_t kernarg_length_qwords;
-  // Tail payload size in 8-byte qwords.
-  uint16_t tail_length_qwords;
+  // Strategy-specific payload count.
+  union {
+    // Inline tail payload size in 8-byte qwords.
+    uint16_t tail_length_qwords;
+    // Number of dynamic binding patch records following this command.
+    uint16_t patch_source_count;
+  } payload;
   // Kernarg strategy from iree_hal_amdgpu_command_buffer_kernarg_strategy_t.
   uint8_t kernarg_strategy;
   // Dispatch flags from iree_hal_amdgpu_command_buffer_dispatch_flag_bits_t.

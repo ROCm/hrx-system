@@ -8,6 +8,7 @@
 #define IREE_HAL_DRIVERS_AMDGPU_SYSTEM_H_
 
 #include "iree/base/api.h"
+#include "iree/hal/drivers/amdgpu/util/device_clock.h"
 #include "iree/hal/drivers/amdgpu/util/device_library.h"
 #include "iree/hal/drivers/amdgpu/util/info.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
@@ -68,9 +69,8 @@ typedef struct iree_hal_amdgpu_system_t {
   // HSA API handle.
   iree_hal_amdgpu_libhsa_t libhsa;
 
-  // /dev/kfd handle, or -1 when unavailable on the platform.
-  // TODO(benvanik): drop this when HSA supports all of the ioctls we need.
-  int kfd_fd;
+  // Platform source used for device/host clock-correlation sampling.
+  iree_hal_amdgpu_device_clock_source_t device_clock_source;
 
   // System topology as visible to the HAL device. This may be a subset of
   // the devices available in the system.

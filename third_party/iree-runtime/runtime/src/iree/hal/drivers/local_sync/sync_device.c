@@ -122,15 +122,6 @@ static iree_status_t iree_hal_sync_device_create_default_pool(
   return status;
 }
 
-static iree_status_t iree_hal_sync_device_resolve_pool(
-    iree_hal_sync_device_t* device, iree_hal_pool_t* pool,
-    iree_hal_pool_t** out_pool) {
-  IREE_ASSERT_ARGUMENT(device);
-  IREE_ASSERT_ARGUMENT(out_pool);
-  *out_pool = pool ? pool : device->default_pool;
-  return iree_ok_status();
-}
-
 static bool iree_hal_sync_device_query_pool_epoch(void* user_data,
                                                   iree_async_axis_t axis,
                                                   uint64_t epoch) {
@@ -812,6 +803,74 @@ static iree_status_t iree_hal_sync_device_profiled_queue_op_end(
                                            operation_status);
 }
 
+static iree_status_t iree_hal_sync_device_queue_alloca_direct_profiled(
+    iree_hal_sync_device_t* device,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_params_t params, iree_device_size_t allocation_size,
+    iree_hal_buffer_t** IREE_RESTRICT out_buffer) {
+  iree_hal_sync_device_profile_operation_t profile_operation;
+  iree_hal_sync_device_profile_operation_initialize(
+      IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_ALLOCA, allocation_size,
+      /*operation_count=*/1, &profile_operation);
+
+  bool queue_op_begun = false;
+  iree_status_t status = iree_hal_sync_device_profiled_queue_op_begin(
+      device, wait_semaphore_list, signal_semaphore_list, &profile_operation);
+  queue_op_begun = iree_status_is_ok(status);
+
+  iree_hal_buffer_t* buffer = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_allocator_allocate_buffer(
+        device->device_allocator, params, allocation_size, &buffer);
+  }
+  if (iree_status_is_ok(status)) {
+    iree_hal_sync_device_profile_record_memory_event(
+        device, &profile_operation,
+        IREE_HAL_PROFILE_MEMORY_EVENT_TYPE_QUEUE_ALLOCA,
+        IREE_HAL_PROFILE_MEMORY_EVENT_FLAG_QUEUE_OPERATION, UINT32_MAX,
+        /*pool=*/NULL, params, /*reservation=*/NULL,
+        /*frontier_entry_count=*/0);
+  }
+  if (queue_op_begun) {
+    status = iree_hal_sync_device_profiled_queue_op_end(
+        device, signal_semaphore_list, &profile_operation, status);
+  }
+  if (iree_status_is_ok(status)) {
+    *out_buffer = buffer;
+  } else {
+    iree_hal_buffer_release(buffer);
+  }
+  return status;
+}
+
+static iree_status_t iree_hal_sync_device_queue_alloca_direct(
+    iree_hal_sync_device_t* device,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_params_t params, iree_device_size_t allocation_size,
+    iree_hal_buffer_t** IREE_RESTRICT out_buffer) {
+  iree_status_t status =
+      iree_hal_sync_device_queue_op_begin(device, wait_semaphore_list);
+  bool queue_op_begun = iree_status_is_ok(status);
+
+  iree_hal_buffer_t* buffer = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_allocator_allocate_buffer(
+        device->device_allocator, params, allocation_size, &buffer);
+  }
+  if (queue_op_begun) {
+    status = iree_hal_sync_device_queue_op_end(device, signal_semaphore_list,
+                                               status);
+  }
+  if (iree_status_is_ok(status)) {
+    *out_buffer = buffer;
+  } else {
+    iree_hal_buffer_release(buffer);
+  }
+  return status;
+}
+
 static iree_status_t iree_hal_sync_device_queue_alloca_profiled(
     iree_hal_sync_device_t* device, iree_hal_device_t* base_device,
     iree_hal_queue_affinity_t queue_affinity,
@@ -824,6 +883,17 @@ static iree_status_t iree_hal_sync_device_queue_alloca_profiled(
   iree_hal_sync_device_profile_operation_initialize(
       IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_ALLOCA, allocation_size,
       /*operation_count=*/1, &profile_operation);
+
+  if (allocation_size == 0) {
+    return iree_hal_sync_device_queue_alloca_direct_profiled(
+        device, wait_semaphore_list, signal_semaphore_list, params,
+        allocation_size, out_buffer);
+  }
+  if (!allocation_pool) {
+    return iree_hal_sync_device_queue_alloca_direct_profiled(
+        device, wait_semaphore_list, signal_semaphore_list, params,
+        allocation_size, out_buffer);
+  }
 
   iree_hal_buffer_t* backing_buffer = NULL;
   iree_hal_buffer_t* transient_buffer = NULL;
@@ -881,9 +951,7 @@ static iree_status_t iree_hal_sync_device_queue_alloca(
     iree_device_size_t allocation_size, iree_hal_alloca_flags_t flags,
     iree_hal_buffer_t** IREE_RESTRICT out_buffer) {
   iree_hal_sync_device_t* device = iree_hal_sync_device_cast(base_device);
-  iree_hal_pool_t* allocation_pool = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_sync_device_resolve_pool(device, pool, &allocation_pool));
+  iree_hal_pool_t* allocation_pool = pool;
   iree_hal_buffer_params_canonicalize(&params);
   iree_hal_allocator_query_buffer_compatibility(
       device->device_allocator, params, allocation_size, &params,
@@ -893,6 +961,17 @@ static iree_status_t iree_hal_sync_device_queue_alloca(
         device, base_device, queue_affinity, wait_semaphore_list,
         signal_semaphore_list, allocation_pool, params, allocation_size, flags,
         out_buffer);
+  }
+
+  if (allocation_size == 0) {
+    return iree_hal_sync_device_queue_alloca_direct(
+        device, wait_semaphore_list, signal_semaphore_list, params,
+        allocation_size, out_buffer);
+  }
+  if (!allocation_pool) {
+    return iree_hal_sync_device_queue_alloca_direct(
+        device, wait_semaphore_list, signal_semaphore_list, params,
+        allocation_size, out_buffer);
   }
 
   IREE_RETURN_IF_ERROR(
@@ -1356,14 +1435,16 @@ static iree_status_t iree_hal_sync_device_queue_host_call_profiled(
                                               : signal_semaphore_list,
   };
   iree_status_t call_status = call.fn(call.user_data, args, &context);
+  const iree_status_code_t call_status_code = iree_status_code(call_status);
 
-  if (is_nonblocking) {
+  if (is_nonblocking || call_status_code == IREE_STATUS_DEFERRED) {
+    iree_hal_sync_device_profile_operation_record_end(
+        device, &profile_operation, iree_status_from_code(call_status_code));
     // Dependencies have already been signaled by contract; the callback status
-    // cannot be represented on the queue timeline.
-    return iree_status_ignore(call_status);
-  } else if (iree_status_is_deferred(call_status)) {
-    // User callback will signal in the future (or they are fire-and-forget).
-    return iree_status_ignore(call_status);
+    // cannot be represented on the queue timeline. Deferred callbacks will
+    // signal in the future or are fire-and-forget.
+    iree_status_free(call_status);
+    return iree_ok_status();
   } else if (iree_status_is_ok(call_status)) {
     // Signal callback completed synchronously.
     return iree_hal_sync_device_profiled_queue_op_end(
@@ -1418,14 +1499,14 @@ static iree_status_t iree_hal_sync_device_queue_host_call(
                                               : signal_semaphore_list,
   };
   iree_status_t call_status = call.fn(call.user_data, args, &context);
+  const iree_status_code_t call_status_code = iree_status_code(call_status);
 
-  if (is_nonblocking) {
+  if (is_nonblocking || call_status_code == IREE_STATUS_DEFERRED) {
     // Dependencies have already been signaled by contract; the callback status
-    // cannot affect this queue operation.
-    return iree_status_ignore(call_status);
-  } else if (iree_status_is_deferred(call_status)) {
-    // User callback will signal in the future (or they are fire-and-forget).
-    return iree_status_ignore(call_status);
+    // cannot affect this queue operation. Deferred callbacks will signal in the
+    // future or are fire-and-forget.
+    iree_status_free(call_status);
+    return iree_ok_status();
   } else if (iree_status_is_ok(call_status)) {
     // Signal callback completed synchronously.
     IREE_RETURN_IF_ERROR(iree_hal_semaphore_list_signal(signal_semaphore_list,

@@ -22,7 +22,7 @@ extern "C" {
 // the Two-Level Segregated Fit algorithm. It is pure bookkeeping: it tracks
 // which sub-ranges are allocated and which are free, but has no knowledge of
 // physical memory, device pointers, or GPU drivers. All metadata lives in host
-// memory — the allocator never reads from or writes to the managed range.
+// memory; the allocator never reads from or writes to the managed range.
 //
 // ## Why TLSF
 //
@@ -108,7 +108,7 @@ extern "C" {
 // Each free block carries an inline death frontier: an `iree_async_frontier_t`
 // with a configurable maximum entry capacity (set at allocator creation time,
 // shared by all blocks in the instance). The frontier captures the causal
-// position at which the block was freed — "everything that used this memory
+// position at which the block was freed; "everything that used this memory
 // has been submitted to these queues at these epochs."
 //
 // When the async allocator considers reusing a free block, it checks whether
@@ -123,7 +123,7 @@ extern "C" {
 //
 // If a frontier merge exceeds the inline capacity (too many distinct axes),
 // the block is marked **tainted**. A tainted frontier conservatively means
-// "not safe for zero-sync reuse" — the async allocator must wait for device
+// "not safe for zero-sync reuse"; the async allocator must wait for device
 // confirmation before reusing the block. Taint is self-healing: when a
 // tainted block is eventually allocated and later freed again, it gets a
 // fresh frontier from its new usage context.
@@ -139,7 +139,7 @@ extern "C" {
 //   - The block node pool grows dynamically as allocations fragment the
 //     range into more blocks. A 1 GB range with 256-byte minimum blocks
 //     has at most ~4M blocks (700 MB metadata). In practice, the number
-//     of live blocks is much smaller — a well-utilized pool has O(100s)
+//     of live blocks is much smaller; a well-utilized pool has O(100s)
 //     of blocks, not millions.
 //
 // ### Thread safety
@@ -168,6 +168,12 @@ extern "C" {
 // including the frontier header) covers single-queue, multi-queue, and
 // collective workloads without taint. Multi-GPU training may need higher.
 #define IREE_HAL_MEMORY_TLSF_DEFAULT_FRONTIER_CAPACITY 8
+
+// Default initial block metadata capacity. TLSF slabs usually start as a
+// single free block and only need more nodes as real fragmentation appears.
+// Keeping the initial node pool small avoids scaling host metadata overhead
+// with the theoretical maximum number of aligned blocks in a large slab.
+#define IREE_HAL_MEMORY_TLSF_DEFAULT_INITIAL_BLOCK_CAPACITY 64
 
 // Minimum alignment for all allocations. Ensures that the FL/SL decomposition
 // has meaningful sub-bins at the lowest levels (FL_MIN >= 4 gives 32 sub-bins
@@ -211,7 +217,7 @@ enum iree_hal_memory_tlsf_block_flag_bits_e {
 
 // Fixed-size metadata for a single block in the TLSF allocator. Each block
 // represents a contiguous sub-range of the managed offset space. Blocks are
-// stored in a flat array with stride arithmetic — the actual storage size per
+// stored in a flat array with stride arithmetic; the actual storage size per
 // block includes trailing inline frontier data (not represented in this
 // struct).
 //
@@ -248,7 +254,7 @@ typedef struct iree_hal_memory_tlsf_block_t {
 // Options for creating a TLSF allocator instance.
 typedef struct iree_hal_memory_tlsf_options_t {
   // Total range to manage: offsets [0, range_length). Must be > 0.
-  // The range represents an abstract offset space — it could map to GPU VRAM,
+  // The range represents an abstract offset space; it could map to GPU VRAM,
   // host memory, a file, or any contiguous address space. The TLSF allocator
   // does not access the underlying storage.
   iree_device_size_t range_length;
@@ -265,8 +271,8 @@ typedef struct iree_hal_memory_tlsf_options_t {
 
   // Initial capacity of the block node pool (number of block metadata
   // entries to pre-allocate). The pool grows dynamically when exhausted,
-  // doubling in capacity. Set to 0 to use a default derived from
-  // range_length / alignment (clamped to [64, 4096]).
+  // doubling in capacity. Set to 0 to use
+  // IREE_HAL_MEMORY_TLSF_DEFAULT_INITIAL_BLOCK_CAPACITY (64).
   //
   // Each block node costs approximately (40 + 8 + 16 * frontier_capacity)
   // bytes of host memory.
@@ -278,12 +284,12 @@ typedef struct iree_hal_memory_tlsf_options_t {
   // this many entries, the merged block is marked tainted.
   //
   // Guideline for sizing:
-  //   1 — single-queue inference (minimal, any coalescing with cross-queue
+  //   1: single-queue inference (minimal, any coalescing with cross-queue
   //       frees will taint)
-  //   4 — single-device, multi-queue or small collective workloads
-  //   8 — (default) multi-queue with moderate coalescing headroom
-  //  12 — 8-GPU tensor-parallel training
-  //  24 — 64-GPU DP+TP training
+  //   4: single-device, multi-queue or small collective workloads
+  //   8: (default) multi-queue with moderate coalescing headroom
+  //  12: 8-GPU tensor-parallel training
+  //  24: 64-GPU DP+TP training
   //
   // Set to 0 to use IREE_HAL_MEMORY_TLSF_DEFAULT_FRONTIER_CAPACITY (8).
   uint8_t frontier_capacity;
@@ -332,7 +338,7 @@ enum iree_hal_memory_tlsf_allocate_result_e {
 };
 
 // Running statistics for a TLSF allocator. All counters are maintained
-// incrementally — querying stats is O(1) with no internal walks.
+// incrementally; querying stats is O(1) with no internal walks.
 typedef struct iree_hal_memory_tlsf_stats_t {
   // Total bytes currently occupied by live allocations.
   iree_device_size_t bytes_allocated;
@@ -515,7 +521,7 @@ void iree_hal_memory_tlsf_restore(
     iree_hal_memory_tlsf_t* tlsf,
     iree_hal_memory_tlsf_block_index_t block_index);
 
-// Copies the allocator's running statistics into |out_stats|. O(1) — all
+// Copies the allocator's running statistics into |out_stats|. O(1); all
 // counters are maintained incrementally on every alloc/free operation.
 void iree_hal_memory_tlsf_query_stats(const iree_hal_memory_tlsf_t* tlsf,
                                       iree_hal_memory_tlsf_stats_t* out_stats);

@@ -633,11 +633,11 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_copy_with_action(
       &profile_event_info, out_ready, &submission));
   if (!*out_ready) return iree_ok_status();
 
-  memcpy(submission.kernel.kernarg_blocks->data, &kernargs, sizeof(kernargs));
+  memcpy(submission.kernel.kernargs.blocks->data, &kernargs, sizeof(kernargs));
   submission.dispatch_setup =
       iree_hal_amdgpu_host_queue_write_dispatch_packet_body(
           &submission.dispatch_slot->dispatch, &dispatch_packet,
-          submission.kernel.kernarg_blocks->data,
+          submission.kernel.kernargs.blocks->data,
           submission.dispatch_completion_signal);
   submission.minimum_acquire_scope = minimum_acquire_scope;
   submission.minimum_release_scope = minimum_release_scope;
@@ -819,16 +819,16 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_update(
   if (!*out_ready) return iree_ok_status();
 
   uint8_t* staged_source_bytes =
-      (uint8_t*)submission.kernel.kernarg_blocks + source_payload_offset;
-  memcpy(submission.kernel.kernarg_blocks->data, &kernargs, sizeof(kernargs));
+      (uint8_t*)submission.kernel.kernargs.blocks + source_payload_offset;
+  memcpy(submission.kernel.kernargs.blocks->data, &kernargs, sizeof(kernargs));
   ((iree_hal_amdgpu_device_buffer_copy_kernargs_t*)
-       submission.kernel.kernarg_blocks->data)
+       submission.kernel.kernargs.blocks->data)
       ->source_ptr = staged_source_bytes;
   memcpy(staged_source_bytes, source_bytes, source_length);
   submission.dispatch_setup =
       iree_hal_amdgpu_host_queue_write_dispatch_packet_body(
           &submission.dispatch_slot->dispatch, &dispatch_packet,
-          submission.kernel.kernarg_blocks->data,
+          submission.kernel.kernargs.blocks->data,
           submission.dispatch_completion_signal);
 
   iree_hal_resource_t* operation_resources[1] = {

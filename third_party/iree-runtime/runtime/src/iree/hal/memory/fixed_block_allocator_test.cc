@@ -299,7 +299,7 @@ TEST(FixedBlockAllocator, ReleaseAndReacquire) {
   IREE_ASSERT_OK(iree_hal_memory_fixed_block_allocator_acquire(pool, &a));
   IREE_ASSERT_OK(iree_hal_memory_fixed_block_allocator_acquire(pool, &b));
 
-  // Release one, then reacquire — should succeed.
+  // Release one, then reacquire; should succeed.
   iree_hal_memory_fixed_block_allocator_release(pool, a.block_index, nullptr);
 
   iree_hal_memory_fixed_block_allocator_allocation_t reused;
@@ -330,7 +330,7 @@ TEST(FixedBlockAllocator, FrontierPreservedAcrossAcquireRelease) {
   MAKE_FRONTIER(death, 2, E(TestQueueAxis(0), 42), E(TestQueueAxis(1), 100));
   iree_hal_memory_fixed_block_allocator_release(pool, first.block_index, death);
 
-  // Reacquire the same block — death frontier should be visible.
+  // Reacquire the same block; death frontier should be visible.
   iree_hal_memory_fixed_block_allocator_allocation_t second;
   IREE_ASSERT_OK(iree_hal_memory_fixed_block_allocator_acquire(pool, &second));
   EXPECT_EQ(second.block_index, first.block_index);
@@ -361,7 +361,7 @@ TEST(FixedBlockAllocator, FrontierClearedOnReleaseWithNull) {
 
   IREE_ASSERT_OK(iree_hal_memory_fixed_block_allocator_acquire(pool, &alloc));
   ASSERT_NE(alloc.death_frontier, nullptr);
-  // Release with null — frontier should be cleared.
+  // Release with null; frontier should be cleared.
   iree_hal_memory_fixed_block_allocator_release(pool, alloc.block_index,
                                                 nullptr);
 
@@ -450,12 +450,12 @@ TEST(FixedBlockAllocator, OversizedFrontierCausesTaint) {
   iree_hal_memory_fixed_block_allocator_allocation_t alloc;
   IREE_ASSERT_OK(iree_hal_memory_fixed_block_allocator_acquire(pool, &alloc));
 
-  // Release with a 3-entry frontier when capacity is 2 — should taint.
+  // Release with a 3-entry frontier when capacity is 2; should taint.
   MAKE_FRONTIER(big, 3, E(TestQueueAxis(0), 1), E(TestQueueAxis(1), 2),
                 E(TestQueueAxis(2), 3));
   iree_hal_memory_fixed_block_allocator_release(pool, alloc.block_index, big);
 
-  // Reacquire — should see TAINTED flag and no frontier.
+  // Reacquire; should see TAINTED flag and no frontier.
   IREE_ASSERT_OK(iree_hal_memory_fixed_block_allocator_acquire(pool, &alloc));
   EXPECT_TRUE(alloc.block_flags &
               IREE_HAL_MEMORY_FIXED_BLOCK_ALLOCATOR_BLOCK_FLAG_TAINTED);
@@ -486,7 +486,7 @@ TEST(FixedBlockAllocator, TaintClearedOnReleaseWithFittingFrontier) {
   EXPECT_TRUE(alloc.block_flags &
               IREE_HAL_MEMORY_FIXED_BLOCK_ALLOCATOR_BLOCK_FLAG_TAINTED);
 
-  // Release with a fitting frontier — taint should clear.
+  // Release with a fitting frontier; taint should clear.
   MAKE_FRONTIER(small, 2, E(TestQueueAxis(0), 10), E(TestQueueAxis(1), 20));
   iree_hal_memory_fixed_block_allocator_release(pool, alloc.block_index, small);
 

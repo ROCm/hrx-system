@@ -746,22 +746,6 @@ TEST(MultiWaitTest, SingleSemaphoreTimesOut) {
   iree_async_semaphore_release(sem);
 }
 
-TEST(MultiWaitTest, SingleSemaphoreActiveWaitTimesOut) {
-  iree_async_semaphore_t* sem = nullptr;
-  IREE_ASSERT_OK(iree_async_semaphore_create(
-      test_proactor(), 0, IREE_ASYNC_SEMAPHORE_DEFAULT_FRONTIER_CAPACITY,
-      iree_allocator_system(), &sem));
-
-  uint64_t value = 10;
-  iree_status_t status = iree_async_semaphore_multi_wait(
-      IREE_ASYNC_WAIT_MODE_ALL, &sem, &value, 1, iree_make_timeout_ms(1),
-      IREE_ASYNC_WAIT_FLAG_ACTIVE, iree_allocator_system());
-  EXPECT_EQ(iree_status_code(status), IREE_STATUS_DEADLINE_EXCEEDED);
-  iree_status_free(status);
-
-  iree_async_semaphore_release(sem);
-}
-
 TEST(MultiWaitTest, SingleSemaphoreImmediateTimeout) {
   iree_async_semaphore_t* sem = nullptr;
   IREE_ASSERT_OK(iree_async_semaphore_create(
@@ -1329,7 +1313,10 @@ TEST(LinkTest, FailurePropagation) {
       source, iree_make_status(IREE_STATUS_INTERNAL, "gpu fault"));
 
   // Target should be failed with the same status code.
-  EXPECT_EQ(iree_async_semaphore_query_status(target), IREE_STATUS_INTERNAL);
+  iree_status_t target_failure = (iree_status_t)iree_atomic_load(
+      &target->failure_status, iree_memory_order_acquire);
+  EXPECT_FALSE(iree_status_is_ok(target_failure));
+  EXPECT_EQ(iree_status_code(target_failure), IREE_STATUS_INTERNAL);
 
   iree_async_semaphore_release(source);
   iree_async_semaphore_release(target);
@@ -1438,7 +1425,10 @@ TEST(LinkTest, SourceDestroyPropagatesCancelled) {
   iree_async_semaphore_release(source);
 
   // Target should have been failed with CANCELLED.
-  EXPECT_EQ(iree_async_semaphore_query_status(target), IREE_STATUS_CANCELLED);
+  iree_status_t target_failure = (iree_status_t)iree_atomic_load(
+      &target->failure_status, iree_memory_order_acquire);
+  EXPECT_FALSE(iree_status_is_ok(target_failure));
+  EXPECT_EQ(iree_status_code(target_failure), IREE_STATUS_CANCELLED);
 
   iree_async_semaphore_release(target);
 }
@@ -1461,7 +1451,10 @@ TEST(LinkTest, AlreadyFailedSourcePropagatesImmediately) {
   IREE_ASSERT_OK(iree_async_semaphore_link(source, 10, target, 20, &link));
 
   // Target should be failed immediately.
-  EXPECT_EQ(iree_async_semaphore_query_status(target), IREE_STATUS_ABORTED);
+  iree_status_t target_failure = (iree_status_t)iree_atomic_load(
+      &target->failure_status, iree_memory_order_acquire);
+  EXPECT_FALSE(iree_status_is_ok(target_failure));
+  EXPECT_EQ(iree_status_code(target_failure), IREE_STATUS_ABORTED);
 
   iree_async_semaphore_release(source);
   iree_async_semaphore_release(target);

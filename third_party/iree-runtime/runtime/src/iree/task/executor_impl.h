@@ -20,6 +20,10 @@
 extern "C" {
 #endif  // __cplusplus
 
+// Temporary marker for a compute slot that has been claimed by a scheduler
+// thread but has not yet published a drainable process pointer.
+#define IREE_TASK_COMPUTE_SLOT_RESERVED ((intptr_t)1)
+
 // A single compute slot in the executor's slot array. Holds a process
 // pointer, a count of workers currently engaged with this slot, and a flag
 // ensuring the completion callback fires exactly once.
@@ -35,9 +39,15 @@ extern "C" {
 // the eager completion callback (semaphore signaling, dependent activation).
 typedef struct iree_alignas(iree_hardware_destructive_interference_size)
     iree_task_compute_slot_t {
-  // Process pointer: 0 (empty) or a valid process. Set via CAS on activate,
-  // cleared by the last active drainer on release.
+  // Process pointer: 0 (empty), IREE_TASK_COMPUTE_SLOT_RESERVED while the
+  // scheduler publishes slot metadata, or a valid process.
   iree_atomic_intptr_t process;
+
+  // Process placement epoch captured at publication time. Slot releases
+  // snapshot this before clearing the slot so they can detect if the same
+  // persistent process was republished before the old release callback runs.
+  iree_atomic_int32_t placement_epoch;
+
   // Tagged drainer counter: {generation(32) | count(32)}.
   //
   // The low 32 bits are the active drainer count — workers between their
@@ -221,12 +231,6 @@ struct iree_task_executor_t {
   // eliminates the hard slot limit and prevents silent process drops.
   iree_task_process_slist_t compute_overflow;
 };
-
-// Seeds the wake tree by adding |count| to the desired_wake counter and
-// waking one idle worker. Exposed for use by worker.c's release path, which
-// must re-wake workers when a new process is placed during slot release.
-void iree_task_executor_wake_workers(iree_task_executor_t* executor,
-                                     int32_t count);
 
 // Tries to place a process into the first available compute slot. Returns true
 // if placed, false if all slots are occupied. Exposed for use by worker.c's

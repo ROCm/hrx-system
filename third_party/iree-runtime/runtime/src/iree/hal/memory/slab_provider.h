@@ -68,7 +68,10 @@ typedef struct iree_hal_slab_provider_stats_t {
 // Stack-allocate before a stats query:
 //   iree_hal_slab_provider_visited_set_t visited = {0};
 typedef struct iree_hal_slab_provider_visited_set_t {
+  // Number of providers already recorded in |providers|.
   iree_host_size_t count;
+
+  // Providers visited during the current recursive stats query.
   const iree_hal_slab_provider_t* providers[IREE_HAL_SLAB_PROVIDER_MAX_VISITED];
 } iree_hal_slab_provider_visited_set_t;
 
@@ -98,7 +101,7 @@ typedef struct iree_hal_slab_t {
   iree_device_size_t length;
 
   // Provider-specific opaque handle used to release the slab. The provider
-  // interprets this however it needs — a pointer to internal state, an
+  // interprets this however it needs: a pointer to internal state, an
   // allocation handle, a VMM mapping descriptor, etc.
   uint64_t provider_handle;
 } iree_hal_slab_t;
@@ -109,7 +112,7 @@ typedef struct iree_hal_slab_t {
 
 // Acquires and releases large chunks of physical memory from the platform or
 // GPU driver. This is the only component that makes driver API calls for
-// memory allocation — everything above it (offset allocators, pools) is pure
+// memory allocation; everything above it (offset allocators, pools) is pure
 // host-side bookkeeping.
 //
 // Slab providers are ref-counted. Pools retain their slab provider at creation
@@ -121,7 +124,10 @@ typedef struct iree_hal_slab_t {
 //
 // Concrete implementations embed this struct at offset 0.
 struct iree_hal_slab_provider_t {
+  // Reference count controlling provider lifetime.
   iree_atomic_ref_count_t ref_count;
+
+  // Concrete provider implementation hooks.
   const iree_hal_slab_provider_vtable_t* vtable;
 };
 
@@ -193,6 +199,7 @@ bool iree_hal_slab_provider_visited(
 //===----------------------------------------------------------------------===//
 
 struct iree_hal_slab_provider_vtable_t {
+  // Destroys a concrete slab provider implementation.
   void (*destroy)(iree_hal_slab_provider_t* provider);
 
   // Acquires a slab of at least |min_length| bytes. The returned slab may
@@ -250,7 +257,7 @@ struct iree_hal_slab_provider_vtable_t {
   // Accumulates this provider's statistics into |out_stats|. Wrapping
   // providers call into their inner provider first, then add their own
   // contributions. |visited| prevents double-counting when multiple pools
-  // share a provider chain — providers already in the set return immediately.
+  // share a provider chain; providers already in the set return immediately.
   void (*query_stats)(const iree_hal_slab_provider_t* provider,
                       iree_hal_slab_provider_visited_set_t* visited,
                       iree_hal_slab_provider_stats_t* out_stats);

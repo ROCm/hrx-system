@@ -11,7 +11,10 @@
 #endif  // IREE_PLATFORM_LINUX
 
 typedef struct iree_hal_cpu_slab_provider_t {
+  // Base provider header for vtable dispatch and ref counting.
   iree_hal_slab_provider_t base;
+
+  // Host allocator used for provider metadata and slab memory.
   iree_allocator_t host_allocator;
 } iree_hal_cpu_slab_provider_t;
 
@@ -102,7 +105,7 @@ static void iree_hal_cpu_slab_provider_query_properties(
 }
 
 // Forces the OS to back all virtual pages in the slab with physical memory
-// and zero them. Without this, each page faults on first write — 65,536
+// and zero them. Without this, each page faults on first write: 65,536
 // faults for a 256MB slab, scattered across whichever thread touches the
 // memory first. Running this on the slab cache's background thread (which is
 // NUMA-pinned) ensures pages are allocated on the correct NUMA node via
@@ -140,13 +143,13 @@ static void iree_hal_cpu_slab_provider_prefault(
   IREE_TRACE_ZONE_END(z0);
 }
 
-// The CPU provider has no cache or freelist — nothing to trim.
+// The CPU provider has no cache or freelist; nothing to trim.
 static void iree_hal_cpu_slab_provider_trim(
     iree_hal_slab_provider_t* base_provider,
     iree_hal_slab_provider_trim_flags_t flags) {}
 
 // The CPU provider tracks no statistics beyond what the allocator itself
-// provides. Leaf provider — no inner provider to recurse into.
+// provides. Leaf provider; no inner provider to recurse into.
 static void iree_hal_cpu_slab_provider_query_stats(
     const iree_hal_slab_provider_t* base_provider,
     iree_hal_slab_provider_visited_set_t* visited,

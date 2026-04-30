@@ -11,6 +11,7 @@
 #include "iree/base/threading/mutex.h"
 #include "iree/hal/api.h"
 #include "iree/hal/profile_sink.h"
+#include "iree/hal/utils/profile_event_ring.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -23,36 +24,15 @@ extern "C" {
 // Lossy fixed-capacity host-side profiling event stream.
 //
 // Producers append records until the stream reaches capacity. Once full, new
-// records are dropped and accounted in |dropped_count| until a flush copies
-// retained records to the sink and advances |read_position|. The stream writes
-// a metadata-only TRUNCATED chunk if only dropped records are available.
+// records are dropped and accounted until a flush writes retained records to
+// the sink and advances the read position. The stream writes a metadata-only
+// TRUNCATED chunk if only dropped records are available.
 typedef struct iree_hal_amdgpu_profile_event_stream_t {
   // Mutex protecting positions, dropped counts, and event id allocation.
   iree_slim_mutex_t mutex;
 
-  // Event record storage, or NULL when the stream is disabled.
-  void* events;
-
-  // Byte size of one event record in |events|.
-  iree_host_size_t event_size;
-
-  // Allocated event capacity, always a power of two when nonzero.
-  iree_host_size_t capacity;
-
-  // Mask used to wrap absolute stream positions.
-  iree_host_size_t mask;
-
-  // Absolute read position of the first retained event.
-  uint64_t read_position;
-
-  // Absolute write position one past the last retained event.
-  uint64_t write_position;
-
-  // Number of events dropped since the last successful flush accounted them.
-  uint64_t dropped_count;
-
-  // Next nonzero event id assigned by this stream.
-  uint64_t next_event_id;
+  // Lossy fixed-capacity host-side event ring.
+  iree_hal_profile_event_ring_t ring;
 } iree_hal_amdgpu_profile_event_stream_t;
 
 // Host-side profiling event streams owned by an AMDGPU logical device.

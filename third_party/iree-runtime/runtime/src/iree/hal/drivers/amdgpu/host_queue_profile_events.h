@@ -38,13 +38,13 @@ void iree_hal_amdgpu_host_queue_deallocate_profiling_completion_signals(
 static inline uint32_t
 iree_hal_amdgpu_host_queue_profile_dispatch_event_capacity(
     const iree_hal_amdgpu_host_queue_t* queue) {
-  return queue->profiling.dispatch_event_capacity;
+  return queue->profiling.dispatch_events.capacity;
 }
 
 // Returns the dispatch event ring slot index for |event_position|.
 static inline uint32_t iree_hal_amdgpu_host_queue_profile_dispatch_event_index(
     const iree_hal_amdgpu_host_queue_t* queue, uint64_t event_position) {
-  return (uint32_t)(event_position & queue->profiling.dispatch_event_mask);
+  return (uint32_t)(event_position & queue->profiling.dispatch_events.mask);
 }
 
 // Returns the raw profiling completion signal paired with |event_position|'s
@@ -59,11 +59,11 @@ iree_hal_amdgpu_host_queue_profiling_completion_signal_ptr(
       iree_hal_amdgpu_host_queue_profile_dispatch_event_index(queue,
                                                               event_position);
   const uint32_t block_index =
-      signal_index / queue->profiling.signals_per_block;
+      signal_index / queue->profiling.signals.signals_per_block;
   const uint32_t block_signal_index =
-      signal_index - block_index * queue->profiling.signals_per_block;
+      signal_index - block_index * queue->profiling.signals.signals_per_block;
   uint8_t* block_ptr =
-      (uint8_t*)queue->profiling.signal_blocks[block_index]->ptr;
+      (uint8_t*)queue->profiling.signals.blocks[block_index]->ptr;
   iree_amd_signal_t* signal =
       (iree_amd_signal_t*)(block_ptr +
                            block_signal_index * sizeof(iree_amd_signal_t));

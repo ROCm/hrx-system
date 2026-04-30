@@ -151,12 +151,12 @@ TEST(Arena, AcquireExhaustion) {
   IREE_ASSERT_OK(
       iree_hal_memory_arena_allocate(options, iree_allocator_system(), &arena));
 
-  // Acquire 100 bytes — should succeed.
+  // Acquire 100 bytes; should succeed.
   iree_hal_memory_arena_allocation_t alloc;
   IREE_ASSERT_OK(iree_hal_memory_arena_acquire(arena, 100, 1, &alloc));
   EXPECT_EQ(alloc.offset, 0u);
 
-  // Acquire 1 more byte — should fail.
+  // Acquire 1 more byte; should fail.
   iree_hal_memory_arena_allocation_t extra;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
                         iree_hal_memory_arena_acquire(arena, 1, 1, &extra));
@@ -254,7 +254,7 @@ TEST(Arena, PartialReleaseNoReset) {
   IREE_ASSERT_OK(iree_hal_memory_arena_acquire(arena, 100, 1, &a));
   IREE_ASSERT_OK(iree_hal_memory_arena_acquire(arena, 200, 1, &b));
 
-  // Release one — arena should NOT reset.
+  // Release one; arena should NOT reset.
   iree_hal_memory_arena_release(arena, nullptr);
 
   iree_hal_memory_arena_stats_t stats;
@@ -474,13 +474,13 @@ TEST(Arena, AllAcquisitionsSeePreviousFrontier) {
 TEST(Arena, TaintOnFrontierOverflow) {
   iree_hal_memory_arena_options_t options = {};
   options.capacity = 4096;
-  options.frontier_capacity = 1;  // Only 1 entry — merging 2 axes overflows.
+  options.frontier_capacity = 1;  // Only 1 entry; merging 2 axes overflows.
 
   iree_hal_memory_arena_t* arena = NULL;
   IREE_ASSERT_OK(
       iree_hal_memory_arena_allocate(options, iree_allocator_system(), &arena));
 
-  // Batch 1: release with 2 different axes — exceeds capacity of 1.
+  // Batch 1: release with 2 different axes; exceeds capacity of 1.
   iree_hal_memory_arena_allocation_t a, b;
   IREE_ASSERT_OK(iree_hal_memory_arena_acquire(arena, 64, 1, &a));
   IREE_ASSERT_OK(iree_hal_memory_arena_acquire(arena, 64, 1, &b));

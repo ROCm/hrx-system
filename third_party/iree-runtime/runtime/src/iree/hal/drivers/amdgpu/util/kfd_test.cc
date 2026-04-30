@@ -40,41 +40,8 @@ class StdinRestorer {
 };
 #endif  // IREE_PLATFORM_LINUX
 
-TEST(KFDStandaloneTest, ValidateClockCounters) {
-  iree_hal_amdgpu_clock_counters_t counters = {
-      /*.gpu_clock_counter=*/1,
-      /*.cpu_clock_counter=*/2,
-      /*.system_clock_counter=*/3,
-      /*.system_clock_freq=*/4,
-  };
-  IREE_EXPECT_OK(iree_hal_amdgpu_kfd_validate_clock_counters(1234, &counters));
-
-  counters.gpu_clock_counter = 0;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_FAILED_PRECONDITION,
-      iree_hal_amdgpu_kfd_validate_clock_counters(1234, &counters));
-  counters.gpu_clock_counter = 1;
-
-  counters.cpu_clock_counter = 0;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_FAILED_PRECONDITION,
-      iree_hal_amdgpu_kfd_validate_clock_counters(1234, &counters));
-  counters.cpu_clock_counter = 2;
-
-  counters.system_clock_counter = 0;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_FAILED_PRECONDITION,
-      iree_hal_amdgpu_kfd_validate_clock_counters(1234, &counters));
-  counters.system_clock_counter = 3;
-
-  counters.system_clock_freq = 0;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_FAILED_PRECONDITION,
-      iree_hal_amdgpu_kfd_validate_clock_counters(1234, &counters));
-}
-
 TEST(KFDStandaloneTest, GetClockCountersFailsForInvalidDescriptor) {
-  iree_hal_amdgpu_clock_counters_t counters = {
+  iree_hal_amdgpu_kfd_clock_counters_t counters = {
       /*.gpu_clock_counter=*/1,
       /*.cpu_clock_counter=*/2,
       /*.system_clock_counter=*/3,
@@ -190,7 +157,7 @@ TEST_F(KFDTest, GetClockCounters) {
   int kfd = -1;
   IREE_ASSERT_OK(iree_hal_amdgpu_kfd_open(&kfd));
 
-  iree_hal_amdgpu_clock_counters_t counters = {0};
+  iree_hal_amdgpu_kfd_clock_counters_t counters = {0};
   IREE_ASSERT_OK(
       iree_hal_amdgpu_kfd_get_clock_counters(kfd, *gpu_uid, &counters));
 

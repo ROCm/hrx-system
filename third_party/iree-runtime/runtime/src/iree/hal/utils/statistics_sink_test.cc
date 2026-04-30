@@ -29,10 +29,9 @@ static iree_status_t CollectRow(void* user_data,
 static CollectedRows CollectRows(
     iree_hal_profile_statistics_sink_t* statistics_sink) {
   CollectedRows rows;
-  iree_hal_profile_statistics_row_callback_t callback = {
-      .fn = CollectRow,
-      .user_data = &rows,
-  };
+  iree_hal_profile_statistics_row_callback_t callback = {};
+  callback.fn = CollectRow;
+  callback.user_data = &rows;
   IREE_EXPECT_OK(
       iree_hal_profile_statistics_sink_for_each_row(statistics_sink, callback));
   return rows;

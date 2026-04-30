@@ -70,8 +70,8 @@ IREE_HAL_AMDGPU_DEVICE_KERNEL(
     iree_hal_amdgpu_device_dispatch_patch_indirect_params, 1, 1, 1)
 
 //===----------------------------------------------------------------------===//
-// Profiling helpers (profiling.h)
+// Timestamp helpers (timestamp.h)
 //===----------------------------------------------------------------------===//
 
 IREE_HAL_AMDGPU_DEVICE_KERNEL(
-    iree_hal_amdgpu_device_profile_harvest_dispatch_events, 32, 1, 1)
+    iree_hal_amdgpu_device_timestamp_harvest_dispatch_records, 32, 1, 1)

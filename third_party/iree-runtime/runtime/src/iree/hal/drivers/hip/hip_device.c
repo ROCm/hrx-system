@@ -1106,6 +1106,38 @@ static iree_status_t iree_hal_hip_device_query_queue_pool_backend(
                           "HIP queue pool backend not implemented");
 }
 
+static iree_status_t iree_hal_hip_device_select_queue_affinity(
+    const iree_hal_hip_device_t* device,
+    iree_hal_queue_affinity_t requested_affinity,
+    iree_hal_queue_affinity_t* out_queue_affinity) {
+  iree_hal_queue_affinity_t available_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  if (device->device_count < IREE_HAL_MAX_QUEUES) {
+    available_affinity =
+        (((iree_hal_queue_affinity_t)1) << device->device_count) - 1;
+  }
+
+  iree_hal_queue_affinity_t queue_affinity = requested_affinity;
+  if (iree_hal_queue_affinity_is_empty(queue_affinity) ||
+      iree_hal_queue_affinity_is_any(queue_affinity)) {
+    queue_affinity = available_affinity;
+  } else {
+    iree_hal_queue_affinity_and_into(queue_affinity, available_affinity);
+  }
+
+  if (iree_hal_queue_affinity_is_empty(queue_affinity)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "device queue affinity 0x%016" PRIx64
+                            " does not select one of the %" PRIhsz
+                            " available HIP queues",
+                            requested_affinity, device->device_count);
+  }
+
+  *out_queue_affinity =
+      ((iree_hal_queue_affinity_t)1)
+      << iree_hal_queue_affinity_find_first_set(queue_affinity);
+  return iree_ok_status();
+}
+
 static void iree_hal_hip_async_buffer_release(
     void* user_data, struct iree_hal_buffer_t* buffer) {
   iree_hal_hip_device_t* device = (iree_hal_hip_device_t*)user_data;
@@ -1749,13 +1781,12 @@ static iree_status_t iree_hal_hip_device_queue_alloca(
                             "HIP custom queue alloca pools not implemented");
   }
 
-  uint64_t queue_affinity_mask =
-      ((iree_hal_queue_affinity_t)1 << device->device_count);
-  queue_affinity_mask = queue_affinity_mask | (queue_affinity_mask - 1);
-  queue_affinity &= queue_affinity_mask;
-
-  int device_ordinal = iree_math_count_trailing_zeros_u64(queue_affinity);
-  queue_affinity = (uint64_t)1 << device_ordinal;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_hip_device_select_queue_affinity(device, queue_affinity,
+                                                    &queue_affinity));
+  const int device_ordinal =
+      iree_hal_queue_affinity_find_first_set(queue_affinity);
+  params.queue_affinity = queue_affinity;
 
   iree_status_t status = iree_ok_status();
   if (!iree_all_bits_set(params.type, IREE_HAL_MEMORY_TYPE_HOST_VISIBLE) &&
@@ -1864,22 +1895,11 @@ static iree_status_t iree_hal_hip_device_queue_dealloca(
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_hal_hip_device_t* device = iree_hal_hip_device_cast(base_device);
-  uint64_t queue_affinity_mask =
-      ((iree_hal_queue_affinity_t)1 << device->device_count);
-  queue_affinity_mask = queue_affinity_mask | (queue_affinity_mask - 1);
-  queue_affinity &= queue_affinity_mask;
-
-  int device_ordinal = iree_math_count_trailing_zeros_u64(queue_affinity);
-
-  if (device_ordinal > device->device_count) {
-    IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "device affinity out of range, maximum device is %" PRIhsz,
-        device->device_count);
-  }
-
-  queue_affinity = (uint64_t)1 << device_ordinal;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_hip_device_select_queue_affinity(device, queue_affinity,
+                                                    &queue_affinity));
+  const int device_ordinal =
+      iree_hal_queue_affinity_find_first_set(queue_affinity);
 
   iree_status_t status = iree_ok_status();
   if (iree_hal_hip_allocator_isa(iree_hal_device_allocator(base_device))) {
@@ -2355,12 +2375,12 @@ static iree_status_t iree_hal_hip_device_queue_read(
     iree_device_size_t length, iree_hal_read_flags_t flags) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  if (queue_affinity == IREE_HAL_QUEUE_AFFINITY_ANY) {
-    queue_affinity = 0x1;
-  }
-
   iree_hal_hip_device_t* device = iree_hal_hip_device_cast(base_device);
-  const int device_ordinal = iree_math_count_trailing_zeros_u64(queue_affinity);
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_hip_device_select_queue_affinity(device, queue_affinity,
+                                                    &queue_affinity));
+  const int device_ordinal =
+      iree_hal_queue_affinity_find_first_set(queue_affinity);
 
   iree_hal_hip_device_semaphore_queue_read_callback_data_t* callback_data =
       NULL;
@@ -2729,17 +2749,11 @@ static iree_status_t iree_hal_hip_device_queue_execute(
 
   iree_hal_hip_device_t* device = iree_hal_hip_device_cast(base_device);
 
-  if (queue_affinity == IREE_HAL_QUEUE_AFFINITY_ANY) {
-    queue_affinity = 0x1;
-  }
-
-  uint64_t queue_affinity_mask =
-      ((iree_hal_queue_affinity_t)1 << device->device_count);
-  queue_affinity_mask = queue_affinity_mask | (queue_affinity_mask - 1);
-  queue_affinity &= queue_affinity_mask;
-
-  int device_ordinal = iree_math_count_trailing_zeros_u64(queue_affinity);
-  queue_affinity = (uint64_t)1 << device_ordinal;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_hip_device_select_queue_affinity(device, queue_affinity,
+                                                    &queue_affinity));
+  const int device_ordinal =
+      iree_hal_queue_affinity_find_first_set(queue_affinity);
 
   iree_hal_hip_device_semaphore_submit_callback_data_t* callback_data = NULL;
   iree_status_t status = iree_ok_status();

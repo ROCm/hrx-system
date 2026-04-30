@@ -18,6 +18,7 @@
 #include "iree/async/semaphore.h"
 #include "iree/async/span.h"
 #include "iree/base/threading/processor.h"
+#include "iree/base/threading/thread.h"
 #include "iree/hal/drivers/local_task/block_builder.h"
 #include "iree/hal/drivers/local_task/block_command_buffer.h"
 #include "iree/hal/drivers/local_task/block_command_ops.h"
@@ -587,6 +588,38 @@ static void iree_hal_task_queue_profile_finish_host_execution(
 static void iree_hal_task_queue_op_release_alloca_memory_wait(
     iree_hal_task_queue_op_t* operation);
 
+// Unmaps any SCOPED binding table mappings before user-visible completion is
+// published. Dealloca can legally wait on command completion and immediately
+// decommit transient backing memory, so command mappings must be finalized
+// before signal semaphores/frontiers become observable.
+static iree_status_t iree_hal_task_queue_op_unmap_binding_mappings(
+    iree_hal_task_queue_op_t* operation, iree_status_t status) {
+  if (operation->type != IREE_HAL_TASK_QUEUE_OP_COMMANDS ||
+      !operation->commands.binding_mappings) {
+    return status;
+  }
+
+  iree_hal_buffer_mapping_t* binding_mappings =
+      operation->commands.binding_mappings;
+  const iree_host_size_t binding_mapping_count =
+      operation->commands.binding_mapping_count;
+  operation->commands.binding_mappings = NULL;
+  operation->commands.binding_mapping_count = 0;
+
+  for (iree_host_size_t i = 0; i < binding_mapping_count; ++i) {
+    iree_status_t unmap_status =
+        iree_hal_buffer_unmap_range(&binding_mappings[i]);
+    if (!iree_status_is_ok(unmap_status)) {
+      if (iree_status_is_ok(status)) {
+        status = unmap_status;
+      } else {
+        status = iree_status_join(status, unmap_status);
+      }
+    }
+  }
+  return status;
+}
+
 // Destroys an operation, failing signal semaphores if |failure_status| is
 // non-OK. Releases all retained resources, ends the scope, and deinitializes
 // the arena (which frees the operation itself and all transient allocations).
@@ -596,32 +629,13 @@ static void iree_hal_task_queue_op_destroy(iree_hal_task_queue_op_t* operation,
                                            failure_status);
   iree_hal_task_queue_profile_finish_host_execution(operation, failure_status);
 
-  // Unmap SCOPED binding table mappings before signaling semaphores: the
-  // unmap may flush non-coherent memory, so waiters must not observe the
-  // signal until writes are visible. Must also precede resource_set_free
-  // (which drops the buffer references the mappings point into).
+  // Failure/early-destroy backstop: success completion finalizes mappings
+  // before signaling, but issue failures can destroy the operation directly.
   //
   // The mappings array is 1:1 with resolved block binding entries; NULL-buffer
   // slots have zeroed mappings that unmap_range handles as no-ops.
-  //
-  // On the success path, an unmap failure becomes the operation's failure
-  // status (surfaced to semaphores below). On the failure path, we already
-  // have an error to propagate so unmap failures are secondary.
-  if (operation->type == IREE_HAL_TASK_QUEUE_OP_COMMANDS &&
-      operation->commands.binding_mappings) {
-    for (iree_host_size_t i = 0; i < operation->commands.binding_mapping_count;
-         ++i) {
-      iree_status_t unmap_status =
-          iree_hal_buffer_unmap_range(&operation->commands.binding_mappings[i]);
-      if (!iree_status_is_ok(unmap_status)) {
-        if (iree_status_is_ok(failure_status)) {
-          failure_status = unmap_status;
-        } else {
-          failure_status = iree_status_join(failure_status, unmap_status);
-        }
-      }
-    }
-  }
+  failure_status =
+      iree_hal_task_queue_op_unmap_binding_mappings(operation, failure_status);
 
   iree_hal_task_queue_op_release_alloca_memory_wait(operation);
 
@@ -680,8 +694,12 @@ static void iree_hal_task_queue_op_advance_frontier(
 
 static void iree_hal_task_queue_op_complete_with_epoch(
     iree_hal_task_queue_op_t* operation, uint64_t epoch) {
-  iree_status_t status = iree_hal_semaphore_list_signal(
-      operation->signal_semaphores, /*frontier=*/NULL);
+  iree_status_t status = iree_hal_task_queue_op_unmap_binding_mappings(
+      operation, iree_ok_status());
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_semaphore_list_signal(operation->signal_semaphores,
+                                            /*frontier=*/NULL);
+  }
   if (iree_status_is_ok(status)) {
     iree_hal_task_queue_op_advance_frontier(operation, epoch);
     iree_hal_task_queue_debug_record_complete(operation->queue, operation);
@@ -695,9 +713,13 @@ static void iree_hal_task_queue_op_complete_with_epoch(
 // frontier, then destroys the operation (freeing the arena).
 static void iree_hal_task_queue_op_complete(
     iree_hal_task_queue_op_t* operation) {
-  // Signal all semaphores to their new values.
-  iree_status_t status = iree_hal_semaphore_list_signal(
-      operation->signal_semaphores, /*frontier=*/NULL);
+  iree_status_t status = iree_hal_task_queue_op_unmap_binding_mappings(
+      operation, iree_ok_status());
+  if (iree_status_is_ok(status)) {
+    // Signal all semaphores to their new values.
+    status = iree_hal_semaphore_list_signal(operation->signal_semaphores,
+                                            /*frontier=*/NULL);
+  }
 
   // Advance the frontier tracker after signaling.
   if (iree_status_is_ok(status)) {
@@ -796,6 +818,15 @@ typedef struct iree_hal_task_queue_wait_entry_t {
   iree_hal_semaphore_t* semaphore;
 } iree_hal_task_queue_wait_entry_t;
 
+static bool iree_hal_task_queue_is_shutting_down(iree_hal_task_queue_t* queue) {
+  return iree_atomic_load(&queue->shutting_down, iree_memory_order_acquire) !=
+         0;
+}
+
+static iree_status_t iree_hal_task_queue_make_shutdown_status(void) {
+  return iree_make_status(IREE_STATUS_CANCELLED, "queue shutting down");
+}
+
 // Callback fired when a semaphore timepoint is resolved (value reached or
 // semaphore failed). Decrements the operation's wait_count and, if this was
 // the last outstanding wait, either pushes the operation to the ready list
@@ -806,6 +837,7 @@ static void iree_hal_task_queue_wait_resolved(
   iree_hal_task_queue_wait_entry_t* entry =
       (iree_hal_task_queue_wait_entry_t*)user_data;
   iree_hal_task_queue_op_t* operation = entry->operation;
+  iree_hal_task_queue_t* queue = operation->queue;
   iree_hal_semaphore_t* semaphore = entry->semaphore;
 
   // Record the first failure via CAS.
@@ -830,13 +862,17 @@ static void iree_hal_task_queue_wait_resolved(
       // At least one wait failed. Fail signals and destroy.
       iree_hal_task_queue_profile_record_failed_before_ready(operation);
       iree_hal_task_queue_op_destroy(operation, error);
+    } else if (iree_hal_task_queue_is_shutting_down(operation->queue)) {
+      // Shutdown owns all remaining unresolved work. Late wait callbacks must
+      // resolve the operation inline instead of scheduling a terminal process.
+      iree_hal_task_queue_profile_record_failed_before_ready(operation);
+      iree_hal_task_queue_op_destroy(
+          operation, iree_hal_task_queue_make_shutdown_status());
     } else {
       // All waits satisfied. Push to ready list and wake queue.
       iree_hal_task_queue_profile_record_ready(operation);
-      iree_hal_task_queue_op_slist_push(&operation->queue->ready_list,
-                                        operation);
-      iree_task_executor_schedule_process(operation->queue->executor,
-                                          &operation->queue->process);
+      iree_hal_task_queue_op_slist_push(&queue->ready_list, operation);
+      iree_task_executor_schedule_process(queue->executor, &queue->process);
     }
   }
 
@@ -881,6 +917,10 @@ static iree_status_t iree_hal_task_queue_enqueue_waits(
     iree_hal_task_queue_op_t* operation,
     iree_hal_semaphore_list_t wait_semaphores) {
   if (wait_semaphores.count == 0) {
+    if (iree_hal_task_queue_is_shutting_down(operation->queue)) {
+      return iree_hal_task_queue_make_shutdown_status();
+    }
+
     // All waits already satisfied — push directly.
     iree_hal_task_queue_profile_record_ready(operation);
     iree_hal_task_queue_op_slist_push(&operation->queue->ready_list, operation);
@@ -1037,6 +1077,13 @@ static void iree_hal_task_queue_alloca_memory_wait_resolved(
   if (!iree_status_is_ok(status)) {
     iree_hal_task_queue_profile_record_failed_before_ready(operation);
     iree_hal_task_queue_op_fail(operation, status);
+    return;
+  }
+
+  if (iree_hal_task_queue_is_shutting_down(operation->queue)) {
+    iree_hal_task_queue_profile_record_failed_before_ready(operation);
+    iree_hal_task_queue_op_destroy(operation,
+                                   iree_hal_task_queue_make_shutdown_status());
     return;
   }
 
@@ -1347,10 +1394,10 @@ static iree_status_t iree_hal_task_queue_compute_item_allocate(
   return iree_ok_status();
 }
 
-// Routes a recording through the compute process for multi-worker execution.
+// Routes a recording through the compute process for deferred execution.
 // Acquires a compute item, allocates the processor context, and schedules the
-// compute process. The recording is referenced (not copied) — the caller
-// ensures it stays alive until the compute item's final release.
+// compute process. The processor context always references a recording that
+// remains live until the compute item's final release.
 //
 // If |owned_recording| is non-NULL, the compute item takes ownership and
 // releases the blocks in its final release path. If NULL, the caller
@@ -1407,12 +1454,27 @@ static iree_status_t iree_hal_task_queue_drain_recording(
         iree_hal_task_queue_compute_item_allocate(queue, &item));
   }
 
+  // Transfer ownership before allocating the processor context so the context
+  // never captures a pointer to a caller stack recording.
+  const iree_hal_cmd_block_recording_t* processor_recording = recording;
+  if (owned_recording) {
+    item->recording = *owned_recording;
+    memset(owned_recording, 0, sizeof(*owned_recording));
+    processor_recording = &item->recording;
+  } else {
+    memset(&item->recording, 0, sizeof(item->recording));
+  }
+
   // Allocate the block processor execution context.
   iree_hal_cmd_block_processor_context_t* processor_context = NULL;
   status = iree_hal_cmd_block_processor_context_allocate(
-      recording, binding_table, binding_table_length, worker_count,
+      processor_recording, binding_table, binding_table_length, worker_count,
       host_allocator, &processor_context);
   if (!iree_status_is_ok(status)) {
+    if (owned_recording) {
+      iree_hal_cmd_block_recording_release(&item->recording);
+      memset(&item->recording, 0, sizeof(item->recording));
+    }
     iree_hal_task_queue_compute_item_slist_push(&queue->compute_free_pool,
                                                 item);
     return status;
@@ -1424,8 +1486,7 @@ static iree_status_t iree_hal_task_queue_drain_recording(
   // the null-safe block processor drain path.
   if (processor_context) {
     processor_context->wake_budget_ptr = &queue->compute_process.wake_budget;
-    processor_context->desired_wake_ptr =
-        iree_task_executor_desired_wake_ptr(queue->executor);
+    processor_context->wake_executor = queue->executor;
     processor_context->retention_epoch_ptr =
         &queue->compute_process.retention_epoch;
     processor_context->retention_sleepers_ptr =
@@ -1455,12 +1516,6 @@ static iree_status_t iree_hal_task_queue_drain_recording(
   item->worker_count = worker_count;
   item->operation = operation;
   item->host_allocator = host_allocator;
-  if (owned_recording) {
-    item->recording = *owned_recording;
-    memset(owned_recording, 0, sizeof(*owned_recording));
-  } else {
-    memset(&item->recording, 0, sizeof(item->recording));
-  }
   memset(item->worker_states, 0, sizeof(item->worker_states[0]) * worker_count);
   // drainers retains generation from previous lifecycle. Count and CLOSED
   // were cleared during the previous cleanup. First use: memset zeroed it.
@@ -1883,7 +1938,8 @@ static void iree_hal_task_queue_drain_dealloca(
 // fits in the same 4KB block that already holds the operation).
 static void iree_hal_task_queue_execute_recording_inline(
     iree_hal_task_queue_t* queue, iree_hal_task_queue_op_t* operation,
-    iree_hal_cmd_block_recording_t* recording) {
+    iree_hal_cmd_block_recording_t* recording,
+    const iree_hal_cmd_block_processor_worker_context_t* worker_context) {
   iree_status_t status = iree_ok_status();
 
   // Allocate .data from the operation's arena.
@@ -1906,8 +1962,8 @@ static void iree_hal_task_queue_execute_recording_inline(
 
     iree_hal_cmd_block_processor_worker_state_t worker_state = {0};
     iree_hal_cmd_block_processor_drain_result_t result;
-    iree_hal_cmd_block_processor_drain(&processor_context, 0, &worker_state,
-                                       &result);
+    iree_hal_cmd_block_processor_drain(&processor_context, worker_context,
+                                       &worker_state, &result);
     status =
         iree_hal_cmd_block_processor_context_consume_result(&processor_context);
   }
@@ -1928,7 +1984,8 @@ static void iree_hal_task_queue_execute_recording_inline(
 // itself at those sizes. Larger fills build a single-command recording and
 // run it through the inline block processor.
 static iree_status_t iree_hal_task_queue_drain_fill(
-    iree_hal_task_queue_t* queue, iree_hal_task_queue_op_t* operation) {
+    iree_hal_task_queue_t* queue, iree_hal_task_queue_op_t* operation,
+    const iree_hal_cmd_block_processor_worker_context_t* worker_context) {
   // Fast path: below the threshold, bypass the cmd builder entirely.
   if (operation->fill.length < queue->inline_transfer_threshold) {
     iree_status_t status = iree_hal_buffer_map_fill(
@@ -1980,7 +2037,8 @@ static iree_status_t iree_hal_task_queue_drain_fill(
 
   iree_hal_cmd_block_builder_deinitialize(&builder);
   if (iree_status_is_ok(status)) {
-    iree_hal_task_queue_execute_recording_inline(queue, operation, &recording);
+    iree_hal_task_queue_execute_recording_inline(queue, operation, &recording,
+                                                 worker_context);
   }
 
   // Unmap the buffer after inline execution completes. Safe on zero-initialized
@@ -1996,7 +2054,8 @@ static iree_status_t iree_hal_task_queue_drain_fill(
 // itself at those sizes. Larger copies build a single-command recording and
 // run it through the inline block processor.
 static iree_status_t iree_hal_task_queue_drain_copy(
-    iree_hal_task_queue_t* queue, iree_hal_task_queue_op_t* operation) {
+    iree_hal_task_queue_t* queue, iree_hal_task_queue_op_t* operation,
+    const iree_hal_cmd_block_processor_worker_context_t* worker_context) {
   // Fast path: below the threshold, bypass the cmd builder entirely.
   if (operation->copy.length < queue->inline_transfer_threshold) {
     iree_status_t status = iree_hal_buffer_map_copy(
@@ -2059,7 +2118,8 @@ static iree_status_t iree_hal_task_queue_drain_copy(
 
   iree_hal_cmd_block_builder_deinitialize(&builder);
   if (iree_status_is_ok(status)) {
-    iree_hal_task_queue_execute_recording_inline(queue, operation, &recording);
+    iree_hal_task_queue_execute_recording_inline(queue, operation, &recording,
+                                                 worker_context);
   }
 
   iree_hal_buffer_unmap_range(&source_mapping);
@@ -2096,7 +2156,8 @@ static iree_status_t iree_hal_task_queue_drain_update(
 // executes it inline (ALLOW_INLINE_EXECUTION) or routes it through the compute
 // process for multi-worker tile distribution.
 static iree_status_t iree_hal_task_queue_drain_dispatch(
-    iree_hal_task_queue_t* queue, iree_hal_task_queue_op_t* operation);
+    iree_hal_task_queue_t* queue, iree_hal_task_queue_op_t* operation,
+    const iree_hal_cmd_block_processor_worker_context_t* worker_context);
 
 //===----------------------------------------------------------------------===//
 // Compute process (data plane)
@@ -2268,12 +2329,13 @@ static void iree_hal_task_queue_compute_item_leave(
 //   re-check close the TOCTOU window where the item could be recycled between
 //   the initial load and the increment.
 static iree_status_t iree_hal_task_queue_compute_process_drain(
-    iree_task_process_t* process, uint32_t worker_index,
+    iree_task_process_t* process,
+    const iree_task_worker_context_t* worker_context,
     iree_task_process_drain_result_t* out_result) {
   iree_hal_task_queue_t* queue = (iree_hal_task_queue_t*)process->user_data;
 
   // Check for shutdown.
-  if (iree_atomic_load(&queue->shutting_down, iree_memory_order_acquire)) {
+  if (iree_hal_task_queue_is_shutting_down(queue)) {
     IREE_TRACE(iree_hal_task_queue_trace_compute_drain_event());
     out_result->did_work = false;
     out_result->completed = true;
@@ -2348,12 +2410,21 @@ static iree_status_t iree_hal_task_queue_compute_process_drain(
     if (IREE_UNLIKELY(queue->profile_recorder)) {
       iree_hal_task_queue_profile_start_host_execution(item->operation);
     }
+    const uint32_t local_worker_index =
+        worker_context->worker_index % item->worker_count;
     iree_hal_cmd_block_processor_worker_state_t* worker_state =
-        &item->worker_states[worker_index % item->worker_count];
+        &item->worker_states[local_worker_index];
+    const iree_hal_cmd_block_processor_worker_context_t
+        processor_worker_context = {
+            .worker_index = local_worker_index,
+            .processor_id = worker_context->processor_id,
+            .local_memory = worker_context->local_memory,
+        };
     iree_hal_cmd_block_processor_drain_result_t processor_result;
     memset(&processor_result, 0, sizeof(processor_result));
-    iree_hal_cmd_block_processor_drain(item->processor_context, worker_index,
-                                       worker_state, &processor_result);
+    iree_hal_cmd_block_processor_drain(item->processor_context,
+                                       &processor_worker_context, worker_state,
+                                       &processor_result);
 
     // Handle per-recording completion via CLOSED flag. The first worker to set
     // CLOSED only publishes the next recording; the last drainer consumes the
@@ -2372,6 +2443,8 @@ static iree_status_t iree_hal_task_queue_compute_process_drain(
     bool processor_keep_active = false;
     bool processor_publish_keep_active = false;
     bool processor_keep_warm = false;
+    int32_t processor_keep_warm_retainer_limit = 0;
+    bool processor_keep_warm_spin = false;
     int32_t processor_keep_warm_epoch = 0;
     if (!processor_result.completed && processor_result.tiles_executed == 0) {
       // Sample the process epoch before validating the processor state. If a
@@ -2384,7 +2457,20 @@ static iree_status_t iree_hal_task_queue_compute_process_drain(
         processor_keep_active = true;
         processor_publish_keep_active = true;
       } else {
-        processor_keep_warm = true;
+        int32_t expected_retain_drain = 0;
+        if (iree_atomic_compare_exchange_strong(
+                &process->retain_drain, &expected_retain_drain, 1,
+                iree_memory_order_acq_rel, iree_memory_order_acquire)) {
+          // A warm wait needs some drainer to advance the command-buffer
+          // retention epoch. Elect one no-work/no-advance drainer to stay
+          // active so peer drainers can park warm without stranding progress.
+          processor_keep_active = true;
+        } else {
+          processor_keep_warm = true;
+          processor_keep_warm_retainer_limit =
+              processor_result.warm_retainer_limit;
+          processor_keep_warm_spin = processor_result.prefer_warm_spin;
+        }
       }
       processor_did_work = false;
       if (IREE_UNLIKELY(
@@ -2404,6 +2490,8 @@ static iree_status_t iree_hal_task_queue_compute_process_drain(
     out_result->keep_active = processor_keep_active;
     out_result->publish_keep_active = processor_publish_keep_active;
     out_result->keep_warm = processor_keep_warm;
+    out_result->keep_warm_retainer_limit = processor_keep_warm_retainer_limit;
+    out_result->keep_warm_spin = processor_keep_warm_spin;
     out_result->keep_warm_epoch = processor_keep_warm_epoch;
     out_result->completed = false;
     return iree_ok_status();
@@ -2532,10 +2620,11 @@ static void iree_hal_task_queue_compute_process_release(
   iree_hal_task_queue_compute_item_slist_discard(&queue->compute_pending);
 
   // End the scope for the compute process (paired with scope_begin at init).
-  // This MUST be the last access to queue state. After this call,
-  // scope_wait_idle may unblock and the main thread may immediately free
-  // the queue and all embedded fields.
+  // After this call, scope_wait_idle may unblock; the process-release count
+  // below is the final queue lifetime barrier for the callback itself.
   iree_task_scope_end(&queue->scope);
+  iree_atomic_fetch_sub(&queue->pending_process_release_count, 1,
+                        iree_memory_order_release);
 }
 
 //===----------------------------------------------------------------------===//
@@ -2846,30 +2935,43 @@ static iree_status_t iree_hal_task_queue_drain_write(
 static void iree_hal_task_queue_process_release(iree_task_process_t* process) {
   iree_hal_task_queue_t* queue = (iree_hal_task_queue_t*)process->user_data;
   iree_task_scope_end(&queue->scope);
+  iree_atomic_fetch_sub(&queue->pending_process_release_count, 1,
+                        iree_memory_order_release);
 }
 
 // Queue process drain function. Pops one operation from the ready list and
 // handles it by type. Returns did_work=false when the ready list is empty
-// (the executor's sleeping protocol will park the process). Returns
-// completed=true when shutting_down is set (during deinitialize).
+// (the executor's sleeping protocol will park the process). During
+// deinitialize, cancels remaining ready work before returning completed=true.
 static iree_status_t iree_hal_task_queue_process_drain(
-    iree_task_process_t* process, uint32_t worker_index,
+    iree_task_process_t* process,
+    const iree_task_worker_context_t* worker_context,
     iree_task_process_drain_result_t* out_result) {
   iree_hal_task_queue_t* queue = (iree_hal_task_queue_t*)process->user_data;
-
-  // Check for shutdown. When set, complete the process and let the release
-  // callback fire scope_end after the worker exits the drain stack, so
-  // scope_wait_idle in deinitialize is a true lifetime barrier.
-  if (iree_atomic_load(&queue->shutting_down, iree_memory_order_acquire)) {
-    out_result->did_work = false;
-    out_result->completed = true;
-    return iree_ok_status();
-  }
+  const iree_hal_cmd_block_processor_worker_context_t processor_worker_context =
+      {
+          .worker_index = worker_context->worker_index,
+          .processor_id = worker_context->processor_id,
+          .local_memory = worker_context->local_memory,
+      };
 
   iree_hal_task_queue_op_t* operation =
       iree_hal_task_queue_op_slist_pop(&queue->ready_list);
   if (!operation) {
     out_result->did_work = false;
+    out_result->completed = iree_hal_task_queue_is_shutting_down(queue);
+    return iree_ok_status();
+  }
+
+  if (iree_hal_task_queue_is_shutting_down(queue)) {
+    if (operation->type == IREE_HAL_TASK_QUEUE_OP_DEALLOCA) {
+      iree_hal_task_queue_profile_start_host_execution(operation);
+      iree_hal_task_queue_drain_dealloca(operation);
+    } else {
+      iree_hal_task_queue_op_destroy(
+          operation, iree_hal_task_queue_make_shutdown_status());
+    }
+    out_result->did_work = true;
     out_result->completed = false;
     return iree_ok_status();
   }
@@ -2923,7 +3025,8 @@ static iree_status_t iree_hal_task_queue_process_drain(
       break;
     case IREE_HAL_TASK_QUEUE_OP_FILL:
       iree_hal_task_queue_profile_start_host_execution(operation);
-      status = iree_hal_task_queue_drain_fill(queue, operation);
+      status = iree_hal_task_queue_drain_fill(queue, operation,
+                                              &processor_worker_context);
       if (!iree_status_is_ok(status)) {
         iree_hal_task_queue_op_destroy(operation, status);
         status = iree_ok_status();
@@ -2931,7 +3034,8 @@ static iree_status_t iree_hal_task_queue_process_drain(
       break;
     case IREE_HAL_TASK_QUEUE_OP_COPY:
       iree_hal_task_queue_profile_start_host_execution(operation);
-      status = iree_hal_task_queue_drain_copy(queue, operation);
+      status = iree_hal_task_queue_drain_copy(queue, operation,
+                                              &processor_worker_context);
       if (!iree_status_is_ok(status)) {
         iree_hal_task_queue_op_destroy(operation, status);
         status = iree_ok_status();
@@ -2946,7 +3050,8 @@ static iree_status_t iree_hal_task_queue_process_drain(
       }
       break;
     case IREE_HAL_TASK_QUEUE_OP_DISPATCH:
-      status = iree_hal_task_queue_drain_dispatch(queue, operation);
+      status = iree_hal_task_queue_drain_dispatch(queue, operation,
+                                                  &processor_worker_context);
       if (!iree_status_is_ok(status)) {
         iree_hal_task_queue_op_destroy(operation, status);
         status = iree_ok_status();
@@ -3049,6 +3154,8 @@ iree_status_t iree_hal_task_queue_initialize(
   iree_hal_allocator_retain(out_queue->device_allocator);
 
   iree_task_scope_initialize(identifier, scope_flags, &out_queue->scope);
+  iree_atomic_store(&out_queue->pending_process_release_count, 2,
+                    iree_memory_order_relaxed);
 
   // Initialize the ready list.
   iree_hal_task_queue_op_slist_initialize(&out_queue->ready_list);
@@ -3086,6 +3193,8 @@ iree_status_t iree_hal_task_queue_initialize(
       /*suspend_count=*/0,
       /*wake_budget=*/(int32_t)iree_task_executor_worker_count(executor),
       &out_queue->compute_process);
+  iree_task_process_set_flags(&out_queue->compute_process,
+                              IREE_TASK_PROCESS_FLAG_COMPUTE_SLOT);
   out_queue->compute_process.user_data = out_queue;
   // completion_fn is intentionally NULL. For wake_budget > 1 processes,
   // completion fires eagerly on the first worker that observes termination
@@ -3171,6 +3280,11 @@ void iree_hal_task_queue_deinitialize(iree_hal_task_queue_t* queue) {
   IREE_ASSERT(iree_status_is_ok(idle_status),
               "scope idle wait must not fail with an infinite deadline");
   iree_status_free(idle_status);
+
+  while (iree_atomic_load(&queue->pending_process_release_count,
+                          iree_memory_order_acquire) != 0) {
+    iree_thread_yield();
+  }
 
   // Drain and destroy any remaining operations in the ready list.
   // These are operations that were queued but never drained (e.g.,
@@ -3711,7 +3825,8 @@ iree_status_t iree_hal_task_queue_submit_dispatch(
 //===----------------------------------------------------------------------===//
 
 static iree_status_t iree_hal_task_queue_drain_dispatch(
-    iree_hal_task_queue_t* queue, iree_hal_task_queue_op_t* operation) {
+    iree_hal_task_queue_t* queue, iree_hal_task_queue_op_t* operation,
+    const iree_hal_cmd_block_processor_worker_context_t* worker_context) {
   const bool allow_inline = iree_any_bit_set(
       operation->dispatch.flags, IREE_HAL_DISPATCH_FLAG_ALLOW_INLINE_EXECUTION);
   if (allow_inline) {
@@ -3836,8 +3951,8 @@ static iree_status_t iree_hal_task_queue_drain_dispatch(
       // semaphores via op_complete. We unmap AFTER because the processor
       // reads through the host pointers during execution. For local_task
       // (cache-coherent CPU), unmap is a no-op — no flush needed.
-      iree_hal_task_queue_execute_recording_inline(queue, operation,
-                                                   &recording);
+      iree_hal_task_queue_execute_recording_inline(queue, operation, &recording,
+                                                   worker_context);
       for (iree_host_size_t i = 0; i < binding_count; ++i) {
         status =
             iree_status_join(status, iree_hal_buffer_unmap_range(&mappings[i]));

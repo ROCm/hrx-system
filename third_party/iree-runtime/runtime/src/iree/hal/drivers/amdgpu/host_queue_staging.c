@@ -658,7 +658,7 @@ static iree_status_t iree_hal_amdgpu_staging_transfer_submit_signal_barrier(
   resolution.inline_acquire_scope = IREE_HSA_FENCE_SCOPE_SYSTEM;
   resolution.barrier_acquire_scope = IREE_HSA_FENCE_SCOPE_SYSTEM;
 
-  iree_slim_mutex_lock(&transfer->queue->submission_mutex);
+  iree_slim_mutex_lock(&transfer->queue->locks.submission_mutex);
   bool ready = false;
   uint64_t submission_id = 0;
   iree_hal_amdgpu_host_queue_profile_event_info_t profile_event_info = {
@@ -690,7 +690,7 @@ static iree_status_t iree_hal_amdgpu_staging_transfer_submit_signal_barrier(
         transfer->queue, &transfer->signal_capacity_retry,
         iree_hal_amdgpu_staging_signal_capacity_post_drain, transfer);
   }
-  iree_slim_mutex_unlock(&transfer->queue->submission_mutex);
+  iree_slim_mutex_unlock(&transfer->queue->locks.submission_mutex);
   return status;
 }
 
@@ -846,7 +846,7 @@ static iree_status_t iree_hal_amdgpu_staging_chunk_submit_copy(
   }
 
   iree_hal_resource_t* extra_resources[1] = {&transfer->resource};
-  iree_slim_mutex_lock(&transfer->queue->submission_mutex);
+  iree_slim_mutex_lock(&transfer->queue->locks.submission_mutex);
   bool ready = false;
   iree_status_t status = iree_hal_amdgpu_host_queue_submit_copy_with_action(
       transfer->queue, &resolution, iree_hal_semaphore_list_empty(),
@@ -864,7 +864,7 @@ static iree_status_t iree_hal_amdgpu_staging_chunk_submit_copy(
         transfer->queue, &chunk->post_drain_action,
         iree_hal_amdgpu_staging_copy_capacity_post_drain, chunk);
   }
-  iree_slim_mutex_unlock(&transfer->queue->submission_mutex);
+  iree_slim_mutex_unlock(&transfer->queue->locks.submission_mutex);
   return status;
 }
 

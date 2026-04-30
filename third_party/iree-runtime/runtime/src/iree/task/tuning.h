@@ -57,6 +57,14 @@ extern "C" {
 #define IREE_TASK_WARM_WAIT_SPIN_NS (10 * 1000)
 #endif  // IREE_TASK_WARM_WAIT_SPIN_NS
 
+// Time explicitly retained warm workers spin when the process has reported
+// near-future work that benefits from a wider active worker set. This is
+// separate from the generic tail spin above: only drain functions with concrete
+// lookahead evidence request this wider handoff window.
+#ifndef IREE_TASK_WARM_WAIT_LOOKAHEAD_SPIN_NS
+#define IREE_TASK_WARM_WAIT_LOOKAHEAD_SPIN_NS (10 * 1000)
+#endif  // IREE_TASK_WARM_WAIT_LOOKAHEAD_SPIN_NS
+
 // Maximum number of remaining active drainers where a no-work warm retainer is
 // allowed to enter the shared spin window. Larger tails mean some workers are
 // still executing already-claimed work and extra retainers would only herd-spin

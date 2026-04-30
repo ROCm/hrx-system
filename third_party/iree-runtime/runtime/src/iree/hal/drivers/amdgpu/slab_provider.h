@@ -38,6 +38,18 @@ typedef struct iree_hal_amdgpu_slab_provider_memory_pool_properties_t {
   iree_hal_buffer_usage_t supported_usage;
 } iree_hal_amdgpu_slab_provider_memory_pool_properties_t;
 
+// HSA memory pool and HAL capabilities exposed by a slab provider.
+typedef struct iree_hal_amdgpu_slab_provider_options_t {
+  // HSA memory pool used for slab allocations.
+  hsa_amd_memory_pool_t memory_pool;
+
+  // HAL memory type bits reported for buffers materialized from slabs.
+  iree_hal_memory_type_t memory_type;
+
+  // HAL buffer usage bits supported by buffers materialized from slabs.
+  iree_hal_buffer_usage_t supported_usage;
+} iree_hal_amdgpu_slab_provider_options_t;
+
 // Queries HSA memory-pool properties used by AMDGPU slab providers and pools.
 iree_status_t iree_hal_amdgpu_slab_provider_query_memory_pool_properties(
     const iree_hal_amdgpu_libhsa_t* libhsa, hsa_amd_memory_pool_t memory_pool,
@@ -59,7 +71,8 @@ iree_status_t iree_hal_amdgpu_slab_provider_query_memory_pool_properties(
 iree_status_t iree_hal_amdgpu_slab_provider_create(
     iree_hal_device_t* device, const iree_hal_amdgpu_libhsa_t* libhsa,
     const iree_hal_amdgpu_topology_t* topology,
-    hsa_amd_memory_pool_t memory_pool, iree_host_size_t physical_device_ordinal,
+    iree_hal_amdgpu_slab_provider_options_t options,
+    iree_host_size_t physical_device_ordinal,
     iree_hal_queue_affinity_t queue_affinity_mask,
     iree_hal_amdgpu_buffer_pool_t* buffer_pool, iree_string_view_t trace_name,
     iree_allocator_t host_allocator, iree_hal_slab_provider_t** out_provider);

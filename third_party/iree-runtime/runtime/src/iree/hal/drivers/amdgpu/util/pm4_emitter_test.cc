@@ -393,6 +393,57 @@ TEST(PM4EmitterTest, BuilderAppendsTimestampRangeAtomically) {
                 IREE_HAL_AMDGPU_PM4_RELEASE_MEM_TIMESTAMP_DWORD_COUNT));
 }
 
+TEST(PM4EmitterTest, EmitsTimestampAqlPackets) {
+  iree_hal_amdgpu_aql_packet_control_t packet_control =
+      iree_hal_amdgpu_aql_packet_control_barrier_system();
+  const iree_hsa_signal_t completion_signal = {0x12345678ull};
+  uint64_t start_tick = 0;
+  uint64_t end_tick = 0;
+
+  iree_hsa_amd_aql_pm4_ib_packet_t packet = {};
+  iree_hal_amdgpu_pm4_ib_slot_t slot;
+  uint16_t setup = 0;
+  uint16_t header = iree_hal_amdgpu_aql_emit_timestamp_start(
+      &packet, &slot, packet_control, &start_tick, &setup);
+  EXPECT_EQ(header, iree_hal_amdgpu_aql_make_header(
+                        IREE_HSA_PACKET_TYPE_VENDOR_SPECIFIC, packet_control));
+  EXPECT_EQ(setup, IREE_HSA_AMD_AQL_FORMAT_PM4_IB);
+  EXPECT_EQ(packet.completion_signal.handle, iree_hsa_signal_null().handle);
+  EXPECT_EQ(slot.dwords[0],
+            iree_hal_amdgpu_pm4_make_header(
+                IREE_HAL_AMDGPU_PM4_HDR_IT_OPCODE_COPY_DATA,
+                IREE_HAL_AMDGPU_PM4_COPY_TIMESTAMP_DWORD_COUNT));
+
+  packet = {};
+  header = iree_hal_amdgpu_aql_emit_timestamp_end(
+      &packet, &slot, packet_control, completion_signal, &end_tick, &setup);
+  EXPECT_EQ(header, iree_hal_amdgpu_aql_make_header(
+                        IREE_HSA_PACKET_TYPE_VENDOR_SPECIFIC, packet_control));
+  EXPECT_EQ(setup, IREE_HSA_AMD_AQL_FORMAT_PM4_IB);
+  EXPECT_EQ(packet.completion_signal.handle, completion_signal.handle);
+  EXPECT_EQ(slot.dwords[0],
+            iree_hal_amdgpu_pm4_make_header(
+                IREE_HAL_AMDGPU_PM4_HDR_IT_OPCODE_RELEASE_MEM,
+                IREE_HAL_AMDGPU_PM4_RELEASE_MEM_TIMESTAMP_DWORD_COUNT));
+
+  packet = {};
+  header = iree_hal_amdgpu_aql_emit_timestamp_range(
+      &packet, &slot, packet_control, completion_signal, &start_tick, &end_tick,
+      &setup);
+  EXPECT_EQ(header, iree_hal_amdgpu_aql_make_header(
+                        IREE_HSA_PACKET_TYPE_VENDOR_SPECIFIC, packet_control));
+  EXPECT_EQ(setup, IREE_HSA_AMD_AQL_FORMAT_PM4_IB);
+  EXPECT_EQ(packet.completion_signal.handle, completion_signal.handle);
+  EXPECT_EQ(slot.dwords[0],
+            iree_hal_amdgpu_pm4_make_header(
+                IREE_HAL_AMDGPU_PM4_HDR_IT_OPCODE_COPY_DATA,
+                IREE_HAL_AMDGPU_PM4_COPY_TIMESTAMP_DWORD_COUNT));
+  EXPECT_EQ(slot.dwords[6],
+            iree_hal_amdgpu_pm4_make_header(
+                IREE_HAL_AMDGPU_PM4_HDR_IT_OPCODE_RELEASE_MEM,
+                IREE_HAL_AMDGPU_PM4_RELEASE_MEM_TIMESTAMP_DWORD_COUNT));
+}
+
 TEST(PM4EmitterTest, BuilderRejectsTimestampRangeWithoutPartialAppend) {
   iree_hal_amdgpu_pm4_ib_slot_t slot;
   iree_hal_amdgpu_pm4_ib_builder_t builder;

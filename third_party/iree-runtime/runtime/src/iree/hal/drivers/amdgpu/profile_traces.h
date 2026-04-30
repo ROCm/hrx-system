@@ -73,20 +73,20 @@ uint32_t iree_hal_amdgpu_host_queue_profile_trace_start_packet_count(
 
 // Prepares executable trace slots for |reservation|.
 //
-// Caller must hold queue->submission_mutex and must call this only after the
-// dispatch profile events have been reserved. Start/stop handles are created
-// lazily per event-ring slot and then reused only after the dispatch event
-// cursor has advanced past the slot. Because ATT output buffers are large, the
-// event flush path releases the slot handle after all sink writes for the
-// corresponding dispatch event have succeeded instead of retaining it for the
-// full profiling session.
+// Caller must hold queue->locks.submission_mutex and must call this only after
+// the dispatch profile events have been reserved. Start/stop handles are
+// created lazily per event-ring slot and then reused only after the dispatch
+// event cursor has advanced past the slot. Because ATT output buffers are
+// large, the event flush path releases the slot handle after all sink writes
+// for the corresponding dispatch event have succeeded instead of retaining it
+// for the full profiling session.
 iree_status_t iree_hal_amdgpu_host_queue_prepare_profile_traces(
     iree_hal_amdgpu_host_queue_t* queue,
     iree_hal_amdgpu_profile_dispatch_event_reservation_t reservation);
 
 // Prepares the ATT code-object marker packet for |event_position|.
 //
-// Caller must hold queue->submission_mutex and call
+// Caller must hold queue->locks.submission_mutex and call
 // iree_hal_amdgpu_host_queue_prepare_profile_traces first for the same event
 // slot so the aqlprofile allocation context has been initialized.
 iree_status_t iree_hal_amdgpu_host_queue_prepare_profile_trace_code_object(

@@ -10,6 +10,7 @@
 #include <cstring>
 #include <memory>
 
+#include "iree/hal/drivers/amdgpu/abi/queue.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -28,6 +29,9 @@ using CommandBufferPtr =
 class AqlCommandBufferTest : public ::testing::Test {
  protected:
   void SetUp() override {
+    IREE_ASSERT_OK(iree_hal_allocator_create_heap(
+        iree_make_cstring_view("aql_command_buffer_test"),
+        iree_allocator_system(), iree_allocator_system(), &device_allocator_));
     iree_hal_amdgpu_profile_metadata_initialize(iree_allocator_system(),
                                                 &profile_metadata_);
     IREE_ASSERT_OK(iree_hal_amdgpu_aql_program_block_pool_initialize(
@@ -37,16 +41,26 @@ class AqlCommandBufferTest : public ::testing::Test {
   void TearDown() override {
     iree_arena_block_pool_deinitialize(&block_pool_);
     iree_hal_amdgpu_profile_metadata_deinitialize(&profile_metadata_);
+    iree_hal_allocator_release(device_allocator_);
   }
 
   CommandBufferPtr CreateCommandBufferWithMode(
       iree_hal_command_buffer_mode_t mode,
       iree_host_size_t binding_capacity = 0) {
+    return CreateCommandBufferWithProfileMetadata(mode, &profile_metadata_,
+                                                  binding_capacity);
+  }
+
+  CommandBufferPtr CreateCommandBufferWithProfileMetadata(
+      iree_hal_command_buffer_mode_t mode,
+      iree_hal_amdgpu_profile_metadata_registry_t* profile_metadata,
+      iree_host_size_t binding_capacity = 0) {
     iree_hal_command_buffer_t* command_buffer = nullptr;
     IREE_EXPECT_OK(iree_hal_amdgpu_aql_command_buffer_create(
-        /*device_allocator=*/nullptr, mode, IREE_HAL_COMMAND_CATEGORY_ANY,
+        device_allocator_, mode, IREE_HAL_COMMAND_CATEGORY_ANY,
         IREE_HAL_QUEUE_AFFINITY_ANY, binding_capacity, /*device_ordinal=*/0,
-        &profile_metadata_, &block_pool_, &block_pool_, iree_allocator_system(),
+        iree_hal_amdgpu_aql_prepublished_kernarg_storage_disabled(),
+        profile_metadata, &block_pool_, &block_pool_, iree_allocator_system(),
         &command_buffer));
     return CommandBufferPtr(command_buffer);
   }
@@ -61,8 +75,13 @@ class AqlCommandBufferTest : public ::testing::Test {
   }
 
  private:
+  // Test allocator borrowed by command buffers for validation.
+  iree_hal_allocator_t* device_allocator_ = nullptr;
+  // Fixed block size used by command-buffer tests.
   iree_host_size_t block_size_ = 256;
+  // Program and resource-set block pool borrowed by test command buffers.
   iree_arena_block_pool_t block_pool_;
+  // Profile metadata registry borrowed by test command buffers.
   iree_hal_amdgpu_profile_metadata_registry_t profile_metadata_;
 };
 
@@ -123,7 +142,7 @@ TEST_F(AqlCommandBufferTest, UnvalidatedCommandBufferCannotRerecord) {
   const uint32_t command_count = program->command_count;
   const iree_host_size_t profile_operation_count =
       profile_metadata().command_operation_record_count;
-  EXPECT_EQ(profile_operation_count, command_count);
+  EXPECT_EQ(profile_operation_count, 0u);
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
                         iree_hal_command_buffer_begin(command_buffer.get()));
@@ -133,6 +152,37 @@ TEST_F(AqlCommandBufferTest, UnvalidatedCommandBufferCannotRerecord) {
   EXPECT_EQ(command_count, program->command_count);
   EXPECT_EQ(profile_operation_count,
             profile_metadata().command_operation_record_count);
+}
+
+TEST_F(AqlCommandBufferTest, RetainedProfileMetadataRegistersOperations) {
+  CommandBufferPtr command_buffer = CreateCommandBufferWithMode(
+      IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT |
+      IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA);
+  ASSERT_NE(command_buffer, nullptr);
+
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer.get()));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer.get()));
+
+  const iree_hal_amdgpu_aql_program_t* program =
+      iree_hal_amdgpu_aql_command_buffer_program(command_buffer.get());
+  ASSERT_NE(program->first_block, nullptr);
+  EXPECT_EQ(program->command_count,
+            profile_metadata().command_operation_record_count);
+}
+
+TEST_F(AqlCommandBufferTest, RetainedDispatchMetadataDoesNotRequireProfile) {
+  CommandBufferPtr command_buffer = CreateCommandBufferWithProfileMetadata(
+      IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT |
+          IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_DISPATCH_METADATA,
+      /*profile_metadata=*/nullptr);
+  ASSERT_NE(command_buffer, nullptr);
+  EXPECT_EQ(iree_hal_amdgpu_aql_command_buffer_profile_id(command_buffer.get()),
+            0u);
+
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer.get()));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer.get()));
+  EXPECT_EQ(profile_metadata().command_buffer_record_count, 0u);
+  EXPECT_EQ(profile_metadata().command_operation_record_count, 0u);
 }
 
 TEST_F(AqlCommandBufferTest, BarrierOnlyRecordingHasBarrierAndReturn) {
@@ -158,10 +208,45 @@ TEST_F(AqlCommandBufferTest, BarrierOnlyRecordingHasBarrierAndReturn) {
       iree_hal_amdgpu_command_buffer_block_commands_const(program->first_block);
   EXPECT_EQ(barrier_command->opcode,
             IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_BARRIER);
+  const auto* barrier =
+      reinterpret_cast<const iree_hal_amdgpu_command_buffer_barrier_command_t*>(
+          barrier_command);
+  EXPECT_EQ(barrier->acquire_scope, IREE_HSA_FENCE_SCOPE_NONE);
+  EXPECT_EQ(barrier->release_scope, IREE_HSA_FENCE_SCOPE_NONE);
   const iree_hal_amdgpu_command_buffer_command_header_t* return_command =
       iree_hal_amdgpu_command_buffer_command_next_const(barrier_command);
   EXPECT_EQ(return_command->opcode,
             IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_RETURN);
+}
+
+TEST_F(AqlCommandBufferTest, MemoryBarrierRecordingPreservesFenceScopes) {
+  CommandBufferPtr command_buffer = CreateCommandBuffer();
+  ASSERT_NE(command_buffer, nullptr);
+
+  const iree_hal_memory_barrier_t memory_barrier = {
+      .source_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
+      .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ,
+  };
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer.get()));
+  IREE_ASSERT_OK(iree_hal_command_buffer_execution_barrier(
+      command_buffer.get(), IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      IREE_HAL_EXECUTION_STAGE_DISPATCH, IREE_HAL_EXECUTION_BARRIER_FLAG_NONE,
+      /*memory_barrier_count=*/1, &memory_barrier,
+      /*buffer_barrier_count=*/0, /*buffer_barriers=*/nullptr));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer.get()));
+
+  const iree_hal_amdgpu_aql_program_t* program =
+      iree_hal_amdgpu_aql_command_buffer_program(command_buffer.get());
+  ASSERT_NE(program->first_block, nullptr);
+  const iree_hal_amdgpu_command_buffer_command_header_t* barrier_command =
+      iree_hal_amdgpu_command_buffer_block_commands_const(program->first_block);
+  ASSERT_EQ(barrier_command->opcode,
+            IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_BARRIER);
+  const auto* barrier =
+      reinterpret_cast<const iree_hal_amdgpu_command_buffer_barrier_command_t*>(
+          barrier_command);
+  EXPECT_EQ(barrier->acquire_scope, IREE_HSA_FENCE_SCOPE_AGENT);
+  EXPECT_EQ(barrier->release_scope, IREE_HSA_FENCE_SCOPE_AGENT);
 }
 
 TEST_F(AqlCommandBufferTest, UpdatePayloadsUseStableRodataOrdinals) {

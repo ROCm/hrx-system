@@ -722,10 +722,6 @@ static iree_status_t iree_hal_task_device_prepare_alloca_wrapper(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "unsupported alloca flags: 0x%" PRIx64, flags);
   }
-  if (IREE_UNLIKELY(allocation_size == 0)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "queue_alloca allocation_size must be non-zero");
-  }
 
   // Local CPU slab providers report physical host properties while the local
   // HAL device exposes those bytes as device-local. Normalize through the
@@ -737,6 +733,7 @@ static iree_status_t iree_hal_task_device_prepare_alloca_wrapper(
           /*out_allocation_size=*/NULL);
   if (IREE_UNLIKELY(!iree_all_bits_set(
           compatibility, IREE_HAL_BUFFER_COMPATIBILITY_ALLOCATABLE))) {
+#if IREE_STATUS_MODE
     iree_bitfield_string_temp_t compatibility_string;
     iree_string_view_t compatibility_value =
         iree_hal_buffer_compatibility_format(compatibility,
@@ -745,6 +742,9 @@ static iree_status_t iree_hal_task_device_prepare_alloca_wrapper(
         IREE_STATUS_INVALID_ARGUMENT,
         "queue_alloca params are not allocatable on this device: %.*s",
         (int)compatibility_value.size, compatibility_value.data);
+#else
+    return iree_status_from_code(IREE_STATUS_INVALID_ARGUMENT);
+#endif  // IREE_STATUS_MODE
   }
 
   iree_hal_task_device_t* device = iree_hal_task_device_cast(base_device);
@@ -769,6 +769,36 @@ static iree_status_t iree_hal_task_device_prepare_alloca_wrapper(
   return iree_ok_status();
 }
 
+static iree_status_t iree_hal_task_device_queue_alloca_empty(
+    iree_hal_device_t* base_device, iree_hal_task_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_params_t params, iree_hal_alloca_flags_t flags,
+    iree_hal_buffer_t** IREE_RESTRICT out_buffer) {
+  if (IREE_UNLIKELY(iree_any_bit_set(
+          flags, ~(IREE_HAL_ALLOCA_FLAG_NONE |
+                   IREE_HAL_ALLOCA_FLAG_INDETERMINATE_LIFETIME |
+                   IREE_HAL_ALLOCA_FLAG_ALLOW_POOL_WAIT_FRONTIER)))) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported alloca flags: 0x%" PRIx64, flags);
+  }
+
+  iree_hal_buffer_t* empty_buffer = NULL;
+  iree_status_t status = iree_hal_allocator_allocate_buffer(
+      iree_hal_device_allocator(base_device), params, /*allocation_size=*/0,
+      &empty_buffer);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_task_queue_submit_barrier(queue, wait_semaphore_list,
+                                                signal_semaphore_list);
+  }
+  if (iree_status_is_ok(status)) {
+    *out_buffer = empty_buffer;
+  } else {
+    iree_hal_buffer_release(empty_buffer);
+  }
+  return status;
+}
+
 static iree_status_t iree_hal_task_device_queue_alloca(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -783,6 +813,12 @@ static iree_status_t iree_hal_task_device_queue_alloca(
   const iree_host_size_t queue_index = iree_hal_task_device_select_queue(
       device, IREE_HAL_COMMAND_CATEGORY_ANY, queue_affinity);
   iree_hal_task_queue_t* queue = &device->queues[queue_index];
+
+  if (allocation_size == 0) {
+    return iree_hal_task_device_queue_alloca_empty(
+        base_device, queue, wait_semaphore_list, signal_semaphore_list, params,
+        flags, out_buffer);
+  }
 
   iree_hal_pool_t* allocation_pool = NULL;
   iree_hal_buffer_t* transient_buffer = NULL;

@@ -41,6 +41,28 @@ extern "C" {
 
 typedef struct iree_task_process_t iree_task_process_t;
 
+typedef uint32_t iree_task_process_flags_t;
+
+typedef enum iree_task_process_flag_bits_e {
+  IREE_TASK_PROCESS_FLAG_NONE = 0u,
+  // Admits the process through compute slots even when its current wake budget
+  // is one. Use for cooperative processes whose drain functions may retain
+  // warm workers or require deferred release after active drainers exit.
+  IREE_TASK_PROCESS_FLAG_COMPUTE_SLOT = 1u << 0,
+} iree_task_process_flag_bits_t;
+
+// Worker execution context passed to process drain functions.
+typedef struct iree_task_worker_context_t {
+  // Globally unique worker index assigned by the executor.
+  uint32_t worker_index;
+
+  // Cached logical processor identifier for the calling worker.
+  iree_cpu_processor_id_t processor_id;
+
+  // Reusable worker-local scratch memory.
+  iree_byte_span_t local_memory;
+} iree_task_worker_context_t;
+
 // Result of a single drain() call on a process.
 typedef struct iree_task_process_drain_result_t {
   // True when the process has finished all work or encountered a fatal error.
@@ -60,10 +82,20 @@ typedef struct iree_task_process_drain_result_t {
 
   // True if this drain() call did not perform useful work and the worker
   // should wait near the compute slot without remaining an active drainer.
-  // Only wake_budget > 1 compute-slot processes can use this. While warm, the
-  // worker is counted in the process warm-retainer count and does not call
-  // drain() again until the process retention epoch changes.
+  // Only compute-slot processes can use this. While warm, the worker is counted
+  // in the process warm-retainer count and does not call drain() again until
+  // the process retention epoch changes.
   bool keep_warm;
+
+  // Maximum warm retainers allowed for this keep_warm decision. A zero value
+  // uses the process's current wake budget.
+  int32_t keep_warm_retainer_limit;
+
+  // True if a keep_warm worker should enter the longer lookahead spin window.
+  // Drain functions set this only when they have process-specific evidence
+  // that near-future work needs more workers than the generic tail policy keeps
+  // hot. This has no effect unless keep_warm is also true.
+  bool keep_warm_spin;
 
   // True if keep_active must be visible to peer drainers. Use this when a
   // cooperative process may make mixed keep/release decisions across workers;
@@ -84,12 +116,14 @@ typedef struct iree_task_process_drain_result_t {
 // quickly — the scheduler relies on drain() returning to check for higher-
 // priority work between calls.
 //
-// |worker_index| identifies the calling worker. It is stable for the worker
-// lifetime and may include an executor-specific base offset. Drain functions
-// that need dense per-executor storage should map this value into their own
-// worker capacity; the executor does not manage per-process worker state.
+// |worker_context| describes the calling worker. The worker index is stable for
+// the worker lifetime and may include an executor-specific base offset. Drain
+// functions that need dense per-executor storage should map this value into
+// their own worker capacity; the executor does not manage per-process worker
+// state.
 typedef iree_status_t (*iree_task_process_drain_fn_t)(
-    iree_task_process_t* process, uint32_t worker_index,
+    iree_task_process_t* process,
+    const iree_task_worker_context_t* worker_context,
     iree_task_process_drain_result_t* out_result);
 
 // Called exactly once when a process completes (after the last drain() returns
@@ -220,14 +254,25 @@ struct iree_task_process_t {
 
   iree_alignas(iree_hardware_destructive_interference_size)
 
-      // Wake demand hint. A value of 1 uses the sequential immediate-list
-      // path. Values greater than 1 use compute slots and seed the executor
-      // wake tree with this many desired workers. This is not an admission
-      // limit: already-active workers may still enter drain().
+      // Wake demand hint. The scheduler uses this to seed the executor wake
+      // tree when a process is activated or republished. This is not an
+      // admission limit: already-active workers may still enter drain().
+      // The process scheduler class is separate: processes with
+      // IREE_TASK_PROCESS_FLAG_COMPUTE_SLOT stay in compute slots even when
+      // their current wake demand is one.
       //
       // Drain functions may update the hint at region transitions when the
       // amount of useful parallel work changes.
       iree_atomic_int32_t wake_budget;
+
+  // Immutable scheduler and lifecycle flags.
+  iree_task_process_flags_t flags;
+
+  // Monotonic compute-slot placement generation. Incremented immediately
+  // before publishing this process into a compute slot and sampled by slot
+  // release paths so stale releases cannot mutate process-global schedule
+  // state after a newer slot lifetime has begun.
+  iree_atomic_int32_t placement_epoch;
 
   // Executor-managed scheduling state (iree_task_process_schedule_state_t).
   // Tracks whether this process is idle, queued on a run list, or being
@@ -320,6 +365,10 @@ void iree_task_process_initialize(iree_task_process_drain_fn_t drain_fn,
                                   int32_t suspend_count, int32_t wake_budget,
                                   iree_task_process_t* out_process);
 
+// Sets immutable scheduler/lifecycle flags before the process is activated.
+void iree_task_process_set_flags(iree_task_process_t* process,
+                                 iree_task_process_flags_t flags);
+
 // Decrements the process's suspend count by one. If the count reaches zero,
 // returns true — the caller is responsible for pushing the process to the
 // appropriate run list and waking workers. If the count is still positive,
@@ -411,6 +460,25 @@ static inline int32_t iree_task_process_wake_budget(
   return iree_atomic_load(&process->wake_budget, iree_memory_order_relaxed);
 }
 
+static inline bool iree_task_process_uses_compute_slots(
+    const iree_task_process_t* process) {
+  return iree_any_bit_set(process->flags, IREE_TASK_PROCESS_FLAG_COMPUTE_SLOT);
+}
+
+// Returns the current compute-slot placement epoch.
+static inline int32_t iree_task_process_placement_epoch(
+    const iree_task_process_t* process) {
+  return iree_atomic_load(&process->placement_epoch, iree_memory_order_acquire);
+}
+
+// Advances and returns the compute-slot placement epoch.
+static inline int32_t iree_task_process_advance_placement_epoch(
+    iree_task_process_t* process) {
+  return iree_atomic_fetch_add(&process->placement_epoch, 1,
+                               iree_memory_order_acq_rel) +
+         1;
+}
+
 // Returns the process-local warm-retention epoch.
 static inline int32_t iree_task_process_retention_epoch(
     const iree_task_process_t* process) {
@@ -421,6 +489,25 @@ static inline int32_t iree_task_process_retention_epoch(
 static inline int32_t iree_task_process_warm_retainer_count(
     const iree_task_process_t* process) {
   return iree_atomic_load(&process->warm_retainers, iree_memory_order_acquire);
+}
+
+// Attempts to retain one warm worker near the process. Warm retention is
+// capacity for near-future useful draining, so admission is capped by the
+// caller-provided retention limit. Excess workers should leave active draining
+// and park.
+static inline bool iree_task_process_try_retain_warm(
+    iree_task_process_t* process, int32_t retainer_limit) {
+  if (retainer_limit <= 0) return false;
+  int32_t current_count =
+      iree_atomic_load(&process->warm_retainers, iree_memory_order_acquire);
+  while (true) {
+    if (current_count >= retainer_limit) return false;
+    if (iree_atomic_compare_exchange_weak(
+            &process->warm_retainers, &current_count, current_count + 1,
+            iree_memory_order_acq_rel, iree_memory_order_acquire)) {
+      return true;
+    }
+  }
 }
 
 // Advances the process-local warm-retention epoch and returns the new value.

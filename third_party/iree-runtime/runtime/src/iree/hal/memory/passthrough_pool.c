@@ -15,23 +15,40 @@
 //===----------------------------------------------------------------------===//
 
 typedef struct iree_hal_passthrough_pool_t {
+  // Base pool resource for vtable dispatch and ref counting.
   iree_hal_resource_t resource;
+
+  // Provider used to acquire one slab per reservation.
   iree_hal_slab_provider_t* slab_provider;
+
+  // Notification signaled when a reservation release may unblock waiters.
   iree_async_notification_t* notification;
+
+  // Host allocator used for pool metadata and reservation state.
   iree_allocator_t host_allocator;
 
   // Stable named-memory stream for logical reservations from this pool.
   iree_hal_memory_trace_t trace;
 
-  // Cached from slab_provider at creation time.
+  // Memory type properties provided by |slab_provider|.
   iree_hal_memory_type_t memory_type;
+
+  // Buffer usages supported by |slab_provider|.
   iree_hal_buffer_usage_t supported_usage;
 
-  // Statistics (relaxed atomics, incremented on acquire/release).
+  // Approximate live reservation bytes for lock-free stats queries.
   iree_atomic_int64_t bytes_reserved;
+
+  // Approximate live reservation count for lock-free stats queries.
   iree_atomic_int32_t reservation_count;
+
+  // Approximate live slab count for lock-free stats queries.
   iree_atomic_int32_t slab_count;
+
+  // Total successful acquire_reservation() calls.
   iree_atomic_int64_t reserve_count;
+
+  // Total release_reservation() calls.
   iree_atomic_int64_t release_count;
 } iree_hal_passthrough_pool_t;
 

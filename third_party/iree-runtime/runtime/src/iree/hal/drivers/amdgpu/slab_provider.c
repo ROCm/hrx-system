@@ -238,7 +238,8 @@ iree_hal_amdgpu_slab_provider_query_memory_pool_properties(
 iree_status_t iree_hal_amdgpu_slab_provider_create(
     iree_hal_device_t* device, const iree_hal_amdgpu_libhsa_t* libhsa,
     const iree_hal_amdgpu_topology_t* topology,
-    hsa_amd_memory_pool_t memory_pool, iree_host_size_t physical_device_ordinal,
+    iree_hal_amdgpu_slab_provider_options_t options,
+    iree_host_size_t physical_device_ordinal,
     iree_hal_queue_affinity_t queue_affinity_mask,
     iree_hal_amdgpu_buffer_pool_t* buffer_pool, iree_string_view_t trace_name,
     iree_allocator_t host_allocator, iree_hal_slab_provider_t** out_provider) {
@@ -263,6 +264,23 @@ iree_status_t iree_hal_amdgpu_slab_provider_create(
         "AMDGPU slab provider physical device ordinal out of range: %" PRIhsz,
         physical_device_ordinal);
   }
+  if (IREE_UNLIKELY(!options.memory_pool.handle)) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "AMDGPU slab provider requires an HSA memory pool");
+  }
+  if (IREE_UNLIKELY(options.memory_type == IREE_HAL_MEMORY_TYPE_NONE)) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AMDGPU slab provider requires non-empty HAL memory type bits");
+  }
+  if (IREE_UNLIKELY(options.supported_usage == IREE_HAL_BUFFER_USAGE_NONE)) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AMDGPU slab provider requires non-empty HAL buffer usage bits");
+  }
 
   iree_hal_amdgpu_slab_provider_t* provider = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
@@ -275,7 +293,7 @@ iree_status_t iree_hal_amdgpu_slab_provider_create(
   provider->device = device;
   provider->libhsa = libhsa;
   provider->topology = topology;
-  provider->memory_pool = memory_pool;
+  provider->memory_pool = options.memory_pool;
   provider->physical_device_ordinal = (uint32_t)physical_device_ordinal;
   provider->buffer_pool = buffer_pool;
   provider->queue_affinity_mask = queue_affinity_mask;
@@ -288,13 +306,13 @@ iree_status_t iree_hal_amdgpu_slab_provider_create(
   iree_hal_amdgpu_slab_provider_memory_pool_properties_t properties;
   if (iree_status_is_ok(status)) {
     status = iree_hal_amdgpu_slab_provider_query_memory_pool_properties(
-        libhsa, memory_pool, &properties);
+        libhsa, options.memory_pool, &properties);
   }
   if (iree_status_is_ok(status)) {
     provider->allocation_granule = properties.allocation_granule;
     provider->allocation_alignment = properties.allocation_alignment;
-    provider->memory_type = properties.memory_type;
-    provider->supported_usage = properties.supported_usage;
+    provider->memory_type = options.memory_type;
+    provider->supported_usage = options.supported_usage;
     *out_provider = &provider->base;
   } else {
     iree_hal_slab_provider_release(&provider->base);

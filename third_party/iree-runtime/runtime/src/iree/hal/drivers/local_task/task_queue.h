@@ -439,6 +439,10 @@ struct iree_hal_task_queue_t {
   // differentiation of operations within the executor.
   iree_task_scope_t scope;
 
+  // Persistent process release callbacks that may still access queue fields
+  // after the queue scope reaches idle.
+  iree_atomic_int32_t pending_process_release_count;
+
 #if !defined(NDEBUG)
   // Debug-only operation counters omitted from release builds.
   iree_hal_task_queue_debug_state_t debug;

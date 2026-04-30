@@ -121,15 +121,14 @@ static iree_async_notification_t* iree_hal_needs_wait_test_pool_notification(
 }
 
 static const iree_hal_pool_vtable_t iree_hal_needs_wait_test_pool_vtable = {
-    .destroy = iree_hal_needs_wait_test_pool_destroy,
-    .acquire_reservation = iree_hal_needs_wait_test_pool_acquire_reservation,
-    .release_reservation = iree_hal_needs_wait_test_pool_release_reservation,
-    .materialize_reservation =
-        iree_hal_needs_wait_test_pool_materialize_reservation,
-    .query_capabilities = iree_hal_needs_wait_test_pool_query_capabilities,
-    .query_stats = iree_hal_needs_wait_test_pool_query_stats,
-    .trim = iree_hal_needs_wait_test_pool_trim,
-    .notification = iree_hal_needs_wait_test_pool_notification,
+    iree_hal_needs_wait_test_pool_destroy,
+    iree_hal_needs_wait_test_pool_acquire_reservation,
+    iree_hal_needs_wait_test_pool_release_reservation,
+    iree_hal_needs_wait_test_pool_materialize_reservation,
+    iree_hal_needs_wait_test_pool_query_capabilities,
+    iree_hal_needs_wait_test_pool_query_stats,
+    iree_hal_needs_wait_test_pool_trim,
+    iree_hal_needs_wait_test_pool_notification,
 };
 
 static iree_hal_needs_wait_test_pool_t* CreateNeedsWaitTestPool() {
@@ -225,15 +224,14 @@ static iree_async_notification_t* iree_hal_routing_test_pool_notification(
 }
 
 static const iree_hal_pool_vtable_t iree_hal_routing_test_pool_vtable = {
-    .destroy = iree_hal_routing_test_pool_destroy,
-    .acquire_reservation = iree_hal_routing_test_pool_acquire_reservation,
-    .release_reservation = iree_hal_routing_test_pool_release_reservation,
-    .materialize_reservation =
-        iree_hal_routing_test_pool_materialize_reservation,
-    .query_capabilities = iree_hal_routing_test_pool_query_capabilities,
-    .query_stats = iree_hal_routing_test_pool_query_stats,
-    .trim = iree_hal_routing_test_pool_trim,
-    .notification = iree_hal_routing_test_pool_notification,
+    iree_hal_routing_test_pool_destroy,
+    iree_hal_routing_test_pool_acquire_reservation,
+    iree_hal_routing_test_pool_release_reservation,
+    iree_hal_routing_test_pool_materialize_reservation,
+    iree_hal_routing_test_pool_query_capabilities,
+    iree_hal_routing_test_pool_query_stats,
+    iree_hal_routing_test_pool_trim,
+    iree_hal_routing_test_pool_notification,
 };
 
 static iree_hal_routing_test_pool_t* CreateRoutingTestPool(
@@ -300,6 +298,10 @@ TEST(PoolSetTest, SelectsHighestPriorityCompatiblePoolBySize) {
             iree_hal_pool_set_select(&pool_set, params, 512));
   EXPECT_EQ((iree_hal_pool_t*)direct_pool,
             iree_hal_pool_set_select(&pool_set, params, 2048));
+
+  params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_OPTIMAL;
+  EXPECT_EQ((iree_hal_pool_t*)tlsf_pool,
+            iree_hal_pool_set_select(&pool_set, params, 512));
 
   params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE;
   EXPECT_EQ(nullptr, iree_hal_pool_set_select(&pool_set, params, 512));

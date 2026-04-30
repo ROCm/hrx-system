@@ -21,8 +21,6 @@ typedef enum iree_hal_replay_dump_format_e {
   // One JSON object per line. Blob payload bytes are represented as file
   // ranges.
   IREE_HAL_REPLAY_DUMP_FORMAT_JSONL = 1,
-  // Reserved for future C reproducer emission.
-  IREE_HAL_REPLAY_DUMP_FORMAT_C = 2,
 } iree_hal_replay_dump_format_t;
 
 // Options controlling replay dump output.
@@ -35,12 +33,19 @@ typedef struct iree_hal_replay_dump_options_t {
 typedef iree_status_t (*iree_hal_replay_dump_write_fn_t)(
     void* user_data, iree_string_view_t text);
 
+// Callback invoked for each text fragment emitted by the dumper.
+typedef struct iree_hal_replay_dump_write_callback_t {
+  // Function receiving the next text fragment.
+  iree_hal_replay_dump_write_fn_t fn;
+  // Opaque callback state passed to |fn|.
+  void* user_data;
+} iree_hal_replay_dump_write_callback_t;
+
 // Returns default replay dump options.
 static inline iree_hal_replay_dump_options_t
 iree_hal_replay_dump_options_default(void) {
-  iree_hal_replay_dump_options_t options = {
-      .format = IREE_HAL_REPLAY_DUMP_FORMAT_TEXT,
-  };
+  iree_hal_replay_dump_options_t options;
+  options.format = IREE_HAL_REPLAY_DUMP_FORMAT_TEXT;
   return options;
 }
 
@@ -52,8 +57,8 @@ iree_hal_replay_dump_options_default(void) {
 IREE_API_EXPORT iree_status_t
 iree_hal_replay_dump_file(iree_const_byte_span_t file_contents,
                           const iree_hal_replay_dump_options_t* options,
-                          iree_hal_replay_dump_write_fn_t write,
-                          void* user_data, iree_allocator_t host_allocator);
+                          iree_hal_replay_dump_write_callback_t write_callback,
+                          iree_allocator_t host_allocator);
 
 #ifdef __cplusplus
 }  // extern "C"

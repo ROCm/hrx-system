@@ -79,8 +79,8 @@ typedef struct iree_atomic_slist_entry_t {
 // single heavily tested implementation seems more worthwhile than several.
 typedef iree_alignas(iree_max_align_t) struct {
   iree_slim_mutex_t mutex;
-  // Atomic head pointer: relaxed loads enable fast-path empty checks
-  // without taking the mutex. All mutations still hold the mutex.
+  // Atomic head pointer used for relaxed empty checks without taking the mutex.
+  // All mutations still hold the mutex.
   iree_atomic_intptr_t head;
 } iree_atomic_slist_t;
 

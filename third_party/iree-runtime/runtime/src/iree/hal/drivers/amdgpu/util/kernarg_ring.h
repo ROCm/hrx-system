@@ -8,6 +8,15 @@
 #define IREE_HAL_DRIVERS_AMDGPU_UTIL_KERNARG_RING_H_
 
 #include "iree/base/api.h"
+
+#if defined(IREE_ARCH_X86_64)
+#if defined(IREE_COMPILER_MSVC_COMPAT)
+#include <intrin.h>
+#else
+#include <emmintrin.h>
+#endif  // IREE_COMPILER_MSVC_COMPAT
+#endif  // IREE_ARCH_X86_64
+
 #include "iree/base/internal/atomics.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
 
@@ -37,11 +46,44 @@ static_assert(sizeof(iree_hal_amdgpu_kernarg_block_t) == 64,
 // iree_hal_amdgpu_kernarg_ring_t
 //===----------------------------------------------------------------------===//
 
-// Per-queue bump allocator for dispatch kernarg memory backed by a shared host
-// memory pool with HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT. The physical
-// memory is allocated from a CPU pool and then
-// explicitly made visible to the queue's GPU agent with
-// hsa_amd_agents_allow_access.
+typedef enum iree_hal_amdgpu_kernarg_ring_publication_mode_e {
+  // Host writes to the ring need no extra publication beyond the packet-header
+  // release store.
+  IREE_HAL_AMDGPU_KERNARG_RING_PUBLICATION_MODE_NONE = 0,
+  // Host writes to the ring are published with the agent's HDP memory-flush
+  // register before packet-header commits.
+  IREE_HAL_AMDGPU_KERNARG_RING_PUBLICATION_MODE_HDP_FLUSH = 1,
+} iree_hal_amdgpu_kernarg_ring_publication_mode_t;
+
+typedef struct iree_hal_amdgpu_kernarg_ring_publication_t {
+  // Publication mode used before AQL packet headers reference the written
+  // kernargs.
+  iree_hal_amdgpu_kernarg_ring_publication_mode_t mode;
+  // HDP memory-flush register used when |mode| is
+  // IREE_HAL_AMDGPU_KERNARG_RING_PUBLICATION_MODE_HDP_FLUSH.
+  volatile uint32_t* hdp_mem_flush_control;
+} iree_hal_amdgpu_kernarg_ring_publication_t;
+
+// Memory backing policy for a queue-owned kernarg ring.
+//
+// The descriptor is consumed during ring initialization and may reference
+// caller-owned stack storage for |access_agents|.
+typedef struct iree_hal_amdgpu_kernarg_ring_memory_t {
+  // HSA memory pool used for the ring allocation.
+  hsa_amd_memory_pool_t memory_pool;
+  // Agents granted explicit access to the ring allocation.
+  const hsa_agent_t* access_agents;
+  // Number of entries in |access_agents|.
+  iree_host_size_t access_agent_count;
+  // Host-write publication mechanism for this memory pool.
+  iree_hal_amdgpu_kernarg_ring_publication_t publication;
+} iree_hal_amdgpu_kernarg_ring_memory_t;
+
+// Per-queue bump allocator for dispatch kernarg memory backed by an HSA memory
+// pool. The backing pool is selected per physical device: host kernarg-init
+// memory is universally valid, while host-visible device-local memory avoids
+// device reads over PCIe on systems where CPU agents can directly access the
+// GPU's coarse-grained pool.
 //
 // Thread safety:
 //   allocate() is multi-producer safe (CAS on write_position).
@@ -63,11 +105,13 @@ static_assert(sizeof(iree_hal_amdgpu_kernarg_block_t) == 64,
 //   cannot succeed and then fail in normal execution.
 //
 // Memory ordering:
-//   write_position uses relaxed CAS. It only claims space; the actual
-//   kernarg data writes are made visible to the GPU by the AQL packet header
-//   commit (release store). The GPU cannot read the kernargs until it sees a
-//   valid header, and the release/acquire pair on the header orders all prior
-//   stores (including the kernarg writes).
+//   write_position uses relaxed CAS. It only claims space. The GPU cannot read
+//   kernargs until it sees a valid AQL packet header. Rings backed by normal
+//   host kernarg memory rely on the AQL packet header release store to order
+//   prior kernarg writes. Rings backed by host-visible device memory also
+//   require publish_host_writes() before committing any packet header that
+//   references queue-owned kernargs so CPU write-combining/BAR effects are
+//   drained before the doorbell-visible packet stream can consume them.
 //
 //   read_position uses release (drain) / acquire (allocators). The drain
 //   publishes reclamation; allocators observe it for the defensive fullness
@@ -83,6 +127,9 @@ typedef struct iree_hal_amdgpu_kernarg_ring_t {
   uint32_t capacity;
   // capacity - 1, for masking logical positions to physical ring indices.
   uint32_t mask;
+
+  // Host-write publication mechanism for this ring.
+  iree_hal_amdgpu_kernarg_ring_publication_t publication;
 
   // Monotonically increasing write position in blocks. Each allocate()
   // atomically advances this via a CAS loop. The position is a logical
@@ -101,23 +148,19 @@ typedef struct iree_hal_amdgpu_kernarg_ring_t {
 } iree_hal_amdgpu_kernarg_ring_t;
 
 // Initializes the kernarg ring by allocating at least |min_capacity_in_blocks|
-// blocks from |memory_pool|.
+// blocks from |memory->memory_pool|.
 //
 // |min_capacity_in_blocks| must be a power of two. The actual capacity may be
 // larger if the HSA allocation granule requires rounding; the ring preserves a
 // power-of-two block count so physical indices can be masked.
 //
-// |memory_pool| must be a CPU pool with
-// HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT and
-// HSA_AMD_MEMORY_POOL_INFO_ACCESSIBLE_BY_ALL=true so |device_agent| can be
-// granted direct access. HSA VMEM handles are not supported on at least current
-// ROCm stacks for the host pools used here, so this ring uses a plain pool
-// allocation and skips a tail fragment when needed to preserve contiguous
-// multi-block spans.
+// HSA VMEM handles are not supported on at least current ROCm stacks for the
+// host pools used here, so this ring uses a plain pool allocation and skips a
+// tail fragment when needed to preserve contiguous multi-block spans.
 iree_status_t iree_hal_amdgpu_kernarg_ring_initialize(
-    const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t device_agent,
-    hsa_amd_memory_pool_t memory_pool, uint32_t min_capacity_in_blocks,
-    iree_hal_amdgpu_kernarg_ring_t* out_ring);
+    const iree_hal_amdgpu_libhsa_t* libhsa,
+    const iree_hal_amdgpu_kernarg_ring_memory_t* memory,
+    uint32_t min_capacity_in_blocks, iree_hal_amdgpu_kernarg_ring_t* out_ring);
 
 // Deinitializes the kernarg ring and frees the backing HSA memory-pool
 // allocation.
@@ -125,6 +168,63 @@ iree_status_t iree_hal_amdgpu_kernarg_ring_initialize(
 void iree_hal_amdgpu_kernarg_ring_deinitialize(
     const iree_hal_amdgpu_libhsa_t* libhsa,
     iree_hal_amdgpu_kernarg_ring_t* ring);
+
+// Returns true if host writes into |ring| need explicit publication before
+// packet headers referencing queue-owned kernargs become visible.
+static inline bool iree_hal_amdgpu_kernarg_ring_requires_host_write_publication(
+    const iree_hal_amdgpu_kernarg_ring_t* ring) {
+  return ring->publication.mode !=
+         IREE_HAL_AMDGPU_KERNARG_RING_PUBLICATION_MODE_NONE;
+}
+
+// Returns true if this host architecture has an explicit store fence suitable
+// for ordering BAR/write-combined kernarg writes before device-visible
+// publication.
+static inline bool iree_hal_amdgpu_kernarg_ring_supports_host_write_publication(
+    void) {
+#if defined(IREE_ARCH_X86_64) || \
+    (defined(IREE_ARCH_ARM_64) && defined(IREE_COMPILER_GCC_COMPAT))
+  return true;
+#else
+  return false;
+#endif  // IREE_ARCH_*
+}
+
+// Orders host writes to BAR/write-combined kernarg memory before the
+// device-visible publication operation that follows.
+static inline void iree_hal_amdgpu_kernarg_ring_host_write_fence(void) {
+#if defined(IREE_ARCH_X86_64)
+  _mm_sfence();
+#elif defined(IREE_ARCH_ARM_64) && defined(IREE_COMPILER_GCC_COMPAT)
+  __asm__ __volatile__("dmb oshst" ::: "memory");
+#else
+  // This fallback is only valid for normal host memory. Physical-device
+  // selection must not choose a publication-requiring kernarg pool when
+  // supports_host_write_publication() is false.
+  iree_atomic_thread_fence(iree_memory_order_seq_cst);
+#endif  // IREE_ARCH_*
+}
+
+// Publishes host writes to queue-owned kernargs before their packet headers
+// become visible to the command processor.
+//
+// Host kernarg-init memory needs no extra work: the packet header release store
+// provides the ordering edge. Host-visible device memory can be mapped through
+// write-combining/BAR paths, so the selected backing policy must drain CPU
+// writes and make them visible to the GPU before packet publication.
+static inline void iree_hal_amdgpu_kernarg_ring_publish_host_writes(
+    const iree_hal_amdgpu_kernarg_ring_t* ring) {
+  if (ring->publication.mode ==
+      IREE_HAL_AMDGPU_KERNARG_RING_PUBLICATION_MODE_NONE) {
+    return;
+  }
+  IREE_ASSERT(ring->publication.mode ==
+              IREE_HAL_AMDGPU_KERNARG_RING_PUBLICATION_MODE_HDP_FLUSH);
+  IREE_ASSERT(ring->publication.hdp_mem_flush_control);
+  iree_hal_amdgpu_kernarg_ring_host_write_fence();
+  *ring->publication.hdp_mem_flush_control = 1u;
+  (void)*ring->publication.hdp_mem_flush_control;
+}
 
 // Returns true if |block_count| contiguous blocks can currently be allocated
 // without exceeding the ring capacity. The check accounts for the same

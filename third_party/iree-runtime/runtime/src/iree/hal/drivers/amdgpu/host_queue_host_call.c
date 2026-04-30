@@ -137,7 +137,7 @@ static void iree_hal_amdgpu_host_call_signal_or_fail(
 // the callback's cloned signal list.
 static void iree_hal_amdgpu_host_call_consume_unobservable_status(
     iree_status_t status) {
-  (void)iree_status_consume_code(status);
+  iree_status_free(status);
 }
 
 static void iree_hal_amdgpu_host_call_execute(

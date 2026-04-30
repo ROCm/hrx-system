@@ -48,7 +48,7 @@ typedef struct RetireCallbackState {
 static void VerifySemaphoreNotVisibleBeforePreSignalAction(
     iree_hal_amdgpu_reclaim_entry_t* entry, void* user_data,
     iree_status_t status) {
-  EXPECT_TRUE(iree_status_is_ok(status));
+  IREE_EXPECT_OK(status);
   EXPECT_NE(entry, nullptr);
   auto* state = static_cast<PreSignalActionState*>(user_data);
   EXPECT_EQ(iree_async_semaphore_query(state->semaphore), 0u);
@@ -157,10 +157,12 @@ struct NotificationRingTest : public ::testing::Test {
 
   static iree_hal_amdgpu_reclaim_entry_t* ReclaimEntryForNextEpoch(
       iree_hal_amdgpu_notification_ring_t* ring,
-      uint64_t kernarg_write_position = 0) {
+      uint64_t kernarg_write_position = 0,
+      uint64_t queue_upload_write_position = 0) {
     iree_hal_amdgpu_reclaim_entry_t* reclaim_entry =
         iree_hal_amdgpu_notification_ring_reclaim_entry(ring);
     reclaim_entry->kernarg_write_position = kernarg_write_position;
+    reclaim_entry->queue_upload_write_position = queue_upload_write_position;
     return reclaim_entry;
   }
 
@@ -642,6 +644,29 @@ TEST_F(NotificationRingTest, KernargPositionReporting) {
   EXPECT_EQ(kernarg_position, 192u);
 
   iree_async_semaphore_release(semaphore);
+}
+
+TEST_F(NotificationRingTest, QueueOwnedReclaimPositionReporting) {
+  IREE_ASSERT_OK_AND_ASSIGN(auto ring, InitializeRing());
+
+  // Epoch 1: no user-visible signals, but both queue-owned rings must retire.
+  ReclaimEntryForNextEpoch(ring.get(), /*kernarg_write_position=*/64,
+                           /*queue_upload_write_position=*/256);
+  EXPECT_EQ(iree_hal_amdgpu_notification_ring_advance_epoch(ring.get()), 1u);
+
+  // Epoch 2: later kernargs but an earlier upload watermark.
+  ReclaimEntryForNextEpoch(ring.get(), /*kernarg_write_position=*/192,
+                           /*queue_upload_write_position=*/128);
+  EXPECT_EQ(iree_hal_amdgpu_notification_ring_advance_epoch(ring.get()), 2u);
+
+  SimulateCompletions(ring.get(), 2);
+  iree_hal_amdgpu_reclaim_positions_t reclaim_positions = {0};
+  EXPECT_EQ(
+      iree_hal_amdgpu_notification_ring_drain_reclaim_positions(
+          ring.get(), &kEmptyFrontier, nullptr, nullptr, &reclaim_positions),
+      0u);
+  EXPECT_EQ(reclaim_positions.kernarg_write_position, 192u);
+  EXPECT_EQ(reclaim_positions.queue_upload_write_position, 256u);
 }
 
 TEST_F(NotificationRingTest, KernargPositionReportingForZeroSignalEpochs) {

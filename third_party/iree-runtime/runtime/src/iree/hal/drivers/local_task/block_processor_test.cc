@@ -34,16 +34,26 @@ struct WorkerArgs {
   uint32_t worker_index;
 };
 
+static iree_hal_cmd_block_processor_worker_context_t worker_context(
+    uint32_t worker_index) {
+  return {
+      /*.worker_index=*/worker_index,
+      /*.processor_id=*/worker_index,
+      /*.local_memory=*/iree_byte_span_empty(),
+  };
+}
+
 static int worker_thread_entry(void* arg) {
   WorkerArgs* worker_args = reinterpret_cast<WorkerArgs*>(arg);
   // Drain loop.
   iree_hal_cmd_block_processor_worker_state_t worker_state;
   memset(&worker_state, 0, sizeof(worker_state));
   iree_hal_cmd_block_processor_drain_result_t result;
+  iree_hal_cmd_block_processor_worker_context_t worker_context_value =
+      worker_context(worker_args->worker_index);
   do {
-    iree_hal_cmd_block_processor_drain(worker_args->context,
-                                       worker_args->worker_index, &worker_state,
-                                       &result);
+    iree_hal_cmd_block_processor_drain(
+        worker_args->context, &worker_context_value, &worker_state, &result);
     if (result.tiles_executed != 0) {
       iree_atomic_fetch_add(worker_args->total_tiles,
                             (int64_t)result.tiles_executed,
@@ -264,8 +274,11 @@ class BlockProcessorTest : public ::testing::TestWithParam<uint32_t> {
       iree_hal_cmd_block_processor_worker_state_t worker_state;
       memset(&worker_state, 0, sizeof(worker_state));
       iree_hal_cmd_block_processor_drain_result_t result;
+      iree_hal_cmd_block_processor_worker_context_t worker_context_value =
+          worker_context(0);
       do {
-        iree_hal_cmd_block_processor_drain(context, 0, &worker_state, &result);
+        iree_hal_cmd_block_processor_drain(context, &worker_context_value,
+                                           &worker_state, &result);
         if (result.tiles_executed != 0) {
           iree_atomic_fetch_add(&total_tiles_executed,
                                 (int64_t)result.tiles_executed,
@@ -285,7 +298,10 @@ class BlockProcessorTest : public ::testing::TestWithParam<uint32_t> {
       iree_hal_cmd_block_processor_worker_state_t worker_state;
       memset(&worker_state, 0, sizeof(worker_state));
       iree_hal_cmd_block_processor_drain_result_t result;
-      iree_hal_cmd_block_processor_drain(context, 0, &worker_state, &result);
+      iree_hal_cmd_block_processor_worker_context_t worker_context_value =
+          worker_context(0);
+      iree_hal_cmd_block_processor_drain(context, &worker_context_value,
+                                         &worker_state, &result);
       if (result.tiles_executed != 0) {
         iree_atomic_fetch_add(&total_tiles_executed,
                               (int64_t)result.tiles_executed,

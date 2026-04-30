@@ -9,8 +9,6 @@
 
 #include "iree/async/frontier.h"
 #include "iree/base/api.h"
-#include "iree/base/internal/atomics.h"
-#include "iree/base/threading/mutex.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -48,8 +46,10 @@ typedef struct iree_async_frontier_waiter_t {
   // pending. The tracker reads entries during advance() to check satisfaction.
   const iree_async_frontier_t* frontier;
 
-  // Callback and context.
+  // Callback invoked when the frontier becomes ready or failed.
   iree_async_frontier_waiter_fn_t callback;
+
+  // User data passed through to |callback|.
   void* user_data;
 
   // Scratch field used during dispatch: holds the status to pass to the
@@ -67,7 +67,7 @@ typedef struct iree_async_frontier_waiter_t {
 // The frontier tracker is the runtime component that makes frontiers
 // actionable. It answers two questions:
 //   1. "Has this frontier been reached yet?" (is_satisfied / wait)
-//   2. "An axis just advanced — who should be woken up?" (advance)
+//   2. "An axis just advanced; who should be woken up?" (advance)
 //
 // ## How it connects to the rest of the system
 //
@@ -82,13 +82,13 @@ typedef struct iree_async_frontier_waiter_t {
 //   Network receives frontier update from remote machine
 //     → Protocol decoder reads {axis, epoch} pairs
 //     → iree_async_frontier_tracker_advance(tracker, remote_axis, epoch)
-//     → Same flow as above — local waiters on remote axes get woken
+//     → Same flow as above; local waiters on remote axes get woken
 //
 // ## Thread safety
 //
 //   advance():     Thread-safe. Multiple threads can advance different axes
 //                  concurrently. Same axis from multiple threads is safe
-//                  (monotonic — max wins, lower values are no-ops).
+//                  (monotonic: max wins, lower values are no-ops).
 //
 //   wait():        Thread-safe. Can be called from any thread.
 //
@@ -113,6 +113,28 @@ typedef struct iree_async_frontier_waiter_t {
 //   // ... populate axis table during session setup ...
 //   // ... steady-state: advance() and wait() from multiple threads ...
 //   iree_async_frontier_tracker_release(tracker);
+//
+// ## Axis lookup shape
+//
+// Axes are registered once during setup, then looked up by advance(), wait(),
+// and query_epoch(). The implementation stores them in tracker-owned hash
+// slots so steady-state operations do not scan all registered axes:
+//
+//   ┌───────────────────────────────┐
+//   │ iree_async_axis_t             │
+//   │ session/machine/domain/ordinal│
+//   └──────────────┬────────────────┘
+//                  │ hash
+//                  ▼
+//   ┌──────┬──────┬──────┬──────┬──────┐
+//   │ slot │ slot │ slot │ slot │ slot │
+//   └──────┴──────┴──────┴──────┴──────┘
+//                         │
+//                         ▼
+//              {epoch, bridge semaphore, failure}
+//
+// The capacity option below is the maximum number of registered axes. The
+// tracker may allocate additional internal slots to keep probes short.
 //
 // Options for creating a frontier tracker.
 typedef struct iree_async_frontier_tracker_options_t {
@@ -220,7 +242,7 @@ iree_host_size_t iree_async_frontier_tracker_advance(
 // same duration.
 //
 // Returns IREE_STATUS_NOT_FOUND if any axis in the frontier is not in the
-// tracker's axis table (programming error — all axes must be registered during
+// tracker's axis table (programming error: all axes must be registered during
 // session setup).
 iree_status_t iree_async_frontier_tracker_wait(
     iree_async_frontier_tracker_t* tracker,
@@ -240,7 +262,7 @@ bool iree_async_frontier_tracker_cancel_wait(
 // Fails an axis permanently. All pending waiters that reference this axis are
 // dispatched with |status|. Future waits on this axis will fail immediately.
 // Takes ownership of |status|, which must be a non-OK status describing the
-// failure — this API is explicitly for the error path, never for clean
+// failure. This API is explicitly for the error path, never for clean
 // dispositions.
 //
 // This propagates device-lost and similar fatal errors through the frontier

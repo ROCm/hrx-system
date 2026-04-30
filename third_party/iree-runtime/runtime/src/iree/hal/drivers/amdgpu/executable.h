@@ -36,11 +36,11 @@ iree_status_t iree_hal_amdgpu_verify_device_isa_commonality(
 // Returns whether the IREE HAL executable |format| is supported by all GPU
 // devices in |topology|. Some devices may support multiple ISAs.
 //
-// Supports both the target architecture names used by the compiler
-// (`gfx1100`) and the canonical ISA names reported by HSA
-// (`amdgcn-amd-amdhsa--gfx1100`). The runtime normalizes executable flatbuffer
-// formats to the HSA ISA spelling, but device target matching queries use the
-// compiler target format directly during VM initialization.
+// Supports AMDGPU target IDs in both compiler spelling (`gfx1100`,
+// `gfx942:xnack-`) and the canonical ISA names reported by HSA
+// (`amdgcn-amd-amdhsa--gfx1100`). Matching uses structured target-ID
+// compatibility so generic code-object targets and explicit feature modes can
+// be checked without relying on string equality.
 //
 // Optionally |out_isa| can be used to get the agent ISA for the given format.
 // Note that this will be from the first device but should match all other
@@ -87,8 +87,11 @@ typedef struct iree_hal_amdgpu_executable_dispatch_descriptor_t {
 
 // Infers the format of the executable and calculates its total size.
 // If executable_data.data_length is 0 attempts to infer size from the data.
-// Returns the canonical format string and total size of the executable data.
-// The format will be the ISA name like "amdgcn-amd-amdhsa--gfx1100".
+// Returns the canonical target-ID format string and total size of the
+// executable data.
+//
+// Wrapped AMDGPU flatbuffers infer the target ID from the embedded ELF image
+// instead of trusting the flatbuffer metadata target label.
 iree_status_t iree_hal_amdgpu_executable_infer_format(
     iree_const_byte_span_t executable_data,
     iree_host_size_t executable_format_capacity, char* executable_format,

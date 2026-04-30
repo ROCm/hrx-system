@@ -50,6 +50,7 @@ iree_cc_library(
     iree::base
     iree::base::threading
     iree::hal
+    iree::hal::utils::profile_event_ring
   PUBLIC
 )
 
@@ -61,12 +62,21 @@ iree_cc_library(
   SRCS
     "allocator.c"
     "allocator.h"
+    "aql_block_processor.c"
+    "aql_block_processor.h"
+    "aql_block_processor_profile.c"
+    "aql_block_processor_profile.h"
+    "aql_block_processor_timestamp.c"
+    "aql_block_processor_timestamp.h"
     "aql_command_buffer.c"
     "aql_command_buffer.h"
     "aql_command_buffer_profile.c"
     "aql_command_buffer_profile.h"
+    "aql_prepublished_kernarg_storage.h"
     "aql_program_builder.c"
     "aql_program_builder.h"
+    "aql_program_validation.c"
+    "aql_program_validation.h"
     "buffer.c"
     "buffer.h"
     "driver.c"
@@ -82,10 +92,14 @@ iree_cc_library(
     "host_queue_command_buffer.c"
     "host_queue_command_buffer.h"
     "host_queue_command_buffer_block.c"
-    "host_queue_command_buffer_internal.h"
+    "host_queue_command_buffer_block.h"
+    "host_queue_command_buffer_packet.c"
+    "host_queue_command_buffer_packet.h"
     "host_queue_command_buffer_profile.c"
     "host_queue_command_buffer_profile.h"
     "host_queue_command_buffer_replay.c"
+    "host_queue_command_buffer_replay.h"
+    "host_queue_command_buffer_scratch.h"
     "host_queue_dispatch.c"
     "host_queue_dispatch.h"
     "host_queue_file.c"
@@ -96,6 +110,8 @@ iree_cc_library(
     "host_queue_memory.h"
     "host_queue_pending.c"
     "host_queue_pending.h"
+    "host_queue_pending_operation.h"
+    "host_queue_pending_payload.c"
     "host_queue_policy.c"
     "host_queue_policy.h"
     "host_queue_profile.c"
@@ -106,18 +122,24 @@ iree_cc_library(
     "host_queue_staging.h"
     "host_queue_submission.c"
     "host_queue_submission.h"
+    "host_queue_timestamp.c"
+    "host_queue_timestamp.h"
     "host_queue_waits.c"
     "host_queue_waits.h"
     "logical_device.c"
     "logical_device.h"
     "physical_device.c"
     "physical_device.h"
+    "physical_device_capabilities.c"
+    "physical_device_capabilities.h"
     "profile_aqlprofile.c"
     "profile_aqlprofile.h"
     "profile_counters.c"
     "profile_counters.h"
     "profile_device_metrics.c"
     "profile_device_metrics.h"
+    "profile_device_metrics_linux.c"
+    "profile_device_metrics_source.h"
     "profile_metadata.c"
     "profile_metadata.h"
     "profile_traces.c"
@@ -150,8 +172,10 @@ iree_cc_library(
     iree::hal::drivers::amdgpu::device::blit
     iree::hal::drivers::amdgpu::device::dispatch
     iree::hal::drivers::amdgpu::device::headers
-    iree::hal::drivers::amdgpu::device::profiling
+    iree::hal::drivers::amdgpu::device::timestamp
     iree::hal::drivers::amdgpu::util::block_pool
+    iree::hal::drivers::amdgpu::util::code_object_target
+    iree::hal::drivers::amdgpu::util::device_clock
     iree::hal::drivers::amdgpu::util::device_library
     iree::hal::drivers::amdgpu::util::hsaco_metadata
     iree::hal::drivers::amdgpu::util::info
@@ -160,6 +184,7 @@ iree_cc_library(
     iree::hal::drivers::amdgpu::util::libhsa
     iree::hal::drivers::amdgpu::util::packet
     iree::hal::drivers::amdgpu::util::queue_primitives
+    iree::hal::drivers::amdgpu::util::target_id
     iree::hal::drivers::amdgpu::util::topology
     iree::hal::drivers::amdgpu::util::vmem
     iree::hal::memory::passthrough_pool
@@ -180,9 +205,13 @@ iree_cc_library(
   NAME
     headers
   HDRS
+    "aql_block_processor.h"
+    "aql_block_processor_timestamp.h"
     "aql_command_buffer.h"
     "aql_command_buffer_profile.h"
+    "aql_prepublished_kernarg_storage.h"
     "aql_program_builder.h"
+    "aql_program_validation.h"
     "buffer.h"
     "driver.h"
     "executable.h"
@@ -190,7 +219,9 @@ iree_cc_library(
     "host_queue.h"
     "host_queue_blit.h"
     "host_queue_command_buffer.h"
+    "host_queue_command_buffer_block.h"
     "host_queue_command_buffer_profile.h"
+    "host_queue_command_buffer_replay.h"
     "host_queue_dispatch.h"
     "host_queue_file.h"
     "host_queue_host_call.h"
@@ -201,9 +232,11 @@ iree_cc_library(
     "host_queue_profile_events.h"
     "host_queue_staging.h"
     "host_queue_submission.h"
+    "host_queue_timestamp.h"
     "host_queue_waits.h"
     "logical_device.h"
     "physical_device.h"
+    "physical_device_capabilities.h"
     "profile_aqlprofile.h"
     "profile_counters.h"
     "profile_device_metrics.h"
@@ -233,6 +266,7 @@ iree_cc_library(
     iree::hal::drivers::amdgpu::util::libhsa
     iree::hal::drivers::amdgpu::util::packet
     iree::hal::drivers::amdgpu::util::queue_primitives
+    iree::hal::drivers::amdgpu::util::target_id
     iree::hal::drivers::amdgpu::util::topology
     iree::hal::drivers::amdgpu::util::vmem
     iree::hal::memory::slab_provider
@@ -293,6 +327,50 @@ iree_cc_test(
 
 iree_cc_test(
   NAME
+    aql_block_processor_test
+  SRCS
+    "aql_block_processor_test.cc"
+  DEPS
+    ::amdgpu
+    ::headers
+    iree::base
+    iree::base::internal::arena
+    iree::hal
+    iree::hal::drivers::amdgpu::abi
+    iree::hal::drivers::amdgpu::device::headers
+    iree::hal::drivers::amdgpu::util::packet
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "driver=amdgpu"
+    "nodocker"
+  GROUP
+    "iree-hal-drivers-amdgpu-tests"
+)
+
+iree_cc_test(
+  NAME
+    aql_block_processor_timestamp_test
+  SRCS
+    "aql_block_processor_timestamp_test.cc"
+  DEPS
+    ::amdgpu
+    ::headers
+    iree::base
+    iree::hal::drivers::amdgpu::abi
+    iree::hal::drivers::amdgpu::device::headers
+    iree::hal::drivers::amdgpu::util::packet
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "driver=amdgpu"
+    "nodocker"
+  GROUP
+    "iree-hal-drivers-amdgpu-tests"
+)
+
+iree_cc_test(
+  NAME
     aql_command_buffer_test
   SRCS
     "aql_command_buffer_test.cc"
@@ -302,6 +380,7 @@ iree_cc_test(
     iree::base
     iree::base::internal::arena
     iree::hal
+    iree::hal::drivers::amdgpu::abi
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS
@@ -321,6 +400,7 @@ iree_cc_test(
     ::headers
     iree::base
     iree::base::internal::arena
+    iree::hal::drivers::amdgpu::abi
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS
@@ -345,31 +425,48 @@ iree_cc_test(
     "iree-hal-drivers-amdgpu-tests"
 )
 
-if(TARGET iree::hal::drivers::amdgpu::cts::testdata_amdgpu)
-  iree_cc_test(
-    NAME
-      host_queue_command_buffer_test
-    SRCS
-      "host_queue_command_buffer_internal.h"
-      "host_queue_command_buffer_test.cc"
-    DEPS
-      ::amdgpu
-      ::headers
-      ::queue_affinity
-      iree::base
-      iree::hal
-      iree::hal::cts::util::test_base
-      iree::hal::drivers::amdgpu::cts::testdata_amdgpu
-      iree::hal::drivers::amdgpu::util::packet
-      iree::testing::gtest
-      iree::testing::gtest_main
-    LABELS
-      "driver=amdgpu"
-      "nodocker"
-    GROUP
-      "iree-hal-drivers-amdgpu-tests"
-  )
-endif()
+iree_cc_test(
+  NAME
+    executable_test
+  SRCS
+    "executable_test.cc"
+  DEPS
+    ::amdgpu
+    ::headers
+    iree::base
+    iree::base::core_headers
+    iree::base::internal::flatcc::building
+    iree::hal
+    iree::schemas::amdgpu_executable_def_c_fbs
+    iree::testing::gtest
+    iree::testing::gtest_main
+  GROUP
+    "iree-hal-drivers-amdgpu-tests"
+)
+
+iree_cc_test(
+  NAME
+    host_queue_command_buffer_test
+  SRCS
+    "host_queue_command_buffer_packet.h"
+    "host_queue_command_buffer_test.cc"
+  DEPS
+    ::amdgpu
+    ::headers
+    ::queue_affinity
+    iree::base
+    iree::hal
+    iree::hal::cts::util::test_base
+    iree::hal::drivers::amdgpu::cts::testdata_amdgpu
+    iree::hal::drivers::amdgpu::util::packet
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "driver=amdgpu"
+    "nodocker"
+  GROUP
+    "iree-hal-drivers-amdgpu-tests"
+)
 
 iree_cc_test(
   NAME
@@ -387,6 +484,7 @@ iree_cc_test(
     iree::hal::cts::util::test_base
     iree::hal::drivers::amdgpu::util::packet
     iree::hal::memory::fixed_block_pool
+    iree::hal::memory::tlsf_pool
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS
@@ -436,6 +534,22 @@ iree_cc_test(
   LABELS
     "driver=amdgpu"
     "nodocker"
+  GROUP
+    "iree-hal-drivers-amdgpu-tests"
+)
+
+iree_cc_test(
+  NAME
+    physical_device_capabilities_test
+  SRCS
+    "physical_device_capabilities_test.cc"
+  DEPS
+    ::amdgpu
+    ::headers
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
   GROUP
     "iree-hal-drivers-amdgpu-tests"
 )

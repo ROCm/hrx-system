@@ -14,6 +14,7 @@
 
 #include "iree/async/platform/io_uring/proactor.h"
 #include "iree/async/proactor.h"
+#include "iree/base/threading/futex.h"
 
 //===----------------------------------------------------------------------===//
 // Creation and destruction
@@ -40,12 +41,15 @@ iree_status_t iree_async_io_uring_notification_create(
   iree_atomic_store(&notification->epoch, 0, iree_memory_order_release);
   notification->epoch_ptr = &notification->epoch;
   notification->flags = IREE_ASYNC_NOTIFICATION_FLAG_NONE;
-  notification->mode = IREE_ASYNC_NOTIFICATION_MODE_EVENT;
 
-  // Create eventfd for poll-based async waits.
+  // Use eventfd-backed notifications for now. io_uring FUTEX_WAIT has no
+  // userspace-visible "wait is armed" edge, so a signal racing immediately
+  // after relay registration can miss the in-kernel waiter. eventfd is
+  // level-triggered and preserves that register-before-signal contract.
+  iree_status_t status = iree_ok_status();
+  notification->mode = IREE_ASYNC_NOTIFICATION_MODE_EVENT;
   // EFD_SEMAPHORE makes read() decrement by 1 instead of draining the
   // counter. This allows wake_count to control how many waiters are woken.
-  iree_status_t status = iree_ok_status();
   int eventfd_result = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK | EFD_SEMAPHORE);
   if (eventfd_result >= 0) {
     iree_async_primitive_t event_primitive =
@@ -89,23 +93,18 @@ iree_status_t iree_async_io_uring_notification_create_shared(
   notification->proactor = &proactor->base;
   notification->epoch_ptr = options->epoch_address;
   notification->flags = IREE_ASYNC_NOTIFICATION_FLAG_SHARED;
-  notification->mode = IREE_ASYNC_NOTIFICATION_MODE_EVENT;
 
+  notification->mode = IREE_ASYNC_NOTIFICATION_MODE_EVENT;
   // Use caller-provided primitives instead of creating our own eventfd.
   // For proxy notifications (peer wake): wake_primitive may be NONE (not
   // polled locally) while signal_primitive is the peer's eventfd.
-  iree_status_t status = iree_ok_status();
   notification->platform.io_uring.primitive = options->wake_primitive;
   notification->platform.io_uring.signal_primitive = options->signal_primitive;
   notification->platform.io_uring.drain_buffer = 0;
 
-  if (iree_status_is_ok(status)) {
-    *out_notification = notification;
-  } else {
-    iree_allocator_free(allocator, notification);
-  }
+  *out_notification = notification;
   IREE_TRACE_ZONE_END(z0);
-  return status;
+  return iree_ok_status();
 }
 
 void iree_async_io_uring_notification_destroy(
@@ -138,6 +137,34 @@ void iree_async_io_uring_notification_destroy(
 void iree_async_io_uring_notification_signal(
     iree_async_proactor_t* base_proactor,
     iree_async_notification_t* notification, int32_t wake_count) {
+#if defined(IREE_RUNTIME_USE_FUTEX)
+  if (notification->mode == IREE_ASYNC_NOTIFICATION_MODE_FUTEX) {
+    // Add the count of relays with in-flight FUTEX_WAIT operations on this
+    // notification. Each relay is an implicit kernel-side futex waiter that the
+    // caller cannot account for. Without this, signaling with wake_count=1
+    // when N relays are attached would only wake 1 of the N kernel waiters,
+    // leaving N-1 relays permanently stuck.
+    int32_t relay_count =
+        iree_atomic_load(&notification->platform.io_uring.futex_relay_count,
+                         iree_memory_order_acquire);
+    int32_t total_wake_count = wake_count;
+    if (relay_count > 0) {
+      if (wake_count > INT32_MAX - relay_count) {
+        total_wake_count = INT32_MAX;
+      } else {
+        total_wake_count = wake_count + relay_count;
+      }
+    }
+    if (iree_any_bit_set(notification->flags,
+                         IREE_ASYNC_NOTIFICATION_FLAG_SHARED)) {
+      iree_futex_wake_shared(notification->epoch_ptr, total_wake_count);
+    } else {
+      iree_futex_wake(notification->epoch_ptr, total_wake_count);
+    }
+    return;
+  }
+#endif  // IREE_RUNTIME_USE_FUTEX
+
   // With EFD_SEMAPHORE, write(N) allows N read()s to succeed.
   // Write to signal_primitive — for local notifications this is the same
   // eventfd as primitive; for shared/proxy notifications it's the peer's fd.
@@ -158,7 +185,30 @@ bool iree_async_io_uring_notification_wait(
     iree_timeout_t timeout) {
   iree_time_t deadline_ns = iree_timeout_as_deadline_ns(timeout);
 
-  // Poll on eventfd, check epoch after wakeup.
+#if defined(IREE_RUNTIME_USE_FUTEX)
+  if (notification->mode == IREE_ASYNC_NOTIFICATION_MODE_FUTEX) {
+    bool is_shared = iree_any_bit_set(notification->flags,
+                                      IREE_ASYNC_NOTIFICATION_FLAG_SHARED);
+    while (iree_time_now() < deadline_ns) {
+      uint32_t current_epoch =
+          iree_atomic_load(notification->epoch_ptr, iree_memory_order_acquire);
+      if (current_epoch != wait_token) return true;
+
+      iree_status_code_t status_code =
+          is_shared ? iree_futex_wait_shared(notification->epoch_ptr,
+                                             wait_token, deadline_ns)
+                    : iree_futex_wait(notification->epoch_ptr, wait_token,
+                                      deadline_ns);
+      if (status_code == IREE_STATUS_DEADLINE_EXCEEDED) return false;
+    }
+
+    uint32_t final_epoch =
+        iree_atomic_load(notification->epoch_ptr, iree_memory_order_acquire);
+    return final_epoch != wait_token;
+  }
+#endif  // IREE_RUNTIME_USE_FUTEX
+
+  // Event mode: poll on eventfd, check epoch after wakeup.
   int fd = notification->platform.io_uring.primitive.value.fd;
 
   while (iree_time_now() < deadline_ns) {

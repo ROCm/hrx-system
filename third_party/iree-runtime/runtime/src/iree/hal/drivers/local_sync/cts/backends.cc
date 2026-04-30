@@ -20,12 +20,12 @@ namespace iree::hal::cts {
 static iree_status_t CreateLocalSyncDevice(
     const iree_hal_device_create_params_t* create_params,
     iree_hal_driver_t** out_driver, iree_hal_device_t** out_device) {
-  // Register the driver module with the global registry. Subsequent calls
-  // return ALREADY_EXISTS which we ignore — only true errors propagate.
+  // Register the driver module with the global registry. Subsequent calls may
+  // return ALREADY_EXISTS once another CTS test has already registered it.
   iree_status_t status = iree_hal_local_sync_driver_module_register(
       iree_hal_driver_registry_default());
   if (iree_status_is_already_exists(status)) {
-    iree_status_ignore(status);
+    iree_status_free(status);
     status = iree_ok_status();
   }
 

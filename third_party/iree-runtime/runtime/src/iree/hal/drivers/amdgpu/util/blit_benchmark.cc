@@ -37,7 +37,7 @@ class BlitBenchmark : public benchmark::Fixture {
     iree_status_t status = iree_hal_amdgpu_driver_module_register(
         iree_hal_driver_registry_default());
     if (iree_status_is_already_exists(status)) {
-      (void)iree_status_consume_code(status);
+      iree_status_free(status);
       status = iree_ok_status();
     }
 

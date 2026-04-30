@@ -70,6 +70,11 @@ static void ThreadRange(::benchmark::Benchmark* benchmark) {
   }
 }
 
+// Fixed iteration count for intrusive-entry contention benchmarks. Each push
+// needs a unique entry until the shared list is drained at teardown; otherwise
+// repeatedly pushing the same intrusive node would corrupt the list.
+static constexpr benchmark::IterationCount kContentionIterations = 10000;
+
 //===----------------------------------------------------------------------===//
 // Single-threaded baselines
 //===----------------------------------------------------------------------===//
@@ -263,14 +268,20 @@ void BM_ContentionPush(benchmark::State& state) {
     bench_slist_initialize(&list);
   }
 
-  // Each thread gets its own entry to push (no false sharing between entries).
-  bench_entry_t entry = {static_cast<int>(state.thread_index()), nullptr};
+  // Each push uses a unique intrusive entry. The benchmark loop has a start
+  // barrier, so thread 0 setup is complete before other threads push.
+  std::vector<bench_entry_t> entries(static_cast<size_t>(state.max_iterations));
+  size_t entry_index = 0;
 
   for (auto _ : state) {
-    bench_slist_push(&list, &entry);
+    (void)_;
+    entries[entry_index].value = static_cast<int>(entry_index);
+    bench_slist_push(&list, &entries[entry_index]);
+    ++entry_index;
   }
 
-  // Thread 0 cleans up.
+  // The benchmark loop has a stop barrier before teardown, so thread 0 drains
+  // only after all pushes have completed.
   if (state.thread_index() == 0) {
     bench_entry_t* head = nullptr;
     bench_slist_flush(&list, IREE_ATOMIC_SLIST_FLUSH_ORDER_APPROXIMATE_LIFO,
@@ -278,7 +289,10 @@ void BM_ContentionPush(benchmark::State& state) {
     bench_slist_deinitialize(&list);
   }
 }
-BENCHMARK(BM_ContentionPush)->Apply(ThreadRange)->UseRealTime();
+BENCHMARK(BM_ContentionPush)
+    ->Apply(ThreadRange)
+    ->Iterations(kContentionIterations)
+    ->UseRealTime();
 
 // N threads each doing push-then-pop cycles on the same list. Measures
 // mixed read-write contention. Each thread pushes its own entry then
@@ -292,10 +306,14 @@ void BM_ContentionPushPop(benchmark::State& state) {
     bench_slist_initialize(&list);
   }
 
-  bench_entry_t entry = {static_cast<int>(state.thread_index()), nullptr};
+  std::vector<bench_entry_t> entries(static_cast<size_t>(state.max_iterations));
+  size_t entry_index = 0;
 
   for (auto _ : state) {
-    bench_slist_push(&list, &entry);
+    (void)_;
+    entries[entry_index].value = static_cast<int>(entry_index);
+    bench_slist_push(&list, &entries[entry_index]);
+    ++entry_index;
     bench_entry_t* popped = bench_slist_pop(&list);
     benchmark::DoNotOptimize(popped);
   }
@@ -307,7 +325,10 @@ void BM_ContentionPushPop(benchmark::State& state) {
     bench_slist_deinitialize(&list);
   }
 }
-BENCHMARK(BM_ContentionPushPop)->Apply(ThreadRange)->UseRealTime();
+BENCHMARK(BM_ContentionPushPop)
+    ->Apply(ThreadRange)
+    ->Iterations(kContentionIterations)
+    ->UseRealTime();
 
 //===----------------------------------------------------------------------===//
 // Multi-threaded contention: empty fast-path
@@ -378,12 +399,16 @@ void BM_ProducerConsumerPop(benchmark::State& state) {
     bench_slist_initialize(&list);
   }
 
-  bench_entry_t entry = {static_cast<int>(state.thread_index()), nullptr};
+  std::vector<bench_entry_t> entries(static_cast<size_t>(state.max_iterations));
+  size_t entry_index = 0;
   const bool is_consumer = (state.thread_index() == 0);
 
   for (auto _ : state) {
+    (void)_;
     if (state.threads() == 1 || !is_consumer) {
-      bench_slist_push(&list, &entry);
+      entries[entry_index].value = static_cast<int>(entry_index);
+      bench_slist_push(&list, &entries[entry_index]);
+      ++entry_index;
     }
     if (state.threads() == 1 || is_consumer) {
       bench_entry_t* popped = bench_slist_pop(&list);
@@ -398,7 +423,10 @@ void BM_ProducerConsumerPop(benchmark::State& state) {
     bench_slist_deinitialize(&list);
   }
 }
-BENCHMARK(BM_ProducerConsumerPop)->Apply(ThreadRange)->UseRealTime();
+BENCHMARK(BM_ProducerConsumerPop)
+    ->Apply(ThreadRange)
+    ->Iterations(kContentionIterations)
+    ->UseRealTime();
 
 // (N-1) producers pushing, 1 consumer flushing. Simulates the pattern where
 // a coordinator periodically drains the entire list in one shot. This is the
@@ -412,12 +440,16 @@ void BM_ProducerConsumerFlush(benchmark::State& state) {
     bench_slist_initialize(&list);
   }
 
-  bench_entry_t entry = {static_cast<int>(state.thread_index()), nullptr};
+  std::vector<bench_entry_t> entries(static_cast<size_t>(state.max_iterations));
+  size_t entry_index = 0;
   const bool is_consumer = (state.thread_index() == 0);
 
   for (auto _ : state) {
+    (void)_;
     if (state.threads() == 1 || !is_consumer) {
-      bench_slist_push(&list, &entry);
+      entries[entry_index].value = static_cast<int>(entry_index);
+      bench_slist_push(&list, &entries[entry_index]);
+      ++entry_index;
     }
     if (state.threads() == 1 || is_consumer) {
       bench_entry_t* head = nullptr;
@@ -435,6 +467,9 @@ void BM_ProducerConsumerFlush(benchmark::State& state) {
     bench_slist_deinitialize(&list);
   }
 }
-BENCHMARK(BM_ProducerConsumerFlush)->Apply(ThreadRange)->UseRealTime();
+BENCHMARK(BM_ProducerConsumerFlush)
+    ->Apply(ThreadRange)
+    ->Iterations(kContentionIterations)
+    ->UseRealTime();
 
 }  // namespace

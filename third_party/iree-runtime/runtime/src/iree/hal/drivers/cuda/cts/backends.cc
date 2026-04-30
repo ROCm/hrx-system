@@ -86,6 +86,9 @@ static bool cuda_registered_ =
                "Blocked by the same iree_hal_cuda_device_queue_alloca "
                "non-NULL pool rejection as "
                "ExplicitPassthroughPoolAllocaDealloca."},
+              {"QueueAllocaTest.ExplicitTLSFPoolCrossQueueStaleBlockGrows",
+               "Blocked by the same CUDA queue pool backend UNIMPLEMENTED "
+               "path as ExplicitTLSFPoolCrossQueueWaitFrontier."},
               {"QueueAllocaTest.ExplicitFixedBlockPoolNotificationRetry",
                "Blocked by the same iree_hal_cuda_device_queue_alloca "
                "non-NULL pool rejection as "

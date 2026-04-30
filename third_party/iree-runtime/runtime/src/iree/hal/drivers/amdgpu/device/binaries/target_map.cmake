@@ -4,15 +4,21 @@
 
 set(_IREE_HAL_AMDGPU_DEVICE_TARGETS
   "gfx900"
+  "gfx902"
+  "gfx904"
   "gfx90c"
   "gfx906"
   "gfx908"
+  "gfx909"
   "gfx90a"
+  "gfx940"
+  "gfx941"
   "gfx942"
   "gfx950"
   "gfx1010"
   "gfx1011"
   "gfx1012"
+  "gfx1013"
   "gfx1030"
   "gfx1031"
   "gfx1032"
@@ -28,8 +34,13 @@ set(_IREE_HAL_AMDGPU_DEVICE_TARGETS
   "gfx1151"
   "gfx1152"
   "gfx1153"
+  "gfx1170"
+  "gfx1171"
+  "gfx1172"
   "gfx1200"
   "gfx1201"
+  "gfx1250"
+  "gfx1251"
 )
 
 set(_IREE_HAL_AMDGPU_DEVICE_CODE_OBJECT_TARGETS
@@ -41,18 +52,25 @@ set(_IREE_HAL_AMDGPU_DEVICE_CODE_OBJECT_TARGETS
   "gfx10-3-generic"
   "gfx11-generic"
   "gfx12-generic"
+  "gfx12-5-generic"
 )
 
 set(_IREE_HAL_AMDGPU_DEVICE_TARGET_CODE_OBJECT_gfx900 "gfx9-generic")
+set(_IREE_HAL_AMDGPU_DEVICE_TARGET_CODE_OBJECT_gfx902 "gfx9-generic")
+set(_IREE_HAL_AMDGPU_DEVICE_TARGET_CODE_OBJECT_gfx904 "gfx9-generic")
 set(_IREE_HAL_AMDGPU_DEVICE_TARGET_CODE_OBJECT_gfx90c "gfx9-generic")
 set(_IREE_HAL_AMDGPU_DEVICE_TARGET_CODE_OBJECT_gfx906 "gfx9-generic")
 set(_IREE_HAL_AMDGPU_DEVICE_TARGET_CODE_OBJECT_gfx908 "gfx908")
+set(_IREE_HAL_AMDGPU_DEVICE_TARGET_CODE_OBJECT_gfx909 "gfx9-generic")
 set(_IREE_HAL_AMDGPU_DEVICE_TARGET_CODE_OBJECT_gfx90a "gfx90a")
+set(_IREE_HAL_AMDGPU_DEVICE_TARGET_CODE_OBJECT_gfx940 "gfx9-4-generic")
+set(_IREE_HAL_AMDGPU_DEVICE_TARGET_CODE_OBJECT_gfx941 "gfx9-4-generic")
 set(_IREE_HAL_AMDGPU_DEVICE_TARGET_CODE_OBJECT_gfx942 "gfx9-4-generic")
 set(_IREE_HAL_AMDGPU_DEVICE_TARGET_CODE_OBJECT_gfx950 "gfx9-4-generic")
 set(_IREE_HAL_AMDGPU_DEVICE_TARGET_CODE_OBJECT_gfx1010 "gfx10-1-generic")
 set(_IREE_HAL_AMDGPU_DEVICE_TARGET_CODE_OBJECT_gfx1011 "gfx10-1-generic")
 set(_IREE_HAL_AMDGPU_DEVICE_TARGET_CODE_OBJECT_gfx1012 "gfx10-1-generic")
+set(_IREE_HAL_AMDGPU_DEVICE_TARGET_CODE_OBJECT_gfx1013 "gfx10-1-generic")
 set(_IREE_HAL_AMDGPU_DEVICE_TARGET_CODE_OBJECT_gfx1030 "gfx10-3-generic")
 set(_IREE_HAL_AMDGPU_DEVICE_TARGET_CODE_OBJECT_gfx1031 "gfx10-3-generic")
 set(_IREE_HAL_AMDGPU_DEVICE_TARGET_CODE_OBJECT_gfx1032 "gfx10-3-generic")
@@ -68,8 +86,13 @@ set(_IREE_HAL_AMDGPU_DEVICE_TARGET_CODE_OBJECT_gfx1150 "gfx11-generic")
 set(_IREE_HAL_AMDGPU_DEVICE_TARGET_CODE_OBJECT_gfx1151 "gfx11-generic")
 set(_IREE_HAL_AMDGPU_DEVICE_TARGET_CODE_OBJECT_gfx1152 "gfx11-generic")
 set(_IREE_HAL_AMDGPU_DEVICE_TARGET_CODE_OBJECT_gfx1153 "gfx11-generic")
+set(_IREE_HAL_AMDGPU_DEVICE_TARGET_CODE_OBJECT_gfx1170 "gfx11-generic")
+set(_IREE_HAL_AMDGPU_DEVICE_TARGET_CODE_OBJECT_gfx1171 "gfx11-generic")
+set(_IREE_HAL_AMDGPU_DEVICE_TARGET_CODE_OBJECT_gfx1172 "gfx11-generic")
 set(_IREE_HAL_AMDGPU_DEVICE_TARGET_CODE_OBJECT_gfx1200 "gfx12-generic")
 set(_IREE_HAL_AMDGPU_DEVICE_TARGET_CODE_OBJECT_gfx1201 "gfx12-generic")
+set(_IREE_HAL_AMDGPU_DEVICE_TARGET_CODE_OBJECT_gfx1250 "gfx12-5-generic")
+set(_IREE_HAL_AMDGPU_DEVICE_TARGET_CODE_OBJECT_gfx1251 "gfx12-5-generic")
 
 set(_IREE_HAL_AMDGPU_DEVICE_TARGET_FAMILIES
   "all"
@@ -94,7 +117,9 @@ set(_IREE_HAL_AMDGPU_DEVICE_TARGET_FAMILIES
   "gfx110X-igpu"
   "gfx115X-all"
   "gfx115X-igpu"
+  "gfx117X-all"
   "gfx120X-all"
+  "gfx125X-all"
   "igpu-all"
 )
 
@@ -104,15 +129,21 @@ set(_IREE_HAL_AMDGPU_DEVICE_TARGET_FAMILY_all
 set(_IREE_HAL_AMDGPU_DEVICE_TARGET_FAMILY_dcgpu_all
   "gfx908"
   "gfx90a"
+  "gfx940"
+  "gfx941"
   "gfx942"
   "gfx950"
 )
 set(_IREE_HAL_AMDGPU_DEVICE_TARGET_FAMILY_dgpu_all
   "gfx900"
+  "gfx902"
+  "gfx904"
   "gfx906"
+  "gfx909"
   "gfx1010"
   "gfx1011"
   "gfx1012"
+  "gfx1013"
   "gfx1030"
   "gfx1031"
   "gfx1032"
@@ -139,9 +170,13 @@ set(_IREE_HAL_AMDGPU_DEVICE_TARGET_FAMILY_gfx90c_igpu
   "gfx90c"
 )
 set(_IREE_HAL_AMDGPU_DEVICE_TARGET_FAMILY_gfx94X_all
+  "gfx940"
+  "gfx941"
   "gfx942"
 )
 set(_IREE_HAL_AMDGPU_DEVICE_TARGET_FAMILY_gfx94X_dcgpu
+  "gfx940"
+  "gfx941"
   "gfx942"
 )
 set(_IREE_HAL_AMDGPU_DEVICE_TARGET_FAMILY_gfx950_all
@@ -154,11 +189,13 @@ set(_IREE_HAL_AMDGPU_DEVICE_TARGET_FAMILY_gfx101X_all
   "gfx1010"
   "gfx1011"
   "gfx1012"
+  "gfx1013"
 )
 set(_IREE_HAL_AMDGPU_DEVICE_TARGET_FAMILY_gfx101X_dgpu
   "gfx1010"
   "gfx1011"
   "gfx1012"
+  "gfx1013"
 )
 set(_IREE_HAL_AMDGPU_DEVICE_TARGET_FAMILY_gfx103X_all
   "gfx1030"
@@ -206,9 +243,18 @@ set(_IREE_HAL_AMDGPU_DEVICE_TARGET_FAMILY_gfx115X_igpu
   "gfx1152"
   "gfx1153"
 )
+set(_IREE_HAL_AMDGPU_DEVICE_TARGET_FAMILY_gfx117X_all
+  "gfx1170"
+  "gfx1171"
+  "gfx1172"
+)
 set(_IREE_HAL_AMDGPU_DEVICE_TARGET_FAMILY_gfx120X_all
   "gfx1200"
   "gfx1201"
+)
+set(_IREE_HAL_AMDGPU_DEVICE_TARGET_FAMILY_gfx125X_all
+  "gfx1250"
+  "gfx1251"
 )
 set(_IREE_HAL_AMDGPU_DEVICE_TARGET_FAMILY_igpu_all
   "gfx90c"

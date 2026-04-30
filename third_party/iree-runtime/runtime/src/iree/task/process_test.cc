@@ -20,9 +20,10 @@ namespace {
 //===----------------------------------------------------------------------===//
 
 // Drain function that completes immediately.
-static iree_status_t drain_immediate(iree_task_process_t* process,
-                                     uint32_t worker_index,
-                                     iree_task_process_drain_result_t* result) {
+static iree_status_t drain_immediate(
+    iree_task_process_t* process,
+    const iree_task_worker_context_t* worker_context,
+    iree_task_process_drain_result_t* result) {
   result->completed = true;
   result->did_work = true;
   return iree_ok_status();
@@ -30,7 +31,8 @@ static iree_status_t drain_immediate(iree_task_process_t* process,
 
 // Drain function that does work but never completes (for testing wake/cancel).
 static iree_status_t drain_never_completes(
-    iree_task_process_t* process, uint32_t worker_index,
+    iree_task_process_t* process,
+    const iree_task_worker_context_t* worker_context,
     iree_task_process_drain_result_t* result) {
   result->completed = false;
   result->did_work = true;
@@ -38,9 +40,10 @@ static iree_status_t drain_never_completes(
 }
 
 // Drain function that counts calls via user_data (int32_t counter).
-static iree_status_t drain_counting(iree_task_process_t* process,
-                                    uint32_t worker_index,
-                                    iree_task_process_drain_result_t* result) {
+static iree_status_t drain_counting(
+    iree_task_process_t* process,
+    const iree_task_worker_context_t* worker_context,
+    iree_task_process_drain_result_t* result) {
   iree_atomic_int32_t* counter =
       reinterpret_cast<iree_atomic_int32_t*>(process->user_data);
   int32_t count =
@@ -52,9 +55,10 @@ static iree_status_t drain_counting(iree_task_process_t* process,
 }
 
 // Drain function that returns an error.
-static iree_status_t drain_failing(iree_task_process_t* process,
-                                   uint32_t worker_index,
-                                   iree_task_process_drain_result_t* result) {
+static iree_status_t drain_failing(
+    iree_task_process_t* process,
+    const iree_task_worker_context_t* worker_context,
+    iree_task_process_drain_result_t* result) {
   result->completed = true;
   result->did_work = true;
   return iree_make_status(IREE_STATUS_INTERNAL, "drain failed");
@@ -71,7 +75,7 @@ static void completion_record(iree_task_process_t* process,
       reinterpret_cast<CompletionRecord*>(process->user_data);
   record->called = true;
   record->status_code = iree_status_code(status);
-  iree_status_ignore(status);
+  iree_status_free(status);
 }
 
 //===----------------------------------------------------------------------===//
@@ -96,6 +100,26 @@ TEST(ProcessTest, InitializeRunnable) {
   EXPECT_EQ(iree_task_process_state(&process),
             IREE_TASK_PROCESS_STATE_RUNNABLE);
   EXPECT_EQ(iree_task_process_wake_budget(&process), 4);
+}
+
+TEST(ProcessTest, WarmRetainerAdmissionCapsToLimit) {
+  iree_task_process_t process;
+  iree_task_process_initialize(drain_immediate, /*suspend_count=*/0,
+                               /*wake_budget=*/2, &process);
+
+  EXPECT_TRUE(iree_task_process_try_retain_warm(&process, 2));
+  EXPECT_TRUE(iree_task_process_try_retain_warm(&process, 2));
+  EXPECT_FALSE(iree_task_process_try_retain_warm(&process, 2));
+  EXPECT_EQ(iree_task_process_warm_retainer_count(&process), 2);
+
+  EXPECT_FALSE(iree_task_process_try_retain_warm(&process, 1));
+  EXPECT_EQ(iree_task_process_warm_retainer_count(&process), 2);
+
+  iree_atomic_fetch_sub(&process.warm_retainers, 1, iree_memory_order_acq_rel);
+  EXPECT_FALSE(iree_task_process_try_retain_warm(&process, 1));
+  iree_atomic_fetch_sub(&process.warm_retainers, 1, iree_memory_order_acq_rel);
+  EXPECT_TRUE(iree_task_process_try_retain_warm(&process, 1));
+  EXPECT_EQ(iree_task_process_warm_retainer_count(&process), 1);
 }
 
 //===----------------------------------------------------------------------===//

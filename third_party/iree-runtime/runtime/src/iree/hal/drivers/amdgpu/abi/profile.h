@@ -7,7 +7,7 @@
 #ifndef IREE_HAL_DRIVERS_AMDGPU_ABI_PROFILE_H_
 #define IREE_HAL_DRIVERS_AMDGPU_ABI_PROFILE_H_
 
-#include "iree/hal/drivers/amdgpu/abi/signal.h"
+#include "iree/hal/drivers/amdgpu/abi/timestamp.h"
 
 //===----------------------------------------------------------------------===//
 // Dispatch event records
@@ -57,27 +57,29 @@ typedef struct iree_hal_amdgpu_profile_dispatch_event_t {
 IREE_AMDGPU_STATIC_ASSERT(
     sizeof(iree_hal_amdgpu_profile_dispatch_event_t) == 88,
     "dispatch event record size is part of the profiling ABI");
+IREE_AMDGPU_STATIC_ASSERT(
+    IREE_AMDGPU_OFFSETOF(iree_hal_amdgpu_profile_dispatch_event_t, start_tick) +
+            sizeof(iree_hal_amdgpu_timestamp_range_t) ==
+        sizeof(iree_hal_amdgpu_profile_dispatch_event_t),
+    "dispatch event timestamps must be a trailing timestamp range");
 
-// One device-side timestamp harvest source.
-typedef struct iree_hal_amdgpu_profile_dispatch_harvest_source_t {
-  // Raw AMD completion signal populated by the CP for the profiled dispatch.
-  const iree_amd_signal_t* completion_signal;
-  // Profiling event record receiving the harvested timestamps.
-  iree_hal_amdgpu_profile_dispatch_event_t* event;
-} iree_hal_amdgpu_profile_dispatch_harvest_source_t;
+// Returns the timestamp range embedded in |event|.
+static inline iree_hal_amdgpu_timestamp_range_t*
+iree_hal_amdgpu_profile_dispatch_event_ticks(
+    iree_hal_amdgpu_profile_dispatch_event_t* event) {
+  return (iree_hal_amdgpu_timestamp_range_t*)&event->start_tick;
+}
+
+// Fixed timestamp harvest source used to populate profile dispatch events.
+typedef iree_hal_amdgpu_dispatch_timestamp_harvest_source_t
+    iree_hal_amdgpu_profile_dispatch_harvest_source_t;
 IREE_AMDGPU_STATIC_ASSERT(
     sizeof(iree_hal_amdgpu_profile_dispatch_harvest_source_t) == 16,
     "dispatch harvest source size is part of the profiling ABI");
 
-// Kernel arguments for the dispatch timestamp harvest builtin.
-typedef struct iree_hal_amdgpu_profile_dispatch_harvest_args_t {
-  // Source table with one entry per profiled dispatch.
-  const iree_hal_amdgpu_profile_dispatch_harvest_source_t* sources;
-  // Number of entries in |sources|.
-  uint32_t source_count;
-  // Reserved padding.
-  uint32_t reserved0;
-} iree_hal_amdgpu_profile_dispatch_harvest_args_t;
+// Fixed timestamp harvest arguments used to populate profile dispatch events.
+typedef iree_hal_amdgpu_dispatch_timestamp_harvest_args_t
+    iree_hal_amdgpu_profile_dispatch_harvest_args_t;
 IREE_AMDGPU_STATIC_ASSERT(
     sizeof(iree_hal_amdgpu_profile_dispatch_harvest_args_t) == 16,
     "dispatch harvest args must match the kernel ABI");

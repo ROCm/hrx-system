@@ -7,7 +7,9 @@
 #include "iree/hal/drivers/amdgpu/host_queue_command_buffer.h"
 
 #include "iree/hal/drivers/amdgpu/aql_command_buffer.h"
-#include "iree/hal/drivers/amdgpu/host_queue_command_buffer_internal.h"
+#include "iree/hal/drivers/amdgpu/aql_program_validation.h"
+#include "iree/hal/drivers/amdgpu/host_queue_command_buffer_block.h"
+#include "iree/hal/drivers/amdgpu/host_queue_command_buffer_replay.h"
 #include "iree/hal/utils/resource_set.h"
 
 iree_status_t iree_hal_amdgpu_host_queue_validate_execute_flags(
@@ -126,7 +128,7 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_command_buffer(
       program->max_block_aql_packet_count == 0 || program->block_count != 1;
   if (requires_replay && program->max_block_aql_packet_count == 0) {
     IREE_RETURN_IF_ERROR(
-        iree_hal_amdgpu_host_queue_validate_metadata_commands(program));
+        iree_hal_amdgpu_aql_program_validate_metadata_only(program));
   }
   if (requires_replay) {
     iree_status_t status =
@@ -147,7 +149,7 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_command_buffer(
   bool ready = false;
   iree_status_t status = iree_hal_amdgpu_host_queue_submit_command_buffer_block(
       queue, resolution, signal_semaphore_list, command_buffer, binding_table,
-      program->first_block, inout_binding_resource_set,
+      /*binding_ptrs=*/NULL, program->first_block, inout_binding_resource_set,
       (iree_hal_amdgpu_reclaim_action_t){0}, &command_buffer_resource,
       /*operation_resource_count=*/1,
       IREE_HAL_AMDGPU_HOST_QUEUE_SUBMISSION_FLAG_RETAIN_RESOURCES, &ready);

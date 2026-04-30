@@ -29,7 +29,7 @@ typedef struct iree_hal_passthrough_pool_options_t {
 // release_reservation() frees it. No suballocation, no offset management, and
 // no death-frontier tracking.
 //
-// This is the simplest possible pool — it exists to provide the default device
+// This is the simplest possible pool; it exists to provide the default device
 // pool with the same behavior as direct allocation through the current
 // iree_hal_allocator_t. It proves the pool vtable dispatch chain works and
 // serves as a baseline for benchmarking suballocating pool types.

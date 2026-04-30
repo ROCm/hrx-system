@@ -137,6 +137,34 @@ TEST_F(AllocatorTest, OversizedAllocationIsRejectedByCompatibility) {
   EXPECT_EQ(compatibility, IREE_HAL_BUFFER_COMPATIBILITY_NONE);
 }
 
+TEST_F(AllocatorTest, DeviceLocalHostVisibleMemoryIsLowPerformance) {
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(test_device.Initialize(&libhsa_, &topology_, host_allocator_));
+
+  iree_hal_buffer_params_t params = {0};
+  params.type =
+      IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
+  params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER |
+                 IREE_HAL_BUFFER_USAGE_DISPATCH |
+                 IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED;
+
+  iree_hal_buffer_params_t resolved_params = {0};
+  iree_device_size_t resolved_allocation_size = 0;
+  const iree_hal_buffer_compatibility_t compatibility =
+      iree_hal_allocator_query_buffer_compatibility(
+          test_device.allocator(), params, /*allocation_size=*/4096,
+          &resolved_params, &resolved_allocation_size);
+  EXPECT_TRUE(iree_all_bits_set(
+      compatibility, IREE_HAL_BUFFER_COMPATIBILITY_ALLOCATABLE |
+                         IREE_HAL_BUFFER_COMPATIBILITY_QUEUE_TRANSFER |
+                         IREE_HAL_BUFFER_COMPATIBILITY_QUEUE_DISPATCH |
+                         IREE_HAL_BUFFER_COMPATIBILITY_LOW_PERFORMANCE));
+  EXPECT_TRUE(iree_all_bits_set(resolved_params.type,
+                                IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
+                                    IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
+                                    IREE_HAL_MEMORY_TYPE_HOST_COHERENT));
+}
+
 TEST_F(AllocatorTest, OverAlignedAllocationIsRejected) {
   TestLogicalDevice test_device;
   IREE_ASSERT_OK(test_device.Initialize(&libhsa_, &topology_, host_allocator_));
@@ -171,6 +199,62 @@ TEST_F(AllocatorTest, OverAlignedAllocationIsRejected) {
       iree_hal_allocator_allocate_buffer(test_device.allocator(), params,
                                          /*allocation_size=*/1, &buffer));
   EXPECT_EQ(buffer, nullptr);
+}
+
+TEST_F(AllocatorTest, UnsupportedExternalBufferImportsFailLoud) {
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(test_device.Initialize(&libhsa_, &topology_, host_allocator_));
+
+  iree_hal_buffer_params_t params = {0};
+  params.type =
+      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
+  params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
+
+  std::array<iree_hal_external_buffer_type_t, 3> unsupported_types = {
+      IREE_HAL_EXTERNAL_BUFFER_TYPE_DEVICE_ALLOCATION,
+      IREE_HAL_EXTERNAL_BUFFER_TYPE_OPAQUE_FD,
+      IREE_HAL_EXTERNAL_BUFFER_TYPE_OPAQUE_WIN32,
+  };
+  for (iree_hal_external_buffer_type_t unsupported_type : unsupported_types) {
+    iree_hal_external_buffer_t external_buffer = {};
+    external_buffer.type = unsupported_type;
+    external_buffer.size = 4096;
+
+    iree_hal_buffer_t* buffer = NULL;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_UNIMPLEMENTED,
+        iree_hal_allocator_import_buffer(
+            test_device.allocator(), params, &external_buffer,
+            iree_hal_buffer_release_callback_null(), &buffer));
+    EXPECT_EQ(buffer, nullptr);
+  }
+}
+
+TEST_F(AllocatorTest, ExternalBufferExportFailsLoud) {
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(test_device.Initialize(&libhsa_, &topology_, host_allocator_));
+
+  iree_hal_buffer_params_t params = {0};
+  params.type =
+      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
+  params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
+
+  iree_hal_buffer_t* buffer = NULL;
+  IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
+      test_device.allocator(), params, /*allocation_size=*/4096, &buffer));
+
+  iree_hal_external_buffer_t external_buffer = {};
+  external_buffer.type = IREE_HAL_EXTERNAL_BUFFER_TYPE_OPAQUE_WIN32;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNAVAILABLE,
+      iree_hal_allocator_export_buffer(
+          test_device.allocator(), buffer,
+          IREE_HAL_EXTERNAL_BUFFER_TYPE_OPAQUE_WIN32,
+          IREE_HAL_EXTERNAL_BUFFER_FLAG_NONE, &external_buffer));
+  EXPECT_EQ(external_buffer.type, IREE_HAL_EXTERNAL_BUFFER_TYPE_NONE);
+  EXPECT_EQ(external_buffer.size, 0u);
+
+  iree_hal_buffer_release(buffer);
 }
 
 }  // namespace

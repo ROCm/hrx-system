@@ -25,7 +25,13 @@
 // Inline synchronous one-shot command "buffer".
 typedef struct iree_hal_inline_command_buffer_t {
   iree_hal_command_buffer_t base;
+
+  // Allocator used to free heap storage when created as a ref-counted object.
   iree_allocator_t host_allocator;
+
+  // Original heap allocation returned by the allocator, or NULL when the
+  // command buffer uses caller-owned storage.
+  void* allocated_storage;
 
   struct {
     // Cached and initialized dispatch state reused for all dispatches.
@@ -79,10 +85,20 @@ static void iree_hal_inline_command_buffer_reset(
       command_buffer->state.binding_length_storage;
 }
 
-iree_host_size_t iree_hal_inline_command_buffer_size(
+static iree_host_size_t iree_hal_inline_command_buffer_alignment(void) {
+  return iree_alignof(iree_hal_inline_command_buffer_t);
+}
+
+static iree_host_size_t iree_hal_inline_command_buffer_body_size(
     iree_hal_command_buffer_mode_t mode, iree_host_size_t binding_capacity) {
   return sizeof(iree_hal_inline_command_buffer_t) +
          iree_hal_command_buffer_validation_state_size(mode, binding_capacity);
+}
+
+iree_host_size_t iree_hal_inline_command_buffer_size(
+    iree_hal_command_buffer_mode_t mode, iree_host_size_t binding_capacity) {
+  return iree_hal_inline_command_buffer_body_size(mode, binding_capacity) +
+         iree_hal_inline_command_buffer_alignment() - 1;
 }
 
 iree_status_t iree_hal_inline_command_buffer_initialize(
@@ -110,8 +126,16 @@ iree_status_t iree_hal_inline_command_buffer_initialize(
         IREE_STATUS_INVALID_ARGUMENT,
         "indirect command buffers do not support binding tables");
   }
-  if (storage.data_length <
-      iree_hal_inline_command_buffer_size(mode, binding_capacity)) {
+  const uintptr_t storage_address = (uintptr_t)storage.data;
+  const uintptr_t command_buffer_address =
+      (uintptr_t)iree_host_align((iree_host_size_t)storage_address,
+                                 iree_hal_inline_command_buffer_alignment());
+  const iree_host_size_t storage_prefix_length =
+      (iree_host_size_t)(command_buffer_address - storage_address);
+  const iree_host_size_t required_size =
+      storage_prefix_length +
+      iree_hal_inline_command_buffer_body_size(mode, binding_capacity);
+  if (storage.data_length < required_size) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "storage must have at least the capacity as "
                             "defined by iree_hal_inline_command_buffer_size");
@@ -120,7 +144,7 @@ iree_status_t iree_hal_inline_command_buffer_initialize(
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_hal_inline_command_buffer_t* command_buffer =
-      (iree_hal_inline_command_buffer_t*)storage.data;
+      (iree_hal_inline_command_buffer_t*)command_buffer_address;
   memset(command_buffer, 0, sizeof(*command_buffer));
 
   iree_hal_command_buffer_initialize(
@@ -182,6 +206,8 @@ iree_status_t iree_hal_inline_command_buffer_create(
   }
 
   if (iree_status_is_ok(status)) {
+    iree_hal_inline_command_buffer_cast(command_buffer)->allocated_storage =
+        storage;
     *out_command_buffer = command_buffer;
   } else {
     iree_allocator_free(host_allocator, storage);
@@ -195,10 +221,13 @@ static void iree_hal_inline_command_buffer_destroy(
   iree_hal_inline_command_buffer_t* command_buffer =
       iree_hal_inline_command_buffer_cast(base_command_buffer);
   iree_allocator_t host_allocator = command_buffer->host_allocator;
+  void* allocated_storage = command_buffer->allocated_storage;
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  IREE_ASSERT(allocated_storage,
+              "caller-owned inline command buffer storage cannot be retained");
   iree_hal_inline_command_buffer_deinitialize(base_command_buffer);
-  iree_allocator_free(host_allocator, command_buffer);
+  iree_allocator_free(host_allocator, allocated_storage);
 
   IREE_TRACE_ZONE_END(z0);
 }

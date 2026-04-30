@@ -13,6 +13,25 @@
 #include "iree/base/threading/futex.h"
 #include "iree/base/threading/notification.h"
 
+// Compile-time selection for sync notification_wait() implementation.
+// When futex is available, sync waiters use futex_wait() on the epoch atomic —
+// no eventfd involvement, no drain race with the poll thread. When futex is
+// unavailable (macOS), sync waiters use iree_notification_t (condvar-based),
+// keeping the eventfd exclusively for the poll thread.
+//
+// This flag is potentially transient: after measurement across platforms it
+// may either track the main IREE_RUNTIME_USE_FUTEX unconditionally or be
+// removed entirely.
+//
+// Set IREE_ASYNC_POSIX_NOTIFICATION_WANT_FUTEX=0 to force the condvar path
+// even on platforms that support futex (for benchmarking/testing).
+#ifndef IREE_ASYNC_POSIX_NOTIFICATION_WANT_FUTEX
+#define IREE_ASYNC_POSIX_NOTIFICATION_WANT_FUTEX 1
+#endif  // IREE_ASYNC_POSIX_NOTIFICATION_WANT_FUTEX
+#if defined(IREE_RUNTIME_USE_FUTEX) && IREE_ASYNC_POSIX_NOTIFICATION_WANT_FUTEX
+#define IREE_ASYNC_POSIX_NOTIFICATION_USE_FUTEX 1
+#endif  // IREE_RUNTIME_USE_FUTEX && IREE_ASYNC_POSIX_NOTIFICATION_WANT_FUTEX
+
 #ifdef __cplusplus
 extern "C" {
 #endif  // __cplusplus
@@ -26,11 +45,15 @@ typedef struct iree_async_notification_wait_operation_t
 //===----------------------------------------------------------------------===//
 
 // Implementation mode for notification wait/wake primitives.
-// All notifications use kernel objects (eventfd/pipe) for reliable signaling.
 typedef enum iree_async_notification_mode_e {
+  // Futex word: wait/wake operate directly on the epoch atomic.
+  // Optimal (no fd overhead) but requires a backend-specific readiness
+  // contract for any kernel-side waiters.
+  IREE_ASYNC_NOTIFICATION_MODE_FUTEX = 0,
+
   // Event fd: eventfd (Linux) or pipe (macOS/BSD) with poll-based waits.
-  // Used by all backends for consistent behavior.
-  IREE_ASYNC_NOTIFICATION_MODE_EVENT = 0,
+  // Used by POSIX backend and io_uring fallback on older kernels.
+  IREE_ASYNC_NOTIFICATION_MODE_EVENT = 1,
 } iree_async_notification_mode_t;
 
 // Creation flags for notifications.
@@ -94,9 +117,11 @@ typedef struct iree_async_notification_t {
   // Platform-specific resources. Only the creating backend accesses its member.
   union {
     // io_uring backend (Linux).
-    // Uses eventfd with EFD_SEMAPHORE for reliable poll-based signaling.
+    // In FUTEX mode: primitive is unused (futex operates on &epoch directly).
+    // In EVENT mode: primitive is an eventfd with EFD_SEMAPHORE for linked
+    // POLL_ADD + READ SQE patterns.
     struct {
-      // Eventfd for poll-based async waits.
+      // Eventfd for poll-based async waits (EVENT mode only).
       // Monitored for POLLIN by io_uring POLL_ADD SQEs and sync poll().
       iree_async_primitive_t primitive;
       // Fd written to by signal() to trigger POLLIN on the monitored end.
@@ -106,6 +131,12 @@ typedef struct iree_async_notification_t {
       iree_async_primitive_t signal_primitive;
       // Buffer target for linked READ SQEs that drain the eventfd.
       uint64_t drain_buffer;
+      // Count of relays with in-flight FUTEX_WAIT SQEs on this notification.
+      // Incremented when a relay submits a FUTEX_WAIT, decremented when the
+      // FUTEX_WAIT CQE is processed. Read from the signal path to compute a
+      // precise futex wake count that includes both user waiters and relay
+      // waiters. Always zero in EVENT mode (relays use POLL_ADD instead).
+      iree_atomic_int32_t futex_relay_count;
     } io_uring;
 
     // POSIX backend (Linux/macOS/BSD).

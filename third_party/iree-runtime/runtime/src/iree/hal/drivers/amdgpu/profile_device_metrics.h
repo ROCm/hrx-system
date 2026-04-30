@@ -20,16 +20,16 @@ typedef struct iree_hal_amdgpu_profile_device_metrics_session_t
 
 // Allocates a flush-sampled AMDGPU device metrics session from |options|.
 //
-// The session owns only cold-path sampler state: PCI sysfs paths, open metric
-// file descriptors, and per-source ids. Queue submission/completion paths never
-// reference the session.
+// The session owns only cold-path sampler state: source identities, platform
+// metric handles, and per-source sample ids. Queue submission/completion paths
+// never reference the session.
 iree_status_t iree_hal_amdgpu_profile_device_metrics_session_allocate(
     iree_hal_amdgpu_logical_device_t* logical_device,
     const iree_hal_device_profiling_options_t* options,
     iree_allocator_t host_allocator,
     iree_hal_amdgpu_profile_device_metrics_session_t** out_session);
 
-// Frees |session| and closes any sysfs file descriptors it owns.
+// Frees |session| and releases any platform metric handles it owns.
 void iree_hal_amdgpu_profile_device_metrics_session_free(
     iree_hal_amdgpu_profile_device_metrics_session_t* session);
 

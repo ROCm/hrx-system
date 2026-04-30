@@ -7,6 +7,7 @@
 #ifndef IREE_HAL_DRIVERS_AMDGPU_HOST_QUEUE_SUBMISSION_H_
 #define IREE_HAL_DRIVERS_AMDGPU_HOST_QUEUE_SUBMISSION_H_
 
+#include "iree/hal/drivers/amdgpu/host_queue_policy.h"
 #include "iree/hal/drivers/amdgpu/host_queue_waits.h"
 #include "iree/hal/utils/resource_set.h"
 
@@ -61,12 +62,20 @@ typedef struct iree_hal_amdgpu_host_queue_kernel_submission_t {
   iree_hal_amdgpu_reclaim_entry_t* reclaim_entry;
   // Reclaim resource slots owned by |reclaim_entry|.
   iree_hal_resource_t** reclaim_resources;
-  // Queue-owned kernarg blocks reserved for this submission.
-  iree_hal_amdgpu_kernarg_block_t* kernarg_blocks;
+  // Queue-owned kernarg reservation for this submission.
+  struct {
+    // First kernarg block reserved for this submission, or NULL when unused.
+    iree_hal_amdgpu_kernarg_block_t* blocks;
+    // Kernarg ring write position to reclaim after this submission completes.
+    uint64_t write_position;
+  } kernargs;
   // First AQL packet id reserved for this submission.
   uint64_t first_packet_id;
-  // Kernarg ring write position to reclaim after this submission completes.
-  uint64_t kernarg_write_position;
+  // Queue-control upload reservation for this submission.
+  struct {
+    // Upload ring write position to reclaim after this submission completes.
+    uint64_t write_position;
+  } queue_upload;
   // Number of AQL packets reserved starting at |first_packet_id|.
   uint32_t packet_count;
   // Number of valid entries in |reclaim_resources|.
@@ -170,6 +179,34 @@ iree_status_t iree_hal_amdgpu_host_queue_try_begin_kernel_submission(
     iree_host_size_t operation_resource_count, uint32_t payload_packet_count,
     uint32_t kernarg_block_count, bool* out_ready,
     iree_hal_amdgpu_host_queue_kernel_submission_t* out_submission);
+
+// Publishes host-populated queue-owned kernargs before committing packet
+// headers that reference them. Callers must have already written all kernarg
+// bytes for |submission|.
+static inline void iree_hal_amdgpu_host_queue_publish_submission_kernargs(
+    const iree_hal_amdgpu_host_queue_t* queue,
+    const iree_hal_amdgpu_host_queue_kernel_submission_t* submission) {
+  if (submission->kernargs.blocks) {
+    iree_hal_amdgpu_kernarg_ring_publish_host_writes(&queue->kernarg_ring);
+  }
+}
+
+// Returns the acquire scope required for device execution to observe
+// host-populated queue-owned kernargs. Device-local rings need SYSTEM acquire
+// here because publish_submission_kernargs() only drains host writes before
+// packet publication; shader-visible memory may otherwise retain stale
+// contents across ring-slot reuse.
+static inline iree_hsa_fence_scope_t
+iree_hal_amdgpu_host_queue_kernarg_acquire_scope(
+    const iree_hal_amdgpu_host_queue_t* queue,
+    iree_hsa_fence_scope_t minimum_acquire_scope) {
+  if (iree_hal_amdgpu_kernarg_ring_requires_host_write_publication(
+          &queue->kernarg_ring)) {
+    return iree_hal_amdgpu_host_queue_max_fence_scope(
+        minimum_acquire_scope, IREE_HSA_FENCE_SCOPE_SYSTEM);
+  }
+  return minimum_acquire_scope;
+}
 
 // Attempts to begin one barrier-shaped packet submission without waiting for
 // ring capacity. If temporary AQL/notification capacity is unavailable then

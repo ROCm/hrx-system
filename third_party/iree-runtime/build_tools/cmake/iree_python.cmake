@@ -94,10 +94,6 @@ function(iree_local_py_test)
     set(_SRC_DIR "${CMAKE_CURRENT_BINARY_DIR}")
   endif()
 
-  if(NOT DEFINED _RULE_TIMEOUT)
-    set(_RULE_TIMEOUT 60)
-  endif()
-
   iree_package_name(_PACKAGE_NAME)
   set(_NAME "${_PACKAGE_NAME}_${_RULE_NAME}")
 
@@ -105,12 +101,15 @@ function(iree_local_py_test)
   string(REPLACE "::" "/" _PACKAGE_PATH ${_PACKAGE_NS})
   set(_NAME_PATH "${_PACKAGE_PATH}/${_RULE_NAME}")
   list(APPEND _RULE_LABELS "${_PACKAGE_PATH}")
+  if(NOT DEFINED _RULE_TIMEOUT)
+    set(_RULE_TIMEOUT 60)
+  endif()
 
   add_test(
     NAME ${_NAME_PATH}
     COMMAND
       "${Python3_EXECUTABLE}"
-      "${_SRC_DIR}/${_RULE_SRC}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/${_RULE_SRC}"
       ${_RULE_ARGS}
   )
 
@@ -127,6 +126,7 @@ function(iree_local_py_test)
   endif()
   set_property(TEST ${_NAME_PATH} PROPERTY ENVIRONMENT
       "PYTHONPATH=${_PYTHONPATH}"
+      "PYTHONDONTWRITEBYTECODE=1"
   )
 
   iree_configure_test(${_NAME_PATH})

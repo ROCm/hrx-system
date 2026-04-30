@@ -60,7 +60,10 @@ static iree_async_axis_t Axis(uint8_t index) {
 
 // Callback tracking state.
 struct CallbackState {
+  // Number of times the callback fired.
   std::atomic<int> call_count{0};
+
+  // Status code captured from the most recent callback.
   iree_status_code_t last_status_code{IREE_STATUS_OK};
 
   void Reset() {
@@ -128,6 +131,14 @@ TEST(InitializeTest, ZeroCapacity) {
 
 TEST(RegisterAxisTest, DuplicateAxisFails) {
   TrackerFixture fixture(4);
+  fixture.AddAxis(Axis(0));
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_ALREADY_EXISTS,
+                        fixture.RegisterAxis(Axis(0)));
+}
+
+TEST(RegisterAxisTest, FullTableDuplicateReportsDuplicate) {
+  TrackerFixture fixture(1);
   fixture.AddAxis(Axis(0));
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_ALREADY_EXISTS,
@@ -393,14 +404,14 @@ TEST(AdvanceWaitTest, MultipleWaitersDifferentFrontiers) {
   IREE_EXPECT_OK(iree_async_frontier_tracker_wait(
       fixture.tracker(), f2, TrackingCallback, &state2, &waiter2));
 
-  // Advance Axis(0) — only waiter1 should fire.
+  // Advance Axis(0); only waiter1 should fire.
   iree_host_size_t dispatched =
       iree_async_frontier_tracker_advance(fixture.tracker(), Axis(0), 5);
   EXPECT_EQ(dispatched, 1u);
   EXPECT_EQ(state1.call_count, 1);
   EXPECT_EQ(state2.call_count, 0);
 
-  // Advance Axis(1) — waiter2 fires.
+  // Advance Axis(1); waiter2 fires.
   dispatched =
       iree_async_frontier_tracker_advance(fixture.tracker(), Axis(1), 5);
   EXPECT_EQ(dispatched, 1u);
@@ -425,7 +436,7 @@ TEST(CancelTest, CancelPendingWaiter) {
   EXPECT_TRUE(
       iree_async_frontier_tracker_cancel_wait(fixture.tracker(), &waiter));
 
-  // Advance past the frontier — callback should NOT fire.
+  // Advance past the frontier; callback should NOT fire.
   iree_async_frontier_tracker_advance(fixture.tracker(), Axis(0), 20);
   EXPECT_EQ(state.call_count, 0);
 }
@@ -442,7 +453,7 @@ TEST(CancelTest, CancelAlreadyDispatched) {
   iree_async_frontier_tracker_advance(fixture.tracker(), Axis(0), 5);
   EXPECT_EQ(state.call_count, 1);
 
-  // Cancel after already dispatched — should be a no-op.
+  // Cancel after already dispatched; should be a no-op.
   EXPECT_FALSE(
       iree_async_frontier_tracker_cancel_wait(fixture.tracker(), &waiter));
   EXPECT_EQ(state.call_count, 1);  // Still 1, not re-invoked or anything weird.
@@ -541,7 +552,7 @@ TEST(FailAxisTest, FailOneAxisOfMulti) {
       fixture.tracker(), f, TrackingCallback, &state, &waiter));
   EXPECT_EQ(state.call_count, 0);
 
-  // Fail Axis(1) — waiter should fail even though Axis(0) is not satisfied.
+  // Fail Axis(1); waiter should fail even though Axis(0) is not satisfied.
   iree_async_frontier_tracker_fail_axis(
       fixture.tracker(), Axis(1),
       iree_make_status(IREE_STATUS_INTERNAL, "axis 1 failed"));
@@ -609,7 +620,7 @@ TEST(SemaphoreBridgingTest, AdvanceWithoutSemaphore) {
   fixture.AddAxis(Axis(0));  // No semaphore.
 
   iree_async_frontier_tracker_advance(fixture.tracker(), Axis(0), 5);
-  // No crash — that's the test.
+  // No crash; that's the test.
 }
 
 //===----------------------------------------------------------------------===//
@@ -624,10 +635,17 @@ TEST(ConcurrencyTest, ConcurrentAdvanceDifferentAxes) {
 
   // Create persistent frontiers and waiters for the threads.
   struct WaiterData {
+    // Waiter storage registered with the tracker.
     iree_async_frontier_waiter_t waiter;
+
+    // Callback state updated when the waiter dispatches.
     CallbackState state;
+
+    // Inline storage for a one-entry frontier.
     alignas(16) uint8_t frontier_storage[sizeof(iree_async_frontier_t) +
                                          sizeof(iree_async_frontier_entry_t)];
+
+    // Frontier view over |frontier_storage|.
     iree_async_frontier_t* frontier;
   };
   std::vector<WaiterData> waiter_data(8);

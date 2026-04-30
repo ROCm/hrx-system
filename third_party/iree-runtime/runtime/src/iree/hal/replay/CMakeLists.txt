@@ -77,18 +77,6 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
-    help
-  HDRS
-    "help.h"
-  SRCS
-    "help.c"
-  DEPS
-    iree::base
-  PUBLIC
-)
-
-iree_cc_library(
-  NAME
     dump
   HDRS
     "dump.h"
@@ -165,6 +153,8 @@ iree_cc_test(
     iree::testing::gtest_main
 )
 
+if(TARGET iree::hal::drivers::local_sync::sync_driver)
+
 iree_cc_test(
   NAME
     execute_test
@@ -183,7 +173,10 @@ iree_cc_test(
     iree::io::file_handle
     iree::testing::gtest
     iree::testing::gtest_main
+    iree::testing::temp_file
 )
+
+endif()
 
 iree_cc_test(
   NAME
@@ -196,6 +189,8 @@ iree_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
 )
+
+if(TARGET iree::hal::drivers::local_sync::sync_driver)
 
 iree_cc_test(
   NAME
@@ -211,8 +206,12 @@ iree_cc_test(
     iree::hal
     iree::hal::drivers::local_sync::sync_driver
     iree::hal::testing::mock_device
+    iree::io::file_handle
     iree::testing::gtest
     iree::testing::gtest_main
+    iree::testing::temp_file
 )
+
+endif()
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

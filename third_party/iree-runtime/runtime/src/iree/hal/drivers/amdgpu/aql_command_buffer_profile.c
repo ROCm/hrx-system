@@ -54,12 +54,28 @@ iree_hal_amdgpu_aql_command_buffer_profile_dispatch_binding_flags(
   if (dispatch_command->binding_count == 0) {
     return IREE_HAL_PROFILE_COMMAND_OPERATION_FLAG_NONE;
   }
+
+  iree_hal_profile_command_operation_flags_t flags =
+      IREE_HAL_PROFILE_COMMAND_OPERATION_FLAG_NONE;
+  switch (dispatch_command->kernarg_strategy) {
+    case IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STRATEGY_PREPUBLISHED:
+      return IREE_HAL_PROFILE_COMMAND_OPERATION_FLAG_STATIC_BINDINGS;
+    case IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STRATEGY_PATCHED_TEMPLATE:
+      if (dispatch_command->payload.patch_source_count != 0) {
+        flags |= IREE_HAL_PROFILE_COMMAND_OPERATION_FLAG_DYNAMIC_BINDINGS;
+      }
+      if (dispatch_command->payload.patch_source_count <
+          dispatch_command->binding_count) {
+        flags |= IREE_HAL_PROFILE_COMMAND_OPERATION_FLAG_STATIC_BINDINGS;
+      }
+      return flags;
+    default:
+      break;
+  }
   if (dispatch_command->binding_source_offset == 0) {
     return IREE_HAL_PROFILE_COMMAND_OPERATION_FLAG_STATIC_BINDINGS;
   }
 
-  iree_hal_profile_command_operation_flags_t flags =
-      IREE_HAL_PROFILE_COMMAND_OPERATION_FLAG_NONE;
   const uint8_t* block_base = (const uint8_t*)block;
   const uint32_t binding_source_offset =
       dispatch_command->binding_source_offset;

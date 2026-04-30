@@ -12,11 +12,13 @@
 #include "iree/hal/drivers/amdgpu/buffer.h"
 #include "iree/hal/drivers/amdgpu/host_queue.h"
 #include "iree/hal/drivers/amdgpu/host_queue_staging.h"
+#include "iree/hal/drivers/amdgpu/physical_device_capabilities.h"
 #include "iree/hal/drivers/amdgpu/system.h"
 #include "iree/hal/drivers/amdgpu/transient_buffer.h"
 #include "iree/hal/drivers/amdgpu/util/block_pool.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
 #include "iree/hal/drivers/amdgpu/util/signal_pool.h"
+#include "iree/hal/drivers/amdgpu/util/target_id.h"
 #include "iree/hal/memory/slab_provider.h"
 #include "iree/hal/memory/tlsf_pool.h"
 #include "iree/hal/pool.h"
@@ -24,15 +26,6 @@
 
 typedef struct iree_hal_amdgpu_host_memory_pools_t
     iree_hal_amdgpu_host_memory_pools_t;
-
-typedef struct iree_hal_amdgpu_gfxip_version_t {
-  // Major gfx ISA version, such as 9, 10, 11, or 12.
-  uint32_t major;
-  // Minor gfx ISA version within |major|.
-  uint32_t minor;
-  // Stepping digit within |major|.|minor|.
-  uint32_t stepping;
-} iree_hal_amdgpu_gfxip_version_t;
 
 //===----------------------------------------------------------------------===//
 // iree_hal_amdgpu_physical_device_options_t
@@ -80,6 +73,10 @@ typedef struct iree_hal_amdgpu_gfxip_version_t {
 #define IREE_HAL_AMDGPU_PHYSICAL_DEVICE_DEFAULT_POOL_RANGE_LENGTH_DEFAULT \
   (64 * 1024 * 1024)
 
+// Logical byte length for host-visible default queue-allocation pool slabs.
+#define IREE_HAL_AMDGPU_PHYSICAL_DEVICE_HOST_POOL_RANGE_LENGTH_DEFAULT \
+  (64 * 1024)
+
 // Minimum byte alignment for default-pool suballocations.
 #define IREE_HAL_AMDGPU_PHYSICAL_DEVICE_DEFAULT_POOL_ALIGNMENT_DEFAULT 256
 
@@ -103,6 +100,7 @@ typedef struct iree_hal_amdgpu_gfxip_version_t {
 #define IREE_HAL_AMDGPU_PHYSICAL_DEVICE_DEFAULT_HOST_QUEUE_KERNARG_CAPACITY \
   ((uint32_t)(IREE_HAL_AMDGPU_DEFAULT_KERNARG_RINGBUFFER_CAPACITY /         \
               sizeof(iree_hal_amdgpu_kernarg_block_t)))
+#define IREE_HAL_AMDGPU_PHYSICAL_DEVICE_DEFAULT_HOST_QUEUE_UPLOAD_CAPACITY 0
 
 // Options controlling how a physical device is initialized.
 typedef struct iree_hal_amdgpu_physical_device_options_t {
@@ -133,6 +131,9 @@ typedef struct iree_hal_amdgpu_physical_device_options_t {
   uint32_t host_queue_notification_capacity;
   // Per-host-queue kernarg ring capacity in 64-byte blocks.
   uint32_t host_queue_kernarg_capacity;
+  // Per-host-queue device-visible control upload ring capacity in bytes. Zero
+  // disables the optional upload ring.
+  uint32_t host_queue_upload_capacity;
 
   // Default queue-allocation pool policy.
   struct {
@@ -175,8 +176,8 @@ typedef struct iree_hal_amdgpu_physical_device_t {
   hsa_agent_t device_agent;
   // Ordinal of the GPU agent within the topology.
   iree_host_size_t device_ordinal;
-  // KFD GPU identifier used when querying per-device clock counters.
-  uint32_t kfd_gpu_uid;
+  // HSA driver identifier used when querying per-device clock counters.
+  uint32_t driver_uid;
   // PCI domain from HSA_AMD_AGENT_INFO_DOMAIN.
   uint32_t pci_domain;
   // PCI bus decoded from HSA_AMD_AGENT_INFO_BDFID.
@@ -187,8 +188,13 @@ typedef struct iree_hal_amdgpu_physical_device_t {
   uint32_t pci_function;
   // True when the PCI identity fields contain HSA-provided values.
   uint32_t has_pci_identity : 1;
-  // Parsed gfx ISA version reported by the HSA agent.
-  iree_hal_amdgpu_gfxip_version_t gfxip_version;
+  // HSA ISA identity selected for this GPU agent.
+  struct {
+    // Storage backing |target_id.processor|.
+    char target_id_processor[64];
+    // Parsed target identity, including XNACK/SRAMECC support and mode.
+    iree_hal_amdgpu_target_id_t target_id;
+  } isa;
   // Stable physical device UUID bytes reported by HSA when available.
   uint8_t physical_device_uuid[16];
   // True when |physical_device_uuid| contains a stable HSA device identifier.
@@ -197,6 +203,14 @@ typedef struct iree_hal_amdgpu_physical_device_t {
   uint32_t host_numa_node;
   // Host memory pools for the CPU agent nearest to |device_agent|.
   iree_hal_amdgpu_host_memory_pools_t host_memory_pools;
+  // Cold memory-system facts used to derive conservative topology flags.
+  iree_hal_amdgpu_memory_system_capabilities_t memory_system;
+  // CPU-visible coarse-grained device-memory capability for this GPU.
+  iree_hal_amdgpu_cpu_visible_device_coarse_memory_t
+      cpu_visible_device_coarse_memory;
+  // Prepublished command-buffer kernarg storage capability for this GPU.
+  iree_hal_amdgpu_aql_prepublished_kernarg_storage_t
+      prepublished_kernarg_storage;
 
   // Fine-grained block pools for device memory blocks of various sizes.
   iree_hal_amdgpu_block_pools_t fine_block_pools;
@@ -227,14 +241,20 @@ typedef struct iree_hal_amdgpu_physical_device_t {
   iree_async_notification_t* default_pool_notification;
   // Slab provider backing default and caller-created pools for this domain.
   iree_hal_slab_provider_t* default_slab_provider;
+  // Host-local slab provider for mappable queue allocation transients.
+  iree_hal_slab_provider_t* default_host_slab_provider;
   // TLSF options derived from device options and HSA memory-pool properties.
   iree_hal_tlsf_pool_options_t default_pool_options;
-  // Routes default queue allocations to the best device-owned pool.
+  // Routes default queue allocations to the best compatible memory pool.
   iree_hal_pool_set_t default_pool_set;
   // Frontier-aware suballocating pool used up to the TLSF slab length.
   iree_hal_pool_t* default_pool;
   // Direct per-allocation pool used for requests larger than one TLSF slab.
   iree_hal_pool_t* default_oversized_pool;
+  // Frontier-aware suballocating pool for host-visible queue allocations.
+  iree_hal_pool_t* default_host_pool;
+  // Direct host-visible pool used for requests larger than one host TLSF slab.
+  iree_hal_pool_t* default_host_oversized_pool;
 
   // Fixed-size staging pool for non-mappable queue_read/queue_write transfers.
   iree_hal_amdgpu_staging_pool_t file_staging_pool;
@@ -244,6 +264,11 @@ typedef struct iree_hal_amdgpu_physical_device_t {
   // Host/device-neutral transfer context that points into |device_kernels|.
   iree_hal_amdgpu_device_buffer_transfer_context_t buffer_transfer_context;
 
+  // Wavefront size (warp size) reported by HSA for this agent. Always either
+  // 32 or 64 on supported AMDGPU hardware. RDNA parts (gfx10+/gfx11) execute
+  // at wave32 natively; CDNA/GCN at wave64.
+  uint32_t wavefront_size;
+
   // Total number of host queue slots allocated in |host_queues|.
   iree_host_size_t host_queue_capacity;
   // Per-host-queue HSA AQL ring capacity in packets.
@@ -252,6 +277,9 @@ typedef struct iree_hal_amdgpu_physical_device_t {
   uint32_t host_queue_notification_capacity;
   // Per-host-queue kernarg ring capacity in 64-byte blocks.
   uint32_t host_queue_kernarg_capacity;
+  // Per-host-queue device-visible control upload ring capacity in bytes. Zero
+  // disables the optional upload ring.
+  uint32_t host_queue_upload_capacity;
   // AMD vendor-packet capabilities selected from this GPU agent's ISA.
   iree_hal_amdgpu_vendor_packet_capability_flags_t vendor_packet_capabilities;
   // Hardware strategy selected for cross-queue epoch waits on this GPU agent.

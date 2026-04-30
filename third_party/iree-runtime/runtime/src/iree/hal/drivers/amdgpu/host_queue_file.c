@@ -242,7 +242,7 @@ static iree_status_t iree_hal_amdgpu_file_action_submit_signal_barrier(
   resolution.inline_acquire_scope = IREE_HSA_FENCE_SCOPE_SYSTEM;
   resolution.barrier_acquire_scope = IREE_HSA_FENCE_SCOPE_SYSTEM;
 
-  iree_slim_mutex_lock(&state->queue->submission_mutex);
+  iree_slim_mutex_lock(&state->queue->locks.submission_mutex);
   bool ready = false;
   uint64_t submission_id = 0;
   iree_hal_amdgpu_host_queue_profile_event_info_t profile_event_info = {
@@ -273,7 +273,7 @@ static iree_status_t iree_hal_amdgpu_file_action_submit_signal_barrier(
         state->queue, &state->signal_capacity_retry,
         iree_hal_amdgpu_file_action_signal_capacity_post_drain, state);
   }
-  iree_slim_mutex_unlock(&state->queue->submission_mutex);
+  iree_slim_mutex_unlock(&state->queue->locks.submission_mutex);
   return status;
 }
 

@@ -13,14 +13,6 @@ set(IREE_HAL_AMDGPU_DEVICE_LIBRARY_TARGETS
 
 include("${CMAKE_CURRENT_LIST_DIR}/target_map.cmake")
 
-iree_cc_library(
-  NAME
-    target_map
-  TEXTUAL_HDRS
-    "target_map.inl"
-  PUBLIC
-)
-
 function(_iree_hal_amdgpu_device_target_family_var out_var family)
   string(MAKE_C_IDENTIFIER "${family}" _family_identifier)
   set(${out_var} "_IREE_HAL_AMDGPU_DEVICE_TARGET_FAMILY_${_family_identifier}" PARENT_SCOPE)
@@ -66,15 +58,17 @@ endfunction()
 set(_BITCODE_SRCS
   "../blit.c"
   "../dispatch.c"
-  "../profiling.c"
+  "../timestamp.c"
 )
 
 set(_ABI_HDRS
   "${CMAKE_CURRENT_SOURCE_DIR}/../../abi/command_buffer.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/../../abi/common.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/../../abi/kernel_args.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../abi/profile.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/../../abi/queue.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/../../abi/signal.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../abi/timestamp.h"
 )
 
 set(_BITCODE_HDRS
@@ -82,11 +76,11 @@ set(_BITCODE_HDRS
   "${CMAKE_CURRENT_SOURCE_DIR}/../dispatch.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/../kernel_tables.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/../kernels.h"
-  "${CMAKE_CURRENT_SOURCE_DIR}/../profiling.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/../support/common.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/../support/kernel.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/../support/queue.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/../support/signal.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../timestamp.h"
   ${_ABI_HDRS}
 )
 

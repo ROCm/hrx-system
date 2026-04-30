@@ -207,21 +207,6 @@ IREE_API_EXPORT void iree_async_semaphore_fail(
   }
 }
 
-IREE_API_EXPORT iree_status_t
-iree_async_semaphore_consume_status(iree_async_semaphore_t* semaphore) {
-  iree_status_t old_status = iree_ok_status();
-  iree_status_t new_status = iree_ok_status();
-  while (!iree_atomic_compare_exchange_strong(
-      &semaphore->failure_status, (intptr_t*)&old_status, (intptr_t)new_status,
-      iree_memory_order_acq_rel,
-      iree_memory_order_acquire /* old_status is actually used */)) {
-    // Previous status was not OK; we have it now and can try again with just
-    // the bare status code (preserving the failed state).
-    new_status = iree_status_from_code(iree_status_code(old_status));
-  }
-  return old_status;
-}
-
 IREE_API_EXPORT iree_status_t iree_async_semaphore_acquire_timepoint(
     iree_async_semaphore_t* semaphore, uint64_t minimum_value,
     iree_async_semaphore_timepoint_t* timepoint) {
@@ -855,52 +840,34 @@ IREE_API_EXPORT iree_status_t iree_async_semaphore_multi_wait(
     // Check if the condition is already met (timepoints may have fired
     // synchronously during acquire_timepoint above).
     if (!iree_async_multi_wait_condition_fn(&condition)) {
-      const iree_time_t deadline_ns = iree_timeout_as_deadline_ns(timeout);
-
+      // Map wait flags to spin duration:
+      //   ACTIVE: full spin (never enter kernel wait)
+      //   YIELD:  brief spin to catch fast signals, then block
+      //   NONE:   straight to futex (no spin)
+      // ACTIVE takes precedence if both ACTIVE and YIELD are set.
+      iree_duration_t spin_ns;
       if (iree_any_bit_set(flags, IREE_ASYNC_WAIT_FLAG_ACTIVE)) {
-        // ACTIVE never registers as a notification waiter and never enters the
-        // kernel. The caller has explicitly chosen to burn this thread in
-        // exchange for minimum wake latency, so producers should not pay a
-        // futile futex wake syscall.
-        IREE_TRACE_ZONE_BEGIN_NAMED(z_spin,
-                                    "iree_async_semaphore_multi_wait_spin");
-        bool satisfied = false;
-        if (deadline_ns == IREE_TIME_INFINITE_FUTURE) {
-          do {
-            iree_processor_yield();
-            satisfied = iree_async_multi_wait_condition_fn(&condition);
-          } while (!satisfied);
-        } else {
-          do {
-            iree_processor_yield();
-            satisfied = iree_async_multi_wait_condition_fn(&condition);
-          } while (!satisfied && iree_time_now() < deadline_ns);
-        }
-        IREE_TRACE_ZONE_END(z_spin);
-        if (!satisfied) {
-          status = iree_status_from_code(IREE_STATUS_DEADLINE_EXCEEDED);
-        }
+        spin_ns = IREE_DURATION_INFINITE;
+      } else if (iree_any_bit_set(flags, IREE_ASYNC_WAIT_FLAG_YIELD)) {
+        spin_ns = 500;  // ~500ns; tuned to avoid futex overhead on fast signals
       } else {
-        const iree_duration_t spin_ns =
-            iree_any_bit_set(flags, IREE_ASYNC_WAIT_FLAG_YIELD)
-                ? 500  // ~500ns; tuned to avoid futex overhead on fast signals.
-                : IREE_DURATION_ZERO;
-        bool satisfied = false;
-        while (!satisfied) {
-          iree_wait_token_t wait_token =
-              iree_notification_prepare_wait(&state.notification);
-          if (iree_async_multi_wait_condition_fn(&condition)) {
-            iree_notification_cancel_wait(&state.notification);
-            satisfied = true;
-          } else if (!iree_notification_commit_wait(&state.notification,
-                                                    wait_token, spin_ns,
-                                                    deadline_ns)) {
-            break;  // Deadline expired.
-          }
+        spin_ns = IREE_DURATION_ZERO;
+      }
+      const iree_time_t deadline_ns = iree_timeout_as_deadline_ns(timeout);
+      bool satisfied = false;
+      while (!satisfied) {
+        iree_wait_token_t wait_token =
+            iree_notification_prepare_wait(&state.notification);
+        if (iree_async_multi_wait_condition_fn(&condition)) {
+          iree_notification_cancel_wait(&state.notification);
+          satisfied = true;
+        } else if (!iree_notification_commit_wait(
+                       &state.notification, wait_token, spin_ns, deadline_ns)) {
+          break;  // Deadline expired.
         }
-        if (!satisfied) {
-          status = iree_status_from_code(IREE_STATUS_DEADLINE_EXCEEDED);
-        }
+      }
+      if (!satisfied) {
+        status = iree_status_from_code(IREE_STATUS_DEADLINE_EXCEEDED);
       }
     }
 

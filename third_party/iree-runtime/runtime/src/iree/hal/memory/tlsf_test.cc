@@ -176,6 +176,22 @@ TEST(TLSFTest, InitializeDefaultFrontierCapacity) {
   iree_hal_memory_tlsf_deinitialize(&tlsf);
 }
 
+TEST(TLSFTest, InitializeDefaultBlockCapacityIsRangeIndependent) {
+  iree_hal_memory_tlsf_t tlsf;
+  auto options = DefaultOptions();
+  options.range_length = 64 * 1024 * 1024;
+  options.alignment = 256;
+  options.initial_block_capacity = 0;
+  IREE_ASSERT_OK(
+      iree_hal_memory_tlsf_initialize(options, iree_allocator_system(), &tlsf));
+
+  EXPECT_EQ(tlsf.block_capacity,
+            IREE_HAL_MEMORY_TLSF_DEFAULT_INITIAL_BLOCK_CAPACITY);
+  EXPECT_LE(tlsf.block_capacity * tlsf.block_stride, 64 * 1024u);
+
+  iree_hal_memory_tlsf_deinitialize(&tlsf);
+}
+
 TEST(TLSFTest, InitializeRangeRoundedDownToAlignment) {
   iree_hal_memory_tlsf_t tlsf;
   auto options = DefaultOptions();
@@ -439,7 +455,7 @@ TEST(TLSFTest, CoalesceBoth) {
     EXPECT_EQ(stats.free_block_count, 2u);
   }
 
-  // Free the middle — should coalesce with both neighbors.
+  // Free the middle; should coalesce with both neighbors.
   iree_hal_memory_tlsf_free(&tlsf, alloc2.block_index, NULL);
 
   {
@@ -462,7 +478,7 @@ TEST(TLSFTest, NoCoalesceWithAllocatedNeighbors) {
   IREE_ASSERT_OK(iree_hal_memory_tlsf_allocate(&tlsf, 256, &alloc2));
   IREE_ASSERT_OK(iree_hal_memory_tlsf_allocate(&tlsf, 256, &alloc3));
 
-  // Free only the middle block — both neighbors are allocated.
+  // Free only the middle block; both neighbors are allocated.
   iree_hal_memory_tlsf_free(&tlsf, alloc2.block_index, NULL);
 
   iree_hal_memory_tlsf_stats_t stats;
@@ -485,7 +501,7 @@ TEST(TLSFTest, ReuseFreedBlock) {
   IREE_ASSERT_OK(iree_hal_memory_tlsf_allocate(&tlsf, 256, &alloc1));
   IREE_ASSERT_OK(iree_hal_memory_tlsf_allocate(&tlsf, 256, &alloc2));
 
-  // Free the first, allocate same size — should reuse the freed block's range.
+  // Free the first, allocate same size; should reuse the freed block's range.
   iree_hal_memory_tlsf_free(&tlsf, alloc1.block_index, NULL);
 
   iree_hal_memory_tlsf_allocation_t alloc3;
@@ -515,7 +531,7 @@ TEST(TLSFTest, FrontierPreservedAcrossAllocFree) {
   MAKE_FRONTIER(death, 2, E(TestQueueAxis(0), 10), E(TestQueueAxis(1), 20));
   iree_hal_memory_tlsf_free(&tlsf, alloc.block_index, death);
 
-  // Allocate the same region — the death frontier should be returned.
+  // Allocate the same region; the death frontier should be returned.
   iree_hal_memory_tlsf_allocation_t realloc;
   IREE_ASSERT_OK(iree_hal_memory_tlsf_allocate(&tlsf, 256, &realloc));
   ASSERT_NE(realloc.death_frontier, nullptr);
@@ -538,7 +554,7 @@ TEST(TLSFTest, NullFrontierReturnsNullOnAlloc) {
   IREE_ASSERT_OK(iree_hal_memory_tlsf_allocate(&tlsf, 256, &alloc));
   iree_hal_memory_tlsf_free(&tlsf, alloc.block_index, NULL);
 
-  // Re-allocate — frontier should be NULL (block was freed with no frontier).
+  // Re-allocate; frontier should be NULL (block was freed with no frontier).
   iree_hal_memory_tlsf_allocation_t realloc;
   IREE_ASSERT_OK(iree_hal_memory_tlsf_allocate(&tlsf, 256, &realloc));
   EXPECT_EQ(realloc.death_frontier, nullptr);
@@ -619,7 +635,7 @@ TEST(TLSFTest, FrontierMergeMultipleAxes) {
   IREE_ASSERT_OK(iree_hal_memory_tlsf_allocate(&tlsf, 256, &alloc2));
   IREE_ASSERT_OK(iree_hal_memory_tlsf_allocate(&tlsf, 256, &alloc3));
 
-  // Free with frontiers on different axes — after coalescing, the merged
+  // Free with frontiers on different axes; after coalescing, the merged
   // frontier should contain both axes.
   MAKE_FRONTIER(f1, 1, E(TestQueueAxis(0), 5));
   MAKE_FRONTIER(f2, 1, E(TestQueueAxis(1), 10));
@@ -650,7 +666,7 @@ TEST(TLSFTest, TaintOnFrontierOverflow) {
   IREE_ASSERT_OK(iree_hal_memory_tlsf_allocate(&tlsf, 256, &alloc2));
   IREE_ASSERT_OK(iree_hal_memory_tlsf_allocate(&tlsf, 256, &alloc3));
 
-  // Free with different axes — merge will need 2 entries but capacity is 1.
+  // Free with different axes; merge will need 2 entries but capacity is 1.
   MAKE_FRONTIER(f1, 1, E(TestQueueAxis(0), 5));
   MAKE_FRONTIER(f2, 1, E(TestQueueAxis(1), 10));
   iree_hal_memory_tlsf_free(&tlsf, alloc1.block_index, f1);
@@ -724,7 +740,7 @@ TEST(TLSFTest, TaintPropagatesThroughRightCoalesce) {
   iree_hal_memory_tlsf_free(&tlsf, alloc3.block_index, f3);
 
   // Now the coalesced block [256..1024) is tainted and sits to the right of
-  // alloc1. Free alloc1 — it should coalesce right with the tainted block
+  // alloc1. Free alloc1; it should coalesce right with the tainted block
   // and the resulting block should also be tainted.
   MAKE_FRONTIER(f1, 1, E(TestQueueAxis(0), 100));
   iree_hal_memory_tlsf_free(&tlsf, alloc1.block_index, f1);
@@ -763,7 +779,7 @@ TEST(TLSFTest, TaintPropagatesThroughLeftCoalesce) {
   iree_hal_memory_tlsf_free(&tlsf, alloc2.block_index, f2);
 
   // Now the coalesced block [0..512) is tainted and sits to the left of
-  // alloc3. Free alloc3 — it should coalesce left with the tainted block
+  // alloc3. Free alloc3; it should coalesce left with the tainted block
   // and the resulting block should also be tainted.
   MAKE_FRONTIER(f3, 1, E(TestQueueAxis(0), 100));
   iree_hal_memory_tlsf_free(&tlsf, alloc3.block_index, f3);
@@ -800,7 +816,7 @@ TEST(TLSFTest, TaintClearedOnReuse) {
   EXPECT_NE(tainted_alloc.block_flags & IREE_HAL_MEMORY_TLSF_BLOCK_FLAG_TAINTED,
             0u);
 
-  // Free with a fresh frontier and re-allocate — taint should be cleared.
+  // Free with a fresh frontier and re-allocate; taint should be cleared.
   MAKE_FRONTIER(fresh, 1, E(TestQueueAxis(0), 100));
   iree_hal_memory_tlsf_free(&tlsf, tainted_alloc.block_index, fresh);
 
@@ -829,7 +845,7 @@ TEST(TLSFTest, TaintOnOversizedDeathFrontier) {
   MAKE_FRONTIER(big, 2, E(TestQueueAxis(0), 5), E(TestQueueAxis(1), 10));
   iree_hal_memory_tlsf_free(&tlsf, alloc.block_index, big);
 
-  // Re-allocate — should be tainted because the death frontier was too large.
+  // Re-allocate; should be tainted because the death frontier was too large.
   iree_hal_memory_tlsf_allocation_t realloc;
   IREE_ASSERT_OK(iree_hal_memory_tlsf_allocate(&tlsf, 256, &realloc));
   EXPECT_NE(realloc.block_flags & IREE_HAL_MEMORY_TLSF_BLOCK_FLAG_TAINTED, 0u);
@@ -956,12 +972,12 @@ TEST(TLSFTest, ExhaustionAfterFragmentation) {
     allocs.push_back(alloc);
   }
 
-  // Range is fully allocated — next allocation should fail.
+  // Range is fully allocated; next allocation should fail.
   iree_hal_memory_tlsf_allocation_t overflow;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
                         iree_hal_memory_tlsf_allocate(&tlsf, 16, &overflow));
 
-  // Free every other block — creates 8 x 16-byte holes.
+  // Free every other block; creates 8 x 16-byte holes.
   for (int i = 0; i < 16; i += 2) {
     iree_hal_memory_tlsf_free(&tlsf, allocs[i].block_index, NULL);
   }

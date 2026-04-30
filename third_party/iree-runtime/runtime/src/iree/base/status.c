@@ -688,7 +688,7 @@ IREE_API_EXPORT iree_status_t iree_status_join(iree_status_t base_status,
                                                iree_status_t new_status) {
   if (!iree_status_is_ok(base_status)) {
     if (!iree_status_is_ok(new_status)) {
-#if IREE_STATUS_FEATURES & IREE_STATUS_FEATURE_ANNOTATIONS
+#if (IREE_STATUS_FEATURES & IREE_STATUS_FEATURE_ANNOTATIONS) != 0
       iree_allocator_t allocator = iree_allocator_system();
       char* message = NULL;
       iree_host_size_t message_length = 0;
@@ -703,7 +703,7 @@ IREE_API_EXPORT iree_status_t iree_status_join(iree_status_t base_status,
             base_status, "additional failure: %s",
             iree_status_code_string(iree_status_code(new_status)));
       }
-#endif  // IREE_STATUS_FEATURES & IREE_STATUS_FEATURE_ANNOTATIONS
+#endif  // has IREE_STATUS_FEATURE_ANNOTATIONS
       iree_status_free(new_status);
     }
     return base_status;

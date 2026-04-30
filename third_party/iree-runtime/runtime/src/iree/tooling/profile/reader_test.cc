@@ -297,10 +297,9 @@ TEST(ProfileFileReaderTest, IteratesOnlyLogicalFileLength) {
   profile_file.file_length = (iree_host_size_t)profile_file.header.file_length;
 
   RecordCounter counter = {};
-  iree_profile_file_record_callback_t callback = {
-      .fn = CountProfileFileRecord,
-      .user_data = &counter,
-  };
+  iree_profile_file_record_callback_t callback = {};
+  callback.fn = CountProfileFileRecord;
+  callback.user_data = &counter;
   IREE_ASSERT_OK(iree_profile_file_for_each_record(&profile_file, callback));
   EXPECT_EQ(3u, counter.count);
 }

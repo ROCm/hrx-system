@@ -87,6 +87,21 @@ static uint32_t iree_sysfs_query_processor_count(void) {
   return 0;  // Unknown.
 }
 
+// Queries the CPU set currently available to the calling thread.
+// Returns false if the platform query fails, in which case callers should not
+// constrain sysfs topology discovery to an affinity mask.
+static bool iree_sysfs_query_current_affinity(cpu_set_t* out_cpu_set) {
+  CPU_ZERO(out_cpu_set);
+  return sched_getaffinity(/*pid=*/0, sizeof(*out_cpu_set), out_cpu_set) == 0;
+}
+
+// Returns true if |processor| is currently available to the calling thread.
+static bool iree_sysfs_is_processor_available(
+    uint32_t processor, const cpu_set_t* current_affinity) {
+  if (!current_affinity) return true;
+  return processor < CPU_SETSIZE && CPU_ISSET(processor, current_affinity);
+}
+
 // Reads the core ID for a specific logical processor.
 // Returns false if the file doesn't exist or can't be parsed.
 static bool iree_sysfs_try_query_core_id(uint32_t processor,
@@ -713,12 +728,25 @@ iree_status_t iree_task_topology_initialize_from_physical_cores(
 
   iree_task_topology_initialize(out_topology);
 
+  // Sysfs describes the host machine, not necessarily the processor set this
+  // process is allowed to run on. Constrain topology discovery with the current
+  // affinity mask so cgroups, cpusets, taskset, and qemu-user test runners do
+  // not create worker groups that can never execute.
+  cpu_set_t current_affinity;
+  const cpu_set_t* current_affinity_ptr =
+      iree_sysfs_query_current_affinity(&current_affinity) ? &current_affinity
+                                                           : NULL;
+
   // Find unique cores by enumerating processors and grouping by core_id.
   // We build a simple map of core_id -> first processor in that core.
   uint32_t core_map[IREE_TASK_TOPOLOGY_MAX_GROUP_COUNT];
   iree_host_size_t core_count = 0;
   for (uint32_t cpu = 0; cpu < processor_count && core_count < max_core_count;
        ++cpu) {
+    if (!iree_sysfs_is_processor_available(cpu, current_affinity_ptr)) {
+      continue;
+    }
+
     uint32_t core_id = 0;
     if (!iree_sysfs_try_query_core_id(cpu, &core_id)) {
       continue;  // Skip CPUs we can't query.

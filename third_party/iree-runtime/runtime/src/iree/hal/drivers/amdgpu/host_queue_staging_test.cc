@@ -67,9 +67,9 @@ static iree_hal_semaphore_list_t MakeSemaphoreList(
 }
 
 static bool HostQueueHasPostDrainAction(iree_hal_amdgpu_host_queue_t* queue) {
-  iree_slim_mutex_lock(&queue->post_drain_mutex);
-  const bool has_action = queue->post_drain_head != NULL;
-  iree_slim_mutex_unlock(&queue->post_drain_mutex);
+  iree_slim_mutex_lock(&queue->locks.post_drain_mutex);
+  const bool has_action = queue->post_drain.head != NULL;
+  iree_slim_mutex_unlock(&queue->locks.post_drain_mutex);
   return has_action;
 }
 

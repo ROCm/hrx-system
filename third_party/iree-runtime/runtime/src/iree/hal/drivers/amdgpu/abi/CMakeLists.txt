@@ -20,6 +20,7 @@ iree_cc_library(
     "profile.h"
     "queue.h"
     "signal.h"
+    "timestamp.h"
   DEPS
     hsa_runtime::headers
   PUBLIC

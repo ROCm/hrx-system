@@ -195,12 +195,16 @@ static bool iree_task_worker_drain_process(iree_task_worker_t* worker) {
                     (int32_t)IREE_TASK_PROCESS_SCHEDULE_DRAINING,
                     iree_memory_order_release);
 
+  const iree_task_worker_context_t worker_context = {
+      .worker_index = (uint32_t)worker->worker_index,
+      .processor_id = worker->processor_id,
+      .local_memory = worker->local_memory,
+  };
   while (true) {
     // Drain bounded work from the process.
     iree_task_process_drain_result_t result;
     memset(&result, 0, sizeof(result));
-    iree_status_t status =
-        process->drain(process, (uint32_t)worker->worker_index, &result);
+    iree_status_t status = process->drain(process, &worker_context, &result);
     if (!iree_status_is_ok(status)) {
       iree_task_process_report_error(process, status);
     }
@@ -210,10 +214,6 @@ static bool iree_task_worker_drain_process(iree_task_worker_t* worker) {
     // Completed or terminal (cancelled/errored): resolve and schedule
     // activated dependents.
     if (result.completed || iree_task_process_is_terminal(process)) {
-      iree_atomic_store(&process->schedule_state,
-                        (int32_t)IREE_TASK_PROCESS_SCHEDULE_IDLE,
-                        iree_memory_order_release);
-
       // Snapshot release_fn before complete — completion_fn may free the
       // process if release_fn is NULL (single-phase lifecycle).
       iree_task_process_release_fn_t release_fn = process->release_fn;
@@ -329,24 +329,31 @@ static void iree_task_worker_release_compute_process(
     iree_task_process_t* process, bool process_is_terminal,
     int64_t tagged_sentinel) {
   iree_task_executor_t* executor = worker->executor;
+  const int32_t release_placement_epoch =
+      iree_atomic_load(&slot->placement_epoch, iree_memory_order_acquire);
   process_is_terminal =
       process_is_terminal || iree_task_process_is_terminal(process);
 
   IREE_ASSERT(iree_task_process_warm_retainer_count(process) == 0,
               "cannot release a compute slot with warm retainers");
 
+  // Invalidate the slot placement before publishing an empty process pointer
+  // and resetting active_drainers. A worker may have observed the old process
+  // pointer in the quick check; the placement epoch lets it reject that stale
+  // observation after registering in the next empty slot generation.
+  iree_atomic_store(&slot->placement_epoch, 0, iree_memory_order_release);
+
   // Clear the process pointer. After this store (release), no new worker will
-  // pass the quick check for this slot — except via stale relaxed reads (the
-  // quick check uses relaxed ordering).
+  // pass the quick check for this slot — except via stale reads that are
+  // rejected by the active_drainers and placement-epoch protocols below.
   iree_atomic_store(&slot->process, 0, iree_memory_order_release);
 
   // Reset completion_claimed and atomically CAS active_drainers from
   // gen|SENTINEL to (gen+1)|0.
   //
-  // Workers that passed the quick check with a stale non-zero read before
-  // the process pointer was cleared may still be in the bail path: they did
-  // fetch_add(1) on active_drainers (seeing SENTINEL + N in the count bits),
-  // found (int32_t)prev < 0, and are about to do fetch_sub(1) to undo.
+  // Workers that passed the quick check with a stale non-zero read before the
+  // process pointer was cleared may still be trying to enter the slot. They
+  // cannot observe a non-sentinel count until this CAS completes.
   //
   // The CAS only succeeds when active_drainers is exactly our sentinel
   // value (no in-flight bailers have perturbed the count bits). The
@@ -376,20 +383,12 @@ static void iree_task_worker_release_compute_process(
   iree_task_process_t* overflow_process =
       iree_task_process_slist_pop(&executor->compute_overflow);
   if (overflow_process) {
-    intptr_t expected = 0;
-    if (iree_atomic_compare_exchange_strong(
-            &slot->process, &expected, (intptr_t)overflow_process,
-            iree_memory_order_release, iree_memory_order_relaxed)) {
-      // Placed successfully. The re-wake below will handle waking workers.
-    } else {
-      // Slot was filled by a concurrent schedule_process. Try to place the
-      // overflow process in any other empty slot; if none available, push it
-      // back to the overflow list for the next release to pick up.
-      if (!iree_task_executor_try_place_in_compute_slot(executor,
-                                                        overflow_process)) {
-        iree_task_process_slist_push(&executor->compute_overflow,
-                                     overflow_process);
-      }
+    if (!iree_task_executor_try_place_in_compute_slot(executor,
+                                                      overflow_process)) {
+      // All slots were filled by concurrent schedule_process calls. Push back
+      // to the overflow list for the next release to pick up.
+      iree_task_process_slist_push(&executor->compute_overflow,
+                                   overflow_process);
     }
   }
 
@@ -402,10 +401,19 @@ static void iree_task_worker_release_compute_process(
   // must re-wake workers for whatever process is in the slot.
   intptr_t new_process =
       iree_atomic_load(&slot->process, iree_memory_order_acquire);
-  if (new_process) {
+  if (new_process && new_process != IREE_TASK_COMPUTE_SLOT_RESERVED) {
     iree_task_process_t* p = (iree_task_process_t*)new_process;
     int32_t budget = iree_task_process_wake_budget(p);
     iree_task_executor_wake_workers(executor, budget);
+  }
+
+  // Process scheduling state is process-global, while compute slot releases
+  // can overlap with newer slot lifetimes of persistent processes. If this
+  // release no longer owns the current placement, the newer lifetime is
+  // responsible for sleeping or releasing the process.
+  if (IREE_UNLIKELY(release_placement_epoch !=
+                    iree_task_process_placement_epoch(process))) {
+    return;
   }
 
   // Transition to IDLE only if the process is not terminal (may be
@@ -419,6 +427,14 @@ static void iree_task_worker_release_compute_process(
     iree_atomic_store(&process->schedule_state,
                       (int32_t)IREE_TASK_PROCESS_SCHEDULE_IDLE,
                       iree_memory_order_seq_cst);
+
+    // A concurrent scheduler may have immediately consumed the IDLE state and
+    // published a newer placement. Do not run the stale release's final
+    // re-drain decision against that newer lifetime.
+    if (IREE_UNLIKELY(release_placement_epoch !=
+                      iree_task_process_placement_epoch(process))) {
+      return;
+    }
 
     // Final race check. If new work arrived after we cleared the slot but
     // before the IDLE store became visible, reclaim the process by CAS-ing it
@@ -453,20 +469,27 @@ static void iree_task_worker_release_compute_process(
   }
 }
 
-// Attempts to claim and release a compute slot that has no active drainers and
-// no warm retainers. Returns true when this worker claimed release.
+// Attempts to claim and release the caller's observed compute-slot lifetime.
+// The active-drainer value must still be the exact empty generation produced by
+// the caller's drain exit; a later generation belongs to a newer slot lifetime
+// and must not be cleared by this release attempt.
 static bool iree_task_worker_try_release_compute_process(
     iree_task_worker_t* worker, iree_task_compute_slot_t* slot,
-    iree_task_process_t* process, bool process_is_terminal) {
+    iree_task_process_t* process, int64_t expected_empty_drainers,
+    int32_t expected_placement_epoch, bool process_is_terminal) {
   int64_t current_drainers =
       iree_atomic_load(&slot->active_drainers, iree_memory_order_acquire);
-  if ((int32_t)current_drainers != 0) return false;
+  if (current_drainers != expected_empty_drainers) return false;
+
+  if (iree_atomic_load(&slot->placement_epoch, iree_memory_order_acquire) !=
+      expected_placement_epoch) {
+    return false;
+  }
 
   if (iree_task_process_warm_retainer_count(process) != 0) return false;
 
-  int64_t generation = current_drainers & ~(int64_t)UINT32_MAX;
-  int64_t expected_empty = generation;
-  int64_t sentinel = generation | IREE_TASK_SLOT_SENTINEL;
+  int64_t expected_empty = expected_empty_drainers;
+  int64_t sentinel = expected_empty_drainers | IREE_TASK_SLOT_SENTINEL;
   if (iree_atomic_compare_exchange_strong(
           &slot->active_drainers, &expected_empty, sentinel,
           iree_memory_order_acq_rel, iree_memory_order_relaxed)) {
@@ -485,13 +508,14 @@ static iree_time_t iree_task_worker_deadline_after(iree_time_t now,
 }
 
 static iree_time_t iree_task_worker_seed_warm_spin_deadline(
-    iree_task_process_t* process, iree_time_t now) {
+    iree_task_process_t* process, iree_time_t now,
+    iree_duration_t spin_duration) {
   int64_t current_deadline = iree_atomic_load(
       &process->retention_spin_deadline_ns, iree_memory_order_acquire);
   if (current_deadline > now) return current_deadline;
 
-  const iree_time_t new_deadline = iree_task_worker_deadline_after(
-      now, (iree_duration_t)IREE_TASK_WARM_WAIT_SPIN_NS);
+  const iree_time_t new_deadline =
+      iree_task_worker_deadline_after(now, spin_duration);
   while (current_deadline <= now) {
     if (iree_atomic_compare_exchange_weak(&process->retention_spin_deadline_ns,
                                           &current_deadline, new_deadline,
@@ -509,7 +533,8 @@ static iree_time_t iree_task_worker_seed_warm_spin_deadline(
 // drain state protected by active_drainers.
 static bool iree_task_worker_wait_warm_compute_process(
     iree_task_worker_t* worker, iree_task_process_t* process,
-    int32_t keep_warm_epoch, bool allow_initial_spin) {
+    int32_t keep_warm_epoch, iree_duration_t initial_spin_duration) {
+  const bool allow_initial_spin = initial_spin_duration > IREE_DURATION_ZERO;
   // Workers that reached warm wait while other drainers are still active are
   // in an intra-region tail: any remaining work has already been claimed by
   // those drainers. Parking them avoids a pool-wide spin herd while still
@@ -524,7 +549,8 @@ static bool iree_task_worker_wait_warm_compute_process(
     iree_time_t now = iree_time_now();
     iree_time_t spin_deadline_ns =
         seed_spin_deadline
-            ? iree_task_worker_seed_warm_spin_deadline(process, now)
+            ? iree_task_worker_seed_warm_spin_deadline(process, now,
+                                                       initial_spin_duration)
             : iree_atomic_load(&process->retention_spin_deadline_ns,
                                iree_memory_order_acquire);
     seed_spin_deadline = false;
@@ -622,6 +648,25 @@ static bool iree_task_worker_wait_warm_compute_process(
   }
 }
 
+// Returns true if this warm retainer should rejoin active draining. If the
+// current warm set is wider than the process wake budget, consumes this
+// worker's warm claim and returns false.
+static bool iree_task_worker_try_rejoin_warm_compute_process(
+    iree_task_process_t* process) {
+  int32_t current_count =
+      iree_atomic_load(&process->warm_retainers, iree_memory_order_acquire);
+  while (true) {
+    IREE_ASSERT(current_count > 0, "warm retainer count underflow");
+    const int32_t wake_budget = iree_task_process_wake_budget(process);
+    if (current_count <= wake_budget) return true;
+    if (iree_atomic_compare_exchange_weak(
+            &process->warm_retainers, &current_count, current_count - 1,
+            iree_memory_order_acq_rel, iree_memory_order_acquire)) {
+      return false;
+    }
+  }
+}
+
 // Scans executor compute slots for wake_budget > 1 processes and drains bounded
 // work from one of them. Workers scan round-robin starting from
 // compute_slot_scan_start to distribute load evenly across slots.
@@ -650,30 +695,40 @@ static bool iree_task_worker_drain_compute_slots(iree_task_worker_t* worker) {
     // Relaxed is sufficient — this is just a hint to avoid the expensive
     // fetch_add on the common case of empty slots.
     intptr_t quick =
-        iree_atomic_load(&slot->process, iree_memory_order_relaxed);
-    if (!quick) continue;
+        iree_atomic_load(&slot->process, iree_memory_order_acquire);
+    if (!quick || quick == IREE_TASK_COMPUTE_SLOT_RESERVED) continue;
 
     // Register as an active drainer BEFORE accessing the process. This
     // prevents the release callback from firing while we're in drain().
     //
-    // The fetch_add(1) operates on the full 64-bit tagged counter but only
-    // affects the low 32-bit count (count is always small, never overflows
-    // into the generation bits). If the count portion is negative (sentinel
-    // bit set), the slot is being released — bail immediately.
-    int64_t prev_drainers = iree_atomic_fetch_add(&slot->active_drainers, 1,
-                                                  iree_memory_order_acq_rel);
-    if (IREE_UNLIKELY((int32_t)prev_drainers < 0)) {
+    // Wake budget controls how many workers the executor asks to keep active;
+    // it is not an admission limit for workers that are already active and
+    // scanning the compute slots. The low 32 bits of active_drainers carry the
+    // active count; if the sentinel bit is set the slot is being released, so
+    // undo our claim and skip this slot.
+    int64_t previous_drainers = iree_atomic_fetch_add(
+        &slot->active_drainers, 1, iree_memory_order_acq_rel);
+    if (IREE_UNLIKELY((int32_t)previous_drainers < 0)) {
       iree_atomic_fetch_sub(&slot->active_drainers, 1,
                             iree_memory_order_release);
       continue;
     }
 
-    // Re-verify with acquire ordering. Between our relaxed load and
-    // our drainer registration, the slot may have been cleared by the
-    // last drainer of a prior completion. If so, unregister and skip.
+    // Re-verify with acquire ordering. Between our relaxed load and active
+    // drainer registration, the slot may have been cleared by the last drainer
+    // of a prior completion. If so, unregister and skip.
     iree_task_process_t* process = (iree_task_process_t*)iree_atomic_load(
         &slot->process, iree_memory_order_acquire);
-    if (!process) {
+    if (!process || (intptr_t)process == IREE_TASK_COMPUTE_SLOT_RESERVED) {
+      iree_atomic_fetch_sub(&slot->active_drainers, 1,
+                            iree_memory_order_release);
+      continue;
+    }
+    int32_t slot_placement_epoch =
+        iree_atomic_load(&slot->placement_epoch, iree_memory_order_acquire);
+    if (IREE_UNLIKELY(slot_placement_epoch == 0 ||
+                      slot_placement_epoch !=
+                          iree_task_process_placement_epoch(process))) {
       iree_atomic_fetch_sub(&slot->active_drainers, 1,
                             iree_memory_order_release);
       continue;
@@ -687,14 +742,20 @@ static bool iree_task_worker_drain_compute_slots(iree_task_worker_t* worker) {
     bool drained_process_keep_active = false;
     bool drained_process_publish_keep_active = false;
     bool drained_process_keep_warm = false;
+    int32_t drained_process_keep_warm_retainer_limit = 0;
+    bool drained_process_keep_warm_spin = false;
     int32_t drained_process_keep_warm_epoch = 0;
 
     if (!is_terminal) {
       // Drain bounded work from this process.
+      const iree_task_worker_context_t worker_context = {
+          .worker_index = (uint32_t)worker->worker_index,
+          .processor_id = worker->processor_id,
+          .local_memory = worker->local_memory,
+      };
       iree_task_process_drain_result_t result;
       memset(&result, 0, sizeof(result));
-      iree_status_t status =
-          process->drain(process, (uint32_t)worker->worker_index, &result);
+      iree_status_t status = process->drain(process, &worker_context, &result);
       if (!iree_status_is_ok(status)) {
         iree_task_process_report_error(process, status);
       }
@@ -705,6 +766,9 @@ static bool iree_task_worker_drain_compute_slots(iree_task_worker_t* worker) {
       drained_process_publish_keep_active =
           result.keep_active && result.publish_keep_active;
       drained_process_keep_warm = result.keep_warm;
+      drained_process_keep_warm_retainer_limit =
+          result.keep_warm_retainer_limit;
+      drained_process_keep_warm_spin = result.keep_warm_spin;
       drained_process_keep_warm_epoch = result.keep_warm_epoch;
       if (drained_process_work) {
         // Sticky self-rerun signal for cross-drainer coordination. Any
@@ -725,10 +789,6 @@ static bool iree_task_worker_drain_compute_slots(iree_task_worker_t* worker) {
         // no useful work was performed and there is no cross-drainer progress
         // to publish to needs_drain.
         did_work = true;
-      } else if (drained_process_keep_warm) {
-        // This worker will leave active draining and wait as a warm retainer
-        // after its active drainer claim is dropped below.
-        did_work = true;
       }
       if (IREE_UNLIKELY(drained_process_publish_keep_active && !is_terminal)) {
         // Cross-drainer retention signal for mixed keep/release policies. This
@@ -739,11 +799,6 @@ static bool iree_task_worker_drain_compute_slots(iree_task_worker_t* worker) {
     }
 
     bool entered_warm = false;
-    if (drained_process_keep_warm && !is_terminal) {
-      iree_atomic_fetch_add(&process->warm_retainers, 1,
-                            iree_memory_order_acq_rel);
-      entered_warm = true;
-    }
     bool rejoin_warm = false;
 
     // If we observed completion, try to claim the eager completion callback.
@@ -756,6 +811,18 @@ static bool iree_task_worker_drain_compute_slots(iree_task_worker_t* worker) {
               iree_memory_order_acq_rel, iree_memory_order_relaxed)) {
         iree_task_worker_eager_complete_compute_process(worker, process);
       }
+    }
+
+    // Retain warm before dropping the active drainer claim so a peer last
+    // drainer cannot release the slot while this worker is moving from active
+    // ownership to warm ownership.
+    if (drained_process_keep_warm && !is_terminal) {
+      const int32_t retainer_limit =
+          drained_process_keep_warm_retainer_limit > 0
+              ? drained_process_keep_warm_retainer_limit
+              : iree_task_process_wake_budget(process);
+      entered_warm = iree_task_process_try_retain_warm(process, retainer_limit);
+      did_work = did_work || entered_warm;
     }
 
     // Unregister as active drainer. The fetch_sub(1) returns the previous
@@ -771,7 +838,9 @@ static bool iree_task_worker_drain_compute_slots(iree_task_worker_t* worker) {
     // that existed with the 32-bit counter.
     int64_t old_drainers = iree_atomic_fetch_sub(&slot->active_drainers, 1,
                                                  iree_memory_order_acq_rel);
+    int64_t release_generation = old_drainers & ~(int64_t)UINT32_MAX;
     int32_t remaining = (int32_t)old_drainers - 1;
+
     if (remaining == 0) {
       // Only the last drainer is allowed to clear needs_drain. A non-last
       // drainer that returned did_work=false may have observed a stale empty
@@ -805,21 +874,22 @@ static bool iree_task_worker_drain_compute_slots(iree_task_worker_t* worker) {
       // did_work=false last drainer must consume the global flag to avoid
       // missing a cross-drainer wake signal.
       bool needs_drain = drained_process_work || drained_process_keep_active;
-      bool shared_keep_active = false;
       if (!is_terminal) {
         if (!needs_drain) {
           needs_drain = iree_atomic_exchange(&process->needs_drain, 0,
                                              iree_memory_order_acq_rel) != 0;
         }
         if (!needs_drain) {
-          shared_keep_active =
-              iree_atomic_exchange(&process->retain_drain, 0,
-                                   iree_memory_order_acq_rel) != 0;
-          needs_drain = shared_keep_active;
+          needs_drain = iree_atomic_exchange(&process->retain_drain, 0,
+                                             iree_memory_order_acq_rel) != 0;
         }
         if (needs_drain) {
+          // If the final active drainer entered warm retention, any re-drain
+          // signal requires it to rejoin before sleeping. Once it drops active
+          // ownership, only warm retainers may remain, and those retainers are
+          // waiting for an active drainer to advance the retention epoch.
           did_work = true;
-          rejoin_warm = entered_warm && shared_keep_active;
+          rejoin_warm = entered_warm;
         }
       }
 
@@ -828,29 +898,54 @@ static bool iree_task_worker_drain_compute_slots(iree_task_worker_t* worker) {
         // new worker incremented active_drainers between our decrement and the
         // CAS, or another worker already released this slot. Either way,
         // release is handled.
-        iree_task_worker_try_release_compute_process(worker, slot, process,
-                                                     is_terminal);
+        iree_task_worker_try_release_compute_process(
+            worker, slot, process, release_generation, slot_placement_epoch,
+            is_terminal);
       }
     }
 
     if (entered_warm) {
       // If many drainers remain active, they are responsible for either
       // completing already-claimed tiles or publishing the next retention
-      // epoch. Spinning this worker now only burns CPU in the tail. The final
-      // few drainers stay warm to bridge short region-transition gaps without
-      // waking the whole worker pool.
+      // epoch. The final few drainers use the generic short spin to bridge
+      // region-transition gaps. Drain functions with concrete lookahead may
+      // request the same bounded spin even in a wider tail so known upcoming
+      // work does not need to rebuild the worker set from sleeping threads.
       const bool allow_initial_warm_spin =
+          drained_process_keep_warm_spin ||
           remaining <= IREE_TASK_WARM_WAIT_TAIL_SPIN_DRAINER_LIMIT;
+      const iree_duration_t initial_warm_spin_duration =
+          allow_initial_warm_spin
+              ? (drained_process_keep_warm_spin
+                     ? (iree_duration_t)IREE_TASK_WARM_WAIT_LOOKAHEAD_SPIN_NS
+                     : (iree_duration_t)IREE_TASK_WARM_WAIT_SPIN_NS)
+              : IREE_DURATION_ZERO;
       bool rejoin_process =
           rejoin_warm || iree_task_worker_wait_warm_compute_process(
                              worker, process, drained_process_keep_warm_epoch,
-                             allow_initial_warm_spin);
-      int32_t prior_warm_retainers = iree_atomic_fetch_sub(
-          &process->warm_retainers, 1, iree_memory_order_acq_rel);
-      IREE_ASSERT(prior_warm_retainers > 0, "warm retainer count underflow");
-      if (!rejoin_process && prior_warm_retainers == 1) {
-        iree_task_worker_try_release_compute_process(
-            worker, slot, process, iree_task_process_is_terminal(process));
+                             initial_warm_spin_duration);
+      bool has_warm_claim = true;
+      if (rejoin_process) {
+        has_warm_claim =
+            iree_task_worker_try_rejoin_warm_compute_process(process);
+        rejoin_process = has_warm_claim;
+      }
+      if (rejoin_process) {
+        // Publish the rejoin before dropping the warm lifetime claim. This
+        // closes the gap where another final active drainer could otherwise
+        // see no warm retainers and release the compute slot before this
+        // worker re-enters active draining.
+        iree_atomic_store(&process->needs_drain, 1, iree_memory_order_release);
+      }
+      if (has_warm_claim) {
+        int32_t prior_warm_retainers = iree_atomic_fetch_sub(
+            &process->warm_retainers, 1, iree_memory_order_acq_rel);
+        IREE_ASSERT(prior_warm_retainers > 0, "warm retainer count underflow");
+        if (!rejoin_process && prior_warm_retainers == 1) {
+          iree_task_worker_try_release_compute_process(
+              worker, slot, process, release_generation, slot_placement_epoch,
+              iree_task_process_is_terminal(process));
+        }
       }
       did_work = true;
       break;

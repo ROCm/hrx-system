@@ -96,6 +96,9 @@ static bool vulkan_registered_ =
                "Blocked by the same iree_hal_vulkan_device_queue_alloca "
                "non-NULL pool rejection as "
                "ExplicitPassthroughPoolAllocaDealloca."},
+              {"QueueAllocaTest.ExplicitTLSFPoolCrossQueueStaleBlockGrows",
+               "Blocked by the same Vulkan queue pool backend UNIMPLEMENTED "
+               "path as ExplicitTLSFPoolCrossQueueWaitFrontier."},
               {"QueueAllocaTest.ExplicitFixedBlockPoolNotificationRetry",
                "Blocked by the same iree_hal_vulkan_device_queue_alloca "
                "non-NULL pool rejection as "

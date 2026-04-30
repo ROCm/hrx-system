@@ -10,7 +10,7 @@
 //   GPU completes -> semaphore signal -> tracker advance -> waiter dispatch
 //
 // Key operations to measure:
-//   - advance() with no waiters: baseline CAS + mutex overhead
+//   - advance() with no waiters: baseline hash/probe + CAS overhead
 //   - advance() with unaffected waiters: cost of scanning past irrelevant
 //   waiters
 //   - advance() that dispatches: full satisfaction check + callback invocation
@@ -30,6 +30,7 @@
 
 #include "benchmark/benchmark.h"
 #include "iree/async/frontier_tracker.h"
+#include "iree/base/threading/mutex.h"
 
 namespace {
 
@@ -103,6 +104,7 @@ class TrackerFixture {
 // Storage for a frontier with up to N entries.
 template <int N>
 struct FrontierStorage {
+  // Inline storage for a frontier with up to N entries.
   alignas(16) uint8_t data[sizeof(iree_async_frontier_t) +
                            N * sizeof(iree_async_frontier_entry_t)];
 
@@ -169,7 +171,7 @@ BENCHMARK(BM_Baseline_IndirectCall);
 // Advance benchmarks
 //===----------------------------------------------------------------------===//
 
-// Advance with no waiters: pure CAS + mutex overhead.
+// Advance with no waiters: pure lookup/CAS/head-check overhead.
 // This is the hot path when axis advances happen but no one is waiting.
 static void BM_Advance_NoWaiters(benchmark::State& state) {
   TrackerFixture fixture(kMaxAxes);

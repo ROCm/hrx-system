@@ -17,10 +17,13 @@
 
 // A cached slab in the freelist, ready for immediate acquisition.
 typedef struct iree_hal_slab_cache_entry_t {
+  // Slab returned from the inner provider.
   iree_hal_slab_t slab;
+
   // Timestamp (nanoseconds) when this entry was pushed to the freelist.
   // Used for adaptive retention: entries idle too long are released.
   iree_time_t return_time;
+
   // Intrusive linkage for the atomic slist.
   iree_atomic_slist_intrusive_ptr_t slist_next;
 } iree_hal_slab_cache_entry_t;
@@ -35,19 +38,28 @@ IREE_TYPED_ATOMIC_SLIST_WRAPPER(iree_hal_slab_cache_entry,
 //===----------------------------------------------------------------------===//
 
 typedef struct iree_hal_slab_cache_t {
+  // Base slab-provider interface.
   iree_hal_slab_provider_t base;
-  iree_hal_slab_provider_t* inner_provider;  // retained
+
+  // Retained provider that performs real slab allocation and wrapping.
+  iree_hal_slab_provider_t* inner_provider;
+
+  // Host allocator used for cache bookkeeping.
   iree_allocator_t host_allocator;
 
-  // Immutable after creation.
+  // Uniform size of slabs prepared and retained by the cache.
   iree_device_size_t slab_size;
+
+  // Number of ready slabs the background thread tries to maintain.
   uint32_t target_count;
+
+  // Maximum number of ready slabs retained by release_slab().
   uint32_t max_count;
 
   // Lock-free freelist of pre-acquired, pre-faulted slabs.
   iree_hal_slab_cache_entry_slist_t freelist;
 
-  // Current number of entries in the freelist. Relaxed atomic — approximate
+  // Current number of entries in the freelist. Relaxed atomic; approximate
   // count for the background thread's refill decisions.
   iree_atomic_int32_t ready_count;
 
@@ -67,7 +79,7 @@ typedef struct iree_hal_slab_cache_t {
   // (iree_status_t is a pointer). The background thread stores errors here
   // via exchange and stops refilling until the error is consumed by an
   // acquire_slab caller (also via exchange). This propagates the inner
-  // provider's backtrace to the caller that needs it — the user decides
+  // provider's backtrace to the caller that needs it; the user decides
   // whether to retry (unload a model, shrink pools) or give up.
   iree_atomic_intptr_t pending_error;
 
@@ -75,24 +87,169 @@ typedef struct iree_hal_slab_cache_t {
   // NULL if thread creation failed during _create (partial init state).
   iree_thread_t* thread;
 
-  // Statistics (relaxed atomics).
-  iree_atomic_int64_t total_acquired;
-  iree_atomic_int64_t total_released;
+  // Number of acquire_slab() calls satisfied from the freelist.
   iree_atomic_int64_t cache_hit_count;
+
+  // Number of acquire_slab() calls that had to wait for the refill thread.
   iree_atomic_int64_t cache_miss_count;
+
+  // Cumulative nanoseconds spent prefaulting slabs on the refill thread.
   iree_atomic_int64_t prefault_time_nanoseconds;
+
+  // Exponential moving average of slab reuse interval in nanoseconds.
   iree_atomic_int64_t ema_reuse_interval_nanoseconds;
 } iree_hal_slab_cache_t;
 
 static const iree_hal_slab_provider_vtable_t iree_hal_slab_cache_vtable;
-static void iree_hal_slab_cache_destroy(
-    iree_hal_slab_provider_t* base_provider);
+
+//===----------------------------------------------------------------------===//
+// Background thread
+//===----------------------------------------------------------------------===//
+
+// Acquires and prefaults one slab, pushes it to the freelist.
+// Returns the status from the inner provider on failure.
+static iree_status_t iree_hal_slab_cache_refill_one(
+    iree_hal_slab_cache_t* cache) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_TEXT(z0, "refill_one");
+
+  iree_hal_slab_cache_entry_t* entry = NULL;
+  iree_status_t status = iree_allocator_malloc(cache->host_allocator,
+                                               sizeof(*entry), (void**)&entry);
+  if (iree_status_is_ok(status)) {
+    memset(entry, 0, sizeof(*entry));
+    status = iree_hal_slab_provider_acquire_slab(
+        cache->inner_provider, cache->slab_size, &entry->slab);
+  }
+  if (iree_status_is_ok(status)) {
+    iree_time_t prefault_start = iree_time_now();
+    iree_hal_slab_provider_prefault(cache->inner_provider, &entry->slab);
+    iree_atomic_fetch_add(&cache->prefault_time_nanoseconds,
+                          (int64_t)(iree_time_now() - prefault_start),
+                          iree_memory_order_relaxed);
+
+    entry->return_time = iree_time_now();
+    iree_hal_slab_cache_entry_slist_push(&cache->freelist, entry);
+    iree_atomic_fetch_add(&cache->ready_count, 1, iree_memory_order_release);
+    iree_notification_post(&cache->ready_notification, IREE_ALL_WAITERS);
+  } else {
+    // Entry allocation succeeded but slab acquisition failed; free entry.
+    // If entry allocation itself failed, entry is NULL and this is safe.
+    iree_allocator_free(cache->host_allocator, entry);
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+// Returns true if the thread has a pending error that hasn't been consumed.
+static bool iree_hal_slab_cache_has_pending_error(
+    iree_hal_slab_cache_t* cache) {
+  return iree_atomic_load(&cache->pending_error, iree_memory_order_acquire) !=
+         0;
+}
+
+// Publishes |status| as the pending cache error if no error is already pending.
+// Takes ownership of |status| in all cases. First error wins: if a different
+// caller already published an error, this releases the later status.
+static void iree_hal_slab_cache_publish_error(iree_hal_slab_cache_t* cache,
+                                              iree_status_t status) {
+  IREE_ASSERT(!iree_status_is_ok(status));
+  intptr_t expected = 0;
+  if (!iree_atomic_compare_exchange_strong(
+          &cache->pending_error, &expected, (intptr_t)status,
+          iree_memory_order_release, iree_memory_order_relaxed)) {
+    iree_status_free(status);
+    return;
+  }
+
+  // Wake waiters so they can consume the error instead of blocking.
+  iree_notification_post(&cache->ready_notification, IREE_ALL_WAITERS);
+}
+
+// Predicate for iree_notification_await: returns true when the thread should
+// wake (ready_count below target, no pending error, or shutdown requested).
+static bool iree_hal_slab_cache_should_wake(void* arg) {
+  iree_hal_slab_cache_t* cache = (iree_hal_slab_cache_t*)arg;
+  if (iree_atomic_load(&cache->shutdown, iree_memory_order_acquire)) {
+    return true;
+  }
+  if (iree_hal_slab_cache_has_pending_error(cache)) {
+    return false;  // Don't wake while an error is pending.
+  }
+  return iree_atomic_load(&cache->ready_count, iree_memory_order_relaxed) <
+         (int32_t)cache->target_count;
+}
+
+static int iree_hal_slab_cache_thread_main(void* arg) {
+  iree_hal_slab_cache_t* cache = (iree_hal_slab_cache_t*)arg;
+
+  while (!iree_atomic_load(&cache->shutdown, iree_memory_order_acquire)) {
+    iree_notification_await(&cache->wake_notification,
+                            iree_hal_slab_cache_should_wake, cache,
+                            iree_infinite_timeout());
+    if (iree_atomic_load(&cache->shutdown, iree_memory_order_acquire)) {
+      break;
+    }
+
+    // Refill the freelist up to target_count.
+    while (!iree_atomic_load(&cache->shutdown, iree_memory_order_acquire) &&
+           !iree_hal_slab_cache_has_pending_error(cache) &&
+           iree_atomic_load(&cache->ready_count, iree_memory_order_relaxed) <
+               (int32_t)cache->target_count) {
+      iree_status_t status = iree_hal_slab_cache_refill_one(cache);
+      if (!iree_status_is_ok(status)) {
+        // Store the error for the next acquire_slab caller to consume. The
+        // thread stops refilling until the error is consumed.
+        iree_hal_slab_cache_publish_error(cache, status);
+        break;
+      }
+    }
+  }
+
+  return 0;
+}
 
 //===----------------------------------------------------------------------===//
 // Create / Destroy
 //===----------------------------------------------------------------------===//
 
-static int iree_hal_slab_cache_thread_main(void* arg);
+static void iree_hal_slab_cache_destroy(
+    iree_hal_slab_provider_t* base_provider) {
+  iree_hal_slab_cache_t* cache = (iree_hal_slab_cache_t*)base_provider;
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  // Signal the background thread to exit and wait for it.
+  if (cache->thread) {
+    iree_atomic_store(&cache->shutdown, 1, iree_memory_order_release);
+    iree_notification_post(&cache->wake_notification, IREE_ALL_WAITERS);
+    iree_thread_release(cache->thread);
+  }
+
+  // Flush all cached slabs back to the inner provider.
+  iree_hal_slab_cache_entry_t* entry = NULL;
+  while ((entry = iree_hal_slab_cache_entry_slist_pop(&cache->freelist)) !=
+         NULL) {
+    iree_hal_slab_provider_release_slab(cache->inner_provider, &entry->slab);
+    iree_allocator_free(cache->host_allocator, entry);
+  }
+
+  // Release any pending error that was never picked up by a caller. The cache
+  // is being torn down and there is no caller left to receive it.
+  iree_status_t pending_error = (iree_status_t)iree_atomic_exchange(
+      &cache->pending_error, 0, iree_memory_order_acquire);
+  iree_status_free(pending_error);
+
+  iree_hal_slab_cache_entry_slist_deinitialize(&cache->freelist);
+  iree_notification_deinitialize(&cache->ready_notification);
+  iree_notification_deinitialize(&cache->wake_notification);
+  iree_hal_slab_provider_release(cache->inner_provider);
+
+  iree_allocator_t host_allocator = cache->host_allocator;
+  iree_allocator_free(host_allocator, cache);
+
+  IREE_TRACE_ZONE_END(z0);
+}
 
 iree_status_t iree_hal_slab_cache_create(
     iree_hal_slab_cache_options_t options,
@@ -156,143 +313,6 @@ iree_status_t iree_hal_slab_cache_create(
 
   IREE_TRACE_ZONE_END(z0);
   return status;
-}
-
-static void iree_hal_slab_cache_destroy(
-    iree_hal_slab_provider_t* base_provider) {
-  iree_hal_slab_cache_t* cache = (iree_hal_slab_cache_t*)base_provider;
-  IREE_TRACE_ZONE_BEGIN(z0);
-
-  // Signal the background thread to exit and wait for it.
-  if (cache->thread) {
-    iree_atomic_store(&cache->shutdown, 1, iree_memory_order_release);
-    iree_notification_post(&cache->wake_notification, IREE_ALL_WAITERS);
-    iree_thread_release(cache->thread);
-  }
-
-  // Flush all cached slabs back to the inner provider.
-  iree_hal_slab_cache_entry_t* entry = NULL;
-  while ((entry = iree_hal_slab_cache_entry_slist_pop(&cache->freelist)) !=
-         NULL) {
-    iree_hal_slab_provider_release_slab(cache->inner_provider, &entry->slab);
-    iree_allocator_free(cache->host_allocator, entry);
-  }
-
-  // Consume any pending error that was never picked up by a caller.
-  // This is the one place where discarding an error is correct: the cache
-  // is being torn down and there is no caller left to receive it.
-  iree_status_t pending_error = (iree_status_t)iree_atomic_exchange(
-      &cache->pending_error, 0, iree_memory_order_acquire);
-  iree_status_ignore(pending_error);
-
-  iree_hal_slab_cache_entry_slist_deinitialize(&cache->freelist);
-  iree_notification_deinitialize(&cache->ready_notification);
-  iree_notification_deinitialize(&cache->wake_notification);
-  iree_hal_slab_provider_release(cache->inner_provider);
-
-  iree_allocator_t host_allocator = cache->host_allocator;
-  iree_allocator_free(host_allocator, cache);
-
-  IREE_TRACE_ZONE_END(z0);
-}
-
-//===----------------------------------------------------------------------===//
-// Background thread
-//===----------------------------------------------------------------------===//
-
-// Acquires and prefaults one slab, pushes it to the freelist.
-// Returns the status from the inner provider on failure.
-static iree_status_t iree_hal_slab_cache_refill_one(
-    iree_hal_slab_cache_t* cache) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-  IREE_TRACE_ZONE_APPEND_TEXT(z0, "refill_one");
-
-  iree_hal_slab_cache_entry_t* entry = NULL;
-  iree_status_t status = iree_allocator_malloc(cache->host_allocator,
-                                               sizeof(*entry), (void**)&entry);
-  if (iree_status_is_ok(status)) {
-    memset(entry, 0, sizeof(*entry));
-    status = iree_hal_slab_provider_acquire_slab(
-        cache->inner_provider, cache->slab_size, &entry->slab);
-  }
-  if (iree_status_is_ok(status)) {
-    iree_time_t prefault_start = iree_time_now();
-    iree_hal_slab_provider_prefault(cache->inner_provider, &entry->slab);
-    iree_atomic_fetch_add(&cache->prefault_time_nanoseconds,
-                          (int64_t)(iree_time_now() - prefault_start),
-                          iree_memory_order_relaxed);
-
-    iree_atomic_fetch_add(&cache->total_acquired, 1, iree_memory_order_relaxed);
-    entry->return_time = iree_time_now();
-    iree_hal_slab_cache_entry_slist_push(&cache->freelist, entry);
-    iree_atomic_fetch_add(&cache->ready_count, 1, iree_memory_order_release);
-    iree_notification_post(&cache->ready_notification, IREE_ALL_WAITERS);
-  } else {
-    // Entry allocation succeeded but slab acquisition failed — free entry.
-    // If entry allocation itself failed, entry is NULL and this is safe.
-    iree_allocator_free(cache->host_allocator, entry);
-  }
-
-  IREE_TRACE_ZONE_END(z0);
-  return status;
-}
-
-// Returns true if the thread has a pending error that hasn't been consumed.
-static bool iree_hal_slab_cache_has_pending_error(
-    iree_hal_slab_cache_t* cache) {
-  return iree_atomic_load(&cache->pending_error, iree_memory_order_acquire) !=
-         0;
-}
-
-// Predicate for iree_notification_await: returns true when the thread should
-// wake (ready_count below target, no pending error, or shutdown requested).
-static bool iree_hal_slab_cache_should_wake(void* arg) {
-  iree_hal_slab_cache_t* cache = (iree_hal_slab_cache_t*)arg;
-  if (iree_atomic_load(&cache->shutdown, iree_memory_order_acquire)) {
-    return true;
-  }
-  if (iree_hal_slab_cache_has_pending_error(cache)) {
-    return false;  // Don't wake while an error is pending.
-  }
-  return iree_atomic_load(&cache->ready_count, iree_memory_order_relaxed) <
-         (int32_t)cache->target_count;
-}
-
-static int iree_hal_slab_cache_thread_main(void* arg) {
-  iree_hal_slab_cache_t* cache = (iree_hal_slab_cache_t*)arg;
-
-  while (!iree_atomic_load(&cache->shutdown, iree_memory_order_acquire)) {
-    iree_notification_await(&cache->wake_notification,
-                            iree_hal_slab_cache_should_wake, cache,
-                            iree_infinite_timeout());
-    if (iree_atomic_load(&cache->shutdown, iree_memory_order_acquire)) {
-      break;
-    }
-
-    // Refill the freelist up to target_count.
-    while (!iree_atomic_load(&cache->shutdown, iree_memory_order_acquire) &&
-           !iree_hal_slab_cache_has_pending_error(cache) &&
-           iree_atomic_load(&cache->ready_count, iree_memory_order_relaxed) <
-               (int32_t)cache->target_count) {
-      iree_status_t status = iree_hal_slab_cache_refill_one(cache);
-      if (!iree_status_is_ok(status)) {
-        // Store the error for the next acquire_slab caller to consume.
-        // The thread stops refilling until the error is consumed. CAS
-        // ensures we don't overwrite an error from a racing release_slab.
-        intptr_t expected = 0;
-        if (!iree_atomic_compare_exchange_strong(
-                &cache->pending_error, &expected, (intptr_t)status,
-                iree_memory_order_release, iree_memory_order_relaxed)) {
-          iree_status_ignore(status);
-        }
-        // Wake waiters so they can consume the error rather than block.
-        iree_notification_post(&cache->ready_notification, IREE_ALL_WAITERS);
-        break;
-      }
-    }
-  }
-
-  return 0;
 }
 
 //===----------------------------------------------------------------------===//
@@ -365,6 +385,12 @@ static iree_status_t iree_hal_slab_cache_acquire_slab(
     return status;
   }
 
+  // Deliver refill errors before cached slabs. Pending errors stop the refill
+  // thread; consuming them promptly lets the next caller retry instead of
+  // silently draining the remaining cache and leaving refill parked.
+  iree_status_t status = iree_hal_slab_cache_consume_error(cache);
+  if (!iree_status_is_ok(status)) return status;
+
   // Fast path: pop from the freelist.
   if (iree_hal_slab_cache_pop_entry(cache, out_slab)) {
     iree_atomic_fetch_add(&cache->cache_hit_count, 1,
@@ -377,40 +403,41 @@ static iree_status_t iree_hal_slab_cache_acquire_slab(
     return iree_ok_status();
   }
 
-  // Slow path: freelist empty. Signal the background thread and wait for
-  // either a slab to appear or an error to be posted. The condition predicate
-  // ensures we only wake when there's something actionable.
-  iree_notification_post(&cache->wake_notification, IREE_ALL_WAITERS);
-  iree_notification_await(&cache->ready_notification,
-                          iree_hal_slab_cache_acquire_ready, cache,
-                          iree_infinite_timeout());
-
   iree_atomic_fetch_add(&cache->cache_miss_count, 1, iree_memory_order_relaxed);
+  for (;;) {
+    // Slow path: freelist empty. Signal the background thread and wait for
+    // either a slab to appear or an error to be posted. The condition predicate
+    // ensures we only wake when there's something actionable, but another
+    // acquire_slab() caller may consume that slab/error before this thread
+    // resumes. Keep looping until this caller owns a slab or a real error.
+    iree_notification_post(&cache->wake_notification, IREE_ALL_WAITERS);
+    iree_notification_await(&cache->ready_notification,
+                            iree_hal_slab_cache_acquire_ready, cache,
+                            iree_infinite_timeout());
 
-  // The condition was met: either a slab is available or an error is pending.
-  if (iree_hal_slab_cache_pop_entry(cache, out_slab)) {
-    return iree_ok_status();
+    status = iree_hal_slab_cache_consume_error(cache);
+    if (!iree_status_is_ok(status)) return status;
+
+    if (iree_hal_slab_cache_pop_entry(cache, out_slab)) {
+      return iree_ok_status();
+    }
   }
-
-  // No slab — the background thread must have posted an error.
-  return iree_hal_slab_cache_consume_error(cache);
 }
 
 static void iree_hal_slab_cache_release_slab(
     iree_hal_slab_provider_t* base_provider, const iree_hal_slab_t* slab) {
   iree_hal_slab_cache_t* cache = (iree_hal_slab_cache_t*)base_provider;
 
-  // Oversized slabs were not cached — return directly to inner provider.
+  // Oversized slabs were not cached; return directly to inner provider.
   if (slab->length != cache->slab_size) {
     iree_hal_slab_provider_release_slab(cache->inner_provider, slab);
     return;
   }
 
-  // Over max capacity — release to inner provider.
+  // Over max capacity; release to inner provider.
   if (iree_atomic_load(&cache->ready_count, iree_memory_order_relaxed) >=
       (int32_t)cache->max_count) {
     iree_hal_slab_provider_release_slab(cache->inner_provider, slab);
-    iree_atomic_fetch_add(&cache->total_released, 1, iree_memory_order_relaxed);
     return;
   }
 
@@ -419,16 +446,9 @@ static void iree_hal_slab_cache_release_slab(
   iree_status_t status = iree_allocator_malloc(cache->host_allocator,
                                                sizeof(*entry), (void**)&entry);
   if (!iree_status_is_ok(status)) {
-    // Entry allocation failed — try to store the error for the next acquire.
-    // If there's already a pending error (from the refill thread), discard
-    // ours — the existing error is more informative (it has the inner
-    // provider's backtrace).
-    intptr_t expected = 0;
-    if (!iree_atomic_compare_exchange_strong(
-            &cache->pending_error, &expected, (intptr_t)status,
-            iree_memory_order_release, iree_memory_order_relaxed)) {
-      iree_status_ignore(status);
-    }
+    // Entry allocation failed; store the error for the next acquire. If an
+    // error is already pending, first error wins and this status is released.
+    iree_hal_slab_cache_publish_error(cache, status);
     iree_hal_slab_provider_release_slab(cache->inner_provider, slab);
     return;
   }
@@ -489,7 +509,6 @@ static void iree_hal_slab_cache_trim(
     iree_hal_slab_provider_release_slab(cache->inner_provider, &entry->slab);
     iree_allocator_free(cache->host_allocator, entry);
     iree_atomic_fetch_add(&cache->ready_count, -1, iree_memory_order_relaxed);
-    iree_atomic_fetch_add(&cache->total_released, 1, iree_memory_order_relaxed);
   }
 
   // Trim the inner provider as well.

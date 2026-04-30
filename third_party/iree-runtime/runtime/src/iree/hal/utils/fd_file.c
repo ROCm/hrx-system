@@ -181,6 +181,22 @@ static iree_status_t iree_hal_platform_fd_pwrite(
 
 #endif  // IREE_PLATFORM_WINDOWS
 
+#if defined(IREE_ASYNC_HAVE_FD)
+// Attempts to duplicate |fd| for optional async I/O ownership transfer.
+static bool iree_hal_platform_fd_try_dup_for_async(
+    int fd, iree_async_primitive_t* out_primitive) {
+  *out_primitive = iree_async_primitive_none();
+#if defined(IREE_PLATFORM_WINDOWS)
+  int dup_fd = _dup(fd);
+#else
+  int dup_fd = dup(fd);
+#endif  // IREE_PLATFORM_WINDOWS
+  if (dup_fd == -1) return false;
+  *out_primitive = iree_async_primitive_from_fd(dup_fd);
+  return true;
+}
+#endif  // IREE_ASYNC_HAVE_FD
+
 #endif  // IREE_FILE_IO_ENABLE
 
 //===----------------------------------------------------------------------===//
@@ -270,35 +286,36 @@ IREE_API_EXPORT iree_status_t iree_hal_fd_file_from_handle(
   file->fd = fd;
   file->length = length;
 
-  // If a proactor is provided, attempt to duplicate the fd and import it for
-  // async I/O. The duplicate is owned by the proactor-managed async file and
-  // closed when the async file is released.
-  //
-  // If async import fails (unsupported fd type, platform limitations, etc.) the
-  // file degrades to synchronous-only mode: all reads/writes go through
-  // pread/pwrite instead of the proactor. This is always correct — async I/O is
-  // a performance optimization, not a correctness requirement.
+  iree_status_t status = iree_ok_status();
+
 #if defined(IREE_ASYNC_HAVE_FD)
   if (proactor) {
-    iree_async_primitive_t async_primitive = iree_async_primitive_from_fd(fd);
+    // If a proactor is provided, attempt to duplicate the fd and import it for
+    // async I/O. The duplicate is owned by the proactor-managed async file and
+    // closed when the async file is released.
+    //
+    // Duplication is an optional fast-path probe: if the OS cannot produce a
+    // duplicate fd then the file remains synchronous-only. Once duplication
+    // succeeds, import failures are real construction failures and propagate.
     iree_async_primitive_t dup_primitive;
-    iree_status_t import_status =
-        iree_async_primitive_dup(async_primitive, &dup_primitive);
-    if (iree_status_is_ok(import_status)) {
-      import_status =
+    if (iree_hal_platform_fd_try_dup_for_async(fd, &dup_primitive)) {
+      status =
           iree_async_file_import(proactor, dup_primitive, &file->async_file);
-      if (!iree_status_is_ok(import_status)) {
+      if (!iree_status_is_ok(status)) {
         iree_async_primitive_close(&dup_primitive);
       }
     }
-    // Async import failure is non-fatal: degrade to sync-only mode.
-    iree_status_ignore(import_status);
   }
 #endif  // IREE_ASYNC_HAVE_FD
 
-  *out_file = (iree_hal_file_t*)file;
+  if (iree_status_is_ok(status)) {
+    *out_file = (iree_hal_file_t*)file;
+  } else {
+    iree_io_file_handle_release(file->handle);
+    iree_allocator_free(host_allocator, file);
+  }
   IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
+  return status;
 }
 
 static void iree_hal_fd_file_destroy(iree_hal_file_t* IREE_RESTRICT base_file) {

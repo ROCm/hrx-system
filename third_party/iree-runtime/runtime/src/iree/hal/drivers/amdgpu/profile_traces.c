@@ -285,7 +285,7 @@ iree_hal_amdgpu_host_queue_profile_trace_slot(
   const uint32_t event_index =
       iree_hal_amdgpu_host_queue_profile_dispatch_event_index(queue,
                                                               event_position);
-  return &queue->profiling.trace_slots[event_index];
+  return &queue->profiling.traces.slots[event_index];
 }
 
 iree_status_t iree_hal_amdgpu_host_queue_enable_profile_traces(
@@ -312,7 +312,7 @@ iree_status_t iree_hal_amdgpu_host_queue_enable_profile_traces(
         IREE_STATUS_FAILED_PRECONDITION,
         "AMDGPU executable trace profiling requires AQL PM4-IB packet support");
   }
-  if (IREE_UNLIKELY(queue->profiling.trace_slots)) {
+  if (IREE_UNLIKELY(queue->profiling.traces.slots)) {
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "AMDGPU executable trace profiling is already "
@@ -331,8 +331,8 @@ iree_status_t iree_hal_amdgpu_host_queue_enable_profile_traces(
                                 (void**)&slots));
   memset(slots, 0, slot_storage_size);
 
-  queue->profiling.trace_session = session;
-  queue->profiling.trace_slots = slots;
+  queue->profiling.traces.session = session;
+  queue->profiling.traces.slots = slots;
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
@@ -340,20 +340,20 @@ iree_status_t iree_hal_amdgpu_host_queue_enable_profile_traces(
 
 void iree_hal_amdgpu_host_queue_disable_profile_traces(
     iree_hal_amdgpu_host_queue_t* queue) {
-  if (!queue->profiling.trace_slots) return;
+  if (!queue->profiling.traces.slots) return;
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_hal_amdgpu_profile_trace_session_t* session =
-      queue->profiling.trace_session;
+      queue->profiling.traces.session;
   const uint32_t dispatch_event_capacity =
       iree_hal_amdgpu_host_queue_profile_dispatch_event_capacity(queue);
   for (uint32_t i = 0; i < dispatch_event_capacity; ++i) {
     iree_hal_amdgpu_profile_trace_slot_reset(&session->libaqlprofile,
-                                             &queue->profiling.trace_slots[i]);
+                                             &queue->profiling.traces.slots[i]);
   }
-  iree_allocator_free(queue->host_allocator, queue->profiling.trace_slots);
-  queue->profiling.trace_session = NULL;
-  queue->profiling.trace_slots = NULL;
+  iree_allocator_free(queue->host_allocator, queue->profiling.traces.slots);
+  queue->profiling.traces.session = NULL;
+  queue->profiling.traces.slots = NULL;
 
   IREE_TRACE_ZONE_END(z0);
 }
@@ -361,7 +361,7 @@ void iree_hal_amdgpu_host_queue_disable_profile_traces(
 uint32_t iree_hal_amdgpu_host_queue_profile_trace_packet_count(
     const iree_hal_amdgpu_host_queue_t* queue,
     iree_hal_amdgpu_profile_dispatch_event_reservation_t reservation) {
-  if (!reservation.event_count || !queue->profiling.trace_session) return 0;
+  if (!reservation.event_count || !queue->profiling.traces.session) return 0;
   return reservation.event_count *
          iree_hal_amdgpu_profile_trace_packets_per_event;
 }
@@ -369,7 +369,7 @@ uint32_t iree_hal_amdgpu_host_queue_profile_trace_packet_count(
 uint32_t iree_hal_amdgpu_host_queue_profile_trace_start_packet_count(
     const iree_hal_amdgpu_host_queue_t* queue,
     iree_hal_amdgpu_profile_dispatch_event_reservation_t reservation) {
-  if (!reservation.event_count || !queue->profiling.trace_session) return 0;
+  if (!reservation.event_count || !queue->profiling.traces.session) return 0;
   return reservation.event_count *
          iree_hal_amdgpu_profile_trace_start_packets_per_event;
 }
@@ -378,7 +378,7 @@ iree_status_t iree_hal_amdgpu_host_queue_prepare_profile_traces(
     iree_hal_amdgpu_host_queue_t* queue,
     iree_hal_amdgpu_profile_dispatch_event_reservation_t reservation) {
   iree_hal_amdgpu_profile_trace_session_t* session =
-      queue->profiling.trace_session;
+      queue->profiling.traces.session;
   if (!reservation.event_count || !session) return iree_ok_status();
 
   iree_hal_amdgpu_logical_device_t* logical_device =
@@ -414,7 +414,7 @@ iree_status_t iree_hal_amdgpu_host_queue_prepare_profile_trace_code_object(
     iree_hal_amdgpu_host_queue_t* queue, uint64_t event_position,
     uint64_t executable_id) {
   iree_hal_amdgpu_profile_trace_session_t* session =
-      queue->profiling.trace_session;
+      queue->profiling.traces.session;
   if (!session) return iree_ok_status();
 
   iree_hal_amdgpu_profile_trace_slot_t* slot =
@@ -648,13 +648,13 @@ iree_status_t iree_hal_amdgpu_host_queue_write_profile_traces(
     uint64_t session_id, uint64_t event_read_position,
     iree_host_size_t event_count,
     const iree_hal_profile_dispatch_event_t* events) {
-  if (!sink || !event_count || !queue->profiling.trace_session) {
+  if (!sink || !event_count || !queue->profiling.traces.session) {
     return iree_ok_status();
   }
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_hal_amdgpu_profile_trace_session_t* session =
-      queue->profiling.trace_session;
+      queue->profiling.traces.session;
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t event_ordinal = 0;
        event_ordinal < event_count && iree_status_is_ok(status);
@@ -672,9 +672,9 @@ iree_status_t iree_hal_amdgpu_host_queue_write_profile_traces(
 void iree_hal_amdgpu_host_queue_release_profile_trace_slots(
     iree_hal_amdgpu_host_queue_t* queue, uint64_t event_read_position,
     iree_host_size_t event_count) {
-  if (!event_count || !queue->profiling.trace_session) return;
+  if (!event_count || !queue->profiling.traces.session) return;
   iree_hal_amdgpu_profile_trace_session_t* session =
-      queue->profiling.trace_session;
+      queue->profiling.traces.session;
   for (iree_host_size_t event_ordinal = 0; event_ordinal < event_count;
        ++event_ordinal) {
     const uint64_t event_position = event_read_position + event_ordinal;

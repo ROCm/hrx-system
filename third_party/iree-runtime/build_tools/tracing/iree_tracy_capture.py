@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import os
+from pathlib import Path
 import re
 import shlex
 import shutil
@@ -21,7 +22,6 @@ import subprocess
 import sys
 import tempfile
 import time
-from pathlib import Path
 
 
 def eprint(message: str) -> None:
@@ -37,6 +37,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--address", default="127.0.0.1")
     parser.add_argument("--capture-tool", type=Path)
+    parser.add_argument("--capture-exit-timeout", type=float, default=10.0)
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     if args.command and args.command[0] == "--":
@@ -44,10 +45,6 @@ def parse_arguments() -> argparse.Namespace:
     if not args.command:
         parser.error("expected -- <command> [args...]")
     return args
-
-
-def repository_root() -> Path:
-    return Path(__file__).resolve().parents[2]
 
 
 def sanitize_name(value: str) -> str:
@@ -69,27 +66,21 @@ def executable(path: Path) -> bool:
 
 
 def find_capture_tool(explicit_tool: Path | None) -> Path:
-    root = repository_root()
     candidates: list[Path] = []
     if explicit_tool is not None:
         candidates.append(explicit_tool)
     if os.environ.get("IREE_TRACY_CAPTURE"):
         candidates.append(Path(os.environ["IREE_TRACY_CAPTURE"]))
-    candidates.extend(
-        [
-            root / "third_party/tracy/capture/build/tracy-capture",
-            root / "build_tools/third_party/tracy/build/iree-tracy-capture",
-        ]
-    )
-    path_from_path = shutil.which("tracy-capture")
-    if path_from_path:
-        candidates.append(Path(path_from_path))
+    for tool_name in ("iree-tracy-capture", "tracy-capture"):
+        path_from_path = shutil.which(tool_name)
+        if path_from_path:
+            candidates.append(Path(path_from_path))
     for candidate in candidates:
         if executable(candidate):
             return candidate
     raise RuntimeError(
-        "Could not find tracy-capture; set IREE_TRACY_CAPTURE or build the "
-        "checkout's third_party/tracy/capture tool"
+        "Could not find tracy-capture; set IREE_TRACY_CAPTURE, pass "
+        "--capture-tool, or put tracy-capture/iree-tracy-capture on PATH"
     )
 
 
@@ -185,7 +176,13 @@ def main() -> int:
         )
 
         eprint("waiting for tracy-capture to finish")
-        capture_return_code = int(capture_process.wait())
+        try:
+            capture_return_code = int(
+                capture_process.wait(timeout=args.capture_exit_timeout)
+            )
+        except subprocess.TimeoutExpired:
+            terminate(capture_process)
+            raise RuntimeError("tracy-capture did not finish after the workload exited")
         if capture_return_code != 0:
             raise RuntimeError(
                 f"tracy-capture failed with exit code {capture_return_code}"

@@ -28,10 +28,6 @@ iree_cc_library(
   PUBLIC
 )
 
-# ROCm's packaged aqlprofile SDK header currently has C++-only declarations:
-# https://github.com/ROCm/rocm-systems/issues/5576
-set_source_files_properties("libaqlprofile.c" PROPERTIES LANGUAGE CXX)
-
 iree_cc_library(
   NAME
     libaqlprofile
@@ -195,6 +191,67 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    target_id
+  HDRS
+    "target_id.h"
+  TEXTUAL_HDRS
+    "target_id_map.inl"
+  SRCS
+    "target_id.c"
+  DEPS
+    iree::base
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
+    code_object_target
+  HDRS
+    "code_object_target.h"
+  SRCS
+    "code_object_target.c"
+  DEPS
+    ::target_id
+    iree::base
+    iree::base::core_headers
+    iree::hal::utils::elf_format
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    code_object_target_test
+  SRCS
+    "code_object_target_test.cc"
+  DEPS
+    ::code_object_target
+    ::target_id
+    iree::base
+    iree::base::core_headers
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "driver=amdgpu"
+    "nodocker"
+  GROUP
+    "iree-hal-drivers-amdgpu-tests"
+)
+
+iree_cc_library(
+  NAME
+    device_clock
+  HDRS
+    "device_clock.h"
+  SRCS
+    "device_clock.c"
+  DEPS
+    ::kfd
+    iree::base
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     kfd
   HDRS
     "kfd.h"
@@ -228,10 +285,12 @@ iree_cc_library(
     "error_callback.h"
     "kernarg_ring.h"
     "notification_ring.h"
+    "queue_upload_ring.h"
     "signal_pool.h"
   SRCS
     "kernarg_ring.c"
     "notification_ring.c"
+    "queue_upload_ring.c"
     "signal_pool.c"
   DEPS
     ::libhsa
@@ -283,13 +342,26 @@ iree_cc_library(
   SRCS
     "device_library.c"
   DEPS
+    ::device_library_target
     ::libhsa
     ::topology
     iree::base
     iree::base::internal
-    iree::hal::drivers::amdgpu::device::binaries::target_map
     iree::hal::drivers::amdgpu::device::binaries::toc
     iree::hal::drivers::amdgpu::device::headers
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
+    device_library_target
+  HDRS
+    "device_library_target.h"
+  SRCS
+    "device_library_target.c"
+  DEPS
+    ::target_id
+    iree::base
   PUBLIC
 )
 
@@ -300,11 +372,13 @@ iree_cc_library(
     ::affinity
     ::block_pool
     ::device_library
+    ::device_library_target
     ::info
     ::kfd
     ::packet
     ::pm4_program
     ::queue_primitives
+    ::target_id
     ::vmem
   PUBLIC
 )
@@ -387,6 +461,37 @@ iree_cc_test(
 
 iree_cc_test(
   NAME
+    device_library_target_test
+  SRCS
+    "device_library_target_test.cc"
+  DEPS
+    ::device_library_target
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+  GROUP
+    "iree-hal-drivers-amdgpu-tests"
+)
+
+iree_cc_test(
+  NAME
+    target_id_test
+  SRCS
+    "target_id_test.cc"
+  DEPS
+    ::target_id
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "driver=amdgpu"
+    "nodocker"
+  GROUP
+    "iree-hal-drivers-amdgpu-tests"
+)
+
+iree_cc_test(
+  NAME
     epoch_signal_table_test
   SRCS
     "epoch_signal_table_test.cc"
@@ -401,6 +506,52 @@ iree_cc_test(
     "nodocker"
   GROUP
     "iree-hal-drivers-amdgpu-tests"
+)
+
+iree_cc_test(
+  NAME
+    kernarg_ring_test
+  SRCS
+    "kernarg_ring_test.cc"
+  DEPS
+    ::queue_primitives
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "driver=amdgpu"
+    "nodocker"
+  GROUP
+    "iree-hal-drivers-amdgpu-tests"
+)
+
+iree_cc_test(
+  NAME
+    queue_upload_ring_test
+  SRCS
+    "queue_upload_ring_test.cc"
+  DEPS
+    ::queue_primitives
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "driver=amdgpu"
+    "nodocker"
+  GROUP
+    "iree-hal-drivers-amdgpu-tests"
+)
+
+iree_cc_test(
+  NAME
+    device_clock_test
+  SRCS
+    "device_clock_test.cc"
+  DEPS
+    ::device_clock
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 iree_cc_test(
@@ -515,7 +666,7 @@ iree_hal_cts_testdata(
   BACKEND_NAME
     "amdgpu"
   FORMAT_STRING
-    [=["amdgcn-amd-amdhsa--${IREE_ROCM_TEST_TARGET_CHIP}"]=]
+    "\"amdgcn-amd-amdhsa--${IREE_ROCM_TEST_TARGET_CHIP}\""
   TESTDATA_DIR
     "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/drivers/amdgpu/util"
   FLAGS
@@ -544,6 +695,7 @@ iree_cc_binary_benchmark(
     iree::hal::drivers::amdgpu::headers
     iree::hal::drivers::amdgpu::queue_affinity
     iree::hal::drivers::amdgpu::registration
+    iree::hal::memory::tlsf_pool
     iree::io::file_handle
   TESTONLY
   LABELS

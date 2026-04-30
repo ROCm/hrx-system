@@ -65,7 +65,7 @@ void iree_atomic_slist_discard(iree_atomic_slist_t* list) {
 iree_atomic_slist_entry_t* iree_atomic_slist_pop(iree_atomic_slist_t* list) {
   // Fast path: check if the list is empty without taking the mutex.
   // The relaxed load is safe because we re-check under the mutex if non-NULL.
-  // False negatives (read NULL when an entry was just pushed) are benign —
+  // False negatives (read NULL when an entry was just pushed) are benign:
   // the entry will be seen on the next pop call.
   if (!iree_atomic_slist_load_head(list, iree_memory_order_relaxed)) {
     return NULL;

@@ -35,7 +35,7 @@ extern "C" {
 //   Parallel processes that benefit from multiple workers draining
 //   concurrently. Placed into fixed slots (CAS on activation); workers scan
 //   round-robin and cooperatively drain bounded work from each occupied slot.
-//   The wake budget controls wake fan-out, not admission to drain().
+//   The wake budget controls wake fan-out and active-drainer admission.
 //
 // Workers alternate between draining immediate processes and scanning compute
 // slots. When no work is available, workers sleep via a notification-based
@@ -125,12 +125,9 @@ void iree_task_executor_trim(iree_task_executor_t* executor);
 iree_host_size_t iree_task_executor_worker_count(
     iree_task_executor_t* executor);
 
-// Returns a pointer to the executor's desired_wake counter. Processes can
-// atomically add wake credits to this counter at region transitions (when
-// ramping up worker count). Workers claim credits via relay_wake,
-// propagating the wake tree without requiring direct notification posts.
-iree_atomic_int32_t* iree_task_executor_desired_wake_ptr(
-    iree_task_executor_t* executor);
+// Wakes up to |count| workers for newly available parallel work.
+void iree_task_executor_wake_workers(iree_task_executor_t* executor,
+                                     int32_t count);
 
 // Schedules a process for draining by a worker. If the process is idle, it is
 // pushed to the appropriate run list and a worker is woken. If the process is

@@ -7,7 +7,6 @@
 #include "iree/hal/drivers/amdgpu/system.h"
 
 #include "iree/hal/drivers/amdgpu/executable.h"
-#include "iree/hal/drivers/amdgpu/util/kfd.h"
 #include "iree/hal/drivers/amdgpu/util/topology.h"
 
 //===----------------------------------------------------------------------===//
@@ -240,9 +239,10 @@ static iree_status_t iree_hal_amdgpu_system_initialize(
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_amdgpu_system_info_query(libhsa, &out_system->info));
 
-  // Open /dev/kfd so that we can issue ioctls directly.
+  // Initialize the platform source used for profile clock correlation.
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_amdgpu_kfd_open(&out_system->kfd_fd));
+      z0, iree_hal_amdgpu_device_clock_source_initialize(
+              &out_system->device_clock_source));
 
   // Copy the libhsa symbol table and retain HSA for the lifetime of the system.
   // The caller may destroy the provided libhsa after this call returns.
@@ -295,8 +295,9 @@ static void iree_hal_amdgpu_system_deinitialize(
   // Unload the device library - no references to it should remain.
   iree_hal_amdgpu_device_library_deinitialize(&system->device_library);
 
-  // Close our handle to /dev/kfd prior to (potentially) unloading HSA.
-  iree_hal_amdgpu_kfd_close(system->kfd_fd);
+  // Release platform clock-sampling state before unloading HSA.
+  iree_hal_amdgpu_device_clock_source_deinitialize(
+      &system->device_clock_source);
 
   // This may unload HSA if we were the last retainer in the process.
   iree_hal_amdgpu_libhsa_deinitialize(&system->libhsa);

@@ -56,9 +56,10 @@ static iree_task_executor_t* CreateExecutor(iree_host_size_t worker_count) {
 // Drain function for wake_budget == 1 benchmarks: completes on first call.
 // Does not signal the main thread — release_fn handles that (the worker
 // still accesses process fields after drain() returns).
-static iree_status_t instant_drain(iree_task_process_t* process,
-                                   uint32_t worker_index,
-                                   iree_task_process_drain_result_t* result) {
+static iree_status_t instant_drain(
+    iree_task_process_t* process,
+    const iree_task_worker_context_t* worker_context,
+    iree_task_process_drain_result_t* result) {
   result->did_work = true;
   result->completed = true;
   return iree_ok_status();
@@ -85,7 +86,8 @@ struct ComputeBenchmarkContext {
 // Drain function for wake_budget > 1 benchmarks: each worker claims tiles
 // atomically.
 static iree_status_t compute_bench_drain(
-    iree_task_process_t* process, uint32_t worker_index,
+    iree_task_process_t* process,
+    const iree_task_worker_context_t* worker_context,
     iree_task_process_drain_result_t* result) {
   auto* context =
       reinterpret_cast<ComputeBenchmarkContext*>(process->user_data);
@@ -114,7 +116,7 @@ static void compute_bench_completion(iree_task_process_t* process,
   auto* context =
       reinterpret_cast<ComputeBenchmarkContext*>(process->user_data);
   context->completed.store(true, std::memory_order_release);
-  iree_status_ignore(status);
+  iree_status_free(status);
 }
 
 // Release callback: fires when all active drainers have exited the slot.

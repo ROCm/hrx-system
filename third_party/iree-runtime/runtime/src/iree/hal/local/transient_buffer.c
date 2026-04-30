@@ -6,6 +6,8 @@
 
 #include "iree/hal/local/transient_buffer.h"
 
+#include "iree/base/threading/mutex.h"
+
 static iree_atomic_int64_t iree_hal_local_transient_buffer_next_profile_id =
     IREE_ATOMIC_VAR_INIT(1);
 
@@ -28,16 +30,15 @@ struct iree_hal_local_transient_buffer_t {
   // Stable nonzero id used to join profile rows for this wrapper lifetime.
   uint64_t profile_id;
 
+  // Guards all staged backing, committed backing, and reservation state.
+  iree_slim_mutex_t mutex;
+
   // Materialized backing buffer staged for a future commit. Retained by the
   // wrapper while non-NULL.
   iree_hal_buffer_t* staged_backing;
 
-  // The committed backing buffer. NULL before commit, non-NULL after.
-  //
-  // Semaphore waits provide the real queue-ordering edge between commit and
-  // use, but acquire/release atomics make the transition visible to TSAN and
-  // keep concurrent host access to the wrapper's state data-race-free.
-  iree_atomic_intptr_t committed;
+  // Materialized backing buffer visible to accessors after commit.
+  iree_hal_buffer_t* committed_backing;
 
   // Borrowed pool that owns |reservation| when armed.
   iree_hal_pool_t* reservation_pool;
@@ -46,7 +47,7 @@ struct iree_hal_local_transient_buffer_t {
   iree_hal_pool_reservation_t reservation;
 
   // Nonzero while the wrapper still owns |reservation|.
-  iree_atomic_int32_t reservation_armed;
+  int32_t reservation_armed;
 };
 
 static const iree_hal_buffer_vtable_t iree_hal_local_transient_buffer_vtable;
@@ -56,10 +57,15 @@ static iree_hal_local_transient_buffer_t* iree_hal_local_transient_buffer_cast(
   return (iree_hal_local_transient_buffer_t*)buffer;
 }
 
-static iree_hal_buffer_t* iree_hal_local_transient_buffer_load_committed(
+static iree_hal_buffer_t* iree_hal_local_transient_buffer_retain_committed(
     iree_hal_local_transient_buffer_t* buffer) {
-  return (iree_hal_buffer_t*)iree_atomic_load(&buffer->committed,
-                                              iree_memory_order_acquire);
+  iree_slim_mutex_lock(&buffer->mutex);
+  iree_hal_buffer_t* committed = buffer->committed_backing;
+  if (committed) {
+    iree_hal_buffer_retain(committed);
+  }
+  iree_slim_mutex_unlock(&buffer->mutex);
+  return committed;
 }
 
 iree_status_t iree_hal_local_transient_buffer_create(
@@ -89,11 +95,12 @@ iree_status_t iree_hal_local_transient_buffer_create(
   buffer->profile_id = (uint64_t)iree_atomic_fetch_add(
       &iree_hal_local_transient_buffer_next_profile_id, 1,
       iree_memory_order_relaxed);
+  iree_slim_mutex_initialize(&buffer->mutex);
   buffer->staged_backing = NULL;
-  iree_atomic_store(&buffer->committed, 0, iree_memory_order_relaxed);
+  buffer->committed_backing = NULL;
   buffer->reservation_pool = NULL;
   memset(&buffer->reservation, 0, sizeof(buffer->reservation));
-  iree_atomic_store(&buffer->reservation_armed, 0, iree_memory_order_relaxed);
+  buffer->reservation_armed = 0;
 
   *out_buffer = &buffer->base;
   IREE_TRACE_ZONE_END(z0);
@@ -109,7 +116,10 @@ bool iree_hal_local_transient_buffer_is_committed(
     iree_hal_buffer_t* base_buffer) {
   iree_hal_local_transient_buffer_t* buffer =
       iree_hal_local_transient_buffer_cast(base_buffer);
-  return iree_hal_local_transient_buffer_load_committed(buffer) != NULL;
+  iree_slim_mutex_lock(&buffer->mutex);
+  const bool is_committed = buffer->committed_backing != NULL;
+  iree_slim_mutex_unlock(&buffer->mutex);
+  return is_committed;
 }
 
 uint64_t iree_hal_local_transient_buffer_profile_id(
@@ -126,12 +136,13 @@ void iree_hal_local_transient_buffer_attach_reservation(
       iree_hal_local_transient_buffer_cast(base_buffer);
   IREE_ASSERT_ARGUMENT(pool);
   IREE_ASSERT_ARGUMENT(reservation);
+  iree_slim_mutex_lock(&buffer->mutex);
   IREE_ASSERT_TRUE(buffer->reservation_pool == NULL);
-  IREE_ASSERT_TRUE(iree_atomic_load(&buffer->reservation_armed,
-                                    iree_memory_order_acquire) == 0);
+  IREE_ASSERT_TRUE(buffer->reservation_armed == 0);
   buffer->reservation_pool = pool;
   buffer->reservation = *reservation;
-  iree_atomic_store(&buffer->reservation_armed, 1, iree_memory_order_release);
+  buffer->reservation_armed = 1;
+  iree_slim_mutex_unlock(&buffer->mutex);
 }
 
 void iree_hal_local_transient_buffer_stage_backing(
@@ -139,30 +150,34 @@ void iree_hal_local_transient_buffer_stage_backing(
   iree_hal_local_transient_buffer_t* buffer =
       iree_hal_local_transient_buffer_cast(base_buffer);
   IREE_ASSERT_ARGUMENT(backing);
+  iree_slim_mutex_lock(&buffer->mutex);
   IREE_ASSERT_TRUE(buffer->staged_backing == NULL);
-  IREE_ASSERT_TRUE(iree_hal_local_transient_buffer_load_committed(buffer) ==
-                   NULL);
+  IREE_ASSERT_TRUE(buffer->committed_backing == NULL);
   iree_hal_buffer_retain(backing);
   buffer->staged_backing = backing;
+  iree_slim_mutex_unlock(&buffer->mutex);
 }
 
 void iree_hal_local_transient_buffer_commit(iree_hal_buffer_t* base_buffer) {
   iree_hal_local_transient_buffer_t* buffer =
       iree_hal_local_transient_buffer_cast(base_buffer);
+  iree_slim_mutex_lock(&buffer->mutex);
   IREE_ASSERT_TRUE(buffer->staged_backing != NULL);
-  IREE_ASSERT_TRUE(iree_hal_local_transient_buffer_load_committed(buffer) ==
-                   NULL);
-  iree_atomic_store(&buffer->committed, (intptr_t)buffer->staged_backing,
-                    iree_memory_order_release);
+  IREE_ASSERT_TRUE(buffer->committed_backing == NULL);
+  buffer->committed_backing = buffer->staged_backing;
+  iree_slim_mutex_unlock(&buffer->mutex);
 }
 
 void iree_hal_local_transient_buffer_decommit(iree_hal_buffer_t* base_buffer) {
   iree_hal_local_transient_buffer_t* buffer =
       iree_hal_local_transient_buffer_cast(base_buffer);
-  iree_atomic_exchange(&buffer->committed, 0, iree_memory_order_acq_rel);
-  if (buffer->staged_backing) {
-    iree_hal_buffer_release(buffer->staged_backing);
-    buffer->staged_backing = NULL;
+  iree_slim_mutex_lock(&buffer->mutex);
+  iree_hal_buffer_t* staged_backing = buffer->staged_backing;
+  buffer->staged_backing = NULL;
+  buffer->committed_backing = NULL;
+  iree_slim_mutex_unlock(&buffer->mutex);
+  if (staged_backing) {
+    iree_hal_buffer_release(staged_backing);
   }
 }
 
@@ -171,14 +186,15 @@ bool iree_hal_local_transient_buffer_query_reservation(
     iree_hal_pool_reservation_t* out_reservation) {
   iree_hal_local_transient_buffer_t* buffer =
       iree_hal_local_transient_buffer_cast(base_buffer);
-  if (!buffer->reservation_pool) return false;
-  if (iree_atomic_load(&buffer->reservation_armed, iree_memory_order_acquire) ==
-      0) {
-    return false;
+  iree_slim_mutex_lock(&buffer->mutex);
+  const bool has_reservation =
+      buffer->reservation_pool != NULL && buffer->reservation_armed;
+  if (has_reservation) {
+    if (out_pool) *out_pool = buffer->reservation_pool;
+    if (out_reservation) *out_reservation = buffer->reservation;
   }
-  if (out_pool) *out_pool = buffer->reservation_pool;
-  if (out_reservation) *out_reservation = buffer->reservation;
-  return true;
+  iree_slim_mutex_unlock(&buffer->mutex);
+  return has_reservation;
 }
 
 void iree_hal_local_transient_buffer_release_reservation(
@@ -186,12 +202,18 @@ void iree_hal_local_transient_buffer_release_reservation(
     const iree_async_frontier_t* death_frontier) {
   iree_hal_local_transient_buffer_t* buffer =
       iree_hal_local_transient_buffer_cast(base_buffer);
-  if (!buffer->reservation_pool) return;
-  const int32_t was_armed = iree_atomic_exchange(&buffer->reservation_armed, 0,
-                                                 iree_memory_order_acq_rel);
+  iree_hal_pool_t* pool = NULL;
+  iree_hal_pool_reservation_t reservation;
+  iree_slim_mutex_lock(&buffer->mutex);
+  const int32_t was_armed = buffer->reservation_armed;
   if (was_armed) {
-    iree_hal_pool_release_reservation(buffer->reservation_pool,
-                                      &buffer->reservation, death_frontier);
+    pool = buffer->reservation_pool;
+    reservation = buffer->reservation;
+    buffer->reservation_armed = 0;
+  }
+  iree_slim_mutex_unlock(&buffer->mutex);
+  if (was_armed) {
+    iree_hal_pool_release_reservation(pool, &reservation, death_frontier);
   }
 }
 
@@ -206,6 +228,7 @@ static void iree_hal_local_transient_buffer_destroy(
   iree_hal_local_transient_buffer_release_reservation(base_buffer,
                                                       /*death_frontier=*/NULL);
 
+  iree_slim_mutex_deinitialize(&buffer->mutex);
   iree_allocator_free(host_allocator, buffer);
   IREE_TRACE_ZONE_END(z0);
 }
@@ -218,16 +241,32 @@ static iree_status_t iree_hal_local_transient_buffer_map_range(
   iree_hal_local_transient_buffer_t* buffer =
       iree_hal_local_transient_buffer_cast(base_buffer);
   iree_hal_buffer_t* committed =
-      iree_hal_local_transient_buffer_load_committed(buffer);
+      iree_hal_local_transient_buffer_retain_committed(buffer);
   if (IREE_UNLIKELY(!committed)) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "transient buffer has not been committed; ensure the alloca signal "
         "semaphores are satisfied before accessing it");
   }
-  return iree_hal_local_transient_buffer_committed_vtable(committed)->map_range(
-      committed, mapping_mode, memory_access, local_byte_offset,
-      local_byte_length, mapping);
+  iree_status_t status =
+      iree_hal_local_transient_buffer_committed_vtable(committed)->map_range(
+          committed, mapping_mode, memory_access, local_byte_offset,
+          local_byte_length, mapping);
+  if (iree_status_is_ok(status)) {
+    if (mapping->impl.is_persistent) {
+      iree_hal_buffer_release(committed);
+    } else {
+      iree_hal_buffer_t* mapped_buffer = mapping->buffer;
+      // Scoped maps own their mapped storage until unmap. Transfer that mapping
+      // ownership from the transient wrapper to the committed backing buffer so
+      // a queue-ordered decommit cannot invalidate the unmap path.
+      mapping->buffer = committed;
+      iree_hal_buffer_release(mapped_buffer);
+    }
+  } else {
+    iree_hal_buffer_release(committed);
+  }
+  return status;
 }
 
 static iree_status_t iree_hal_local_transient_buffer_unmap_range(
@@ -236,13 +275,16 @@ static iree_status_t iree_hal_local_transient_buffer_unmap_range(
   iree_hal_local_transient_buffer_t* buffer =
       iree_hal_local_transient_buffer_cast(base_buffer);
   iree_hal_buffer_t* committed =
-      iree_hal_local_transient_buffer_load_committed(buffer);
+      iree_hal_local_transient_buffer_retain_committed(buffer);
   if (IREE_UNLIKELY(!committed)) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "transient buffer has been decommitted");
   }
-  return iree_hal_local_transient_buffer_committed_vtable(committed)
-      ->unmap_range(committed, local_byte_offset, local_byte_length, mapping);
+  iree_status_t status =
+      iree_hal_local_transient_buffer_committed_vtable(committed)->unmap_range(
+          committed, local_byte_offset, local_byte_length, mapping);
+  iree_hal_buffer_release(committed);
+  return status;
 }
 
 static iree_status_t iree_hal_local_transient_buffer_invalidate_range(
@@ -251,13 +293,16 @@ static iree_status_t iree_hal_local_transient_buffer_invalidate_range(
   iree_hal_local_transient_buffer_t* buffer =
       iree_hal_local_transient_buffer_cast(base_buffer);
   iree_hal_buffer_t* committed =
-      iree_hal_local_transient_buffer_load_committed(buffer);
+      iree_hal_local_transient_buffer_retain_committed(buffer);
   if (IREE_UNLIKELY(!committed)) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "transient buffer has been decommitted");
   }
-  return iree_hal_local_transient_buffer_committed_vtable(committed)
-      ->invalidate_range(committed, local_byte_offset, local_byte_length);
+  iree_status_t status =
+      iree_hal_local_transient_buffer_committed_vtable(committed)
+          ->invalidate_range(committed, local_byte_offset, local_byte_length);
+  iree_hal_buffer_release(committed);
+  return status;
 }
 
 static iree_status_t iree_hal_local_transient_buffer_flush_range(
@@ -266,13 +311,16 @@ static iree_status_t iree_hal_local_transient_buffer_flush_range(
   iree_hal_local_transient_buffer_t* buffer =
       iree_hal_local_transient_buffer_cast(base_buffer);
   iree_hal_buffer_t* committed =
-      iree_hal_local_transient_buffer_load_committed(buffer);
+      iree_hal_local_transient_buffer_retain_committed(buffer);
   if (IREE_UNLIKELY(!committed)) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "transient buffer has been decommitted");
   }
-  return iree_hal_local_transient_buffer_committed_vtable(committed)
-      ->flush_range(committed, local_byte_offset, local_byte_length);
+  iree_status_t status =
+      iree_hal_local_transient_buffer_committed_vtable(committed)->flush_range(
+          committed, local_byte_offset, local_byte_length);
+  iree_hal_buffer_release(committed);
+  return status;
 }
 
 static const iree_hal_buffer_vtable_t iree_hal_local_transient_buffer_vtable = {

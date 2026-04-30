@@ -25,6 +25,17 @@ static iree_status_t AppendToString(void* user_data, iree_string_view_t text) {
   return iree_ok_status();
 }
 
+static iree_status_t DumpReplayToString(
+    iree_const_byte_span_t file_contents,
+    const iree_hal_replay_dump_options_t* options, std::string* output) {
+  iree_hal_replay_dump_write_callback_t write_callback = {
+      /*.fn=*/AppendToString,
+      /*.user_data=*/output,
+  };
+  return iree_hal_replay_dump_file(file_contents, options, write_callback,
+                                   iree_allocator_system());
+}
+
 static std::vector<uint8_t> MakeReplayFileStorage() {
   std::vector<uint8_t> storage(4096, 0);
   iree_io_file_handle_t* file_handle = nullptr;
@@ -71,6 +82,53 @@ static iree_const_byte_span_t MakeReplayFileContents(
       reinterpret_cast<const iree_hal_replay_file_header_t*>(storage.data());
   return iree_make_const_byte_span(
       storage.data(), static_cast<iree_host_size_t>(file_header->file_length));
+}
+
+static std::vector<uint8_t> MakeScopeReplayFileStorage() {
+  std::vector<uint8_t> storage(4096, 0);
+  iree_io_file_handle_t* file_handle = nullptr;
+  IREE_CHECK_OK(iree_io_file_handle_wrap_host_allocation(
+      IREE_IO_FILE_ACCESS_READ | IREE_IO_FILE_ACCESS_WRITE,
+      iree_make_byte_span(storage.data(), storage.size()),
+      iree_io_file_handle_release_callback_null(), iree_allocator_system(),
+      &file_handle));
+
+  iree_hal_replay_file_writer_t* writer = nullptr;
+  IREE_CHECK_OK(iree_hal_replay_file_writer_create(
+      file_handle, iree_allocator_system(), &writer));
+  iree_io_file_handle_release(file_handle);
+
+  iree_hal_replay_file_record_metadata_t session_metadata = {};
+  session_metadata.sequence_ordinal = 0;
+  session_metadata.record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_SESSION;
+  IREE_CHECK_OK(iree_hal_replay_file_writer_append_record(
+      writer, &session_metadata, 0, nullptr, nullptr));
+
+  const char scope_name[] = "execute";
+  iree_hal_replay_scope_payload_t payload = {};
+  payload.name_length = sizeof(scope_name) - 1;
+  iree_const_byte_span_t iovecs[] = {
+      iree_make_const_byte_span(&payload, sizeof(payload)),
+      iree_make_const_byte_span(scope_name, sizeof(scope_name) - 1),
+  };
+  iree_hal_replay_file_record_metadata_t begin_metadata = {};
+  begin_metadata.sequence_ordinal = 1;
+  begin_metadata.record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION;
+  begin_metadata.payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_REPLAY_SCOPE;
+  begin_metadata.operation_code =
+      IREE_HAL_REPLAY_OPERATION_CODE_REPLAY_SCOPE_BEGIN;
+  IREE_CHECK_OK(iree_hal_replay_file_writer_append_record(
+      writer, &begin_metadata, IREE_ARRAYSIZE(iovecs), iovecs, nullptr));
+
+  iree_hal_replay_file_record_metadata_t end_metadata = begin_metadata;
+  end_metadata.sequence_ordinal = 2;
+  end_metadata.operation_code = IREE_HAL_REPLAY_OPERATION_CODE_REPLAY_SCOPE_END;
+  IREE_CHECK_OK(iree_hal_replay_file_writer_append_record(
+      writer, &end_metadata, IREE_ARRAYSIZE(iovecs), iovecs, nullptr));
+
+  IREE_CHECK_OK(iree_hal_replay_file_writer_close(writer));
+  iree_hal_replay_file_writer_free(writer);
+  return storage;
 }
 
 static std::vector<uint8_t> MakeExecutablePrepareReplayFileStorage() {
@@ -137,9 +195,8 @@ TEST(ReplayDumpTest, EmitsTextSummary) {
       iree_hal_replay_dump_options_default();
 
   std::string output;
-  IREE_ASSERT_OK(iree_hal_replay_dump_file(MakeReplayFileContents(storage),
-                                           &options, AppendToString, &output,
-                                           iree_allocator_system()));
+  IREE_ASSERT_OK(
+      DumpReplayToString(MakeReplayFileContents(storage), &options, &output));
 
   EXPECT_THAT(output, HasSubstr("IREE HAL replay v1.0"));
   EXPECT_THAT(output, HasSubstr("summary:"));
@@ -160,9 +217,8 @@ TEST(ReplayDumpTest, EmitsJsonlWithPayloadRanges) {
   options.format = IREE_HAL_REPLAY_DUMP_FORMAT_JSONL;
 
   std::string output;
-  IREE_ASSERT_OK(iree_hal_replay_dump_file(MakeReplayFileContents(storage),
-                                           &options, AppendToString, &output,
-                                           iree_allocator_system()));
+  IREE_ASSERT_OK(
+      DumpReplayToString(MakeReplayFileContents(storage), &options, &output));
 
   EXPECT_THAT(output, HasSubstr("\"kind\":\"file\""));
   EXPECT_THAT(output, HasSubstr("\"kind\":\"summary\""));
@@ -175,15 +231,40 @@ TEST(ReplayDumpTest, EmitsJsonlWithPayloadRanges) {
   EXPECT_THAT(output, HasSubstr("\"allocation_size\":256"));
 }
 
+TEST(ReplayDumpTest, EmitsScopes) {
+  std::vector<uint8_t> storage = MakeScopeReplayFileStorage();
+  iree_hal_replay_dump_options_t options =
+      iree_hal_replay_dump_options_default();
+
+  std::string text_output;
+  IREE_ASSERT_OK(DumpReplayToString(MakeReplayFileContents(storage), &options,
+                                    &text_output));
+
+  EXPECT_THAT(text_output, HasSubstr("scopes: begin=1 end=1"));
+  EXPECT_THAT(text_output, HasSubstr("op=replay.scope_begin"));
+  EXPECT_THAT(text_output, HasSubstr("payload=replay_scope"));
+  EXPECT_THAT(text_output, HasSubstr("name=\"execute\""));
+
+  options.format = IREE_HAL_REPLAY_DUMP_FORMAT_JSONL;
+  std::string jsonl_output;
+  IREE_ASSERT_OK(DumpReplayToString(MakeReplayFileContents(storage), &options,
+                                    &jsonl_output));
+
+  EXPECT_THAT(jsonl_output, HasSubstr("\"scope_begin_count\":1"));
+  EXPECT_THAT(jsonl_output, HasSubstr("\"scope_end_count\":1"));
+  EXPECT_THAT(jsonl_output, HasSubstr("\"operation\":\"replay.scope_begin\""));
+  EXPECT_THAT(jsonl_output, HasSubstr("\"payload_type\":\"replay_scope\""));
+  EXPECT_THAT(jsonl_output, HasSubstr("\"name\":\"execute\""));
+}
+
 TEST(ReplayDumpTest, EmitsExecutableMetadataRanges) {
   std::vector<uint8_t> storage = MakeExecutablePrepareReplayFileStorage();
   iree_hal_replay_dump_options_t options =
       iree_hal_replay_dump_options_default();
 
   std::string text_output;
-  IREE_ASSERT_OK(iree_hal_replay_dump_file(
-      MakeReplayFileContents(storage), &options, AppendToString, &text_output,
-      iree_allocator_system()));
+  IREE_ASSERT_OK(DumpReplayToString(MakeReplayFileContents(storage), &options,
+                                    &text_output));
 
   EXPECT_THAT(text_output, HasSubstr("payload=executable_prepare"));
   EXPECT_THAT(text_output, HasSubstr("metadata_range=["));
@@ -192,9 +273,8 @@ TEST(ReplayDumpTest, EmitsExecutableMetadataRanges) {
 
   options.format = IREE_HAL_REPLAY_DUMP_FORMAT_JSONL;
   std::string jsonl_output;
-  IREE_ASSERT_OK(iree_hal_replay_dump_file(
-      MakeReplayFileContents(storage), &options, AppendToString, &jsonl_output,
-      iree_allocator_system()));
+  IREE_ASSERT_OK(DumpReplayToString(MakeReplayFileContents(storage), &options,
+                                    &jsonl_output));
 
   EXPECT_THAT(jsonl_output, HasSubstr("\"executable_metadata_length\":"));
   EXPECT_THAT(jsonl_output, HasSubstr("\"metadata_range\""));
@@ -241,9 +321,8 @@ TEST(ReplayDumpTest, EmitsBufferRangeDataRanges) {
       iree_hal_replay_dump_options_default();
   options.format = IREE_HAL_REPLAY_DUMP_FORMAT_JSONL;
   std::string output;
-  IREE_ASSERT_OK(iree_hal_replay_dump_file(MakeReplayFileContents(storage),
-                                           &options, AppendToString, &output,
-                                           iree_allocator_system()));
+  IREE_ASSERT_OK(
+      DumpReplayToString(MakeReplayFileContents(storage), &options, &output));
 
   EXPECT_THAT(output, HasSubstr("\"payload_type\":\"buffer_range_data\""));
   EXPECT_THAT(output, HasSubstr("\"data_range\""));
@@ -293,9 +372,8 @@ TEST(ReplayDumpTest, EmitsQueueAllocaSemaphoreRanges) {
   iree_hal_replay_dump_options_t text_options =
       iree_hal_replay_dump_options_default();
   std::string text_output;
-  IREE_ASSERT_OK(iree_hal_replay_dump_file(
-      MakeReplayFileContents(storage), &text_options, AppendToString,
-      &text_output, iree_allocator_system()));
+  IREE_ASSERT_OK(DumpReplayToString(MakeReplayFileContents(storage),
+                                    &text_options, &text_output));
   EXPECT_THAT(text_output, HasSubstr("payload=device_queue_alloca"));
   EXPECT_THAT(text_output, HasSubstr("submit_queue_affinity="));
   EXPECT_THAT(text_output, HasSubstr("wait_range="));
@@ -305,9 +383,8 @@ TEST(ReplayDumpTest, EmitsQueueAllocaSemaphoreRanges) {
       iree_hal_replay_dump_options_default();
   json_options.format = IREE_HAL_REPLAY_DUMP_FORMAT_JSONL;
   std::string json_output;
-  IREE_ASSERT_OK(iree_hal_replay_dump_file(
-      MakeReplayFileContents(storage), &json_options, AppendToString,
-      &json_output, iree_allocator_system()));
+  IREE_ASSERT_OK(DumpReplayToString(MakeReplayFileContents(storage),
+                                    &json_options, &json_output));
   EXPECT_THAT(json_output,
               HasSubstr("\"payload_type\":\"device_queue_alloca\""));
   EXPECT_THAT(json_output, HasSubstr("\"wait_semaphores_range\""));
@@ -364,9 +441,8 @@ TEST(ReplayDumpTest, EmitsQueueExecuteTables) {
   iree_hal_replay_dump_options_t text_options =
       iree_hal_replay_dump_options_default();
   std::string text_output;
-  IREE_ASSERT_OK(iree_hal_replay_dump_file(
-      MakeReplayFileContents(storage), &text_options, AppendToString,
-      &text_output, iree_allocator_system()));
+  IREE_ASSERT_OK(DumpReplayToString(MakeReplayFileContents(storage),
+                                    &text_options, &text_output));
   EXPECT_THAT(text_output, HasSubstr("payload=device_queue_execute"));
   EXPECT_THAT(text_output, HasSubstr("wait_semaphores=[{semaphore_id=42"));
   EXPECT_THAT(text_output, HasSubstr("signal_semaphores=[{semaphore_id=43"));
@@ -376,9 +452,8 @@ TEST(ReplayDumpTest, EmitsQueueExecuteTables) {
       iree_hal_replay_dump_options_default();
   json_options.format = IREE_HAL_REPLAY_DUMP_FORMAT_JSONL;
   std::string json_output;
-  IREE_ASSERT_OK(iree_hal_replay_dump_file(
-      MakeReplayFileContents(storage), &json_options, AppendToString,
-      &json_output, iree_allocator_system()));
+  IREE_ASSERT_OK(DumpReplayToString(MakeReplayFileContents(storage),
+                                    &json_options, &json_output));
   EXPECT_THAT(json_output,
               HasSubstr("\"payload_type\":\"device_queue_execute\""));
   EXPECT_THAT(json_output,
@@ -430,9 +505,8 @@ TEST(ReplayDumpTest, EmitsExecutionBarrierRanges) {
   iree_hal_replay_dump_options_t text_options =
       iree_hal_replay_dump_options_default();
   std::string text_output;
-  IREE_ASSERT_OK(iree_hal_replay_dump_file(
-      MakeReplayFileContents(storage), &text_options, AppendToString,
-      &text_output, iree_allocator_system()));
+  IREE_ASSERT_OK(DumpReplayToString(MakeReplayFileContents(storage),
+                                    &text_options, &text_output));
   EXPECT_THAT(text_output,
               HasSubstr("payload=command_buffer_execution_barrier"));
   EXPECT_THAT(text_output, HasSubstr("memory_barriers_range="));
@@ -442,9 +516,8 @@ TEST(ReplayDumpTest, EmitsExecutionBarrierRanges) {
       iree_hal_replay_dump_options_default();
   json_options.format = IREE_HAL_REPLAY_DUMP_FORMAT_JSONL;
   std::string json_output;
-  IREE_ASSERT_OK(iree_hal_replay_dump_file(
-      MakeReplayFileContents(storage), &json_options, AppendToString,
-      &json_output, iree_allocator_system()));
+  IREE_ASSERT_OK(DumpReplayToString(MakeReplayFileContents(storage),
+                                    &json_options, &json_output));
   EXPECT_THAT(
       json_output,
       HasSubstr("\"payload_type\":\"command_buffer_execution_barrier\""));
@@ -536,9 +609,8 @@ TEST(ReplayDumpTest, EmitsEventPayloads) {
   iree_hal_replay_dump_options_t text_options =
       iree_hal_replay_dump_options_default();
   std::string text_output;
-  IREE_ASSERT_OK(iree_hal_replay_dump_file(
-      MakeReplayFileContents(storage), &text_options, AppendToString,
-      &text_output, iree_allocator_system()));
+  IREE_ASSERT_OK(DumpReplayToString(MakeReplayFileContents(storage),
+                                    &text_options, &text_output));
   EXPECT_THAT(text_output, HasSubstr("payload=event_object"));
   EXPECT_THAT(text_output, HasSubstr("payload=command_buffer_event"));
   EXPECT_THAT(text_output, HasSubstr("payload=command_buffer_wait_events"));
@@ -550,9 +622,8 @@ TEST(ReplayDumpTest, EmitsEventPayloads) {
       iree_hal_replay_dump_options_default();
   json_options.format = IREE_HAL_REPLAY_DUMP_FORMAT_JSONL;
   std::string json_output;
-  IREE_ASSERT_OK(iree_hal_replay_dump_file(
-      MakeReplayFileContents(storage), &json_options, AppendToString,
-      &json_output, iree_allocator_system()));
+  IREE_ASSERT_OK(DumpReplayToString(MakeReplayFileContents(storage),
+                                    &json_options, &json_output));
   EXPECT_THAT(json_output, HasSubstr("\"payload_type\":\"event_object\""));
   EXPECT_THAT(json_output,
               HasSubstr("\"payload_type\":\"command_buffer_event\""));
@@ -661,9 +732,8 @@ TEST(ReplayDumpTest, EmitsFilePayloads) {
   iree_hal_replay_dump_options_t text_options =
       iree_hal_replay_dump_options_default();
   std::string text_output;
-  IREE_ASSERT_OK(iree_hal_replay_dump_file(
-      MakeReplayFileContents(storage), &text_options, AppendToString,
-      &text_output, iree_allocator_system()));
+  IREE_ASSERT_OK(DumpReplayToString(MakeReplayFileContents(storage),
+                                    &text_options, &text_output));
   EXPECT_THAT(text_output, HasSubstr("payload=file_object"));
   EXPECT_THAT(text_output, HasSubstr("hermetic: no"));
   EXPECT_THAT(text_output, HasSubstr("environment_referenced: yes"));
@@ -686,9 +756,8 @@ TEST(ReplayDumpTest, EmitsFilePayloads) {
       iree_hal_replay_dump_options_default();
   json_options.format = IREE_HAL_REPLAY_DUMP_FORMAT_JSONL;
   std::string json_output;
-  IREE_ASSERT_OK(iree_hal_replay_dump_file(
-      MakeReplayFileContents(storage), &json_options, AppendToString,
-      &json_output, iree_allocator_system()));
+  IREE_ASSERT_OK(DumpReplayToString(MakeReplayFileContents(storage),
+                                    &json_options, &json_output));
   EXPECT_THAT(json_output, HasSubstr("\"payload_type\":\"file_object\""));
   EXPECT_THAT(json_output, HasSubstr("\"kind\":\"summary\""));
   EXPECT_THAT(json_output, HasSubstr("\"hermetic\":false"));
@@ -759,9 +828,8 @@ TEST(ReplayDumpTest, EmitsQueueTransferRanges) {
   iree_hal_replay_dump_options_t text_options =
       iree_hal_replay_dump_options_default();
   std::string text_output;
-  IREE_ASSERT_OK(iree_hal_replay_dump_file(
-      MakeReplayFileContents(storage), &text_options, AppendToString,
-      &text_output, iree_allocator_system()));
+  IREE_ASSERT_OK(DumpReplayToString(MakeReplayFileContents(storage),
+                                    &text_options, &text_output));
   EXPECT_THAT(text_output, HasSubstr("payload=device_queue_update"));
   EXPECT_THAT(text_output, HasSubstr("wait_range="));
   EXPECT_THAT(text_output, HasSubstr("signal_range="));
@@ -771,9 +839,8 @@ TEST(ReplayDumpTest, EmitsQueueTransferRanges) {
       iree_hal_replay_dump_options_default();
   json_options.format = IREE_HAL_REPLAY_DUMP_FORMAT_JSONL;
   std::string json_output;
-  IREE_ASSERT_OK(iree_hal_replay_dump_file(
-      MakeReplayFileContents(storage), &json_options, AppendToString,
-      &json_output, iree_allocator_system()));
+  IREE_ASSERT_OK(DumpReplayToString(MakeReplayFileContents(storage),
+                                    &json_options, &json_output));
   EXPECT_THAT(json_output,
               HasSubstr("\"payload_type\":\"device_queue_update\""));
   EXPECT_THAT(json_output, HasSubstr("\"wait_semaphores_range\""));
@@ -845,9 +912,8 @@ TEST(ReplayDumpTest, EmitsCommandBufferTransferRanges) {
   iree_hal_replay_dump_options_t text_options =
       iree_hal_replay_dump_options_default();
   std::string text_output;
-  IREE_ASSERT_OK(iree_hal_replay_dump_file(
-      MakeReplayFileContents(storage), &text_options, AppendToString,
-      &text_output, iree_allocator_system()));
+  IREE_ASSERT_OK(DumpReplayToString(MakeReplayFileContents(storage),
+                                    &text_options, &text_output));
   EXPECT_THAT(text_output, HasSubstr("payload=command_buffer_fill_buffer"));
   EXPECT_THAT(text_output, HasSubstr("payload=command_buffer_update_buffer"));
   EXPECT_THAT(text_output, HasSubstr("pattern_range="));
@@ -857,9 +923,8 @@ TEST(ReplayDumpTest, EmitsCommandBufferTransferRanges) {
       iree_hal_replay_dump_options_default();
   json_options.format = IREE_HAL_REPLAY_DUMP_FORMAT_JSONL;
   std::string json_output;
-  IREE_ASSERT_OK(iree_hal_replay_dump_file(
-      MakeReplayFileContents(storage), &json_options, AppendToString,
-      &json_output, iree_allocator_system()));
+  IREE_ASSERT_OK(DumpReplayToString(MakeReplayFileContents(storage),
+                                    &json_options, &json_output));
   EXPECT_THAT(json_output,
               HasSubstr("\"payload_type\":\"command_buffer_fill_buffer\""));
   EXPECT_THAT(json_output,

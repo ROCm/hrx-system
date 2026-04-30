@@ -13,6 +13,17 @@
 extern "C" {
 #endif  // __cplusplus
 
+typedef uint32_t iree_hal_amdgpu_host_queue_profile_flags_t;
+enum iree_hal_amdgpu_host_queue_profile_flag_bits_t {
+  IREE_HAL_AMDGPU_HOST_QUEUE_PROFILE_FLAG_NONE = 0u,
+  // Host-timestamped queue operation events should be recorded.
+  IREE_HAL_AMDGPU_HOST_QUEUE_PROFILE_FLAG_QUEUE_EVENTS = 1u << 0,
+  // Device-timestamped queue operation events should be recorded.
+  IREE_HAL_AMDGPU_HOST_QUEUE_PROFILE_FLAG_QUEUE_DEVICE_EVENTS = 1u << 1,
+  // Per-dispatch profiling augmentation may be applied to selected dispatches.
+  IREE_HAL_AMDGPU_HOST_QUEUE_PROFILE_FLAG_DISPATCHES = 1u << 2,
+};
+
 // Additional details for one queue operation profile event.
 typedef struct iree_hal_amdgpu_host_queue_profile_event_info_t {
   // Type of queue operation represented by the event.
@@ -47,10 +58,10 @@ uint64_t iree_hal_amdgpu_host_queue_profile_stream_id(
 uint32_t iree_hal_amdgpu_host_queue_profile_semaphore_count(
     const iree_hal_semaphore_list_t semaphore_list);
 
-// Sets queue-local profile event recording flags for an active session.
-void iree_hal_amdgpu_host_queue_set_profile_events_enabled(
-    iree_hal_amdgpu_host_queue_t* queue, bool queue_events_enabled,
-    bool queue_device_events_enabled);
+// Sets queue-local profile recording flags for an active session.
+void iree_hal_amdgpu_host_queue_set_profile_flags(
+    iree_hal_amdgpu_host_queue_t* queue,
+    iree_hal_amdgpu_host_queue_profile_flags_t flags);
 
 // Initializes one reserved device-timestamped queue operation event.
 iree_hal_amdgpu_profile_queue_device_event_t*

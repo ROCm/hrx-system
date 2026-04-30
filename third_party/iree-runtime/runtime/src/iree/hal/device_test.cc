@@ -65,10 +65,10 @@ static iree_status_t CountingProfileSinkEndSession(
 }
 
 static const iree_hal_profile_sink_vtable_t kCountingProfileSinkVTable = {
-    .destroy = CountingProfileSinkDestroy,
-    .begin_session = CountingProfileSinkBeginSession,
-    .write = CountingProfileSinkWrite,
-    .end_session = CountingProfileSinkEndSession,
+    /*.destroy=*/CountingProfileSinkDestroy,
+    /*.begin_session=*/CountingProfileSinkBeginSession,
+    /*.write=*/CountingProfileSinkWrite,
+    /*.end_session=*/CountingProfileSinkEndSession,
 };
 
 static void CountingProfileSinkInitialize(CountingProfileSink* sink) {
@@ -185,6 +185,14 @@ TEST_F(DeviceProfilingTest, BeginRejectsCounterSamplesWithoutCounterSets) {
   iree_hal_device_profiling_options_t profiling_options = {0};
   profiling_options.data_families =
       IREE_HAL_DEVICE_PROFILING_DATA_COUNTER_SAMPLES;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        Begin(&profiling_options));
+}
+
+TEST_F(DeviceProfilingTest, BeginRejectsCounterRangesWithoutCounterSets) {
+  iree_hal_device_profiling_options_t profiling_options = {0};
+  profiling_options.data_families =
+      IREE_HAL_DEVICE_PROFILING_DATA_COUNTER_RANGES;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Begin(&profiling_options));
 }

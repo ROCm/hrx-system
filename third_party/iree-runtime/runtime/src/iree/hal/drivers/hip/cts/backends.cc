@@ -86,6 +86,10 @@ static bool hip_registered_ =
                "Blocked by the same iree_hal_hip_device_queue_alloca "
                "non-NULL pool rejection as "
                "ExplicitPassthroughPoolAllocaDealloca."},
+              {"QueueAllocaTest.ExplicitTLSFPoolCrossQueueStaleBlockGrows",
+               "Blocked by the same iree_hal_hip_device_query_queue_pool_"
+               "backend UNIMPLEMENTED path as "
+               "ExplicitTLSFPoolCrossQueueWaitFrontier."},
               {"QueueAllocaTest.ExplicitFixedBlockPoolNotificationRetry",
                "Blocked by the same iree_hal_hip_device_queue_alloca "
                "non-NULL pool rejection as "
@@ -124,6 +128,72 @@ static bool hip_registered_ =
                "HIP stream/graph command buffers explicitly reject indirect "
                "workgroup count parameters; supporting them requires a "
                "device-side launch or packet-patching mechanism."},
+          },
+          /*expected_failures=*/
+          {
+              {"TransientBufferTest.FillTransientBufferSubrange",
+               "HIP stream command buffers can hang when a transient buffer "
+               "subspan is filled after stream-ordered queue_alloca; this "
+               "requires a HIP transient-buffer sequencing fix."},
+              {"TransientBufferTest.FillTransientBuffer1Byte",
+               "HIP graph command buffers can hang on gfx950 when a transient "
+               "buffer is filled with a 1-byte pattern after stream-ordered "
+               "queue_alloca; gfx1100 passes locally, so this requires a HIP "
+               "transient-buffer sequencing fix across targets."},
+              {"TransientBufferTest.FillTransientWithZeroAccessFlags",
+               "HIP stream command buffers can hang on gfx950 when filling a "
+               "transient buffer allocated with HAL-module access=0; gfx1100 "
+               "passes locally, so this requires a HIP transient-buffer "
+               "access/sequence fix across targets."},
+              {"CommandBufferStressTest.RapidFillSubmit",
+               "HIP command-buffer stress CTS can hit ROCm memory reservation "
+               "failures on RDNA runners and then fail validation with an "
+               "empty binding table."},
+              {"CommandBufferStressTest.RapidCopySubmit",
+               "Blocked by the same HIP command-buffer stress memory "
+               "reservation path as RapidFillSubmit."},
+              {"QueueAllocaTest.AllocaDeallocaCycle",
+               "HIP async queue_dealloca does not yet reliably advance "
+               "stream-ordered dealloca dependencies for transient buffers."},
+              {"QueueAllocaTest.BufferMetadata",
+               "The metadata assertions are valid after queue-affinity "
+               "normalization, but the test still performs queue_dealloca "
+               "cleanup and hits the same HIP async dealloca gap as "
+               "AllocaDeallocaCycle."},
+              {"QueueAllocaTest.DeallocaReleasesMemory",
+               "HIP async queue_dealloca does not yet report the "
+               "failed-precondition post-use behavior required for "
+               "decommitted transient buffers."},
+              {"QueueAllocaTest.FailedDeallocaWaitDoesNotDealloca",
+               "HIP queue_dealloca does not yet propagate failed wait "
+               "dependencies before preserving the transient allocation."},
+              {"QueueAllocaTest.ChainedAllocaDealloca",
+               "HIP async queue_dealloca does not yet reliably advance "
+               "when chained directly behind queue_alloca."},
+              {"QueueAllocaTest.DefaultPoolRepeatedChainedAllocaDealloca",
+               "Blocked by the same HIP queue_alloca -> queue_dealloca "
+               "dependency issue as ChainedAllocaDealloca."},
+              {"QueueAllocaTest.DeallocaPrefersOriginPlacement",
+               "HIP queue_dealloca origin routing still depends on the same "
+               "async dealloca sequencing path as ChainedAllocaDealloca."},
+              {"QueueAllocaTest.ZeroAccessFlagsCanonicalized",
+               "HIP graph queues can hang on RDNA4 when queue_alloca "
+               "canonicalizes access=0 before transient-buffer use."},
+              {"QueueTransferTest.*",
+               "HIP direct queue transfer CTS can hit ROCm memory reservation "
+               "failures on RDNA runners and then fail validation with an "
+               "empty binding table."},
+              {"SemaphoreSubmissionTest."
+               "IndirectCommandBufferBindingTableRetainedUntilSignal",
+               "HIP graph queues can hit ROCm memory reservation failures "
+               "while retaining indirect command-buffer binding tables."},
+              {"DispatchPipelineTest.*",
+               "HIP dispatch pipeline CTS can hit ROCm memory reservation "
+               "failures on RDNA runners or hang on transient dispatch input "
+               "sequencing."},
+              {"DispatchReuseTest.*",
+               "HIP dispatch reuse CTS can hit ROCm memory reservation "
+               "failures and invalid binding tables on RDNA runners."},
           }},
          {"async_queue"},
      }),

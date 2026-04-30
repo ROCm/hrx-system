@@ -191,11 +191,10 @@ TEST(ProfileSummaryTest, RecordsDeviceMetricMetadataAndSamples) {
   sample_record.value_count = 1;
   sample_record.record_length =
       sizeof(sample_record) + sizeof(iree_hal_profile_device_metric_value_t);
-  iree_hal_profile_device_metric_value_t sample_value = {
-      .metric_id = descriptor_record.metric_id,
-      .value_bits = 42,
-      .flags = IREE_HAL_PROFILE_DEVICE_METRIC_VALUE_FLAG_NONE,
-  };
+  iree_hal_profile_device_metric_value_t sample_value = {};
+  sample_value.metric_id = descriptor_record.metric_id;
+  sample_value.value_bits = 42;
+  sample_value.flags = IREE_HAL_PROFILE_DEVICE_METRIC_VALUE_FLAG_NONE;
   std::vector<uint8_t> sample_payload;
   AppendInlineRecord(
       &sample_payload, sample_record,

@@ -15,7 +15,7 @@ add_custom_command(OUTPUT bitcode_srcs.stamp
   DEPENDS
     "blit.c"
     "dispatch.c"
-    "profiling.c"
+    "timestamp.c"
 )
 
 add_custom_target(bitcode_srcs
@@ -29,11 +29,11 @@ add_custom_command(OUTPUT bitcode_hdrs.stamp
     "dispatch.h"
     "kernel_tables.h"
     "kernels.h"
-    "profiling.h"
     "support/common.h"
     "support/kernel.h"
     "support/queue.h"
     "support/signal.h"
+    "timestamp.h"
 )
 
 add_custom_target(bitcode_hdrs
@@ -48,11 +48,11 @@ iree_cc_library(
     "dispatch.h"
     "kernel_tables.h"
     "kernels.h"
-    "profiling.h"
     "support/common.h"
     "support/kernel.h"
     "support/queue.h"
     "support/signal.h"
+    "timestamp.h"
   DEPS
     iree::base
     iree::base::internal
@@ -83,10 +83,11 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
-    profiling
+    timestamp
   SRCS
-    "profiling.c"
+    "timestamp.c"
   DEPS
+    ::dispatch
     ::headers
   PUBLIC
 )
@@ -116,6 +117,24 @@ iree_cc_test(
   DEPS
     ::dispatch
     ::headers
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "driver=amdgpu"
+    "nodocker"
+  GROUP
+    "iree-hal-drivers-amdgpu-tests"
+)
+
+iree_cc_test(
+  NAME
+    timestamp_test
+  SRCS
+    "timestamp_test.cc"
+  DEPS
+    ::headers
+    ::timestamp
+    iree::hal::drivers::amdgpu::abi
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS

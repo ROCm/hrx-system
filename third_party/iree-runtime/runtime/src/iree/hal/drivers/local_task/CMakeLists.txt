@@ -113,9 +113,12 @@ iree_cc_library(
     ::block_isa
     iree::async
     iree::base
+    iree::base::internal::cpu
     iree::base::threading
+    iree::base::threading::thread
     iree::hal::local::executable_loader
     iree::hal::local::profile
+    iree::task
   PUBLIC
 )
 
@@ -163,6 +166,7 @@ iree_cc_library(
     iree::base::internal::atomic_slist
     iree::base::internal::cpu
     iree::base::threading
+    iree::base::threading::thread
     iree::hal
     iree::hal::local
     iree::hal::local::executable_environment

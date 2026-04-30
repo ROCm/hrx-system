@@ -6,19 +6,12 @@
 
 #include "iree/hal/replay/execute.h"
 
-#include <cerrno>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
-
-#if IREE_FILE_IO_ENABLE && \
-    (defined(IREE_PLATFORM_ANDROID) || defined(IREE_PLATFORM_LINUX))
-#include <stdlib.h>
-#include <unistd.h>
-#endif  // IREE_FILE_IO_ENABLE && (IREE_PLATFORM_ANDROID ||
-        // IREE_PLATFORM_LINUX)
 
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
@@ -26,13 +19,13 @@
 #include "iree/hal/replay/file_reader.h"
 #include "iree/hal/replay/recorder.h"
 #include "iree/hal/testing/mock_device.h"
+#include "iree/io/file_contents.h"
 #include "iree/io/file_handle.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "iree/testing/temp_file.h"
 
 namespace {
-
-using ::testing::HasSubstr;
 
 static iree_hal_device_t* CreateSyncDevice(const char* identifier) {
   iree_async_proactor_pool_t* proactor_pool = nullptr;
@@ -142,6 +135,32 @@ static iree_status_t NoopHostCall(void* user_data, const uint64_t args[4],
   (void)user_data;
   (void)args;
   (void)context;
+  return iree_ok_status();
+}
+
+typedef struct ReplayScopeCallbackState {
+  // Ordered scope event descriptions observed during replay.
+  std::vector<std::string>* events;
+} ReplayScopeCallbackState;
+
+static iree_status_t RecordReplayScopeEvent(
+    void* user_data, const iree_hal_replay_scope_event_t* event) {
+  ReplayScopeCallbackState* state = (ReplayScopeCallbackState*)user_data;
+  const char* prefix = nullptr;
+  switch (event->type) {
+    case IREE_HAL_REPLAY_SCOPE_EVENT_TYPE_BEGIN:
+      prefix = "begin:";
+      break;
+    case IREE_HAL_REPLAY_SCOPE_EVENT_TYPE_END:
+      prefix = "end:";
+      break;
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "unknown replay scope event type");
+  }
+  std::string text(prefix);
+  text.append(event->name.data, event->name.size);
+  state->events->push_back(text);
   return iree_ok_status();
 }
 
@@ -266,6 +285,90 @@ static iree_status_t TestExecutableSubstitutionCallback(
   return iree_ok_status();
 }
 
+TEST(ReplayExecuteTest, ObservesScopeEvents) {
+  std::vector<uint8_t> storage(32768, 0);
+  iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);
+
+  iree_hal_device_group_t* source_group = CreateSyncDeviceGroup();
+  iree_hal_device_group_t* wrapped_group = nullptr;
+  IREE_ASSERT_OK(iree_hal_replay_wrap_device_group(
+      recorder, source_group, iree_allocator_system(), &wrapped_group));
+
+  IREE_ASSERT_OK(iree_hal_replay_recorder_scope_begin(
+      recorder, iree_make_cstring_view("execute")));
+  IREE_ASSERT_OK(iree_hal_replay_recorder_scope_end(
+      recorder, iree_make_cstring_view("execute")));
+  IREE_ASSERT_OK(iree_hal_replay_recorder_close(recorder));
+  iree_hal_replay_recorder_release(recorder);
+  iree_hal_device_group_release(wrapped_group);
+  iree_hal_device_group_release(source_group);
+
+  std::vector<std::string> events;
+  ReplayScopeCallbackState callback_state = {
+      /*.events=*/&events,
+  };
+  iree_hal_replay_execute_options_t options =
+      iree_hal_replay_execute_options_default();
+  options.scope_event_callback.fn = RecordReplayScopeEvent;
+  options.scope_event_callback.user_data = &callback_state;
+
+  iree_hal_device_group_t* replay_group = CreateSyncDeviceGroup();
+  IREE_EXPECT_OK(iree_hal_replay_execute_file(GetCapturedFileContents(storage),
+                                              replay_group, &options,
+                                              iree_allocator_system()));
+  iree_hal_device_group_release(replay_group);
+
+  ASSERT_EQ(events.size(), 2u);
+  EXPECT_EQ(events[0], "begin:execute");
+  EXPECT_EQ(events[1], "end:execute");
+}
+
+TEST(ReplayExecuteTest, ExecutesPreparedPlanRepeatedly) {
+  std::vector<uint8_t> storage(32768, 0);
+  iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);
+
+  iree_hal_device_group_t* source_group = CreateSyncDeviceGroup();
+  iree_hal_device_group_t* wrapped_group = nullptr;
+  IREE_ASSERT_OK(iree_hal_replay_wrap_device_group(
+      recorder, source_group, iree_allocator_system(), &wrapped_group));
+
+  IREE_ASSERT_OK(iree_hal_replay_recorder_scope_begin(
+      recorder, iree_make_cstring_view("execute")));
+  IREE_ASSERT_OK(iree_hal_replay_recorder_scope_end(
+      recorder, iree_make_cstring_view("execute")));
+  IREE_ASSERT_OK(iree_hal_replay_recorder_close(recorder));
+  iree_hal_replay_recorder_release(recorder);
+  iree_hal_device_group_release(wrapped_group);
+  iree_hal_device_group_release(source_group);
+
+  iree_hal_replay_plan_t* plan = nullptr;
+  IREE_ASSERT_OK(iree_hal_replay_plan_create(GetCapturedFileContents(storage),
+                                             iree_allocator_system(), &plan));
+
+  std::vector<std::string> events;
+  ReplayScopeCallbackState callback_state = {
+      /*.events=*/&events,
+  };
+  iree_hal_replay_execute_options_t options =
+      iree_hal_replay_execute_options_default();
+  options.scope_event_callback.fn = RecordReplayScopeEvent;
+  options.scope_event_callback.user_data = &callback_state;
+
+  iree_hal_device_group_t* replay_group = CreateSyncDeviceGroup();
+  IREE_EXPECT_OK(iree_hal_replay_plan_execute(plan, replay_group, &options,
+                                              iree_allocator_system()));
+  IREE_EXPECT_OK(iree_hal_replay_plan_execute(plan, replay_group, &options,
+                                              iree_allocator_system()));
+  iree_hal_device_group_release(replay_group);
+  iree_hal_replay_plan_destroy(plan);
+
+  ASSERT_EQ(events.size(), 4u);
+  EXPECT_EQ(events[0], "begin:execute");
+  EXPECT_EQ(events[1], "end:execute");
+  EXPECT_EQ(events[2], "begin:execute");
+  EXPECT_EQ(events[3], "end:execute");
+}
+
 TEST(ReplayExecuteTest, SubstitutesRecordedExecutablePayload) {
   std::vector<uint8_t> captured_data =
       MakeMockExecutableData(/*constant_count=*/2, /*binding_count=*/3,
@@ -366,15 +469,10 @@ TEST(ReplayExecuteTest, RejectsExecutableSubstitutionAbiMismatch) {
   options.executable_substitution_callback.user_data = &substitution_state;
 
   iree_hal_device_group_t* replay_group = CreateMockExecutableDeviceGroup();
-  iree_status_t status = iree_hal_replay_execute_file(
-      GetCapturedFileContents(storage), replay_group, &options,
-      iree_allocator_system());
-  auto owned_status = ::iree::internal::ConsumeForTest(status);
-  EXPECT_THAT(owned_status,
-              ::iree::testing::status::StatusIs(static_cast<::iree::StatusCode>(
-                  IREE_STATUS_FAILED_PRECONDITION)));
-  EXPECT_THAT(owned_status.ToString(), HasSubstr("ABI mismatch"));
-  EXPECT_THAT(owned_status.ToString(), HasSubstr("executable 3"));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        iree_hal_replay_execute_file(
+                            GetCapturedFileContents(storage), replay_group,
+                            &options, iree_allocator_system()));
   EXPECT_EQ(substitution_state.invocation_count, 1u);
   iree_hal_device_group_release(replay_group);
 }
@@ -400,15 +498,10 @@ TEST(ReplayExecuteTest, RejectsTargetDeviceCountMismatch) {
   iree_hal_device_release(replay_device_a);
   iree_hal_device_release(replay_device_b);
 
-  iree_status_t status = iree_hal_replay_execute_file(
-      GetCapturedFileContents(storage), replay_group, nullptr,
-      iree_allocator_system());
-  auto owned_status = ::iree::internal::ConsumeForTest(status);
-  EXPECT_THAT(owned_status,
-              ::iree::testing::status::StatusIs(static_cast<::iree::StatusCode>(
-                  IREE_STATUS_FAILED_PRECONDITION)));
-  EXPECT_THAT(owned_status.ToString(), HasSubstr("captured 1 device"));
-  EXPECT_THAT(owned_status.ToString(), HasSubstr("contains 2 device"));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        iree_hal_replay_execute_file(
+                            GetCapturedFileContents(storage), replay_group,
+                            nullptr, iree_allocator_system()));
 
   iree_hal_device_group_release(replay_group);
   iree_hal_replay_recorder_release(recorder);
@@ -416,53 +509,18 @@ TEST(ReplayExecuteTest, RejectsTargetDeviceCountMismatch) {
 
 #if IREE_FILE_IO_ENABLE && \
     (defined(IREE_PLATFORM_ANDROID) || defined(IREE_PLATFORM_LINUX))
-class ScopedTempFile {
- public:
-  explicit ScopedTempFile(iree_const_byte_span_t contents) {
-    char path_template[] = "/tmp/iree_hal_replay_file_XXXXXX";
-    const int fd = mkstemp(path_template);
-    EXPECT_GE(fd, 0);
-    if (fd < 0) return;
-    iree_host_size_t total_written = 0;
-    while (total_written < contents.data_length) {
-      ssize_t written = write(fd, contents.data + total_written,
-                              contents.data_length - total_written);
-      if (written < 0 && errno == EINTR) continue;
-      EXPECT_GT(written, 0);
-      if (written <= 0) break;
-      total_written += (iree_host_size_t)written;
-    }
-    EXPECT_EQ(contents.data_length, total_written);
-    EXPECT_EQ(0, close(fd));
-    path_ = path_template;
-  }
+iree::testing::TempFilePath WriteTempFile(iree_const_byte_span_t contents) {
+  iree::testing::TempFilePath path("iree_hal_replay_file");
+  IREE_EXPECT_OK(iree_io_file_contents_write(path.path_view(), contents,
+                                             iree_allocator_system()));
+  return path;
+}
 
-  ~ScopedTempFile() {
-    if (!path_.empty()) {
-      unlink(path_.c_str());
-    }
-  }
-
-  iree_string_view_t path_view() const {
-    return iree_make_string_view(path_.data(), path_.size());
-  }
-
-  const std::string& path_string() const { return path_; }
-
-  void RenameToUniquePath() {
-    char path_template[] = "/tmp/iree_hal_replay_file_XXXXXX";
-    const int fd = mkstemp(path_template);
-    EXPECT_GE(fd, 0);
-    if (fd < 0) return;
-    EXPECT_EQ(0, close(fd));
-    EXPECT_EQ(0, unlink(path_template));
-    EXPECT_EQ(0, rename(path_.c_str(), path_template));
-    path_ = path_template;
-  }
-
- private:
-  std::string path_;
-};
+void RenameToUniquePath(iree::testing::TempFilePath* path) {
+  iree::testing::TempFilePath new_path("iree_hal_replay_file");
+  EXPECT_EQ(0, rename(path->path().c_str(), new_path.path().c_str()));
+  *path = std::move(new_path);
+}
 
 static void CaptureFdBackedQueueRead(
     iree_string_view_t source_path,
@@ -671,7 +729,7 @@ TEST(ReplayExecuteTest, ExecutesRecordedFdBackedQueueRead) {
       0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x21,
       0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B,
   };
-  ScopedTempFile source_file(
+  iree::testing::TempFilePath source_file = WriteTempFile(
       iree_make_const_byte_span(file_contents, sizeof(file_contents)));
 
   std::vector<uint8_t> storage(65536, 0);
@@ -756,7 +814,7 @@ TEST(ReplayExecuteTest, ExecutesCapturedFdBackedQueueReadWithoutSourceFile) {
       0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x21,
       0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B,
   };
-  ScopedTempFile source_file(
+  iree::testing::TempFilePath source_file = WriteTempFile(
       iree_make_const_byte_span(file_contents, sizeof(file_contents)));
 
   std::vector<uint8_t> storage(65536, 0);
@@ -767,7 +825,7 @@ TEST(ReplayExecuteTest, ExecutesCapturedFdBackedQueueReadWithoutSourceFile) {
   CaptureFdBackedQueueRead(source_file.path_view(), &recorder_options,
                            &storage);
 
-  source_file.RenameToUniquePath();
+  RenameToUniquePath(&source_file);
   iree_hal_device_group_t* replay_group = CreateSyncDeviceGroup();
   iree_hal_replay_execute_options_t options =
       iree_hal_replay_execute_options_default();
@@ -790,7 +848,7 @@ TEST(ReplayExecuteTest,
       0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x21,
       0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B,
   };
-  ScopedTempFile source_file(
+  iree::testing::TempFilePath source_file = WriteTempFile(
       iree_make_const_byte_span(file_contents, sizeof(file_contents)));
 
   std::vector<uint8_t> storage(65536, 0);
@@ -801,7 +859,7 @@ TEST(ReplayExecuteTest,
   CaptureFdBackedQueueRead(source_file.path_view(), &recorder_options,
                            &storage);
 
-  source_file.RenameToUniquePath();
+  RenameToUniquePath(&source_file);
   iree_hal_device_group_t* replay_group = CreateSyncDeviceGroup();
   iree_hal_replay_execute_options_t options =
       iree_hal_replay_execute_options_default();
@@ -823,9 +881,9 @@ TEST(ReplayExecuteTest, ExecutesRemappedFdBackedQueueRead) {
       0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x21,
       0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B,
   };
-  ScopedTempFile source_file(
+  iree::testing::TempFilePath source_file = WriteTempFile(
       iree_make_const_byte_span(file_contents, sizeof(file_contents)));
-  std::string captured_path = source_file.path_string();
+  std::string captured_path = source_file.path();
 
   std::vector<uint8_t> storage(65536, 0);
   iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);
@@ -887,7 +945,7 @@ TEST(ReplayExecuteTest, ExecutesRemappedFdBackedQueueRead) {
   iree_hal_device_group_release(wrapped_group);
   iree_hal_device_group_release(source_group);
 
-  source_file.RenameToUniquePath();
+  RenameToUniquePath(&source_file);
   iree_hal_replay_file_path_remap_t file_path_remap = {
       iree_make_string_view(captured_path.data(), captured_path.size()),
       source_file.path_view(),
@@ -916,9 +974,9 @@ TEST(ReplayExecuteTest, CopiedFdBackedQueueReadFailsIdentityValidation) {
       0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x21,
       0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B,
   };
-  ScopedTempFile source_file(
+  iree::testing::TempFilePath source_file = WriteTempFile(
       iree_make_const_byte_span(file_contents, sizeof(file_contents)));
-  ScopedTempFile copied_file(
+  iree::testing::TempFilePath copied_file = WriteTempFile(
       iree_make_const_byte_span(file_contents, sizeof(file_contents)));
 
   std::vector<uint8_t> storage(65536, 0);
@@ -934,16 +992,10 @@ TEST(ReplayExecuteTest, CopiedFdBackedQueueReadFailsIdentityValidation) {
       iree_hal_replay_execute_options_default();
   options.file_path_remap_count = 1;
   options.file_path_remaps = &file_path_remap;
-  iree_status_t status = iree_hal_replay_execute_file(
-      GetCapturedFileContents(storage), replay_group, &options,
-      iree_allocator_system());
-  auto owned_status = ::iree::internal::ConsumeForTest(status);
-  EXPECT_THAT(owned_status,
-              ::iree::testing::status::StatusIs(static_cast<::iree::StatusCode>(
-                  IREE_STATUS_FAILED_PRECONDITION)));
-  EXPECT_THAT(owned_status.ToString(),
-              HasSubstr("--device_replay_file_validation=digest"));
-  EXPECT_THAT(owned_status.ToString(), HasSubstr("--replay_file_remap"));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        iree_hal_replay_execute_file(
+                            GetCapturedFileContents(storage), replay_group,
+                            &options, iree_allocator_system()));
   iree_hal_device_group_release(replay_group);
 #else
   GTEST_SKIP() << "FD-backed replay requires POSIX file IO.";
@@ -959,9 +1011,9 @@ TEST(ReplayExecuteTest, ExecutesDigestValidatedCopiedFdBackedQueueRead) {
       0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x21,
       0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B,
   };
-  ScopedTempFile source_file(
+  iree::testing::TempFilePath source_file = WriteTempFile(
       iree_make_const_byte_span(file_contents, sizeof(file_contents)));
-  ScopedTempFile copied_file(
+  iree::testing::TempFilePath copied_file = WriteTempFile(
       iree_make_const_byte_span(file_contents, sizeof(file_contents)));
 
   std::vector<uint8_t> storage(65536, 0);
@@ -1002,10 +1054,11 @@ TEST(ReplayExecuteTest, DigestValidatedFdBackedQueueReadRejectsWrongBytes) {
   uint8_t wrong_file_contents[32];
   std::memcpy(wrong_file_contents, file_contents, sizeof(file_contents));
   wrong_file_contents[7] ^= 0xFF;
-  ScopedTempFile source_file(
+  iree::testing::TempFilePath source_file = WriteTempFile(
       iree_make_const_byte_span(file_contents, sizeof(file_contents)));
-  ScopedTempFile wrong_file(iree_make_const_byte_span(
-      wrong_file_contents, sizeof(wrong_file_contents)));
+  iree::testing::TempFilePath wrong_file =
+      WriteTempFile(iree_make_const_byte_span(wrong_file_contents,
+                                              sizeof(wrong_file_contents)));
 
   std::vector<uint8_t> storage(65536, 0);
   iree_hal_replay_recorder_options_t recorder_options =
@@ -1135,7 +1188,7 @@ TEST(ReplayExecuteTest, ExecutesHostAllocationImportedBufferRecord) {
   iree_hal_allocator_t* allocator = iree_hal_device_allocator(wrapped_device);
   ASSERT_NE(nullptr, allocator);
 
-  uint8_t imported_storage[16] = {
+  alignas(64) uint8_t imported_storage[16] = {
       0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
       0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
   };

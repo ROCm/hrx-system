@@ -163,6 +163,14 @@ typedef struct iree_hal_amdgpu_reclaim_action_t {
   void* user_data;
 } iree_hal_amdgpu_reclaim_action_t;
 
+// Queue-owned ring positions retired by one or more completed epochs.
+typedef struct iree_hal_amdgpu_reclaim_positions_t {
+  // Highest kernarg ring write position retired by the completed epochs.
+  uint64_t kernarg_write_position;
+  // Highest queue upload ring write position retired by the completed epochs.
+  uint64_t queue_upload_write_position;
+} iree_hal_amdgpu_reclaim_positions_t;
+
 // Optional callback invoked for one completed epoch after pre-signal actions
 // execute and before user-visible semaphore signals publish.
 typedef void(IREE_API_PTR* iree_hal_amdgpu_reclaim_retire_fn_t)(
@@ -196,6 +204,10 @@ struct iree_hal_amdgpu_reclaim_entry_t {
   // report the highest position across retired epochs so the caller can reclaim
   // kernarg blocks. 0 means no kernarg was allocated.
   uint64_t kernarg_write_position;
+  // Queue upload ring write position at the time of this submission.
+  // Drain/fail_all report the highest position across retired epochs so the
+  // caller can reclaim upload bytes. 0 means no upload bytes were allocated.
+  uint64_t queue_upload_write_position;
   // Number of dispatch profiling events reserved by this epoch.
   uint32_t profile_event_count;
   // Number of queue device profiling events reserved by this epoch.
@@ -212,8 +224,8 @@ struct iree_hal_amdgpu_reclaim_entry_t {
 // Prepares a reclaim entry for |count| resources. If count fits inline,
 // sets |*out_resources| to the entry's inline storage. Otherwise acquires
 // a block from |block_pool| and sets |*out_resources| to point into it.
-// The caller fills the array with retained resource pointers, sets
-// entry->kernarg_write_position, and sets entry->count before advancing the
+// The caller fills the array with retained resource pointers, sets any
+// queue-owned ring write positions, and sets entry->count before advancing the
 // submission epoch.
 iree_status_t iree_hal_amdgpu_reclaim_entry_prepare(
     iree_hal_amdgpu_reclaim_entry_t* entry, iree_arena_block_pool_t* block_pool,
@@ -401,6 +413,20 @@ void iree_hal_amdgpu_notification_ring_push_frontier_snapshot(
 // caller has already merged frontier state into the semaphore at submission
 // time and only needs completion-time timeline advancement/untainting.
 //
+// Stores the highest queue-owned ring positions across all retired epochs in
+// |out_reclaim_positions|. Positions are set to 0 if no epochs were retired.
+//
+// |retire_fn|, when provided, is called once per retired epoch before
+// user-visible semaphore publication. It must not publish user-visible
+// completion itself.
+//
+// Returns the number of entries drained.
+iree_host_size_t iree_hal_amdgpu_notification_ring_drain_reclaim_positions(
+    iree_hal_amdgpu_notification_ring_t* ring,
+    const iree_async_frontier_t* fallback_frontier,
+    iree_hal_amdgpu_reclaim_retire_fn_t retire_fn, void* retire_user_data,
+    iree_hal_amdgpu_reclaim_positions_t* out_reclaim_positions);
+
 // Stores the highest kernarg_write_position across all retired epochs in
 // |out_kernarg_reclaim_position|. Set to 0 if no epochs were retired.
 //
@@ -422,6 +448,14 @@ iree_host_size_t iree_hal_amdgpu_notification_ring_drain(
 //
 // |error_status| is borrowed, not consumed — the caller retains ownership.
 //
+// Stores the highest queue-owned ring positions across all failed entries in
+// |out_reclaim_positions| (same semantics as drain_reclaim_positions).
+//
+// Returns the number of entries failed.
+iree_host_size_t iree_hal_amdgpu_notification_ring_fail_all_reclaim_positions(
+    iree_hal_amdgpu_notification_ring_t* ring, iree_status_t error_status,
+    iree_hal_amdgpu_reclaim_positions_t* out_reclaim_positions);
+
 // Stores the highest kernarg_write_position across all failed entries in
 // |out_kernarg_reclaim_position| (same semantics as drain).
 //

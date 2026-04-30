@@ -15,9 +15,10 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Returns the size, in bytes, of an inline command buffer.
-// This can be used for arena/stack allocations along with
-// iree_hal_inline_command_buffer_initialize/iree_hal_inline_command_buffer_deinitialize.
+// Returns the size, in bytes, of inline command buffer storage. The returned
+// size includes internal alignment padding required by
+// iree_hal_inline_command_buffer_initialize and can be used for arena/stack
+// allocations.
 iree_host_size_t iree_hal_inline_command_buffer_size(
     iree_hal_command_buffer_mode_t mode, iree_host_size_t binding_capacity);
 

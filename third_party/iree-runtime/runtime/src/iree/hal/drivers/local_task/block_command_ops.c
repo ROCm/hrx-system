@@ -307,7 +307,7 @@ iree_status_t iree_hal_cmd_build_dispatch(
     cmd->params.direct.workgroup_count[2] = config.workgroup_count[2];
   }
   cmd->tile_count = tile_count;
-  cmd->tiles_per_reservation = 1;
+  cmd->tiles_per_reservation = 0;
   cmd->local_memory_size =
       (uint32_t)dispatch_attrs.local_memory_pages *
           IREE_HAL_EXECUTABLE_WORKGROUP_LOCAL_MEMORY_PAGE_SIZE +
