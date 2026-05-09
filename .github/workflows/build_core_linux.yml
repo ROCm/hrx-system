@@ -133,6 +133,6 @@ jobs:
         with:
           name: hrx-core-linux-x86_64
           path: |
-            build/linux/dist/*.tar.gz
+            build/linux/dist/*.tar.zst
             build/linux/dist/hrx-core/.hrx-core-package.json
           if-no-files-found: error

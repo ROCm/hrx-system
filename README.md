@@ -48,9 +48,9 @@ python build_tools/test_core.py
 python build_tools/package_core.py
 ```
 
-The package script emits a unified ROCm-style install tree and tarball under
-`../build/hrx-core/dist/`. Source `env.sh` from the packaged tree to use it as
-an alternate ROCm universe:
+The package script emits a unified ROCm-style install tree and `.tar.zst`
+archive under `../build/hrx-core/dist/`. Source `env.sh` from the packaged tree
+to use it as an alternate ROCm universe:
 
 ```bash
 source ../build/hrx-core/dist/hrx-core/env.sh
