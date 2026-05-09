@@ -7,13 +7,12 @@
 from __future__ import annotations
 
 import argparse
-import os
 from pathlib import Path
 import sys
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
-from hrx_build_tools import REPO_ROOT, require_file, run
+from hrx_build_tools import REPO_ROOT, require_file, rocm_build_env, rocm_tool, run
 
 
 def build(args: argparse.Namespace) -> None:
@@ -22,6 +21,10 @@ def build(args: argparse.Namespace) -> None:
     install_prefix = args.install_prefix.resolve()
 
     require_file(rocm_root, "ROCm build root")
+    c_compiler = rocm_tool(rocm_root, "clang")
+    cxx_compiler = rocm_tool(rocm_root, "clang++")
+    ar = rocm_tool(rocm_root, "llvm-ar")
+    ranlib = rocm_tool(rocm_root, "llvm-ranlib")
 
     cmake_args = [
         "cmake",
@@ -33,8 +36,11 @@ def build(args: argparse.Namespace) -> None:
         f"-DCMAKE_PREFIX_PATH={rocm_root}",
         f"-DCMAKE_INSTALL_PREFIX={install_prefix}",
         "-DCMAKE_INSTALL_LIBDIR=lib",
-        "-DCMAKE_C_COMPILER=clang",
-        "-DCMAKE_CXX_COMPILER=clang++",
+        f"-DCMAKE_C_COMPILER={c_compiler}",
+        f"-DCMAKE_CXX_COMPILER={cxx_compiler}",
+        f"-DCMAKE_ASM_COMPILER={c_compiler}",
+        f"-DCMAKE_AR={ar}",
+        f"-DCMAKE_RANLIB={ranlib}",
         "-DCMAKE_C_COMPILER_LAUNCHER=ccache",
         "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
         "-DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld",
@@ -52,8 +58,7 @@ def build(args: argparse.Namespace) -> None:
         cmake_args.append(f"-DHRX_IREE_SOURCE_DIR={args.iree_source_dir.resolve()}")
     cmake_args.extend(f"-D{option}" for option in args.cmake_option)
 
-    env = os.environ.copy()
-    env.setdefault("CMAKE_PREFIX_PATH", str(rocm_root))
+    env = rocm_build_env(rocm_root)
     run(cmake_args, cwd=REPO_ROOT, env=env)
     run(
         ["cmake", "--build", build_dir, "--target", args.target], cwd=REPO_ROOT, env=env

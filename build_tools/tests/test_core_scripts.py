@@ -14,7 +14,13 @@ SCRIPT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPT_DIR))
 
 from fetch_rocm_artifacts import S3Object, select_available, wanted_artifacts
-from hrx_build_tools import copy_tree_contents, flatten_therock_artifact, sha256_file
+from hrx_build_tools import (
+    copy_tree_contents,
+    flatten_therock_artifact,
+    rocm_build_env,
+    rocm_tool,
+    sha256_file,
+)
 
 
 class CoreScriptTest(unittest.TestCase):
@@ -82,6 +88,19 @@ class CoreScriptTest(unittest.TestCase):
             copy_tree_contents(src, dst, skip_names={".download_cache"})
             self.assertTrue((dst / "lib" / "libexample.so").exists())
             self.assertFalse((dst / ".download_cache").exists())
+
+    def test_rocm_toolchain_helpers_use_rocm_llvm_bin(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            clang = root / "lib" / "llvm" / "bin" / "clang"
+            clang.parent.mkdir(parents=True)
+            clang.write_text("")
+            self.assertEqual(rocm_tool(root, "clang"), clang)
+            env = rocm_build_env(
+                root, {"PATH": "/usr/bin", "CMAKE_PREFIX_PATH": "/opt"}
+            )
+            self.assertTrue(env["PATH"].startswith(f"{clang.parent}:{root / 'bin'}:"))
+            self.assertTrue(env["CMAKE_PREFIX_PATH"].startswith(f"{root}:"))
 
     def _write_artifact_archive(self, path: Path, files: dict[str, bytes]) -> None:
         import zstandard

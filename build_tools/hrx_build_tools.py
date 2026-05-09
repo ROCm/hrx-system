@@ -23,6 +23,27 @@ DEFAULT_BUILD_IMAGE = (
 )
 
 
+def rocm_llvm_bin(rocm_root: Path) -> Path:
+    return rocm_root / "lib" / "llvm" / "bin"
+
+
+def rocm_tool(rocm_root: Path, name: str) -> Path:
+    tool_path = rocm_llvm_bin(rocm_root) / name
+    if not tool_path.exists():
+        raise FileNotFoundError(f"Missing ROCm LLVM tool {name}: {tool_path}")
+    return tool_path
+
+
+def rocm_build_env(
+    rocm_root: Path, base_env: dict[str, str] | None = None
+) -> dict[str, str]:
+    env = dict(base_env or os.environ)
+    llvm_bin = rocm_llvm_bin(rocm_root)
+    env["PATH"] = f"{llvm_bin}:{rocm_root / 'bin'}:{env.get('PATH', '')}"
+    env["CMAKE_PREFIX_PATH"] = f"{rocm_root}:{env.get('CMAKE_PREFIX_PATH', '')}"
+    return env
+
+
 def log(message: str = "") -> None:
     print(message, flush=True)
 

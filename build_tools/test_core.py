@@ -7,17 +7,16 @@
 from __future__ import annotations
 
 import argparse
-import os
 from pathlib import Path
 import sys
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
-from hrx_build_tools import REPO_ROOT, require_file, run
+from hrx_build_tools import REPO_ROOT, require_file, rocm_build_env, rocm_tool, run
 
 
 def _env(rocm_root: Path, install_prefix: Path) -> dict[str, str]:
-    env = os.environ.copy()
+    env = rocm_build_env(rocm_root)
     lib_paths = [install_prefix / "lib", rocm_root / "lib"]
     env["LD_LIBRARY_PATH"] = (
         ":".join(str(p) for p in lib_paths) + ":" + env.get("LD_LIBRARY_PATH", "")
@@ -34,6 +33,10 @@ def test(args: argparse.Namespace) -> None:
     build_dir = args.build_dir.resolve()
     install_prefix = args.install_prefix.resolve()
     env = _env(rocm_root, install_prefix)
+    c_compiler = rocm_tool(rocm_root, "clang")
+    cxx_compiler = rocm_tool(rocm_root, "clang++")
+    ar = rocm_tool(rocm_root, "llvm-ar")
+    ranlib = rocm_tool(rocm_root, "llvm-ranlib")
 
     require_file(rocm_root, "ROCm build root")
     require_file(build_dir / "CTestTestfile.cmake", "build-tree CTest file")
@@ -72,8 +75,10 @@ def test(args: argparse.Namespace) -> None:
             smoke_build,
             "-GNinja",
             f"-DCMAKE_PREFIX_PATH={install_prefix};{rocm_root}",
-            "-DCMAKE_C_COMPILER=clang",
-            "-DCMAKE_CXX_COMPILER=clang++",
+            f"-DCMAKE_C_COMPILER={c_compiler}",
+            f"-DCMAKE_CXX_COMPILER={cxx_compiler}",
+            f"-DCMAKE_AR={ar}",
+            f"-DCMAKE_RANLIB={ranlib}",
             "-DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld",
             "-DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld",
             "-DCMAKE_MODULE_LINKER_FLAGS=-fuse-ld=lld",
