@@ -34,11 +34,42 @@ def _tar_filter(info: tarfile.TarInfo) -> tarfile.TarInfo:
     return info
 
 
+def _add_archive_contents(tf: tarfile.TarFile, source_dir: Path) -> None:
+    for child in sorted(source_dir.iterdir(), key=lambda p: p.name):
+        tf.add(child, arcname=child.name, recursive=True, filter=_tar_filter)
+
+
+def _create_tar_zst(source_dir: Path, tarball_path: Path) -> None:
+    try:
+        import zstandard
+    except ImportError as e:
+        raise RuntimeError(
+            "The zstandard package is required to create .tar.zst packages"
+        ) from e
+
+    cctx = zstandard.ZstdCompressor(level=3, threads=-1)
+    with tarball_path.open("wb") as f:
+        with cctx.stream_writer(f, closefd=False) as zstd_stream:
+            with tarfile.open(fileobj=zstd_stream, mode="w|") as tf:
+                _add_archive_contents(tf, source_dir)
+
+
+def _create_tar_gz(source_dir: Path, tarball_path: Path) -> None:
+    with tarfile.open(tarball_path, "w:gz") as tf:
+        _add_archive_contents(tf, source_dir)
+
+
 def create_tarball(source_dir: Path, tarball_path: Path) -> None:
     tarball_path.parent.mkdir(parents=True, exist_ok=True)
-    with tarfile.open(tarball_path, "w:gz") as tf:
-        for child in sorted(source_dir.iterdir(), key=lambda p: p.name):
-            tf.add(child, arcname=child.name, recursive=True, filter=_tar_filter)
+    if tarball_path.name.endswith(".tar.zst"):
+        _create_tar_zst(source_dir, tarball_path)
+    elif tarball_path.name.endswith(".tar.gz") or tarball_path.name.endswith(".tgz"):
+        _create_tar_gz(source_dir, tarball_path)
+    else:
+        raise ValueError(
+            f"Unsupported package archive extension: {tarball_path.name} "
+            "(expected .tar.zst or .tar.gz)"
+        )
 
 
 def package(args: argparse.Namespace) -> Path:
@@ -91,7 +122,7 @@ def package(args: argparse.Namespace) -> Path:
 
     tarball_name = (
         args.tarball_name
-        or f"hrx-core-linux-x86_64-{manifest['generated_at'][:10]}.tar.gz"
+        or f"hrx-core-linux-x86_64-{manifest['generated_at'][:10]}.tar.zst"
     )
     tarball_path = output_dir / tarball_name
     create_tarball(package_root, tarball_path)
