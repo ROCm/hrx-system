@@ -1,0 +1,87 @@
+# Copyright 2026 The HRX Authors
+# SPDX-License-Identifier: Apache-2.0
+
+name: Release Core Linux
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+      - "[0-9]*.[0-9]*.[0-9]*"
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  validate_tag:
+    name: Validate tag
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check semantic version tag
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if [[ ! "${tag}" =~ ^v?([0-9]|[1-9][0-9]*)\.([0-9]|[1-9][0-9]*)\.([0-9]|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+            echo "Not a semantic version tag: ${tag}" >&2
+            exit 1
+          fi
+
+  build_core_linux:
+    name: Build release package
+    needs: validate_tag
+    uses: ./.github/workflows/build_core_linux.yml
+    permissions:
+      contents: read
+    with:
+      release_type: nightly
+      artifact_set: core
+      test_gpu: false
+      package_suffix: ${{ github.ref_name }}
+
+  publish_release:
+    name: Publish release
+    needs: build_core_linux
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Download package artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p release-assets
+          gh run download "${GITHUB_RUN_ID}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --name hrx-core-linux-x86_64 \
+            --dir release-assets
+          ls -lh release-assets
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if [[ ! "${tag}" =~ ^v?([0-9]|[1-9][0-9]*)\.([0-9]|[1-9][0-9]*)\.([0-9]|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+            echo "Not a semantic version tag: ${tag}" >&2
+            exit 1
+          fi
+
+          prerelease_args=()
+          core_version="${tag#v}"
+          core_version="${core_version%%+*}"
+          if [[ "${core_version}" == *-* ]]; then
+            prerelease_args+=(--prerelease)
+          fi
+
+          if gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release upload "${tag}" release-assets/* \
+              --repo "${GITHUB_REPOSITORY}" \
+              --clobber
+          else
+            gh release create "${tag}" release-assets/* \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "HRX ${tag}" \
+              --generate-notes \
+              "${prerelease_args[@]}"
+          fi

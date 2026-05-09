@@ -64,6 +64,15 @@ container:
 python build_tools/linux_core_build.py
 ```
 
+To publish a Linux core release, push a semantic version tag. The release
+workflow builds, validates, packages, creates the GitHub release, and uploads
+the `.tar.zst` package plus manifest:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
 Requires: clang/clang++, ccache, lld, CMake 3.20+, Ninja, ROCm's
 `hsa-runtime64` CMake package, and Catch2 v3 for CTS. GTest is only required
 when `IREE_BUILD_TESTS=ON`.
