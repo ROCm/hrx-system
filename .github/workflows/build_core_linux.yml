@@ -1,0 +1,137 @@
+# Copyright 2026 The HRX Authors
+# SPDX-License-Identifier: Apache-2.0
+
+name: Build Core Linux
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        type: choice
+        options:
+          - nightly
+          - dev
+          - prerelease
+        default: nightly
+      run_id:
+        type: string
+        description: "TheRock artifact run id. Empty means latest complete Linux run."
+        default: ""
+      artifact_set:
+        type: choice
+        options:
+          - core
+          - core-with-llvm-dev
+          - core-with-upstream-hip
+        default: core
+      test_gpu:
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - ".github/workflows/build_core_linux.yml"
+      - "CMakeLists.txt"
+      - "build_tools/**"
+      - "cmake/**"
+      - "cts/**"
+      - "include/**"
+      - "src/**"
+      - "third_party/**"
+      - "tools/**"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/build_core_linux.yml"
+      - "CMakeLists.txt"
+      - "build_tools/**"
+      - "cmake/**"
+      - "cts/**"
+      - "include/**"
+      - "src/**"
+      - "third_party/**"
+      - "tools/**"
+
+permissions:
+  contents: read
+
+jobs:
+  build_core_linux:
+    name: Build core
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    container:
+      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:702a5133851e6d1daf1207d2c9fbb01c2667914a5b6dc5a01faeb3ce66ea6421
+      options: --cap-add=SYS_PTRACE --security-opt seccomp=unconfined
+    env:
+      HRX_RELEASE_TYPE: ${{ github.event.inputs.release_type || 'nightly' }}
+      HRX_ARTIFACT_SET: ${{ github.event.inputs.artifact_set || 'core' }}
+      HRX_OUTPUT_DIR: ${{ github.workspace }}/build/linux
+      CCACHE_DIR: ${{ github.workspace }}/build/linux/caches/ccache
+      PIP_CACHE_DIR: ${{ github.workspace }}/build/linux/caches/pip
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Adjust git config
+        run: |
+          git config --global --add safe.directory "$PWD"
+
+      - name: Install python deps
+        run: |
+          python3 -m pip install --upgrade boto3 zstandard
+
+      - name: Fetch ROCm artifact root
+        env:
+          HRX_RUN_ID: ${{ github.event.inputs.run_id }}
+        run: |
+          args=(
+            --release-type "${HRX_RELEASE_TYPE}"
+            --set "${HRX_ARTIFACT_SET}"
+            --output-dir "${HRX_OUTPUT_DIR}/rocm-root"
+            --download-cache-dir "${HRX_OUTPUT_DIR}/downloads"
+          )
+          if [[ -n "${HRX_RUN_ID}" ]]; then
+            args+=(--run-id "${HRX_RUN_ID}")
+          else
+            args+=(--latest)
+          fi
+          python3 build_tools/fetch_rocm_artifacts.py "${args[@]}"
+
+      - name: Build and install core
+        run: |
+          python3 build_tools/build_core.py \
+            --rocm-root "${HRX_OUTPUT_DIR}/rocm-root" \
+            --build-dir "${HRX_OUTPUT_DIR}/build/hrx-core" \
+            --install-prefix "${HRX_OUTPUT_DIR}/rocm-root"
+
+      - name: Validate core
+        env:
+          HRX_TEST_GPU: ${{ github.event.inputs.test_gpu == 'true' && '1' || '0' }}
+        run: |
+          args=(
+            --rocm-root "${HRX_OUTPUT_DIR}/rocm-root"
+            --build-dir "${HRX_OUTPUT_DIR}/build/hrx-core"
+            --install-prefix "${HRX_OUTPUT_DIR}/rocm-root"
+            --package-smoke-build-dir "${HRX_OUTPUT_DIR}/build/package-smoke"
+          )
+          if [[ "${HRX_TEST_GPU}" == "1" ]]; then
+            args+=(--gpu)
+          fi
+          python3 build_tools/test_core.py "${args[@]}"
+
+      - name: Package core
+        run: |
+          python3 build_tools/package_core.py \
+            --rocm-root "${HRX_OUTPUT_DIR}/rocm-root" \
+            --hrx-install "${HRX_OUTPUT_DIR}/rocm-root" \
+            --output-dir "${HRX_OUTPUT_DIR}/dist"
+
+      - name: Upload package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hrx-core-linux-x86_64
+          path: |
+            build/linux/dist/*.tar.gz
+            build/linux/dist/hrx-core/.hrx-core-package.json
+          if-no-files-found: error
