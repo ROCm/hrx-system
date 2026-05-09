@@ -51,27 +51,32 @@ extern "C" {
 // HRX enums match IREE values by convention. These asserts guarantee it.
 //===----------------------------------------------------------------------===//
 
-_Static_assert(HRX_STATUS_OK == IREE_STATUS_OK, "status mismatch");
-_Static_assert(HRX_STATUS_CANCELLED == IREE_STATUS_CANCELLED,
-               "status mismatch");
-_Static_assert(HRX_STATUS_UNKNOWN == IREE_STATUS_UNKNOWN, "status mismatch");
-_Static_assert(HRX_STATUS_INVALID_ARGUMENT == IREE_STATUS_INVALID_ARGUMENT,
-               "status mismatch");
-_Static_assert(HRX_STATUS_DEADLINE_EXCEEDED == IREE_STATUS_DEADLINE_EXCEEDED,
-               "status mismatch");
-_Static_assert(HRX_STATUS_NOT_FOUND == IREE_STATUS_NOT_FOUND,
-               "status mismatch");
-_Static_assert(HRX_STATUS_ALREADY_EXISTS == IREE_STATUS_ALREADY_EXISTS,
-               "status mismatch");
-_Static_assert(HRX_STATUS_OUT_OF_MEMORY == IREE_STATUS_RESOURCE_EXHAUSTED,
-               "status mismatch");
-_Static_assert(HRX_STATUS_OUT_OF_RANGE == IREE_STATUS_OUT_OF_RANGE,
-               "status mismatch");
-_Static_assert(HRX_STATUS_UNIMPLEMENTED == IREE_STATUS_UNIMPLEMENTED,
-               "status mismatch");
-_Static_assert(HRX_STATUS_INTERNAL == IREE_STATUS_INTERNAL, "status mismatch");
-_Static_assert(HRX_STATUS_UNAVAILABLE == IREE_STATUS_UNAVAILABLE,
-               "status mismatch");
+#define HRX_STATIC_ASSERT_ENUM_EQ(lhs, rhs, message) \
+  _Static_assert((int)(lhs) == (int)(rhs), message)
+
+HRX_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_OK, IREE_STATUS_OK, "status mismatch");
+HRX_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_CANCELLED, IREE_STATUS_CANCELLED,
+                          "status mismatch");
+HRX_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_UNKNOWN, IREE_STATUS_UNKNOWN,
+                          "status mismatch");
+HRX_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_INVALID_ARGUMENT,
+                          IREE_STATUS_INVALID_ARGUMENT, "status mismatch");
+HRX_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_DEADLINE_EXCEEDED,
+                          IREE_STATUS_DEADLINE_EXCEEDED, "status mismatch");
+HRX_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_NOT_FOUND, IREE_STATUS_NOT_FOUND,
+                          "status mismatch");
+HRX_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_ALREADY_EXISTS,
+                          IREE_STATUS_ALREADY_EXISTS, "status mismatch");
+HRX_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_OUT_OF_MEMORY,
+                          IREE_STATUS_RESOURCE_EXHAUSTED, "status mismatch");
+HRX_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_OUT_OF_RANGE, IREE_STATUS_OUT_OF_RANGE,
+                          "status mismatch");
+HRX_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_UNIMPLEMENTED, IREE_STATUS_UNIMPLEMENTED,
+                          "status mismatch");
+HRX_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_INTERNAL, IREE_STATUS_INTERNAL,
+                          "status mismatch");
+HRX_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_UNAVAILABLE, IREE_STATUS_UNAVAILABLE,
+                          "status mismatch");
 
 // Memory type bitfield.
 _Static_assert(HRX_MEMORY_TYPE_NONE == IREE_HAL_MEMORY_TYPE_NONE,
@@ -170,6 +175,8 @@ _Static_assert(HRX_MAP_WRITE == IREE_HAL_MEMORY_ACCESS_WRITE,
                "map flags mismatch");
 _Static_assert(HRX_MAP_DISCARD == IREE_HAL_MEMORY_ACCESS_DISCARD,
                "map flags mismatch");
+
+#undef HRX_STATIC_ASSERT_ENUM_EQ
 
 //===----------------------------------------------------------------------===//
 // Internal types backing opaque handles
