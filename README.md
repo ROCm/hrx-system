@@ -26,6 +26,44 @@ headers.
 
 Run from `sources/hrx`.
 
+### Bolt-On Build Scripts
+
+The bolt-on path bootstraps a shared ROCm root from TheRock nightly artifacts,
+then installs the current HRX core scope into the same tree. By default this
+root is `../build/rocm-root`, so future HRX components can share it as both
+their dependency prefix and install prefix.
+
+The artifact fetcher follows the public S3 artifact layout described in
+`sources/TheRock/RELEASES.md` and mirrors a small, stable subset of
+`BUILD_TOPOLOGY.toml`: sysdeps, base ROCm files, LLVM runtime bits, ROCr/HSA,
+AMD SMI, and AQL profile. It intentionally does not fetch upstream HIP by
+default because HRX core owns `libamdhip64.so` in the final tree.
+
+```bash
+python build_tools/fetch_rocm_artifacts.py \
+  --release-type nightly --latest --set core
+
+python build_tools/build_core.py
+python build_tools/test_core.py
+python build_tools/package_core.py
+```
+
+The package script emits a unified ROCm-style install tree and tarball under
+`../build/hrx-core/dist/`. Source `env.sh` from the packaged tree to use it as
+an alternate ROCm universe:
+
+```bash
+source ../build/hrx-core/dist/hrx-core/env.sh
+hrx-info --device=cpu:0
+```
+
+To reproduce the Linux CI environment locally with TheRock's manylinux build
+container:
+
+```bash
+python build_tools/linux_core_build.py
+```
+
 Requires: clang/clang++, ccache, lld, CMake 3.20+, Ninja, ROCm's
 `hsa-runtime64` CMake package, and Catch2 v3 for CTS. GTest is only required
 when `IREE_BUILD_TESTS=ON`.
