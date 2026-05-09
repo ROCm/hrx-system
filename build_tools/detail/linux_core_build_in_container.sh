@@ -31,7 +31,8 @@ python3 /hrx/src/build_tools/fetch_rocm_artifacts.py "${FETCH_ARGS[@]}"
 python3 /hrx/src/build_tools/build_core.py \
   --rocm-root "${HRX_OUTPUT_DIR}/rocm-root" \
   --build-dir "${HRX_OUTPUT_DIR}/build/hrx-core" \
-  --install-prefix "${HRX_OUTPUT_DIR}/rocm-root"
+  --install-prefix "${HRX_OUTPUT_DIR}/rocm-root" \
+  --build-deps-prefix "${HRX_OUTPUT_DIR}/build-deps"
 
 TEST_ARGS=(
   --rocm-root "${HRX_OUTPUT_DIR}/rocm-root"

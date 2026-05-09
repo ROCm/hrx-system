@@ -12,6 +12,7 @@ import sys
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
+from bootstrap_build_deps import ensure_build_deps
 from hrx_build_tools import REPO_ROOT, require_file, rocm_build_env, rocm_tool, run
 
 
@@ -19,12 +20,18 @@ def build(args: argparse.Namespace) -> None:
     rocm_root = args.rocm_root.resolve()
     build_dir = args.build_dir.resolve()
     install_prefix = args.install_prefix.resolve()
+    build_deps_prefix = args.build_deps_prefix.resolve()
 
     require_file(rocm_root, "ROCm build root")
     c_compiler = rocm_tool(rocm_root, "clang")
     cxx_compiler = rocm_tool(rocm_root, "clang++")
     ar = rocm_tool(rocm_root, "llvm-ar")
     ranlib = rocm_tool(rocm_root, "llvm-ranlib")
+    cmake_prefix_paths = [rocm_root]
+    if args.cts and not args.skip_build_deps:
+        ensure_build_deps(build_deps_prefix, rocm_root)
+        cmake_prefix_paths.append(build_deps_prefix)
+    cmake_prefix_path = ";".join(str(p) for p in cmake_prefix_paths)
 
     cmake_args = [
         "cmake",
@@ -33,7 +40,7 @@ def build(args: argparse.Namespace) -> None:
         "-B",
         build_dir,
         "-GNinja",
-        f"-DCMAKE_PREFIX_PATH={rocm_root}",
+        f"-DCMAKE_PREFIX_PATH={cmake_prefix_path}",
         f"-DCMAKE_INSTALL_PREFIX={install_prefix}",
         "-DCMAKE_INSTALL_LIBDIR=lib",
         f"-DCMAKE_C_COMPILER={c_compiler}",
@@ -59,6 +66,9 @@ def build(args: argparse.Namespace) -> None:
     cmake_args.extend(f"-D{option}" for option in args.cmake_option)
 
     env = rocm_build_env(rocm_root)
+    env["CMAKE_PREFIX_PATH"] = ":".join(str(p) for p in cmake_prefix_paths) + (
+        f":{env['CMAKE_PREFIX_PATH']}" if env.get("CMAKE_PREFIX_PATH") else ""
+    )
     run(cmake_args, cwd=REPO_ROOT, env=env)
     run(
         ["cmake", "--build", build_dir, "--target", args.target], cwd=REPO_ROOT, env=env
@@ -73,6 +83,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--rocm-root", type=Path, default=shared_root)
     parser.add_argument("--build-dir", type=Path, default=core_root / "build")
     parser.add_argument("--install-prefix", type=Path, default=shared_root)
+    parser.add_argument(
+        "--build-deps-prefix", type=Path, default=core_root / "build-deps"
+    )
+    parser.add_argument(
+        "--skip-build-deps",
+        action="store_true",
+        help="Do not bootstrap build-only dependencies such as Catch2",
+    )
     parser.add_argument("--build-type", default="RelWithDebInfo")
     parser.add_argument("--target", default="all")
     parser.add_argument("--iree-source-dir", type=Path)

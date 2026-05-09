@@ -103,7 +103,8 @@ jobs:
           python3 build_tools/build_core.py \
             --rocm-root "${HRX_OUTPUT_DIR}/rocm-root" \
             --build-dir "${HRX_OUTPUT_DIR}/build/hrx-core" \
-            --install-prefix "${HRX_OUTPUT_DIR}/rocm-root"
+            --install-prefix "${HRX_OUTPUT_DIR}/rocm-root" \
+            --build-deps-prefix "${HRX_OUTPUT_DIR}/build-deps"
 
       - name: Validate core
         env:
