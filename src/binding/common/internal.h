@@ -218,6 +218,11 @@ struct iree_hal_streaming_context_t {
   // Buffer mapping table (pyre unified implementation).
   hrx_buffer_table_t buffer_table;
 
+  // Cached host-visible staging buffer for blocking pageable H2D transfers.
+  // Guarded by |mutex| and released during context destruction.
+  iree_hal_streaming_buffer_t* pageable_h2d_staging_buffer;
+  iree_device_size_t pageable_h2d_staging_size;
+
   // Context resource limits.
   iree_hal_streaming_limits_t limits;
 
@@ -1262,6 +1267,10 @@ iree_status_t iree_hal_streaming_memory_allocate_host(
 // Synchronization: context (waits for all operations to complete).
 iree_status_t iree_hal_streaming_memory_free_host(
     iree_hal_streaming_context_t* context, void* ptr);
+
+// Synchronization: none; called during context destruction after streams idle.
+void iree_hal_streaming_memory_release_pageable_staging(
+    iree_hal_streaming_context_t* context);
 
 // Synchronization: none (registers existing memory).
 iree_status_t iree_hal_streaming_memory_register_host(

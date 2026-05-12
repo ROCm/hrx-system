@@ -151,6 +151,92 @@ static void iree_hal_streaming_buffer_free(
   IREE_TRACE_ZONE_END(z0);
 }
 
+static void iree_hal_streaming_temporary_host_buffer_free(
+    iree_hal_streaming_context_t* context,
+    iree_hal_streaming_buffer_t* buffer) {
+  if (!buffer) return;
+  hrx_buffer_table_remove(&context->buffer_table, buffer->device_ptr);
+  iree_hal_streaming_buffer_free(buffer);
+}
+
+void iree_hal_streaming_memory_release_pageable_staging(
+    iree_hal_streaming_context_t* context) {
+  if (!context || !context->pageable_h2d_staging_buffer) return;
+  iree_hal_streaming_buffer_t* buffer = context->pageable_h2d_staging_buffer;
+  hrx_buffer_table_remove(&context->buffer_table, buffer->device_ptr);
+  if (buffer->hrx_buf) {
+    hrx_buffer_release(buffer->hrx_buf);
+    buffer->hrx_buf = NULL;
+    buffer->buffer = NULL;
+  }
+  iree_allocator_free(context->host_allocator, buffer);
+  context->pageable_h2d_staging_buffer = NULL;
+  context->pageable_h2d_staging_size = 0;
+}
+
+static iree_status_t iree_hal_streaming_context_ensure_pageable_h2d_staging(
+    iree_hal_streaming_context_t* context, iree_device_size_t size,
+    iree_hal_streaming_buffer_t** out_staging) {
+  IREE_ASSERT_ARGUMENT(context);
+  IREE_ASSERT_ARGUMENT(out_staging);
+  *out_staging = NULL;
+
+  if (context->pageable_h2d_staging_buffer &&
+      context->pageable_h2d_staging_size >= size) {
+    *out_staging = context->pageable_h2d_staging_buffer;
+    return iree_ok_status();
+  }
+
+  if (context->pageable_h2d_staging_buffer) {
+    iree_hal_streaming_memory_release_pageable_staging(context);
+  }
+
+  iree_hal_streaming_buffer_t* staging = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_streaming_memory_allocate_host(
+      context, size, IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT,
+      &staging));
+  // The context owns this cached buffer directly. Drop the wrapper's normal
+  // external retain to avoid a context -> staging -> context reference cycle.
+  iree_hal_streaming_context_release(context);
+  context->pageable_h2d_staging_buffer = staging;
+  context->pageable_h2d_staging_size = size;
+  *out_staging = staging;
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_streaming_import_pageable_host_buffer(
+    iree_hal_streaming_context_t* context, void* ptr, iree_device_size_t size,
+    iree_hal_memory_access_t access, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_buffer_t** out_buffer) {
+  IREE_ASSERT_ARGUMENT(context);
+  IREE_ASSERT_ARGUMENT(ptr);
+  IREE_ASSERT_ARGUMENT(out_buffer);
+  *out_buffer = NULL;
+
+  iree_hal_external_buffer_t external_buffer = {
+      .type = IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION,
+      .flags = IREE_HAL_EXTERNAL_BUFFER_FLAG_NONE,
+      .size = size,
+      .handle =
+          {
+              .host_allocation =
+                  {
+                      .ptr = ptr,
+                  },
+          },
+  };
+  iree_hal_buffer_params_t params = {
+      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
+      .access = access,
+      .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
+      .queue_affinity = queue_affinity,
+      .min_alignment = 1,
+  };
+  return iree_hal_allocator_import_buffer(
+      context->device_allocator, params, &external_buffer,
+      iree_hal_buffer_release_callback_null(), out_buffer);
+}
+
 iree_hal_streaming_deviceptr_t iree_hal_streaming_buffer_device_pointer(
     iree_hal_streaming_buffer_t* buffer) {
   return buffer ? buffer->device_ptr : 0;
@@ -324,67 +410,41 @@ iree_status_t iree_hal_streaming_memory_allocate_host(
   IREE_TRACE_ZONE_BEGIN(z0);
   *out_buffer = NULL;
 
-  // For host memory allocation, we use a simpler approach:
-  // Allocate wrapper directly with system memory.
-  // This provides page-locked-like behavior for the streaming layer.
-  iree_hal_streaming_buffer_t* wrapper = NULL;
+  iree_hal_memory_type_t memory_type =
+      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
+  iree_hal_buffer_params_t params = {
+      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .type = memory_type,
+      .queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY,
+      .min_alignment = 64,
+  };
+
+  iree_hal_buffer_t* buffer = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_allocator_malloc(context->host_allocator, sizeof(*wrapper),
-                                (void**)&wrapper));
+      z0, iree_hal_allocator_allocate_buffer(context->device_allocator, params,
+                                             size, &buffer));
 
-  // Allocate the host memory with alignment.
-  void* host_ptr = NULL;
-  iree_status_t status = iree_allocator_malloc(
-      context->host_allocator, size, &host_ptr);
+  iree_hal_streaming_buffer_t* wrapper = NULL;
+  iree_status_t status =
+      iree_hal_streaming_buffer_wrap(context, buffer, (int)memory_type,
+                                     &wrapper);
+  iree_hal_buffer_release(buffer);
 
-  if (!iree_status_is_ok(status)) {
-    iree_allocator_free(context->host_allocator, wrapper);
-    IREE_TRACE_ZONE_END(z0);
-    return status;
+  if (iree_status_is_ok(status) && wrapper->host_ptr == NULL) {
+    status = iree_make_status(
+        IREE_STATUS_UNAVAILABLE,
+        "host allocation did not export a host-visible pointer");
   }
-
-  // Create pyre buffer for host memory (no HAL buffer).
-  hrx_buffer_t hrx_buf = NULL;
-  hrx_device_t hrx_dev = context->device_entry
-                               ? context->device_entry->hrx_device
-                               : NULL;
-  status = hrx_buffer_create_from_hal(
-      NULL, hrx_dev, HRX_MEMORY_TYPE_HOST_LOCAL,
-      size, host_ptr, &hrx_buf);
-  if (!iree_status_is_ok(status)) {
-    iree_allocator_free(context->host_allocator, host_ptr);
-    iree_allocator_free(context->host_allocator, wrapper);
-    IREE_TRACE_ZONE_END(z0);
-    return status;
-  }
-
-  // Initialize wrapper for host memory.
-  memset(wrapper, 0, sizeof(*wrapper));
-  wrapper->hrx_buf = hrx_buf;
-  wrapper->buffer = NULL;
-  wrapper->context = context;
-  iree_hal_streaming_context_retain(context);
-  wrapper->memory_type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
-  wrapper->host_register_flags = flags;
-  wrapper->size = size;
-  wrapper->host_ptr = host_ptr;
-  wrapper->device_ptr = (iree_hal_streaming_deviceptr_t)host_ptr;
-  wrapper->read_mostly_hint = false;
-  wrapper->preferred_location = -2;
-  wrapper->last_prefetch_location = -2;
-
-  // Register in buffer table using host pointer as key.
-  status = HRX_CALL(hrx_buffer_table_insert(
-      &context->buffer_table, wrapper->device_ptr, wrapper->host_ptr,
-      wrapper->size, wrapper->hrx_buf, wrapper));
 
   if (iree_status_is_ok(status)) {
+    wrapper->host_register_flags = flags;
     *out_buffer = wrapper;
   } else {
-    hrx_buffer_release(hrx_buf);
-    iree_allocator_free(context->host_allocator, host_ptr);
-    iree_hal_streaming_context_release(context);
-    iree_allocator_free(context->host_allocator, wrapper);
+    if (wrapper) {
+      hrx_buffer_table_remove(&context->buffer_table, wrapper->device_ptr);
+      iree_hal_streaming_buffer_free(wrapper);
+    }
   }
   IREE_TRACE_ZONE_END(z0);
   return status;
@@ -787,8 +847,8 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device(
   // Memory allocated via hipHostMalloc using system malloc does not have
   // a HAL buffer, so we use synchronous transfer for those cases.
   bool src_is_pinned = false;
+  iree_hal_streaming_buffer_ref_t src_ref = {0};
   if (stream) {
-    iree_hal_streaming_buffer_ref_t src_ref;
     iree_status_t src_status = iree_hal_streaming_memory_lookup(
         context, (iree_hal_streaming_deviceptr_t)src, &src_ref);
     // Only consider it pinned if there's a backing HAL buffer that we can
@@ -811,25 +871,46 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device(
       }
     }
 
-    // Chunk large transfers into pieces that fit within the inline
-    // BUFFER_UPDATE path (<=64KB per chunk). The remote HAL wire format
-    // uses uint16_t for command length (max 65535). The BUFFER_UPDATE
-    // header is 40 bytes, so max payload is ~65495. Use 63KB to be safe.
-    const iree_device_size_t h2d_chunk_size = 63 * 1024;
-    const uint8_t* src_ptr = (const uint8_t*)src;
-    iree_device_size_t remaining = size;
-    iree_device_size_t chunk_offset = 0;
-
-    // Use synchronous iree_hal_device_transfer_h2d for both hipMemcpy
-    // (stream==NULL) and hipMemcpyAsync with pageable host memory.
-    // Pageable memory can't do true async DMA; the HIP spec falls back
-    // to synchronous copy. Using the direct transfer path avoids flooding
-    // the remote HAL's async buffer pool (32 slots) with thousands of
-    // BUFFER_UPDATE submissions for large tensors.
-    // Ordering is guaranteed because we already flushed pending dispatches
-    // above, and iree_hal_device_transfer_h2d blocks until each chunk
-    // completes.
-    {
+    const iree_device_size_t staging_threshold = 256 * 1024;
+    if (size >= staging_threshold) {
+      iree_hal_streaming_stream_t* copy_stream =
+          stream ? stream : context->default_stream;
+      iree_hal_streaming_buffer_t* staging = NULL;
+      iree_slim_mutex_lock(&context->mutex);
+      iree_status_t status =
+          iree_hal_streaming_context_ensure_pageable_h2d_staging(
+              context, size, &staging);
+      if (iree_status_is_ok(status)) {
+        memcpy(staging->host_ptr, src, size);
+      }
+      if (iree_status_is_ok(status) && !copy_stream->command_buffer) {
+        status = iree_hal_streaming_stream_begin(copy_stream);
+      }
+      if (iree_status_is_ok(status)) {
+        iree_hal_streaming_buffer_ref_t staging_ref = {
+            .buffer = staging,
+            .offset = 0,
+        };
+        iree_hal_buffer_ref_t src_buffer_ref =
+            iree_hal_streaming_convert_range_buffer_ref(staging_ref, size);
+        iree_hal_buffer_ref_t dst_buffer_ref =
+            iree_hal_streaming_convert_range_buffer_ref(dst_ref, size);
+        status = iree_hal_command_buffer_copy_buffer(
+            copy_stream->command_buffer, src_buffer_ref, dst_buffer_ref,
+            IREE_HAL_COPY_FLAG_NONE);
+      }
+      if (iree_status_is_ok(status)) {
+        status = iree_hal_streaming_stream_synchronize(copy_stream);
+      }
+      iree_slim_mutex_unlock(&context->mutex);
+      IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
+    } else {
+      // Small pageable transfers are faster through the direct blocking path
+      // than paying temporary host-visible allocation overhead.
+      const iree_device_size_t h2d_chunk_size = 63 * 1024;
+      const uint8_t* src_ptr = (const uint8_t*)src;
+      iree_device_size_t remaining = size;
+      iree_device_size_t chunk_offset = 0;
       while (remaining > 0) {
         iree_device_size_t this_chunk =
             remaining < h2d_chunk_size ? remaining : h2d_chunk_size;
@@ -837,71 +918,28 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device(
             context->device, src_ptr + chunk_offset, dst_ref.buffer->buffer,
             dst_ref.offset + chunk_offset, this_chunk,
             IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout());
-        if (!iree_status_is_ok(chunk_status)) {
-          fprintf(stderr,
-                  "[H2D] chunk %d failed: buf_offset=%" PRIu64
-                  " chunk_offset=%" PRIu64 " size=%" PRIu64 " total=%" PRIu64
-                  " buf_len=%" PRIu64 "\n",
-                  (int)(chunk_offset / h2d_chunk_size),
-                  (uint64_t)dst_ref.offset, (uint64_t)chunk_offset,
-                  (uint64_t)this_chunk, (uint64_t)size,
-                  (uint64_t)iree_hal_buffer_byte_length(
-                      dst_ref.buffer->buffer));
-          iree_status_fprint(stderr, chunk_status);
-          fprintf(stderr, "\n");
-          IREE_TRACE_ZONE_END(z0);
-          return chunk_status;
-        }
+        IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, chunk_status);
         chunk_offset += this_chunk;
         remaining -= this_chunk;
       }
     }
   } else {
-    // Async: create a host buffer view and copy via command buffer.
+    // Async: copy from the already registered pinned host buffer.
     // Only used when source is pinned memory.
     if (!stream->command_buffer) {
       IREE_RETURN_AND_END_ZONE_IF_ERROR(
           z0, iree_hal_streaming_stream_begin(stream));
     }
 
-    // Import host memory as external buffer.
-    iree_hal_external_buffer_t external_buffer = {
-        .type = IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION,
-        .flags = IREE_HAL_EXTERNAL_BUFFER_FLAG_NONE,
-        .size = size,
-        .handle =
-            {
-                .host_allocation =
-                    {
-                        .ptr = (void*)src,
-                    },
-            },
-    };
-
-    iree_hal_buffer_params_t params = {
-        .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
-        .access = IREE_HAL_MEMORY_ACCESS_READ,
-        .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
-        .queue_affinity = stream->queue_affinity,
-        .min_alignment = 1,
-    };
-
-    iree_hal_buffer_t* src_buffer = NULL;
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_allocator_import_buffer(
-                context->device_allocator, params, &external_buffer,
-                iree_hal_buffer_release_callback_null(), &src_buffer));
-
     // Record copy command.
     iree_hal_buffer_ref_t src_buffer_ref =
-        iree_hal_make_buffer_ref(src_buffer, 0, size);
+        iree_hal_streaming_convert_range_buffer_ref(src_ref, size);
     iree_hal_buffer_ref_t dst_buffer_ref =
         iree_hal_streaming_convert_range_buffer_ref(dst_ref, size);
     iree_status_t status = iree_hal_command_buffer_copy_buffer(
         stream->command_buffer, src_buffer_ref, dst_buffer_ref,
         IREE_HAL_COPY_FLAG_NONE);
 
-    iree_hal_buffer_release(src_buffer);
     IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
   }
 
@@ -933,8 +971,8 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host(
   // Memory allocated via hipHostMalloc using system malloc does not have
   // a HAL buffer, so we use synchronous transfer for those cases.
   bool dst_is_pinned = false;
+  iree_hal_streaming_buffer_ref_t dst_ref = {0};
   if (stream) {
-    iree_hal_streaming_buffer_ref_t dst_ref;
     iree_status_t dst_status = iree_hal_streaming_memory_lookup(
         context, (iree_hal_streaming_deviceptr_t)dst, &dst_ref);
     // Only consider it pinned if there's a backing HAL buffer.
@@ -955,12 +993,38 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host(
       IREE_RETURN_AND_END_ZONE_IF_ERROR(
           z0, iree_hal_streaming_stream_synchronize(stream));
     }
-    // Chunk large transfers to avoid staging buffer map responses that
-    // exceed the remote HAL receive buffer size. Each chunk allocates a
-    // temporary staging buffer, copies device→staging, then maps the
-    // staging buffer to pull data from the server. Keeping chunks small
-    // ensures the map response fits within the receive buffer.
-    const iree_device_size_t d2h_chunk_size = 4 * 1024 * 1024;  // 4MB
+
+    const iree_device_size_t import_threshold = 4 * 1024 * 1024;
+    if (size >= import_threshold) {
+      iree_hal_streaming_stream_t* copy_stream =
+          stream ? stream : context->default_stream;
+      iree_hal_buffer_t* imported_dst = NULL;
+      iree_status_t status = iree_hal_streaming_import_pageable_host_buffer(
+          context, dst, size, IREE_HAL_MEMORY_ACCESS_WRITE,
+          copy_stream->queue_affinity, &imported_dst);
+      if (iree_status_is_ok(status)) {
+        if (!copy_stream->command_buffer) {
+          status = iree_hal_streaming_stream_begin(copy_stream);
+        }
+        if (iree_status_is_ok(status)) {
+          iree_hal_buffer_ref_t src_buffer_ref =
+              iree_hal_streaming_convert_range_buffer_ref(src_ref, size);
+          iree_hal_buffer_ref_t dst_buffer_ref =
+              iree_hal_make_buffer_ref(imported_dst, 0, size);
+          status = iree_hal_command_buffer_copy_buffer(
+              copy_stream->command_buffer, src_buffer_ref, dst_buffer_ref,
+              IREE_HAL_COPY_FLAG_NONE);
+        }
+        if (iree_status_is_ok(status)) {
+          status = iree_hal_streaming_stream_synchronize(copy_stream);
+        }
+        iree_hal_buffer_release(imported_dst);
+        IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
+      }
+      iree_status_ignore(status);
+    }
+
+    const iree_device_size_t d2h_chunk_size = 4 * 1024 * 1024;
     uint8_t* dst_ptr = (uint8_t*)dst;
     iree_device_size_t remaining = size;
     iree_device_size_t chunk_offset = 0;
@@ -971,59 +1035,27 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host(
           context->device, src_ref.buffer->buffer,
           src_ref.offset + chunk_offset, dst_ptr + chunk_offset, this_chunk,
           IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout());
-      if (!iree_status_is_ok(chunk_status)) {
-        IREE_TRACE_ZONE_END(z0);
-        return chunk_status;
-      }
+      IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, chunk_status);
       chunk_offset += this_chunk;
       remaining -= this_chunk;
     }
   } else {
-    // Async: create a host buffer view and copy via command buffer.
+    // Async: copy into the already registered pinned host buffer.
     // Only used when destination is pinned memory.
     if (!stream->command_buffer) {
       IREE_RETURN_AND_END_ZONE_IF_ERROR(
           z0, iree_hal_streaming_stream_begin(stream));
     }
 
-    // Import host memory as external buffer.
-    iree_hal_external_buffer_t external_buffer = {
-        .type = IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION,
-        .flags = IREE_HAL_EXTERNAL_BUFFER_FLAG_NONE,
-        .size = size,
-        .handle =
-            {
-                .host_allocation =
-                    {
-                        .ptr = dst,
-                    },
-            },
-    };
-
-    iree_hal_buffer_params_t params = {
-        .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
-        .access = IREE_HAL_MEMORY_ACCESS_WRITE,
-        .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
-        .queue_affinity = stream->queue_affinity,
-        .min_alignment = 1,
-    };
-
-    iree_hal_buffer_t* dst_buffer = NULL;
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_allocator_import_buffer(
-                context->device_allocator, params, &external_buffer,
-                iree_hal_buffer_release_callback_null(), &dst_buffer));
-
     // Record copy command.
     iree_hal_buffer_ref_t src_buffer_ref =
         iree_hal_streaming_convert_range_buffer_ref(src_ref, size);
     iree_hal_buffer_ref_t dst_buffer_ref =
-        iree_hal_make_buffer_ref(dst_buffer, 0, size);
+        iree_hal_streaming_convert_range_buffer_ref(dst_ref, size);
     iree_status_t status = iree_hal_command_buffer_copy_buffer(
         stream->command_buffer, src_buffer_ref, dst_buffer_ref,
         IREE_HAL_COPY_FLAG_NONE);
 
-    iree_hal_buffer_release(dst_buffer);
     IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
   }
 

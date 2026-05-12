@@ -1521,13 +1521,6 @@ iree_hal_amdgpu_executable_calculate_raw_hsaco_reflection_storage(
     iree_host_size_t* out_export_name_storage_size,
     iree_host_size_t* out_export_parameter_count,
     iree_host_size_t* out_export_parameter_name_storage_size) {
-  if (iree_string_view_is_empty(hsaco_metadata->target)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "raw HSACO metadata is missing `amdhsa.target`; direct loading "
-        "requires the code object to declare its target ISA");
-  }
-
   iree_host_size_t export_name_storage_size = 0;
   iree_host_size_t export_parameter_count = 0;
   iree_host_size_t export_parameter_name_storage_size = 0;

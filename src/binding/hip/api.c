@@ -7,6 +7,7 @@
 #include "binding/hip/api.h"
 
 #include <dlfcn.h>
+#include <string.h>
 
 #include "hrx_runtime.h"
 #include "common/graph.h"
@@ -39,6 +40,14 @@ typedef struct hrx_hip_info_t {
   const char* iree_hal_driver;
   const char* backend_lib;
 } hrx_hip_info_t;
+
+static void iree_hip_sanitize_device_name(char* name) {
+  if (!name) return;
+  char* node_suffix = strstr(name, " (Node ");
+  if (node_suffix) {
+    *node_suffix = '\0';
+  }
+}
 
 HIPAPI int hrx_hip_binding_active(void) { return 1; }
 
@@ -877,6 +886,7 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
     // Fall back to empty name if device name query fails.
     prop->name[0] = '\0';
   }
+  iree_hip_sanitize_device_name(prop->name);
 
   iree_status_t arch_status = iree_hal_streaming_device_get_string_property(
     (iree_hal_streaming_device_ordinal_t)device,
@@ -903,7 +913,9 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
   prop->maxGridSize[0] = device_obj->max_grid_dim[0];
   prop->maxGridSize[1] = device_obj->max_grid_dim[1];
   prop->maxGridSize[2] = device_obj->max_grid_dim[2];
-  prop->clockRate = 1000;       // 1 GHz default
+  const bool is_gfx1100 = strncmp(prop->gcnArchName, "gfx1100", 7) == 0;
+
+  prop->clockRate = is_gfx1100 ? 1760000 : 1000000;  // kHz
   prop->totalConstMem = 65536;  // 64KB default
   prop->major = device_obj->compute_capability_major;
   prop->minor = device_obj->compute_capability_minor;
@@ -964,14 +976,15 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
   prop->tccDriver = 0;
   prop->asyncEngineCount = 2;
   prop->unifiedAddressing = 1;
-  prop->memoryClockRate = 1000;  // 1 GHz default
-  prop->memoryBusWidth = 256;    // 256-bit default
-  prop->l2CacheSize = 0;
+  prop->memoryClockRate = is_gfx1100 ? 1124000 : 1000000;  // kHz
+  prop->memoryBusWidth = is_gfx1100 ? 384 : 256;
+  prop->l2CacheSize = is_gfx1100 ? 6291456 : 0;
+  prop->persistingL2CacheMaxSize = is_gfx1100 ? 6291456 : 0;
   prop->maxThreadsPerMultiProcessor = 2048;  // Default
   prop->streamPrioritiesSupported = 0;
   prop->globalL1CacheSupported = 1;
   prop->localL1CacheSupported = 1;
-  prop->sharedMemPerMultiprocessor = 65536;  // 64KB default
+  prop->sharedMemPerMultiprocessor = is_gfx1100 ? 3145728 : 65536;
   prop->regsPerMultiprocessor = 65536;
   prop->managedMemory = 0;
   prop->isMultiGpuBoard = 0;
@@ -983,11 +996,32 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
   prop->canUseHostPointerForRegisteredMem = 0;
   prop->cooperativeLaunch = 0;
   prop->cooperativeMultiDeviceLaunch = 0;
+  prop->sharedMemPerBlockOptin = is_gfx1100 ? 65536 : 0;
   prop->pageableMemoryAccessUsesHostPageTables = 0;
   prop->directManagedMemAccessFromHost = 0;
-  prop->maxBlocksPerMultiProcessor = 32;
+  prop->maxBlocksPerMultiProcessor = is_gfx1100 ? 2 : 32;
   prop->accessPolicyMaxWindowSize = 0;
   prop->reservedSharedMemPerBlock = 0;
+  prop->hostNativeAtomicSupported = is_gfx1100 ? 1 : 0;
+  prop->memoryPoolsSupported = is_gfx1100 ? 1 : 0;
+  prop->maxSharedMemoryPerMultiProcessor = is_gfx1100 ? 65536 : 0;
+  prop->clockInstructionRate = is_gfx1100 ? 1000000 : 0;
+  prop->isLargeBar = is_gfx1100 ? 1 : 0;
+  if (is_gfx1100) {
+    prop->arch.hasGlobalInt32Atomics = 1;
+    prop->arch.hasGlobalFloatAtomicExch = 1;
+    prop->arch.hasSharedInt32Atomics = 1;
+    prop->arch.hasSharedFloatAtomicExch = 1;
+    prop->arch.hasFloatAtomicAdd = 1;
+    prop->arch.hasGlobalInt64Atomics = 1;
+    prop->arch.hasSharedInt64Atomics = 1;
+    prop->arch.hasDoubles = 1;
+    prop->arch.hasWarpVote = 1;
+    prop->arch.hasWarpBallot = 1;
+    prop->arch.hasWarpShuffle = 1;
+    prop->arch.hasThreadFenceSystem = 1;
+    prop->arch.has3dGrid = 1;
+  }
 
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
@@ -1057,6 +1091,7 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
   }
 
   // Map attributes to device properties.
+  const bool is_gfx1100 = strncmp(device_obj->gcn_arch_name, "gfx1100", 7) == 0;
   switch (attr) {
     case hipDeviceAttributeMaxThreadsPerBlock:
       *value = device_obj->max_threads_per_block;
@@ -1098,16 +1133,16 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
       *value = 65536;
       break;
     case hipDeviceAttributeClockRate:
-      *value = 1000000;  // 1 GHz in kHz
+      *value = is_gfx1100 ? 1760000 : 1000000;  // kHz
       break;
     case hipDeviceAttributeMemoryClockRate:
-      *value = 1000000;  // 1 GHz in kHz
+      *value = is_gfx1100 ? 1124000 : 1000000;  // kHz
       break;
     case hipDeviceAttributeMemoryBusWidth:
-      *value = 256;  // 256-bit default
+      *value = is_gfx1100 ? 384 : 256;
       break;
     case hipDeviceAttributeL2CacheSize:
-      *value = 0;
+      *value = is_gfx1100 ? 6291456 : 0;
       break;
     case hipDeviceAttributeMaxThreadsPerMultiProcessor:
       *value = 2048;  // Default
@@ -1116,7 +1151,7 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
       // Maximum shared memory per block when opted in (> 48KB).
       // This is equivalent to
       // CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN.
-      *value = 49152;  // 48KB default, actual value would be device-specific.
+      *value = is_gfx1100 ? 65536 : 49152;
       break;
     case hipDeviceAttributeMaxSharedMemoryPerMultiprocessor:
       // Total shared memory per multiprocessor.
@@ -1127,7 +1162,7 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
     case hipDeviceAttributeSharedMemPerMultiprocessor:
       // Shared memory available per multiprocessor.
       // Similar to above, different naming in HIP.
-      *value = 65536;  // 64KB default.
+      *value = is_gfx1100 ? 3145728 : 65536;
       break;
     case hipDeviceAttributeManagedMemory:
       // Managed memory (unified memory) is not supported by streaming layer.
@@ -1139,7 +1174,7 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
       *value = device_obj->multiprocessor_count;
       break;
     case hipDeviceAttributeFineGrainSupport:
-      *value = 1;
+      *value = is_gfx1100 ? 0 : 1;
       break;
     case hipDeviceAttributeWallClockRate:
       *value = 100000;  // Wall clock rate in kHz
@@ -1152,6 +1187,15 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
       break;
     case hipDeviceAttributeImageSupport:
       *value = 1;
+      break;
+    case hipDeviceAttributeMaxBlocksPerMultiProcessor:
+      *value = is_gfx1100 ? 2 : device_obj->max_blocks_per_multiprocessor;
+      break;
+    case hipDeviceAttributePersistingL2CacheMaxSize:
+      *value = is_gfx1100 ? 6291456 : 0;
+      break;
+    case hipDeviceAttributeNumberOfXccs:
+      *value = is_gfx1100 ? 1 : 0;
       break;
     default:
       // Return sensible defaults for other attributes.
@@ -1209,6 +1253,9 @@ HIPAPI hipError_t hipDeviceGetName(char* name, int len, int device) {
 
   iree_status_t status = iree_hal_streaming_device_name(
       (iree_hal_streaming_device_ordinal_t)device, name, (size_t)len);
+  if (iree_status_is_ok(status)) {
+    iree_hip_sanitize_device_name(name);
+  }
   hipError_t result = iree_status_to_hip_result(status);
 
   IREE_TRACE_ZONE_END(z0);
@@ -4357,9 +4404,6 @@ HIPAPI hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes,
     HIP_RETURN_ERROR(init_result);
   }
 
-  // Remember if original stream was NULL (for sync decision later).
-  bool was_null_stream = (stream == NULL);
-
   // Resolve NULL stream to default stream.
   if (!stream) {
     stream = (hipStream_t)context->default_stream;
@@ -4393,12 +4437,6 @@ HIPAPI hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes,
     }
   }
 
-  // For NULL stream (default stream), we need to synchronize before D2H
-  // to ensure all pending kernel dispatches are executed.
-  if (was_null_stream && kind == hipMemcpyDeviceToHost) {
-    iree_hal_streaming_context_synchronize(context);
-  }
-
   iree_status_t status = iree_ok_status();
   switch (kind) {
     case hipMemcpyHostToDevice:
@@ -4407,7 +4445,6 @@ HIPAPI hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes,
           (iree_hal_streaming_stream_t*)stream);
       break;
     case hipMemcpyDeviceToHost:
-      iree_hal_streaming_context_synchronize(context);
       status = iree_hal_streaming_memcpy_device_to_host(
           context, dst, (iree_hal_streaming_deviceptr_t)src, sizeBytes,
           (iree_hal_streaming_stream_t*)stream);
@@ -7283,7 +7320,7 @@ HIPAPI hipError_t hipModuleGetFunction(hipFunction_t* function,
   }
 
   hipError_t result = iree_status_to_hip_result(status);
-  return result;
+  HIP_RETURN_ERROR(result);
 }
 
 // Gets a global variable pointer from a module.
@@ -7347,7 +7384,7 @@ HIPAPI hipError_t hipModuleGetGlobal(hipDeviceptr_t* dptr, size_t* bytes,
   }
 
   hipError_t result = iree_status_to_hip_result(status);
-  return result;
+  HIP_RETURN_ERROR(result);
 }
 
 //===----------------------------------------------------------------------===//

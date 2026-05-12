@@ -141,7 +141,15 @@ static iree_status_t iree_hal_streaming_query_device_info(
       device->hal_device, IREE_SV("hal.dispatch"), IREE_SV("concurrency"),
       &mp_count);
   if (iree_status_is_ok(status) && mp_count > 0) {
-    device->multiprocessor_count = (uint32_t)mp_count;
+    uint32_t multiprocessor_count = (uint32_t)mp_count;
+    // IREE/HSA reports raw compute units, while HIP reports RDNA devices in
+    // WGP-like units. Keep this HIP-compatible because rocBLAS/hipBLASLt query
+    // the physical multiprocessor count when selecting GEMM solutions.
+    if (device->compute_capability_major >= 10 && device->warp_size == 32 &&
+        multiprocessor_count > 1 && (multiprocessor_count % 2) == 0) {
+      multiprocessor_count /= 2;
+    }
+    device->multiprocessor_count = multiprocessor_count;
   } else {
     // Fall back to generic value if query fails.
     // The HSA backend supports hal.dispatch.concurrency and will return

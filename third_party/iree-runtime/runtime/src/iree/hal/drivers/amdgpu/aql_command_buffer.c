@@ -2060,13 +2060,15 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_prepare_dispatch_plan(
         out_plan->descriptor->kernel_args.implicit_args_offset != UINT16_MAX
             ? out_plan->descriptor->kernel_args.implicit_args_offset
             : out_plan->descriptor->kernel_args.kernarg_size;
-    if (IREE_UNLIKELY(inputs->constants.data_length <
-                      required_explicit_bytes)) {
+    const iree_host_size_t padded_constant_length =
+        iree_host_align(inputs->constants.data_length, /*alignment=*/8);
+    if (IREE_UNLIKELY(padded_constant_length < required_explicit_bytes)) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "custom dispatch argument length too short; expected at least %u "
-          "but got %" PRIhsz,
-          required_explicit_bytes, inputs->constants.data_length);
+          "but got %" PRIhsz " (padded to %" PRIhsz ")",
+          required_explicit_bytes, inputs->constants.data_length,
+          padded_constant_length);
     }
     out_plan->layout = &out_plan->descriptor->custom_kernarg_layout;
     out_plan->kernarg_block_count =

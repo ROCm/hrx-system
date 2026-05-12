@@ -65,6 +65,8 @@ iree_hal_streaming_context_create(iree_hal_streaming_device_t *device_entry,
   context->peer_count = 0;
   context->peer_capacity = 0;
   memset(&context->buffer_table, 0, sizeof(context->buffer_table));
+  context->pageable_h2d_staging_buffer = NULL;
+  context->pageable_h2d_staging_size = 0;
   context->host_allocator = host_allocator;
   iree_slim_mutex_initialize(&context->mutex);
 
@@ -165,6 +167,8 @@ iree_hal_streaming_context_destroy(iree_hal_streaming_context_t *context) {
     iree_status_ignore(
         iree_hal_streaming_stream_synchronize(context->default_stream));
   }
+
+  iree_hal_streaming_memory_release_pageable_staging(context);
 
   // Deinitialize symbol map and unload any statically-registered modules that
   // were on-demand loaded for this context.
