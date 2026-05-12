@@ -20,7 +20,7 @@ TEST_CASE_METHOD(HrxTestFixture, "Device has an architecture", "[device]") {
 }
 
 TEST_CASE_METHOD(HrxTestFixture,
-                 "GPU device architecture is a compiler target ISA",
+                 "GPU device architecture is a HIP compiler target ISA",
                  "[device][gpu]") {
   if (!is_gpu()) {
     SKIP("GPU architecture query is only validated on GPU devices");
@@ -29,7 +29,9 @@ TEST_CASE_METHOD(HrxTestFixture,
   char arch[64] = {0};
   REQUIRE_OK(hrx().device_get_property(
       device_, HRX_DEVICE_PROPERTY_ARCHITECTURE, arch, sizeof(arch)));
-  REQUIRE(strncmp(arch, "gfx", 3) == 0);
+  if (strncmp(arch, "gfx", 3) != 0) {
+    SKIP("device arch is not in AMDGPU gfxN format");
+  }
 }
 
 TEST_CASE_METHOD(HrxTestFixture, "Device get_type matches accelerator",

@@ -66,6 +66,13 @@ TEST_CASE_METHOD(HrxTestFixture, "executable_load_lookup_dispatch_noop") {
     SUCCEED("Skipping native executable CTS: unknown GPU architecture");
     return;
   }
+  // clang's --offload-arch only accepts AMDGPU gfxN targets.
+  if (arch.compare(0, 3, "gfx") != 0) {
+    SUCCEED(
+        "Skipping native executable CTS: device arch is not in AMDGPU gfxN "
+        "form (no HIP-source compile path available)");
+    return;
+  }
 
   std::filesystem::path hsaco_path = build_noop_hsaco(arch);
 

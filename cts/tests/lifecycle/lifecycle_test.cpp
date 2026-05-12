@@ -12,9 +12,13 @@ TEST_CASE("Runtime version is valid", "[lifecycle]") {
   REQUIRE(patch >= 0);
 }
 
-TEST_CASE("CPU init and shutdown", "[lifecycle][cpu]") {
-  // CPU is already initialized by main.cpp if we're on CPU.
-  // Test that device_count works.
+TEST_CASE_METHOD(HrxTestFixture, "CPU init and shutdown",
+                 "[lifecycle][cpu]") {
+  // main.cpp only initializes the selected accelerator. When --hrx-device is
+  // gpu:N the CPU side is never touched, so cpu_device_count would fail.
+  if (!is_cpu()) {
+    SKIP("CPU lifecycle test is only valid when running on the CPU device");
+  }
   int count = 0;
   REQUIRE_OK(hrx().cpu_device_count(&count));
   REQUIRE(count > 0);
@@ -32,8 +36,13 @@ TEST_CASE("GPU init and shutdown", "[lifecycle][gpu]") {
   }
 }
 
-TEST_CASE("Double init returns ALREADY_EXISTS", "[lifecycle]") {
-  // CPU is already initialized. Calling again should return error.
+TEST_CASE_METHOD(HrxTestFixture, "Double init returns ALREADY_EXISTS",
+                 "[lifecycle][cpu]") {
+  // Tests cpu_initialize's double-init behavior; only meaningful when CPU
+  // was the accelerator selected and pre-initialized by main.cpp.
+  if (!is_cpu()) {
+    SKIP("cpu_initialize double-init requires CPU as the selected device");
+  }
   hrx_status_t status = hrx().cpu_initialize(0);
   REQUIRE(!hrx_status_is_ok(status));
   REQUIRE(hrx().status_code(status) == HRX_STATUS_ALREADY_EXISTS);

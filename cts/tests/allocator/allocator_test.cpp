@@ -74,8 +74,16 @@ TEST_CASE_METHOD(HrxTestFixture, "allocator_import_buffer from host ptr",
   params.usage = HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED;
 
   hrx_buffer_t buf = nullptr;
-  REQUIRE_OK(
-      hrx().allocator_import_buffer(alloc, params, host_data, 128, &buf));
+  hrx_status_t status =
+      hrx().allocator_import_buffer(alloc, params, host_data, 128, &buf);
+  // Host-pointer import is an optional HAL capability; UNIMPLEMENTED is a
+  // valid return for drivers without a userptr-style ioctl.
+  if (hrx().status_code(status) == HRX_STATUS_UNIMPLEMENTED) {
+    hrx().status_ignore(status);
+    hrx().host_allocator_free_aligned(ha, host_raw);
+    SKIP("device allocator does not support host pointer import");
+  }
+  REQUIRE_OK(status);
   REQUIRE(buf != nullptr);
 
   size_t size = 0;
