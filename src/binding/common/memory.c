@@ -161,17 +161,19 @@ static void iree_hal_streaming_temporary_host_buffer_free(
 
 void iree_hal_streaming_memory_release_pageable_staging(
     iree_hal_streaming_context_t* context) {
-  if (!context || !context->pageable_h2d_staging_buffer) return;
-  iree_hal_streaming_buffer_t* buffer = context->pageable_h2d_staging_buffer;
-  hrx_buffer_table_remove(&context->buffer_table, buffer->device_ptr);
-  if (buffer->hrx_buf) {
-    hrx_buffer_release(buffer->hrx_buf);
-    buffer->hrx_buf = NULL;
-    buffer->buffer = NULL;
+  if (!context) return;
+  if (context->pageable_h2d_staging_buffer) {
+    iree_hal_streaming_buffer_t* buffer = context->pageable_h2d_staging_buffer;
+    hrx_buffer_table_remove(&context->buffer_table, buffer->device_ptr);
+    if (buffer->hrx_buf) {
+      hrx_buffer_release(buffer->hrx_buf);
+      buffer->hrx_buf = NULL;
+      buffer->buffer = NULL;
+    }
+    iree_allocator_free(context->host_allocator, buffer);
+    context->pageable_h2d_staging_buffer = NULL;
+    context->pageable_h2d_staging_size = 0;
   }
-  iree_allocator_free(context->host_allocator, buffer);
-  context->pageable_h2d_staging_buffer = NULL;
-  context->pageable_h2d_staging_size = 0;
 }
 
 static iree_status_t iree_hal_streaming_context_ensure_pageable_h2d_staging(
@@ -202,39 +204,6 @@ static iree_status_t iree_hal_streaming_context_ensure_pageable_h2d_staging(
   context->pageable_h2d_staging_size = size;
   *out_staging = staging;
   return iree_ok_status();
-}
-
-static iree_status_t iree_hal_streaming_import_pageable_host_buffer(
-    iree_hal_streaming_context_t* context, void* ptr, iree_device_size_t size,
-    iree_hal_memory_access_t access, iree_hal_queue_affinity_t queue_affinity,
-    iree_hal_buffer_t** out_buffer) {
-  IREE_ASSERT_ARGUMENT(context);
-  IREE_ASSERT_ARGUMENT(ptr);
-  IREE_ASSERT_ARGUMENT(out_buffer);
-  *out_buffer = NULL;
-
-  iree_hal_external_buffer_t external_buffer = {
-      .type = IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION,
-      .flags = IREE_HAL_EXTERNAL_BUFFER_FLAG_NONE,
-      .size = size,
-      .handle =
-          {
-              .host_allocation =
-                  {
-                      .ptr = ptr,
-                  },
-          },
-  };
-  iree_hal_buffer_params_t params = {
-      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
-      .access = access,
-      .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
-      .queue_affinity = queue_affinity,
-      .min_alignment = 1,
-  };
-  return iree_hal_allocator_import_buffer(
-      context->device_allocator, params, &external_buffer,
-      iree_hal_buffer_release_callback_null(), out_buffer);
 }
 
 iree_hal_streaming_deviceptr_t iree_hal_streaming_buffer_device_pointer(
@@ -992,36 +961,6 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host(
     if (stream) {
       IREE_RETURN_AND_END_ZONE_IF_ERROR(
           z0, iree_hal_streaming_stream_synchronize(stream));
-    }
-
-    const iree_device_size_t import_threshold = 4 * 1024 * 1024;
-    if (size >= import_threshold) {
-      iree_hal_streaming_stream_t* copy_stream =
-          stream ? stream : context->default_stream;
-      iree_hal_buffer_t* imported_dst = NULL;
-      iree_status_t status = iree_hal_streaming_import_pageable_host_buffer(
-          context, dst, size, IREE_HAL_MEMORY_ACCESS_WRITE,
-          copy_stream->queue_affinity, &imported_dst);
-      if (iree_status_is_ok(status)) {
-        if (!copy_stream->command_buffer) {
-          status = iree_hal_streaming_stream_begin(copy_stream);
-        }
-        if (iree_status_is_ok(status)) {
-          iree_hal_buffer_ref_t src_buffer_ref =
-              iree_hal_streaming_convert_range_buffer_ref(src_ref, size);
-          iree_hal_buffer_ref_t dst_buffer_ref =
-              iree_hal_make_buffer_ref(imported_dst, 0, size);
-          status = iree_hal_command_buffer_copy_buffer(
-              copy_stream->command_buffer, src_buffer_ref, dst_buffer_ref,
-              IREE_HAL_COPY_FLAG_NONE);
-        }
-        if (iree_status_is_ok(status)) {
-          status = iree_hal_streaming_stream_synchronize(copy_stream);
-        }
-        iree_hal_buffer_release(imported_dst);
-        IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
-      }
-      iree_status_ignore(status);
     }
 
     const iree_device_size_t d2h_chunk_size = 4 * 1024 * 1024;

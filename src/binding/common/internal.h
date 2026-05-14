@@ -255,6 +255,7 @@ struct iree_hal_streaming_context_t {
   // HIP/CUDA C++ and embedded kernels split out by the compiler. If only using
   // the driver API with explicit module management this is bypassed.
   iree_hal_streaming_context_symbol_map_t symbol_map;
+
 };
 
 //===----------------------------------------------------------------------===//
@@ -417,6 +418,7 @@ typedef struct iree_hal_streaming_stream_t {
 
   // Command buffer for batching operations.
   iree_hal_command_buffer_t* command_buffer;
+  uint32_t pending_launch_count;
 
   // Semaphore chain for synchronization.
   iree_hal_semaphore_t* timeline_semaphore;

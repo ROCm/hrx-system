@@ -186,7 +186,7 @@ static int g_pt_log_level = 0;
 static pthread_mutex_t g_pt_log_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int g_pt_log_initialized = 0;
 
-static void pt_log_fallback(int level, const char *fmt, ...) {
+static void pt_log_fallback_init(void) {
   if (!g_pt_log_initialized) {
     g_pt_log_initialized = 1;
     const char *log_path = getenv("HIP_LOG_FILE");
@@ -201,6 +201,10 @@ static void pt_log_fallback(int level, const char *fmt, ...) {
     if (level_str)
       g_pt_log_level = atoi(level_str);
   }
+}
+
+static void pt_log_fallback(int level, const char *fmt, ...) {
+  pt_log_fallback_init();
   if (level > g_pt_log_level || !g_pt_log_file)
     return;
 
@@ -230,6 +234,9 @@ static void pt_log(int level, const char *fmt, ...) {
     return;
   }
   // Fallback: use our own logging
+  pt_log_fallback_init();
+  if (level > g_pt_log_level || !g_pt_log_file)
+    return;
   va_list args;
   va_start(args, fmt);
   char buf[1024];
