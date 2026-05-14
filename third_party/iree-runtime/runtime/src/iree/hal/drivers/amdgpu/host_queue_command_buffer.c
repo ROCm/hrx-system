@@ -12,6 +12,20 @@
 #include "iree/hal/drivers/amdgpu/host_queue_command_buffer_replay.h"
 #include "iree/hal/utils/resource_set.h"
 
+#include <stdio.h>
+#include <stdlib.h>
+
+static bool iree_hal_amdgpu_hrx_cb_stats_enabled(void) {
+  static int initialized = 0;
+  static bool enabled = false;
+  if (!initialized) {
+    initialized = 1;
+    const char* value = getenv("HRX_CB_STATS");
+    enabled = value && value[0] && value[0] != '0';
+  }
+  return enabled;
+}
+
 iree_status_t iree_hal_amdgpu_host_queue_validate_execute_flags(
     iree_hal_execute_flags_t flags) {
   const iree_hal_execute_flags_t supported_flags =
@@ -126,6 +140,14 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_command_buffer(
 
   const bool requires_replay =
       program->max_block_aql_packet_count == 0 || program->block_count != 1;
+  if (iree_hal_amdgpu_hrx_cb_stats_enabled()) {
+    fprintf(stderr,
+            "[HRX_CB_STATS] commands=%u blocks=%u max_block_packets=%u "
+            "max_block_kernarg=%u requires_replay=%d\n",
+            program->command_count, program->block_count,
+            program->max_block_aql_packet_count,
+            program->max_block_kernarg_length, requires_replay ? 1 : 0);
+  }
   if (requires_replay && program->max_block_aql_packet_count == 0) {
     IREE_RETURN_IF_ERROR(
         iree_hal_amdgpu_aql_program_validate_metadata_only(program));

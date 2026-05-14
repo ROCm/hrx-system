@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "iree/base/alignment.h"
 #include "iree/hal/drivers/amdgpu/buffer.h"
 #include "iree/hal/drivers/amdgpu/device/dispatch.h"
 #include "iree/hal/drivers/amdgpu/device/timestamp.h"
@@ -226,12 +227,15 @@ static iree_status_t iree_hal_amdgpu_host_queue_validate_dispatch_kernargs(
         descriptor->kernel_args.implicit_args_offset != UINT16_MAX
             ? descriptor->kernel_args.implicit_args_offset
             : descriptor->kernel_args.kernarg_size;
-    if (IREE_UNLIKELY(constants.data_length < required_explicit_bytes)) {
+    const iree_host_size_t padded_constant_length =
+        iree_host_align(constants.data_length, /*alignment=*/8);
+    if (IREE_UNLIKELY(padded_constant_length < required_explicit_bytes)) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "custom dispatch argument length too short; expected at least %u "
-          "but got %" PRIhsz,
-          required_explicit_bytes, constants.data_length);
+          "but got %" PRIhsz " (padded to %" PRIhsz ")",
+          required_explicit_bytes, constants.data_length,
+          padded_constant_length);
     }
     // Callers (e.g. rocBLAS/Tensile) may pad beyond the declared
     // kernarg_segment_size. The kernel descriptor only reads its declared
@@ -536,7 +540,7 @@ static iree_status_t iree_hal_amdgpu_host_queue_submit_direct_dispatch(
     iree_hal_amdgpu_device_dispatch_emplace_custom_kernargs(
         plan->kernel_args, config.workgroup_count,
         config.dynamic_workgroup_local_memory, plan->layout, constants.data,
-        submission.kernel.kernargs.blocks->data);
+        constants.data_length, submission.kernel.kernargs.blocks->data);
   } else {
     iree_hal_amdgpu_device_dispatch_emplace_hal_kernargs(
         plan->kernel_args, config.workgroup_count,
@@ -732,7 +736,7 @@ static iree_status_t iree_hal_amdgpu_host_queue_submit_indirect_dispatch(
     iree_hal_amdgpu_device_dispatch_emplace_custom_kernargs(
         plan->kernel_args, placeholder_workgroup_count,
         config.dynamic_workgroup_local_memory, plan->layout, constants.data,
-        dispatch_kernarg_data);
+        constants.data_length, dispatch_kernarg_data);
   } else {
     iree_hal_amdgpu_device_dispatch_emplace_hal_kernargs(
         plan->kernel_args, placeholder_workgroup_count,

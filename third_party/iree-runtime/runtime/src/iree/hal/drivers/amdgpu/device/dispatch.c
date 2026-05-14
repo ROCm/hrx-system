@@ -102,6 +102,7 @@ void iree_hal_amdgpu_device_dispatch_emplace_custom_kernargs(
     const iree_hal_amdgpu_device_dispatch_kernarg_layout_t* IREE_AMDGPU_RESTRICT
         layout,
     const void* IREE_AMDGPU_RESTRICT custom_kernarg_ptr,
+    size_t custom_kernarg_length,
     void* IREE_AMDGPU_RESTRICT kernarg_ptr) {
   if (layout->total_kernarg_size > 0) {
     // Zero the segment first so the implicit region is well-defined even if
@@ -113,8 +114,11 @@ void iree_hal_amdgpu_device_dispatch_emplace_custom_kernargs(
         (kernel_args && kernel_args->implicit_args_offset != (uint16_t)0xFFFFu)
             ? (uint32_t)kernel_args->implicit_args_offset
             : layout->total_kernarg_size;
-    if (explicit_bytes > 0) {
-      iree_amdgpu_memcpy(kernarg_ptr, custom_kernarg_ptr, explicit_bytes);
+    const size_t copy_bytes =
+        custom_kernarg_length < explicit_bytes ? custom_kernarg_length
+                                               : explicit_bytes;
+    if (copy_bytes > 0) {
+      iree_amdgpu_memcpy(kernarg_ptr, custom_kernarg_ptr, copy_bytes);
     }
   }
   // HIP-compiled kernels (e.g. PyTorch's distribution_elementwise grid-stride

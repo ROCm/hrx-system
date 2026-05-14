@@ -180,6 +180,7 @@ void iree_hal_amdgpu_device_dispatch_emplace_custom_kernargs(
     const iree_hal_amdgpu_device_dispatch_kernarg_layout_t* IREE_AMDGPU_RESTRICT
         layout,
     const void* IREE_AMDGPU_RESTRICT custom_kernarg_ptr,
+    size_t custom_kernarg_length,
     void* IREE_AMDGPU_RESTRICT kernarg_ptr);
 
 // Populates the builtin patch dispatch that updates an indirect-parameter

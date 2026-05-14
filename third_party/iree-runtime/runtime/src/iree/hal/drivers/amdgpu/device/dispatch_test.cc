@@ -173,7 +173,8 @@ TEST(DispatchTest, EmplaceCustomKernargsCopiesRawBlob) {
 
   iree_hal_amdgpu_device_dispatch_emplace_custom_kernargs(
       &kernel_args, workgroup_count, /*dynamic_workgroup_local_memory=*/0,
-      &layout, custom_kernargs.data(), kernargs.data());
+      &layout, custom_kernargs.data(), custom_kernargs.size(),
+      kernargs.data());
 
   EXPECT_EQ(std::memcmp(kernargs.data(), custom_kernargs.data(),
                         custom_kernargs.size()),
