@@ -7,10 +7,12 @@
 #ifndef IREE_HAL_REMOTE_SERVER_SESSION_H_
 #define IREE_HAL_REMOTE_SERVER_SESSION_H_
 
+#include "iree/async/frontier.h"
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
 #include "iree/hal/remote/server/resource_table.h"
 #include "iree/net/channel/queue/queue_channel.h"
+#include "iree/net/channel/util/sequence_window.h"
 #include "iree/net/session.h"
 
 #ifdef __cplusplus
@@ -18,6 +20,14 @@ extern "C" {
 #endif  // __cplusplus
 
 typedef struct iree_hal_remote_server_t iree_hal_remote_server_t;
+
+typedef uint8_t iree_hal_remote_server_epoch_slot_state_t;
+
+enum iree_hal_remote_server_epoch_slot_state_e {
+  IREE_HAL_REMOTE_SERVER_EPOCH_SLOT_EMPTY = 0,
+  IREE_HAL_REMOTE_SERVER_EPOCH_SLOT_OCCUPIED = 1,
+  IREE_HAL_REMOTE_SERVER_EPOCH_SLOT_TOMBSTONE = 2,
+};
 
 // Per-client session tracking entry.
 // Stored in the server's sessions array (indexed by slot).
@@ -44,17 +54,36 @@ typedef struct iree_hal_remote_server_session_t {
   // when the session is removed.
   iree_hal_remote_resource_table_t resource_table;
 
-  // Epoch→local semaphore mapping for wait frontier resolution. Each COMMAND
-  // creates a local semaphore for completion tracking; subsequent commands
-  // with wait frontiers look up earlier epochs to build local wait semaphore
-  // lists. The mapping retains each semaphore and releases them all on session
-  // removal.
+  // (axis, epoch)→local semaphore mapping for wait frontier resolution. Each
+  // COMMAND creates a local semaphore for completion tracking; subsequent
+  // commands with wait frontiers look up earlier frontier entries to build
+  // local wait semaphore lists. The mapping retains each semaphore until its
+  // command completes or the session is removed.
   struct {
+    // Occupancy state for each open-addressed slot.
+    iree_hal_remote_server_epoch_slot_state_t* states;
+    // Signal axis for each occupied slot.
+    iree_async_axis_t* axes;
+    // Signal epoch for each occupied slot.
     uint64_t* epochs;
-    iree_hal_semaphore_t** semaphores;  // retained
+    // Retained local completion semaphore for each occupied slot.
+    iree_hal_semaphore_t** semaphores;
+    // Number of occupied slots.
     iree_host_size_t count;
+    // Number of occupied or tombstone slots.
+    iree_host_size_t used_count;
+    // Power-of-two capacity of all slot arrays.
     iree_host_size_t capacity;
   } epoch_semaphore_map;
+
+  // COMMAND submission epochs processed by the server after referenced
+  // resources have either been retained by the local HAL or rejected.
+  iree_net_sequence_window_t observed_submission_window;
+
+  // COMMAND signal epochs completed by the wrapped local HAL. Exact
+  // observations let later wait frontier resolution skip retired local
+  // semaphores, while the contiguous prefix gates ordered ADVANCE frames.
+  iree_net_sequence_window_t completed_signal_window;
 
   // Provisional→resolved resource ID mapping. Populated during BUFFER_ALLOCA
   // processing (the server assigns a canonical ID and records the mapping).
@@ -100,6 +129,10 @@ iree_status_t iree_hal_remote_server_on_control_data(
 // same session (second call is a no-op).
 void iree_hal_remote_server_remove_session(iree_hal_remote_server_t* server,
                                            iree_net_session_t* session);
+
+// Deinitializes sequence windows and releases any owner-managed pending nodes.
+void iree_hal_remote_server_session_deinitialize_windows(
+    iree_hal_remote_server_session_t* session_slot);
 
 #ifdef __cplusplus
 }  // extern "C"

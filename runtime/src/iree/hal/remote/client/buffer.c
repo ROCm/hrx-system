@@ -33,28 +33,10 @@ static void iree_hal_remote_client_buffer_destroy(
   iree_hal_buffer_release(buffer->backing_buffer);
 
   if (buffer->owns_remote_resource && buffer->resource_id != 0) {
-    // Send fire-and-forget RESOURCE_RELEASE_BATCH to the server.
-    // Build a batch of 1 resource.
-    struct {
-      iree_hal_remote_control_envelope_t envelope;
-      iree_hal_remote_resource_release_batch_t batch;
-      iree_hal_remote_resource_id_t resource_ids[1];
-    } message;
-    memset(&message, 0, sizeof(message));
-    message.envelope.message_type =
-        IREE_HAL_REMOTE_CONTROL_RESOURCE_RELEASE_BATCH;
-    message.envelope.message_flags =
-        IREE_HAL_REMOTE_CONTROL_FLAG_FIRE_AND_FORGET;
-    message.batch.resource_count = 1;
-    message.resource_ids[0] = buffer->resource_id;
-
-    iree_const_byte_span_t message_span =
-        iree_make_const_byte_span(&message, sizeof(message));
-    iree_status_t status = iree_hal_remote_client_device_send_fire_and_forget(
-        buffer->device, message_span);
     // Release is best-effort. If the session is already disconnected, the
     // server will clean up the resource when the session closes.
-    iree_status_ignore(status);
+    iree_status_ignore(iree_hal_remote_client_device_release_resource(
+        buffer->device, buffer->resource_id));
   }
 
   if (base_buffer->allocated_buffer != base_buffer) {

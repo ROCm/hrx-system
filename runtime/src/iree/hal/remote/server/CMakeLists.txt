@@ -34,6 +34,7 @@ iree_cc_library(
     iree::hal::remote::util::queue_header_pool
     iree::net::channel::queue::queue_channel
     iree::net::channel::util::frame_sender
+    iree::net::channel::util::sequence_window
     iree::net::session
     iree::net::status_wire
     iree::net::transport_factory

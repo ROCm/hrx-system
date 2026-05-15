@@ -13,15 +13,15 @@ iree_status_t iree_hal_remote_resource_table_initialize(
     iree_hal_remote_resource_table_t* out_table) {
   memset(out_table, 0, sizeof(*out_table));
 
-  iree_status_t status = iree_allocator_malloc(
-      host_allocator, capacity * sizeof(void*), (void**)&out_table->entries);
+  iree_status_t status = iree_allocator_malloc_array(
+      host_allocator, capacity, sizeof(*out_table->entries),
+      (void**)&out_table->entries);
   if (iree_status_is_ok(status)) {
-    memset(out_table->entries, 0, capacity * sizeof(void*));
-    status = iree_allocator_malloc(host_allocator, capacity * sizeof(uint16_t),
-                                   (void**)&out_table->generations);
+    status = iree_allocator_malloc_array(host_allocator, capacity,
+                                         sizeof(*out_table->generations),
+                                         (void**)&out_table->generations);
   }
   if (iree_status_is_ok(status)) {
-    memset(out_table->generations, 0, capacity * sizeof(uint16_t));
     out_table->capacity = capacity;
     out_table->next_slot = 0;
   } else {
@@ -88,13 +88,21 @@ void* iree_hal_remote_resource_table_lookup(
 void iree_hal_remote_resource_table_release(
     iree_hal_remote_resource_table_t* table,
     iree_hal_remote_resource_id_t resource_id) {
+  void* resource = iree_hal_remote_resource_table_detach(table, resource_id);
+  iree_hal_resource_release(resource);
+}
+
+void* iree_hal_remote_resource_table_detach(
+    iree_hal_remote_resource_table_t* table,
+    iree_hal_remote_resource_id_t resource_id) {
   uint32_t slot = IREE_HAL_REMOTE_RESOURCE_ID_SLOT(resource_id);
-  if (slot >= table->capacity) return;
+  if (slot >= table->capacity) return NULL;
 
   uint16_t expected_generation =
       IREE_HAL_REMOTE_RESOURCE_ID_GENERATION(resource_id);
-  if (table->generations[slot] != expected_generation) return;
+  if (table->generations[slot] != expected_generation) return NULL;
 
-  iree_hal_resource_release(table->entries[slot]);
+  void* resource = table->entries[slot];
   table->entries[slot] = NULL;
+  return resource;
 }

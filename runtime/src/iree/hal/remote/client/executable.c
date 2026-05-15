@@ -26,21 +26,8 @@ static void iree_hal_remote_client_executable_destroy(
       (iree_hal_remote_client_executable_t*)base_executable;
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  // Fire-and-forget resource release to the server (same pattern as buffer).
-  struct {
-    iree_hal_remote_control_envelope_t envelope;
-    iree_hal_remote_resource_release_batch_t batch;
-    iree_hal_remote_resource_id_t resource_ids[1];
-  } message;
-  memset(&message, 0, sizeof(message));
-  message.envelope.message_type =
-      IREE_HAL_REMOTE_CONTROL_RESOURCE_RELEASE_BATCH;
-  message.envelope.message_flags = IREE_HAL_REMOTE_CONTROL_FLAG_FIRE_AND_FORGET;
-  message.batch.resource_count = 1;
-  message.resource_ids[0] = executable->resource_id;
-  iree_status_ignore(iree_hal_remote_client_device_send_fire_and_forget(
-      executable->device,
-      iree_make_const_byte_span(&message, sizeof(message))));
+  iree_status_ignore(iree_hal_remote_client_device_release_resource(
+      executable->device, executable->resource_id));
 
   iree_allocator_t host_allocator = executable->host_allocator;
   iree_allocator_free(host_allocator, executable);

@@ -66,6 +66,14 @@ void iree_hal_remote_resource_table_release(
     iree_hal_remote_resource_table_t* table,
     iree_hal_remote_resource_id_t resource_id);
 
+// Detaches a resource slot by resource_id and transfers the table's retained
+// reference to the caller. Validates the type and generation before detaching.
+// Returns NULL on mismatch or stale release. The caller must release the
+// returned HAL resource.
+void* iree_hal_remote_resource_table_detach(
+    iree_hal_remote_resource_table_t* table,
+    iree_hal_remote_resource_id_t resource_id);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

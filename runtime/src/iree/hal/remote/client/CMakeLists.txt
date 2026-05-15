@@ -40,6 +40,7 @@ iree_cc_library(
     iree::async::util::proactor_pool
     iree::base
     iree::base::internal
+    iree::base::internal::arena
     iree::base::threading
     iree::hal
     iree::hal::memory::slab_provider
@@ -50,6 +51,7 @@ iree_cc_library(
     iree::hal::remote::util::queue_header_pool
     iree::hal::remote::util::recv_pool
     iree::hal::utils::files
+    iree::hal::utils::resource_set
     iree::net::channel::queue::queue_channel
     iree::net::channel::util::frame_sender
     iree::net::session

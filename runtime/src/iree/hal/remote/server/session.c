@@ -28,6 +28,111 @@
 // Session slot helpers
 //===----------------------------------------------------------------------===//
 
+// Context for a pending command completion on the server. Heap-allocated before
+// local submission and released after sending the ordered ADVANCE frame or when
+// the session shuts down. Used for all queue operations.
+typedef struct iree_hal_remote_server_command_completion_t {
+  // Timepoint registered on the local signal semaphore.
+  iree_async_semaphore_timepoint_t timepoint;
+  // Intrusive node held by completed_signal_window until ADVANCE is ordered.
+  iree_net_sequence_node_t sequence_node;
+  // Owning server retained while the completion can fire asynchronously.
+  iree_hal_remote_server_t* server;
+  // Session slot that owned the command when it was submitted.
+  iree_hal_remote_server_session_t* session_slot;
+  // Session ID expected in |session_slot| when the completion fires.
+  uint64_t session_id;
+  // Queue channel retained for the eventual ADVANCE frame.
+  iree_net_queue_channel_t* queue_channel;
+  // Local signal semaphore retained for completion tracking.
+  iree_hal_semaphore_t* local_semaphore;
+  // Host allocator used to free this context.
+  iree_allocator_t host_allocator;
+  // Single-entry frontier signaled by this command.
+  iree_async_single_frontier_t signal_frontier;
+  // Number of resolution entries piggybacked on ADVANCE.
+  uint16_t resolution_count;
+  // Padding reserved to keep following payload storage aligned.
+  uint16_t resolution_padding[3];
+  // BUFFER_ALLOCA provisional-to-resolved mapping, valid when count is one.
+  iree_hal_remote_resolution_entry_t resolution;
+} iree_hal_remote_server_command_completion_t;
+
+static void iree_hal_remote_server_release_command_completion(
+    iree_hal_remote_server_command_completion_t* completion) {
+  if (!completion) return;
+  iree_allocator_t host_allocator = completion->host_allocator;
+  iree_net_queue_channel_release(completion->queue_channel);
+  iree_hal_semaphore_release(completion->local_semaphore);
+  iree_hal_remote_server_release(completion->server);
+  iree_allocator_free(host_allocator, completion);
+}
+
+static void iree_hal_remote_server_free_command_completion_nodes(
+    iree_net_sequence_node_t* pending_list) {
+  while (pending_list) {
+    iree_net_sequence_node_t* next = pending_list->next;
+    iree_hal_remote_server_command_completion_t* completion = iree_containerof(
+        pending_list, iree_hal_remote_server_command_completion_t,
+        sequence_node);
+    iree_hal_remote_server_release_command_completion(completion);
+    pending_list = next;
+  }
+}
+
+typedef struct iree_hal_remote_server_resource_release_node_t {
+  // Intrusive node held by observed_submission_window until release is safe.
+  iree_net_sequence_node_t sequence_node;
+  // Host allocator used to free this node.
+  iree_allocator_t host_allocator;
+  // Number of resource IDs in the trailing array.
+  uint32_t resource_count;
+  // Reserved padding for stable trailing-array alignment.
+  uint32_t reserved;
+  // Resource IDs to release once the required submission epoch is observed.
+  iree_hal_remote_resource_id_t resource_ids[];
+} iree_hal_remote_server_resource_release_node_t;
+
+static void iree_hal_remote_server_free_resource_release_nodes(
+    iree_net_sequence_node_t* pending_list) {
+  while (pending_list) {
+    iree_net_sequence_node_t* next = pending_list->next;
+    iree_hal_remote_server_resource_release_node_t* release_node =
+        iree_containerof(pending_list,
+                         iree_hal_remote_server_resource_release_node_t,
+                         sequence_node);
+    iree_allocator_t host_allocator = release_node->host_allocator;
+    iree_allocator_free(host_allocator, release_node);
+    pending_list = next;
+  }
+}
+
+static void iree_hal_remote_server_session_take_window_nodes(
+    iree_hal_remote_server_session_t* session_slot,
+    iree_net_sequence_node_t** out_pending_releases,
+    iree_net_sequence_node_t** out_pending_completions) {
+  *out_pending_releases = NULL;
+  *out_pending_completions = NULL;
+  iree_net_sequence_window_take_pending(
+      &session_slot->observed_submission_window, out_pending_releases);
+  iree_net_sequence_window_deinitialize(
+      &session_slot->observed_submission_window);
+
+  iree_net_sequence_window_take_pending(&session_slot->completed_signal_window,
+                                        out_pending_completions);
+  iree_net_sequence_window_deinitialize(&session_slot->completed_signal_window);
+}
+
+void iree_hal_remote_server_session_deinitialize_windows(
+    iree_hal_remote_server_session_t* session_slot) {
+  iree_net_sequence_node_t* pending_releases = NULL;
+  iree_net_sequence_node_t* pending_completions = NULL;
+  iree_hal_remote_server_session_take_window_nodes(
+      session_slot, &pending_releases, &pending_completions);
+  iree_hal_remote_server_free_resource_release_nodes(pending_releases);
+  iree_hal_remote_server_free_command_completion_nodes(pending_completions);
+}
+
 // Finds the slot holding the given session. Returns -1 if not found.
 static int32_t iree_hal_remote_server_find_session_slot(
     iree_hal_remote_server_t* server, iree_net_session_t* session) {
@@ -50,11 +155,15 @@ void iree_hal_remote_server_remove_session(iree_hal_remote_server_t* server,
   // Snapshot the resource table and epoch mapping for cleanup outside the lock.
   iree_hal_remote_resource_table_t resource_table;
   memset(&resource_table, 0, sizeof(resource_table));
+  iree_hal_remote_server_epoch_slot_state_t* epoch_map_states = NULL;
+  iree_async_axis_t* epoch_map_axes = NULL;
   uint64_t* epoch_map_epochs = NULL;
   iree_hal_semaphore_t** epoch_map_semaphores = NULL;
-  iree_host_size_t epoch_map_count = 0;
+  iree_host_size_t epoch_map_capacity = 0;
   iree_hal_remote_resource_id_t* prov_map_provisionals = NULL;
   iree_hal_remote_resource_id_t* prov_map_resolved = NULL;
+  iree_net_sequence_node_t* pending_releases = NULL;
+  iree_net_sequence_node_t* pending_completions = NULL;
 
   iree_slim_mutex_lock(&server->session_mutex);
   int32_t slot = iree_hal_remote_server_find_session_slot(server, session);
@@ -67,10 +176,12 @@ void iree_hal_remote_server_remove_session(iree_hal_remote_server_t* server,
     memset(&server->sessions[slot].resource_table, 0,
            sizeof(server->sessions[slot].resource_table));
 
+    epoch_map_states = server->sessions[slot].epoch_semaphore_map.states;
+    epoch_map_axes = server->sessions[slot].epoch_semaphore_map.axes;
     epoch_map_epochs = server->sessions[slot].epoch_semaphore_map.epochs;
     epoch_map_semaphores =
         server->sessions[slot].epoch_semaphore_map.semaphores;
-    epoch_map_count = server->sessions[slot].epoch_semaphore_map.count;
+    epoch_map_capacity = server->sessions[slot].epoch_semaphore_map.capacity;
     memset(&server->sessions[slot].epoch_semaphore_map, 0,
            sizeof(server->sessions[slot].epoch_semaphore_map));
 
@@ -79,6 +190,9 @@ void iree_hal_remote_server_remove_session(iree_hal_remote_server_t* server,
     prov_map_resolved = server->sessions[slot].provisional_map.resolved_ids;
     memset(&server->sessions[slot].provisional_map, 0,
            sizeof(server->sessions[slot].provisional_map));
+
+    iree_hal_remote_server_session_take_window_nodes(
+        &server->sessions[slot], &pending_releases, &pending_completions);
 
     server->sessions[slot].session = NULL;
     server->sessions[slot].session_id = 0;
@@ -100,15 +214,21 @@ void iree_hal_remote_server_remove_session(iree_hal_remote_server_t* server,
                                               server->host_allocator);
 
   // Release all local semaphores in the epoch mapping.
-  for (iree_host_size_t i = 0; i < epoch_map_count; ++i) {
+  for (iree_host_size_t i = 0; i < epoch_map_capacity; ++i) {
     iree_hal_semaphore_release(epoch_map_semaphores[i]);
   }
+  iree_allocator_free(server->host_allocator, epoch_map_states);
+  iree_allocator_free(server->host_allocator, epoch_map_axes);
   iree_allocator_free(server->host_allocator, epoch_map_epochs);
   iree_allocator_free(server->host_allocator, epoch_map_semaphores);
 
   // Free provisional mapping arrays.
   iree_allocator_free(server->host_allocator, prov_map_provisionals);
   iree_allocator_free(server->host_allocator, prov_map_resolved);
+
+  // Release owner-managed nodes that were pending in sequence windows.
+  iree_hal_remote_server_free_resource_release_nodes(pending_releases);
+  iree_hal_remote_server_free_command_completion_nodes(pending_completions);
 
   // Detach the queue channel from its endpoint before releasing the session.
   // Command completions may hold retained references to the channel that
@@ -125,29 +245,224 @@ void iree_hal_remote_server_remove_session(iree_hal_remote_server_t* server,
 }
 
 //===----------------------------------------------------------------------===//
+// Epoch→semaphore mapping
+//===----------------------------------------------------------------------===//
+
+static uint64_t iree_hal_remote_server_mix_u64(uint64_t value) {
+  value ^= value >> 33;
+  value *= 0xff51afd7ed558ccdull;
+  value ^= value >> 33;
+  value *= 0xc4ceb9fe1a85ec53ull;
+  value ^= value >> 33;
+  return value;
+}
+
+static iree_host_size_t iree_hal_remote_server_epoch_semaphore_slot(
+    iree_async_axis_t axis, uint64_t epoch, iree_host_size_t capacity) {
+  uint64_t hash = iree_hal_remote_server_mix_u64(axis);
+  hash ^= iree_hal_remote_server_mix_u64(epoch);
+  return (iree_host_size_t)(hash & (capacity - 1));
+}
+
+static iree_host_size_t iree_hal_remote_server_epoch_map_capacity(
+    iree_host_size_t minimum_capacity) {
+  iree_host_size_t capacity = 64;
+  while (capacity < minimum_capacity) {
+    if (capacity > IREE_HOST_SIZE_MAX / 2) return 0;
+    capacity *= 2;
+  }
+  return capacity;
+}
+
+static iree_status_t iree_hal_remote_server_resize_epoch_semaphore_map(
+    iree_hal_remote_server_session_t* session_slot,
+    iree_host_size_t minimum_capacity, iree_allocator_t host_allocator) {
+  iree_host_size_t new_capacity =
+      iree_hal_remote_server_epoch_map_capacity(minimum_capacity);
+  if (new_capacity == 0) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "epoch semaphore map capacity overflow");
+  }
+
+  iree_hal_remote_server_epoch_slot_state_t* new_states = NULL;
+  iree_async_axis_t* new_axes = NULL;
+  uint64_t* new_epochs = NULL;
+  iree_hal_semaphore_t** new_semaphores = NULL;
+  iree_status_t status = iree_allocator_malloc_array(
+      host_allocator, new_capacity, sizeof(*new_states), (void**)&new_states);
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_array(host_allocator, new_capacity,
+                                         sizeof(*new_axes), (void**)&new_axes);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_array(
+        host_allocator, new_capacity, sizeof(*new_epochs), (void**)&new_epochs);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_array(host_allocator, new_capacity,
+                                         sizeof(*new_semaphores),
+                                         (void**)&new_semaphores);
+  }
+
+  if (iree_status_is_ok(status)) {
+    memset(new_states, 0, new_capacity * sizeof(*new_states));
+    memset(new_axes, 0, new_capacity * sizeof(*new_axes));
+    memset(new_epochs, 0, new_capacity * sizeof(*new_epochs));
+    memset(new_semaphores, 0, new_capacity * sizeof(*new_semaphores));
+
+    for (iree_host_size_t i = 0; i < session_slot->epoch_semaphore_map.capacity;
+         ++i) {
+      if (session_slot->epoch_semaphore_map.states &&
+          session_slot->epoch_semaphore_map.states[i] !=
+              IREE_HAL_REMOTE_SERVER_EPOCH_SLOT_OCCUPIED) {
+        continue;
+      }
+      iree_hal_semaphore_t* semaphore =
+          session_slot->epoch_semaphore_map.semaphores[i];
+      if (!semaphore) continue;
+      iree_async_axis_t axis = session_slot->epoch_semaphore_map.axes[i];
+      uint64_t epoch = session_slot->epoch_semaphore_map.epochs[i];
+      iree_host_size_t slot = iree_hal_remote_server_epoch_semaphore_slot(
+          axis, epoch, new_capacity);
+      while (new_states[slot] == IREE_HAL_REMOTE_SERVER_EPOCH_SLOT_OCCUPIED) {
+        slot = (slot + 1) & (new_capacity - 1);
+      }
+      new_states[slot] = IREE_HAL_REMOTE_SERVER_EPOCH_SLOT_OCCUPIED;
+      new_axes[slot] = axis;
+      new_epochs[slot] = epoch;
+      new_semaphores[slot] = semaphore;
+    }
+
+    iree_allocator_free(host_allocator,
+                        session_slot->epoch_semaphore_map.states);
+    iree_allocator_free(host_allocator, session_slot->epoch_semaphore_map.axes);
+    iree_allocator_free(host_allocator,
+                        session_slot->epoch_semaphore_map.epochs);
+    iree_allocator_free(host_allocator,
+                        session_slot->epoch_semaphore_map.semaphores);
+    session_slot->epoch_semaphore_map.states = new_states;
+    session_slot->epoch_semaphore_map.axes = new_axes;
+    session_slot->epoch_semaphore_map.epochs = new_epochs;
+    session_slot->epoch_semaphore_map.semaphores = new_semaphores;
+    session_slot->epoch_semaphore_map.capacity = new_capacity;
+    session_slot->epoch_semaphore_map.used_count =
+        session_slot->epoch_semaphore_map.count;
+  } else {
+    iree_allocator_free(host_allocator, new_states);
+    iree_allocator_free(host_allocator, new_axes);
+    iree_allocator_free(host_allocator, new_epochs);
+    iree_allocator_free(host_allocator, new_semaphores);
+  }
+
+  return status;
+}
+
+// Stores a mapping from signal frontier entry to local semaphore.
+// Retains the semaphore.
+static iree_status_t iree_hal_remote_server_store_epoch_semaphore(
+    iree_hal_remote_server_session_t* session_slot, iree_async_axis_t axis,
+    uint64_t epoch, iree_hal_semaphore_t* semaphore,
+    iree_allocator_t host_allocator) {
+  iree_host_size_t minimum_used_capacity =
+      session_slot->epoch_semaphore_map.used_count + 1;
+  if (minimum_used_capacity * 4 >=
+      session_slot->epoch_semaphore_map.capacity * 3) {
+    IREE_RETURN_IF_ERROR(iree_hal_remote_server_resize_epoch_semaphore_map(
+        session_slot, (session_slot->epoch_semaphore_map.count + 1) * 2,
+        host_allocator));
+  }
+
+  iree_host_size_t slot = iree_hal_remote_server_epoch_semaphore_slot(
+      axis, epoch, session_slot->epoch_semaphore_map.capacity);
+  iree_host_size_t first_tombstone = IREE_HOST_SIZE_MAX;
+  while (session_slot->epoch_semaphore_map.states[slot] !=
+         IREE_HAL_REMOTE_SERVER_EPOCH_SLOT_EMPTY) {
+    if (session_slot->epoch_semaphore_map.states[slot] ==
+        IREE_HAL_REMOTE_SERVER_EPOCH_SLOT_TOMBSTONE) {
+      if (first_tombstone == IREE_HOST_SIZE_MAX) first_tombstone = slot;
+    } else if (session_slot->epoch_semaphore_map.axes[slot] == axis &&
+               session_slot->epoch_semaphore_map.epochs[slot] == epoch) {
+      return iree_make_status(
+          IREE_STATUS_ALREADY_EXISTS,
+          "duplicate signal frontier entry axis=0x%016" PRIx64
+          " epoch=%" PRIu64,
+          axis, epoch);
+    }
+    slot = (slot + 1) & (session_slot->epoch_semaphore_map.capacity - 1);
+  }
+  if (first_tombstone != IREE_HOST_SIZE_MAX) {
+    slot = first_tombstone;
+  } else {
+    ++session_slot->epoch_semaphore_map.used_count;
+  }
+
+  session_slot->epoch_semaphore_map.states[slot] =
+      IREE_HAL_REMOTE_SERVER_EPOCH_SLOT_OCCUPIED;
+  session_slot->epoch_semaphore_map.axes[slot] = axis;
+  session_slot->epoch_semaphore_map.epochs[slot] = epoch;
+  session_slot->epoch_semaphore_map.semaphores[slot] = semaphore;
+  ++session_slot->epoch_semaphore_map.count;
+  iree_hal_semaphore_retain(semaphore);
+  return iree_ok_status();
+}
+
+// Looks up the local semaphore for a given frontier entry. Returns NULL if not
+// found. The returned pointer is borrowed — the epoch mapping retains it.
+static iree_hal_semaphore_t* iree_hal_remote_server_lookup_epoch_semaphore(
+    iree_hal_remote_server_session_t* session_slot, iree_async_axis_t axis,
+    uint64_t epoch) {
+  if (session_slot->epoch_semaphore_map.capacity == 0) return NULL;
+  iree_host_size_t slot = iree_hal_remote_server_epoch_semaphore_slot(
+      axis, epoch, session_slot->epoch_semaphore_map.capacity);
+  while (session_slot->epoch_semaphore_map.states[slot] !=
+         IREE_HAL_REMOTE_SERVER_EPOCH_SLOT_EMPTY) {
+    if (session_slot->epoch_semaphore_map.states[slot] ==
+            IREE_HAL_REMOTE_SERVER_EPOCH_SLOT_OCCUPIED &&
+        session_slot->epoch_semaphore_map.axes[slot] == axis &&
+        session_slot->epoch_semaphore_map.epochs[slot] == epoch) {
+      return session_slot->epoch_semaphore_map.semaphores[slot];
+    }
+    slot = (slot + 1) & (session_slot->epoch_semaphore_map.capacity - 1);
+  }
+  return NULL;
+}
+
+// Removes the local semaphore for a given frontier entry and transfers the map
+// retain to the caller. Returns NULL when no entry was found.
+static iree_hal_semaphore_t* iree_hal_remote_server_remove_epoch_semaphore(
+    iree_hal_remote_server_session_t* session_slot, iree_async_axis_t axis,
+    uint64_t epoch) {
+  if (session_slot->epoch_semaphore_map.capacity == 0) return NULL;
+  iree_host_size_t slot = iree_hal_remote_server_epoch_semaphore_slot(
+      axis, epoch, session_slot->epoch_semaphore_map.capacity);
+  while (session_slot->epoch_semaphore_map.states[slot] !=
+         IREE_HAL_REMOTE_SERVER_EPOCH_SLOT_EMPTY) {
+    if (session_slot->epoch_semaphore_map.states[slot] ==
+            IREE_HAL_REMOTE_SERVER_EPOCH_SLOT_OCCUPIED &&
+        session_slot->epoch_semaphore_map.axes[slot] == axis &&
+        session_slot->epoch_semaphore_map.epochs[slot] == epoch) {
+      iree_hal_semaphore_t* semaphore =
+          session_slot->epoch_semaphore_map.semaphores[slot];
+      session_slot->epoch_semaphore_map.states[slot] =
+          IREE_HAL_REMOTE_SERVER_EPOCH_SLOT_TOMBSTONE;
+      session_slot->epoch_semaphore_map.axes[slot] = 0;
+      session_slot->epoch_semaphore_map.epochs[slot] = 0;
+      session_slot->epoch_semaphore_map.semaphores[slot] = NULL;
+      --session_slot->epoch_semaphore_map.count;
+      return semaphore;
+    }
+    slot = (slot + 1) & (session_slot->epoch_semaphore_map.capacity - 1);
+  }
+  return NULL;
+}
+
+//===----------------------------------------------------------------------===//
 // Command completion
 //===----------------------------------------------------------------------===//
 
-// Context for a pending command completion on the server. Heap-allocated and
-// freed in the timepoint callback after sending the ADVANCE frame. Used for
-// all queue operations (barrier, fill, copy, update, alloca, dealloca).
-typedef struct iree_hal_remote_server_command_completion_t {
-  iree_async_semaphore_timepoint_t timepoint;
-  iree_net_queue_channel_t* queue_channel;  // retained
-  iree_hal_semaphore_t* local_semaphore;    // retained
-  iree_allocator_t host_allocator;
-  iree_async_single_frontier_t signal_frontier;
-  // Resolution entry for BUFFER_ALLOCA completions. The ADVANCE frame
-  // piggybacks this (provisional → resolved) mapping so the client can
-  // update its buffer proxy. resolution_count is 0 for non-alloca ops.
-  uint16_t resolution_count;
-  uint16_t resolution_padding[3];
-  iree_hal_remote_resolution_entry_t resolution;
-} iree_hal_remote_server_command_completion_t;
-
 // Sends an error ADVANCE frame to the client. The ADVANCE carries the full
 // serialized iree_status_t so the client can reconstruct the error with source
-// locations, messages, and annotations. The status is consumed (freed) by this
+// locations, messages, and annotations. The status is consumed by this
 // function.
 //
 // On the client side, the non-zero status_code in the advance payload triggers
@@ -180,7 +495,7 @@ static void iree_hal_remote_server_send_error_advance(
       iree_status_ignore(iree_net_queue_channel_send_advance(
           queue_channel, signal_frontier, payload, 0));
     } else {
-      // Serialization failed — send code-only error ADVANCE.
+      // Serialization failed; send code-only error ADVANCE.
       iree_status_ignore(serialize_status);
       iree_async_span_t spans[1] = {
           iree_async_span_from_ptr(&advance_header, sizeof(advance_header)),
@@ -190,7 +505,7 @@ static void iree_hal_remote_server_send_error_advance(
           queue_channel, signal_frontier, payload, 0));
     }
   } else {
-    // Status too large for stack buffer — send code-only.
+    // Status too large for stack storage; send code-only.
     iree_async_span_t spans[1] = {
         iree_async_span_from_ptr(&advance_header, sizeof(advance_header)),
     };
@@ -203,126 +518,135 @@ static void iree_hal_remote_server_send_error_advance(
   IREE_TRACE_ZONE_END(z0);
 }
 
+static void iree_hal_remote_server_send_success_advance(
+    iree_hal_remote_server_command_completion_t* completion) {
+  iree_async_frontier_t* signal_frontier =
+      iree_async_single_frontier_as_frontier(&completion->signal_frontier);
+
+  if (completion->resolution_count > 0) {
+    // BUFFER_ALLOCA: include resolution entries in the ADVANCE payload.
+    iree_hal_remote_advance_payload_t advance_header;
+    memset(&advance_header, 0, sizeof(advance_header));
+    advance_header.resolution_count = completion->resolution_count;
+    iree_async_span_t spans[2] = {
+        iree_async_span_from_ptr(&advance_header, sizeof(advance_header)),
+        iree_async_span_from_ptr(&completion->resolution,
+                                 sizeof(completion->resolution)),
+    };
+    iree_async_span_list_t payload = {spans, 2};
+    iree_status_t send_status = iree_net_queue_channel_send_advance(
+        completion->queue_channel, signal_frontier, payload,
+        /*operation_user_data=*/0);
+    iree_status_ignore(send_status);
+  } else {
+    // Non-alloca: empty ADVANCE payload.
+    iree_async_span_list_t empty_payload = {NULL, 0};
+    iree_status_t send_status = iree_net_queue_channel_send_advance(
+        completion->queue_channel, signal_frontier, empty_payload,
+        /*operation_user_data=*/0);
+    iree_status_ignore(send_status);
+  }
+}
+
+static void iree_hal_remote_server_process_ready_command_completions(
+    iree_net_sequence_node_t* ready_list) {
+  while (ready_list) {
+    iree_net_sequence_node_t* next = ready_list->next;
+    iree_hal_remote_server_command_completion_t* completion = iree_containerof(
+        ready_list, iree_hal_remote_server_command_completion_t, sequence_node);
+    iree_hal_remote_server_send_success_advance(completion);
+    iree_hal_remote_server_release_command_completion(completion);
+    ready_list = next;
+  }
+}
+
 // Fired by the local device's semaphore when the queue operation completes.
-// Sends ADVANCE back to the client and cleans up.
+// Successful completions retire their local semaphore immediately but only send
+// ADVANCE frames in contiguous epoch order. Failed completions fail the client
+// frontier immediately because the axis is terminal after an execution error.
 static void iree_hal_remote_server_on_command_complete(
     void* user_data, iree_async_semaphore_timepoint_t* timepoint,
     iree_status_t status) {
+  (void)timepoint;
   iree_hal_remote_server_command_completion_t* completion =
       (iree_hal_remote_server_command_completion_t*)user_data;
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  if (iree_status_is_ok(status)) {
-    iree_async_frontier_t* signal_frontier =
-        iree_async_single_frontier_as_frontier(&completion->signal_frontier);
+  iree_async_frontier_t* signal_frontier =
+      iree_async_single_frontier_as_frontier(&completion->signal_frontier);
+  iree_async_axis_t signal_axis = signal_frontier->entries[0].axis;
+  uint64_t signal_epoch = signal_frontier->entries[0].epoch;
+  iree_net_sequence_node_t* ready_completions = NULL;
+  iree_hal_semaphore_t* removed_semaphore = NULL;
+  bool completion_transferred = false;
+  bool session_active = false;
 
-    if (completion->resolution_count > 0) {
-      // BUFFER_ALLOCA: include resolution entries in the ADVANCE payload.
-      iree_hal_remote_advance_payload_t advance_header;
-      memset(&advance_header, 0, sizeof(advance_header));
-      advance_header.resolution_count = completion->resolution_count;
-      iree_async_span_t spans[2] = {
-          iree_async_span_from_ptr(&advance_header, sizeof(advance_header)),
-          iree_async_span_from_ptr(&completion->resolution,
-                                   sizeof(completion->resolution)),
-      };
-      iree_async_span_list_t payload = {spans, 2};
-      iree_status_t send_status = iree_net_queue_channel_send_advance(
-          completion->queue_channel, signal_frontier, payload,
-          /*operation_user_data=*/0);
-      iree_status_ignore(send_status);
+  iree_hal_remote_server_t* server = completion->server;
+  iree_hal_remote_server_session_t* session_slot = completion->session_slot;
+  iree_slim_mutex_lock(&server->session_mutex);
+  session_active = session_slot->session_id == completion->session_id &&
+                   session_slot->session != NULL;
+  if (session_active) {
+    removed_semaphore = iree_hal_remote_server_remove_epoch_semaphore(
+        session_slot, signal_axis, signal_epoch);
+    if (iree_status_is_ok(status)) {
+      if (!removed_semaphore) {
+        status = iree_make_status(
+            IREE_STATUS_INTERNAL,
+            "missing local semaphore for completed signal epoch %" PRIu64,
+            signal_epoch);
+      } else if (iree_net_sequence_window_has_observed(
+                     &session_slot->completed_signal_window, signal_epoch)) {
+        status = iree_make_status(
+            IREE_STATUS_ALREADY_EXISTS,
+            "duplicate command completion for signal epoch %" PRIu64,
+            signal_epoch);
+      } else {
+        status = iree_net_sequence_window_observe(
+            &session_slot->completed_signal_window, signal_epoch,
+            &ready_completions);
+      }
+      if (iree_status_is_ok(status)) {
+        if (signal_epoch <= iree_net_sequence_window_observed(
+                                &session_slot->completed_signal_window)) {
+          completion->sequence_node.next = ready_completions;
+          completion->sequence_node.sequence = signal_epoch;
+          ready_completions = &completion->sequence_node;
+          completion_transferred = true;
+        } else {
+          status = iree_net_sequence_window_defer_until(
+              &session_slot->completed_signal_window, signal_epoch,
+              &completion->sequence_node, &ready_completions);
+          if (iree_status_is_ok(status)) {
+            completion_transferred = true;
+          }
+        }
+      }
+    }
+  }
+  iree_slim_mutex_unlock(&server->session_mutex);
+
+  iree_hal_semaphore_release(removed_semaphore);
+
+  if (session_active) {
+    if (iree_status_is_ok(status)) {
+      iree_hal_remote_server_process_ready_command_completions(
+          ready_completions);
     } else {
-      // Non-alloca: empty ADVANCE payload.
-      iree_async_span_list_t empty_payload = {NULL, 0};
-      iree_status_t send_status = iree_net_queue_channel_send_advance(
-          completion->queue_channel, signal_frontier, empty_payload,
-          /*operation_user_data=*/0);
-      iree_status_ignore(send_status);
+      // Execution failed locally, or completion ordering bookkeeping detected
+      // a protocol violation. Fail the client axis immediately.
+      iree_hal_remote_server_send_error_advance(completion->queue_channel,
+                                                signal_frontier, status);
     }
   } else {
-    // Execution failed on the local device. Send error ADVANCE so the client's
-    // frontier_tracker_fail_axis fires and the error surfaces at
-    // semaphore_wait.
-    iree_async_frontier_t* signal_frontier =
-        iree_async_single_frontier_as_frontier(&completion->signal_frontier);
-    iree_hal_remote_server_send_error_advance(completion->queue_channel,
-                                              signal_frontier, status);
+    iree_status_ignore(status);
   }
 
-  iree_net_queue_channel_release(completion->queue_channel);
-  iree_hal_semaphore_release(completion->local_semaphore);
-  iree_allocator_free(completion->host_allocator, completion);
+  if (!completion_transferred) {
+    iree_hal_remote_server_release_command_completion(completion);
+  }
 
   IREE_TRACE_ZONE_END(z0);
-}
-
-//===----------------------------------------------------------------------===//
-// Epoch→semaphore mapping
-//===----------------------------------------------------------------------===//
-
-// Stores a mapping from signal frontier epoch to local semaphore.
-// Retains the semaphore. Epochs are appended in monotonically increasing order.
-static iree_status_t iree_hal_remote_server_store_epoch_semaphore(
-    iree_hal_remote_server_session_t* session_slot, uint64_t epoch,
-    iree_hal_semaphore_t* semaphore, iree_allocator_t host_allocator) {
-  // Grow both parallel arrays together so they share a single capacity.
-  // iree_allocator_grow_array handles the doubling strategy internally.
-  iree_host_size_t minimum_capacity =
-      session_slot->epoch_semaphore_map.count + 1;
-  if (minimum_capacity > session_slot->epoch_semaphore_map.capacity) {
-    // Save capacity before first grow — both arrays must grow to the same
-    // target. Grow epochs first, then grow semaphores to the same capacity.
-    iree_host_size_t epochs_capacity =
-        session_slot->epoch_semaphore_map.capacity;
-    IREE_RETURN_IF_ERROR(iree_allocator_grow_array(
-        host_allocator, minimum_capacity, sizeof(uint64_t), &epochs_capacity,
-        (void**)&session_slot->epoch_semaphore_map.epochs));
-    iree_host_size_t semaphores_capacity =
-        session_slot->epoch_semaphore_map.capacity;
-    iree_status_t status = iree_allocator_grow_array(
-        host_allocator, minimum_capacity, sizeof(iree_hal_semaphore_t*),
-        &semaphores_capacity,
-        (void**)&session_slot->epoch_semaphore_map.semaphores);
-    if (!iree_status_is_ok(status)) {
-      // Epochs grew but semaphores didn't. The epochs array is larger than
-      // needed but still valid — capacity reflects the smaller of the two.
-      // Don't update capacity; the next call will try to grow semaphores
-      // again.
-      return status;
-    }
-    // Both grew successfully. Use the minimum of the two (they should be
-    // equal since grow_array uses the same doubling strategy, but be safe).
-    session_slot->epoch_semaphore_map.capacity =
-        iree_min(epochs_capacity, semaphores_capacity);
-  }
-
-  iree_host_size_t index = session_slot->epoch_semaphore_map.count++;
-  session_slot->epoch_semaphore_map.epochs[index] = epoch;
-  session_slot->epoch_semaphore_map.semaphores[index] = semaphore;
-  iree_hal_semaphore_retain(semaphore);
-  return iree_ok_status();
-}
-
-// Looks up the local semaphore for a given epoch. Returns NULL if not found.
-// The returned pointer is borrowed — the epoch mapping retains it.
-static iree_hal_semaphore_t* iree_hal_remote_server_lookup_epoch_semaphore(
-    iree_hal_remote_server_session_t* session_slot, uint64_t epoch) {
-  // Binary search (epochs are monotonically increasing).
-  iree_host_size_t low = 0;
-  iree_host_size_t high = session_slot->epoch_semaphore_map.count;
-  while (low < high) {
-    iree_host_size_t mid = low + (high - low) / 2;
-    if (session_slot->epoch_semaphore_map.epochs[mid] < epoch) {
-      low = mid + 1;
-    } else {
-      high = mid;
-    }
-  }
-  if (low < session_slot->epoch_semaphore_map.count &&
-      session_slot->epoch_semaphore_map.epochs[low] == epoch) {
-    return session_slot->epoch_semaphore_map.semaphores[low];
-  }
-  return NULL;
 }
 
 //===----------------------------------------------------------------------===//
@@ -432,12 +756,13 @@ static iree_status_t iree_hal_remote_server_resolve_command_buffer_ref(
 }
 
 // Resolves a wire wait_frontier to a local wait semaphore list. For each
-// (axis, epoch) entry in the wait frontier, looks up the corresponding local
-// semaphore from the epoch mapping. All resolved semaphores use payload_value=1
-// (each local semaphore signals to 1 on completion).
+// (axis, epoch) entry in the wait frontier, completed epochs are skipped and
+// live epochs are resolved through the epoch mapping. All resolved semaphores
+// use payload_value=1 (each local semaphore signals to 1 on completion).
 //
 // |out_semaphores| and |out_values| are caller-provided arrays of |capacity|.
-// Returns the number of resolved entries in |out_count|.
+// Returns the number of resolved entries in |out_count|. Resolved semaphores
+// are retained and must be released by the caller.
 static iree_status_t iree_hal_remote_server_resolve_wait_frontier(
     iree_hal_remote_server_session_t* session_slot,
     const iree_async_frontier_t* wait_frontier,
@@ -446,13 +771,21 @@ static iree_status_t iree_hal_remote_server_resolve_wait_frontier(
   *out_count = 0;
   if (!wait_frontier) return iree_ok_status();
   for (uint8_t i = 0; i < wait_frontier->entry_count; ++i) {
+    if (iree_net_sequence_window_has_observed(
+            &session_slot->completed_signal_window,
+            wait_frontier->entries[i].epoch)) {
+      continue;
+    }
+
     iree_hal_semaphore_t* local_semaphore =
         iree_hal_remote_server_lookup_epoch_semaphore(
-            session_slot, wait_frontier->entries[i].epoch);
+            session_slot, wait_frontier->entries[i].axis,
+            wait_frontier->entries[i].epoch);
     if (!local_semaphore) {
       return iree_make_status(IREE_STATUS_NOT_FOUND,
-                              "no local semaphore for wait frontier epoch "
-                              "%" PRIu64,
+                              "no local semaphore for wait frontier "
+                              "axis=0x%016" PRIx64 " epoch=%" PRIu64,
+                              wait_frontier->entries[i].axis,
                               wait_frontier->entries[i].epoch);
     }
     if (*out_count >= capacity) {
@@ -460,6 +793,7 @@ static iree_status_t iree_hal_remote_server_resolve_wait_frontier(
                               "wait frontier exceeds local semaphore capacity");
     }
     out_semaphores[*out_count] = local_semaphore;
+    iree_hal_semaphore_retain(local_semaphore);
     out_values[*out_count] = 1;
     ++*out_count;
   }
@@ -477,14 +811,21 @@ typedef iree_status_t (*iree_hal_remote_server_submit_fn_t)(
     void* user_data, iree_hal_device_t* local_device,
     iree_hal_semaphore_list_t wait_list, iree_hal_semaphore_list_t signal_list);
 
+static iree_status_t iree_hal_remote_server_process_ready_resource_releases(
+    iree_hal_remote_server_session_t* entry,
+    iree_net_sequence_node_t* ready_list);
+
 // Context passed to op submit callbacks. Carries the command payload and
 // session slot reference. Alloca callbacks also populate resolution data
 // that gets piggybacked on the ADVANCE frame.
 typedef struct iree_hal_remote_server_op_context_t {
+  // Session slot whose resource tables are used by the operation.
   iree_hal_remote_server_session_t* session_slot;
+  // Queue command payload being decoded.
   iree_const_byte_span_t command_data;
   // Populated by BUFFER_ALLOCA callback to piggyback resolution on ADVANCE.
   uint16_t resolution_count;
+  // BUFFER_ALLOCA provisional-to-resolved mapping copied into completion.
   iree_hal_remote_resolution_entry_t resolution;
 } iree_hal_remote_server_op_context_t;
 
@@ -500,47 +841,50 @@ static iree_status_t iree_hal_remote_server_submit_command(
     iree_hal_remote_server_submit_fn_t submit_fn, void* submit_user_data) {
   iree_hal_remote_server_t* server = session_slot->server;
   iree_hal_device_t* local_device = server->devices[0];
+  IREE_ASSERT(signal_frontier && signal_frontier->entry_count == 1);
+  iree_async_axis_t signal_axis = signal_frontier->entries[0].axis;
+  uint64_t signal_epoch = signal_frontier->entries[0].epoch;
 
-  // Resolve wait frontier → local wait semaphore list.
-  iree_hal_semaphore_t* wait_semaphores[8];
-  uint64_t wait_values[8];
+  iree_net_queue_channel_t* queue_channel = NULL;
+  uint64_t session_id = 0;
+  iree_hal_semaphore_t* wait_semaphores[8] = {0};
+  uint64_t wait_values[8] = {0};
   iree_host_size_t wait_count = 0;
-  iree_status_t status = iree_hal_remote_server_resolve_wait_frontier(
-      session_slot, wait_frontier, wait_semaphores, wait_values,
-      IREE_ARRAYSIZE(wait_semaphores), &wait_count);
+  bool submission_window_reserved = false;
+
+  iree_status_t status = iree_ok_status();
+  iree_slim_mutex_lock(&server->session_mutex);
+  if (!session_slot->session || !session_slot->queue_channel) {
+    status = iree_status_from_code(IREE_STATUS_ABORTED);
+  } else {
+    session_id = session_slot->session_id;
+    queue_channel = session_slot->queue_channel;
+    iree_net_queue_channel_retain(queue_channel);
+    status = iree_net_sequence_window_reserve(
+        &session_slot->observed_submission_window, signal_epoch);
+    submission_window_reserved = iree_status_is_ok(status);
+    if (iree_status_is_ok(status)) {
+      status = iree_net_sequence_window_reserve(
+          &session_slot->completed_signal_window, signal_epoch);
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_remote_server_resolve_wait_frontier(
+          session_slot, wait_frontier, wait_semaphores, wait_values,
+          IREE_ARRAYSIZE(wait_semaphores), &wait_count);
+    }
+  }
+  iree_slim_mutex_unlock(&server->session_mutex);
 
   // Create local signal semaphore (initial_value=0).
   iree_hal_semaphore_t* local_semaphore = NULL;
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && submission_window_reserved) {
     status = iree_hal_semaphore_create(
         local_device, IREE_HAL_QUEUE_AFFINITY_ANY,
         /*initial_value=*/0, IREE_HAL_SEMAPHORE_FLAG_NONE, &local_semaphore);
   }
 
-  // Store epoch→semaphore mapping for future wait frontier resolution.
-  if (iree_status_is_ok(status)) {
-    IREE_ASSERT(signal_frontier && signal_frontier->entry_count == 1);
-    status = iree_hal_remote_server_store_epoch_semaphore(
-        session_slot, signal_frontier->entries[0].epoch, local_semaphore,
-        server->host_allocator);
-  }
-
-  // Submit the operation to the local device.
-  if (iree_status_is_ok(status)) {
-    iree_hal_semaphore_list_t wait_list = {
-        .count = wait_count,
-        .semaphores = wait_semaphores,
-        .payload_values = wait_values,
-    };
-    iree_hal_semaphore_list_t signal_list = {
-        .count = 1,
-        .semaphores = &local_semaphore,
-        .payload_values = (uint64_t[]){1},
-    };
-    status = submit_fn(submit_user_data, local_device, wait_list, signal_list);
-  }
-
-  // Allocate completion context and register timepoint.
+  // Allocate the completion context before publishing the epoch or submitting
+  // the local command so that later failures can still be reported cleanly.
   iree_hal_remote_server_command_completion_t* completion = NULL;
   if (iree_status_is_ok(status)) {
     status = iree_allocator_malloc(server->host_allocator, sizeof(*completion),
@@ -550,16 +894,52 @@ static iree_status_t iree_hal_remote_server_submit_command(
   if (iree_status_is_ok(status)) {
     memset(completion, 0, sizeof(*completion));
     completion->host_allocator = server->host_allocator;
-    completion->queue_channel = session_slot->queue_channel;
+    completion->server = server;
+    iree_hal_remote_server_retain(server);
+    completion->session_slot = session_slot;
+    completion->session_id = session_id;
+    completion->queue_channel = queue_channel;
     iree_net_queue_channel_retain(completion->queue_channel);
     completion->local_semaphore = local_semaphore;
     iree_hal_semaphore_retain(local_semaphore);
-
-    // Deep copy the signal frontier.
     iree_async_single_frontier_initialize(&completion->signal_frontier,
-                                          signal_frontier->entries[0].axis,
-                                          signal_frontier->entries[0].epoch);
+                                          signal_axis, signal_epoch);
+    completion->timepoint.callback = iree_hal_remote_server_on_command_complete;
+    completion->timepoint.user_data = completion;
+  }
 
+  // Store epoch→semaphore mapping for future wait frontier resolution.
+  bool epoch_mapping_stored = false;
+  if (iree_status_is_ok(status)) {
+    iree_slim_mutex_lock(&server->session_mutex);
+    if (session_slot->session_id == session_id && session_slot->session) {
+      status = iree_hal_remote_server_store_epoch_semaphore(
+          session_slot, signal_axis, signal_epoch, local_semaphore,
+          server->host_allocator);
+    } else {
+      status = iree_status_from_code(IREE_STATUS_ABORTED);
+    }
+    iree_slim_mutex_unlock(&server->session_mutex);
+    epoch_mapping_stored = iree_status_is_ok(status);
+  }
+
+  bool completion_registered = false;
+  if (iree_status_is_ok(status)) {
+    iree_hal_semaphore_list_t wait_list = {
+        .count = wait_count,
+        .semaphores = wait_semaphores,
+        .payload_values = wait_values,
+    };
+    uint64_t signal_value = 1;
+    iree_hal_semaphore_list_t signal_list = {
+        .count = 1,
+        .semaphores = &local_semaphore,
+        .payload_values = &signal_value,
+    };
+    status = submit_fn(submit_user_data, local_device, wait_list, signal_list);
+  }
+
+  if (iree_status_is_ok(status)) {
     // Copy resolution entry from the op context if the submit callback
     // populated one (e.g., BUFFER_ALLOCA stores provisional→resolved mapping).
     iree_hal_remote_server_op_context_t* op_context =
@@ -569,11 +949,10 @@ static iree_status_t iree_hal_remote_server_submit_command(
       completion->resolution = op_context->resolution;
     }
 
-    completion->timepoint.callback = iree_hal_remote_server_on_command_complete;
-    completion->timepoint.user_data = completion;
     status = iree_async_semaphore_acquire_timepoint(
         (iree_async_semaphore_t*)local_semaphore, /*minimum_value=*/1,
         &completion->timepoint);
+    completion_registered = iree_status_is_ok(status);
   }
 
   if (!iree_status_is_ok(status)) {
@@ -582,19 +961,62 @@ static iree_status_t iree_hal_remote_server_submit_command(
     // channel frame handler) because the error has been delivered to the client
     // via the ADVANCE frame — propagating it upward would trigger a transport
     // error on a channel that is otherwise healthy.
-    iree_hal_remote_server_send_error_advance(session_slot->queue_channel,
-                                              signal_frontier, status);
-    if (completion) {
-      iree_hal_semaphore_release(completion->local_semaphore);
-      iree_net_queue_channel_release(completion->queue_channel);
-      iree_allocator_free(server->host_allocator, completion);
+    iree_status_t failure_status = status;
+    status = iree_ok_status();
+
+    if (epoch_mapping_stored) {
+      iree_hal_semaphore_t* removed_semaphore = NULL;
+      iree_slim_mutex_lock(&server->session_mutex);
+      if (session_slot->session_id == session_id && session_slot->session) {
+        removed_semaphore = iree_hal_remote_server_remove_epoch_semaphore(
+            session_slot, signal_axis, signal_epoch);
+      }
+      iree_slim_mutex_unlock(&server->session_mutex);
+      iree_hal_semaphore_release(removed_semaphore);
     }
-    iree_hal_semaphore_release(local_semaphore);
-    return iree_ok_status();
+
+    if (local_semaphore) {
+      iree_hal_semaphore_fail(local_semaphore,
+                              iree_status_clone(failure_status));
+    }
+    if (queue_channel) {
+      iree_hal_remote_server_send_error_advance(queue_channel, signal_frontier,
+                                                failure_status);
+    } else {
+      iree_status_ignore(failure_status);
+    }
   }
 
+  if (iree_status_is_ok(status) && submission_window_reserved) {
+    iree_net_sequence_node_t* ready_releases = NULL;
+    bool session_active = false;
+    iree_slim_mutex_lock(&server->session_mutex);
+    session_active =
+        session_slot->session_id == session_id && session_slot->session != NULL;
+    if (session_active) {
+      status = iree_net_sequence_window_observe(
+          &session_slot->observed_submission_window, signal_epoch,
+          &ready_releases);
+    }
+    iree_slim_mutex_unlock(&server->session_mutex);
+    if (iree_status_is_ok(status) && session_active) {
+      status = iree_hal_remote_server_process_ready_resource_releases(
+          session_slot, ready_releases);
+    }
+  }
+
+  if (completion && !completion_registered) {
+    iree_hal_remote_server_release_command_completion(completion);
+  }
+  iree_hal_semaphore_list_t retained_wait_list = {
+      .count = wait_count,
+      .semaphores = wait_semaphores,
+      .payload_values = wait_values,
+  };
+  iree_hal_semaphore_list_release(retained_wait_list);
   iree_hal_semaphore_release(local_semaphore);
-  return iree_ok_status();
+  iree_net_queue_channel_release(queue_channel);
+  return status;
 }
 
 //===----------------------------------------------------------------------===//
@@ -2161,8 +2583,138 @@ static iree_status_t iree_hal_remote_server_submit_command_buffer_execute(
   return status;
 }
 
-// Handles RESOURCE_RELEASE_BATCH: releases resources by ID. Fire-and-forget
-// (no response sent).
+static iree_status_t iree_hal_remote_server_release_resource_ids(
+    iree_hal_remote_server_session_t* entry,
+    const iree_hal_remote_resource_id_t* resource_ids,
+    uint32_t resource_count) {
+  for (uint32_t i = 0; i < resource_count; ++i) {
+    iree_hal_remote_resource_id_t resolved_id =
+        iree_hal_remote_server_resolve_resource_id(entry, resource_ids[i]);
+    iree_hal_remote_resource_table_release(&entry->resource_table, resolved_id);
+    if (resolved_id != resource_ids[i]) {
+      iree_hal_remote_server_remove_provisional(entry, resource_ids[i]);
+    }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_remote_server_release_resource_node(
+    iree_hal_remote_server_session_t* entry,
+    iree_hal_remote_server_resource_release_node_t* release_node) {
+  iree_status_t status = iree_hal_remote_server_release_resource_ids(
+      entry, release_node->resource_ids, release_node->resource_count);
+  iree_allocator_t host_allocator = release_node->host_allocator;
+  iree_allocator_free(host_allocator, release_node);
+  return status;
+}
+
+static iree_status_t iree_hal_remote_server_process_ready_resource_releases(
+    iree_hal_remote_server_session_t* entry,
+    iree_net_sequence_node_t* ready_list) {
+  iree_status_t status = iree_ok_status();
+  while (ready_list && iree_status_is_ok(status)) {
+    iree_net_sequence_node_t* next = ready_list->next;
+    iree_hal_remote_server_resource_release_node_t* release_node =
+        iree_containerof(ready_list,
+                         iree_hal_remote_server_resource_release_node_t,
+                         sequence_node);
+    status = iree_hal_remote_server_release_resource_node(entry, release_node);
+    ready_list = next;
+  }
+  iree_hal_remote_server_free_resource_release_nodes(ready_list);
+  return status;
+}
+
+static iree_status_t iree_hal_remote_server_schedule_resource_release(
+    iree_hal_remote_server_session_t* entry, uint64_t required_observed_epoch,
+    const iree_hal_remote_resource_id_t* resource_ids,
+    uint32_t resource_count) {
+  if (resource_count == 0) return iree_ok_status();
+  iree_hal_remote_server_t* server = entry->server;
+  bool release_now = false;
+
+  iree_slim_mutex_lock(&server->session_mutex);
+  if (!entry->session) {
+    release_now = false;
+  } else if (required_observed_epoch <=
+             iree_net_sequence_window_observed(
+                 &entry->observed_submission_window)) {
+    release_now = true;
+  }
+  iree_slim_mutex_unlock(&server->session_mutex);
+  if (release_now) {
+    return iree_hal_remote_server_release_resource_ids(entry, resource_ids,
+                                                       resource_count);
+  }
+
+  iree_host_size_t total_size = 0;
+  IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
+      sizeof(iree_hal_remote_server_resource_release_node_t), &total_size,
+      IREE_STRUCT_FIELD_FAM(resource_count, iree_hal_remote_resource_id_t)));
+
+  iree_allocator_t host_allocator = server->host_allocator;
+  iree_status_t status = iree_ok_status();
+  iree_slim_mutex_lock(&server->session_mutex);
+  if (!entry->session) {
+    status = iree_status_from_code(IREE_STATUS_ABORTED);
+  } else {
+    status = iree_net_sequence_window_reserve(
+        &entry->observed_submission_window, required_observed_epoch);
+  }
+  iree_slim_mutex_unlock(&server->session_mutex);
+
+  iree_hal_remote_server_resource_release_node_t* release_node = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc(host_allocator, total_size,
+                                   (void**)&release_node);
+  }
+  if (iree_status_is_ok(status)) {
+    memset(release_node, 0, sizeof(*release_node));
+    release_node->host_allocator = host_allocator;
+    release_node->resource_count = resource_count;
+    memcpy(release_node->resource_ids, resource_ids,
+           (iree_host_size_t)resource_count *
+               sizeof(iree_hal_remote_resource_id_t));
+  }
+
+  iree_net_sequence_node_t* ready_list = NULL;
+  if (iree_status_is_ok(status)) {
+    iree_slim_mutex_lock(&server->session_mutex);
+    if (!entry->session) {
+      status = iree_status_from_code(IREE_STATUS_ABORTED);
+    } else if (required_observed_epoch <=
+               iree_net_sequence_window_observed(
+                   &entry->observed_submission_window)) {
+      release_now = true;
+    } else {
+      status = iree_net_sequence_window_defer_until(
+          &entry->observed_submission_window, required_observed_epoch,
+          &release_node->sequence_node, &ready_list);
+      if (iree_status_is_ok(status)) release_node = NULL;
+    }
+    iree_slim_mutex_unlock(&server->session_mutex);
+  }
+  if (iree_status_is_ok(status)) {
+    if (release_now) {
+      status =
+          iree_hal_remote_server_release_resource_node(entry, release_node);
+      release_node = NULL;
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_remote_server_process_ready_resource_releases(
+          entry, ready_list);
+    }
+  }
+  if (release_node) {
+    iree_allocator_free(host_allocator, release_node);
+  }
+  return status;
+}
+
+// Handles legacy control-channel RESOURCE_RELEASE_BATCH. Current clients send
+// releases over the queue channel with an observed-submission epoch. Control
+// frames do not carry that ordering information, so accepting one here would
+// risk racing ahead of queue commands still resolving the resources.
 static iree_status_t iree_hal_remote_server_handle_resource_release_batch(
     iree_hal_remote_server_session_t* entry, const uint8_t* body,
     iree_host_size_t body_length) {
@@ -2192,20 +2744,74 @@ static iree_status_t iree_hal_remote_server_handle_resource_release_batch(
                             body_length, expected_size, resource_count);
   }
 
-  const iree_hal_remote_resource_id_t* resource_ids =
-      (const iree_hal_remote_resource_id_t*)(body +
-                                             sizeof(
-                                                 iree_hal_remote_resource_release_batch_t));
-  for (uint32_t i = 0; i < resource_count; ++i) {
-    iree_hal_remote_resource_table_release(&entry->resource_table,
-                                           resource_ids[i]);
-  }
+  (void)entry;
+  (void)resource_count;
   return iree_ok_status();
+}
+
+// Handles queue-channel RESOURCE_RELEASE_BATCH. The frame carries the greatest
+// submission epoch that may still reference the resources. Once all COMMAND
+// packets up to that epoch have been processed, the wrapped local HAL has
+// retained anything it still needs and the resource table entries can be
+// released without waiting for execution completion.
+static iree_status_t iree_hal_remote_server_handle_queue_resource_release_batch(
+    iree_hal_remote_server_session_t* entry,
+    iree_const_byte_span_t command_data) {
+  if (command_data.data_length <
+      sizeof(iree_hal_remote_resource_release_op_t)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "RESOURCE_RELEASE_BATCH op too small: %" PRIhsz
+                            " bytes",
+                            command_data.data_length);
+  }
+
+  const iree_hal_remote_resource_release_op_t* op =
+      (const iree_hal_remote_resource_release_op_t*)command_data.data;
+  uint32_t resource_count = op->resource_count;
+
+  iree_host_size_t expected_size = 0;
+  if (!iree_host_size_checked_mul_add(
+          sizeof(iree_hal_remote_resource_release_op_t), resource_count,
+          sizeof(iree_hal_remote_resource_id_t), &expected_size)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "RESOURCE_RELEASE_BATCH op size overflow");
+  }
+  if (command_data.data_length < expected_size) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "RESOURCE_RELEASE_BATCH op truncated: %" PRIhsz
+                            " bytes, expected %" PRIhsz " for %u resources",
+                            command_data.data_length, expected_size,
+                            resource_count);
+  }
+
+  const iree_hal_remote_resource_id_t* resource_ids =
+      (const iree_hal_remote_resource_id_t*)(command_data.data +
+                                             sizeof(
+                                                 iree_hal_remote_resource_release_op_t));
+  return iree_hal_remote_server_schedule_resource_release(
+      entry, op->required_observed_epoch, resource_ids, resource_count);
 }
 
 //===----------------------------------------------------------------------===//
 // Queue channel callbacks
 //===----------------------------------------------------------------------===//
+
+static iree_status_t iree_hal_remote_server_validate_queue_frontier(
+    iree_hal_remote_server_session_t* session_slot, const char* frontier_name,
+    const iree_async_frontier_t* frontier) {
+  if (!frontier) return iree_ok_status();
+  iree_async_axis_t queue_axis = session_slot->server->local_topology.axes[0];
+  for (uint8_t i = 0; i < frontier->entry_count; ++i) {
+    if (frontier->entries[i].axis != queue_axis) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "%s frontier entry %u has axis=0x%016" PRIx64
+                              "; expected queue axis=0x%016" PRIx64,
+                              frontier_name, i, frontier->entries[i].axis,
+                              queue_axis);
+    }
+  }
+  return iree_ok_status();
+}
 
 // Server receives COMMAND frames from clients and dispatches to the local
 // device. On completion (via semaphore timepoint), sends ADVANCE back.
@@ -2218,24 +2824,42 @@ static iree_status_t iree_hal_remote_server_on_command(
       (iree_hal_remote_server_session_t*)user_data;
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  if (!signal_frontier || signal_frontier->entry_count == 0) {
+  iree_status_t status;
+  const iree_hal_remote_queue_op_header_t* op_header = NULL;
+  if (command_data.data_length >= sizeof(iree_hal_remote_queue_op_header_t)) {
+    op_header = (const iree_hal_remote_queue_op_header_t*)command_data.data;
+    if (op_header->type == IREE_HAL_REMOTE_QUEUE_OP_RESOURCE_RELEASE_BATCH) {
+      status = iree_hal_remote_server_handle_queue_resource_release_batch(
+          session_slot, command_data);
+      IREE_TRACE_ZONE_END(z0);
+      return status;
+    }
+  }
+
+  if (!signal_frontier || signal_frontier->entry_count != 1) {
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "COMMAND frame must have a signal frontier for completion tracking");
+        "COMMAND frame must have exactly one signal frontier entry");
   }
 
-  iree_status_t status;
+  status = iree_hal_remote_server_validate_queue_frontier(session_slot, "wait",
+                                                          wait_frontier);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_server_validate_queue_frontier(
+        session_slot, "signal", signal_frontier);
+  }
+  if (!iree_status_is_ok(status)) {
+    IREE_TRACE_ZONE_END(z0);
+    return status;
+  }
 
   if (command_data.data_length == 0) {
     // Barrier operation (empty payload).
     status = iree_hal_remote_server_submit_command(
         session_slot, wait_frontier, signal_frontier,
         iree_hal_remote_server_submit_barrier, NULL);
-  } else if (command_data.data_length >=
-             sizeof(iree_hal_remote_queue_op_header_t)) {
-    const iree_hal_remote_queue_op_header_t* op_header =
-        (const iree_hal_remote_queue_op_header_t*)command_data.data;
+  } else if (op_header) {
     iree_hal_remote_server_op_context_t op_context = {
         .session_slot = session_slot,
         .command_data = command_data,

@@ -11,6 +11,7 @@
 #include "iree/hal/remote/client/executable.h"
 #include "iree/hal/remote/protocol/commands.h"
 #include "iree/hal/remote/protocol/control.h"
+#include "iree/hal/utils/resource_set.h"
 
 //===----------------------------------------------------------------------===//
 // iree_hal_remote_client_command_buffer_t
@@ -36,6 +37,9 @@ typedef struct iree_hal_remote_client_command_buffer_t {
   // Server resource ID (reusable only). Initially provisional (from end()),
   // resolved to canonical when upload response arrives.
   iree_hal_remote_resource_id_t resource_id;
+
+  // Retained direct resources referenced by the serialized command stream.
+  iree_hal_resource_set_t* resource_set;
 } iree_hal_remote_client_command_buffer_t;
 
 static iree_hal_remote_client_command_buffer_t*
@@ -50,13 +54,27 @@ iree_hal_remote_client_command_buffer_cast(
 // Buffer reference helpers
 //===----------------------------------------------------------------------===//
 
+static void iree_hal_remote_client_command_buffer_release_resources(
+    iree_hal_remote_client_command_buffer_t* command_buffer) {
+  iree_hal_resource_set_free(command_buffer->resource_set);
+  command_buffer->resource_set = NULL;
+}
+
+static iree_status_t iree_hal_remote_client_command_buffer_retain_resource(
+    iree_hal_remote_client_command_buffer_t* command_buffer,
+    iree_hal_resource_t* resource) {
+  return iree_hal_resource_set_insert(command_buffer->resource_set, 1,
+                                      &resource);
+}
+
 // Resolves a buffer reference for wire serialization. Returns the resource_id
 // of the root allocation and adjusts the offset to be absolute within that
 // allocation (adding the subspan byte_offset if the buffer is a subspan).
 static iree_hal_remote_resource_id_t
-iree_hal_remote_client_cb_resolve_buffer_ref(iree_hal_buffer_ref_t ref,
-                                             iree_device_size_t* out_offset,
-                                             iree_status_t* out_status) {
+iree_hal_remote_client_cb_resolve_buffer_ref(
+    iree_hal_remote_client_command_buffer_t* command_buffer,
+    iree_hal_buffer_ref_t ref, iree_device_size_t* out_offset,
+    iree_status_t* out_status) {
   if (!ref.buffer) {
     *out_offset = ref.offset;
     return 0;
@@ -69,6 +87,12 @@ iree_hal_remote_client_cb_resolve_buffer_ref(iree_hal_buffer_ref_t ref,
     *out_status = status;
     return 0;
   }
+  status = iree_hal_remote_client_command_buffer_retain_resource(
+      command_buffer, (iree_hal_resource_t*)ref.buffer);
+  if (!iree_status_is_ok(status)) {
+    *out_status = status;
+    return 0;
+  }
   *out_offset = byte_offset;
   return resource_id;
 }
@@ -77,6 +101,7 @@ iree_hal_remote_client_cb_resolve_buffer_ref(iree_hal_buffer_ref_t ref,
 // Direct refs carry a server resource ID; indirect refs carry the binding table
 // slot that will be resolved when the command buffer executes.
 static void iree_hal_remote_client_cb_encode_buffer_ref(
+    iree_hal_remote_client_command_buffer_t* command_buffer,
     iree_hal_buffer_ref_t ref, iree_hal_remote_resource_id_t* out_buffer_id,
     uint32_t* out_buffer_slot, iree_device_size_t* out_offset,
     iree_status_t* out_status) {
@@ -86,8 +111,8 @@ static void iree_hal_remote_client_cb_encode_buffer_ref(
     *out_offset = ref.offset;
     return;
   }
-  *out_buffer_id =
-      iree_hal_remote_client_cb_resolve_buffer_ref(ref, out_offset, out_status);
+  *out_buffer_id = iree_hal_remote_client_cb_resolve_buffer_ref(
+      command_buffer, ref, out_offset, out_status);
   *out_buffer_slot = 0;
 }
 
@@ -141,23 +166,11 @@ static void iree_hal_remote_client_command_buffer_destroy(
 
   // Release server-side resource for reusable command buffers.
   if (command_buffer->resource_id != 0) {
-    struct {
-      iree_hal_remote_control_envelope_t envelope;
-      iree_hal_remote_resource_release_batch_t batch;
-      iree_hal_remote_resource_id_t resource_ids[1];
-    } message;
-    memset(&message, 0, sizeof(message));
-    message.envelope.message_type =
-        IREE_HAL_REMOTE_CONTROL_RESOURCE_RELEASE_BATCH;
-    message.envelope.message_flags =
-        IREE_HAL_REMOTE_CONTROL_FLAG_FIRE_AND_FORGET;
-    message.batch.resource_count = 1;
-    message.resource_ids[0] = command_buffer->resource_id;
-    iree_status_ignore(iree_hal_remote_client_device_send_fire_and_forget(
-        command_buffer->device,
-        iree_make_const_byte_span(&message, sizeof(message))));
+    iree_status_ignore(iree_hal_remote_client_device_release_resource(
+        command_buffer->device, command_buffer->resource_id));
   }
 
+  iree_hal_remote_client_command_buffer_release_resources(command_buffer);
   iree_allocator_free(host_allocator, command_buffer->stream_data);
   iree_allocator_free(host_allocator, command_buffer);
 }
@@ -169,27 +182,20 @@ static iree_status_t iree_hal_remote_client_command_buffer_begin(
 
   // Re-recording: release old server resource if present.
   if (command_buffer->resource_id != 0) {
-    struct {
-      iree_hal_remote_control_envelope_t envelope;
-      iree_hal_remote_resource_release_batch_t batch;
-      iree_hal_remote_resource_id_t resource_ids[1];
-    } message;
-    memset(&message, 0, sizeof(message));
-    message.envelope.message_type =
-        IREE_HAL_REMOTE_CONTROL_RESOURCE_RELEASE_BATCH;
-    message.envelope.message_flags =
-        IREE_HAL_REMOTE_CONTROL_FLAG_FIRE_AND_FORGET;
-    message.batch.resource_count = 1;
-    message.resource_ids[0] = command_buffer->resource_id;
-    iree_status_ignore(iree_hal_remote_client_device_send_fire_and_forget(
-        command_buffer->device,
-        iree_make_const_byte_span(&message, sizeof(message))));
+    iree_status_ignore(iree_hal_remote_client_device_release_resource(
+        command_buffer->device, command_buffer->resource_id));
     command_buffer->resource_id = 0;
   }
 
   // Reset recording position (keeps the allocation for reuse).
-  command_buffer->stream_length = 0;
-  return iree_ok_status();
+  iree_hal_remote_client_command_buffer_release_resources(command_buffer);
+  iree_status_t status = iree_hal_resource_set_allocate(
+      &command_buffer->device->resource_set_block_pool,
+      &command_buffer->resource_set);
+  if (iree_status_is_ok(status)) {
+    command_buffer->stream_length = 0;
+  }
+  return status;
 }
 
 static iree_status_t iree_hal_remote_client_command_buffer_end(
@@ -361,48 +367,53 @@ static iree_status_t iree_hal_remote_client_command_buffer_execution_barrier(
   }
   total_size = iree_host_align(total_size, 8);
 
+  const iree_host_size_t stream_start = command_buffer->stream_length;
   void* ptr = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_remote_client_cb_append(command_buffer, total_size, &ptr));
+  iree_status_t status =
+      iree_hal_remote_client_cb_append(command_buffer, total_size, &ptr);
 
-  iree_hal_remote_execution_barrier_cmd_t* cmd =
-      (iree_hal_remote_execution_barrier_cmd_t*)ptr;
-  cmd->header.type = IREE_HAL_REMOTE_CMD_EXECUTION_BARRIER;
-  cmd->header.length = (uint16_t)total_size;
-  cmd->source_stage_mask = (uint32_t)source_stage_mask;
-  cmd->target_stage_mask = (uint32_t)target_stage_mask;
-  cmd->memory_barrier_count = (uint16_t)memory_barrier_count;
-  cmd->buffer_barrier_count = (uint16_t)buffer_barrier_count;
+  if (iree_status_is_ok(status)) {
+    iree_hal_remote_execution_barrier_cmd_t* cmd =
+        (iree_hal_remote_execution_barrier_cmd_t*)ptr;
+    cmd->header.type = IREE_HAL_REMOTE_CMD_EXECUTION_BARRIER;
+    cmd->header.length = (uint16_t)total_size;
+    cmd->source_stage_mask = (uint32_t)source_stage_mask;
+    cmd->target_stage_mask = (uint32_t)target_stage_mask;
+    cmd->memory_barrier_count = (uint16_t)memory_barrier_count;
+    cmd->buffer_barrier_count = (uint16_t)buffer_barrier_count;
 
-  uint8_t* cursor = (uint8_t*)(cmd + 1);
+    uint8_t* cursor = (uint8_t*)(cmd + 1);
 
-  // Serialize memory barriers.
-  for (iree_host_size_t i = 0; i < memory_barrier_count; ++i) {
-    iree_hal_remote_memory_barrier_t* wire =
-        (iree_hal_remote_memory_barrier_t*)cursor;
-    wire->source_scope = (uint32_t)memory_barriers[i].source_scope;
-    wire->target_scope = (uint32_t)memory_barriers[i].target_scope;
-    cursor += sizeof(*wire);
+    // Serialize memory barriers.
+    for (iree_host_size_t i = 0; i < memory_barrier_count; ++i) {
+      iree_hal_remote_memory_barrier_t* wire =
+          (iree_hal_remote_memory_barrier_t*)cursor;
+      wire->source_scope = (uint32_t)memory_barriers[i].source_scope;
+      wire->target_scope = (uint32_t)memory_barriers[i].target_scope;
+      cursor += sizeof(*wire);
+    }
+
+    // Serialize buffer barriers (resolve buffer IDs + subspan offsets).
+    for (iree_host_size_t i = 0;
+         i < buffer_barrier_count && iree_status_is_ok(status); ++i) {
+      iree_hal_remote_buffer_barrier_t* wire =
+          (iree_hal_remote_buffer_barrier_t*)cursor;
+      wire->source_scope = (uint32_t)buffer_barriers[i].source_scope;
+      wire->target_scope = (uint32_t)buffer_barriers[i].target_scope;
+      iree_device_size_t barrier_offset = 0;
+      iree_hal_remote_client_cb_encode_buffer_ref(
+          command_buffer, buffer_barriers[i].buffer_ref, &wire->buffer_id,
+          &wire->buffer_slot, &barrier_offset, &status);
+      wire->offset = barrier_offset;
+      wire->length = buffer_barriers[i].buffer_ref.length;
+      cursor += sizeof(*wire);
+    }
   }
 
-  // Serialize buffer barriers (resolve buffer IDs + subspan offsets).
-  iree_status_t resolve_status = iree_ok_status();
-  for (iree_host_size_t i = 0; i < buffer_barrier_count; ++i) {
-    iree_hal_remote_buffer_barrier_t* wire =
-        (iree_hal_remote_buffer_barrier_t*)cursor;
-    wire->source_scope = (uint32_t)buffer_barriers[i].source_scope;
-    wire->target_scope = (uint32_t)buffer_barriers[i].target_scope;
-    iree_device_size_t barrier_offset = 0;
-    iree_hal_remote_client_cb_encode_buffer_ref(
-        buffer_barriers[i].buffer_ref, &wire->buffer_id, &wire->buffer_slot,
-        &barrier_offset, &resolve_status);
-    IREE_RETURN_IF_ERROR(resolve_status);
-    wire->offset = barrier_offset;
-    wire->length = buffer_barriers[i].buffer_ref.length;
-    cursor += sizeof(*wire);
+  if (!iree_status_is_ok(status)) {
+    command_buffer->stream_length = stream_start;
   }
-
-  return iree_ok_status();
+  return status;
 }
 
 static iree_status_t iree_hal_remote_client_command_buffer_signal_event(
@@ -443,30 +454,36 @@ static iree_status_t iree_hal_remote_client_command_buffer_fill_buffer(
   iree_hal_remote_client_command_buffer_t* command_buffer =
       iree_hal_remote_client_command_buffer_cast(base_command_buffer);
 
+  const iree_host_size_t stream_start = command_buffer->stream_length;
   void* ptr = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_remote_client_cb_append(
-      command_buffer, sizeof(iree_hal_remote_buffer_fill_cmd_t), &ptr));
+  iree_status_t status = iree_hal_remote_client_cb_append(
+      command_buffer, sizeof(iree_hal_remote_buffer_fill_cmd_t), &ptr);
 
-  iree_hal_remote_buffer_fill_cmd_t* cmd =
-      (iree_hal_remote_buffer_fill_cmd_t*)ptr;
-  cmd->header.type = IREE_HAL_REMOTE_CMD_BUFFER_FILL;
-  cmd->header.length = (uint16_t)sizeof(*cmd);
-  iree_device_size_t target_offset = 0;
-  iree_status_t resolve_status = iree_ok_status();
-  iree_hal_remote_client_cb_encode_buffer_ref(
-      target_ref, &cmd->target_buffer_id, &cmd->target_buffer_slot,
-      &target_offset, &resolve_status);
-  IREE_RETURN_IF_ERROR(resolve_status);
-  cmd->target_offset = target_offset;
-  cmd->target_length = target_ref.length;
-  cmd->pattern_length = (uint8_t)pattern_length;
-  cmd->fill_flags = (uint32_t)flags;
+  if (iree_status_is_ok(status)) {
+    iree_hal_remote_buffer_fill_cmd_t* cmd =
+        (iree_hal_remote_buffer_fill_cmd_t*)ptr;
+    cmd->header.type = IREE_HAL_REMOTE_CMD_BUFFER_FILL;
+    cmd->header.length = (uint16_t)sizeof(*cmd);
+    iree_device_size_t target_offset = 0;
+    iree_hal_remote_client_cb_encode_buffer_ref(
+        command_buffer, target_ref, &cmd->target_buffer_id,
+        &cmd->target_buffer_slot, &target_offset, &status);
+    cmd->target_offset = target_offset;
+    cmd->target_length = target_ref.length;
+    cmd->pattern_length = (uint8_t)pattern_length;
+    cmd->fill_flags = (uint32_t)flags;
 
-  // Zero-extend pattern into uint32_t.
-  memcpy(&cmd->pattern, pattern,
-         iree_min(pattern_length, sizeof(cmd->pattern)));
+    if (iree_status_is_ok(status)) {
+      // Zero-extend pattern into uint32_t.
+      memcpy(&cmd->pattern, pattern,
+             iree_min(pattern_length, sizeof(cmd->pattern)));
+    }
+  }
 
-  return iree_ok_status();
+  if (!iree_status_is_ok(status)) {
+    command_buffer->stream_length = stream_start;
+  }
+  return status;
 }
 
 static iree_status_t iree_hal_remote_client_command_buffer_update_buffer(
@@ -485,29 +502,35 @@ static iree_status_t iree_hal_remote_client_command_buffer_update_buffer(
                             "update buffer command size overflow");
   }
 
+  const iree_host_size_t stream_start = command_buffer->stream_length;
   void* ptr = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_remote_client_cb_append(command_buffer, total_size, &ptr));
+  iree_status_t status =
+      iree_hal_remote_client_cb_append(command_buffer, total_size, &ptr);
 
-  iree_hal_remote_buffer_update_cmd_t* cmd =
-      (iree_hal_remote_buffer_update_cmd_t*)ptr;
-  cmd->header.type = IREE_HAL_REMOTE_CMD_BUFFER_UPDATE;
-  cmd->header.length = (uint16_t)total_size;
-  iree_device_size_t update_target_offset = 0;
-  iree_status_t resolve_status = iree_ok_status();
-  iree_hal_remote_client_cb_encode_buffer_ref(
-      target_ref, &cmd->target_buffer_id, &cmd->target_buffer_slot,
-      &update_target_offset, &resolve_status);
-  IREE_RETURN_IF_ERROR(resolve_status);
-  cmd->target_offset = update_target_offset;
-  cmd->target_length = target_ref.length;
-  cmd->update_flags = (uint32_t)flags;
+  if (iree_status_is_ok(status)) {
+    iree_hal_remote_buffer_update_cmd_t* cmd =
+        (iree_hal_remote_buffer_update_cmd_t*)ptr;
+    cmd->header.type = IREE_HAL_REMOTE_CMD_BUFFER_UPDATE;
+    cmd->header.length = (uint16_t)total_size;
+    iree_device_size_t update_target_offset = 0;
+    iree_hal_remote_client_cb_encode_buffer_ref(
+        command_buffer, target_ref, &cmd->target_buffer_id,
+        &cmd->target_buffer_slot, &update_target_offset, &status);
+    cmd->target_offset = update_target_offset;
+    cmd->target_length = target_ref.length;
+    cmd->update_flags = (uint32_t)flags;
 
-  // Deep-copy the source data into the stream.
-  memcpy((uint8_t*)(cmd + 1), (const uint8_t*)source_buffer + source_offset,
-         data_length);
+    if (iree_status_is_ok(status)) {
+      // Deep-copy the source data into the stream.
+      memcpy((uint8_t*)(cmd + 1), (const uint8_t*)source_buffer + source_offset,
+             data_length);
+    }
+  }
 
-  return iree_ok_status();
+  if (!iree_status_is_ok(status)) {
+    command_buffer->stream_length = stream_start;
+  }
+  return status;
 }
 
 static iree_status_t iree_hal_remote_client_command_buffer_copy_buffer(
@@ -517,31 +540,36 @@ static iree_status_t iree_hal_remote_client_command_buffer_copy_buffer(
   iree_hal_remote_client_command_buffer_t* command_buffer =
       iree_hal_remote_client_command_buffer_cast(base_command_buffer);
 
+  const iree_host_size_t stream_start = command_buffer->stream_length;
   void* ptr = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_remote_client_cb_append(
-      command_buffer, sizeof(iree_hal_remote_buffer_copy_cmd_t), &ptr));
+  iree_status_t status = iree_hal_remote_client_cb_append(
+      command_buffer, sizeof(iree_hal_remote_buffer_copy_cmd_t), &ptr);
 
-  iree_hal_remote_buffer_copy_cmd_t* cmd =
-      (iree_hal_remote_buffer_copy_cmd_t*)ptr;
-  cmd->header.type = IREE_HAL_REMOTE_CMD_BUFFER_COPY;
-  cmd->header.length = (uint16_t)sizeof(*cmd);
-  iree_device_size_t copy_source_offset = 0;
-  iree_device_size_t copy_target_offset = 0;
-  iree_status_t resolve_status = iree_ok_status();
-  iree_hal_remote_client_cb_encode_buffer_ref(
-      source_ref, &cmd->source_buffer_id, &cmd->source_buffer_slot,
-      &copy_source_offset, &resolve_status);
-  IREE_RETURN_IF_ERROR(resolve_status);
-  cmd->source_offset = copy_source_offset;
-  iree_hal_remote_client_cb_encode_buffer_ref(
-      target_ref, &cmd->target_buffer_id, &cmd->target_buffer_slot,
-      &copy_target_offset, &resolve_status);
-  IREE_RETURN_IF_ERROR(resolve_status);
-  cmd->target_offset = copy_target_offset;
-  cmd->length = source_ref.length;
-  cmd->copy_flags = (uint32_t)flags;
+  if (iree_status_is_ok(status)) {
+    iree_hal_remote_buffer_copy_cmd_t* cmd =
+        (iree_hal_remote_buffer_copy_cmd_t*)ptr;
+    cmd->header.type = IREE_HAL_REMOTE_CMD_BUFFER_COPY;
+    cmd->header.length = (uint16_t)sizeof(*cmd);
+    iree_device_size_t copy_source_offset = 0;
+    iree_device_size_t copy_target_offset = 0;
+    iree_hal_remote_client_cb_encode_buffer_ref(
+        command_buffer, source_ref, &cmd->source_buffer_id,
+        &cmd->source_buffer_slot, &copy_source_offset, &status);
+    cmd->source_offset = copy_source_offset;
+    if (iree_status_is_ok(status)) {
+      iree_hal_remote_client_cb_encode_buffer_ref(
+          command_buffer, target_ref, &cmd->target_buffer_id,
+          &cmd->target_buffer_slot, &copy_target_offset, &status);
+    }
+    cmd->target_offset = copy_target_offset;
+    cmd->length = source_ref.length;
+    cmd->copy_flags = (uint32_t)flags;
+  }
 
-  return iree_ok_status();
+  if (!iree_status_is_ok(status)) {
+    command_buffer->stream_length = stream_start;
+  }
+  return status;
 }
 
 static iree_status_t iree_hal_remote_client_command_buffer_advise_buffer(
@@ -551,27 +579,31 @@ static iree_status_t iree_hal_remote_client_command_buffer_advise_buffer(
   iree_hal_remote_client_command_buffer_t* command_buffer =
       iree_hal_remote_client_command_buffer_cast(base_command_buffer);
 
+  const iree_host_size_t stream_start = command_buffer->stream_length;
   void* ptr = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_remote_client_cb_append(
-      command_buffer, sizeof(iree_hal_remote_buffer_advise_cmd_t), &ptr));
+  iree_status_t status = iree_hal_remote_client_cb_append(
+      command_buffer, sizeof(iree_hal_remote_buffer_advise_cmd_t), &ptr);
 
-  iree_hal_remote_buffer_advise_cmd_t* cmd =
-      (iree_hal_remote_buffer_advise_cmd_t*)ptr;
-  cmd->header.type = IREE_HAL_REMOTE_CMD_BUFFER_ADVISE;
-  cmd->header.length = (uint16_t)sizeof(*cmd);
-  iree_device_size_t advise_offset = 0;
-  iree_status_t resolve_status = iree_ok_status();
-  iree_hal_remote_client_cb_encode_buffer_ref(buffer_ref, &cmd->buffer_id,
-                                              &cmd->buffer_slot, &advise_offset,
-                                              &resolve_status);
-  IREE_RETURN_IF_ERROR(resolve_status);
-  cmd->offset = advise_offset;
-  cmd->length = buffer_ref.length;
-  cmd->advise_flags = (uint32_t)advise_flags;
-  cmd->argument0 = arg0;
-  cmd->argument1 = arg1;
+  if (iree_status_is_ok(status)) {
+    iree_hal_remote_buffer_advise_cmd_t* cmd =
+        (iree_hal_remote_buffer_advise_cmd_t*)ptr;
+    cmd->header.type = IREE_HAL_REMOTE_CMD_BUFFER_ADVISE;
+    cmd->header.length = (uint16_t)sizeof(*cmd);
+    iree_device_size_t advise_offset = 0;
+    iree_hal_remote_client_cb_encode_buffer_ref(
+        command_buffer, buffer_ref, &cmd->buffer_id, &cmd->buffer_slot,
+        &advise_offset, &status);
+    cmd->offset = advise_offset;
+    cmd->length = buffer_ref.length;
+    cmd->advise_flags = (uint32_t)advise_flags;
+    cmd->argument0 = arg0;
+    cmd->argument1 = arg1;
+  }
 
-  return iree_ok_status();
+  if (!iree_status_is_ok(status)) {
+    command_buffer->stream_length = stream_start;
+  }
+  return status;
 }
 
 //===----------------------------------------------------------------------===//
@@ -649,6 +681,11 @@ static iree_status_t iree_hal_remote_client_command_buffer_dispatch(
   status = iree_hal_remote_client_cb_append(command_buffer, total_size, &ptr);
 
   if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_client_command_buffer_retain_resource(
+        command_buffer, (iree_hal_resource_t*)executable);
+  }
+
+  if (iree_status_is_ok(status)) {
     iree_hal_remote_dispatch_cmd_t* cmd = (iree_hal_remote_dispatch_cmd_t*)ptr;
     cmd->header.type = IREE_HAL_REMOTE_CMD_DISPATCH;
     cmd->header.length = (uint16_t)total_size;
@@ -664,7 +701,8 @@ static iree_status_t iree_hal_remote_client_command_buffer_dispatch(
     iree_device_size_t workgroup_count_offset = 0;
     cmd->config.workgroup_count_buffer_id =
         iree_hal_remote_client_cb_resolve_buffer_ref(
-            config.workgroup_count_ref, &workgroup_count_offset, &status);
+            command_buffer, config.workgroup_count_ref, &workgroup_count_offset,
+            &status);
     cmd->config.workgroup_count_offset = workgroup_count_offset;
     cmd->config.workgroup_count_length = config.workgroup_count_ref.length;
     cmd->config.workgroup_count_buffer_slot =
@@ -687,7 +725,7 @@ static iree_status_t iree_hal_remote_client_command_buffer_dispatch(
       const iree_hal_buffer_ref_t* ref = &bindings.values[i];
       iree_device_size_t binding_offset = 0;
       wire_bindings[i].buffer_id = iree_hal_remote_client_cb_resolve_buffer_ref(
-          *ref, &binding_offset, &status);
+          command_buffer, *ref, &binding_offset, &status);
       wire_bindings[i].offset = binding_offset;
       wire_bindings[i].length = ref->length;
       wire_bindings[i].buffer_slot = ref->buffer_slot;
@@ -752,6 +790,8 @@ iree_status_t iree_hal_remote_client_command_buffer_create(
                                                (void**)&command_buffer);
 
   if (iree_status_is_ok(status)) {
+    memset(command_buffer, 0, sizeof(*command_buffer));
+
     // Allocate initial stream buffer.
     status = iree_allocator_malloc(host_allocator,
                                    IREE_HAL_REMOTE_CB_INITIAL_CAPACITY,
@@ -769,12 +809,16 @@ iree_status_t iree_hal_remote_client_command_buffer_create(
     command_buffer->stream_length = 0;
     command_buffer->stream_capacity = IREE_HAL_REMOTE_CB_INITIAL_CAPACITY;
     command_buffer->resource_id = 0;
-    *out_command_buffer = &command_buffer->base;
-  } else {
-    if (command_buffer) {
-      iree_allocator_free(host_allocator, command_buffer->stream_data);
-      iree_allocator_free(host_allocator, command_buffer);
+    status = iree_hal_resource_set_allocate(&device->resource_set_block_pool,
+                                            &command_buffer->resource_set);
+    if (iree_status_is_ok(status)) {
+      *out_command_buffer = &command_buffer->base;
     }
+  }
+
+  if (!iree_status_is_ok(status) && command_buffer) {
+    iree_allocator_free(host_allocator, command_buffer->stream_data);
+    iree_allocator_free(host_allocator, command_buffer);
   }
 
   IREE_TRACE_ZONE_END(z0);

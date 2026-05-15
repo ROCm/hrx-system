@@ -17,6 +17,7 @@
 #include "iree/hal/remote/client/semaphore.h"
 #include "iree/hal/remote/client/slab_provider.h"
 #include "iree/hal/remote/protocol/control.h"
+#include "iree/hal/remote/protocol/queue.h"
 #include "iree/hal/remote/util/recv_pool.h"
 #include "iree/hal/utils/file_registry.h"
 #include "iree/net/channel/queue/queue_channel.h"
@@ -24,6 +25,9 @@
 #include "iree/net/transport_factory.h"
 
 static const iree_hal_device_vtable_t iree_hal_remote_client_device_vtable;
+
+// Block size used for command-buffer retained resource sets.
+#define IREE_HAL_REMOTE_CLIENT_RESOURCE_SET_BLOCK_SIZE 4096
 
 iree_hal_remote_client_device_t* iree_hal_remote_client_device_cast(
     iree_hal_device_t* base_value) {
@@ -163,6 +167,9 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_create(
   device->host_allocator = host_allocator;
   device->channel_provider = NULL;
   device->device_allocator = NULL;
+  iree_arena_block_pool_initialize(
+      IREE_HAL_REMOTE_CLIENT_RESOURCE_SET_BLOCK_SIZE, host_allocator,
+      &device->resource_set_block_pool);
 
   // Retain the receive-pool proactor, create the session frontier tracker, and
   // retain recv_pool.
@@ -174,6 +181,7 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_create(
   iree_status_t tracker_status = iree_async_frontier_tracker_create(
       tracker_options, host_allocator, &device->frontier_tracker);
   if (!iree_status_is_ok(tracker_status)) {
+    iree_arena_block_pool_deinitialize(&device->resource_set_block_pool);
     iree_async_proactor_release(device->proactor);
     iree_net_transport_factory_release(options->transport_factory);
     iree_allocator_free(host_allocator, device);
@@ -211,6 +219,7 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_create(
     iree_async_frontier_tracker_release(device->frontier_tracker);
     iree_hal_remote_recv_pool_release(device->recv_pool);
     iree_async_proactor_release(device->proactor);
+    iree_arena_block_pool_deinitialize(&device->resource_set_block_pool);
     iree_net_transport_factory_release(options->transport_factory);
     iree_allocator_free(host_allocator, device);
     IREE_TRACE_ZONE_END(z0);
@@ -232,6 +241,7 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_create(
     iree_async_frontier_tracker_release(device->frontier_tracker);
     iree_hal_remote_recv_pool_release(device->recv_pool);
     iree_async_proactor_release(device->proactor);
+    iree_arena_block_pool_deinitialize(&device->resource_set_block_pool);
     iree_net_transport_factory_release(options->transport_factory);
     iree_allocator_free(host_allocator, device);
     IREE_TRACE_ZONE_END(z0);
@@ -327,6 +337,7 @@ static void iree_hal_remote_client_device_destroy(
   iree_hal_remote_recv_pool_release(device->recv_pool);
   iree_async_frontier_tracker_release(device->frontier_tracker);
   iree_async_proactor_release(device->proactor);
+  iree_arena_block_pool_deinitialize(&device->resource_set_block_pool);
 
   iree_slim_mutex_deinitialize(&device->rpc_mutex);
   iree_allocator_free(host_allocator, device);
@@ -887,6 +898,47 @@ iree_status_t iree_hal_remote_client_device_send_fire_and_forget(
   return iree_net_session_send_control_data_copy(device->session, /*flags=*/0,
                                                  payload,
                                                  /*operation_user_data=*/0);
+}
+
+iree_status_t iree_hal_remote_client_device_release_resource(
+    iree_hal_remote_client_device_t* device,
+    iree_hal_remote_resource_id_t resource_id) {
+  if (resource_id == 0) return iree_ok_status();
+
+  iree_net_queue_channel_t* queue_channel =
+      (iree_net_queue_channel_t*)iree_atomic_load(&device->queue_channel,
+                                                  iree_memory_order_acquire);
+  if (!queue_channel) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "queue channel not available");
+  }
+
+  const iree_host_size_t payload_length =
+      sizeof(iree_hal_remote_resource_release_op_t) +
+      sizeof(iree_hal_remote_resource_id_t);
+  uint64_t next_submission_epoch = (uint64_t)iree_atomic_load(
+      &device->next_submission_epoch, iree_memory_order_relaxed);
+  uint64_t required_observed_epoch =
+      next_submission_epoch > 1 ? next_submission_epoch - 1 : 0;
+
+  uint8_t* payload_data = NULL;
+  iree_net_queue_channel_send_handle_t send_handle = 0;
+  iree_status_t status = iree_net_queue_channel_begin_command(
+      queue_channel, /*stream_id=*/0, /*wait_frontier=*/NULL,
+      /*signal_frontier=*/NULL, payload_length, &payload_data, &send_handle);
+  if (iree_status_is_ok(status)) {
+    iree_hal_remote_resource_release_op_t* op =
+        (iree_hal_remote_resource_release_op_t*)payload_data;
+    memset(op, 0, sizeof(*op));
+    op->header.type = IREE_HAL_REMOTE_QUEUE_OP_RESOURCE_RELEASE_BATCH;
+    op->required_observed_epoch = required_observed_epoch;
+    op->resource_count = 1;
+    iree_hal_remote_resource_id_t* resource_ids =
+        (iree_hal_remote_resource_id_t*)(payload_data + sizeof(*op));
+    resource_ids[0] = resource_id;
+    status = iree_net_queue_channel_commit_send(queue_channel, send_handle);
+  }
+  return status;
 }
 
 // Returns the device's session (for use by the allocator module).

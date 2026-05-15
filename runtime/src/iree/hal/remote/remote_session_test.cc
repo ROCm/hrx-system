@@ -952,6 +952,40 @@ struct SemaphoreListHelper {
   }
 };
 
+TEST_F(RemoteBufferTest, RepeatedAllocateReleaseDoesNotExhaustRemoteTable) {
+  iree_hal_allocator_t* allocator = iree_hal_device_allocator(client_device_);
+
+  iree_hal_buffer_params_t params = {0};
+  params.usage =
+      IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED;
+  params.access = IREE_HAL_MEMORY_ACCESS_ALL;
+  params.type =
+      IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+
+  for (iree_host_size_t i = 0; i < 300; ++i) {
+    iree_hal_buffer_t* buffer = nullptr;
+    IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
+        allocator, params, /*allocation_size=*/256, &buffer));
+    iree_hal_buffer_release(buffer);
+
+    // The release is a fire-and-forget queue frame. A following barrier lets
+    // the test observe that the server processed it without adding any wait to
+    // the production release path.
+    iree_hal_semaphore_t* semaphore = nullptr;
+    IREE_ASSERT_OK(iree_hal_semaphore_create(
+        client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+        IREE_HAL_SEMAPHORE_FLAG_NONE, &semaphore));
+    SemaphoreListHelper signal(semaphore, 1);
+    IREE_ASSERT_OK(iree_hal_device_queue_barrier(
+        client_device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+        iree_hal_semaphore_list_empty(), signal.list,
+        IREE_HAL_EXECUTE_FLAG_NONE));
+    IREE_ASSERT_OK(iree_hal_semaphore_wait(
+        semaphore, 1, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+    iree_hal_semaphore_release(semaphore);
+  }
+}
+
 TEST_F(RemoteBufferTest, QueueFillAndReadBack) {
   iree_hal_allocator_t* allocator = iree_hal_device_allocator(client_device_);
 
@@ -1566,6 +1600,12 @@ TEST_F(RemoteBufferTest, OneShotCommandBufferFillAndCopy) {
 
   IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
 
+  // The command buffer owns direct resources it recorded. The client can drop
+  // its source reference before submitting without racing the server-side
+  // replay of the inlined command stream.
+  iree_hal_buffer_release(source_buffer);
+  source_buffer = nullptr;
+
   iree_hal_semaphore_t* sem = nullptr;
   IREE_ASSERT_OK(iree_hal_semaphore_create(client_device_,
                                            IREE_HAL_QUEUE_AFFINITY_ANY, 0,
@@ -1575,6 +1615,8 @@ TEST_F(RemoteBufferTest, OneShotCommandBufferFillAndCopy) {
       client_device_, IREE_HAL_QUEUE_AFFINITY_ANY,
       iree_hal_semaphore_list_empty(), signal.list, command_buffer,
       iree_hal_buffer_binding_table_empty(), IREE_HAL_EXECUTE_FLAG_NONE));
+  iree_hal_command_buffer_release(command_buffer);
+  command_buffer = nullptr;
 
   IREE_ASSERT_OK(iree_hal_semaphore_wait(sem, 1, iree_infinite_timeout(),
                                          IREE_ASYNC_WAIT_FLAG_NONE));
@@ -1590,9 +1632,7 @@ TEST_F(RemoteBufferTest, OneShotCommandBufferFillAndCopy) {
   IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
 
   iree_hal_semaphore_release(sem);
-  iree_hal_command_buffer_release(command_buffer);
   iree_hal_buffer_release(dest_buffer);
-  iree_hal_buffer_release(source_buffer);
 }
 
 }  // namespace

@@ -278,12 +278,15 @@ typedef struct iree_hal_remote_deferred_submit_t {
   iree_host_size_t signal_count;
   // Number of required wait frontier entries in trailing storage.
   iree_host_size_t required_wait_entry_count;
+  // Number of retained HAL resources in trailing storage.
+  iree_host_size_t resource_count;
   // Trailing layout:
   //   iree_hal_semaphore_t* wait_semaphores[wait_count]
   //   uint64_t wait_values[wait_count]
   //   iree_hal_semaphore_t* signal_semaphores[signal_count]
   //   uint64_t signal_values[signal_count]
   //   iree_async_frontier_entry_t required_wait_entries[entry_count]
+  //   iree_hal_resource_t* resources[resource_count]
   //   uint8_t payload_data[payload_length]
   // Number of payload bytes in trailing storage.
   iree_host_size_t payload_length;
@@ -298,14 +301,78 @@ typedef struct iree_hal_remote_queue_payload_writer_t {
   iree_host_size_t payload_length;
 } iree_hal_remote_queue_payload_writer_t;
 
-// Forward declaration — submit_queue_op and the deferred callback are
+typedef struct iree_hal_remote_queue_resource_list_t {
+  // Callback that writes resource pointers into |target_resources|.
+  iree_status_t (*write)(void* user_data,
+                         iree_hal_resource_t** target_resources);
+  // User data passed to |write|.
+  void* user_data;
+  // Exact number of resource pointers written by |write|.
+  iree_host_size_t resource_count;
+} iree_hal_remote_queue_resource_list_t;
+
+typedef struct iree_hal_remote_resource_ptr_list_t {
+  // Resource pointer values to copy.
+  iree_hal_resource_t* const* values;
+  // Number of resource pointer values to copy.
+  iree_host_size_t count;
+} iree_hal_remote_resource_ptr_list_t;
+
+static void iree_hal_remote_retain_resources(
+    iree_host_size_t resource_count, iree_hal_resource_t* const* resources) {
+  for (iree_host_size_t i = 0; i < resource_count; ++i) {
+    iree_hal_resource_retain(resources[i]);
+  }
+}
+
+static void iree_hal_remote_release_resources(iree_host_size_t resource_count,
+                                              iree_hal_resource_t** resources) {
+  for (iree_host_size_t i = 0; i < resource_count; ++i) {
+    iree_hal_resource_release(resources[i]);
+  }
+}
+
+static iree_status_t iree_hal_remote_write_resource_ptrs(
+    void* user_data, iree_hal_resource_t** target_resources) {
+  const iree_hal_remote_resource_ptr_list_t* source_resources =
+      (const iree_hal_remote_resource_ptr_list_t*)user_data;
+  memcpy(target_resources, source_resources->values,
+         source_resources->count * sizeof(*target_resources));
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_remote_write_payload_spans(
+    void* user_data, iree_byte_span_t target);
+
+static iree_hal_remote_queue_resource_list_t
+iree_hal_remote_make_resource_ptr_list(
+    iree_hal_resource_t* const* resources, iree_host_size_t resource_count,
+    iree_hal_remote_resource_ptr_list_t* out_storage) {
+  out_storage->values = resources;
+  out_storage->count = resource_count;
+  iree_hal_remote_queue_resource_list_t resource_list = {
+      .write = iree_hal_remote_write_resource_ptrs,
+      .user_data = out_storage,
+      .resource_count = resource_count,
+  };
+  return resource_list;
+}
+
+static iree_hal_remote_queue_resource_list_t
+iree_hal_remote_empty_resource_list(void) {
+  iree_hal_remote_queue_resource_list_t resource_list = {0};
+  return resource_list;
+}
+
+// Forward declaration: submit_queue_op and the deferred callback are
 // mutually recursive.
-static iree_status_t iree_hal_remote_client_device_submit_queue_op(
+static iree_status_t iree_hal_remote_client_device_submit_queue_op_writer(
     iree_hal_remote_client_device_t* device,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     const iree_async_frontier_t* required_wait_frontier,
-    iree_async_span_list_t op_payload, uint64_t* out_epoch);
+    iree_hal_remote_queue_payload_writer_t payload_writer,
+    iree_hal_remote_queue_resource_list_t resource_list, uint64_t* out_epoch);
 
 static void iree_hal_remote_deferred_submit_callback(
     void* user_data, iree_async_semaphore_timepoint_t* timepoint,
@@ -326,8 +393,10 @@ static void iree_hal_remote_deferred_submit_callback(
                   deferred->signal_count * sizeof(iree_hal_semaphore_t*));
   iree_async_frontier_entry_t* required_wait_entries =
       (iree_async_frontier_entry_t*)(signal_values + deferred->signal_count);
-  uint8_t* payload_data =
-      (uint8_t*)(required_wait_entries + deferred->required_wait_entry_count);
+  iree_hal_resource_t** resources =
+      (iree_hal_resource_t**)(required_wait_entries +
+                              deferred->required_wait_entry_count);
+  uint8_t* payload_data = (uint8_t*)(resources + deferred->resource_count);
 
   if (iree_status_is_ok(status)) {
     // Re-invoke submit. The previously-gated semaphore is now satisfied
@@ -361,9 +430,23 @@ static void iree_hal_remote_deferred_submit_callback(
         deferred->payload_length > 0
             ? iree_async_span_list_make(&payload_span, 1)
             : iree_async_span_list_empty();
-    status = iree_hal_remote_client_device_submit_queue_op(
+    iree_hal_remote_queue_payload_writer_t payload_writer = {
+        .write = iree_hal_remote_write_payload_spans,
+        .user_data = &payload,
+        .payload_length = deferred->payload_length,
+    };
+    iree_hal_remote_resource_ptr_list_t resource_ptr_list = {
+        .values = resources,
+        .count = deferred->resource_count,
+    };
+    iree_hal_remote_queue_resource_list_t resource_list = {
+        .write = iree_hal_remote_write_resource_ptrs,
+        .user_data = &resource_ptr_list,
+        .resource_count = deferred->resource_count,
+    };
+    status = iree_hal_remote_client_device_submit_queue_op_writer(
         deferred->device, wait_list, signal_list, required_wait_frontier,
-        payload, /*out_epoch=*/NULL);
+        payload_writer, resource_list, /*out_epoch=*/NULL);
   }
 
   if (!iree_status_is_ok(status)) {
@@ -381,6 +464,7 @@ static void iree_hal_remote_deferred_submit_callback(
   for (iree_host_size_t i = 0; i < deferred->signal_count; ++i) {
     iree_hal_semaphore_release(signal_semaphores[i]);
   }
+  iree_hal_remote_release_resources(deferred->resource_count, resources);
   iree_allocator_free(deferred->host_allocator, deferred);
   IREE_TRACE_ZONE_END(z0);
 }
@@ -394,6 +478,7 @@ static iree_status_t iree_hal_remote_client_device_defer_submit(
     const iree_hal_semaphore_list_t signal_semaphore_list,
     const iree_async_frontier_t* required_wait_frontier,
     iree_hal_remote_queue_payload_writer_t payload_writer,
+    iree_hal_remote_queue_resource_list_t resource_list,
     iree_hal_semaphore_t* gate, uint64_t gate_value) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
@@ -403,6 +488,7 @@ static iree_status_t iree_hal_remote_client_device_defer_submit(
   iree_host_size_t signal_semaphores_offset = 0;
   iree_host_size_t signal_values_offset = 0;
   iree_host_size_t required_wait_entries_offset = 0;
+  iree_host_size_t resources_offset = 0;
   iree_host_size_t payload_offset = 0;
   iree_status_t status = IREE_STRUCT_LAYOUT(
       sizeof(iree_hal_remote_deferred_submit_t), &total_size,
@@ -419,6 +505,8 @@ static iree_status_t iree_hal_remote_client_device_defer_submit(
       IREE_STRUCT_FIELD_ALIGNED(
           required_wait_frontier ? required_wait_frontier->entry_count : 0,
           iree_async_frontier_entry_t, 1, &required_wait_entries_offset),
+      IREE_STRUCT_FIELD_ALIGNED(resource_list.resource_count,
+                                iree_hal_resource_t*, 1, &resources_offset),
       IREE_STRUCT_FIELD_ALIGNED(payload_writer.payload_length, uint8_t, 1,
                                 &payload_offset));
 
@@ -433,6 +521,8 @@ static iree_status_t iree_hal_remote_client_device_defer_submit(
   iree_hal_semaphore_t** signal_semaphores = NULL;
   uint64_t* signal_values = NULL;
   bool semaphores_retained = false;
+  iree_hal_resource_t** retained_resources = NULL;
+  bool resources_retained = false;
   if (iree_status_is_ok(status)) {
     memset(deferred, 0, sizeof(*deferred));
     deferred->device = device;
@@ -441,6 +531,7 @@ static iree_status_t iree_hal_remote_client_device_defer_submit(
     deferred->signal_count = signal_semaphore_list.count;
     deferred->required_wait_entry_count =
         required_wait_frontier ? required_wait_frontier->entry_count : 0;
+    deferred->resource_count = resource_list.resource_count;
     deferred->payload_length = payload_writer.payload_length;
 
     uint8_t* base = (uint8_t*)deferred;
@@ -451,6 +542,7 @@ static iree_status_t iree_hal_remote_client_device_defer_submit(
     signal_values = (uint64_t*)(base + signal_values_offset);
     iree_async_frontier_entry_t* required_wait_entries =
         (iree_async_frontier_entry_t*)(base + required_wait_entries_offset);
+    retained_resources = (iree_hal_resource_t**)(base + resources_offset);
     uint8_t* payload_target = base + payload_offset;
 
     status = payload_writer.write(
@@ -469,16 +561,27 @@ static iree_status_t iree_hal_remote_client_device_defer_submit(
         signal_values[i] = signal_semaphore_list.payload_values[i];
       }
       semaphores_retained = true;
-      if (deferred->required_wait_entry_count > 0) {
-        memcpy(required_wait_entries, required_wait_frontier->entries,
-               deferred->required_wait_entry_count *
-                   sizeof(iree_async_frontier_entry_t));
+      if (resource_list.resource_count > 0) {
+        status =
+            resource_list.write(resource_list.user_data, retained_resources);
       }
+      if (iree_status_is_ok(status)) {
+        iree_hal_remote_retain_resources(resource_list.resource_count,
+                                         retained_resources);
+        resources_retained = true;
+      }
+      if (iree_status_is_ok(status)) {
+        if (deferred->required_wait_entry_count > 0) {
+          memcpy(required_wait_entries, required_wait_frontier->entries,
+                 deferred->required_wait_entry_count *
+                     sizeof(iree_async_frontier_entry_t));
+        }
 
-      deferred->timepoint.callback = iree_hal_remote_deferred_submit_callback;
-      deferred->timepoint.user_data = deferred;
-      status = iree_async_semaphore_acquire_timepoint(
-          (iree_async_semaphore_t*)gate, gate_value, &deferred->timepoint);
+        deferred->timepoint.callback = iree_hal_remote_deferred_submit_callback;
+        deferred->timepoint.user_data = deferred;
+        status = iree_async_semaphore_acquire_timepoint(
+            (iree_async_semaphore_t*)gate, gate_value, &deferred->timepoint);
+      }
     }
   }
 
@@ -496,6 +599,10 @@ static iree_status_t iree_hal_remote_client_device_defer_submit(
           .payload_values = signal_values,
       };
       iree_hal_semaphore_list_release(retained_signal_list);
+    }
+    if (resources_retained) {
+      iree_hal_remote_release_resources(resource_list.resource_count,
+                                        retained_resources);
     }
     if (deferred) {
       iree_allocator_free(device->host_allocator, deferred);
@@ -602,7 +709,7 @@ static iree_status_t iree_hal_remote_client_device_submit_queue_op_writer(
     const iree_hal_semaphore_list_t signal_semaphore_list,
     const iree_async_frontier_t* required_wait_frontier,
     iree_hal_remote_queue_payload_writer_t payload_writer,
-    uint64_t* out_epoch) {
+    iree_hal_remote_queue_resource_list_t resource_list, uint64_t* out_epoch) {
   IREE_HAL_REMOTE_REQUIRE_CONNECTED(device);
   IREE_TRACE_ZONE_BEGIN(z0);
   if (out_epoch) *out_epoch = 0;
@@ -625,12 +732,13 @@ static iree_status_t iree_hal_remote_client_device_submit_queue_op_writer(
     deferred = true;
     status = iree_hal_remote_client_device_defer_submit(
         device, wait_semaphore_list, signal_semaphore_list,
-        required_wait_frontier, payload_writer, gate, gate_value);
+        required_wait_frontier, payload_writer, resource_list, gate,
+        gate_value);
   }
 
   uint64_t epoch = 0;
   if (iree_status_is_ok(status) && !deferred) {
-    // Assign epoch on the remote queue axis (atomic — deferred callbacks may
+    // Assign epoch on the remote queue axis (atomic: deferred callbacks may
     // run on the proactor thread concurrently with app-thread submissions).
     epoch = (uint64_t)iree_atomic_fetch_add(&device->next_submission_epoch, 1,
                                             iree_memory_order_relaxed);
@@ -681,6 +789,28 @@ static iree_status_t iree_hal_remote_client_device_submit_queue_op_writer(
   return status;
 }
 
+static iree_status_t iree_hal_remote_client_device_submit_queue_op_resources(
+    iree_hal_remote_client_device_t* device,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    const iree_async_frontier_t* required_wait_frontier,
+    iree_async_span_list_t op_payload, iree_host_size_t resource_count,
+    iree_hal_resource_t* const* resources, uint64_t* out_epoch) {
+  iree_hal_remote_queue_payload_writer_t payload_writer;
+  iree_status_t status =
+      iree_hal_remote_make_span_payload_writer(&op_payload, &payload_writer);
+  iree_hal_remote_resource_ptr_list_t resource_ptr_list;
+  iree_hal_remote_queue_resource_list_t resource_list =
+      iree_hal_remote_make_resource_ptr_list(resources, resource_count,
+                                             &resource_ptr_list);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_client_device_submit_queue_op_writer(
+        device, wait_semaphore_list, signal_semaphore_list,
+        required_wait_frontier, payload_writer, resource_list, out_epoch);
+  }
+  return status;
+}
+
 static iree_status_t iree_hal_remote_client_device_submit_queue_op(
     iree_hal_remote_client_device_t* device,
     const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -693,7 +823,8 @@ static iree_status_t iree_hal_remote_client_device_submit_queue_op(
   if (iree_status_is_ok(status)) {
     status = iree_hal_remote_client_device_submit_queue_op_writer(
         device, wait_semaphore_list, signal_semaphore_list,
-        required_wait_frontier, payload_writer, out_epoch);
+        required_wait_frontier, payload_writer,
+        iree_hal_remote_empty_resource_list(), out_epoch);
   }
   return status;
 }
@@ -830,6 +961,18 @@ static iree_status_t iree_hal_remote_prepare_execute_payload(
     out_payload_writer->payload_length = payload_length;
   }
   return status;
+}
+
+static iree_status_t iree_hal_remote_write_execute_resources(
+    void* user_data, iree_hal_resource_t** target_resources) {
+  const iree_hal_remote_execute_payload_t* payload =
+      (const iree_hal_remote_execute_payload_t*)user_data;
+  target_resources[0] = (iree_hal_resource_t*)payload->command_buffer;
+  for (iree_host_size_t i = 0; i < payload->binding_table.count; ++i) {
+    target_resources[1 + i] =
+        (iree_hal_resource_t*)payload->binding_table.bindings[i].buffer;
+  }
+  return iree_ok_status();
 }
 
 typedef struct iree_hal_remote_dispatch_payload_t {
@@ -996,6 +1139,20 @@ static iree_status_t iree_hal_remote_prepare_dispatch_payload(
   return status;
 }
 
+static iree_status_t iree_hal_remote_write_dispatch_resources(
+    void* user_data, iree_hal_resource_t** target_resources) {
+  const iree_hal_remote_dispatch_payload_t* payload =
+      (const iree_hal_remote_dispatch_payload_t*)user_data;
+  target_resources[0] = (iree_hal_resource_t*)payload->executable;
+  target_resources[1] =
+      (iree_hal_resource_t*)payload->config.workgroup_count_ref.buffer;
+  for (iree_host_size_t i = 0; i < payload->bindings.count; ++i) {
+    target_resources[2 + i] =
+        (iree_hal_resource_t*)payload->bindings.values[i].buffer;
+  }
+  return iree_ok_status();
+}
+
 iree_status_t iree_hal_remote_client_device_queue_execute(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -1019,10 +1176,16 @@ iree_status_t iree_hal_remote_client_device_queue_execute(
     iree_hal_remote_queue_payload_writer_t payload_writer;
     status = iree_hal_remote_prepare_execute_payload(
         command_buffer, binding_table, flags, &payload, &payload_writer);
+    iree_hal_remote_queue_resource_list_t resource_list = {
+        .write = iree_hal_remote_write_execute_resources,
+        .user_data = &payload,
+        .resource_count = 1 + binding_table.count,
+    };
     if (iree_status_is_ok(status)) {
       status = iree_hal_remote_client_device_submit_queue_op_writer(
           device, wait_semaphore_list, signal_semaphore_list,
-          /*required_wait_frontier=*/NULL, payload_writer, /*out_epoch=*/NULL);
+          /*required_wait_frontier=*/NULL, payload_writer, resource_list,
+          /*out_epoch=*/NULL);
     }
   }
 
@@ -1514,9 +1677,13 @@ iree_status_t iree_hal_remote_client_device_queue_alloca(
 
     iree_async_span_t span = iree_async_span_from_ptr(&op, sizeof(op));
     iree_async_span_list_t payload = {&span, 1};
-    status = iree_hal_remote_client_device_submit_queue_op(
+    iree_hal_resource_t* resources[1] = {
+        (iree_hal_resource_t*)buffer,
+    };
+    status = iree_hal_remote_client_device_submit_queue_op_resources(
         device, wait_semaphore_list, signal_semaphore_list,
-        /*required_wait_frontier=*/NULL, payload, /*out_epoch=*/NULL);
+        /*required_wait_frontier=*/NULL, payload, IREE_ARRAYSIZE(resources),
+        resources, /*out_epoch=*/NULL);
   }
 
   if (iree_status_is_ok(status)) {
@@ -1544,10 +1711,13 @@ iree_status_t iree_hal_remote_client_device_queue_dealloca(
   uint64_t dealloca_epoch = 0;
   iree_status_t status = iree_ok_status();
   if (iree_hal_remote_client_buffer_has_reservation(buffer)) {
-    status = iree_hal_remote_client_device_submit_queue_op(
+    iree_hal_resource_t* resources[1] = {
+        (iree_hal_resource_t*)buffer,
+    };
+    status = iree_hal_remote_client_device_submit_queue_op_resources(
         device, wait_semaphore_list, signal_semaphore_list,
         /*required_wait_frontier=*/NULL, iree_async_span_list_empty(),
-        &dealloca_epoch);
+        IREE_ARRAYSIZE(resources), resources, &dealloca_epoch);
   } else {
     op.header.type = IREE_HAL_REMOTE_QUEUE_OP_BUFFER_DEALLOCA;
     iree_device_size_t buffer_offset = 0;
@@ -1558,9 +1728,13 @@ iree_status_t iree_hal_remote_client_device_queue_dealloca(
     iree_async_span_t span = iree_async_span_from_ptr(&op, sizeof(op));
     iree_async_span_list_t payload = {&span, 1};
     if (iree_status_is_ok(status)) {
-      status = iree_hal_remote_client_device_submit_queue_op(
+      iree_hal_resource_t* resources[1] = {
+          (iree_hal_resource_t*)buffer,
+      };
+      status = iree_hal_remote_client_device_submit_queue_op_resources(
           device, wait_semaphore_list, signal_semaphore_list,
-          /*required_wait_frontier=*/NULL, payload, &dealloca_epoch);
+          /*required_wait_frontier=*/NULL, payload, IREE_ARRAYSIZE(resources),
+          resources, &dealloca_epoch);
     }
   }
   if (iree_status_is_ok(status) && dealloca_epoch != 0) {
@@ -1604,9 +1778,13 @@ iree_status_t iree_hal_remote_client_device_queue_fill(
   if (iree_status_is_ok(status)) {
     iree_async_span_t span = iree_async_span_from_ptr(&op, sizeof(op));
     iree_async_span_list_t payload = {&span, 1};
-    status = iree_hal_remote_client_device_submit_queue_op(
+    iree_hal_resource_t* resources[1] = {
+        (iree_hal_resource_t*)target_buffer,
+    };
+    status = iree_hal_remote_client_device_submit_queue_op_resources(
         device, wait_semaphore_list, signal_semaphore_list,
-        /*required_wait_frontier=*/NULL, payload, /*out_epoch=*/NULL);
+        /*required_wait_frontier=*/NULL, payload, IREE_ARRAYSIZE(resources),
+        resources, /*out_epoch=*/NULL);
   }
 
   IREE_TRACE_ZONE_END(z0);
@@ -1646,9 +1824,13 @@ iree_status_t iree_hal_remote_client_device_queue_update(
             (iree_host_size_t)length),
     };
     iree_async_span_list_t payload = {spans, 2};
-    status = iree_hal_remote_client_device_submit_queue_op(
+    iree_hal_resource_t* resources[1] = {
+        (iree_hal_resource_t*)target_buffer,
+    };
+    status = iree_hal_remote_client_device_submit_queue_op_resources(
         device, wait_semaphore_list, signal_semaphore_list,
-        /*required_wait_frontier=*/NULL, payload, /*out_epoch=*/NULL);
+        /*required_wait_frontier=*/NULL, payload, IREE_ARRAYSIZE(resources),
+        resources, /*out_epoch=*/NULL);
   }
 
   IREE_TRACE_ZONE_END(z0);
@@ -1684,9 +1866,14 @@ iree_status_t iree_hal_remote_client_device_queue_copy(
   if (iree_status_is_ok(status)) {
     iree_async_span_t span = iree_async_span_from_ptr(&op, sizeof(op));
     iree_async_span_list_t payload = {&span, 1};
-    status = iree_hal_remote_client_device_submit_queue_op(
+    iree_hal_resource_t* resources[2] = {
+        (iree_hal_resource_t*)source_buffer,
+        (iree_hal_resource_t*)target_buffer,
+    };
+    status = iree_hal_remote_client_device_submit_queue_op_resources(
         device, wait_semaphore_list, signal_semaphore_list,
-        /*required_wait_frontier=*/NULL, payload, /*out_epoch=*/NULL);
+        /*required_wait_frontier=*/NULL, payload, IREE_ARRAYSIZE(resources),
+        resources, /*out_epoch=*/NULL);
   }
 
   IREE_TRACE_ZONE_END(z0);
@@ -1799,10 +1986,16 @@ iree_status_t iree_hal_remote_client_device_queue_dispatch(
   iree_status_t status = iree_hal_remote_prepare_dispatch_payload(
       executable, iree_hal_executable_function_index(function), config,
       constants, bindings, flags, &payload, &payload_writer);
+  iree_hal_remote_queue_resource_list_t resource_list = {
+      .write = iree_hal_remote_write_dispatch_resources,
+      .user_data = &payload,
+      .resource_count = 2 + bindings.count,
+  };
   if (iree_status_is_ok(status)) {
     status = iree_hal_remote_client_device_submit_queue_op_writer(
         device, wait_semaphore_list, signal_semaphore_list,
-        /*required_wait_frontier=*/NULL, payload_writer, /*out_epoch=*/NULL);
+        /*required_wait_frontier=*/NULL, payload_writer, resource_list,
+        /*out_epoch=*/NULL);
   }
 
   IREE_TRACE_ZONE_END(z0);

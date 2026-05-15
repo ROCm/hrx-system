@@ -558,10 +558,12 @@ static_assert(sizeof(iree_hal_remote_host_call_unregister_t) == 8, "");
 // Lifecycle messages
 //===----------------------------------------------------------------------===//
 
-// RESOURCE_RELEASE_BATCH. Fire-and-forget: batched release of resources.
-// Client-side destroy enqueues handles into an MPSC pending-release queue,
-// flushed periodically (~1ms or ~100 releases), on queue_flush, or on
-// session teardown. Resource IDs may be provisional or resolved.
+// RESOURCE_RELEASE_BATCH. Legacy control-channel release of resources.
+//
+// Current clients send iree_hal_remote_resource_release_op_t on the queue
+// channel so releases are ordered with COMMAND frames that may reference the
+// resources. Control-channel releases are still accepted for non-queue
+// resources and session teardown compatibility.
 typedef struct iree_hal_remote_resource_release_batch_t {
   uint32_t resource_count;
   uint32_t reserved;  // Must be 0.

@@ -88,6 +88,7 @@ typedef enum iree_hal_remote_queue_op_type_e {
 
   // ── Queue Control ───────────────────────────────────────────────────────
   IREE_HAL_REMOTE_QUEUE_OP_QUEUE_FLUSH = 0x000B,
+  IREE_HAL_REMOTE_QUEUE_OP_RESOURCE_RELEASE_BATCH = 0x000C,
 
   // ── Extensions ──────────────────────────────────────────────────────────
   IREE_HAL_REMOTE_QUEUE_OP_QUEUE_EXTENSION = 0x00F0,
@@ -106,6 +107,23 @@ typedef struct iree_hal_remote_queue_op_header_t {
   uint32_t reserved;  // Must be 0.
 } iree_hal_remote_queue_op_header_t;
 static_assert(sizeof(iree_hal_remote_queue_op_header_t) == 8, "");
+
+// RESOURCE_RELEASE_BATCH: releases server-side resource table entries.
+//
+// The client tags the release with the greatest submission epoch that could
+// still refer to the resources. The server releases the resource table entries
+// once all COMMAND packets up to that epoch have been processed and any
+// referenced HAL resources have been retained by the wrapped local device. The
+// operation has no signal frontier and produces no ADVANCE.
+typedef struct iree_hal_remote_resource_release_op_t {
+  iree_hal_remote_queue_op_header_t header;
+  uint64_t required_observed_epoch;
+  uint32_t resource_count;
+  uint32_t reserved;  // Must be 0.
+  // Followed by:
+  //   iree_hal_remote_resource_id_t resource_ids[resource_count]
+} iree_hal_remote_resource_release_op_t;
+static_assert(sizeof(iree_hal_remote_resource_release_op_t) == 24, "");
 
 // Queue op flag bits for COMMAND_BUFFER_EXECUTE.
 // When set, the serialized command stream follows the binding table instead

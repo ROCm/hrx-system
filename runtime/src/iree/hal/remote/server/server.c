@@ -12,6 +12,8 @@
 // Each session can hold up to this many concurrently allocated resources
 // (buffers, semaphores, executables, etc.) across all types.
 #define IREE_HAL_REMOTE_SERVER_RESOURCE_TABLE_CAPACITY 256
+// Initial capacity for per-session sequence reconstruction windows.
+#define IREE_HAL_REMOTE_SERVER_SEQUENCE_WINDOW_INITIAL_CAPACITY 256
 
 //===----------------------------------------------------------------------===//
 // iree_hal_remote_server_options_t
@@ -74,6 +76,10 @@ static iree_status_t iree_hal_remote_server_options_verify(
   if (!options->local_topology) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "local_topology is required");
+  }
+  if (options->local_topology->axis_count == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "local_topology must expose a queue axis");
   }
   return iree_ok_status();
 }
@@ -252,10 +258,14 @@ static void iree_hal_remote_server_destroy(iree_hal_remote_server_t* server) {
 
     // Release epoch→semaphore mapping (retained local semaphores).
     for (iree_host_size_t j = 0;
-         j < server->sessions[i].epoch_semaphore_map.count; ++j) {
+         j < server->sessions[i].epoch_semaphore_map.capacity; ++j) {
       iree_hal_semaphore_release(
           server->sessions[i].epoch_semaphore_map.semaphores[j]);
     }
+    iree_allocator_free(host_allocator,
+                        server->sessions[i].epoch_semaphore_map.states);
+    iree_allocator_free(host_allocator,
+                        server->sessions[i].epoch_semaphore_map.axes);
     iree_allocator_free(host_allocator,
                         server->sessions[i].epoch_semaphore_map.epochs);
     iree_allocator_free(host_allocator,
@@ -270,6 +280,8 @@ static void iree_hal_remote_server_destroy(iree_hal_remote_server_t* server) {
                         server->sessions[i].provisional_map.resolved_ids);
     memset(&server->sessions[i].provisional_map, 0,
            sizeof(server->sessions[i].provisional_map));
+
+    iree_hal_remote_server_session_deinitialize_windows(&server->sessions[i]);
 
     iree_net_queue_channel_detach(server->sessions[i].queue_channel);
     iree_net_queue_channel_release(server->sessions[i].queue_channel);
@@ -358,6 +370,20 @@ static void iree_hal_remote_server_on_accept(
         IREE_HAL_REMOTE_SERVER_RESOURCE_TABLE_CAPACITY, server->host_allocator,
         &server->sessions[slot].resource_table);
   }
+  if (iree_status_is_ok(status)) {
+    status = iree_net_sequence_window_initialize(
+        /*initial_observed_sequence=*/0,
+        IREE_HAL_REMOTE_SERVER_SEQUENCE_WINDOW_INITIAL_CAPACITY,
+        server->host_allocator,
+        &server->sessions[slot].observed_submission_window);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_net_sequence_window_initialize(
+        /*initial_observed_sequence=*/0,
+        IREE_HAL_REMOTE_SERVER_SEQUENCE_WINDOW_INITIAL_CAPACITY,
+        server->host_allocator,
+        &server->sessions[slot].completed_signal_window);
+  }
 
   // Create the server-side session outside the lock (allocation + network
   // setup). Session callbacks use &server->sessions[slot] as user_data so
@@ -402,6 +428,8 @@ static void iree_hal_remote_server_on_accept(
     if (slot >= 0) {
       iree_hal_remote_resource_table_deinitialize(
           &server->sessions[slot].resource_table, server->host_allocator);
+      iree_hal_remote_server_session_deinitialize_windows(
+          &server->sessions[slot]);
       server->sessions[slot].server = NULL;
     }
     iree_status_ignore(status);

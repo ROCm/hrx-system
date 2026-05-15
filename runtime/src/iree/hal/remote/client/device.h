@@ -10,6 +10,7 @@
 #include "iree/async/buffer_pool.h"
 #include "iree/async/frontier.h"
 #include "iree/base/api.h"
+#include "iree/base/internal/arena.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/hal/api.h"
 #include "iree/hal/remote/client/api.h"
@@ -34,6 +35,9 @@ typedef struct iree_hal_remote_client_device_t {
 
   iree_allocator_t host_allocator;
   iree_hal_allocator_t* device_allocator;
+
+  // Block pool used for remote command buffer resource sets.
+  iree_arena_block_pool_t resource_set_block_pool;
 
   // Optional provider used for creating/configuring collective channels.
   iree_hal_channel_provider_t* channel_provider;
@@ -175,6 +179,13 @@ iree_status_t iree_hal_remote_client_device_control_rpc(
 // Sends a fire-and-forget control message (no response expected).
 iree_status_t iree_hal_remote_client_device_send_fire_and_forget(
     iree_hal_remote_client_device_t* device, iree_const_byte_span_t message);
+
+// Sends a frontier-ordered release for a remote resource. The release is
+// fire-and-forget and produces no ADVANCE; failures are best-effort cleanup
+// failures and are usually ignored by resource destroy paths.
+iree_status_t iree_hal_remote_client_device_release_resource(
+    iree_hal_remote_client_device_t* device,
+    iree_hal_remote_resource_id_t resource_id);
 
 // Returns the device's active session (for sending control messages).
 iree_net_session_t* iree_hal_remote_client_device_session(

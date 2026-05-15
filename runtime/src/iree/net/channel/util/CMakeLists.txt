@@ -103,4 +103,28 @@ iree_cc_test(
     iree::testing::gtest_main
 )
 
+iree_cc_library(
+  NAME
+    sequence_window
+  HDRS
+    "sequence_window.h"
+  SRCS
+    "sequence_window.c"
+  DEPS
+    iree::base
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    sequence_window_test
+  SRCS
+    "sequence_window_test.cc"
+  DEPS
+    ::sequence_window
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

@@ -94,3 +94,23 @@ iree_runtime_cc_test(
         "//runtime/src/iree/testing:gtest_main",
     ],
 )
+
+iree_runtime_cc_library(
+    name = "sequence_window",
+    srcs = ["sequence_window.c"],
+    hdrs = ["sequence_window.h"],
+    deps = [
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "sequence_window_test",
+    srcs = ["sequence_window_test.cc"],
+    deps = [
+        ":sequence_window",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
