@@ -11,6 +11,7 @@
 #include "iree/base/threading/notification.h"
 #include "iree/base/threading/processor.h"
 #include "iree/hal/remote/client/allocator.h"
+#include "iree/hal/remote/client/bulk.h"
 #include "iree/hal/remote/client/command_buffer.h"
 #include "iree/hal/remote/client/executable_cache.h"
 #include "iree/hal/remote/client/queue.h"
@@ -20,6 +21,8 @@
 #include "iree/hal/remote/protocol/queue.h"
 #include "iree/hal/remote/util/recv_pool.h"
 #include "iree/hal/utils/file_registry.h"
+#include "iree/net/bootstrap.h"
+#include "iree/net/channel/bulk/bulk_channel.h"
 #include "iree/net/channel/queue/queue_channel.h"
 #include "iree/net/status_wire.h"
 #include "iree/net/transport_factory.h"
@@ -196,6 +199,7 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_create(
   device->queue_slab_provider = NULL;
   device->queue_pool_notification = NULL;
   iree_atomic_store(&device->queue_channel, 0, iree_memory_order_relaxed);
+  iree_atomic_store(&device->bulk_channel, 0, iree_memory_order_relaxed);
   device->remote_queue_axis = 0;
   iree_atomic_store(&device->next_submission_epoch, 0,
                     iree_memory_order_relaxed);
@@ -289,6 +293,53 @@ iree_net_queue_channel_t* iree_hal_remote_client_device_publish_queue_channel(
                                                               queue_channel);
 }
 
+static iree_net_bulk_channel_t*
+iree_hal_remote_client_device_exchange_bulk_channel(
+    iree_hal_remote_client_device_t* device,
+    iree_net_bulk_channel_t* new_bulk_channel) {
+  return (iree_net_bulk_channel_t*)iree_atomic_exchange(
+      &device->bulk_channel, (intptr_t)new_bulk_channel,
+      iree_memory_order_acq_rel);
+}
+
+static void iree_hal_remote_client_device_detach_bulk_channel(
+    iree_hal_remote_client_device_t* device) {
+  iree_net_bulk_channel_t* bulk_channel =
+      (iree_net_bulk_channel_t*)iree_atomic_load(&device->bulk_channel,
+                                                 iree_memory_order_acquire);
+  iree_net_bulk_channel_detach(bulk_channel);
+}
+
+static void iree_hal_remote_client_device_release_bulk_channel(
+    iree_hal_remote_client_device_t* device) {
+  iree_net_bulk_channel_t* bulk_channel =
+      iree_hal_remote_client_device_exchange_bulk_channel(device, NULL);
+  iree_net_bulk_channel_detach(bulk_channel);
+  iree_net_bulk_channel_release(bulk_channel);
+}
+
+iree_net_bulk_channel_t* iree_hal_remote_client_device_publish_bulk_channel(
+    iree_hal_remote_client_device_t* device,
+    iree_net_bulk_channel_t* bulk_channel) {
+  return iree_hal_remote_client_device_exchange_bulk_channel(device,
+                                                             bulk_channel);
+}
+
+void iree_hal_remote_client_device_complete_connect(
+    iree_hal_remote_client_device_t* device, iree_status_t status) {
+  iree_hal_remote_client_device_connected_callback_t callback =
+      device->connect_callback;
+  memset(&device->connect_callback, 0, sizeof(device->connect_callback));
+  if (callback.fn) {
+    callback.fn(callback.user_data, status);
+  } else if (!iree_status_is_ok(status) && device->options.error_callback.fn) {
+    device->options.error_callback.fn(device->options.error_callback.user_data,
+                                      status);
+  } else {
+    iree_status_ignore(status);
+  }
+}
+
 static void iree_hal_remote_client_device_destroy(
     iree_hal_device_t* base_device) {
   iree_hal_remote_client_device_t* device =
@@ -307,10 +358,11 @@ static void iree_hal_remote_client_device_destroy(
                          "device destroyed while connected"));
   }
 
-  // Detach and release queue channel before session. Detach clears endpoint
-  // callbacks while the endpoint is still alive and zeroes the endpoint
-  // reference, preventing UAF if retained references (barrier completions)
-  // later drop the last channel ref after the session is freed.
+  // Detach and release channels before session. Detach clears endpoint
+  // callbacks while the endpoint is still alive and zeroes endpoint references,
+  // preventing UAF if retained references later drop the last channel ref after
+  // the session is freed.
+  iree_hal_remote_client_device_release_bulk_channel(device);
   iree_hal_remote_client_device_release_queue_channel(device);
 
   // Clear session before releasing to prevent re-entrancy.
@@ -592,10 +644,9 @@ static void iree_hal_remote_client_device_on_session_ready(
   iree_atomic_store(&device->next_provisional_generation, 1,
                     iree_memory_order_relaxed);
 
-  // The connect callback is NOT fired here — it is deferred to
-  // on_queue_endpoint_ready so the application receives the callback only
-  // after the queue channel is published, the state becomes CONNECTED, and
-  // queue operations are usable.
+  // The connect callback is NOT fired here — it is deferred until queue and
+  // bulk endpoint provisioning complete so CONNECTED means all production
+  // channels are usable.
   iree_net_endpoint_ready_callback_t endpoint_callback = {
       .fn = iree_hal_remote_client_device_on_queue_endpoint_ready,
       .user_data = device,
@@ -607,17 +658,7 @@ static void iree_hal_remote_client_device_on_session_ready(
         device, IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_ERROR);
     // Fire the connect callback with the error so the application doesn't
     // hang waiting for a connection that will never complete.
-    iree_hal_remote_client_device_connected_callback_t callback =
-        device->connect_callback;
-    memset(&device->connect_callback, 0, sizeof(device->connect_callback));
-    if (callback.fn) {
-      callback.fn(callback.user_data, status);
-    } else if (device->options.error_callback.fn) {
-      device->options.error_callback.fn(
-          device->options.error_callback.user_data, status);
-    } else {
-      iree_status_ignore(status);
-    }
+    iree_hal_remote_client_device_complete_connect(device, status);
   }
 
   IREE_TRACE_ZONE_END(z0);
@@ -654,9 +695,8 @@ static void iree_hal_remote_client_device_on_session_goaway(
                          "server sent GOAWAY; remote queue axis failed"));
   }
 
-  // Detach while the endpoint is still alive to clear callbacks safely. The
-  // channel object stays retained by the device so concurrent submitters that
-  // already acquired the pointer only observe a detached channel.
+  // Detach while the endpoint is still alive to clear callbacks safely.
+  iree_hal_remote_client_device_detach_bulk_channel(device);
   iree_hal_remote_client_device_detach_queue_channel(device);
 
   // Clear session before releasing to prevent re-entrancy.
@@ -664,11 +704,9 @@ static void iree_hal_remote_client_device_on_session_goaway(
   device->session = NULL;
   iree_net_session_release(device_session);
 
-  // If the connect callback is still pending (bootstrap hasn't fully
-  // completed — on_queue_endpoint_ready hasn't fired yet), fire it with
-  // error so the application doesn't hang waiting for a connection result.
-  // This handles GOAWAY arriving between on_session_ready (CONNECTED state)
-  // and on_queue_endpoint_ready (callback fire).
+  // If the connect callback is still pending (bootstrap or endpoint
+  // provisioning has not completed), fire it with error so the application
+  // does not hang waiting for a connection result.
   iree_hal_remote_client_device_connected_callback_t callback =
       device->connect_callback;
   memset(&device->connect_callback, 0, sizeof(device->connect_callback));
@@ -711,6 +749,7 @@ static void iree_hal_remote_client_device_on_session_error(
                                           iree_status_clone(status));
   }
 
+  iree_hal_remote_client_device_detach_bulk_channel(device);
   iree_hal_remote_client_device_detach_queue_channel(device);
 
   // Clear session before releasing to prevent re-entrancy.
@@ -719,9 +758,8 @@ static void iree_hal_remote_client_device_on_session_error(
   iree_net_session_release(device_session);
 
   // If the connect callback is still pending, fire it with the error so the
-  // application doesn't hang. This covers errors during bootstrap (CONNECTING
-  // state) and errors between on_session_ready and on_queue_endpoint_ready
-  // (CONNECTED state but callback not yet fired).
+  // application does not hang. This covers errors during bootstrap and endpoint
+  // provisioning.
   iree_hal_remote_client_device_connected_callback_t callback =
       device->connect_callback;
   memset(&device->connect_callback, 0, sizeof(device->connect_callback));
@@ -1126,6 +1164,7 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_connect(
   // the HELLO_ACK.
   iree_net_session_options_t session_options =
       iree_net_session_options_default();
+  session_options.capabilities = IREE_NET_BOOTSTRAP_CAPABILITY_BULK_TRANSFER;
   if (device->options.connect_timeout_ns) {
     session_options.bootstrap_timeout_ns = device->options.connect_timeout_ns;
   }

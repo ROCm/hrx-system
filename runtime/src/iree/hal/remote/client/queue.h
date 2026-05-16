@@ -97,8 +97,8 @@ iree_status_t iree_hal_remote_client_device_queue_dispatch(
 iree_status_t iree_hal_remote_client_device_queue_flush(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity);
 
-// Called when the queue endpoint is ready after session bootstrap.
-// Creates the header pool, queue channel, and activates it.
+// Called when the queue endpoint is ready after session bootstrap. Creates the
+// queue channel, then starts bulk endpoint provisioning.
 void iree_hal_remote_client_device_on_queue_endpoint_ready(
     void* user_data, iree_status_t status,
     iree_net_message_endpoint_t endpoint);

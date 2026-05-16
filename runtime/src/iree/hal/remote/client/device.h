@@ -26,6 +26,7 @@ typedef struct iree_async_frontier_tracker_t iree_async_frontier_tracker_t;
 typedef struct iree_async_notification_t iree_async_notification_t;
 typedef struct iree_hal_slab_provider_t iree_hal_slab_provider_t;
 typedef struct iree_hal_remote_recv_pool_t iree_hal_remote_recv_pool_t;
+typedef struct iree_net_bulk_channel_t iree_net_bulk_channel_t;
 typedef struct iree_net_queue_channel_t iree_net_queue_channel_t;
 typedef struct iree_hal_remote_pending_rpc_t iree_hal_remote_pending_rpc_t;
 
@@ -75,6 +76,11 @@ typedef struct iree_hal_remote_client_device_t {
   // do not need per-operation lifetime fences.
   iree_atomic_intptr_t queue_channel;
 
+  // Bulk channel for large payload transfers (0 until bulk endpoint opens).
+  // Published after the queue and bulk endpoints are both activated so the
+  // CONNECTED state means all production channels are usable.
+  iree_atomic_intptr_t bulk_channel;
+
   // Remote queue axis from the server's topology. Used to build signal
   // frontiers for queue submissions. Valid after on_session_ready.
   iree_async_axis_t remote_queue_axis;
@@ -119,8 +125,8 @@ typedef struct iree_hal_remote_client_device_t {
   // reads ensures those fields are visible.
   iree_atomic_int32_t state;
 
-  // Pending connect callback (valid during CONNECTING/CONNECTED state until
-  // on_queue_endpoint_ready fires).
+  // Pending connect callback (valid during CONNECTING state until queue and
+  // bulk endpoints are both ready).
   iree_hal_remote_client_device_connected_callback_t connect_callback;
 
   // Trailing storage layout:
@@ -156,6 +162,18 @@ iree_hal_remote_client_device_t* iree_hal_remote_client_device_cast(
 iree_net_queue_channel_t* iree_hal_remote_client_device_publish_queue_channel(
     iree_hal_remote_client_device_t* device,
     iree_net_queue_channel_t* queue_channel);
+
+// Publishes |bulk_channel| for bulk transfers and returns the previously
+// published channel, if any. The caller owns and must detach/release the
+// returned channel.
+iree_net_bulk_channel_t* iree_hal_remote_client_device_publish_bulk_channel(
+    iree_hal_remote_client_device_t* device,
+    iree_net_bulk_channel_t* bulk_channel);
+
+// Completes the pending connect callback with |status|. If no connect callback
+// is pending, errors are forwarded to the device error callback when present.
+void iree_hal_remote_client_device_complete_connect(
+    iree_hal_remote_client_device_t* device, iree_status_t status);
 
 // All queue operations require the device to be connected.
 #define IREE_HAL_REMOTE_REQUIRE_CONNECTED(device)            \

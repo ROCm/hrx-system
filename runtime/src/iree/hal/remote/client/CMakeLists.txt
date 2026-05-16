@@ -19,6 +19,8 @@ iree_cc_library(
     "allocator.h"
     "buffer.c"
     "buffer.h"
+    "bulk.c"
+    "bulk.h"
     "command_buffer.c"
     "command_buffer.h"
     "device.c"
@@ -52,6 +54,8 @@ iree_cc_library(
     iree::hal::remote::util::recv_pool
     iree::hal::utils::files
     iree::hal::utils::resource_set
+    iree::net::bootstrap
+    iree::net::channel::bulk::bulk_channel
     iree::net::channel::queue::queue_channel
     iree::net::channel::util::frame_sender
     iree::net::session

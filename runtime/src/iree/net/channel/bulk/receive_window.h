@@ -51,7 +51,7 @@ typedef struct iree_net_bulk_receive_window_options_t {
 // Returns conservative default receive window options.
 static inline iree_net_bulk_receive_window_options_t
 iree_net_bulk_receive_window_options_default(void) {
-  iree_net_bulk_receive_window_options_t options = {0};
+  iree_net_bulk_receive_window_options_t options = {{0}};
   options.chunk_pool = iree_net_bulk_chunk_pool_options_default();
   options.credit_batch_threshold =
       IREE_NET_BULK_RECEIVE_WINDOW_DEFAULT_CREDIT_BATCH_THRESHOLD;

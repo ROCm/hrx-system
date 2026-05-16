@@ -222,8 +222,8 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_create(
 // Initiates asynchronous connection to the remote server.
 //
 // The |callback| fires exactly once on the proactor thread:
-//   - With OK status when the session becomes OPERATIONAL.
-//   - With an error status if connection or bootstrap fails.
+//   - With OK status when the session and application endpoints are ready.
+//   - With an error status if connection, bootstrap, or endpoint setup fails.
 //
 // Requires DISCONNECTED state. Returns ALREADY_EXISTS if already connected,
 // FAILED_PRECONDITION for any other non-DISCONNECTED state.

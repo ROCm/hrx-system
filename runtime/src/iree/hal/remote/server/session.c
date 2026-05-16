@@ -15,6 +15,7 @@
 #include "iree/hal/remote/protocol/queue.h"
 #include "iree/hal/remote/server/server.h"
 #include "iree/hal/remote/util/queue_header_pool.h"
+#include "iree/net/channel/bulk/bulk_channel.h"
 #include "iree/net/channel/queue/queue_channel.h"
 #include "iree/net/channel/util/frame_sender.h"
 #include "iree/net/status_wire.h"
@@ -149,6 +150,7 @@ static int32_t iree_hal_remote_server_find_session_slot(
 void iree_hal_remote_server_remove_session(iree_hal_remote_server_t* server,
                                            iree_net_session_t* session) {
   iree_net_queue_channel_t* queue_channel = NULL;
+  iree_net_bulk_channel_t* bulk_channel = NULL;
   iree_hal_remote_server_stopped_callback_t stopped_callback;
   memset(&stopped_callback, 0, sizeof(stopped_callback));
 
@@ -171,6 +173,8 @@ void iree_hal_remote_server_remove_session(iree_hal_remote_server_t* server,
     // Snapshot references to clean up outside the lock.
     queue_channel = server->sessions[slot].queue_channel;
     server->sessions[slot].queue_channel = NULL;
+    bulk_channel = server->sessions[slot].bulk_channel;
+    server->sessions[slot].bulk_channel = NULL;
 
     resource_table = server->sessions[slot].resource_table;
     memset(&server->sessions[slot].resource_table, 0,
@@ -230,11 +234,12 @@ void iree_hal_remote_server_remove_session(iree_hal_remote_server_t* server,
   iree_hal_remote_server_free_resource_release_nodes(pending_releases);
   iree_hal_remote_server_free_command_completion_nodes(pending_completions);
 
-  // Detach the queue channel from its endpoint before releasing the session.
-  // Command completions may hold retained references to the channel that
-  // outlive the session. Detach clears the endpoint callbacks (safe while the
-  // endpoint is alive) and zeroes the endpoint reference so that the eventual
-  // channel destroy does not UAF on the freed endpoint.
+  // Detach channels from their endpoints before releasing the session. Command
+  // completions may hold retained references to the queue channel that outlive
+  // the session. Detach clears endpoint callbacks while endpoints are alive and
+  // zeroes endpoint references so eventual channel destroy does not UAF.
+  iree_net_bulk_channel_detach(bulk_channel);
+  iree_net_bulk_channel_release(bulk_channel);
   iree_net_queue_channel_detach(queue_channel);
   iree_net_queue_channel_release(queue_channel);
   iree_net_session_release(session);
@@ -2934,8 +2939,87 @@ static void iree_hal_remote_server_on_queue_transport_error(
   iree_status_ignore(status);
 }
 
+// Header buffers used by the bulk channel frame sender. Bulk DATA payloads are
+// not copied into this pool; only the 40-byte frame headers are retained until
+// send completion.
+#define IREE_HAL_REMOTE_BULK_HEADER_POOL_BUFFER_COUNT 128
+#define IREE_HAL_REMOTE_BULK_HEADER_POOL_BUFFER_SIZE 128
+
+static iree_status_t iree_hal_remote_server_on_bulk_start(
+    void* user_data, uint64_t transfer_id, uint64_t total_size,
+    iree_net_bulk_frame_flags_t flags) {
+  (void)user_data;
+  (void)transfer_id;
+  (void)total_size;
+  (void)flags;
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "remote server bulk START is not implemented yet");
+}
+
+static iree_status_t iree_hal_remote_server_on_bulk_data(
+    void* user_data, uint64_t transfer_id, uint64_t chunk_offset,
+    uint32_t sequence, iree_net_bulk_frame_flags_t flags,
+    iree_const_byte_span_t chunk_data, iree_async_buffer_lease_t* lease) {
+  (void)user_data;
+  (void)transfer_id;
+  (void)chunk_offset;
+  (void)sequence;
+  (void)flags;
+  (void)chunk_data;
+  (void)lease;
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "remote server bulk DATA is not implemented yet");
+}
+
+static iree_status_t iree_hal_remote_server_on_bulk_complete(
+    void* user_data, uint64_t transfer_id) {
+  (void)user_data;
+  (void)transfer_id;
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "remote server bulk COMPLETE is not implemented yet");
+}
+
+static iree_status_t iree_hal_remote_server_on_bulk_abort(
+    void* user_data, uint64_t transfer_id, iree_const_byte_span_t abort_data,
+    iree_async_buffer_lease_t* lease) {
+  (void)user_data;
+  (void)transfer_id;
+  (void)abort_data;
+  (void)lease;
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "remote server bulk ABORT is not implemented yet");
+}
+
+static void iree_hal_remote_server_on_bulk_transport_error(
+    void* user_data, iree_status_t status) {
+  iree_hal_remote_server_session_t* session_slot =
+      (iree_hal_remote_server_session_t*)user_data;
+  iree_status_t shutdown_status = iree_net_session_shutdown(
+      session_slot->session, /*reason_code=*/0,
+      iree_make_cstring_view("bulk channel transport error"));
+  iree_status_ignore(shutdown_status);
+  iree_status_ignore(status);
+}
+
+static void iree_hal_remote_server_on_bulk_send_complete(
+    void* user_data, uint64_t operation_user_data, iree_status_t status) {
+  (void)operation_user_data;
+  if (iree_status_is_ok(status)) {
+    iree_status_ignore(status);
+    return;
+  }
+  iree_hal_remote_server_on_bulk_transport_error(user_data, status);
+}
+
+static void iree_hal_remote_server_on_bulk_credit(
+    void* user_data, uint32_t credit_delta, uint32_t available_credit_count) {
+  (void)user_data;
+  (void)credit_delta;
+  (void)available_credit_count;
+}
+
 // Context passed to the endpoint_ready callback to identify which session
-// slot should receive the queue channel.
+// slot should receive the application channel.
 typedef struct iree_hal_remote_server_endpoint_context_t {
   iree_hal_remote_server_t* server;
   iree_net_session_t* session;  // retained
@@ -2957,6 +3041,10 @@ static void iree_hal_remote_server_on_queue_endpoint_ready(
   context = NULL;
 
   if (!iree_status_is_ok(status)) {
+    iree_status_t shutdown_status = iree_net_session_shutdown(
+        session, /*reason_code=*/0,
+        iree_make_cstring_view("queue endpoint open failed"));
+    iree_status_ignore(shutdown_status);
     iree_status_ignore(status);
     iree_net_session_release(session);
     IREE_TRACE_ZONE_END(z0);
@@ -3034,6 +3122,91 @@ static void iree_hal_remote_server_on_queue_endpoint_ready(
   IREE_TRACE_ZONE_END(z0);
 }
 
+static void iree_hal_remote_server_on_bulk_endpoint_ready(
+    void* user_data, iree_status_t status,
+    iree_net_message_endpoint_t endpoint) {
+  iree_hal_remote_server_endpoint_context_t* context =
+      (iree_hal_remote_server_endpoint_context_t*)user_data;
+  iree_hal_remote_server_t* server = context->server;
+  iree_net_session_t* session = context->session;
+  iree_allocator_t host_allocator = context->host_allocator;
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  iree_allocator_free(host_allocator, context);
+  context = NULL;
+
+  if (!iree_status_is_ok(status)) {
+    iree_status_t shutdown_status = iree_net_session_shutdown(
+        session, /*reason_code=*/0,
+        iree_make_cstring_view("bulk endpoint open failed"));
+    iree_status_ignore(shutdown_status);
+    iree_status_ignore(status);
+    iree_net_session_release(session);
+    IREE_TRACE_ZONE_END(z0);
+    return;
+  }
+
+  iree_slim_mutex_lock(&server->session_mutex);
+  int32_t slot = iree_hal_remote_server_find_session_slot(server, session);
+  iree_slim_mutex_unlock(&server->session_mutex);
+  if (slot < 0) {
+    iree_net_session_release(session);
+    IREE_TRACE_ZONE_END(z0);
+    return;
+  }
+
+  iree_async_buffer_pool_t* header_pool = NULL;
+  status = iree_hal_remote_create_queue_header_pool(
+      IREE_HAL_REMOTE_BULK_HEADER_POOL_BUFFER_COUNT,
+      IREE_HAL_REMOTE_BULK_HEADER_POOL_BUFFER_SIZE, host_allocator,
+      &header_pool);
+
+  iree_net_bulk_channel_t* bulk_channel = NULL;
+  if (iree_status_is_ok(status)) {
+    iree_net_bulk_channel_callbacks_t callbacks = {
+        .on_start = iree_hal_remote_server_on_bulk_start,
+        .on_data = iree_hal_remote_server_on_bulk_data,
+        .on_complete = iree_hal_remote_server_on_bulk_complete,
+        .on_abort = iree_hal_remote_server_on_bulk_abort,
+        .on_transport_error = iree_hal_remote_server_on_bulk_transport_error,
+        .on_send_complete = iree_hal_remote_server_on_bulk_send_complete,
+        .on_credit = iree_hal_remote_server_on_bulk_credit,
+        .user_data = &server->sessions[slot],
+    };
+    iree_async_buffer_pool_t* channel_header_pool = header_pool;
+    header_pool = NULL;  // Ownership transfers to create, including failure.
+    status = iree_net_bulk_channel_create(endpoint, /*options=*/NULL,
+                                          channel_header_pool, callbacks,
+                                          host_allocator, &bulk_channel);
+  }
+
+  if (iree_status_is_ok(status)) {
+    status = iree_net_bulk_channel_activate(bulk_channel);
+  }
+
+  if (iree_status_is_ok(status)) {
+    iree_slim_mutex_lock(&server->session_mutex);
+    if (server->sessions[slot].session == session) {
+      server->sessions[slot].bulk_channel = bulk_channel;
+      bulk_channel = NULL;  // Ownership transferred.
+    }
+    iree_slim_mutex_unlock(&server->session_mutex);
+
+    iree_net_bulk_channel_release(bulk_channel);
+  } else {
+    iree_net_bulk_channel_release(bulk_channel);
+    iree_async_buffer_pool_free(header_pool);
+    iree_status_t shutdown_status = iree_net_session_shutdown(
+        session, /*reason_code=*/0,
+        iree_make_cstring_view("bulk channel setup failed"));
+    iree_status_ignore(shutdown_status);
+    iree_status_ignore(status);
+  }
+
+  iree_net_session_release(session);
+  IREE_TRACE_ZONE_END(z0);
+}
+
 //===----------------------------------------------------------------------===//
 // Session callbacks
 //===----------------------------------------------------------------------===//
@@ -3061,28 +3234,53 @@ void iree_hal_remote_server_on_session_ready(
     return;
   }
 
-  // Open the queue endpoint for HAL command dispatch. The endpoint_ready
-  // callback creates the queue channel and activates it.
-  iree_hal_remote_server_endpoint_context_t* context = NULL;
+  // Open application endpoints in the same order as the client: queue first,
+  // then bulk. Endpoint-ready callbacks create and activate their channels.
+  iree_hal_remote_server_endpoint_context_t* queue_context = NULL;
   iree_status_t status = iree_allocator_malloc(
-      server->host_allocator, sizeof(*context), (void**)&context);
+      server->host_allocator, sizeof(*queue_context), (void**)&queue_context);
   if (iree_status_is_ok(status)) {
-    context->server = server;
-    context->session = session;
+    queue_context->server = server;
+    queue_context->session = session;
     iree_net_session_retain(session);
-    context->host_allocator = server->host_allocator;
+    queue_context->host_allocator = server->host_allocator;
 
     iree_net_endpoint_ready_callback_t endpoint_callback = {
         .fn = iree_hal_remote_server_on_queue_endpoint_ready,
-        .user_data = context,
+        .user_data = queue_context,
     };
     status = iree_net_session_open_endpoint(session, endpoint_callback);
     if (!iree_status_is_ok(status)) {
       iree_net_session_release(session);
-      iree_allocator_free(server->host_allocator, context);
+      iree_allocator_free(server->host_allocator, queue_context);
+    }
+  }
+  iree_hal_remote_server_endpoint_context_t* bulk_context = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc(
+        server->host_allocator, sizeof(*bulk_context), (void**)&bulk_context);
+  }
+  if (iree_status_is_ok(status)) {
+    bulk_context->server = server;
+    bulk_context->session = session;
+    iree_net_session_retain(session);
+    bulk_context->host_allocator = server->host_allocator;
+
+    iree_net_endpoint_ready_callback_t endpoint_callback = {
+        .fn = iree_hal_remote_server_on_bulk_endpoint_ready,
+        .user_data = bulk_context,
+    };
+    status = iree_net_session_open_endpoint(session, endpoint_callback);
+    if (!iree_status_is_ok(status)) {
+      iree_net_session_release(session);
+      iree_allocator_free(server->host_allocator, bulk_context);
     }
   }
   if (!iree_status_is_ok(status)) {
+    iree_status_t shutdown_status = iree_net_session_shutdown(
+        session, /*reason_code=*/0,
+        iree_make_cstring_view("application endpoint setup failed"));
+    iree_status_ignore(shutdown_status);
     iree_status_ignore(status);
   }
 
@@ -3100,10 +3298,9 @@ void iree_hal_remote_server_on_session_goaway(void* user_data,
 
   (void)reason_code;
   (void)message;
-  // Client initiated graceful shutdown. The session transitions to DRAINING
-  // and will eventually reach CLOSED, at which point we remove it.
-  // For now, remove immediately since we have no application endpoints to
-  // drain.
+  // Client initiated graceful shutdown. Detach and release the session's
+  // application channels immediately; queued command completion references
+  // retain the queue channel and observe a detached endpoint.
   iree_hal_remote_server_remove_session(server, session);
 
   IREE_TRACE_ZONE_END(z0);

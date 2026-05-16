@@ -12,6 +12,7 @@
 #include "iree/async/operations/scheduling.h"
 #include "iree/async/proactor.h"
 #include "iree/hal/remote/client/buffer.h"
+#include "iree/hal/remote/client/bulk.h"
 #include "iree/hal/remote/client/command_buffer.h"
 #include "iree/hal/remote/client/executable.h"
 #include "iree/hal/remote/client/semaphore.h"
@@ -2149,8 +2150,8 @@ static void iree_hal_remote_client_device_on_queue_transport_error(
   IREE_TRACE_ZONE_END(z0);
 }
 
-// Called when the queue endpoint is ready after session bootstrap.
-// Creates the header pool, queue channel, and activates it.
+// Called when the queue endpoint is ready after session bootstrap. Creates the
+// queue channel, then starts bulk endpoint provisioning.
 void iree_hal_remote_client_device_on_queue_endpoint_ready(
     void* user_data, iree_status_t status,
     iree_net_message_endpoint_t endpoint) {
@@ -2158,30 +2159,24 @@ void iree_hal_remote_client_device_on_queue_endpoint_ready(
       (iree_hal_remote_client_device_t*)user_data;
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  if (!iree_status_is_ok(status)) {
-    iree_hal_remote_client_device_store_state(
-        device, IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_ERROR);
-    // Fire the connect callback with error so the application doesn't hang.
-    iree_hal_remote_client_device_connected_callback_t callback =
-        device->connect_callback;
-    memset(&device->connect_callback, 0, sizeof(device->connect_callback));
-    if (callback.fn) {
-      callback.fn(callback.user_data,
-                  iree_make_status(IREE_STATUS_INTERNAL,
-                                   "failed to open queue endpoint"));
-    } else if (device->options.error_callback.fn) {
-      device->options.error_callback.fn(
-          device->options.error_callback.user_data,
-          iree_make_status(IREE_STATUS_INTERNAL,
-                           "failed to open queue endpoint"));
-    }
+  if (iree_hal_remote_client_device_load_state(device) !=
+      IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_CONNECTING) {
     iree_status_ignore(status);
     IREE_TRACE_ZONE_END(z0);
     return;
   }
 
-  // Create header pool and queue channel into locals first, then publish
-  // atomically to device->queue_channel.
+  if (!iree_status_is_ok(status)) {
+    iree_hal_remote_client_device_store_state(
+        device, IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_ERROR);
+    // Fire the connect callback with error so the application doesn't hang.
+    iree_hal_remote_client_device_complete_connect(device, status);
+    IREE_TRACE_ZONE_END(z0);
+    return;
+  }
+
+  // Create header pool and queue channel into locals first; bulk endpoint
+  // provisioning publishes it only after both production channels are ready.
   iree_async_buffer_pool_t* header_pool = NULL;
   iree_net_queue_channel_t* queue_channel = NULL;
 
@@ -2204,6 +2199,7 @@ void iree_hal_remote_client_device_on_queue_endpoint_ready(
     status = iree_net_queue_channel_create(
         endpoint, IREE_NET_FRAME_SENDER_MAX_SPANS, header_pool, callbacks,
         device->host_allocator, &queue_channel);
+    header_pool = NULL;  // queue_channel_create consumes the pool.
   }
 
   // Activate the channel to begin receiving frames.
@@ -2212,28 +2208,14 @@ void iree_hal_remote_client_device_on_queue_endpoint_ready(
   }
 
   if (iree_status_is_ok(status)) {
-    // Publish atomically for the hot send path. If this replaces a detached
-    // channel from an earlier connection generation, release that old
-    // generation now that queue submissions are rejected until the new channel
-    // is fully published.
-    iree_net_queue_channel_t* old_queue_channel =
-        iree_hal_remote_client_device_publish_queue_channel(device,
-                                                            queue_channel);
-    iree_net_queue_channel_detach(old_queue_channel);
-    iree_net_queue_channel_release(old_queue_channel);
-
-    iree_hal_remote_client_device_store_state(
-        device, IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_CONNECTED);
-
-    // Queue channel is ready. Fire the deferred connect callback so the
-    // application can immediately submit queue operations.
-    iree_hal_remote_client_device_connected_callback_t callback =
-        device->connect_callback;
-    memset(&device->connect_callback, 0, sizeof(device->connect_callback));
-    if (callback.fn) {
-      callback.fn(callback.user_data, iree_ok_status());
+    status =
+        iree_hal_remote_client_device_open_bulk_endpoint(device, queue_channel);
+    if (iree_status_is_ok(status)) {
+      queue_channel = NULL;  // Ownership transferred to the bulk callback.
     }
-  } else {
+  }
+
+  if (!iree_status_is_ok(status)) {
     // Cleanup on failure. Channel owns the pool if it was created
     // successfully; otherwise we must free the pool ourselves.
     if (queue_channel) {
@@ -2245,17 +2227,7 @@ void iree_hal_remote_client_device_on_queue_endpoint_ready(
     iree_hal_remote_client_device_store_state(
         device, IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_ERROR);
     // Fire connect callback with error so the application doesn't hang.
-    iree_hal_remote_client_device_connected_callback_t callback =
-        device->connect_callback;
-    memset(&device->connect_callback, 0, sizeof(device->connect_callback));
-    if (callback.fn) {
-      callback.fn(callback.user_data, status);
-    } else if (device->options.error_callback.fn) {
-      device->options.error_callback.fn(
-          device->options.error_callback.user_data, status);
-    } else {
-      iree_status_ignore(status);
-    }
+    iree_hal_remote_client_device_complete_connect(device, status);
   }
 
   IREE_TRACE_ZONE_END(z0);

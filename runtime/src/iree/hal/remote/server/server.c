@@ -6,6 +6,8 @@
 
 #include "iree/hal/remote/server/server.h"
 
+#include "iree/net/bootstrap.h"
+#include "iree/net/channel/bulk/bulk_channel.h"
 #include "iree/net/transport_factory.h"
 
 // Initial capacity for the per-session resource table.
@@ -245,8 +247,8 @@ static void iree_hal_remote_server_destroy(iree_hal_remote_server_t* server) {
   iree_allocator_t host_allocator = server->host_allocator;
 
   // Release all active sessions (should be empty if stop() was called).
-  // Release queue channels before sessions (channels reference endpoints
-  // owned by sessions). The channel owns the header pool (freed on channel
+  // Release application channels before sessions (channels reference endpoints
+  // owned by sessions). Channels own their header pools (freed on channel
   // destroy). Clear each slot before releasing to prevent re-entrancy: if
   // release drops the last ref and the session's destructor synchronously
   // fires an error callback, on_session_error → remove_session must not
@@ -282,6 +284,10 @@ static void iree_hal_remote_server_destroy(iree_hal_remote_server_t* server) {
            sizeof(server->sessions[i].provisional_map));
 
     iree_hal_remote_server_session_deinitialize_windows(&server->sessions[i]);
+
+    iree_net_bulk_channel_detach(server->sessions[i].bulk_channel);
+    iree_net_bulk_channel_release(server->sessions[i].bulk_channel);
+    server->sessions[i].bulk_channel = NULL;
 
     iree_net_queue_channel_detach(server->sessions[i].queue_channel);
     iree_net_queue_channel_release(server->sessions[i].queue_channel);
@@ -393,6 +399,7 @@ static void iree_hal_remote_server_on_accept(
     iree_net_session_options_t session_options =
         iree_net_session_options_default();
     session_options.local_topology = server->local_topology;
+    session_options.capabilities = IREE_NET_BOOTSTRAP_CAPABILITY_BULK_TRANSFER;
     session_options.session_id = session_id;
 
     iree_net_session_callbacks_t callbacks = {

@@ -32,6 +32,8 @@ iree_cc_library(
     iree::hal::remote::protocol::control
     iree::hal::remote::protocol::queue
     iree::hal::remote::util::queue_header_pool
+    iree::net::bootstrap
+    iree::net::channel::bulk::bulk_channel
     iree::net::channel::queue::queue_channel
     iree::net::channel::util::frame_sender
     iree::net::channel::util::sequence_window

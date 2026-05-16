@@ -20,6 +20,7 @@ extern "C" {
 #endif  // __cplusplus
 
 typedef struct iree_hal_remote_server_t iree_hal_remote_server_t;
+typedef struct iree_net_bulk_channel_t iree_net_bulk_channel_t;
 
 typedef uint8_t iree_hal_remote_server_epoch_slot_state_t;
 
@@ -32,8 +33,8 @@ enum iree_hal_remote_server_epoch_slot_state_e {
 // Per-client session tracking entry.
 // Stored in the server's sessions array (indexed by slot).
 typedef struct iree_hal_remote_server_session_t {
-  // Back-pointer to the owning server. Used by queue channel callbacks to
-  // access server->devices without a global search.
+  // Back-pointer to the owning server. Used by application channel callbacks
+  // to access server->devices without a global search.
   iree_hal_remote_server_t* server;
 
   // The net-layer session handling bootstrap and control channel.
@@ -48,6 +49,9 @@ typedef struct iree_hal_remote_server_session_t {
   // destroy). This ensures the pool remains valid as long as any reference
   // to the channel exists (e.g., command completion contexts).
   iree_net_queue_channel_t* queue_channel;
+
+  // Bulk channel for large payload transfers (NULL until bulk endpoint opens).
+  iree_net_bulk_channel_t* bulk_channel;
 
   // Resource table mapping resource_ids to retained HAL resources (buffers,
   // semaphores, etc.). Initialized when the session is accepted, deinitialized
