@@ -54,6 +54,19 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    receive_window
+  HDRS
+    "receive_window.h"
+  SRCS
+    "receive_window.c"
+  DEPS
+    ::chunk_pool
+    iree::base
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     transfer_table
   HDRS
     "transfer_table.h"
@@ -89,6 +102,20 @@ iree_cc_test(
   DEPS
     ::chunk_pool
     ::frame
+    iree::async
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    receive_window_test
+  SRCS
+    "receive_window_test.cc"
+  DEPS
+    ::frame
+    ::receive_window
     iree::async
     iree::base
     iree::testing::gtest

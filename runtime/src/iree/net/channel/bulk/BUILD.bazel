@@ -49,6 +49,16 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "receive_window",
+    srcs = ["receive_window.c"],
+    hdrs = ["receive_window.h"],
+    deps = [
+        ":chunk_pool",
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "transfer_table",
     srcs = ["transfer_table.c"],
     hdrs = ["transfer_table.h"],
@@ -79,6 +89,19 @@ iree_runtime_cc_test(
     deps = [
         ":chunk_pool",
         ":frame",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "receive_window_test",
+    srcs = ["receive_window_test.cc"],
+    deps = [
+        ":frame",
+        ":receive_window",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
