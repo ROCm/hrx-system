@@ -46,6 +46,9 @@ typedef enum iree_net_bulk_channel_state_e {
 // Default maximum number of send contexts that can be in flight.
 #define IREE_NET_BULK_CHANNEL_DEFAULT_SEND_CONTEXT_CAPACITY 64
 
+// Default maximum number of DATA chunk receive credits accepted from a peer.
+#define IREE_NET_BULK_CHANNEL_DEFAULT_REMOTE_CHUNK_CREDIT_CAPACITY 64
+
 // Bulk channel creation options.
 typedef struct iree_net_bulk_channel_options_t {
   // Maximum scatter-gather spans per send after endpoint overhead.
@@ -53,6 +56,9 @@ typedef struct iree_net_bulk_channel_options_t {
 
   // Maximum send frames submitted but not completed at once.
   iree_host_size_t send_context_capacity;
+
+  // Maximum DATA chunk credits the peer may advertise as available.
+  uint32_t remote_chunk_credit_capacity;
 } iree_net_bulk_channel_options_t;
 
 // Returns conservative default bulk channel options.
@@ -61,6 +67,8 @@ iree_net_bulk_channel_options_default(void) {
   iree_net_bulk_channel_options_t options = {0};
   options.send_context_capacity =
       IREE_NET_BULK_CHANNEL_DEFAULT_SEND_CONTEXT_CAPACITY;
+  options.remote_chunk_credit_capacity =
+      IREE_NET_BULK_CHANNEL_DEFAULT_REMOTE_CHUNK_CREDIT_CAPACITY;
   return options;
 }
 
@@ -75,8 +83,9 @@ typedef iree_status_t (*iree_net_bulk_channel_on_start_fn_t)(
 
 // Called when a DATA frame is received.
 //
-// |chunk_data| points into the receive buffer. Retain |lease| to keep the data
-// valid beyond the callback.
+// |chunk_data| points into the receive buffer. Move |lease| into retained
+// storage and clear the caller's lease to keep the data valid beyond the
+// callback.
 typedef iree_status_t (*iree_net_bulk_channel_on_data_fn_t)(
     void* user_data, uint64_t transfer_id, uint64_t chunk_offset,
     uint32_t sequence, iree_net_bulk_frame_flags_t flags,
@@ -88,8 +97,9 @@ typedef iree_status_t (*iree_net_bulk_channel_on_complete_fn_t)(
 
 // Called when an ABORT frame reports transfer cancellation or failure.
 //
-// |abort_data| points into the receive buffer and may be empty. Retain |lease|
-// to keep the data valid beyond the callback.
+// |abort_data| points into the receive buffer and may be empty. Move |lease|
+// into retained storage and clear the caller's lease to keep the data valid
+// beyond the callback.
 typedef iree_status_t (*iree_net_bulk_channel_on_abort_fn_t)(
     void* user_data, uint64_t transfer_id, iree_const_byte_span_t abort_data,
     iree_async_buffer_lease_t* lease);
@@ -107,6 +117,10 @@ typedef void (*iree_net_bulk_channel_on_transport_error_fn_t)(
 // success or failure.
 typedef void (*iree_net_bulk_channel_on_send_complete_fn_t)(
     void* user_data, uint64_t operation_user_data, iree_status_t status);
+
+// Called when peer DATA chunk receive credits are replenished.
+typedef void (*iree_net_bulk_channel_on_credit_fn_t)(
+    void* user_data, uint32_t credit_delta, uint32_t available_credit_count);
 
 // Bundled application callbacks for channel events.
 typedef struct iree_net_bulk_channel_callbacks_t {
@@ -127,6 +141,9 @@ typedef struct iree_net_bulk_channel_callbacks_t {
 
   // Optional callback for send completions.
   iree_net_bulk_channel_on_send_complete_fn_t on_send_complete;
+
+  // Optional callback for peer DATA chunk receive credit replenishment.
+  iree_net_bulk_channel_on_credit_fn_t on_credit;
 
   // User data passed as the first argument to each callback.
   void* user_data;
@@ -191,6 +208,10 @@ bool iree_net_bulk_channel_has_pending_sends(
 iree_net_carrier_send_budget_t iree_net_bulk_channel_query_send_budget(
     iree_net_bulk_channel_t* channel);
 
+// Returns DATA chunk receive credits currently available on the peer.
+uint32_t iree_net_bulk_channel_remote_chunk_credit_count(
+    const iree_net_bulk_channel_t* channel);
+
 // Sends a START frame for |transfer_id|.
 iree_status_t iree_net_bulk_channel_send_start(
     iree_net_bulk_channel_t* channel, uint64_t transfer_id, uint64_t total_size,
@@ -208,6 +229,12 @@ iree_status_t iree_net_bulk_channel_send_data(
 // Sends a COMPLETE frame for |transfer_id|.
 iree_status_t iree_net_bulk_channel_send_complete(
     iree_net_bulk_channel_t* channel, uint64_t transfer_id,
+    uint64_t operation_user_data);
+
+// Sends a CREDIT frame advertising additional local DATA chunk receive
+// capacity.
+iree_status_t iree_net_bulk_channel_send_credit(
+    iree_net_bulk_channel_t* channel, uint32_t credit_delta,
     uint64_t operation_user_data);
 
 // Sends an ABORT frame for |transfer_id| with optional payload data.

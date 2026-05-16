@@ -378,6 +378,12 @@ struct TestContext {
   // Send completion status codes.
   std::vector<iree_status_code_t> send_completion_errors;
 
+  // Credit replenishment deltas.
+  std::vector<uint32_t> credit_deltas;
+
+  // Available credit counts after each replenishment.
+  std::vector<uint32_t> available_credit_counts;
+
   static iree_status_t OnStart(void* user_data, uint64_t transfer_id,
                                uint64_t total_size,
                                iree_net_bulk_frame_flags_t flags) {
@@ -435,6 +441,13 @@ struct TestContext {
     iree_status_ignore(status);
   }
 
+  static void OnCredit(void* user_data, uint32_t credit_delta,
+                       uint32_t available_credit_count) {
+    auto* context = static_cast<TestContext*>(user_data);
+    context->credit_deltas.push_back(credit_delta);
+    context->available_credit_counts.push_back(available_credit_count);
+  }
+
   iree_net_bulk_channel_callbacks_t MakeCallbacks() {
     iree_net_bulk_channel_callbacks_t callbacks;
     memset(&callbacks, 0, sizeof(callbacks));
@@ -444,6 +457,7 @@ struct TestContext {
     callbacks.on_abort = OnAbort;
     callbacks.on_transport_error = OnTransportError;
     callbacks.on_send_complete = OnSendComplete;
+    callbacks.on_credit = OnCredit;
     callbacks.user_data = this;
     return callbacks;
   }
@@ -622,6 +636,41 @@ TEST_F(BulkChannelTest, ReceiveAbortWithPayload) {
   EXPECT_EQ(context_.aborts[0].payload, (std::vector<uint8_t>{'b', 'a', 'd'}));
 }
 
+TEST_F(BulkChannelTest, ReceiveCreditReplenishesRemoteChunkCredit) {
+  CreateAndActivate();
+
+  IREE_ASSERT_OK(endpoint_.InjectMessage(BuildBulkFrame(
+      IREE_NET_BULK_FRAME_TYPE_CREDIT, IREE_NET_BULK_FRAME_FLAG_NONE,
+      /*transfer_id=*/0, /*total_size=*/3, /*chunk_offset=*/0,
+      /*sequence=*/0, {})));
+
+  EXPECT_EQ(iree_net_bulk_channel_remote_chunk_credit_count(channel_), 3u);
+  EXPECT_EQ(context_.credit_deltas, (std::vector<uint32_t>{3}));
+  EXPECT_EQ(context_.available_credit_counts, (std::vector<uint32_t>{3}));
+}
+
+TEST_F(BulkChannelTest, ReceiveCreditRejectsOverflow) {
+  iree_net_bulk_channel_options_t options =
+      iree_net_bulk_channel_options_default();
+  options.remote_chunk_credit_capacity = 2;
+  IREE_ASSERT_OK(iree_net_bulk_channel_create(
+      endpoint_.as_endpoint(), &options, CreatePool(), context_.MakeCallbacks(),
+      iree_allocator_system(), &channel_));
+  IREE_ASSERT_OK(iree_net_bulk_channel_activate(channel_));
+
+  IREE_ASSERT_OK(endpoint_.InjectMessage(BuildBulkFrame(
+      IREE_NET_BULK_FRAME_TYPE_CREDIT, IREE_NET_BULK_FRAME_FLAG_NONE,
+      /*transfer_id=*/0, /*total_size=*/2, /*chunk_offset=*/0,
+      /*sequence=*/0, {})));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      endpoint_.InjectMessage(BuildBulkFrame(
+          IREE_NET_BULK_FRAME_TYPE_CREDIT, IREE_NET_BULK_FRAME_FLAG_NONE,
+          /*transfer_id=*/0, /*total_size=*/1,
+          /*chunk_offset=*/0, /*sequence=*/0, {})));
+  EXPECT_EQ(iree_net_bulk_channel_remote_chunk_credit_count(channel_), 2u);
+}
+
 TEST_F(BulkChannelTest, ReceiveBadMagic) {
   CreateAndActivate();
   auto message = BuildBulkFrame(IREE_NET_BULK_FRAME_TYPE_START,
@@ -681,6 +730,15 @@ TEST_F(BulkChannelTest, ReceiveInvalidLifecycleMetadata) {
   abort_header->chunk_offset = 1;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         endpoint_.InjectMessage(abort_message));
+
+  auto credit_message =
+      BuildBulkFrame(IREE_NET_BULK_FRAME_TYPE_CREDIT,
+                     IREE_NET_BULK_FRAME_FLAG_NONE, 0, 1, 0, 0, {});
+  auto* credit_header =
+      reinterpret_cast<iree_net_bulk_frame_header_t*>(credit_message.data());
+  credit_header->transfer_id = 1;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        endpoint_.InjectMessage(credit_message));
 }
 
 TEST_F(BulkChannelTest, ReceiveCodecFlagRejected) {
@@ -738,6 +796,10 @@ TEST_F(BulkChannelTest, SendStartDataCompleteAbort) {
   iree_async_span_list_t abort_payload =
       iree_async_span_list_make(&abort_span, 1);
 
+  IREE_ASSERT_OK(endpoint_.InjectMessage(BuildBulkFrame(
+      IREE_NET_BULK_FRAME_TYPE_CREDIT, IREE_NET_BULK_FRAME_FLAG_NONE,
+      /*transfer_id=*/0, /*total_size=*/1, /*chunk_offset=*/0,
+      /*sequence=*/0, {})));
   IREE_ASSERT_OK(iree_net_bulk_channel_send_start(
       channel_, /*transfer_id=*/3, /*total_size=*/1024,
       IREE_NET_BULK_FRAME_FLAG_NONE, /*operation_user_data=*/10));
@@ -784,6 +846,81 @@ TEST_F(BulkChannelTest, SendStartDataCompleteAbort) {
   EXPECT_EQ(abort_header.type, IREE_NET_BULK_FRAME_TYPE_ABORT);
   EXPECT_EQ(abort_header.transfer_id, 4u);
   EXPECT_EQ(abort_header.chunk_length, sizeof(abort_bytes));
+}
+
+TEST_F(BulkChannelTest, SendDataRequiresRemoteChunkCredit) {
+  CreateAndActivate();
+
+  uint8_t chunk_bytes[] = {0x10};
+  iree_async_span_t chunk_span =
+      iree_async_span_from_ptr(chunk_bytes, sizeof(chunk_bytes));
+  iree_async_span_list_t chunk_payload =
+      iree_async_span_list_make(&chunk_span, 1);
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        iree_net_bulk_channel_send_data(
+                            channel_, /*transfer_id=*/3, /*chunk_offset=*/0,
+                            /*sequence=*/0, IREE_NET_BULK_FRAME_FLAG_NONE,
+                            chunk_payload, /*operation_user_data=*/1));
+  EXPECT_TRUE(carrier_->sends.empty());
+
+  IREE_ASSERT_OK(endpoint_.InjectMessage(BuildBulkFrame(
+      IREE_NET_BULK_FRAME_TYPE_CREDIT, IREE_NET_BULK_FRAME_FLAG_NONE,
+      /*transfer_id=*/0, /*total_size=*/1, /*chunk_offset=*/0,
+      /*sequence=*/0, {})));
+  IREE_ASSERT_OK(iree_net_bulk_channel_send_data(
+      channel_, /*transfer_id=*/3, /*chunk_offset=*/0, /*sequence=*/0,
+      IREE_NET_BULK_FRAME_FLAG_NONE, chunk_payload, /*operation_user_data=*/2));
+  EXPECT_EQ(iree_net_bulk_channel_remote_chunk_credit_count(channel_), 0u);
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        iree_net_bulk_channel_send_data(
+                            channel_, /*transfer_id=*/3, /*chunk_offset=*/1,
+                            /*sequence=*/1, IREE_NET_BULK_FRAME_FLAG_NONE,
+                            chunk_payload, /*operation_user_data=*/3));
+}
+
+TEST_F(BulkChannelTest, SendDataRefundsCreditOnSubmitFailure) {
+  CreateAndActivate();
+
+  uint8_t chunk_bytes[] = {0x10};
+  iree_async_span_t chunk_span =
+      iree_async_span_from_ptr(chunk_bytes, sizeof(chunk_bytes));
+  iree_async_span_list_t chunk_payload =
+      iree_async_span_list_make(&chunk_span, 1);
+
+  IREE_ASSERT_OK(endpoint_.InjectMessage(BuildBulkFrame(
+      IREE_NET_BULK_FRAME_TYPE_CREDIT, IREE_NET_BULK_FRAME_FLAG_NONE,
+      /*transfer_id=*/0, /*total_size=*/1, /*chunk_offset=*/0,
+      /*sequence=*/0, {})));
+  carrier_->next_send_error = IREE_STATUS_RESOURCE_EXHAUSTED;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        iree_net_bulk_channel_send_data(
+                            channel_, /*transfer_id=*/3, /*chunk_offset=*/0,
+                            /*sequence=*/0, IREE_NET_BULK_FRAME_FLAG_NONE,
+                            chunk_payload, /*operation_user_data=*/1));
+  EXPECT_EQ(iree_net_bulk_channel_remote_chunk_credit_count(channel_), 1u);
+  EXPECT_TRUE(context_.send_completions.empty());
+}
+
+TEST_F(BulkChannelTest, SendCredit) {
+  CreateAndActivate();
+
+  IREE_ASSERT_OK(iree_net_bulk_channel_send_credit(channel_, /*credit_delta=*/7,
+                                                   /*operation_user_data=*/20));
+
+  ASSERT_EQ(carrier_->sends.size(), 1u);
+  ASSERT_EQ(context_.send_completions.size(), 1u);
+  EXPECT_EQ(context_.send_completions[0], 20u);
+
+  iree_net_bulk_frame_header_t credit_header =
+      ParseBulkHeader(carrier_->sends[0].data);
+  EXPECT_EQ(credit_header.type, IREE_NET_BULK_FRAME_TYPE_CREDIT);
+  EXPECT_EQ(credit_header.transfer_id, 0u);
+  EXPECT_EQ(credit_header.total_size, 7u);
+  EXPECT_EQ(credit_header.chunk_offset, 0u);
+  EXPECT_EQ(credit_header.chunk_length, 0u);
+  EXPECT_EQ(credit_header.sequence, 0u);
 }
 
 TEST_F(BulkChannelTest, SendBeforeActivateFails) {
