@@ -38,6 +38,18 @@ iree_cc_library(
   PUBLIC
 )
 
+iree_cc_library(
+  NAME
+    transfer_table
+  HDRS
+    "transfer_table.h"
+  SRCS
+    "transfer_table.c"
+  DEPS
+    iree::base
+  PUBLIC
+)
+
 iree_cc_test(
   NAME
     bulk_channel_test
@@ -51,6 +63,18 @@ iree_cc_test(
     iree::net::carrier
     iree::net::channel::util::frame_sender
     iree::net::message_endpoint
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    transfer_table_test
+  SRCS
+    "transfer_table_test.cc"
+  DEPS
+    ::transfer_table
+    iree::base
     iree::testing::gtest
     iree::testing::gtest_main
 )
