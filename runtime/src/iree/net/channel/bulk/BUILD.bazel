@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -17,5 +18,37 @@ iree_runtime_cc_library(
     hdrs = ["frame.h"],
     deps = [
         "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "bulk_channel",
+    srcs = ["bulk_channel.c"],
+    hdrs = ["bulk_channel.h"],
+    deps = [
+        ":frame",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:atomic_slist",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/net:message_endpoint",
+        "//runtime/src/iree/net/channel/util:frame_sender",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "bulk_channel_test",
+    srcs = ["bulk_channel_test.cc"],
+    deps = [
+        ":bulk_channel",
+        ":frame",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/net:carrier",
+        "//runtime/src/iree/net:message_endpoint",
+        "//runtime/src/iree/net/channel/util:frame_sender",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )

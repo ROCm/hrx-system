@@ -24,8 +24,6 @@
 //   │ Bytes 36-39: sequence (little-endian uint32, for datagram ordering)    │
 //   └────────────────────────────────────────────────────────────────────────┘
 //
-// [FUTURE - not yet implemented]
-
 #ifndef IREE_NET_CHANNEL_BULK_FRAME_H_
 #define IREE_NET_CHANNEL_BULK_FRAME_H_
 
@@ -65,7 +63,8 @@ typedef enum iree_net_bulk_frame_type_e {
 
   // Transfer abort: signals transfer cancellation.
   IREE_NET_BULK_FRAME_TYPE_ABORT = 0x04,
-} iree_net_bulk_frame_type_t;
+} iree_net_bulk_frame_type_e;
+typedef uint8_t iree_net_bulk_frame_type_t;
 
 //===----------------------------------------------------------------------===//
 // Frame flags
@@ -104,8 +103,109 @@ typedef struct iree_net_bulk_frame_header_t {
 static_assert(sizeof(iree_net_bulk_frame_header_t) ==
                   IREE_NET_BULK_FRAME_HEADER_SIZE,
               "Bulk frame header must be exactly 40 bytes");
+static_assert(offsetof(iree_net_bulk_frame_header_t, magic) == 0, "");
+static_assert(offsetof(iree_net_bulk_frame_header_t, version) == 4, "");
+static_assert(offsetof(iree_net_bulk_frame_header_t, type) == 5, "");
+static_assert(offsetof(iree_net_bulk_frame_header_t, flags) == 6, "");
+static_assert(offsetof(iree_net_bulk_frame_header_t, reserved) == 7, "");
+static_assert(offsetof(iree_net_bulk_frame_header_t, transfer_id) == 8, "");
+static_assert(offsetof(iree_net_bulk_frame_header_t, total_size) == 16, "");
+static_assert(offsetof(iree_net_bulk_frame_header_t, chunk_offset) == 24, "");
+static_assert(offsetof(iree_net_bulk_frame_header_t, chunk_length) == 32, "");
+static_assert(offsetof(iree_net_bulk_frame_header_t, sequence) == 36, "");
 
-// TODO(benvanik): header initialization and accessor functions.
+//===----------------------------------------------------------------------===//
+// Frame header initialization
+//===----------------------------------------------------------------------===//
+
+// Initializes a bulk frame header with the given parameters.
+static inline void iree_net_bulk_frame_header_initialize(
+    iree_net_bulk_frame_type_t type, iree_net_bulk_frame_flags_t flags,
+    uint64_t transfer_id, uint64_t total_size, uint64_t chunk_offset,
+    uint32_t chunk_length, uint32_t sequence,
+    iree_net_bulk_frame_header_t* out_header) {
+  out_header->magic = IREE_NET_BULK_FRAME_MAGIC;
+  out_header->version = IREE_NET_BULK_FRAME_VERSION;
+  out_header->type = type;
+  out_header->flags = flags;
+  out_header->reserved = 0;
+  out_header->transfer_id = transfer_id;
+  out_header->total_size = total_size;
+  out_header->chunk_offset = chunk_offset;
+  out_header->chunk_length = chunk_length;
+  out_header->sequence = sequence;
+}
+
+//===----------------------------------------------------------------------===//
+// Frame header accessors
+//===----------------------------------------------------------------------===//
+
+// Validates a bulk frame header's magic, version, and reserved fields.
+static inline iree_status_t iree_net_bulk_frame_header_validate(
+    iree_net_bulk_frame_header_t header) {
+  if (header.magic != IREE_NET_BULK_FRAME_MAGIC) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "invalid bulk frame magic: 0x%08X", header.magic);
+  }
+  if (header.version != IREE_NET_BULK_FRAME_VERSION) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported bulk frame version: %u",
+                            header.version);
+  }
+  if (header.reserved != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "bulk frame reserved field must be 0");
+  }
+  return iree_ok_status();
+}
+
+// Returns the frame type.
+static inline iree_net_bulk_frame_type_t iree_net_bulk_frame_header_type(
+    iree_net_bulk_frame_header_t header) {
+  return header.type;
+}
+
+// Returns the frame flags.
+static inline iree_net_bulk_frame_flags_t iree_net_bulk_frame_header_flags(
+    iree_net_bulk_frame_header_t header) {
+  return header.flags;
+}
+
+// Returns the transfer ID.
+static inline uint64_t iree_net_bulk_frame_header_transfer_id(
+    iree_net_bulk_frame_header_t header) {
+  return header.transfer_id;
+}
+
+// Returns the total transfer size.
+static inline uint64_t iree_net_bulk_frame_header_total_size(
+    iree_net_bulk_frame_header_t header) {
+  return header.total_size;
+}
+
+// Returns the chunk byte offset.
+static inline uint64_t iree_net_bulk_frame_header_chunk_offset(
+    iree_net_bulk_frame_header_t header) {
+  return header.chunk_offset;
+}
+
+// Returns the chunk payload length.
+static inline uint32_t iree_net_bulk_frame_header_chunk_length(
+    iree_net_bulk_frame_header_t header) {
+  return header.chunk_length;
+}
+
+// Returns the datagram sequence number.
+static inline uint32_t iree_net_bulk_frame_header_sequence(
+    iree_net_bulk_frame_header_t header) {
+  return header.sequence;
+}
+
+// Returns true if the specified flag is set.
+static inline bool iree_net_bulk_frame_header_has_flag(
+    iree_net_bulk_frame_header_t header, iree_net_bulk_frame_flag_bits_t flag) {
+  return iree_any_bit_set(header.flags, flag);
+}
 
 #ifdef __cplusplus
 }  // extern "C"

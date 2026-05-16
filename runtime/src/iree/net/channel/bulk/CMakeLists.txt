@@ -19,4 +19,40 @@ iree_cc_library(
   PUBLIC
 )
 
+iree_cc_library(
+  NAME
+    bulk_channel
+  HDRS
+    "bulk_channel.h"
+  SRCS
+    "bulk_channel.c"
+  DEPS
+    ::frame
+    iree::async
+    iree::base
+    iree::base::internal
+    iree::base::internal::atomic_slist
+    iree::base::threading
+    iree::net::channel::util::frame_sender
+    iree::net::message_endpoint
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    bulk_channel_test
+  SRCS
+    "bulk_channel_test.cc"
+  DEPS
+    ::bulk_channel
+    ::frame
+    iree::async
+    iree::base
+    iree::net::carrier
+    iree::net::channel::util::frame_sender
+    iree::net::message_endpoint
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
