@@ -40,6 +40,20 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    chunk_pool
+  HDRS
+    "chunk_pool.h"
+  SRCS
+    "chunk_pool.c"
+  DEPS
+    ::frame
+    iree::async
+    iree::base
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     transfer_table
   HDRS
     "transfer_table.h"
@@ -63,6 +77,20 @@ iree_cc_test(
     iree::net::carrier
     iree::net::channel::util::frame_sender
     iree::net::message_endpoint
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    chunk_pool_test
+  SRCS
+    "chunk_pool_test.cc"
+  DEPS
+    ::chunk_pool
+    ::frame
+    iree::async
+    iree::base
     iree::testing::gtest
     iree::testing::gtest_main
 )

@@ -38,6 +38,17 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "chunk_pool",
+    srcs = ["chunk_pool.c"],
+    hdrs = ["chunk_pool.h"],
+    deps = [
+        ":frame",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "transfer_table",
     srcs = ["transfer_table.c"],
     hdrs = ["transfer_table.h"],
@@ -57,6 +68,19 @@ iree_runtime_cc_test(
         "//runtime/src/iree/net:carrier",
         "//runtime/src/iree/net:message_endpoint",
         "//runtime/src/iree/net/channel/util:frame_sender",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "chunk_pool_test",
+    srcs = ["chunk_pool_test.cc"],
+    deps = [
+        ":chunk_pool",
+        ":frame",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
