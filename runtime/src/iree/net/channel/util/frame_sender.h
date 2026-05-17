@@ -80,6 +80,7 @@
 #include "iree/async/buffer_pool.h"
 #include "iree/async/span.h"
 #include "iree/base/api.h"
+#include "iree/base/internal/atomic_slist.h"
 #include "iree/base/internal/atomics.h"
 
 #ifdef __cplusplus
@@ -132,17 +133,48 @@ typedef struct iree_net_frame_send_complete_callback_t {
   void* user_data;
 } iree_net_frame_send_complete_callback_t;
 
-// Per-send context allocated from context_allocator.
-// Holds state needed until completion callback fires.
+// Acquires one reusable send context from a caller-owned pool.
+typedef iree_status_t (*iree_net_frame_sender_context_acquire_fn_t)(
+    void* user_data, iree_net_frame_send_context_t** out_context);
+
+// Releases one send context back to a caller-owned pool.
+typedef void (*iree_net_frame_sender_context_release_fn_t)(
+    void* user_data, iree_net_frame_send_context_t* context);
+
+// Caller-owned send context pool callbacks.
+typedef struct iree_net_frame_sender_context_pool_t {
+  // Acquires one context or returns RESOURCE_EXHAUSTED for backpressure.
+  iree_net_frame_sender_context_acquire_fn_t acquire;
+
+  // Releases one previously acquired context.
+  iree_net_frame_sender_context_release_fn_t release;
+
+  // User data passed to acquire/release.
+  void* user_data;
+} iree_net_frame_sender_context_pool_t;
+
+// Per-send context owned by the frame sender until completion fires.
 //
 // Layout optimized for cache: hot fields (sender, lease, span_count, first
 // span) fit in first cache line for common single-span case.
 struct iree_net_frame_send_context_t {
+  // Sender that owns this context and receives completion recycling.
   iree_net_frame_sender_t* sender;
-  iree_async_buffer_lease_t buffer_lease;  // Header or batch buffer.
+
+  // Header, copied-frame, or batch buffer lease held until send completion.
+  iree_async_buffer_lease_t buffer_lease;
+
+  // Caller-provided value echoed to the sender completion callback.
   uint64_t operation_user_data;
+
+  // Number of valid entries in |spans|.
   iree_host_size_t span_count;
+
+  // Scatter-gather spans submitted to the carrier.
   iree_async_span_t spans[IREE_NET_FRAME_SENDER_MAX_SPANS];
+
+  // Intrusive free-list pointer used while the context is idle.
+  iree_atomic_slist_intrusive_ptr_t slist_next;
 };
 
 // Embeddable sender structure.
@@ -160,22 +192,38 @@ struct iree_net_frame_sender_t {
   // one span for its stream header, so max_send_spans = carrier->max_iov - 1).
   iree_host_size_t max_send_spans;
 
-  iree_async_buffer_pool_t* header_pool;  // Not owned.
+  // Pool used for frame headers, copied frames, and batches. Not owned.
+  iree_async_buffer_pool_t* header_pool;
 
   // Completion callback (provided by channel).
   iree_net_frame_send_complete_callback_t callback;
 
   // Batch buffer for small frames (queue/flush mode).
   iree_async_buffer_lease_t batch_lease;
+
+  // True when |batch_lease| is live and holds queued bytes.
   bool has_batch_lease;
+
+  // Number of bytes currently used in |batch_lease|.
   iree_host_size_t batch_used;
 
-  // Tracking.
+  // Number of send operations submitted without a matching completion.
   iree_atomic_int32_t sends_in_flight;
 
-  // Allocators.
-  iree_allocator_t context_allocator;  // For send contexts (may be pooled).
-  iree_allocator_t host_allocator;     // For other allocations.
+  // Free list of reusable send contexts in block-pool mode.
+  iree_atomic_slist_t context_free_list;
+
+  // Blocks backing the block-pool mode; freed during deinitialize.
+  iree_atomic_slist_t context_block_list;
+
+  // Optional caller-owned context pool; empty uses the internal block pool.
+  iree_net_frame_sender_context_pool_t context_pool;
+
+  // Allocator used when growing the internal block pool.
+  iree_allocator_t context_allocator;
+
+  // General host allocator retained for future sender-owned allocations.
+  iree_allocator_t host_allocator;
 };
 
 // Initializes a frame sender in pre-allocated memory.
@@ -190,8 +238,7 @@ struct iree_net_frame_sender_t {
 //
 // |header_pool| must outlive the sender.
 // |callback| is fired for each completed send operation.
-// |context_allocator| is used for per-send context structs (can be pool-backed
-// for performance).
+// |context_allocator| is used to grow the internal send context pool.
 // |host_allocator| is used for other dynamic allocations.
 iree_status_t iree_net_frame_sender_initialize(
     iree_net_frame_sender_t* sender, iree_net_frame_send_submit_fn_t submit_fn,
@@ -199,6 +246,20 @@ iree_status_t iree_net_frame_sender_initialize(
     iree_async_buffer_pool_t* header_pool,
     iree_net_frame_send_complete_callback_t callback,
     iree_allocator_t context_allocator, iree_allocator_t host_allocator);
+
+// Initializes a frame sender using an external allocation-free context pool.
+//
+// The |context_pool| must return storage for iree_net_frame_send_context_t from
+// a caller-owned pool and recycle it on release. It may return
+// RESOURCE_EXHAUSTED to express intentional backpressure, but must not call
+// general-purpose malloc/free per send in the steady state.
+iree_status_t iree_net_frame_sender_initialize_with_context_pool(
+    iree_net_frame_sender_t* sender, iree_net_frame_send_submit_fn_t submit_fn,
+    void* submit_fn_user_data, iree_host_size_t max_send_spans,
+    iree_async_buffer_pool_t* header_pool,
+    iree_net_frame_send_complete_callback_t callback,
+    iree_net_frame_sender_context_pool_t context_pool,
+    iree_allocator_t host_allocator);
 
 // Deinitializes a frame sender.
 // Asserts that no sends are in flight. Caller must drain completions first.
@@ -295,7 +356,7 @@ int32_t iree_net_frame_sender_pending_count(
 //   1. Releases the buffer lease back to the pool
 //   2. Decrements sends_in_flight
 //   3. Fires the user callback
-//   4. Frees the context
+//   4. Returns the context to the sender pool
 void iree_net_frame_sender_handle_completion(
     iree_net_frame_send_context_t* context, iree_status_t status);
 

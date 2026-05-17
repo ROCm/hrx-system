@@ -10,29 +10,186 @@
 
 #include "iree/net/carrier.h"
 
+// Target block size used when growing the send context pool. The block grows
+// elastically, so this is an amortization unit rather than a capacity limit.
+#define IREE_NET_FRAME_SEND_CONTEXT_BLOCK_SIZE (64 * 1024)
+
+typedef struct iree_net_frame_send_context_block_t {
+  // Intrusive list pointer for sender-owned context blocks.
+  iree_atomic_slist_intrusive_ptr_t slist_next;
+} iree_net_frame_send_context_block_t;
+
+static inline iree_atomic_slist_entry_t*
+iree_net_frame_send_context_slist_entry(
+    iree_net_frame_send_context_t* context) {
+  return context ? (iree_atomic_slist_entry_t*)&context->slist_next : NULL;
+}
+
+static inline iree_net_frame_send_context_t*
+iree_net_frame_send_context_from_slist_entry(iree_atomic_slist_entry_t* entry) {
+  return entry
+             ? (iree_net_frame_send_context_t*)((uint8_t*)entry -
+                                                offsetof(
+                                                    iree_net_frame_send_context_t,
+                                                    slist_next))
+             : NULL;
+}
+
+static inline iree_atomic_slist_entry_t*
+iree_net_frame_send_context_block_slist_entry(
+    iree_net_frame_send_context_block_t* block) {
+  return block ? (iree_atomic_slist_entry_t*)&block->slist_next : NULL;
+}
+
+static inline iree_net_frame_send_context_block_t*
+iree_net_frame_send_context_block_from_slist_entry(
+    iree_atomic_slist_entry_t* entry) {
+  return entry
+             ? (iree_net_frame_send_context_block_t*)((uint8_t*)entry -
+                                                      offsetof(
+                                                          iree_net_frame_send_context_block_t,
+                                                          slist_next))
+             : NULL;
+}
+
+static void iree_net_frame_sender_push_context(
+    iree_net_frame_sender_t* sender, iree_net_frame_send_context_t* context) {
+  memset(context, 0, sizeof(*context));
+  iree_atomic_slist_push(&sender->context_free_list,
+                         iree_net_frame_send_context_slist_entry(context));
+}
+
+static iree_net_frame_send_context_t* iree_net_frame_sender_pop_context(
+    iree_net_frame_sender_t* sender) {
+  return iree_net_frame_send_context_from_slist_entry(
+      iree_atomic_slist_pop(&sender->context_free_list));
+}
+
+static iree_status_t iree_net_frame_sender_grow_context_pool(
+    iree_net_frame_sender_t* sender,
+    iree_net_frame_send_context_t** out_context) {
+  *out_context = NULL;
+
+  const iree_host_size_t context_alignment =
+      iree_alignof(iree_net_frame_send_context_t);
+  const iree_host_size_t context_bytes = sizeof(iree_net_frame_send_context_t);
+  const iree_host_size_t block_header_size = iree_host_align(
+      sizeof(iree_net_frame_send_context_block_t), context_alignment);
+  const iree_host_size_t target_block_size =
+      iree_max((iree_host_size_t)IREE_NET_FRAME_SEND_CONTEXT_BLOCK_SIZE,
+               block_header_size + context_bytes);
+  const iree_host_size_t context_count =
+      (target_block_size - block_header_size) / context_bytes;
+
+  iree_host_size_t contexts_offset = 0;
+  iree_host_size_t allocation_size = 0;
+  iree_status_t status = IREE_STRUCT_LAYOUT(
+      sizeof(iree_net_frame_send_context_block_t), &allocation_size,
+      IREE_STRUCT_FIELD_ALIGNED(context_count, iree_net_frame_send_context_t,
+                                context_alignment, &contexts_offset));
+
+  iree_net_frame_send_context_block_t* block = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc(sender->context_allocator, allocation_size,
+                                   (void**)&block);
+  }
+
+  if (iree_status_is_ok(status)) {
+    iree_atomic_slist_push(
+        &sender->context_block_list,
+        iree_net_frame_send_context_block_slist_entry(block));
+
+    uint8_t* context_base = (uint8_t*)block + contexts_offset;
+    for (iree_host_size_t i = 0; i < context_count; ++i) {
+      iree_net_frame_send_context_t* context =
+          (iree_net_frame_send_context_t*)(context_base + i * context_bytes);
+      if (i == 0) {
+        *out_context = context;
+      } else {
+        iree_net_frame_sender_push_context(sender, context);
+      }
+    }
+  }
+
+  return status;
+}
+
+static void iree_net_frame_sender_release_context(
+    iree_net_frame_sender_t* sender, iree_net_frame_send_context_t* context) {
+  if (sender->context_pool.release) {
+    sender->context_pool.release(sender->context_pool.user_data, context);
+  } else {
+    iree_net_frame_sender_push_context(sender, context);
+  }
+}
+
+static iree_status_t iree_net_frame_sender_initialize_impl(
+    iree_net_frame_sender_t* sender, iree_net_frame_send_submit_fn_t submit_fn,
+    void* submit_fn_user_data, iree_host_size_t max_send_spans,
+    iree_async_buffer_pool_t* header_pool,
+    iree_net_frame_send_complete_callback_t callback,
+    iree_net_frame_sender_context_pool_t context_pool,
+    bool require_context_pool, iree_allocator_t context_allocator,
+    iree_allocator_t host_allocator) {
+  IREE_ASSERT_ARGUMENT(sender);
+  IREE_ASSERT_ARGUMENT(submit_fn);
+  IREE_ASSERT_ARGUMENT(header_pool);
+
+  iree_status_t status = iree_ok_status();
+  if (require_context_pool &&
+      (!context_pool.acquire || !context_pool.release)) {
+    status = iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "external frame sender context pool requires acquire and release");
+  } else if ((context_pool.acquire == NULL) != (context_pool.release == NULL)) {
+    status = iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "external frame sender context pool requires acquire and release");
+  }
+
+  if (iree_status_is_ok(status)) {
+    memset(sender, 0, sizeof(*sender));
+    sender->submit_fn = submit_fn;
+    sender->submit_fn_user_data = submit_fn_user_data;
+    sender->max_send_spans = max_send_spans;
+    sender->header_pool = header_pool;
+    sender->callback = callback;
+    sender->has_batch_lease = false;
+    sender->batch_used = 0;
+    iree_atomic_store(&sender->sends_in_flight, 0, iree_memory_order_relaxed);
+    iree_atomic_slist_initialize(&sender->context_free_list);
+    iree_atomic_slist_initialize(&sender->context_block_list);
+    sender->context_pool = context_pool;
+    sender->context_allocator = context_allocator;
+    sender->host_allocator = host_allocator;
+  }
+
+  return status;
+}
+
 iree_status_t iree_net_frame_sender_initialize(
     iree_net_frame_sender_t* sender, iree_net_frame_send_submit_fn_t submit_fn,
     void* submit_fn_user_data, iree_host_size_t max_send_spans,
     iree_async_buffer_pool_t* header_pool,
     iree_net_frame_send_complete_callback_t callback,
     iree_allocator_t context_allocator, iree_allocator_t host_allocator) {
-  IREE_ASSERT_ARGUMENT(sender);
-  IREE_ASSERT_ARGUMENT(submit_fn);
-  IREE_ASSERT_ARGUMENT(header_pool);
+  return iree_net_frame_sender_initialize_impl(
+      sender, submit_fn, submit_fn_user_data, max_send_spans, header_pool,
+      callback, (iree_net_frame_sender_context_pool_t){0},
+      /*require_context_pool=*/false, context_allocator, host_allocator);
+}
 
-  memset(sender, 0, sizeof(*sender));
-  sender->submit_fn = submit_fn;
-  sender->submit_fn_user_data = submit_fn_user_data;
-  sender->max_send_spans = max_send_spans;
-  sender->header_pool = header_pool;
-  sender->callback = callback;
-  sender->has_batch_lease = false;
-  sender->batch_used = 0;
-  iree_atomic_store(&sender->sends_in_flight, 0, iree_memory_order_relaxed);
-  sender->context_allocator = context_allocator;
-  sender->host_allocator = host_allocator;
-
-  return iree_ok_status();
+iree_status_t iree_net_frame_sender_initialize_with_context_pool(
+    iree_net_frame_sender_t* sender, iree_net_frame_send_submit_fn_t submit_fn,
+    void* submit_fn_user_data, iree_host_size_t max_send_spans,
+    iree_async_buffer_pool_t* header_pool,
+    iree_net_frame_send_complete_callback_t callback,
+    iree_net_frame_sender_context_pool_t context_pool,
+    iree_allocator_t host_allocator) {
+  return iree_net_frame_sender_initialize_impl(
+      sender, submit_fn, submit_fn_user_data, max_send_spans, header_pool,
+      callback, context_pool, /*require_context_pool=*/true, host_allocator,
+      host_allocator);
 }
 
 void iree_net_frame_sender_deinitialize(iree_net_frame_sender_t* sender) {
@@ -50,6 +207,23 @@ void iree_net_frame_sender_deinitialize(iree_net_frame_sender_t* sender) {
     sender->has_batch_lease = false;
   }
 
+  iree_atomic_slist_discard(&sender->context_free_list);
+  iree_atomic_slist_deinitialize(&sender->context_free_list);
+
+  iree_atomic_slist_entry_t* block_entry = NULL;
+  if (iree_atomic_slist_flush(&sender->context_block_list,
+                              IREE_ATOMIC_SLIST_FLUSH_ORDER_APPROXIMATE_LIFO,
+                              &block_entry, NULL)) {
+    while (block_entry) {
+      iree_atomic_slist_entry_t* next_block_entry = block_entry->next;
+      iree_net_frame_send_context_block_t* block =
+          iree_net_frame_send_context_block_from_slist_entry(block_entry);
+      iree_allocator_free(sender->context_allocator, block);
+      block_entry = next_block_entry;
+    }
+  }
+  iree_atomic_slist_deinitialize(&sender->context_block_list);
+
   memset(sender, 0, sizeof(*sender));
 }
 
@@ -57,14 +231,32 @@ void iree_net_frame_sender_deinitialize(iree_net_frame_sender_t* sender) {
 static iree_status_t iree_net_frame_sender_allocate_context(
     iree_net_frame_sender_t* sender, uint64_t operation_user_data,
     iree_net_frame_send_context_t** out_context) {
+  *out_context = NULL;
+
+  iree_status_t status = iree_ok_status();
   iree_net_frame_send_context_t* context = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-      sender->context_allocator, sizeof(*context), (void**)&context));
-  context->sender = sender;
-  context->operation_user_data = operation_user_data;
-  context->span_count = 0;
-  *out_context = context;
-  return iree_ok_status();
+  if (sender->context_pool.acquire) {
+    status =
+        sender->context_pool.acquire(sender->context_pool.user_data, &context);
+  } else {
+    context = iree_net_frame_sender_pop_context(sender);
+    if (!context) {
+      status = iree_net_frame_sender_grow_context_pool(sender, &context);
+    }
+  }
+
+  if (iree_status_is_ok(status) && !context) {
+    status = iree_make_status(IREE_STATUS_INTERNAL,
+                              "frame sender context pool returned NULL");
+  }
+  if (iree_status_is_ok(status)) {
+    memset(context, 0, sizeof(*context));
+    context->sender = sender;
+    context->operation_user_data = operation_user_data;
+    context->span_count = 0;
+    *out_context = context;
+  }
+  return status;
 }
 
 // Submits a send context via the configured submit callback.
@@ -158,7 +350,7 @@ iree_status_t iree_net_frame_sender_send(iree_net_frame_sender_t* sender,
   status = iree_net_frame_sender_submit(sender, context);
   if (!iree_status_is_ok(status)) {
     iree_async_buffer_lease_release(&context->buffer_lease);
-    iree_allocator_free(sender->context_allocator, context);
+    iree_net_frame_sender_release_context(sender, context);
     return status;
   }
 
@@ -234,7 +426,7 @@ iree_status_t iree_net_frame_sender_send_copy(iree_net_frame_sender_t* sender,
   if (!iree_status_is_ok(status)) {
     if (context) {
       iree_async_buffer_lease_release(&context->buffer_lease);
-      iree_allocator_free(sender->context_allocator, context);
+      iree_net_frame_sender_release_context(sender, context);
     }
     if (has_frame_lease) {
       iree_async_buffer_lease_release(&frame_lease);
@@ -309,7 +501,7 @@ iree_status_t iree_net_frame_sender_flush(iree_net_frame_sender_t* sender,
   if (!iree_status_is_ok(status)) {
     // Submission failed - keep batch data for retry.
     // DO NOT release batch_lease, it's still in sender.
-    iree_allocator_free(sender->context_allocator, context);
+    iree_net_frame_sender_release_context(sender, context);
     return status;
   }
 
@@ -356,8 +548,8 @@ void iree_net_frame_sender_handle_completion(
                         context->operation_user_data, status);
   }
 
-  // Free context.
-  iree_allocator_free(sender->context_allocator, context);
+  // Return context to the pool.
+  iree_net_frame_sender_release_context(sender, context);
 }
 
 iree_status_t iree_net_frame_sender_carrier_submit(void* user_data,

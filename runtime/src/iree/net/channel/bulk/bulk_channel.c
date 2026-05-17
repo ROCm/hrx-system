@@ -75,62 +75,33 @@ static void iree_net_bulk_send_context_pool_deinitialize(
   iree_net_bulk_send_context_slist_deinitialize(&pool->available_slist);
 }
 
-static iree_status_t iree_net_bulk_send_context_pool_ctl(
-    void* self, iree_allocator_command_t command, const void* params,
-    void** inout_ptr) {
+static iree_status_t iree_net_bulk_send_context_pool_acquire(
+    void* self, iree_net_frame_send_context_t** out_context) {
+  *out_context = NULL;
   iree_net_bulk_send_context_pool_t* pool =
       (iree_net_bulk_send_context_pool_t*)self;
-  switch (command) {
-    case IREE_ALLOCATOR_COMMAND_MALLOC:
-    case IREE_ALLOCATOR_COMMAND_CALLOC: {
-      const iree_allocator_alloc_params_t* alloc_params =
-          (const iree_allocator_alloc_params_t*)params;
-      if (alloc_params->byte_length > sizeof(iree_net_frame_send_context_t)) {
-        return iree_make_status(
-            IREE_STATUS_OUT_OF_RANGE,
-            "bulk send context allocation too large: %" PRIhsz
-            " bytes (max %zu)",
-            alloc_params->byte_length, sizeof(iree_net_frame_send_context_t));
-      }
-      iree_net_bulk_send_context_t* context =
-          iree_net_bulk_send_context_slist_pop(&pool->available_slist);
-      if (!context) {
-        return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
-      }
-      iree_atomic_fetch_sub(&pool->available_count, 1,
-                            iree_memory_order_release);
-      memset(&context->context, 0, sizeof(context->context));
-      *inout_ptr = &context->context;
-      return iree_ok_status();
-    }
-    case IREE_ALLOCATOR_COMMAND_FREE: {
-      if (!inout_ptr || !*inout_ptr) return iree_ok_status();
-      iree_net_bulk_send_context_t* context =
-          (iree_net_bulk_send_context_t*)((uint8_t*)*inout_ptr -
-                                          offsetof(iree_net_bulk_send_context_t,
-                                                   context));
-      iree_net_bulk_send_context_slist_push(&pool->available_slist, context);
-      iree_atomic_fetch_add(&pool->available_count, 1,
-                            iree_memory_order_release);
-      *inout_ptr = NULL;
-      return iree_ok_status();
-    }
-    case IREE_ALLOCATOR_COMMAND_REALLOC:
-      return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                              "bulk send context pool does not reallocate");
-    default:
-      return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                              "unsupported bulk send context pool command");
+  iree_net_bulk_send_context_t* context =
+      iree_net_bulk_send_context_slist_pop(&pool->available_slist);
+  if (!context) {
+    return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
   }
+  iree_atomic_fetch_sub(&pool->available_count, 1, iree_memory_order_release);
+  memset(&context->context, 0, sizeof(context->context));
+  *out_context = &context->context;
+  return iree_ok_status();
 }
 
-static iree_allocator_t iree_net_bulk_send_context_pool_allocator(
-    iree_net_bulk_send_context_pool_t* pool) {
-  iree_allocator_t allocator = {
-      .self = pool,
-      .ctl = iree_net_bulk_send_context_pool_ctl,
-  };
-  return allocator;
+static void iree_net_bulk_send_context_pool_release(
+    void* self, iree_net_frame_send_context_t* frame_context) {
+  if (!frame_context) return;
+  iree_net_bulk_send_context_pool_t* pool =
+      (iree_net_bulk_send_context_pool_t*)self;
+  iree_net_bulk_send_context_t* context =
+      (iree_net_bulk_send_context_t*)((uint8_t*)frame_context -
+                                      offsetof(iree_net_bulk_send_context_t,
+                                               context));
+  iree_net_bulk_send_context_slist_push(&pool->available_slist, context);
+  iree_atomic_fetch_add(&pool->available_count, 1, iree_memory_order_release);
 }
 
 //===----------------------------------------------------------------------===//
@@ -157,7 +128,7 @@ struct iree_net_bulk_channel_t {
   // Owned header pool for scatter-gather sends.
   iree_async_buffer_pool_t* header_pool;
 
-  // Fixed-capacity allocator backing frame sender contexts.
+  // Fixed-capacity pool backing frame sender contexts.
   iree_net_bulk_send_context_pool_t send_context_pool;
 
   // Embedded frame sender for the send path.
@@ -637,11 +608,15 @@ iree_status_t iree_net_bulk_channel_create(
         .fn = iree_net_bulk_channel_on_sender_complete,
         .user_data = channel,
     };
-    status = iree_net_frame_sender_initialize(
+    iree_net_frame_sender_context_pool_t send_context_pool = {
+        .acquire = iree_net_bulk_send_context_pool_acquire,
+        .release = iree_net_bulk_send_context_pool_release,
+        .user_data = &channel->send_context_pool,
+    };
+    status = iree_net_frame_sender_initialize_with_context_pool(
         &channel->sender, iree_net_bulk_channel_submit_send, channel,
         resolved_options.max_send_spans, header_pool, send_complete,
-        iree_net_bulk_send_context_pool_allocator(&channel->send_context_pool),
-        host_allocator);
+        send_context_pool, host_allocator);
   }
 
   if (iree_status_is_ok(status)) {

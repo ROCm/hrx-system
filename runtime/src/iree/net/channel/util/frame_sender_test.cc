@@ -271,6 +271,43 @@ struct TestContext {
   }
 };
 
+struct CountingAllocator {
+  // Number of malloc/calloc requests issued through this allocator.
+  uint32_t allocation_count = 0;
+
+  // Number of free requests issued through this allocator.
+  uint32_t free_count = 0;
+
+  // Number of realloc requests issued through this allocator.
+  uint32_t realloc_count = 0;
+
+  iree_allocator_t allocator() {
+    return {
+        this,
+        Control,
+    };
+  }
+
+  static iree_status_t Control(void* self, iree_allocator_command_t command,
+                               const void* params, void** inout_ptr) {
+    CountingAllocator* allocator = static_cast<CountingAllocator*>(self);
+    switch (command) {
+      case IREE_ALLOCATOR_COMMAND_MALLOC:
+      case IREE_ALLOCATOR_COMMAND_CALLOC:
+        ++allocator->allocation_count;
+        break;
+      case IREE_ALLOCATOR_COMMAND_REALLOC:
+        ++allocator->realloc_count;
+        break;
+      case IREE_ALLOCATOR_COMMAND_FREE:
+        ++allocator->free_count;
+        break;
+    }
+    return iree_allocator_system().ctl(iree_allocator_system().self, command,
+                                       params, inout_ptr);
+  }
+};
+
 //===----------------------------------------------------------------------===//
 // Test fixture
 //===----------------------------------------------------------------------===//
@@ -348,6 +385,36 @@ TEST_F(FrameSenderTest, DeinitializeClearsFields) {
       &sender_, iree_net_frame_sender_carrier_submit, &mock_carrier_->base,
       mock_carrier_->base.max_iov, test_pool_->get(), complete_callback,
       iree_allocator_system(), iree_allocator_system()));
+}
+
+TEST_F(FrameSenderTest, ReusesContextPoolAcrossCompletedSends) {
+  CountingAllocator context_allocator;
+  TestContext local_context;
+  iree_net_frame_send_complete_callback_t complete_callback;
+  complete_callback.fn = TestContext::OnComplete;
+  complete_callback.user_data = &local_context;
+
+  iree_net_frame_sender_t sender;
+  IREE_ASSERT_OK(iree_net_frame_sender_initialize(
+      &sender, iree_net_frame_sender_carrier_submit, &mock_carrier_->base,
+      mock_carrier_->base.max_iov, test_pool_->get(), complete_callback,
+      context_allocator.allocator(), iree_allocator_system()));
+
+  const uint8_t header_data[] = {0x01};
+  iree_const_byte_span_t header =
+      iree_make_const_byte_span(header_data, sizeof(header_data));
+  iree_async_span_list_t payload = {nullptr, 0};
+
+  for (int i = 0; i < 128; ++i) {
+    IREE_ASSERT_OK(iree_net_frame_sender_send(&sender, header, payload, i));
+  }
+
+  EXPECT_EQ(local_context.completions.size(), 128u);
+  EXPECT_EQ(context_allocator.allocation_count, 1u);
+  EXPECT_EQ(context_allocator.free_count, 0u);
+
+  iree_net_frame_sender_deinitialize(&sender);
+  EXPECT_EQ(context_allocator.free_count, context_allocator.allocation_count);
 }
 
 //===----------------------------------------------------------------------===//
