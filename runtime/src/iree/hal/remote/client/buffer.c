@@ -47,6 +47,108 @@ static void iree_hal_remote_client_buffer_destroy(
   IREE_TRACE_ZONE_END(z0);
 }
 
+static iree_status_t iree_hal_remote_client_buffer_validate_mappable(
+    iree_hal_buffer_t* base_buffer, iree_hal_remote_client_buffer_t* buffer,
+    const char* operation) {
+  iree_status_t status = iree_ok_status();
+  if (iree_hal_remote_client_buffer_is_deallocated(base_buffer)) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "remote buffer has been deallocated");
+  } else if (buffer->resource_id == 0) {
+    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "remote buffer backing has not been "
+                              "materialized; wait for the queue_alloca signal "
+                              "before %s it",
+                              operation);
+  }
+  return status;
+}
+
+typedef struct iree_hal_remote_client_buffer_write_request_header_t {
+  // Control channel envelope for the write request.
+  iree_hal_remote_control_envelope_t envelope;
+
+  // BUFFER_UNMAP request header preceding the inline byte payload.
+  iree_hal_remote_buffer_unmap_request_t body;
+} iree_hal_remote_client_buffer_write_request_header_t;
+
+static iree_status_t iree_hal_remote_client_buffer_write_range(
+    iree_hal_remote_client_buffer_t* buffer, iree_hal_buffer_t* base_buffer,
+    iree_device_size_t local_byte_offset, iree_const_byte_span_t source_bytes) {
+  iree_host_size_t request_size = 0;
+  iree_host_size_t data_offset = 0;
+  iree_status_t status = IREE_STRUCT_LAYOUT(
+      sizeof(iree_hal_remote_client_buffer_write_request_header_t),
+      &request_size,
+      IREE_STRUCT_FIELD(source_bytes.data_length, uint8_t, &data_offset));
+
+  iree_hal_remote_client_buffer_write_request_header_t* request = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc(buffer->host_allocator, request_size,
+                                   (void**)&request);
+  }
+
+  if (iree_status_is_ok(status)) {
+    request->envelope.message_type = IREE_HAL_REMOTE_CONTROL_BUFFER_UNMAP;
+    request->body.buffer_id =
+        iree_hal_remote_client_buffer_resource_id(base_buffer);
+    request->body.offset = local_byte_offset;
+    request->body.length = source_bytes.data_length;
+    memcpy((uint8_t*)request + data_offset, source_bytes.data,
+           source_bytes.data_length);
+
+    iree_const_byte_span_t response_payload = iree_const_byte_span_empty();
+    iree_async_buffer_lease_t response_lease;
+    memset(&response_lease, 0, sizeof(response_lease));
+    status = iree_hal_remote_client_device_control_rpc(
+        buffer->device, iree_make_const_byte_span(request, request_size),
+        &response_payload, &response_lease);
+    iree_async_buffer_lease_release(&response_lease);
+  }
+
+  iree_allocator_free(buffer->host_allocator, request);
+  return status;
+}
+
+static iree_status_t iree_hal_remote_client_buffer_validate_active_range(
+    iree_hal_remote_client_buffer_t* buffer,
+    iree_device_size_t local_byte_offset, iree_device_size_t local_byte_length,
+    iree_host_size_t* out_staging_offset,
+    iree_host_size_t* out_staging_length) {
+  *out_staging_offset = 0;
+  *out_staging_length = 0;
+
+  iree_status_t status = iree_ok_status();
+  if (local_byte_length == 0) {
+    // Zero-length flushes carry no data and do not require retained staging.
+  } else if (!buffer->active_mapping_data) {
+    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "remote buffer has no active mapping");
+  } else if (local_byte_offset < buffer->active_mapping_offset) {
+    status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "flush range begins before the active mapping");
+  } else {
+    iree_device_size_t staging_offset =
+        local_byte_offset - buffer->active_mapping_offset;
+    if (staging_offset > buffer->active_mapping_length ||
+        local_byte_length > buffer->active_mapping_length - staging_offset) {
+      status =
+          iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                           "flush range extends beyond the active mapping");
+    } else if (staging_offset > IREE_HOST_SIZE_MAX ||
+               local_byte_length > IREE_HOST_SIZE_MAX) {
+      status =
+          iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                           "flush range cannot be represented on this host");
+    } else {
+      *out_staging_offset = (iree_host_size_t)staging_offset;
+      *out_staging_length = (iree_host_size_t)local_byte_length;
+    }
+  }
+
+  return status;
+}
+
 static iree_status_t iree_hal_remote_client_buffer_map_range(
     iree_hal_buffer_t* base_buffer, iree_hal_mapping_mode_t mapping_mode,
     iree_hal_memory_access_t memory_access,
@@ -55,30 +157,38 @@ static iree_status_t iree_hal_remote_client_buffer_map_range(
   iree_hal_remote_client_buffer_t* buffer =
       (iree_hal_remote_client_buffer_t*)base_buffer;
   IREE_TRACE_ZONE_BEGIN(z0);
+  (void)mapping_mode;
 
-  if (iree_hal_remote_client_buffer_is_deallocated(base_buffer)) {
-    IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "remote buffer has been deallocated");
+  iree_status_t status = iree_hal_remote_client_buffer_validate_mappable(
+      base_buffer, buffer, "mapping");
+  iree_host_size_t staging_length = 0;
+  if (iree_status_is_ok(status) && local_byte_length > IREE_HOST_SIZE_MAX) {
+    status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "map range cannot be represented on this host");
   }
-  if (buffer->resource_id == 0) {
-    IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "remote buffer backing has not been materialized; wait for the "
-        "queue_alloca signal before mapping it");
+  if (iree_status_is_ok(status)) {
+    staging_length = (iree_host_size_t)local_byte_length;
+  }
+  const bool mapping_writes =
+      iree_all_bits_set(memory_access, IREE_HAL_MEMORY_ACCESS_WRITE);
+  if (iree_status_is_ok(status) && mapping_writes && staging_length > 0 &&
+      buffer->active_mapping_data) {
+    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "remote buffer already has an active write "
+                              "mapping");
   }
 
-  // Allocate local staging buffer. All access goes through this staging copy:
-  // READ pulls data from server into staging, WRITE pushes staging to server
-  // on unmap.
-  uint8_t* staging = NULL;
-  iree_status_t status = iree_allocator_malloc(
-      buffer->host_allocator, (iree_host_size_t)local_byte_length,
-      (void**)&staging);
+  // All access goes through a staging copy: READ pulls data from the server
+  // into staging, while WRITE pushes staging back on flush or unmap.
+  uint8_t* staging_data = NULL;
+  if (iree_status_is_ok(status) && staging_length > 0) {
+    status = iree_allocator_malloc_array(buffer->host_allocator, staging_length,
+                                         sizeof(*staging_data),
+                                         (void**)&staging_data);
+  }
 
   // If READ access, pull current buffer contents from the server.
-  if (iree_status_is_ok(status) &&
+  if (iree_status_is_ok(status) && staging_length > 0 &&
       iree_all_bits_set(memory_access, IREE_HAL_MEMORY_ACCESS_READ)) {
     struct {
       iree_hal_remote_control_envelope_t envelope;
@@ -113,29 +223,30 @@ static iree_status_t iree_hal_remote_client_buffer_map_range(
             response_payload.data + sizeof(*response);
         iree_host_size_t data_available =
             response_payload.data_length - sizeof(*response);
-        if (data_available < local_byte_length) {
+        if (data_available < staging_length) {
           status =
               iree_make_status(IREE_STATUS_INTERNAL,
                                "BUFFER_MAP response data too short: %" PRIhsz
-                               " bytes, expected %" PRIdsz,
-                               data_available, local_byte_length);
+                               " bytes, expected %" PRIhsz,
+                               data_available, staging_length);
         } else {
-          memcpy(staging, response_data, (iree_host_size_t)local_byte_length);
+          memcpy(staging_data, response_data, staging_length);
         }
       }
-      iree_async_buffer_lease_release(&response_lease);
     }
+    iree_async_buffer_lease_release(&response_lease);
   }
 
   if (iree_status_is_ok(status)) {
-    mapping->contents =
-        iree_make_byte_span(staging, (iree_host_size_t)local_byte_length);
-    // Store mapping state so flush_range can find the staging data.
-    buffer->active_mapping_data = staging;
-    buffer->active_mapping_offset = local_byte_offset;
-    buffer->active_mapping_length = local_byte_length;
+    mapping->contents = iree_make_byte_span(staging_data, staging_length);
+    if (mapping_writes && staging_length > 0) {
+      buffer->active_mapping_data = staging_data;
+      buffer->active_mapping_offset = local_byte_offset;
+      buffer->active_mapping_length = local_byte_length;
+      staging_data = NULL;
+    }
   } else {
-    iree_allocator_free(buffer->host_allocator, staging);
+    iree_allocator_free(buffer->host_allocator, staging_data);
   }
 
   IREE_TRACE_ZONE_END(z0);
@@ -149,81 +260,54 @@ static iree_status_t iree_hal_remote_client_buffer_unmap_range(
       (iree_hal_remote_client_buffer_t*)base_buffer;
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  iree_status_t status = iree_ok_status();
-  if (iree_hal_remote_client_buffer_is_deallocated(base_buffer)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "remote buffer has been deallocated");
-  } else if (buffer->resource_id == 0) {
+  iree_status_t status = iree_hal_remote_client_buffer_validate_mappable(
+      base_buffer, buffer, "unmapping");
+  const bool mapping_writes = iree_all_bits_set(mapping->impl.allowed_access,
+                                                IREE_HAL_MEMORY_ACCESS_WRITE);
+  if (iree_status_is_ok(status) && mapping_writes && local_byte_length > 0 &&
+      mapping->contents.data != buffer->active_mapping_data) {
     status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "remote buffer backing has not been "
-                              "materialized; wait for the queue_alloca signal "
-                              "before unmapping it");
+                              "remote buffer mapping state mismatch");
   }
 
   // If WRITE access was used, push the staging data to the server.
-  if (iree_status_is_ok(status) &&
-      iree_all_bits_set(mapping->impl.allowed_access,
-                        IREE_HAL_MEMORY_ACCESS_WRITE)) {
-    // Build request: envelope + unmap header + inline data. The data can be
-    // arbitrarily large, so heap-allocate the entire request.
-    iree_host_size_t header_size =
-        sizeof(iree_hal_remote_control_envelope_t) +
-        sizeof(iree_hal_remote_buffer_unmap_request_t);
-    iree_host_size_t data_size = (iree_host_size_t)local_byte_length;
-    iree_host_size_t request_size = header_size + data_size;
-
-    uint8_t* request_buffer = NULL;
-    status = iree_allocator_malloc(buffer->host_allocator, request_size,
-                                   (void**)&request_buffer);
-    if (iree_status_is_ok(status)) {
-      memset(request_buffer, 0, header_size);
-
-      iree_hal_remote_control_envelope_t* envelope =
-          (iree_hal_remote_control_envelope_t*)request_buffer;
-      envelope->message_type = IREE_HAL_REMOTE_CONTROL_BUFFER_UNMAP;
-
-      iree_hal_remote_buffer_unmap_request_t* body =
-          (iree_hal_remote_buffer_unmap_request_t*)(request_buffer +
-                                                    sizeof(*envelope));
-      body->buffer_id = iree_hal_remote_client_buffer_resource_id(base_buffer);
-      body->offset = local_byte_offset;
-      body->length = local_byte_length;
-
-      // Copy staging data after the header.
-      memcpy(request_buffer + header_size, mapping->contents.data, data_size);
-
-      iree_const_byte_span_t response_payload = iree_const_byte_span_empty();
-      iree_async_buffer_lease_t response_lease;
-      memset(&response_lease, 0, sizeof(response_lease));
-      status = iree_hal_remote_client_device_control_rpc(
-          buffer->device,
-          iree_make_const_byte_span(request_buffer, request_size),
-          &response_payload, &response_lease);
-      iree_async_buffer_lease_release(&response_lease);
-      iree_allocator_free(buffer->host_allocator, request_buffer);
-    }
+  if (iree_status_is_ok(status) && local_byte_length > 0 && mapping_writes) {
+    status = iree_hal_remote_client_buffer_write_range(
+        buffer, base_buffer, local_byte_offset,
+        iree_make_const_byte_span(mapping->contents.data,
+                                  mapping->contents.data_length));
   }
 
-  // Clear active mapping state and free the staging buffer.
-  buffer->active_mapping_data = NULL;
-  buffer->active_mapping_offset = 0;
-  buffer->active_mapping_length = 0;
+  if (mapping->contents.data == buffer->active_mapping_data) {
+    buffer->active_mapping_data = NULL;
+    buffer->active_mapping_offset = 0;
+    buffer->active_mapping_length = 0;
+  }
   iree_allocator_free(buffer->host_allocator, mapping->contents.data);
 
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
 
-// Invalidate is a no-op: the next map_range(READ) will pull fresh data.
 static iree_status_t iree_hal_remote_client_buffer_invalidate_range(
-    iree_hal_buffer_t* buffer, iree_device_size_t local_byte_offset,
+    iree_hal_buffer_t* base_buffer, iree_device_size_t local_byte_offset,
     iree_device_size_t local_byte_length) {
-  return iree_ok_status();
+  iree_hal_remote_client_buffer_t* buffer =
+      (iree_hal_remote_client_buffer_t*)base_buffer;
+  (void)local_byte_offset;
+  iree_status_t status = iree_hal_remote_client_buffer_validate_mappable(
+      base_buffer, buffer, "invalidating");
+  if (iree_status_is_ok(status) && local_byte_length != 0) {
+    status = iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "remote buffer mapping invalidation requires tracked staging ranges");
+  }
+  return status;
 }
 
 // Flush pushes the dirty mapping data to the server without unmapping.
-// Uses the active mapping state stored on the buffer during map_range
-// to locate the staging data for the specified range.
+// Uses the active write mapping state stored on the buffer during map_range to
+// locate the staging data for the specified range.
 static iree_status_t iree_hal_remote_client_buffer_flush_range(
     iree_hal_buffer_t* base_buffer, iree_device_size_t local_byte_offset,
     iree_device_size_t local_byte_length) {
@@ -231,70 +315,20 @@ static iree_status_t iree_hal_remote_client_buffer_flush_range(
       (iree_hal_remote_client_buffer_t*)base_buffer;
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  if (iree_hal_remote_client_buffer_is_deallocated(base_buffer)) {
-    IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "remote buffer has been deallocated");
-  }
-  if (buffer->resource_id == 0) {
-    IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "remote buffer backing has not been materialized; wait for the "
-        "queue_alloca signal before flushing it");
-  }
-
-  if (!buffer->active_mapping_data) {
-    IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "flush_range called without an active mapping");
-  }
-
-  // Calculate the offset within the staging buffer. local_byte_offset is
-  // absolute within the buffer; the staging buffer starts at
-  // active_mapping_offset.
-  iree_device_size_t staging_offset =
-      local_byte_offset - buffer->active_mapping_offset;
-  const uint8_t* staging_data =
-      buffer->active_mapping_data + (iree_host_size_t)staging_offset;
-
-  iree_host_size_t header_size = sizeof(iree_hal_remote_control_envelope_t) +
-                                 sizeof(iree_hal_remote_buffer_unmap_request_t);
-  iree_host_size_t data_size = (iree_host_size_t)local_byte_length;
-  iree_host_size_t request_size = 0;
-  if (!iree_host_size_checked_add(header_size, data_size, &request_size)) {
-    IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "flush request size overflow");
-  }
-
-  uint8_t* request_buffer = NULL;
-  iree_status_t status = iree_allocator_malloc(
-      buffer->host_allocator, request_size, (void**)&request_buffer);
+  iree_status_t status = iree_hal_remote_client_buffer_validate_mappable(
+      base_buffer, buffer, "flushing");
+  iree_host_size_t staging_offset = 0;
+  iree_host_size_t staging_length = 0;
   if (iree_status_is_ok(status)) {
-    memset(request_buffer, 0, header_size);
-
-    iree_hal_remote_control_envelope_t* envelope =
-        (iree_hal_remote_control_envelope_t*)request_buffer;
-    envelope->message_type = IREE_HAL_REMOTE_CONTROL_BUFFER_UNMAP;
-
-    iree_hal_remote_buffer_unmap_request_t* body =
-        (iree_hal_remote_buffer_unmap_request_t*)(request_buffer +
-                                                  sizeof(*envelope));
-    body->buffer_id = iree_hal_remote_client_buffer_resource_id(base_buffer);
-    body->offset = local_byte_offset;
-    body->length = local_byte_length;
-
-    memcpy(request_buffer + header_size, staging_data, data_size);
-
-    iree_const_byte_span_t response_payload = iree_const_byte_span_empty();
-    iree_async_buffer_lease_t response_lease;
-    memset(&response_lease, 0, sizeof(response_lease));
-    status = iree_hal_remote_client_device_control_rpc(
-        buffer->device, iree_make_const_byte_span(request_buffer, request_size),
-        &response_payload, &response_lease);
-    iree_async_buffer_lease_release(&response_lease);
-    iree_allocator_free(buffer->host_allocator, request_buffer);
+    status = iree_hal_remote_client_buffer_validate_active_range(
+        buffer, local_byte_offset, local_byte_length, &staging_offset,
+        &staging_length);
+  }
+  if (iree_status_is_ok(status) && staging_length > 0) {
+    status = iree_hal_remote_client_buffer_write_range(
+        buffer, base_buffer, local_byte_offset,
+        iree_make_const_byte_span(buffer->active_mapping_data + staging_offset,
+                                  staging_length));
   }
 
   IREE_TRACE_ZONE_END(z0);

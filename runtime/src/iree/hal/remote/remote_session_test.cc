@@ -934,6 +934,39 @@ TEST_F(RemoteBufferTest, ReadWriteModifiesInPlace) {
   iree_hal_buffer_release(buffer);
 }
 
+TEST_F(RemoteBufferTest, RejectsConcurrentClientWriteMappings) {
+  iree_hal_allocator_t* allocator = iree_hal_device_allocator(client_device_);
+
+  iree_hal_buffer_params_t params = {0};
+  params.usage =
+      IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED;
+  params.access = IREE_HAL_MEMORY_ACCESS_ALL;
+  params.type =
+      IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+
+  iree_hal_buffer_t* buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
+      allocator, params, /*allocation_size=*/64, &buffer));
+
+  iree_hal_buffer_mapping_t first_mapping;
+  IREE_ASSERT_OK(iree_hal_buffer_map_range(buffer, IREE_HAL_MAPPING_MODE_SCOPED,
+                                           IREE_HAL_MEMORY_ACCESS_DISCARD_WRITE,
+                                           /*byte_offset=*/0,
+                                           /*byte_length=*/64, &first_mapping));
+  memset(first_mapping.contents.data, 0, first_mapping.contents.data_length);
+
+  iree_hal_buffer_mapping_t second_mapping;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      iree_hal_buffer_map_range(buffer, IREE_HAL_MAPPING_MODE_SCOPED,
+                                IREE_HAL_MEMORY_ACCESS_DISCARD_WRITE,
+                                /*byte_offset=*/0, /*byte_length=*/64,
+                                &second_mapping));
+
+  IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&first_mapping));
+  iree_hal_buffer_release(buffer);
+}
+
 //===----------------------------------------------------------------------===//
 // Queue fill, copy, and update tests
 //===----------------------------------------------------------------------===//
