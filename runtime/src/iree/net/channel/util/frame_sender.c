@@ -303,58 +303,57 @@ iree_status_t iree_net_frame_sender_send(iree_net_frame_sender_t* sender,
                             total_spans, max_spans);
   }
 
-  // Acquire header buffer from pool.
-  iree_async_buffer_lease_t header_lease;
-  iree_status_t status =
-      iree_async_buffer_pool_acquire(sender->header_pool, &header_lease);
-  if (!iree_status_is_ok(status)) {
-    return status;
-  }
-
-  // Verify header fits in pool buffer.
-  if (header.data_length > header_lease.span.length) {
-    iree_async_buffer_lease_release(&header_lease);
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "header size %" PRIhsz
-                            " exceeds pool buffer size %" PRIhsz,
-                            header.data_length, header_lease.span.length);
-  }
-
-  // Copy header into pool buffer (guard against NULL for zero-length headers).
-  if (header.data_length > 0) {
-    memcpy(iree_async_span_ptr(header_lease.span), header.data,
-           header.data_length);
-  }
-
   // Allocate send context.
   iree_net_frame_send_context_t* context = NULL;
-  status = iree_net_frame_sender_allocate_context(sender, operation_user_data,
-                                                  &context);
-  if (!iree_status_is_ok(status)) {
-    iree_async_buffer_lease_release(&header_lease);
-    return status;
+  iree_status_t status = iree_net_frame_sender_allocate_context(
+      sender, operation_user_data, &context);
+
+  if (iree_status_is_ok(status) &&
+      header.data_length <= sizeof(context->inline_header)) {
+    if (header.data_length > 0) {
+      memcpy(context->inline_header, header.data, header.data_length);
+    }
+    context->spans[0] =
+        iree_async_span_from_ptr(context->inline_header, header.data_length);
+  } else if (iree_status_is_ok(status)) {
+    // Fall back to the buffer pool for unusually large headers.
+    status = iree_async_buffer_pool_acquire(sender->header_pool,
+                                            &context->buffer_lease);
+    if (iree_status_is_ok(status) &&
+        header.data_length > context->buffer_lease.span.length) {
+      status = iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "header size %" PRIhsz " exceeds pool buffer size %" PRIhsz,
+          header.data_length, context->buffer_lease.span.length);
+    }
+    if (iree_status_is_ok(status) && header.data_length > 0) {
+      memcpy(iree_async_span_ptr(context->buffer_lease.span), header.data,
+             header.data_length);
+    }
+    if (iree_status_is_ok(status)) {
+      context->spans[0] = iree_async_span_make(
+          context->buffer_lease.span.region, context->buffer_lease.span.offset,
+          header.data_length);
+    }
   }
 
-  // Transfer header lease to context.
-  context->buffer_lease = header_lease;
-
-  // Build span list: [header_span, payload_spans...].
-  context->spans[0] = iree_async_span_make(
-      header_lease.span.region, header_lease.span.offset, header.data_length);
-  for (iree_host_size_t i = 0; i < payload.count; ++i) {
-    context->spans[1 + i] = payload.values[i];
+  if (iree_status_is_ok(status)) {
+    // Build span list: [header_span, payload_spans...].
+    for (iree_host_size_t i = 0; i < payload.count; ++i) {
+      context->spans[1 + i] = payload.values[i];
+    }
+    context->span_count = total_spans;
   }
-  context->span_count = total_spans;
 
-  // Submit to carrier.
-  status = iree_net_frame_sender_submit(sender, context);
-  if (!iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status)) {
+    // Submit to carrier.
+    status = iree_net_frame_sender_submit(sender, context);
+  }
+  if (!iree_status_is_ok(status) && context) {
     iree_async_buffer_lease_release(&context->buffer_lease);
     iree_net_frame_sender_release_context(sender, context);
-    return status;
   }
-
-  return iree_ok_status();
+  return status;
 }
 
 iree_status_t iree_net_frame_sender_send_copy(iree_net_frame_sender_t* sender,

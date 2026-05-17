@@ -474,6 +474,24 @@ TEST_F(FrameSenderTest, SendWithPayload) {
   EXPECT_EQ(ctx_.completions[0].operation_user_data, 100u);
 }
 
+TEST_F(FrameSenderTest, SmallHeadersDoNotLeasePoolBuffers) {
+  mock_carrier_->auto_complete = false;
+  iree_host_size_t available_before = test_pool_->AvailableCount();
+
+  const uint8_t header_data[] = {0x01, 0x02};
+  iree_const_byte_span_t header =
+      iree_make_const_byte_span(header_data, sizeof(header_data));
+  iree_async_span_list_t payload = {nullptr, 0};
+
+  IREE_ASSERT_OK(iree_net_frame_sender_send(&sender_, header, payload, 1));
+  IREE_ASSERT_OK(iree_net_frame_sender_send(&sender_, header, payload, 2));
+
+  EXPECT_EQ(test_pool_->AvailableCount(), available_before);
+  EXPECT_EQ(iree_net_frame_sender_pending_count(&sender_), 2);
+
+  mock_carrier_->FireAllCompletions(iree_ok_status());
+}
+
 TEST_F(FrameSenderTest, SendTooManySpans) {
   const uint8_t header_data[] = {0x01};
   iree_const_byte_span_t header =
@@ -532,15 +550,16 @@ TEST_F(FrameSenderTest, SendRespectsCarrierMaxIov) {
   iree_net_frame_sender_deinitialize(&limited_sender);
 }
 
-TEST_F(FrameSenderTest, SendPoolExhausted) {
-  // Exhaust the pool by acquiring all buffers without completing them.
+TEST_F(FrameSenderTest, SendLargeHeaderPoolExhausted) {
+  // Headers larger than the inline capacity fall back to the buffer pool.
   mock_carrier_->auto_complete = false;
-  const uint8_t header_data[] = {0x01};
+  std::vector<uint8_t> header_data(
+      IREE_NET_FRAME_SENDER_INLINE_HEADER_CAPACITY + 1, 0x01);
   iree_const_byte_span_t header =
-      iree_make_const_byte_span(header_data, sizeof(header_data));
+      iree_make_const_byte_span(header_data.data(), header_data.size());
   iree_async_span_list_t payload = {nullptr, 0};
 
-  // Pool has 4 buffers. Send 4 to exhaust it.
+  // Pool has 4 buffers. Send 4 large-header frames to exhaust it.
   for (int i = 0; i < 4; ++i) {
     IREE_ASSERT_OK(iree_net_frame_sender_send(&sender_, header, payload, i));
   }
@@ -744,9 +763,10 @@ TEST_F(FrameSenderTest, CompletionReleasesBufferAndFiresCallback) {
   mock_carrier_->auto_complete = false;
   iree_host_size_t available_before = test_pool_->AvailableCount();
 
-  const uint8_t header[] = {0x01};
+  std::vector<uint8_t> header(IREE_NET_FRAME_SENDER_INLINE_HEADER_CAPACITY + 1,
+                              0x01);
   iree_const_byte_span_t send_header =
-      iree_make_const_byte_span(header, sizeof(header));
+      iree_make_const_byte_span(header.data(), header.size());
   iree_async_span_list_t payload = {nullptr, 0};
 
   IREE_ASSERT_OK(
@@ -787,9 +807,11 @@ TEST_F(FrameSenderTest, MultipleInFlightSends) {
   iree_host_size_t available_before = test_pool_->AvailableCount();  // 4
 
   for (int i = 0; i < 3; ++i) {
-    const uint8_t header[] = {static_cast<uint8_t>(i)};
+    std::vector<uint8_t> header(
+        IREE_NET_FRAME_SENDER_INLINE_HEADER_CAPACITY + 1,
+        static_cast<uint8_t>(i));
     iree_const_byte_span_t send_header =
-        iree_make_const_byte_span(header, sizeof(header));
+        iree_make_const_byte_span(header.data(), header.size());
     iree_async_span_list_t payload = {nullptr, 0};
     IREE_ASSERT_OK(
         iree_net_frame_sender_send(&sender_, send_header, payload, i));

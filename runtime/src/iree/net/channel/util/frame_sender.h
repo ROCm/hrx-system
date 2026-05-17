@@ -117,6 +117,9 @@ typedef iree_status_t (*iree_net_frame_send_submit_fn_t)(
 // Validated against carrier->max_iov at send time.
 #define IREE_NET_FRAME_SENDER_MAX_SPANS 8
 
+// Maximum header size retained inline in the send context.
+#define IREE_NET_FRAME_SENDER_INLINE_HEADER_CAPACITY 32
+
 // Completion callback fired when a send completes (success or failure).
 // Channel uses this for resource cleanup and drain signaling.
 //
@@ -155,8 +158,8 @@ typedef struct iree_net_frame_sender_context_pool_t {
 
 // Per-send context owned by the frame sender until completion fires.
 //
-// Layout optimized for cache: hot fields (sender, lease, span_count, first
-// span) fit in first cache line for common single-span case.
+// Layout keeps hot metadata early and retains typical protocol headers inline
+// so stack-built frame headers do not need a separate pool lease.
 struct iree_net_frame_send_context_t {
   // Sender that owns this context and receives completion recycling.
   iree_net_frame_sender_t* sender;
@@ -169,6 +172,9 @@ struct iree_net_frame_send_context_t {
 
   // Number of valid entries in |spans|.
   iree_host_size_t span_count;
+
+  // Inline storage for small stack-built frame headers.
+  uint8_t inline_header[IREE_NET_FRAME_SENDER_INLINE_HEADER_CAPACITY];
 
   // Scatter-gather spans submitted to the carrier.
   iree_async_span_t spans[IREE_NET_FRAME_SENDER_MAX_SPANS];
