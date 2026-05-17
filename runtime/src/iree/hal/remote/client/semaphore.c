@@ -50,30 +50,33 @@ iree_status_t iree_hal_remote_client_semaphore_create(
   // Compute allocation layout: struct + trailing frontier storage.
   iree_host_size_t frontier_offset = 0;
   iree_host_size_t total_size = 0;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_async_semaphore_layout(
-              sizeof(iree_hal_remote_client_semaphore_t),
-              /*frontier_capacity=*/0, &frontier_offset, &total_size));
+  iree_status_t status = iree_async_semaphore_layout(
+      sizeof(iree_hal_remote_client_semaphore_t),
+      /*frontier_capacity=*/0, &frontier_offset, &total_size);
 
   iree_hal_remote_client_semaphore_t* semaphore = NULL;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0,
-      iree_allocator_malloc(host_allocator, total_size, (void**)&semaphore));
-  memset(semaphore, 0, total_size);
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_allocator_malloc(host_allocator, total_size, (void**)&semaphore);
+  }
 
-  // Initialize the embedded async semaphore (sets ref_count, vtable, etc.).
-  iree_async_semaphore_initialize(
-      (const iree_async_semaphore_vtable_t*)&iree_hal_remote_client_semaphore_vtable,
-      proactor, initial_value, frontier_offset, /*frontier_capacity=*/0,
-      &semaphore->async);
+  if (iree_status_is_ok(status)) {
+    memset(semaphore, 0, total_size);
 
-  semaphore->host_allocator = host_allocator;
-  iree_slim_mutex_initialize(&semaphore->epoch_map_mutex);
+    // Initialize the embedded async semaphore (sets ref_count, vtable, etc.).
+    iree_async_semaphore_initialize(
+        (const iree_async_semaphore_vtable_t*)&iree_hal_remote_client_semaphore_vtable,
+        proactor, initial_value, frontier_offset, /*frontier_capacity=*/0,
+        &semaphore->async);
 
-  *out_semaphore = iree_hal_semaphore_cast(&semaphore->async);
+    semaphore->host_allocator = host_allocator;
+    iree_slim_mutex_initialize(&semaphore->epoch_map_mutex);
+
+    *out_semaphore = iree_hal_semaphore_cast(&semaphore->async);
+  }
 
   IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
+  return status;
 }
 
 static void iree_hal_remote_client_semaphore_destroy(

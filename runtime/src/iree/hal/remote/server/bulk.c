@@ -234,19 +234,23 @@ static iree_status_t iree_hal_remote_server_bulk_host_contents_allocate(
 
   iree_host_size_t total_size = 0;
   iree_host_size_t data_offset = 0;
-  IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
+  iree_status_t status = IREE_STRUCT_LAYOUT(
       sizeof(iree_hal_remote_server_bulk_host_allocation_t), &total_size,
-      IREE_STRUCT_FIELD(allocation_size, uint8_t, &data_offset)));
+      IREE_STRUCT_FIELD(allocation_size, uint8_t, &data_offset));
 
   iree_hal_remote_server_bulk_host_allocation_t* allocation = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_allocator_malloc(host_allocator, total_size, (void**)&allocation));
-  allocation->host_allocator = host_allocator;
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_allocator_malloc(host_allocator, total_size, (void**)&allocation);
+  }
 
-  iree_byte_span_t host_contents =
-      iree_make_byte_span((uint8_t*)allocation + data_offset, allocation_size);
-  *out_host_contents = host_contents;
-  return iree_ok_status();
+  if (iree_status_is_ok(status)) {
+    allocation->host_allocator = host_allocator;
+    iree_byte_span_t host_contents = iree_make_byte_span(
+        (uint8_t*)allocation + data_offset, allocation_size);
+    *out_host_contents = host_contents;
+  }
+  return status;
 }
 
 static iree_status_t iree_hal_remote_server_bulk_host_allocation_create(
@@ -254,16 +258,18 @@ static iree_status_t iree_hal_remote_server_bulk_host_allocation_create(
     iree_byte_span_t* out_host_contents,
     iree_io_file_handle_t** out_file_handle) {
   *out_file_handle = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_remote_server_bulk_host_contents_allocate(
-      allocation_size, host_allocator, out_host_contents));
+  iree_status_t status = iree_hal_remote_server_bulk_host_contents_allocate(
+      allocation_size, host_allocator, out_host_contents);
 
   iree_io_file_handle_release_callback_t release_callback = {
       .fn = iree_hal_remote_server_bulk_host_allocation_release,
       .user_data = NULL,
   };
-  iree_status_t status = iree_io_file_handle_wrap_host_allocation(
-      IREE_IO_FILE_ACCESS_READ | IREE_IO_FILE_ACCESS_WRITE, *out_host_contents,
-      release_callback, host_allocator, out_file_handle);
+  if (iree_status_is_ok(status)) {
+    status = iree_io_file_handle_wrap_host_allocation(
+        IREE_IO_FILE_ACCESS_READ | IREE_IO_FILE_ACCESS_WRITE,
+        *out_host_contents, release_callback, host_allocator, out_file_handle);
+  }
   if (!iree_status_is_ok(status)) {
     iree_hal_remote_server_bulk_host_contents_free(*out_host_contents);
     *out_host_contents = iree_byte_span_empty();

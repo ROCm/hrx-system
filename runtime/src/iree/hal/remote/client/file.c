@@ -69,26 +69,29 @@ static iree_status_t iree_hal_remote_client_file_create(
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_hal_remote_client_file_t* file = NULL;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_allocator_malloc(host_allocator, sizeof(*file), (void**)&file));
+  iree_status_t status =
+      iree_allocator_malloc(host_allocator, sizeof(*file), (void**)&file);
+  if (iree_status_is_ok(status)) {
+    memset(file, 0, sizeof(*file));
+    iree_hal_resource_initialize(&iree_hal_remote_client_file_vtable,
+                                 &file->resource);
+    file->host_allocator = host_allocator;
+    file->kind = kind;
+    file->access = access;
+    file->length = length;
+    file->handle = handle;
+    file->inner_file = inner_file;
+    file->host_allocation = host_allocation;
+    file->remote_file_id = remote_file_id;
 
-  iree_hal_resource_initialize(&iree_hal_remote_client_file_vtable,
-                               &file->resource);
-  file->host_allocator = host_allocator;
-  file->kind = kind;
-  file->access = access;
-  file->length = length;
-  file->handle = handle;
-  file->inner_file = inner_file;
-  file->host_allocation = host_allocation;
-  file->remote_file_id = remote_file_id;
+    iree_io_file_handle_retain(file->handle);
+    iree_hal_file_retain(file->inner_file);
 
-  iree_io_file_handle_retain(file->handle);
-  iree_hal_file_retain(file->inner_file);
+    *out_file = (iree_hal_file_t*)file;
+  }
 
-  *out_file = (iree_hal_file_t*)file;
   IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
+  return status;
 }
 
 static iree_status_t iree_hal_remote_client_file_import_host_allocation(

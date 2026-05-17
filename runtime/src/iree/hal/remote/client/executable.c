@@ -86,17 +86,20 @@ iree_status_t iree_hal_remote_client_executable_create(
   *out_executable = NULL;
 
   iree_hal_remote_client_executable_t* executable = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-      host_allocator, sizeof(*executable), (void**)&executable));
-  iree_hal_resource_initialize(&iree_hal_remote_client_executable_vtable,
-                               &executable->resource);
-  executable->host_allocator = host_allocator;
-  executable->device = device;
-  executable->resource_id = resource_id;
-  executable->export_count = export_count;
+  iree_status_t status = iree_allocator_malloc(
+      host_allocator, sizeof(*executable), (void**)&executable);
+  if (iree_status_is_ok(status)) {
+    memset(executable, 0, sizeof(*executable));
+    iree_hal_resource_initialize(&iree_hal_remote_client_executable_vtable,
+                                 &executable->resource);
+    executable->host_allocator = host_allocator;
+    executable->device = device;
+    executable->resource_id = resource_id;
+    executable->export_count = export_count;
 
-  *out_executable = (iree_hal_executable_t*)executable;
-  return iree_ok_status();
+    *out_executable = (iree_hal_executable_t*)executable;
+  }
+  return status;
 }
 
 iree_hal_remote_resource_id_t iree_hal_remote_client_executable_resource_id(

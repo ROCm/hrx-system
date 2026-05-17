@@ -139,21 +139,23 @@ iree_status_t iree_hal_remote_recv_pool_wrap(
   *out_recv_pool = NULL;
 
   iree_hal_remote_recv_pool_t* recv_pool = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof(*recv_pool),
-                                             (void**)&recv_pool));
-  memset(recv_pool, 0, sizeof(*recv_pool));
-  iree_atomic_ref_count_init(&recv_pool->ref_count);
-  recv_pool->host_allocator = host_allocator;
-  recv_pool->proactor = proactor;
-  iree_async_proactor_retain(proactor);
-  recv_pool->slab = slab;
-  iree_async_slab_retain(slab);
-  recv_pool->region = region;
-  iree_async_region_retain(region);
-  recv_pool->buffer_pool = buffer_pool;
+  iree_status_t status = iree_allocator_malloc(
+      host_allocator, sizeof(*recv_pool), (void**)&recv_pool);
+  if (iree_status_is_ok(status)) {
+    memset(recv_pool, 0, sizeof(*recv_pool));
+    iree_atomic_ref_count_init(&recv_pool->ref_count);
+    recv_pool->host_allocator = host_allocator;
+    recv_pool->proactor = proactor;
+    iree_async_proactor_retain(proactor);
+    recv_pool->slab = slab;
+    iree_async_slab_retain(slab);
+    recv_pool->region = region;
+    iree_async_region_retain(region);
+    recv_pool->buffer_pool = buffer_pool;
 
-  *out_recv_pool = recv_pool;
-  return iree_ok_status();
+    *out_recv_pool = recv_pool;
+  }
+  return status;
 }
 
 void iree_hal_remote_recv_pool_retain(iree_hal_remote_recv_pool_t* recv_pool) {

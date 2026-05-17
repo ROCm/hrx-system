@@ -33,18 +33,19 @@ iree_status_t iree_hal_remote_client_allocator_create(
 
   iree_host_size_t total_size = 0;
   iree_hal_remote_client_allocator_t* allocator = NULL;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, IREE_STRUCT_LAYOUT(sizeof(*allocator), &total_size,
-                             IREE_STRUCT_FIELD_FAM(identifier.size, char)));
   iree_status_t status =
-      iree_allocator_malloc(host_allocator, total_size, (void**)&allocator);
+      IREE_STRUCT_LAYOUT(sizeof(*allocator), &total_size,
+                         IREE_STRUCT_FIELD_FAM(identifier.size, char));
   if (iree_status_is_ok(status)) {
+    status =
+        iree_allocator_malloc(host_allocator, total_size, (void**)&allocator);
+  }
+  if (iree_status_is_ok(status)) {
+    memset(allocator, 0, total_size);
     iree_hal_resource_initialize(&iree_hal_remote_client_allocator_vtable,
                                  &allocator->resource);
     allocator->host_allocator = host_allocator;
     allocator->device = device;
-    allocator->heaps = NULL;
-    allocator->heap_count = 0;
 
     iree_string_view_append_to_buffer(identifier, &allocator->identifier,
                                       allocator->identifier_storage);

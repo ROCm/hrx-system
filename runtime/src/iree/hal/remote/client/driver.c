@@ -81,36 +81,38 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_client_driver_create(
   iree_host_size_t identifier_offset = 0;
   iree_host_size_t server_address_offset = 0;
   iree_hal_remote_client_driver_t* driver = NULL;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, IREE_STRUCT_LAYOUT(
-              sizeof(*driver), &total_size,
-              IREE_STRUCT_FIELD_ALIGNED(identifier.size, char, 1,
-                                        &identifier_offset),
-              IREE_STRUCT_FIELD_ALIGNED(
-                  options->default_device_options.server_address.size, char, 1,
-                  &server_address_offset)));
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_allocator_malloc(host_allocator, total_size, (void**)&driver));
+  iree_status_t status = IREE_STRUCT_LAYOUT(
+      sizeof(*driver), &total_size,
+      IREE_STRUCT_FIELD_ALIGNED(identifier.size, char, 1, &identifier_offset),
+      IREE_STRUCT_FIELD_ALIGNED(
+          options->default_device_options.server_address.size, char, 1,
+          &server_address_offset));
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc(host_allocator, total_size, (void**)&driver);
+  }
 
-  iree_hal_resource_initialize(&iree_hal_remote_client_driver_vtable,
-                               &driver->resource);
-  driver->host_allocator = host_allocator;
-  driver->options = *options;
-  driver->recv_pool = NULL;
+  if (iree_status_is_ok(status)) {
+    memset(driver, 0, total_size);
+    iree_hal_resource_initialize(&iree_hal_remote_client_driver_vtable,
+                                 &driver->resource);
+    driver->host_allocator = host_allocator;
+    driver->options = *options;
 
-  iree_string_view_append_to_buffer(identifier, &driver->identifier,
-                                    (char*)driver + identifier_offset);
-  iree_net_transport_factory_retain(options->transport_factory);
-  driver->options.default_device_options.transport_factory =
-      options->transport_factory;
-  iree_string_view_append_to_buffer(
-      options->default_device_options.server_address,
-      &driver->options.default_device_options.server_address,
-      (char*)driver + server_address_offset);
+    iree_string_view_append_to_buffer(identifier, &driver->identifier,
+                                      (char*)driver + identifier_offset);
+    iree_net_transport_factory_retain(options->transport_factory);
+    driver->options.default_device_options.transport_factory =
+        options->transport_factory;
+    iree_string_view_append_to_buffer(
+        options->default_device_options.server_address,
+        &driver->options.default_device_options.server_address,
+        (char*)driver + server_address_offset);
 
-  *out_driver = (iree_hal_driver_t*)driver;
+    *out_driver = (iree_hal_driver_t*)driver;
+  }
+
   IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
+  return status;
 }
 
 static void iree_hal_remote_client_driver_destroy(
@@ -192,22 +194,24 @@ static iree_status_t iree_hal_remote_client_driver_create_device_by_path(
 
   iree_hal_remote_client_device_options_t options =
       driver->options.default_device_options;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_remote_client_device_options_parse(
-              &options, (iree_string_pair_list_t){.count = param_count,
-                                                  .pairs = params}));
+  iree_status_t status = iree_hal_remote_client_device_options_parse(
+      &options,
+      (iree_string_pair_list_t){.count = param_count, .pairs = params});
 
-  if (!iree_string_view_is_empty(device_path)) {
+  if (iree_status_is_ok(status) && !iree_string_view_is_empty(device_path)) {
     options.server_address = device_path;
   }
 
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0,
-      iree_hal_remote_client_driver_ensure_recv_pool(driver, create_params));
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_hal_remote_client_driver_ensure_recv_pool(driver, create_params);
+  }
 
-  iree_status_t status = iree_hal_remote_client_device_create(
-      driver->identifier, &options, create_params, driver->recv_pool,
-      host_allocator, out_device);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_client_device_create(
+        driver->identifier, &options, create_params, driver->recv_pool,
+        host_allocator, out_device);
+  }
 
   // Auto-connect and wait synchronously. Callers (tooling, VM) expect
   // create_device to return a ready device.

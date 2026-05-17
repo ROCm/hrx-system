@@ -782,15 +782,20 @@ iree_status_t iree_hal_remote_client_command_buffer_create(
 
   iree_host_size_t validation_size =
       iree_hal_command_buffer_validation_state_size(mode, binding_capacity);
-  iree_host_size_t total_size =
-      sizeof(iree_hal_remote_client_command_buffer_t) + validation_size;
+  iree_host_size_t total_size = 0;
+  iree_host_size_t validation_offset = 0;
+  iree_status_t status = IREE_STRUCT_LAYOUT(
+      sizeof(iree_hal_remote_client_command_buffer_t), &total_size,
+      IREE_STRUCT_FIELD(validation_size, uint8_t, &validation_offset));
 
   iree_hal_remote_client_command_buffer_t* command_buffer = NULL;
-  iree_status_t status = iree_allocator_malloc(host_allocator, total_size,
-                                               (void**)&command_buffer);
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc(host_allocator, total_size,
+                                   (void**)&command_buffer);
+  }
 
   if (iree_status_is_ok(status)) {
-    memset(command_buffer, 0, sizeof(*command_buffer));
+    memset(command_buffer, 0, total_size);
 
     // Allocate initial stream buffer.
     status = iree_allocator_malloc(host_allocator,
@@ -802,7 +807,7 @@ iree_status_t iree_hal_remote_client_command_buffer_create(
     iree_hal_command_buffer_initialize(
         iree_hal_device_allocator((iree_hal_device_t*)device), mode,
         command_categories, queue_affinity, binding_capacity,
-        (uint8_t*)command_buffer + sizeof(*command_buffer),
+        (uint8_t*)command_buffer + validation_offset,
         &iree_hal_remote_client_command_buffer_vtable, &command_buffer->base);
     command_buffer->host_allocator = host_allocator;
     command_buffer->device = device;

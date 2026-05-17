@@ -175,15 +175,18 @@ iree_status_t iree_hal_remote_client_executable_cache_create(
   *out_executable_cache = NULL;
 
   iree_hal_remote_client_executable_cache_t* cache = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_allocator_malloc(host_allocator, sizeof(*cache), (void**)&cache));
-  iree_hal_resource_initialize(&iree_hal_remote_client_executable_cache_vtable,
-                               &cache->resource);
-  cache->host_allocator = host_allocator;
-  cache->device = device;
+  iree_status_t status =
+      iree_allocator_malloc(host_allocator, sizeof(*cache), (void**)&cache);
+  if (iree_status_is_ok(status)) {
+    memset(cache, 0, sizeof(*cache));
+    iree_hal_resource_initialize(
+        &iree_hal_remote_client_executable_cache_vtable, &cache->resource);
+    cache->host_allocator = host_allocator;
+    cache->device = device;
 
-  *out_executable_cache = (iree_hal_executable_cache_t*)cache;
-  return iree_ok_status();
+    *out_executable_cache = (iree_hal_executable_cache_t*)cache;
+  }
+  return status;
 }
 
 static const iree_hal_executable_cache_vtable_t
