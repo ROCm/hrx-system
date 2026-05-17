@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -31,6 +32,8 @@ iree_runtime_cc_library(
         "executable.h",
         "executable_cache.c",
         "executable_cache.h",
+        "file.c",
+        "file.h",
         "queue.c",
         "queue.h",
         "semaphore.c",
@@ -54,16 +57,41 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/remote/protocol:common",
         "//runtime/src/iree/hal/remote/protocol:control",
         "//runtime/src/iree/hal/remote/protocol:queue",
+        "//runtime/src/iree/hal/remote/util:bulk_transfer_tracker",
         "//runtime/src/iree/hal/remote/util:queue_header_pool",
         "//runtime/src/iree/hal/remote/util:recv_pool",
         "//runtime/src/iree/hal/utils:files",
         "//runtime/src/iree/hal/utils:resource_set",
+        "//runtime/src/iree/io:file_handle",
         "//runtime/src/iree/net:bootstrap",
         "//runtime/src/iree/net:session",
         "//runtime/src/iree/net:status_wire",
         "//runtime/src/iree/net:transport_factory",
         "//runtime/src/iree/net/channel/bulk:bulk_channel",
+        "//runtime/src/iree/net/channel/bulk:chunk_pool",
+        "//runtime/src/iree/net/channel/bulk:transfer_table",
         "//runtime/src/iree/net/channel/queue:queue_channel",
         "//runtime/src/iree/net/channel/util:frame_sender",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "file_test",
+    srcs = [
+        "file.h",
+        "file_test.cc",
+    ],
+    tags = ["requires-filesystem"],
+    deps = [
+        ":client",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async:platform",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/remote/protocol:common",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/testing:temp_file",
     ],
 )

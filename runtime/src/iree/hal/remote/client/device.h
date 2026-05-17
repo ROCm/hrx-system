@@ -27,6 +27,8 @@ typedef struct iree_async_notification_t iree_async_notification_t;
 typedef struct iree_hal_slab_provider_t iree_hal_slab_provider_t;
 typedef struct iree_hal_remote_recv_pool_t iree_hal_remote_recv_pool_t;
 typedef struct iree_net_bulk_channel_t iree_net_bulk_channel_t;
+typedef struct iree_net_bulk_chunk_pool_t iree_net_bulk_chunk_pool_t;
+typedef struct iree_net_bulk_transfer_table_t iree_net_bulk_transfer_table_t;
 typedef struct iree_net_queue_channel_t iree_net_queue_channel_t;
 typedef struct iree_hal_remote_pending_rpc_t iree_hal_remote_pending_rpc_t;
 
@@ -80,6 +82,18 @@ typedef struct iree_hal_remote_client_device_t {
   // Published after the queue and bulk endpoints are both activated so the
   // CONNECTED state means all production channels are usable.
   iree_atomic_intptr_t bulk_channel;
+
+  // Protects client-local file bulk transfers.
+  iree_slim_mutex_t bulk_transfer_mutex;
+
+  // Fixed-capacity table of client-local file transfers.
+  iree_net_bulk_transfer_table_t* bulk_transfers;
+
+  // Fixed-capacity pool of outgoing async file read staging chunks.
+  iree_net_bulk_chunk_pool_t* bulk_send_chunks;
+
+  // Fixed-capacity pool of retained incoming bulk DATA chunks.
+  iree_net_bulk_chunk_pool_t* bulk_receive_chunks;
 
   // Remote queue axis from the server's topology. Used to build signal
   // frontiers for queue submissions. Valid after on_session_ready.

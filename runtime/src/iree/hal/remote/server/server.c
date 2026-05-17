@@ -6,6 +6,7 @@
 
 #include "iree/hal/remote/server/server.h"
 
+#include "iree/hal/remote/server/bulk.h"
 #include "iree/net/bootstrap.h"
 #include "iree/net/channel/bulk/bulk_channel.h"
 #include "iree/net/transport_factory.h"
@@ -16,6 +17,8 @@
 #define IREE_HAL_REMOTE_SERVER_RESOURCE_TABLE_CAPACITY 256
 // Initial capacity for per-session sequence reconstruction windows.
 #define IREE_HAL_REMOTE_SERVER_SEQUENCE_WINDOW_INITIAL_CAPACITY 256
+
+static void iree_hal_remote_server_destroy(iree_hal_remote_server_t* server);
 
 //===----------------------------------------------------------------------===//
 // iree_hal_remote_server_options_t
@@ -106,19 +109,24 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_server_create(
   IREE_TRACE_ZONE_BEGIN(z0);
   *out_server = NULL;
 
+  iree_status_t status = iree_ok_status();
   if (device_count == 0) {
-    IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "at least one device is required");
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "at least one device is required");
   }
 
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_remote_server_options_verify(options));
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_server_options_verify(options);
+  }
 
-  uint32_t max_connections = options->max_connections
-                                 ? options->max_connections
-                                 : IREE_HAL_REMOTE_DEFAULT_MAX_CONNECTIONS;
-  uint32_t axis_count = options->local_topology->axis_count;
+  uint32_t max_connections = 0;
+  uint32_t axis_count = 0;
+  if (iree_status_is_ok(status)) {
+    max_connections = options->max_connections
+                          ? options->max_connections
+                          : IREE_HAL_REMOTE_DEFAULT_MAX_CONNECTIONS;
+    axis_count = options->local_topology->axis_count;
+  }
 
   // Calculate trailing storage layout.
   iree_host_size_t total_size = 0;
@@ -127,112 +135,106 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_server_create(
   iree_host_size_t epochs_offset = 0;
   iree_host_size_t devices_offset = 0;
   iree_host_size_t sessions_offset = 0;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0,
-      IREE_STRUCT_LAYOUT(
-          sizeof(iree_hal_remote_server_t), &total_size,
-          IREE_STRUCT_FIELD(options->bind_address.size, char,
-                            &bind_address_offset),
-          IREE_STRUCT_FIELD_ALIGNED(axis_count, iree_async_axis_t,
-                                    iree_alignof(iree_async_axis_t),
-                                    &axes_offset),
-          IREE_STRUCT_FIELD(axis_count, uint64_t, &epochs_offset),
-          IREE_STRUCT_FIELD(device_count, iree_hal_device_t*, &devices_offset),
-          IREE_STRUCT_FIELD(max_connections, iree_hal_remote_server_session_t,
-                            &sessions_offset)));
+  if (iree_status_is_ok(status)) {
+    status = IREE_STRUCT_LAYOUT(
+        sizeof(iree_hal_remote_server_t), &total_size,
+        IREE_STRUCT_FIELD(options->bind_address.size, char,
+                          &bind_address_offset),
+        IREE_STRUCT_FIELD_ALIGNED(axis_count, iree_async_axis_t,
+                                  iree_alignof(iree_async_axis_t),
+                                  &axes_offset),
+        IREE_STRUCT_FIELD(axis_count, uint64_t, &epochs_offset),
+        IREE_STRUCT_FIELD(device_count, iree_hal_device_t*, &devices_offset),
+        IREE_STRUCT_FIELD(max_connections, iree_hal_remote_server_session_t,
+                          &sessions_offset));
+  }
 
   iree_hal_remote_server_t* server = NULL;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_allocator_malloc(host_allocator, total_size, (void**)&server));
-
-  iree_atomic_ref_count_init(&server->ref_count);
-  server->host_allocator = host_allocator;
-  iree_slim_mutex_initialize(&server->session_mutex);
-
-  // Copy options and bind_address to trailing storage.
-  server->options = *options;
-  server->options.max_connections = max_connections;
-  iree_string_view_append_to_buffer(options->bind_address,
-                                    &server->options.bind_address,
-                                    (char*)server + bind_address_offset);
-
-  // Copy topology arrays to trailing storage.
-  iree_async_axis_t* local_axes =
-      (iree_async_axis_t*)((uint8_t*)server + axes_offset);
-  uint64_t* local_epochs = (uint64_t*)((uint8_t*)server + epochs_offset);
-  memcpy(local_axes, options->local_topology->axes,
-         axis_count * sizeof(iree_async_axis_t));
-  memcpy(local_epochs, options->local_topology->current_epochs,
-         axis_count * sizeof(uint64_t));
-  server->local_topology.axes = local_axes;
-  server->local_topology.current_epochs = local_epochs;
-  server->local_topology.axis_count = axis_count;
-  server->local_topology.machine_index = options->local_topology->machine_index;
-  server->local_topology.session_epoch = options->local_topology->session_epoch;
-  memset(server->local_topology.reserved, 0,
-         sizeof(server->local_topology.reserved));
-
-  // Clear topology pointer in options (we own the copy now, not the original).
-  server->options.local_topology = NULL;
-
-  // Retain transport factory.
-  iree_net_transport_factory_retain(options->transport_factory);
-
-  // Copy and retain devices.
-  server->devices = (iree_hal_device_t**)((uint8_t*)server + devices_offset);
-  server->device_count = device_count;
-  for (iree_host_size_t i = 0; i < device_count; ++i) {
-    server->devices[i] = devices[i];
-    iree_hal_device_retain(devices[i]);
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc(host_allocator, total_size, (void**)&server);
   }
 
-  // Create per-device executable caches (shared across all sessions).
-  server->executable_caches = NULL;
-  iree_status_t status = iree_allocator_malloc_array(
-      host_allocator, device_count, sizeof(iree_hal_executable_cache_t*),
-      (void**)&server->executable_caches);
-  for (iree_host_size_t i = 0; i < device_count && iree_status_is_ok(status);
-       ++i) {
-    status = iree_hal_executable_cache_create(
-        devices[i], iree_make_cstring_view("remote-server"),
-        &server->executable_caches[i]);
-  }
-  if (!iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status)) {
+    memset(server, 0, total_size);
+    iree_atomic_ref_count_init(&server->ref_count);
+    server->host_allocator = host_allocator;
+    iree_slim_mutex_initialize(&server->session_mutex);
+
+    // Copy options and bind_address to trailing storage.
+    server->options = *options;
+    server->options.max_connections = max_connections;
+    iree_string_view_append_to_buffer(options->bind_address,
+                                      &server->options.bind_address,
+                                      (char*)server + bind_address_offset);
+
+    // Copy topology arrays to trailing storage.
+    iree_async_axis_t* local_axes =
+        (iree_async_axis_t*)((uint8_t*)server + axes_offset);
+    uint64_t* local_epochs = (uint64_t*)((uint8_t*)server + epochs_offset);
+    memcpy(local_axes, options->local_topology->axes,
+           axis_count * sizeof(iree_async_axis_t));
+    memcpy(local_epochs, options->local_topology->current_epochs,
+           axis_count * sizeof(uint64_t));
+    server->local_topology.axes = local_axes;
+    server->local_topology.current_epochs = local_epochs;
+    server->local_topology.axis_count = axis_count;
+    server->local_topology.machine_index =
+        options->local_topology->machine_index;
+    server->local_topology.session_epoch =
+        options->local_topology->session_epoch;
+
+    // Clear topology pointer in options (we own the copy now, not the
+    // original).
+    server->options.local_topology = NULL;
+
+    iree_net_transport_factory_retain(server->options.transport_factory);
+
+    server->devices = (iree_hal_device_t**)((uint8_t*)server + devices_offset);
+    server->device_count = device_count;
     for (iree_host_size_t i = 0; i < device_count; ++i) {
-      iree_hal_executable_cache_release(server->executable_caches[i]);
+      server->devices[i] = devices[i];
+      iree_hal_device_retain(devices[i]);
     }
-    iree_allocator_free(host_allocator, server->executable_caches);
-    for (iree_host_size_t i = 0; i < device_count; ++i) {
-      iree_hal_device_release(devices[i]);
+
+    // Borrow infrastructure.
+    server->proactor = proactor;
+    server->frontier_tracker = frontier_tracker;
+    server->recv_pool = recv_pool;
+
+    server->sessions =
+        (iree_hal_remote_server_session_t*)((uint8_t*)server + sessions_offset);
+    for (uint32_t i = 0; i < max_connections; ++i) {
+      iree_slim_mutex_initialize(&server->sessions[i].bulk_transfer_mutex);
     }
-    iree_net_transport_factory_release(options->transport_factory);
-    iree_slim_mutex_deinitialize(&server->session_mutex);
-    iree_allocator_free(host_allocator, server);
-    *out_server = NULL;
-    IREE_TRACE_ZONE_END(z0);
-    return status;
+    server->next_session_id = 1;
+    server->state = IREE_HAL_REMOTE_SERVER_STATE_STOPPED;
   }
 
-  // Borrow infrastructure.
-  server->proactor = proactor;
-  server->frontier_tracker = frontier_tracker;
-  server->recv_pool = recv_pool;
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_array(host_allocator, device_count,
+                                         sizeof(iree_hal_executable_cache_t*),
+                                         (void**)&server->executable_caches);
+  }
 
-  // Initialize session tracking.
-  server->sessions =
-      (iree_hal_remote_server_session_t*)((uint8_t*)server + sessions_offset);
-  memset(server->sessions, 0,
-         max_connections * sizeof(iree_hal_remote_server_session_t));
-  server->active_session_count = 0;
-  server->next_session_id = 1;
+  if (iree_status_is_ok(status)) {
+    memset(server->executable_caches, 0,
+           device_count * sizeof(*server->executable_caches));
+    for (iree_host_size_t i = 0; i < device_count && iree_status_is_ok(status);
+         ++i) {
+      status = iree_hal_executable_cache_create(
+          devices[i], iree_make_cstring_view("remote-server"),
+          &server->executable_caches[i]);
+    }
+  }
 
-  server->listener = NULL;
-  server->state = IREE_HAL_REMOTE_SERVER_STATE_STOPPED;
-  memset(&server->stopped_callback, 0, sizeof(server->stopped_callback));
+  if (iree_status_is_ok(status)) {
+    *out_server = server;
+  } else if (server) {
+    iree_hal_remote_server_destroy(server);
+  }
 
-  *out_server = server;
   IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
+  return status;
 }
 
 IREE_API_EXPORT void iree_hal_remote_server_retain(
@@ -284,6 +286,8 @@ static void iree_hal_remote_server_destroy(iree_hal_remote_server_t* server) {
            sizeof(server->sessions[i].provisional_map));
 
     iree_hal_remote_server_session_deinitialize_windows(&server->sessions[i]);
+    iree_hal_remote_server_session_deinitialize_bulk_transfers(
+        &server->sessions[i]);
 
     iree_net_bulk_channel_detach(server->sessions[i].bulk_channel);
     iree_net_bulk_channel_release(server->sessions[i].bulk_channel);
@@ -296,6 +300,8 @@ static void iree_hal_remote_server_destroy(iree_hal_remote_server_t* server) {
     iree_net_session_t* session = server->sessions[i].session;
     server->sessions[i].session = NULL;
     iree_net_session_release(session);
+
+    iree_slim_mutex_deinitialize(&server->sessions[i].bulk_transfer_mutex);
   }
 
   // Free listener if still alive (shouldn't be if stop() was called).
@@ -306,11 +312,15 @@ static void iree_hal_remote_server_destroy(iree_hal_remote_server_t* server) {
 
   // Release retained objects.
   iree_net_transport_factory_release(server->options.transport_factory);
+  if (server->executable_caches) {
+    for (iree_host_size_t i = 0; i < server->device_count; ++i) {
+      iree_hal_executable_cache_release(server->executable_caches[i]);
+    }
+    iree_allocator_free(host_allocator, server->executable_caches);
+  }
   for (iree_host_size_t i = 0; i < server->device_count; ++i) {
-    iree_hal_executable_cache_release(server->executable_caches[i]);
     iree_hal_device_release(server->devices[i]);
   }
-  iree_allocator_free(host_allocator, server->executable_caches);
 
   iree_slim_mutex_deinitialize(&server->session_mutex);
   iree_allocator_free(host_allocator, server);
@@ -390,6 +400,10 @@ static void iree_hal_remote_server_on_accept(
         server->host_allocator,
         &server->sessions[slot].completed_signal_window);
   }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_server_session_initialize_bulk_transfers(
+        &server->sessions[slot], server->host_allocator);
+  }
 
   // Create the server-side session outside the lock (allocation + network
   // setup). Session callbacks use &server->sessions[slot] as user_data so
@@ -436,6 +450,8 @@ static void iree_hal_remote_server_on_accept(
       iree_hal_remote_resource_table_deinitialize(
           &server->sessions[slot].resource_table, server->host_allocator);
       iree_hal_remote_server_session_deinitialize_windows(
+          &server->sessions[slot]);
+      iree_hal_remote_server_session_deinitialize_bulk_transfers(
           &server->sessions[slot]);
       server->sessions[slot].server = NULL;
     }

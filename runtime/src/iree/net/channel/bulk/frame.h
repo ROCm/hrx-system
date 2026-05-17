@@ -8,7 +8,8 @@
 //
 // Bulk frames carry large data transfers with chunking and progress tracking.
 // The format is optimized for transfers exceeding 4GB with minimal overhead.
-// CREDIT frames provide channel-level receiver flow control for DATA chunks.
+// CREDIT frames provide channel-level receiver flow control for DATA chunks by
+// carrying the sender's cumulative receive credit grant.
 //
 // ## Frame header layout
 //
@@ -19,7 +20,7 @@
 //   │ Byte 6:      flags                                                     │
 //   │ Byte 7:      reserved (must be 0)                                      │
 //   │ Bytes 8-15:  transfer_id (little-endian uint64)                        │
-//   │ Bytes 16-23: total_size (little-endian uint64, START/CREDIT frames)    │
+//   │ Bytes 16-23: total_size (little-endian uint64, START/cumulative CREDIT)│
 //   │ Bytes 24-31: chunk_offset (little-endian uint64)                       │
 //   │ Bytes 32-35: chunk_length (little-endian uint32)                       │
 //   │ Bytes 36-39: sequence (little-endian uint32, for datagram ordering)    │
@@ -65,7 +66,7 @@ typedef enum iree_net_bulk_frame_type_e {
   // Transfer abort: signals transfer cancellation.
   IREE_NET_BULK_FRAME_TYPE_ABORT = 0x04,
 
-  // Receiver credit: announces additional DATA chunk receive capacity.
+  // Receiver credit: announces the cumulative DATA chunk receive credit grant.
   IREE_NET_BULK_FRAME_TYPE_CREDIT = 0x05,
 } iree_net_bulk_frame_type_e;
 typedef uint8_t iree_net_bulk_frame_type_t;
@@ -98,7 +99,7 @@ typedef struct iree_net_bulk_frame_header_t {
   uint8_t flags;          // iree_net_bulk_frame_flags_t
   uint8_t reserved;       // Must be 0.
   uint64_t transfer_id;   // Unique transfer identifier.
-  uint64_t total_size;    // Total size in START; credit count in CREDIT.
+  uint64_t total_size;    // Total size in START; cumulative CREDIT grant.
   uint64_t chunk_offset;  // Offset of this chunk within transfer.
   uint32_t chunk_length;  // Length of this chunk's payload.
   uint32_t sequence;      // Sequence number for datagram ordering.

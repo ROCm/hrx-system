@@ -60,18 +60,16 @@ iree_status_t iree_hal_remote_recv_pool_create(
   iree_hal_remote_recv_pool_t* recv_pool = NULL;
   iree_status_t status = iree_allocator_malloc(
       host_allocator, sizeof(*recv_pool), (void**)&recv_pool);
-  if (!iree_status_is_ok(status)) {
-    IREE_TRACE_ZONE_END(z0);
-    return status;
-  }
-  memset(recv_pool, 0, sizeof(*recv_pool));
-  iree_atomic_ref_count_init(&recv_pool->ref_count);
-  recv_pool->host_allocator = host_allocator;
+  if (iree_status_is_ok(status)) {
+    memset(recv_pool, 0, sizeof(*recv_pool));
+    iree_atomic_ref_count_init(&recv_pool->ref_count);
+    recv_pool->host_allocator = host_allocator;
 
-  // Retain the proactor pool to keep its threads alive. The pool's proactor
-  // thread polls the io_uring/epoll ring — without it, no I/O completes.
-  recv_pool->proactor_pool = proactor_pool;
-  iree_async_proactor_pool_retain(proactor_pool);
+    // Retain the proactor pool to keep its threads alive. The pool's proactor
+    // thread polls the io_uring/epoll ring -- without it, no I/O completes.
+    recv_pool->proactor_pool = proactor_pool;
+    iree_async_proactor_pool_retain(proactor_pool);
+  }
 
   // Select the proactor for this NUMA node and retain it.
   if (iree_status_is_ok(status)) {
@@ -120,7 +118,7 @@ iree_status_t iree_hal_remote_recv_pool_create(
 
   if (iree_status_is_ok(status)) {
     *out_recv_pool = recv_pool;
-  } else {
+  } else if (recv_pool) {
     iree_hal_remote_recv_pool_destroy(recv_pool);
   }
 

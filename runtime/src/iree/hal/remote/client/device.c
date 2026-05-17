@@ -14,13 +14,13 @@
 #include "iree/hal/remote/client/bulk.h"
 #include "iree/hal/remote/client/command_buffer.h"
 #include "iree/hal/remote/client/executable_cache.h"
+#include "iree/hal/remote/client/file.h"
 #include "iree/hal/remote/client/queue.h"
 #include "iree/hal/remote/client/semaphore.h"
 #include "iree/hal/remote/client/slab_provider.h"
 #include "iree/hal/remote/protocol/control.h"
 #include "iree/hal/remote/protocol/queue.h"
 #include "iree/hal/remote/util/recv_pool.h"
-#include "iree/hal/utils/file_registry.h"
 #include "iree/net/bootstrap.h"
 #include "iree/net/channel/bulk/bulk_channel.h"
 #include "iree/net/channel/queue/queue_channel.h"
@@ -28,6 +28,8 @@
 #include "iree/net/transport_factory.h"
 
 static const iree_hal_device_vtable_t iree_hal_remote_client_device_vtable;
+static void iree_hal_remote_client_device_destroy(
+    iree_hal_device_t* base_device);
 
 // Block size used for command-buffer retained resource sets.
 #define IREE_HAL_REMOTE_CLIENT_RESOURCE_SET_BLOCK_SIZE 4096
@@ -135,127 +137,101 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_create(
   *out_device = NULL;
   (void)create_params;
 
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_remote_client_device_options_verify(options));
+  iree_status_t status = iree_hal_remote_client_device_options_verify(options);
 
   // Calculate trailing storage layout.
   iree_host_size_t total_size = 0;
   iree_host_size_t identifier_offset = 0;
   iree_host_size_t server_address_offset = 0;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, IREE_STRUCT_LAYOUT(
-              sizeof(iree_hal_remote_client_device_t), &total_size,
-              IREE_STRUCT_FIELD(identifier.size, char, &identifier_offset),
-              IREE_STRUCT_FIELD(options->server_address.size, char,
-                                &server_address_offset)));
+  if (iree_status_is_ok(status)) {
+    status = IREE_STRUCT_LAYOUT(
+        sizeof(iree_hal_remote_client_device_t), &total_size,
+        IREE_STRUCT_FIELD(identifier.size, char, &identifier_offset),
+        IREE_STRUCT_FIELD(options->server_address.size, char,
+                          &server_address_offset));
+  }
 
   iree_hal_remote_client_device_t* device = NULL;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_allocator_malloc(host_allocator, total_size, (void**)&device));
-
-  iree_hal_resource_initialize(&iree_hal_remote_client_device_vtable,
-                               &device->resource);
-
-  // Copy strings to trailing storage.
-  iree_string_view_append_to_buffer(identifier, &device->identifier,
-                                    (char*)device + identifier_offset);
-  device->options = *options;
-  iree_string_view_append_to_buffer(options->server_address,
-                                    &device->options.server_address,
-                                    (char*)device + server_address_offset);
-
-  // Retain transport factory.
-  iree_net_transport_factory_retain(options->transport_factory);
-
-  device->host_allocator = host_allocator;
-  device->channel_provider = NULL;
-  device->device_allocator = NULL;
-  iree_arena_block_pool_initialize(
-      IREE_HAL_REMOTE_CLIENT_RESOURCE_SET_BLOCK_SIZE, host_allocator,
-      &device->resource_set_block_pool);
-
-  // Retain the receive-pool proactor, create the session frontier tracker, and
-  // retain recv_pool.
-  device->proactor = iree_hal_remote_recv_pool_proactor(recv_pool);
-  iree_async_proactor_retain(device->proactor);
-  iree_async_frontier_tracker_options_t tracker_options =
-      iree_async_frontier_tracker_options_default();
-  tracker_options.axis_table_capacity = 256;
-  iree_status_t tracker_status = iree_async_frontier_tracker_create(
-      tracker_options, host_allocator, &device->frontier_tracker);
-  if (!iree_status_is_ok(tracker_status)) {
-    iree_arena_block_pool_deinitialize(&device->resource_set_block_pool);
-    iree_async_proactor_release(device->proactor);
-    iree_net_transport_factory_release(options->transport_factory);
-    iree_allocator_free(host_allocator, device);
-    IREE_TRACE_ZONE_END(z0);
-    return tracker_status;
-  }
-  device->recv_pool = recv_pool;
-  iree_hal_remote_recv_pool_retain(recv_pool);
-
-  device->session = NULL;
-  memset(&device->topology_info, 0, sizeof(device->topology_info));
-  device->queue_slab_provider = NULL;
-  device->queue_pool_notification = NULL;
-  iree_atomic_store(&device->queue_channel, 0, iree_memory_order_relaxed);
-  iree_atomic_store(&device->bulk_channel, 0, iree_memory_order_relaxed);
-  device->remote_queue_axis = 0;
-  iree_atomic_store(&device->next_submission_epoch, 0,
-                    iree_memory_order_relaxed);
-  iree_atomic_store(&device->next_provisional_generation, 1,
-                    iree_memory_order_relaxed);
-  iree_slim_mutex_initialize(&device->provisional_mutex);
-  memset(&device->provisional_buffers, 0, sizeof(device->provisional_buffers));
-  iree_atomic_store(&device->next_request_id, 1, iree_memory_order_relaxed);
-  iree_slim_mutex_initialize(&device->rpc_mutex);
-  device->pending_rpcs = NULL;
-  iree_atomic_store(&device->state,
-                    IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_DISCONNECTED,
-                    iree_memory_order_relaxed);
-  memset(&device->connect_callback, 0, sizeof(device->connect_callback));
-
-  // Create the remote allocator proxy.
-  iree_status_t allocator_status = iree_hal_remote_client_allocator_create(
-      device, identifier, host_allocator, &device->device_allocator);
-  if (!iree_status_is_ok(allocator_status)) {
-    iree_slim_mutex_deinitialize(&device->rpc_mutex);
-    iree_async_frontier_tracker_release(device->frontier_tracker);
-    iree_hal_remote_recv_pool_release(device->recv_pool);
-    iree_async_proactor_release(device->proactor);
-    iree_arena_block_pool_deinitialize(&device->resource_set_block_pool);
-    iree_net_transport_factory_release(options->transport_factory);
-    iree_allocator_free(host_allocator, device);
-    IREE_TRACE_ZONE_END(z0);
-    return allocator_status;
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc(host_allocator, total_size, (void**)&device);
   }
 
-  iree_status_t pool_backend_status =
-      iree_hal_remote_client_slab_provider_create(device, host_allocator,
-                                                  &device->queue_slab_provider);
-  if (iree_status_is_ok(pool_backend_status)) {
-    pool_backend_status = iree_async_notification_create(
-        device->proactor, IREE_ASYNC_NOTIFICATION_FLAG_NONE,
-        &device->queue_pool_notification);
-  }
-  if (!iree_status_is_ok(pool_backend_status)) {
-    iree_hal_slab_provider_release(device->queue_slab_provider);
-    iree_hal_allocator_release(device->device_allocator);
-    iree_slim_mutex_deinitialize(&device->rpc_mutex);
-    iree_async_frontier_tracker_release(device->frontier_tracker);
-    iree_hal_remote_recv_pool_release(device->recv_pool);
-    iree_async_proactor_release(device->proactor);
-    iree_arena_block_pool_deinitialize(&device->resource_set_block_pool);
-    iree_net_transport_factory_release(options->transport_factory);
-    iree_allocator_free(host_allocator, device);
-    IREE_TRACE_ZONE_END(z0);
-    return pool_backend_status;
+  if (iree_status_is_ok(status)) {
+    memset(device, 0, total_size);
+    iree_hal_resource_initialize(&iree_hal_remote_client_device_vtable,
+                                 &device->resource);
+
+    // Copy strings to trailing storage.
+    iree_string_view_append_to_buffer(identifier, &device->identifier,
+                                      (char*)device + identifier_offset);
+    device->options = *options;
+    iree_string_view_append_to_buffer(options->server_address,
+                                      &device->options.server_address,
+                                      (char*)device + server_address_offset);
+
+    iree_net_transport_factory_retain(device->options.transport_factory);
+
+    device->host_allocator = host_allocator;
+    iree_arena_block_pool_initialize(
+        IREE_HAL_REMOTE_CLIENT_RESOURCE_SET_BLOCK_SIZE, host_allocator,
+        &device->resource_set_block_pool);
+
+    device->recv_pool = recv_pool;
+    iree_hal_remote_recv_pool_retain(recv_pool);
+    device->proactor = iree_hal_remote_recv_pool_proactor(recv_pool);
+    iree_async_proactor_retain(device->proactor);
+
+    iree_atomic_store(&device->queue_channel, 0, iree_memory_order_relaxed);
+    iree_atomic_store(&device->bulk_channel, 0, iree_memory_order_relaxed);
+    iree_slim_mutex_initialize(&device->bulk_transfer_mutex);
+    iree_atomic_store(&device->next_submission_epoch, 0,
+                      iree_memory_order_relaxed);
+    iree_atomic_store(&device->next_provisional_generation, 1,
+                      iree_memory_order_relaxed);
+    iree_slim_mutex_initialize(&device->provisional_mutex);
+    iree_atomic_store(&device->next_request_id, 1, iree_memory_order_relaxed);
+    iree_slim_mutex_initialize(&device->rpc_mutex);
+    iree_atomic_store(&device->state,
+                      IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_DISCONNECTED,
+                      iree_memory_order_relaxed);
   }
 
-  *out_device = (iree_hal_device_t*)device;
+  if (iree_status_is_ok(status)) {
+    iree_async_frontier_tracker_options_t tracker_options =
+        iree_async_frontier_tracker_options_default();
+    tracker_options.axis_table_capacity = 256;
+    status = iree_async_frontier_tracker_create(tracker_options, host_allocator,
+                                                &device->frontier_tracker);
+  }
+
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_client_allocator_create(
+        device, identifier, host_allocator, &device->device_allocator);
+  }
+
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_client_slab_provider_create(
+        device, host_allocator, &device->queue_slab_provider);
+  }
+
+  if (iree_status_is_ok(status)) {
+    status = iree_async_notification_create(device->proactor,
+                                            IREE_ASYNC_NOTIFICATION_FLAG_NONE,
+                                            &device->queue_pool_notification);
+  }
+
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_client_device_initialize_bulk_transfers(device);
+  }
+
+  if (iree_status_is_ok(status)) {
+    *out_device = (iree_hal_device_t*)device;
+  } else if (device) {
+    iree_hal_remote_client_device_destroy((iree_hal_device_t*)device);
+  }
 
   IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
+  return status;
 }
 
 static iree_net_queue_channel_t*
@@ -385,6 +361,9 @@ static void iree_hal_remote_client_device_destroy(
                       device->provisional_buffers.provisional_ids);
   iree_allocator_free(host_allocator, device->provisional_buffers.buffers);
   iree_slim_mutex_deinitialize(&device->provisional_mutex);
+
+  iree_hal_remote_client_device_deinitialize_bulk_transfers(device);
+  iree_slim_mutex_deinitialize(&device->bulk_transfer_mutex);
 
   iree_hal_remote_recv_pool_release(device->recv_pool);
   iree_async_frontier_tracker_release(device->frontier_tracker);
@@ -542,9 +521,9 @@ static iree_status_t iree_hal_remote_client_device_import_file(
     iree_hal_external_file_flags_t flags, iree_hal_file_t** out_file) {
   iree_hal_remote_client_device_t* device =
       iree_hal_remote_client_device_cast(base_device);
-  return iree_hal_file_from_handle(device->device_allocator, queue_affinity,
-                                   access, handle, device->proactor,
-                                   device->host_allocator, out_file);
+  return iree_hal_remote_client_file_import(queue_affinity, access, handle,
+                                            flags, device->proactor,
+                                            device->host_allocator, out_file);
 }
 
 static iree_status_t iree_hal_remote_client_device_create_semaphore(

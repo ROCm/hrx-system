@@ -31,6 +31,8 @@ iree_cc_library(
     "executable.h"
     "executable_cache.c"
     "executable_cache.h"
+    "file.c"
+    "file.h"
     "queue.c"
     "queue.h"
     "semaphore.c"
@@ -50,18 +52,43 @@ iree_cc_library(
     iree::hal::remote::protocol::common
     iree::hal::remote::protocol::control
     iree::hal::remote::protocol::queue
+    iree::hal::remote::util::bulk_transfer_tracker
     iree::hal::remote::util::queue_header_pool
     iree::hal::remote::util::recv_pool
     iree::hal::utils::files
     iree::hal::utils::resource_set
+    iree::io::file_handle
     iree::net::bootstrap
     iree::net::channel::bulk::bulk_channel
+    iree::net::channel::bulk::chunk_pool
+    iree::net::channel::bulk::transfer_table
     iree::net::channel::queue::queue_channel
     iree::net::channel::util::frame_sender
     iree::net::session
     iree::net::status_wire
     iree::net::transport_factory
   PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    file_test
+  SRCS
+    "file.h"
+    "file_test.cc"
+  DEPS
+    ::client
+    iree::async
+    iree::async::platform
+    iree::base
+    iree::hal
+    iree::hal::remote::protocol::common
+    iree::io::file_handle
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::testing::temp_file
+  LABELS
+    "requires-filesystem"
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

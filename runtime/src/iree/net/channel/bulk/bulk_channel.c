@@ -163,11 +163,17 @@ struct iree_net_bulk_channel_t {
   // Embedded frame sender for the send path.
   iree_net_frame_sender_t sender;
 
-  // Maximum DATA chunk receive credits accepted from the peer.
-  int32_t remote_chunk_credit_capacity;
+  // Maximum DATA chunk credits the peer may grant ahead of sent DATA.
+  uint64_t remote_chunk_credit_capacity;
 
-  // DATA chunk receive credits currently available on the peer.
-  iree_atomic_int32_t remote_chunk_credits;
+  // Cumulative local DATA chunk receive credit grant sent to the peer.
+  iree_atomic_uint64_t local_chunk_credit_limit;
+
+  // Cumulative peer DATA chunk receive credit grant observed locally.
+  iree_atomic_uint64_t remote_chunk_credit_limit;
+
+  // DATA chunks sent locally and charged against peer credit.
+  iree_atomic_uint64_t remote_chunk_credit_consumed;
 
   // Application callbacks.
   iree_net_bulk_channel_callbacks_t callbacks;
@@ -258,35 +264,85 @@ static iree_status_t iree_net_bulk_channel_payload_length(
   return status;
 }
 
-static iree_status_t iree_net_bulk_channel_add_remote_chunk_credits(
+static iree_status_t iree_net_bulk_channel_grant_local_chunk_credits(
     iree_net_bulk_channel_t* channel, uint32_t credit_delta,
-    uint32_t* out_available_credit_count) {
+    uint64_t* out_credit_limit) {
   if (credit_delta == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "bulk credit delta must be non-zero");
   }
-  if (credit_delta > INT32_MAX) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "bulk credit delta too large: %" PRIu32,
-                            credit_delta);
-  }
-  int32_t delta = (int32_t)credit_delta;
 
-  int32_t available = iree_atomic_load(&channel->remote_chunk_credits,
-                                       iree_memory_order_acquire);
+  uint64_t credit_limit = iree_atomic_load(&channel->local_chunk_credit_limit,
+                                           iree_memory_order_acquire);
   while (true) {
-    if (delta > channel->remote_chunk_credit_capacity - available) {
+    if (credit_limit > UINT64_MAX - (uint64_t)credit_delta) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "bulk credit grant overflow");
+    }
+    uint64_t updated_credit_limit = credit_limit + (uint64_t)credit_delta;
+    if (iree_atomic_compare_exchange_weak(&channel->local_chunk_credit_limit,
+                                          &credit_limit, updated_credit_limit,
+                                          iree_memory_order_acq_rel,
+                                          iree_memory_order_acquire)) {
+      *out_credit_limit = updated_credit_limit;
+      return iree_ok_status();
+    }
+  }
+}
+
+static void iree_net_bulk_channel_revoke_local_chunk_credits(
+    iree_net_bulk_channel_t* channel, uint32_t credit_delta,
+    uint64_t credit_limit) {
+  uint64_t expected_credit_limit = credit_limit;
+  iree_atomic_compare_exchange_strong(
+      &channel->local_chunk_credit_limit, &expected_credit_limit,
+      credit_limit - (uint64_t)credit_delta, iree_memory_order_acq_rel,
+      iree_memory_order_acquire);
+}
+
+static iree_status_t iree_net_bulk_channel_set_remote_chunk_credit_limit(
+    iree_net_bulk_channel_t* channel, uint64_t credit_limit,
+    uint32_t* out_credit_delta, uint32_t* out_available_credit_count) {
+  uint64_t current_limit = iree_atomic_load(&channel->remote_chunk_credit_limit,
+                                            iree_memory_order_acquire);
+  while (true) {
+    uint64_t consumed = iree_atomic_load(&channel->remote_chunk_credit_consumed,
+                                         iree_memory_order_acquire);
+    if (consumed > current_limit) {
+      current_limit = iree_atomic_load(&channel->remote_chunk_credit_limit,
+                                       iree_memory_order_acquire);
+      continue;
+    }
+
+    if (credit_limit <= current_limit) {
+      uint64_t available = current_limit - consumed;
+      if (available > channel->remote_chunk_credit_capacity) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "bulk credit exceeds configured capacity: available=%" PRIu64
+            " capacity=%" PRIu64,
+            available, channel->remote_chunk_credit_capacity);
+      }
+      *out_credit_delta = 0;
+      *out_available_credit_count = (uint32_t)available;
+      return iree_ok_status();
+    }
+
+    uint64_t available = credit_limit - consumed;
+    if (available > channel->remote_chunk_credit_capacity) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "bulk credit exceeds configured capacity: available=%" PRIi32
-          " delta=%" PRIi32 " capacity=%" PRIi32,
-          available, delta, channel->remote_chunk_credit_capacity);
+          "bulk credit exceeds configured capacity: available=%" PRIu64
+          " capacity=%" PRIu64,
+          available, channel->remote_chunk_credit_capacity);
     }
-    int32_t updated = available + delta;
     if (iree_atomic_compare_exchange_weak(
-            &channel->remote_chunk_credits, &available, updated,
+            &channel->remote_chunk_credit_limit, &current_limit, credit_limit,
             iree_memory_order_acq_rel, iree_memory_order_acquire)) {
-      *out_available_credit_count = (uint32_t)updated;
+      uint64_t credit_delta = credit_limit - current_limit;
+      *out_credit_delta =
+          credit_delta > UINT32_MAX ? UINT32_MAX : (uint32_t)credit_delta;
+      *out_available_credit_count = (uint32_t)available;
       return iree_ok_status();
     }
   }
@@ -294,15 +350,17 @@ static iree_status_t iree_net_bulk_channel_add_remote_chunk_credits(
 
 static iree_status_t iree_net_bulk_channel_consume_remote_chunk_credit(
     iree_net_bulk_channel_t* channel) {
-  int32_t available = iree_atomic_load(&channel->remote_chunk_credits,
+  uint64_t consumed = iree_atomic_load(&channel->remote_chunk_credit_consumed,
                                        iree_memory_order_acquire);
   while (true) {
-    if (available <= 0) {
+    uint64_t credit_limit = iree_atomic_load(
+        &channel->remote_chunk_credit_limit, iree_memory_order_acquire);
+    if (consumed >= credit_limit) {
       return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
     }
-    int32_t updated = available - 1;
+    uint64_t updated = consumed + 1;
     if (iree_atomic_compare_exchange_weak(
-            &channel->remote_chunk_credits, &available, updated,
+            &channel->remote_chunk_credit_consumed, &consumed, updated,
             iree_memory_order_acq_rel, iree_memory_order_acquire)) {
       return iree_ok_status();
     }
@@ -311,9 +369,9 @@ static iree_status_t iree_net_bulk_channel_consume_remote_chunk_credit(
 
 static void iree_net_bulk_channel_refund_remote_chunk_credit(
     iree_net_bulk_channel_t* channel) {
-  int32_t previous = iree_atomic_fetch_add(&channel->remote_chunk_credits, 1,
-                                           iree_memory_order_acq_rel);
-  IREE_ASSERT_LT(previous, channel->remote_chunk_credit_capacity);
+  uint64_t previous = iree_atomic_fetch_sub(
+      &channel->remote_chunk_credit_consumed, 1, iree_memory_order_acq_rel);
+  IREE_ASSERT_GT(previous, 0u);
 }
 
 // Submit callback for frame_sender: routes sends through the message endpoint.
@@ -442,17 +500,17 @@ static iree_status_t iree_net_bulk_channel_on_message(
             IREE_STATUS_INVALID_ARGUMENT,
             "CREDIT frames cannot carry transfer or chunk metadata");
       }
-      if (header.total_size == 0 || header.total_size > INT32_MAX) {
+      if (header.total_size == 0) {
         return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                                "invalid bulk credit count: %" PRIu64,
+                                "invalid bulk credit limit: %" PRIu64,
                                 header.total_size);
       }
+      uint32_t credit_delta = 0;
       uint32_t available_credit_count = 0;
-      IREE_RETURN_IF_ERROR(iree_net_bulk_channel_add_remote_chunk_credits(
-          channel, (uint32_t)header.total_size, &available_credit_count));
-      if (channel->callbacks.on_credit) {
-        channel->callbacks.on_credit(channel->callbacks.user_data,
-                                     (uint32_t)header.total_size,
+      IREE_RETURN_IF_ERROR(iree_net_bulk_channel_set_remote_chunk_credit_limit(
+          channel, header.total_size, &credit_delta, &available_credit_count));
+      if (channel->callbacks.on_credit && credit_delta > 0) {
+        channel->callbacks.on_credit(channel->callbacks.user_data, credit_delta,
                                      available_credit_count);
       }
       return iree_ok_status();
@@ -557,8 +615,12 @@ iree_status_t iree_net_bulk_channel_create(
     channel->header_pool = header_pool;
     channel->callbacks = callbacks;
     channel->remote_chunk_credit_capacity =
-        (int32_t)resolved_options.remote_chunk_credit_capacity;
-    iree_atomic_store(&channel->remote_chunk_credits, 0,
+        (uint64_t)resolved_options.remote_chunk_credit_capacity;
+    iree_atomic_store(&channel->local_chunk_credit_limit, 0,
+                      iree_memory_order_relaxed);
+    iree_atomic_store(&channel->remote_chunk_credit_limit, 0,
+                      iree_memory_order_relaxed);
+    iree_atomic_store(&channel->remote_chunk_credit_consumed, 0,
                       iree_memory_order_relaxed);
     iree_atomic_store(&channel->state,
                       (int32_t)IREE_NET_BULK_CHANNEL_STATE_CREATED,
@@ -711,10 +773,15 @@ iree_net_carrier_send_budget_t iree_net_bulk_channel_query_send_budget(
 uint32_t iree_net_bulk_channel_remote_chunk_credit_count(
     const iree_net_bulk_channel_t* channel) {
   IREE_ASSERT_ARGUMENT(channel);
-  int32_t credit_count = iree_atomic_load(
-      &((iree_net_bulk_channel_t*)channel)->remote_chunk_credits,
+  uint64_t credit_limit = iree_atomic_load(
+      &((iree_net_bulk_channel_t*)channel)->remote_chunk_credit_limit,
       iree_memory_order_acquire);
-  return credit_count > 0 ? (uint32_t)credit_count : 0;
+  uint64_t consumed = iree_atomic_load(
+      &((iree_net_bulk_channel_t*)channel)->remote_chunk_credit_consumed,
+      iree_memory_order_acquire);
+  if (credit_limit <= consumed) return 0;
+  uint64_t available = credit_limit - consumed;
+  return available > UINT32_MAX ? UINT32_MAX : (uint32_t)available;
 }
 
 //===----------------------------------------------------------------------===//
@@ -794,18 +861,31 @@ iree_status_t iree_net_bulk_channel_send_complete(
 iree_status_t iree_net_bulk_channel_send_credit(
     iree_net_bulk_channel_t* channel, uint32_t credit_delta,
     uint64_t operation_user_data) {
-  if (credit_delta == 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "bulk credit count must be non-zero");
+  uint64_t credit_limit = 0;
+  iree_status_t status = iree_net_bulk_channel_grant_local_chunk_credits(
+      channel, credit_delta, &credit_limit);
+  if (iree_status_is_ok(status)) {
+    status = iree_net_bulk_channel_send_frame(
+        channel, IREE_NET_BULK_FRAME_TYPE_CREDIT, IREE_NET_BULK_FRAME_FLAG_NONE,
+        /*transfer_id=*/0, /*total_size=*/credit_limit, /*chunk_offset=*/0,
+        /*chunk_length=*/0, /*sequence=*/0, iree_async_span_list_empty(),
+        operation_user_data, /*consumes_remote_chunk_credit=*/false);
   }
-  if (credit_delta > INT32_MAX) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "invalid bulk credit count: %" PRIu32,
-                            credit_delta);
+  if (!iree_status_is_ok(status) && credit_limit > 0) {
+    iree_net_bulk_channel_revoke_local_chunk_credits(channel, credit_delta,
+                                                     credit_limit);
   }
+  return status;
+}
+
+iree_status_t iree_net_bulk_channel_refresh_credit(
+    iree_net_bulk_channel_t* channel, uint64_t operation_user_data) {
+  uint64_t credit_limit = iree_atomic_load(&channel->local_chunk_credit_limit,
+                                           iree_memory_order_acquire);
+  if (credit_limit == 0) return iree_ok_status();
   return iree_net_bulk_channel_send_frame(
       channel, IREE_NET_BULK_FRAME_TYPE_CREDIT, IREE_NET_BULK_FRAME_FLAG_NONE,
-      /*transfer_id=*/0, /*total_size=*/credit_delta, /*chunk_offset=*/0,
+      /*transfer_id=*/0, /*total_size=*/credit_limit, /*chunk_offset=*/0,
       /*chunk_length=*/0, /*sequence=*/0, iree_async_span_list_empty(),
       operation_user_data, /*consumes_remote_chunk_credit=*/false);
 }

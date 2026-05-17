@@ -13,7 +13,13 @@
 // different factory functions.
 
 #include <atomic>
+#include <cstdlib>
+#include <cstring>
+#include <map>
+#include <memory>
+#include <string>
 #include <thread>
+#include <utility>
 
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/proactor.h"
@@ -22,7 +28,9 @@
 #include "iree/base/threading/notification.h"
 #include "iree/hal/api.h"
 #include "iree/hal/cts/util/registry.h"
+#include "iree/hal/drivers/amdgpu/registration/driver_module.h"
 #include "iree/hal/drivers/local_task/registration/driver_module.h"
+#include "iree/hal/drivers/vulkan/registration/driver_module.h"
 #include "iree/hal/remote/client/api.h"
 #include "iree/hal/remote/server/api.h"
 #include "iree/hal/remote/util/recv_pool.h"
@@ -61,6 +69,9 @@ struct RemoteBackendContext {
 
   // Remote HAL server accepting the loopback client connection.
   iree_hal_remote_server_t* server = nullptr;
+
+  // Loopback address unique to this backend context.
+  std::string server_address;
 
   ~RemoteBackendContext() { Teardown(); }
 
@@ -146,11 +157,22 @@ struct RemoteBackendContext {
 // GTest environment that tears down the remote backend context at program exit.
 class RemoteBackendEnvironment : public ::testing::Environment {
  public:
-  RemoteBackendContext* context() { return &context_; }
-  void TearDown() override { context_.Teardown(); }
+  RemoteBackendContext* context(const char* backend_name) {
+    auto& context = contexts_[backend_name];
+    if (!context) context = std::make_unique<RemoteBackendContext>();
+    return context.get();
+  }
+
+  void TearDown() override {
+    for (auto& entry : contexts_) {
+      entry.second->Teardown();
+    }
+    contexts_.clear();
+  }
 
  private:
-  RemoteBackendContext context_;
+  // Remote backend contexts keyed by backend name.
+  std::map<std::string, std::unique_ptr<RemoteBackendContext>> contexts_;
 };
 
 static RemoteBackendEnvironment* GetEnvironment() {
@@ -163,12 +185,15 @@ static RemoteBackendEnvironment* GetEnvironment() {
   return env;
 }
 
-// Creates the server-side local-task device.
-static iree_status_t CreateLocalTaskServerDevice(
-    iree_async_proactor_pool_t* proactor_pool, iree_hal_driver_t** out_driver,
+using DriverRegisterFn =
+    iree_status_t (*)(iree_hal_driver_registry_t* registry);
+
+// Creates a server-side device for |driver_name|.
+static iree_status_t CreateRegisteredServerDevice(
+    iree_async_proactor_pool_t* proactor_pool, iree_string_view_t driver_name,
+    DriverRegisterFn register_driver, iree_hal_driver_t** out_driver,
     iree_hal_device_t** out_device) {
-  iree_status_t status = iree_hal_local_task_driver_module_register(
-      iree_hal_driver_registry_default());
+  iree_status_t status = register_driver(iree_hal_driver_registry_default());
   if (iree_status_is_already_exists(status)) {
     iree_status_ignore(status);
     status = iree_ok_status();
@@ -177,8 +202,8 @@ static iree_status_t CreateLocalTaskServerDevice(
   iree_hal_driver_t* driver = nullptr;
   if (iree_status_is_ok(status)) {
     status = iree_hal_driver_registry_try_create(
-        iree_hal_driver_registry_default(),
-        iree_make_cstring_view("local-task"), iree_allocator_system(), &driver);
+        iree_hal_driver_registry_default(), driver_name,
+        iree_allocator_system(), &driver);
   }
 
   iree_hal_device_t* device = nullptr;
@@ -200,16 +225,52 @@ static iree_status_t CreateLocalTaskServerDevice(
   return status;
 }
 
+static iree_status_t MapUnavailableServerDeviceStatus(
+    iree_status_t status, const char* backend_name) {
+  if (iree_status_is_not_found(status)) {
+    iree_status_ignore(status);
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "remote CTS backend '%s' is unavailable",
+                            backend_name);
+  }
+  return status;
+}
+
+static iree_status_t CreateLocalTaskServerDevice(
+    iree_async_proactor_pool_t* proactor_pool, iree_hal_driver_t** out_driver,
+    iree_hal_device_t** out_device) {
+  return CreateRegisteredServerDevice(
+      proactor_pool, IREE_SV("local-task"),
+      iree_hal_local_task_driver_module_register, out_driver, out_device);
+}
+
+static iree_status_t CreateAmdgpuServerDevice(
+    iree_async_proactor_pool_t* proactor_pool, iree_hal_driver_t** out_driver,
+    iree_hal_device_t** out_device) {
+  return CreateRegisteredServerDevice(proactor_pool, IREE_SV("amdgpu"),
+                                      iree_hal_amdgpu_driver_module_register,
+                                      out_driver, out_device);
+}
+
+static iree_status_t CreateVulkanServerDevice(
+    iree_async_proactor_pool_t* proactor_pool, iree_hal_driver_t** out_driver,
+    iree_hal_device_t** out_device) {
+  return CreateRegisteredServerDevice(proactor_pool, IREE_SV("vulkan"),
+                                      iree_hal_vulkan_driver_module_register,
+                                      out_driver, out_device);
+}
+
 // Creates a remote client device connected to a server via loopback.
 // |create_server_device| creates the server-side device+driver pair using
 // the shared proactor pool.
 static iree_status_t CreateRemoteDevice(
     const iree_hal_device_create_params_t* create_params,
+    const char* backend_name,
     iree_status_t (*create_server_device)(iree_async_proactor_pool_t*,
                                           iree_hal_driver_t**,
                                           iree_hal_device_t**),
     iree_hal_driver_t** out_driver, iree_hal_device_t** out_device) {
-  RemoteBackendContext* ctx = GetEnvironment()->context();
+  RemoteBackendContext* ctx = GetEnvironment()->context(backend_name);
   *out_driver = nullptr;
   *out_device = nullptr;
 
@@ -254,6 +315,7 @@ static iree_status_t CreateRemoteDevice(
   if (iree_status_is_ok(status)) {
     status = create_server_device(ctx->proactor_pool, &ctx->server_driver,
                                   &ctx->server_device);
+    status = MapUnavailableServerDeviceStatus(status, backend_name);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_device_group_create_from_device(
@@ -263,6 +325,7 @@ static iree_status_t CreateRemoteDevice(
 
   // Create and start the server.
   if (iree_status_is_ok(status)) {
+    ctx->server_address = backend_name;
     iree_async_axis_t server_axes[] = {0x0200};
     uint64_t server_epochs[] = {0};
     iree_net_session_topology_t server_topology = {};
@@ -275,7 +338,8 @@ static iree_status_t CreateRemoteDevice(
     iree_hal_remote_server_options_t server_options;
     iree_hal_remote_server_options_initialize(&server_options);
     server_options.transport_factory = ctx->factory;
-    server_options.bind_address = IREE_SV("cts-server");
+    server_options.bind_address =
+        iree_make_cstring_view(ctx->server_address.c_str());
     server_options.local_topology = &server_topology;
     server_options.max_connections = 1;
 
@@ -295,7 +359,8 @@ static iree_status_t CreateRemoteDevice(
     iree_hal_remote_client_device_options_t client_options;
     iree_hal_remote_client_device_options_initialize(&client_options);
     client_options.transport_factory = ctx->factory;
-    client_options.server_address = IREE_SV("cts-server");
+    client_options.server_address =
+        iree_make_cstring_view(ctx->server_address.c_str());
 
     status = iree_hal_remote_client_device_create(
         IREE_SV("remote"), &client_options, create_params, ctx->recv_pool,
@@ -354,15 +419,27 @@ static iree_status_t CreateRemoteDevice(
 static iree_status_t CreateRemoteLocalTask(
     const iree_hal_device_create_params_t* create_params,
     iree_hal_driver_t** out_driver, iree_hal_device_t** out_device) {
-  return CreateRemoteDevice(create_params, CreateLocalTaskServerDevice,
-                            out_driver, out_device);
+  return CreateRemoteDevice(create_params, "remote_local_task",
+                            CreateLocalTaskServerDevice, out_driver,
+                            out_device);
 }
 
-static bool remote_local_task_registered_ = [] {
-  BackendInfo info;
-  info.name = "remote_local_task";
-  info.factory = CreateRemoteLocalTask;
-  info.unsupported_tests = {
+static iree_status_t CreateRemoteAmdgpu(
+    const iree_hal_device_create_params_t* create_params,
+    iree_hal_driver_t** out_driver, iree_hal_device_t** out_device) {
+  return CreateRemoteDevice(create_params, "remote_amdgpu",
+                            CreateAmdgpuServerDevice, out_driver, out_device);
+}
+
+static iree_status_t CreateRemoteVulkan(
+    const iree_hal_device_create_params_t* create_params,
+    iree_hal_driver_t** out_driver, iree_hal_device_t** out_device) {
+  return CreateRemoteDevice(create_params, "remote_vulkan",
+                            CreateVulkanServerDevice, out_driver, out_device);
+}
+
+static std::vector<TestUnsupported> RemoteUnsupportedTests() {
+  return {
       {"DriverTest.*",
        "remote devices are created directly, not through driver enumeration"},
       {"EventTest.*", "events not implemented"},
@@ -370,28 +447,36 @@ static bool remote_local_task_registered_ = [] {
        "remote client returns true for all formats (server validates)"},
       {"ExecutableTest.*",
        "export info queries require EXECUTABLE_QUERY_EXPORT RPC"},
-      {"FileTest.*", "file I/O not implemented"},
-      {"CommandBufferCopyBufferTest.*",
-       "command buffer copy CTS verifies device-local buffers through file "
-       "import, which remote devices do not implement"},
-      {"CommandBufferStressTest.*",
-       "command buffer stress CTS verifies device-local buffers through file "
-       "import, which remote devices do not implement"},
-      {"QueueAllocaTest.*",
-       "queue alloca CTS verifies device-local buffers through file import, "
-       "which remote devices do not implement"},
-      {"QueueTransferTest.*",
-       "queue transfer CTS verifies device-local buffers through file import, "
-       "which remote devices do not implement"},
       {"QueueHostCallTest.*", "host calls not implemented"},
       {"TransientBufferTest.*",
        "transient command buffer allocations not implemented"},
   };
+}
+
+static void RegisterRemoteBackend(const char* name, DeviceFactory factory) {
+  BackendInfo info;
+  info.name = name;
+  info.factory = std::move(factory);
+  info.unsupported_tests = RemoteUnsupportedTests();
   CtsRegistry::RegisterBackend({
-      "remote_local_task",
+      name,
       std::move(info),
-      {"mapping"},
+      {"file_io", "mapping"},
   });
+}
+
+static bool RemoteHardwareBackendsEnabled() {
+  const char* value =
+      std::getenv("IREE_HAL_REMOTE_CTS_ENABLE_HARDWARE_BACKENDS");
+  return value && value[0] != '\0' && std::strcmp(value, "0") != 0;
+}
+
+static bool remote_backends_registered_ = [] {
+  RegisterRemoteBackend("remote_local_task", CreateRemoteLocalTask);
+  if (RemoteHardwareBackendsEnabled()) {
+    RegisterRemoteBackend("remote_amdgpu", CreateRemoteAmdgpu);
+    RegisterRemoteBackend("remote_vulkan", CreateRemoteVulkan);
+  }
   return true;
 }();
 

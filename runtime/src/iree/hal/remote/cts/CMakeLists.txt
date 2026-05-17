@@ -21,7 +21,9 @@ iree_cc_library(
     iree::base::threading
     iree::hal
     iree::hal::cts::util::registry
+    iree::hal::drivers::amdgpu::registration
     iree::hal::drivers::local_task::registration
+    iree::hal::drivers::vulkan::registration
     iree::hal::remote::client
     iree::hal::remote::server
     iree::hal::remote::util::recv_pool

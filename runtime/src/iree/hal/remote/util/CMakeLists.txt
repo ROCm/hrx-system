@@ -11,6 +11,30 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
+    bulk_transfer_tracker
+  HDRS
+    "bulk_transfer_tracker.h"
+  SRCS
+    "bulk_transfer_tracker.c"
+  DEPS
+    iree::base
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    bulk_transfer_tracker_test
+  SRCS
+    "bulk_transfer_tracker_test.cc"
+  DEPS
+    ::bulk_transfer_tracker
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_library(
+  NAME
     queue_header_pool
   HDRS
     "queue_header_pool.h"

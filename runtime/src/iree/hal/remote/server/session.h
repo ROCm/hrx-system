@@ -9,6 +9,7 @@
 
 #include "iree/async/frontier.h"
 #include "iree/base/api.h"
+#include "iree/base/threading/mutex.h"
 #include "iree/hal/api.h"
 #include "iree/hal/remote/server/resource_table.h"
 #include "iree/net/channel/queue/queue_channel.h"
@@ -21,6 +22,7 @@ extern "C" {
 
 typedef struct iree_hal_remote_server_t iree_hal_remote_server_t;
 typedef struct iree_net_bulk_channel_t iree_net_bulk_channel_t;
+typedef struct iree_net_bulk_transfer_table_t iree_net_bulk_transfer_table_t;
 
 typedef uint8_t iree_hal_remote_server_epoch_slot_state_t;
 
@@ -52,6 +54,12 @@ typedef struct iree_hal_remote_server_session_t {
 
   // Bulk channel for large payload transfers (NULL until bulk endpoint opens).
   iree_net_bulk_channel_t* bulk_channel;
+
+  // Protects active bulk transfer state.
+  iree_slim_mutex_t bulk_transfer_mutex;
+
+  // Fixed-capacity table of active bulk transfers.
+  iree_net_bulk_transfer_table_t* bulk_transfers;
 
   // Resource table mapping resource_ids to retained HAL resources (buffers,
   // semaphores, etc.). Initialized when the session is accepted, deinitialized

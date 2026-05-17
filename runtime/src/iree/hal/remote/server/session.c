@@ -13,6 +13,7 @@
 #include "iree/hal/remote/protocol/common.h"
 #include "iree/hal/remote/protocol/control.h"
 #include "iree/hal/remote/protocol/queue.h"
+#include "iree/hal/remote/server/bulk.h"
 #include "iree/hal/remote/server/server.h"
 #include "iree/hal/remote/util/queue_header_pool.h"
 #include "iree/net/channel/bulk/bulk_channel.h"
@@ -233,6 +234,10 @@ void iree_hal_remote_server_remove_session(iree_hal_remote_server_t* server,
   // Release owner-managed nodes that were pending in sequence windows.
   iree_hal_remote_server_free_resource_release_nodes(pending_releases);
   iree_hal_remote_server_free_command_completion_nodes(pending_completions);
+
+  // Fail and release active bulk transfers before detaching the bulk channel.
+  iree_hal_remote_server_session_deinitialize_bulk_transfers(
+      &server->sessions[slot]);
 
   // Detach channels from their endpoints before releasing the session. Command
   // completions may hold retained references to the queue channel that outlive
@@ -1279,6 +1284,109 @@ static iree_status_t iree_hal_remote_server_submit_buffer_dealloca(
   return iree_hal_device_queue_dealloca(
       local_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_list, signal_list, buffer,
       (iree_hal_dealloca_flags_t)op->dealloca_flags);
+}
+
+static iree_status_t iree_hal_remote_server_submit_client_file_read(
+    void* user_data, iree_hal_device_t* local_device,
+    iree_hal_semaphore_list_t wait_list,
+    iree_hal_semaphore_list_t signal_list) {
+  iree_hal_remote_server_op_context_t* context =
+      (iree_hal_remote_server_op_context_t*)user_data;
+  if (context->command_data.data_length <
+      sizeof(iree_hal_remote_client_file_read_op_t)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "CLIENT_FILE_READ command too short: %" PRIhsz
+                            " < %" PRIhsz,
+                            context->command_data.data_length,
+                            sizeof(iree_hal_remote_client_file_read_op_t));
+  }
+  const iree_hal_remote_client_file_read_op_t* op =
+      (const iree_hal_remote_client_file_read_op_t*)context->command_data.data;
+  if (op->transfer_id == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "CLIENT_FILE_READ transfer_id must be non-zero");
+  }
+  if (op->read_flags != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported CLIENT_FILE_READ flags: 0x%" PRIx64,
+                            op->read_flags);
+  }
+  if (op->length > IREE_DEVICE_SIZE_MAX) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "CLIENT_FILE_READ length %" PRIu64
+                            " exceeds device size max %" PRIu64,
+                            op->length, (uint64_t)IREE_DEVICE_SIZE_MAX);
+  }
+
+  iree_hal_remote_resource_id_t target_id =
+      iree_hal_remote_server_resolve_resource_id(context->session_slot,
+                                                 op->target_buffer_id);
+  iree_hal_buffer_t* target_buffer =
+      (iree_hal_buffer_t*)iree_hal_remote_resource_table_lookup(
+          &context->session_slot->resource_table,
+          IREE_HAL_REMOTE_RESOURCE_TYPE_BUFFER, target_id);
+  if (!target_buffer) {
+    return iree_make_status(
+        IREE_STATUS_NOT_FOUND,
+        "CLIENT_FILE_READ target buffer 0x%016" PRIx64 " not found", target_id);
+  }
+
+  return iree_hal_remote_server_bulk_submit_client_file_read(
+      context->session_slot, local_device, wait_list, signal_list,
+      op->transfer_id, target_buffer, op->target_offset,
+      (iree_device_size_t)op->length, (iree_hal_read_flags_t)op->read_flags);
+}
+
+static iree_status_t iree_hal_remote_server_submit_client_file_write(
+    void* user_data, iree_hal_device_t* local_device,
+    iree_hal_semaphore_list_t wait_list,
+    iree_hal_semaphore_list_t signal_list) {
+  iree_hal_remote_server_op_context_t* context =
+      (iree_hal_remote_server_op_context_t*)user_data;
+  if (context->command_data.data_length <
+      sizeof(iree_hal_remote_client_file_write_op_t)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "CLIENT_FILE_WRITE command too short: %" PRIhsz
+                            " < %" PRIhsz,
+                            context->command_data.data_length,
+                            sizeof(iree_hal_remote_client_file_write_op_t));
+  }
+  const iree_hal_remote_client_file_write_op_t* op =
+      (const iree_hal_remote_client_file_write_op_t*)context->command_data.data;
+  if (op->transfer_id == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "CLIENT_FILE_WRITE transfer_id must be non-zero");
+  }
+  if (op->write_flags != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported CLIENT_FILE_WRITE flags: 0x%" PRIx64,
+                            op->write_flags);
+  }
+  if (op->length > IREE_HOST_SIZE_MAX) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "CLIENT_FILE_WRITE length %" PRIu64
+                            " exceeds host size max %" PRIhsz,
+                            op->length, IREE_HOST_SIZE_MAX);
+  }
+
+  iree_hal_remote_resource_id_t source_id =
+      iree_hal_remote_server_resolve_resource_id(context->session_slot,
+                                                 op->source_buffer_id);
+  iree_hal_buffer_t* source_buffer =
+      (iree_hal_buffer_t*)iree_hal_remote_resource_table_lookup(
+          &context->session_slot->resource_table,
+          IREE_HAL_REMOTE_RESOURCE_TYPE_BUFFER, source_id);
+  if (!source_buffer) {
+    return iree_make_status(IREE_STATUS_NOT_FOUND,
+                            "CLIENT_FILE_WRITE source buffer 0x%016" PRIx64
+                            " not found",
+                            source_id);
+  }
+
+  return iree_hal_remote_server_bulk_submit_client_file_write(
+      context->session_slot, local_device, wait_list, signal_list,
+      op->transfer_id, source_buffer, op->source_offset,
+      (iree_device_size_t)op->length, (iree_hal_write_flags_t)op->write_flags);
 }
 
 static iree_status_t iree_hal_remote_server_resolve_dispatch_config(
@@ -2896,6 +3004,16 @@ static iree_status_t iree_hal_remote_server_on_command(
             session_slot, wait_frontier, signal_frontier,
             iree_hal_remote_server_submit_buffer_update, &op_context);
         break;
+      case IREE_HAL_REMOTE_QUEUE_OP_CLIENT_FILE_READ:
+        status = iree_hal_remote_server_submit_command(
+            session_slot, wait_frontier, signal_frontier,
+            iree_hal_remote_server_submit_client_file_read, &op_context);
+        break;
+      case IREE_HAL_REMOTE_QUEUE_OP_CLIENT_FILE_WRITE:
+        status = iree_hal_remote_server_submit_command(
+            session_slot, wait_frontier, signal_frontier,
+            iree_hal_remote_server_submit_client_file_write, &op_context);
+        break;
       case IREE_HAL_REMOTE_QUEUE_OP_DISPATCH:
         status = iree_hal_remote_server_submit_command(
             session_slot, wait_frontier, signal_frontier,
@@ -2939,55 +3057,41 @@ static void iree_hal_remote_server_on_queue_transport_error(
   iree_status_ignore(status);
 }
 
-// Header buffers used by the bulk channel frame sender. Bulk DATA payloads are
-// not copied into this pool; only the 40-byte frame headers are retained until
-// send completion.
-#define IREE_HAL_REMOTE_BULK_HEADER_POOL_BUFFER_COUNT 128
-#define IREE_HAL_REMOTE_BULK_HEADER_POOL_BUFFER_SIZE 128
-
 static iree_status_t iree_hal_remote_server_on_bulk_start(
     void* user_data, uint64_t transfer_id, uint64_t total_size,
     iree_net_bulk_frame_flags_t flags) {
-  (void)user_data;
-  (void)transfer_id;
-  (void)total_size;
-  (void)flags;
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "remote server bulk START is not implemented yet");
+  iree_hal_remote_server_session_t* session_slot =
+      (iree_hal_remote_server_session_t*)user_data;
+  return iree_hal_remote_server_bulk_on_start(session_slot, transfer_id,
+                                              total_size, flags);
 }
 
 static iree_status_t iree_hal_remote_server_on_bulk_data(
     void* user_data, uint64_t transfer_id, uint64_t chunk_offset,
     uint32_t sequence, iree_net_bulk_frame_flags_t flags,
     iree_const_byte_span_t chunk_data, iree_async_buffer_lease_t* lease) {
-  (void)user_data;
-  (void)transfer_id;
-  (void)chunk_offset;
-  (void)sequence;
-  (void)flags;
-  (void)chunk_data;
-  (void)lease;
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "remote server bulk DATA is not implemented yet");
+  iree_hal_remote_server_session_t* session_slot =
+      (iree_hal_remote_server_session_t*)user_data;
+  return iree_hal_remote_server_bulk_on_data(session_slot, transfer_id,
+                                             chunk_offset, sequence, flags,
+                                             chunk_data, lease);
 }
 
 static iree_status_t iree_hal_remote_server_on_bulk_complete(
     void* user_data, uint64_t transfer_id) {
-  (void)user_data;
-  (void)transfer_id;
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "remote server bulk COMPLETE is not implemented yet");
+  iree_hal_remote_server_session_t* session_slot =
+      (iree_hal_remote_server_session_t*)user_data;
+  return iree_hal_remote_server_bulk_on_complete(session_slot, transfer_id);
 }
 
 static iree_status_t iree_hal_remote_server_on_bulk_abort(
     void* user_data, uint64_t transfer_id, iree_const_byte_span_t abort_data,
     iree_async_buffer_lease_t* lease) {
-  (void)user_data;
-  (void)transfer_id;
+  iree_hal_remote_server_session_t* session_slot =
+      (iree_hal_remote_server_session_t*)user_data;
   (void)abort_data;
   (void)lease;
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "remote server bulk ABORT is not implemented yet");
+  return iree_hal_remote_server_bulk_on_abort(session_slot, transfer_id);
 }
 
 static void iree_hal_remote_server_on_bulk_transport_error(
@@ -3003,19 +3107,32 @@ static void iree_hal_remote_server_on_bulk_transport_error(
 
 static void iree_hal_remote_server_on_bulk_send_complete(
     void* user_data, uint64_t operation_user_data, iree_status_t status) {
-  (void)operation_user_data;
-  if (iree_status_is_ok(status)) {
-    iree_status_ignore(status);
+  iree_hal_remote_server_session_t* session_slot =
+      (iree_hal_remote_server_session_t*)user_data;
+  if (operation_user_data == 0) {
+    iree_hal_remote_server_bulk_on_send_complete(session_slot,
+                                                 operation_user_data, status);
     return;
   }
-  iree_hal_remote_server_on_bulk_transport_error(user_data, status);
+
+  iree_status_t transport_status = iree_ok_status();
+  if (!iree_status_is_ok(status)) {
+    transport_status = iree_status_clone(status);
+  }
+  iree_hal_remote_server_bulk_on_send_complete(session_slot,
+                                               operation_user_data, status);
+  if (!iree_status_is_ok(transport_status)) {
+    iree_hal_remote_server_on_bulk_transport_error(user_data, transport_status);
+  }
 }
 
 static void iree_hal_remote_server_on_bulk_credit(
     void* user_data, uint32_t credit_delta, uint32_t available_credit_count) {
-  (void)user_data;
   (void)credit_delta;
   (void)available_credit_count;
+  iree_hal_remote_server_session_t* session_slot =
+      (iree_hal_remote_server_session_t*)user_data;
+  iree_hal_remote_server_bulk_on_credit(session_slot);
 }
 
 // Context passed to the endpoint_ready callback to identify which session
@@ -3182,6 +3299,11 @@ static void iree_hal_remote_server_on_bulk_endpoint_ready(
 
   if (iree_status_is_ok(status)) {
     status = iree_net_bulk_channel_activate(bulk_channel);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_net_bulk_channel_send_credit(
+        bulk_channel, IREE_HAL_REMOTE_BULK_INITIAL_CHUNK_CREDIT,
+        /*operation_user_data=*/0);
   }
 
   if (iree_status_is_ok(status)) {

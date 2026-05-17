@@ -233,9 +233,21 @@ iree_status_t iree_net_bulk_channel_send_complete(
 
 // Sends a CREDIT frame advertising additional local DATA chunk receive
 // capacity.
+//
+// The local API takes a delta, but the wire frame carries the cumulative local
+// receive credit grant. Re-sending the same cumulative grant is therefore
+// idempotent and does not expand the peer's send window.
 iree_status_t iree_net_bulk_channel_send_credit(
     iree_net_bulk_channel_t* channel, uint32_t credit_delta,
     uint64_t operation_user_data);
+
+// Re-sends the last cumulative local DATA chunk receive credit grant.
+//
+// This does not advertise any additional capacity. It is useful after receiving
+// a transfer START frame so peers that missed bootstrap credit during endpoint
+// activation can make progress without inflating the bounded DATA window.
+iree_status_t iree_net_bulk_channel_refresh_credit(
+    iree_net_bulk_channel_t* channel, uint64_t operation_user_data);
 
 // Sends an ABORT frame for |transfer_id| with optional payload data.
 //

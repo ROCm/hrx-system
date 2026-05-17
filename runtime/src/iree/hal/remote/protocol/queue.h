@@ -80,6 +80,8 @@ typedef enum iree_hal_remote_queue_op_type_e {
   // ── File ────────────────────────────────────────────────────────────────
   IREE_HAL_REMOTE_QUEUE_OP_FILE_READ = 0x0006,
   IREE_HAL_REMOTE_QUEUE_OP_FILE_WRITE = 0x0007,
+  IREE_HAL_REMOTE_QUEUE_OP_CLIENT_FILE_READ = 0x000D,
+  IREE_HAL_REMOTE_QUEUE_OP_CLIENT_FILE_WRITE = 0x000E,
 
   // ── Execution ───────────────────────────────────────────────────────────
   IREE_HAL_REMOTE_QUEUE_OP_DISPATCH = 0x0008,
@@ -227,6 +229,37 @@ typedef struct iree_hal_remote_file_write_op_t {
   uint64_t write_flags;  // Reserved, must be 0.
 } iree_hal_remote_file_write_op_t;
 static_assert(sizeof(iree_hal_remote_file_write_op_t) == 56, "");
+
+// CLIENT_FILE_READ: Upload bytes from a client-local file into a server buffer.
+//
+// The client keeps the source file and offset in local transfer state keyed by
+// transfer_id. The server receives DATA frames on the bulk channel and writes
+// them into target_buffer_id.
+typedef struct iree_hal_remote_client_file_read_op_t {
+  iree_hal_remote_queue_op_header_t header;
+  uint64_t transfer_id;
+  iree_hal_remote_resource_id_t target_buffer_id;
+  uint64_t target_offset;
+  uint64_t length;
+  uint64_t read_flags;  // Reserved, must be 0.
+} iree_hal_remote_client_file_read_op_t;
+static_assert(sizeof(iree_hal_remote_client_file_read_op_t) == 48, "");
+
+// CLIENT_FILE_WRITE: Download bytes from a server buffer into a client file.
+//
+// The client keeps the target file and offset in local transfer state keyed by
+// transfer_id. The server streams DATA frames from source_buffer_id and delays
+// queue completion until the client acknowledges file completion with a bulk
+// COMPLETE frame.
+typedef struct iree_hal_remote_client_file_write_op_t {
+  iree_hal_remote_queue_op_header_t header;
+  uint64_t transfer_id;
+  iree_hal_remote_resource_id_t source_buffer_id;
+  uint64_t source_offset;
+  uint64_t length;
+  uint64_t write_flags;  // Reserved, must be 0.
+} iree_hal_remote_client_file_write_op_t;
+static_assert(sizeof(iree_hal_remote_client_file_write_op_t) == 48, "");
 
 // DISPATCH: Execute a compute dispatch.
 // Variable-length tail: constants array followed by bindings array.

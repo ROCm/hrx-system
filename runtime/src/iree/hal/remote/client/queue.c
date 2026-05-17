@@ -15,6 +15,7 @@
 #include "iree/hal/remote/client/bulk.h"
 #include "iree/hal/remote/client/command_buffer.h"
 #include "iree/hal/remote/client/executable.h"
+#include "iree/hal/remote/client/file.h"
 #include "iree/hal/remote/client/semaphore.h"
 #include "iree/hal/remote/protocol/queue.h"
 #include "iree/hal/remote/util/queue_header_pool.h"
@@ -80,6 +81,14 @@ static void iree_hal_remote_pending_signal_callback(void* user_data,
 //===----------------------------------------------------------------------===//
 // Queue operations
 //===----------------------------------------------------------------------===//
+
+// Maximum host-allocation file slice sent inline on the queue channel.
+//
+// Larger client-local files use the bulk channel so latency-sensitive queue
+// traffic is not trapped behind file payloads. This conservative bound leaves
+// room for queue frame headers and frontiers under the default frame size.
+#define IREE_HAL_REMOTE_CLIENT_FILE_INLINE_UPDATE_MAX_LENGTH \
+  (IREE_NET_QUEUE_FRAME_DEFAULT_MAX_SIZE / 2)
 
 // Registers frontier waiters for each signal semaphore. Each waiter fires when
 // the server echoes the submission epoch in an ADVANCE frame, signaling the
@@ -1881,6 +1890,324 @@ iree_status_t iree_hal_remote_client_device_queue_copy(
   return status;
 }
 
+static iree_status_t iree_hal_remote_client_device_queue_read_client_file_now(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_file_t* source_file,
+    const iree_hal_remote_client_file_view_t* source_file_view,
+    uint64_t source_offset, iree_hal_buffer_t* target_buffer,
+    iree_device_size_t target_offset, iree_device_size_t length,
+    iree_hal_read_flags_t flags) {
+  iree_hal_remote_client_device_t* device =
+      iree_hal_remote_client_device_cast(base_device);
+  const uint64_t source_length = (uint64_t)length;
+  uint64_t source_end = source_offset;
+  const bool source_range_overflow = source_offset > UINT64_MAX - source_length;
+  if (!source_range_overflow) {
+    source_end = source_offset + source_length;
+  }
+
+  if (source_range_overflow || source_offset > source_file_view->length ||
+      source_length > source_file_view->length - source_offset) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "remote queue_read source range [%" PRIu64 ", %" PRIu64
+        ") exceeds client file length %" PRIu64,
+        source_offset, source_end, source_file_view->length);
+  }
+
+  if (source_file_view->kind ==
+          IREE_HAL_REMOTE_CLIENT_FILE_KIND_HOST_ALLOCATION &&
+      length <= IREE_HAL_REMOTE_CLIENT_FILE_INLINE_UPDATE_MAX_LENGTH) {
+    return iree_hal_remote_client_device_queue_update(
+        base_device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
+        source_file_view->host_allocation.data, (iree_host_size_t)source_offset,
+        target_buffer, target_offset, length, (iree_hal_update_flags_t)flags);
+  }
+
+  iree_hal_remote_client_file_read_op_t op;
+  memset(&op, 0, sizeof(op));
+  op.header.type = IREE_HAL_REMOTE_QUEUE_OP_CLIENT_FILE_READ;
+  iree_status_t status = iree_hal_remote_client_buffer_resolve_ref(
+      target_buffer, target_offset, &op.target_buffer_id, &op.target_offset);
+
+  uint64_t transfer_id = 0;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_client_bulk_begin_file_read(
+        device, source_file, source_file_view, source_offset, length,
+        &transfer_id);
+  }
+  op.transfer_id = transfer_id;
+  op.length = length;
+  op.read_flags = flags;
+  if (iree_status_is_ok(status)) {
+    iree_async_span_t span = iree_async_span_from_ptr(&op, sizeof(op));
+    iree_async_span_list_t payload = {&span, 1};
+    iree_hal_resource_t* resources[1] = {
+        (iree_hal_resource_t*)target_buffer,
+    };
+    status = iree_hal_remote_client_device_submit_queue_op_resources(
+        device, wait_semaphore_list, signal_semaphore_list,
+        /*required_wait_frontier=*/NULL, payload, IREE_ARRAYSIZE(resources),
+        resources, /*out_epoch=*/NULL);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_client_bulk_upload_file_read(device, transfer_id);
+  }
+  if (!iree_status_is_ok(status) && transfer_id != 0) {
+    iree_hal_remote_client_bulk_cancel_transfer(device, transfer_id);
+  }
+  return status;
+}
+
+typedef struct iree_hal_remote_deferred_file_read_t {
+  // Number of active timepoint callbacks plus the submitter hold.
+  iree_atomic_int32_t pending_count;
+  // Number of wait timepoints that still need to complete successfully.
+  iree_atomic_int32_t remaining_wait_count;
+  // Whether a wait or submit failure has already been reported to signals.
+  iree_atomic_int32_t failure_reported;
+  // Borrowed device pointer; the device outlives deferred queue work.
+  iree_hal_remote_client_device_t* device;
+  // Allocator used for this deferred read allocation.
+  iree_allocator_t host_allocator;
+  // Queue affinity supplied by the caller.
+  iree_hal_queue_affinity_t queue_affinity;
+  // Retained source file backing the client-local bytes.
+  iree_hal_file_t* source_file;
+  // Source file view captured when the caller submitted the read.
+  iree_hal_remote_client_file_view_t source_file_view;
+  // Byte offset in the source file.
+  uint64_t source_offset;
+  // Retained target buffer receiving the queued read contents.
+  iree_hal_buffer_t* target_buffer;
+  // Byte offset in the target buffer.
+  iree_device_size_t target_offset;
+  // Number of bytes to read.
+  iree_device_size_t length;
+  // Queue read flags supplied by the caller.
+  iree_hal_read_flags_t flags;
+  // Cloned wait list retained while timepoints are active.
+  iree_hal_semaphore_list_t wait_semaphore_list;
+  // Cloned signal list used by the deferred queue operation or failure path.
+  iree_hal_semaphore_list_t signal_semaphore_list;
+  // Offset of trailing iree_async_semaphore_timepoint_t storage.
+  iree_host_size_t timepoints_offset;
+} iree_hal_remote_deferred_file_read_t;
+
+static iree_async_semaphore_timepoint_t*
+iree_hal_remote_deferred_file_read_timepoints(
+    iree_hal_remote_deferred_file_read_t* deferred) {
+  return (iree_async_semaphore_timepoint_t*)((uint8_t*)deferred +
+                                             deferred->timepoints_offset);
+}
+
+static void iree_hal_remote_deferred_file_read_destroy(
+    iree_hal_remote_deferred_file_read_t* deferred) {
+  if (!deferred) return;
+  if (!iree_hal_semaphore_list_is_empty(deferred->wait_semaphore_list)) {
+    iree_hal_semaphore_list_free(deferred->wait_semaphore_list,
+                                 deferred->host_allocator);
+  }
+  if (!iree_hal_semaphore_list_is_empty(deferred->signal_semaphore_list)) {
+    iree_hal_semaphore_list_free(deferred->signal_semaphore_list,
+                                 deferred->host_allocator);
+  }
+  iree_hal_buffer_release(deferred->target_buffer);
+  iree_hal_file_release(deferred->source_file);
+  iree_allocator_free(deferred->host_allocator, deferred);
+}
+
+static void iree_hal_remote_deferred_file_read_release(
+    iree_hal_remote_deferred_file_read_t* deferred) {
+  if (iree_atomic_fetch_sub(&deferred->pending_count, 1,
+                            iree_memory_order_acq_rel) == 1) {
+    iree_hal_remote_deferred_file_read_destroy(deferred);
+  }
+}
+
+static void iree_hal_remote_deferred_file_read_report_failure(
+    iree_hal_remote_deferred_file_read_t* deferred, iree_status_t status) {
+  int32_t expected = 0;
+  if (iree_atomic_compare_exchange_strong(
+          &deferred->failure_reported, &expected, 1, iree_memory_order_acq_rel,
+          iree_memory_order_acquire)) {
+    iree_hal_semaphore_list_fail(deferred->signal_semaphore_list, status);
+  } else {
+    iree_status_ignore(status);
+  }
+}
+
+static void iree_hal_remote_deferred_file_read_submit(
+    iree_hal_remote_deferred_file_read_t* deferred) {
+  if (iree_atomic_load(&deferred->failure_reported,
+                       iree_memory_order_acquire)) {
+    return;
+  }
+
+  iree_status_t status =
+      iree_hal_remote_client_device_queue_read_client_file_now(
+          (iree_hal_device_t*)deferred->device, deferred->queue_affinity,
+          iree_hal_semaphore_list_empty(), deferred->signal_semaphore_list,
+          deferred->source_file, &deferred->source_file_view,
+          deferred->source_offset, deferred->target_buffer,
+          deferred->target_offset, deferred->length, deferred->flags);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_remote_deferred_file_read_report_failure(deferred, status);
+  }
+}
+
+static void iree_hal_remote_deferred_file_read_callback(
+    void* user_data, iree_async_semaphore_timepoint_t* timepoint,
+    iree_status_t status) {
+  iree_hal_remote_deferred_file_read_t* deferred =
+      (iree_hal_remote_deferred_file_read_t*)user_data;
+  (void)timepoint;
+
+  if (iree_status_is_ok(status)) {
+    if (iree_atomic_fetch_sub(&deferred->remaining_wait_count, 1,
+                              iree_memory_order_acq_rel) == 1) {
+      iree_hal_remote_deferred_file_read_submit(deferred);
+    }
+  } else {
+    iree_hal_remote_deferred_file_read_report_failure(deferred, status);
+  }
+  iree_hal_remote_deferred_file_read_release(deferred);
+}
+
+static iree_status_t iree_hal_remote_client_device_defer_queue_read_client_file(
+    iree_hal_remote_client_device_t* device,
+    iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_file_t* source_file,
+    const iree_hal_remote_client_file_view_t* source_file_view,
+    uint64_t source_offset, iree_hal_buffer_t* target_buffer,
+    iree_device_size_t target_offset, iree_device_size_t length,
+    iree_hal_read_flags_t flags) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  iree_status_t status = iree_ok_status();
+  if (wait_semaphore_list.count > (iree_host_size_t)INT32_MAX) {
+    status = iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "remote deferred queue_read wait count exceeds int32_t range");
+  }
+
+  iree_host_size_t total_size = 0;
+  iree_host_size_t timepoints_offset = 0;
+  if (iree_status_is_ok(status)) {
+    status = IREE_STRUCT_LAYOUT(
+        sizeof(iree_hal_remote_deferred_file_read_t), &total_size,
+        IREE_STRUCT_FIELD_ALIGNED(
+            wait_semaphore_list.count, iree_async_semaphore_timepoint_t,
+            iree_alignof(iree_async_semaphore_timepoint_t),
+            &timepoints_offset));
+  }
+
+  iree_hal_remote_deferred_file_read_t* deferred = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc(device->host_allocator, total_size,
+                                   (void**)&deferred);
+  }
+
+  if (iree_status_is_ok(status)) {
+    memset(deferred, 0, sizeof(*deferred));
+    iree_atomic_store(&deferred->pending_count, 1, iree_memory_order_relaxed);
+    iree_atomic_store(&deferred->remaining_wait_count,
+                      (int32_t)wait_semaphore_list.count,
+                      iree_memory_order_relaxed);
+    iree_atomic_store(&deferred->failure_reported, 0,
+                      iree_memory_order_relaxed);
+    deferred->device = device;
+    deferred->host_allocator = device->host_allocator;
+    deferred->queue_affinity = queue_affinity;
+    deferred->source_file = source_file;
+    iree_hal_file_retain(deferred->source_file);
+    deferred->source_file_view = *source_file_view;
+    deferred->source_offset = source_offset;
+    deferred->target_buffer = target_buffer;
+    iree_hal_buffer_retain(deferred->target_buffer);
+    deferred->target_offset = target_offset;
+    deferred->length = length;
+    deferred->flags = flags;
+    deferred->timepoints_offset = timepoints_offset;
+
+    status = iree_hal_semaphore_list_clone(&wait_semaphore_list,
+                                           deferred->host_allocator,
+                                           &deferred->wait_semaphore_list);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_semaphore_list_clone(&signal_semaphore_list,
+                                           deferred->host_allocator,
+                                           &deferred->signal_semaphore_list);
+  }
+
+  bool registration_started = false;
+  if (iree_status_is_ok(status)) {
+    iree_async_semaphore_timepoint_t* timepoints =
+        iree_hal_remote_deferred_file_read_timepoints(deferred);
+    for (iree_host_size_t i = 0;
+         i < wait_semaphore_list.count && iree_status_is_ok(status); ++i) {
+      iree_atomic_fetch_add(&deferred->pending_count, 1,
+                            iree_memory_order_relaxed);
+      registration_started = true;
+      timepoints[i].callback = iree_hal_remote_deferred_file_read_callback;
+      timepoints[i].user_data = deferred;
+      status = iree_async_semaphore_acquire_timepoint(
+          (iree_async_semaphore_t*)wait_semaphore_list.semaphores[i],
+          wait_semaphore_list.payload_values[i], &timepoints[i]);
+      if (!iree_status_is_ok(status)) {
+        iree_hal_remote_deferred_file_read_release(deferred);
+      }
+    }
+  }
+
+  if (!iree_status_is_ok(status) && registration_started) {
+    iree_hal_remote_deferred_file_read_report_failure(
+        deferred, iree_status_clone(status));
+    iree_status_ignore(status);
+    status = iree_ok_status();
+  }
+
+  if (deferred) {
+    if (iree_status_is_ok(status)) {
+      iree_hal_remote_deferred_file_read_release(deferred);
+    } else {
+      iree_hal_remote_deferred_file_read_destroy(deferred);
+    }
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+static iree_status_t iree_hal_remote_client_device_queue_read_client_file(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_file_t* source_file,
+    const iree_hal_remote_client_file_view_t* source_file_view,
+    uint64_t source_offset, iree_hal_buffer_t* target_buffer,
+    iree_device_size_t target_offset, iree_device_size_t length,
+    iree_hal_read_flags_t flags) {
+  iree_hal_remote_client_device_t* device =
+      iree_hal_remote_client_device_cast(base_device);
+  if (wait_semaphore_list.count == 0 ||
+      iree_hal_semaphore_list_poll(wait_semaphore_list)) {
+    return iree_hal_remote_client_device_queue_read_client_file_now(
+        base_device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
+        source_file, source_file_view, source_offset, target_buffer,
+        target_offset, length, flags);
+  }
+
+  return iree_hal_remote_client_device_defer_queue_read_client_file(
+      device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
+      source_file, source_file_view, source_offset, target_buffer,
+      target_offset, length, flags);
+}
+
 iree_status_t iree_hal_remote_client_device_queue_read(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -1891,9 +2218,6 @@ iree_status_t iree_hal_remote_client_device_queue_read(
   iree_hal_remote_client_device_t* device =
       iree_hal_remote_client_device_cast(base_device);
   IREE_HAL_REMOTE_REQUIRE_CONNECTED(device);
-  (void)source_offset;
-  (void)target_buffer;
-  (void)target_offset;
 
   iree_status_t status =
       iree_hal_file_validate_access(source_file, IREE_HAL_MEMORY_ACCESS_READ);
@@ -1902,14 +2226,37 @@ iree_status_t iree_hal_remote_client_device_queue_read(
                               "unsupported read flags: 0x%" PRIx64, flags);
   }
 
+  iree_hal_remote_client_file_view_t source_file_view;
   if (iree_status_is_ok(status) && length == 0) {
     status = iree_hal_device_queue_barrier(
         base_device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
         IREE_HAL_EXECUTE_FLAG_NONE);
   } else if (iree_status_is_ok(status)) {
-    status = iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "remote queue_read requires async remote file transfer");
+    status =
+        iree_hal_remote_client_file_resolve(source_file, &source_file_view);
+    if (iree_status_is_ok(status)) {
+      switch (source_file_view.kind) {
+        case IREE_HAL_REMOTE_CLIENT_FILE_KIND_HOST_ALLOCATION:
+        case IREE_HAL_REMOTE_CLIENT_FILE_KIND_ASYNC_FILE:
+          status = iree_hal_remote_client_device_queue_read_client_file(
+              base_device, queue_affinity, wait_semaphore_list,
+              signal_semaphore_list, source_file, &source_file_view,
+              source_offset, target_buffer, target_offset, length, flags);
+          break;
+        case IREE_HAL_REMOTE_CLIENT_FILE_KIND_REMOTE_FILE:
+          status = iree_make_status(
+              IREE_STATUS_UNIMPLEMENTED,
+              "remote queue_read from server-side files requires FILE_READ "
+              "server queue support");
+          break;
+        default:
+          status =
+              iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                               "unsupported remote queue_read file kind: %u",
+                               (unsigned)source_file_view.kind);
+          break;
+      }
+    }
   }
 
   if (!iree_status_is_ok(status)) {
@@ -1929,9 +2276,6 @@ iree_status_t iree_hal_remote_client_device_queue_write(
   iree_hal_remote_client_device_t* device =
       iree_hal_remote_client_device_cast(base_device);
   IREE_HAL_REMOTE_REQUIRE_CONNECTED(device);
-  (void)source_buffer;
-  (void)source_offset;
-  (void)target_offset;
 
   iree_status_t status =
       iree_hal_file_validate_access(target_file, IREE_HAL_MEMORY_ACCESS_WRITE);
@@ -1940,14 +2284,63 @@ iree_status_t iree_hal_remote_client_device_queue_write(
                               "unsupported write flags: 0x%" PRIx64, flags);
   }
 
+  iree_hal_remote_client_file_view_t target_file_view;
   if (iree_status_is_ok(status) && length == 0) {
     status = iree_hal_device_queue_barrier(
         base_device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
         IREE_HAL_EXECUTE_FLAG_NONE);
   } else if (iree_status_is_ok(status)) {
-    status = iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "remote queue_write requires async remote file transfer");
+    status =
+        iree_hal_remote_client_file_resolve(target_file, &target_file_view);
+    if (iree_status_is_ok(status)) {
+      switch (target_file_view.kind) {
+        case IREE_HAL_REMOTE_CLIENT_FILE_KIND_HOST_ALLOCATION:
+        case IREE_HAL_REMOTE_CLIENT_FILE_KIND_ASYNC_FILE: {
+          uint64_t transfer_id = 0;
+          status = iree_hal_remote_client_bulk_begin_file_write(
+              device, target_file, &target_file_view, target_offset, length,
+              &transfer_id);
+          iree_hal_remote_client_file_write_op_t op;
+          memset(&op, 0, sizeof(op));
+          op.header.type = IREE_HAL_REMOTE_QUEUE_OP_CLIENT_FILE_WRITE;
+          op.transfer_id = transfer_id;
+          if (iree_status_is_ok(status)) {
+            status = iree_hal_remote_client_buffer_resolve_ref(
+                source_buffer, source_offset, &op.source_buffer_id,
+                &op.source_offset);
+          }
+          op.length = length;
+          op.write_flags = flags;
+          if (iree_status_is_ok(status)) {
+            iree_async_span_t span = iree_async_span_from_ptr(&op, sizeof(op));
+            iree_async_span_list_t payload = {&span, 1};
+            iree_hal_resource_t* resources[1] = {
+                (iree_hal_resource_t*)source_buffer,
+            };
+            status = iree_hal_remote_client_device_submit_queue_op_resources(
+                device, wait_semaphore_list, signal_semaphore_list,
+                /*required_wait_frontier=*/NULL, payload,
+                IREE_ARRAYSIZE(resources), resources, /*out_epoch=*/NULL);
+          }
+          if (!iree_status_is_ok(status)) {
+            iree_hal_remote_client_bulk_cancel_transfer(device, transfer_id);
+          }
+          break;
+        }
+        case IREE_HAL_REMOTE_CLIENT_FILE_KIND_REMOTE_FILE:
+          status = iree_make_status(
+              IREE_STATUS_UNIMPLEMENTED,
+              "remote queue_write to server-side files requires FILE_WRITE "
+              "server queue support");
+          break;
+        default:
+          status =
+              iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                               "unsupported remote queue_write file kind: %u",
+                               (unsigned)target_file_view.kind);
+          break;
+      }
+    }
   }
 
   if (!iree_status_is_ok(status)) {

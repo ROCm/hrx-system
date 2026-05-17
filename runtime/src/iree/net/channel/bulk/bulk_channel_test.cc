@@ -649,7 +649,24 @@ TEST_F(BulkChannelTest, ReceiveCreditReplenishesRemoteChunkCredit) {
   EXPECT_EQ(context_.available_credit_counts, (std::vector<uint32_t>{3}));
 }
 
-TEST_F(BulkChannelTest, ReceiveCreditRejectsOverflow) {
+TEST_F(BulkChannelTest, ReceiveCreditIgnoresDuplicateLimit) {
+  CreateAndActivate();
+
+  IREE_ASSERT_OK(endpoint_.InjectMessage(BuildBulkFrame(
+      IREE_NET_BULK_FRAME_TYPE_CREDIT, IREE_NET_BULK_FRAME_FLAG_NONE,
+      /*transfer_id=*/0, /*total_size=*/3, /*chunk_offset=*/0,
+      /*sequence=*/0, {})));
+  IREE_ASSERT_OK(endpoint_.InjectMessage(BuildBulkFrame(
+      IREE_NET_BULK_FRAME_TYPE_CREDIT, IREE_NET_BULK_FRAME_FLAG_NONE,
+      /*transfer_id=*/0, /*total_size=*/3, /*chunk_offset=*/0,
+      /*sequence=*/0, {})));
+
+  EXPECT_EQ(iree_net_bulk_channel_remote_chunk_credit_count(channel_), 3u);
+  EXPECT_EQ(context_.credit_deltas, (std::vector<uint32_t>{3}));
+  EXPECT_EQ(context_.available_credit_counts, (std::vector<uint32_t>{3}));
+}
+
+TEST_F(BulkChannelTest, ReceiveCreditRejectsWindowOverflow) {
   iree_net_bulk_channel_options_t options =
       iree_net_bulk_channel_options_default();
   options.remote_chunk_credit_capacity = 2;
@@ -666,7 +683,7 @@ TEST_F(BulkChannelTest, ReceiveCreditRejectsOverflow) {
       IREE_STATUS_INVALID_ARGUMENT,
       endpoint_.InjectMessage(BuildBulkFrame(
           IREE_NET_BULK_FRAME_TYPE_CREDIT, IREE_NET_BULK_FRAME_FLAG_NONE,
-          /*transfer_id=*/0, /*total_size=*/1,
+          /*transfer_id=*/0, /*total_size=*/3,
           /*chunk_offset=*/0, /*sequence=*/0, {})));
   EXPECT_EQ(iree_net_bulk_channel_remote_chunk_credit_count(channel_), 2u);
 }
@@ -878,6 +895,16 @@ TEST_F(BulkChannelTest, SendDataRequiresRemoteChunkCredit) {
                             channel_, /*transfer_id=*/3, /*chunk_offset=*/1,
                             /*sequence=*/1, IREE_NET_BULK_FRAME_FLAG_NONE,
                             chunk_payload, /*operation_user_data=*/3));
+
+  IREE_ASSERT_OK(endpoint_.InjectMessage(BuildBulkFrame(
+      IREE_NET_BULK_FRAME_TYPE_CREDIT, IREE_NET_BULK_FRAME_FLAG_NONE,
+      /*transfer_id=*/0, /*total_size=*/2, /*chunk_offset=*/0,
+      /*sequence=*/0, {})));
+  EXPECT_EQ(iree_net_bulk_channel_remote_chunk_credit_count(channel_), 1u);
+  IREE_ASSERT_OK(iree_net_bulk_channel_send_data(
+      channel_, /*transfer_id=*/3, /*chunk_offset=*/1, /*sequence=*/1,
+      IREE_NET_BULK_FRAME_FLAG_NONE, chunk_payload, /*operation_user_data=*/4));
+  EXPECT_EQ(iree_net_bulk_channel_remote_chunk_credit_count(channel_), 0u);
 }
 
 TEST_F(BulkChannelTest, SendDataRefundsCreditOnSubmitFailure) {
@@ -908,10 +935,14 @@ TEST_F(BulkChannelTest, SendCredit) {
 
   IREE_ASSERT_OK(iree_net_bulk_channel_send_credit(channel_, /*credit_delta=*/7,
                                                    /*operation_user_data=*/20));
+  IREE_ASSERT_OK(iree_net_bulk_channel_send_credit(channel_, /*credit_delta=*/1,
+                                                   /*operation_user_data=*/21));
+  IREE_ASSERT_OK(iree_net_bulk_channel_refresh_credit(
+      channel_, /*operation_user_data=*/22));
 
-  ASSERT_EQ(carrier_->sends.size(), 1u);
-  ASSERT_EQ(context_.send_completions.size(), 1u);
-  EXPECT_EQ(context_.send_completions[0], 20u);
+  ASSERT_EQ(carrier_->sends.size(), 3u);
+  ASSERT_EQ(context_.send_completions.size(), 3u);
+  EXPECT_EQ(context_.send_completions, (std::vector<uint64_t>{20, 21, 22}));
 
   iree_net_bulk_frame_header_t credit_header =
       ParseBulkHeader(carrier_->sends[0].data);
@@ -921,6 +952,16 @@ TEST_F(BulkChannelTest, SendCredit) {
   EXPECT_EQ(credit_header.chunk_offset, 0u);
   EXPECT_EQ(credit_header.chunk_length, 0u);
   EXPECT_EQ(credit_header.sequence, 0u);
+
+  iree_net_bulk_frame_header_t next_credit_header =
+      ParseBulkHeader(carrier_->sends[1].data);
+  EXPECT_EQ(next_credit_header.type, IREE_NET_BULK_FRAME_TYPE_CREDIT);
+  EXPECT_EQ(next_credit_header.total_size, 8u);
+
+  iree_net_bulk_frame_header_t refresh_credit_header =
+      ParseBulkHeader(carrier_->sends[2].data);
+  EXPECT_EQ(refresh_credit_header.type, IREE_NET_BULK_FRAME_TYPE_CREDIT);
+  EXPECT_EQ(refresh_credit_header.total_size, 8u);
 }
 
 TEST_F(BulkChannelTest, SendBeforeActivateFails) {
