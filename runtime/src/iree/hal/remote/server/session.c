@@ -17,6 +17,7 @@
 #include "iree/hal/remote/server/server.h"
 #include "iree/hal/remote/util/queue_header_pool.h"
 #include "iree/net/channel/bulk/bulk_channel.h"
+#include "iree/net/channel/control/frame.h"
 #include "iree/net/channel/queue/queue_channel.h"
 #include "iree/net/channel/util/frame_sender.h"
 #include "iree/net/status_wire.h"
@@ -1563,64 +1564,157 @@ typedef struct iree_hal_remote_control_send_allocation_t {
   // Trailing response frame bytes.
 } iree_hal_remote_control_send_allocation_t;
 
-// Sends a control channel response. Builds envelope + response_prefix + body
-// in retained storage and sends via the session. The request envelope is used
-// to echo the request_id and message_type.
-static iree_status_t iree_hal_remote_server_send_response(
-    iree_allocator_t host_allocator, iree_net_session_t* session,
-    const iree_hal_remote_control_envelope_t* request_envelope,
-    iree_status_code_t status_code, const void* body,
-    iree_host_size_t body_length) {
-  iree_host_size_t response_length =
-      sizeof(iree_hal_remote_control_envelope_t) +
-      sizeof(iree_hal_remote_control_response_prefix_t) + body_length;
+static iree_hal_remote_control_envelope_t
+iree_hal_remote_server_make_response_envelope(
+    const iree_hal_remote_control_envelope_t* request_envelope) {
+  iree_hal_remote_control_envelope_t envelope;
+  memset(&envelope, 0, sizeof(envelope));
+  envelope.message_type = request_envelope->message_type;
+  envelope.message_flags = IREE_HAL_REMOTE_CONTROL_FLAG_IS_RESPONSE;
+  envelope.request_id = request_envelope->request_id;
+  return envelope;
+}
 
-  iree_host_size_t allocation_size = 0;
+static bool iree_hal_remote_server_response_fits_inline_copy(
+    iree_host_size_t response_length) {
+  if (IREE_NET_FRAME_SENDER_INLINE_FRAME_CAPACITY <
+      IREE_NET_CONTROL_FRAME_HEADER_SIZE) {
+    return false;
+  }
+  return response_length <= IREE_NET_FRAME_SENDER_INLINE_FRAME_CAPACITY -
+                                IREE_NET_CONTROL_FRAME_HEADER_SIZE;
+}
+
+static iree_status_t iree_hal_remote_server_response_length(
+    iree_host_size_t body_header_length, iree_host_size_t data_length,
+    iree_host_size_t* out_response_length) {
+  *out_response_length = 0;
+  iree_host_size_t body_length = 0;
   iree_status_t status =
-      iree_host_size_checked_add(
-          sizeof(iree_hal_remote_control_send_allocation_t), response_length,
-          &allocation_size)
+      iree_host_size_checked_add(body_header_length, data_length, &body_length)
           ? iree_ok_status()
           : iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                             "control response allocation size overflow");
+                             "response body size overflow");
+  if (iree_status_is_ok(status) &&
+      !iree_host_size_checked_add(
+          sizeof(iree_hal_remote_control_envelope_t) +
+              sizeof(iree_hal_remote_control_response_prefix_t),
+          body_length, out_response_length)) {
+    status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "response payload size overflow");
+  }
+  return status;
+}
+
+// Sends a control channel response by synchronously copying stack/local spans
+// into the net frame sender's retained inline storage.
+static iree_status_t iree_hal_remote_server_send_response_copy(
+    iree_net_session_t* session,
+    const iree_hal_remote_control_envelope_t* request_envelope,
+    iree_status_code_t status_code, const void* body_header,
+    iree_host_size_t body_header_length, const void* data,
+    iree_host_size_t data_length) {
+  iree_hal_remote_control_envelope_t envelope =
+      iree_hal_remote_server_make_response_envelope(request_envelope);
+  iree_hal_remote_control_response_prefix_t prefix;
+  memset(&prefix, 0, sizeof(prefix));
+  prefix.status_code = (uint32_t)status_code;
+
+  iree_async_span_t spans[4];
+  iree_host_size_t span_count = 0;
+  spans[span_count++] = iree_async_span_from_ptr(&envelope, sizeof(envelope));
+  spans[span_count++] = iree_async_span_from_ptr(&prefix, sizeof(prefix));
+  if (body_header && body_header_length > 0) {
+    spans[span_count++] =
+        iree_async_span_from_ptr((void*)body_header, body_header_length);
+  }
+  if (data && data_length > 0) {
+    spans[span_count++] = iree_async_span_from_ptr((void*)data, data_length);
+  }
+
+  iree_async_span_list_t payload = iree_async_span_list_make(spans, span_count);
+  return iree_net_session_send_control_data_copy(session, /*flags=*/0, payload,
+                                                 /*operation_user_data=*/0);
+}
+
+// Sends a control channel response with retained heap storage for large
+// payloads that do not fit in the frame sender's inline copy storage.
+static iree_status_t iree_hal_remote_server_send_response_retained(
+    iree_allocator_t host_allocator, iree_net_session_t* session,
+    const iree_hal_remote_control_envelope_t* request_envelope,
+    iree_status_code_t status_code, const void* body_header,
+    iree_host_size_t body_header_length, const void* data,
+    iree_host_size_t data_length) {
+  iree_host_size_t response_length = 0;
+  iree_status_t status = iree_hal_remote_server_response_length(
+      body_header_length, data_length, &response_length);
+
+  iree_host_size_t response_offset = 0;
+  iree_host_size_t allocation_size = 0;
+  if (iree_status_is_ok(status)) {
+    status = IREE_STRUCT_LAYOUT(
+        sizeof(iree_hal_remote_control_send_allocation_t), &allocation_size,
+        IREE_STRUCT_FIELD(response_length, uint8_t, &response_offset));
+  }
   iree_hal_remote_control_send_allocation_t* allocation = NULL;
   if (iree_status_is_ok(status)) {
     status = iree_allocator_malloc(host_allocator, allocation_size,
                                    (void**)&allocation);
   }
-  if (!iree_status_is_ok(status)) return status;
-  allocation->host_allocator = host_allocator;
-  uint8_t* response_storage = (uint8_t*)(allocation + 1);
-  memset(response_storage, 0, response_length);
 
-  // Envelope.
-  iree_hal_remote_control_envelope_t* envelope =
-      (iree_hal_remote_control_envelope_t*)response_storage;
-  envelope->message_type = request_envelope->message_type;
-  envelope->message_flags = IREE_HAL_REMOTE_CONTROL_FLAG_IS_RESPONSE;
-  envelope->request_id = request_envelope->request_id;
+  if (iree_status_is_ok(status)) {
+    allocation->host_allocator = host_allocator;
+    uint8_t* response_data = (uint8_t*)allocation + response_offset;
 
-  // Response prefix.
-  iree_hal_remote_control_response_prefix_t* prefix =
-      (iree_hal_remote_control_response_prefix_t*)(response_storage +
-                                                   sizeof(
-                                                       iree_hal_remote_control_envelope_t));
-  prefix->status_code = (uint32_t)status_code;
+    iree_hal_remote_control_envelope_t envelope =
+        iree_hal_remote_server_make_response_envelope(request_envelope);
+    memcpy(response_data, &envelope, sizeof(envelope));
 
-  // Body.
-  if (body && body_length > 0) {
-    memcpy(response_storage + sizeof(iree_hal_remote_control_envelope_t) +
-               sizeof(iree_hal_remote_control_response_prefix_t),
-           body, body_length);
+    iree_hal_remote_control_response_prefix_t prefix;
+    memset(&prefix, 0, sizeof(prefix));
+    prefix.status_code = (uint32_t)status_code;
+    memcpy(response_data + sizeof(envelope), &prefix, sizeof(prefix));
+
+    iree_host_size_t body_offset = sizeof(envelope) + sizeof(prefix);
+    if (body_header && body_header_length > 0) {
+      memcpy(response_data + body_offset, body_header, body_header_length);
+    }
+    body_offset += body_header_length;
+    if (data && data_length > 0) {
+      memcpy(response_data + body_offset, data, data_length);
+    }
+
+    iree_async_span_t span =
+        iree_async_span_from_ptr(response_data, response_length);
+    iree_async_span_list_t payload = iree_async_span_list_make(&span, 1);
+    status = iree_net_session_send_control_data(
+        session, /*flags=*/0, payload, (uint64_t)(uintptr_t)allocation);
   }
-
-  iree_async_span_t span =
-      iree_async_span_from_ptr(response_storage, response_length);
-  iree_async_span_list_t payload = {&span, 1};
-  status = iree_net_session_send_control_data(session, /*flags=*/0, payload,
-                                              (uint64_t)(uintptr_t)allocation);
-  if (!iree_status_is_ok(status)) {
+  if (!iree_status_is_ok(status) && allocation) {
     iree_allocator_free(host_allocator, allocation);
+  }
+  return status;
+}
+
+// Sends a control channel response. The request envelope is used to echo the
+// request_id and message_type.
+static iree_status_t iree_hal_remote_server_send_response(
+    iree_allocator_t host_allocator, iree_net_session_t* session,
+    const iree_hal_remote_control_envelope_t* request_envelope,
+    iree_status_code_t status_code, const void* body,
+    iree_host_size_t body_length) {
+  iree_host_size_t response_length = 0;
+  iree_status_t status =
+      iree_hal_remote_server_response_length(body_length, 0, &response_length);
+  if (iree_status_is_ok(status)) {
+    if (iree_hal_remote_server_response_fits_inline_copy(response_length)) {
+      status = iree_hal_remote_server_send_response_copy(
+          session, request_envelope, status_code, body, body_length, NULL, 0);
+    } else {
+      status = iree_hal_remote_server_send_response_retained(
+          host_allocator, session, request_envelope, status_code, body,
+          body_length, NULL, 0);
+    }
   }
   return status;
 }
@@ -1798,73 +1892,25 @@ static iree_status_t iree_hal_remote_server_handle_buffer_query_heaps(
 }
 
 // Sends a control channel response with a variable-length data payload.
-// The response is copied into one retained allocation because control sends are
-// asynchronous and callers usually hold mapped or staging memory only for this
-// function's dynamic extent. The session send-complete callback frees the
-// allocation.
 static iree_status_t iree_hal_remote_server_send_response_with_data(
     iree_hal_remote_server_session_t* entry,
     const iree_hal_remote_control_envelope_t* request_envelope,
     iree_status_code_t status_code, const void* body_header,
     iree_host_size_t body_header_length, const void* data,
     iree_host_size_t data_length) {
-  iree_host_size_t header_length =
-      sizeof(iree_hal_remote_control_envelope_t) +
-      sizeof(iree_hal_remote_control_response_prefix_t) + body_header_length;
   iree_host_size_t response_length = 0;
-  iree_status_t status =
-      iree_host_size_checked_add(header_length, data_length, &response_length)
-          ? iree_ok_status()
-          : iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                             "response payload size overflow");
-
-  iree_host_size_t allocation_size = 0;
-  if (iree_status_is_ok(status) &&
-      !iree_host_size_checked_add(
-          sizeof(iree_hal_remote_control_send_allocation_t), response_length,
-          &allocation_size)) {
-    status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "response allocation size overflow");
-  }
-
-  iree_hal_remote_control_send_allocation_t* allocation = NULL;
+  iree_status_t status = iree_hal_remote_server_response_length(
+      body_header_length, data_length, &response_length);
   if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc(entry->server->host_allocator,
-                                   allocation_size, (void**)&allocation);
-  }
-  if (!iree_status_is_ok(status)) {
-    return status;
-  }
-  allocation->host_allocator = entry->server->host_allocator;
-  uint8_t* response_data = (uint8_t*)(allocation + 1);
-  memset(response_data, 0, response_length);
-
-  iree_hal_remote_control_envelope_t* envelope =
-      (iree_hal_remote_control_envelope_t*)response_data;
-  envelope->message_type = request_envelope->message_type;
-  envelope->message_flags = IREE_HAL_REMOTE_CONTROL_FLAG_IS_RESPONSE;
-  envelope->request_id = request_envelope->request_id;
-
-  iree_hal_remote_control_response_prefix_t* prefix =
-      (iree_hal_remote_control_response_prefix_t*)(response_data +
-                                                   sizeof(*envelope));
-  prefix->status_code = (uint32_t)status_code;
-
-  if (body_header && body_header_length > 0) {
-    memcpy(response_data + sizeof(*envelope) + sizeof(*prefix), body_header,
-           body_header_length);
-  }
-  if (data && data_length > 0) {
-    memcpy(response_data + header_length, data, data_length);
-  }
-
-  iree_async_span_t span =
-      iree_async_span_from_ptr(response_data, response_length);
-  iree_async_span_list_t payload = {&span, 1};
-  status = iree_net_session_send_control_data(
-      entry->session, /*flags=*/0, payload, (uint64_t)(uintptr_t)allocation);
-  if (!iree_status_is_ok(status)) {
-    iree_allocator_free(entry->server->host_allocator, allocation);
+    if (iree_hal_remote_server_response_fits_inline_copy(response_length)) {
+      status = iree_hal_remote_server_send_response_copy(
+          entry->session, request_envelope, status_code, body_header,
+          body_header_length, data, data_length);
+    } else {
+      status = iree_hal_remote_server_send_response_retained(
+          entry->server->host_allocator, entry->session, request_envelope,
+          status_code, body_header, body_header_length, data, data_length);
+    }
   }
   return status;
 }

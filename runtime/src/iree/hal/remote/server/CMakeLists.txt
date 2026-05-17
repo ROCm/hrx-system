@@ -39,6 +39,7 @@ iree_cc_library(
     iree::net::bootstrap
     iree::net::channel::bulk::bulk_channel
     iree::net::channel::bulk::transfer_table
+    iree::net::channel::control::frame
     iree::net::channel::queue::queue_channel
     iree::net::channel::util::frame_sender
     iree::net::channel::util::sequence_window

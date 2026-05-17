@@ -31,14 +31,15 @@
 //
 // Three modes are supported:
 //
-// 1. **send()**: Scatter-gather send with header from pool, payload zero-copy.
-//    Header is copied to a pool buffer, payload spans are passed directly.
+// 1. **send()**: Scatter-gather send with retained header, payload zero-copy.
+//    Typical headers are copied to send-context storage; unusually large
+//    headers fall back to the header pool. Payload spans are passed directly.
 //    Used for all sends with application payloads (queue command payloads
 //    are typically 64KB-512KB; control DATA payloads can be many megabytes).
 //
-// 2. **send_copy()**: Single-buffer send with header and payload copied to a
-//    pool buffer before submission. Used for small messages whose source
-//    storage cannot outlive the asynchronous send.
+// 2. **send_copy()**: Single-buffer send with header and payload copied to
+//    retained sender storage before submission. Used for small messages whose
+//    source storage cannot outlive the asynchronous send.
 //
 // 3. **queue() + flush()**: Batched send for small frames.
 //    Frames are copied to a batch buffer, then sent together on flush().
@@ -117,8 +118,8 @@ typedef iree_status_t (*iree_net_frame_send_submit_fn_t)(
 // Validated against carrier->max_iov at send time.
 #define IREE_NET_FRAME_SENDER_MAX_SPANS 8
 
-// Maximum header size retained inline in the send context.
-#define IREE_NET_FRAME_SENDER_INLINE_HEADER_CAPACITY 32
+// Maximum copied frame size retained inline in the send context.
+#define IREE_NET_FRAME_SENDER_INLINE_FRAME_CAPACITY 2048
 
 // Completion callback fired when a send completes (success or failure).
 // Channel uses this for resource cleanup and drain signaling.
@@ -158,8 +159,8 @@ typedef struct iree_net_frame_sender_context_pool_t {
 
 // Per-send context owned by the frame sender until completion fires.
 //
-// Layout keeps hot metadata early and retains typical protocol headers inline
-// so stack-built frame headers do not need a separate pool lease.
+// Layout keeps hot metadata early and retains typical copied frames inline so
+// stack-built control packets do not need a separate pool lease.
 struct iree_net_frame_send_context_t {
   // Sender that owns this context and receives completion recycling.
   iree_net_frame_sender_t* sender;
@@ -173,8 +174,8 @@ struct iree_net_frame_send_context_t {
   // Number of valid entries in |spans|.
   iree_host_size_t span_count;
 
-  // Inline storage for small stack-built frame headers.
-  uint8_t inline_header[IREE_NET_FRAME_SENDER_INLINE_HEADER_CAPACITY];
+  // Inline storage for small stack-built frames.
+  uint8_t inline_frame[IREE_NET_FRAME_SENDER_INLINE_FRAME_CAPACITY];
 
   // Scatter-gather spans submitted to the carrier.
   iree_async_span_t spans[IREE_NET_FRAME_SENDER_MAX_SPANS];
@@ -198,7 +199,8 @@ struct iree_net_frame_sender_t {
   // one span for its stream header, so max_send_spans = carrier->max_iov - 1).
   iree_host_size_t max_send_spans;
 
-  // Pool used for frame headers, copied frames, and batches. Not owned.
+  // Pool used for unusually large frame headers, copied frames, and batches.
+  // Not owned.
   iree_async_buffer_pool_t* header_pool;
 
   // Completion callback (provided by channel).
@@ -276,7 +278,8 @@ void iree_net_frame_sender_deinitialize(iree_net_frame_sender_t* sender);
 // This is the primary send API and may be called from any thread. The
 // underlying carrier and buffer pool are assumed to be thread-safe.
 //
-// |header| is copied into a pool buffer (typically 8-16 bytes per frame).
+// |header| is copied into sender-owned storage (typically inline in the send
+// context).
 // |payload| is a span list sent zero-copy (may be hundreds of KB or MBs).
 // |operation_user_data| is passed to the completion callback.
 //
@@ -293,7 +296,7 @@ iree_status_t iree_net_frame_sender_send(iree_net_frame_sender_t* sender,
                                          iree_async_span_list_t payload,
                                          uint64_t operation_user_data);
 
-// Sends a frame with header and payload copied into one pool buffer.
+// Sends a frame with header and payload copied into sender-owned storage.
 // THREAD-SAFE.
 //
 // Unlike send(), all payload bytes are copied before this function returns.
@@ -303,7 +306,7 @@ iree_status_t iree_net_frame_sender_send(iree_net_frame_sender_t* sender,
 //
 // Returns OK if the operation was submitted (callback will fire).
 // Returns OUT_OF_RANGE if the combined header+payload is larger than the
-// frame sender's pool buffer.
+// frame sender's fallback pool buffer.
 // Returns FAILED_PRECONDITION if any payload span is not CPU-accessible.
 //
 // On non-OK return, the callback is NOT called.

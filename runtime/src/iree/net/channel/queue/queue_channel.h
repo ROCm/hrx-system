@@ -155,13 +155,13 @@ typedef struct iree_net_queue_channel_t iree_net_queue_channel_t;
 // The |endpoint| is a borrowed view used for both receive and send paths.
 // The caller must ensure the underlying transport object outlives the channel.
 //
-// The |header_pool| provides buffers for copying the queue frame header and
-// frontier metadata into a contiguous block for scatter-gather sends. Pool
-// buffers must be large enough for the queue frame header (16 bytes) plus
+// The |header_pool| provides fallback buffers for unusually large queue frame
+// headers and frontier metadata that do not fit in frame-sender inline storage.
+// Pool buffers must be large enough for the queue frame header (16 bytes) plus
 // the largest expected frontier pair. A conservative minimum is 1024 bytes
-// (handles frontiers with up to ~30 entries each). The channel takes
-// ownership of the pool and frees it on destroy. This ensures the pool
-// remains valid as long as any reference to the channel exists (e.g.,
+// (handles frontiers with up to ~30 entries each). The channel takes ownership
+// of the pool and frees it on destroy. This ensures the pool remains valid as
+// long as any reference to the channel exists (e.g.,
 // barrier completion contexts that retain the channel for async sends).
 // Note: the command payload (typically 64KB-512KB) is NOT copied into pool
 // buffers — it is sent zero-copy through the span list.
@@ -232,8 +232,8 @@ bool iree_net_queue_channel_has_pending_sends(
 // 64KB-512KB of serialized HAL commands) sent zero-copy.
 // |operation_user_data| is echoed to on_send_complete for correlation.
 //
-// The queue frame header and frontier data (up to ~1KB) are copied into a
-// pool buffer. The command payload buffers must remain valid until
+// The queue frame header and frontier data (up to ~1KB) are copied into
+// retained sender storage. The command payload buffers must remain valid until
 // on_send_complete fires.
 //
 // Requires OPERATIONAL state. Returns FAILED_PRECONDITION otherwise.

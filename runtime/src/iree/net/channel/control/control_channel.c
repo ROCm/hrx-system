@@ -24,8 +24,8 @@ struct iree_net_control_channel_t {
   // Used for the receive path (message callbacks, activation).
   iree_net_message_endpoint_t endpoint;
 
-  // Embedded frame sender for the send path. Manages header pool buffer
-  // allocations, in-flight tracking, and completion dispatch.
+  // Embedded frame sender for the send path. Manages retained frame storage,
+  // in-flight tracking, and completion dispatch.
   iree_net_frame_sender_t sender;
 
   iree_net_control_channel_options_t options;
@@ -538,8 +538,8 @@ iree_status_t iree_net_control_channel_send_data(
                             (int)state);
   }
 
-  // Build the 8-byte frame header on the stack. frame_sender.send() copies
-  // it into a pool buffer, so the stack-local data is safe.
+  // Build the 8-byte frame header on the stack. frame_sender.send() copies it
+  // into retained sender storage, so the stack-local data is safe.
   iree_net_control_frame_header_t header;
   iree_net_control_frame_header_initialize(IREE_NET_CONTROL_FRAME_TYPE_DATA,
                                            flags, &header);

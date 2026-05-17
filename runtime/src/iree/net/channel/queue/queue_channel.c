@@ -53,8 +53,8 @@ struct iree_net_queue_channel_t {
   // on this reaching 0 before zeroing the endpoint.
   iree_atomic_int32_t sends_in_flight;
 
-  // Owned header pool for scatter-gather sends. Freed on channel destroy.
-  // The frame_sender borrows this pointer (it does not own it).
+  // Owned fallback header pool for unusually large scatter-gather sends. Freed
+  // on channel destroy. The frame_sender borrows this pointer.
   iree_async_buffer_pool_t* header_pool;
 
   // Embedded frame sender for the send path.
@@ -625,7 +625,7 @@ iree_status_t iree_net_queue_channel_send_command(
   iree_host_size_t header_total = frame_size - command_payload_size;
 
   // Build header + frontier data contiguously. The frame_sender copies this
-  // into a pool buffer, so stack allocation is safe.
+  // into retained sender storage, so stack allocation is safe.
   //
   // The stack buffer handles up to IREE_NET_QUEUE_CHANNEL_MAX_HEADER_SIZE
   // bytes, which accommodates 32 entries per frontier — sufficient for

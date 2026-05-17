@@ -86,7 +86,6 @@ static iree_status_t iree_net_bulk_send_context_pool_acquire(
     return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
   }
   iree_atomic_fetch_sub(&pool->available_count, 1, iree_memory_order_release);
-  memset(&context->context, 0, sizeof(context->context));
   *out_context = &context->context;
   return iree_ok_status();
 }
@@ -125,7 +124,7 @@ struct iree_net_bulk_channel_t {
   // Count of in-flight submit_send operations.
   iree_atomic_int32_t sends_in_flight;
 
-  // Owned header pool for scatter-gather sends.
+  // Owned fallback header pool for unusually large scatter-gather sends.
   iree_async_buffer_pool_t* header_pool;
 
   // Fixed-capacity pool backing frame sender contexts.

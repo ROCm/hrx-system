@@ -29,10 +29,10 @@
 // can retain the lease to keep payload data valid beyond the callback.
 //
 // On the send path, the channel uses a frame_sender to manage buffer
-// lifetimes. The 8-byte framing header is copied into a pool buffer that
-// survives until send completion. Caller-provided payload data (which may
-// be many megabytes for inline command buffer recordings) is sent zero-copy
-// and must remain valid until the on_send_complete callback fires.
+// lifetimes. The 8-byte framing header is copied into retained sender storage
+// that survives until send completion. Caller-provided payload data (which may
+// be many megabytes for inline command buffer recordings) is sent zero-copy and
+// must remain valid until the on_send_complete callback fires.
 //
 // ## Threading
 //
