@@ -283,7 +283,8 @@ void iree_net_queue_channel_abort_send(
 //
 // |signal_frontier| must be non-NULL with at least one entry.
 // |advance_payload| is an optional scatter-gather list of advance data
-// (resolution entries, etc.) sent zero-copy. May be empty.
+// (resolution entries, status payloads, etc.). The payload is copied before
+// this function returns and may be stack backed. May be empty.
 // |operation_user_data| is echoed to on_send_complete.
 //
 // Requires OPERATIONAL state.

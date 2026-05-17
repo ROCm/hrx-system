@@ -2244,10 +2244,42 @@ iree_status_t iree_hal_remote_client_device_queue_read(
               source_offset, target_buffer, target_offset, length, flags);
           break;
         case IREE_HAL_REMOTE_CLIENT_FILE_KIND_REMOTE_FILE:
-          status = iree_make_status(
-              IREE_STATUS_UNIMPLEMENTED,
-              "remote queue_read from server-side files requires FILE_READ "
-              "server queue support");
+          if (source_file_view.length != 0 &&
+              (source_offset > source_file_view.length ||
+               (uint64_t)length > source_file_view.length - source_offset)) {
+            status = iree_make_status(
+                IREE_STATUS_OUT_OF_RANGE,
+                "remote queue_read source range exceeds server file length");
+          }
+          if (iree_status_is_ok(status)) {
+            iree_hal_remote_file_read_op_t op;
+            memset(&op, 0, sizeof(op));
+            op.header.type = IREE_HAL_REMOTE_QUEUE_OP_FILE_READ;
+            op.source_file_id = source_file_view.remote_file_id;
+            op.source_offset = source_offset;
+            status = iree_hal_remote_client_buffer_resolve_ref(
+                target_buffer, target_offset, &op.target_buffer_id,
+                &op.target_offset);
+            op.length = length;
+            op.read_flags = flags;
+            if (iree_status_is_ok(status)) {
+              iree_async_span_t span =
+                  iree_async_span_from_ptr(&op, sizeof(op));
+              iree_async_span_list_t payload = {&span, 1};
+              iree_hal_resource_t* resources[2] = {
+                  (iree_hal_resource_t*)target_buffer,
+                  (iree_hal_resource_t*)source_file,
+              };
+              status = iree_hal_remote_client_device_submit_queue_op_resources(
+                  device, wait_semaphore_list, signal_semaphore_list,
+                  /*required_wait_frontier=*/NULL, payload,
+                  IREE_ARRAYSIZE(resources), resources,
+                  /*out_epoch=*/NULL);
+              if (iree_status_is_ok(status)) {
+                iree_hal_remote_client_file_mark_queue_referenced(source_file);
+              }
+            }
+          }
           break;
         default:
           status =
@@ -2328,10 +2360,42 @@ iree_status_t iree_hal_remote_client_device_queue_write(
           break;
         }
         case IREE_HAL_REMOTE_CLIENT_FILE_KIND_REMOTE_FILE:
-          status = iree_make_status(
-              IREE_STATUS_UNIMPLEMENTED,
-              "remote queue_write to server-side files requires FILE_WRITE "
-              "server queue support");
+          if (target_file_view.length != 0 &&
+              (target_offset > target_file_view.length ||
+               (uint64_t)length > target_file_view.length - target_offset)) {
+            status = iree_make_status(
+                IREE_STATUS_OUT_OF_RANGE,
+                "remote queue_write target range exceeds server file length");
+          }
+          if (iree_status_is_ok(status)) {
+            iree_hal_remote_file_write_op_t op;
+            memset(&op, 0, sizeof(op));
+            op.header.type = IREE_HAL_REMOTE_QUEUE_OP_FILE_WRITE;
+            status = iree_hal_remote_client_buffer_resolve_ref(
+                source_buffer, source_offset, &op.source_buffer_id,
+                &op.source_offset);
+            op.target_file_id = target_file_view.remote_file_id;
+            op.target_offset = target_offset;
+            op.length = length;
+            op.write_flags = flags;
+            if (iree_status_is_ok(status)) {
+              iree_async_span_t span =
+                  iree_async_span_from_ptr(&op, sizeof(op));
+              iree_async_span_list_t payload = {&span, 1};
+              iree_hal_resource_t* resources[2] = {
+                  (iree_hal_resource_t*)source_buffer,
+                  (iree_hal_resource_t*)target_file,
+              };
+              status = iree_hal_remote_client_device_submit_queue_op_resources(
+                  device, wait_semaphore_list, signal_semaphore_list,
+                  /*required_wait_frontier=*/NULL, payload,
+                  IREE_ARRAYSIZE(resources), resources,
+                  /*out_epoch=*/NULL);
+              if (iree_status_is_ok(status)) {
+                iree_hal_remote_client_file_mark_queue_referenced(target_file);
+              }
+            }
+          }
           break;
         default:
           status =

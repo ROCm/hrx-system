@@ -168,6 +168,9 @@ struct iree_net_frame_send_context_t {
   // Header, copied-frame, or batch buffer lease held until send completion.
   iree_async_buffer_lease_t buffer_lease;
 
+  // Heap-backed copied frame storage held until send completion.
+  void* heap_frame;
+
   // Caller-provided value echoed to the sender completion callback.
   uint64_t operation_user_data;
 
@@ -304,8 +307,8 @@ iree_status_t iree_net_frame_sender_send(iree_net_frame_sender_t* sender,
 // intended only for small control messages; large payloads should use send()
 // and keep their backing storage alive until completion.
 //
-// Returns OK if the operation was submitted (callback will fire).
-// Returns OUT_OF_RANGE if the combined header+payload is larger than the
+// Returns OK if the operation was submitted (callback will fire). The sender
+// may allocate heap storage when the combined header+payload is larger than the
 // frame sender's fallback pool buffer.
 // Returns FAILED_PRECONDITION if any payload span is not CPU-accessible.
 //

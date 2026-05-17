@@ -235,6 +235,19 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_connect(
 IREE_API_EXPORT iree_hal_remote_client_device_state_t
 iree_hal_remote_client_device_state(iree_hal_device_t* device);
 
+// Opens a server-side file from the server's configured logical namespace.
+//
+// The returned HAL file is a provisional remote handle that can immediately be
+// used with queue file I/O operations. The client never performs synchronous
+// I/O against the host file and does not wait for a server round-trip here:
+// path validation, final access checks, and concrete file opening happen on the
+// server, and any failure is reported through the affected queue signal
+// semaphores.
+IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_open_file(
+    iree_hal_device_t* device, iree_string_view_t logical_name,
+    iree_hal_memory_access_t access, iree_allocator_t host_allocator,
+    iree_hal_file_t** out_file);
+
 //===----------------------------------------------------------------------===//
 // iree_hal_remote_client_driver_t
 //===----------------------------------------------------------------------===//

@@ -14,6 +14,7 @@
 #include "iree/hal/remote/protocol/control.h"
 #include "iree/hal/remote/protocol/queue.h"
 #include "iree/hal/remote/server/bulk.h"
+#include "iree/hal/remote/server/file_index.h"
 #include "iree/hal/remote/server/server.h"
 #include "iree/hal/remote/util/queue_header_pool.h"
 #include "iree/net/channel/bulk/bulk_channel.h"
@@ -21,11 +22,6 @@
 #include "iree/net/channel/queue/queue_channel.h"
 #include "iree/net/channel/util/frame_sender.h"
 #include "iree/net/status_wire.h"
-
-// Maximum stack-allocated buffer for serializing iree_status_t to wire format.
-// Sufficient for typical error messages with source location + 1-2 annotations.
-// Statuses exceeding this are sent code-only (message lost, code preserved).
-#define IREE_HAL_REMOTE_MAX_STATUS_WIRE_SIZE 232
 
 //===----------------------------------------------------------------------===//
 // Session slot helpers
@@ -96,6 +92,69 @@ typedef struct iree_hal_remote_server_resource_release_node_t {
   iree_hal_remote_resource_id_t resource_ids[];
 } iree_hal_remote_server_resource_release_node_t;
 
+struct iree_hal_remote_server_pending_queue_command_t {
+  // Next command parked on the same provisional resource ID.
+  iree_hal_remote_server_pending_queue_command_t* next;
+  // Queue channel retained for the eventual ADVANCE frame.
+  iree_net_queue_channel_t* queue_channel;
+  // Host allocator used to free this command.
+  iree_allocator_t host_allocator;
+  // Receive-buffer lease keeping zero-copy frontier/payload pointers valid.
+  iree_async_buffer_lease_t lease;
+  // Provisional resource ID that must resolve before dispatch.
+  iree_hal_remote_resource_id_t provisional_id;
+  // Wait frontier referenced by |lease|; NULL if absent.
+  const iree_async_frontier_t* wait_frontier;
+  // Signal frontier referenced by |lease|.
+  const iree_async_frontier_t* signal_frontier;
+  // Queue command payload referenced by |lease|.
+  iree_const_byte_span_t command_data;
+};
+
+static const iree_async_frontier_t*
+iree_hal_remote_server_pending_queue_command_wait_frontier(
+    iree_hal_remote_server_pending_queue_command_t* command) {
+  return command->wait_frontier;
+}
+
+static const iree_async_frontier_t*
+iree_hal_remote_server_pending_queue_command_signal_frontier(
+    iree_hal_remote_server_pending_queue_command_t* command) {
+  return command->signal_frontier;
+}
+
+static iree_const_byte_span_t iree_hal_remote_server_pending_queue_command_data(
+    iree_hal_remote_server_pending_queue_command_t* command) {
+  return command->command_data;
+}
+
+static void iree_hal_remote_server_free_pending_queue_command(
+    iree_hal_remote_server_pending_queue_command_t* command) {
+  if (!command) return;
+  iree_allocator_t host_allocator = command->host_allocator;
+  iree_async_buffer_lease_release(&command->lease);
+  iree_net_queue_channel_release(command->queue_channel);
+  iree_allocator_free(host_allocator, command);
+}
+
+static void iree_hal_remote_server_free_pending_queue_commands(
+    iree_hal_remote_server_pending_queue_command_t* pending_list) {
+  while (pending_list) {
+    iree_hal_remote_server_pending_queue_command_t* next = pending_list->next;
+    iree_hal_remote_server_free_pending_queue_command(pending_list);
+    pending_list = next;
+  }
+}
+
+static iree_status_t iree_hal_remote_server_observe_submission_frontier(
+    iree_hal_remote_server_session_t* session_slot,
+    const iree_async_frontier_t* signal_frontier);
+iree_status_t iree_hal_remote_server_on_queue_command(
+    void* user_data, uint32_t stream_id,
+    const iree_async_frontier_t* wait_frontier,
+    const iree_async_frontier_t* signal_frontier,
+    iree_const_byte_span_t command_data, iree_async_buffer_lease_t* lease);
+
 static void iree_hal_remote_server_free_resource_release_nodes(
     iree_net_sequence_node_t* pending_list) {
   while (pending_list) {
@@ -136,6 +195,28 @@ void iree_hal_remote_server_session_deinitialize_windows(
   iree_hal_remote_server_free_command_completion_nodes(pending_completions);
 }
 
+void iree_hal_remote_server_session_deinitialize_provisionals(
+    iree_hal_remote_server_session_t* session_slot,
+    iree_allocator_t host_allocator) {
+  for (iree_host_size_t i = 0; i < session_slot->provisional_map.count; ++i) {
+    iree_hal_remote_server_free_pending_queue_commands(
+        session_slot->provisional_map.pending_heads[i]);
+  }
+  iree_allocator_free(host_allocator,
+                      session_slot->provisional_map.provisional_ids);
+  iree_allocator_free(host_allocator,
+                      session_slot->provisional_map.resolved_ids);
+  iree_allocator_free(host_allocator, session_slot->provisional_map.states);
+  iree_allocator_free(host_allocator,
+                      session_slot->provisional_map.status_codes);
+  iree_allocator_free(host_allocator,
+                      session_slot->provisional_map.pending_heads);
+  iree_allocator_free(host_allocator,
+                      session_slot->provisional_map.pending_tails);
+  memset(&session_slot->provisional_map, 0,
+         sizeof(session_slot->provisional_map));
+}
+
 // Finds the slot holding the given session. Returns -1 if not found.
 static int32_t iree_hal_remote_server_find_session_slot(
     iree_hal_remote_server_t* server, iree_net_session_t* session) {
@@ -164,8 +245,8 @@ void iree_hal_remote_server_remove_session(iree_hal_remote_server_t* server,
   uint64_t* epoch_map_epochs = NULL;
   iree_hal_semaphore_t** epoch_map_semaphores = NULL;
   iree_host_size_t epoch_map_capacity = 0;
-  iree_hal_remote_resource_id_t* prov_map_provisionals = NULL;
-  iree_hal_remote_resource_id_t* prov_map_resolved = NULL;
+  iree_hal_remote_server_session_t provisional_snapshot;
+  memset(&provisional_snapshot, 0, sizeof(provisional_snapshot));
   iree_net_sequence_node_t* pending_releases = NULL;
   iree_net_sequence_node_t* pending_completions = NULL;
 
@@ -191,9 +272,8 @@ void iree_hal_remote_server_remove_session(iree_hal_remote_server_t* server,
     memset(&server->sessions[slot].epoch_semaphore_map, 0,
            sizeof(server->sessions[slot].epoch_semaphore_map));
 
-    prov_map_provisionals =
-        server->sessions[slot].provisional_map.provisional_ids;
-    prov_map_resolved = server->sessions[slot].provisional_map.resolved_ids;
+    provisional_snapshot.provisional_map =
+        server->sessions[slot].provisional_map;
     memset(&server->sessions[slot].provisional_map, 0,
            sizeof(server->sessions[slot].provisional_map));
 
@@ -228,9 +308,8 @@ void iree_hal_remote_server_remove_session(iree_hal_remote_server_t* server,
   iree_allocator_free(server->host_allocator, epoch_map_epochs);
   iree_allocator_free(server->host_allocator, epoch_map_semaphores);
 
-  // Free provisional mapping arrays.
-  iree_allocator_free(server->host_allocator, prov_map_provisionals);
-  iree_allocator_free(server->host_allocator, prov_map_resolved);
+  iree_hal_remote_server_session_deinitialize_provisionals(
+      &provisional_snapshot, server->host_allocator);
 
   // Release owner-managed nodes that were pending in sequence windows.
   iree_hal_remote_server_free_resource_release_nodes(pending_releases);
@@ -481,7 +560,8 @@ static iree_hal_semaphore_t* iree_hal_remote_server_remove_epoch_semaphore(
 // at iree_hal_semaphore_wait().
 static void iree_hal_remote_server_send_error_advance(
     iree_net_queue_channel_t* queue_channel,
-    const iree_async_frontier_t* signal_frontier, iree_status_t status) {
+    const iree_async_frontier_t* signal_frontier, iree_status_t status,
+    iree_allocator_t host_allocator) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   // Build the advance payload header with the error status code.
@@ -492,31 +572,34 @@ static void iree_hal_remote_server_send_error_advance(
   // Serialize the full status for the client.
   iree_host_size_t wire_size = 0;
   iree_net_status_wire_size(status, &wire_size);
-  uint8_t wire_buffer[IREE_HAL_REMOTE_MAX_STATUS_WIRE_SIZE];
-  if (wire_size <= sizeof(wire_buffer)) {
-    iree_status_t serialize_status = iree_net_status_wire_serialize(
-        status, iree_make_byte_span(wire_buffer, wire_size));
-    if (iree_status_is_ok(serialize_status)) {
-      advance_header.status_wire_length = (uint32_t)wire_size;
-      iree_async_span_t spans[2] = {
-          iree_async_span_from_ptr(&advance_header, sizeof(advance_header)),
-          iree_async_span_from_ptr(wire_buffer, wire_size),
-      };
-      iree_async_span_list_t payload = {spans, 2};
-      iree_status_ignore(iree_net_queue_channel_send_advance(
-          queue_channel, signal_frontier, payload, 0));
-    } else {
-      // Serialization failed; send code-only error ADVANCE.
-      iree_status_ignore(serialize_status);
-      iree_async_span_t spans[1] = {
-          iree_async_span_from_ptr(&advance_header, sizeof(advance_header)),
-      };
-      iree_async_span_list_t payload = {spans, 1};
-      iree_status_ignore(iree_net_queue_channel_send_advance(
-          queue_channel, signal_frontier, payload, 0));
-    }
+  uint8_t* wire_buffer = NULL;
+  iree_status_t serialize_status = iree_ok_status();
+  if (wire_size > UINT32_MAX) {
+    serialize_status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                        "serialized status wire length %" PRIhsz
+                                        " exceeds protocol limit %" PRIu32,
+                                        wire_size, UINT32_MAX);
   } else {
-    // Status too large for stack storage; send code-only.
+    serialize_status =
+        iree_allocator_malloc(host_allocator, wire_size, (void**)&wire_buffer);
+  }
+  if (iree_status_is_ok(serialize_status)) {
+    serialize_status = iree_net_status_wire_serialize(
+        status, iree_make_byte_span(wire_buffer, wire_size));
+  }
+
+  if (iree_status_is_ok(serialize_status)) {
+    advance_header.status_wire_length = (uint32_t)wire_size;
+    iree_async_span_t spans[2] = {
+        iree_async_span_from_ptr(&advance_header, sizeof(advance_header)),
+        iree_async_span_from_ptr(wire_buffer, wire_size),
+    };
+    iree_async_span_list_t payload = {spans, 2};
+    iree_status_ignore(iree_net_queue_channel_send_advance(
+        queue_channel, signal_frontier, payload, 0));
+  } else {
+    // Allocation or serialization failed; send code-only error ADVANCE.
+    iree_status_ignore(serialize_status);
     iree_async_span_t spans[1] = {
         iree_async_span_from_ptr(&advance_header, sizeof(advance_header)),
     };
@@ -525,6 +608,7 @@ static void iree_hal_remote_server_send_error_advance(
         queue_channel, signal_frontier, payload, 0));
   }
 
+  iree_allocator_free(host_allocator, wire_buffer);
   iree_status_free(status);
   IREE_TRACE_ZONE_END(z0);
 }
@@ -647,7 +731,8 @@ static void iree_hal_remote_server_on_command_complete(
       // Execution failed locally, or completion ordering bookkeeping detected
       // a protocol violation. Fail the client axis immediately.
       iree_hal_remote_server_send_error_advance(completion->queue_channel,
-                                                signal_frontier, status);
+                                                signal_frontier, status,
+                                                completion->host_allocator);
     }
   } else {
     iree_status_ignore(status);
@@ -664,69 +749,461 @@ static void iree_hal_remote_server_on_command_complete(
 // Provisional→resolved resource ID mapping
 //===----------------------------------------------------------------------===//
 
-// Removes a provisional mapping by provisional_id. Called when the resolved
-// resource is released to prevent unbounded map growth.
-static void iree_hal_remote_server_remove_provisional(
+static bool iree_hal_remote_server_find_provisional(
     iree_hal_remote_server_session_t* session_slot,
-    iree_hal_remote_resource_id_t provisional_id) {
+    iree_hal_remote_resource_id_t provisional_id, iree_host_size_t* out_index) {
+  *out_index = 0;
   for (iree_host_size_t i = 0; i < session_slot->provisional_map.count; ++i) {
     if (session_slot->provisional_map.provisional_ids[i] == provisional_id) {
-      // Swap-remove with the last entry.
-      iree_host_size_t last = session_slot->provisional_map.count - 1;
-      if (i != last) {
-        session_slot->provisional_map.provisional_ids[i] =
-            session_slot->provisional_map.provisional_ids[last];
-        session_slot->provisional_map.resolved_ids[i] =
-            session_slot->provisional_map.resolved_ids[last];
-      }
-      --session_slot->provisional_map.count;
-      return;
+      *out_index = i;
+      return true;
     }
   }
+  return false;
 }
 
-// Stores a provisional→resolved resource ID mapping. Used by BUFFER_ALLOCA
-// so that subsequent commands referencing the provisional ID can be resolved.
-static iree_status_t iree_hal_remote_server_store_provisional(
+static iree_status_t iree_hal_remote_server_reserve_provisional_map(
     iree_hal_remote_server_session_t* session_slot,
-    iree_hal_remote_resource_id_t provisional_id,
-    iree_hal_remote_resource_id_t resolved_id,
     iree_allocator_t host_allocator) {
-  // Cap the map at the resource table capacity. There can never be more live
-  // provisionals than resource table slots. Use the actual table capacity
-  // since it's set at initialization time.
+  // Cap distinct provisional IDs at the resource table capacity. Pending
+  // provisionals that later resolve will consume resource table slots, so the
+  // map should not admit more live names than the session can materialize.
   if (session_slot->provisional_map.count >=
       session_slot->resource_table.capacity) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "provisional map full");
   }
   iree_host_size_t minimum_capacity = session_slot->provisional_map.count + 1;
+  iree_status_t status = iree_ok_status();
   if (minimum_capacity > session_slot->provisional_map.capacity) {
-    iree_host_size_t prov_capacity = session_slot->provisional_map.capacity;
-    IREE_RETURN_IF_ERROR(iree_allocator_grow_array(
+    iree_host_size_t provisional_capacity =
+        session_slot->provisional_map.capacity;
+    status = iree_allocator_grow_array(
         host_allocator, minimum_capacity, sizeof(iree_hal_remote_resource_id_t),
-        &prov_capacity,
-        (void**)&session_slot->provisional_map.provisional_ids));
-    iree_host_size_t res_capacity = session_slot->provisional_map.capacity;
-    iree_status_t status = iree_allocator_grow_array(
-        host_allocator, minimum_capacity, sizeof(iree_hal_remote_resource_id_t),
-        &res_capacity, (void**)&session_slot->provisional_map.resolved_ids);
-    if (!iree_status_is_ok(status)) {
-      session_slot->provisional_map.capacity = prov_capacity;
-      return status;
+        &provisional_capacity,
+        (void**)&session_slot->provisional_map.provisional_ids);
+
+    iree_host_size_t resolved_capacity = session_slot->provisional_map.capacity;
+    if (iree_status_is_ok(status)) {
+      status = iree_allocator_grow_array(
+          host_allocator, minimum_capacity,
+          sizeof(iree_hal_remote_resource_id_t), &resolved_capacity,
+          (void**)&session_slot->provisional_map.resolved_ids);
     }
-    session_slot->provisional_map.capacity =
-        iree_min(prov_capacity, res_capacity);
+
+    iree_host_size_t state_capacity = session_slot->provisional_map.capacity;
+    if (iree_status_is_ok(status)) {
+      status = iree_allocator_grow_array(
+          host_allocator, minimum_capacity,
+          sizeof(iree_hal_remote_server_provisional_state_t), &state_capacity,
+          (void**)&session_slot->provisional_map.states);
+    }
+
+    iree_host_size_t status_code_capacity =
+        session_slot->provisional_map.capacity;
+    if (iree_status_is_ok(status)) {
+      status = iree_allocator_grow_array(
+          host_allocator, minimum_capacity, sizeof(iree_status_code_t),
+          &status_code_capacity,
+          (void**)&session_slot->provisional_map.status_codes);
+    }
+
+    iree_host_size_t head_capacity = session_slot->provisional_map.capacity;
+    if (iree_status_is_ok(status)) {
+      status = iree_allocator_grow_array(
+          host_allocator, minimum_capacity,
+          sizeof(iree_hal_remote_server_pending_queue_command_t*),
+          &head_capacity, (void**)&session_slot->provisional_map.pending_heads);
+    }
+
+    iree_host_size_t tail_capacity = session_slot->provisional_map.capacity;
+    if (iree_status_is_ok(status)) {
+      status = iree_allocator_grow_array(
+          host_allocator, minimum_capacity,
+          sizeof(iree_hal_remote_server_pending_queue_command_t*),
+          &tail_capacity, (void**)&session_slot->provisional_map.pending_tails);
+    }
+
+    if (iree_status_is_ok(status)) {
+      session_slot->provisional_map.capacity =
+          iree_min(iree_min(provisional_capacity, resolved_capacity),
+                   iree_min(state_capacity,
+                            iree_min(status_code_capacity,
+                                     iree_min(head_capacity, tail_capacity))));
+    }
   }
-  iree_host_size_t index = session_slot->provisional_map.count++;
-  session_slot->provisional_map.provisional_ids[index] = provisional_id;
-  session_slot->provisional_map.resolved_ids[index] = resolved_id;
-  return iree_ok_status();
+  return status;
+}
+
+static iree_status_t iree_hal_remote_server_insert_provisional(
+    iree_hal_remote_server_session_t* session_slot,
+    iree_hal_remote_resource_id_t provisional_id,
+    iree_hal_remote_server_provisional_state_t state,
+    iree_hal_remote_resource_id_t resolved_id, iree_allocator_t host_allocator,
+    iree_host_size_t* out_index) {
+  *out_index = 0;
+  iree_status_t status = iree_hal_remote_server_reserve_provisional_map(
+      session_slot, host_allocator);
+  if (iree_status_is_ok(status)) {
+    iree_host_size_t index = session_slot->provisional_map.count++;
+    session_slot->provisional_map.provisional_ids[index] = provisional_id;
+    session_slot->provisional_map.resolved_ids[index] = resolved_id;
+    session_slot->provisional_map.states[index] = state;
+    session_slot->provisional_map.status_codes[index] = IREE_STATUS_OK;
+    session_slot->provisional_map.pending_heads[index] = NULL;
+    session_slot->provisional_map.pending_tails[index] = NULL;
+    *out_index = index;
+  }
+  return status;
+}
+
+// Prepares a provisional ID for a control-channel operation that will resolve
+// later. Queue commands that arrive first can already have created the pending
+// entry; in that case FILE_OPEN claims the same entry and later resolves it.
+static iree_status_t iree_hal_remote_server_prepare_provisional(
+    iree_hal_remote_server_session_t* session_slot,
+    iree_hal_remote_resource_id_t provisional_id,
+    iree_allocator_t host_allocator) {
+  iree_host_size_t index = 0;
+  iree_status_t status = iree_ok_status();
+  if (iree_hal_remote_server_find_provisional(session_slot, provisional_id,
+                                              &index)) {
+    if (session_slot->provisional_map.states[index] ==
+        IREE_HAL_REMOTE_SERVER_PROVISIONAL_RESOLVED) {
+      status = iree_make_status(IREE_STATUS_ALREADY_EXISTS,
+                                "provisional resource 0x%016" PRIx64
+                                " already has a resolved mapping",
+                                provisional_id);
+    } else if (session_slot->provisional_map.states[index] ==
+               IREE_HAL_REMOTE_SERVER_PROVISIONAL_FAILED) {
+      iree_status_code_t status_code =
+          session_slot->provisional_map.status_codes[index];
+      if (status_code == IREE_STATUS_OK) {
+        status_code = IREE_STATUS_FAILED_PRECONDITION;
+      }
+      status = iree_make_status(status_code,
+                                "provisional resource 0x%016" PRIx64
+                                " already failed resolution",
+                                provisional_id);
+    }
+  } else {
+    status = iree_hal_remote_server_insert_provisional(
+        session_slot, provisional_id,
+        IREE_HAL_REMOTE_SERVER_PROVISIONAL_PENDING,
+        /*resolved_id=*/0, host_allocator, &index);
+  }
+  return status;
+}
+
+// Stores or completes a provisional→resolved resource ID mapping. Used by
+// BUFFER_ALLOCA, FILE_OPEN, and similar operations so later commands
+// referencing the provisional ID can be resolved.
+static iree_status_t iree_hal_remote_server_store_provisional(
+    iree_hal_remote_server_session_t* session_slot,
+    iree_hal_remote_resource_id_t provisional_id,
+    iree_hal_remote_resource_id_t resolved_id, iree_allocator_t host_allocator,
+    iree_hal_remote_server_pending_queue_command_t** out_pending_commands) {
+  if (out_pending_commands) *out_pending_commands = NULL;
+
+  iree_host_size_t index = 0;
+  iree_status_t status = iree_ok_status();
+  if (iree_hal_remote_server_find_provisional(session_slot, provisional_id,
+                                              &index)) {
+    if (session_slot->provisional_map.states[index] ==
+        IREE_HAL_REMOTE_SERVER_PROVISIONAL_RESOLVED) {
+      status = iree_make_status(IREE_STATUS_ALREADY_EXISTS,
+                                "provisional resource 0x%016" PRIx64
+                                " already has a resolved mapping",
+                                provisional_id);
+    } else if (session_slot->provisional_map.states[index] ==
+               IREE_HAL_REMOTE_SERVER_PROVISIONAL_FAILED) {
+      iree_status_code_t status_code =
+          session_slot->provisional_map.status_codes[index];
+      if (status_code == IREE_STATUS_OK) {
+        status_code = IREE_STATUS_FAILED_PRECONDITION;
+      }
+      status = iree_make_status(status_code,
+                                "provisional resource 0x%016" PRIx64
+                                " already failed resolution",
+                                provisional_id);
+    }
+  } else {
+    status = iree_hal_remote_server_insert_provisional(
+        session_slot, provisional_id,
+        IREE_HAL_REMOTE_SERVER_PROVISIONAL_PENDING,
+        /*resolved_id=*/0, host_allocator, &index);
+  }
+
+  if (iree_status_is_ok(status)) {
+    session_slot->provisional_map.resolved_ids[index] = resolved_id;
+    session_slot->provisional_map.states[index] =
+        IREE_HAL_REMOTE_SERVER_PROVISIONAL_RESOLVED;
+    session_slot->provisional_map.status_codes[index] = IREE_STATUS_OK;
+    if (out_pending_commands) {
+      *out_pending_commands =
+          session_slot->provisional_map.pending_heads[index];
+    } else {
+      iree_hal_remote_server_free_pending_queue_commands(
+          session_slot->provisional_map.pending_heads[index]);
+    }
+    session_slot->provisional_map.pending_heads[index] = NULL;
+    session_slot->provisional_map.pending_tails[index] = NULL;
+  }
+
+  return status;
+}
+
+// Marks a provisional ID as failed and detaches any queue commands waiting for
+// its resolution.
+static void iree_hal_remote_server_fail_provisional(
+    iree_hal_remote_server_session_t* session_slot,
+    iree_hal_remote_resource_id_t provisional_id,
+    iree_status_code_t status_code, iree_allocator_t host_allocator,
+    iree_hal_remote_server_pending_queue_command_t** out_pending_commands) {
+  if (out_pending_commands) *out_pending_commands = NULL;
+
+  iree_host_size_t index = 0;
+  if (!iree_hal_remote_server_find_provisional(session_slot, provisional_id,
+                                               &index)) {
+    iree_status_ignore(iree_hal_remote_server_insert_provisional(
+        session_slot, provisional_id, IREE_HAL_REMOTE_SERVER_PROVISIONAL_FAILED,
+        /*resolved_id=*/0, host_allocator, &index));
+  }
+  if (index < session_slot->provisional_map.count) {
+    session_slot->provisional_map.resolved_ids[index] = 0;
+    session_slot->provisional_map.states[index] =
+        IREE_HAL_REMOTE_SERVER_PROVISIONAL_FAILED;
+    session_slot->provisional_map.status_codes[index] = status_code;
+    if (out_pending_commands) {
+      *out_pending_commands =
+          session_slot->provisional_map.pending_heads[index];
+    } else {
+      iree_hal_remote_server_free_pending_queue_commands(
+          session_slot->provisional_map.pending_heads[index]);
+    }
+    session_slot->provisional_map.pending_heads[index] = NULL;
+    session_slot->provisional_map.pending_tails[index] = NULL;
+  }
+}
+
+// Removes a provisional mapping by provisional_id. Called when the resolved
+// resource is released or a pending open fails to prevent unbounded map growth.
+static iree_hal_remote_server_pending_queue_command_t*
+iree_hal_remote_server_remove_provisional(
+    iree_hal_remote_server_session_t* session_slot,
+    iree_hal_remote_resource_id_t provisional_id) {
+  iree_hal_remote_server_pending_queue_command_t* pending_commands = NULL;
+  iree_host_size_t index = 0;
+  if (iree_hal_remote_server_find_provisional(session_slot, provisional_id,
+                                              &index)) {
+    pending_commands = session_slot->provisional_map.pending_heads[index];
+    iree_host_size_t last = session_slot->provisional_map.count - 1;
+    if (index != last) {
+      session_slot->provisional_map.provisional_ids[index] =
+          session_slot->provisional_map.provisional_ids[last];
+      session_slot->provisional_map.resolved_ids[index] =
+          session_slot->provisional_map.resolved_ids[last];
+      session_slot->provisional_map.states[index] =
+          session_slot->provisional_map.states[last];
+      session_slot->provisional_map.status_codes[index] =
+          session_slot->provisional_map.status_codes[last];
+      session_slot->provisional_map.pending_heads[index] =
+          session_slot->provisional_map.pending_heads[last];
+      session_slot->provisional_map.pending_tails[index] =
+          session_slot->provisional_map.pending_tails[last];
+    }
+    --session_slot->provisional_map.count;
+  }
+  return pending_commands;
+}
+
+static iree_status_t iree_hal_remote_server_enqueue_pending_queue_command(
+    iree_hal_remote_server_session_t* session_slot,
+    iree_hal_remote_resource_id_t provisional_id,
+    iree_net_queue_channel_t* queue_channel,
+    const iree_async_frontier_t* wait_frontier,
+    const iree_async_frontier_t* signal_frontier,
+    iree_const_byte_span_t command_data, iree_async_buffer_lease_t* lease,
+    iree_allocator_t host_allocator) {
+  iree_status_t status = iree_ok_status();
+  if (!lease || !lease->release.fn) {
+    status = iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "queue message endpoint did not provide retainable receive storage for "
+        "deferred provisional resource 0x%016" PRIx64,
+        provisional_id);
+  }
+
+  iree_hal_remote_server_pending_queue_command_t* command = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc(host_allocator, sizeof(*command),
+                                   (void**)&command);
+  }
+  if (iree_status_is_ok(status)) {
+    memset(command, 0, sizeof(*command));
+    command->host_allocator = host_allocator;
+    command->provisional_id = provisional_id;
+    command->queue_channel = queue_channel;
+    iree_net_queue_channel_retain(command->queue_channel);
+
+    command->lease = *lease;
+    memset(lease, 0, sizeof(*lease));
+    command->wait_frontier = wait_frontier;
+    command->signal_frontier = signal_frontier;
+    command->command_data = command_data;
+  }
+
+  iree_host_size_t index = 0;
+  if (iree_status_is_ok(status) && !iree_hal_remote_server_find_provisional(
+                                       session_slot, provisional_id, &index)) {
+    status = iree_hal_remote_server_insert_provisional(
+        session_slot, provisional_id,
+        IREE_HAL_REMOTE_SERVER_PROVISIONAL_PENDING,
+        /*resolved_id=*/0, host_allocator, &index);
+  }
+  if (iree_status_is_ok(status)) {
+    if (session_slot->provisional_map.states[index] ==
+        IREE_HAL_REMOTE_SERVER_PROVISIONAL_RESOLVED) {
+      status = iree_make_status(IREE_STATUS_ALREADY_EXISTS,
+                                "provisional resource 0x%016" PRIx64
+                                " resolved while queue command "
+                                "was being parked",
+                                provisional_id);
+    } else if (session_slot->provisional_map.states[index] ==
+               IREE_HAL_REMOTE_SERVER_PROVISIONAL_FAILED) {
+      iree_status_code_t status_code =
+          session_slot->provisional_map.status_codes[index];
+      if (status_code == IREE_STATUS_OK) {
+        status_code = IREE_STATUS_FAILED_PRECONDITION;
+      }
+      status = iree_make_status(status_code,
+                                "provisional resource 0x%016" PRIx64
+                                " failed before queue command arrived",
+                                provisional_id);
+    } else if (session_slot->provisional_map.pending_tails[index]) {
+      session_slot->provisional_map.pending_tails[index]->next = command;
+      session_slot->provisional_map.pending_tails[index] = command;
+      command = NULL;
+    } else {
+      session_slot->provisional_map.pending_heads[index] = command;
+      session_slot->provisional_map.pending_tails[index] = command;
+      command = NULL;
+    }
+  }
+  iree_hal_remote_server_free_pending_queue_command(command);
+  return status;
+}
+
+static bool iree_hal_remote_server_is_provisional_resolved(
+    iree_hal_remote_server_session_t* session_slot,
+    iree_hal_remote_resource_id_t provisional_id) {
+  iree_host_size_t index = 0;
+  return iree_hal_remote_server_find_provisional(session_slot, provisional_id,
+                                                 &index) &&
+         session_slot->provisional_map.states[index] ==
+             IREE_HAL_REMOTE_SERVER_PROVISIONAL_RESOLVED;
+}
+
+static bool iree_hal_remote_server_file_command_waits_on_provisional(
+    iree_hal_remote_server_session_t* session_slot,
+    iree_const_byte_span_t command_data,
+    iree_hal_remote_resource_id_t* out_provisional_id) {
+  *out_provisional_id = 0;
+  if (command_data.data_length < sizeof(iree_hal_remote_queue_op_header_t)) {
+    return false;
+  }
+  const iree_hal_remote_queue_op_header_t* op_header =
+      (const iree_hal_remote_queue_op_header_t*)command_data.data;
+  iree_hal_remote_resource_id_t file_id = 0;
+  if (op_header->type == IREE_HAL_REMOTE_QUEUE_OP_FILE_READ &&
+      command_data.data_length >= sizeof(iree_hal_remote_file_read_op_t)) {
+    const iree_hal_remote_file_read_op_t* op =
+        (const iree_hal_remote_file_read_op_t*)command_data.data;
+    file_id = op->source_file_id;
+  } else if (op_header->type == IREE_HAL_REMOTE_QUEUE_OP_FILE_WRITE &&
+             command_data.data_length >=
+                 sizeof(iree_hal_remote_file_write_op_t)) {
+    const iree_hal_remote_file_write_op_t* op =
+        (const iree_hal_remote_file_write_op_t*)command_data.data;
+    file_id = op->target_file_id;
+  }
+
+  bool waits_on_provisional = false;
+  if (file_id != 0 && IREE_HAL_REMOTE_RESOURCE_ID_IS_PROVISIONAL(file_id) &&
+      !iree_hal_remote_server_is_provisional_resolved(session_slot, file_id)) {
+    *out_provisional_id = file_id;
+    waits_on_provisional = true;
+  }
+  return waits_on_provisional;
+}
+
+static iree_status_t iree_hal_remote_server_fail_pending_queue_command(
+    iree_hal_remote_server_session_t* session_slot,
+    iree_hal_remote_server_pending_queue_command_t* pending_command,
+    iree_status_t status) {
+  IREE_ASSERT_ARGUMENT(pending_command);
+  const iree_async_frontier_t* signal_frontier =
+      iree_hal_remote_server_pending_queue_command_signal_frontier(
+          pending_command);
+  iree_hal_remote_server_send_error_advance(pending_command->queue_channel,
+                                            signal_frontier, status,
+                                            pending_command->host_allocator);
+  iree_status_t observe_status =
+      iree_hal_remote_server_observe_submission_frontier(session_slot,
+                                                         signal_frontier);
+  iree_hal_remote_server_free_pending_queue_command(pending_command);
+  return observe_status;
+}
+
+static iree_status_t iree_hal_remote_server_fail_pending_queue_commands(
+    iree_hal_remote_server_session_t* session_slot,
+    iree_hal_remote_server_pending_queue_command_t* pending_commands,
+    iree_status_t status) {
+  if (!pending_commands) {
+    return iree_status_ignore(status);
+  }
+  iree_status_t fail_status = iree_ok_status();
+  while (pending_commands) {
+    iree_hal_remote_server_pending_queue_command_t* next =
+        pending_commands->next;
+    pending_commands->next = NULL;
+    iree_status_t command_status = next ? iree_status_clone(status) : status;
+    if (!next) status = iree_ok_status();
+    fail_status = iree_status_join(
+        fail_status, iree_hal_remote_server_fail_pending_queue_command(
+                         session_slot, pending_commands, command_status));
+    pending_commands = next;
+  }
+  iree_status_ignore(status);
+  return fail_status;
+}
+
+static iree_status_t iree_hal_remote_server_process_pending_queue_command(
+    iree_hal_remote_server_session_t* session_slot,
+    iree_hal_remote_server_pending_queue_command_t* pending_command) {
+  const iree_async_frontier_t* wait_frontier =
+      iree_hal_remote_server_pending_queue_command_wait_frontier(
+          pending_command);
+  const iree_async_frontier_t* signal_frontier =
+      iree_hal_remote_server_pending_queue_command_signal_frontier(
+          pending_command);
+  iree_const_byte_span_t command_data =
+      iree_hal_remote_server_pending_queue_command_data(pending_command);
+  iree_status_t status = iree_hal_remote_server_on_queue_command(
+      session_slot, /*stream_id=*/0, wait_frontier, signal_frontier,
+      command_data, /*lease=*/NULL);
+  if (!iree_status_is_ok(status)) {
+    status = iree_hal_remote_server_fail_pending_queue_command(
+        session_slot, pending_command, status);
+  } else {
+    iree_hal_remote_server_free_pending_queue_command(pending_command);
+  }
+  return status;
 }
 
 // Resolves a resource ID that may be provisional. If the ID has the
-// PROVISIONAL flag set, looks up the mapping and returns the resolved ID.
-// If not provisional, returns the ID unchanged.
+// PROVISIONAL flag set, looks up a resolved mapping and returns it. Pending or
+// unknown provisionals return unchanged so resource table lookups fail loudly.
 static iree_hal_remote_resource_id_t iree_hal_remote_server_resolve_resource_id(
     iree_hal_remote_server_session_t* session_slot,
     iree_hal_remote_resource_id_t resource_id) {
@@ -734,11 +1211,13 @@ static iree_hal_remote_resource_id_t iree_hal_remote_server_resolve_resource_id(
     return resource_id;
   }
   for (iree_host_size_t i = 0; i < session_slot->provisional_map.count; ++i) {
-    if (session_slot->provisional_map.provisional_ids[i] == resource_id) {
+    if (session_slot->provisional_map.provisional_ids[i] == resource_id &&
+        session_slot->provisional_map.states[i] ==
+            IREE_HAL_REMOTE_SERVER_PROVISIONAL_RESOLVED) {
       return session_slot->provisional_map.resolved_ids[i];
     }
   }
-  return resource_id;  // Not found — return as-is (will fail in table lookup).
+  return resource_id;
 }
 
 static iree_status_t iree_hal_remote_server_resolve_command_buffer_ref(
@@ -992,7 +1471,8 @@ static iree_status_t iree_hal_remote_server_submit_command(
     }
     if (queue_channel) {
       iree_hal_remote_server_send_error_advance(queue_channel, signal_frontier,
-                                                failure_status);
+                                                failure_status,
+                                                server->host_allocator);
     } else {
       iree_status_ignore(failure_status);
     }
@@ -1236,7 +1716,8 @@ static iree_status_t iree_hal_remote_server_submit_buffer_alloca(
   if (iree_status_is_ok(status)) {
     status = iree_hal_remote_server_store_provisional(
         context->session_slot, op->provisional_buffer_id, resolved_id,
-        context->session_slot->server->host_allocator);
+        context->session_slot->server->host_allocator,
+        /*out_pending_commands=*/NULL);
   }
 
   // Store the resolution entry in the op context so submit_command can
@@ -1387,6 +1868,127 @@ static iree_status_t iree_hal_remote_server_submit_client_file_write(
   return iree_hal_remote_server_bulk_submit_client_file_write(
       context->session_slot, local_device, wait_list, signal_list,
       op->transfer_id, source_buffer, op->source_offset,
+      (iree_device_size_t)op->length, (iree_hal_write_flags_t)op->write_flags);
+}
+
+static iree_status_t iree_hal_remote_server_submit_file_read(
+    void* user_data, iree_hal_device_t* local_device,
+    iree_hal_semaphore_list_t wait_list,
+    iree_hal_semaphore_list_t signal_list) {
+  iree_hal_remote_server_op_context_t* context =
+      (iree_hal_remote_server_op_context_t*)user_data;
+  if (context->command_data.data_length <
+      sizeof(iree_hal_remote_file_read_op_t)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "FILE_READ command too short: %" PRIhsz
+                            " < %" PRIhsz,
+                            context->command_data.data_length,
+                            sizeof(iree_hal_remote_file_read_op_t));
+  }
+  const iree_hal_remote_file_read_op_t* op =
+      (const iree_hal_remote_file_read_op_t*)context->command_data.data;
+  if (op->read_flags != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported FILE_READ flags: 0x%" PRIx64,
+                            op->read_flags);
+  }
+  if (op->length > IREE_DEVICE_SIZE_MAX) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "FILE_READ length %" PRIu64
+                            " exceeds device size max %" PRIu64,
+                            op->length, (uint64_t)IREE_DEVICE_SIZE_MAX);
+  }
+
+  iree_hal_remote_resource_id_t source_file_id =
+      iree_hal_remote_server_resolve_resource_id(context->session_slot,
+                                                 op->source_file_id);
+  iree_hal_file_t* source_file =
+      (iree_hal_file_t*)iree_hal_remote_resource_table_lookup(
+          &context->session_slot->resource_table,
+          IREE_HAL_REMOTE_RESOURCE_TYPE_FILE, source_file_id);
+  if (!source_file) {
+    return iree_make_status(IREE_STATUS_NOT_FOUND,
+                            "FILE_READ source file 0x%016" PRIx64 " not found",
+                            source_file_id);
+  }
+
+  iree_hal_remote_resource_id_t target_buffer_id =
+      iree_hal_remote_server_resolve_resource_id(context->session_slot,
+                                                 op->target_buffer_id);
+  iree_hal_buffer_t* target_buffer =
+      (iree_hal_buffer_t*)iree_hal_remote_resource_table_lookup(
+          &context->session_slot->resource_table,
+          IREE_HAL_REMOTE_RESOURCE_TYPE_BUFFER, target_buffer_id);
+  if (!target_buffer) {
+    return iree_make_status(
+        IREE_STATUS_NOT_FOUND,
+        "FILE_READ target buffer 0x%016" PRIx64 " not found", target_buffer_id);
+  }
+
+  return iree_hal_device_queue_read(
+      local_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_list, signal_list,
+      source_file, op->source_offset, target_buffer, op->target_offset,
+      (iree_device_size_t)op->length, (iree_hal_read_flags_t)op->read_flags);
+}
+
+static iree_status_t iree_hal_remote_server_submit_file_write(
+    void* user_data, iree_hal_device_t* local_device,
+    iree_hal_semaphore_list_t wait_list,
+    iree_hal_semaphore_list_t signal_list) {
+  iree_hal_remote_server_op_context_t* context =
+      (iree_hal_remote_server_op_context_t*)user_data;
+  if (context->command_data.data_length <
+      sizeof(iree_hal_remote_file_write_op_t)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "FILE_WRITE command too short: %" PRIhsz
+                            " < %" PRIhsz,
+                            context->command_data.data_length,
+                            sizeof(iree_hal_remote_file_write_op_t));
+  }
+  const iree_hal_remote_file_write_op_t* op =
+      (const iree_hal_remote_file_write_op_t*)context->command_data.data;
+  if (op->write_flags != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported FILE_WRITE flags: 0x%" PRIx64,
+                            op->write_flags);
+  }
+  if (op->length > IREE_DEVICE_SIZE_MAX) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "FILE_WRITE length %" PRIu64
+                            " exceeds device size max %" PRIu64,
+                            op->length, (uint64_t)IREE_DEVICE_SIZE_MAX);
+  }
+
+  iree_hal_remote_resource_id_t source_buffer_id =
+      iree_hal_remote_server_resolve_resource_id(context->session_slot,
+                                                 op->source_buffer_id);
+  iree_hal_buffer_t* source_buffer =
+      (iree_hal_buffer_t*)iree_hal_remote_resource_table_lookup(
+          &context->session_slot->resource_table,
+          IREE_HAL_REMOTE_RESOURCE_TYPE_BUFFER, source_buffer_id);
+  if (!source_buffer) {
+    return iree_make_status(IREE_STATUS_NOT_FOUND,
+                            "FILE_WRITE source buffer 0x%016" PRIx64
+                            " not found",
+                            source_buffer_id);
+  }
+
+  iree_hal_remote_resource_id_t target_file_id =
+      iree_hal_remote_server_resolve_resource_id(context->session_slot,
+                                                 op->target_file_id);
+  iree_hal_file_t* target_file =
+      (iree_hal_file_t*)iree_hal_remote_resource_table_lookup(
+          &context->session_slot->resource_table,
+          IREE_HAL_REMOTE_RESOURCE_TYPE_FILE, target_file_id);
+  if (!target_file) {
+    return iree_make_status(IREE_STATUS_NOT_FOUND,
+                            "FILE_WRITE target file 0x%016" PRIx64 " not found",
+                            target_file_id);
+  }
+
+  return iree_hal_device_queue_write(
+      local_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_list, signal_list,
+      source_buffer, op->source_offset, target_file, op->target_offset,
       (iree_device_size_t)op->length, (iree_hal_write_flags_t)op->write_flags);
 }
 
@@ -1729,31 +2331,31 @@ static iree_status_t iree_hal_remote_server_send_error_response(
     iree_status_t status) {
   iree_status_code_t code = iree_status_code(status);
 
-  // Compute serialized size and serialize if it fits in the stack buffer.
+  // Compute serialized size and serialize the full status.
   iree_host_size_t wire_size = 0;
   iree_net_status_wire_size(status, &wire_size);
 
-  iree_status_t send_status;
-  if (wire_size <= IREE_HAL_REMOTE_MAX_STATUS_WIRE_SIZE) {
-    uint8_t wire_buffer[IREE_HAL_REMOTE_MAX_STATUS_WIRE_SIZE];
-    iree_status_t serialize_status = iree_net_status_wire_serialize(
+  uint8_t* wire_buffer = NULL;
+  iree_status_t serialize_status =
+      iree_allocator_malloc(host_allocator, wire_size, (void**)&wire_buffer);
+  if (iree_status_is_ok(serialize_status)) {
+    serialize_status = iree_net_status_wire_serialize(
         status, iree_make_byte_span(wire_buffer, wire_size));
-    if (iree_status_is_ok(serialize_status)) {
-      send_status = iree_hal_remote_server_send_response(
-          host_allocator, session, request_envelope, code, wire_buffer,
-          wire_size);
-    } else {
-      // Serialization failed; send code-only response.
-      iree_status_ignore(serialize_status);
-      send_status = iree_hal_remote_server_send_response(
-          host_allocator, session, request_envelope, code, NULL, 0);
-    }
+  }
+
+  iree_status_t send_status = iree_ok_status();
+  if (iree_status_is_ok(serialize_status)) {
+    send_status = iree_hal_remote_server_send_response(host_allocator, session,
+                                                       request_envelope, code,
+                                                       wire_buffer, wire_size);
   } else {
-    // Status too large for stack buffer; send code-only response.
+    // Allocation or serialization failed; send code-only response.
+    iree_status_ignore(serialize_status);
     send_status = iree_hal_remote_server_send_response(
         host_allocator, session, request_envelope, code, NULL, 0);
   }
 
+  iree_allocator_free(host_allocator, wire_buffer);
   iree_status_ignore(status);
   return send_status;
 }
@@ -2746,15 +3348,29 @@ static iree_status_t iree_hal_remote_server_release_resource_ids(
     iree_hal_remote_server_session_t* entry,
     const iree_hal_remote_resource_id_t* resource_ids,
     uint32_t resource_count) {
+  iree_status_t status = iree_ok_status();
   for (uint32_t i = 0; i < resource_count; ++i) {
     iree_hal_remote_resource_id_t resolved_id =
         iree_hal_remote_server_resolve_resource_id(entry, resource_ids[i]);
-    iree_hal_remote_resource_table_release(&entry->resource_table, resolved_id);
-    if (resolved_id != resource_ids[i]) {
-      iree_hal_remote_server_remove_provisional(entry, resource_ids[i]);
+    if (!IREE_HAL_REMOTE_RESOURCE_ID_IS_PROVISIONAL(resolved_id)) {
+      iree_hal_remote_resource_table_release(&entry->resource_table,
+                                             resolved_id);
+    }
+    if (resolved_id != resource_ids[i] ||
+        IREE_HAL_REMOTE_RESOURCE_ID_IS_PROVISIONAL(resource_ids[i])) {
+      iree_hal_remote_server_pending_queue_command_t* pending_commands =
+          iree_hal_remote_server_remove_provisional(entry, resource_ids[i]);
+      status = iree_status_join(
+          status,
+          iree_hal_remote_server_fail_pending_queue_commands(
+              entry, pending_commands,
+              iree_make_status(IREE_STATUS_ABORTED,
+                               "resource release canceled pending provisional "
+                               "resource 0x%016" PRIx64,
+                               resource_ids[i])));
     }
   }
-  return iree_ok_status();
+  return status;
 }
 
 static iree_status_t iree_hal_remote_server_release_resource_node(
@@ -2771,16 +3387,18 @@ static iree_status_t iree_hal_remote_server_process_ready_resource_releases(
     iree_hal_remote_server_session_t* entry,
     iree_net_sequence_node_t* ready_list) {
   iree_status_t status = iree_ok_status();
-  while (ready_list && iree_status_is_ok(status)) {
+  while (ready_list) {
     iree_net_sequence_node_t* next = ready_list->next;
     iree_hal_remote_server_resource_release_node_t* release_node =
         iree_containerof(ready_list,
                          iree_hal_remote_server_resource_release_node_t,
                          sequence_node);
-    status = iree_hal_remote_server_release_resource_node(entry, release_node);
+    ready_list->next = NULL;
+    status = iree_status_join(
+        status,
+        iree_hal_remote_server_release_resource_node(entry, release_node));
     ready_list = next;
   }
-  iree_hal_remote_server_free_resource_release_nodes(ready_list);
   return status;
 }
 
@@ -2951,6 +3569,30 @@ static iree_status_t iree_hal_remote_server_handle_queue_resource_release_batch(
       entry, op->required_observed_epoch, resource_ids, resource_count);
 }
 
+static iree_status_t iree_hal_remote_server_observe_submission_frontier(
+    iree_hal_remote_server_session_t* session_slot,
+    const iree_async_frontier_t* signal_frontier) {
+  uint64_t signal_epoch = signal_frontier->entries[0].epoch;
+
+  iree_net_sequence_node_t* ready_releases = NULL;
+  bool session_active = false;
+  iree_hal_remote_server_t* server = session_slot->server;
+  iree_status_t status = iree_ok_status();
+  iree_slim_mutex_lock(&server->session_mutex);
+  session_active = session_slot->session != NULL;
+  if (session_active) {
+    status = iree_net_sequence_window_observe(
+        &session_slot->observed_submission_window, signal_epoch,
+        &ready_releases);
+  }
+  iree_slim_mutex_unlock(&server->session_mutex);
+  if (iree_status_is_ok(status) && session_active) {
+    status = iree_hal_remote_server_process_ready_resource_releases(
+        session_slot, ready_releases);
+  }
+  return status;
+}
+
 //===----------------------------------------------------------------------===//
 // Queue channel callbacks
 //===----------------------------------------------------------------------===//
@@ -2974,7 +3616,7 @@ static iree_status_t iree_hal_remote_server_validate_queue_frontier(
 
 // Server receives COMMAND frames from clients and dispatches to the local
 // device. On completion (via semaphore timepoint), sends ADVANCE back.
-static iree_status_t iree_hal_remote_server_on_command(
+iree_status_t iree_hal_remote_server_on_queue_command(
     void* user_data, uint32_t stream_id,
     const iree_async_frontier_t* wait_frontier,
     const iree_async_frontier_t* signal_frontier,
@@ -3009,6 +3651,28 @@ static iree_status_t iree_hal_remote_server_on_command(
         session_slot, "signal", signal_frontier);
   }
   if (!iree_status_is_ok(status)) {
+    IREE_TRACE_ZONE_END(z0);
+    return status;
+  }
+
+  iree_hal_remote_resource_id_t pending_file_id = 0;
+  if (op_header && iree_hal_remote_server_file_command_waits_on_provisional(
+                       session_slot, command_data, &pending_file_id)) {
+    if (!session_slot->queue_channel) {
+      status = iree_status_from_code(IREE_STATUS_ABORTED);
+    } else {
+      status = iree_hal_remote_server_enqueue_pending_queue_command(
+          session_slot, pending_file_id, session_slot->queue_channel,
+          wait_frontier, signal_frontier, command_data, lease,
+          session_slot->server->host_allocator);
+    }
+    if (!iree_status_is_ok(status) && session_slot->queue_channel) {
+      iree_hal_remote_server_send_error_advance(
+          session_slot->queue_channel, signal_frontier, status,
+          session_slot->server->host_allocator);
+      status = iree_hal_remote_server_observe_submission_frontier(
+          session_slot, signal_frontier);
+    }
     IREE_TRACE_ZONE_END(z0);
     return status;
   }
@@ -3060,6 +3724,16 @@ static iree_status_t iree_hal_remote_server_on_command(
             session_slot, wait_frontier, signal_frontier,
             iree_hal_remote_server_submit_client_file_write, &op_context);
         break;
+      case IREE_HAL_REMOTE_QUEUE_OP_FILE_READ:
+        status = iree_hal_remote_server_submit_command(
+            session_slot, wait_frontier, signal_frontier,
+            iree_hal_remote_server_submit_file_read, &op_context);
+        break;
+      case IREE_HAL_REMOTE_QUEUE_OP_FILE_WRITE:
+        status = iree_hal_remote_server_submit_command(
+            session_slot, wait_frontier, signal_frontier,
+            iree_hal_remote_server_submit_file_write, &op_context);
+        break;
       case IREE_HAL_REMOTE_QUEUE_OP_DISPATCH:
         status = iree_hal_remote_server_submit_command(
             session_slot, wait_frontier, signal_frontier,
@@ -3085,6 +3759,209 @@ static iree_status_t iree_hal_remote_server_on_command(
 
   IREE_TRACE_ZONE_END(z0);
   return status;
+}
+
+static iree_status_t iree_hal_remote_server_process_pending_queue_commands(
+    iree_hal_remote_server_session_t* session_slot,
+    iree_hal_remote_server_pending_queue_command_t* pending_commands) {
+  iree_status_t status = iree_ok_status();
+  while (pending_commands) {
+    iree_hal_remote_server_pending_queue_command_t* next =
+        pending_commands->next;
+    pending_commands->next = NULL;
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_remote_server_process_pending_queue_command(
+          session_slot, pending_commands);
+    } else {
+      iree_status_t command_status = iree_status_clone(status);
+      iree_status_t fail_status =
+          iree_hal_remote_server_fail_pending_queue_command(
+              session_slot, pending_commands, command_status);
+      status = iree_status_join(status, fail_status);
+    }
+    pending_commands = next;
+  }
+  return status;
+}
+
+// Handles FILE_OPEN: resolves a server-side logical file name through the
+// configured file index and assigns the imported HAL file to the session table.
+static iree_status_t iree_hal_remote_server_handle_file_open(
+    iree_hal_remote_server_session_t* entry,
+    const iree_hal_remote_control_envelope_t* envelope, const uint8_t* body,
+    iree_host_size_t body_length) {
+  const bool fire_and_forget = iree_all_bits_set(
+      envelope->message_flags, IREE_HAL_REMOTE_CONTROL_FLAG_FIRE_AND_FORGET);
+  iree_status_t status = iree_ok_status();
+  const iree_hal_remote_file_open_request_t* request = NULL;
+  iree_string_view_t logical_name = iree_string_view_empty();
+
+  if (body_length < sizeof(iree_hal_remote_file_open_request_t)) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "FILE_OPEN body too small: %" PRIhsz " bytes",
+                              body_length);
+  }
+  if (iree_status_is_ok(status)) {
+    request = (const iree_hal_remote_file_open_request_t*)body;
+    if (request->flags != 0) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "FILE_OPEN flags must be 0");
+    }
+  }
+  if (iree_status_is_ok(status) &&
+      IREE_HAL_REMOTE_RESOURCE_ID_TYPE(request->provisional_id) !=
+          IREE_HAL_REMOTE_RESOURCE_TYPE_FILE) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "FILE_OPEN provisional id must have FILE type");
+  }
+  if (iree_status_is_ok(status) &&
+      !IREE_HAL_REMOTE_RESOURCE_ID_IS_PROVISIONAL(request->provisional_id)) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "FILE_OPEN provisional id must be provisional");
+  }
+  if (iree_status_is_ok(status)) {
+    iree_host_size_t path_offset = sizeof(iree_hal_remote_file_open_request_t);
+    iree_host_size_t path_end = 0;
+    if (!iree_host_size_checked_add(path_offset, request->path_length,
+                                    &path_end) ||
+        path_end > body_length) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "FILE_OPEN path string truncated");
+    } else {
+      logical_name = iree_make_string_view((const char*)body + path_offset,
+                                           request->path_length);
+    }
+  }
+
+  bool provisional_prepared = false;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_server_prepare_provisional(
+        entry, request->provisional_id, entry->server->host_allocator);
+    provisional_prepared = iree_status_is_ok(status);
+  }
+
+  iree_hal_memory_access_t granted_access = 0;
+  iree_io_file_handle_t* file_handle = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_file_index_open(
+        entry->server->options.file_index, logical_name,
+        (iree_hal_memory_access_t)request->mode, entry->server->host_allocator,
+        &file_handle, &granted_access);
+  }
+
+  iree_hal_file_t* file = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_file_import(
+        entry->server->devices[0], IREE_HAL_QUEUE_AFFINITY_ANY, granted_access,
+        file_handle, IREE_HAL_EXTERNAL_FILE_FLAG_NONE, &file);
+  }
+
+  uint64_t file_size = 0;
+  iree_hal_remote_resource_id_t resolved_id = 0;
+  if (iree_status_is_ok(status)) {
+    file_size = iree_hal_file_length(file);
+    status = iree_hal_remote_resource_table_assign(
+        &entry->resource_table, IREE_HAL_REMOTE_RESOURCE_TYPE_FILE, file,
+        &resolved_id);
+  }
+  iree_hal_remote_server_pending_queue_command_t* pending_commands = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_server_store_provisional(
+        entry, request->provisional_id, resolved_id,
+        entry->server->host_allocator, &pending_commands);
+  }
+  if (!iree_status_is_ok(status)) {
+    iree_hal_remote_server_free_pending_queue_commands(pending_commands);
+    pending_commands = NULL;
+  }
+
+  if (!iree_status_is_ok(status) && resolved_id != 0) {
+    iree_hal_remote_resource_table_release(&entry->resource_table, resolved_id);
+    resolved_id = 0;
+  }
+  iree_status_t pending_failure_status = iree_ok_status();
+  if (!iree_status_is_ok(status) && provisional_prepared) {
+    iree_hal_remote_server_pending_queue_command_t* pending_commands = NULL;
+    iree_hal_remote_server_fail_provisional(
+        entry, request->provisional_id, iree_status_code(status),
+        entry->server->host_allocator, &pending_commands);
+    pending_failure_status = iree_hal_remote_server_fail_pending_queue_commands(
+        entry, pending_commands, iree_status_clone(status));
+  }
+
+  iree_hal_file_release(file);
+  iree_io_file_handle_release(file_handle);
+
+  iree_status_t send_status = iree_ok_status();
+  if (iree_status_is_ok(status)) {
+    if (!fire_and_forget) {
+      iree_hal_remote_file_open_response_t response;
+      memset(&response, 0, sizeof(response));
+      response.resolved_id = resolved_id;
+      response.file_size = file_size;
+      response.granted_access = granted_access;
+      send_status = iree_hal_remote_server_send_response(
+          entry->server->host_allocator, entry->session, envelope,
+          IREE_STATUS_OK, &response, sizeof(response));
+    }
+    send_status = iree_status_join(
+        send_status, iree_hal_remote_server_process_pending_queue_commands(
+                         entry, pending_commands));
+    pending_commands = NULL;
+  } else if (!fire_and_forget) {
+    send_status = iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope, status);
+    status = iree_ok_status();
+  } else {
+    iree_status_ignore(status);
+    status = iree_ok_status();
+  }
+  send_status = iree_status_join(send_status, pending_failure_status);
+  iree_hal_remote_server_free_pending_queue_commands(pending_commands);
+  return send_status;
+}
+
+static iree_status_t iree_hal_remote_server_handle_file_close(
+    iree_hal_remote_server_session_t* entry, const uint8_t* body,
+    iree_host_size_t body_length) {
+  iree_status_t status = iree_ok_status();
+  if (body_length < sizeof(iree_hal_remote_file_close_t)) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "FILE_CLOSE body too small: %" PRIhsz " bytes",
+                              body_length);
+  }
+  if (iree_status_is_ok(status)) {
+    const iree_hal_remote_file_close_t* request =
+        (const iree_hal_remote_file_close_t*)body;
+    iree_hal_remote_resource_id_t resolved_id =
+        iree_hal_remote_server_resolve_resource_id(entry, request->file_id);
+    if (!IREE_HAL_REMOTE_RESOURCE_ID_IS_PROVISIONAL(resolved_id)) {
+      iree_hal_remote_resource_table_release(&entry->resource_table,
+                                             resolved_id);
+    }
+    if (resolved_id != request->file_id ||
+        IREE_HAL_REMOTE_RESOURCE_ID_IS_PROVISIONAL(request->file_id)) {
+      iree_hal_remote_server_pending_queue_command_t* pending_commands =
+          iree_hal_remote_server_remove_provisional(entry, request->file_id);
+      status = iree_hal_remote_server_fail_pending_queue_commands(
+          entry, pending_commands,
+          iree_make_status(IREE_STATUS_ABORTED,
+                           "FILE_CLOSE canceled pending provisional file "
+                           "0x%016" PRIx64,
+                           request->file_id));
+    }
+  }
+  return status;
+}
+
+static iree_status_t iree_hal_remote_server_handle_file_register(
+    iree_hal_remote_server_session_t* entry,
+    const iree_hal_remote_control_envelope_t* envelope) {
+  return iree_hal_remote_server_send_error_response(
+      entry->server->host_allocator, entry->session, envelope,
+      iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                       "FILE_REGISTER requires a transport-supported external "
+                       "file handle capability"));
 }
 
 // Server does not receive ADVANCE frames (only clients do).
@@ -3236,7 +4113,7 @@ static void iree_hal_remote_server_on_queue_endpoint_ready(
   iree_net_queue_channel_t* queue_channel = NULL;
   if (iree_status_is_ok(status)) {
     iree_net_queue_channel_callbacks_t callbacks = {
-        .on_command = iree_hal_remote_server_on_command,
+        .on_command = iree_hal_remote_server_on_queue_command,
         .on_advance = iree_hal_remote_server_on_advance,
         .on_transport_error = iree_hal_remote_server_on_queue_transport_error,
         .user_data = &server->sessions[slot],
@@ -3552,6 +4429,15 @@ iree_status_t iree_hal_remote_server_on_control_data(
     case IREE_HAL_REMOTE_CONTROL_COMMAND_BUFFER_UPLOAD:
       return iree_hal_remote_server_handle_command_buffer_upload(
           entry, envelope, body, body_length);
+    case IREE_HAL_REMOTE_CONTROL_FILE_OPEN:
+      return iree_hal_remote_server_handle_file_open(entry, envelope, body,
+                                                     body_length);
+    case IREE_HAL_REMOTE_CONTROL_FILE_CLOSE:
+      return iree_hal_remote_server_handle_file_close(entry, body, body_length);
+    case IREE_HAL_REMOTE_CONTROL_FILE_REGISTER:
+      return iree_hal_remote_server_handle_file_register(entry, envelope);
+    case IREE_HAL_REMOTE_CONTROL_FILE_UNREGISTER:
+      return iree_hal_remote_server_handle_file_close(entry, body, body_length);
     case IREE_HAL_REMOTE_CONTROL_RESOURCE_RELEASE_BATCH:
       return iree_hal_remote_server_handle_resource_release_batch(entry, body,
                                                                   body_length);

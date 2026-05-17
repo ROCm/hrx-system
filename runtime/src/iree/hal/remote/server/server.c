@@ -7,6 +7,7 @@
 #include "iree/hal/remote/server/server.h"
 
 #include "iree/hal/remote/server/bulk.h"
+#include "iree/hal/remote/server/file_index.h"
 #include "iree/net/bootstrap.h"
 #include "iree/net/channel/bulk/bulk_channel.h"
 #include "iree/net/transport_factory.h"
@@ -188,6 +189,7 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_server_create(
     server->options.local_topology = NULL;
 
     iree_net_transport_factory_retain(server->options.transport_factory);
+    iree_hal_remote_file_index_retain(server->options.file_index);
 
     server->devices = (iree_hal_device_t**)((uint8_t*)server + devices_offset);
     server->device_count = device_count;
@@ -277,13 +279,8 @@ static void iree_hal_remote_server_destroy(iree_hal_remote_server_t* server) {
     memset(&server->sessions[i].epoch_semaphore_map, 0,
            sizeof(server->sessions[i].epoch_semaphore_map));
 
-    // Free provisional→resolved mapping.
-    iree_allocator_free(host_allocator,
-                        server->sessions[i].provisional_map.provisional_ids);
-    iree_allocator_free(host_allocator,
-                        server->sessions[i].provisional_map.resolved_ids);
-    memset(&server->sessions[i].provisional_map, 0,
-           sizeof(server->sessions[i].provisional_map));
+    iree_hal_remote_server_session_deinitialize_provisionals(
+        &server->sessions[i], host_allocator);
 
     iree_hal_remote_server_session_deinitialize_windows(&server->sessions[i]);
     iree_hal_remote_server_session_deinitialize_bulk_transfers(
@@ -312,6 +309,7 @@ static void iree_hal_remote_server_destroy(iree_hal_remote_server_t* server) {
 
   // Release retained objects.
   iree_net_transport_factory_release(server->options.transport_factory);
+  iree_hal_remote_file_index_release(server->options.file_index);
   if (server->executable_caches) {
     for (iree_host_size_t i = 0; i < server->device_count; ++i) {
       iree_hal_executable_cache_release(server->executable_caches[i]);

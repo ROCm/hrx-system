@@ -44,6 +44,15 @@ iree_status_t iree_file_path_join(iree_string_view_t lhs,
                                   iree_string_view_t rhs,
                                   iree_allocator_t allocator, char** out_path);
 
+// Returns true if |path| is a portable relative path suffix.
+//
+// Portable relative suffixes are suitable for appending to an already-trusted
+// directory root. They reject absolute paths, alternate platform separators,
+// empty path segments, "."/".." segments, embedded control characters, and
+// Windows-special spellings such as drive paths, alternate data streams, and
+// reserved DOS device names.
+bool iree_file_path_is_portable_relative(iree_string_view_t path);
+
 // Splits |path| into the dirname and basename at the final platform path
 // separator. Windows paths accept both `/` and `\`.
 void iree_file_path_split(iree_string_view_t path,

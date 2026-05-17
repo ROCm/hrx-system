@@ -86,6 +86,7 @@ typedef struct iree_net_session_topology_t iree_net_session_topology_t;
 typedef struct iree_async_proactor_t iree_async_proactor_t;
 typedef struct iree_async_frontier_tracker_t iree_async_frontier_tracker_t;
 typedef struct iree_async_buffer_pool_t iree_async_buffer_pool_t;
+typedef struct iree_hal_remote_file_index_t iree_hal_remote_file_index_t;
 
 //===----------------------------------------------------------------------===//
 // iree_hal_remote_server_t
@@ -142,6 +143,11 @@ typedef struct iree_hal_remote_server_options_t {
 
   // Flags controlling server behavior.
   iree_hal_remote_server_flags_t flags;
+
+  // Optional server-side file allow-list used by FILE_OPEN.
+  // The server retains this index on creation and releases it on destroy. NULL
+  // denies all FILE_OPEN requests.
+  iree_hal_remote_file_index_t* file_index;
 } iree_hal_remote_server_options_t;
 
 // Default maximum concurrent connections.

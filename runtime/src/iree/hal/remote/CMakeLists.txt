@@ -45,10 +45,12 @@ iree_cc_test(
     iree::hal::remote::server
     iree::hal::remote::util::recv_pool
     iree::hal::testing::mock_device
+    iree::io::file_handle
     iree::net::carrier::loopback::factory
     iree::net::session
     iree::testing::gtest
     iree::testing::gtest_main
+    iree::testing::temp_file
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

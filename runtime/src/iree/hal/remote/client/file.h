@@ -8,8 +8,8 @@
 //
 // Remote queue file I/O needs to know where a file lives instead of probing
 // generic HAL file vtable capabilities. Client-local files expose transfer
-// capabilities here; server-local files will expose remote resource IDs when
-// the FILE_OPEN/REGISTER control path is wired up.
+// capabilities here; server-local files expose remote resource IDs resolved by
+// the FILE_OPEN control path.
 
 #ifndef IREE_HAL_REMOTE_CLIENT_FILE_H_
 #define IREE_HAL_REMOTE_CLIENT_FILE_H_
@@ -20,6 +20,7 @@
 #include "iree/hal/remote/protocol/common.h"
 
 typedef struct iree_async_proactor_t iree_async_proactor_t;
+typedef struct iree_hal_remote_client_device_t iree_hal_remote_client_device_t;
 
 #ifdef __cplusplus
 extern "C" {
@@ -74,12 +75,22 @@ iree_status_t iree_hal_remote_client_file_import(
     iree_async_proactor_t* proactor, iree_allocator_t host_allocator,
     iree_hal_file_t** out_file);
 
+// Opens a provisional server-side file from the server's configured logical
+// namespace.
+iree_status_t iree_hal_remote_client_file_open(
+    iree_hal_remote_client_device_t* device, iree_string_view_t logical_name,
+    iree_hal_memory_access_t access, iree_allocator_t host_allocator,
+    iree_hal_file_t** out_file);
+
 // Returns true if |file| is a remote client file wrapper.
 bool iree_hal_remote_client_file_isa(iree_hal_file_t* file);
 
 // Resolves the transfer capabilities for |file|.
 iree_status_t iree_hal_remote_client_file_resolve(
     iree_hal_file_t* file, iree_hal_remote_client_file_view_t* out_view);
+
+// Marks |file| as referenced by at least one remote queue command.
+void iree_hal_remote_client_file_mark_queue_referenced(iree_hal_file_t* file);
 
 #ifdef __cplusplus
 }  // extern "C"

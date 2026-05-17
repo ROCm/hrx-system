@@ -22,6 +22,7 @@
 #include "iree/base/tooling/flags.h"
 #include "iree/hal/api.h"
 #include "iree/hal/remote/server/api.h"
+#include "iree/hal/remote/server/file_index.h"
 #include "iree/hal/remote/util/recv_pool.h"
 #include "iree/net/carrier/shm/factory.h"
 #include "iree/net/carrier/tcp/factory.h"
@@ -39,6 +40,19 @@ IREE_FLAG(int32_t, max_connections, 16,
 
 IREE_FLAG(bool, rdma, false, "Enable RDMA for bulk transfers when available.");
 
+IREE_FLAG_LIST(
+    string, remote_file_allow,
+    "Allows a server-side file or directory to be opened read-only by remote "
+    "clients. Repeat as --remote_file_allow=logical=host_path. The host path "
+    "is stat-ed during startup to decide whether it is an exact file entry or "
+    "a directory prefix entry.");
+IREE_FLAG_LIST(
+    string, remote_file_allow_write,
+    "Allows a server-side file or directory to be opened read/write by remote "
+    "clients. Repeat as --remote_file_allow_write=logical=host_path. The host "
+    "path is stat-ed during startup to decide whether it is an exact file "
+    "entry or a directory prefix entry.");
+
 typedef struct iree_serve_device_state_t {
   iree_allocator_t host_allocator;
   iree_hal_device_t* device;
@@ -49,6 +63,8 @@ typedef struct iree_serve_device_state_t {
   iree_hal_remote_recv_pool_t* recv_pool;
   // Tracks server-side frontier axes for remote queue ordering.
   iree_async_frontier_tracker_t* tracker;
+  // Optional explicit allow-list for server-side remote FILE_OPEN requests.
+  iree_hal_remote_file_index_t* file_index;
   iree_net_transport_factory_t* factory;
   iree_hal_remote_server_t* server;
   iree_async_signal_subscription_t* interrupt_subscription;
@@ -104,6 +120,59 @@ static iree_status_t iree_serve_device_create_transport(
                           (int)transport_name.size, transport_name.data);
 }
 
+static iree_status_t iree_serve_device_add_file_allow_list(
+    iree_hal_remote_file_index_t* file_index, iree_string_view_t flag_name,
+    iree_flag_string_list_t flag_list, iree_hal_memory_access_t access) {
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < flag_list.count && iree_status_is_ok(status);
+       ++i) {
+    iree_string_view_t logical_name = iree_string_view_empty();
+    iree_string_view_t host_path = iree_string_view_empty();
+    if (iree_string_view_split(flag_list.values[i], '=', &logical_name,
+                               &host_path) < 0 ||
+        iree_string_view_is_empty(logical_name) ||
+        iree_string_view_is_empty(host_path)) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "--%.*s values must be logical=host_path",
+                                (int)flag_name.size, flag_name.data);
+    } else {
+      status = iree_hal_remote_file_index_allow_path(file_index, logical_name,
+                                                     host_path, access);
+    }
+  }
+  return status;
+}
+
+static iree_status_t iree_serve_device_create_file_index_from_flags(
+    iree_serve_device_state_t* state) {
+  iree_flag_string_list_t read_only_list = FLAG_remote_file_allow_list();
+  iree_flag_string_list_t read_write_list = FLAG_remote_file_allow_write_list();
+  iree_status_t status = iree_ok_status();
+  if (read_only_list.count == 0 && read_write_list.count == 0) {
+    return status;
+  }
+
+  iree_hal_remote_file_index_t* file_index = NULL;
+  status =
+      iree_hal_remote_file_index_create(state->host_allocator, &file_index);
+  if (iree_status_is_ok(status)) {
+    status = iree_serve_device_add_file_allow_list(
+        file_index, IREE_SV("remote_file_allow"), read_only_list,
+        IREE_HAL_MEMORY_ACCESS_READ);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_serve_device_add_file_allow_list(
+        file_index, IREE_SV("remote_file_allow_write"), read_write_list,
+        IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE);
+  }
+  if (iree_status_is_ok(status)) {
+    state->file_index = file_index;
+  } else {
+    iree_hal_remote_file_index_release(file_index);
+  }
+  return status;
+}
+
 static void iree_serve_device_on_signal(void* user_data,
                                         iree_async_signal_t signal) {
   iree_serve_device_state_t* state = (iree_serve_device_state_t*)user_data;
@@ -145,6 +214,7 @@ static iree_status_t iree_serve_device_create_and_run_server(
   options.bind_address = bind_address;
   options.local_topology = &server_topology;
   options.max_connections = (uint32_t)FLAG_max_connections;
+  options.file_index = state->file_index;
   if (FLAG_rdma) {
     options.flags |= IREE_HAL_REMOTE_SERVER_FLAG_ENABLE_RDMA;
   }
@@ -200,6 +270,7 @@ static iree_status_t iree_serve_device_teardown(
   iree_hal_remote_server_release(state->server);
   iree_notification_deinitialize(&state->shutdown_notification);
   iree_net_transport_factory_release(state->factory);
+  iree_hal_remote_file_index_release(state->file_index);
   iree_hal_remote_recv_pool_release(state->recv_pool);
   iree_async_proactor_pool_release(state->server_proactor_pool);
   iree_hal_device_group_release(state->device_group);
@@ -287,6 +358,9 @@ static iree_status_t iree_serve_device_run(void) {
   if (iree_status_is_ok(status)) {
     status = iree_serve_device_create_transport(
         transport_name, state.host_allocator, &state.factory);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_serve_device_create_file_index_from_flags(&state);
   }
   if (iree_status_is_ok(status)) {
     fprintf(stdout, "Serving on %.*s://%.*s (Ctrl+C to stop)\n",

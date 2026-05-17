@@ -329,11 +329,17 @@ static_assert(sizeof(iree_hal_remote_command_buffer_upload_response_t) == 8,
 // File messages
 //===----------------------------------------------------------------------===//
 
-// FILE_OPEN request. Opens a server-side file by canonical path. [epoch]
-// The server's VFS layer resolves canonical names to real paths and enforces
-// access control. The client never sees real filesystem paths. The client
-// provides a provisional_id so queue ops (FILE_READ/FILE_WRITE) can reference
-// the file immediately without waiting for the response round-trip.
+// FILE_OPEN request. Opens a server-side file by logical name. [epoch]
+// The server resolves logical names through its explicit allow-list and the
+// client never sees real filesystem paths. The logical namespace may contain
+// operator-configured symlinks; the portable client-controlled suffix grammar
+// rejects absolute paths, parent traversal, empty path segments, and alternate
+// platform separators. The client provides a provisional_id so queue ops
+// (FILE_READ/FILE_WRITE) can reference the file immediately without waiting
+// for the response round-trip. Servers park those queue ops until this control
+// request resolves the provisional ID. Fire-and-forget opens do not produce a
+// response; failures are reported through any parked/subsequent queue ops using
+// the provisional file ID.
 typedef struct iree_hal_remote_file_open_request_t {
   iree_hal_remote_resource_id_t provisional_id;  // PROVISIONAL=1
   uint16_t path_length;  // UTF-8 byte count (not null-terminated).

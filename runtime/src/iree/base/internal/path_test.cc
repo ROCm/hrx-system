@@ -117,6 +117,42 @@ TEST(FilePathTest, JoinPathsDoubleSlash) {
   EXPECT_EQ(JoinPaths("foo", "//bar"), "foo//bar");
 }
 
+TEST(FilePathTest, PortableRelativePath) {
+  EXPECT_TRUE(iree_file_path_is_portable_relative(_SV("foo")));
+  EXPECT_TRUE(iree_file_path_is_portable_relative(_SV("foo/bar.baz")));
+  EXPECT_TRUE(iree_file_path_is_portable_relative(_SV("foo_bar-123/weights")));
+
+  EXPECT_FALSE(iree_file_path_is_portable_relative(_SV("")));
+  EXPECT_FALSE(iree_file_path_is_portable_relative(_SV("/foo")));
+  EXPECT_FALSE(iree_file_path_is_portable_relative(_SV("\\foo")));
+  EXPECT_FALSE(iree_file_path_is_portable_relative(_SV("foo\\bar")));
+  EXPECT_FALSE(iree_file_path_is_portable_relative(_SV("foo//bar")));
+  EXPECT_FALSE(iree_file_path_is_portable_relative(_SV("foo/./bar")));
+  EXPECT_FALSE(iree_file_path_is_portable_relative(_SV("foo/../bar")));
+  EXPECT_FALSE(iree_file_path_is_portable_relative(_SV("C:foo")));
+  EXPECT_FALSE(iree_file_path_is_portable_relative(_SV("foo:bar")));
+  EXPECT_FALSE(iree_file_path_is_portable_relative(_SV("foo*bar")));
+  EXPECT_FALSE(iree_file_path_is_portable_relative(_SV("foo?bar")));
+  EXPECT_FALSE(iree_file_path_is_portable_relative(_SV("foo\"bar")));
+  EXPECT_FALSE(iree_file_path_is_portable_relative(_SV("foo<bar")));
+  EXPECT_FALSE(iree_file_path_is_portable_relative(_SV("foo>bar")));
+  EXPECT_FALSE(iree_file_path_is_portable_relative(_SV("foo|bar")));
+  EXPECT_FALSE(iree_file_path_is_portable_relative(_SV("foo.")));
+  EXPECT_FALSE(iree_file_path_is_portable_relative(_SV("foo ")));
+  EXPECT_FALSE(iree_file_path_is_portable_relative(_SV("CON")));
+  EXPECT_FALSE(iree_file_path_is_portable_relative(_SV("nul.txt")));
+  EXPECT_FALSE(iree_file_path_is_portable_relative(_SV("foo/COM1/bar")));
+  EXPECT_FALSE(iree_file_path_is_portable_relative(_SV("foo/Lpt9.txt")));
+  EXPECT_FALSE(iree_file_path_is_portable_relative(_SV("CONIN$")));
+  EXPECT_FALSE(iree_file_path_is_portable_relative(_SV("conout$/bar")));
+  static const char kNulPath[] = "foo\0bar";
+  EXPECT_FALSE(iree_file_path_is_portable_relative(
+      iree_make_string_view(kNulPath, sizeof(kNulPath) - 1)));
+  static const char kDelPath[] = {'f', 'o', 'o', '\x7F', 'b', 'a', 'r'};
+  EXPECT_FALSE(iree_file_path_is_portable_relative(
+      iree_make_string_view(kDelPath, sizeof(kDelPath))));
+}
+
 TEST(FilePathTest, DirnameEmpty) {
   EXPECT_SV_EQ(iree_file_path_dirname(_SV("")), _SV(""));
 }

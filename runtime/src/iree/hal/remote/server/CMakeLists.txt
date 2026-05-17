@@ -14,9 +14,11 @@ iree_cc_library(
     server
   HDRS
     "api.h"
+    "file_index.h"
   SRCS
     "bulk.c"
     "bulk.h"
+    "file_index.c"
     "resource_table.c"
     "resource_table.h"
     "server.c"
@@ -27,6 +29,7 @@ iree_cc_library(
     iree::async
     iree::base
     iree::base::internal
+    iree::base::internal::path
     iree::base::threading
     iree::hal
     iree::hal::remote::protocol::commands
@@ -47,6 +50,51 @@ iree_cc_library(
     iree::net::status_wire
     iree::net::transport_factory
   PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    file_index_test
+  SRCS
+    "file_index_test.cc"
+  DEPS
+    ::server
+    iree::base
+    iree::base::internal::path
+    iree::io::file_handle
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::testing::temp_file
+  LABELS
+    "requires-filesystem"
+)
+
+iree_cc_test(
+  NAME
+    session_test
+  SRCS
+    "resource_table.h"
+    "server.h"
+    "session.h"
+    "session_test.cc"
+  DEPS
+    ::server
+    iree::async
+    iree::base
+    iree::base::threading
+    iree::hal
+    iree::hal::remote::protocol::common
+    iree::hal::remote::protocol::control
+    iree::hal::remote::protocol::queue
+    iree::net::channel::queue::frame
+    iree::net::channel::queue::queue_channel
+    iree::net::channel::util::frame_sender
+    iree::net::channel::util::sequence_window
+    iree::net::message_endpoint
+    iree::net::session
+    iree::net::transport_factory
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

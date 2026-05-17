@@ -823,7 +823,7 @@ iree_status_t iree_net_queue_channel_send_advance(
   offset += iree_net_queue_channel_serialize_frontier(header_buffer + offset,
                                                       signal_frontier);
 
-  iree_status_t status = iree_net_frame_sender_send(
+  iree_status_t status = iree_net_frame_sender_send_copy(
       &channel->sender, iree_make_const_byte_span(header_buffer, offset),
       advance_payload, operation_user_data);
 

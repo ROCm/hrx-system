@@ -176,6 +176,84 @@ iree_status_t iree_file_path_join(iree_string_view_t lhs,
   return iree_string_view_cat(lhs, rhs, allocator, out_path);
 }
 
+static char iree_file_path_ascii_lower(char c) {
+  return c >= 'A' && c <= 'Z' ? (char)(c - 'A' + 'a') : c;
+}
+
+static bool iree_file_path_segment_equal_case_insensitive(
+    iree_string_view_t segment, const char* value) {
+  iree_host_size_t i = 0;
+  for (; i < segment.size && value[i] != 0; ++i) {
+    if (iree_file_path_ascii_lower(segment.data[i]) != value[i]) return false;
+  }
+  return i == segment.size && value[i] == 0;
+}
+
+static bool iree_file_path_segment_is_reserved_dos_device(
+    iree_string_view_t segment) {
+  iree_host_size_t name_length = segment.size;
+  for (iree_host_size_t i = 0; i < segment.size; ++i) {
+    if (segment.data[i] == '.') {
+      name_length = i;
+      break;
+    }
+  }
+  iree_string_view_t name = iree_make_string_view(segment.data, name_length);
+  if (iree_file_path_segment_equal_case_insensitive(name, "con") ||
+      iree_file_path_segment_equal_case_insensitive(name, "prn") ||
+      iree_file_path_segment_equal_case_insensitive(name, "aux") ||
+      iree_file_path_segment_equal_case_insensitive(name, "nul") ||
+      iree_file_path_segment_equal_case_insensitive(name, "conin$") ||
+      iree_file_path_segment_equal_case_insensitive(name, "conout$")) {
+    return true;
+  }
+  if (name.size == 4) {
+    char c0 = iree_file_path_ascii_lower(name.data[0]);
+    char c1 = iree_file_path_ascii_lower(name.data[1]);
+    char c2 = iree_file_path_ascii_lower(name.data[2]);
+    char c3 = name.data[3];
+    return ((c0 == 'c' && c1 == 'o' && c2 == 'm') ||
+            (c0 == 'l' && c1 == 'p' && c2 == 't')) &&
+           c3 >= '1' && c3 <= '9';
+  }
+  return false;
+}
+
+static bool iree_file_path_segment_is_safe(iree_string_view_t segment) {
+  if (iree_string_view_is_empty(segment) ||
+      iree_string_view_equal(segment, IREE_SV(".")) ||
+      iree_string_view_equal(segment, IREE_SV(".."))) {
+    return false;
+  }
+  char last_char = segment.data[segment.size - 1];
+  if (last_char == '.' || last_char == ' ') return false;
+  return !iree_file_path_segment_is_reserved_dos_device(segment);
+}
+
+bool iree_file_path_is_portable_relative(iree_string_view_t path) {
+  if (iree_string_view_is_empty(path)) return false;
+  if (path.data[0] == '/' || path.data[0] == '\\') return false;
+
+  iree_host_size_t segment_start = 0;
+  for (iree_host_size_t i = 0; i <= path.size; ++i) {
+    char c = i < path.size ? path.data[i] : '/';
+    if (c != '/') {
+      uint8_t byte = (uint8_t)c;
+      if (byte < 0x20 || byte == 0x7F || c == '\\' || c == ':' || c == '*' ||
+          c == '?' || c == '"' || c == '<' || c == '>' || c == '|') {
+        return false;
+      }
+      continue;
+    }
+    iree_host_size_t segment_size = i - segment_start;
+    iree_string_view_t segment =
+        iree_make_string_view(path.data + segment_start, segment_size);
+    if (!iree_file_path_segment_is_safe(segment)) return false;
+    segment_start = i + 1;
+  }
+  return true;
+}
+
 void iree_file_path_split(iree_string_view_t path,
                           iree_string_view_t* out_dirname,
                           iree_string_view_t* out_basename) {

@@ -232,6 +232,7 @@ static void iree_net_frame_sender_reset_context(
     iree_net_frame_send_context_t* context) {
   context->sender = sender;
   memset(&context->buffer_lease, 0, sizeof(context->buffer_lease));
+  context->heap_frame = NULL;
   context->operation_user_data = operation_user_data;
   context->span_count = 0;
   // The inline frame bytes and span array are overwritten before submit.
@@ -280,6 +281,15 @@ static void iree_net_frame_sender_copy_frame(iree_byte_span_t target,
       memcpy(target_ptr, iree_async_span_ptr(span), span.length);
       target_ptr += span.length;
     }
+  }
+}
+
+static void iree_net_frame_sender_release_context_storage(
+    iree_net_frame_sender_t* sender, iree_net_frame_send_context_t* context) {
+  iree_async_buffer_lease_release(&context->buffer_lease);
+  if (context->heap_frame) {
+    iree_allocator_free(sender->host_allocator, context->heap_frame);
+    context->heap_frame = NULL;
   }
 }
 
@@ -374,7 +384,7 @@ iree_status_t iree_net_frame_sender_send(iree_net_frame_sender_t* sender,
     status = iree_net_frame_sender_submit(sender, context);
   }
   if (!iree_status_is_ok(status) && context) {
-    iree_async_buffer_lease_release(&context->buffer_lease);
+    iree_net_frame_sender_release_context_storage(sender, context);
     iree_net_frame_sender_release_context(sender, context);
   }
   return status;
@@ -416,16 +426,11 @@ iree_status_t iree_net_frame_sender_send_copy(iree_net_frame_sender_t* sender,
     context->spans[0] =
         iree_async_span_from_ptr(context->inline_frame, frame_length);
     context->span_count = 1;
-  } else if (iree_status_is_ok(status)) {
+  } else if (iree_status_is_ok(status) &&
+             frame_length <=
+                 iree_async_buffer_pool_buffer_size(sender->header_pool)) {
     status = iree_async_buffer_pool_acquire(sender->header_pool,
                                             &context->buffer_lease);
-    if (iree_status_is_ok(status) &&
-        frame_length > context->buffer_lease.span.length) {
-      status = iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "copied frame size %" PRIhsz " exceeds pool buffer size %" PRIhsz,
-          frame_length, context->buffer_lease.span.length);
-    }
     if (iree_status_is_ok(status)) {
       iree_net_frame_sender_copy_frame(
           iree_make_byte_span(iree_async_span_ptr(context->buffer_lease.span),
@@ -436,6 +441,17 @@ iree_status_t iree_net_frame_sender_send_copy(iree_net_frame_sender_t* sender,
                                context->buffer_lease.span.offset, frame_length);
       context->span_count = 1;
     }
+  } else if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc(sender->host_allocator, frame_length,
+                                   &context->heap_frame);
+    if (iree_status_is_ok(status)) {
+      iree_net_frame_sender_copy_frame(
+          iree_make_byte_span((uint8_t*)context->heap_frame, frame_length),
+          header, payload);
+      context->spans[0] =
+          iree_async_span_from_ptr(context->heap_frame, frame_length);
+      context->span_count = 1;
+    }
   }
 
   if (iree_status_is_ok(status)) {
@@ -444,7 +460,7 @@ iree_status_t iree_net_frame_sender_send_copy(iree_net_frame_sender_t* sender,
 
   if (!iree_status_is_ok(status)) {
     if (context) {
-      iree_async_buffer_lease_release(&context->buffer_lease);
+      iree_net_frame_sender_release_context_storage(sender, context);
       iree_net_frame_sender_release_context(sender, context);
     }
   }
@@ -552,8 +568,7 @@ void iree_net_frame_sender_handle_completion(
   IREE_ASSERT_ARGUMENT(context);
   iree_net_frame_sender_t* sender = context->sender;
 
-  // Release buffer lease back to pool.
-  iree_async_buffer_lease_release(&context->buffer_lease);
+  iree_net_frame_sender_release_context_storage(sender, context);
 
   // Decrement in-flight count.
   iree_atomic_fetch_sub(&sender->sends_in_flight, 1, iree_memory_order_release);

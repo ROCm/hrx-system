@@ -23,6 +23,8 @@ extern "C" {
 typedef struct iree_hal_remote_server_t iree_hal_remote_server_t;
 typedef struct iree_net_bulk_channel_t iree_net_bulk_channel_t;
 typedef struct iree_net_bulk_transfer_table_t iree_net_bulk_transfer_table_t;
+typedef struct iree_hal_remote_server_pending_queue_command_t
+    iree_hal_remote_server_pending_queue_command_t;
 
 typedef uint8_t iree_hal_remote_server_epoch_slot_state_t;
 
@@ -30,6 +32,14 @@ enum iree_hal_remote_server_epoch_slot_state_e {
   IREE_HAL_REMOTE_SERVER_EPOCH_SLOT_EMPTY = 0,
   IREE_HAL_REMOTE_SERVER_EPOCH_SLOT_OCCUPIED = 1,
   IREE_HAL_REMOTE_SERVER_EPOCH_SLOT_TOMBSTONE = 2,
+};
+
+typedef uint8_t iree_hal_remote_server_provisional_state_t;
+
+enum iree_hal_remote_server_provisional_state_e {
+  IREE_HAL_REMOTE_SERVER_PROVISIONAL_PENDING = 0,
+  IREE_HAL_REMOTE_SERVER_PROVISIONAL_RESOLVED = 1,
+  IREE_HAL_REMOTE_SERVER_PROVISIONAL_FAILED = 2,
 };
 
 // Per-client session tracking entry.
@@ -97,15 +107,27 @@ typedef struct iree_hal_remote_server_session_t {
   // semaphores, while the contiguous prefix gates ordered ADVANCE frames.
   iree_net_sequence_window_t completed_signal_window;
 
-  // Provisional→resolved resource ID mapping. Populated during BUFFER_ALLOCA
-  // processing (the server assigns a canonical ID and records the mapping).
-  // Queried during subsequent commands that reference the provisional ID
-  // (fill, copy, dealloca, etc.). Entries persist for the session lifetime
-  // to handle out-of-order or late-arriving commands.
+  // Provisional→resolved resource ID mapping for resources whose client-visible
+  // ID can appear on the queue channel before the control operation that
+  // resolves it. Queue commands parked on unresolved provisionals are replayed
+  // when resolution succeeds or failed with an ordered ADVANCE when resolution
+  // fails or the provisional is released.
   struct {
+    // Client-assigned provisional resource IDs.
     iree_hal_remote_resource_id_t* provisional_ids;
+    // Server-assigned resolved resource IDs for RESOLVED entries.
     iree_hal_remote_resource_id_t* resolved_ids;
+    // Resolution state for each provisional ID.
+    iree_hal_remote_server_provisional_state_t* states;
+    // Failure status codes for FAILED entries.
+    iree_status_code_t* status_codes;
+    // FIFO head of queue commands parked on unresolved provisional IDs.
+    iree_hal_remote_server_pending_queue_command_t** pending_heads;
+    // FIFO tail of queue commands parked on unresolved provisional IDs.
+    iree_hal_remote_server_pending_queue_command_t** pending_tails;
+    // Number of initialized provisional entries.
     iree_host_size_t count;
+    // Capacity of each provisional map array.
     iree_host_size_t capacity;
   } provisional_map;
 } iree_hal_remote_server_session_t;
@@ -136,6 +158,13 @@ iree_status_t iree_hal_remote_server_on_control_data(
     void* user_data, iree_net_control_frame_flags_t flags,
     iree_const_byte_span_t payload, iree_async_buffer_lease_t* lease);
 
+// Dispatches an incoming queue channel COMMAND frame to the wrapped HAL.
+iree_status_t iree_hal_remote_server_on_queue_command(
+    void* user_data, uint32_t stream_id,
+    const iree_async_frontier_t* wait_frontier,
+    const iree_async_frontier_t* signal_frontier,
+    iree_const_byte_span_t command_data, iree_async_buffer_lease_t* lease);
+
 // Removes a session from the server's tracking. Called when a session reaches
 // a terminal state (CLOSED or ERROR). Safe to call multiple times for the
 // same session (second call is a no-op).
@@ -145,6 +174,11 @@ void iree_hal_remote_server_remove_session(iree_hal_remote_server_t* server,
 // Deinitializes sequence windows and releases any owner-managed pending nodes.
 void iree_hal_remote_server_session_deinitialize_windows(
     iree_hal_remote_server_session_t* session_slot);
+
+// Deinitializes provisional mappings and releases any parked queue commands.
+void iree_hal_remote_server_session_deinitialize_provisionals(
+    iree_hal_remote_server_session_t* session_slot,
+    iree_allocator_t host_allocator);
 
 #ifdef __cplusplus
 }  // extern "C"
