@@ -329,6 +329,42 @@ static_assert(sizeof(iree_hal_remote_command_buffer_upload_response_t) == 8,
 // File messages
 //===----------------------------------------------------------------------===//
 
+typedef uint8_t iree_hal_remote_file_external_type_t;
+
+// External file handle namespaces used by FILE_REGISTER.
+//
+// These values describe handles transferred by a transport-supported external
+// handle mechanism. Process-local integers such as POSIX fds are only valid
+// when the transport actually transfers the underlying handle rights; they must
+// never be interpreted as ordinary scalar payload across machines.
+enum iree_hal_remote_file_external_type_e {
+  IREE_HAL_REMOTE_FILE_EXTERNAL_TYPE_NONE = 0u,
+  IREE_HAL_REMOTE_FILE_EXTERNAL_TYPE_POSIX_FD = 1u,
+  IREE_HAL_REMOTE_FILE_EXTERNAL_TYPE_WIN32_HANDLE = 2u,
+};
+
+typedef uint32_t iree_hal_remote_file_registration_capabilities_t;
+
+// FILE_REGISTER external handle capabilities advertised by a transport/server.
+enum iree_hal_remote_file_registration_capability_bits_e {
+  IREE_HAL_REMOTE_FILE_REGISTRATION_CAPABILITY_NONE = 0u,
+  IREE_HAL_REMOTE_FILE_REGISTRATION_CAPABILITY_POSIX_FD = 1u << 0,
+  IREE_HAL_REMOTE_FILE_REGISTRATION_CAPABILITY_WIN32_HANDLE = 1u << 1,
+};
+
+static inline iree_hal_remote_file_registration_capabilities_t
+iree_hal_remote_file_registration_capability_for_external_type(
+    iree_hal_remote_file_external_type_t external_type) {
+  switch (external_type) {
+    case IREE_HAL_REMOTE_FILE_EXTERNAL_TYPE_POSIX_FD:
+      return IREE_HAL_REMOTE_FILE_REGISTRATION_CAPABILITY_POSIX_FD;
+    case IREE_HAL_REMOTE_FILE_EXTERNAL_TYPE_WIN32_HANDLE:
+      return IREE_HAL_REMOTE_FILE_REGISTRATION_CAPABILITY_WIN32_HANDLE;
+    default:
+      return IREE_HAL_REMOTE_FILE_REGISTRATION_CAPABILITY_NONE;
+  }
+}
+
 // FILE_OPEN request. Opens a server-side file by logical name. [epoch]
 // The server resolves logical names through its explicit allow-list and the
 // client never sees real filesystem paths. The logical namespace may contain
@@ -369,11 +405,11 @@ static_assert(sizeof(iree_hal_remote_file_close_t) == 8, "");
 
 // FILE_REGISTER request. Registers an external file handle for use with
 // queue-ordered I/O operations (FILE_READ/FILE_WRITE). [epoch] The
-// external_type identifies the handle namespace (POSIX fd, Win32 HANDLE,
-// memfd, etc.); handle_payload carries the type-specific data.
+// external_type identifies the handle namespace; handle_payload carries
+// type-specific metadata for the transport-supported handle transfer.
 typedef struct iree_hal_remote_file_register_request_t {
   iree_hal_remote_resource_id_t provisional_id;  // PROVISIONAL=1
-  uint32_t external_type;                        // File handle type identifier.
+  uint32_t external_type;          // iree_hal_remote_file_external_type_t.
   uint32_t access_flags;           // Access mode for the registered file.
   uint32_t handle_payload_length;  // Byte count of type-specific handle data.
   uint32_t reserved;               // Must be 0.

@@ -128,8 +128,9 @@ static iree_status_t iree_hal_remote_client_file_import_file_descriptor(
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
         "remote file descriptor import requires an async proactor file handle; "
-        "open the file with IREE_IO_FILE_MODE_ASYNC or use a host allocation "
-        "or server-side remote file");
+        "FILE_REGISTER external handle transfer is not implemented for this "
+        "transport, so open the file with IREE_IO_FILE_MODE_ASYNC or use a "
+        "host allocation or server-side remote file");
   }
 
   iree_hal_file_t* inner_file = NULL;

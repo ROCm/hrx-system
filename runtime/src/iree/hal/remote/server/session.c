@@ -3956,12 +3956,133 @@ static iree_status_t iree_hal_remote_server_handle_file_close(
 
 static iree_status_t iree_hal_remote_server_handle_file_register(
     iree_hal_remote_server_session_t* entry,
-    const iree_hal_remote_control_envelope_t* envelope) {
-  return iree_hal_remote_server_send_error_response(
-      entry->server->host_allocator, entry->session, envelope,
-      iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                       "FILE_REGISTER requires a transport-supported external "
-                       "file handle capability"));
+    const iree_hal_remote_control_envelope_t* envelope, const uint8_t* body,
+    iree_host_size_t body_length) {
+  const bool fire_and_forget = iree_all_bits_set(
+      envelope->message_flags, IREE_HAL_REMOTE_CONTROL_FLAG_FIRE_AND_FORGET);
+  const iree_hal_remote_file_registration_capabilities_t
+      supported_capabilities =
+          IREE_HAL_REMOTE_FILE_REGISTRATION_CAPABILITY_NONE;
+  const iree_hal_memory_access_t allowed_access_mask =
+      IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE;
+
+  iree_status_t status = iree_ok_status();
+  const iree_hal_remote_file_register_request_t* request = NULL;
+  if (body_length < sizeof(iree_hal_remote_file_register_request_t)) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "FILE_REGISTER body too small: %" PRIhsz " bytes",
+                              body_length);
+  }
+  if (iree_status_is_ok(status)) {
+    request = (const iree_hal_remote_file_register_request_t*)body;
+    if (request->reserved != 0) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "FILE_REGISTER reserved field must be 0");
+    }
+  }
+  if (iree_status_is_ok(status) &&
+      IREE_HAL_REMOTE_RESOURCE_ID_TYPE(request->provisional_id) !=
+          IREE_HAL_REMOTE_RESOURCE_TYPE_FILE) {
+    status =
+        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                         "FILE_REGISTER provisional id must have FILE type");
+  }
+  if (iree_status_is_ok(status) &&
+      !IREE_HAL_REMOTE_RESOURCE_ID_IS_PROVISIONAL(request->provisional_id)) {
+    status =
+        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                         "FILE_REGISTER provisional id must be provisional");
+  }
+  if (iree_status_is_ok(status) && request->access_flags == 0) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "FILE_REGISTER access flags must be nonzero");
+  }
+  if (iree_status_is_ok(status) &&
+      (request->access_flags & ~allowed_access_mask) != 0) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "FILE_REGISTER access flags 0x%08x contain "
+                              "unsupported bits outside read/write",
+                              request->access_flags);
+  }
+
+  iree_host_size_t required_length = 0;
+  if (iree_status_is_ok(status)) {
+    status = IREE_STRUCT_LAYOUT(
+        sizeof(*request), &required_length,
+        IREE_STRUCT_FIELD(request->handle_payload_length, uint8_t, NULL));
+  }
+  if (iree_status_is_ok(status) && body_length < required_length) {
+    status =
+        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                         "FILE_REGISTER handle payload truncated: need %" PRIhsz
+                         " bytes, got %" PRIhsz " bytes",
+                         required_length, body_length);
+  }
+  if (iree_status_is_ok(status) && request->external_type > UINT8_MAX) {
+    status =
+        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                         "FILE_REGISTER external file type %u is out of range",
+                         request->external_type);
+  }
+
+  iree_hal_remote_file_registration_capabilities_t required_capability =
+      IREE_HAL_REMOTE_FILE_REGISTRATION_CAPABILITY_NONE;
+  if (iree_status_is_ok(status)) {
+    required_capability =
+        iree_hal_remote_file_registration_capability_for_external_type(
+            (iree_hal_remote_file_external_type_t)request->external_type);
+    if (required_capability ==
+        IREE_HAL_REMOTE_FILE_REGISTRATION_CAPABILITY_NONE) {
+      status =
+          iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                           "FILE_REGISTER external file type %u is not defined",
+                           request->external_type);
+    }
+  }
+
+  bool provisional_prepared = false;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_server_prepare_provisional(
+        entry, request->provisional_id, entry->server->host_allocator);
+    provisional_prepared = iree_status_is_ok(status);
+  }
+
+  if (iree_status_is_ok(status) &&
+      !iree_all_bits_set(supported_capabilities, required_capability)) {
+    status = iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "FILE_REGISTER external file type %u requires capability 0x%08x, "
+        "but this server supports 0x%08x",
+        request->external_type, required_capability, supported_capabilities);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "FILE_REGISTER capability 0x%08x is advertised but no server-side "
+        "external file importer is installed",
+        required_capability);
+  }
+
+  iree_status_t pending_failure_status = iree_ok_status();
+  if (!iree_status_is_ok(status) && provisional_prepared) {
+    iree_hal_remote_server_pending_queue_command_t* pending_commands = NULL;
+    iree_hal_remote_server_fail_provisional(
+        entry, request->provisional_id, iree_status_code(status),
+        entry->server->host_allocator, &pending_commands);
+    pending_failure_status = iree_hal_remote_server_fail_pending_queue_commands(
+        entry, pending_commands, iree_status_clone(status));
+  }
+
+  iree_status_t send_status = iree_ok_status();
+  if (!iree_status_is_ok(status)) {
+    if (!fire_and_forget) {
+      send_status = iree_hal_remote_server_send_error_response(
+          entry->server->host_allocator, entry->session, envelope, status);
+      status = iree_ok_status();
+    }
+  }
+  return iree_status_join(
+      status, iree_status_join(send_status, pending_failure_status));
 }
 
 // Server does not receive ADVANCE frames (only clients do).
@@ -4435,7 +4556,8 @@ iree_status_t iree_hal_remote_server_on_control_data(
     case IREE_HAL_REMOTE_CONTROL_FILE_CLOSE:
       return iree_hal_remote_server_handle_file_close(entry, body, body_length);
     case IREE_HAL_REMOTE_CONTROL_FILE_REGISTER:
-      return iree_hal_remote_server_handle_file_register(entry, envelope);
+      return iree_hal_remote_server_handle_file_register(entry, envelope, body,
+                                                         body_length);
     case IREE_HAL_REMOTE_CONTROL_FILE_UNREGISTER:
       return iree_hal_remote_server_handle_file_close(entry, body, body_length);
     case IREE_HAL_REMOTE_CONTROL_RESOURCE_RELEASE_BATCH:

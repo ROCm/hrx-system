@@ -66,9 +66,9 @@ typedef struct iree_hal_remote_client_file_view_t {
 // Imports |handle| as a remote-native client file.
 //
 // Supported client-local handles expose either a direct host allocation byte
-// span or a proactor-managed async file handle. Synchronous-only files are not
-// imported because remote queue file I/O must never call synchronous HAL file
-// vtable methods.
+// span or a proactor-managed async file handle. Synchronous-only files are
+// rejected before queue submission; importing them would require a negotiated
+// FILE_REGISTER external handle capability and transport-level handle transfer.
 iree_status_t iree_hal_remote_client_file_import(
     iree_hal_queue_affinity_t queue_affinity, iree_hal_memory_access_t access,
     iree_io_file_handle_t* handle, iree_hal_external_file_flags_t flags,

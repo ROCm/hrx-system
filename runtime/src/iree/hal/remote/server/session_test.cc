@@ -348,4 +348,67 @@ TEST(RemoteServerSessionTest, QueueCommandBeforeFailedFileOpenSignalsAdvance) {
   EXPECT_GT(advance->status_wire_length, 0u);
 }
 
+TEST(RemoteServerSessionTest,
+     QueueCommandBeforeUnsupportedFileRegisterSignalsAdvance) {
+  RemoteServerSessionHarness harness;
+  const iree_hal_remote_resource_id_t provisional_file_id =
+      IREE_HAL_REMOTE_RESOURCE_ID_PROVISIONAL(
+          IREE_HAL_REMOTE_RESOURCE_TYPE_FILE, 42);
+  iree_hal_remote_file_read_op_t file_read = {};
+  file_read.header.type = IREE_HAL_REMOTE_QUEUE_OP_FILE_READ;
+  file_read.source_file_id = provisional_file_id;
+  file_read.target_buffer_id = 0x101;
+  file_read.length = 16;
+
+  int lease_release_count = 0;
+  iree_async_buffer_lease_t lease = {};
+  lease.span = iree_async_span_from_ptr(&file_read, sizeof(file_read));
+  lease.release.fn = CountLeaseRelease;
+  lease.release.user_data = &lease_release_count;
+
+  iree_async_single_frontier_t signal_frontier_storage;
+  iree_async_single_frontier_initialize(&signal_frontier_storage,
+                                        harness.queue_axis, 1);
+  IREE_ASSERT_OK(iree_hal_remote_server_on_queue_command(
+      &harness.session, /*stream_id=*/0, /*wait_frontier=*/NULL,
+      iree_async_single_frontier_as_frontier(&signal_frontier_storage),
+      iree_make_const_byte_span(&file_read, sizeof(file_read)), &lease));
+
+  EXPECT_EQ(harness.endpoint.sends.size(), 0u);
+  EXPECT_EQ(lease.release.fn, nullptr);
+  EXPECT_EQ(lease_release_count, 0);
+
+  struct FileRegisterPacket {
+    iree_hal_remote_control_envelope_t envelope;
+    iree_hal_remote_file_register_request_t request;
+  } file_register = {};
+  file_register.envelope.message_type = IREE_HAL_REMOTE_CONTROL_FILE_REGISTER;
+  file_register.envelope.message_flags =
+      IREE_HAL_REMOTE_CONTROL_FLAG_FIRE_AND_FORGET;
+  file_register.request.provisional_id = provisional_file_id;
+  file_register.request.external_type =
+      IREE_HAL_REMOTE_FILE_EXTERNAL_TYPE_POSIX_FD;
+  file_register.request.access_flags = IREE_HAL_MEMORY_ACCESS_READ;
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNIMPLEMENTED,
+      iree_hal_remote_server_on_control_data(
+          &harness.session, IREE_NET_CONTROL_DATA_FLAG_NONE,
+          iree_make_const_byte_span(&file_register, sizeof(file_register)),
+          /*lease=*/NULL));
+
+  ASSERT_EQ(harness.endpoint.sends.size(), 1u);
+  EXPECT_EQ(lease_release_count, 1);
+  EXPECT_EQ(iree_net_sequence_window_observed(
+                &harness.session.observed_submission_window),
+            1u);
+
+  const iree_hal_remote_advance_payload_t* advance = ParseSingleAdvancePayload(
+      harness.endpoint.sends[0].data, harness.queue_axis, 1);
+  ASSERT_NE(advance, nullptr);
+  EXPECT_EQ(advance->resolution_count, 0);
+  EXPECT_EQ(advance->status_code, IREE_STATUS_UNIMPLEMENTED);
+  EXPECT_GT(advance->status_wire_length, 0u);
+}
+
 }  // namespace

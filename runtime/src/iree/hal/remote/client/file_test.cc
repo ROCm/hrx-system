@@ -122,6 +122,45 @@ TEST(RemoteClientFileTest, ImportsAsyncFileHandle) {
   iree_async_proactor_release(proactor);
 }
 
+TEST(RemoteClientFileTest, RejectsSynchronousFileHandleBeforeQueueSubmission) {
+  iree_allocator_t host_allocator = iree_allocator_system();
+
+  iree_async_proactor_t* proactor = nullptr;
+  iree_async_proactor_options_t proactor_options =
+      iree_async_proactor_options_default();
+  iree_status_t status = iree_async_proactor_create_platform(
+      proactor_options, host_allocator, &proactor);
+  if (iree_status_is_unavailable(status)) {
+    iree_status_ignore(status);
+    GTEST_SKIP() << "Platform proactor unavailable";
+  }
+  IREE_ASSERT_OK(status);
+
+  iree::testing::TempFilePath path("iree_hal_remote_client_sync_file");
+  const uint8_t contents[16] = {0};
+  IREE_ASSERT_OK(iree_io_file_contents_write(
+      path.path_view(), iree_make_const_byte_span(contents, sizeof(contents)),
+      host_allocator));
+
+  iree_io_file_handle_t* handle = nullptr;
+  IREE_ASSERT_OK(iree_io_file_handle_open(
+      IREE_IO_FILE_MODE_READ | IREE_IO_FILE_MODE_RANDOM_ACCESS |
+          IREE_IO_FILE_MODE_SHARE_READ,
+      path.path_view(), host_allocator, &handle));
+  EXPECT_FALSE(iree_io_file_handle_uses_async_io(handle));
+
+  iree_hal_file_t* file = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNIMPLEMENTED,
+      iree_hal_remote_client_file_import(
+          /*queue_affinity=*/0, IREE_HAL_MEMORY_ACCESS_READ, handle,
+          IREE_HAL_EXTERNAL_FILE_FLAG_NONE, proactor, host_allocator, &file));
+  EXPECT_EQ(file, nullptr);
+
+  iree_io_file_handle_release(handle);
+  iree_async_proactor_release(proactor);
+}
+
 TEST(RemoteClientFileTest, RejectsDisallowedHandleAccess) {
   iree_allocator_t host_allocator = iree_allocator_system();
   uint8_t contents[16] = {0};
