@@ -12,7 +12,7 @@
 #include "iree/hal/remote/server/bulk_profile_sender.h"
 #include "iree/hal/remote/server/bulk_staging_pool.h"
 #include "iree/hal/remote/server/bulk_upload_receiver.h"
-#include "iree/hal/remote/server/profile.h"
+#include "iree/hal/remote/server/profile_relay.h"
 #include "iree/hal/remote/server/server.h"
 #include "iree/hal/remote/server/session.h"
 #include "iree/hal/remote/util/bulk_channel_writer.h"
@@ -793,7 +793,7 @@ iree_status_t iree_hal_remote_server_bulk_on_complete(
       iree_hal_remote_server_profile_has_pending_transfers_locked(session_slot);
   iree_slim_mutex_unlock(&session_slot->bulk_transfer_mutex);
   if (iree_status_is_ok(status) && profile_sequence != 0) {
-    status = iree_hal_remote_server_profile_observe_transfer(
+    status = iree_hal_remote_server_profile_relay_observe_transfer(
         session_slot, profile_sequence, iree_ok_status());
   }
   if (drain_profile_pending) {
@@ -842,7 +842,7 @@ iree_status_t iree_hal_remote_server_bulk_on_abort(
   iree_slim_mutex_unlock(&session_slot->bulk_transfer_mutex);
   iree_status_t status = iree_ok_status();
   if (profile_sequence != 0) {
-    status = iree_hal_remote_server_profile_observe_transfer(
+    status = iree_hal_remote_server_profile_relay_observe_transfer(
         session_slot, profile_sequence,
         iree_make_status(IREE_STATUS_ABORTED,
                          "remote client aborted profile transfer"));
@@ -936,7 +936,7 @@ void iree_hal_remote_server_bulk_on_credit(
       iree_hal_remote_server_profile_has_pending_transfers_locked(session_slot);
   iree_slim_mutex_unlock(&session_slot->bulk_transfer_mutex);
   if (!iree_status_is_ok(status) && failed_profile_sequence != 0) {
-    status = iree_hal_remote_server_profile_observe_transfer(
+    status = iree_hal_remote_server_profile_relay_observe_transfer(
         session_slot, failed_profile_sequence, status);
   } else {
     iree_status_free(status);

@@ -80,6 +80,7 @@ iree_cc_library(
     "bulk_profile_sender.h"
     "bulk_upload_receiver.h"
     "file_index.h"
+    "profile_relay.h"
   SRCS
     "bulk.c"
     "bulk.h"
@@ -89,6 +90,7 @@ iree_cc_library(
     "file_index.c"
     "profile.c"
     "profile.h"
+    "profile_relay.c"
     "resource_table.c"
     "resource_table.h"
     "server.c"

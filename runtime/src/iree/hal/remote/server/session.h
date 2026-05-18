@@ -12,6 +12,7 @@
 #include "iree/base/threading/mutex.h"
 #include "iree/hal/api.h"
 #include "iree/hal/remote/server/bulk_router.h"
+#include "iree/hal/remote/server/profile_relay.h"
 #include "iree/hal/remote/server/resource_table.h"
 #include "iree/net/channel/queue/queue_channel.h"
 #include "iree/net/channel/util/sequence_window.h"
@@ -26,8 +27,6 @@ typedef struct iree_hal_remote_control_envelope_t
     iree_hal_remote_control_envelope_t;
 typedef struct iree_hal_remote_server_bulk_staging_pool_t
     iree_hal_remote_server_bulk_staging_pool_t;
-typedef struct iree_hal_remote_server_profile_pending_transfer_t
-    iree_hal_remote_server_profile_pending_transfer_t;
 typedef struct iree_hal_remote_bulk_transfer_scheduler_t
     iree_hal_remote_bulk_transfer_scheduler_t;
 typedef struct iree_net_bulk_channel_t iree_net_bulk_channel_t;
@@ -98,32 +97,8 @@ typedef struct iree_hal_remote_server_session_t {
   // Receive window retaining client-to-server DATA chunks and CREDIT state.
   iree_net_bulk_receive_window_t* bulk_receive_window;
 
-  // FIFO head of server-originated profile transfers awaiting transfer
-  // capacity. Protected by bulk_transfer_mutex.
-  iree_hal_remote_server_profile_pending_transfer_t*
-      profile_pending_transfer_head;
-
-  // FIFO tail of server-originated profile transfers awaiting transfer
-  // capacity. Protected by bulk_transfer_mutex.
-  iree_hal_remote_server_profile_pending_transfer_t*
-      profile_pending_transfer_tail;
-
-  // Active server-created profile sink for the session, or NULL when no
-  // HAL-native profiling session is active. Protected by server->session_mutex.
-  iree_hal_profile_sink_t* profile_sink;
-
-  // Server-originated profile transfer acknowledgements observed from the
-  // client. Protected by server->session_mutex.
-  iree_net_sequence_window_t profile_ack_window;
-
-  // First asynchronous profile transfer failure code observed in the active
-  // session, or IREE_STATUS_OK when all transfers have completed normally.
-  // Protected by server->session_mutex.
-  iree_status_code_t profile_transfer_failure_code;
-
-  // First failed profile callback sequence, or 0 when no transfer has failed.
-  // Protected by server->session_mutex.
-  uint64_t profile_transfer_failure_sequence;
+  // Server-originated profiling callback relay state.
+  iree_hal_remote_server_profile_relay_t profile_relay;
 
   // Resource table mapping resource_ids to retained HAL resources (buffers,
   // semaphores, etc.). Initialized when the session is accepted, deinitialized

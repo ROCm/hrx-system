@@ -77,6 +77,7 @@ iree_runtime_cc_library(
         "file_index.c",
         "profile.c",
         "profile.h",
+        "profile_relay.c",
         "resource_table.c",
         "resource_table.h",
         "server.c",
@@ -90,6 +91,7 @@ iree_runtime_cc_library(
         "bulk_profile_sender.h",
         "bulk_upload_receiver.h",
         "file_index.h",
+        "profile_relay.h",
     ],
     deps = [
         ":bulk_router",

@@ -284,8 +284,8 @@ static void iree_hal_remote_server_destroy(iree_hal_remote_server_t* server) {
     iree_hal_remote_server_session_deinitialize_provisionals(
         &server->sessions[i], host_allocator);
 
-    iree_hal_remote_server_profile_session_cancel(&server->sessions[i]);
-    iree_hal_remote_server_profile_session_deinitialize(&server->sessions[i]);
+    iree_hal_remote_server_profile_relay_cancel(&server->sessions[i]);
+    iree_hal_remote_server_profile_relay_deinitialize(&server->sessions[i]);
 
     iree_hal_remote_server_session_deinitialize_windows(&server->sessions[i]);
     iree_net_bulk_channel_detach(server->sessions[i].bulk_channel);
@@ -351,12 +351,8 @@ static int32_t iree_hal_remote_server_find_free_slot(
         !server->sessions[i].bulk_transfer_scheduler &&
         !server->sessions[i].bulk_staging_pool &&
         !server->sessions[i].bulk_receive_window &&
-        !server->sessions[i].profile_pending_transfer_head &&
-        !server->sessions[i].profile_pending_transfer_tail &&
-        !server->sessions[i].profile_sink &&
-        !server->sessions[i].profile_ack_window.storage &&
-        server->sessions[i].profile_transfer_failure_code == IREE_STATUS_OK &&
-        server->sessions[i].profile_transfer_failure_sequence == 0 &&
+        iree_hal_remote_server_profile_relay_is_empty(
+            &server->sessions[i].profile_relay) &&
         server->sessions[i].flags == 0) {
       return (int32_t)i;
     }
@@ -417,10 +413,8 @@ static void iree_hal_remote_server_on_accept(
         &server->sessions[slot].completed_signal_window);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_net_sequence_window_initialize(
-        /*initial_observed_sequence=*/0,
-        IREE_HAL_REMOTE_SERVER_SEQUENCE_WINDOW_INITIAL_CAPACITY,
-        server->host_allocator, &server->sessions[slot].profile_ack_window);
+    status = iree_hal_remote_server_profile_relay_initialize(
+        &server->sessions[slot], server->host_allocator);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_remote_server_session_initialize_bulk_transfers(
@@ -473,7 +467,7 @@ static void iree_hal_remote_server_on_accept(
     if (slot >= 0) {
       iree_hal_remote_resource_table_deinitialize(
           &server->sessions[slot].resource_table, server->host_allocator);
-      iree_hal_remote_server_profile_session_deinitialize(
+      iree_hal_remote_server_profile_relay_deinitialize(
           &server->sessions[slot]);
       iree_hal_remote_server_session_deinitialize_windows(
           &server->sessions[slot]);

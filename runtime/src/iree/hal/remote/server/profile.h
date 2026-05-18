@@ -14,21 +14,6 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Deinitializes session profiling state and releases pending response nodes.
-void iree_hal_remote_server_profile_session_deinitialize(
-    iree_hal_remote_server_session_t* session_slot);
-
-// Cancels a session-owned profiling session during connection teardown.
-void iree_hal_remote_server_profile_session_cancel(
-    iree_hal_remote_server_session_t* session_slot);
-
-// Observes client completion of one server-originated profile transfer.
-// Consumes |status|, using non-OK values to fail lifecycle responses whose
-// callback range includes |sequence|.
-iree_status_t iree_hal_remote_server_profile_observe_transfer(
-    iree_hal_remote_server_session_t* session_slot, uint64_t sequence,
-    iree_status_t status);
-
 // Handles PROFILING_BEGIN.
 iree_status_t iree_hal_remote_server_handle_profiling_begin(
     iree_hal_remote_server_session_t* session_slot,

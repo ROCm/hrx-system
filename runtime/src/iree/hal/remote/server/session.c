@@ -332,8 +332,8 @@ void iree_hal_remote_server_remove_session(iree_hal_remote_server_t* server,
 
   if (slot < 0) return;  // Already removed (e.g., double callback).
 
-  iree_hal_remote_server_profile_session_cancel(&server->sessions[slot]);
-  iree_hal_remote_server_profile_session_deinitialize(&server->sessions[slot]);
+  iree_hal_remote_server_profile_relay_cancel(&server->sessions[slot]);
+  iree_hal_remote_server_profile_relay_deinitialize(&server->sessions[slot]);
 
   // Release all resources in the table.
   iree_hal_remote_resource_table_deinitialize(&resource_table,
