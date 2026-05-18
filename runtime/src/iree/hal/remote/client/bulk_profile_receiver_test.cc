@@ -8,20 +8,22 @@
 
 #include <cstdint>
 #include <cstring>
-#include <utility>
 #include <vector>
 
 #include "iree/hal/remote/client/bulk.h"
+#include "iree/hal/remote/client/bulk_test_util.h"
 #include "iree/hal/remote/protocol/profile.h"
 #include "iree/hal/remote/util/queue_header_pool.h"
 #include "iree/net/channel/bulk/frame.h"
 #include "iree/net/channel/bulk/transfer_table.h"
-#include "iree/net/channel/util/frame_sender.h"
-#include "iree/net/message_endpoint.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
 namespace {
+
+using iree::hal::remote::client::testing::BulkChannelCallbacks;
+using iree::hal::remote::client::testing::MockEndpoint;
+using iree::hal::remote::client::testing::ParseBulkHeader;
 
 struct RecordedProfileCallback {
   // Profile callback type delivered to the recording sink.
@@ -132,213 +134,6 @@ static void recording_profile_sink_initialize(
 static iree_hal_profile_sink_t* recording_profile_sink_as_base(
     recording_profile_sink_t* sink) {
   return reinterpret_cast<iree_hal_profile_sink_t*>(sink);
-}
-
-struct CapturedBulkSend {
-  // Concatenated scatter-gather bytes submitted through the endpoint.
-  std::vector<uint8_t> data;
-
-  // Total byte length reported to frame-sender completion.
-  iree_host_size_t total_length = 0;
-
-  // Frame-sender context pointer forwarded as endpoint user data.
-  uint64_t endpoint_user_data = 0;
-
-  // True after the test completes the send.
-  bool completed = false;
-};
-
-struct MockEndpoint {
-  // Endpoint callbacks installed by the bulk channel.
-  iree_net_message_endpoint_callbacks_t callbacks = {};
-
-  // Sends captured at the endpoint boundary.
-  std::vector<CapturedBulkSend> sends;
-
-  // Status returned by the next endpoint send.
-  iree_status_code_t next_send_error = IREE_STATUS_OK;
-
-  // True after endpoint activation.
-  bool activated = false;
-
-  static void SetCallbacks(void* self,
-                           iree_net_message_endpoint_callbacks_t callbacks) {
-    static_cast<MockEndpoint*>(self)->callbacks = callbacks;
-  }
-
-  static iree_status_t Activate(void* self) {
-    static_cast<MockEndpoint*>(self)->activated = true;
-    return iree_ok_status();
-  }
-
-  static iree_status_t Deactivate(
-      void* self, iree_net_message_endpoint_deactivate_fn_t callback,
-      void* user_data) {
-    static_cast<MockEndpoint*>(self)->activated = false;
-    if (callback) callback(user_data);
-    return iree_ok_status();
-  }
-
-  static iree_status_t Send(
-      void* self, const iree_net_message_endpoint_send_params_t* params) {
-    MockEndpoint* endpoint = static_cast<MockEndpoint*>(self);
-    if (endpoint->next_send_error != IREE_STATUS_OK) {
-      iree_status_code_t send_error = endpoint->next_send_error;
-      endpoint->next_send_error = IREE_STATUS_OK;
-      return iree_status_from_code(send_error);
-    }
-
-    CapturedBulkSend captured;
-    captured.endpoint_user_data = params->user_data;
-    for (iree_host_size_t i = 0; i < params->data.count; ++i) {
-      if (!iree_host_size_checked_add(captured.total_length,
-                                      params->data.values[i].length,
-                                      &captured.total_length)) {
-        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                                "captured send size overflow");
-      }
-    }
-    captured.data.reserve(captured.total_length);
-    for (iree_host_size_t i = 0; i < params->data.count; ++i) {
-      iree_async_span_t span = params->data.values[i];
-      const uint8_t* span_data = iree_async_span_ptr(span);
-      captured.data.insert(captured.data.end(), span_data,
-                           span_data + span.length);
-    }
-    endpoint->sends.push_back(std::move(captured));
-    return iree_ok_status();
-  }
-
-  static iree_net_carrier_send_budget_t QuerySendBudget(void* self) {
-    (void)self;
-    return {1024 * 1024, 64};
-  }
-
-  static iree_status_t BeginSend(void* self, iree_host_size_t size,
-                                 void** out_ptr,
-                                 iree_net_carrier_send_handle_t* out_handle) {
-    (void)self;
-    (void)size;
-    (void)out_ptr;
-    (void)out_handle;
-    return iree_make_status(IREE_STATUS_UNIMPLEMENTED, "mock");
-  }
-
-  static iree_status_t CommitSend(void* self,
-                                  iree_net_carrier_send_handle_t handle) {
-    (void)self;
-    (void)handle;
-    return iree_make_status(IREE_STATUS_UNIMPLEMENTED, "mock");
-  }
-
-  static void AbortSend(void* self, iree_net_carrier_send_handle_t handle) {
-    (void)self;
-    (void)handle;
-  }
-
-  static const iree_net_message_endpoint_vtable_t* VTable() {
-    static const iree_net_message_endpoint_vtable_t vtable = {
-        MockEndpoint::SetCallbacks,    MockEndpoint::Activate,
-        MockEndpoint::Deactivate,      MockEndpoint::Send,
-        MockEndpoint::QuerySendBudget, MockEndpoint::BeginSend,
-        MockEndpoint::CommitSend,      MockEndpoint::AbortSend,
-    };
-    return &vtable;
-  }
-
-  iree_net_message_endpoint_t as_endpoint() { return {this, VTable()}; }
-
-  void CompleteSend(iree_host_size_t send_index, iree_status_t status) {
-    CapturedBulkSend& captured = sends[send_index];
-    captured.completed = true;
-    iree_net_frame_sender_dispatch_carrier_completion(
-        /*callback_user_data=*/NULL, captured.endpoint_user_data, status,
-        captured.total_length, /*recv_lease=*/NULL);
-  }
-
-  void CompleteAllSends() {
-    for (iree_host_size_t i = 0; i < sends.size(); ++i) {
-      if (!sends[i].completed) CompleteSend(i, iree_ok_status());
-    }
-  }
-};
-
-struct BulkChannelCallbacks {
-  // Send-completion operation user data values observed by the channel.
-  std::vector<uint64_t> send_completions;
-
-  // Send-completion status codes observed by the channel.
-  std::vector<iree_status_code_t> send_completion_status_codes;
-
-  static iree_status_t OnStart(void* user_data, uint64_t transfer_id,
-                               uint64_t total_size,
-                               iree_net_bulk_frame_flags_t flags) {
-    (void)user_data;
-    (void)transfer_id;
-    (void)total_size;
-    (void)flags;
-    return iree_make_status(IREE_STATUS_INTERNAL, "unexpected START");
-  }
-
-  static iree_status_t OnData(void* user_data, uint64_t transfer_id,
-                              uint64_t chunk_offset, uint32_t sequence,
-                              iree_net_bulk_frame_flags_t flags,
-                              iree_const_byte_span_t chunk_data,
-                              iree_async_buffer_lease_t* lease) {
-    (void)user_data;
-    (void)transfer_id;
-    (void)chunk_offset;
-    (void)sequence;
-    (void)flags;
-    (void)chunk_data;
-    (void)lease;
-    return iree_make_status(IREE_STATUS_INTERNAL, "unexpected DATA");
-  }
-
-  static iree_status_t OnComplete(void* user_data, uint64_t transfer_id) {
-    (void)user_data;
-    (void)transfer_id;
-    return iree_make_status(IREE_STATUS_INTERNAL, "unexpected COMPLETE");
-  }
-
-  static iree_status_t OnAbort(void* user_data, uint64_t transfer_id,
-                               iree_const_byte_span_t abort_data,
-                               iree_async_buffer_lease_t* lease) {
-    (void)user_data;
-    (void)transfer_id;
-    (void)abort_data;
-    (void)lease;
-    return iree_make_status(IREE_STATUS_INTERNAL, "unexpected ABORT");
-  }
-
-  static void OnSendComplete(void* user_data, uint64_t operation_user_data,
-                             iree_status_t status) {
-    BulkChannelCallbacks* callbacks =
-        static_cast<BulkChannelCallbacks*>(user_data);
-    callbacks->send_completions.push_back(operation_user_data);
-    callbacks->send_completion_status_codes.push_back(iree_status_code(status));
-    iree_status_free(status);
-  }
-
-  iree_net_bulk_channel_callbacks_t MakeCallbacks() {
-    iree_net_bulk_channel_callbacks_t callbacks;
-    memset(&callbacks, 0, sizeof(callbacks));
-    callbacks.on_start = OnStart;
-    callbacks.on_data = OnData;
-    callbacks.on_complete = OnComplete;
-    callbacks.on_abort = OnAbort;
-    callbacks.on_send_complete = OnSendComplete;
-    callbacks.user_data = this;
-    return callbacks;
-  }
-};
-
-static iree_net_bulk_frame_header_t ParseBulkHeader(
-    const CapturedBulkSend& send) {
-  iree_net_bulk_frame_header_t header;
-  memset(&header, 0, sizeof(header));
-  memcpy(&header, send.data.data(), sizeof(header));
-  return header;
 }
 
 static iree_status_t BuildProfilePayload(
