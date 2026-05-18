@@ -8,7 +8,7 @@
 
 #include "iree/hal/remote/protocol/control.h"
 #include "iree/hal/remote/protocol/profile.h"
-#include "iree/hal/remote/server/bulk.h"
+#include "iree/hal/remote/server/bulk_profile_sender.h"
 #include "iree/hal/remote/server/server.h"
 
 #define IREE_HAL_REMOTE_PROFILE_ACK_WINDOW_INITIAL_CAPACITY 64
@@ -501,7 +501,7 @@ static iree_status_t iree_hal_remote_server_profile_sink_submit(
       sequence, callback_type, metadata, session_status_code, iovec_count,
       iovecs, sink->host_allocator, &payload);
   if (iree_status_is_ok(status)) {
-    status = iree_hal_remote_server_bulk_submit_profile_transfer(
+    status = iree_hal_remote_server_profile_submit_transfer(
         sink->session_slot, sink->session_id, base_sink, payload);
     payload = iree_byte_span_empty();
   }

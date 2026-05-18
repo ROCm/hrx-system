@@ -27,6 +27,22 @@ typedef struct iree_hal_remote_control_envelope_t
 #define IREE_HAL_REMOTE_BULK_HEADER_POOL_BUFFER_SIZE 128
 #define IREE_HAL_REMOTE_BULK_INITIAL_CHUNK_CREDIT 64
 
+// DATA payloads share the frame with a bulk header; keep chunks comfortably
+// below the default queue frame size instead of filling the whole frame.
+#define IREE_HAL_REMOTE_BULK_DATA_CHUNK_LENGTH (32 * 1024)
+#define IREE_HAL_REMOTE_BULK_ACTIVE_TRANSFER_CAPACITY \
+  IREE_NET_BULK_TRANSFER_TABLE_DEFAULT_CAPACITY
+#define IREE_HAL_REMOTE_BULK_STAGING_SLOT_COUNT \
+  IREE_HAL_REMOTE_BULK_ACTIVE_TRANSFER_CAPACITY
+
+typedef enum iree_hal_remote_server_bulk_transfer_kind_e {
+  IREE_HAL_REMOTE_SERVER_BULK_TRANSFER_KIND_EMPTY = 0u,
+  IREE_HAL_REMOTE_SERVER_BULK_TRANSFER_KIND_CLIENT_FILE_READ = 1u,
+  IREE_HAL_REMOTE_SERVER_BULK_TRANSFER_KIND_CLIENT_FILE_WRITE = 2u,
+  IREE_HAL_REMOTE_SERVER_BULK_TRANSFER_KIND_PROFILE_SEND = 3u,
+} iree_hal_remote_server_bulk_transfer_kind_e;
+typedef uint8_t iree_hal_remote_server_bulk_transfer_kind_t;
+
 // Initializes bounded bulk transfer state for a session slot.
 iree_status_t iree_hal_remote_server_session_initialize_bulk_transfers(
     iree_hal_remote_server_session_t* session_slot,
@@ -60,13 +76,6 @@ iree_status_t iree_hal_remote_server_bulk_submit_client_file_write(
     iree_hal_semaphore_list_t signal_list, uint64_t transfer_id,
     iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
     iree_device_size_t length, iree_hal_write_flags_t flags);
-
-// Submits one server-to-client profile callback payload. If active transfer
-// capacity is exhausted, the payload may be queued until a transfer retires.
-// Consumes |payload| regardless of the result.
-iree_status_t iree_hal_remote_server_bulk_submit_profile_transfer(
-    iree_hal_remote_server_session_t* session_slot, uint64_t session_id,
-    iree_hal_profile_sink_t* profile_sink, iree_byte_span_t payload);
 
 // Flushes any unadvertised local receive capacity to the peer.
 iree_status_t iree_hal_remote_server_bulk_flush_receive_window(

@@ -77,12 +77,14 @@ iree_cc_library(
   HDRS
     "api.h"
     "bulk_download_sender.h"
+    "bulk_profile_sender.h"
     "bulk_upload_receiver.h"
     "file_index.h"
   SRCS
     "bulk.c"
     "bulk.h"
     "bulk_download_sender.c"
+    "bulk_profile_sender.c"
     "bulk_upload_receiver.c"
     "file_index.c"
     "profile.c"

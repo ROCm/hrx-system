@@ -72,6 +72,7 @@ iree_runtime_cc_library(
         "bulk.c",
         "bulk.h",
         "bulk_download_sender.c",
+        "bulk_profile_sender.c",
         "bulk_upload_receiver.c",
         "file_index.c",
         "profile.c",
@@ -86,6 +87,7 @@ iree_runtime_cc_library(
     hdrs = [
         "api.h",
         "bulk_download_sender.h",
+        "bulk_profile_sender.h",
         "bulk_upload_receiver.h",
         "file_index.h",
     ],
