@@ -471,14 +471,34 @@ static iree_status_t failing_queue_write_device_queue_write(
 }
 
 const iree_hal_device_vtable_t failing_queue_write_device_vtable = {
-    .destroy = failing_queue_write_device_destroy,
-    .id = failing_queue_write_device_id,
-    .host_allocator = failing_queue_write_device_host_allocator,
-    .import_file = failing_queue_write_device_import_file,
-    .create_semaphore = failing_queue_write_device_create_semaphore,
-    .query_semaphore_compatibility =
-        failing_queue_write_device_query_semaphore_compatibility,
-    .queue_write = failing_queue_write_device_queue_write,
+    /*.destroy=*/failing_queue_write_device_destroy,
+    /*.id=*/failing_queue_write_device_id,
+    /*.host_allocator=*/failing_queue_write_device_host_allocator,
+    /*.device_allocator=*/nullptr,
+    /*.replace_device_allocator=*/nullptr,
+    /*.replace_channel_provider=*/nullptr,
+    /*.trim=*/nullptr,
+    /*.query_i64=*/nullptr,
+    /*.query_capabilities=*/nullptr,
+    /*.topology_info=*/nullptr,
+    /*.refine_topology_edge=*/nullptr,
+    /*.assign_topology_info=*/nullptr,
+    /*.create_channel=*/nullptr,
+    /*.create_command_buffer=*/nullptr,
+    /*.create_event=*/nullptr,
+    /*.create_executable_cache=*/nullptr,
+    /*.import_file=*/failing_queue_write_device_import_file,
+    /*.create_semaphore=*/failing_queue_write_device_create_semaphore,
+    /*.query_semaphore_compatibility=*/
+    failing_queue_write_device_query_semaphore_compatibility,
+    /*.query_queue_pool_backend=*/nullptr,
+    /*.queue_alloca=*/nullptr,
+    /*.queue_dealloca=*/nullptr,
+    /*.queue_fill=*/nullptr,
+    /*.queue_update=*/nullptr,
+    /*.queue_copy=*/nullptr,
+    /*.queue_read=*/nullptr,
+    /*.queue_write=*/failing_queue_write_device_queue_write,
 };
 
 static iree_status_t CreateFailingQueueWriteDevice(
@@ -585,7 +605,7 @@ class BulkDownloadSenderTest : public ::testing::Test {
         iree_hal_remote_server_bulk_staging_pool_options_default();
     options.slot_count = slot_count;
     options.slot_length = slot_length;
-    return iree_hal_remote_server_bulk_staging_pool_allocate(
+    return iree_hal_remote_server_bulk_staging_pool_create(
         &options, iree_allocator_system(), &session_.bulk_staging_pool);
   }
 

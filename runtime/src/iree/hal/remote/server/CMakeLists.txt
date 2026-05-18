@@ -174,13 +174,14 @@ iree_cc_test(
     iree::testing::gtest_main
 )
 
-iree_cc_test(
+iree_cc_binary_benchmark(
   NAME
-    bulk_profile_sender_test
+    bulk_profile_sender_benchmark
   SRCS
     "bulk.h"
-    "bulk_profile_sender_test.cc"
+    "bulk_profile_sender_benchmark.cc"
     "bulk_test_util.h"
+    "resource_table.h"
     "server.h"
     "session.h"
   DEPS
@@ -190,6 +191,42 @@ iree_cc_test(
     iree::base
     iree::base::threading
     iree::hal
+    iree::hal::remote::protocol::common
+    iree::hal::remote::protocol::profile
+    iree::hal::remote::util::bulk_transfer_scheduler
+    iree::net::carrier
+    iree::net::channel::bulk::bulk_channel
+    iree::net::channel::bulk::frame
+    iree::net::channel::queue::queue_channel
+    iree::net::channel::util::frame_sender
+    iree::net::channel::util::sequence_window
+    iree::net::message_endpoint
+    iree::net::session
+    iree::net::transport_factory
+    iree::testing::benchmark
+    iree::testing::benchmark_main
+    iree::third_party::google_benchmark
+  TESTONLY
+)
+
+iree_cc_test(
+  NAME
+    bulk_profile_sender_test
+  SRCS
+    "bulk.h"
+    "bulk_profile_sender_test.cc"
+    "bulk_test_util.h"
+    "resource_table.h"
+    "server.h"
+    "session.h"
+  DEPS
+    ::bulk_router
+    ::server
+    iree::async
+    iree::base
+    iree::base::threading
+    iree::hal
+    iree::hal::remote::protocol::common
     iree::hal::remote::protocol::profile
     iree::hal::remote::util::bulk_transfer_scheduler
     iree::net::carrier
@@ -281,6 +318,7 @@ iree_cc_test(
     profile_relay_test
   SRCS
     "profile_relay_test.cc"
+    "resource_table.h"
     "server.h"
     "session.h"
   DEPS
@@ -290,6 +328,7 @@ iree_cc_test(
     iree::base
     iree::base::threading
     iree::hal
+    iree::hal::remote::protocol::common
     iree::hal::remote::protocol::control
     iree::net::channel::queue::queue_channel
     iree::net::channel::util::sequence_window

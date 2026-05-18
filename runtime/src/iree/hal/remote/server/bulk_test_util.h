@@ -153,6 +153,15 @@ struct MockCarrier {
 
     CapturedSend captured;
     captured.carrier_operation_user_data = params->user_data;
+    iree_host_size_t total_length = 0;
+    for (iree_host_size_t i = 0; i < params->data.count; ++i) {
+      if (!iree_host_size_checked_add(
+              total_length, params->data.values[i].length, &total_length)) {
+        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "mock send payload size overflow");
+      }
+    }
+    captured.data.reserve(total_length);
     for (iree_host_size_t i = 0; i < params->data.count; ++i) {
       iree_async_span_t span = params->data.values[i];
       uint8_t* pointer = iree_async_span_ptr(span);
