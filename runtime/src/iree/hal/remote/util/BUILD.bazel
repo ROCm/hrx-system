@@ -38,6 +38,29 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_library(
+    name = "bulk_router",
+    srcs = ["bulk_router.c"],
+    hdrs = ["bulk_router.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/net/channel/bulk:bulk_channel",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "bulk_router_test",
+    srcs = [
+        "bulk_router_test.cc",
+    ],
+    deps = [
+        ":bulk_router",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "bulk_transfer_scheduler",
     srcs = ["bulk_transfer_scheduler.c"],
     hdrs = ["bulk_transfer_scheduler.h"],

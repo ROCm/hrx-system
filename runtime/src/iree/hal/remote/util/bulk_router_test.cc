@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "iree/hal/remote/server/bulk_router.h"
+#include "iree/hal/remote/util/bulk_router.h"
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -135,8 +135,8 @@ static void FakeCredit(void* user_data) {
   ++context->credit_count;
 }
 
-static iree_hal_remote_server_bulk_router_operations_t FakeOperations() {
-  iree_hal_remote_server_bulk_router_operations_t operations = {};
+static iree_hal_remote_bulk_router_operations_t FakeOperations() {
+  iree_hal_remote_bulk_router_operations_t operations = {};
   operations.retain = FakeRetain;
   operations.release = FakeRelease;
   operations.start = FakeStart;
@@ -151,11 +151,10 @@ static iree_hal_remote_server_bulk_router_operations_t FakeOperations() {
 
 TEST(BulkRouterTest, RoutesReceiveFrames) {
   fake_router_context_t context = {};
-  iree_hal_remote_server_bulk_router_t router;
-  iree_hal_remote_server_bulk_router_initialize(FakeOperations(), &context,
-                                                &router);
+  iree_hal_remote_bulk_router_t router;
+  iree_hal_remote_bulk_router_initialize(FakeOperations(), &context, &router);
   iree_net_bulk_channel_callbacks_t callbacks =
-      iree_hal_remote_server_bulk_router_callbacks(&router);
+      iree_hal_remote_bulk_router_callbacks(&router);
 
   IREE_ASSERT_OK(callbacks.on_start(callbacks.user_data, /*transfer_id=*/12,
                                     /*total_size=*/4096,
@@ -185,31 +184,29 @@ TEST(BulkRouterTest, RoutesReceiveFrames) {
   EXPECT_EQ(context.complete_transfer_id, 12u);
   EXPECT_EQ(context.abort_transfer_id, 13u);
 
-  iree_hal_remote_server_bulk_router_deinitialize(&router);
+  iree_hal_remote_bulk_router_deinitialize(&router);
 }
 
 TEST(BulkRouterTest, NormalizesCreditCallback) {
   fake_router_context_t context = {};
-  iree_hal_remote_server_bulk_router_t router;
-  iree_hal_remote_server_bulk_router_initialize(FakeOperations(), &context,
-                                                &router);
+  iree_hal_remote_bulk_router_t router;
+  iree_hal_remote_bulk_router_initialize(FakeOperations(), &context, &router);
   iree_net_bulk_channel_callbacks_t callbacks =
-      iree_hal_remote_server_bulk_router_callbacks(&router);
+      iree_hal_remote_bulk_router_callbacks(&router);
 
   callbacks.on_credit(callbacks.user_data, /*credit_delta=*/4,
                       /*available_credit_count=*/32);
 
   EXPECT_EQ(context.credit_count, 1);
-  iree_hal_remote_server_bulk_router_deinitialize(&router);
+  iree_hal_remote_bulk_router_deinitialize(&router);
 }
 
 TEST(BulkRouterTest, SendCompleteFailureRoutesTransportError) {
   fake_router_context_t context = {};
-  iree_hal_remote_server_bulk_router_t router;
-  iree_hal_remote_server_bulk_router_initialize(FakeOperations(), &context,
-                                                &router);
+  iree_hal_remote_bulk_router_t router;
+  iree_hal_remote_bulk_router_initialize(FakeOperations(), &context, &router);
   iree_net_bulk_channel_callbacks_t callbacks =
-      iree_hal_remote_server_bulk_router_callbacks(&router);
+      iree_hal_remote_bulk_router_callbacks(&router);
 
   callbacks.on_send_complete(
       callbacks.user_data, /*operation_user_data=*/42,
@@ -222,16 +219,15 @@ TEST(BulkRouterTest, SendCompleteFailureRoutesTransportError) {
   EXPECT_EQ(context.send_complete_status_code, IREE_STATUS_UNAVAILABLE);
   EXPECT_EQ(context.transport_error_count, 1);
   EXPECT_EQ(context.transport_error_status_code, IREE_STATUS_UNAVAILABLE);
-  iree_hal_remote_server_bulk_router_deinitialize(&router);
+  iree_hal_remote_bulk_router_deinitialize(&router);
 }
 
 TEST(BulkRouterTest, CreditSendCompletionDoesNotRouteTransportError) {
   fake_router_context_t context = {};
-  iree_hal_remote_server_bulk_router_t router;
-  iree_hal_remote_server_bulk_router_initialize(FakeOperations(), &context,
-                                                &router);
+  iree_hal_remote_bulk_router_t router;
+  iree_hal_remote_bulk_router_initialize(FakeOperations(), &context, &router);
   iree_net_bulk_channel_callbacks_t callbacks =
-      iree_hal_remote_server_bulk_router_callbacks(&router);
+      iree_hal_remote_bulk_router_callbacks(&router);
 
   callbacks.on_send_complete(
       callbacks.user_data, /*operation_user_data=*/0,
@@ -243,7 +239,7 @@ TEST(BulkRouterTest, CreditSendCompletionDoesNotRouteTransportError) {
   EXPECT_EQ(context.send_complete_operation_user_data, 0u);
   EXPECT_EQ(context.send_complete_status_code, IREE_STATUS_ABORTED);
   EXPECT_EQ(context.transport_error_count, 0);
-  iree_hal_remote_server_bulk_router_deinitialize(&router);
+  iree_hal_remote_bulk_router_deinitialize(&router);
 }
 
 }  // namespace

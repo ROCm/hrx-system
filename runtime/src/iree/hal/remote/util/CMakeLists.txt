@@ -36,6 +36,31 @@ iree_cc_test(
 
 iree_cc_library(
   NAME
+    bulk_router
+  HDRS
+    "bulk_router.h"
+  SRCS
+    "bulk_router.c"
+  DEPS
+    iree::base
+    iree::net::channel::bulk::bulk_channel
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    bulk_router_test
+  SRCS
+    "bulk_router_test.cc"
+  DEPS
+    ::bulk_router
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_library(
+  NAME
     bulk_transfer_scheduler
   HDRS
     "bulk_transfer_scheduler.h"

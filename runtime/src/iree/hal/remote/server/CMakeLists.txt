@@ -11,19 +11,6 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
-    bulk_router
-  HDRS
-    "bulk_router.h"
-  SRCS
-    "bulk_router.c"
-  DEPS
-    iree::base
-    iree::net::channel::bulk::bulk_channel
-  PUBLIC
-)
-
-iree_cc_library(
-  NAME
     bulk_staging_pool
   HDRS
     "bulk_staging_pool.h"
@@ -100,7 +87,6 @@ iree_cc_library(
     "session.c"
     "session.h"
   DEPS
-    ::bulk_router
     ::bulk_staging_pool
     iree::async
     iree::base
@@ -114,6 +100,7 @@ iree_cc_library(
     iree::hal::remote::protocol::profile
     iree::hal::remote::protocol::queue
     iree::hal::remote::util::bulk_channel_writer
+    iree::hal::remote::util::bulk_router
     iree::hal::remote::util::bulk_transfer_scheduler
     iree::hal::remote::util::bulk_transfer_tracker
     iree::hal::remote::util::queue_header_pool
@@ -131,18 +118,6 @@ iree_cc_library(
     iree::net::status_wire
     iree::net::transport_factory
   PUBLIC
-)
-
-iree_cc_test(
-  NAME
-    bulk_router_test
-  SRCS
-    "bulk_router_test.cc"
-  DEPS
-    ::bulk_router
-    iree::base
-    iree::testing::gtest
-    iree::testing::gtest_main
 )
 
 iree_cc_test(
@@ -183,7 +158,6 @@ iree_cc_test(
     "server.h"
     "session.h"
   DEPS
-    ::bulk_router
     ::server
     iree::async
     iree::async::util::proactor_pool
@@ -215,7 +189,6 @@ iree_cc_binary_benchmark(
     "server.h"
     "session.h"
   DEPS
-    ::bulk_router
     ::server
     iree::async
     iree::async::util::proactor_pool
@@ -251,7 +224,6 @@ iree_cc_binary_benchmark(
     "server.h"
     "session.h"
   DEPS
-    ::bulk_router
     ::server
     iree::async
     iree::async::util::proactor_pool
@@ -287,7 +259,6 @@ iree_cc_test(
     "server.h"
     "session.h"
   DEPS
-    ::bulk_router
     ::server
     iree::async
     iree::base
@@ -319,7 +290,6 @@ iree_cc_binary_benchmark(
     "server.h"
     "session.h"
   DEPS
-    ::bulk_router
     ::server
     iree::async
     iree::async::util::proactor_pool
@@ -353,7 +323,6 @@ iree_cc_test(
     "server.h"
     "session.h"
   DEPS
-    ::bulk_router
     ::server
     iree::async
     iree::async::util::proactor_pool
@@ -401,7 +370,6 @@ iree_cc_test(
     "server.h"
     "session.h"
   DEPS
-    ::bulk_router
     ::server
     iree::async
     iree::base
@@ -426,7 +394,6 @@ iree_cc_test(
     "session.h"
     "session_test.cc"
   DEPS
-    ::bulk_router
     ::server
     iree::async
     iree::base
