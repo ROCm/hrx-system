@@ -87,6 +87,29 @@ iree_cc_library(
 
 iree_cc_test(
   NAME
+    bulk_profile_receiver_test
+  SRCS
+    "bulk.h"
+    "bulk_profile_receiver.h"
+    "bulk_profile_receiver_test.cc"
+  DEPS
+    ::client
+    iree::base
+    iree::hal
+    iree::hal::remote::protocol::profile
+    iree::hal::remote::util::queue_header_pool
+    iree::net::channel::bulk::bulk_channel
+    iree::net::channel::bulk::frame
+    iree::net::channel::bulk::transfer_table
+    iree::net::channel::queue::queue_channel
+    iree::net::channel::util::frame_sender
+    iree::net::message_endpoint
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
     bulk_session_test
   SRCS
     "bulk_session.h"

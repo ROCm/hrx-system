@@ -150,13 +150,9 @@ static iree_status_t iree_hal_remote_server_profile_allocate_payload(
   iree_host_size_t name_offset = 0;
   iree_host_size_t profile_payload_offset = 0;
   if (iree_status_is_ok(status)) {
-    status = IREE_STRUCT_LAYOUT(
-        sizeof(iree_hal_remote_profile_transfer_header_t), &total_size,
-        IREE_STRUCT_FIELD_ALIGNED(content_type_length, char, 8,
-                                  &content_type_offset),
-        IREE_STRUCT_FIELD_ALIGNED(name_length, char, 8, &name_offset),
-        IREE_STRUCT_FIELD(profile_payload_length, uint8_t,
-                          &profile_payload_offset));
+    status = iree_hal_remote_profile_transfer_layout(
+        content_type_length, name_length, profile_payload_length, &total_size,
+        &content_type_offset, &name_offset, &profile_payload_offset);
   }
 
   uint8_t* payload_data = NULL;

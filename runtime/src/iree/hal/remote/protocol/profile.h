@@ -30,6 +30,13 @@ enum iree_hal_remote_profile_callback_type_e {
   IREE_HAL_REMOTE_PROFILE_CALLBACK_TYPE_END_SESSION = 0x03,
 };
 
+// Alignment of the flattened profile payload within a bulk transfer.
+//
+// HAL profile content types may contain native record arrays with naturally
+// aligned 64-bit fields. Keeping the payload 8-byte aligned lets sinks consume
+// those records directly from the reassembled transfer storage.
+#define IREE_HAL_REMOTE_PROFILE_PAYLOAD_ALIGNMENT ((iree_host_size_t)8)
+
 // Header at the start of every profile bulk transfer payload.
 //
 // The transfer payload layout is:
@@ -88,6 +95,26 @@ static_assert(offsetof(iree_hal_remote_profile_transfer_header_t,
 static_assert(offsetof(iree_hal_remote_profile_transfer_header_t,
                        callback_type) == 88,
               "");
+
+// Calculates the canonical profile transfer payload layout.
+//
+// Sender and receiver must use this function so that string padding and the
+// native profile payload alignment cannot diverge. All offsets are relative to
+// the beginning of iree_hal_remote_profile_transfer_header_t.
+static inline iree_status_t iree_hal_remote_profile_transfer_layout(
+    uint16_t content_type_length, uint16_t name_length,
+    iree_host_size_t payload_length, iree_host_size_t* out_total_length,
+    iree_host_size_t* out_content_type_offset,
+    iree_host_size_t* out_name_offset, iree_host_size_t* out_payload_offset) {
+  return IREE_STRUCT_LAYOUT(
+      sizeof(iree_hal_remote_profile_transfer_header_t), out_total_length,
+      IREE_STRUCT_FIELD_ALIGNED(content_type_length, char, 8,
+                                out_content_type_offset),
+      IREE_STRUCT_FIELD_ALIGNED(name_length, char, 8, out_name_offset),
+      IREE_STRUCT_FIELD_ALIGNED(payload_length, uint8_t,
+                                IREE_HAL_REMOTE_PROFILE_PAYLOAD_ALIGNMENT,
+                                out_payload_offset));
+}
 
 #ifdef __cplusplus
 }  // extern "C"

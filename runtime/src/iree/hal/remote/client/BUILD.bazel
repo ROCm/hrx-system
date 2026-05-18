@@ -91,6 +91,30 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_test(
+    name = "bulk_profile_receiver_test",
+    srcs = [
+        "bulk.h",
+        "bulk_profile_receiver.h",
+        "bulk_profile_receiver_test.cc",
+    ],
+    deps = [
+        ":client",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/remote/protocol:profile",
+        "//runtime/src/iree/hal/remote/util:queue_header_pool",
+        "//runtime/src/iree/net:message_endpoint",
+        "//runtime/src/iree/net/channel/bulk:bulk_channel",
+        "//runtime/src/iree/net/channel/bulk:frame",
+        "//runtime/src/iree/net/channel/bulk:transfer_table",
+        "//runtime/src/iree/net/channel/queue:queue_channel",
+        "//runtime/src/iree/net/channel/util:frame_sender",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "bulk_session_test",
     srcs = [
         "bulk_session.h",

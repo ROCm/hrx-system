@@ -228,13 +228,10 @@ static iree_status_t iree_hal_remote_client_profile_transfer_parse(
   }
 
   iree_host_size_t required_length = 0;
-  iree_status_t status = IREE_STRUCT_LAYOUT(
-      sizeof(iree_hal_remote_profile_transfer_header_t), &required_length,
-      IREE_STRUCT_FIELD_ALIGNED(header->content_type_length, char, 8,
-                                out_content_type_offset),
-      IREE_STRUCT_FIELD_ALIGNED(header->name_length, char, 8, out_name_offset),
-      IREE_STRUCT_FIELD((iree_host_size_t)header->payload_length, uint8_t,
-                        out_payload_offset));
+  iree_status_t status = iree_hal_remote_profile_transfer_layout(
+      header->content_type_length, header->name_length,
+      (iree_host_size_t)header->payload_length, &required_length,
+      out_content_type_offset, out_name_offset, out_payload_offset);
   if (iree_status_is_ok(status) &&
       required_length != transfer->contents.data_length) {
     status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
