@@ -408,4 +408,31 @@ iree_cc_test(
     iree::testing::gtest_main
 )
 
+iree_cc_test(
+  NAME
+    server_lifecycle_test
+  SRCS
+    "server.h"
+    "server_lifecycle_test.cc"
+    "session.h"
+  DEPS
+    ::server
+    iree::async
+    iree::async::platform
+    iree::base
+    iree::base::threading
+    iree::hal
+    iree::hal::remote::client
+    iree::hal::remote::protocol::common
+    iree::hal::remote::util::recv_pool
+    iree::hal::testing::mock_device
+    iree::net::carrier::loopback::factory
+    iree::net::channel::queue::queue_channel
+    iree::net::channel::util::sequence_window
+    iree::net::session
+    iree::net::transport_factory
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
