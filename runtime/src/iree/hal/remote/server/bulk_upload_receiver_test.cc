@@ -89,11 +89,130 @@ static iree_status_t RecordCredit(void* user_data, uint32_t credit_delta) {
   return iree_ok_status();
 }
 
+typedef struct failing_queue_read_device_t {
+  // HAL resource header for the test wrapper device.
+  iree_hal_resource_t resource;
+
+  // Host allocator used for wrapper lifetime.
+  iree_allocator_t host_allocator;
+
+  // Underlying device used for files and semaphores.
+  iree_hal_device_t* base_device;
+} failing_queue_read_device_t;
+
+extern const iree_hal_device_vtable_t failing_queue_read_device_vtable;
+
+static failing_queue_read_device_t* failing_queue_read_device_cast(
+    iree_hal_device_t* base_device) {
+  IREE_HAL_ASSERT_TYPE(base_device, &failing_queue_read_device_vtable);
+  return (failing_queue_read_device_t*)base_device;
+}
+
+static void failing_queue_read_device_destroy(iree_hal_device_t* base_device) {
+  failing_queue_read_device_t* device =
+      failing_queue_read_device_cast(base_device);
+  iree_allocator_t host_allocator = device->host_allocator;
+  iree_hal_device_release(device->base_device);
+  iree_allocator_free(host_allocator, device);
+}
+
+static iree_string_view_t failing_queue_read_device_id(
+    iree_hal_device_t* base_device) {
+  (void)base_device;
+  return iree_make_cstring_view("failing-queue-read");
+}
+
+static iree_allocator_t failing_queue_read_device_host_allocator(
+    iree_hal_device_t* base_device) {
+  failing_queue_read_device_t* device =
+      failing_queue_read_device_cast(base_device);
+  return device->host_allocator;
+}
+
+static iree_status_t failing_queue_read_device_import_file(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_memory_access_t access, iree_io_file_handle_t* handle,
+    iree_hal_external_file_flags_t flags, iree_hal_file_t** out_file) {
+  failing_queue_read_device_t* device =
+      failing_queue_read_device_cast(base_device);
+  return iree_hal_file_import(device->base_device, queue_affinity, access,
+                              handle, flags, out_file);
+}
+
+static iree_status_t failing_queue_read_device_create_semaphore(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    uint64_t initial_value, iree_hal_semaphore_flags_t flags,
+    iree_hal_semaphore_t** out_semaphore) {
+  failing_queue_read_device_t* device =
+      failing_queue_read_device_cast(base_device);
+  return iree_hal_semaphore_create(device->base_device, queue_affinity,
+                                   initial_value, flags, out_semaphore);
+}
+
+static iree_hal_semaphore_compatibility_t
+failing_queue_read_device_query_semaphore_compatibility(
+    iree_hal_device_t* base_device, iree_hal_semaphore_t* semaphore) {
+  failing_queue_read_device_t* device =
+      failing_queue_read_device_cast(base_device);
+  return iree_hal_device_query_semaphore_compatibility(device->base_device,
+                                                       semaphore);
+}
+
+static iree_status_t failing_queue_read_device_queue_read(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_file_t* source_file, uint64_t source_offset,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_device_size_t length, iree_hal_read_flags_t flags) {
+  (void)base_device;
+  (void)queue_affinity;
+  (void)wait_semaphore_list;
+  (void)signal_semaphore_list;
+  (void)source_file;
+  (void)source_offset;
+  (void)target_buffer;
+  (void)target_offset;
+  (void)length;
+  (void)flags;
+  return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                          "injected queue_read failure");
+}
+
+const iree_hal_device_vtable_t failing_queue_read_device_vtable = {
+    .destroy = failing_queue_read_device_destroy,
+    .id = failing_queue_read_device_id,
+    .host_allocator = failing_queue_read_device_host_allocator,
+    .import_file = failing_queue_read_device_import_file,
+    .create_semaphore = failing_queue_read_device_create_semaphore,
+    .query_semaphore_compatibility =
+        failing_queue_read_device_query_semaphore_compatibility,
+    .queue_read = failing_queue_read_device_queue_read,
+};
+
+static iree_status_t CreateFailingQueueReadDevice(
+    iree_hal_device_t* base_device, iree_allocator_t host_allocator,
+    iree_hal_device_t** out_device) {
+  *out_device = nullptr;
+  failing_queue_read_device_t* device = nullptr;
+  iree_status_t status =
+      iree_allocator_malloc(host_allocator, sizeof(*device), (void**)&device);
+  if (iree_status_is_ok(status)) {
+    memset(device, 0, sizeof(*device));
+    iree_hal_resource_initialize(&failing_queue_read_device_vtable,
+                                 &device->resource);
+    device->host_allocator = host_allocator;
+    device->base_device = base_device;
+    iree_hal_device_retain(device->base_device);
+    *out_device = (iree_hal_device_t*)device;
+  }
+  return status;
+}
+
 static void UnexpectedStagingCallback(
     void* user_data, iree_hal_remote_server_bulk_staging_slot_t* slot,
     uint64_t signal_value, iree_status_t status) {
   (void)user_data;
-  (void)slot;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INTERNAL, status);
   iree_hal_remote_server_bulk_staging_slot_release(slot, signal_value);
 }
@@ -360,16 +479,39 @@ class BulkUploadReceiverSessionTest : public ::testing::Test {
   }
 
   iree_status_t AttachReadyCommand(iree_net_bulk_transfer_t* table_transfer) {
+    return AttachReadyCommand(table_transfer, device_,
+                              iree_hal_semaphore_list_empty());
+  }
+
+  iree_status_t AttachReadyCommand(iree_net_bulk_transfer_t* table_transfer,
+                                   iree_hal_device_t* local_device,
+                                   iree_hal_semaphore_list_t signal_list) {
+    return AttachReadyCommand(table_transfer, local_device, signal_list,
+                              /*response_envelope=*/nullptr);
+  }
+
+  iree_status_t AttachReadyControlResponse(
+      iree_net_bulk_transfer_t* table_transfer,
+      const iree_hal_remote_control_envelope_t* response_envelope) {
+    return AttachReadyCommand(table_transfer, device_,
+                              iree_hal_semaphore_list_empty(),
+                              response_envelope);
+  }
+
+  iree_status_t AttachReadyCommand(
+      iree_net_bulk_transfer_t* table_transfer, iree_hal_device_t* local_device,
+      iree_hal_semaphore_list_t signal_list,
+      const iree_hal_remote_control_envelope_t* response_envelope) {
     iree_hal_semaphore_t* ready_semaphore = nullptr;
     iree_status_t status = iree_hal_semaphore_create(
-        device_, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/1,
+        local_device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/1,
         IREE_HAL_SEMAPHORE_FLAG_NONE, &ready_semaphore);
     iree_hal_remote_server_bulk_upload_ready_t* ready_context = nullptr;
     if (iree_status_is_ok(status)) {
       status = iree_hal_remote_server_bulk_upload_attach_command_locked(
-          &session_, table_transfer, device_, iree_hal_semaphore_list_empty(),
+          &session_, table_transfer, local_device, signal_list,
           /*target_buffer=*/nullptr, /*target_offset=*/0, &ready_semaphore,
-          &ready_context, /*response_envelope=*/nullptr);
+          &ready_context, response_envelope);
     }
     iree_hal_semaphore_release(ready_semaphore);
     iree_hal_remote_server_bulk_upload_ready_release(ready_context);
@@ -444,6 +586,83 @@ TEST_F(BulkUploadReceiverSessionTest,
   EXPECT_EQ(iree_net_bulk_receive_window_count(session_.bulk_receive_window),
             0u);
   EXPECT_EQ(lease_release_count_, 1);
+}
+
+TEST_F(BulkUploadReceiverSessionTest,
+       ControlResponseSendFailureReleasesTransfer) {
+  iree_slim_mutex_lock(&session_.bulk_transfer_mutex);
+  iree_net_bulk_transfer_t* table_transfer = nullptr;
+  IREE_ASSERT_OK(StartUpload(&table_transfer));
+  ASSERT_NE(table_transfer, nullptr);
+  iree_hal_remote_control_envelope_t response_envelope = {};
+  response_envelope.message_type = IREE_HAL_REMOTE_CONTROL_BUFFER_UNMAP;
+  response_envelope.request_id = 7;
+  IREE_ASSERT_OK(
+      AttachReadyControlResponse(table_transfer, &response_envelope));
+
+  iree_hal_remote_server_bulk_upload_transfer_t* transfer =
+      iree_hal_remote_server_bulk_upload_transfer_storage(table_transfer);
+  IREE_ASSERT_OK(iree_hal_remote_server_bulk_upload_transfer_record_data(
+      transfer, kTransferId, kTotalLength, /*chunk_offset=*/0, kChunkLength,
+      IREE_NET_BULK_FRAME_FLAG_FINAL_CHUNK));
+  IREE_ASSERT_OK(iree_hal_remote_server_bulk_upload_transfer_mark_peer_complete(
+      transfer, kTransferId));
+
+  session_.session = nullptr;
+  iree_hal_remote_server_bulk_upload_try_finish_locked(&session_,
+                                                       table_transfer);
+  iree_slim_mutex_unlock(&session_.bulk_transfer_mutex);
+
+  EXPECT_EQ(iree_hal_remote_bulk_transfer_scheduler_count(
+                session_.bulk_transfer_scheduler),
+            0u);
+}
+
+TEST_F(BulkUploadReceiverSessionTest, QueueReadFailureFailsSignalSemaphore) {
+  iree_hal_device_t* failing_device = nullptr;
+  IREE_ASSERT_OK(CreateFailingQueueReadDevice(device_, iree_allocator_system(),
+                                              &failing_device));
+
+  iree_hal_semaphore_t* signal_semaphore = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      failing_device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      IREE_HAL_SEMAPHORE_FLAG_NONE, &signal_semaphore));
+  uint64_t signal_value = 1;
+  iree_hal_semaphore_t* signal_semaphores[] = {signal_semaphore};
+  iree_hal_semaphore_list_t signal_list = {
+      IREE_ARRAYSIZE(signal_semaphores),
+      signal_semaphores,
+      &signal_value,
+  };
+
+  iree_slim_mutex_lock(&session_.bulk_transfer_mutex);
+  iree_net_bulk_transfer_t* table_transfer = nullptr;
+  IREE_ASSERT_OK(StartUpload(&table_transfer));
+  ASSERT_NE(table_transfer, nullptr);
+  IREE_ASSERT_OK(
+      AttachReadyCommand(table_transfer, failing_device, signal_list));
+  iree_async_buffer_lease_t lease = MakeCountingLease(&lease_release_count_);
+  IREE_ASSERT_OK(RecordData(IREE_NET_BULK_FRAME_FLAG_FINAL_CHUNK, &lease));
+  iree_slim_mutex_unlock(&session_.bulk_transfer_mutex);
+
+  EXPECT_EQ(iree_hal_remote_bulk_transfer_scheduler_count(
+                session_.bulk_transfer_scheduler),
+            0u);
+  EXPECT_EQ(iree_hal_remote_server_bulk_staging_pool_count(
+                session_.bulk_staging_pool),
+            0u);
+  EXPECT_EQ(iree_net_bulk_receive_window_count(session_.bulk_receive_window),
+            0u);
+  EXPECT_EQ(lease.release.fn, nullptr);
+  EXPECT_EQ(lease_release_count_, 1);
+
+  uint64_t current_value = 0;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNAVAILABLE,
+      iree_hal_semaphore_query(signal_semaphore, &current_value));
+
+  iree_hal_semaphore_release(signal_semaphore);
+  iree_hal_device_release(failing_device);
 }
 
 TEST_F(BulkUploadReceiverSessionTest, PeerAbortReleasesRetainedChunks) {
