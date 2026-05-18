@@ -134,6 +134,12 @@ TEST_P(BeginSendTest, Backpressure) {
 
   ActivateBoth(MakeNullRecvHandler(), server_capture.AsHandler());
 
+  iree_net_carrier_send_budget_t initial =
+      iree_net_carrier_query_send_budget(client_);
+  if (initial.slots >= 1000000) {
+    GTEST_SKIP() << "Carrier has effectively unlimited budget";
+  }
+
   // Fill the transport with committed sends until exhausted.
   const iree_host_size_t kChunkSize = 256;
   int committed_count = 0;

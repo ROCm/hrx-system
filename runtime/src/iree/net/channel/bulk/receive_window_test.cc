@@ -63,6 +63,12 @@ static iree_net_bulk_receive_window_callbacks_t MakeCallbacks(
   return callbacks;
 }
 
+static void RecordVisitedTransfer(void* user_data,
+                                  iree_net_bulk_chunk_t* chunk) {
+  auto* transfers = static_cast<std::vector<uint64_t>*>(user_data);
+  transfers->push_back(iree_net_bulk_chunk_transfer_id(chunk));
+}
+
 class ReceiveWindowTest : public ::testing::Test {
  protected:
   void TearDown() override {
@@ -195,6 +201,37 @@ TEST_F(ReceiveWindowTest, AcquireConsumesCreditAndReleaseQueuesCredit) {
   EXPECT_EQ(iree_net_bulk_receive_window_advertised_credit_count(window_), 2u);
   EXPECT_EQ(iree_net_bulk_receive_window_unadvertised_credit_count(window_),
             0u);
+}
+
+TEST_F(ReceiveWindowTest, VisitChunksReportsRetainedChunks) {
+  AllocateWindow(/*capacity=*/2);
+  IREE_ASSERT_OK(iree_net_bulk_receive_window_flush_credit(window_));
+
+  uint8_t payload_bytes[] = {0x10};
+  iree_const_byte_span_t payload =
+      iree_make_const_byte_span(payload_bytes, sizeof(payload_bytes));
+  LeaseReleaseLog release_log;
+  iree_async_buffer_lease_t first_lease = MakeLease(&release_log, 1);
+  iree_async_buffer_lease_t second_lease = MakeLease(&release_log, 2);
+
+  iree_net_bulk_chunk_t* first_chunk = nullptr;
+  IREE_ASSERT_OK(iree_net_bulk_receive_window_acquire_chunk(
+      window_, /*transfer_id=*/42, /*chunk_offset=*/0, /*sequence=*/0,
+      IREE_NET_BULK_FRAME_FLAG_NONE, payload, &first_lease,
+      /*user_value=*/0, &first_chunk));
+  iree_net_bulk_chunk_t* second_chunk = nullptr;
+  IREE_ASSERT_OK(iree_net_bulk_receive_window_acquire_chunk(
+      window_, /*transfer_id=*/43, /*chunk_offset=*/0, /*sequence=*/0,
+      IREE_NET_BULK_FRAME_FLAG_NONE, payload, &second_lease,
+      /*user_value=*/0, &second_chunk));
+
+  std::vector<uint64_t> transfers;
+  iree_net_bulk_receive_window_visit_chunks(window_, RecordVisitedTransfer,
+                                            &transfers);
+  EXPECT_THAT(transfers, ::testing::UnorderedElementsAre(42u, 43u));
+
+  iree_net_bulk_receive_window_release_chunk(window_, first_chunk);
+  iree_net_bulk_receive_window_release_chunk(window_, second_chunk);
 }
 
 TEST_F(ReceiveWindowTest, DataBeyondCreditDoesNotStealLease) {

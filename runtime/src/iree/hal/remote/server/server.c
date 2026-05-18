@@ -348,9 +348,11 @@ static int32_t iree_hal_remote_server_find_free_slot(
   for (uint32_t i = 0; i < server->options.max_connections; ++i) {
     if (!server->sessions[i].session && !server->sessions[i].queue_channel &&
         !server->sessions[i].bulk_channel &&
-        !server->sessions[i].bulk_transfers &&
+        !server->sessions[i].bulk_transfer_scheduler &&
         !server->sessions[i].bulk_staging_pool &&
-        !server->sessions[i].bulk_receive_chunks &&
+        !server->sessions[i].bulk_receive_window &&
+        !server->sessions[i].profile_pending_transfer_head &&
+        !server->sessions[i].profile_pending_transfer_tail &&
         !server->sessions[i].profile_sink &&
         !server->sessions[i].profile_ack_window.storage &&
         server->sessions[i].profile_transfer_failure_code == IREE_STATUS_OK &&

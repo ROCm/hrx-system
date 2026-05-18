@@ -11,11 +11,6 @@
 static_assert(sizeof(uintptr_t) <= sizeof(iree_net_carrier_send_handle_t),
               "send handle cannot round-trip pending send pointers");
 
-// Maximum concurrent loopback sends per carrier. This is an explicit async
-// delivery budget: begin_send reserves one slot so commit_send cannot discover
-// proactor backpressure after the caller has already written the payload.
-#define IREE_NET_LOOPBACK_SEND_SLOT_COUNT 32
-
 // A pending send operation awaiting delivery during the next poll() cycle. The
 // trailing storage contains the payload copied from send() or written by
 // begin_send() before commit_send().
@@ -228,7 +223,6 @@ static iree_status_t iree_net_loopback_carrier_begin_send_operation(
                         iree_memory_order_acq_rel);
 
   iree_status_t status = iree_ok_status();
-  bool send_slot_reserved = false;
   iree_net_carrier_state_t state = iree_net_carrier_state(base_carrier);
   if (state != IREE_NET_CARRIER_STATE_ACTIVE) {
     status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
@@ -242,24 +236,11 @@ static iree_status_t iree_net_loopback_carrier_begin_send_operation(
     status = iree_make_status(IREE_STATUS_UNAVAILABLE, "peer disconnected");
   }
   if (iree_status_is_ok(status)) {
-    int32_t previous_count = iree_atomic_fetch_add(&carrier->sends_in_flight, 1,
-                                                   iree_memory_order_acq_rel);
-    if (previous_count >= IREE_NET_LOOPBACK_SEND_SLOT_COUNT) {
-      iree_atomic_fetch_sub(&carrier->sends_in_flight, 1,
-                            iree_memory_order_release);
-      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                                "loopback send slots exhausted (%d in flight)",
-                                IREE_NET_LOOPBACK_SEND_SLOT_COUNT);
-    } else {
-      send_slot_reserved = true;
-    }
+    iree_atomic_fetch_add(&carrier->sends_in_flight, 1,
+                          iree_memory_order_acq_rel);
   }
 
   if (!iree_status_is_ok(status)) {
-    if (send_slot_reserved) {
-      iree_atomic_fetch_sub(&carrier->sends_in_flight, 1,
-                            iree_memory_order_release);
-    }
     iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
                           iree_memory_order_release);
     iree_net_loopback_carrier_maybe_complete_deactivation(carrier);
@@ -470,16 +451,9 @@ iree_net_loopback_carrier_query_send_budget(iree_net_carrier_t* base_carrier) {
     return budget;
   }
 
-  int32_t sends_in_flight =
-      iree_atomic_load(&carrier->sends_in_flight, iree_memory_order_acquire);
-  uint32_t available_slots =
-      sends_in_flight >= IREE_NET_LOOPBACK_SEND_SLOT_COUNT
-          ? 0
-          : (uint32_t)(IREE_NET_LOOPBACK_SEND_SLOT_COUNT - sends_in_flight);
-
   iree_net_carrier_send_budget_t budget;
-  budget.slots = available_slots;
-  budget.bytes = available_slots > 0 ? IREE_HOST_SIZE_MAX : 0;
+  budget.slots = UINT32_MAX;
+  budget.bytes = IREE_HOST_SIZE_MAX;
   return budget;
 }
 

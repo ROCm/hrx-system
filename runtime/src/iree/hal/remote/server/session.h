@@ -11,6 +11,7 @@
 #include "iree/base/api.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/hal/api.h"
+#include "iree/hal/remote/server/bulk_router.h"
 #include "iree/hal/remote/server/resource_table.h"
 #include "iree/net/channel/queue/queue_channel.h"
 #include "iree/net/channel/util/sequence_window.h"
@@ -25,9 +26,12 @@ typedef struct iree_hal_remote_control_envelope_t
     iree_hal_remote_control_envelope_t;
 typedef struct iree_hal_remote_server_bulk_staging_pool_t
     iree_hal_remote_server_bulk_staging_pool_t;
+typedef struct iree_hal_remote_server_profile_pending_transfer_t
+    iree_hal_remote_server_profile_pending_transfer_t;
+typedef struct iree_hal_remote_bulk_transfer_scheduler_t
+    iree_hal_remote_bulk_transfer_scheduler_t;
 typedef struct iree_net_bulk_channel_t iree_net_bulk_channel_t;
-typedef struct iree_net_bulk_chunk_pool_t iree_net_bulk_chunk_pool_t;
-typedef struct iree_net_bulk_transfer_table_t iree_net_bulk_transfer_table_t;
+typedef struct iree_net_bulk_receive_window_t iree_net_bulk_receive_window_t;
 typedef struct iree_hal_remote_server_pending_queue_command_t
     iree_hal_remote_server_pending_queue_command_t;
 
@@ -79,17 +83,30 @@ typedef struct iree_hal_remote_server_session_t {
   // Bulk channel for large payload transfers (NULL until bulk endpoint opens).
   iree_net_bulk_channel_t* bulk_channel;
 
+  // Bulk channel callback router bound to this session slot.
+  iree_hal_remote_server_bulk_router_t bulk_router;
+
   // Protects active bulk transfer state.
   iree_slim_mutex_t bulk_transfer_mutex;
 
-  // Fixed-capacity table of active bulk transfers.
-  iree_net_bulk_transfer_table_t* bulk_transfers;
+  // Active bulk transfer scheduler and lifecycle owner.
+  iree_hal_remote_bulk_transfer_scheduler_t* bulk_transfer_scheduler;
 
   // Reusable host staging slots for server-to-client bulk queue writes.
   iree_hal_remote_server_bulk_staging_pool_t* bulk_staging_pool;
 
-  // Fixed-capacity retained receive chunks for client-to-server bulk uploads.
-  iree_net_bulk_chunk_pool_t* bulk_receive_chunks;
+  // Receive window retaining client-to-server DATA chunks and CREDIT state.
+  iree_net_bulk_receive_window_t* bulk_receive_window;
+
+  // FIFO head of server-originated profile transfers awaiting transfer
+  // capacity. Protected by bulk_transfer_mutex.
+  iree_hal_remote_server_profile_pending_transfer_t*
+      profile_pending_transfer_head;
+
+  // FIFO tail of server-originated profile transfers awaiting transfer
+  // capacity. Protected by bulk_transfer_mutex.
+  iree_hal_remote_server_profile_pending_transfer_t*
+      profile_pending_transfer_tail;
 
   // Active server-created profile sink for the session, or NULL when no
   // HAL-native profiling session is active. Protected by server->session_mutex.

@@ -163,6 +163,14 @@ bool iree_net_bulk_receive_window_should_flush_credit(
   return window->unadvertised_credit_count >= window->credit_batch_threshold;
 }
 
+void iree_net_bulk_receive_window_visit_chunks(
+    iree_net_bulk_receive_window_t* window,
+    iree_net_bulk_chunk_visit_fn_t visitor, void* user_data) {
+  IREE_ASSERT_ARGUMENT(window);
+  iree_net_bulk_receive_window_assert_invariants(window);
+  iree_net_bulk_chunk_pool_visit(window->chunk_pool, visitor, user_data);
+}
+
 iree_status_t iree_net_bulk_receive_window_flush_credit(
     iree_net_bulk_receive_window_t* window) {
   IREE_ASSERT_ARGUMENT(window);

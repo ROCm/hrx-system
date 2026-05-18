@@ -11,6 +11,70 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
+    bulk_channel_writer
+  HDRS
+    "bulk_channel_writer.h"
+  SRCS
+    "bulk_channel_writer.c"
+  DEPS
+    iree::base
+    iree::net::channel::bulk::bulk_channel
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    bulk_channel_writer_test
+  SRCS
+    "bulk_channel_writer_test.cc"
+  DEPS
+    ::bulk_channel_writer
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_library(
+  NAME
+    bulk_transfer_scheduler
+  HDRS
+    "bulk_transfer_scheduler.h"
+  SRCS
+    "bulk_transfer_scheduler.c"
+  DEPS
+    iree::base
+    iree::net::channel::bulk::transfer_table
+  PUBLIC
+)
+
+iree_cc_binary_benchmark(
+  NAME
+    bulk_transfer_scheduler_benchmark
+  SRCS
+    "bulk_transfer_scheduler_benchmark.cc"
+  DEPS
+    ::bulk_transfer_scheduler
+    iree::base
+    iree::testing::benchmark
+    iree::testing::benchmark_main
+    iree::third_party::google_benchmark
+  TESTONLY
+)
+
+iree_cc_test(
+  NAME
+    bulk_transfer_scheduler_test
+  SRCS
+    "bulk_transfer_scheduler_test.cc"
+  DEPS
+    ::bulk_transfer_scheduler
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_library(
+  NAME
     bulk_transfer_tracker
   HDRS
     "bulk_transfer_tracker.h"

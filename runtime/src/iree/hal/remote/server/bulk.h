@@ -61,11 +61,16 @@ iree_status_t iree_hal_remote_server_bulk_submit_client_file_write(
     iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
     iree_device_size_t length, iree_hal_write_flags_t flags);
 
-// Submits one server-to-client profile callback payload.
+// Submits one server-to-client profile callback payload. If active transfer
+// capacity is exhausted, the payload may be queued until a transfer retires.
 // Consumes |payload| regardless of the result.
 iree_status_t iree_hal_remote_server_bulk_submit_profile_transfer(
     iree_hal_remote_server_session_t* session_slot, uint64_t session_id,
     iree_hal_profile_sink_t* profile_sink, iree_byte_span_t payload);
+
+// Flushes any unadvertised local receive capacity to the peer.
+iree_status_t iree_hal_remote_server_bulk_flush_receive_window(
+    iree_hal_remote_server_session_t* session_slot);
 
 // Handles a peer START frame.
 iree_status_t iree_hal_remote_server_bulk_on_start(

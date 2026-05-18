@@ -92,6 +92,14 @@ uint32_t iree_net_bulk_receive_window_unadvertised_credit_count(
 bool iree_net_bulk_receive_window_should_flush_credit(
     const iree_net_bulk_receive_window_t* window);
 
+// Visits all currently retained DATA chunks in unspecified order.
+//
+// The visitor must not mutate |window|. Use this for scheduling decisions or
+// to collect chunks for later release outside the visit.
+void iree_net_bulk_receive_window_visit_chunks(
+    iree_net_bulk_receive_window_t* window,
+    iree_net_bulk_chunk_visit_fn_t visitor, void* user_data);
+
 // Sends all currently unadvertised local receive credits.
 //
 // If the send path returns RESOURCE_EXHAUSTED, credit remains unadvertised and
