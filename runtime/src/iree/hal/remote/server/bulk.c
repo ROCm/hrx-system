@@ -9,13 +9,13 @@
 #include "iree/async/semaphore.h"
 #include "iree/hal/remote/protocol/control.h"
 #include "iree/hal/remote/protocol/profile.h"
+#include "iree/hal/remote/server/bulk_staging_pool.h"
 #include "iree/hal/remote/server/profile.h"
 #include "iree/hal/remote/server/server.h"
 #include "iree/hal/remote/server/session.h"
 #include "iree/hal/remote/util/bulk_channel_writer.h"
 #include "iree/hal/remote/util/bulk_transfer_scheduler.h"
 #include "iree/hal/remote/util/bulk_transfer_tracker.h"
-#include "iree/io/file_handle.h"
 #include "iree/net/channel/bulk/chunk_pool.h"
 #include "iree/net/channel/bulk/receive_window.h"
 
@@ -27,26 +27,8 @@
 #define IREE_HAL_REMOTE_BULK_STAGING_SLOT_COUNT \
   IREE_HAL_REMOTE_BULK_ACTIVE_TRANSFER_CAPACITY
 
-// Host allocation wrapped as a HAL memory file for local queue_write staging.
-typedef struct iree_hal_remote_server_bulk_host_allocation_t {
-  // Host allocator used to free this allocation.
-  iree_allocator_t host_allocator;
-
-  // Byte-addressable file contents.
-  uint8_t data[];
-} iree_hal_remote_server_bulk_host_allocation_t;
-
 typedef struct iree_hal_remote_server_client_file_read_ready_t
     iree_hal_remote_server_client_file_read_ready_t;
-typedef struct iree_hal_remote_server_bulk_staging_pool_t
-    iree_hal_remote_server_bulk_staging_pool_t;
-typedef struct iree_hal_remote_server_bulk_staging_slot_t
-    iree_hal_remote_server_bulk_staging_slot_t;
-
-typedef uint8_t iree_hal_remote_server_bulk_staging_slot_flags_t;
-enum iree_hal_remote_server_bulk_staging_slot_flag_bits_e {
-  IREE_HAL_REMOTE_SERVER_BULK_STAGING_SLOT_FLAG_IN_USE = 1u << 0,
-};
 
 typedef uint8_t iree_hal_remote_server_client_file_read_transfer_flags_t;
 enum iree_hal_remote_server_client_file_read_transfer_flag_bits_e {
@@ -108,6 +90,20 @@ typedef struct iree_hal_remote_server_client_file_read_transfer_t {
   iree_hal_remote_server_client_file_read_transfer_flags_t flags;
 } iree_hal_remote_server_client_file_read_transfer_t;
 
+typedef struct iree_hal_remote_server_client_file_read_staging_callback_t {
+  // Server retained while the staging slot timepoint may fire.
+  iree_hal_remote_server_t* server;
+
+  // Session slot that owned the callback transfer when submitted.
+  iree_hal_remote_server_session_t* session_slot;
+
+  // Session ID expected in |session_slot| when the callback fires.
+  uint64_t session_id;
+
+  // Bulk transfer ID to resume after local queue read completion.
+  uint64_t transfer_id;
+} iree_hal_remote_server_client_file_read_staging_callback_t;
+
 typedef struct iree_hal_remote_server_client_file_write_ready_t
     iree_hal_remote_server_client_file_write_ready_t;
 
@@ -163,10 +159,7 @@ typedef struct iree_hal_remote_server_client_file_write_transfer_t {
   // Queue write flags provided by the remote command.
   iree_hal_write_flags_t write_flags;
 
-  // Session staging pool borrowed while |staging_slot| is acquired.
-  iree_hal_remote_server_bulk_staging_pool_t* staging_pool;
-
-  // Acquired staging slot returned to |staging_pool| at transfer teardown.
+  // Acquired staging slot returned at transfer teardown.
   iree_hal_remote_server_bulk_staging_slot_t* staging_slot;
 
   // Server-side memory file borrowed from |staging_slot|.
@@ -348,300 +341,6 @@ iree_hal_remote_server_client_file_write_storage(
               ->client_file_write;
 }
 
-static void iree_hal_remote_server_bulk_host_allocation_release(
-    void* user_data, iree_io_file_handle_primitive_t handle_primitive) {
-  (void)user_data;
-  IREE_ASSERT(handle_primitive.type ==
-              IREE_IO_FILE_HANDLE_TYPE_HOST_ALLOCATION);
-  iree_byte_span_t host_allocation = handle_primitive.value.host_allocation;
-  if (!host_allocation.data) return;
-  iree_hal_remote_server_bulk_host_allocation_t* allocation =
-      (iree_hal_remote_server_bulk_host_allocation_t*)(host_allocation.data -
-                                                       sizeof(*allocation));
-  iree_allocator_t host_allocator = allocation->host_allocator;
-  iree_allocator_free(host_allocator, allocation);
-}
-
-static void iree_hal_remote_server_bulk_host_contents_free(
-    iree_byte_span_t host_contents) {
-  if (!host_contents.data) return;
-  iree_hal_remote_server_bulk_host_allocation_t* allocation =
-      (iree_hal_remote_server_bulk_host_allocation_t*)(host_contents.data -
-                                                       sizeof(*allocation));
-  iree_allocator_t host_allocator = allocation->host_allocator;
-  iree_allocator_free(host_allocator, allocation);
-}
-
-static iree_status_t iree_hal_remote_server_bulk_host_contents_allocate(
-    iree_host_size_t allocation_size, iree_allocator_t host_allocator,
-    iree_byte_span_t* out_host_contents) {
-  *out_host_contents = iree_byte_span_empty();
-
-  iree_host_size_t total_size = 0;
-  iree_host_size_t data_offset = 0;
-  iree_status_t status = IREE_STRUCT_LAYOUT(
-      sizeof(iree_hal_remote_server_bulk_host_allocation_t), &total_size,
-      IREE_STRUCT_FIELD(allocation_size, uint8_t, &data_offset));
-
-  iree_hal_remote_server_bulk_host_allocation_t* allocation = NULL;
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_allocator_malloc(host_allocator, total_size, (void**)&allocation);
-  }
-
-  if (iree_status_is_ok(status)) {
-    allocation->host_allocator = host_allocator;
-    iree_byte_span_t host_contents = iree_make_byte_span(
-        (uint8_t*)allocation + data_offset, allocation_size);
-    *out_host_contents = host_contents;
-  }
-  return status;
-}
-
-static iree_status_t iree_hal_remote_server_bulk_host_allocation_create(
-    iree_host_size_t allocation_size, iree_allocator_t host_allocator,
-    iree_byte_span_t* out_host_contents,
-    iree_io_file_handle_t** out_file_handle) {
-  *out_file_handle = NULL;
-  iree_status_t status = iree_hal_remote_server_bulk_host_contents_allocate(
-      allocation_size, host_allocator, out_host_contents);
-
-  iree_io_file_handle_release_callback_t release_callback = {
-      .fn = iree_hal_remote_server_bulk_host_allocation_release,
-      .user_data = NULL,
-  };
-  if (iree_status_is_ok(status)) {
-    status = iree_io_file_handle_wrap_host_allocation(
-        IREE_IO_FILE_ACCESS_READ | IREE_IO_FILE_ACCESS_WRITE,
-        *out_host_contents, release_callback, host_allocator, out_file_handle);
-  }
-  if (!iree_status_is_ok(status)) {
-    iree_hal_remote_server_bulk_host_contents_free(*out_host_contents);
-    *out_host_contents = iree_byte_span_empty();
-  }
-  return status;
-}
-
-struct iree_hal_remote_server_bulk_staging_slot_t {
-  // Owning staging pool retained while callbacks may reference this slot.
-  iree_hal_remote_server_bulk_staging_pool_t* pool;
-
-  // Local device this slot's HAL file and semaphore are bound to.
-  iree_hal_device_t* local_device;
-
-  // Imported HAL memory file wrapping |file_handle| for |local_device|.
-  iree_hal_file_t* file;
-
-  // Local semaphore sequencing queue writes into |file|.
-  iree_hal_semaphore_t* semaphore;
-
-  // Host allocation file handle for |contents|.
-  iree_io_file_handle_t* file_handle;
-
-  // Host bytes exposed through |file_handle|.
-  iree_byte_span_t contents;
-
-  // Last payload value signaled on |semaphore|.
-  uint64_t last_signal_value;
-
-  // Payload value for the active callback timepoint.
-  uint64_t callback_signal_value;
-
-  // Timepoint registered on |semaphore| for a local queue read chunk.
-  iree_async_semaphore_timepoint_t callback_timepoint;
-
-  // Server retained while |callback_timepoint| may fire.
-  iree_hal_remote_server_t* callback_server;
-
-  // Session slot that owned the callback transfer when submitted.
-  iree_hal_remote_server_session_t* callback_session_slot;
-
-  // Session ID expected in |callback_session_slot| when the callback fires.
-  uint64_t callback_session_id;
-
-  // Bulk transfer ID to resume after local queue read completion.
-  uint64_t callback_transfer_id;
-
-  // State bits from iree_hal_remote_server_bulk_staging_slot_flag_bits_e.
-  iree_hal_remote_server_bulk_staging_slot_flags_t flags;
-};
-
-struct iree_hal_remote_server_bulk_staging_pool_t {
-  // Reference count for pool lifetime management.
-  iree_atomic_ref_count_t ref_count;
-
-  // Host allocator used for pool and slot storage.
-  iree_allocator_t host_allocator;
-
-  // Number of entries in |slots|.
-  iree_host_size_t slot_count;
-
-  // Byte length of each slot allocation.
-  iree_host_size_t slot_length;
-
-  // FAM: staging slots.
-  iree_hal_remote_server_bulk_staging_slot_t slots[];
-};
-
-static void iree_hal_remote_server_bulk_staging_pool_retain(
-    iree_hal_remote_server_bulk_staging_pool_t* pool) {
-  if (!pool) return;
-  iree_atomic_ref_count_inc(&pool->ref_count);
-}
-
-static void iree_hal_remote_server_bulk_staging_slot_deinitialize(
-    iree_hal_remote_server_bulk_staging_slot_t* slot) {
-  iree_hal_remote_server_release(slot->callback_server);
-  iree_hal_semaphore_release(slot->semaphore);
-  iree_hal_file_release(slot->file);
-  iree_io_file_handle_release(slot->file_handle);
-  iree_hal_device_release(slot->local_device);
-  memset(slot, 0, sizeof(*slot));
-}
-
-static void iree_hal_remote_server_bulk_staging_pool_destroy(
-    iree_hal_remote_server_bulk_staging_pool_t* pool) {
-  if (!pool) return;
-  iree_allocator_t host_allocator = pool->host_allocator;
-  for (iree_host_size_t i = 0; i < pool->slot_count; ++i) {
-    iree_hal_remote_server_bulk_staging_slot_deinitialize(&pool->slots[i]);
-  }
-  iree_allocator_free(host_allocator, pool);
-}
-
-static void iree_hal_remote_server_bulk_staging_pool_release(
-    iree_hal_remote_server_bulk_staging_pool_t* pool) {
-  if (pool && iree_atomic_ref_count_dec(&pool->ref_count) == 1) {
-    iree_hal_remote_server_bulk_staging_pool_destroy(pool);
-  }
-}
-
-static iree_status_t iree_hal_remote_server_bulk_staging_pool_create(
-    iree_host_size_t slot_count, iree_host_size_t slot_length,
-    iree_allocator_t host_allocator,
-    iree_hal_remote_server_bulk_staging_pool_t** out_pool) {
-  *out_pool = NULL;
-
-  iree_host_size_t total_size = 0;
-  iree_status_t status = IREE_STRUCT_LAYOUT(
-      sizeof(iree_hal_remote_server_bulk_staging_pool_t), &total_size,
-      IREE_STRUCT_FIELD_FAM(slot_count,
-                            iree_hal_remote_server_bulk_staging_slot_t));
-
-  iree_hal_remote_server_bulk_staging_pool_t* pool = NULL;
-  if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc(host_allocator, total_size, (void**)&pool);
-  }
-  if (iree_status_is_ok(status)) {
-    memset(pool, 0, total_size);
-    iree_atomic_ref_count_init(&pool->ref_count);
-    pool->host_allocator = host_allocator;
-    pool->slot_count = slot_count;
-    pool->slot_length = slot_length;
-  }
-
-  for (iree_host_size_t i = 0; i < slot_count && iree_status_is_ok(status);
-       ++i) {
-    pool->slots[i].pool = pool;
-    status = iree_hal_remote_server_bulk_host_allocation_create(
-        slot_length, host_allocator, &pool->slots[i].contents,
-        &pool->slots[i].file_handle);
-  }
-
-  if (iree_status_is_ok(status)) {
-    *out_pool = pool;
-  } else {
-    iree_hal_remote_server_bulk_staging_pool_destroy(pool);
-  }
-  return status;
-}
-
-static void iree_hal_remote_server_bulk_staging_slot_unbind(
-    iree_hal_remote_server_bulk_staging_slot_t* slot) {
-  iree_hal_semaphore_release(slot->semaphore);
-  slot->semaphore = NULL;
-  iree_hal_file_release(slot->file);
-  slot->file = NULL;
-  iree_hal_device_release(slot->local_device);
-  slot->local_device = NULL;
-  slot->last_signal_value = 0;
-}
-
-static iree_status_t iree_hal_remote_server_bulk_staging_slot_bind(
-    iree_hal_remote_server_bulk_staging_slot_t* slot,
-    iree_hal_device_t* local_device) {
-  if (slot->local_device == local_device && slot->file && slot->semaphore) {
-    return iree_ok_status();
-  }
-
-  iree_hal_remote_server_bulk_staging_slot_unbind(slot);
-  iree_hal_device_retain(local_device);
-  slot->local_device = local_device;
-
-  iree_status_t status = iree_hal_file_import(
-      local_device, IREE_HAL_QUEUE_AFFINITY_ANY,
-      IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
-      slot->file_handle, IREE_HAL_EXTERNAL_FILE_FLAG_NONE, &slot->file);
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_semaphore_create(
-        local_device, IREE_HAL_QUEUE_AFFINITY_ANY,
-        /*initial_value=*/0, IREE_HAL_SEMAPHORE_FLAG_NONE, &slot->semaphore);
-  }
-  if (!iree_status_is_ok(status)) {
-    iree_hal_remote_server_bulk_staging_slot_unbind(slot);
-  }
-  return status;
-}
-
-static iree_status_t iree_hal_remote_server_bulk_staging_pool_try_acquire(
-    iree_hal_remote_server_bulk_staging_pool_t* pool,
-    iree_hal_device_t* local_device,
-    iree_hal_remote_server_bulk_staging_slot_t** out_slot) {
-  *out_slot = NULL;
-  for (iree_host_size_t i = 0; i < pool->slot_count; ++i) {
-    iree_hal_remote_server_bulk_staging_slot_t* slot = &pool->slots[i];
-    if (iree_any_bit_set(
-            slot->flags,
-            IREE_HAL_REMOTE_SERVER_BULK_STAGING_SLOT_FLAG_IN_USE)) {
-      continue;
-    }
-    IREE_RETURN_IF_ERROR(
-        iree_hal_remote_server_bulk_staging_slot_bind(slot, local_device));
-    slot->flags |= IREE_HAL_REMOTE_SERVER_BULK_STAGING_SLOT_FLAG_IN_USE;
-    *out_slot = slot;
-    return iree_ok_status();
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t iree_hal_remote_server_bulk_staging_pool_acquire(
-    iree_hal_remote_server_bulk_staging_pool_t* pool,
-    iree_hal_device_t* local_device,
-    iree_hal_remote_server_bulk_staging_slot_t** out_slot) {
-  IREE_RETURN_IF_ERROR(iree_hal_remote_server_bulk_staging_pool_try_acquire(
-      pool, local_device, out_slot));
-  if (*out_slot) return iree_ok_status();
-  return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                          "no remote bulk staging slots available");
-}
-
-static void iree_hal_remote_server_bulk_staging_pool_release_slot(
-    iree_hal_remote_server_bulk_staging_pool_t* pool,
-    iree_hal_remote_server_bulk_staging_slot_t* slot,
-    uint64_t last_signal_value) {
-  (void)pool;
-  if (!slot) return;
-  slot->last_signal_value = last_signal_value;
-  slot->callback_signal_value = 0;
-  memset(&slot->callback_timepoint, 0, sizeof(slot->callback_timepoint));
-  iree_hal_remote_server_release(slot->callback_server);
-  slot->callback_server = NULL;
-  slot->callback_session_slot = NULL;
-  slot->callback_session_id = 0;
-  slot->callback_transfer_id = 0;
-  slot->flags &= ~IREE_HAL_REMOTE_SERVER_BULK_STAGING_SLOT_FLAG_IN_USE;
-}
-
 static void iree_hal_remote_server_client_file_read_ready_context_release(
     iree_hal_remote_server_client_file_read_ready_t* context);
 
@@ -653,8 +352,8 @@ static void iree_hal_remote_server_client_file_read_ready_callback(
     iree_status_t status);
 
 static void iree_hal_remote_server_client_file_read_chunk_callback(
-    void* user_data, iree_async_semaphore_timepoint_t* timepoint,
-    iree_status_t status);
+    void* user_data, iree_hal_remote_server_bulk_staging_slot_t* staging_slot,
+    uint64_t signal_value, iree_status_t status);
 
 static void iree_hal_remote_server_session_try_complete_bulk_drain(
     iree_hal_remote_server_session_t* session_slot);
@@ -865,9 +564,8 @@ static void iree_hal_remote_server_client_file_write_deinitialize(
                                    "remote bulk transfer cancelled"));
   }
   iree_hal_remote_server_client_file_write_free_initial_wait_list(transfer);
-  iree_hal_remote_server_bulk_staging_pool_release_slot(
-      transfer->staging_pool, transfer->staging_slot,
-      transfer->last_staging_signal_value);
+  iree_hal_remote_server_bulk_staging_slot_release(
+      transfer->staging_slot, transfer->last_staging_signal_value);
   iree_hal_remote_server_client_file_write_ready_context_release(
       transfer->ready_context);
   iree_hal_buffer_release(transfer->source_buffer);
@@ -1083,8 +781,9 @@ static bool iree_hal_remote_server_client_file_read_submit_chunk_locked(
   const uint64_t chunk_offset = iree_net_bulk_chunk_offset(chunk);
   const iree_const_byte_span_t chunk_payload =
       iree_net_bulk_chunk_payload(chunk);
-  memcpy(staging_slot->contents.data, chunk_payload.data,
-         chunk_payload.data_length);
+  iree_byte_span_t staging_contents =
+      iree_hal_remote_server_bulk_staging_slot_contents(staging_slot);
+  memcpy(staging_contents.data, chunk_payload.data, chunk_payload.data_length);
   iree_net_bulk_receive_window_release_chunk(session_slot->bulk_receive_window,
                                              chunk);
 
@@ -1094,12 +793,20 @@ static bool iree_hal_remote_server_client_file_read_submit_chunk_locked(
   iree_hal_device_retain(local_device);
   iree_hal_buffer_t* target_buffer = transfer->target_buffer;
   iree_hal_buffer_retain(target_buffer);
-  iree_hal_file_t* staging_file = staging_slot->file;
+  iree_hal_file_t* staging_file =
+      iree_hal_remote_server_bulk_staging_slot_file(staging_slot);
   iree_hal_file_retain(staging_file);
-  iree_hal_semaphore_t* staging_semaphore = staging_slot->semaphore;
+  iree_hal_semaphore_t* staging_semaphore =
+      iree_hal_remote_server_bulk_staging_slot_semaphore(staging_slot);
   iree_hal_semaphore_retain(staging_semaphore);
-  iree_hal_remote_server_bulk_staging_pool_t* staging_pool = staging_slot->pool;
-  iree_hal_remote_server_bulk_staging_pool_retain(staging_pool);
+  iree_hal_remote_server_client_file_read_staging_callback_t* staging_callback =
+      (iree_hal_remote_server_client_file_read_staging_callback_t*)
+          iree_hal_remote_server_bulk_staging_slot_user_storage(staging_slot)
+              .data;
+  staging_callback->server = server;
+  staging_callback->session_slot = session_slot;
+  staging_callback->session_id = transfer->session_id;
+  staging_callback->transfer_id = transfer_id;
 
   uint64_t ready_wait_value = 1;
   iree_hal_semaphore_t* ready_semaphore = transfer->ready_semaphore;
@@ -1108,21 +815,14 @@ static bool iree_hal_remote_server_client_file_read_submit_chunk_locked(
       .semaphores = &ready_semaphore,
       .payload_values = &ready_wait_value,
   };
-  uint64_t staging_signal_value = staging_slot->last_signal_value + 1;
+  uint64_t staging_signal_value =
+      iree_hal_remote_server_bulk_staging_slot_next_signal_value(staging_slot);
   iree_hal_semaphore_list_t signal_list = {
       .count = 1,
       .semaphores = &staging_semaphore,
       .payload_values = &staging_signal_value,
   };
 
-  staging_slot->callback_signal_value = staging_signal_value;
-  staging_slot->callback_timepoint.callback =
-      iree_hal_remote_server_client_file_read_chunk_callback;
-  staging_slot->callback_timepoint.user_data = staging_slot;
-  staging_slot->callback_server = server;
-  staging_slot->callback_session_slot = session_slot;
-  staging_slot->callback_session_id = transfer->session_id;
-  staging_slot->callback_transfer_id = transfer_id;
   ++transfer->pending_operation_count;
 
   iree_slim_mutex_unlock(&session_slot->bulk_transfer_mutex);
@@ -1132,9 +832,10 @@ static bool iree_hal_remote_server_client_file_read_submit_chunk_locked(
       transfer->target_offset + (iree_device_size_t)chunk_offset,
       (iree_device_size_t)chunk_payload.data_length, IREE_HAL_READ_FLAG_NONE);
   if (iree_status_is_ok(status)) {
-    status = iree_async_semaphore_acquire_timepoint(
-        (iree_async_semaphore_t*)staging_semaphore, staging_signal_value,
-        &staging_slot->callback_timepoint);
+    status = iree_hal_remote_server_bulk_staging_slot_acquire_timepoint(
+        staging_slot, staging_signal_value,
+        iree_hal_remote_server_client_file_read_chunk_callback,
+        staging_callback);
   }
   iree_hal_semaphore_release(staging_semaphore);
   iree_hal_file_release(staging_file);
@@ -1144,9 +845,11 @@ static bool iree_hal_remote_server_client_file_read_submit_chunk_locked(
 
   if (iree_status_is_ok(status)) return true;
 
-  iree_hal_remote_server_bulk_staging_pool_release_slot(
-      staging_pool, staging_slot, staging_slot->last_signal_value);
-  iree_hal_remote_server_bulk_staging_pool_release(staging_pool);
+  iree_hal_remote_server_release(staging_callback->server);
+  memset(staging_callback, 0, sizeof(*staging_callback));
+  iree_hal_remote_server_bulk_staging_slot_release(
+      staging_slot,
+      iree_hal_remote_server_bulk_staging_slot_last_signal_value(staging_slot));
   table_transfer = NULL;
   if (session_slot->bulk_transfer_scheduler) {
     table_transfer = iree_hal_remote_bulk_transfer_scheduler_lookup(
@@ -2054,19 +1757,16 @@ static void iree_hal_remote_server_client_file_read_ready_callback(
 }
 
 static void iree_hal_remote_server_client_file_read_chunk_callback(
-    void* user_data, iree_async_semaphore_timepoint_t* timepoint,
-    iree_status_t status) {
-  (void)timepoint;
-  iree_hal_remote_server_bulk_staging_slot_t* staging_slot =
-      (iree_hal_remote_server_bulk_staging_slot_t*)user_data;
-  iree_hal_remote_server_t* server = staging_slot->callback_server;
-  iree_hal_remote_server_retain(server);
+    void* user_data, iree_hal_remote_server_bulk_staging_slot_t* staging_slot,
+    uint64_t signal_value, iree_status_t status) {
+  iree_hal_remote_server_client_file_read_staging_callback_t* staging_callback =
+      (iree_hal_remote_server_client_file_read_staging_callback_t*)user_data;
+  iree_hal_remote_server_t* server = staging_callback->server;
   iree_hal_remote_server_session_t* session_slot =
-      staging_slot->callback_session_slot;
-  const uint64_t session_id = staging_slot->callback_session_id;
-  const uint64_t transfer_id = staging_slot->callback_transfer_id;
-  iree_hal_remote_server_bulk_staging_pool_t* staging_pool = staging_slot->pool;
-  const uint64_t signal_value = staging_slot->callback_signal_value;
+      staging_callback->session_slot;
+  const uint64_t session_id = staging_callback->session_id;
+  const uint64_t transfer_id = staging_callback->transfer_id;
+  memset(staging_callback, 0, sizeof(*staging_callback));
 
   iree_net_bulk_channel_t* bulk_channel = NULL;
   bool session_active = false;
@@ -2088,8 +1788,8 @@ static void iree_hal_remote_server_client_file_read_chunk_callback(
       table_transfer = iree_hal_remote_bulk_transfer_scheduler_lookup(
           session_slot->bulk_transfer_scheduler, transfer_id);
     }
-    iree_hal_remote_server_bulk_staging_pool_release_slot(
-        staging_pool, staging_slot, signal_value);
+    iree_hal_remote_server_bulk_staging_slot_release(staging_slot,
+                                                     signal_value);
     if (table_transfer) {
       iree_hal_remote_server_bulk_transfer_t* bulk_transfer =
           iree_hal_remote_server_bulk_transfer_storage(table_transfer);
@@ -2113,8 +1813,8 @@ static void iree_hal_remote_server_client_file_read_chunk_callback(
       table_transfer = iree_hal_remote_bulk_transfer_scheduler_lookup(
           session_slot->bulk_transfer_scheduler, transfer_id);
     }
-    iree_hal_remote_server_bulk_staging_pool_release_slot(
-        staging_pool, staging_slot, signal_value);
+    iree_hal_remote_server_bulk_staging_slot_release(staging_slot,
+                                                     signal_value);
     if (!table_transfer) {
       iree_status_ignore(status);
     } else {
@@ -2158,7 +1858,6 @@ static void iree_hal_remote_server_client_file_read_chunk_callback(
     iree_status_ignore(drain_status);
   }
   iree_net_bulk_channel_release(bulk_channel);
-  iree_hal_remote_server_bulk_staging_pool_release(staging_pool);
   iree_hal_remote_server_session_try_complete_bulk_drain(session_slot);
   iree_hal_remote_server_release(server);
 }
@@ -2406,10 +2105,16 @@ iree_status_t iree_hal_remote_server_session_initialize_bulk_transfers(
       &options, callbacks, host_allocator,
       &session_slot->bulk_transfer_scheduler);
   if (iree_status_is_ok(status)) {
+    iree_hal_remote_server_bulk_staging_pool_options_t staging_options =
+        iree_hal_remote_server_bulk_staging_pool_options_default();
+    staging_options.slot_count = IREE_HAL_REMOTE_BULK_STAGING_SLOT_COUNT;
+    staging_options.slot_length = IREE_HAL_REMOTE_BULK_DATA_CHUNK_LENGTH;
+    staging_options.user_storage_size =
+        sizeof(iree_hal_remote_server_client_file_read_staging_callback_t);
+    staging_options.user_storage_alignment = iree_alignof(
+        iree_hal_remote_server_client_file_read_staging_callback_t);
     status = iree_hal_remote_server_bulk_staging_pool_create(
-        IREE_HAL_REMOTE_BULK_STAGING_SLOT_COUNT,
-        IREE_HAL_REMOTE_BULK_DATA_CHUNK_LENGTH, host_allocator,
-        &session_slot->bulk_staging_pool);
+        &staging_options, host_allocator, &session_slot->bulk_staging_pool);
   }
   iree_net_bulk_receive_window_options_t receive_window_options =
       iree_net_bulk_receive_window_options_default();
@@ -2806,12 +2511,18 @@ iree_status_t iree_hal_remote_server_bulk_submit_client_file_write(
             session_slot->bulk_staging_pool, local_device,
             &transfer->staging_slot);
         if (iree_status_is_ok(status)) {
-          transfer->staging_pool = session_slot->bulk_staging_pool;
-          transfer->staging_file = transfer->staging_slot->file;
-          transfer->staging_contents = transfer->staging_slot->contents;
-          transfer->staging_semaphore = transfer->staging_slot->semaphore;
+          transfer->staging_file =
+              iree_hal_remote_server_bulk_staging_slot_file(
+                  transfer->staging_slot);
+          transfer->staging_contents =
+              iree_hal_remote_server_bulk_staging_slot_contents(
+                  transfer->staging_slot);
+          transfer->staging_semaphore =
+              iree_hal_remote_server_bulk_staging_slot_semaphore(
+                  transfer->staging_slot);
           transfer->last_staging_signal_value =
-              transfer->staging_slot->last_signal_value;
+              iree_hal_remote_server_bulk_staging_slot_last_signal_value(
+                  transfer->staging_slot);
           transfer->ready_context->local_semaphore =
               transfer->staging_semaphore;
           iree_hal_semaphore_retain(transfer->ready_context->local_semaphore);

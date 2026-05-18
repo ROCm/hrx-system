@@ -24,6 +24,55 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    bulk_staging_pool
+  HDRS
+    "bulk_staging_pool.h"
+  SRCS
+    "bulk_staging_pool.c"
+  DEPS
+    iree::async
+    iree::base
+    iree::hal
+    iree::io::file_handle
+  PUBLIC
+)
+
+iree_cc_binary_benchmark(
+  NAME
+    bulk_staging_pool_benchmark
+  SRCS
+    "bulk_staging_pool_benchmark.cc"
+  DEPS
+    ::bulk_staging_pool
+    iree::async::util::proactor_pool
+    iree::base
+    iree::base::threading
+    iree::hal
+    iree::hal::drivers::local_task::registration
+    iree::testing::benchmark
+    iree::testing::benchmark_main
+    iree::third_party::google_benchmark
+  TESTONLY
+)
+
+iree_cc_test(
+  NAME
+    bulk_staging_pool_test
+  SRCS
+    "bulk_staging_pool_test.cc"
+  DEPS
+    ::bulk_staging_pool
+    iree::async::util::proactor_pool
+    iree::base
+    iree::base::threading
+    iree::hal
+    iree::hal::drivers::local_task::registration
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_library(
+  NAME
     server
   HDRS
     "api.h"
@@ -42,6 +91,7 @@ iree_cc_library(
     "session.h"
   DEPS
     ::bulk_router
+    ::bulk_staging_pool
     iree::async
     iree::base
     iree::base::internal

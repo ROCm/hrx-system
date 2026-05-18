@@ -92,7 +92,7 @@ typedef struct iree_hal_remote_server_session_t {
   // Active bulk transfer scheduler and lifecycle owner.
   iree_hal_remote_bulk_transfer_scheduler_t* bulk_transfer_scheduler;
 
-  // Reusable host staging slots for server-to-client bulk queue writes.
+  // Reusable host staging slots for bulk queue file operations.
   iree_hal_remote_server_bulk_staging_pool_t* bulk_staging_pool;
 
   // Receive window retaining client-to-server DATA chunks and CREDIT state.
