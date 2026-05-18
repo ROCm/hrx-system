@@ -7,6 +7,7 @@
 #ifndef IREE_HAL_REMOTE_CLIENT_BULK_H_
 #define IREE_HAL_REMOTE_CLIENT_BULK_H_
 
+#include "iree/hal/remote/client/bulk_transfer.h"
 #include "iree/hal/remote/client/device.h"
 #include "iree/hal/remote/client/file.h"
 #include "iree/net/channel/queue/queue_channel.h"
@@ -52,16 +53,6 @@ iree_status_t iree_hal_remote_client_bulk_upload_file_read(
 // Cancels a client-local file transfer before the server observes it.
 void iree_hal_remote_client_bulk_cancel_transfer(
     iree_hal_remote_client_device_t* device, uint64_t transfer_id);
-
-typedef void (*iree_hal_remote_client_bulk_completion_fn_t)(
-    void* user_data, iree_status_t status);
-typedef struct iree_hal_remote_client_bulk_completion_callback_t {
-  // Completion callback. Consumes |status|.
-  iree_hal_remote_client_bulk_completion_fn_t fn;
-
-  // User data passed to |fn|.
-  void* user_data;
-} iree_hal_remote_client_bulk_completion_callback_t;
 
 // Begins a server-to-client buffer map bulk transfer into |target_bytes|.
 iree_status_t iree_hal_remote_client_bulk_begin_buffer_map_read(

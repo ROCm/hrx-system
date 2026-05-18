@@ -224,6 +224,10 @@ iree_status_t iree_hal_remote_client_device_send_fire_and_forget(
 void iree_hal_remote_client_device_fail_pending_rpcs(
     iree_hal_remote_client_device_t* device);
 
+// Reports a bulk channel transport failure and consumes |status|.
+void iree_hal_remote_client_device_notify_bulk_transport_error(
+    iree_hal_remote_client_device_t* device, iree_status_t status);
+
 // Sends a frontier-ordered release for a remote resource. The release is
 // fire-and-forget and produces no ADVANCE; failures are best-effort cleanup
 // failures and are usually ignored by resource destroy paths.

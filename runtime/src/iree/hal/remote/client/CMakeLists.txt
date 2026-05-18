@@ -23,6 +23,9 @@ iree_cc_library(
     "bulk.h"
     "bulk_session.c"
     "bulk_session.h"
+    "bulk_transfer.h"
+    "bulk_upload_sender.c"
+    "bulk_upload_sender.h"
     "command_buffer.c"
     "command_buffer.h"
     "device.c"
@@ -57,6 +60,7 @@ iree_cc_library(
     iree::hal::remote::protocol::control
     iree::hal::remote::protocol::profile
     iree::hal::remote::protocol::queue
+    iree::hal::remote::util::bulk_channel_writer
     iree::hal::remote::util::bulk_transfer_tracker
     iree::hal::remote::util::queue_header_pool
     iree::hal::remote::util::recv_pool

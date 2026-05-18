@@ -1082,6 +1082,19 @@ void iree_hal_remote_client_device_fail_pending_rpcs(
   }
 }
 
+void iree_hal_remote_client_device_notify_bulk_transport_error(
+    iree_hal_remote_client_device_t* device, iree_status_t status) {
+  iree_hal_remote_client_device_store_state(
+      device, IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_ERROR);
+  iree_hal_remote_client_device_fail_pending_rpcs(device);
+  if (device->options.error_callback.fn) {
+    device->options.error_callback.fn(device->options.error_callback.user_data,
+                                      status);
+  } else {
+    iree_status_ignore(status);
+  }
+}
+
 iree_status_t iree_hal_remote_client_device_control_rpc_with_after_send(
     iree_hal_remote_client_device_t* device, iree_const_byte_span_t request,
     iree_hal_remote_client_device_control_rpc_after_send_t after_send,
