@@ -21,6 +21,8 @@ iree_cc_library(
     "buffer.h"
     "bulk.c"
     "bulk.h"
+    "bulk_download_receiver.c"
+    "bulk_download_receiver.h"
     "bulk_session.c"
     "bulk_session.h"
     "bulk_transfer.h"
