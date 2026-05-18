@@ -144,7 +144,7 @@ static iree_status_t iree_hal_remote_benchmark_allocate_staging_pool(
       sizeof(iree_hal_remote_server_bulk_upload_staging_callback_t);
   options.user_storage_alignment =
       iree_alignof(iree_hal_remote_server_bulk_upload_staging_callback_t);
-  return iree_hal_remote_server_bulk_staging_pool_allocate(
+  return iree_hal_remote_server_bulk_staging_pool_create(
       &options, iree_allocator_system(), out_pool);
 }
 

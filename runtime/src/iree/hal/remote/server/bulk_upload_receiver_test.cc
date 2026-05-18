@@ -180,14 +180,33 @@ static iree_status_t failing_queue_read_device_queue_read(
 }
 
 const iree_hal_device_vtable_t failing_queue_read_device_vtable = {
-    .destroy = failing_queue_read_device_destroy,
-    .id = failing_queue_read_device_id,
-    .host_allocator = failing_queue_read_device_host_allocator,
-    .import_file = failing_queue_read_device_import_file,
-    .create_semaphore = failing_queue_read_device_create_semaphore,
-    .query_semaphore_compatibility =
-        failing_queue_read_device_query_semaphore_compatibility,
-    .queue_read = failing_queue_read_device_queue_read,
+    /*.destroy=*/failing_queue_read_device_destroy,
+    /*.id=*/failing_queue_read_device_id,
+    /*.host_allocator=*/failing_queue_read_device_host_allocator,
+    /*.device_allocator=*/nullptr,
+    /*.replace_device_allocator=*/nullptr,
+    /*.replace_channel_provider=*/nullptr,
+    /*.trim=*/nullptr,
+    /*.query_i64=*/nullptr,
+    /*.query_capabilities=*/nullptr,
+    /*.topology_info=*/nullptr,
+    /*.refine_topology_edge=*/nullptr,
+    /*.assign_topology_info=*/nullptr,
+    /*.create_channel=*/nullptr,
+    /*.create_command_buffer=*/nullptr,
+    /*.create_event=*/nullptr,
+    /*.create_executable_cache=*/nullptr,
+    /*.import_file=*/failing_queue_read_device_import_file,
+    /*.create_semaphore=*/failing_queue_read_device_create_semaphore,
+    /*.query_semaphore_compatibility=*/
+    failing_queue_read_device_query_semaphore_compatibility,
+    /*.query_queue_pool_backend=*/nullptr,
+    /*.queue_alloca=*/nullptr,
+    /*.queue_dealloca=*/nullptr,
+    /*.queue_fill=*/nullptr,
+    /*.queue_update=*/nullptr,
+    /*.queue_copy=*/nullptr,
+    /*.queue_read=*/failing_queue_read_device_queue_read,
 };
 
 static iree_status_t CreateFailingQueueReadDevice(
@@ -386,6 +405,7 @@ class BulkUploadReceiverSessionTest : public ::testing::Test {
         iree_make_cstring_view("local-task"), iree_allocator_system(),
         &driver_));
     IREE_ASSERT_OK(CreateDevice(&device_));
+    IREE_ASSERT_OK(CreateTargetBuffer(&target_buffer_));
 
     iree_atomic_ref_count_init(&server_.ref_count);
     server_.host_allocator = iree_allocator_system();
@@ -408,6 +428,7 @@ class BulkUploadReceiverSessionTest : public ::testing::Test {
     iree_net_bulk_receive_window_free(session_.bulk_receive_window);
     session_.bulk_receive_window = nullptr;
     iree_slim_mutex_deinitialize(&session_.bulk_transfer_mutex);
+    iree_hal_buffer_release(target_buffer_);
     iree_hal_device_release(device_);
     iree_hal_driver_release(driver_);
   }
@@ -436,6 +457,19 @@ class BulkUploadReceiverSessionTest : public ::testing::Test {
     return status;
   }
 
+  iree_status_t CreateTargetBuffer(iree_hal_buffer_t** out_buffer) {
+    *out_buffer = nullptr;
+    iree_hal_allocator_t* allocator = iree_hal_device_allocator(device_);
+    iree_hal_buffer_params_t params = {0};
+    params.usage =
+        IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED;
+    params.access = IREE_HAL_MEMORY_ACCESS_ALL;
+    params.type =
+        IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+    return iree_hal_allocator_allocate_buffer(allocator, params, kTotalLength,
+                                              out_buffer);
+  }
+
   iree_status_t AllocateReceiveWindow() {
     iree_net_bulk_receive_window_options_t options =
         iree_net_bulk_receive_window_options_default();
@@ -462,7 +496,7 @@ class BulkUploadReceiverSessionTest : public ::testing::Test {
         sizeof(iree_hal_remote_server_bulk_upload_staging_callback_t);
     options.user_storage_alignment =
         iree_alignof(iree_hal_remote_server_bulk_upload_staging_callback_t);
-    return iree_hal_remote_server_bulk_staging_pool_allocate(
+    return iree_hal_remote_server_bulk_staging_pool_create(
         &options, iree_allocator_system(), &session_.bulk_staging_pool);
   }
 
@@ -509,9 +543,9 @@ class BulkUploadReceiverSessionTest : public ::testing::Test {
     iree_hal_remote_server_bulk_upload_ready_t* ready_context = nullptr;
     if (iree_status_is_ok(status)) {
       status = iree_hal_remote_server_bulk_upload_attach_command_locked(
-          &session_, table_transfer, local_device, signal_list,
-          /*target_buffer=*/nullptr, /*target_offset=*/0, &ready_semaphore,
-          &ready_context, response_envelope);
+          &session_, table_transfer, local_device, signal_list, target_buffer_,
+          /*target_offset=*/0, &ready_semaphore, &ready_context,
+          response_envelope);
     }
     iree_hal_semaphore_release(ready_semaphore);
     iree_hal_remote_server_bulk_upload_ready_release(ready_context);
@@ -538,6 +572,7 @@ class BulkUploadReceiverSessionTest : public ::testing::Test {
 
   iree_hal_driver_t* driver_ = nullptr;
   iree_hal_device_t* device_ = nullptr;
+  iree_hal_buffer_t* target_buffer_ = nullptr;
   iree_hal_remote_server_t server_ = {};
   iree_hal_remote_server_session_t session_ = {};
   uint32_t total_credit_delta_ = 0;

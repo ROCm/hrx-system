@@ -76,11 +76,13 @@ iree_cc_library(
     server
   HDRS
     "api.h"
+    "bulk_download_sender.h"
     "bulk_upload_receiver.h"
     "file_index.h"
   SRCS
     "bulk.c"
     "bulk.h"
+    "bulk_download_sender.c"
     "bulk_upload_receiver.c"
     "file_index.c"
     "profile.c"
@@ -114,6 +116,7 @@ iree_cc_library(
     iree::net::channel::bulk::bulk_channel
     iree::net::channel::bulk::chunk_pool
     iree::net::channel::bulk::receive_window
+    iree::net::channel::bulk::transfer_table
     iree::net::channel::control::frame
     iree::net::channel::queue::queue_channel
     iree::net::channel::util::frame_sender
@@ -136,11 +139,12 @@ iree_cc_test(
     iree::testing::gtest_main
 )
 
-iree_cc_binary_benchmark(
+iree_cc_test(
   NAME
-    bulk_upload_receiver_benchmark
+    bulk_download_sender_test
   SRCS
-    "bulk_upload_receiver_benchmark.cc"
+    "bulk_download_sender_test.cc"
+    "resource_table.h"
     "server.h"
     "session.h"
   DEPS
@@ -152,6 +156,38 @@ iree_cc_binary_benchmark(
     iree::base::threading
     iree::hal
     iree::hal::drivers::local_task::registration
+    iree::hal::remote::protocol::common
+    iree::net::carrier
+    iree::net::channel::bulk::bulk_channel
+    iree::net::channel::bulk::frame
+    iree::net::channel::queue::queue_channel
+    iree::net::channel::util::frame_sender
+    iree::net::channel::util::sequence_window
+    iree::net::message_endpoint
+    iree::net::session
+    iree::net::transport_factory
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_binary_benchmark(
+  NAME
+    bulk_upload_receiver_benchmark
+  SRCS
+    "bulk_upload_receiver_benchmark.cc"
+    "resource_table.h"
+    "server.h"
+    "session.h"
+  DEPS
+    ::bulk_router
+    ::server
+    iree::async
+    iree::async::util::proactor_pool
+    iree::base
+    iree::base::threading
+    iree::hal
+    iree::hal::drivers::local_task::registration
+    iree::hal::remote::protocol::common
     iree::net::channel::queue::queue_channel
     iree::net::channel::util::sequence_window
     iree::net::session
@@ -167,6 +203,7 @@ iree_cc_test(
     bulk_upload_receiver_test
   SRCS
     "bulk_upload_receiver_test.cc"
+    "resource_table.h"
     "server.h"
     "session.h"
   DEPS
@@ -178,6 +215,7 @@ iree_cc_test(
     iree::base::threading
     iree::hal
     iree::hal::drivers::local_task::registration
+    iree::hal::remote::protocol::common
     iree::net::channel::queue::queue_channel
     iree::net::channel::util::sequence_window
     iree::net::session
