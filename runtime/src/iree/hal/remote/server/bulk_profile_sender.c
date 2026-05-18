@@ -93,6 +93,16 @@ static void iree_hal_remote_server_profile_transfer_try_finish_locked(
     iree_net_bulk_transfer_t* table_transfer) {
   iree_hal_remote_server_profile_transfer_t* transfer =
       iree_hal_remote_server_profile_transfer_storage(table_transfer);
+  if (iree_any_bit_set(transfer->flags,
+                       IREE_HAL_REMOTE_SERVER_PROFILE_TRANSFER_FLAG_FAILED)) {
+    if (!iree_any_bit_set(
+            transfer->flags,
+            IREE_HAL_REMOTE_SERVER_PROFILE_TRANSFER_FLAG_SEND_PENDING)) {
+      iree_hal_remote_server_profile_release_transfer(
+          session_slot->bulk_transfer_scheduler, table_transfer);
+    }
+    return;
+  }
   if (iree_all_bits_set(
           transfer->flags,
           IREE_HAL_REMOTE_SERVER_PROFILE_TRANSFER_FLAG_COMPLETE_SENT |
@@ -108,8 +118,11 @@ static void iree_hal_remote_server_profile_transfer_try_finish_locked(
 void iree_hal_remote_server_profile_transfer_fail_locked(
     iree_hal_remote_server_session_t* session_slot,
     iree_net_bulk_transfer_t* table_transfer) {
-  iree_hal_remote_server_profile_release_transfer(
-      session_slot->bulk_transfer_scheduler, table_transfer);
+  iree_hal_remote_server_profile_transfer_t* transfer =
+      iree_hal_remote_server_profile_transfer_storage(table_transfer);
+  transfer->flags |= IREE_HAL_REMOTE_SERVER_PROFILE_TRANSFER_FLAG_FAILED;
+  iree_hal_remote_server_profile_transfer_try_finish_locked(session_slot,
+                                                            table_transfer);
 }
 
 static iree_status_t iree_hal_remote_server_profile_transfer_try_send_locked(
@@ -121,7 +134,8 @@ static iree_status_t iree_hal_remote_server_profile_transfer_try_send_locked(
   const iree_hal_remote_server_profile_transfer_flags_t
       terminal_or_send_pending_flags =
           IREE_HAL_REMOTE_SERVER_PROFILE_TRANSFER_FLAG_PEER_COMPLETE |
-          IREE_HAL_REMOTE_SERVER_PROFILE_TRANSFER_FLAG_SEND_PENDING;
+          IREE_HAL_REMOTE_SERVER_PROFILE_TRANSFER_FLAG_SEND_PENDING |
+          IREE_HAL_REMOTE_SERVER_PROFILE_TRANSFER_FLAG_FAILED;
   if (iree_any_bit_set(transfer->flags, terminal_or_send_pending_flags)) {
     return iree_ok_status();
   }
@@ -356,7 +370,9 @@ static bool iree_hal_remote_server_select_ready_profile_transfer(
       iree_hal_remote_server_profile_transfer_storage(table_transfer);
   if (iree_any_bit_set(
           transfer->flags,
-          IREE_HAL_REMOTE_SERVER_PROFILE_TRANSFER_FLAG_PEER_COMPLETE)) {
+          IREE_HAL_REMOTE_SERVER_PROFILE_TRANSFER_FLAG_PEER_COMPLETE |
+              IREE_HAL_REMOTE_SERVER_PROFILE_TRANSFER_FLAG_SEND_PENDING |
+              IREE_HAL_REMOTE_SERVER_PROFILE_TRANSFER_FLAG_FAILED)) {
     return false;
   }
   return true;
@@ -446,14 +462,20 @@ iree_status_t iree_hal_remote_server_profile_on_send_complete(
   profile_sequence = transfer->sequence;
   transfer->flags &= ~IREE_HAL_REMOTE_SERVER_PROFILE_TRANSFER_FLAG_SEND_PENDING;
   if (iree_status_is_ok(status)) {
-    iree_status_t send_status =
-        iree_hal_remote_server_profile_transfer_try_send_locked(
-            session_slot, session_slot->bulk_channel, table_transfer);
-    table_transfer = iree_hal_remote_bulk_transfer_scheduler_lookup(
-        session_slot->bulk_transfer_scheduler, transfer_id);
-    if (table_transfer) {
+    iree_status_t send_status = iree_ok_status();
+    if (iree_any_bit_set(transfer->flags,
+                         IREE_HAL_REMOTE_SERVER_PROFILE_TRANSFER_FLAG_FAILED)) {
       iree_hal_remote_server_profile_transfer_try_finish_locked(session_slot,
                                                                 table_transfer);
+    } else {
+      send_status = iree_hal_remote_server_profile_transfer_try_send_locked(
+          session_slot, session_slot->bulk_channel, table_transfer);
+      table_transfer = iree_hal_remote_bulk_transfer_scheduler_lookup(
+          session_slot->bulk_transfer_scheduler, transfer_id);
+      if (table_transfer) {
+        iree_hal_remote_server_profile_transfer_try_finish_locked(
+            session_slot, table_transfer);
+      }
     }
     drain_profile_pending =
         iree_hal_remote_server_profile_has_pending_transfers_locked(

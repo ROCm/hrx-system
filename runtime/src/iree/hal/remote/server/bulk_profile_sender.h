@@ -36,6 +36,7 @@ enum iree_hal_remote_server_profile_transfer_flag_bits_e {
   IREE_HAL_REMOTE_SERVER_PROFILE_TRANSFER_FLAG_SEND_PENDING = 1u << 1,
   IREE_HAL_REMOTE_SERVER_PROFILE_TRANSFER_FLAG_COMPLETE_SENT = 1u << 2,
   IREE_HAL_REMOTE_SERVER_PROFILE_TRANSFER_FLAG_PEER_COMPLETE = 1u << 3,
+  IREE_HAL_REMOTE_SERVER_PROFILE_TRANSFER_FLAG_FAILED = 1u << 4,
 };
 
 // Active server-originated profile callback transfer state.
