@@ -183,8 +183,6 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_create(
     iree_async_proactor_retain(device->proactor);
 
     iree_atomic_store(&device->queue_channel, 0, iree_memory_order_relaxed);
-    iree_atomic_store(&device->bulk_channel, 0, iree_memory_order_relaxed);
-    iree_slim_mutex_initialize(&device->bulk_transfer_mutex);
     iree_atomic_store(&device->next_submission_epoch, 0,
                       iree_memory_order_relaxed);
     iree_atomic_store(&device->next_provisional_generation, 1,
@@ -198,9 +196,8 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_create(
   }
 
   if (iree_status_is_ok(status)) {
-    status = iree_net_sequence_window_initialize(
-        /*initial_observed_sequence=*/0, /*initial_capacity=*/64,
-        host_allocator, &device->profile_sequence_window);
+    status = iree_hal_remote_client_bulk_session_initialize(
+        host_allocator, &device->bulk_session);
   }
 
   if (iree_status_is_ok(status)) {
@@ -280,16 +277,14 @@ static iree_net_bulk_channel_t*
 iree_hal_remote_client_device_exchange_bulk_channel(
     iree_hal_remote_client_device_t* device,
     iree_net_bulk_channel_t* new_bulk_channel) {
-  return (iree_net_bulk_channel_t*)iree_atomic_exchange(
-      &device->bulk_channel, (intptr_t)new_bulk_channel,
-      iree_memory_order_acq_rel);
+  return iree_hal_remote_client_bulk_session_exchange_channel(
+      &device->bulk_session, new_bulk_channel);
 }
 
 static void iree_hal_remote_client_device_detach_bulk_channel(
     iree_hal_remote_client_device_t* device) {
   iree_net_bulk_channel_t* bulk_channel =
-      (iree_net_bulk_channel_t*)iree_atomic_load(&device->bulk_channel,
-                                                 iree_memory_order_acquire);
+      iree_hal_remote_client_bulk_session_load_channel(&device->bulk_session);
   iree_net_bulk_channel_detach(bulk_channel);
 }
 
@@ -370,9 +365,7 @@ static void iree_hal_remote_client_device_destroy(
   iree_slim_mutex_deinitialize(&device->provisional_mutex);
 
   iree_hal_remote_client_device_deinitialize_bulk_transfers(device);
-  iree_net_sequence_window_deinitialize(&device->profile_sequence_window);
-  iree_hal_profile_sink_release(device->profile_sink);
-  iree_slim_mutex_deinitialize(&device->bulk_transfer_mutex);
+  iree_hal_remote_client_bulk_session_deinitialize(&device->bulk_session);
 
   iree_hal_remote_recv_pool_release(device->recv_pool);
   iree_async_frontier_tracker_release(device->frontier_tracker);

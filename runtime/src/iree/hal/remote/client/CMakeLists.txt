@@ -21,6 +21,8 @@ iree_cc_library(
     "buffer.h"
     "bulk.c"
     "bulk.h"
+    "bulk_session.c"
+    "bulk_session.h"
     "command_buffer.c"
     "command_buffer.h"
     "device.c"
@@ -73,6 +75,22 @@ iree_cc_library(
     iree::net::status_wire
     iree::net::transport_factory
   PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    bulk_session_test
+  SRCS
+    "bulk_session.h"
+    "bulk_session_test.cc"
+  DEPS
+    ::client
+    iree::base
+    iree::base::threading
+    iree::net::channel::bulk::transfer_table
+    iree::net::channel::util::sequence_window
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 iree_cc_test(

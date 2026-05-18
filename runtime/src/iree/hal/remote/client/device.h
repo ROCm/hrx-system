@@ -14,8 +14,8 @@
 #include "iree/base/threading/mutex.h"
 #include "iree/hal/api.h"
 #include "iree/hal/remote/client/api.h"
+#include "iree/hal/remote/client/bulk_session.h"
 #include "iree/hal/remote/protocol/common.h"
-#include "iree/net/channel/util/sequence_window.h"
 #include "iree/net/session.h"
 
 #ifdef __cplusplus
@@ -28,8 +28,6 @@ typedef struct iree_async_notification_t iree_async_notification_t;
 typedef struct iree_hal_slab_provider_t iree_hal_slab_provider_t;
 typedef struct iree_hal_remote_recv_pool_t iree_hal_remote_recv_pool_t;
 typedef struct iree_net_bulk_channel_t iree_net_bulk_channel_t;
-typedef struct iree_net_bulk_chunk_pool_t iree_net_bulk_chunk_pool_t;
-typedef struct iree_net_bulk_transfer_table_t iree_net_bulk_transfer_table_t;
 typedef struct iree_net_queue_channel_t iree_net_queue_channel_t;
 typedef struct iree_hal_remote_pending_rpc_t iree_hal_remote_pending_rpc_t;
 
@@ -91,30 +89,8 @@ typedef struct iree_hal_remote_client_device_t {
   // do not need per-operation lifetime fences.
   iree_atomic_intptr_t queue_channel;
 
-  // Bulk channel for large payload transfers (0 until bulk endpoint opens).
-  // Published after the queue and bulk endpoints are both activated so the
-  // CONNECTED state means all production channels are usable.
-  iree_atomic_intptr_t bulk_channel;
-
-  // Protects client-local file bulk transfers.
-  iree_slim_mutex_t bulk_transfer_mutex;
-
-  // Fixed-capacity table of client-local file transfers.
-  iree_net_bulk_transfer_table_t* bulk_transfers;
-
-  // Fixed-capacity pool of outgoing async file read staging chunks.
-  iree_net_bulk_chunk_pool_t* bulk_send_chunks;
-
-  // Fixed-capacity pool of retained incoming bulk DATA chunks.
-  iree_net_bulk_chunk_pool_t* bulk_receive_chunks;
-
-  // Client-owned sink retained while a remote profiling session is active.
-  // Protected by bulk_transfer_mutex.
-  iree_hal_profile_sink_t* profile_sink;
-
-  // Reconstructs in-order profile callback dispatch from completed bulk
-  // transfers that may arrive out of order. Protected by bulk_transfer_mutex.
-  iree_net_sequence_window_t profile_sequence_window;
+  // Client-local bulk channel, transfer, chunk, and profiling state.
+  iree_hal_remote_client_bulk_session_t bulk_session;
 
   // Remote queue axis from the server's topology. Used to build signal
   // frontiers for queue submissions. Valid after on_session_ready.

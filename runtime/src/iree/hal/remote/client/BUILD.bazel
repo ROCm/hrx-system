@@ -22,6 +22,8 @@ iree_runtime_cc_library(
         "buffer.h",
         "bulk.c",
         "bulk.h",
+        "bulk_session.c",
+        "bulk_session.h",
         "command_buffer.c",
         "command_buffer.h",
         "device.c",
@@ -77,6 +79,23 @@ iree_runtime_cc_library(
         "//runtime/src/iree/net/channel/queue:queue_channel",
         "//runtime/src/iree/net/channel/util:frame_sender",
         "//runtime/src/iree/net/channel/util:sequence_window",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "bulk_session_test",
+    srcs = [
+        "bulk_session.h",
+        "bulk_session_test.cc",
+    ],
+    deps = [
+        ":client",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/net/channel/bulk:transfer_table",
+        "//runtime/src/iree/net/channel/util:sequence_window",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
