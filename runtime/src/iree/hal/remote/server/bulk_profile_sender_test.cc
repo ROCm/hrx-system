@@ -529,4 +529,84 @@ TEST_F(BulkProfileSenderTest, PeerAbortWaitsForPendingDataSendCompletion) {
   EXPECT_EQ(carrier_->sends.size(), 3u);
 }
 
+TEST_F(BulkProfileSenderTest, QueuedCallbackDrainsAfterActiveSinkDetach) {
+  SubmitProfilePayload(/*sequence=*/1);
+  ASSERT_EQ(carrier_->sends.size(), 1u);
+  uint64_t first_transfer_id = ExpectStartFrame(/*send_index=*/0);
+
+  SubmitProfilePayload(/*sequence=*/2);
+  EXPECT_TRUE(HasPendingTransfers());
+
+  iree_hal_profile_sink_t* detached_sink =
+      iree_hal_remote_server_profile_relay_detach_active_sink(&session_,
+                                                              profile_sink_);
+  ASSERT_EQ(detached_sink, profile_sink_);
+  iree_hal_profile_sink_release(detached_sink);
+  EXPECT_EQ(session_.profile_relay.active_sink, nullptr);
+
+  IREE_ASSERT_OK(endpoint_.InjectCredit(/*credit_delta=*/1));
+  CompleteSend(/*send_index=*/0, iree_ok_status());
+  ASSERT_EQ(carrier_->sends.size(), 2u);
+  ExpectDataFrame(/*send_index=*/1, first_transfer_id,
+                  /*profile_sequence=*/1);
+  CompleteSend(/*send_index=*/1, iree_ok_status());
+  ASSERT_EQ(carrier_->sends.size(), 3u);
+  ExpectCompleteFrame(/*send_index=*/2, first_transfer_id);
+  CompleteSend(/*send_index=*/2, iree_ok_status());
+
+  IREE_EXPECT_OK(
+      iree_hal_remote_server_bulk_on_complete(&session_, first_transfer_id));
+  EXPECT_EQ(
+      iree_net_sequence_window_observed(&session_.profile_relay.ack_window),
+      1u);
+
+  ASSERT_EQ(carrier_->sends.size(), 4u);
+  uint64_t second_transfer_id = ExpectStartFrame(/*send_index=*/3);
+  EXPECT_FALSE(HasPendingTransfers());
+  EXPECT_EQ(ActiveTransferCount(), 1u);
+
+  IREE_ASSERT_OK(endpoint_.InjectCredit(/*credit_delta=*/1));
+  CompleteSend(/*send_index=*/3, iree_ok_status());
+  ASSERT_EQ(carrier_->sends.size(), 5u);
+  ExpectDataFrame(/*send_index=*/4, second_transfer_id,
+                  /*profile_sequence=*/2);
+  CompleteSend(/*send_index=*/4, iree_ok_status());
+  ASSERT_EQ(carrier_->sends.size(), 6u);
+  ExpectCompleteFrame(/*send_index=*/5, second_transfer_id);
+  CompleteSend(/*send_index=*/5, iree_ok_status());
+
+  IREE_EXPECT_OK(
+      iree_hal_remote_server_bulk_on_complete(&session_, second_transfer_id));
+  EXPECT_EQ(ActiveTransferCount(), 0u);
+  EXPECT_EQ(
+      iree_net_sequence_window_observed(&session_.profile_relay.ack_window),
+      2u);
+}
+
+TEST_F(BulkProfileSenderTest, NoBacklogCompletionDoesNotStartMoreWork) {
+  SubmitProfilePayload(/*sequence=*/1);
+  ASSERT_EQ(carrier_->sends.size(), 1u);
+  uint64_t transfer_id = ExpectStartFrame(/*send_index=*/0);
+
+  IREE_ASSERT_OK(endpoint_.InjectCredit(/*credit_delta=*/1));
+  CompleteSend(/*send_index=*/0, iree_ok_status());
+  ASSERT_EQ(carrier_->sends.size(), 2u);
+  ExpectDataFrame(/*send_index=*/1, transfer_id,
+                  /*profile_sequence=*/1);
+  CompleteSend(/*send_index=*/1, iree_ok_status());
+  ASSERT_EQ(carrier_->sends.size(), 3u);
+  ExpectCompleteFrame(/*send_index=*/2, transfer_id);
+  CompleteSend(/*send_index=*/2, iree_ok_status());
+  EXPECT_FALSE(HasPendingTransfers());
+
+  IREE_EXPECT_OK(
+      iree_hal_remote_server_bulk_on_complete(&session_, transfer_id));
+  EXPECT_FALSE(HasPendingTransfers());
+  EXPECT_EQ(ActiveTransferCount(), 0u);
+  EXPECT_EQ(carrier_->sends.size(), 3u);
+  EXPECT_EQ(
+      iree_net_sequence_window_observed(&session_.profile_relay.ack_window),
+      1u);
+}
+
 }  // namespace
