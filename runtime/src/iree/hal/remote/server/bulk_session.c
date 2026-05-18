@@ -31,6 +31,9 @@ typedef union iree_hal_remote_server_bulk_transfer_storage_t {
 } iree_hal_remote_server_bulk_transfer_storage_t;
 
 struct iree_hal_remote_server_bulk_session_t {
+  // References held by the session slot owner and in-flight callbacks.
+  iree_atomic_ref_count_t ref_count;
+
   // Session slot whose identity gates callbacks using this state.
   iree_hal_remote_server_session_t* session_slot;
 
@@ -141,13 +144,16 @@ static iree_status_t iree_hal_remote_server_bulk_receive_window_send_credit(
 static void iree_hal_remote_server_bulk_session_retain(void* user_data) {
   iree_hal_remote_server_bulk_session_t* bulk_session =
       (iree_hal_remote_server_bulk_session_t*)user_data;
+  iree_atomic_ref_count_inc(&bulk_session->ref_count);
   iree_hal_remote_server_retain(bulk_session->session_slot->server);
 }
 
 static void iree_hal_remote_server_bulk_session_release(void* user_data) {
   iree_hal_remote_server_bulk_session_t* bulk_session =
       (iree_hal_remote_server_bulk_session_t*)user_data;
-  iree_hal_remote_server_release(bulk_session->session_slot->server);
+  iree_hal_remote_server_t* server = bulk_session->session_slot->server;
+  iree_hal_remote_server_bulk_session_free(bulk_session);
+  iree_hal_remote_server_release(server);
 }
 
 static iree_status_t iree_hal_remote_server_bulk_session_start(
@@ -236,7 +242,7 @@ iree_hal_remote_server_bulk_session_router_operations(void) {
   return operations;
 }
 
-iree_status_t iree_hal_remote_server_bulk_session_allocate(
+iree_status_t iree_hal_remote_server_bulk_session_create(
     iree_hal_remote_server_session_t* session_slot,
     const iree_hal_remote_server_bulk_session_options_t* options,
     iree_allocator_t host_allocator,
@@ -253,6 +259,7 @@ iree_status_t iree_hal_remote_server_bulk_session_allocate(
       host_allocator, sizeof(*bulk_session), (void**)&bulk_session);
   if (iree_status_is_ok(status)) {
     memset(bulk_session, 0, sizeof(*bulk_session));
+    iree_atomic_ref_count_init(&bulk_session->ref_count);
     bulk_session->session_slot = session_slot;
     bulk_session->host_allocator = host_allocator;
     session_slot->bulk_session = bulk_session;
@@ -323,9 +330,8 @@ iree_status_t iree_hal_remote_server_bulk_session_allocate(
   return status;
 }
 
-void iree_hal_remote_server_bulk_session_free(
+static void iree_hal_remote_server_bulk_session_destroy(
     iree_hal_remote_server_bulk_session_t* bulk_session) {
-  if (!bulk_session) return;
   iree_allocator_t host_allocator = bulk_session->host_allocator;
   iree_hal_remote_server_session_t* session_slot = bulk_session->session_slot;
 
@@ -349,6 +355,14 @@ void iree_hal_remote_server_bulk_session_free(
   iree_hal_remote_server_bulk_router_deinitialize(&bulk_session->router);
   iree_slim_mutex_deinitialize(&bulk_session->transfer_mutex);
   iree_allocator_free(host_allocator, bulk_session);
+}
+
+void iree_hal_remote_server_bulk_session_free(
+    iree_hal_remote_server_bulk_session_t* bulk_session) {
+  if (bulk_session &&
+      iree_atomic_ref_count_dec(&bulk_session->ref_count) == 1) {
+    iree_hal_remote_server_bulk_session_destroy(bulk_session);
+  }
 }
 
 bool iree_hal_remote_server_bulk_session_is_empty(

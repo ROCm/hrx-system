@@ -255,7 +255,7 @@ class BulkProfileSenderTest : public ::testing::Test {
     iree_hal_remote_server_bulk_session_options_t bulk_options =
         iree_hal_remote_server_bulk_session_options_default();
     bulk_options.active_transfer_capacity = 1;
-    IREE_ASSERT_OK(iree_hal_remote_server_bulk_session_allocate(
+    IREE_ASSERT_OK(iree_hal_remote_server_bulk_session_create(
         &session_, &bulk_options, iree_allocator_system(),
         &session_.bulk_session));
 

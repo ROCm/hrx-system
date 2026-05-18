@@ -104,7 +104,7 @@ class ProfileRelayTest : public ::testing::Test {
     iree_slim_mutex_initialize(&server_.session_mutex);
     session_.server = &server_;
     session_.session_id = 1;
-    IREE_ASSERT_OK(iree_hal_remote_server_bulk_session_allocate(
+    IREE_ASSERT_OK(iree_hal_remote_server_bulk_session_create(
         &session_, /*options=*/nullptr, iree_allocator_system(),
         &session_.bulk_session));
   }

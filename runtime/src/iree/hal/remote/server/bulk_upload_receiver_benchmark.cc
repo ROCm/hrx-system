@@ -207,7 +207,7 @@ static iree_status_t BM_RecordBackpressuredDataBurst(
         IREE_HAL_REMOTE_BULK_UPLOAD_BURST_CHUNK_LENGTH;
     bulk_options.receive_chunk_capacity =
         IREE_HAL_REMOTE_BULK_UPLOAD_BURST_CHUNK_COUNT;
-    status = iree_hal_remote_server_bulk_session_allocate(
+    status = iree_hal_remote_server_bulk_session_create(
         &session_slot, &bulk_options, iree_allocator_system(),
         &session_slot.bulk_session);
   }

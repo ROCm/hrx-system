@@ -233,7 +233,7 @@ class ProfileBenchmarkContext {
     iree_hal_remote_server_bulk_session_options_t bulk_options =
         iree_hal_remote_server_bulk_session_options_default();
     bulk_options.active_transfer_capacity = active_transfer_capacity;
-    iree_status_t status = iree_hal_remote_server_bulk_session_allocate(
+    iree_status_t status = iree_hal_remote_server_bulk_session_create(
         &session_, &bulk_options, iree_allocator_system(),
         &session_.bulk_session);
 

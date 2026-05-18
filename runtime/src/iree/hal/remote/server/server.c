@@ -400,7 +400,7 @@ static void iree_hal_remote_server_on_accept(
   if (iree_status_is_ok(status)) {
     iree_hal_remote_server_bulk_session_options_t bulk_session_options =
         iree_hal_remote_server_bulk_session_options_default();
-    status = iree_hal_remote_server_bulk_session_allocate(
+    status = iree_hal_remote_server_bulk_session_create(
         &server->sessions[slot], &bulk_session_options, server->host_allocator,
         &server->sessions[slot].bulk_session);
   }

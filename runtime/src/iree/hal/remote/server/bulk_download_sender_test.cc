@@ -544,7 +544,7 @@ class BulkDownloadSenderTest : public ::testing::Test {
     bulk_options.active_transfer_capacity = 4;
     bulk_options.staging_slot_count = 1;
     bulk_options.staging_slot_length = 4;
-    IREE_ASSERT_OK(iree_hal_remote_server_bulk_session_allocate(
+    IREE_ASSERT_OK(iree_hal_remote_server_bulk_session_create(
         &session_, &bulk_options, iree_allocator_system(),
         &session_.bulk_session));
 

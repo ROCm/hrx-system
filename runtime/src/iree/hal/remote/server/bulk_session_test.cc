@@ -29,7 +29,7 @@ class BulkSessionTest : public ::testing::Test {
     session_.server = &server_;
     session_.session_id = 1;
     session_.session = reinterpret_cast<iree_net_session_t*>(this);
-    IREE_ASSERT_OK(iree_hal_remote_server_bulk_session_allocate(
+    IREE_ASSERT_OK(iree_hal_remote_server_bulk_session_create(
         &session_, /*options=*/nullptr, iree_allocator_system(),
         &session_.bulk_session));
   }

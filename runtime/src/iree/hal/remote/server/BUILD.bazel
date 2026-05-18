@@ -410,6 +410,7 @@ iree_runtime_cc_test(
 iree_runtime_cc_test(
     name = "server_lifecycle_test",
     srcs = [
+        "bulk_test_util.h",
         "resource_table.h",
         "server.h",
         "server_lifecycle_test.cc",
@@ -426,10 +427,15 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal/remote/protocol:common",
         "//runtime/src/iree/hal/remote/util:recv_pool",
         "//runtime/src/iree/hal/testing:mock_device",
+        "//runtime/src/iree/net:carrier",
+        "//runtime/src/iree/net:message_endpoint",
         "//runtime/src/iree/net:session",
         "//runtime/src/iree/net:transport_factory",
         "//runtime/src/iree/net/carrier/loopback:factory",
+        "//runtime/src/iree/net/channel/bulk:bulk_channel",
+        "//runtime/src/iree/net/channel/bulk:frame",
         "//runtime/src/iree/net/channel/queue:queue_channel",
+        "//runtime/src/iree/net/channel/util:frame_sender",
         "//runtime/src/iree/net/channel/util:sequence_window",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

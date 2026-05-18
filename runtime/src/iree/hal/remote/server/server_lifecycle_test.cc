@@ -14,14 +14,20 @@
 #include "iree/hal/remote/client/api.h"
 #include "iree/hal/remote/protocol/common.h"
 #include "iree/hal/remote/server/bulk_session.h"
+#include "iree/hal/remote/server/bulk_test_util.h"
 #include "iree/hal/remote/server/server.h"
 #include "iree/hal/remote/util/recv_pool.h"
 #include "iree/hal/testing/mock_device.h"
 #include "iree/net/carrier/loopback/factory.h"
+#include "iree/net/channel/bulk/bulk_channel.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
 namespace {
+
+using iree::hal::remote::server::testing::MockCarrier;
+using iree::hal::remote::server::testing::MockEndpoint;
+using iree::hal::remote::server::testing::TestBufferPool;
 
 class ServerLifecycleTest : public ::testing::Test {
  protected:
@@ -154,6 +160,41 @@ class ServerLifecycleTest : public ::testing::Test {
     return client_connect_status_;
   }
 
+  iree_hal_remote_server_session_t* ActiveSessionSlot() {
+    for (uint32_t i = 0; i < server_->options.max_connections; ++i) {
+      if (server_->sessions[i].session) return &server_->sessions[i];
+    }
+    return nullptr;
+  }
+
+  iree_status_t CreateBulkChannel(
+      iree_hal_remote_server_session_t* session_slot, MockEndpoint* endpoint,
+      iree_net_bulk_channel_t** out_bulk_channel) {
+    *out_bulk_channel = nullptr;
+    TestBufferPool buffer_pool;
+    iree_status_t status =
+        buffer_pool.Initialize(/*buffer_count=*/16, /*buffer_size=*/1024);
+    if (iree_status_is_ok(status)) {
+      iree_net_bulk_channel_callbacks_t callbacks =
+          iree_hal_remote_server_bulk_session_channel_callbacks(session_slot);
+      status = iree_net_bulk_channel_create(
+          endpoint->as_endpoint(), /*options=*/nullptr, buffer_pool.release(),
+          callbacks, iree_allocator_system(), out_bulk_channel);
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_net_bulk_channel_activate(*out_bulk_channel);
+    }
+    return status;
+  }
+
+  void RequestServerStop() {
+    server_stopped_ = false;
+    iree_hal_remote_server_stopped_callback_t callback;
+    callback.fn = OnServerStopped;
+    callback.user_data = this;
+    IREE_ASSERT_OK(iree_hal_remote_server_stop(server_, callback));
+  }
+
   void DrainProactor() {
     for (;;) {
       iree_host_size_t completed = 0;
@@ -190,11 +231,7 @@ class ServerLifecycleTest : public ::testing::Test {
   }
 
   void StopServerAndWait() {
-    server_stopped_ = false;
-    iree_hal_remote_server_stopped_callback_t callback;
-    callback.fn = OnServerStopped;
-    callback.user_data = this;
-    IREE_ASSERT_OK(iree_hal_remote_server_stop(server_, callback));
+    RequestServerStop();
     ASSERT_TRUE(PollUntil([&]() { return server_stopped_; }))
         << "Server stop timed out";
   }
@@ -243,6 +280,65 @@ TEST_F(ServerLifecycleTest, AcceptFailureClearsReservedSlot) {
   EXPECT_EQ(session.resource_table.entries, nullptr);
   EXPECT_EQ(session.observed_submission_window.storage, nullptr);
   EXPECT_EQ(session.completed_signal_window.storage, nullptr);
+}
+
+TEST_F(ServerLifecycleTest, StopWaitsForPendingBulkSendBeforeFreeingSlot) {
+  CreateLoopbackFactory(IREE_HAL_REMOTE_REQUIRED_ENDPOINT_COUNT);
+  CreateAndStartServer();
+  CreateClientDevice();
+
+  EXPECT_EQ(ConnectAndWait(), IREE_STATUS_OK);
+  iree_hal_remote_server_session_t* session_slot = nullptr;
+  ASSERT_TRUE(PollUntil([&]() {
+    session_slot = ActiveSessionSlot();
+    return session_slot &&
+           iree_hal_remote_server_bulk_session_channel(session_slot);
+  }));
+  ASSERT_EQ(server_->active_session_count, 1u);
+
+  iree_net_bulk_channel_t* live_bulk_channel =
+      iree_hal_remote_server_bulk_session_take_channel(session_slot);
+  ASSERT_NE(live_bulk_channel, nullptr);
+  iree_net_bulk_channel_detach(live_bulk_channel);
+  iree_net_bulk_channel_release(live_bulk_channel);
+
+  std::unique_ptr<MockCarrier> carrier = MockCarrier::Create();
+  MockEndpoint endpoint;
+  endpoint.carrier = carrier.get();
+  iree_net_bulk_channel_t* bulk_channel = nullptr;
+  IREE_ASSERT_OK(CreateBulkChannel(session_slot, &endpoint, &bulk_channel));
+  IREE_ASSERT_OK(iree_hal_remote_server_bulk_session_attach_channel(
+      session_slot, bulk_channel));
+
+  IREE_ASSERT_OK(iree_net_bulk_channel_send_start(
+      bulk_channel, /*transfer_id=*/1, /*total_size=*/0,
+      IREE_NET_BULK_FRAME_FLAG_NONE, /*operation_user_data=*/0));
+  ASSERT_EQ(carrier->sends.size(), 1u);
+  EXPECT_TRUE(iree_net_bulk_channel_has_pending_sends(bulk_channel));
+
+  RequestServerStop();
+  ASSERT_TRUE(PollUntil([&]() {
+    return server_->state == IREE_HAL_REMOTE_SERVER_STATE_STOPPING &&
+           server_->listener == nullptr &&
+           server_->active_session_count == 1u &&
+           session_slot->session == nullptr &&
+           iree_any_bit_set(
+               session_slot->flags,
+               IREE_HAL_REMOTE_SERVER_SESSION_FLAG_BULK_DRAIN_PENDING);
+  }));
+  EXPECT_FALSE(server_stopped_);
+  EXPECT_TRUE(iree_net_bulk_channel_has_pending_sends(bulk_channel));
+  EXPECT_NE(session_slot->bulk_session, nullptr);
+
+  carrier->CompleteSend(/*send_index=*/0, iree_ok_status());
+  ASSERT_TRUE(PollUntil([&]() { return server_stopped_; }));
+  EXPECT_EQ(server_->state, IREE_HAL_REMOTE_SERVER_STATE_STOPPED);
+  EXPECT_EQ(server_->active_session_count, 0u);
+  EXPECT_EQ(session_slot->flags, 0u);
+  EXPECT_TRUE(
+      iree_hal_remote_server_bulk_session_is_empty(session_slot->bulk_session));
+
+  iree_net_bulk_channel_release(bulk_channel);
 }
 
 }  // namespace

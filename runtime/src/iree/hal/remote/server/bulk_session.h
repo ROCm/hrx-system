@@ -35,7 +35,7 @@ typedef struct iree_hal_remote_server_session_t
     iree_hal_remote_server_session_t;
 typedef struct iree_net_bulk_receive_window_t iree_net_bulk_receive_window_t;
 
-// Allocation parameters for per-session bulk transfer state.
+// Creation parameters for per-session bulk transfer state.
 typedef struct iree_hal_remote_server_bulk_session_options_t {
   // Maximum number of concurrent bulk transfers in the active transfer table.
   iree_host_size_t active_transfer_capacity;
@@ -60,8 +60,8 @@ typedef struct iree_hal_remote_server_bulk_session_options_t {
 iree_hal_remote_server_bulk_session_options_t
 iree_hal_remote_server_bulk_session_options_default(void);
 
-// Allocates and initializes bulk transfer state for |session_slot|.
-iree_status_t iree_hal_remote_server_bulk_session_allocate(
+// Creates and initializes bulk transfer state for |session_slot|.
+iree_status_t iree_hal_remote_server_bulk_session_create(
     iree_hal_remote_server_session_t* session_slot,
     const iree_hal_remote_server_bulk_session_options_t* options,
     iree_allocator_t host_allocator,
