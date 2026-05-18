@@ -98,10 +98,8 @@ class ClientBulkDownloadReceiverTest : public ::testing::Test {
     }
     iree_hal_remote_client_device_deinitialize_bulk_transfers(&device_);
     iree_hal_remote_client_bulk_session_deinitialize(&device_.bulk_session);
-    if (proactor_) {
-      iree_async_proactor_release(proactor_);
-      proactor_ = NULL;
-    }
+    iree_async_proactor_release(proactor_);
+    proactor_ = NULL;
   }
 
   uint64_t BeginBufferMapRead(iree_byte_span_t target_bytes) {

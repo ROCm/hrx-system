@@ -92,15 +92,22 @@ iree_cc_test(
     "bulk.h"
     "bulk_download_receiver.h"
     "bulk_download_receiver_test.cc"
+    "bulk_session.h"
     "bulk_test_util.h"
+    "bulk_transfer.h"
+    "device.h"
     "file.h"
   DEPS
     ::client
     iree::async
     iree::async::platform
     iree::base
+    iree::base::internal::arena
+    iree::base::threading
     iree::hal
     iree::hal::remote::protocol::common
+    iree::hal::remote::protocol::profile
+    iree::hal::remote::util::bulk_transfer_tracker
     iree::hal::remote::util::queue_header_pool
     iree::io::file_handle
     iree::net::channel::bulk::bulk_channel
@@ -108,7 +115,9 @@ iree_cc_test(
     iree::net::channel::bulk::transfer_table
     iree::net::channel::queue::queue_channel
     iree::net::channel::util::frame_sender
+    iree::net::channel::util::sequence_window
     iree::net::message_endpoint
+    iree::net::session
     iree::testing::gtest
     iree::testing::gtest_main
     iree::testing::temp_file
@@ -123,19 +132,30 @@ iree_cc_test(
     "bulk.h"
     "bulk_profile_receiver.h"
     "bulk_profile_receiver_test.cc"
+    "bulk_session.h"
     "bulk_test_util.h"
+    "bulk_transfer.h"
+    "device.h"
+    "file.h"
   DEPS
     ::client
+    iree::async
     iree::base
+    iree::base::internal::arena
+    iree::base::threading
     iree::hal
+    iree::hal::remote::protocol::common
     iree::hal::remote::protocol::profile
+    iree::hal::remote::util::bulk_transfer_tracker
     iree::hal::remote::util::queue_header_pool
     iree::net::channel::bulk::bulk_channel
     iree::net::channel::bulk::frame
     iree::net::channel::bulk::transfer_table
     iree::net::channel::queue::queue_channel
     iree::net::channel::util::frame_sender
+    iree::net::channel::util::sequence_window
     iree::net::message_endpoint
+    iree::net::session
     iree::testing::gtest
     iree::testing::gtest_main
 )
@@ -156,22 +176,66 @@ iree_cc_test(
     iree::testing::gtest_main
 )
 
+iree_cc_binary_benchmark(
+  NAME
+    bulk_upload_sender_benchmark
+  SRCS
+    "bulk.h"
+    "bulk_session.h"
+    "bulk_test_util.h"
+    "bulk_transfer.h"
+    "bulk_upload_sender.h"
+    "bulk_upload_sender_benchmark.cc"
+    "device.h"
+    "file.h"
+  DEPS
+    ::client
+    iree::async
+    iree::base
+    iree::base::internal::arena
+    iree::base::threading
+    iree::hal
+    iree::hal::remote::protocol::common
+    iree::hal::remote::protocol::profile
+    iree::hal::remote::util::bulk_transfer_tracker
+    iree::hal::remote::util::queue_header_pool
+    iree::net::channel::bulk::bulk_channel
+    iree::net::channel::bulk::frame
+    iree::net::channel::bulk::transfer_table
+    iree::net::channel::queue::queue_channel
+    iree::net::channel::util::frame_sender
+    iree::net::channel::util::sequence_window
+    iree::net::message_endpoint
+    iree::net::session
+    iree::testing::benchmark
+    iree::testing::benchmark_main
+    iree::third_party::google_benchmark
+  TESTONLY
+)
+
 iree_cc_test(
   NAME
     bulk_upload_sender_test
   SRCS
     "bulk.h"
+    "bulk_session.h"
     "bulk_test_util.h"
+    "bulk_transfer.h"
     "bulk_upload_sender.h"
     "bulk_upload_sender_test.cc"
+    "device.h"
     "file.h"
   DEPS
     ::client
     iree::async
     iree::async::platform
     iree::base
+    iree::base::internal::arena
+    iree::base::threading
     iree::hal
     iree::hal::remote::protocol::common
+    iree::hal::remote::protocol::profile
+    iree::hal::remote::util::bulk_transfer_tracker
     iree::hal::remote::util::queue_header_pool
     iree::hal::remote::util::recv_pool
     iree::io::file_handle
@@ -180,7 +244,9 @@ iree_cc_test(
     iree::net::channel::bulk::transfer_table
     iree::net::channel::queue::queue_channel
     iree::net::channel::util::frame_sender
+    iree::net::channel::util::sequence_window
     iree::net::message_endpoint
+    iree::net::session
     iree::testing::gtest
     iree::testing::gtest_main
     iree::testing::temp_file

@@ -47,6 +47,15 @@ struct MockEndpoint {
   // Status returned by the next endpoint send.
   iree_status_code_t next_send_error = IREE_STATUS_OK;
 
+  // Whether send payload bytes are captured into |CapturedBulkSend::data|.
+  bool capture_send_payload = true;
+
+  // Endpoint send budget reported to the bulk channel.
+  iree_net_carrier_send_budget_t send_budget = {1024 * 1024, 64};
+
+  // Cumulative peer DATA receive credit limit advertised to the channel.
+  uint64_t remote_credit_limit = 0;
+
   // True after endpoint activation.
   bool activated = false;
 
@@ -87,20 +96,34 @@ struct MockEndpoint {
                                 "captured send size overflow");
       }
     }
-    captured.data.reserve(captured.total_length);
+    iree_host_size_t capture_capacity =
+        endpoint->capture_send_payload
+            ? captured.total_length
+            : iree_min(captured.total_length,
+                       (iree_host_size_t)IREE_NET_BULK_FRAME_HEADER_SIZE);
+    captured.data.reserve(capture_capacity);
     for (iree_host_size_t i = 0; i < params->data.count; ++i) {
+      if (!endpoint->capture_send_payload &&
+          captured.data.size() >= IREE_NET_BULK_FRAME_HEADER_SIZE) {
+        break;
+      }
       iree_async_span_t span = params->data.values[i];
       const uint8_t* span_data = iree_async_span_ptr(span);
+      iree_host_size_t capture_length = span.length;
+      if (!endpoint->capture_send_payload) {
+        capture_length = iree_min(span.length, IREE_NET_BULK_FRAME_HEADER_SIZE -
+                                                   captured.data.size());
+      }
       captured.data.insert(captured.data.end(), span_data,
-                           span_data + span.length);
+                           span_data + capture_length);
     }
     endpoint->sends.push_back(std::move(captured));
     return iree_ok_status();
   }
 
   static iree_net_carrier_send_budget_t QuerySendBudget(void* self) {
-    (void)self;
-    return {1024 * 1024, 64};
+    MockEndpoint* endpoint = static_cast<MockEndpoint*>(self);
+    return endpoint->send_budget;
   }
 
   static iree_status_t BeginSend(void* self, iree_host_size_t size,
@@ -149,6 +172,22 @@ struct MockEndpoint {
     return callbacks.on_message(
         callbacks.user_data,
         iree_make_const_byte_span(message.data(), message.size()), &lease);
+  }
+
+  iree_status_t InjectCredit(uint32_t credit_delta) {
+    if (remote_credit_limit > UINT64_MAX - (uint64_t)credit_delta) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "mock bulk credit limit overflow");
+    }
+    remote_credit_limit += credit_delta;
+    std::vector<uint8_t> message(IREE_NET_BULK_FRAME_HEADER_SIZE);
+    iree_net_bulk_frame_header_t header;
+    iree_net_bulk_frame_header_initialize(
+        IREE_NET_BULK_FRAME_TYPE_CREDIT, IREE_NET_BULK_FRAME_FLAG_NONE,
+        /*transfer_id=*/0, remote_credit_limit, /*chunk_offset=*/0,
+        /*chunk_length=*/0, /*sequence=*/0, &header);
+    memcpy(message.data(), &header, sizeof(header));
+    return InjectMessage(message);
   }
 
   void CompleteSend(iree_host_size_t send_index, iree_status_t status) {

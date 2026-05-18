@@ -99,21 +99,8 @@ class ClientBulkUploadSenderTest : public ::testing::Test {
         &test->device_, test->bulk_channel_, operation_user_data, status);
   }
 
-  static std::vector<uint8_t> BuildCreditFrame(uint64_t credit_limit) {
-    std::vector<uint8_t> message(IREE_NET_BULK_FRAME_HEADER_SIZE);
-    iree_net_bulk_frame_header_t header;
-    iree_net_bulk_frame_header_initialize(
-        IREE_NET_BULK_FRAME_TYPE_CREDIT, IREE_NET_BULK_FRAME_FLAG_NONE,
-        /*transfer_id=*/0, credit_limit, /*chunk_offset=*/0,
-        /*chunk_length=*/0, /*sequence=*/0, &header);
-    memcpy(message.data(), &header, sizeof(header));
-    return message;
-  }
-
   void GrantRemoteChunkCredit(uint32_t credit_delta) {
-    remote_credit_limit_ += credit_delta;
-    IREE_ASSERT_OK(
-        endpoint_.InjectMessage(BuildCreditFrame(remote_credit_limit_)));
+    IREE_ASSERT_OK(endpoint_.InjectCredit(credit_delta));
   }
 
   void TrySendAllUploads() {
@@ -242,9 +229,6 @@ class ClientBulkUploadSenderTest : public ::testing::Test {
 
   // Receive buffer pool used as async file read staging storage.
   iree_hal_remote_recv_pool_t* recv_pool_ = NULL;
-
-  // Cumulative peer DATA receive credit limit advertised to the channel.
-  uint64_t remote_credit_limit_ = 0;
 };
 
 TEST_F(ClientBulkUploadSenderTest,
