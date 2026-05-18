@@ -141,6 +141,34 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "bulk_session_test",
+    srcs = [
+        "bulk_session_test.cc",
+        "bulk_test_util.h",
+        "server.h",
+        "session.h",
+    ],
+    deps = [
+        ":server",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/net:carrier",
+        "//runtime/src/iree/net:message_endpoint",
+        "//runtime/src/iree/net:session",
+        "//runtime/src/iree/net:transport_factory",
+        "//runtime/src/iree/net/channel/bulk:bulk_channel",
+        "//runtime/src/iree/net/channel/bulk:frame",
+        "//runtime/src/iree/net/channel/queue:queue_channel",
+        "//runtime/src/iree/net/channel/util:frame_sender",
+        "//runtime/src/iree/net/channel/util:sequence_window",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "bulk_download_sender_test",
     srcs = [
         "bulk_download_sender_test.cc",

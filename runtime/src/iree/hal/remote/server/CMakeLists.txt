@@ -147,6 +147,33 @@ iree_cc_test(
 
 iree_cc_test(
   NAME
+    bulk_session_test
+  SRCS
+    "bulk_session_test.cc"
+    "bulk_test_util.h"
+    "server.h"
+    "session.h"
+  DEPS
+    ::server
+    iree::async
+    iree::base
+    iree::base::threading
+    iree::hal
+    iree::net::carrier
+    iree::net::channel::bulk::bulk_channel
+    iree::net::channel::bulk::frame
+    iree::net::channel::queue::queue_channel
+    iree::net::channel::util::frame_sender
+    iree::net::channel::util::sequence_window
+    iree::net::message_endpoint
+    iree::net::session
+    iree::net::transport_factory
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
     bulk_download_sender_test
   SRCS
     "bulk_download_sender_test.cc"
