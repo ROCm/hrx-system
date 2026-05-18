@@ -92,6 +92,9 @@ struct CapturedSend {
   // Concatenated scatter-gather send bytes captured at the carrier boundary.
   std::vector<uint8_t> data;
 
+  // Total scatter-gather send byte length.
+  iree_host_size_t total_length = 0;
+
   // Carrier completion user data for the captured send.
   uint64_t carrier_operation_user_data = 0;
 
@@ -109,12 +112,15 @@ struct MockCarrier {
   // Optional status for the next send submission.
   iree_status_code_t next_send_error = IREE_STATUS_OK;
 
+  // Whether send payload bytes are captured into |CapturedSend::data|.
+  bool capture_send_payload = true;
+
   void CompleteSend(iree_host_size_t send_index, iree_status_t status) {
     CapturedSend& captured = sends[send_index];
     captured.completed = true;
     base.callback.fn(base.callback.user_data,
                      captured.carrier_operation_user_data, status,
-                     captured.data.size(), nullptr);
+                     captured.total_length, nullptr);
   }
 
   static void Destroy(iree_net_carrier_t* carrier) {}
@@ -161,11 +167,20 @@ struct MockCarrier {
                                 "mock send payload size overflow");
       }
     }
-    captured.data.reserve(total_length);
+    captured.total_length = total_length;
+    iree_host_size_t capture_length =
+        mock->capture_send_payload
+            ? total_length
+            : iree_min(total_length, IREE_NET_BULK_FRAME_HEADER_SIZE);
+    captured.data.reserve(capture_length);
     for (iree_host_size_t i = 0; i < params->data.count; ++i) {
+      if (captured.data.size() == capture_length) break;
       iree_async_span_t span = params->data.values[i];
       uint8_t* pointer = iree_async_span_ptr(span);
-      captured.data.insert(captured.data.end(), pointer, pointer + span.length);
+      iree_host_size_t span_capture_length =
+          iree_min(span.length, capture_length - captured.data.size());
+      captured.data.insert(captured.data.end(), pointer,
+                           pointer + span_capture_length);
     }
     mock->sends.push_back(std::move(captured));
     return iree_ok_status();

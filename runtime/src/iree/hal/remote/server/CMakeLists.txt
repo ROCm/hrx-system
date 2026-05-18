@@ -207,6 +207,41 @@ iree_cc_test(
 
 iree_cc_binary_benchmark(
   NAME
+    bulk_download_sender_benchmark
+  SRCS
+    "bulk_download_sender_benchmark.cc"
+    "bulk_test_util.h"
+    "resource_table.h"
+    "server.h"
+    "session.h"
+  DEPS
+    ::bulk_router
+    ::server
+    iree::async
+    iree::async::util::proactor_pool
+    iree::base
+    iree::base::threading
+    iree::hal
+    iree::hal::drivers::local_task::registration
+    iree::hal::remote::protocol::common
+    iree::hal::remote::util::bulk_transfer_scheduler
+    iree::net::carrier
+    iree::net::channel::bulk::bulk_channel
+    iree::net::channel::bulk::frame
+    iree::net::channel::queue::queue_channel
+    iree::net::channel::util::frame_sender
+    iree::net::channel::util::sequence_window
+    iree::net::message_endpoint
+    iree::net::session
+    iree::net::transport_factory
+    iree::testing::benchmark
+    iree::testing::benchmark_main
+    iree::third_party::google_benchmark
+  TESTONLY
+)
+
+iree_cc_binary_benchmark(
+  NAME
     bulk_profile_sender_benchmark
   SRCS
     "bulk.h"
@@ -219,6 +254,7 @@ iree_cc_binary_benchmark(
     ::bulk_router
     ::server
     iree::async
+    iree::async::util::proactor_pool
     iree::base
     iree::base::threading
     iree::hal
