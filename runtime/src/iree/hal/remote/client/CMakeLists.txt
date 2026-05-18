@@ -158,6 +158,38 @@ iree_cc_test(
 
 iree_cc_test(
   NAME
+    bulk_upload_sender_test
+  SRCS
+    "bulk.h"
+    "bulk_test_util.h"
+    "bulk_upload_sender.h"
+    "bulk_upload_sender_test.cc"
+    "file.h"
+  DEPS
+    ::client
+    iree::async
+    iree::async::platform
+    iree::base
+    iree::hal
+    iree::hal::remote::protocol::common
+    iree::hal::remote::util::queue_header_pool
+    iree::hal::remote::util::recv_pool
+    iree::io::file_handle
+    iree::net::channel::bulk::bulk_channel
+    iree::net::channel::bulk::frame
+    iree::net::channel::bulk::transfer_table
+    iree::net::channel::queue::queue_channel
+    iree::net::channel::util::frame_sender
+    iree::net::message_endpoint
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::testing::temp_file
+  LABELS
+    "requires-filesystem"
+)
+
+iree_cc_test(
+  NAME
     file_test
   SRCS
     "file.h"

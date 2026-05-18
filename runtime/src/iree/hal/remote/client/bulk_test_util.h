@@ -19,6 +19,10 @@
 
 namespace iree::hal::remote::client::testing {
 
+using BulkSendCompleteHook = iree_status_t (*)(void* user_data,
+                                               uint64_t operation_user_data,
+                                               iree_status_t status);
+
 struct CapturedBulkSend {
   // Concatenated scatter-gather bytes submitted through the endpoint.
   std::vector<uint8_t> data;
@@ -133,6 +137,20 @@ struct MockEndpoint {
 
   iree_net_message_endpoint_t as_endpoint() { return {this, VTable()}; }
 
+  iree_status_t InjectMessage(const std::vector<uint8_t>& message) {
+    if (!callbacks.on_message) {
+      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "mock endpoint has no message callback");
+    }
+    iree_async_buffer_lease_t lease;
+    memset(&lease, 0, sizeof(lease));
+    lease.span = iree_async_span_from_ptr(const_cast<uint8_t*>(message.data()),
+                                          message.size());
+    return callbacks.on_message(
+        callbacks.user_data,
+        iree_make_const_byte_span(message.data(), message.size()), &lease);
+  }
+
   void CompleteSend(iree_host_size_t send_index, iree_status_t status) {
     CapturedBulkSend& captured = sends[send_index];
     captured.completed = true;
@@ -154,6 +172,15 @@ struct BulkChannelCallbacks {
 
   // Send-completion status codes observed by the channel.
   std::vector<iree_status_code_t> send_completion_status_codes;
+
+  // Status codes returned by the optional send-completion hook.
+  std::vector<iree_status_code_t> send_complete_result_status_codes;
+
+  // Optional hook that consumes the send-completion status.
+  BulkSendCompleteHook send_complete_hook = NULL;
+
+  // User data passed to |send_complete_hook|.
+  void* send_complete_user_data = NULL;
 
   static iree_status_t OnStart(void* user_data, uint64_t transfer_id,
                                uint64_t total_size,
@@ -202,7 +229,15 @@ struct BulkChannelCallbacks {
         static_cast<BulkChannelCallbacks*>(user_data);
     callbacks->send_completions.push_back(operation_user_data);
     callbacks->send_completion_status_codes.push_back(iree_status_code(status));
-    iree_status_free(status);
+    if (callbacks->send_complete_hook) {
+      iree_status_t hook_status = callbacks->send_complete_hook(
+          callbacks->send_complete_user_data, operation_user_data, status);
+      callbacks->send_complete_result_status_codes.push_back(
+          iree_status_code(hook_status));
+      iree_status_free(hook_status);
+    } else {
+      iree_status_free(status);
+    }
   }
 
   iree_net_bulk_channel_callbacks_t MakeCallbacks() {

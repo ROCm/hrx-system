@@ -397,6 +397,10 @@ static iree_status_t iree_hal_remote_client_bulk_try_send_upload_locked(
   if (iree_any_bit_set(
           transfer->flags,
           IREE_HAL_REMOTE_CLIENT_FILE_READ_TRANSFER_FLAG_COMPLETE_SENT)) {
+    if (transfer->pending_send_count == 0) {
+      iree_hal_remote_client_bulk_upload_sender_release_transfer(
+          device->bulk_session.transfers, table_transfer);
+    }
     return iree_ok_status();
   }
   if (!channel) {
