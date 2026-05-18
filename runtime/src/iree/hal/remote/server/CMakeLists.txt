@@ -247,6 +247,29 @@ iree_cc_test(
 
 iree_cc_test(
   NAME
+    profile_relay_test
+  SRCS
+    "profile_relay_test.cc"
+    "server.h"
+    "session.h"
+  DEPS
+    ::bulk_router
+    ::server
+    iree::async
+    iree::base
+    iree::base::threading
+    iree::hal
+    iree::hal::remote::protocol::control
+    iree::net::channel::queue::queue_channel
+    iree::net::channel::util::sequence_window
+    iree::net::session
+    iree::net::transport_factory
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
     session_test
   SRCS
     "resource_table.h"
