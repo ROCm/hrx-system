@@ -266,6 +266,10 @@ typedef struct iree_hal_remote_client_driver_options_t {
   uint32_t numa_node_id;
 
   // Default device options when none are provided during device creation.
+  // If server_address is populated the driver exposes one enumerated
+  // client-supplied endpoint. Remote drivers do not query server-local device
+  // fleets during enumeration; create-by-path remains the primary way to
+  // select the endpoint address.
   iree_hal_remote_client_device_options_t default_device_options;
 } iree_hal_remote_client_driver_options_t;
 
@@ -280,11 +284,17 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_client_driver_options_parse(
     iree_hal_remote_client_driver_options_t* options,
     iree_string_pair_list_t params);
 
-// Creates a remote HAL driver from which devices can be created.
+// Creates a remote HAL driver from which endpoint devices can be created.
 //
 // The provided |identifier| will be used by programs to distinguish the device
 // type from other HAL implementations. If compiling programs with the IREE
 // compiler this must match the value used by IREE::HAL::TargetDevice.
+//
+// Remote driver enumeration is intentionally local to the client process: it
+// reports the default endpoint address configured in |options|, if any, and
+// never mirrors the server's private device topology. Callers that need a
+// specific remote endpoint should pass it as the device path or as the
+// "server" device parameter.
 //
 // |out_driver| must be released by the caller (see iree_hal_driver_release).
 IREE_API_EXPORT iree_status_t iree_hal_remote_client_driver_create(

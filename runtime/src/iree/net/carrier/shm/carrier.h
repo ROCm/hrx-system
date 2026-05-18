@@ -189,9 +189,9 @@ typedef struct iree_net_shm_carrier_options_t {
   // Mode bitfield controlling carrier behavior.
   iree_net_shm_carrier_mode_t mode;
   // Maximum endpoints per connection. Each open_endpoint() call consumes one
-  // slot. Sessions need at least 2 (control + one application endpoint).
-  // Used by the factory when creating connections; individual carriers ignore
-  // this field.
+  // slot. Sessions need one control endpoint plus any application endpoints
+  // declared in their session options. Used by the factory when creating
+  // connections; individual carriers ignore this field.
   uint16_t max_endpoint_count;
 } iree_net_shm_carrier_options_t;
 

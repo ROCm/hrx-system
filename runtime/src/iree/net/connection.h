@@ -87,9 +87,15 @@ typedef struct iree_async_proactor_t iree_async_proactor_t;
 // Concrete implementations (TCP connection, QUIC connection, RDMA connection)
 // embed this structure at offset 0.
 struct iree_net_connection_t {
+  // Reference count controlling connection lifetime.
   iree_atomic_ref_count_t ref_count;
+  // Vtable implementing the concrete transport connection.
   const iree_net_connection_vtable_t* vtable;
+  // Host allocator used for connection lifetime allocations.
   iree_allocator_t host_allocator;
+  // Maximum endpoint slots available on the connection, including the control
+  // endpoint opened by iree_net_session_t.
+  uint32_t max_endpoint_count;
 };
 
 struct iree_net_connection_vtable_t {
@@ -117,10 +123,11 @@ struct iree_net_connection_vtable_t {
 // Initializes base connection fields. Called by connection implementations.
 static inline void iree_net_connection_initialize(
     const iree_net_connection_vtable_t* vtable, iree_allocator_t host_allocator,
-    iree_net_connection_t* out_connection) {
+    uint32_t max_endpoint_count, iree_net_connection_t* out_connection) {
   iree_atomic_ref_count_init(&out_connection->ref_count);
   out_connection->vtable = vtable;
   out_connection->host_allocator = host_allocator;
+  out_connection->max_endpoint_count = max_endpoint_count;
 }
 
 // Retains a reference to the connection (thread-safe).
@@ -180,6 +187,16 @@ static inline iree_status_t iree_net_connection_open_endpoint(
     iree_net_connection_t* connection,
     iree_net_endpoint_ready_callback_t callback) {
   return connection->vtable->open_endpoint(connection, callback);
+}
+
+// Returns the maximum number of endpoint slots available on this connection.
+//
+// The count includes the session control endpoint. Callers that need
+// application endpoints must reserve one control slot plus their application
+// endpoint count.
+static inline uint32_t iree_net_connection_max_endpoint_count(
+    iree_net_connection_t* connection) {
+  return connection->max_endpoint_count;
 }
 
 // Returns the carrier backing this connection's endpoints.

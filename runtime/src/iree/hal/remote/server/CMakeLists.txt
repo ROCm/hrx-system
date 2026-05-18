@@ -19,6 +19,8 @@ iree_cc_library(
     "bulk.c"
     "bulk.h"
     "file_index.c"
+    "profile.c"
+    "profile.h"
     "resource_table.c"
     "resource_table.h"
     "server.c"
@@ -35,6 +37,7 @@ iree_cc_library(
     iree::hal::remote::protocol::commands
     iree::hal::remote::protocol::common
     iree::hal::remote::protocol::control
+    iree::hal::remote::protocol::profile
     iree::hal::remote::protocol::queue
     iree::hal::remote::util::bulk_transfer_tracker
     iree::hal::remote::util::queue_header_pool

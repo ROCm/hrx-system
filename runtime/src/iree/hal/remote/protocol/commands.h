@@ -44,6 +44,9 @@ extern "C" {
 typedef enum iree_hal_remote_cmd_type_e {
   // ── Synchronization ─────────────────────────────────────────────────────
   IREE_HAL_REMOTE_CMD_EXECUTION_BARRIER = 0x0001,
+  IREE_HAL_REMOTE_CMD_EVENT_SIGNAL = 0x0002,
+  IREE_HAL_REMOTE_CMD_EVENT_RESET = 0x0003,
+  IREE_HAL_REMOTE_CMD_EVENT_WAIT = 0x0004,
 
   // ── Buffer ──────────────────────────────────────────────────────────────
   IREE_HAL_REMOTE_CMD_BUFFER_ADVISE = 0x0010,
@@ -122,6 +125,42 @@ typedef struct iree_hal_remote_execution_barrier_cmd_t {
   //   (total command padded to 8-byte alignment)
 } iree_hal_remote_execution_barrier_cmd_t;
 static_assert(sizeof(iree_hal_remote_execution_barrier_cmd_t) == 24, "");
+
+// EVENT_SIGNAL: Sets an event when prior commands reach source_stage_mask.
+typedef struct iree_hal_remote_event_signal_cmd_t {
+  iree_hal_remote_cmd_header_t header;
+  iree_hal_remote_resource_id_t event_id;
+  uint32_t source_stage_mask;  // iree_hal_execution_stage_t
+  uint32_t reserved;           // Must be 0.
+} iree_hal_remote_event_signal_cmd_t;
+static_assert(sizeof(iree_hal_remote_event_signal_cmd_t) == 24, "");
+
+// EVENT_RESET: Resets an event when prior commands reach source_stage_mask.
+typedef struct iree_hal_remote_event_reset_cmd_t {
+  iree_hal_remote_cmd_header_t header;
+  iree_hal_remote_resource_id_t event_id;
+  uint32_t source_stage_mask;  // iree_hal_execution_stage_t
+  uint32_t reserved;           // Must be 0.
+} iree_hal_remote_event_reset_cmd_t;
+static_assert(sizeof(iree_hal_remote_event_reset_cmd_t) == 24, "");
+
+// EVENT_WAIT: Waits on events and applies a pipeline barrier.
+// Variable-length tail: event IDs followed by memory and buffer barriers.
+typedef struct iree_hal_remote_event_wait_cmd_t {
+  iree_hal_remote_cmd_header_t header;
+  uint32_t source_stage_mask;  // iree_hal_execution_stage_t
+  uint32_t target_stage_mask;  // iree_hal_execution_stage_t
+  uint16_t event_count;
+  uint16_t memory_barrier_count;
+  uint16_t buffer_barrier_count;
+  uint16_t reserved;  // Must be 0.
+  // Followed by:
+  //   iree_hal_remote_resource_id_t event_ids[event_count]
+  //   iree_hal_remote_memory_barrier_t memory_barriers[memory_barrier_count]
+  //   iree_hal_remote_buffer_barrier_t buffer_barriers[buffer_barrier_count]
+  //   (total command padded to 8-byte alignment)
+} iree_hal_remote_event_wait_cmd_t;
+static_assert(sizeof(iree_hal_remote_event_wait_cmd_t) == 24, "");
 
 // BUFFER_ADVISE: Provide a hint about buffer usage.
 typedef struct iree_hal_remote_buffer_advise_cmd_t {

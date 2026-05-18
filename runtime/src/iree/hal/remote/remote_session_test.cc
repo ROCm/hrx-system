@@ -29,6 +29,7 @@
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/local_task/registration/driver_module.h"
 #include "iree/hal/remote/client/api.h"
+#include "iree/hal/remote/protocol/common.h"
 #include "iree/hal/remote/server/api.h"
 #include "iree/hal/remote/server/file_index.h"
 #include "iree/hal/remote/util/recv_pool.h"
@@ -306,6 +307,68 @@ class RemoteSessionTest : public ::testing::Test {
 //===----------------------------------------------------------------------===//
 // Connection lifecycle tests
 //===----------------------------------------------------------------------===//
+
+TEST_F(RemoteSessionTest, DriverCreateDeviceByPathRequiresExplicitConnect) {
+  iree_async_proactor_pool_t* proactor_pool = nullptr;
+  IREE_ASSERT_OK(iree_async_proactor_pool_create(
+      1, /*node_ids=*/nullptr, iree_async_proactor_pool_options_default(),
+      iree_allocator_system(), &proactor_pool));
+
+  iree_hal_remote_client_driver_options_t driver_options;
+  iree_hal_remote_client_driver_options_initialize(&driver_options);
+  driver_options.transport_factory = factory_;
+
+  iree_hal_driver_t* driver = nullptr;
+  IREE_ASSERT_OK(iree_hal_remote_client_driver_create(
+      IREE_SV("remote-loopback"), &driver_options, iree_allocator_system(),
+      &driver));
+
+  iree_hal_device_create_params_t create_params =
+      iree_hal_device_create_params_default();
+  create_params.proactor_pool = proactor_pool;
+
+  iree_hal_device_t* device = nullptr;
+  IREE_ASSERT_OK(iree_hal_driver_create_device_by_path(
+      driver, IREE_SV("remote-loopback"), IREE_SV("missing-server"),
+      /*param_count=*/0, /*params=*/nullptr, &create_params,
+      iree_allocator_system(), &device));
+
+  EXPECT_EQ(iree_hal_remote_client_device_state(device),
+            IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_DISCONNECTED);
+
+  iree_hal_device_release(device);
+  iree_hal_driver_release(driver);
+  iree_async_proactor_pool_release(proactor_pool);
+}
+
+TEST_F(RemoteSessionTest, ConnectFailsWhenServerMissing) {
+  CreateClientDevice();
+
+  EXPECT_EQ(iree_hal_remote_client_device_state(client_device_),
+            IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_DISCONNECTED);
+  EXPECT_NE(ConnectAndWait(), IREE_STATUS_OK);
+  EXPECT_EQ(iree_hal_remote_client_device_state(client_device_),
+            IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_ERROR);
+}
+
+TEST_F(RemoteSessionTest, ConnectFailsWithInsufficientEndpointCapacity) {
+  iree_net_transport_factory_release(factory_);
+  factory_ = nullptr;
+
+  iree_net_loopback_factory_options_t factory_options =
+      iree_net_loopback_factory_options_default();
+  factory_options.max_endpoint_count =
+      IREE_HAL_REMOTE_REQUIRED_ENDPOINT_COUNT - 1u;
+  IREE_ASSERT_OK(iree_net_loopback_factory_create(
+      factory_options, iree_allocator_system(), &factory_));
+
+  CreateAndStartServer();
+  CreateClientDevice();
+
+  EXPECT_EQ(ConnectAndWait(), IREE_STATUS_RESOURCE_EXHAUSTED);
+  EXPECT_EQ(iree_hal_remote_client_device_state(client_device_),
+            IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_ERROR);
+}
 
 TEST_F(RemoteSessionTest, ConnectSucceeds) {
   CreateAndStartServer();
@@ -729,6 +792,48 @@ class RemoteBufferTest : public ::testing::Test {
         iree_allocator_system(), &client_device_));
   }
 
+  void AllocateMappableBuffer(iree_device_size_t allocation_size,
+                              iree_hal_buffer_t** out_buffer) {
+    iree_hal_allocator_t* allocator = iree_hal_device_allocator(client_device_);
+
+    iree_hal_buffer_params_t params = {0};
+    params.usage =
+        IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED;
+    params.access = IREE_HAL_MEMORY_ACCESS_ALL;
+    params.type =
+        IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+
+    IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
+        allocator, params, allocation_size, out_buffer));
+  }
+
+  void QueueUpdateAndWait(const void* source_buffer,
+                          iree_host_size_t source_length,
+                          iree_hal_buffer_t* target_buffer,
+                          iree_device_size_t target_offset) {
+    iree_hal_semaphore_t* semaphore = nullptr;
+    IREE_ASSERT_OK(iree_hal_semaphore_create(
+        client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+        IREE_HAL_SEMAPHORE_FLAG_NONE, &semaphore));
+
+    iree_hal_semaphore_t* signal_semaphores[] = {semaphore};
+    uint64_t signal_values[] = {1};
+    iree_hal_semaphore_list_t signal_list = {
+        /*.count=*/1,
+        /*.semaphores=*/signal_semaphores,
+        /*.payload_values=*/signal_values,
+    };
+    IREE_ASSERT_OK(iree_hal_device_queue_update(
+        client_device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+        iree_hal_semaphore_list_empty(), signal_list, source_buffer,
+        /*source_offset=*/0, target_buffer, target_offset, source_length,
+        IREE_HAL_UPDATE_FLAG_NONE));
+    IREE_ASSERT_OK(iree_hal_semaphore_wait(
+        semaphore, 1, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+
+    iree_hal_semaphore_release(semaphore);
+  }
+
   iree_status_code_t ConnectAndWait() {
     client_connect_fired_ = false;
     client_connect_status_ = IREE_STATUS_OK;
@@ -810,6 +915,90 @@ class RemoteBufferTest : public ::testing::Test {
   iree_hal_remote_server_t* teardown_server_ = nullptr;
   std::atomic<int32_t> teardown_phase_{0};
 };
+
+// Profile sink used to force client-side profile callback failure after the
+// remote bulk relay has delivered and ordered a callback.
+struct RejectingProfileSink {
+  // HAL resource header for profile sink lifetime.
+  iree_hal_resource_t resource;
+
+  // Number of begin-session callbacks observed.
+  std::atomic<uint32_t> begin_count{0};
+
+  // Number of write callbacks observed.
+  std::atomic<uint32_t> write_count{0};
+
+  // Number of end-session callbacks observed.
+  std::atomic<uint32_t> end_count{0};
+
+  // True when write callbacks should reject delivered chunks.
+  std::atomic<bool> reject_writes{false};
+};
+
+static RejectingProfileSink* RejectingProfileSinkCast(
+    iree_hal_profile_sink_t* sink) {
+  return reinterpret_cast<RejectingProfileSink*>(sink);
+}
+
+static void RejectingProfileSinkDestroy(iree_hal_profile_sink_t* sink) {
+  (void)sink;
+}
+
+static iree_status_t RejectingProfileSinkBegin(
+    iree_hal_profile_sink_t* sink,
+    const iree_hal_profile_chunk_metadata_t* metadata) {
+  (void)metadata;
+  RejectingProfileSinkCast(sink)->begin_count.fetch_add(
+      1, std::memory_order_relaxed);
+  return iree_ok_status();
+}
+
+static iree_status_t RejectingProfileSinkWrite(
+    iree_hal_profile_sink_t* sink,
+    const iree_hal_profile_chunk_metadata_t* metadata,
+    iree_host_size_t iovec_count, const iree_const_byte_span_t* iovecs) {
+  (void)metadata;
+  (void)iovec_count;
+  (void)iovecs;
+  RejectingProfileSink* rejecting_sink = RejectingProfileSinkCast(sink);
+  rejecting_sink->write_count.fetch_add(1, std::memory_order_relaxed);
+  if (rejecting_sink->reject_writes.load(std::memory_order_relaxed)) {
+    return iree_make_status(IREE_STATUS_CANCELLED,
+                            "test profile sink rejected write");
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t RejectingProfileSinkEnd(
+    iree_hal_profile_sink_t* sink,
+    const iree_hal_profile_chunk_metadata_t* metadata,
+    iree_status_code_t session_status_code) {
+  (void)metadata;
+  EXPECT_EQ(session_status_code, IREE_STATUS_OK);
+  RejectingProfileSinkCast(sink)->end_count.fetch_add(
+      1, std::memory_order_relaxed);
+  return iree_ok_status();
+}
+
+static const iree_hal_profile_sink_vtable_t kRejectingProfileSinkVTable = {
+    /*.destroy=*/RejectingProfileSinkDestroy,
+    /*.begin_session=*/RejectingProfileSinkBegin,
+    /*.write=*/RejectingProfileSinkWrite,
+    /*.end_session=*/RejectingProfileSinkEnd,
+};
+
+static void RejectingProfileSinkInitialize(RejectingProfileSink* sink) {
+  iree_hal_resource_initialize(&kRejectingProfileSinkVTable, &sink->resource);
+  sink->begin_count.store(0, std::memory_order_relaxed);
+  sink->write_count.store(0, std::memory_order_relaxed);
+  sink->end_count.store(0, std::memory_order_relaxed);
+  sink->reject_writes.store(false, std::memory_order_relaxed);
+}
+
+static iree_hal_profile_sink_t* RejectingProfileSinkAsBase(
+    RejectingProfileSink* sink) {
+  return reinterpret_cast<iree_hal_profile_sink_t*>(sink);
+}
 
 //===----------------------------------------------------------------------===//
 // Buffer allocation and map/unmap tests
@@ -982,34 +1171,116 @@ TEST_F(RemoteBufferTest, ReadWriteModifiesInPlace) {
   iree_hal_buffer_release(buffer);
 }
 
-TEST_F(RemoteBufferTest, RejectsConcurrentClientWriteMappings) {
-  iree_hal_allocator_t* allocator = iree_hal_device_allocator(client_device_);
-
-  iree_hal_buffer_params_t params = {0};
-  params.usage =
-      IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED;
-  params.access = IREE_HAL_MEMORY_ACCESS_ALL;
-  params.type =
-      IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-
+TEST_F(RemoteBufferTest, InvalidatesReadOnlyMapping) {
   iree_hal_buffer_t* buffer = nullptr;
-  IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
-      allocator, params, /*allocation_size=*/64, &buffer));
+  AllocateMappableBuffer(/*allocation_size=*/64, &buffer);
+
+  uint8_t initial_data[64];
+  memset(initial_data, 0x11, sizeof(initial_data));
+  QueueUpdateAndWait(initial_data, sizeof(initial_data), buffer,
+                     /*target_offset=*/0);
+
+  iree_hal_buffer_mapping_t mapping;
+  IREE_ASSERT_OK(iree_hal_buffer_map_range(
+      buffer, IREE_HAL_MAPPING_MODE_SCOPED, IREE_HAL_MEMORY_ACCESS_READ,
+      /*byte_offset=*/0, /*byte_length=*/64, &mapping));
+
+  uint8_t updated_data[16];
+  memset(updated_data, 0x22, sizeof(updated_data));
+  QueueUpdateAndWait(updated_data, sizeof(updated_data), buffer,
+                     /*target_offset=*/16);
+
+  IREE_ASSERT_OK(iree_hal_buffer_mapping_invalidate_range(
+      &mapping, /*byte_offset=*/16, /*byte_length=*/16));
+
+  const uint8_t* data = mapping.contents.data;
+  for (iree_host_size_t i = 0; i < 16; ++i) {
+    EXPECT_EQ(data[i], 0x11) << "prefix mismatch at byte " << i;
+  }
+  for (iree_host_size_t i = 16; i < 32; ++i) {
+    EXPECT_EQ(data[i], 0x22) << "invalidated range mismatch at byte " << i;
+  }
+  for (iree_host_size_t i = 32; i < 64; ++i) {
+    EXPECT_EQ(data[i], 0x11) << "suffix mismatch at byte " << i;
+  }
+
+  IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
+  iree_hal_buffer_release(buffer);
+}
+
+TEST_F(RemoteBufferTest, InvalidatesReadWriteMapping) {
+  iree_hal_buffer_t* buffer = nullptr;
+  AllocateMappableBuffer(/*allocation_size=*/64, &buffer);
+
+  uint8_t initial_data[64];
+  memset(initial_data, 0x33, sizeof(initial_data));
+  QueueUpdateAndWait(initial_data, sizeof(initial_data), buffer,
+                     /*target_offset=*/0);
+
+  iree_hal_buffer_mapping_t mapping;
+  IREE_ASSERT_OK(iree_hal_buffer_map_range(
+      buffer, IREE_HAL_MAPPING_MODE_SCOPED,
+      IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
+      /*byte_offset=*/0, /*byte_length=*/64, &mapping));
+  memset(mapping.contents.data + 8, 0x44, 8);
+
+  uint8_t updated_data[8];
+  memset(updated_data, 0x55, sizeof(updated_data));
+  QueueUpdateAndWait(updated_data, sizeof(updated_data), buffer,
+                     /*target_offset=*/8);
+
+  IREE_ASSERT_OK(iree_hal_buffer_mapping_invalidate_range(
+      &mapping, /*byte_offset=*/8, /*byte_length=*/8));
+  memset(mapping.contents.data + 32, 0x66, 8);
+  IREE_ASSERT_OK(iree_hal_buffer_mapping_flush_range(
+      &mapping, /*byte_offset=*/32, /*byte_length=*/8));
+  IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
+
+  IREE_ASSERT_OK(iree_hal_buffer_map_range(
+      buffer, IREE_HAL_MAPPING_MODE_SCOPED, IREE_HAL_MEMORY_ACCESS_READ,
+      /*byte_offset=*/0, /*byte_length=*/64, &mapping));
+  const uint8_t* data = mapping.contents.data;
+  for (iree_host_size_t i = 0; i < 8; ++i) {
+    EXPECT_EQ(data[i], 0x33) << "prefix mismatch at byte " << i;
+  }
+  for (iree_host_size_t i = 8; i < 16; ++i) {
+    EXPECT_EQ(data[i], 0x55) << "invalidated range mismatch at byte " << i;
+  }
+  for (iree_host_size_t i = 16; i < 32; ++i) {
+    EXPECT_EQ(data[i], 0x33) << "middle mismatch at byte " << i;
+  }
+  for (iree_host_size_t i = 32; i < 40; ++i) {
+    EXPECT_EQ(data[i], 0x66) << "flushed range mismatch at byte " << i;
+  }
+  for (iree_host_size_t i = 40; i < 64; ++i) {
+    EXPECT_EQ(data[i], 0x33) << "suffix mismatch at byte " << i;
+  }
+  IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
+
+  iree_hal_buffer_release(buffer);
+}
+
+TEST_F(RemoteBufferTest, RejectsOverlappingClientMappings) {
+  iree_hal_buffer_t* buffer = nullptr;
+  AllocateMappableBuffer(/*allocation_size=*/64, &buffer);
 
   iree_hal_buffer_mapping_t first_mapping;
-  IREE_ASSERT_OK(iree_hal_buffer_map_range(buffer, IREE_HAL_MAPPING_MODE_SCOPED,
-                                           IREE_HAL_MEMORY_ACCESS_DISCARD_WRITE,
-                                           /*byte_offset=*/0,
-                                           /*byte_length=*/64, &first_mapping));
-  memset(first_mapping.contents.data, 0, first_mapping.contents.data_length);
+  IREE_ASSERT_OK(iree_hal_buffer_map_range(
+      buffer, IREE_HAL_MAPPING_MODE_SCOPED, IREE_HAL_MEMORY_ACCESS_READ,
+      /*byte_offset=*/0, /*byte_length=*/64, &first_mapping));
 
   iree_hal_buffer_mapping_t second_mapping;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_FAILED_PRECONDITION,
+      iree_hal_buffer_map_range(
+          buffer, IREE_HAL_MAPPING_MODE_SCOPED, IREE_HAL_MEMORY_ACCESS_READ,
+          /*byte_offset=*/0, /*byte_length=*/64, &second_mapping));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
       iree_hal_buffer_map_range(buffer, IREE_HAL_MAPPING_MODE_SCOPED,
                                 IREE_HAL_MEMORY_ACCESS_DISCARD_WRITE,
-                                /*byte_offset=*/0, /*byte_length=*/64,
-                                &second_mapping));
+                                /*byte_offset=*/0,
+                                /*byte_length=*/64, &second_mapping));
 
   IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&first_mapping));
   iree_hal_buffer_release(buffer);
@@ -1223,6 +1494,38 @@ TEST_F(RemoteBufferTest, QueueUpdateAndReadBack) {
   IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
 
   iree_hal_semaphore_release(sem);
+  iree_hal_buffer_release(buffer);
+}
+
+TEST_F(RemoteBufferTest, ProfilingSinkAbortFailsLifecycleResponse) {
+  RejectingProfileSink sink;
+  RejectingProfileSinkInitialize(&sink);
+
+  iree_hal_device_profiling_options_t profiling_options = {0};
+  profiling_options.data_families =
+      IREE_HAL_DEVICE_PROFILING_DATA_QUEUE_EVENTS |
+      IREE_HAL_DEVICE_PROFILING_DATA_HOST_EXECUTION_EVENTS;
+  profiling_options.sink = RejectingProfileSinkAsBase(&sink);
+  IREE_ASSERT_OK(
+      iree_hal_device_profiling_begin(client_device_, &profiling_options));
+
+  uint32_t update_data = 0xABCD1234u;
+  iree_hal_buffer_t* buffer = nullptr;
+  AllocateMappableBuffer(sizeof(update_data), &buffer);
+  QueueUpdateAndWait(&update_data, sizeof(update_data), buffer,
+                     /*target_offset=*/0);
+
+  sink.reject_writes.store(true, std::memory_order_relaxed);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED,
+                        iree_hal_device_profiling_flush(client_device_));
+  EXPECT_EQ(1u, sink.begin_count.load(std::memory_order_relaxed));
+  EXPECT_GT(sink.write_count.load(std::memory_order_relaxed), 0u);
+
+  sink.reject_writes.store(false, std::memory_order_relaxed);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED,
+                        iree_hal_device_profiling_end(client_device_));
+  EXPECT_EQ(1u, sink.end_count.load(std::memory_order_relaxed));
+
   iree_hal_buffer_release(buffer);
 }
 

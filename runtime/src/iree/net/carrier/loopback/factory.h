@@ -37,7 +37,8 @@ extern "C" {
 
 typedef struct iree_net_loopback_factory_options_t {
   // Maximum endpoints per connection. Each open_endpoint() call consumes one
-  // slot. Sessions need at least 2 (control + one application endpoint).
+  // slot. Sessions need one control endpoint plus any application endpoints
+  // declared in their session options.
   uint16_t max_endpoint_count;
 } iree_net_loopback_factory_options_t;
 

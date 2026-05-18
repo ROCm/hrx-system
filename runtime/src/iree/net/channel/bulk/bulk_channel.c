@@ -359,12 +359,18 @@ static iree_status_t iree_net_bulk_channel_submit_send(
                             "bulk channel endpoint detached");
   }
 
+  // Keep the channel, embedded frame sender, and fixed send-context pool alive
+  // until the carrier posts the corresponding send completion.
+  iree_net_bulk_channel_retain(channel);
   iree_net_message_endpoint_send_params_t params = {
       .data = data,
       .user_data = send_user_data,
   };
   iree_status_t status =
       iree_net_message_endpoint_send(channel->endpoint, &params);
+  if (!iree_status_is_ok(status)) {
+    iree_net_bulk_channel_release(channel);
+  }
 
   iree_atomic_fetch_sub(&channel->sends_in_flight, 1,
                         iree_memory_order_release);
@@ -382,6 +388,7 @@ static void iree_net_bulk_channel_on_sender_complete(
   } else {
     iree_status_ignore(status);
   }
+  iree_net_bulk_channel_release(channel);
 }
 
 //===----------------------------------------------------------------------===//

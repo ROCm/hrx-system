@@ -6,8 +6,10 @@
 
 #include "iree/hal/remote/server/server.h"
 
+#include "iree/hal/remote/protocol/common.h"
 #include "iree/hal/remote/server/bulk.h"
 #include "iree/hal/remote/server/file_index.h"
+#include "iree/hal/remote/server/profile.h"
 #include "iree/net/bootstrap.h"
 #include "iree/net/channel/bulk/bulk_channel.h"
 #include "iree/net/transport_factory.h"
@@ -282,11 +284,14 @@ static void iree_hal_remote_server_destroy(iree_hal_remote_server_t* server) {
     iree_hal_remote_server_session_deinitialize_provisionals(
         &server->sessions[i], host_allocator);
 
+    iree_hal_remote_server_profile_session_cancel(&server->sessions[i]);
+    iree_hal_remote_server_profile_session_deinitialize(&server->sessions[i]);
+
     iree_hal_remote_server_session_deinitialize_windows(&server->sessions[i]);
+    iree_net_bulk_channel_detach(server->sessions[i].bulk_channel);
     iree_hal_remote_server_session_deinitialize_bulk_transfers(
         &server->sessions[i]);
 
-    iree_net_bulk_channel_detach(server->sessions[i].bulk_channel);
     iree_net_bulk_channel_release(server->sessions[i].bulk_channel);
     server->sessions[i].bulk_channel = NULL;
 
@@ -341,7 +346,18 @@ IREE_API_EXPORT void iree_hal_remote_server_release(
 static int32_t iree_hal_remote_server_find_free_slot(
     iree_hal_remote_server_t* server) {
   for (uint32_t i = 0; i < server->options.max_connections; ++i) {
-    if (!server->sessions[i].session) return (int32_t)i;
+    if (!server->sessions[i].session && !server->sessions[i].queue_channel &&
+        !server->sessions[i].bulk_channel &&
+        !server->sessions[i].bulk_transfers &&
+        !server->sessions[i].bulk_staging_pool &&
+        !server->sessions[i].bulk_receive_chunks &&
+        !server->sessions[i].profile_sink &&
+        !server->sessions[i].profile_ack_window.storage &&
+        server->sessions[i].profile_transfer_failure_code == IREE_STATUS_OK &&
+        server->sessions[i].profile_transfer_failure_sequence == 0 &&
+        server->sessions[i].flags == 0) {
+      return (int32_t)i;
+    }
   }
   return -1;
 }
@@ -399,6 +415,12 @@ static void iree_hal_remote_server_on_accept(
         &server->sessions[slot].completed_signal_window);
   }
   if (iree_status_is_ok(status)) {
+    status = iree_net_sequence_window_initialize(
+        /*initial_observed_sequence=*/0,
+        IREE_HAL_REMOTE_SERVER_SEQUENCE_WINDOW_INITIAL_CAPACITY,
+        server->host_allocator, &server->sessions[slot].profile_ack_window);
+  }
+  if (iree_status_is_ok(status)) {
     status = iree_hal_remote_server_session_initialize_bulk_transfers(
         &server->sessions[slot], server->host_allocator);
   }
@@ -412,6 +434,8 @@ static void iree_hal_remote_server_on_accept(
         iree_net_session_options_default();
     session_options.local_topology = server->local_topology;
     session_options.capabilities = IREE_NET_BOOTSTRAP_CAPABILITY_BULK_TRANSFER;
+    session_options.application_endpoint_count =
+        IREE_HAL_REMOTE_APPLICATION_ENDPOINT_COUNT;
     session_options.session_id = session_id;
 
     iree_net_session_callbacks_t callbacks = {
@@ -447,6 +471,8 @@ static void iree_hal_remote_server_on_accept(
     if (slot >= 0) {
       iree_hal_remote_resource_table_deinitialize(
           &server->sessions[slot].resource_table, server->host_allocator);
+      iree_hal_remote_server_profile_session_deinitialize(
+          &server->sessions[slot]);
       iree_hal_remote_server_session_deinitialize_windows(
           &server->sessions[slot]);
       iree_hal_remote_server_session_deinitialize_bulk_transfers(

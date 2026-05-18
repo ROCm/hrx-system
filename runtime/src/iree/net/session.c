@@ -11,6 +11,7 @@
 #include "iree/async/buffer_pool.h"
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/operations/scheduling.h"
+#include "iree/async/proactor.h"
 #include "iree/async/region.h"
 #include "iree/async/semaphore.h"
 #include "iree/base/internal/atomics.h"
@@ -119,9 +120,13 @@ struct iree_net_session_t {
   // Application callbacks.
   iree_net_session_callbacks_t callbacks;
 
-  // Configuration (copied at creation).
+  // Protocol version offered or accepted during bootstrap.
   uint32_t protocol_version;
+  // Capability bits advertised during bootstrap.
   uint32_t capabilities;
+  // Number of application endpoint slots reserved during setup.
+  uint32_t application_endpoint_count;
+  // Bootstrap timeout in nanoseconds.
   iree_duration_t bootstrap_timeout_ns;
 
   // Server-assigned session identifier.
@@ -145,10 +150,10 @@ struct iree_net_session_t {
   // and all completions are forwarded to the application callback.
   uint32_t bootstrap_sends_in_flight;
 
-  // Frontier tracker (borrowed, must outlive session).
+  // Frontier tracker retained for remote axis registration and cleanup.
   iree_async_frontier_tracker_t* frontier_tracker;
 
-  // Proactor (borrowed).
+  // Proactor retained for bootstrap timers and cancellation.
   iree_async_proactor_t* proactor;
 
   // Bootstrap timeout timer. Non-NULL while the timer is in flight.
@@ -188,6 +193,23 @@ struct iree_net_session_t {
 static void iree_net_session_cleanup_remote_axes(iree_net_session_t* session);
 static void iree_net_session_fail(iree_net_session_t* session,
                                   iree_status_t status);
+
+static iree_status_t iree_net_session_validate_endpoint_capacity(
+    iree_net_session_t* session, iree_net_connection_t* connection) {
+  const uint32_t required_endpoint_count =
+      session->application_endpoint_count + 1u;
+  const uint32_t max_endpoint_count =
+      iree_net_connection_max_endpoint_count(connection);
+  if (max_endpoint_count < required_endpoint_count) {
+    return iree_make_status(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        "connection has %u endpoint slots but session requires %u "
+        "(1 control + %u application)",
+        max_endpoint_count, required_endpoint_count,
+        session->application_endpoint_count);
+  }
+  return iree_ok_status();
+}
 
 //===----------------------------------------------------------------------===//
 // State helpers
@@ -992,6 +1014,17 @@ static void iree_net_session_on_connect(void* user_data, iree_status_t status,
   // Adopt the connection (the factory callback transfers ownership).
   session->connection = connection;
 
+  iree_status_t capacity_status =
+      iree_net_session_validate_endpoint_capacity(session, connection);
+  if (!iree_status_is_ok(capacity_status)) {
+    iree_net_session_fail(
+        session, iree_status_annotate(
+                     capacity_status,
+                     IREE_SV("connection endpoint capacity is insufficient")));
+    iree_net_session_release(session);
+    return;
+  }
+
   // Open the control endpoint.
   session->bootstrap_phase = IREE_NET_SESSION_BOOTSTRAP_OPENING_CONTROL;
   iree_net_endpoint_ready_callback_t endpoint_callback = {
@@ -1029,6 +1062,11 @@ static iree_status_t iree_net_session_create_common(
   if (!callbacks.on_control_data) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "on_control_data callback is required");
+  }
+  if (options->application_endpoint_count == UINT32_MAX) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "application endpoint count overflows required "
+                            "endpoint count");
   }
 
   // Validate axis count fits in the wire format (uint16_t in HELLO/HELLO_ACK).
@@ -1068,6 +1106,7 @@ static iree_status_t iree_net_session_create_common(
                                   ? options->protocol_version
                                   : IREE_NET_BOOTSTRAP_PROTOCOL_VERSION;
   session->capabilities = options->capabilities;
+  session->application_endpoint_count = options->application_endpoint_count;
   session->bootstrap_timeout_ns = options->bootstrap_timeout_ns;
 
   // Copy local topology into trailing storage.
@@ -1117,6 +1156,10 @@ static void iree_net_session_complete_teardown(iree_net_session_t* session) {
 
   // Release transport factory (client path only).
   iree_net_transport_factory_release(session->transport_factory);
+
+  // Release async infrastructure used by in-flight session operations.
+  iree_async_frontier_tracker_release(session->frontier_tracker);
+  iree_async_proactor_release(session->proactor);
 
   // Free server address storage (client path only).
   if (session->server_address_storage) {
@@ -1205,9 +1248,11 @@ IREE_API_EXPORT iree_status_t iree_net_session_connect(
   session->transport_factory = factory;
   iree_net_transport_factory_retain(factory);
 
-  // Store borrowed references.
+  // Retain async infrastructure referenced by the session callbacks/timer.
   session->frontier_tracker = frontier_tracker;
+  iree_async_frontier_tracker_retain(frontier_tracker);
   session->proactor = proactor;
+  iree_async_proactor_retain(proactor);
   session->recv_pool = recv_pool;
 
   // Copy server address (the string_view may not outlive this call).
@@ -1286,9 +1331,21 @@ IREE_API_EXPORT iree_status_t iree_net_session_accept(
   session->connection = connection;
   iree_net_connection_retain(connection);
 
-  // Store borrowed references.
+  // Retain async infrastructure referenced by the session callbacks/timer.
   session->frontier_tracker = frontier_tracker;
+  iree_async_frontier_tracker_retain(frontier_tracker);
   session->proactor = proactor;
+  iree_async_proactor_retain(proactor);
+
+  iree_status_t capacity_status =
+      iree_net_session_validate_endpoint_capacity(session, connection);
+  if (!iree_status_is_ok(capacity_status)) {
+    iree_net_session_release(session);
+    IREE_TRACE_ZONE_END(z0);
+    return iree_status_annotate(
+        capacity_status,
+        IREE_SV("connection endpoint capacity is insufficient"));
+  }
 
   // Start the bootstrap timeout timer before any async operations.
   iree_status_t status = iree_net_session_start_bootstrap_timer(

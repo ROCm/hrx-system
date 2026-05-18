@@ -311,10 +311,9 @@ typedef struct iree_hal_remote_command_buffer_execute_op_t {
 } iree_hal_remote_command_buffer_execute_op_t;
 static_assert(sizeof(iree_hal_remote_command_buffer_execute_op_t) == 32, "");
 
-// HOST_CALL_INVOKE: Invoke a registered host call handler on the server.
-// Arguments are scalar integer values only — pointers are invalid in a remote
-// context (disjoint address spaces). For structured data, pass a buffer
-// resource ID and have the handler read from the buffer.
+// HOST_CALL_INVOKE: reserved for future explicit server-side named handlers.
+// HAL queue_host_call callbacks are client-local function pointers and are not
+// represented by this protocol message.
 typedef struct iree_hal_remote_host_call_invoke_op_t {
   iree_hal_remote_queue_op_header_t header;
   uint64_t call_id;          // From HOST_CALL_REGISTER.

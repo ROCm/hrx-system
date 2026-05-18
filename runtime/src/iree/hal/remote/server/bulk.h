@@ -17,6 +17,8 @@ extern "C" {
 
 typedef struct iree_hal_remote_server_session_t
     iree_hal_remote_server_session_t;
+typedef struct iree_hal_remote_control_envelope_t
+    iree_hal_remote_control_envelope_t;
 
 // Header buffers used by the bulk channel frame sender. Bulk DATA payloads are
 // not copied into this pool; only the 40-byte frame headers are retained until
@@ -42,6 +44,15 @@ iree_status_t iree_hal_remote_server_bulk_submit_client_file_read(
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_device_size_t length, iree_hal_read_flags_t flags);
 
+// Submits a BUFFER_UNMAP bulk upload and sends |response_envelope| once the
+// uploaded bytes are visible in |target_buffer|.
+iree_status_t iree_hal_remote_server_bulk_submit_buffer_unmap(
+    iree_hal_remote_server_session_t* session_slot,
+    iree_hal_device_t* local_device,
+    const iree_hal_remote_control_envelope_t* response_envelope,
+    uint64_t transfer_id, iree_hal_buffer_t* target_buffer,
+    iree_device_size_t target_offset, iree_device_size_t length);
+
 // Submits a CLIENT_FILE_WRITE command using the wrapped local HAL queue_write.
 iree_status_t iree_hal_remote_server_bulk_submit_client_file_write(
     iree_hal_remote_server_session_t* session_slot,
@@ -49,6 +60,12 @@ iree_status_t iree_hal_remote_server_bulk_submit_client_file_write(
     iree_hal_semaphore_list_t signal_list, uint64_t transfer_id,
     iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
     iree_device_size_t length, iree_hal_write_flags_t flags);
+
+// Submits one server-to-client profile callback payload.
+// Consumes |payload| regardless of the result.
+iree_status_t iree_hal_remote_server_bulk_submit_profile_transfer(
+    iree_hal_remote_server_session_t* session_slot, uint64_t session_id,
+    iree_hal_profile_sink_t* profile_sink, iree_byte_span_t payload);
 
 // Handles a peer START frame.
 iree_status_t iree_hal_remote_server_bulk_on_start(

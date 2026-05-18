@@ -555,7 +555,8 @@ static iree_status_t iree_net_tcp_connection_create(
   if (iree_status_is_ok(status)) {
     memset(connection, 0, total_size);
     iree_net_connection_initialize(&iree_net_tcp_connection_vtable,
-                                   host_allocator, &connection->base);
+                                   host_allocator, max_stream_count,
+                                   &connection->base);
     connection->factory = factory;
     connection->proactor = proactor;
     connection->recv_pool = recv_pool;

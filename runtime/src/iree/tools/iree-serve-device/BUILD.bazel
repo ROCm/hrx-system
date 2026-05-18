@@ -24,6 +24,7 @@ iree_runtime_cc_binary(
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/remote/protocol:common",
         "//runtime/src/iree/hal/remote/server",
         "//runtime/src/iree/hal/remote/util:recv_pool",
         "//runtime/src/iree/net:session",

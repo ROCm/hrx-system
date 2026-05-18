@@ -353,17 +353,25 @@ static iree_status_t CreateRemoteDevice(
     status = iree_hal_remote_server_start(ctx->server);
   }
 
-  // Create the remote client device.
-  iree_hal_device_t* client_device = nullptr;
+  // Create the remote client driver and device.
+  iree_hal_driver_t* client_driver = nullptr;
   if (iree_status_is_ok(status)) {
-    iree_hal_remote_client_device_options_t client_options;
-    iree_hal_remote_client_device_options_initialize(&client_options);
-    client_options.transport_factory = ctx->factory;
-    client_options.server_address =
+    iree_hal_remote_client_driver_options_t driver_options;
+    iree_hal_remote_client_driver_options_initialize(&driver_options);
+    driver_options.transport_factory = ctx->factory;
+    driver_options.default_device_options.server_address =
         iree_make_cstring_view(ctx->server_address.c_str());
 
-    status = iree_hal_remote_client_device_create(
-        IREE_SV("remote"), &client_options, create_params, ctx->recv_pool,
+    status = iree_hal_remote_client_driver_create(
+        IREE_SV("remote"), &driver_options, iree_allocator_system(),
+        &client_driver);
+  }
+
+  iree_hal_device_t* client_device = nullptr;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_driver_create_device_by_path(
+        client_driver, IREE_SV("remote"), iree_string_view_empty(),
+        /*param_count=*/0, /*params=*/nullptr, create_params,
         iree_allocator_system(), &client_device);
   }
 
@@ -407,10 +415,11 @@ static iree_status_t CreateRemoteDevice(
   }
 
   if (iree_status_is_ok(status)) {
-    *out_driver = nullptr;  // Remote device has no driver.
+    *out_driver = client_driver;
     *out_device = client_device;
   } else {
     iree_hal_device_release(client_device);
+    iree_hal_driver_release(client_driver);
     ctx->Teardown();
   }
   return status;
@@ -438,34 +447,34 @@ static iree_status_t CreateRemoteVulkan(
                             CreateVulkanServerDevice, out_driver, out_device);
 }
 
-static std::vector<TestUnsupported> RemoteUnsupportedTests() {
-  return {
-      {"DriverTest.*",
-       "remote devices are created directly, not through driver enumeration"},
-      {"EventTest.*", "events not implemented"},
-      {"ExecutableCacheTest.*",
-       "remote client returns true for all formats (server validates)"},
-      {"ExecutableTest.*",
-       "export info queries require EXECUTABLE_QUERY_EXPORT RPC"},
-      {"QueueHostCallTest.*", "host calls not implemented"},
-      {"TransientBufferTest.*",
-       "transient command buffer allocations not implemented"},
-  };
+static std::vector<TestUnsupported> RemoteUnsupportedTests(const char* name) {
+  std::vector<TestUnsupported> unsupported_tests;
+  std::string backend_name(name);
+  if (backend_name == "remote_amdgpu" || backend_name == "remote_vulkan") {
+    unsupported_tests.push_back(
+        {"EventTest.*", "server HAL does not implement events"});
+  }
+  return unsupported_tests;
 }
 
 static void RegisterRemoteBackend(const char* name, DeviceFactory factory) {
   BackendInfo info;
   info.name = name;
   info.factory = std::move(factory);
-  info.unsupported_tests = RemoteUnsupportedTests();
+  info.unsupported_tests = RemoteUnsupportedTests(name);
   CtsRegistry::RegisterBackend({
       name,
       std::move(info),
-      {"file_io", "mapping"},
+      {"file_io", "host_calls", "mapping"},
   });
 }
 
 static bool RemoteHardwareBackendsEnabled() {
+#if defined(IREE_HAL_REMOTE_CTS_ENABLE_HARDWARE_BACKENDS_DEFAULT) && \
+    IREE_HAL_REMOTE_CTS_ENABLE_HARDWARE_BACKENDS_DEFAULT
+  return true;
+#endif  // IREE_HAL_REMOTE_CTS_ENABLE_HARDWARE_BACKENDS_DEFAULT
+
   const char* value =
       std::getenv("IREE_HAL_REMOTE_CTS_ENABLE_HARDWARE_BACKENDS");
   return value && value[0] != '\0' && std::strcmp(value, "0") != 0;

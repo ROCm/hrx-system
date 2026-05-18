@@ -301,7 +301,8 @@ static iree_status_t iree_net_loopback_connection_create(
       iree_allocator_malloc(host_allocator, total_size, (void**)&connection));
   memset(connection, 0, total_size);
   iree_net_connection_initialize(&iree_net_loopback_connection_vtable,
-                                 host_allocator, &connection->base);
+                                 host_allocator, max_endpoint_count,
+                                 &connection->base);
   connection->proactor = proactor;
   connection->recv_pool = recv_pool;
   connection->max_endpoint_count = max_endpoint_count;

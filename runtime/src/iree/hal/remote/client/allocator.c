@@ -134,12 +134,11 @@ static iree_status_t iree_hal_remote_client_allocator_query_memory_heaps(
       heap_count = response->heap_count;
 
       iree_host_size_t expected_size = 0;
-      if (!iree_host_size_checked_mul_add(
-              sizeof(iree_hal_remote_buffer_query_heaps_response_t), heap_count,
-              sizeof(iree_hal_remote_memory_heap_t), &expected_size)) {
-        status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                                  "BUFFER_QUERY_HEAPS response size overflow");
-      } else if (response_payload.data_length < expected_size) {
+      status = IREE_STRUCT_LAYOUT(
+          sizeof(iree_hal_remote_buffer_query_heaps_response_t), &expected_size,
+          IREE_STRUCT_FIELD(heap_count, iree_hal_remote_memory_heap_t, NULL));
+      if (iree_status_is_ok(status) &&
+          response_payload.data_length < expected_size) {
         status =
             iree_make_status(IREE_STATUS_INTERNAL,
                              "BUFFER_QUERY_HEAPS response truncated: %" PRIhsz

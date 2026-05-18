@@ -36,6 +36,18 @@ extern "C" {
 #endif  // __cplusplus
 
 //===----------------------------------------------------------------------===//
+// Channel topology
+//===----------------------------------------------------------------------===//
+
+// HAL remote opens one queue endpoint and one bulk endpoint in addition to the
+// net session control endpoint.
+#define IREE_HAL_REMOTE_APPLICATION_ENDPOINT_COUNT 2u
+
+// Minimum endpoint slots a connection must provide for a HAL remote session.
+#define IREE_HAL_REMOTE_REQUIRED_ENDPOINT_COUNT \
+  (1u + IREE_HAL_REMOTE_APPLICATION_ENDPOINT_COUNT)
+
+//===----------------------------------------------------------------------===//
 // Resource IDs
 //===----------------------------------------------------------------------===//
 
@@ -63,6 +75,7 @@ typedef enum iree_hal_remote_resource_type_e {
   IREE_HAL_REMOTE_RESOURCE_TYPE_EXECUTABLE = 0x03,
   IREE_HAL_REMOTE_RESOURCE_TYPE_COMMAND_BUFFER = 0x04,
   IREE_HAL_REMOTE_RESOURCE_TYPE_FILE = 0x05,
+  IREE_HAL_REMOTE_RESOURCE_TYPE_EVENT = 0x06,
 } iree_hal_remote_resource_type_t;
 
 // Resource ID flag bits (bits [55:48] of resource ID).

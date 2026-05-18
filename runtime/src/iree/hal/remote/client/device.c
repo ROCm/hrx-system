@@ -13,6 +13,7 @@
 #include "iree/hal/remote/client/allocator.h"
 #include "iree/hal/remote/client/bulk.h"
 #include "iree/hal/remote/client/command_buffer.h"
+#include "iree/hal/remote/client/event.h"
 #include "iree/hal/remote/client/executable_cache.h"
 #include "iree/hal/remote/client/file.h"
 #include "iree/hal/remote/client/queue.h"
@@ -197,6 +198,12 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_create(
   }
 
   if (iree_status_is_ok(status)) {
+    status = iree_net_sequence_window_initialize(
+        /*initial_observed_sequence=*/0, /*initial_capacity=*/64,
+        host_allocator, &device->profile_sequence_window);
+  }
+
+  if (iree_status_is_ok(status)) {
     iree_async_frontier_tracker_options_t tracker_options =
         iree_async_frontier_tracker_options_default();
     tracker_options.axis_table_capacity = 256;
@@ -363,6 +370,8 @@ static void iree_hal_remote_client_device_destroy(
   iree_slim_mutex_deinitialize(&device->provisional_mutex);
 
   iree_hal_remote_client_device_deinitialize_bulk_transfers(device);
+  iree_net_sequence_window_deinitialize(&device->profile_sequence_window);
+  iree_hal_profile_sink_release(device->profile_sink);
   iree_slim_mutex_deinitialize(&device->bulk_transfer_mutex);
 
   iree_hal_remote_recv_pool_release(device->recv_pool);
@@ -502,8 +511,10 @@ static iree_status_t iree_hal_remote_client_device_create_command_buffer(
 static iree_status_t iree_hal_remote_client_device_create_event(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
     iree_hal_event_flags_t flags, iree_hal_event_t** out_event) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "remote events not yet implemented");
+  iree_hal_remote_client_device_t* device =
+      iree_hal_remote_client_device_cast(base_device);
+  return iree_hal_remote_client_event_create(device, queue_affinity, flags,
+                                             device->host_allocator, out_event);
 }
 
 static iree_status_t iree_hal_remote_client_device_create_executable_cache(
@@ -565,14 +576,286 @@ static iree_status_t iree_hal_remote_client_device_query_queue_pool_backend(
   return iree_ok_status();
 }
 
+typedef struct iree_hal_remote_client_profiling_begin_message_t {
+  iree_hal_remote_control_envelope_t envelope;
+  iree_hal_remote_profiling_begin_request_t body;
+} iree_hal_remote_client_profiling_begin_message_t;
+static_assert(sizeof(iree_hal_remote_client_profiling_begin_message_t) == 72,
+              "");
+
+typedef struct iree_hal_remote_client_profiling_flush_message_t {
+  iree_hal_remote_control_envelope_t envelope;
+  iree_hal_remote_profiling_flush_request_t body;
+} iree_hal_remote_client_profiling_flush_message_t;
+static_assert(sizeof(iree_hal_remote_client_profiling_flush_message_t) == 24,
+              "");
+
+typedef struct iree_hal_remote_client_profiling_end_message_t {
+  iree_hal_remote_control_envelope_t envelope;
+  iree_hal_remote_profiling_end_request_t body;
+} iree_hal_remote_client_profiling_end_message_t;
+static_assert(sizeof(iree_hal_remote_client_profiling_end_message_t) == 24, "");
+
+static iree_status_t iree_hal_remote_client_profiling_get_string_length(
+    iree_string_view_t value, const char* field_name, uint32_t* out_length) {
+  *out_length = 0;
+  if (value.size > UINT32_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "profile %s length %" PRIhsz
+                            " exceeds wire limit %u",
+                            field_name, value.size, UINT32_MAX);
+  }
+  *out_length = (uint32_t)value.size;
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_remote_client_profiling_count_counter_names(
+    const iree_hal_device_profiling_options_t* options,
+    uint32_t* out_counter_set_count, uint32_t* out_counter_name_count) {
+  *out_counter_set_count = 0;
+  *out_counter_name_count = 0;
+  if (options->counter_set_count > UINT32_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "profile counter set count %" PRIhsz
+                            " exceeds wire limit %u",
+                            options->counter_set_count, UINT32_MAX);
+  }
+  *out_counter_set_count = (uint32_t)options->counter_set_count;
+
+  iree_host_size_t counter_name_count = 0;
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < options->counter_set_count && iree_status_is_ok(status); ++i) {
+    const iree_hal_profile_counter_set_selection_t* counter_set =
+        &options->counter_sets[i];
+    if (IREE_UNLIKELY(!iree_host_size_checked_add(
+            counter_name_count, counter_set->counter_name_count,
+            &counter_name_count))) {
+      status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "profile counter name count overflow");
+    }
+  }
+  if (iree_status_is_ok(status) && counter_name_count > UINT32_MAX) {
+    status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "profile counter name count %" PRIhsz
+                              " exceeds wire limit %u",
+                              counter_name_count, UINT32_MAX);
+  }
+  if (iree_status_is_ok(status)) {
+    *out_counter_name_count = (uint32_t)counter_name_count;
+  }
+  return status;
+}
+
+static iree_status_t iree_hal_remote_client_profiling_layout_counter_sets(
+    const iree_hal_device_profiling_options_t* options,
+    iree_host_size_t* inout_total_size) {
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < options->counter_set_count && iree_status_is_ok(status); ++i) {
+    const iree_hal_profile_counter_set_selection_t* counter_set =
+        &options->counter_sets[i];
+    uint32_t counter_set_name_length = 0;
+    status = iree_hal_remote_client_profiling_get_string_length(
+        counter_set->name, "counter set name", &counter_set_name_length);
+    if (iree_status_is_ok(status) &&
+        counter_set->counter_name_count > UINT32_MAX) {
+      status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "profile counter set %" PRIhsz
+                                " counter name count %" PRIhsz
+                                " exceeds wire limit %u",
+                                i, counter_set->counter_name_count, UINT32_MAX);
+    }
+    if (iree_status_is_ok(status)) {
+      status = IREE_STRUCT_LAYOUT(
+          *inout_total_size, inout_total_size,
+          IREE_STRUCT_FIELD_ALIGNED(
+              1, iree_hal_remote_profile_counter_set_selection_t, 8, NULL),
+          IREE_STRUCT_FIELD_ALIGNED(counter_set_name_length, char, 8, NULL));
+    }
+    for (iree_host_size_t j = 0;
+         j < counter_set->counter_name_count && iree_status_is_ok(status);
+         ++j) {
+      uint32_t counter_name_length = 0;
+      status = iree_hal_remote_client_profiling_get_string_length(
+          counter_set->counter_names[j], "counter name", &counter_name_length);
+      if (iree_status_is_ok(status)) {
+        status = IREE_STRUCT_LAYOUT(
+            *inout_total_size, inout_total_size,
+            IREE_STRUCT_FIELD_ALIGNED(1, iree_hal_remote_profile_counter_name_t,
+                                      8, NULL),
+            IREE_STRUCT_FIELD_ALIGNED(counter_name_length, char, 8, NULL));
+      }
+    }
+  }
+  return status;
+}
+
+static iree_status_t iree_hal_remote_client_profiling_write_counter_sets(
+    const iree_hal_device_profiling_options_t* options, uint8_t* base,
+    iree_host_size_t* inout_offset) {
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < options->counter_set_count && iree_status_is_ok(status); ++i) {
+    const iree_hal_profile_counter_set_selection_t* counter_set =
+        &options->counter_sets[i];
+    iree_host_size_t counter_set_offset = 0;
+    iree_host_size_t counter_set_name_offset = 0;
+    status = IREE_STRUCT_LAYOUT(
+        *inout_offset, inout_offset,
+        IREE_STRUCT_FIELD_ALIGNED(
+            1, iree_hal_remote_profile_counter_set_selection_t, 8,
+            &counter_set_offset),
+        IREE_STRUCT_FIELD_ALIGNED(counter_set->name.size, char, 8,
+                                  &counter_set_name_offset));
+    if (iree_status_is_ok(status)) {
+      iree_hal_remote_profile_counter_set_selection_t* remote_counter_set =
+          (iree_hal_remote_profile_counter_set_selection_t*)(base +
+                                                             counter_set_offset);
+      remote_counter_set->flags = counter_set->flags;
+      remote_counter_set->counter_name_count =
+          (uint32_t)counter_set->counter_name_count;
+      remote_counter_set->name_length = (uint32_t)counter_set->name.size;
+      if (counter_set->name.size > 0) {
+        memcpy(base + counter_set_name_offset, counter_set->name.data,
+               counter_set->name.size);
+      }
+    }
+    for (iree_host_size_t j = 0;
+         j < counter_set->counter_name_count && iree_status_is_ok(status);
+         ++j) {
+      iree_string_view_t counter_name = counter_set->counter_names[j];
+      iree_host_size_t counter_name_offset = 0;
+      iree_host_size_t counter_name_data_offset = 0;
+      status = IREE_STRUCT_LAYOUT(
+          *inout_offset, inout_offset,
+          IREE_STRUCT_FIELD_ALIGNED(1, iree_hal_remote_profile_counter_name_t,
+                                    8, &counter_name_offset),
+          IREE_STRUCT_FIELD_ALIGNED(counter_name.size, char, 8,
+                                    &counter_name_data_offset));
+      if (iree_status_is_ok(status)) {
+        iree_hal_remote_profile_counter_name_t* remote_counter_name =
+            (iree_hal_remote_profile_counter_name_t*)(base +
+                                                      counter_name_offset);
+        remote_counter_name->name_length = (uint32_t)counter_name.size;
+        if (counter_name.size > 0) {
+          memcpy(base + counter_name_data_offset, counter_name.data,
+                 counter_name.size);
+        }
+      }
+    }
+  }
+  return status;
+}
+
+static iree_status_t iree_hal_remote_client_profiling_begin_request_allocate(
+    const iree_hal_device_profiling_options_t* options,
+    iree_allocator_t host_allocator, iree_byte_span_t* out_message) {
+  *out_message = iree_byte_span_empty();
+
+  iree_string_view_t executable_function_pattern = iree_string_view_empty();
+  if (iree_any_bit_set(
+          options->capture_filter.flags,
+          IREE_HAL_PROFILE_CAPTURE_FILTER_FLAG_EXECUTABLE_FUNCTION_PATTERN)) {
+    executable_function_pattern =
+        options->capture_filter.executable_function_pattern;
+  }
+
+  uint32_t executable_function_pattern_length = 0;
+  uint32_t counter_set_count = 0;
+  uint32_t counter_name_count = 0;
+  iree_status_t status = iree_hal_remote_client_profiling_get_string_length(
+      executable_function_pattern, "executable function pattern",
+      &executable_function_pattern_length);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_client_profiling_count_counter_names(
+        options, &counter_set_count, &counter_name_count);
+  }
+
+  iree_host_size_t message_size =
+      sizeof(iree_hal_remote_client_profiling_begin_message_t);
+  iree_host_size_t executable_function_pattern_offset = 0;
+  if (iree_status_is_ok(status)) {
+    status = IREE_STRUCT_LAYOUT(
+        message_size, &message_size,
+        IREE_STRUCT_FIELD_ALIGNED(executable_function_pattern_length, char, 8,
+                                  &executable_function_pattern_offset));
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_client_profiling_layout_counter_sets(
+        options, &message_size);
+  }
+
+  uint8_t* message_data = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc(host_allocator, message_size,
+                                   (void**)&message_data);
+  }
+  if (iree_status_is_ok(status)) {
+    memset(message_data, 0, message_size);
+    iree_hal_remote_client_profiling_begin_message_t* message =
+        (iree_hal_remote_client_profiling_begin_message_t*)message_data;
+    message->envelope.message_type = IREE_HAL_REMOTE_CONTROL_PROFILING_BEGIN;
+    message->body.data_families = options->data_families;
+    message->body.command_buffer_id = options->capture_filter.command_buffer_id;
+    message->body.flags = options->flags;
+    message->body.capture_filter_flags = options->capture_filter.flags;
+    message->body.command_index = options->capture_filter.command_index;
+    message->body.physical_device_ordinal =
+        options->capture_filter.physical_device_ordinal;
+    message->body.queue_ordinal = options->capture_filter.queue_ordinal;
+    message->body.executable_export_pattern_length =
+        executable_function_pattern_length;
+    message->body.counter_set_count = counter_set_count;
+    message->body.counter_name_count = counter_name_count;
+    if (executable_function_pattern_length > 0) {
+      memcpy(message_data + executable_function_pattern_offset,
+             executable_function_pattern.data,
+             executable_function_pattern.size);
+    }
+    iree_host_size_t write_offset =
+        executable_function_pattern_offset +
+        iree_host_align(executable_function_pattern_length, 8);
+    status = iree_hal_remote_client_profiling_write_counter_sets(
+        options, message_data, &write_offset);
+  }
+  if (iree_status_is_ok(status)) {
+    *out_message = iree_make_byte_span(message_data, message_size);
+  } else {
+    iree_allocator_free(host_allocator, message_data);
+  }
+  return status;
+}
+
 static iree_status_t iree_hal_remote_client_device_profiling_begin(
     iree_hal_device_t* base_device,
     const iree_hal_device_profiling_options_t* options) {
   iree_hal_remote_client_device_t* device =
       iree_hal_remote_client_device_cast(base_device);
   IREE_HAL_REMOTE_REQUIRE_CONNECTED(device);
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "remote profiling not yet implemented");
+
+  iree_byte_span_t message = iree_byte_span_empty();
+  iree_status_t status =
+      iree_hal_remote_client_profiling_begin_request_allocate(
+          options, device->host_allocator, &message);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_client_bulk_begin_profile_session(device,
+                                                               options->sink);
+  }
+
+  iree_const_byte_span_t response_payload = iree_const_byte_span_empty();
+  iree_async_buffer_lease_t response_lease = {0};
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_client_device_control_rpc(
+        device, iree_make_const_byte_span(message.data, message.data_length),
+        &response_payload, &response_lease);
+  }
+  iree_async_buffer_lease_release(&response_lease);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_remote_client_bulk_end_profile_session(device);
+  }
+  iree_allocator_free(device->host_allocator, message.data);
+  return status;
 }
 
 static iree_status_t iree_hal_remote_client_device_profiling_flush(
@@ -583,8 +866,22 @@ static iree_status_t iree_hal_remote_client_device_profiling_flush(
       IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_CONNECTED) {
     return iree_ok_status();
   }
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "remote profiling not yet implemented");
+  if (!iree_hal_remote_client_bulk_has_profile_session(device)) {
+    return iree_ok_status();
+  }
+  iree_hal_remote_client_profiling_flush_message_t message = {
+      .envelope =
+          {
+              .message_type = IREE_HAL_REMOTE_CONTROL_PROFILING_FLUSH,
+          },
+  };
+  iree_const_byte_span_t response_payload = iree_const_byte_span_empty();
+  iree_async_buffer_lease_t response_lease = {0};
+  iree_status_t status = iree_hal_remote_client_device_control_rpc(
+      device, iree_make_const_byte_span(&message, sizeof(message)),
+      &response_payload, &response_lease);
+  iree_async_buffer_lease_release(&response_lease);
+  return status;
 }
 
 static iree_status_t iree_hal_remote_client_device_profiling_end(
@@ -593,13 +890,29 @@ static iree_status_t iree_hal_remote_client_device_profiling_end(
       iree_hal_remote_client_device_cast(base_device);
   if (iree_hal_remote_client_device_load_state(device) !=
       IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_CONNECTED) {
+    iree_hal_remote_client_bulk_end_profile_session(device);
     return iree_ok_status();
   }
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "remote profiling not yet implemented");
+  if (!iree_hal_remote_client_bulk_has_profile_session(device)) {
+    return iree_ok_status();
+  }
+  iree_hal_remote_client_profiling_end_message_t message = {
+      .envelope =
+          {
+              .message_type = IREE_HAL_REMOTE_CONTROL_PROFILING_END,
+          },
+  };
+  iree_const_byte_span_t response_payload = iree_const_byte_span_empty();
+  iree_async_buffer_lease_t response_lease = {0};
+  iree_status_t status = iree_hal_remote_client_device_control_rpc(
+      device, iree_make_const_byte_span(&message, sizeof(message)),
+      &response_payload, &response_lease);
+  iree_async_buffer_lease_release(&response_lease);
+  iree_hal_remote_client_bulk_end_profile_session(device);
+  return status;
 }
 
-static void iree_hal_remote_client_device_fail_pending_rpcs(
+void iree_hal_remote_client_device_fail_pending_rpcs(
     iree_hal_remote_client_device_t* device);
 
 //===----------------------------------------------------------------------===//
@@ -759,7 +1072,7 @@ static void iree_hal_remote_client_device_on_session_error(
 
 // Wakes all pending RPCs with an error status. Called when the session
 // disconnects (goaway/error) while RPCs are in-flight.
-static void iree_hal_remote_client_device_fail_pending_rpcs(
+void iree_hal_remote_client_device_fail_pending_rpcs(
     iree_hal_remote_client_device_t* device) {
   iree_slim_mutex_lock(&device->rpc_mutex);
   iree_hal_remote_pending_rpc_t* pending = device->pending_rpcs;
@@ -776,61 +1089,88 @@ static void iree_hal_remote_client_device_fail_pending_rpcs(
   }
 }
 
-// Sends a control channel message and blocks until the response arrives.
-// The request span must contain the full message ([envelope + body]).
-// On success, |out_response_payload| points into the retained lease and
-// |out_response_lease| holds the backing buffer. The caller must release
-// the lease after processing the response.
-iree_status_t iree_hal_remote_client_device_control_rpc(
+iree_status_t iree_hal_remote_client_device_control_rpc_with_after_send(
     iree_hal_remote_client_device_t* device, iree_const_byte_span_t request,
+    iree_hal_remote_client_device_control_rpc_after_send_t after_send,
     iree_const_byte_span_t* out_response_payload,
     iree_async_buffer_lease_t* out_response_lease) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  *out_response_payload = iree_const_byte_span_empty();
+  memset(out_response_lease, 0, sizeof(*out_response_lease));
+
+  iree_status_t status = iree_ok_status();
   if (iree_hal_remote_client_device_load_state(device) !=
       IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_CONNECTED) {
-    IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "device is not connected");
+    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "device is not connected");
   }
-  if (!device->session) {
-    IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "session is not available");
+  if (iree_status_is_ok(status) && !device->session) {
+    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "session is not available");
+  }
+  if (iree_status_is_ok(status) &&
+      request.data_length < sizeof(iree_hal_remote_control_envelope_t)) {
+    status = iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "control RPC request too small for envelope: %" PRIhsz " bytes",
+        request.data_length);
   }
 
   // Assign a unique request_id and patch it into the envelope.
-  uint32_t request_id = (uint32_t)iree_atomic_fetch_add(
-      &device->next_request_id, 1, iree_memory_order_relaxed);
-  // The envelope is at the start of the request buffer. We cast away const
-  // to patch the request_id — the caller allocated this on their stack.
-  iree_hal_remote_control_envelope_t* envelope =
-      (iree_hal_remote_control_envelope_t*)request.data;
-  envelope->request_id = request_id;
+  uint32_t request_id = 0;
+  if (iree_status_is_ok(status)) {
+    request_id = (uint32_t)iree_atomic_fetch_add(&device->next_request_id, 1,
+                                                 iree_memory_order_relaxed);
+    // The envelope is at the start of the request buffer. We cast away const
+    // to patch the request_id — the caller allocated this on their stack.
+    iree_hal_remote_control_envelope_t* envelope =
+        (iree_hal_remote_control_envelope_t*)request.data;
+    envelope->request_id = request_id;
+  }
 
   // Initialize the pending RPC entry on the stack.
   iree_hal_remote_pending_rpc_t pending;
   memset(&pending, 0, sizeof(pending));
-  pending.request_id = request_id;
-  iree_notification_initialize(&pending.notification);
-  // IREE_STATUS_INTERNAL is the sentinel: "no response yet."
-  iree_atomic_store(&pending.response_status_code, IREE_STATUS_INTERNAL,
-                    iree_memory_order_relaxed);
+  bool pending_initialized = false;
+  if (iree_status_is_ok(status)) {
+    pending.request_id = request_id;
+    iree_notification_initialize(&pending.notification);
+    pending_initialized = true;
+    // IREE_STATUS_INTERNAL is the sentinel: "no response yet."
+    iree_atomic_store(&pending.response_status_code, IREE_STATUS_INTERNAL,
+                      iree_memory_order_relaxed);
+  }
 
   // Link into the pending list.
-  iree_slim_mutex_lock(&device->rpc_mutex);
-  pending.next = device->pending_rpcs;
-  device->pending_rpcs = &pending;
-  iree_slim_mutex_unlock(&device->rpc_mutex);
+  if (iree_status_is_ok(status)) {
+    iree_slim_mutex_lock(&device->rpc_mutex);
+    pending.next = device->pending_rpcs;
+    device->pending_rpcs = &pending;
+    iree_slim_mutex_unlock(&device->rpc_mutex);
+  }
 
   // Send the request.
-  iree_async_span_t span =
-      iree_async_span_from_ptr((void*)request.data, request.data_length);
-  iree_async_span_list_t payload = {&span, 1};
-  iree_status_t status = iree_net_session_send_control_data(
-      device->session, /*flags=*/0, payload, /*operation_user_data=*/0);
-
+  bool request_submitted = false;
   if (iree_status_is_ok(status)) {
+    iree_async_span_t span =
+        iree_async_span_from_ptr((void*)request.data, request.data_length);
+    iree_async_span_list_t payload = {&span, 1};
+    status = iree_net_session_send_control_data(
+        device->session, /*flags=*/0, payload, /*operation_user_data=*/0);
+    request_submitted = iree_status_is_ok(status);
+  }
+
+  iree_status_t after_send_status = iree_ok_status();
+  if (iree_status_is_ok(status) && after_send.fn) {
+    after_send_status = after_send.fn(after_send.user_data);
+    if (!iree_status_is_ok(after_send_status)) {
+      status = after_send_status;
+      after_send_status = iree_ok_status();
+    }
+  }
+
+  if (request_submitted) {
     // Block until the proactor thread delivers the response.
     iree_wait_token_t token =
         iree_notification_prepare_wait(&pending.notification);
@@ -848,17 +1188,20 @@ iree_status_t iree_hal_remote_client_device_control_rpc(
   }
 
   // Unlink from the pending list.
-  iree_slim_mutex_lock(&device->rpc_mutex);
-  iree_hal_remote_pending_rpc_t** prev = &device->pending_rpcs;
-  while (*prev && *prev != &pending) prev = &(*prev)->next;
-  if (*prev == &pending) *prev = pending.next;
-  iree_slim_mutex_unlock(&device->rpc_mutex);
+  if (pending_initialized) {
+    iree_slim_mutex_lock(&device->rpc_mutex);
+    iree_hal_remote_pending_rpc_t** prev = &device->pending_rpcs;
+    while (*prev && *prev != &pending) prev = &(*prev)->next;
+    if (*prev == &pending) *prev = pending.next;
+    iree_slim_mutex_unlock(&device->rpc_mutex);
 
-  iree_notification_deinitialize(&pending.notification);
+    iree_notification_deinitialize(&pending.notification);
+  }
 
   if (!iree_status_is_ok(status)) {
     // Send failed — clean up any lease that might have been set.
     iree_async_buffer_lease_release(&pending.response_lease);
+    iree_status_ignore(after_send_status);
     IREE_TRACE_ZONE_END(z0);
     return status;
   }
@@ -892,14 +1235,30 @@ iree_status_t iree_hal_remote_client_device_control_rpc(
           iree_make_status(response_code, "remote control RPC failed");
     }
     iree_async_buffer_lease_release(&pending.response_lease);
+    iree_status_ignore(after_send_status);
     IREE_TRACE_ZONE_END(z0);
     return error_status;
   }
 
   *out_response_payload = pending.response_payload;
   *out_response_lease = pending.response_lease;
+  iree_status_ignore(after_send_status);
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
+}
+
+// Sends a control channel message and blocks until the response arrives.
+// The request span must contain the full message ([envelope + body]).
+// On success, |out_response_payload| points into the retained lease and
+// |out_response_lease| holds the backing buffer. The caller must release
+// the lease after processing the response.
+iree_status_t iree_hal_remote_client_device_control_rpc(
+    iree_hal_remote_client_device_t* device, iree_const_byte_span_t request,
+    iree_const_byte_span_t* out_response_payload,
+    iree_async_buffer_lease_t* out_response_lease) {
+  iree_hal_remote_client_device_control_rpc_after_send_t after_send = {0};
+  return iree_hal_remote_client_device_control_rpc_with_after_send(
+      device, request, after_send, out_response_payload, out_response_lease);
 }
 
 // Sends a fire-and-forget control message (no response expected).
@@ -1071,15 +1430,18 @@ static iree_status_t iree_hal_remote_client_device_on_control_data(
     iree_host_size_t response_body_length =
         remaining - sizeof(iree_hal_remote_control_response_prefix_t);
 
-    // Find the matching pending RPC.
+    // Find the matching pending RPC and publish the response while holding the
+    // mutex. The waiter unlinks stack-owned pending entries after waking; the
+    // lock keeps fail/disconnect paths from racing a response writer that has
+    // found an entry but not yet posted its notification.
     iree_slim_mutex_lock(&device->rpc_mutex);
     iree_hal_remote_pending_rpc_t* pending = device->pending_rpcs;
     while (pending && pending->request_id != envelope->request_id) {
       pending = pending->next;
     }
-    iree_slim_mutex_unlock(&device->rpc_mutex);
 
     if (!pending) {
+      iree_slim_mutex_unlock(&device->rpc_mutex);
       return iree_make_status(IREE_STATUS_NOT_FOUND,
                               "no pending RPC with request_id=%u",
                               envelope->request_id);
@@ -1103,6 +1465,7 @@ static iree_status_t iree_hal_remote_client_device_on_control_data(
 
     // Wake the blocked caller.
     iree_notification_post(&pending->notification, IREE_ALL_WAITERS);
+    iree_slim_mutex_unlock(&device->rpc_mutex);
     return iree_ok_status();
   }
 
@@ -1144,6 +1507,8 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_connect(
   iree_net_session_options_t session_options =
       iree_net_session_options_default();
   session_options.capabilities = IREE_NET_BOOTSTRAP_CAPABILITY_BULK_TRANSFER;
+  session_options.application_endpoint_count =
+      IREE_HAL_REMOTE_APPLICATION_ENDPOINT_COUNT;
   if (device->options.connect_timeout_ns) {
     session_options.bootstrap_timeout_ns = device->options.connect_timeout_ns;
   }

@@ -15,6 +15,7 @@
 #include "iree/hal/api.h"
 #include "iree/hal/remote/client/api.h"
 #include "iree/hal/remote/protocol/common.h"
+#include "iree/net/channel/util/sequence_window.h"
 #include "iree/net/session.h"
 
 #ifdef __cplusplus
@@ -31,6 +32,18 @@ typedef struct iree_net_bulk_chunk_pool_t iree_net_bulk_chunk_pool_t;
 typedef struct iree_net_bulk_transfer_table_t iree_net_bulk_transfer_table_t;
 typedef struct iree_net_queue_channel_t iree_net_queue_channel_t;
 typedef struct iree_hal_remote_pending_rpc_t iree_hal_remote_pending_rpc_t;
+
+typedef iree_status_t (
+    *iree_hal_remote_client_device_control_rpc_after_send_fn_t)(
+    void* user_data);
+
+typedef struct iree_hal_remote_client_device_control_rpc_after_send_t {
+  // Optional callback invoked after the control request is submitted.
+  iree_hal_remote_client_device_control_rpc_after_send_fn_t fn;
+
+  // User data passed to |fn|.
+  void* user_data;
+} iree_hal_remote_client_device_control_rpc_after_send_t;
 
 typedef struct iree_hal_remote_client_device_t {
   iree_hal_resource_t resource;
@@ -94,6 +107,14 @@ typedef struct iree_hal_remote_client_device_t {
 
   // Fixed-capacity pool of retained incoming bulk DATA chunks.
   iree_net_bulk_chunk_pool_t* bulk_receive_chunks;
+
+  // Client-owned sink retained while a remote profiling session is active.
+  // Protected by bulk_transfer_mutex.
+  iree_hal_profile_sink_t* profile_sink;
+
+  // Reconstructs in-order profile callback dispatch from completed bulk
+  // transfers that may arrive out of order. Protected by bulk_transfer_mutex.
+  iree_net_sequence_window_t profile_sequence_window;
 
   // Remote queue axis from the server's topology. Used to build signal
   // frontiers for queue submissions. Valid after on_session_ready.
@@ -208,9 +229,24 @@ iree_status_t iree_hal_remote_client_device_control_rpc(
     iree_const_byte_span_t* out_response_payload,
     iree_async_buffer_lease_t* out_response_lease);
 
+// Sends a control channel request, invokes |after_send| once the request is
+// submitted, and then blocks until the response arrives.
+//
+// This is used when the control request publishes metadata that allows a
+// side-band transfer to make progress. The callback must not retain |request|.
+iree_status_t iree_hal_remote_client_device_control_rpc_with_after_send(
+    iree_hal_remote_client_device_t* device, iree_const_byte_span_t request,
+    iree_hal_remote_client_device_control_rpc_after_send_t after_send,
+    iree_const_byte_span_t* out_response_payload,
+    iree_async_buffer_lease_t* out_response_lease);
+
 // Sends a fire-and-forget control message (no response expected).
 iree_status_t iree_hal_remote_client_device_send_fire_and_forget(
     iree_hal_remote_client_device_t* device, iree_const_byte_span_t message);
+
+// Wakes all pending control RPCs with an unavailable status.
+void iree_hal_remote_client_device_fail_pending_rpcs(
+    iree_hal_remote_client_device_t* device);
 
 // Sends a frontier-ordered release for a remote resource. The release is
 // fire-and-forget and produces no ADVANCE; failures are best-effort cleanup

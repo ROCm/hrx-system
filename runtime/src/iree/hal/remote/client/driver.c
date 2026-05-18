@@ -6,33 +6,10 @@
 
 #include "iree/hal/remote/client/driver.h"
 
-#include "iree/base/threading/notification.h"
 #include "iree/hal/remote/client/api.h"
 #include "iree/hal/remote/client/device.h"
 #include "iree/hal/remote/util/recv_pool.h"
 #include "iree/net/transport_factory.h"
-
-// Synchronous connect state for create_device_by_path.
-typedef struct iree_hal_remote_client_driver_connect_state_t {
-  iree_notification_t notification;
-  // Owns the status — caller must consume or free.
-  iree_status_t status;
-  bool fired;
-} iree_hal_remote_client_driver_connect_state_t;
-
-static void iree_hal_remote_client_driver_on_connected(void* user_data,
-                                                       iree_status_t status) {
-  iree_hal_remote_client_driver_connect_state_t* state =
-      (iree_hal_remote_client_driver_connect_state_t*)user_data;
-  // Transfer ownership to the connect state.
-  state->status = status;
-  state->fired = true;
-  iree_notification_post(&state->notification, IREE_ALL_WAITERS);
-}
-
-static bool iree_hal_remote_client_driver_connect_condition(void* arg) {
-  return ((iree_hal_remote_client_driver_connect_state_t*)arg)->fired;
-}
 
 IREE_API_EXPORT void iree_hal_remote_client_driver_options_initialize(
     iree_hal_remote_client_driver_options_t* out_options) {
@@ -50,13 +27,17 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_client_driver_options_parse(
 }
 
 typedef struct iree_hal_remote_client_driver_t {
+  // Base HAL resource header.
   iree_hal_resource_t resource;
+  // Host allocator used to allocate the driver.
   iree_allocator_t host_allocator;
+  // Device identifier reported by devices this driver creates.
   iree_string_view_t identifier;
+  // Driver defaults copied at creation time.
   iree_hal_remote_client_driver_options_t options;
 
-  // Shared receive buffer pool. Created lazily on first device creation
-  // from the proactor pool. All child devices retain this pool.
+  // Shared receive buffer pool. Created lazily on first device creation from
+  // the proactor pool. All child devices retain this pool.
   iree_hal_remote_recv_pool_t* recv_pool;
 } iree_hal_remote_client_driver_t;
 
@@ -133,15 +114,56 @@ static iree_status_t iree_hal_remote_client_driver_query_available_devices(
     iree_hal_driver_t* base_driver, iree_allocator_t host_allocator,
     iree_host_size_t* out_device_info_count,
     iree_hal_device_info_t** out_device_infos) {
+  iree_hal_remote_client_driver_t* driver =
+      iree_hal_remote_client_driver_cast(base_driver);
   *out_device_info_count = 0;
   *out_device_infos = NULL;
-  return iree_ok_status();
+
+  iree_string_view_t server_address =
+      driver->options.default_device_options.server_address;
+  iree_status_t status = iree_ok_status();
+  if (!iree_string_view_is_empty(server_address)) {
+    static const iree_string_view_t name =
+        iree_string_view_literal("remote endpoint");
+
+    iree_host_size_t total_size = 0;
+    iree_host_size_t name_offset = 0;
+    iree_host_size_t path_offset = 0;
+    status = IREE_STRUCT_LAYOUT(
+        sizeof(iree_hal_device_info_t), &total_size,
+        IREE_STRUCT_FIELD_ALIGNED(name.size, char, 1, &name_offset),
+        IREE_STRUCT_FIELD_ALIGNED(server_address.size, char, 1, &path_offset));
+
+    iree_hal_device_info_t* device_info = NULL;
+    if (iree_status_is_ok(status)) {
+      status = iree_allocator_malloc(host_allocator, total_size,
+                                     (void**)&device_info);
+    }
+    if (iree_status_is_ok(status)) {
+      memset(device_info, 0, total_size);
+      char* storage = (char*)device_info;
+      device_info->device_id = IREE_HAL_DEVICE_ID_DEFAULT;
+      iree_string_view_append_to_buffer(name, &device_info->name,
+                                        storage + name_offset);
+      iree_string_view_append_to_buffer(server_address, &device_info->path,
+                                        storage + path_offset);
+
+      *out_device_info_count = 1;
+      *out_device_infos = device_info;
+    }
+  }
+  return status;
 }
 
 static iree_status_t iree_hal_remote_client_driver_dump_device_info(
     iree_hal_driver_t* base_driver, iree_hal_device_id_t device_id,
     iree_string_builder_t* builder) {
-  return iree_ok_status();
+  iree_status_t status = iree_ok_status();
+  if (device_id == IREE_HAL_DEVICE_ID_DEFAULT) {
+    status = iree_string_builder_append_cstring(
+        builder, "Remote HAL endpoint: client-supplied transport address.\n");
+  }
+  return status;
 }
 
 // Ensures the driver has a recv_pool, creating one lazily from the proactor
@@ -149,15 +171,19 @@ static iree_status_t iree_hal_remote_client_driver_dump_device_info(
 static iree_status_t iree_hal_remote_client_driver_ensure_recv_pool(
     iree_hal_remote_client_driver_t* driver,
     const iree_hal_device_create_params_t* create_params) {
-  if (driver->recv_pool) return iree_ok_status();
-  if (!create_params || !create_params->proactor_pool) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "remote driver requires a proactor_pool in "
-                            "create_params for recv_pool initialization");
+  iree_status_t status = iree_ok_status();
+  if (!driver->recv_pool) {
+    if (!create_params || !create_params->proactor_pool) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "remote driver requires a proactor_pool in "
+                                "create_params for recv_pool initialization");
+    } else {
+      status = iree_hal_remote_recv_pool_create(
+          create_params->proactor_pool, driver->options.numa_node_id,
+          driver->host_allocator, &driver->recv_pool);
+    }
   }
-  return iree_hal_remote_recv_pool_create(
-      create_params->proactor_pool, driver->options.numa_node_id,
-      driver->host_allocator, &driver->recv_pool);
+  return status;
 }
 
 static iree_status_t iree_hal_remote_client_driver_create_device_by_id(
@@ -170,16 +196,27 @@ static iree_status_t iree_hal_remote_client_driver_create_device_by_id(
 
   iree_hal_remote_client_device_options_t options =
       driver->options.default_device_options;
-  IREE_RETURN_IF_ERROR(iree_hal_remote_client_device_options_parse(
-      &options,
-      (iree_string_pair_list_t){.count = param_count, .pairs = params}));
-
-  IREE_RETURN_IF_ERROR(
-      iree_hal_remote_client_driver_ensure_recv_pool(driver, create_params));
-
-  return iree_hal_remote_client_device_create(driver->identifier, &options,
-                                              create_params, driver->recv_pool,
-                                              host_allocator, out_device);
+  iree_status_t status = iree_ok_status();
+  if (device_id != IREE_HAL_DEVICE_ID_DEFAULT) {
+    status = iree_make_status(
+        IREE_STATUS_NOT_FOUND,
+        "remote drivers only expose the configured default endpoint by ID");
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_client_device_options_parse(
+        &options,
+        (iree_string_pair_list_t){.count = param_count, .pairs = params});
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_hal_remote_client_driver_ensure_recv_pool(driver, create_params);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_client_device_create(
+        driver->identifier, &options, create_params, driver->recv_pool,
+        host_allocator, out_device);
+  }
+  return status;
 }
 
 static iree_status_t iree_hal_remote_client_driver_create_device_by_path(
@@ -211,41 +248,6 @@ static iree_status_t iree_hal_remote_client_driver_create_device_by_path(
     status = iree_hal_remote_client_device_create(
         driver->identifier, &options, create_params, driver->recv_pool,
         host_allocator, out_device);
-  }
-
-  // Auto-connect and wait synchronously. Callers (tooling, VM) expect
-  // create_device to return a ready device.
-  if (iree_status_is_ok(status)) {
-    iree_hal_remote_client_driver_connect_state_t connect_state;
-    memset(&connect_state, 0, sizeof(connect_state));
-    iree_notification_initialize(&connect_state.notification);
-
-    iree_hal_remote_client_device_connected_callback_t callback = {
-        .fn = iree_hal_remote_client_driver_on_connected,
-        .user_data = &connect_state,
-    };
-    status = iree_hal_remote_client_device_connect(*out_device, callback);
-
-    if (iree_status_is_ok(status)) {
-      bool connected = iree_notification_await(
-          &connect_state.notification,
-          iree_hal_remote_client_driver_connect_condition, &connect_state,
-          iree_make_timeout_ms(10000));
-      if (!connected) {
-        status = iree_make_status(IREE_STATUS_DEADLINE_EXCEEDED,
-                                  "remote device connect timed out");
-        iree_status_ignore(connect_state.status);
-      } else if (!iree_status_is_ok(connect_state.status)) {
-        status = connect_state.status;
-      }
-    }
-
-    iree_notification_deinitialize(&connect_state.notification);
-
-    if (!iree_status_is_ok(status)) {
-      iree_hal_device_release(*out_device);
-      *out_device = NULL;
-    }
   }
 
   IREE_TRACE_ZONE_END(z0);

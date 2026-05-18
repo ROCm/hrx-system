@@ -10,12 +10,16 @@
 #include <string.h>
 
 #include "iree/base/internal/atomics.h"
+#include "iree/base/internal/path.h"
 #include "iree/base/threading/call_once.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/base/threading/notification.h"
 #include "iree/base/threading/thread.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/hal/drivers/init.h"
+#if defined(IREE_HAVE_HAL_REMOTE_CLIENT_DRIVER_MODULE)
+#include "iree/hal/remote/client/api.h"
+#endif  // IREE_HAVE_HAL_REMOTE_CLIENT_DRIVER_MODULE
 #include "iree/hal/utils/allocators.h"
 #include "iree/hal/utils/mpi_channel_provider.h"
 #include "iree/hal/utils/profile_file.h"
@@ -350,6 +354,79 @@ iree_string_view_list_t iree_hal_device_flag_list(void) {
   return FLAG_device_list();
 }
 
+#if defined(IREE_HAVE_HAL_REMOTE_CLIENT_DRIVER_MODULE)
+typedef struct iree_hal_remote_device_connect_state_t {
+  // Posted when the remote connect callback has fired.
+  iree_notification_t notification;
+  // Status transferred from the remote connect callback.
+  iree_status_t status;
+  // Set to true after |status| has been populated.
+  bool fired;
+} iree_hal_remote_device_connect_state_t;
+
+static bool iree_hal_remote_device_connect_condition(void* user_data) {
+  const iree_hal_remote_device_connect_state_t* state =
+      (const iree_hal_remote_device_connect_state_t*)user_data;
+  return state->fired;
+}
+
+static void iree_hal_remote_device_connected(void* user_data,
+                                             iree_status_t status) {
+  iree_hal_remote_device_connect_state_t* state =
+      (iree_hal_remote_device_connect_state_t*)user_data;
+  state->status = status;
+  state->fired = true;
+  iree_notification_post(&state->notification, IREE_ALL_WAITERS);
+}
+
+static bool iree_hal_device_uri_is_remote(iree_string_view_t device_uri) {
+  iree_string_view_t driver_name = iree_uri_schema(device_uri);
+  return iree_string_view_starts_with(driver_name, IREE_SV("remote-"));
+}
+
+static iree_status_t iree_hal_connect_remote_device_from_flags(
+    iree_string_view_t device_uri, iree_hal_device_t* device) {
+  iree_status_t status = iree_ok_status();
+  if (iree_hal_device_uri_is_remote(device_uri)) {
+    iree_hal_remote_device_connect_state_t connect_state;
+    memset(&connect_state, 0, sizeof(connect_state));
+    iree_notification_initialize(&connect_state.notification);
+
+    iree_hal_remote_client_device_connected_callback_t callback = {
+        .fn = iree_hal_remote_device_connected,
+        .user_data = &connect_state,
+    };
+    status = iree_hal_remote_client_device_connect(device, callback);
+    if (iree_status_is_ok(status)) {
+      const bool connected = iree_notification_await(
+          &connect_state.notification, iree_hal_remote_device_connect_condition,
+          &connect_state, iree_infinite_timeout());
+      if (connected) {
+        status = connect_state.status;
+      } else {
+        status = iree_make_status(IREE_STATUS_INTERNAL,
+                                  "remote device connect did not complete");
+      }
+    }
+
+    iree_notification_deinitialize(&connect_state.notification);
+
+    if (!iree_status_is_ok(status)) {
+      status = iree_status_annotate_f(status, "connecting remote device '%.*s'",
+                                      (int)device_uri.size, device_uri.data);
+    }
+  }
+  return status;
+}
+#else
+static iree_status_t iree_hal_connect_remote_device_from_flags(
+    iree_string_view_t device_uri, iree_hal_device_t* device) {
+  (void)device_uri;
+  (void)device;
+  return iree_ok_status();
+}
+#endif  // IREE_HAVE_HAL_REMOTE_CLIENT_DRIVER_MODULE
+
 iree_status_t iree_hal_create_device_from_flags(
     iree_hal_driver_registry_t* driver_registry,
     iree_string_view_t default_device,
@@ -406,6 +483,14 @@ iree_status_t iree_hal_create_devices_from_flags(
     iree_hal_device_t* device = NULL;
     status = iree_hal_create_device(driver_registry, flag_list.values[i],
                                     create_params, host_allocator, &device);
+
+    // Command-line tools require remote devices to be ready before they are
+    // inserted into modules or device groups. Keep that readiness policy here
+    // instead of hiding a blocking network wait in HAL driver creation.
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_connect_remote_device_from_flags(flag_list.values[i],
+                                                         device);
+    }
 
     // Optionally wrap the base device allocator with caching/pooling.
     // Doing this here satisfies the requirement that no buffers have been

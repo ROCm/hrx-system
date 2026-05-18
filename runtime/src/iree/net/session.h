@@ -36,8 +36,10 @@
 //   - Propagate frontiers in steady state. Frontier updates flow through
 //     queue channel ADVANCE frames, parsed by the HAL layer, which calls
 //     frontier_tracker_advance() directly.
-//   - Own the frontier_tracker. The tracker is application-scoped (spans
-//     machine lifetime, survives session reconnects). The session borrows it.
+//   - Retain the frontier_tracker while remote axes are registered. The
+//     tracker is application-scoped (spans machine lifetime, survives session
+//     reconnects), but async session teardown can outlive the owner that
+//     initiated release.
 //
 // ## Threading
 //
@@ -48,9 +50,8 @@
 // ## Ownership
 //
 // Sessions use create/retain/release. The session retains the transport
-// factory and connection internally. The frontier_tracker is borrowed (must
-// outlive the session). Proxy semaphores are owned by the session and
-// released on shutdown/destroy.
+// factory, connection, proactor, and frontier tracker internally. Proxy
+// semaphores are owned by the session and released on shutdown/destroy.
 
 #ifndef IREE_NET_SESSION_H_
 #define IREE_NET_SESSION_H_
@@ -233,6 +234,11 @@ typedef struct iree_net_session_options_t {
   // Capabilities to advertise. See iree_net_bootstrap_capability_bits_e.
   uint32_t capabilities;
 
+  // Number of application endpoints the session user will open after the
+  // control endpoint is established. Session setup validates the connection has
+  // at least one control endpoint plus this many application endpoints.
+  uint32_t application_endpoint_count;
+
   // Server-assigned session identifier. Sent to the client in HELLO_ACK.
   // Must be nonzero for server sessions (iree_net_session_accept).
   // Ignored for client sessions (assigned by the server via HELLO_ACK).
@@ -269,9 +275,9 @@ static inline iree_net_session_options_t iree_net_session_options_default(
 //   6. Transitions to OPERATIONAL, fires on_ready.
 //
 // |factory| is retained by the session.
-// |frontier_tracker| is borrowed (must outlive the session).
+// |frontier_tracker| is retained by the session.
 // |recv_pool| is borrowed (must outlive the session).
-// |proactor| is borrowed (must outlive the session).
+// |proactor| is retained by the session.
 //
 // |callbacks.on_ready| and |callbacks.on_control_data| must be non-NULL.
 IREE_API_EXPORT iree_status_t iree_net_session_connect(
@@ -298,8 +304,8 @@ IREE_API_EXPORT iree_status_t iree_net_session_connect(
 //   6. Transitions to OPERATIONAL, fires on_ready.
 //
 // |connection| is retained by the session.
-// |frontier_tracker| is borrowed (must outlive the session).
-// |proactor| is borrowed (must outlive the session).
+// |frontier_tracker| is retained by the session.
+// |proactor| is retained by the session.
 //
 // |callbacks.on_ready| and |callbacks.on_control_data| must be non-NULL.
 IREE_API_EXPORT iree_status_t iree_net_session_accept(

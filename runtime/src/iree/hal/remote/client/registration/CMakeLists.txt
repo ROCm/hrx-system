@@ -20,6 +20,7 @@ set(_DEPS
   iree::base
   iree::hal
   iree::hal::remote::client
+  iree::hal::remote::protocol::common
   iree::net::transport_factory
 )
 

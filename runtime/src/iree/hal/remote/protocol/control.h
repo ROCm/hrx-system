@@ -95,9 +95,16 @@ typedef enum iree_hal_remote_control_type_e {
   IREE_HAL_REMOTE_CONTROL_SEMAPHORE_SIGNAL = 0x0012,  // fire-and-forget
   IREE_HAL_REMOTE_CONTROL_SEMAPHORE_WAIT = 0x0013,
 
+  // ── Event ───────────────────────────────────────────────────────────────
+  IREE_HAL_REMOTE_CONTROL_EVENT_CREATE = 0x0018,  // [epoch]
+
   // ── Executable ──────────────────────────────────────────────────────────
   IREE_HAL_REMOTE_CONTROL_EXECUTABLE_UPLOAD = 0x0020,  // [epoch]
   IREE_HAL_REMOTE_CONTROL_EXECUTABLE_QUERY_EXPORT = 0x0021,
+  IREE_HAL_REMOTE_CONTROL_EXECUTABLE_QUERY_PARAMETERS = 0x0022,
+  IREE_HAL_REMOTE_CONTROL_EXECUTABLE_LOOKUP_EXPORT = 0x0023,
+  IREE_HAL_REMOTE_CONTROL_EXECUTABLE_CACHE_QUERY_FORMAT = 0x0024,
+  IREE_HAL_REMOTE_CONTROL_EXECUTABLE_LOOKUP_GLOBAL = 0x0025,
 
   // ── Command Buffer ──────────────────────────────────────────────────────
   IREE_HAL_REMOTE_CONTROL_COMMAND_BUFFER_UPLOAD = 0x0030,  // [epoch]
@@ -117,11 +124,19 @@ typedef enum iree_hal_remote_control_type_e {
   IREE_HAL_REMOTE_CONTROL_BUFFER_QUERY_HEAPS = 0x0054,
 
   // ── Host Call ───────────────────────────────────────────────────────────
+  // Reserved for future explicit server-side named handlers. HAL
+  // queue_host_call callbacks are client-local function pointers and are
+  // handled by the remote client without crossing the control channel.
   IREE_HAL_REMOTE_CONTROL_HOST_CALL_REGISTER = 0x0060,    // [epoch]
   IREE_HAL_REMOTE_CONTROL_HOST_CALL_UNREGISTER = 0x0061,  // fire-and-forget
 
   // ── Lifecycle ───────────────────────────────────────────────────────────
   IREE_HAL_REMOTE_CONTROL_RESOURCE_RELEASE_BATCH = 0x0070,  // fire-and-forget
+
+  // ── Profiling ───────────────────────────────────────────────────────────
+  IREE_HAL_REMOTE_CONTROL_PROFILING_BEGIN = 0x0080,
+  IREE_HAL_REMOTE_CONTROL_PROFILING_FLUSH = 0x0081,
+  IREE_HAL_REMOTE_CONTROL_PROFILING_END = 0x0082,
 
   // ── Extensions ──────────────────────────────────────────────────────────
   IREE_HAL_REMOTE_CONTROL_DEVICE_EXTENSION = 0x00F0,
@@ -245,6 +260,24 @@ static_assert(sizeof(iree_hal_remote_semaphore_wait_request_t) == 24, "");
 // Response: status only (OK or DEADLINE_EXCEEDED).
 
 //===----------------------------------------------------------------------===//
+// Event messages
+//===----------------------------------------------------------------------===//
+
+// EVENT_CREATE request. Creates a device event. [epoch]
+typedef struct iree_hal_remote_event_create_request_t {
+  uint64_t queue_affinity;  // iree_hal_queue_affinity_t
+  uint32_t flags;           // iree_hal_event_flags_t
+  uint32_t reserved;        // Must be 0.
+} iree_hal_remote_event_create_request_t;
+static_assert(sizeof(iree_hal_remote_event_create_request_t) == 16, "");
+
+// EVENT_CREATE response. Returns the server-assigned canonical ID.
+typedef struct iree_hal_remote_event_create_response_t {
+  iree_hal_remote_resource_id_t resolved_id;  // PROVISIONAL=0
+} iree_hal_remote_event_create_response_t;
+static_assert(sizeof(iree_hal_remote_event_create_response_t) == 8, "");
+
+//===----------------------------------------------------------------------===//
 // Executable messages
 //===----------------------------------------------------------------------===//
 
@@ -270,15 +303,15 @@ static_assert(offsetof(iree_hal_remote_executable_upload_request_t,
                        data_length) == 16,
               "");
 
-// EXECUTABLE_UPLOAD response. Returns the resolved ID and export count.
+// EXECUTABLE_UPLOAD response. Returns the resolved ID and function count.
 typedef struct iree_hal_remote_executable_upload_response_t {
   iree_hal_remote_resource_id_t resolved_id;  // PROVISIONAL=0
-  uint32_t export_count;  // Number of entry points in the executable.
+  uint32_t export_count;  // Number of functions in the executable.
   uint32_t reserved;      // Must be 0.
 } iree_hal_remote_executable_upload_response_t;
 static_assert(sizeof(iree_hal_remote_executable_upload_response_t) == 16, "");
 
-// EXECUTABLE_QUERY_EXPORT request. Queries metadata for a specific entry point.
+// EXECUTABLE_QUERY_EXPORT request. Queries metadata for a specific function.
 typedef struct iree_hal_remote_executable_query_export_request_t {
   iree_hal_remote_resource_id_t executable_id;
   uint32_t export_ordinal;
@@ -287,13 +320,137 @@ typedef struct iree_hal_remote_executable_query_export_request_t {
 static_assert(sizeof(iree_hal_remote_executable_query_export_request_t) == 16,
               "");
 
-// EXECUTABLE_QUERY_EXPORT response. Returns workgroup size for the export.
+// EXECUTABLE_QUERY_EXPORT response. Returns fixed function metadata followed by
+// the export name bytes. The name is UTF-8, not null-terminated, and is only
+// valid for the lifetime of the response payload; clients that expose it
+// through HAL APIs must copy it into executable-owned storage.
 typedef struct iree_hal_remote_executable_query_export_response_t {
+  uint64_t flags;  // iree_hal_executable_function_flags_t
   uint32_t workgroup_size[3];
-  uint32_t reserved;  // Must be 0.
+  int32_t occupancy_reserved;  // iree_hal_occupancy_info_t::reserved.
+  uint16_t constant_count;  // iree_hal_executable_function_info_t byte length.
+  uint16_t binding_count;
+  uint16_t parameter_count;
+  uint16_t name_length;  // Byte length of the following export name.
+  uint32_t reserved[2];  // Must be 0.
+  // Followed by:
+  //   char name[name_length]
 } iree_hal_remote_executable_query_export_response_t;
-static_assert(sizeof(iree_hal_remote_executable_query_export_response_t) == 16,
+static_assert(sizeof(iree_hal_remote_executable_query_export_response_t) == 40,
               "");
+
+// EXECUTABLE_QUERY_PARAMETERS request. Queries reflected parameters for a
+// specific function. The server returns at most capacity entries.
+typedef struct iree_hal_remote_executable_query_parameters_request_t {
+  iree_hal_remote_resource_id_t executable_id;
+  uint32_t export_ordinal;
+  uint16_t capacity;
+  uint16_t reserved;  // Must be 0.
+} iree_hal_remote_executable_query_parameters_request_t;
+static_assert(sizeof(iree_hal_remote_executable_query_parameters_request_t) ==
+                  16,
+              "");
+
+// Wire representation of iree_hal_executable_function_parameter_t. Parameter
+// names are serialized out-of-line in the containing response so the struct is
+// pointer-free and stable across processes.
+typedef struct iree_hal_remote_executable_export_parameter_t {
+  uint16_t offset;
+  uint16_t flags;  // iree_hal_executable_function_parameter_flags_t
+  uint16_t name_length;
+  uint8_t type;  // iree_hal_executable_function_parameter_type_t
+  uint8_t size;
+} iree_hal_remote_executable_export_parameter_t;
+static_assert(sizeof(iree_hal_remote_executable_export_parameter_t) == 8, "");
+
+// EXECUTABLE_QUERY_PARAMETERS response. Fixed parameter records are followed
+// by concatenated UTF-8 parameter name bytes in record order. Names are not
+// null-terminated and are only valid for the lifetime of the response payload;
+// clients that expose them through HAL APIs must copy them into
+// executable-owned storage.
+typedef struct iree_hal_remote_executable_query_parameters_response_t {
+  uint16_t parameter_count;
+  uint16_t reserved;  // Must be 0.
+  uint32_t name_data_length;
+  // Followed by:
+  //   iree_hal_remote_executable_export_parameter_t parameters[parameter_count]
+  //   char names[name_data_length]
+} iree_hal_remote_executable_query_parameters_response_t;
+static_assert(sizeof(iree_hal_remote_executable_query_parameters_response_t) ==
+                  8,
+              "");
+
+// EXECUTABLE_LOOKUP_EXPORT request. Looks up a function ordinal by name.
+typedef struct iree_hal_remote_executable_lookup_export_request_t {
+  iree_hal_remote_resource_id_t executable_id;
+  uint16_t name_length;  // Byte length of the following export name.
+  uint16_t reserved0;    // Must be 0.
+  uint32_t reserved1;    // Must be 0.
+  // Followed by:
+  //   char name[name_length]
+} iree_hal_remote_executable_lookup_export_request_t;
+static_assert(sizeof(iree_hal_remote_executable_lookup_export_request_t) == 16,
+              "");
+
+// EXECUTABLE_LOOKUP_EXPORT response. Returns the matching function ordinal.
+typedef struct iree_hal_remote_executable_lookup_export_response_t {
+  uint32_t export_ordinal;
+  uint32_t reserved;  // Must be 0.
+} iree_hal_remote_executable_lookup_export_response_t;
+static_assert(sizeof(iree_hal_remote_executable_lookup_export_response_t) == 8,
+              "");
+
+// EXECUTABLE_LOOKUP_GLOBAL request. Looks up an executable global by name for
+// the requested queue affinity. Empty queue affinity lets the server select an
+// implementation-defined valid device instance.
+typedef struct iree_hal_remote_executable_lookup_global_request_t {
+  iree_hal_remote_resource_id_t executable_id;
+  uint64_t queue_affinity;  // iree_hal_queue_affinity_t
+  uint16_t name_length;     // Byte length of the following global name.
+  uint16_t reserved0;       // Must be 0.
+  uint32_t reserved1;       // Must be 0.
+  // Followed by:
+  //   char name[name_length]
+} iree_hal_remote_executable_lookup_global_request_t;
+static_assert(sizeof(iree_hal_remote_executable_lookup_global_request_t) == 24,
+              "");
+
+// EXECUTABLE_LOOKUP_GLOBAL response. The returned resource ID refers to the
+// exact buffer alias returned by the server executable lookup; client proxies
+// must treat it as a zero-offset buffer of |byte_length| bytes rather than
+// reconstructing any server-local root allocation.
+typedef struct iree_hal_remote_executable_lookup_global_response_t {
+  iree_hal_remote_resource_id_t resolved_id;  // PROVISIONAL=0
+  iree_hal_remote_buffer_params_t params;
+  uint64_t byte_length;
+  uint32_t placement_flags;  // iree_hal_buffer_placement_flags_t
+  uint32_t reserved;         // Must be 0.
+} iree_hal_remote_executable_lookup_global_response_t;
+static_assert(sizeof(iree_hal_remote_executable_lookup_global_response_t) == 56,
+              "");
+
+// EXECUTABLE_CACHE_QUERY_FORMAT request. Queries whether the server-side
+// executable cache can prepare a format. This is a capability hint only:
+// EXECUTABLE_UPLOAD remains authoritative and may still reject malformed or
+// unsupported executable contents.
+typedef struct iree_hal_remote_executable_cache_query_format_request_t {
+  uint32_t caching_mode;   // iree_hal_executable_caching_mode_t
+  uint16_t format_length;  // Byte length of the following format string.
+  uint16_t reserved;       // Must be 0.
+  // Followed by:
+  //   char format[format_length]
+} iree_hal_remote_executable_cache_query_format_request_t;
+static_assert(sizeof(iree_hal_remote_executable_cache_query_format_request_t) ==
+                  8,
+              "");
+
+// EXECUTABLE_CACHE_QUERY_FORMAT response. Non-zero if the format is supported.
+typedef struct iree_hal_remote_executable_cache_query_format_response_t {
+  uint32_t can_prepare;
+  uint32_t reserved;  // Must be 0.
+} iree_hal_remote_executable_cache_query_format_response_t;
+static_assert(
+    sizeof(iree_hal_remote_executable_cache_query_format_response_t) == 8, "");
 
 //===----------------------------------------------------------------------===//
 // Command buffer messages
@@ -520,40 +677,53 @@ typedef struct iree_hal_remote_buffer_import_response_t {
 } iree_hal_remote_buffer_import_response_t;
 static_assert(sizeof(iree_hal_remote_buffer_import_response_t) == 8, "");
 
-// BUFFER_MAP request. Reads buffer contents from the server. The server maps
-// the buffer locally, reads the requested region, and returns the data inline
-// in the response. No persistent server-side mapping state is created.
+// BUFFER_MAP flags.
+#define IREE_HAL_REMOTE_BUFFER_MAP_FLAG_BULK_TRANSFER (1u << 0)
+
+// BUFFER_MAP request. Reads buffer contents from the server. Inline maps return
+// the data in the control response. Bulk maps stream the data under
+// |transfer_id| on the bulk channel and return only metadata in the control
+// response. No persistent server-side mapping state is created.
 typedef struct iree_hal_remote_buffer_map_request_t {
   iree_hal_remote_resource_id_t buffer_id;
   uint32_t memory_access;  // iree_hal_memory_access_t bits (READ, WRITE, etc.)
-  uint32_t reserved;       // Must be 0.
+  uint32_t flags;          // IREE_HAL_REMOTE_BUFFER_MAP_FLAG_*.
   uint64_t offset;
   uint64_t length;
+  uint64_t transfer_id;  // Required when BULK_TRANSFER is set; otherwise 0.
 } iree_hal_remote_buffer_map_request_t;
-static_assert(sizeof(iree_hal_remote_buffer_map_request_t) == 32, "");
+static_assert(sizeof(iree_hal_remote_buffer_map_request_t) == 40, "");
 
-// BUFFER_MAP response. When READ access was requested, the response carries
-// mapped_length bytes of inline data after this header. When only WRITE|DISCARD
-// was requested, mapped_length is 0 and no data follows.
+// BUFFER_MAP response. Inline READ responses carry mapped_length bytes after
+// this header and set transfer_id=0. Bulk READ responses set transfer_id to the
+// bulk transfer carrying mapped_length bytes and carry no inline data. When
+// only WRITE|DISCARD was requested, mapped_length and transfer_id are 0.
 typedef struct iree_hal_remote_buffer_map_response_t {
   uint64_t mapped_offset;  // Actual start offset of the mapped region.
   uint64_t mapped_length;  // Actual byte count of the mapped region.
-  // Followed by: uint8_t data[mapped_length] when READ access was requested.
+  uint64_t transfer_id;    // Bulk transfer ID, or 0 for inline/no data.
+  // Followed by: uint8_t data[mapped_length] for inline READ responses.
 } iree_hal_remote_buffer_map_response_t;
-static_assert(sizeof(iree_hal_remote_buffer_map_response_t) == 16, "");
+static_assert(sizeof(iree_hal_remote_buffer_map_response_t) == 24, "");
 
-// BUFFER_UNMAP request. Writes buffer contents to the server. The request
-// carries length bytes of inline data after this header. The server maps the
-// buffer locally and writes the data to the specified region. Synchronous:
-// the server responds after the write completes so the client can safely
-// proceed with queue operations that depend on the data being present.
+// BUFFER_UNMAP flags.
+#define IREE_HAL_REMOTE_BUFFER_UNMAP_FLAG_BULK_TRANSFER (1u << 0)
+
+// BUFFER_UNMAP request. Writes buffer contents to the server. Inline requests
+// carry length bytes after this header. Bulk requests stream the bytes under
+// |transfer_id| on the bulk channel and carry no inline data. The server
+// responds only after the write completes so the client can safely proceed with
+// queue operations that depend on the data being present.
 typedef struct iree_hal_remote_buffer_unmap_request_t {
   iree_hal_remote_resource_id_t buffer_id;
   uint64_t offset;
   uint64_t length;
-  // Followed by: uint8_t data[length].
+  uint32_t flags;        // IREE_HAL_REMOTE_BUFFER_UNMAP_FLAG_*.
+  uint32_t reserved;     // Must be 0.
+  uint64_t transfer_id;  // Required when BULK_TRANSFER is set; otherwise 0.
+  // Followed by: uint8_t data[length] for inline requests.
 } iree_hal_remote_buffer_unmap_request_t;
-static_assert(sizeof(iree_hal_remote_buffer_unmap_request_t) == 24, "");
+static_assert(sizeof(iree_hal_remote_buffer_unmap_request_t) == 40, "");
 // Response: status only (no body).
 
 // BUFFER_QUERY_HEAPS request. Queries the device's memory heap topology.
@@ -574,11 +744,107 @@ typedef struct iree_hal_remote_buffer_query_heaps_response_t {
 static_assert(sizeof(iree_hal_remote_buffer_query_heaps_response_t) == 8, "");
 
 //===----------------------------------------------------------------------===//
+// Profiling messages
+//===----------------------------------------------------------------------===//
+
+// PROFILING_BEGIN request. Starts a HAL-native structured profiling session on
+// the wrapped server device. The client-owned sink is not serialized here; the
+// server creates a relay sink that forwards callback payloads over the bulk
+// channel using iree_hal_remote_profile_transfer_header_t records.
+typedef struct iree_hal_remote_profiling_begin_request_t {
+  // iree_hal_device_profiling_data_families_t requested by the client.
+  uint64_t data_families;
+  // Capture-filter command buffer identifier, or 0 when inactive.
+  uint64_t command_buffer_id;
+  // iree_hal_device_profiling_flags_t behavior bits.
+  uint32_t flags;
+  // iree_hal_profile_capture_filter_flags_t active filter fields.
+  uint32_t capture_filter_flags;
+  // Capture-filter command index, valid when its flag is set.
+  uint32_t command_index;
+  // Capture-filter physical device ordinal, valid when its flag is set.
+  uint32_t physical_device_ordinal;
+  // Capture-filter queue ordinal, valid when its flag is set.
+  uint32_t queue_ordinal;
+  // Byte length of the executable function glob pattern.
+  uint32_t executable_export_pattern_length;
+  // Number of counter set selection records in the variable-length tail.
+  uint32_t counter_set_count;
+  // Total number of counter names across all counter set selections.
+  uint32_t counter_name_count;
+  // Must be 0.
+  uint32_t reserved[2];
+  // Followed by:
+  //   char executable_function_pattern[executable_export_pattern_length]
+  //       (padded to 8-byte alignment)
+  //   iree_hal_remote_profile_counter_set_selection_t
+  //       counter_sets[counter_set_count], each followed by:
+  //     char name[name_length]  (padded to 8-byte alignment)
+  //     iree_hal_remote_profile_counter_name_t
+  //         counter_names[counter_name_count], each followed by:
+  //       char name[name_length]  (padded to 8-byte alignment)
+} iree_hal_remote_profiling_begin_request_t;
+static_assert(sizeof(iree_hal_remote_profiling_begin_request_t) == 56, "");
+static_assert(offsetof(iree_hal_remote_profiling_begin_request_t,
+                       data_families) == 0,
+              "");
+static_assert(offsetof(iree_hal_remote_profiling_begin_request_t,
+                       counter_set_count) == 40,
+              "");
+
+// Variable-length counter set selection embedded in PROFILING_BEGIN.
+typedef struct iree_hal_remote_profile_counter_set_selection_t {
+  // iree_hal_profile_counter_set_selection_flags_t behavior bits.
+  uint32_t flags;
+  // Number of counter names following this counter set name.
+  uint32_t counter_name_count;
+  // Byte length of the counter set name following this header.
+  uint32_t name_length;
+  // Must be 0.
+  uint32_t reserved;
+  // Followed by:
+  //   char name[name_length]  (padded to 8-byte alignment)
+  //   iree_hal_remote_profile_counter_name_t counter_names[counter_name_count],
+  //       each followed by:
+  //     char name[name_length]  (padded to 8-byte alignment)
+} iree_hal_remote_profile_counter_set_selection_t;
+static_assert(sizeof(iree_hal_remote_profile_counter_set_selection_t) == 16,
+              "");
+
+// Variable-length counter name embedded in a counter set selection.
+typedef struct iree_hal_remote_profile_counter_name_t {
+  // Byte length of the counter name following this header.
+  uint32_t name_length;
+  // Must be 0.
+  uint32_t reserved;
+  // Followed by:
+  //   char name[name_length]  (padded to 8-byte alignment)
+} iree_hal_remote_profile_counter_name_t;
+static_assert(sizeof(iree_hal_remote_profile_counter_name_t) == 8, "");
+
+// PROFILING_FLUSH request. Flushes profile data for the active session.
+typedef struct iree_hal_remote_profiling_flush_request_t {
+  uint32_t flags;     // Reserved, must be 0.
+  uint32_t reserved;  // Must be 0.
+} iree_hal_remote_profiling_flush_request_t;
+static_assert(sizeof(iree_hal_remote_profiling_flush_request_t) == 8, "");
+// Response: status only (no _response_t struct).
+
+// PROFILING_END request. Ends the active profile session.
+typedef struct iree_hal_remote_profiling_end_request_t {
+  uint32_t flags;     // Reserved, must be 0.
+  uint32_t reserved;  // Must be 0.
+} iree_hal_remote_profiling_end_request_t;
+static_assert(sizeof(iree_hal_remote_profiling_end_request_t) == 8, "");
+// Response: status only (no _response_t struct).
+
+//===----------------------------------------------------------------------===//
 // Host call messages
 //===----------------------------------------------------------------------===//
 
-// HOST_CALL_REGISTER request. Registers a named host-side call handler.
-// [epoch] Invocation happens via HOST_CALL_INVOKE on the queue channel.
+// HOST_CALL_REGISTER request. Reserved for future explicit server-side named
+// handlers. HAL queue_host_call callbacks are client-local function pointers
+// and are not represented by this protocol message.
 typedef struct iree_hal_remote_host_call_register_request_t {
   uint64_t call_id;      // Client-chosen ID, unique within session.
   uint16_t name_length;  // UTF-8 handler name (not null-terminated).

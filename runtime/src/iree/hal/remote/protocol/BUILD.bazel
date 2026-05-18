@@ -16,6 +16,14 @@ package(
 )
 
 iree_runtime_cc_library(
+    name = "commands",
+    hdrs = ["commands.h"],
+    deps = [
+        ":common",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "common",
     hdrs = ["common.h"],
     deps = [
@@ -32,16 +40,16 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
-    name = "queue",
-    hdrs = ["queue.h"],
+    name = "profile",
+    hdrs = ["profile.h"],
     deps = [
         ":common",
     ],
 )
 
 iree_runtime_cc_library(
-    name = "commands",
-    hdrs = ["commands.h"],
+    name = "queue",
+    hdrs = ["queue.h"],
     deps = [
         ":common",
     ],

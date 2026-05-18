@@ -42,6 +42,7 @@ iree_cc_test(
     iree::hal
     iree::hal::drivers::local_task::registration
     iree::hal::remote::client
+    iree::hal::remote::protocol::common
     iree::hal::remote::server
     iree::hal::remote::util::recv_pool
     iree::hal::testing::mock_device

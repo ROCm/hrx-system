@@ -21,6 +21,8 @@ extern "C" {
 #endif  // __cplusplus
 
 typedef struct iree_hal_remote_server_t iree_hal_remote_server_t;
+typedef struct iree_hal_remote_control_envelope_t
+    iree_hal_remote_control_envelope_t;
 typedef struct iree_hal_remote_server_bulk_staging_pool_t
     iree_hal_remote_server_bulk_staging_pool_t;
 typedef struct iree_net_bulk_channel_t iree_net_bulk_channel_t;
@@ -45,6 +47,12 @@ enum iree_hal_remote_server_provisional_state_e {
   IREE_HAL_REMOTE_SERVER_PROVISIONAL_FAILED = 2,
 };
 
+typedef uint8_t iree_hal_remote_server_session_flags_t;
+
+enum iree_hal_remote_server_session_flag_bits_e {
+  IREE_HAL_REMOTE_SERVER_SESSION_FLAG_BULK_DRAIN_PENDING = 1u << 0,
+};
+
 // Per-client session tracking entry.
 // Stored in the server's sessions array (indexed by slot).
 typedef struct iree_hal_remote_server_session_t {
@@ -58,6 +66,9 @@ typedef struct iree_hal_remote_server_session_t {
 
   // Server-assigned session ID (unique, monotonically increasing).
   uint64_t session_id;
+
+  // State bits from iree_hal_remote_server_session_flag_bits_e.
+  iree_hal_remote_server_session_flags_t flags;
 
   // Queue channel for HAL command dispatch (NULL until queue endpoint opens).
   // The channel owns the header pool for its frame_sender (freed on channel
@@ -79,6 +90,23 @@ typedef struct iree_hal_remote_server_session_t {
 
   // Fixed-capacity retained receive chunks for client-to-server bulk uploads.
   iree_net_bulk_chunk_pool_t* bulk_receive_chunks;
+
+  // Active server-created profile sink for the session, or NULL when no
+  // HAL-native profiling session is active. Protected by server->session_mutex.
+  iree_hal_profile_sink_t* profile_sink;
+
+  // Server-originated profile transfer acknowledgements observed from the
+  // client. Protected by server->session_mutex.
+  iree_net_sequence_window_t profile_ack_window;
+
+  // First asynchronous profile transfer failure code observed in the active
+  // session, or IREE_STATUS_OK when all transfers have completed normally.
+  // Protected by server->session_mutex.
+  iree_status_code_t profile_transfer_failure_code;
+
+  // First failed profile callback sequence, or 0 when no transfer has failed.
+  // Protected by server->session_mutex.
+  uint64_t profile_transfer_failure_sequence;
 
   // Resource table mapping resource_ids to retained HAL resources (buffers,
   // semaphores, etc.). Initialized when the session is accepted, deinitialized
@@ -179,6 +207,24 @@ iree_status_t iree_hal_remote_server_on_queue_command(
 // same session (second call is a no-op).
 void iree_hal_remote_server_remove_session(iree_hal_remote_server_t* server,
                                            iree_net_session_t* session);
+
+// Completes asynchronous bulk transfer teardown for a removed session.
+void iree_hal_remote_server_session_complete_bulk_drain(
+    iree_hal_remote_server_session_t* session_slot);
+
+// Sends a control-channel response from asynchronous session-owned work.
+iree_status_t iree_hal_remote_server_session_send_response(
+    iree_hal_remote_server_session_t* session_slot,
+    const iree_hal_remote_control_envelope_t* request_envelope,
+    iree_status_code_t status_code, const void* body,
+    iree_host_size_t body_length);
+
+// Sends a control-channel error response from asynchronous session-owned work.
+// Consumes |status|.
+iree_status_t iree_hal_remote_server_session_send_error_response(
+    iree_hal_remote_server_session_t* session_slot,
+    const iree_hal_remote_control_envelope_t* request_envelope,
+    iree_status_t status);
 
 // Deinitializes sequence windows and releases any owner-managed pending nodes.
 void iree_hal_remote_server_session_deinitialize_windows(

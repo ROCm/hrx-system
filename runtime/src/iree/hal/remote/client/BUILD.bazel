@@ -28,6 +28,8 @@ iree_runtime_cc_library(
         "device.h",
         "driver.c",
         "driver.h",
+        "event.c",
+        "event.h",
         "executable.c",
         "executable.h",
         "executable_cache.c",
@@ -56,6 +58,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/remote/protocol:commands",
         "//runtime/src/iree/hal/remote/protocol:common",
         "//runtime/src/iree/hal/remote/protocol:control",
+        "//runtime/src/iree/hal/remote/protocol:profile",
         "//runtime/src/iree/hal/remote/protocol:queue",
         "//runtime/src/iree/hal/remote/util:bulk_transfer_tracker",
         "//runtime/src/iree/hal/remote/util:queue_header_pool",
@@ -70,8 +73,10 @@ iree_runtime_cc_library(
         "//runtime/src/iree/net/channel/bulk:bulk_channel",
         "//runtime/src/iree/net/channel/bulk:chunk_pool",
         "//runtime/src/iree/net/channel/bulk:transfer_table",
+        "//runtime/src/iree/net/channel/control:frame",
         "//runtime/src/iree/net/channel/queue:queue_channel",
         "//runtime/src/iree/net/channel/util:frame_sender",
+        "//runtime/src/iree/net/channel/util:sequence_window",
     ],
 )
 

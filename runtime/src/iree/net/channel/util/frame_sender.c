@@ -567,20 +567,25 @@ void iree_net_frame_sender_handle_completion(
     iree_net_frame_send_context_t* context, iree_status_t status) {
   IREE_ASSERT_ARGUMENT(context);
   iree_net_frame_sender_t* sender = context->sender;
+  iree_net_frame_send_complete_callback_t callback = sender->callback;
+  uint64_t operation_user_data = context->operation_user_data;
 
   iree_net_frame_sender_release_context_storage(sender, context);
 
   // Decrement in-flight count.
   iree_atomic_fetch_sub(&sender->sends_in_flight, 1, iree_memory_order_release);
 
-  // Fire user callback.
-  if (sender->callback.fn) {
-    sender->callback.fn(sender->callback.user_data,
-                        context->operation_user_data, status);
-  }
-
-  // Return context to the pool.
+  // Return context to the pool before notifying the channel. Channel callbacks
+  // may synchronously submit another frame and should see the completed send's
+  // context as available.
   iree_net_frame_sender_release_context(sender, context);
+
+  // Fire user callback.
+  if (callback.fn) {
+    callback.fn(callback.user_data, operation_user_data, status);
+  } else {
+    iree_status_ignore(status);
+  }
 }
 
 iree_status_t iree_net_frame_sender_carrier_submit(void* user_data,

@@ -8,6 +8,7 @@
 
 #include "iree/base/api.h"
 #include "iree/hal/remote/client/api.h"
+#include "iree/hal/remote/protocol/common.h"
 #include "iree/net/transport_factory.h"
 
 #if defined(IREE_HAVE_NET_TCP_TRANSPORT)
@@ -88,9 +89,8 @@ static iree_status_t iree_hal_remote_client_create_transport_factory(
   if (iree_string_view_equal(transport_name, IREE_SV("tcp"))) {
     iree_net_tcp_carrier_options_t tcp_options =
         iree_net_tcp_carrier_options_default();
-    // HAL remote uses multiple endpoints per connection (control channel +
-    // queue channels).
-    tcp_options.max_endpoint_count = 4;
+    // HAL remote requires control, queue, and bulk endpoints per connection.
+    tcp_options.max_endpoint_count = IREE_HAL_REMOTE_REQUIRED_ENDPOINT_COUNT;
     return iree_net_tcp_factory_create(tcp_options, host_allocator,
                                        out_factory);
   }

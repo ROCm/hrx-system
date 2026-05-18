@@ -64,11 +64,9 @@ static iree_status_t iree_hal_remote_file_index_dup_string(
   out_value->size = 0;
 
   iree_host_size_t allocation_size = 0;
-  iree_status_t status =
-      iree_host_size_checked_add(value.size, 1, &allocation_size)
-          ? iree_ok_status()
-          : iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                             "file index string length overflow");
+  iree_status_t status = IREE_STRUCT_LAYOUT(
+      0, &allocation_size, IREE_STRUCT_FIELD(value.size, char, NULL),
+      IREE_STRUCT_FIELD(1, char, NULL));
 
   char* storage = NULL;
   if (iree_status_is_ok(status)) {
@@ -107,12 +105,9 @@ static iree_status_t iree_hal_remote_file_index_dup_logical_name(
                       (iree_string_view_is_empty(logical_name) ||
                        logical_name.data[logical_name.size - 1] != '/');
   iree_host_size_t allocation_size = 0;
-  iree_status_t status =
-      iree_host_size_checked_add(logical_name.size, append_slash ? 2 : 1,
-                                 &allocation_size)
-          ? iree_ok_status()
-          : iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                             "logical file name length overflow");
+  iree_status_t status = IREE_STRUCT_LAYOUT(
+      0, &allocation_size, IREE_STRUCT_FIELD(logical_name.size, char, NULL),
+      IREE_STRUCT_FIELD(append_slash ? 2 : 1, char, NULL));
 
   char* storage = NULL;
   if (iree_status_is_ok(status)) {

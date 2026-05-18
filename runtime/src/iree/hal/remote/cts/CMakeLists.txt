@@ -34,9 +34,75 @@ iree_cc_library(
   PUBLIC
 )
 
+iree_cc_library(
+  NAME
+    hardware_backends
+  SRCS
+    "backends.cc"
+  DEPS
+    iree::async
+    iree::async::util::proactor_pool
+    iree::base
+    iree::base::threading
+    iree::hal
+    iree::hal::cts::util::registry
+    iree::hal::drivers::amdgpu::registration
+    iree::hal::drivers::local_task::registration
+    iree::hal::drivers::vulkan::registration
+    iree::hal::remote::client
+    iree::hal::remote::server
+    iree::hal::remote::util::recv_pool
+    iree::net::carrier::loopback::factory
+    iree::net::session
+  DEFINES
+    "IREE_HAL_REMOTE_CTS_ENABLE_HARDWARE_BACKENDS_DEFAULT=1"
+  TESTONLY
+  ALWAYSLINK
+  PUBLIC
+)
+
+iree_hal_cts_testdata(
+  FORMAT_NAME
+    amdgpu
+  TARGET_DEVICE
+    "amdgpu"
+  IDENTIFIER
+    "iree_remote_cts_testdata_amdgpu"
+  BACKEND_NAME
+    "remote_amdgpu"
+  FORMAT_STRING
+    [=["amdgcn-amd-amdhsa--{ROCM_TARGET}"]=]
+  TESTDATA_DIR
+    "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/remote/cts/testdata"
+  FLAGS
+
+)
+
 iree_hal_cts_test_suite(
   BACKENDS_LIB
     ::backends
 )
+
+iree_package_ns(_IREE_OPTIONAL_TESTDATA_PACKAGE_NS)
+if(TARGET ${_IREE_OPTIONAL_TESTDATA_PACKAGE_NS}::testdata_amdgpu_lib)
+iree_cc_test(
+  NAME
+    executable_global_tests
+  SRCS
+    "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/util/test_main.cc"
+    "executable_global_test.cc"
+  DEPS
+    ::hardware_backends
+    ::testdata_amdgpu_lib
+    iree::base::tooling::flags
+    iree::hal::cts::util::registry
+    iree::hal::cts::util::test_base
+    iree::testing::gtest
+  LABELS
+    "driver=amdgpu"
+    "requires-gpu-amd"
+)
+
+endif()
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

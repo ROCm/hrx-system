@@ -151,6 +151,25 @@ static void CountLeaseRelease(void* user_data, uint32_t buffer_index) {
   ++*release_count;
 }
 
+struct TestResource {
+  iree_hal_resource_t resource;
+  int* destroy_count = nullptr;
+};
+
+static void DestroyTestResource(iree_hal_resource_t* base_resource) {
+  auto* resource = reinterpret_cast<TestResource*>(base_resource);
+  ++*resource->destroy_count;
+}
+
+static const iree_hal_resource_vtable_t kTestResourceVTable = {
+    DestroyTestResource,
+};
+
+static void InitializeTestResource(TestResource* resource, int* destroy_count) {
+  iree_hal_resource_initialize(&kTestResourceVTable, &resource->resource);
+  resource->destroy_count = destroy_count;
+}
+
 class RemoteServerSessionHarness {
  public:
   RemoteServerSessionHarness() {
@@ -209,6 +228,14 @@ class RemoteServerSessionHarness {
   TestBufferPool header_pool_{/*buffer_count=*/4, /*buffer_size=*/1024};
 };
 
+static iree_status_t AssignTestBufferResource(
+    RemoteServerSessionHarness* harness, TestResource* resource,
+    iree_hal_remote_resource_id_t* out_resource_id) {
+  return iree_hal_remote_resource_table_assign(
+      &harness->session.resource_table, IREE_HAL_REMOTE_RESOURCE_TYPE_BUFFER,
+      &resource->resource, out_resource_id);
+}
+
 static const iree_hal_remote_advance_payload_t* ParseSingleAdvancePayload(
     const std::vector<uint8_t>& advance_frame, iree_async_axis_t expected_axis,
     uint64_t expected_epoch) {
@@ -252,6 +279,46 @@ static const iree_hal_remote_advance_payload_t* ParseSingleAdvancePayload(
       payload.data + frontier_size);
 }
 
+static void SubmitMissingLeaseFileRead(RemoteServerSessionHarness* harness,
+                                       uint64_t signal_epoch) {
+  const iree_hal_remote_resource_id_t provisional_file_id =
+      IREE_HAL_REMOTE_RESOURCE_ID_PROVISIONAL(
+          IREE_HAL_REMOTE_RESOURCE_TYPE_FILE, 42);
+  iree_hal_remote_file_read_op_t file_read = {};
+  file_read.header.type = IREE_HAL_REMOTE_QUEUE_OP_FILE_READ;
+  file_read.source_file_id = provisional_file_id;
+  file_read.target_buffer_id = 0x101;
+  file_read.length = 16;
+
+  iree_async_single_frontier_t signal_frontier_storage;
+  iree_async_single_frontier_initialize(&signal_frontier_storage,
+                                        harness->queue_axis, signal_epoch);
+  IREE_ASSERT_OK(iree_hal_remote_server_on_queue_command(
+      &harness->session, /*stream_id=*/0, /*wait_frontier=*/NULL,
+      iree_async_single_frontier_as_frontier(&signal_frontier_storage),
+      iree_make_const_byte_span(&file_read, sizeof(file_read)),
+      /*lease=*/NULL));
+}
+
+static void SubmitResourceRelease(RemoteServerSessionHarness* harness,
+                                  uint64_t required_observed_epoch,
+                                  iree_hal_remote_resource_id_t resource_id) {
+  struct ReleasePacket {
+    iree_hal_remote_resource_release_op_t op;
+    iree_hal_remote_resource_id_t resource_ids[1];
+  } release = {};
+  release.op.header.type = IREE_HAL_REMOTE_QUEUE_OP_RESOURCE_RELEASE_BATCH;
+  release.op.required_observed_epoch = required_observed_epoch;
+  release.op.resource_count = IREE_ARRAYSIZE(release.resource_ids);
+  release.resource_ids[0] = resource_id;
+
+  IREE_ASSERT_OK(iree_hal_remote_server_on_queue_command(
+      &harness->session, /*stream_id=*/0, /*wait_frontier=*/NULL,
+      /*signal_frontier=*/NULL,
+      iree_make_const_byte_span(&release, sizeof(release)),
+      /*lease=*/NULL));
+}
+
 TEST(RemoteServerSessionTest, QueueCommandWithoutLeaseSignalsErrorAdvance) {
   RemoteServerSessionHarness harness;
   const iree_hal_remote_resource_id_t provisional_file_id =
@@ -281,6 +348,57 @@ TEST(RemoteServerSessionTest, QueueCommandWithoutLeaseSignalsErrorAdvance) {
   ASSERT_NE(advance, nullptr);
   EXPECT_EQ(advance->resolution_count, 0);
   EXPECT_EQ(advance->status_code, IREE_STATUS_FAILED_PRECONDITION);
+  EXPECT_GT(advance->status_wire_length, 0u);
+}
+
+TEST(RemoteServerSessionTest, QueueUnsupportedOpSignalsErrorAdvance) {
+  RemoteServerSessionHarness harness;
+  iree_hal_remote_queue_op_header_t unsupported_op = {};
+  unsupported_op.type = IREE_HAL_REMOTE_QUEUE_OP_QUEUE_EXTENSION;
+
+  iree_async_single_frontier_t signal_frontier_storage;
+  iree_async_single_frontier_initialize(&signal_frontier_storage,
+                                        harness.queue_axis, 1);
+  IREE_ASSERT_OK(iree_hal_remote_server_on_queue_command(
+      &harness.session, /*stream_id=*/0, /*wait_frontier=*/NULL,
+      iree_async_single_frontier_as_frontier(&signal_frontier_storage),
+      iree_make_const_byte_span(&unsupported_op, sizeof(unsupported_op)),
+      /*lease=*/NULL));
+
+  ASSERT_EQ(harness.endpoint.sends.size(), 1u);
+  EXPECT_EQ(iree_net_sequence_window_observed(
+                &harness.session.observed_submission_window),
+            1u);
+  const iree_hal_remote_advance_payload_t* advance = ParseSingleAdvancePayload(
+      harness.endpoint.sends[0].data, harness.queue_axis, 1);
+  ASSERT_NE(advance, nullptr);
+  EXPECT_EQ(advance->resolution_count, 0);
+  EXPECT_EQ(advance->status_code, IREE_STATUS_UNIMPLEMENTED);
+  EXPECT_GT(advance->status_wire_length, 0u);
+}
+
+TEST(RemoteServerSessionTest, QueueTruncatedPayloadSignalsErrorAdvance) {
+  RemoteServerSessionHarness harness;
+  uint32_t truncated_payload = 0;
+
+  iree_async_single_frontier_t signal_frontier_storage;
+  iree_async_single_frontier_initialize(&signal_frontier_storage,
+                                        harness.queue_axis, 1);
+  IREE_ASSERT_OK(iree_hal_remote_server_on_queue_command(
+      &harness.session, /*stream_id=*/0, /*wait_frontier=*/NULL,
+      iree_async_single_frontier_as_frontier(&signal_frontier_storage),
+      iree_make_const_byte_span(&truncated_payload, sizeof(truncated_payload)),
+      /*lease=*/NULL));
+
+  ASSERT_EQ(harness.endpoint.sends.size(), 1u);
+  EXPECT_EQ(iree_net_sequence_window_observed(
+                &harness.session.observed_submission_window),
+            1u);
+  const iree_hal_remote_advance_payload_t* advance = ParseSingleAdvancePayload(
+      harness.endpoint.sends[0].data, harness.queue_axis, 1);
+  ASSERT_NE(advance, nullptr);
+  EXPECT_EQ(advance->resolution_count, 0);
+  EXPECT_EQ(advance->status_code, IREE_STATUS_INVALID_ARGUMENT);
   EXPECT_GT(advance->status_wire_length, 0u);
 }
 
@@ -409,6 +527,65 @@ TEST(RemoteServerSessionTest,
   EXPECT_EQ(advance->resolution_count, 0);
   EXPECT_EQ(advance->status_code, IREE_STATUS_UNIMPLEMENTED);
   EXPECT_GT(advance->status_wire_length, 0u);
+}
+
+TEST(RemoteServerSessionTest, ResourceReleaseWaitsForObservedSubmissionEpoch) {
+  RemoteServerSessionHarness harness;
+  int destroy_count = 0;
+  TestResource resource;
+  InitializeTestResource(&resource, &destroy_count);
+
+  iree_hal_remote_resource_id_t resource_id = 0;
+  IREE_ASSERT_OK(AssignTestBufferResource(&harness, &resource, &resource_id));
+  iree_hal_resource_release(&resource.resource);
+
+  SubmitResourceRelease(&harness, /*required_observed_epoch=*/2, resource_id);
+  EXPECT_EQ(destroy_count, 0);
+  EXPECT_NE(iree_hal_remote_resource_table_lookup(
+                &harness.session.resource_table,
+                IREE_HAL_REMOTE_RESOURCE_TYPE_BUFFER, resource_id),
+            nullptr);
+
+  SubmitMissingLeaseFileRead(&harness, /*signal_epoch=*/1);
+  EXPECT_EQ(iree_net_sequence_window_observed(
+                &harness.session.observed_submission_window),
+            1u);
+  EXPECT_EQ(destroy_count, 0);
+
+  SubmitMissingLeaseFileRead(&harness, /*signal_epoch=*/2);
+  EXPECT_EQ(iree_net_sequence_window_observed(
+                &harness.session.observed_submission_window),
+            2u);
+  EXPECT_EQ(destroy_count, 1);
+  EXPECT_EQ(iree_hal_remote_resource_table_lookup(
+                &harness.session.resource_table,
+                IREE_HAL_REMOTE_RESOURCE_TYPE_BUFFER, resource_id),
+            nullptr);
+}
+
+TEST(RemoteServerSessionTest,
+     ResourceReleaseWaitsForContiguousObservedSubmissionPrefix) {
+  RemoteServerSessionHarness harness;
+  int destroy_count = 0;
+  TestResource resource;
+  InitializeTestResource(&resource, &destroy_count);
+
+  iree_hal_remote_resource_id_t resource_id = 0;
+  IREE_ASSERT_OK(AssignTestBufferResource(&harness, &resource, &resource_id));
+  iree_hal_resource_release(&resource.resource);
+
+  SubmitResourceRelease(&harness, /*required_observed_epoch=*/2, resource_id);
+  SubmitMissingLeaseFileRead(&harness, /*signal_epoch=*/2);
+  EXPECT_EQ(iree_net_sequence_window_observed(
+                &harness.session.observed_submission_window),
+            0u);
+  EXPECT_EQ(destroy_count, 0);
+
+  SubmitMissingLeaseFileRead(&harness, /*signal_epoch=*/1);
+  EXPECT_EQ(iree_net_sequence_window_observed(
+                &harness.session.observed_submission_window),
+            2u);
+  EXPECT_EQ(destroy_count, 1);
 }
 
 }  // namespace

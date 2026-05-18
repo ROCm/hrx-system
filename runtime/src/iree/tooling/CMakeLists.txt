@@ -114,11 +114,13 @@ iree_cc_library(
   DEPS
     iree::base
     iree::base::internal
+    iree::base::internal::path
     iree::base::threading
     iree::base::threading::thread
     iree::base::tooling::flags
     iree::hal
     iree::hal::drivers
+    iree::hal::remote::client
     iree::hal::utils::allocators
     iree::hal::utils::mpi_channel_provider
     iree::hal::utils::profile_file

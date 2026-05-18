@@ -59,11 +59,17 @@ typedef struct iree_hal_remote_client_buffer_t {
   // Staging allocation for the active mapping, or NULL when unmapped.
   uint8_t* active_mapping_data;
 
+  // Access bits granted to the active mapping.
+  iree_hal_memory_access_t active_mapping_access;
+
   // Buffer offset where active_mapping_data begins.
   iree_device_size_t active_mapping_offset;
 
   // Length of active_mapping_data in bytes.
   iree_device_size_t active_mapping_length;
+
+  // Count of active read-only staging mappings that are not tracked.
+  uint32_t active_untracked_mapping_count;
 } iree_hal_remote_client_buffer_t;
 
 // Creates a buffer proxy wrapping a server-assigned resource.

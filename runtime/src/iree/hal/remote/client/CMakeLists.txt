@@ -27,6 +27,8 @@ iree_cc_library(
     "device.h"
     "driver.c"
     "driver.h"
+    "event.c"
+    "event.h"
     "executable.c"
     "executable.h"
     "executable_cache.c"
@@ -51,6 +53,7 @@ iree_cc_library(
     iree::hal::remote::protocol::commands
     iree::hal::remote::protocol::common
     iree::hal::remote::protocol::control
+    iree::hal::remote::protocol::profile
     iree::hal::remote::protocol::queue
     iree::hal::remote::util::bulk_transfer_tracker
     iree::hal::remote::util::queue_header_pool
@@ -62,8 +65,10 @@ iree_cc_library(
     iree::net::channel::bulk::bulk_channel
     iree::net::channel::bulk::chunk_pool
     iree::net::channel::bulk::transfer_table
+    iree::net::channel::control::frame
     iree::net::channel::queue::queue_channel
     iree::net::channel::util::frame_sender
+    iree::net::channel::util::sequence_window
     iree::net::session
     iree::net::status_wire
     iree::net::transport_factory

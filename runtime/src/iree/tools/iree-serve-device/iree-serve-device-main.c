@@ -21,6 +21,7 @@
 #include "iree/base/threading/numa.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/hal/api.h"
+#include "iree/hal/remote/protocol/common.h"
 #include "iree/hal/remote/server/api.h"
 #include "iree/hal/remote/server/file_index.h"
 #include "iree/hal/remote/util/recv_pool.h"
@@ -100,9 +101,8 @@ static iree_status_t iree_serve_device_create_transport(
   if (iree_string_view_equal(transport_name, IREE_SV("tcp"))) {
     iree_net_tcp_carrier_options_t tcp_options =
         iree_net_tcp_carrier_options_default();
-    // HAL remote uses multiple endpoints per connection (control channel +
-    // queue channels).
-    tcp_options.max_endpoint_count = 4;
+    // HAL remote requires control, queue, and bulk endpoints per connection.
+    tcp_options.max_endpoint_count = IREE_HAL_REMOTE_REQUIRED_ENDPOINT_COUNT;
     iree_status_t status =
         iree_net_tcp_factory_create(tcp_options, host_allocator, out_factory);
     IREE_TRACE_ZONE_END(z0);

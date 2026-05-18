@@ -6,8 +6,12 @@
 
 #include "iree/hal/remote/client/buffer.h"
 
+#include "iree/base/threading/notification.h"
+#include "iree/hal/remote/client/bulk.h"
 #include "iree/hal/remote/client/device.h"
 #include "iree/hal/remote/protocol/control.h"
+#include "iree/net/channel/control/frame.h"
+#include "iree/net/channel/util/frame_sender.h"
 
 //===----------------------------------------------------------------------===//
 // iree_hal_remote_client_buffer_t
@@ -72,74 +76,358 @@ typedef struct iree_hal_remote_client_buffer_write_request_header_t {
   iree_hal_remote_buffer_unmap_request_t body;
 } iree_hal_remote_client_buffer_write_request_header_t;
 
+#define IREE_HAL_REMOTE_CLIENT_MAPPING_UNTRACKED 0ull
+#define IREE_HAL_REMOTE_CLIENT_MAPPING_TRACKED 1ull
+
+typedef struct iree_hal_remote_client_buffer_bulk_wait_t {
+  // Notification posted when the bulk transfer reaches a terminal state.
+  iree_notification_t notification;
+
+  // Terminal status consumed by the waiting mapper.
+  iree_status_t status;
+
+  // Non-zero after |status| has been set.
+  iree_atomic_int32_t completed;
+} iree_hal_remote_client_buffer_bulk_wait_t;
+
+typedef struct iree_hal_remote_client_buffer_bulk_upload_t {
+  // Device owning the client-local bulk transfer table.
+  iree_hal_remote_client_device_t* device;
+
+  // Client-allocated transfer ID to upload on the bulk channel.
+  uint64_t transfer_id;
+} iree_hal_remote_client_buffer_bulk_upload_t;
+
+static bool iree_hal_remote_client_buffer_bulk_wait_complete(void* user_data) {
+  iree_hal_remote_client_buffer_bulk_wait_t* wait_state =
+      (iree_hal_remote_client_buffer_bulk_wait_t*)user_data;
+  return iree_atomic_load(&wait_state->completed, iree_memory_order_acquire) !=
+         0;
+}
+
+static void iree_hal_remote_client_buffer_bulk_complete(void* user_data,
+                                                        iree_status_t status) {
+  iree_hal_remote_client_buffer_bulk_wait_t* wait_state =
+      (iree_hal_remote_client_buffer_bulk_wait_t*)user_data;
+  wait_state->status = status;
+  iree_atomic_store(&wait_state->completed, 1, iree_memory_order_release);
+  iree_notification_post(&wait_state->notification, IREE_ALL_WAITERS);
+}
+
+static iree_status_t iree_hal_remote_client_buffer_bulk_upload_after_send(
+    void* user_data) {
+  iree_hal_remote_client_buffer_bulk_upload_t* upload =
+      (iree_hal_remote_client_buffer_bulk_upload_t*)user_data;
+  return iree_hal_remote_client_bulk_upload_buffer_unmap(upload->device,
+                                                         upload->transfer_id);
+}
+
+static iree_status_t iree_hal_remote_client_buffer_control_payload_length(
+    iree_host_size_t body_header_length, iree_host_size_t data_length,
+    iree_host_size_t* out_payload_length) {
+  *out_payload_length = 0;
+  iree_host_size_t body_length = 0;
+  iree_status_t status =
+      iree_host_size_checked_add(body_header_length, data_length, &body_length)
+          ? iree_ok_status()
+          : iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                             "remote buffer control payload size overflow");
+  if (iree_status_is_ok(status) &&
+      !iree_host_size_checked_add(sizeof(iree_hal_remote_control_envelope_t),
+                                  body_length, out_payload_length)) {
+    status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "remote buffer control payload size overflow");
+  }
+  return status;
+}
+
+static iree_status_t iree_hal_remote_client_buffer_control_response_length(
+    iree_host_size_t body_header_length, iree_host_size_t data_length,
+    iree_host_size_t* out_response_length) {
+  *out_response_length = 0;
+  iree_host_size_t body_length = 0;
+  iree_status_t status =
+      iree_host_size_checked_add(body_header_length, data_length, &body_length)
+          ? iree_ok_status()
+          : iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                             "remote buffer control response size overflow");
+  if (iree_status_is_ok(status) &&
+      !iree_host_size_checked_add(
+          sizeof(iree_hal_remote_control_envelope_t) +
+              sizeof(iree_hal_remote_control_response_prefix_t),
+          body_length, out_response_length)) {
+    status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "remote buffer control response size overflow");
+  }
+  return status;
+}
+
+static bool iree_hal_remote_client_buffer_control_frame_fits_inline(
+    iree_host_size_t frame_payload_length) {
+  if (IREE_NET_FRAME_SENDER_INLINE_FRAME_CAPACITY <
+      IREE_NET_CONTROL_FRAME_HEADER_SIZE) {
+    return false;
+  }
+  return frame_payload_length <= IREE_NET_FRAME_SENDER_INLINE_FRAME_CAPACITY -
+                                     IREE_NET_CONTROL_FRAME_HEADER_SIZE;
+}
+
+static iree_status_t iree_hal_remote_client_buffer_should_use_bulk_map_read(
+    iree_host_size_t staging_length, bool* out_use_bulk) {
+  *out_use_bulk = false;
+  iree_host_size_t response_length = 0;
+  iree_status_t status = iree_hal_remote_client_buffer_control_response_length(
+      sizeof(iree_hal_remote_buffer_map_response_t), staging_length,
+      &response_length);
+  if (iree_status_is_ok(status)) {
+    *out_use_bulk = staging_length > 0 &&
+                    !iree_hal_remote_client_buffer_control_frame_fits_inline(
+                        response_length);
+  }
+  return status;
+}
+
+static iree_status_t iree_hal_remote_client_buffer_should_use_bulk_unmap_write(
+    iree_host_size_t source_length, bool* out_use_bulk) {
+  *out_use_bulk = false;
+  iree_host_size_t request_length = 0;
+  iree_status_t status = iree_hal_remote_client_buffer_control_payload_length(
+      sizeof(iree_hal_remote_buffer_unmap_request_t), source_length,
+      &request_length);
+  if (iree_status_is_ok(status)) {
+    *out_use_bulk = source_length > 0 &&
+                    !iree_hal_remote_client_buffer_control_frame_fits_inline(
+                        request_length);
+  }
+  return status;
+}
+
 static iree_status_t iree_hal_remote_client_buffer_write_range(
     iree_hal_remote_client_buffer_t* buffer, iree_hal_buffer_t* base_buffer,
     iree_device_size_t local_byte_offset, iree_const_byte_span_t source_bytes) {
+  bool use_bulk = false;
+  iree_status_t status =
+      iree_hal_remote_client_buffer_should_use_bulk_unmap_write(
+          source_bytes.data_length, &use_bulk);
+
+  uint64_t transfer_id = 0;
+  if (iree_status_is_ok(status) && use_bulk) {
+    status = iree_hal_remote_client_bulk_begin_buffer_unmap_write(
+        buffer->device, source_bytes, &transfer_id);
+  }
+
   iree_host_size_t request_size = 0;
   iree_host_size_t data_offset = 0;
-  iree_status_t status = IREE_STRUCT_LAYOUT(
-      sizeof(iree_hal_remote_client_buffer_write_request_header_t),
-      &request_size,
-      IREE_STRUCT_FIELD(source_bytes.data_length, uint8_t, &data_offset));
-
-  iree_hal_remote_client_buffer_write_request_header_t* request = NULL;
   if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc(buffer->host_allocator, request_size,
-                                   (void**)&request);
+    iree_host_size_t inline_length = use_bulk ? 0 : source_bytes.data_length;
+    status = IREE_STRUCT_LAYOUT(
+        sizeof(iree_hal_remote_client_buffer_write_request_header_t),
+        &request_size, IREE_STRUCT_FIELD(inline_length, uint8_t, &data_offset));
   }
 
   if (iree_status_is_ok(status)) {
+    iree_hal_remote_client_buffer_write_request_header_t* request =
+        (iree_hal_remote_client_buffer_write_request_header_t*)iree_alloca(
+            request_size);
+    memset(request, 0, request_size);
     request->envelope.message_type = IREE_HAL_REMOTE_CONTROL_BUFFER_UNMAP;
     request->body.buffer_id =
         iree_hal_remote_client_buffer_resource_id(base_buffer);
     request->body.offset = local_byte_offset;
     request->body.length = source_bytes.data_length;
-    memcpy((uint8_t*)request + data_offset, source_bytes.data,
-           source_bytes.data_length);
+    request->body.flags =
+        use_bulk ? IREE_HAL_REMOTE_BUFFER_UNMAP_FLAG_BULK_TRANSFER : 0;
+    request->body.transfer_id = transfer_id;
+    if (!use_bulk && source_bytes.data_length > 0) {
+      memcpy((uint8_t*)request + data_offset, source_bytes.data,
+             source_bytes.data_length);
+    }
 
     iree_const_byte_span_t response_payload = iree_const_byte_span_empty();
     iree_async_buffer_lease_t response_lease;
     memset(&response_lease, 0, sizeof(response_lease));
-    status = iree_hal_remote_client_device_control_rpc(
-        buffer->device, iree_make_const_byte_span(request, request_size),
-        &response_payload, &response_lease);
+    if (use_bulk) {
+      iree_hal_remote_client_buffer_bulk_upload_t upload = {
+          .device = buffer->device,
+          .transfer_id = transfer_id,
+      };
+      iree_hal_remote_client_device_control_rpc_after_send_t after_send = {
+          .fn = iree_hal_remote_client_buffer_bulk_upload_after_send,
+          .user_data = &upload,
+      };
+      status = iree_hal_remote_client_device_control_rpc_with_after_send(
+          buffer->device, iree_make_const_byte_span(request, request_size),
+          after_send, &response_payload, &response_lease);
+    } else {
+      status = iree_hal_remote_client_device_control_rpc(
+          buffer->device, iree_make_const_byte_span(request, request_size),
+          &response_payload, &response_lease);
+    }
     iree_async_buffer_lease_release(&response_lease);
+    if (iree_status_is_ok(status) && use_bulk) {
+      iree_hal_remote_client_bulk_end_buffer_unmap(buffer->device, transfer_id);
+      transfer_id = 0;
+    }
   }
 
-  iree_allocator_free(buffer->host_allocator, request);
+  if (!iree_status_is_ok(status) && transfer_id != 0) {
+    iree_hal_remote_client_bulk_cancel_transfer(buffer->device, transfer_id);
+  }
+  return status;
+}
+
+static iree_status_t iree_hal_remote_client_buffer_read_range(
+    iree_hal_remote_client_buffer_t* buffer, iree_hal_buffer_t* base_buffer,
+    iree_device_size_t local_byte_offset, iree_byte_span_t target_bytes) {
+  bool use_bulk = false;
+  iree_status_t status = iree_ok_status();
+  if (target_bytes.data_length > 0) {
+    status = iree_hal_remote_client_buffer_should_use_bulk_map_read(
+        target_bytes.data_length, &use_bulk);
+  }
+
+  iree_hal_remote_client_buffer_bulk_wait_t bulk_wait;
+  memset(&bulk_wait, 0, sizeof(bulk_wait));
+  bool bulk_wait_initialized = false;
+  uint64_t transfer_id = 0;
+  if (iree_status_is_ok(status) && use_bulk) {
+    iree_notification_initialize(&bulk_wait.notification);
+    bulk_wait_initialized = true;
+    bulk_wait.status = iree_ok_status();
+    iree_atomic_store(&bulk_wait.completed, 0, iree_memory_order_relaxed);
+
+    iree_hal_remote_client_bulk_completion_callback_t callback = {
+        .fn = iree_hal_remote_client_buffer_bulk_complete,
+        .user_data = &bulk_wait,
+    };
+    status = iree_hal_remote_client_bulk_begin_buffer_map_read(
+        buffer->device, target_bytes, callback, &transfer_id);
+  }
+
+  struct {
+    iree_hal_remote_control_envelope_t envelope;
+    iree_hal_remote_buffer_map_request_t body;
+  } request;
+  iree_const_byte_span_t response_payload = iree_const_byte_span_empty();
+  iree_async_buffer_lease_t response_lease;
+  memset(&response_lease, 0, sizeof(response_lease));
+  if (iree_status_is_ok(status) && target_bytes.data_length > 0) {
+    memset(&request, 0, sizeof(request));
+    request.envelope.message_type = IREE_HAL_REMOTE_CONTROL_BUFFER_MAP;
+    request.body.buffer_id =
+        iree_hal_remote_client_buffer_resource_id(base_buffer);
+    request.body.memory_access = IREE_HAL_MEMORY_ACCESS_READ;
+    request.body.flags =
+        use_bulk ? IREE_HAL_REMOTE_BUFFER_MAP_FLAG_BULK_TRANSFER : 0;
+    request.body.offset = local_byte_offset;
+    request.body.length = target_bytes.data_length;
+    request.body.transfer_id = transfer_id;
+
+    status = iree_hal_remote_client_device_control_rpc(
+        buffer->device, iree_make_const_byte_span(&request, sizeof(request)),
+        &response_payload, &response_lease);
+  }
+
+  if (iree_status_is_ok(status) && target_bytes.data_length > 0) {
+    if (response_payload.data_length <
+        sizeof(iree_hal_remote_buffer_map_response_t)) {
+      status =
+          iree_make_status(IREE_STATUS_INTERNAL,
+                           "BUFFER_MAP response truncated: %" PRIhsz " bytes",
+                           response_payload.data_length);
+    } else {
+      const iree_hal_remote_buffer_map_response_t* response =
+          (const iree_hal_remote_buffer_map_response_t*)response_payload.data;
+      const uint8_t* response_data = response_payload.data + sizeof(*response);
+      iree_host_size_t data_available =
+          response_payload.data_length - sizeof(*response);
+      if (response->mapped_offset != local_byte_offset ||
+          response->mapped_length != target_bytes.data_length) {
+        status = iree_make_status(
+            IREE_STATUS_INTERNAL,
+            "BUFFER_MAP response range mismatch: offset %" PRIu64
+            " length %" PRIu64 ", expected offset %" PRIdsz " length %" PRIhsz,
+            response->mapped_offset, response->mapped_length, local_byte_offset,
+            target_bytes.data_length);
+      } else if (use_bulk) {
+        if (response->transfer_id != transfer_id) {
+          status =
+              iree_make_status(IREE_STATUS_INTERNAL,
+                               "BUFFER_MAP response transfer_id=%" PRIu64
+                               " does not match expected transfer_id=%" PRIu64,
+                               response->transfer_id, transfer_id);
+        } else if (data_available != 0) {
+          status = iree_make_status(IREE_STATUS_INTERNAL,
+                                    "BUFFER_MAP bulk response carried %" PRIhsz
+                                    " unexpected inline bytes",
+                                    data_available);
+        }
+      } else if (response->transfer_id != 0) {
+        status =
+            iree_make_status(IREE_STATUS_INTERNAL,
+                             "BUFFER_MAP inline response carried unexpected "
+                             "transfer_id=%" PRIu64,
+                             response->transfer_id);
+      } else if (data_available < target_bytes.data_length) {
+        status = iree_make_status(IREE_STATUS_INTERNAL,
+                                  "BUFFER_MAP response data too short: %" PRIhsz
+                                  " bytes, expected %" PRIhsz,
+                                  data_available, target_bytes.data_length);
+      } else {
+        memcpy(target_bytes.data, response_data, target_bytes.data_length);
+      }
+    }
+  }
+  iree_async_buffer_lease_release(&response_lease);
+
+  if (iree_status_is_ok(status) && use_bulk) {
+    iree_notification_await(&bulk_wait.notification,
+                            iree_hal_remote_client_buffer_bulk_wait_complete,
+                            &bulk_wait, iree_infinite_timeout());
+    status = bulk_wait.status;
+    bulk_wait.status = iree_ok_status();
+  }
+  if (!iree_status_is_ok(status) && transfer_id != 0) {
+    iree_hal_remote_client_bulk_cancel_transfer(buffer->device, transfer_id);
+  }
+  if (bulk_wait_initialized) {
+    iree_status_ignore(bulk_wait.status);
+    iree_notification_deinitialize(&bulk_wait.notification);
+  }
   return status;
 }
 
 static iree_status_t iree_hal_remote_client_buffer_validate_active_range(
     iree_hal_remote_client_buffer_t* buffer,
     iree_device_size_t local_byte_offset, iree_device_size_t local_byte_length,
-    iree_host_size_t* out_staging_offset,
+    const char* operation, iree_host_size_t* out_staging_offset,
     iree_host_size_t* out_staging_length) {
   *out_staging_offset = 0;
   *out_staging_length = 0;
 
   iree_status_t status = iree_ok_status();
   if (local_byte_length == 0) {
-    // Zero-length flushes carry no data and do not require retained staging.
+    // Zero-length cache operations carry no data and do not require staging.
   } else if (!buffer->active_mapping_data) {
     status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                               "remote buffer has no active mapping");
   } else if (local_byte_offset < buffer->active_mapping_offset) {
     status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "flush range begins before the active mapping");
+                              "%s range begins before the active mapping",
+                              operation);
   } else {
     iree_device_size_t staging_offset =
         local_byte_offset - buffer->active_mapping_offset;
     if (staging_offset > buffer->active_mapping_length ||
         local_byte_length > buffer->active_mapping_length - staging_offset) {
-      status =
-          iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                           "flush range extends beyond the active mapping");
+      status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "%s range extends beyond the active mapping",
+                                operation);
     } else if (staging_offset > IREE_HOST_SIZE_MAX ||
                local_byte_length > IREE_HOST_SIZE_MAX) {
-      status =
-          iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                           "flush range cannot be represented on this host");
+      status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "%s range cannot be represented on this host",
+                                operation);
     } else {
       *out_staging_offset = (iree_host_size_t)staging_offset;
       *out_staging_length = (iree_host_size_t)local_byte_length;
@@ -171,11 +459,26 @@ static iree_status_t iree_hal_remote_client_buffer_map_range(
   }
   const bool mapping_writes =
       iree_all_bits_set(memory_access, IREE_HAL_MEMORY_ACCESS_WRITE);
-  if (iree_status_is_ok(status) && mapping_writes && staging_length > 0 &&
-      buffer->active_mapping_data) {
-    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "remote buffer already has an active write "
-                              "mapping");
+  const bool mapping_reads =
+      iree_all_bits_set(memory_access, IREE_HAL_MEMORY_ACCESS_READ);
+  bool track_mapping = false;
+  if (iree_status_is_ok(status) && staging_length > 0) {
+    if (!buffer->active_mapping_data) {
+      track_mapping = true;
+    } else if (mapping_writes) {
+      status =
+          iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                           "remote buffer already has an active write mapping");
+    } else if (!iree_all_bits_set(buffer->active_mapping_access,
+                                  IREE_HAL_MEMORY_ACCESS_WRITE)) {
+      status =
+          iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                           "remote buffer already has an active read mapping");
+    } else if (buffer->active_untracked_mapping_count == UINT32_MAX) {
+      status = iree_make_status(
+          IREE_STATUS_RESOURCE_EXHAUSTED,
+          "remote buffer has too many active untracked read mappings");
+    }
   }
 
   // All access goes through a staging copy: READ pulls data from the server
@@ -188,61 +491,24 @@ static iree_status_t iree_hal_remote_client_buffer_map_range(
   }
 
   // If READ access, pull current buffer contents from the server.
-  if (iree_status_is_ok(status) && staging_length > 0 &&
-      iree_all_bits_set(memory_access, IREE_HAL_MEMORY_ACCESS_READ)) {
-    struct {
-      iree_hal_remote_control_envelope_t envelope;
-      iree_hal_remote_buffer_map_request_t body;
-    } request;
-    memset(&request, 0, sizeof(request));
-    request.envelope.message_type = IREE_HAL_REMOTE_CONTROL_BUFFER_MAP;
-    request.body.buffer_id =
-        iree_hal_remote_client_buffer_resource_id(base_buffer);
-    request.body.memory_access = (uint32_t)memory_access;
-    request.body.offset = local_byte_offset;
-    request.body.length = local_byte_length;
-
-    iree_const_byte_span_t response_payload = iree_const_byte_span_empty();
-    iree_async_buffer_lease_t response_lease;
-    memset(&response_lease, 0, sizeof(response_lease));
-    status = iree_hal_remote_client_device_control_rpc(
-        buffer->device, iree_make_const_byte_span(&request, sizeof(request)),
-        &response_payload, &response_lease);
-
-    if (iree_status_is_ok(status)) {
-      if (response_payload.data_length <
-          sizeof(iree_hal_remote_buffer_map_response_t)) {
-        status =
-            iree_make_status(IREE_STATUS_INTERNAL,
-                             "BUFFER_MAP response truncated: %" PRIhsz " bytes",
-                             response_payload.data_length);
-      } else {
-        const iree_hal_remote_buffer_map_response_t* response =
-            (const iree_hal_remote_buffer_map_response_t*)response_payload.data;
-        const uint8_t* response_data =
-            response_payload.data + sizeof(*response);
-        iree_host_size_t data_available =
-            response_payload.data_length - sizeof(*response);
-        if (data_available < staging_length) {
-          status =
-              iree_make_status(IREE_STATUS_INTERNAL,
-                               "BUFFER_MAP response data too short: %" PRIhsz
-                               " bytes, expected %" PRIhsz,
-                               data_available, staging_length);
-        } else {
-          memcpy(staging_data, response_data, staging_length);
-        }
-      }
-    }
-    iree_async_buffer_lease_release(&response_lease);
+  if (iree_status_is_ok(status) && staging_length > 0 && mapping_reads) {
+    status = iree_hal_remote_client_buffer_read_range(
+        buffer, base_buffer, local_byte_offset,
+        iree_make_byte_span(staging_data, staging_length));
   }
 
   if (iree_status_is_ok(status)) {
     mapping->contents = iree_make_byte_span(staging_data, staging_length);
-    if (mapping_writes && staging_length > 0) {
+    mapping->impl.reserved[0] = IREE_HAL_REMOTE_CLIENT_MAPPING_UNTRACKED;
+    if (track_mapping) {
       buffer->active_mapping_data = staging_data;
+      buffer->active_mapping_access = memory_access;
       buffer->active_mapping_offset = local_byte_offset;
       buffer->active_mapping_length = local_byte_length;
+      mapping->impl.reserved[0] = IREE_HAL_REMOTE_CLIENT_MAPPING_TRACKED;
+      staging_data = NULL;
+    } else if (staging_length > 0) {
+      ++buffer->active_untracked_mapping_count;
       staging_data = NULL;
     }
   } else {
@@ -264,10 +530,22 @@ static iree_status_t iree_hal_remote_client_buffer_unmap_range(
       base_buffer, buffer, "unmapping");
   const bool mapping_writes = iree_all_bits_set(mapping->impl.allowed_access,
                                                 IREE_HAL_MEMORY_ACCESS_WRITE);
-  if (iree_status_is_ok(status) && mapping_writes && local_byte_length > 0 &&
-      mapping->contents.data != buffer->active_mapping_data) {
-    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "remote buffer mapping state mismatch");
+  const bool mapping_tracked =
+      mapping->impl.reserved[0] == IREE_HAL_REMOTE_CLIENT_MAPPING_TRACKED;
+  if (iree_status_is_ok(status) && local_byte_length > 0) {
+    if (mapping_tracked &&
+        mapping->contents.data != buffer->active_mapping_data) {
+      status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                "remote buffer mapping state mismatch");
+    } else if (!mapping_tracked && mapping_writes) {
+      status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                "remote buffer write mapping was not tracked");
+    } else if (!mapping_tracked &&
+               buffer->active_untracked_mapping_count == 0) {
+      status =
+          iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                           "remote buffer untracked mapping count underflow");
+    }
   }
 
   // If WRITE access was used, push the staging data to the server.
@@ -278,10 +556,15 @@ static iree_status_t iree_hal_remote_client_buffer_unmap_range(
                                   mapping->contents.data_length));
   }
 
-  if (mapping->contents.data == buffer->active_mapping_data) {
+  if (mapping_tracked &&
+      mapping->contents.data == buffer->active_mapping_data) {
     buffer->active_mapping_data = NULL;
+    buffer->active_mapping_access = IREE_HAL_MEMORY_ACCESS_NONE;
     buffer->active_mapping_offset = 0;
     buffer->active_mapping_length = 0;
+  } else if (!mapping_tracked && local_byte_length > 0 &&
+             buffer->active_untracked_mapping_count > 0) {
+    --buffer->active_untracked_mapping_count;
   }
   iree_allocator_free(buffer->host_allocator, mapping->contents.data);
 
@@ -294,20 +577,45 @@ static iree_status_t iree_hal_remote_client_buffer_invalidate_range(
     iree_device_size_t local_byte_length) {
   iree_hal_remote_client_buffer_t* buffer =
       (iree_hal_remote_client_buffer_t*)base_buffer;
-  (void)local_byte_offset;
+  IREE_TRACE_ZONE_BEGIN(z0);
+
   iree_status_t status = iree_hal_remote_client_buffer_validate_mappable(
       base_buffer, buffer, "invalidating");
-  if (iree_status_is_ok(status) && local_byte_length != 0) {
-    status = iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "remote buffer mapping invalidation requires tracked staging ranges");
+  iree_host_size_t staging_offset = 0;
+  iree_host_size_t staging_length = 0;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_client_buffer_validate_active_range(
+        buffer, local_byte_offset, local_byte_length, "invalidate",
+        &staging_offset, &staging_length);
   }
+  if (iree_status_is_ok(status) && staging_length > 0 &&
+      buffer->active_untracked_mapping_count != 0) {
+    status = iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "remote buffer mapping invalidation is ambiguous while untracked read "
+        "mappings are active");
+  }
+  if (iree_status_is_ok(status) && staging_length > 0 &&
+      !iree_all_bits_set(buffer->active_mapping_access,
+                         IREE_HAL_MEMORY_ACCESS_READ)) {
+    status = iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "remote buffer mapping invalidation requires READ access");
+  }
+  if (iree_status_is_ok(status) && staging_length > 0) {
+    status = iree_hal_remote_client_buffer_read_range(
+        buffer, base_buffer, local_byte_offset,
+        iree_make_byte_span(buffer->active_mapping_data + staging_offset,
+                            staging_length));
+  }
+
+  IREE_TRACE_ZONE_END(z0);
   return status;
 }
 
 // Flush pushes the dirty mapping data to the server without unmapping.
-// Uses the active write mapping state stored on the buffer during map_range to
-// locate the staging data for the specified range.
+// Uses the active mapping state stored on the buffer during map_range to locate
+// the staging data for the specified range.
 static iree_status_t iree_hal_remote_client_buffer_flush_range(
     iree_hal_buffer_t* base_buffer, iree_device_size_t local_byte_offset,
     iree_device_size_t local_byte_length) {
@@ -321,8 +629,15 @@ static iree_status_t iree_hal_remote_client_buffer_flush_range(
   iree_host_size_t staging_length = 0;
   if (iree_status_is_ok(status)) {
     status = iree_hal_remote_client_buffer_validate_active_range(
-        buffer, local_byte_offset, local_byte_length, &staging_offset,
+        buffer, local_byte_offset, local_byte_length, "flush", &staging_offset,
         &staging_length);
+  }
+  if (iree_status_is_ok(status) && staging_length > 0 &&
+      !iree_all_bits_set(buffer->active_mapping_access,
+                         IREE_HAL_MEMORY_ACCESS_WRITE)) {
+    status =
+        iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                         "remote buffer mapping flush requires WRITE access");
   }
   if (iree_status_is_ok(status) && staging_length > 0) {
     status = iree_hal_remote_client_buffer_write_range(
@@ -390,6 +705,11 @@ static iree_status_t iree_hal_remote_client_buffer_create_internal(
                       iree_memory_order_relaxed);
     iree_atomic_store(&buffer->deallocated, 0, iree_memory_order_relaxed);
     buffer->owns_remote_resource = owns_remote_resource;
+    buffer->active_mapping_data = NULL;
+    buffer->active_mapping_access = IREE_HAL_MEMORY_ACCESS_NONE;
+    buffer->active_mapping_offset = 0;
+    buffer->active_mapping_length = 0;
+    buffer->active_untracked_mapping_count = 0;
     *out_buffer = &buffer->base;
   }
 

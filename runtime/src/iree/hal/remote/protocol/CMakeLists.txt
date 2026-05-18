@@ -11,6 +11,16 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
+    commands
+  HDRS
+    "commands.h"
+  DEPS
+    ::common
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     common
   HDRS
     "common.h"
@@ -31,9 +41,9 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
-    queue
+    profile
   HDRS
-    "queue.h"
+    "profile.h"
   DEPS
     ::common
   PUBLIC
@@ -41,9 +51,9 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
-    commands
+    queue
   HDRS
-    "commands.h"
+    "queue.h"
   DEPS
     ::common
   PUBLIC

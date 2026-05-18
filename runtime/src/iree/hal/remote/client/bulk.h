@@ -53,6 +53,48 @@ iree_status_t iree_hal_remote_client_bulk_upload_file_read(
 void iree_hal_remote_client_bulk_cancel_transfer(
     iree_hal_remote_client_device_t* device, uint64_t transfer_id);
 
+typedef void (*iree_hal_remote_client_bulk_completion_fn_t)(
+    void* user_data, iree_status_t status);
+typedef struct iree_hal_remote_client_bulk_completion_callback_t {
+  // Completion callback. Consumes |status|.
+  iree_hal_remote_client_bulk_completion_fn_t fn;
+
+  // User data passed to |fn|.
+  void* user_data;
+} iree_hal_remote_client_bulk_completion_callback_t;
+
+// Begins a server-to-client buffer map bulk transfer into |target_bytes|.
+iree_status_t iree_hal_remote_client_bulk_begin_buffer_map_read(
+    iree_hal_remote_client_device_t* device, iree_byte_span_t target_bytes,
+    iree_hal_remote_client_bulk_completion_callback_t callback,
+    uint64_t* out_transfer_id);
+
+// Begins a client-to-server buffer unmap bulk transfer from |source_bytes|.
+iree_status_t iree_hal_remote_client_bulk_begin_buffer_unmap_write(
+    iree_hal_remote_client_device_t* device,
+    iree_const_byte_span_t source_bytes, uint64_t* out_transfer_id);
+
+// Starts or resumes uploading a client-to-server buffer unmap transfer.
+iree_status_t iree_hal_remote_client_bulk_upload_buffer_unmap(
+    iree_hal_remote_client_device_t* device, uint64_t transfer_id);
+
+// Releases client-side bookkeeping after the server has consumed the upload.
+void iree_hal_remote_client_bulk_end_buffer_unmap(
+    iree_hal_remote_client_device_t* device, uint64_t transfer_id);
+
+// Begins a remote profiling session and prepares to receive profile bulk
+// transfers. |sink| is retained until end_profile_session.
+iree_status_t iree_hal_remote_client_bulk_begin_profile_session(
+    iree_hal_remote_client_device_t* device, iree_hal_profile_sink_t* sink);
+
+// Returns true when a remote profiling session is active locally.
+bool iree_hal_remote_client_bulk_has_profile_session(
+    iree_hal_remote_client_device_t* device);
+
+// Ends any active remote profiling session and drops pending profile transfers.
+void iree_hal_remote_client_bulk_end_profile_session(
+    iree_hal_remote_client_device_t* device);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

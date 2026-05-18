@@ -8,6 +8,7 @@
 
 #include "iree/hal/remote/client/buffer.h"
 #include "iree/hal/remote/client/device.h"
+#include "iree/hal/remote/client/event.h"
 #include "iree/hal/remote/client/executable.h"
 #include "iree/hal/remote/protocol/commands.h"
 #include "iree/hal/remote/protocol/control.h"
@@ -154,6 +155,17 @@ static iree_status_t iree_hal_remote_client_cb_append(
   return iree_ok_status();
 }
 
+static iree_status_t iree_hal_remote_client_cb_validate_command_length(
+    iree_host_size_t command_length) {
+  if (command_length > UINT16_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "remote command length %" PRIhsz
+                            " exceeds wire limit %" PRIu16,
+                            command_length, UINT16_MAX);
+  }
+  return iree_ok_status();
+}
+
 //===----------------------------------------------------------------------===//
 // Lifecycle
 //===----------------------------------------------------------------------===//
@@ -209,15 +221,15 @@ static iree_status_t iree_hal_remote_client_command_buffer_end(
   if (!iree_all_bits_set(base_command_buffer->mode,
                          IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT)) {
     // Build COMMAND_BUFFER_UPLOAD request.
-    iree_host_size_t header_size =
+    const iree_host_size_t header_size =
         sizeof(iree_hal_remote_control_envelope_t) +
         sizeof(iree_hal_remote_command_buffer_upload_request_t);
     iree_host_size_t message_size = 0;
-    if (!iree_host_size_checked_add(header_size, command_buffer->stream_length,
-                                    &message_size)) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "command buffer upload size overflow");
-    }
+    iree_host_size_t stream_offset = 0;
+    IREE_RETURN_IF_ERROR(
+        IREE_STRUCT_LAYOUT(header_size, &message_size,
+                           IREE_STRUCT_FIELD(command_buffer->stream_length,
+                                             uint8_t, &stream_offset)));
 
     uint8_t* message_buffer = NULL;
     IREE_RETURN_IF_ERROR(iree_allocator_malloc(
@@ -240,7 +252,7 @@ static iree_status_t iree_hal_remote_client_command_buffer_end(
 
     // Copy stream data after the header.
     if (command_buffer->stream_length > 0) {
-      memcpy(message_buffer + header_size, command_buffer->stream_data,
+      memcpy(message_buffer + stream_offset, command_buffer->stream_data,
              command_buffer->stream_length);
     }
 
@@ -289,12 +301,12 @@ static iree_status_t iree_hal_remote_client_command_buffer_begin_debug_group(
   iree_hal_remote_client_command_buffer_t* command_buffer =
       iree_hal_remote_client_command_buffer_cast(base_command_buffer);
 
-  iree_host_size_t label_padded = iree_host_align(label.size, 8);
-  iree_host_size_t total_size = sizeof(iree_hal_remote_debug_group_begin_cmd_t);
-  if (!iree_host_size_checked_add(total_size, label_padded, &total_size)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "debug group size overflow");
-  }
+  iree_host_size_t label_offset = 0;
+  iree_host_size_t total_size = 0;
+  IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
+      sizeof(iree_hal_remote_debug_group_begin_cmd_t), &total_size,
+      IREE_STRUCT_FIELD(label.size, uint8_t, &label_offset),
+      IREE_STRUCT_FIELD_ALIGNED(0, uint8_t, 8, NULL)));
 
   void* ptr = NULL;
   IREE_RETURN_IF_ERROR(
@@ -308,7 +320,7 @@ static iree_status_t iree_hal_remote_client_command_buffer_begin_debug_group(
   cmd->label_length = (uint16_t)label.size;
 
   if (label.size > 0) {
-    memcpy((uint8_t*)(cmd + 1), label.data, label.size);
+    memcpy((uint8_t*)cmd + label_offset, label.data, label.size);
   }
 
   return iree_ok_status();
@@ -346,31 +358,52 @@ static iree_status_t iree_hal_remote_client_command_buffer_execution_barrier(
   iree_hal_remote_client_command_buffer_t* command_buffer =
       iree_hal_remote_client_command_buffer_cast(base_command_buffer);
 
-  iree_host_size_t memory_barriers_size = 0;
-  iree_host_size_t buffer_barriers_size = 0;
-  if (!iree_host_size_checked_mul(memory_barrier_count,
-                                  sizeof(iree_hal_remote_memory_barrier_t),
-                                  &memory_barriers_size) ||
-      !iree_host_size_checked_mul(buffer_barrier_count,
-                                  sizeof(iree_hal_remote_buffer_barrier_t),
-                                  &buffer_barriers_size)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE, "barrier size overflow");
+  iree_status_t status = iree_ok_status();
+  if (memory_barrier_count > UINT16_MAX) {
+    status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "memory barrier count %" PRIhsz
+                              " exceeds wire limit %" PRIu16,
+                              memory_barrier_count, UINT16_MAX);
   }
-
-  iree_host_size_t total_size = sizeof(iree_hal_remote_execution_barrier_cmd_t);
-  if (!iree_host_size_checked_add(total_size, memory_barriers_size,
-                                  &total_size) ||
-      !iree_host_size_checked_add(total_size, buffer_barriers_size,
-                                  &total_size)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "barrier command size overflow");
+  if (iree_status_is_ok(status) && buffer_barrier_count > UINT16_MAX) {
+    status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "buffer barrier count %" PRIhsz
+                              " exceeds wire limit %" PRIu16,
+                              buffer_barrier_count, UINT16_MAX);
   }
-  total_size = iree_host_align(total_size, 8);
+  if (iree_status_is_ok(status) && memory_barrier_count > 0 &&
+      !memory_barriers) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "memory barrier list is NULL");
+  }
+  if (iree_status_is_ok(status) && buffer_barrier_count > 0 &&
+      !buffer_barriers) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "buffer barrier list is NULL");
+  }
+  iree_host_size_t memory_barriers_offset = 0;
+  iree_host_size_t buffer_barriers_offset = 0;
+  iree_host_size_t total_size = 0;
+  if (iree_status_is_ok(status)) {
+    status = IREE_STRUCT_LAYOUT(
+        sizeof(iree_hal_remote_execution_barrier_cmd_t), &total_size,
+        IREE_STRUCT_FIELD(memory_barrier_count,
+                          iree_hal_remote_memory_barrier_t,
+                          &memory_barriers_offset),
+        IREE_STRUCT_FIELD(buffer_barrier_count,
+                          iree_hal_remote_buffer_barrier_t,
+                          &buffer_barriers_offset),
+        IREE_STRUCT_FIELD_ALIGNED(0, uint8_t, 8, NULL));
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_client_cb_validate_command_length(total_size);
+  }
 
   const iree_host_size_t stream_start = command_buffer->stream_length;
   void* ptr = NULL;
-  iree_status_t status =
-      iree_hal_remote_client_cb_append(command_buffer, total_size, &ptr);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_client_cb_append(command_buffer, total_size, &ptr);
+  }
 
   if (iree_status_is_ok(status)) {
     iree_hal_remote_execution_barrier_cmd_t* cmd =
@@ -382,22 +415,23 @@ static iree_status_t iree_hal_remote_client_command_buffer_execution_barrier(
     cmd->memory_barrier_count = (uint16_t)memory_barrier_count;
     cmd->buffer_barrier_count = (uint16_t)buffer_barrier_count;
 
-    uint8_t* cursor = (uint8_t*)(cmd + 1);
-
     // Serialize memory barriers.
+    iree_hal_remote_memory_barrier_t* wire_memory_barriers =
+        (iree_hal_remote_memory_barrier_t*)((uint8_t*)cmd +
+                                            memory_barriers_offset);
     for (iree_host_size_t i = 0; i < memory_barrier_count; ++i) {
-      iree_hal_remote_memory_barrier_t* wire =
-          (iree_hal_remote_memory_barrier_t*)cursor;
+      iree_hal_remote_memory_barrier_t* wire = &wire_memory_barriers[i];
       wire->source_scope = (uint32_t)memory_barriers[i].source_scope;
       wire->target_scope = (uint32_t)memory_barriers[i].target_scope;
-      cursor += sizeof(*wire);
     }
 
     // Serialize buffer barriers (resolve buffer IDs + subspan offsets).
+    iree_hal_remote_buffer_barrier_t* wire_buffer_barriers =
+        (iree_hal_remote_buffer_barrier_t*)((uint8_t*)cmd +
+                                            buffer_barriers_offset);
     for (iree_host_size_t i = 0;
          i < buffer_barrier_count && iree_status_is_ok(status); ++i) {
-      iree_hal_remote_buffer_barrier_t* wire =
-          (iree_hal_remote_buffer_barrier_t*)cursor;
+      iree_hal_remote_buffer_barrier_t* wire = &wire_buffer_barriers[i];
       wire->source_scope = (uint32_t)buffer_barriers[i].source_scope;
       wire->target_scope = (uint32_t)buffer_barriers[i].target_scope;
       iree_device_size_t barrier_offset = 0;
@@ -406,7 +440,6 @@ static iree_status_t iree_hal_remote_client_command_buffer_execution_barrier(
           &wire->buffer_slot, &barrier_offset, &status);
       wire->offset = barrier_offset;
       wire->length = buffer_barriers[i].buffer_ref.length;
-      cursor += sizeof(*wire);
     }
   }
 
@@ -419,15 +452,75 @@ static iree_status_t iree_hal_remote_client_command_buffer_execution_barrier(
 static iree_status_t iree_hal_remote_client_command_buffer_signal_event(
     iree_hal_command_buffer_t* base_command_buffer, iree_hal_event_t* event,
     iree_hal_execution_stage_t source_stage_mask) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "events not supported on remote device");
+  iree_hal_remote_client_command_buffer_t* command_buffer =
+      iree_hal_remote_client_command_buffer_cast(base_command_buffer);
+
+  const iree_host_size_t stream_start = command_buffer->stream_length;
+  void* ptr = NULL;
+  iree_status_t status = iree_hal_remote_client_cb_append(
+      command_buffer, sizeof(iree_hal_remote_event_signal_cmd_t), &ptr);
+  if (iree_status_is_ok(status)) {
+    if (!iree_hal_remote_client_event_isa(event)) {
+      status = iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "cannot record remote command buffer signal_event with a non-remote "
+          "event");
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_client_command_buffer_retain_resource(
+        command_buffer, (iree_hal_resource_t*)event);
+  }
+  if (iree_status_is_ok(status)) {
+    iree_hal_remote_event_signal_cmd_t* cmd =
+        (iree_hal_remote_event_signal_cmd_t*)ptr;
+    cmd->header.type = IREE_HAL_REMOTE_CMD_EVENT_SIGNAL;
+    cmd->header.length = (uint16_t)sizeof(*cmd);
+    cmd->event_id = iree_hal_remote_client_event_resource_id(event);
+    cmd->source_stage_mask = (uint32_t)source_stage_mask;
+  }
+
+  if (!iree_status_is_ok(status)) {
+    command_buffer->stream_length = stream_start;
+  }
+  return status;
 }
 
 static iree_status_t iree_hal_remote_client_command_buffer_reset_event(
     iree_hal_command_buffer_t* base_command_buffer, iree_hal_event_t* event,
     iree_hal_execution_stage_t source_stage_mask) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "events not supported on remote device");
+  iree_hal_remote_client_command_buffer_t* command_buffer =
+      iree_hal_remote_client_command_buffer_cast(base_command_buffer);
+
+  const iree_host_size_t stream_start = command_buffer->stream_length;
+  void* ptr = NULL;
+  iree_status_t status = iree_hal_remote_client_cb_append(
+      command_buffer, sizeof(iree_hal_remote_event_reset_cmd_t), &ptr);
+  if (iree_status_is_ok(status)) {
+    if (!iree_hal_remote_client_event_isa(event)) {
+      status = iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "cannot record remote command buffer reset_event with a non-remote "
+          "event");
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_client_command_buffer_retain_resource(
+        command_buffer, (iree_hal_resource_t*)event);
+  }
+  if (iree_status_is_ok(status)) {
+    iree_hal_remote_event_reset_cmd_t* cmd =
+        (iree_hal_remote_event_reset_cmd_t*)ptr;
+    cmd->header.type = IREE_HAL_REMOTE_CMD_EVENT_RESET;
+    cmd->header.length = (uint16_t)sizeof(*cmd);
+    cmd->event_id = iree_hal_remote_client_event_resource_id(event);
+    cmd->source_stage_mask = (uint32_t)source_stage_mask;
+  }
+
+  if (!iree_status_is_ok(status)) {
+    command_buffer->stream_length = stream_start;
+  }
+  return status;
 }
 
 static iree_status_t iree_hal_remote_client_command_buffer_wait_events(
@@ -439,8 +532,131 @@ static iree_status_t iree_hal_remote_client_command_buffer_wait_events(
     const iree_hal_memory_barrier_t* memory_barriers,
     iree_host_size_t buffer_barrier_count,
     const iree_hal_buffer_barrier_t* buffer_barriers) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "events not supported on remote device");
+  iree_hal_remote_client_command_buffer_t* command_buffer =
+      iree_hal_remote_client_command_buffer_cast(base_command_buffer);
+
+  iree_status_t status = iree_ok_status();
+  if (event_count > UINT16_MAX) {
+    status =
+        iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                         "event count %" PRIhsz " exceeds wire limit %" PRIu16,
+                         event_count, UINT16_MAX);
+  }
+  if (iree_status_is_ok(status) && memory_barrier_count > UINT16_MAX) {
+    status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "memory barrier count %" PRIhsz
+                              " exceeds wire limit %" PRIu16,
+                              memory_barrier_count, UINT16_MAX);
+  }
+  if (iree_status_is_ok(status) && buffer_barrier_count > UINT16_MAX) {
+    status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "buffer barrier count %" PRIhsz
+                              " exceeds wire limit %" PRIu16,
+                              buffer_barrier_count, UINT16_MAX);
+  }
+  if (iree_status_is_ok(status) && event_count > 0 && !events) {
+    status =
+        iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "event list is NULL");
+  }
+  if (iree_status_is_ok(status) && memory_barrier_count > 0 &&
+      !memory_barriers) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "memory barrier list is NULL");
+  }
+  if (iree_status_is_ok(status) && buffer_barrier_count > 0 &&
+      !buffer_barriers) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "buffer barrier list is NULL");
+  }
+
+  iree_host_size_t event_ids_offset = 0;
+  iree_host_size_t memory_barriers_offset = 0;
+  iree_host_size_t buffer_barriers_offset = 0;
+  iree_host_size_t total_size = 0;
+  if (iree_status_is_ok(status)) {
+    status = IREE_STRUCT_LAYOUT(
+        sizeof(iree_hal_remote_event_wait_cmd_t), &total_size,
+        IREE_STRUCT_FIELD(event_count, iree_hal_remote_resource_id_t,
+                          &event_ids_offset),
+        IREE_STRUCT_FIELD(memory_barrier_count,
+                          iree_hal_remote_memory_barrier_t,
+                          &memory_barriers_offset),
+        IREE_STRUCT_FIELD(buffer_barrier_count,
+                          iree_hal_remote_buffer_barrier_t,
+                          &buffer_barriers_offset),
+        IREE_STRUCT_FIELD_ALIGNED(0, uint8_t, 8, NULL));
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_client_cb_validate_command_length(total_size);
+  }
+
+  const iree_host_size_t stream_start = command_buffer->stream_length;
+  void* ptr = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_client_cb_append(command_buffer, total_size, &ptr);
+  }
+
+  if (iree_status_is_ok(status)) {
+    iree_hal_remote_event_wait_cmd_t* cmd =
+        (iree_hal_remote_event_wait_cmd_t*)ptr;
+    cmd->header.type = IREE_HAL_REMOTE_CMD_EVENT_WAIT;
+    cmd->header.length = (uint16_t)total_size;
+    cmd->source_stage_mask = (uint32_t)source_stage_mask;
+    cmd->target_stage_mask = (uint32_t)target_stage_mask;
+    cmd->event_count = (uint16_t)event_count;
+    cmd->memory_barrier_count = (uint16_t)memory_barrier_count;
+    cmd->buffer_barrier_count = (uint16_t)buffer_barrier_count;
+
+    iree_hal_remote_resource_id_t* event_ids =
+        (iree_hal_remote_resource_id_t*)((uint8_t*)cmd + event_ids_offset);
+    for (iree_host_size_t i = 0; i < event_count && iree_status_is_ok(status);
+         ++i) {
+      if (!iree_hal_remote_client_event_isa(events[i])) {
+        status = iree_make_status(
+            IREE_STATUS_FAILED_PRECONDITION,
+            "cannot record remote command buffer wait_events with a "
+            "non-remote event");
+        break;
+      }
+      status = iree_hal_remote_client_command_buffer_retain_resource(
+          command_buffer, (iree_hal_resource_t*)events[i]);
+      event_ids[i] = iree_hal_remote_client_event_resource_id(events[i]);
+    }
+
+    if (iree_status_is_ok(status)) {
+      iree_hal_remote_memory_barrier_t* wire_memory_barriers =
+          (iree_hal_remote_memory_barrier_t*)((uint8_t*)cmd +
+                                              memory_barriers_offset);
+      for (iree_host_size_t i = 0; i < memory_barrier_count; ++i) {
+        iree_hal_remote_memory_barrier_t* wire = &wire_memory_barriers[i];
+        wire->source_scope = (uint32_t)memory_barriers[i].source_scope;
+        wire->target_scope = (uint32_t)memory_barriers[i].target_scope;
+      }
+    }
+
+    if (iree_status_is_ok(status)) {
+      iree_hal_remote_buffer_barrier_t* wire_buffer_barriers =
+          (iree_hal_remote_buffer_barrier_t*)((uint8_t*)cmd +
+                                              buffer_barriers_offset);
+      for (iree_host_size_t i = 0;
+           i < buffer_barrier_count && iree_status_is_ok(status); ++i) {
+        iree_hal_remote_buffer_barrier_t* wire = &wire_buffer_barriers[i];
+        wire->source_scope = (uint32_t)buffer_barriers[i].source_scope;
+        wire->target_scope = (uint32_t)buffer_barriers[i].target_scope;
+        iree_device_size_t barrier_offset = 0;
+        iree_hal_remote_client_cb_encode_buffer_ref(
+            command_buffer, buffer_barriers[i].buffer_ref, &wire->buffer_id,
+            &wire->buffer_slot, &barrier_offset, &status);
+        wire->offset = barrier_offset;
+        wire->length = buffer_barriers[i].buffer_ref.length;
+      }
+    }
+  }
+
+  if (!iree_status_is_ok(status)) {
+    command_buffer->stream_length = stream_start;
+  }
+  return status;
 }
 
 //===----------------------------------------------------------------------===//
@@ -494,13 +710,12 @@ static iree_status_t iree_hal_remote_client_command_buffer_update_buffer(
       iree_hal_remote_client_command_buffer_cast(base_command_buffer);
 
   iree_host_size_t data_length = (iree_host_size_t)target_ref.length;
-  iree_host_size_t data_padded = iree_host_align(data_length, 8);
+  iree_host_size_t data_offset = 0;
   iree_host_size_t total_size = 0;
-  if (!iree_host_size_checked_add(sizeof(iree_hal_remote_buffer_update_cmd_t),
-                                  data_padded, &total_size)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "update buffer command size overflow");
-  }
+  IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
+      sizeof(iree_hal_remote_buffer_update_cmd_t), &total_size,
+      IREE_STRUCT_FIELD(data_length, uint8_t, &data_offset),
+      IREE_STRUCT_FIELD_ALIGNED(0, uint8_t, 8, NULL)));
 
   const iree_host_size_t stream_start = command_buffer->stream_length;
   void* ptr = NULL;
@@ -522,8 +737,8 @@ static iree_status_t iree_hal_remote_client_command_buffer_update_buffer(
 
     if (iree_status_is_ok(status)) {
       // Deep-copy the source data into the stream.
-      memcpy((uint8_t*)(cmd + 1), (const uint8_t*)source_buffer + source_offset,
-             data_length);
+      memcpy((uint8_t*)cmd + data_offset,
+             (const uint8_t*)source_buffer + source_offset, data_length);
     }
   }
 
@@ -656,25 +871,16 @@ static iree_status_t iree_hal_remote_client_command_buffer_dispatch(
       (uint16_t)(constants.data_length / sizeof(uint32_t));
   uint16_t binding_count = (uint16_t)bindings.count;
 
-  iree_host_size_t constants_size = 0;
-  iree_host_size_t bindings_size = 0;
-  if (!iree_host_size_checked_mul((iree_host_size_t)constant_count,
-                                  sizeof(uint32_t), &constants_size) ||
-      !iree_host_size_checked_mul((iree_host_size_t)binding_count,
-                                  sizeof(iree_hal_remote_binding_t),
-                                  &bindings_size)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "dispatch command size overflow");
-  }
-  iree_host_size_t constants_padded = iree_host_align(constants_size, 8);
-
-  iree_host_size_t total_size = sizeof(iree_hal_remote_dispatch_cmd_t);
-  if (!iree_host_size_checked_add(total_size, constants_padded, &total_size) ||
-      !iree_host_size_checked_add(total_size, bindings_size, &total_size)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "dispatch command size overflow");
-  }
-  total_size = iree_host_align(total_size, 8);
+  const iree_host_size_t constants_size = constants.data_length;
+  iree_host_size_t constants_offset = 0;
+  iree_host_size_t bindings_offset = 0;
+  iree_host_size_t total_size = 0;
+  IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
+      sizeof(iree_hal_remote_dispatch_cmd_t), &total_size,
+      IREE_STRUCT_FIELD(constant_count, uint32_t, &constants_offset),
+      IREE_STRUCT_FIELD_ALIGNED(binding_count, iree_hal_remote_binding_t, 8,
+                                &bindings_offset),
+      IREE_STRUCT_FIELD_ALIGNED(0, uint8_t, 8, NULL)));
 
   const iree_host_size_t stream_start = command_buffer->stream_length;
   void* ptr = NULL;
@@ -712,15 +918,14 @@ static iree_status_t iree_hal_remote_client_command_buffer_dispatch(
     cmd->dispatch_flags = flags;
 
     // Constants (padded to 8-byte alignment).
-    uint8_t* cursor = (uint8_t*)(cmd + 1);
+    uint8_t* cursor = (uint8_t*)cmd + constants_offset;
     if (constants_size > 0) {
       memcpy(cursor, constants.data, constants_size);
     }
-    cursor += constants_padded;
 
     // Bindings.
     iree_hal_remote_binding_t* wire_bindings =
-        (iree_hal_remote_binding_t*)cursor;
+        (iree_hal_remote_binding_t*)((uint8_t*)cmd + bindings_offset);
     for (uint16_t i = 0; i < binding_count && iree_status_is_ok(status); ++i) {
       const iree_hal_buffer_ref_t* ref = &bindings.values[i];
       iree_device_size_t binding_offset = 0;
