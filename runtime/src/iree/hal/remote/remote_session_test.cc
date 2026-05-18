@@ -174,7 +174,7 @@ class RemoteSessionTest : public ::testing::Test {
   }
 
   // Creates and starts the server with a single-axis topology.
-  void CreateAndStartServer() {
+  void CreateAndStartServer(uint32_t max_connections = 4) {
     CreateMockDevice();
 
     // Build server topology: one axis representing the mock device's queue.
@@ -192,7 +192,7 @@ class RemoteSessionTest : public ::testing::Test {
     server_options.transport_factory = factory_;
     server_options.bind_address = IREE_SV("test-server");
     server_options.local_topology = &server_topology;
-    server_options.max_connections = 4;
+    server_options.max_connections = max_connections;
 
     iree_hal_device_t* devices[] = {mock_device_};
     IREE_ASSERT_OK(iree_hal_remote_server_create(
@@ -379,6 +379,21 @@ TEST_F(RemoteSessionTest, ConnectSucceeds) {
             IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_DISCONNECTED);
 
   // Connect and verify success.
+  EXPECT_EQ(ConnectAndWait(), IREE_STATUS_OK);
+  EXPECT_EQ(iree_hal_remote_client_device_state(client_device_),
+            IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_CONNECTED);
+}
+
+TEST_F(RemoteSessionTest, ReusesSingleServerSlotAfterClientDisconnect) {
+  CreateAndStartServer(/*max_connections=*/1);
+  CreateClientDevice();
+  ASSERT_EQ(ConnectAndWait(), IREE_STATUS_OK);
+
+  iree_hal_device_release(client_device_);
+  client_device_ = nullptr;
+  DrainProactor();
+
+  CreateClientDevice();
   EXPECT_EQ(ConnectAndWait(), IREE_STATUS_OK);
   EXPECT_EQ(iree_hal_remote_client_device_state(client_device_),
             IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_CONNECTED);
