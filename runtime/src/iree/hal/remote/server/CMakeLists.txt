@@ -141,9 +141,21 @@ iree_cc_binary_benchmark(
     bulk_upload_receiver_benchmark
   SRCS
     "bulk_upload_receiver_benchmark.cc"
+    "server.h"
+    "session.h"
   DEPS
+    ::bulk_router
     ::server
+    iree::async
+    iree::async::util::proactor_pool
     iree::base
+    iree::base::threading
+    iree::hal
+    iree::hal::drivers::local_task::registration
+    iree::net::channel::queue::queue_channel
+    iree::net::channel::util::sequence_window
+    iree::net::session
+    iree::net::transport_factory
     iree::testing::benchmark
     iree::testing::benchmark_main
     iree::third_party::google_benchmark
