@@ -151,6 +151,7 @@ iree_cc_test(
   SRCS
     "bulk_session_test.cc"
     "bulk_test_util.h"
+    "resource_table.h"
     "server.h"
     "session.h"
   DEPS
@@ -159,6 +160,7 @@ iree_cc_test(
     iree::base
     iree::base::threading
     iree::hal
+    iree::hal::remote::protocol::common
     iree::net::carrier
     iree::net::channel::bulk::bulk_channel
     iree::net::channel::bulk::frame
@@ -412,6 +414,7 @@ iree_cc_test(
   NAME
     server_lifecycle_test
   SRCS
+    "resource_table.h"
     "server.h"
     "server_lifecycle_test.cc"
     "session.h"

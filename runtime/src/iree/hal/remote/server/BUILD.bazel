@@ -145,6 +145,7 @@ iree_runtime_cc_test(
     srcs = [
         "bulk_session_test.cc",
         "bulk_test_util.h",
+        "resource_table.h",
         "server.h",
         "session.h",
     ],
@@ -154,6 +155,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/remote/protocol:common",
         "//runtime/src/iree/net:carrier",
         "//runtime/src/iree/net:message_endpoint",
         "//runtime/src/iree/net:session",
@@ -408,6 +410,7 @@ iree_runtime_cc_test(
 iree_runtime_cc_test(
     name = "server_lifecycle_test",
     srcs = [
+        "resource_table.h",
         "server.h",
         "server_lifecycle_test.cc",
         "session.h",

@@ -396,10 +396,9 @@ static iree_status_t iree_net_session_register_remote_axes(
     session->remote_axes[i] = (iree_async_axis_t)entries[i].axis;
     session->remote_epochs[i] = entries[i].current_epoch;
 
-    // Create a software proxy semaphore and register it as the bridge for this
-    // remote axis. Bootstrap advances through the frontier tracker below so
-    // the tracker epoch and semaphore timeline are initialized by the same
-    // path used for later remote ADVANCE frames.
+    // Create a software proxy semaphore for the remote axis. The tracker
+    // advance below synchronizes its epoch with the remote's bootstrap epoch
+    // through the same bridge path used by later ADVANCE frames.
     status = iree_async_semaphore_create(
         session->proactor, /*initial_value=*/0,
         IREE_ASYNC_SEMAPHORE_DEFAULT_FRONTIER_CAPACITY, session->host_allocator,
