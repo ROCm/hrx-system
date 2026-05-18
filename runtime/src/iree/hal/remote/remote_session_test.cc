@@ -17,6 +17,7 @@
 #include <atomic>
 #include <cstring>
 #include <thread>
+#include <vector>
 
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/operation.h"
@@ -1308,6 +1309,80 @@ TEST_F(RemoteBufferTest, ServerFileQueueReadOpenFailureSignalsSemaphore) {
   iree_hal_file_release(source_file);
 }
 
+TEST_F(RemoteBufferTest, ClientFileQueueReadLargeHostAllocation) {
+  constexpr iree_device_size_t kLength = 3 * 64 * 1024 + 17;
+
+  std::vector<uint8_t> source_contents(kLength);
+  std::vector<uint8_t> target_contents(kLength, 0);
+  for (iree_host_size_t i = 0; i < source_contents.size(); ++i) {
+    source_contents[i] = (uint8_t)((i * 31 + 7) & 0xFF);
+  }
+
+  iree_io_file_handle_t* source_handle = nullptr;
+  IREE_ASSERT_OK(iree_io_file_handle_wrap_host_allocation(
+      IREE_IO_FILE_ACCESS_READ,
+      iree_make_byte_span(source_contents.data(), source_contents.size()),
+      iree_io_file_handle_release_callback_null(), iree_allocator_system(),
+      &source_handle));
+  iree_hal_file_t* source_file = nullptr;
+  IREE_ASSERT_OK(iree_hal_file_import(
+      client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, IREE_HAL_MEMORY_ACCESS_READ,
+      source_handle, IREE_HAL_EXTERNAL_FILE_FLAG_NONE, &source_file));
+  iree_io_file_handle_release(source_handle);
+
+  iree_io_file_handle_t* target_handle = nullptr;
+  IREE_ASSERT_OK(iree_io_file_handle_wrap_host_allocation(
+      IREE_IO_FILE_ACCESS_READ | IREE_IO_FILE_ACCESS_WRITE,
+      iree_make_byte_span(target_contents.data(), target_contents.size()),
+      iree_io_file_handle_release_callback_null(), iree_allocator_system(),
+      &target_handle));
+  iree_hal_file_t* target_file = nullptr;
+  IREE_ASSERT_OK(iree_hal_file_import(
+      client_device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+      IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE, target_handle,
+      IREE_HAL_EXTERNAL_FILE_FLAG_NONE, &target_file));
+  iree_io_file_handle_release(target_handle);
+
+  iree_hal_allocator_t* allocator = iree_hal_device_allocator(client_device_);
+  iree_hal_buffer_params_t params = {0};
+  params.usage =
+      IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED;
+  params.access = IREE_HAL_MEMORY_ACCESS_ALL;
+  params.type =
+      IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+
+  iree_hal_buffer_t* buffer = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_allocator_allocate_buffer(allocator, params, kLength, &buffer));
+
+  iree_hal_semaphore_t* sem = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(client_device_,
+                                           IREE_HAL_QUEUE_AFFINITY_ANY, 0,
+                                           IREE_HAL_SEMAPHORE_FLAG_NONE, &sem));
+  SemaphoreListHelper read_signal(sem, 1);
+  IREE_ASSERT_OK(iree_hal_device_queue_read(
+      client_device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+      iree_hal_semaphore_list_empty(), read_signal.list, source_file,
+      /*source_offset=*/0, buffer, /*target_offset=*/0, kLength,
+      IREE_HAL_READ_FLAG_NONE));
+
+  SemaphoreListHelper write_wait(sem, 1);
+  SemaphoreListHelper write_signal(sem, 2);
+  IREE_ASSERT_OK(iree_hal_device_queue_write(
+      client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, write_wait.list,
+      write_signal.list, buffer, /*source_offset=*/0, target_file,
+      /*target_offset=*/0, kLength, IREE_HAL_WRITE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(sem, 2, iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
+
+  EXPECT_EQ(target_contents, source_contents);
+
+  iree_hal_semaphore_release(sem);
+  iree_hal_buffer_release(buffer);
+  iree_hal_file_release(target_file);
+  iree_hal_file_release(source_file);
+}
+
 TEST_F(RemoteBufferTest, ServerFileQueueWrite) {
   iree_hal_file_t* target_file = nullptr;
   IREE_ASSERT_OK(iree_hal_remote_client_device_open_file(
@@ -1356,6 +1431,66 @@ TEST_F(RemoteBufferTest, ServerFileQueueWrite) {
                    sizeof(kWriteContents) - 1),
             0);
   iree_io_file_contents_free(contents);
+
+  iree_hal_semaphore_release(sem);
+  iree_hal_buffer_release(buffer);
+  iree_hal_file_release(target_file);
+}
+
+TEST_F(RemoteBufferTest, ClientFileQueueWriteLargeHostAllocation) {
+  constexpr iree_device_size_t kLength = 3 * 64 * 1024 + 17;
+
+  constexpr uint8_t kPattern = 0xA5;
+  std::vector<uint8_t> expected(kLength, kPattern);
+  std::vector<uint8_t> target_contents(kLength, 0);
+
+  iree_io_file_handle_t* target_handle = nullptr;
+  IREE_ASSERT_OK(iree_io_file_handle_wrap_host_allocation(
+      IREE_IO_FILE_ACCESS_READ | IREE_IO_FILE_ACCESS_WRITE,
+      iree_make_byte_span(target_contents.data(), target_contents.size()),
+      iree_io_file_handle_release_callback_null(), iree_allocator_system(),
+      &target_handle));
+
+  iree_hal_file_t* target_file = nullptr;
+  IREE_ASSERT_OK(iree_hal_file_import(
+      client_device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+      IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE, target_handle,
+      IREE_HAL_EXTERNAL_FILE_FLAG_NONE, &target_file));
+  iree_io_file_handle_release(target_handle);
+
+  iree_hal_allocator_t* allocator = iree_hal_device_allocator(client_device_);
+  iree_hal_buffer_params_t params = {0};
+  params.usage =
+      IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED;
+  params.access = IREE_HAL_MEMORY_ACCESS_ALL;
+  params.type =
+      IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+
+  iree_hal_buffer_t* buffer = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_allocator_allocate_buffer(allocator, params, kLength, &buffer));
+
+  iree_hal_semaphore_t* sem = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(client_device_,
+                                           IREE_HAL_QUEUE_AFFINITY_ANY, 0,
+                                           IREE_HAL_SEMAPHORE_FLAG_NONE, &sem));
+  SemaphoreListHelper fill_signal(sem, 1);
+  IREE_ASSERT_OK(iree_hal_device_queue_fill(
+      client_device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+      iree_hal_semaphore_list_empty(), fill_signal.list, buffer,
+      /*target_offset=*/0, kLength, &kPattern, sizeof(kPattern),
+      IREE_HAL_FILL_FLAG_NONE));
+
+  SemaphoreListHelper write_wait(sem, 1);
+  SemaphoreListHelper write_signal(sem, 2);
+  IREE_ASSERT_OK(iree_hal_device_queue_write(
+      client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, write_wait.list,
+      write_signal.list, buffer, /*source_offset=*/0, target_file,
+      /*target_offset=*/0, kLength, IREE_HAL_WRITE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(sem, 2, iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
+
+  EXPECT_EQ(target_contents, expected);
 
   iree_hal_semaphore_release(sem);
   iree_hal_buffer_release(buffer);

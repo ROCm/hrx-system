@@ -19,7 +19,9 @@
 // send completion.
 #define IREE_HAL_REMOTE_BULK_HEADER_POOL_BUFFER_COUNT 128
 #define IREE_HAL_REMOTE_BULK_HEADER_POOL_BUFFER_SIZE 128
-#define IREE_HAL_REMOTE_BULK_DATA_CHUNK_LENGTH (64 * 1024)
+// DATA payloads share the frame with a bulk header; keep chunks comfortably
+// below the default queue frame size instead of filling the whole frame.
+#define IREE_HAL_REMOTE_BULK_DATA_CHUNK_LENGTH (32 * 1024)
 
 static void iree_hal_remote_client_device_on_bulk_transport_error(
     void* user_data, iree_status_t status);
@@ -89,6 +91,13 @@ typedef struct iree_hal_remote_client_file_write_chunk_t {
   iree_async_file_write_operation_t write_op;
 } iree_hal_remote_client_file_write_chunk_t;
 
+typedef uint8_t iree_hal_remote_client_file_read_transfer_flags_t;
+enum iree_hal_remote_client_file_read_transfer_flag_bits_e {
+  IREE_HAL_REMOTE_CLIENT_FILE_READ_TRANSFER_FLAG_CHUNK_IN_FLIGHT = 1u << 0,
+  IREE_HAL_REMOTE_CLIENT_FILE_READ_TRANSFER_FLAG_START_SENT = 1u << 1,
+  IREE_HAL_REMOTE_CLIENT_FILE_READ_TRANSFER_FLAG_COMPLETE_SENT = 1u << 2,
+};
+
 typedef struct iree_hal_remote_client_file_read_transfer_t {
   // Source HAL file retained for the transfer lifetime.
   iree_hal_file_t* source_file;
@@ -114,15 +123,15 @@ typedef struct iree_hal_remote_client_file_read_transfer_t {
   // Number of bulk START/DATA/COMPLETE frames still awaiting send completion.
   uint32_t pending_send_count;
 
-  // True while an async file read chunk is reading or awaiting send completion.
-  bool chunk_in_flight;
-
-  // True once the START frame has been submitted.
-  bool start_sent;
-
-  // True once the COMPLETE frame has been submitted.
-  bool complete_sent;
+  // State bits from iree_hal_remote_client_file_read_transfer_flag_bits_e.
+  iree_hal_remote_client_file_read_transfer_flags_t flags;
 } iree_hal_remote_client_file_read_transfer_t;
+
+typedef uint8_t iree_hal_remote_client_file_write_transfer_flags_t;
+enum iree_hal_remote_client_file_write_transfer_flag_bits_e {
+  IREE_HAL_REMOTE_CLIENT_FILE_WRITE_TRANSFER_FLAG_SERVER_COMPLETE = 1u << 0,
+  IREE_HAL_REMOTE_CLIENT_FILE_WRITE_TRANSFER_FLAG_WRITE_FAILED = 1u << 1,
+};
 
 typedef struct iree_hal_remote_client_file_write_transfer_t {
   // Target HAL file retained for the transfer lifetime.
@@ -143,11 +152,8 @@ typedef struct iree_hal_remote_client_file_write_transfer_t {
   // Number of async file writes still in flight.
   uint32_t pending_write_count;
 
-  // True once the server has sent its COMPLETE marker.
-  bool server_complete;
-
-  // True once an async file write failed and ABORT was sent or queued.
-  bool write_failed;
+  // State bits from iree_hal_remote_client_file_write_transfer_flag_bits_e.
+  iree_hal_remote_client_file_write_transfer_flags_t flags;
 } iree_hal_remote_client_file_write_transfer_t;
 
 typedef struct iree_hal_remote_client_bulk_transfer_t {
@@ -495,7 +501,12 @@ static iree_status_t iree_hal_remote_client_file_write_chunk_submit_next(
 
 static bool iree_hal_remote_client_file_write_is_ready_locked(
     const iree_hal_remote_client_file_write_transfer_t* transfer) {
-  return !transfer->write_failed && transfer->server_complete &&
+  return !iree_any_bit_set(
+             transfer->flags,
+             IREE_HAL_REMOTE_CLIENT_FILE_WRITE_TRANSFER_FLAG_WRITE_FAILED) &&
+         iree_any_bit_set(
+             transfer->flags,
+             IREE_HAL_REMOTE_CLIENT_FILE_WRITE_TRANSFER_FLAG_SERVER_COMPLETE) &&
          transfer->pending_write_count == 0 &&
          iree_hal_remote_bulk_transfer_tracker_is_complete(
              &transfer->receive_tracker);
@@ -701,7 +712,8 @@ static void iree_hal_remote_client_file_write_chunk_complete(
         send_complete =
             iree_hal_remote_client_file_write_is_ready_locked(file_transfer);
       } else {
-        file_transfer->write_failed = true;
+        file_transfer->flags |=
+            IREE_HAL_REMOTE_CLIENT_FILE_WRITE_TRANSFER_FLAG_WRITE_FAILED;
         send_abort = true;
       }
     }
@@ -823,7 +835,11 @@ static iree_status_t iree_hal_remote_client_bulk_try_send_file_read_locked(
   }
   iree_hal_remote_client_file_read_transfer_t* transfer =
       &bulk_transfer->file_read;
-  if (transfer->complete_sent) return iree_ok_status();
+  if (iree_any_bit_set(
+          transfer->flags,
+          IREE_HAL_REMOTE_CLIENT_FILE_READ_TRANSFER_FLAG_COMPLETE_SENT)) {
+    return iree_ok_status();
+  }
   if (!channel) {
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
                             "remote bulk channel is not available");
@@ -832,7 +848,9 @@ static iree_status_t iree_hal_remote_client_bulk_try_send_file_read_locked(
   const uint64_t transfer_id = iree_net_bulk_transfer_id(table_transfer);
   const uint64_t total_length =
       iree_net_bulk_transfer_total_size(table_transfer);
-  if (!transfer->start_sent) {
+  if (!iree_any_bit_set(
+          transfer->flags,
+          IREE_HAL_REMOTE_CLIENT_FILE_READ_TRANSFER_FLAG_START_SENT)) {
     iree_status_t status = iree_net_bulk_channel_send_start(
         channel, transfer_id, total_length, IREE_NET_BULK_FRAME_FLAG_NONE,
         transfer_id);
@@ -843,7 +861,8 @@ static iree_status_t iree_hal_remote_client_bulk_try_send_file_read_locked(
     if (!iree_status_is_ok(status)) {
       return status;
     }
-    transfer->start_sent = true;
+    transfer->flags |=
+        IREE_HAL_REMOTE_CLIENT_FILE_READ_TRANSFER_FLAG_START_SENT;
     ++transfer->pending_send_count;
   }
 
@@ -852,7 +871,10 @@ static iree_status_t iree_hal_remote_client_bulk_try_send_file_read_locked(
     IREE_RETURN_IF_ERROR(
         iree_hal_remote_client_bulk_try_send_pending_read_locked(
             device, channel, table_transfer));
-    if (!transfer->chunk_in_flight && transfer->send_offset < total_length &&
+    if (!iree_any_bit_set(
+            transfer->flags,
+            IREE_HAL_REMOTE_CLIENT_FILE_READ_TRANSFER_FLAG_CHUNK_IN_FLIGHT) &&
+        transfer->send_offset < total_length &&
         iree_net_bulk_channel_remote_chunk_credit_count(channel) > 0) {
       const uint64_t remaining_length = total_length - transfer->send_offset;
       const iree_host_size_t chunk_length = (iree_host_size_t)iree_min(
@@ -872,7 +894,8 @@ static iree_status_t iree_hal_remote_client_bulk_try_send_file_read_locked(
                                                 iree_async_span_list_empty(),
                                                 /*operation_user_data=*/0);
       }
-      transfer->chunk_in_flight = true;
+      transfer->flags |=
+          IREE_HAL_REMOTE_CLIENT_FILE_READ_TRANSFER_FLAG_CHUNK_IN_FLIGHT;
     }
   } else {
     while (transfer->send_offset < total_length) {
@@ -909,8 +932,14 @@ static iree_status_t iree_hal_remote_client_bulk_try_send_file_read_locked(
     }
   }
 
-  if (!transfer->chunk_in_flight && !transfer->pending_chunk &&
-      !transfer->complete_sent && transfer->send_offset == total_length) {
+  if (!iree_any_bit_set(
+          transfer->flags,
+          IREE_HAL_REMOTE_CLIENT_FILE_READ_TRANSFER_FLAG_CHUNK_IN_FLIGHT) &&
+      !transfer->pending_chunk &&
+      !iree_any_bit_set(
+          transfer->flags,
+          IREE_HAL_REMOTE_CLIENT_FILE_READ_TRANSFER_FLAG_COMPLETE_SENT) &&
+      transfer->send_offset == total_length) {
     iree_status_t status =
         iree_net_bulk_channel_send_complete(channel, transfer_id, transfer_id);
     if (iree_status_code(status) == IREE_STATUS_RESOURCE_EXHAUSTED) {
@@ -920,11 +949,15 @@ static iree_status_t iree_hal_remote_client_bulk_try_send_file_read_locked(
     if (!iree_status_is_ok(status)) {
       return status;
     }
-    transfer->complete_sent = true;
+    transfer->flags |=
+        IREE_HAL_REMOTE_CLIENT_FILE_READ_TRANSFER_FLAG_COMPLETE_SENT;
     ++transfer->pending_send_count;
   }
 
-  if (transfer->complete_sent && transfer->pending_send_count == 0) {
+  if (iree_any_bit_set(
+          transfer->flags,
+          IREE_HAL_REMOTE_CLIENT_FILE_READ_TRANSFER_FLAG_COMPLETE_SENT) &&
+      transfer->pending_send_count == 0) {
     iree_hal_remote_client_bulk_release_transfer(device->bulk_transfers,
                                                  table_transfer);
   }
@@ -981,7 +1014,11 @@ static void iree_hal_remote_client_bulk_collect_ready_file_read(
       IREE_HAL_REMOTE_CLIENT_BULK_TRANSFER_KIND_FILE_READ) {
     return;
   }
-  if (bulk_transfer->file_read.complete_sent) return;
+  if (iree_any_bit_set(
+          bulk_transfer->file_read.flags,
+          IREE_HAL_REMOTE_CLIENT_FILE_READ_TRANSFER_FLAG_COMPLETE_SENT)) {
+    return;
+  }
   if (id_list->transfer_count >= IREE_ARRAYSIZE(id_list->transfer_ids)) return;
   id_list->transfer_ids[id_list->transfer_count++] =
       iree_net_bulk_transfer_id(table_transfer);
@@ -1208,7 +1245,8 @@ static iree_status_t iree_hal_remote_client_device_on_bulk_complete(
     } else {
       iree_hal_remote_client_file_write_transfer_t* file_transfer =
           &bulk_transfer->file_write;
-      file_transfer->server_complete = true;
+      file_transfer->flags |=
+          IREE_HAL_REMOTE_CLIENT_FILE_WRITE_TRANSFER_FLAG_SERVER_COMPLETE;
       if (!iree_hal_remote_bulk_transfer_tracker_is_complete(
               &file_transfer->receive_tracker)) {
         status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -1294,7 +1332,8 @@ static void iree_hal_remote_client_device_on_bulk_send_complete(
         if (transfer->pending_send_count > 0) {
           --transfer->pending_send_count;
         }
-        transfer->chunk_in_flight = false;
+        transfer->flags &=
+            ~IREE_HAL_REMOTE_CLIENT_FILE_READ_TRANSFER_FLAG_CHUNK_IN_FLIGHT;
         if (!iree_status_is_ok(status)) {
           transport_status = status;
           status = iree_ok_status();

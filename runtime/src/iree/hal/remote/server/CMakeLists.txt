@@ -41,6 +41,7 @@ iree_cc_library(
     iree::io::file_handle
     iree::net::bootstrap
     iree::net::channel::bulk::bulk_channel
+    iree::net::channel::bulk::chunk_pool
     iree::net::channel::bulk::transfer_table
     iree::net::channel::control::frame
     iree::net::channel::queue::queue_channel

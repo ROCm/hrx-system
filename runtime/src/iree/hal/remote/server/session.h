@@ -21,7 +21,10 @@ extern "C" {
 #endif  // __cplusplus
 
 typedef struct iree_hal_remote_server_t iree_hal_remote_server_t;
+typedef struct iree_hal_remote_server_bulk_staging_pool_t
+    iree_hal_remote_server_bulk_staging_pool_t;
 typedef struct iree_net_bulk_channel_t iree_net_bulk_channel_t;
+typedef struct iree_net_bulk_chunk_pool_t iree_net_bulk_chunk_pool_t;
 typedef struct iree_net_bulk_transfer_table_t iree_net_bulk_transfer_table_t;
 typedef struct iree_hal_remote_server_pending_queue_command_t
     iree_hal_remote_server_pending_queue_command_t;
@@ -70,6 +73,12 @@ typedef struct iree_hal_remote_server_session_t {
 
   // Fixed-capacity table of active bulk transfers.
   iree_net_bulk_transfer_table_t* bulk_transfers;
+
+  // Reusable host staging slots for server-to-client bulk queue writes.
+  iree_hal_remote_server_bulk_staging_pool_t* bulk_staging_pool;
+
+  // Fixed-capacity retained receive chunks for client-to-server bulk uploads.
+  iree_net_bulk_chunk_pool_t* bulk_receive_chunks;
 
   // Resource table mapping resource_ids to retained HAL resources (buffers,
   // semaphores, etc.). Initialized when the session is accepted, deinitialized
