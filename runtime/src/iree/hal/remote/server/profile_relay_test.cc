@@ -10,6 +10,7 @@
 #include <cstring>
 
 #include "iree/hal/remote/protocol/control.h"
+#include "iree/hal/remote/server/bulk_session.h"
 #include "iree/hal/remote/server/server.h"
 #include "iree/hal/remote/server/session.h"
 #include "iree/net/channel/util/sequence_window.h"
@@ -103,13 +104,19 @@ class ProfileRelayTest : public ::testing::Test {
     iree_slim_mutex_initialize(&server_.session_mutex);
     session_.server = &server_;
     session_.session_id = 1;
-    IREE_ASSERT_OK(iree_hal_remote_server_profile_relay_initialize(
-        &session_, iree_allocator_system()));
+    IREE_ASSERT_OK(iree_hal_remote_server_bulk_session_allocate(
+        &session_, /*options=*/nullptr, iree_allocator_system(),
+        &session_.bulk_session));
   }
 
   void TearDown() override {
-    iree_hal_remote_server_profile_relay_deinitialize(&session_);
+    iree_hal_remote_server_bulk_session_free(session_.bulk_session);
+    session_.bulk_session = nullptr;
     iree_slim_mutex_deinitialize(&server_.session_mutex);
+  }
+
+  iree_hal_remote_server_profile_relay_t* profile_relay() {
+    return iree_hal_remote_server_bulk_session_profile_relay(&session_);
   }
 
   iree_hal_remote_server_t server_;
@@ -126,21 +133,20 @@ TEST_F(ProfileRelayTest, EarliestFailureWins) {
   IREE_EXPECT_OK(iree_hal_remote_server_profile_relay_observe_transfer(
       &session_, /*sequence=*/5,
       iree_make_status(IREE_STATUS_UNAVAILABLE, "sequence 5 failed")));
-  EXPECT_EQ(session_.profile_relay.transfer_failure_sequence, 5u);
-  EXPECT_EQ(session_.profile_relay.transfer_failure_code,
-            IREE_STATUS_UNAVAILABLE);
+  EXPECT_EQ(profile_relay()->transfer_failure_sequence, 5u);
+  EXPECT_EQ(profile_relay()->transfer_failure_code, IREE_STATUS_UNAVAILABLE);
 
   IREE_EXPECT_OK(iree_hal_remote_server_profile_relay_observe_transfer(
       &session_, /*sequence=*/3,
       iree_make_status(IREE_STATUS_ABORTED, "sequence 3 failed")));
-  EXPECT_EQ(session_.profile_relay.transfer_failure_sequence, 3u);
-  EXPECT_EQ(session_.profile_relay.transfer_failure_code, IREE_STATUS_ABORTED);
+  EXPECT_EQ(profile_relay()->transfer_failure_sequence, 3u);
+  EXPECT_EQ(profile_relay()->transfer_failure_code, IREE_STATUS_ABORTED);
 
   IREE_EXPECT_OK(iree_hal_remote_server_profile_relay_observe_transfer(
       &session_, /*sequence=*/7,
       iree_make_status(IREE_STATUS_CANCELLED, "sequence 7 failed")));
-  EXPECT_EQ(session_.profile_relay.transfer_failure_sequence, 3u);
-  EXPECT_EQ(session_.profile_relay.transfer_failure_code, IREE_STATUS_ABORTED);
+  EXPECT_EQ(profile_relay()->transfer_failure_sequence, 3u);
+  EXPECT_EQ(profile_relay()->transfer_failure_code, IREE_STATUS_ABORTED);
 }
 
 TEST_F(ProfileRelayTest, DeferredResponseWaitsForContiguousObservation) {
@@ -148,30 +154,26 @@ TEST_F(ProfileRelayTest, DeferredResponseWaitsForContiguousObservation) {
   memset(&envelope, 0, sizeof(envelope));
   IREE_EXPECT_OK(iree_hal_remote_server_profile_relay_defer_response(
       &session_, &envelope, /*target_sequence=*/3, iree_ok_status()));
-  EXPECT_EQ(
-      iree_net_sequence_window_observed(&session_.profile_relay.ack_window),
-      0u);
+  EXPECT_EQ(iree_net_sequence_window_observed(&profile_relay()->ack_window),
+            0u);
 
   IREE_EXPECT_OK(iree_hal_remote_server_profile_relay_observe_transfer(
       &session_, /*sequence=*/2, iree_ok_status()));
-  EXPECT_EQ(
-      iree_net_sequence_window_observed(&session_.profile_relay.ack_window),
-      0u);
+  EXPECT_EQ(iree_net_sequence_window_observed(&profile_relay()->ack_window),
+            0u);
 
   IREE_EXPECT_OK(iree_hal_remote_server_profile_relay_observe_transfer(
       &session_, /*sequence=*/1, iree_ok_status()));
-  EXPECT_EQ(
-      iree_net_sequence_window_observed(&session_.profile_relay.ack_window),
-      2u);
+  EXPECT_EQ(iree_net_sequence_window_observed(&profile_relay()->ack_window),
+            2u);
 
   IREE_EXPECT_OK(iree_hal_remote_server_profile_relay_observe_transfer(
       &session_, /*sequence=*/3, iree_ok_status()));
-  EXPECT_EQ(
-      iree_net_sequence_window_observed(&session_.profile_relay.ack_window),
-      3u);
+  EXPECT_EQ(iree_net_sequence_window_observed(&profile_relay()->ack_window),
+            3u);
 
   iree_net_sequence_node_t* pending_list = NULL;
-  iree_net_sequence_window_take_pending(&session_.profile_relay.ack_window,
+  iree_net_sequence_window_take_pending(&profile_relay()->ack_window,
                                         &pending_list);
   EXPECT_EQ(pending_list, nullptr);
 }
@@ -181,8 +183,8 @@ TEST_F(ProfileRelayTest, PrepareBeginResetsFailureAndAckWindow) {
       &session_, /*sequence=*/3,
       iree_make_status(IREE_STATUS_ABORTED, "prior session failed")));
   EXPECT_TRUE(iree_net_sequence_window_has_observed(
-      &session_.profile_relay.ack_window, /*sequence=*/3));
-  EXPECT_EQ(session_.profile_relay.transfer_failure_sequence, 3u);
+      &profile_relay()->ack_window, /*sequence=*/3));
+  EXPECT_EQ(profile_relay()->transfer_failure_sequence, 3u);
 
   int destroy_count = 0;
   iree_hal_profile_sink_t* sink = NULL;
@@ -192,14 +194,13 @@ TEST_F(ProfileRelayTest, PrepareBeginResetsFailureAndAckWindow) {
   session_.session = reinterpret_cast<iree_net_session_t*>(this);
   IREE_EXPECT_OK(
       iree_hal_remote_server_profile_relay_prepare_begin(&session_, sink));
-  EXPECT_EQ(session_.profile_relay.active_sink, sink);
-  EXPECT_EQ(session_.profile_relay.transfer_failure_sequence, 0u);
-  EXPECT_EQ(session_.profile_relay.transfer_failure_code, IREE_STATUS_OK);
+  EXPECT_EQ(profile_relay()->active_sink, sink);
+  EXPECT_EQ(profile_relay()->transfer_failure_sequence, 0u);
+  EXPECT_EQ(profile_relay()->transfer_failure_code, IREE_STATUS_OK);
   EXPECT_FALSE(iree_net_sequence_window_has_observed(
-      &session_.profile_relay.ack_window, /*sequence=*/3));
-  EXPECT_EQ(
-      iree_net_sequence_window_observed(&session_.profile_relay.ack_window),
-      0u);
+      &profile_relay()->ack_window, /*sequence=*/3));
+  EXPECT_EQ(iree_net_sequence_window_observed(&profile_relay()->ack_window),
+            0u);
 
   iree_hal_profile_sink_t* detached_sink =
       iree_hal_remote_server_profile_relay_detach_active_sink(&session_, sink);

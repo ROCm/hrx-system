@@ -13,6 +13,7 @@
 
 #include "iree/hal/remote/protocol/profile.h"
 #include "iree/hal/remote/server/bulk.h"
+#include "iree/hal/remote/server/bulk_session.h"
 #include "iree/hal/remote/server/bulk_test_util.h"
 #include "iree/hal/remote/server/profile_relay.h"
 #include "iree/hal/remote/server/server.h"
@@ -103,28 +104,6 @@ static iree_status_t test_profile_sink_create(
     *out_sink = reinterpret_cast<iree_hal_profile_sink_t*>(sink);
   }
   return status;
-}
-
-static void DeinitializeProfileTransfer(void* user_data,
-                                        iree_net_bulk_transfer_t* transfer) {
-  (void)user_data;
-  iree_hal_remote_server_profile_transfer_deinitialize(
-      iree_hal_remote_server_profile_transfer_storage(transfer));
-}
-
-static iree_status_t AllocateProfileScheduler(
-    iree_host_size_t capacity,
-    iree_hal_remote_bulk_transfer_scheduler_t** out_scheduler) {
-  iree_hal_remote_bulk_transfer_scheduler_options_t options =
-      iree_hal_remote_bulk_transfer_scheduler_options_default();
-  options.capacity = capacity;
-  options.user_storage_size = sizeof(iree_hal_remote_server_profile_transfer_t);
-  options.user_storage_alignment =
-      iree_alignof(iree_hal_remote_server_profile_transfer_t);
-  iree_hal_remote_bulk_transfer_scheduler_callbacks_t callbacks = {};
-  callbacks.deinitialize = DeinitializeProfileTransfer;
-  return iree_hal_remote_bulk_transfer_scheduler_allocate(
-      &options, callbacks, iree_allocator_system(), out_scheduler);
 }
 
 static iree_status_t AllocateProfilePayload(uint64_t sequence,
@@ -273,11 +252,12 @@ class BulkProfileSenderTest : public ::testing::Test {
     session_.server = &server_;
     session_.session_id = kSessionId;
     session_.session = reinterpret_cast<iree_net_session_t*>(this);
-    iree_slim_mutex_initialize(&session_.bulk_transfer_mutex);
-    IREE_ASSERT_OK(iree_hal_remote_server_profile_relay_initialize(
-        &session_, iree_allocator_system()));
-    IREE_ASSERT_OK(AllocateProfileScheduler(
-        /*capacity=*/1, &session_.bulk_transfer_scheduler));
+    iree_hal_remote_server_bulk_session_options_t bulk_options =
+        iree_hal_remote_server_bulk_session_options_default();
+    bulk_options.active_transfer_capacity = 1;
+    IREE_ASSERT_OK(iree_hal_remote_server_bulk_session_allocate(
+        &session_, &bulk_options, iree_allocator_system(),
+        &session_.bulk_session));
 
     carrier_ = MockCarrier::Create();
     endpoint_.carrier = carrier_.get();
@@ -290,7 +270,8 @@ class BulkProfileSenderTest : public ::testing::Test {
         channel_callbacks_.MakeCallbacks(), iree_allocator_system(),
         &bulk_channel_));
     IREE_ASSERT_OK(iree_net_bulk_channel_activate(bulk_channel_));
-    session_.bulk_channel = bulk_channel_;
+    IREE_ASSERT_OK(iree_hal_remote_server_bulk_session_attach_channel(
+        &session_, bulk_channel_));
 
     IREE_ASSERT_OK(test_profile_sink_create(
         iree_allocator_system(), &sink_destroy_count_, &profile_sink_));
@@ -299,21 +280,23 @@ class BulkProfileSenderTest : public ::testing::Test {
   }
 
   void TearDown() override {
+    iree_hal_remote_server_profile_pending_transfer_t* pending_transfers =
+        nullptr;
+    iree_slim_mutex_lock(iree_hal_remote_server_bulk_session_mutex(&session_));
+    pending_transfers =
+        iree_hal_remote_server_profile_take_pending_transfers_locked(&session_);
+    iree_slim_mutex_unlock(
+        iree_hal_remote_server_bulk_session_mutex(&session_));
     iree_hal_remote_server_profile_pending_transfer_free_list(
-        &server_, iree_hal_remote_server_profile_take_pending_transfers_locked(
-                      &session_));
-    iree_hal_remote_bulk_transfer_scheduler_free(
-        session_.bulk_transfer_scheduler);
-    session_.bulk_transfer_scheduler = nullptr;
-
-    session_.bulk_channel = nullptr;
+        &server_, pending_transfers);
+    iree_hal_remote_server_profile_relay_deinitialize(&session_);
+    iree_hal_remote_server_bulk_session_free(session_.bulk_session);
+    session_.bulk_session = nullptr;
     iree_net_bulk_channel_release(bulk_channel_);
     bulk_channel_ = nullptr;
 
-    iree_hal_remote_server_profile_relay_deinitialize(&session_);
     iree_hal_profile_sink_release(profile_sink_);
     profile_sink_ = nullptr;
-    iree_slim_mutex_deinitialize(&session_.bulk_transfer_mutex);
     iree_slim_mutex_deinitialize(&server_.session_mutex);
   }
 
@@ -377,12 +360,16 @@ class BulkProfileSenderTest : public ::testing::Test {
 
   iree_net_bulk_transfer_t* LookupTransfer(uint64_t transfer_id) {
     return iree_hal_remote_bulk_transfer_scheduler_lookup(
-        session_.bulk_transfer_scheduler, transfer_id);
+        iree_hal_remote_server_bulk_session_scheduler(&session_), transfer_id);
   }
 
-  iree_host_size_t ActiveTransferCount() const {
+  iree_host_size_t ActiveTransferCount() {
     return iree_hal_remote_bulk_transfer_scheduler_count(
-        session_.bulk_transfer_scheduler);
+        iree_hal_remote_server_bulk_session_scheduler(&session_));
+  }
+
+  iree_hal_remote_server_profile_relay_t* profile_relay() {
+    return iree_hal_remote_server_bulk_session_profile_relay(&session_);
   }
 
   // Stack server shell retained by transfer state.
@@ -444,9 +431,8 @@ TEST_F(BulkProfileSenderTest,
   EXPECT_NE(second_transfer_id, first_transfer_id);
   EXPECT_FALSE(HasPendingTransfers());
   EXPECT_EQ(ActiveTransferCount(), 1u);
-  EXPECT_EQ(
-      iree_net_sequence_window_observed(&session_.profile_relay.ack_window),
-      1u);
+  EXPECT_EQ(iree_net_sequence_window_observed(&profile_relay()->ack_window),
+            1u);
 
   IREE_ASSERT_OK(endpoint_.InjectCredit(/*credit_delta=*/1));
   CompleteSend(/*send_index=*/3, iree_ok_status());
@@ -462,9 +448,8 @@ TEST_F(BulkProfileSenderTest,
       iree_hal_remote_server_bulk_on_complete(&session_, second_transfer_id));
   EXPECT_FALSE(HasPendingTransfers());
   EXPECT_EQ(ActiveTransferCount(), 0u);
-  EXPECT_EQ(
-      iree_net_sequence_window_observed(&session_.profile_relay.ack_window),
-      2u);
+  EXPECT_EQ(iree_net_sequence_window_observed(&profile_relay()->ack_window),
+            2u);
 }
 
 TEST_F(BulkProfileSenderTest, SendFailureDrainsQueuedCallback) {
@@ -480,9 +465,8 @@ TEST_F(BulkProfileSenderTest, SendFailureDrainsQueuedCallback) {
   ASSERT_EQ(channel_callbacks_.send_completion_errors.size(), 1u);
   EXPECT_EQ(channel_callbacks_.send_completion_errors[0],
             IREE_STATUS_UNAVAILABLE);
-  EXPECT_EQ(session_.profile_relay.transfer_failure_sequence, 1u);
-  EXPECT_EQ(session_.profile_relay.transfer_failure_code,
-            IREE_STATUS_UNAVAILABLE);
+  EXPECT_EQ(profile_relay()->transfer_failure_sequence, 1u);
+  EXPECT_EQ(profile_relay()->transfer_failure_code, IREE_STATUS_UNAVAILABLE);
   EXPECT_EQ(LookupTransfer(first_transfer_id), nullptr);
   EXPECT_FALSE(HasPendingTransfers());
   EXPECT_EQ(ActiveTransferCount(), 1u);
@@ -511,8 +495,8 @@ TEST_F(BulkProfileSenderTest, PeerAbortWaitsForPendingDataSendCompletion) {
 
   IREE_EXPECT_OK(
       iree_hal_remote_server_bulk_on_abort(&session_, first_transfer_id));
-  EXPECT_EQ(session_.profile_relay.transfer_failure_sequence, 1u);
-  EXPECT_EQ(session_.profile_relay.transfer_failure_code, IREE_STATUS_ABORTED);
+  EXPECT_EQ(profile_relay()->transfer_failure_sequence, 1u);
+  EXPECT_EQ(profile_relay()->transfer_failure_code, IREE_STATUS_ABORTED);
   EXPECT_NE(LookupTransfer(first_transfer_id), nullptr);
   EXPECT_TRUE(HasPendingTransfers());
   EXPECT_EQ(carrier_->sends.size(), 2u);
@@ -542,7 +526,7 @@ TEST_F(BulkProfileSenderTest, QueuedCallbackDrainsAfterActiveSinkDetach) {
                                                               profile_sink_);
   ASSERT_EQ(detached_sink, profile_sink_);
   iree_hal_profile_sink_release(detached_sink);
-  EXPECT_EQ(session_.profile_relay.active_sink, nullptr);
+  EXPECT_EQ(profile_relay()->active_sink, nullptr);
 
   IREE_ASSERT_OK(endpoint_.InjectCredit(/*credit_delta=*/1));
   CompleteSend(/*send_index=*/0, iree_ok_status());
@@ -556,9 +540,8 @@ TEST_F(BulkProfileSenderTest, QueuedCallbackDrainsAfterActiveSinkDetach) {
 
   IREE_EXPECT_OK(
       iree_hal_remote_server_bulk_on_complete(&session_, first_transfer_id));
-  EXPECT_EQ(
-      iree_net_sequence_window_observed(&session_.profile_relay.ack_window),
-      1u);
+  EXPECT_EQ(iree_net_sequence_window_observed(&profile_relay()->ack_window),
+            1u);
 
   ASSERT_EQ(carrier_->sends.size(), 4u);
   uint64_t second_transfer_id = ExpectStartFrame(/*send_index=*/3);
@@ -578,9 +561,8 @@ TEST_F(BulkProfileSenderTest, QueuedCallbackDrainsAfterActiveSinkDetach) {
   IREE_EXPECT_OK(
       iree_hal_remote_server_bulk_on_complete(&session_, second_transfer_id));
   EXPECT_EQ(ActiveTransferCount(), 0u);
-  EXPECT_EQ(
-      iree_net_sequence_window_observed(&session_.profile_relay.ack_window),
-      2u);
+  EXPECT_EQ(iree_net_sequence_window_observed(&profile_relay()->ack_window),
+            2u);
 }
 
 TEST_F(BulkProfileSenderTest, NoBacklogCompletionDoesNotStartMoreWork) {
@@ -604,9 +586,8 @@ TEST_F(BulkProfileSenderTest, NoBacklogCompletionDoesNotStartMoreWork) {
   EXPECT_FALSE(HasPendingTransfers());
   EXPECT_EQ(ActiveTransferCount(), 0u);
   EXPECT_EQ(carrier_->sends.size(), 3u);
-  EXPECT_EQ(
-      iree_net_sequence_window_observed(&session_.profile_relay.ack_window),
-      1u);
+  EXPECT_EQ(iree_net_sequence_window_observed(&profile_relay()->ack_window),
+            1u);
 }
 
 }  // namespace

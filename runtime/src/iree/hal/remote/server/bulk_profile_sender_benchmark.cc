@@ -12,6 +12,7 @@
 #include "iree/hal/remote/protocol/profile.h"
 #include "iree/hal/remote/server/bulk.h"
 #include "iree/hal/remote/server/bulk_profile_sender.h"
+#include "iree/hal/remote/server/bulk_session.h"
 #include "iree/hal/remote/server/bulk_test_util.h"
 #include "iree/hal/remote/server/profile_relay.h"
 #include "iree/hal/remote/server/server.h"
@@ -98,28 +99,6 @@ static iree_status_t benchmark_profile_sink_create(
     *out_sink = reinterpret_cast<iree_hal_profile_sink_t*>(sink);
   }
   return status;
-}
-
-static void DeinitializeProfileTransfer(void* user_data,
-                                        iree_net_bulk_transfer_t* transfer) {
-  (void)user_data;
-  iree_hal_remote_server_profile_transfer_deinitialize(
-      iree_hal_remote_server_profile_transfer_storage(transfer));
-}
-
-static iree_status_t AllocateProfileScheduler(
-    iree_host_size_t capacity,
-    iree_hal_remote_bulk_transfer_scheduler_t** out_scheduler) {
-  iree_hal_remote_bulk_transfer_scheduler_options_t options =
-      iree_hal_remote_bulk_transfer_scheduler_options_default();
-  options.capacity = capacity;
-  options.user_storage_size = sizeof(iree_hal_remote_server_profile_transfer_t);
-  options.user_storage_alignment =
-      iree_alignof(iree_hal_remote_server_profile_transfer_t);
-  iree_hal_remote_bulk_transfer_scheduler_callbacks_t callbacks = {};
-  callbacks.deinitialize = DeinitializeProfileTransfer;
-  return iree_hal_remote_bulk_transfer_scheduler_allocate(
-      &options, callbacks, iree_allocator_system(), out_scheduler);
 }
 
 static iree_status_t AllocateProfilePayload(uint64_t sequence,
@@ -251,17 +230,12 @@ class ProfileBenchmarkContext {
     session_.server = &server_;
     session_.session_id = 1;
     session_.session = reinterpret_cast<iree_net_session_t*>(this);
-    iree_slim_mutex_initialize(&session_.bulk_transfer_mutex);
-    bulk_transfer_mutex_initialized_ = true;
-
-    iree_status_t status = iree_hal_remote_server_profile_relay_initialize(
-        &session_, iree_allocator_system());
-    profile_relay_initialized_ = iree_status_is_ok(status);
-
-    if (iree_status_is_ok(status)) {
-      status = AllocateProfileScheduler(active_transfer_capacity,
-                                        &session_.bulk_transfer_scheduler);
-    }
+    iree_hal_remote_server_bulk_session_options_t bulk_options =
+        iree_hal_remote_server_bulk_session_options_default();
+    bulk_options.active_transfer_capacity = active_transfer_capacity;
+    iree_status_t status = iree_hal_remote_server_bulk_session_allocate(
+        &session_, &bulk_options, iree_allocator_system(),
+        &session_.bulk_session);
 
     if (iree_status_is_ok(status)) {
       carrier_ = MockCarrier::Create();
@@ -283,7 +257,10 @@ class ProfileBenchmarkContext {
       status = iree_net_bulk_channel_activate(bulk_channel_);
     }
     if (iree_status_is_ok(status)) {
-      session_.bulk_channel = bulk_channel_;
+      status = iree_hal_remote_server_bulk_session_attach_channel(
+          &session_, bulk_channel_);
+    }
+    if (iree_status_is_ok(status)) {
       status = benchmark_profile_sink_create(iree_allocator_system(),
                                              &profile_sink_);
     }
@@ -297,15 +274,13 @@ class ProfileBenchmarkContext {
   ~ProfileBenchmarkContext() {
     CompleteAllCapturedSends();
     DropPendingAndActiveTransfers();
-    session_.bulk_channel = NULL;
-    iree_net_bulk_channel_release(bulk_channel_);
-    if (profile_relay_initialized_) {
+    if (session_.bulk_session) {
       iree_hal_remote_server_profile_relay_deinitialize(&session_);
+      iree_hal_remote_server_bulk_session_free(session_.bulk_session);
+      session_.bulk_session = NULL;
     }
+    iree_net_bulk_channel_release(bulk_channel_);
     iree_hal_profile_sink_release(profile_sink_);
-    if (bulk_transfer_mutex_initialized_) {
-      iree_slim_mutex_deinitialize(&session_.bulk_transfer_mutex);
-    }
     if (server_mutex_initialized_) {
       iree_slim_mutex_deinitialize(&server_.session_mutex);
     }
@@ -343,16 +318,17 @@ class ProfileBenchmarkContext {
   }
 
   void DropPendingAndActiveTransfers() {
-    if (!bulk_transfer_mutex_initialized_) return;
+    if (!session_.bulk_session) return;
     iree_hal_remote_server_profile_pending_transfer_t* pending_transfers = NULL;
-    iree_slim_mutex_lock(&session_.bulk_transfer_mutex);
+    iree_slim_mutex_lock(iree_hal_remote_server_bulk_session_mutex(&session_));
     pending_transfers =
         iree_hal_remote_server_profile_take_pending_transfers_locked(&session_);
-    if (session_.bulk_transfer_scheduler) {
+    if (iree_hal_remote_server_bulk_session_scheduler(&session_)) {
       iree_hal_remote_bulk_transfer_scheduler_clear(
-          session_.bulk_transfer_scheduler);
+          iree_hal_remote_server_bulk_session_scheduler(&session_));
     }
-    iree_slim_mutex_unlock(&session_.bulk_transfer_mutex);
+    iree_slim_mutex_unlock(
+        iree_hal_remote_server_bulk_session_mutex(&session_));
 
     iree_hal_remote_server_profile_pending_transfer_free_list(
         &server_, pending_transfers);
@@ -403,12 +379,6 @@ class ProfileBenchmarkContext {
 
   // True once |server_.session_mutex| has been initialized.
   bool server_mutex_initialized_ = false;
-
-  // True once |session_.bulk_transfer_mutex| has been initialized.
-  bool bulk_transfer_mutex_initialized_ = false;
-
-  // True once |session_.profile_relay| has been initialized.
-  bool profile_relay_initialized_ = false;
 };
 
 IREE_BENCHMARK_FN(BM_SubmitBurstStalledCredit) {

@@ -9,10 +9,7 @@
 
 #include "iree/async/frontier.h"
 #include "iree/base/api.h"
-#include "iree/base/threading/mutex.h"
 #include "iree/hal/api.h"
-#include "iree/hal/remote/server/bulk_router.h"
-#include "iree/hal/remote/server/profile_relay.h"
 #include "iree/hal/remote/server/resource_table.h"
 #include "iree/net/channel/queue/queue_channel.h"
 #include "iree/net/channel/util/sequence_window.h"
@@ -23,14 +20,10 @@ extern "C" {
 #endif  // __cplusplus
 
 typedef struct iree_hal_remote_server_t iree_hal_remote_server_t;
+typedef struct iree_hal_remote_server_bulk_session_t
+    iree_hal_remote_server_bulk_session_t;
 typedef struct iree_hal_remote_control_envelope_t
     iree_hal_remote_control_envelope_t;
-typedef struct iree_hal_remote_server_bulk_staging_pool_t
-    iree_hal_remote_server_bulk_staging_pool_t;
-typedef struct iree_hal_remote_bulk_transfer_scheduler_t
-    iree_hal_remote_bulk_transfer_scheduler_t;
-typedef struct iree_net_bulk_channel_t iree_net_bulk_channel_t;
-typedef struct iree_net_bulk_receive_window_t iree_net_bulk_receive_window_t;
 typedef struct iree_hal_remote_server_pending_queue_command_t
     iree_hal_remote_server_pending_queue_command_t;
 
@@ -79,26 +72,8 @@ typedef struct iree_hal_remote_server_session_t {
   // to the channel exists (e.g., command completion contexts).
   iree_net_queue_channel_t* queue_channel;
 
-  // Bulk channel for large payload transfers (NULL until bulk endpoint opens).
-  iree_net_bulk_channel_t* bulk_channel;
-
-  // Bulk channel callback router bound to this session slot.
-  iree_hal_remote_server_bulk_router_t bulk_router;
-
-  // Protects active bulk transfer state.
-  iree_slim_mutex_t bulk_transfer_mutex;
-
-  // Active bulk transfer scheduler and lifecycle owner.
-  iree_hal_remote_bulk_transfer_scheduler_t* bulk_transfer_scheduler;
-
-  // Reusable host staging slots for bulk queue file operations.
-  iree_hal_remote_server_bulk_staging_pool_t* bulk_staging_pool;
-
-  // Receive window retaining client-to-server DATA chunks and CREDIT state.
-  iree_net_bulk_receive_window_t* bulk_receive_window;
-
-  // Server-originated profiling callback relay state.
-  iree_hal_remote_server_profile_relay_t profile_relay;
+  // Owned bulk transfer state, or NULL when the slot has no active session.
+  iree_hal_remote_server_bulk_session_t* bulk_session;
 
   // Resource table mapping resource_ids to retained HAL resources (buffers,
   // semaphores, etc.). Initialized when the session is accepted, deinitialized

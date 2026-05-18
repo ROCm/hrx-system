@@ -78,6 +78,7 @@ iree_cc_library(
     "api.h"
     "bulk_download_sender.h"
     "bulk_profile_sender.h"
+    "bulk_session.h"
     "bulk_upload_receiver.h"
     "file_index.h"
     "profile_relay.h"
@@ -86,6 +87,7 @@ iree_cc_library(
     "bulk.h"
     "bulk_download_sender.c"
     "bulk_profile_sender.c"
+    "bulk_session.c"
     "bulk_upload_receiver.c"
     "file_index.c"
     "profile.c"
@@ -246,6 +248,7 @@ iree_cc_binary_benchmark(
   NAME
     bulk_upload_receiver_benchmark
   SRCS
+    "bulk_test_util.h"
     "bulk_upload_receiver_benchmark.cc"
     "resource_table.h"
     "server.h"
@@ -260,8 +263,13 @@ iree_cc_binary_benchmark(
     iree::hal
     iree::hal::drivers::local_task::registration
     iree::hal::remote::protocol::common
+    iree::net::carrier
+    iree::net::channel::bulk::bulk_channel
+    iree::net::channel::bulk::frame
     iree::net::channel::queue::queue_channel
+    iree::net::channel::util::frame_sender
     iree::net::channel::util::sequence_window
+    iree::net::message_endpoint
     iree::net::session
     iree::net::transport_factory
     iree::testing::benchmark
@@ -274,6 +282,7 @@ iree_cc_test(
   NAME
     bulk_upload_receiver_test
   SRCS
+    "bulk_test_util.h"
     "bulk_upload_receiver_test.cc"
     "resource_table.h"
     "server.h"
@@ -288,8 +297,13 @@ iree_cc_test(
     iree::hal
     iree::hal::drivers::local_task::registration
     iree::hal::remote::protocol::common
+    iree::net::carrier
+    iree::net::channel::bulk::bulk_channel
+    iree::net::channel::bulk::frame
     iree::net::channel::queue::queue_channel
+    iree::net::channel::util::frame_sender
     iree::net::channel::util::sequence_window
+    iree::net::message_endpoint
     iree::net::session
     iree::net::transport_factory
     iree::testing::gtest

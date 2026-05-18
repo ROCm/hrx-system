@@ -7,6 +7,7 @@
 #include "iree/hal/remote/server/profile_relay.h"
 
 #include "iree/hal/remote/protocol/control.h"
+#include "iree/hal/remote/server/bulk_session.h"
 #include "iree/hal/remote/server/server.h"
 #include "iree/hal/remote/server/session.h"
 
@@ -110,7 +111,8 @@ iree_status_t iree_hal_remote_server_profile_relay_initialize(
   return iree_net_sequence_window_initialize(
       /*initial_observed_sequence=*/0,
       IREE_HAL_REMOTE_PROFILE_ACK_WINDOW_INITIAL_CAPACITY, host_allocator,
-      &session_slot->profile_relay.ack_window);
+      &iree_hal_remote_server_bulk_session_profile_relay(session_slot)
+           ->ack_window);
 }
 
 bool iree_hal_remote_server_profile_relay_is_empty(
@@ -123,7 +125,8 @@ bool iree_hal_remote_server_profile_relay_is_empty(
 
 void iree_hal_remote_server_profile_relay_deinitialize(
     iree_hal_remote_server_session_t* session_slot) {
-  iree_hal_remote_server_profile_relay_t* relay = &session_slot->profile_relay;
+  iree_hal_remote_server_profile_relay_t* relay =
+      iree_hal_remote_server_bulk_session_profile_relay(session_slot);
   iree_net_sequence_node_t* pending_responses = NULL;
   iree_net_sequence_window_take_pending(&relay->ack_window, &pending_responses);
   iree_net_sequence_window_deinitialize(&relay->ack_window);
@@ -140,7 +143,8 @@ iree_hal_remote_server_profile_relay_retain_active_sink(
     iree_hal_remote_server_session_t* session_slot) {
   iree_hal_profile_sink_t* profile_sink = NULL;
   iree_slim_mutex_lock(&session_slot->server->session_mutex);
-  profile_sink = session_slot->profile_relay.active_sink;
+  profile_sink = iree_hal_remote_server_bulk_session_profile_relay(session_slot)
+                     ->active_sink;
   iree_hal_profile_sink_retain(profile_sink);
   iree_slim_mutex_unlock(&session_slot->server->session_mutex);
   return profile_sink;
@@ -153,9 +157,13 @@ iree_hal_remote_server_profile_relay_detach_active_sink(
   iree_hal_profile_sink_t* profile_sink = NULL;
   iree_slim_mutex_lock(&session_slot->server->session_mutex);
   if (!expected_sink ||
-      session_slot->profile_relay.active_sink == expected_sink) {
-    profile_sink = session_slot->profile_relay.active_sink;
-    session_slot->profile_relay.active_sink = NULL;
+      iree_hal_remote_server_bulk_session_profile_relay(session_slot)
+              ->active_sink == expected_sink) {
+    profile_sink =
+        iree_hal_remote_server_bulk_session_profile_relay(session_slot)
+            ->active_sink;
+    iree_hal_remote_server_bulk_session_profile_relay(session_slot)
+        ->active_sink = NULL;
   }
   iree_slim_mutex_unlock(&session_slot->server->session_mutex);
   return profile_sink;
@@ -177,7 +185,8 @@ void iree_hal_remote_server_profile_relay_cancel(
 iree_status_t iree_hal_remote_server_profile_relay_prepare_begin(
     iree_hal_remote_server_session_t* session_slot,
     iree_hal_profile_sink_t* profile_sink) {
-  iree_hal_remote_server_profile_relay_t* relay = &session_slot->profile_relay;
+  iree_hal_remote_server_profile_relay_t* relay =
+      iree_hal_remote_server_bulk_session_profile_relay(session_slot);
   iree_status_t status = iree_ok_status();
   iree_net_sequence_node_t* pending_responses = NULL;
 
@@ -213,7 +222,8 @@ iree_status_t iree_hal_remote_server_profile_relay_defer_response(
     iree_hal_remote_server_session_t* session_slot,
     const iree_hal_remote_control_envelope_t* request_envelope,
     uint64_t target_sequence, iree_status_t operation_status) {
-  iree_hal_remote_server_profile_relay_t* relay = &session_slot->profile_relay;
+  iree_hal_remote_server_profile_relay_t* relay =
+      iree_hal_remote_server_bulk_session_profile_relay(session_slot);
   iree_status_code_t transfer_failure_code = IREE_STATUS_OK;
   uint64_t transfer_failure_sequence = 0;
   if (target_sequence == 0) {
@@ -274,7 +284,8 @@ iree_status_t iree_hal_remote_server_profile_relay_defer_response(
 iree_status_t iree_hal_remote_server_profile_relay_observe_transfer(
     iree_hal_remote_server_session_t* session_slot, uint64_t sequence,
     iree_status_t status) {
-  iree_hal_remote_server_profile_relay_t* relay = &session_slot->profile_relay;
+  iree_hal_remote_server_profile_relay_t* relay =
+      iree_hal_remote_server_bulk_session_profile_relay(session_slot);
   iree_status_code_t transfer_failure_code = IREE_STATUS_OK;
   uint64_t transfer_failure_sequence = 0;
   iree_net_sequence_node_t* ready_list = NULL;

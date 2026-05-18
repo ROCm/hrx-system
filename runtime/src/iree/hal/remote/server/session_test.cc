@@ -22,13 +22,25 @@ namespace {
 
 class TestBufferPool {
  public:
-  TestBufferPool(iree_host_size_t buffer_count, iree_host_size_t buffer_size) {
-    const iree_host_size_t total_size = buffer_count * buffer_size;
+  TestBufferPool() = default;
+
+  iree_status_t Initialize(iree_host_size_t buffer_count,
+                           iree_host_size_t buffer_size) {
+    iree_host_size_t total_size = 0;
+    if (!iree_host_size_checked_mul(buffer_count, buffer_size, &total_size)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "test buffer pool size overflow");
+    }
     void* memory = malloc(total_size);
+    if (!memory) return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
     memset(memory, 0, total_size);
 
     region_ =
         static_cast<iree_async_region_t*>(malloc(sizeof(iree_async_region_t)));
+    if (!region_) {
+      free(memory);
+      return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
+    }
     memset(region_, 0, sizeof(*region_));
     iree_atomic_ref_count_init(&region_->ref_count);
     region_->destroy_fn = DestroyRegion;
@@ -39,8 +51,9 @@ class TestBufferPool {
 
     iree_status_t status = iree_async_buffer_pool_allocate(
         region_, iree_allocator_system(), &pool_);
-    IREE_CHECK_OK(status);
     iree_async_region_release(region_);
+    region_ = nullptr;
+    return status;
   }
 
   ~TestBufferPool() {
@@ -172,7 +185,7 @@ static void InitializeTestResource(TestResource* resource, int* destroy_count) {
 
 class RemoteServerSessionHarness {
  public:
-  RemoteServerSessionHarness() {
+  iree_status_t Initialize() {
     topology_.axes = &queue_axis;
     topology_.current_epochs = &queue_epoch;
     topology_.axis_count = 1;
@@ -182,38 +195,64 @@ class RemoteServerSessionHarness {
     server.host_allocator = iree_allocator_system();
     server.local_topology = topology_;
     iree_slim_mutex_initialize(&server.session_mutex);
+    server_mutex_initialized_ = true;
 
     iree_net_queue_channel_callbacks_t callbacks = {};
     callbacks.on_command = UnusedOnCommand;
-    IREE_CHECK_OK(iree_net_queue_channel_create(
-        endpoint.as_endpoint(), IREE_NET_FRAME_SENDER_MAX_SPANS,
-        header_pool_.release(), callbacks, iree_allocator_system(),
-        &queue_channel));
-    IREE_CHECK_OK(iree_net_queue_channel_activate(queue_channel));
+    iree_status_t status =
+        header_pool_.Initialize(/*buffer_count=*/4, /*buffer_size=*/1024);
+    if (iree_status_is_ok(status)) {
+      status = iree_net_queue_channel_create(
+          endpoint.as_endpoint(), IREE_NET_FRAME_SENDER_MAX_SPANS,
+          header_pool_.release(), callbacks, iree_allocator_system(),
+          &queue_channel);
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_net_queue_channel_activate(queue_channel);
+    }
 
     session.server = &server;
     session.session = reinterpret_cast<iree_net_session_t*>(1);
     session.session_id = 1;
     session.queue_channel = queue_channel;
-    IREE_CHECK_OK(iree_hal_remote_resource_table_initialize(
-        /*capacity=*/16, iree_allocator_system(), &session.resource_table));
-    IREE_CHECK_OK(iree_net_sequence_window_initialize(
-        /*initial_observed_sequence=*/0, /*initial_capacity=*/16,
-        iree_allocator_system(), &session.observed_submission_window));
-    IREE_CHECK_OK(iree_net_sequence_window_initialize(
-        /*initial_observed_sequence=*/0, /*initial_capacity=*/16,
-        iree_allocator_system(), &session.completed_signal_window));
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_remote_resource_table_initialize(
+          /*capacity=*/16, iree_allocator_system(), &session.resource_table);
+      resource_table_initialized_ = iree_status_is_ok(status);
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_net_sequence_window_initialize(
+          /*initial_observed_sequence=*/0, /*initial_capacity=*/16,
+          iree_allocator_system(), &session.observed_submission_window);
+      observed_window_initialized_ = iree_status_is_ok(status);
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_net_sequence_window_initialize(
+          /*initial_observed_sequence=*/0, /*initial_capacity=*/16,
+          iree_allocator_system(), &session.completed_signal_window);
+      completed_window_initialized_ = iree_status_is_ok(status);
+    }
+    return status;
   }
 
   ~RemoteServerSessionHarness() {
     iree_hal_remote_server_session_deinitialize_provisionals(
         &session, iree_allocator_system());
-    iree_hal_remote_resource_table_deinitialize(&session.resource_table,
-                                                iree_allocator_system());
-    iree_net_sequence_window_deinitialize(&session.observed_submission_window);
-    iree_net_sequence_window_deinitialize(&session.completed_signal_window);
+    if (resource_table_initialized_) {
+      iree_hal_remote_resource_table_deinitialize(&session.resource_table,
+                                                  iree_allocator_system());
+    }
+    if (observed_window_initialized_) {
+      iree_net_sequence_window_deinitialize(
+          &session.observed_submission_window);
+    }
+    if (completed_window_initialized_) {
+      iree_net_sequence_window_deinitialize(&session.completed_signal_window);
+    }
     iree_net_queue_channel_release(queue_channel);
-    iree_slim_mutex_deinitialize(&server.session_mutex);
+    if (server_mutex_initialized_) {
+      iree_slim_mutex_deinitialize(&server.session_mutex);
+    }
   }
 
   iree_async_axis_t queue_axis = 0x0200;
@@ -225,7 +264,11 @@ class RemoteServerSessionHarness {
 
  private:
   iree_net_session_topology_t topology_ = {};
-  TestBufferPool header_pool_{/*buffer_count=*/4, /*buffer_size=*/1024};
+  TestBufferPool header_pool_;
+  bool server_mutex_initialized_ = false;
+  bool resource_table_initialized_ = false;
+  bool observed_window_initialized_ = false;
+  bool completed_window_initialized_ = false;
 };
 
 static iree_status_t AssignTestBufferResource(
@@ -321,6 +364,7 @@ static void SubmitResourceRelease(RemoteServerSessionHarness* harness,
 
 TEST(RemoteServerSessionTest, QueueCommandWithoutLeaseSignalsErrorAdvance) {
   RemoteServerSessionHarness harness;
+  IREE_ASSERT_OK(harness.Initialize());
   const iree_hal_remote_resource_id_t provisional_file_id =
       IREE_HAL_REMOTE_RESOURCE_ID_PROVISIONAL(
           IREE_HAL_REMOTE_RESOURCE_TYPE_FILE, 42);
@@ -353,6 +397,7 @@ TEST(RemoteServerSessionTest, QueueCommandWithoutLeaseSignalsErrorAdvance) {
 
 TEST(RemoteServerSessionTest, QueueUnsupportedOpSignalsErrorAdvance) {
   RemoteServerSessionHarness harness;
+  IREE_ASSERT_OK(harness.Initialize());
   iree_hal_remote_queue_op_header_t unsupported_op = {};
   unsupported_op.type = IREE_HAL_REMOTE_QUEUE_OP_QUEUE_EXTENSION;
 
@@ -379,6 +424,7 @@ TEST(RemoteServerSessionTest, QueueUnsupportedOpSignalsErrorAdvance) {
 
 TEST(RemoteServerSessionTest, QueueTruncatedPayloadSignalsErrorAdvance) {
   RemoteServerSessionHarness harness;
+  IREE_ASSERT_OK(harness.Initialize());
   uint32_t truncated_payload = 0;
 
   iree_async_single_frontier_t signal_frontier_storage;
@@ -404,6 +450,7 @@ TEST(RemoteServerSessionTest, QueueTruncatedPayloadSignalsErrorAdvance) {
 
 TEST(RemoteServerSessionTest, QueueCommandBeforeFailedFileOpenSignalsAdvance) {
   RemoteServerSessionHarness harness;
+  IREE_ASSERT_OK(harness.Initialize());
   const iree_hal_remote_resource_id_t provisional_file_id =
       IREE_HAL_REMOTE_RESOURCE_ID_PROVISIONAL(
           IREE_HAL_REMOTE_RESOURCE_TYPE_FILE, 42);
@@ -469,6 +516,7 @@ TEST(RemoteServerSessionTest, QueueCommandBeforeFailedFileOpenSignalsAdvance) {
 TEST(RemoteServerSessionTest,
      QueueCommandBeforeUnsupportedFileRegisterSignalsAdvance) {
   RemoteServerSessionHarness harness;
+  IREE_ASSERT_OK(harness.Initialize());
   const iree_hal_remote_resource_id_t provisional_file_id =
       IREE_HAL_REMOTE_RESOURCE_ID_PROVISIONAL(
           IREE_HAL_REMOTE_RESOURCE_TYPE_FILE, 42);
@@ -531,6 +579,7 @@ TEST(RemoteServerSessionTest,
 
 TEST(RemoteServerSessionTest, ResourceReleaseWaitsForObservedSubmissionEpoch) {
   RemoteServerSessionHarness harness;
+  IREE_ASSERT_OK(harness.Initialize());
   int destroy_count = 0;
   TestResource resource;
   InitializeTestResource(&resource, &destroy_count);
@@ -566,6 +615,7 @@ TEST(RemoteServerSessionTest, ResourceReleaseWaitsForObservedSubmissionEpoch) {
 TEST(RemoteServerSessionTest,
      ResourceReleaseWaitsForContiguousObservedSubmissionPrefix) {
   RemoteServerSessionHarness harness;
+  IREE_ASSERT_OK(harness.Initialize());
   int destroy_count = 0;
   TestResource resource;
   InitializeTestResource(&resource, &destroy_count);

@@ -6,15 +6,23 @@
 
 #include "iree/hal/remote/server/bulk_upload_receiver.h"
 
+#include <memory>
+
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/threading/numa.h"
 #include "iree/hal/drivers/local_task/registration/driver_module.h"
+#include "iree/hal/remote/server/bulk_session.h"
+#include "iree/hal/remote/server/bulk_test_util.h"
 #include "iree/hal/remote/server/server.h"
 #include "iree/hal/remote/server/session.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
 namespace {
+
+using iree::hal::remote::server::testing::MockCarrier;
+using iree::hal::remote::server::testing::MockEndpoint;
+using iree::hal::remote::server::testing::TestBufferPool;
 
 class BulkUploadReceiverTest : public ::testing::Test {
  protected:
@@ -81,12 +89,6 @@ static iree_async_buffer_lease_t MakeCountingLease(int* release_count) {
   lease.release.fn = CountLeaseRelease;
   lease.release.user_data = release_count;
   return lease;
-}
-
-static iree_status_t RecordCredit(void* user_data, uint32_t credit_delta) {
-  uint32_t* total_credit_delta = static_cast<uint32_t*>(user_data);
-  *total_credit_delta += credit_delta;
-  return iree_ok_status();
 }
 
 typedef struct failing_queue_read_device_t {
@@ -409,25 +411,44 @@ class BulkUploadReceiverSessionTest : public ::testing::Test {
 
     iree_atomic_ref_count_init(&server_.ref_count);
     server_.host_allocator = iree_allocator_system();
+    iree_slim_mutex_initialize(&server_.session_mutex);
     session_.server = &server_;
     session_.session_id = 1;
-    iree_slim_mutex_initialize(&session_.bulk_transfer_mutex);
+    session_.session = reinterpret_cast<iree_net_session_t*>(this);
+    iree_hal_remote_server_bulk_session_options_t bulk_options =
+        iree_hal_remote_server_bulk_session_options_default();
+    bulk_options.active_transfer_capacity = 1;
+    bulk_options.staging_slot_count = 1;
+    bulk_options.staging_slot_length = kChunkLength;
+    bulk_options.receive_chunk_capacity = 1;
+    IREE_ASSERT_OK(iree_hal_remote_server_bulk_session_allocate(
+        &session_, &bulk_options, iree_allocator_system(),
+        &session_.bulk_session));
 
-    IREE_ASSERT_OK(AllocateUploadScheduler(&session_.bulk_transfer_scheduler));
-    IREE_ASSERT_OK(AllocateReceiveWindow());
-    IREE_ASSERT_OK(AllocateStagingPool(/*slot_count=*/1));
+    carrier_ = MockCarrier::Create();
+    endpoint_.carrier = carrier_.get();
+    TestBufferPool buffer_pool;
+    IREE_ASSERT_OK(
+        buffer_pool.Initialize(/*buffer_count=*/16, /*buffer_size=*/1024));
+    IREE_ASSERT_OK(iree_net_bulk_channel_create(
+        endpoint_.as_endpoint(), nullptr, buffer_pool.release(),
+        iree_hal_remote_server_bulk_session_channel_callbacks(&session_),
+        iree_allocator_system(), &bulk_channel_));
+    IREE_ASSERT_OK(iree_net_bulk_channel_activate(bulk_channel_));
+    IREE_ASSERT_OK(iree_hal_remote_server_bulk_session_attach_channel(
+        &session_, bulk_channel_));
+    IREE_ASSERT_OK(
+        iree_hal_remote_server_bulk_session_flush_receive_window(&session_));
+    CompleteCapturedSends();
   }
 
   void TearDown() override {
-    iree_hal_remote_bulk_transfer_scheduler_free(
-        session_.bulk_transfer_scheduler);
-    session_.bulk_transfer_scheduler = nullptr;
-    iree_hal_remote_server_bulk_staging_pool_release(
-        session_.bulk_staging_pool);
-    session_.bulk_staging_pool = nullptr;
-    iree_net_bulk_receive_window_free(session_.bulk_receive_window);
-    session_.bulk_receive_window = nullptr;
-    iree_slim_mutex_deinitialize(&session_.bulk_transfer_mutex);
+    CompleteCapturedSends();
+    iree_hal_remote_server_bulk_session_free(session_.bulk_session);
+    session_.bulk_session = nullptr;
+    iree_net_bulk_channel_release(bulk_channel_);
+    bulk_channel_ = nullptr;
+    iree_slim_mutex_deinitialize(&server_.session_mutex);
     iree_hal_buffer_release(target_buffer_);
     iree_hal_device_release(device_);
     iree_hal_driver_release(driver_);
@@ -468,36 +489,6 @@ class BulkUploadReceiverSessionTest : public ::testing::Test {
         IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
     return iree_hal_allocator_allocate_buffer(allocator, params, kTotalLength,
                                               out_buffer);
-  }
-
-  iree_status_t AllocateReceiveWindow() {
-    iree_net_bulk_receive_window_options_t options =
-        iree_net_bulk_receive_window_options_default();
-    options.chunk_pool.capacity = 1;
-    iree_net_bulk_receive_window_callbacks_t callbacks = {};
-    callbacks.send_credit = RecordCredit;
-    callbacks.user_data = &total_credit_delta_;
-    iree_status_t status = iree_net_bulk_receive_window_allocate(
-        &options, callbacks, iree_allocator_system(),
-        &session_.bulk_receive_window);
-    if (iree_status_is_ok(status)) {
-      status = iree_net_bulk_receive_window_flush_credit(
-          session_.bulk_receive_window);
-    }
-    return status;
-  }
-
-  iree_status_t AllocateStagingPool(iree_host_size_t slot_count) {
-    iree_hal_remote_server_bulk_staging_pool_options_t options =
-        iree_hal_remote_server_bulk_staging_pool_options_default();
-    options.slot_count = slot_count;
-    options.slot_length = kChunkLength;
-    options.user_storage_size =
-        sizeof(iree_hal_remote_server_bulk_upload_staging_callback_t);
-    options.user_storage_alignment =
-        iree_alignof(iree_hal_remote_server_bulk_upload_staging_callback_t);
-    return iree_hal_remote_server_bulk_staging_pool_create(
-        &options, iree_allocator_system(), &session_.bulk_staging_pool);
   }
 
   iree_status_t StartUpload(iree_net_bulk_transfer_t** out_table_transfer) {
@@ -570,12 +561,23 @@ class BulkUploadReceiverSessionTest : public ::testing::Test {
         UnexpectedStagingCallback);
   }
 
+  void CompleteCapturedSends() {
+    if (!carrier_) return;
+    for (iree_host_size_t i = 0; i < carrier_->sends.size(); ++i) {
+      if (!carrier_->sends[i].completed) {
+        carrier_->CompleteSend(i, iree_ok_status());
+      }
+    }
+  }
+
   iree_hal_driver_t* driver_ = nullptr;
   iree_hal_device_t* device_ = nullptr;
   iree_hal_buffer_t* target_buffer_ = nullptr;
   iree_hal_remote_server_t server_ = {};
   iree_hal_remote_server_session_t session_ = {};
-  uint32_t total_credit_delta_ = 0;
+  std::unique_ptr<MockCarrier> carrier_;
+  MockEndpoint endpoint_;
+  iree_net_bulk_channel_t* bulk_channel_ = nullptr;
   int lease_release_count_ = 0;
   uint8_t payload_[kChunkLength] = {};
 };
@@ -584,48 +586,52 @@ TEST_F(BulkUploadReceiverSessionTest,
        StagingSlotExhaustionKeepsUploadChunkRetained) {
   iree_hal_remote_server_bulk_staging_slot_t* held_slot = nullptr;
   IREE_ASSERT_OK(iree_hal_remote_server_bulk_staging_pool_acquire(
-      session_.bulk_staging_pool, device_, &held_slot));
+      iree_hal_remote_server_bulk_session_staging_pool(&session_), device_,
+      &held_slot));
 
-  iree_slim_mutex_lock(&session_.bulk_transfer_mutex);
+  iree_slim_mutex_lock(iree_hal_remote_server_bulk_session_mutex(&session_));
   iree_net_bulk_transfer_t* table_transfer = nullptr;
   IREE_ASSERT_OK(StartUpload(&table_transfer));
   ASSERT_NE(table_transfer, nullptr);
   IREE_ASSERT_OK(AttachReadyCommand(table_transfer));
   iree_async_buffer_lease_t lease = MakeCountingLease(&lease_release_count_);
   IREE_ASSERT_OK(RecordData(IREE_NET_BULK_FRAME_FLAG_FINAL_CHUNK, &lease));
-  EXPECT_EQ(iree_net_bulk_receive_window_count(session_.bulk_receive_window),
+  EXPECT_EQ(iree_net_bulk_receive_window_count(
+                iree_hal_remote_server_bulk_session_receive_window(&session_)),
             1u);
   EXPECT_EQ(iree_hal_remote_server_bulk_staging_pool_count(
-                session_.bulk_staging_pool),
+                iree_hal_remote_server_bulk_session_staging_pool(&session_)),
             1u);
   EXPECT_EQ(lease.release.fn, nullptr);
   EXPECT_EQ(lease_release_count_, 0);
-  iree_slim_mutex_unlock(&session_.bulk_transfer_mutex);
+  iree_slim_mutex_unlock(iree_hal_remote_server_bulk_session_mutex(&session_));
 
   iree_hal_remote_server_bulk_staging_slot_release(held_slot,
                                                    /*last_signal_value=*/0);
   EXPECT_EQ(iree_hal_remote_server_bulk_staging_pool_count(
-                session_.bulk_staging_pool),
+                iree_hal_remote_server_bulk_session_staging_pool(&session_)),
             0u);
-  EXPECT_EQ(iree_net_bulk_receive_window_count(session_.bulk_receive_window),
+  EXPECT_EQ(iree_net_bulk_receive_window_count(
+                iree_hal_remote_server_bulk_session_receive_window(&session_)),
             1u);
 
-  iree_slim_mutex_lock(&session_.bulk_transfer_mutex);
+  iree_slim_mutex_lock(iree_hal_remote_server_bulk_session_mutex(&session_));
   table_transfer = iree_hal_remote_server_bulk_upload_lookup_locked(
       &session_, kTransferKind, kTransferId);
   ASSERT_NE(table_transfer, nullptr);
   iree_hal_remote_server_bulk_upload_fail_locked(
       &session_, table_transfer,
       iree_make_status(IREE_STATUS_CANCELLED, "test cleanup"));
-  iree_slim_mutex_unlock(&session_.bulk_transfer_mutex);
-  EXPECT_EQ(iree_net_bulk_receive_window_count(session_.bulk_receive_window),
+  iree_slim_mutex_unlock(iree_hal_remote_server_bulk_session_mutex(&session_));
+  EXPECT_EQ(iree_net_bulk_receive_window_count(
+                iree_hal_remote_server_bulk_session_receive_window(&session_)),
             0u);
   EXPECT_EQ(lease_release_count_, 1);
 }
 
 TEST_F(BulkUploadReceiverSessionTest,
        ControlResponseSendFailureReleasesTransfer) {
-  iree_slim_mutex_lock(&session_.bulk_transfer_mutex);
+  iree_slim_mutex_lock(iree_hal_remote_server_bulk_session_mutex(&session_));
   iree_net_bulk_transfer_t* table_transfer = nullptr;
   IREE_ASSERT_OK(StartUpload(&table_transfer));
   ASSERT_NE(table_transfer, nullptr);
@@ -646,10 +652,10 @@ TEST_F(BulkUploadReceiverSessionTest,
   session_.session = nullptr;
   iree_hal_remote_server_bulk_upload_try_finish_locked(&session_,
                                                        table_transfer);
-  iree_slim_mutex_unlock(&session_.bulk_transfer_mutex);
+  iree_slim_mutex_unlock(iree_hal_remote_server_bulk_session_mutex(&session_));
 
   EXPECT_EQ(iree_hal_remote_bulk_transfer_scheduler_count(
-                session_.bulk_transfer_scheduler),
+                iree_hal_remote_server_bulk_session_scheduler(&session_)),
             0u);
 }
 
@@ -670,7 +676,7 @@ TEST_F(BulkUploadReceiverSessionTest, QueueReadFailureFailsSignalSemaphore) {
       &signal_value,
   };
 
-  iree_slim_mutex_lock(&session_.bulk_transfer_mutex);
+  iree_slim_mutex_lock(iree_hal_remote_server_bulk_session_mutex(&session_));
   iree_net_bulk_transfer_t* table_transfer = nullptr;
   IREE_ASSERT_OK(StartUpload(&table_transfer));
   ASSERT_NE(table_transfer, nullptr);
@@ -678,15 +684,16 @@ TEST_F(BulkUploadReceiverSessionTest, QueueReadFailureFailsSignalSemaphore) {
       AttachReadyCommand(table_transfer, failing_device, signal_list));
   iree_async_buffer_lease_t lease = MakeCountingLease(&lease_release_count_);
   IREE_ASSERT_OK(RecordData(IREE_NET_BULK_FRAME_FLAG_FINAL_CHUNK, &lease));
-  iree_slim_mutex_unlock(&session_.bulk_transfer_mutex);
+  iree_slim_mutex_unlock(iree_hal_remote_server_bulk_session_mutex(&session_));
 
   EXPECT_EQ(iree_hal_remote_bulk_transfer_scheduler_count(
-                session_.bulk_transfer_scheduler),
+                iree_hal_remote_server_bulk_session_scheduler(&session_)),
             0u);
   EXPECT_EQ(iree_hal_remote_server_bulk_staging_pool_count(
-                session_.bulk_staging_pool),
+                iree_hal_remote_server_bulk_session_staging_pool(&session_)),
             0u);
-  EXPECT_EQ(iree_net_bulk_receive_window_count(session_.bulk_receive_window),
+  EXPECT_EQ(iree_net_bulk_receive_window_count(
+                iree_hal_remote_server_bulk_session_receive_window(&session_)),
             0u);
   EXPECT_EQ(lease.release.fn, nullptr);
   EXPECT_EQ(lease_release_count_, 1);
@@ -701,13 +708,14 @@ TEST_F(BulkUploadReceiverSessionTest, QueueReadFailureFailsSignalSemaphore) {
 }
 
 TEST_F(BulkUploadReceiverSessionTest, PeerAbortReleasesRetainedChunks) {
-  iree_slim_mutex_lock(&session_.bulk_transfer_mutex);
+  iree_slim_mutex_lock(iree_hal_remote_server_bulk_session_mutex(&session_));
   iree_net_bulk_transfer_t* table_transfer = nullptr;
   IREE_ASSERT_OK(StartUpload(&table_transfer));
   ASSERT_NE(table_transfer, nullptr);
   iree_async_buffer_lease_t lease = MakeCountingLease(&lease_release_count_);
   IREE_ASSERT_OK(RecordData(IREE_NET_BULK_FRAME_FLAG_FINAL_CHUNK, &lease));
-  EXPECT_EQ(iree_net_bulk_receive_window_count(session_.bulk_receive_window),
+  EXPECT_EQ(iree_net_bulk_receive_window_count(
+                iree_hal_remote_server_bulk_session_receive_window(&session_)),
             1u);
   EXPECT_EQ(lease.release.fn, nullptr);
   EXPECT_EQ(lease_release_count_, 0);
@@ -716,12 +724,13 @@ TEST_F(BulkUploadReceiverSessionTest, PeerAbortReleasesRetainedChunks) {
       &session_, table_transfer,
       iree_make_status(IREE_STATUS_ABORTED,
                        "remote client aborted bulk transfer"));
-  iree_slim_mutex_unlock(&session_.bulk_transfer_mutex);
+  iree_slim_mutex_unlock(iree_hal_remote_server_bulk_session_mutex(&session_));
 
   EXPECT_EQ(iree_hal_remote_bulk_transfer_scheduler_count(
-                session_.bulk_transfer_scheduler),
+                iree_hal_remote_server_bulk_session_scheduler(&session_)),
             0u);
-  EXPECT_EQ(iree_net_bulk_receive_window_count(session_.bulk_receive_window),
+  EXPECT_EQ(iree_net_bulk_receive_window_count(
+                iree_hal_remote_server_bulk_session_receive_window(&session_)),
             0u);
   EXPECT_EQ(lease_release_count_, 1);
 }

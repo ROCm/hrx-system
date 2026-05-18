@@ -8,6 +8,7 @@
 
 #include "iree/hal/remote/protocol/profile.h"
 #include "iree/hal/remote/server/bulk.h"
+#include "iree/hal/remote/server/bulk_session.h"
 #include "iree/hal/remote/server/profile_relay.h"
 #include "iree/hal/remote/server/server.h"
 #include "iree/hal/remote/server/session.h"
@@ -68,17 +69,22 @@ void iree_hal_remote_server_profile_pending_transfer_free_list(
 
 bool iree_hal_remote_server_profile_has_pending_transfers_locked(
     const iree_hal_remote_server_session_t* session_slot) {
-  return session_slot->profile_relay.pending_transfer_head != NULL ||
-         session_slot->profile_relay.pending_transfer_tail != NULL;
+  return iree_hal_remote_server_bulk_session_profile_relay(session_slot)
+                 ->pending_transfer_head != NULL ||
+         iree_hal_remote_server_bulk_session_profile_relay(session_slot)
+                 ->pending_transfer_tail != NULL;
 }
 
 iree_hal_remote_server_profile_pending_transfer_t*
 iree_hal_remote_server_profile_take_pending_transfers_locked(
     iree_hal_remote_server_session_t* session_slot) {
   iree_hal_remote_server_profile_pending_transfer_t* pending_transfers =
-      session_slot->profile_relay.pending_transfer_head;
-  session_slot->profile_relay.pending_transfer_head = NULL;
-  session_slot->profile_relay.pending_transfer_tail = NULL;
+      iree_hal_remote_server_bulk_session_profile_relay(session_slot)
+          ->pending_transfer_head;
+  iree_hal_remote_server_bulk_session_profile_relay(session_slot)
+      ->pending_transfer_head = NULL;
+  iree_hal_remote_server_bulk_session_profile_relay(session_slot)
+      ->pending_transfer_tail = NULL;
   return pending_transfers;
 }
 
@@ -99,7 +105,8 @@ static void iree_hal_remote_server_profile_transfer_try_finish_locked(
             transfer->flags,
             IREE_HAL_REMOTE_SERVER_PROFILE_TRANSFER_FLAG_SEND_PENDING)) {
       iree_hal_remote_server_profile_release_transfer(
-          session_slot->bulk_transfer_scheduler, table_transfer);
+          iree_hal_remote_server_bulk_session_scheduler(session_slot),
+          table_transfer);
     }
     return;
   }
@@ -111,7 +118,8 @@ static void iree_hal_remote_server_profile_transfer_try_finish_locked(
           transfer->flags,
           IREE_HAL_REMOTE_SERVER_PROFILE_TRANSFER_FLAG_SEND_PENDING)) {
     iree_hal_remote_server_profile_release_transfer(
-        session_slot->bulk_transfer_scheduler, table_transfer);
+        iree_hal_remote_server_bulk_session_scheduler(session_slot),
+        table_transfer);
   }
 }
 
@@ -250,13 +258,16 @@ iree_hal_remote_server_profile_pending_transfer_enqueue_locked(
     pending_transfer->sequence = sequence;
     pending_transfer->payload = *payload;
     *payload = iree_byte_span_empty();
-    if (session_slot->profile_relay.pending_transfer_tail) {
-      session_slot->profile_relay.pending_transfer_tail->next =
-          pending_transfer;
+    if (iree_hal_remote_server_bulk_session_profile_relay(session_slot)
+            ->pending_transfer_tail) {
+      iree_hal_remote_server_bulk_session_profile_relay(session_slot)
+          ->pending_transfer_tail->next = pending_transfer;
     } else {
-      session_slot->profile_relay.pending_transfer_head = pending_transfer;
+      iree_hal_remote_server_bulk_session_profile_relay(session_slot)
+          ->pending_transfer_head = pending_transfer;
     }
-    session_slot->profile_relay.pending_transfer_tail = pending_transfer;
+    iree_hal_remote_server_bulk_session_profile_relay(session_slot)
+        ->pending_transfer_tail = pending_transfer;
   }
   return status;
 }
@@ -268,19 +279,20 @@ static iree_status_t iree_hal_remote_server_profile_transfer_activate_locked(
     bool* out_table_full) {
   *out_table_full = false;
   iree_status_t status = iree_ok_status();
-  if (!session_slot->bulk_transfer_scheduler) {
+  if (!iree_hal_remote_server_bulk_session_scheduler(session_slot)) {
     status = iree_status_from_code(IREE_STATUS_ABORTED);
   } else if (iree_hal_remote_bulk_transfer_scheduler_count(
-                 session_slot->bulk_transfer_scheduler) >=
+                 iree_hal_remote_server_bulk_session_scheduler(session_slot)) >=
              iree_hal_remote_bulk_transfer_scheduler_capacity(
-                 session_slot->bulk_transfer_scheduler)) {
+                 iree_hal_remote_server_bulk_session_scheduler(session_slot))) {
     *out_table_full = true;
   }
 
   iree_net_bulk_transfer_t* table_transfer = NULL;
   if (iree_status_is_ok(status) && !*out_table_full) {
     status = iree_hal_remote_bulk_transfer_scheduler_allocate_local(
-        session_slot->bulk_transfer_scheduler, payload->data_length,
+        iree_hal_remote_server_bulk_session_scheduler(session_slot),
+        payload->data_length,
         /*user_value=*/IREE_HAL_REMOTE_SERVER_BULK_TRANSFER_KIND_PROFILE_SEND,
         &table_transfer);
   }
@@ -307,10 +319,13 @@ iree_hal_remote_server_profile_pending_transfer_try_drain_locked(
     iree_net_bulk_channel_t* bulk_channel, uint64_t* out_failed_sequence) {
   *out_failed_sequence = 0;
   iree_status_t status = iree_ok_status();
-  while (session_slot->bulk_transfer_scheduler && iree_status_is_ok(status) &&
-         session_slot->profile_relay.pending_transfer_head) {
+  while (iree_hal_remote_server_bulk_session_scheduler(session_slot) &&
+         iree_status_is_ok(status) &&
+         iree_hal_remote_server_bulk_session_profile_relay(session_slot)
+             ->pending_transfer_head) {
     iree_hal_remote_server_profile_pending_transfer_t* pending_transfer =
-        session_slot->profile_relay.pending_transfer_head;
+        iree_hal_remote_server_bulk_session_profile_relay(session_slot)
+            ->pending_transfer_head;
     iree_byte_span_t payload = pending_transfer->payload;
     bool table_full = false;
     status = iree_hal_remote_server_profile_transfer_activate_locked(
@@ -318,9 +333,12 @@ iree_hal_remote_server_profile_pending_transfer_try_drain_locked(
         pending_transfer->sequence, &payload, &table_full);
     if (table_full) break;
 
-    session_slot->profile_relay.pending_transfer_head = pending_transfer->next;
-    if (!session_slot->profile_relay.pending_transfer_head) {
-      session_slot->profile_relay.pending_transfer_tail = NULL;
+    iree_hal_remote_server_bulk_session_profile_relay(session_slot)
+        ->pending_transfer_head = pending_transfer->next;
+    if (!iree_hal_remote_server_bulk_session_profile_relay(session_slot)
+             ->pending_transfer_head) {
+      iree_hal_remote_server_bulk_session_profile_relay(session_slot)
+          ->pending_transfer_tail = NULL;
     }
     pending_transfer->next = NULL;
     pending_transfer->payload = payload;
@@ -340,11 +358,13 @@ iree_status_t iree_hal_remote_server_profile_pending_transfer_drain(
   while (iree_status_is_ok(status)) {
     uint64_t failed_sequence = 0;
     iree_status_t drain_status = iree_ok_status();
-    iree_slim_mutex_lock(&session_slot->bulk_transfer_mutex);
+    iree_slim_mutex_lock(
+        iree_hal_remote_server_bulk_session_mutex(session_slot));
     drain_status =
         iree_hal_remote_server_profile_pending_transfer_try_drain_locked(
             session_slot, bulk_channel, &failed_sequence);
-    iree_slim_mutex_unlock(&session_slot->bulk_transfer_mutex);
+    iree_slim_mutex_unlock(
+        iree_hal_remote_server_bulk_session_mutex(session_slot));
     if (iree_status_is_ok(drain_status)) break;
     if (failed_sequence == returned_sequence) {
       status = drain_status;
@@ -382,21 +402,24 @@ iree_status_t iree_hal_remote_server_profile_try_send_all_locked(
     iree_hal_remote_server_session_t* session_slot,
     iree_net_bulk_channel_t* bulk_channel, uint64_t* out_failed_sequence) {
   *out_failed_sequence = 0;
-  if (!session_slot->bulk_transfer_scheduler) return iree_ok_status();
+  if (!iree_hal_remote_server_bulk_session_scheduler(session_slot))
+    return iree_ok_status();
   uint64_t transfer_ids[IREE_HAL_REMOTE_BULK_ACTIVE_TRANSFER_CAPACITY];
   iree_host_size_t transfer_count = 0;
   bool all_ids_collected =
       iree_hal_remote_bulk_transfer_scheduler_collect_transfer_ids(
-          session_slot->bulk_transfer_scheduler,
+          iree_hal_remote_server_bulk_session_scheduler(session_slot),
           iree_hal_remote_server_select_ready_profile_transfer, NULL,
           transfer_ids, IREE_ARRAYSIZE(transfer_ids), &transfer_count);
   IREE_ASSERT(all_ids_collected);
   (void)all_ids_collected;
   for (iree_host_size_t i = 0; i < transfer_count; ++i) {
-    if (!session_slot->bulk_transfer_scheduler) return iree_ok_status();
+    if (!iree_hal_remote_server_bulk_session_scheduler(session_slot))
+      return iree_ok_status();
     iree_net_bulk_transfer_t* table_transfer =
         iree_hal_remote_bulk_transfer_scheduler_lookup(
-            session_slot->bulk_transfer_scheduler, transfer_ids[i]);
+            iree_hal_remote_server_bulk_session_scheduler(session_slot),
+            transfer_ids[i]);
     if (table_transfer) {
       iree_hal_remote_server_profile_transfer_t* transfer =
           iree_hal_remote_server_profile_transfer_storage(table_transfer);
@@ -442,17 +465,20 @@ iree_status_t iree_hal_remote_server_profile_on_send_complete(
   bool drain_profile_pending = false;
   uint64_t profile_sequence = 0;
 
-  iree_slim_mutex_lock(&session_slot->bulk_transfer_mutex);
-  if (!session_slot->bulk_transfer_scheduler) {
-    iree_slim_mutex_unlock(&session_slot->bulk_transfer_mutex);
+  iree_slim_mutex_lock(iree_hal_remote_server_bulk_session_mutex(session_slot));
+  if (!iree_hal_remote_server_bulk_session_scheduler(session_slot)) {
+    iree_slim_mutex_unlock(
+        iree_hal_remote_server_bulk_session_mutex(session_slot));
     iree_status_free(status);
     return iree_ok_status();
   }
   iree_net_bulk_transfer_t* table_transfer =
       iree_hal_remote_bulk_transfer_scheduler_lookup(
-          session_slot->bulk_transfer_scheduler, transfer_id);
+          iree_hal_remote_server_bulk_session_scheduler(session_slot),
+          transfer_id);
   if (!table_transfer) {
-    iree_slim_mutex_unlock(&session_slot->bulk_transfer_mutex);
+    iree_slim_mutex_unlock(
+        iree_hal_remote_server_bulk_session_mutex(session_slot));
     iree_status_free(status);
     return iree_ok_status();
   }
@@ -469,9 +495,12 @@ iree_status_t iree_hal_remote_server_profile_on_send_complete(
                                                                 table_transfer);
     } else {
       send_status = iree_hal_remote_server_profile_transfer_try_send_locked(
-          session_slot, session_slot->bulk_channel, table_transfer);
+          session_slot,
+          iree_hal_remote_server_bulk_session_channel(session_slot),
+          table_transfer);
       table_transfer = iree_hal_remote_bulk_transfer_scheduler_lookup(
-          session_slot->bulk_transfer_scheduler, transfer_id);
+          iree_hal_remote_server_bulk_session_scheduler(session_slot),
+          transfer_id);
       if (table_transfer) {
         iree_hal_remote_server_profile_transfer_try_finish_locked(
             session_slot, table_transfer);
@@ -480,7 +509,8 @@ iree_status_t iree_hal_remote_server_profile_on_send_complete(
     drain_profile_pending =
         iree_hal_remote_server_profile_has_pending_transfers_locked(
             session_slot);
-    iree_slim_mutex_unlock(&session_slot->bulk_transfer_mutex);
+    iree_slim_mutex_unlock(
+        iree_hal_remote_server_bulk_session_mutex(session_slot));
     iree_status_free(status);
     if (!iree_status_is_ok(send_status)) {
       result_status = iree_hal_remote_server_profile_relay_observe_transfer(
@@ -492,14 +522,16 @@ iree_status_t iree_hal_remote_server_profile_on_send_complete(
     drain_profile_pending =
         iree_hal_remote_server_profile_has_pending_transfers_locked(
             session_slot);
-    iree_slim_mutex_unlock(&session_slot->bulk_transfer_mutex);
+    iree_slim_mutex_unlock(
+        iree_hal_remote_server_bulk_session_mutex(session_slot));
     result_status = iree_hal_remote_server_profile_relay_observe_transfer(
         session_slot, profile_sequence, status);
   }
 
   if (iree_status_is_ok(result_status) && drain_profile_pending) {
     result_status = iree_hal_remote_server_profile_pending_transfer_drain(
-        session_slot, session_slot->bulk_channel, /*returned_sequence=*/0);
+        session_slot, iree_hal_remote_server_bulk_session_channel(session_slot),
+        /*returned_sequence=*/0);
   }
   return result_status;
 }
@@ -533,12 +565,14 @@ iree_status_t iree_hal_remote_server_profile_submit_transfer(
   if (iree_status_is_ok(status)) {
     bool session_active = false;
     iree_slim_mutex_lock(&server->session_mutex);
-    session_active = session_slot->session_id == session_id &&
-                     session_slot->session != NULL &&
-                     session_slot->bulk_channel != NULL &&
-                     session_slot->profile_relay.active_sink == profile_sink;
+    session_active =
+        session_slot->session_id == session_id &&
+        session_slot->session != NULL &&
+        iree_hal_remote_server_bulk_session_channel(session_slot) != NULL &&
+        iree_hal_remote_server_bulk_session_profile_relay(session_slot)
+                ->active_sink == profile_sink;
     if (session_active) {
-      bulk_channel = session_slot->bulk_channel;
+      bulk_channel = iree_hal_remote_server_bulk_session_channel(session_slot);
       iree_net_bulk_channel_retain(bulk_channel);
     }
     iree_slim_mutex_unlock(&server->session_mutex);
@@ -549,12 +583,14 @@ iree_status_t iree_hal_remote_server_profile_submit_transfer(
 
   bool drain_profile_pending = false;
   if (iree_status_is_ok(status)) {
-    iree_slim_mutex_lock(&session_slot->bulk_transfer_mutex);
-    if (!session_slot->bulk_transfer_scheduler) {
+    iree_slim_mutex_lock(
+        iree_hal_remote_server_bulk_session_mutex(session_slot));
+    if (!iree_hal_remote_server_bulk_session_scheduler(session_slot)) {
       status = iree_status_from_code(IREE_STATUS_ABORTED);
     }
     if (iree_status_is_ok(status)) {
-      if (session_slot->profile_relay.pending_transfer_head) {
+      if (iree_hal_remote_server_bulk_session_profile_relay(session_slot)
+              ->pending_transfer_head) {
         status = iree_hal_remote_server_profile_pending_transfer_enqueue_locked(
             session_slot, session_id, profile_sequence, &payload);
         drain_profile_pending = iree_status_is_ok(status);
@@ -571,7 +607,8 @@ iree_status_t iree_hal_remote_server_profile_submit_transfer(
         }
       }
     }
-    iree_slim_mutex_unlock(&session_slot->bulk_transfer_mutex);
+    iree_slim_mutex_unlock(
+        iree_hal_remote_server_bulk_session_mutex(session_slot));
   }
   if (iree_status_is_ok(status) && drain_profile_pending) {
     status = iree_hal_remote_server_profile_pending_transfer_drain(

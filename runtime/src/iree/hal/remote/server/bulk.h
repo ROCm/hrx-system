@@ -43,15 +43,6 @@ typedef enum iree_hal_remote_server_bulk_transfer_kind_e {
 } iree_hal_remote_server_bulk_transfer_kind_e;
 typedef uint8_t iree_hal_remote_server_bulk_transfer_kind_t;
 
-// Initializes bounded bulk transfer state for a session slot.
-iree_status_t iree_hal_remote_server_session_initialize_bulk_transfers(
-    iree_hal_remote_server_session_t* session_slot,
-    iree_allocator_t host_allocator);
-
-// Deinitializes bounded bulk transfer state for a session slot.
-void iree_hal_remote_server_session_deinitialize_bulk_transfers(
-    iree_hal_remote_server_session_t* session_slot);
-
 // Submits a CLIENT_FILE_READ command once bulk DATA has uploaded the file.
 iree_status_t iree_hal_remote_server_bulk_submit_client_file_read(
     iree_hal_remote_server_session_t* session_slot,
@@ -76,10 +67,6 @@ iree_status_t iree_hal_remote_server_bulk_submit_client_file_write(
     iree_hal_semaphore_list_t signal_list, uint64_t transfer_id,
     iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
     iree_device_size_t length, iree_hal_write_flags_t flags);
-
-// Flushes any unadvertised local receive capacity to the peer.
-iree_status_t iree_hal_remote_server_bulk_flush_receive_window(
-    iree_hal_remote_server_session_t* session_slot);
 
 // Handles a peer START frame.
 iree_status_t iree_hal_remote_server_bulk_on_start(

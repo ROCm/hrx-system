@@ -13,6 +13,7 @@
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/threading/numa.h"
 #include "iree/hal/drivers/local_task/registration/driver_module.h"
+#include "iree/hal/remote/server/bulk_session.h"
 #include "iree/hal/remote/server/server.h"
 #include "iree/hal/remote/server/session.h"
 #include "iree/net/carrier.h"
@@ -26,13 +27,25 @@ namespace {
 
 class TestBufferPool {
  public:
-  TestBufferPool(iree_host_size_t buffer_count, iree_host_size_t buffer_size) {
-    iree_host_size_t total_size = buffer_count * buffer_size;
+  TestBufferPool() = default;
+
+  iree_status_t Initialize(iree_host_size_t buffer_count,
+                           iree_host_size_t buffer_size) {
+    iree_host_size_t total_size = 0;
+    if (!iree_host_size_checked_mul(buffer_count, buffer_size, &total_size)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "test buffer pool size overflow");
+    }
     void* memory = malloc(total_size);
+    if (!memory) return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
     memset(memory, 0, total_size);
 
     region_ =
         static_cast<iree_async_region_t*>(malloc(sizeof(iree_async_region_t)));
+    if (!region_) {
+      free(memory);
+      return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
+    }
     memset(region_, 0, sizeof(*region_));
     iree_atomic_ref_count_init(&region_->ref_count);
     region_->destroy_fn = DestroyRegion;
@@ -43,8 +56,9 @@ class TestBufferPool {
 
     iree_status_t status = iree_async_buffer_pool_allocate(
         region_, iree_allocator_system(), &pool_);
-    IREE_CHECK_OK(status);
     iree_async_region_release(region_);
+    region_ = nullptr;
+    return status;
   }
 
   ~TestBufferPool() {
@@ -348,28 +362,6 @@ static iree_net_bulk_frame_header_t ParseBulkHeader(
   return header;
 }
 
-static void DeinitializeDownloadTransfer(void* user_data,
-                                         iree_net_bulk_transfer_t* transfer) {
-  (void)user_data;
-  iree_hal_remote_server_bulk_download_transfer_deinitialize(
-      iree_hal_remote_server_bulk_download_transfer_storage(transfer));
-}
-
-static iree_status_t AllocateDownloadScheduler(
-    iree_hal_remote_bulk_transfer_scheduler_t** out_scheduler) {
-  iree_hal_remote_bulk_transfer_scheduler_options_t options =
-      iree_hal_remote_bulk_transfer_scheduler_options_default();
-  options.capacity = 4;
-  options.user_storage_size =
-      sizeof(iree_hal_remote_server_bulk_download_transfer_t);
-  options.user_storage_alignment =
-      iree_alignof(iree_hal_remote_server_bulk_download_transfer_t);
-  iree_hal_remote_bulk_transfer_scheduler_callbacks_t callbacks = {};
-  callbacks.deinitialize = DeinitializeDownloadTransfer;
-  return iree_hal_remote_bulk_transfer_scheduler_allocate(
-      &options, callbacks, iree_allocator_system(), out_scheduler);
-}
-
 static iree_status_t RegisterLocalTaskDriver() {
   iree_status_t status = iree_hal_local_task_driver_module_register(
       iree_hal_driver_registry_default());
@@ -543,34 +535,39 @@ class BulkDownloadSenderTest : public ::testing::Test {
 
     iree_atomic_ref_count_init(&server_.ref_count);
     server_.host_allocator = iree_allocator_system();
+    iree_slim_mutex_initialize(&server_.session_mutex);
     session_.server = &server_;
     session_.session_id = 1;
-    iree_slim_mutex_initialize(&session_.bulk_transfer_mutex);
-    IREE_ASSERT_OK(
-        AllocateDownloadScheduler(&session_.bulk_transfer_scheduler));
+    session_.session = reinterpret_cast<iree_net_session_t*>(this);
+    iree_hal_remote_server_bulk_session_options_t bulk_options =
+        iree_hal_remote_server_bulk_session_options_default();
+    bulk_options.active_transfer_capacity = 4;
+    bulk_options.staging_slot_count = 1;
+    bulk_options.staging_slot_length = 4;
+    IREE_ASSERT_OK(iree_hal_remote_server_bulk_session_allocate(
+        &session_, &bulk_options, iree_allocator_system(),
+        &session_.bulk_session));
 
     carrier_ = MockCarrier::Create();
     endpoint_.carrier = carrier_.get();
+    TestBufferPool buffer_pool;
+    IREE_ASSERT_OK(
+        buffer_pool.Initialize(/*buffer_count=*/16, /*buffer_size=*/1024));
     IREE_ASSERT_OK(iree_net_bulk_channel_create(
-        endpoint_.as_endpoint(), nullptr,
-        TestBufferPool(/*buffer_count=*/16, /*buffer_size=*/1024).release(),
+        endpoint_.as_endpoint(), nullptr, buffer_pool.release(),
         channel_callbacks_.MakeCallbacks(), iree_allocator_system(),
         &bulk_channel_));
     IREE_ASSERT_OK(iree_net_bulk_channel_activate(bulk_channel_));
-    session_.bulk_channel = bulk_channel_;
+    IREE_ASSERT_OK(iree_hal_remote_server_bulk_session_attach_channel(
+        &session_, bulk_channel_));
   }
 
   void TearDown() override {
-    session_.bulk_channel = nullptr;
+    iree_hal_remote_server_bulk_session_free(session_.bulk_session);
+    session_.bulk_session = nullptr;
     iree_net_bulk_channel_release(bulk_channel_);
     bulk_channel_ = nullptr;
-    iree_hal_remote_server_bulk_staging_pool_release(
-        session_.bulk_staging_pool);
-    session_.bulk_staging_pool = nullptr;
-    iree_hal_remote_bulk_transfer_scheduler_free(
-        session_.bulk_transfer_scheduler);
-    session_.bulk_transfer_scheduler = nullptr;
-    iree_slim_mutex_deinitialize(&session_.bulk_transfer_mutex);
+    iree_slim_mutex_deinitialize(&server_.session_mutex);
     iree_hal_device_release(device_);
     iree_hal_driver_release(driver_);
   }
@@ -599,16 +596,6 @@ class BulkDownloadSenderTest : public ::testing::Test {
     return status;
   }
 
-  iree_status_t AllocateStagingPool(iree_host_size_t slot_count,
-                                    iree_host_size_t slot_length) {
-    iree_hal_remote_server_bulk_staging_pool_options_t options =
-        iree_hal_remote_server_bulk_staging_pool_options_default();
-    options.slot_count = slot_count;
-    options.slot_length = slot_length;
-    return iree_hal_remote_server_bulk_staging_pool_create(
-        &options, iree_allocator_system(), &session_.bulk_staging_pool);
-  }
-
   iree_status_t AllocateSourceBuffer(iree_device_size_t length,
                                      iree_hal_buffer_t** out_buffer) {
     iree_hal_allocator_t* allocator = iree_hal_device_allocator(device_);
@@ -626,8 +613,8 @@ class BulkDownloadSenderTest : public ::testing::Test {
     *out_table_transfer = nullptr;
     iree_net_bulk_transfer_t* table_transfer = nullptr;
     iree_status_t status = iree_hal_remote_bulk_transfer_scheduler_insert_peer(
-        session_.bulk_transfer_scheduler, kTransferId, total_length,
-        kTransferKind, &table_transfer);
+        iree_hal_remote_server_bulk_session_scheduler(&session_), kTransferId,
+        total_length, kTransferKind, &table_transfer);
     if (iree_status_is_ok(status)) {
       iree_hal_remote_server_bulk_download_transfer_t* transfer =
           iree_hal_remote_server_bulk_download_transfer_storage(table_transfer);
@@ -709,10 +696,10 @@ TEST_F(BulkDownloadSenderTest, CreditExhaustionKeepsDataReady) {
   PrepareStagedData(table_transfer, /*staging_offset=*/0,
                     /*staging_length=*/4, /*next_staging_offset=*/4);
 
-  iree_slim_mutex_lock(&session_.bulk_transfer_mutex);
+  iree_slim_mutex_lock(iree_hal_remote_server_bulk_session_mutex(&session_));
   iree_hal_remote_server_bulk_download_try_send_locked(&session_, bulk_channel_,
                                                        table_transfer);
-  iree_slim_mutex_unlock(&session_.bulk_transfer_mutex);
+  iree_slim_mutex_unlock(iree_hal_remote_server_bulk_session_mutex(&session_));
 
   EXPECT_TRUE(carrier_->sends.empty());
   iree_hal_remote_server_bulk_download_transfer_t* transfer =
@@ -730,10 +717,10 @@ TEST_F(BulkDownloadSenderTest, CreditAllowsFinalDataSend) {
   PrepareStagedData(table_transfer, /*staging_offset=*/0,
                     /*staging_length=*/4, /*next_staging_offset=*/4);
 
-  iree_slim_mutex_lock(&session_.bulk_transfer_mutex);
+  iree_slim_mutex_lock(iree_hal_remote_server_bulk_session_mutex(&session_));
   iree_hal_remote_server_bulk_download_try_send_locked(&session_, bulk_channel_,
                                                        table_transfer);
-  iree_slim_mutex_unlock(&session_.bulk_transfer_mutex);
+  iree_slim_mutex_unlock(iree_hal_remote_server_bulk_session_mutex(&session_));
 
   ASSERT_EQ(carrier_->sends.size(), 1u);
   iree_net_bulk_frame_header_t header =
@@ -757,10 +744,10 @@ TEST_F(BulkDownloadSenderTest, CreditAllowsNonFinalDataSend) {
   PrepareStagedData(table_transfer, /*staging_offset=*/0,
                     /*staging_length=*/2, /*next_staging_offset=*/2);
 
-  iree_slim_mutex_lock(&session_.bulk_transfer_mutex);
+  iree_slim_mutex_lock(iree_hal_remote_server_bulk_session_mutex(&session_));
   iree_hal_remote_server_bulk_download_try_send_locked(&session_, bulk_channel_,
                                                        table_transfer);
-  iree_slim_mutex_unlock(&session_.bulk_transfer_mutex);
+  iree_slim_mutex_unlock(iree_hal_remote_server_bulk_session_mutex(&session_));
 
   ASSERT_EQ(carrier_->sends.size(), 1u);
   iree_net_bulk_frame_header_t header =
@@ -778,19 +765,17 @@ TEST_F(BulkDownloadSenderTest, PermanentSendFailureReleasesTransfer) {
                     /*staging_length=*/4, /*next_staging_offset=*/4);
   carrier_->next_send_error = IREE_STATUS_INTERNAL;
 
-  iree_slim_mutex_lock(&session_.bulk_transfer_mutex);
+  iree_slim_mutex_lock(iree_hal_remote_server_bulk_session_mutex(&session_));
   iree_hal_remote_server_bulk_download_try_send_locked(&session_, bulk_channel_,
                                                        table_transfer);
-  iree_slim_mutex_unlock(&session_.bulk_transfer_mutex);
+  iree_slim_mutex_unlock(iree_hal_remote_server_bulk_session_mutex(&session_));
 
   EXPECT_EQ(iree_hal_remote_bulk_transfer_scheduler_count(
-                session_.bulk_transfer_scheduler),
+                iree_hal_remote_server_bulk_session_scheduler(&session_)),
             0u);
 }
 
 TEST_F(BulkDownloadSenderTest, QueueWriteFailureFailsSignalAndReleasesSlot) {
-  IREE_ASSERT_OK(AllocateStagingPool(/*slot_count=*/1, /*slot_length=*/4));
-
   iree_hal_buffer_t* source_buffer = nullptr;
   IREE_ASSERT_OK(AllocateSourceBuffer(/*length=*/4, &source_buffer));
 
@@ -810,7 +795,7 @@ TEST_F(BulkDownloadSenderTest, QueueWriteFailureFailsSignalAndReleasesSlot) {
       &signal_value,
   };
 
-  iree_slim_mutex_lock(&session_.bulk_transfer_mutex);
+  iree_slim_mutex_lock(iree_hal_remote_server_bulk_session_mutex(&session_));
   IREE_ASSERT_OK(iree_hal_remote_server_bulk_download_submit_locked(
       &session_, bulk_channel_, kTransferKind, session_.session_id,
       failing_device, iree_hal_semaphore_list_empty(), signal_list, kTransferId,
@@ -818,20 +803,21 @@ TEST_F(BulkDownloadSenderTest, QueueWriteFailureFailsSignalAndReleasesSlot) {
       IREE_HAL_WRITE_FLAG_NONE, UnusedReadyCallback));
   iree_net_bulk_transfer_t* table_transfer =
       iree_hal_remote_bulk_transfer_scheduler_lookup(
-          session_.bulk_transfer_scheduler, kTransferId);
+          iree_hal_remote_server_bulk_session_scheduler(&session_),
+          kTransferId);
   ASSERT_NE(table_transfer, nullptr);
   EXPECT_EQ(iree_hal_remote_server_bulk_staging_pool_count(
-                session_.bulk_staging_pool),
+                iree_hal_remote_server_bulk_session_staging_pool(&session_)),
             1u);
   iree_hal_remote_server_bulk_download_on_send_complete_locked(
       &session_, bulk_channel_, table_transfer, iree_ok_status());
-  iree_slim_mutex_unlock(&session_.bulk_transfer_mutex);
+  iree_slim_mutex_unlock(iree_hal_remote_server_bulk_session_mutex(&session_));
 
   EXPECT_EQ(iree_hal_remote_bulk_transfer_scheduler_count(
-                session_.bulk_transfer_scheduler),
+                iree_hal_remote_server_bulk_session_scheduler(&session_)),
             0u);
   EXPECT_EQ(iree_hal_remote_server_bulk_staging_pool_count(
-                session_.bulk_staging_pool),
+                iree_hal_remote_server_bulk_session_staging_pool(&session_)),
             0u);
   uint64_t current_value = 0;
   IREE_EXPECT_STATUS_IS(
@@ -850,19 +836,17 @@ TEST_F(BulkDownloadSenderTest, SendPendingTeardownReleasesTransfer) {
   PrepareStagedData(table_transfer, /*staging_offset=*/0,
                     /*staging_length=*/4, /*next_staging_offset=*/4);
 
-  iree_slim_mutex_lock(&session_.bulk_transfer_mutex);
+  iree_slim_mutex_lock(iree_hal_remote_server_bulk_session_mutex(&session_));
   iree_hal_remote_server_bulk_download_try_send_locked(&session_, bulk_channel_,
                                                        table_transfer);
-  iree_slim_mutex_unlock(&session_.bulk_transfer_mutex);
+  iree_slim_mutex_unlock(iree_hal_remote_server_bulk_session_mutex(&session_));
 
   ASSERT_EQ(carrier_->sends.size(), 1u);
   iree_hal_remote_server_bulk_download_transfer_t* transfer =
       iree_hal_remote_server_bulk_download_transfer_storage(table_transfer);
   EXPECT_EQ(transfer->pending_operation_count, 1u);
 
-  iree_hal_remote_bulk_transfer_scheduler_free(
-      session_.bulk_transfer_scheduler);
-  session_.bulk_transfer_scheduler = nullptr;
+  iree_hal_remote_server_bulk_session_deinitialize_transfers(&session_);
 }
 
 TEST_F(BulkDownloadSenderTest, PeerCompleteSignalsSignalSemaphore) {
@@ -878,16 +862,16 @@ TEST_F(BulkDownloadSenderTest, PeerCompleteSignalsSignalSemaphore) {
   IREE_ASSERT_OK(
       CloneSignalList(signal_semaphore, /*signal_value=*/1, transfer));
 
-  iree_slim_mutex_lock(&session_.bulk_transfer_mutex);
+  iree_slim_mutex_lock(iree_hal_remote_server_bulk_session_mutex(&session_));
   IREE_EXPECT_OK(iree_hal_remote_server_bulk_download_on_complete_locked(
       &session_, table_transfer, kTransferId));
-  iree_slim_mutex_unlock(&session_.bulk_transfer_mutex);
+  iree_slim_mutex_unlock(iree_hal_remote_server_bulk_session_mutex(&session_));
 
   uint64_t current_value = 0;
   IREE_EXPECT_OK(iree_hal_semaphore_query(signal_semaphore, &current_value));
   EXPECT_EQ(current_value, 1u);
   EXPECT_EQ(iree_hal_remote_bulk_transfer_scheduler_count(
-                session_.bulk_transfer_scheduler),
+                iree_hal_remote_server_bulk_session_scheduler(&session_)),
             0u);
   iree_hal_semaphore_release(signal_semaphore);
 }
@@ -905,19 +889,19 @@ TEST_F(BulkDownloadSenderTest, PeerAbortFailsSignalSemaphore) {
   IREE_ASSERT_OK(
       CloneSignalList(signal_semaphore, /*signal_value=*/1, transfer));
 
-  iree_slim_mutex_lock(&session_.bulk_transfer_mutex);
+  iree_slim_mutex_lock(iree_hal_remote_server_bulk_session_mutex(&session_));
   iree_hal_remote_server_bulk_download_fail_locked(
       &session_, table_transfer,
       iree_make_status(IREE_STATUS_ABORTED,
                        "remote client aborted bulk transfer"));
-  iree_slim_mutex_unlock(&session_.bulk_transfer_mutex);
+  iree_slim_mutex_unlock(iree_hal_remote_server_bulk_session_mutex(&session_));
 
   uint64_t current_value = 0;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_ABORTED,
       iree_hal_semaphore_query(signal_semaphore, &current_value));
   EXPECT_EQ(iree_hal_remote_bulk_transfer_scheduler_count(
-                session_.bulk_transfer_scheduler),
+                iree_hal_remote_server_bulk_session_scheduler(&session_)),
             0u);
   iree_hal_semaphore_release(signal_semaphore);
 }

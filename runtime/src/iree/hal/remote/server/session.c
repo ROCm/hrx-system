@@ -14,8 +14,10 @@
 #include "iree/hal/remote/protocol/control.h"
 #include "iree/hal/remote/protocol/queue.h"
 #include "iree/hal/remote/server/bulk.h"
+#include "iree/hal/remote/server/bulk_session.h"
 #include "iree/hal/remote/server/file_index.h"
 #include "iree/hal/remote/server/profile.h"
+#include "iree/hal/remote/server/profile_relay.h"
 #include "iree/hal/remote/server/server.h"
 #include "iree/hal/remote/util/queue_header_pool.h"
 #include "iree/net/channel/bulk/bulk_channel.h"
@@ -252,7 +254,7 @@ static void iree_hal_remote_server_decrement_active_session_count_locked(
 void iree_hal_remote_server_session_complete_bulk_drain(
     iree_hal_remote_server_session_t* session_slot) {
   iree_hal_remote_server_t* server = session_slot->server;
-  iree_net_bulk_channel_t* bulk_channel = NULL;
+  iree_hal_remote_server_bulk_session_t* bulk_session = NULL;
   iree_hal_remote_server_stopped_callback_t stopped_callback;
   memset(&stopped_callback, 0, sizeof(stopped_callback));
 
@@ -262,15 +264,21 @@ void iree_hal_remote_server_session_complete_bulk_drain(
           IREE_HAL_REMOTE_SERVER_SESSION_FLAG_BULK_DRAIN_PENDING)) {
     session_slot->flags &=
         ~IREE_HAL_REMOTE_SERVER_SESSION_FLAG_BULK_DRAIN_PENDING;
-    bulk_channel = session_slot->bulk_channel;
-    session_slot->bulk_channel = NULL;
-    iree_hal_remote_server_bulk_router_deinitialize(&session_slot->bulk_router);
+    bulk_session = session_slot->bulk_session;
     iree_hal_remote_server_decrement_active_session_count_locked(
         server, &stopped_callback);
   }
   iree_slim_mutex_unlock(&server->session_mutex);
 
-  iree_net_bulk_channel_release(bulk_channel);
+  iree_hal_remote_server_bulk_session_free(bulk_session);
+
+  if (bulk_session) {
+    iree_slim_mutex_lock(&server->session_mutex);
+    if (session_slot->bulk_session == bulk_session) {
+      session_slot->bulk_session = NULL;
+    }
+    iree_slim_mutex_unlock(&server->session_mutex);
+  }
   if (stopped_callback.fn) {
     stopped_callback.fn(stopped_callback.user_data);
   }
@@ -279,7 +287,6 @@ void iree_hal_remote_server_session_complete_bulk_drain(
 void iree_hal_remote_server_remove_session(iree_hal_remote_server_t* server,
                                            iree_net_session_t* session) {
   iree_net_queue_channel_t* queue_channel = NULL;
-  iree_net_bulk_channel_t* bulk_channel = NULL;
 
   // Snapshot the resource table and epoch mapping for cleanup outside the lock.
   iree_hal_remote_resource_table_t resource_table;
@@ -300,7 +307,6 @@ void iree_hal_remote_server_remove_session(iree_hal_remote_server_t* server,
     // Snapshot references to clean up outside the lock.
     queue_channel = server->sessions[slot].queue_channel;
     server->sessions[slot].queue_channel = NULL;
-    bulk_channel = server->sessions[slot].bulk_channel;
 
     resource_table = server->sessions[slot].resource_table;
     memset(&server->sessions[slot].resource_table, 0,
@@ -358,7 +364,7 @@ void iree_hal_remote_server_remove_session(iree_hal_remote_server_t* server,
   // Stop new bulk callbacks before failing transfers. DATA payload sends are
   // zero-copy, so the bulk state drains asynchronously until send completions
   // retire any staging memory referenced by the transport.
-  iree_net_bulk_channel_detach(bulk_channel);
+  iree_hal_remote_server_bulk_session_detach_channel(&server->sessions[slot]);
 
   // Detach channels from their endpoints before releasing the session. Command
   // completions may hold retained references to the queue channel that outlive
@@ -368,7 +374,7 @@ void iree_hal_remote_server_remove_session(iree_hal_remote_server_t* server,
   iree_net_queue_channel_release(queue_channel);
   iree_net_session_release(session);
 
-  iree_hal_remote_server_session_deinitialize_bulk_transfers(
+  iree_hal_remote_server_bulk_session_deinitialize_transfers(
       &server->sessions[slot]);
 }
 
@@ -5048,101 +5054,6 @@ static void iree_hal_remote_server_on_queue_transport_error(
   iree_status_ignore(status);
 }
 
-static void iree_hal_remote_server_bulk_router_retain(void* user_data) {
-  iree_hal_remote_server_session_t* session_slot =
-      (iree_hal_remote_server_session_t*)user_data;
-  iree_hal_remote_server_retain(session_slot->server);
-}
-
-static void iree_hal_remote_server_bulk_router_release(void* user_data) {
-  iree_hal_remote_server_session_t* session_slot =
-      (iree_hal_remote_server_session_t*)user_data;
-  iree_hal_remote_server_release(session_slot->server);
-}
-
-static iree_status_t iree_hal_remote_server_bulk_router_start(
-    void* user_data, uint64_t transfer_id, uint64_t total_size,
-    iree_net_bulk_frame_flags_t flags) {
-  iree_hal_remote_server_session_t* session_slot =
-      (iree_hal_remote_server_session_t*)user_data;
-  return iree_hal_remote_server_bulk_on_start(session_slot, transfer_id,
-                                              total_size, flags);
-}
-
-static iree_status_t iree_hal_remote_server_bulk_router_data(
-    void* user_data, uint64_t transfer_id, uint64_t chunk_offset,
-    uint32_t sequence, iree_net_bulk_frame_flags_t flags,
-    iree_const_byte_span_t chunk_data, iree_async_buffer_lease_t* lease) {
-  iree_hal_remote_server_session_t* session_slot =
-      (iree_hal_remote_server_session_t*)user_data;
-  return iree_hal_remote_server_bulk_on_data(session_slot, transfer_id,
-                                             chunk_offset, sequence, flags,
-                                             chunk_data, lease);
-}
-
-static iree_status_t iree_hal_remote_server_bulk_router_complete(
-    void* user_data, uint64_t transfer_id) {
-  iree_hal_remote_server_session_t* session_slot =
-      (iree_hal_remote_server_session_t*)user_data;
-  return iree_hal_remote_server_bulk_on_complete(session_slot, transfer_id);
-}
-
-static iree_status_t iree_hal_remote_server_bulk_router_abort(
-    void* user_data, uint64_t transfer_id) {
-  iree_hal_remote_server_session_t* session_slot =
-      (iree_hal_remote_server_session_t*)user_data;
-  return iree_hal_remote_server_bulk_on_abort(session_slot, transfer_id);
-}
-
-static void iree_hal_remote_server_bulk_router_transport_error(
-    void* user_data, iree_status_t status) {
-  iree_hal_remote_server_session_t* session_slot =
-      (iree_hal_remote_server_session_t*)user_data;
-  iree_net_session_t* session = NULL;
-  iree_slim_mutex_lock(&session_slot->server->session_mutex);
-  session = session_slot->session;
-  if (session) iree_net_session_retain(session);
-  iree_slim_mutex_unlock(&session_slot->server->session_mutex);
-  if (session) {
-    iree_status_t shutdown_status = iree_net_session_shutdown(
-        session, /*reason_code=*/0,
-        iree_make_cstring_view("bulk channel transport error"));
-    iree_status_ignore(shutdown_status);
-    iree_net_session_release(session);
-  }
-  iree_status_ignore(status);
-}
-
-static void iree_hal_remote_server_bulk_router_send_complete(
-    void* user_data, uint64_t operation_user_data, iree_status_t status) {
-  iree_hal_remote_server_session_t* session_slot =
-      (iree_hal_remote_server_session_t*)user_data;
-  iree_hal_remote_server_bulk_on_send_complete(session_slot,
-                                               operation_user_data, status);
-}
-
-static void iree_hal_remote_server_bulk_router_credit(void* user_data) {
-  iree_hal_remote_server_session_t* session_slot =
-      (iree_hal_remote_server_session_t*)user_data;
-  iree_hal_remote_server_bulk_on_credit(session_slot);
-}
-
-static iree_hal_remote_server_bulk_router_operations_t
-iree_hal_remote_server_bulk_router_operations(void) {
-  iree_hal_remote_server_bulk_router_operations_t operations = {
-      .retain = iree_hal_remote_server_bulk_router_retain,
-      .release = iree_hal_remote_server_bulk_router_release,
-      .start = iree_hal_remote_server_bulk_router_start,
-      .data = iree_hal_remote_server_bulk_router_data,
-      .complete = iree_hal_remote_server_bulk_router_complete,
-      .abort = iree_hal_remote_server_bulk_router_abort,
-      .transport_error = iree_hal_remote_server_bulk_router_transport_error,
-      .send_complete = iree_hal_remote_server_bulk_router_send_complete,
-      .credit = iree_hal_remote_server_bulk_router_credit,
-  };
-  return operations;
-}
-
 // Context passed to the endpoint_ready callback to identify which session
 // slot should receive the application channel.
 typedef struct iree_hal_remote_server_endpoint_context_t {
@@ -5288,12 +5199,9 @@ static void iree_hal_remote_server_on_bulk_endpoint_ready(
 
   iree_net_bulk_channel_t* bulk_channel = NULL;
   if (iree_status_is_ok(status)) {
-    iree_hal_remote_server_bulk_router_initialize(
-        iree_hal_remote_server_bulk_router_operations(),
-        &server->sessions[slot], &server->sessions[slot].bulk_router);
     iree_net_bulk_channel_callbacks_t callbacks =
-        iree_hal_remote_server_bulk_router_callbacks(
-            &server->sessions[slot].bulk_router);
+        iree_hal_remote_server_bulk_session_channel_callbacks(
+            &server->sessions[slot]);
     status =
         iree_net_bulk_channel_create(endpoint, /*options=*/NULL, header_pool,
                                      callbacks, host_allocator, &bulk_channel);
@@ -5306,19 +5214,12 @@ static void iree_hal_remote_server_on_bulk_endpoint_ready(
 
   bool bulk_channel_attached = false;
   if (iree_status_is_ok(status)) {
-    iree_slim_mutex_lock(&server->session_mutex);
-    if (server->sessions[slot].session == session &&
-        !server->sessions[slot].bulk_channel) {
-      iree_net_bulk_channel_retain(bulk_channel);
-      server->sessions[slot].bulk_channel = bulk_channel;
-      bulk_channel_attached = true;
-    } else {
-      status = iree_status_from_code(IREE_STATUS_ABORTED);
-    }
-    iree_slim_mutex_unlock(&server->session_mutex);
+    status = iree_hal_remote_server_bulk_session_attach_channel(
+        &server->sessions[slot], bulk_channel);
+    bulk_channel_attached = iree_status_is_ok(status);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_remote_server_bulk_flush_receive_window(
+    status = iree_hal_remote_server_bulk_session_flush_receive_window(
         &server->sessions[slot]);
   }
 
@@ -5327,20 +5228,16 @@ static void iree_hal_remote_server_on_bulk_endpoint_ready(
     bulk_channel = NULL;
   } else {
     if (bulk_channel_attached) {
-      iree_slim_mutex_lock(&server->session_mutex);
-      if (server->sessions[slot].bulk_channel == bulk_channel) {
-        server->sessions[slot].bulk_channel = NULL;
-        iree_net_bulk_channel_release(bulk_channel);
-      }
-      iree_slim_mutex_unlock(&server->session_mutex);
+      iree_net_bulk_channel_t* attached_channel =
+          iree_hal_remote_server_bulk_session_take_channel(
+              &server->sessions[slot]);
+      iree_net_bulk_channel_release(attached_channel);
     }
     if (bulk_channel) {
       iree_net_bulk_channel_release(bulk_channel);
     } else {
       iree_async_buffer_pool_free(header_pool);
     }
-    iree_hal_remote_server_bulk_router_deinitialize(
-        &server->sessions[slot].bulk_router);
     iree_status_t shutdown_status = iree_net_session_shutdown(
         session, /*reason_code=*/0,
         iree_make_cstring_view("bulk channel setup failed"));

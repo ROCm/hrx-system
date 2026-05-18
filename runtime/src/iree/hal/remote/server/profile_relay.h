@@ -32,11 +32,11 @@ typedef struct iree_hal_remote_server_profile_pending_transfer_t
 
 typedef struct iree_hal_remote_server_profile_relay_t {
   // FIFO head of profile callbacks awaiting active bulk transfer capacity.
-  // Protected by iree_hal_remote_server_session_t::bulk_transfer_mutex.
+  // Protected by the owning bulk session mutex.
   iree_hal_remote_server_profile_pending_transfer_t* pending_transfer_head;
 
   // FIFO tail of profile callbacks awaiting active bulk transfer capacity.
-  // Protected by iree_hal_remote_server_session_t::bulk_transfer_mutex.
+  // Protected by the owning bulk session mutex.
   iree_hal_remote_server_profile_pending_transfer_t* pending_transfer_tail;
 
   // Active server-created sink, or NULL when no profiling session is active.

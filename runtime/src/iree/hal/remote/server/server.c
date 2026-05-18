@@ -8,6 +8,7 @@
 
 #include "iree/hal/remote/protocol/common.h"
 #include "iree/hal/remote/server/bulk.h"
+#include "iree/hal/remote/server/bulk_session.h"
 #include "iree/hal/remote/server/file_index.h"
 #include "iree/hal/remote/server/profile.h"
 #include "iree/net/bootstrap.h"
@@ -207,9 +208,6 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_server_create(
 
     server->sessions =
         (iree_hal_remote_server_session_t*)((uint8_t*)server + sessions_offset);
-    for (uint32_t i = 0; i < max_connections; ++i) {
-      iree_slim_mutex_initialize(&server->sessions[i].bulk_transfer_mutex);
-    }
     server->next_session_id = 1;
     server->state = IREE_HAL_REMOTE_SERVER_STATE_STOPPED;
   }
@@ -284,16 +282,9 @@ static void iree_hal_remote_server_destroy(iree_hal_remote_server_t* server) {
     iree_hal_remote_server_session_deinitialize_provisionals(
         &server->sessions[i], host_allocator);
 
-    iree_hal_remote_server_profile_relay_cancel(&server->sessions[i]);
-    iree_hal_remote_server_profile_relay_deinitialize(&server->sessions[i]);
-
     iree_hal_remote_server_session_deinitialize_windows(&server->sessions[i]);
-    iree_net_bulk_channel_detach(server->sessions[i].bulk_channel);
-    iree_hal_remote_server_session_deinitialize_bulk_transfers(
-        &server->sessions[i]);
-
-    iree_net_bulk_channel_release(server->sessions[i].bulk_channel);
-    server->sessions[i].bulk_channel = NULL;
+    iree_hal_remote_server_bulk_session_free(server->sessions[i].bulk_session);
+    server->sessions[i].bulk_session = NULL;
 
     iree_net_queue_channel_detach(server->sessions[i].queue_channel);
     iree_net_queue_channel_release(server->sessions[i].queue_channel);
@@ -302,8 +293,6 @@ static void iree_hal_remote_server_destroy(iree_hal_remote_server_t* server) {
     iree_net_session_t* session = server->sessions[i].session;
     server->sessions[i].session = NULL;
     iree_net_session_release(session);
-
-    iree_slim_mutex_deinitialize(&server->sessions[i].bulk_transfer_mutex);
   }
 
   // Free listener if still alive (shouldn't be if stop() was called).
@@ -347,12 +336,8 @@ static int32_t iree_hal_remote_server_find_free_slot(
     iree_hal_remote_server_t* server) {
   for (uint32_t i = 0; i < server->options.max_connections; ++i) {
     if (!server->sessions[i].session && !server->sessions[i].queue_channel &&
-        !server->sessions[i].bulk_channel &&
-        !server->sessions[i].bulk_transfer_scheduler &&
-        !server->sessions[i].bulk_staging_pool &&
-        !server->sessions[i].bulk_receive_window &&
-        iree_hal_remote_server_profile_relay_is_empty(
-            &server->sessions[i].profile_relay) &&
+        iree_hal_remote_server_bulk_session_is_empty(
+            server->sessions[i].bulk_session) &&
         server->sessions[i].flags == 0) {
       return (int32_t)i;
     }
@@ -413,12 +398,11 @@ static void iree_hal_remote_server_on_accept(
         &server->sessions[slot].completed_signal_window);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_remote_server_profile_relay_initialize(
-        &server->sessions[slot], server->host_allocator);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_remote_server_session_initialize_bulk_transfers(
-        &server->sessions[slot], server->host_allocator);
+    iree_hal_remote_server_bulk_session_options_t bulk_session_options =
+        iree_hal_remote_server_bulk_session_options_default();
+    status = iree_hal_remote_server_bulk_session_allocate(
+        &server->sessions[slot], &bulk_session_options, server->host_allocator,
+        &server->sessions[slot].bulk_session);
   }
 
   // Create the server-side session outside the lock (allocation + network
@@ -467,12 +451,11 @@ static void iree_hal_remote_server_on_accept(
     if (slot >= 0) {
       iree_hal_remote_resource_table_deinitialize(
           &server->sessions[slot].resource_table, server->host_allocator);
-      iree_hal_remote_server_profile_relay_deinitialize(
-          &server->sessions[slot]);
       iree_hal_remote_server_session_deinitialize_windows(
           &server->sessions[slot]);
-      iree_hal_remote_server_session_deinitialize_bulk_transfers(
-          &server->sessions[slot]);
+      iree_hal_remote_server_bulk_session_free(
+          server->sessions[slot].bulk_session);
+      server->sessions[slot].bulk_session = NULL;
       server->sessions[slot].server = NULL;
     }
     iree_status_ignore(status);
