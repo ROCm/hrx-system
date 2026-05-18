@@ -23,6 +23,8 @@ iree_cc_library(
     "bulk.h"
     "bulk_download_receiver.c"
     "bulk_download_receiver.h"
+    "bulk_profile_receiver.c"
+    "bulk_profile_receiver.h"
     "bulk_session.c"
     "bulk_session.h"
     "bulk_transfer.h"
