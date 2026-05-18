@@ -76,10 +76,12 @@ iree_cc_library(
     server
   HDRS
     "api.h"
+    "bulk_upload_receiver.h"
     "file_index.h"
   SRCS
     "bulk.c"
     "bulk.h"
+    "bulk_upload_receiver.c"
     "file_index.c"
     "profile.c"
     "profile.h"
@@ -129,6 +131,32 @@ iree_cc_test(
     "bulk_router_test.cc"
   DEPS
     ::bulk_router
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_binary_benchmark(
+  NAME
+    bulk_upload_receiver_benchmark
+  SRCS
+    "bulk_upload_receiver_benchmark.cc"
+  DEPS
+    ::server
+    iree::base
+    iree::testing::benchmark
+    iree::testing::benchmark_main
+    iree::third_party::google_benchmark
+  TESTONLY
+)
+
+iree_cc_test(
+  NAME
+    bulk_upload_receiver_test
+  SRCS
+    "bulk_upload_receiver_test.cc"
+  DEPS
+    ::server
     iree::base
     iree::testing::gtest
     iree::testing::gtest_main
