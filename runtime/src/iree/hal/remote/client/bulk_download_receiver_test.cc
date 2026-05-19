@@ -348,6 +348,7 @@ TEST_F(ClientBulkDownloadReceiverTest,
 
   iree_hal_remote_client_file_view_t file_view;
   IREE_ASSERT_OK(iree_hal_remote_client_file_resolve(file, &file_view));
+  file_view.length = sizeof(initial_contents);
   uint64_t transfer_id = 0;
   IREE_ASSERT_OK(iree_hal_remote_client_bulk_begin_file_write(
       &device_, file, &file_view, /*target_offset=*/0,

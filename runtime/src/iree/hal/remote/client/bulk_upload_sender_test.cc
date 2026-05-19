@@ -380,6 +380,7 @@ TEST_F(ClientBulkUploadSenderTest, AsyncFileReadSendsDataAfterReadCompletion) {
 
   iree_hal_remote_client_file_view_t file_view;
   IREE_ASSERT_OK(iree_hal_remote_client_file_resolve(file, &file_view));
+  file_view.length = sizeof(contents);
   GrantRemoteChunkCredit(/*credit_delta=*/1);
   uint64_t transfer_id = BeginFileRead(file, &file_view, sizeof(contents));
   Upload(transfer_id);
