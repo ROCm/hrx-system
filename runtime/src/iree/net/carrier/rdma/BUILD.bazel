@@ -74,10 +74,40 @@ iree_runtime_cc_library(
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
+        ":connection_data",
         ":context",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
         "//runtime/src/iree/net:carrier",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "connection_data",
+    srcs = ["connection_data.c"],
+    hdrs = ["connection_data.h"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "connection_data_test",
+    srcs = ["connection_data_test.cc"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":connection_data",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

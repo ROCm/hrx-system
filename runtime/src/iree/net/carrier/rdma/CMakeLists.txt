@@ -57,11 +57,41 @@ iree_cc_library(
   HDRS
     "carrier.h"
   DEPS
+    ::connection_data
     ::context
     iree::async
     iree::base
     iree::net::carrier
   PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_library(
+  NAME
+    connection_data
+  HDRS
+    "connection_data.h"
+  SRCS
+    "connection_data.c"
+  DEPS
+    iree::base
+    iree::base::core_headers
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    connection_data_test
+  SRCS
+    "connection_data_test.cc"
+  DEPS
+    ::connection_data
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 endif()
 

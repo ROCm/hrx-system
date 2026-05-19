@@ -45,6 +45,7 @@
 #include "iree/async/proactor.h"
 #include "iree/base/api.h"
 #include "iree/net/carrier.h"
+#include "iree/net/carrier/rdma/connection_data.h"
 #include "iree/net/carrier/rdma/context.h"
 
 #ifdef __cplusplus
@@ -60,7 +61,8 @@ typedef struct iree_net_rdma_carrier_t iree_net_rdma_carrier_t;
 #define IREE_NET_RDMA_CARRIER_DEFAULT_RECV_QUEUE_DEPTH 256u
 
 // Maximum scatter-gather entries supported by the current carrier ABI.
-#define IREE_NET_RDMA_CARRIER_MAX_SEND_SGE 16u
+#define IREE_NET_RDMA_CARRIER_MAX_SEND_SGE \
+  IREE_NET_RDMA_CONNECTION_DATA_MAX_SEND_SGE
 
 // Default maximum scatter-gather entries per send work request.
 #define IREE_NET_RDMA_CARRIER_DEFAULT_MAX_SEND_SGE 16u
