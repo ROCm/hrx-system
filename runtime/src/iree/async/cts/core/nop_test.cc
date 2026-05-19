@@ -92,6 +92,62 @@ TEST_P(NopTest, CallbackReceivesOperationPointer) {
   EXPECT_EQ(received_op, &nop.base);
 }
 
+// NOP submitted from a completion callback should be visible to the same poll.
+TEST_P(NopTest, SubmitFromCallbackCompletesBeforePollReturns) {
+  struct CallbackState : public CompletionLog {
+    // Proactor used by the first callback to submit the nested NOP.
+    iree_async_proactor_t* proactor = nullptr;
+
+    // Nested NOP submitted while the first NOP callback is being dispatched.
+    iree_async_nop_operation_t nested_nop;
+
+    // Status returned by the nested submit call.
+    iree_status_t submit_status = iree_ok_status();
+
+    static void NestedCallback(void* user_data,
+                               iree_async_operation_t* operation,
+                               iree_status_t status,
+                               iree_async_completion_flags_t flags) {
+      CompletionLog::Callback(user_data, operation, status, flags);
+    }
+
+    static void FirstCallback(void* user_data,
+                              iree_async_operation_t* operation,
+                              iree_status_t status,
+                              iree_async_completion_flags_t flags) {
+      auto* state = static_cast<CallbackState*>(user_data);
+      CompletionLog::Callback(user_data, operation, status, flags);
+      state->submit_status = iree_async_proactor_submit_one(
+          state->proactor, &state->nested_nop.base);
+    }
+  };
+
+  CallbackState state;
+  state.proactor = proactor_;
+  iree_async_operation_zero(&state.nested_nop.base, sizeof(state.nested_nop));
+  iree_async_operation_initialize(
+      &state.nested_nop.base, IREE_ASYNC_OPERATION_TYPE_NOP,
+      IREE_ASYNC_OPERATION_FLAG_NONE, CallbackState::NestedCallback, &state);
+
+  iree_async_nop_operation_t first_nop;
+  iree_async_operation_zero(&first_nop.base, sizeof(first_nop));
+  iree_async_operation_initialize(
+      &first_nop.base, IREE_ASYNC_OPERATION_TYPE_NOP,
+      IREE_ASYNC_OPERATION_FLAG_NONE, CallbackState::FirstCallback, &state);
+
+  IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &first_nop.base));
+
+  iree_host_size_t completed_count = 0;
+  IREE_ASSERT_OK(iree_async_proactor_poll(proactor_, iree_infinite_timeout(),
+                                          &completed_count));
+
+  IREE_EXPECT_OK(state.submit_status);
+  EXPECT_EQ(completed_count, 2u);
+  ASSERT_EQ(state.entries.size(), 2u);
+  IREE_EXPECT_OK(state.ConsumeStatus(0));
+  IREE_EXPECT_OK(state.ConsumeStatus(1));
+}
+
 // Empty submit list: should succeed with no completions.
 TEST_P(NopTest, EmptySubmit) {
   iree_async_operation_list_t empty_list = iree_async_operation_list_empty();
