@@ -175,7 +175,8 @@ static iree_net_carrier_capabilities_t iree_net_rdma_carrier_capabilities(
          IREE_NET_CARRIER_CAPABILITY_ORDERED |
          IREE_NET_CARRIER_CAPABILITY_ZERO_COPY_TX |
          IREE_NET_CARRIER_CAPABILITY_ZERO_COPY_RX |
-         IREE_NET_CARRIER_CAPABILITY_REGISTERED_REGIONS;
+         IREE_NET_CARRIER_CAPABILITY_REGISTERED_REGIONS |
+         IREE_NET_CARRIER_CAPABILITY_DIRECT_WRITE;
 }
 
 static void iree_net_rdma_carrier_notify_error(iree_net_rdma_carrier_t* carrier,
@@ -206,46 +207,65 @@ static void iree_net_rdma_carrier_on_send_completions(
     const struct ibv_wc* completion = &completions[i];
     iree_net_rdma_work_request_completion_t work_request_completion;
     memset(&work_request_completion, 0, sizeof(work_request_completion));
-    iree_status_t completion_status =
+    iree_status_t work_status =
         iree_net_rdma_carrier_status_from_work_completion(completion, "send");
-    if (iree_status_is_ok(completion_status)) {
-      completion_status = iree_net_rdma_work_request_table_complete(
-          &carrier->work_request_table, completion->wr_id,
-          &work_request_completion);
+
+    iree_status_t cleanup_status = iree_net_rdma_work_request_table_complete(
+        &carrier->work_request_table, completion->wr_id,
+        &work_request_completion);
+    if (iree_status_is_ok(cleanup_status) &&
+        work_request_completion.operation ==
+            IREE_NET_RDMA_WORK_REQUEST_OPERATION_RECV) {
+      cleanup_status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                        "RDMA send CQ returned operation %u",
+                                        work_request_completion.operation);
     }
-    if (iree_status_is_ok(completion_status)) {
-      completion_status =
+    if (iree_status_is_ok(cleanup_status)) {
+      cleanup_status =
           iree_net_rdma_send_window_complete(&carrier->send_window);
     }
+    if (iree_status_is_ok(work_status) && iree_status_is_ok(cleanup_status)) {
+      if (work_request_completion.operation ==
+          IREE_NET_RDMA_WORK_REQUEST_OPERATION_DIRECT_READ) {
+        iree_atomic_fetch_add(&carrier->base.bytes_received,
+                              (int64_t)work_request_completion.byte_length,
+                              iree_memory_order_relaxed);
+      } else {
+        iree_atomic_fetch_add(&carrier->base.bytes_sent,
+                              (int64_t)work_request_completion.byte_length,
+                              iree_memory_order_relaxed);
+      }
+    }
+    iree_status_t completion_status =
+        iree_status_join(work_status, cleanup_status);
+    iree_host_size_t bytes_transferred =
+        iree_status_is_ok(completion_status)
+            ? work_request_completion.byte_length
+            : 0;
     carrier->base.callback.fn(
         carrier->base.callback.user_data, work_request_completion.user_data,
-        completion_status, work_request_completion.byte_length,
-        /*recv_lease=*/NULL);
+        completion_status, bytes_transferred, /*recv_lease=*/NULL);
   }
 }
 
 static iree_status_t iree_net_rdma_carrier_deliver_receive(
-    iree_net_rdma_carrier_t* carrier,
-    iree_net_rdma_work_request_completion_t completion,
-    const struct ibv_wc* work_completion) {
-  iree_async_buffer_lease_t lease;
-  iree_status_t status = iree_net_rdma_receive_queue_complete(
-      &carrier->receive_queue, completion,
-      (iree_host_size_t)work_completion->byte_len, &lease);
-
-  if (iree_status_is_ok(status)) {
-    iree_net_carrier_state_t state = iree_net_carrier_state(&carrier->base);
-    if (state != IREE_NET_CARRIER_STATE_ACTIVE ||
-        !carrier->base.recv_handler.fn) {
-      status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                                "RDMA receive arrived before activation");
-    }
+    iree_net_rdma_carrier_t* carrier, iree_async_buffer_lease_t* lease) {
+  iree_status_t status = iree_ok_status();
+  iree_net_carrier_state_t state = iree_net_carrier_state(&carrier->base);
+  if (state != IREE_NET_CARRIER_STATE_ACTIVE ||
+      !carrier->base.recv_handler.fn) {
+    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "RDMA receive arrived before activation");
   }
   if (iree_status_is_ok(status)) {
     status = carrier->base.recv_handler.fn(carrier->base.recv_handler.user_data,
-                                           lease.span, &lease);
+                                           lease->span, lease);
   }
-  iree_async_buffer_lease_release(&lease);
+  if (iree_status_is_ok(status)) {
+    iree_atomic_fetch_add(&carrier->base.bytes_received,
+                          (int64_t)lease->span.length,
+                          iree_memory_order_relaxed);
+  }
 
   if (iree_status_is_ok(status)) {
     uint32_t posted_count = 0;
@@ -269,25 +289,38 @@ static void iree_net_rdma_carrier_on_recv_completions(
     const struct ibv_wc* completion = &completions[i];
     iree_net_rdma_work_request_completion_t work_request_completion;
     memset(&work_request_completion, 0, sizeof(work_request_completion));
-    iree_status_t completion_status =
+    iree_status_t work_status =
         iree_net_rdma_carrier_status_from_work_completion(completion, "recv");
-    if (iree_status_is_ok(completion_status)) {
-      completion_status = iree_net_rdma_work_request_table_complete(
-          &carrier->work_request_table, completion->wr_id,
-          &work_request_completion);
-    }
-    if (iree_status_is_ok(completion_status) &&
+
+    iree_status_t cleanup_status = iree_net_rdma_work_request_table_complete(
+        &carrier->work_request_table, completion->wr_id,
+        &work_request_completion);
+    if (iree_status_is_ok(cleanup_status) &&
         work_request_completion.operation !=
             IREE_NET_RDMA_WORK_REQUEST_OPERATION_RECV) {
-      completion_status =
-          iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                           "RDMA receive CQ returned operation %u",
-                           work_request_completion.operation);
+      cleanup_status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                        "RDMA receive CQ returned operation %u",
+                                        work_request_completion.operation);
     }
-    if (iree_status_is_ok(completion_status)) {
-      completion_status = iree_net_rdma_carrier_deliver_receive(
-          carrier, work_request_completion, completion);
+
+    iree_async_buffer_lease_t lease;
+    memset(&lease, 0, sizeof(lease));
+    if (iree_status_is_ok(cleanup_status)) {
+      iree_host_size_t byte_length =
+          iree_status_is_ok(work_status)
+              ? (iree_host_size_t)completion->byte_len
+              : 0;
+      cleanup_status = iree_net_rdma_receive_queue_complete(
+          &carrier->receive_queue, work_request_completion, byte_length,
+          &lease);
     }
+    if (iree_status_is_ok(work_status) && iree_status_is_ok(cleanup_status)) {
+      work_status = iree_net_rdma_carrier_deliver_receive(carrier, &lease);
+    }
+    iree_async_buffer_lease_release(&lease);
+
+    iree_status_t completion_status =
+        iree_status_join(work_status, cleanup_status);
     if (!iree_status_is_ok(completion_status)) {
       iree_net_rdma_carrier_notify_error(carrier, completion_status);
     }
@@ -394,6 +427,53 @@ static iree_status_t iree_net_rdma_carrier_total_span_length(
   return status;
 }
 
+static iree_status_t iree_net_rdma_carrier_post_send_work_request(
+    iree_net_rdma_carrier_t* carrier,
+    iree_net_rdma_work_request_operation_t operation,
+    iree_net_rdma_send_window_acquire_flags_t acquire_flags, uint64_t user_data,
+    iree_host_size_t byte_length, struct ibv_send_wr* work_request) {
+  iree_status_t status =
+      iree_net_rdma_send_window_acquire(&carrier->send_window, acquire_flags);
+  bool send_window_acquired = iree_status_is_ok(status);
+
+  uint64_t work_request_id = 0;
+  if (iree_status_is_ok(status)) {
+    status = iree_net_rdma_work_request_table_acquire(
+        &carrier->work_request_table, operation, user_data, byte_length,
+        &work_request_id);
+  }
+
+  if (iree_status_is_ok(status)) {
+    work_request->wr_id = work_request_id;
+    struct ibv_send_wr* bad_work_request = NULL;
+    errno = 0;
+    int result =
+        ibv_post_send(iree_net_rdma_queue_pair_native_qp(&carrier->queue_pair),
+                      work_request, &bad_work_request);
+    if (result != 0) {
+      int error = result > 0 ? result : errno;
+      status = iree_net_rdma_carrier_status_from_errno_required(
+          __FILE__, __LINE__, error, "ibv_post_send");
+    }
+  }
+
+  if (!iree_status_is_ok(status)) {
+    if (work_request_id != 0) {
+      iree_net_rdma_work_request_completion_t completion;
+      status = iree_status_join(
+          status,
+          iree_net_rdma_work_request_table_complete(
+              &carrier->work_request_table, work_request_id, &completion));
+    }
+    if (send_window_acquired) {
+      status =
+          iree_status_join(status, iree_net_rdma_send_window_abort(
+                                       &carrier->send_window, acquire_flags));
+    }
+  }
+  return status;
+}
+
 static iree_status_t iree_net_rdma_carrier_send(
     iree_net_carrier_t* base_carrier, const iree_net_send_params_t* params) {
   iree_net_rdma_carrier_t* carrier =
@@ -430,56 +510,18 @@ static iree_status_t iree_net_rdma_carrier_send(
         iree_net_rdma_carrier_total_span_length(params->data, &total_length);
   }
 
-  iree_net_rdma_send_window_acquire_flags_t acquire_flags =
-      IREE_NET_RDMA_SEND_WINDOW_ACQUIRE_FLAG_REMOTE_RECV_CREDIT;
-  bool send_window_acquired = false;
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_net_rdma_send_window_acquire(&carrier->send_window, acquire_flags);
-    send_window_acquired = iree_status_is_ok(status);
-  }
-
-  uint64_t work_request_id = 0;
-  if (iree_status_is_ok(status)) {
-    status = iree_net_rdma_work_request_table_acquire(
-        &carrier->work_request_table, IREE_NET_RDMA_WORK_REQUEST_OPERATION_SEND,
-        params->user_data, total_length, &work_request_id);
-  }
-
   if (iree_status_is_ok(status)) {
     struct ibv_send_wr work_request;
     memset(&work_request, 0, sizeof(work_request));
-    work_request.wr_id = work_request_id;
     work_request.sg_list = scatter_gather_entries;
     work_request.num_sge = scatter_gather_entry_count;
     work_request.opcode = IBV_WR_SEND;
     work_request.send_flags = IBV_SEND_SIGNALED;
 
-    struct ibv_send_wr* bad_work_request = NULL;
-    errno = 0;
-    int result =
-        ibv_post_send(iree_net_rdma_queue_pair_native_qp(&carrier->queue_pair),
-                      &work_request, &bad_work_request);
-    if (result != 0) {
-      int error = result > 0 ? result : errno;
-      status = iree_net_rdma_carrier_status_from_errno_required(
-          __FILE__, __LINE__, error, "ibv_post_send");
-    }
-  }
-
-  if (!iree_status_is_ok(status)) {
-    if (work_request_id != 0) {
-      iree_net_rdma_work_request_completion_t completion;
-      status = iree_status_join(
-          status,
-          iree_net_rdma_work_request_table_complete(
-              &carrier->work_request_table, work_request_id, &completion));
-    }
-    if (send_window_acquired) {
-      status =
-          iree_status_join(status, iree_net_rdma_send_window_abort(
-                                       &carrier->send_window, acquire_flags));
-    }
+    status = iree_net_rdma_carrier_post_send_work_request(
+        carrier, IREE_NET_RDMA_WORK_REQUEST_OPERATION_SEND,
+        IREE_NET_RDMA_SEND_WINDOW_ACQUIRE_FLAG_REMOTE_RECV_CREDIT,
+        params->user_data, total_length, &work_request);
   }
   return status;
 }
@@ -516,9 +558,64 @@ static iree_status_t iree_net_rdma_carrier_shutdown(
 static iree_status_t iree_net_rdma_carrier_direct_write(
     iree_net_carrier_t* base_carrier,
     const iree_net_direct_write_params_t* params) {
-  (void)base_carrier;
-  (void)params;
-  return iree_net_rdma_carrier_unimplemented("direct_write");
+  iree_net_rdma_carrier_t* carrier =
+      iree_net_rdma_carrier_from_base(base_carrier);
+  if (iree_net_carrier_state(base_carrier) != IREE_NET_CARRIER_STATE_ACTIVE) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "carrier is not active");
+  }
+  if (!params) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "params must not be NULL");
+  }
+  iree_net_direct_write_flags_t known_flags =
+      IREE_NET_DIRECT_WRITE_FLAG_SIGNAL_RECEIVER;
+  if (iree_any_bit_set(params->flags, ~known_flags)) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "RDMA direct_write flags 0x%08X are not supported",
+                            params->flags & ~known_flags);
+  }
+  if (iree_any_bit_set(params->flags,
+                       IREE_NET_DIRECT_WRITE_FLAG_SIGNAL_RECEIVER)) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "RDMA direct_write receiver signaling is not implemented yet");
+  }
+  if (iree_async_span_is_empty(params->local)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "direct_write local span must not be empty");
+  }
+  if (iree_net_remote_handle_is_null(params->remote)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "direct_write remote handle must not be null");
+  }
+  if (params->remote.opaque[0] > UINT32_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "RDMA rkey 0x%016" PRIX64
+                            " does not fit in uint32_t",
+                            params->remote.opaque[0]);
+  }
+
+  struct ibv_sge scatter_gather_entry;
+  iree_status_t status =
+      iree_net_rdma_sge_from_span(params->local, &scatter_gather_entry);
+
+  if (iree_status_is_ok(status)) {
+    struct ibv_send_wr work_request;
+    memset(&work_request, 0, sizeof(work_request));
+    work_request.sg_list = &scatter_gather_entry;
+    work_request.num_sge = 1;
+    work_request.opcode = IBV_WR_RDMA_WRITE;
+    work_request.send_flags = IBV_SEND_SIGNALED;
+    work_request.wr.rdma.remote_addr = params->remote.opaque[1];
+    work_request.wr.rdma.rkey = (uint32_t)params->remote.opaque[0];
+
+    status = iree_net_rdma_carrier_post_send_work_request(
+        carrier, IREE_NET_RDMA_WORK_REQUEST_OPERATION_DIRECT_WRITE,
+        IREE_NET_RDMA_SEND_WINDOW_ACQUIRE_FLAG_NONE, params->user_data,
+        params->local.length, &work_request);
+  }
+  return status;
 }
 
 static iree_status_t iree_net_rdma_carrier_direct_read(
@@ -532,10 +629,52 @@ static iree_status_t iree_net_rdma_carrier_direct_read(
 static iree_status_t iree_net_rdma_carrier_register_buffer(
     iree_net_carrier_t* base_carrier, iree_async_region_t* region,
     iree_net_remote_handle_t* out_handle) {
-  (void)base_carrier;
-  (void)region;
-  if (out_handle) *out_handle = iree_net_remote_handle_null();
-  return iree_net_rdma_carrier_unimplemented("register_buffer");
+  iree_net_rdma_carrier_t* carrier =
+      iree_net_rdma_carrier_from_base(base_carrier);
+  if (!out_handle) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "out_handle must not be NULL");
+  }
+  *out_handle = iree_net_remote_handle_null();
+  if (!region) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "region must not be NULL");
+  }
+  if (region->type != IREE_ASYNC_REGION_TYPE_RDMA) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "region type %u is not RDMA",
+                            (unsigned)region->type);
+  }
+  if (!iree_any_bit_set(region->access_flags,
+                        IREE_ASYNC_BUFFER_ACCESS_FLAG_REMOTE_WRITE)) {
+    return iree_make_status(IREE_STATUS_PERMISSION_DENIED,
+                            "RDMA region is not registered for remote writes");
+  }
+  if (!region->base_ptr) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "CPU-inaccessible RDMA regions need an explicit device IOVA");
+  }
+  if (region->length == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "region length must be non-zero");
+  }
+
+  struct ibv_mr* memory_region = (struct ibv_mr*)region->handles.rdma.mr;
+  if (!memory_region) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "RDMA region has no memory registration");
+  }
+  if (memory_region->pd !=
+      iree_net_rdma_context_protection_domain(carrier->context)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "RDMA region is not registered in the carrier protection domain");
+  }
+
+  out_handle->opaque[0] = region->handles.rdma.rkey;
+  out_handle->opaque[1] = (uint64_t)(uintptr_t)region->base_ptr;
+  return iree_ok_status();
 }
 
 static void iree_net_rdma_carrier_unregister_buffer(
