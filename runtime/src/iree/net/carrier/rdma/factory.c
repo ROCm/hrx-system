@@ -602,7 +602,38 @@ typedef enum iree_net_rdma_connect_phase_e {
   IREE_NET_RDMA_CONNECT_PHASE_COMPLETE = 3,
 } iree_net_rdma_connect_phase_t;
 
-typedef struct iree_net_rdma_connect_state_t {
+typedef struct iree_net_rdma_connect_state_t iree_net_rdma_connect_state_t;
+
+typedef struct iree_net_rdma_connect_endpoint_t {
+  // Owning logical connect state.
+  iree_net_rdma_connect_state_t* state;
+
+  // Raw connection ID before carrier creation transfers ownership.
+  struct rdma_cm_id* connection_id;
+
+  // Carrier created after address resolution.
+  iree_net_carrier_t* carrier;
+
+  // Child context matching connection_id->verbs.
+  iree_net_rdma_context_t* connection_context;
+
+  // Serialized local endpoint private data sent by rdma_connect.
+  uint8_t private_data[IREE_NET_RDMA_ENDPOINT_DATA_LENGTH];
+
+  // Number of bytes valid in private_data.
+  iree_host_size_t private_data_length;
+
+  // Zero-based endpoint slot index.
+  uint16_t endpoint_index;
+
+  // Current per-endpoint CM state-machine phase.
+  iree_net_rdma_connect_phase_t phase;
+
+  // True after remote private data has been applied.
+  bool remote_data_applied;
+} iree_net_rdma_connect_endpoint_t;
+
+struct iree_net_rdma_connect_state_t {
   // Cleanup operation used to release cm_channel outside its callback.
   iree_async_nop_operation_t cleanup_operation;
 
@@ -618,15 +649,6 @@ typedef struct iree_net_rdma_connect_state_t {
   // rdma_cm event channel wrapper.
   iree_net_rdma_cm_channel_t* cm_channel;
 
-  // Raw connection ID before carrier creation transfers ownership.
-  struct rdma_cm_id* connection_id;
-
-  // Carrier created after address resolution.
-  iree_net_carrier_t* carrier;
-
-  // Child context matching connection_id->verbs.
-  iree_net_rdma_context_t* connection_context;
-
   // User connect callback.
   iree_net_transport_connect_callback_t callback;
 
@@ -636,21 +658,21 @@ typedef struct iree_net_rdma_connect_state_t {
   // Logical connection group identifier shared by endpoint QPs.
   uint64_t group_id;
 
-  // Serialized local endpoint private data sent by rdma_connect.
-  uint8_t private_data[IREE_NET_RDMA_ENDPOINT_DATA_LENGTH];
+  // Total endpoint slots in this logical connection.
+  uint16_t endpoint_count;
 
-  // Number of bytes valid in private_data.
-  iree_host_size_t private_data_length;
+  // Number of endpoint slots that have reached ESTABLISHED.
+  uint16_t completed_endpoint_count;
 
-  // Current CM state-machine phase.
-  iree_net_rdma_connect_phase_t phase;
-
-  // True after remote private data has been applied.
-  bool remote_data_applied;
+  // True after the user callback has been invoked.
+  bool callback_issued;
 
   // Host allocator used for this state allocation.
   iree_allocator_t host_allocator;
-} iree_net_rdma_connect_state_t;
+
+  // Flexible array of endpoint connection substates.
+  iree_net_rdma_connect_endpoint_t endpoints[];
+};
 
 static void iree_net_rdma_connect_state_cleanup(
     void* user_data, iree_async_operation_t* operation, iree_status_t status,
@@ -659,15 +681,18 @@ static void iree_net_rdma_connect_state_cleanup(
       (iree_net_rdma_connect_state_t*)user_data;
   if (!iree_status_is_ok(status)) iree_status_abort(status);
 
-  iree_net_carrier_release(state->carrier);
-  iree_net_rdma_context_release(state->connection_context);
-  if (state->connection_id) {
-    const iree_net_librdmacm_t* librdmacm =
-        iree_net_rdma_context_librdmacm(state->factory->context);
-    int result = librdmacm->rdma_destroy_id(state->connection_id);
-    iree_status_t destroy_status = iree_net_rdma_factory_status_from_result(
-        __FILE__, __LINE__, result, "rdma_destroy_id");
-    if (!iree_status_is_ok(destroy_status)) iree_status_abort(destroy_status);
+  const iree_net_librdmacm_t* librdmacm =
+      iree_net_rdma_context_librdmacm(state->factory->context);
+  for (uint16_t i = 0; i < state->endpoint_count; ++i) {
+    iree_net_rdma_connect_endpoint_t* endpoint = &state->endpoints[i];
+    iree_net_carrier_release(endpoint->carrier);
+    iree_net_rdma_context_release(endpoint->connection_context);
+    if (endpoint->connection_id) {
+      int result = librdmacm->rdma_destroy_id(endpoint->connection_id);
+      iree_status_t destroy_status = iree_net_rdma_factory_status_from_result(
+          __FILE__, __LINE__, result, "rdma_destroy_id");
+      if (!iree_status_is_ok(destroy_status)) iree_status_abort(destroy_status);
+    }
   }
   iree_net_rdma_cm_channel_release(state->cm_channel);
   iree_async_proactor_release(state->proactor);
@@ -690,7 +715,7 @@ static void iree_net_rdma_connect_state_submit_cleanup(
 
 static void iree_net_rdma_connect_state_fail(
     iree_net_rdma_connect_state_t* state, iree_status_t status) {
-  state->phase = IREE_NET_RDMA_CONNECT_PHASE_COMPLETE;
+  state->callback_issued = true;
   state->callback(state->callback_user_data, status, NULL);
   iree_net_rdma_connect_state_submit_cleanup(state);
 }
@@ -698,26 +723,38 @@ static void iree_net_rdma_connect_state_fail(
 static void iree_net_rdma_connect_state_succeed(
     iree_net_rdma_connect_state_t* state) {
   iree_net_connection_t* connection = NULL;
-  iree_net_carrier_t* carriers[1] = {state->carrier};
-  iree_status_t status = iree_net_rdma_connection_create(
-      state->proactor, state->recv_pool, IREE_ARRAYSIZE(carriers), carriers,
-      state->host_allocator, &connection);
+  iree_net_carrier_t** carriers = NULL;
+  iree_status_t status =
+      iree_allocator_malloc_array(state->host_allocator, state->endpoint_count,
+                                  sizeof(*carriers), (void**)&carriers);
   if (iree_status_is_ok(status)) {
-    state->carrier = carriers[0];
-    state->phase = IREE_NET_RDMA_CONNECT_PHASE_COMPLETE;
+    for (uint16_t i = 0; i < state->endpoint_count; ++i) {
+      carriers[i] = state->endpoints[i].carrier;
+    }
+    status = iree_net_rdma_connection_create(
+        state->proactor, state->recv_pool, state->endpoint_count, carriers,
+        state->host_allocator, &connection);
+  }
+  if (iree_status_is_ok(status)) {
+    for (uint16_t i = 0; i < state->endpoint_count; ++i) {
+      state->endpoints[i].carrier = carriers[i];
+    }
+    state->callback_issued = true;
     state->callback(state->callback_user_data, iree_ok_status(), connection);
   } else {
-    state->phase = IREE_NET_RDMA_CONNECT_PHASE_COMPLETE;
+    state->callback_issued = true;
     state->callback(state->callback_user_data, status, NULL);
   }
+  iree_allocator_free(state->host_allocator, carriers);
   iree_net_rdma_connect_state_submit_cleanup(state);
 }
 
 static iree_status_t iree_net_rdma_connect_state_create_carrier(
-    iree_net_rdma_connect_state_t* state) {
+    iree_net_rdma_connect_endpoint_t* endpoint) {
+  iree_net_rdma_connect_state_t* state = endpoint->state;
   iree_status_t status = iree_net_rdma_context_create_for_cm_id(
-      state->factory->context, state->connection_id, state->host_allocator,
-      &state->connection_context);
+      state->factory->context, endpoint->connection_id, state->host_allocator,
+      &endpoint->connection_context);
 
   if (iree_status_is_ok(status)) {
     iree_net_carrier_callback_t callback = {
@@ -725,58 +762,62 @@ static iree_status_t iree_net_rdma_connect_state_create_carrier(
         .user_data = NULL,
     };
     iree_net_rdma_carrier_create_params_t params = {
-        .context = state->connection_context,
+        .context = endpoint->connection_context,
         .proactor = state->proactor,
         .recv_pool = state->recv_pool,
-        .connection_id = state->connection_id,
+        .connection_id = endpoint->connection_id,
         .callback = callback,
         .options = state->factory->carrier_options,
     };
     status = iree_net_rdma_carrier_create(params, state->host_allocator,
-                                          &state->carrier);
+                                          &endpoint->carrier);
   }
 
   if (iree_status_is_ok(status)) {
-    state->connection_id = NULL;
+    endpoint->connection_id = NULL;
     iree_net_rdma_carrier_t* rdma_carrier =
-        iree_net_rdma_carrier_cast(state->carrier);
+        iree_net_rdma_carrier_cast(endpoint->carrier);
     status = iree_net_rdma_factory_serialize_endpoint_data(
-        rdma_carrier, state->group_id, /*endpoint_index=*/0,
-        /*endpoint_count=*/1,
-        iree_make_byte_span(state->private_data, sizeof(state->private_data)),
-        &state->private_data_length);
+        rdma_carrier, state->group_id, endpoint->endpoint_index,
+        state->endpoint_count,
+        iree_make_byte_span(endpoint->private_data,
+                            sizeof(endpoint->private_data)),
+        &endpoint->private_data_length);
   }
   return status;
 }
 
 static iree_status_t iree_net_rdma_connect_state_apply_remote_data(
-    iree_net_rdma_connect_state_t* state,
+    iree_net_rdma_connect_endpoint_t* endpoint,
     const iree_net_rdma_cm_event_t* event) {
-  if (state->remote_data_applied) return iree_ok_status();
+  if (endpoint->remote_data_applied) return iree_ok_status();
   if (event->private_data.data_length == 0) {
     return iree_make_status(IREE_STATUS_DATA_LOSS,
                             "RDMA peer did not provide private data");
   }
+  iree_net_rdma_connect_state_t* state = endpoint->state;
   iree_net_rdma_endpoint_data_t endpoint_data;
   IREE_RETURN_IF_ERROR(iree_net_rdma_endpoint_data_deserialize(
       event->private_data, &endpoint_data));
   IREE_RETURN_IF_ERROR(iree_net_rdma_factory_validate_endpoint_data(
-      &endpoint_data, state->group_id, /*endpoint_index=*/0,
-      /*endpoint_count=*/1));
+      &endpoint_data, state->group_id, endpoint->endpoint_index,
+      state->endpoint_count));
 
-  iree_net_rdma_carrier_t* carrier = iree_net_rdma_carrier_cast(state->carrier);
+  iree_net_rdma_carrier_t* carrier =
+      iree_net_rdma_carrier_cast(endpoint->carrier);
   iree_status_t status = iree_net_rdma_carrier_import_connection_data(
       carrier, &endpoint_data.connection_data);
-  if (iree_status_is_ok(status)) state->remote_data_applied = true;
+  if (iree_status_is_ok(status)) endpoint->remote_data_applied = true;
   return status;
 }
 
 static void iree_net_rdma_connect_state_on_cm_event(
     void* user_data, iree_status_t status,
     const iree_net_rdma_cm_event_t* event) {
-  iree_net_rdma_connect_state_t* state =
-      (iree_net_rdma_connect_state_t*)user_data;
-  if (state->phase == IREE_NET_RDMA_CONNECT_PHASE_COMPLETE) {
+  iree_net_rdma_connect_endpoint_t* endpoint =
+      (iree_net_rdma_connect_endpoint_t*)user_data;
+  iree_net_rdma_connect_state_t* state = endpoint->state;
+  if (state->callback_issued) {
     if (!iree_status_is_ok(status)) iree_status_abort(status);
     return;
   }
@@ -792,13 +833,13 @@ static void iree_net_rdma_connect_state_on_cm_event(
       status = iree_net_rdma_factory_status_from_cm_event(event,
                                                           "rdma_resolve_addr");
       if (iree_status_is_ok(status)) {
-        status = iree_net_rdma_connect_state_create_carrier(state);
+        status = iree_net_rdma_connect_state_create_carrier(endpoint);
       }
       if (iree_status_is_ok(status)) {
-        state->phase = IREE_NET_RDMA_CONNECT_PHASE_RESOLVING_ROUTE;
+        endpoint->phase = IREE_NET_RDMA_CONNECT_PHASE_RESOLVING_ROUTE;
         int result = librdmacm->rdma_resolve_route(
             iree_net_rdma_carrier_connection_id(
-                iree_net_rdma_carrier_cast(state->carrier)),
+                iree_net_rdma_carrier_cast(endpoint->carrier)),
             state->factory->resolve_timeout_ms);
         status = iree_net_rdma_factory_status_from_result(
             __FILE__, __LINE__, result, "rdma_resolve_route");
@@ -814,15 +855,15 @@ static void iree_net_rdma_connect_state_on_cm_event(
       struct rdma_conn_param conn_param;
       if (iree_status_is_ok(status)) {
         status = iree_net_rdma_factory_initialize_conn_param(
-            iree_make_const_byte_span(state->private_data,
-                                      state->private_data_length),
+            iree_make_const_byte_span(endpoint->private_data,
+                                      endpoint->private_data_length),
             &conn_param);
       }
       if (iree_status_is_ok(status)) {
-        state->phase = IREE_NET_RDMA_CONNECT_PHASE_CONNECTING;
+        endpoint->phase = IREE_NET_RDMA_CONNECT_PHASE_CONNECTING;
         int result = librdmacm->rdma_connect(
             iree_net_rdma_carrier_connection_id(
-                iree_net_rdma_carrier_cast(state->carrier)),
+                iree_net_rdma_carrier_cast(endpoint->carrier)),
             &conn_param);
         status = iree_net_rdma_factory_status_from_result(
             __FILE__, __LINE__, result, "rdma_connect");
@@ -833,7 +874,7 @@ static void iree_net_rdma_connect_state_on_cm_event(
       break;
     }
     case RDMA_CM_EVENT_CONNECT_RESPONSE:
-      status = iree_net_rdma_connect_state_apply_remote_data(state, event);
+      status = iree_net_rdma_connect_state_apply_remote_data(endpoint, event);
       if (!iree_status_is_ok(status)) {
         iree_net_rdma_connect_state_fail(state, status);
       }
@@ -842,10 +883,14 @@ static void iree_net_rdma_connect_state_on_cm_event(
       status =
           iree_net_rdma_factory_status_from_cm_event(event, "rdma_connect");
       if (iree_status_is_ok(status)) {
-        status = iree_net_rdma_connect_state_apply_remote_data(state, event);
+        status = iree_net_rdma_connect_state_apply_remote_data(endpoint, event);
       }
       if (iree_status_is_ok(status)) {
-        iree_net_rdma_connect_state_succeed(state);
+        endpoint->phase = IREE_NET_RDMA_CONNECT_PHASE_COMPLETE;
+        ++state->completed_endpoint_count;
+        if (state->completed_endpoint_count == state->endpoint_count) {
+          iree_net_rdma_connect_state_succeed(state);
+        }
       } else {
         iree_net_rdma_connect_state_fail(state, status);
       }
@@ -1554,19 +1599,28 @@ static iree_status_t iree_net_rdma_factory_connect(
     iree_async_proactor_t* proactor, iree_async_buffer_pool_t* recv_pool,
     iree_net_transport_connect_callback_t callback, void* user_data) {
   iree_net_rdma_factory_t* factory = (iree_net_rdma_factory_t*)base_factory;
+  uint16_t endpoint_count = (uint16_t)factory->max_endpoint_count;
 
   iree_async_address_t remote_address;
   iree_status_t status =
       iree_async_address_from_string(address, &remote_address);
 
+  iree_host_size_t total_size = 0;
+  if (iree_status_is_ok(status)) {
+    status = IREE_STRUCT_LAYOUT(
+        sizeof(iree_net_rdma_connect_state_t), &total_size,
+        IREE_STRUCT_FIELD_FAM(endpoint_count,
+                              iree_net_rdma_connect_endpoint_t));
+  }
+
   iree_net_rdma_connect_state_t* state = NULL;
   if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc(factory->host_allocator, sizeof(*state),
+    status = iree_allocator_malloc(factory->host_allocator, total_size,
                                    (void**)&state);
   }
 
   if (iree_status_is_ok(status)) {
-    memset(state, 0, sizeof(*state));
+    memset(state, 0, total_size);
     state->factory = factory;
     iree_net_transport_factory_retain(base_factory);
     state->proactor = proactor;
@@ -1574,8 +1628,13 @@ static iree_status_t iree_net_rdma_factory_connect(
     state->recv_pool = recv_pool;
     state->callback = callback;
     state->callback_user_data = user_data;
-    state->phase = IREE_NET_RDMA_CONNECT_PHASE_RESOLVING_ADDRESS;
+    state->endpoint_count = endpoint_count;
     state->host_allocator = factory->host_allocator;
+    for (uint16_t i = 0; i < endpoint_count; ++i) {
+      state->endpoints[i].state = state;
+      state->endpoints[i].endpoint_index = i;
+      state->endpoints[i].phase = IREE_NET_RDMA_CONNECT_PHASE_RESOLVING_ADDRESS;
+    }
   }
 
   if (iree_status_is_ok(status)) {
@@ -1592,23 +1651,26 @@ static iree_status_t iree_net_rdma_factory_connect(
         cm_callback, factory->host_allocator, &state->cm_channel);
   }
 
-  const iree_net_librdmacm_t* librdmacm =
-      iree_net_rdma_context_librdmacm(factory->context);
   if (iree_status_is_ok(status)) {
+    const iree_net_librdmacm_t* librdmacm =
+        iree_net_rdma_context_librdmacm(factory->context);
     struct rdma_event_channel* event_channel =
         iree_net_rdma_cm_channel_native_event_channel(state->cm_channel);
-    int result = librdmacm->rdma_create_id(event_channel, &state->connection_id,
-                                           state, RDMA_PS_TCP);
-    status = iree_net_rdma_factory_status_from_result(__FILE__, __LINE__,
-                                                      result, "rdma_create_id");
-  }
-
-  if (iree_status_is_ok(status)) {
-    int result = librdmacm->rdma_resolve_addr(
-        state->connection_id, NULL, (struct sockaddr*)remote_address.storage,
-        factory->resolve_timeout_ms);
-    status = iree_net_rdma_factory_status_from_result(
-        __FILE__, __LINE__, result, "rdma_resolve_addr");
+    for (uint16_t i = 0; i < endpoint_count && iree_status_is_ok(status); ++i) {
+      iree_net_rdma_connect_endpoint_t* endpoint = &state->endpoints[i];
+      int result = librdmacm->rdma_create_id(
+          event_channel, &endpoint->connection_id, endpoint, RDMA_PS_TCP);
+      status = iree_net_rdma_factory_status_from_result(
+          __FILE__, __LINE__, result, "rdma_create_id");
+      if (iree_status_is_ok(status)) {
+        result = librdmacm->rdma_resolve_addr(
+            endpoint->connection_id, NULL,
+            (struct sockaddr*)remote_address.storage,
+            factory->resolve_timeout_ms);
+        status = iree_net_rdma_factory_status_from_result(
+            __FILE__, __LINE__, result, "rdma_resolve_addr");
+      }
+    }
   }
 
   if (!iree_status_is_ok(status) && state) {
