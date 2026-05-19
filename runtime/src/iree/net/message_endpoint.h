@@ -72,6 +72,12 @@ typedef iree_status_t (*iree_net_message_endpoint_message_fn_t)(
 typedef void (*iree_net_message_endpoint_error_fn_t)(void* user_data,
                                                      iree_status_t status);
 
+// Send readiness handler invoked when backpressured sends may make progress.
+//
+// Called on the proactor thread. This is an edge notification, not a
+// reservation; callers must re-query send budget or retry their send path.
+typedef void (*iree_net_message_endpoint_send_ready_fn_t)(void* user_data);
+
 // Deactivation complete callback invoked when graceful shutdown finishes.
 //
 // After this callback fires, the endpoint is fully drained and operations will
@@ -80,13 +86,21 @@ typedef void (*iree_net_message_endpoint_deactivate_fn_t)(void* user_data);
 
 // Bundled message and error handlers for atomic handoff.
 //
-// During protocol transitions (e.g., bootstrap to operational), both handlers
-// must change atomically to prevent messages from being delivered to a stale
-// handler. The shared user_data ensures consistency between both callbacks.
+// During protocol transitions (e.g., bootstrap to operational), callbacks must
+// change atomically to prevent messages from being delivered to a stale
+// handler. The shared user_data ensures consistency across the bundle.
 typedef struct iree_net_message_endpoint_callbacks_t {
+  // Function invoked for each complete received message.
   iree_net_message_endpoint_message_fn_t on_message;
+
+  // Function invoked when the endpoint reports a transport error.
   iree_net_message_endpoint_error_fn_t on_error;
+
+  // Opaque user data passed to every callback in this bundle.
   void* user_data;
+
+  // Function invoked when a previously backpressured send may make progress.
+  iree_net_message_endpoint_send_ready_fn_t on_send_ready;
 } iree_net_message_endpoint_callbacks_t;
 
 // Parameters for send operations.
@@ -193,8 +207,9 @@ static inline iree_status_t iree_net_message_endpoint_send(
 // Queries send budget for backpressure management.
 //
 // Returns both byte budget and operation slot budget. When either reaches
-// zero, the endpoint is backpressured and callers should wait for send
-// completions before submitting more operations.
+// zero, the endpoint is backpressured. Local operation slot exhaustion is
+// refreshed by send completions; peer-managed budget exhaustion may instead be
+// refreshed by on_send_ready.
 static inline iree_net_carrier_send_budget_t
 iree_net_message_endpoint_query_send_budget(
     iree_net_message_endpoint_t endpoint) {

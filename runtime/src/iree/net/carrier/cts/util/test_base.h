@@ -102,9 +102,15 @@ struct SendCompletionTracker {
                        uint64_t operation_user_data, iree_status_t status,
                        iree_host_size_t bytes_transferred,
                        iree_async_buffer_lease_t* recv_lease) {
-    (void)kind;
     (void)operation_user_data;
     (void)recv_lease;
+    if (kind == IREE_NET_CARRIER_COMPLETION_SEND_READY) {
+      if (!iree_status_is_ok(status)) {
+        iree_status_abort(status);
+      }
+      return;
+    }
+
     auto* tracker = static_cast<SendCompletionTracker*>(callback_user_data);
     tracker->call_count.fetch_add(1, std::memory_order_relaxed);
     tracker->total_bytes.fetch_add(bytes_transferred,

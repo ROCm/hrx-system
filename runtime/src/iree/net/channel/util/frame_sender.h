@@ -378,9 +378,9 @@ void iree_net_frame_sender_handle_completion(
 // use frame_sender. The callback extracts the frame_send_context_t from
 // |operation_user_data| and calls iree_net_frame_sender_handle_completion().
 //
-// Completion kinds other than IREE_NET_CARRIER_COMPLETION_SEND are not part of
-// the frame_sender contract and abort because they require a carrier-level
-// router rather than a frame_sender-only callback.
+// IREE_NET_CARRIER_COMPLETION_SEND_READY is a transport readiness edge and is
+// ignored here. Other completion kinds require a carrier-level router rather
+// than a frame_sender-only callback.
 //
 // This is the standard carrier callback for connections that use frame_sender
 // in their channel layers.

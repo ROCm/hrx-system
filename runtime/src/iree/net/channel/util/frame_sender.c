@@ -607,6 +607,12 @@ void iree_net_frame_sender_dispatch_carrier_completion(
   (void)callback_user_data;
   (void)bytes_transferred;
   (void)recv_lease;
+  if (kind == IREE_NET_CARRIER_COMPLETION_SEND_READY) {
+    if (!iree_status_is_ok(status)) {
+      iree_status_abort(status);
+    }
+    return;
+  }
   if (kind != IREE_NET_CARRIER_COMPLETION_SEND) {
     if (!iree_status_is_ok(status)) {
       iree_status_abort(status);

@@ -879,6 +879,15 @@ TEST_F(FrameSenderTest, CompletionWithError) {
   EXPECT_EQ(ctx_.completions[0].status_code, IREE_STATUS_INTERNAL);
 }
 
+TEST_F(FrameSenderTest, DispatchIgnoresSendReadyCompletion) {
+  iree_net_frame_sender_dispatch_carrier_completion(
+      nullptr, IREE_NET_CARRIER_COMPLETION_SEND_READY,
+      /*operation_user_data=*/0, iree_ok_status(), /*bytes_transferred=*/0,
+      nullptr);
+
+  EXPECT_TRUE(ctx_.completions.empty());
+}
+
 TEST_F(FrameSenderTest, MultipleInFlightSends) {
   mock_carrier_->auto_complete = false;
   iree_host_size_t available_before = test_pool_->AvailableCount();  // 4

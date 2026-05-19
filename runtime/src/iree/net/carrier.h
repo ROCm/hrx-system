@@ -33,9 +33,13 @@
 // ## Backpressure
 //
 // Carriers expose message backpressure via query_send_budget() and one-sided
-// write backpressure via query_direct_write_budget(). When budget is exhausted,
-// callers should wait for operation completions before submitting more data.
-// This prevents buffer exhaustion and RNR errors (RDMA).
+// write backpressure via query_direct_write_budget(). When local operation
+// slots are exhausted, operation completions will refresh the budget. Some
+// carriers also depend on peer-managed budget (for example RDMA receive
+// credits) where the peer may update memory without producing a local operation
+// completion. Those carriers report IREE_NET_CARRIER_COMPLETION_SEND_READY
+// when send admission may succeed again. This prevents buffer exhaustion and
+// RNR errors (RDMA).
 
 #ifndef IREE_NET_CARRIER_H_
 #define IREE_NET_CARRIER_H_
@@ -286,6 +290,9 @@ typedef struct iree_net_direct_read_params_t {
 //
 // query_send_budget() reports budget for message sends. Carriers with one-sided
 // operations may expose operation-specific budgets through other query APIs.
+// Callers that observe a zero budget should poll until either an operation
+// completion or IREE_NET_CARRIER_COMPLETION_SEND_READY indicates that the
+// budget may have changed.
 typedef struct iree_net_carrier_send_budget_t {
   // Bytes available for sending. 0 means backpressured on bandwidth.
   // For TCP, this reflects socket send buffer space.
@@ -371,6 +378,14 @@ enum iree_net_carrier_completion_kind_e {
 
   // Carrier-level transport error not associated with a specific operation.
   IREE_NET_CARRIER_COMPLETION_ERROR = 4u,
+
+  // Send admission may succeed after peer-managed budget changed.
+  //
+  // This is not associated with a previously submitted operation:
+  // |operation_user_data| and |bytes_transferred| are zero and |recv_lease| is
+  // NULL. It is a readiness edge, not a reservation; callers must re-query the
+  // budget or retry the send path before submitting more work.
+  IREE_NET_CARRIER_COMPLETION_SEND_READY = 5u,
 };
 
 // Completion callback for carrier operations.
@@ -707,8 +722,10 @@ static inline iree_net_carrier_stats_t iree_net_carrier_query_stats(
 //   - RDMA: Limited by send queue depth (slots) to avoid RNR errors.
 //   - UDP: Limited by socket buffer and MTU.
 //
-// When either dimension reaches 0, the carrier is backpressured and callers
-// should wait for send completions before submitting more operations.
+// When either dimension reaches 0, the carrier is backpressured. Local
+// operation slot exhaustion is refreshed by send completions; peer-managed
+// budget exhaustion may instead be refreshed by
+// IREE_NET_CARRIER_COMPLETION_SEND_READY.
 static inline iree_net_carrier_send_budget_t iree_net_carrier_query_send_budget(
     iree_net_carrier_t* carrier) {
   return carrier->vtable->query_send_budget(carrier);

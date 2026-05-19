@@ -24,6 +24,8 @@
 #include "iree/net/carrier/rdma/sge.h"
 #include "iree/net/carrier/rdma/work_request_table.h"
 
+#define IREE_NET_RDMA_CARRIER_CREDIT_WAKE_INTERVAL_NS iree_make_duration_ms(1)
+
 typedef uint8_t iree_net_rdma_carrier_flags_t;
 enum iree_net_rdma_carrier_flag_bits_e {
   IREE_NET_RDMA_CARRIER_FLAG_OWNS_CONNECTION_ID = 1u << 0,
@@ -32,6 +34,7 @@ enum iree_net_rdma_carrier_flag_bits_e {
   IREE_NET_RDMA_CARRIER_FLAG_CREDIT_GRANT_IN_FLIGHT = 1u << 3,
   IREE_NET_RDMA_CARRIER_FLAG_TERMINAL_FAILURE_HANDLED = 1u << 4,
   IREE_NET_RDMA_CARRIER_FLAG_OWNS_RECV_POOL = 1u << 5,
+  IREE_NET_RDMA_CARRIER_FLAG_CREDIT_WAKE_TIMER_IN_FLIGHT = 1u << 6,
 };
 
 struct iree_net_rdma_carrier_t {
@@ -98,6 +101,12 @@ struct iree_net_rdma_carrier_t {
   // Cumulative local receive credits known complete and visible to the peer.
   uint32_t local_recv_credit_published;
 
+  // Proactor timers used to re-check peer-written credit memory after stalls.
+  iree_async_timer_operation_t credit_wake_timers[2];
+
+  // Timer slot selected for the next credit-wake arm.
+  uint8_t credit_wake_next_timer_index;
+
   // Local private data serialized during rdma_cm connect/accept.
   iree_net_rdma_connection_data_t local_connection_data;
 
@@ -112,6 +121,9 @@ struct iree_net_rdma_carrier_t {
 };
 
 static const iree_net_carrier_vtable_t iree_net_rdma_carrier_vtable;
+
+static iree_status_t iree_net_rdma_carrier_arm_credit_wake_locked(
+    iree_net_rdma_carrier_t* carrier);
 
 static iree_status_t iree_net_rdma_carrier_try_post_credit_grant_locked(
     iree_net_rdma_carrier_t* carrier);
@@ -336,6 +348,101 @@ static void iree_net_rdma_carrier_refresh_remote_recv_credits_locked(
   }
 }
 
+static bool iree_net_rdma_carrier_remote_recv_credits_exhausted_locked(
+    iree_net_rdma_carrier_t* carrier) {
+  if (!iree_any_bit_set(
+          carrier->flags,
+          IREE_NET_RDMA_CARRIER_FLAG_REMOTE_CONNECTION_DATA_APPLIED)) {
+    return false;
+  }
+  return iree_net_rdma_send_window_available_recv_credits(
+             &carrier->send_window) == 0;
+}
+
+static bool iree_net_rdma_carrier_acquire_uses_remote_recv_credit(
+    iree_net_rdma_send_window_acquire_flags_t acquire_flags) {
+  return iree_any_bit_set(
+      acquire_flags, IREE_NET_RDMA_SEND_WINDOW_ACQUIRE_FLAG_REMOTE_RECV_CREDIT);
+}
+
+static void iree_net_rdma_carrier_on_credit_wake_timer(
+    void* user_data, iree_async_operation_t* operation, iree_status_t status,
+    iree_async_completion_flags_t flags) {
+  (void)operation;
+  (void)flags;
+  iree_net_rdma_carrier_t* carrier = (iree_net_rdma_carrier_t*)user_data;
+
+  bool notify_send_ready = false;
+  iree_status_t rearm_status = iree_ok_status();
+  if (iree_status_is_ok(status)) {
+    iree_slim_mutex_lock(&carrier->queue_mutex);
+    carrier->flags &= ~IREE_NET_RDMA_CARRIER_FLAG_CREDIT_WAKE_TIMER_IN_FLIGHT;
+    if (iree_net_carrier_state(&carrier->base) ==
+        IREE_NET_CARRIER_STATE_ACTIVE) {
+      iree_net_rdma_carrier_refresh_remote_recv_credits_locked(carrier);
+      if (iree_net_rdma_carrier_remote_recv_credits_exhausted_locked(carrier)) {
+        rearm_status = iree_net_rdma_carrier_arm_credit_wake_locked(carrier);
+      } else {
+        notify_send_ready = true;
+      }
+    }
+    iree_slim_mutex_unlock(&carrier->queue_mutex);
+  } else {
+    iree_slim_mutex_lock(&carrier->queue_mutex);
+    carrier->flags &= ~IREE_NET_RDMA_CARRIER_FLAG_CREDIT_WAKE_TIMER_IN_FLIGHT;
+    iree_slim_mutex_unlock(&carrier->queue_mutex);
+  }
+
+  if (!iree_status_is_ok(status)) {
+    iree_net_rdma_carrier_notify_error(carrier, status);
+  } else if (!iree_status_is_ok(rearm_status)) {
+    iree_net_rdma_carrier_notify_error(carrier, rearm_status);
+  } else if (notify_send_ready) {
+    carrier->base.callback.fn(carrier->base.callback.user_data,
+                              IREE_NET_CARRIER_COMPLETION_SEND_READY,
+                              /*operation_user_data=*/0, iree_ok_status(),
+                              /*bytes_transferred=*/0, /*recv_lease=*/NULL);
+  }
+  iree_net_carrier_release(&carrier->base);
+}
+
+static iree_status_t iree_net_rdma_carrier_arm_credit_wake_locked(
+    iree_net_rdma_carrier_t* carrier) {
+  if (iree_net_carrier_state(&carrier->base) != IREE_NET_CARRIER_STATE_ACTIVE) {
+    return iree_ok_status();
+  }
+  if (!iree_net_rdma_carrier_remote_recv_credits_exhausted_locked(carrier)) {
+    return iree_ok_status();
+  }
+  if (iree_any_bit_set(
+          carrier->flags,
+          IREE_NET_RDMA_CARRIER_FLAG_CREDIT_WAKE_TIMER_IN_FLIGHT)) {
+    return iree_ok_status();
+  }
+
+  uint8_t timer_index = carrier->credit_wake_next_timer_index;
+  carrier->credit_wake_next_timer_index ^= 1u;
+  iree_async_timer_operation_t* timer =
+      &carrier->credit_wake_timers[timer_index];
+  iree_async_operation_zero(&timer->base, sizeof(*timer));
+  iree_async_operation_initialize(&timer->base, IREE_ASYNC_OPERATION_TYPE_TIMER,
+                                  IREE_ASYNC_OPERATION_FLAG_NONE,
+                                  iree_net_rdma_carrier_on_credit_wake_timer,
+                                  carrier);
+  timer->deadline_ns =
+      iree_time_now() + IREE_NET_RDMA_CARRIER_CREDIT_WAKE_INTERVAL_NS;
+
+  carrier->flags |= IREE_NET_RDMA_CARRIER_FLAG_CREDIT_WAKE_TIMER_IN_FLIGHT;
+  iree_net_carrier_retain(&carrier->base);
+  iree_status_t status =
+      iree_async_proactor_submit_one(carrier->proactor, &timer->base);
+  if (!iree_status_is_ok(status)) {
+    carrier->flags &= ~IREE_NET_RDMA_CARRIER_FLAG_CREDIT_WAKE_TIMER_IN_FLIGHT;
+    iree_net_carrier_release(&carrier->base);
+  }
+  return status;
+}
+
 static iree_status_t iree_net_rdma_carrier_completion_kind_from_operation(
     iree_net_rdma_work_request_operation_t operation,
     iree_net_carrier_completion_kind_t* out_kind) {
@@ -517,6 +624,7 @@ static void iree_net_rdma_carrier_on_send_completions(
     void* deactivate_user_data = NULL;
     bool send_queue_completed = false;
     bool terminal_failure_handled = false;
+    iree_status_t credit_wake_status = iree_ok_status();
 
     iree_slim_mutex_lock(&carrier->queue_mutex);
     terminal_failure_handled =
@@ -559,6 +667,16 @@ static void iree_net_rdma_carrier_on_send_completions(
       if (send_queue_completed) {
         iree_net_rdma_carrier_drop_pending_operations_locked(
             carrier, 1, &deactivate_callback, &deactivate_user_data);
+      }
+      if (!draining_flush && send_queue_completed &&
+          iree_status_is_ok(work_status) && iree_status_is_ok(cleanup_status)) {
+        iree_net_rdma_carrier_refresh_remote_recv_credits_locked(carrier);
+      }
+      if (!draining_flush && send_queue_completed &&
+          iree_status_is_ok(work_status) && iree_status_is_ok(cleanup_status) &&
+          iree_net_rdma_carrier_remote_recv_credits_exhausted_locked(carrier)) {
+        credit_wake_status =
+            iree_net_rdma_carrier_arm_credit_wake_locked(carrier);
       }
     }
     iree_slim_mutex_unlock(&carrier->queue_mutex);
@@ -622,6 +740,9 @@ static void iree_net_rdma_carrier_on_send_completions(
                                 work_request_completion.user_data,
                                 completion_status, bytes_transferred,
                                 /*recv_lease=*/NULL);
+    }
+    if (!iree_status_is_ok(credit_wake_status)) {
+      iree_net_rdma_carrier_notify_error(carrier, credit_wake_status);
     }
     iree_net_rdma_carrier_invoke_deactivate_callback(deactivate_callback,
                                                      deactivate_user_data);
@@ -1161,6 +1282,11 @@ static iree_status_t iree_net_rdma_carrier_post_send_work_request_locked(
     }
     status =
         iree_net_rdma_send_window_acquire(&carrier->send_window, acquire_flags);
+    if (!iree_status_is_ok(status) &&
+        iree_net_rdma_carrier_acquire_uses_remote_recv_credit(acquire_flags)) {
+      status = iree_status_join(
+          status, iree_net_rdma_carrier_arm_credit_wake_locked(carrier));
+    }
   }
   bool send_window_acquired = iree_status_is_ok(status);
 

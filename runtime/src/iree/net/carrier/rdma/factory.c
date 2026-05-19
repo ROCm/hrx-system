@@ -382,12 +382,30 @@ static void iree_net_rdma_endpoint_notify_error(
   }
 }
 
+static void iree_net_rdma_endpoint_notify_send_ready(
+    iree_net_rdma_endpoint_t* endpoint) {
+  if (endpoint->callbacks.on_send_ready &&
+      iree_any_bit_set(endpoint->flags,
+                       IREE_NET_RDMA_ENDPOINT_FLAG_ALLOCATED)) {
+    endpoint->callbacks.on_send_ready(endpoint->callbacks.user_data);
+  }
+}
+
 static void iree_net_rdma_connection_carrier_completion(
     void* callback_user_data, iree_net_carrier_completion_kind_t kind,
     uint64_t operation_user_data, iree_status_t status,
     iree_host_size_t bytes_transferred, iree_async_buffer_lease_t* recv_lease) {
   iree_net_rdma_endpoint_t* endpoint =
       (iree_net_rdma_endpoint_t*)callback_user_data;
+  if (kind == IREE_NET_CARRIER_COMPLETION_SEND_READY) {
+    if (iree_status_is_ok(status)) {
+      iree_net_rdma_endpoint_notify_send_ready(endpoint);
+    } else {
+      iree_net_rdma_endpoint_notify_error(endpoint, status);
+    }
+    return;
+  }
+
   if (kind == IREE_NET_CARRIER_COMPLETION_SEND && operation_user_data != 0) {
     iree_status_t endpoint_status = iree_ok_status();
     if (!iree_status_is_ok(status)) endpoint_status = iree_status_clone(status);
