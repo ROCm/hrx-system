@@ -4,12 +4,14 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Cross-process file handle transfer sideband for SHM carriers.
+// Cross-process file handle transfer for SHM carriers.
 //
 // SHM ring entries cannot carry platform descriptor rights. Cross-process SHM
 // handshakes therefore keep their bootstrap channel open and use this component
-// to transfer POSIX fd rights out-of-band while the normal carrier/control
-// payload carries an opaque transfer ID.
+// to transfer rights while the normal carrier/control payload carries an opaque
+// transfer payload. POSIX uses SCM_RIGHTS over the retained channel. Windows
+// duplicates HANDLEs into the peer process at export time and carries the peer
+// HANDLE value in the transfer payload.
 
 #ifndef IREE_NET_CARRIER_SHM_FILE_TRANSFER_H_
 #define IREE_NET_CARRIER_SHM_FILE_TRANSFER_H_
@@ -25,9 +27,11 @@ extern "C" {
 
 typedef struct iree_net_shm_file_transfer_t iree_net_shm_file_transfer_t;
 
-// Creates a file transfer sideband that owns |channel|.
+// Creates a file transfer sideband that owns |channel|. |peer_process_id| is
+// only used by platforms that duplicate handles into the peer process.
 iree_status_t iree_net_shm_file_transfer_create(
-    iree_async_primitive_t channel, iree_allocator_t host_allocator,
+    iree_async_primitive_t channel, uint32_t peer_process_id,
+    iree_allocator_t host_allocator,
     iree_net_shm_file_transfer_t** out_transfer);
 
 // Releases the transfer sideband and closes any pending imported descriptors.

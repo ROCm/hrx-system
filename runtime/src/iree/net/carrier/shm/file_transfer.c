@@ -18,8 +18,22 @@
 #include <unistd.h>
 #endif  // IREE_FILE_IO_ENABLE && !IREE_PLATFORM_WINDOWS
 
+#if IREE_FILE_IO_ENABLE && defined(IREE_PLATFORM_WINDOWS)
+#include <fcntl.h>
+#include <io.h>
+#include <windows.h>
+#endif  // IREE_FILE_IO_ENABLE && IREE_PLATFORM_WINDOWS
+
 #define IREE_NET_SHM_FILE_TRANSFER_MAGIC 0x54464853u
 #define IREE_NET_SHM_FILE_TRANSFER_VERSION 1u
+
+#if IREE_FILE_IO_ENABLE
+#define IREE_NET_SHM_FILE_TRANSFER_INVALID_FD (-1)
+#define IREE_NET_SHM_FILE_TRANSFER_SUPPORTED_ACCESS \
+  (IREE_IO_FILE_ACCESS_READ | IREE_IO_FILE_ACCESS_WRITE)
+#define IREE_NET_SHM_FILE_TRANSFER_SUPPORTED_MODE \
+  (IREE_IO_FILE_MODE_READ | IREE_IO_FILE_MODE_WRITE | IREE_IO_FILE_MODE_ASYNC)
+#endif  // IREE_FILE_IO_ENABLE
 
 typedef uint8_t iree_net_shm_file_transfer_opcode_t;
 enum iree_net_shm_file_transfer_opcode_e {
@@ -28,7 +42,7 @@ enum iree_net_shm_file_transfer_opcode_e {
 };
 
 typedef struct iree_net_shm_file_transfer_payload_t {
-  // Opaque sideband transfer ID resolved by the peer carrier.
+  // POSIX: opaque sideband transfer ID. Windows: peer-process HANDLE value.
   uint64_t id;
   // iree_io_file_mode_t used when the peer wraps the received handle.
   uint64_t mode;
@@ -83,21 +97,15 @@ struct iree_net_shm_file_transfer_t {
   // FD received with a partial header; -1 if none is pending.
   int partial_fd;
 #endif  // IREE_FILE_IO_ENABLE && !IREE_PLATFORM_WINDOWS
+#if IREE_FILE_IO_ENABLE && defined(IREE_PLATFORM_WINDOWS)
+  // Peer process ID received during SHM handshake.
+  uint32_t peer_process_id;
+  // Process handle opened with PROCESS_DUP_HANDLE for duplicating file HANDLEs.
+  HANDLE peer_process;
+#endif  // IREE_FILE_IO_ENABLE && IREE_PLATFORM_WINDOWS
 };
 
-#if IREE_FILE_IO_ENABLE && !defined(IREE_PLATFORM_WINDOWS)
-
-#define IREE_NET_SHM_FILE_TRANSFER_INVALID_FD (-1)
-#define IREE_NET_SHM_FILE_TRANSFER_SUPPORTED_ACCESS \
-  (IREE_IO_FILE_ACCESS_READ | IREE_IO_FILE_ACCESS_WRITE)
-#define IREE_NET_SHM_FILE_TRANSFER_SUPPORTED_MODE \
-  (IREE_IO_FILE_MODE_READ | IREE_IO_FILE_MODE_WRITE | IREE_IO_FILE_MODE_ASYNC)
-
-static int iree_net_shm_file_transfer_channel_fd(
-    iree_net_shm_file_transfer_t* transfer) {
-  if (transfer->channel.type != IREE_ASYNC_PRIMITIVE_TYPE_FD) return -1;
-  return transfer->channel.value.fd;
-}
+#if IREE_FILE_IO_ENABLE
 
 static iree_io_file_mode_t iree_net_shm_file_transfer_mode_from_handle(
     iree_io_file_handle_t* file_handle) {
@@ -127,7 +135,7 @@ static iree_status_t iree_net_shm_file_transfer_validate_payload(
   memcpy(out_payload, transfer_payload.data, sizeof(*out_payload));
   if (out_payload->id == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "SHM file transfer ID must be nonzero");
+                            "SHM file transfer handle/id must be nonzero");
   }
   if (out_payload->reserved != 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -160,6 +168,16 @@ static iree_status_t iree_net_shm_file_transfer_validate_payload(
         out_payload->mode, out_payload->access);
   }
   return iree_ok_status();
+}
+
+#endif  // IREE_FILE_IO_ENABLE
+
+#if IREE_FILE_IO_ENABLE && !defined(IREE_PLATFORM_WINDOWS)
+
+static int iree_net_shm_file_transfer_channel_fd(
+    iree_net_shm_file_transfer_t* transfer) {
+  if (transfer->channel.type != IREE_ASYNC_PRIMITIVE_TYPE_FD) return -1;
+  return transfer->channel.value.fd;
 }
 
 static void iree_net_shm_file_transfer_close_fd(int fd) {
@@ -507,6 +525,51 @@ static void iree_net_shm_file_transfer_cancel_pending_locked(
   }
 }
 
+#endif  // IREE_FILE_IO_ENABLE && !IREE_PLATFORM_WINDOWS
+
+#if IREE_FILE_IO_ENABLE && defined(IREE_PLATFORM_WINDOWS)
+
+static void iree_net_shm_file_transfer_close_fd(int fd) {
+  if (fd >= 0) _close(fd);
+}
+
+static iree_status_t iree_net_shm_file_transfer_win32_handle_from_file(
+    iree_io_file_handle_t* file_handle, HANDLE* out_handle) {
+  *out_handle = INVALID_HANDLE_VALUE;
+  if (iree_io_file_handle_type(file_handle) != IREE_IO_FILE_HANDLE_TYPE_FD) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "SHM carrier can only transfer descriptor-backed file handles");
+  }
+  intptr_t os_file_handle =
+      _get_osfhandle(iree_io_file_handle_value(file_handle).fd);
+  if (os_file_handle == -1) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "file descriptor is not backed by a valid Win32 HANDLE");
+  }
+  *out_handle = (HANDLE)os_file_handle;
+  return iree_ok_status();
+}
+
+static iree_status_t iree_net_shm_file_transfer_win32_close_peer_handle(
+    iree_net_shm_file_transfer_t* transfer, uint64_t handle_value) {
+  if (!transfer->peer_process) return iree_ok_status();
+  if (handle_value == 0) return iree_ok_status();
+
+  if (!DuplicateHandle(transfer->peer_process, (HANDLE)(uintptr_t)handle_value,
+                       NULL, NULL, 0, FALSE, DUPLICATE_CLOSE_SOURCE)) {
+    return iree_make_status(
+        iree_status_code_from_win32_error(GetLastError()),
+        "failed to close transferred Win32 HANDLE in peer process");
+  }
+  return iree_ok_status();
+}
+
+#endif  // IREE_FILE_IO_ENABLE && IREE_PLATFORM_WINDOWS
+
+#if IREE_FILE_IO_ENABLE
+
 static void iree_net_shm_file_transfer_release_primitive(
     void* user_data, iree_io_file_handle_primitive_t handle_primitive) {
   (void)user_data;
@@ -514,10 +577,11 @@ static void iree_net_shm_file_transfer_release_primitive(
   iree_net_shm_file_transfer_close_fd(handle_primitive.value.fd);
 }
 
-#endif  // IREE_FILE_IO_ENABLE && !IREE_PLATFORM_WINDOWS
+#endif  // IREE_FILE_IO_ENABLE
 
 iree_status_t iree_net_shm_file_transfer_create(
-    iree_async_primitive_t channel, iree_allocator_t host_allocator,
+    iree_async_primitive_t channel, uint32_t peer_process_id,
+    iree_allocator_t host_allocator,
     iree_net_shm_file_transfer_t** out_transfer) {
   IREE_ASSERT_ARGUMENT(out_transfer);
   *out_transfer = NULL;
@@ -542,6 +606,16 @@ iree_status_t iree_net_shm_file_transfer_create(
       transfer = NULL;
     }
 #endif  // IREE_FILE_IO_ENABLE && !IREE_PLATFORM_WINDOWS
+#if IREE_FILE_IO_ENABLE && defined(IREE_PLATFORM_WINDOWS)
+    transfer->peer_process_id = peer_process_id;
+    if (transfer->channel.type == IREE_ASYNC_PRIMITIVE_TYPE_WIN32_HANDLE &&
+        peer_process_id != 0) {
+      transfer->peer_process =
+          OpenProcess(PROCESS_DUP_HANDLE, FALSE, peer_process_id);
+    }
+#else
+    (void)peer_process_id;
+#endif  // IREE_FILE_IO_ENABLE && IREE_PLATFORM_WINDOWS
     *out_transfer = transfer;
   } else {
     iree_async_primitive_close(&channel);
@@ -564,6 +638,11 @@ void iree_net_shm_file_transfer_release(
   iree_net_shm_file_transfer_close_fd(transfer->partial_fd);
   iree_slim_mutex_deinitialize(&transfer->mutex);
 #endif  // IREE_FILE_IO_ENABLE && !IREE_PLATFORM_WINDOWS
+#if IREE_FILE_IO_ENABLE && defined(IREE_PLATFORM_WINDOWS)
+  if (transfer->peer_process) {
+    CloseHandle(transfer->peer_process);
+  }
+#endif  // IREE_FILE_IO_ENABLE && IREE_PLATFORM_WINDOWS
   iree_async_primitive_close(&transfer->channel);
   iree_allocator_t host_allocator = transfer->host_allocator;
   iree_allocator_free(host_allocator, transfer);
@@ -575,6 +654,10 @@ iree_net_file_handle_transfer_type_t iree_net_shm_file_transfer_type(
 #if IREE_FILE_IO_ENABLE && !defined(IREE_PLATFORM_WINDOWS)
   return transfer->channel.type == IREE_ASYNC_PRIMITIVE_TYPE_FD
              ? IREE_NET_FILE_HANDLE_TRANSFER_TYPE_POSIX_FD
+             : IREE_NET_FILE_HANDLE_TRANSFER_TYPE_NONE;
+#elif IREE_FILE_IO_ENABLE && defined(IREE_PLATFORM_WINDOWS)
+  return transfer->peer_process
+             ? IREE_NET_FILE_HANDLE_TRANSFER_TYPE_WIN32_HANDLE
              : IREE_NET_FILE_HANDLE_TRANSFER_TYPE_NONE;
 #else
   (void)transfer;
@@ -591,23 +674,32 @@ iree_status_t iree_net_shm_file_transfer_query(
   *out_transfer_type = IREE_NET_FILE_HANDLE_TRANSFER_TYPE_NONE;
   *out_payload_length = 0;
 
-#if IREE_FILE_IO_ENABLE && !defined(IREE_PLATFORM_WINDOWS)
+#if IREE_FILE_IO_ENABLE
   if (!transfer) {
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                             "SHM carrier does not have a file transfer "
                             "sideband");
   }
-  if (iree_net_shm_file_transfer_type(transfer) !=
-      IREE_NET_FILE_HANDLE_TRANSFER_TYPE_POSIX_FD) {
+#if defined(IREE_PLATFORM_WINDOWS)
+  const iree_net_file_handle_transfer_type_t expected_transfer_type =
+      IREE_NET_FILE_HANDLE_TRANSFER_TYPE_WIN32_HANDLE;
+  const char* expected_transfer_name = "Win32 HANDLE";
+#else
+  const iree_net_file_handle_transfer_type_t expected_transfer_type =
+      IREE_NET_FILE_HANDLE_TRANSFER_TYPE_POSIX_FD;
+  const char* expected_transfer_name = "POSIX fd";
+#endif  // IREE_PLATFORM_WINDOWS
+  if (iree_net_shm_file_transfer_type(transfer) != expected_transfer_type) {
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                            "SHM carrier cannot transfer POSIX fd rights");
+                            "SHM carrier cannot transfer %s rights",
+                            expected_transfer_name);
   }
   if (iree_io_file_handle_type(file_handle) != IREE_IO_FILE_HANDLE_TYPE_FD) {
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
         "SHM carrier can only transfer descriptor-backed file handles");
   }
-  *out_transfer_type = IREE_NET_FILE_HANDLE_TRANSFER_TYPE_POSIX_FD;
+  *out_transfer_type = expected_transfer_type;
   *out_payload_length = sizeof(iree_net_shm_file_transfer_payload_t);
   return iree_ok_status();
 #else
@@ -623,13 +715,20 @@ iree_status_t iree_net_shm_file_transfer_export(
     iree_net_shm_file_transfer_t* transfer, iree_io_file_handle_t* file_handle,
     iree_net_file_handle_transfer_type_t transfer_type,
     iree_byte_span_t transfer_payload) {
-#if IREE_FILE_IO_ENABLE && !defined(IREE_PLATFORM_WINDOWS)
+#if IREE_FILE_IO_ENABLE
   if (!transfer) {
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                             "SHM carrier does not have a file transfer "
                             "sideband");
   }
-  if (transfer_type != IREE_NET_FILE_HANDLE_TRANSFER_TYPE_POSIX_FD) {
+#if defined(IREE_PLATFORM_WINDOWS)
+  const iree_net_file_handle_transfer_type_t expected_transfer_type =
+      IREE_NET_FILE_HANDLE_TRANSFER_TYPE_WIN32_HANDLE;
+#else
+  const iree_net_file_handle_transfer_type_t expected_transfer_type =
+      IREE_NET_FILE_HANDLE_TRANSFER_TYPE_POSIX_FD;
+#endif  // IREE_PLATFORM_WINDOWS
+  if (transfer_type != expected_transfer_type) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "unsupported SHM file transfer type %u",
                             (uint32_t)transfer_type);
@@ -647,6 +746,38 @@ iree_status_t iree_net_shm_file_transfer_export(
         "SHM carrier can only transfer descriptor-backed file handles");
   }
 
+#if defined(IREE_PLATFORM_WINDOWS)
+  if (!transfer->peer_process) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "SHM carrier cannot transfer Win32 HANDLE rights to peer process %u",
+        transfer->peer_process_id);
+  }
+
+  HANDLE source_handle = INVALID_HANDLE_VALUE;
+  iree_status_t status = iree_net_shm_file_transfer_win32_handle_from_file(
+      file_handle, &source_handle);
+  HANDLE peer_handle = NULL;
+  if (iree_status_is_ok(status) &&
+      !DuplicateHandle(GetCurrentProcess(), source_handle,
+                       transfer->peer_process, &peer_handle, 0, FALSE,
+                       DUPLICATE_SAME_ACCESS)) {
+    status = iree_make_status(iree_status_code_from_win32_error(GetLastError()),
+                              "failed to duplicate Win32 file HANDLE into peer "
+                              "process %u",
+                              transfer->peer_process_id);
+  }
+  if (iree_status_is_ok(status)) {
+    iree_net_shm_file_transfer_payload_t payload = {
+        .id = (uint64_t)(uintptr_t)peer_handle,
+        .mode = iree_net_shm_file_transfer_mode_from_handle(file_handle),
+        .access = iree_io_file_handle_access(file_handle),
+        .reserved = 0,
+    };
+    memcpy(transfer_payload.data, &payload, sizeof(payload));
+  }
+  return status;
+#else
   iree_slim_mutex_lock(&transfer->mutex);
   uint64_t id = transfer->next_id++;
   if (transfer->next_id == 0) transfer->next_id = 1;
@@ -665,6 +796,7 @@ iree_status_t iree_net_shm_file_transfer_export(
     memcpy(transfer_payload.data, &payload, sizeof(payload));
   }
   return status;
+#endif  // IREE_PLATFORM_WINDOWS
 #else
   (void)transfer;
   (void)file_handle;
@@ -673,7 +805,7 @@ iree_status_t iree_net_shm_file_transfer_export(
   return iree_make_status(IREE_STATUS_UNAVAILABLE,
                           "SHM file handle transfer is unavailable on this "
                           "platform or file support is disabled");
-#endif  // IREE_FILE_IO_ENABLE && !IREE_PLATFORM_WINDOWS
+#endif  // IREE_FILE_IO_ENABLE
 }
 
 iree_status_t iree_net_shm_file_transfer_import(
@@ -684,13 +816,20 @@ iree_status_t iree_net_shm_file_transfer_import(
   IREE_ASSERT_ARGUMENT(out_file_handle);
   *out_file_handle = NULL;
 
-#if IREE_FILE_IO_ENABLE && !defined(IREE_PLATFORM_WINDOWS)
+#if IREE_FILE_IO_ENABLE
   if (!transfer) {
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                             "SHM carrier does not have a file transfer "
                             "sideband");
   }
-  if (transfer_type != IREE_NET_FILE_HANDLE_TRANSFER_TYPE_POSIX_FD) {
+#if defined(IREE_PLATFORM_WINDOWS)
+  const iree_net_file_handle_transfer_type_t expected_transfer_type =
+      IREE_NET_FILE_HANDLE_TRANSFER_TYPE_WIN32_HANDLE;
+#else
+  const iree_net_file_handle_transfer_type_t expected_transfer_type =
+      IREE_NET_FILE_HANDLE_TRANSFER_TYPE_POSIX_FD;
+#endif  // IREE_PLATFORM_WINDOWS
+  if (transfer_type != expected_transfer_type) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "unsupported SHM file transfer type %u",
                             (uint32_t)transfer_type);
@@ -701,6 +840,21 @@ iree_status_t iree_net_shm_file_transfer_import(
       iree_net_shm_file_transfer_validate_payload(transfer_payload, &payload);
 
   int fd = IREE_NET_SHM_FILE_TRANSFER_INVALID_FD;
+#if defined(IREE_PLATFORM_WINDOWS)
+  if (iree_status_is_ok(status)) {
+    int open_flags = 0;
+    if (!iree_all_bits_set(payload.mode, IREE_IO_FILE_MODE_WRITE)) {
+      open_flags |= _O_RDONLY;
+    }
+    fd = _open_osfhandle((intptr_t)(HANDLE)(uintptr_t)payload.id, open_flags);
+    if (fd == -1) {
+      CloseHandle((HANDLE)(uintptr_t)payload.id);
+      status = iree_make_status(
+          IREE_STATUS_INTERNAL,
+          "unable to transfer Win32 HANDLE to a CRT file descriptor");
+    }
+  }
+#else
   iree_slim_mutex_lock(&transfer->mutex);
   iree_net_shm_file_transfer_pending_t* pending = NULL;
   if (iree_status_is_ok(status)) {
@@ -750,6 +904,7 @@ iree_status_t iree_net_shm_file_transfer_import(
     }
   }
   iree_slim_mutex_unlock(&transfer->mutex);
+#endif  // IREE_PLATFORM_WINDOWS
 
   if (iree_status_is_ok(status)) {
     iree_io_file_handle_primitive_t handle_primitive = {
@@ -777,16 +932,23 @@ iree_status_t iree_net_shm_file_transfer_import(
   return iree_make_status(IREE_STATUS_UNAVAILABLE,
                           "SHM file handle transfer is unavailable on this "
                           "platform or file support is disabled");
-#endif  // IREE_FILE_IO_ENABLE && !IREE_PLATFORM_WINDOWS
+#endif  // IREE_FILE_IO_ENABLE
 }
 
 iree_status_t iree_net_shm_file_transfer_release_export(
     iree_net_shm_file_transfer_t* transfer,
     iree_net_file_handle_transfer_type_t transfer_type,
     iree_const_byte_span_t transfer_payload) {
-#if IREE_FILE_IO_ENABLE && !defined(IREE_PLATFORM_WINDOWS)
+#if IREE_FILE_IO_ENABLE
   if (!transfer) return iree_ok_status();
-  if (transfer_type != IREE_NET_FILE_HANDLE_TRANSFER_TYPE_POSIX_FD) {
+#if defined(IREE_PLATFORM_WINDOWS)
+  const iree_net_file_handle_transfer_type_t expected_transfer_type =
+      IREE_NET_FILE_HANDLE_TRANSFER_TYPE_WIN32_HANDLE;
+#else
+  const iree_net_file_handle_transfer_type_t expected_transfer_type =
+      IREE_NET_FILE_HANDLE_TRANSFER_TYPE_POSIX_FD;
+#endif  // IREE_PLATFORM_WINDOWS
+  if (transfer_type != expected_transfer_type) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "unsupported SHM file transfer type %u",
                             (uint32_t)transfer_type);
@@ -796,11 +958,16 @@ iree_status_t iree_net_shm_file_transfer_release_export(
   iree_status_t status =
       iree_net_shm_file_transfer_validate_payload(transfer_payload, &payload);
   if (iree_status_is_ok(status)) {
+#if defined(IREE_PLATFORM_WINDOWS)
+    status = iree_net_shm_file_transfer_win32_close_peer_handle(transfer,
+                                                                payload.id);
+#else
     iree_slim_mutex_lock(&transfer->mutex);
     status = iree_net_shm_file_transfer_send_sideband(
         transfer, IREE_NET_SHM_FILE_TRANSFER_OPCODE_CANCEL, payload.id,
         IREE_NET_SHM_FILE_TRANSFER_INVALID_FD);
     iree_slim_mutex_unlock(&transfer->mutex);
+#endif  // IREE_PLATFORM_WINDOWS
   }
   return status;
 #else
@@ -808,5 +975,5 @@ iree_status_t iree_net_shm_file_transfer_release_export(
   (void)transfer_type;
   (void)transfer_payload;
   return iree_ok_status();
-#endif  // IREE_FILE_IO_ENABLE && !IREE_PLATFORM_WINDOWS
+#endif  // IREE_FILE_IO_ENABLE
 }

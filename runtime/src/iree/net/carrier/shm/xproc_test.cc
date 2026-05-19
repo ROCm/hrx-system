@@ -28,6 +28,7 @@
 #include "iree/base/api.h"  // Must precede platform checks for IREE_PLATFORM_*.
 
 #if defined(IREE_PLATFORM_WINDOWS)
+#include <io.h>
 #include <windows.h>
 #else
 #include <fcntl.h>
@@ -46,6 +47,7 @@
 #include "iree/async/buffer_pool.h"
 #include "iree/async/proactor_platform.h"
 #include "iree/async/slab.h"
+#include "iree/io/file_contents.h"
 #include "iree/io/file_handle.h"
 #include "iree/net/carrier/shm/carrier.h"
 #include "iree/net/carrier/shm/factory.h"
@@ -949,45 +951,110 @@ static int dwrite_client_role(int argc, char** argv,
 // Test 4: File transfer sideband
 //===----------------------------------------------------------------------===//
 
-#if IREE_FILE_IO_ENABLE && !defined(IREE_PLATFORM_WINDOWS)
+#if IREE_FILE_IO_ENABLE
 
 static const char kFileTransferContents[] = "shm sideband file contents";
 static const char kFileTransferAck[] = "file-transfer-ok";
 
+static iree_net_carrier_capabilities_t FileTransferCapability() {
+#if defined(IREE_PLATFORM_WINDOWS)
+  return IREE_NET_CARRIER_CAPABILITY_WIN32_HANDLE_TRANSFER;
+#else
+  return IREE_NET_CARRIER_CAPABILITY_POSIX_FD_TRANSFER;
+#endif  // IREE_PLATFORM_WINDOWS
+}
+
+static iree_net_file_handle_transfer_type_t FileTransferType() {
+#if defined(IREE_PLATFORM_WINDOWS)
+  return IREE_NET_FILE_HANDLE_TRANSFER_TYPE_WIN32_HANDLE;
+#else
+  return IREE_NET_FILE_HANDLE_TRANSFER_TYPE_POSIX_FD;
+#endif  // IREE_PLATFORM_WINDOWS
+}
+
+static const char* FileTransferTypeName() {
+#if defined(IREE_PLATFORM_WINDOWS)
+  return "Win32 HANDLE";
+#else
+  return "POSIX fd";
+#endif  // IREE_PLATFORM_WINDOWS
+}
+
 static iree_status_t WriteTestFile(const char* path, const void* contents,
                                    iree_host_size_t length) {
-  int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
-  if (fd < 0) {
-    return iree_make_status(iree_status_code_from_errno(errno),
-                            "open(%s) failed", path);
+  return iree_io_file_contents_write(
+      iree_make_cstring_view(path), iree_make_const_byte_span(contents, length),
+      iree_allocator_system());
+}
+
+#if defined(IREE_PLATFORM_WINDOWS)
+
+static iree_status_t ReadTestFd(int fd, void* contents,
+                                iree_host_size_t length) {
+  HANDLE file_handle = (HANDLE)_get_osfhandle(fd);
+  if (file_handle == INVALID_HANDLE_VALUE) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "file descriptor is not backed by a valid Win32 HANDLE");
   }
 
-  const uint8_t* cursor = (const uint8_t*)contents;
+  HANDLE event = CreateEventW(NULL, /*bManualReset=*/TRUE,
+                              /*bInitialState=*/FALSE, NULL);
+  if (!event) {
+    return iree_make_status(iree_status_code_from_win32_error(GetLastError()),
+                            "CreateEventW failed for file read");
+  }
+
+  uint8_t* cursor = (uint8_t*)contents;
   iree_host_size_t remaining = length;
+  uint64_t offset = 0;
   iree_status_t status = iree_ok_status();
   while (iree_status_is_ok(status) && remaining > 0) {
-    ssize_t written = write(fd, cursor, remaining);
-    if (written < 0) {
-      if (errno != EINTR) {
-        status = iree_make_status(iree_status_code_from_errno(errno),
-                                  "write(%s) failed", path);
+    OVERLAPPED overlapped;
+    memset(&overlapped, 0, sizeof(overlapped));
+    overlapped.hEvent = event;
+    overlapped.Offset = (DWORD)(offset & 0xFFFFFFFFu);
+    overlapped.OffsetHigh = (DWORD)(offset >> 32);
+    ResetEvent(event);
+
+    DWORD chunk_length =
+        (DWORD)iree_min(remaining, (iree_host_size_t)UINT32_MAX);
+    BOOL read_ok =
+        ReadFile(file_handle, cursor, chunk_length, NULL, &overlapped);
+    if (!read_ok) {
+      DWORD error = GetLastError();
+      if (error != ERROR_IO_PENDING) {
+        status =
+            iree_make_status(iree_status_code_from_win32_error(error),
+                             "ReadFile failed for transferred file handle");
       }
-    } else if (written == 0) {
-      status = iree_make_status(IREE_STATUS_DATA_LOSS,
-                                "write(%s) made no progress", path);
-    } else {
-      cursor += written;
-      remaining -= (iree_host_size_t)written;
+    }
+
+    DWORD bytes_read = 0;
+    if (iree_status_is_ok(status) &&
+        !GetOverlappedResult(file_handle, &overlapped, &bytes_read, TRUE)) {
+      status =
+          iree_make_status(iree_status_code_from_win32_error(GetLastError()),
+                           "GetOverlappedResult failed for transferred "
+                           "file read");
+    }
+    if (iree_status_is_ok(status) && bytes_read == 0) {
+      status =
+          iree_make_status(IREE_STATUS_DATA_LOSS,
+                           "unexpected EOF while reading transferred file");
+    }
+    if (iree_status_is_ok(status)) {
+      cursor += bytes_read;
+      offset += bytes_read;
+      remaining -= (iree_host_size_t)bytes_read;
     }
   }
 
-  if (close(fd) != 0) {
-    status = iree_status_join(
-        status, iree_make_status(iree_status_code_from_errno(errno),
-                                 "close(%s) failed", path));
-  }
+  CloseHandle(event);
   return status;
 }
+
+#else
 
 static iree_status_t ReadTestFd(int fd, void* contents,
                                 iree_host_size_t length) {
@@ -1014,6 +1081,8 @@ static iree_status_t ReadTestFd(int fd, void* contents,
   return status;
 }
 
+#endif  // IREE_PLATFORM_WINDOWS
+
 static int file_transfer_server_role(int argc, char** argv,
                                      const char* temp_directory) {
   XProcContext context;
@@ -1027,8 +1096,8 @@ static int file_transfer_server_role(int argc, char** argv,
 
   XPROC_CHECK_OK(ServerAcceptAndHandshake(&context, context.AsCallback()));
   XPROC_CHECK(iree_all_bits_set(iree_net_carrier_capabilities(context.carrier),
-                                IREE_NET_CARRIER_CAPABILITY_POSIX_FD_TRANSFER),
-              "carrier does not advertise POSIX fd transfer");
+                                FileTransferCapability()),
+              "carrier does not advertise %s transfer", FileTransferTypeName());
 
   iree_net_carrier_set_recv_handler(context.carrier, context.AsRecvHandler());
   XPROC_CHECK_OK(iree_net_carrier_activate(context.carrier));
@@ -1040,17 +1109,18 @@ static int file_transfer_server_role(int argc, char** argv,
                                strlen(kFileTransferContents)));
 
   iree_io_file_handle_t* file_handle = nullptr;
-  XPROC_CHECK_OK(
-      iree_io_file_handle_open(IREE_IO_FILE_MODE_READ | IREE_IO_FILE_MODE_ASYNC,
-                               iree_make_cstring_view(file_path),
-                               iree_allocator_system(), &file_handle));
+  XPROC_CHECK_OK(iree_io_file_handle_open(
+      IREE_IO_FILE_MODE_READ | IREE_IO_FILE_MODE_RANDOM_ACCESS |
+          IREE_IO_FILE_MODE_SHARE_READ | IREE_IO_FILE_MODE_ASYNC,
+      iree_make_cstring_view(file_path), iree_allocator_system(),
+      &file_handle));
 
   iree_net_file_handle_transfer_type_t transfer_type =
       IREE_NET_FILE_HANDLE_TRANSFER_TYPE_NONE;
   iree_host_size_t payload_length = 0;
   XPROC_CHECK_OK(iree_net_carrier_query_file_handle_transfer(
       context.carrier, file_handle, &transfer_type, &payload_length));
-  XPROC_CHECK(transfer_type == IREE_NET_FILE_HANDLE_TRANSFER_TYPE_POSIX_FD,
+  XPROC_CHECK(transfer_type == FileTransferType(),
               "unexpected transfer type %u", (uint32_t)transfer_type);
 
   std::vector<uint8_t> transfer_payload(payload_length);
@@ -1089,7 +1159,7 @@ static int file_transfer_client_role(int argc, char** argv,
 
   iree_io_file_handle_t* file_handle = nullptr;
   XPROC_CHECK_OK(iree_net_carrier_import_file_handle(
-      context.carrier, IREE_NET_FILE_HANDLE_TRANSFER_TYPE_POSIX_FD,
+      context.carrier, FileTransferType(),
       iree_make_const_byte_span(context.recv_buffer.data(),
                                 context.recv_buffer.size()),
       iree_allocator_system(), &file_handle));
@@ -1108,7 +1178,7 @@ static int file_transfer_client_role(int argc, char** argv,
   return 0;
 }
 
-#endif  // IREE_FILE_IO_ENABLE && !IREE_PLATFORM_WINDOWS
+#endif  // IREE_FILE_IO_ENABLE
 
 //===----------------------------------------------------------------------===//
 // Test 5: Factory multi-endpoint connection
@@ -1310,7 +1380,7 @@ static const iree_coordinated_test_config_t kDirectWriteConfig = {
     /*.timeout_ms=*/30000,
 };
 
-#if IREE_FILE_IO_ENABLE && !defined(IREE_PLATFORM_WINDOWS)
+#if IREE_FILE_IO_ENABLE
 static const iree_test_role_t kFileTransferRoles[] = {
     {"file_transfer_server", file_transfer_server_role,
      /*signals_ready=*/true},
@@ -1322,7 +1392,7 @@ static const iree_coordinated_test_config_t kFileTransferConfig = {
     /*.role_count=*/2,
     /*.timeout_ms=*/30000,
 };
-#endif  // IREE_FILE_IO_ENABLE && !IREE_PLATFORM_WINDOWS
+#endif  // IREE_FILE_IO_ENABLE
 
 #if !defined(IREE_PLATFORM_WINDOWS)
 static const iree_test_role_t kFactoryMultiEndpointRoles[] = {
@@ -1357,12 +1427,12 @@ static const iree_test_role_t kAllRoles[] = {
     {"sendrecv_client", sendrecv_client_role, /*signals_ready=*/false},
     {"dwrite_server", dwrite_server_role, /*signals_ready=*/true},
     {"dwrite_client", dwrite_client_role, /*signals_ready=*/false},
-#if IREE_FILE_IO_ENABLE && !defined(IREE_PLATFORM_WINDOWS)
+#if IREE_FILE_IO_ENABLE
     {"file_transfer_server", file_transfer_server_role,
      /*signals_ready=*/true},
     {"file_transfer_client", file_transfer_client_role,
      /*signals_ready=*/false},
-#endif  // IREE_FILE_IO_ENABLE && !IREE_PLATFORM_WINDOWS
+#endif  // IREE_FILE_IO_ENABLE
 #if !defined(IREE_PLATFORM_WINDOWS)
     {"factory_multi_endpoint_server", factory_multi_endpoint_server_role,
      /*signals_ready=*/true},
@@ -1428,14 +1498,14 @@ TEST(XProcCarrier, DirectWriteSignaling) {
                                          &kDirectWriteConfig));
 }
 
-#if IREE_FILE_IO_ENABLE && !defined(IREE_PLATFORM_WINDOWS)
+#if IREE_FILE_IO_ENABLE
 TEST(XProcCarrier, FileTransferSideband) {
   if (!ProactorAvailable()) GTEST_SKIP() << "Platform proactor unavailable";
   ASSERT_EQ(0, iree_coordinated_test_run(iree_coordinated_test_argc(),
                                          iree_coordinated_test_argv(),
                                          &kFileTransferConfig));
 }
-#endif  // IREE_FILE_IO_ENABLE && !IREE_PLATFORM_WINDOWS
+#endif  // IREE_FILE_IO_ENABLE
 
 #if !defined(IREE_PLATFORM_WINDOWS)
 TEST(XProcCarrier, FactoryMultiEndpointConnection) {

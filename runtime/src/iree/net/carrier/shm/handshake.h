@@ -86,6 +86,9 @@ typedef struct iree_net_shm_handshake_header_t {
 // Handles exchanged alongside a handshake message. The OFFER includes the
 // SHM region handle plus wake handles; the ACCEPT includes only wake handles.
 typedef struct iree_net_shm_handshake_handles_t {
+  // Sending process ID for platforms where the receiver needs it to interpret
+  // handle values. Zero when the platform does not provide a process ID.
+  uint32_t sender_process_id;
   // SHM region handle (OFFER only; zero/invalid for ACCEPT).
   iree_shm_handle_t shm_region;
   // Wake epoch SHM handle.

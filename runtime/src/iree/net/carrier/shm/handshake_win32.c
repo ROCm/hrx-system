@@ -269,6 +269,8 @@ iree_status_t iree_net_shm_handshake_recv(
 
   if (!iree_status_is_ok(status)) return status;
 
+  out_handles->sender_process_id = payload.sender_pid;
+
   // Validate the handle count.
   if (payload.handle_count > MAX_HANDSHAKE_HANDLES) {
     return iree_make_status(IREE_STATUS_DATA_LOSS,
