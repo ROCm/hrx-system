@@ -7,8 +7,9 @@
 #include "iree/net/carrier/rdma/cm_channel.h"
 
 #include <errno.h>
-#include <fcntl.h>
 #include <string.h>
+
+#include "iree/net/carrier/rdma/pollable_fd.h"
 
 struct iree_net_rdma_cm_channel_t {
   // Borrowed dynamically loaded librdmacm symbol table.
@@ -29,45 +30,6 @@ struct iree_net_rdma_cm_channel_t {
   // Host allocator used for this channel allocation.
   iree_allocator_t host_allocator;
 };
-
-static iree_status_code_t iree_net_rdma_cm_status_code_from_errno(int error) {
-  if (error == ENODEV) return IREE_STATUS_UNAVAILABLE;
-  return iree_status_code_from_errno(error);
-}
-
-static iree_status_t iree_net_rdma_cm_status_from_errno(const char* file,
-                                                        uint32_t line,
-                                                        int error,
-                                                        const char* call) {
-  if (error == 0) return iree_ok_status();
-  return iree_make_status_with_location(
-      file, line, iree_net_rdma_cm_status_code_from_errno(error),
-      "[%s] errno %d: %s", call, error, strerror(error));
-}
-
-static iree_status_t iree_net_rdma_cm_set_fd_flags(int fd) {
-  int flags = fcntl(fd, F_GETFL);
-  if (flags == -1) {
-    return iree_net_rdma_cm_status_from_errno(__FILE__, __LINE__, errno,
-                                              "fcntl(F_GETFL)");
-  }
-  if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
-    return iree_net_rdma_cm_status_from_errno(__FILE__, __LINE__, errno,
-                                              "fcntl(F_SETFL, O_NONBLOCK)");
-  }
-
-  int descriptor_flags = fcntl(fd, F_GETFD);
-  if (descriptor_flags == -1) {
-    return iree_net_rdma_cm_status_from_errno(__FILE__, __LINE__, errno,
-                                              "fcntl(F_GETFD)");
-  }
-  if (fcntl(fd, F_SETFD, descriptor_flags | FD_CLOEXEC) == -1) {
-    return iree_net_rdma_cm_status_from_errno(__FILE__, __LINE__, errno,
-                                              "fcntl(F_SETFD, FD_CLOEXEC)");
-  }
-
-  return iree_ok_status();
-}
 
 static bool iree_net_rdma_cm_event_has_connection_private_data(
     enum rdma_cm_event_type event_type) {
@@ -113,8 +75,8 @@ iree_net_rdma_cm_channel_drain(iree_net_rdma_cm_channel_t* channel) {
                                                        &native_event);
     if (result != 0) {
       if (errno == EAGAIN || errno == EWOULDBLOCK) break;
-      status = iree_net_rdma_cm_status_from_errno(__FILE__, __LINE__, errno,
-                                                  "rdma_get_cm_event");
+      status = iree_net_rdma_pollable_fd_status_from_errno(
+          __FILE__, __LINE__, errno, "rdma_get_cm_event");
       break;
     }
 
@@ -123,8 +85,8 @@ iree_net_rdma_cm_channel_drain(iree_net_rdma_cm_channel_t* channel) {
 
     result = channel->librdmacm->rdma_ack_cm_event(native_event);
     if (result != 0) {
-      status = iree_net_rdma_cm_status_from_errno(__FILE__, __LINE__, errno,
-                                                  "rdma_ack_cm_event");
+      status = iree_net_rdma_pollable_fd_status_from_errno(
+          __FILE__, __LINE__, errno, "rdma_ack_cm_event");
     }
   }
 
@@ -187,13 +149,13 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_cm_channel_create(
 
     channel->event_channel = librdmacm->rdma_create_event_channel();
     if (!channel->event_channel) {
-      status = iree_net_rdma_cm_status_from_errno(__FILE__, __LINE__, errno,
-                                                  "rdma_create_event_channel");
+      status = iree_net_rdma_pollable_fd_status_from_errno(
+          __FILE__, __LINE__, errno, "rdma_create_event_channel");
     }
   }
 
   if (iree_status_is_ok(status)) {
-    status = iree_net_rdma_cm_set_fd_flags(channel->event_channel->fd);
+    status = iree_net_rdma_pollable_fd_initialize(channel->event_channel->fd);
   }
 
   if (iree_status_is_ok(status)) {

@@ -76,6 +76,7 @@ iree_cc_library(
     "cm_channel.c"
   DEPS
     ::librdmacm
+    ::pollable_fd
     iree::async
     iree::base
     rdma_core::headers
@@ -125,6 +126,34 @@ iree_cc_test(
     "connection_data_test.cc"
   DEPS
     ::connection_data
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_library(
+  NAME
+    pollable_fd
+  HDRS
+    "pollable_fd.h"
+  SRCS
+    "pollable_fd.c"
+  DEPS
+    iree::base
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    pollable_fd_test
+  SRCS
+    "pollable_fd_test.cc"
+  DEPS
+    ::pollable_fd
     iree::base
     iree::testing::gtest
     iree::testing::gtest_main
