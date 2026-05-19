@@ -1905,6 +1905,48 @@ IREE_API_EXPORT struct rdma_cm_id* iree_net_rdma_carrier_connection_id(
   return carrier ? carrier->connection_id : NULL;
 }
 
+IREE_API_EXPORT iree_status_t iree_net_rdma_carrier_export_connection_data(
+    iree_net_rdma_carrier_t* carrier,
+    iree_net_rdma_connection_data_t* out_data) {
+  if (!out_data) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "out_data must not be NULL");
+  }
+  memset(out_data, 0, sizeof(*out_data));
+  if (!carrier) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "carrier must not be NULL");
+  }
+  *out_data = carrier->local_connection_data;
+  return iree_ok_status();
+}
+
+IREE_API_EXPORT iree_status_t iree_net_rdma_carrier_import_connection_data(
+    iree_net_rdma_carrier_t* carrier,
+    const iree_net_rdma_connection_data_t* data) {
+  if (!carrier) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "carrier must not be NULL");
+  }
+  if (!data) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "connection data must not be NULL");
+  }
+  IREE_RETURN_IF_ERROR(iree_net_rdma_connection_data_validate(data));
+
+  iree_slim_mutex_lock(&carrier->queue_mutex);
+  carrier->remote_connection_data = *data;
+  iree_net_rdma_send_window_refresh_remote_credits(&carrier->send_window,
+                                                   data->initial_recv_credits);
+  iree_net_rdma_credit_memory_store(carrier->credit_memory,
+                                    data->initial_recv_credits);
+  carrier->flags |= IREE_NET_RDMA_CARRIER_FLAG_REMOTE_CONNECTION_DATA_APPLIED;
+  iree_status_t status =
+      iree_net_rdma_carrier_try_post_credit_grant_locked(carrier);
+  iree_slim_mutex_unlock(&carrier->queue_mutex);
+  return status;
+}
+
 IREE_API_EXPORT iree_status_t
 iree_net_rdma_carrier_serialize_local_connection_data(
     iree_net_rdma_carrier_t* carrier, iree_byte_span_t target,
@@ -1913,8 +1955,11 @@ iree_net_rdma_carrier_serialize_local_connection_data(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "carrier must not be NULL");
   }
-  return iree_net_rdma_connection_data_serialize(
-      &carrier->local_connection_data, target, out_length);
+  iree_net_rdma_connection_data_t connection_data;
+  IREE_RETURN_IF_ERROR(
+      iree_net_rdma_carrier_export_connection_data(carrier, &connection_data));
+  return iree_net_rdma_connection_data_serialize(&connection_data, target,
+                                                 out_length);
 }
 
 IREE_API_EXPORT iree_status_t
@@ -1929,15 +1974,8 @@ iree_net_rdma_carrier_apply_remote_connection_data(
   iree_status_t status =
       iree_net_rdma_connection_data_deserialize(source, &connection_data);
   if (iree_status_is_ok(status)) {
-    iree_slim_mutex_lock(&carrier->queue_mutex);
-    carrier->remote_connection_data = connection_data;
-    iree_net_rdma_send_window_refresh_remote_credits(
-        &carrier->send_window, connection_data.initial_recv_credits);
-    iree_net_rdma_credit_memory_store(carrier->credit_memory,
-                                      connection_data.initial_recv_credits);
-    carrier->flags |= IREE_NET_RDMA_CARRIER_FLAG_REMOTE_CONNECTION_DATA_APPLIED;
-    status = iree_net_rdma_carrier_try_post_credit_grant_locked(carrier);
-    iree_slim_mutex_unlock(&carrier->queue_mutex);
+    status =
+        iree_net_rdma_carrier_import_connection_data(carrier, &connection_data);
   }
   return status;
 }

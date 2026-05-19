@@ -164,6 +164,16 @@ IREE_API_EXPORT iree_net_carrier_t* iree_net_rdma_carrier_as_generic(
 IREE_API_EXPORT struct rdma_cm_id* iree_net_rdma_carrier_connection_id(
     iree_net_rdma_carrier_t* carrier);
 
+// Exports the carrier's local rdma_cm private-data fields.
+IREE_API_EXPORT iree_status_t iree_net_rdma_carrier_export_connection_data(
+    iree_net_rdma_carrier_t* carrier,
+    iree_net_rdma_connection_data_t* out_data);
+
+// Imports peer rdma_cm private-data fields after connect/accept.
+IREE_API_EXPORT iree_status_t iree_net_rdma_carrier_import_connection_data(
+    iree_net_rdma_carrier_t* carrier,
+    const iree_net_rdma_connection_data_t* data);
+
 // Serializes the carrier's local rdma_cm private-data payload.
 IREE_API_EXPORT iree_status_t
 iree_net_rdma_carrier_serialize_local_connection_data(

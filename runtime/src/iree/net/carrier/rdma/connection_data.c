@@ -72,8 +72,12 @@ static iree_status_t iree_net_rdma_connection_data_validate_reserved(
   return iree_ok_status();
 }
 
-static iree_status_t iree_net_rdma_connection_data_validate(
+IREE_API_EXPORT iree_status_t iree_net_rdma_connection_data_validate(
     const iree_net_rdma_connection_data_t* data) {
+  if (!data) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "connection data must not be NULL");
+  }
   if (data->flags != 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "unsupported RDMA connection flags: 0x%04X",

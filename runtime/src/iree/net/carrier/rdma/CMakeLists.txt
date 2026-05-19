@@ -579,8 +579,11 @@ iree_cc_library(
     ::carrier
     ::cm_channel
     ::context
+    ::endpoint_data
     iree::async
     iree::base
+    iree::base::internal
+    iree::base::internal::csprng
     iree::net::channel::util::frame_sender
     iree::net::connection
     iree::net::message_endpoint

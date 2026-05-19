@@ -74,6 +74,10 @@ typedef struct iree_net_rdma_connection_data_t {
   iree_net_rdma_remote_credit_memory_t credit_memory;
 } iree_net_rdma_connection_data_t;
 
+// Validates decoded RDMA connection data before applying it to a carrier.
+IREE_API_EXPORT iree_status_t iree_net_rdma_connection_data_validate(
+    const iree_net_rdma_connection_data_t* data);
+
 // Serializes RDMA connection data into an rdma_cm private-data payload.
 IREE_API_EXPORT iree_status_t iree_net_rdma_connection_data_serialize(
     const iree_net_rdma_connection_data_t* data, iree_byte_span_t target,

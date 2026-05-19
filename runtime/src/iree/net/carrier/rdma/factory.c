@@ -13,7 +13,9 @@
 
 #include "iree/async/address.h"
 #include "iree/async/operations/scheduling.h"
+#include "iree/base/internal/csprng.h"
 #include "iree/net/carrier/rdma/cm_channel.h"
+#include "iree/net/carrier/rdma/endpoint_data.h"
 #include "iree/net/channel/util/frame_sender.h"
 #include "iree/net/connection.h"
 #include "iree/net/message_endpoint.h"
@@ -94,6 +96,61 @@ static iree_status_t iree_net_rdma_factory_initialize_conn_param(
   out_params->retry_count = 7;
   out_params->rnr_retry_count = 7;
   return iree_ok_status();
+}
+
+static iree_status_t iree_net_rdma_factory_generate_group_id(
+    uint64_t* out_group_id) {
+  *out_group_id = 0;
+  IREE_RETURN_IF_ERROR(iree_csprng_fill(
+      iree_make_byte_span((uint8_t*)out_group_id, sizeof(*out_group_id))));
+  if (*out_group_id == 0) {
+    *out_group_id = 1;
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t iree_net_rdma_factory_serialize_endpoint_data(
+    iree_net_rdma_carrier_t* carrier, uint64_t group_id,
+    uint16_t endpoint_index, uint16_t endpoint_count, iree_byte_span_t target,
+    iree_host_size_t* out_length) {
+  iree_net_rdma_endpoint_data_t endpoint_data;
+  memset(&endpoint_data, 0, sizeof(endpoint_data));
+  endpoint_data.group_id = group_id;
+  endpoint_data.endpoint_index = endpoint_index;
+  endpoint_data.endpoint_count = endpoint_count;
+  IREE_RETURN_IF_ERROR(iree_net_rdma_carrier_export_connection_data(
+      carrier, &endpoint_data.connection_data));
+  return iree_net_rdma_endpoint_data_serialize(&endpoint_data, target,
+                                               out_length);
+}
+
+static iree_status_t iree_net_rdma_factory_validate_endpoint_slot(
+    const iree_net_rdma_endpoint_data_t* endpoint_data, uint16_t endpoint_index,
+    uint16_t endpoint_count) {
+  if (endpoint_data->endpoint_index != endpoint_index) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "RDMA endpoint_index %" PRIu16
+                            " does not match expected %" PRIu16,
+                            endpoint_data->endpoint_index, endpoint_index);
+  }
+  if (endpoint_data->endpoint_count != endpoint_count) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "RDMA endpoint_count %" PRIu16
+                            " does not match expected %" PRIu16,
+                            endpoint_data->endpoint_count, endpoint_count);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t iree_net_rdma_factory_validate_endpoint_data(
+    const iree_net_rdma_endpoint_data_t* endpoint_data, uint64_t group_id,
+    uint16_t endpoint_index, uint16_t endpoint_count) {
+  if (endpoint_data->group_id != group_id) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "RDMA endpoint group_id mismatch");
+  }
+  return iree_net_rdma_factory_validate_endpoint_slot(
+      endpoint_data, endpoint_index, endpoint_count);
 }
 
 //===----------------------------------------------------------------------===//
@@ -557,8 +614,11 @@ typedef struct iree_net_rdma_connect_state_t {
   // User data passed to callback.
   void* callback_user_data;
 
-  // Serialized local RDMA private data sent by rdma_connect.
-  uint8_t private_data[IREE_NET_RDMA_CONNECTION_DATA_LENGTH];
+  // Logical connection group identifier shared by endpoint QPs.
+  uint64_t group_id;
+
+  // Serialized local endpoint private data sent by rdma_connect.
+  uint8_t private_data[IREE_NET_RDMA_ENDPOINT_DATA_LENGTH];
 
   // Number of bytes valid in private_data.
   iree_host_size_t private_data_length;
@@ -660,8 +720,9 @@ static iree_status_t iree_net_rdma_connect_state_create_carrier(
     state->connection_id = NULL;
     iree_net_rdma_carrier_t* rdma_carrier =
         iree_net_rdma_carrier_cast(state->carrier);
-    status = iree_net_rdma_carrier_serialize_local_connection_data(
-        rdma_carrier,
+    status = iree_net_rdma_factory_serialize_endpoint_data(
+        rdma_carrier, state->group_id, /*endpoint_index=*/0,
+        /*endpoint_count=*/1,
         iree_make_byte_span(state->private_data, sizeof(state->private_data)),
         &state->private_data_length);
   }
@@ -676,9 +737,16 @@ static iree_status_t iree_net_rdma_connect_state_apply_remote_data(
     return iree_make_status(IREE_STATUS_DATA_LOSS,
                             "RDMA peer did not provide private data");
   }
+  iree_net_rdma_endpoint_data_t endpoint_data;
+  IREE_RETURN_IF_ERROR(iree_net_rdma_endpoint_data_deserialize(
+      event->private_data, &endpoint_data));
+  IREE_RETURN_IF_ERROR(iree_net_rdma_factory_validate_endpoint_data(
+      &endpoint_data, state->group_id, /*endpoint_index=*/0,
+      /*endpoint_count=*/1));
+
   iree_net_rdma_carrier_t* carrier = iree_net_rdma_carrier_cast(state->carrier);
-  iree_status_t status = iree_net_rdma_carrier_apply_remote_connection_data(
-      carrier, event->private_data);
+  iree_status_t status = iree_net_rdma_carrier_import_connection_data(
+      carrier, &endpoint_data.connection_data);
   if (iree_status_is_ok(status)) state->remote_data_applied = true;
   return status;
 }
@@ -878,8 +946,11 @@ struct iree_net_rdma_accept_state_t {
   // Child context matching connection_id->verbs.
   iree_net_rdma_context_t* connection_context;
 
-  // Serialized local RDMA private data sent by rdma_accept.
-  uint8_t private_data[IREE_NET_RDMA_CONNECTION_DATA_LENGTH];
+  // Remote endpoint private data received in CONNECT_REQUEST.
+  iree_net_rdma_endpoint_data_t remote_endpoint_data;
+
+  // Serialized local endpoint private data sent by rdma_accept.
+  uint8_t private_data[IREE_NET_RDMA_ENDPOINT_DATA_LENGTH];
 
   // Number of bytes valid in private_data.
   iree_host_size_t private_data_length;
@@ -1042,6 +1113,17 @@ static iree_status_t iree_net_rdma_accept_state_create(
   }
 
   if (iree_status_is_ok(status)) {
+    status = iree_net_rdma_endpoint_data_deserialize(
+        event->private_data, &accept_state->remote_endpoint_data);
+  }
+
+  if (iree_status_is_ok(status)) {
+    status = iree_net_rdma_factory_validate_endpoint_slot(
+        &accept_state->remote_endpoint_data, /*endpoint_index=*/0,
+        /*endpoint_count=*/1);
+  }
+
+  if (iree_status_is_ok(status)) {
     status = iree_net_rdma_context_create_for_cm_id(
         listener->factory->context, accept_state->connection_id,
         listener->host_allocator, &accept_state->connection_context);
@@ -1068,15 +1150,16 @@ static iree_status_t iree_net_rdma_accept_state_create(
     accept_state->connection_id = NULL;
     iree_net_rdma_carrier_t* carrier =
         iree_net_rdma_carrier_cast(accept_state->carrier);
-    status = iree_net_rdma_carrier_apply_remote_connection_data(
-        carrier, event->private_data);
+    status = iree_net_rdma_carrier_import_connection_data(
+        carrier, &accept_state->remote_endpoint_data.connection_data);
   }
 
   if (iree_status_is_ok(status)) {
     iree_net_rdma_carrier_t* carrier =
         iree_net_rdma_carrier_cast(accept_state->carrier);
-    status = iree_net_rdma_carrier_serialize_local_connection_data(
-        carrier,
+    status = iree_net_rdma_factory_serialize_endpoint_data(
+        carrier, accept_state->remote_endpoint_data.group_id,
+        /*endpoint_index=*/0, /*endpoint_count=*/1,
         iree_make_byte_span(accept_state->private_data,
                             sizeof(accept_state->private_data)),
         &accept_state->private_data_length);
@@ -1472,6 +1555,10 @@ static iree_status_t iree_net_rdma_factory_connect(
     state->callback_user_data = user_data;
     state->phase = IREE_NET_RDMA_CONNECT_PHASE_RESOLVING_ADDRESS;
     state->host_allocator = factory->host_allocator;
+  }
+
+  if (iree_status_is_ok(status)) {
+    status = iree_net_rdma_factory_generate_group_id(&state->group_id);
   }
 
   if (iree_status_is_ok(status)) {
