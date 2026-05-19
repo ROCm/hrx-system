@@ -4,15 +4,19 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Fixed send-buffer reservation table for RDMA begin_send/commit_send.
+// Fixed-capacity send-buffer reservation table for staged RDMA SEND payloads.
 //
 // begin_send() hands callers writable bytes from an RDMA-registered staging
 // pool. This table owns those leases between begin_send() and commit_send() or
 // abort_send(), returning generation-checked handles that fit in the generic
-// carrier send handle. No memory is allocated after initialization.
+// carrier send handle. The carrier also uses the table as the pending-post FIFO
+// once fully-staged send() payloads are accepted under native SEND
+// backpressure. No memory is allocated after initialization.
 
 #ifndef IREE_NET_CARRIER_RDMA_SEND_RESERVATION_TABLE_H_
 #define IREE_NET_CARRIER_RDMA_SEND_RESERVATION_TABLE_H_
+
+#include <stdint.h>
 
 #include "iree/async/buffer_pool.h"
 #include "iree/base/api.h"
@@ -24,6 +28,14 @@ extern "C" {
 
 typedef struct iree_net_rdma_send_reservation_slot_t
     iree_net_rdma_send_reservation_slot_t;
+
+typedef uint8_t iree_net_rdma_send_reservation_completion_t;
+enum iree_net_rdma_send_reservation_completion_e {
+  // Internal send with no user-visible completion.
+  IREE_NET_RDMA_SEND_RESERVATION_COMPLETION_INTERNAL = 0,
+  // User-visible two-sided SEND completion.
+  IREE_NET_RDMA_SEND_RESERVATION_COMPLETION_SEND = 1,
+};
 
 typedef struct iree_net_rdma_send_reservation_table_t {
   // Host allocator used for the slot allocation.
@@ -57,6 +69,12 @@ typedef struct iree_net_rdma_send_reservation_t {
 
   // Number of bytes written by the caller into buffer_lease.
   iree_host_size_t byte_length;
+
+  // Completion behavior for the eventual posted send.
+  iree_net_rdma_send_reservation_completion_t completion;
+
+  // User data forwarded to user-visible completions.
+  uint64_t user_data;
 } iree_net_rdma_send_reservation_t;
 
 // Initializes |out_table| with |capacity| fixed reservation slots.
@@ -89,6 +107,7 @@ IREE_API_EXPORT uint32_t iree_net_rdma_send_reservation_table_pending_count(
 IREE_API_EXPORT iree_status_t iree_net_rdma_send_reservation_table_acquire(
     iree_net_rdma_send_reservation_table_t* table,
     iree_async_buffer_lease_t* buffer_lease, iree_host_size_t byte_length,
+    iree_net_rdma_send_reservation_completion_t completion, uint64_t user_data,
     iree_net_carrier_send_handle_t* out_handle);
 
 // Returns a borrowed view of |handle| without releasing its slot.
@@ -127,6 +146,15 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_send_reservation_table_resolve(
     iree_net_rdma_send_reservation_table_t* table,
     iree_net_carrier_send_handle_t handle,
     iree_net_rdma_send_reservation_t* out_reservation);
+
+// Resolves the next active reservation at or after |*inout_cursor|.
+//
+// Initialize |*inout_cursor| to 0 and call until |*out_found| is false. The
+// caller owns the returned buffer_lease, when present, and must release it.
+// Committed reservations are removed from the pending FIFO before returning.
+IREE_API_EXPORT iree_status_t iree_net_rdma_send_reservation_table_resolve_next(
+    iree_net_rdma_send_reservation_table_t* table, uint32_t* inout_cursor,
+    iree_net_rdma_send_reservation_t* out_reservation, bool* out_found);
 
 // Aborts |handle| and releases its retained buffer lease.
 IREE_API_EXPORT iree_status_t iree_net_rdma_send_reservation_table_abort(
