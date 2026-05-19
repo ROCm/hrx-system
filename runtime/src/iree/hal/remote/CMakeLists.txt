@@ -48,6 +48,7 @@ iree_cc_test(
     iree::hal::testing::mock_device
     iree::io::file_handle
     iree::net::carrier::loopback::factory
+    iree::net::carrier::shm::factory
     iree::net::session
     iree::testing::gtest
     iree::testing::gtest_main

@@ -134,6 +134,10 @@ iree_hal_remote_server_bulk_session_profile_relay(
 iree_status_t iree_hal_remote_server_bulk_session_flush_receive_window(
     iree_hal_remote_server_session_t* session_slot);
 
+// Returns true if a drain completion was deferred to the active CREDIT flush.
+bool iree_hal_remote_server_bulk_session_defer_drain_if_flushing(
+    iree_hal_remote_server_session_t* session_slot);
+
 // Deinitializes or drains active bulk transfers for |session_slot|.
 void iree_hal_remote_server_bulk_session_deinitialize_transfers(
     iree_hal_remote_server_session_t* session_slot);

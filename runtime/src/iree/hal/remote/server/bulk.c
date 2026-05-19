@@ -579,7 +579,10 @@ void iree_hal_remote_server_bulk_on_send_complete(
     uint64_t operation_user_data, iree_status_t status) {
   if (operation_user_data == 0) {
     iree_status_free(status);
-    iree_hal_remote_server_bulk_session_try_complete_drain(session_slot);
+    if (!iree_hal_remote_server_bulk_session_defer_drain_if_flushing(
+            session_slot)) {
+      iree_hal_remote_server_bulk_session_try_complete_drain(session_slot);
+    }
     return;
   }
   const uint64_t transfer_id = operation_user_data;

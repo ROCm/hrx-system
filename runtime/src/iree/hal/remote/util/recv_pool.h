@@ -40,11 +40,12 @@ iree_status_t iree_hal_remote_recv_pool_create(
     iree_allocator_t host_allocator,
     iree_hal_remote_recv_pool_t** out_recv_pool);
 
-// Wraps pre-created components into a recv_pool.
+// Wraps pre-created components into a receive buffer pool.
 //
 // Retains |proactor|, |slab|, and |region|, and takes ownership of
-// |buffer_pool|. Callers use this when slab registration must complete before
-// the proactor's poll thread starts.
+// |buffer_pool|. This is used when slab registration must complete before
+// proactor poll threads start, such as tests and bootstrap paths that assemble
+// proactors directly.
 iree_status_t iree_hal_remote_recv_pool_wrap(
     iree_async_proactor_t* proactor, iree_async_slab_t* slab,
     iree_async_region_t* region, iree_async_buffer_pool_t* buffer_pool,

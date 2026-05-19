@@ -6,6 +6,7 @@
 
 #include "iree/hal/remote/server/bulk_session.h"
 
+#include "iree/base/internal/atomics.h"
 #include "iree/hal/remote/server/bulk.h"
 #include "iree/hal/remote/server/bulk_download_sender.h"
 #include "iree/hal/remote/server/bulk_profile_sender.h"
@@ -57,6 +58,12 @@ struct iree_hal_remote_server_bulk_session_t {
 
   // Receive window retaining client-to-server DATA chunks and CREDIT state.
   iree_net_bulk_receive_window_t* receive_window;
+
+  // Non-zero while CREDIT flush is inside callbacks under |transfer_mutex|.
+  iree_atomic_int32_t is_flushing_receive_window;
+
+  // Non-zero when a send completion requested drain after the active flush.
+  iree_atomic_int32_t drain_after_receive_window_flush;
 
   // Server-originated profiling callback relay state.
   iree_hal_remote_server_profile_relay_t profile_relay;
@@ -264,6 +271,10 @@ iree_status_t iree_hal_remote_server_bulk_session_create(
     bulk_session->host_allocator = host_allocator;
     session_slot->bulk_session = bulk_session;
     iree_slim_mutex_initialize(&bulk_session->transfer_mutex);
+    iree_atomic_store(&bulk_session->is_flushing_receive_window, 0,
+                      iree_memory_order_relaxed);
+    iree_atomic_store(&bulk_session->drain_after_receive_window_flush, 0,
+                      iree_memory_order_relaxed);
     iree_hal_remote_bulk_router_initialize(
         iree_hal_remote_server_bulk_session_router_operations(), bulk_session,
         &bulk_session->router);
@@ -495,12 +506,39 @@ iree_hal_remote_server_bulk_session_flush_receive_window_locked(
 iree_status_t iree_hal_remote_server_bulk_session_flush_receive_window(
     iree_hal_remote_server_session_t* session_slot) {
   iree_slim_mutex_lock(iree_hal_remote_server_bulk_session_mutex(session_slot));
+  iree_hal_remote_server_bulk_session_t* bulk_session =
+      session_slot->bulk_session;
+  iree_atomic_store(&bulk_session->is_flushing_receive_window, 1,
+                    iree_memory_order_release);
   iree_status_t status =
       iree_hal_remote_server_bulk_session_flush_receive_window_locked(
           session_slot);
+  iree_atomic_store(&bulk_session->is_flushing_receive_window, 0,
+                    iree_memory_order_release);
+  bool drain_after_flush =
+      iree_atomic_exchange(&bulk_session->drain_after_receive_window_flush, 0,
+                           iree_memory_order_acq_rel) != 0;
   iree_slim_mutex_unlock(
       iree_hal_remote_server_bulk_session_mutex(session_slot));
+  if (drain_after_flush) {
+    iree_hal_remote_server_bulk_session_try_complete_drain(session_slot);
+  }
   return status;
+}
+
+bool iree_hal_remote_server_bulk_session_defer_drain_if_flushing(
+    iree_hal_remote_server_session_t* session_slot) {
+  iree_hal_remote_server_bulk_session_t* bulk_session =
+      session_slot->bulk_session;
+  if (!bulk_session) return false;
+  if (!iree_atomic_load(&bulk_session->is_flushing_receive_window,
+                        iree_memory_order_acquire)) {
+    return false;
+  }
+  iree_atomic_store(&bulk_session->drain_after_receive_window_flush, 1,
+                    iree_memory_order_release);
+  return iree_atomic_load(&bulk_session->is_flushing_receive_window,
+                          iree_memory_order_acquire) != 0;
 }
 
 static void iree_hal_remote_server_bulk_session_release_transfer(

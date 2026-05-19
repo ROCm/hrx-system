@@ -24,13 +24,15 @@
 //
 //   Unix domain sockets (e.g., "unix:/tmp/iree.sock"): Cross-process
 //   connections on POSIX. Listeners bind to a socket path, clients connect
-//   by path. Each accepted connection runs an SHM handshake to exchange
-//   handles via SCM_RIGHTS, creating independent carriers on each side.
+//   by path. Each accepted connection runs one SHM handshake per endpoint slot
+//   to exchange handles via SCM_RIGHTS, creating independent carriers on each
+//   side while retaining the bootstrap socket as the control endpoint's
+//   descriptor-transfer sideband.
 //
 //   Windows named pipes (e.g., "pipe:my-service"): Cross-process connections
-//   on Windows. Maps to \\.\pipe\<name>. Each accepted connection runs an
-//   SHM handshake to exchange handles via DuplicateHandle, creating
-//   independent carriers on each side.
+//   on Windows. Maps to \\.\pipe\<name>. Each accepted connection runs one SHM
+//   handshake per endpoint slot to exchange handles via DuplicateHandle,
+//   creating independent carriers on each side.
 //
 // All paths share the same connection type and endpoint adapter. Using
 // a cross-process scheme on the wrong platform returns UNIMPLEMENTED.

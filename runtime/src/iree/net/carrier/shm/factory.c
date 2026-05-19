@@ -324,10 +324,14 @@ iree_status_t iree_net_shm_connection_create_from_handshake_results(
     memset(carriers, 0, endpoint_count * sizeof(*carriers));
   }
 
-  iree_net_carrier_callback_t no_callback = {0};
+  iree_net_carrier_callback_t send_callback = {
+      .fn = iree_net_frame_sender_dispatch_carrier_completion,
+      .user_data = NULL,
+  };
   for (uint16_t i = 0; i < endpoint_count && iree_status_is_ok(status); ++i) {
-    status = iree_net_shm_carrier_create(
-        &results[i].carrier_params, no_callback, host_allocator, &carriers[i]);
+    status =
+        iree_net_shm_carrier_create(&results[i].carrier_params, send_callback,
+                                    host_allocator, &carriers[i]);
     if (iree_status_is_ok(status)) {
       results[i].context = NULL;
     }

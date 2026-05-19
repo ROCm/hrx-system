@@ -15,13 +15,18 @@
 // without hardware dependencies.
 
 #include <atomic>
+#include <cerrno>
+#include <cstdio>
 #include <cstring>
+#include <functional>
+#include <string>
 #include <thread>
 #include <vector>
 
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/operation.h"
 #include "iree/async/proactor.h"
+#include "iree/async/proactor_platform.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/async/util/proactor_thread.h"
 #include "iree/base/api.h"
@@ -35,7 +40,9 @@
 #include "iree/hal/remote/util/recv_pool.h"
 #include "iree/hal/testing/mock_device.h"
 #include "iree/io/file_contents.h"
+#include "iree/io/file_handle.h"
 #include "iree/net/carrier/loopback/factory.h"
+#include "iree/net/carrier/shm/factory.h"
 #include "iree/net/session.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -930,6 +937,389 @@ class RemoteBufferTest : public ::testing::Test {
   iree_hal_remote_server_t* teardown_server_ = nullptr;
   std::atomic<int32_t> teardown_phase_{0};
 };
+
+#if IREE_FILE_IO_ENABLE && !defined(IREE_PLATFORM_WINDOWS)
+
+// Fixture for exercising the real POSIX SHM cross-process transport path. The
+// client and server use distinct proactors so the synchronous bootstrap
+// handshakes are always paired by independent polling threads.
+class RemoteShmFileRegistrationTest : public ::testing::Test {
+ protected:
+  static constexpr uint32_t kAxisTableCapacity = 16;
+
+  void SetUp() override {
+    CreateProactorAndRecvPool(&server_proactor_, &server_recv_pool_);
+    CreateProactorAndRecvPool(&client_proactor_, &client_recv_pool_);
+
+    IREE_ASSERT_OK(iree_async_proactor_thread_create(
+        server_proactor_, iree_async_proactor_thread_options_default(),
+        iree_allocator_system(), &server_proactor_thread_));
+    IREE_ASSERT_OK(iree_async_proactor_thread_create(
+        client_proactor_, iree_async_proactor_thread_options_default(),
+        iree_allocator_system(), &client_proactor_thread_));
+
+    iree_async_frontier_tracker_options_t tracker_options =
+        iree_async_frontier_tracker_options_default();
+    tracker_options.axis_table_capacity = kAxisTableCapacity;
+    IREE_ASSERT_OK(iree_async_frontier_tracker_create(
+        tracker_options, iree_allocator_system(), &server_tracker_));
+
+    iree_net_shm_carrier_options_t factory_options =
+        iree_net_shm_carrier_options_default();
+    factory_options.max_endpoint_count =
+        IREE_HAL_REMOTE_REQUIRED_ENDPOINT_COUNT;
+    IREE_ASSERT_OK(iree_net_shm_factory_create(
+        factory_options, iree_allocator_system(), &factory_));
+
+    socket_path_ =
+        "/tmp/iree-rshm-" + std::to_string((uint64_t)iree_time_now()) + ".sock";
+    RemoveSocketPathIfPresent();
+    server_address_ = std::string("unix:") + socket_path_;
+
+    CreateLocalTaskDevice();
+    CreateAndStartServer();
+    CreateClientDevice();
+    ASSERT_EQ(ConnectAndWait(), IREE_STATUS_OK);
+  }
+
+  void TearDown() override {
+    ReleaseClientDeviceOnProactor();
+    ReleaseServerOnProactor();
+
+    StopProactorThread(&client_proactor_thread_);
+    StopProactorThread(&server_proactor_thread_);
+
+    iree_hal_device_group_release(local_task_device_group_);
+    local_task_device_group_ = nullptr;
+    iree_hal_device_release(local_task_device_);
+    local_task_device_ = nullptr;
+    iree_hal_driver_release(local_task_driver_);
+    local_task_driver_ = nullptr;
+    iree_net_transport_factory_release(factory_);
+    factory_ = nullptr;
+
+    RemoveSocketPathIfPresent();
+
+    iree_async_frontier_tracker_release(server_tracker_);
+    server_tracker_ = nullptr;
+
+    iree_hal_remote_recv_pool_release(client_recv_pool_);
+    client_recv_pool_ = nullptr;
+    iree_hal_remote_recv_pool_release(server_recv_pool_);
+    server_recv_pool_ = nullptr;
+    iree_async_proactor_release(client_proactor_);
+    client_proactor_ = nullptr;
+    iree_async_proactor_release(server_proactor_);
+    server_proactor_ = nullptr;
+  }
+
+  static void CreateProactorAndRecvPool(
+      iree_async_proactor_t** out_proactor,
+      iree_hal_remote_recv_pool_t** out_recv_pool) {
+    *out_proactor = nullptr;
+    *out_recv_pool = nullptr;
+
+    iree_async_proactor_t* proactor = nullptr;
+    IREE_ASSERT_OK(iree_async_proactor_create_platform(
+        iree_async_proactor_options_default(), iree_allocator_system(),
+        &proactor));
+
+    iree_async_slab_t* slab = nullptr;
+    iree_async_slab_options_t slab_options = {0};
+    slab_options.buffer_size = 64 * 1024;
+    slab_options.buffer_count = 16;
+    IREE_ASSERT_OK(
+        iree_async_slab_create(slab_options, iree_allocator_system(), &slab));
+
+    iree_async_region_t* region = nullptr;
+    IREE_ASSERT_OK(iree_async_proactor_register_slab(
+        proactor, slab, IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE, &region));
+
+    iree_async_buffer_pool_t* buffer_pool = nullptr;
+    IREE_ASSERT_OK(iree_async_buffer_pool_allocate(
+        region, iree_allocator_system(), &buffer_pool));
+
+    iree_hal_remote_recv_pool_t* recv_pool = nullptr;
+    IREE_ASSERT_OK(
+        iree_hal_remote_recv_pool_wrap(proactor, slab, region, buffer_pool,
+                                       iree_allocator_system(), &recv_pool));
+
+    iree_async_region_release(region);
+    iree_async_slab_release(slab);
+
+    *out_proactor = proactor;
+    *out_recv_pool = recv_pool;
+  }
+
+  void CreateLocalTaskDevice() {
+    iree_status_t status = iree_hal_local_task_driver_module_register(
+        iree_hal_driver_registry_default());
+    if (iree_status_is_already_exists(status)) {
+      iree_status_ignore(status);
+      status = iree_ok_status();
+    }
+    IREE_ASSERT_OK(status);
+    IREE_ASSERT_OK(iree_hal_driver_registry_try_create(
+        iree_hal_driver_registry_default(), IREE_SV("local-task"),
+        iree_allocator_system(), &local_task_driver_));
+
+    iree_async_proactor_pool_t* proactor_pool = nullptr;
+    IREE_ASSERT_OK(iree_async_proactor_pool_create(
+        iree_numa_node_count(), /*node_ids=*/nullptr,
+        iree_async_proactor_pool_options_default(), iree_allocator_system(),
+        &proactor_pool));
+
+    iree_hal_device_create_params_t create_params =
+        iree_hal_device_create_params_default();
+    create_params.proactor_pool = proactor_pool;
+    IREE_ASSERT_OK(iree_hal_driver_create_default_device(
+        local_task_driver_, &create_params, iree_allocator_system(),
+        &local_task_device_));
+    IREE_ASSERT_OK(iree_hal_device_group_create_from_device(
+        local_task_device_, server_tracker_, iree_allocator_system(),
+        &local_task_device_group_));
+
+    iree_async_proactor_pool_release(proactor_pool);
+  }
+
+  void CreateAndStartServer() {
+    iree_async_axis_t server_axes[] = {0x0200};
+    uint64_t server_epochs[] = {0};
+    iree_net_session_topology_t server_topology = {};
+    server_topology.axes = server_axes;
+    server_topology.current_epochs = server_epochs;
+    server_topology.axis_count = 1;
+    server_topology.machine_index = 1;
+    server_topology.session_epoch = 1;
+
+    iree_hal_remote_server_options_t server_options;
+    iree_hal_remote_server_options_initialize(&server_options);
+    server_options.transport_factory = factory_;
+    server_options.bind_address =
+        iree_make_string_view(server_address_.data(), server_address_.size());
+    server_options.local_topology = &server_topology;
+    server_options.max_connections = 1;
+
+    iree_hal_device_t* devices[] = {local_task_device_};
+    IREE_ASSERT_OK(iree_hal_remote_server_create(
+        &server_options, devices, 1, server_proactor_, server_tracker_,
+        iree_hal_remote_recv_pool_buffer_pool(server_recv_pool_),
+        iree_allocator_system(), &server_));
+
+    IREE_ASSERT_OK(iree_hal_remote_server_start(server_));
+  }
+
+  void CreateClientDevice() {
+    iree_hal_remote_client_device_options_t client_options;
+    iree_hal_remote_client_device_options_initialize(&client_options);
+    client_options.transport_factory = factory_;
+    client_options.server_address =
+        iree_make_string_view(server_address_.data(), server_address_.size());
+    client_options.error_callback.fn = OnClientError;
+    client_options.error_callback.user_data = this;
+
+    iree_hal_device_create_params_t create_params =
+        iree_hal_device_create_params_default();
+    IREE_ASSERT_OK(iree_hal_remote_client_device_create(
+        IREE_SV("remote-shm"), &client_options, &create_params,
+        client_recv_pool_, iree_allocator_system(), &client_device_));
+  }
+
+  void AllocateMappableBuffer(iree_device_size_t allocation_size,
+                              iree_hal_buffer_t** out_buffer) {
+    iree_hal_allocator_t* allocator = iree_hal_device_allocator(client_device_);
+
+    iree_hal_buffer_params_t params = {0};
+    params.usage =
+        IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED;
+    params.access = IREE_HAL_MEMORY_ACCESS_ALL;
+    params.type =
+        IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+
+    IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
+        allocator, params, allocation_size, out_buffer));
+  }
+
+  void RemoveSocketPathIfPresent() {
+    if (!socket_path_.empty()) {
+      errno = 0;
+      if (std::remove(socket_path_.c_str()) != 0 && errno != ENOENT) {
+        ADD_FAILURE() << "failed to remove Unix socket path " << socket_path_
+                      << ": " << std::strerror(errno);
+      }
+    }
+  }
+
+  bool WaitUntil(std::function<bool()> condition,
+                 iree_duration_t budget = iree_make_duration_ms(5000)) {
+    iree_time_t deadline = iree_time_now() + budget;
+    bool condition_met = condition();
+    while (!condition_met && iree_time_now() < deadline) {
+      std::this_thread::yield();
+      condition_met = condition();
+    }
+    return condition_met;
+  }
+
+  iree_status_code_t ConnectAndWait() {
+    client_connect_fired_.store(false, std::memory_order_relaxed);
+    client_connect_status_.store(IREE_STATUS_OK, std::memory_order_relaxed);
+
+    iree_hal_remote_client_device_connected_callback_t callback;
+    callback.fn = OnClientConnected;
+    callback.user_data = this;
+
+    iree_status_t connect_status =
+        iree_hal_remote_client_device_connect(client_device_, callback);
+    iree_status_code_t code = iree_status_code(connect_status);
+    if (!iree_status_is_ok(connect_status)) {
+      iree_status_ignore(connect_status);
+    } else {
+      EXPECT_TRUE(WaitUntil([&]() { return client_connect_fired_.load(); }))
+          << "Client connect callback timed out";
+      code = client_connect_status_.load();
+    }
+    return code;
+  }
+
+  void ReleaseClientDeviceOnProactor() {
+    if (client_device_) {
+      teardown_client_device_ = client_device_;
+      client_device_ = nullptr;
+      client_teardown_phase_.store(0, std::memory_order_relaxed);
+
+      iree_async_proactor_message_callback_t callback;
+      callback.fn = OnClientTeardownMessage;
+      callback.user_data = this;
+      iree_async_proactor_set_message_callback(client_proactor_, callback);
+
+      IREE_ASSERT_OK(iree_async_proactor_send_message(client_proactor_, 1));
+      ASSERT_TRUE(WaitUntil([&]() {
+        return client_teardown_phase_.load() >= 1;
+      })) << "Client teardown timed out";
+
+      IREE_ASSERT_OK(iree_async_proactor_send_message(client_proactor_, 2));
+      ASSERT_TRUE(WaitUntil([&]() {
+        return client_teardown_phase_.load() >= 2;
+      })) << "Client teardown drain timed out";
+    }
+  }
+
+  void ReleaseServerOnProactor() {
+    if (server_) {
+      teardown_server_ = server_;
+      server_ = nullptr;
+      server_teardown_phase_.store(0, std::memory_order_relaxed);
+
+      iree_async_proactor_message_callback_t callback;
+      callback.fn = OnServerTeardownMessage;
+      callback.user_data = this;
+      iree_async_proactor_set_message_callback(server_proactor_, callback);
+
+      IREE_ASSERT_OK(iree_async_proactor_send_message(server_proactor_, 1));
+      ASSERT_TRUE(WaitUntil([&]() {
+        return server_teardown_phase_.load() >= 1;
+      })) << "Server teardown timed out";
+
+      IREE_ASSERT_OK(iree_async_proactor_send_message(server_proactor_, 2));
+      ASSERT_TRUE(WaitUntil([&]() {
+        return server_teardown_phase_.load() >= 2;
+      })) << "Server teardown drain timed out";
+    }
+  }
+
+  static void StopProactorThread(iree_async_proactor_thread_t** thread) {
+    if (*thread) {
+      iree_async_proactor_thread_request_stop(*thread);
+      IREE_EXPECT_OK(
+          iree_async_proactor_thread_join(*thread, IREE_DURATION_INFINITE));
+      IREE_EXPECT_OK(iree_async_proactor_thread_consume_status(*thread));
+      iree_async_proactor_thread_release(*thread);
+      *thread = nullptr;
+    }
+  }
+
+  static void OnClientConnected(void* user_data, iree_status_t status) {
+    auto* self = static_cast<RemoteShmFileRegistrationTest*>(user_data);
+    self->client_connect_fired_.store(true, std::memory_order_relaxed);
+    self->client_connect_status_.store(iree_status_code(status),
+                                       std::memory_order_relaxed);
+    iree_status_ignore(status);
+  }
+
+  static void OnClientError(void* user_data, iree_status_t status) {
+    auto* self = static_cast<RemoteShmFileRegistrationTest*>(user_data);
+    self->client_error_fired_.store(true, std::memory_order_relaxed);
+    self->client_error_status_.store(iree_status_code(status),
+                                     std::memory_order_relaxed);
+    iree_status_ignore(status);
+  }
+
+  static void OnClientTeardownMessage(iree_async_proactor_t* proactor,
+                                      uint64_t message_data, void* user_data) {
+    (void)proactor;
+    auto* self = static_cast<RemoteShmFileRegistrationTest*>(user_data);
+    if (message_data == 1 && self->teardown_client_device_) {
+      iree_hal_device_release(self->teardown_client_device_);
+      self->teardown_client_device_ = nullptr;
+    }
+    self->client_teardown_phase_.store((int32_t)message_data,
+                                       std::memory_order_release);
+  }
+
+  static void OnServerTeardownMessage(iree_async_proactor_t* proactor,
+                                      uint64_t message_data, void* user_data) {
+    (void)proactor;
+    auto* self = static_cast<RemoteShmFileRegistrationTest*>(user_data);
+    if (message_data == 1 && self->teardown_server_) {
+      iree_hal_remote_server_release(self->teardown_server_);
+      self->teardown_server_ = nullptr;
+    }
+    self->server_teardown_phase_.store((int32_t)message_data,
+                                       std::memory_order_release);
+  }
+
+  iree_async_proactor_t* server_proactor_ = nullptr;  // Server I/O proactor.
+  iree_async_proactor_t* client_proactor_ = nullptr;  // Client I/O proactor.
+  iree_async_proactor_thread_t* server_proactor_thread_ =
+      nullptr;  // Polling thread for server_proactor_.
+  iree_async_proactor_thread_t* client_proactor_thread_ =
+      nullptr;  // Polling thread for client_proactor_.
+  iree_hal_remote_recv_pool_t* server_recv_pool_ =
+      nullptr;  // Server receive buffers.
+  iree_hal_remote_recv_pool_t* client_recv_pool_ =
+      nullptr;  // Client receive buffers.
+  iree_async_frontier_tracker_t* server_tracker_ =
+      nullptr;  // Server queue frontier tracker.
+
+  iree_net_transport_factory_t* factory_ =
+      nullptr;                  // Shared SHM transport factory.
+  std::string socket_path_;     // Short /tmp Unix socket path.
+  std::string server_address_;  // "unix:" address for socket_path_.
+
+  iree_hal_driver_t* local_task_driver_ = nullptr;  // Server target driver.
+  iree_hal_device_t* local_task_device_ = nullptr;  // Server target device.
+  iree_hal_device_group_t* local_task_device_group_ =
+      nullptr;                                  // Server target device group.
+  iree_hal_remote_server_t* server_ = nullptr;  // Remote HAL server.
+  iree_hal_device_t* client_device_ = nullptr;  // Remote HAL client device.
+
+  std::atomic<bool> client_connect_fired_{false};  // Connect callback flag.
+  std::atomic<iree_status_code_t> client_connect_status_{
+      IREE_STATUS_OK};  // Connect callback status code.
+  std::atomic<bool> client_error_fired_{false};  // Async client error flag.
+  std::atomic<iree_status_code_t> client_error_status_{
+      IREE_STATUS_OK};  // Async client error status code.
+
+  iree_hal_device_t* teardown_client_device_ =
+      nullptr;  // Client released on client_proactor_.
+  iree_hal_remote_server_t* teardown_server_ =
+      nullptr;  // Server released on server_proactor_.
+  std::atomic<int32_t> client_teardown_phase_{0};  // Client teardown progress.
+  std::atomic<int32_t> server_teardown_phase_{0};  // Server teardown progress.
+};
+
+#endif  // IREE_FILE_IO_ENABLE && !IREE_PLATFORM_WINDOWS
 
 // Profile sink used to force client-side profile callback failure after the
 // remote bulk relay has delivered and ordered a callback.
@@ -1898,6 +2288,139 @@ TEST_F(RemoteBufferTest, RegisteredClientFileQueueWrite) {
   iree_hal_file_release(target_file);
   target_path.Remove();
 }
+
+#if IREE_FILE_IO_ENABLE && !defined(IREE_PLATFORM_WINDOWS)
+
+TEST_F(RemoteShmFileRegistrationTest,
+       RegisteredClientFileQueueReadWriteOverUnixShm) {
+  static const char kReadContents[] =
+      "remote unix shm registered file read contents";
+  iree::testing::TempFilePath source_path(
+      "iree_hal_remote_shm_registered_read");
+  IREE_ASSERT_OK(WriteFileContents(
+      source_path.path_view(),
+      iree_make_const_byte_span(kReadContents, sizeof(kReadContents) - 1)));
+
+  iree_io_file_handle_t* source_handle = nullptr;
+  iree_status_t status = iree_io_file_handle_open(
+      IREE_IO_FILE_MODE_READ | IREE_IO_FILE_MODE_RANDOM_ACCESS |
+          IREE_IO_FILE_MODE_SHARE_READ | IREE_IO_FILE_MODE_ASYNC,
+      source_path.path_view(), iree_allocator_system(), &source_handle);
+  if (iree_status_is_unavailable(status) ||
+      iree_status_code(status) == IREE_STATUS_UNIMPLEMENTED) {
+    iree_status_ignore(status);
+    GTEST_SKIP() << "Async platform file handles unavailable";
+  }
+  IREE_ASSERT_OK(status);
+
+  iree_hal_file_t* source_file = nullptr;
+  IREE_ASSERT_OK(iree_hal_file_import(
+      client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, IREE_HAL_MEMORY_ACCESS_READ,
+      source_handle, IREE_HAL_EXTERNAL_FILE_FLAG_NONE, &source_file));
+  iree_io_file_handle_release(source_handle);
+  EXPECT_EQ(iree_hal_file_length(source_file), sizeof(kReadContents) - 1);
+
+  iree_hal_buffer_t* read_buffer = nullptr;
+  AllocateMappableBuffer(sizeof(kReadContents) - 1, &read_buffer);
+
+  iree_hal_semaphore_t* read_semaphore = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_create(client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, 0,
+                                IREE_HAL_SEMAPHORE_FLAG_NONE, &read_semaphore));
+  SemaphoreListHelper read_signal(read_semaphore, 1);
+  IREE_ASSERT_OK(iree_hal_device_queue_read(
+      client_device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+      iree_hal_semaphore_list_empty(), read_signal.list, source_file,
+      /*source_offset=*/0, read_buffer, /*target_offset=*/0,
+      sizeof(kReadContents) - 1, IREE_HAL_READ_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(
+      read_semaphore, 1, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+
+  iree_hal_buffer_mapping_t read_mapping;
+  IREE_ASSERT_OK(iree_hal_buffer_map_range(
+      read_buffer, IREE_HAL_MAPPING_MODE_SCOPED, IREE_HAL_MEMORY_ACCESS_READ, 0,
+      sizeof(kReadContents) - 1, &read_mapping));
+  ASSERT_EQ(memcmp(read_mapping.contents.data, kReadContents,
+                   sizeof(kReadContents) - 1),
+            0);
+  IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&read_mapping));
+
+  iree_hal_semaphore_release(read_semaphore);
+  iree_hal_buffer_release(read_buffer);
+  iree_hal_file_release(source_file);
+  source_path.Remove();
+
+  static const char kWriteContents[] =
+      "remote unix shm registered file write contents";
+  iree::testing::TempFilePath target_path(
+      "iree_hal_remote_shm_registered_write");
+  std::string initial_contents(sizeof(kWriteContents) - 1, '\0');
+  IREE_ASSERT_OK(
+      WriteFileContents(target_path.path_view(),
+                        iree_make_const_byte_span(initial_contents.data(),
+                                                  initial_contents.size())));
+
+  iree_io_file_handle_t* target_handle = nullptr;
+  status = iree_io_file_handle_open(
+      IREE_IO_FILE_MODE_READ | IREE_IO_FILE_MODE_WRITE |
+          IREE_IO_FILE_MODE_RANDOM_ACCESS | IREE_IO_FILE_MODE_SHARE_READ |
+          IREE_IO_FILE_MODE_SHARE_WRITE | IREE_IO_FILE_MODE_ASYNC,
+      target_path.path_view(), iree_allocator_system(), &target_handle);
+  if (iree_status_is_unavailable(status) ||
+      iree_status_code(status) == IREE_STATUS_UNIMPLEMENTED) {
+    iree_status_ignore(status);
+    GTEST_SKIP() << "Async platform file handles unavailable";
+  }
+  IREE_ASSERT_OK(status);
+
+  iree_hal_file_t* target_file = nullptr;
+  IREE_ASSERT_OK(iree_hal_file_import(
+      client_device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+      IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE, target_handle,
+      IREE_HAL_EXTERNAL_FILE_FLAG_NONE, &target_file));
+  iree_io_file_handle_release(target_handle);
+  EXPECT_EQ(iree_hal_file_length(target_file), sizeof(kWriteContents) - 1);
+
+  iree_hal_buffer_t* write_buffer = nullptr;
+  AllocateMappableBuffer(sizeof(kWriteContents) - 1, &write_buffer);
+  iree_hal_buffer_mapping_t write_mapping;
+  IREE_ASSERT_OK(
+      iree_hal_buffer_map_range(write_buffer, IREE_HAL_MAPPING_MODE_SCOPED,
+                                IREE_HAL_MEMORY_ACCESS_DISCARD_WRITE, 0,
+                                sizeof(kWriteContents) - 1, &write_mapping));
+  memcpy(write_mapping.contents.data, kWriteContents,
+         sizeof(kWriteContents) - 1);
+  IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&write_mapping));
+
+  iree_hal_semaphore_t* write_semaphore = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, 0,
+      IREE_HAL_SEMAPHORE_FLAG_NONE, &write_semaphore));
+  SemaphoreListHelper write_signal(write_semaphore, 1);
+  IREE_ASSERT_OK(iree_hal_device_queue_write(
+      client_device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+      iree_hal_semaphore_list_empty(), write_signal.list, write_buffer,
+      /*source_offset=*/0, target_file, /*target_offset=*/0,
+      sizeof(kWriteContents) - 1, IREE_HAL_WRITE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(
+      write_semaphore, 1, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+
+  iree_io_file_contents_t* contents = nullptr;
+  IREE_ASSERT_OK(iree_io_file_contents_read(
+      target_path.path_view(), iree_allocator_system(), &contents));
+  ASSERT_GE(contents->const_buffer.data_length, sizeof(kWriteContents) - 1);
+  ASSERT_EQ(memcmp(contents->const_buffer.data, kWriteContents,
+                   sizeof(kWriteContents) - 1),
+            0);
+  iree_io_file_contents_free(contents);
+
+  iree_hal_semaphore_release(write_semaphore);
+  iree_hal_buffer_release(write_buffer);
+  iree_hal_file_release(target_file);
+  target_path.Remove();
+}
+
+#endif  // IREE_FILE_IO_ENABLE && !IREE_PLATFORM_WINDOWS
 
 TEST_F(RemoteBufferTest, ClientFileQueueWriteLargeHostAllocation) {
   constexpr iree_device_size_t kLength = 3 * 64 * 1024 + 17;
