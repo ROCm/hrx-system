@@ -66,6 +66,7 @@ static bool iree_net_rdma_work_request_operation_is_valid(
     case IREE_NET_RDMA_WORK_REQUEST_OPERATION_DIRECT_WRITE:
     case IREE_NET_RDMA_WORK_REQUEST_OPERATION_DIRECT_READ:
     case IREE_NET_RDMA_WORK_REQUEST_OPERATION_COMMITTED_SEND:
+    case IREE_NET_RDMA_WORK_REQUEST_OPERATION_CREDIT_GRANT:
       return true;
     default:
       return false;

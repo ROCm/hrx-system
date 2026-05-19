@@ -51,6 +51,16 @@ TEST(RdmaCreditMemoryTest, RejectsNullContext) {
   EXPECT_EQ(nullptr, memory);
 }
 
+TEST(RdmaCreditMemoryTest, StoreSgeRejectsMissingStorage) {
+  struct ibv_sge scatter_gather_entry;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_net_rdma_credit_memory_store_sge(nullptr, 1, &scatter_gather_entry));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_net_rdma_credit_memory_store_sge(nullptr, 1, nullptr));
+}
+
 TEST(RdmaCreditMemoryTest, PublishesRegisteredCounter) {
   iree_net_rdma_context_t* raw_context = nullptr;
   iree_status_t context_status =
@@ -81,6 +91,14 @@ TEST(RdmaCreditMemoryTest, PublishesRegisteredCounter) {
       reinterpret_cast<iree_atomic_uint32_t*>((uintptr_t)remote_memory.address);
   iree_atomic_store(counter, 13u, iree_memory_order_release);
   EXPECT_EQ(13u, iree_net_rdma_credit_memory_load(memory.get()));
+
+  struct ibv_sge scatter_gather_entry;
+  IREE_ASSERT_OK(iree_net_rdma_credit_memory_store_sge(memory.get(), 17,
+                                                       &scatter_gather_entry));
+  EXPECT_EQ(17u, iree_net_rdma_credit_memory_load(memory.get()));
+  EXPECT_EQ(remote_memory.address, scatter_gather_entry.addr);
+  EXPECT_EQ(sizeof(uint32_t), scatter_gather_entry.length);
+  EXPECT_NE(0u, scatter_gather_entry.lkey);
 }
 
 TEST(RdmaCreditMemoryTest, EmptyRemoteDescriptorForNullMemory) {

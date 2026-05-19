@@ -138,3 +138,26 @@ IREE_API_EXPORT void iree_net_rdma_credit_memory_store(
   iree_atomic_store(&memory->counter->value, credit_limit,
                     iree_memory_order_release);
 }
+
+IREE_API_EXPORT iree_status_t iree_net_rdma_credit_memory_store_sge(
+    iree_net_rdma_credit_memory_t* memory, uint32_t credit_limit,
+    struct ibv_sge* out_sge) {
+  if (!out_sge) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "out_sge must not be NULL");
+  }
+  memset(out_sge, 0, sizeof(*out_sge));
+
+  iree_status_t status = iree_ok_status();
+  if (!memory || !memory->counter || !memory->memory_region) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "memory must be initialized");
+  }
+  if (iree_status_is_ok(status)) {
+    iree_net_rdma_credit_memory_store(memory, credit_limit);
+    out_sge->addr = (uint64_t)(uintptr_t)&memory->counter->value;
+    out_sge->length = sizeof(memory->counter->value);
+    out_sge->lkey = memory->memory_region->lkey;
+  }
+  return status;
+}

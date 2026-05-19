@@ -57,6 +57,11 @@ iree_net_rdma_credit_memory_load(const iree_net_rdma_credit_memory_t* memory);
 IREE_API_EXPORT void iree_net_rdma_credit_memory_store(
     iree_net_rdma_credit_memory_t* memory, uint32_t credit_limit);
 
+// Stores |credit_limit| and returns an SGE for sending it to a peer.
+IREE_API_EXPORT iree_status_t iree_net_rdma_credit_memory_store_sge(
+    iree_net_rdma_credit_memory_t* memory, uint32_t credit_limit,
+    struct ibv_sge* out_sge);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus
