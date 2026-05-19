@@ -168,12 +168,17 @@ iree_cc_test(
   SRCS
     "xproc_test.cc"
   DEPS
+    ::factory
     ::handshake
     ::shared_wake
     ::shm
+    iree::async
     iree::async::platform
     iree::base
     iree::io::file_handle
+    iree::net::connection
+    iree::net::message_endpoint
+    iree::net::transport_factory
     iree::testing::coordinated_test
     iree::testing::coordinated_test_main
     iree::testing::gtest

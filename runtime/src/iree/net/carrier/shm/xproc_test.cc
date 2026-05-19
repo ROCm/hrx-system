@@ -40,13 +40,20 @@
 #include <cerrno>
 #include <cstring>
 #include <functional>
+#include <string>
 #include <vector>
 
+#include "iree/async/buffer_pool.h"
 #include "iree/async/proactor_platform.h"
+#include "iree/async/slab.h"
 #include "iree/io/file_handle.h"
 #include "iree/net/carrier/shm/carrier.h"
+#include "iree/net/carrier/shm/factory.h"
 #include "iree/net/carrier/shm/handshake.h"
 #include "iree/net/carrier/shm/shared_wake.h"
+#include "iree/net/connection.h"
+#include "iree/net/message_endpoint.h"
+#include "iree/net/transport_factory.h"
 #include "iree/testing/coordinated_test.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -220,6 +227,196 @@ struct XProcContext {
     }
   }
 };
+
+#if !defined(IREE_PLATFORM_WINDOWS)
+
+struct EndpointReadyState {
+  bool fired = false;
+  iree_status_code_t status_code = IREE_STATUS_OK;
+  iree_net_message_endpoint_t endpoint = {nullptr, nullptr};
+
+  static void Callback(void* user_data, iree_status_t status,
+                       iree_net_message_endpoint_t endpoint) {
+    auto* state = static_cast<EndpointReadyState*>(user_data);
+    state->fired = true;
+    state->status_code = iree_status_code(status);
+    state->endpoint = endpoint;
+    iree_status_ignore(status);
+  }
+};
+
+struct FactoryXProcContext {
+  iree_async_proactor_t* proactor = nullptr;
+  iree_async_slab_t* slab = nullptr;
+  iree_async_region_t* region = nullptr;
+  iree_async_buffer_pool_t* recv_pool = nullptr;
+  iree_net_transport_factory_t* factory = nullptr;
+  iree_net_listener_t* listener = nullptr;
+  iree_net_connection_t* connection = nullptr;
+  bool connection_ready = false;
+  iree_status_code_t connection_status_code = IREE_STATUS_OK;
+
+  ~FactoryXProcContext() {
+    if (listener) {
+      bool stopped = false;
+      iree_status_t status = iree_net_listener_stop(
+          listener,
+          {[](void* user_data) { *static_cast<bool*>(user_data) = true; },
+           &stopped});
+      if (iree_status_is_ok(status)) {
+        PollUntil([&] { return stopped; });
+      } else {
+        iree_status_ignore(status);
+      }
+      iree_net_listener_free(listener);
+    }
+    if (connection) {
+      bool deactivated = false;
+      iree_net_connection_deactivate(
+          connection,
+          {[](void* user_data) { *static_cast<bool*>(user_data) = true; },
+           &deactivated});
+      PollUntil([&] { return deactivated; });
+    }
+    iree_net_connection_release(connection);
+    iree_net_transport_factory_release(factory);
+    iree_async_buffer_pool_free(recv_pool);
+    iree_async_region_release(region);
+    iree_async_slab_release(slab);
+    iree_async_proactor_release(proactor);
+  }
+
+  iree_status_t Initialize(uint16_t endpoint_count) {
+    IREE_RETURN_IF_ERROR(iree_async_proactor_create_platform(
+        iree_async_proactor_options_default(), iree_allocator_system(),
+        &proactor));
+
+    iree_async_slab_options_t slab_options = {0};
+    slab_options.buffer_size = 4096;
+    slab_options.buffer_count = 16;
+    IREE_RETURN_IF_ERROR(
+        iree_async_slab_create(slab_options, iree_allocator_system(), &slab));
+    IREE_RETURN_IF_ERROR(iree_async_proactor_register_slab(
+        proactor, slab, IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE, &region));
+    IREE_RETURN_IF_ERROR(iree_async_buffer_pool_allocate(
+        region, iree_allocator_system(), &recv_pool));
+
+    iree_net_shm_carrier_options_t options =
+        iree_net_shm_carrier_options_default();
+    options.max_endpoint_count = endpoint_count;
+    return iree_net_shm_factory_create(options, iree_allocator_system(),
+                                       &factory);
+  }
+
+  bool PollUntil(std::function<bool()> condition,
+                 int64_t timeout_ms = kPollTimeoutMs) {
+    iree_time_t deadline_ns =
+        iree_time_now() + iree_make_duration_ms(timeout_ms);
+    while (!condition()) {
+      if (iree_time_now() >= deadline_ns) return false;
+      iree_host_size_t completed = 0;
+      iree_status_t status = iree_async_proactor_poll(
+          proactor, iree_make_deadline(deadline_ns), &completed);
+      if (iree_status_is_deadline_exceeded(status)) {
+        iree_status_ignore(status);
+      } else if (!iree_status_is_ok(status)) {
+        iree_status_ignore(status);
+        return false;
+      }
+    }
+    return true;
+  }
+
+  static void AcceptCallback(void* user_data, iree_status_t status,
+                             iree_net_connection_t* connection) {
+    auto* context = static_cast<FactoryXProcContext*>(user_data);
+    context->connection_ready = true;
+    context->connection_status_code = iree_status_code(status);
+    context->connection = connection;
+    iree_status_ignore(status);
+  }
+
+  static void ConnectCallback(void* user_data, iree_status_t status,
+                              iree_net_connection_t* connection) {
+    AcceptCallback(user_data, status, connection);
+  }
+
+  static iree_status_t EndpointMessage(void* user_data,
+                                       iree_const_byte_span_t message,
+                                       iree_async_buffer_lease_t* lease) {
+    (void)user_data;
+    (void)message;
+    (void)lease;
+    return iree_ok_status();
+  }
+
+  static void EndpointError(void* user_data, iree_status_t status) {
+    auto* status_code = static_cast<iree_status_code_t*>(user_data);
+    *status_code = iree_status_code(status);
+    iree_status_ignore(status);
+  }
+
+  iree_status_t OpenActivateAndDeactivateEndpoints(uint16_t endpoint_count) {
+    std::vector<EndpointReadyState> ready(endpoint_count);
+    for (uint16_t i = 0; i < endpoint_count; ++i) {
+      IREE_RETURN_IF_ERROR(iree_net_connection_open_endpoint(
+          connection, {EndpointReadyState::Callback, &ready[i]}));
+    }
+    if (!PollUntil([&] {
+          for (const auto& state : ready) {
+            if (!state.fired) return false;
+          }
+          return true;
+        })) {
+      return iree_make_status(IREE_STATUS_DEADLINE_EXCEEDED,
+                              "endpoint ready callbacks did not fire");
+    }
+
+    std::vector<iree_status_code_t> endpoint_errors(endpoint_count,
+                                                    IREE_STATUS_OK);
+    for (uint16_t i = 0; i < endpoint_count; ++i) {
+      if (ready[i].status_code != IREE_STATUS_OK) {
+        return iree_make_status(ready[i].status_code,
+                                "endpoint %" PRIu16 " open failed", i);
+      }
+      if (!ready[i].endpoint.self) {
+        return iree_make_status(IREE_STATUS_INTERNAL,
+                                "endpoint %" PRIu16 " opened as NULL", i);
+      }
+      iree_net_message_endpoint_set_callbacks(
+          ready[i].endpoint,
+          {EndpointMessage, EndpointError, &endpoint_errors[i]});
+      IREE_RETURN_IF_ERROR(
+          iree_net_message_endpoint_activate(ready[i].endpoint));
+    }
+
+    std::vector<uint8_t> deactivated(endpoint_count, 0);
+    for (uint16_t i = 0; i < endpoint_count; ++i) {
+      IREE_RETURN_IF_ERROR(iree_net_message_endpoint_deactivate(
+          ready[i].endpoint,
+          [](void* user_data) { *static_cast<uint8_t*>(user_data) = 1; },
+          &deactivated[i]));
+    }
+    if (!PollUntil([&] {
+          for (uint8_t value : deactivated) {
+            if (!value) return false;
+          }
+          return true;
+        })) {
+      return iree_make_status(IREE_STATUS_DEADLINE_EXCEEDED,
+                              "endpoint deactivate callbacks did not fire");
+    }
+    for (uint16_t i = 0; i < endpoint_count; ++i) {
+      if (endpoint_errors[i] != IREE_STATUS_OK) {
+        return iree_make_status(endpoint_errors[i],
+                                "endpoint %" PRIu16 " transport error", i);
+      }
+    }
+    return iree_ok_status();
+  }
+};
+
+#endif  // !IREE_PLATFORM_WINDOWS
 
 //===----------------------------------------------------------------------===//
 // Channel and handshake helpers
@@ -914,7 +1111,77 @@ static int file_transfer_client_role(int argc, char** argv,
 #endif  // IREE_FILE_IO_ENABLE && !IREE_PLATFORM_WINDOWS
 
 //===----------------------------------------------------------------------===//
-// Test 5: Direct read across processes
+// Test 5: Factory multi-endpoint connection
+//===----------------------------------------------------------------------===//
+
+#if !defined(IREE_PLATFORM_WINDOWS)
+
+static constexpr uint16_t kFactoryEndpointCount = 3;
+
+static std::string MakeFactoryAddressString(const char* temp_directory) {
+  char address[256];
+  MakeAddress(temp_directory, address, sizeof(address));
+  return std::string("unix:") + address;
+}
+
+static int factory_multi_endpoint_server_role(int argc, char** argv,
+                                              const char* temp_directory) {
+  FactoryXProcContext context;
+  XPROC_CHECK_OK(context.Initialize(kFactoryEndpointCount));
+
+  std::string address = MakeFactoryAddressString(temp_directory);
+  XPROC_CHECK_OK(iree_net_transport_factory_create_listener(
+      context.factory, iree_make_cstring_view(address.c_str()),
+      context.proactor, context.recv_pool, FactoryXProcContext::AcceptCallback,
+      &context, iree_allocator_system(), &context.listener));
+
+  iree_coordinated_test_signal_ready(temp_directory);
+
+  XPROC_CHECK(context.PollUntil([&] { return context.connection_ready; }),
+              "timed out waiting for factory accept");
+  XPROC_CHECK(context.connection_status_code == IREE_STATUS_OK,
+              "factory accept failed with status %d",
+              (int)context.connection_status_code);
+  XPROC_CHECK(context.connection != nullptr,
+              "factory accept produced a NULL connection");
+  XPROC_CHECK(iree_net_connection_max_endpoint_count(context.connection) ==
+                  kFactoryEndpointCount,
+              "server endpoint count mismatch");
+  XPROC_CHECK_OK(
+      context.OpenActivateAndDeactivateEndpoints(kFactoryEndpointCount));
+  return 0;
+}
+
+static int factory_multi_endpoint_client_role(int argc, char** argv,
+                                              const char* temp_directory) {
+  FactoryXProcContext context;
+  XPROC_CHECK_OK(context.Initialize(kFactoryEndpointCount));
+
+  std::string address = MakeFactoryAddressString(temp_directory);
+  XPROC_CHECK_OK(iree_net_transport_factory_connect(
+      context.factory, iree_make_cstring_view(address.c_str()),
+      context.proactor, context.recv_pool, FactoryXProcContext::ConnectCallback,
+      &context));
+
+  XPROC_CHECK(context.PollUntil([&] { return context.connection_ready; }),
+              "timed out waiting for factory connect");
+  XPROC_CHECK(context.connection_status_code == IREE_STATUS_OK,
+              "factory connect failed with status %d",
+              (int)context.connection_status_code);
+  XPROC_CHECK(context.connection != nullptr,
+              "factory connect produced a NULL connection");
+  XPROC_CHECK(iree_net_connection_max_endpoint_count(context.connection) ==
+                  kFactoryEndpointCount,
+              "client endpoint count mismatch");
+  XPROC_CHECK_OK(
+      context.OpenActivateAndDeactivateEndpoints(kFactoryEndpointCount));
+  return 0;
+}
+
+#endif  // !IREE_PLATFORM_WINDOWS
+
+//===----------------------------------------------------------------------===//
+// Test 6: Direct read across processes
 //===----------------------------------------------------------------------===//
 
 // The server writes data at this offset; the client reads it.
@@ -1057,6 +1324,20 @@ static const iree_coordinated_test_config_t kFileTransferConfig = {
 };
 #endif  // IREE_FILE_IO_ENABLE && !IREE_PLATFORM_WINDOWS
 
+#if !defined(IREE_PLATFORM_WINDOWS)
+static const iree_test_role_t kFactoryMultiEndpointRoles[] = {
+    {"factory_multi_endpoint_server", factory_multi_endpoint_server_role,
+     /*signals_ready=*/true},
+    {"factory_multi_endpoint_client", factory_multi_endpoint_client_role,
+     /*signals_ready=*/false},
+};
+static const iree_coordinated_test_config_t kFactoryMultiEndpointConfig = {
+    /*.roles=*/kFactoryMultiEndpointRoles,
+    /*.role_count=*/2,
+    /*.timeout_ms=*/30000,
+};
+#endif  // !IREE_PLATFORM_WINDOWS
+
 static const iree_test_role_t kDirectReadRoles[] = {
     {"dread_server", dread_server_role, /*signals_ready=*/true},
     {"dread_client", dread_client_role, /*signals_ready=*/false},
@@ -1082,6 +1363,12 @@ static const iree_test_role_t kAllRoles[] = {
     {"file_transfer_client", file_transfer_client_role,
      /*signals_ready=*/false},
 #endif  // IREE_FILE_IO_ENABLE && !IREE_PLATFORM_WINDOWS
+#if !defined(IREE_PLATFORM_WINDOWS)
+    {"factory_multi_endpoint_server", factory_multi_endpoint_server_role,
+     /*signals_ready=*/true},
+    {"factory_multi_endpoint_client", factory_multi_endpoint_client_role,
+     /*signals_ready=*/false},
+#endif  // !IREE_PLATFORM_WINDOWS
     {"dread_server", dread_server_role, /*signals_ready=*/true},
     {"dread_client", dread_client_role, /*signals_ready=*/false},
 };
@@ -1149,6 +1436,15 @@ TEST(XProcCarrier, FileTransferSideband) {
                                          &kFileTransferConfig));
 }
 #endif  // IREE_FILE_IO_ENABLE && !IREE_PLATFORM_WINDOWS
+
+#if !defined(IREE_PLATFORM_WINDOWS)
+TEST(XProcCarrier, FactoryMultiEndpointConnection) {
+  if (!ProactorAvailable()) GTEST_SKIP() << "Platform proactor unavailable";
+  ASSERT_EQ(0, iree_coordinated_test_run(iree_coordinated_test_argc(),
+                                         iree_coordinated_test_argv(),
+                                         &kFactoryMultiEndpointConfig));
+}
+#endif  // !IREE_PLATFORM_WINDOWS
 
 TEST(XProcCarrier, DirectReadAcrossProcesses) {
   if (!ProactorAvailable()) GTEST_SKIP() << "Platform proactor unavailable";

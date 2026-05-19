@@ -64,8 +64,9 @@ static void iree_net_shm_unix_listener_accept_complete(
     iree_async_completion_flags_t flags);
 
 // Handles a successfully accepted socket: duplicates the primitive, runs the
-// server-side handshake, creates a carrier, wraps in a connection, and delivers
-// to the consumer. On failure at any step, reports the error to the consumer.
+// server-side endpoint handshakes, creates a multi-endpoint connection, and
+// delivers it to the consumer. On failure at any step, reports the error to the
+// consumer.
 static void iree_net_shm_unix_listener_handle_accepted(
     iree_net_shm_unix_listener_t* listener, iree_async_socket_t* accepted) {
   // Dup the socket's primitive for the handshake. The duplicate transfers to
@@ -83,43 +84,47 @@ static void iree_net_shm_unix_listener_handle_accepted(
     status = iree_net_shm_factory_get_or_create_shared_wake(
         listener->factory, listener->proactor, &shared_wake);
     iree_slim_mutex_unlock(&listener->factory->mutex);
-    if (!iree_status_is_ok(status)) {
-      iree_async_primitive_close(&handshake_primitive);
-    }
   }
 
-  // Run the server handshake. The socket primitive transfers to the xproc
-  // context on success and is closed on failure.
-  iree_net_shm_handshake_result_t handshake_result;
-  memset(&handshake_result, 0, sizeof(handshake_result));
+  uint16_t endpoint_count = listener->factory->options.max_endpoint_count;
+  iree_net_shm_handshake_result_t* handshake_results = NULL;
+  if (iree_status_is_ok(status) && endpoint_count == 0) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "SHM listener requires at least one endpoint");
+  }
   if (iree_status_is_ok(status)) {
-    status = iree_net_shm_handshake_server(
+    status = iree_allocator_malloc_array(
+        listener->host_allocator, endpoint_count, sizeof(*handshake_results),
+        (void**)&handshake_results);
+    if (iree_status_is_ok(status)) {
+      memset(handshake_results, 0, endpoint_count * sizeof(*handshake_results));
+    }
+  }
+  for (uint16_t i = 0; i < endpoint_count && iree_status_is_ok(status); ++i) {
+    status = iree_net_shm_handshake_server_endpoint(
         handshake_primitive, shared_wake, listener->factory->options,
-        listener->proactor, listener->host_allocator, &handshake_result);
+        listener->proactor, listener->host_allocator, &handshake_results[i]);
   }
-
-  // Create carrier from handshake result.
-  iree_net_carrier_callback_t no_callback = {0};
-  iree_net_carrier_t* carrier = NULL;
   if (iree_status_is_ok(status)) {
-    status = iree_net_shm_carrier_create(&handshake_result.carrier_params,
-                                         no_callback, listener->host_allocator,
-                                         &carrier);
-    if (!iree_status_is_ok(status)) {
-      iree_net_shm_xproc_context_release(handshake_result.context);
+    status = iree_net_shm_handshake_result_attach_file_transfer(
+        &handshake_primitive, listener->host_allocator, &handshake_results[0]);
+  }
+  if (!iree_status_is_ok(status)) {
+    iree_async_primitive_close(&handshake_primitive);
+    if (handshake_results) {
+      for (uint16_t i = 0; i < endpoint_count; ++i) {
+        iree_net_shm_handshake_result_deinitialize(&handshake_results[i]);
+      }
     }
   }
 
-  // Wrap in connection and deliver to the consumer.
   iree_net_connection_t* connection = NULL;
   if (iree_status_is_ok(status)) {
-    status = iree_net_shm_connection_create(
-        listener->proactor, carrier, listener->recv_pool,
-        listener->host_allocator, &connection);
-    if (!iree_status_is_ok(status)) {
-      iree_net_carrier_release(carrier);
-    }
+    status = iree_net_shm_connection_create_from_handshake_results(
+        listener->proactor, endpoint_count, handshake_results,
+        listener->recv_pool, listener->host_allocator, &connection);
   }
+  iree_allocator_free(listener->host_allocator, handshake_results);
 
   if (iree_status_is_ok(status)) {
     listener->accept.fn(listener->accept.user_data, iree_ok_status(),
@@ -342,8 +347,8 @@ typedef struct iree_net_shm_unix_connect_state_t {
 } iree_net_shm_unix_connect_state_t;
 
 // Handles the connected socket: duplicates the primitive, runs the client-side
-// handshake, creates a carrier, wraps in a connection, and delivers to the
-// consumer. On failure at any step, reports the error to the consumer.
+// endpoint handshakes, creates a multi-endpoint connection, and delivers it to
+// the consumer. On failure at any step, reports the error to the consumer.
 static void iree_net_shm_unix_connect_handle_connected(
     iree_net_shm_unix_connect_state_t* state) {
   // Dup the connected socket's primitive for the handshake. The duplicate
@@ -362,43 +367,47 @@ static void iree_net_shm_unix_connect_handle_connected(
     status = iree_net_shm_factory_get_or_create_shared_wake(
         state->factory, state->proactor, &shared_wake);
     iree_slim_mutex_unlock(&state->factory->mutex);
-    if (!iree_status_is_ok(status)) {
-      iree_async_primitive_close(&handshake_primitive);
-    }
   }
 
-  // Run the client handshake. Synchronous but completes in microseconds over
-  // a local Unix domain socket. Closes the socket primitive on return.
-  iree_net_shm_handshake_result_t handshake_result;
-  memset(&handshake_result, 0, sizeof(handshake_result));
+  uint16_t endpoint_count = state->factory->options.max_endpoint_count;
+  iree_net_shm_handshake_result_t* handshake_results = NULL;
+  if (iree_status_is_ok(status) && endpoint_count == 0) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "SHM connection requires at least one endpoint");
+  }
   if (iree_status_is_ok(status)) {
-    status = iree_net_shm_handshake_client(
+    status = iree_allocator_malloc_array(state->host_allocator, endpoint_count,
+                                         sizeof(*handshake_results),
+                                         (void**)&handshake_results);
+    if (iree_status_is_ok(status)) {
+      memset(handshake_results, 0, endpoint_count * sizeof(*handshake_results));
+    }
+  }
+  for (uint16_t i = 0; i < endpoint_count && iree_status_is_ok(status); ++i) {
+    status = iree_net_shm_handshake_client_endpoint(
         handshake_primitive, shared_wake, state->proactor,
-        state->host_allocator, &handshake_result);
+        state->host_allocator, &handshake_results[i]);
   }
-
-  // Create carrier from handshake result.
-  iree_net_carrier_callback_t no_callback = {0};
-  iree_net_carrier_t* carrier = NULL;
   if (iree_status_is_ok(status)) {
-    status = iree_net_shm_carrier_create(&handshake_result.carrier_params,
-                                         no_callback, state->host_allocator,
-                                         &carrier);
-    if (!iree_status_is_ok(status)) {
-      iree_net_shm_xproc_context_release(handshake_result.context);
+    status = iree_net_shm_handshake_result_attach_file_transfer(
+        &handshake_primitive, state->host_allocator, &handshake_results[0]);
+  }
+  if (!iree_status_is_ok(status)) {
+    iree_async_primitive_close(&handshake_primitive);
+    if (handshake_results) {
+      for (uint16_t i = 0; i < endpoint_count; ++i) {
+        iree_net_shm_handshake_result_deinitialize(&handshake_results[i]);
+      }
     }
   }
 
-  // Wrap in connection and deliver.
   iree_net_connection_t* connection = NULL;
   if (iree_status_is_ok(status)) {
-    status = iree_net_shm_connection_create(state->proactor, carrier,
-                                            state->recv_pool,
-                                            state->host_allocator, &connection);
-    if (!iree_status_is_ok(status)) {
-      iree_net_carrier_release(carrier);
-    }
+    status = iree_net_shm_connection_create_from_handshake_results(
+        state->proactor, endpoint_count, handshake_results, state->recv_pool,
+        state->host_allocator, &connection);
   }
+  iree_allocator_free(state->host_allocator, handshake_results);
 
   if (iree_status_is_ok(status)) {
     state->callback.fn(state->callback.user_data, iree_ok_status(), connection);

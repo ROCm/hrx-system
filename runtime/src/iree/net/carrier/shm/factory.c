@@ -116,8 +116,10 @@ static iree_status_t iree_net_shm_endpoint_activate(void* self) {
                                         .fn = iree_net_shm_endpoint_on_recv,
                                         .user_data = adapter,
                                     });
-  adapter->activated = true;
   iree_status_t status = iree_net_carrier_activate(adapter->carrier);
+  if (iree_status_is_ok(status)) {
+    adapter->activated = true;
+  }
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -299,6 +301,59 @@ iree_status_t iree_net_shm_connection_create(
   connection->endpoints[0].carrier = initial_carrier;
   *out_connection = &connection->base;
   return iree_ok_status();
+}
+
+iree_status_t iree_net_shm_connection_create_from_handshake_results(
+    iree_async_proactor_t* proactor, uint16_t endpoint_count,
+    iree_net_shm_handshake_result_t* results,
+    iree_async_buffer_pool_t* recv_pool, iree_allocator_t host_allocator,
+    iree_net_connection_t** out_connection) {
+  IREE_ASSERT_ARGUMENT(results);
+  IREE_ASSERT_ARGUMENT(out_connection);
+  *out_connection = NULL;
+
+  if (endpoint_count == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "SHM connection requires at least one endpoint");
+  }
+
+  iree_net_carrier_t** carriers = NULL;
+  iree_status_t status = iree_allocator_malloc_array(
+      host_allocator, endpoint_count, sizeof(*carriers), (void**)&carriers);
+  if (iree_status_is_ok(status)) {
+    memset(carriers, 0, endpoint_count * sizeof(*carriers));
+  }
+
+  iree_net_carrier_callback_t no_callback = {0};
+  for (uint16_t i = 0; i < endpoint_count && iree_status_is_ok(status); ++i) {
+    status = iree_net_shm_carrier_create(
+        &results[i].carrier_params, no_callback, host_allocator, &carriers[i]);
+    if (iree_status_is_ok(status)) {
+      results[i].context = NULL;
+    }
+  }
+
+  iree_net_shm_connection_t* connection = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_net_shm_connection_create_with_slots(
+        proactor, endpoint_count, recv_pool, host_allocator, &connection);
+  }
+  if (iree_status_is_ok(status)) {
+    for (uint16_t i = 0; i < endpoint_count; ++i) {
+      connection->endpoints[i].carrier = carriers[i];
+      carriers[i] = NULL;
+    }
+    *out_connection = &connection->base;
+  }
+
+  for (uint16_t i = 0; i < endpoint_count; ++i) {
+    if (carriers) {
+      iree_net_carrier_release(carriers[i]);
+    }
+    iree_net_shm_handshake_result_deinitialize(&results[i]);
+  }
+  iree_allocator_free(host_allocator, carriers);
+  return status;
 }
 
 // Per-carrier deactivation callback. Fires when one carrier has drained.

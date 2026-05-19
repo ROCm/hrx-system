@@ -87,6 +87,7 @@ static inline void iree_net_shm_xproc_context_retain(
 static inline void iree_net_shm_xproc_context_release(void* opaque) {
   if (!opaque) return;
   iree_net_shm_xproc_context_t* context = (iree_net_shm_xproc_context_t*)opaque;
+  if (!context) return;
   if (iree_atomic_ref_count_dec(&context->ref_count) == 1) {
     iree_async_notification_release(context->peer_notification);
     iree_async_primitive_close(&context->peer_signal_primitive);

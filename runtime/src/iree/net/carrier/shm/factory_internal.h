@@ -16,6 +16,7 @@
 #include "iree/base/api.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/net/carrier/shm/carrier.h"
+#include "iree/net/carrier/shm/handshake.h"
 #include "iree/net/carrier/shm/shared_wake.h"
 #include "iree/net/connection.h"
 #include "iree/net/transport_factory.h"
@@ -70,6 +71,17 @@ iree_status_t iree_net_shm_factory_get_or_create_shared_wake(
 // success. On failure, the caller retains ownership.
 iree_status_t iree_net_shm_connection_create(
     iree_async_proactor_t* proactor, iree_net_carrier_t* initial_carrier,
+    iree_async_buffer_pool_t* recv_pool, iree_allocator_t host_allocator,
+    iree_net_connection_t** out_connection);
+
+// Creates an SHM connection from one carrier per endpoint handshake result.
+//
+// On success, the connection owns each result context through its carrier and
+// |results| entries are cleared. On failure, any created carriers and
+// unconsumed result contexts are released before returning.
+iree_status_t iree_net_shm_connection_create_from_handshake_results(
+    iree_async_proactor_t* proactor, uint16_t endpoint_count,
+    iree_net_shm_handshake_result_t* results,
     iree_async_buffer_pool_t* recv_pool, iree_allocator_t host_allocator,
     iree_net_connection_t** out_connection);
 

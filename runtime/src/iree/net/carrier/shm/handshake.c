@@ -145,11 +145,38 @@ static void iree_net_shm_handshake_assemble_params(
   result->context = context;
 }
 
+void iree_net_shm_handshake_result_deinitialize(
+    iree_net_shm_handshake_result_t* result) {
+  if (!result) return;
+  iree_net_shm_xproc_context_release(result->context);
+  memset(result, 0, sizeof(*result));
+}
+
+iree_status_t iree_net_shm_handshake_result_attach_file_transfer(
+    iree_async_primitive_t* channel, iree_allocator_t host_allocator,
+    iree_net_shm_handshake_result_t* result) {
+  IREE_ASSERT_ARGUMENT(channel);
+  IREE_ASSERT_ARGUMENT(result);
+  IREE_ASSERT_ARGUMENT(result->context);
+
+  iree_net_shm_file_transfer_t* file_transfer = NULL;
+  iree_status_t status = iree_net_shm_file_transfer_create(
+      *channel, host_allocator, &file_transfer);
+  *channel = iree_async_primitive_none();
+  if (iree_status_is_ok(status)) {
+    result->context->file_transfer = file_transfer;
+    result->carrier_params.file_transfer = file_transfer;
+  } else {
+    iree_net_shm_handshake_result_deinitialize(result);
+  }
+  return status;
+}
+
 //===----------------------------------------------------------------------===//
 // Server handshake
 //===----------------------------------------------------------------------===//
 
-IREE_API_EXPORT iree_status_t iree_net_shm_handshake_server(
+IREE_API_EXPORT iree_status_t iree_net_shm_handshake_server_endpoint(
     iree_async_primitive_t channel, iree_net_shm_shared_wake_t* shared_wake,
     iree_net_shm_carrier_options_t options, iree_async_proactor_t* proactor,
     iree_allocator_t host_allocator,
@@ -163,7 +190,6 @@ IREE_API_EXPORT iree_status_t iree_net_shm_handshake_server(
   uint32_t ring_capacity = options.ring_capacity;
   if (ring_capacity < IREE_MPSC_QUEUE_MIN_CAPACITY ||
       (ring_capacity & (ring_capacity - 1)) != 0) {
-    iree_async_primitive_close(&channel);
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "ring_capacity must be a power of two >= %" PRIu32,
@@ -177,7 +203,6 @@ IREE_API_EXPORT iree_status_t iree_net_shm_handshake_server(
   if (!iree_host_size_checked_mul(2, ring_size, &double_ring_size) ||
       !iree_host_size_checked_add(IREE_NET_SHM_OFFSET_RINGS, double_ring_size,
                                   &total_region_size)) {
-    iree_async_primitive_close(&channel);
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "SHM region size overflow for capacity %" PRIu32,
@@ -294,12 +319,6 @@ IREE_API_EXPORT iree_status_t iree_net_shm_handshake_server(
   if (iree_status_is_ok(status)) {
     status = iree_net_shm_xproc_context_create(host_allocator, &context);
   }
-  iree_net_shm_file_transfer_t* file_transfer = NULL;
-  if (iree_status_is_ok(status)) {
-    status = iree_net_shm_file_transfer_create(channel, host_allocator,
-                                               &file_transfer);
-    channel = iree_async_primitive_none();
-  }
   iree_mpsc_queue_t tx_queue, rx_queue;
   memset(&tx_queue, 0, sizeof(tx_queue));
   memset(&rx_queue, 0, sizeof(rx_queue));
@@ -313,7 +332,6 @@ IREE_API_EXPORT iree_status_t iree_net_shm_handshake_server(
     context->peer_wake_epoch_mapping = peer_epoch_mapping;
     context->peer_notification = peer_notification;
     context->peer_signal_primitive = accept_handles.signal_primitive;
-    context->file_transfer = file_transfer;
 
     iree_net_shm_handshake_assemble_params(
         out_result, &region_mapping, /*is_client=*/false, tx_queue, rx_queue,
@@ -321,7 +339,6 @@ IREE_API_EXPORT iree_status_t iree_net_shm_handshake_server(
     iree_shm_handle_close(&accept_handles.wake_epoch_shm);
   } else {
     iree_net_shm_xproc_context_release(context);
-    iree_net_shm_file_transfer_release(file_transfer);
     iree_async_notification_release(peer_notification);
     iree_shm_close(&peer_epoch_mapping);
     iree_net_shm_handshake_handles_close(&accept_handles);
@@ -329,9 +346,25 @@ IREE_API_EXPORT iree_status_t iree_net_shm_handshake_server(
     iree_shm_handle_close(&our_export.epoch_shm_handle);
     iree_async_primitive_close(&our_export.signal_primitive);
     iree_shm_close(&region_mapping);
-    iree_async_primitive_close(&channel);
   }
   IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+IREE_API_EXPORT iree_status_t iree_net_shm_handshake_server(
+    iree_async_primitive_t channel, iree_net_shm_shared_wake_t* shared_wake,
+    iree_net_shm_carrier_options_t options, iree_async_proactor_t* proactor,
+    iree_allocator_t host_allocator,
+    iree_net_shm_handshake_result_t* out_result) {
+  iree_status_t status = iree_net_shm_handshake_server_endpoint(
+      channel, shared_wake, options, proactor, host_allocator, out_result);
+  if (iree_status_is_ok(status)) {
+    status = iree_net_shm_handshake_result_attach_file_transfer(
+        &channel, host_allocator, out_result);
+  }
+  if (!iree_status_is_ok(status)) {
+    iree_async_primitive_close(&channel);
+  }
   return status;
 }
 
@@ -339,7 +372,7 @@ IREE_API_EXPORT iree_status_t iree_net_shm_handshake_server(
 // Client handshake
 //===----------------------------------------------------------------------===//
 
-IREE_API_EXPORT iree_status_t iree_net_shm_handshake_client(
+IREE_API_EXPORT iree_status_t iree_net_shm_handshake_client_endpoint(
     iree_async_primitive_t channel, iree_net_shm_shared_wake_t* shared_wake,
     iree_async_proactor_t* proactor, iree_allocator_t host_allocator,
     iree_net_shm_handshake_result_t* out_result) {
@@ -440,12 +473,6 @@ IREE_API_EXPORT iree_status_t iree_net_shm_handshake_client(
   if (iree_status_is_ok(status)) {
     status = iree_net_shm_xproc_context_create(host_allocator, &context);
   }
-  iree_net_shm_file_transfer_t* file_transfer = NULL;
-  if (iree_status_is_ok(status)) {
-    status = iree_net_shm_file_transfer_create(channel, host_allocator,
-                                               &file_transfer);
-    channel = iree_async_primitive_none();
-  }
   iree_mpsc_queue_t tx_queue, rx_queue;
   memset(&tx_queue, 0, sizeof(tx_queue));
   memset(&rx_queue, 0, sizeof(rx_queue));
@@ -461,7 +488,6 @@ IREE_API_EXPORT iree_status_t iree_net_shm_handshake_client(
     context->peer_wake_epoch_mapping = peer_epoch_mapping;
     context->peer_notification = peer_notification;
     context->peer_signal_primitive = offer_handles.signal_primitive;
-    context->file_transfer = file_transfer;
 
     iree_net_shm_handshake_assemble_params(
         out_result, &region_mapping, /*is_client=*/true, tx_queue, rx_queue,
@@ -475,15 +501,29 @@ IREE_API_EXPORT iree_status_t iree_net_shm_handshake_client(
     // Context fields are zero-initialized — resources haven't been transferred
     // yet, so release the context (if allocated) and each resource separately.
     iree_net_shm_xproc_context_release(context);
-    iree_net_shm_file_transfer_release(file_transfer);
     iree_async_notification_release(peer_notification);
     iree_shm_close(&peer_epoch_mapping);
     iree_shm_close(&region_mapping);
     iree_net_shm_handshake_handles_close(&offer_handles);
     iree_shm_handle_close(&our_export.epoch_shm_handle);
     iree_async_primitive_close(&our_export.signal_primitive);
-    iree_async_primitive_close(&channel);
   }
   IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+IREE_API_EXPORT iree_status_t iree_net_shm_handshake_client(
+    iree_async_primitive_t channel, iree_net_shm_shared_wake_t* shared_wake,
+    iree_async_proactor_t* proactor, iree_allocator_t host_allocator,
+    iree_net_shm_handshake_result_t* out_result) {
+  iree_status_t status = iree_net_shm_handshake_client_endpoint(
+      channel, shared_wake, proactor, host_allocator, out_result);
+  if (iree_status_is_ok(status)) {
+    status = iree_net_shm_handshake_result_attach_file_transfer(
+        &channel, host_allocator, out_result);
+  }
+  if (!iree_status_is_ok(status)) {
+    iree_async_primitive_close(&channel);
+  }
   return status;
 }

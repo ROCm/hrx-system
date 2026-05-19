@@ -238,9 +238,9 @@ static iree_status_t iree_net_shm_win32_listener_rearm(
   return iree_net_shm_win32_listener_start_accept(listener);
 }
 
-// Handles a successfully accepted pipe connection: takes ownership of the
-// pipe, runs the server-side handshake, creates a carrier, wraps in a
-// connection, and delivers to the consumer. On failure at any step, reports
+// Handles a successfully accepted pipe connection: takes ownership of the pipe,
+// runs the server-side endpoint handshakes, creates a multi-endpoint
+// connection, and delivers it to the consumer. On failure at any step, reports
 // the error to the consumer.
 static void iree_net_shm_win32_listener_handle_accepted(
     iree_net_shm_win32_listener_t* listener) {
@@ -257,43 +257,46 @@ static void iree_net_shm_win32_listener_handle_accepted(
   iree_status_t status = iree_net_shm_factory_get_or_create_shared_wake(
       listener->factory, listener->proactor, &shared_wake);
   iree_slim_mutex_unlock(&listener->factory->mutex);
+
+  uint16_t endpoint_count = listener->factory->options.max_endpoint_count;
+  iree_net_shm_handshake_result_t* handshake_results = NULL;
+  if (iree_status_is_ok(status) && endpoint_count == 0) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "SHM listener requires at least one endpoint");
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_array(
+        listener->host_allocator, endpoint_count, sizeof(*handshake_results),
+        (void**)&handshake_results);
+    if (iree_status_is_ok(status)) {
+      memset(handshake_results, 0, endpoint_count * sizeof(*handshake_results));
+    }
+  }
+  for (uint16_t i = 0; i < endpoint_count && iree_status_is_ok(status); ++i) {
+    status = iree_net_shm_handshake_server_endpoint(
+        channel, shared_wake, listener->factory->options, listener->proactor,
+        listener->host_allocator, &handshake_results[i]);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_net_shm_handshake_result_attach_file_transfer(
+        &channel, listener->host_allocator, &handshake_results[0]);
+  }
   if (!iree_status_is_ok(status)) {
     iree_async_primitive_close(&channel);
-    listener->accept.fn(listener->accept.user_data, status, NULL);
-    return;
-  }
-
-  // Run the server handshake. Synchronous -- completes in microseconds over a
-  // local pipe. The channel primitive transfers to the xproc context on
-  // success and is closed on failure.
-  iree_net_shm_handshake_result_t handshake_result;
-  memset(&handshake_result, 0, sizeof(handshake_result));
-  status = iree_net_shm_handshake_server(
-      channel, shared_wake, listener->factory->options, listener->proactor,
-      listener->host_allocator, &handshake_result);
-
-  // Create carrier from handshake result.
-  iree_net_carrier_callback_t no_callback = {0};
-  iree_net_carrier_t* carrier = NULL;
-  if (iree_status_is_ok(status)) {
-    status = iree_net_shm_carrier_create(&handshake_result.carrier_params,
-                                         no_callback, listener->host_allocator,
-                                         &carrier);
-    if (!iree_status_is_ok(status)) {
-      iree_net_shm_xproc_context_release(handshake_result.context);
+    if (handshake_results) {
+      for (uint16_t i = 0; i < endpoint_count; ++i) {
+        iree_net_shm_handshake_result_deinitialize(&handshake_results[i]);
+      }
     }
   }
 
-  // Wrap in connection and deliver to the consumer.
   iree_net_connection_t* connection = NULL;
   if (iree_status_is_ok(status)) {
-    status = iree_net_shm_connection_create(
-        listener->proactor, carrier, listener->recv_pool,
-        listener->host_allocator, &connection);
-    if (!iree_status_is_ok(status)) {
-      iree_net_carrier_release(carrier);
-    }
+    status = iree_net_shm_connection_create_from_handshake_results(
+        listener->proactor, endpoint_count, handshake_results,
+        listener->recv_pool, listener->host_allocator, &connection);
   }
+  iree_allocator_free(listener->host_allocator, handshake_results);
 
   if (iree_status_is_ok(status)) {
     listener->accept.fn(listener->accept.user_data, iree_ok_status(),
@@ -539,8 +542,8 @@ typedef struct iree_net_shm_win32_connect_state_t {
   iree_allocator_t host_allocator;
 } iree_net_shm_win32_connect_state_t;
 
-// Handles the connected pipe: runs the client-side handshake, creates a
-// carrier, wraps in a connection, and delivers to the consumer. On failure at
+// Handles the connected pipe: runs the client-side endpoint handshakes, creates
+// a multi-endpoint connection, and delivers it to the consumer. On failure at
 // any step, reports the error to the consumer.
 static void iree_net_shm_win32_connect_handle_connected(
     iree_net_shm_win32_connect_state_t* state) {
@@ -556,43 +559,46 @@ static void iree_net_shm_win32_connect_handle_connected(
   iree_status_t status = iree_net_shm_factory_get_or_create_shared_wake(
       state->factory, state->proactor, &shared_wake);
   iree_slim_mutex_unlock(&state->factory->mutex);
+
+  uint16_t endpoint_count = state->factory->options.max_endpoint_count;
+  iree_net_shm_handshake_result_t* handshake_results = NULL;
+  if (iree_status_is_ok(status) && endpoint_count == 0) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "SHM connection requires at least one endpoint");
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_array(state->host_allocator, endpoint_count,
+                                         sizeof(*handshake_results),
+                                         (void**)&handshake_results);
+    if (iree_status_is_ok(status)) {
+      memset(handshake_results, 0, endpoint_count * sizeof(*handshake_results));
+    }
+  }
+  for (uint16_t i = 0; i < endpoint_count && iree_status_is_ok(status); ++i) {
+    status = iree_net_shm_handshake_client_endpoint(
+        channel, shared_wake, state->proactor, state->host_allocator,
+        &handshake_results[i]);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_net_shm_handshake_result_attach_file_transfer(
+        &channel, state->host_allocator, &handshake_results[0]);
+  }
   if (!iree_status_is_ok(status)) {
     iree_async_primitive_close(&channel);
-    state->callback.fn(state->callback.user_data, status, NULL);
-    return;
-  }
-
-  // Run the client handshake. Synchronous -- completes in microseconds over a
-  // local pipe. The channel primitive transfers to the xproc context on
-  // success and is closed on failure.
-  iree_net_shm_handshake_result_t handshake_result;
-  memset(&handshake_result, 0, sizeof(handshake_result));
-  status =
-      iree_net_shm_handshake_client(channel, shared_wake, state->proactor,
-                                    state->host_allocator, &handshake_result);
-
-  // Create carrier from handshake result.
-  iree_net_carrier_callback_t no_callback = {0};
-  iree_net_carrier_t* carrier = NULL;
-  if (iree_status_is_ok(status)) {
-    status = iree_net_shm_carrier_create(&handshake_result.carrier_params,
-                                         no_callback, state->host_allocator,
-                                         &carrier);
-    if (!iree_status_is_ok(status)) {
-      iree_net_shm_xproc_context_release(handshake_result.context);
+    if (handshake_results) {
+      for (uint16_t i = 0; i < endpoint_count; ++i) {
+        iree_net_shm_handshake_result_deinitialize(&handshake_results[i]);
+      }
     }
   }
 
-  // Wrap in connection and deliver.
   iree_net_connection_t* connection = NULL;
   if (iree_status_is_ok(status)) {
-    status = iree_net_shm_connection_create(state->proactor, carrier,
-                                            state->recv_pool,
-                                            state->host_allocator, &connection);
-    if (!iree_status_is_ok(status)) {
-      iree_net_carrier_release(carrier);
-    }
+    status = iree_net_shm_connection_create_from_handshake_results(
+        state->proactor, endpoint_count, handshake_results, state->recv_pool,
+        state->host_allocator, &connection);
   }
+  iree_allocator_free(state->host_allocator, handshake_results);
 
   if (iree_status_is_ok(status)) {
     state->callback.fn(state->callback.user_data, iree_ok_status(), connection);

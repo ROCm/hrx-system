@@ -20,10 +20,11 @@
 //   POSIX:   fd passing via SCM_RIGHTS over sendmsg/recvmsg on Unix sockets.
 //   Windows: DuplicateHandle over ReadFile/WriteFile on named pipes.
 //
-// The handshake is synchronous (blocking with timeout). Over a local channel,
-// it completes in microseconds. On success, the channel is retained by the
-// xproc context for descriptor/HANDLE transfer sideband traffic; on failure,
-// it is closed before return.
+// The public handshake helpers attach the channel to the returned xproc context
+// as a descriptor/HANDLE transfer sideband on success and close it on failure.
+// The per-endpoint helpers below leave channel ownership with the caller so one
+// bootstrap channel can exchange handles for several endpoint carriers before
+// being attached to the control endpoint.
 
 #ifndef IREE_NET_CARRIER_SHM_HANDSHAKE_H_
 #define IREE_NET_CARRIER_SHM_HANDSHAKE_H_
@@ -127,6 +128,45 @@ typedef struct iree_net_shm_handshake_result_t {
   // points to this field) remains valid until the result is consumed.
   iree_net_shm_region_info_t region;
 } iree_net_shm_handshake_result_t;
+
+// Releases any resources held by |result| before carrier creation.
+//
+// Carrier creation transfers |result->context| ownership into the carrier; call
+// this only for handshake results that have not been consumed by a carrier.
+void iree_net_shm_handshake_result_deinitialize(
+    iree_net_shm_handshake_result_t* result);
+
+// Attaches |channel| as the file-transfer sideband for |result|.
+//
+// On return, |channel| is consumed and set to NONE whether the call succeeds or
+// fails. On success, |result|'s xproc context owns the transfer sideband and
+// the carrier params advertise it. On failure, |result| is deinitialized.
+iree_status_t iree_net_shm_handshake_result_attach_file_transfer(
+    iree_async_primitive_t* channel, iree_allocator_t host_allocator,
+    iree_net_shm_handshake_result_t* result);
+
+// Server side: performs one endpoint handle exchange over |channel|.
+//
+// The caller owns |channel| on both success and failure. No file-transfer
+// sideband is attached; call
+// iree_net_shm_handshake_result_attach_file_transfer() on the control endpoint
+// after all endpoint handshakes complete.
+iree_status_t iree_net_shm_handshake_server_endpoint(
+    iree_async_primitive_t channel, iree_net_shm_shared_wake_t* shared_wake,
+    iree_net_shm_carrier_options_t options, iree_async_proactor_t* proactor,
+    iree_allocator_t host_allocator,
+    iree_net_shm_handshake_result_t* out_result);
+
+// Client side: performs one endpoint handle exchange over |channel|.
+//
+// The caller owns |channel| on both success and failure. No file-transfer
+// sideband is attached; call
+// iree_net_shm_handshake_result_attach_file_transfer() on the control endpoint
+// after all endpoint handshakes complete.
+iree_status_t iree_net_shm_handshake_client_endpoint(
+    iree_async_primitive_t channel, iree_net_shm_shared_wake_t* shared_wake,
+    iree_async_proactor_t* proactor, iree_allocator_t host_allocator,
+    iree_net_shm_handshake_result_t* out_result);
 
 // Server side: create SHM region, send OFFER, receive ACCEPT, assemble
 // carrier params.
