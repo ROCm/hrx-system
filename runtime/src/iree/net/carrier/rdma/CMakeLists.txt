@@ -537,4 +537,42 @@ iree_cc_test(
 )
 endif()
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_library(
+  NAME
+    factory
+  HDRS
+    "factory.h"
+  SRCS
+    "factory.c"
+  DEPS
+    ::carrier
+    ::cm_channel
+    ::context
+    iree::async
+    iree::base
+    iree::net::channel::util::frame_sender
+    iree::net::connection
+    iree::net::message_endpoint
+    iree::net::transport_factory
+    rdma_core::headers
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    factory_test
+  SRCS
+    "factory_test.cc"
+  DEPS
+    ::factory
+    iree::base
+    iree::net::transport_factory
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

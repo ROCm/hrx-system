@@ -17,6 +17,9 @@ struct iree_net_rdma_context_t {
   // Reference count controlling context lifetime.
   iree_atomic_ref_count_t ref_count;
 
+  // Parent context retaining copied dynamic-library symbol tables, if any.
+  iree_net_rdma_context_t* parent_context;
+
   // Host allocator used for the context allocation.
   iree_allocator_t host_allocator;
 
@@ -34,6 +37,9 @@ struct iree_net_rdma_context_t {
 
   // Opened verbs device context.
   struct ibv_context* device_context;
+
+  // True when device_context must be closed by this context.
+  bool owns_device_context;
 
   // Protection domain used for queue pairs and memory registrations.
   struct ibv_pd* protection_domain;
@@ -271,7 +277,7 @@ static void iree_net_rdma_context_destroy(iree_net_rdma_context_t* context) {
     IREE_ASSERT(result == 0, "ibv_dealloc_pd failed during destroy: %d",
                 result);
   }
-  if (context->device_context) {
+  if (context->owns_device_context && context->device_context) {
     int result = context->libverbs.ibv_close_device(context->device_context);
     IREE_ASSERT(result == 0, "ibv_close_device failed during destroy: %d",
                 result);
@@ -282,6 +288,7 @@ static void iree_net_rdma_context_destroy(iree_net_rdma_context_t* context) {
   if (context->libverbs_initialized) {
     iree_net_libverbs_deinitialize(&context->libverbs);
   }
+  iree_net_rdma_context_release(context->parent_context);
 
   iree_allocator_t host_allocator = context->host_allocator;
   iree_allocator_free(host_allocator, context);
@@ -304,6 +311,7 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_context_create(
     memset(context, 0, sizeof(*context));
     iree_atomic_ref_count_init(&context->ref_count);
     context->host_allocator = host_allocator;
+    context->owns_device_context = true;
   }
 
   if (iree_status_is_ok(status)) {
@@ -329,6 +337,127 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_context_create(
   }
 
   IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+IREE_API_EXPORT iree_status_t iree_net_rdma_context_create_for_cm_id(
+    iree_net_rdma_context_t* parent_context, struct rdma_cm_id* connection_id,
+    iree_allocator_t host_allocator, iree_net_rdma_context_t** out_context) {
+  IREE_ASSERT_ARGUMENT(out_context);
+  *out_context = NULL;
+
+  iree_status_t status = iree_ok_status();
+  if (!parent_context) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "parent_context must not be NULL");
+  }
+  if (iree_status_is_ok(status) && !connection_id) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "connection_id must not be NULL");
+  }
+  if (iree_status_is_ok(status) && !connection_id->verbs) {
+    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "connection_id is not bound to a verbs device");
+  }
+  if (iree_status_is_ok(status) && !connection_id->verbs->device) {
+    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "connection_id has no verbs device metadata");
+  }
+  if (iree_status_is_ok(status) && connection_id->port_num == 0) {
+    status =
+        iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                         "connection_id is not bound to a non-zero RDMA port");
+  }
+
+  iree_net_rdma_context_t* context = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc(host_allocator, sizeof(*context),
+                                   (void**)&context);
+  }
+
+  if (iree_status_is_ok(status)) {
+    memset(context, 0, sizeof(*context));
+    iree_atomic_ref_count_init(&context->ref_count);
+    context->parent_context = parent_context;
+    iree_net_rdma_context_retain(parent_context);
+    context->host_allocator = host_allocator;
+    context->libverbs = parent_context->libverbs;
+    context->librdmacm = parent_context->librdmacm;
+    context->device_context = connection_id->verbs;
+    context->owns_device_context = false;
+    context->port_number = connection_id->port_num;
+    context->gid_index = parent_context->gid_index;
+  }
+
+  if (iree_status_is_ok(status)) {
+    int result = context->libverbs.ibv_query_device(
+        context->device_context, &context->device_attributes);
+    status =
+        iree_status_from_errno(__FILE__, __LINE__, result, "ibv_query_device");
+  }
+
+  if (iree_status_is_ok(status)) {
+    status = iree_net_rdma_context_query_port(
+        context, context->port_number, context->gid_index,
+        &context->port_attributes, &context->gid);
+  }
+
+  if (iree_status_is_ok(status)) {
+    const char* device_name =
+        context->libverbs.ibv_get_device_name(context->device_context->device);
+    int device_name_length = snprintf(
+        context->device_name, sizeof(context->device_name), "%s", device_name);
+    if (device_name_length < 0) {
+      context->device_name[0] = '\0';
+      context->device_name_length = 0;
+    } else {
+      context->device_name_length = (iree_host_size_t)device_name_length;
+    }
+    if (context->device_name_length >= sizeof(context->device_name)) {
+      context->device_name_length = sizeof(context->device_name) - 1;
+    }
+  }
+
+  if (iree_status_is_ok(status) &&
+      !iree_string_view_equal(
+          iree_make_string_view(context->device_name,
+                                context->device_name_length),
+          iree_make_string_view(parent_context->device_name,
+                                parent_context->device_name_length))) {
+    status = iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "rdma_cm selected device '%.*s' but factory context selected '%.*s'",
+        (int)context->device_name_length, context->device_name,
+        (int)parent_context->device_name_length, parent_context->device_name);
+  }
+  if (iree_status_is_ok(status) &&
+      context->port_number != parent_context->port_number) {
+    status = iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "rdma_cm selected port %u but factory context selected port %u",
+        (unsigned)context->port_number, (unsigned)parent_context->port_number);
+  }
+  if (iree_status_is_ok(status) &&
+      memcmp(&context->gid, &parent_context->gid, sizeof(context->gid)) != 0) {
+    status = iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "rdma_cm selected GID does not match factory context GID");
+  }
+
+  if (iree_status_is_ok(status)) {
+    context->protection_domain =
+        context->libverbs.ibv_alloc_pd(context->device_context);
+    if (!context->protection_domain) {
+      status =
+          iree_status_from_errno(__FILE__, __LINE__, errno, "ibv_alloc_pd");
+    }
+  }
+
+  if (iree_status_is_ok(status)) {
+    *out_context = context;
+  } else if (context) {
+    iree_net_rdma_context_destroy(context);
+  }
   return status;
 }
 

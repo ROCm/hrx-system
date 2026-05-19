@@ -60,6 +60,21 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_context_create(
     iree_net_rdma_context_options_t options, iree_allocator_t host_allocator,
     iree_net_rdma_context_t** out_context);
 
+// Creates an RDMA context over the verbs device selected by |connection_id|.
+//
+// rdma_cm resolves and accepts connection IDs against a provider-owned verbs
+// context. QPs created for those IDs must use a protection domain allocated
+// from that exact verbs context. This function creates a child context that
+// borrows |connection_id->verbs|, allocates a matching protection domain, and
+// validates that the selected device/port/GID match |parent_context|.
+//
+// |parent_context| provides the dynamically loaded rdma-core symbol tables and
+// the expected device selection. It is retained by the child context so the
+// borrowed symbol tables remain valid.
+IREE_API_EXPORT iree_status_t iree_net_rdma_context_create_for_cm_id(
+    iree_net_rdma_context_t* parent_context, struct rdma_cm_id* connection_id,
+    iree_allocator_t host_allocator, iree_net_rdma_context_t** out_context);
+
 // Retains an RDMA context.
 IREE_API_EXPORT void iree_net_rdma_context_retain(
     iree_net_rdma_context_t* context);
