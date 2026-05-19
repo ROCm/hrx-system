@@ -56,13 +56,37 @@ iree_cc_library(
     carrier
   HDRS
     "carrier.h"
+  SRCS
+    "carrier.c"
   DEPS
+    ::completion_queue
     ::connection_data
     ::context
+    ::credit_memory
+    ::queue_pair
+    ::receive_queue
+    ::send_window
+    ::sge
+    ::work_request_table
     iree::async
     iree::base
     iree::net::carrier
+    rdma_core::headers
   PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    carrier_test
+  SRCS
+    "carrier_test.cc"
+  DEPS
+    ::carrier
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 endif()
 

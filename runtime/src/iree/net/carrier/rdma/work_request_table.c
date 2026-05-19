@@ -19,6 +19,9 @@ struct iree_net_rdma_work_request_slot_t {
   // User data returned when the work request completes.
   uint64_t user_data;
 
+  // Byte length returned when the work request completes.
+  iree_host_size_t byte_length;
+
   // Generation encoded in wr_id to reject stale completions.
   uint32_t generation;
 
@@ -122,7 +125,7 @@ IREE_API_EXPORT uint32_t iree_net_rdma_work_request_table_available_capacity(
 IREE_API_EXPORT iree_status_t iree_net_rdma_work_request_table_acquire(
     iree_net_rdma_work_request_table_t* table,
     iree_net_rdma_work_request_operation_t operation, uint64_t user_data,
-    uint64_t* out_wr_id) {
+    iree_host_size_t byte_length, uint64_t* out_wr_id) {
   if (!out_wr_id) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "out_wr_id must not be NULL");
@@ -149,6 +152,7 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_work_request_table_acquire(
   --table->available_capacity;
 
   slot->user_data = user_data;
+  slot->byte_length = byte_length;
   slot->operation = operation;
   slot->next_free = IREE_NET_RDMA_WORK_REQUEST_TABLE_INVALID_INDEX;
   slot->flags = IREE_NET_RDMA_WORK_REQUEST_SLOT_IN_USE;
@@ -190,8 +194,10 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_work_request_table_complete(
 
   out_completion->operation = slot->operation;
   out_completion->user_data = slot->user_data;
+  out_completion->byte_length = slot->byte_length;
 
   slot->user_data = 0;
+  slot->byte_length = 0;
   slot->operation = IREE_NET_RDMA_WORK_REQUEST_OPERATION_NONE;
   slot->generation =
       iree_net_rdma_work_request_table_next_generation(slot->generation);

@@ -142,6 +142,29 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_carrier_create(
     iree_net_rdma_carrier_create_params_t params,
     iree_allocator_t host_allocator, iree_net_carrier_t** out_carrier);
 
+// Casts a generic carrier to an RDMA carrier.
+IREE_API_EXPORT iree_net_rdma_carrier_t* iree_net_rdma_carrier_cast(
+    iree_net_carrier_t* carrier);
+
+// Returns the generic carrier view of an RDMA carrier.
+IREE_API_EXPORT iree_net_carrier_t* iree_net_rdma_carrier_as_generic(
+    iree_net_rdma_carrier_t* carrier);
+
+// Returns the rdma_cm ID owned by |carrier| for connect/accept operations.
+IREE_API_EXPORT struct rdma_cm_id* iree_net_rdma_carrier_connection_id(
+    iree_net_rdma_carrier_t* carrier);
+
+// Serializes the carrier's local rdma_cm private-data payload.
+IREE_API_EXPORT iree_status_t
+iree_net_rdma_carrier_serialize_local_connection_data(
+    iree_net_rdma_carrier_t* carrier, iree_byte_span_t target,
+    iree_host_size_t* out_length);
+
+// Applies the peer private-data payload after rdma_cm connect/accept.
+IREE_API_EXPORT iree_status_t
+iree_net_rdma_carrier_apply_remote_connection_data(
+    iree_net_rdma_carrier_t* carrier, iree_const_byte_span_t source);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

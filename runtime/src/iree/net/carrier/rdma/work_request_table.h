@@ -56,6 +56,9 @@ typedef struct iree_net_rdma_work_request_completion_t {
 
   // User data originally supplied during acquire.
   uint64_t user_data;
+
+  // Byte length originally supplied during acquire.
+  iree_host_size_t byte_length;
 } iree_net_rdma_work_request_completion_t;
 
 // Initializes |out_table| with |capacity| fixed slots.
@@ -79,7 +82,7 @@ IREE_API_EXPORT uint32_t iree_net_rdma_work_request_table_available_capacity(
 IREE_API_EXPORT iree_status_t iree_net_rdma_work_request_table_acquire(
     iree_net_rdma_work_request_table_t* table,
     iree_net_rdma_work_request_operation_t operation, uint64_t user_data,
-    uint64_t* out_wr_id);
+    iree_host_size_t byte_length, uint64_t* out_wr_id);
 
 // Completes the work request identified by |wr_id| and releases its slot.
 IREE_API_EXPORT iree_status_t iree_net_rdma_work_request_table_complete(

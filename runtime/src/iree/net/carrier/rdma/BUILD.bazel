@@ -68,17 +68,41 @@ iree_runtime_cc_library(
 
 iree_runtime_cc_library(
     name = "carrier",
+    srcs = ["carrier.c"],
     hdrs = ["carrier.h"],
     target_compatible_with = select({
         "@platforms//os:linux": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
+        ":completion_queue",
         ":connection_data",
         ":context",
+        ":credit_memory",
+        ":queue_pair",
+        ":receive_queue",
+        ":send_window",
+        ":sge",
+        ":work_request_table",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
         "//runtime/src/iree/net:carrier",
+        "@rdma_core_headers",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "carrier_test",
+    srcs = ["carrier_test.cc"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":carrier",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
