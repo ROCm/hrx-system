@@ -16,6 +16,9 @@ enum iree_net_rdma_work_request_slot_bits_e {
 };
 
 struct iree_net_rdma_work_request_slot_t {
+  // Buffer lease retained for the native work request lifetime.
+  iree_async_buffer_lease_t retained_buffer_lease;
+
   // User data returned when the work request completes.
   uint64_t user_data;
 
@@ -125,7 +128,8 @@ IREE_API_EXPORT uint32_t iree_net_rdma_work_request_table_available_capacity(
 IREE_API_EXPORT iree_status_t iree_net_rdma_work_request_table_acquire(
     iree_net_rdma_work_request_table_t* table,
     iree_net_rdma_work_request_operation_t operation, uint64_t user_data,
-    iree_host_size_t byte_length, uint64_t* out_wr_id) {
+    iree_host_size_t byte_length,
+    iree_async_buffer_lease_t* retained_buffer_lease, uint64_t* out_wr_id) {
   if (!out_wr_id) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "out_wr_id must not be NULL");
@@ -153,6 +157,13 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_work_request_table_acquire(
 
   slot->user_data = user_data;
   slot->byte_length = byte_length;
+  if (retained_buffer_lease) {
+    slot->retained_buffer_lease = *retained_buffer_lease;
+    memset(retained_buffer_lease, 0, sizeof(*retained_buffer_lease));
+  } else {
+    memset(&slot->retained_buffer_lease, 0,
+           sizeof(slot->retained_buffer_lease));
+  }
   slot->operation = operation;
   slot->next_free = IREE_NET_RDMA_WORK_REQUEST_TABLE_INVALID_INDEX;
   slot->flags = IREE_NET_RDMA_WORK_REQUEST_SLOT_IN_USE;
@@ -195,7 +206,9 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_work_request_table_complete(
   out_completion->operation = slot->operation;
   out_completion->user_data = slot->user_data;
   out_completion->byte_length = slot->byte_length;
+  out_completion->retained_buffer_lease = slot->retained_buffer_lease;
 
+  memset(&slot->retained_buffer_lease, 0, sizeof(slot->retained_buffer_lease));
   slot->user_data = 0;
   slot->byte_length = 0;
   slot->operation = IREE_NET_RDMA_WORK_REQUEST_OPERATION_NONE;

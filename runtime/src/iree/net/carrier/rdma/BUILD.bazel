@@ -81,6 +81,7 @@ iree_runtime_cc_library(
         ":credit_memory",
         ":queue_pair",
         ":receive_queue",
+        ":region",
         ":send_window",
         ":sge",
         ":work_request_table",
@@ -448,6 +449,7 @@ iree_runtime_cc_library(
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
+        "//runtime/src/iree/async",
         "//runtime/src/iree/base",
     ],
 )

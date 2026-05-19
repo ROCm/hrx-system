@@ -75,6 +75,9 @@ typedef struct iree_net_rdma_carrier_t iree_net_rdma_carrier_t;
 // Default inline send threshold requested from the provider.
 #define IREE_NET_RDMA_CARRIER_DEFAULT_MAX_INLINE_DATA 64u
 
+// Default per-send staging buffer size for CPU spans that are not RDMA regions.
+#define IREE_NET_RDMA_CARRIER_DEFAULT_SEND_STAGING_BUFFER_SIZE 4096u
+
 // Options for RDMA carrier creation.
 typedef struct iree_net_rdma_carrier_options_t {
   // Send queue depth. 0 selects the default.
@@ -91,6 +94,9 @@ typedef struct iree_net_rdma_carrier_options_t {
 
   // Maximum inline data bytes requested for small sends. 0 selects the default.
   uint32_t max_inline_data;
+
+  // Per-buffer size for registered send staging. 0 selects the default.
+  uint32_t send_staging_buffer_size;
 } iree_net_rdma_carrier_options_t;
 
 // Returns default RDMA carrier options.
@@ -103,6 +109,8 @@ iree_net_rdma_carrier_options_default(void) {
   options.max_send_sge = IREE_NET_RDMA_CARRIER_DEFAULT_MAX_SEND_SGE;
   options.max_recv_sge = IREE_NET_RDMA_CARRIER_DEFAULT_MAX_RECV_SGE;
   options.max_inline_data = IREE_NET_RDMA_CARRIER_DEFAULT_MAX_INLINE_DATA;
+  options.send_staging_buffer_size =
+      IREE_NET_RDMA_CARRIER_DEFAULT_SEND_STAGING_BUFFER_SIZE;
   return options;
 }
 

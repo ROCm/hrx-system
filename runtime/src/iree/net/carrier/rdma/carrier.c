@@ -8,12 +8,15 @@
 
 #include <errno.h>
 #include <limits.h>
+#include <stdint.h>
 #include <string.h>
 
+#include "iree/async/slab.h"
 #include "iree/net/carrier/rdma/completion_queue.h"
 #include "iree/net/carrier/rdma/credit_memory.h"
 #include "iree/net/carrier/rdma/queue_pair.h"
 #include "iree/net/carrier/rdma/receive_queue.h"
+#include "iree/net/carrier/rdma/region.h"
 #include "iree/net/carrier/rdma/send_window.h"
 #include "iree/net/carrier/rdma/sge.h"
 #include "iree/net/carrier/rdma/work_request_table.h"
@@ -36,6 +39,9 @@ struct iree_net_rdma_carrier_t {
 
   // Borrowed receive buffer pool supplying posted receive buffers.
   iree_async_buffer_pool_t* recv_pool;
+
+  // Owned RDMA-registered pool for staging non-RDMA CPU send spans.
+  iree_async_buffer_pool_t* send_staging_pool;
 
   // rdma_cm ID owned after successful carrier creation.
   struct rdma_cm_id* connection_id;
@@ -106,6 +112,10 @@ static iree_status_t iree_net_rdma_carrier_validate_options(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "max_recv_sge must be non-zero");
   }
+  if (options.send_staging_buffer_size == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "send_staging_buffer_size must be non-zero");
+  }
   if (options.send_queue_depth > (uint32_t)INT_MAX ||
       options.recv_queue_depth > (uint32_t)INT_MAX) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -136,6 +146,9 @@ static iree_net_rdma_carrier_options_t iree_net_rdma_carrier_resolve_options(
   }
   if (options.max_inline_data == 0) {
     options.max_inline_data = defaults.max_inline_data;
+  }
+  if (options.send_staging_buffer_size == 0) {
+    options.send_staging_buffer_size = defaults.send_staging_buffer_size;
   }
   return options;
 }
@@ -225,6 +238,8 @@ static void iree_net_rdma_carrier_on_send_completions(
       cleanup_status =
           iree_net_rdma_send_window_complete(&carrier->send_window);
     }
+    iree_async_buffer_lease_release(
+        &work_request_completion.retained_buffer_lease);
     if (iree_status_is_ok(work_status) && iree_status_is_ok(cleanup_status)) {
       if (work_request_completion.operation ==
           IREE_NET_RDMA_WORK_REQUEST_OPERATION_DIRECT_READ) {
@@ -335,6 +350,7 @@ static void iree_net_rdma_carrier_destroy(iree_net_carrier_t* base_carrier) {
   iree_net_rdma_queue_pair_deinitialize(&carrier->queue_pair);
   iree_net_rdma_receive_queue_deinitialize(&carrier->receive_queue);
   iree_net_rdma_work_request_table_deinitialize(&carrier->work_request_table);
+  iree_async_buffer_pool_free(carrier->send_staging_pool);
   iree_net_rdma_credit_memory_release(carrier->credit_memory);
   iree_net_rdma_completion_queue_release(carrier->recv_completion_queue);
   iree_net_rdma_completion_queue_release(carrier->send_completion_queue);
@@ -401,6 +417,13 @@ static iree_net_carrier_send_budget_t iree_net_rdma_carrier_query_send_budget(
   budget.slots = iree_net_rdma_send_window_available(
       &carrier->send_window,
       IREE_NET_RDMA_SEND_WINDOW_ACQUIRE_FLAG_REMOTE_RECV_CREDIT);
+  if (carrier->send_staging_pool) {
+    iree_host_size_t staging_available =
+        iree_async_buffer_pool_available(carrier->send_staging_pool);
+    if (staging_available < budget.slots) {
+      budget.slots = (uint32_t)staging_available;
+    }
+  }
   return budget;
 }
 
@@ -414,6 +437,10 @@ static iree_status_t iree_net_rdma_carrier_total_span_length(
     iree_async_span_list_t spans, iree_host_size_t* out_total_length) {
   *out_total_length = 0;
   iree_status_t status = iree_ok_status();
+  if (spans.count > 0 && !spans.values) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "span list values must not be NULL");
+  }
   for (iree_host_size_t i = 0; i < spans.count && iree_status_is_ok(status);
        ++i) {
     iree_host_size_t new_total = 0;
@@ -428,11 +455,125 @@ static iree_status_t iree_net_rdma_carrier_total_span_length(
   return status;
 }
 
+static bool iree_net_rdma_carrier_span_uses_rdma_region(
+    iree_async_span_t span) {
+  return span.region && span.region->type == IREE_ASYNC_REGION_TYPE_RDMA;
+}
+
+static iree_status_t iree_net_rdma_carrier_span_list_requires_staging(
+    iree_async_span_list_t spans, bool* out_requires_staging) {
+  *out_requires_staging = false;
+  iree_status_t status = iree_ok_status();
+  if (spans.count > 0 && !spans.values) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "span list values must not be NULL");
+  }
+  for (iree_host_size_t i = 0; i < spans.count && iree_status_is_ok(status);
+       ++i) {
+    if (!iree_net_rdma_carrier_span_uses_rdma_region(spans.values[i])) {
+      *out_requires_staging = true;
+      break;
+    }
+  }
+  return status;
+}
+
+static iree_status_t iree_net_rdma_carrier_validate_staging_source_span(
+    iree_async_span_t span, iree_host_size_t span_index) {
+  if (!iree_async_span_is_cpu_accessible(span)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "send staging requires CPU-accessible span %" PRIhsz, span_index);
+  }
+  if (span.region) {
+    bool in_range = span.offset <= span.region->length &&
+                    span.length <= span.region->length - span.offset;
+    if (!in_range) {
+      iree_host_size_t span_end = span.length > SIZE_MAX - span.offset
+                                      ? SIZE_MAX
+                                      : span.offset + span.length;
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "send span %" PRIhsz " [%" PRIhsz ", %" PRIhsz
+                              ") exceeds region length %" PRIhsz,
+                              span_index, span.offset, span_end,
+                              span.region->length);
+    }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t iree_net_rdma_carrier_stage_send_data(
+    iree_net_rdma_carrier_t* carrier, iree_async_span_list_t spans,
+    iree_host_size_t total_length, iree_async_buffer_lease_t* out_lease,
+    struct ibv_sge* out_scatter_gather_entry) {
+  memset(out_lease, 0, sizeof(*out_lease));
+  memset(out_scatter_gather_entry, 0, sizeof(*out_scatter_gather_entry));
+
+  iree_status_t status = iree_ok_status();
+  if (!carrier->send_staging_pool) {
+    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "RDMA send staging pool is not available");
+  }
+
+  iree_host_size_t buffer_size = 0;
+  if (iree_status_is_ok(status)) {
+    buffer_size =
+        iree_async_buffer_pool_buffer_size(carrier->send_staging_pool);
+    if (total_length > buffer_size) {
+      status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "send payload size %" PRIhsz
+                                " exceeds RDMA staging buffer size %" PRIhsz,
+                                total_length, buffer_size);
+    }
+  }
+
+  for (iree_host_size_t i = 0; i < spans.count && iree_status_is_ok(status);
+       ++i) {
+    status =
+        iree_net_rdma_carrier_validate_staging_source_span(spans.values[i], i);
+  }
+
+  iree_async_buffer_lease_t lease;
+  memset(&lease, 0, sizeof(lease));
+  if (iree_status_is_ok(status)) {
+    status = iree_async_buffer_pool_acquire(carrier->send_staging_pool, &lease);
+  }
+
+  if (iree_status_is_ok(status)) {
+    uint8_t* target_ptr = iree_async_span_ptr(lease.span);
+    for (iree_host_size_t i = 0; i < spans.count; ++i) {
+      iree_async_span_t span = spans.values[i];
+      if (span.length > 0) {
+        memcpy(target_ptr, iree_async_span_ptr(span), span.length);
+        target_ptr += span.length;
+      }
+    }
+
+    iree_async_span_t staged_span = iree_async_span_make(
+        lease.span.region, lease.span.offset, total_length);
+    status = iree_net_rdma_sge_from_span(staged_span, out_scatter_gather_entry);
+  }
+
+  if (iree_status_is_ok(status)) {
+    *out_lease = lease;
+  } else {
+    iree_async_buffer_lease_release(&lease);
+  }
+  return status;
+}
+
+// Posts one send-queue work request.
+//
+// |retained_buffer_lease|, when non-NULL, is consumed by this function: on
+// successful post it is retained by the WR table until CQ completion, and on
+// failed admission/post it is released before returning.
 static iree_status_t iree_net_rdma_carrier_post_send_work_request(
     iree_net_rdma_carrier_t* carrier,
     iree_net_rdma_work_request_operation_t operation,
     iree_net_rdma_send_window_acquire_flags_t acquire_flags, uint64_t user_data,
-    iree_host_size_t byte_length, struct ibv_send_wr* work_request) {
+    iree_host_size_t byte_length,
+    iree_async_buffer_lease_t* retained_buffer_lease,
+    struct ibv_send_wr* work_request) {
   iree_status_t status =
       iree_net_rdma_send_window_acquire(&carrier->send_window, acquire_flags);
   bool send_window_acquired = iree_status_is_ok(status);
@@ -441,7 +582,7 @@ static iree_status_t iree_net_rdma_carrier_post_send_work_request(
   if (iree_status_is_ok(status)) {
     status = iree_net_rdma_work_request_table_acquire(
         &carrier->work_request_table, operation, user_data, byte_length,
-        &work_request_id);
+        retained_buffer_lease, &work_request_id);
   }
 
   if (iree_status_is_ok(status)) {
@@ -465,6 +606,9 @@ static iree_status_t iree_net_rdma_carrier_post_send_work_request(
           status,
           iree_net_rdma_work_request_table_complete(
               &carrier->work_request_table, work_request_id, &completion));
+      iree_async_buffer_lease_release(&completion.retained_buffer_lease);
+    } else {
+      iree_async_buffer_lease_release(retained_buffer_lease);
     }
     if (send_window_acquired) {
       status =
@@ -498,17 +642,44 @@ static iree_status_t iree_net_rdma_carrier_send(
                             "RDMA send flags 0x%08X are not supported",
                             params->flags & ~supported_flags);
   }
+  if (params->data.count > base_carrier->max_iov) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "send requires %" PRIhsz
+                            " spans but max_iov is %" PRIhsz,
+                            params->data.count, base_carrier->max_iov);
+  }
 
-  struct ibv_sge scatter_gather_entries[IREE_NET_RDMA_CARRIER_MAX_SEND_SGE];
-  int scatter_gather_entry_count = 0;
-  iree_status_t status = iree_net_rdma_sge_list_from_span_list(
-      params->data, IREE_ARRAYSIZE(scatter_gather_entries),
-      scatter_gather_entries, &scatter_gather_entry_count);
+  bool requires_staging = false;
+  iree_status_t status = iree_net_rdma_carrier_span_list_requires_staging(
+      params->data, &requires_staging);
 
   iree_host_size_t total_length = 0;
   if (iree_status_is_ok(status)) {
     status =
         iree_net_rdma_carrier_total_span_length(params->data, &total_length);
+  }
+  if (iree_status_is_ok(status) && requires_staging &&
+      iree_any_bit_set(params->flags, IREE_NET_SEND_FLAG_ZERO_COPY)) {
+    status =
+        iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                         "RDMA ZERO_COPY send requires RDMA-registered spans");
+  }
+
+  struct ibv_sge scatter_gather_entries[IREE_NET_RDMA_CARRIER_MAX_SEND_SGE];
+  int scatter_gather_entry_count = 0;
+  iree_async_buffer_lease_t retained_buffer_lease;
+  memset(&retained_buffer_lease, 0, sizeof(retained_buffer_lease));
+  if (iree_status_is_ok(status) && requires_staging) {
+    status = iree_net_rdma_carrier_stage_send_data(
+        carrier, params->data, total_length, &retained_buffer_lease,
+        &scatter_gather_entries[0]);
+    if (iree_status_is_ok(status)) {
+      scatter_gather_entry_count = 1;
+    }
+  } else if (iree_status_is_ok(status)) {
+    status = iree_net_rdma_sge_list_from_span_list(
+        params->data, IREE_ARRAYSIZE(scatter_gather_entries),
+        scatter_gather_entries, &scatter_gather_entry_count);
   }
 
   if (iree_status_is_ok(status)) {
@@ -522,7 +693,10 @@ static iree_status_t iree_net_rdma_carrier_send(
     status = iree_net_rdma_carrier_post_send_work_request(
         carrier, IREE_NET_RDMA_WORK_REQUEST_OPERATION_SEND,
         IREE_NET_RDMA_SEND_WINDOW_ACQUIRE_FLAG_REMOTE_RECV_CREDIT,
-        params->user_data, total_length, &work_request);
+        params->user_data, total_length, &retained_buffer_lease, &work_request);
+  }
+  if (!iree_status_is_ok(status)) {
+    iree_async_buffer_lease_release(&retained_buffer_lease);
   }
   return status;
 }
@@ -614,7 +788,7 @@ static iree_status_t iree_net_rdma_carrier_direct_write(
     status = iree_net_rdma_carrier_post_send_work_request(
         carrier, IREE_NET_RDMA_WORK_REQUEST_OPERATION_DIRECT_WRITE,
         IREE_NET_RDMA_SEND_WINDOW_ACQUIRE_FLAG_NONE, params->user_data,
-        params->local.length, &work_request);
+        params->local.length, /*retained_buffer_lease=*/NULL, &work_request);
   }
   return status;
 }
@@ -671,7 +845,7 @@ static iree_status_t iree_net_rdma_carrier_direct_read(
     status = iree_net_rdma_carrier_post_send_work_request(
         carrier, IREE_NET_RDMA_WORK_REQUEST_OPERATION_DIRECT_READ,
         IREE_NET_RDMA_SEND_WINDOW_ACQUIRE_FLAG_NONE, params->user_data,
-        params->local.length, &work_request);
+        params->local.length, /*retained_buffer_lease=*/NULL, &work_request);
   }
   return status;
 }
@@ -751,6 +925,31 @@ static const iree_net_carrier_vtable_t iree_net_rdma_carrier_vtable = {
     .register_buffer = iree_net_rdma_carrier_register_buffer,
     .unregister_buffer = iree_net_rdma_carrier_unregister_buffer,
 };
+
+static iree_status_t iree_net_rdma_carrier_create_send_staging_pool(
+    iree_net_rdma_carrier_t* carrier) {
+  iree_async_slab_options_t slab_options = iree_async_slab_options_default();
+  slab_options.buffer_size = carrier->options.send_staging_buffer_size;
+  slab_options.buffer_count = carrier->options.send_queue_depth;
+
+  iree_async_slab_t* slab = NULL;
+  iree_status_t status =
+      iree_async_slab_create(slab_options, carrier->base.host_allocator, &slab);
+
+  iree_async_region_t* region = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_net_rdma_region_register_slab(
+        carrier->context, slab, IREE_ASYNC_BUFFER_ACCESS_FLAG_READ,
+        carrier->base.host_allocator, &region);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_async_buffer_pool_allocate(
+        region, carrier->base.host_allocator, &carrier->send_staging_pool);
+  }
+  iree_async_region_release(region);
+  iree_async_slab_release(slab);
+  return status;
+}
 
 static iree_status_t iree_net_rdma_carrier_create_completion_queues(
     iree_net_rdma_carrier_t* carrier) {
@@ -864,6 +1063,9 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_carrier_create(
     carrier->options = params.options;
   }
 
+  if (iree_status_is_ok(status)) {
+    status = iree_net_rdma_carrier_create_send_staging_pool(carrier);
+  }
   if (iree_status_is_ok(status)) {
     status = iree_net_rdma_carrier_create_completion_queues(carrier);
   }

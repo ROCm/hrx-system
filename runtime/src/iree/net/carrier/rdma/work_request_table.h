@@ -14,6 +14,7 @@
 #ifndef IREE_NET_CARRIER_RDMA_WORK_REQUEST_TABLE_H_
 #define IREE_NET_CARRIER_RDMA_WORK_REQUEST_TABLE_H_
 
+#include "iree/async/buffer_pool.h"
 #include "iree/base/api.h"
 
 #ifdef __cplusplus
@@ -59,6 +60,9 @@ typedef struct iree_net_rdma_work_request_completion_t {
 
   // Byte length originally supplied during acquire.
   iree_host_size_t byte_length;
+
+  // Buffer lease retained for the native work request lifetime.
+  iree_async_buffer_lease_t retained_buffer_lease;
 } iree_net_rdma_work_request_completion_t;
 
 // Initializes |out_table| with |capacity| fixed slots.
@@ -79,10 +83,14 @@ IREE_API_EXPORT uint32_t iree_net_rdma_work_request_table_available_capacity(
     const iree_net_rdma_work_request_table_t* table);
 
 // Acquires one slot and returns the wr_id to place in the native WR.
+//
+// If |retained_buffer_lease| is non-NULL, ownership transfers to the table on
+// success and returns through iree_net_rdma_work_request_table_complete().
 IREE_API_EXPORT iree_status_t iree_net_rdma_work_request_table_acquire(
     iree_net_rdma_work_request_table_t* table,
     iree_net_rdma_work_request_operation_t operation, uint64_t user_data,
-    iree_host_size_t byte_length, uint64_t* out_wr_id);
+    iree_host_size_t byte_length,
+    iree_async_buffer_lease_t* retained_buffer_lease, uint64_t* out_wr_id);
 
 // Completes the work request identified by |wr_id| and releases its slot.
 IREE_API_EXPORT iree_status_t iree_net_rdma_work_request_table_complete(

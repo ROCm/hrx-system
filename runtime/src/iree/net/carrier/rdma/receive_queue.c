@@ -187,7 +187,8 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_receive_queue_replenish(
     if (iree_status_is_ok(status)) {
       status = iree_net_rdma_work_request_table_acquire(
           queue->work_request_table, IREE_NET_RDMA_WORK_REQUEST_OPERATION_RECV,
-          slot_index, /*byte_length=*/0, &work_request_id);
+          slot_index, /*byte_length=*/0, /*retained_buffer_lease=*/NULL,
+          &work_request_id);
     }
 
     if (iree_status_is_ok(status)) {

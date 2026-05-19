@@ -65,6 +65,7 @@ iree_cc_library(
     ::credit_memory
     ::queue_pair
     ::receive_queue
+    ::region
     ::send_window
     ::sge
     ::work_request_table
@@ -428,6 +429,7 @@ iree_cc_library(
   SRCS
     "work_request_table.c"
   DEPS
+    iree::async
     iree::base
   PUBLIC
 )
