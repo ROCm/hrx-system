@@ -8,6 +8,9 @@ load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
 
 # RDMA carrier using libibverbs and librdmacm — Linux-only.
 
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
+
 package(
     default_visibility = ["//visibility:public"],
     features = ["layering_check"],
@@ -76,5 +79,28 @@ iree_runtime_cc_library(
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
         "//runtime/src/iree/net:carrier",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "dmabuf_registration_test",
+    srcs = ["dmabuf_registration_test.cc"],
+    tags = [
+        "driver=amdgpu",
+        "nodocker",
+        "requires-gpu-amd",
+    ],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":libverbs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:libhsa",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:topology",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:vmem",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
