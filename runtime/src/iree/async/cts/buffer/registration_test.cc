@@ -12,6 +12,7 @@
 
 #include <cstring>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "iree/async/buffer_pool.h"
@@ -19,6 +20,7 @@
 #include "iree/async/cts/util/socket_test_base.h"
 #include "iree/async/operations/net.h"
 #include "iree/async/slab.h"
+#include "iree/async/span.h"
 
 // memfd_create is used as a dmabuf stand-in for tests. Available on Linux
 // glibc 2.27+ and Android API level 30+.
@@ -92,6 +94,36 @@ static StatusOr<AsyncRegionPtr> RegisterSlab(
 }
 
 class BufferRegistrationTest : public SocketTestBase<> {};
+
+struct RecvPoolCompletionLog : public CompletionLog {
+  std::vector<std::vector<uint8_t>> payloads;
+
+  static void Callback(void* user_data, iree_async_operation_t* operation,
+                       iree_status_t status,
+                       iree_async_completion_flags_t flags) {
+    auto* log = static_cast<RecvPoolCompletionLog*>(user_data);
+    auto* recv_pool =
+        reinterpret_cast<iree_async_socket_recv_pool_operation_t*>(operation);
+    bool status_ok = iree_status_is_ok(status);
+
+    Entry entry;
+    entry.status = status;
+    entry.flags = flags;
+    entry.bytes_transferred = recv_pool->bytes_received;
+    log->entries.push_back(std::move(entry));
+
+    if (status_ok && recv_pool->bytes_received > 0) {
+      const uint8_t* data = static_cast<const uint8_t*>(
+          iree_async_span_ptr(recv_pool->lease.span));
+      log->payloads.emplace_back(data, data + recv_pool->bytes_received);
+    }
+    iree_async_buffer_lease_release(&recv_pool->lease);
+
+    if (!(flags & IREE_ASYNC_COMPLETION_FLAG_MORE)) {
+      log->final_received = true;
+    }
+  }
+};
 
 //===----------------------------------------------------------------------===//
 // Host buffer registration tests
@@ -392,6 +424,135 @@ TEST_P(BufferRegistrationTest, RecvPoolBufferRecycling) {
     iree_async_buffer_lease_release(&leases[i]);
   }
 
+  iree_async_buffer_pool_free(pool);
+}
+
+// io_uring must hide PBUF_RING availability from SOCKET_RECV_POOL users. When
+// the slab is registered without a provided buffer ring, multishot receive is
+// emulated with userspace-acquired buffers and single-shot resubmission.
+TEST_P(BufferRegistrationTest,
+       RecvPoolMultishotEmulatesWithoutProvidedBufferRing) {
+  if (std::string(this->GetParam().name).rfind("io_uring", 0) != 0) {
+    GTEST_SKIP() << "PBUF_RING fallback is io_uring-specific";
+  }
+  iree_async_proactor_capabilities_t caps =
+      iree_async_proactor_query_capabilities(proactor_);
+  if (!(caps & IREE_ASYNC_PROACTOR_CAPABILITY_MULTISHOT)) {
+    GTEST_SKIP() << "Backend does not support multishot operations";
+  }
+
+  iree_async_slab_options_t slab_options = {0};
+  slab_options.buffer_size = 256;
+  slab_options.buffer_count = 4;
+
+  IREE_ASSERT_OK_AND_ASSIGN(AsyncSlabPtr slab, CreateSlab(slab_options));
+
+  auto region_or =
+      RegisterSlab(proactor_, slab.get(), IREE_ASYNC_BUFFER_ACCESS_FLAG_NONE);
+  if (!region_or.ok() &&
+      region_or.status().code() == iree::StatusCode::kUnavailable) {
+    GTEST_SKIP() << region_or.status().ToString();
+  }
+  IREE_ASSERT_OK_AND_ASSIGN(AsyncRegionPtr region, std::move(region_or));
+  ASSERT_EQ(region->type, IREE_ASYNC_REGION_TYPE_IOURING);
+  ASSERT_LT(region->handles.iouring.buffer_group_id, 0);
+
+  iree_async_buffer_pool_t* pool = nullptr;
+  IREE_ASSERT_OK(iree_async_buffer_pool_allocate(
+      region.get(), iree_allocator_system(), &pool));
+
+  iree_async_socket_t* client = nullptr;
+  iree_async_socket_t* server = nullptr;
+  iree_async_socket_t* listener = nullptr;
+  EstablishConnection(&client, &server, &listener);
+
+  RecvPoolCompletionLog recv_pool_log;
+  iree_async_socket_recv_pool_operation_t recv_pool_op;
+  iree_async_operation_zero(&recv_pool_op.base, sizeof(recv_pool_op));
+  iree_async_operation_initialize(
+      &recv_pool_op.base, IREE_ASYNC_OPERATION_TYPE_SOCKET_RECV_POOL,
+      IREE_ASYNC_OPERATION_FLAG_MULTISHOT, RecvPoolCompletionLog::Callback,
+      &recv_pool_log);
+  recv_pool_op.socket = server;
+  recv_pool_op.pool = pool;
+
+  IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &recv_pool_op.base));
+
+  auto send_message = [&](const char* message, size_t expected_payloads) {
+    iree_async_span_t send_span =
+        iree_async_span_from_ptr((void*)message, strlen(message));
+    iree_async_socket_send_operation_t send_op;
+    CompletionTracker send_tracker;
+    InitSendOperation(&send_op, client, &send_span, 1,
+                      IREE_ASYNC_SOCKET_SEND_FLAG_NONE,
+                      CompletionTracker::Callback, &send_tracker);
+
+    IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &send_op.base));
+    PollUntilCondition([&]() {
+      return send_tracker.call_count > 0 &&
+             recv_pool_log.payloads.size() >= expected_payloads;
+    });
+    IREE_ASSERT_OK(send_tracker.ConsumeStatus());
+  };
+
+  send_message("alpha", 1);
+  ASSERT_GE(recv_pool_log.entries.size(), 1u);
+  EXPECT_TRUE(recv_pool_log.entries[0].flags & IREE_ASYNC_COMPLETION_FLAG_MORE);
+  IREE_EXPECT_OK(recv_pool_log.ConsumeStatus(0));
+  ASSERT_EQ(recv_pool_log.payloads[0].size(), 5u);
+  EXPECT_EQ(memcmp(recv_pool_log.payloads[0].data(), "alpha", 5), 0);
+
+  send_message("beta", 2);
+  ASSERT_GE(recv_pool_log.entries.size(), 2u);
+  EXPECT_TRUE(recv_pool_log.entries[1].flags & IREE_ASYNC_COMPLETION_FLAG_MORE);
+  IREE_EXPECT_OK(recv_pool_log.ConsumeStatus(1));
+  ASSERT_EQ(recv_pool_log.payloads[1].size(), 4u);
+  EXPECT_EQ(memcmp(recv_pool_log.payloads[1].data(), "beta", 4), 0);
+
+  IREE_ASSERT_OK(iree_async_proactor_cancel(proactor_, &recv_pool_op.base));
+  PollUntilCondition([&]() { return recv_pool_log.final_received; });
+  ASSERT_GE(recv_pool_log.entries.size(), 3u);
+  size_t final_index = recv_pool_log.entries.size() - 1;
+  EXPECT_FALSE(recv_pool_log.entries[final_index].flags &
+               IREE_ASYNC_COMPLETION_FLAG_MORE);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED,
+                        recv_pool_log.ConsumeStatus(final_index));
+
+  char post_cancel_recv_buffer[16] = {0};
+  iree_async_span_t post_cancel_recv_span = iree_async_span_from_ptr(
+      post_cancel_recv_buffer, sizeof(post_cancel_recv_buffer));
+  iree_async_socket_recv_operation_t post_cancel_recv_op;
+  CompletionTracker post_cancel_recv_tracker;
+  InitRecvOperation(&post_cancel_recv_op, server, &post_cancel_recv_span, 1,
+                    CompletionTracker::Callback, &post_cancel_recv_tracker);
+  IREE_ASSERT_OK(
+      iree_async_proactor_submit_one(proactor_, &post_cancel_recv_op.base));
+
+  const char* post_cancel_message = "gamma";
+  iree_async_span_t post_cancel_send_span = iree_async_span_from_ptr(
+      (void*)post_cancel_message, strlen(post_cancel_message));
+  iree_async_socket_send_operation_t post_cancel_send_op;
+  CompletionTracker post_cancel_send_tracker;
+  InitSendOperation(&post_cancel_send_op, client, &post_cancel_send_span, 1,
+                    IREE_ASYNC_SOCKET_SEND_FLAG_NONE,
+                    CompletionTracker::Callback, &post_cancel_send_tracker);
+  IREE_ASSERT_OK(
+      iree_async_proactor_submit_one(proactor_, &post_cancel_send_op.base));
+
+  PollUntilCondition([&]() {
+    return post_cancel_send_tracker.call_count > 0 &&
+           post_cancel_recv_tracker.call_count > 0;
+  });
+  IREE_EXPECT_OK(post_cancel_send_tracker.ConsumeStatus());
+  IREE_EXPECT_OK(post_cancel_recv_tracker.ConsumeStatus());
+  ASSERT_EQ(post_cancel_recv_op.bytes_received, strlen(post_cancel_message));
+  EXPECT_EQ(memcmp(post_cancel_recv_buffer, post_cancel_message,
+                   strlen(post_cancel_message)),
+            0);
+
+  iree_async_socket_release(client);
+  iree_async_socket_release(server);
+  iree_async_socket_release(listener);
   iree_async_buffer_pool_free(pool);
 }
 

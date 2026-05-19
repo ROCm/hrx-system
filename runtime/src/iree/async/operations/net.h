@@ -258,7 +258,9 @@ static inline void iree_async_socket_recv_operation_initialize(
 //
 // Optimal path (io_uring 5.19+):
 //   Uses provided buffer rings (PBUF_RING) for kernel-managed buffer
-//   selection with zero syscalls per receive after initial setup.
+//   selection with zero syscalls per receive after initial setup. If a slab
+//   cannot be registered with PBUF_RING, io_uring transparently emulates
+//   multishot with userspace buffer acquisition and single-shot resubmission.
 //
 // Threading model:
 //   Callback fires on the poll thread. The lease is valid until released.

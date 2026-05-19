@@ -30,6 +30,16 @@ extern "C" {
 
 typedef struct iree_async_semaphore_wait_operation_t
     iree_async_semaphore_wait_operation_t;
+typedef struct iree_async_socket_recv_pool_operation_t
+    iree_async_socket_recv_pool_operation_t;
+
+// Internal flags used by the io_uring proactor for operation state management.
+enum iree_async_io_uring_operation_internal_flags_e {
+  // Set when a SOCKET_RECV_POOL operation is cancelled. Native io_uring
+  // cancellation targets the in-flight SQE; emulated multishot recv also checks
+  // this across the post-callback resubmit gap.
+  IREE_ASYNC_IO_URING_INTERNAL_FLAG_CANCELLED = 1u << 0,
+};
 
 //===----------------------------------------------------------------------===//
 // Event source tracking
@@ -377,6 +387,18 @@ void iree_async_proactor_io_uring_cancel_continuation_chain_to_mpsc(
 iree_status_t iree_async_proactor_io_uring_submit(
     iree_async_proactor_t* base_proactor,
     iree_async_operation_list_t operations);
+
+// Returns true when |recv_pool| is using userspace-acquired buffers to emulate
+// multishot SOCKET_RECV_POOL completions instead of a kernel PBUF_RING.
+bool iree_async_proactor_io_uring_is_userspace_recv_pool_multishot(
+    iree_async_socket_recv_pool_operation_t* recv_pool);
+
+// Resubmits an emulated multishot SOCKET_RECV_POOL operation without taking a
+// new operation resource reference. The first submit retains resources for the
+// entire multishot lifetime; intermediate resubmits reuse that ownership.
+iree_status_t iree_async_proactor_io_uring_resubmit_recv_pool(
+    iree_async_proactor_io_uring_t* proactor,
+    iree_async_socket_recv_pool_operation_t* recv_pool);
 
 #ifdef __cplusplus
 }  // extern "C"

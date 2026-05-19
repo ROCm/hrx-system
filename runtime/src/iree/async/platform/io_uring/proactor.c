@@ -22,6 +22,7 @@
 #include <sys/uio.h>
 #include <unistd.h>
 
+#include "iree/async/buffer_pool.h"
 #include "iree/async/event.h"
 #include "iree/async/file.h"
 #include "iree/async/operation.h"
@@ -872,6 +873,12 @@ static void iree_async_proactor_io_uring_handle_signal_cqe(
 // zero-copy send notification CQEs that are not errors.
 static iree_status_t iree_async_proactor_io_uring_cqe_to_status(
     const iree_io_uring_cqe_t* cqe, iree_async_operation_t* operation) {
+  if (operation->type == IREE_ASYNC_OPERATION_TYPE_SOCKET_RECV_POOL &&
+      iree_any_bit_set(iree_async_operation_load_internal_flags(operation),
+                       IREE_ASYNC_IO_URING_INTERNAL_FLAG_CANCELLED)) {
+    return iree_status_from_code(IREE_STATUS_CANCELLED);
+  }
+
   if (cqe->res >= 0) {
     return iree_ok_status();
   }
@@ -1159,6 +1166,14 @@ iree_async_proactor_io_uring_completion_flags(
   if (iree_any_bit_set(cqe->flags, IREE_IORING_CQE_F_MORE)) {
     flags |= IREE_ASYNC_COMPLETION_FLAG_MORE;
   }
+  if (operation->type == IREE_ASYNC_OPERATION_TYPE_SOCKET_RECV_POOL &&
+      cqe->res > 0 &&
+      iree_async_proactor_io_uring_is_userspace_recv_pool_multishot(
+          (iree_async_socket_recv_pool_operation_t*)operation) &&
+      !iree_any_bit_set(iree_async_operation_load_internal_flags(operation),
+                        IREE_ASYNC_IO_URING_INTERNAL_FLAG_CANCELLED)) {
+    flags |= IREE_ASYNC_COMPLETION_FLAG_MORE;
+  }
 
   // For ZC send NOTIF CQEs, check if zero-copy was actually achieved.
   if (operation->type == IREE_ASYNC_OPERATION_TYPE_SOCKET_SEND ||
@@ -1305,13 +1320,21 @@ static iree_host_size_t iree_async_proactor_io_uring_process_cqe(
   bool is_recv_pool_backpressure =
       operation->type == IREE_ASYNC_OPERATION_TYPE_SOCKET_RECV_POOL &&
       status_code == IREE_STATUS_RESOURCE_EXHAUSTED;
+  bool is_operation_cancellation = status_code == IREE_STATUS_CANCELLED;
   if (!iree_status_is_ok(status) && status_code != IREE_STATUS_DEFERRED &&
-      !is_recv_pool_backpressure) {
+      !is_operation_cancellation && !is_recv_pool_backpressure) {
     iree_async_socket_t* socket =
         iree_async_proactor_io_uring_socket_from_io_operation(operation);
     if (socket) {
       iree_async_socket_set_failure(socket, iree_status_code(status));
     }
+  }
+
+  if (!iree_status_is_ok(status) &&
+      operation->type == IREE_ASYNC_OPERATION_TYPE_SOCKET_RECV_POOL) {
+    iree_async_socket_recv_pool_operation_t* recv_pool =
+        (iree_async_socket_recv_pool_operation_t*)operation;
+    iree_async_buffer_lease_release(&recv_pool->lease);
   }
 
   // Zero-copy send handling: first CQE has MORE set, defer until NOTIF.
@@ -1320,19 +1343,28 @@ static iree_host_size_t iree_async_proactor_io_uring_process_cqe(
     return 0;
   }
 
-  // Detach LINKED continuation chain before callback (callback may free the
-  // operation). Continuations are dispatched AFTER the trigger's callback to
-  // preserve callback ordering: trigger first, then its continuations.
-  iree_async_operation_t* continuation = operation->linked_next;
-  operation->linked_next = NULL;
-
   // Compute completion flags.
   iree_async_completion_flags_t flags =
       iree_async_proactor_io_uring_completion_flags(cqe, operation);
+  bool is_final = !iree_any_bit_set(flags, IREE_ASYNC_COMPLETION_FLAG_MORE);
+  bool should_resubmit_recv_pool =
+      iree_status_is_ok(status) && !is_final &&
+      operation->type == IREE_ASYNC_OPERATION_TYPE_SOCKET_RECV_POOL &&
+      iree_async_proactor_io_uring_is_userspace_recv_pool_multishot(
+          (iree_async_socket_recv_pool_operation_t*)operation);
+
+  // Detach LINKED continuation chains only on the final callback. Multishot
+  // completions keep the operation in-flight and continuations must remain
+  // associated until the terminal completion.
+  iree_async_operation_t* continuation = NULL;
+  if (is_final) {
+    continuation = operation->linked_next;
+    operation->linked_next = NULL;
+  }
 
   // Release resources retained during submission (not for multishot).
   // Must happen BEFORE callback since callback may free the operation.
-  if (!iree_any_bit_set(flags, IREE_ASYNC_COMPLETION_FLAG_MORE)) {
+  if (is_final) {
     iree_async_operation_release_resources(operation);
   }
 
@@ -1341,6 +1373,31 @@ static iree_host_size_t iree_async_proactor_io_uring_process_cqe(
   // Invoke callback and release to pool. The helper extracts the pool pointer
   // before the callback (which may free the operation when pool is NULL).
   iree_async_proactor_complete_operation(operation, status, flags);
+
+  if (should_resubmit_recv_pool) {
+    iree_status_t resubmit_status = iree_ok_status();
+    if (iree_any_bit_set(iree_async_operation_load_internal_flags(operation),
+                         IREE_ASYNC_IO_URING_INTERNAL_FLAG_CANCELLED)) {
+      resubmit_status = iree_status_from_code(IREE_STATUS_CANCELLED);
+    } else {
+      resubmit_status = iree_async_proactor_io_uring_resubmit_recv_pool(
+          proactor, (iree_async_socket_recv_pool_operation_t*)operation);
+    }
+    if (iree_status_is_ok(resubmit_status)) {
+      return 1;
+    }
+
+    iree_async_operation_t* terminal_continuation = operation->linked_next;
+    operation->linked_next = NULL;
+    iree_async_operation_release_resources(operation);
+    iree_async_proactor_complete_operation(operation, resubmit_status,
+                                           IREE_ASYNC_COMPLETION_FLAG_NONE);
+    if (terminal_continuation) {
+      iree_async_proactor_io_uring_cancel_continuation_chain_to_mpsc(
+          proactor, terminal_continuation);
+    }
+    return 1;
+  }
 
   // Dispatch continuation chain after the trigger's callback. Software
   // completions in the chain are pushed to the MPSC queue (counted by the
@@ -1616,6 +1673,10 @@ static iree_status_t iree_async_proactor_io_uring_cancel(
   memset(sqe, 0, sizeof(*sqe));
   sqe->opcode = IREE_IORING_OP_ASYNC_CANCEL;
   sqe->fd = -1;
+  if (operation->type == IREE_ASYNC_OPERATION_TYPE_SOCKET_RECV_POOL) {
+    iree_async_operation_set_internal_flags(
+        operation, IREE_ASYNC_IO_URING_INTERNAL_FLAG_CANCELLED);
+  }
   if (operation->type == IREE_ASYNC_OPERATION_TYPE_EVENT_WAIT ||
       operation->type == IREE_ASYNC_OPERATION_TYPE_NOTIFICATION_WAIT) {
     sqe->addr = iree_io_uring_internal_encode(IREE_IO_URING_TAG_LINKED_POLL,

@@ -275,10 +275,11 @@ static iree_status_t iree_async_proactor_io_uring_fill_socket_recv_pool(
       (iree_async_socket_recv_pool_operation_t*)base_operation;
 
   // Validate the buffer pool region.
-  // RECV_POOL requires a pool with a provided buffer ring (PBUF_RING), which
-  // is set up during slab registration when the pool has write access and the
-  // kernel supports multishot (5.19+). If the pool lacks a buffer ring, callers
-  // should use SOCKET_RECV with manual buffer management instead.
+  // RECV_POOL prefers a provided buffer ring (PBUF_RING), which is set up
+  // during slab registration when the pool has write access and registration
+  // succeeds. If the pool lacks a buffer ring we acquire buffers in userspace
+  // and use ordinary single-shot receives; multishot is then emulated by
+  // resubmitting after each successful completion.
   iree_async_region_t* region = iree_async_buffer_pool_region(recv_pool->pool);
   if (IREE_UNLIKELY(region->type != IREE_ASYNC_REGION_TYPE_IOURING)) {
     return iree_make_status(
@@ -297,12 +298,19 @@ static iree_status_t iree_async_proactor_io_uring_fill_socket_recv_pool(
         "proactor; buffer group IDs are ring-local and cannot be used "
         "across proactors");
   }
+  // WRITE means the backend may write received bytes into the region. NONE is
+  // accepted for emulated registrations where the proactor owns the memory but
+  // no kernel buffer facility was installed. READ-only registrations serve send
+  // paths and are invalid receive targets.
   if (IREE_UNLIKELY(!iree_any_bit_set(region->access_flags,
-                                      IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE))) {
+                                      IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE) &&
+                    region->access_flags !=
+                        IREE_ASYNC_BUFFER_ACCESS_FLAG_NONE)) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
-        "SOCKET_RECV_POOL requires a buffer pool with WRITE access; "
-        "this pool was registered with read-only access");
+        "SOCKET_RECV_POOL requires a buffer pool registered with WRITE or "
+        "NONE access; got access flags 0x%x",
+        region->access_flags);
   }
   // Clear output fields.
   recv_pool->bytes_received = 0;
@@ -336,17 +344,8 @@ static iree_status_t iree_async_proactor_io_uring_fill_socket_recv_pool(
     // No PBUF_RING: acquire a buffer from the pool in userspace and point
     // the recv at it directly. The completion handler sees no CQE_F_BUFFER
     // flag and uses the lease that was pre-populated here.
-    //
-    // TODO(benvanik): emulate multishot by resubmitting single-shot recvs
-    // on completion, transparently matching the kernel multishot behavior.
-    // Until then, multishot is only available with PBUF_RING.
     if (multishot) {
-      return iree_make_status(
-          IREE_STATUS_UNIMPLEMENTED,
-          "multishot SOCKET_RECV_POOL without PBUF_RING is not yet "
-          "implemented; register the pool's slab with "
-          "IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE to enable PBUF_RING, or "
-          "use single-shot recv");
+      sqe->ioprio |= IREE_IORING_RECVSEND_POLL_FIRST;
     }
     IREE_RETURN_IF_ERROR(
         iree_async_buffer_pool_acquire(recv_pool->pool, &recv_pool->lease));
@@ -1304,6 +1303,36 @@ static void iree_async_proactor_io_uring_release_prepared(
   }
 }
 
+static iree_status_t iree_async_proactor_io_uring_flush_or_wake(
+    iree_async_proactor_io_uring_t* proactor) {
+  int32_t poll_tid =
+      iree_atomic_load(&proactor->poll_tid, iree_memory_order_relaxed);
+  if (poll_tid != 0) {
+    if (poll_tid == (int32_t)syscall(__NR_gettid)) {
+      // Poll thread during CQE processing: flush SQEs immediately for latency.
+      // This gets SQEs to the kernel promptly so inline sends (where the
+      // socket buffer has room) complete during io_uring_enter. It is not a
+      // data lifetime guarantee: under socket buffer pressure, the kernel
+      // defers sends to io-wq worker threads that read buffer data after
+      // io_uring_enter returns. Callers must keep send data alive until the
+      // completion callback fires.
+      //
+      // No GETEVENTS: we avoid running task_work mid-processing. The drain
+      // loop handles deferred completions with GETEVENTS after the CQE loop.
+      return iree_io_uring_ring_submit(&proactor->ring,
+                                       /*min_complete=*/0, /*flags=*/0);
+    }
+    // Cross-thread submit while the poll thread is actively processing CQEs.
+    // The SQEs are in the ring; the poll thread's drain loop will flush them.
+    return iree_ok_status();
+  }
+
+  // Poll thread idle. Only the poll thread may call io_uring_enter
+  // (SINGLE_ISSUER constraint), so wake it to flush pending SQEs.
+  iree_async_proactor_wake(&proactor->base);
+  return iree_ok_status();
+}
+
 //===----------------------------------------------------------------------===//
 // Submit
 //===----------------------------------------------------------------------===//
@@ -1836,34 +1865,46 @@ iree_status_t iree_async_proactor_io_uring_submit(
   // Phase 4: Flush or wake.
   //=========================================================================
 
-  int32_t poll_tid =
-      iree_atomic_load(&proactor->poll_tid, iree_memory_order_relaxed);
-  if (poll_tid != 0) {
-    if (poll_tid == (int32_t)syscall(__NR_gettid)) {
-      // Poll thread during CQE processing: flush SQEs immediately for
-      // latency. This gets SQEs to the kernel promptly so inline sends
-      // (where the socket buffer has room) complete during io_uring_enter.
-      // NOTE: This is a latency optimization, not a data lifetime guarantee.
-      // Under socket buffer pressure, the kernel defers sends to io-wq
-      // worker threads that read buffer data after io_uring_enter returns.
-      // Callers must ensure buffer data survives until the completion
-      // callback fires.
-      //
-      // No GETEVENTS: we avoid running task_work mid-processing. The drain
-      // loop handles deferred completions with GETEVENTS after the CQE loop.
-      return iree_io_uring_ring_submit(&proactor->ring,
-                                       /*min_complete=*/0, /*flags=*/0);
-    }
-    // Cross-thread submit while the poll thread is actively processing CQEs.
-    // The SQEs are in the ring; the poll thread's drain loop will flush them.
-    // Skip wake — the poll thread is already awake.
-    return iree_ok_status();
+  return iree_async_proactor_io_uring_flush_or_wake(proactor);
+}
+
+bool iree_async_proactor_io_uring_is_userspace_recv_pool_multishot(
+    iree_async_socket_recv_pool_operation_t* recv_pool) {
+  if (!iree_any_bit_set(recv_pool->base.flags,
+                        IREE_ASYNC_OPERATION_FLAG_MULTISHOT)) {
+    return false;
+  }
+  iree_async_region_t* region = iree_async_buffer_pool_region(recv_pool->pool);
+  return region->type == IREE_ASYNC_REGION_TYPE_IOURING &&
+         region->handles.iouring.buffer_group_id < 0;
+}
+
+iree_status_t iree_async_proactor_io_uring_resubmit_recv_pool(
+    iree_async_proactor_io_uring_t* proactor,
+    iree_async_socket_recv_pool_operation_t* recv_pool) {
+  iree_async_operation_t* operation = &recv_pool->base;
+
+  iree_io_uring_ring_sq_lock(&proactor->ring);
+  iree_io_uring_sqe_t* sqe = iree_io_uring_ring_get_sqe(&proactor->ring);
+  if (!sqe) {
+    iree_io_uring_ring_sq_unlock(&proactor->ring);
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "failed to get SQE for recv_pool resubmit");
   }
 
-  // Poll thread idle. Only the poll thread may call io_uring_enter
-  // (SINGLE_ISSUER constraint), so wake it to flush pending SQEs.
-  // For pure-software batches (sqes_needed == 0), the wake causes poll() to
-  // drain pending_software_completions and fire callbacks.
-  iree_async_proactor_wake(&proactor->base);
-  return iree_ok_status();
+  iree_status_t status = iree_async_proactor_io_uring_fill_socket_recv_pool(
+      proactor, sqe, operation);
+  if (!iree_status_is_ok(status)) {
+    iree_io_uring_ring_sq_rollback(&proactor->ring, 1);
+    iree_io_uring_ring_sq_unlock(&proactor->ring);
+    return status;
+  }
+
+  // Publish writes for the next single-shot receive. The operation resource
+  // reference remains held from the initial multishot submit.
+  IREE_IO_URING_TSAN_SUBMIT(operation);
+  IREE_TRACE({ operation->submit_time_ns = iree_time_now(); });
+
+  iree_io_uring_ring_sq_unlock(&proactor->ring);
+  return iree_async_proactor_io_uring_flush_or_wake(proactor);
 }
