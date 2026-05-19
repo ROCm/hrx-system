@@ -401,6 +401,7 @@ iree_cc_library(
   SRCS
     "send_reservation_table.c"
   DEPS
+    ::connection_data
     iree::async
     iree::base
     iree::net::carrier

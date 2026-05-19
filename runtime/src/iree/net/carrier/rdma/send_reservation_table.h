@@ -4,14 +4,16 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Fixed-capacity send-buffer reservation table for staged RDMA SEND payloads.
+// Fixed-capacity send-buffer reservation table for pending RDMA SEND payloads.
 //
 // begin_send() hands callers writable bytes from an RDMA-registered staging
 // pool. This table owns those leases between begin_send() and commit_send() or
 // abort_send(), returning generation-checked handles that fit in the generic
 // carrier send handle. The carrier also uses the table as the pending-post FIFO
-// once fully-staged send() payloads are accepted under native SEND
-// backpressure. No memory is allocated after initialization.
+// once send() payloads are accepted under native SEND backpressure. Staged
+// sends keep a carrier-owned lease, while zero-copy sends copy bounded span
+// descriptors and continue borrowing the caller's referenced memory until
+// completion. No memory is allocated after initialization.
 
 #ifndef IREE_NET_CARRIER_RDMA_SEND_RESERVATION_TABLE_H_
 #define IREE_NET_CARRIER_RDMA_SEND_RESERVATION_TABLE_H_
@@ -19,8 +21,10 @@
 #include <stdint.h>
 
 #include "iree/async/buffer_pool.h"
+#include "iree/async/span.h"
 #include "iree/base/api.h"
 #include "iree/net/carrier.h"
+#include "iree/net/carrier/rdma/connection_data.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -35,6 +39,14 @@ enum iree_net_rdma_send_reservation_completion_e {
   IREE_NET_RDMA_SEND_RESERVATION_COMPLETION_INTERNAL = 0,
   // User-visible two-sided SEND completion.
   IREE_NET_RDMA_SEND_RESERVATION_COMPLETION_SEND = 1,
+};
+
+typedef uint8_t iree_net_rdma_send_reservation_payload_t;
+enum iree_net_rdma_send_reservation_payload_e {
+  // Reservation owns one staged buffer lease.
+  IREE_NET_RDMA_SEND_RESERVATION_PAYLOAD_STAGED_BUFFER = 0,
+  // Reservation borrows caller-owned RDMA spans until completion callback.
+  IREE_NET_RDMA_SEND_RESERVATION_PAYLOAD_SPAN_LIST = 1,
 };
 
 typedef struct iree_net_rdma_send_reservation_table_t {
@@ -64,10 +76,19 @@ typedef struct iree_net_rdma_send_reservation_table_t {
 } iree_net_rdma_send_reservation_table_t;
 
 typedef struct iree_net_rdma_send_reservation_t {
+  // Payload representation stored in this reservation.
+  iree_net_rdma_send_reservation_payload_t payload;
+
   // Buffer lease containing the staged send bytes.
   iree_async_buffer_lease_t buffer_lease;
 
-  // Number of bytes written by the caller into buffer_lease.
+  // Borrowed caller spans for zero-copy sends.
+  iree_async_span_t spans[IREE_NET_RDMA_CONNECTION_DATA_MAX_SEND_SGE];
+
+  // Number of valid entries in spans.
+  iree_host_size_t span_count;
+
+  // Number of bytes to send from the reservation payload.
   iree_host_size_t byte_length;
 
   // Completion behavior for the eventual posted send.
@@ -99,7 +120,7 @@ iree_net_rdma_send_reservation_table_available_capacity(
 IREE_API_EXPORT uint32_t iree_net_rdma_send_reservation_table_pending_count(
     const iree_net_rdma_send_reservation_table_t* table);
 
-// Acquires one reservation slot and transfers |buffer_lease| into it.
+// Acquires one staged-buffer reservation and transfers |buffer_lease| into it.
 //
 // On success |buffer_lease| is cleared, |out_handle| receives a
 // generation-checked carrier send handle, and the table owns the lease until
@@ -107,6 +128,18 @@ IREE_API_EXPORT uint32_t iree_net_rdma_send_reservation_table_pending_count(
 IREE_API_EXPORT iree_status_t iree_net_rdma_send_reservation_table_acquire(
     iree_net_rdma_send_reservation_table_t* table,
     iree_async_buffer_lease_t* buffer_lease, iree_host_size_t byte_length,
+    iree_net_rdma_send_reservation_completion_t completion, uint64_t user_data,
+    iree_net_carrier_send_handle_t* out_handle);
+
+// Acquires one span-list reservation and copies |spans| into it.
+//
+// The table stores only the span descriptors. The caller-owned referenced
+// memory must remain valid until the carrier completion fires, matching
+// iree_net_carrier_send()'s normal async I/O contract.
+IREE_API_EXPORT iree_status_t
+iree_net_rdma_send_reservation_table_acquire_span_list(
+    iree_net_rdma_send_reservation_table_t* table, iree_async_span_list_t spans,
+    iree_host_size_t byte_length,
     iree_net_rdma_send_reservation_completion_t completion, uint64_t user_data,
     iree_net_carrier_send_handle_t* out_handle);
 

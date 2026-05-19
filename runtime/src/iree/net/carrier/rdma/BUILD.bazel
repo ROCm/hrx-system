@@ -421,6 +421,7 @@ iree_runtime_cc_library(
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
+        ":connection_data",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
         "//runtime/src/iree/net:carrier",

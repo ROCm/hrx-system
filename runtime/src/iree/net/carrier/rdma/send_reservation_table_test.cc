@@ -66,7 +66,10 @@ TEST_F(SendReservationTableTest, AcquireAndResolveTransfersLease) {
   iree_net_rdma_send_reservation_t reservation;
   IREE_ASSERT_OK(iree_net_rdma_send_reservation_table_resolve(&table_, handle,
                                                               &reservation));
+  EXPECT_EQ(IREE_NET_RDMA_SEND_RESERVATION_PAYLOAD_STAGED_BUFFER,
+            reservation.payload);
   EXPECT_EQ(64u, reservation.byte_length);
+  EXPECT_EQ(0u, reservation.span_count);
   EXPECT_NE(nullptr, reservation.buffer_lease.release.fn);
   EXPECT_EQ(2u,
             iree_net_rdma_send_reservation_table_available_capacity(&table_));
@@ -184,6 +187,8 @@ TEST_F(SendReservationTableTest, PreservesCompletionMetadata) {
   IREE_ASSERT_OK(iree_net_rdma_send_reservation_table_resolve_pending_front(
       &table_, nullptr, &reservation));
   EXPECT_EQ(32u, reservation.byte_length);
+  EXPECT_EQ(IREE_NET_RDMA_SEND_RESERVATION_PAYLOAD_STAGED_BUFFER,
+            reservation.payload);
   EXPECT_EQ(IREE_NET_RDMA_SEND_RESERVATION_COMPLETION_SEND,
             reservation.completion);
   EXPECT_EQ(0x1234u, reservation.user_data);
@@ -191,6 +196,37 @@ TEST_F(SendReservationTableTest, PreservesCompletionMetadata) {
   iree_async_buffer_lease_release(&reservation.buffer_lease);
   EXPECT_EQ(1u, release_count);
 }
+
+TEST_F(SendReservationTableTest, SpanListReservationsCopyMetadata) {
+  IREE_ASSERT_OK(Initialize(1));
+
+  iree_async_span_t spans[2] = {
+      iree_async_span_from_ptr(reinterpret_cast<void*>(0x1000), 32),
+      iree_async_span_from_ptr(reinterpret_cast<void*>(0x2000), 64),
+  };
+  iree_net_carrier_send_handle_t handle = 0;
+  IREE_ASSERT_OK(iree_net_rdma_send_reservation_table_acquire_span_list(
+      &table_, iree_async_span_list_make(spans, IREE_ARRAYSIZE(spans)),
+      /*byte_length=*/96, IREE_NET_RDMA_SEND_RESERVATION_COMPLETION_SEND,
+      /*user_data=*/0x5678u, &handle));
+  spans[0] = iree_async_span_empty();
+  spans[1] = iree_async_span_empty();
+
+  IREE_ASSERT_OK(iree_net_rdma_send_reservation_table_commit(&table_, handle));
+  iree_net_rdma_send_reservation_t reservation;
+  IREE_ASSERT_OK(iree_net_rdma_send_reservation_table_resolve_pending_front(
+      &table_, nullptr, &reservation));
+  EXPECT_EQ(IREE_NET_RDMA_SEND_RESERVATION_PAYLOAD_SPAN_LIST,
+            reservation.payload);
+  EXPECT_EQ(2u, reservation.span_count);
+  EXPECT_EQ(32u, reservation.spans[0].length);
+  EXPECT_EQ(64u, reservation.spans[1].length);
+  EXPECT_EQ(96u, reservation.byte_length);
+  EXPECT_EQ(IREE_NET_RDMA_SEND_RESERVATION_COMPLETION_SEND,
+            reservation.completion);
+  EXPECT_EQ(0x5678u, reservation.user_data);
+}
+
 TEST_F(SendReservationTableTest, AbortAllReleasesAllLeases) {
   IREE_ASSERT_OK(Initialize(3));
 
@@ -362,6 +398,34 @@ TEST_F(SendReservationTableTest, RejectsInvalidArguments) {
                             &table_, &lease, /*byte_length=*/32,
                             (iree_net_rdma_send_reservation_completion_t)0xFFu,
                             /*user_data=*/0, &handle));
+  iree_async_span_t spans[1] = {
+      iree_async_span_from_ptr(reinterpret_cast<void*>(0x1000), 32),
+  };
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_net_rdma_send_reservation_table_acquire_span_list(
+          &table_, iree_async_span_list_empty(), /*byte_length=*/32,
+          IREE_NET_RDMA_SEND_RESERVATION_COMPLETION_SEND, /*user_data=*/0,
+          &handle));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_net_rdma_send_reservation_table_acquire_span_list(
+          &table_, iree_async_span_list_make(nullptr, 1), /*byte_length=*/32,
+          IREE_NET_RDMA_SEND_RESERVATION_COMPLETION_SEND, /*user_data=*/0,
+          &handle));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_net_rdma_send_reservation_table_acquire_span_list(
+          &table_, iree_async_span_list_make(spans, IREE_ARRAYSIZE(spans)),
+          /*byte_length=*/64, IREE_NET_RDMA_SEND_RESERVATION_COMPLETION_SEND,
+          /*user_data=*/0, &handle));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_net_rdma_send_reservation_table_acquire_span_list(
+          &table_, iree_async_span_list_make(spans, IREE_ARRAYSIZE(spans)),
+          /*byte_length=*/32,
+          (iree_net_rdma_send_reservation_completion_t)0xFFu,
+          /*user_data=*/0, &handle));
 
   iree_net_rdma_send_reservation_t reservation;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
