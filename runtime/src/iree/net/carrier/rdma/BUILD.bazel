@@ -88,6 +88,7 @@ iree_runtime_cc_library(
         ":work_request_table",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
         "//runtime/src/iree/net:carrier",
         "@rdma_core_headers",
     ],

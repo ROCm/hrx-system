@@ -72,6 +72,7 @@ iree_cc_library(
     ::work_request_table
     iree::async
     iree::base
+    iree::base::threading
     iree::net::carrier
     rdma_core::headers
   PUBLIC
