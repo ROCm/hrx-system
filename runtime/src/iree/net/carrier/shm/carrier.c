@@ -20,6 +20,9 @@ typedef struct iree_net_shm_carrier_t {
   iree_atomic_int32_t shutdown_initiated;
   bool peer_shutdown_received;
 
+  // First asynchronous carrier error without a completion callback.
+  iree_atomic_intptr_t failure_status;
+
   // Opaque ownership context released during destroy. Typically a pair_context
   // for create_pair or a per-carrier resource bundle for factory-created
   // carriers.
@@ -164,6 +167,36 @@ static iree_host_size_t iree_net_shm_carrier_progress(void* user_data);
 // The progress callback uses the AIMD window instead.
 #define IREE_NET_SHM_DRAIN_RX_BUDGET 256
 
+static void iree_net_shm_carrier_set_failure_status(
+    iree_net_shm_carrier_t* carrier, iree_status_t status) {
+  intptr_t expected = 0;
+  intptr_t desired = (intptr_t)status;
+  if (!iree_atomic_compare_exchange_strong(&carrier->failure_status, &expected,
+                                           desired, iree_memory_order_release,
+                                           iree_memory_order_relaxed)) {
+    iree_status_ignore(status);
+  }
+}
+
+static void iree_net_shm_carrier_drop_failure_status(
+    iree_net_shm_carrier_t* carrier) {
+  iree_status_t status = (iree_status_t)iree_atomic_exchange(
+      &carrier->failure_status, 0, iree_memory_order_acq_rel);
+  iree_status_ignore(status);
+}
+
+static void iree_net_shm_carrier_notify_error(iree_net_shm_carrier_t* carrier,
+                                              iree_status_t status) {
+  if (carrier->base.callback.fn) {
+    carrier->base.callback.fn(carrier->base.callback.user_data,
+                              IREE_NET_CARRIER_COMPLETION_ERROR,
+                              /*operation_user_data=*/0, status,
+                              /*bytes_transferred=*/0, /*recv_lease=*/NULL);
+  } else if (!iree_status_is_ok(status)) {
+    iree_net_shm_carrier_set_failure_status(carrier, status);
+  }
+}
+
 typedef struct iree_net_shm_drain_rx_result_t {
   enum {
     // Ring empty — all available data was processed.
@@ -178,14 +211,21 @@ typedef struct iree_net_shm_drain_rx_result_t {
   int32_t drained_count;
 } iree_net_shm_drain_rx_result_t;
 
-// Dispatches a single received ring entry to the recv handler. Returns true on
-// success (entry was valid and delivered), false if the entry is malformed or
-// out-of-bounds (caller should stop draining).
+// Dispatches a single received ring entry to the data or signal handler.
+// Returns true on success (entry was valid and delivered), false if the entry
+// is malformed, out-of-bounds, or rejected by the handler.
 static bool iree_net_shm_carrier_dispatch_rx_entry(
     iree_net_shm_carrier_t* carrier, const void* payload,
     iree_host_size_t entry_length) {
   const uint8_t* data = (const uint8_t*)payload;
   if (entry_length < sizeof(iree_net_shm_entry_header_t)) {
+    iree_net_shm_carrier_notify_error(
+        carrier, iree_make_status(
+                     IREE_STATUS_INVALID_ARGUMENT,
+                     "SHM RX entry length %" PRIhsz
+                     " is smaller than the %" PRIhsz " byte header",
+                     entry_length,
+                     (iree_host_size_t)sizeof(iree_net_shm_entry_header_t)));
     return false;
   }
   const iree_net_shm_entry_header_t* header =
@@ -200,7 +240,10 @@ static bool iree_net_shm_carrier_dispatch_rx_entry(
           iree_async_span_from_ptr((void*)entry_data, data_length);
       iree_status_t recv_status = carrier->base.recv_handler.fn(
           carrier->base.recv_handler.user_data, span, NULL);
-      iree_status_ignore(recv_status);
+      if (!iree_status_is_ok(recv_status)) {
+        iree_net_shm_carrier_notify_error(carrier, recv_status);
+        return false;
+      }
     }
     iree_atomic_fetch_add(&carrier->base.bytes_received, (int64_t)data_length,
                           iree_memory_order_relaxed);
@@ -209,6 +252,14 @@ static bool iree_net_shm_carrier_dispatch_rx_entry(
 
   if (entry_type == IREE_NET_SHM_ENTRY_TYPE_REFERENCE) {
     if (data_length != sizeof(iree_net_shm_reference_descriptor_t)) {
+      iree_net_shm_carrier_notify_error(
+          carrier,
+          iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "SHM reference descriptor has length %" PRIhsz
+              ", expected %" PRIhsz,
+              data_length,
+              (iree_host_size_t)sizeof(iree_net_shm_reference_descriptor_t)));
       return false;
     }
     const iree_net_shm_reference_descriptor_t descriptor =
@@ -218,17 +269,25 @@ static bool iree_net_shm_carrier_dispatch_rx_entry(
         !iree_checked_add_u64(descriptor.offset, descriptor.length,
                               &range_end) ||
         range_end > carrier->regions[descriptor.region_id].size) {
+      iree_net_shm_carrier_notify_error(
+          carrier, iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                    "SHM reference region %u offset %" PRIu64
+                                    " length %" PRIu64 " is out of range",
+                                    descriptor.region_id, descriptor.offset,
+                                    descriptor.length));
       return false;
     }
-    uint8_t* resolved =
-        (uint8_t*)carrier->regions[descriptor.region_id].base_ptr +
-        descriptor.offset;
-    if (carrier->base.recv_handler.fn) {
-      iree_async_span_t span = iree_async_span_from_ptr(
-          resolved, (iree_host_size_t)descriptor.length);
-      iree_status_t recv_status = carrier->base.recv_handler.fn(
-          carrier->base.recv_handler.user_data, span, NULL);
-      iree_status_ignore(recv_status);
+    if (!carrier->base.signal_handler.fn) {
+      iree_net_shm_carrier_notify_error(
+          carrier, iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                    "SHM direct_write signal handler not set"));
+      return false;
+    }
+    iree_status_t signal_status = carrier->base.signal_handler.fn(
+        carrier->base.signal_handler.user_data, descriptor.reserved);
+    if (!iree_status_is_ok(signal_status)) {
+      iree_net_shm_carrier_notify_error(carrier, signal_status);
+      return false;
     }
     iree_atomic_fetch_add(&carrier->base.bytes_received,
                           (int64_t)descriptor.length,
@@ -237,6 +296,10 @@ static bool iree_net_shm_carrier_dispatch_rx_entry(
   }
 
   // Unknown entry type — cannot safely interpret subsequent entries.
+  iree_net_shm_carrier_notify_error(
+      carrier,
+      iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                       "unknown SHM RX entry type 0x%08" PRIX32, entry_type));
   return false;
 }
 
@@ -265,6 +328,7 @@ static iree_net_shm_drain_rx_result_t iree_net_shm_carrier_drain_rx(
       // Malformed or unrecognized entry — consume it and stop.
       iree_mpsc_queue_consume(&carrier->rx_queue);
       iree_net_shm_signal_peer(carrier);
+      carrier->peer_shutdown_received = true;
       result.status = IREE_NET_SHM_DRAIN_RX_PEER_DONE;
       return result;
     }
@@ -550,6 +614,7 @@ static iree_status_t iree_net_shm_carrier_deactivate(
 static void iree_net_shm_carrier_free(iree_net_shm_carrier_t* carrier) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  iree_net_shm_carrier_drop_failure_status(carrier);
   iree_async_notification_release(carrier->peer_wake_notification);
   if (carrier->release.fn) {
     carrier->release.fn(carrier->release.context);
@@ -576,6 +641,8 @@ static void iree_net_shm_carrier_destroy(iree_net_carrier_t* base_carrier) {
     // defer the actual free until all pending operations complete.
     base_carrier->recv_handler.fn = NULL;
     base_carrier->recv_handler.user_data = NULL;
+    base_carrier->signal_handler.fn = NULL;
+    base_carrier->signal_handler.user_data = NULL;
     iree_status_ignore(iree_net_shm_carrier_deactivate(
         base_carrier, iree_net_shm_carrier_deferred_destroy, carrier));
     return;
@@ -1121,8 +1188,8 @@ static iree_status_t iree_net_shm_carrier_direct_write(
   }
 
   // Signaling write: write a REFERENCE entry to the TX ring so the peer's
-  // drain callback discovers the data. Completion fires synchronously after
-  // the reference entry is committed to the ring.
+  // drain callback delivers the immediate value. Completion fires
+  // synchronously after the reference entry is committed to the ring.
   iree_host_size_t ring_entry_size =
       sizeof(iree_net_shm_entry_header_t) +
       sizeof(iree_net_shm_reference_descriptor_t);

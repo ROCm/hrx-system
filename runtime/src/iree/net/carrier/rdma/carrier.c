@@ -6,6 +6,7 @@
 
 #include "iree/net/carrier/rdma/carrier.h"
 
+#include <arpa/inet.h>
 #include <errno.h>
 #include <limits.h>
 #include <stdint.h>
@@ -644,6 +645,23 @@ static iree_status_t iree_net_rdma_carrier_deliver_receive(
   return status;
 }
 
+static iree_status_t iree_net_rdma_carrier_deliver_signal(
+    iree_net_rdma_carrier_t* carrier, uint32_t immediate) {
+  iree_status_t status = iree_ok_status();
+  iree_net_carrier_state_t state = iree_net_carrier_state(&carrier->base);
+  if (state != IREE_NET_CARRIER_STATE_ACTIVE ||
+      !carrier->base.signal_handler.fn) {
+    status =
+        iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                         "RDMA direct_write signal arrived before activation");
+  }
+  if (iree_status_is_ok(status)) {
+    status = carrier->base.signal_handler.fn(
+        carrier->base.signal_handler.user_data, immediate);
+  }
+  return status;
+}
+
 static void iree_net_rdma_carrier_on_recv_completions(
     void* user_data, iree_status_t status, const struct ibv_wc* completions,
     iree_host_size_t completion_count) {
@@ -664,7 +682,9 @@ static void iree_net_rdma_carrier_on_recv_completions(
     iree_net_carrier_deactivate_callback_fn_t deactivate_callback = NULL;
     void* deactivate_user_data = NULL;
     bool receive_queue_completed = false;
+    bool receive_is_signal = false;
     bool terminal_failure_handled = false;
+    uint32_t receive_signal_immediate = 0;
 
     iree_slim_mutex_lock(&carrier->queue_mutex);
     iree_async_buffer_lease_t lease;
@@ -690,14 +710,42 @@ static void iree_net_rdma_carrier_on_recv_completions(
       }
 
       if (iree_status_is_ok(cleanup_status)) {
-        iree_host_size_t byte_length =
-            iree_status_is_ok(work_status)
-                ? (iree_host_size_t)completion->byte_len
-                : 0;
-        cleanup_status = iree_net_rdma_receive_queue_complete(
-            &carrier->receive_queue, work_request_completion, byte_length,
-            &lease);
-        receive_queue_completed = iree_status_is_ok(cleanup_status);
+        iree_host_size_t byte_length = 0;
+        if (iree_status_is_ok(work_status)) {
+          switch (completion->opcode) {
+            case IBV_WC_RECV:
+              byte_length = (iree_host_size_t)completion->byte_len;
+              break;
+            case IBV_WC_RECV_RDMA_WITH_IMM:
+              receive_is_signal = true;
+              if (iree_any_bit_set(completion->wc_flags, IBV_WC_WITH_IMM)) {
+                receive_signal_immediate = ntohl(completion->imm_data);
+              } else {
+                cleanup_status = iree_make_status(
+                    IREE_STATUS_FAILED_PRECONDITION,
+                    "RDMA direct_write signal completion missing immediate");
+              }
+              break;
+            default:
+              cleanup_status =
+                  iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                   "RDMA receive CQ returned opcode %d",
+                                   (int)completion->opcode);
+              break;
+          }
+        }
+        if (!iree_status_is_ok(work_status)) {
+          receive_is_signal = false;
+        }
+        if (!iree_status_is_ok(cleanup_status)) {
+          byte_length = 0;
+        }
+        iree_status_t receive_queue_status =
+            iree_net_rdma_receive_queue_complete(&carrier->receive_queue,
+                                                 work_request_completion,
+                                                 byte_length, &lease);
+        receive_queue_completed = iree_status_is_ok(receive_queue_status);
+        cleanup_status = iree_status_join(cleanup_status, receive_queue_status);
       }
     }
     iree_slim_mutex_unlock(&carrier->queue_mutex);
@@ -709,7 +757,10 @@ static void iree_net_rdma_carrier_on_recv_completions(
 
     if (!draining_flush && iree_status_is_ok(work_status) &&
         iree_status_is_ok(cleanup_status)) {
-      work_status = iree_net_rdma_carrier_deliver_receive(carrier, &lease);
+      work_status = receive_is_signal ? iree_net_rdma_carrier_deliver_signal(
+                                            carrier, receive_signal_immediate)
+                                      : iree_net_rdma_carrier_deliver_receive(
+                                            carrier, &lease);
     }
     iree_async_buffer_lease_release(&lease);
 
@@ -1422,12 +1473,6 @@ static iree_status_t iree_net_rdma_carrier_direct_write(
                             "RDMA direct_write flags 0x%08X are not supported",
                             params->flags & ~known_flags);
   }
-  if (iree_any_bit_set(params->flags,
-                       IREE_NET_DIRECT_WRITE_FLAG_SIGNAL_RECEIVER)) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "RDMA direct_write receiver signaling is not implemented yet");
-  }
   if (iree_async_span_is_empty(params->local)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "direct_write local span must not be empty");
@@ -1448,19 +1493,27 @@ static iree_status_t iree_net_rdma_carrier_direct_write(
       iree_net_rdma_sge_from_span(params->local, &scatter_gather_entry);
 
   if (iree_status_is_ok(status)) {
+    bool signal_receiver = iree_any_bit_set(
+        params->flags, IREE_NET_DIRECT_WRITE_FLAG_SIGNAL_RECEIVER);
     struct ibv_send_wr work_request;
     memset(&work_request, 0, sizeof(work_request));
     work_request.sg_list = &scatter_gather_entry;
     work_request.num_sge = 1;
-    work_request.opcode = IBV_WR_RDMA_WRITE;
+    work_request.opcode =
+        signal_receiver ? IBV_WR_RDMA_WRITE_WITH_IMM : IBV_WR_RDMA_WRITE;
     work_request.send_flags = IBV_SEND_SIGNALED;
+    work_request.imm_data = signal_receiver ? htonl(params->immediate) : 0;
     work_request.wr.rdma.remote_addr = params->remote.opaque[1];
     work_request.wr.rdma.rkey = (uint32_t)params->remote.opaque[0];
 
+    iree_net_rdma_send_window_acquire_flags_t acquire_flags =
+        signal_receiver
+            ? IREE_NET_RDMA_SEND_WINDOW_ACQUIRE_FLAG_REMOTE_RECV_CREDIT
+            : IREE_NET_RDMA_SEND_WINDOW_ACQUIRE_FLAG_NONE;
     status = iree_net_rdma_carrier_post_send_work_request(
         carrier, IREE_NET_RDMA_WORK_REQUEST_OPERATION_DIRECT_WRITE,
-        IREE_NET_RDMA_SEND_WINDOW_ACQUIRE_FLAG_NONE, params->user_data,
-        params->local.length, /*pending_operation_delta=*/1,
+        acquire_flags, params->user_data, params->local.length,
+        /*pending_operation_delta=*/1,
         /*retained_buffer_lease=*/NULL, &work_request);
   }
   return status;

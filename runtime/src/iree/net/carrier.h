@@ -323,6 +323,28 @@ typedef struct iree_net_carrier_recv_handler_t {
   void* user_data;
 } iree_net_carrier_recv_handler_t;
 
+// Signal handler invoked when a peer direct_write operation requests receiver
+// notification without carrying an inline message payload.
+//
+// The direct-write payload has already been written to registered receiver
+// memory before this handler runs. |immediate| is the 32-bit value supplied by
+// the sender and is transport-native: RDMA delivers the RDMA WRITE WITH
+// IMMEDIATE payload, while other one-sided carriers must preserve the same
+// value through their signaling path.
+//
+// Return iree_ok_status() to indicate successful processing. Returning an
+// error causes the carrier to report the error and may trigger deactivation.
+typedef iree_status_t (*iree_net_carrier_signal_handler_fn_t)(
+    void* user_data, uint32_t immediate);
+
+typedef struct iree_net_carrier_signal_handler_t {
+  // Function invoked for each receiver-side direct-write signal.
+  iree_net_carrier_signal_handler_fn_t fn;
+
+  // Opaque user data passed to fn.
+  void* user_data;
+} iree_net_carrier_signal_handler_t;
+
 // Callback invoked when carrier deactivation completes (all operations
 // drained). After this callback, the carrier is in DEACTIVATED state and safe
 // to release.
@@ -474,6 +496,10 @@ struct iree_net_carrier_t {
   // Set via set_recv_handler() before activate().
   iree_net_carrier_recv_handler_t recv_handler;
 
+  // Handler for direct-write receiver signals.
+  // Set via iree_net_carrier_set_signal_handler().
+  iree_net_carrier_signal_handler_t signal_handler;
+
   // Completion callback for send operations and legacy recv.
   iree_net_carrier_callback_t callback;
 
@@ -515,6 +541,8 @@ static inline void iree_net_carrier_initialize(
   out_carrier->max_iov = max_iov;
   out_carrier->recv_handler.fn = NULL;
   out_carrier->recv_handler.user_data = NULL;
+  out_carrier->signal_handler.fn = NULL;
+  out_carrier->signal_handler.user_data = NULL;
   out_carrier->callback = callback;
   out_carrier->host_allocator = host_allocator;
   iree_atomic_store(&out_carrier->pending_operations, 0,
@@ -566,6 +594,17 @@ static inline void iree_net_carrier_set_state(iree_net_carrier_t* carrier,
 static inline void iree_net_carrier_set_recv_handler(
     iree_net_carrier_t* carrier, iree_net_carrier_recv_handler_t handler) {
   carrier->vtable->set_recv_handler(carrier, handler);
+}
+
+// Sets the handler used for receiver-side direct-write signals.
+//
+// Carriers that implement IREE_NET_DIRECT_WRITE_FLAG_SIGNAL_RECEIVER deliver
+// the sender's 32-bit immediate value to this handler. The handler is
+// independent from recv_handler because signaling direct writes do not produce
+// receive-message payloads.
+static inline void iree_net_carrier_set_signal_handler(
+    iree_net_carrier_t* carrier, iree_net_carrier_signal_handler_t handler) {
+  carrier->signal_handler = handler;
 }
 
 // Activates the carrier to begin receiving data.
@@ -764,7 +803,8 @@ static inline iree_status_t iree_net_carrier_shutdown(
 // This is an RDMA WRITE operation: data moves directly from local memory to
 // remote memory via DMA. The remote side is not notified unless
 // IREE_NET_DIRECT_WRITE_FLAG_SIGNAL_RECEIVER is set, which uses RDMA WRITE
-// WITH IMMEDIATE to wake the remote proactor.
+// WITH IMMEDIATE to wake the remote proactor and deliver the immediate value to
+// the peer's signal handler.
 //
 // Only available if IREE_NET_CARRIER_CAPABILITY_DIRECT_WRITE is set.
 // Returns IREE_STATUS_UNIMPLEMENTED for carriers that don't support one-sided

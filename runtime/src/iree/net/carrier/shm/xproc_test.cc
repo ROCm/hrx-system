@@ -122,6 +122,12 @@ struct XProcContext {
   std::vector<uint8_t> recv_buffer;
   std::atomic<iree_host_size_t> recv_total_bytes{0};
 
+  // Direct-write signal capture.
+  std::atomic<int> signal_count{0};
+
+  // Last direct-write signal immediate value.
+  std::atomic<uint32_t> signal_immediate{0};
+
   // Completion tracking: counts send completions.
   std::atomic<int> completion_count{0};
   std::atomic<iree_host_size_t> completion_bytes{0};
@@ -130,6 +136,7 @@ struct XProcContext {
     if (carrier) {
       // Set a null recv handler to avoid callbacks during teardown.
       iree_net_carrier_set_recv_handler(carrier, NullRecvHandler());
+      iree_net_carrier_set_signal_handler(carrier, {nullptr, nullptr});
       DeactivateAndDrain();
       iree_net_carrier_release(carrier);
     }
@@ -156,6 +163,17 @@ struct XProcContext {
 
   iree_net_carrier_recv_handler_t AsRecvHandler() {
     return {RecvHandler, this};
+  }
+
+  static iree_status_t SignalHandler(void* user_data, uint32_t immediate) {
+    auto* context = static_cast<XProcContext*>(user_data);
+    context->signal_immediate.store(immediate, std::memory_order_relaxed);
+    context->signal_count.fetch_add(1, std::memory_order_relaxed);
+    return iree_ok_status();
+  }
+
+  iree_net_carrier_signal_handler_t AsSignalHandler() {
+    return {SignalHandler, this};
   }
 
   // Static completion callback that tracks send completions.
@@ -892,26 +910,30 @@ static int dwrite_server_role(int argc, char** argv,
 
   XPROC_CHECK_OK(ServerAcceptAndHandshake(&context, context.AsCallback()));
 
-  // Activate and wait for the signaling direct_write to arrive via recv
-  // handler. The REFERENCE entry resolves to the SHM data.
-  iree_net_carrier_set_recv_handler(context.carrier, context.AsRecvHandler());
+  // Activate and wait for the signaling direct_write immediate. The direct
+  // write bytes land in SHM region memory before the signal is delivered.
+  iree_net_carrier_set_recv_handler(context.carrier,
+                                    XProcContext::NullRecvHandler());
+  iree_net_carrier_set_signal_handler(context.carrier,
+                                      context.AsSignalHandler());
   XPROC_CHECK_OK(iree_net_carrier_activate(context.carrier));
 
-  XPROC_CHECK(context.PollUntil([&] {
-    return context.recv_total_bytes.load() >= kDirectWriteLength;
-  }),
-              "timed out waiting for direct_write data");
+  XPROC_CHECK(
+      context.PollUntil([&] { return context.signal_count.load() >= 1; }),
+      "timed out waiting for direct_write signal");
+  XPROC_CHECK(context.signal_immediate.load() == 0xABCD1234u,
+              "direct_write signal immediate mismatch");
 
   // Verify the received data matches the expected pattern.
   uint8_t expected[kDirectWriteLength];
   FillPattern(expected, kDirectWriteLength, 0xAB);
 
-  XPROC_CHECK(context.recv_buffer.size() == kDirectWriteLength,
-              "expected %zu bytes, got %zu", kDirectWriteLength,
-              context.recv_buffer.size());
-  XPROC_CHECK(
-      memcmp(context.recv_buffer.data(), expected, kDirectWriteLength) == 0,
-      "direct_write data mismatch");
+  iree_net_shm_region_info_t region_info = {};
+  XPROC_CHECK_OK(
+      iree_net_shm_carrier_query_region(context.carrier, 0, &region_info));
+  XPROC_CHECK(memcmp((uint8_t*)region_info.base_ptr + kDirectWriteOffset,
+                     expected, kDirectWriteLength) == 0,
+              "direct_write data mismatch");
 
   return 0;
 }
@@ -931,7 +953,7 @@ static int dwrite_client_role(int argc, char** argv,
   XPROC_CHECK_OK(iree_net_carrier_activate(context.carrier));
 
   // Prepare the source data and write it at kDirectWriteOffset in region 0
-  // with SIGNAL_RECEIVER flag so the server's recv handler fires.
+  // with SIGNAL_RECEIVER flag so the server's signal handler fires.
   uint8_t source_data[kDirectWriteLength];
   FillPattern(source_data, kDirectWriteLength, 0xAB);
 
@@ -939,7 +961,7 @@ static int dwrite_client_role(int argc, char** argv,
   params.local = iree_async_span_from_ptr(source_data, sizeof(source_data));
   params.remote = iree_net_remote_handle_t{{0, kDirectWriteOffset}};
   params.flags = IREE_NET_DIRECT_WRITE_FLAG_SIGNAL_RECEIVER;
-  params.immediate = 0;
+  params.immediate = 0xABCD1234u;
   params.user_data = 0;
   XPROC_CHECK_OK(iree_net_carrier_direct_write(context.carrier, &params));
 

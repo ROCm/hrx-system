@@ -49,7 +49,7 @@
 //   - RELIABLE: no drops (shared memory, single producer/consumer per ring).
 //   - ORDERED: FIFO (SPSC ring preserves insertion order).
 //   - ZERO_COPY_TX: advertised for large-data CTS tests; inline sends copy but
-//     reference sends (register_buffer) avoid the copy entirely.
+//     one-sided writes into registered buffers avoid the copy entirely.
 //
 // Thread safety:
 //   - send() is thread-safe (serialized by slim mutex).
@@ -98,8 +98,8 @@ extern "C" {
 #define IREE_NET_SHM_ENTRY_TYPE_INLINE ((uint32_t)0x00)
 
 // Reference descriptor: a region ID + offset + length identifying data in a
-// registered shared memory region. The consumer resolves the reference to a
-// pointer without any data copy.
+// registered shared memory region. The consumer delivers |reserved| to the
+// signal handler so protocols can locate or interpret the written bytes.
 #define IREE_NET_SHM_ENTRY_TYPE_REFERENCE ((uint32_t)0x01)
 
 // Shutdown marker: signals the peer that no more data will be sent. The
@@ -119,9 +119,9 @@ static_assert(sizeof(iree_net_shm_entry_header_t) == 4, "");
 // fields and avoid artificial 4GB caps on registered region ranges.
 typedef struct iree_net_shm_reference_descriptor_t {
   uint32_t region_id;  // Assigned during register_buffer.
-  uint32_t reserved;
-  uint64_t offset;  // Byte offset within the registered region.
-  uint64_t length;  // Byte length of the referenced data.
+  uint32_t reserved;   // Direct-write signal immediate value.
+  uint64_t offset;     // Byte offset within the registered region.
+  uint64_t length;     // Byte length of the referenced data.
 } iree_net_shm_reference_descriptor_t;
 
 // Byte offsets of shared state fields within the SHM region.

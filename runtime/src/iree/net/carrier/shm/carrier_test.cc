@@ -46,6 +46,23 @@ struct RecvCapture {
   iree_net_carrier_recv_handler_t AsHandler() { return {Handler, this}; }
 };
 
+struct SignalCapture {
+  // Number of signal handler invocations observed.
+  std::atomic<int> count{0};
+
+  // Last immediate value delivered to the signal handler.
+  std::atomic<uint32_t> immediate{0};
+
+  static iree_status_t Handler(void* user_data, uint32_t immediate) {
+    auto* capture = static_cast<SignalCapture*>(user_data);
+    capture->immediate.store(immediate, std::memory_order_relaxed);
+    capture->count.fetch_add(1, std::memory_order_relaxed);
+    return iree_ok_status();
+  }
+
+  iree_net_carrier_signal_handler_t AsHandler() { return {Handler, this}; }
+};
+
 //===----------------------------------------------------------------------===//
 // Completion tracking
 //===----------------------------------------------------------------------===//
@@ -352,7 +369,7 @@ TEST_F(ShmCarrierTest, DirectWriteNonSignaling) {
 // direct_write (signaling)
 //===----------------------------------------------------------------------===//
 
-TEST_F(ShmCarrierTest, DirectWriteSignalingDeliversToRecvHandler) {
+TEST_F(ShmCarrierTest, DirectWriteSignalingDeliversToSignalHandler) {
   iree_net_shm_region_info_t region_info = {};
   IREE_ASSERT_OK(iree_net_shm_carrier_query_region(client_, 0, &region_info));
 
@@ -364,26 +381,25 @@ TEST_F(ShmCarrierTest, DirectWriteSignalingDeliversToRecvHandler) {
   for (size_t i = 0; i < sizeof(source_data); ++i) {
     source_data[i] = (uint8_t)(i + 1);
   }
+  memset((uint8_t*)region_info.base_ptr + write_offset, 0, write_length);
 
-  // Set up recv capture on the server to observe the REFERENCE delivery.
-  RecvCapture server_recv;
-  ActivateBoth(MakeNullRecvHandler(), server_recv.AsHandler());
+  SignalCapture server_signal;
+  iree_net_carrier_set_signal_handler(server_, server_signal.AsHandler());
+  ActivateBoth(MakeNullRecvHandler(), MakeNullRecvHandler());
 
   iree_net_direct_write_params_t params = {};
   params.local = iree_async_span_from_ptr(source_data, sizeof(source_data));
   params.remote = iree_net_remote_handle_t{{0, write_offset}};
   params.flags = IREE_NET_DIRECT_WRITE_FLAG_SIGNAL_RECEIVER;
-  params.immediate = 0xDEAD;
+  params.immediate = 0xDEADCAFEu;
   params.user_data = 42;
   IREE_ASSERT_OK(iree_net_carrier_direct_write(client_, &params));
 
-  // Poll until the server's recv handler receives the data.
-  ASSERT_TRUE(PollUntil(
-      [&] { return server_recv.total_bytes.load() >= write_length; }));
-
-  // The recv handler should have received the resolved SHM data.
-  ASSERT_EQ(server_recv.buffer.size(), write_length);
-  EXPECT_EQ(memcmp(server_recv.buffer.data(), source_data, write_length), 0);
+  ASSERT_TRUE(PollUntil([&] { return server_signal.count.load() >= 1; }));
+  EXPECT_EQ(server_signal.immediate.load(), 0xDEADCAFEu);
+  EXPECT_EQ(memcmp((uint8_t*)region_info.base_ptr + write_offset, source_data,
+                   write_length),
+            0);
 
   // The sender's completion callback should have fired.
   ASSERT_TRUE(PollUntil([&] { return completions_.call_count.load() >= 1; }));
