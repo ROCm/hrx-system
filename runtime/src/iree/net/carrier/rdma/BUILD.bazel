@@ -284,6 +284,43 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_library(
+    name = "region",
+    srcs = ["region.c"],
+    hdrs = ["region.h"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":context",
+        ":libverbs",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "@rdma_core_headers",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "region_test",
+    srcs = ["region_test.cc"],
+    tags = [
+        "nodocker",
+    ],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":region",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "work_request_table",
     srcs = ["work_request_table.c"],
     hdrs = ["work_request_table.h"],

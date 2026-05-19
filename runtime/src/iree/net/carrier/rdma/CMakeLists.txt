@@ -267,6 +267,42 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_library(
   NAME
+    region
+  HDRS
+    "region.h"
+  SRCS
+    "region.c"
+  DEPS
+    ::context
+    ::libverbs
+    iree::async
+    iree::base
+    iree::base::internal
+    rdma_core::headers
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    region_test
+  SRCS
+    "region_test.cc"
+  DEPS
+    ::region
+    iree::async
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "nodocker"
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_library(
+  NAME
     work_request_table
   HDRS
     "work_request_table.h"
