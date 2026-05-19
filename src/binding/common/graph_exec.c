@@ -703,8 +703,8 @@ static iree_status_t iree_hal_streaming_graph_record_partition(
                 ? IREE_HAL_DISPATCH_FLAG_NONE
                 : IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS;
         status = iree_hal_command_buffer_dispatch(
-            command_buffer, symbol->module->executable, symbol->export_ordinal,
-            config, attrs->constants, attrs->bindings, flags);
+            command_buffer, symbol->executable, symbol->export_ordinal, config,
+            attrs->constants, attrs->bindings, flags);
         break;
       }
       case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEMCPY: {

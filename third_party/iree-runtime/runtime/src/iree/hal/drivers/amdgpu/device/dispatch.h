@@ -80,8 +80,7 @@ iree_hal_amdgpu_device_dispatch_make_hal_kernarg_layout(
 // Returns a custom-direct-argument layout for a raw kernarg blob of
 // |kernarg_size| bytes.
 //
-// The caller owns all packing and padding in the raw argument blob. No implicit
-// suffix is synthesized in this mode.
+// The caller owns all packing and padding in the raw argument blob.
 static inline iree_hal_amdgpu_device_dispatch_kernarg_layout_t
 iree_hal_amdgpu_device_dispatch_make_custom_kernarg_layout(
     size_t kernarg_size) {
@@ -160,19 +159,15 @@ void iree_hal_amdgpu_device_dispatch_emplace_hal_kernargs(
 
 // Populates custom direct kernargs in already-reserved storage.
 //
-// |custom_kernarg_ptr| must provide |layout->total_kernarg_size| bytes in the
-// final kernel ABI shape expected by the target kernel.
-//
-// If |kernel_args->implicit_args_offset| is not UINT16_MAX the HIP/OpenCL
-// implicit args suffix is populated at that offset using |workgroup_count|
-// and |dynamic_workgroup_local_memory|. This is required for HIP-compiled
-// kernels that read gridDim/blockDim through the implicit args path.
+// |custom_kernarg_ptr| provides up to |layout->total_kernarg_size| bytes in the
+// final kernel ABI shape expected by the target kernel. Missing trailing padding
+// bytes remain zeroed.
 //
 // Preconditions:
-//   - |kernel_args|, |layout|, and |kernarg_ptr| are non-NULL.
+//   - |layout| and |kernarg_ptr| are non-NULL.
 //   - |layout| was derived with
 //     iree_hal_amdgpu_device_dispatch_make_custom_kernarg_layout.
-//   - |custom_kernarg_ptr| is non-NULL when |layout->total_kernarg_size| > 0.
+//   - |custom_kernarg_ptr| is non-NULL when |custom_kernarg_length| > 0.
 void iree_hal_amdgpu_device_dispatch_emplace_custom_kernargs(
     const iree_hal_amdgpu_device_kernel_args_t* IREE_AMDGPU_RESTRICT
         kernel_args,

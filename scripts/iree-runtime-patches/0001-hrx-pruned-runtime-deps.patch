@@ -1,28 +1,40 @@
-From 3cd40ff60509e9552edb3656596882714094f493 Mon Sep 17 00:00:00 2001
-From: Andrew Woloszyn <andrew.woloszyn@gmail.com>
-Date: Thu, 30 Apr 2026 12:10:15 -0400
-Subject: [PATCH] Apply IREE patch 0001-hrx-pruned-runtime-deps
+From 08d7dbae836754e43e1624a0e0107ed3d6945e09 Mon Sep 17 00:00:00 2001
+From: HRX <hrx@example.invalid>
+Date: Thu, 14 May 2026 12:42:28 -0400
+Subject: [PATCH] Apply HRX IREE runtime patches
 
-Reapplies the HRX-local patch stack on top of the new pristine import
-(now pinned to users/awoloszyn/hrx_on_amdgpu, IREE a56a07822441). The
-host_queue_command_buffer_test guard had to be hand-applied because the
-test's SRCS list moved from host_queue_command_buffer_internal.h to
-host_queue_command_buffer_packet.h on the new base.
-
-Made-with: Cursor
 ---
- CMakeLists.txt                                | 39 ++++++++++++++-
- build_tools/cmake/iree_check_test.cmake       |  4 ++
+ CMakeLists.txt                                | 39 ++++++++-
+ build_tools/cmake/iree_check_test.cmake       |  4 +
  build_tools/cmake/iree_install_support.cmake  |  1 +
- .../iree/hal/drivers/amdgpu/CMakeLists.txt    | 48 ++++++++++---------
+ .../iree/hal/drivers/amdgpu/CMakeLists.txt    | 48 +++++------
  .../src/iree/hal/drivers/amdgpu/abi/common.h  |  2 +-
- .../hal/drivers/amdgpu/util/CMakeLists.txt    |  4 ++
+ .../iree/hal/drivers/amdgpu/abi/kernel_args.h |  5 +-
+ .../src/iree/hal/drivers/amdgpu/allocator.c   | 49 +++++++++++-
+ .../hal/drivers/amdgpu/aql_command_buffer.c   | 41 +++++++---
+ .../hal/drivers/amdgpu/aql_program_builder.c  | 10 +++
+ .../iree/hal/drivers/amdgpu/device/dispatch.c | 23 +++++-
+ .../iree/hal/drivers/amdgpu/device/dispatch.h | 14 ++--
+ .../drivers/amdgpu/device/dispatch_test.cc    |  8 +-
+ .../src/iree/hal/drivers/amdgpu/executable.c  | 51 ++++++++++--
+ .../amdgpu/host_queue_command_buffer.c        | 22 ++++++
+ .../hal/drivers/amdgpu/host_queue_dispatch.c  | 23 ++++--
+ .../iree/hal/drivers/amdgpu/logical_device.c  | 11 +++
+ .../hal/drivers/amdgpu/util/CMakeLists.txt    |  4 +
+ .../hal/drivers/amdgpu/util/hsaco_metadata.c  | 52 ++++++------
  .../hal/drivers/amdgpu/util/libaqlprofile.c   |  2 +-
- .../src/iree/hal/drivers/amdgpu/util/libhsa.h | 10 ++--
- 8 files changed, 78 insertions(+), 32 deletions(-)
+ .../src/iree/hal/drivers/amdgpu/util/libhsa.h | 10 +--
+ runtime/src/iree/hal/executable.h             | 19 ++++-
+ .../libbacktrace/backtrace-supported.h        | 13 +++
+ third_party/libbacktrace/config.h             | 79 +++++++++++++++++++
+ third_party/libbacktrace/iree_libbacktrace.h  | 19 +++++
+ 24 files changed, 452 insertions(+), 97 deletions(-)
+ create mode 100644 third_party/libbacktrace/backtrace-supported.h
+ create mode 100644 third_party/libbacktrace/config.h
+ create mode 100644 third_party/libbacktrace/iree_libbacktrace.h
 
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 24137ca..4b6d72f 100644
+index b777b37..244f3db 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -981,7 +981,25 @@ endif()
@@ -51,7 +63,7 @@ index 24137ca..4b6d72f 100644
 +  endif()
  endif()
  
- if(IREE_ENABLE_THREADING)
+ if(IREE_ENABLE_THREADING AND IREE_BUILD_BENCHMARKS)
 @@ -1057,7 +1075,24 @@ if(IREE_ALLOCATOR_SYSTEM STREQUAL "mimalloc")
  endif()
  
@@ -177,6 +189,470 @@ index bca7f1f..ffbecf1 100644
  
  #endif  // IREE_AMDGPU_TARGET_DEVICE
  
+diff --git a/runtime/src/iree/hal/drivers/amdgpu/abi/kernel_args.h b/runtime/src/iree/hal/drivers/amdgpu/abi/kernel_args.h
+index fe64f33..88a4ac9 100644
+--- a/runtime/src/iree/hal/drivers/amdgpu/abi/kernel_args.h
++++ b/runtime/src/iree/hal/drivers/amdgpu/abi/kernel_args.h
+@@ -54,8 +54,11 @@ typedef struct iree_hal_amdgpu_device_kernel_args_t {
+   uint16_t constant_count;
+   // Total number of bindings used by the dispatch (if a HAL dispatch).
+   uint16_t binding_count;
++  // Offset of HIP/OpenCL implicit args within custom-direct kernargs, or
++  // UINT16_MAX if the kernel does not use an implicit suffix.
++  uint16_t implicit_args_offset;
+   // Reserved for future hot kernel metadata. Must be zero.
+-  uint32_t reserved;
++  uint16_t reserved;
+ } iree_hal_amdgpu_device_kernel_args_t;
+ IREE_AMDGPU_STATIC_ASSERT(
+     sizeof(iree_hal_amdgpu_device_kernel_args_t) <= 64,
+diff --git a/runtime/src/iree/hal/drivers/amdgpu/allocator.c b/runtime/src/iree/hal/drivers/amdgpu/allocator.c
+index 74f0ed3..644b607 100644
+--- a/runtime/src/iree/hal/drivers/amdgpu/allocator.c
++++ b/runtime/src/iree/hal/drivers/amdgpu/allocator.c
+@@ -1027,8 +1027,53 @@ static iree_status_t iree_hal_amdgpu_allocator_export_buffer(
+     iree_hal_external_buffer_type_t requested_type,
+     iree_hal_external_buffer_flags_t requested_flags,
+     iree_hal_external_buffer_t* IREE_RESTRICT out_external_buffer) {
+-  return iree_make_status(IREE_STATUS_UNAVAILABLE,
+-                          "AMDGPU buffer export not yet implemented");
++  (void)base_allocator;
++  IREE_ASSERT_ARGUMENT(buffer);
++  IREE_ASSERT_ARGUMENT(out_external_buffer);
++  if (requested_flags != IREE_HAL_EXTERNAL_BUFFER_FLAG_NONE) {
++    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
++                            "unsupported AMDGPU external buffer flags: 0x%x",
++                            requested_flags);
++  }
++
++  // HSA memory-pool allocations from our allocator are GPU-visible virtual
++  // addresses directly usable as kernel arguments (and, for fine-grained pools,
++  // also host-mappable). The same pointer serves both roles, so expose it as
++  // either a DEVICE_ALLOCATION or HOST_ALLOCATION on request.
++  iree_hal_buffer_t* allocated = iree_hal_buffer_allocated_buffer(buffer);
++  void* base_ptr = iree_hal_amdgpu_buffer_device_pointer(allocated);
++  if (!base_ptr) {
++    return iree_make_status(
++        IREE_STATUS_UNAVAILABLE,
++        "AMDGPU buffer does not expose a direct device pointer");
++  }
++  const iree_device_size_t byte_offset = iree_hal_buffer_byte_offset(buffer);
++  const iree_device_size_t byte_length = iree_hal_buffer_byte_length(buffer);
++  void* view_ptr = (uint8_t*)base_ptr + byte_offset;
++
++  memset(out_external_buffer, 0, sizeof(*out_external_buffer));
++  out_external_buffer->type = requested_type;
++  out_external_buffer->flags = requested_flags;
++  out_external_buffer->size = byte_length;
++
++  switch (requested_type) {
++    case IREE_HAL_EXTERNAL_BUFFER_TYPE_DEVICE_ALLOCATION:
++      out_external_buffer->handle.device_allocation.ptr =
++          (uint64_t)(uintptr_t)view_ptr;
++      return iree_ok_status();
++    case IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION:
++      out_external_buffer->handle.host_allocation.ptr = view_ptr;
++      return iree_ok_status();
++    case IREE_HAL_EXTERNAL_BUFFER_TYPE_OPAQUE_FD:
++    case IREE_HAL_EXTERNAL_BUFFER_TYPE_OPAQUE_WIN32:
++      return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
++                              "AMDGPU external buffer type %u not supported",
++                              (unsigned)requested_type);
++    default:
++      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
++                              "unknown AMDGPU external buffer type %u",
++                              (unsigned)requested_type);
++  }
+ }
+ 
+ static bool iree_hal_amdgpu_allocator_supports_virtual_memory(
+diff --git a/runtime/src/iree/hal/drivers/amdgpu/aql_command_buffer.c b/runtime/src/iree/hal/drivers/amdgpu/aql_command_buffer.c
+index ad99d3a..068f622 100644
+--- a/runtime/src/iree/hal/drivers/amdgpu/aql_command_buffer.c
++++ b/runtime/src/iree/hal/drivers/amdgpu/aql_command_buffer.c
+@@ -1690,11 +1690,26 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_write_dispatch_tail(
+       }
+       return iree_ok_status();
+     }
+-    case IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STRATEGY_CUSTOM_DIRECT:
+-      if (constants.data_length > 0) {
+-        memcpy(tail_payload, constants.data, constants.data_length);
++    case IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STRATEGY_CUSTOM_DIRECT: {
++      memset(tail_payload, 0, layout->total_kernarg_size);
++      const iree_host_size_t explicit_bytes =
++          layout->has_implicit_args ? layout->implicit_args_offset
++                                    : layout->total_kernarg_size;
++      const iree_host_size_t copy_bytes =
++          constants.data_length < explicit_bytes ? constants.data_length
++                                                 : explicit_bytes;
++      if (copy_bytes > 0) {
++        memcpy(tail_payload, constants.data, copy_bytes);
++      }
++      if (layout->has_implicit_args) {
++        iree_amdgpu_kernel_implicit_args_t* implicit_args =
++            (iree_amdgpu_kernel_implicit_args_t*)(tail_payload +
++                                                  layout->implicit_args_offset);
++        iree_hal_amdgpu_aql_command_buffer_write_implicit_args(
++            kernel_args, config, implicit_args);
+       }
+       return iree_ok_status();
++    }
+     case IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STRATEGY_INDIRECT:
+       return iree_make_status(
+           IREE_STATUS_UNIMPLEMENTED,
+@@ -2017,14 +2032,22 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_prepare_dispatch_plan(
+ 
+   if (iree_hal_amdgpu_aql_dispatch_plan_uses_custom_direct_arguments(
+           out_plan)) {
+-    if (IREE_UNLIKELY(inputs->constants.data_length !=
+-                      out_plan->descriptor->kernel_args.kernarg_size)) {
++    // Callers (e.g. rocBLAS/Tensile) sometimes omit trailing ABI padding or pad
++    // beyond the declared kernarg_segment_size with extra trailing scalars. The
++    // kernel only reads its declared size, so trailing bytes are ignored and the
++    // memcpy in write_dispatch_tail clamps to the declared size.
++    const uint32_t required_explicit_bytes =
++        (uint32_t)out_plan->descriptor->custom_kernarg_layout
++            .explicit_kernarg_size;
++    const iree_host_size_t padded_constant_length =
++        iree_host_align(inputs->constants.data_length, /*alignment=*/8);
++    if (IREE_UNLIKELY(padded_constant_length < required_explicit_bytes)) {
+       return iree_make_status(
+           IREE_STATUS_INVALID_ARGUMENT,
+-          "custom dispatch argument length mismatch; expected %u but got "
+-          "%" PRIhsz,
+-          out_plan->descriptor->kernel_args.kernarg_size,
+-          inputs->constants.data_length);
++          "custom dispatch argument length too short; expected at least %u "
++          "but got %" PRIhsz " (padded to %" PRIhsz ")",
++          required_explicit_bytes, inputs->constants.data_length,
++          padded_constant_length);
+     }
+     out_plan->layout = &out_plan->descriptor->custom_kernarg_layout;
+     out_plan->kernarg_block_count =
+diff --git a/runtime/src/iree/hal/drivers/amdgpu/aql_program_builder.c b/runtime/src/iree/hal/drivers/amdgpu/aql_program_builder.c
+index 2239167..c206142 100644
+--- a/runtime/src/iree/hal/drivers/amdgpu/aql_program_builder.c
++++ b/runtime/src/iree/hal/drivers/amdgpu/aql_program_builder.c
+@@ -640,6 +640,16 @@ void iree_hal_amdgpu_aql_program_builder_set_pending_barrier_scopes(
+               builder->last_payload_command->flags, current_acquire_scope,
+               release_scope);
+     }
++    builder->last_payload_command->flags |=
++        IREE_HAL_AMDGPU_COMMAND_BUFFER_COMMAND_FLAG_HAS_BARRIER;
++    if (!iree_any_bit_set(
++            builder->current_block.flags,
++            IREE_HAL_AMDGPU_AQL_PROGRAM_BUILDER_FLAG_HAS_INITIAL_BARRIER_PACKET)) {
++      builder->current_block.initial_barrier_packet_count =
++          builder->current_block.aql_packet_count;
++      builder->current_block.flags |=
++          IREE_HAL_AMDGPU_AQL_PROGRAM_BUILDER_FLAG_HAS_INITIAL_BARRIER_PACKET;
++    }
+   }
+   if (acquire_scope > builder->current_block.pending_barrier_acquire_scope) {
+     builder->current_block.pending_barrier_acquire_scope = acquire_scope;
+diff --git a/runtime/src/iree/hal/drivers/amdgpu/device/dispatch.c b/runtime/src/iree/hal/drivers/amdgpu/device/dispatch.c
+index 78bb097..d273409 100644
+--- a/runtime/src/iree/hal/drivers/amdgpu/device/dispatch.c
++++ b/runtime/src/iree/hal/drivers/amdgpu/device/dispatch.c
+@@ -96,14 +96,33 @@ void iree_hal_amdgpu_device_dispatch_emplace_hal_kernargs(
+ }
+ 
+ void iree_hal_amdgpu_device_dispatch_emplace_custom_kernargs(
++    const iree_hal_amdgpu_device_kernel_args_t* IREE_AMDGPU_RESTRICT
++        kernel_args,
++    const uint32_t workgroup_count[3], uint32_t dynamic_workgroup_local_memory,
+     const iree_hal_amdgpu_device_dispatch_kernarg_layout_t* IREE_AMDGPU_RESTRICT
+         layout,
+     const void* IREE_AMDGPU_RESTRICT custom_kernarg_ptr,
++    size_t custom_kernarg_length,
+     void* IREE_AMDGPU_RESTRICT kernarg_ptr) {
+   if (layout->total_kernarg_size > 0) {
+-    iree_amdgpu_memcpy(kernarg_ptr, custom_kernarg_ptr,
+-                       layout->total_kernarg_size);
++    // Zero the segment first so missing ABI padding and implicit args storage
++    // are well-defined. The caller-provided bytes overwrite the explicit
++    // prefix below.
++    iree_amdgpu_memset(kernarg_ptr, 0, layout->total_kernarg_size);
++    const size_t explicit_bytes =
++        layout->has_implicit_args ? layout->implicit_args_offset
++                                  : layout->total_kernarg_size;
++    const size_t copy_bytes =
++        custom_kernarg_length < explicit_bytes ? custom_kernarg_length
++                                               : explicit_bytes;
++    if (copy_bytes > 0) {
++      iree_amdgpu_memcpy(kernarg_ptr, custom_kernarg_ptr, copy_bytes);
++    }
+   }
++
++  iree_hal_amdgpu_device_dispatch_emplace_implicit_args(
++      kernel_args, workgroup_count, dynamic_workgroup_local_memory, layout,
++      kernarg_ptr);
+ }
+ 
+ //===----------------------------------------------------------------------===//
+diff --git a/runtime/src/iree/hal/drivers/amdgpu/device/dispatch.h b/runtime/src/iree/hal/drivers/amdgpu/device/dispatch.h
+index e0b5862..459e777 100644
+--- a/runtime/src/iree/hal/drivers/amdgpu/device/dispatch.h
++++ b/runtime/src/iree/hal/drivers/amdgpu/device/dispatch.h
+@@ -80,8 +80,7 @@ iree_hal_amdgpu_device_dispatch_make_hal_kernarg_layout(
+ // Returns a custom-direct-argument layout for a raw kernarg blob of
+ // |kernarg_size| bytes.
+ //
+-// The caller owns all packing and padding in the raw argument blob. No implicit
+-// suffix is synthesized in this mode.
++// The caller owns all packing and padding in the raw argument blob.
+ static inline iree_hal_amdgpu_device_dispatch_kernarg_layout_t
+ iree_hal_amdgpu_device_dispatch_make_custom_kernarg_layout(
+     size_t kernarg_size) {
+@@ -160,18 +159,23 @@ void iree_hal_amdgpu_device_dispatch_emplace_hal_kernargs(
+ 
+ // Populates custom direct kernargs in already-reserved storage.
+ //
+-// |custom_kernarg_ptr| must provide |layout->total_kernarg_size| bytes in the
+-// final kernel ABI shape expected by the target kernel.
++// |custom_kernarg_ptr| provides up to |layout->total_kernarg_size| bytes in the
++// final kernel ABI shape expected by the target kernel. Missing trailing padding
++// bytes remain zeroed.
+ //
+ // Preconditions:
+ //   - |layout| and |kernarg_ptr| are non-NULL.
+ //   - |layout| was derived with
+ //     iree_hal_amdgpu_device_dispatch_make_custom_kernarg_layout.
+-//   - |custom_kernarg_ptr| is non-NULL when |layout->total_kernarg_size| > 0.
++//   - |custom_kernarg_ptr| is non-NULL when |custom_kernarg_length| > 0.
+ void iree_hal_amdgpu_device_dispatch_emplace_custom_kernargs(
++    const iree_hal_amdgpu_device_kernel_args_t* IREE_AMDGPU_RESTRICT
++        kernel_args,
++    const uint32_t workgroup_count[3], uint32_t dynamic_workgroup_local_memory,
+     const iree_hal_amdgpu_device_dispatch_kernarg_layout_t* IREE_AMDGPU_RESTRICT
+         layout,
+     const void* IREE_AMDGPU_RESTRICT custom_kernarg_ptr,
++    size_t custom_kernarg_length,
+     void* IREE_AMDGPU_RESTRICT kernarg_ptr);
+ 
+ // Populates the builtin patch dispatch that updates an indirect-parameter
+diff --git a/runtime/src/iree/hal/drivers/amdgpu/device/dispatch_test.cc b/runtime/src/iree/hal/drivers/amdgpu/device/dispatch_test.cc
+index 273fe49..8dac8f8 100644
+--- a/runtime/src/iree/hal/drivers/amdgpu/device/dispatch_test.cc
++++ b/runtime/src/iree/hal/drivers/amdgpu/device/dispatch_test.cc
+@@ -167,8 +167,14 @@ TEST(DispatchTest, EmplaceCustomKernargsCopiesRawBlob) {
+   alignas(16) std::array<uint8_t, 32> kernargs = {};
+   kernargs.fill(0xFD);
+ 
++  iree_hal_amdgpu_device_kernel_args_t kernel_args = {};
++  kernel_args.implicit_args_offset = UINT16_MAX;
++  const uint32_t workgroup_count[3] = {1, 1, 1};
++
+   iree_hal_amdgpu_device_dispatch_emplace_custom_kernargs(
+-      &layout, custom_kernargs.data(), kernargs.data());
++      &kernel_args, workgroup_count, /*dynamic_workgroup_local_memory=*/0,
++      &layout, custom_kernargs.data(), custom_kernargs.size(),
++      kernargs.data());
+ 
+   EXPECT_EQ(std::memcmp(kernargs.data(), custom_kernargs.data(),
+                         custom_kernargs.size()),
+diff --git a/runtime/src/iree/hal/drivers/amdgpu/executable.c b/runtime/src/iree/hal/drivers/amdgpu/executable.c
+index 0d80937..d43b43a 100644
+--- a/runtime/src/iree/hal/drivers/amdgpu/executable.c
++++ b/runtime/src/iree/hal/drivers/amdgpu/executable.c
+@@ -965,6 +965,7 @@ static iree_status_t iree_hal_amdgpu_executable_resolve_kernel_args_from_symbol(
+ 
+   out_kernel_args->binding_count = binding_count;
+   out_kernel_args->constant_count = constant_count;
++  out_kernel_args->implicit_args_offset = UINT16_MAX;
+ 
+   IREE_TRACE_ZONE_END(z0);
+   return iree_ok_status();
+@@ -1141,6 +1142,17 @@ static iree_status_t iree_hal_amdgpu_executable_initialize_dispatch_descriptor(
+   out_descriptor->custom_kernarg_layout =
+       iree_hal_amdgpu_device_dispatch_make_custom_kernarg_layout(
+           kernel_args->kernarg_size);
++  if (kernel_args->implicit_args_offset != UINT16_MAX) {
++    out_descriptor->custom_kernarg_layout.explicit_kernarg_size =
++        kernel_args->implicit_args_offset;
++    out_descriptor->custom_kernarg_layout.implicit_args_offset =
++        kernel_args->implicit_args_offset;
++    out_descriptor->custom_kernarg_layout.total_kernarg_size = iree_max(
++        (size_t)kernel_args->kernarg_size,
++        (size_t)kernel_args->implicit_args_offset +
++            IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE);
++    out_descriptor->custom_kernarg_layout.has_implicit_args = true;
++  }
+   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_executable_calculate_kernarg_block_count(
+       &out_descriptor->custom_kernarg_layout,
+       &out_descriptor->custom_kernarg_block_count));
+@@ -1624,13 +1636,6 @@ iree_hal_amdgpu_executable_calculate_raw_hsaco_reflection_storage(
+     iree_host_size_t* out_export_name_storage_size,
+     iree_host_size_t* out_export_parameter_count,
+     iree_host_size_t* out_export_parameter_name_storage_size) {
+-  if (iree_string_view_is_empty(hsaco_metadata->target)) {
+-    return iree_make_status(
+-        IREE_STATUS_INVALID_ARGUMENT,
+-        "raw HSACO metadata is missing `amdhsa.target`; direct loading "
+-        "requires the code object to declare its target ISA");
+-  }
+-
+   iree_host_size_t export_name_storage_size = 0;
+   iree_host_size_t export_parameter_count = 0;
+   iree_host_size_t export_parameter_name_storage_size = 0;
+@@ -1890,6 +1895,38 @@ static iree_status_t iree_hal_amdgpu_executable_resolve_raw_hsaco_kernel_args(
+             requirements.binding_count, &host_kernel_args[kernel_ordinal]),
+         "resolving kernel args for raw kernel `%.*s`", (int)symbol_name.size,
+         symbol_name.data);
++    // HSA can report 0 for KERNEL_KERNARG_SEGMENT_SIZE on large multi-kernel
++    // HSACO ELFs even though metadata declares non-zero kernargs. Trust the
++    // ELF metadata since both sources describe the same code object.
++    if (host_kernel_args[kernel_ordinal].kernarg_size <
++        kernel->kernarg_segment_size) {
++      host_kernel_args[kernel_ordinal].kernarg_size =
++          kernel->kernarg_segment_size;
++    }
++    if (host_kernel_args[kernel_ordinal].kernarg_alignment == 0 &&
++        kernel->kernarg_segment_alignment != 0) {
++      host_kernel_args[kernel_ordinal].kernarg_alignment =
++          kernel->kernarg_segment_alignment;
++    }
++
++    uint16_t implicit_args_offset = UINT16_MAX;
++    for (iree_host_size_t arg_i = 0; arg_i < kernel->arg_count; ++arg_i) {
++      const iree_hal_amdgpu_hsaco_metadata_arg_t* arg =
++          &kernel->args[arg_i];
++      if (arg->kind == IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_HIDDEN ||
++          arg->kind == IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_HIDDEN_NONE) {
++        if (arg->offset <= UINT16_MAX &&
++            (implicit_args_offset == UINT16_MAX ||
++             arg->offset < implicit_args_offset)) {
++          implicit_args_offset = (uint16_t)arg->offset;
++        }
++        continue;
++      }
++    }
++    if (implicit_args_offset != UINT16_MAX && implicit_args_offset > 0) {
++      host_kernel_args[kernel_ordinal].implicit_args_offset =
++          implicit_args_offset;
++    }
+   }
+   return iree_ok_status();
+ }
+diff --git a/runtime/src/iree/hal/drivers/amdgpu/host_queue_command_buffer.c b/runtime/src/iree/hal/drivers/amdgpu/host_queue_command_buffer.c
+index 704e536..519a7dc 100644
+--- a/runtime/src/iree/hal/drivers/amdgpu/host_queue_command_buffer.c
++++ b/runtime/src/iree/hal/drivers/amdgpu/host_queue_command_buffer.c
+@@ -12,6 +12,20 @@
+ #include "iree/hal/drivers/amdgpu/host_queue_command_buffer_replay.h"
+ #include "iree/hal/utils/resource_set.h"
+ 
++#include <stdio.h>
++#include <stdlib.h>
++
++static bool iree_hal_amdgpu_hrx_cb_stats_enabled(void) {
++  static int initialized = 0;
++  static bool enabled = false;
++  if (!initialized) {
++    initialized = 1;
++    const char* value = getenv("HRX_CB_STATS");
++    enabled = value && value[0] && value[0] != '0';
++  }
++  return enabled;
++}
++
+ iree_status_t iree_hal_amdgpu_host_queue_validate_execute_flags(
+     iree_hal_execute_flags_t flags) {
+   const iree_hal_execute_flags_t supported_flags =
+@@ -126,6 +140,14 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_command_buffer(
+ 
+   const bool requires_replay =
+       program->max_block_aql_packet_count == 0 || program->block_count != 1;
++  if (iree_hal_amdgpu_hrx_cb_stats_enabled()) {
++    fprintf(stderr,
++            "[HRX_CB_STATS] commands=%u blocks=%u max_block_packets=%u "
++            "max_block_kernarg=%u requires_replay=%d\n",
++            program->command_count, program->block_count,
++            program->max_block_aql_packet_count,
++            program->max_block_kernarg_length, requires_replay ? 1 : 0);
++  }
+   if (requires_replay && program->max_block_aql_packet_count == 0) {
+     IREE_RETURN_IF_ERROR(
+         iree_hal_amdgpu_aql_program_validate_metadata_only(program));
+diff --git a/runtime/src/iree/hal/drivers/amdgpu/host_queue_dispatch.c b/runtime/src/iree/hal/drivers/amdgpu/host_queue_dispatch.c
+index d1a7eb7..acc53de 100644
+--- a/runtime/src/iree/hal/drivers/amdgpu/host_queue_dispatch.c
++++ b/runtime/src/iree/hal/drivers/amdgpu/host_queue_dispatch.c
+@@ -8,6 +8,7 @@
+ 
+ #include <string.h>
+ 
++#include "iree/base/alignment.h"
+ #include "iree/hal/drivers/amdgpu/buffer.h"
+ #include "iree/hal/drivers/amdgpu/device/dispatch.h"
+ #include "iree/hal/drivers/amdgpu/device/timestamp.h"
+@@ -221,13 +222,17 @@ static iree_status_t iree_hal_amdgpu_host_queue_validate_dispatch_kernargs(
+ 
+   iree_host_size_t operation_resource_count = 1;
+   if (iree_any_bit_set(flags, IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS)) {
+-    if (IREE_UNLIKELY(constants.data_length !=
+-                      descriptor->kernel_args.kernarg_size)) {
++    const uint32_t required_explicit_bytes =
++        (uint32_t)descriptor->custom_kernarg_layout.explicit_kernarg_size;
++    const iree_host_size_t padded_constant_length =
++        iree_host_align(constants.data_length, /*alignment=*/8);
++    if (IREE_UNLIKELY(padded_constant_length < required_explicit_bytes)) {
+       return iree_make_status(
+           IREE_STATUS_INVALID_ARGUMENT,
+-          "custom dispatch argument length mismatch; expected %u but got "
+-          "%" PRIhsz,
+-          descriptor->kernel_args.kernarg_size, constants.data_length);
++          "custom dispatch argument length too short; expected at least %u "
++          "but got %" PRIhsz " (padded to %" PRIhsz ")",
++          required_explicit_bytes, constants.data_length,
++          padded_constant_length);
+     }
+     if (IREE_UNLIKELY(constants.data_length > 0 && !constants.data)) {
+       return iree_make_status(
+@@ -531,7 +536,9 @@ static iree_status_t iree_hal_amdgpu_host_queue_submit_direct_dispatch(
+ 
+   if (uses_custom_direct_arguments) {
+     iree_hal_amdgpu_device_dispatch_emplace_custom_kernargs(
+-        plan->layout, constants.data, submission.kernel.kernargs.blocks->data);
++        plan->kernel_args, config.workgroup_count,
++        config.dynamic_workgroup_local_memory, plan->layout, constants.data,
++        constants.data_length, submission.kernel.kernargs.blocks->data);
+   } else {
+     iree_hal_amdgpu_device_dispatch_emplace_hal_kernargs(
+         plan->kernel_args, config.workgroup_count,
+@@ -725,7 +732,9 @@ static iree_status_t iree_hal_amdgpu_host_queue_submit_indirect_dispatch(
+   const uint32_t placeholder_workgroup_count[3] = {0, 0, 0};
+   if (uses_custom_direct_arguments) {
+     iree_hal_amdgpu_device_dispatch_emplace_custom_kernargs(
+-        plan->layout, constants.data, dispatch_kernarg_data);
++        plan->kernel_args, placeholder_workgroup_count,
++        config.dynamic_workgroup_local_memory, plan->layout, constants.data,
++        constants.data_length, dispatch_kernarg_data);
+   } else {
+     iree_hal_amdgpu_device_dispatch_emplace_hal_kernargs(
+         plan->kernel_args, placeholder_workgroup_count,
+diff --git a/runtime/src/iree/hal/drivers/amdgpu/logical_device.c b/runtime/src/iree/hal/drivers/amdgpu/logical_device.c
+index 738bf39..f4a4b44 100644
+--- a/runtime/src/iree/hal/drivers/amdgpu/logical_device.c
++++ b/runtime/src/iree/hal/drivers/amdgpu/logical_device.c
+@@ -1668,6 +1668,17 @@ static iree_status_t iree_hal_amdgpu_logical_device_query_i64(
+       *out_value = system->topology.gpu_agent_count *
+                    system->topology.gpu_agent_queue_count;
+       return iree_ok_status();
++    } else if (iree_string_view_equal(key, IREE_SV("gfxip"))) {
++      if (logical_device->physical_device_count == 0) {
++        return iree_make_status(
++            IREE_STATUS_INTERNAL,
++            "logical device has no physical devices (initialization incomplete)");
++      }
++      const iree_hal_amdgpu_gfxip_version_t version =
++          logical_device->physical_devices[0]->isa.target_id.version;
++      *out_value = ((int64_t)version.major << 16) |
++                   ((int64_t)version.minor << 8) | (int64_t)version.stepping;
++      return iree_ok_status();
+     }
+   } else if (iree_string_view_equal(category, IREE_SV("hal.dispatch"))) {
+     if (iree_string_view_equal(key, IREE_SV("concurrency"))) {
 diff --git a/runtime/src/iree/hal/drivers/amdgpu/util/CMakeLists.txt b/runtime/src/iree/hal/drivers/amdgpu/util/CMakeLists.txt
 index 63dd650..aed9744 100644
 --- a/runtime/src/iree/hal/drivers/amdgpu/util/CMakeLists.txt
@@ -192,6 +668,126 @@ index 63dd650..aed9744 100644
  iree_cc_library(
    NAME
      libaqlprofile
+diff --git a/runtime/src/iree/hal/drivers/amdgpu/util/hsaco_metadata.c b/runtime/src/iree/hal/drivers/amdgpu/util/hsaco_metadata.c
+index 7e529ef..f49396c 100644
+--- a/runtime/src/iree/hal/drivers/amdgpu/util/hsaco_metadata.c
++++ b/runtime/src/iree/hal/drivers/amdgpu/util/hsaco_metadata.c
+@@ -1218,7 +1218,6 @@ iree_hal_amdgpu_hsaco_metadata_calculate_default_export_parameter_requirements(
+ 
+   iree_host_size_t parameter_count = 0;
+   iree_host_size_t binding_count = 0;
+-  iree_host_size_t constant_byte_count = 0;
+   iree_host_size_t name_storage_size = 0;
+   for (iree_host_size_t i = 0; i < kernel->arg_count; ++i) {
+     const iree_hal_amdgpu_hsaco_metadata_arg_t* arg = &kernel->args[i];
+@@ -1242,7 +1241,7 @@ iree_hal_amdgpu_hsaco_metadata_calculate_default_export_parameter_requirements(
+                 arg, &name_storage_size));
+         break;
+       case IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_BY_VALUE: {
+-        if (arg->size > UINT8_MAX) {
++        if (arg->size > UINT16_MAX) {
+           return iree_make_status(
+               IREE_STATUS_OUT_OF_RANGE,
+               "AMDGPU kernel `%.*s` by_value argument %" PRIhsz
+@@ -1250,28 +1249,15 @@ iree_hal_amdgpu_hsaco_metadata_calculate_default_export_parameter_requirements(
+               (int)kernel->symbol_name.size, kernel->symbol_name.data, i,
+               arg->size);
+         }
+-        if (!iree_host_size_has_alignment(arg->size, sizeof(uint32_t))) {
+-          return iree_make_status(
+-              IREE_STATUS_INVALID_ARGUMENT,
+-              "AMDGPU kernel `%.*s` by_value argument %" PRIhsz
+-              " size %u is not a whole number of 32-bit HAL constants",
+-              (int)kernel->symbol_name.size, kernel->symbol_name.data, i,
+-              arg->size);
+-        }
+-        if (constant_byte_count > UINT16_MAX) {
++        if (arg->offset > UINT16_MAX) {
+           return iree_make_status(
+               IREE_STATUS_OUT_OF_RANGE,
+               "AMDGPU kernel `%.*s` by_value argument %" PRIhsz
+-              " constant offset exceeds HAL parameter offset range",
+-              (int)kernel->symbol_name.size, kernel->symbol_name.data, i);
++              " kernarg offset %u exceeds HAL parameter offset range",
++              (int)kernel->symbol_name.size, kernel->symbol_name.data, i,
++              arg->offset);
+         }
+         ++parameter_count;
+-        if (!iree_host_size_checked_add(constant_byte_count, arg->size,
+-                                        &constant_byte_count)) {
+-          return iree_make_status(
+-              IREE_STATUS_OUT_OF_RANGE,
+-              "AMDGPU metadata reflected constant byte count overflow");
+-        }
+         IREE_RETURN_IF_ERROR(
+             iree_hal_amdgpu_hsaco_metadata_add_parameter_name_size(
+                 arg, &name_storage_size));
+@@ -1287,12 +1273,18 @@ iree_hal_amdgpu_hsaco_metadata_calculate_default_export_parameter_requirements(
+     }
+   }
+ 
++  // The HAL constant buffer spans the entire kernarg segment as reported by
++  // HSACO (which already includes any padding required by the ABI). Using
++  // the raw segment size lets callers hand the HAL a kernarg buffer that
++  // exactly matches what the kernel expects without us having to
++  // reconstruct per-arg padding rules.
+   iree_host_size_t aligned_constant_byte_count = 0;
+-  if (!iree_host_size_checked_align(constant_byte_count, sizeof(uint32_t),
++  if (!iree_host_size_checked_align(kernel->kernarg_segment_size,
++                                    sizeof(uint32_t),
+                                     &aligned_constant_byte_count)) {
+     return iree_make_status(
+         IREE_STATUS_OUT_OF_RANGE,
+-        "AMDGPU metadata reflected constant byte count alignment overflow");
++        "AMDGPU metadata kernarg segment size alignment overflow");
+   }
+   const iree_host_size_t constant_count =
+       aligned_constant_byte_count / sizeof(uint32_t);
+@@ -1338,8 +1330,6 @@ iree_status_t iree_hal_amdgpu_hsaco_metadata_populate_default_export_parameters(
+ 
+   iree_host_size_t parameter_index = 0;
+   iree_host_size_t name_storage_offset = 0;
+-  uint16_t binding_ordinal = 0;
+-  iree_host_size_t constant_offset = 0;
+   for (iree_host_size_t i = 0; i < kernel->arg_count; ++i) {
+     const iree_hal_amdgpu_hsaco_metadata_arg_t* arg = &kernel->args[i];
+     if (iree_hal_amdgpu_hsaco_metadata_arg_kind_is_hidden(arg->kind)) {
+@@ -1350,7 +1340,7 @@ iree_status_t iree_hal_amdgpu_hsaco_metadata_populate_default_export_parameters(
+         &out_parameters[parameter_index++];
+     memset(parameter, 0, sizeof(*parameter));
+     parameter->flags = IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_FLAG_NONE;
+-    parameter->size = (uint8_t)arg->size;
++    parameter->size = (uint16_t)arg->size;
+     if (!iree_string_view_is_empty(arg->name)) {
+       memcpy(name_storage + name_storage_offset, arg->name.data,
+              arg->name.size);
+@@ -1361,15 +1351,23 @@ iree_status_t iree_hal_amdgpu_hsaco_metadata_populate_default_export_parameters(
+       parameter->name = iree_string_view_empty();
+     }
+ 
++    // Use the real kernarg byte offset recorded in HSACO metadata for both
++    // |offset| and |kernarg_offset|. Upstream IREE's contract is that for
++    // BINDING parameters |offset| is a binding ordinal (index into the
++    // bindings list), but the N-th BINDING parameter encountered when
++    // walking this array is always bindings[N], so consumers can recover
++    // the ordinal by iteration if they need it. Carrying the byte offset
++    // here lets CUSTOM_DIRECT_ARGUMENTS callers (HRX) pack the kernarg
++    // blob without consulting a second field, and matches what the
++    // BY_VALUE path has always done.
++    parameter->offset = (uint16_t)arg->offset;
++    parameter->kernarg_offset = (uint16_t)arg->offset;
+     switch (arg->kind) {
+       case IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_GLOBAL_BUFFER:
+         parameter->type = IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_BINDING;
+-        parameter->offset = binding_ordinal++;
+         break;
+       case IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_BY_VALUE:
+         parameter->type = IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_CONSTANT;
+-        parameter->offset = (uint16_t)constant_offset;
+-        constant_offset += arg->size;
+         break;
+       default:
+         return iree_make_status(
 diff --git a/runtime/src/iree/hal/drivers/amdgpu/util/libaqlprofile.c b/runtime/src/iree/hal/drivers/amdgpu/util/libaqlprofile.c
 index 1ee198f..47e8c07 100644
 --- a/runtime/src/iree/hal/drivers/amdgpu/util/libaqlprofile.c
@@ -226,6 +822,169 @@ index c79e377..a44146e 100644
  
  #ifdef __cplusplus
  extern "C" {
+diff --git a/runtime/src/iree/hal/executable.h b/runtime/src/iree/hal/executable.h
+index 9697674..8289a4a 100644
+--- a/runtime/src/iree/hal/executable.h
++++ b/runtime/src/iree/hal/executable.h
+@@ -99,14 +99,25 @@ typedef uint16_t iree_hal_executable_export_parameter_flags_t;
+ typedef struct iree_hal_executable_export_parameter_t {
+   // Type of the parameter.
+   iree_hal_executable_export_parameter_type_t type;
+-  // Size of the parameter in bytes. Does not contain padding.
+-  uint8_t size;
+   // Flags indicating parameter behavior.
+   iree_hal_executable_export_parameter_flags_t flags;
+-  // Parameter name if available, otherwise empty.
+-  iree_string_view_t name;
++  // Size of the parameter in bytes. Does not contain padding.
++  // Widened from uint8_t so we can represent kernarg structs emitted by
++  // user toolchains (e.g. PyTorch HIP kernels routinely pass 300+ byte
++  // TensorIteratorBase structs by value).
++  uint16_t size;
+   // Offset of the parameter in bytes or binding ordinal, depending on type.
+   uint16_t offset;
++  // Backend-reported byte offset of this parameter within the raw kernarg
++  // segment. This is always the true kernarg offset regardless of |type| and
++  // is populated whenever the backend has it (e.g. HSACO metadata). Consumers
++  // that synthesize raw kernarg blobs (HIP/CUDA CUSTOM_DIRECT_ARGUMENTS) must
++  // use this field rather than |offset| for BINDING parameters because
++  // |offset| there is a binding ordinal, not a byte offset. Backends that
++  // don't have per-parameter kernarg offsets leave this 0.
++  uint16_t kernarg_offset;
++  // Parameter name if available, otherwise empty.
++  iree_string_view_t name;
+ } iree_hal_executable_export_parameter_t;
+ 
+ // Handle to a loaded executable.
+diff --git a/third_party/libbacktrace/backtrace-supported.h b/third_party/libbacktrace/backtrace-supported.h
+new file mode 100644
+index 0000000..8f2e862
+--- /dev/null
++++ b/third_party/libbacktrace/backtrace-supported.h
+@@ -0,0 +1,13 @@
++// Copyright 2025 The IREE Authors
++//
++// Licensed under the Apache License v2.0 with LLVM Exceptions.
++// See https://llvm.org/LICENSE.txt for license information.
++// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
++
++// Indicates libbacktrace feature support.
++// This file is required by libbacktrace and is normally generated by autotools.
++
++#define BACKTRACE_SUPPORTED 1
++#define BACKTRACE_USES_MALLOC 0
++#define BACKTRACE_SUPPORTS_THREADS 1
++#define BACKTRACE_SUPPORTS_DATA 1
+diff --git a/third_party/libbacktrace/config.h b/third_party/libbacktrace/config.h
+new file mode 100644
+index 0000000..850220c
+--- /dev/null
++++ b/third_party/libbacktrace/config.h
+@@ -0,0 +1,79 @@
++// Copyright 2025 The IREE Authors
++//
++// Licensed under the Apache License v2.0 with LLVM Exceptions.
++// See https://llvm.org/LICENSE.txt for license information.
++// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
++
++// Compile-time configuration for libbacktrace.
++// Based on Bazel Central Registry's approach - no autotools needed.
++// https://github.com/bazelbuild/bazel-central-registry/tree/main/modules/libbacktrace
++
++#ifndef _GNU_SOURCE
++#define _GNU_SOURCE
++#endif
++
++#include <stdint.h>
++
++// ELF word size detection.
++#if UINTPTR_MAX == 0xffffffff
++#define BACKTRACE_ELF_SIZE 32
++#ifdef __i386__
++#define HAVE_ATOMIC_FUNCTIONS 1
++#define HAVE_SYNC_FUNCTIONS 1
++#endif
++#else
++#if UINTPTR_MAX != 0xffffffffffffffffULL
++#error bad elf word size!?
++#endif
++#define BACKTRACE_ELF_SIZE 64
++#define HAVE_ATOMIC_FUNCTIONS 1
++#define HAVE_SYNC_FUNCTIONS 1
++#endif
++
++// Platform detection.
++#if defined __ELF__
++// dl_iterate_phdr availability detected at CMake configure time.
++// This allows proper cross-compilation support for embedded Linux targets
++// where the libc may not provide this function (e.g., newlib, minimal uclibc).
++#define HAVE_DL_ITERATE_PHDR 1
++#define HAVE_LINK_H 1
++
++// FreeBSD-specific features.
++#if defined __has_include
++#if __has_include(<sys/sysctl.h>)
++#include <sys/sysctl.h>
++#if defined KERN_PROC
++#define HAVE_KERN_PROC 1
++#endif
++#if defined KERN_PROC_ARGS
++#define HAVE_KERN_PROC_ARGS 1
++#endif
++#endif
++#endif
++
++#elif defined __MACH__
++#define HAVE_MACH_O_DYLD_H 1
++#else
++#error This code only supports ELF (Linux) or Mach-O (macOS)
++#endif
++
++// Standard POSIX features available on Linux/macOS.
++#define HAVE_FCNTL 1
++#define HAVE_LSTAT 1
++#define HAVE_MEMORY_H 1
++#define HAVE_READLINK 1
++#define HAVE_CLOCK_GETTIME 1
++#define HAVE_DECL_GETPAGESIZE 1
++#define HAVE_DECL_STRNLEN 1
++#define HAVE_DECL__PGMPTR 0
++#define HAVE_DLFCN_H 1
++#define HAVE_GETIPINFO 1
++#define HAVE_INTTYPES_H 1
++#define HAVE_STDINT_H 1
++#define HAVE_STDLIB_H 1
++#define HAVE_STRINGS_H 1
++#define HAVE_STRING_H 1
++#define HAVE_SYS_MMAN_H 1
++#define HAVE_SYS_STAT_H 1
++#define HAVE_SYS_TYPES_H 1
++#define HAVE_UNISTD_H 1
+diff --git a/third_party/libbacktrace/iree_libbacktrace.h b/third_party/libbacktrace/iree_libbacktrace.h
+new file mode 100644
+index 0000000..25201a3
+--- /dev/null
++++ b/third_party/libbacktrace/iree_libbacktrace.h
+@@ -0,0 +1,19 @@
++// Copyright 2025 The IREE Authors
++//
++// Licensed under the Apache License v2.0 with LLVM Exceptions.
++// See https://llvm.org/LICENSE.txt for license information.
++// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
++
++// Re-export backtrace.h from BCR's libbacktrace.
++// This wrapper exists to properly export the header for Bazel's layering check.
++// When status_stack_trace.c includes <backtrace.h>, the layering check needs
++// to see that the include comes from a direct dependency's exported header.
++// BCR's libbacktrace exports backtrace.h, but cc_library deps don't
++// transitively propagate include paths. This wrapper header bridges the gap.
++
++#ifndef IREE_BUILD_TOOLS_THIRD_PARTY_LIBBACKTRACE_IREE_LIBBACKTRACE_H_
++#define IREE_BUILD_TOOLS_THIRD_PARTY_LIBBACKTRACE_IREE_LIBBACKTRACE_H_
++
++#include <backtrace.h>
++
++#endif  // IREE_BUILD_TOOLS_THIRD_PARTY_LIBBACKTRACE_IREE_LIBBACKTRACE_H_
 -- 
 2.34.1
 

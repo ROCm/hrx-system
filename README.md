@@ -192,7 +192,7 @@ changes live as patch files under `scripts/iree-runtime-patches`.
 Current upstream IREE commit:
 
 ```text
-6e34728ce15889222b73d0348932882f6fef54bd
+05110733b50c2c0faafbe7452ab77f6e8088d33b
 ```
 
 The importer vendors selected IREE runtime paths plus `benchmark`, `flatcc`,
@@ -207,7 +207,7 @@ Create the pristine import commit:
 ```bash
 python scripts/vendor_iree_runtime.py \
   --iree-repo ../iree \
-  --ref 6e34728ce15889222b73d0348932882f6fef54bd \
+  --ref 05110733b50c2c0faafbe7452ab77f6e8088d33b \
   import-pristine
 ```
 
@@ -230,7 +230,7 @@ Validate that the committed tree still matches the importer and patch queue:
 ```bash
 python scripts/vendor_iree_runtime.py \
   --iree-repo ../iree \
-  --ref 6e34728ce15889222b73d0348932882f6fef54bd \
+  --ref 05110733b50c2c0faafbe7452ab77f6e8088d33b \
   check
 ```
 

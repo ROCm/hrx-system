@@ -109,6 +109,8 @@ typedef struct iree_hal_amdgpu_hsaco_metadata_t {
   iree_host_size_t reflection_name_storage_size;
   // Bytes required to clone all decoded argument names.
   iree_host_size_t arg_name_storage_size;
+  // Extra string storage owned by HRX metadata augmentation.
+  char* owned_string_storage;
   // Number of decoded kernels.
   iree_host_size_t kernel_count;
   // Decoded kernel records.

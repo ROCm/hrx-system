@@ -100,9 +100,15 @@ static iree_status_t iree_hal_streaming_query_device_info(
   if (iree_status_is_ok(status) && total_memory > 0) {
     device->total_memory = (iree_device_size_t)total_memory;
   } else {
-    // Fall back to 8GB default if query fails.
+    // Fall back to known HIP-visible memory sizes when the HAL cannot query
+    // VRAM. rocBLAS/hipBLASLt use this value when selecting solution kernels.
     iree_status_ignore(status);
-    device->total_memory = 8ULL * 1024 * 1024 * 1024;
+    if (device->info.name.data &&
+        strstr(device->info.name.data, "Radeon PRO W7900")) {
+      device->total_memory = 48301604864ULL;
+    } else {
+      device->total_memory = 8ULL * 1024 * 1024 * 1024;
+    }
   }
   device->free_memory = device->total_memory;
 
@@ -133,6 +139,12 @@ static iree_status_t iree_hal_streaming_query_device_info(
     // Since this streaming layer is primarily used with HIP/AMD, default to 64.
     iree_status_ignore(status);
     device->warp_size = 64;
+  }
+  if (strncmp(device->gcn_arch_name, "gfx1100", 7) == 0) {
+    // HIP reports wave32 as the warp size for RDNA3 devices. IREE/HSA may
+    // expose the hardware wavefront width instead, which in turn prevents the
+    // CU-to-WGP compatibility adjustment below.
+    device->warp_size = 32;
   }
   
   // Query multiprocessor (compute unit) count from the device.

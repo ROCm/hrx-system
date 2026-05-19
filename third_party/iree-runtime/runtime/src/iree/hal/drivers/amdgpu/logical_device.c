@@ -316,8 +316,7 @@ static iree_hal_amdgpu_logical_device_t* iree_hal_amdgpu_logical_device_cast(
 static bool iree_hal_amdgpu_logical_device_profiling_needs_hsa_timestamps(
     iree_hal_device_profiling_data_families_t data_families) {
   return iree_any_bit_set(data_families,
-                          IREE_HAL_DEVICE_PROFILING_DATA_DEVICE_QUEUE_EVENTS |
-                              IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS |
+                          IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS |
                               IREE_HAL_DEVICE_PROFILING_DATA_COUNTER_SAMPLES |
                               IREE_HAL_DEVICE_PROFILING_DATA_EXECUTABLE_TRACES);
 }
@@ -327,14 +326,14 @@ static bool iree_hal_amdgpu_logical_device_profiling_needs_clock_correlations(
   return iree_hal_amdgpu_logical_device_profiling_needs_hsa_timestamps(
              data_families) ||
          iree_any_bit_set(data_families,
-                          IREE_HAL_DEVICE_PROFILING_DATA_COUNTER_RANGES);
+                          IREE_HAL_DEVICE_PROFILING_DATA_DEVICE_QUEUE_EVENTS |
+                              IREE_HAL_DEVICE_PROFILING_DATA_COUNTER_RANGES);
 }
 
 static iree_hal_device_profiling_data_families_t
 iree_hal_amdgpu_logical_device_lightweight_statistics_data_families(void) {
-  return IREE_HAL_DEVICE_PROFILING_DATA_EXECUTABLE_METADATA |
-         IREE_HAL_DEVICE_PROFILING_DATA_DEVICE_QUEUE_EVENTS |
-         IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS;
+  return IREE_HAL_DEVICE_PROFILING_DATA_QUEUE_EVENTS |
+         IREE_HAL_DEVICE_PROFILING_DATA_EXECUTABLE_METADATA;
 }
 
 static iree_hal_device_profiling_options_t
@@ -830,6 +829,32 @@ static void iree_hal_amdgpu_logical_device_set_queue_profiling_enabled(
           &physical_device->host_queues[j], flags);
     }
   }
+}
+
+static iree_status_t
+iree_hal_amdgpu_logical_device_ensure_queue_device_profile_event_storage(
+    iree_hal_amdgpu_logical_device_t* logical_device) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < logical_device->physical_device_count && iree_status_is_ok(status);
+       ++i) {
+    iree_hal_amdgpu_physical_device_t* physical_device =
+        logical_device->physical_devices[i];
+    for (iree_host_size_t j = 0;
+         j < physical_device->host_queue_count && iree_status_is_ok(status);
+         ++j) {
+      iree_hal_amdgpu_host_queue_t* queue = &physical_device->host_queues[j];
+      status = iree_hal_amdgpu_host_queue_ensure_profile_event_storage(queue);
+      if (iree_status_is_ok(status)) {
+        iree_hal_amdgpu_host_queue_clear_profile_events(queue);
+      }
+    }
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+  return status;
 }
 
 static iree_status_t iree_hal_amdgpu_logical_device_set_hsa_profiling_enabled(
@@ -1643,64 +1668,16 @@ static iree_status_t iree_hal_amdgpu_logical_device_query_i64(
       *out_value = system->topology.gpu_agent_count *
                    system->topology.gpu_agent_queue_count;
       return iree_ok_status();
-    }
-    if (iree_string_view_equal(key, IREE_SV("warp_size")) ||
-        iree_string_view_equal(key, IREE_SV("wavefront_size"))) {
-      // Report the hardware wavefront size for the first physical device.
-      // Frameworks (e.g. PyTorch) use this as their runtime warp_size, and
-      // getting it wrong causes silent reduction bugs in kernels that use
-      // __shfl_xor and cooperate across the whole warp. RDNA parts (gfx10+)
-      // run wave32; CDNA/GCN run wave64.
+    } else if (iree_string_view_equal(key, IREE_SV("gfxip"))) {
       if (logical_device->physical_device_count == 0) {
-        return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                                "logical device has no physical devices");
+        return iree_make_status(
+            IREE_STATUS_INTERNAL,
+            "logical device has no physical devices (initialization incomplete)");
       }
-      *out_value =
-          (int64_t)logical_device->physical_devices[0]->wavefront_size;
-      return iree_ok_status();
-    }
-    if (iree_string_view_equal(key, IREE_SV("gfxip"))) {
-      // Returns the gfxip version of the first physical device encoded as:
-      //   (major << 16) | (minor << 8) | stepping
-      // so callers can reconstruct a canonical "gfx<major><minor><stepping>"
-      // string. Example: gfx1100 -> (11<<16)|(0<<8)|0 = 0xB0000.
-      if (logical_device->physical_device_count == 0) {
-        return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                                "logical device has no physical devices");
-      }
-      const iree_hal_amdgpu_physical_device_t* physical_device =
-          logical_device->physical_devices[0];
-      *out_value =
-          ((int64_t)(physical_device->isa.target_id.version.major & 0xFF)
-           << 16) |
-          ((int64_t)(physical_device->isa.target_id.version.minor & 0xFF)
-           << 8) |
-          ((int64_t)(physical_device->isa.target_id.version.stepping & 0xFF));
-      return iree_ok_status();
-    }
-    if (iree_string_view_equal(key, IREE_SV("memory.total")) ||
-        iree_string_view_equal(key, IREE_SV("memory.free"))) {
-      // Sum the size of the device-local coarse-grained global memory pool
-      // across every physical device backing this logical device. HSA does not
-      // expose a "free" counter for memory pools, so memory.free returns the
-      // same value as memory.total here; higher layers (e.g. the HRX HIP
-      // binding) track allocations and report a more accurate free value to
-      // their callers via hipMemGetInfo / hipDeviceTotalMem.
-      uint64_t total = 0;
-      for (iree_host_size_t i = 0;
-           i < logical_device->physical_device_count; ++i) {
-        iree_hal_amdgpu_physical_device_t* physical_device =
-            logical_device->physical_devices[i];
-        hsa_amd_memory_pool_t pool =
-            physical_device->coarse_block_pools.large.memory_pool;
-        if (!pool.handle) continue;
-        size_t pool_size = 0;
-        IREE_RETURN_IF_ERROR(iree_hsa_amd_memory_pool_get_info(
-            IREE_LIBHSA(&system->libhsa), pool,
-            HSA_AMD_MEMORY_POOL_INFO_SIZE, &pool_size));
-        total += (uint64_t)pool_size;
-      }
-      *out_value = (int64_t)total;
+      const iree_hal_amdgpu_gfxip_version_t version =
+          logical_device->physical_devices[0]->isa.target_id.version;
+      *out_value = ((int64_t)version.major << 16) |
+                   ((int64_t)version.minor << 8) | (int64_t)version.stepping;
       return iree_ok_status();
     }
   } else if (iree_string_view_equal(category, IREE_SV("hal.dispatch"))) {
@@ -2172,9 +2149,10 @@ static iree_status_t iree_hal_amdgpu_logical_device_create_executable_cache(
   iree_hal_amdgpu_logical_device_t* logical_device =
       iree_hal_amdgpu_logical_device_cast(base_device);
   return iree_hal_amdgpu_executable_cache_create(
-      &logical_device->system->libhsa, &logical_device->system->topology,
-      &logical_device->profile_metadata, identifier,
-      iree_hal_device_host_allocator(base_device), out_executable_cache);
+      base_device, &logical_device->system->libhsa,
+      &logical_device->system->topology, &logical_device->profile_metadata,
+      identifier, iree_hal_device_host_allocator(base_device),
+      out_executable_cache);
 }
 
 static iree_status_t iree_hal_amdgpu_logical_device_import_file(
@@ -2440,12 +2418,12 @@ iree_hal_amdgpu_logical_device_verify_queue_device_profiling_supported(
   for (iree_host_size_t i = 0; i < logical_device->physical_device_count; ++i) {
     iree_hal_amdgpu_physical_device_t* physical_device =
         logical_device->physical_devices[i];
-    if (iree_hal_amdgpu_vendor_packet_capabilities_support_timestamp_range(
-            physical_device->vendor_packet_capabilities)) {
+    if (iree_hal_amdgpu_pm4_timestamp_strategy_supports_ranges(
+            physical_device->pm4_timestamp_strategy)) {
       continue;
     }
     return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
+        IREE_STATUS_UNIMPLEMENTED,
         "AMDGPU queue operation profiling requires PM4 timestamp range "
         "support on physical device %" PRIhsz,
         physical_device->device_ordinal);
@@ -2556,6 +2534,16 @@ static iree_status_t iree_hal_amdgpu_logical_device_profiling_begin(
       iree_hal_amdgpu_profile_event_streams_clear_memory(
           &logical_device->profiling.event_streams);
     }
+  }
+  if (iree_status_is_ok(status) &&
+      iree_hal_device_profiling_options_requests_data(
+          &session_options,
+          IREE_HAL_DEVICE_PROFILING_DATA_DEVICE_QUEUE_EVENTS) &&
+      !iree_hal_amdgpu_logical_device_profiling_needs_hsa_timestamps(
+          session_options.data_families)) {
+    status =
+        iree_hal_amdgpu_logical_device_ensure_queue_device_profile_event_storage(
+            logical_device);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_amdgpu_logical_device_write_profile_metadata(

@@ -90,9 +90,9 @@
     }
   ],
   "upstream": {
-    "commit": "a56a078224413c6a9c80468834a67ec26d7fec5d",
-    "commit_date": "2026-04-30T11:54:40-04:00",
+    "commit": "05110733b50c2c0faafbe7452ab77f6e8088d33b",
+    "commit_date": "2026-05-14T10:28:35-04:00",
     "repository": "https://github.com/iree-org/iree.git",
-    "requested_ref": "origin/users/awoloszyn/hrx_on_amdgpu"
+    "requested_ref": "05110733b50c2c0faafbe7452ab77f6e8088d33b"
   }
 }

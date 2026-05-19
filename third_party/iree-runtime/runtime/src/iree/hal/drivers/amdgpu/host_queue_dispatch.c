@@ -51,7 +51,8 @@ static iree_status_t iree_hal_amdgpu_host_queue_validate_dispatch_flags(
       IREE_HAL_DISPATCH_FLAG_DYNAMIC_INDIRECT_PARAMETERS |
       IREE_HAL_DISPATCH_FLAG_STATIC_INDIRECT_PARAMETERS |
       IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS |
-      IREE_HAL_DISPATCH_FLAG_ALLOW_INLINE_EXECUTION;
+      IREE_HAL_DISPATCH_FLAG_ALLOW_INLINE_EXECUTION |
+      IREE_HAL_DISPATCH_FLAG_BORROW_RESOURCE_LIFETIMES;
   if (IREE_UNLIKELY(iree_any_bit_set(flags, ~supported_flags))) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "unsupported dispatch flags: 0x%" PRIx64, flags);
@@ -221,12 +222,8 @@ static iree_status_t iree_hal_amdgpu_host_queue_validate_dispatch_kernargs(
 
   iree_host_size_t operation_resource_count = 1;
   if (iree_any_bit_set(flags, IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS)) {
-    // Callers pack only the explicit kernel args; the runtime populates the
-    // implicit args suffix itself when the kernel uses one.
     const uint32_t required_explicit_bytes =
-        descriptor->kernel_args.implicit_args_offset != UINT16_MAX
-            ? descriptor->kernel_args.implicit_args_offset
-            : descriptor->kernel_args.kernarg_size;
+        (uint32_t)descriptor->custom_kernarg_layout.explicit_kernarg_size;
     const iree_host_size_t padded_constant_length =
         iree_host_align(constants.data_length, /*alignment=*/8);
     if (IREE_UNLIKELY(padded_constant_length < required_explicit_bytes)) {
@@ -237,9 +234,6 @@ static iree_status_t iree_hal_amdgpu_host_queue_validate_dispatch_kernargs(
           required_explicit_bytes, constants.data_length,
           padded_constant_length);
     }
-    // Callers (e.g. rocBLAS/Tensile) may pad beyond the declared
-    // kernarg_segment_size. The kernel descriptor only reads its declared
-    // size so extra trailing bytes are ignored downstream.
     if (IREE_UNLIKELY(constants.data_length > 0 && !constants.data)) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
@@ -295,6 +289,10 @@ static iree_status_t iree_hal_amdgpu_host_queue_validate_dispatch_kernargs(
 
   if (iree_hal_dispatch_uses_indirect_parameters(flags)) {
     ++operation_resource_count;
+  }
+  if (iree_any_bit_set(flags,
+                       IREE_HAL_DISPATCH_FLAG_BORROW_RESOURCE_LIFETIMES)) {
+    operation_resource_count = 0;
   }
 
   if (IREE_UNLIKELY(*out_kernarg_block_count > queue->kernarg_ring.capacity)) {

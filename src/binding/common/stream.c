@@ -396,6 +396,10 @@ iree_hal_streaming_stream_flush(iree_hal_streaming_stream_t *stream) {
         stream->context->device, queue_affinity, wait_semaphores,
         signal_semaphores, stream->command_buffer,
         iree_hal_buffer_binding_table_empty(), IREE_HAL_EXECUTE_FLAG_NONE);
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_device_queue_flush(stream->context->device,
+                                           queue_affinity);
+    }
     if (timing_enabled) {
       timing_execute_ns += hrx_launch_timing_now_ns() - timing_step_ns;
     }
@@ -835,9 +839,18 @@ iree_status_t iree_hal_streaming_launch_kernel(
     // Pre-packed buffer: pass the raw buffer directly to the kernel.
     // This is used for kernels launched via HIP_LAUNCH_PARAM_BUFFER_POINTER
     // (e.g., hipBLASLt GEMM kernels) where the buffer is already packed.
-    constants = params->buffer;
     if (params->buffer_size != 0) {
-      constants_size = params->buffer_size;
+      if (params->buffer_size < symbol->parameters.constant_bytes) {
+        constants_size = symbol->parameters.constant_bytes;
+        constants = iree_alloca(constants_size);
+        memset(constants, 0, constants_size);
+        memcpy(constants, params->buffer, params->buffer_size);
+      } else {
+        constants = params->buffer;
+        constants_size = params->buffer_size;
+      }
+    } else {
+      constants = params->buffer;
     }
     binding_list.count = 0; // No IREE bindings, using raw pointers.
     use_raw_arguments = true;
@@ -1051,17 +1064,20 @@ iree_status_t iree_hal_streaming_launch_kernel(
     };
     status = iree_hal_device_queue_dispatch(
         stream->context->device, stream->queue_affinity, wait_semaphores,
-        signal_semaphores, symbol->module->executable, symbol->export_ordinal,
+        signal_semaphores, symbol->executable, symbol->export_ordinal,
         config, iree_make_const_byte_span(constants, constants_size),
         binding_list, flags);
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_device_queue_flush(stream->context->device,
+                                           stream->queue_affinity);
+    }
     if (iree_status_is_ok(status)) {
       stream->pending_value = signal_value;
       stream->submitted_value = signal_value;
     }
   } else {
     status = iree_hal_command_buffer_dispatch(
-        stream->command_buffer, symbol->module->executable,
-        symbol->export_ordinal, config,
+        stream->command_buffer, symbol->executable, symbol->export_ordinal, config,
         iree_make_const_byte_span(constants, constants_size), binding_list,
         flags);
   }

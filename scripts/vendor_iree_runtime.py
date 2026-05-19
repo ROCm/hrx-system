@@ -687,7 +687,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--ref",
-        default="6e34728ce15889222b73d0348932882f6fef54bd",
+        default="05110733b50c2c0faafbe7452ab77f6e8088d33b",
         help="IREE commit/ref to import.",
     )
     parser.add_argument(

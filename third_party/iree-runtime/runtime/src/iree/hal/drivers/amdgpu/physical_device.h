@@ -264,11 +264,6 @@ typedef struct iree_hal_amdgpu_physical_device_t {
   // Host/device-neutral transfer context that points into |device_kernels|.
   iree_hal_amdgpu_device_buffer_transfer_context_t buffer_transfer_context;
 
-  // Wavefront size (warp size) reported by HSA for this agent. Always either
-  // 32 or 64 on supported AMDGPU hardware. RDNA parts (gfx10+/gfx11) execute
-  // at wave32 natively; CDNA/GCN at wave64.
-  uint32_t wavefront_size;
-
   // Total number of host queue slots allocated in |host_queues|.
   iree_host_size_t host_queue_capacity;
   // Per-host-queue HSA AQL ring capacity in packets.
@@ -284,6 +279,8 @@ typedef struct iree_hal_amdgpu_physical_device_t {
   iree_hal_amdgpu_vendor_packet_capability_flags_t vendor_packet_capabilities;
   // Hardware strategy selected for cross-queue epoch waits on this GPU agent.
   iree_hal_amdgpu_wait_barrier_strategy_t wait_barrier_strategy;
+  // Queue-local PM4 timestamp strategy selected from this GPU agent's ISA.
+  iree_hal_amdgpu_pm4_timestamp_strategy_t pm4_timestamp_strategy;
 
   // Number of live host queues initialized in |host_queues|.
   iree_host_size_t host_queue_count;

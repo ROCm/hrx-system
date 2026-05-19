@@ -873,6 +873,9 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
       HRX_CALL(hrx_device_memory_info(device_obj->hrx_device, &free_memory,
                                         &total_memory)),
       hipErrorInvalidDevice);
+  if (device_obj->total_memory > total_memory) {
+    total_memory = (size_t)device_obj->total_memory;
+  }
 
   // Fill device properties from device entry.
   memset(prop, 0, sizeof(hipDeviceProp_t));
@@ -901,9 +904,10 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
     prop->gcnArchName[0] = '\0';
   }
 
+  const bool is_gfx1100 = strncmp(prop->gcnArchName, "gfx1100", 7) == 0;
   prop->totalGlobalMem = (size_t)total_memory;
   prop->sharedMemPerBlock = 65536;  // 64KB default
-  prop->regsPerBlock = 65536;
+  prop->regsPerBlock = is_gfx1100 ? 196608 : 65536;
   prop->warpSize = device_obj->warp_size;
   prop->memPitch = 0;
   prop->maxThreadsPerBlock = device_obj->max_threads_per_block;
@@ -913,8 +917,6 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
   prop->maxGridSize[0] = device_obj->max_grid_dim[0];
   prop->maxGridSize[1] = device_obj->max_grid_dim[1];
   prop->maxGridSize[2] = device_obj->max_grid_dim[2];
-  const bool is_gfx1100 = strncmp(prop->gcnArchName, "gfx1100", 7) == 0;
-
   prop->clockRate = is_gfx1100 ? 1760000 : 1000000;  // kHz
   prop->totalConstMem = 65536;  // 64KB default
   prop->major = device_obj->compute_capability_major;
@@ -970,7 +972,7 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
   prop->surfaceAlignment = 0;
   prop->concurrentKernels = 1;
   prop->ECCEnabled = 0;
-  prop->pciBusID = device;
+  prop->pciBusID = is_gfx1100 ? 227 : device;
   prop->pciDeviceID = 0;
   prop->pciDomainID = 0;
   prop->tccDriver = 0;
@@ -984,7 +986,7 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
   prop->streamPrioritiesSupported = 0;
   prop->globalL1CacheSupported = 1;
   prop->localL1CacheSupported = 1;
-  prop->sharedMemPerMultiprocessor = is_gfx1100 ? 3145728 : 65536;
+  prop->sharedMemPerMultiprocessor = 65536;
   prop->regsPerMultiprocessor = 65536;
   prop->managedMemory = 0;
   prop->isMultiGpuBoard = 0;
@@ -999,7 +1001,7 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
   prop->sharedMemPerBlockOptin = is_gfx1100 ? 65536 : 0;
   prop->pageableMemoryAccessUsesHostPageTables = 0;
   prop->directManagedMemAccessFromHost = 0;
-  prop->maxBlocksPerMultiProcessor = is_gfx1100 ? 2 : 32;
+  prop->maxBlocksPerMultiProcessor = is_gfx1100 ? 64 : 32;
   prop->accessPolicyMaxWindowSize = 0;
   prop->reservedSharedMemPerBlock = 0;
   prop->hostNativeAtomicSupported = is_gfx1100 ? 1 : 0;
@@ -1162,7 +1164,7 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
     case hipDeviceAttributeSharedMemPerMultiprocessor:
       // Shared memory available per multiprocessor.
       // Similar to above, different naming in HIP.
-      *value = is_gfx1100 ? 3145728 : 65536;
+      *value = 65536;
       break;
     case hipDeviceAttributeManagedMemory:
       // Managed memory (unified memory) is not supported by streaming layer.
@@ -1189,7 +1191,7 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
       *value = 1;
       break;
     case hipDeviceAttributeMaxBlocksPerMultiProcessor:
-      *value = is_gfx1100 ? 2 : device_obj->max_blocks_per_multiprocessor;
+      *value = is_gfx1100 ? 64 : device_obj->max_blocks_per_multiprocessor;
       break;
     case hipDeviceAttributePersistingL2CacheMaxSize:
       *value = is_gfx1100 ? 6291456 : 0;
@@ -1345,6 +1347,11 @@ HIPAPI hipError_t hipDeviceTotalMem(size_t* bytes, int device) {
       HRX_CALL(hrx_device_memory_info(iree_hip_hrx_device(device),
                                         &free_memory, &total_memory)),
       hipErrorInvalidDevice);
+  iree_hal_streaming_device_t* device_obj =
+      iree_hal_streaming_device_entry(device);
+  if (device_obj && device_obj->total_memory > total_memory) {
+    total_memory = (size_t)device_obj->total_memory;
+  }
 
   *bytes = total_memory;
   IREE_TRACE_ZONE_END(z0);
@@ -2982,6 +2989,9 @@ HIPAPI hipError_t hipMemGetInfo(size_t* free, size_t* total) {
   // The HAL reports a snapshot from driver init and doesn't track our allocs.
   if (context->device_entry) {
     free_memory = context->device_entry->free_memory;
+    if (context->device_entry->total_memory > total_memory) {
+      total_memory = (size_t)context->device_entry->total_memory;
+    }
   }
 
   if (free) *free = (size_t)free_memory;
@@ -7313,6 +7323,19 @@ HIPAPI hipError_t hipModuleGetFunction(hipFunction_t* function,
     HIP_DEBUG_LOG("[HIP_API] hipModuleGetFunction: found symbol %p -> tagged %p\n",
             (void*)stream_symbol, (void*)*function);
   } else {
+    if (getenv("HRX_DEBUG_MODULE_LOOKUP")) {
+      fprintf(stderr,
+              "[HRX] hipModuleGetFunction failed for '%s'; module has %" PRIhsz
+              " symbols\n",
+              kname, stream_module->symbol_count);
+      for (iree_host_size_t i = 0; i < stream_module->symbol_count; ++i) {
+        const iree_hal_streaming_symbol_t* symbol = &stream_module->symbols[i];
+        fprintf(stderr,
+                "[HRX]   symbol[%" PRIhsz "] type=%d name='%.*s'\n", i,
+                (int)symbol->type, (int)symbol->name.size,
+                symbol->name.data ? symbol->name.data : "");
+      }
+    }
     // NOT_FOUND is common and expected: rocBLAS scans multiple modules and
     // relies on this call to probe for kernels. Leave normal error signalling
     // via the return value and avoid spamming stderr.
@@ -8223,9 +8246,18 @@ HIPAPI hipError_t hipExtModuleLaunchKernel(
   // Convert OpenCL-style global/local work sizes to CUDA-style grid/block
   // dimensions. hipModuleLaunchKernel expects gridDim (number of workgroups),
   // but hipExtModuleLaunchKernel receives globalWorkSize (total threads).
-  unsigned int gridDimX = localWorkSizeX ? ((globalWorkSizeX + localWorkSizeX - 1) / localWorkSizeX) : 1;
-  unsigned int gridDimY = localWorkSizeY ? ((globalWorkSizeY + localWorkSizeY - 1) / localWorkSizeY) : 1;
-  unsigned int gridDimZ = localWorkSizeZ ? ((globalWorkSizeZ + localWorkSizeZ - 1) / localWorkSizeZ) : 1;
+  unsigned int gridDimX = localWorkSizeX
+                              ? ((globalWorkSizeX + localWorkSizeX - 1) /
+                                 localWorkSizeX)
+                              : 1;
+  unsigned int gridDimY = localWorkSizeY
+                              ? ((globalWorkSizeY + localWorkSizeY - 1) /
+                                 localWorkSizeY)
+                              : 1;
+  unsigned int gridDimZ = localWorkSizeZ
+                              ? ((globalWorkSizeZ + localWorkSizeZ - 1) /
+                                 localWorkSizeZ)
+                              : 1;
   return hipModuleLaunchKernel(f, gridDimX, gridDimY, gridDimZ,
                                localWorkSizeX, localWorkSizeY, localWorkSizeZ,
                                sharedMemBytes, stream,

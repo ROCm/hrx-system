@@ -105,15 +105,13 @@ void iree_hal_amdgpu_device_dispatch_emplace_custom_kernargs(
     size_t custom_kernarg_length,
     void* IREE_AMDGPU_RESTRICT kernarg_ptr) {
   if (layout->total_kernarg_size > 0) {
-    // Zero the segment first so the implicit region is well-defined even if
-    // the caller provided only the explicit prefix. The explicit bytes are
-    // overwritten by the memcpy below; the implicit region is then filled
-    // from kernel_args/config when present.
+    // Zero the segment first so missing ABI padding and implicit args storage
+    // are well-defined. The caller-provided bytes overwrite the explicit
+    // prefix below.
     iree_amdgpu_memset(kernarg_ptr, 0, layout->total_kernarg_size);
-    const uint32_t explicit_bytes =
-        (kernel_args && kernel_args->implicit_args_offset != (uint16_t)0xFFFFu)
-            ? (uint32_t)kernel_args->implicit_args_offset
-            : layout->total_kernarg_size;
+    const size_t explicit_bytes =
+        layout->has_implicit_args ? layout->implicit_args_offset
+                                  : layout->total_kernarg_size;
     const size_t copy_bytes =
         custom_kernarg_length < explicit_bytes ? custom_kernarg_length
                                                : explicit_bytes;
@@ -121,34 +119,10 @@ void iree_hal_amdgpu_device_dispatch_emplace_custom_kernargs(
       iree_amdgpu_memcpy(kernarg_ptr, custom_kernarg_ptr, copy_bytes);
     }
   }
-  // HIP-compiled kernels (e.g. PyTorch's distribution_elementwise grid-stride
-  // kernels) read gridDim/blockDim through the implicit kernel args suffix
-  // appended by the LLVM AMDGPU backend. Callers using CUSTOM_DIRECT pack
-  // only the explicit args and leave the implicit region zero-initialized;
-  // the kernel would then see gridDim=0 and silently produce no output.
-  // Populate the implicit args from the dispatch config when the kernel
-  // metadata tells us where they live.
-  if (kernel_args && kernel_args->implicit_args_offset != (uint16_t)0xFFFFu &&
-      (size_t)kernel_args->implicit_args_offset +
-              sizeof(iree_amdgpu_kernel_implicit_args_t) <=
-          layout->total_kernarg_size) {
-    iree_amdgpu_kernel_implicit_args_t* IREE_AMDGPU_RESTRICT implicit_args =
-        (iree_amdgpu_kernel_implicit_args_t*)((uint8_t*)kernarg_ptr +
-                                              kernel_args
-                                                  ->implicit_args_offset);
-    iree_amdgpu_memset(implicit_args, 0,
-                       sizeof(iree_amdgpu_kernel_implicit_args_t));
-    implicit_args->block_count[0] = workgroup_count[0];
-    implicit_args->block_count[1] = workgroup_count[1];
-    implicit_args->block_count[2] = workgroup_count[2];
-    implicit_args->group_size[0] = kernel_args->workgroup_size[0];
-    implicit_args->group_size[1] = kernel_args->workgroup_size[1];
-    implicit_args->group_size[2] = kernel_args->workgroup_size[2];
-    implicit_args->grid_dims = 3;
-    implicit_args->printf_buffer = NULL;
-    implicit_args->hostcall_buffer = NULL;
-    implicit_args->dynamic_lds_size = dynamic_workgroup_local_memory;
-  }
+
+  iree_hal_amdgpu_device_dispatch_emplace_implicit_args(
+      kernel_args, workgroup_count, dynamic_workgroup_local_memory, layout,
+      kernarg_ptr);
 }
 
 //===----------------------------------------------------------------------===//

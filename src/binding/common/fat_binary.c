@@ -409,6 +409,44 @@ static iree_status_t hrx_fat_extract_from_bundle(
   return iree_ok_status();
 }
 
+// Some ROCm libraries (notably Tensile payloads loaded by hipBLASLt) store
+// multiple HSACO ELFs back-to-back in a decompressed CCOB instead of wrapping
+// them in a Clang offload bundle. Preserve every ELF so hipModuleGetFunction
+// can find kernels that live after the first image.
+static iree_status_t hrx_fat_extract_concatenated_elves(
+    iree_const_byte_span_t data,
+    iree_hal_streaming_fat_binary_extract_t* extract) {
+  iree_host_size_t offset = 0;
+  const iree_host_size_t initial_match_count = extract->match_count;
+  while (offset + 4 <= data.data_length) {
+    iree_const_byte_span_t remaining =
+        iree_make_const_byte_span(data.data + offset, data.data_length - offset);
+    if (!hrx_fat_is_elf(remaining)) {
+      // Allow zero padding between images.
+      if (data.data[offset] == 0) {
+        ++offset;
+        continue;
+      }
+      break;
+    }
+    iree_host_size_t elf_size = 0;
+    IREE_RETURN_IF_ERROR(hrx_fat_validate_elf(remaining, &elf_size));
+    if (elf_size == 0) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "ELF at offset %" PRIhsz " has zero size",
+                              offset);
+    }
+    IREE_RETURN_IF_ERROR(hrx_fat_extract_push(
+        extract, iree_make_const_byte_span(remaining.data, elf_size),
+        iree_string_view_empty()));
+    offset += elf_size;
+  }
+  return extract->match_count > initial_match_count
+             ? iree_ok_status()
+             : iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "no ELF images found in concatenated payload");
+}
+
 // Decompresses a CCOB payload into extract->owned_buffer using zstd, then
 // parses the result as either a raw ELF or an offload bundle and collects
 // matching ELFs.
@@ -475,11 +513,7 @@ static iree_status_t hrx_fat_extract_from_ccob(
   iree_const_byte_span_t decompressed =
       iree_make_const_byte_span(out_buffer, (iree_host_size_t)actual);
   if (hrx_fat_is_elf(decompressed)) {
-    iree_host_size_t elf_size = 0;
-    IREE_RETURN_IF_ERROR(hrx_fat_validate_elf(decompressed, &elf_size));
-    iree_const_byte_span_t tight_elf =
-        iree_make_const_byte_span(decompressed.data, elf_size);
-    return hrx_fat_extract_push(extract, tight_elf, iree_string_view_empty());
+    return hrx_fat_extract_concatenated_elves(decompressed, extract);
   }
   if (hrx_fat_is_uncompressed_bundle(decompressed)) {
     return hrx_fat_extract_from_bundle(decompressed, target_arch, extract);

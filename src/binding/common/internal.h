@@ -526,6 +526,7 @@ typedef struct iree_hal_streaming_symbol_t {
   iree_hal_streaming_module_t* module;
   iree_string_view_t name;
   iree_hal_streaming_symbol_type_t type;
+  iree_hal_executable_t* executable;
   iree_hal_executable_export_ordinal_t export_ordinal;
 
   // Function attributes (only valid for FUNCTION type).
@@ -553,6 +554,8 @@ typedef struct iree_hal_streaming_module_t {
   // HAL executable resources.
   iree_hal_executable_cache_t* cache;
   iree_hal_executable_t* executable;
+  iree_hal_executable_t** executables;
+  iree_host_size_t executable_count;
 
   // Symbol metadata.
   iree_hal_streaming_symbol_t* symbols;

@@ -12,7 +12,7 @@ then layered as one commit per patch. Regenerate the pristine import with:
 ```bash
 python scripts/vendor_iree_runtime.py \
   --iree-repo ../iree \
-  --ref 6e34728ce15889222b73d0348932882f6fef54bd \
+  --ref 05110733b50c2c0faafbe7452ab77f6e8088d33b \
   import-pristine
 ```
 
@@ -24,7 +24,7 @@ Patch files are dumped from the commits after the pristine import with
 `vendor_iree_runtime.py dump-patches --diffbase <pristine-import-commit>`.
 
 The initial snapshot is based on IREE commit
-`6e34728ce15889222b73d0348932882f6fef54bd`. It vendors `third_party/flatcc`
+`05110733b50c2c0faafbe7452ab77f6e8088d33b`. It vendors `third_party/flatcc`
 from IREE's recorded submodule commit and intentionally excludes
 `third_party/hsa-runtime-headers`; HSA is provided by ROCm's
 `hsa-runtime64` CMake package. HRX-local IREE changes belong in

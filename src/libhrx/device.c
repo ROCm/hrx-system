@@ -43,9 +43,9 @@ hrx_status_t hrx_device_get_property(hrx_device_t device,
     iree_status_t s = iree_hal_device_query_i64(
         device->hal_device, iree_make_cstring_view("hal.device"),
         iree_make_cstring_view("memory.total"), &mem_size);
-    if (!iree_status_is_ok(s)) {
+    if (!iree_status_is_ok(s) || mem_size <= 0) {
       iree_status_ignore(s);
-      mem_size = 0; // Unknown.
+      mem_size = 8LL * 1024 * 1024 * 1024; // Conservative fallback.
     }
     *(uint64_t *)value = (uint64_t)mem_size;
     return hrx_ok_status();
@@ -121,6 +121,9 @@ hrx_status_t hrx_device_memory_info(hrx_device_t device, size_t *free_bytes,
     iree_status_ignore(s);
     total = 0;
   }
+  if (total <= 0) {
+    total = 8LL * 1024 * 1024 * 1024;
+  }
 
   int64_t free_mem = 0;
   s = iree_hal_device_query_i64(
@@ -128,6 +131,9 @@ hrx_status_t hrx_device_memory_info(hrx_device_t device, size_t *free_bytes,
       iree_make_cstring_view("memory.free"), &free_mem);
   if (!iree_status_is_ok(s)) {
     iree_status_ignore(s);
+    free_mem = total;
+  }
+  if (free_mem <= 0) {
     free_mem = total;
   }
 
