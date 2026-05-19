@@ -303,6 +303,38 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_library(
   NAME
+    sge
+  HDRS
+    "sge.h"
+  SRCS
+    "sge.c"
+  DEPS
+    ::libverbs
+    iree::async
+    iree::base
+    rdma_core::headers
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    sge_test
+  SRCS
+    "sge_test.cc"
+  DEPS
+    ::sge
+    iree::async
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_library(
+  NAME
     work_request_table
   HDRS
     "work_request_table.h"
