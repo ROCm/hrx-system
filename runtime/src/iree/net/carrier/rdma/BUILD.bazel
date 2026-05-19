@@ -216,6 +216,34 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_library(
+    name = "work_request_table",
+    srcs = ["work_request_table.c"],
+    hdrs = ["work_request_table.h"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "work_request_table_test",
+    srcs = ["work_request_table_test.cc"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":work_request_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "context",
     srcs = [
         "context.c",

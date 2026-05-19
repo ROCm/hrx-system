@@ -200,6 +200,34 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_library(
   NAME
+    work_request_table
+  HDRS
+    "work_request_table.h"
+  SRCS
+    "work_request_table.c"
+  DEPS
+    iree::base
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    work_request_table_test
+  SRCS
+    "work_request_table_test.cc"
+  DEPS
+    ::work_request_table
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_library(
+  NAME
     context
   HDRS
     "context.h"
