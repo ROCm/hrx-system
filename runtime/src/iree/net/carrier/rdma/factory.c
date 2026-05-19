@@ -144,6 +144,12 @@ typedef struct iree_net_rdma_endpoint_t {
   // Borrowed carrier owned by the connection.
   iree_net_carrier_t* carrier;
 
+  // Endpoint-ready operation submitted by open_endpoint.
+  iree_async_nop_operation_t ready_operation;
+
+  // Endpoint-ready callback invoked by ready_operation.
+  iree_net_endpoint_ready_callback_t ready_callback;
+
   // Message and error callbacks installed by the endpoint consumer.
   iree_net_message_endpoint_callbacks_t callbacks;
 
@@ -152,6 +158,9 @@ typedef struct iree_net_rdma_endpoint_t {
 
   // User data passed to deactivate_callback.
   void* deactivate_user_data;
+
+  // Zero-based endpoint slot index in the owning connection.
+  uint32_t endpoint_index;
 
   // Bitfield of iree_net_rdma_endpoint_flag_bits_e values.
   iree_net_rdma_endpoint_flags_t flags;
@@ -273,7 +282,17 @@ static const iree_net_message_endpoint_vtable_t iree_net_rdma_endpoint_vtable =
 // Connection
 //===----------------------------------------------------------------------===//
 
-typedef struct iree_net_rdma_connection_t {
+// Embedded drain context for connection deactivation. Shared across all
+// endpoint carriers; the last carrier to drain fires the outer callback.
+typedef struct iree_net_rdma_connection_drain_t {
+  // Number of active endpoint carriers still draining.
+  iree_atomic_int32_t remaining_endpoint_count;
+
+  // User callback invoked when the last active endpoint carrier drains.
+  iree_net_connection_deactivate_callback_t callback;
+} iree_net_rdma_connection_drain_t;
+
+struct iree_net_rdma_connection_t {
   // Base connection; must be first for vtable dispatch.
   iree_net_connection_t base;
 
@@ -283,34 +302,27 @@ typedef struct iree_net_rdma_connection_t {
   // Receive pool borrowed by the carrier. Stored for diagnostics/future QPs.
   iree_async_buffer_pool_t* recv_pool;
 
-  // Owned single-QP carrier.
-  iree_net_carrier_t* carrier;
+  // Maximum number of endpoint slots in endpoints.
+  uint32_t max_endpoint_count;
 
-  // Embedded single endpoint view over carrier.
-  iree_net_rdma_endpoint_t endpoint;
-
-  // Endpoint-ready operation submitted by open_endpoint.
-  iree_async_nop_operation_t endpoint_ready_operation;
-
-  // Endpoint-ready callback for endpoint_ready_operation.
-  iree_net_endpoint_ready_callback_t endpoint_ready_callback;
-
-  // Connection-level deactivation callback.
-  iree_net_connection_deactivate_callback_t deactivate_callback;
-
-  // Number of endpoint slots already handed out.
+  // Number of endpoint slots already reserved by open_endpoint.
   uint32_t allocated_endpoint_count;
-} iree_net_rdma_connection_t;
+
+  // Embedded drain context used by connection-level deactivation.
+  iree_net_rdma_connection_drain_t drain;
+
+  // Flexible array of endpoint slots owned by this connection.
+  iree_net_rdma_endpoint_t endpoints[];
+};
 
 static const iree_net_connection_vtable_t iree_net_rdma_connection_vtable;
 
-static void iree_net_rdma_connection_notify_error(
-    iree_net_rdma_connection_t* connection, iree_status_t status) {
-  if (connection->endpoint.callbacks.on_error &&
-      iree_any_bit_set(connection->endpoint.flags,
+static void iree_net_rdma_endpoint_notify_error(
+    iree_net_rdma_endpoint_t* endpoint, iree_status_t status) {
+  if (endpoint->callbacks.on_error &&
+      iree_any_bit_set(endpoint->flags,
                        IREE_NET_RDMA_ENDPOINT_FLAG_ALLOCATED)) {
-    connection->endpoint.callbacks.on_error(
-        connection->endpoint.callbacks.user_data, status);
+    endpoint->callbacks.on_error(endpoint->callbacks.user_data, status);
   } else if (!iree_status_is_ok(status)) {
     iree_status_abort(status);
   }
@@ -320,30 +332,32 @@ static void iree_net_rdma_connection_carrier_completion(
     void* callback_user_data, iree_net_carrier_completion_kind_t kind,
     uint64_t operation_user_data, iree_status_t status,
     iree_host_size_t bytes_transferred, iree_async_buffer_lease_t* recv_lease) {
-  iree_net_rdma_connection_t* connection =
-      (iree_net_rdma_connection_t*)callback_user_data;
+  iree_net_rdma_endpoint_t* endpoint =
+      (iree_net_rdma_endpoint_t*)callback_user_data;
   if (kind == IREE_NET_CARRIER_COMPLETION_SEND && operation_user_data != 0) {
     iree_status_t endpoint_status = iree_ok_status();
     if (!iree_status_is_ok(status)) endpoint_status = iree_status_clone(status);
     iree_net_frame_sender_dispatch_carrier_completion(
         NULL, kind, operation_user_data, status, bytes_transferred, recv_lease);
     if (!iree_status_is_ok(endpoint_status)) {
-      iree_net_rdma_connection_notify_error(connection, endpoint_status);
+      iree_net_rdma_endpoint_notify_error(endpoint, endpoint_status);
     }
     return;
   }
 
   if (!iree_status_is_ok(status)) {
-    iree_net_rdma_connection_notify_error(connection, status);
+    iree_net_rdma_endpoint_notify_error(endpoint, status);
   }
 }
 
-static void iree_net_rdma_connection_deactivate_complete(void* user_data) {
-  iree_net_rdma_connection_t* connection =
-      (iree_net_rdma_connection_t*)user_data;
-  connection->endpoint.flags &= ~IREE_NET_RDMA_ENDPOINT_FLAG_ACTIVE;
-  connection->deactivate_callback.fn(connection->deactivate_callback.user_data);
-  iree_net_connection_release(&connection->base);
+static void iree_net_rdma_connection_endpoint_drained(void* user_data) {
+  iree_net_rdma_endpoint_t* endpoint = (iree_net_rdma_endpoint_t*)user_data;
+  endpoint->flags &= ~IREE_NET_RDMA_ENDPOINT_FLAG_ACTIVE;
+  iree_net_rdma_connection_drain_t* drain = &endpoint->connection->drain;
+  if (iree_atomic_fetch_sub(&drain->remaining_endpoint_count, 1,
+                            iree_memory_order_acq_rel) == 1) {
+    drain->callback.fn(drain->callback.user_data);
+  }
 }
 
 static void iree_net_rdma_connection_deactivate(
@@ -351,33 +365,53 @@ static void iree_net_rdma_connection_deactivate(
     iree_net_connection_deactivate_callback_t callback) {
   iree_net_rdma_connection_t* connection =
       (iree_net_rdma_connection_t*)base_connection;
-  if (!iree_any_bit_set(connection->endpoint.flags,
-                        IREE_NET_RDMA_ENDPOINT_FLAG_ACTIVE)) {
+  uint32_t active_endpoint_count = 0;
+  for (uint32_t i = 0; i < connection->max_endpoint_count; ++i) {
+    iree_net_rdma_endpoint_t* endpoint = &connection->endpoints[i];
+    if (iree_any_bit_set(endpoint->flags, IREE_NET_RDMA_ENDPOINT_FLAG_ACTIVE)) {
+      ++active_endpoint_count;
+    }
+  }
+
+  if (active_endpoint_count == 0) {
     callback.fn(callback.user_data);
     return;
   }
 
-  connection->deactivate_callback = callback;
+  iree_net_rdma_connection_drain_t* drain = &connection->drain;
+  iree_atomic_store(&drain->remaining_endpoint_count,
+                    (int32_t)active_endpoint_count, iree_memory_order_relaxed);
+  drain->callback = callback;
+
   iree_net_connection_retain(base_connection);
-  iree_status_t status = iree_net_carrier_deactivate(
-      connection->carrier, iree_net_rdma_connection_deactivate_complete,
-      connection);
-  if (!iree_status_is_ok(status)) {
-    iree_net_connection_release(base_connection);
-    iree_status_abort(status);
+  for (uint32_t i = 0; i < connection->max_endpoint_count; ++i) {
+    iree_net_rdma_endpoint_t* endpoint = &connection->endpoints[i];
+    if (iree_any_bit_set(endpoint->flags, IREE_NET_RDMA_ENDPOINT_FLAG_ACTIVE)) {
+      iree_status_t status = iree_net_carrier_deactivate(
+          endpoint->carrier, iree_net_rdma_connection_endpoint_drained,
+          endpoint);
+      if (!iree_status_is_ok(status)) {
+        iree_status_abort(status);
+      }
+    }
   }
+  iree_net_connection_release(base_connection);
 }
 
 static void iree_net_rdma_connection_destroy(
     iree_net_connection_t* base_connection) {
   iree_net_rdma_connection_t* connection =
       (iree_net_rdma_connection_t*)base_connection;
-  IREE_ASSERT(!iree_any_bit_set(connection->endpoint.flags,
-                                IREE_NET_RDMA_ENDPOINT_FLAG_ACTIVE),
-              "connection destroyed with active endpoint; call "
-              "iree_net_connection_deactivate before releasing");
   iree_allocator_t host_allocator = connection->base.host_allocator;
-  iree_net_carrier_release(connection->carrier);
+  for (uint32_t i = 0; i < connection->max_endpoint_count; ++i) {
+    iree_net_rdma_endpoint_t* endpoint = &connection->endpoints[i];
+    IREE_ASSERT(
+        !iree_any_bit_set(endpoint->flags, IREE_NET_RDMA_ENDPOINT_FLAG_ACTIVE),
+        "connection destroyed with active endpoint at slot %u; call "
+        "iree_net_connection_deactivate before releasing",
+        (unsigned)i);
+    iree_net_carrier_release(endpoint->carrier);
+  }
   iree_async_proactor_release(connection->proactor);
   iree_allocator_free(host_allocator, connection);
 }
@@ -385,23 +419,20 @@ static void iree_net_rdma_connection_destroy(
 static void iree_net_rdma_endpoint_ready_complete(
     void* user_data, iree_async_operation_t* operation, iree_status_t status,
     iree_async_completion_flags_t flags) {
-  iree_net_rdma_connection_t* connection =
-      (iree_net_rdma_connection_t*)user_data;
+  iree_net_rdma_endpoint_t* endpoint = (iree_net_rdma_endpoint_t*)user_data;
   if (iree_status_is_ok(status)) {
-    iree_net_message_endpoint_t endpoint = {
-        .self = &connection->endpoint,
+    iree_net_message_endpoint_t message_endpoint = {
+        .self = endpoint,
         .vtable = &iree_net_rdma_endpoint_vtable,
     };
-    connection->endpoint_ready_callback.fn(
-        connection->endpoint_ready_callback.user_data, iree_ok_status(),
-        endpoint);
+    endpoint->ready_callback.fn(endpoint->ready_callback.user_data,
+                                iree_ok_status(), message_endpoint);
   } else {
-    connection->endpoint.flags &= ~IREE_NET_RDMA_ENDPOINT_FLAG_ALLOCATED;
-    connection->endpoint_ready_callback.fn(
-        connection->endpoint_ready_callback.user_data, status,
-        (iree_net_message_endpoint_t){0});
+    endpoint->flags &= ~IREE_NET_RDMA_ENDPOINT_FLAG_ALLOCATED;
+    endpoint->ready_callback.fn(endpoint->ready_callback.user_data, status,
+                                (iree_net_message_endpoint_t){0});
   }
-  iree_net_connection_release(&connection->base);
+  iree_net_connection_release(&endpoint->connection->base);
 }
 
 static iree_status_t iree_net_rdma_connection_open_endpoint(
@@ -409,28 +440,29 @@ static iree_status_t iree_net_rdma_connection_open_endpoint(
     iree_net_endpoint_ready_callback_t callback) {
   iree_net_rdma_connection_t* connection =
       (iree_net_rdma_connection_t*)base_connection;
-  if (connection->allocated_endpoint_count >= 1) {
+  if (connection->allocated_endpoint_count >= connection->max_endpoint_count) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "RDMA connection has no free endpoint slots");
+                            "all %u RDMA endpoint slots allocated",
+                            (unsigned)connection->max_endpoint_count);
   }
 
-  connection->allocated_endpoint_count = 1;
-  connection->endpoint.flags |= IREE_NET_RDMA_ENDPOINT_FLAG_ALLOCATED;
-  connection->endpoint_ready_callback = callback;
-  memset(&connection->endpoint_ready_operation, 0,
-         sizeof(connection->endpoint_ready_operation));
+  uint32_t endpoint_index = connection->allocated_endpoint_count++;
+  iree_net_rdma_endpoint_t* endpoint = &connection->endpoints[endpoint_index];
+  endpoint->flags |= IREE_NET_RDMA_ENDPOINT_FLAG_ALLOCATED;
+  endpoint->ready_callback = callback;
+  memset(&endpoint->ready_operation, 0, sizeof(endpoint->ready_operation));
   iree_async_operation_initialize(
-      &connection->endpoint_ready_operation.base, IREE_ASYNC_OPERATION_TYPE_NOP,
+      &endpoint->ready_operation.base, IREE_ASYNC_OPERATION_TYPE_NOP,
       IREE_ASYNC_OPERATION_FLAG_NONE, iree_net_rdma_endpoint_ready_complete,
-      connection);
+      endpoint);
 
   iree_net_connection_retain(base_connection);
   iree_status_t status = iree_async_proactor_submit_one(
-      connection->proactor, &connection->endpoint_ready_operation.base);
+      connection->proactor, &endpoint->ready_operation.base);
   if (!iree_status_is_ok(status)) {
     iree_net_connection_release(base_connection);
-    connection->allocated_endpoint_count = 0;
-    connection->endpoint.flags &= ~IREE_NET_RDMA_ENDPOINT_FLAG_ALLOCATED;
+    --connection->allocated_endpoint_count;
+    endpoint->flags &= ~IREE_NET_RDMA_ENDPOINT_FLAG_ALLOCATED;
   }
   return status;
 }
@@ -439,7 +471,8 @@ static iree_net_carrier_t* iree_net_rdma_connection_carrier(
     iree_net_connection_t* base_connection) {
   iree_net_rdma_connection_t* connection =
       (iree_net_rdma_connection_t*)base_connection;
-  return connection->carrier;
+  if (connection->max_endpoint_count == 0) return NULL;
+  return connection->endpoints[0].carrier;
 }
 
 static const iree_net_connection_vtable_t iree_net_rdma_connection_vtable = {
@@ -456,20 +489,27 @@ static iree_status_t iree_net_rdma_connection_create(
   *out_connection = NULL;
 
   iree_net_rdma_connection_t* connection = NULL;
-  iree_status_t status = iree_allocator_malloc(
-      host_allocator, sizeof(*connection), (void**)&connection);
+  iree_host_size_t total_size = 0;
+  iree_status_t status =
+      IREE_STRUCT_LAYOUT(sizeof(*connection), &total_size,
+                         IREE_STRUCT_FIELD_FAM(1, iree_net_rdma_endpoint_t));
   if (iree_status_is_ok(status)) {
-    memset(connection, 0, sizeof(*connection));
+    status =
+        iree_allocator_malloc(host_allocator, total_size, (void**)&connection);
+  }
+  if (iree_status_is_ok(status)) {
+    memset(connection, 0, total_size);
     iree_net_connection_initialize(&iree_net_rdma_connection_vtable,
                                    host_allocator, /*max_endpoint_count=*/1,
                                    &connection->base);
     connection->proactor = proactor;
     iree_async_proactor_retain(proactor);
     connection->recv_pool = recv_pool;
-    connection->carrier = carrier;
-    carrier->callback.user_data = connection;
-    connection->endpoint.connection = connection;
-    connection->endpoint.carrier = carrier;
+    connection->max_endpoint_count = 1;
+    connection->endpoints[0].connection = connection;
+    connection->endpoints[0].carrier = carrier;
+    connection->endpoints[0].endpoint_index = 0;
+    carrier->callback.user_data = &connection->endpoints[0];
     *out_connection = &connection->base;
   }
   return status;
