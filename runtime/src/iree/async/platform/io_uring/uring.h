@@ -32,6 +32,7 @@
 #include "iree/async/platform/io_uring/defs.h"
 #include "iree/base/api.h"
 #include "iree/base/internal/atomics.h"
+#include "iree/base/threading/mutex.h"
 #include "iree/base/threading/processor.h"
 
 #ifdef __cplusplus
@@ -41,6 +42,14 @@ extern "C" {
 //===----------------------------------------------------------------------===//
 // Ring state
 //===----------------------------------------------------------------------===//
+
+// Callback invoked before io_uring_register waits for an in-flight enter.
+typedef struct iree_io_uring_ring_register_wake_callback_t {
+  // Function used to wake the thread that may be blocked in io_uring_enter.
+  void (*fn)(void* user_data);
+  // User data passed to |fn|.
+  void* user_data;
+} iree_io_uring_ring_register_wake_callback_t;
 
 // State for an io_uring instance. Manages the ring fd and memory mappings.
 typedef struct iree_io_uring_ring_t {
@@ -90,6 +99,17 @@ typedef struct iree_io_uring_ring_t {
   // Test-and-test-and-set lock protecting SQ mutations.
   // Zero is unlocked and one is locked; waiters poll without modifying it.
   iree_atomic_int32_t sq_lock;
+
+  // Mutex serializing io_uring_enter with io_uring_register calls that mutate
+  // ring resources. The kernel requires registrations such as PBUF_RING to not
+  // overlap an enter on the same ring.
+  iree_slim_mutex_t enter_mutex;
+
+  // Number of threads waiting to call io_uring_register on this ring.
+  iree_atomic_int32_t register_pending_count;
+
+  // Optional callback that wakes the ring owner before registration waits.
+  iree_io_uring_ring_register_wake_callback_t register_wake_callback;
 
   // Non-zero if the ring was created with R_DISABLED and needs
   // REGISTER_ENABLE_RINGS before io_uring_enter can be called. When
@@ -188,6 +208,18 @@ void iree_io_uring_ring_deinitialize(iree_io_uring_ring_t* ring);
 // on a disabled ring without restriction — only io_uring_enter (submission)
 // is blocked until enable.
 iree_status_t iree_io_uring_ring_enable(iree_io_uring_ring_t* ring);
+
+// Calls io_uring_register while serialized against io_uring_enter on |ring|.
+// Returns the raw syscall result and preserves errno on failure so callers can
+// apply operation-specific error handling.
+long iree_io_uring_ring_register(iree_io_uring_ring_t* ring, uint32_t opcode,
+                                 const void* arg, uint32_t nr_args);
+
+// Sets the callback used to wake a thread blocked in io_uring_enter before a
+// cross-thread registration waits for |ring|'s enter/register mutex.
+void iree_io_uring_ring_set_register_wake_callback(
+    iree_io_uring_ring_t* ring,
+    iree_io_uring_ring_register_wake_callback_t callback);
 
 //===----------------------------------------------------------------------===//
 // Submission queue operations

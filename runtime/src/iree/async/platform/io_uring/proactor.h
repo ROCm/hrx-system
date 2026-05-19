@@ -336,7 +336,7 @@ extern const iree_async_proactor_vtable_t iree_async_proactor_io_uring_vtable;
 // |out_capabilities| with the detected capabilities.
 // Returns IREE_STATUS_UNAVAILABLE if the kernel is too old.
 iree_status_t iree_async_proactor_io_uring_detect_capabilities(
-    int ring_fd, uint32_t ring_features,
+    iree_io_uring_ring_t* ring,
     iree_async_proactor_capabilities_t* out_capabilities);
 
 // Buffer registration vtable implementations (in proactor_registration.c).

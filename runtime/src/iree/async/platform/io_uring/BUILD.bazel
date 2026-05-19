@@ -82,6 +82,7 @@ iree_runtime_cc_library(
     target_compatible_with = ["@platforms//os:linux"],
     deps = [
         ":defs",
+        ":uring",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:memory",

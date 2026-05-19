@@ -97,6 +97,7 @@ static void iree_async_proactor_io_uring_destroy(
     iree_async_proactor_t* base_proactor);
 static iree_status_t iree_async_proactor_io_uring_cancel(
     iree_async_proactor_t* base_proactor, iree_async_operation_t* operation);
+static void iree_async_proactor_io_uring_register_wake(void* user_data);
 
 iree_status_t iree_async_proactor_create_io_uring(
     iree_async_proactor_options_t options, iree_allocator_t allocator,
@@ -188,8 +189,7 @@ iree_status_t iree_async_proactor_create_io_uring(
   // are available.
   if (iree_status_is_ok(status)) {
     status = iree_async_proactor_io_uring_detect_capabilities(
-        proactor->ring.ring_fd, proactor->ring.features,
-        &proactor->capabilities);
+        &proactor->ring, &proactor->capabilities);
   }
 
   // Apply the allowed_capabilities mask from options.
@@ -215,11 +215,8 @@ iree_status_t iree_async_proactor_create_io_uring(
           .data = 0,
           .tags = 0,
       };
-      long ret = 0;
-      do {
-        ret = syscall(IREE_IO_URING_SYSCALL_REGISTER, proactor->ring.ring_fd,
-                      IREE_IORING_REGISTER_BUFFERS2, &reg, sizeof(reg));
-      } while (ret < 0 && errno == EINTR);
+      long ret = iree_io_uring_ring_register(
+          &proactor->ring, IREE_IORING_REGISTER_BUFFERS2, &reg, sizeof(reg));
       if (ret < 0) {
         int saved_errno = errno;
         iree_io_uring_sparse_table_free(proactor->buffer_table, allocator);
@@ -238,6 +235,13 @@ iree_status_t iree_async_proactor_create_io_uring(
     if (proactor->wake_eventfd < 0) {
       status = iree_make_status(iree_status_code_from_errno(errno),
                                 "eventfd creation failed (%d)", errno);
+    } else {
+      iree_io_uring_ring_register_wake_callback_t register_wake_callback = {
+          .fn = iree_async_proactor_io_uring_register_wake,
+          .user_data = proactor,
+      };
+      iree_io_uring_ring_set_register_wake_callback(&proactor->ring,
+                                                    register_wake_callback);
     }
   }
 
@@ -1627,11 +1631,8 @@ static iree_status_t iree_async_proactor_io_uring_poll(
 // Wake
 //===----------------------------------------------------------------------===//
 
-static void iree_async_proactor_io_uring_wake(
-    iree_async_proactor_t* base_proactor) {
-  iree_async_proactor_io_uring_t* proactor =
-      iree_async_proactor_io_uring_cast(base_proactor);
-
+static void iree_async_proactor_io_uring_wake_eventfd(
+    iree_async_proactor_io_uring_t* proactor) {
   if (proactor->wake_eventfd < 0) return;
 
   // Write to eventfd to wake a blocked poll. This is thread-safe and
@@ -1646,6 +1647,18 @@ static void iree_async_proactor_io_uring_wake(
   IREE_ASSERT(result == sizeof(value),
               "failed to signal io_uring wake eventfd: %zd (errno=%d)", result,
               errno);
+}
+
+static void iree_async_proactor_io_uring_register_wake(void* user_data) {
+  iree_async_proactor_io_uring_wake_eventfd(
+      (iree_async_proactor_io_uring_t*)user_data);
+}
+
+static void iree_async_proactor_io_uring_wake(
+    iree_async_proactor_t* base_proactor) {
+  iree_async_proactor_io_uring_t* proactor =
+      iree_async_proactor_io_uring_cast(base_proactor);
+  iree_async_proactor_io_uring_wake_eventfd(proactor);
 }
 
 //===----------------------------------------------------------------------===//

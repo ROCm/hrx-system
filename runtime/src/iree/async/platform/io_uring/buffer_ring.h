@@ -11,8 +11,8 @@
 // the ring during recv completions; userspace recycles them back after
 // processing.
 //
-// This module is self-contained and only requires the io_uring ring fd. It
-// does not depend on the proactor, enabling independent testing and reuse.
+// This module depends only on the io_uring ring wrapper. Registration is
+// serialized with io_uring_enter through the ring wrapper.
 //
 // ## Usage
 //
@@ -25,7 +25,7 @@
 //       .group_id = 0,
 //   };
 //   IREE_RETURN_IF_ERROR(iree_io_uring_buffer_ring_allocate(
-//       ring_fd, options, allocator, &ring));
+//       io_ring, options, allocator, &ring));
 //
 //   // Use group_id in SQE for multishot recv:
 //   //   sqe->flags |= IOSQE_BUFFER_SELECT;
@@ -56,7 +56,7 @@
 #ifndef IREE_ASYNC_PLATFORM_IO_URING_BUFFER_RING_H_
 #define IREE_ASYNC_PLATFORM_IO_URING_BUFFER_RING_H_
 
-#include "iree/async/platform/io_uring/defs.h"
+#include "iree/async/platform/io_uring/uring.h"
 #include "iree/base/api.h"
 
 #ifdef __cplusplus
@@ -123,7 +123,7 @@ iree_io_uring_buffer_ring_options_default(void) {
 // Returns IREE_STATUS_UNAVAILABLE if PBUF_RING is not supported (kernel
 // < 5.19).
 iree_status_t iree_io_uring_buffer_ring_allocate(
-    int ring_fd, iree_io_uring_buffer_ring_options_t options,
+    iree_io_uring_ring_t* io_ring, iree_io_uring_buffer_ring_options_t options,
     iree_allocator_t allocator, iree_io_uring_buffer_ring_t** out_ring);
 
 // Unregisters and frees a buffer ring.

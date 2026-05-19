@@ -16,9 +16,7 @@
 #include <stddef.h>
 #include <string.h>
 #include <sys/mman.h>
-#include <sys/syscall.h>
 #include <sys/uio.h>
-#include <unistd.h>
 
 #include "iree/async/platform/io_uring/buffer_ring.h"
 #include "iree/async/platform/io_uring/defs.h"
@@ -82,6 +80,12 @@ static void iree_async_io_uring_buffer_registration_cleanup(
 static iree_status_t iree_async_io_uring_clear_buffer_slots_locked(
     iree_async_proactor_io_uring_t* proactor, uint16_t base_slot,
     uint16_t count);
+
+static long iree_async_io_uring_register(
+    iree_async_proactor_io_uring_t* proactor, uint32_t opcode, const void* arg,
+    uint32_t nr_args) {
+  return iree_io_uring_ring_register(&proactor->ring, opcode, arg, nr_args);
+}
 
 // Destroy callback for dmabuf registration regions.
 // Called when the region's ref count reaches zero.
@@ -261,12 +265,9 @@ iree_status_t iree_async_proactor_io_uring_register_dmabuf(
           .nr = 1,
           .resv2 = 0,
       };
-      long ret = 0;
-      do {
-        ret = syscall(IREE_IO_URING_SYSCALL_REGISTER, proactor->ring.ring_fd,
-                      IREE_IORING_REGISTER_BUFFERS_UPDATE, &update,
-                      sizeof(update));
-      } while (ret < 0 && errno == EINTR);
+      long ret = iree_async_io_uring_register(
+          proactor, IREE_IORING_REGISTER_BUFFERS_UPDATE, &update,
+          sizeof(update));
       if (ret < 0) {
         iree_io_uring_sparse_table_release(proactor->buffer_table,
                                            (uint16_t)slot, 1);
@@ -397,12 +398,8 @@ static iree_status_t iree_async_io_uring_clear_buffer_slots_locked(
         .nr = batch,
         .resv2 = 0,
     };
-    long ret = 0;
-    do {
-      ret =
-          syscall(IREE_IO_URING_SYSCALL_REGISTER, proactor->ring.ring_fd,
-                  IREE_IORING_REGISTER_BUFFERS_UPDATE, &update, sizeof(update));
-    } while (ret < 0 && errno == EINTR);
+    long ret = iree_async_io_uring_register(
+        proactor, IREE_IORING_REGISTER_BUFFERS_UPDATE, &update, sizeof(update));
     if (ret < 0) {
       int saved_errno = errno;
       // Release only the slots we successfully cleared. The remaining slots
@@ -449,13 +446,9 @@ static iree_status_t iree_async_io_uring_slab_region_unregister_fixed_buffers(
   }
 
   // Legacy path (pre-5.19): unregister the entire singleton buffer table.
-  long ret = 0;
-  int saved_errno = 0;
-  do {
-    ret = syscall(IREE_IO_URING_SYSCALL_REGISTER, proactor->ring.ring_fd,
-                  IREE_IORING_UNREGISTER_BUFFERS, NULL, 0);
-    saved_errno = errno;
-  } while (ret < 0 && saved_errno == EINTR);
+  long ret = iree_async_io_uring_register(
+      proactor, IREE_IORING_UNREGISTER_BUFFERS, NULL, 0);
+  int saved_errno = errno;
   if (ret < 0) {
     return iree_make_status(
         iree_status_code_from_errno(saved_errno),
@@ -522,12 +515,9 @@ static iree_status_t iree_async_io_uring_slab_region_register_fixed_buffers(
           .nr = (uint32_t)buffer_count,
           .resv2 = 0,
       };
-      long ret = 0;
-      do {
-        ret = syscall(IREE_IO_URING_SYSCALL_REGISTER, proactor->ring.ring_fd,
-                      IREE_IORING_REGISTER_BUFFERS_UPDATE, &update,
-                      sizeof(update));
-      } while (ret < 0 && errno == EINTR);
+      long ret = iree_async_io_uring_register(
+          proactor, IREE_IORING_REGISTER_BUFFERS_UPDATE, &update,
+          sizeof(update));
       if (ret < 0) {
         int saved_errno = errno;
         iree_io_uring_sparse_table_release(proactor->buffer_table,
@@ -556,11 +546,8 @@ static iree_status_t iree_async_io_uring_slab_region_register_fixed_buffers(
     }
     iree_io_uring_sparse_table_unlock(proactor->buffer_table);
   } else {
-    long ret = 0;
-    do {
-      ret = syscall(IREE_IO_URING_SYSCALL_REGISTER, proactor->ring.ring_fd,
-                    IREE_IORING_REGISTER_BUFFERS, iovecs, buffer_count);
-    } while (ret < 0 && errno == EINTR);
+    long ret = iree_async_io_uring_register(
+        proactor, IREE_IORING_REGISTER_BUFFERS, iovecs, (uint32_t)buffer_count);
     if (ret < 0) {
       int saved_errno = errno;
       if (saved_errno == ENOMEM) {
@@ -736,8 +723,7 @@ iree_status_t iree_async_proactor_io_uring_register_slab(
     ring_options.group_id = proactor->next_group_id++;
 
     iree_status_t status = iree_io_uring_buffer_ring_allocate(
-        proactor->ring.ring_fd, ring_options, base_proactor->allocator,
-        &buffer_ring);
+        &proactor->ring, ring_options, base_proactor->allocator, &buffer_ring);
     if (!iree_status_is_ok(status)) {
       // Unregister the buffer table on failure if we registered it.
       // This is a programming error if it fails (we just registered these

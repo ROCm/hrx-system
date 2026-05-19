@@ -73,6 +73,7 @@ iree_cc_library(
     "buffer_ring.c"
   DEPS
     ::defs
+    ::uring
     iree::base
     iree::base::internal
     iree::base::internal::memory

@@ -31,6 +31,26 @@ static inline int iree_io_uring_enter(int ring_fd, uint32_t to_submit,
                       min_complete, flags, arg, argsz);
 }
 
+static inline int iree_io_uring_ring_enter(iree_io_uring_ring_t* ring,
+                                           uint32_t to_submit,
+                                           uint32_t min_complete,
+                                           uint32_t flags, void* arg,
+                                           size_t argsz) {
+  iree_slim_mutex_lock(&ring->enter_mutex);
+  int ret = iree_io_uring_enter(ring->ring_fd, to_submit, min_complete, flags,
+                                arg, argsz);
+  int saved_errno = ret < 0 ? errno : 0;
+  iree_slim_mutex_unlock(&ring->enter_mutex);
+  if (ret < 0) errno = saved_errno;
+  return ret;
+}
+
+static inline bool iree_io_uring_ring_has_register_pending(
+    iree_io_uring_ring_t* ring) {
+  return iree_atomic_load(&ring->register_pending_count,
+                          iree_memory_order_acquire) > 0;
+}
+
 //===----------------------------------------------------------------------===//
 // Ring initialization
 //===----------------------------------------------------------------------===//
@@ -322,6 +342,7 @@ iree_status_t iree_io_uring_ring_initialize(
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0,
       iree_io_uring_ring_try_setup(entries, setup_flags, out_ring, &params));
+  iree_slim_mutex_initialize(&out_ring->enter_mutex);
 
   // Record whether the ring needs enabling before io_uring_enter can be
   // called. The actual flags used may differ from requested (fallback path).
@@ -331,6 +352,7 @@ iree_status_t iree_io_uring_ring_initialize(
 
   iree_status_t status = iree_io_uring_ring_map_buffers(out_ring, &params);
   if (!iree_status_is_ok(status)) {
+    iree_slim_mutex_deinitialize(&out_ring->enter_mutex);
     close(out_ring->ring_fd);
     out_ring->ring_fd = -1;
   }
@@ -346,11 +368,8 @@ iree_status_t iree_io_uring_ring_enable(iree_io_uring_ring_t* ring) {
   // exclusive submitter — all subsequent io_uring_enter calls must come from
   // this thread. The kernel defers this binding when R_DISABLED is set during
   // io_uring_setup, allowing creation on one thread and polling from another.
-  long ret = 0;
-  do {
-    ret = syscall(IREE_IO_URING_SYSCALL_REGISTER, ring->ring_fd,
-                  IREE_IORING_REGISTER_ENABLE_RINGS, NULL, 0);
-  } while (ret < 0 && errno == EINTR);
+  long ret = iree_io_uring_ring_register(
+      ring, IREE_IORING_REGISTER_ENABLE_RINGS, NULL, 0);
   if (ret < 0) {
     int saved_errno = errno;
     return iree_make_status(
@@ -361,6 +380,38 @@ iree_status_t iree_io_uring_ring_enable(iree_io_uring_ring_t* ring) {
 
   iree_atomic_store(&ring->needs_enable, 0, iree_memory_order_release);
   return iree_ok_status();
+}
+
+long iree_io_uring_ring_register(iree_io_uring_ring_t* ring, uint32_t opcode,
+                                 const void* arg, uint32_t nr_args) {
+  iree_atomic_fetch_add(&ring->register_pending_count, 1,
+                        iree_memory_order_acq_rel);
+
+  bool has_enter_mutex = iree_slim_mutex_try_lock(&ring->enter_mutex);
+  if (!has_enter_mutex) {
+    if (ring->register_wake_callback.fn) {
+      ring->register_wake_callback.fn(ring->register_wake_callback.user_data);
+    }
+    iree_slim_mutex_lock(&ring->enter_mutex);
+  }
+
+  long ret = 0;
+  do {
+    ret = syscall(IREE_IO_URING_SYSCALL_REGISTER, ring->ring_fd, opcode, arg,
+                  nr_args);
+  } while (ret < 0 && errno == EINTR);
+  int saved_errno = ret < 0 ? errno : 0;
+  iree_slim_mutex_unlock(&ring->enter_mutex);
+  iree_atomic_fetch_sub(&ring->register_pending_count, 1,
+                        iree_memory_order_release);
+  if (ret < 0) errno = saved_errno;
+  return ret;
+}
+
+void iree_io_uring_ring_set_register_wake_callback(
+    iree_io_uring_ring_t* ring,
+    iree_io_uring_ring_register_wake_callback_t callback) {
+  ring->register_wake_callback = callback;
 }
 
 void iree_io_uring_ring_deinitialize(iree_io_uring_ring_t* ring) {
@@ -381,6 +432,7 @@ void iree_io_uring_ring_deinitialize(iree_io_uring_ring_t* ring) {
     close(ring->ring_fd);
     ring->ring_fd = -1;
   }
+  iree_slim_mutex_deinitialize(&ring->enter_mutex);
   IREE_TRACE_ZONE_END(z0);
 }
 
@@ -416,6 +468,13 @@ iree_io_uring_sqe_t* iree_io_uring_ring_get_sqe(iree_io_uring_ring_t* ring) {
 
 iree_status_t iree_io_uring_ring_submit(iree_io_uring_ring_t* ring,
                                         uint32_t min_complete, uint32_t flags) {
+  // A pending registration needs the poll thread to avoid new enter calls so it
+  // can acquire enter_mutex. Return before advancing *sq_tail so pending SQEs
+  // remain staged for the next submit after registration completes.
+  if (iree_io_uring_ring_has_register_pending(ring)) {
+    return iree_ok_status();
+  }
+
   // Flush under the SQ lock: read sq_local_tail and advance *sq_tail.
   // The lock ensures no other thread is mid-fill when we compute to_submit.
   iree_io_uring_ring_sq_lock(ring);
@@ -446,8 +505,8 @@ iree_status_t iree_io_uring_ring_submit(iree_io_uring_ring_t* ring,
   // to retry. This keeps EINTR handling out of all callers.
   int ret = 0;
   do {
-    ret = iree_io_uring_enter(ring->ring_fd, to_submit, min_complete, flags,
-                              NULL, 0);
+    ret =
+        iree_io_uring_ring_enter(ring, to_submit, min_complete, flags, NULL, 0);
   } while (ret < 0 && errno == EINTR);
 
   if (ret < 0) {
@@ -473,6 +532,12 @@ iree_status_t iree_io_uring_ring_wait_cqe(iree_io_uring_ring_t* ring,
                                           iree_duration_t timeout_ns) {
   // Check if we already have enough CQEs.
   if (iree_io_uring_ring_cq_count(ring) >= min_complete) {
+    return iree_ok_status();
+  }
+  // Let a waiting registration acquire enter_mutex instead of starting a new
+  // blocking enter. The poll loop will spin briefly and retry after the
+  // registration completes.
+  if (iree_io_uring_ring_has_register_pending(ring)) {
     return iree_ok_status();
   }
 
@@ -525,8 +590,8 @@ iree_status_t iree_io_uring_ring_wait_cqe(iree_io_uring_ring_t* ring,
       arg_sz = sizeof(arg);
     }
 
-    int ret = iree_io_uring_enter(ring->ring_fd, to_submit, min_complete, flags,
-                                  arg_ptr, arg_sz);
+    int ret = iree_io_uring_ring_enter(ring, to_submit, min_complete, flags,
+                                       arg_ptr, arg_sz);
     // Only flush SQEs on the first iteration; subsequent retries have nothing
     // new to submit.
     to_submit = 0;

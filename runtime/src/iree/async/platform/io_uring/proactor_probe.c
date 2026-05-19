@@ -12,12 +12,10 @@
 
 #include <errno.h>
 #include <string.h>
-#include <sys/syscall.h>
-#include <unistd.h>
 
 #include "iree/async/platform/io_uring/defs.h"
+#include "iree/async/platform/io_uring/proactor.h"
 #include "iree/async/platform/io_uring/uring.h"
-#include "iree/async/proactor.h"
 
 //===----------------------------------------------------------------------===//
 // Capability detection
@@ -34,7 +32,7 @@
 // The probe is performed via IORING_REGISTER_PROBE which requires an
 // active ring (so this must be called after io_uring_setup succeeds).
 static iree_status_t iree_async_proactor_io_uring_probe_opcodes(
-    int ring_fd, uint64_t* out_supported_opcodes) {
+    iree_io_uring_ring_t* ring, uint64_t* out_supported_opcodes) {
   *out_supported_opcodes = 0;
 
   // Stack-allocate the probe structure with space for opcodes.
@@ -50,14 +48,11 @@ static iree_status_t iree_async_proactor_io_uring_probe_opcodes(
 
   iree_io_uring_probe_t* probe = &probe_buffer.probe;
 
-  // Perform the probe syscall. Retry on EINTR since io_uring_register can be
-  // interrupted by signals (common when attached to debuggers/profilers).
-  long ret;
-  do {
-    ret = syscall(IREE_IO_URING_SYSCALL_REGISTER, ring_fd,
-                  IREE_IORING_REGISTER_PROBE, probe,
-                  IREE_IO_URING_PROBE_OPCODE_COUNT);
-  } while (ret < 0 && errno == EINTR);
+  // Perform the probe syscall through the ring wrapper, which retries EINTR
+  // and serializes registration against io_uring_enter.
+  long ret =
+      iree_io_uring_ring_register(ring, IREE_IORING_REGISTER_PROBE, probe,
+                                  IREE_IO_URING_PROBE_OPCODE_COUNT);
   if (ret < 0) {
     // Probe not supported on older kernels (pre-5.6). This is fine - we just
     // won't enable advanced capabilities.
@@ -103,20 +98,20 @@ static iree_status_t iree_async_proactor_io_uring_probe_opcodes(
 //
 // Returns IREE_STATUS_UNAVAILABLE if the kernel is too old.
 iree_status_t iree_async_proactor_io_uring_detect_capabilities(
-    int ring_fd, uint32_t ring_features,
+    iree_io_uring_ring_t* ring,
     iree_async_proactor_capabilities_t* out_capabilities) {
   *out_capabilities = IREE_ASYNC_PROACTOR_CAPABILITY_NONE;
 
   // Require kernel 5.7+ for baseline io_uring stability.
   // IORING_FEAT_FAST_POLL was added in 5.7 and is our minimum requirement.
-  if (!iree_any_bit_set(ring_features, IREE_IORING_FEAT_FAST_POLL)) {
+  if (!iree_any_bit_set(ring->features, IREE_IORING_FEAT_FAST_POLL)) {
     return iree_make_status(
         IREE_STATUS_UNAVAILABLE,
         "io_uring requires Linux kernel 5.7 or later; this kernel lacks "
         "IORING_FEAT_FAST_POLL (features=0x%08x). On older kernels, IREE "
         "falls back to the portable threaded backend. See "
         "https://iree.dev/guides/deployment/linux-kernel-requirements",
-        ring_features);
+        ring->features);
   }
 
   // Baseline capabilities (5.7+): always present when we get here.
@@ -130,7 +125,7 @@ iree_status_t iree_async_proactor_io_uring_detect_capabilities(
   // Probe for newer capabilities that require specific opcodes.
   uint64_t supported_opcodes = 0;
   iree_status_t probe_status =
-      iree_async_proactor_io_uring_probe_opcodes(ring_fd, &supported_opcodes);
+      iree_async_proactor_io_uring_probe_opcodes(ring, &supported_opcodes);
   if (iree_status_is_ok(probe_status)) {
     // MULTISHOT: available since 5.19 with ACCEPT.
     // We detect 5.19+ by checking for SOCKET opcode (45), added in 5.19.

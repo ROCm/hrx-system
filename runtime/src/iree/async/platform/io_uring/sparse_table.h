@@ -19,8 +19,11 @@
 //   iree_io_uring_sparse_table_lock(table);
 //   int32_t slot = iree_io_uring_sparse_table_acquire(table, count);
 //   if (slot < 0) { unlock; return RESOURCE_EXHAUSTED; }
-//   long ret = syscall(IORING_REGISTER_*_UPDATE, ...);
-//   if (ret < 0) { iree_io_uring_sparse_table_release(table, slot, count); }
+//   long ret = iree_io_uring_ring_register(
+//       ring, IORING_REGISTER_*_UPDATE, ...);
+//   if (ret < 0) {
+//     iree_io_uring_sparse_table_release(table, slot, count);
+//   }
 //   iree_io_uring_sparse_table_unlock(table);
 //
 // The lock ensures the acquire-then-syscall sequence is atomic: no other
