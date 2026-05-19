@@ -10,6 +10,7 @@
 #include "iree/async/socket.h"
 #include "iree/base/internal/atomics.h"
 #include "iree/base/internal/math.h"
+#include "iree/base/threading/mutex.h"
 
 //===----------------------------------------------------------------------===//
 // Send slot management
@@ -22,6 +23,12 @@
 // must survive beyond the submit call. This buffer provides stable storage.
 #define IREE_NET_TCP_SEND_SLOT_INLINE_DATA_CAPACITY 64
 
+typedef uint8_t iree_net_tcp_send_slot_flags_t;
+enum iree_net_tcp_send_slot_flag_bits_e {
+  IREE_NET_TCP_SEND_SLOT_FLAG_NONE = 0u,
+  IREE_NET_TCP_SEND_SLOT_FLAG_QUEUED_RESOURCES_RETAINED = 1u << 0,
+};
+
 // Pre-allocated send operation slot.
 // Each slot tracks one in-flight send operation and provides inline storage
 // for the span list and small unregistered span data. This ensures all data
@@ -29,6 +36,12 @@
 typedef struct iree_net_tcp_send_slot_t {
   // The async send operation submitted to the proactor.
   iree_async_socket_send_operation_t operation;
+
+  // Next committed send slot waiting for proactor submission.
+  struct iree_net_tcp_send_slot_t* pending_next;
+
+  // Flags tracking carrier-owned send slot state.
+  iree_net_tcp_send_slot_flags_t flags;
 
   // User data from iree_net_send_params_t, echoed to completion callback.
   uint64_t user_data;
@@ -126,8 +139,25 @@ typedef struct iree_net_tcp_carrier_t {
   // Release: atomic OR to set bit.
   // No ordering dependency between slots — out-of-order completion is correct.
   struct {
+    // Guards pending_head, pending_tail, and submitted_count.
+    iree_slim_mutex_t pending_mutex;
+
+    // Head of the FIFO committed-send queue awaiting proactor submission.
+    iree_net_tcp_send_slot_t* pending_head;
+
+    // Tail of the FIFO committed-send queue awaiting proactor submission.
+    iree_net_tcp_send_slot_t* pending_tail;
+
+    // Number of send slots currently submitted to the proactor.
+    uint32_t submitted_count;
+
+    // Number of allocated send slots.
     uint32_t slot_count;
+
+    // Bitmap of free send slots; bit i set means slot i is free.
     iree_atomic_uint32_t free_bitmap;
+
+    // Contiguous storage for slot_count send slots.
     iree_net_tcp_send_slot_t* slots;
   } send;
 
@@ -262,6 +292,10 @@ static iree_status_t iree_net_tcp_carrier_submit_single_shot_recv(
 
 static void iree_net_tcp_carrier_resume_one_paused_recv(
     iree_net_tcp_carrier_t* carrier);
+
+static void iree_net_tcp_carrier_send_completion(
+    void* user_data, iree_async_operation_t* operation, iree_status_t status,
+    iree_async_completion_flags_t flags);
 
 static void iree_net_tcp_carrier_terminate_single_shot_recv(
     iree_net_tcp_carrier_t* carrier, iree_net_tcp_recv_slot_t* slot) {
@@ -684,23 +718,17 @@ static iree_status_t iree_net_tcp_carrier_submit_single_shot_recv(
 // Send completion handler
 //===----------------------------------------------------------------------===//
 
-// Completion callback for send operations.
-static void iree_net_tcp_carrier_send_completion(
-    void* user_data, iree_async_operation_t* operation, iree_status_t status,
-    iree_async_completion_flags_t flags) {
-  (void)flags;
-  iree_net_tcp_carrier_t* carrier = (iree_net_tcp_carrier_t*)user_data;
-  iree_async_socket_send_operation_t* send_op =
-      (iree_async_socket_send_operation_t*)operation;
+static uint32_t iree_net_tcp_send_slot_index(iree_net_tcp_carrier_t* carrier,
+                                             iree_net_tcp_send_slot_t* slot) {
+  return (uint32_t)(slot - carrier->send.slots);
+}
 
-  // Find the slot containing this operation.
-  // The slot's operation is at the beginning of the slot struct.
-  iree_net_tcp_send_slot_t* slot = (iree_net_tcp_send_slot_t*)send_op;
-
+static void iree_net_tcp_carrier_complete_send_slot(
+    iree_net_tcp_carrier_t* carrier, iree_net_tcp_send_slot_t* slot,
+    iree_status_t status, iree_host_size_t bytes_sent) {
   // Update statistics on success.
   if (iree_status_is_ok(status)) {
-    iree_atomic_fetch_add(&carrier->base.bytes_sent,
-                          (int64_t)send_op->bytes_sent,
+    iree_atomic_fetch_add(&carrier->base.bytes_sent, (int64_t)bytes_sent,
                           iree_memory_order_relaxed);
   } else {
     // Capture send errors as sticky failure status.
@@ -713,22 +741,33 @@ static void iree_net_tcp_carrier_send_completion(
   if (is_begin_send) {
     iree_allocator_free(carrier->base.host_allocator, slot->begin_send_buffer);
     slot->begin_send_buffer = NULL;
+    slot->begin_send_size = 0;
+  }
+
+  if (iree_any_bit_set(slot->flags,
+                       IREE_NET_TCP_SEND_SLOT_FLAG_QUEUED_RESOURCES_RETAINED)) {
+    iree_async_span_list_release_regions(slot->operation.buffers);
+    iree_async_operation_release_resources(&slot->operation.base);
+    slot->flags &= ~IREE_NET_TCP_SEND_SLOT_FLAG_QUEUED_RESOURCES_RETAINED;
   }
 
   // Invoke user callback if set. begin_send/commit_send operations do not fire
   // user callbacks (the data is fully consumed on commit).
   if (!is_begin_send && carrier->base.callback.fn) {
     carrier->base.callback.fn(carrier->base.callback.user_data, slot->user_data,
-                              status, send_op->bytes_sent, NULL);
+                              status, bytes_sent, NULL);
   } else {
     // No callback or begin_send operation - we must consume the status.
     iree_status_ignore(status);
   }
+  slot->user_data = 0;
+  slot->pending_next = NULL;
+  slot->flags = IREE_NET_TCP_SEND_SLOT_FLAG_NONE;
 
   // Release the slot back to the free bitmap.
   // Release ordering ensures all slot cleanup (buffer free, field zeroing) is
   // visible to threads that acquire-load the bitmap in begin_send/send.
-  int slot_index = (int)(slot - carrier->send.slots);
+  uint32_t slot_index = iree_net_tcp_send_slot_index(carrier, slot);
   iree_atomic_fetch_or(&carrier->send.free_bitmap, (uint32_t)1 << slot_index,
                        iree_memory_order_release);
 
@@ -738,6 +777,122 @@ static void iree_net_tcp_carrier_send_completion(
 
   // Check for deactivation completion.
   iree_net_tcp_carrier_maybe_complete_deactivation(carrier);
+}
+
+static iree_status_t iree_net_tcp_carrier_submit_send_slot(
+    iree_net_tcp_carrier_t* carrier, iree_net_tcp_send_slot_t* slot) {
+  return iree_async_proactor_submit_one(carrier->proactor,
+                                        &slot->operation.base);
+}
+
+static void iree_net_tcp_carrier_enqueue_send_slot_locked(
+    iree_net_tcp_carrier_t* carrier, iree_net_tcp_send_slot_t* slot) {
+  slot->pending_next = NULL;
+  iree_async_operation_retain_resources(&slot->operation.base);
+  iree_async_span_list_retain_regions(slot->operation.buffers);
+  slot->flags |= IREE_NET_TCP_SEND_SLOT_FLAG_QUEUED_RESOURCES_RETAINED;
+  if (carrier->send.pending_tail) {
+    carrier->send.pending_tail->pending_next = slot;
+  } else {
+    carrier->send.pending_head = slot;
+  }
+  carrier->send.pending_tail = slot;
+}
+
+static iree_net_tcp_send_slot_t*
+iree_net_tcp_carrier_pop_pending_send_slot_locked(
+    iree_net_tcp_carrier_t* carrier) {
+  iree_net_tcp_send_slot_t* slot = carrier->send.pending_head;
+  if (slot) {
+    carrier->send.pending_head = slot->pending_next;
+    if (!carrier->send.pending_head) {
+      carrier->send.pending_tail = NULL;
+    }
+    slot->pending_next = NULL;
+  }
+  return slot;
+}
+
+static iree_status_t iree_net_tcp_carrier_enqueue_or_submit_send_slot(
+    iree_net_tcp_carrier_t* carrier, iree_net_tcp_send_slot_t* slot) {
+  iree_slim_mutex_lock(&carrier->send.pending_mutex);
+
+  iree_status_t status = iree_ok_status();
+  if (carrier->send.pending_head) {
+    iree_net_tcp_carrier_enqueue_send_slot_locked(carrier, slot);
+  } else {
+    status = iree_net_tcp_carrier_submit_send_slot(carrier, slot);
+    if (iree_status_is_ok(status)) {
+      ++carrier->send.submitted_count;
+    } else if (iree_status_code(status) == IREE_STATUS_RESOURCE_EXHAUSTED &&
+               carrier->send.submitted_count > 0) {
+      iree_status_ignore(status);
+      iree_net_tcp_carrier_enqueue_send_slot_locked(carrier, slot);
+      status = iree_ok_status();
+    }
+  }
+
+  iree_slim_mutex_unlock(&carrier->send.pending_mutex);
+  return status;
+}
+
+static void iree_net_tcp_carrier_flush_pending_send_slots(
+    iree_net_tcp_carrier_t* carrier) {
+  for (;;) {
+    iree_slim_mutex_lock(&carrier->send.pending_mutex);
+    iree_net_tcp_send_slot_t* slot = carrier->send.pending_head;
+    if (!slot) {
+      iree_slim_mutex_unlock(&carrier->send.pending_mutex);
+      return;
+    }
+
+    iree_status_t status = iree_net_tcp_carrier_submit_send_slot(carrier, slot);
+    if (iree_status_is_ok(status)) {
+      (void)iree_net_tcp_carrier_pop_pending_send_slot_locked(carrier);
+      ++carrier->send.submitted_count;
+      iree_slim_mutex_unlock(&carrier->send.pending_mutex);
+    } else if (iree_status_code(status) == IREE_STATUS_RESOURCE_EXHAUSTED) {
+      if (carrier->send.submitted_count > 0) {
+        // Submission capacity is still exhausted. The head slot remains queued
+        // and another send completion will retry it.
+        iree_status_ignore(status);
+        iree_slim_mutex_unlock(&carrier->send.pending_mutex);
+        return;
+      }
+      // There is no carrier-owned send completion left to trigger a retry.
+      // Fail the accepted slot instead of leaving deactivation permanently
+      // blocked behind a queued operation that nobody can service.
+      (void)iree_net_tcp_carrier_pop_pending_send_slot_locked(carrier);
+      iree_slim_mutex_unlock(&carrier->send.pending_mutex);
+      iree_net_tcp_carrier_complete_send_slot(carrier, slot, status, 0);
+    } else {
+      (void)iree_net_tcp_carrier_pop_pending_send_slot_locked(carrier);
+      iree_slim_mutex_unlock(&carrier->send.pending_mutex);
+      iree_net_tcp_carrier_complete_send_slot(carrier, slot, status, 0);
+    }
+  }
+}
+
+// Completion callback for send operations.
+static void iree_net_tcp_carrier_send_completion(
+    void* user_data, iree_async_operation_t* operation, iree_status_t status,
+    iree_async_completion_flags_t flags) {
+  (void)flags;
+  iree_net_tcp_carrier_t* carrier = (iree_net_tcp_carrier_t*)user_data;
+  iree_async_socket_send_operation_t* send_op =
+      (iree_async_socket_send_operation_t*)operation;
+
+  // The slot's operation is the first field.
+  iree_net_tcp_send_slot_t* slot = (iree_net_tcp_send_slot_t*)send_op;
+
+  iree_slim_mutex_lock(&carrier->send.pending_mutex);
+  IREE_ASSERT(carrier->send.submitted_count > 0);
+  --carrier->send.submitted_count;
+  iree_slim_mutex_unlock(&carrier->send.pending_mutex);
+
+  iree_net_tcp_carrier_flush_pending_send_slots(carrier);
+  iree_net_tcp_carrier_complete_send_slot(carrier, slot, status,
+                                          send_op->bytes_sent);
 }
 
 //===----------------------------------------------------------------------===//
@@ -770,6 +925,8 @@ static void iree_net_tcp_carrier_free(iree_net_tcp_carrier_t* carrier) {
   iree_async_socket_release(carrier->socket);
 
   // NOTE: recv_pool is not owned by carrier. Caller must ensure it outlives us.
+
+  iree_slim_mutex_deinitialize(&carrier->send.pending_mutex);
 
   // Free carrier memory.
   iree_allocator_t allocator = carrier->base.host_allocator;
@@ -1143,9 +1300,8 @@ static iree_status_t iree_net_tcp_carrier_send(
     inline_data_offset += length;
   }
 
-  // Submit to proactor.
   iree_status_t status =
-      iree_async_proactor_submit_one(carrier->proactor, &send_op->base);
+      iree_net_tcp_carrier_enqueue_or_submit_send_slot(carrier, slot);
 
   if (!iree_status_is_ok(status)) {
     // Rollback: release slot back to free bitmap.
@@ -1267,9 +1423,8 @@ static iree_status_t iree_net_tcp_carrier_commit_send(
   send_op->buffers.count = 1;
   send_op->send_flags = IREE_ASYNC_SOCKET_SEND_FLAG_NONE;
 
-  // Submit to proactor.
   iree_status_t status =
-      iree_async_proactor_submit_one(carrier->proactor, &send_op->base);
+      iree_net_tcp_carrier_enqueue_or_submit_send_slot(carrier, slot);
 
   if (!iree_status_is_ok(status)) {
     // Rollback: free buffer, release slot back to free bitmap.
@@ -1297,6 +1452,7 @@ static void iree_net_tcp_carrier_abort_send(
   // Free the allocated buffer.
   iree_allocator_free(carrier->base.host_allocator, slot->begin_send_buffer);
   slot->begin_send_buffer = NULL;
+  slot->begin_send_size = 0;
 
   // Release the slot back to the free bitmap.
   iree_atomic_fetch_or(&carrier->send.free_bitmap, (uint32_t)1 << slot_index,
@@ -1500,6 +1656,7 @@ IREE_API_EXPORT iree_status_t iree_net_tcp_carrier_create(
   // NOTE: recv_pool is not ref-counted. Caller must ensure it outlives carrier.
 
   // Initialize send slot bitmap with all slots free.
+  iree_slim_mutex_initialize(&carrier->send.pending_mutex);
   carrier->send.slot_count = options.send_slot_count;
   uint32_t all_free = (options.send_slot_count == 32)
                           ? UINT32_MAX

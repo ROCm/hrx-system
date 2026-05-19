@@ -35,8 +35,20 @@ namespace {
 class TcpCarrierTest : public ::testing::Test {
  protected:
   void SetUp() override {
+    CreateAsyncResources(/*max_concurrent_operations=*/0);
+  }
+
+  void TearDown() override { ReleaseAsyncResources(); }
+
+  void ResetAsyncResources(iree_host_size_t max_concurrent_operations) {
+    ReleaseAsyncResources();
+    CreateAsyncResources(max_concurrent_operations);
+  }
+
+  void CreateAsyncResources(iree_host_size_t max_concurrent_operations) {
     iree_async_proactor_options_t options =
         iree_async_proactor_options_default();
+    options.max_concurrent_operations = max_concurrent_operations;
     IREE_ASSERT_OK(iree_async_proactor_create_platform(
         options, iree_allocator_system(), &proactor_));
 
@@ -56,7 +68,7 @@ class TcpCarrierTest : public ::testing::Test {
         region_, iree_allocator_system(), &recv_pool_));
   }
 
-  void TearDown() override {
+  void ReleaseAsyncResources() {
     if (recv_pool_) {
       iree_async_buffer_pool_free(recv_pool_);
       recv_pool_ = nullptr;
@@ -176,6 +188,20 @@ static iree_status_t TestRecvHandler(void* user_data, iree_async_span_t data,
   return ctx->handler_return_status;
 }
 
+// Test-only region with caller-owned storage.
+struct TestRegion {
+  // Base async region presented to the send path.
+  iree_async_region_t base;
+
+  // Counter incremented when the region's final reference is released.
+  std::atomic<int>* destroy_count = nullptr;
+};
+
+static void TestRegionDestroy(iree_async_region_t* region) {
+  auto* test_region = reinterpret_cast<TestRegion*>(region);
+  ++(*test_region->destroy_count);
+}
+
 // Context for deactivate callback.
 struct DeactivateContext {
   bool completed = false;
@@ -254,6 +280,150 @@ TEST_F(TcpCarrierTest, AllocateWithCustomOptions) {
   EXPECT_TRUE(caps & IREE_NET_CARRIER_CAPABILITY_ORDERED);
   EXPECT_EQ(iree_net_carrier_state(carrier), IREE_NET_CARRIER_STATE_CREATED);
 
+  iree_net_carrier_release(carrier);
+  iree_async_socket_release(client);
+  iree_async_socket_release(listener);
+}
+
+TEST_F(TcpCarrierTest, CommitSendQueuesWhenSubmitBackpressures) {
+  ResetAsyncResources(/*max_concurrent_operations=*/4);
+
+  iree_async_socket_t* client = nullptr;
+  iree_async_socket_t* server = nullptr;
+  iree_async_socket_t* listener = nullptr;
+  EstablishConnection(&client, &server, &listener);
+
+  iree_net_tcp_carrier_options_t options =
+      iree_net_tcp_carrier_options_default();
+  options.send_slot_count = 8;
+  options.single_shot_recv_count = 1;
+
+  iree_net_carrier_t* carrier = nullptr;
+  IREE_ASSERT_OK(iree_net_tcp_carrier_allocate(
+      proactor_, server, recv_pool_, options, {nullptr, nullptr},
+      iree_allocator_system(), &carrier));
+  ASSERT_NE(carrier, nullptr);
+
+  RecvTestContext recv_ctx;
+  iree_net_carrier_set_recv_handler(carrier, {TestRecvHandler, &recv_ctx});
+  IREE_ASSERT_OK(iree_net_carrier_activate(carrier));
+
+  constexpr iree_host_size_t kPayloadSize = 16;
+  constexpr int kSendCount = 8;
+  for (int i = 0; i < kSendCount; ++i) {
+    void* ptr = nullptr;
+    iree_net_carrier_send_handle_t handle = 0;
+    IREE_ASSERT_OK(
+        iree_net_carrier_begin_send(carrier, kPayloadSize, &ptr, &handle));
+    ASSERT_NE(ptr, nullptr);
+    memset(ptr, i, kPayloadSize);
+    IREE_ASSERT_OK(iree_net_carrier_commit_send(carrier, handle));
+  }
+
+  iree_host_size_t expected_bytes = kPayloadSize * kSendCount;
+  int polls = 0;
+  while (polls < 100 && (iree_host_size_t)iree_atomic_load(
+                            &carrier->bytes_sent, iree_memory_order_relaxed) <
+                            expected_bytes) {
+    iree_host_size_t count = 0;
+    iree_status_t status =
+        iree_async_proactor_poll(proactor_, iree_make_timeout_ms(50), &count);
+    if (iree_status_is_deadline_exceeded(status)) {
+      iree_status_ignore(status);
+    } else {
+      IREE_ASSERT_OK(status);
+    }
+    ++polls;
+  }
+  EXPECT_GE((iree_host_size_t)iree_atomic_load(&carrier->bytes_sent,
+                                               iree_memory_order_relaxed),
+            expected_bytes);
+
+  DeactivateAndWait(proactor_, carrier);
+  iree_net_carrier_release(carrier);
+  iree_async_socket_release(client);
+  iree_async_socket_release(listener);
+}
+
+TEST_F(TcpCarrierTest, QueuedSendRetainsRegisteredRegion) {
+  ResetAsyncResources(/*max_concurrent_operations=*/4);
+
+  iree_async_socket_t* client = nullptr;
+  iree_async_socket_t* server = nullptr;
+  iree_async_socket_t* listener = nullptr;
+  EstablishConnection(&client, &server, &listener);
+
+  iree_net_tcp_carrier_options_t options =
+      iree_net_tcp_carrier_options_default();
+  options.send_slot_count = 8;
+  options.single_shot_recv_count = 1;
+
+  iree_net_carrier_t* carrier = nullptr;
+  IREE_ASSERT_OK(iree_net_tcp_carrier_allocate(
+      proactor_, server, recv_pool_, options, {nullptr, nullptr},
+      iree_allocator_system(), &carrier));
+  ASSERT_NE(carrier, nullptr);
+
+  RecvTestContext recv_ctx;
+  iree_net_carrier_set_recv_handler(carrier, {TestRecvHandler, &recv_ctx});
+  IREE_ASSERT_OK(iree_net_carrier_activate(carrier));
+
+  constexpr iree_host_size_t kPayloadSize = 16;
+  constexpr int kBackpressureSendCount = 4;
+  for (int i = 0; i < kBackpressureSendCount; ++i) {
+    void* ptr = nullptr;
+    iree_net_carrier_send_handle_t handle = 0;
+    IREE_ASSERT_OK(
+        iree_net_carrier_begin_send(carrier, kPayloadSize, &ptr, &handle));
+    ASSERT_NE(ptr, nullptr);
+    memset(ptr, i, kPayloadSize);
+    IREE_ASSERT_OK(iree_net_carrier_commit_send(carrier, handle));
+  }
+
+  uint8_t registered_payload[kPayloadSize] = {0};
+  std::atomic<int> destroy_count = 0;
+  TestRegion test_region;
+  memset(&test_region.base, 0, sizeof(test_region.base));
+  iree_atomic_ref_count_init(&test_region.base.ref_count);
+  test_region.base.proactor = proactor_;
+  test_region.base.destroy_fn = TestRegionDestroy;
+  test_region.base.type = IREE_ASYNC_REGION_TYPE_NONE;
+  test_region.base.access_flags = IREE_ASYNC_BUFFER_ACCESS_FLAG_READ;
+  test_region.base.base_ptr = registered_payload;
+  test_region.base.length = sizeof(registered_payload);
+  test_region.destroy_count = &destroy_count;
+
+  iree_async_span_t span =
+      iree_async_span_make(&test_region.base, 0, sizeof(registered_payload));
+  iree_net_send_params_t params;
+  memset(&params, 0, sizeof(params));
+  params.data = iree_async_span_list_make(&span, 1);
+  IREE_ASSERT_OK(iree_net_carrier_send(carrier, &params));
+
+  iree_async_region_release(&test_region.base);
+  EXPECT_EQ(destroy_count.load(), 0);
+
+  iree_host_size_t expected_bytes = kPayloadSize * (kBackpressureSendCount + 1);
+  int polls = 0;
+  while (polls < 100 && (iree_host_size_t)iree_atomic_load(
+                            &carrier->bytes_sent, iree_memory_order_relaxed) <
+                            expected_bytes) {
+    iree_host_size_t count = 0;
+    iree_status_t status =
+        iree_async_proactor_poll(proactor_, iree_make_timeout_ms(50), &count);
+    if (iree_status_is_deadline_exceeded(status)) {
+      iree_status_ignore(status);
+    } else {
+      IREE_ASSERT_OK(status);
+    }
+    ++polls;
+  }
+  EXPECT_GE((iree_host_size_t)iree_atomic_load(&carrier->bytes_sent,
+                                               iree_memory_order_relaxed),
+            expected_bytes);
+  EXPECT_EQ(destroy_count.load(), 1);
+
+  DeactivateAndWait(proactor_, carrier);
   iree_net_carrier_release(carrier);
   iree_async_socket_release(client);
   iree_async_socket_release(listener);
