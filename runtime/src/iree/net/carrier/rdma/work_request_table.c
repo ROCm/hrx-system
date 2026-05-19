@@ -10,6 +10,11 @@
 
 #define IREE_NET_RDMA_WORK_REQUEST_TABLE_INVALID_INDEX UINT32_MAX
 
+typedef uint8_t iree_net_rdma_work_request_slot_flags_t;
+enum iree_net_rdma_work_request_slot_bits_e {
+  IREE_NET_RDMA_WORK_REQUEST_SLOT_IN_USE = 1u << 0,
+};
+
 struct iree_net_rdma_work_request_slot_t {
   // User data returned when the work request completes.
   uint64_t user_data;
@@ -23,8 +28,8 @@ struct iree_net_rdma_work_request_slot_t {
   // Operation class returned when the work request completes.
   iree_net_rdma_work_request_operation_t operation;
 
-  // True while the slot is owned by an in-flight work request.
-  bool in_use;
+  // Bitfield of iree_net_rdma_work_request_slot_bits_e values.
+  iree_net_rdma_work_request_slot_flags_t flags;
 };
 
 static uint64_t iree_net_rdma_work_request_table_make_wr_id(
@@ -84,6 +89,7 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_work_request_table_initialize(
   }
 
   if (iree_status_is_ok(status)) {
+    memset(slots, 0, capacity * sizeof(*slots));
     for (uint32_t index = 0; index < capacity; ++index) {
       slots[index].generation = 1;
       slots[index].next_free =
@@ -145,7 +151,7 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_work_request_table_acquire(
   slot->user_data = user_data;
   slot->operation = operation;
   slot->next_free = IREE_NET_RDMA_WORK_REQUEST_TABLE_INVALID_INDEX;
-  slot->in_use = true;
+  slot->flags = IREE_NET_RDMA_WORK_REQUEST_SLOT_IN_USE;
   *out_wr_id =
       iree_net_rdma_work_request_table_make_wr_id(index, slot->generation);
   return iree_ok_status();
@@ -175,7 +181,8 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_work_request_table_complete(
   iree_net_rdma_work_request_slot_t* slot = &slots[index];
   uint32_t generation =
       iree_net_rdma_work_request_table_wr_id_generation(wr_id);
-  if (!slot->in_use || slot->generation != generation) {
+  if (!iree_any_bit_set(slot->flags, IREE_NET_RDMA_WORK_REQUEST_SLOT_IN_USE) ||
+      slot->generation != generation) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "wr_id does not reference an in-flight work request");
@@ -189,7 +196,7 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_work_request_table_complete(
   slot->generation =
       iree_net_rdma_work_request_table_next_generation(slot->generation);
   slot->next_free = table->free_head;
-  slot->in_use = false;
+  slot->flags = 0;
   table->free_head = index;
   ++table->available_capacity;
   return iree_ok_status();

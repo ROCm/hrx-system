@@ -267,6 +267,41 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_library(
   NAME
+    receive_queue
+  HDRS
+    "receive_queue.h"
+  SRCS
+    "receive_queue.c"
+  DEPS
+    ::queue_pair
+    ::sge
+    ::work_request_table
+    iree::async
+    iree::base
+    rdma_core::headers
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    receive_queue_test
+  SRCS
+    "receive_queue_test.cc"
+  DEPS
+    ::receive_queue
+    iree::async
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    rdma_core::headers
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_library(
+  NAME
     region
   HDRS
     "region.h"

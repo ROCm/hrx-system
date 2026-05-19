@@ -7,19 +7,21 @@
 // RDMA carrier: reliable connected queue-pair transport.
 //
 // The RDMA carrier is the host-initiated data plane for RDMA-capable remoting.
-// It wraps an rdma_cm-established Reliable Connection (RC) queue pair and
-// exposes it through the generic iree_net_carrier_t interface:
+// It owns the verbs resources attached to one rdma_cm Reliable Connection (RC)
+// ID and exposes them through the generic iree_net_carrier_t interface:
 //
 //   - send(): two-sided IBV_WR_SEND for ordered message/control traffic.
 //   - direct_write(): RDMA WRITE or RDMA WRITE WITH IMMEDIATE for bulk data.
 //   - direct_read(): RDMA READ for pull-based bulk data.
 //   - register_buffer(): one-time MR registration for host or dma-buf memory.
 //
-// The carrier does not perform address exchange itself. The transport factory
-// owns rdma_cm listener/connect state, creates the QP before connect/accept,
-// exchanges private connection data, and hands an established connection to the
-// carrier. Keeping the rdma_cm state machine out of carrier send paths makes
-// the hot path just WR posting, CQ draining, and credit accounting.
+// The transport factory owns rdma_cm listener/connect state and route
+// resolution. The carrier owns the QP, CQs, receive postings, and credit
+// memory that must exist before rdma_connect/rdma_accept private-data exchange.
+// The factory borrows those carrier-owned handshake values, completes the
+// rdma_cm state machine, then activates the carrier data plane. Keeping the
+// rdma_cm state machine out of carrier send paths makes the hot path just WR
+// posting, CQ draining, and credit accounting.
 //
 // ## Capability model
 //
@@ -104,7 +106,7 @@ iree_net_rdma_carrier_options_default(void) {
   return options;
 }
 
-// Parameters for creating a carrier from an established rdma_cm connection.
+// Parameters for creating a carrier around an rdma_cm connection ID.
 typedef struct iree_net_rdma_carrier_create_params_t {
   // Shared RDMA context. Retained by the carrier.
   iree_net_rdma_context_t* context;
@@ -116,8 +118,10 @@ typedef struct iree_net_rdma_carrier_create_params_t {
   // must outlive the carrier.
   iree_async_buffer_pool_t* recv_pool;
 
-  // Established rdma_cm connection identifier. Ownership transfers to the
-  // carrier on successful creation; on failure, the caller retains ownership.
+  // Resolved rdma_cm connection identifier. The carrier creates and owns the QP
+  // attached to this ID before the factory calls rdma_connect/rdma_accept.
+  // Ownership transfers to the carrier on successful creation; on failure, the
+  // caller retains ownership.
   struct rdma_cm_id* connection_id;
 
   // Completion callback for carrier operations.
@@ -127,12 +131,13 @@ typedef struct iree_net_rdma_carrier_create_params_t {
   iree_net_rdma_carrier_options_t options;
 } iree_net_rdma_carrier_create_params_t;
 
-// Creates an RDMA carrier from an established rdma_cm connection.
+// Creates an RDMA carrier around a resolved rdma_cm connection ID.
 //
-// The connection ID must already have a QP associated with it and must be in
-// the established state. The transport factory is responsible for rdma_cm
-// address resolution, route resolution, connect/accept, and private-data
-// exchange.
+// The connection ID must already be bound to a local RDMA device and must not
+// yet have a QP associated with it. The carrier creates the QP and local
+// private-data state; the transport factory is responsible for rdma_cm address
+// resolution, route resolution, connect/accept, and exchanging the carrier's
+// serialized private data.
 IREE_API_EXPORT iree_status_t iree_net_rdma_carrier_create(
     iree_net_rdma_carrier_create_params_t params,
     iree_allocator_t host_allocator, iree_net_carrier_t** out_carrier);
