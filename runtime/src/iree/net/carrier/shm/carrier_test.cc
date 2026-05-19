@@ -323,6 +323,38 @@ TEST_F(ShmCarrierTest, HandleOffsetAddsToOpaque1) {
 }
 
 //===----------------------------------------------------------------------===//
+// direct_write budget
+//===----------------------------------------------------------------------===//
+
+TEST_F(ShmCarrierTest, DirectWriteBudgetDistinguishesSignalingAdmission) {
+  iree_net_carrier_send_budget_t before_activate_budget =
+      iree_net_carrier_query_direct_write_budget(
+          client_, IREE_NET_DIRECT_WRITE_FLAG_NONE);
+  EXPECT_EQ(before_activate_budget.slots, 0u);
+  EXPECT_EQ(before_activate_budget.bytes, 0u);
+
+  ActivateBoth(MakeNullRecvHandler(), MakeNullRecvHandler());
+
+  iree_net_carrier_send_budget_t plain_budget =
+      iree_net_carrier_query_direct_write_budget(
+          client_, IREE_NET_DIRECT_WRITE_FLAG_NONE);
+  EXPECT_EQ(plain_budget.slots, UINT32_MAX);
+  EXPECT_EQ(plain_budget.bytes, IREE_HOST_SIZE_MAX);
+
+  iree_net_carrier_send_budget_t signaling_budget =
+      iree_net_carrier_query_direct_write_budget(
+          client_, IREE_NET_DIRECT_WRITE_FLAG_SIGNAL_RECEIVER);
+  EXPECT_GT(signaling_budget.slots, 0u);
+  EXPECT_LT(signaling_budget.slots, UINT32_MAX);
+  EXPECT_EQ(signaling_budget.bytes, IREE_HOST_SIZE_MAX);
+
+  iree_net_carrier_send_budget_t unsupported_budget =
+      iree_net_carrier_query_direct_write_budget(client_, 1u << 31);
+  EXPECT_EQ(unsupported_budget.slots, 0u);
+  EXPECT_EQ(unsupported_budget.bytes, 0u);
+}
+
+//===----------------------------------------------------------------------===//
 // direct_write (non-signaling)
 //===----------------------------------------------------------------------===//
 

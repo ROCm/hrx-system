@@ -823,6 +823,37 @@ static iree_net_carrier_send_budget_t iree_net_shm_carrier_query_send_budget(
   return budget;
 }
 
+static iree_net_carrier_send_budget_t
+iree_net_shm_carrier_query_direct_write_budget(
+    iree_net_carrier_t* base_carrier, iree_net_direct_write_flags_t flags) {
+  iree_net_direct_write_flags_t known_flags =
+      IREE_NET_DIRECT_WRITE_FLAG_SIGNAL_RECEIVER;
+  iree_net_carrier_send_budget_t budget = {0};
+  if (iree_any_bit_set(flags, ~known_flags)) return budget;
+
+  if (iree_net_carrier_state(base_carrier) != IREE_NET_CARRIER_STATE_ACTIVE) {
+    return budget;
+  }
+  budget.bytes = IREE_HOST_SIZE_MAX;
+  if (!iree_any_bit_set(flags, IREE_NET_DIRECT_WRITE_FLAG_SIGNAL_RECEIVER)) {
+    budget.slots = UINT32_MAX;
+    return budget;
+  }
+
+  iree_net_shm_carrier_t* carrier = iree_net_shm_carrier_cast(base_carrier);
+  iree_host_size_t ring_entry_size =
+      sizeof(iree_net_shm_entry_header_t) +
+      sizeof(iree_net_shm_reference_descriptor_t);
+  // Account for the uint32_t length prefix plus worst-case 8-byte alignment.
+  iree_host_size_t per_entry_overhead = sizeof(uint32_t) + 7;
+  iree_host_size_t total_entry_size = ring_entry_size + per_entry_overhead;
+  iree_host_size_t available_entries =
+      iree_mpsc_queue_write_available(&carrier->tx_queue) / total_entry_size;
+  budget.slots =
+      available_entries > UINT32_MAX ? UINT32_MAX : (uint32_t)available_entries;
+  return budget;
+}
+
 static iree_status_t iree_net_shm_carrier_send(
     iree_net_carrier_t* base_carrier, const iree_net_send_params_t* params) {
   iree_net_shm_carrier_t* carrier = iree_net_shm_carrier_cast(base_carrier);
@@ -1337,6 +1368,7 @@ static const iree_net_carrier_vtable_t iree_net_shm_carrier_vtable = {
     .import_file_handle = iree_net_shm_carrier_import_file_handle,
     .release_file_handle_transfer =
         iree_net_shm_carrier_release_file_handle_transfer,
+    .query_direct_write_budget = iree_net_shm_carrier_query_direct_write_budget,
 };
 
 //===----------------------------------------------------------------------===//

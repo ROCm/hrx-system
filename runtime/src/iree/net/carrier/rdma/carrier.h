@@ -33,9 +33,11 @@
 //
 // ## Backpressure
 //
-// query_send_budget() is the only admission-control surface. For RDMA it must
-// account for local SQ capacity and remote receive/notification credits so
-// callers never intentionally drive the QP into RNR. Credit return is carrier
+// query_send_budget() reports two-sided SEND admission and must account for
+// local SQ capacity plus remote receive credits so callers never intentionally
+// drive the QP into RNR. query_direct_write_budget() reports one-sided WRITE
+// admission: plain WRITEs consume only local SQ capacity, while WRITE WITH
+// IMMEDIATE also consumes remote receive credits. Credit return is carrier
 // internal; higher layers should not add their own remote wait/round-trip.
 
 #ifndef IREE_NET_CARRIER_RDMA_CARRIER_H_

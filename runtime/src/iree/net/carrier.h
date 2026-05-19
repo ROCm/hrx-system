@@ -32,9 +32,10 @@
 //
 // ## Backpressure
 //
-// Carriers expose backpressure via query_send_budget(). When budget is
-// exhausted, callers should wait for send completions before submitting
-// more data. This prevents buffer exhaustion and RNR errors (RDMA).
+// Carriers expose message backpressure via query_send_budget() and one-sided
+// write backpressure via query_direct_write_budget(). When budget is exhausted,
+// callers should wait for operation completions before submitting more data.
+// This prevents buffer exhaustion and RNR errors (RDMA).
 
 #ifndef IREE_NET_CARRIER_H_
 #define IREE_NET_CARRIER_H_
@@ -282,6 +283,9 @@ typedef struct iree_net_direct_read_params_t {
 //   - UDP: Limited by socket buffer and MTU
 //
 // Callers should check both dimensions before submitting operations.
+//
+// query_send_budget() reports budget for message sends. Carriers with one-sided
+// operations may expose operation-specific budgets through other query APIs.
 typedef struct iree_net_carrier_send_budget_t {
   // Bytes available for sending. 0 means backpressured on bandwidth.
   // For TCP, this reflects socket send buffer space.
@@ -469,6 +473,11 @@ struct iree_net_carrier_vtable_t {
       iree_net_carrier_t* carrier,
       iree_net_file_handle_transfer_type_t transfer_type,
       iree_const_byte_span_t transfer_payload);
+
+  // Queries current admission budget for direct_write operations with |flags|.
+  // Optional; unsupported when NULL.
+  iree_net_carrier_send_budget_t (*query_direct_write_budget)(
+      iree_net_carrier_t* carrier, iree_net_direct_write_flags_t flags);
 };
 
 // Statistics for a carrier. Cumulative since carrier creation.
@@ -812,6 +821,21 @@ static inline iree_status_t iree_net_carrier_shutdown(
 static inline iree_status_t iree_net_carrier_direct_write(
     iree_net_carrier_t* carrier, const iree_net_direct_write_params_t* params) {
   return carrier->vtable->direct_write(carrier, params);
+}
+
+// Queries admission budget for direct_write operations with |flags|.
+//
+// Plain one-sided writes may have a larger slot budget than ordinary sends
+// because they only consume local send-queue entries. Signaling writes consume
+// both local send-queue entries and peer receive credits.
+static inline iree_net_carrier_send_budget_t
+iree_net_carrier_query_direct_write_budget(
+    iree_net_carrier_t* carrier, iree_net_direct_write_flags_t flags) {
+  if (!carrier->vtable->query_direct_write_budget) {
+    iree_net_carrier_send_budget_t empty_budget = {0};
+    return empty_budget;
+  }
+  return carrier->vtable->query_direct_write_budget(carrier, flags);
 }
 
 // Reads remote memory into a local buffer without involving the remote CPU.

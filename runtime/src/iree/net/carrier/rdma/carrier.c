@@ -951,6 +951,37 @@ static iree_net_carrier_send_budget_t iree_net_rdma_carrier_query_send_budget(
   return budget;
 }
 
+static iree_net_carrier_send_budget_t
+iree_net_rdma_carrier_query_direct_write_budget(
+    iree_net_carrier_t* base_carrier, iree_net_direct_write_flags_t flags) {
+  iree_net_direct_write_flags_t known_flags =
+      IREE_NET_DIRECT_WRITE_FLAG_SIGNAL_RECEIVER;
+  iree_net_carrier_send_budget_t budget = {0};
+  if (iree_any_bit_set(flags, ~known_flags)) return budget;
+
+  iree_net_rdma_carrier_t* carrier =
+      iree_net_rdma_carrier_from_base(base_carrier);
+  iree_net_rdma_send_window_acquire_flags_t acquire_flags =
+      IREE_NET_RDMA_SEND_WINDOW_ACQUIRE_FLAG_NONE;
+  if (iree_any_bit_set(flags, IREE_NET_DIRECT_WRITE_FLAG_SIGNAL_RECEIVER)) {
+    acquire_flags = IREE_NET_RDMA_SEND_WINDOW_ACQUIRE_FLAG_REMOTE_RECV_CREDIT;
+  }
+
+  iree_slim_mutex_lock(&carrier->queue_mutex);
+  if (iree_net_carrier_state(base_carrier) == IREE_NET_CARRIER_STATE_ACTIVE) {
+    budget.bytes = IREE_HOST_SIZE_MAX;
+    if (iree_any_bit_set(
+            acquire_flags,
+            IREE_NET_RDMA_SEND_WINDOW_ACQUIRE_FLAG_REMOTE_RECV_CREDIT)) {
+      iree_net_rdma_carrier_refresh_remote_recv_credits_locked(carrier);
+    }
+    budget.slots = iree_net_rdma_send_window_available(&carrier->send_window,
+                                                       acquire_flags);
+  }
+  iree_slim_mutex_unlock(&carrier->queue_mutex);
+  return budget;
+}
+
 static iree_status_t iree_net_rdma_carrier_total_span_length(
     iree_async_span_list_t spans, iree_host_size_t* out_total_length) {
   *out_total_length = 0;
@@ -1651,6 +1682,8 @@ static const iree_net_carrier_vtable_t iree_net_rdma_carrier_vtable = {
     .direct_read = iree_net_rdma_carrier_direct_read,
     .register_buffer = iree_net_rdma_carrier_register_buffer,
     .unregister_buffer = iree_net_rdma_carrier_unregister_buffer,
+    .query_direct_write_budget =
+        iree_net_rdma_carrier_query_direct_write_budget,
 };
 
 static iree_status_t iree_net_rdma_carrier_create_send_staging_pool(
