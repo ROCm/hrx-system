@@ -71,9 +71,11 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_queue_pair_initialize(
   }
 
   const iree_net_librdmacm_t* librdmacm = NULL;
+  const iree_net_libverbs_t* libverbs = NULL;
   struct ibv_qp_init_attr qp_init_attr;
   if (iree_status_is_ok(status)) {
     librdmacm = iree_net_rdma_context_librdmacm(params.context);
+    libverbs = iree_net_rdma_context_libverbs(params.context);
     memset(&qp_init_attr, 0, sizeof(qp_init_attr));
     qp_init_attr.qp_context = params.qp_context;
     qp_init_attr.send_cq =
@@ -110,6 +112,7 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_queue_pair_initialize(
 
   if (iree_status_is_ok(status)) {
     out_queue_pair->librdmacm = librdmacm;
+    out_queue_pair->libverbs = libverbs;
     out_queue_pair->connection_id = params.connection_id;
     out_queue_pair->native_qp = params.connection_id->qp;
     out_queue_pair->capabilities = qp_init_attr.cap;
@@ -125,6 +128,27 @@ IREE_API_EXPORT void iree_net_rdma_queue_pair_deinitialize(
     queue_pair->librdmacm->rdma_destroy_qp(queue_pair->connection_id);
   }
   memset(queue_pair, 0, sizeof(*queue_pair));
+}
+
+IREE_API_EXPORT iree_status_t
+iree_net_rdma_queue_pair_request_error(iree_net_rdma_queue_pair_t* queue_pair) {
+  iree_status_t status = iree_ok_status();
+  if (!queue_pair || !queue_pair->native_qp || !queue_pair->libverbs) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "queue_pair must contain a native QP");
+  }
+
+  if (iree_status_is_ok(status)) {
+    struct ibv_qp_attr attr;
+    memset(&attr, 0, sizeof(attr));
+    attr.qp_state = IBV_QPS_ERR;
+    errno = 0;
+    int result = queue_pair->libverbs->ibv_modify_qp(queue_pair->native_qp,
+                                                     &attr, IBV_QP_STATE);
+    status = iree_net_rdma_queue_pair_status_from_result(
+        __FILE__, __LINE__, result, "ibv_modify_qp");
+  }
+  return status;
 }
 
 IREE_API_EXPORT struct ibv_qp* iree_net_rdma_queue_pair_native_qp(

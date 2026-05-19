@@ -27,6 +27,7 @@ typedef uint8_t iree_net_rdma_carrier_flags_t;
 enum iree_net_rdma_carrier_flag_bits_e {
   IREE_NET_RDMA_CARRIER_FLAG_OWNS_CONNECTION_ID = 1u << 0,
   IREE_NET_RDMA_CARRIER_FLAG_REMOTE_CONNECTION_DATA_APPLIED = 1u << 1,
+  IREE_NET_RDMA_CARRIER_FLAG_QUEUE_PAIR_ERROR_REQUESTED = 1u << 2,
 };
 
 struct iree_net_rdma_carrier_t {
@@ -44,6 +45,12 @@ struct iree_net_rdma_carrier_t {
 
   // Serializes native QP posting and fixed queue bookkeeping.
   iree_slim_mutex_t queue_mutex;
+
+  // Callback invoked after DRAINING retires all pending operations.
+  iree_net_carrier_deactivate_callback_fn_t deactivate_callback;
+
+  // Opaque user data passed to deactivate_callback.
+  void* deactivate_user_data;
 
   // Owned RDMA-registered pool for staging non-RDMA CPU send spans.
   iree_async_buffer_pool_t* send_staging_pool;
@@ -209,12 +216,76 @@ static void iree_net_rdma_carrier_notify_error(iree_net_rdma_carrier_t* carrier,
                             /*bytes_transferred=*/0, /*recv_lease=*/NULL);
 }
 
+static void iree_net_rdma_carrier_add_pending_operations(
+    iree_net_rdma_carrier_t* carrier, uint32_t count) {
+  if (count == 0) return;
+  iree_atomic_fetch_add(&carrier->base.pending_operations, (int32_t)count,
+                        iree_memory_order_release);
+}
+
+static void iree_net_rdma_carrier_maybe_complete_deactivation_locked(
+    iree_net_rdma_carrier_t* carrier,
+    iree_net_carrier_deactivate_callback_fn_t* out_callback,
+    void** out_user_data) {
+  *out_callback = NULL;
+  *out_user_data = NULL;
+
+  iree_net_carrier_state_t state = iree_net_carrier_state(&carrier->base);
+  if (state != IREE_NET_CARRIER_STATE_DRAINING) return;
+
+  int32_t pending = iree_atomic_load(&carrier->base.pending_operations,
+                                     iree_memory_order_acquire);
+  if (pending > 0) return;
+
+  iree_net_carrier_set_state(&carrier->base,
+                             IREE_NET_CARRIER_STATE_DEACTIVATED);
+  *out_callback = carrier->deactivate_callback;
+  *out_user_data = carrier->deactivate_user_data;
+  carrier->deactivate_callback = NULL;
+  carrier->deactivate_user_data = NULL;
+}
+
+static void iree_net_rdma_carrier_drop_pending_operations_locked(
+    iree_net_rdma_carrier_t* carrier, uint32_t count,
+    iree_net_carrier_deactivate_callback_fn_t* out_callback,
+    void** out_user_data) {
+  *out_callback = NULL;
+  *out_user_data = NULL;
+  if (count == 0) return;
+
+  int32_t old_count =
+      iree_atomic_fetch_sub(&carrier->base.pending_operations, (int32_t)count,
+                            iree_memory_order_release);
+  if (old_count < (int32_t)count) {
+    iree_status_abort(iree_make_status(
+        IREE_STATUS_INTERNAL,
+        "RDMA carrier pending operation count underflow: old=%d drop=%u",
+        old_count, count));
+  }
+
+  iree_net_rdma_carrier_maybe_complete_deactivation_locked(
+      carrier, out_callback, out_user_data);
+}
+
+static void iree_net_rdma_carrier_invoke_deactivate_callback(
+    iree_net_carrier_deactivate_callback_fn_t callback, void* user_data) {
+  if (callback) callback(user_data);
+}
+
 static iree_status_t iree_net_rdma_carrier_status_from_work_completion(
     const struct ibv_wc* completion, const char* queue_name) {
   if (completion->status == IBV_WC_SUCCESS) return iree_ok_status();
   return iree_make_status(
       IREE_STATUS_UNAVAILABLE, "RDMA %s completion failed: status=%u vendor=%u",
       queue_name, (uint32_t)completion->status, completion->vendor_err);
+}
+
+static bool iree_net_rdma_carrier_work_completion_is_draining_flush(
+    iree_net_rdma_carrier_t* carrier, const struct ibv_wc* completion) {
+  if (completion->status != IBV_WC_WR_FLUSH_ERR) return false;
+  iree_net_carrier_state_t state = iree_net_carrier_state(&carrier->base);
+  return state == IREE_NET_CARRIER_STATE_DRAINING ||
+         state == IREE_NET_CARRIER_STATE_DEACTIVATED;
 }
 
 static iree_status_t iree_net_rdma_carrier_completion_kind_from_operation(
@@ -251,8 +322,15 @@ static void iree_net_rdma_carrier_on_send_completions(
     const struct ibv_wc* completion = &completions[i];
     iree_net_rdma_work_request_completion_t work_request_completion;
     memset(&work_request_completion, 0, sizeof(work_request_completion));
+    bool draining_flush =
+        iree_net_rdma_carrier_work_completion_is_draining_flush(carrier,
+                                                                completion);
     iree_status_t work_status =
-        iree_net_rdma_carrier_status_from_work_completion(completion, "send");
+        draining_flush ? iree_ok_status()
+                       : iree_net_rdma_carrier_status_from_work_completion(
+                             completion, "send");
+    iree_net_carrier_deactivate_callback_fn_t deactivate_callback = NULL;
+    void* deactivate_user_data = NULL;
 
     iree_slim_mutex_lock(&carrier->queue_mutex);
     iree_status_t cleanup_status = iree_net_rdma_work_request_table_complete(
@@ -269,11 +347,16 @@ static void iree_net_rdma_carrier_on_send_completions(
       cleanup_status =
           iree_net_rdma_send_window_complete(&carrier->send_window);
     }
+    if (iree_status_is_ok(cleanup_status)) {
+      iree_net_rdma_carrier_drop_pending_operations_locked(
+          carrier, 1, &deactivate_callback, &deactivate_user_data);
+    }
     iree_slim_mutex_unlock(&carrier->queue_mutex);
 
     iree_async_buffer_lease_release(
         &work_request_completion.retained_buffer_lease);
-    if (iree_status_is_ok(work_status) && iree_status_is_ok(cleanup_status)) {
+    if (!draining_flush && iree_status_is_ok(work_status) &&
+        iree_status_is_ok(cleanup_status)) {
       if (work_request_completion.operation ==
           IREE_NET_RDMA_WORK_REQUEST_OPERATION_DIRECT_READ) {
         iree_atomic_fetch_add(&carrier->base.bytes_received,
@@ -284,6 +367,12 @@ static void iree_net_rdma_carrier_on_send_completions(
                               (int64_t)work_request_completion.byte_length,
                               iree_memory_order_relaxed);
       }
+    }
+    if (draining_flush &&
+        work_request_completion.operation !=
+            IREE_NET_RDMA_WORK_REQUEST_OPERATION_COMMITTED_SEND) {
+      work_status = iree_make_status(
+          IREE_STATUS_CANCELLED, "RDMA send cancelled by carrier deactivation");
     }
     iree_status_t completion_status =
         iree_status_join(work_status, cleanup_status);
@@ -311,6 +400,8 @@ static void iree_net_rdma_carrier_on_send_completions(
                                 completion_status, bytes_transferred,
                                 /*recv_lease=*/NULL);
     }
+    iree_net_rdma_carrier_invoke_deactivate_callback(deactivate_callback,
+                                                     deactivate_user_data);
   }
 }
 
@@ -348,8 +439,16 @@ static void iree_net_rdma_carrier_on_recv_completions(
     const struct ibv_wc* completion = &completions[i];
     iree_net_rdma_work_request_completion_t work_request_completion;
     memset(&work_request_completion, 0, sizeof(work_request_completion));
+    bool draining_flush =
+        iree_net_rdma_carrier_work_completion_is_draining_flush(carrier,
+                                                                completion);
     iree_status_t work_status =
-        iree_net_rdma_carrier_status_from_work_completion(completion, "recv");
+        draining_flush ? iree_ok_status()
+                       : iree_net_rdma_carrier_status_from_work_completion(
+                             completion, "recv");
+    iree_net_carrier_deactivate_callback_fn_t deactivate_callback = NULL;
+    void* deactivate_user_data = NULL;
+    bool receive_queue_completed = false;
 
     iree_slim_mutex_lock(&carrier->queue_mutex);
     iree_status_t cleanup_status = iree_net_rdma_work_request_table_complete(
@@ -373,20 +472,30 @@ static void iree_net_rdma_carrier_on_recv_completions(
       cleanup_status = iree_net_rdma_receive_queue_complete(
           &carrier->receive_queue, work_request_completion, byte_length,
           &lease);
+      receive_queue_completed = iree_status_is_ok(cleanup_status);
     }
     iree_slim_mutex_unlock(&carrier->queue_mutex);
 
-    if (iree_status_is_ok(work_status) && iree_status_is_ok(cleanup_status)) {
+    if (!draining_flush && iree_status_is_ok(work_status) &&
+        iree_status_is_ok(cleanup_status)) {
       work_status = iree_net_rdma_carrier_deliver_receive(carrier, &lease);
     }
     iree_async_buffer_lease_release(&lease);
 
-    if (iree_status_is_ok(work_status) && iree_status_is_ok(cleanup_status)) {
+    if (!draining_flush && iree_status_is_ok(work_status) &&
+        iree_status_is_ok(cleanup_status)) {
       uint32_t posted_count = 0;
       iree_slim_mutex_lock(&carrier->queue_mutex);
       cleanup_status = iree_net_rdma_receive_queue_replenish(
           &carrier->receive_queue, carrier->options.recv_queue_depth,
           &posted_count);
+      iree_net_rdma_carrier_add_pending_operations(carrier, posted_count);
+      iree_slim_mutex_unlock(&carrier->queue_mutex);
+    }
+    if (receive_queue_completed) {
+      iree_slim_mutex_lock(&carrier->queue_mutex);
+      iree_net_rdma_carrier_drop_pending_operations_locked(
+          carrier, 1, &deactivate_callback, &deactivate_user_data);
       iree_slim_mutex_unlock(&carrier->queue_mutex);
     }
 
@@ -395,6 +504,8 @@ static void iree_net_rdma_carrier_on_recv_completions(
     if (!iree_status_is_ok(completion_status)) {
       iree_net_rdma_carrier_notify_error(carrier, completion_status);
     }
+    iree_net_rdma_carrier_invoke_deactivate_callback(deactivate_callback,
+                                                     deactivate_user_data);
   }
 }
 
@@ -457,18 +568,67 @@ static iree_status_t iree_net_rdma_carrier_deactivate(
     iree_net_carrier_deactivate_callback_fn_t callback, void* user_data) {
   iree_net_rdma_carrier_t* carrier =
       iree_net_rdma_carrier_from_base(base_carrier);
+  iree_net_carrier_deactivate_callback_fn_t deactivate_callback = NULL;
+  void* deactivate_user_data = NULL;
+  iree_status_t status = iree_ok_status();
+  int32_t pending = 0;
+  bool drain_completion_queues = false;
+
   iree_slim_mutex_lock(&carrier->queue_mutex);
   iree_net_carrier_state_t state = iree_net_carrier_state(base_carrier);
+  bool already_deactivated = state == IREE_NET_CARRIER_STATE_DEACTIVATED;
   if (state == IREE_NET_CARRIER_STATE_DEACTIVATED) {
-    iree_slim_mutex_unlock(&carrier->queue_mutex);
-    if (callback) callback(user_data);
-    return iree_ok_status();
+    deactivate_callback = callback;
+    deactivate_user_data = user_data;
+  } else if (state != IREE_NET_CARRIER_STATE_ACTIVE &&
+             state != IREE_NET_CARRIER_STATE_CREATED) {
+    status = iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "carrier must be in ACTIVE or CREATED state to deactivate");
   }
-  iree_net_carrier_set_state(base_carrier, IREE_NET_CARRIER_STATE_DRAINING);
-  iree_net_carrier_set_state(base_carrier, IREE_NET_CARRIER_STATE_DEACTIVATED);
+
+  if (!already_deactivated && iree_status_is_ok(status)) {
+    carrier->deactivate_callback = callback;
+    carrier->deactivate_user_data = user_data;
+    iree_net_carrier_set_state(base_carrier, IREE_NET_CARRIER_STATE_DRAINING);
+  }
+
+  if (!already_deactivated && iree_status_is_ok(status)) {
+    pending = iree_atomic_load(&base_carrier->pending_operations,
+                               iree_memory_order_acquire);
+    drain_completion_queues = pending > 0;
+    if (pending > 0 &&
+        !iree_any_bit_set(
+            carrier->flags,
+            IREE_NET_RDMA_CARRIER_FLAG_QUEUE_PAIR_ERROR_REQUESTED)) {
+      status = iree_net_rdma_queue_pair_request_error(&carrier->queue_pair);
+      if (iree_status_is_ok(status)) {
+        carrier->flags |= IREE_NET_RDMA_CARRIER_FLAG_QUEUE_PAIR_ERROR_REQUESTED;
+      } else {
+        carrier->deactivate_callback = NULL;
+        carrier->deactivate_user_data = NULL;
+        iree_net_carrier_set_state(base_carrier, state);
+      }
+    }
+  }
+
+  if (!already_deactivated && iree_status_is_ok(status)) {
+    iree_net_rdma_carrier_maybe_complete_deactivation_locked(
+        carrier, &deactivate_callback, &deactivate_user_data);
+  }
   iree_slim_mutex_unlock(&carrier->queue_mutex);
-  if (callback) callback(user_data);
-  return iree_ok_status();
+
+  if (iree_status_is_ok(status) && drain_completion_queues) {
+    status =
+        iree_net_rdma_completion_queue_drain(carrier->send_completion_queue);
+  }
+  if (iree_status_is_ok(status) && drain_completion_queues) {
+    status =
+        iree_net_rdma_completion_queue_drain(carrier->recv_completion_queue);
+  }
+  iree_net_rdma_carrier_invoke_deactivate_callback(deactivate_callback,
+                                                   deactivate_user_data);
+  return status;
 }
 
 static iree_net_carrier_send_budget_t iree_net_rdma_carrier_query_send_budget(
@@ -633,7 +793,7 @@ static iree_status_t iree_net_rdma_carrier_post_send_work_request_locked(
     iree_net_rdma_carrier_t* carrier,
     iree_net_rdma_work_request_operation_t operation,
     iree_net_rdma_send_window_acquire_flags_t acquire_flags, uint64_t user_data,
-    iree_host_size_t byte_length,
+    iree_host_size_t byte_length, uint32_t pending_operation_delta,
     iree_async_buffer_lease_t* retained_buffer_lease,
     struct ibv_send_wr* work_request) {
   iree_status_t status = iree_ok_status();
@@ -667,6 +827,10 @@ static iree_status_t iree_net_rdma_carrier_post_send_work_request_locked(
           __FILE__, __LINE__, error, "ibv_post_send");
     }
   }
+  if (iree_status_is_ok(status)) {
+    iree_net_rdma_carrier_add_pending_operations(carrier,
+                                                 pending_operation_delta);
+  }
 
   if (!iree_status_is_ok(status)) {
     if (work_request_id != 0) {
@@ -692,13 +856,13 @@ static iree_status_t iree_net_rdma_carrier_post_send_work_request(
     iree_net_rdma_carrier_t* carrier,
     iree_net_rdma_work_request_operation_t operation,
     iree_net_rdma_send_window_acquire_flags_t acquire_flags, uint64_t user_data,
-    iree_host_size_t byte_length,
+    iree_host_size_t byte_length, uint32_t pending_operation_delta,
     iree_async_buffer_lease_t* retained_buffer_lease,
     struct ibv_send_wr* work_request) {
   iree_slim_mutex_lock(&carrier->queue_mutex);
   iree_status_t status = iree_net_rdma_carrier_post_send_work_request_locked(
       carrier, operation, acquire_flags, user_data, byte_length,
-      retained_buffer_lease, work_request);
+      pending_operation_delta, retained_buffer_lease, work_request);
   iree_slim_mutex_unlock(&carrier->queue_mutex);
   return status;
 }
@@ -777,7 +941,8 @@ static iree_status_t iree_net_rdma_carrier_send(
     status = iree_net_rdma_carrier_post_send_work_request(
         carrier, IREE_NET_RDMA_WORK_REQUEST_OPERATION_SEND,
         IREE_NET_RDMA_SEND_WINDOW_ACQUIRE_FLAG_REMOTE_RECV_CREDIT,
-        params->user_data, total_length, &retained_buffer_lease, &work_request);
+        params->user_data, total_length, /*pending_operation_delta=*/1,
+        &retained_buffer_lease, &work_request);
   }
   if (!iree_status_is_ok(status)) {
     iree_async_buffer_lease_release(&retained_buffer_lease);
@@ -833,6 +998,9 @@ static iree_status_t iree_net_rdma_carrier_begin_send(
       status = iree_net_rdma_send_reservation_table_acquire(
           &carrier->send_reservation_table, &lease, size, out_handle);
     }
+    if (iree_status_is_ok(status)) {
+      iree_net_rdma_carrier_add_pending_operations(carrier, 1);
+    }
     iree_slim_mutex_unlock(&carrier->queue_mutex);
   }
   if (iree_status_is_ok(status)) {
@@ -851,9 +1019,11 @@ static iree_status_t iree_net_rdma_carrier_commit_send(
   iree_net_rdma_send_reservation_t reservation;
   memset(&reservation, 0, sizeof(reservation));
 
+  bool reservation_resolved = false;
   iree_slim_mutex_lock(&carrier->queue_mutex);
   iree_status_t status = iree_net_rdma_send_reservation_table_resolve(
       &carrier->send_reservation_table, handle, &reservation);
+  reservation_resolved = iree_status_is_ok(status);
   struct ibv_sge scatter_gather_entry;
   if (iree_status_is_ok(status) &&
       iree_net_carrier_state(base_carrier) != IREE_NET_CARRIER_STATE_ACTIVE) {
@@ -878,12 +1048,23 @@ static iree_status_t iree_net_rdma_carrier_commit_send(
     status = iree_net_rdma_carrier_post_send_work_request_locked(
         carrier, IREE_NET_RDMA_WORK_REQUEST_OPERATION_COMMITTED_SEND,
         IREE_NET_RDMA_SEND_WINDOW_ACQUIRE_FLAG_REMOTE_RECV_CREDIT,
-        /*user_data=*/0, reservation.byte_length, &reservation.buffer_lease,
+        /*user_data=*/0, reservation.byte_length,
+        /*pending_operation_delta=*/0, &reservation.buffer_lease,
         &work_request);
   }
   iree_slim_mutex_unlock(&carrier->queue_mutex);
   if (!iree_status_is_ok(status)) {
     iree_async_buffer_lease_release(&reservation.buffer_lease);
+    if (reservation_resolved) {
+      iree_net_carrier_deactivate_callback_fn_t deactivate_callback = NULL;
+      void* deactivate_user_data = NULL;
+      iree_slim_mutex_lock(&carrier->queue_mutex);
+      iree_net_rdma_carrier_drop_pending_operations_locked(
+          carrier, 1, &deactivate_callback, &deactivate_user_data);
+      iree_slim_mutex_unlock(&carrier->queue_mutex);
+      iree_net_rdma_carrier_invoke_deactivate_callback(deactivate_callback,
+                                                       deactivate_user_data);
+    }
   }
   return status;
 }
@@ -892,13 +1073,21 @@ static void iree_net_rdma_carrier_abort_send(
     iree_net_carrier_t* base_carrier, iree_net_carrier_send_handle_t handle) {
   iree_net_rdma_carrier_t* carrier =
       iree_net_rdma_carrier_from_base(base_carrier);
+  iree_net_carrier_deactivate_callback_fn_t deactivate_callback = NULL;
+  void* deactivate_user_data = NULL;
   iree_slim_mutex_lock(&carrier->queue_mutex);
   iree_status_t status = iree_net_rdma_send_reservation_table_abort(
       &carrier->send_reservation_table, handle);
+  if (iree_status_is_ok(status)) {
+    iree_net_rdma_carrier_drop_pending_operations_locked(
+        carrier, 1, &deactivate_callback, &deactivate_user_data);
+  }
   iree_slim_mutex_unlock(&carrier->queue_mutex);
   if (!iree_status_is_ok(status)) {
     iree_status_abort(status);
   }
+  iree_net_rdma_carrier_invoke_deactivate_callback(deactivate_callback,
+                                                   deactivate_user_data);
 }
 
 static iree_status_t iree_net_rdma_carrier_shutdown(
@@ -965,7 +1154,8 @@ static iree_status_t iree_net_rdma_carrier_direct_write(
     status = iree_net_rdma_carrier_post_send_work_request(
         carrier, IREE_NET_RDMA_WORK_REQUEST_OPERATION_DIRECT_WRITE,
         IREE_NET_RDMA_SEND_WINDOW_ACQUIRE_FLAG_NONE, params->user_data,
-        params->local.length, /*retained_buffer_lease=*/NULL, &work_request);
+        params->local.length, /*pending_operation_delta=*/1,
+        /*retained_buffer_lease=*/NULL, &work_request);
   }
   return status;
 }
@@ -1022,7 +1212,8 @@ static iree_status_t iree_net_rdma_carrier_direct_read(
     status = iree_net_rdma_carrier_post_send_work_request(
         carrier, IREE_NET_RDMA_WORK_REQUEST_OPERATION_DIRECT_READ,
         IREE_NET_RDMA_SEND_WINDOW_ACQUIRE_FLAG_NONE, params->user_data,
-        params->local.length, /*retained_buffer_lease=*/NULL, &work_request);
+        params->local.length, /*pending_operation_delta=*/1,
+        /*retained_buffer_lease=*/NULL, &work_request);
   }
   return status;
 }
@@ -1277,6 +1468,7 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_carrier_create(
     status = iree_net_rdma_receive_queue_replenish(
         &carrier->receive_queue, params.options.recv_queue_depth,
         &posted_recv_count);
+    iree_net_rdma_carrier_add_pending_operations(carrier, posted_recv_count);
   }
   if (iree_status_is_ok(status)) {
     status = iree_net_rdma_send_window_initialize(

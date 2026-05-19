@@ -73,4 +73,13 @@ TEST(RdmaQueuePairTest, DeinitializeAcceptsNullAndZeroedPair) {
   iree_net_rdma_queue_pair_deinitialize(&queue_pair);
 }
 
+TEST(RdmaQueuePairTest, RequestErrorRejectsMissingNativeQueuePair) {
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_net_rdma_queue_pair_request_error(nullptr));
+
+  iree_net_rdma_queue_pair_t queue_pair = {};
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_net_rdma_queue_pair_request_error(&queue_pair));
+}
+
 }  // namespace

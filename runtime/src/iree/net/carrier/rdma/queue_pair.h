@@ -26,6 +26,9 @@ typedef struct iree_net_rdma_queue_pair_t {
   // Borrowed librdmacm symbol table owned by context.
   const iree_net_librdmacm_t* librdmacm;
 
+  // Borrowed libibverbs symbol table owned by context.
+  const iree_net_libverbs_t* libverbs;
+
   // rdma_cm ID with the created QP attached.
   struct rdma_cm_id* connection_id;
 
@@ -88,6 +91,10 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_queue_pair_initialize(
 // Destroys the QP attached by initialize.
 IREE_API_EXPORT void iree_net_rdma_queue_pair_deinitialize(
     iree_net_rdma_queue_pair_t* queue_pair);
+
+// Transitions the QP to the error state, flushing outstanding WRs to the CQs.
+IREE_API_EXPORT iree_status_t
+iree_net_rdma_queue_pair_request_error(iree_net_rdma_queue_pair_t* queue_pair);
 
 // Returns the native QP.
 IREE_API_EXPORT struct ibv_qp* iree_net_rdma_queue_pair_native_qp(
