@@ -188,6 +188,43 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_library(
+    name = "credit_memory",
+    srcs = ["credit_memory.c"],
+    hdrs = ["credit_memory.h"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":connection_data",
+        ":context",
+        ":libverbs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "@rdma_core_headers",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "credit_memory_test",
+    srcs = ["credit_memory_test.cc"],
+    tags = [
+        "nodocker",
+    ],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":credit_memory",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "pollable_fd",
     srcs = ["pollable_fd.c"],
     hdrs = ["pollable_fd.h"],

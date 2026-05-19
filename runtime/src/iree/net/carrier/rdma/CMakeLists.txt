@@ -172,6 +172,42 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_library(
   NAME
+    credit_memory
+  HDRS
+    "credit_memory.h"
+  SRCS
+    "credit_memory.c"
+  DEPS
+    ::connection_data
+    ::context
+    ::libverbs
+    iree::base
+    iree::base::internal
+    rdma_core::headers
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    credit_memory_test
+  SRCS
+    "credit_memory_test.cc"
+  DEPS
+    ::credit_memory
+    iree::base
+    iree::base::internal
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "nodocker"
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_library(
+  NAME
     pollable_fd
   HDRS
     "pollable_fd.h"
