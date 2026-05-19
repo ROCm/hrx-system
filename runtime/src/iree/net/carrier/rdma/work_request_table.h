@@ -49,6 +49,8 @@ enum iree_net_rdma_work_request_operation_e {
   IREE_NET_RDMA_WORK_REQUEST_OPERATION_RECV = 2u,
   IREE_NET_RDMA_WORK_REQUEST_OPERATION_DIRECT_WRITE = 3u,
   IREE_NET_RDMA_WORK_REQUEST_OPERATION_DIRECT_READ = 4u,
+  // Send submitted by begin_send/commit_send, which has no user completion.
+  IREE_NET_RDMA_WORK_REQUEST_OPERATION_COMMITTED_SEND = 5u,
 };
 
 typedef struct iree_net_rdma_work_request_completion_t {

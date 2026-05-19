@@ -66,6 +66,7 @@ iree_cc_library(
     ::queue_pair
     ::receive_queue
     ::region
+    ::send_reservation_table
     ::send_window
     ::sge
     ::work_request_table
@@ -363,16 +364,15 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_library(
   NAME
-    sge
+    send_reservation_table
   HDRS
-    "sge.h"
+    "send_reservation_table.h"
   SRCS
-    "sge.c"
+    "send_reservation_table.c"
   DEPS
-    ::libverbs
     iree::async
     iree::base
-    rdma_core::headers
+    iree::net::carrier
   PUBLIC
 )
 endif()
@@ -380,12 +380,11 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_test(
   NAME
-    sge_test
+    send_reservation_table_test
   SRCS
-    "sge_test.cc"
+    "send_reservation_table_test.cc"
   DEPS
-    ::sge
-    iree::async
+    ::send_reservation_table
     iree::base
     iree::testing::gtest
     iree::testing::gtest_main
@@ -414,6 +413,38 @@ iree_cc_test(
     "send_window_test.cc"
   DEPS
     ::send_window
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_library(
+  NAME
+    sge
+  HDRS
+    "sge.h"
+  SRCS
+    "sge.c"
+  DEPS
+    ::libverbs
+    iree::async
+    iree::base
+    rdma_core::headers
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    sge_test
+  SRCS
+    "sge_test.cc"
+  DEPS
+    ::sge
+    iree::async
     iree::base
     iree::testing::gtest
     iree::testing::gtest_main
