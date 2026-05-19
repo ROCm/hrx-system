@@ -618,7 +618,14 @@ static iree_status_t iree_net_rdma_carrier_activate(
                             "recv handler must be set before activation");
   }
   iree_net_carrier_set_state(base_carrier, IREE_NET_CARRIER_STATE_ACTIVE);
-  return iree_ok_status();
+  iree_net_rdma_carrier_t* carrier =
+      iree_net_rdma_carrier_from_base(base_carrier);
+  iree_status_t status =
+      iree_net_rdma_completion_queue_activate(carrier->recv_completion_queue);
+  if (!iree_status_is_ok(status)) {
+    iree_net_carrier_set_state(base_carrier, IREE_NET_CARRIER_STATE_CREATED);
+  }
+  return status;
 }
 
 static iree_status_t iree_net_rdma_carrier_deactivate(
@@ -1456,6 +1463,7 @@ static iree_status_t iree_net_rdma_carrier_create_completion_queues(
     iree_net_rdma_completion_queue_options_t recv_options =
         iree_net_rdma_completion_queue_options_default();
     recv_options.completion_capacity = (int)carrier->options.recv_queue_depth;
+    recv_options.flags = IREE_NET_RDMA_COMPLETION_QUEUE_FLAG_DEFER_ACTIVATION;
     iree_net_rdma_completion_queue_callback_t recv_callback = {
         iree_net_rdma_carrier_on_recv_completions,
         carrier,

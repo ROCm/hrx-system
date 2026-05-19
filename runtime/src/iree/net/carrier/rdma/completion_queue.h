@@ -26,6 +26,13 @@ extern "C" {
 typedef struct iree_net_rdma_completion_queue_t
     iree_net_rdma_completion_queue_t;
 
+typedef uint8_t iree_net_rdma_completion_queue_flags_t;
+enum iree_net_rdma_completion_queue_flag_bits_e {
+  // Defers proactor registration and CQ notification until explicit
+  // activation.
+  IREE_NET_RDMA_COMPLETION_QUEUE_FLAG_DEFER_ACTIVATION = 1u << 0,
+};
+
 // Completion queue creation options.
 typedef struct iree_net_rdma_completion_queue_options_t {
   // Number of work completions requested for the native CQ.
@@ -33,6 +40,9 @@ typedef struct iree_net_rdma_completion_queue_options_t {
 
   // Completion vector passed to ibv_create_cq.
   int completion_vector;
+
+  // Bitfield of iree_net_rdma_completion_queue_flag_bits_e values.
+  iree_net_rdma_completion_queue_flags_t flags;
 } iree_net_rdma_completion_queue_options_t;
 
 // Returns default completion queue options.
@@ -62,16 +72,30 @@ typedef struct iree_net_rdma_completion_queue_callback_t {
   void* user_data;
 } iree_net_rdma_completion_queue_callback_t;
 
-// Creates a completion channel and CQ registered with |proactor|.
+// Creates a completion channel and CQ.
 //
 // The queue retains |context| and |proactor|. The callback must not release the
 // queue or unregister the event source while executing.
+//
+// By default the queue is activated before this returns and events may start
+// flowing on the next proactor poll. Use
+// IREE_NET_RDMA_COMPLETION_QUEUE_FLAG_DEFER_ACTIVATION when the owner needs to
+// finish installing higher-level receive handlers before completions can be
+// delivered.
 IREE_API_EXPORT iree_status_t iree_net_rdma_completion_queue_create(
     iree_net_rdma_context_t* context, iree_async_proactor_t* proactor,
     iree_net_rdma_completion_queue_options_t options,
     iree_net_rdma_completion_queue_callback_t callback,
     iree_allocator_t host_allocator,
     iree_net_rdma_completion_queue_t** out_queue);
+
+// Registers the queue with its proactor, requests CQ notifications, and drains
+// any completions that arrived before activation.
+//
+// Safe to call multiple times. Once activated, callbacks may fire from this
+// call if completions were already pending.
+IREE_API_EXPORT iree_status_t iree_net_rdma_completion_queue_activate(
+    iree_net_rdma_completion_queue_t* queue);
 
 // Releases the completion queue and unregisters it from the proactor.
 //

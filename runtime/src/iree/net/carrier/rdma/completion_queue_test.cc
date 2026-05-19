@@ -132,6 +132,9 @@ TEST(RdmaCompletionQueueTest, RejectsInvalidArguments) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         iree_net_rdma_completion_queue_drain(nullptr));
 
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_net_rdma_completion_queue_activate(nullptr));
+
   EXPECT_EQ(nullptr, iree_net_rdma_completion_queue_native_channel(nullptr));
   EXPECT_EQ(nullptr, iree_net_rdma_completion_queue_native_cq(nullptr));
 }
@@ -169,6 +172,13 @@ TEST(RdmaCompletionQueueTest, RejectsInvalidOptionsAndCallback) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         iree_net_rdma_completion_queue_create(
                             context.get(), proactor.get(), invalid_vector,
+                            NoopCallback(), iree_allocator_system(), &queue));
+
+  iree_net_rdma_completion_queue_options_t invalid_flags = options;
+  invalid_flags.flags = 0x80u;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_net_rdma_completion_queue_create(
+                            context.get(), proactor.get(), invalid_flags,
                             NoopCallback(), iree_allocator_system(), &queue));
 
   iree_net_rdma_completion_queue_callback_t null_callback = {nullptr, nullptr};

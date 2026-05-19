@@ -13,6 +13,8 @@
 #include "iree/net/carrier/rdma/pollable_fd.h"
 
 #define IREE_NET_RDMA_COMPLETION_QUEUE_DRAIN_BATCH_CAPACITY 32
+#define IREE_NET_RDMA_COMPLETION_QUEUE_VALID_FLAGS \
+  IREE_NET_RDMA_COMPLETION_QUEUE_FLAG_DEFER_ACTIVATION
 
 struct iree_net_rdma_completion_queue_t {
   // RDMA context retained by the completion queue.
@@ -184,6 +186,33 @@ static void iree_net_rdma_completion_queue_on_event_source(
   }
 }
 
+IREE_API_EXPORT iree_status_t iree_net_rdma_completion_queue_activate(
+    iree_net_rdma_completion_queue_t* queue) {
+  if (!queue) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "queue must not be NULL");
+  }
+  if (queue->event_source) return iree_ok_status();
+
+  iree_async_event_source_callback_t event_callback = {
+      iree_net_rdma_completion_queue_on_event_source,
+      queue,
+  };
+  iree_status_t status = iree_async_proactor_register_event_source(
+      queue->proactor,
+      iree_async_primitive_from_fd(queue->completion_channel->fd),
+      event_callback, &queue->event_source);
+  if (iree_status_is_ok(status)) {
+    status = iree_net_rdma_completion_queue_drain(queue);
+  }
+  if (!iree_status_is_ok(status) && queue->event_source) {
+    iree_async_proactor_unregister_event_source(queue->proactor,
+                                                queue->event_source);
+    queue->event_source = NULL;
+  }
+  return status;
+}
+
 IREE_API_EXPORT iree_status_t iree_net_rdma_completion_queue_create(
     iree_net_rdma_context_t* context, iree_async_proactor_t* proactor,
     iree_net_rdma_completion_queue_options_t options,
@@ -206,6 +235,10 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_completion_queue_create(
   } else if (options.completion_vector < 0) {
     status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "completion_vector must be non-negative");
+  } else if (options.flags & ~IREE_NET_RDMA_COMPLETION_QUEUE_VALID_FLAGS) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "unsupported completion queue flags: 0x%02X",
+                              options.flags);
   } else if (!callback.fn) {
     status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "callback.fn must not be NULL");
@@ -253,17 +286,11 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_completion_queue_create(
   }
 
   if (iree_status_is_ok(status)) {
-    status = iree_net_rdma_completion_queue_rearm(queue);
-  }
-
-  if (iree_status_is_ok(status)) {
-    iree_async_event_source_callback_t event_callback = {
-        iree_net_rdma_completion_queue_on_event_source,
-        queue,
-    };
-    status = iree_async_proactor_register_event_source(
-        proactor, iree_async_primitive_from_fd(queue->completion_channel->fd),
-        event_callback, &queue->event_source);
+    bool defer_activation = iree_all_bits_set(
+        options.flags, IREE_NET_RDMA_COMPLETION_QUEUE_FLAG_DEFER_ACTIVATION);
+    if (!defer_activation) {
+      status = iree_net_rdma_completion_queue_activate(queue);
+    }
   }
 
   if (iree_status_is_ok(status)) {
