@@ -47,18 +47,22 @@ enum iree_async_io_uring_operation_internal_flags_e {
 
 // Internal state for event source lifecycle management.
 typedef enum iree_async_io_uring_event_source_state_e {
+  // Registration is complete but the poll owner has not submitted the
+  // multishot poll yet.
+  IREE_ASYNC_IO_URING_EVENT_SOURCE_STATE_ARM_PENDING = 0,
+
   // The multishot poll is active and callbacks may be dispatched.
-  IREE_ASYNC_IO_URING_EVENT_SOURCE_STATE_ACTIVE = 0,
+  IREE_ASYNC_IO_URING_EVENT_SOURCE_STATE_ACTIVE = 1,
 
   // Unregistration was requested but SQ pressure prevented cancellation from
   // being queued. Callbacks are suppressed while the proactor retries.
-  IREE_ASYNC_IO_URING_EVENT_SOURCE_STATE_UNREGISTRATION_PENDING = 1,
+  IREE_ASYNC_IO_URING_EVENT_SOURCE_STATE_UNREGISTRATION_PENDING = 2,
 
   // Cancellation was queued and the final multishot poll CQE is pending.
-  IREE_ASYNC_IO_URING_EVENT_SOURCE_STATE_UNREGISTRATION_SUBMITTED = 2,
+  IREE_ASYNC_IO_URING_EVENT_SOURCE_STATE_UNREGISTRATION_SUBMITTED = 3,
 
   // The multishot poll ended without an explicit unregistration request.
-  IREE_ASYNC_IO_URING_EVENT_SOURCE_STATE_TERMINAL = 3,
+  IREE_ASYNC_IO_URING_EVENT_SOURCE_STATE_TERMINAL = 4,
 } iree_async_io_uring_event_source_state_t;
 
 // Tracks a registered event source for persistent monitoring of an external fd.

@@ -296,28 +296,8 @@ static void iree_async_proactor_io_uring_destroy(
   // Free any remaining relays. In normal use, callers should unregister all
   // relays before destroying the proactor, but we clean up here to avoid leaks.
   while (proactor->relays) {
-    iree_async_relay_t* relay = proactor->relays;
-    proactor->relays = relay->next;
-    iree_async_relay_unregistered_callback_t unregistered_callback =
-        relay->unregistered_callback;
-    // Close source fd if owned.
-    if (iree_any_bit_set(relay->flags,
-                         IREE_ASYNC_RELAY_FLAG_OWN_SOURCE_PRIMITIVE) &&
-        relay->source.type == IREE_ASYNC_RELAY_SOURCE_TYPE_PRIMITIVE) {
-      close(relay->source.primitive.value.fd);
-    }
-    // Release retained notifications.
-    if (relay->source.type == IREE_ASYNC_RELAY_SOURCE_TYPE_NOTIFICATION) {
-      iree_async_notification_release(relay->source.notification);
-    }
-    if (relay->sink.type == IREE_ASYNC_RELAY_SINK_TYPE_SIGNAL_NOTIFICATION) {
-      iree_async_notification_release(
-          relay->sink.signal_notification.notification);
-    }
-    iree_allocator_free(relay->allocator, relay);
-    if (unregistered_callback.fn) {
-      unregistered_callback.fn(unregistered_callback.user_data);
-    }
+    iree_async_io_uring_cleanup_relay_after_ring_close(proactor,
+                                                       proactor->relays);
   }
 
   // Deinitialize the message pool (all entries returned to free list by now).
@@ -597,19 +577,22 @@ static iree_status_t iree_async_proactor_io_uring_arm_wake(
   return iree_ok_status();
 }
 
-// Handles completion of the wake POLL_ADD. Drains the eventfd and re-arms.
+// Handles completion of the wake POLL_ADD and drains the eventfd. poll() arms
+// a fresh wait before it can block again; any intervening wake remains recorded
+// in the eventfd counter until then.
 static void iree_async_proactor_io_uring_handle_wake_completion(
     iree_async_proactor_io_uring_t* proactor) {
   proactor->wake_poll_armed = false;
 
   // Drain the eventfd (read returns the count of wake() calls).
   uint64_t value;
-  ssize_t ret = read(proactor->wake_eventfd, &value, sizeof(value));
-  (void)ret;  // Ignore errors; the poll was the signal.
-
-  // Re-arm for next wake.
-  iree_status_t status = iree_async_proactor_io_uring_arm_wake(proactor);
-  iree_status_ignore(status);  // Best effort.
+  ssize_t result = 0;
+  do {
+    result = read(proactor->wake_eventfd, &value, sizeof(value));
+  } while (result < 0 && errno == EINTR);
+  IREE_ASSERT(result == sizeof(value),
+              "failed to drain io_uring wake eventfd: %zd (errno=%d)", result,
+              errno);
 }
 
 //===----------------------------------------------------------------------===//
@@ -782,6 +765,18 @@ static void iree_async_proactor_io_uring_handle_event_source_cqe(
   }
 }
 
+// Fills an SQE that begins persistent polling for |source|.
+static void iree_async_proactor_io_uring_fill_event_source_arm_sqe(
+    iree_async_event_source_t* source, iree_io_uring_sqe_t* sqe) {
+  memset(sqe, 0, sizeof(*sqe));
+  sqe->opcode = IREE_IORING_OP_POLL_ADD;
+  sqe->fd = source->fd;
+  sqe->poll32_events = POLLIN;
+  sqe->len = IREE_IORING_POLL_ADD_MULTI;
+  sqe->user_data = iree_io_uring_internal_encode(IREE_IO_URING_TAG_EVENT_SOURCE,
+                                                 (uintptr_t)source);
+}
+
 // Fills an SQE that cancels persistent polling for |source|.
 static void iree_async_proactor_io_uring_fill_event_source_cancel_sqe(
     iree_async_event_source_t* source, iree_io_uring_sqe_t* sqe) {
@@ -793,23 +788,39 @@ static void iree_async_proactor_io_uring_fill_event_source_cancel_sqe(
   sqe->user_data = iree_io_uring_internal_encode(IREE_IO_URING_TAG_CANCEL, 0);
 }
 
-// Retries event source cancellations deferred by submission queue pressure.
-static void iree_async_proactor_io_uring_retry_pending_event_sources(
+// Queues initial arms and cancellations deferred to the poll owner. Returns
+// true when SQ pressure left work pending.
+static bool iree_async_proactor_io_uring_retry_pending_event_sources(
     iree_async_proactor_io_uring_t* proactor) {
+  bool has_pending = false;
   iree_io_uring_ring_sq_lock(&proactor->ring);
   for (iree_async_event_source_t* source = proactor->event_sources; source;
        source = source->next) {
+    if (source->state == IREE_ASYNC_IO_URING_EVENT_SOURCE_STATE_ARM_PENDING) {
+      iree_io_uring_sqe_t* sqe = iree_io_uring_ring_get_sqe(&proactor->ring);
+      if (!sqe) {
+        has_pending = true;
+        break;
+      }
+      iree_async_proactor_io_uring_fill_event_source_arm_sqe(source, sqe);
+      source->state = IREE_ASYNC_IO_URING_EVENT_SOURCE_STATE_ACTIVE;
+      continue;
+    }
     if (source->state !=
         IREE_ASYNC_IO_URING_EVENT_SOURCE_STATE_UNREGISTRATION_PENDING) {
       continue;
     }
     iree_io_uring_sqe_t* sqe = iree_io_uring_ring_get_sqe(&proactor->ring);
-    if (!sqe) break;
+    if (!sqe) {
+      has_pending = true;
+      break;
+    }
     iree_async_proactor_io_uring_fill_event_source_cancel_sqe(source, sqe);
     source->state =
         IREE_ASYNC_IO_URING_EVENT_SOURCE_STATE_UNREGISTRATION_SUBMITTED;
   }
   iree_io_uring_ring_sq_unlock(&proactor->ring);
+  return has_pending;
 }
 
 // Callback for signalfd dispatch - invoked for each signal read.
@@ -1368,8 +1379,6 @@ static iree_host_size_t iree_async_proactor_io_uring_process_cqe(
     iree_async_operation_release_resources(operation);
   }
 
-  iree_status_code_t status_code = iree_status_code(status);
-
   // Invoke callback and release to pool. The helper extracts the pool pointer
   // before the callback (which may free the operation when pool is NULL).
   iree_async_proactor_complete_operation(operation, status, flags);
@@ -1416,6 +1425,30 @@ static iree_host_size_t iree_async_proactor_io_uring_process_cqe(
   return 1;
 }
 
+// Submits poll-owned event source and relay operations in SQ-sized batches.
+// Registration only creates logical handles; this is the boundary that makes
+// them kernel-visible while preserving SINGLE_ISSUER ownership.
+static iree_status_t iree_async_proactor_io_uring_submit_pending_event_monitors(
+    iree_async_proactor_io_uring_t* proactor) {
+  bool has_pending = false;
+  do {
+    bool has_pending_event_sources =
+        iree_async_proactor_io_uring_retry_pending_event_sources(proactor);
+    bool has_pending_relays =
+        iree_async_io_uring_retry_pending_relays(proactor);
+    has_pending = has_pending_event_sources || has_pending_relays;
+
+    // This also flushes SQEs queued by ordinary operations before the first
+    // poll. Submitting each full batch advances the SQ head so registration is
+    // not limited by the ring's instantaneous capacity.
+    IREE_RETURN_IF_ERROR(
+        iree_io_uring_ring_submit(&proactor->ring,
+                                  /*min_complete=*/0,
+                                  /*flags=*/IREE_IORING_ENTER_GETEVENTS));
+  } while (has_pending);
+  return iree_ok_status();
+}
+
 static iree_status_t iree_async_proactor_io_uring_poll(
     iree_async_proactor_t* base_proactor, iree_timeout_t timeout,
     iree_host_size_t* out_completed_count) {
@@ -1431,16 +1464,19 @@ static iree_status_t iree_async_proactor_io_uring_poll(
 
   bool is_immediate = iree_timeout_is_immediate(timeout);
 
+  // Submit registrations and any SQEs queued before the first poll. This must
+  // happen before arming the wake source: a full pre-poll SQ must not prevent
+  // the poll owner from establishing its own wake path.
+  IREE_RETURN_IF_ERROR(
+      iree_async_proactor_io_uring_submit_pending_event_monitors(proactor));
+
   // Arm the wake poll before potentially blocking.
   IREE_RETURN_IF_ERROR(iree_async_proactor_io_uring_arm_wake(proactor));
 
-  // Flush pending SQEs and deferred completions. With DEFER_TASKRUN, the kernel
-  // defers CQE generation for async notifications (e.g., recv completions
-  // triggered by completed sends on the same ring) until we explicitly request
-  // processing via GETEVENTS. This flush must happen unconditionally — even
-  // when CQEs are already in the CQ ring from inline SQE processing — because
-  // those inline completions may have triggered deferred work that produced
-  // additional CQEs we haven't seen yet.
+  // Flush the wake SQE and deferred completions. With DEFER_TASKRUN, the kernel
+  // defers CQE generation for async notifications until we explicitly request
+  // processing via GETEVENTS. This flush must happen even when CQEs are already
+  // available because those completions may have triggered deferred task work.
   IREE_RETURN_IF_ERROR(
       iree_io_uring_ring_submit(&proactor->ring,
                                 /*min_complete=*/0,
@@ -1464,7 +1500,7 @@ static iree_status_t iree_async_proactor_io_uring_poll(
         iree_io_uring_ring_wait_cqe(&proactor->ring, /*min_complete=*/1,
                                     /*flush_pending=*/true, timeout_ns);
     if (iree_status_is_deadline_exceeded(wait_status)) {
-      iree_status_ignore(wait_status);
+      iree_status_free(wait_status);
       return iree_status_from_code(IREE_STATUS_DEADLINE_EXCEEDED);
     }
     IREE_RETURN_IF_ERROR(wait_status);
@@ -1577,11 +1613,6 @@ static iree_status_t iree_async_proactor_io_uring_poll(
   completed +=
       iree_async_proactor_io_uring_drain_pending_software_completions(proactor);
 
-  // Retry terminal cancellations and relay re-arming deferred by SQ pressure.
-  // Processing CQEs above may have made submission queue slots available.
-  iree_async_proactor_io_uring_retry_pending_event_sources(proactor);
-  iree_async_io_uring_retry_pending_relays(proactor);
-
   if (out_completed_count) *out_completed_count = completed;
 
   // Return DEADLINE_EXCEEDED for immediate poll with no completions.
@@ -1604,12 +1635,17 @@ static void iree_async_proactor_io_uring_wake(
   if (proactor->wake_eventfd < 0) return;
 
   // Write to eventfd to wake a blocked poll. This is thread-safe and
-  // signal-safe. The value accumulates if wake() is called multiple times
-  // before the eventfd is read.
+  // signal-safe. EAGAIN means the counter is saturated and therefore already
+  // readable; all other failures violate the live-proactor invariant.
   uint64_t value = 1;
-  ssize_t ret = write(proactor->wake_eventfd, &value, sizeof(value));
-  (void)ret;  // Ignore errors; eventfd writes only fail if the counter would
-              // overflow (extremely unlikely with uint64_t).
+  ssize_t result = 0;
+  do {
+    result = write(proactor->wake_eventfd, &value, sizeof(value));
+  } while (result < 0 && errno == EINTR);
+  if (result < 0 && errno == EAGAIN) return;
+  IREE_ASSERT(result == sizeof(value),
+              "failed to signal io_uring wake eventfd: %zd (errno=%d)", result,
+              errno);
 }
 
 //===----------------------------------------------------------------------===//
@@ -2018,20 +2054,6 @@ static iree_status_t iree_async_proactor_io_uring_export_fence(
 // Event source registration
 //===----------------------------------------------------------------------===//
 
-static void iree_async_proactor_io_uring_submit_internal_sqe(
-    iree_async_proactor_io_uring_t* proactor) {
-  int32_t poll_tid =
-      iree_atomic_load(&proactor->poll_tid, iree_memory_order_relaxed);
-  int32_t current_tid = (int32_t)syscall(__NR_gettid);
-  if (poll_tid != 0 && poll_tid == current_tid) {
-    iree_status_ignore(iree_io_uring_ring_submit(&proactor->ring,
-                                                 /*min_complete=*/0,
-                                                 /*flags=*/0));
-  } else {
-    iree_async_proactor_wake(&proactor->base);
-  }
-}
-
 static iree_status_t iree_async_proactor_io_uring_register_event_source(
     iree_async_proactor_t* base_proactor, iree_async_primitive_t handle,
     iree_async_event_source_callback_t callback,
@@ -2076,38 +2098,8 @@ static iree_status_t iree_async_proactor_io_uring_register_event_source(
   source->proactor = base_proactor;
   source->fd = handle.value.fd;
   source->callback = callback;
-  source->state = IREE_ASYNC_IO_URING_EVENT_SOURCE_STATE_ACTIVE;
+  source->state = IREE_ASYNC_IO_URING_EVENT_SOURCE_STATE_ARM_PENDING;
   source->allocator = proactor->base.allocator;
-
-  // Get an SQE for multishot POLL_ADD.
-  iree_io_uring_ring_sq_lock(&proactor->ring);
-  iree_io_uring_sqe_t* sqe = iree_io_uring_ring_get_sqe(&proactor->ring);
-  if (!sqe) {
-    iree_io_uring_ring_sq_unlock(&proactor->ring);
-    iree_allocator_free(proactor->base.allocator, source);
-    IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "SQ full, cannot submit event source POLL_ADD");
-  }
-
-  // Fill multishot POLL_ADD SQE.
-  memset(sqe, 0, sizeof(*sqe));
-  sqe->opcode = IREE_IORING_OP_POLL_ADD;
-  sqe->fd = source->fd;
-  sqe->poll32_events = POLLIN;
-  // Use multishot mode (POLL_ADD_MULTI) so the poll stays armed after each
-  // completion. This requires kernel 5.19+.
-  sqe->len = IREE_IORING_POLL_ADD_MULTI;
-  sqe->user_data = iree_io_uring_internal_encode(IREE_IO_URING_TAG_EVENT_SOURCE,
-                                                 (uintptr_t)source);
-  iree_io_uring_ring_sq_unlock(&proactor->ring);
-
-  // Flush the SQE to the kernel if already on the poll thread, otherwise wake
-  // the poll thread to submit it. io_uring is created with SINGLE_ISSUER, so
-  // only the poll thread may call io_uring_enter after polling starts. Any
-  // ring_submit failure is ignored here: the SQE tail may already be published
-  // and rolling back or freeing |source| would race a later successful enter.
-  iree_async_proactor_io_uring_submit_internal_sqe(proactor);
 
   // Link into the proactor's event source list.
   source->next = proactor->event_sources;
@@ -2115,6 +2107,11 @@ static iree_status_t iree_async_proactor_io_uring_register_event_source(
     proactor->event_sources->prev = source;
   }
   proactor->event_sources = source;
+
+  // The poll owner converts ARM_PENDING into a kernel operation. This keeps
+  // io_uring_enter on the SINGLE_ISSUER thread and allows registration batches
+  // larger than the submission queue.
+  iree_async_proactor_wake(&proactor->base);
 
   *out_event_source = source;
   IREE_TRACE_ZONE_END(z0);
@@ -2130,9 +2127,11 @@ static void iree_async_proactor_io_uring_unregister_event_source(
   iree_async_proactor_io_uring_t* proactor =
       iree_async_proactor_io_uring_cast(base_proactor);
 
-  // A terminal CQE has already proven the kernel no longer references this
-  // source, so it can be destroyed synchronously.
-  if (event_source->state == IREE_ASYNC_IO_URING_EVENT_SOURCE_STATE_TERMINAL) {
+  // An unarmed source has no kernel reference. A terminal CQE has already
+  // proven the same for a source whose persistent poll ended.
+  if (event_source->state ==
+          IREE_ASYNC_IO_URING_EVENT_SOURCE_STATE_ARM_PENDING ||
+      event_source->state == IREE_ASYNC_IO_URING_EVENT_SOURCE_STATE_TERMINAL) {
     iree_async_proactor_io_uring_cleanup_event_source(proactor, event_source);
     IREE_TRACE_ZONE_END(z0);
     return;
@@ -2157,7 +2156,7 @@ static void iree_async_proactor_io_uring_unregister_event_source(
   iree_io_uring_ring_sq_unlock(&proactor->ring);
 
   if (sqe) {
-    iree_async_proactor_io_uring_submit_internal_sqe(proactor);
+    iree_async_proactor_wake(&proactor->base);
   }
 
   // The poll thread flushes the cancellation and owns the source until the
@@ -2222,7 +2221,7 @@ static iree_status_t iree_async_proactor_io_uring_submit_signal_poll(
   // SINGLE_ISSUER, so only the poll thread may call io_uring_enter after it
   // starts polling.
   if (iree_status_is_ok(status)) {
-    iree_async_proactor_io_uring_submit_internal_sqe(proactor);
+    iree_async_proactor_wake(&proactor->base);
     proactor->signal.initialized = true;
   }
 

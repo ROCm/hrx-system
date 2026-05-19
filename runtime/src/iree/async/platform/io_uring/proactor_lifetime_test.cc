@@ -157,6 +157,10 @@ TEST_F(ProactorLifetimeTest,
   ASSERT_EQ(static_cast<void*>(event_source), allocator_state_.last_allocation);
   allocator_state_.watched_allocation = event_source;
 
+  // Cross the registration barrier so unregistration must cancel a live
+  // multishot poll instead of completing an unarmed logical handle.
+  PollOnce();
+
   FillSubmissionQueue();
   iree_async_proactor_unregister_event_source(proactor_, event_source);
 
@@ -185,6 +189,10 @@ TEST_F(ProactorLifetimeTest,
       iree_async_relay_sink_signal_notification(sink_notification, 1),
       IREE_ASYNC_RELAY_FLAG_PERSISTENT, iree_async_relay_error_callback_none(),
       &relay));
+
+  // Cross the registration barrier so unregistration must cancel a live
+  // source wait instead of completing an unarmed logical handle.
+  PollOnce();
 
   FillSubmissionQueue();
 
@@ -267,6 +275,53 @@ TEST_F(ProactorLifetimeTest,
   while (!unregistration_state.completed) PollOnce();
 
   close(source_fd);
+}
+
+TEST_F(ProactorLifetimeTest,
+       ProactorDestructionJoinsPendingRelayUnregistration) {
+  int source_fd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  ASSERT_GE(source_fd, 0);
+  int sink_fd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  ASSERT_GE(sink_fd, 0);
+
+  iree_async_relay_t* relay = nullptr;
+  IREE_ASSERT_OK(iree_async_proactor_register_relay(
+      proactor_,
+      iree_async_relay_source_from_primitive(
+          iree_async_primitive_from_fd(source_fd)),
+      iree_async_relay_sink_signal_primitive(
+          iree_async_primitive_from_fd(sink_fd), 1),
+      IREE_ASYNC_RELAY_FLAG_PERSISTENT, iree_async_relay_error_callback_none(),
+      &relay));
+  ASSERT_EQ(static_cast<void*>(relay), allocator_state_.last_allocation);
+  allocator_state_.watched_allocation = relay;
+
+  // Submit source monitoring, then force cancellation to remain pending behind
+  // a full SQ. Destruction must terminate the live kernel operation and run the
+  // caller's terminal callback before returning.
+  PollOnce();
+  FillSubmissionQueue();
+
+  struct UnregistrationState {
+    // Set after destruction has retired all backend references.
+    bool completed = false;
+  } unregistration_state;
+  iree_async_relay_unregistered_callback_t unregistered_callback = {
+      +[](void* user_data) {
+        static_cast<UnregistrationState*>(user_data)->completed = true;
+      },
+      &unregistration_state,
+  };
+  iree_async_proactor_unregister_relay(proactor_, relay, unregistered_callback);
+  EXPECT_FALSE(unregistration_state.completed);
+
+  iree_async_proactor_release(proactor_);
+  proactor_ = nullptr;
+
+  EXPECT_TRUE(allocator_state_.watched_allocation_freed);
+  EXPECT_TRUE(unregistration_state.completed);
+  close(source_fd);
+  close(sink_fd);
 }
 
 }  // namespace

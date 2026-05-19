@@ -136,9 +136,41 @@ static bool iree_async_io_uring_relay_is_futex_source(
          relay->source.notification->mode == IREE_ASYNC_NOTIFICATION_MODE_FUTEX;
 }
 
+// Returns true when |relay| owns one entry in its source notification's
+// futex_relay_count. The entry is acquired when a FUTEX_WAIT is staged and
+// released when its CQE is processed or the ring is closed.
+static bool iree_async_io_uring_relay_owns_futex_wait_count(
+    iree_async_relay_t* relay) {
+  switch (relay->platform.io_uring.state) {
+    case IREE_ASYNC_IO_URING_RELAY_STATE_ACTIVE:
+    case IREE_ASYNC_IO_URING_RELAY_STATE_UNREGISTRATION_PENDING:
+    case IREE_ASYNC_IO_URING_RELAY_STATE_UNREGISTRATION_SUBMITTED:
+    case IREE_ASYNC_IO_URING_RELAY_STATE_FAULT_CANCELLATION_PENDING:
+    case IREE_ASYNC_IO_URING_RELAY_STATE_FAULT_CANCELLATION_SUBMITTED:
+      return iree_async_io_uring_relay_is_futex_source(relay);
+    case IREE_ASYNC_IO_URING_RELAY_STATE_ARM_PENDING:
+    case IREE_ASYNC_IO_URING_RELAY_STATE_REARM_PENDING:
+    case IREE_ASYNC_IO_URING_RELAY_STATE_FAULTED:
+    case IREE_ASYNC_IO_URING_RELAY_STATE_TERMINAL:
+      return false;
+  }
+  return false;
+}
+
+// Releases the source notification count owned by an active FUTEX_WAIT.
+static void iree_async_io_uring_relay_release_futex_wait_count(
+    iree_async_relay_t* relay) {
+  int32_t previous_count = iree_atomic_fetch_add(
+      &relay->source.notification->platform.io_uring.futex_relay_count, -1,
+      iree_memory_order_release);
+  IREE_ASSERT(previous_count > 0,
+              "relay released a FUTEX_WAIT count it did not own");
+}
+
 // Fills an SQE to monitor the relay's source. Caller must provide a valid SQE.
 static void iree_async_io_uring_relay_fill_source_sqe(
-    iree_async_relay_t* relay, iree_io_uring_sqe_t* sqe) {
+    iree_async_relay_t* relay, bool refresh_wait_epoch,
+    iree_io_uring_sqe_t* sqe) {
   memset(sqe, 0, sizeof(*sqe));
 
   switch (relay->source.type) {
@@ -157,8 +189,10 @@ static void iree_async_io_uring_relay_fill_source_sqe(
       iree_async_notification_t* notification = relay->source.notification;
       if (notification->mode == IREE_ASYNC_NOTIFICATION_MODE_FUTEX) {
         // FUTEX_WAIT on the notification's epoch.
-        relay->wait_epoch = iree_atomic_load(notification->epoch_ptr,
-                                             iree_memory_order_acquire);
+        if (refresh_wait_epoch) {
+          relay->wait_epoch = iree_atomic_load(notification->epoch_ptr,
+                                               iree_memory_order_acquire);
+        }
         int32_t futex_flags = IREE_ASYNC_FUTEX_SIZE_U32;
         if (!iree_any_bit_set(notification->flags,
                               IREE_ASYNC_NOTIFICATION_FLAG_SHARED)) {
@@ -185,24 +219,6 @@ static void iree_async_io_uring_relay_fill_source_sqe(
   }
 
   sqe->user_data = iree_io_uring_relay_encode(relay);
-}
-
-// Acquires an SQE and fills it to monitor the relay's source.
-// Returns a status on failure - use only for initial registration where
-// failure is a real error. For re-arming, use get_sqe + fill_source_sqe
-// directly to avoid status allocation on expected backpressure.
-static iree_status_t iree_async_io_uring_relay_submit_source(
-    iree_async_proactor_io_uring_t* proactor, iree_async_relay_t* relay) {
-  iree_io_uring_ring_sq_lock(&proactor->ring);
-  iree_io_uring_sqe_t* sqe = iree_io_uring_ring_get_sqe(&proactor->ring);
-  if (!sqe) {
-    iree_io_uring_ring_sq_unlock(&proactor->ring);
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "SQ full, cannot submit relay source monitoring");
-  }
-  iree_async_io_uring_relay_fill_source_sqe(relay, sqe);
-  iree_io_uring_ring_sq_unlock(&proactor->ring);
-  return iree_ok_status();
 }
 
 // Transitions a relay to a faulted state and invokes the error callback.
@@ -266,6 +282,14 @@ static void iree_async_io_uring_relay_cleanup(
   if (unregistered_callback.fn) {
     unregistered_callback.fn(unregistered_callback.user_data);
   }
+}
+
+void iree_async_io_uring_cleanup_relay_after_ring_close(
+    iree_async_proactor_io_uring_t* proactor, iree_async_relay_t* relay) {
+  if (iree_async_io_uring_relay_owns_futex_wait_count(relay)) {
+    iree_async_io_uring_relay_release_futex_wait_count(relay);
+  }
+  iree_async_io_uring_relay_cleanup(proactor, relay);
 }
 
 //===----------------------------------------------------------------------===//
@@ -372,10 +396,19 @@ iree_status_t iree_async_io_uring_register_relay(
   relay->flags = flags;
   relay->error_callback = error_callback;
   relay->unregistered_callback = iree_async_relay_unregistered_callback_none();
-  relay->platform.io_uring.state = IREE_ASYNC_IO_URING_RELAY_STATE_ACTIVE;
+  relay->platform.io_uring.state = IREE_ASYNC_IO_URING_RELAY_STATE_ARM_PENDING;
   relay->wait_epoch = 0;
   relay->platform.io_uring.write_buffer = 0;
   relay->allocator = proactor->base.allocator;
+
+  // Capture the registration epoch before returning the logical handle. If
+  // the notification is signaled before the poll owner submits FUTEX_WAIT,
+  // the stale expected value makes the wait complete immediately instead of
+  // losing the edge.
+  if (iree_async_io_uring_relay_is_futex_source(relay)) {
+    relay->wait_epoch = iree_atomic_load(source.notification->epoch_ptr,
+                                         iree_memory_order_acquire);
+  }
 
   // Retain notifications used in source/sink.
   if (source.type == IREE_ASYNC_RELAY_SOURCE_TYPE_NOTIFICATION) {
@@ -385,40 +418,17 @@ iree_status_t iree_async_io_uring_register_relay(
     iree_async_notification_retain(sink.signal_notification.notification);
   }
 
-  // Submit source monitoring.
-  iree_status_t status =
-      iree_async_io_uring_relay_submit_source(proactor, relay);
-  if (!iree_status_is_ok(status)) {
-    // Rollback: release notifications and free relay.
-    if (source.type == IREE_ASYNC_RELAY_SOURCE_TYPE_NOTIFICATION) {
-      iree_async_notification_release(source.notification);
-    }
-    if (sink.type == IREE_ASYNC_RELAY_SINK_TYPE_SIGNAL_NOTIFICATION) {
-      iree_async_notification_release(sink.signal_notification.notification);
-    }
-    iree_allocator_free(proactor->base.allocator, relay);
-    IREE_TRACE_ZONE_END(z0);
-    return status;
-  }
-
-  // Wake the poll thread to submit the SQE. Do not call ring_submit() here:
-  // SINGLE_ISSUER rings are enabled and entered only by the poll thread.
-  iree_async_proactor_wake(&proactor->base);
-
-  // The FUTEX_WAIT (or POLL_ADD) is now in-flight. Track it so the
-  // notification signal path wakes the precise number of futex waiters.
-  if (iree_async_io_uring_relay_is_futex_source(relay)) {
-    iree_atomic_fetch_add(
-        &relay->source.notification->platform.io_uring.futex_relay_count, 1,
-        iree_memory_order_release);
-  }
-
   // Link into proactor's relay list.
   relay->next = proactor->relays;
   if (proactor->relays) {
     proactor->relays->prev = relay;
   }
   proactor->relays = relay;
+
+  // The poll owner converts ARM_PENDING into a kernel operation. Keeping all
+  // io_uring_enter calls on that thread preserves SINGLE_ISSUER while allowing
+  // registration batches larger than the submission queue.
+  iree_async_proactor_wake(&proactor->base);
 
   *out_relay = relay;
   IREE_TRACE_ZONE_END(z0);
@@ -454,6 +464,8 @@ void iree_async_io_uring_unregister_relay(
   // These states have no in-flight kernel operation, so terminal
   // unregistration can complete synchronously.
   if (relay->platform.io_uring.state ==
+          IREE_ASYNC_IO_URING_RELAY_STATE_ARM_PENDING ||
+      relay->platform.io_uring.state ==
           IREE_ASYNC_IO_URING_RELAY_STATE_REARM_PENDING ||
       relay->platform.io_uring.state ==
           IREE_ASYNC_IO_URING_RELAY_STATE_FAULTED ||
@@ -496,9 +508,9 @@ void iree_async_io_uring_unregister_relay(
   iree_io_uring_ring_sq_unlock(&proactor->ring);
 
   if (sqe) {
-    // Wake the poll thread to submit the cancellation SQE. Do not call
-    // ring_submit() here: SINGLE_ISSUER rings are entered only by the poll
-    // thread.
+    // Wake the poll thread to submit the cancel/remove SQE. Calling
+    // io_uring_enter here can violate SINGLE_ISSUER and can also race a ring
+    // that has not been enabled by poll() yet.
     iree_async_proactor_wake(&proactor->base);
   }
 
@@ -540,9 +552,7 @@ void iree_async_io_uring_handle_relay_cqe(
   // incremented when the FUTEX_WAIT SQE was submitted.
   bool is_futex_source = iree_async_io_uring_relay_is_futex_source(relay);
   if (is_futex_source) {
-    iree_atomic_fetch_add(
-        &relay->source.notification->platform.io_uring.futex_relay_count, -1,
-        iree_memory_order_release);
+    iree_async_io_uring_relay_release_futex_wait_count(relay);
   }
 
   // Fire the sink only while the relay is active.
@@ -666,7 +676,8 @@ void iree_async_io_uring_handle_relay_cqe(
       relay->platform.io_uring.state =
           IREE_ASYNC_IO_URING_RELAY_STATE_REARM_PENDING;
     } else {
-      iree_async_io_uring_relay_fill_source_sqe(relay, sqe);
+      iree_async_io_uring_relay_fill_source_sqe(
+          relay, /*refresh_wait_epoch=*/true, sqe);
       iree_io_uring_ring_sq_unlock(&proactor->ring);
       iree_status_t status = iree_io_uring_ring_submit(
           &proactor->ring, /*min_complete=*/0, /*flags=*/0);
@@ -697,17 +708,38 @@ void iree_async_io_uring_handle_relay_cqe(
 // Retry pending relay operations
 //===----------------------------------------------------------------------===//
 
-void iree_async_io_uring_retry_pending_relays(
+bool iree_async_io_uring_retry_pending_relays(
     iree_async_proactor_io_uring_t* proactor) {
+  bool has_pending = false;
   iree_io_uring_ring_sq_lock(&proactor->ring);
   for (iree_async_relay_t* relay = proactor->relays; relay;
        relay = relay->next) {
+    if (relay->platform.io_uring.state ==
+        IREE_ASYNC_IO_URING_RELAY_STATE_ARM_PENDING) {
+      iree_io_uring_sqe_t* sqe = iree_io_uring_ring_get_sqe(&proactor->ring);
+      if (!sqe) {
+        has_pending = true;
+        break;
+      }
+      iree_async_io_uring_relay_fill_source_sqe(
+          relay, /*refresh_wait_epoch=*/false, sqe);
+      relay->platform.io_uring.state = IREE_ASYNC_IO_URING_RELAY_STATE_ACTIVE;
+      if (iree_async_io_uring_relay_is_futex_source(relay)) {
+        iree_atomic_fetch_add(
+            &relay->source.notification->platform.io_uring.futex_relay_count, 1,
+            iree_memory_order_release);
+      }
+      continue;
+    }
     if (relay->platform.io_uring.state ==
             IREE_ASYNC_IO_URING_RELAY_STATE_UNREGISTRATION_PENDING ||
         relay->platform.io_uring.state ==
             IREE_ASYNC_IO_URING_RELAY_STATE_FAULT_CANCELLATION_PENDING) {
       iree_io_uring_sqe_t* sqe = iree_io_uring_ring_get_sqe(&proactor->ring);
-      if (!sqe) break;
+      if (!sqe) {
+        has_pending = true;
+        break;
+      }
       iree_async_io_uring_relay_fill_unregistration_sqe(relay, sqe);
       relay->platform.io_uring.state =
           relay->platform.io_uring.state ==
@@ -724,10 +756,12 @@ void iree_async_io_uring_retry_pending_relays(
     iree_io_uring_sqe_t* sqe = iree_io_uring_ring_get_sqe(&proactor->ring);
     if (!sqe) {
       // Still no SQ space. Remaining relays stay pending until next poll.
+      has_pending = true;
       break;
     }
 
-    iree_async_io_uring_relay_fill_source_sqe(relay, sqe);
+    iree_async_io_uring_relay_fill_source_sqe(relay,
+                                              /*refresh_wait_epoch=*/true, sqe);
     relay->platform.io_uring.state = IREE_ASYNC_IO_URING_RELAY_STATE_ACTIVE;
     // Re-armed: FUTEX_WAIT will be in-flight after the caller's next submit.
     if (iree_async_io_uring_relay_is_futex_source(relay)) {
@@ -737,5 +771,5 @@ void iree_async_io_uring_retry_pending_relays(
     }
   }
   iree_io_uring_ring_sq_unlock(&proactor->ring);
-  // SQEs are submitted by the caller's next ring_submit in poll().
+  return has_pending;
 }
