@@ -20,6 +20,8 @@ iree_cc_library(
     iree::async
     iree::base
     iree::base::internal
+    iree::base::threading
+    iree::io::file_handle
     iree::net::carrier
   PUBLIC
 )

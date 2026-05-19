@@ -10,6 +10,7 @@
 #include "iree/async/frontier.h"
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
+#include "iree/hal/remote/protocol/control.h"
 #include "iree/hal/remote/server/resource_table.h"
 #include "iree/net/channel/queue/queue_channel.h"
 #include "iree/net/channel/util/sequence_window.h"
@@ -59,6 +60,13 @@ typedef struct iree_hal_remote_server_session_t {
   // The net-layer session handling bootstrap and control channel.
   // NULL when the slot is free.
   iree_net_session_t* session;
+
+  // Borrowed carrier backing the session connection, or NULL if unavailable.
+  iree_net_carrier_t* carrier;
+
+  // FILE_REGISTER capabilities derived from |carrier|.
+  iree_hal_remote_file_registration_capabilities_t
+      file_registration_capabilities;
 
   // Server-assigned session ID (unique, monotonically increasing).
   uint64_t session_id;

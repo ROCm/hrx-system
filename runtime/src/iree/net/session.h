@@ -335,6 +335,13 @@ iree_net_session_state(const iree_net_session_t* session);
 // Returns 0 during BOOTSTRAPPING (not yet assigned). Stable after on_ready.
 IREE_API_EXPORT uint64_t iree_net_session_id(const iree_net_session_t* session);
 
+// Returns the carrier backing this session's connection, if one is exposed.
+//
+// The carrier is borrowed from the session-owned connection and is valid only
+// while the session is alive. Some transports and tests may return NULL.
+IREE_API_EXPORT iree_net_carrier_t* iree_net_session_carrier(
+    iree_net_session_t* session);
+
 // Opens an application endpoint on this session's connection.
 //
 // The session proxies to connection.open_endpoint(). The application uses

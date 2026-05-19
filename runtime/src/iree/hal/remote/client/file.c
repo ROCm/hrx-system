@@ -13,6 +13,7 @@
 #include "iree/hal/remote/protocol/control.h"
 #include "iree/hal/utils/fd_file.h"
 #include "iree/hal/utils/file_registry.h"
+#include "iree/net/carrier.h"
 
 typedef struct iree_hal_remote_client_file_t {
   iree_hal_resource_t resource;
@@ -120,10 +121,163 @@ static iree_status_t iree_hal_remote_client_file_import_host_allocation(
       out_file);
 }
 
+typedef struct iree_hal_remote_client_file_register_request_header_t {
+  iree_hal_remote_control_envelope_t envelope;
+  iree_hal_remote_file_register_request_t body;
+} iree_hal_remote_client_file_register_request_header_t;
+
+static iree_hal_remote_file_external_type_t
+iree_hal_remote_client_file_external_type(
+    iree_net_file_handle_transfer_type_t transfer_type) {
+  switch (transfer_type) {
+    case IREE_NET_FILE_HANDLE_TRANSFER_TYPE_POSIX_FD:
+      return IREE_HAL_REMOTE_FILE_EXTERNAL_TYPE_POSIX_FD;
+    case IREE_NET_FILE_HANDLE_TRANSFER_TYPE_WIN32_HANDLE:
+      return IREE_HAL_REMOTE_FILE_EXTERNAL_TYPE_WIN32_HANDLE;
+    default:
+      return IREE_HAL_REMOTE_FILE_EXTERNAL_TYPE_NONE;
+  }
+}
+
+static iree_status_t iree_hal_remote_client_file_register_descriptor(
+    iree_hal_remote_client_device_t* device, iree_hal_memory_access_t access,
+    iree_io_file_handle_t* handle, iree_allocator_t host_allocator,
+    iree_hal_file_t** out_file) {
+  *out_file = NULL;
+
+  iree_status_t status = iree_ok_status();
+  if (!device || !device->session || !device->session_carrier) {
+    status = iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                              "remote file descriptor registration requires "
+                              "an active transport carrier");
+  }
+  if (iree_status_is_ok(status) && !iree_io_file_handle_uses_async_io(handle)) {
+    status = iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "remote file descriptor registration requires an async file handle");
+  }
+
+  iree_net_file_handle_transfer_type_t transfer_type =
+      IREE_NET_FILE_HANDLE_TRANSFER_TYPE_NONE;
+  iree_host_size_t transfer_payload_length = 0;
+  if (iree_status_is_ok(status)) {
+    status = iree_net_carrier_query_file_handle_transfer(
+        device->session_carrier, handle, &transfer_type,
+        &transfer_payload_length);
+  }
+
+  iree_hal_remote_file_external_type_t external_type =
+      IREE_HAL_REMOTE_FILE_EXTERNAL_TYPE_NONE;
+  iree_hal_remote_file_registration_capabilities_t required_capability =
+      IREE_HAL_REMOTE_FILE_REGISTRATION_CAPABILITY_NONE;
+  if (iree_status_is_ok(status)) {
+    external_type = iree_hal_remote_client_file_external_type(transfer_type);
+    required_capability =
+        iree_hal_remote_file_registration_capability_for_external_type(
+            external_type);
+    if (required_capability ==
+        IREE_HAL_REMOTE_FILE_REGISTRATION_CAPABILITY_NONE) {
+      status = iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                                "remote transport file transfer type %u is "
+                                "not supported by FILE_REGISTER",
+                                (uint32_t)transfer_type);
+    }
+  }
+  if (iree_status_is_ok(status) &&
+      !iree_all_bits_set(device->file_registration_capabilities,
+                         required_capability)) {
+    status = iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "remote FILE_REGISTER external file type %u requires capability "
+        "0x%08x, but this client session supports 0x%08x",
+        (uint32_t)external_type, required_capability,
+        device->file_registration_capabilities);
+  }
+  if (iree_status_is_ok(status) && transfer_payload_length > UINT32_MAX) {
+    status = iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "remote FILE_REGISTER transfer payload too large: %" PRIhsz " bytes",
+        transfer_payload_length);
+  }
+
+  iree_host_size_t request_size = 0;
+  iree_host_size_t transfer_payload_offset = 0;
+  if (iree_status_is_ok(status)) {
+    status = IREE_STRUCT_LAYOUT(
+        sizeof(iree_hal_remote_client_file_register_request_header_t),
+        &request_size,
+        IREE_STRUCT_FIELD(transfer_payload_length, uint8_t,
+                          &transfer_payload_offset));
+  }
+
+  iree_hal_remote_client_file_register_request_header_t* request = NULL;
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_allocator_malloc(host_allocator, request_size, (void**)&request);
+  }
+  if (iree_status_is_ok(status)) {
+    memset(request, 0, request_size);
+    request->envelope.message_type = IREE_HAL_REMOTE_CONTROL_FILE_REGISTER;
+    request->envelope.message_flags =
+        IREE_HAL_REMOTE_CONTROL_FLAG_FIRE_AND_FORGET;
+    const uint32_t provisional_generation = (uint32_t)iree_atomic_fetch_add(
+        &device->next_provisional_generation, 1, iree_memory_order_relaxed);
+    request->body.provisional_id = IREE_HAL_REMOTE_RESOURCE_ID_PROVISIONAL(
+        IREE_HAL_REMOTE_RESOURCE_TYPE_FILE, provisional_generation);
+    request->body.external_type = (uint32_t)external_type;
+    request->body.access_flags = access;
+    request->body.handle_payload_length = (uint32_t)transfer_payload_length;
+  }
+
+  iree_hal_file_t* file = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_client_file_create(
+        device, IREE_HAL_REMOTE_CLIENT_FILE_KIND_REMOTE_FILE, access,
+        /*length=*/0, /*handle=*/NULL, /*inner_file=*/NULL,
+        iree_byte_span_empty(), request->body.provisional_id,
+        /*owns_remote_resource=*/true, host_allocator, &file);
+  }
+
+  iree_byte_span_t transfer_payload = iree_byte_span_empty();
+  if (iree_status_is_ok(status)) {
+    transfer_payload = iree_make_byte_span(
+        (uint8_t*)request + transfer_payload_offset, transfer_payload_length);
+    status = iree_net_carrier_export_file_handle(
+        device->session_carrier, handle, transfer_type, transfer_payload);
+  }
+
+  bool transfer_exported = iree_status_is_ok(status);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_client_device_send_fire_and_forget(
+        device, iree_make_const_byte_span(request, request_size));
+  }
+  if (!iree_status_is_ok(status) && transfer_exported) {
+    iree_net_carrier_release_file_handle_transfer(
+        device->session_carrier, transfer_type,
+        iree_make_const_byte_span(transfer_payload.data,
+                                  transfer_payload.data_length));
+  }
+  if (iree_status_is_ok(status)) {
+    *out_file = file;
+    file = NULL;
+  }
+
+  iree_hal_file_release(file);
+  iree_allocator_free(host_allocator, request);
+  return status;
+}
+
 static iree_status_t iree_hal_remote_client_file_import_file_descriptor(
+    iree_hal_remote_client_device_t* device,
     iree_hal_queue_affinity_t queue_affinity, iree_hal_memory_access_t access,
     iree_io_file_handle_t* handle, iree_async_proactor_t* proactor,
     iree_allocator_t host_allocator, iree_hal_file_t** out_file) {
+  if (device && device->file_registration_capabilities !=
+                    IREE_HAL_REMOTE_FILE_REGISTRATION_CAPABILITY_NONE) {
+    return iree_hal_remote_client_file_register_descriptor(
+        device, access, handle, host_allocator, out_file);
+  }
+
   if (!proactor || !iree_io_file_handle_uses_async_io(handle)) {
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
@@ -282,6 +436,7 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_open_file(
 }
 
 iree_status_t iree_hal_remote_client_file_import(
+    iree_hal_remote_client_device_t* device,
     iree_hal_queue_affinity_t queue_affinity, iree_hal_memory_access_t access,
     iree_io_file_handle_t* handle, iree_hal_external_file_flags_t flags,
     iree_async_proactor_t* proactor, iree_allocator_t host_allocator,
@@ -310,7 +465,8 @@ iree_status_t iree_hal_remote_client_file_import(
         break;
       case IREE_IO_FILE_HANDLE_TYPE_FD:
         status = iree_hal_remote_client_file_import_file_descriptor(
-            queue_affinity, access, handle, proactor, host_allocator, out_file);
+            device, queue_affinity, access, handle, proactor, host_allocator,
+            out_file);
         break;
       default:
         status = iree_make_status(

@@ -43,6 +43,7 @@
 #include "iree/async/buffer_pool.h"
 #include "iree/base/api.h"
 #include "iree/base/internal/atomics.h"
+#include "iree/io/file_handle.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -120,8 +121,29 @@ typedef enum iree_net_carrier_capability_bits_e {
   // When set, receive buffers with base_ptr == NULL can be used.
   // When not set, all receive buffers must be CPU-accessible.
   IREE_NET_CARRIER_CAPABILITY_DEVICE_MEMORY_RX = 1u << 11,
+
+  // Carrier can transfer POSIX fd rights to its peer. The transfer payload is
+  // carrier-specific and must only be decoded through the same carrier pair.
+  IREE_NET_CARRIER_CAPABILITY_POSIX_FD_TRANSFER = 1u << 12,
+
+  // Carrier can transfer Win32 HANDLE rights to its peer. The transfer payload
+  // is carrier-specific and must only be decoded through the same carrier pair.
+  IREE_NET_CARRIER_CAPABILITY_WIN32_HANDLE_TRANSFER = 1u << 13,
 } iree_net_carrier_capability_bits_t;
 typedef uint32_t iree_net_carrier_capabilities_t;
+
+// External file handle transfer mechanisms supported by carriers.
+//
+// These name the rights transfer mechanism, not an ordinary scalar payload. For
+// example, POSIX_FD means the transport has transferred fd rights through an
+// SCM_RIGHTS-equivalent mechanism or an in-process carrier-owned token. Peers
+// must never reinterpret the transfer payload without asking the carrier.
+typedef uint8_t iree_net_file_handle_transfer_type_t;
+enum iree_net_file_handle_transfer_type_e {
+  IREE_NET_FILE_HANDLE_TRANSFER_TYPE_NONE = 0u,
+  IREE_NET_FILE_HANDLE_TRANSFER_TYPE_POSIX_FD = 1u,
+  IREE_NET_FILE_HANDLE_TRANSFER_TYPE_WIN32_HANDLE = 2u,
+};
 
 //===----------------------------------------------------------------------===//
 // Remote memory handle (for RDMA and devmem)
@@ -376,6 +398,35 @@ struct iree_net_carrier_vtable_t {
                                    iree_net_remote_handle_t* out_handle);
   void (*unregister_buffer)(iree_net_carrier_t* carrier,
                             iree_net_remote_handle_t handle);
+
+  // Queries whether and how |file_handle| can be transferred to the peer.
+  // Optional; unsupported when NULL.
+  iree_status_t (*query_file_handle_transfer)(
+      iree_net_carrier_t* carrier, iree_io_file_handle_t* file_handle,
+      iree_net_file_handle_transfer_type_t* out_transfer_type,
+      iree_host_size_t* out_payload_length);
+
+  // Exports |file_handle| into a carrier-specific transfer payload.
+  // Optional; unsupported when NULL.
+  iree_status_t (*export_file_handle)(
+      iree_net_carrier_t* carrier, iree_io_file_handle_t* file_handle,
+      iree_net_file_handle_transfer_type_t transfer_type,
+      iree_byte_span_t transfer_payload);
+
+  // Imports a peer-exported carrier-specific transfer payload.
+  // Optional; unsupported when NULL.
+  iree_status_t (*import_file_handle)(
+      iree_net_carrier_t* carrier,
+      iree_net_file_handle_transfer_type_t transfer_type,
+      iree_const_byte_span_t transfer_payload, iree_allocator_t host_allocator,
+      iree_io_file_handle_t** out_file_handle);
+
+  // Releases a local export that will not be imported by the peer.
+  // Optional; ignored when NULL.
+  void (*release_file_handle_transfer)(
+      iree_net_carrier_t* carrier,
+      iree_net_file_handle_transfer_type_t transfer_type,
+      iree_const_byte_span_t transfer_payload);
 };
 
 // Statistics for a carrier. Cumulative since carrier creation.
@@ -746,6 +797,70 @@ static inline iree_status_t iree_net_carrier_register_buffer(
 static inline void iree_net_carrier_unregister_buffer(
     iree_net_carrier_t* carrier, iree_net_remote_handle_t handle) {
   carrier->vtable->unregister_buffer(carrier, handle);
+}
+
+// Queries the payload size required to transfer |file_handle| to the peer.
+//
+// The transfer payload is carrier-specific and can only be decoded by the peer
+// through iree_net_carrier_import_file_handle(). Returns UNIMPLEMENTED if the
+// carrier cannot transfer this handle.
+static inline iree_status_t iree_net_carrier_query_file_handle_transfer(
+    iree_net_carrier_t* carrier, iree_io_file_handle_t* file_handle,
+    iree_net_file_handle_transfer_type_t* out_transfer_type,
+    iree_host_size_t* out_payload_length) {
+  if (!carrier->vtable->query_file_handle_transfer) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "carrier does not support external file handle transfer");
+  }
+  return carrier->vtable->query_file_handle_transfer(
+      carrier, file_handle, out_transfer_type, out_payload_length);
+}
+
+// Exports |file_handle| into |transfer_payload| for peer import.
+//
+// The payload storage must be exactly the size returned by
+// iree_net_carrier_query_file_handle_transfer(). On success, the carrier owns
+// transfer state until the peer imports it or the caller releases it with
+// iree_net_carrier_release_file_handle_transfer() after send failure.
+static inline iree_status_t iree_net_carrier_export_file_handle(
+    iree_net_carrier_t* carrier, iree_io_file_handle_t* file_handle,
+    iree_net_file_handle_transfer_type_t transfer_type,
+    iree_byte_span_t transfer_payload) {
+  if (!carrier->vtable->export_file_handle) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "carrier does not support external file handle transfer");
+  }
+  return carrier->vtable->export_file_handle(carrier, file_handle,
+                                             transfer_type, transfer_payload);
+}
+
+// Imports a transferred peer file handle and consumes the transfer payload.
+static inline iree_status_t iree_net_carrier_import_file_handle(
+    iree_net_carrier_t* carrier,
+    iree_net_file_handle_transfer_type_t transfer_type,
+    iree_const_byte_span_t transfer_payload, iree_allocator_t host_allocator,
+    iree_io_file_handle_t** out_file_handle) {
+  if (!carrier->vtable->import_file_handle) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "carrier does not support external file handle transfer");
+  }
+  return carrier->vtable->import_file_handle(carrier, transfer_type,
+                                             transfer_payload, host_allocator,
+                                             out_file_handle);
+}
+
+// Releases an exported transfer that could not be delivered to the peer.
+static inline void iree_net_carrier_release_file_handle_transfer(
+    iree_net_carrier_t* carrier,
+    iree_net_file_handle_transfer_type_t transfer_type,
+    iree_const_byte_span_t transfer_payload) {
+  if (carrier->vtable->release_file_handle_transfer) {
+    carrier->vtable->release_file_handle_transfer(carrier, transfer_type,
+                                                  transfer_payload);
+  }
 }
 
 #ifdef __cplusplus

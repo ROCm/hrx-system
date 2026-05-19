@@ -7,9 +7,27 @@
 #include "iree/net/carrier/loopback/carrier.h"
 
 #include "iree/async/operations/scheduling.h"
+#include "iree/base/threading/mutex.h"
 
 static_assert(sizeof(uintptr_t) <= sizeof(iree_net_carrier_send_handle_t),
               "send handle cannot round-trip pending send pointers");
+
+typedef struct iree_net_loopback_file_transfer_payload_t {
+  // Opaque transfer ID resolved by the peer carrier.
+  uint64_t id;
+} iree_net_loopback_file_transfer_payload_t;
+static_assert(sizeof(iree_net_loopback_file_transfer_payload_t) == 8, "");
+
+typedef struct iree_net_loopback_file_transfer_t {
+  // Next transfer in the carrier-local pending transfer list.
+  struct iree_net_loopback_file_transfer_t* next;
+
+  // Opaque transfer ID serialized in the control payload.
+  uint64_t id;
+
+  // Retained file handle transferred to the peer on import.
+  iree_io_file_handle_t* file_handle;
+} iree_net_loopback_file_transfer_t;
 
 // A pending send operation awaiting delivery during the next poll() cycle. The
 // trailing storage contains the payload copied from send() or written by
@@ -66,11 +84,29 @@ typedef struct iree_net_loopback_carrier_t {
   // destroyed). Set by the endpoint adapter to propagate transport errors.
   // This provides the loopback equivalent of TCP's ECONNRESET notification.
   iree_net_loopback_carrier_disconnect_handler_t peer_disconnect_handler;
+
+  // Guards pending_file_transfers and next_file_transfer_id.
+  iree_slim_mutex_t file_transfer_mutex;
+
+  // Next opaque file transfer ID to allocate.
+  uint64_t next_file_transfer_id;
+
+  // Pending file handles exported by this carrier and not yet imported.
+  iree_net_loopback_file_transfer_t* pending_file_transfers;
 } iree_net_loopback_carrier_t;
 
 static inline iree_net_loopback_carrier_t* iree_net_loopback_carrier_cast(
     iree_net_carrier_t* base_carrier) {
   return (iree_net_loopback_carrier_t*)base_carrier;
+}
+
+static iree_net_file_handle_transfer_type_t
+iree_net_loopback_file_transfer_type(void) {
+#if defined(IREE_PLATFORM_WINDOWS)
+  return IREE_NET_FILE_HANDLE_TRANSFER_TYPE_WIN32_HANDLE;
+#else
+  return IREE_NET_FILE_HANDLE_TRANSFER_TYPE_POSIX_FD;
+#endif  // IREE_PLATFORM_WINDOWS
 }
 
 //===----------------------------------------------------------------------===//
@@ -97,6 +133,40 @@ static void iree_net_loopback_carrier_maybe_complete_deactivation(
   if (carrier->deactivate_callback.fn) {
     carrier->deactivate_callback.fn(carrier->deactivate_callback.user_data);
   }
+}
+
+static void iree_net_loopback_carrier_release_file_transfers(
+    iree_net_loopback_carrier_t* carrier) {
+  iree_slim_mutex_lock(&carrier->file_transfer_mutex);
+  iree_net_loopback_file_transfer_t* transfer = carrier->pending_file_transfers;
+  carrier->pending_file_transfers = NULL;
+  iree_slim_mutex_unlock(&carrier->file_transfer_mutex);
+
+  while (transfer) {
+    iree_net_loopback_file_transfer_t* next = transfer->next;
+    iree_io_file_handle_release(transfer->file_handle);
+    iree_allocator_free(carrier->base.host_allocator, transfer);
+    transfer = next;
+  }
+}
+
+static iree_net_loopback_file_transfer_t*
+iree_net_loopback_carrier_take_file_transfer(
+    iree_net_loopback_carrier_t* carrier, uint64_t id) {
+  iree_slim_mutex_lock(&carrier->file_transfer_mutex);
+  iree_net_loopback_file_transfer_t** previous_next =
+      &carrier->pending_file_transfers;
+  iree_net_loopback_file_transfer_t* transfer = carrier->pending_file_transfers;
+  while (transfer && transfer->id != id) {
+    previous_next = &transfer->next;
+    transfer = transfer->next;
+  }
+  if (transfer) {
+    *previous_next = transfer->next;
+    transfer->next = NULL;
+  }
+  iree_slim_mutex_unlock(&carrier->file_transfer_mutex);
+  return transfer;
 }
 
 // Deferred notification delivered to the surviving peer when the other side
@@ -352,6 +422,9 @@ static void iree_net_loopback_carrier_destroy(
   // Release proactor reference.
   iree_async_proactor_release(carrier->proactor);
 
+  iree_net_loopback_carrier_release_file_transfers(carrier);
+  iree_slim_mutex_deinitialize(&carrier->file_transfer_mutex);
+
   // Free carrier memory.
   iree_allocator_t allocator = carrier->base.host_allocator;
   iree_allocator_free(allocator, carrier);
@@ -606,6 +679,185 @@ static void iree_net_loopback_carrier_unregister_buffer(
   (void)handle;
 }
 
+static iree_status_t iree_net_loopback_carrier_query_file_handle_transfer(
+    iree_net_carrier_t* base_carrier, iree_io_file_handle_t* file_handle,
+    iree_net_file_handle_transfer_type_t* out_transfer_type,
+    iree_host_size_t* out_payload_length) {
+  IREE_ASSERT_ARGUMENT(file_handle);
+  IREE_ASSERT_ARGUMENT(out_transfer_type);
+  IREE_ASSERT_ARGUMENT(out_payload_length);
+
+  *out_transfer_type = IREE_NET_FILE_HANDLE_TRANSFER_TYPE_NONE;
+  *out_payload_length = 0;
+
+  iree_status_t status = iree_ok_status();
+  iree_net_loopback_carrier_t* carrier =
+      iree_net_loopback_carrier_cast(base_carrier);
+#if !IREE_FILE_IO_ENABLE
+  status = iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "file support has been compiled out of this "
+                            "binary; set IREE_FILE_IO_ENABLE=1 to include it");
+#endif  // !IREE_FILE_IO_ENABLE
+  if (iree_status_is_ok(status) && !carrier->peer) {
+    status = iree_make_status(IREE_STATUS_UNAVAILABLE, "peer disconnected");
+  }
+  if (iree_status_is_ok(status) &&
+      iree_io_file_handle_type(file_handle) != IREE_IO_FILE_HANDLE_TYPE_FD) {
+    status = iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "loopback carrier can only transfer descriptor-backed file handles");
+  }
+  if (iree_status_is_ok(status)) {
+    *out_transfer_type = iree_net_loopback_file_transfer_type();
+    *out_payload_length = sizeof(iree_net_loopback_file_transfer_payload_t);
+  }
+  return status;
+}
+
+static iree_status_t iree_net_loopback_carrier_export_file_handle(
+    iree_net_carrier_t* base_carrier, iree_io_file_handle_t* file_handle,
+    iree_net_file_handle_transfer_type_t transfer_type,
+    iree_byte_span_t transfer_payload) {
+  IREE_ASSERT_ARGUMENT(file_handle);
+
+  iree_net_loopback_carrier_t* carrier =
+      iree_net_loopback_carrier_cast(base_carrier);
+  iree_status_t status = iree_ok_status();
+#if !IREE_FILE_IO_ENABLE
+  status = iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "file support has been compiled out of this "
+                            "binary; set IREE_FILE_IO_ENABLE=1 to include it");
+#endif  // !IREE_FILE_IO_ENABLE
+  if (iree_status_is_ok(status) &&
+      transfer_type != iree_net_loopback_file_transfer_type()) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "unsupported loopback file transfer type %u",
+                              (uint32_t)transfer_type);
+  }
+  if (iree_status_is_ok(status) &&
+      transfer_payload.data_length !=
+          sizeof(iree_net_loopback_file_transfer_payload_t)) {
+    status = iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "loopback file transfer payload length must be %" PRIhsz " bytes",
+        (iree_host_size_t)sizeof(iree_net_loopback_file_transfer_payload_t));
+  }
+  if (iree_status_is_ok(status) && !carrier->peer) {
+    status = iree_make_status(IREE_STATUS_UNAVAILABLE, "peer disconnected");
+  }
+  if (iree_status_is_ok(status) &&
+      iree_io_file_handle_type(file_handle) != IREE_IO_FILE_HANDLE_TYPE_FD) {
+    status = iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "loopback carrier can only transfer descriptor-backed file handles");
+  }
+
+  iree_net_loopback_file_transfer_t* transfer = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc(carrier->base.host_allocator,
+                                   sizeof(*transfer), (void**)&transfer);
+  }
+  if (iree_status_is_ok(status)) {
+    memset(transfer, 0, sizeof(*transfer));
+    transfer->file_handle = file_handle;
+    iree_io_file_handle_retain(transfer->file_handle);
+
+    iree_slim_mutex_lock(&carrier->file_transfer_mutex);
+    transfer->id = carrier->next_file_transfer_id++;
+    if (carrier->next_file_transfer_id == 0) {
+      carrier->next_file_transfer_id = 1;
+    }
+    transfer->next = carrier->pending_file_transfers;
+    carrier->pending_file_transfers = transfer;
+    iree_slim_mutex_unlock(&carrier->file_transfer_mutex);
+
+    iree_net_loopback_file_transfer_payload_t payload = {
+        .id = transfer->id,
+    };
+    memcpy(transfer_payload.data, &payload, sizeof(payload));
+  }
+  return status;
+}
+
+static iree_status_t iree_net_loopback_carrier_import_file_handle(
+    iree_net_carrier_t* base_carrier,
+    iree_net_file_handle_transfer_type_t transfer_type,
+    iree_const_byte_span_t transfer_payload, iree_allocator_t host_allocator,
+    iree_io_file_handle_t** out_file_handle) {
+  IREE_ASSERT_ARGUMENT(out_file_handle);
+  *out_file_handle = NULL;
+  (void)host_allocator;
+
+  iree_net_loopback_carrier_t* carrier =
+      iree_net_loopback_carrier_cast(base_carrier);
+  iree_net_loopback_file_transfer_payload_t payload = {0};
+  iree_status_t status = iree_ok_status();
+#if !IREE_FILE_IO_ENABLE
+  status = iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "file support has been compiled out of this "
+                            "binary; set IREE_FILE_IO_ENABLE=1 to include it");
+#endif  // !IREE_FILE_IO_ENABLE
+  if (iree_status_is_ok(status) &&
+      transfer_type != iree_net_loopback_file_transfer_type()) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "unsupported loopback file transfer type %u",
+                              (uint32_t)transfer_type);
+  }
+  if (iree_status_is_ok(status) &&
+      transfer_payload.data_length != sizeof(payload)) {
+    status = iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "loopback file transfer payload length must be %" PRIhsz " bytes",
+        (iree_host_size_t)sizeof(payload));
+  }
+  if (iree_status_is_ok(status) && !carrier->peer) {
+    status = iree_make_status(IREE_STATUS_UNAVAILABLE, "peer disconnected");
+  }
+  if (iree_status_is_ok(status)) {
+    memcpy(&payload, transfer_payload.data, sizeof(payload));
+  }
+
+  iree_net_loopback_file_transfer_t* transfer = NULL;
+  iree_allocator_t transfer_allocator = carrier->base.host_allocator;
+  if (iree_status_is_ok(status)) {
+    transfer_allocator = carrier->peer->base.host_allocator;
+    transfer =
+        iree_net_loopback_carrier_take_file_transfer(carrier->peer, payload.id);
+    if (!transfer) {
+      status = iree_make_status(IREE_STATUS_NOT_FOUND,
+                                "loopback file transfer token not found");
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    *out_file_handle = transfer->file_handle;
+    transfer->file_handle = NULL;
+  }
+  if (transfer) {
+    iree_io_file_handle_release(transfer->file_handle);
+    iree_allocator_free(transfer_allocator, transfer);
+  }
+  return status;
+}
+
+static void iree_net_loopback_carrier_release_file_handle_transfer(
+    iree_net_carrier_t* base_carrier,
+    iree_net_file_handle_transfer_type_t transfer_type,
+    iree_const_byte_span_t transfer_payload) {
+  iree_net_loopback_carrier_t* carrier =
+      iree_net_loopback_carrier_cast(base_carrier);
+  iree_net_loopback_file_transfer_payload_t payload = {0};
+  if (transfer_type == iree_net_loopback_file_transfer_type() &&
+      transfer_payload.data_length == sizeof(payload)) {
+    memcpy(&payload, transfer_payload.data, sizeof(payload));
+    iree_net_loopback_file_transfer_t* transfer =
+        iree_net_loopback_carrier_take_file_transfer(carrier, payload.id);
+    if (transfer) {
+      iree_io_file_handle_release(transfer->file_handle);
+      iree_allocator_free(carrier->base.host_allocator, transfer);
+    }
+  }
+}
+
 static iree_status_t iree_net_loopback_carrier_shutdown(
     iree_net_carrier_t* base_carrier) {
   iree_net_loopback_carrier_t* carrier =
@@ -639,6 +891,12 @@ static const iree_net_carrier_vtable_t iree_net_loopback_carrier_vtable = {
     .direct_read = iree_net_loopback_carrier_direct_read,
     .register_buffer = iree_net_loopback_carrier_register_buffer,
     .unregister_buffer = iree_net_loopback_carrier_unregister_buffer,
+    .query_file_handle_transfer =
+        iree_net_loopback_carrier_query_file_handle_transfer,
+    .export_file_handle = iree_net_loopback_carrier_export_file_handle,
+    .import_file_handle = iree_net_loopback_carrier_import_file_handle,
+    .release_file_handle_transfer =
+        iree_net_loopback_carrier_release_file_handle_transfer,
 };
 
 //===----------------------------------------------------------------------===//
@@ -658,6 +916,8 @@ static void iree_net_loopback_carrier_init(
   carrier->proactor = proactor;
   iree_async_proactor_retain(proactor);
   carrier->shutdown_initiated = false;
+  iree_slim_mutex_initialize(&carrier->file_transfer_mutex);
+  carrier->next_file_transfer_id = 1;
 }
 
 IREE_API_EXPORT void iree_net_loopback_carrier_set_peer_disconnect_handler(
@@ -696,6 +956,13 @@ IREE_API_EXPORT iree_status_t iree_net_loopback_carrier_create_pair(
     iree_net_carrier_capabilities_t capabilities =
         IREE_NET_CARRIER_CAPABILITY_RELIABLE |
         IREE_NET_CARRIER_CAPABILITY_ORDERED;
+#if IREE_FILE_IO_ENABLE
+#if defined(IREE_PLATFORM_WINDOWS)
+    capabilities |= IREE_NET_CARRIER_CAPABILITY_WIN32_HANDLE_TRANSFER;
+#else
+    capabilities |= IREE_NET_CARRIER_CAPABILITY_POSIX_FD_TRANSFER;
+#endif  // IREE_PLATFORM_WINDOWS
+#endif  // IREE_FILE_IO_ENABLE
 
     // Initialize both carriers.
     iree_net_loopback_carrier_init(client, proactor, capabilities, callback,

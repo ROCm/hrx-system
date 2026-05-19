@@ -78,6 +78,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/utils:resource_set",
         "//runtime/src/iree/io:file_handle",
         "//runtime/src/iree/net:bootstrap",
+        "//runtime/src/iree/net:carrier",
         "//runtime/src/iree/net:session",
         "//runtime/src/iree/net:status_wire",
         "//runtime/src/iree/net:transport_factory",

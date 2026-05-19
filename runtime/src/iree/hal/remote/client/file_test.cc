@@ -29,7 +29,7 @@ TEST(RemoteClientFileTest, ImportsHostAllocation) {
 
   iree_hal_file_t* file = nullptr;
   IREE_ASSERT_OK(iree_hal_remote_client_file_import(
-      /*queue_affinity=*/0,
+      /*device=*/nullptr, /*queue_affinity=*/0,
       IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE, handle,
       IREE_HAL_EXTERNAL_FILE_FLAG_NONE, /*proactor=*/nullptr, host_allocator,
       &file));
@@ -94,7 +94,7 @@ TEST(RemoteClientFileTest, ImportsAsyncFileHandle) {
 
   iree_hal_file_t* file = nullptr;
   IREE_ASSERT_OK(iree_hal_remote_client_file_import(
-      /*queue_affinity=*/0,
+      /*device=*/nullptr, /*queue_affinity=*/0,
       IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE, handle,
       IREE_HAL_EXTERNAL_FILE_FLAG_NONE, proactor, host_allocator, &file));
 
@@ -153,8 +153,9 @@ TEST(RemoteClientFileTest, RejectsSynchronousFileHandleBeforeQueueSubmission) {
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_UNIMPLEMENTED,
       iree_hal_remote_client_file_import(
-          /*queue_affinity=*/0, IREE_HAL_MEMORY_ACCESS_READ, handle,
-          IREE_HAL_EXTERNAL_FILE_FLAG_NONE, proactor, host_allocator, &file));
+          /*device=*/nullptr, /*queue_affinity=*/0, IREE_HAL_MEMORY_ACCESS_READ,
+          handle, IREE_HAL_EXTERNAL_FILE_FLAG_NONE, proactor, host_allocator,
+          &file));
   EXPECT_EQ(file, nullptr);
 
   iree_io_file_handle_release(handle);
@@ -173,8 +174,9 @@ TEST(RemoteClientFileTest, RejectsDisallowedHandleAccess) {
   iree_hal_file_t* file = nullptr;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED,
                         iree_hal_remote_client_file_import(
-                            /*queue_affinity=*/0, IREE_HAL_MEMORY_ACCESS_WRITE,
-                            handle, IREE_HAL_EXTERNAL_FILE_FLAG_NONE,
+                            /*device=*/nullptr, /*queue_affinity=*/0,
+                            IREE_HAL_MEMORY_ACCESS_WRITE, handle,
+                            IREE_HAL_EXTERNAL_FILE_FLAG_NONE,
                             /*proactor=*/nullptr, host_allocator, &file));
   EXPECT_EQ(file, nullptr);
 

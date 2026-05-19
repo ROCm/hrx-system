@@ -1311,8 +1311,8 @@ struct SemaphoreListHelper {
   iree_hal_semaphore_t* semaphore;
   uint64_t value;
   iree_hal_semaphore_list_t list;
-  SemaphoreListHelper(iree_hal_semaphore_t* sem, uint64_t val)
-      : semaphore(sem), value(val) {
+  SemaphoreListHelper(iree_hal_semaphore_t* input_semaphore, uint64_t val)
+      : semaphore(input_semaphore), value(val) {
     list.count = 1;
     list.semaphores = &semaphore;
     list.payload_values = &value;
@@ -1368,14 +1368,14 @@ TEST_F(RemoteBufferTest, QueueFillAndReadBack) {
       allocator, params, /*allocation_size=*/1024, &buffer));
 
   // Create a semaphore to track fill completion.
-  iree_hal_semaphore_t* sem = nullptr;
+  iree_hal_semaphore_t* semaphore = nullptr;
   IREE_ASSERT_OK(iree_hal_semaphore_create(
       client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
-      IREE_HAL_SEMAPHORE_FLAG_NONE, &sem));
+      IREE_HAL_SEMAPHORE_FLAG_NONE, &semaphore));
 
   // Queue fill with 4-byte pattern.
   uint32_t pattern = 0xDEADBEEF;
-  SemaphoreListHelper signal(sem, 1);
+  SemaphoreListHelper signal(semaphore, 1);
   IREE_ASSERT_OK(iree_hal_device_queue_fill(
       client_device_, IREE_HAL_QUEUE_AFFINITY_ANY,
       iree_hal_semaphore_list_empty(), signal.list, buffer,
@@ -1383,7 +1383,7 @@ TEST_F(RemoteBufferTest, QueueFillAndReadBack) {
       /*pattern_length=*/sizeof(pattern), IREE_HAL_FILL_FLAG_NONE));
 
   // Wait for fill to complete.
-  IREE_ASSERT_OK(iree_hal_semaphore_wait(sem, 1, iree_infinite_timeout(),
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(semaphore, 1, iree_infinite_timeout(),
                                          IREE_ASYNC_WAIT_FLAG_NONE));
 
   // Read back and verify.
@@ -1397,7 +1397,7 @@ TEST_F(RemoteBufferTest, QueueFillAndReadBack) {
   }
   IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
 
-  iree_hal_semaphore_release(sem);
+  iree_hal_semaphore_release(semaphore);
   iree_hal_buffer_release(buffer);
 }
 
@@ -1481,22 +1481,22 @@ TEST_F(RemoteBufferTest, QueueUpdateAndReadBack) {
   IREE_ASSERT_OK(
       iree_hal_allocator_allocate_buffer(allocator, params, 64, &buffer));
 
-  iree_hal_semaphore_t* sem = nullptr;
-  IREE_ASSERT_OK(iree_hal_semaphore_create(client_device_,
-                                           IREE_HAL_QUEUE_AFFINITY_ANY, 0,
-                                           IREE_HAL_SEMAPHORE_FLAG_NONE, &sem));
+  iree_hal_semaphore_t* semaphore = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_create(client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, 0,
+                                IREE_HAL_SEMAPHORE_FLAG_NONE, &semaphore));
 
   // Queue update with inline host data.
   const char host_data[] = "Hello, remote HAL!";
   iree_host_size_t data_length = sizeof(host_data) - 1;  // exclude NUL
-  SemaphoreListHelper signal(sem, 1);
+  SemaphoreListHelper signal(semaphore, 1);
   IREE_ASSERT_OK(iree_hal_device_queue_update(
       client_device_, IREE_HAL_QUEUE_AFFINITY_ANY,
       iree_hal_semaphore_list_empty(), signal.list, host_data,
       /*source_offset=*/0, buffer, /*target_offset=*/0, data_length,
       IREE_HAL_UPDATE_FLAG_NONE));
 
-  IREE_ASSERT_OK(iree_hal_semaphore_wait(sem, 1, iree_infinite_timeout(),
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(semaphore, 1, iree_infinite_timeout(),
                                          IREE_ASYNC_WAIT_FLAG_NONE));
 
   // Read back and verify.
@@ -1508,7 +1508,7 @@ TEST_F(RemoteBufferTest, QueueUpdateAndReadBack) {
       << "Update data mismatch";
   IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
 
-  iree_hal_semaphore_release(sem);
+  iree_hal_semaphore_release(semaphore);
   iree_hal_buffer_release(buffer);
 }
 
@@ -1563,17 +1563,17 @@ TEST_F(RemoteBufferTest, ServerFileQueueRead) {
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       allocator, params, server_read_contents_.size(), &buffer));
 
-  iree_hal_semaphore_t* sem = nullptr;
-  IREE_ASSERT_OK(iree_hal_semaphore_create(client_device_,
-                                           IREE_HAL_QUEUE_AFFINITY_ANY, 0,
-                                           IREE_HAL_SEMAPHORE_FLAG_NONE, &sem));
-  SemaphoreListHelper signal(sem, 1);
+  iree_hal_semaphore_t* semaphore = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_create(client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, 0,
+                                IREE_HAL_SEMAPHORE_FLAG_NONE, &semaphore));
+  SemaphoreListHelper signal(semaphore, 1);
   IREE_ASSERT_OK(iree_hal_device_queue_read(
       client_device_, IREE_HAL_QUEUE_AFFINITY_ANY,
       iree_hal_semaphore_list_empty(), signal.list, source_file,
       /*source_offset=*/0, buffer, /*target_offset=*/0,
       server_read_contents_.size(), IREE_HAL_READ_FLAG_NONE));
-  IREE_ASSERT_OK(iree_hal_semaphore_wait(sem, 1, iree_infinite_timeout(),
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(semaphore, 1, iree_infinite_timeout(),
                                          IREE_ASYNC_WAIT_FLAG_NONE));
 
   iree_hal_buffer_mapping_t mapping;
@@ -1585,9 +1585,75 @@ TEST_F(RemoteBufferTest, ServerFileQueueRead) {
             0);
   IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
 
-  iree_hal_semaphore_release(sem);
+  iree_hal_semaphore_release(semaphore);
   iree_hal_buffer_release(buffer);
   iree_hal_file_release(source_file);
+}
+
+TEST_F(RemoteBufferTest, RegisteredClientFileQueueRead) {
+  static const char kReadContents[] = "remote registered file read contents";
+  iree::testing::TempFilePath source_path("iree_hal_remote_registered_read");
+  IREE_ASSERT_OK(WriteFileContents(
+      source_path.path_view(),
+      iree_make_const_byte_span(kReadContents, sizeof(kReadContents) - 1)));
+
+  iree_io_file_handle_t* source_handle = nullptr;
+  iree_status_t status = iree_io_file_handle_open(
+      IREE_IO_FILE_MODE_READ | IREE_IO_FILE_MODE_RANDOM_ACCESS |
+          IREE_IO_FILE_MODE_SHARE_READ | IREE_IO_FILE_MODE_ASYNC,
+      source_path.path_view(), iree_allocator_system(), &source_handle);
+  if (iree_status_is_unavailable(status) ||
+      iree_status_code(status) == IREE_STATUS_UNIMPLEMENTED) {
+    iree_status_ignore(status);
+    GTEST_SKIP() << "Async platform file handles unavailable";
+  }
+  IREE_ASSERT_OK(status);
+
+  iree_hal_file_t* source_file = nullptr;
+  IREE_ASSERT_OK(iree_hal_file_import(
+      client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, IREE_HAL_MEMORY_ACCESS_READ,
+      source_handle, IREE_HAL_EXTERNAL_FILE_FLAG_NONE, &source_file));
+  iree_io_file_handle_release(source_handle);
+  EXPECT_EQ(iree_hal_file_length(source_file), 0);
+
+  iree_hal_allocator_t* allocator = iree_hal_device_allocator(client_device_);
+  iree_hal_buffer_params_t params = {0};
+  params.usage =
+      IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED;
+  params.access = IREE_HAL_MEMORY_ACCESS_ALL;
+  params.type =
+      IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+
+  iree_hal_buffer_t* buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
+      allocator, params, sizeof(kReadContents) - 1, &buffer));
+
+  iree_hal_semaphore_t* semaphore = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_create(client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, 0,
+                                IREE_HAL_SEMAPHORE_FLAG_NONE, &semaphore));
+  SemaphoreListHelper signal(semaphore, 1);
+  IREE_ASSERT_OK(iree_hal_device_queue_read(
+      client_device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+      iree_hal_semaphore_list_empty(), signal.list, source_file,
+      /*source_offset=*/0, buffer, /*target_offset=*/0,
+      sizeof(kReadContents) - 1, IREE_HAL_READ_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(semaphore, 1, iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
+
+  iree_hal_buffer_mapping_t mapping;
+  IREE_ASSERT_OK(iree_hal_buffer_map_range(
+      buffer, IREE_HAL_MAPPING_MODE_SCOPED, IREE_HAL_MEMORY_ACCESS_READ, 0,
+      sizeof(kReadContents) - 1, &mapping));
+  ASSERT_EQ(
+      memcmp(mapping.contents.data, kReadContents, sizeof(kReadContents) - 1),
+      0);
+  IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
+
+  iree_hal_semaphore_release(semaphore);
+  iree_hal_buffer_release(buffer);
+  iree_hal_file_release(source_file);
+  source_path.Remove();
 }
 
 TEST_F(RemoteBufferTest, ServerFileQueueReadOpenFailureSignalsSemaphore) {
@@ -1608,21 +1674,22 @@ TEST_F(RemoteBufferTest, ServerFileQueueReadOpenFailureSignalsSemaphore) {
   IREE_ASSERT_OK(
       iree_hal_allocator_allocate_buffer(allocator, params, 16, &buffer));
 
-  iree_hal_semaphore_t* sem = nullptr;
-  IREE_ASSERT_OK(iree_hal_semaphore_create(client_device_,
-                                           IREE_HAL_QUEUE_AFFINITY_ANY, 0,
-                                           IREE_HAL_SEMAPHORE_FLAG_NONE, &sem));
-  SemaphoreListHelper signal(sem, 1);
+  iree_hal_semaphore_t* semaphore = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_create(client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, 0,
+                                IREE_HAL_SEMAPHORE_FLAG_NONE, &semaphore));
+  SemaphoreListHelper signal(semaphore, 1);
   IREE_ASSERT_OK(iree_hal_device_queue_read(
       client_device_, IREE_HAL_QUEUE_AFFINITY_ANY,
       iree_hal_semaphore_list_empty(), signal.list, source_file,
       /*source_offset=*/0, buffer, /*target_offset=*/0, 16,
       IREE_HAL_READ_FLAG_NONE));
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED,
-                        iree_hal_semaphore_wait(sem, 1, iree_infinite_timeout(),
-                                                IREE_ASYNC_WAIT_FLAG_NONE));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_PERMISSION_DENIED,
+      iree_hal_semaphore_wait(semaphore, 1, iree_infinite_timeout(),
+                              IREE_ASYNC_WAIT_FLAG_NONE));
 
-  iree_hal_semaphore_release(sem);
+  iree_hal_semaphore_release(semaphore);
   iree_hal_buffer_release(buffer);
   iree_hal_file_release(source_file);
 }
@@ -1673,29 +1740,29 @@ TEST_F(RemoteBufferTest, ClientFileQueueReadLargeHostAllocation) {
   IREE_ASSERT_OK(
       iree_hal_allocator_allocate_buffer(allocator, params, kLength, &buffer));
 
-  iree_hal_semaphore_t* sem = nullptr;
-  IREE_ASSERT_OK(iree_hal_semaphore_create(client_device_,
-                                           IREE_HAL_QUEUE_AFFINITY_ANY, 0,
-                                           IREE_HAL_SEMAPHORE_FLAG_NONE, &sem));
-  SemaphoreListHelper read_signal(sem, 1);
+  iree_hal_semaphore_t* semaphore = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_create(client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, 0,
+                                IREE_HAL_SEMAPHORE_FLAG_NONE, &semaphore));
+  SemaphoreListHelper read_signal(semaphore, 1);
   IREE_ASSERT_OK(iree_hal_device_queue_read(
       client_device_, IREE_HAL_QUEUE_AFFINITY_ANY,
       iree_hal_semaphore_list_empty(), read_signal.list, source_file,
       /*source_offset=*/0, buffer, /*target_offset=*/0, kLength,
       IREE_HAL_READ_FLAG_NONE));
 
-  SemaphoreListHelper write_wait(sem, 1);
-  SemaphoreListHelper write_signal(sem, 2);
+  SemaphoreListHelper write_wait(semaphore, 1);
+  SemaphoreListHelper write_signal(semaphore, 2);
   IREE_ASSERT_OK(iree_hal_device_queue_write(
       client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, write_wait.list,
       write_signal.list, buffer, /*source_offset=*/0, target_file,
       /*target_offset=*/0, kLength, IREE_HAL_WRITE_FLAG_NONE));
-  IREE_ASSERT_OK(iree_hal_semaphore_wait(sem, 2, iree_infinite_timeout(),
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(semaphore, 2, iree_infinite_timeout(),
                                          IREE_ASYNC_WAIT_FLAG_NONE));
 
   EXPECT_EQ(target_contents, source_contents);
 
-  iree_hal_semaphore_release(sem);
+  iree_hal_semaphore_release(semaphore);
   iree_hal_buffer_release(buffer);
   iree_hal_file_release(target_file);
   iree_hal_file_release(source_file);
@@ -1728,17 +1795,17 @@ TEST_F(RemoteBufferTest, ServerFileQueueWrite) {
   memcpy(mapping.contents.data, kWriteContents, sizeof(kWriteContents) - 1);
   IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
 
-  iree_hal_semaphore_t* sem = nullptr;
-  IREE_ASSERT_OK(iree_hal_semaphore_create(client_device_,
-                                           IREE_HAL_QUEUE_AFFINITY_ANY, 0,
-                                           IREE_HAL_SEMAPHORE_FLAG_NONE, &sem));
-  SemaphoreListHelper signal(sem, 1);
+  iree_hal_semaphore_t* semaphore = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_create(client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, 0,
+                                IREE_HAL_SEMAPHORE_FLAG_NONE, &semaphore));
+  SemaphoreListHelper signal(semaphore, 1);
   IREE_ASSERT_OK(iree_hal_device_queue_write(
       client_device_, IREE_HAL_QUEUE_AFFINITY_ANY,
       iree_hal_semaphore_list_empty(), signal.list, buffer, /*source_offset=*/0,
       target_file, /*target_offset=*/0, sizeof(kWriteContents) - 1,
       IREE_HAL_WRITE_FLAG_NONE));
-  IREE_ASSERT_OK(iree_hal_semaphore_wait(sem, 1, iree_infinite_timeout(),
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(semaphore, 1, iree_infinite_timeout(),
                                          IREE_ASYNC_WAIT_FLAG_NONE));
 
   iree_io_file_contents_t* contents = nullptr;
@@ -1750,9 +1817,86 @@ TEST_F(RemoteBufferTest, ServerFileQueueWrite) {
             0);
   iree_io_file_contents_free(contents);
 
-  iree_hal_semaphore_release(sem);
+  iree_hal_semaphore_release(semaphore);
   iree_hal_buffer_release(buffer);
   iree_hal_file_release(target_file);
+}
+
+TEST_F(RemoteBufferTest, RegisteredClientFileQueueWrite) {
+  static const char kWriteContents[] = "remote registered file write contents";
+  iree::testing::TempFilePath target_path("iree_hal_remote_registered_write");
+  std::string initial_contents(sizeof(kWriteContents) - 1, '\0');
+  IREE_ASSERT_OK(
+      WriteFileContents(target_path.path_view(),
+                        iree_make_const_byte_span(initial_contents.data(),
+                                                  initial_contents.size())));
+
+  iree_io_file_handle_t* target_handle = nullptr;
+  iree_status_t status = iree_io_file_handle_open(
+      IREE_IO_FILE_MODE_READ | IREE_IO_FILE_MODE_WRITE |
+          IREE_IO_FILE_MODE_RANDOM_ACCESS | IREE_IO_FILE_MODE_SHARE_READ |
+          IREE_IO_FILE_MODE_SHARE_WRITE | IREE_IO_FILE_MODE_ASYNC,
+      target_path.path_view(), iree_allocator_system(), &target_handle);
+  if (iree_status_is_unavailable(status) ||
+      iree_status_code(status) == IREE_STATUS_UNIMPLEMENTED) {
+    iree_status_ignore(status);
+    GTEST_SKIP() << "Async platform file handles unavailable";
+  }
+  IREE_ASSERT_OK(status);
+
+  iree_hal_file_t* target_file = nullptr;
+  IREE_ASSERT_OK(iree_hal_file_import(
+      client_device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+      IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE, target_handle,
+      IREE_HAL_EXTERNAL_FILE_FLAG_NONE, &target_file));
+  iree_io_file_handle_release(target_handle);
+  EXPECT_EQ(iree_hal_file_length(target_file), 0);
+
+  iree_hal_allocator_t* allocator = iree_hal_device_allocator(client_device_);
+  iree_hal_buffer_params_t params = {0};
+  params.usage =
+      IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED;
+  params.access = IREE_HAL_MEMORY_ACCESS_ALL;
+  params.type =
+      IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+
+  iree_hal_buffer_t* buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
+      allocator, params, sizeof(kWriteContents) - 1, &buffer));
+  iree_hal_buffer_mapping_t mapping;
+  IREE_ASSERT_OK(iree_hal_buffer_map_range(buffer, IREE_HAL_MAPPING_MODE_SCOPED,
+                                           IREE_HAL_MEMORY_ACCESS_DISCARD_WRITE,
+                                           0, sizeof(kWriteContents) - 1,
+                                           &mapping));
+  memcpy(mapping.contents.data, kWriteContents, sizeof(kWriteContents) - 1);
+  IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
+
+  iree_hal_semaphore_t* semaphore = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_create(client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, 0,
+                                IREE_HAL_SEMAPHORE_FLAG_NONE, &semaphore));
+  SemaphoreListHelper signal(semaphore, 1);
+  IREE_ASSERT_OK(iree_hal_device_queue_write(
+      client_device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+      iree_hal_semaphore_list_empty(), signal.list, buffer, /*source_offset=*/0,
+      target_file, /*target_offset=*/0, sizeof(kWriteContents) - 1,
+      IREE_HAL_WRITE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(semaphore, 1, iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
+
+  iree_io_file_contents_t* contents = nullptr;
+  IREE_ASSERT_OK(iree_io_file_contents_read(
+      target_path.path_view(), iree_allocator_system(), &contents));
+  ASSERT_GE(contents->const_buffer.data_length, sizeof(kWriteContents) - 1);
+  ASSERT_EQ(memcmp(contents->const_buffer.data, kWriteContents,
+                   sizeof(kWriteContents) - 1),
+            0);
+  iree_io_file_contents_free(contents);
+
+  iree_hal_semaphore_release(semaphore);
+  iree_hal_buffer_release(buffer);
+  iree_hal_file_release(target_file);
+  target_path.Remove();
 }
 
 TEST_F(RemoteBufferTest, ClientFileQueueWriteLargeHostAllocation) {
@@ -1788,29 +1932,29 @@ TEST_F(RemoteBufferTest, ClientFileQueueWriteLargeHostAllocation) {
   IREE_ASSERT_OK(
       iree_hal_allocator_allocate_buffer(allocator, params, kLength, &buffer));
 
-  iree_hal_semaphore_t* sem = nullptr;
-  IREE_ASSERT_OK(iree_hal_semaphore_create(client_device_,
-                                           IREE_HAL_QUEUE_AFFINITY_ANY, 0,
-                                           IREE_HAL_SEMAPHORE_FLAG_NONE, &sem));
-  SemaphoreListHelper fill_signal(sem, 1);
+  iree_hal_semaphore_t* semaphore = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_create(client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, 0,
+                                IREE_HAL_SEMAPHORE_FLAG_NONE, &semaphore));
+  SemaphoreListHelper fill_signal(semaphore, 1);
   IREE_ASSERT_OK(iree_hal_device_queue_fill(
       client_device_, IREE_HAL_QUEUE_AFFINITY_ANY,
       iree_hal_semaphore_list_empty(), fill_signal.list, buffer,
       /*target_offset=*/0, kLength, &kPattern, sizeof(kPattern),
       IREE_HAL_FILL_FLAG_NONE));
 
-  SemaphoreListHelper write_wait(sem, 1);
-  SemaphoreListHelper write_signal(sem, 2);
+  SemaphoreListHelper write_wait(semaphore, 1);
+  SemaphoreListHelper write_signal(semaphore, 2);
   IREE_ASSERT_OK(iree_hal_device_queue_write(
       client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, write_wait.list,
       write_signal.list, buffer, /*source_offset=*/0, target_file,
       /*target_offset=*/0, kLength, IREE_HAL_WRITE_FLAG_NONE));
-  IREE_ASSERT_OK(iree_hal_semaphore_wait(sem, 2, iree_infinite_timeout(),
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(semaphore, 2, iree_infinite_timeout(),
                                          IREE_ASYNC_WAIT_FLAG_NONE));
 
   EXPECT_EQ(target_contents, expected);
 
-  iree_hal_semaphore_release(sem);
+  iree_hal_semaphore_release(semaphore);
   iree_hal_buffer_release(buffer);
   iree_hal_file_release(target_file);
 }
@@ -1820,10 +1964,10 @@ TEST_F(RemoteBufferTest, ClientFileQueueWriteLargeHostAllocation) {
 //===----------------------------------------------------------------------===//
 
 TEST_F(RemoteBufferTest, QueueAllocaAndVerify) {
-  iree_hal_semaphore_t* sem = nullptr;
-  IREE_ASSERT_OK(iree_hal_semaphore_create(client_device_,
-                                           IREE_HAL_QUEUE_AFFINITY_ANY, 0,
-                                           IREE_HAL_SEMAPHORE_FLAG_NONE, &sem));
+  iree_hal_semaphore_t* semaphore = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_create(client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, 0,
+                                IREE_HAL_SEMAPHORE_FLAG_NONE, &semaphore));
 
   iree_hal_buffer_params_t params = {0};
   params.usage =
@@ -1833,7 +1977,7 @@ TEST_F(RemoteBufferTest, QueueAllocaAndVerify) {
       IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
 
   iree_hal_buffer_t* buffer = nullptr;
-  SemaphoreListHelper signal(sem, 1);
+  SemaphoreListHelper signal(semaphore, 1);
   IREE_ASSERT_OK(iree_hal_device_queue_alloca(
       client_device_, IREE_HAL_QUEUE_AFFINITY_ANY,
       iree_hal_semaphore_list_empty(), signal.list,
@@ -1843,7 +1987,7 @@ TEST_F(RemoteBufferTest, QueueAllocaAndVerify) {
   EXPECT_EQ(iree_hal_buffer_allocation_size(buffer), 256);
 
   // Wait for alloca to complete (ADVANCE resolves the provisional ID).
-  IREE_ASSERT_OK(iree_hal_semaphore_wait(sem, 1, iree_infinite_timeout(),
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(semaphore, 1, iree_infinite_timeout(),
                                          IREE_ASYNC_WAIT_FLAG_NONE));
 
   // Verify the buffer is usable: map and access.
@@ -1853,7 +1997,7 @@ TEST_F(RemoteBufferTest, QueueAllocaAndVerify) {
                                            &mapping));
   IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
 
-  iree_hal_semaphore_release(sem);
+  iree_hal_semaphore_release(semaphore);
   iree_hal_buffer_release(buffer);
 }
 
@@ -2055,10 +2199,10 @@ TEST_F(RemoteBufferTest, QueueDispatchAbsF32) {
   IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
 
   // Dispatch abs(input) → output.
-  iree_hal_semaphore_t* sem = nullptr;
-  IREE_ASSERT_OK(iree_hal_semaphore_create(client_device_,
-                                           IREE_HAL_QUEUE_AFFINITY_ANY, 0,
-                                           IREE_HAL_SEMAPHORE_FLAG_NONE, &sem));
+  iree_hal_semaphore_t* semaphore = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_create(client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, 0,
+                                IREE_HAL_SEMAPHORE_FLAG_NONE, &semaphore));
 
   iree_hal_buffer_ref_t binding_refs[2];
   memset(binding_refs, 0, sizeof(binding_refs));
@@ -2073,7 +2217,7 @@ TEST_F(RemoteBufferTest, QueueDispatchAbsF32) {
       /*.values=*/binding_refs,
   };
 
-  SemaphoreListHelper signal(sem, 1);
+  SemaphoreListHelper signal(semaphore, 1);
   IREE_ASSERT_OK(iree_hal_device_queue_dispatch(
       client_device_, IREE_HAL_QUEUE_AFFINITY_ANY,
       iree_hal_semaphore_list_empty(), signal.list, executable,
@@ -2082,7 +2226,7 @@ TEST_F(RemoteBufferTest, QueueDispatchAbsF32) {
       iree_const_byte_span_empty(), bindings, IREE_HAL_DISPATCH_FLAG_NONE));
 
   // Wait for dispatch to complete.
-  IREE_ASSERT_OK(iree_hal_semaphore_wait(sem, 1, iree_infinite_timeout(),
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(semaphore, 1, iree_infinite_timeout(),
                                          IREE_ASYNC_WAIT_FLAG_NONE));
 
   // Read back output and verify abs values: [2.5, 2.5].
@@ -2094,7 +2238,7 @@ TEST_F(RemoteBufferTest, QueueDispatchAbsF32) {
   EXPECT_EQ(output_data[1], 2.5f);
   IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
 
-  iree_hal_semaphore_release(sem);
+  iree_hal_semaphore_release(semaphore);
   iree_hal_buffer_release(output_buffer);
   iree_hal_buffer_release(input_buffer);
   iree_hal_executable_release(executable);
@@ -2194,18 +2338,18 @@ TEST_F(RemoteBufferTest, OneShotCommandBufferDispatch) {
   IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
 
   // Submit via queue_execute.
-  iree_hal_semaphore_t* sem = nullptr;
-  IREE_ASSERT_OK(iree_hal_semaphore_create(client_device_,
-                                           IREE_HAL_QUEUE_AFFINITY_ANY, 0,
-                                           IREE_HAL_SEMAPHORE_FLAG_NONE, &sem));
-  SemaphoreListHelper signal(sem, 1);
+  iree_hal_semaphore_t* semaphore = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_create(client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, 0,
+                                IREE_HAL_SEMAPHORE_FLAG_NONE, &semaphore));
+  SemaphoreListHelper signal(semaphore, 1);
   IREE_ASSERT_OK(iree_hal_device_queue_execute(
       client_device_, IREE_HAL_QUEUE_AFFINITY_ANY,
       iree_hal_semaphore_list_empty(), signal.list, command_buffer,
       iree_hal_buffer_binding_table_empty(), IREE_HAL_EXECUTE_FLAG_NONE));
 
   // Wait for completion.
-  IREE_ASSERT_OK(iree_hal_semaphore_wait(sem, 1, iree_infinite_timeout(),
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(semaphore, 1, iree_infinite_timeout(),
                                          IREE_ASYNC_WAIT_FLAG_NONE));
 
   // Read back output and verify abs values: [2.5, 2.5].
@@ -2217,7 +2361,7 @@ TEST_F(RemoteBufferTest, OneShotCommandBufferDispatch) {
   EXPECT_EQ(output_data[1], 2.5f);
   IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
 
-  iree_hal_semaphore_release(sem);
+  iree_hal_semaphore_release(semaphore);
   iree_hal_command_buffer_release(command_buffer);
   iree_hal_buffer_release(output_buffer);
   iree_hal_buffer_release(input_buffer);
@@ -2276,11 +2420,11 @@ TEST_F(RemoteBufferTest, OneShotCommandBufferFillAndCopy) {
   iree_hal_buffer_release(source_buffer);
   source_buffer = nullptr;
 
-  iree_hal_semaphore_t* sem = nullptr;
-  IREE_ASSERT_OK(iree_hal_semaphore_create(client_device_,
-                                           IREE_HAL_QUEUE_AFFINITY_ANY, 0,
-                                           IREE_HAL_SEMAPHORE_FLAG_NONE, &sem));
-  SemaphoreListHelper signal(sem, 1);
+  iree_hal_semaphore_t* semaphore = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_create(client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, 0,
+                                IREE_HAL_SEMAPHORE_FLAG_NONE, &semaphore));
+  SemaphoreListHelper signal(semaphore, 1);
   IREE_ASSERT_OK(iree_hal_device_queue_execute(
       client_device_, IREE_HAL_QUEUE_AFFINITY_ANY,
       iree_hal_semaphore_list_empty(), signal.list, command_buffer,
@@ -2288,7 +2432,7 @@ TEST_F(RemoteBufferTest, OneShotCommandBufferFillAndCopy) {
   iree_hal_command_buffer_release(command_buffer);
   command_buffer = nullptr;
 
-  IREE_ASSERT_OK(iree_hal_semaphore_wait(sem, 1, iree_infinite_timeout(),
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(semaphore, 1, iree_infinite_timeout(),
                                          IREE_ASYNC_WAIT_FLAG_NONE));
 
   // Verify dest buffer has the fill pattern.
@@ -2301,7 +2445,7 @@ TEST_F(RemoteBufferTest, OneShotCommandBufferFillAndCopy) {
   }
   IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
 
-  iree_hal_semaphore_release(sem);
+  iree_hal_semaphore_release(semaphore);
   iree_hal_buffer_release(dest_buffer);
 }
 

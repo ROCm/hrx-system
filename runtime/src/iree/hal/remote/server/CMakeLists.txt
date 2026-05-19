@@ -106,6 +106,7 @@ iree_cc_library(
     iree::hal::remote::util::queue_header_pool
     iree::io::file_handle
     iree::net::bootstrap
+    iree::net::carrier
     iree::net::channel::bulk::bulk_channel
     iree::net::channel::bulk::chunk_pool
     iree::net::channel::bulk::receive_window

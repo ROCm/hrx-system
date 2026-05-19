@@ -151,7 +151,7 @@ class ClientBulkDownloadReceiverTest : public ::testing::Test {
         path.path_view(), iree_allocator_system(), &handle);
     if (iree_status_is_ok(status)) {
       status = iree_hal_remote_client_file_import(
-          /*queue_affinity=*/0,
+          /*device=*/NULL, /*queue_affinity=*/0,
           IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE, handle,
           IREE_HAL_EXTERNAL_FILE_FLAG_NONE, proactor_, iree_allocator_system(),
           out_file);

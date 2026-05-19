@@ -72,6 +72,7 @@ iree_cc_library(
     iree::hal::utils::resource_set
     iree::io::file_handle
     iree::net::bootstrap
+    iree::net::carrier
     iree::net::channel::bulk::bulk_channel
     iree::net::channel::bulk::chunk_pool
     iree::net::channel::bulk::transfer_table

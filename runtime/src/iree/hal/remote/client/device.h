@@ -16,6 +16,7 @@
 #include "iree/hal/remote/client/api.h"
 #include "iree/hal/remote/client/bulk_session.h"
 #include "iree/hal/remote/protocol/common.h"
+#include "iree/hal/remote/protocol/control.h"
 #include "iree/net/session.h"
 
 #ifdef __cplusplus
@@ -81,6 +82,13 @@ typedef struct iree_hal_remote_client_device_t {
 
   // Active session (NULL when disconnected).
   iree_net_session_t* session;
+
+  // Borrowed carrier backing the active session, or NULL if unavailable.
+  iree_net_carrier_t* session_carrier;
+
+  // FILE_REGISTER capabilities derived from |session_carrier|.
+  iree_hal_remote_file_registration_capabilities_t
+      file_registration_capabilities;
 
   // Queue channel for HAL command dispatch (0 until queue endpoint opens).
   // Published with release ordering and read with acquire ordering by queue

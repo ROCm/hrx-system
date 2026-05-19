@@ -346,6 +346,9 @@ static void iree_hal_remote_client_device_destroy(
   // Clear session before releasing to prevent re-entrancy.
   iree_net_session_t* session = device->session;
   device->session = NULL;
+  device->session_carrier = NULL;
+  device->file_registration_capabilities =
+      IREE_HAL_REMOTE_FILE_REGISTRATION_CAPABILITY_NONE;
   iree_net_session_release(session);
 
   iree_async_notification_release(device->queue_pool_notification);
@@ -525,8 +528,8 @@ static iree_status_t iree_hal_remote_client_device_import_file(
     iree_hal_external_file_flags_t flags, iree_hal_file_t** out_file) {
   iree_hal_remote_client_device_t* device =
       iree_hal_remote_client_device_cast(base_device);
-  return iree_hal_remote_client_file_import(queue_affinity, access, handle,
-                                            flags, device->proactor,
+  return iree_hal_remote_client_file_import(device, queue_affinity, access,
+                                            handle, flags, device->proactor,
                                             device->host_allocator, out_file);
 }
 
@@ -912,6 +915,26 @@ void iree_hal_remote_client_device_fail_pending_rpcs(
 // Session callbacks
 //===----------------------------------------------------------------------===//
 
+static iree_hal_remote_file_registration_capabilities_t
+iree_hal_remote_client_device_file_registration_capabilities(
+    iree_net_carrier_t* carrier) {
+  iree_hal_remote_file_registration_capabilities_t capabilities =
+      IREE_HAL_REMOTE_FILE_REGISTRATION_CAPABILITY_NONE;
+  if (carrier) {
+    iree_net_carrier_capabilities_t carrier_capabilities =
+        iree_net_carrier_capabilities(carrier);
+    if (iree_any_bit_set(carrier_capabilities,
+                         IREE_NET_CARRIER_CAPABILITY_POSIX_FD_TRANSFER)) {
+      capabilities |= IREE_HAL_REMOTE_FILE_REGISTRATION_CAPABILITY_POSIX_FD;
+    }
+    if (iree_any_bit_set(carrier_capabilities,
+                         IREE_NET_CARRIER_CAPABILITY_WIN32_HANDLE_TRANSFER)) {
+      capabilities |= IREE_HAL_REMOTE_FILE_REGISTRATION_CAPABILITY_WIN32_HANDLE;
+    }
+  }
+  return capabilities;
+}
+
 static void iree_hal_remote_client_device_on_session_ready(
     void* user_data, iree_net_session_t* session,
     const iree_net_session_topology_t* remote_topology) {
@@ -928,6 +951,10 @@ static void iree_hal_remote_client_device_on_session_ready(
                     iree_memory_order_relaxed);
   iree_atomic_store(&device->next_provisional_generation, 1,
                     iree_memory_order_relaxed);
+  device->session_carrier = iree_net_session_carrier(session);
+  device->file_registration_capabilities =
+      iree_hal_remote_client_device_file_registration_capabilities(
+          device->session_carrier);
 
   // The connect callback is NOT fired here — it is deferred until queue and
   // bulk endpoint provisioning complete so CONNECTED means all production
@@ -987,6 +1014,9 @@ static void iree_hal_remote_client_device_on_session_goaway(
   // Clear session before releasing to prevent re-entrancy.
   iree_net_session_t* device_session = device->session;
   device->session = NULL;
+  device->session_carrier = NULL;
+  device->file_registration_capabilities =
+      IREE_HAL_REMOTE_FILE_REGISTRATION_CAPABILITY_NONE;
   iree_net_session_release(device_session);
 
   // If the connect callback is still pending (bootstrap or endpoint
@@ -1040,6 +1070,9 @@ static void iree_hal_remote_client_device_on_session_error(
   // Clear session before releasing to prevent re-entrancy.
   iree_net_session_t* device_session = device->session;
   device->session = NULL;
+  device->session_carrier = NULL;
+  device->file_registration_capabilities =
+      IREE_HAL_REMOTE_FILE_REGISTRATION_CAPABILITY_NONE;
   iree_net_session_release(device_session);
 
   // If the connect callback is still pending, fire it with the error so the

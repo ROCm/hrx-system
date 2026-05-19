@@ -226,6 +226,26 @@ void iree_hal_remote_server_session_deinitialize_provisionals(
          sizeof(session_slot->provisional_map));
 }
 
+static iree_hal_remote_file_registration_capabilities_t
+iree_hal_remote_server_file_registration_capabilities(
+    iree_net_carrier_t* carrier) {
+  iree_hal_remote_file_registration_capabilities_t capabilities =
+      IREE_HAL_REMOTE_FILE_REGISTRATION_CAPABILITY_NONE;
+  if (carrier) {
+    iree_net_carrier_capabilities_t carrier_capabilities =
+        iree_net_carrier_capabilities(carrier);
+    if (iree_any_bit_set(carrier_capabilities,
+                         IREE_NET_CARRIER_CAPABILITY_POSIX_FD_TRANSFER)) {
+      capabilities |= IREE_HAL_REMOTE_FILE_REGISTRATION_CAPABILITY_POSIX_FD;
+    }
+    if (iree_any_bit_set(carrier_capabilities,
+                         IREE_NET_CARRIER_CAPABILITY_WIN32_HANDLE_TRANSFER)) {
+      capabilities |= IREE_HAL_REMOTE_FILE_REGISTRATION_CAPABILITY_WIN32_HANDLE;
+    }
+  }
+  return capabilities;
+}
+
 // Finds the slot holding the given session. Returns -1 if not found.
 static int32_t iree_hal_remote_server_find_session_slot(
     iree_hal_remote_server_t* server, iree_net_session_t* session) {
@@ -330,6 +350,9 @@ void iree_hal_remote_server_remove_session(iree_hal_remote_server_t* server,
         &server->sessions[slot], &pending_releases, &pending_completions);
 
     server->sessions[slot].session = NULL;
+    server->sessions[slot].carrier = NULL;
+    server->sessions[slot].file_registration_capabilities =
+        IREE_HAL_REMOTE_FILE_REGISTRATION_CAPABILITY_NONE;
     server->sessions[slot].session_id = 0;
     server->sessions[slot].flags |=
         IREE_HAL_REMOTE_SERVER_SESSION_FLAG_BULK_DRAIN_PENDING;
@@ -4914,8 +4937,7 @@ static iree_status_t iree_hal_remote_server_handle_file_register(
   const bool fire_and_forget = iree_all_bits_set(
       envelope->message_flags, IREE_HAL_REMOTE_CONTROL_FLAG_FIRE_AND_FORGET);
   const iree_hal_remote_file_registration_capabilities_t
-      supported_capabilities =
-          IREE_HAL_REMOTE_FILE_REGISTRATION_CAPABILITY_NONE;
+      supported_capabilities = entry->file_registration_capabilities;
   const iree_hal_memory_access_t allowed_access_mask =
       IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE;
 
@@ -4959,10 +4981,12 @@ static iree_status_t iree_hal_remote_server_handle_file_register(
   }
 
   iree_host_size_t required_length = 0;
+  iree_host_size_t handle_payload_offset = 0;
   if (iree_status_is_ok(status)) {
-    status = IREE_STRUCT_LAYOUT(
-        sizeof(*request), &required_length,
-        IREE_STRUCT_FIELD(request->handle_payload_length, uint8_t, NULL));
+    status =
+        IREE_STRUCT_LAYOUT(sizeof(*request), &required_length,
+                           IREE_STRUCT_FIELD(request->handle_payload_length,
+                                             uint8_t, &handle_payload_offset));
   }
   if (iree_status_is_ok(status) && body_length < required_length) {
     status =
@@ -5008,12 +5032,78 @@ static iree_status_t iree_hal_remote_server_handle_file_register(
         "but this server supports 0x%08x",
         request->external_type, required_capability, supported_capabilities);
   }
+  if (iree_status_is_ok(status) && !entry->carrier) {
+    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "FILE_REGISTER requires a session carrier");
+  }
+  iree_const_byte_span_t handle_payload = iree_const_byte_span_empty();
   if (iree_status_is_ok(status)) {
+    handle_payload = iree_make_const_byte_span(body + handle_payload_offset,
+                                               request->handle_payload_length);
+  }
+
+  iree_net_file_handle_transfer_type_t transfer_type =
+      IREE_NET_FILE_HANDLE_TRANSFER_TYPE_NONE;
+  if (iree_status_is_ok(status)) {
+    switch ((iree_hal_remote_file_external_type_t)request->external_type) {
+      case IREE_HAL_REMOTE_FILE_EXTERNAL_TYPE_POSIX_FD:
+        transfer_type = IREE_NET_FILE_HANDLE_TRANSFER_TYPE_POSIX_FD;
+        break;
+      case IREE_HAL_REMOTE_FILE_EXTERNAL_TYPE_WIN32_HANDLE:
+        transfer_type = IREE_NET_FILE_HANDLE_TRANSFER_TYPE_WIN32_HANDLE;
+        break;
+      default:
+        status = iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "FILE_REGISTER external file type %u is not importable",
+            request->external_type);
+        break;
+    }
+  }
+
+  iree_io_file_handle_t* file_handle = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_net_carrier_import_file_handle(
+        entry->carrier, transfer_type, handle_payload,
+        entry->server->host_allocator, &file_handle);
+  }
+  if (iree_status_is_ok(status) &&
+      !iree_io_file_handle_uses_async_io(file_handle)) {
     status = iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
-        "FILE_REGISTER capability 0x%08x is advertised but no server-side "
-        "external file importer is installed",
-        required_capability);
+        "FILE_REGISTER imported file handle is not opened for async I/O");
+  }
+
+  iree_hal_file_t* file = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_file_import(
+        entry->server->devices[0], IREE_HAL_QUEUE_AFFINITY_ANY,
+        (iree_hal_memory_access_t)request->access_flags, file_handle,
+        IREE_HAL_EXTERNAL_FILE_FLAG_NONE, &file);
+  }
+
+  uint64_t file_size = 0;
+  iree_hal_remote_resource_id_t resolved_id = 0;
+  if (iree_status_is_ok(status)) {
+    file_size = iree_hal_file_length(file);
+    status = iree_hal_remote_resource_table_assign(
+        &entry->resource_table, IREE_HAL_REMOTE_RESOURCE_TYPE_FILE, file,
+        &resolved_id);
+  }
+  iree_hal_remote_server_pending_queue_command_t* pending_commands = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_server_store_provisional(
+        entry, request->provisional_id, resolved_id,
+        entry->server->host_allocator, &pending_commands);
+  }
+  if (!iree_status_is_ok(status)) {
+    iree_hal_remote_server_free_pending_queue_commands(pending_commands);
+    pending_commands = NULL;
+  }
+
+  if (!iree_status_is_ok(status) && resolved_id != 0) {
+    iree_hal_remote_resource_table_release(&entry->resource_table, resolved_id);
+    resolved_id = 0;
   }
 
   iree_status_t pending_failure_status = iree_ok_status();
@@ -5026,16 +5116,32 @@ static iree_status_t iree_hal_remote_server_handle_file_register(
         entry, pending_commands, iree_status_clone(status));
   }
 
+  iree_hal_file_release(file);
+  iree_io_file_handle_release(file_handle);
+
   iree_status_t send_status = iree_ok_status();
-  if (!iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status)) {
     if (!fire_and_forget) {
-      send_status = iree_hal_remote_server_send_error_response(
-          entry->server->host_allocator, entry->session, envelope, status);
-      status = iree_ok_status();
+      iree_hal_remote_file_register_response_t response;
+      memset(&response, 0, sizeof(response));
+      response.resolved_id = resolved_id;
+      response.file_size = file_size;
+      send_status = iree_hal_remote_server_send_response(
+          entry->server->host_allocator, entry->session, envelope,
+          IREE_STATUS_OK, &response, sizeof(response));
     }
+    send_status = iree_status_join(
+        send_status, iree_hal_remote_server_process_pending_queue_commands(
+                         entry, pending_commands));
+    pending_commands = NULL;
+  } else if (!fire_and_forget) {
+    send_status = iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope, status);
+    status = iree_ok_status();
   }
-  return iree_status_join(
-      status, iree_status_join(send_status, pending_failure_status));
+  send_status = iree_status_join(send_status, pending_failure_status);
+  iree_hal_remote_server_free_pending_queue_commands(pending_commands);
+  return iree_status_join(status, send_status);
 }
 
 // Server does not receive ADVANCE frames (only clients do).
@@ -5262,6 +5368,10 @@ void iree_hal_remote_server_on_session_ready(
   IREE_TRACE_ZONE_BEGIN(z0);
 
   (void)remote_topology;
+
+  entry->carrier = iree_net_session_carrier(session);
+  entry->file_registration_capabilities =
+      iree_hal_remote_server_file_registration_capabilities(entry->carrier);
 
   // If we're shutting down, immediately GOAWAY this newly-ready session.
   iree_slim_mutex_lock(&server->session_mutex);

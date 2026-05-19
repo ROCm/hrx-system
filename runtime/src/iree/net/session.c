@@ -1406,6 +1406,13 @@ iree_net_session_id(const iree_net_session_t* session) {
   return session->session_id;
 }
 
+IREE_API_EXPORT iree_net_carrier_t* iree_net_session_carrier(
+    iree_net_session_t* session) {
+  IREE_ASSERT_ARGUMENT(session);
+  return session->connection ? iree_net_connection_carrier(session->connection)
+                             : NULL;
+}
+
 //===----------------------------------------------------------------------===//
 // Public API: operations
 //===----------------------------------------------------------------------===//
