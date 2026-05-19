@@ -12,22 +12,23 @@
 //
 // Design:
 //   - Creates a connected pair of carriers that point to each other.
-//   - send() copies data into a carrier-owned buffer and submits a NOP to the
-//     proactor. Delivery occurs during poll() when the NOP completes. This
-//     mirrors real carrier behavior where sends are async and recv handlers
-//     fire from the proactor thread during poll().
+//   - send() copies data into a carrier-owned buffer and enqueues it for
+//     delivery by a carrier-owned NOP submitted to the proactor. Delivery
+//     occurs during poll() when the NOP completes. This mirrors real carrier
+//     behavior where sends are async and recv handlers fire from the proactor
+//     thread during poll().
 //   - Data is always copied during send() (no zero-copy TX), matching real
 //     carriers where send() consumes data into kernel/hardware buffers. The
 //     sender's buffer can be freed immediately after send() returns.
-//   - Send budget has no fixed slot ceiling; payloads are copied into
-//     per-send allocations and backpressure is host allocation failure.
+//   - Send budget has no fixed slot ceiling; payloads are copied into per-send
+//     allocations and backpressure is host allocation failure.
 //
 // Capabilities:
 //   - RELIABLE: No drops (in-memory).
-//   - ORDERED: FIFO (NOP completion order matches submission order).
+//   - ORDERED: FIFO (committed sends drain in enqueue order).
 //
 // Thread safety:
-//   - send() is thread-safe (CAS-based slot claiming, same as TCP carrier).
+//   - send() is thread-safe.
 //   - All completions fire from the proactor poll thread.
 
 #ifndef IREE_NET_CARRIER_LOOPBACK_CARRIER_H_

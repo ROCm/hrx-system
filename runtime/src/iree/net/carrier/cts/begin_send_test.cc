@@ -613,9 +613,8 @@ TEST_P(BeginSendTest, OutOfOrderCommit) {
     IREE_ASSERT_OK(iree_net_carrier_commit_send(client_, handle_b));
     IREE_ASSERT_OK(iree_net_carrier_commit_send(client_, handle_a));
 
-    // Poll to drain the receiver and free send slots. Without this, loopback
-    // exhausts its 32-slot ring after 16 iterations (each iteration holds 2
-    // slots until the proactor processes the NOP completions).
+    // Poll to let carriers with bounded in-flight state drain between
+    // iterations.
     PollOnce();
   }
 

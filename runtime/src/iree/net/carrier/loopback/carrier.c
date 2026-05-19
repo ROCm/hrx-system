@@ -33,15 +33,14 @@ typedef struct iree_net_loopback_file_transfer_t {
 // trailing storage contains the payload copied from send() or written by
 // begin_send() before commit_send().
 typedef struct iree_net_loopback_pending_send_t {
-  // NOP operation submitted to the proactor. Must be the first field so that
-  // the completion callback can cast (iree_net_loopback_pending_send_t*).
-  iree_async_nop_operation_t nop;
+  // Next committed send in the carrier-local FIFO queue.
+  struct iree_net_loopback_pending_send_t* next;
 
   // Carrier that owns the send. Retained until the send completes or aborts.
   struct iree_net_loopback_carrier_t* carrier;
 
-  // Data to deliver to the peer's recv handler when the NOP completes. Points
-  // into trailing storage.
+  // Data to deliver to the peer's recv handler when the drain NOP completes.
+  // Points into trailing storage.
   iree_async_span_t delivery_span;
 
   // Total byte count for statistics and completion callback.
@@ -54,8 +53,12 @@ typedef struct iree_net_loopback_pending_send_t {
   bool notify_completion;
 
   // Payload bytes delivered to the peer.
-  uint8_t storage[];
+  iree_alignas(IREE_NET_MESSAGE_ALIGNMENT) uint8_t storage[];
 } iree_net_loopback_pending_send_t;
+static_assert(offsetof(iree_net_loopback_pending_send_t, storage) %
+                      IREE_NET_MESSAGE_ALIGNMENT ==
+                  0,
+              "loopback message storage must satisfy carrier alignment");
 
 typedef struct iree_net_loopback_carrier_t {
   // Base carrier (must be first for safe upcasting).
@@ -63,6 +66,22 @@ typedef struct iree_net_loopback_carrier_t {
 
   // Proactor for async delivery via NOP operations. Retained.
   iree_async_proactor_t* proactor;
+
+  // Guards send_queue_head, send_queue_tail, and send_drain_scheduled.
+  iree_slim_mutex_t send_queue_mutex;
+
+  // NOP operation submitted while queued sends need poll-thread delivery.
+  iree_async_nop_operation_t send_drain_nop;
+
+  // Head of the FIFO committed-send queue awaiting delivery.
+  iree_net_loopback_pending_send_t* send_queue_head;
+
+  // Tail of the FIFO committed-send queue awaiting delivery.
+  iree_net_loopback_pending_send_t* send_queue_tail;
+
+  // True while send_drain_nop is submitted or its callback is draining sends.
+  // The carrier is retained for this interval.
+  bool send_drain_scheduled;
 
   // Peer carrier (the other end of the pair). Not retained.
   // Set at pair creation, cleared on deactivate or peer destruction.
@@ -74,9 +93,12 @@ typedef struct iree_net_loopback_carrier_t {
   // Number of committed or reserved sends awaiting completion/abort.
   iree_atomic_int32_t sends_in_flight;
 
-  // Deactivation callback (stored during deactivate, fired when drained).
+  // Deactivation callback state stored during deactivate.
   struct {
+    // Function invoked when all pending operations drain.
     iree_net_carrier_deactivate_callback_fn_t fn;
+
+    // User data passed to fn when deactivation completes.
     void* user_data;
   } deactivate_callback;
 
@@ -113,7 +135,7 @@ iree_net_loopback_file_transfer_type(void) {
 // Internal helpers
 //===----------------------------------------------------------------------===//
 
-static void iree_net_loopback_carrier_nop_completion(
+static void iree_net_loopback_carrier_send_drain_completion(
     void* user_data, iree_async_operation_t* operation, iree_status_t status,
     iree_async_completion_flags_t flags);
 
@@ -275,17 +297,6 @@ static void iree_net_loopback_pending_send_free(
   iree_net_carrier_release(&carrier->base);
 }
 
-static iree_status_t iree_net_loopback_pending_send_submit(
-    iree_net_loopback_pending_send_t* pending_send) {
-  iree_async_operation_zero(&pending_send->nop.base, sizeof(pending_send->nop));
-  iree_async_operation_initialize(
-      &pending_send->nop.base, IREE_ASYNC_OPERATION_TYPE_NOP,
-      IREE_ASYNC_OPERATION_FLAG_NONE, iree_net_loopback_carrier_nop_completion,
-      NULL);
-  return iree_async_proactor_submit_one(pending_send->carrier->proactor,
-                                        &pending_send->nop.base);
-}
-
 static iree_status_t iree_net_loopback_carrier_begin_send_operation(
     iree_net_loopback_carrier_t* carrier) {
   iree_net_carrier_t* base_carrier = &carrier->base;
@@ -327,24 +338,67 @@ static void iree_net_loopback_carrier_end_send_operation(
   iree_net_loopback_carrier_maybe_complete_deactivation(carrier);
 }
 
-// Fires from within iree_async_proactor_poll() on the proactor thread.
-// Delivers data to the peer's recv handler and fires the sender's send
-// completion callback.
-static void iree_net_loopback_carrier_nop_completion(
-    void* user_data, iree_async_operation_t* operation, iree_status_t status,
-    iree_async_completion_flags_t flags) {
-  (void)user_data;
-  (void)flags;  // NOP is never multishot.
-  iree_net_loopback_pending_send_t* pending_send =
-      (iree_net_loopback_pending_send_t*)operation;
+static iree_status_t iree_net_loopback_pending_send_enqueue(
+    iree_net_loopback_pending_send_t* pending_send) {
   iree_net_loopback_carrier_t* carrier = pending_send->carrier;
+  pending_send->next = NULL;
 
-  // Consume NOP status (always OK for NOP, but be correct about ownership).
-  iree_status_ignore(status);
+  iree_slim_mutex_lock(&carrier->send_queue_mutex);
 
+  iree_status_t status = iree_ok_status();
+  if (!carrier->send_drain_scheduled) {
+    iree_async_operation_zero(&carrier->send_drain_nop.base,
+                              sizeof(carrier->send_drain_nop));
+    iree_async_operation_initialize(
+        &carrier->send_drain_nop.base, IREE_ASYNC_OPERATION_TYPE_NOP,
+        IREE_ASYNC_OPERATION_FLAG_NONE,
+        iree_net_loopback_carrier_send_drain_completion, carrier);
+    iree_net_carrier_retain(&carrier->base);
+    status = iree_async_proactor_submit_one(carrier->proactor,
+                                            &carrier->send_drain_nop.base);
+    if (iree_status_is_ok(status)) {
+      carrier->send_drain_scheduled = true;
+    } else {
+      iree_net_carrier_release(&carrier->base);
+    }
+  }
+
+  if (iree_status_is_ok(status)) {
+    if (carrier->send_queue_tail) {
+      carrier->send_queue_tail->next = pending_send;
+    } else {
+      carrier->send_queue_head = pending_send;
+    }
+    carrier->send_queue_tail = pending_send;
+  }
+
+  iree_slim_mutex_unlock(&carrier->send_queue_mutex);
+  return status;
+}
+
+static iree_net_loopback_pending_send_t* iree_net_loopback_pending_send_pop(
+    iree_net_loopback_carrier_t* carrier) {
+  iree_slim_mutex_lock(&carrier->send_queue_mutex);
+  iree_net_loopback_pending_send_t* pending_send = carrier->send_queue_head;
+  if (pending_send) {
+    carrier->send_queue_head = pending_send->next;
+    if (!carrier->send_queue_head) {
+      carrier->send_queue_tail = NULL;
+    }
+    pending_send->next = NULL;
+  } else {
+    carrier->send_drain_scheduled = false;
+  }
+  iree_slim_mutex_unlock(&carrier->send_queue_mutex);
+  return pending_send;
+}
+
+static void iree_net_loopback_pending_send_deliver(
+    iree_net_loopback_pending_send_t* pending_send) {
+  iree_net_loopback_carrier_t* carrier = pending_send->carrier;
   // Deliver data to peer's recv handler if peer is still alive and active.
   // If the peer departed between send() and this completion (deactivated or
-  // destroyed while NOP was in flight), report an error through the sender's
+  // destroyed while the send was queued), report an error through the sender's
   // completion callback. This mirrors TCP/SHM carriers where the OS reports
   // EPIPE/ECONNRESET when the peer closes the connection.
   //
@@ -393,6 +447,49 @@ static void iree_net_loopback_carrier_nop_completion(
   iree_net_loopback_pending_send_free(pending_send);
 }
 
+static void iree_net_loopback_pending_send_fail(
+    iree_net_loopback_pending_send_t* pending_send, iree_status_t status) {
+  iree_net_loopback_carrier_t* carrier = pending_send->carrier;
+  iree_status_t completion_status = iree_status_clone(status);
+  if (pending_send->notify_completion && carrier->base.callback.fn) {
+    carrier->base.callback.fn(carrier->base.callback.user_data,
+                              pending_send->user_data, completion_status,
+                              pending_send->total_size, NULL);
+  } else {
+    iree_status_ignore(completion_status);
+  }
+  iree_net_loopback_carrier_end_send_operation(carrier);
+  iree_net_loopback_pending_send_free(pending_send);
+}
+
+// Fires from within iree_async_proactor_poll() on the proactor thread. Drains
+// queued committed sends, delivers data to peer recv handlers, and fires
+// sender send-completion callbacks for send() calls.
+static void iree_net_loopback_carrier_send_drain_completion(
+    void* user_data, iree_async_operation_t* operation, iree_status_t status,
+    iree_async_completion_flags_t flags) {
+  (void)operation;
+  (void)flags;  // NOP is never multishot.
+  iree_net_loopback_carrier_t* carrier =
+      (iree_net_loopback_carrier_t*)user_data;
+
+  if (iree_status_is_ok(status)) {
+    iree_net_loopback_pending_send_t* pending_send = NULL;
+    while ((pending_send = iree_net_loopback_pending_send_pop(carrier)) !=
+           NULL) {
+      iree_net_loopback_pending_send_deliver(pending_send);
+    }
+  } else {
+    iree_net_loopback_pending_send_t* pending_send = NULL;
+    while ((pending_send = iree_net_loopback_pending_send_pop(carrier)) !=
+           NULL) {
+      iree_net_loopback_pending_send_fail(pending_send, status);
+    }
+  }
+  iree_status_ignore(status);
+  iree_net_carrier_release(&carrier->base);
+}
+
 //===----------------------------------------------------------------------===//
 // Carrier interface implementation
 //===----------------------------------------------------------------------===//
@@ -422,6 +519,7 @@ static void iree_net_loopback_carrier_destroy(
   // Release proactor reference.
   iree_async_proactor_release(carrier->proactor);
 
+  iree_slim_mutex_deinitialize(&carrier->send_queue_mutex);
   iree_net_loopback_carrier_release_file_transfers(carrier);
   iree_slim_mutex_deinitialize(&carrier->file_transfer_mutex);
 
@@ -568,7 +666,7 @@ static iree_status_t iree_net_loopback_carrier_send(
     }
     pending_send->user_data = params->user_data;
     pending_send->notify_completion = true;
-    status = iree_net_loopback_pending_send_submit(pending_send);
+    status = iree_net_loopback_pending_send_enqueue(pending_send);
     if (iree_status_is_ok(status)) {
       pending_send = NULL;
       send_operation_active = false;
@@ -627,7 +725,7 @@ static iree_status_t iree_net_loopback_carrier_commit_send(
   iree_net_loopback_pending_send_t* pending_send =
       (iree_net_loopback_pending_send_t*)(uintptr_t)handle;
   iree_net_loopback_carrier_t* carrier = pending_send->carrier;
-  iree_status_t status = iree_net_loopback_pending_send_submit(pending_send);
+  iree_status_t status = iree_net_loopback_pending_send_enqueue(pending_send);
   if (!iree_status_is_ok(status)) {
     iree_net_loopback_carrier_end_send_operation(carrier);
     iree_net_loopback_pending_send_free(pending_send);
@@ -925,6 +1023,7 @@ static void iree_net_loopback_carrier_init(
   carrier->proactor = proactor;
   iree_async_proactor_retain(proactor);
   carrier->shutdown_initiated = false;
+  iree_slim_mutex_initialize(&carrier->send_queue_mutex);
   iree_slim_mutex_initialize(&carrier->file_transfer_mutex);
   carrier->next_file_transfer_id = 1;
 }
