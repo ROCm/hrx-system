@@ -761,6 +761,12 @@ typedef enum iree_net_rdma_listener_state_e {
   IREE_NET_RDMA_LISTENER_STATE_STOPPED = 2,
 } iree_net_rdma_listener_state_t;
 
+typedef uint8_t iree_net_rdma_listener_flags_t;
+enum iree_net_rdma_listener_flag_bits_e {
+  IREE_NET_RDMA_LISTENER_FLAG_IN_CALLBACK = 1u << 0,
+  IREE_NET_RDMA_LISTENER_FLAG_STOPPED_OPERATION_SUBMITTED = 1u << 1,
+};
+
 typedef struct iree_net_rdma_accept_state_t iree_net_rdma_accept_state_t;
 
 typedef struct iree_net_rdma_listener_t {
@@ -803,11 +809,14 @@ typedef struct iree_net_rdma_listener_t {
   // Linked list of accepted IDs waiting for ESTABLISHED.
   iree_net_rdma_accept_state_t* pending_accepts;
 
+  // Number of submitted accept-state cleanup operations still pending.
+  uint32_t pending_cleanup_count;
+
   // Listener lifecycle state.
   iree_net_rdma_listener_state_t state;
 
-  // True while executing the rdma_cm channel callback.
-  bool in_callback;
+  // Bitfield of iree_net_rdma_listener_flag_bits_e values.
+  iree_net_rdma_listener_flags_t flags;
 
   // Host allocator used for this listener allocation.
   iree_allocator_t host_allocator;
@@ -844,6 +853,40 @@ struct iree_net_rdma_accept_state_t {
 
 static const iree_net_listener_vtable_t iree_net_rdma_listener_vtable;
 
+static void iree_net_rdma_listener_stopped_complete(
+    void* user_data, iree_async_operation_t* operation, iree_status_t status,
+    iree_async_completion_flags_t flags) {
+  iree_net_rdma_listener_t* listener = (iree_net_rdma_listener_t*)user_data;
+  if (!iree_status_is_ok(status)) iree_status_abort(status);
+  listener->state = IREE_NET_RDMA_LISTENER_STATE_STOPPED;
+  listener->stopped_callback.fn(listener->stopped_callback.user_data);
+}
+
+static iree_status_t iree_net_rdma_listener_maybe_submit_stopped(
+    iree_net_rdma_listener_t* listener) {
+  if (listener->state != IREE_NET_RDMA_LISTENER_STATE_STOPPING ||
+      iree_any_bit_set(listener->flags,
+                       IREE_NET_RDMA_LISTENER_FLAG_STOPPED_OPERATION_SUBMITTED |
+                           IREE_NET_RDMA_LISTENER_FLAG_IN_CALLBACK) ||
+      listener->listen_id || listener->cm_channel ||
+      listener->pending_accepts || listener->pending_cleanup_count != 0) {
+    return iree_ok_status();
+  }
+
+  listener->flags |= IREE_NET_RDMA_LISTENER_FLAG_STOPPED_OPERATION_SUBMITTED;
+  memset(&listener->stopped_operation, 0, sizeof(listener->stopped_operation));
+  iree_async_operation_initialize(
+      &listener->stopped_operation.base, IREE_ASYNC_OPERATION_TYPE_NOP,
+      IREE_ASYNC_OPERATION_FLAG_NONE, iree_net_rdma_listener_stopped_complete,
+      listener);
+  iree_status_t status = iree_async_proactor_submit_one(
+      listener->proactor, &listener->stopped_operation.base);
+  if (!iree_status_is_ok(status)) {
+    listener->flags &= ~IREE_NET_RDMA_LISTENER_FLAG_STOPPED_OPERATION_SUBMITTED;
+  }
+  return status;
+}
+
 static void iree_net_rdma_accept_state_cleanup(
     void* user_data, iree_async_operation_t* operation, iree_status_t status,
     iree_async_completion_flags_t flags) {
@@ -851,11 +894,12 @@ static void iree_net_rdma_accept_state_cleanup(
       (iree_net_rdma_accept_state_t*)user_data;
   if (!iree_status_is_ok(status)) iree_status_abort(status);
 
+  iree_net_rdma_listener_t* listener = accept_state->listener;
   iree_net_carrier_release(accept_state->carrier);
   iree_net_rdma_context_release(accept_state->connection_context);
   if (accept_state->connection_id) {
-    const iree_net_librdmacm_t* librdmacm = iree_net_rdma_context_librdmacm(
-        accept_state->listener->factory->context);
+    const iree_net_librdmacm_t* librdmacm =
+        iree_net_rdma_context_librdmacm(listener->factory->context);
     int result = librdmacm->rdma_destroy_id(accept_state->connection_id);
     iree_status_t destroy_status = iree_net_rdma_factory_status_from_result(
         __FILE__, __LINE__, result, "rdma_destroy_id");
@@ -863,10 +907,20 @@ static void iree_net_rdma_accept_state_cleanup(
   }
   iree_allocator_t host_allocator = accept_state->host_allocator;
   iree_allocator_free(host_allocator, accept_state);
+
+  if (listener->pending_cleanup_count == 0) {
+    iree_status_abort(iree_make_status(
+        IREE_STATUS_INTERNAL, "RDMA listener accept cleanup count underflow"));
+  }
+  --listener->pending_cleanup_count;
+  iree_status_t stopped_status =
+      iree_net_rdma_listener_maybe_submit_stopped(listener);
+  if (!iree_status_is_ok(stopped_status)) iree_status_abort(stopped_status);
 }
 
 static void iree_net_rdma_accept_state_submit_cleanup(
     iree_net_rdma_accept_state_t* accept_state) {
+  ++accept_state->listener->pending_cleanup_count;
   memset(&accept_state->cleanup_operation, 0,
          sizeof(accept_state->cleanup_operation));
   iree_async_operation_initialize(
@@ -900,6 +954,18 @@ static iree_net_rdma_accept_state_t* iree_net_rdma_listener_pop_accept(
     link = &accept_state->next;
   }
   return NULL;
+}
+
+static void iree_net_rdma_listener_cancel_pending_accepts(
+    iree_net_rdma_listener_t* listener) {
+  iree_net_rdma_accept_state_t* accept_state = listener->pending_accepts;
+  listener->pending_accepts = NULL;
+  while (accept_state) {
+    iree_net_rdma_accept_state_t* next_accept_state = accept_state->next;
+    accept_state->next = NULL;
+    iree_net_rdma_accept_state_submit_cleanup(accept_state);
+    accept_state = next_accept_state;
+  }
 }
 
 static void iree_net_rdma_listener_deliver_accept(
@@ -1034,16 +1100,63 @@ static iree_status_t iree_net_rdma_listener_accept_request(
 static iree_status_t iree_net_rdma_listener_discard_stopping_event(
     iree_net_rdma_listener_t* listener, const iree_net_rdma_cm_event_t* event) {
   iree_status_t status = iree_ok_status();
-  if (event && event->type == RDMA_CM_EVENT_CONNECT_REQUEST) {
+  if (!event) return status;
+
+  switch (event->type) {
+    case RDMA_CM_EVENT_CONNECT_REQUEST: {
+      const iree_net_librdmacm_t* librdmacm =
+          iree_net_rdma_context_librdmacm(listener->factory->context);
+      int result = librdmacm->rdma_reject(event->id, NULL, 0);
+      status = iree_net_rdma_factory_status_from_result(__FILE__, __LINE__,
+                                                        result, "rdma_reject");
+      result = librdmacm->rdma_destroy_id(event->id);
+      status = iree_status_join(
+          status, iree_net_rdma_factory_status_from_result(
+                      __FILE__, __LINE__, result, "rdma_destroy_id"));
+      break;
+    }
+    case RDMA_CM_EVENT_ESTABLISHED:
+    case RDMA_CM_EVENT_REJECTED:
+    case RDMA_CM_EVENT_CONNECT_ERROR:
+    case RDMA_CM_EVENT_UNREACHABLE:
+    case RDMA_CM_EVENT_DISCONNECTED:
+    case RDMA_CM_EVENT_DEVICE_REMOVAL: {
+      iree_net_rdma_accept_state_t* accept_state =
+          iree_net_rdma_listener_pop_accept(listener, event->id);
+      if (accept_state) {
+        iree_net_rdma_accept_state_submit_cleanup(accept_state);
+      }
+      break;
+    }
+    default:
+      status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                "unexpected RDMA CM event %d while stopping",
+                                (int)event->type);
+      break;
+  }
+  return status;
+}
+
+static iree_status_t iree_net_rdma_listener_drain_stopping_events(
+    iree_net_rdma_listener_t* listener) {
+  iree_status_t status = iree_ok_status();
+  if (listener->cm_channel) {
+    status = iree_net_rdma_cm_channel_drain(listener->cm_channel);
+  }
+  return status;
+}
+
+static iree_status_t iree_net_rdma_listener_destroy_listen_id(
+    iree_net_rdma_listener_t* listener) {
+  iree_status_t status = iree_ok_status();
+  if (listener->listen_id) {
     const iree_net_librdmacm_t* librdmacm =
         iree_net_rdma_context_librdmacm(listener->factory->context);
-    int result = librdmacm->rdma_reject(event->id, NULL, 0);
-    status = iree_net_rdma_factory_status_from_result(__FILE__, __LINE__,
-                                                      result, "rdma_reject");
-    result = librdmacm->rdma_destroy_id(event->id);
-    status = iree_status_join(
-        status, iree_net_rdma_factory_status_from_result(
-                    __FILE__, __LINE__, result, "rdma_destroy_id"));
+    struct rdma_cm_id* listen_id = listener->listen_id;
+    int result = librdmacm->rdma_destroy_id(listen_id);
+    status = iree_net_rdma_factory_status_from_result(
+        __FILE__, __LINE__, result, "rdma_destroy_id");
+    if (iree_status_is_ok(status)) listener->listen_id = NULL;
   }
   return status;
 }
@@ -1052,17 +1165,17 @@ static void iree_net_rdma_listener_on_cm_event(
     void* user_data, iree_status_t status,
     const iree_net_rdma_cm_event_t* event) {
   iree_net_rdma_listener_t* listener = (iree_net_rdma_listener_t*)user_data;
-  listener->in_callback = true;
+  listener->flags |= IREE_NET_RDMA_LISTENER_FLAG_IN_CALLBACK;
   if (listener->state != IREE_NET_RDMA_LISTENER_STATE_LISTENING) {
     if (!iree_status_is_ok(status)) iree_status_abort(status);
     status = iree_net_rdma_listener_discard_stopping_event(listener, event);
     if (!iree_status_is_ok(status)) iree_status_abort(status);
-    listener->in_callback = false;
+    listener->flags &= ~IREE_NET_RDMA_LISTENER_FLAG_IN_CALLBACK;
     return;
   }
   if (!iree_status_is_ok(status)) {
     listener->accept_callback(listener->accept_user_data, status, NULL);
-    listener->in_callback = false;
+    listener->flags &= ~IREE_NET_RDMA_LISTENER_FLAG_IN_CALLBACK;
     return;
   }
 
@@ -1112,44 +1225,22 @@ static void iree_net_rdma_listener_on_cm_event(
           NULL);
       break;
   }
-  listener->in_callback = false;
-}
-
-static void iree_net_rdma_listener_stopped_complete(
-    void* user_data, iree_async_operation_t* operation, iree_status_t status,
-    iree_async_completion_flags_t flags) {
-  iree_net_rdma_listener_t* listener = (iree_net_rdma_listener_t*)user_data;
-  if (!iree_status_is_ok(status)) iree_status_abort(status);
-  listener->state = IREE_NET_RDMA_LISTENER_STATE_STOPPED;
-  listener->stopped_callback.fn(listener->stopped_callback.user_data);
+  listener->flags &= ~IREE_NET_RDMA_LISTENER_FLAG_IN_CALLBACK;
 }
 
 static iree_status_t iree_net_rdma_listener_begin_stop(
     iree_net_rdma_listener_t* listener) {
-  const iree_net_librdmacm_t* librdmacm =
-      iree_net_rdma_context_librdmacm(listener->factory->context);
-
-  iree_status_t status = iree_ok_status();
-  if (listener->listen_id) {
-    struct rdma_cm_id* listen_id = listener->listen_id;
-    int result = librdmacm->rdma_destroy_id(listen_id);
-    status = iree_net_rdma_factory_status_from_result(
-        __FILE__, __LINE__, result, "rdma_destroy_id");
-    if (iree_status_is_ok(status)) listener->listen_id = NULL;
+  iree_status_t status = iree_net_rdma_listener_destroy_listen_id(listener);
+  if (iree_status_is_ok(status)) {
+    status = iree_net_rdma_listener_drain_stopping_events(listener);
   }
   if (iree_status_is_ok(status)) {
+    iree_net_rdma_listener_cancel_pending_accepts(listener);
     iree_net_rdma_cm_channel_release(listener->cm_channel);
     listener->cm_channel = NULL;
   }
   if (iree_status_is_ok(status)) {
-    memset(&listener->stopped_operation, 0,
-           sizeof(listener->stopped_operation));
-    iree_async_operation_initialize(
-        &listener->stopped_operation.base, IREE_ASYNC_OPERATION_TYPE_NOP,
-        IREE_ASYNC_OPERATION_FLAG_NONE, iree_net_rdma_listener_stopped_complete,
-        listener);
-    status = iree_async_proactor_submit_one(listener->proactor,
-                                            &listener->stopped_operation.base);
+    status = iree_net_rdma_listener_maybe_submit_stopped(listener);
   }
   return status;
 }
@@ -1181,16 +1272,12 @@ static iree_status_t iree_net_rdma_listener_stop(
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "listener is already stopping or stopped");
   }
-  if (listener->pending_accepts) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "listener has pending RDMA accepts that have not established");
-  }
 
   listener->state = IREE_NET_RDMA_LISTENER_STATE_STOPPING;
   listener->stopped_callback = callback;
   iree_status_t status = iree_ok_status();
-  if (listener->in_callback) {
+  if (iree_all_bits_set(listener->flags,
+                        IREE_NET_RDMA_LISTENER_FLAG_IN_CALLBACK)) {
     memset(&listener->stop_operation, 0, sizeof(listener->stop_operation));
     iree_async_operation_initialize(
         &listener->stop_operation.base, IREE_ASYNC_OPERATION_TYPE_NOP,
