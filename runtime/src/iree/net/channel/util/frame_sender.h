@@ -83,6 +83,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/atomic_slist.h"
 #include "iree/base/internal/atomics.h"
+#include "iree/net/carrier.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -94,8 +95,6 @@ extern "C" {
 
 typedef struct iree_net_frame_sender_t iree_net_frame_sender_t;
 typedef struct iree_net_frame_send_context_t iree_net_frame_send_context_t;
-
-typedef struct iree_net_carrier_t iree_net_carrier_t;
 
 // Submit callback for sending data through the transport.
 //
@@ -372,23 +371,23 @@ int32_t iree_net_frame_sender_pending_count(
 void iree_net_frame_sender_handle_completion(
     iree_net_frame_send_context_t* context, iree_status_t status);
 
-// Generic carrier completion callback that dispatches to frame_sender.
+// Generic carrier completion callback that dispatches SEND completions to a
+// frame_sender.
 //
 // Use as the iree_net_carrier_callback_t.fn when all sends through a carrier
 // use frame_sender. The callback extracts the frame_send_context_t from
 // |operation_user_data| and calls iree_net_frame_sender_handle_completion().
 //
-// Completions with |operation_user_data| == 0 are silently ignored (with status
-// consumed). This allows the callback to be used on carriers that also fire
-// completions for non-frame_sender operations (NOPs, activation, etc.) where
-// the user_data is 0.
+// Completion kinds other than IREE_NET_CARRIER_COMPLETION_SEND are not part of
+// the frame_sender contract and abort because they require a carrier-level
+// router rather than a frame_sender-only callback.
 //
 // This is the standard carrier callback for connections that use frame_sender
 // in their channel layers.
 void iree_net_frame_sender_dispatch_carrier_completion(
-    void* callback_user_data, uint64_t operation_user_data,
-    iree_status_t status, iree_host_size_t bytes_transferred,
-    iree_async_buffer_lease_t* recv_lease);
+    void* callback_user_data, iree_net_carrier_completion_kind_t kind,
+    uint64_t operation_user_data, iree_status_t status,
+    iree_host_size_t bytes_transferred, iree_async_buffer_lease_t* recv_lease);
 
 //===----------------------------------------------------------------------===//
 // Carrier-direct submit helper

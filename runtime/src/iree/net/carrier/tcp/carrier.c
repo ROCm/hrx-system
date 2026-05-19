@@ -754,7 +754,8 @@ static void iree_net_tcp_carrier_complete_send_slot(
   // Invoke user callback if set. begin_send/commit_send operations do not fire
   // user callbacks (the data is fully consumed on commit).
   if (!is_begin_send && carrier->base.callback.fn) {
-    carrier->base.callback.fn(carrier->base.callback.user_data, slot->user_data,
+    carrier->base.callback.fn(carrier->base.callback.user_data,
+                              IREE_NET_CARRIER_COMPLETION_SEND, slot->user_data,
                               status, bytes_sent, NULL);
   } else {
     // No callback or begin_send operation - we must consume the status.

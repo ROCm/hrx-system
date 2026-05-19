@@ -117,8 +117,9 @@ struct CapturingEndpoint {
     }
     endpoint->sends.push_back(std::move(captured));
     iree_net_frame_sender_dispatch_carrier_completion(
-        /*callback_user_data=*/NULL, params->user_data, iree_ok_status(),
-        /*bytes_transferred=*/0, /*recv_lease=*/NULL);
+        /*callback_user_data=*/NULL, IREE_NET_CARRIER_COMPLETION_SEND,
+        params->user_data, iree_ok_status(), /*bytes_transferred=*/0,
+        /*recv_lease=*/NULL);
     return iree_ok_status();
   }
 

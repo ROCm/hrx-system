@@ -194,8 +194,9 @@ struct MockEndpoint {
     CapturedBulkSend& captured = sends[send_index];
     captured.completed = true;
     iree_net_frame_sender_dispatch_carrier_completion(
-        /*callback_user_data=*/NULL, captured.endpoint_user_data, status,
-        captured.total_length, /*recv_lease=*/NULL);
+        /*callback_user_data=*/NULL, IREE_NET_CARRIER_COMPLETION_SEND,
+        captured.endpoint_user_data, status, captured.total_length,
+        /*recv_lease=*/NULL);
   }
 
   void CompleteAllSends() {

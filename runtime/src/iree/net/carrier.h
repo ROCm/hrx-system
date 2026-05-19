@@ -328,21 +328,41 @@ typedef struct iree_net_carrier_recv_handler_t {
 // to release.
 typedef void (*iree_net_carrier_deactivate_callback_fn_t)(void* user_data);
 
-// Completion callback for send operations and legacy recv operations.
+// Carrier completion kind.
+typedef uint8_t iree_net_carrier_completion_kind_t;
+enum iree_net_carrier_completion_kind_e {
+  // No completion kind. Invalid for callback delivery.
+  IREE_NET_CARRIER_COMPLETION_NONE = 0u,
+
+  // Completion for an iree_net_carrier_send operation.
+  IREE_NET_CARRIER_COMPLETION_SEND = 1u,
+
+  // Completion for an iree_net_carrier_direct_write operation.
+  IREE_NET_CARRIER_COMPLETION_DIRECT_WRITE = 2u,
+
+  // Completion for an iree_net_carrier_direct_read operation.
+  IREE_NET_CARRIER_COMPLETION_DIRECT_READ = 3u,
+
+  // Carrier-level transport error not associated with a specific operation.
+  IREE_NET_CARRIER_COMPLETION_ERROR = 4u,
+};
+
+// Completion callback for carrier operations.
 //
 // Invoked from proactor poll() on the polling thread. Callbacks for a single
 // carrier are never concurrent - they're serialized in completion order.
 // Implementations should be non-blocking.
 //
-// |operation_user_data| is echoed from the send/recv params for correlation.
+// |kind| identifies the operation class that completed.
+// |operation_user_data| is echoed from the operation params for correlation.
 // |status| is OK on success, error on failure.
 // |bytes_transferred| is the number of bytes actually sent/received.
 // |recv_lease| is non-NULL only for successful pooled recv completions;
 // caller must release via iree_async_buffer_lease_release() after processing.
 typedef void (*iree_net_carrier_completion_fn_t)(
-    void* callback_user_data, uint64_t operation_user_data,
-    iree_status_t status, iree_host_size_t bytes_transferred,
-    iree_async_buffer_lease_t* recv_lease);
+    void* callback_user_data, iree_net_carrier_completion_kind_t kind,
+    uint64_t operation_user_data, iree_status_t status,
+    iree_host_size_t bytes_transferred, iree_async_buffer_lease_t* recv_lease);
 
 typedef struct iree_net_carrier_callback_t {
   iree_net_carrier_completion_fn_t fn;

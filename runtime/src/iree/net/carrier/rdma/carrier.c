@@ -200,6 +200,7 @@ static iree_net_carrier_capabilities_t iree_net_rdma_carrier_capabilities(
 static void iree_net_rdma_carrier_notify_error(iree_net_rdma_carrier_t* carrier,
                                                iree_status_t status) {
   carrier->base.callback.fn(carrier->base.callback.user_data,
+                            IREE_NET_CARRIER_COMPLETION_ERROR,
                             /*operation_user_data=*/0, status,
                             /*bytes_transferred=*/0, /*recv_lease=*/NULL);
 }
@@ -210,6 +211,27 @@ static iree_status_t iree_net_rdma_carrier_status_from_work_completion(
   return iree_make_status(
       IREE_STATUS_UNAVAILABLE, "RDMA %s completion failed: status=%u vendor=%u",
       queue_name, (uint32_t)completion->status, completion->vendor_err);
+}
+
+static iree_status_t iree_net_rdma_carrier_completion_kind_from_operation(
+    iree_net_rdma_work_request_operation_t operation,
+    iree_net_carrier_completion_kind_t* out_kind) {
+  *out_kind = IREE_NET_CARRIER_COMPLETION_NONE;
+  switch (operation) {
+    case IREE_NET_RDMA_WORK_REQUEST_OPERATION_SEND:
+      *out_kind = IREE_NET_CARRIER_COMPLETION_SEND;
+      return iree_ok_status();
+    case IREE_NET_RDMA_WORK_REQUEST_OPERATION_DIRECT_WRITE:
+      *out_kind = IREE_NET_CARRIER_COMPLETION_DIRECT_WRITE;
+      return iree_ok_status();
+    case IREE_NET_RDMA_WORK_REQUEST_OPERATION_DIRECT_READ:
+      *out_kind = IREE_NET_CARRIER_COMPLETION_DIRECT_READ;
+      return iree_ok_status();
+    default:
+      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "RDMA operation %u has no carrier completion",
+                              operation);
+  }
 }
 
 static void iree_net_rdma_carrier_on_send_completions(
@@ -268,9 +290,19 @@ static void iree_net_rdma_carrier_on_send_completions(
         iree_net_rdma_carrier_notify_error(carrier, completion_status);
       }
     } else {
-      carrier->base.callback.fn(
-          carrier->base.callback.user_data, work_request_completion.user_data,
-          completion_status, bytes_transferred, /*recv_lease=*/NULL);
+      iree_net_carrier_completion_kind_t kind =
+          IREE_NET_CARRIER_COMPLETION_NONE;
+      completion_status =
+          iree_status_join(completion_status,
+                           iree_net_rdma_carrier_completion_kind_from_operation(
+                               work_request_completion.operation, &kind));
+      if (!iree_status_is_ok(completion_status)) {
+        bytes_transferred = 0;
+      }
+      carrier->base.callback.fn(carrier->base.callback.user_data, kind,
+                                work_request_completion.user_data,
+                                completion_status, bytes_transferred,
+                                /*recv_lease=*/NULL);
     }
   }
 }

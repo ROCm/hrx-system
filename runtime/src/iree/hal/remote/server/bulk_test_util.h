@@ -118,7 +118,7 @@ struct MockCarrier {
   void CompleteSend(iree_host_size_t send_index, iree_status_t status) {
     CapturedSend& captured = sends[send_index];
     captured.completed = true;
-    base.callback.fn(base.callback.user_data,
+    base.callback.fn(base.callback.user_data, IREE_NET_CARRIER_COMPLETION_SEND,
                      captured.carrier_operation_user_data, status,
                      captured.total_length, nullptr);
   }

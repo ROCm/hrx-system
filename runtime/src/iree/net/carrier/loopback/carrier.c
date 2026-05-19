@@ -437,6 +437,7 @@ static void iree_net_loopback_pending_send_deliver(
   // Fire sender's send completion callback if set.
   if (pending_send->notify_completion && carrier->base.callback.fn) {
     carrier->base.callback.fn(carrier->base.callback.user_data,
+                              IREE_NET_CARRIER_COMPLETION_SEND,
                               pending_send->user_data, delivery_status,
                               pending_send->total_size, NULL);
   } else {
@@ -453,6 +454,7 @@ static void iree_net_loopback_pending_send_fail(
   iree_status_t completion_status = iree_status_clone(status);
   if (pending_send->notify_completion && carrier->base.callback.fn) {
     carrier->base.callback.fn(carrier->base.callback.user_data,
+                              IREE_NET_CARRIER_COMPLETION_SEND,
                               pending_send->user_data, completion_status,
                               pending_send->total_size, NULL);
   } else {

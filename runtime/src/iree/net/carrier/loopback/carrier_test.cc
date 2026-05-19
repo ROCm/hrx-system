@@ -112,8 +112,9 @@ TEST_F(LoopbackCarrierTest, InFlightSendReportsErrorOnPeerDeparture) {
   } completion;
 
   iree_net_carrier_callback_t callback = {
-      [](void* user_data, uint64_t /*operation_user_data*/,
-         iree_status_t status, iree_host_size_t /*bytes_transferred*/,
+      [](void* user_data, iree_net_carrier_completion_kind_t /*kind*/,
+         uint64_t /*operation_user_data*/, iree_status_t status,
+         iree_host_size_t /*bytes_transferred*/,
          iree_async_buffer_lease_t* /*recv_lease*/) {
         auto* state = static_cast<CompletionState*>(user_data);
         if (!iree_status_is_ok(status)) {

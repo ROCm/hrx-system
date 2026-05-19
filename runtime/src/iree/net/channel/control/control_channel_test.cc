@@ -127,7 +127,8 @@ struct MockCarrier {
     mock->sends.push_back(std::move(captured));
 
     // Auto-complete: fire the carrier callback (frame_sender dispatch).
-    carrier->callback.fn(carrier->callback.user_data, params->user_data,
+    carrier->callback.fn(carrier->callback.user_data,
+                         IREE_NET_CARRIER_COMPLETION_SEND, params->user_data,
                          iree_ok_status(), 0, nullptr);
     return iree_ok_status();
   }

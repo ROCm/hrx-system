@@ -53,14 +53,21 @@ struct RecvCapture {
 struct CompletionTracker {
   std::atomic<int> call_count{0};
   std::atomic<iree_host_size_t> total_bytes{0};
+  std::atomic<iree_net_carrier_completion_kind_t> last_kind{
+      IREE_NET_CARRIER_COMPLETION_NONE};
 
-  static void Callback(void* callback_user_data, uint64_t operation_user_data,
-                       iree_status_t status, iree_host_size_t bytes_transferred,
+  static void Callback(void* callback_user_data,
+                       iree_net_carrier_completion_kind_t kind,
+                       uint64_t operation_user_data, iree_status_t status,
+                       iree_host_size_t bytes_transferred,
                        iree_async_buffer_lease_t* recv_lease) {
+    (void)operation_user_data;
+    (void)recv_lease;
     auto* tracker = static_cast<CompletionTracker*>(callback_user_data);
     tracker->call_count.fetch_add(1, std::memory_order_relaxed);
     tracker->total_bytes.fetch_add(bytes_transferred,
                                    std::memory_order_relaxed);
+    tracker->last_kind.store(kind, std::memory_order_relaxed);
     iree_status_ignore(status);
   }
 
@@ -380,6 +387,8 @@ TEST_F(ShmCarrierTest, DirectWriteSignalingDeliversToRecvHandler) {
 
   // The sender's completion callback should have fired.
   ASSERT_TRUE(PollUntil([&] { return completions_.call_count.load() >= 1; }));
+  EXPECT_EQ(completions_.last_kind.load(),
+            IREE_NET_CARRIER_COMPLETION_DIRECT_WRITE);
   EXPECT_EQ(completions_.total_bytes.load(), write_length);
 }
 

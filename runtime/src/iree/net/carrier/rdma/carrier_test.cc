@@ -11,10 +11,12 @@
 
 namespace {
 
-void NoopCompletion(void* user_data, uint64_t operation_user_data,
-                    iree_status_t status, iree_host_size_t bytes_transferred,
+void NoopCompletion(void* user_data, iree_net_carrier_completion_kind_t kind,
+                    uint64_t operation_user_data, iree_status_t status,
+                    iree_host_size_t bytes_transferred,
                     iree_async_buffer_lease_t* recv_lease) {
   (void)user_data;
+  (void)kind;
   (void)operation_user_data;
   (void)bytes_transferred;
   (void)recv_lease;

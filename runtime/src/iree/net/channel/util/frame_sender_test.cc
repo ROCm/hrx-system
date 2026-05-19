@@ -94,7 +94,8 @@ struct MockCarrier {
 
     if (mock->auto_complete) {
       // Fire completion immediately - don't track in pending_contexts.
-      carrier->callback.fn(carrier->callback.user_data, params->user_data,
+      carrier->callback.fn(carrier->callback.user_data,
+                           IREE_NET_CARRIER_COMPLETION_SEND, params->user_data,
                            iree_ok_status(), 0, nullptr);
     } else {
       // Save context for manual completion later.
@@ -167,8 +168,9 @@ struct MockCarrier {
     if (!pending_contexts.empty()) {
       auto* context = pending_contexts.front();
       pending_contexts.erase(pending_contexts.begin());
-      base.callback.fn(base.callback.user_data, (uint64_t)(uintptr_t)context,
-                       status, 0, nullptr);
+      base.callback.fn(base.callback.user_data,
+                       IREE_NET_CARRIER_COMPLETION_SEND,
+                       (uint64_t)(uintptr_t)context, status, 0, nullptr);
     }
   }
 
@@ -342,10 +344,15 @@ class FrameSenderTest : public ::testing::Test {
 
   // Carrier completion callback that routes to frame_sender.
   static void CarrierCompletionCallback(void* callback_user_data,
+                                        iree_net_carrier_completion_kind_t kind,
                                         uint64_t operation_user_data,
                                         iree_status_t status,
                                         iree_host_size_t bytes_transferred,
                                         iree_async_buffer_lease_t* recv_lease) {
+    (void)callback_user_data;
+    (void)kind;
+    (void)bytes_transferred;
+    (void)recv_lease;
     auto* context =
         reinterpret_cast<iree_net_frame_send_context_t*>(operation_user_data);
     iree_net_frame_sender_handle_completion(context, status);

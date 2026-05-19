@@ -583,8 +583,8 @@ void iree_net_frame_sender_handle_completion(
   // Fire user callback.
   if (callback.fn) {
     callback.fn(callback.user_data, operation_user_data, status);
-  } else {
-    iree_status_ignore(status);
+  } else if (!iree_status_is_ok(status)) {
+    iree_status_abort(status);
   }
 }
 
@@ -601,17 +601,29 @@ iree_status_t iree_net_frame_sender_carrier_submit(void* user_data,
 }
 
 void iree_net_frame_sender_dispatch_carrier_completion(
-    void* callback_user_data, uint64_t operation_user_data,
-    iree_status_t status, iree_host_size_t bytes_transferred,
-    iree_async_buffer_lease_t* recv_lease) {
+    void* callback_user_data, iree_net_carrier_completion_kind_t kind,
+    uint64_t operation_user_data, iree_status_t status,
+    iree_host_size_t bytes_transferred, iree_async_buffer_lease_t* recv_lease) {
   (void)callback_user_data;
   (void)bytes_transferred;
   (void)recv_lease;
-  // Frame sender always passes a non-NULL context pointer. Completions with
-  // operation_user_data=0 are from non-frame_sender carrier operations (NOPs,
-  // activation, etc.) and should be ignored.
+  if (kind != IREE_NET_CARRIER_COMPLETION_SEND) {
+    if (!iree_status_is_ok(status)) {
+      iree_status_abort(status);
+    }
+    iree_status_abort(iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "frame sender callback received non-SEND completion kind %u",
+        (uint32_t)kind));
+    return;
+  }
+
+  // Frame sender always passes a non-NULL context pointer. Uncorrelated
+  // successful SEND completions are not owned by frame_sender.
   if (operation_user_data == 0) {
-    iree_status_ignore(status);
+    if (!iree_status_is_ok(status)) {
+      iree_status_abort(status);
+    }
     return;
   }
   iree_net_frame_send_context_t* context =

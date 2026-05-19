@@ -851,9 +851,9 @@ static iree_status_t iree_net_shm_carrier_send(
   iree_atomic_fetch_add(&base_carrier->bytes_sent, (int64_t)total_size,
                         iree_memory_order_relaxed);
   if (base_carrier->callback.fn) {
-    base_carrier->callback.fn(base_carrier->callback.user_data,
-                              params->user_data, iree_ok_status(), total_size,
-                              NULL);
+    base_carrier->callback.fn(
+        base_carrier->callback.user_data, IREE_NET_CARRIER_COMPLETION_SEND,
+        params->user_data, iree_ok_status(), total_size, NULL);
   }
 
   iree_atomic_fetch_sub(&base_carrier->pending_operations, 1,
@@ -1173,6 +1173,7 @@ static iree_status_t iree_net_shm_carrier_direct_write(
                         iree_memory_order_relaxed);
   if (base_carrier->callback.fn) {
     base_carrier->callback.fn(base_carrier->callback.user_data,
+                              IREE_NET_CARRIER_COMPLETION_DIRECT_WRITE,
                               params->user_data, iree_ok_status(),
                               params->local.length, NULL);
   }

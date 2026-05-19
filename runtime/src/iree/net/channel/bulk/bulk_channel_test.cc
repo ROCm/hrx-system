@@ -189,8 +189,9 @@ struct MockCarrier {
     ASSERT_LT(send_index, sends.size());
     ASSERT_FALSE(sends[send_index].completed);
     sends[send_index].completed = true;
-    base.callback.fn(base.callback.user_data, sends[send_index].user_data,
-                     status, sends[send_index].data.size(), nullptr);
+    base.callback.fn(base.callback.user_data, IREE_NET_CARRIER_COMPLETION_SEND,
+                     sends[send_index].user_data, status,
+                     sends[send_index].data.size(), nullptr);
   }
 
   static const iree_net_carrier_vtable_t kVtable;

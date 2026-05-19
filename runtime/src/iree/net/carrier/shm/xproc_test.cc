@@ -160,10 +160,14 @@ struct XProcContext {
 
   // Static completion callback that tracks send completions.
   static void CompletionCallback(void* callback_user_data,
+                                 iree_net_carrier_completion_kind_t kind,
                                  uint64_t operation_user_data,
                                  iree_status_t status,
                                  iree_host_size_t bytes_transferred,
                                  iree_async_buffer_lease_t* recv_lease) {
+    (void)kind;
+    (void)operation_user_data;
+    (void)recv_lease;
     auto* context = static_cast<XProcContext*>(callback_user_data);
     context->completion_count.fetch_add(1, std::memory_order_relaxed);
     context->completion_bytes.fetch_add(bytes_transferred,

@@ -97,9 +97,14 @@ struct SendCompletionTracker {
     total_bytes = 0;
   }
 
-  static void Callback(void* callback_user_data, uint64_t operation_user_data,
-                       iree_status_t status, iree_host_size_t bytes_transferred,
+  static void Callback(void* callback_user_data,
+                       iree_net_carrier_completion_kind_t kind,
+                       uint64_t operation_user_data, iree_status_t status,
+                       iree_host_size_t bytes_transferred,
                        iree_async_buffer_lease_t* recv_lease) {
+    (void)kind;
+    (void)operation_user_data;
+    (void)recv_lease;
     auto* tracker = static_cast<SendCompletionTracker*>(callback_user_data);
     tracker->call_count.fetch_add(1, std::memory_order_relaxed);
     tracker->total_bytes.fetch_add(bytes_transferred,

@@ -150,7 +150,8 @@ static iree_status_t fuzz_carrier_send(iree_net_carrier_t* carrier,
     return iree_status_from_code(IREE_STATUS_UNAVAILABLE);
   }
   // Auto-complete via the frame_sender dispatch callback.
-  carrier->callback.fn(carrier->callback.user_data, params->user_data,
+  carrier->callback.fn(carrier->callback.user_data,
+                       IREE_NET_CARRIER_COMPLETION_SEND, params->user_data,
                        iree_ok_status(), 0, NULL);
   return iree_ok_status();
 }
