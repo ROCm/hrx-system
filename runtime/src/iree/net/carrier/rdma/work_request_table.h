@@ -101,6 +101,16 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_work_request_table_complete(
     iree_net_rdma_work_request_table_t* table, uint64_t wr_id,
     iree_net_rdma_work_request_completion_t* out_completion);
 
+// Drains at most one in-flight work request at or after |*inout_cursor|.
+//
+// Initialize |*inout_cursor| to 0 and call until |*out_found| is false. The
+// caller owns the returned retained_buffer_lease, when present, and must
+// release it. The cursor advances monotonically, making a full drain
+// O(capacity).
+IREE_API_EXPORT iree_status_t iree_net_rdma_work_request_table_drain_next(
+    iree_net_rdma_work_request_table_t* table, uint32_t* inout_cursor,
+    iree_net_rdma_work_request_completion_t* out_completion, bool* out_found);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

@@ -131,6 +131,21 @@ TEST_F(WorkRequestTableTest, RejectsInvalidArguments) {
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       iree_net_rdma_work_request_table_complete(&table_, 0u, nullptr));
+
+  uint32_t cursor = 0;
+  bool found = false;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_net_rdma_work_request_table_drain_next(
+                            nullptr, &cursor, &completion, &found));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_net_rdma_work_request_table_drain_next(
+                            &table_, nullptr, &completion, &found));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_net_rdma_work_request_table_drain_next(
+                            &table_, &cursor, nullptr, &found));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_net_rdma_work_request_table_drain_next(
+                            &table_, &cursor, &completion, nullptr));
 }
 
 TEST_F(WorkRequestTableTest, RetainsLeaseUntilCompletion) {
@@ -162,6 +177,97 @@ TEST_F(WorkRequestTableTest, RetainsLeaseUntilCompletion) {
   iree_async_buffer_lease_release(&completion.retained_buffer_lease);
   iree_async_buffer_lease_release(&completion.retained_buffer_lease);
   EXPECT_EQ(1u, release_count);
+}
+
+TEST_F(WorkRequestTableTest, DrainReturnsAllInFlightRequests) {
+  IREE_ASSERT_OK(Initialize(4));
+
+  uint32_t release_count = 0;
+  iree_async_buffer_lease_t lease = {};
+  lease.release = (iree_async_buffer_recycle_callback_t){
+      .fn = CountLeaseRelease,
+      .user_data = &release_count,
+  };
+  lease.buffer_index = 7u;
+
+  uint64_t first_wr_id = 0;
+  IREE_ASSERT_OK(iree_net_rdma_work_request_table_acquire(
+      &table_, IREE_NET_RDMA_WORK_REQUEST_OPERATION_SEND, 10u,
+      /*byte_length=*/64, &lease, &first_wr_id));
+  uint64_t second_wr_id = 0;
+  IREE_ASSERT_OK(iree_net_rdma_work_request_table_acquire(
+      &table_, IREE_NET_RDMA_WORK_REQUEST_OPERATION_DIRECT_READ, 20u,
+      /*byte_length=*/128, /*retained_buffer_lease=*/nullptr, &second_wr_id));
+
+  iree_net_rdma_work_request_completion_t completions[2] = {};
+  uint32_t cursor = 0;
+  bool found = false;
+  IREE_ASSERT_OK(iree_net_rdma_work_request_table_drain_next(
+      &table_, &cursor, &completions[0], &found));
+  EXPECT_TRUE(found);
+  IREE_ASSERT_OK(iree_net_rdma_work_request_table_drain_next(
+      &table_, &cursor, &completions[1], &found));
+  EXPECT_TRUE(found);
+  iree_net_rdma_work_request_completion_t unused_completion;
+  IREE_ASSERT_OK(iree_net_rdma_work_request_table_drain_next(
+      &table_, &cursor, &unused_completion, &found));
+  EXPECT_FALSE(found);
+
+  EXPECT_EQ(IREE_NET_RDMA_WORK_REQUEST_OPERATION_SEND,
+            completions[0].operation);
+  EXPECT_EQ(10u, completions[0].user_data);
+  EXPECT_EQ(64u, completions[0].byte_length);
+  EXPECT_NE(nullptr, completions[0].retained_buffer_lease.release.fn);
+  EXPECT_EQ(IREE_NET_RDMA_WORK_REQUEST_OPERATION_DIRECT_READ,
+            completions[1].operation);
+  EXPECT_EQ(20u, completions[1].user_data);
+  EXPECT_EQ(128u, completions[1].byte_length);
+  EXPECT_EQ(4u, iree_net_rdma_work_request_table_available_capacity(&table_));
+
+  iree_net_rdma_work_request_completion_t completion;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        iree_net_rdma_work_request_table_complete(
+                            &table_, first_wr_id, &completion));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        iree_net_rdma_work_request_table_complete(
+                            &table_, second_wr_id, &completion));
+
+  iree_async_buffer_lease_release(&completions[0].retained_buffer_lease);
+  EXPECT_EQ(1u, release_count);
+}
+
+TEST_F(WorkRequestTableTest, DrainNextAdvancesCursor) {
+  IREE_ASSERT_OK(Initialize(3));
+
+  uint64_t first_wr_id = 0;
+  IREE_ASSERT_OK(iree_net_rdma_work_request_table_acquire(
+      &table_, IREE_NET_RDMA_WORK_REQUEST_OPERATION_SEND, 100u,
+      /*byte_length=*/4, /*retained_buffer_lease=*/nullptr, &first_wr_id));
+  uint64_t second_wr_id = 0;
+  IREE_ASSERT_OK(iree_net_rdma_work_request_table_acquire(
+      &table_, IREE_NET_RDMA_WORK_REQUEST_OPERATION_DIRECT_WRITE, 200u,
+      /*byte_length=*/8, /*retained_buffer_lease=*/nullptr, &second_wr_id));
+
+  uint32_t cursor = 0;
+  bool found = false;
+  iree_net_rdma_work_request_completion_t completion;
+  IREE_ASSERT_OK(iree_net_rdma_work_request_table_drain_next(
+      &table_, &cursor, &completion, &found));
+  EXPECT_TRUE(found);
+  EXPECT_EQ(IREE_NET_RDMA_WORK_REQUEST_OPERATION_SEND, completion.operation);
+  EXPECT_EQ(100u, completion.user_data);
+
+  IREE_ASSERT_OK(iree_net_rdma_work_request_table_drain_next(
+      &table_, &cursor, &completion, &found));
+  EXPECT_TRUE(found);
+  EXPECT_EQ(IREE_NET_RDMA_WORK_REQUEST_OPERATION_DIRECT_WRITE,
+            completion.operation);
+  EXPECT_EQ(200u, completion.user_data);
+
+  IREE_ASSERT_OK(iree_net_rdma_work_request_table_drain_next(
+      &table_, &cursor, &completion, &found));
+  EXPECT_FALSE(found);
+  EXPECT_EQ(3u, iree_net_rdma_work_request_table_available_capacity(&table_));
 }
 
 TEST(WorkRequestTableStandaloneTest, NullTableHasNoAvailableCapacity) {

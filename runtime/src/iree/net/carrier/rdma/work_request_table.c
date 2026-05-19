@@ -73,6 +73,27 @@ static bool iree_net_rdma_work_request_operation_is_valid(
   }
 }
 
+static void iree_net_rdma_work_request_table_release_slot(
+    iree_net_rdma_work_request_table_t* table, uint32_t index,
+    iree_net_rdma_work_request_completion_t* out_completion) {
+  iree_net_rdma_work_request_slot_t* slot = &table->slots[index];
+  out_completion->operation = slot->operation;
+  out_completion->user_data = slot->user_data;
+  out_completion->byte_length = slot->byte_length;
+  out_completion->retained_buffer_lease = slot->retained_buffer_lease;
+
+  memset(&slot->retained_buffer_lease, 0, sizeof(slot->retained_buffer_lease));
+  slot->user_data = 0;
+  slot->byte_length = 0;
+  slot->operation = IREE_NET_RDMA_WORK_REQUEST_OPERATION_NONE;
+  slot->generation =
+      iree_net_rdma_work_request_table_next_generation(slot->generation);
+  slot->next_free = table->free_head;
+  slot->flags = 0;
+  table->free_head = index;
+  ++table->available_capacity;
+}
+
 IREE_API_EXPORT iree_status_t iree_net_rdma_work_request_table_initialize(
     uint32_t capacity, iree_allocator_t host_allocator,
     iree_net_rdma_work_request_table_t* out_table) {
@@ -117,6 +138,15 @@ IREE_API_EXPORT void iree_net_rdma_work_request_table_deinitialize(
     iree_net_rdma_work_request_table_t* table) {
   if (!table) return;
 
+  if (table->slots) {
+    for (uint32_t index = 0; index < table->capacity; ++index) {
+      iree_net_rdma_work_request_slot_t* slot = &table->slots[index];
+      if (iree_any_bit_set(slot->flags,
+                           IREE_NET_RDMA_WORK_REQUEST_SLOT_IN_USE)) {
+        iree_async_buffer_lease_release(&slot->retained_buffer_lease);
+      }
+    }
+  }
   iree_allocator_free(table->host_allocator, table->slots);
   memset(table, 0, sizeof(*table));
   table->free_head = IREE_NET_RDMA_WORK_REQUEST_TABLE_INVALID_INDEX;
@@ -205,20 +235,44 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_work_request_table_complete(
         "wr_id does not reference an in-flight work request");
   }
 
-  out_completion->operation = slot->operation;
-  out_completion->user_data = slot->user_data;
-  out_completion->byte_length = slot->byte_length;
-  out_completion->retained_buffer_lease = slot->retained_buffer_lease;
+  iree_net_rdma_work_request_table_release_slot(table, index, out_completion);
+  return iree_ok_status();
+}
 
-  memset(&slot->retained_buffer_lease, 0, sizeof(slot->retained_buffer_lease));
-  slot->user_data = 0;
-  slot->byte_length = 0;
-  slot->operation = IREE_NET_RDMA_WORK_REQUEST_OPERATION_NONE;
-  slot->generation =
-      iree_net_rdma_work_request_table_next_generation(slot->generation);
-  slot->next_free = table->free_head;
-  slot->flags = 0;
-  table->free_head = index;
-  ++table->available_capacity;
+IREE_API_EXPORT iree_status_t iree_net_rdma_work_request_table_drain_next(
+    iree_net_rdma_work_request_table_t* table, uint32_t* inout_cursor,
+    iree_net_rdma_work_request_completion_t* out_completion, bool* out_found) {
+  if (out_completion) memset(out_completion, 0, sizeof(*out_completion));
+  if (out_found) *out_found = false;
+  if (!table || !table->slots) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "table must be initialized");
+  }
+  if (!inout_cursor) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "inout_cursor must not be NULL");
+  }
+  if (!out_completion) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "out_completion must not be NULL");
+  }
+  if (!out_found) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "out_found must not be NULL");
+  }
+
+  for (uint32_t index = *inout_cursor; index < table->capacity; ++index) {
+    iree_net_rdma_work_request_slot_t* slot = &table->slots[index];
+    if (!iree_any_bit_set(slot->flags,
+                          IREE_NET_RDMA_WORK_REQUEST_SLOT_IN_USE)) {
+      continue;
+    }
+    iree_net_rdma_work_request_table_release_slot(table, index, out_completion);
+    *inout_cursor = index + 1;
+    *out_found = true;
+    return iree_ok_status();
+  }
+
+  *inout_cursor = table->capacity;
   return iree_ok_status();
 }

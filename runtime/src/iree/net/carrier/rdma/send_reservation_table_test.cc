@@ -83,6 +83,36 @@ TEST_F(SendReservationTableTest, AbortReleasesLease) {
             iree_net_rdma_send_reservation_table_available_capacity(&table_));
 }
 
+TEST_F(SendReservationTableTest, AbortAllReleasesAllLeases) {
+  IREE_ASSERT_OK(Initialize(3));
+
+  uint32_t release_count = 0;
+  iree_async_buffer_lease_t first_lease = MakeLease(&release_count);
+  iree_net_carrier_send_handle_t first_handle = 0;
+  IREE_ASSERT_OK(iree_net_rdma_send_reservation_table_acquire(
+      &table_, &first_lease, /*byte_length=*/32, &first_handle));
+  iree_async_buffer_lease_t second_lease = MakeLease(&release_count);
+  iree_net_carrier_send_handle_t second_handle = 0;
+  IREE_ASSERT_OK(iree_net_rdma_send_reservation_table_acquire(
+      &table_, &second_lease, /*byte_length=*/48, &second_handle));
+
+  uint32_t aborted_count = 0;
+  IREE_ASSERT_OK(
+      iree_net_rdma_send_reservation_table_abort_all(&table_, &aborted_count));
+  EXPECT_EQ(2u, aborted_count);
+  EXPECT_EQ(2u, release_count);
+  EXPECT_EQ(3u,
+            iree_net_rdma_send_reservation_table_available_capacity(&table_));
+
+  iree_net_rdma_send_reservation_t reservation;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        iree_net_rdma_send_reservation_table_resolve(
+                            &table_, first_handle, &reservation));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        iree_net_rdma_send_reservation_table_resolve(
+                            &table_, second_handle, &reservation));
+}
+
 TEST_F(SendReservationTableTest, DeinitializeReleasesOutstandingLeases) {
   IREE_ASSERT_OK(Initialize(1));
 
@@ -178,6 +208,9 @@ TEST_F(SendReservationTableTest, RejectsInvalidArguments) {
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       iree_net_rdma_send_reservation_table_resolve(&table_, 0u, nullptr));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_net_rdma_send_reservation_table_abort_all(
+                            nullptr, /*out_aborted_count=*/nullptr));
   iree_async_buffer_lease_release(&lease);
 }
 

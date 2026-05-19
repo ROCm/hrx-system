@@ -89,6 +89,10 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_send_reservation_table_abort(
     iree_net_rdma_send_reservation_table_t* table,
     iree_net_carrier_send_handle_t handle);
 
+// Aborts every active reservation and releases all retained buffer leases.
+IREE_API_EXPORT iree_status_t iree_net_rdma_send_reservation_table_abort_all(
+    iree_net_rdma_send_reservation_table_t* table, uint32_t* out_aborted_count);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

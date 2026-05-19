@@ -29,6 +29,7 @@ enum iree_net_rdma_carrier_flag_bits_e {
   IREE_NET_RDMA_CARRIER_FLAG_REMOTE_CONNECTION_DATA_APPLIED = 1u << 1,
   IREE_NET_RDMA_CARRIER_FLAG_QUEUE_PAIR_ERROR_REQUESTED = 1u << 2,
   IREE_NET_RDMA_CARRIER_FLAG_CREDIT_GRANT_IN_FLIGHT = 1u << 3,
+  IREE_NET_RDMA_CARRIER_FLAG_TERMINAL_FAILURE_HANDLED = 1u << 4,
 };
 
 struct iree_net_rdma_carrier_t {
@@ -288,6 +289,20 @@ static void iree_net_rdma_carrier_invoke_deactivate_callback(
   if (callback) callback(user_data);
 }
 
+static void iree_net_rdma_carrier_capture_deactivate_callback(
+    iree_net_carrier_deactivate_callback_fn_t new_callback, void* new_user_data,
+    iree_net_carrier_deactivate_callback_fn_t* inout_callback,
+    void** inout_user_data) {
+  if (!new_callback) return;
+  if (*inout_callback) {
+    iree_status_abort(iree_make_status(
+        IREE_STATUS_INTERNAL,
+        "RDMA carrier observed multiple deactivate callbacks"));
+  }
+  *inout_callback = new_callback;
+  *inout_user_data = new_user_data;
+}
+
 static iree_status_t iree_net_rdma_carrier_status_from_work_completion(
     const struct ibv_wc* completion, const char* queue_name) {
   if (completion->status == IBV_WC_SUCCESS) return iree_ok_status();
@@ -337,12 +352,151 @@ static iree_status_t iree_net_rdma_carrier_completion_kind_from_operation(
   }
 }
 
+static bool iree_net_rdma_carrier_terminal_failure_handled_locked(
+    iree_net_rdma_carrier_t* carrier) {
+  return iree_any_bit_set(carrier->flags,
+                          IREE_NET_RDMA_CARRIER_FLAG_TERMINAL_FAILURE_HANDLED);
+}
+
+static bool iree_net_rdma_carrier_operation_has_user_completion(
+    iree_net_rdma_work_request_operation_t operation) {
+  switch (operation) {
+    case IREE_NET_RDMA_WORK_REQUEST_OPERATION_SEND:
+    case IREE_NET_RDMA_WORK_REQUEST_OPERATION_DIRECT_WRITE:
+    case IREE_NET_RDMA_WORK_REQUEST_OPERATION_DIRECT_READ:
+      return true;
+    default:
+      return false;
+  }
+}
+
+static void iree_net_rdma_carrier_notify_work_request_failure(
+    iree_net_rdma_carrier_t* carrier,
+    iree_net_rdma_work_request_completion_t* completion,
+    iree_status_t failure_status) {
+  iree_async_buffer_lease_release(&completion->retained_buffer_lease);
+  if (!iree_net_rdma_carrier_operation_has_user_completion(
+          completion->operation)) {
+    return;
+  }
+
+  iree_net_carrier_completion_kind_t kind = IREE_NET_CARRIER_COMPLETION_NONE;
+  iree_status_t kind_status =
+      iree_net_rdma_carrier_completion_kind_from_operation(
+          completion->operation, &kind);
+  if (!iree_status_is_ok(kind_status)) {
+    iree_status_abort(kind_status);
+  }
+
+  carrier->base.callback.fn(carrier->base.callback.user_data, kind,
+                            completion->user_data,
+                            iree_status_clone(failure_status),
+                            /*bytes_transferred=*/0,
+                            /*recv_lease=*/NULL);
+}
+
+static void iree_net_rdma_carrier_fail_all(iree_net_rdma_carrier_t* carrier,
+                                           iree_status_t failure_status) {
+  bool should_retire_local_state = false;
+  iree_slim_mutex_lock(&carrier->queue_mutex);
+  if (!iree_net_rdma_carrier_terminal_failure_handled_locked(carrier)) {
+    carrier->flags |= IREE_NET_RDMA_CARRIER_FLAG_TERMINAL_FAILURE_HANDLED;
+    carrier->flags &= ~IREE_NET_RDMA_CARRIER_FLAG_CREDIT_GRANT_IN_FLIGHT;
+    iree_net_carrier_state_t state = iree_net_carrier_state(&carrier->base);
+    if (state == IREE_NET_CARRIER_STATE_ACTIVE ||
+        state == IREE_NET_CARRIER_STATE_CREATED) {
+      iree_net_carrier_set_state(&carrier->base,
+                                 IREE_NET_CARRIER_STATE_DRAINING);
+    }
+    should_retire_local_state = true;
+  }
+  iree_slim_mutex_unlock(&carrier->queue_mutex);
+
+  if (!should_retire_local_state) {
+    // A sibling CQ may report the same terminal condition after local state has
+    // already been retired. Surface it as a carrier error without touching the
+    // already-failed work tables.
+    iree_net_rdma_carrier_notify_error(carrier, failure_status);
+    return;
+  }
+
+  iree_net_carrier_deactivate_callback_fn_t deactivate_callback = NULL;
+  void* deactivate_user_data = NULL;
+  uint32_t drain_cursor = 0;
+  while (true) {
+    iree_net_rdma_work_request_completion_t completion;
+    memset(&completion, 0, sizeof(completion));
+    iree_async_buffer_lease_t receive_lease;
+    memset(&receive_lease, 0, sizeof(receive_lease));
+    bool found_completion = false;
+
+    iree_slim_mutex_lock(&carrier->queue_mutex);
+    iree_status_t drain_status = iree_net_rdma_work_request_table_drain_next(
+        &carrier->work_request_table, &drain_cursor, &completion,
+        &found_completion);
+    if (iree_status_is_ok(drain_status) && found_completion &&
+        completion.operation == IREE_NET_RDMA_WORK_REQUEST_OPERATION_RECV) {
+      drain_status = iree_net_rdma_receive_queue_complete(
+          &carrier->receive_queue, completion, /*byte_length=*/0,
+          &receive_lease);
+    }
+    iree_net_carrier_deactivate_callback_fn_t drop_callback = NULL;
+    void* drop_user_data = NULL;
+    if (iree_status_is_ok(drain_status) && found_completion) {
+      iree_net_rdma_carrier_drop_pending_operations_locked(
+          carrier, 1, &drop_callback, &drop_user_data);
+    }
+    iree_slim_mutex_unlock(&carrier->queue_mutex);
+    iree_net_rdma_carrier_capture_deactivate_callback(
+        drop_callback, drop_user_data, &deactivate_callback,
+        &deactivate_user_data);
+
+    if (!iree_status_is_ok(drain_status)) {
+      iree_async_buffer_lease_release(&receive_lease);
+      iree_async_buffer_lease_release(&completion.retained_buffer_lease);
+      iree_status_abort(drain_status);
+    }
+    if (!found_completion) break;
+
+    iree_async_buffer_lease_release(&receive_lease);
+    iree_net_rdma_carrier_notify_work_request_failure(carrier, &completion,
+                                                      failure_status);
+  }
+
+  uint32_t aborted_reservation_count = 0;
+  iree_slim_mutex_lock(&carrier->queue_mutex);
+  iree_status_t abort_status = iree_net_rdma_send_reservation_table_abort_all(
+      &carrier->send_reservation_table, &aborted_reservation_count);
+  if (iree_status_is_ok(abort_status)) {
+    iree_net_carrier_deactivate_callback_fn_t drop_callback = NULL;
+    void* drop_user_data = NULL;
+    if (aborted_reservation_count > 0) {
+      iree_net_rdma_carrier_drop_pending_operations_locked(
+          carrier, aborted_reservation_count, &drop_callback, &drop_user_data);
+    } else {
+      iree_net_rdma_carrier_maybe_complete_deactivation_locked(
+          carrier, &drop_callback, &drop_user_data);
+    }
+    iree_net_rdma_carrier_capture_deactivate_callback(
+        drop_callback, drop_user_data, &deactivate_callback,
+        &deactivate_user_data);
+  }
+  iree_slim_mutex_unlock(&carrier->queue_mutex);
+  if (!iree_status_is_ok(abort_status)) {
+    iree_status_abort(abort_status);
+  }
+
+  iree_net_rdma_carrier_notify_error(carrier, failure_status);
+  iree_net_rdma_carrier_invoke_deactivate_callback(deactivate_callback,
+                                                   deactivate_user_data);
+}
+
 static void iree_net_rdma_carrier_on_send_completions(
     void* user_data, iree_status_t status, const struct ibv_wc* completions,
     iree_host_size_t completion_count) {
   iree_net_rdma_carrier_t* carrier = (iree_net_rdma_carrier_t*)user_data;
   if (!iree_status_is_ok(status)) {
-    iree_net_rdma_carrier_notify_error(carrier, status);
+    iree_net_rdma_carrier_fail_all(carrier, status);
     return;
   }
 
@@ -353,49 +507,61 @@ static void iree_net_rdma_carrier_on_send_completions(
     bool draining_flush =
         iree_net_rdma_carrier_work_completion_is_draining_flush(carrier,
                                                                 completion);
-    iree_status_t work_status =
-        draining_flush ? iree_ok_status()
-                       : iree_net_rdma_carrier_status_from_work_completion(
-                             completion, "send");
+    iree_status_t work_status = iree_ok_status();
     iree_net_carrier_deactivate_callback_fn_t deactivate_callback = NULL;
     void* deactivate_user_data = NULL;
     bool send_queue_completed = false;
+    bool terminal_failure_handled = false;
 
     iree_slim_mutex_lock(&carrier->queue_mutex);
-    iree_status_t cleanup_status = iree_net_rdma_work_request_table_complete(
-        &carrier->work_request_table, completion->wr_id,
-        &work_request_completion);
-    if (iree_status_is_ok(cleanup_status) &&
-        work_request_completion.operation ==
-            IREE_NET_RDMA_WORK_REQUEST_OPERATION_RECV) {
-      cleanup_status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                                        "RDMA send CQ returned operation %u",
-                                        work_request_completion.operation);
-    }
-    if (iree_status_is_ok(cleanup_status)) {
-      cleanup_status =
-          iree_net_rdma_send_window_complete(&carrier->send_window);
-      send_queue_completed = iree_status_is_ok(cleanup_status);
-    }
-    if (iree_status_is_ok(cleanup_status) &&
-        work_request_completion.operation ==
-            IREE_NET_RDMA_WORK_REQUEST_OPERATION_CREDIT_GRANT) {
-      carrier->flags &= ~IREE_NET_RDMA_CARRIER_FLAG_CREDIT_GRANT_IN_FLIGHT;
-      if (!draining_flush && iree_status_is_ok(work_status)) {
-        carrier->local_recv_credit_published =
-            carrier->local_recv_credit_submitted;
+    terminal_failure_handled =
+        iree_net_rdma_carrier_terminal_failure_handled_locked(carrier);
+    iree_status_t cleanup_status = iree_ok_status();
+    if (!terminal_failure_handled) {
+      work_status = draining_flush
+                        ? iree_ok_status()
+                        : iree_net_rdma_carrier_status_from_work_completion(
+                              completion, "send");
+      cleanup_status = iree_net_rdma_work_request_table_complete(
+          &carrier->work_request_table, completion->wr_id,
+          &work_request_completion);
+      if (iree_status_is_ok(cleanup_status) &&
+          work_request_completion.operation ==
+              IREE_NET_RDMA_WORK_REQUEST_OPERATION_RECV) {
+        cleanup_status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                          "RDMA send CQ returned operation %u",
+                                          work_request_completion.operation);
+      }
+      if (iree_status_is_ok(cleanup_status)) {
+        cleanup_status =
+            iree_net_rdma_send_window_complete(&carrier->send_window);
+        send_queue_completed = iree_status_is_ok(cleanup_status);
+      }
+      if (iree_status_is_ok(cleanup_status) &&
+          work_request_completion.operation ==
+              IREE_NET_RDMA_WORK_REQUEST_OPERATION_CREDIT_GRANT) {
+        carrier->flags &= ~IREE_NET_RDMA_CARRIER_FLAG_CREDIT_GRANT_IN_FLIGHT;
+        if (!draining_flush && iree_status_is_ok(work_status)) {
+          carrier->local_recv_credit_published =
+              carrier->local_recv_credit_submitted;
+        }
+      }
+      if (!draining_flush && iree_status_is_ok(work_status) &&
+          iree_status_is_ok(cleanup_status)) {
+        cleanup_status =
+            iree_net_rdma_carrier_try_post_credit_grant_locked(carrier);
+      }
+      if (send_queue_completed) {
+        iree_net_rdma_carrier_drop_pending_operations_locked(
+            carrier, 1, &deactivate_callback, &deactivate_user_data);
       }
     }
-    if (!draining_flush && iree_status_is_ok(work_status) &&
-        iree_status_is_ok(cleanup_status)) {
-      cleanup_status =
-          iree_net_rdma_carrier_try_post_credit_grant_locked(carrier);
-    }
-    if (send_queue_completed) {
-      iree_net_rdma_carrier_drop_pending_operations_locked(
-          carrier, 1, &deactivate_callback, &deactivate_user_data);
-    }
     iree_slim_mutex_unlock(&carrier->queue_mutex);
+
+    // The terminal failure path already failed and released every local WR
+    // table entry. Any later CQE is stale and must not complete an operation a
+    // second time.
+    if (terminal_failure_handled) continue;
 
     iree_async_buffer_lease_release(
         &work_request_completion.retained_buffer_lease);
@@ -483,7 +649,7 @@ static void iree_net_rdma_carrier_on_recv_completions(
     iree_host_size_t completion_count) {
   iree_net_rdma_carrier_t* carrier = (iree_net_rdma_carrier_t*)user_data;
   if (!iree_status_is_ok(status)) {
-    iree_net_rdma_carrier_notify_error(carrier, status);
+    iree_net_rdma_carrier_fail_all(carrier, status);
     return;
   }
 
@@ -494,39 +660,52 @@ static void iree_net_rdma_carrier_on_recv_completions(
     bool draining_flush =
         iree_net_rdma_carrier_work_completion_is_draining_flush(carrier,
                                                                 completion);
-    iree_status_t work_status =
-        draining_flush ? iree_ok_status()
-                       : iree_net_rdma_carrier_status_from_work_completion(
-                             completion, "recv");
+    iree_status_t work_status = iree_ok_status();
     iree_net_carrier_deactivate_callback_fn_t deactivate_callback = NULL;
     void* deactivate_user_data = NULL;
     bool receive_queue_completed = false;
+    bool terminal_failure_handled = false;
 
     iree_slim_mutex_lock(&carrier->queue_mutex);
-    iree_status_t cleanup_status = iree_net_rdma_work_request_table_complete(
-        &carrier->work_request_table, completion->wr_id,
-        &work_request_completion);
-    if (iree_status_is_ok(cleanup_status) &&
-        work_request_completion.operation !=
-            IREE_NET_RDMA_WORK_REQUEST_OPERATION_RECV) {
-      cleanup_status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                                        "RDMA receive CQ returned operation %u",
-                                        work_request_completion.operation);
-    }
-
     iree_async_buffer_lease_t lease;
     memset(&lease, 0, sizeof(lease));
-    if (iree_status_is_ok(cleanup_status)) {
-      iree_host_size_t byte_length =
-          iree_status_is_ok(work_status)
-              ? (iree_host_size_t)completion->byte_len
-              : 0;
-      cleanup_status = iree_net_rdma_receive_queue_complete(
-          &carrier->receive_queue, work_request_completion, byte_length,
-          &lease);
-      receive_queue_completed = iree_status_is_ok(cleanup_status);
+    terminal_failure_handled =
+        iree_net_rdma_carrier_terminal_failure_handled_locked(carrier);
+    iree_status_t cleanup_status = iree_ok_status();
+    if (!terminal_failure_handled) {
+      work_status = draining_flush
+                        ? iree_ok_status()
+                        : iree_net_rdma_carrier_status_from_work_completion(
+                              completion, "recv");
+      cleanup_status = iree_net_rdma_work_request_table_complete(
+          &carrier->work_request_table, completion->wr_id,
+          &work_request_completion);
+      if (iree_status_is_ok(cleanup_status) &&
+          work_request_completion.operation !=
+              IREE_NET_RDMA_WORK_REQUEST_OPERATION_RECV) {
+        cleanup_status =
+            iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                             "RDMA receive CQ returned operation %u",
+                             work_request_completion.operation);
+      }
+
+      if (iree_status_is_ok(cleanup_status)) {
+        iree_host_size_t byte_length =
+            iree_status_is_ok(work_status)
+                ? (iree_host_size_t)completion->byte_len
+                : 0;
+        cleanup_status = iree_net_rdma_receive_queue_complete(
+            &carrier->receive_queue, work_request_completion, byte_length,
+            &lease);
+        receive_queue_completed = iree_status_is_ok(cleanup_status);
+      }
     }
     iree_slim_mutex_unlock(&carrier->queue_mutex);
+
+    // The terminal failure path already failed and released every local WR
+    // table entry. Any later CQE is stale and must not complete an operation a
+    // second time.
+    if (terminal_failure_handled) continue;
 
     if (!draining_flush && iree_status_is_ok(work_status) &&
         iree_status_is_ok(cleanup_status)) {
