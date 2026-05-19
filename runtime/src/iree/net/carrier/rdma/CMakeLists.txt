@@ -235,6 +235,36 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_library(
   NAME
+    endpoint_data
+  HDRS
+    "endpoint_data.h"
+  SRCS
+    "endpoint_data.c"
+  DEPS
+    ::connection_data
+    iree::base
+    iree::base::core_headers
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    endpoint_data_test
+  SRCS
+    "endpoint_data_test.cc"
+  DEPS
+    ::endpoint_data
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_library(
+  NAME
     pollable_fd
   HDRS
     "pollable_fd.h"

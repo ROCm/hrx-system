@@ -252,6 +252,36 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_library(
+    name = "endpoint_data",
+    srcs = ["endpoint_data.c"],
+    hdrs = ["endpoint_data.h"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":connection_data",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "endpoint_data_test",
+    srcs = ["endpoint_data_test.cc"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":endpoint_data",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "pollable_fd",
     srcs = ["pollable_fd.c"],
     hdrs = ["pollable_fd.h"],
