@@ -121,6 +121,44 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_library(
+    name = "completion_queue",
+    srcs = ["completion_queue.c"],
+    hdrs = ["completion_queue.h"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":context",
+        ":pollable_fd",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "@rdma_core_headers",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "completion_queue_test",
+    srcs = ["completion_queue_test.cc"],
+    tags = [
+        "nodocker",
+    ],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":completion_queue",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async:platform",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "@rdma_core_headers",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "connection_data",
     srcs = ["connection_data.c"],
     hdrs = ["connection_data.h"],

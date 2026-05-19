@@ -106,6 +106,43 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_library(
   NAME
+    completion_queue
+  HDRS
+    "completion_queue.h"
+  SRCS
+    "completion_queue.c"
+  DEPS
+    ::context
+    ::pollable_fd
+    iree::async
+    iree::base
+    rdma_core::headers
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    completion_queue_test
+  SRCS
+    "completion_queue_test.cc"
+  DEPS
+    ::completion_queue
+    iree::async
+    iree::async::platform
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    rdma_core::headers
+  LABELS
+    "nodocker"
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_library(
+  NAME
     connection_data
   HDRS
     "connection_data.h"
