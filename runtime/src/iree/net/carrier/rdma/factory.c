@@ -811,16 +811,42 @@ static iree_status_t iree_net_rdma_connect_state_apply_remote_data(
   return status;
 }
 
+static iree_status_t iree_net_rdma_connect_state_lookup_endpoint(
+    iree_net_rdma_connect_state_t* state, const iree_net_rdma_cm_event_t* event,
+    iree_net_rdma_connect_endpoint_t** out_endpoint) {
+  *out_endpoint = NULL;
+  if (!event || !event->id) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "RDMA CM event must have a connection ID");
+  }
+  void* id_context = event->id->context;
+  for (uint16_t i = 0; i < state->endpoint_count; ++i) {
+    iree_net_rdma_connect_endpoint_t* endpoint = &state->endpoints[i];
+    if (id_context == endpoint) {
+      *out_endpoint = endpoint;
+      return iree_ok_status();
+    }
+  }
+  return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                          "RDMA CM event does not match a connect endpoint");
+}
+
 static void iree_net_rdma_connect_state_on_cm_event(
     void* user_data, iree_status_t status,
     const iree_net_rdma_cm_event_t* event) {
-  iree_net_rdma_connect_endpoint_t* endpoint =
-      (iree_net_rdma_connect_endpoint_t*)user_data;
-  iree_net_rdma_connect_state_t* state = endpoint->state;
+  iree_net_rdma_connect_state_t* state =
+      (iree_net_rdma_connect_state_t*)user_data;
   if (state->callback_issued) {
     if (!iree_status_is_ok(status)) iree_status_abort(status);
     return;
   }
+  if (!iree_status_is_ok(status)) {
+    iree_net_rdma_connect_state_fail(state, status);
+    return;
+  }
+
+  iree_net_rdma_connect_endpoint_t* endpoint = NULL;
+  status = iree_net_rdma_connect_state_lookup_endpoint(state, event, &endpoint);
   if (!iree_status_is_ok(status)) {
     iree_net_rdma_connect_state_fail(state, status);
     return;
@@ -880,8 +906,14 @@ static void iree_net_rdma_connect_state_on_cm_event(
       }
       break;
     case RDMA_CM_EVENT_ESTABLISHED:
-      status =
-          iree_net_rdma_factory_status_from_cm_event(event, "rdma_connect");
+      if (endpoint->phase == IREE_NET_RDMA_CONNECT_PHASE_COMPLETE) {
+        status = iree_make_status(
+            IREE_STATUS_ALREADY_EXISTS,
+            "duplicate RDMA ESTABLISHED event for connect endpoint");
+      } else {
+        status =
+            iree_net_rdma_factory_status_from_cm_event(event, "rdma_connect");
+      }
       if (iree_status_is_ok(status)) {
         status = iree_net_rdma_connect_state_apply_remote_data(endpoint, event);
       }
@@ -995,24 +1027,24 @@ typedef struct iree_net_rdma_listener_t {
   iree_allocator_t host_allocator;
 } iree_net_rdma_listener_t;
 
-struct iree_net_rdma_accept_state_t {
-  // Next pending accepted connection in listener list.
-  iree_net_rdma_accept_state_t* next;
+typedef uint8_t iree_net_rdma_accept_endpoint_flags_t;
+enum iree_net_rdma_accept_endpoint_flag_bits_e {
+  IREE_NET_RDMA_ACCEPT_ENDPOINT_FLAG_REQUESTED = 1u << 0,
+  IREE_NET_RDMA_ACCEPT_ENDPOINT_FLAG_ESTABLISHED = 1u << 1,
+};
 
-  // Listener owning this accept state.
-  iree_net_rdma_listener_t* listener;
+typedef struct iree_net_rdma_accept_endpoint_t {
+  // Remote endpoint private data received in CONNECT_REQUEST.
+  iree_net_rdma_endpoint_data_t remote_endpoint_data;
 
   // Raw connection ID before carrier creation transfers ownership.
   struct rdma_cm_id* connection_id;
 
-  // Carrier created for the accepted connection.
+  // Carrier created for the accepted endpoint.
   iree_net_carrier_t* carrier;
 
   // Child context matching connection_id->verbs.
   iree_net_rdma_context_t* connection_context;
-
-  // Remote endpoint private data received in CONNECT_REQUEST.
-  iree_net_rdma_endpoint_data_t remote_endpoint_data;
 
   // Serialized local endpoint private data sent by rdma_accept.
   uint8_t private_data[IREE_NET_RDMA_ENDPOINT_DATA_LENGTH];
@@ -1020,11 +1052,34 @@ struct iree_net_rdma_accept_state_t {
   // Number of bytes valid in private_data.
   iree_host_size_t private_data_length;
 
+  // Bitfield of iree_net_rdma_accept_endpoint_flag_bits_e values.
+  iree_net_rdma_accept_endpoint_flags_t flags;
+} iree_net_rdma_accept_endpoint_t;
+
+struct iree_net_rdma_accept_state_t {
+  // Next pending accepted connection group in listener list.
+  iree_net_rdma_accept_state_t* next;
+
+  // Listener owning this accept state.
+  iree_net_rdma_listener_t* listener;
+
+  // Logical connection group identifier shared by endpoint QPs.
+  uint64_t group_id;
+
+  // Total endpoint slots expected in this logical connection.
+  uint16_t endpoint_count;
+
+  // Number of endpoint slots that have reached ESTABLISHED.
+  uint16_t established_endpoint_count;
+
   // Cleanup operation submitted after the CM event callback returns.
   iree_async_nop_operation_t cleanup_operation;
 
   // Host allocator used for this state allocation.
   iree_allocator_t host_allocator;
+
+  // Flexible array of accepted endpoint substates.
+  iree_net_rdma_accept_endpoint_t endpoints[];
 };
 
 static const iree_net_listener_vtable_t iree_net_rdma_listener_vtable;
@@ -1071,15 +1126,18 @@ static void iree_net_rdma_accept_state_cleanup(
   if (!iree_status_is_ok(status)) iree_status_abort(status);
 
   iree_net_rdma_listener_t* listener = accept_state->listener;
-  iree_net_carrier_release(accept_state->carrier);
-  iree_net_rdma_context_release(accept_state->connection_context);
-  if (accept_state->connection_id) {
-    const iree_net_librdmacm_t* librdmacm =
-        iree_net_rdma_context_librdmacm(listener->factory->context);
-    int result = librdmacm->rdma_destroy_id(accept_state->connection_id);
-    iree_status_t destroy_status = iree_net_rdma_factory_status_from_result(
-        __FILE__, __LINE__, result, "rdma_destroy_id");
-    if (!iree_status_is_ok(destroy_status)) iree_status_abort(destroy_status);
+  const iree_net_librdmacm_t* librdmacm =
+      iree_net_rdma_context_librdmacm(listener->factory->context);
+  for (uint16_t i = 0; i < accept_state->endpoint_count; ++i) {
+    iree_net_rdma_accept_endpoint_t* endpoint = &accept_state->endpoints[i];
+    iree_net_carrier_release(endpoint->carrier);
+    iree_net_rdma_context_release(endpoint->connection_context);
+    if (endpoint->connection_id) {
+      int result = librdmacm->rdma_destroy_id(endpoint->connection_id);
+      iree_status_t destroy_status = iree_net_rdma_factory_status_from_result(
+          __FILE__, __LINE__, result, "rdma_destroy_id");
+      if (!iree_status_is_ok(destroy_status)) iree_status_abort(destroy_status);
+    }
   }
   iree_allocator_t host_allocator = accept_state->host_allocator;
   iree_allocator_free(host_allocator, accept_state);
@@ -1115,16 +1173,76 @@ static void iree_net_rdma_listener_push_accept(
   listener->pending_accepts = accept_state;
 }
 
-static iree_net_rdma_accept_state_t* iree_net_rdma_listener_pop_accept(
-    iree_net_rdma_listener_t* listener, struct rdma_cm_id* id) {
+static iree_net_rdma_accept_state_t* iree_net_rdma_listener_find_accept(
+    iree_net_rdma_listener_t* listener, uint64_t group_id) {
+  iree_net_rdma_accept_state_t* accept_state = listener->pending_accepts;
+  while (accept_state) {
+    if (accept_state->group_id == group_id) return accept_state;
+    accept_state = accept_state->next;
+  }
+  return NULL;
+}
+
+static iree_net_rdma_accept_endpoint_t*
+iree_net_rdma_accept_state_find_endpoint_by_id(
+    iree_net_rdma_accept_state_t* accept_state, struct rdma_cm_id* id) {
+  for (uint16_t i = 0; i < accept_state->endpoint_count; ++i) {
+    iree_net_rdma_accept_endpoint_t* endpoint = &accept_state->endpoints[i];
+    iree_net_rdma_carrier_t* carrier =
+        iree_net_rdma_carrier_cast(endpoint->carrier);
+    if ((carrier && iree_net_rdma_carrier_connection_id(carrier) == id) ||
+        endpoint->connection_id == id) {
+      return endpoint;
+    }
+  }
+  return NULL;
+}
+
+static iree_net_rdma_accept_state_t* iree_net_rdma_listener_pop_accept_by_group(
+    iree_net_rdma_listener_t* listener, uint64_t group_id) {
   iree_net_rdma_accept_state_t** link = &listener->pending_accepts;
   while (*link) {
     iree_net_rdma_accept_state_t* accept_state = *link;
-    iree_net_rdma_carrier_t* carrier =
-        iree_net_rdma_carrier_cast(accept_state->carrier);
-    if (carrier && iree_net_rdma_carrier_connection_id(carrier) == id) {
+    if (accept_state->group_id == group_id) {
       *link = accept_state->next;
       accept_state->next = NULL;
+      return accept_state;
+    }
+    link = &accept_state->next;
+  }
+  return NULL;
+}
+
+static iree_net_rdma_accept_state_t* iree_net_rdma_listener_find_accept_by_id(
+    iree_net_rdma_listener_t* listener, struct rdma_cm_id* id,
+    iree_net_rdma_accept_endpoint_t** out_endpoint) {
+  if (out_endpoint) *out_endpoint = NULL;
+  iree_net_rdma_accept_state_t* accept_state = listener->pending_accepts;
+  while (accept_state) {
+    iree_net_rdma_accept_endpoint_t* endpoint =
+        iree_net_rdma_accept_state_find_endpoint_by_id(accept_state, id);
+    if (endpoint) {
+      if (out_endpoint) *out_endpoint = endpoint;
+      return accept_state;
+    }
+    accept_state = accept_state->next;
+  }
+  return NULL;
+}
+
+static iree_net_rdma_accept_state_t* iree_net_rdma_listener_pop_accept_by_id(
+    iree_net_rdma_listener_t* listener, struct rdma_cm_id* id,
+    iree_net_rdma_accept_endpoint_t** out_endpoint) {
+  if (out_endpoint) *out_endpoint = NULL;
+  iree_net_rdma_accept_state_t** link = &listener->pending_accepts;
+  while (*link) {
+    iree_net_rdma_accept_state_t* accept_state = *link;
+    iree_net_rdma_accept_endpoint_t* endpoint =
+        iree_net_rdma_accept_state_find_endpoint_by_id(accept_state, id);
+    if (endpoint) {
+      *link = accept_state->next;
+      accept_state->next = NULL;
+      if (out_endpoint) *out_endpoint = endpoint;
       return accept_state;
     }
     link = &accept_state->next;
@@ -1148,52 +1266,70 @@ static void iree_net_rdma_listener_deliver_accept(
     iree_net_rdma_listener_t* listener,
     iree_net_rdma_accept_state_t* accept_state) {
   iree_net_connection_t* connection = NULL;
-  iree_net_carrier_t* carriers[1] = {accept_state->carrier};
-  iree_status_t status = iree_net_rdma_connection_create(
-      listener->proactor, listener->recv_pool, IREE_ARRAYSIZE(carriers),
-      carriers, accept_state->host_allocator, &connection);
+  iree_net_carrier_t** carriers = NULL;
+  iree_status_t status = iree_allocator_malloc_array(
+      accept_state->host_allocator, accept_state->endpoint_count,
+      sizeof(*carriers), (void**)&carriers);
   if (iree_status_is_ok(status)) {
-    accept_state->carrier = carriers[0];
+    for (uint16_t i = 0; i < accept_state->endpoint_count; ++i) {
+      carriers[i] = accept_state->endpoints[i].carrier;
+    }
+    status = iree_net_rdma_connection_create(
+        listener->proactor, listener->recv_pool, accept_state->endpoint_count,
+        carriers, accept_state->host_allocator, &connection);
+  }
+  if (iree_status_is_ok(status)) {
+    for (uint16_t i = 0; i < accept_state->endpoint_count; ++i) {
+      accept_state->endpoints[i].carrier = carriers[i];
+    }
     listener->accept_callback(listener->accept_user_data, iree_ok_status(),
                               connection);
   } else {
     listener->accept_callback(listener->accept_user_data, status, NULL);
   }
+  iree_allocator_free(accept_state->host_allocator, carriers);
   iree_net_rdma_accept_state_submit_cleanup(accept_state);
 }
 
 static iree_status_t iree_net_rdma_accept_state_create(
-    iree_net_rdma_listener_t* listener, const iree_net_rdma_cm_event_t* event,
-    iree_net_rdma_accept_state_t** out_accept_state) {
+    iree_net_rdma_listener_t* listener, uint64_t group_id,
+    uint16_t endpoint_count, iree_net_rdma_accept_state_t** out_accept_state) {
   *out_accept_state = NULL;
 
+  iree_host_size_t total_size = 0;
+  iree_status_t status = IREE_STRUCT_LAYOUT(
+      sizeof(iree_net_rdma_accept_state_t), &total_size,
+      IREE_STRUCT_FIELD_FAM(endpoint_count, iree_net_rdma_accept_endpoint_t));
+
   iree_net_rdma_accept_state_t* accept_state = NULL;
-  iree_status_t status = iree_allocator_malloc(
-      listener->host_allocator, sizeof(*accept_state), (void**)&accept_state);
   if (iree_status_is_ok(status)) {
-    memset(accept_state, 0, sizeof(*accept_state));
+    status = iree_allocator_malloc(listener->host_allocator, total_size,
+                                   (void**)&accept_state);
+  }
+  if (iree_status_is_ok(status)) {
+    memset(accept_state, 0, total_size);
     accept_state->listener = listener;
-    accept_state->connection_id = event->id;
+    accept_state->group_id = group_id;
+    accept_state->endpoint_count = endpoint_count;
     accept_state->host_allocator = listener->host_allocator;
     *out_accept_state = accept_state;
   }
+  return status;
+}
 
-  if (iree_status_is_ok(status)) {
-    status = iree_net_rdma_endpoint_data_deserialize(
-        event->private_data, &accept_state->remote_endpoint_data);
-  }
+static iree_status_t iree_net_rdma_accept_state_prepare_endpoint(
+    iree_net_rdma_accept_state_t* accept_state,
+    const iree_net_rdma_cm_event_t* event,
+    const iree_net_rdma_endpoint_data_t* remote_endpoint_data) {
+  iree_net_rdma_listener_t* listener = accept_state->listener;
+  iree_net_rdma_accept_endpoint_t* endpoint =
+      &accept_state->endpoints[remote_endpoint_data->endpoint_index];
+  endpoint->remote_endpoint_data = *remote_endpoint_data;
+  endpoint->connection_id = event->id;
 
-  if (iree_status_is_ok(status)) {
-    status = iree_net_rdma_factory_validate_endpoint_slot(
-        &accept_state->remote_endpoint_data, /*endpoint_index=*/0,
-        /*endpoint_count=*/1);
-  }
-
-  if (iree_status_is_ok(status)) {
-    status = iree_net_rdma_context_create_for_cm_id(
-        listener->factory->context, accept_state->connection_id,
-        listener->host_allocator, &accept_state->connection_context);
-  }
+  iree_status_t status = iree_net_rdma_context_create_for_cm_id(
+      listener->factory->context, endpoint->connection_id,
+      listener->host_allocator, &endpoint->connection_context);
 
   if (iree_status_is_ok(status)) {
     iree_net_carrier_callback_t callback = {
@@ -1201,34 +1337,34 @@ static iree_status_t iree_net_rdma_accept_state_create(
         .user_data = NULL,
     };
     iree_net_rdma_carrier_create_params_t params = {
-        .context = accept_state->connection_context,
+        .context = endpoint->connection_context,
         .proactor = listener->proactor,
         .recv_pool = listener->recv_pool,
-        .connection_id = accept_state->connection_id,
+        .connection_id = endpoint->connection_id,
         .callback = callback,
         .options = listener->factory->carrier_options,
     };
     status = iree_net_rdma_carrier_create(params, listener->host_allocator,
-                                          &accept_state->carrier);
+                                          &endpoint->carrier);
   }
 
   if (iree_status_is_ok(status)) {
-    accept_state->connection_id = NULL;
+    endpoint->connection_id = NULL;
     iree_net_rdma_carrier_t* carrier =
-        iree_net_rdma_carrier_cast(accept_state->carrier);
+        iree_net_rdma_carrier_cast(endpoint->carrier);
     status = iree_net_rdma_carrier_import_connection_data(
-        carrier, &accept_state->remote_endpoint_data.connection_data);
+        carrier, &endpoint->remote_endpoint_data.connection_data);
   }
 
   if (iree_status_is_ok(status)) {
     iree_net_rdma_carrier_t* carrier =
-        iree_net_rdma_carrier_cast(accept_state->carrier);
+        iree_net_rdma_carrier_cast(endpoint->carrier);
     status = iree_net_rdma_factory_serialize_endpoint_data(
-        carrier, accept_state->remote_endpoint_data.group_id,
-        /*endpoint_index=*/0, /*endpoint_count=*/1,
-        iree_make_byte_span(accept_state->private_data,
-                            sizeof(accept_state->private_data)),
-        &accept_state->private_data_length);
+        carrier, accept_state->group_id, remote_endpoint_data->endpoint_index,
+        accept_state->endpoint_count,
+        iree_make_byte_span(endpoint->private_data,
+                            sizeof(endpoint->private_data)),
+        &endpoint->private_data_length);
   }
 
   return status;
@@ -1236,20 +1372,71 @@ static iree_status_t iree_net_rdma_accept_state_create(
 
 static iree_status_t iree_net_rdma_listener_accept_request(
     iree_net_rdma_listener_t* listener, const iree_net_rdma_cm_event_t* event) {
+  iree_status_t status = iree_ok_status();
   if (event->private_data.data_length == 0) {
-    return iree_make_status(IREE_STATUS_DATA_LOSS,
-                            "RDMA peer did not provide private data");
+    status = iree_make_status(IREE_STATUS_DATA_LOSS,
+                              "RDMA peer did not provide private data");
+  }
+
+  iree_net_rdma_endpoint_data_t remote_endpoint_data;
+  if (iree_status_is_ok(status)) {
+    status = iree_net_rdma_endpoint_data_deserialize(event->private_data,
+                                                     &remote_endpoint_data);
+  }
+  if (iree_status_is_ok(status) && remote_endpoint_data.endpoint_count >
+                                       listener->factory->max_endpoint_count) {
+    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "RDMA endpoint_count %" PRIu16
+                              " exceeds listener capacity %" PRIu32,
+                              remote_endpoint_data.endpoint_count,
+                              listener->factory->max_endpoint_count);
   }
 
   iree_net_rdma_accept_state_t* accept_state = NULL;
-  iree_status_t status =
-      iree_net_rdma_accept_state_create(listener, event, &accept_state);
+  if (iree_status_is_ok(status)) {
+    accept_state = iree_net_rdma_listener_find_accept(
+        listener, remote_endpoint_data.group_id);
+    if (accept_state &&
+        accept_state->endpoint_count != remote_endpoint_data.endpoint_count) {
+      status = iree_make_status(
+          IREE_STATUS_DATA_LOSS,
+          "RDMA endpoint_count changed within connection group");
+    }
+  }
+
+  if (iree_status_is_ok(status) && !accept_state) {
+    status = iree_net_rdma_accept_state_create(
+        listener, remote_endpoint_data.group_id,
+        remote_endpoint_data.endpoint_count, &accept_state);
+    if (iree_status_is_ok(status)) {
+      iree_net_rdma_listener_push_accept(listener, accept_state);
+    }
+  }
+
+  iree_net_rdma_accept_endpoint_t* endpoint = NULL;
+  bool event_id_adopted = false;
+  if (iree_status_is_ok(status)) {
+    endpoint = &accept_state->endpoints[remote_endpoint_data.endpoint_index];
+    if (iree_any_bit_set(endpoint->flags,
+                         IREE_NET_RDMA_ACCEPT_ENDPOINT_FLAG_REQUESTED)) {
+      status = iree_make_status(
+          IREE_STATUS_ALREADY_EXISTS,
+          "duplicate RDMA CONNECT_REQUEST for endpoint_index %" PRIu16,
+          remote_endpoint_data.endpoint_index);
+    }
+  }
+
+  if (iree_status_is_ok(status)) {
+    event_id_adopted = true;
+    status = iree_net_rdma_accept_state_prepare_endpoint(accept_state, event,
+                                                         &remote_endpoint_data);
+  }
 
   struct rdma_conn_param conn_param;
   if (iree_status_is_ok(status)) {
     status = iree_net_rdma_factory_initialize_conn_param(
-        iree_make_const_byte_span(accept_state->private_data,
-                                  accept_state->private_data_length),
+        iree_make_const_byte_span(endpoint->private_data,
+                                  endpoint->private_data_length),
         &conn_param);
   }
 
@@ -1258,14 +1445,14 @@ static iree_status_t iree_net_rdma_listener_accept_request(
         iree_net_rdma_context_librdmacm(listener->factory->context);
     int result = librdmacm->rdma_accept(
         iree_net_rdma_carrier_connection_id(
-            iree_net_rdma_carrier_cast(accept_state->carrier)),
+            iree_net_rdma_carrier_cast(endpoint->carrier)),
         &conn_param);
     status = iree_net_rdma_factory_status_from_result(__FILE__, __LINE__,
                                                       result, "rdma_accept");
   }
 
   if (iree_status_is_ok(status)) {
-    iree_net_rdma_listener_push_accept(listener, accept_state);
+    endpoint->flags |= IREE_NET_RDMA_ACCEPT_ENDPOINT_FLAG_REQUESTED;
   } else {
     const iree_net_librdmacm_t* librdmacm =
         iree_net_rdma_context_librdmacm(listener->factory->context);
@@ -1274,8 +1461,14 @@ static iree_status_t iree_net_rdma_listener_accept_request(
                               iree_net_rdma_factory_status_from_result(
                                   __FILE__, __LINE__, result, "rdma_reject"));
     if (accept_state) {
-      iree_net_rdma_accept_state_submit_cleanup(accept_state);
-    } else {
+      iree_net_rdma_accept_state_t* popped_accept_state =
+          iree_net_rdma_listener_pop_accept_by_group(listener,
+                                                     accept_state->group_id);
+      if (popped_accept_state) {
+        iree_net_rdma_accept_state_submit_cleanup(popped_accept_state);
+      }
+    }
+    if (!event_id_adopted) {
       result = librdmacm->rdma_destroy_id(event->id);
       status = iree_status_join(
           status, iree_net_rdma_factory_status_from_result(
@@ -1311,7 +1504,7 @@ static iree_status_t iree_net_rdma_listener_discard_stopping_event(
     case RDMA_CM_EVENT_DISCONNECTED:
     case RDMA_CM_EVENT_DEVICE_REMOVAL: {
       iree_net_rdma_accept_state_t* accept_state =
-          iree_net_rdma_listener_pop_accept(listener, event->id);
+          iree_net_rdma_listener_pop_accept_by_id(listener, event->id, NULL);
       if (accept_state) {
         iree_net_rdma_accept_state_submit_cleanup(accept_state);
       }
@@ -1375,10 +1568,43 @@ static void iree_net_rdma_listener_on_cm_event(
       break;
     }
     case RDMA_CM_EVENT_ESTABLISHED: {
+      iree_net_rdma_accept_endpoint_t* endpoint = NULL;
       iree_net_rdma_accept_state_t* accept_state =
-          iree_net_rdma_listener_pop_accept(listener, event->id);
-      if (accept_state) {
-        iree_net_rdma_listener_deliver_accept(listener, accept_state);
+          iree_net_rdma_listener_find_accept_by_id(listener, event->id,
+                                                   &endpoint);
+      if (accept_state && endpoint) {
+        if (iree_any_bit_set(endpoint->flags,
+                             IREE_NET_RDMA_ACCEPT_ENDPOINT_FLAG_ESTABLISHED)) {
+          accept_state = iree_net_rdma_listener_pop_accept_by_group(
+              listener, accept_state->group_id);
+          if (accept_state) {
+            iree_net_rdma_accept_state_submit_cleanup(accept_state);
+          }
+          listener->accept_callback(
+              listener->accept_user_data,
+              iree_make_status(
+                  IREE_STATUS_ALREADY_EXISTS,
+                  "duplicate RDMA ESTABLISHED event for accepted endpoint"),
+              NULL);
+        } else {
+          endpoint->flags |= IREE_NET_RDMA_ACCEPT_ENDPOINT_FLAG_ESTABLISHED;
+          ++accept_state->established_endpoint_count;
+          if (accept_state->established_endpoint_count ==
+              accept_state->endpoint_count) {
+            accept_state = iree_net_rdma_listener_pop_accept_by_group(
+                listener, accept_state->group_id);
+            if (accept_state) {
+              iree_net_rdma_listener_deliver_accept(listener, accept_state);
+            } else {
+              listener->accept_callback(
+                  listener->accept_user_data,
+                  iree_make_status(
+                      IREE_STATUS_NOT_FOUND,
+                      "RDMA established endpoint group was already removed"),
+                  NULL);
+            }
+          }
+        }
       } else {
         listener->accept_callback(
             listener->accept_user_data,
@@ -1394,7 +1620,7 @@ static void iree_net_rdma_listener_on_cm_event(
     case RDMA_CM_EVENT_DISCONNECTED:
     case RDMA_CM_EVENT_DEVICE_REMOVAL: {
       iree_net_rdma_accept_state_t* accept_state =
-          iree_net_rdma_listener_pop_accept(listener, event->id);
+          iree_net_rdma_listener_pop_accept_by_id(listener, event->id, NULL);
       if (accept_state) {
         iree_net_rdma_accept_state_submit_cleanup(accept_state);
       }
@@ -1520,10 +1746,9 @@ static iree_net_rdma_factory_options_t iree_net_rdma_factory_resolve_options(
 
 static iree_status_t iree_net_rdma_factory_validate_options(
     iree_net_rdma_factory_options_t options) {
-  if (options.max_endpoint_count != 1) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "RDMA factory currently supports exactly one endpoint per connection");
+  if (options.max_endpoint_count > UINT16_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "max_endpoint_count must fit in uint16_t");
   }
   if (options.resolve_timeout_ms < 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,

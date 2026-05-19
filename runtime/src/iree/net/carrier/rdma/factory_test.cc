@@ -21,16 +21,32 @@ bool ConsumeUnavailableStatus(iree_status_t& status) {
   return true;
 }
 
-TEST(RdmaFactoryTest, RejectsUnsupportedEndpointCount) {
+TEST(RdmaFactoryTest, RejectsEndpointCountOutOfRange) {
+  iree_net_rdma_factory_options_t options =
+      iree_net_rdma_factory_options_default();
+  options.max_endpoint_count = UINT16_MAX + 1u;
+
+  iree_net_transport_factory_t* factory = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      iree_net_rdma_factory_create(options, iree_allocator_system(), &factory));
+  EXPECT_EQ(nullptr, factory);
+}
+
+TEST(RdmaFactoryTest, AcceptsMultipleEndpointCapacity) {
   iree_net_rdma_factory_options_t options =
       iree_net_rdma_factory_options_default();
   options.max_endpoint_count = 2;
 
   iree_net_transport_factory_t* factory = nullptr;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_UNIMPLEMENTED,
-      iree_net_rdma_factory_create(options, iree_allocator_system(), &factory));
-  EXPECT_EQ(nullptr, factory);
+  iree_status_t status =
+      iree_net_rdma_factory_create(options, iree_allocator_system(), &factory);
+  if (ConsumeUnavailableStatus(status)) {
+    GTEST_SKIP() << "RDMA factory is not available on this machine";
+  }
+  IREE_ASSERT_OK(status);
+
+  iree_net_transport_factory_release(factory);
 }
 
 TEST(RdmaFactoryTest, QueryCapabilities) {

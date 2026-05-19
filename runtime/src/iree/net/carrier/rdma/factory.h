@@ -12,9 +12,8 @@
 // device, exchanges the carrier private-data payload, and then returns a
 // standard iree_net_connection_t.
 //
-// The first implementation exposes one RC QP as one message endpoint. Native
-// multi-endpoint QP allocation can layer on the same handshake machinery
-// without changing the carrier hot path.
+// Each logical connection owns one or more RC QPs, exposing each QP as one
+// message endpoint without adding multiplexing framing to the carrier hot path.
 
 #ifndef IREE_NET_CARRIER_RDMA_FACTORY_H_
 #define IREE_NET_CARRIER_RDMA_FACTORY_H_
@@ -47,7 +46,7 @@ typedef struct iree_net_rdma_factory_options_t {
   // Backlog passed to rdma_listen.
   int listen_backlog;
 
-  // Maximum endpoint slots per connection. Only 1 is currently supported.
+  // Maximum endpoint slots per connection.
   uint32_t max_endpoint_count;
 } iree_net_rdma_factory_options_t;
 
