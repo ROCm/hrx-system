@@ -541,15 +541,30 @@ static const iree_net_connection_vtable_t iree_net_rdma_connection_vtable = {
 
 static iree_status_t iree_net_rdma_connection_create(
     iree_async_proactor_t* proactor, iree_async_buffer_pool_t* recv_pool,
-    iree_net_carrier_t* carrier, iree_allocator_t host_allocator,
-    iree_net_connection_t** out_connection) {
+    uint32_t endpoint_count, iree_net_carrier_t** carriers,
+    iree_allocator_t host_allocator, iree_net_connection_t** out_connection) {
   *out_connection = NULL;
+
+  iree_status_t status = iree_ok_status();
+  if (endpoint_count == 0) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "RDMA connection requires at least one endpoint");
+  }
+  for (uint32_t i = 0; i < endpoint_count && iree_status_is_ok(status); ++i) {
+    if (!carriers || !carriers[i]) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "RDMA connection carrier %u must not be NULL",
+                                (unsigned)i);
+    }
+  }
 
   iree_net_rdma_connection_t* connection = NULL;
   iree_host_size_t total_size = 0;
-  iree_status_t status =
-      IREE_STRUCT_LAYOUT(sizeof(*connection), &total_size,
-                         IREE_STRUCT_FIELD_FAM(1, iree_net_rdma_endpoint_t));
+  if (iree_status_is_ok(status)) {
+    status = IREE_STRUCT_LAYOUT(
+        sizeof(*connection), &total_size,
+        IREE_STRUCT_FIELD_FAM(endpoint_count, iree_net_rdma_endpoint_t));
+  }
   if (iree_status_is_ok(status)) {
     status =
         iree_allocator_malloc(host_allocator, total_size, (void**)&connection);
@@ -557,16 +572,20 @@ static iree_status_t iree_net_rdma_connection_create(
   if (iree_status_is_ok(status)) {
     memset(connection, 0, total_size);
     iree_net_connection_initialize(&iree_net_rdma_connection_vtable,
-                                   host_allocator, /*max_endpoint_count=*/1,
+                                   host_allocator, endpoint_count,
                                    &connection->base);
     connection->proactor = proactor;
     iree_async_proactor_retain(proactor);
     connection->recv_pool = recv_pool;
-    connection->max_endpoint_count = 1;
-    connection->endpoints[0].connection = connection;
-    connection->endpoints[0].carrier = carrier;
-    connection->endpoints[0].endpoint_index = 0;
-    carrier->callback.user_data = &connection->endpoints[0];
+    connection->max_endpoint_count = endpoint_count;
+    for (uint32_t i = 0; i < endpoint_count; ++i) {
+      iree_net_rdma_endpoint_t* endpoint = &connection->endpoints[i];
+      endpoint->connection = connection;
+      endpoint->carrier = carriers[i];
+      endpoint->endpoint_index = i;
+      carriers[i]->callback.user_data = endpoint;
+      carriers[i] = NULL;
+    }
     *out_connection = &connection->base;
   }
   return status;
@@ -679,11 +698,12 @@ static void iree_net_rdma_connect_state_fail(
 static void iree_net_rdma_connect_state_succeed(
     iree_net_rdma_connect_state_t* state) {
   iree_net_connection_t* connection = NULL;
+  iree_net_carrier_t* carriers[1] = {state->carrier};
   iree_status_t status = iree_net_rdma_connection_create(
-      state->proactor, state->recv_pool, state->carrier, state->host_allocator,
-      &connection);
+      state->proactor, state->recv_pool, IREE_ARRAYSIZE(carriers), carriers,
+      state->host_allocator, &connection);
   if (iree_status_is_ok(status)) {
-    state->carrier = NULL;
+    state->carrier = carriers[0];
     state->phase = IREE_NET_RDMA_CONNECT_PHASE_COMPLETE;
     state->callback(state->callback_user_data, iree_ok_status(), connection);
   } else {
@@ -1083,11 +1103,12 @@ static void iree_net_rdma_listener_deliver_accept(
     iree_net_rdma_listener_t* listener,
     iree_net_rdma_accept_state_t* accept_state) {
   iree_net_connection_t* connection = NULL;
+  iree_net_carrier_t* carriers[1] = {accept_state->carrier};
   iree_status_t status = iree_net_rdma_connection_create(
-      listener->proactor, listener->recv_pool, accept_state->carrier,
-      accept_state->host_allocator, &connection);
+      listener->proactor, listener->recv_pool, IREE_ARRAYSIZE(carriers),
+      carriers, accept_state->host_allocator, &connection);
   if (iree_status_is_ok(status)) {
-    accept_state->carrier = NULL;
+    accept_state->carrier = carriers[0];
     listener->accept_callback(listener->accept_user_data, iree_ok_status(),
                               connection);
   } else {
