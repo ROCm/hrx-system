@@ -83,6 +83,43 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "cm_channel",
+    srcs = ["cm_channel.c"],
+    hdrs = ["cm_channel.h"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":librdmacm",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "@rdma_core_headers",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "cm_channel_test",
+    srcs = ["cm_channel_test.cc"],
+    tags = [
+        "nodocker",
+    ],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":cm_channel",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async:platform",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "@rdma_core_headers",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "connection_data",
     srcs = ["connection_data.c"],
     hdrs = ["connection_data.h"],

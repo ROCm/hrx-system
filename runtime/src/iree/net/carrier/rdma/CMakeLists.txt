@@ -69,6 +69,42 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_library(
   NAME
+    cm_channel
+  HDRS
+    "cm_channel.h"
+  SRCS
+    "cm_channel.c"
+  DEPS
+    ::librdmacm
+    iree::async
+    iree::base
+    rdma_core::headers
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    cm_channel_test
+  SRCS
+    "cm_channel_test.cc"
+  DEPS
+    ::cm_channel
+    iree::async
+    iree::async::platform
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    rdma_core::headers
+  LABELS
+    "nodocker"
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_library(
+  NAME
     connection_data
   HDRS
     "connection_data.h"
