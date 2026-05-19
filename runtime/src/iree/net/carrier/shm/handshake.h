@@ -21,7 +21,9 @@
 //   Windows: DuplicateHandle over ReadFile/WriteFile on named pipes.
 //
 // The handshake is synchronous (blocking with timeout). Over a local channel,
-// it completes in microseconds. The channel is closed on return.
+// it completes in microseconds. On success, the channel is retained by the
+// xproc context for descriptor/HANDLE transfer sideband traffic; on failure,
+// it is closed before return.
 
 #ifndef IREE_NET_CARRIER_SHM_HANDSHAKE_H_
 #define IREE_NET_CARRIER_SHM_HANDSHAKE_H_
@@ -131,7 +133,8 @@ typedef struct iree_net_shm_handshake_result_t {
 //
 // |channel| is a connected channel primitive (Unix domain socket fd on POSIX,
 // named pipe HANDLE on Windows). The handshake is synchronous with a timeout;
-// the channel is closed on return (success or failure).
+// the channel is transferred to the returned xproc context on success and
+// closed on failure.
 //
 // |shared_wake| must have been created with
 // iree_net_shm_shared_wake_create_shared().
@@ -147,7 +150,8 @@ IREE_API_EXPORT iree_status_t iree_net_shm_handshake_server(
 // Client side: receive OFFER, map SHM region, send ACCEPT, assemble carrier
 // params.
 //
-// Same semantics as server: synchronous with timeout, channel closed on return.
+// Same semantics as server: synchronous with timeout, channel transferred to
+// the returned xproc context on success and closed on failure.
 IREE_API_EXPORT iree_status_t iree_net_shm_handshake_client(
     iree_async_primitive_t channel, iree_net_shm_shared_wake_t* shared_wake,
     iree_async_proactor_t* proactor, iree_allocator_t host_allocator,

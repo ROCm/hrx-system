@@ -11,23 +11,27 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
-    shared_wake
+    file_transfer
   HDRS
-    "shared_wake.h"
+    "file_transfer.h"
   SRCS
-    "shared_wake.c"
+    "file_transfer.c"
   DEPS
     iree::async
     iree::base
-    iree::base::internal::shm
+    iree::base::threading
+    iree::io::file_handle
+    iree::net::carrier
   PUBLIC
 )
 
 iree_cc_library(
   NAME
-    xproc_context
+    shared_wake
   HDRS
-    "xproc_context.h"
+    "shared_wake.h"
+  SRCS
+    "shared_wake.c"
   DEPS
     iree::async
     iree::base
@@ -63,11 +67,25 @@ iree_cc_library(
   SRCS
     "carrier.c"
   DEPS
+    ::file_transfer
     ::shared_wake
     iree::async
     iree::base
     iree::base::internal::mpsc_queue
     iree::net::carrier
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
+    xproc_context
+  HDRS
+    "xproc_context.h"
+  DEPS
+    ::file_transfer
+    iree::async
+    iree::base
+    iree::base::internal::shm
   PUBLIC
 )
 
@@ -155,6 +173,7 @@ iree_cc_test(
     ::shm
     iree::async::platform
     iree::base
+    iree::io::file_handle
     iree::testing::coordinated_test
     iree::testing::coordinated_test_main
     iree::testing::gtest

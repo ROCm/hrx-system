@@ -839,23 +839,32 @@ static iree_status_t iree_net_loopback_carrier_import_file_handle(
   return status;
 }
 
-static void iree_net_loopback_carrier_release_file_handle_transfer(
+static iree_status_t iree_net_loopback_carrier_release_file_handle_transfer(
     iree_net_carrier_t* base_carrier,
     iree_net_file_handle_transfer_type_t transfer_type,
     iree_const_byte_span_t transfer_payload) {
   iree_net_loopback_carrier_t* carrier =
       iree_net_loopback_carrier_cast(base_carrier);
   iree_net_loopback_file_transfer_payload_t payload = {0};
-  if (transfer_type == iree_net_loopback_file_transfer_type() &&
-      transfer_payload.data_length == sizeof(payload)) {
-    memcpy(&payload, transfer_payload.data, sizeof(payload));
-    iree_net_loopback_file_transfer_t* transfer =
-        iree_net_loopback_carrier_take_file_transfer(carrier, payload.id);
-    if (transfer) {
-      iree_io_file_handle_release(transfer->file_handle);
-      iree_allocator_free(carrier->base.host_allocator, transfer);
-    }
+  if (transfer_type != iree_net_loopback_file_transfer_type()) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported loopback file transfer type %u",
+                            (uint32_t)transfer_type);
   }
+  if (transfer_payload.data_length != sizeof(payload)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "loopback file transfer payload length must be %" PRIhsz " bytes",
+        (iree_host_size_t)sizeof(payload));
+  }
+  memcpy(&payload, transfer_payload.data, sizeof(payload));
+  iree_net_loopback_file_transfer_t* transfer =
+      iree_net_loopback_carrier_take_file_transfer(carrier, payload.id);
+  if (transfer) {
+    iree_io_file_handle_release(transfer->file_handle);
+    iree_allocator_free(carrier->base.host_allocator, transfer);
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t iree_net_loopback_carrier_shutdown(

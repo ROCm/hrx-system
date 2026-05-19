@@ -126,6 +126,7 @@ static void iree_net_shm_handshake_assemble_params(
   params->peer_wake_notification = peer_notification;
   params->regions = &result->region;
   params->region_count = 1;
+  params->file_transfer = context->file_transfer;
 
   if (is_client) {
     // Client reads from Ring A (consumer A), writes to Ring B.
@@ -270,9 +271,6 @@ IREE_API_EXPORT iree_status_t iree_net_shm_handshake_server(
         &accept_header, IREE_NET_SHM_HANDSHAKE_MESSAGE_ACCEPT);
   }
 
-  // Close the channel — handshake is done.
-  iree_async_primitive_close(&channel);
-
   // Map the peer's wake epoch SHM.
   iree_shm_mapping_t peer_epoch_mapping;
   memset(&peer_epoch_mapping, 0, sizeof(peer_epoch_mapping));
@@ -296,6 +294,12 @@ IREE_API_EXPORT iree_status_t iree_net_shm_handshake_server(
   if (iree_status_is_ok(status)) {
     status = iree_net_shm_xproc_context_create(host_allocator, &context);
   }
+  iree_net_shm_file_transfer_t* file_transfer = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_net_shm_file_transfer_create(channel, host_allocator,
+                                               &file_transfer);
+    channel = iree_async_primitive_none();
+  }
   iree_mpsc_queue_t tx_queue, rx_queue;
   memset(&tx_queue, 0, sizeof(tx_queue));
   memset(&rx_queue, 0, sizeof(rx_queue));
@@ -309,6 +313,7 @@ IREE_API_EXPORT iree_status_t iree_net_shm_handshake_server(
     context->peer_wake_epoch_mapping = peer_epoch_mapping;
     context->peer_notification = peer_notification;
     context->peer_signal_primitive = accept_handles.signal_primitive;
+    context->file_transfer = file_transfer;
 
     iree_net_shm_handshake_assemble_params(
         out_result, &region_mapping, /*is_client=*/false, tx_queue, rx_queue,
@@ -316,6 +321,7 @@ IREE_API_EXPORT iree_status_t iree_net_shm_handshake_server(
     iree_shm_handle_close(&accept_handles.wake_epoch_shm);
   } else {
     iree_net_shm_xproc_context_release(context);
+    iree_net_shm_file_transfer_release(file_transfer);
     iree_async_notification_release(peer_notification);
     iree_shm_close(&peer_epoch_mapping);
     iree_net_shm_handshake_handles_close(&accept_handles);
@@ -323,6 +329,7 @@ IREE_API_EXPORT iree_status_t iree_net_shm_handshake_server(
     iree_shm_handle_close(&our_export.epoch_shm_handle);
     iree_async_primitive_close(&our_export.signal_primitive);
     iree_shm_close(&region_mapping);
+    iree_async_primitive_close(&channel);
   }
   IREE_TRACE_ZONE_END(z0);
   return status;
@@ -420,9 +427,6 @@ IREE_API_EXPORT iree_status_t iree_net_shm_handshake_client(
     }
   }
 
-  // Close the channel — handshake is done.
-  iree_async_primitive_close(&channel);
-
   // Create peer notification proxy (to signal the server).
   iree_async_notification_t* peer_notification = NULL;
   if (iree_status_is_ok(status)) {
@@ -435,6 +439,12 @@ IREE_API_EXPORT iree_status_t iree_net_shm_handshake_client(
   iree_net_shm_xproc_context_t* context = NULL;
   if (iree_status_is_ok(status)) {
     status = iree_net_shm_xproc_context_create(host_allocator, &context);
+  }
+  iree_net_shm_file_transfer_t* file_transfer = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_net_shm_file_transfer_create(channel, host_allocator,
+                                               &file_transfer);
+    channel = iree_async_primitive_none();
   }
   iree_mpsc_queue_t tx_queue, rx_queue;
   memset(&tx_queue, 0, sizeof(tx_queue));
@@ -451,6 +461,7 @@ IREE_API_EXPORT iree_status_t iree_net_shm_handshake_client(
     context->peer_wake_epoch_mapping = peer_epoch_mapping;
     context->peer_notification = peer_notification;
     context->peer_signal_primitive = offer_handles.signal_primitive;
+    context->file_transfer = file_transfer;
 
     iree_net_shm_handshake_assemble_params(
         out_result, &region_mapping, /*is_client=*/true, tx_queue, rx_queue,
@@ -464,12 +475,14 @@ IREE_API_EXPORT iree_status_t iree_net_shm_handshake_client(
     // Context fields are zero-initialized — resources haven't been transferred
     // yet, so release the context (if allocated) and each resource separately.
     iree_net_shm_xproc_context_release(context);
+    iree_net_shm_file_transfer_release(file_transfer);
     iree_async_notification_release(peer_notification);
     iree_shm_close(&peer_epoch_mapping);
     iree_shm_close(&region_mapping);
     iree_net_shm_handshake_handles_close(&offer_handles);
     iree_shm_handle_close(&our_export.epoch_shm_handle);
     iree_async_primitive_close(&our_export.signal_primitive);
+    iree_async_primitive_close(&channel);
   }
   IREE_TRACE_ZONE_END(z0);
   return status;

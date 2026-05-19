@@ -8,7 +8,8 @@
 //
 // Implements listener and connect over Unix domain sockets. Each accepted
 // connection runs a synchronous handshake (handshake_posix.c) to exchange SHM
-// handles via SCM_RIGHTS, then creates an independent SHM carrier pair.
+// handles via SCM_RIGHTS, then creates an independent SHM carrier pair using
+// the socket as a retained descriptor-rights sideband.
 
 #include "iree/net/carrier/shm/factory_internal.h"
 
@@ -67,9 +68,9 @@ static void iree_net_shm_unix_listener_accept_complete(
 // to the consumer. On failure at any step, reports the error to the consumer.
 static void iree_net_shm_unix_listener_handle_accepted(
     iree_net_shm_unix_listener_t* listener, iree_async_socket_t* accepted) {
-  // Dup the socket's primitive for the handshake (the handshake closes its
-  // primitive on return; releasing the socket object separately closes the
-  // original fd -- so both owners are handled cleanly).
+  // Dup the socket's primitive for the handshake. The duplicate transfers to
+  // the xproc context on success and is closed on failure; releasing the socket
+  // object separately closes the original fd.
   iree_async_primitive_t handshake_primitive;
   iree_status_t status =
       iree_async_primitive_dup(accepted->primitive, &handshake_primitive);
@@ -87,8 +88,8 @@ static void iree_net_shm_unix_listener_handle_accepted(
     }
   }
 
-  // Run the server handshake. Closes the socket primitive on return (both
-  // success and error paths).
+  // Run the server handshake. The socket primitive transfers to the xproc
+  // context on success and is closed on failure.
   iree_net_shm_handshake_result_t handshake_result;
   memset(&handshake_result, 0, sizeof(handshake_result));
   if (iree_status_is_ok(status)) {
@@ -345,9 +346,9 @@ typedef struct iree_net_shm_unix_connect_state_t {
 // consumer. On failure at any step, reports the error to the consumer.
 static void iree_net_shm_unix_connect_handle_connected(
     iree_net_shm_unix_connect_state_t* state) {
-  // Dup the connected socket's primitive for the handshake (the handshake
-  // closes its primitive on return; releasing the socket object separately
-  // closes the original fd).
+  // Dup the connected socket's primitive for the handshake. The duplicate
+  // transfers to the xproc context on success and is closed on failure;
+  // releasing the socket object separately closes the original fd.
   iree_async_primitive_t handshake_primitive;
   iree_status_t status =
       iree_async_primitive_dup(state->socket->primitive, &handshake_primitive);

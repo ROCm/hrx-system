@@ -107,6 +107,7 @@ iree_cc_test(
     iree::base::threading
     iree::hal
     iree::hal::remote::protocol::common
+    iree::hal::remote::protocol::control
     iree::hal::remote::protocol::profile
     iree::hal::remote::util::bulk_transfer_tracker
     iree::hal::remote::util::queue_header_pool
@@ -146,6 +147,7 @@ iree_cc_test(
     iree::base::threading
     iree::hal
     iree::hal::remote::protocol::common
+    iree::hal::remote::protocol::control
     iree::hal::remote::protocol::profile
     iree::hal::remote::util::bulk_transfer_tracker
     iree::hal::remote::util::queue_header_pool
@@ -197,6 +199,7 @@ iree_cc_binary_benchmark(
     iree::base::threading
     iree::hal
     iree::hal::remote::protocol::common
+    iree::hal::remote::protocol::control
     iree::hal::remote::protocol::profile
     iree::hal::remote::util::bulk_transfer_tracker
     iree::hal::remote::util::queue_header_pool
@@ -235,6 +238,7 @@ iree_cc_test(
     iree::base::threading
     iree::hal
     iree::hal::remote::protocol::common
+    iree::hal::remote::protocol::control
     iree::hal::remote::protocol::profile
     iree::hal::remote::util::bulk_transfer_tracker
     iree::hal::remote::util::queue_header_pool

@@ -10,10 +10,11 @@
 // connection runs a synchronous handshake (handshake_win32.c) to exchange SHM
 // handles via DuplicateHandle, then creates an independent SHM carrier pair.
 //
-// The named pipe is a temporary bootstrap channel: ConnectNamedPipe accepts a
-// client, the handshake exchanges SHM region and notification handles, then the
-// pipe is closed. The carrier uses the SHM ring buffers directly -- the pipe
-// carries only the ~100-byte handshake messages.
+// The named pipe bootstraps each carrier: ConnectNamedPipe accepts a client,
+// the handshake exchanges SHM region and notification handles, and the pipe is
+// then retained by the xproc context. Windows handle transfer is not advertised
+// until that sideband is integrated with the proactor. The carrier uses the SHM
+// ring buffers directly.
 //
 // Async accept uses EVENT_WAIT: the pipe is NOT associated with IOCP. An
 // iree_async_event_t signals when ConnectNamedPipe completes (the event's
@@ -243,8 +244,8 @@ static iree_status_t iree_net_shm_win32_listener_rearm(
 // the error to the consumer.
 static void iree_net_shm_win32_listener_handle_accepted(
     iree_net_shm_win32_listener_t* listener) {
-  // Take ownership of the connected pipe. The handshake takes ownership of the
-  // primitive and closes it on return (both success and error paths).
+  // Take ownership of the connected pipe. The handshake transfers the
+  // primitive to the xproc context on success and closes it on failure.
   HANDLE pipe = listener->pipe_handle;
   listener->pipe_handle = INVALID_HANDLE_VALUE;
   iree_async_primitive_t channel =
@@ -263,7 +264,8 @@ static void iree_net_shm_win32_listener_handle_accepted(
   }
 
   // Run the server handshake. Synchronous -- completes in microseconds over a
-  // local pipe. Closes the channel primitive on return.
+  // local pipe. The channel primitive transfers to the xproc context on
+  // success and is closed on failure.
   iree_net_shm_handshake_result_t handshake_result;
   memset(&handshake_result, 0, sizeof(handshake_result));
   status = iree_net_shm_handshake_server(
@@ -542,8 +544,8 @@ typedef struct iree_net_shm_win32_connect_state_t {
 // any step, reports the error to the consumer.
 static void iree_net_shm_win32_connect_handle_connected(
     iree_net_shm_win32_connect_state_t* state) {
-  // Take ownership of the pipe for the handshake. The handshake closes the
-  // channel primitive on return (both success and error paths).
+  // Take ownership of the pipe for the handshake. The handshake transfers the
+  // channel primitive to the xproc context on success and closes it on failure.
   iree_async_primitive_t channel =
       iree_async_primitive_from_win32_handle((uintptr_t)state->pipe_handle);
   state->pipe_handle = INVALID_HANDLE_VALUE;
@@ -561,7 +563,8 @@ static void iree_net_shm_win32_connect_handle_connected(
   }
 
   // Run the client handshake. Synchronous -- completes in microseconds over a
-  // local pipe. Closes the channel primitive on return.
+  // local pipe. The channel primitive transfers to the xproc context on
+  // success and is closed on failure.
   iree_net_shm_handshake_result_t handshake_result;
   memset(&handshake_result, 0, sizeof(handshake_result));
   status =

@@ -137,6 +137,7 @@ iree_cc_test(
     iree::base::threading
     iree::hal
     iree::hal::remote::protocol::common
+    iree::hal::remote::protocol::control
     iree::net::carrier
     iree::net::channel::bulk::bulk_channel
     iree::net::channel::bulk::frame
@@ -167,6 +168,7 @@ iree_cc_test(
     iree::hal
     iree::hal::drivers::local_task::registration
     iree::hal::remote::protocol::common
+    iree::hal::remote::protocol::control
     iree::net::carrier
     iree::net::channel::bulk::bulk_channel
     iree::net::channel::bulk::frame
@@ -198,6 +200,7 @@ iree_cc_binary_benchmark(
     iree::hal
     iree::hal::drivers::local_task::registration
     iree::hal::remote::protocol::common
+    iree::hal::remote::protocol::control
     iree::hal::remote::util::bulk_transfer_scheduler
     iree::net::carrier
     iree::net::channel::bulk::bulk_channel
@@ -232,6 +235,7 @@ iree_cc_binary_benchmark(
     iree::base::threading
     iree::hal
     iree::hal::remote::protocol::common
+    iree::hal::remote::protocol::control
     iree::hal::remote::protocol::profile
     iree::hal::remote::util::bulk_transfer_scheduler
     iree::net::carrier
@@ -266,6 +270,7 @@ iree_cc_test(
     iree::base::threading
     iree::hal
     iree::hal::remote::protocol::common
+    iree::hal::remote::protocol::control
     iree::hal::remote::protocol::profile
     iree::hal::remote::util::bulk_transfer_scheduler
     iree::net::carrier
@@ -299,6 +304,7 @@ iree_cc_binary_benchmark(
     iree::hal
     iree::hal::drivers::local_task::registration
     iree::hal::remote::protocol::common
+    iree::hal::remote::protocol::control
     iree::net::carrier
     iree::net::channel::bulk::bulk_channel
     iree::net::channel::bulk::frame
@@ -332,6 +338,7 @@ iree_cc_test(
     iree::hal
     iree::hal::drivers::local_task::registration
     iree::hal::remote::protocol::common
+    iree::hal::remote::protocol::control
     iree::net::carrier
     iree::net::channel::bulk::bulk_channel
     iree::net::channel::bulk::frame
@@ -432,6 +439,7 @@ iree_cc_test(
     iree::hal
     iree::hal::remote::client
     iree::hal::remote::protocol::common
+    iree::hal::remote::protocol::control
     iree::hal::remote::util::recv_pool
     iree::hal::testing::mock_device
     iree::net::carrier

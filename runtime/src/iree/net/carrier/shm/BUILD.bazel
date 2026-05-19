@@ -16,19 +16,22 @@ package(
 )
 
 iree_runtime_cc_library(
-    name = "shared_wake",
-    srcs = ["shared_wake.c"],
-    hdrs = ["shared_wake.h"],
+    name = "file_transfer",
+    srcs = ["file_transfer.c"],
+    hdrs = ["file_transfer.h"],
     deps = [
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:shm",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/net:carrier",
     ],
 )
 
 iree_runtime_cc_library(
-    name = "xproc_context",
-    hdrs = ["xproc_context.h"],
+    name = "shared_wake",
+    srcs = ["shared_wake.c"],
+    hdrs = ["shared_wake.h"],
     deps = [
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
@@ -60,11 +63,23 @@ iree_runtime_cc_library(
     srcs = ["carrier.c"],
     hdrs = ["carrier.h"],
     deps = [
+        ":file_transfer",
         ":shared_wake",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:mpsc_queue",
         "//runtime/src/iree/net:carrier",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "xproc_context",
+    hdrs = ["xproc_context.h"],
+    deps = [
+        ":file_transfer",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:shm",
     ],
 )
 
@@ -144,6 +159,7 @@ iree_runtime_cc_test(
         ":shm",
         "//runtime/src/iree/async:platform",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/io:file_handle",
         "//runtime/src/iree/testing:coordinated_test",
         "//runtime/src/iree/testing:coordinated_test_main",
         "//runtime/src/iree/testing:gtest",

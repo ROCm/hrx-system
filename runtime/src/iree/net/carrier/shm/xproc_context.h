@@ -23,6 +23,7 @@
 #include "iree/async/primitive.h"
 #include "iree/base/api.h"
 #include "iree/base/internal/shm.h"
+#include "iree/net/carrier/shm/file_transfer.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -52,6 +53,10 @@ typedef struct iree_net_shm_xproc_context_t {
   // We close it here on destroy.
   iree_async_primitive_t peer_signal_primitive;
 
+  // Sideband channel used to transfer external file handle rights.
+  iree_net_shm_file_transfer_t* file_transfer;
+
+  // Host allocator used for this context allocation.
   iree_allocator_t allocator;
 } iree_net_shm_xproc_context_t;
 
@@ -85,6 +90,7 @@ static inline void iree_net_shm_xproc_context_release(void* opaque) {
   if (iree_atomic_ref_count_dec(&context->ref_count) == 1) {
     iree_async_notification_release(context->peer_notification);
     iree_async_primitive_close(&context->peer_signal_primitive);
+    iree_net_shm_file_transfer_release(context->file_transfer);
     iree_shm_close(&context->peer_wake_epoch_mapping);
     iree_shm_close(&context->shm_mapping);
     iree_allocator_t allocator = context->allocator;

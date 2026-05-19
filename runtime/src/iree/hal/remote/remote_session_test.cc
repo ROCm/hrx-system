@@ -1614,7 +1614,7 @@ TEST_F(RemoteBufferTest, RegisteredClientFileQueueRead) {
       client_device_, IREE_HAL_QUEUE_AFFINITY_ANY, IREE_HAL_MEMORY_ACCESS_READ,
       source_handle, IREE_HAL_EXTERNAL_FILE_FLAG_NONE, &source_file));
   iree_io_file_handle_release(source_handle);
-  EXPECT_EQ(iree_hal_file_length(source_file), 0);
+  EXPECT_EQ(iree_hal_file_length(source_file), sizeof(kReadContents) - 1);
 
   iree_hal_allocator_t* allocator = iree_hal_device_allocator(client_device_);
   iree_hal_buffer_params_t params = {0};
@@ -1850,7 +1850,7 @@ TEST_F(RemoteBufferTest, RegisteredClientFileQueueWrite) {
       IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE, target_handle,
       IREE_HAL_EXTERNAL_FILE_FLAG_NONE, &target_file));
   iree_io_file_handle_release(target_handle);
-  EXPECT_EQ(iree_hal_file_length(target_file), 0);
+  EXPECT_EQ(iree_hal_file_length(target_file), sizeof(kWriteContents) - 1);
 
   iree_hal_allocator_t* allocator = iree_hal_device_allocator(client_device_);
   iree_hal_buffer_params_t params = {0};

@@ -422,8 +422,8 @@ struct iree_net_carrier_vtable_t {
       iree_io_file_handle_t** out_file_handle);
 
   // Releases a local export that will not be imported by the peer.
-  // Optional; ignored when NULL.
-  void (*release_file_handle_transfer)(
+  // Optional; succeeds when NULL.
+  iree_status_t (*release_file_handle_transfer)(
       iree_net_carrier_t* carrier,
       iree_net_file_handle_transfer_type_t transfer_type,
       iree_const_byte_span_t transfer_payload);
@@ -853,14 +853,17 @@ static inline iree_status_t iree_net_carrier_import_file_handle(
 }
 
 // Releases an exported transfer that could not be delivered to the peer.
-static inline void iree_net_carrier_release_file_handle_transfer(
+static inline iree_status_t iree_net_carrier_release_file_handle_transfer(
     iree_net_carrier_t* carrier,
     iree_net_file_handle_transfer_type_t transfer_type,
     iree_const_byte_span_t transfer_payload) {
   if (carrier->vtable->release_file_handle_transfer) {
-    carrier->vtable->release_file_handle_transfer(carrier, transfer_type,
-                                                  transfer_payload);
+    return carrier->vtable->release_file_handle_transfer(carrier, transfer_type,
+                                                         transfer_payload);
   }
+  (void)transfer_type;
+  (void)transfer_payload;
+  return iree_ok_status();
 }
 
 #ifdef __cplusplus

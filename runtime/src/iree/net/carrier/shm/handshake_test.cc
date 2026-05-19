@@ -62,8 +62,9 @@ class HandshakeTest : public ::testing::Test {
     proactor_ = nullptr;
   }
 
-  // Creates a connected channel pair and wraps both ends as primitives.
-  // The handshake functions take ownership and close the channels on return.
+  // Creates a connected channel pair and wraps both ends as primitives. The
+  // handshake functions take ownership; successful handshakes transfer them to
+  // the xproc contexts and failed handshakes close them before returning.
   void CreateChannelPair(iree_async_primitive_t* out_server,
                          iree_async_primitive_t* out_client) {
 #if !defined(IREE_PLATFORM_WINDOWS)
@@ -184,6 +185,7 @@ TEST_F(HandshakeTest, BasicExchangeSucceeds) {
   EXPECT_NE(server_params.peer_wake_notification, nullptr);
   EXPECT_NE(server_params.release_context, nullptr);
   EXPECT_NE(server_params.release_context_fn, nullptr);
+  EXPECT_NE(server_params.file_transfer, nullptr);
   ASSERT_NE(result.server.context, nullptr);
 
   // Client params: is a client, has valid queues and armed flags.
@@ -197,6 +199,7 @@ TEST_F(HandshakeTest, BasicExchangeSucceeds) {
   EXPECT_NE(client_params.peer_wake_notification, nullptr);
   EXPECT_NE(client_params.release_context, nullptr);
   EXPECT_NE(client_params.release_context_fn, nullptr);
+  EXPECT_NE(client_params.file_transfer, nullptr);
   ASSERT_NE(result.client.context, nullptr);
 
   // TX and RX queues should be distinct (Ring A vs Ring B).

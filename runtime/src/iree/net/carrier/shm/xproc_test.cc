@@ -30,17 +30,20 @@
 #if defined(IREE_PLATFORM_WINDOWS)
 #include <windows.h>
 #else
+#include <fcntl.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
 #endif
 
 #include <atomic>
+#include <cerrno>
 #include <cstring>
 #include <functional>
 #include <vector>
 
 #include "iree/async/proactor_platform.h"
+#include "iree/io/file_handle.h"
 #include "iree/net/carrier/shm/carrier.h"
 #include "iree/net/carrier/shm/handshake.h"
 #include "iree/net/carrier/shm/shared_wake.h"
@@ -98,8 +101,8 @@ struct XProcContext {
   iree_net_carrier_t* carrier = nullptr;
 
   // Platform-specific server handle. The server binds/creates the channel;
-  // the handshake consumes (and closes) the connected handle, so this may
-  // be invalidated before the destructor runs.
+  // the accepted/connected handle transfers to the xproc context on successful
+  // handshake, so this may be invalidated before the destructor runs.
 #if defined(IREE_PLATFORM_WINDOWS)
   HANDLE pipe_handle = INVALID_HANDLE_VALUE;
 #else
@@ -291,7 +294,7 @@ static iree_status_t ServerBind(const char* address, XProcContext* context) {
 // handshake. Creates a carrier from the handshake result.
 //
 // Uses overlapped ConnectNamedPipe with a blocking wait via event. The pipe
-// handle is consumed by the handshake (which closes it on return).
+// handle transfers to the xproc context on a successful handshake.
 static iree_status_t ServerAcceptAndHandshake(
     XProcContext* context, iree_net_carrier_callback_t callback) {
   // Wait for client connection via overlapped ConnectNamedPipe.
@@ -347,7 +350,7 @@ static iree_status_t ServerAcceptAndHandshake(
   CloseHandle(event);
 
   // Pass the connected pipe to the handshake, which takes ownership and
-  // closes it on return (both success and failure).
+  // transfers it to the xproc context on success and closes it on failure.
   iree_async_primitive_t channel =
       iree_async_primitive_from_win32_handle((uintptr_t)context->pipe_handle);
   context->pipe_handle = INVALID_HANDLE_VALUE;
@@ -388,7 +391,7 @@ static iree_status_t ClientConnectAndHandshake(
                             (unsigned long)GetLastError());
   }
 
-  // The handshake takes ownership of the channel (closes it on return).
+  // The handshake takes ownership of the channel.
   iree_async_primitive_t channel =
       iree_async_primitive_from_win32_handle((uintptr_t)pipe);
 
@@ -456,7 +459,7 @@ static iree_status_t ServerAcceptAndHandshake(
                             strerror(errno));
   }
 
-  // The handshake takes ownership of the fd (closes it on return).
+  // The handshake takes ownership of the fd.
   iree_async_primitive_t channel = iree_async_primitive_from_fd(client_fd);
 
   iree_net_shm_handshake_result_t handshake_result;
@@ -746,7 +749,172 @@ static int dwrite_client_role(int argc, char** argv,
 }
 
 //===----------------------------------------------------------------------===//
-// Test 4: Direct read across processes
+// Test 4: File transfer sideband
+//===----------------------------------------------------------------------===//
+
+#if IREE_FILE_IO_ENABLE && !defined(IREE_PLATFORM_WINDOWS)
+
+static const char kFileTransferContents[] = "shm sideband file contents";
+static const char kFileTransferAck[] = "file-transfer-ok";
+
+static iree_status_t WriteTestFile(const char* path, const void* contents,
+                                   iree_host_size_t length) {
+  int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+  if (fd < 0) {
+    return iree_make_status(iree_status_code_from_errno(errno),
+                            "open(%s) failed", path);
+  }
+
+  const uint8_t* cursor = (const uint8_t*)contents;
+  iree_host_size_t remaining = length;
+  iree_status_t status = iree_ok_status();
+  while (iree_status_is_ok(status) && remaining > 0) {
+    ssize_t written = write(fd, cursor, remaining);
+    if (written < 0) {
+      if (errno != EINTR) {
+        status = iree_make_status(iree_status_code_from_errno(errno),
+                                  "write(%s) failed", path);
+      }
+    } else if (written == 0) {
+      status = iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "write(%s) made no progress", path);
+    } else {
+      cursor += written;
+      remaining -= (iree_host_size_t)written;
+    }
+  }
+
+  if (close(fd) != 0) {
+    status = iree_status_join(
+        status, iree_make_status(iree_status_code_from_errno(errno),
+                                 "close(%s) failed", path));
+  }
+  return status;
+}
+
+static iree_status_t ReadTestFd(int fd, void* contents,
+                                iree_host_size_t length) {
+  uint8_t* cursor = (uint8_t*)contents;
+  iree_host_size_t remaining = length;
+  off_t offset = 0;
+  iree_status_t status = iree_ok_status();
+  while (iree_status_is_ok(status) && remaining > 0) {
+    ssize_t read_count = pread(fd, cursor, remaining, offset);
+    if (read_count < 0) {
+      if (errno != EINTR) {
+        status = iree_make_status(iree_status_code_from_errno(errno),
+                                  "pread failed");
+      }
+    } else if (read_count == 0) {
+      status = iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "unexpected EOF while reading transferred fd");
+    } else {
+      cursor += read_count;
+      offset += read_count;
+      remaining -= (iree_host_size_t)read_count;
+    }
+  }
+  return status;
+}
+
+static int file_transfer_server_role(int argc, char** argv,
+                                     const char* temp_directory) {
+  XProcContext context;
+  char address[256];
+  MakeAddress(temp_directory, address, sizeof(address));
+
+  XPROC_CHECK_OK(SetupProactor(&context));
+  XPROC_CHECK_OK(ServerBind(address, &context));
+
+  iree_coordinated_test_signal_ready(temp_directory);
+
+  XPROC_CHECK_OK(ServerAcceptAndHandshake(&context, context.AsCallback()));
+  XPROC_CHECK(iree_all_bits_set(iree_net_carrier_capabilities(context.carrier),
+                                IREE_NET_CARRIER_CAPABILITY_POSIX_FD_TRANSFER),
+              "carrier does not advertise POSIX fd transfer");
+
+  iree_net_carrier_set_recv_handler(context.carrier, context.AsRecvHandler());
+  XPROC_CHECK_OK(iree_net_carrier_activate(context.carrier));
+
+  char file_path[256];
+  snprintf(file_path, sizeof(file_path), "%s/file-transfer.dat",
+           temp_directory);
+  XPROC_CHECK_OK(WriteTestFile(file_path, kFileTransferContents,
+                               strlen(kFileTransferContents)));
+
+  iree_io_file_handle_t* file_handle = nullptr;
+  XPROC_CHECK_OK(
+      iree_io_file_handle_open(IREE_IO_FILE_MODE_READ | IREE_IO_FILE_MODE_ASYNC,
+                               iree_make_cstring_view(file_path),
+                               iree_allocator_system(), &file_handle));
+
+  iree_net_file_handle_transfer_type_t transfer_type =
+      IREE_NET_FILE_HANDLE_TRANSFER_TYPE_NONE;
+  iree_host_size_t payload_length = 0;
+  XPROC_CHECK_OK(iree_net_carrier_query_file_handle_transfer(
+      context.carrier, file_handle, &transfer_type, &payload_length));
+  XPROC_CHECK(transfer_type == IREE_NET_FILE_HANDLE_TRANSFER_TYPE_POSIX_FD,
+              "unexpected transfer type %u", (uint32_t)transfer_type);
+
+  std::vector<uint8_t> transfer_payload(payload_length);
+  XPROC_CHECK_OK(iree_net_carrier_export_file_handle(
+      context.carrier, file_handle, transfer_type,
+      iree_make_byte_span(transfer_payload.data(), transfer_payload.size())));
+  iree_io_file_handle_release(file_handle);
+
+  XPROC_CHECK_OK(SendMessage(context.carrier, transfer_payload.data(),
+                             transfer_payload.size()));
+
+  XPROC_CHECK(context.PollUntil([&] {
+    return context.recv_total_bytes.load() >= strlen(kFileTransferAck);
+  }),
+              "timed out waiting for file transfer ack");
+
+  return 0;
+}
+
+static int file_transfer_client_role(int argc, char** argv,
+                                     const char* temp_directory) {
+  XProcContext context;
+  char address[256];
+  MakeAddress(temp_directory, address, sizeof(address));
+
+  XPROC_CHECK_OK(SetupProactor(&context));
+  XPROC_CHECK_OK(
+      ClientConnectAndHandshake(address, &context, context.AsCallback()));
+
+  iree_net_carrier_set_recv_handler(context.carrier, context.AsRecvHandler());
+  XPROC_CHECK_OK(iree_net_carrier_activate(context.carrier));
+
+  XPROC_CHECK(
+      context.PollUntil([&] { return context.recv_total_bytes.load() > 0; }),
+      "timed out waiting for file transfer payload");
+
+  iree_io_file_handle_t* file_handle = nullptr;
+  XPROC_CHECK_OK(iree_net_carrier_import_file_handle(
+      context.carrier, IREE_NET_FILE_HANDLE_TRANSFER_TYPE_POSIX_FD,
+      iree_make_const_byte_span(context.recv_buffer.data(),
+                                context.recv_buffer.size()),
+      iree_allocator_system(), &file_handle));
+
+  const int fd = iree_io_file_handle_value(file_handle).fd;
+  char contents[sizeof(kFileTransferContents)] = {0};
+  XPROC_CHECK_OK(ReadTestFd(fd, contents, strlen(kFileTransferContents)));
+  iree_io_file_handle_release(file_handle);
+
+  XPROC_CHECK(strcmp(contents, kFileTransferContents) == 0,
+              "transferred fd contents mismatch");
+
+  XPROC_CHECK_OK(
+      SendMessage(context.carrier, kFileTransferAck, strlen(kFileTransferAck)));
+
+  return 0;
+}
+
+#endif  // IREE_FILE_IO_ENABLE && !IREE_PLATFORM_WINDOWS
+
+//===----------------------------------------------------------------------===//
+// Test 5: Direct read across processes
 //===----------------------------------------------------------------------===//
 
 // The server writes data at this offset; the client reads it.
@@ -875,6 +1043,20 @@ static const iree_coordinated_test_config_t kDirectWriteConfig = {
     /*.timeout_ms=*/30000,
 };
 
+#if IREE_FILE_IO_ENABLE && !defined(IREE_PLATFORM_WINDOWS)
+static const iree_test_role_t kFileTransferRoles[] = {
+    {"file_transfer_server", file_transfer_server_role,
+     /*signals_ready=*/true},
+    {"file_transfer_client", file_transfer_client_role,
+     /*signals_ready=*/false},
+};
+static const iree_coordinated_test_config_t kFileTransferConfig = {
+    /*.roles=*/kFileTransferRoles,
+    /*.role_count=*/2,
+    /*.timeout_ms=*/30000,
+};
+#endif  // IREE_FILE_IO_ENABLE && !IREE_PLATFORM_WINDOWS
+
 static const iree_test_role_t kDirectReadRoles[] = {
     {"dread_server", dread_server_role, /*signals_ready=*/true},
     {"dread_client", dread_client_role, /*signals_ready=*/false},
@@ -894,12 +1076,18 @@ static const iree_test_role_t kAllRoles[] = {
     {"sendrecv_client", sendrecv_client_role, /*signals_ready=*/false},
     {"dwrite_server", dwrite_server_role, /*signals_ready=*/true},
     {"dwrite_client", dwrite_client_role, /*signals_ready=*/false},
+#if IREE_FILE_IO_ENABLE && !defined(IREE_PLATFORM_WINDOWS)
+    {"file_transfer_server", file_transfer_server_role,
+     /*signals_ready=*/true},
+    {"file_transfer_client", file_transfer_client_role,
+     /*signals_ready=*/false},
+#endif  // IREE_FILE_IO_ENABLE && !IREE_PLATFORM_WINDOWS
     {"dread_server", dread_server_role, /*signals_ready=*/true},
     {"dread_client", dread_client_role, /*signals_ready=*/false},
 };
 static const iree_coordinated_test_config_t kAllRolesConfig = {
     /*.roles=*/kAllRoles,
-    /*.role_count=*/8,
+    /*.role_count=*/sizeof(kAllRoles) / sizeof(kAllRoles[0]),
     /*.timeout_ms=*/30000,
 };
 IREE_COORDINATED_TEST_REGISTER(kAllRolesConfig);
@@ -952,6 +1140,15 @@ TEST(XProcCarrier, DirectWriteSignaling) {
                                          iree_coordinated_test_argv(),
                                          &kDirectWriteConfig));
 }
+
+#if IREE_FILE_IO_ENABLE && !defined(IREE_PLATFORM_WINDOWS)
+TEST(XProcCarrier, FileTransferSideband) {
+  if (!ProactorAvailable()) GTEST_SKIP() << "Platform proactor unavailable";
+  ASSERT_EQ(0, iree_coordinated_test_run(iree_coordinated_test_argc(),
+                                         iree_coordinated_test_argv(),
+                                         &kFileTransferConfig));
+}
+#endif  // IREE_FILE_IO_ENABLE && !IREE_PLATFORM_WINDOWS
 
 TEST(XProcCarrier, DirectReadAcrossProcesses) {
   if (!ProactorAvailable()) GTEST_SKIP() << "Platform proactor unavailable";

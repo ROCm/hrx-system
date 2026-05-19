@@ -229,11 +229,21 @@ static iree_status_t iree_hal_remote_client_file_register_descriptor(
     request->body.handle_payload_length = (uint32_t)transfer_payload_length;
   }
 
+  uint64_t file_length = 0;
+  iree_hal_file_t* metadata_file = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_fd_file_from_handle(access, handle, /*proactor=*/NULL,
+                                          host_allocator, &metadata_file);
+  }
+  if (iree_status_is_ok(status)) {
+    file_length = iree_hal_file_length(metadata_file);
+  }
+
   iree_hal_file_t* file = NULL;
   if (iree_status_is_ok(status)) {
     status = iree_hal_remote_client_file_create(
         device, IREE_HAL_REMOTE_CLIENT_FILE_KIND_REMOTE_FILE, access,
-        /*length=*/0, /*handle=*/NULL, /*inner_file=*/NULL,
+        file_length, /*handle=*/NULL, /*inner_file=*/NULL,
         iree_byte_span_empty(), request->body.provisional_id,
         /*owns_remote_resource=*/true, host_allocator, &file);
   }
@@ -252,10 +262,11 @@ static iree_status_t iree_hal_remote_client_file_register_descriptor(
         device, iree_make_const_byte_span(request, request_size));
   }
   if (!iree_status_is_ok(status) && transfer_exported) {
-    iree_net_carrier_release_file_handle_transfer(
-        device->session_carrier, transfer_type,
-        iree_make_const_byte_span(transfer_payload.data,
-                                  transfer_payload.data_length));
+    status = iree_status_join(
+        status, iree_net_carrier_release_file_handle_transfer(
+                    device->session_carrier, transfer_type,
+                    iree_make_const_byte_span(transfer_payload.data,
+                                              transfer_payload.data_length)));
   }
   if (iree_status_is_ok(status)) {
     *out_file = file;
@@ -263,6 +274,7 @@ static iree_status_t iree_hal_remote_client_file_register_descriptor(
   }
 
   iree_hal_file_release(file);
+  iree_hal_file_release(metadata_file);
   iree_allocator_free(host_allocator, request);
   return status;
 }

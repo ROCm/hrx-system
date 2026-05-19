@@ -66,6 +66,7 @@
 #include "iree/net/carrier.h"
 
 typedef struct iree_net_shm_shared_wake_t iree_net_shm_shared_wake_t;
+typedef struct iree_net_shm_file_transfer_t iree_net_shm_file_transfer_t;
 
 #ifdef __cplusplus
 extern "C" {
@@ -248,7 +249,11 @@ typedef struct iree_net_shm_carrier_create_params_t {
   // the carrier advertises REGISTERED_REGIONS | DIRECT_WRITE | DIRECT_READ
   // capabilities.
   const iree_net_shm_region_info_t* regions;
+  // Number of entries in |regions|.
   iree_host_size_t region_count;
+
+  // Optional sideband used to transfer external file handle rights.
+  iree_net_shm_file_transfer_t* file_transfer;
 } iree_net_shm_carrier_create_params_t;
 
 // Creates a single SHM carrier from pre-assembled dependencies.

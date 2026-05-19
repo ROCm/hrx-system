@@ -9,6 +9,7 @@
 #include "iree/async/notification.h"
 #include "iree/async/operations/scheduling.h"
 #include "iree/base/internal/mpsc_queue.h"
+#include "iree/net/carrier/shm/file_transfer.h"
 #include "iree/net/carrier/shm/shared_wake.h"
 
 typedef struct iree_net_shm_carrier_t {
@@ -92,6 +93,9 @@ typedef struct iree_net_shm_carrier_t {
   // Known SHM regions for buffer registration and direct read/write.
   // Stored as a FAM at the end of the struct.
   iree_host_size_t region_count;
+  // Optional sideband used to transfer external file handle rights.
+  iree_net_shm_file_transfer_t* file_transfer;
+  // Known SHM region table entries.
   iree_net_shm_region_info_t regions[];
 } iree_net_shm_carrier_t;
 
@@ -1198,8 +1202,47 @@ static iree_status_t iree_net_shm_carrier_direct_read(
 }
 
 //===----------------------------------------------------------------------===//
-// REFERENCE entry recv handling
+// File handle transfer
 //===----------------------------------------------------------------------===//
+
+static iree_status_t iree_net_shm_carrier_query_file_handle_transfer(
+    iree_net_carrier_t* base_carrier, iree_io_file_handle_t* file_handle,
+    iree_net_file_handle_transfer_type_t* out_transfer_type,
+    iree_host_size_t* out_payload_length) {
+  iree_net_shm_carrier_t* carrier = iree_net_shm_carrier_cast(base_carrier);
+  return iree_net_shm_file_transfer_query(carrier->file_transfer, file_handle,
+                                          out_transfer_type,
+                                          out_payload_length);
+}
+
+static iree_status_t iree_net_shm_carrier_export_file_handle(
+    iree_net_carrier_t* base_carrier, iree_io_file_handle_t* file_handle,
+    iree_net_file_handle_transfer_type_t transfer_type,
+    iree_byte_span_t transfer_payload) {
+  iree_net_shm_carrier_t* carrier = iree_net_shm_carrier_cast(base_carrier);
+  return iree_net_shm_file_transfer_export(carrier->file_transfer, file_handle,
+                                           transfer_type, transfer_payload);
+}
+
+static iree_status_t iree_net_shm_carrier_import_file_handle(
+    iree_net_carrier_t* base_carrier,
+    iree_net_file_handle_transfer_type_t transfer_type,
+    iree_const_byte_span_t transfer_payload, iree_allocator_t host_allocator,
+    iree_io_file_handle_t** out_file_handle) {
+  iree_net_shm_carrier_t* carrier = iree_net_shm_carrier_cast(base_carrier);
+  return iree_net_shm_file_transfer_import(carrier->file_transfer,
+                                           transfer_type, transfer_payload,
+                                           host_allocator, out_file_handle);
+}
+
+static iree_status_t iree_net_shm_carrier_release_file_handle_transfer(
+    iree_net_carrier_t* base_carrier,
+    iree_net_file_handle_transfer_type_t transfer_type,
+    iree_const_byte_span_t transfer_payload) {
+  iree_net_shm_carrier_t* carrier = iree_net_shm_carrier_cast(base_carrier);
+  return iree_net_shm_file_transfer_release_export(
+      carrier->file_transfer, transfer_type, transfer_payload);
+}
 
 //===----------------------------------------------------------------------===//
 // Vtable
@@ -1220,6 +1263,12 @@ static const iree_net_carrier_vtable_t iree_net_shm_carrier_vtable = {
     .direct_read = iree_net_shm_carrier_direct_read,
     .register_buffer = iree_net_shm_carrier_register_buffer,
     .unregister_buffer = iree_net_shm_carrier_unregister_buffer,
+    .query_file_handle_transfer =
+        iree_net_shm_carrier_query_file_handle_transfer,
+    .export_file_handle = iree_net_shm_carrier_export_file_handle,
+    .import_file_handle = iree_net_shm_carrier_import_file_handle,
+    .release_file_handle_transfer =
+        iree_net_shm_carrier_release_file_handle_transfer,
 };
 
 //===----------------------------------------------------------------------===//
@@ -1262,6 +1311,18 @@ IREE_API_EXPORT iree_status_t iree_net_shm_carrier_create(
                     IREE_NET_CARRIER_CAPABILITY_DIRECT_WRITE |
                     IREE_NET_CARRIER_CAPABILITY_DIRECT_READ;
   }
+  if (params->file_transfer) {
+    switch (iree_net_shm_file_transfer_type(params->file_transfer)) {
+      case IREE_NET_FILE_HANDLE_TRANSFER_TYPE_POSIX_FD:
+        capabilities |= IREE_NET_CARRIER_CAPABILITY_POSIX_FD_TRANSFER;
+        break;
+      case IREE_NET_FILE_HANDLE_TRANSFER_TYPE_WIN32_HANDLE:
+        capabilities |= IREE_NET_CARRIER_CAPABILITY_WIN32_HANDLE_TRANSFER;
+        break;
+      default:
+        break;
+    }
+  }
   iree_net_carrier_initialize(&iree_net_shm_carrier_vtable, capabilities, 0,
                               SIZE_MAX, callback, host_allocator,
                               &carrier->base);
@@ -1292,6 +1353,7 @@ IREE_API_EXPORT iree_status_t iree_net_shm_carrier_create(
 
   // Copy region table from params.
   carrier->region_count = params->region_count;
+  carrier->file_transfer = params->file_transfer;
   for (iree_host_size_t i = 0; i < params->region_count; ++i) {
     carrier->regions[i] = params->regions[i];
   }
