@@ -356,9 +356,6 @@ struct iree_net_rdma_connection_t {
   // Proactor used to deliver endpoint-ready NOPs. Retained by the connection.
   iree_async_proactor_t* proactor;
 
-  // Receive pool borrowed by the carrier. Stored for diagnostics/future QPs.
-  iree_async_buffer_pool_t* recv_pool;
-
   // Maximum number of endpoint slots in endpoints.
   uint32_t max_endpoint_count;
 
@@ -540,9 +537,9 @@ static const iree_net_connection_vtable_t iree_net_rdma_connection_vtable = {
 };
 
 static iree_status_t iree_net_rdma_connection_create(
-    iree_async_proactor_t* proactor, iree_async_buffer_pool_t* recv_pool,
-    uint32_t endpoint_count, iree_net_carrier_t** carriers,
-    iree_allocator_t host_allocator, iree_net_connection_t** out_connection) {
+    iree_async_proactor_t* proactor, uint32_t endpoint_count,
+    iree_net_carrier_t** carriers, iree_allocator_t host_allocator,
+    iree_net_connection_t** out_connection) {
   *out_connection = NULL;
 
   iree_status_t status = iree_ok_status();
@@ -576,7 +573,6 @@ static iree_status_t iree_net_rdma_connection_create(
                                    &connection->base);
     connection->proactor = proactor;
     iree_async_proactor_retain(proactor);
-    connection->recv_pool = recv_pool;
     connection->max_endpoint_count = endpoint_count;
     for (uint32_t i = 0; i < endpoint_count; ++i) {
       iree_net_rdma_endpoint_t* endpoint = &connection->endpoints[i];
@@ -642,9 +638,6 @@ struct iree_net_rdma_connect_state_t {
 
   // Proactor used for CM events and cleanup NOPs.
   iree_async_proactor_t* proactor;
-
-  // Receive pool borrowed by the resulting carrier.
-  iree_async_buffer_pool_t* recv_pool;
 
   // rdma_cm event channel wrapper.
   iree_net_rdma_cm_channel_t* cm_channel;
@@ -732,8 +725,8 @@ static void iree_net_rdma_connect_state_succeed(
       carriers[i] = state->endpoints[i].carrier;
     }
     status = iree_net_rdma_connection_create(
-        state->proactor, state->recv_pool, state->endpoint_count, carriers,
-        state->host_allocator, &connection);
+        state->proactor, state->endpoint_count, carriers, state->host_allocator,
+        &connection);
   }
   if (iree_status_is_ok(status)) {
     for (uint16_t i = 0; i < state->endpoint_count; ++i) {
@@ -764,7 +757,7 @@ static iree_status_t iree_net_rdma_connect_state_create_carrier(
     iree_net_rdma_carrier_create_params_t params = {
         .context = endpoint->connection_context,
         .proactor = state->proactor,
-        .recv_pool = state->recv_pool,
+        .recv_pool = NULL,
         .connection_id = endpoint->connection_id,
         .callback = callback,
         .options = state->factory->carrier_options,
@@ -983,9 +976,6 @@ typedef struct iree_net_rdma_listener_t {
 
   // Proactor used for CM events and stopped callbacks. Retained.
   iree_async_proactor_t* proactor;
-
-  // Receive pool borrowed by accepted carriers.
-  iree_async_buffer_pool_t* recv_pool;
 
   // rdma_cm event channel wrapper.
   iree_net_rdma_cm_channel_t* cm_channel;
@@ -1275,8 +1265,8 @@ static void iree_net_rdma_listener_deliver_accept(
       carriers[i] = accept_state->endpoints[i].carrier;
     }
     status = iree_net_rdma_connection_create(
-        listener->proactor, listener->recv_pool, accept_state->endpoint_count,
-        carriers, accept_state->host_allocator, &connection);
+        listener->proactor, accept_state->endpoint_count, carriers,
+        accept_state->host_allocator, &connection);
   }
   if (iree_status_is_ok(status)) {
     for (uint16_t i = 0; i < accept_state->endpoint_count; ++i) {
@@ -1339,7 +1329,7 @@ static iree_status_t iree_net_rdma_accept_state_prepare_endpoint(
     iree_net_rdma_carrier_create_params_t params = {
         .context = endpoint->connection_context,
         .proactor = listener->proactor,
-        .recv_pool = listener->recv_pool,
+        .recv_pool = NULL,
         .connection_id = endpoint->connection_id,
         .callback = callback,
         .options = listener->factory->carrier_options,
@@ -1823,6 +1813,7 @@ static iree_status_t iree_net_rdma_factory_connect(
     iree_net_transport_factory_t* base_factory, iree_string_view_t address,
     iree_async_proactor_t* proactor, iree_async_buffer_pool_t* recv_pool,
     iree_net_transport_connect_callback_t callback, void* user_data) {
+  (void)recv_pool;
   iree_net_rdma_factory_t* factory = (iree_net_rdma_factory_t*)base_factory;
   uint16_t endpoint_count = (uint16_t)factory->max_endpoint_count;
 
@@ -1850,7 +1841,6 @@ static iree_status_t iree_net_rdma_factory_connect(
     iree_net_transport_factory_retain(base_factory);
     state->proactor = proactor;
     iree_async_proactor_retain(proactor);
-    state->recv_pool = recv_pool;
     state->callback = callback;
     state->callback_user_data = user_data;
     state->endpoint_count = endpoint_count;
@@ -1910,6 +1900,7 @@ static iree_status_t iree_net_rdma_factory_create_listener(
     iree_async_proactor_t* proactor, iree_async_buffer_pool_t* recv_pool,
     iree_net_listener_accept_callback_t accept_callback, void* user_data,
     iree_allocator_t host_allocator, iree_net_listener_t** out_listener) {
+  (void)recv_pool;
   IREE_ASSERT_ARGUMENT(out_listener);
   *out_listener = NULL;
   iree_net_rdma_factory_t* factory = (iree_net_rdma_factory_t*)base_factory;
@@ -1930,7 +1921,6 @@ static iree_status_t iree_net_rdma_factory_create_listener(
     iree_net_transport_factory_retain(base_factory);
     listener->proactor = proactor;
     iree_async_proactor_retain(proactor);
-    listener->recv_pool = recv_pool;
     listener->accept_callback = accept_callback;
     listener->accept_user_data = user_data;
     listener->state = IREE_NET_RDMA_LISTENER_STATE_LISTENING;

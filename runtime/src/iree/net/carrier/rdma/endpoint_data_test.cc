@@ -18,6 +18,7 @@ iree_net_rdma_connection_data_t MakeTestConnectionData() {
   iree_net_rdma_connection_data_t data = {};
   data.send_queue_depth = 256;
   data.recv_queue_depth = 128;
+  data.recv_buffer_size = 4096;
   data.max_send_sge = 4;
   data.max_recv_sge = 1;
   data.max_inline_data = 64;
@@ -42,6 +43,7 @@ void ExpectConnectionDataEq(const iree_net_rdma_connection_data_t& expected,
   EXPECT_EQ(expected.flags, actual.flags);
   EXPECT_EQ(expected.send_queue_depth, actual.send_queue_depth);
   EXPECT_EQ(expected.recv_queue_depth, actual.recv_queue_depth);
+  EXPECT_EQ(expected.recv_buffer_size, actual.recv_buffer_size);
   EXPECT_EQ(expected.max_send_sge, actual.max_send_sge);
   EXPECT_EQ(expected.max_recv_sge, actual.max_recv_sge);
   EXPECT_EQ(expected.max_inline_data, actual.max_inline_data);

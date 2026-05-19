@@ -264,8 +264,9 @@ iree_net_transport_factory_query_capabilities(
 // The |proactor| handles I/O completions for this connection. All callbacks
 // for this connection will fire on the proactor's thread.
 //
-// The |recv_pool| provides buffers for incoming data during connection setup.
-// It must remain valid until the connection is released.
+// The |recv_pool| provides buffers for incoming data during connection setup
+// when required by the transport. Transports with connection-specific receive
+// registration may create their own receive pools instead.
 //
 // The |callback| fires exactly once via the proactor when the connection
 // succeeds or fails. The callback is always delivered asynchronously, never
@@ -293,8 +294,9 @@ static inline iree_status_t iree_net_transport_factory_connect(
 // The |proactor| handles I/O completions. All accept callbacks fire on the
 // proactor's thread.
 //
-// The |recv_pool| provides buffers for accepted connections' initial receives.
-// It must remain valid for the lifetime of all accepted connections.
+// The |recv_pool| provides buffers for accepted connections' initial receives
+// when required by the transport. Transports with connection-specific receive
+// registration may create their own receive pools instead.
 //
 // The |accept_callback| fires each time a new connection is accepted. On
 // success, the callback receives a new connection that the caller owns. The

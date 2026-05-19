@@ -23,7 +23,8 @@ enum iree_net_rdma_connection_data_offset_e {
   IREE_NET_RDMA_CONNECTION_DATA_OFFSET_CREDIT_ADDRESS = 32,
   IREE_NET_RDMA_CONNECTION_DATA_OFFSET_CREDIT_RKEY = 40,
   IREE_NET_RDMA_CONNECTION_DATA_OFFSET_CREDIT_LENGTH = 44,
-  IREE_NET_RDMA_CONNECTION_DATA_OFFSET_RESERVED0 = 48,
+  IREE_NET_RDMA_CONNECTION_DATA_OFFSET_RECV_BUFFER_SIZE = 48,
+  IREE_NET_RDMA_CONNECTION_DATA_OFFSET_RESERVED0 = 52,
 };
 
 static void iree_net_rdma_connection_data_store_u16(uint8_t* target,
@@ -86,6 +87,10 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_connection_data_validate(
   if (data->send_queue_depth == 0 || data->recv_queue_depth == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "RDMA queue depths must be non-zero");
+  }
+  if (data->recv_buffer_size == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "RDMA recv_buffer_size must be non-zero");
   }
   if (data->max_send_sge == 0 ||
       data->max_send_sge > IREE_NET_RDMA_CONNECTION_DATA_MAX_SEND_SGE) {
@@ -173,6 +178,9 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_connection_data_serialize(
   iree_net_rdma_connection_data_store_u32(
       target.data, IREE_NET_RDMA_CONNECTION_DATA_OFFSET_CREDIT_LENGTH,
       data->credit_memory.length);
+  iree_net_rdma_connection_data_store_u32(
+      target.data, IREE_NET_RDMA_CONNECTION_DATA_OFFSET_RECV_BUFFER_SIZE,
+      data->recv_buffer_size);
 
   *out_length = IREE_NET_RDMA_CONNECTION_DATA_LENGTH;
   return iree_ok_status();
@@ -234,6 +242,8 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_connection_data_deserialize(
       source.data, IREE_NET_RDMA_CONNECTION_DATA_OFFSET_CREDIT_RKEY);
   out_data->credit_memory.length = iree_net_rdma_connection_data_load_u32(
       source.data, IREE_NET_RDMA_CONNECTION_DATA_OFFSET_CREDIT_LENGTH);
+  out_data->recv_buffer_size = iree_net_rdma_connection_data_load_u32(
+      source.data, IREE_NET_RDMA_CONNECTION_DATA_OFFSET_RECV_BUFFER_SIZE);
 
   return iree_net_rdma_connection_data_validate(out_data);
 }

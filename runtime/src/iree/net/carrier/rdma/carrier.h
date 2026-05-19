@@ -64,6 +64,9 @@ typedef struct iree_net_rdma_carrier_t iree_net_rdma_carrier_t;
 // Default receive queue depth for two-sided messages and immediate signals.
 #define IREE_NET_RDMA_CARRIER_DEFAULT_RECV_QUEUE_DEPTH 256u
 
+// Default per-receive buffer size for two-sided messages.
+#define IREE_NET_RDMA_CARRIER_DEFAULT_RECV_BUFFER_SIZE 4096u
+
 // Maximum scatter-gather entries supported by the current carrier ABI.
 #define IREE_NET_RDMA_CARRIER_MAX_SEND_SGE \
   IREE_NET_RDMA_CONNECTION_DATA_MAX_SEND_SGE
@@ -88,6 +91,9 @@ typedef struct iree_net_rdma_carrier_options_t {
   // Receive queue depth. 0 selects the default.
   uint32_t recv_queue_depth;
 
+  // Per-buffer size for posted receives. 0 selects the default.
+  uint32_t recv_buffer_size;
+
   // Maximum send scatter-gather entries. 0 selects the default.
   uint32_t max_send_sge;
 
@@ -108,6 +114,7 @@ iree_net_rdma_carrier_options_default(void) {
   memset(&options, 0, sizeof(options));
   options.send_queue_depth = IREE_NET_RDMA_CARRIER_DEFAULT_SEND_QUEUE_DEPTH;
   options.recv_queue_depth = IREE_NET_RDMA_CARRIER_DEFAULT_RECV_QUEUE_DEPTH;
+  options.recv_buffer_size = IREE_NET_RDMA_CARRIER_DEFAULT_RECV_BUFFER_SIZE;
   options.max_send_sge = IREE_NET_RDMA_CARRIER_DEFAULT_MAX_SEND_SGE;
   options.max_recv_sge = IREE_NET_RDMA_CARRIER_DEFAULT_MAX_RECV_SGE;
   options.max_inline_data = IREE_NET_RDMA_CARRIER_DEFAULT_MAX_INLINE_DATA;
@@ -124,8 +131,10 @@ typedef struct iree_net_rdma_carrier_create_params_t {
   // Proactor used to monitor RDMA completion channels. Retained by the carrier.
   iree_async_proactor_t* proactor;
 
-  // Receive buffer pool for two-sided messages. Referenced, not owned; the pool
-  // must outlive the carrier.
+  // Optional receive buffer pool for two-sided messages. When NULL, the carrier
+  // creates an RDMA-registered pool in its own protection domain. Supplied
+  // pools must contain RDMA regions registered in |context|'s protection domain
+  // and must outlive the carrier.
   iree_async_buffer_pool_t* recv_pool;
 
   // Resolved rdma_cm connection identifier. The carrier creates and owns the QP

@@ -18,6 +18,7 @@ iree_net_rdma_connection_data_t MakeTestConnectionData() {
   iree_net_rdma_connection_data_t data = {};
   data.send_queue_depth = 256;
   data.recv_queue_depth = 128;
+  data.recv_buffer_size = 4096;
   data.max_send_sge = 4;
   data.max_recv_sge = 1;
   data.max_inline_data = 64;
@@ -33,6 +34,7 @@ void ExpectConnectionDataEq(const iree_net_rdma_connection_data_t& expected,
   EXPECT_EQ(expected.flags, actual.flags);
   EXPECT_EQ(expected.send_queue_depth, actual.send_queue_depth);
   EXPECT_EQ(expected.recv_queue_depth, actual.recv_queue_depth);
+  EXPECT_EQ(expected.recv_buffer_size, actual.recv_buffer_size);
   EXPECT_EQ(expected.max_send_sge, actual.max_send_sge);
   EXPECT_EQ(expected.max_recv_sge, actual.max_recv_sge);
   EXPECT_EQ(expected.max_inline_data, actual.max_inline_data);
@@ -76,7 +78,7 @@ TEST(RdmaConnectionDataTest, SerializesLittleEndianWireLayout) {
   EXPECT_EQ(0x52u, storage[1]);
   EXPECT_EQ(0x44u, storage[2]);
   EXPECT_EQ(0x4Du, storage[3]);
-  EXPECT_EQ(0x01u, storage[4]);
+  EXPECT_EQ(0x02u, storage[4]);
   EXPECT_EQ(0x00u, storage[5]);
   EXPECT_EQ(0x00u, storage[6]);
   EXPECT_EQ(0x00u, storage[7]);
@@ -93,7 +95,11 @@ TEST(RdmaConnectionDataTest, SerializesLittleEndianWireLayout) {
   EXPECT_EQ(0xCCu, storage[41]);
   EXPECT_EQ(0xBBu, storage[42]);
   EXPECT_EQ(0xAAu, storage[43]);
-  for (iree_host_size_t i = 48; i < IREE_NET_RDMA_CONNECTION_DATA_LENGTH; ++i) {
+  EXPECT_EQ(0x00u, storage[48]);
+  EXPECT_EQ(0x10u, storage[49]);
+  EXPECT_EQ(0x00u, storage[50]);
+  EXPECT_EQ(0x00u, storage[51]);
+  for (iree_host_size_t i = 52; i < IREE_NET_RDMA_CONNECTION_DATA_LENGTH; ++i) {
     EXPECT_EQ(0x00u, storage[i]);
   }
 }
@@ -166,7 +172,7 @@ TEST(RdmaConnectionDataTest, RejectsUnsupportedVersion) {
   uint8_t storage[IREE_NET_RDMA_CONNECTION_DATA_LENGTH] = {0};
   SerializeTestConnectionData(storage, sizeof(storage));
 
-  storage[4] = 2;
+  storage[4] = 3;
   iree_net_rdma_connection_data_t actual = {};
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_UNIMPLEMENTED,
@@ -178,7 +184,7 @@ TEST(RdmaConnectionDataTest, RejectsReservedBytes) {
   uint8_t storage[IREE_NET_RDMA_CONNECTION_DATA_LENGTH] = {0};
   SerializeTestConnectionData(storage, sizeof(storage));
 
-  storage[48] = 1;
+  storage[52] = 1;
   iree_net_rdma_connection_data_t actual = {};
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_UNIMPLEMENTED,
@@ -223,6 +229,18 @@ TEST(RdmaConnectionDataTest, RejectsInvalidCreditMemory) {
 TEST(RdmaConnectionDataTest, RejectsCreditOverflow) {
   iree_net_rdma_connection_data_t data = MakeTestConnectionData();
   data.initial_recv_credits = data.recv_queue_depth + 1;
+
+  uint8_t storage[IREE_NET_RDMA_CONNECTION_DATA_LENGTH] = {0};
+  iree_host_size_t data_length = 0;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_net_rdma_connection_data_serialize(
+          &data, iree_make_byte_span(storage, sizeof(storage)), &data_length));
+}
+
+TEST(RdmaConnectionDataTest, RejectsZeroRecvBufferSize) {
+  iree_net_rdma_connection_data_t data = MakeTestConnectionData();
+  data.recv_buffer_size = 0;
 
   uint8_t storage[IREE_NET_RDMA_CONNECTION_DATA_LENGTH] = {0};
   iree_host_size_t data_length = 0;
