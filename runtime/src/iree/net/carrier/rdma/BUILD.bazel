@@ -74,8 +74,7 @@ iree_runtime_cc_library(
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
-        ":librdmacm",
-        ":libverbs",
+        ":context",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
         "//runtime/src/iree/net:carrier",

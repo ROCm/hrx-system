@@ -57,8 +57,7 @@ iree_cc_library(
   HDRS
     "carrier.h"
   DEPS
-    ::librdmacm
-    ::libverbs
+    ::context
     iree::async
     iree::base
     iree::net::carrier

@@ -4,183 +4,136 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// RDMA carrier: kernel-bypass transport with one-sided operations.
+// RDMA carrier: reliable connected queue-pair transport.
 //
-// The RDMA carrier provides high-performance networking using InfiniBand verbs:
+// The RDMA carrier is the host-initiated data plane for RDMA-capable remoting.
+// It wraps an rdma_cm-established Reliable Connection (RC) queue pair and
+// exposes it through the generic iree_net_carrier_t interface:
 //
-//   - Kernel bypass: No syscalls on the data path.
-//   - Zero-copy: Data moves directly between registered memory regions.
-//   - One-sided operations: RDMA WRITE/READ without remote CPU involvement.
-//   - Low latency: Single-digit microsecond round trips.
+//   - send(): two-sided IBV_WR_SEND for ordered message/control traffic.
+//   - direct_write(): RDMA WRITE or RDMA WRITE WITH IMMEDIATE for bulk data.
+//   - direct_read(): RDMA READ for pull-based bulk data.
+//   - register_buffer(): one-time MR registration for host or dma-buf memory.
 //
-// ## Capabilities
+// The carrier does not perform address exchange itself. The transport factory
+// owns rdma_cm listener/connect state, creates the QP before connect/accept,
+// exchanges private connection data, and hands an established connection to the
+// carrier. Keeping the rdma_cm state machine out of carrier send paths makes
+// the hot path just WR posting, CQ draining, and credit accounting.
 //
-// RDMA carrier reports these capabilities:
-//   - RELIABLE: RC (Reliable Connection) QP mode guarantees delivery.
-//   - ZERO_COPY_TX: All sends are zero-copy from registered memory.
-//   - ZERO_COPY_RX: All receives land in registered memory.
-//   - REGISTERED_REGIONS: Memory registration required for DMA.
-//   - DIRECT_WRITE: RDMA WRITE to remote memory.
-//   - DIRECT_READ: RDMA READ from remote memory.
+// ## Capability model
 //
-// RDMA carrier does NOT support:
-//   - ORDERED: Completion ordering is not guaranteed for one-sided ops.
-//   - DATAGRAM: UD mode is not implemented (use RC for reliability).
-//
-// ## Connection setup
-//
-// RDMA connection requires out-of-band exchange of connection parameters:
-//   1. Each side creates a QP and gets its local address (GID, QP number).
-//   2. Exchange addresses via TCP, shared memory, or other mechanism.
-//   3. Call iree_net_rdma_carrier_connect() with remote parameters.
-//
-// The carrier handles QP state transitions (INIT -> RTR -> RTS).
-//
-// ## Memory registration
-//
-// Buffers used for RDMA operations must be registered with the device:
-//   - Use iree_async_region_t with RDMA device capabilities.
-//   - For direct_write/read, publish the region to get a remote handle.
-//   - Send the handle to the peer via control channel.
-//
-// ## Work request flow
-//
-// The carrier submits work requests (WRs) to the QP:
-//   - send(): Submits IBV_WR_SEND.
-//   - recv(): Posts receive buffers (IBV_WR_RECV).
-//   - direct_write(): Submits IBV_WR_RDMA_WRITE.
-//   - direct_read(): Submits IBV_WR_RDMA_READ.
-//
-// Completions are polled from the CQ and delivered via callback.
+// RC QPs provide reliable in-order execution within a QP, so the carrier
+// reports RELIABLE | ORDERED for message traffic. One-sided operations are
+// still completion-correlated by user_data/immediate values: callers must not
+// infer cross-QP ordering, and future GPU-initiated QPs are separate data
+// planes with their own ordering domains.
 //
 // ## Backpressure
 //
-// query_send_budget() returns available send queue depth. RDMA has strict
-// limits on outstanding WRs; exceeding them causes RNR (receiver not ready)
-// errors. The record layer respects this budget.
+// query_send_budget() is the only admission-control surface. For RDMA it must
+// account for local SQ capacity and remote receive/notification credits so
+// callers never intentionally drive the QP into RNR. Credit return is carrier
+// internal; higher layers should not add their own remote wait/round-trip.
 
 #ifndef IREE_NET_CARRIER_RDMA_CARRIER_H_
 #define IREE_NET_CARRIER_RDMA_CARRIER_H_
 
-#include "iree/async/api.h"
+#include <stdint.h>
+
+#include "iree/async/buffer_pool.h"
+#include "iree/async/proactor.h"
 #include "iree/base/api.h"
 #include "iree/net/carrier.h"
+#include "iree/net/carrier/rdma/context.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif  // __cplusplus
 
-//===----------------------------------------------------------------------===//
-// RDMA connection parameters
-//===----------------------------------------------------------------------===//
+typedef struct iree_net_rdma_carrier_t iree_net_rdma_carrier_t;
 
-// Local RDMA endpoint address. Exchanged out-of-band for connection setup.
-typedef struct iree_net_rdma_address_t {
-  // Global identifier (GID) for routing.
-  uint8_t gid[16];
+// Default send queue depth for host-initiated RDMA work requests.
+#define IREE_NET_RDMA_CARRIER_DEFAULT_SEND_QUEUE_DEPTH 256u
 
-  // Queue pair number.
-  uint32_t qp_number;
+// Default receive queue depth for two-sided messages and immediate signals.
+#define IREE_NET_RDMA_CARRIER_DEFAULT_RECV_QUEUE_DEPTH 256u
 
-  // Partition key (for InfiniBand subnets).
-  uint16_t pkey;
+// Maximum scatter-gather entries supported by the current carrier ABI.
+#define IREE_NET_RDMA_CARRIER_MAX_SEND_SGE 16u
 
-  // Local identifier (LID) for InfiniBand (0 for RoCE).
-  uint16_t lid;
+// Default maximum scatter-gather entries per send work request.
+#define IREE_NET_RDMA_CARRIER_DEFAULT_MAX_SEND_SGE 16u
 
-  // Packet sequence number for reliability.
-  uint32_t psn;
-} iree_net_rdma_address_t;
+// Default maximum scatter-gather entries per receive work request.
+#define IREE_NET_RDMA_CARRIER_DEFAULT_MAX_RECV_SGE 1u
 
-//===----------------------------------------------------------------------===//
-// RDMA carrier options
-//===----------------------------------------------------------------------===//
+// Default inline send threshold requested from the provider.
+#define IREE_NET_RDMA_CARRIER_DEFAULT_MAX_INLINE_DATA 64u
 
 // Options for RDMA carrier creation.
 typedef struct iree_net_rdma_carrier_options_t {
-  // Proactor for completion polling. The carrier retains a reference.
-  // The proactor must support RDMA completion channels.
-  iree_async_proactor_t* proactor;
-
-  // RDMA device name (e.g., "mlx5_0"). NULL uses the first available device.
-  const char* device_name;
-
-  // Port number on the device (1-based). 0 uses the first active port.
-  uint8_t port_number;
-
-  // Completion callback for carrier operations.
-  iree_net_carrier_callback_t callback;
-
-  // Send queue depth. 0 uses the default (256).
+  // Send queue depth. 0 selects the default.
   uint32_t send_queue_depth;
 
-  // Receive queue depth. 0 uses the default (256).
+  // Receive queue depth. 0 selects the default.
   uint32_t recv_queue_depth;
 
-  // Maximum send scatter-gather entries. 0 uses the default (16).
+  // Maximum send scatter-gather entries. 0 selects the default.
   uint32_t max_send_sge;
 
-  // Maximum receive scatter-gather entries. 0 uses the default (16).
+  // Maximum receive scatter-gather entries. 0 selects the default.
   uint32_t max_recv_sge;
 
-  // Maximum inline data size for small sends. 0 uses the default (64).
-  // Small sends below this threshold are inlined in the WQE.
+  // Maximum inline data bytes requested for small sends. 0 selects the default.
   uint32_t max_inline_data;
-
-  // GID index for RoCE. 0 uses the default GID.
-  uint8_t gid_index;
 } iree_net_rdma_carrier_options_t;
 
-// Returns default options with reasonable values.
+// Returns default RDMA carrier options.
 static inline iree_net_rdma_carrier_options_t
 iree_net_rdma_carrier_options_default(void) {
   iree_net_rdma_carrier_options_t options;
   memset(&options, 0, sizeof(options));
-  options.device_name = NULL;
-  options.port_number = 0;
-  options.send_queue_depth = 256;
-  options.recv_queue_depth = 256;
-  options.max_send_sge = 16;
-  options.max_recv_sge = 16;
-  options.max_inline_data = 64;
-  options.gid_index = 0;
+  options.send_queue_depth = IREE_NET_RDMA_CARRIER_DEFAULT_SEND_QUEUE_DEPTH;
+  options.recv_queue_depth = IREE_NET_RDMA_CARRIER_DEFAULT_RECV_QUEUE_DEPTH;
+  options.max_send_sge = IREE_NET_RDMA_CARRIER_DEFAULT_MAX_SEND_SGE;
+  options.max_recv_sge = IREE_NET_RDMA_CARRIER_DEFAULT_MAX_RECV_SGE;
+  options.max_inline_data = IREE_NET_RDMA_CARRIER_DEFAULT_MAX_INLINE_DATA;
   return options;
 }
 
-//===----------------------------------------------------------------------===//
-// RDMA carrier
-//===----------------------------------------------------------------------===//
+// Parameters for creating a carrier from an established rdma_cm connection.
+typedef struct iree_net_rdma_carrier_create_params_t {
+  // Shared RDMA context. Retained by the carrier.
+  iree_net_rdma_context_t* context;
 
-// Creates an RDMA carrier.
+  // Proactor used to monitor RDMA completion channels. Retained by the carrier.
+  iree_async_proactor_t* proactor;
+
+  // Receive buffer pool for two-sided messages. Referenced, not owned; the pool
+  // must outlive the carrier.
+  iree_async_buffer_pool_t* recv_pool;
+
+  // Established rdma_cm connection identifier. Ownership transfers to the
+  // carrier on successful creation; on failure, the caller retains ownership.
+  struct rdma_cm_id* connection_id;
+
+  // Completion callback for carrier operations.
+  iree_net_carrier_callback_t callback;
+
+  // Carrier queue and inline-data options.
+  iree_net_rdma_carrier_options_t options;
+} iree_net_rdma_carrier_create_params_t;
+
+// Creates an RDMA carrier from an established rdma_cm connection.
 //
-// |options| configures the carrier. The proactor is required.
-//
-// After creation, the carrier is in INIT state. Call
-// iree_net_rdma_carrier_local_address() to get the local address for
-// out-of-band exchange, then iree_net_rdma_carrier_connect() to complete
-// the connection.
-//
-// On success, |*out_carrier| receives the new carrier with ref count 1.
+// The connection ID must already have a QP associated with it and must be in
+// the established state. The transport factory is responsible for rdma_cm
+// address resolution, route resolution, connect/accept, and private-data
+// exchange.
 IREE_API_EXPORT iree_status_t iree_net_rdma_carrier_create(
-    iree_net_rdma_carrier_options_t options, iree_allocator_t host_allocator,
-    iree_net_carrier_t** out_carrier);
-
-// Returns the local RDMA address for out-of-band exchange.
-// Call after creation to get the address to send to the peer.
-IREE_API_EXPORT iree_status_t iree_net_rdma_carrier_local_address(
-    iree_net_rdma_carrier_t* carrier, iree_net_rdma_address_t* out_address);
-
-// Connects to a remote RDMA endpoint.
-//
-// |remote_address| is the peer's address obtained via out-of-band exchange.
-//
-// This transitions the QP through INIT -> RTR -> RTS and enables
-// send/recv/direct operations.
-//
-// Must be called exactly once after creation.
-IREE_API_EXPORT iree_status_t
-iree_net_rdma_carrier_connect(iree_net_rdma_carrier_t* carrier,
-                              const iree_net_rdma_address_t* remote_address);
+    iree_net_rdma_carrier_create_params_t params,
+    iree_allocator_t host_allocator, iree_net_carrier_t** out_carrier);
 
 #ifdef __cplusplus
 }  // extern "C"
