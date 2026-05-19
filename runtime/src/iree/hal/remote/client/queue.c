@@ -914,13 +914,14 @@ static iree_status_t iree_hal_remote_write_execute_payload(
     const iree_hal_buffer_binding_t* binding =
         &payload->binding_table.bindings[i];
     if (binding->buffer) {
-      status = iree_hal_remote_client_buffer_resolve_ref(
-          binding->buffer, binding->offset, &wire_bindings[i].buffer_id,
-          &wire_bindings[i].offset);
+      status = iree_hal_remote_client_buffer_resolve_range(
+          binding->buffer, binding->offset, binding->length,
+          &wire_bindings[i].buffer_id, &wire_bindings[i].offset,
+          &wire_bindings[i].length);
     } else {
       wire_bindings[i].offset = binding->offset;
+      wire_bindings[i].length = binding->length;
     }
-    wire_bindings[i].length = binding->length;
   }
   if (iree_status_is_ok(status) && payload->command_stream.data_length > 0) {
     memcpy(target.data + payload->stream_offset, payload->command_stream.data,
@@ -1035,14 +1036,14 @@ static iree_status_t iree_hal_remote_write_dispatch_payload(
   const iree_hal_buffer_ref_t workgroup_count_ref =
       payload->config.workgroup_count_ref;
   if (workgroup_count_ref.buffer) {
-    status = iree_hal_remote_client_buffer_resolve_ref(
+    status = iree_hal_remote_client_buffer_resolve_range(
         workgroup_count_ref.buffer, workgroup_count_ref.offset,
-        &op->config.workgroup_count_buffer_id,
-        &op->config.workgroup_count_offset);
+        workgroup_count_ref.length, &op->config.workgroup_count_buffer_id,
+        &op->config.workgroup_count_offset, &op->config.workgroup_count_length);
   } else {
     op->config.workgroup_count_offset = workgroup_count_ref.offset;
+    op->config.workgroup_count_length = workgroup_count_ref.length;
   }
-  op->config.workgroup_count_length = workgroup_count_ref.length;
   op->config.workgroup_count_buffer_slot = workgroup_count_ref.buffer_slot;
 
   uint8_t* constants_data = target.data + sizeof(iree_hal_remote_dispatch_op_t);
@@ -1056,13 +1057,13 @@ static iree_status_t iree_hal_remote_write_dispatch_payload(
        ++i) {
     const iree_hal_buffer_ref_t* ref = &payload->bindings.values[i];
     if (ref->buffer) {
-      status = iree_hal_remote_client_buffer_resolve_ref(
-          ref->buffer, ref->offset, &wire_bindings[i].buffer_id,
-          &wire_bindings[i].offset);
+      status = iree_hal_remote_client_buffer_resolve_range(
+          ref->buffer, ref->offset, ref->length, &wire_bindings[i].buffer_id,
+          &wire_bindings[i].offset, &wire_bindings[i].length);
     } else {
       wire_bindings[i].offset = ref->offset;
+      wire_bindings[i].length = ref->length;
     }
-    wire_bindings[i].length = ref->length;
     wire_bindings[i].buffer_slot = ref->buffer_slot;
   }
   return status;
@@ -1762,9 +1763,9 @@ iree_status_t iree_hal_remote_client_device_queue_fill(
   iree_hal_remote_buffer_fill_op_t op;
   memset(&op, 0, sizeof(op));
   op.header.type = IREE_HAL_REMOTE_QUEUE_OP_BUFFER_FILL;
-  iree_status_t status = iree_hal_remote_client_buffer_resolve_ref(
-      target_buffer, target_offset, &op.target_buffer_id, &op.target_offset);
-  op.length = length;
+  iree_status_t status = iree_hal_remote_client_buffer_resolve_range(
+      target_buffer, target_offset, length, &op.target_buffer_id,
+      &op.target_offset, &op.length);
   op.pattern_length = (uint8_t)pattern_length;
   op.fill_flags = flags;
   // Copy pattern (1, 2, or 4 bytes) into the 4-byte field, zero-extended.
@@ -1803,9 +1804,9 @@ iree_status_t iree_hal_remote_client_device_queue_update(
   iree_hal_remote_buffer_update_op_t op;
   memset(&op, 0, sizeof(op));
   op.header.type = IREE_HAL_REMOTE_QUEUE_OP_BUFFER_UPDATE;
-  iree_status_t status = iree_hal_remote_client_buffer_resolve_ref(
-      target_buffer, target_offset, &op.target_buffer_id, &op.target_offset);
-  op.length = length;
+  iree_status_t status = iree_hal_remote_client_buffer_resolve_range(
+      target_buffer, target_offset, length, &op.target_buffer_id,
+      &op.target_offset, &op.length);
   op.update_flags = flags;
 
   // The inline source data follows the op struct. Build two spans: the op
@@ -1816,7 +1817,7 @@ iree_status_t iree_hal_remote_client_device_queue_update(
         iree_async_span_from_ptr(&op, sizeof(op)),
         iree_async_span_from_ptr(
             (void*)((const uint8_t*)source_buffer + source_offset),
-            (iree_host_size_t)length),
+            (iree_host_size_t)op.length),
     };
     iree_async_span_list_t payload = {spans, 2};
     iree_hal_resource_t* resources[1] = {
@@ -1849,13 +1850,19 @@ iree_status_t iree_hal_remote_client_device_queue_copy(
   iree_hal_remote_buffer_copy_op_t op;
   memset(&op, 0, sizeof(op));
   op.header.type = IREE_HAL_REMOTE_QUEUE_OP_BUFFER_COPY;
-  iree_status_t status = iree_hal_remote_client_buffer_resolve_ref(
-      source_buffer, source_offset, &op.source_buffer_id, &op.source_offset);
+  iree_device_size_t source_length = 0;
+  iree_device_size_t target_length = 0;
+  iree_status_t status = iree_hal_remote_client_buffer_resolve_range(
+      source_buffer, source_offset, length, &op.source_buffer_id,
+      &op.source_offset, &source_length);
   if (iree_status_is_ok(status)) {
-    status = iree_hal_remote_client_buffer_resolve_ref(
-        target_buffer, target_offset, &op.target_buffer_id, &op.target_offset);
+    status = iree_hal_remote_client_buffer_resolve_range(
+        target_buffer, target_offset, length, &op.target_buffer_id,
+        &op.target_offset, &target_length);
   }
-  op.length = length;
+  op.length = length == IREE_HAL_WHOLE_BUFFER
+                  ? iree_min(source_length, target_length)
+                  : source_length;
   op.copy_flags = flags;
 
   if (iree_status_is_ok(status)) {
@@ -1914,17 +1921,17 @@ static iree_status_t iree_hal_remote_client_device_queue_read_client_file_now(
   iree_hal_remote_client_file_read_op_t op;
   memset(&op, 0, sizeof(op));
   op.header.type = IREE_HAL_REMOTE_QUEUE_OP_CLIENT_FILE_READ;
-  iree_status_t status = iree_hal_remote_client_buffer_resolve_ref(
-      target_buffer, target_offset, &op.target_buffer_id, &op.target_offset);
+  iree_status_t status = iree_hal_remote_client_buffer_resolve_range(
+      target_buffer, target_offset, length, &op.target_buffer_id,
+      &op.target_offset, &op.length);
 
   uint64_t transfer_id = 0;
   if (iree_status_is_ok(status)) {
     status = iree_hal_remote_client_bulk_begin_file_read(
-        device, source_file, source_file_view, source_offset, length,
+        device, source_file, source_file_view, source_offset, op.length,
         &transfer_id);
   }
   op.transfer_id = transfer_id;
-  op.length = length;
   op.read_flags = flags;
   if (iree_status_is_ok(status)) {
     iree_async_span_t span = iree_async_span_from_ptr(&op, sizeof(op));
@@ -2242,10 +2249,9 @@ iree_status_t iree_hal_remote_client_device_queue_read(
             op.header.type = IREE_HAL_REMOTE_QUEUE_OP_FILE_READ;
             op.source_file_id = source_file_view.remote_file_id;
             op.source_offset = source_offset;
-            status = iree_hal_remote_client_buffer_resolve_ref(
-                target_buffer, target_offset, &op.target_buffer_id,
-                &op.target_offset);
-            op.length = length;
+            status = iree_hal_remote_client_buffer_resolve_range(
+                target_buffer, target_offset, length, &op.target_buffer_id,
+                &op.target_offset, &op.length);
             op.read_flags = flags;
             if (iree_status_is_ok(status)) {
               iree_async_span_t span =
@@ -2313,20 +2319,19 @@ iree_status_t iree_hal_remote_client_device_queue_write(
       switch (target_file_view.kind) {
         case IREE_HAL_REMOTE_CLIENT_FILE_KIND_HOST_ALLOCATION:
         case IREE_HAL_REMOTE_CLIENT_FILE_KIND_ASYNC_FILE: {
-          uint64_t transfer_id = 0;
-          status = iree_hal_remote_client_bulk_begin_file_write(
-              device, target_file, &target_file_view, target_offset, length,
-              &transfer_id);
           iree_hal_remote_client_file_write_op_t op;
           memset(&op, 0, sizeof(op));
           op.header.type = IREE_HAL_REMOTE_QUEUE_OP_CLIENT_FILE_WRITE;
-          op.transfer_id = transfer_id;
+          status = iree_hal_remote_client_buffer_resolve_range(
+              source_buffer, source_offset, length, &op.source_buffer_id,
+              &op.source_offset, &op.length);
+          uint64_t transfer_id = 0;
           if (iree_status_is_ok(status)) {
-            status = iree_hal_remote_client_buffer_resolve_ref(
-                source_buffer, source_offset, &op.source_buffer_id,
-                &op.source_offset);
+            status = iree_hal_remote_client_bulk_begin_file_write(
+                device, target_file, &target_file_view, target_offset,
+                op.length, &transfer_id);
           }
-          op.length = length;
+          op.transfer_id = transfer_id;
           op.write_flags = flags;
           if (iree_status_is_ok(status)) {
             iree_async_span_t span = iree_async_span_from_ptr(&op, sizeof(op));
@@ -2356,12 +2361,11 @@ iree_status_t iree_hal_remote_client_device_queue_write(
             iree_hal_remote_file_write_op_t op;
             memset(&op, 0, sizeof(op));
             op.header.type = IREE_HAL_REMOTE_QUEUE_OP_FILE_WRITE;
-            status = iree_hal_remote_client_buffer_resolve_ref(
-                source_buffer, source_offset, &op.source_buffer_id,
-                &op.source_offset);
+            status = iree_hal_remote_client_buffer_resolve_range(
+                source_buffer, source_offset, length, &op.source_buffer_id,
+                &op.source_offset, &op.length);
             op.target_file_id = target_file_view.remote_file_id;
             op.target_offset = target_offset;
-            op.length = length;
             op.write_flags = flags;
             if (iree_status_is_ok(status)) {
               iree_async_span_t span =

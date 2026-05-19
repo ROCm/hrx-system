@@ -125,6 +125,13 @@ iree_status_t iree_hal_remote_client_buffer_resolve_ref(
     iree_hal_remote_resource_id_t* out_resource_id,
     iree_device_size_t* out_byte_offset);
 
+// Resolves a buffer range to a remote root resource and absolute offset/length.
+iree_status_t iree_hal_remote_client_buffer_resolve_range(
+    iree_hal_buffer_t* buffer, iree_device_size_t byte_offset,
+    iree_device_size_t byte_length,
+    iree_hal_remote_resource_id_t* out_resource_id,
+    iree_device_size_t* out_byte_offset, iree_device_size_t* out_byte_length);
+
 // Returns the resource_id from a remote client buffer proxy.
 // Handles subspan buffers by traversing to the root allocation.
 static inline iree_hal_remote_resource_id_t

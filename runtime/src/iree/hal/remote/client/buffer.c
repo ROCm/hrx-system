@@ -866,3 +866,39 @@ iree_status_t iree_hal_remote_client_buffer_resolve_ref(
   *out_byte_offset = iree_hal_buffer_byte_offset(buffer) + byte_offset;
   return iree_ok_status();
 }
+
+iree_status_t iree_hal_remote_client_buffer_resolve_range(
+    iree_hal_buffer_t* buffer, iree_device_size_t byte_offset,
+    iree_device_size_t byte_length,
+    iree_hal_remote_resource_id_t* out_resource_id,
+    iree_device_size_t* out_byte_offset, iree_device_size_t* out_byte_length) {
+  IREE_ASSERT_ARGUMENT(buffer);
+  IREE_ASSERT_ARGUMENT(out_resource_id);
+  IREE_ASSERT_ARGUMENT(out_byte_offset);
+  IREE_ASSERT_ARGUMENT(out_byte_length);
+  if (iree_hal_remote_client_buffer_is_deallocated(buffer)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "remote buffer has been deallocated");
+  }
+
+  iree_device_size_t relative_offset = 0;
+  iree_device_size_t relative_length = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_calculate_range(
+      /*base_offset=*/0, iree_hal_buffer_byte_length(buffer), byte_offset,
+      byte_length, &relative_offset, &relative_length));
+
+  iree_hal_buffer_t* root_buffer = iree_hal_buffer_allocated_buffer(buffer);
+  if (!root_buffer) root_buffer = buffer;
+  iree_hal_remote_client_buffer_t* remote_buffer =
+      (iree_hal_remote_client_buffer_t*)root_buffer;
+  if (remote_buffer->resource_id == 0) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "remote buffer backing has not been materialized; wait for the "
+        "queue_alloca signal before using it");
+  }
+  *out_resource_id = remote_buffer->resource_id;
+  *out_byte_offset = iree_hal_buffer_byte_offset(buffer) + relative_offset;
+  *out_byte_length = relative_length;
+  return iree_ok_status();
+}
