@@ -67,6 +67,41 @@ iree_cc_library(
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_library(
+  NAME
+    context
+  HDRS
+    "context.h"
+  SRCS
+    "context.c"
+  DEPS
+    ::librdmacm
+    ::libverbs
+    iree::base
+    iree::base::internal
+    rdma_core::headers
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    context_test
+  SRCS
+    "context_test.cc"
+  DEPS
+    ::context
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    rdma_core::headers
+  LABELS
+    "nodocker"
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_test(
   NAME
     dmabuf_registration_test

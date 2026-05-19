@@ -82,6 +82,46 @@ iree_runtime_cc_library(
     ],
 )
 
+iree_runtime_cc_library(
+    name = "context",
+    srcs = [
+        "context.c",
+    ],
+    hdrs = [
+        "context.h",
+    ],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":librdmacm",
+        ":libverbs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "@rdma_core_headers",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "context_test",
+    srcs = ["context_test.cc"],
+    tags = [
+        "nodocker",
+    ],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":context",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "@rdma_core_headers",
+    ],
+)
+
 iree_runtime_cc_test(
     name = "dmabuf_registration_test",
     srcs = ["dmabuf_registration_test.cc"],
