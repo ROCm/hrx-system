@@ -136,7 +136,7 @@ TEST_P(BeginSendTest, Backpressure) {
 
   iree_net_carrier_send_budget_t initial =
       iree_net_carrier_query_send_budget(client_);
-  if (initial.slots >= 1000000) {
+  if (initial.slots >= 4096) {
     GTEST_SKIP() << "Carrier has effectively unlimited budget";
   }
 
@@ -144,15 +144,16 @@ TEST_P(BeginSendTest, Backpressure) {
   const iree_host_size_t kChunkSize = 256;
   int committed_count = 0;
   iree_host_size_t total_committed = 0;
+  bool admission_exhausted = false;
 
-  for (int i = 0; i < 10000; ++i) {
+  for (uint32_t i = 0; i <= initial.slots; ++i) {
     void* ptr = nullptr;
     iree_net_carrier_send_handle_t handle = 0;
     iree_status_t status =
         iree_net_carrier_begin_send(client_, kChunkSize, &ptr, &handle);
     if (!iree_status_is_ok(status)) {
-      // Should be RESOURCE_EXHAUSTED.
       IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, status);
+      admission_exhausted = true;
       break;
     }
     memset(ptr, (uint8_t)(i & 0xFF), kChunkSize);
@@ -163,6 +164,9 @@ TEST_P(BeginSendTest, Backpressure) {
 
   // We should have committed at least one.
   ASSERT_GT(committed_count, 0);
+  ASSERT_TRUE(admission_exhausted)
+      << "Carrier accepted more sends than its finite budget of "
+      << initial.slots << " slots without transport progress";
 
   // Drain the transport so the receiver processes everything.
   ASSERT_TRUE(PollUntil(
