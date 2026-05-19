@@ -17,6 +17,7 @@ iree_cc_library(
   SRCS
     "registry.cc"
   DEPS
+    iree::base::tooling::flags
     iree::hal
     iree::testing::gtest
   TESTONLY

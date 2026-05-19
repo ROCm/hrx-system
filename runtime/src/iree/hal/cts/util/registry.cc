@@ -11,6 +11,13 @@
 #include <iostream>
 #include <mutex>
 
+#include "iree/base/tooling/flags.h"
+
+IREE_FLAG_LIST(
+    string, cts_backend_filter,
+    "Backend name patterns to instantiate. May be repeated and uses the same "
+    "glob syntax as iree_string_view_match_pattern.");
+
 namespace iree::hal::cts {
 namespace {
 
@@ -29,14 +36,18 @@ struct RegistryData {
   std::mutex mutex;
   // True after test suites have been instantiated.
   bool instantiated = false;
+  // True after pending formats, backend adapters, and filters are applied.
+  bool prepared = false;
   // True after process-level cleanup hooks have run.
   bool cleanups_run = false;
   // Registered CTS test suites.
   std::vector<TestSuiteInfo> test_suites;
-  // Registered CTS backend configurations.
+  // Concrete and adapted CTS backend configurations.
   std::vector<BackendConfig> backends;
   // Executable targets waiting for matching backend registration.
   std::vector<PendingTarget> pending_targets;
+  // Backend adapters registered by optional wrapper libraries.
+  std::vector<BackendAdapterInfo> backend_adapters;
   // Process-level cleanup hooks registered by CTS helper libraries.
   std::vector<CleanupFn> cleanups;
 };
@@ -98,6 +109,12 @@ std::vector<ExecutableTarget> CtsRegistry::ListExecutableTargets(
   return targets;
 }
 
+void CtsRegistry::RegisterBackendAdapter(BackendAdapterInfo info) {
+  auto& data = GetRegistryData();
+  std::lock_guard<std::mutex> lock(data.mutex);
+  data.backend_adapters.push_back(std::move(info));
+}
+
 //===----------------------------------------------------------------------===//
 // Instantiation
 //===----------------------------------------------------------------------===//
@@ -146,6 +163,61 @@ static void MergePendingTargets(RegistryData& data) {
   data.pending_targets.clear();
 }
 
+// Applies registered backend adapters to the concrete backend list. Adapters
+// see only the original source backends, so derived backends are not
+// recursively adapted by another linked adapter.
+static void ApplyBackendAdapters(RegistryData& data) {
+  if (data.backend_adapters.empty()) return;
+  std::vector<BackendConfig> source_backends = data.backends;
+  for (const auto& adapter : data.backend_adapters) {
+    for (const auto& backend : source_backends) {
+      adapter.adapter(backend, &data.backends);
+    }
+  }
+}
+
+static bool BackendMatchesAnyFilter(const BackendConfig& backend,
+                                    iree_flag_string_list_t filters) {
+  if (filters.count == 0) return true;
+  iree_string_view_t backend_name =
+      iree_make_cstring_view(backend.name.c_str());
+  for (iree_host_size_t i = 0; i < filters.count; ++i) {
+    if (iree_string_view_match_pattern(backend_name, filters.values[i])) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static void ApplyBackendFilter(RegistryData& data) {
+  iree_flag_string_list_t filters = FLAG_cts_backend_filter_list();
+  if (filters.count == 0) return;
+  auto remove_begin =
+      std::remove_if(data.backends.begin(), data.backends.end(),
+                     [filters](const BackendConfig& backend) {
+                       return !BackendMatchesAnyFilter(backend, filters);
+                     });
+  data.backends.erase(remove_begin, data.backends.end());
+  if (data.backends.empty()) {
+    std::cerr << "CtsRegistry: --cts_backend_filter matched no "
+                 "registered backends.\n";
+    std::abort();
+  }
+}
+
+static void PrepareBackends(RegistryData& data) {
+  if (data.prepared) return;
+  data.prepared = true;
+
+  // Merge pending executable targets into their backends. This handles the
+  // case where RegisterExecutableTarget() was called before or after the
+  // corresponding RegisterBackend() — static init ordering is unspecified.
+  MergePendingTargets(data);
+
+  ApplyBackendAdapters(data);
+  ApplyBackendFilter(data);
+}
+
 void CtsRegistry::InstantiateAll() {
   auto& data = GetRegistryData();
   std::lock_guard<std::mutex> lock(data.mutex);
@@ -156,10 +228,7 @@ void CtsRegistry::InstantiateAll() {
   }
   data.instantiated = true;
 
-  // Merge pending executable targets into their backends. This handles the
-  // case where RegisterExecutableTarget() was called before or after the
-  // corresponding RegisterBackend() — static init ordering is unspecified.
-  MergePendingTargets(data);
+  PrepareBackends(data);
 
   if (data.backends.empty() || data.test_suites.empty()) {
     return;
@@ -182,9 +251,7 @@ void CtsRegistry::Instantiate(const char* suite_name,
   auto& data = GetRegistryData();
   std::lock_guard<std::mutex> lock(data.mutex);
 
-  // Merge pending executable targets (same as InstantiateAll) so that targets
-  // registered separately from backends are available.
-  MergePendingTargets(data);
+  PrepareBackends(data);
 
   // Find the specified suite.
   const TestSuiteInfo* suite = nullptr;
@@ -203,7 +270,7 @@ void CtsRegistry::Instantiate(const char* suite_name,
   // Find the specified backend.
   const BackendConfig* backend = nullptr;
   for (const auto& b : data.backends) {
-    if (std::string(b.name) == backend_name) {
+    if (b.name == backend_name) {
       backend = &b;
       break;
     }

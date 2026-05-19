@@ -33,6 +33,7 @@ iree_runtime_cc_library(
     srcs = ["registry.cc"],
     hdrs = ["registry.h"],
     deps = [
+        "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",
     ],

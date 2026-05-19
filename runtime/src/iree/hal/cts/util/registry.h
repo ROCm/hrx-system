@@ -14,8 +14,10 @@
 //      CTS_REGISTER_TEST_SUITE().
 //   2. Backends register themselves at static init time via
 //      CtsRegistry::RegisterBackend().
-//   3. main() calls CtsRegistry::InstantiateAll() before RUN_ALL_TESTS().
-//   4. InstantiateAll() creates gtest parameterized test instances for each
+//   3. Backend adapters optionally derive additional backends from the concrete
+//      backend registrations (for example, wrapping a backend through remote).
+//   4. main() calls CtsRegistry::InstantiateAll() before RUN_ALL_TESTS().
+//   5. InstantiateAll() creates gtest parameterized test instances for each
 //      suite × backend pair that passes tag filtering.
 //
 // Tag filtering:
@@ -247,10 +249,29 @@ inline void PrintTo(const BackendInfo& info, std::ostream* os) {
 // Identifies a backend configuration for test instantiation.
 // Extends BackendInfo with tags for filtering which test suites apply.
 struct BackendConfig {
-  const char* name;               // "local_task", etc.
+  std::string name;               // "local_task", etc.
   BackendInfo info;               // Factory + capabilities.
   std::vector<std::string> tags;  // {"events", "indirect", ...}
   std::vector<ExecutableTarget> executable_targets;  // Available targets.
+};
+
+//===----------------------------------------------------------------------===//
+// Backend adaptation
+//===----------------------------------------------------------------------===//
+
+// Function called once for each concrete backend after executable targets have
+// been merged. Adapters may append derived backends, such as a remote client
+// backend that wraps the concrete backend's device factory.
+using BackendAdapterFn =
+    std::function<void(const BackendConfig& source_config,
+                       std::vector<BackendConfig>* adapted_configs)>;
+
+// Metadata about a registered backend adapter.
+struct BackendAdapterInfo {
+  // Adapter name for diagnostics.
+  const char* name;
+  // Function that appends derived backend configs.
+  BackendAdapterFn adapter;
 };
 
 //===----------------------------------------------------------------------===//
@@ -314,6 +335,10 @@ class CtsRegistry {
   // gtest parameterizations or requiring a BackendConfig registration.
   static std::vector<ExecutableTarget> ListExecutableTargets(
       const char* backend_name);
+
+  // Register a backend adapter. Called by libraries that derive test backends
+  // from concrete backend registrations.
+  static void RegisterBackendAdapter(BackendAdapterInfo info);
 
   //===--------------------------------------------------------------------===//
   // Instantiation (called from main, before RUN_ALL_TESTS)

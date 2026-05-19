@@ -4,15 +4,9 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-# CTS test binaries for the remote HAL driver (loopback + local-task).
+# CTS helpers for adapting HAL CTS backends through the remote loopback driver.
 
-load(
-    "//build_tools/bazel:iree_hal_cts_test_suite.bzl",
-    "iree_hal_cts_test_suite",
-    "iree_hal_cts_testdata",
-)
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
-load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -20,77 +14,24 @@ package(
     licenses = ["notice"],
 )
 
-_BACKENDS_DEPS = [
-    "//runtime/src/iree/async",
-    "//runtime/src/iree/async/util:proactor_pool",
-    "//runtime/src/iree/base",
-    "//runtime/src/iree/base/threading",
-    "//runtime/src/iree/hal",
-    "//runtime/src/iree/hal/cts/util:registry",
-    "//runtime/src/iree/hal/drivers/amdgpu/registration",
-    "//runtime/src/iree/hal/drivers/local_task/registration",
-    "//runtime/src/iree/hal/drivers/vulkan/registration",
-    "//runtime/src/iree/hal/remote/client",
-    "//runtime/src/iree/hal/remote/server",
-    "//runtime/src/iree/hal/remote/util:recv_pool",
-    "//runtime/src/iree/net:session",
-    "//runtime/src/iree/net/carrier/loopback:factory",
-]
-
 iree_runtime_cc_library(
-    name = "backends",
+    name = "loopback_adapter",
     testonly = True,
-    srcs = ["backends.cc"],
-    deps = _BACKENDS_DEPS,
-    alwayslink = True,
-)
-
-iree_runtime_cc_library(
-    name = "hardware_backends",
-    testonly = True,
-    srcs = ["backends.cc"],
-    defines = ["IREE_HAL_REMOTE_CTS_ENABLE_HARDWARE_BACKENDS_DEFAULT=1"],
-    deps = _BACKENDS_DEPS,
-    alwayslink = True,
-)
-
-iree_hal_cts_testdata(
-    backend_name = "remote_amdgpu",
-    flag_values = {
-        "ROCM_BC_DIR": "@amdgpu_device_libs//:bitcode",
-        "ROCM_TARGET": "//build_tools/bazel:rocm_test_target",
-    },
-    flags = [
-        "--iree-rocm-target={ROCM_TARGET}",
-        "--iree-rocm-bc-dir={ROCM_BC_DIR}",
-    ],
-    format_name = "amdgpu",
-    format_string = '"amdgcn-amd-amdhsa--{ROCM_TARGET}"',
-    identifier = "iree_remote_cts_testdata_amdgpu",
-    target_device = "amdgpu",
-    testdata = "//runtime/src/iree/hal/remote/cts/testdata:executable_srcs",
-)
-
-iree_hal_cts_test_suite(
-    backends_lib = ":backends",
-)
-
-iree_runtime_cc_test(
-    name = "executable_global_tests",
-    srcs = [
-        "executable_global_test.cc",
-        "//runtime/src/iree/hal/cts/util:test_main.cc",
-    ],
-    tags = [
-        "driver=amdgpu",
-        "requires-gpu-amd",
-    ],
+    srcs = ["loopback_adapter.cc"],
     deps = [
-        ":hardware_backends",
-        ":testdata_amdgpu_lib",
-        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async:platform",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/async/util:proactor_thread",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:registry",
-        "//runtime/src/iree/hal/cts/util:test_base",
-        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/hal/remote/client",
+        "//runtime/src/iree/hal/remote/server",
+        "//runtime/src/iree/hal/remote/util:recv_pool",
+        "//runtime/src/iree/net:session",
+        "//runtime/src/iree/net/carrier/loopback:factory",
     ],
+    alwayslink = True,
 )
