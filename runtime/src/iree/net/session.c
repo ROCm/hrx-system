@@ -877,6 +877,15 @@ static void iree_net_session_on_send_complete(void* user_data,
   }
 }
 
+static void iree_net_session_on_send_ready(void* user_data) {
+  iree_net_session_t* session = (iree_net_session_t*)user_data;
+  iree_net_session_retain(session);
+  if (session->callbacks.on_send_ready) {
+    session->callbacks.on_send_ready(session->callbacks.user_data, session);
+  }
+  iree_net_session_release(session);
+}
+
 // Control channel transport error handler.
 // Retains the session to protect against re-entrant release from on_error.
 static void iree_net_session_on_transport_error(void* user_data,
@@ -942,6 +951,7 @@ static void iree_net_session_on_control_endpoint_ready(
       .on_pong = NULL,  // Session doesn't use PONG directly.
       .on_transport_error = iree_net_session_on_transport_error,
       .on_send_complete = iree_net_session_on_send_complete,
+      .on_send_ready = iree_net_session_on_send_ready,
       .user_data = session,
   };
 

@@ -146,6 +146,13 @@ typedef void (*iree_net_control_channel_on_transport_error_fn_t)(
 typedef void (*iree_net_control_channel_on_send_complete_fn_t)(
     void* user_data, uint64_t operation_user_data, iree_status_t status);
 
+// Called when a previously backpressured send may make progress.
+//
+// This is an edge notification from the transport, not a reservation. Callers
+// must re-query budget or retry the send that previously returned
+// RESOURCE_EXHAUSTED.
+typedef void (*iree_net_control_channel_on_send_ready_fn_t)(void* user_data);
+
 // Bundled application callbacks for channel events.
 //
 // |on_data| is required — receiving a DATA frame with no handler is a protocol
@@ -155,12 +162,28 @@ typedef void (*iree_net_control_channel_on_send_complete_fn_t)(
 // All callbacks fire on the proactor thread. The shared |user_data| is passed
 // as the first argument to each callback.
 typedef struct iree_net_control_channel_callbacks_t {
+  // Required callback for DATA frames.
   iree_net_control_channel_on_data_fn_t on_data;
+
+  // Optional callback for GOAWAY frames.
   iree_net_control_channel_on_goaway_fn_t on_goaway;
+
+  // Optional callback for ERROR frames.
   iree_net_control_channel_on_error_fn_t on_error;
+
+  // Optional callback for PONG frames.
   iree_net_control_channel_on_pong_fn_t on_pong;
+
+  // Optional callback for transport errors.
   iree_net_control_channel_on_transport_error_fn_t on_transport_error;
+
+  // Optional callback for send completions.
   iree_net_control_channel_on_send_complete_fn_t on_send_complete;
+
+  // Optional callback for send readiness after transport backpressure.
+  iree_net_control_channel_on_send_ready_fn_t on_send_ready;
+
+  // User data passed as the first argument to each callback.
   void* user_data;
 } iree_net_control_channel_callbacks_t;
 

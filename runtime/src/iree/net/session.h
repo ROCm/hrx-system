@@ -195,6 +195,14 @@ typedef iree_status_t (*iree_net_session_on_control_data_fn_t)(
 typedef void (*iree_net_session_on_send_complete_fn_t)(
     void* user_data, uint64_t operation_user_data, iree_status_t status);
 
+// Called when a previously backpressured control send may make progress.
+//
+// This is an edge notification from the transport, not a reservation. Callers
+// must re-query budget or retry the control send that previously returned
+// RESOURCE_EXHAUSTED.
+typedef void (*iree_net_session_on_send_ready_fn_t)(
+    void* user_data, iree_net_session_t* session);
+
 // Bundled session callbacks.
 //
 // |on_ready| is required. |on_control_data| is required (the application
@@ -204,11 +212,25 @@ typedef void (*iree_net_session_on_send_complete_fn_t)(
 // All callbacks fire on the proactor thread. The shared |user_data| is
 // passed as the first argument to each callback.
 typedef struct iree_net_session_callbacks_t {
+  // Required callback for session bootstrap completion.
   iree_net_session_on_ready_fn_t on_ready;
+
+  // Optional callback for peer-initiated graceful shutdown.
   iree_net_session_on_goaway_fn_t on_goaway;
+
+  // Optional callback for unrecoverable session errors.
   iree_net_session_on_error_fn_t on_error;
+
+  // Required callback for post-bootstrap control DATA frames.
   iree_net_session_on_control_data_fn_t on_control_data;
+
+  // Optional callback for control DATA send completions.
   iree_net_session_on_send_complete_fn_t on_send_complete;
+
+  // Optional callback for send readiness after transport backpressure.
+  iree_net_session_on_send_ready_fn_t on_send_ready;
+
+  // User data passed as the first argument to each callback.
   void* user_data;
 } iree_net_session_callbacks_t;
 

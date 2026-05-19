@@ -308,6 +308,12 @@ struct MockEndpoint {
       callbacks.on_error(callbacks.user_data, status);
     }
   }
+
+  void InjectSendReady() {
+    if (callbacks.on_send_ready) {
+      callbacks.on_send_ready(callbacks.user_data);
+    }
+  }
 };
 
 const iree_net_message_endpoint_vtable_t MockEndpoint::vtable = {
@@ -379,6 +385,9 @@ struct TestContext {
   // Send completion status codes.
   std::vector<iree_status_code_t> send_completion_errors;
 
+  // Send readiness notification count.
+  iree_host_size_t send_ready_count = 0;
+
   // Credit replenishment deltas.
   std::vector<uint32_t> credit_deltas;
 
@@ -442,6 +451,11 @@ struct TestContext {
     iree_status_ignore(status);
   }
 
+  static void OnSendReady(void* user_data) {
+    auto* context = static_cast<TestContext*>(user_data);
+    ++context->send_ready_count;
+  }
+
   static void OnCredit(void* user_data, uint32_t credit_delta,
                        uint32_t available_credit_count) {
     auto* context = static_cast<TestContext*>(user_data);
@@ -458,6 +472,7 @@ struct TestContext {
     callbacks.on_abort = OnAbort;
     callbacks.on_transport_error = OnTransportError;
     callbacks.on_send_complete = OnSendComplete;
+    callbacks.on_send_ready = OnSendReady;
     callbacks.on_credit = OnCredit;
     callbacks.user_data = this;
     return callbacks;
@@ -793,6 +808,20 @@ TEST_F(BulkChannelTest, TransportErrorTransitionsToError) {
             IREE_NET_BULK_CHANNEL_STATE_ERROR);
   ASSERT_EQ(context_.transport_errors.size(), 1u);
   EXPECT_EQ(context_.transport_errors[0], IREE_STATUS_UNAVAILABLE);
+}
+
+TEST_F(BulkChannelTest, SendReadyCallbackFiresInOperationalState) {
+  CreateAndActivate();
+  endpoint_.InjectSendReady();
+  EXPECT_EQ(context_.send_ready_count, 1u);
+}
+
+TEST_F(BulkChannelTest, SendReadyIgnoredInErrorState) {
+  CreateAndActivate();
+  endpoint_.InjectError(
+      iree_make_status(IREE_STATUS_UNAVAILABLE, "transport down"));
+  endpoint_.InjectSendReady();
+  EXPECT_EQ(context_.send_ready_count, 0u);
 }
 
 //===----------------------------------------------------------------------===//

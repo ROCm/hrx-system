@@ -119,6 +119,16 @@ static void iree_net_control_channel_on_sender_complete(
   }
 }
 
+static void iree_net_control_channel_on_endpoint_send_ready(void* user_data) {
+  iree_net_control_channel_t* channel = (iree_net_control_channel_t*)user_data;
+  iree_net_control_channel_state_t state =
+      iree_net_control_channel_load_state(channel);
+  if (state != IREE_NET_CONTROL_CHANNEL_STATE_ERROR &&
+      channel->callbacks.on_send_ready) {
+    channel->callbacks.on_send_ready(channel->callbacks.user_data);
+  }
+}
+
 // Serializes a complete control frame (header + sub-header + optional trailing
 // data) into a contiguous buffer for queue/flush sends. Returns the total
 // number of bytes written to |buffer|.
@@ -495,6 +505,7 @@ iree_status_t iree_net_control_channel_activate(
       .on_message = iree_net_control_channel_on_message,
       .on_error = iree_net_control_channel_on_endpoint_error,
       .user_data = channel,
+      .on_send_ready = iree_net_control_channel_on_endpoint_send_ready,
   };
   iree_net_message_endpoint_set_callbacks(channel->endpoint,
                                           endpoint_callbacks);

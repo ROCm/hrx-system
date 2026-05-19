@@ -293,6 +293,12 @@ struct MockEndpoint {
       callbacks.on_error(callbacks.user_data, status);
     }
   }
+
+  void InjectSendReady() {
+    if (callbacks.on_send_ready) {
+      callbacks.on_send_ready(callbacks.user_data);
+    }
+  }
 };
 
 const iree_net_message_endpoint_vtable_t MockEndpoint::vtable = {
@@ -339,6 +345,7 @@ struct TestContext {
   std::vector<PongRecord> pong_records;
   std::vector<iree_status_code_t> transport_errors;
   std::vector<SendCompleteRecord> send_completes;
+  iree_host_size_t send_ready_count = 0;
   iree_status_code_t next_data_error = IREE_STATUS_OK;
 
   static iree_status_t OnData(void* user_data,
@@ -407,6 +414,11 @@ struct TestContext {
     iree_status_ignore(status);
   }
 
+  static void OnSendReady(void* user_data) {
+    TestContext* ctx = static_cast<TestContext*>(user_data);
+    ++ctx->send_ready_count;
+  }
+
   iree_net_control_channel_callbacks_t MakeCallbacks() {
     iree_net_control_channel_callbacks_t callbacks = {};
     callbacks.on_data = OnData;
@@ -415,6 +427,7 @@ struct TestContext {
     callbacks.on_pong = OnPong;
     callbacks.on_transport_error = OnTransportError;
     callbacks.on_send_complete = OnSendComplete;
+    callbacks.on_send_ready = OnSendReady;
     callbacks.user_data = this;
     return callbacks;
   }
@@ -1388,6 +1401,19 @@ TEST_F(ControlChannelTest, TransportErrorWithNullCallback) {
   mock_endpoint_->InjectError(iree_make_status(IREE_STATUS_INTERNAL, "error"));
   EXPECT_EQ(iree_net_control_channel_state(channel_),
             IREE_NET_CONTROL_CHANNEL_STATE_ERROR);
+}
+
+TEST_F(ControlChannelTest, SendReadyCallbackFiresInOperationalState) {
+  CreateAndActivate();
+  mock_endpoint_->InjectSendReady();
+  EXPECT_EQ(ctx_.send_ready_count, 1u);
+}
+
+TEST_F(ControlChannelTest, SendReadyIgnoredInErrorState) {
+  CreateAndActivate();
+  mock_endpoint_->InjectError(iree_make_status(IREE_STATUS_INTERNAL, "error"));
+  mock_endpoint_->InjectSendReady();
+  EXPECT_EQ(ctx_.send_ready_count, 0u);
 }
 
 }  // namespace

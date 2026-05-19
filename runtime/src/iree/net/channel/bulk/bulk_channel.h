@@ -118,6 +118,12 @@ typedef void (*iree_net_bulk_channel_on_transport_error_fn_t)(
 typedef void (*iree_net_bulk_channel_on_send_complete_fn_t)(
     void* user_data, uint64_t operation_user_data, iree_status_t status);
 
+// Called when a previously transport-backpressured send may make progress.
+//
+// This is separate from DATA chunk credit. Callers must still re-query budget,
+// retry the send path, and honor DATA chunk credit before sending DATA frames.
+typedef void (*iree_net_bulk_channel_on_send_ready_fn_t)(void* user_data);
+
 // Called when peer DATA chunk receive credits are replenished.
 typedef void (*iree_net_bulk_channel_on_credit_fn_t)(
     void* user_data, uint32_t credit_delta, uint32_t available_credit_count);
@@ -141,6 +147,9 @@ typedef struct iree_net_bulk_channel_callbacks_t {
 
   // Optional callback for send completions.
   iree_net_bulk_channel_on_send_complete_fn_t on_send_complete;
+
+  // Optional callback for send readiness after transport backpressure.
+  iree_net_bulk_channel_on_send_ready_fn_t on_send_ready;
 
   // Optional callback for peer DATA chunk receive credit replenishment.
   iree_net_bulk_channel_on_credit_fn_t on_credit;

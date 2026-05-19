@@ -273,6 +273,12 @@ struct MockEndpoint {
       callbacks.on_error(callbacks.user_data, status);
     }
   }
+
+  void InjectSendReady() {
+    if (callbacks.on_send_ready) {
+      callbacks.on_send_ready(callbacks.user_data);
+    }
+  }
 };
 
 const iree_net_message_endpoint_vtable_t MockEndpoint::vtable = {
@@ -298,6 +304,7 @@ struct TestContext {
   std::vector<iree_status_code_t> transport_errors;
   std::vector<uint64_t> send_completions;
   std::vector<iree_status_code_t> send_completion_errors;
+  iree_host_size_t send_ready_count = 0;
 
   static iree_status_t OnCommand(void* user_data, uint32_t stream_id,
                                  const iree_async_frontier_t* wait_frontier,
@@ -337,12 +344,18 @@ struct TestContext {
     iree_status_ignore(status);
   }
 
+  static void OnSendReady(void* user_data) {
+    auto* context = static_cast<TestContext*>(user_data);
+    ++context->send_ready_count;
+  }
+
   iree_net_queue_channel_callbacks_t MakeCallbacks() {
     iree_net_queue_channel_callbacks_t callbacks;
     memset(&callbacks, 0, sizeof(callbacks));
     callbacks.on_command = OnCommand;
     callbacks.on_transport_error = OnTransportError;
     callbacks.on_send_complete = OnSendComplete;
+    callbacks.on_send_ready = OnSendReady;
     callbacks.user_data = this;
     return callbacks;
   }
@@ -718,6 +731,20 @@ TEST_F(QueueChannelTest, ErrorStateRejectsMessages) {
                                  IREE_NET_QUEUE_FRAME_FLAG_NONE, 0, {0x01});
   IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
                         endpoint_.InjectMessage(message));
+}
+
+TEST_F(QueueChannelTest, SendReadyCallbackFiresInOperationalState) {
+  CreateAndActivate();
+  endpoint_.InjectSendReady();
+  EXPECT_EQ(context_.send_ready_count, 1u);
+}
+
+TEST_F(QueueChannelTest, SendReadyIgnoredInErrorState) {
+  CreateAndActivate();
+  endpoint_.InjectError(
+      iree_make_status(IREE_STATUS_UNAVAILABLE, "transport down"));
+  endpoint_.InjectSendReady();
+  EXPECT_EQ(context_.send_ready_count, 0u);
 }
 
 //===----------------------------------------------------------------------===//

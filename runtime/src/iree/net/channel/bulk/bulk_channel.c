@@ -391,6 +391,15 @@ static void iree_net_bulk_channel_on_sender_complete(
   iree_net_bulk_channel_release(channel);
 }
 
+static void iree_net_bulk_channel_on_endpoint_send_ready(void* user_data) {
+  iree_net_bulk_channel_t* channel = (iree_net_bulk_channel_t*)user_data;
+  if (iree_net_bulk_channel_load_state(channel) ==
+          IREE_NET_BULK_CHANNEL_STATE_OPERATIONAL &&
+      channel->callbacks.on_send_ready) {
+    channel->callbacks.on_send_ready(channel->callbacks.user_data);
+  }
+}
+
 //===----------------------------------------------------------------------===//
 // Receive path
 //===----------------------------------------------------------------------===//
@@ -706,6 +715,7 @@ iree_status_t iree_net_bulk_channel_activate(iree_net_bulk_channel_t* channel) {
       .on_message = iree_net_bulk_channel_on_message,
       .on_error = iree_net_bulk_channel_on_endpoint_error,
       .user_data = channel,
+      .on_send_ready = iree_net_bulk_channel_on_endpoint_send_ready,
   };
   iree_net_message_endpoint_set_callbacks(channel->endpoint,
                                           endpoint_callbacks);
