@@ -83,6 +83,86 @@ TEST_F(SendReservationTableTest, AbortReleasesLease) {
             iree_net_rdma_send_reservation_table_available_capacity(&table_));
 }
 
+TEST_F(SendReservationTableTest, CommitQueuesPendingReservationsInOrder) {
+  IREE_ASSERT_OK(Initialize(2));
+
+  uint32_t release_count = 0;
+  iree_async_buffer_lease_t first_lease = MakeLease(&release_count);
+  iree_net_carrier_send_handle_t first_handle = 0;
+  IREE_ASSERT_OK(iree_net_rdma_send_reservation_table_acquire(
+      &table_, &first_lease, /*byte_length=*/32, &first_handle));
+  iree_async_buffer_lease_t second_lease = MakeLease(&release_count);
+  iree_net_carrier_send_handle_t second_handle = 0;
+  IREE_ASSERT_OK(iree_net_rdma_send_reservation_table_acquire(
+      &table_, &second_lease, /*byte_length=*/48, &second_handle));
+
+  IREE_ASSERT_OK(
+      iree_net_rdma_send_reservation_table_commit(&table_, first_handle));
+  IREE_ASSERT_OK(
+      iree_net_rdma_send_reservation_table_commit(&table_, second_handle));
+  EXPECT_EQ(0u,
+            iree_net_rdma_send_reservation_table_available_capacity(&table_));
+  EXPECT_EQ(2u, iree_net_rdma_send_reservation_table_pending_count(&table_));
+
+  iree_net_carrier_send_handle_t pending_handle = 0;
+  iree_net_rdma_send_reservation_t reservation;
+  IREE_ASSERT_OK(iree_net_rdma_send_reservation_table_peek_pending_front(
+      &table_, &pending_handle, &reservation));
+  EXPECT_EQ(first_handle, pending_handle);
+  EXPECT_EQ(32u, reservation.byte_length);
+  EXPECT_EQ(0u, release_count);
+
+  IREE_ASSERT_OK(iree_net_rdma_send_reservation_table_resolve_pending_front(
+      &table_, &pending_handle, &reservation));
+  EXPECT_EQ(first_handle, pending_handle);
+  EXPECT_EQ(32u, reservation.byte_length);
+  EXPECT_NE(nullptr, reservation.buffer_lease.release.fn);
+  EXPECT_EQ(1u,
+            iree_net_rdma_send_reservation_table_available_capacity(&table_));
+  EXPECT_EQ(1u, iree_net_rdma_send_reservation_table_pending_count(&table_));
+  iree_async_buffer_lease_release(&reservation.buffer_lease);
+
+  IREE_ASSERT_OK(iree_net_rdma_send_reservation_table_resolve_pending_front(
+      &table_, &pending_handle, &reservation));
+  EXPECT_EQ(second_handle, pending_handle);
+  EXPECT_EQ(48u, reservation.byte_length);
+  EXPECT_EQ(2u,
+            iree_net_rdma_send_reservation_table_available_capacity(&table_));
+  EXPECT_EQ(0u, iree_net_rdma_send_reservation_table_pending_count(&table_));
+  iree_async_buffer_lease_release(&reservation.buffer_lease);
+  EXPECT_EQ(2u, release_count);
+}
+
+TEST_F(SendReservationTableTest, CommitConsumesCallerHandle) {
+  IREE_ASSERT_OK(Initialize(1));
+
+  uint32_t release_count = 0;
+  iree_async_buffer_lease_t lease = MakeLease(&release_count);
+  iree_net_carrier_send_handle_t handle = 0;
+  IREE_ASSERT_OK(iree_net_rdma_send_reservation_table_acquire(
+      &table_, &lease, /*byte_length=*/32, &handle));
+  IREE_ASSERT_OK(iree_net_rdma_send_reservation_table_commit(&table_, handle));
+
+  iree_net_rdma_send_reservation_t reservation;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      iree_net_rdma_send_reservation_table_commit(&table_, handle));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      iree_net_rdma_send_reservation_table_peek(&table_, handle, &reservation));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        iree_net_rdma_send_reservation_table_resolve(
+                            &table_, handle, &reservation));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      iree_net_rdma_send_reservation_table_abort(&table_, handle));
+  EXPECT_EQ(0u, release_count);
+
+  IREE_ASSERT_OK(iree_net_rdma_send_reservation_table_resolve_pending_front(
+      &table_, nullptr, &reservation));
+  iree_async_buffer_lease_release(&reservation.buffer_lease);
+}
+
 TEST_F(SendReservationTableTest, AbortAllReleasesAllLeases) {
   IREE_ASSERT_OK(Initialize(3));
 
@@ -95,6 +175,8 @@ TEST_F(SendReservationTableTest, AbortAllReleasesAllLeases) {
   iree_net_carrier_send_handle_t second_handle = 0;
   IREE_ASSERT_OK(iree_net_rdma_send_reservation_table_acquire(
       &table_, &second_lease, /*byte_length=*/48, &second_handle));
+  IREE_ASSERT_OK(
+      iree_net_rdma_send_reservation_table_commit(&table_, second_handle));
 
   uint32_t aborted_count = 0;
   IREE_ASSERT_OK(
@@ -103,6 +185,7 @@ TEST_F(SendReservationTableTest, AbortAllReleasesAllLeases) {
   EXPECT_EQ(2u, release_count);
   EXPECT_EQ(3u,
             iree_net_rdma_send_reservation_table_available_capacity(&table_));
+  EXPECT_EQ(0u, iree_net_rdma_send_reservation_table_pending_count(&table_));
 
   iree_net_rdma_send_reservation_t reservation;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
@@ -208,6 +291,23 @@ TEST_F(SendReservationTableTest, RejectsInvalidArguments) {
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       iree_net_rdma_send_reservation_table_resolve(&table_, 0u, nullptr));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_net_rdma_send_reservation_table_peek(&table_, 0u, nullptr));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        iree_net_rdma_send_reservation_table_peek_pending_front(
+                            &table_, nullptr, &reservation));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      iree_net_rdma_send_reservation_table_resolve_pending_front(
+          &table_, nullptr, &reservation));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_net_rdma_send_reservation_table_peek_pending_front(
+                            nullptr, nullptr, &reservation));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_net_rdma_send_reservation_table_resolve_pending_front(
+          nullptr, nullptr, &reservation));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         iree_net_rdma_send_reservation_table_abort_all(
                             nullptr, /*out_aborted_count=*/nullptr));
@@ -217,6 +317,7 @@ TEST_F(SendReservationTableTest, RejectsInvalidArguments) {
 TEST(SendReservationTableStandaloneTest, NullTableHasNoAvailableCapacity) {
   EXPECT_EQ(0u,
             iree_net_rdma_send_reservation_table_available_capacity(nullptr));
+  EXPECT_EQ(0u, iree_net_rdma_send_reservation_table_pending_count(nullptr));
 }
 
 }  // namespace

@@ -13,6 +13,7 @@
 typedef uint8_t iree_net_rdma_send_reservation_slot_flags_t;
 enum iree_net_rdma_send_reservation_slot_bits_e {
   IREE_NET_RDMA_SEND_RESERVATION_SLOT_IN_USE = 1u << 0,
+  IREE_NET_RDMA_SEND_RESERVATION_SLOT_COMMITTED = 1u << 1,
 };
 
 struct iree_net_rdma_send_reservation_slot_t {
@@ -27,6 +28,9 @@ struct iree_net_rdma_send_reservation_slot_t {
 
   // Next slot index in the free list when not in use.
   uint32_t next_free;
+
+  // Next slot index in the committed pending FIFO.
+  uint32_t next_pending;
 
   // Bitfield of iree_net_rdma_send_reservation_slot_bits_e values.
   iree_net_rdma_send_reservation_slot_flags_t flags;
@@ -54,6 +58,48 @@ static uint32_t iree_net_rdma_send_reservation_table_next_generation(
   return generation == 0 ? 1 : generation;
 }
 
+static iree_status_t iree_net_rdma_send_reservation_table_lookup_slot(
+    iree_net_rdma_send_reservation_table_t* table,
+    iree_net_carrier_send_handle_t handle, bool require_uncommitted,
+    uint32_t* out_index, iree_net_rdma_send_reservation_slot_t** out_slot) {
+  if (out_index) {
+    *out_index = IREE_NET_RDMA_SEND_RESERVATION_TABLE_INVALID_INDEX;
+  }
+  if (out_slot) *out_slot = NULL;
+  if (!table || !table->slots) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "table must be initialized");
+  }
+
+  uint32_t index = iree_net_rdma_send_reservation_table_handle_index(handle);
+  if (index >= table->capacity) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "send handle index %u is outside table capacity %u",
+                            index, table->capacity);
+  }
+
+  iree_net_rdma_send_reservation_slot_t* slot = &table->slots[index];
+  uint32_t generation =
+      iree_net_rdma_send_reservation_table_handle_generation(handle);
+  if (!iree_any_bit_set(slot->flags,
+                        IREE_NET_RDMA_SEND_RESERVATION_SLOT_IN_USE) ||
+      slot->generation != generation) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "send handle does not reference an active reservation");
+  }
+  if (require_uncommitted &&
+      iree_any_bit_set(slot->flags,
+                       IREE_NET_RDMA_SEND_RESERVATION_SLOT_COMMITTED)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "send handle references a committed reservation");
+  }
+
+  if (out_index) *out_index = index;
+  if (out_slot) *out_slot = slot;
+  return iree_ok_status();
+}
+
 static void iree_net_rdma_send_reservation_table_release_slot(
     iree_net_rdma_send_reservation_table_t* table, uint32_t index,
     iree_net_rdma_send_reservation_t* out_reservation) {
@@ -66,6 +112,7 @@ static void iree_net_rdma_send_reservation_table_release_slot(
   slot->generation =
       iree_net_rdma_send_reservation_table_next_generation(slot->generation);
   slot->next_free = table->free_head;
+  slot->next_pending = IREE_NET_RDMA_SEND_RESERVATION_TABLE_INVALID_INDEX;
   slot->flags = 0;
   table->free_head = index;
   ++table->available_capacity;
@@ -81,6 +128,8 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_send_reservation_table_initialize(
   memset(out_table, 0, sizeof(*out_table));
   out_table->host_allocator = host_allocator;
   out_table->free_head = IREE_NET_RDMA_SEND_RESERVATION_TABLE_INVALID_INDEX;
+  out_table->pending_head = IREE_NET_RDMA_SEND_RESERVATION_TABLE_INVALID_INDEX;
+  out_table->pending_tail = IREE_NET_RDMA_SEND_RESERVATION_TABLE_INVALID_INDEX;
 
   iree_status_t status = iree_ok_status();
   if (capacity == 0) {
@@ -102,6 +151,8 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_send_reservation_table_initialize(
           index + 1 < capacity
               ? index + 1
               : IREE_NET_RDMA_SEND_RESERVATION_TABLE_INVALID_INDEX;
+      slots[index].next_pending =
+          IREE_NET_RDMA_SEND_RESERVATION_TABLE_INVALID_INDEX;
     }
     out_table->slots = slots;
     out_table->capacity = capacity;
@@ -124,12 +175,19 @@ IREE_API_EXPORT void iree_net_rdma_send_reservation_table_deinitialize(
   iree_allocator_free(table->host_allocator, table->slots);
   memset(table, 0, sizeof(*table));
   table->free_head = IREE_NET_RDMA_SEND_RESERVATION_TABLE_INVALID_INDEX;
+  table->pending_head = IREE_NET_RDMA_SEND_RESERVATION_TABLE_INVALID_INDEX;
+  table->pending_tail = IREE_NET_RDMA_SEND_RESERVATION_TABLE_INVALID_INDEX;
 }
 
 IREE_API_EXPORT uint32_t
 iree_net_rdma_send_reservation_table_available_capacity(
     const iree_net_rdma_send_reservation_table_t* table) {
   return table ? table->available_capacity : 0;
+}
+
+IREE_API_EXPORT uint32_t iree_net_rdma_send_reservation_table_pending_count(
+    const iree_net_rdma_send_reservation_table_t* table) {
+  return table ? table->pending_count : 0;
 }
 
 IREE_API_EXPORT iree_status_t iree_net_rdma_send_reservation_table_acquire(
@@ -174,9 +232,125 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_send_reservation_table_acquire(
   memset(buffer_lease, 0, sizeof(*buffer_lease));
   slot->byte_length = byte_length;
   slot->next_free = IREE_NET_RDMA_SEND_RESERVATION_TABLE_INVALID_INDEX;
+  slot->next_pending = IREE_NET_RDMA_SEND_RESERVATION_TABLE_INVALID_INDEX;
   slot->flags = IREE_NET_RDMA_SEND_RESERVATION_SLOT_IN_USE;
   *out_handle =
       iree_net_rdma_send_reservation_table_make_handle(index, slot->generation);
+  return iree_ok_status();
+}
+
+IREE_API_EXPORT iree_status_t iree_net_rdma_send_reservation_table_peek(
+    iree_net_rdma_send_reservation_table_t* table,
+    iree_net_carrier_send_handle_t handle,
+    iree_net_rdma_send_reservation_t* out_reservation) {
+  if (!out_reservation) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "out_reservation must not be NULL");
+  }
+  memset(out_reservation, 0, sizeof(*out_reservation));
+  iree_net_rdma_send_reservation_slot_t* slot = NULL;
+  IREE_RETURN_IF_ERROR(iree_net_rdma_send_reservation_table_lookup_slot(
+      table, handle, /*require_uncommitted=*/true, /*out_index=*/NULL, &slot));
+
+  out_reservation->buffer_lease = slot->buffer_lease;
+  out_reservation->byte_length = slot->byte_length;
+  return iree_ok_status();
+}
+
+IREE_API_EXPORT iree_status_t iree_net_rdma_send_reservation_table_commit(
+    iree_net_rdma_send_reservation_table_t* table,
+    iree_net_carrier_send_handle_t handle) {
+  uint32_t index = IREE_NET_RDMA_SEND_RESERVATION_TABLE_INVALID_INDEX;
+  iree_net_rdma_send_reservation_slot_t* slot = NULL;
+  IREE_RETURN_IF_ERROR(iree_net_rdma_send_reservation_table_lookup_slot(
+      table, handle, /*require_uncommitted=*/true, &index, &slot));
+
+  slot->flags |= IREE_NET_RDMA_SEND_RESERVATION_SLOT_COMMITTED;
+  slot->next_pending = IREE_NET_RDMA_SEND_RESERVATION_TABLE_INVALID_INDEX;
+  if (table->pending_tail ==
+      IREE_NET_RDMA_SEND_RESERVATION_TABLE_INVALID_INDEX) {
+    table->pending_head = index;
+  } else {
+    table->slots[table->pending_tail].next_pending = index;
+  }
+  table->pending_tail = index;
+  ++table->pending_count;
+  return iree_ok_status();
+}
+
+IREE_API_EXPORT iree_status_t
+iree_net_rdma_send_reservation_table_peek_pending_front(
+    iree_net_rdma_send_reservation_table_t* table,
+    iree_net_carrier_send_handle_t* out_handle,
+    iree_net_rdma_send_reservation_t* out_reservation) {
+  if (out_handle) *out_handle = 0;
+  if (!out_reservation) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "out_reservation must not be NULL");
+  }
+  memset(out_reservation, 0, sizeof(*out_reservation));
+  if (!table || !table->slots) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "table must be initialized");
+  }
+  if (table->pending_head ==
+      IREE_NET_RDMA_SEND_RESERVATION_TABLE_INVALID_INDEX) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "pending reservation FIFO is empty");
+  }
+
+  uint32_t index = table->pending_head;
+  iree_net_rdma_send_reservation_slot_t* slot = &table->slots[index];
+  if (out_handle) {
+    *out_handle = iree_net_rdma_send_reservation_table_make_handle(
+        index, slot->generation);
+  }
+  out_reservation->buffer_lease = slot->buffer_lease;
+  out_reservation->byte_length = slot->byte_length;
+  return iree_ok_status();
+}
+
+IREE_API_EXPORT iree_status_t
+iree_net_rdma_send_reservation_table_resolve_pending_front(
+    iree_net_rdma_send_reservation_table_t* table,
+    iree_net_carrier_send_handle_t* out_handle,
+    iree_net_rdma_send_reservation_t* out_reservation) {
+  if (out_handle) *out_handle = 0;
+  if (!out_reservation) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "out_reservation must not be NULL");
+  }
+  memset(out_reservation, 0, sizeof(*out_reservation));
+  if (!table || !table->slots) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "table must be initialized");
+  }
+  if (table->pending_head ==
+      IREE_NET_RDMA_SEND_RESERVATION_TABLE_INVALID_INDEX) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "pending reservation FIFO is empty");
+  }
+
+  uint32_t index = table->pending_head;
+  iree_net_rdma_send_reservation_slot_t* slot = &table->slots[index];
+  if (!iree_any_bit_set(slot->flags,
+                        IREE_NET_RDMA_SEND_RESERVATION_SLOT_COMMITTED)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "pending FIFO head does not reference a committed reservation");
+  }
+  if (out_handle) {
+    *out_handle = iree_net_rdma_send_reservation_table_make_handle(
+        index, slot->generation);
+  }
+  table->pending_head = slot->next_pending;
+  if (table->pending_head ==
+      IREE_NET_RDMA_SEND_RESERVATION_TABLE_INVALID_INDEX) {
+    table->pending_tail = IREE_NET_RDMA_SEND_RESERVATION_TABLE_INVALID_INDEX;
+  }
+  --table->pending_count;
+  iree_net_rdma_send_reservation_table_release_slot(table, index,
+                                                    out_reservation);
   return iree_ok_status();
 }
 
@@ -189,28 +363,10 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_send_reservation_table_resolve(
                             "out_reservation must not be NULL");
   }
   memset(out_reservation, 0, sizeof(*out_reservation));
-  if (!table || !table->slots) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "table must be initialized");
-  }
-
-  uint32_t index = iree_net_rdma_send_reservation_table_handle_index(handle);
-  if (index >= table->capacity) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "send handle index %u is outside table capacity %u",
-                            index, table->capacity);
-  }
-
-  iree_net_rdma_send_reservation_slot_t* slot = &table->slots[index];
-  uint32_t generation =
-      iree_net_rdma_send_reservation_table_handle_generation(handle);
-  if (!iree_any_bit_set(slot->flags,
-                        IREE_NET_RDMA_SEND_RESERVATION_SLOT_IN_USE) ||
-      slot->generation != generation) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "send handle does not reference an active reservation");
-  }
+  uint32_t index = IREE_NET_RDMA_SEND_RESERVATION_TABLE_INVALID_INDEX;
+  IREE_RETURN_IF_ERROR(iree_net_rdma_send_reservation_table_lookup_slot(
+      table, handle, /*require_uncommitted=*/true, &index,
+      /*out_slot=*/NULL));
 
   iree_net_rdma_send_reservation_table_release_slot(table, index,
                                                     out_reservation);
@@ -253,5 +409,8 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_send_reservation_table_abort_all(
     ++aborted_count;
   }
   if (out_aborted_count) *out_aborted_count = aborted_count;
+  table->pending_head = IREE_NET_RDMA_SEND_RESERVATION_TABLE_INVALID_INDEX;
+  table->pending_tail = IREE_NET_RDMA_SEND_RESERVATION_TABLE_INVALID_INDEX;
+  table->pending_count = 0;
   return iree_ok_status();
 }

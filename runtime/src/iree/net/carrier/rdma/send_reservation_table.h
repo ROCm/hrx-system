@@ -40,6 +40,15 @@ typedef struct iree_net_rdma_send_reservation_table_t {
 
   // Index of the first free slot, or UINT32_MAX when full.
   uint32_t free_head;
+
+  // Index of the first committed reservation waiting to be posted.
+  uint32_t pending_head;
+
+  // Index of the last committed reservation waiting to be posted.
+  uint32_t pending_tail;
+
+  // Number of committed reservations waiting to be posted.
+  uint32_t pending_count;
 } iree_net_rdma_send_reservation_table_t;
 
 typedef struct iree_net_rdma_send_reservation_t {
@@ -68,6 +77,10 @@ IREE_API_EXPORT uint32_t
 iree_net_rdma_send_reservation_table_available_capacity(
     const iree_net_rdma_send_reservation_table_t* table);
 
+// Returns the number of committed reservations waiting to be posted.
+IREE_API_EXPORT uint32_t iree_net_rdma_send_reservation_table_pending_count(
+    const iree_net_rdma_send_reservation_table_t* table);
+
 // Acquires one reservation slot and transfers |buffer_lease| into it.
 //
 // On success |buffer_lease| is cleared, |out_handle| receives a
@@ -78,7 +91,38 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_send_reservation_table_acquire(
     iree_async_buffer_lease_t* buffer_lease, iree_host_size_t byte_length,
     iree_net_carrier_send_handle_t* out_handle);
 
-// Resolves |handle|, releases its slot, and returns the reservation to caller.
+// Returns a borrowed view of |handle| without releasing its slot.
+IREE_API_EXPORT iree_status_t iree_net_rdma_send_reservation_table_peek(
+    iree_net_rdma_send_reservation_table_t* table,
+    iree_net_carrier_send_handle_t handle,
+    iree_net_rdma_send_reservation_t* out_reservation);
+
+// Marks |handle| committed and appends it to the pending-post FIFO.
+//
+// After commit, the handle is consumed by the table. Callers must not resolve
+// or abort it directly; the carrier must post it through
+// resolve_pending_front() or release it through abort_all().
+IREE_API_EXPORT iree_status_t iree_net_rdma_send_reservation_table_commit(
+    iree_net_rdma_send_reservation_table_t* table,
+    iree_net_carrier_send_handle_t handle);
+
+// Returns a borrowed view of the pending FIFO front without releasing it.
+IREE_API_EXPORT iree_status_t
+iree_net_rdma_send_reservation_table_peek_pending_front(
+    iree_net_rdma_send_reservation_table_t* table,
+    iree_net_carrier_send_handle_t* out_handle,
+    iree_net_rdma_send_reservation_t* out_reservation);
+
+// Resolves the pending FIFO front, releases its slot, and returns the
+// reservation to the caller.
+IREE_API_EXPORT iree_status_t
+iree_net_rdma_send_reservation_table_resolve_pending_front(
+    iree_net_rdma_send_reservation_table_t* table,
+    iree_net_carrier_send_handle_t* out_handle,
+    iree_net_rdma_send_reservation_t* out_reservation);
+
+// Resolves uncommitted |handle|, releases its slot, and returns the
+// reservation.
 IREE_API_EXPORT iree_status_t iree_net_rdma_send_reservation_table_resolve(
     iree_net_rdma_send_reservation_table_t* table,
     iree_net_carrier_send_handle_t handle,
