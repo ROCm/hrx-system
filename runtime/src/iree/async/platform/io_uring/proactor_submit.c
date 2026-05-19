@@ -1716,6 +1716,9 @@ iree_status_t iree_async_proactor_io_uring_submit(
             }
             iree_async_proactor_io_uring_t* target =
                 iree_async_proactor_io_uring_cast(message_op->target);
+            // MSG_RING requires the target ring to have been enabled. Before
+            // the target's first poll, use the message pool + eventfd path so
+            // cross-proactor messages can bootstrap the target safely.
             if (iree_any_bit_set(
                     proactor->capabilities,
                     IREE_ASYNC_PROACTOR_CAPABILITY_PROACTOR_MESSAGING) &&

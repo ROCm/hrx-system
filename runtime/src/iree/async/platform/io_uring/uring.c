@@ -326,8 +326,8 @@ iree_status_t iree_io_uring_ring_initialize(
   // Record whether the ring needs enabling before io_uring_enter can be
   // called. The actual flags used may differ from requested (fallback path).
   iree_atomic_store(&out_ring->needs_enable,
-                    (params.flags & IREE_IORING_SETUP_R_DISABLED) != 0,
-                    iree_memory_order_relaxed);
+                    (params.flags & IREE_IORING_SETUP_R_DISABLED) ? 1 : 0,
+                    iree_memory_order_release);
 
   iree_status_t status = iree_io_uring_ring_map_buffers(out_ring, &params);
   if (!iree_status_is_ok(status)) {
