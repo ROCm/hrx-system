@@ -6,6 +6,8 @@
 
 #include "iree/async/util/proactor_pool.h"
 
+#include <cstring>
+
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -26,6 +28,48 @@ class ProactorPoolTest : public ::testing::Test {
     return iree_async_proactor_pool_options_default();
   }
 };
+
+struct TestRunnerState {
+  // Number of runner handles created by the factory.
+  int create_count = 0;
+
+  // Number of runner handles passed to request_stop.
+  int request_stop_count = 0;
+
+  // Number of runner handles destroyed by the factory.
+  int destroy_count = 0;
+};
+
+static iree_status_t TestRunnerCreate(void* user_data,
+                                      iree_async_proactor_t* proactor,
+                                      uint32_t node_id,
+                                      iree_allocator_t allocator,
+                                      void** out_runner) {
+  (void)proactor;
+  (void)node_id;
+  (void)allocator;
+  TestRunnerState* state = (TestRunnerState*)user_data;
+  ++state->create_count;
+  *out_runner = user_data;
+  return iree_ok_status();
+}
+
+static void TestRunnerRequestStop(void* user_data, void** runners,
+                                  iree_host_size_t count) {
+  (void)user_data;
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    if (runners[i]) {
+      TestRunnerState* state = (TestRunnerState*)runners[i];
+      ++state->request_stop_count;
+    }
+  }
+}
+
+static void TestRunnerDestroy(void* user_data, void* runner) {
+  (void)user_data;
+  TestRunnerState* state = (TestRunnerState*)runner;
+  ++state->destroy_count;
+}
 
 TEST_F(ProactorPoolTest, CreateZeroNodesFails) {
   iree_async_proactor_pool_t* pool = nullptr;
@@ -187,32 +231,43 @@ TEST_F(ProactorPoolTest, RetainRelease) {
   iree_async_proactor_pool_release(pool);  // Final release, destroys.
 }
 
-TEST_F(ProactorPoolTest, ProactorSurvivesPoolRelease) {
+TEST_F(ProactorPoolTest, AcquiredEntryKeepsRunnerAfterPoolRelease) {
+  TestRunnerState runner_state;
+  iree_async_proactor_pool_options_t options = default_options();
+  memset(&options.runner, 0, sizeof(options.runner));
+  options.runner.user_data = &runner_state;
+  options.runner.create = TestRunnerCreate;
+  options.runner.request_stop = TestRunnerRequestStop;
+  options.runner.destroy = TestRunnerDestroy;
+
   iree_async_proactor_pool_t* pool = nullptr;
   IREE_ASSERT_OK(iree_async_proactor_pool_create(
-      1, /*node_ids=*/nullptr, default_options(), iree_allocator_system(),
-      &pool));
+      1, /*node_ids=*/nullptr, options, iree_allocator_system(), &pool));
 
-  // Trigger on-demand creation then retain the proactor.
-  iree_async_proactor_t* proactor = nullptr;
-  iree_status_t status = iree_async_proactor_pool_get(pool, 0, &proactor);
+  // Trigger on-demand creation and acquire the entry.
+  iree_async_proactor_pool_entry_t* entry = nullptr;
+  iree_status_t status = iree_async_proactor_pool_acquire(pool, 0, &entry);
   if (iree_status_is_unavailable(status)) {
     iree_status_ignore(status);
     iree_async_proactor_pool_release(pool);
     GTEST_SKIP() << "Platform proactor unavailable";
   }
   IREE_ASSERT_OK(status);
+  ASSERT_NE(entry, nullptr);
+  iree_async_proactor_t* proactor =
+      iree_async_proactor_pool_entry_proactor(entry);
   ASSERT_NE(proactor, nullptr);
-  iree_async_proactor_retain(proactor);
+  EXPECT_EQ(runner_state.create_count, 1);
 
-  // Release the pool. The proactor should still be valid because we retained
-  // it.
+  // Release the aggregate pool. The acquired entry owns the runner lifetime, so
+  // the pool release must not stop it.
   iree_async_proactor_pool_release(pool);
+  EXPECT_EQ(runner_state.request_stop_count, 0);
+  EXPECT_EQ(runner_state.destroy_count, 0);
 
-  // The proactor is still alive (we hold a ref).
-  // We can't easily test functionality here since the thread is stopped,
-  // but at minimum release should not crash.
-  iree_async_proactor_release(proactor);
+  iree_async_proactor_pool_entry_release(entry);
+  EXPECT_EQ(runner_state.request_stop_count, 1);
+  EXPECT_EQ(runner_state.destroy_count, 1);
 }
 
 }  // namespace

@@ -12,7 +12,7 @@
 //
 // The factory is returned by iree_async_proactor_pool_thread_runner_factory()
 // and injected into pool options. The pool calls the factory callbacks during
-// pool_get() (create) and pool_release() (request_stop, destroy).
+// pool entry acquisition (create) and entry release (request_stop, destroy).
 
 #ifndef IREE_ASYNC_UTIL_PROACTOR_THREAD_RUNNER_H_
 #define IREE_ASYNC_UTIL_PROACTOR_THREAD_RUNNER_H_

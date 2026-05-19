@@ -28,10 +28,10 @@ typedef iree_status_t(
 
 // Factory callbacks for creating poll runners that drive proactors.
 //
-// When a proactor is first accessed via pool_get(), the pool calls |create| to
-// optionally create a runner that drives the proactor's poll loop. If the
-// factory's |create| is NULL, no runner is created and the caller (or host
-// event loop) is responsible for polling.
+// When a proactor is first accessed via pool_get() or pool_acquire(), the pool
+// calls |create| to optionally create a runner that drives the proactor's poll
+// loop. If the factory's |create| is NULL, no runner is created and the caller
+// (or host event loop) is responsible for polling.
 //
 // The standard implementation (proactor_runner_thread.h) creates a dedicated
 // poll thread for each proactor.
@@ -47,14 +47,14 @@ typedef struct iree_async_proactor_pool_runner_factory_t {
                           uint32_t node_id, iree_allocator_t allocator,
                           void** out_runner);
 
-  // Requests all runners to stop. Called once before any destroy calls.
+  // Requests runners to stop. Called before the corresponding destroy calls.
   // Non-blocking: signals each runner to stop but does not wait.
   // |runners| and |count| are the opaque handles returned by create.
   // NULL entries are skipped.
   void (*request_stop)(void* user_data, void** runners, iree_host_size_t count);
 
-  // Destroys a single runner, blocking until it has fully stopped.
-  // Called after request_stop has been called for all runners.
+  // Destroys a single runner, blocking until it has fully stopped. Called after
+  // request_stop has been called for that runner.
   void (*destroy)(void* user_data, void* runner);
 } iree_async_proactor_pool_runner_factory_t;
 

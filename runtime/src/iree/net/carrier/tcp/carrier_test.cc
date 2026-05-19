@@ -299,7 +299,7 @@ TEST_F(TcpCarrierTest, CommitSendQueuesWhenSubmitBackpressures) {
   options.single_shot_recv_count = 1;
 
   iree_net_carrier_t* carrier = nullptr;
-  IREE_ASSERT_OK(iree_net_tcp_carrier_allocate(
+  IREE_ASSERT_OK(iree_net_tcp_carrier_create(
       proactor_, server, recv_pool_, options, {nullptr, nullptr},
       iree_allocator_system(), &carrier));
   ASSERT_NE(carrier, nullptr);
@@ -359,7 +359,7 @@ TEST_F(TcpCarrierTest, QueuedSendRetainsRegisteredRegion) {
   options.single_shot_recv_count = 1;
 
   iree_net_carrier_t* carrier = nullptr;
-  IREE_ASSERT_OK(iree_net_tcp_carrier_allocate(
+  IREE_ASSERT_OK(iree_net_tcp_carrier_create(
       proactor_, server, recv_pool_, options, {nullptr, nullptr},
       iree_allocator_system(), &carrier));
   ASSERT_NE(carrier, nullptr);

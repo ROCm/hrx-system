@@ -14,17 +14,17 @@
 #define IREE_HAL_REMOTE_RECV_POOL_BUFFER_COUNT 32
 
 struct iree_hal_remote_recv_pool_t {
-  // Reference count for shared ownership between drivers, devices, and tests.
+  // Reference count for shared receive pool ownership.
   iree_atomic_ref_count_t ref_count;
 
   // Host allocator used for pool storage and teardown.
   iree_allocator_t host_allocator;
 
-  // Proactor pool retained to keep its runner thread alive. NULL for wrapped
-  // raw proactors.
-  iree_async_proactor_pool_t* proactor_pool;
+  // Retained pool entry that owns the proactor runner, or NULL for wrapped raw
+  // proactors.
+  iree_async_proactor_pool_entry_t* proactor_entry;
 
-  // Proactor that owns the registered receive region. Retained.
+  // Retained proactor used for region registration and carrier I/O.
   iree_async_proactor_t* proactor;
 
   // Backing memory slab containing all fixed-size receive buffers.
@@ -44,7 +44,7 @@ static void iree_hal_remote_recv_pool_destroy(
   iree_async_region_release(recv_pool->region);
   iree_async_slab_release(recv_pool->slab);
   iree_async_proactor_release(recv_pool->proactor);
-  iree_async_proactor_pool_release(recv_pool->proactor_pool);
+  iree_async_proactor_pool_entry_release(recv_pool->proactor_entry);
   iree_allocator_free(host_allocator, recv_pool);
 }
 
@@ -64,18 +64,16 @@ iree_status_t iree_hal_remote_recv_pool_create(
     memset(recv_pool, 0, sizeof(*recv_pool));
     iree_atomic_ref_count_init(&recv_pool->ref_count);
     recv_pool->host_allocator = host_allocator;
-
-    // Retain the proactor pool to keep its threads alive. The pool's proactor
-    // thread polls the io_uring/epoll ring -- without it, no I/O completes.
-    recv_pool->proactor_pool = proactor_pool;
-    iree_async_proactor_pool_retain(proactor_pool);
   }
 
-  // Select the proactor for this NUMA node and retain it.
+  // Select the proactor for this NUMA node and retain its pool entry. The entry
+  // owns the pool-created runner that polls the proactor.
   if (iree_status_is_ok(status)) {
-    status = iree_async_proactor_pool_get_for_node(proactor_pool, numa_node_id,
-                                                   &recv_pool->proactor);
+    status = iree_async_proactor_pool_acquire_for_node(
+        proactor_pool, numa_node_id, &recv_pool->proactor_entry);
     if (iree_status_is_ok(status)) {
+      recv_pool->proactor =
+          iree_async_proactor_pool_entry_proactor(recv_pool->proactor_entry);
       iree_async_proactor_retain(recv_pool->proactor);
     }
   }
