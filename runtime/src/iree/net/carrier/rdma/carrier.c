@@ -176,7 +176,8 @@ static iree_net_carrier_capabilities_t iree_net_rdma_carrier_capabilities(
          IREE_NET_CARRIER_CAPABILITY_ZERO_COPY_TX |
          IREE_NET_CARRIER_CAPABILITY_ZERO_COPY_RX |
          IREE_NET_CARRIER_CAPABILITY_REGISTERED_REGIONS |
-         IREE_NET_CARRIER_CAPABILITY_DIRECT_WRITE;
+         IREE_NET_CARRIER_CAPABILITY_DIRECT_WRITE |
+         IREE_NET_CARRIER_CAPABILITY_DIRECT_READ;
 }
 
 static void iree_net_rdma_carrier_notify_error(iree_net_rdma_carrier_t* carrier,
@@ -621,9 +622,58 @@ static iree_status_t iree_net_rdma_carrier_direct_write(
 static iree_status_t iree_net_rdma_carrier_direct_read(
     iree_net_carrier_t* base_carrier,
     const iree_net_direct_read_params_t* params) {
-  (void)base_carrier;
-  (void)params;
-  return iree_net_rdma_carrier_unimplemented("direct_read");
+  iree_net_rdma_carrier_t* carrier =
+      iree_net_rdma_carrier_from_base(base_carrier);
+  if (iree_net_carrier_state(base_carrier) != IREE_NET_CARRIER_STATE_ACTIVE) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "carrier is not active");
+  }
+  if (!params) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "params must not be NULL");
+  }
+  if (iree_async_span_is_empty(params->local)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "direct_read local span must not be empty");
+  }
+  if (iree_net_remote_handle_is_null(params->remote)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "direct_read remote handle must not be null");
+  }
+  if (params->remote.opaque[0] > UINT32_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "RDMA rkey 0x%016" PRIX64
+                            " does not fit in uint32_t",
+                            params->remote.opaque[0]);
+  }
+  if (!params->local.region ||
+      !iree_any_bit_set(params->local.region->access_flags,
+                        IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE)) {
+    return iree_make_status(
+        IREE_STATUS_PERMISSION_DENIED,
+        "direct_read local span is not registered for local writes");
+  }
+
+  struct ibv_sge scatter_gather_entry;
+  iree_status_t status =
+      iree_net_rdma_sge_from_span(params->local, &scatter_gather_entry);
+
+  if (iree_status_is_ok(status)) {
+    struct ibv_send_wr work_request;
+    memset(&work_request, 0, sizeof(work_request));
+    work_request.sg_list = &scatter_gather_entry;
+    work_request.num_sge = 1;
+    work_request.opcode = IBV_WR_RDMA_READ;
+    work_request.send_flags = IBV_SEND_SIGNALED;
+    work_request.wr.rdma.remote_addr = params->remote.opaque[1];
+    work_request.wr.rdma.rkey = (uint32_t)params->remote.opaque[0];
+
+    status = iree_net_rdma_carrier_post_send_work_request(
+        carrier, IREE_NET_RDMA_WORK_REQUEST_OPERATION_DIRECT_READ,
+        IREE_NET_RDMA_SEND_WINDOW_ACQUIRE_FLAG_NONE, params->user_data,
+        params->local.length, &work_request);
+  }
+  return status;
 }
 
 static iree_status_t iree_net_rdma_carrier_register_buffer(
@@ -645,10 +695,12 @@ static iree_status_t iree_net_rdma_carrier_register_buffer(
                             "region type %u is not RDMA",
                             (unsigned)region->type);
   }
-  if (!iree_any_bit_set(region->access_flags,
-                        IREE_ASYNC_BUFFER_ACCESS_FLAG_REMOTE_WRITE)) {
+  iree_async_buffer_access_flags_t remote_access_flags =
+      IREE_ASYNC_BUFFER_ACCESS_FLAG_REMOTE_READ |
+      IREE_ASYNC_BUFFER_ACCESS_FLAG_REMOTE_WRITE;
+  if (!iree_any_bit_set(region->access_flags, remote_access_flags)) {
     return iree_make_status(IREE_STATUS_PERMISSION_DENIED,
-                            "RDMA region is not registered for remote writes");
+                            "RDMA region is not registered for remote access");
   }
   if (!region->base_ptr) {
     return iree_make_status(
