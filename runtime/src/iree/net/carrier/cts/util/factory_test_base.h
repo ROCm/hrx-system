@@ -105,8 +105,16 @@ class FactoryTestBase : public ::testing::TestWithParam<BackendInfo> {
     IREE_ASSERT_OK(iree_async_buffer_pool_allocate(
         region_, iree_allocator_system(), &recv_pool_));
 
-    IREE_ASSERT_OK(
-        GetParam().create_factory(iree_allocator_system(), &factory_));
+    iree_status_t factory_status =
+        GetParam().create_factory(iree_allocator_system(), &factory_);
+    if (!iree_status_is_ok(factory_status) &&
+        iree_status_code(factory_status) == IREE_STATUS_UNAVAILABLE) {
+      iree::Status consumed_status(std::move(factory_status));
+      GTEST_SKIP() << "Backend '" << GetParam().name
+                   << "' factory unavailable on this system: "
+                   << consumed_status.ToString();
+    }
+    IREE_ASSERT_OK(factory_status);
   }
 
   void TearDown() override {
@@ -128,14 +136,16 @@ class FactoryTestBase : public ::testing::TestWithParam<BackendInfo> {
   // Address delegates
   //===--------------------------------------------------------------------===//
 
-  std::string MakeBindAddress() { return GetParam().make_bind_address(); }
+  iree::StatusOr<std::string> MakeBindAddress() {
+    return GetParam().make_bind_address();
+  }
 
-  std::string ResolveConnectAddress(const std::string& bind_address,
-                                    iree_net_listener_t* listener) {
+  iree::StatusOr<std::string> ResolveConnectAddress(
+      const std::string& bind_address, iree_net_listener_t* listener) {
     return GetParam().resolve_connect_address(bind_address, listener);
   }
 
-  std::string MakeUnreachableAddress() {
+  iree::StatusOr<std::string> MakeUnreachableAddress() {
     return GetParam().make_unreachable_address(proactor_);
   }
 
@@ -186,14 +196,25 @@ class FactoryTestBase : public ::testing::TestWithParam<BackendInfo> {
   //===--------------------------------------------------------------------===//
 
   // Stops a listener and polls until the stopped callback fires.
-  void StopAndWait(iree_net_listener_t* listener) {
+  iree_status_t StopAndWaitStatus(iree_net_listener_t* listener) {
+    if (!listener) return iree_ok_status();
     bool stopped = false;
-    IREE_ASSERT_OK(iree_net_listener_stop(
+    iree_status_t status = iree_net_listener_stop(
         listener,
         {[](void* user_data) { *static_cast<bool*>(user_data) = true; },
-         &stopped}));
-    ASSERT_TRUE(PollUntil([&]() { return stopped; }))
-        << "Listener stop timed out";
+         &stopped});
+    if (iree_status_is_ok(status)) {
+      bool stopped_in_time = PollUntil([&]() { return stopped; });
+      if (!stopped_in_time) {
+        status = iree_make_status(IREE_STATUS_DEADLINE_EXCEEDED,
+                                  "listener stop timed out");
+      }
+    }
+    return status;
+  }
+
+  void StopAndWait(iree_net_listener_t* listener) {
+    IREE_ASSERT_OK(StopAndWaitStatus(listener));
   }
 
   //===--------------------------------------------------------------------===//
@@ -210,54 +231,87 @@ class FactoryTestBase : public ::testing::TestWithParam<BackendInfo> {
 
   // Creates a listener, connects to it, and returns the resulting pair.
   // Polls until both accept and connect callbacks fire.
-  ConnectPair EstablishConnection() {
+  iree::StatusOr<ConnectPair> EstablishConnection() {
     ConnectPair pair;
-    std::string bind_str = MakeBindAddress();
+    IREE_ASSIGN_OR_RETURN(std::string bind_str, MakeBindAddress());
     iree_string_view_t bind_addr = iree_make_cstring_view(bind_str.c_str());
 
     struct AcceptCtx {
       iree_net_connection_t* connection = nullptr;
+      iree::Status status;
       bool fired = false;
     } accept_ctx;
 
-    IREE_CHECK_OK(iree_net_transport_factory_create_listener(
+    iree_status_t status = iree_net_transport_factory_create_listener(
         factory_, bind_addr, proactor_, recv_pool_,
         [](void* user_data, iree_status_t status,
            iree_net_connection_t* connection) {
           auto* ctx = static_cast<AcceptCtx*>(user_data);
-          IREE_CHECK_OK(status);
-          ctx->connection = connection;
+          ctx->status = iree::Status(std::move(status));
+          if (ctx->status.ok()) ctx->connection = connection;
           ctx->fired = true;
         },
-        &accept_ctx, iree_allocator_system(), &pair.listener));
+        &accept_ctx, iree_allocator_system(), &pair.listener);
 
-    pair.connect_address = ResolveConnectAddress(bind_str, pair.listener);
+    if (iree_status_is_ok(status)) {
+      iree::StatusOr<std::string> connect_address =
+          ResolveConnectAddress(bind_str, pair.listener);
+      if (connect_address.ok()) {
+        pair.connect_address = std::move(connect_address).value();
+      } else {
+        status = std::move(connect_address).status();
+      }
+    }
     iree_string_view_t connect_addr =
         iree_make_cstring_view(pair.connect_address.c_str());
 
     struct ConnectCtx {
       iree_net_connection_t* connection = nullptr;
+      iree::Status status;
       bool fired = false;
     } connect_ctx;
 
-    IREE_CHECK_OK(iree_net_transport_factory_connect(
-        factory_, connect_addr, proactor_, recv_pool_,
-        [](void* user_data, iree_status_t status,
-           iree_net_connection_t* connection) {
-          auto* ctx = static_cast<ConnectCtx*>(user_data);
-          IREE_CHECK_OK(status);
-          ctx->connection = connection;
-          ctx->fired = true;
-        },
-        &connect_ctx));
-
-    bool ok =
-        PollUntil([&]() { return accept_ctx.fired && connect_ctx.fired; });
-    EXPECT_TRUE(ok) << "Connection establishment timed out";
-    if (ok) {
-      pair.client = connect_ctx.connection;
-      pair.server = accept_ctx.connection;
+    if (iree_status_is_ok(status)) {
+      status = iree_net_transport_factory_connect(
+          factory_, connect_addr, proactor_, recv_pool_,
+          [](void* user_data, iree_status_t status,
+             iree_net_connection_t* connection) {
+            auto* ctx = static_cast<ConnectCtx*>(user_data);
+            ctx->status = iree::Status(std::move(status));
+            if (ctx->status.ok()) ctx->connection = connection;
+            ctx->fired = true;
+          },
+          &connect_ctx);
     }
+
+    if (iree_status_is_ok(status)) {
+      bool ok =
+          PollUntil([&]() { return accept_ctx.fired && connect_ctx.fired; });
+      if (!ok) {
+        status = iree_make_status(IREE_STATUS_DEADLINE_EXCEEDED,
+                                  "connection establishment timed out");
+      }
+    }
+    if (iree_status_is_ok(status) && !accept_ctx.status.ok()) {
+      status = std::move(accept_ctx.status);
+    }
+    if (iree_status_is_ok(status) && !connect_ctx.status.ok()) {
+      status = std::move(connect_ctx.status);
+    }
+
+    if (!iree_status_is_ok(status)) {
+      iree_net_connection_release(connect_ctx.connection);
+      iree_net_connection_release(accept_ctx.connection);
+      if (pair.listener) {
+        status = iree_status_join(status, StopAndWaitStatus(pair.listener));
+        iree_net_listener_free(pair.listener);
+        pair.listener = nullptr;
+      }
+      return iree::Status(std::move(status));
+    }
+
+    pair.client = connect_ctx.connection;
+    pair.server = accept_ctx.connection;
     return pair;
   }
 

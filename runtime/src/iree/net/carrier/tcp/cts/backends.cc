@@ -321,39 +321,48 @@ static iree_status_t CreateTcpFactory(
   return iree_net_tcp_factory_create(options, allocator, out_factory);
 }
 
-static std::string MakeTcpBindAddress() {
+static iree::StatusOr<std::string> MakeTcpBindAddress() {
   // TCP always binds to localhost ephemeral port.
   return "127.0.0.1:0";
 }
 
-static std::string ResolveTcpConnectAddress(const std::string& /*bind_address*/,
-                                            iree_net_listener_t* listener) {
+static iree::StatusOr<std::string> ResolveTcpConnectAddress(
+    const std::string& /*bind_address*/, iree_net_listener_t* listener) {
   // Query the listener for the actual bound address (ephemeral port assigned).
   char address_buffer[IREE_ASYNC_ADDRESS_MAX_FORMAT_LENGTH];
   iree_string_view_t bound_address;
-  IREE_CHECK_OK(iree_net_listener_query_bound_address(
+  IREE_RETURN_IF_ERROR(iree_net_listener_query_bound_address(
       listener, sizeof(address_buffer), address_buffer, &bound_address));
   return std::string(bound_address.data, bound_address.size);
 }
 
-static std::string MakeTcpUnreachableAddress(iree_async_proactor_t* proactor) {
+static iree::StatusOr<std::string> MakeTcpUnreachableAddress(
+    iree_async_proactor_t* proactor) {
   // Bind+close a socket to get a port that is definitely not being listened on.
   iree_async_socket_t* temp_socket = nullptr;
-  IREE_CHECK_OK(iree_async_socket_create(proactor, IREE_ASYNC_SOCKET_TYPE_TCP,
-                                         IREE_ASYNC_SOCKET_OPTION_REUSE_ADDR,
-                                         &temp_socket));
+  iree_status_t status = iree_async_socket_create(
+      proactor, IREE_ASYNC_SOCKET_TYPE_TCP, IREE_ASYNC_SOCKET_OPTION_REUSE_ADDR,
+      &temp_socket);
   iree_async_address_t temp_address;
-  IREE_CHECK_OK(iree_async_address_from_ipv4(
-      iree_make_cstring_view("127.0.0.1"), 0, &temp_address));
-  IREE_CHECK_OK(iree_async_socket_bind(temp_socket, &temp_address));
+  if (iree_status_is_ok(status)) {
+    status = iree_async_address_from_ipv4(iree_make_cstring_view("127.0.0.1"),
+                                          0, &temp_address);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_async_socket_bind(temp_socket, &temp_address);
+  }
   iree_async_address_t bound_address;
-  IREE_CHECK_OK(
-      iree_async_socket_query_local_address(temp_socket, &bound_address));
+  if (iree_status_is_ok(status)) {
+    status = iree_async_socket_query_local_address(temp_socket, &bound_address);
+  }
   char address_buffer[IREE_ASYNC_ADDRESS_MAX_FORMAT_LENGTH];
   iree_string_view_t address_str;
-  IREE_CHECK_OK(iree_async_address_format(
-      &bound_address, sizeof(address_buffer), address_buffer, &address_str));
+  if (iree_status_is_ok(status)) {
+    status = iree_async_address_format(&bound_address, sizeof(address_buffer),
+                                       address_buffer, &address_str);
+  }
   iree_async_socket_release(temp_socket);
+  if (!iree_status_is_ok(status)) return iree::Status(std::move(status));
   return std::string(address_str.data, address_str.size);
 }
 

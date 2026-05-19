@@ -37,7 +37,7 @@ TEST_P(FactoryTest, AllocateAndFree) { EXPECT_NE(factory_, nullptr); }
 //===----------------------------------------------------------------------===//
 
 TEST_P(FactoryTest, ConnectAsyncUnreachable) {
-  std::string unreachable = MakeUnreachableAddress();
+  IREE_ASSERT_OK_AND_ASSIGN(std::string unreachable, MakeUnreachableAddress());
   iree_string_view_t address = iree_make_cstring_view(unreachable.c_str());
 
   ConnectResult result;
@@ -55,7 +55,7 @@ TEST_P(FactoryTest, ConnectAsyncUnreachable) {
 }
 
 TEST_P(FactoryTest, ConnectAsyncSuccess) {
-  auto pair = EstablishConnection();
+  IREE_ASSERT_OK_AND_ASSIGN(auto pair, EstablishConnection());
   ASSERT_NE(pair.client, nullptr);
   ASSERT_NE(pair.server, nullptr);
 
@@ -68,7 +68,7 @@ TEST_P(FactoryTest, ConnectAsyncSuccess) {
 TEST_P(FactoryTest, CallbackNotFiredBeforePoll) {
   // Verify that connect returns with the callback still pending.
   // This is the fundamental async contract for all transports.
-  std::string bind_str = MakeBindAddress();
+  IREE_ASSERT_OK_AND_ASSIGN(std::string bind_str, MakeBindAddress());
   iree_string_view_t bind_addr = iree_make_cstring_view(bind_str.c_str());
 
   iree_net_listener_t* listener = nullptr;
@@ -83,7 +83,8 @@ TEST_P(FactoryTest, CallbackNotFiredBeforePoll) {
       },
       &accept_fired, iree_allocator_system(), &listener));
 
-  std::string connect_str = ResolveConnectAddress(bind_str, listener);
+  IREE_ASSERT_OK_AND_ASSIGN(std::string connect_str,
+                            ResolveConnectAddress(bind_str, listener));
   iree_string_view_t connect_addr = iree_make_cstring_view(connect_str.c_str());
 
   ConnectResult result;
@@ -106,10 +107,11 @@ TEST_P(FactoryTest, CallbackNotFiredBeforePoll) {
 }
 
 TEST_P(FactoryTest, MultipleConnections) {
-  std::string bind_str = MakeBindAddress();
+  IREE_ASSERT_OK_AND_ASSIGN(std::string bind_str, MakeBindAddress());
   iree_string_view_t bind_addr = iree_make_cstring_view(bind_str.c_str());
 
   struct MultiAcceptCtx {
+    iree::Status status;
     std::vector<iree_net_connection_t*> connections;
   } accept_ctx;
 
@@ -119,12 +121,13 @@ TEST_P(FactoryTest, MultipleConnections) {
       [](void* user_data, iree_status_t status,
          iree_net_connection_t* connection) {
         auto* ctx = static_cast<MultiAcceptCtx*>(user_data);
-        IREE_CHECK_OK(status);
-        ctx->connections.push_back(connection);
+        ctx->status = iree::Status(std::move(status));
+        if (ctx->status.ok()) ctx->connections.push_back(connection);
       },
       &accept_ctx, iree_allocator_system(), &listener));
 
-  std::string connect_str = ResolveConnectAddress(bind_str, listener);
+  IREE_ASSERT_OK_AND_ASSIGN(std::string connect_str,
+                            ResolveConnectAddress(bind_str, listener));
   iree_string_view_t connect_addr = iree_make_cstring_view(connect_str.c_str());
 
   ConnectResult connect_results[3];
@@ -135,9 +138,11 @@ TEST_P(FactoryTest, MultipleConnections) {
   }
 
   ASSERT_TRUE(PollUntil([&]() {
-    return accept_ctx.connections.size() >= 3 && connect_results[0].fired &&
-           connect_results[1].fired && connect_results[2].fired;
+    return !accept_ctx.status.ok() ||
+           (accept_ctx.connections.size() >= 3 && connect_results[0].fired &&
+            connect_results[1].fired && connect_results[2].fired);
   })) << "Not all connections completed";
+  IREE_ASSERT_OK(accept_ctx.status);
   for (int i = 0; i < 3; ++i) {
     EXPECT_EQ(connect_results[i].status_code, IREE_STATUS_OK);
     ASSERT_NE(connect_results[i].connection, nullptr);
@@ -152,7 +157,7 @@ TEST_P(FactoryTest, MultipleConnections) {
 }
 
 TEST_P(FactoryTest, ListenerStop) {
-  std::string bind_str = MakeBindAddress();
+  IREE_ASSERT_OK_AND_ASSIGN(std::string bind_str, MakeBindAddress());
   iree_string_view_t bind_addr = iree_make_cstring_view(bind_str.c_str());
 
   iree_net_listener_t* listener = nullptr;
@@ -165,7 +170,8 @@ TEST_P(FactoryTest, ListenerStop) {
       },
       nullptr, iree_allocator_system(), &listener));
 
-  std::string connect_str = ResolveConnectAddress(bind_str, listener);
+  IREE_ASSERT_OK_AND_ASSIGN(std::string connect_str,
+                            ResolveConnectAddress(bind_str, listener));
 
   // Stopped callback must be delivered asynchronously.
   bool stopped = false;
@@ -196,7 +202,7 @@ TEST_P(FactoryTest, ListenerStop) {
 //===----------------------------------------------------------------------===//
 
 TEST_P(FactoryTest, OpenEndpointFirst) {
-  auto pair = EstablishConnection();
+  IREE_ASSERT_OK_AND_ASSIGN(auto pair, EstablishConnection());
 
   // First open_endpoint returns a borrowed endpoint view.
   EndpointReadyResult endpoint_result;
@@ -220,7 +226,7 @@ TEST_P(FactoryTest, OpenEndpointFirst) {
 TEST_P(FactoryTest, ConnectionReleaseWithoutEndpoint) {
   // Create a connection but never open_endpoint — the transport stack should be
   // released when the connection is destroyed. ASan/LSan catch leaks.
-  auto pair = EstablishConnection();
+  IREE_ASSERT_OK_AND_ASSIGN(auto pair, EstablishConnection());
 
   iree_net_connection_release(pair.client);
   iree_net_connection_release(pair.server);
@@ -233,7 +239,7 @@ TEST_P(FactoryTest, ConnectionReleaseWithoutEndpoint) {
 //===----------------------------------------------------------------------===//
 
 TEST_P(FactoryTest, BidirectionalSendRecv) {
-  auto pair = EstablishConnection();
+  IREE_ASSERT_OK_AND_ASSIGN(auto pair, EstablishConnection());
 
   // Open endpoints on both sides.
   EndpointReadyResult client_endpoint_result;

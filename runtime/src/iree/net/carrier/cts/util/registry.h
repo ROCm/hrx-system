@@ -95,16 +95,18 @@ struct BackendInfo {
 
   // Returns a unique listener bind address. Each call produces a fresh address
   // so tests can create multiple independent listeners.
-  std::function<std::string()> make_bind_address;
+  std::function<iree::StatusOr<std::string>()> make_bind_address;
 
   // Returns the connect address for a listener created with |bind_address|.
   // For transports that assign addresses dynamically (e.g., TCP ephemeral
   // ports), this queries the listener for its actual address.
-  std::function<std::string(const std::string&, iree_net_listener_t*)>
+  std::function<iree::StatusOr<std::string>(const std::string&,
+                                            iree_net_listener_t*)>
       resolve_connect_address;
 
   // Returns an address where no listener exists (for error-path tests).
-  std::function<std::string(iree_async_proactor_t*)> make_unreachable_address;
+  std::function<iree::StatusOr<std::string>(iree_async_proactor_t*)>
+      make_unreachable_address;
 };
 
 // Returns human-readable test suffix from BackendInfo.

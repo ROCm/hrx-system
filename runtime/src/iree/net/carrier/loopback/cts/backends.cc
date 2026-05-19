@@ -66,18 +66,18 @@ static iree_status_t CreateLoopbackFactory(
       iree_net_loopback_factory_options_default(), allocator, out_factory);
 }
 
-static std::string MakeLoopbackBindAddress() {
+static iree::StatusOr<std::string> MakeLoopbackBindAddress() {
   static std::atomic<int> counter{0};
   return "cts_" + std::to_string(counter.fetch_add(1));
 }
 
-static std::string ResolveLoopbackConnectAddress(
+static iree::StatusOr<std::string> ResolveLoopbackConnectAddress(
     const std::string& bind_address, iree_net_listener_t* /*listener*/) {
   // Loopback uses name-based addressing — the bind name is the connect name.
   return bind_address;
 }
 
-static std::string MakeLoopbackUnreachableAddress(
+static iree::StatusOr<std::string> MakeLoopbackUnreachableAddress(
     iree_async_proactor_t* /*proactor*/) {
   static std::atomic<int> counter{0};
   return "unreachable_" + std::to_string(counter.fetch_add(1));

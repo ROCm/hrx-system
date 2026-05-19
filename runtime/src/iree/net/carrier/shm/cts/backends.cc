@@ -91,18 +91,18 @@ static iree_status_t CreateShmFactory(
                                      allocator, out_factory);
 }
 
-static std::string MakeShmBindAddress() {
+static iree::StatusOr<std::string> MakeShmBindAddress() {
   static std::atomic<int> counter{0};
   return "shm_cts_" + std::to_string(counter.fetch_add(1));
 }
 
-static std::string ResolveShmConnectAddress(const std::string& bind_address,
-                                            iree_net_listener_t* /*listener*/) {
+static iree::StatusOr<std::string> ResolveShmConnectAddress(
+    const std::string& bind_address, iree_net_listener_t* /*listener*/) {
   // SHM uses name-based addressing — the bind name is the connect name.
   return bind_address;
 }
 
-static std::string MakeShmUnreachableAddress(
+static iree::StatusOr<std::string> MakeShmUnreachableAddress(
     iree_async_proactor_t* /*proactor*/) {
   static std::atomic<int> counter{0};
   return "shm_unreachable_" + std::to_string(counter.fetch_add(1));

@@ -36,16 +36,25 @@ namespace {
 // ownership: the region's destroy callback frees the buffer memory. Ownership
 // of the returned pool is transferred to the caller (typically a queue
 // channel).
-static iree_async_buffer_pool_t* CreateHeaderPool() {
+static iree::StatusOr<iree_async_buffer_pool_t*> CreateHeaderPool() {
   static constexpr iree_host_size_t kBufferCount = 16;
   static constexpr iree_host_size_t kBufferSize = 256;
   iree_host_size_t total_size = kBufferCount * kBufferSize;
 
   void* memory = malloc(total_size);
+  if (!memory) {
+    return iree::Status(iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                         "failed to allocate header memory"));
+  }
   memset(memory, 0, total_size);
 
   iree_async_region_t* region =
       static_cast<iree_async_region_t*>(malloc(sizeof(iree_async_region_t)));
+  if (!region) {
+    free(memory);
+    return iree::Status(iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                         "failed to allocate header region"));
+  }
   memset(region, 0, sizeof(*region));
   iree_atomic_ref_count_init(&region->ref_count);
   region->destroy_fn = [](iree_async_region_t* r) {
@@ -58,9 +67,10 @@ static iree_async_buffer_pool_t* CreateHeaderPool() {
   region->buffer_count = kBufferCount;
 
   iree_async_buffer_pool_t* pool = nullptr;
-  IREE_CHECK_OK(
-      iree_async_buffer_pool_allocate(region, iree_allocator_system(), &pool));
+  iree_status_t status =
+      iree_async_buffer_pool_allocate(region, iree_allocator_system(), &pool);
   iree_async_region_release(region);  // Pool retains it.
+  if (!iree_status_is_ok(status)) return iree::Status(std::move(status));
   return pool;
 }
 
@@ -281,7 +291,7 @@ TEST_P(SessionTest, OperationsFailAfterShutdown) {
 
 TEST_P(SessionTest, ServerSessionRequiresNonzeroId) {
   // session_accept must reject session_id=0.
-  auto pair = EstablishConnection();
+  IREE_ASSERT_OK_AND_ASSIGN(auto pair, EstablishConnection());
   ASSERT_NE(pair.server, nullptr);
 
   iree_net_session_options_t options = iree_net_session_options_default();
@@ -304,7 +314,7 @@ TEST_P(SessionTest, ServerSessionRequiresNonzeroId) {
 }
 
 TEST_P(SessionTest, OnReadyCallbackRequired) {
-  auto pair = EstablishConnection();
+  IREE_ASSERT_OK_AND_ASSIGN(auto pair, EstablishConnection());
   ASSERT_NE(pair.server, nullptr);
 
   iree_net_session_options_t options = iree_net_session_options_default();
@@ -329,7 +339,7 @@ TEST_P(SessionTest, OnReadyCallbackRequired) {
 }
 
 TEST_P(SessionTest, OnControlDataCallbackRequired) {
-  auto pair = EstablishConnection();
+  IREE_ASSERT_OK_AND_ASSIGN(auto pair, EstablishConnection());
   ASSERT_NE(pair.server, nullptr);
 
   iree_net_session_options_t options = iree_net_session_options_default();
@@ -718,13 +728,18 @@ TEST_P(SessionTest, QueueChannelCommandRoundTrip) {
 
   iree_net_queue_channel_t* client_channel = nullptr;
   iree_net_queue_channel_t* server_channel = nullptr;
-
+  IREE_ASSERT_OK_AND_ASSIGN(iree_async_buffer_pool_t * client_header_pool,
+                            CreateHeaderPool());
   IREE_ASSERT_OK(iree_net_queue_channel_create(
-      client_ep_result.endpoint, /*max_send_spans=*/8, CreateHeaderPool(),
+      client_ep_result.endpoint, /*max_send_spans=*/8, client_header_pool,
       client_qcb, iree_allocator_system(), &client_channel));
+  client_header_pool = nullptr;
+  IREE_ASSERT_OK_AND_ASSIGN(iree_async_buffer_pool_t * server_header_pool,
+                            CreateHeaderPool());
   IREE_ASSERT_OK(iree_net_queue_channel_create(
-      server_ep_result.endpoint, /*max_send_spans=*/8, CreateHeaderPool(),
+      server_ep_result.endpoint, /*max_send_spans=*/8, server_header_pool,
       server_qcb, iree_allocator_system(), &server_channel));
+  server_header_pool = nullptr;
 
   // Activate both channels (installs recv handlers and activates endpoints).
   IREE_ASSERT_OK(iree_net_queue_channel_activate(client_channel));
@@ -785,7 +800,7 @@ TEST_P(SessionTest, QueueChannelCommandRoundTrip) {
 // the error would bubble through the carrier's transport error path, losing the
 // original message.
 TEST_P(SessionTest, ProtocolVersionMismatchCausesServerError) {
-  std::string bind_str = MakeBindAddress();
+  IREE_ASSERT_OK_AND_ASSIGN(std::string bind_str, MakeBindAddress());
   iree_string_view_t bind_addr = iree_make_cstring_view(bind_str.c_str());
 
   // AcceptCtx holds direct pointers to avoid C++ protected member access
@@ -796,6 +811,7 @@ TEST_P(SessionTest, ProtocolVersionMismatchCausesServerError) {
     iree_async_frontier_tracker_t* tracker = nullptr;
     SessionCallbackTracker* callbacks = nullptr;
     iree_net_session_t** out_session = nullptr;
+    iree::Status status;
     bool fired = false;
   } accept_ctx;
   accept_ctx.proactor = proactor_;
@@ -803,28 +819,31 @@ TEST_P(SessionTest, ProtocolVersionMismatchCausesServerError) {
   accept_ctx.callbacks = &server_callbacks_;
   accept_ctx.out_session = &server_session_;
 
-  IREE_CHECK_OK(iree_net_transport_factory_create_listener(
+  IREE_ASSERT_OK(iree_net_transport_factory_create_listener(
       factory_, bind_addr, proactor_, recv_pool_,
       [](void* user_data, iree_status_t status,
          iree_net_connection_t* connection) {
         auto* ctx = static_cast<AcceptCtx*>(user_data);
-        IREE_CHECK_OK(status);
+        ctx->status = iree::Status(std::move(status));
 
-        iree_net_session_options_t server_options =
-            iree_net_session_options_default();
-        server_options.session_id = 1;
+        if (ctx->status.ok()) {
+          iree_net_session_options_t server_options =
+              iree_net_session_options_default();
+          server_options.session_id = 1;
 
-        IREE_CHECK_OK(iree_net_session_accept(
-            connection, ctx->proactor, ctx->tracker, &server_options,
-            ctx->callbacks->MakeCallbacks(), iree_allocator_system(),
-            ctx->out_session));
+          ctx->status = iree::Status(iree_net_session_accept(
+              connection, ctx->proactor, ctx->tracker, &server_options,
+              ctx->callbacks->MakeCallbacks(), iree_allocator_system(),
+              ctx->out_session));
+        }
 
         iree_net_connection_release(connection);
         ctx->fired = true;
       },
       &accept_ctx, iree_allocator_system(), &listener_));
 
-  std::string connect_str = ResolveConnectAddress(bind_str, listener_);
+  IREE_ASSERT_OK_AND_ASSIGN(std::string connect_str,
+                            ResolveConnectAddress(bind_str, listener_));
 
   // Client uses a wrong protocol version — the server will reject the HELLO.
   // Short bootstrap timeout so the client's timer expires during TearDown
@@ -834,15 +853,17 @@ TEST_P(SessionTest, ProtocolVersionMismatchCausesServerError) {
   client_options.protocol_version = 999;
   client_options.bootstrap_timeout_ns = iree_make_duration_ms(500);
 
-  IREE_CHECK_OK(iree_net_session_connect(
+  IREE_ASSERT_OK(iree_net_session_connect(
       factory_, iree_make_string_view(connect_str.c_str(), connect_str.size()),
       proactor_, recv_pool_, client_tracker_, &client_options,
       client_callbacks_.MakeCallbacks(), iree_allocator_system(),
       &client_session_));
 
   // Wait for the server to receive the bad HELLO and fire on_error.
-  ASSERT_TRUE(PollUntil([&]() { return server_callbacks_.error_fired; }))
-      << "Server on_error never fired after protocol version mismatch";
+  ASSERT_TRUE(PollUntil([&]() {
+    return !accept_ctx.status.ok() || server_callbacks_.error_fired;
+  })) << "Server on_error never fired after protocol version mismatch";
+  IREE_ASSERT_OK(accept_ctx.status);
 
   EXPECT_EQ(iree_net_session_state(server_session_),
             IREE_NET_SESSION_STATE_ERROR);
@@ -861,7 +882,7 @@ TEST_P(SessionTest, ProtocolVersionMismatchCausesServerError) {
 // After a session enters ERROR state, all operations return
 // FAILED_PRECONDITION.
 TEST_P(SessionTest, OperationsFailInErrorState) {
-  std::string bind_str = MakeBindAddress();
+  IREE_ASSERT_OK_AND_ASSIGN(std::string bind_str, MakeBindAddress());
   iree_string_view_t bind_addr = iree_make_cstring_view(bind_str.c_str());
 
   struct AcceptCtx {
@@ -869,6 +890,7 @@ TEST_P(SessionTest, OperationsFailInErrorState) {
     iree_async_frontier_tracker_t* tracker = nullptr;
     SessionCallbackTracker* callbacks = nullptr;
     iree_net_session_t** out_session = nullptr;
+    iree::Status status;
     bool fired = false;
   } accept_ctx;
   accept_ctx.proactor = proactor_;
@@ -876,28 +898,31 @@ TEST_P(SessionTest, OperationsFailInErrorState) {
   accept_ctx.callbacks = &server_callbacks_;
   accept_ctx.out_session = &server_session_;
 
-  IREE_CHECK_OK(iree_net_transport_factory_create_listener(
+  IREE_ASSERT_OK(iree_net_transport_factory_create_listener(
       factory_, bind_addr, proactor_, recv_pool_,
       [](void* user_data, iree_status_t status,
          iree_net_connection_t* connection) {
         auto* ctx = static_cast<AcceptCtx*>(user_data);
-        IREE_CHECK_OK(status);
+        ctx->status = iree::Status(std::move(status));
 
-        iree_net_session_options_t server_options =
-            iree_net_session_options_default();
-        server_options.session_id = 1;
+        if (ctx->status.ok()) {
+          iree_net_session_options_t server_options =
+              iree_net_session_options_default();
+          server_options.session_id = 1;
 
-        IREE_CHECK_OK(iree_net_session_accept(
-            connection, ctx->proactor, ctx->tracker, &server_options,
-            ctx->callbacks->MakeCallbacks(), iree_allocator_system(),
-            ctx->out_session));
+          ctx->status = iree::Status(iree_net_session_accept(
+              connection, ctx->proactor, ctx->tracker, &server_options,
+              ctx->callbacks->MakeCallbacks(), iree_allocator_system(),
+              ctx->out_session));
+        }
 
         iree_net_connection_release(connection);
         ctx->fired = true;
       },
       &accept_ctx, iree_allocator_system(), &listener_));
 
-  std::string connect_str = ResolveConnectAddress(bind_str, listener_);
+  IREE_ASSERT_OK_AND_ASSIGN(std::string connect_str,
+                            ResolveConnectAddress(bind_str, listener_));
 
   // Client with wrong protocol version forces server into ERROR state.
   // Short bootstrap timeout so the client's timer expires during TearDown
@@ -907,14 +932,16 @@ TEST_P(SessionTest, OperationsFailInErrorState) {
   client_options.protocol_version = 999;
   client_options.bootstrap_timeout_ns = iree_make_duration_ms(500);
 
-  IREE_CHECK_OK(iree_net_session_connect(
+  IREE_ASSERT_OK(iree_net_session_connect(
       factory_, iree_make_string_view(connect_str.c_str(), connect_str.size()),
       proactor_, recv_pool_, client_tracker_, &client_options,
       client_callbacks_.MakeCallbacks(), iree_allocator_system(),
       &client_session_));
 
-  ASSERT_TRUE(PollUntil([&]() { return server_callbacks_.error_fired; }))
-      << "Server on_error never fired";
+  ASSERT_TRUE(PollUntil([&]() {
+    return !accept_ctx.status.ok() || server_callbacks_.error_fired;
+  })) << "Server on_error never fired";
+  IREE_ASSERT_OK(accept_ctx.status);
 
   ASSERT_EQ(iree_net_session_state(server_session_),
             IREE_NET_SESSION_STATE_ERROR);
@@ -1096,40 +1123,49 @@ TEST_P(SessionTest, GoawayReceivedCleanupFailsFutureFrontierWaits) {
 // Both paths exercise the bootstrap timer lifecycle: start at session creation,
 // cancel on error (loopback) or fire on expiry (TCP/SHM).
 TEST_P(SessionTest, ClientErrorsWhenServerNeverResponds) {
-  std::string bind_str = MakeBindAddress();
+  IREE_ASSERT_OK_AND_ASSIGN(std::string bind_str, MakeBindAddress());
   iree_string_view_t bind_addr = iree_make_cstring_view(bind_str.c_str());
 
   // Server accepts connections but does NOT create a session. The connection
   // is held alive (retained by the accept callback) so the transport layer
   // doesn't report a disconnect.
-  iree_net_connection_t* held_connection = nullptr;
-  IREE_CHECK_OK(iree_net_transport_factory_create_listener(
+  struct HeldConnectionCtx {
+    iree::Status status;
+    iree_net_connection_t* connection = nullptr;
+  } held_connection_ctx;
+  IREE_ASSERT_OK(iree_net_transport_factory_create_listener(
       factory_, bind_addr, proactor_, recv_pool_,
       [](void* user_data, iree_status_t status,
          iree_net_connection_t* connection) {
-        IREE_CHECK_OK(status);
-        auto** held = static_cast<iree_net_connection_t**>(user_data);
-        *held = connection;  // Hold the connection; don't create a session.
+        auto* ctx = static_cast<HeldConnectionCtx*>(user_data);
+        ctx->status = iree::Status(std::move(status));
+        if (ctx->status.ok()) {
+          // Hold the connection; don't create a session.
+          ctx->connection = connection;
+        }
       },
-      &held_connection, iree_allocator_system(), &listener_));
+      &held_connection_ctx, iree_allocator_system(), &listener_));
 
-  std::string connect_str = ResolveConnectAddress(bind_str, listener_);
+  IREE_ASSERT_OK_AND_ASSIGN(std::string connect_str,
+                            ResolveConnectAddress(bind_str, listener_));
 
   // Short bootstrap timeout so the test doesn't wait 10 seconds.
   iree_net_session_options_t client_options =
       iree_net_session_options_default();
   client_options.bootstrap_timeout_ns = iree_make_duration_ms(200);
 
-  IREE_CHECK_OK(iree_net_session_connect(
+  IREE_ASSERT_OK(iree_net_session_connect(
       factory_, iree_make_string_view(connect_str.c_str(), connect_str.size()),
       proactor_, recv_pool_, client_tracker_, &client_options,
       client_callbacks_.MakeCallbacks(), iree_allocator_system(),
       &client_session_));
 
   // Wait for the client to enter ERROR state.
-  ASSERT_TRUE(PollUntil([&]() { return client_callbacks_.error_fired; }))
-      << "Client on_error never fired (expected UNAVAILABLE or "
+  ASSERT_TRUE(PollUntil([&]() {
+    return !held_connection_ctx.status.ok() || client_callbacks_.error_fired;
+  })) << "Client on_error never fired (expected UNAVAILABLE or "
          "DEADLINE_EXCEEDED)";
+  IREE_ASSERT_OK(held_connection_ctx.status);
 
   EXPECT_EQ(iree_net_session_state(client_session_),
             IREE_NET_SESSION_STATE_ERROR);
@@ -1144,8 +1180,8 @@ TEST_P(SessionTest, ClientErrorsWhenServerNeverResponds) {
       << client_callbacks_.error_code;
 
   // Release the held server connection.
-  iree_net_connection_release(held_connection);
-  held_connection = nullptr;
+  iree_net_connection_release(held_connection_ctx.connection);
+  held_connection_ctx.connection = nullptr;
 
   // Drain any pending operations before TearDown.
   PollUntil([&]() { return false; }, iree_make_duration_ms(100));
@@ -1174,7 +1210,7 @@ TEST_P(SessionTest, BootstrapTimeoutCancelledOnSuccess) {
   server_topo.machine_index = 1;
   server_topo.session_epoch = 1;
 
-  std::string bind_str = MakeBindAddress();
+  IREE_ASSERT_OK_AND_ASSIGN(std::string bind_str, MakeBindAddress());
   iree_string_view_t bind_addr = iree_make_cstring_view(bind_str.c_str());
 
   struct AcceptCtx {
@@ -1183,6 +1219,7 @@ TEST_P(SessionTest, BootstrapTimeoutCancelledOnSuccess) {
     SessionCallbackTracker* callbacks = nullptr;
     iree_net_session_t** out_session = nullptr;
     iree_net_session_topology_t server_topology = {};
+    iree::Status status;
     bool fired = false;
   } accept_ctx;
   accept_ctx.proactor = proactor_;
@@ -1191,37 +1228,40 @@ TEST_P(SessionTest, BootstrapTimeoutCancelledOnSuccess) {
   accept_ctx.out_session = &server_session_;
   accept_ctx.server_topology = server_topo;
 
-  IREE_CHECK_OK(iree_net_transport_factory_create_listener(
+  IREE_ASSERT_OK(iree_net_transport_factory_create_listener(
       factory_, bind_addr, proactor_, recv_pool_,
       [](void* user_data, iree_status_t status,
          iree_net_connection_t* connection) {
         auto* ctx = static_cast<AcceptCtx*>(user_data);
-        IREE_CHECK_OK(status);
+        ctx->status = iree::Status(std::move(status));
 
-        iree_net_session_options_t server_options =
-            iree_net_session_options_default();
-        server_options.local_topology = ctx->server_topology;
-        server_options.session_id = 42;
-        server_options.bootstrap_timeout_ns = iree_make_duration_ms(50);
+        if (ctx->status.ok()) {
+          iree_net_session_options_t server_options =
+              iree_net_session_options_default();
+          server_options.local_topology = ctx->server_topology;
+          server_options.session_id = 42;
+          server_options.bootstrap_timeout_ns = iree_make_duration_ms(50);
 
-        IREE_CHECK_OK(iree_net_session_accept(
-            connection, ctx->proactor, ctx->tracker, &server_options,
-            ctx->callbacks->MakeCallbacks(), iree_allocator_system(),
-            ctx->out_session));
+          ctx->status = iree::Status(iree_net_session_accept(
+              connection, ctx->proactor, ctx->tracker, &server_options,
+              ctx->callbacks->MakeCallbacks(), iree_allocator_system(),
+              ctx->out_session));
+        }
 
         iree_net_connection_release(connection);
         ctx->fired = true;
       },
       &accept_ctx, iree_allocator_system(), &listener_));
 
-  std::string connect_str = ResolveConnectAddress(bind_str, listener_);
+  IREE_ASSERT_OK_AND_ASSIGN(std::string connect_str,
+                            ResolveConnectAddress(bind_str, listener_));
 
   iree_net_session_options_t client_options =
       iree_net_session_options_default();
   client_options.local_topology = client_topo;
   client_options.bootstrap_timeout_ns = iree_make_duration_ms(50);
 
-  IREE_CHECK_OK(iree_net_session_connect(
+  IREE_ASSERT_OK(iree_net_session_connect(
       factory_, iree_make_string_view(connect_str.c_str(), connect_str.size()),
       proactor_, recv_pool_, client_tracker_, &client_options,
       client_callbacks_.MakeCallbacks(), iree_allocator_system(),
@@ -1229,8 +1269,10 @@ TEST_P(SessionTest, BootstrapTimeoutCancelledOnSuccess) {
 
   // Bootstrap should complete successfully.
   ASSERT_TRUE(PollUntil([&]() {
-    return client_callbacks_.ready_fired && server_callbacks_.ready_fired;
+    return !accept_ctx.status.ok() ||
+           (client_callbacks_.ready_fired && server_callbacks_.ready_fired);
   })) << "Bootstrap timed out";
+  IREE_ASSERT_OK(accept_ctx.status);
 
   // Wait an extra 200ms — well past the 50ms bootstrap timeout. If the
   // timer cancel is broken, it would fire here and transition to ERROR.

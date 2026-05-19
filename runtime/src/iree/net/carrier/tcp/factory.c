@@ -235,11 +235,11 @@ static void iree_net_tcp_mux_error(void* user_data, iree_status_t status) {
 }
 
 static void iree_net_tcp_connection_on_send_complete(
-    void* callback_user_data, uint64_t operation_user_data,
-    iree_status_t status, iree_host_size_t bytes_transferred,
-    iree_async_buffer_lease_t* recv_lease) {
+    void* callback_user_data, iree_net_carrier_completion_kind_t kind,
+    uint64_t operation_user_data, iree_status_t status,
+    iree_host_size_t bytes_transferred, iree_async_buffer_lease_t* recv_lease) {
   (void)callback_user_data;
-  if (operation_user_data == 0) {
+  if (kind != IREE_NET_CARRIER_COMPLETION_SEND || operation_user_data == 0) {
     iree_status_ignore(status);
     return;
   }
@@ -251,7 +251,7 @@ static void iree_net_tcp_connection_on_send_complete(
 
   if (nested_operation_user_data != 0) {
     iree_net_frame_sender_dispatch_carrier_completion(
-        /*callback_user_data=*/NULL, nested_operation_user_data, status,
+        /*callback_user_data=*/NULL, kind, nested_operation_user_data, status,
         bytes_transferred, recv_lease);
   } else {
     iree_status_ignore(status);
