@@ -216,6 +216,37 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_library(
+    name = "queue_pair",
+    srcs = ["queue_pair.c"],
+    hdrs = ["queue_pair.h"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":completion_queue",
+        ":context",
+        "//runtime/src/iree/base",
+        "@rdma_core_headers",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "queue_pair_test",
+    srcs = ["queue_pair_test.cc"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":queue_pair",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "work_request_table",
     srcs = ["work_request_table.c"],
     hdrs = ["work_request_table.h"],

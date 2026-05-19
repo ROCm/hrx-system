@@ -200,6 +200,37 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_library(
   NAME
+    queue_pair
+  HDRS
+    "queue_pair.h"
+  SRCS
+    "queue_pair.c"
+  DEPS
+    ::completion_queue
+    ::context
+    iree::base
+    rdma_core::headers
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    queue_pair_test
+  SRCS
+    "queue_pair_test.cc"
+  DEPS
+    ::queue_pair
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_library(
+  NAME
     work_request_table
   HDRS
     "work_request_table.h"
