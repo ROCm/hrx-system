@@ -83,6 +83,14 @@ static iree_status_t iree_async_iocp_socket_apply_options(
     iree_async_socket_options_t options) {
   int optval = 1;
 
+  if (iree_any_bit_set(options, IREE_ASYNC_SOCKET_OPTION_REUSE_PORT)) {
+    // Windows has no equivalent to SO_REUSEPORT. SO_REUSEADDR on Windows has
+    // different semantics than on POSIX (allows hijacking by default), so we
+    // cannot safely emulate this.
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "SO_REUSEPORT is not available on Windows");
+  }
+
   if (iree_any_bit_set(options, IREE_ASYNC_SOCKET_OPTION_REUSE_ADDR)) {
     if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (const char*)&optval,
                    sizeof(optval)) == SOCKET_ERROR) {
@@ -91,14 +99,17 @@ static iree_status_t iree_async_iocp_socket_apply_options(
                               "setsockopt SO_REUSEADDR failed (WSA error %d)",
                               wsa_error);
     }
-  }
-
-  if (iree_any_bit_set(options, IREE_ASYNC_SOCKET_OPTION_REUSE_PORT)) {
-    // Windows has no equivalent to SO_REUSEPORT. SO_REUSEADDR on Windows has
-    // different semantics than on POSIX (allows hijacking by default), so we
-    // cannot safely emulate this.
-    return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                            "SO_REUSEPORT is not available on Windows");
+  } else if (type == IREE_ASYNC_SOCKET_TYPE_TCP ||
+             type == IREE_ASYNC_SOCKET_TYPE_TCP6 ||
+             type == IREE_ASYNC_SOCKET_TYPE_UDP ||
+             type == IREE_ASYNC_SOCKET_TYPE_UDP6) {
+    if (setsockopt(sock, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char*)&optval,
+                   sizeof(optval)) == SOCKET_ERROR) {
+      int wsa_error = WSAGetLastError();
+      return iree_make_status(
+          iree_status_code_from_win32_error(wsa_error),
+          "setsockopt SO_EXCLUSIVEADDRUSE failed (WSA error %d)", wsa_error);
+    }
   }
 
   if (iree_any_bit_set(options, IREE_ASYNC_SOCKET_OPTION_NO_DELAY) &&
@@ -158,6 +169,8 @@ static void iree_async_iocp_socket_initialize(
   socket->proactor = &proactor->base;
   socket->primitive = iree_async_primitive_from_win32_handle((uintptr_t)sock);
   socket->fixed_file_index = -1;
+  iree_atomic_store(&socket->bind_state, IREE_ASYNC_SOCKET_BIND_STATE_UNBOUND,
+                    iree_memory_order_release);
   socket->type = type;
   socket->state = IREE_ASYNC_SOCKET_STATE_CREATED;
   socket->flags = flags;

@@ -163,6 +163,8 @@ static void iree_async_socket_initialize(iree_async_socket_t* socket,
   socket->proactor = &proactor->base;
   socket->primitive = iree_async_primitive_from_fd(fd);
   socket->fixed_file_index = -1;
+  iree_atomic_store(&socket->bind_state, IREE_ASYNC_SOCKET_BIND_STATE_UNBOUND,
+                    iree_memory_order_release);
   socket->type = type;
   socket->state = IREE_ASYNC_SOCKET_STATE_CREATED;
   socket->flags = flags;
@@ -245,6 +247,8 @@ iree_status_t iree_async_posix_socket_create_accepted(
 
   iree_async_socket_initialize(socket, proactor, accepted_fd, type,
                                IREE_ASYNC_SOCKET_FLAG_NONE);
+  iree_atomic_store(&socket->bind_state, IREE_ASYNC_SOCKET_BIND_STATE_BOUND,
+                    iree_memory_order_release);
   socket->state = IREE_ASYNC_SOCKET_STATE_CONNECTED;
   *out_socket = socket;
   return iree_ok_status();

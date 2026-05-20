@@ -1643,6 +1643,9 @@ static void iree_async_proactor_iocp_complete_accept(
         accepted_socket->primitive =
             iree_async_primitive_from_win32_handle((uintptr_t)accept_sock);
         accepted_socket->fixed_file_index = -1;
+        iree_atomic_store(&accepted_socket->bind_state,
+                          IREE_ASYNC_SOCKET_BIND_STATE_BOUND,
+                          iree_memory_order_release);
         accepted_socket->type = accept_op->listen_socket->type;
         accepted_socket->state = IREE_ASYNC_SOCKET_STATE_CONNECTED;
         accepted_socket->flags = accept_op->listen_socket->flags;

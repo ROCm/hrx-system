@@ -168,6 +168,8 @@ static void iree_async_socket_initialize(
   socket->proactor = &proactor->base;
   socket->primitive = iree_async_primitive_from_fd(fd);
   socket->fixed_file_index = -1;  // Not using fixed files yet.
+  iree_atomic_store(&socket->bind_state, IREE_ASYNC_SOCKET_BIND_STATE_UNBOUND,
+                    iree_memory_order_release);
   socket->type = type;
   socket->state = IREE_ASYNC_SOCKET_STATE_CREATED;
   socket->flags = flags;

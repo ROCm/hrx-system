@@ -128,6 +128,28 @@ static inline iree_socket_t iree_socket_from_primitive(
 #endif  // IREE_PLATFORM_WINDOWS
 }
 
+static iree_status_t iree_async_socket_begin_explicit_bind(
+    iree_async_socket_t* socket) {
+  int32_t expected = IREE_ASYNC_SOCKET_BIND_STATE_UNBOUND;
+  if (iree_atomic_compare_exchange_strong(
+          &socket->bind_state, &expected, IREE_ASYNC_SOCKET_BIND_STATE_BINDING,
+          iree_memory_order_acq_rel, iree_memory_order_acquire)) {
+    return iree_ok_status();
+  }
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "socket is already bound");
+}
+
+static void iree_async_socket_mark_bind_failed(iree_async_socket_t* socket) {
+  iree_atomic_store(&socket->bind_state, IREE_ASYNC_SOCKET_BIND_STATE_UNBOUND,
+                    iree_memory_order_release);
+}
+
+static void iree_async_socket_mark_bound(iree_async_socket_t* socket) {
+  iree_atomic_store(&socket->bind_state, IREE_ASYNC_SOCKET_BIND_STATE_BOUND,
+                    iree_memory_order_release);
+}
+
 IREE_API_EXPORT iree_status_t iree_async_socket_bind(
     iree_async_socket_t* socket, const iree_async_address_t* address) {
   // Check sticky failure state.
@@ -139,6 +161,8 @@ IREE_API_EXPORT iree_status_t iree_async_socket_bind(
   iree_socket_t sock = iree_socket_from_primitive(socket->primitive);
   const struct sockaddr* sa = (const struct sockaddr*)address->storage;
 
+  IREE_RETURN_IF_ERROR(iree_async_socket_begin_explicit_bind(socket));
+
 #if defined(IREE_PLATFORM_WINDOWS)
   int result = bind(sock, sa, (int)address->length);
 #else
@@ -146,11 +170,19 @@ IREE_API_EXPORT iree_status_t iree_async_socket_bind(
 #endif  // IREE_PLATFORM_WINDOWS
 
   if (result != 0) {
+    iree_async_socket_mark_bind_failed(socket);
+#if defined(IREE_PLATFORM_WINDOWS)
+    int error = WSAGetLastError();
+    return iree_make_status(iree_status_code_from_win32_error(error),
+                            "bind failed (WSA error %d)", error);
+#else
     int saved_errno = errno;
     return iree_make_status(iree_status_code_from_errno(saved_errno),
                             "bind failed: %s", strerror(saved_errno));
+#endif  // IREE_PLATFORM_WINDOWS
   }
 
+  iree_async_socket_mark_bound(socket);
   return iree_ok_status();
 }
 
@@ -203,12 +235,14 @@ IREE_API_EXPORT iree_status_t iree_async_socket_listen(
               "implicit bind not supported for socket type %d", socket->type);
       }
       if (bind(sock, (struct sockaddr*)&bind_addr, bind_addr_length) != 0) {
+        int error = WSAGetLastError();
         return iree_make_status(
-            iree_status_code_from_win32_error(WSAGetLastError()),
-            "implicit bind before listen failed (WSA "
-            "error %d)",
-            WSAGetLastError());
+            iree_status_code_from_win32_error(error),
+            "implicit bind before listen failed (WSA error %d)", error);
       }
+      iree_async_socket_mark_bound(socket);
+    } else {
+      iree_async_socket_mark_bound(socket);
     }
   }
 #endif  // IREE_PLATFORM_WINDOWS
@@ -236,6 +270,7 @@ IREE_API_EXPORT iree_status_t iree_async_socket_listen(
 
   // Update diagnostic state.
   socket->state = IREE_ASYNC_SOCKET_STATE_LISTENING;
+  iree_async_socket_mark_bound(socket);
 
   return iree_ok_status();
 }

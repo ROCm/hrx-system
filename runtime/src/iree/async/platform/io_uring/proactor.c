@@ -973,6 +973,9 @@ static iree_status_t iree_async_proactor_io_uring_complete_socket_accept(
       inherited_flags, &accept->accepted_socket);
   if (iree_status_is_ok(status)) {
     accept->accepted_socket->state = IREE_ASYNC_SOCKET_STATE_CONNECTED;
+    iree_atomic_store(&accept->accepted_socket->bind_state,
+                      IREE_ASYNC_SOCKET_BIND_STATE_BOUND,
+                      iree_memory_order_release);
   } else {
     // Import failed (e.g., allocation failure). Close the accepted fd.
     close(accepted_fd);

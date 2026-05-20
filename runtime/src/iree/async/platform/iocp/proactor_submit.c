@@ -365,6 +365,8 @@ static iree_status_t iree_async_proactor_iocp_auto_bind_if_needed(
   int probe_length = sizeof(probe_address);
   if (getsockname(sock, (struct sockaddr*)&probe_address, &probe_length) !=
       SOCKET_ERROR) {
+    iree_atomic_store(&socket->bind_state, IREE_ASYNC_SOCKET_BIND_STATE_BOUND,
+                      iree_memory_order_release);
     return iree_ok_status();  // Already bound.
   }
 
@@ -403,6 +405,8 @@ static iree_status_t iree_async_proactor_iocp_auto_bind_if_needed(
     return iree_make_status(iree_status_code_from_win32_error(wsa_error),
                             "auto-bind failed (WSA error %d)", wsa_error);
   }
+  iree_atomic_store(&socket->bind_state, IREE_ASYNC_SOCKET_BIND_STATE_BOUND,
+                    iree_memory_order_release);
   return iree_ok_status();
 }
 

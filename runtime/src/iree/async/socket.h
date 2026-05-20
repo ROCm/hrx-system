@@ -139,6 +139,13 @@ enum iree_async_socket_state_e {
 };
 typedef uint8_t iree_async_socket_state_t;
 
+// Internal local bind state for a socket.
+enum iree_async_socket_bind_state_e {
+  IREE_ASYNC_SOCKET_BIND_STATE_UNBOUND = 0,
+  IREE_ASYNC_SOCKET_BIND_STATE_BINDING = 1,
+  IREE_ASYNC_SOCKET_BIND_STATE_BOUND = 2,
+};
+
 // A proactor-managed socket. Created via iree_async_socket_create() or
 // iree_async_socket_import().
 typedef struct iree_async_socket_t {
@@ -154,6 +161,9 @@ typedef struct iree_async_socket_t {
   // io_uring fixed file index for reduced syscall overhead (-1 if not
   // registered). Backend-specific optimization; ignored on other platforms.
   int32_t fixed_file_index;
+
+  // Tracks whether the platform socket has an explicit or implicit local bind.
+  iree_atomic_int32_t bind_state;
 
   // Socket type (TCP, UDP, Unix stream/dgram).
   iree_async_socket_type_t type;
