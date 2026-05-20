@@ -1321,6 +1321,12 @@ static void iree_net_rdma_carrier_on_send_completions(
     }
     iree_status_t completion_status =
         iree_status_join(work_status, cleanup_status);
+    // Non-draining verbs failures are terminal for the QP. Complete the current
+    // CQE first, then retire the rest of the local carrier state.
+    iree_status_t terminal_failure_status =
+        !draining_flush && !iree_status_is_ok(work_status)
+            ? iree_status_clone(completion_status)
+            : iree_ok_status();
     iree_host_size_t bytes_transferred =
         iree_status_is_ok(completion_status)
             ? work_request_completion.byte_length
@@ -1336,7 +1342,11 @@ static void iree_net_rdma_carrier_on_send_completions(
         work_request_completion.operation);
     if (internal_completion) {
       if (!iree_status_is_ok(completion_status)) {
-        iree_net_rdma_carrier_notify_error(carrier, completion_status);
+        if (iree_status_is_ok(terminal_failure_status)) {
+          iree_net_rdma_carrier_notify_error(carrier, completion_status);
+        } else {
+          iree_status_free(completion_status);
+        }
       } else if (!draining_flush &&
                  work_request_completion.operation !=
                      IREE_NET_RDMA_WORK_REQUEST_OPERATION_MEMORY_WINDOW_BIND &&
@@ -1369,6 +1379,9 @@ static void iree_net_rdma_carrier_on_send_completions(
     }
     iree_net_rdma_carrier_defer_deactivate_callback(
         carrier, deactivate_callback, deactivate_user_data);
+    if (!iree_status_is_ok(terminal_failure_status)) {
+      iree_net_rdma_carrier_fail_all(carrier, terminal_failure_status);
+    }
   }
 }
 
@@ -1519,7 +1532,8 @@ static void iree_net_rdma_carrier_on_recv_completions(
                                       : iree_net_rdma_carrier_deliver_receive(
                                             carrier, &lease);
     }
-    if (iree_status_is_ok(cleanup_status)) {
+    if (iree_status_is_ok(cleanup_status) &&
+        (draining_flush || iree_status_is_ok(work_status))) {
       cleanup_status = iree_net_rdma_carrier_release_receive_lease(
           carrier, &lease, &pending_send_failure, &deactivate_callback,
           &deactivate_user_data);
@@ -1535,15 +1549,28 @@ static void iree_net_rdma_carrier_on_recv_completions(
 
     iree_status_t completion_status =
         iree_status_join(work_status, cleanup_status);
+    // Non-draining verbs failures are terminal for the QP. Complete the current
+    // CQE first, then retire the rest of the local carrier state.
+    iree_status_t terminal_failure_status =
+        !draining_flush && !iree_status_is_ok(work_status)
+            ? iree_status_clone(completion_status)
+            : iree_ok_status();
     if (!iree_status_is_ok(completion_status)) {
       iree_net_rdma_carrier_notify_pending_send_failure(
           carrier, &pending_send_failure, completion_status);
     }
     if (!iree_status_is_ok(completion_status)) {
-      iree_net_rdma_carrier_notify_error(carrier, completion_status);
+      if (iree_status_is_ok(terminal_failure_status)) {
+        iree_net_rdma_carrier_notify_error(carrier, completion_status);
+      } else {
+        iree_status_free(completion_status);
+      }
     }
     iree_net_rdma_carrier_defer_deactivate_callback(
         carrier, deactivate_callback, deactivate_user_data);
+    if (!iree_status_is_ok(terminal_failure_status)) {
+      iree_net_rdma_carrier_fail_all(carrier, terminal_failure_status);
+    }
   }
 }
 
@@ -2429,6 +2456,7 @@ static iree_status_t iree_net_rdma_carrier_send(
     iree_net_carrier_t* base_carrier, const iree_net_send_params_t* params) {
   iree_net_rdma_carrier_t* carrier =
       iree_net_rdma_carrier_from_base(base_carrier);
+  IREE_RETURN_IF_ERROR(iree_net_rdma_carrier_get_failure_status(carrier));
   if (iree_net_carrier_state(base_carrier) != IREE_NET_CARRIER_STATE_ACTIVE) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "carrier is not active");
@@ -2454,7 +2482,6 @@ static iree_status_t iree_net_rdma_carrier_send(
                             " spans but max_iov is %" PRIhsz,
                             params->data.count, base_carrier->max_iov);
   }
-  IREE_RETURN_IF_ERROR(iree_net_rdma_carrier_get_failure_status(carrier));
 
   bool requires_staging = false;
   iree_status_t status = iree_net_rdma_carrier_span_list_requires_staging(

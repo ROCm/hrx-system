@@ -134,9 +134,9 @@ TEST_P(RdmaDirectTest, UnregisterInvalidatesRemoteHandle) {
       iree_net_carrier_send_budget_t budget =
           iree_net_carrier_query_direct_write_budget(
               client_, IREE_NET_DIRECT_WRITE_FLAG_NONE);
-      return budget.slots == 0 &&
-             iree_net_carrier_pending_count(client_) == client_pending_before;
+      return budget.slots == 0 && iree_net_carrier_pending_count(client_) == 0;
     }));
+    IREE_EXPECT_NOT_OK(iree_net_carrier_direct_write(client_, &params));
   } else {
     IREE_EXPECT_NOT_OK(stale_write_status);
   }
