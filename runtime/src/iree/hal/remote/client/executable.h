@@ -28,7 +28,7 @@ typedef struct iree_hal_remote_client_device_t iree_hal_remote_client_device_t;
 // and export count (both returned by the EXECUTABLE_UPLOAD RPC response).
 iree_status_t iree_hal_remote_client_executable_create(
     iree_hal_remote_client_device_t* device,
-    iree_hal_remote_resource_id_t resource_id, iree_host_size_t export_count,
+    iree_hal_remote_resource_id_t resource_id, iree_host_size_t function_count,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable);
 
 // Returns the resource_id from a remote client executable proxy.

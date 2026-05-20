@@ -226,7 +226,7 @@ static iree_status_t iree_hal_remote_client_executable_cache_prepare_executable(
             response_payload.data;
     status = iree_hal_remote_client_executable_create(
         cache->device, response->resolved_id,
-        (iree_host_size_t)response->export_count, cache->host_allocator,
+        (iree_host_size_t)response->function_count, cache->host_allocator,
         out_executable);
   }
 

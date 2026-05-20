@@ -49,68 +49,69 @@ typedef struct iree_hal_remote_client_executable_t {
   // Cached globals resolved by name. Each entry owns its remote buffer alias.
   iree_hal_remote_client_executable_global_t* global_list;
 
-  // Number of exported entry points reported by EXECUTABLE_UPLOAD.
-  iree_host_size_t export_count;
+  // Number of dispatchable functions reported by EXECUTABLE_UPLOAD.
+  iree_host_size_t function_count;
 
-  // Number of export metadata entries cached in export_infos.
-  iree_host_size_t export_info_count;
+  // Number of function metadata entries cached in function_infos.
+  iree_host_size_t function_info_count;
 
-  // Cached immutable export metadata indexed by export ordinal.
-  iree_hal_executable_function_info_t* export_infos;
+  // Cached immutable function metadata indexed by dense function index.
+  iree_hal_executable_function_info_t* function_infos;
 
-  // Per-export cached parameter arrays indexed by export ordinal.
-  iree_hal_executable_function_parameter_t** export_parameters;
+  // Per-function cached parameter arrays indexed by dense function index.
+  iree_hal_executable_function_parameter_t** function_parameters;
 
   // Base allocations for each cached parameter array and its name storage.
-  void** export_parameter_storage;
+  void** function_parameter_storage;
 
-  // Bitset tracking which export_infos entries have server metadata.
-  uint64_t* export_info_bits;
+  // Bitset tracking which function_infos entries have server metadata.
+  uint64_t* function_info_bits;
 } iree_hal_remote_client_executable_t;
 
 static iree_host_size_t
-iree_hal_remote_client_executable_export_info_word_count(
-    iree_host_size_t export_count) {
+iree_hal_remote_client_executable_function_info_word_count(
+    iree_host_size_t function_count) {
   return iree_host_size_ceil_div(
-      export_count, IREE_HAL_REMOTE_CLIENT_EXECUTABLE_BITS_PER_WORD);
+      function_count, IREE_HAL_REMOTE_CLIENT_EXECUTABLE_BITS_PER_WORD);
 }
 
-static bool iree_hal_remote_client_executable_export_info_is_cached(
+static bool iree_hal_remote_client_executable_function_info_is_cached(
     const iree_hal_remote_client_executable_t* executable,
-    iree_host_size_t export_ordinal) {
+    iree_host_size_t function_index) {
   iree_host_size_t word_index =
-      export_ordinal / IREE_HAL_REMOTE_CLIENT_EXECUTABLE_BITS_PER_WORD;
+      function_index / IREE_HAL_REMOTE_CLIENT_EXECUTABLE_BITS_PER_WORD;
   iree_host_size_t bit_index =
-      export_ordinal % IREE_HAL_REMOTE_CLIENT_EXECUTABLE_BITS_PER_WORD;
-  return (executable->export_info_bits[word_index] &
+      function_index % IREE_HAL_REMOTE_CLIENT_EXECUTABLE_BITS_PER_WORD;
+  return (executable->function_info_bits[word_index] &
           ((uint64_t)1ull << bit_index)) != 0;
 }
 
-static void iree_hal_remote_client_executable_mark_export_info_cached(
+static void iree_hal_remote_client_executable_mark_function_info_cached(
     iree_hal_remote_client_executable_t* executable,
-    iree_host_size_t export_ordinal) {
+    iree_host_size_t function_index) {
   iree_host_size_t word_index =
-      export_ordinal / IREE_HAL_REMOTE_CLIENT_EXECUTABLE_BITS_PER_WORD;
+      function_index / IREE_HAL_REMOTE_CLIENT_EXECUTABLE_BITS_PER_WORD;
   iree_host_size_t bit_index =
-      export_ordinal % IREE_HAL_REMOTE_CLIENT_EXECUTABLE_BITS_PER_WORD;
-  executable->export_info_bits[word_index] |= (uint64_t)1ull << bit_index;
-  ++executable->export_info_count;
+      function_index % IREE_HAL_REMOTE_CLIENT_EXECUTABLE_BITS_PER_WORD;
+  executable->function_info_bits[word_index] |= (uint64_t)1ull << bit_index;
+  ++executable->function_info_count;
 }
 
-static iree_status_t iree_hal_remote_client_executable_query_export_info(
-    iree_hal_remote_client_executable_t* executable, uint32_t export_ordinal,
+static iree_status_t iree_hal_remote_client_executable_query_function_info(
+    iree_hal_remote_client_executable_t* executable,
+    iree_hal_executable_function_t function,
     iree_hal_executable_function_info_t* out_info) {
   memset(out_info, 0, sizeof(*out_info));
 
   struct {
     iree_hal_remote_control_envelope_t envelope;
-    iree_hal_remote_executable_query_export_request_t request;
+    iree_hal_remote_executable_query_function_request_t request;
   } request_message;
   memset(&request_message, 0, sizeof(request_message));
   request_message.envelope.message_type =
-      IREE_HAL_REMOTE_CONTROL_EXECUTABLE_QUERY_EXPORT;
+      IREE_HAL_REMOTE_CONTROL_EXECUTABLE_QUERY_FUNCTION;
   request_message.request.executable_id = executable->resource_id;
-  request_message.request.export_ordinal = export_ordinal;
+  request_message.request.function_value = function.value;
 
   iree_const_byte_span_t response_payload = iree_const_byte_span_empty();
   iree_async_buffer_lease_t response_lease;
@@ -120,30 +121,30 @@ static iree_status_t iree_hal_remote_client_executable_query_export_info(
       iree_make_const_byte_span(&request_message, sizeof(request_message)),
       &response_payload, &response_lease);
 
-  const iree_hal_remote_executable_query_export_response_t* response = NULL;
+  const iree_hal_remote_executable_query_function_response_t* response = NULL;
   iree_host_size_t name_offset = 0;
   if (iree_status_is_ok(status)) {
     if (response_payload.data_length <
-        sizeof(iree_hal_remote_executable_query_export_response_t)) {
+        sizeof(iree_hal_remote_executable_query_function_response_t)) {
       status = iree_make_status(
           IREE_STATUS_INTERNAL,
-          "EXECUTABLE_QUERY_EXPORT response too short: "
+          "EXECUTABLE_QUERY_FUNCTION response too short: "
           "%" PRIhsz " < %" PRIhsz,
           response_payload.data_length,
-          sizeof(iree_hal_remote_executable_query_export_response_t));
+          sizeof(iree_hal_remote_executable_query_function_response_t));
     } else {
-      response = (const iree_hal_remote_executable_query_export_response_t*)
+      response = (const iree_hal_remote_executable_query_function_response_t*)
                      response_payload.data;
       iree_host_size_t expected_length = 0;
       status = IREE_STRUCT_LAYOUT(
-          sizeof(iree_hal_remote_executable_query_export_response_t),
+          sizeof(iree_hal_remote_executable_query_function_response_t),
           &expected_length,
           IREE_STRUCT_FIELD(response->name_length, char, &name_offset));
       if (iree_status_is_ok(status) &&
           response_payload.data_length < expected_length) {
         status =
             iree_make_status(IREE_STATUS_INTERNAL,
-                             "EXECUTABLE_QUERY_EXPORT response truncated: "
+                             "EXECUTABLE_QUERY_FUNCTION response truncated: "
                              "%" PRIhsz " < %" PRIhsz,
                              response_payload.data_length, expected_length);
       }
@@ -176,8 +177,9 @@ static iree_status_t iree_hal_remote_client_executable_query_export_info(
 }
 
 static iree_status_t iree_hal_remote_client_executable_query_parameters(
-    iree_hal_remote_client_executable_t* executable, uint32_t export_ordinal,
-    iree_host_size_t capacity, void** out_parameter_storage,
+    iree_hal_remote_client_executable_t* executable,
+    iree_hal_executable_function_t function, iree_host_size_t capacity,
+    void** out_parameter_storage,
     iree_hal_executable_function_parameter_t** out_parameters,
     iree_host_size_t* out_parameter_count) {
   *out_parameter_storage = NULL;
@@ -187,7 +189,7 @@ static iree_status_t iree_hal_remote_client_executable_query_parameters(
   iree_status_t status = iree_ok_status();
   if (capacity > UINT16_MAX) {
     status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "export parameter count %" PRIhsz
+                              "function parameter count %" PRIhsz
                               " exceeds wire limit %" PRIu16,
                               capacity, UINT16_MAX);
   }
@@ -201,7 +203,7 @@ static iree_status_t iree_hal_remote_client_executable_query_parameters(
     request_message.envelope.message_type =
         IREE_HAL_REMOTE_CONTROL_EXECUTABLE_QUERY_PARAMETERS;
     request_message.request.executable_id = executable->resource_id;
-    request_message.request.export_ordinal = export_ordinal;
+    request_message.request.function_value = function.value;
     request_message.request.capacity = (uint16_t)capacity;
   }
 
@@ -235,7 +237,7 @@ static iree_status_t iree_hal_remote_client_executable_query_parameters(
           sizeof(iree_hal_remote_executable_query_parameters_response_t),
           &expected_length,
           IREE_STRUCT_FIELD(response->parameter_count,
-                            iree_hal_remote_executable_export_parameter_t,
+                            iree_hal_remote_executable_function_parameter_t,
                             &parameters_offset),
           IREE_STRUCT_FIELD(response->name_data_length, char, &names_offset));
       if (iree_status_is_ok(status) &&
@@ -287,10 +289,10 @@ static iree_status_t iree_hal_remote_client_executable_query_parameters(
   }
 
   if (iree_status_is_ok(status) && parameter_count > 0) {
-    const iree_hal_remote_executable_export_parameter_t* wire_parameters =
-        (const iree_hal_remote_executable_export_parameter_t*)(response_payload
-                                                                   .data +
-                                                               parameters_offset);
+    const iree_hal_remote_executable_function_parameter_t* wire_parameters =
+        (const iree_hal_remote_executable_function_parameter_t*)(response_payload
+                                                                     .data +
+                                                                 parameters_offset);
     const char* response_names =
         (const char*)response_payload.data + names_offset;
     char* name_storage = (char*)parameter_storage + names_storage_offset;
@@ -348,18 +350,20 @@ static iree_status_t iree_hal_remote_client_executable_initialize_metadata(
     iree_hal_remote_client_executable_t* executable) {
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
-       i < executable->export_count && iree_status_is_ok(status); ++i) {
+       i < executable->function_count && iree_status_is_ok(status); ++i) {
     iree_hal_executable_function_info_t info;
-    status = iree_hal_remote_client_executable_query_export_info(
-        executable, (uint32_t)i, &info);
+    status = iree_hal_remote_client_executable_query_function_info(
+        executable, iree_hal_executable_function_from_index((uint32_t)i),
+        &info);
     if (iree_status_is_unimplemented(status)) {
       iree_status_ignore(status);
       status = iree_ok_status();
       break;
     }
     if (iree_status_is_ok(status)) {
-      executable->export_infos[i] = info;
-      iree_hal_remote_client_executable_mark_export_info_cached(executable, i);
+      executable->function_infos[i] = info;
+      iree_hal_remote_client_executable_mark_function_info_cached(executable,
+                                                                  i);
     }
     if (iree_status_is_ok(status) && info.parameter_count > 0) {
       void* parameter_storage = NULL;
@@ -367,15 +371,17 @@ static iree_status_t iree_hal_remote_client_executable_initialize_metadata(
       iree_host_size_t parameter_count = 0;
       iree_status_t parameter_status =
           iree_hal_remote_client_executable_query_parameters(
-              executable, (uint32_t)i, info.parameter_count, &parameter_storage,
-              &parameters, &parameter_count);
+              executable, iree_hal_executable_function_from_index((uint32_t)i),
+              info.parameter_count, &parameter_storage, &parameters,
+              &parameter_count);
       if (iree_status_is_unimplemented(parameter_status)) {
         iree_status_ignore(parameter_status);
-        executable->export_infos[i].parameter_count = 0;
+        executable->function_infos[i].parameter_count = 0;
       } else if (iree_status_is_ok(parameter_status)) {
-        executable->export_parameter_storage[i] = parameter_storage;
-        executable->export_parameters[i] = parameters;
-        executable->export_infos[i].parameter_count = (uint16_t)parameter_count;
+        executable->function_parameter_storage[i] = parameter_storage;
+        executable->function_parameters[i] = parameters;
+        executable->function_infos[i].parameter_count =
+            (uint16_t)parameter_count;
       } else {
         status = parameter_status;
       }
@@ -394,11 +400,11 @@ static void iree_hal_remote_client_executable_destroy(
       executable->device, executable->resource_id));
 
   iree_allocator_t host_allocator = executable->host_allocator;
-  for (iree_host_size_t i = 0; i < executable->export_count; ++i) {
+  for (iree_host_size_t i = 0; i < executable->function_count; ++i) {
     iree_allocator_free(host_allocator,
-                        (void*)executable->export_infos[i].name.data);
+                        (void*)executable->function_infos[i].name.data);
     iree_allocator_free(host_allocator,
-                        executable->export_parameter_storage[i]);
+                        executable->function_parameter_storage[i]);
   }
   iree_hal_remote_client_executable_global_t* global = executable->global_list;
   while (global) {
@@ -416,7 +422,7 @@ static iree_host_size_t iree_hal_remote_client_executable_function_count(
     iree_hal_executable_t* base_executable) {
   iree_hal_remote_client_executable_t* executable =
       (iree_hal_remote_client_executable_t*)base_executable;
-  return executable->export_count;
+  return executable->function_count;
 }
 
 static iree_status_t iree_hal_remote_client_executable_function_info(
@@ -426,20 +432,20 @@ static iree_status_t iree_hal_remote_client_executable_function_info(
   iree_hal_remote_client_executable_t* executable =
       (iree_hal_remote_client_executable_t*)base_executable;
   if (!iree_hal_executable_function_is_index_in_range(
-          function, executable->export_count)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "function index %u >= function count %" PRIhsz,
-                            iree_hal_executable_function_index(function),
-                            executable->export_count);
+          function, executable->function_count)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "function value %" PRIu64 " is outside dense function count %" PRIhsz,
+        (uint64_t)function.value, executable->function_count);
   }
-  uint32_t export_ordinal = iree_hal_executable_function_index(function);
-  if (!iree_hal_remote_client_executable_export_info_is_cached(
-          executable, export_ordinal)) {
+  const uint32_t function_index = iree_hal_executable_function_index(function);
+  if (!iree_hal_remote_client_executable_function_info_is_cached(
+          executable, function_index)) {
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
         "server executable function metadata is not available");
   }
-  *out_info = executable->export_infos[export_ordinal];
+  *out_info = executable->function_infos[function_index];
   return iree_ok_status();
 }
 
@@ -450,29 +456,29 @@ static iree_status_t iree_hal_remote_client_executable_function_parameters(
   iree_hal_remote_client_executable_t* executable =
       (iree_hal_remote_client_executable_t*)base_executable;
   if (!iree_hal_executable_function_is_index_in_range(
-          function, executable->export_count)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "function index %u >= function count %" PRIhsz,
-                            iree_hal_executable_function_index(function),
-                            executable->export_count);
+          function, executable->function_count)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "function value %" PRIu64 " is outside dense function count %" PRIhsz,
+        (uint64_t)function.value, executable->function_count);
   }
-  uint32_t export_ordinal = iree_hal_executable_function_index(function);
-  if (!iree_hal_remote_client_executable_export_info_is_cached(
-          executable, export_ordinal)) {
+  const uint32_t function_index = iree_hal_executable_function_index(function);
+  if (!iree_hal_remote_client_executable_function_info_is_cached(
+          executable, function_index)) {
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
         "server executable function parameter metadata is not available");
   }
   iree_host_size_t parameter_count =
-      executable->export_infos[export_ordinal].parameter_count;
+      executable->function_infos[function_index].parameter_count;
   iree_host_size_t copy_count = iree_min(capacity, parameter_count);
   if (copy_count > 0) {
-    if (!executable->export_parameters[export_ordinal]) {
+    if (!executable->function_parameters[function_index]) {
       return iree_make_status(
           IREE_STATUS_UNIMPLEMENTED,
           "server executable parameter metadata is not available");
     }
-    memcpy(out_parameters, executable->export_parameters[export_ordinal],
+    memcpy(out_parameters, executable->function_parameters[function_index],
            copy_count * sizeof(out_parameters[0]));
   }
   return iree_ok_status();
@@ -484,9 +490,9 @@ static iree_status_t iree_hal_remote_client_executable_lookup_function_by_name(
   iree_hal_remote_client_executable_t* executable =
       (iree_hal_remote_client_executable_t*)base_executable;
   *out_function = iree_hal_executable_function_invalid();
-  if (executable->export_info_count == executable->export_count) {
-    for (iree_host_size_t i = 0; i < executable->export_count; ++i) {
-      if (iree_string_view_equal(executable->export_infos[i].name, name)) {
+  if (executable->function_info_count == executable->function_count) {
+    for (iree_host_size_t i = 0; i < executable->function_count; ++i) {
+      if (iree_string_view_equal(executable->function_infos[i].name, name)) {
         *out_function = iree_hal_executable_function_from_index((uint32_t)i);
         return iree_ok_status();
       }
@@ -508,7 +514,7 @@ static iree_status_t iree_hal_remote_client_executable_lookup_function_by_name(
   iree_host_size_t name_offset = 0;
   const iree_host_size_t header_size =
       sizeof(iree_hal_remote_control_envelope_t) +
-      sizeof(iree_hal_remote_executable_lookup_export_request_t);
+      sizeof(iree_hal_remote_executable_lookup_function_request_t);
   if (iree_status_is_ok(status)) {
     status =
         IREE_STRUCT_LAYOUT(header_size, &message_length,
@@ -524,9 +530,9 @@ static iree_status_t iree_hal_remote_client_executable_lookup_function_by_name(
     memset(message, 0, message_length);
     iree_hal_remote_control_envelope_t* envelope =
         (iree_hal_remote_control_envelope_t*)message;
-    envelope->message_type = IREE_HAL_REMOTE_CONTROL_EXECUTABLE_LOOKUP_EXPORT;
-    iree_hal_remote_executable_lookup_export_request_t* request =
-        (iree_hal_remote_executable_lookup_export_request_t*)(envelope + 1);
+    envelope->message_type = IREE_HAL_REMOTE_CONTROL_EXECUTABLE_LOOKUP_FUNCTION;
+    iree_hal_remote_executable_lookup_function_request_t* request =
+        (iree_hal_remote_executable_lookup_function_request_t*)(envelope + 1);
     request->executable_id = executable->resource_id;
     request->name_length = (uint16_t)name.size;
     memcpy(message + name_offset, name.data, name.size);
@@ -543,27 +549,19 @@ static iree_status_t iree_hal_remote_client_executable_lookup_function_by_name(
 
   if (iree_status_is_ok(status)) {
     if (response_payload.data_length <
-        sizeof(iree_hal_remote_executable_lookup_export_response_t)) {
+        sizeof(iree_hal_remote_executable_lookup_function_response_t)) {
       status = iree_make_status(
           IREE_STATUS_INTERNAL,
-          "EXECUTABLE_LOOKUP_EXPORT response too short: "
+          "EXECUTABLE_LOOKUP_FUNCTION response too short: "
           "%" PRIhsz " < %" PRIhsz,
           response_payload.data_length,
-          sizeof(iree_hal_remote_executable_lookup_export_response_t));
+          sizeof(iree_hal_remote_executable_lookup_function_response_t));
     } else {
-      const iree_hal_remote_executable_lookup_export_response_t* response =
-          (const iree_hal_remote_executable_lookup_export_response_t*)
+      const iree_hal_remote_executable_lookup_function_response_t* response =
+          (const iree_hal_remote_executable_lookup_function_response_t*)
               response_payload.data;
-      if (response->export_ordinal >= executable->export_count) {
-        status = iree_make_status(
-            IREE_STATUS_INTERNAL,
-            "EXECUTABLE_LOOKUP_EXPORT returned ordinal %" PRIu32
-            " for function count %" PRIhsz,
-            response->export_ordinal, executable->export_count);
-      } else {
-        *out_function =
-            iree_hal_executable_function_from_index(response->export_ordinal);
-      }
+      *out_function =
+          iree_hal_executable_function_from_value(response->function_value);
     }
   }
 
@@ -860,28 +858,31 @@ static iree_status_t iree_hal_remote_client_executable_global_buffer(
 
 iree_status_t iree_hal_remote_client_executable_create(
     iree_hal_remote_client_device_t* device,
-    iree_hal_remote_resource_id_t resource_id, iree_host_size_t export_count,
+    iree_hal_remote_resource_id_t resource_id, iree_host_size_t function_count,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable) {
   IREE_ASSERT_ARGUMENT(out_executable);
   *out_executable = NULL;
 
   iree_hal_remote_client_executable_t* executable = NULL;
-  iree_host_size_t export_infos_offset = 0;
-  iree_host_size_t export_parameters_offset = 0;
-  iree_host_size_t export_parameter_storage_offset = 0;
-  iree_host_size_t export_info_bits_offset = 0;
+  iree_host_size_t function_infos_offset = 0;
+  iree_host_size_t function_parameters_offset = 0;
+  iree_host_size_t function_parameter_storage_offset = 0;
+  iree_host_size_t function_info_bits_offset = 0;
   iree_host_size_t total_size = 0;
-  iree_host_size_t export_info_word_count =
-      iree_hal_remote_client_executable_export_info_word_count(export_count);
+  iree_host_size_t function_info_word_count =
+      iree_hal_remote_client_executable_function_info_word_count(
+          function_count);
   iree_status_t status = IREE_STRUCT_LAYOUT(
       sizeof(*executable), &total_size,
-      IREE_STRUCT_FIELD(export_count, iree_hal_executable_function_info_t,
-                        &export_infos_offset),
-      IREE_STRUCT_FIELD(export_count, iree_hal_executable_function_parameter_t*,
-                        &export_parameters_offset),
-      IREE_STRUCT_FIELD(export_count, void*, &export_parameter_storage_offset),
-      IREE_STRUCT_FIELD(export_info_word_count, uint64_t,
-                        &export_info_bits_offset));
+      IREE_STRUCT_FIELD(function_count, iree_hal_executable_function_info_t,
+                        &function_infos_offset),
+      IREE_STRUCT_FIELD(function_count,
+                        iree_hal_executable_function_parameter_t*,
+                        &function_parameters_offset),
+      IREE_STRUCT_FIELD(function_count, void*,
+                        &function_parameter_storage_offset),
+      IREE_STRUCT_FIELD(function_info_word_count, uint64_t,
+                        &function_info_bits_offset));
   if (iree_status_is_ok(status)) {
     status =
         iree_allocator_malloc(host_allocator, total_size, (void**)&executable);
@@ -895,17 +896,17 @@ iree_status_t iree_hal_remote_client_executable_create(
     executable->host_allocator = host_allocator;
     executable->device = device;
     executable->resource_id = resource_id;
-    executable->export_count = export_count;
-    executable->export_infos =
+    executable->function_count = function_count;
+    executable->function_infos =
         (iree_hal_executable_function_info_t*)(executable_storage +
-                                               export_infos_offset);
-    executable->export_parameters =
+                                               function_infos_offset);
+    executable->function_parameters =
         (iree_hal_executable_function_parameter_t**)(executable_storage +
-                                                     export_parameters_offset);
-    executable->export_parameter_storage =
-        (void**)(executable_storage + export_parameter_storage_offset);
-    executable->export_info_bits =
-        (uint64_t*)(executable_storage + export_info_bits_offset);
+                                                     function_parameters_offset);
+    executable->function_parameter_storage =
+        (void**)(executable_storage + function_parameter_storage_offset);
+    executable->function_info_bits =
+        (uint64_t*)(executable_storage + function_info_bits_offset);
 
     status = iree_hal_remote_client_executable_initialize_metadata(executable);
   }

@@ -373,7 +373,7 @@ static iree_status_t iree_hal_remote_server_profile_parse_begin_request(
       !iree_any_bit_set(
           request->capture_filter_flags,
           IREE_HAL_PROFILE_CAPTURE_FILTER_FLAG_EXECUTABLE_FUNCTION_PATTERN) &&
-      request->executable_export_pattern_length != 0) {
+      request->executable_function_pattern_length != 0) {
     status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "PROFILING_BEGIN executable function pattern "
                               "provided without filter bit");
@@ -390,7 +390,7 @@ static iree_status_t iree_hal_remote_server_profile_parse_begin_request(
   if (iree_status_is_ok(status)) {
     status = iree_hal_remote_server_profile_parse_string(
         body, body_length, &read_offset,
-        request->executable_export_pattern_length,
+        request->executable_function_pattern_length,
         &executable_function_pattern);
   }
 

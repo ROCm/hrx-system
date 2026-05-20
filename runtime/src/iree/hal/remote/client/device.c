@@ -800,7 +800,7 @@ static iree_status_t iree_hal_remote_client_profiling_begin_request_allocate(
     message->body.physical_device_ordinal =
         options->capture_filter.physical_device_ordinal;
     message->body.queue_ordinal = options->capture_filter.queue_ordinal;
-    message->body.executable_export_pattern_length =
+    message->body.executable_function_pattern_length =
         executable_function_pattern_length;
     message->body.counter_set_count = counter_set_count;
     message->body.counter_name_count = counter_name_count;

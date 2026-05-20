@@ -988,8 +988,8 @@ static iree_status_t iree_hal_remote_write_execute_resources(
 typedef struct iree_hal_remote_dispatch_payload_t {
   // Executable containing the dispatch entry point.
   iree_hal_executable_t* executable;
-  // Export ordinal within |executable|.
-  uint32_t export_ordinal;
+  // Function token within |executable|.
+  iree_hal_executable_function_t function;
   // Workgroup configuration copied to the wire payload.
   iree_hal_dispatch_config_t config;
   // Dispatch constants copied after the fixed header.
@@ -1021,7 +1021,7 @@ static iree_status_t iree_hal_remote_write_dispatch_payload(
   op->header.type = IREE_HAL_REMOTE_QUEUE_OP_DISPATCH;
   op->executable_id =
       iree_hal_remote_client_executable_resource_id(payload->executable);
-  op->export_ordinal = payload->export_ordinal;
+  op->function_value = payload->function.value;
   memcpy(op->config.workgroup_size, payload->config.workgroup_size,
          sizeof(payload->config.workgroup_size));
   memcpy(op->config.workgroup_count, payload->config.workgroup_count,
@@ -1070,14 +1070,14 @@ static iree_status_t iree_hal_remote_write_dispatch_payload(
 }
 
 static iree_status_t iree_hal_remote_prepare_dispatch_payload(
-    iree_hal_executable_t* executable, uint32_t export_ordinal,
+    iree_hal_executable_t* executable, iree_hal_executable_function_t function,
     const iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
     const iree_hal_buffer_ref_list_t bindings, iree_hal_dispatch_flags_t flags,
     iree_hal_remote_dispatch_payload_t* out_payload,
     iree_hal_remote_queue_payload_writer_t* out_payload_writer) {
   memset(out_payload, 0, sizeof(*out_payload));
   out_payload->executable = executable;
-  out_payload->export_ordinal = export_ordinal;
+  out_payload->function = function;
   out_payload->config = config;
   out_payload->constants = constants;
   out_payload->bindings = bindings;
@@ -2704,8 +2704,8 @@ iree_status_t iree_hal_remote_client_device_queue_dispatch(
   iree_hal_remote_dispatch_payload_t payload;
   iree_hal_remote_queue_payload_writer_t payload_writer;
   iree_status_t status = iree_hal_remote_prepare_dispatch_payload(
-      executable, iree_hal_executable_function_index(function), config,
-      constants, bindings, flags, &payload, &payload_writer);
+      executable, function, config, constants, bindings, flags, &payload,
+      &payload_writer);
   iree_hal_remote_queue_resource_list_t resource_list = {
       .write = iree_hal_remote_write_dispatch_resources,
       .user_data = &payload,

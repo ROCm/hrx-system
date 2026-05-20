@@ -2208,7 +2208,7 @@ static iree_status_t iree_hal_remote_server_submit_dispatch(
 
   return iree_hal_device_queue_dispatch(
       local_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_list, signal_list,
-      executable, iree_hal_executable_function_from_index(op->export_ordinal),
+      executable, iree_hal_executable_function_from_value(op->function_value),
       local_config, constants, binding_list,
       (iree_hal_dispatch_flags_t)op->dispatch_flags);
 }
@@ -2999,7 +2999,7 @@ static iree_status_t iree_hal_remote_server_handle_executable_upload(
   }
 
   // Query function count from the loaded executable.
-  iree_host_size_t export_count =
+  iree_host_size_t function_count =
       iree_hal_executable_function_count(executable);
 
   // Assign to the session's resource table.
@@ -3017,7 +3017,7 @@ static iree_status_t iree_hal_remote_server_handle_executable_upload(
   iree_hal_remote_executable_upload_response_t response;
   memset(&response, 0, sizeof(response));
   response.resolved_id = resolved_id;
-  response.export_count = (uint32_t)export_count;
+  response.function_count = (uint32_t)function_count;
   return iree_hal_remote_server_send_response(
       entry->server->host_allocator, entry->session, envelope, IREE_STATUS_OK,
       &response, sizeof(response));
@@ -3042,36 +3042,37 @@ static iree_status_t iree_hal_remote_server_lookup_executable(
   return iree_ok_status();
 }
 
-static iree_status_t iree_hal_remote_server_handle_executable_query_export(
+static iree_status_t iree_hal_remote_server_handle_executable_query_function(
     iree_hal_remote_server_session_t* entry,
     const iree_hal_remote_control_envelope_t* envelope, const uint8_t* body,
     iree_host_size_t body_length) {
   iree_status_t status = iree_ok_status();
-  if (body_length < sizeof(iree_hal_remote_executable_query_export_request_t)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "EXECUTABLE_QUERY_EXPORT body too small: %" PRIhsz
-                              " bytes",
-                              body_length);
+  if (body_length <
+      sizeof(iree_hal_remote_executable_query_function_request_t)) {
+    status = iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "EXECUTABLE_QUERY_FUNCTION body too small: %" PRIhsz " bytes",
+        body_length);
   }
 
-  const iree_hal_remote_executable_query_export_request_t* request = NULL;
+  const iree_hal_remote_executable_query_function_request_t* request = NULL;
   iree_hal_executable_t* executable = NULL;
   iree_hal_executable_function_info_t info;
   memset(&info, 0, sizeof(info));
   if (iree_status_is_ok(status)) {
-    request = (const iree_hal_remote_executable_query_export_request_t*)body;
+    request = (const iree_hal_remote_executable_query_function_request_t*)body;
     status = iree_hal_remote_server_lookup_executable(
         entry, request->executable_id, &executable);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_executable_function_info(
         executable,
-        iree_hal_executable_function_from_index(request->export_ordinal),
+        iree_hal_executable_function_from_value(request->function_value),
         &info);
   }
   if (iree_status_is_ok(status) && info.name.size > UINT16_MAX) {
     status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "export name length %" PRIhsz
+                              "function name length %" PRIhsz
                               " exceeds wire limit %" PRIu16,
                               info.name.size, UINT16_MAX);
   }
@@ -3087,7 +3088,7 @@ static iree_status_t iree_hal_remote_server_handle_executable_query_export(
         entry->server->host_allocator, entry->session, envelope, status);
   }
 
-  iree_hal_remote_executable_query_export_response_t response;
+  iree_hal_remote_executable_query_function_response_t response;
   memset(&response, 0, sizeof(response));
   response.flags = (uint64_t)info.flags;
   memcpy(response.workgroup_size, info.workgroup_size,
@@ -3128,7 +3129,7 @@ static iree_status_t iree_hal_remote_server_handle_executable_query_parameters(
   if (iree_status_is_ok(status)) {
     status = iree_hal_executable_function_info(
         executable,
-        iree_hal_executable_function_from_index(request->export_ordinal),
+        iree_hal_executable_function_from_value(request->function_value),
         &info);
   }
   iree_host_size_t parameter_count = 0;
@@ -3150,7 +3151,7 @@ static iree_status_t iree_hal_remote_server_handle_executable_query_parameters(
   if (iree_status_is_ok(status) && parameter_count > 0) {
     status = iree_hal_executable_function_parameters(
         executable,
-        iree_hal_executable_function_from_index(request->export_ordinal),
+        iree_hal_executable_function_from_value(request->function_value),
         parameter_count, parameters);
   }
 
@@ -3182,7 +3183,7 @@ static iree_status_t iree_hal_remote_server_handle_executable_query_parameters(
     status = IREE_STRUCT_LAYOUT(
         0, &data_length,
         IREE_STRUCT_FIELD(parameter_count,
-                          iree_hal_remote_executable_export_parameter_t,
+                          iree_hal_remote_executable_function_parameter_t,
                           &parameters_offset),
         IREE_STRUCT_FIELD(name_data_length, char, &names_offset));
   }
@@ -3208,9 +3209,9 @@ static iree_status_t iree_hal_remote_server_handle_executable_query_parameters(
   if (iree_status_is_ok(status)) {
     memset(data_storage, 0, data_length);
     uint8_t* data_bytes = (uint8_t*)data_storage;
-    iree_hal_remote_executable_export_parameter_t* wire_parameters =
-        (iree_hal_remote_executable_export_parameter_t*)(data_bytes +
-                                                         parameters_offset);
+    iree_hal_remote_executable_function_parameter_t* wire_parameters =
+        (iree_hal_remote_executable_function_parameter_t*)(data_bytes +
+                                                           parameters_offset);
     char* name_cursor = (char*)data_bytes + names_offset;
     for (iree_host_size_t i = 0; i < parameter_count; ++i) {
       wire_parameters[i].offset = parameters[i].offset;
@@ -3240,32 +3241,32 @@ static iree_status_t iree_hal_remote_server_handle_executable_query_parameters(
       data_storage, data_length);
 }
 
-static iree_status_t iree_hal_remote_server_handle_executable_lookup_export(
+static iree_status_t iree_hal_remote_server_handle_executable_lookup_function(
     iree_hal_remote_server_session_t* entry,
     const iree_hal_remote_control_envelope_t* envelope, const uint8_t* body,
     iree_host_size_t body_length) {
   iree_status_t status = iree_ok_status();
   if (body_length <
-      sizeof(iree_hal_remote_executable_lookup_export_request_t)) {
+      sizeof(iree_hal_remote_executable_lookup_function_request_t)) {
     status = iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "EXECUTABLE_LOOKUP_EXPORT body too small: %" PRIhsz " bytes",
+        "EXECUTABLE_LOOKUP_FUNCTION body too small: %" PRIhsz " bytes",
         body_length);
   }
 
-  const iree_hal_remote_executable_lookup_export_request_t* request = NULL;
+  const iree_hal_remote_executable_lookup_function_request_t* request = NULL;
   iree_host_size_t name_offset = 0;
   iree_host_size_t required_length = 0;
   if (iree_status_is_ok(status)) {
-    request = (const iree_hal_remote_executable_lookup_export_request_t*)body;
+    request = (const iree_hal_remote_executable_lookup_function_request_t*)body;
     status = IREE_STRUCT_LAYOUT(
-        sizeof(iree_hal_remote_executable_lookup_export_request_t),
+        sizeof(iree_hal_remote_executable_lookup_function_request_t),
         &required_length,
         IREE_STRUCT_FIELD(request->name_length, char, &name_offset));
   }
   if (iree_status_is_ok(status) && body_length < required_length) {
     status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "EXECUTABLE_LOOKUP_EXPORT name truncated");
+                              "EXECUTABLE_LOOKUP_FUNCTION name truncated");
   }
 
   iree_hal_executable_t* executable = NULL;
@@ -3282,21 +3283,14 @@ static iree_status_t iree_hal_remote_server_handle_executable_lookup_export(
     status = iree_hal_executable_lookup_function_by_name(executable, name,
                                                          &function);
   }
-  if (iree_status_is_ok(status) &&
-      !iree_hal_executable_function_is_index_in_range(
-          function, iree_hal_executable_function_count(executable))) {
-    status = iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "EXECUTABLE_LOOKUP_EXPORT returned non-index function handle");
-  }
   if (!iree_status_is_ok(status)) {
     return iree_hal_remote_server_send_error_response(
         entry->server->host_allocator, entry->session, envelope, status);
   }
 
-  iree_hal_remote_executable_lookup_export_response_t response;
+  iree_hal_remote_executable_lookup_function_response_t response;
   memset(&response, 0, sizeof(response));
-  response.export_ordinal = iree_hal_executable_function_index(function);
+  response.function_value = function.value;
   return iree_hal_remote_server_send_response(
       entry->server->host_allocator, entry->session, envelope, IREE_STATUS_OK,
       &response, sizeof(response));
@@ -3908,7 +3902,7 @@ static iree_status_t iree_hal_remote_server_replay_dispatch_cmd(
   };
   return iree_hal_command_buffer_dispatch(
       local_command_buffer, executable,
-      iree_hal_executable_function_from_index(cmd->export_ordinal), config,
+      iree_hal_executable_function_from_value(cmd->function_value), config,
       constants, bindings, (iree_hal_dispatch_flags_t)cmd->dispatch_flags);
 }
 
@@ -5527,14 +5521,14 @@ iree_status_t iree_hal_remote_server_on_control_data(
     case IREE_HAL_REMOTE_CONTROL_EXECUTABLE_UPLOAD:
       return iree_hal_remote_server_handle_executable_upload(entry, envelope,
                                                              body, body_length);
-    case IREE_HAL_REMOTE_CONTROL_EXECUTABLE_QUERY_EXPORT:
-      return iree_hal_remote_server_handle_executable_query_export(
+    case IREE_HAL_REMOTE_CONTROL_EXECUTABLE_QUERY_FUNCTION:
+      return iree_hal_remote_server_handle_executable_query_function(
           entry, envelope, body, body_length);
     case IREE_HAL_REMOTE_CONTROL_EXECUTABLE_QUERY_PARAMETERS:
       return iree_hal_remote_server_handle_executable_query_parameters(
           entry, envelope, body, body_length);
-    case IREE_HAL_REMOTE_CONTROL_EXECUTABLE_LOOKUP_EXPORT:
-      return iree_hal_remote_server_handle_executable_lookup_export(
+    case IREE_HAL_REMOTE_CONTROL_EXECUTABLE_LOOKUP_FUNCTION:
+      return iree_hal_remote_server_handle_executable_lookup_function(
           entry, envelope, body, body_length);
     case IREE_HAL_REMOTE_CONTROL_EXECUTABLE_LOOKUP_GLOBAL:
       return iree_hal_remote_server_handle_executable_lookup_global(

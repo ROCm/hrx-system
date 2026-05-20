@@ -100,9 +100,9 @@ typedef enum iree_hal_remote_control_type_e {
 
   // ── Executable ──────────────────────────────────────────────────────────
   IREE_HAL_REMOTE_CONTROL_EXECUTABLE_UPLOAD = 0x0020,  // [epoch]
-  IREE_HAL_REMOTE_CONTROL_EXECUTABLE_QUERY_EXPORT = 0x0021,
+  IREE_HAL_REMOTE_CONTROL_EXECUTABLE_QUERY_FUNCTION = 0x0021,
   IREE_HAL_REMOTE_CONTROL_EXECUTABLE_QUERY_PARAMETERS = 0x0022,
-  IREE_HAL_REMOTE_CONTROL_EXECUTABLE_LOOKUP_EXPORT = 0x0023,
+  IREE_HAL_REMOTE_CONTROL_EXECUTABLE_LOOKUP_FUNCTION = 0x0023,
   IREE_HAL_REMOTE_CONTROL_EXECUTABLE_CACHE_QUERY_FORMAT = 0x0024,
   IREE_HAL_REMOTE_CONTROL_EXECUTABLE_LOOKUP_GLOBAL = 0x0025,
 
@@ -306,62 +306,63 @@ static_assert(offsetof(iree_hal_remote_executable_upload_request_t,
 // EXECUTABLE_UPLOAD response. Returns the resolved ID and function count.
 typedef struct iree_hal_remote_executable_upload_response_t {
   iree_hal_remote_resource_id_t resolved_id;  // PROVISIONAL=0
-  uint32_t export_count;  // Number of functions in the executable.
-  uint32_t reserved;      // Must be 0.
+  uint32_t function_count;  // Number of entry points in the executable.
+  uint32_t reserved;        // Must be 0.
 } iree_hal_remote_executable_upload_response_t;
 static_assert(sizeof(iree_hal_remote_executable_upload_response_t) == 16, "");
 
-// EXECUTABLE_QUERY_EXPORT request. Queries metadata for a specific function.
-typedef struct iree_hal_remote_executable_query_export_request_t {
+// EXECUTABLE_QUERY_FUNCTION request. Queries metadata for a specific entry
+// point.
+typedef struct iree_hal_remote_executable_query_function_request_t {
   iree_hal_remote_resource_id_t executable_id;
-  uint32_t export_ordinal;
-  uint32_t reserved;  // Must be 0.
-} iree_hal_remote_executable_query_export_request_t;
-static_assert(sizeof(iree_hal_remote_executable_query_export_request_t) == 16,
+  uint64_t function_value;
+} iree_hal_remote_executable_query_function_request_t;
+static_assert(sizeof(iree_hal_remote_executable_query_function_request_t) == 16,
               "");
 
-// EXECUTABLE_QUERY_EXPORT response. Returns fixed function metadata followed by
-// the export name bytes. The name is UTF-8, not null-terminated, and is only
-// valid for the lifetime of the response payload; clients that expose it
+// EXECUTABLE_QUERY_FUNCTION response. Returns fixed function metadata followed
+// by the function name bytes. The name is UTF-8, not null-terminated, and is
+// only valid for the lifetime of the response payload; clients that expose it
 // through HAL APIs must copy it into executable-owned storage.
-typedef struct iree_hal_remote_executable_query_export_response_t {
+typedef struct iree_hal_remote_executable_query_function_response_t {
   uint64_t flags;  // iree_hal_executable_function_flags_t
   uint32_t workgroup_size[3];
   int32_t occupancy_reserved;  // iree_hal_occupancy_info_t::reserved.
   uint16_t constant_count;  // iree_hal_executable_function_info_t byte length.
   uint16_t binding_count;
   uint16_t parameter_count;
-  uint16_t name_length;  // Byte length of the following export name.
+  uint16_t name_length;  // Byte length of the following function name.
   uint32_t reserved[2];  // Must be 0.
   // Followed by:
   //   char name[name_length]
-} iree_hal_remote_executable_query_export_response_t;
-static_assert(sizeof(iree_hal_remote_executable_query_export_response_t) == 40,
+} iree_hal_remote_executable_query_function_response_t;
+static_assert(sizeof(iree_hal_remote_executable_query_function_response_t) ==
+                  40,
               "");
 
 // EXECUTABLE_QUERY_PARAMETERS request. Queries reflected parameters for a
 // specific function. The server returns at most capacity entries.
 typedef struct iree_hal_remote_executable_query_parameters_request_t {
   iree_hal_remote_resource_id_t executable_id;
-  uint32_t export_ordinal;
+  uint64_t function_value;
   uint16_t capacity;
-  uint16_t reserved;  // Must be 0.
+  uint16_t reserved[3];  // Must be 0.
 } iree_hal_remote_executable_query_parameters_request_t;
 static_assert(sizeof(iree_hal_remote_executable_query_parameters_request_t) ==
-                  16,
+                  24,
               "");
 
 // Wire representation of iree_hal_executable_function_parameter_t. Parameter
 // names are serialized out-of-line in the containing response so the struct is
 // pointer-free and stable across processes.
-typedef struct iree_hal_remote_executable_export_parameter_t {
+typedef struct iree_hal_remote_executable_function_parameter_t {
   uint16_t offset;
   uint16_t flags;  // iree_hal_executable_function_parameter_flags_t
   uint16_t name_length;
   uint8_t type;  // iree_hal_executable_function_parameter_type_t
   uint8_t size;
-} iree_hal_remote_executable_export_parameter_t;
-static_assert(sizeof(iree_hal_remote_executable_export_parameter_t) == 8, "");
+} iree_hal_remote_executable_function_parameter_t;
+static_assert(sizeof(iree_hal_remote_executable_function_parameter_t) == 8, "");
 
 // EXECUTABLE_QUERY_PARAMETERS response. Fixed parameter records are followed
 // by concatenated UTF-8 parameter name bytes in record order. Names are not
@@ -373,31 +374,32 @@ typedef struct iree_hal_remote_executable_query_parameters_response_t {
   uint16_t reserved;  // Must be 0.
   uint32_t name_data_length;
   // Followed by:
-  //   iree_hal_remote_executable_export_parameter_t parameters[parameter_count]
-  //   char names[name_data_length]
+  //   iree_hal_remote_executable_function_parameter_t
+  //   parameters[parameter_count] char names[name_data_length]
 } iree_hal_remote_executable_query_parameters_response_t;
 static_assert(sizeof(iree_hal_remote_executable_query_parameters_response_t) ==
                   8,
               "");
 
-// EXECUTABLE_LOOKUP_EXPORT request. Looks up a function ordinal by name.
-typedef struct iree_hal_remote_executable_lookup_export_request_t {
+// EXECUTABLE_LOOKUP_FUNCTION request. Looks up a function token by name.
+typedef struct iree_hal_remote_executable_lookup_function_request_t {
   iree_hal_remote_resource_id_t executable_id;
-  uint16_t name_length;  // Byte length of the following export name.
+  uint16_t name_length;  // Byte length of the following function name.
   uint16_t reserved0;    // Must be 0.
   uint32_t reserved1;    // Must be 0.
   // Followed by:
   //   char name[name_length]
-} iree_hal_remote_executable_lookup_export_request_t;
-static_assert(sizeof(iree_hal_remote_executable_lookup_export_request_t) == 16,
+} iree_hal_remote_executable_lookup_function_request_t;
+static_assert(sizeof(iree_hal_remote_executable_lookup_function_request_t) ==
+                  16,
               "");
 
-// EXECUTABLE_LOOKUP_EXPORT response. Returns the matching function ordinal.
-typedef struct iree_hal_remote_executable_lookup_export_response_t {
-  uint32_t export_ordinal;
-  uint32_t reserved;  // Must be 0.
-} iree_hal_remote_executable_lookup_export_response_t;
-static_assert(sizeof(iree_hal_remote_executable_lookup_export_response_t) == 8,
+// EXECUTABLE_LOOKUP_FUNCTION response. Returns the matching function token.
+typedef struct iree_hal_remote_executable_lookup_function_response_t {
+  uint64_t function_value;
+} iree_hal_remote_executable_lookup_function_response_t;
+static_assert(sizeof(iree_hal_remote_executable_lookup_function_response_t) ==
+                  8,
               "");
 
 // EXECUTABLE_LOOKUP_GLOBAL request. Looks up an executable global by name for
@@ -767,7 +769,7 @@ typedef struct iree_hal_remote_profiling_begin_request_t {
   // Capture-filter queue ordinal, valid when its flag is set.
   uint32_t queue_ordinal;
   // Byte length of the executable function glob pattern.
-  uint32_t executable_export_pattern_length;
+  uint32_t executable_function_pattern_length;
   // Number of counter set selection records in the variable-length tail.
   uint32_t counter_set_count;
   // Total number of counter names across all counter set selections.
@@ -775,7 +777,7 @@ typedef struct iree_hal_remote_profiling_begin_request_t {
   // Must be 0.
   uint32_t reserved[2];
   // Followed by:
-  //   char executable_function_pattern[executable_export_pattern_length]
+  //   char executable_function_pattern[executable_function_pattern_length]
   //       (padded to 8-byte alignment)
   //   iree_hal_remote_profile_counter_set_selection_t
   //       counter_sets[counter_set_count], each followed by:

@@ -914,7 +914,7 @@ static iree_status_t iree_hal_remote_client_command_buffer_dispatch(
     cmd->header.length = (uint16_t)total_size;
     cmd->executable_id =
         iree_hal_remote_client_executable_resource_id(executable);
-    cmd->export_ordinal = iree_hal_executable_function_index(function);
+    cmd->function_value = function.value;
     memcpy(cmd->config.workgroup_size, config.workgroup_size,
            sizeof(config.workgroup_size));
     memcpy(cmd->config.workgroup_count, config.workgroup_count,

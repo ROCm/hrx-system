@@ -266,8 +266,7 @@ static_assert(sizeof(iree_hal_remote_client_file_write_op_t) == 48, "");
 typedef struct iree_hal_remote_dispatch_op_t {
   iree_hal_remote_queue_op_header_t header;
   iree_hal_remote_resource_id_t executable_id;
-  uint32_t export_ordinal;
-  uint32_t reserved0;  // Must be 0.
+  uint64_t function_value;
   iree_hal_remote_dispatch_config_t config;
   uint16_t constant_count;
   uint16_t binding_count;
