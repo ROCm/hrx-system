@@ -398,8 +398,9 @@ static void iree_net_rdma_endpoint_notify_error(
     endpoint->callbacks.on_error(endpoint->callbacks.user_data, status);
   } else if (endpoint_allocated && !iree_status_is_ok(status)) {
     iree_status_abort(status);
-  } else {
-    iree_status_ignore(status);
+  } else if (!iree_status_is_ok(status)) {
+    iree_net_rdma_carrier_record_failure(
+        iree_net_rdma_carrier_cast(endpoint->carrier), status);
   }
 }
 

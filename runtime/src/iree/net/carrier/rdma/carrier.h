@@ -181,6 +181,14 @@ IREE_API_EXPORT struct rdma_cm_id* iree_net_rdma_carrier_connection_id(
 IREE_API_EXPORT iree_net_rdma_context_t* iree_net_rdma_carrier_context(
     iree_net_rdma_carrier_t* carrier);
 
+// Records an asynchronous carrier failure not delivered through the carrier
+// completion callback.
+//
+// The carrier retains the first failure status and returns clones from later
+// carrier operations. |status| is consumed by this call.
+IREE_API_EXPORT void iree_net_rdma_carrier_record_failure(
+    iree_net_rdma_carrier_t* carrier, iree_status_t status);
+
 // Exports the carrier's local rdma_cm private-data fields.
 IREE_API_EXPORT iree_status_t iree_net_rdma_carrier_export_connection_data(
     iree_net_rdma_carrier_t* carrier,

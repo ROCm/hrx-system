@@ -42,7 +42,10 @@ iree_runtime_cc_library(
 
 iree_runtime_cc_test(
     name = "rdma_tests",
-    srcs = ["//runtime/src/iree/net/carrier/cts/util:test_main.cc"],
+    srcs = [
+        "error_test.cc",
+        "//runtime/src/iree/net/carrier/cts/util:test_main.cc",
+    ],
     tags = [
         "nodocker",
     ],
@@ -51,6 +54,7 @@ iree_runtime_cc_test(
         ":backends",
         "//runtime/src/iree/net/carrier/cts:all_tests",
         "//runtime/src/iree/net/carrier/cts/util:registry",
+        "//runtime/src/iree/net/carrier/cts/util:test_base",
         "//runtime/src/iree/testing:gtest",
     ],
 )
