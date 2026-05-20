@@ -15,7 +15,9 @@
 
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/proactor.h"
+#include "iree/async/proactor_platform.h"
 #include "iree/async/util/proactor_pool.h"
+#include "iree/async/util/proactor_thread.h"
 #include "iree/base/api.h"
 #include "iree/base/threading/notification.h"
 #include "iree/base/threading/numa.h"
@@ -55,23 +57,59 @@ IREE_FLAG_LIST(
     "entry or a directory prefix entry.");
 
 typedef struct iree_serve_device_state_t {
+  // Host allocator used for all process-owned tool state.
   iree_allocator_t host_allocator;
+
+  // Served local HAL device selected by --device.
   iree_hal_device_t* device;
+
   // Single-device group that assigns topology/frontier metadata to |device|.
   iree_hal_device_group_t* device_group;
+
+  // Proactor pool passed to the served device for async HAL operations.
   iree_async_proactor_pool_t* device_proactor_pool;
+
+  // Main-thread proactor that owns process signal delivery.
+  iree_async_proactor_t* signal_proactor;
+
+  // Server proactor pool whose entry is polled by |server_proactor_thread|.
   iree_async_proactor_pool_t* server_proactor_pool;
+
+  // Thread that polls the server proactor after setup completes.
+  iree_async_proactor_thread_t* server_proactor_thread;
+
+  // Shared receive buffer pool for remote protocol traffic.
   iree_hal_remote_recv_pool_t* recv_pool;
+
   // Tracks server-side frontier axes for remote queue ordering.
   iree_async_frontier_tracker_t* tracker;
+
   // Optional explicit allow-list for server-side remote FILE_OPEN requests.
   iree_hal_remote_file_index_t* file_index;
+
+  // Transport factory backing the listener and accepted connections.
   iree_net_transport_factory_t* factory;
+
+  // Remote HAL server exposing |device|.
   iree_hal_remote_server_t* server;
+
+  // True when |server| has started and must be stopped before release.
+  bool server_running;
+
+  // Subscription for SIGINT/Ctrl+C on |signal_proactor|.
   iree_async_signal_subscription_t* interrupt_subscription;
+
+  // Subscription for SIGTERM/termination on |signal_proactor|.
   iree_async_signal_subscription_t* terminate_subscription;
+
+  // Notification posted when signal or server-stop callbacks update state.
   iree_notification_t shutdown_notification;
+
+  // Set to 1 after the first shutdown signal is delivered.
   iree_atomic_int32_t shutdown_requested;
+
+  // Set to 1 by the server stopped callback once shutdown has drained.
+  iree_atomic_int32_t server_stopped;
 } iree_serve_device_state_t;
 
 static iree_status_t iree_serve_device_parse_bind_uri(
@@ -176,11 +214,14 @@ static iree_status_t iree_serve_device_create_file_index_from_flags(
 static void iree_serve_device_on_signal(void* user_data,
                                         iree_async_signal_t signal) {
   iree_serve_device_state_t* state = (iree_serve_device_state_t*)user_data;
-  fprintf(stdout, "\nReceived %.*s, shutting down...\n",
-          (int)iree_async_signal_name(signal).size,
-          iree_async_signal_name(signal).data);
-  fflush(stdout);
-  iree_atomic_store(&state->shutdown_requested, 1, iree_memory_order_release);
+  int32_t was_requested = (int32_t)iree_atomic_exchange(
+      &state->shutdown_requested, 1, iree_memory_order_acq_rel);
+  if (!was_requested) {
+    fprintf(stdout, "\nReceived %.*s, shutting down...\n",
+            (int)iree_async_signal_name(signal).size,
+            iree_async_signal_name(signal).data);
+    fflush(stdout);
+  }
   iree_notification_post(&state->shutdown_notification, IREE_ALL_WAITERS);
 }
 
@@ -190,8 +231,147 @@ static bool iree_serve_device_is_shutdown_requested(void* user_data) {
                           iree_memory_order_acquire) != 0;
 }
 
-// Creates the server, subscribes to signals, and blocks until SIGINT/SIGTERM.
-static iree_status_t iree_serve_device_create_and_run_server(
+static bool iree_serve_device_is_server_stopped(void* user_data) {
+  iree_serve_device_state_t* state = (iree_serve_device_state_t*)user_data;
+  return iree_atomic_load(&state->server_stopped, iree_memory_order_acquire) !=
+         0;
+}
+
+static void iree_serve_device_on_server_stopped(void* user_data) {
+  iree_serve_device_state_t* state = (iree_serve_device_state_t*)user_data;
+  iree_atomic_store(&state->server_stopped, 1, iree_memory_order_release);
+  iree_notification_post(&state->shutdown_notification, IREE_ALL_WAITERS);
+}
+
+static iree_status_t iree_serve_device_initialize_signal_handling(
+    iree_serve_device_state_t* state) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  iree_status_t status = iree_async_signal_block_default();
+  if (iree_status_is_ok(status)) {
+    status = iree_async_signal_ignore_broken_pipe();
+  }
+  if (iree_status_is_ok(status)) {
+    iree_async_proactor_options_t signal_proactor_options =
+        iree_async_proactor_options_default();
+    signal_proactor_options.debug_name = IREE_SV("serve-signal");
+    status = iree_async_proactor_create_platform(signal_proactor_options,
+                                                 state->host_allocator,
+                                                 &state->signal_proactor);
+  }
+  if (iree_status_is_ok(status)) {
+    iree_async_signal_callback_t signal_callback = {
+        .fn = iree_serve_device_on_signal,
+        .user_data = state,
+    };
+    status = iree_async_proactor_subscribe_signal(
+        state->signal_proactor, IREE_ASYNC_SIGNAL_INTERRUPT, signal_callback,
+        &state->interrupt_subscription);
+  }
+  if (iree_status_is_ok(status)) {
+    iree_async_signal_callback_t signal_callback = {
+        .fn = iree_serve_device_on_signal,
+        .user_data = state,
+    };
+    status = iree_async_proactor_subscribe_signal(
+        state->signal_proactor, IREE_ASYNC_SIGNAL_TERMINATE, signal_callback,
+        &state->terminate_subscription);
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+static iree_status_t iree_serve_device_wait_for_shutdown_signal(
+    iree_serve_device_state_t* state) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  iree_status_t status = iree_ok_status();
+  while (iree_status_is_ok(status) &&
+         !iree_serve_device_is_shutdown_requested(state)) {
+    status = iree_async_proactor_poll(state->signal_proactor,
+                                      iree_infinite_timeout(),
+                                      /*out_completed_count=*/NULL);
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+static iree_status_t iree_serve_device_wait_for_server_stopped(
+    iree_serve_device_state_t* state) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  iree_status_t status = iree_ok_status();
+  if (state->server_proactor_thread) {
+    iree_notification_await(&state->shutdown_notification,
+                            iree_serve_device_is_server_stopped, state,
+                            iree_infinite_timeout());
+  } else {
+    iree_async_proactor_t* proactor =
+        iree_hal_remote_recv_pool_proactor(state->recv_pool);
+    while (iree_status_is_ok(status) &&
+           !iree_serve_device_is_server_stopped(state)) {
+      status = iree_async_proactor_poll(proactor, iree_infinite_timeout(),
+                                        /*out_completed_count=*/NULL);
+    }
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+static iree_status_t iree_serve_device_stop_server(
+    iree_serve_device_state_t* state) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  iree_status_t status = iree_ok_status();
+  if (state->server_running) {
+    iree_atomic_store(&state->server_stopped, 0, iree_memory_order_release);
+
+    iree_hal_remote_server_stopped_callback_t stopped_callback = {
+        .fn = iree_serve_device_on_server_stopped,
+        .user_data = state,
+    };
+    status = iree_hal_remote_server_stop(state->server, stopped_callback);
+    if (iree_status_is_ok(status)) {
+      status = iree_serve_device_wait_for_server_stopped(state);
+    }
+    if (iree_status_is_ok(status)) {
+      state->server_running = false;
+    }
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+static iree_status_t iree_serve_device_stop_server_thread(
+    iree_serve_device_state_t* state) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  iree_status_t status = iree_ok_status();
+  if (state->server_proactor_thread) {
+    iree_async_proactor_thread_request_stop(state->server_proactor_thread);
+    status = iree_async_proactor_thread_join(state->server_proactor_thread,
+                                             IREE_DURATION_INFINITE);
+    bool joined = iree_status_is_ok(status);
+    if (iree_status_is_ok(status)) {
+      status = iree_async_proactor_thread_consume_status(
+          state->server_proactor_thread);
+    }
+    if (joined) {
+      iree_async_proactor_thread_release(state->server_proactor_thread);
+      state->server_proactor_thread = NULL;
+    }
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+// Creates and starts the server before its proactor begins polling.
+static iree_status_t iree_serve_device_create_and_start_server(
     iree_serve_device_state_t* state, iree_string_view_t bind_address) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
@@ -228,26 +408,15 @@ static iree_status_t iree_serve_device_create_and_run_server(
 
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_remote_server_start(state->server));
+  state->server_running = true;
 
-  // Subscribe to signals for graceful shutdown. The proactor thread delivers
-  // signal callbacks — the main thread blocks on a notification.
-  iree_async_signal_callback_t signal_callback = {
-      .fn = iree_serve_device_on_signal,
-      .user_data = state,
-  };
+  iree_async_proactor_thread_options_t server_thread_options =
+      iree_async_proactor_thread_options_default();
+  server_thread_options.debug_name = IREE_SV("serve-net");
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_async_proactor_subscribe_signal(
-              proactor, IREE_ASYNC_SIGNAL_INTERRUPT, signal_callback,
-              &state->interrupt_subscription));
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_async_proactor_subscribe_signal(
-              proactor, IREE_ASYNC_SIGNAL_TERMINATE, signal_callback,
-              &state->terminate_subscription));
-
-  // Block until shutdown. The proactor thread drives all async I/O.
-  iree_notification_await(&state->shutdown_notification,
-                          iree_serve_device_is_shutdown_requested, state,
-                          iree_infinite_timeout());
+      z0, iree_async_proactor_thread_create(proactor, server_thread_options,
+                                            state->host_allocator,
+                                            &state->server_proactor_thread));
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
@@ -257,18 +426,21 @@ static iree_status_t iree_serve_device_teardown(
     iree_serve_device_state_t* state) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  iree_async_proactor_t* proactor =
-      state->recv_pool ? iree_hal_remote_recv_pool_proactor(state->recv_pool)
-                       : NULL;
-  if (proactor) {
-    iree_async_proactor_unsubscribe_signal(proactor,
+  iree_status_t status = iree_serve_device_stop_server(state);
+  status =
+      iree_status_join(status, iree_serve_device_stop_server_thread(state));
+
+  if (state->signal_proactor) {
+    iree_async_proactor_unsubscribe_signal(state->signal_proactor,
                                            state->interrupt_subscription);
-    iree_async_proactor_unsubscribe_signal(proactor,
+    state->interrupt_subscription = NULL;
+    iree_async_proactor_unsubscribe_signal(state->signal_proactor,
                                            state->terminate_subscription);
+    state->terminate_subscription = NULL;
   }
 
   iree_hal_remote_server_release(state->server);
-  iree_notification_deinitialize(&state->shutdown_notification);
+  iree_async_proactor_release(state->signal_proactor);
   iree_net_transport_factory_release(state->factory);
   iree_hal_remote_file_index_release(state->file_index);
   iree_hal_remote_recv_pool_release(state->recv_pool);
@@ -277,9 +449,10 @@ static iree_status_t iree_serve_device_teardown(
   iree_hal_device_release(state->device);
   iree_async_frontier_tracker_release(state->tracker);
   iree_async_proactor_pool_release(state->device_proactor_pool);
+  iree_notification_deinitialize(&state->shutdown_notification);
 
   IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
+  return status;
 }
 
 static iree_status_t iree_serve_device_run(void) {
@@ -289,11 +462,11 @@ static iree_status_t iree_serve_device_run(void) {
   state.host_allocator = iree_allocator_system();
   iree_notification_initialize(&state.shutdown_notification);
   iree_atomic_store(&state.shutdown_requested, 0, iree_memory_order_relaxed);
+  iree_atomic_store(&state.server_stopped, 0, iree_memory_order_relaxed);
 
-  iree_status_t status = iree_async_signal_block_default();
-  if (iree_status_is_ok(status)) {
-    status = iree_async_signal_ignore_broken_pipe();
-  }
+  // Process-wide signal state must be installed before creating proactor
+  // threads or device workers so all child threads inherit the blocked mask.
+  iree_status_t status = iree_serve_device_initialize_signal_handling(&state);
 
   // Create a proactor pool for the local device. Kept alive for the server's
   // lifetime — the device needs its proactor thread for async queue operations.
@@ -326,8 +499,13 @@ static iree_status_t iree_serve_device_run(void) {
 
   // Create a proactor pool for the server's networking.
   if (iree_status_is_ok(status)) {
+    iree_async_proactor_pool_options_t server_proactor_pool_options =
+        iree_async_proactor_pool_options_default();
+    // Server start submits listener work and must be serialized before poll.
+    memset(&server_proactor_pool_options.runner, 0,
+           sizeof(server_proactor_pool_options.runner));
     status = iree_async_proactor_pool_create(
-        1, /*node_ids=*/NULL, iree_async_proactor_pool_options_default(),
+        1, /*node_ids=*/NULL, server_proactor_pool_options,
         state.host_allocator, &state.server_proactor_pool);
   }
 
@@ -367,7 +545,10 @@ static iree_status_t iree_serve_device_run(void) {
             (int)transport_name.size, transport_name.data,
             (int)bind_address.size, bind_address.data);
     fflush(stdout);
-    status = iree_serve_device_create_and_run_server(&state, bind_address);
+    status = iree_serve_device_create_and_start_server(&state, bind_address);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_serve_device_wait_for_shutdown_signal(&state);
   }
 
   iree_status_t teardown_status = iree_serve_device_teardown(&state);

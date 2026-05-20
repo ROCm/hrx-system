@@ -18,6 +18,7 @@ iree_cc_binary(
     iree::async
     iree::async::platform
     iree::async::util::proactor_pool
+    iree::async::util::proactor_thread
     iree::base
     iree::base::threading
     iree::base::tooling::flags
