@@ -23,6 +23,7 @@ iree_cc_library(
     iree::net::carrier::cts::util::registry
     iree::net::carrier::rdma::context
     iree::net::carrier::rdma::factory
+    iree::net::carrier::rdma::region
     iree::net::connection
     iree::net::transport_factory
   TESTONLY

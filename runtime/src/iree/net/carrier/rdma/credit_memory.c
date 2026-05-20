@@ -86,7 +86,7 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_credit_memory_create(
 
   if (iree_status_is_ok(status)) {
     *out_memory = memory;
-  } else if (memory) {
+  } else {
     iree_net_rdma_credit_memory_release(memory);
   }
   return status;

@@ -203,6 +203,33 @@ TEST_F(ReceiveQueueTest, ReplenishFailureLeavesEarlierPostsOwned) {
                 &work_request_table_));
 }
 
+TEST_F(ReceiveQueueTest, ReplenishStopsWhenBufferPoolIsExhausted) {
+  IREE_ASSERT_OK(InitializeReceiveQueue());
+
+  iree_async_buffer_lease_t external_leases[kBufferCount];
+  std::memset(external_leases, 0, sizeof(external_leases));
+  for (uint32_t i = 0; i < kBufferCount; ++i) {
+    IREE_ASSERT_OK(
+        iree_async_buffer_pool_acquire(buffer_pool_, &external_leases[i]));
+  }
+
+  uint32_t posted_count = 1;
+  IREE_ASSERT_OK(iree_net_rdma_receive_queue_replenish(
+      &receive_queue_, /*target_posted_count=*/1, &posted_count));
+
+  EXPECT_EQ(0u, posted_count);
+  EXPECT_EQ(0u, iree_net_rdma_receive_queue_posted_count(&receive_queue_));
+  EXPECT_EQ(kBufferCount,
+            iree_net_rdma_receive_queue_available_capacity(&receive_queue_));
+  EXPECT_EQ(0u, iree_async_buffer_pool_available(buffer_pool_));
+  EXPECT_EQ(kBufferCount, iree_net_rdma_work_request_table_available_capacity(
+                              &work_request_table_));
+
+  for (uint32_t i = 0; i < kBufferCount; ++i) {
+    iree_async_buffer_lease_release(&external_leases[i]);
+  }
+}
+
 TEST_F(ReceiveQueueTest, CompleteRejectsInvalidByteLength) {
   IREE_ASSERT_OK(InitializeReceiveQueue());
 

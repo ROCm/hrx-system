@@ -119,6 +119,19 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "direct_test_lib",
+    testonly = True,
+    srcs = ["direct_test.cc"],
+    deps = [
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/net/carrier/cts/util:registry",
+        "//runtime/src/iree/net/carrier/cts/util:test_base",
+        "//runtime/src/iree/testing:gtest",
+    ],
+    alwayslink = True,
+)
+
+iree_runtime_cc_library(
     name = "session_test_lib",
     testonly = True,
     srcs = ["session_test.cc"],
@@ -139,6 +152,7 @@ iree_runtime_cc_library(
     deps = [
         ":backpressure_test_lib",
         ":begin_send_test_lib",
+        ":direct_test_lib",
         ":error_handling_test_lib",
         ":factory_test_lib",
         ":lifecycle_test_lib",

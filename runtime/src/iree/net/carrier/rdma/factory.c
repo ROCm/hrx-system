@@ -46,7 +46,9 @@ static iree_status_t iree_net_rdma_factory_status_from_cm_event(
 static iree_status_t iree_net_rdma_factory_status_from_failed_cm_event(
     const iree_net_rdma_cm_event_t* event, const char* operation) {
   if (event->status != 0) {
-    return iree_status_from_errno(__FILE__, __LINE__, event->status, operation);
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "%s failed with RDMA CM event %d status %d",
+                            operation, (int)event->type, event->status);
   }
   return iree_make_status(IREE_STATUS_UNAVAILABLE,
                           "%s failed with RDMA CM event %d", operation,
@@ -356,6 +358,9 @@ struct iree_net_rdma_connection_t {
   // Proactor used to deliver endpoint-ready NOPs. Retained by the connection.
   iree_async_proactor_t* proactor;
 
+  // CM event channel owning established endpoint rdma_cm_id event delivery.
+  iree_net_rdma_cm_channel_t* cm_channel;
+
   // Maximum number of endpoint slots in endpoints.
   uint32_t max_endpoint_count;
 
@@ -371,15 +376,78 @@ struct iree_net_rdma_connection_t {
 
 static const iree_net_connection_vtable_t iree_net_rdma_connection_vtable;
 
+static iree_net_rdma_endpoint_t* iree_net_rdma_connection_find_endpoint_by_id(
+    iree_net_rdma_connection_t* connection, struct rdma_cm_id* id) {
+  if (!connection || !id) return NULL;
+  for (uint32_t i = 0; i < connection->max_endpoint_count; ++i) {
+    iree_net_rdma_endpoint_t* endpoint = &connection->endpoints[i];
+    iree_net_rdma_carrier_t* carrier =
+        iree_net_rdma_carrier_cast(endpoint->carrier);
+    if (carrier && iree_net_rdma_carrier_connection_id(carrier) == id) {
+      return endpoint;
+    }
+  }
+  return NULL;
+}
+
 static void iree_net_rdma_endpoint_notify_error(
     iree_net_rdma_endpoint_t* endpoint, iree_status_t status) {
-  if (endpoint->callbacks.on_error &&
-      iree_any_bit_set(endpoint->flags,
-                       IREE_NET_RDMA_ENDPOINT_FLAG_ALLOCATED)) {
+  bool endpoint_allocated =
+      iree_any_bit_set(endpoint->flags, IREE_NET_RDMA_ENDPOINT_FLAG_ALLOCATED);
+  if (endpoint_allocated && endpoint->callbacks.on_error) {
     endpoint->callbacks.on_error(endpoint->callbacks.user_data, status);
-  } else if (!iree_status_is_ok(status)) {
+  } else if (endpoint_allocated && !iree_status_is_ok(status)) {
     iree_status_abort(status);
+  } else {
+    iree_status_ignore(status);
   }
+}
+
+static void iree_net_rdma_connection_on_cm_event(
+    void* user_data, iree_status_t status,
+    const iree_net_rdma_cm_event_t* event) {
+  iree_net_rdma_connection_t* connection =
+      (iree_net_rdma_connection_t*)user_data;
+  if (!iree_status_is_ok(status)) {
+    iree_status_abort(status);
+    return;
+  }
+
+  switch (event->type) {
+    case RDMA_CM_EVENT_DISCONNECTED:
+    case RDMA_CM_EVENT_TIMEWAIT_EXIT:
+      break;
+    case RDMA_CM_EVENT_CONNECT_ERROR:
+    case RDMA_CM_EVENT_UNREACHABLE:
+    case RDMA_CM_EVENT_REJECTED:
+    case RDMA_CM_EVENT_DEVICE_REMOVAL: {
+      iree_status_t event_status =
+          iree_net_rdma_factory_status_from_failed_cm_event(
+              event, "rdma_cm connection");
+      iree_net_rdma_endpoint_t* endpoint =
+          iree_net_rdma_connection_find_endpoint_by_id(connection, event->id);
+      if (endpoint) {
+        iree_net_rdma_endpoint_notify_error(endpoint, event_status);
+      } else {
+        iree_status_abort(event_status);
+      }
+      break;
+    }
+    default:
+      iree_status_abort(iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "unexpected RDMA CM event %d on established connection",
+          (int)event->type));
+      break;
+  }
+}
+
+static void iree_net_rdma_discard_cm_event(
+    void* user_data, iree_status_t status,
+    const iree_net_rdma_cm_event_t* event) {
+  (void)user_data;
+  (void)event;
+  if (!iree_status_is_ok(status)) iree_status_abort(status);
 }
 
 static void iree_net_rdma_endpoint_notify_send_ready(
@@ -389,6 +457,24 @@ static void iree_net_rdma_endpoint_notify_send_ready(
                        IREE_NET_RDMA_ENDPOINT_FLAG_ALLOCATED)) {
     endpoint->callbacks.on_send_ready(endpoint->callbacks.user_data);
   }
+}
+
+static bool iree_net_rdma_endpoint_completion_is_deactivation_cancel(
+    iree_net_rdma_endpoint_t* endpoint, iree_net_carrier_completion_kind_t kind,
+    iree_status_code_t status_code) {
+  if (status_code != IREE_STATUS_CANCELLED) return false;
+  switch (kind) {
+    case IREE_NET_CARRIER_COMPLETION_SEND:
+    case IREE_NET_CARRIER_COMPLETION_DIRECT_WRITE:
+    case IREE_NET_CARRIER_COMPLETION_DIRECT_READ:
+      break;
+    default:
+      return false;
+  }
+
+  iree_net_carrier_state_t state = iree_net_carrier_state(endpoint->carrier);
+  return state == IREE_NET_CARRIER_STATE_DRAINING ||
+         state == IREE_NET_CARRIER_STATE_DEACTIVATED;
 }
 
 static void iree_net_rdma_connection_carrier_completion(
@@ -406,9 +492,14 @@ static void iree_net_rdma_connection_carrier_completion(
     return;
   }
 
+  bool deactivation_cancel =
+      iree_net_rdma_endpoint_completion_is_deactivation_cancel(
+          endpoint, kind, iree_status_code(status));
   if (kind == IREE_NET_CARRIER_COMPLETION_SEND && operation_user_data != 0) {
     iree_status_t endpoint_status = iree_ok_status();
-    if (!iree_status_is_ok(status)) endpoint_status = iree_status_clone(status);
+    if (!iree_status_is_ok(status) && !deactivation_cancel) {
+      endpoint_status = iree_status_clone(status);
+    }
     iree_net_frame_sender_dispatch_carrier_completion(
         NULL, kind, operation_user_data, status, bytes_transferred, recv_lease);
     if (!iree_status_is_ok(endpoint_status)) {
@@ -418,7 +509,11 @@ static void iree_net_rdma_connection_carrier_completion(
   }
 
   if (!iree_status_is_ok(status)) {
-    iree_net_rdma_endpoint_notify_error(endpoint, status);
+    if (deactivation_cancel) {
+      (void)iree_status_consume_code(status);
+    } else {
+      iree_net_rdma_endpoint_notify_error(endpoint, status);
+    }
   }
 }
 
@@ -484,6 +579,7 @@ static void iree_net_rdma_connection_destroy(
         (unsigned)i);
     iree_net_carrier_release(endpoint->carrier);
   }
+  iree_net_rdma_cm_channel_release(connection->cm_channel);
   iree_async_proactor_release(connection->proactor);
   iree_allocator_free(host_allocator, connection);
 }
@@ -522,7 +618,8 @@ static iree_status_t iree_net_rdma_connection_open_endpoint(
   iree_net_rdma_endpoint_t* endpoint = &connection->endpoints[endpoint_index];
   endpoint->flags |= IREE_NET_RDMA_ENDPOINT_FLAG_ALLOCATED;
   endpoint->ready_callback = callback;
-  memset(&endpoint->ready_operation, 0, sizeof(endpoint->ready_operation));
+  iree_async_operation_zero(&endpoint->ready_operation.base,
+                            sizeof(endpoint->ready_operation));
   iree_async_operation_initialize(
       &endpoint->ready_operation.base, IREE_ASYNC_OPERATION_TYPE_NOP,
       IREE_ASYNC_OPERATION_FLAG_NONE, iree_net_rdma_endpoint_ready_complete,
@@ -556,7 +653,8 @@ static const iree_net_connection_vtable_t iree_net_rdma_connection_vtable = {
 
 static iree_status_t iree_net_rdma_connection_create(
     iree_async_proactor_t* proactor, uint32_t endpoint_count,
-    iree_net_carrier_t** carriers, iree_allocator_t host_allocator,
+    iree_net_carrier_t** carriers, iree_net_rdma_cm_channel_t* cm_channel,
+    bool install_cm_callback, iree_allocator_t host_allocator,
     iree_net_connection_t** out_connection) {
   *out_connection = NULL;
 
@@ -591,7 +689,21 @@ static iree_status_t iree_net_rdma_connection_create(
                                    &connection->base);
     connection->proactor = proactor;
     iree_async_proactor_retain(proactor);
+    connection->cm_channel = cm_channel;
+    iree_net_rdma_cm_channel_retain(connection->cm_channel);
     connection->max_endpoint_count = endpoint_count;
+  }
+
+  if (iree_status_is_ok(status) && connection->cm_channel &&
+      install_cm_callback) {
+    iree_net_rdma_cm_channel_callback_t cm_callback = {
+        .fn = iree_net_rdma_connection_on_cm_event,
+        .user_data = connection,
+    };
+    iree_net_rdma_cm_channel_set_callback(connection->cm_channel, cm_callback);
+  }
+
+  if (iree_status_is_ok(status)) {
     for (uint32_t i = 0; i < endpoint_count; ++i) {
       iree_net_rdma_endpoint_t* endpoint = &connection->endpoints[i];
       endpoint->connection = connection;
@@ -601,6 +713,8 @@ static iree_status_t iree_net_rdma_connection_create(
       carriers[i] = NULL;
     }
     *out_connection = &connection->base;
+  } else if (connection) {
+    iree_net_rdma_connection_destroy(&connection->base);
   }
   return status;
 }
@@ -714,7 +828,8 @@ static void iree_net_rdma_connect_state_cleanup(
 
 static void iree_net_rdma_connect_state_submit_cleanup(
     iree_net_rdma_connect_state_t* state) {
-  memset(&state->cleanup_operation, 0, sizeof(state->cleanup_operation));
+  iree_async_operation_zero(&state->cleanup_operation.base,
+                            sizeof(state->cleanup_operation));
   iree_async_operation_initialize(&state->cleanup_operation.base,
                                   IREE_ASYNC_OPERATION_TYPE_NOP,
                                   IREE_ASYNC_OPERATION_FLAG_NONE,
@@ -743,8 +858,8 @@ static void iree_net_rdma_connect_state_succeed(
       carriers[i] = state->endpoints[i].carrier;
     }
     status = iree_net_rdma_connection_create(
-        state->proactor, state->endpoint_count, carriers, state->host_allocator,
-        &connection);
+        state->proactor, state->endpoint_count, carriers, state->cm_channel,
+        /*install_cm_callback=*/true, state->host_allocator, &connection);
   }
   if (iree_status_is_ok(status)) {
     for (uint16_t i = 0; i < state->endpoint_count; ++i) {
@@ -940,8 +1055,8 @@ static void iree_net_rdma_connect_state_on_cm_event(
       break;
     case RDMA_CM_EVENT_REJECTED:
       iree_net_rdma_connect_state_fail(
-          state, iree_make_status(IREE_STATUS_PERMISSION_DENIED,
-                                  "RDMA connection rejected by peer"));
+          state, iree_net_rdma_factory_status_from_failed_cm_event(
+                     event, "rdma_cm connect"));
       break;
     case RDMA_CM_EVENT_ADDR_ERROR:
     case RDMA_CM_EVENT_ROUTE_ERROR:
@@ -1113,7 +1228,8 @@ static iree_status_t iree_net_rdma_listener_maybe_submit_stopped(
   }
 
   listener->flags |= IREE_NET_RDMA_LISTENER_FLAG_STOPPED_OPERATION_SUBMITTED;
-  memset(&listener->stopped_operation, 0, sizeof(listener->stopped_operation));
+  iree_async_operation_zero(&listener->stopped_operation.base,
+                            sizeof(listener->stopped_operation));
   iree_async_operation_initialize(
       &listener->stopped_operation.base, IREE_ASYNC_OPERATION_TYPE_NOP,
       IREE_ASYNC_OPERATION_FLAG_NONE, iree_net_rdma_listener_stopped_complete,
@@ -1163,8 +1279,8 @@ static void iree_net_rdma_accept_state_cleanup(
 static void iree_net_rdma_accept_state_submit_cleanup(
     iree_net_rdma_accept_state_t* accept_state) {
   ++accept_state->listener->pending_cleanup_count;
-  memset(&accept_state->cleanup_operation, 0,
-         sizeof(accept_state->cleanup_operation));
+  iree_async_operation_zero(&accept_state->cleanup_operation.base,
+                            sizeof(accept_state->cleanup_operation));
   iree_async_operation_initialize(
       &accept_state->cleanup_operation.base, IREE_ASYNC_OPERATION_TYPE_NOP,
       IREE_ASYNC_OPERATION_FLAG_NONE, iree_net_rdma_accept_state_cleanup,
@@ -1284,6 +1400,7 @@ static void iree_net_rdma_listener_deliver_accept(
     }
     status = iree_net_rdma_connection_create(
         listener->proactor, accept_state->endpoint_count, carriers,
+        listener->cm_channel, /*install_cm_callback=*/false,
         accept_state->host_allocator, &connection);
   }
   if (iree_status_is_ok(status)) {
@@ -1631,14 +1748,16 @@ static void iree_net_rdma_listener_on_cm_event(
           iree_net_rdma_listener_pop_accept_by_id(listener, event->id, NULL);
       if (accept_state) {
         iree_net_rdma_accept_state_submit_cleanup(accept_state);
+        listener->accept_callback(
+            listener->accept_user_data,
+            iree_net_rdma_factory_status_from_failed_cm_event(event,
+                                                              "rdma_cm accept"),
+            NULL);
       }
-      listener->accept_callback(
-          listener->accept_user_data,
-          iree_net_rdma_factory_status_from_failed_cm_event(event,
-                                                            "rdma_cm accept"),
-          NULL);
       break;
     }
+    case RDMA_CM_EVENT_TIMEWAIT_EXIT:
+      break;
     default:
       listener->accept_callback(
           listener->accept_user_data,
@@ -1659,6 +1778,11 @@ static iree_status_t iree_net_rdma_listener_begin_stop(
   }
   if (iree_status_is_ok(status)) {
     iree_net_rdma_listener_cancel_pending_accepts(listener);
+    iree_net_rdma_cm_channel_set_callback(
+        listener->cm_channel, (iree_net_rdma_cm_channel_callback_t){
+                                  .fn = iree_net_rdma_discard_cm_event,
+                                  .user_data = NULL,
+                              });
     iree_net_rdma_cm_channel_release(listener->cm_channel);
     listener->cm_channel = NULL;
   }
@@ -1701,7 +1825,8 @@ static iree_status_t iree_net_rdma_listener_stop(
   iree_status_t status = iree_ok_status();
   if (iree_all_bits_set(listener->flags,
                         IREE_NET_RDMA_LISTENER_FLAG_IN_CALLBACK)) {
-    memset(&listener->stop_operation, 0, sizeof(listener->stop_operation));
+    iree_async_operation_zero(&listener->stop_operation.base,
+                              sizeof(listener->stop_operation));
     iree_async_operation_initialize(
         &listener->stop_operation.base, IREE_ASYNC_OPERATION_TYPE_NOP,
         IREE_ASYNC_OPERATION_FLAG_NONE, iree_net_rdma_listener_stop_complete,

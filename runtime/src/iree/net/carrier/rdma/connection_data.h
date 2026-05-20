@@ -4,13 +4,12 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// RDMA connection private-data codec.
+// RDMA carrier connection-data codec.
 //
-// rdma_cm allows peers to exchange a small private-data payload during
-// connect/accept. The RDMA carrier uses that payload to exchange queue
-// capacities, posted receive buffer size, and the remote memory location used
-// for credit returns. This file owns the wire layout so the connection state
-// machine and carrier do not reinterpret ad-hoc structs.
+// The RDMA carrier uses this payload to exchange queue capacities, posted
+// receive buffer size, and the remote memory location used for credit returns.
+// The endpoint private-data codec packs the same information into the smaller
+// RoCE CM budget used during connect/accept.
 
 #ifndef IREE_NET_CARRIER_RDMA_CONNECTION_DATA_H_
 #define IREE_NET_CARRIER_RDMA_CONNECTION_DATA_H_

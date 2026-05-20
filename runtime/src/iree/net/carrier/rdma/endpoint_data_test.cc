@@ -96,7 +96,7 @@ TEST(RdmaEndpointDataTest, SerializesLittleEndianWireLayout) {
   EXPECT_EQ(0x52u, storage[1]);
   EXPECT_EQ(0x44u, storage[2]);
   EXPECT_EQ(0x45u, storage[3]);
-  EXPECT_EQ(0x01u, storage[4]);
+  EXPECT_EQ(0x02u, storage[4]);
   EXPECT_EQ(0x00u, storage[5]);
   EXPECT_EQ(0x00u, storage[6]);
   EXPECT_EQ(0x00u, storage[7]);
@@ -113,17 +113,41 @@ TEST(RdmaEndpointDataTest, SerializesLittleEndianWireLayout) {
   EXPECT_EQ(0x00u, storage[17]);
   EXPECT_EQ(0x04u, storage[18]);
   EXPECT_EQ(0x00u, storage[19]);
-  for (iree_host_size_t i = 20; i < IREE_NET_RDMA_ENDPOINT_DATA_HEADER_LENGTH;
-       ++i) {
+  EXPECT_EQ(0x00u, storage[20]);
+  EXPECT_EQ(0x01u, storage[21]);
+  EXPECT_EQ(0x80u, storage[22]);
+  EXPECT_EQ(0x00u, storage[23]);
+  EXPECT_EQ(0x00u, storage[24]);
+  EXPECT_EQ(0x10u, storage[25]);
+  EXPECT_EQ(0x00u, storage[26]);
+  EXPECT_EQ(0x00u, storage[27]);
+  EXPECT_EQ(0x40u, storage[28]);
+  EXPECT_EQ(0x00u, storage[29]);
+  EXPECT_EQ(0x00u, storage[30]);
+  EXPECT_EQ(0x00u, storage[31]);
+  EXPECT_EQ(0x80u, storage[32]);
+  EXPECT_EQ(0x00u, storage[33]);
+  EXPECT_EQ(0x04u, storage[34]);
+  EXPECT_EQ(0x01u, storage[35]);
+  EXPECT_EQ(0x88u, storage[36]);
+  EXPECT_EQ(0x77u, storage[37]);
+  EXPECT_EQ(0x66u, storage[38]);
+  EXPECT_EQ(0x55u, storage[39]);
+  EXPECT_EQ(0x44u, storage[40]);
+  EXPECT_EQ(0x33u, storage[41]);
+  EXPECT_EQ(0x22u, storage[42]);
+  EXPECT_EQ(0x11u, storage[43]);
+  EXPECT_EQ(0xDDu, storage[44]);
+  EXPECT_EQ(0xCCu, storage[45]);
+  EXPECT_EQ(0xBBu, storage[46]);
+  EXPECT_EQ(0xAAu, storage[47]);
+  EXPECT_EQ(0x04u, storage[48]);
+  EXPECT_EQ(0x00u, storage[49]);
+  EXPECT_EQ(0x00u, storage[50]);
+  EXPECT_EQ(0x00u, storage[51]);
+  for (iree_host_size_t i = 52; i < IREE_NET_RDMA_ENDPOINT_DATA_LENGTH; ++i) {
     EXPECT_EQ(0x00u, storage[i]);
   }
-
-  const iree_host_size_t connection_data_offset =
-      IREE_NET_RDMA_ENDPOINT_DATA_HEADER_LENGTH;
-  EXPECT_EQ(0x49u, storage[connection_data_offset + 0]);
-  EXPECT_EQ(0x52u, storage[connection_data_offset + 1]);
-  EXPECT_EQ(0x44u, storage[connection_data_offset + 2]);
-  EXPECT_EQ(0x4Du, storage[connection_data_offset + 3]);
 }
 
 TEST(RdmaEndpointDataTest, RejectsShortBuffer) {
@@ -194,7 +218,7 @@ TEST(RdmaEndpointDataTest, RejectsUnsupportedVersion) {
   uint8_t storage[IREE_NET_RDMA_ENDPOINT_DATA_LENGTH] = {0};
   SerializeTestEndpointData(storage, sizeof(storage));
 
-  storage[4] = 2;
+  storage[4] = 1;
   iree_net_rdma_endpoint_data_t actual = {};
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_UNIMPLEMENTED,
@@ -206,7 +230,7 @@ TEST(RdmaEndpointDataTest, RejectsReservedBytes) {
   uint8_t storage[IREE_NET_RDMA_ENDPOINT_DATA_LENGTH] = {0};
   SerializeTestEndpointData(storage, sizeof(storage));
 
-  storage[20] = 1;
+  storage[52] = 1;
   iree_net_rdma_endpoint_data_t actual = {};
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_UNIMPLEMENTED,
@@ -325,16 +349,22 @@ TEST(RdmaEndpointDataTest, RejectsInvalidEmbeddedConnectionData) {
           &data, iree_make_byte_span(storage, sizeof(storage)), &data_length));
 }
 
+TEST(RdmaEndpointDataTest, RejectsConnectionDataOutsideCompactCapacity) {
+  iree_net_rdma_endpoint_data_t data = MakeTestEndpointData();
+  data.connection_data.send_queue_depth = UINT16_MAX + 1u;
+
+  uint8_t storage[IREE_NET_RDMA_ENDPOINT_DATA_LENGTH] = {0};
+  iree_host_size_t data_length = 0;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_net_rdma_endpoint_data_serialize(
+          &data, iree_make_byte_span(storage, sizeof(storage)), &data_length));
+}
+
 TEST(RdmaEndpointDataTest, RejectsDecodedInvalidEmbeddedConnectionData) {
   uint8_t storage[IREE_NET_RDMA_ENDPOINT_DATA_LENGTH] = {0};
   SerializeTestEndpointData(storage, sizeof(storage));
-  const iree_host_size_t max_send_sge_offset =
-      IREE_NET_RDMA_ENDPOINT_DATA_HEADER_LENGTH + 16;
-  storage[max_send_sge_offset] =
-      (uint8_t)(IREE_NET_RDMA_CONNECTION_DATA_MAX_SEND_SGE + 1);
-  storage[max_send_sge_offset + 1] = 0;
-  storage[max_send_sge_offset + 2] = 0;
-  storage[max_send_sge_offset + 3] = 0;
+  storage[34] = (uint8_t)(IREE_NET_RDMA_CONNECTION_DATA_MAX_SEND_SGE + 1);
 
   iree_net_rdma_endpoint_data_t actual = {};
   IREE_EXPECT_STATUS_IS(

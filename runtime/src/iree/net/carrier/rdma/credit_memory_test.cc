@@ -32,11 +32,13 @@ using RdmaContextPtr =
 using RdmaCreditMemoryPtr =
     std::unique_ptr<iree_net_rdma_credit_memory_t, RdmaCreditMemoryDeleter>;
 
+bool IsUnavailableStatus(iree_status_code_t status_code) {
+  return status_code == IREE_STATUS_NOT_FOUND ||
+         status_code == IREE_STATUS_UNAVAILABLE;
+}
+
 bool ConsumeUnavailableStatus(iree_status_t& status) {
-  iree_status_code_t code = iree_status_code(status);
-  if (code != IREE_STATUS_NOT_FOUND && code != IREE_STATUS_UNAVAILABLE) {
-    return false;
-  }
+  if (!IsUnavailableStatus(iree_status_code(status))) return false;
   iree::Status consumed_status = iree::internal::ConsumeForTest(status);
   (void)consumed_status;
   return true;

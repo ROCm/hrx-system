@@ -510,10 +510,14 @@ iree_status_t iree_net_control_channel_activate(
   iree_net_message_endpoint_set_callbacks(channel->endpoint,
                                           endpoint_callbacks);
 
+  // Endpoint activation may synchronously drain transport receives into this
+  // channel, so the channel must be operational before activation begins.
+  iree_net_control_channel_set_state(
+      channel, IREE_NET_CONTROL_CHANNEL_STATE_OPERATIONAL);
   iree_status_t status = iree_net_message_endpoint_activate(channel->endpoint);
-  if (iree_status_is_ok(status)) {
-    iree_net_control_channel_set_state(
-        channel, IREE_NET_CONTROL_CHANNEL_STATE_OPERATIONAL);
+  if (!iree_status_is_ok(status)) {
+    iree_net_control_channel_set_state(channel,
+                                       IREE_NET_CONTROL_CHANNEL_STATE_CREATED);
   }
 
   IREE_TRACE_ZONE_END(z0);

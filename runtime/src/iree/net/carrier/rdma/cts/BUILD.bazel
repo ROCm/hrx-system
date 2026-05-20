@@ -35,6 +35,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/net/carrier/cts/util:registry",
         "//runtime/src/iree/net/carrier/rdma:context",
         "//runtime/src/iree/net/carrier/rdma:factory",
+        "//runtime/src/iree/net/carrier/rdma:region",
     ],
     alwayslink = True,
 )

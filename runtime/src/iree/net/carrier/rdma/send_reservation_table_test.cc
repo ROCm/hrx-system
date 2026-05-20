@@ -20,8 +20,8 @@ static void CountLeaseRelease(void* user_data, uint32_t buffer_index) {
 static iree_async_buffer_lease_t MakeLease(uint32_t* release_count) {
   iree_async_buffer_lease_t lease = {};
   lease.release = (iree_async_buffer_recycle_callback_t){
-      .fn = CountLeaseRelease,
-      .user_data = release_count,
+      /*.fn=*/CountLeaseRelease,
+      /*.user_data=*/release_count,
   };
   lease.buffer_index = 11u;
   lease.span = iree_async_span_from_ptr(reinterpret_cast<void*>(0x1000), 128);

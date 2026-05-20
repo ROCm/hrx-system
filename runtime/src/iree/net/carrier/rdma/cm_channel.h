@@ -9,11 +9,13 @@
 // rdma_cm exposes connection-manager events through a pollable fd. This
 // component owns the event channel, registers it with an IREE proactor, and
 // drains/acknowledges events from the proactor callback. Higher-level
-// connect/listen state machines consume the borrowed event view while the
-// underlying rdma_cm event is still valid.
+// connect/listen state machines consume a copied event view after the native
+// rdma_cm event has been acknowledged.
 
 #ifndef IREE_NET_CARRIER_RDMA_CM_CHANNEL_H_
 #define IREE_NET_CARRIER_RDMA_CM_CHANNEL_H_
+
+#include <stdint.h>
 
 #include "iree/async/proactor.h"
 #include "iree/base/api.h"
@@ -25,12 +27,11 @@ extern "C" {
 
 typedef struct iree_net_rdma_cm_channel_t iree_net_rdma_cm_channel_t;
 
-// Borrowed view of one rdma_cm event.
-typedef struct iree_net_rdma_cm_event_t {
-  // Native rdma_cm event. Valid only during the callback; do not acknowledge
-  // it.
-  struct rdma_cm_event* native_event;
+// Maximum private data bytes carried by rdma_cm connection events.
+#define IREE_NET_RDMA_CM_EVENT_PRIVATE_DATA_CAPACITY UINT8_MAX
 
+// Owned view of one rdma_cm event.
+typedef struct iree_net_rdma_cm_event_t {
   // Native connection ID associated with the event.
   struct rdma_cm_id* id;
 
@@ -43,16 +44,19 @@ typedef struct iree_net_rdma_cm_event_t {
   // rdma_cm event status. Non-zero values are transport/provider errors.
   int status;
 
-  // Private data borrowed from native_event->param.conn.
+  // Storage containing a copy of native_event->param.conn private data.
+  uint8_t private_data_storage[IREE_NET_RDMA_CM_EVENT_PRIVATE_DATA_CAPACITY];
+
+  // Private data view into private_data_storage.
   iree_const_byte_span_t private_data;
 } iree_net_rdma_cm_event_t;
 
 // Handles rdma_cm events and channel-level errors.
 //
-// |status| is OK when |event| is non-NULL. The event is borrowed and must not
-// be retained after the callback returns; the channel acknowledges the native
-// event immediately afterward. If |status| is non-OK then |event| is NULL and
-// the callback owns the status.
+// |status| is OK when |event| is non-NULL. The event is owned by the callback
+// stack frame and must not be retained after the callback returns; the channel
+// has already acknowledged the native event before invoking the callback. If
+// |status| is non-OK then |event| is NULL and the callback owns the status.
 typedef void (*iree_net_rdma_cm_channel_callback_fn_t)(
     void* user_data, iree_status_t status,
     const iree_net_rdma_cm_event_t* event);
@@ -74,9 +78,13 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_cm_channel_create(
     iree_net_rdma_cm_channel_callback_t callback,
     iree_allocator_t host_allocator, iree_net_rdma_cm_channel_t** out_channel);
 
+// Retains the channel for an additional owner.
+IREE_API_EXPORT void iree_net_rdma_cm_channel_retain(
+    iree_net_rdma_cm_channel_t* channel);
+
 // Releases the channel and unregisters it from the proactor.
 //
-// Must not be called from the channel callback.
+// The final release must not be called from the channel callback.
 IREE_API_EXPORT void iree_net_rdma_cm_channel_release(
     iree_net_rdma_cm_channel_t* channel);
 
@@ -84,6 +92,11 @@ IREE_API_EXPORT void iree_net_rdma_cm_channel_release(
 IREE_API_EXPORT struct rdma_event_channel*
 iree_net_rdma_cm_channel_native_event_channel(
     const iree_net_rdma_cm_channel_t* channel);
+
+// Replaces the event callback used for subsequent drained events.
+IREE_API_EXPORT void iree_net_rdma_cm_channel_set_callback(
+    iree_net_rdma_cm_channel_t* channel,
+    iree_net_rdma_cm_channel_callback_t callback);
 
 // Drains all currently queued rdma_cm events.
 //

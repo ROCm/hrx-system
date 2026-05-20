@@ -33,10 +33,12 @@
 
 #include "iree/async/address.h"
 #include "iree/async/proactor_platform.h"
+#include "iree/async/slab.h"
 #include "iree/net/carrier.h"
 #include "iree/net/carrier/cts/util/registry.h"
 #include "iree/net/carrier/rdma/context.h"
 #include "iree/net/carrier/rdma/factory.h"
+#include "iree/net/carrier/rdma/region.h"
 #include "iree/net/connection.h"
 #include "iree/net/transport_factory.h"
 
@@ -404,6 +406,38 @@ static iree_status_t CreateRdmaFactory(
   return CreateUncheckedRdmaFactory(allocator, out_factory);
 }
 
+static iree_status_t CreateRdmaRegisteredRegion(
+    iree_net_carrier_t* carrier, iree_host_size_t byte_length,
+    iree_async_buffer_access_flags_t access_flags,
+    iree_allocator_t host_allocator, RegisteredRegion* out_region) {
+  memset(out_region, 0, sizeof(*out_region));
+  iree_net_rdma_carrier_t* rdma_carrier = iree_net_rdma_carrier_cast(carrier);
+  iree_net_rdma_context_t* context =
+      iree_net_rdma_carrier_context(rdma_carrier);
+  if (!context) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "carrier is not an RDMA carrier");
+  }
+
+  iree_async_slab_options_t slab_options = iree_async_slab_options_default();
+  slab_options.buffer_size = byte_length;
+  slab_options.buffer_count = 1;
+
+  iree_status_t status =
+      iree_async_slab_create(slab_options, host_allocator, &out_region->slab);
+  if (iree_status_is_ok(status)) {
+    status = iree_net_rdma_region_register_slab(context, out_region->slab,
+                                                access_flags, host_allocator,
+                                                &out_region->region);
+  }
+  if (!iree_status_is_ok(status)) {
+    iree_async_region_release(out_region->region);
+    iree_async_slab_release(out_region->slab);
+    memset(out_region, 0, sizeof(*out_region));
+  }
+  return status;
+}
+
 static iree::StatusOr<std::string> MakeRdmaBindAddress() {
   const char* bind_address = GetEnvironmentValue(kRdmaCtsBindAddressEnv);
   if (bind_address) return bind_address;
@@ -603,11 +637,12 @@ iree_status_t CreateRdmaCtsAvailabilityStatus() {
 
 static iree::StatusOr<CarrierPair> CreateRdmaCarrierPair(
     iree_async_proactor_t* proactor) {
-  bool created_proactor = proactor == nullptr;
-  if (created_proactor) {
+  iree_async_proactor_t* owned_proactor = nullptr;
+  if (!proactor) {
     IREE_RETURN_IF_ERROR(iree_async_proactor_create_platform(
         iree_async_proactor_options_default(), iree_allocator_system(),
-        &proactor));
+        &owned_proactor));
+    proactor = owned_proactor;
   }
 
   auto context = std::make_unique<RdmaPairContext>();
@@ -644,8 +679,12 @@ static iree::StatusOr<CarrierPair> CreateRdmaCarrierPair(
     status = PollUntil(
         proactor,
         [&]() {
-          return connection_state.completion_count.load(
-                     std::memory_order_acquire) >= 2;
+          int completion_count =
+              connection_state.completion_count.load(std::memory_order_acquire);
+          return completion_count >= 2 ||
+                 (completion_count >= 1 &&
+                  (!connection_state.accept_status.ok() ||
+                   !connection_state.connect_status.ok()));
         },
         "RDMA connect");
   }
@@ -690,12 +729,13 @@ static iree::StatusOr<CarrierPair> CreateRdmaCarrierPair(
     pair.proactor = proactor;
     pair.context = context.release();
     pair.cleanup = CleanupRdmaPair;
+    owned_proactor = nullptr;
     return pair;
   }
 
   iree_net_connection_release(connection_state.client_connection);
   iree_net_connection_release(connection_state.server_connection);
-  if (created_proactor) iree_async_proactor_release(proactor);
+  iree_async_proactor_release(owned_proactor);
   return iree::Status(std::move(status));
 }
 
@@ -708,7 +748,7 @@ static bool rdma_registered =
          {"rdma",
           {"rdma", CreateRdmaCarrierPair, CreateRdmaFactory,
            MakeRdmaBindAddress, ResolveRdmaConnectAddress,
-           MakeRdmaUnreachableAddress},
+           MakeRdmaUnreachableAddress, CreateRdmaRegisteredRegion},
           {"reliable", "ordered", "zerocopy_tx", "zerocopy_rx",
            "registered_regions", "direct_write", "direct_read", "factory"}}),
      true);

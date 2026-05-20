@@ -106,6 +106,7 @@ iree_cc_library(
     ::pollable_fd
     iree::async
     iree::base
+    iree::base::threading
     rdma_core::headers
   PUBLIC
 )

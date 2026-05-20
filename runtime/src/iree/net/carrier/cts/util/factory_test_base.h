@@ -285,8 +285,11 @@ class FactoryTestBase : public ::testing::TestWithParam<BackendInfo> {
     }
 
     if (iree_status_is_ok(status)) {
-      bool ok =
-          PollUntil([&]() { return accept_ctx.fired && connect_ctx.fired; });
+      bool ok = PollUntil([&]() {
+        return (accept_ctx.fired && !accept_ctx.status.ok()) ||
+               (connect_ctx.fired && !connect_ctx.status.ok()) ||
+               (accept_ctx.fired && connect_ctx.fired);
+      });
       if (!ok) {
         status = iree_make_status(IREE_STATUS_DEADLINE_EXCEEDED,
                                   "connection establishment timed out");

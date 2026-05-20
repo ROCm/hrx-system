@@ -154,8 +154,8 @@ TEST_F(WorkRequestTableTest, RetainsLeaseUntilCompletion) {
   uint32_t release_count = 0;
   iree_async_buffer_lease_t lease = {};
   lease.release = (iree_async_buffer_recycle_callback_t){
-      .fn = CountLeaseRelease,
-      .user_data = &release_count,
+      /*.fn=*/CountLeaseRelease,
+      /*.user_data=*/&release_count,
   };
   lease.buffer_index = 7u;
 
@@ -185,8 +185,8 @@ TEST_F(WorkRequestTableTest, DrainReturnsAllInFlightRequests) {
   uint32_t release_count = 0;
   iree_async_buffer_lease_t lease = {};
   lease.release = (iree_async_buffer_recycle_callback_t){
-      .fn = CountLeaseRelease,
-      .user_data = &release_count,
+      /*.fn=*/CountLeaseRelease,
+      /*.user_data=*/&release_count,
   };
   lease.buffer_index = 7u;
 

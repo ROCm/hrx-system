@@ -180,7 +180,8 @@ static iree_status_t iree_net_libverbs_load_library(
   if (iree_status_is_ok(status)) {
     iree_net_libverbs_load_optional_symbols(library, out_libverbs);
     out_libverbs->library = library;
-  } else if (library) {
+    library = NULL;
+  } else {
     iree_dynamic_library_release(library);
   }
   IREE_TRACE_ZONE_END(z0);
@@ -188,9 +189,7 @@ static iree_status_t iree_net_libverbs_load_library(
 }
 
 static void iree_net_libverbs_unload_library(iree_net_libverbs_t* libverbs) {
-  if (libverbs->library) {
-    iree_dynamic_library_release(libverbs->library);
-  }
+  iree_dynamic_library_release(libverbs->library);
 }
 
 IREE_API_EXPORT iree_status_t iree_net_libverbs_append_path_to_builder(

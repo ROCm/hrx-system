@@ -295,7 +295,7 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_completion_queue_create(
 
   if (iree_status_is_ok(status)) {
     *out_queue = queue;
-  } else if (queue) {
+  } else {
     iree_net_rdma_completion_queue_release(queue);
   }
   return status;

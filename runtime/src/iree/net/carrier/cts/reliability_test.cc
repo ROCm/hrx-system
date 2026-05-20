@@ -216,7 +216,15 @@ TEST_P(ReliabilityTest, SmallMessageStress) {
     iree_net_send_params_t params = {};
     params.data.values = &span;
     params.data.count = 1;
-    IREE_ASSERT_OK(iree_net_carrier_send(client_, &params));
+    iree_status_code_t send_status_code = IREE_STATUS_RESOURCE_EXHAUSTED;
+    ASSERT_TRUE(PollUntil([&] {
+      iree_status_t status = iree_net_carrier_send(client_, &params);
+      send_status_code = iree_status_code(status);
+      iree_status_ignore(status);
+      return send_status_code != IREE_STATUS_RESOURCE_EXHAUSTED;
+    })) << "send did not become admissible for message "
+        << i;
+    EXPECT_EQ(send_status_code, IREE_STATUS_OK);
 
     // Poll frequently to avoid exhausting send budget.
     if (i % 20 == 19) {

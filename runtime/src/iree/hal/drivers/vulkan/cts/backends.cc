@@ -53,7 +53,11 @@ static bool vulkan_registered_ =
           /*executable_target_key=*/nullptr,
           /*executable_data=*/nullptr, RecordingMode::kDirect,
           /*unsupported_tests=*/{},
-          /*expected_failures=*/{}},
+          /*expected_failures=*/
+          {
+              // Features and API surface not currently implemented.
+              {"EventTest.*", "Vulkan rewrite HAL does not implement events"},
+          }},
          {"async_queue", "file_io", "vulkan"},
      }),
      true);

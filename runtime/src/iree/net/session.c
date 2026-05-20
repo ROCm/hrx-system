@@ -967,6 +967,12 @@ static void iree_net_session_on_control_endpoint_ready(
     return;
   }
 
+  if (session->role == IREE_NET_SESSION_ROLE_SERVER) {
+    // Server activation may synchronously drain a transport receive queue that
+    // already contains the client's HELLO.
+    session->bootstrap_phase = IREE_NET_SESSION_BOOTSTRAP_WAITING_HELLO;
+  }
+
   // Activate the control channel (start receiving).
   status = iree_net_control_channel_activate(session->control_channel);
   if (!iree_status_is_ok(status)) {
@@ -988,9 +994,6 @@ static void iree_net_session_on_control_endpoint_ready(
       iree_net_session_release(session);
       return;
     }
-  } else {
-    // Server: wait for client's HELLO.
-    session->bootstrap_phase = IREE_NET_SESSION_BOOTSTRAP_WAITING_HELLO;
   }
 
   iree_net_session_release(session);

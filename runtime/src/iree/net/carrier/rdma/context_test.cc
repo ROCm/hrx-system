@@ -24,9 +24,9 @@ struct RdmaContextDeleter {
 using RdmaContextPtr =
     std::unique_ptr<iree_net_rdma_context_t, RdmaContextDeleter>;
 
-bool IsUnavailableStatus(iree_status_t status) {
-  iree_status_code_t code = iree_status_code(status);
-  return code == IREE_STATUS_NOT_FOUND || code == IREE_STATUS_UNAVAILABLE;
+bool ShouldSkipUnavailable(iree_status_code_t status_code) {
+  return status_code == IREE_STATUS_NOT_FOUND ||
+         status_code == IREE_STATUS_UNAVAILABLE;
 }
 
 iree_status_t CreateDefaultContext(iree_net_rdma_context_t** out_context) {
@@ -34,14 +34,11 @@ iree_status_t CreateDefaultContext(iree_net_rdma_context_t** out_context) {
                                       iree_allocator_system(), out_context);
 }
 
-bool ShouldSkipUnavailable(iree_status_t status) {
-  return !iree_status_is_ok(status) && IsUnavailableStatus(status);
-}
-
 TEST(RdmaContextTest, CreateSelectsUsableDeviceAndPort) {
   iree_net_rdma_context_t* raw_context = nullptr;
   iree_status_t status = CreateDefaultContext(&raw_context);
-  if (ShouldSkipUnavailable(status)) {
+  if (!iree_status_is_ok(status) &&
+      ShouldSkipUnavailable(iree_status_code(status))) {
     iree_status_ignore(status);
     GTEST_SKIP() << "RDMA context is not available on this machine";
   }
@@ -62,7 +59,8 @@ TEST(RdmaContextTest, CreateSelectsUsableDeviceAndPort) {
 TEST(RdmaContextTest, RequestedMissingDeviceFailsLoudly) {
   iree_net_rdma_context_t* available_context = nullptr;
   iree_status_t available_status = CreateDefaultContext(&available_context);
-  if (ShouldSkipUnavailable(available_status)) {
+  if (!iree_status_is_ok(available_status) &&
+      ShouldSkipUnavailable(iree_status_code(available_status))) {
     iree_status_ignore(available_status);
     GTEST_SKIP() << "RDMA context is not available on this machine";
   }
@@ -84,7 +82,8 @@ TEST(RdmaContextTest, RequestedMissingDeviceFailsLoudly) {
 TEST(RdmaContextTest, RegistersHostMemory) {
   iree_net_rdma_context_t* raw_context = nullptr;
   iree_status_t create_status = CreateDefaultContext(&raw_context);
-  if (ShouldSkipUnavailable(create_status)) {
+  if (!iree_status_is_ok(create_status) &&
+      ShouldSkipUnavailable(iree_status_code(create_status))) {
     iree_status_ignore(create_status);
     GTEST_SKIP() << "RDMA context is not available on this machine";
   }

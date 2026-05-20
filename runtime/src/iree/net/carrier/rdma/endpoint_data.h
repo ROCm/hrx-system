@@ -8,9 +8,9 @@
 //
 // Multi-endpoint RDMA connections are represented as a group of rdma_cm RC
 // connections, one QP/carrier per endpoint slot. Each CM connection exchanges
-// this fixed private-data payload so the listener can group endpoint QPs into
-// one logical iree_net_connection_t while preserving the existing per-carrier
-// RDMA connection data.
+// this compact fixed private-data payload so the listener can group endpoint
+// QPs into one logical iree_net_connection_t and activate the carrier without
+// requiring an additional setup round trip.
 
 #ifndef IREE_NET_CARRIER_RDMA_ENDPOINT_DATA_H_
 #define IREE_NET_CARRIER_RDMA_ENDPOINT_DATA_H_
@@ -28,15 +28,12 @@ extern "C" {
 #define IREE_NET_RDMA_ENDPOINT_DATA_MAGIC ((uint32_t)0x45445249u)
 
 // Current RDMA endpoint private-data ABI version.
-#define IREE_NET_RDMA_ENDPOINT_DATA_VERSION ((uint16_t)1u)
+#define IREE_NET_RDMA_ENDPOINT_DATA_VERSION ((uint16_t)2u)
 
-// Fixed header length before the embedded per-carrier connection data.
-#define IREE_NET_RDMA_ENDPOINT_DATA_HEADER_LENGTH ((iree_host_size_t)32)
-
-// Fixed private-data payload length.
-#define IREE_NET_RDMA_ENDPOINT_DATA_LENGTH     \
-  (IREE_NET_RDMA_ENDPOINT_DATA_HEADER_LENGTH + \
-   IREE_NET_RDMA_CONNECTION_DATA_LENGTH)
+// Fixed private-data payload length. RoCE CM requests only expose 56 bytes of
+// consumer private data on common providers, so this layout must stay within
+// that budget.
+#define IREE_NET_RDMA_ENDPOINT_DATA_LENGTH ((iree_host_size_t)56)
 
 // Decoded RDMA endpoint parameters exchanged through rdma_cm private data.
 typedef struct iree_net_rdma_endpoint_data_t {

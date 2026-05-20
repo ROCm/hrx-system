@@ -270,7 +270,7 @@ TEST(DmaBufRegistrationTest, RegistersAmdgpuMemoryWithRdma) {
   iree_status_t status = hsa.Initialize(host_allocator);
   if (!iree_status_is_ok(status)) {
     iree_status_fprint(stderr, status);
-    iree_status_ignore(status);
+    iree_status_free(status);
     GTEST_SKIP() << "HSA runtime not available";
   }
 
@@ -301,7 +301,7 @@ TEST(DmaBufRegistrationTest, RegistersAmdgpuMemoryWithRdma) {
   status = dmabuf.Export(allocation.ptr(), allocation.size());
   if (!iree_status_is_ok(status)) {
     iree_status_fprint(stderr, status);
-    iree_status_ignore(status);
+    iree_status_free(status);
     GTEST_SKIP() << "AMDGPU memory dma-buf export not available";
   }
   ASSERT_GE(dmabuf.fd(), 0);
@@ -310,7 +310,7 @@ TEST(DmaBufRegistrationTest, RegistersAmdgpuMemoryWithRdma) {
   status = libverbs.Initialize(host_allocator);
   if (!iree_status_is_ok(status)) {
     iree_status_fprint(stderr, status);
-    iree_status_ignore(status);
+    iree_status_free(status);
     GTEST_SKIP() << "libibverbs not available";
   }
   if (!iree_net_libverbs_has_dmabuf_mr(libverbs.get())) {

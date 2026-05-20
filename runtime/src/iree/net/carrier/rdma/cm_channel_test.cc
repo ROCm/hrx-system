@@ -42,7 +42,7 @@ class RdmaCmChannelTest : public ::testing::Test {
 
   void TearDown() override {
     iree_net_rdma_cm_channel_release(channel_);
-    if (proactor_) iree_async_proactor_release(proactor_);
+    iree_async_proactor_release(proactor_);
     DeinitializeRdmaCmLibrary(&librdmacm_);
   }
 

@@ -17,8 +17,17 @@ enum iree_net_rdma_endpoint_data_offset_e {
   IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_GROUP_ID = 8,
   IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_ENDPOINT_INDEX = 16,
   IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_ENDPOINT_COUNT = 18,
-  IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_RESERVED0 = 20,
-  IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_CONNECTION_DATA = 32,
+  IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_SEND_QUEUE_DEPTH = 20,
+  IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_RECV_QUEUE_DEPTH = 22,
+  IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_RECV_BUFFER_SIZE = 24,
+  IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_MAX_INLINE_DATA = 28,
+  IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_INITIAL_RECV_CREDITS = 32,
+  IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_MAX_SEND_SGE = 34,
+  IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_MAX_RECV_SGE = 35,
+  IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_CREDIT_ADDRESS = 36,
+  IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_CREDIT_RKEY = 44,
+  IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_CREDIT_LENGTH = 48,
+  IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_RESERVED0 = 52,
 };
 
 static void iree_net_rdma_endpoint_data_store_u16(uint8_t* target,
@@ -39,6 +48,11 @@ static void iree_net_rdma_endpoint_data_store_u64(uint8_t* target,
   iree_unaligned_store_le_u64((uint64_t*)(target + offset), value);
 }
 
+static uint8_t iree_net_rdma_endpoint_data_load_u8(const uint8_t* source,
+                                                   iree_host_size_t offset) {
+  return source[offset];
+}
+
 static uint16_t iree_net_rdma_endpoint_data_load_u16(const uint8_t* source,
                                                      iree_host_size_t offset) {
   return iree_unaligned_load_le_u16((const uint16_t*)(source + offset));
@@ -57,7 +71,7 @@ static uint64_t iree_net_rdma_endpoint_data_load_u64(const uint8_t* source,
 static iree_status_t iree_net_rdma_endpoint_data_validate_reserved(
     const uint8_t* source) {
   for (iree_host_size_t i = IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_RESERVED0;
-       i < IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_CONNECTION_DATA; ++i) {
+       i < IREE_NET_RDMA_ENDPOINT_DATA_LENGTH; ++i) {
     if (source[i] != 0) {
       return iree_make_status(
           IREE_STATUS_UNIMPLEMENTED,
@@ -87,6 +101,38 @@ static iree_status_t iree_net_rdma_endpoint_data_validate(
                             "RDMA endpoint_index %" PRIu16
                             " must be less than endpoint_count %" PRIu16,
                             data->endpoint_index, data->endpoint_count);
+  }
+  IREE_RETURN_IF_ERROR(
+      iree_net_rdma_connection_data_validate(&data->connection_data));
+  if (data->connection_data.send_queue_depth > UINT16_MAX) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "RDMA send_queue_depth exceeds endpoint private "
+                            "data capacity: %" PRIu32,
+                            data->connection_data.send_queue_depth);
+  }
+  if (data->connection_data.recv_queue_depth > UINT16_MAX) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "RDMA recv_queue_depth exceeds endpoint private "
+                            "data capacity: %" PRIu32,
+                            data->connection_data.recv_queue_depth);
+  }
+  if (data->connection_data.initial_recv_credits > UINT16_MAX) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "RDMA initial_recv_credits exceeds endpoint "
+                            "private data capacity: %" PRIu32,
+                            data->connection_data.initial_recv_credits);
+  }
+  if (data->connection_data.max_send_sge > UINT8_MAX) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "RDMA max_send_sge exceeds endpoint private data capacity: %" PRIu32,
+        data->connection_data.max_send_sge);
+  }
+  if (data->connection_data.max_recv_sge > UINT8_MAX) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "RDMA max_recv_sge exceeds endpoint private data capacity: %" PRIu32,
+        data->connection_data.max_recv_sge);
   }
   return iree_ok_status();
 }
@@ -133,22 +179,34 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_endpoint_data_serialize(
   iree_net_rdma_endpoint_data_store_u16(
       target.data, IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_ENDPOINT_COUNT,
       data->endpoint_count);
-
-  iree_host_size_t connection_data_length = 0;
-  IREE_RETURN_IF_ERROR(iree_net_rdma_connection_data_serialize(
-      &data->connection_data,
-      iree_make_byte_span(
-          target.data + IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_CONNECTION_DATA,
-          target.data_length -
-              IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_CONNECTION_DATA),
-      &connection_data_length));
-  if (connection_data_length != IREE_NET_RDMA_CONNECTION_DATA_LENGTH) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "RDMA connection private data length %" PRIhsz
-                            " did not match %" PRIhsz,
-                            connection_data_length,
-                            IREE_NET_RDMA_CONNECTION_DATA_LENGTH);
-  }
+  iree_net_rdma_endpoint_data_store_u16(
+      target.data, IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_SEND_QUEUE_DEPTH,
+      (uint16_t)data->connection_data.send_queue_depth);
+  iree_net_rdma_endpoint_data_store_u16(
+      target.data, IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_RECV_QUEUE_DEPTH,
+      (uint16_t)data->connection_data.recv_queue_depth);
+  iree_net_rdma_endpoint_data_store_u32(
+      target.data, IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_RECV_BUFFER_SIZE,
+      data->connection_data.recv_buffer_size);
+  iree_net_rdma_endpoint_data_store_u32(
+      target.data, IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_MAX_INLINE_DATA,
+      data->connection_data.max_inline_data);
+  iree_net_rdma_endpoint_data_store_u16(
+      target.data, IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_INITIAL_RECV_CREDITS,
+      (uint16_t)data->connection_data.initial_recv_credits);
+  target.data[IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_MAX_SEND_SGE] =
+      (uint8_t)data->connection_data.max_send_sge;
+  target.data[IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_MAX_RECV_SGE] =
+      (uint8_t)data->connection_data.max_recv_sge;
+  iree_net_rdma_endpoint_data_store_u64(
+      target.data, IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_CREDIT_ADDRESS,
+      data->connection_data.credit_memory.address);
+  iree_net_rdma_endpoint_data_store_u32(
+      target.data, IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_CREDIT_RKEY,
+      data->connection_data.credit_memory.rkey);
+  iree_net_rdma_endpoint_data_store_u32(
+      target.data, IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_CREDIT_LENGTH,
+      data->connection_data.credit_memory.length);
 
   *out_length = IREE_NET_RDMA_ENDPOINT_DATA_LENGTH;
   return iree_ok_status();
@@ -198,12 +256,34 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_endpoint_data_deserialize(
       source.data, IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_ENDPOINT_INDEX);
   out_data->endpoint_count = iree_net_rdma_endpoint_data_load_u16(
       source.data, IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_ENDPOINT_COUNT);
-  IREE_RETURN_IF_ERROR(iree_net_rdma_connection_data_deserialize(
-      iree_make_const_byte_span(
-          source.data + IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_CONNECTION_DATA,
-          source.data_length -
-              IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_CONNECTION_DATA),
-      &out_data->connection_data));
+  out_data->connection_data.send_queue_depth =
+      iree_net_rdma_endpoint_data_load_u16(
+          source.data, IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_SEND_QUEUE_DEPTH);
+  out_data->connection_data.recv_queue_depth =
+      iree_net_rdma_endpoint_data_load_u16(
+          source.data, IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_RECV_QUEUE_DEPTH);
+  out_data->connection_data.recv_buffer_size =
+      iree_net_rdma_endpoint_data_load_u32(
+          source.data, IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_RECV_BUFFER_SIZE);
+  out_data->connection_data.max_inline_data =
+      iree_net_rdma_endpoint_data_load_u32(
+          source.data, IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_MAX_INLINE_DATA);
+  out_data->connection_data.initial_recv_credits =
+      iree_net_rdma_endpoint_data_load_u16(
+          source.data, IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_INITIAL_RECV_CREDITS);
+  out_data->connection_data.max_send_sge = iree_net_rdma_endpoint_data_load_u8(
+      source.data, IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_MAX_SEND_SGE);
+  out_data->connection_data.max_recv_sge = iree_net_rdma_endpoint_data_load_u8(
+      source.data, IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_MAX_RECV_SGE);
+  out_data->connection_data.credit_memory.address =
+      iree_net_rdma_endpoint_data_load_u64(
+          source.data, IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_CREDIT_ADDRESS);
+  out_data->connection_data.credit_memory.rkey =
+      iree_net_rdma_endpoint_data_load_u32(
+          source.data, IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_CREDIT_RKEY);
+  out_data->connection_data.credit_memory.length =
+      iree_net_rdma_endpoint_data_load_u32(
+          source.data, IREE_NET_RDMA_ENDPOINT_DATA_OFFSET_CREDIT_LENGTH);
 
   return iree_net_rdma_endpoint_data_validate(out_data);
 }

@@ -172,7 +172,8 @@ static iree_status_t iree_net_librdmacm_load_library(
 
   if (iree_status_is_ok(status)) {
     out_librdmacm->library = library;
-  } else if (library) {
+    library = NULL;
+  } else {
     iree_dynamic_library_release(library);
   }
   IREE_TRACE_ZONE_END(z0);
@@ -180,9 +181,7 @@ static iree_status_t iree_net_librdmacm_load_library(
 }
 
 static void iree_net_librdmacm_unload_library(iree_net_librdmacm_t* librdmacm) {
-  if (librdmacm->library) {
-    iree_dynamic_library_release(librdmacm->library);
-  }
+  iree_dynamic_library_release(librdmacm->library);
 }
 
 IREE_API_EXPORT iree_status_t iree_net_librdmacm_append_path_to_builder(

@@ -177,6 +177,11 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_receive_queue_replenish(
     memset(&lease, 0, sizeof(lease));
 
     status = iree_async_buffer_pool_acquire(queue->buffer_pool, &lease);
+    if (iree_status_code(status) == IREE_STATUS_RESOURCE_EXHAUSTED) {
+      (void)iree_status_consume_code(status);
+      status = iree_ok_status();
+      break;
+    }
 
     struct ibv_sge scatter_gather_entry;
     if (iree_status_is_ok(status)) {

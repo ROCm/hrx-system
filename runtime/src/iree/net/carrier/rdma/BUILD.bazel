@@ -4,8 +4,6 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
-
 # RDMA carrier using libibverbs and librdmacm — Linux-only.
 
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
@@ -122,6 +120,7 @@ iree_runtime_cc_library(
         ":pollable_fd",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
         "@rdma_core_headers",
     ],
 )

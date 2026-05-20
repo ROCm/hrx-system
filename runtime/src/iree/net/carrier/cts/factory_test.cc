@@ -96,8 +96,10 @@ TEST_P(FactoryTest, CallbackNotFiredBeforePoll) {
   EXPECT_FALSE(accept_fired);
   EXPECT_FALSE(result.fired);
 
-  // Now poll and verify they fire.
-  ASSERT_TRUE(PollUntil([&]() { return result.fired; }));
+  // Now poll and verify they fire. Transport CM event ordering may let the
+  // connector observe establishment before the listener observes the matching
+  // accept completion, but both callbacks must be delivered by the proactor.
+  ASSERT_TRUE(PollUntil([&]() { return result.fired && accept_fired; }));
   EXPECT_TRUE(result.fired);
   EXPECT_TRUE(accept_fired);
 

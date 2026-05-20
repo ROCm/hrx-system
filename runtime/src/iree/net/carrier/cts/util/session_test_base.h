@@ -60,6 +60,7 @@ struct SessionCallbackTracker {
   // on_error results.
   bool error_fired = false;
   iree_status_code_t error_code = IREE_STATUS_OK;
+  std::string error_message;
 
   // on_control_data results.
   bool control_data_fired = false;
@@ -104,7 +105,8 @@ struct SessionCallbackTracker {
     auto* self = static_cast<SessionCallbackTracker*>(user_data);
     self->error_fired = true;
     self->error_code = iree_status_code(status);
-    iree_status_ignore(status);
+    iree::Status consumed_status(std::move(status));
+    self->error_message = consumed_status.ToString();
   }
 
   static iree_status_t OnControlData(void* user_data,
@@ -267,7 +269,11 @@ class SessionTestBase : public FactoryTestBase {
     ASSERT_TRUE(PollUntil([&]() {
       return !accept_ctx.status.ok() ||
              (client_callbacks_.ready_fired && server_callbacks_.ready_fired);
-    })) << "Session bootstrap timed out";
+    })) << "Session bootstrap timed out"
+        << " client_error=" << client_callbacks_.error_code
+        << " client_message=" << client_callbacks_.error_message
+        << " server_error=" << server_callbacks_.error_code
+        << " server_message=" << server_callbacks_.error_message;
     IREE_ASSERT_OK(accept_ctx.status);
   }
 

@@ -40,13 +40,13 @@ using RdmaContextPtr =
     std::unique_ptr<iree_net_rdma_context_t, RdmaContextDeleter>;
 using ProactorPtr = std::unique_ptr<iree_async_proactor_t, ProactorDeleter>;
 
-bool IsUnavailableStatus(iree_status_t status) {
-  iree_status_code_t code = iree_status_code(status);
-  return code == IREE_STATUS_NOT_FOUND || code == IREE_STATUS_UNAVAILABLE;
+bool IsUnavailableStatus(iree_status_code_t status_code) {
+  return status_code == IREE_STATUS_NOT_FOUND ||
+         status_code == IREE_STATUS_UNAVAILABLE;
 }
 
 bool ConsumeIfUnavailable(iree_status_t status) {
-  if (IsUnavailableStatus(status)) {
+  if (IsUnavailableStatus(iree_status_code(status))) {
     iree_status_consume_code(status);
     return true;
   }

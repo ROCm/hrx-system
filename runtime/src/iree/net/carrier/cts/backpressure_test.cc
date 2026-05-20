@@ -112,10 +112,13 @@ TEST_P(BackpressureTest, BudgetRecoveryAfterCompletion) {
     return server_capture.total_bytes.load() >= to_send * data_length;
   }));
 
-  // Budget should recover after completions are processed.
-  iree_net_carrier_send_budget_t after =
-      iree_net_carrier_query_send_budget(client_);
-  EXPECT_EQ(after.slots, initial.slots);
+  // Budget should recover after completions and any transport-specific
+  // readiness notifications are processed.
+  ASSERT_TRUE(PollUntil([&] {
+    iree_net_carrier_send_budget_t after =
+        iree_net_carrier_query_send_budget(client_);
+    return after.slots == initial.slots;
+  }));
 }
 
 // Burst of sends within budget all succeed.

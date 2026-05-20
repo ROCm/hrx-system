@@ -41,6 +41,8 @@
 #include <vector>
 
 #include "iree/async/proactor.h"
+#include "iree/async/region.h"
+#include "iree/async/slab.h"
 #include "iree/base/status.h"
 #include "iree/net/carrier.h"
 #include "iree/testing/gtest.h"
@@ -79,6 +81,24 @@ struct CarrierPair {
 using CarrierPairFactory =
     std::function<iree::StatusOr<CarrierPair>(iree_async_proactor_t*)>;
 
+// Carrier-local registered memory returned by a backend test hook.
+struct RegisteredRegion {
+  // Slab owning the CPU-visible test memory.
+  iree_async_slab_t* slab;
+
+  // Region registered in the carrier's local transport domain.
+  iree_async_region_t* region;
+};
+
+// Factory function that creates a registered region compatible with |carrier|.
+//
+// The region must be created in the same transport domain/protection domain as
+// |carrier|. This is required for one-sided CTS because generic tests cannot
+// manufacture backend-specific registration handles themselves.
+using RegisteredRegionFactory = std::function<iree_status_t(
+    iree_net_carrier_t*, iree_host_size_t, iree_async_buffer_access_flags_t,
+    iree_allocator_t, RegisteredRegion*)>;
+
 // Identifies a carrier backend for test parameterization.
 struct BackendInfo {
   const char* name;            // Human-readable: "tcp", "loopback", etc.
@@ -107,6 +127,9 @@ struct BackendInfo {
   // Returns an address where no listener exists (for error-path tests).
   std::function<iree::StatusOr<std::string>(iree_async_proactor_t*)>
       make_unreachable_address;
+
+  // Optional hook for one-sided CTS suites requiring carrier-local regions.
+  RegisteredRegionFactory create_registered_region;
 };
 
 // Returns human-readable test suffix from BackendInfo.
