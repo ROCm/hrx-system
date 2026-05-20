@@ -43,6 +43,7 @@ iree_runtime_cc_library(
 iree_runtime_cc_test(
     name = "rdma_tests",
     srcs = [
+        "direct_test.cc",
         "error_test.cc",
         "//runtime/src/iree/net/carrier/cts/util:test_main.cc",
     ],
@@ -52,6 +53,7 @@ iree_runtime_cc_test(
     target_compatible_with = _LINUX_ONLY,
     deps = [
         ":backends",
+        "//runtime/src/iree/async",
         "//runtime/src/iree/net/carrier/cts:all_tests",
         "//runtime/src/iree/net/carrier/cts/util:registry",
         "//runtime/src/iree/net/carrier/cts/util:test_base",

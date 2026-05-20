@@ -119,6 +119,10 @@ iree_net_rdma_context_port_attributes(const iree_net_rdma_context_t* context);
 IREE_API_EXPORT const union ibv_gid* iree_net_rdma_context_gid(
     const iree_net_rdma_context_t* context);
 
+// Returns true when the selected device supports Type 1 memory windows.
+IREE_API_EXPORT bool iree_net_rdma_context_supports_memory_windows(
+    const iree_net_rdma_context_t* context);
+
 // Registers ordinary host memory in the context protection domain.
 //
 // Registration is a cold-path operation. Callers should register slab/provider

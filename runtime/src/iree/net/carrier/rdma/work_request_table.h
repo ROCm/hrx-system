@@ -53,6 +53,8 @@ enum iree_net_rdma_work_request_operation_e {
   IREE_NET_RDMA_WORK_REQUEST_OPERATION_COMMITTED_SEND = 5u,
   // Internal RDMA write publishing a cumulative receive-credit grant.
   IREE_NET_RDMA_WORK_REQUEST_OPERATION_CREDIT_GRANT = 6u,
+  // Internal Type 1 memory-window bind posted by register_buffer.
+  IREE_NET_RDMA_WORK_REQUEST_OPERATION_MEMORY_WINDOW_BIND = 7u,
 };
 
 typedef struct iree_net_rdma_work_request_completion_t {

@@ -521,6 +521,14 @@ IREE_API_EXPORT const union ibv_gid* iree_net_rdma_context_gid(
   return &context->gid;
 }
 
+IREE_API_EXPORT bool iree_net_rdma_context_supports_memory_windows(
+    const iree_net_rdma_context_t* context) {
+  if (!context) return false;
+  return context->device_attributes.max_mw > 0 &&
+         iree_all_bits_set(context->device_attributes.device_cap_flags,
+                           IBV_DEVICE_MEM_WINDOW);
+}
+
 IREE_API_EXPORT iree_status_t iree_net_rdma_context_register_host_memory(
     iree_net_rdma_context_t* context, void* base_ptr, iree_host_size_t length,
     int access_flags, struct ibv_mr** out_memory_region) {

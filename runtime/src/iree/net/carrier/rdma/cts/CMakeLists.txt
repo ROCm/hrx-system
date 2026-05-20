@@ -38,9 +38,11 @@ iree_cc_test(
     rdma_tests
   SRCS
     "${PROJECT_SOURCE_DIR}/runtime/src/iree/net/carrier/cts/util/test_main.cc"
+    "direct_test.cc"
     "error_test.cc"
   DEPS
     ::backends
+    iree::async
     iree::net::carrier::cts::all_tests
     iree::net::carrier::cts::util::registry
     iree::net::carrier::cts::util::test_base

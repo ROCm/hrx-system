@@ -13,7 +13,7 @@
 //   - send(): two-sided IBV_WR_SEND for ordered message/control traffic.
 //   - direct_write(): RDMA WRITE or RDMA WRITE WITH IMMEDIATE for bulk data.
 //   - direct_read(): RDMA READ for pull-based bulk data.
-//   - register_buffer(): one-time MR registration for host or dma-buf memory.
+//   - register_buffer(): revocable memory-window export over an RDMA region.
 //
 // The transport factory owns rdma_cm listener/connect state and route
 // resolution. The carrier owns the QP, CQs, receive postings, and credit

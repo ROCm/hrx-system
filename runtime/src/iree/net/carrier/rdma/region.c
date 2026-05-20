@@ -52,6 +52,10 @@ static iree_status_t iree_net_rdma_region_translate_access_flags(
   if ((access_flags & IREE_ASYNC_BUFFER_ACCESS_FLAG_REMOTE_WRITE) != 0) {
     verbs_flags |= IBV_ACCESS_REMOTE_WRITE;
   }
+  if ((access_flags & (IREE_ASYNC_BUFFER_ACCESS_FLAG_REMOTE_READ |
+                       IREE_ASYNC_BUFFER_ACCESS_FLAG_REMOTE_WRITE)) != 0) {
+    verbs_flags |= IBV_ACCESS_MW_BIND;
+  }
 
   *out_verbs_flags = verbs_flags;
   return iree_ok_status();

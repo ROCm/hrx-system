@@ -155,7 +155,7 @@ enum iree_net_file_handle_transfer_type_e {
 //===----------------------------------------------------------------------===//
 
 // Opaque handle to remote memory. Interpretation is carrier-specific:
-//   - RDMA: (rkey, remote_addr)
+//   - RDMA: (memory-window rkey, remote_addr)
 //   - Shared memory: offset in shared region
 //   - Emulated: buffer ID that triggers receiver response
 //
@@ -874,9 +874,9 @@ static inline iree_status_t iree_net_carrier_direct_read(
 // The peer uses this handle as the remote destination/source for one-sided
 // DMA operations.
 //
-// For RDMA carriers, this performs ibv_reg_mr or ibv_reg_dmabuf_mr to pin
-// memory and get an rkey. The region must remain valid and registered until
-// iree_net_carrier_unregister_buffer() is called.
+// For RDMA carriers, the region is already pinned/registered and this exports
+// a revocable memory-window rkey. The region must remain valid and registered
+// until iree_net_carrier_unregister_buffer() is called.
 //
 // Only meaningful if IREE_NET_CARRIER_CAPABILITY_DIRECT_WRITE or
 // IREE_NET_CARRIER_CAPABILITY_DIRECT_READ is set.

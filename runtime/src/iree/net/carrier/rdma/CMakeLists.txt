@@ -63,6 +63,7 @@ iree_cc_library(
     ::connection_data
     ::context
     ::credit_memory
+    ::memory_window
     ::queue_pair
     ::receive_queue
     ::region
@@ -90,6 +91,26 @@ iree_cc_test(
     iree::base
     iree::testing::gtest
     iree::testing::gtest_main
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_library(
+  NAME
+    memory_window
+  HDRS
+    "memory_window.h"
+  SRCS
+    "memory_window.c"
+  DEPS
+    ::context
+    ::libverbs
+    ::queue_pair
+    iree::async
+    iree::base
+    iree::net::carrier
+    rdma_core::headers
+  PUBLIC
 )
 endif()
 
