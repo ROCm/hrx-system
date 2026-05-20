@@ -9,8 +9,9 @@
 // The factory owns the cold connection-management path: it creates/listens on
 // rdma_cm IDs, waits for address and route resolution through the IREE
 // proactor, creates the RDMA carrier once the CM ID has selected a verbs
-// device, exchanges the carrier private-data payload, and then returns a
-// standard iree_net_connection_t.
+// device, exchanges a compact CM bootstrap record, exchanges full carrier
+// connection data over the established QP, and then returns a standard
+// iree_net_connection_t.
 //
 // Each logical connection owns one or more RC QPs, exposing each QP as one
 // message endpoint without adding multiplexing framing to the carrier hot path.

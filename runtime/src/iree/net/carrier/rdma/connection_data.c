@@ -67,7 +67,7 @@ static iree_status_t iree_net_rdma_connection_data_validate_reserved(
     if (source[i] != 0) {
       return iree_make_status(
           IREE_STATUS_UNIMPLEMENTED,
-          "RDMA connection private data uses reserved byte %" PRIhsz, i);
+          "RDMA connection data uses reserved byte %" PRIhsz, i);
     }
   }
   return iree_ok_status();
@@ -134,7 +134,7 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_connection_data_serialize(
   if (target.data_length < IREE_NET_RDMA_CONNECTION_DATA_LENGTH) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
-        "RDMA connection private data buffer too small: %" PRIhsz " < %" PRIhsz,
+        "RDMA connection data buffer too small: %" PRIhsz " < %" PRIhsz,
         target.data_length, IREE_NET_RDMA_CONNECTION_DATA_LENGTH);
   }
   if (!target.data) {
@@ -197,7 +197,7 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_connection_data_deserialize(
   if (source.data_length < IREE_NET_RDMA_CONNECTION_DATA_LENGTH) {
     return iree_make_status(
         IREE_STATUS_DATA_LOSS,
-        "RDMA connection private data truncated: %" PRIhsz " < %" PRIhsz,
+        "RDMA connection data truncated: %" PRIhsz " < %" PRIhsz,
         source.data_length, IREE_NET_RDMA_CONNECTION_DATA_LENGTH);
   }
   if (!source.data) {
@@ -209,7 +209,7 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_connection_data_deserialize(
       source.data, IREE_NET_RDMA_CONNECTION_DATA_OFFSET_MAGIC);
   if (magic != IREE_NET_RDMA_CONNECTION_DATA_MAGIC) {
     return iree_make_status(IREE_STATUS_DATA_LOSS,
-                            "RDMA connection private data has bad magic");
+                            "RDMA connection data has bad magic");
   }
 
   uint16_t version = iree_net_rdma_connection_data_load_u16(
@@ -217,7 +217,7 @@ IREE_API_EXPORT iree_status_t iree_net_rdma_connection_data_deserialize(
   if (version != IREE_NET_RDMA_CONNECTION_DATA_VERSION) {
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
-        "unsupported RDMA connection private data version: %" PRIu16, version);
+        "unsupported RDMA connection data version: %" PRIu16, version);
   }
   IREE_RETURN_IF_ERROR(
       iree_net_rdma_connection_data_validate_reserved(source.data));

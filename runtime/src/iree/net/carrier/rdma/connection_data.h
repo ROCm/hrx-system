@@ -8,8 +8,8 @@
 //
 // The RDMA carrier uses this payload to exchange queue capacities, posted
 // receive buffer size, and the remote memory location used for credit returns.
-// The endpoint private-data codec packs the same information into the smaller
-// RoCE CM budget used during connect/accept.
+// Peers exchange this after rdma_cm establishment using the carrier's first
+// setup SEND; CM private data is kept to the smaller endpoint bootstrap record.
 
 #ifndef IREE_NET_CARRIER_RDMA_CONNECTION_DATA_H_
 #define IREE_NET_CARRIER_RDMA_CONNECTION_DATA_H_
@@ -22,13 +22,13 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Magic number identifying RDMA connection private data ("IRDM" in LE).
+// Magic number identifying RDMA connection data ("IRDM" in LE).
 #define IREE_NET_RDMA_CONNECTION_DATA_MAGIC ((uint32_t)0x4D445249u)
 
-// Current RDMA connection private-data ABI version.
+// Current RDMA connection-data ABI version.
 #define IREE_NET_RDMA_CONNECTION_DATA_VERSION ((uint16_t)2u)
 
-// Fixed private-data payload length.
+// Fixed connection-data payload length.
 #define IREE_NET_RDMA_CONNECTION_DATA_LENGTH ((iree_host_size_t)56)
 
 // Maximum send scatter-gather entries supported by the connection-data ABI.
@@ -46,9 +46,9 @@ typedef struct iree_net_rdma_remote_credit_memory_t {
   uint32_t length;
 } iree_net_rdma_remote_credit_memory_t;
 
-// Decoded RDMA connection parameters exchanged through rdma_cm private data.
+// Decoded RDMA connection parameters exchanged during carrier setup.
 typedef struct iree_net_rdma_connection_data_t {
-  // Protocol feature flags. Reserved; must be 0 for version 1.
+  // Protocol feature flags. Reserved; must be 0 for this version.
   uint16_t flags;
 
   // Peer's send queue depth.
@@ -80,12 +80,12 @@ typedef struct iree_net_rdma_connection_data_t {
 IREE_API_EXPORT iree_status_t iree_net_rdma_connection_data_validate(
     const iree_net_rdma_connection_data_t* data);
 
-// Serializes RDMA connection data into an rdma_cm private-data payload.
+// Serializes RDMA connection data into a setup payload.
 IREE_API_EXPORT iree_status_t iree_net_rdma_connection_data_serialize(
     const iree_net_rdma_connection_data_t* data, iree_byte_span_t target,
     iree_host_size_t* out_length);
 
-// Deserializes RDMA connection data from an rdma_cm private-data payload.
+// Deserializes RDMA connection data from a setup payload.
 IREE_API_EXPORT iree_status_t iree_net_rdma_connection_data_deserialize(
     iree_const_byte_span_t source, iree_net_rdma_connection_data_t* out_data);
 

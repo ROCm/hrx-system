@@ -68,6 +68,7 @@ static bool iree_net_rdma_work_request_operation_is_valid(
     case IREE_NET_RDMA_WORK_REQUEST_OPERATION_COMMITTED_SEND:
     case IREE_NET_RDMA_WORK_REQUEST_OPERATION_CREDIT_GRANT:
     case IREE_NET_RDMA_WORK_REQUEST_OPERATION_MEMORY_WINDOW_BIND:
+    case IREE_NET_RDMA_WORK_REQUEST_OPERATION_BOOTSTRAP_SEND:
       return true;
     default:
       return false;

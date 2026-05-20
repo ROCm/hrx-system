@@ -14,43 +14,14 @@
 
 namespace {
 
-iree_net_rdma_connection_data_t MakeTestConnectionData() {
-  iree_net_rdma_connection_data_t data = {};
-  data.send_queue_depth = 256;
-  data.recv_queue_depth = 128;
-  data.recv_buffer_size = 4096;
-  data.max_send_sge = 4;
-  data.max_recv_sge = 1;
-  data.max_inline_data = 64;
-  data.initial_recv_credits = 128;
-  data.credit_memory.address = 0x1122334455667788ull;
-  data.credit_memory.rkey = 0xAABBCCDDu;
-  data.credit_memory.length = sizeof(uint32_t);
-  return data;
-}
-
 iree_net_rdma_endpoint_data_t MakeTestEndpointData() {
   iree_net_rdma_endpoint_data_t data = {};
   data.group_id = 0x0102030405060708ull;
   data.endpoint_index = 2;
   data.endpoint_count = 4;
-  data.connection_data = MakeTestConnectionData();
+  data.bootstrap_recv_buffer_size = 4096;
+  data.bootstrap_recv_credits = 128;
   return data;
-}
-
-void ExpectConnectionDataEq(const iree_net_rdma_connection_data_t& expected,
-                            const iree_net_rdma_connection_data_t& actual) {
-  EXPECT_EQ(expected.flags, actual.flags);
-  EXPECT_EQ(expected.send_queue_depth, actual.send_queue_depth);
-  EXPECT_EQ(expected.recv_queue_depth, actual.recv_queue_depth);
-  EXPECT_EQ(expected.recv_buffer_size, actual.recv_buffer_size);
-  EXPECT_EQ(expected.max_send_sge, actual.max_send_sge);
-  EXPECT_EQ(expected.max_recv_sge, actual.max_recv_sge);
-  EXPECT_EQ(expected.max_inline_data, actual.max_inline_data);
-  EXPECT_EQ(expected.initial_recv_credits, actual.initial_recv_credits);
-  EXPECT_EQ(expected.credit_memory.address, actual.credit_memory.address);
-  EXPECT_EQ(expected.credit_memory.rkey, actual.credit_memory.rkey);
-  EXPECT_EQ(expected.credit_memory.length, actual.credit_memory.length);
 }
 
 void ExpectEndpointDataEq(const iree_net_rdma_endpoint_data_t& expected,
@@ -59,7 +30,9 @@ void ExpectEndpointDataEq(const iree_net_rdma_endpoint_data_t& expected,
   EXPECT_EQ(expected.group_id, actual.group_id);
   EXPECT_EQ(expected.endpoint_index, actual.endpoint_index);
   EXPECT_EQ(expected.endpoint_count, actual.endpoint_count);
-  ExpectConnectionDataEq(expected.connection_data, actual.connection_data);
+  EXPECT_EQ(expected.bootstrap_recv_buffer_size,
+            actual.bootstrap_recv_buffer_size);
+  EXPECT_EQ(expected.bootstrap_recv_credits, actual.bootstrap_recv_credits);
 }
 
 void SerializeTestEndpointData(uint8_t* storage,
@@ -96,7 +69,7 @@ TEST(RdmaEndpointDataTest, SerializesLittleEndianWireLayout) {
   EXPECT_EQ(0x52u, storage[1]);
   EXPECT_EQ(0x44u, storage[2]);
   EXPECT_EQ(0x45u, storage[3]);
-  EXPECT_EQ(0x02u, storage[4]);
+  EXPECT_EQ(0x03u, storage[4]);
   EXPECT_EQ(0x00u, storage[5]);
   EXPECT_EQ(0x00u, storage[6]);
   EXPECT_EQ(0x00u, storage[7]);
@@ -114,38 +87,18 @@ TEST(RdmaEndpointDataTest, SerializesLittleEndianWireLayout) {
   EXPECT_EQ(0x04u, storage[18]);
   EXPECT_EQ(0x00u, storage[19]);
   EXPECT_EQ(0x00u, storage[20]);
-  EXPECT_EQ(0x01u, storage[21]);
-  EXPECT_EQ(0x80u, storage[22]);
+  EXPECT_EQ(0x10u, storage[21]);
+  EXPECT_EQ(0x00u, storage[22]);
   EXPECT_EQ(0x00u, storage[23]);
-  EXPECT_EQ(0x00u, storage[24]);
-  EXPECT_EQ(0x10u, storage[25]);
+  EXPECT_EQ(0x80u, storage[24]);
+  EXPECT_EQ(0x00u, storage[25]);
   EXPECT_EQ(0x00u, storage[26]);
   EXPECT_EQ(0x00u, storage[27]);
-  EXPECT_EQ(0x40u, storage[28]);
+  EXPECT_EQ(0x00u, storage[28]);
   EXPECT_EQ(0x00u, storage[29]);
   EXPECT_EQ(0x00u, storage[30]);
   EXPECT_EQ(0x00u, storage[31]);
-  EXPECT_EQ(0x80u, storage[32]);
-  EXPECT_EQ(0x00u, storage[33]);
-  EXPECT_EQ(0x04u, storage[34]);
-  EXPECT_EQ(0x01u, storage[35]);
-  EXPECT_EQ(0x88u, storage[36]);
-  EXPECT_EQ(0x77u, storage[37]);
-  EXPECT_EQ(0x66u, storage[38]);
-  EXPECT_EQ(0x55u, storage[39]);
-  EXPECT_EQ(0x44u, storage[40]);
-  EXPECT_EQ(0x33u, storage[41]);
-  EXPECT_EQ(0x22u, storage[42]);
-  EXPECT_EQ(0x11u, storage[43]);
-  EXPECT_EQ(0xDDu, storage[44]);
-  EXPECT_EQ(0xCCu, storage[45]);
-  EXPECT_EQ(0xBBu, storage[46]);
-  EXPECT_EQ(0xAAu, storage[47]);
-  EXPECT_EQ(0x04u, storage[48]);
-  EXPECT_EQ(0x00u, storage[49]);
-  EXPECT_EQ(0x00u, storage[50]);
-  EXPECT_EQ(0x00u, storage[51]);
-  for (iree_host_size_t i = 52; i < IREE_NET_RDMA_ENDPOINT_DATA_LENGTH; ++i) {
+  for (iree_host_size_t i = 28; i < IREE_NET_RDMA_ENDPOINT_DATA_LENGTH; ++i) {
     EXPECT_EQ(0x00u, storage[i]);
   }
 }
@@ -230,7 +183,7 @@ TEST(RdmaEndpointDataTest, RejectsReservedBytes) {
   uint8_t storage[IREE_NET_RDMA_ENDPOINT_DATA_LENGTH] = {0};
   SerializeTestEndpointData(storage, sizeof(storage));
 
-  storage[52] = 1;
+  storage[28] = 1;
   iree_net_rdma_endpoint_data_t actual = {};
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_UNIMPLEMENTED,
@@ -336,10 +289,9 @@ TEST(RdmaEndpointDataTest, RejectsDecodedEndpointIndexAtCount) {
           iree_make_const_byte_span(storage, sizeof(storage)), &actual));
 }
 
-TEST(RdmaEndpointDataTest, RejectsInvalidEmbeddedConnectionData) {
+TEST(RdmaEndpointDataTest, RejectsSmallBootstrapRecvBuffer) {
   iree_net_rdma_endpoint_data_t data = MakeTestEndpointData();
-  data.connection_data.max_send_sge =
-      IREE_NET_RDMA_CONNECTION_DATA_MAX_SEND_SGE + 1;
+  data.bootstrap_recv_buffer_size = IREE_NET_RDMA_CONNECTION_DATA_LENGTH - 1;
 
   uint8_t storage[IREE_NET_RDMA_ENDPOINT_DATA_LENGTH] = {0};
   iree_host_size_t data_length = 0;
@@ -349,9 +301,9 @@ TEST(RdmaEndpointDataTest, RejectsInvalidEmbeddedConnectionData) {
           &data, iree_make_byte_span(storage, sizeof(storage)), &data_length));
 }
 
-TEST(RdmaEndpointDataTest, RejectsConnectionDataOutsideCompactCapacity) {
+TEST(RdmaEndpointDataTest, RejectsZeroBootstrapRecvCredits) {
   iree_net_rdma_endpoint_data_t data = MakeTestEndpointData();
-  data.connection_data.send_queue_depth = UINT16_MAX + 1u;
+  data.bootstrap_recv_credits = 0;
 
   uint8_t storage[IREE_NET_RDMA_ENDPOINT_DATA_LENGTH] = {0};
   iree_host_size_t data_length = 0;
@@ -361,10 +313,22 @@ TEST(RdmaEndpointDataTest, RejectsConnectionDataOutsideCompactCapacity) {
           &data, iree_make_byte_span(storage, sizeof(storage)), &data_length));
 }
 
-TEST(RdmaEndpointDataTest, RejectsDecodedInvalidEmbeddedConnectionData) {
+TEST(RdmaEndpointDataTest, RejectsDecodedSmallBootstrapRecvBuffer) {
   uint8_t storage[IREE_NET_RDMA_ENDPOINT_DATA_LENGTH] = {0};
   SerializeTestEndpointData(storage, sizeof(storage));
-  storage[34] = (uint8_t)(IREE_NET_RDMA_CONNECTION_DATA_MAX_SEND_SGE + 1);
+  memset(storage + 20, 0, sizeof(uint32_t));
+
+  iree_net_rdma_endpoint_data_t actual = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_net_rdma_endpoint_data_deserialize(
+          iree_make_const_byte_span(storage, sizeof(storage)), &actual));
+}
+
+TEST(RdmaEndpointDataTest, RejectsDecodedZeroBootstrapRecvCredits) {
+  uint8_t storage[IREE_NET_RDMA_ENDPOINT_DATA_LENGTH] = {0};
+  SerializeTestEndpointData(storage, sizeof(storage));
+  memset(storage + 24, 0, sizeof(uint32_t));
 
   iree_net_rdma_endpoint_data_t actual = {};
   IREE_EXPECT_STATUS_IS(

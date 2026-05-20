@@ -17,11 +17,12 @@
 //
 // The transport factory owns rdma_cm listener/connect state and route
 // resolution. The carrier owns the QP, CQs, receive postings, and credit
-// memory that must exist before rdma_connect/rdma_accept private-data exchange.
+// memory that must exist before rdma_connect/rdma_accept endpoint bootstrap.
 // The factory borrows those carrier-owned handshake values, completes the
-// rdma_cm state machine, then activates the carrier data plane. Keeping the
-// rdma_cm state machine out of carrier send paths makes the hot path just WR
-// posting, CQ draining, and credit accounting.
+// rdma_cm state machine, exchanges full connection data with one setup SEND,
+// then hands the carrier data plane to the connection. Keeping the rdma_cm
+// state machine out of carrier send paths makes the hot path just WR posting,
+// CQ draining, and credit accounting.
 //
 // ## Capability model
 //
@@ -154,9 +155,9 @@ typedef struct iree_net_rdma_carrier_create_params_t {
 //
 // The connection ID must already be bound to a local RDMA device and must not
 // yet have a QP associated with it. The carrier creates the QP and local
-// private-data state; the transport factory is responsible for rdma_cm address
-// resolution, route resolution, connect/accept, and exchanging the carrier's
-// serialized private data.
+// connection-data state; the transport factory is responsible for rdma_cm
+// address resolution, route resolution, connect/accept, and exchanging the
+// carrier's serialized connection data.
 IREE_API_EXPORT iree_status_t iree_net_rdma_carrier_create(
     iree_net_rdma_carrier_create_params_t params,
     iree_allocator_t host_allocator, iree_net_carrier_t** out_carrier);
@@ -189,23 +190,43 @@ IREE_API_EXPORT iree_net_rdma_context_t* iree_net_rdma_carrier_context(
 IREE_API_EXPORT void iree_net_rdma_carrier_record_failure(
     iree_net_rdma_carrier_t* carrier, iree_status_t status);
 
-// Exports the carrier's local rdma_cm private-data fields.
+// Exports the carrier's local connection data.
 IREE_API_EXPORT iree_status_t iree_net_rdma_carrier_export_connection_data(
     iree_net_rdma_carrier_t* carrier,
     iree_net_rdma_connection_data_t* out_data);
 
-// Imports peer rdma_cm private-data fields after connect/accept.
+// Imports peer connection data after the post-establish setup exchange.
 IREE_API_EXPORT iree_status_t iree_net_rdma_carrier_import_connection_data(
     iree_net_rdma_carrier_t* carrier,
     const iree_net_rdma_connection_data_t* data);
 
-// Serializes the carrier's local rdma_cm private-data payload.
+// Sends local connection data as the first post-establish setup message.
+//
+// |remote_recv_buffer_size| and |remote_recv_credits| come from the peer's CM
+// bootstrap payload and are used only to safely admit this one setup SEND
+// before full credit-return connection data is available.
+IREE_API_EXPORT iree_status_t
+iree_net_rdma_carrier_send_bootstrap_connection_data(
+    iree_net_rdma_carrier_t* carrier, uint32_t remote_recv_buffer_size,
+    uint32_t remote_recv_credits);
+
+// Completes the private setup exchange and restores public CREATED state.
+//
+// The factory temporarily activates the carrier so the receive CQ can deliver
+// the setup SEND. The generic connection/carrier contract still requires
+// callers to install their own receive handler and activate explicitly after
+// connect/accept completes.
+IREE_API_EXPORT iree_status_t
+iree_net_rdma_carrier_complete_bootstrap_connection_data(
+    iree_net_rdma_carrier_t* carrier);
+
+// Serializes the carrier's local connection-data payload.
 IREE_API_EXPORT iree_status_t
 iree_net_rdma_carrier_serialize_local_connection_data(
     iree_net_rdma_carrier_t* carrier, iree_byte_span_t target,
     iree_host_size_t* out_length);
 
-// Applies the peer private-data payload after rdma_cm connect/accept.
+// Applies the peer connection-data payload after the setup exchange.
 IREE_API_EXPORT iree_status_t
 iree_net_rdma_carrier_apply_remote_connection_data(
     iree_net_rdma_carrier_t* carrier, iree_const_byte_span_t source);
