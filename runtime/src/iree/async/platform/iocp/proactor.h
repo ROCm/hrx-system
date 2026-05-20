@@ -201,20 +201,27 @@ typedef struct iree_async_iocp_carrier_t {
 //===----------------------------------------------------------------------===//
 
 // Tracks a registered event source for persistent monitoring of a HANDLE.
-// On IOCP, event sources use RegisterWaitForSingleObject to receive callbacks
-// when the HANDLE is signaled, then post a tagged completion to the IOCP port.
-// Doubly-linked list node; proactor owns the list.
 struct iree_async_event_source_t {
-  // Intrusive doubly-linked list for efficient removal.
+  // Next event source in the proactor-owned list.
   struct iree_async_event_source_t* next;
+
+  // Previous event source in the proactor-owned list.
   struct iree_async_event_source_t* prev;
 
   // Owning proactor (for vtable access in callbacks).
   iree_async_proactor_t* proactor;
 
-  // The monitored fd/HANDLE (not owned by the event source).
-  // On Windows this is stored as an iree_async_primitive_t for type safety.
-  int fd;
+  // Monitored waitable HANDLE primitive (not owned by the event source).
+  iree_async_primitive_t primitive;
+
+  // Registration handle for the currently armed wait.
+  uintptr_t wait_handle;
+
+  // Set when a fallback threadpool callback has posted an IOCP completion.
+  iree_atomic_int32_t completion_pending;
+
+  // True if unregister deferred free until an already-posted completion drains.
+  bool retire_pending;
 
   // User callback invoked when the handle is signaled.
   iree_async_event_source_callback_t callback;

@@ -39,9 +39,27 @@ iree_cc_library(
 )
 endif()
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+iree_cc_library(
+  NAME
+    event_source_win32_test
+  SRCS
+    "event_source_win32_test.cc"
+  DEPS
+    iree::async
+    iree::async::cts::util::registry
+    iree::async::cts::util::test_base
+  TESTONLY
+  ALWAYSLINK
+  PUBLIC
+)
+endif()
+
 set(_all_tests_platform_deps "")
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   list(APPEND _all_tests_platform_deps ::event_source_posix_test)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+  list(APPEND _all_tests_platform_deps ::event_source_win32_test)
 endif()
 iree_cc_library(
   NAME

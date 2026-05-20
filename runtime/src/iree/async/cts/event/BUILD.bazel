@@ -48,6 +48,20 @@ iree_runtime_cc_library(
     alwayslink = True,
 )
 
+# Event source tests: persistent Win32 HANDLE monitoring with callbacks.
+iree_runtime_cc_library(
+    name = "event_source_win32_test",
+    testonly = True,
+    srcs = ["event_source_win32_test.cc"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/cts/util:registry",
+        "//runtime/src/iree/async/cts/util:test_base",
+    ],
+    alwayslink = True,
+)
+
 #===------------------------------------------------------------------------===#
 # Convenience targets
 #===------------------------------------------------------------------------===#
@@ -60,6 +74,7 @@ iree_runtime_cc_library(
         ":event_test",
     ] + select({
         "@platforms//os:linux": [":event_source_posix_test"],
+        "@platforms//os:windows": [":event_source_win32_test"],
         "//conditions:default": [],
     }),
 )

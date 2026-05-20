@@ -69,6 +69,10 @@ _Static_assert(sizeof(((iree_async_iocp_carrier_t*)0)->data) <= 320,
 // The lpOverlapped field carries the notification pointer for re-arm targeting.
 #define IREE_ASYNC_IOCP_SHARED_NOTIFICATION_COMPLETION_KEY ((ULONG_PTR)2)
 
+// CompletionKey used by event source wait completions. The lpOverlapped field
+// carries the iree_async_event_source_t pointer that must be dispatched.
+#define IREE_ASYNC_IOCP_EVENT_SOURCE_COMPLETION_KEY ((ULONG_PTR)3)
+
 // NTSTATUS and NT_SUCCESS are defined in <winternl.h> but we avoid that
 // include. The definition is stable: NTSTATUS is a LONG, and non-negative
 // values indicate success.
@@ -607,6 +611,14 @@ static void iree_async_proactor_iocp_relay_fault(iree_async_relay_t* relay,
                                                  iree_status_t status);
 static bool iree_async_proactor_iocp_notification_has_consumers(
     iree_async_notification_t* notification);
+static void iree_async_proactor_iocp_close_event_source_wait(
+    iree_async_proactor_iocp_t* proactor,
+    iree_async_event_source_t* event_source);
+static void iree_async_proactor_iocp_free_event_source(
+    iree_async_event_source_t* event_source);
+static void iree_async_proactor_iocp_dispatch_event_source(
+    iree_async_proactor_iocp_t* proactor,
+    iree_async_event_source_t* event_source);
 
 //===----------------------------------------------------------------------===//
 // Destroy
@@ -662,7 +674,8 @@ static void iree_async_proactor_iocp_destroy(
   while (proactor->event_sources) {
     iree_async_event_source_t* source = proactor->event_sources;
     proactor->event_sources = source->next;
-    iree_allocator_free(source->allocator, source);
+    iree_async_proactor_iocp_close_event_source_wait(proactor, source);
+    iree_async_proactor_iocp_free_event_source(source);
   }
 
   // Free all relays, releasing retained notifications.
@@ -722,8 +735,15 @@ iree_async_proactor_iocp_event_wait_callback(PVOID context, BOOLEAN timed_out) {
   iree_async_iocp_carrier_t* carrier = (iree_async_iocp_carrier_t*)context;
   // timed_out is always FALSE because we register with INFINITE timeout.
   (void)timed_out;
-  PostQueuedCompletionStatus((HANDLE)carrier->completion_port, 0, 0,
-                             &carrier->overlapped);
+  BOOL posted = PostQueuedCompletionStatus((HANDLE)carrier->completion_port, 0,
+                                           0, &carrier->overlapped);
+  if (!posted) {
+    DWORD error = GetLastError();
+    iree_status_abort(iree_make_status(
+        iree_status_code_from_win32_error(error),
+        "PostQueuedCompletionStatus failed for event wait (error %lu)",
+        (unsigned long)error));
+  }
 }
 
 //===----------------------------------------------------------------------===//
@@ -1981,6 +2001,14 @@ static iree_status_t iree_async_proactor_iocp_poll(
       continue;
     }
 
+    // Event source wake: dispatch the user callback and re-arm the one-shot
+    // kernel wait for the next signal.
+    if (entry->lpCompletionKey == IREE_ASYNC_IOCP_EVENT_SOURCE_COMPLETION_KEY) {
+      iree_async_proactor_iocp_dispatch_event_source(
+          proactor, (iree_async_event_source_t*)entry->lpOverlapped);
+      continue;
+    }
+
     // Shared notification wake: WaitCompletionPacket fired for a shared
     // notification's wake event. Re-arm for the next signal and continue.
     // Phase 8 (notification epoch scan) handles the actual wake dispatch.
@@ -2446,22 +2474,265 @@ static void iree_async_proactor_iocp_destroy_event(
 }
 
 //===----------------------------------------------------------------------===//
-// Event source registration (stubs)
+// Event source registration
 //===----------------------------------------------------------------------===//
+
+static VOID CALLBACK iree_async_proactor_iocp_event_source_callback(
+    PVOID context, BOOLEAN timed_out) {
+  iree_async_event_source_t* source = (iree_async_event_source_t*)context;
+  // timed_out is always FALSE because we register with INFINITE timeout.
+  (void)timed_out;
+  iree_async_proactor_iocp_t* proactor =
+      iree_async_proactor_iocp_cast(source->proactor);
+  iree_atomic_store(&source->completion_pending, 1, iree_memory_order_release);
+  BOOL posted = PostQueuedCompletionStatus(
+      (HANDLE)proactor->completion_port, 0,
+      IREE_ASYNC_IOCP_EVENT_SOURCE_COMPLETION_KEY, (LPOVERLAPPED)source);
+  if (!posted) {
+    DWORD error = GetLastError();
+    iree_status_abort(iree_make_status(
+        iree_status_code_from_win32_error(error),
+        "PostQueuedCompletionStatus failed for event source (error %lu)",
+        (unsigned long)error));
+  }
+}
+
+static void iree_async_proactor_iocp_unlink_event_source(
+    iree_async_proactor_iocp_t* proactor,
+    iree_async_event_source_t* event_source) {
+  if (event_source->prev) {
+    event_source->prev->next = event_source->next;
+  } else {
+    proactor->event_sources = event_source->next;
+  }
+  if (event_source->next) {
+    event_source->next->prev = event_source->prev;
+  }
+  event_source->next = NULL;
+  event_source->prev = NULL;
+}
+
+static void iree_async_proactor_iocp_free_event_source(
+    iree_async_event_source_t* event_source) {
+  iree_allocator_t allocator = event_source->allocator;
+  iree_allocator_free(allocator, event_source);
+}
+
+static iree_status_t iree_async_proactor_iocp_arm_event_source(
+    iree_async_proactor_iocp_t* proactor,
+    iree_async_event_source_t* event_source) {
+  HANDLE target = (HANDLE)event_source->primitive.value.win32_handle;
+  if (proactor->nt_wait_api.available) {
+    HANDLE wait_handle = (HANDLE)event_source->wait_handle;
+    if (!wait_handle) {
+      NTSTATUS nt_status = proactor->nt_wait_api.NtCreateWaitCompletionPacket(
+          &wait_handle, MAXIMUM_ALLOWED, NULL);
+      if (!NT_SUCCESS(nt_status)) {
+        return iree_make_status(
+            IREE_STATUS_INTERNAL,
+            "NtCreateWaitCompletionPacket failed for event source "
+            "(NTSTATUS 0x%08x)",
+            (unsigned)nt_status);
+      }
+      event_source->wait_handle = (uintptr_t)wait_handle;
+    }
+
+    LONG already_signaled = FALSE;
+    NTSTATUS nt_status = proactor->nt_wait_api.NtAssociateWaitCompletionPacket(
+        wait_handle, (HANDLE)proactor->completion_port, target,
+        (PVOID)IREE_ASYNC_IOCP_EVENT_SOURCE_COMPLETION_KEY, (PVOID)event_source,
+        0, 0, &already_signaled);
+    if (!NT_SUCCESS(nt_status)) {
+      return iree_make_status(
+          IREE_STATUS_INTERNAL,
+          "NtAssociateWaitCompletionPacket failed for event source "
+          "(NTSTATUS 0x%08x)",
+          (unsigned)nt_status);
+    }
+  } else {
+    HANDLE wait_handle = NULL;
+    BOOL registered = RegisterWaitForSingleObject(
+        &wait_handle, target, iree_async_proactor_iocp_event_source_callback,
+        event_source, INFINITE, WT_EXECUTEONLYONCE);
+    if (!registered) {
+      DWORD error = GetLastError();
+      return iree_make_status(
+          iree_status_code_from_win32_error(error),
+          "RegisterWaitForSingleObject failed for event source (error %lu)",
+          (unsigned long)error);
+    }
+    event_source->wait_handle = (uintptr_t)wait_handle;
+  }
+  return iree_ok_status();
+}
+
+static void iree_async_proactor_iocp_close_event_source_wait(
+    iree_async_proactor_iocp_t* proactor,
+    iree_async_event_source_t* event_source) {
+  if (!event_source->wait_handle) return;
+  if (proactor->nt_wait_api.available) {
+    HANDLE wait_handle = (HANDLE)event_source->wait_handle;
+    proactor->nt_wait_api.NtCancelWaitCompletionPacket(wait_handle, TRUE);
+    CloseHandle(wait_handle);
+  } else {
+    if (!UnregisterWaitEx((HANDLE)event_source->wait_handle,
+                          INVALID_HANDLE_VALUE)) {
+      DWORD error = GetLastError();
+      if (error != ERROR_INVALID_HANDLE) {
+        iree_status_abort(iree_make_status(
+            iree_status_code_from_win32_error(error),
+            "UnregisterWaitEx failed during event source cleanup (error %lu)",
+            (unsigned long)error));
+      }
+    }
+  }
+  event_source->wait_handle = 0;
+}
+
+static void iree_async_proactor_iocp_dispatch_event_source(
+    iree_async_proactor_iocp_t* proactor,
+    iree_async_event_source_t* event_source) {
+  if (!proactor->nt_wait_api.available) {
+    // WT_EXECUTEONLYONCE auto-unregistered before posting this completion.
+    event_source->wait_handle = 0;
+  }
+  iree_atomic_store(&event_source->completion_pending, 0,
+                    iree_memory_order_relaxed);
+
+  if (event_source->retire_pending) {
+    iree_async_proactor_iocp_unlink_event_source(proactor, event_source);
+    iree_async_proactor_iocp_free_event_source(event_source);
+    return;
+  }
+
+  if (event_source->callback.fn) {
+    event_source->callback.fn(event_source->callback.user_data, event_source,
+                              IREE_ASYNC_POLL_EVENT_IN);
+  }
+
+  if (event_source->retire_pending) {
+    iree_async_proactor_iocp_unlink_event_source(proactor, event_source);
+    iree_async_proactor_iocp_free_event_source(event_source);
+    return;
+  }
+
+  iree_status_t status =
+      iree_async_proactor_iocp_arm_event_source(proactor, event_source);
+  if (!iree_status_is_ok(status)) {
+    iree_async_proactor_iocp_unlink_event_source(proactor, event_source);
+    iree_async_proactor_iocp_close_event_source_wait(proactor, event_source);
+    iree_async_proactor_iocp_free_event_source(event_source);
+    iree_status_abort(status);
+  }
+}
 
 static iree_status_t iree_async_proactor_iocp_register_event_source(
     iree_async_proactor_t* base_proactor, iree_async_primitive_t handle,
     iree_async_event_source_callback_t callback,
     iree_async_event_source_t** out_event_source) {
-  return iree_make_status(
-      IREE_STATUS_UNIMPLEMENTED,
-      "IOCP proactor: register_event_source not yet implemented");
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_ASSERT_ARGUMENT(out_event_source);
+  *out_event_source = NULL;
+
+  iree_async_proactor_iocp_t* proactor =
+      iree_async_proactor_iocp_cast(base_proactor);
+  iree_allocator_t allocator = proactor->base.allocator;
+
+  iree_status_t status = iree_ok_status();
+  if (handle.type != IREE_ASYNC_PRIMITIVE_TYPE_WIN32_HANDLE) {
+    status = iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "register_event_source requires a WIN32_HANDLE primitive (got type %d)",
+        (int)handle.type);
+  }
+  if (iree_status_is_ok(status) && handle.value.win32_handle == 0) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "register_event_source handle must be non-NULL");
+  }
+  if (iree_status_is_ok(status) && !callback.fn) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "register_event_source requires a non-NULL "
+                              "callback function");
+  }
+
+  iree_async_event_source_t* event_source = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc(allocator, sizeof(*event_source),
+                                   (void**)&event_source);
+  }
+  if (iree_status_is_ok(status)) {
+    memset(event_source, 0, sizeof(*event_source));
+    event_source->proactor = base_proactor;
+    event_source->primitive = handle;
+    event_source->callback = callback;
+    event_source->allocator = allocator;
+    status = iree_async_proactor_iocp_arm_event_source(proactor, event_source);
+  }
+  if (iree_status_is_ok(status)) {
+    event_source->next = proactor->event_sources;
+    if (proactor->event_sources) {
+      proactor->event_sources->prev = event_source;
+    }
+    proactor->event_sources = event_source;
+    *out_event_source = event_source;
+  } else if (event_source) {
+    iree_async_proactor_iocp_close_event_source_wait(proactor, event_source);
+    iree_allocator_free(allocator, event_source);
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+  return status;
 }
 
 static void iree_async_proactor_iocp_unregister_event_source(
     iree_async_proactor_t* base_proactor,
     iree_async_event_source_t* event_source) {
-  // Void return: nothing to do until event sources are implemented.
+  if (!event_source) return;
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  iree_async_proactor_iocp_t* proactor =
+      iree_async_proactor_iocp_cast(base_proactor);
+  event_source->callback = iree_async_event_source_callback_null();
+
+  bool free_now = true;
+  if (event_source->wait_handle) {
+    if (proactor->nt_wait_api.available) {
+      HANDLE wait_handle = (HANDLE)event_source->wait_handle;
+      NTSTATUS cancel_status =
+          proactor->nt_wait_api.NtCancelWaitCompletionPacket(wait_handle, TRUE);
+      CloseHandle(wait_handle);
+      event_source->wait_handle = 0;
+      free_now = NT_SUCCESS(cancel_status);
+    } else {
+      HANDLE wait_handle = (HANDLE)event_source->wait_handle;
+      if (UnregisterWaitEx(wait_handle, INVALID_HANDLE_VALUE)) {
+        event_source->wait_handle = 0;
+        free_now = iree_atomic_load(&event_source->completion_pending,
+                                    iree_memory_order_acquire) == 0;
+      } else {
+        DWORD error = GetLastError();
+        if (error != ERROR_IO_PENDING && error != ERROR_INVALID_HANDLE) {
+          iree_status_abort(iree_make_status(
+              iree_status_code_from_win32_error(error),
+              "UnregisterWaitEx failed for event source (error %lu)",
+              (unsigned long)error));
+        }
+        if (error == ERROR_INVALID_HANDLE) {
+          event_source->wait_handle = 0;
+        }
+        free_now = false;
+      }
+    }
+  }
+
+  if (free_now) {
+    iree_async_proactor_iocp_unlink_event_source(proactor, event_source);
+    iree_async_proactor_iocp_free_event_source(event_source);
+  } else {
+    event_source->retire_pending = true;
+  }
+
+  IREE_TRACE_ZONE_END(z0);
 }
 
 //===----------------------------------------------------------------------===//
