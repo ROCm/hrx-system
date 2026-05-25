@@ -90,9 +90,9 @@
     }
   ],
   "upstream": {
-    "commit": "05110733b50c2c0faafbe7452ab77f6e8088d33b",
-    "commit_date": "2026-05-14T10:28:35-04:00",
+    "commit": "f0103e8c77b8ab11e38e9ad869fcc4f10c90710d",
+    "commit_date": "2026-05-19T11:39:21-04:00",
     "repository": "https://github.com/iree-org/iree.git",
-    "requested_ref": "05110733b50c2c0faafbe7452ab77f6e8088d33b"
+    "requested_ref": "f0103e8c77b8ab11e38e9ad869fcc4f10c90710d"
   }
 }

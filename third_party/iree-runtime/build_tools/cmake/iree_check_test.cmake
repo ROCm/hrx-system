@@ -55,10 +55,6 @@ function(iree_check_test)
     ${ARGN}
   )
 
-  if(NOT TARGET iree-check-module)
-    return()
-  endif()
-
   # Normalize some variables before using them.
   string(TOUPPER ${_RULE_TARGET_BACKEND} _UPPERCASE_TARGET_BACKEND)
   string(REPLACE "-" "_" _NORMALIZED_TARGET_BACKEND ${_UPPERCASE_TARGET_BACKEND})
@@ -198,7 +194,7 @@ function(iree_check_test)
   endif()
   add_dependencies(iree-test-deps "${_NAME}")
 
-  if(_TEST_DEFINED)
+  if(_TEST_DEFINED AND TARGET "${_RUNNER_TARGET}")
     iree_native_test(
       NAME
         "${_RULE_NAME}"

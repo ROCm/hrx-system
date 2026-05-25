@@ -104,14 +104,15 @@ void iree_hal_amdgpu_device_dispatch_emplace_custom_kernargs(
     const void* IREE_AMDGPU_RESTRICT custom_kernarg_ptr,
     size_t custom_kernarg_length,
     void* IREE_AMDGPU_RESTRICT kernarg_ptr) {
-  if (layout->total_kernarg_size > 0) {
-    // Zero the segment first so missing ABI padding and implicit args storage
-    // are well-defined. The caller-provided bytes overwrite the explicit
-    // prefix below.
-    iree_amdgpu_memset(kernarg_ptr, 0, layout->total_kernarg_size);
+  const size_t total_kernarg_size =
+      layout->total_kernarg_size ? layout->total_kernarg_size
+                                 : custom_kernarg_length;
+  if (total_kernarg_size > 0) {
+    iree_amdgpu_memset(kernarg_ptr, 0, total_kernarg_size);
     const size_t explicit_bytes =
-        layout->has_implicit_args ? layout->implicit_args_offset
-                                  : layout->total_kernarg_size;
+        layout->has_implicit_args
+            ? layout->implicit_args_offset
+            : total_kernarg_size;
     const size_t copy_bytes =
         custom_kernarg_length < explicit_bytes ? custom_kernarg_length
                                                : explicit_bytes;
@@ -154,6 +155,36 @@ void iree_hal_amdgpu_device_dispatch_emplace_indirect_params_patch(
       /*dynamic_workgroup_local_memory=*/0, patch_packet, kernarg_ptr);
 }
 
+void iree_hal_amdgpu_device_dispatch_emplace_pm4_binding_patch(
+    const iree_hal_amdgpu_device_kernel_args_t* IREE_AMDGPU_RESTRICT
+        patch_kernel_args,
+    const uint64_t* IREE_AMDGPU_RESTRICT binding_ptrs,
+    const iree_hal_amdgpu_command_buffer_pm4_fixup_entry_t* IREE_AMDGPU_RESTRICT
+        entries,
+    uint8_t* IREE_AMDGPU_RESTRICT target_base, uint32_t entry_count,
+    iree_hsa_kernel_dispatch_packet_t* IREE_AMDGPU_RESTRICT patch_packet,
+    void* IREE_AMDGPU_RESTRICT kernarg_ptr) {
+  iree_hal_amdgpu_device_dispatch_patch_pm4_bindings_args_t*
+      IREE_AMDGPU_RESTRICT kernargs =
+          (iree_hal_amdgpu_device_dispatch_patch_pm4_bindings_args_t*)
+              kernarg_ptr;
+  kernargs->binding_ptrs = binding_ptrs;
+  kernargs->entries = entries;
+  kernargs->target_base = target_base;
+  kernargs->entry_count = entry_count;
+  kernargs->reserved0 = 0;
+
+  const uint32_t workgroup_size_x = patch_kernel_args->workgroup_size[0];
+  const uint32_t patch_workgroup_count[3] = {
+      (entry_count + workgroup_size_x - 1) / workgroup_size_x,
+      1,
+      1,
+  };
+  iree_hal_amdgpu_device_dispatch_emplace_packet(
+      patch_kernel_args, patch_workgroup_count,
+      /*dynamic_workgroup_local_memory=*/0, patch_packet, kernarg_ptr);
+}
+
 #if defined(IREE_AMDGPU_TARGET_DEVICE)
 
 IREE_AMDGPU_ATTRIBUTE_KERNEL void
@@ -179,6 +210,22 @@ iree_hal_amdgpu_device_dispatch_patch_indirect_params(
       (iree_amdgpu_scoped_atomic_uint32_t*)dispatch_packet,
       dispatch_header_setup, iree_amdgpu_memory_order_release,
       iree_amdgpu_memory_scope_system);
+}
+
+IREE_AMDGPU_ATTRIBUTE_KERNEL void
+iree_hal_amdgpu_device_dispatch_patch_pm4_bindings(
+    const uint64_t* IREE_AMDGPU_RESTRICT binding_ptrs,
+    const iree_hal_amdgpu_command_buffer_pm4_fixup_entry_t* IREE_AMDGPU_RESTRICT
+        entries,
+    uint8_t* IREE_AMDGPU_RESTRICT target_base, uint32_t entry_count) {
+  const size_t entry_index = iree_hal_amdgpu_device_global_linear_id_1d();
+  if (entry_index >= entry_count) return;
+
+  const iree_hal_amdgpu_command_buffer_pm4_fixup_entry_t entry =
+      entries[entry_index];
+  uint64_t* IREE_AMDGPU_RESTRICT target_ptr =
+      (uint64_t*)(target_base + entry.target_offset);
+  *target_ptr = binding_ptrs[entry.binding_slot] + entry.binding_offset;
 }
 
 #endif  // IREE_AMDGPU_TARGET_DEVICE

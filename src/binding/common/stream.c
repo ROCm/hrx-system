@@ -443,8 +443,14 @@ iree_hal_streaming_stream_query(iree_hal_streaming_stream_t *stream,
   IREE_ASSERT_ARGUMENT(status);
 
   uint64_t current_value = 0;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_semaphore_query(stream->timeline_semaphore, &current_value));
+  iree_status_t query_status =
+      iree_hal_semaphore_query(stream->timeline_semaphore, &current_value);
+  if (iree_status_is_unavailable(query_status)) {
+    iree_status_ignore(query_status);
+    *status = 1; // Not complete
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(query_status);
 
   if (current_value >= stream->pending_value) {
     *status = 0; // Complete

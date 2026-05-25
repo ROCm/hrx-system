@@ -8,7 +8,6 @@
 
 #include <string.h>
 
-#include "iree/base/alignment.h"
 #include "iree/hal/drivers/amdgpu/buffer.h"
 #include "iree/hal/drivers/amdgpu/device/dispatch.h"
 #include "iree/hal/drivers/amdgpu/device/timestamp.h"
@@ -243,6 +242,13 @@ static iree_status_t iree_hal_amdgpu_host_queue_validate_dispatch_kernargs(
     *out_layout = &descriptor->custom_kernarg_layout;
     *out_kernarg_block_count =
         iree_max(1u, descriptor->custom_kernarg_block_count);
+    if ((*out_layout)->total_kernarg_size == 0 && constants.data_length > 0) {
+      const uint32_t provided_kernarg_block_count =
+          (uint32_t)iree_host_size_ceil_div(
+              constants.data_length, sizeof(iree_hal_amdgpu_kernarg_block_t));
+      *out_kernarg_block_count =
+          iree_max(*out_kernarg_block_count, provided_kernarg_block_count);
+    }
   } else {
     if (IREE_UNLIKELY(constants.data_length > 0 && !constants.data)) {
       return iree_make_status(

@@ -4498,8 +4498,11 @@ HIPAPI hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes,
 HIPAPI hipError_t hipMemcpyWithStream(void* dst, const void* src,
                                       size_t sizeBytes, hipMemcpyKind kind,
                                       hipStream_t stream) {
-  // hipMemcpyWithStream is the same as hipMemcpyAsync.
-  return hipMemcpyAsync(dst, src, sizeBytes, kind, stream);
+  hipError_t result = hipMemcpyAsync(dst, src, sizeBytes, kind, stream);
+  if (result == hipSuccess) {
+    result = hipStreamSynchronize(stream);
+  }
+  return result;
 }
 
 // Copies 2D pitched data between host and device asynchronously.

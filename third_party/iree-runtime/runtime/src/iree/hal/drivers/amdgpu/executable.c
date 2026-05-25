@@ -1142,14 +1142,18 @@ static iree_status_t iree_hal_amdgpu_executable_initialize_dispatch_descriptor(
   out_descriptor->custom_kernarg_layout =
       iree_hal_amdgpu_device_dispatch_make_custom_kernarg_layout(
           kernel_args->kernarg_size);
-  if (kernel_args->implicit_args_offset != UINT16_MAX) {
+  const uint16_t custom_implicit_args_offset =
+      kernel_args->implicit_args_offset != UINT16_MAX
+          ? kernel_args->implicit_args_offset
+          : kernel_args->kernarg_size;
+  if (custom_implicit_args_offset != UINT16_MAX) {
     out_descriptor->custom_kernarg_layout.explicit_kernarg_size =
-        kernel_args->implicit_args_offset;
+        custom_implicit_args_offset;
     out_descriptor->custom_kernarg_layout.implicit_args_offset =
-        kernel_args->implicit_args_offset;
+        custom_implicit_args_offset;
     out_descriptor->custom_kernarg_layout.total_kernarg_size = iree_max(
         (size_t)kernel_args->kernarg_size,
-        (size_t)kernel_args->implicit_args_offset +
+        (size_t)custom_implicit_args_offset +
             IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE);
     out_descriptor->custom_kernarg_layout.has_implicit_args = true;
   }
@@ -1168,6 +1172,38 @@ static iree_status_t iree_hal_amdgpu_executable_initialize_dispatch_descriptor(
   }
   out_descriptor->max_dynamic_workgroup_local_memory =
       UINT32_MAX - kernel_args->group_segment_size;
+
+  // HSA reports the kernel object as the process-addressable AMDHSA descriptor
+  // address. The descriptor also acts as the base for the signed entry offset.
+  const uint64_t kernel_object = kernel_args->kernel_object;
+  if (IREE_UNLIKELY(kernel_object == 0)) {
+    return iree_ok_status();
+  }
+  const iree_hal_amdgpu_kernel_descriptor_t* amdhsa_descriptor =
+      (const iree_hal_amdgpu_kernel_descriptor_t*)(uintptr_t)kernel_object;
+  out_descriptor->pm4_group_segment_fixed_size =
+      amdhsa_descriptor->group_segment_fixed_size;
+  out_descriptor->pm4_launch_state_valid =
+      iree_hal_amdgpu_pm4_dispatch_launch_state_is_supported_gfx10(
+          amdhsa_descriptor, kernel_object, kernel_args->workgroup_size,
+          IREE_HAL_AMDGPU_PM4_DISPATCH_LAUNCH_FLAG_NONE);
+  if (out_descriptor->pm4_launch_state_valid) {
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amdgpu_pm4_dispatch_launch_state_initialize_gfx10(
+            amdhsa_descriptor, kernel_object, kernel_args->workgroup_size,
+            IREE_HAL_AMDGPU_PM4_DISPATCH_LAUNCH_FLAG_NONE,
+            &out_descriptor->pm4_launch_state));
+    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_pm4_dispatch_emit_setup(
+        &out_descriptor->pm4_launch_state,
+        IREE_HAL_AMDGPU_PM4_DISPATCH_SETUP_DWORD_COUNT,
+        out_descriptor->pm4_setup_dwords,
+        &out_descriptor->pm4_setup_dword_count));
+    if (IREE_UNLIKELY(out_descriptor->pm4_setup_dword_count !=
+                      IREE_HAL_AMDGPU_PM4_DISPATCH_SETUP_DWORD_COUNT)) {
+      return iree_make_status(IREE_STATUS_INTERNAL,
+                              "PM4 dispatch setup emission changed size");
+    }
+  }
   return iree_ok_status();
 }
 
@@ -1895,21 +1931,19 @@ static iree_status_t iree_hal_amdgpu_executable_resolve_raw_hsaco_kernel_args(
             requirements.binding_count, &host_kernel_args[kernel_ordinal]),
         "resolving kernel args for raw kernel `%.*s`", (int)symbol_name.size,
         symbol_name.data);
-    // HSA can report 0 for KERNEL_KERNARG_SEGMENT_SIZE on large multi-kernel
-    // HSACO ELFs even though metadata declares non-zero kernargs. Trust the
-    // ELF metadata since both sources describe the same code object.
     if (host_kernel_args[kernel_ordinal].kernarg_size <
         kernel->kernarg_segment_size) {
       host_kernel_args[kernel_ordinal].kernarg_size =
           kernel->kernarg_segment_size;
     }
-    if (host_kernel_args[kernel_ordinal].kernarg_alignment == 0 &&
-        kernel->kernarg_segment_alignment != 0) {
+    if (host_kernel_args[kernel_ordinal].kernarg_alignment <
+        kernel->kernarg_segment_alignment) {
       host_kernel_args[kernel_ordinal].kernarg_alignment =
           kernel->kernarg_segment_alignment;
     }
 
     uint16_t implicit_args_offset = UINT16_MAX;
+    uint32_t explicit_args_end = 0;
     for (iree_host_size_t arg_i = 0; arg_i < kernel->arg_count; ++arg_i) {
       const iree_hal_amdgpu_hsaco_metadata_arg_t* arg =
           &kernel->args[arg_i];
@@ -1920,21 +1954,31 @@ static iree_status_t iree_hal_amdgpu_executable_resolve_raw_hsaco_kernel_args(
              arg->offset < implicit_args_offset)) {
           implicit_args_offset = (uint16_t)arg->offset;
         }
-        continue;
+      } else {
+        iree_host_size_t arg_end = 0;
+        if (!iree_host_size_checked_add(arg->offset, arg->size, &arg_end) ||
+            arg_end > UINT32_MAX) {
+          return iree_make_status(
+              IREE_STATUS_OUT_OF_RANGE,
+              "AMDGPU kernel `%.*s` argument offset overflows",
+              (int)symbol_name.size, symbol_name.data);
+        }
+        explicit_args_end = iree_max(explicit_args_end, (uint32_t)arg_end);
       }
     }
-    if (iree_string_view_starts_with(kernel->reflection_name,
-                                     IREE_SV("Cijk_")) &&
-        host_kernel_args[kernel_ordinal].kernarg_size > 0) {
-      // Tensile code objects can omit per-kernel MessagePack records for many
-      // exported GEMM variants even though hipBLASLt launches them with a
-      // pre-packed explicit kernarg buffer. Treat the HSA-reported kernarg size
-      // as the explicit ABI size and append HRX/IREE implicit args after it.
-      host_kernel_args[kernel_ordinal].implicit_args_offset =
-          host_kernel_args[kernel_ordinal].kernarg_size;
-    } else if (implicit_args_offset != UINT16_MAX && implicit_args_offset > 0) {
+    if (implicit_args_offset != UINT16_MAX && implicit_args_offset > 0) {
       host_kernel_args[kernel_ordinal].implicit_args_offset =
           implicit_args_offset;
+    } else if (explicit_args_end <= UINT16_MAX &&
+               host_kernel_args[kernel_ordinal].kernarg_size >=
+                   explicit_args_end + IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE) {
+      host_kernel_args[kernel_ordinal].implicit_args_offset =
+          (uint16_t)explicit_args_end;
+    } else if (iree_string_view_starts_with(kernel->reflection_name,
+                                            IREE_SV("Cijk_")) &&
+               host_kernel_args[kernel_ordinal].kernarg_size > 0) {
+      host_kernel_args[kernel_ordinal].implicit_args_offset =
+          host_kernel_args[kernel_ordinal].kernarg_size;
     }
   }
   return iree_ok_status();
@@ -2369,6 +2413,33 @@ iree_status_t iree_hal_amdgpu_executable_lookup_dispatch_descriptor_for_device(
   const iree_host_size_t descriptor_ordinal =
       device_ordinal * executable->kernel_count + export_ordinal;
   *out_descriptor = &executable->host_dispatch_descriptors[descriptor_ordinal];
+  return iree_ok_status();
+}
+
+iree_status_t
+iree_hal_amdgpu_executable_lookup_pm4_dispatch_launch_state_for_device(
+    iree_hal_executable_t* base_executable,
+    iree_hal_executable_export_ordinal_t export_ordinal,
+    iree_host_size_t device_ordinal,
+    const iree_hal_amdgpu_pm4_dispatch_launch_state_t** out_state) {
+  IREE_ASSERT_ARGUMENT(out_state);
+  *out_state = NULL;
+
+  const iree_hal_amdgpu_executable_dispatch_descriptor_t* dispatch_descriptor =
+      NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_executable_lookup_dispatch_descriptor_for_device(
+          base_executable, export_ordinal, device_ordinal,
+          &dispatch_descriptor));
+  if (IREE_UNLIKELY(!dispatch_descriptor->pm4_launch_state_valid)) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "export ordinal %" PRIu32
+                            " on device ordinal %" PRIhsz
+                            " does not have PM4 dispatch launch metadata",
+                            export_ordinal, device_ordinal);
+  }
+
+  *out_state = &dispatch_descriptor->pm4_launch_state;
   return iree_ok_status();
 }
 

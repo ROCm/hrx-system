@@ -1529,6 +1529,7 @@ iree_hal_amdgpu_hsaco_metadata_calculate_default_export_parameter_requirements(
 
   iree_host_size_t parameter_count = 0;
   iree_host_size_t binding_count = 0;
+  iree_host_size_t constant_byte_count = 0;
   iree_host_size_t name_storage_size = 0;
   for (iree_host_size_t i = 0; i < kernel->arg_count; ++i) {
     const iree_hal_amdgpu_hsaco_metadata_arg_t* arg = &kernel->args[i];
@@ -1564,11 +1565,16 @@ iree_hal_amdgpu_hsaco_metadata_calculate_default_export_parameter_requirements(
           return iree_make_status(
               IREE_STATUS_OUT_OF_RANGE,
               "AMDGPU kernel `%.*s` by_value argument %" PRIhsz
-              " kernarg offset %u exceeds HAL parameter offset range",
-              (int)kernel->symbol_name.size, kernel->symbol_name.data, i,
-              arg->offset);
+              " kernarg offset exceeds HAL parameter offset range",
+              (int)kernel->symbol_name.size, kernel->symbol_name.data, i);
         }
         ++parameter_count;
+        if (!iree_host_size_checked_add(constant_byte_count, arg->size,
+                                        &constant_byte_count)) {
+          return iree_make_status(
+              IREE_STATUS_OUT_OF_RANGE,
+              "AMDGPU metadata reflected constant byte count overflow");
+        }
         IREE_RETURN_IF_ERROR(
             iree_hal_amdgpu_hsaco_metadata_add_parameter_name_size(
                 arg, &name_storage_size));
@@ -1584,11 +1590,6 @@ iree_hal_amdgpu_hsaco_metadata_calculate_default_export_parameter_requirements(
     }
   }
 
-  // The HAL constant buffer spans the entire kernarg segment as reported by
-  // HSACO (which already includes any padding required by the ABI). Using
-  // the raw segment size lets callers hand the HAL a kernarg buffer that
-  // exactly matches what the kernel expects without us having to
-  // reconstruct per-arg padding rules.
   iree_host_size_t aligned_constant_byte_count = 0;
   if (!iree_host_size_checked_align(kernel->kernarg_segment_size,
                                     sizeof(uint32_t),
@@ -1662,15 +1663,6 @@ iree_status_t iree_hal_amdgpu_hsaco_metadata_populate_default_export_parameters(
       parameter->name = iree_string_view_empty();
     }
 
-    // Use the real kernarg byte offset recorded in HSACO metadata for both
-    // |offset| and |kernarg_offset|. Upstream IREE's contract is that for
-    // BINDING parameters |offset| is a binding ordinal (index into the
-    // bindings list), but the N-th BINDING parameter encountered when
-    // walking this array is always bindings[N], so consumers can recover
-    // the ordinal by iteration if they need it. Carrying the byte offset
-    // here lets CUSTOM_DIRECT_ARGUMENTS callers (HRX) pack the kernarg
-    // blob without consulting a second field, and matches what the
-    // BY_VALUE path has always done.
     parameter->offset = (uint16_t)arg->offset;
     parameter->kernarg_offset = (uint16_t)arg->offset;
     switch (arg->kind) {

@@ -14,6 +14,25 @@
 // Memory management
 //===----------------------------------------------------------------------===//
 
+static iree_status_t iree_hal_streaming_command_buffer_barrier(
+    iree_hal_command_buffer_t* command_buffer) {
+  static const iree_hal_memory_barrier_t memory_barrier = {
+      .source_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
+                      IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
+                      IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
+                      IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+      .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
+                      IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
+                      IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
+                      IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+  };
+  return iree_hal_command_buffer_execution_barrier(
+      command_buffer,
+      IREE_HAL_EXECUTION_STAGE_DISPATCH | IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      IREE_HAL_EXECUTION_STAGE_DISPATCH | IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      IREE_HAL_EXECUTION_BARRIER_FLAG_NONE, 1, &memory_barrier, 0, NULL);
+}
+
 // Wraps a HAL buffer in a stream buffer and caches information.
 static iree_status_t iree_hal_streaming_buffer_wrap(
     iree_hal_streaming_context_t* context, iree_hal_buffer_t* buffer,
@@ -379,6 +398,7 @@ iree_status_t iree_hal_streaming_memory_allocate_host(
   IREE_TRACE_ZONE_BEGIN(z0);
   *out_buffer = NULL;
 
+  const iree_host_size_t allocation_size = iree_max(size, (iree_host_size_t)8);
   iree_hal_memory_type_t memory_type =
       IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
   iree_hal_buffer_params_t params = {
@@ -392,7 +412,7 @@ iree_status_t iree_hal_streaming_memory_allocate_host(
   iree_hal_buffer_t* buffer = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_allocator_allocate_buffer(context->device_allocator, params,
-                                             size, &buffer));
+                                             allocation_size, &buffer));
 
   iree_hal_streaming_buffer_t* wrapper = NULL;
   iree_status_t status =
@@ -677,6 +697,8 @@ iree_status_t iree_hal_streaming_memory_memset(
       z0, iree_hal_command_buffer_fill_buffer(
               stream->command_buffer, target_ref, pattern, pattern_length,
               IREE_HAL_FILL_FLAG_NONE));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_streaming_command_buffer_barrier(stream->command_buffer));
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
@@ -728,6 +750,8 @@ iree_status_t iree_hal_streaming_memory_memcpy(
       z0, iree_hal_command_buffer_copy_buffer(stream->command_buffer,
                                               src_buffer_ref, dst_buffer_ref,
                                               IREE_HAL_COPY_FLAG_NONE));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_streaming_command_buffer_barrier(stream->command_buffer));
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
@@ -783,6 +807,8 @@ iree_status_t iree_hal_streaming_memcpy_peer(
       z0, iree_hal_command_buffer_copy_buffer(stream->command_buffer,
                                               src_buffer_ref, dst_buffer_ref,
                                               IREE_HAL_COPY_FLAG_NONE));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_streaming_command_buffer_barrier(stream->command_buffer));
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
@@ -869,6 +895,10 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device(
             IREE_HAL_COPY_FLAG_NONE);
       }
       if (iree_status_is_ok(status)) {
+        status =
+            iree_hal_streaming_command_buffer_barrier(copy_stream->command_buffer);
+      }
+      if (iree_status_is_ok(status)) {
         status = iree_hal_streaming_stream_synchronize(copy_stream);
       }
       iree_slim_mutex_unlock(&context->mutex);
@@ -908,6 +938,10 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device(
     iree_status_t status = iree_hal_command_buffer_copy_buffer(
         stream->command_buffer, src_buffer_ref, dst_buffer_ref,
         IREE_HAL_COPY_FLAG_NONE);
+    if (iree_status_is_ok(status)) {
+      status =
+          iree_hal_streaming_command_buffer_barrier(stream->command_buffer);
+    }
 
     IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
   }
@@ -994,6 +1028,10 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host(
     iree_status_t status = iree_hal_command_buffer_copy_buffer(
         stream->command_buffer, src_buffer_ref, dst_buffer_ref,
         IREE_HAL_COPY_FLAG_NONE);
+    if (iree_status_is_ok(status)) {
+      status =
+          iree_hal_streaming_command_buffer_barrier(stream->command_buffer);
+    }
 
     IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
   }

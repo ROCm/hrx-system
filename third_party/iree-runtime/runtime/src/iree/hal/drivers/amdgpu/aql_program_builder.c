@@ -640,16 +640,6 @@ void iree_hal_amdgpu_aql_program_builder_set_pending_barrier_scopes(
               builder->last_payload_command->flags, current_acquire_scope,
               release_scope);
     }
-    builder->last_payload_command->flags |=
-        IREE_HAL_AMDGPU_COMMAND_BUFFER_COMMAND_FLAG_HAS_BARRIER;
-    if (!iree_any_bit_set(
-            builder->current_block.flags,
-            IREE_HAL_AMDGPU_AQL_PROGRAM_BUILDER_FLAG_HAS_INITIAL_BARRIER_PACKET)) {
-      builder->current_block.initial_barrier_packet_count =
-          builder->current_block.aql_packet_count;
-      builder->current_block.flags |=
-          IREE_HAL_AMDGPU_AQL_PROGRAM_BUILDER_FLAG_HAS_INITIAL_BARRIER_PACKET;
-    }
   }
   if (acquire_scope > builder->current_block.pending_barrier_acquire_scope) {
     builder->current_block.pending_barrier_acquire_scope = acquire_scope;
