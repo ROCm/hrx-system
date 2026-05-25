@@ -905,6 +905,7 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
   }
 
   const bool is_gfx1100 = strncmp(prop->gcnArchName, "gfx1100", 7) == 0;
+  const bool is_gfx942 = strncmp(prop->gcnArchName, "gfx942", 6) == 0;
   prop->totalGlobalMem = (size_t)total_memory;
   prop->sharedMemPerBlock = 65536;  // 64KB default
   prop->regsPerBlock = is_gfx1100 ? 196608 : 65536;
@@ -917,7 +918,7 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
   prop->maxGridSize[0] = device_obj->max_grid_dim[0];
   prop->maxGridSize[1] = device_obj->max_grid_dim[1];
   prop->maxGridSize[2] = device_obj->max_grid_dim[2];
-  prop->clockRate = is_gfx1100 ? 1760000 : 1000000;  // kHz
+  prop->clockRate = is_gfx942 ? 2100000 : (is_gfx1100 ? 1760000 : 1000000);  // kHz
   prop->totalConstMem = 65536;  // 64KB default
   prop->major = device_obj->compute_capability_major;
   prop->minor = device_obj->compute_capability_minor;
@@ -978,15 +979,15 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
   prop->tccDriver = 0;
   prop->asyncEngineCount = 2;
   prop->unifiedAddressing = 1;
-  prop->memoryClockRate = is_gfx1100 ? 1124000 : 1000000;  // kHz
-  prop->memoryBusWidth = is_gfx1100 ? 384 : 256;
-  prop->l2CacheSize = is_gfx1100 ? 6291456 : 0;
-  prop->persistingL2CacheMaxSize = is_gfx1100 ? 6291456 : 0;
+  prop->memoryClockRate = is_gfx942 ? 1300000 : (is_gfx1100 ? 1124000 : 1000000);  // kHz
+  prop->memoryBusWidth = is_gfx942 ? 8192 : (is_gfx1100 ? 384 : 256);
+  prop->l2CacheSize = is_gfx942 ? 4194304 : (is_gfx1100 ? 6291456 : 0);
+  prop->persistingL2CacheMaxSize = is_gfx942 ? 4194304 : (is_gfx1100 ? 6291456 : 0);
   prop->maxThreadsPerMultiProcessor = 2048;  // Default
   prop->streamPrioritiesSupported = 0;
   prop->globalL1CacheSupported = 1;
   prop->localL1CacheSupported = 1;
-  prop->sharedMemPerMultiprocessor = 65536;
+  prop->sharedMemPerMultiprocessor = is_gfx942 ? 19922944 : 65536;
   prop->regsPerMultiprocessor = 65536;
   prop->managedMemory = 0;
   prop->isMultiGpuBoard = 0;
@@ -998,15 +999,15 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
   prop->canUseHostPointerForRegisteredMem = 0;
   prop->cooperativeLaunch = 0;
   prop->cooperativeMultiDeviceLaunch = 0;
-  prop->sharedMemPerBlockOptin = is_gfx1100 ? 65536 : 0;
+  prop->sharedMemPerBlockOptin = (is_gfx942 || is_gfx1100) ? 65536 : 0;
   prop->pageableMemoryAccessUsesHostPageTables = 0;
   prop->directManagedMemAccessFromHost = 0;
-  prop->maxBlocksPerMultiProcessor = is_gfx1100 ? 64 : 32;
+  prop->maxBlocksPerMultiProcessor = is_gfx942 ? 2 : (is_gfx1100 ? 64 : 32);
   prop->accessPolicyMaxWindowSize = 0;
   prop->reservedSharedMemPerBlock = 0;
   prop->hostNativeAtomicSupported = is_gfx1100 ? 1 : 0;
   prop->memoryPoolsSupported = is_gfx1100 ? 1 : 0;
-  prop->maxSharedMemoryPerMultiProcessor = is_gfx1100 ? 65536 : 0;
+  prop->maxSharedMemoryPerMultiProcessor = is_gfx942 ? 19922944 : (is_gfx1100 ? 65536 : 0);
   prop->clockInstructionRate = is_gfx1100 ? 1000000 : 0;
   prop->isLargeBar = is_gfx1100 ? 1 : 0;
   if (is_gfx1100) {
@@ -1094,6 +1095,7 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
 
   // Map attributes to device properties.
   const bool is_gfx1100 = strncmp(device_obj->gcn_arch_name, "gfx1100", 7) == 0;
+  const bool is_gfx942 = strncmp(device_obj->gcn_arch_name, "gfx942", 6) == 0;
   switch (attr) {
     case hipDeviceAttributeMaxThreadsPerBlock:
       *value = device_obj->max_threads_per_block;
@@ -1135,16 +1137,16 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
       *value = 65536;
       break;
     case hipDeviceAttributeClockRate:
-      *value = is_gfx1100 ? 1760000 : 1000000;  // kHz
+      *value = is_gfx942 ? 2100000 : (is_gfx1100 ? 1760000 : 1000000);  // kHz
       break;
     case hipDeviceAttributeMemoryClockRate:
-      *value = is_gfx1100 ? 1124000 : 1000000;  // kHz
+      *value = is_gfx942 ? 1300000 : (is_gfx1100 ? 1124000 : 1000000);  // kHz
       break;
     case hipDeviceAttributeMemoryBusWidth:
-      *value = is_gfx1100 ? 384 : 256;
+      *value = is_gfx942 ? 8192 : (is_gfx1100 ? 384 : 256);
       break;
     case hipDeviceAttributeL2CacheSize:
-      *value = is_gfx1100 ? 6291456 : 0;
+      *value = is_gfx942 ? 4194304 : (is_gfx1100 ? 6291456 : 0);
       break;
     case hipDeviceAttributeMaxThreadsPerMultiProcessor:
       *value = 2048;  // Default
@@ -1153,18 +1155,23 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
       // Maximum shared memory per block when opted in (> 48KB).
       // This is equivalent to
       // CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN.
-      *value = is_gfx1100 ? 65536 : 49152;
+      *value = (is_gfx942 || is_gfx1100) ? 65536 : 49152;
       break;
     case hipDeviceAttributeMaxSharedMemoryPerMultiprocessor:
       // Total shared memory per multiprocessor.
       // This is equivalent to
       // CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_MULTIPROCESSOR.
-      *value = 65536;  // 64KB default.
+      *value = is_gfx942 ? 19922944 : 65536;
       break;
     case hipDeviceAttributeSharedMemPerMultiprocessor:
       // Shared memory available per multiprocessor.
       // Similar to above, different naming in HIP.
-      *value = 65536;
+      *value = is_gfx942 ? 19922944 : 65536;
+      break;
+    case hipDeviceAttributeTotalGlobalMem:
+      *value = device_obj->total_memory > 2147483647ull
+                   ? 2147483647
+                   : (int)device_obj->total_memory;
       break;
     case hipDeviceAttributeManagedMemory:
       // Managed memory (unified memory) is not supported by streaming layer.
@@ -1191,13 +1198,13 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
       *value = 1;
       break;
     case hipDeviceAttributeMaxBlocksPerMultiProcessor:
-      *value = is_gfx1100 ? 64 : device_obj->max_blocks_per_multiprocessor;
+      *value = device_obj->max_blocks_per_multiprocessor;
       break;
     case hipDeviceAttributePersistingL2CacheMaxSize:
-      *value = is_gfx1100 ? 6291456 : 0;
+      *value = is_gfx942 ? 4194304 : (is_gfx1100 ? 6291456 : 0);
       break;
     case hipDeviceAttributeNumberOfXccs:
-      *value = is_gfx1100 ? 1 : 0;
+      *value = is_gfx942 ? 8 : (is_gfx1100 ? 1 : 0);
       break;
     default:
       // Return sensible defaults for other attributes.

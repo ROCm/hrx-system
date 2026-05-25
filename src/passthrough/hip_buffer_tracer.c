@@ -655,6 +655,8 @@ static bool should_full_dump_kernel(const char *kernel_name) {
   return found;
 }
 
+static void trace_launch_params(void **kernelParams, void **extra);
+
 static hipError_t wrap_hipModuleLaunchKernel(
     hipFunction_t f, unsigned int gridDimX, unsigned int gridDimY,
     unsigned int gridDimZ, unsigned int blockDimX, unsigned int blockDimY,
@@ -683,6 +685,7 @@ static hipError_t wrap_hipModuleLaunchKernel(
       "shared=%u, stream=%p)",
       (void *)f, kernel_name ? kernel_name : "?", gridDimX, gridDimY, gridDimZ,
       blockDimX, blockDimY, blockDimZ, sharedMemBytes, (void *)stream);
+  trace_launch_params(kernelParams, extra);
 
   hipError_t err = g_real->hipModuleLaunchKernel(
       f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ,
@@ -754,6 +757,52 @@ static hipError_t wrap_hipLaunchKernel(const void *function_address,
   return err;
 }
 
+static void trace_kernarg_words(const char *label, const void *buffer,
+                                size_t size) {
+  if (g_trace_level < 2 || !buffer || size == 0) return;
+  const size_t word_count = size / sizeof(uint64_t);
+  const uint64_t *words = (const uint64_t *)buffer;
+  const size_t limit = word_count < 16 ? word_count : 16;
+  trace_msg(2, "  %s buffer=%p size=%zu first_words=%zu", label, buffer, size,
+            limit);
+  for (size_t i = 0; i < limit; ++i) {
+    trace_msg(2, "    %s[%zu]=0x%016llx", label, i,
+              (unsigned long long)words[i]);
+  }
+}
+
+static void trace_launch_params(void **kernelParams, void **extra) {
+  trace_msg(2, "  launch params: kernelParams=%p extra=%p", (void *)kernelParams,
+            (void *)extra);
+
+  if (kernelParams) {
+    for (int i = 0; i < 16 && kernelParams[i]; ++i) {
+      const void *arg_ptr = kernelParams[i];
+      trace_msg(2, "    kernelParams[%d]=%p word=0x%016llx", i, arg_ptr,
+                (unsigned long long)*(const uint64_t *)arg_ptr);
+    }
+  }
+
+  if (extra) {
+    const void *buffer = NULL;
+    size_t buffer_size = 0;
+    for (int i = 0; i < 16 && extra[i]; i += 2) {
+      void *key = extra[i];
+      void *value = extra[i + 1];
+      trace_msg(2, "    extra[%d]=%p value=%p", i / 2, key, value);
+      if ((uintptr_t)key == 1) {
+        buffer = value;
+      } else if ((uintptr_t)key == 2 && value) {
+        buffer_size = *(const size_t *)value;
+        trace_msg(2, "      buffer_size=%zu", buffer_size);
+      }
+    }
+    if (buffer && buffer_size) {
+      trace_kernarg_words("extra", buffer, buffer_size);
+    }
+  }
+}
+
 static hipError_t wrap_hipExtModuleLaunchKernel(
     hipFunction_t f, unsigned int globalWorkSizeX, unsigned int globalWorkSizeY,
     unsigned int globalWorkSizeZ, unsigned int localWorkSizeX,
@@ -780,6 +829,7 @@ static hipError_t wrap_hipExtModuleLaunchKernel(
             (void *)f, kernel_name ? kernel_name : "?", globalWorkSizeX,
             globalWorkSizeY, globalWorkSizeZ, localWorkSizeX, localWorkSizeY,
             localWorkSizeZ, sharedMemBytes, (void *)stream, flags);
+  trace_launch_params(kernelParams, extra);
 
   hipError_t err = g_real->hipExtModuleLaunchKernel(
       f, globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ, localWorkSizeX,
@@ -805,6 +855,19 @@ static hipError_t wrap_hipExtModuleLaunchKernel(
 //===----------------------------------------------------------------------===//
 // Wrapper Functions - Fat Binary Registration
 //===----------------------------------------------------------------------===//
+
+static hipError_t wrap_hipModuleGetFunction(hipFunction_t *function,
+                                            hipModule_t module,
+                                            const char *kname) {
+  hipError_t err = g_real->hipModuleGetFunction(function, module, kname);
+  void *func = (err == 0 && function) ? (void *)*function : NULL;
+  if (func) {
+    kernel_table_add(func, kname);
+  }
+  trace_msg(2, "hipModuleGetFunction(module=%p, name=%s) -> function=%p, ret=%d",
+            (void *)module, kname ? kname : "(null)", func, err);
+  return err;
+}
 
 static void **wrap___hipRegisterFatBinary(const void *data) {
   void **result = g_real->__hipRegisterFatBinary(data);
@@ -949,6 +1012,7 @@ hip_interceptor_init(hip_function_table_t *real_functions) {
   g_wrapper.hipEventSynchronize = wrap_hipEventSynchronize;
 
   // Kernel Launch
+  g_wrapper.hipModuleGetFunction = wrap_hipModuleGetFunction;
   g_wrapper.hipModuleLaunchKernel = wrap_hipModuleLaunchKernel;
   g_wrapper.hipLaunchKernel = wrap_hipLaunchKernel;
   g_wrapper.hipExtModuleLaunchKernel = wrap_hipExtModuleLaunchKernel;

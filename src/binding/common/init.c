@@ -179,6 +179,14 @@ static iree_status_t iree_hal_streaming_query_device_info(
   device->max_shared_memory_per_multiprocessor = 49152;  // 48KB.
   device->max_registers_per_block = 65536;
   device->max_shared_memory_per_block = 49152;  // 48KB.
+  if (strncmp(device->gcn_arch_name, "gfx942", 6) == 0) {
+    // Temporary MI300X compatibility values from native HIP.
+    device->max_blocks_per_multiprocessor = 2;
+    device->max_shared_memory_per_multiprocessor = 19922944;
+    device->max_shared_memory_per_block = 65536;
+  } else if (strncmp(device->gcn_arch_name, "gfx1100", 7) == 0) {
+    device->max_shared_memory_per_block = 65536;
+  }
 
   return iree_ok_status();
 }

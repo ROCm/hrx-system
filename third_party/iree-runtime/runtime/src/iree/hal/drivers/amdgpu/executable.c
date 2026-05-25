@@ -1142,11 +1142,9 @@ static iree_status_t iree_hal_amdgpu_executable_initialize_dispatch_descriptor(
   out_descriptor->custom_kernarg_layout =
       iree_hal_amdgpu_device_dispatch_make_custom_kernarg_layout(
           kernel_args->kernarg_size);
-  const uint16_t custom_implicit_args_offset =
-      kernel_args->implicit_args_offset != UINT16_MAX
-          ? kernel_args->implicit_args_offset
-          : kernel_args->kernarg_size;
-  if (custom_implicit_args_offset != UINT16_MAX) {
+  if (kernel_args->implicit_args_offset != UINT16_MAX) {
+    const uint16_t custom_implicit_args_offset =
+        kernel_args->implicit_args_offset;
     out_descriptor->custom_kernarg_layout.explicit_kernarg_size =
         custom_implicit_args_offset;
     out_descriptor->custom_kernarg_layout.implicit_args_offset =
@@ -1974,11 +1972,6 @@ static iree_status_t iree_hal_amdgpu_executable_resolve_raw_hsaco_kernel_args(
                    explicit_args_end + IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE) {
       host_kernel_args[kernel_ordinal].implicit_args_offset =
           (uint16_t)explicit_args_end;
-    } else if (iree_string_view_starts_with(kernel->reflection_name,
-                                            IREE_SV("Cijk_")) &&
-               host_kernel_args[kernel_ordinal].kernarg_size > 0) {
-      host_kernel_args[kernel_ordinal].implicit_args_offset =
-          host_kernel_args[kernel_ordinal].kernarg_size;
     }
   }
   return iree_ok_status();

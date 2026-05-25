@@ -56,10 +56,16 @@ set(IREE_BUILD_COMPILER OFF)
 set(IREE_BUILD_SAMPLES OFF)
 set(IREE_ERROR_ON_MISSING_SUBMODULES OFF)
 set(IREE_VISIBILITY_HIDDEN OFF)
-set(IREE_ALLOCATOR_SYSTEM "mimalloc" CACHE STRING "" FORCE)
-set(FETCHCONTENT_SOURCE_DIR_MIMALLOC
-    "${HRX_IREE_SOURCE_DIR}/third_party/mimalloc"
-    CACHE PATH "Vendored mimalloc source for embedded IREE" FORCE)
+set(HRX_IREE_ALLOCATOR_SYSTEM
+    "mimalloc"
+    CACHE STRING "Allocator used by the embedded IREE runtime")
+set_property(CACHE HRX_IREE_ALLOCATOR_SYSTEM PROPERTY STRINGS "libc" "mimalloc")
+set(IREE_ALLOCATOR_SYSTEM "${HRX_IREE_ALLOCATOR_SYSTEM}" CACHE STRING "" FORCE)
+if(HRX_IREE_ALLOCATOR_SYSTEM STREQUAL "mimalloc")
+  set(FETCHCONTENT_SOURCE_DIR_MIMALLOC
+      "${HRX_IREE_SOURCE_DIR}/third_party/mimalloc"
+      CACHE PATH "Vendored mimalloc source for embedded IREE" FORCE)
+endif()
 set(FETCHCONTENT_SOURCE_DIR_LIBBACKTRACE_SRC
     "${HRX_IREE_SOURCE_DIR}/third_party/libbacktrace"
     CACHE PATH "Vendored libbacktrace source for embedded IREE" FORCE)
