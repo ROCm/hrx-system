@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -41,10 +42,13 @@ std::filesystem::path build_noop_hsaco(const std::string &arch) {
   std::filesystem::path hsaco_path =
       std::filesystem::temp_directory_path() / "hrx_noop_kernel.hsaco";
 
+  // --no-gpu-bundle-output is required: without it clang wraps the gfx code
+  // object in a __CLANG_OFFLOAD_BUNDLE__ fat binary, which the native loader
+  // rejects ("does not begin with ELF magic"). It wants a bare HSA code object.
   std::string command =
       "clang++ -x hip --offload-device-only --offload-arch=" + arch +
-      " -nogpuinc -nogpulib -c " + src_path.string() + " -o " +
-      hsaco_path.string();
+      " --no-gpu-bundle-output -nogpuinc -nogpulib -c " + src_path.string() +
+      " -o " + hsaco_path.string();
   int rc = std::system(command.c_str());
   INFO("command: " << command);
   REQUIRE(rc == 0);
@@ -90,8 +94,11 @@ TEST_CASE_METHOD(HrxTestFixture, "executable_load_lookup_dispatch_noop") {
   REQUIRE_OK(hrx().executable_export_info(executable, ordinal, &info));
   REQUIRE(info.name != nullptr);
   REQUIRE(std::string(info.name) == "hrx_noop");
-  REQUIRE(info.constant_count == 0);
-  REQUIRE(info.binding_count == 0);
+  // A raw code object has no HAL reflection, so the loader projects the whole
+  // kernarg segment as dispatch constants (kernarg_segment_size / 4) — nonzero
+  // even for a no-argument kernel because of the implicit COV5 kernarg block.
+  REQUIRE(info.constant_count > 0);
+  REQUIRE(info.binding_count == 0);  // hrx_noop binds no buffers
   REQUIRE(info.workgroup_size[0] >= 1);
   REQUIRE(info.workgroup_size[1] >= 1);
   REQUIRE(info.workgroup_size[2] >= 1);
@@ -110,10 +117,14 @@ TEST_CASE_METHOD(HrxTestFixture, "executable_load_lookup_dispatch_noop") {
       },
       /* .subgroup_size = */ 0,
   };
-  REQUIRE_OK(hrx().stream_dispatch(stream, executable, ordinal, &config,
-                                   /*constants=*/nullptr, /*constants_size=*/0,
-                                   /*bindings=*/nullptr, /*binding_count=*/0,
-                                   HRX_DISPATCH_FLAG_NONE));
+  // The dispatch requires constants_size == constant_count * sizeof(uint32_t);
+  // hrx_noop reads none of them, so a zero-filled block suffices.
+  std::vector<uint32_t> constants(info.constant_count, 0u);
+  REQUIRE_OK(hrx().stream_dispatch(
+      stream, executable, ordinal, &config,
+      /*constants=*/constants.empty() ? nullptr : constants.data(),
+      /*constants_size=*/constants.size() * sizeof(uint32_t),
+      /*bindings=*/nullptr, /*binding_count=*/0, HRX_DISPATCH_FLAG_NONE));
   REQUIRE_OK(hrx().stream_synchronize(stream));
 
   hrx().stream_release(stream);
