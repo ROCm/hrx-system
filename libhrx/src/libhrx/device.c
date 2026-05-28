@@ -8,7 +8,7 @@
 #include "hrx_internal.h"
 
 hrx_status_t hrx_device_get_property(hrx_device_t device,
-                                     hrx_device_property_t prop, void* value,
+                                     hrx_device_property_t prop, void *value,
                                      size_t value_size) {
   if (!device || !value) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
@@ -43,11 +43,11 @@ hrx_status_t hrx_device_get_property(hrx_device_t device,
       iree_status_t s = iree_hal_device_query_i64(
           device->hal_device, iree_make_cstring_view("hal.device"),
           iree_make_cstring_view("memory.total"), &mem_size);
-      if (!iree_status_is_ok(s)) {
+      if (!iree_status_is_ok(s) || mem_size <= 0) {
         iree_status_ignore(s);
-        mem_size = 0;  // Unknown.
+        mem_size = 8LL * 1024 * 1024 * 1024;  // Conservative fallback.
       }
-      *(uint64_t*)value = (uint64_t)mem_size;
+      *(uint64_t *)value = (uint64_t)mem_size;
       return hrx_ok_status();
     }
     case HRX_DEVICE_PROPERTY_COMPUTE_UNITS:
@@ -56,7 +56,7 @@ hrx_status_t hrx_device_get_property(hrx_device_t device,
         return hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
                                "buffer too small for uint32_t");
       }
-      *(uint32_t*)value = 0;  // Not available from local-task driver.
+      *(uint32_t *)value = 0;  // Not available from local-task driver.
       return hrx_ok_status();
     }
     default:
@@ -79,7 +79,7 @@ hrx_status_t hrx_device_synchronize(hrx_device_t device) {
 }
 
 hrx_status_t hrx_device_get_type(hrx_device_t device,
-                                 hrx_accelerator_type_t* type) {
+                                 hrx_accelerator_type_t *type) {
   if (!device || !type) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                            "device or type is NULL");
@@ -90,12 +90,13 @@ hrx_status_t hrx_device_get_type(hrx_device_t device,
 
 void hrx_device_retain(hrx_device_t device) {
   iree_hal_device_retain(device->hal_device);
+  iree_hal_device_group_retain(device->hal_device_group);
   iree_atomic_ref_count_inc(&device->ref_count);
 }
 
 void hrx_device_release(hrx_device_t device) {
-  iree_hal_device_t* hal_device = device->hal_device;
-  iree_hal_device_group_t* hal_device_group = device->hal_device_group;
+  iree_hal_device_t *hal_device = device->hal_device;
+  iree_hal_device_group_t *hal_device_group = device->hal_device_group;
   if (iree_atomic_ref_count_dec(&device->ref_count) == 1) {
     iree_hal_allocator_release(device->allocator.hal_allocator);
     iree_hal_device_group_release(hal_device_group);
@@ -104,4 +105,54 @@ void hrx_device_release(hrx_device_t device) {
     device->hal_device_group = NULL;
   }
   iree_hal_device_release(hal_device);
+}
+
+hrx_status_t hrx_device_memory_info(hrx_device_t device, size_t *free_bytes,
+                                    size_t *total_bytes) {
+  if (!device || !free_bytes || !total_bytes) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "NULL argument");
+  }
+
+  int64_t total = 0;
+  iree_status_t s = iree_hal_device_query_i64(
+      device->hal_device, iree_make_cstring_view("hal.device"),
+      iree_make_cstring_view("memory.total"), &total);
+  if (!iree_status_is_ok(s)) {
+    iree_status_ignore(s);
+    total = 0;
+  }
+  if (total <= 0) {
+    total = 8LL * 1024 * 1024 * 1024;
+  }
+
+  int64_t free_mem = 0;
+  s = iree_hal_device_query_i64(
+      device->hal_device, iree_make_cstring_view("hal.device"),
+      iree_make_cstring_view("memory.free"), &free_mem);
+  if (!iree_status_is_ok(s)) {
+    iree_status_ignore(s);
+    free_mem = total;
+  }
+  if (free_mem <= 0) {
+    free_mem = total;
+  }
+
+  *total_bytes = (size_t)total;
+  *free_bytes = (size_t)free_mem;
+  return hrx_ok_status();
+}
+
+hrx_status_t hrx_device_can_access_peer(hrx_device_t device_a,
+                                        hrx_device_t device_b,
+                                        bool *can_access) {
+  if (!device_a || !device_b || !can_access) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "NULL argument");
+  }
+  if (device_a == device_b) {
+    *can_access = true;
+    return hrx_ok_status();
+  }
+  *can_access = (device_a->type == HRX_ACCELERATOR_GPU &&
+                 device_b->type == HRX_ACCELERATOR_GPU);
+  return hrx_ok_status();
 }

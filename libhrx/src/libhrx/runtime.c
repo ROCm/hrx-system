@@ -462,6 +462,9 @@ hrx_status_t hrx_cpu_initialize(uint32_t flags) {
   iree_hal_allocator_retain(dev->allocator.hal_allocator);
   iree_atomic_ref_count_init(&dev->allocator.ref_count);
   dev->allocator.device = dev;
+  hrx_buffer_table_initialize(&dev->buffer_table);
+  iree_arena_block_pool_initialize(/*block_size=*/32 * 1024,
+                                   iree_allocator_system(), &dev->block_pool);
   snprintf(dev->name, sizeof(dev->name), "CPU 0 (local-task)");
   snprintf(dev->architecture, sizeof(dev->architecture), "host");
 
@@ -478,6 +481,8 @@ hrx_status_t hrx_cpu_shutdown(void) {
   }
 
   for (int i = 0; i < g_cpu.device_count; i++) {
+    hrx_buffer_table_deinitialize(&g_cpu.devices[i].buffer_table);
+    iree_arena_block_pool_deinitialize(&g_cpu.devices[i].block_pool);
     hrx_device_release(&g_cpu.devices[i]);
   }
   if (g_cpu.driver) {
@@ -651,6 +656,9 @@ hrx_status_t hrx_gpu_initialize(uint32_t flags) {
     iree_hal_allocator_retain(dev->allocator.hal_allocator);
     iree_atomic_ref_count_init(&dev->allocator.ref_count);
     dev->allocator.device = dev;
+    hrx_buffer_table_initialize(&dev->buffer_table);
+    iree_arena_block_pool_initialize(/*block_size=*/32 * 1024,
+                                     iree_allocator_system(), &dev->block_pool);
 
     iree_host_size_t name_len = device_infos[info_index].name.size;
     if (name_len >= sizeof(dev->name)) name_len = sizeof(dev->name) - 1;
@@ -691,6 +699,8 @@ hrx_status_t hrx_gpu_shutdown(void) {
 
   iree_status_t profiling_status = hrx_gpu_end_all_profiling();
   for (int i = 0; i < g_gpu.device_count; i++) {
+    hrx_buffer_table_deinitialize(&g_gpu.devices[i].buffer_table);
+    iree_arena_block_pool_deinitialize(&g_gpu.devices[i].block_pool);
     hrx_device_release(&g_gpu.devices[i]);
   }
   if (g_gpu.driver) {

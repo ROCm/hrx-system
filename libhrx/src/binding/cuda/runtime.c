@@ -10,7 +10,7 @@
 #include <string.h>
 
 #include "binding/cuda/driver.h"
-#include "streaming/internal.h"
+#include "common/internal.h"
 
 // Thread-local storage for the last CUDA error.
 static iree_thread_local cudaError_t iree_cuda_thread_error = cudaSuccess;

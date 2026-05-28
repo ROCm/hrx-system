@@ -23,7 +23,7 @@ iree_cc_library(
   DEPS
     iree::base
     iree::hal
-    libhrx::src::streaming
+    libhrx::src::binding::common
     libhrx_defs
   SHARED
   INCLUDES

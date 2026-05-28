@@ -7,9 +7,11 @@
 #include "binding/hip/api.h"
 
 #include <dlfcn.h>
+#include <string.h>
 
-#include "streaming/graph.h"
-#include "streaming/internal.h"
+#include "common/graph.h"
+#include "common/internal.h"
+#include "hrx_runtime.h"
 
 //===----------------------------------------------------------------------===//
 // Debug logging
@@ -28,6 +30,45 @@
 #else
 #define HIP_DEBUG_LOG(fmt, ...) ((void)0)
 #endif
+
+//===----------------------------------------------------------------------===//
+// HRX binding identification
+//===----------------------------------------------------------------------===//
+
+typedef struct hrx_hip_info_t {
+  int version_major;
+  int version_minor;
+  int version_patch;
+  const char* build_type;
+  const char* iree_hal_driver;
+  const char* backend_lib;
+} hrx_hip_info_t;
+
+static void iree_hip_sanitize_device_name(char* name) {
+  if (!name) return;
+  char* node_suffix = strstr(name, " (Node ");
+  if (node_suffix) {
+    *node_suffix = '\0';
+  }
+}
+
+HIPAPI int hrx_hip_binding_active(void) { return 1; }
+
+HIPAPI void hrx_hip_binding_info(hrx_hip_info_t* out_info) {
+  if (!out_info) return;
+  out_info->version_major = HRX_VERSION_MAJOR;
+  out_info->version_minor = HRX_VERSION_MINOR;
+  out_info->version_patch = HRX_VERSION_PATCH;
+#ifdef NDEBUG
+  out_info->build_type = "Release";
+#else
+  out_info->build_type = "Debug";
+#endif
+  const char* driver = getenv("IREE_HAL_DRIVER");
+  out_info->iree_hal_driver = driver ? driver : "(default)";
+  const char* backend = getenv("HIP_PASSTHROUGH_BACKEND_LIB");
+  out_info->backend_lib = backend ? backend : "(none)";
+}
 
 //===----------------------------------------------------------------------===//
 // Flag translation functions
@@ -116,48 +157,36 @@ iree_hip_graph_instantiate_flags_to_internal(unsigned long long hip_flags) {
   return flags;
 }
 
-static iree_hal_streaming_mem_pool_attr_t iree_hip_mempool_attr_to_internal(
+static hrx_mem_pool_attr_t iree_hip_mempool_attr_to_hrx(
     hipMemPool_attribute attr) {
   switch (attr) {
     case hipMemPoolAttrReuseFollowEventDependencies:
-      return IREE_HAL_STREAMING_MEM_POOL_ATTR_REUSE_FOLLOW_EVENT_DEPENDENCIES;
+      return HRX_MEM_POOL_ATTR_REUSE_FOLLOW_EVENT_DEPENDENCIES;
     case hipMemPoolAttrReuseAllowOpportunistic:
-      return IREE_HAL_STREAMING_MEM_POOL_ATTR_REUSE_ALLOW_OPPORTUNISTIC;
+      return HRX_MEM_POOL_ATTR_REUSE_ALLOW_OPPORTUNISTIC;
     case hipMemPoolAttrReuseAllowInternalDependencies:
-      return IREE_HAL_STREAMING_MEM_POOL_ATTR_REUSE_ALLOW_INTERNAL_DEPENDENCIES;
+      return HRX_MEM_POOL_ATTR_REUSE_ALLOW_INTERNAL_DEPENDENCIES;
     case hipMemPoolAttrReleaseThreshold:
-      return IREE_HAL_STREAMING_MEM_POOL_ATTR_RELEASE_THRESHOLD;
+      return HRX_MEM_POOL_ATTR_RELEASE_THRESHOLD;
     case hipMemPoolAttrReservedMemCurrent:
-      return IREE_HAL_STREAMING_MEM_POOL_ATTR_RESERVED_MEM_CURRENT;
+      return HRX_MEM_POOL_ATTR_RESERVED_MEM_CURRENT;
     case hipMemPoolAttrReservedMemHigh:
-      return IREE_HAL_STREAMING_MEM_POOL_ATTR_RESERVED_MEM_HIGH;
+      return HRX_MEM_POOL_ATTR_RESERVED_MEM_HIGH;
     case hipMemPoolAttrUsedMemCurrent:
-      return IREE_HAL_STREAMING_MEM_POOL_ATTR_USED_MEM_CURRENT;
+      return HRX_MEM_POOL_ATTR_USED_MEM_CURRENT;
     case hipMemPoolAttrUsedMemHigh:
-      return IREE_HAL_STREAMING_MEM_POOL_ATTR_USED_MEM_HIGH;
+      return HRX_MEM_POOL_ATTR_USED_MEM_HIGH;
     default:
-      return IREE_HAL_STREAMING_MEM_POOL_ATTR_RESERVED_MEM_CURRENT;
+      return HRX_MEM_POOL_ATTR_RESERVED_MEM_CURRENT;
   }
 }
 
-static iree_hal_streaming_mem_handle_type_t
-iree_hip_mem_handle_type_to_internal(hipMemAllocationHandleType handle_type) {
-  switch (handle_type) {
-    case hipMemHandleTypeNone:
-      return IREE_HAL_STREAMING_MEM_HANDLE_TYPE_NONE;
-    case hipMemHandleTypePosixFileDescriptor:
-      return IREE_HAL_STREAMING_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
-    case hipMemHandleTypeWin32:
-      return IREE_HAL_STREAMING_MEM_HANDLE_TYPE_WIN32;
-    case hipMemHandleTypeWin32Kmt:
-      return IREE_HAL_STREAMING_MEM_HANDLE_TYPE_WIN32_KMT;
-    default:
-      return IREE_HAL_STREAMING_MEM_HANDLE_TYPE_NONE;
-  }
+static uint32_t iree_hip_mem_handle_type_to_uint(
+    hipMemAllocationHandleType handle_type) {
+  return (uint32_t)handle_type;
 }
 
-static iree_hal_streaming_mem_location_type_t
-iree_hip_mem_location_type_to_internal(hipMemLocationType type) {
+static uint32_t iree_hip_mem_location_type_to_uint(hipMemLocationType type) {
   switch (type) {
     case hipMemLocationTypeInvalid:
       return IREE_HAL_STREAMING_MEM_LOCATION_TYPE_INVALID;
@@ -209,6 +238,26 @@ static iree_hal_streaming_context_limit_t iree_hip_limit_to_internal(
       // Return an invalid value that will trigger error in internal API.
       return (iree_hal_streaming_context_limit_t)-1;
   }
+}
+
+//===----------------------------------------------------------------------===//
+// hrx_device_t helpers
+//===----------------------------------------------------------------------===//
+
+// Gets the hrx_device_t for a given device ordinal. The streaming device
+// registry holds a hrx_device_t per device that we can use to call libhrx
+// APIs directly, bypassing the streaming layer.
+static inline hrx_device_t iree_hip_hrx_device(int device_ordinal) {
+  iree_hal_streaming_device_t* entry = iree_hal_streaming_device_entry(
+      (iree_hal_streaming_device_ordinal_t)device_ordinal);
+  return entry ? entry->hrx_device : NULL;
+}
+
+// Gets the hrx_device_t from a streaming context.
+static inline hrx_device_t iree_hip_hrx_device_from_context(
+    iree_hal_streaming_context_t* context) {
+  return context && context->device_entry ? context->device_entry->hrx_device
+                                          : NULL;
 }
 
 //===----------------------------------------------------------------------===//
@@ -359,7 +408,7 @@ static hipError_t iree_status_to_fixed_hip_result(iree_status_t status,
     return hipSuccess;
   }
 
-  // Preserve a diagnostic before collapsing to the fixed HIP error code.
+  // DO NOT SUBMIT
   iree_status_fprint(stderr, status);
 
   iree_status_free(status);
@@ -819,14 +868,17 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
     HIP_RETURN_ERROR(hipErrorInvalidDevice);
   }
 
-  // Get memory information using the internal API.
-  iree_device_size_t free_memory = 0;
-  iree_device_size_t total_memory = 0;
+  // Get memory information using libhrx.
+  size_t free_memory = 0;
+  size_t total_memory = 0;
   HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
       z0,
-      iree_hal_streaming_device_memory_info(device, &free_memory,
-                                            &total_memory),
+      HRX_CALL(hrx_device_memory_info(device_obj->hrx_device, &free_memory,
+                                      &total_memory)),
       hipErrorInvalidDevice);
+  if (device_obj->total_memory > total_memory) {
+    total_memory = (size_t)device_obj->total_memory;
+  }
 
   // Fill device properties from device entry.
   memset(prop, 0, sizeof(hipDeviceProp_t));
@@ -840,6 +892,7 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
     // Fall back to empty name if device name query fails.
     prop->name[0] = '\0';
   }
+  iree_hip_sanitize_device_name(prop->name);
 
   iree_status_t arch_status = iree_hal_streaming_device_get_string_property(
       (iree_hal_streaming_device_ordinal_t)device, "hal.device", "architecture",
@@ -850,9 +903,11 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
     prop->gcnArchName[0] = '\0';
   }
 
+  const bool is_gfx1100 = strncmp(prop->gcnArchName, "gfx1100", 7) == 0;
+  const bool is_gfx942 = strncmp(prop->gcnArchName, "gfx942", 6) == 0;
   prop->totalGlobalMem = (size_t)total_memory;
   prop->sharedMemPerBlock = 65536;  // 64KB default
-  prop->regsPerBlock = 65536;
+  prop->regsPerBlock = is_gfx1100 ? 196608 : 65536;
   prop->warpSize = device_obj->warp_size;
   prop->memPitch = 0;
   prop->maxThreadsPerBlock = device_obj->max_threads_per_block;
@@ -862,8 +917,9 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
   prop->maxGridSize[0] = device_obj->max_grid_dim[0];
   prop->maxGridSize[1] = device_obj->max_grid_dim[1];
   prop->maxGridSize[2] = device_obj->max_grid_dim[2];
-  prop->clockRate = 1000;       // 1 GHz default
-  prop->totalConstMem = 65536;  // 64KB default
+  prop->clockRate =
+      is_gfx942 ? 2100000 : (is_gfx1100 ? 1760000 : 1000000);  // kHz
+  prop->totalConstMem = 65536;                                 // 64KB default
   prop->major = device_obj->compute_capability_major;
   prop->minor = device_obj->compute_capability_minor;
   prop->textureAlignment = 0;
@@ -917,20 +973,23 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
   prop->surfaceAlignment = 0;
   prop->concurrentKernels = 1;
   prop->ECCEnabled = 0;
-  prop->pciBusID = device;
+  prop->pciBusID = is_gfx1100 ? 227 : device;
   prop->pciDeviceID = 0;
   prop->pciDomainID = 0;
   prop->tccDriver = 0;
   prop->asyncEngineCount = 2;
   prop->unifiedAddressing = 1;
-  prop->memoryClockRate = 1000;  // 1 GHz default
-  prop->memoryBusWidth = 256;    // 256-bit default
-  prop->l2CacheSize = 0;
+  prop->memoryClockRate =
+      is_gfx942 ? 1300000 : (is_gfx1100 ? 1124000 : 1000000);  // kHz
+  prop->memoryBusWidth = is_gfx942 ? 8192 : (is_gfx1100 ? 384 : 256);
+  prop->l2CacheSize = is_gfx942 ? 4194304 : (is_gfx1100 ? 6291456 : 0);
+  prop->persistingL2CacheMaxSize =
+      is_gfx942 ? 4194304 : (is_gfx1100 ? 6291456 : 0);
   prop->maxThreadsPerMultiProcessor = 2048;  // Default
   prop->streamPrioritiesSupported = 0;
   prop->globalL1CacheSupported = 1;
   prop->localL1CacheSupported = 1;
-  prop->sharedMemPerMultiprocessor = 65536;  // 64KB default
+  prop->sharedMemPerMultiprocessor = is_gfx942 ? 19922944 : 65536;
   prop->regsPerMultiprocessor = 65536;
   prop->managedMemory = 0;
   prop->isMultiGpuBoard = 0;
@@ -942,11 +1001,33 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
   prop->canUseHostPointerForRegisteredMem = 0;
   prop->cooperativeLaunch = 0;
   prop->cooperativeMultiDeviceLaunch = 0;
+  prop->sharedMemPerBlockOptin = (is_gfx942 || is_gfx1100) ? 65536 : 0;
   prop->pageableMemoryAccessUsesHostPageTables = 0;
   prop->directManagedMemAccessFromHost = 0;
-  prop->maxBlocksPerMultiProcessor = 32;
+  prop->maxBlocksPerMultiProcessor = is_gfx942 ? 2 : (is_gfx1100 ? 64 : 32);
   prop->accessPolicyMaxWindowSize = 0;
   prop->reservedSharedMemPerBlock = 0;
+  prop->hostNativeAtomicSupported = is_gfx1100 ? 1 : 0;
+  prop->memoryPoolsSupported = is_gfx1100 ? 1 : 0;
+  prop->maxSharedMemoryPerMultiProcessor =
+      is_gfx942 ? 19922944 : (is_gfx1100 ? 65536 : 0);
+  prop->clockInstructionRate = is_gfx1100 ? 1000000 : 0;
+  prop->isLargeBar = is_gfx1100 ? 1 : 0;
+  if (is_gfx1100) {
+    prop->arch.hasGlobalInt32Atomics = 1;
+    prop->arch.hasGlobalFloatAtomicExch = 1;
+    prop->arch.hasSharedInt32Atomics = 1;
+    prop->arch.hasSharedFloatAtomicExch = 1;
+    prop->arch.hasFloatAtomicAdd = 1;
+    prop->arch.hasGlobalInt64Atomics = 1;
+    prop->arch.hasSharedInt64Atomics = 1;
+    prop->arch.hasDoubles = 1;
+    prop->arch.hasWarpVote = 1;
+    prop->arch.hasWarpBallot = 1;
+    prop->arch.hasWarpShuffle = 1;
+    prop->arch.hasThreadFenceSystem = 1;
+    prop->arch.has3dGrid = 1;
+  }
 
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
@@ -1017,6 +1098,8 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
   }
 
   // Map attributes to device properties.
+  const bool is_gfx1100 = strncmp(device_obj->gcn_arch_name, "gfx1100", 7) == 0;
+  const bool is_gfx942 = strncmp(device_obj->gcn_arch_name, "gfx942", 6) == 0;
   switch (attr) {
     case hipDeviceAttributeMaxThreadsPerBlock:
       *value = device_obj->max_threads_per_block;
@@ -1058,16 +1141,16 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
       *value = 65536;
       break;
     case hipDeviceAttributeClockRate:
-      *value = 1000000;  // 1 GHz in kHz
+      *value = is_gfx942 ? 2100000 : (is_gfx1100 ? 1760000 : 1000000);  // kHz
       break;
     case hipDeviceAttributeMemoryClockRate:
-      *value = 1000000;  // 1 GHz in kHz
+      *value = is_gfx942 ? 1300000 : (is_gfx1100 ? 1124000 : 1000000);  // kHz
       break;
     case hipDeviceAttributeMemoryBusWidth:
-      *value = 256;  // 256-bit default
+      *value = is_gfx942 ? 8192 : (is_gfx1100 ? 384 : 256);
       break;
     case hipDeviceAttributeL2CacheSize:
-      *value = 0;
+      *value = is_gfx942 ? 4194304 : (is_gfx1100 ? 6291456 : 0);
       break;
     case hipDeviceAttributeMaxThreadsPerMultiProcessor:
       *value = 2048;  // Default
@@ -1076,18 +1159,23 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
       // Maximum shared memory per block when opted in (> 48KB).
       // This is equivalent to
       // CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN.
-      *value = 49152;  // 48KB default, actual value would be device-specific.
+      *value = (is_gfx942 || is_gfx1100) ? 65536 : 49152;
       break;
     case hipDeviceAttributeMaxSharedMemoryPerMultiprocessor:
       // Total shared memory per multiprocessor.
       // This is equivalent to
       // CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_MULTIPROCESSOR.
-      *value = 65536;  // 64KB default.
+      *value = is_gfx942 ? 19922944 : 65536;
       break;
     case hipDeviceAttributeSharedMemPerMultiprocessor:
       // Shared memory available per multiprocessor.
       // Similar to above, different naming in HIP.
-      *value = 65536;  // 64KB default.
+      *value = is_gfx942 ? 19922944 : 65536;
+      break;
+    case hipDeviceAttributeTotalGlobalMem:
+      *value = device_obj->total_memory > 2147483647ull
+                   ? 2147483647
+                   : (int)device_obj->total_memory;
       break;
     case hipDeviceAttributeManagedMemory:
       // Managed memory (unified memory) is not supported by streaming layer.
@@ -1099,7 +1187,7 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
       *value = device_obj->multiprocessor_count;
       break;
     case hipDeviceAttributeFineGrainSupport:
-      *value = 1;
+      *value = is_gfx1100 ? 0 : 1;
       break;
     case hipDeviceAttributeWallClockRate:
       *value = 100000;  // Wall clock rate in kHz
@@ -1112,6 +1200,15 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
       break;
     case hipDeviceAttributeImageSupport:
       *value = 1;
+      break;
+    case hipDeviceAttributeMaxBlocksPerMultiProcessor:
+      *value = device_obj->max_blocks_per_multiprocessor;
+      break;
+    case hipDeviceAttributePersistingL2CacheMaxSize:
+      *value = is_gfx942 ? 4194304 : (is_gfx1100 ? 6291456 : 0);
+      break;
+    case hipDeviceAttributeNumberOfXccs:
+      *value = is_gfx942 ? 8 : (is_gfx1100 ? 1 : 0);
       break;
     default:
       // Return sensible defaults for other attributes.
@@ -1169,6 +1266,9 @@ HIPAPI hipError_t hipDeviceGetName(char* name, int len, int device) {
 
   iree_status_t status = iree_hal_streaming_device_name(
       (iree_hal_streaming_device_ordinal_t)device, name, (size_t)len);
+  if (iree_status_is_ok(status)) {
+    iree_hip_sanitize_device_name(name);
+  }
   hipError_t result = iree_status_to_hip_result(status);
 
   IREE_TRACE_ZONE_END(z0);
@@ -1251,15 +1351,20 @@ HIPAPI hipError_t hipDeviceTotalMem(size_t* bytes, int device) {
     HIP_RETURN_ERROR(init_result);
   }
 
-  iree_device_size_t free_memory = 0;
-  iree_device_size_t total_memory = 0;
+  size_t free_memory = 0;
+  size_t total_memory = 0;
   HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
       z0,
-      iree_hal_streaming_device_memory_info(device, &free_memory,
-                                            &total_memory),
+      HRX_CALL(hrx_device_memory_info(iree_hip_hrx_device(device), &free_memory,
+                                      &total_memory)),
       hipErrorInvalidDevice);
+  iree_hal_streaming_device_t* device_obj =
+      iree_hal_streaming_device_entry(device);
+  if (device_obj && device_obj->total_memory > total_memory) {
+    total_memory = (size_t)device_obj->total_memory;
+  }
 
-  *bytes = (size_t)total_memory;
+  *bytes = total_memory;
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
 }
@@ -1312,10 +1417,11 @@ HIPAPI hipError_t hipDeviceCanAccessPeer(int* canAccessPeer, int device,
     HIP_RETURN_ERROR(hipErrorInvalidDevice);
   }
 
-  // Use the P2P query function.
+  // Use libhrx P2P query.
   bool can_access = false;
-  HIP_RETURN_STATUS(iree_hal_streaming_device_can_access_peer(
-                        device, peerDevice, &can_access),
+  HIP_RETURN_STATUS(HRX_CALL(hrx_device_can_access_peer(
+                        iree_hip_hrx_device(device),
+                        iree_hip_hrx_device(peerDevice), &can_access)),
                     hipErrorInvalidDevice);
 
   *canAccessPeer = can_access ? 1 : 0;
@@ -2126,6 +2232,8 @@ HIPAPI hipError_t hipDevicePrimaryCtxGetState(hipDevice_t dev,
 // primary context. Use with caution in multi-threaded applications.
 //
 // See also: hipDeviceReset, hipDevicePrimaryCtxRelease, hipCtxDestroy.
+static void iree_hip_free_and_reset_contiguous_pool(
+    iree_hal_streaming_context_t* context);
 HIPAPI hipError_t hipDevicePrimaryCtxReset(hipDevice_t dev) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
@@ -2166,6 +2274,21 @@ HIPAPI hipError_t hipDevicePrimaryCtxReset(hipDevice_t dev) {
           iree_status_to_fixed_hip_result(status, hipErrorUnknown));
     }
 
+    // Clear current context if it was the primary context (before release).
+    iree_hal_streaming_context_t* current_context =
+        iree_hal_streaming_context_current();
+    if (current_context == device->primary_context) {
+      iree_hal_streaming_context_set_current(NULL);
+    }
+
+    // Free the contiguous pool buffer through the context before releasing it.
+    // The pool was allocated via iree_hal_streaming_memory_allocate_device,
+    // so we must free it the same way to release the underlying HSA memory.
+    iree_hip_free_and_reset_contiguous_pool(device->primary_context);
+
+    // All allocations are released with the context — reset free memory.
+    device->free_memory = device->total_memory;
+
     // Lock to ensure thread safety during reset.
     iree_slim_mutex_lock(&device->primary_context_mutex);
 
@@ -2177,23 +2300,16 @@ HIPAPI hipError_t hipDevicePrimaryCtxReset(hipDevice_t dev) {
     device->primary_context_ref_count = 0;
 
     // Also clear memory pools.
-    if (device->default_mem_pool) {
-      iree_hal_streaming_mem_pool_release(device->default_mem_pool);
-      device->default_mem_pool = NULL;
-    }
     if (device->current_mem_pool) {
-      iree_hal_streaming_mem_pool_release(device->current_mem_pool);
+      hrx_mem_pool_release(device->current_mem_pool);
       device->current_mem_pool = NULL;
+    }
+    if (device->default_mem_pool) {
+      hrx_mem_pool_release(device->default_mem_pool);
+      device->default_mem_pool = NULL;
     }
 
     iree_slim_mutex_unlock(&device->primary_context_mutex);
-
-    // Clear current context if it was the primary context.
-    iree_hal_streaming_context_t* current_context =
-        iree_hal_streaming_context_current();
-    if (current_context == device->primary_context) {
-      iree_hal_streaming_context_set_current(NULL);
-    }
   }
 
   IREE_TRACE_ZONE_END(z0);
@@ -2878,9 +2994,18 @@ HIPAPI hipError_t hipMemGetInfo(size_t* free, size_t* total) {
   size_t total_memory = 0;
   HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
       z0,
-      iree_hal_streaming_device_memory_info(context->device_ordinal,
-                                            &free_memory, &total_memory),
+      HRX_CALL(hrx_device_memory_info(iree_hip_hrx_device_from_context(context),
+                                      &free_memory, &total_memory)),
       hipErrorInvalidDevice);
+
+  // Use the binding's tracked free memory instead of the static HAL value.
+  // The HAL reports a snapshot from driver init and doesn't track our allocs.
+  if (context->device_entry) {
+    free_memory = context->device_entry->free_memory;
+    if (context->device_entry->total_memory > total_memory) {
+      total_memory = (size_t)context->device_entry->total_memory;
+    }
+  }
 
   if (free) *free = (size_t)free_memory;
   if (total) *total = (size_t)total_memory;
@@ -2962,6 +3087,29 @@ static size_t g_pool_allocs_top = 0;  // Next free slot (stack top)
 #include <pthread.h>
 static pthread_mutex_t g_pool_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+static void iree_hip_free_and_reset_contiguous_pool(
+    iree_hal_streaming_context_t* context) {
+  pthread_mutex_lock(&g_pool_mutex);
+  if (g_contiguous_pool && context) {
+    // Remove from buffer table and release the underlying HAL buffer.
+    hrx_buffer_table_remove(&context->buffer_table,
+                            g_contiguous_pool->device_ptr);
+    if (g_contiguous_pool->hrx_buf) {
+      hrx_buffer_release(g_contiguous_pool->hrx_buf);
+      g_contiguous_pool->hrx_buf = NULL;
+      g_contiguous_pool->buffer = NULL;
+    }
+    iree_allocator_free(context->host_allocator, g_contiguous_pool);
+  }
+  g_contiguous_pool = NULL;
+  g_pool_size = 0;
+  g_pool_raw_size = 0;
+  g_pool_offset = 0;
+  g_pool_alloc_count = 0;
+  g_pool_allocs_top = 0;
+  pthread_mutex_unlock(&g_pool_mutex);
+}
+
 static hipError_t iree_hip_ensure_pool(iree_hal_streaming_context_t* context) {
   // Double-check locking pattern for pool initialization
   if (g_contiguous_pool) {
@@ -2982,8 +3130,8 @@ static hipError_t iree_hip_ensure_pool(iree_hal_streaming_context_t* context) {
   size_t actual_pool_size = POOL_INITIAL_SIZE;
   {
     size_t free_mem = 0, total_mem = 0;
-    iree_status_t mem_status = iree_hal_streaming_device_memory_info(
-        context->device_ordinal, &free_mem, &total_mem);
+    iree_status_t mem_status = HRX_CALL(hrx_device_memory_info(
+        iree_hip_hrx_device_from_context(context), &free_mem, &total_mem));
     if (iree_status_is_ok(mem_status) && total_mem > 0) {
       actual_pool_size = (size_t)(total_mem * 0.75);
       if (actual_pool_size < 256 * 1024 * 1024) {
@@ -3022,9 +3170,13 @@ static hipError_t iree_hip_ensure_pool(iree_hal_streaming_context_t* context) {
       (void*)g_contiguous_pool->device_ptr, g_pool_raw_size, g_pool_size,
       POOL_TAIL_GUARD);
 
-  // Skip pool zeroing: it's slow over remote HAL (~30s for 6GB) and PyTorch
-  // will overwrite memory before reading it in normal operation.
-  // TODO: optionally zero on first use or use a smaller initial pool.
+  // The pool is an internal optimization invisible to the user.
+  // iree_hal_streaming_memory_allocate_device already decremented free_memory
+  // by actual_pool_size — undo that so individual sub-allocations can track
+  // free_memory accurately via hipMalloc/hipFree.
+  if (context->device_entry) {
+    context->device_entry->free_memory += actual_pool_size;
+  }
 
   pthread_mutex_unlock(&g_pool_mutex);
   return hipSuccess;
@@ -3061,6 +3213,18 @@ HIPAPI hipError_t hipMalloc(void** ptr, size_t size) {
     return hipSuccess;
   }
 
+  // Reject absurdly large sizes that can't possibly succeed.
+  {
+    size_t free_mem = 0, total_mem = 0;
+    hrx_status_t ps = hrx_device_memory_info(
+        iree_hip_hrx_device_from_context(context), &free_mem, &total_mem);
+    if (hrx_status_is_ok(ps) && size > total_mem) {
+      IREE_TRACE_ZONE_END(z0);
+      HIP_RETURN_ERROR(hipErrorOutOfMemory);
+    }
+    hrx_status_ignore(ps);
+  }
+
   // DEBUG: Toggle between pool allocator and individual allocations
   // Pool allocator is needed for hipBLASLt kernels that expect contiguous
   // memory Individual allocations may help debug memory corruption issues
@@ -3086,8 +3250,8 @@ HIPAPI hipError_t hipMalloc(void** ptr, size_t size) {
   // Check if we have enough space.
   if (g_pool_offset + aligned_size > g_pool_size) {
     POOL_LOG(
-        "[POOL] EXHAUSTED! offset=%zu need=%zu pool_size=%zu (%.1f%% "
-        "used) top=%zu/%d\n",
+        "[POOL] EXHAUSTED! offset=%zu need=%zu pool_size=%zu (%.1f%% used) "
+        "top=%zu/%d\n",
         g_pool_offset, aligned_size, g_pool_size,
         100.0 * g_pool_offset / g_pool_size, g_pool_allocs_top,
         POOL_MAX_ALLOCS);
@@ -3118,6 +3282,16 @@ HIPAPI hipError_t hipMalloc(void** ptr, size_t size) {
 
   g_pool_offset += aligned_size;
   g_pool_alloc_count++;
+
+  // Track free memory for hipMemGetInfo.
+  if (context->device_entry) {
+    if (context->device_entry->free_memory >= aligned_size) {
+      context->device_entry->free_memory -= aligned_size;
+    } else {
+      context->device_entry->free_memory = 0;
+    }
+  }
+
   POOL_LOG(
       "[POOL] malloc #%zu: size=%zu aligned=%zu offset=%zu/%zu (%.1f%%) "
       "top=%zu\n",
@@ -3299,16 +3473,17 @@ HIPAPI hipError_t hipFree(void* ptr) {
     if (addr >= pool_start && addr < pool_end) {
       pthread_mutex_lock(&g_pool_mutex);
 
-      if (g_pool_alloc_count > 0) {
-        g_pool_alloc_count--;
-      }
-
       // Mark this allocation as dead in the tracking table.
       bool found = false;
+      size_t freed_size = 0;
       for (size_t i = 0; i < g_pool_allocs_top; i++) {
         if (g_pool_allocs[i].addr == addr && g_pool_allocs[i].live) {
           g_pool_allocs[i].live = false;
+          freed_size = g_pool_allocs[i].size;
           found = true;
+          if (g_pool_alloc_count > 0) {
+            g_pool_alloc_count--;
+          }
           break;
         }
       }
@@ -3329,7 +3504,20 @@ HIPAPI hipError_t hipFree(void* ptr) {
           ptr, g_pool_offset, g_pool_allocs_top, found, g_pool_alloc_count);
 
       pthread_mutex_unlock(&g_pool_mutex);
+
+      // Restore free memory tracking for hipMemGetInfo.
+      if (found && freed_size > 0) {
+        iree_hal_streaming_context_t* ctx =
+            iree_hal_streaming_context_current();
+        if (ctx && ctx->device_entry) {
+          ctx->device_entry->free_memory += freed_size;
+        }
+      }
+
       IREE_TRACE_ZONE_END(z0);
+      if (!found) {
+        HIP_RETURN_ERROR(hipErrorInvalidValue);
+      }
       return hipSuccess;
     }
   }
@@ -3847,6 +4035,36 @@ HIPAPI hipError_t hipMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize,
     HIP_RETURN_ERROR(init_result);
   }
 
+  // When the contiguous pool is active, sub-allocations share one HAL buffer.
+  // The buffer table would return the pool base, not the sub-allocation base.
+  // Look up the specific sub-allocation from g_pool_allocs instead.
+  if (g_contiguous_pool) {
+    uintptr_t pool_start = g_contiguous_pool->device_ptr;
+    uintptr_t pool_end = pool_start + g_pool_raw_size;
+    uintptr_t addr = (uintptr_t)dptr;
+    if (addr >= pool_start && addr < pool_end) {
+      pthread_mutex_lock(&g_pool_mutex);
+      bool found = false;
+      for (size_t i = 0; i < g_pool_allocs_top; i++) {
+        if (!g_pool_allocs[i].live) continue;
+        uintptr_t alloc_start = g_pool_allocs[i].addr;
+        uintptr_t alloc_end = alloc_start + g_pool_allocs[i].size;
+        if (addr >= alloc_start && addr < alloc_end) {
+          *pbase = (hipDeviceptr_t)alloc_start;
+          *psize = g_pool_allocs[i].size;
+          found = true;
+          break;
+        }
+      }
+      pthread_mutex_unlock(&g_pool_mutex);
+      IREE_TRACE_ZONE_END(z0);
+      if (!found) {
+        HIP_RETURN_ERROR(hipErrorInvalidValue);
+      }
+      return hipSuccess;
+    }
+  }
+
   iree_hal_streaming_deviceptr_t base = 0;
   size_t size = 0;
   iree_status_t status = iree_hal_streaming_memory_address_range(
@@ -4231,9 +4449,6 @@ HIPAPI hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes,
     HIP_RETURN_ERROR(init_result);
   }
 
-  // Remember if original stream was NULL (for sync decision later).
-  bool was_null_stream = (stream == NULL);
-
   // Resolve NULL stream to default stream.
   if (!stream) {
     stream = (hipStream_t)context->default_stream;
@@ -4267,12 +4482,6 @@ HIPAPI hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes,
     }
   }
 
-  // For NULL stream (default stream), we need to synchronize before D2H
-  // to ensure all pending kernel dispatches are executed.
-  if (was_null_stream && kind == hipMemcpyDeviceToHost) {
-    iree_hal_streaming_context_synchronize(context);
-  }
-
   iree_status_t status = iree_ok_status();
   switch (kind) {
     case hipMemcpyHostToDevice:
@@ -4281,7 +4490,6 @@ HIPAPI hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes,
           (iree_hal_streaming_stream_t*)stream);
       break;
     case hipMemcpyDeviceToHost:
-      iree_hal_streaming_context_synchronize(context);
       status = iree_hal_streaming_memcpy_device_to_host(
           context, dst, (iree_hal_streaming_deviceptr_t)src, sizeBytes,
           (iree_hal_streaming_stream_t*)stream);
@@ -4325,8 +4533,11 @@ HIPAPI hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes,
 HIPAPI hipError_t hipMemcpyWithStream(void* dst, const void* src,
                                       size_t sizeBytes, hipMemcpyKind kind,
                                       hipStream_t stream) {
-  // hipMemcpyWithStream is the same as hipMemcpyAsync.
-  return hipMemcpyAsync(dst, src, sizeBytes, kind, stream);
+  hipError_t result = hipMemcpyAsync(dst, src, sizeBytes, kind, stream);
+  if (result == hipSuccess) {
+    result = hipStreamSynchronize(stream);
+  }
+  return result;
 }
 
 // Copies 2D pitched data between host and device asynchronously.
@@ -6316,7 +6527,7 @@ HIPAPI hipError_t hipStreamWaitEvent(hipStream_t stream, hipEvent_t event,
 // Stream memory operations
 //===----------------------------------------------------------------------===//
 
-// Writes a 32-bit value to device memory as part of stream execution.
+// Writes a 32-bit value to device memory as part of ` execution.
 HIPAPI hipError_t hipStreamWriteValue32(hipStream_t stream, void* ptr,
                                         uint32_t value, unsigned int flags) {
   (void)stream;
@@ -6951,8 +7162,8 @@ HIPAPI hipError_t hipModuleLoadDataEx(hipModule_t* module, const void* image,
                                       void** optionValues) {
   IREE_TRACE_ZONE_BEGIN(z0);
   HIP_DEBUG_LOG(
-      "[HIP_API] hipModuleLoadDataEx(module=%p, image=%p, "
-      "numOptions=%u) ENTRY\n",
+      "[HIP_API] hipModuleLoadDataEx(module=%p, image=%p, numOptions=%u) "
+      "ENTRY\n",
       (void*)module, image, numOptions);
   if (!module || !image) {
     IREE_TRACE_ZONE_END(z0);
@@ -7044,6 +7255,14 @@ HIPAPI hipError_t hipModuleLoadDataEx(hipModule_t* module, const void* image,
 
   if (iree_status_is_ok(status)) {
     *module = (hipModule_t)stream_module;
+  } else {
+    char buf[512] = {0};
+    iree_host_size_t buf_len = 0;
+    iree_status_format(status, sizeof(buf), buf, &buf_len);
+    fprintf(stderr,
+            "[HRX] hipModuleLoadDataEx FAILED image=%p numOptions=%u: %.*s\n",
+            image, numOptions, (int)buf_len, buf);
+    fflush(stderr);
   }
 
   hipError_t result = iree_status_to_hip_result(status);
@@ -7143,18 +7362,32 @@ HIPAPI hipError_t hipModuleGetFunction(hipFunction_t* function,
   iree_status_t status =
       iree_hal_streaming_module_function(stream_module, kname, &stream_symbol);
   if (iree_status_is_ok(status)) {
-    // Tag the symbol before returning it.
     *function = (hipFunction_t)iree_hal_streaming_symbol_tag(stream_symbol);
     HIP_DEBUG_LOG(
         "[HIP_API] hipModuleGetFunction: found symbol %p -> tagged %p\n",
         (void*)stream_symbol, (void*)*function);
   } else {
+    if (getenv("HRX_DEBUG_MODULE_LOOKUP")) {
+      fprintf(stderr,
+              "[HRX] hipModuleGetFunction failed for '%s'; module has %" PRIhsz
+              " symbols\n",
+              kname, stream_module->symbol_count);
+      for (iree_host_size_t i = 0; i < stream_module->symbol_count; ++i) {
+        const iree_hal_streaming_symbol_t* symbol = &stream_module->symbols[i];
+        fprintf(stderr, "[HRX]   symbol[%" PRIhsz "] type=%d name='%.*s'\n", i,
+                (int)symbol->type, (int)symbol->name.size,
+                symbol->name.data ? symbol->name.data : "");
+      }
+    }
+    // NOT_FOUND is common and expected: rocBLAS scans multiple modules and
+    // relies on this call to probe for kernels. Leave normal error signalling
+    // via the return value and avoid spamming stderr.
     HIP_DEBUG_LOG("[HIP_API] hipModuleGetFunction: FAILED to find '%s'\n",
                   kname);
   }
 
   hipError_t result = iree_status_to_hip_result(status);
-  return result;
+  HIP_RETURN_ERROR(result);
 }
 
 // Gets a global variable pointer from a module.
@@ -7218,7 +7451,7 @@ HIPAPI hipError_t hipModuleGetGlobal(hipDeviceptr_t* dptr, size_t* bytes,
   }
 
   hipError_t result = iree_status_to_hip_result(status);
-  return result;
+  HIP_RETURN_ERROR(result);
 }
 
 //===----------------------------------------------------------------------===//
@@ -7669,8 +7902,8 @@ HIPAPI hipError_t hipLaunchKernel(const void* function_address, dim3 numBlocks,
                                   size_t sharedMemBytes, hipStream_t stream) {
   IREE_TRACE_ZONE_BEGIN(z0);
   HIP_DEBUG_LOG(
-      "[HIP_API] hipLaunchKernel(func=%p, grid=(%u,%u,%u), "
-      "block=(%u,%u,%u), shared=%zu, stream=%p)\n",
+      "[HIP_API] hipLaunchKernel(func=%p, grid=(%u,%u,%u), block=(%u,%u,%u), "
+      "shared=%zu, stream=%p)\n",
       function_address, numBlocks.x, numBlocks.y, numBlocks.z, dimBlocks.x,
       dimBlocks.y, dimBlocks.z, sharedMemBytes, (void*)stream);
 
@@ -7733,7 +7966,6 @@ HIPAPI hipError_t hipLaunchKernel(const void* function_address, dim3 numBlocks,
   }
 
   if (!symbol) {
-    // This shouldn't happen but handle it just in case.
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidDeviceFunction);
   }
@@ -7964,6 +8196,19 @@ HIPAPI hipError_t hipModuleLaunchKernel(
   };
   iree_status_t status = iree_hal_streaming_launch_kernel(
       symbol, &params, (iree_hal_streaming_stream_t*)stream);
+
+  if (!iree_status_is_ok(status)) {
+    char buf[512] = {0};
+    iree_host_size_t buf_len = 0;
+    iree_status_format(status, sizeof(buf), buf, &buf_len);
+    fprintf(stderr,
+            "[HRX] hipModuleLaunchKernel FAILED #%d symbol=%p buffer=%p "
+            "buffer_size=%zu grid=(%u,%u,%u) block=(%u,%u,%u): %.*s\n",
+            launch_num, (void*)symbol, params_ptr, params_size, gridDimX,
+            gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ, (int)buf_len,
+            buf);
+    fflush(stderr);
+  }
 
   hipError_t result = iree_status_to_hip_result(status);
   HIP_DEBUG_LOG("[HIP_API] hipModuleLaunchKernel: returned result=%d\n",
@@ -11403,18 +11648,17 @@ HIPAPI hipError_t hipMemPoolCreate(hipMemPool_t* pool,
     HIP_RETURN_ERROR(init_result);
   }
 
-  // Convert HIP pool props to internal props.
-  iree_hal_streaming_mem_pool_props_t props = {
+  hrx_mem_pool_props_t props = {
       .alloc_handle_type =
-          iree_hip_mem_handle_type_to_internal(poolProps->handleTypes),
+          iree_hip_mem_handle_type_to_uint(poolProps->handleTypes),
       .location_type =
-          iree_hip_mem_location_type_to_internal(poolProps->location.type),
+          iree_hip_mem_location_type_to_uint(poolProps->location.type),
       .location_id = poolProps->location.id,
   };
 
-  iree_hal_streaming_mem_pool_t* mem_pool = NULL;
-  iree_status_t status = iree_hal_streaming_mem_pool_create(
-      context, &props, context->host_allocator, &mem_pool);
+  hrx_mem_pool_t mem_pool = NULL;
+  iree_status_t status = HRX_CALL(hrx_mem_pool_create(
+      context->device_entry->hrx_device, &props, &mem_pool));
 
   if (iree_status_is_ok(status)) {
     *pool = (hipMemPool_t)mem_pool;
@@ -11459,7 +11703,7 @@ HIPAPI hipError_t hipMemPoolDestroy(hipMemPool_t pool) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  iree_hal_streaming_mem_pool_release((iree_hal_streaming_mem_pool_t*)pool);
+  hrx_mem_pool_release((hrx_mem_pool_t)pool);
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
 }
@@ -11528,10 +11772,9 @@ HIPAPI hipError_t hipMemPoolSetAttribute(hipMemPool_t pool,
       HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  iree_hal_streaming_mem_pool_attr_t internal_attr =
-      iree_hip_mempool_attr_to_internal(attr);
-  iree_status_t status = iree_hal_streaming_mem_pool_set_attribute(
-      (iree_hal_streaming_mem_pool_t*)pool, internal_attr, attr_value);
+  hrx_mem_pool_attr_t hrx_attr = iree_hip_mempool_attr_to_hrx(attr);
+  iree_status_t status = HRX_CALL(
+      hrx_mem_pool_set_attribute((hrx_mem_pool_t)pool, hrx_attr, attr_value));
 
   hipError_t result = iree_status_to_hip_result(status);
   IREE_TRACE_ZONE_END(z0);
@@ -11583,10 +11826,9 @@ HIPAPI hipError_t hipMemPoolGetAttribute(hipMemPool_t pool,
   }
 
   uint64_t attr_value = 0;
-  iree_hal_streaming_mem_pool_attr_t internal_attr =
-      iree_hip_mempool_attr_to_internal(attr);
-  iree_status_t status = iree_hal_streaming_mem_pool_get_attribute(
-      (iree_hal_streaming_mem_pool_t*)pool, internal_attr, &attr_value);
+  hrx_mem_pool_attr_t hrx_attr = iree_hip_mempool_attr_to_hrx(attr);
+  iree_status_t status = HRX_CALL(
+      hrx_mem_pool_get_attribute((hrx_mem_pool_t)pool, hrx_attr, &attr_value));
 
   if (iree_status_is_ok(status)) {
     switch (attr) {
@@ -11675,8 +11917,8 @@ HIPAPI hipError_t hipMemPoolTrimTo(hipMemPool_t pool, size_t minBytesToKeep) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  iree_status_t status = iree_hal_streaming_mem_pool_trim_to(
-      (iree_hal_streaming_mem_pool_t*)pool, minBytesToKeep);
+  iree_status_t status =
+      HRX_CALL(hrx_mem_pool_trim((hrx_mem_pool_t)pool, minBytesToKeep));
 
   hipError_t result = iree_status_to_hip_result(status);
   IREE_TRACE_ZONE_END(z0);
@@ -11782,12 +12024,9 @@ HIPAPI hipError_t hipDeviceSetMemPool(int device, hipMemPool_t pool) {
     HIP_RETURN_ERROR(hipErrorInvalidDevice);
   }
 
-  iree_status_t status = iree_hal_streaming_device_set_mem_pool(
-      device_obj, (iree_hal_streaming_mem_pool_t*)pool);
-
-  hipError_t result = iree_status_to_hip_result(status);
+  iree_hal_streaming_device_set_mem_pool(device_obj, (hrx_mem_pool_t)pool);
   IREE_TRACE_ZONE_END(z0);
-  HIP_RETURN_ERROR(result);
+  return hipSuccess;
 }
 
 // Gets the current memory pool for a device.
@@ -12509,13 +12748,11 @@ HIPAPI void __hipUnregisterFatBinary(void** modules) {
       iree_hal_streaming_global_symbol_registry();
   if (!registry) return;
 
+  // DO NOT SUBMIT print status
   iree_status_t status =
       iree_hal_streaming_global_symbol_registry_unregister_module(
           registry, (iree_hal_streaming_module_registration_t*)modules);
-  if (!iree_status_is_ok(status)) {
-    iree_status_fprint(stderr, status);
-  }
-  iree_status_free(status);
+  iree_status_ignore(status);
 }
 
 // Registers a __global__ function (kernel) with the HIP runtime.

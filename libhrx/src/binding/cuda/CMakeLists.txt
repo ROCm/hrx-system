@@ -13,7 +13,7 @@ target_include_directories(cuda PRIVATE
 )
 
 target_link_libraries(cuda PRIVATE
-    hrx_streaming
+    libhrx::src::binding::common
     iree_base_base
     iree_hal_hal
 )
