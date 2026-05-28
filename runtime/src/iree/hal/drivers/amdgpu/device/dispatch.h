@@ -86,10 +86,11 @@ iree_hal_amdgpu_device_dispatch_make_hal_kernarg_layout(
 static inline iree_hal_amdgpu_device_dispatch_kernarg_layout_t
 iree_hal_amdgpu_device_dispatch_make_custom_kernarg_layout(
     size_t kernarg_size) {
+  (void)kernarg_size;
   return (iree_hal_amdgpu_device_dispatch_kernarg_layout_t){
-      .explicit_kernarg_size = kernarg_size,
-      .implicit_args_offset = kernarg_size,
-      .total_kernarg_size = kernarg_size,
+      .explicit_kernarg_size = 0,
+      .implicit_args_offset = 0,
+      .total_kernarg_size = 0,
       .has_implicit_args = false,
   };
 }
@@ -178,18 +179,24 @@ void iree_hal_amdgpu_device_dispatch_emplace_hal_kernargs(
 
 // Populates custom direct kernargs in already-reserved storage.
 //
-// |custom_kernarg_ptr| must provide |layout->total_kernarg_size| bytes in the
-// final kernel ABI shape expected by the target kernel.
+// |custom_kernarg_ptr| provides up to |layout->total_kernarg_size| bytes in the
+// final kernel ABI shape expected by the target kernel. Missing trailing padding
+// bytes remain zeroed.
 //
 // Preconditions:
-//   - |layout| and |kernarg_ptr| are non-NULL.
+//   - |kernel_args|, |workgroup_count|, |layout|, and |kernarg_ptr| are
+//     non-NULL.
 //   - |layout| was derived with
 //     iree_hal_amdgpu_device_dispatch_make_custom_kernarg_layout.
-//   - |custom_kernarg_ptr| is non-NULL when |layout->total_kernarg_size| > 0.
+//   - |custom_kernarg_ptr| is non-NULL when |custom_kernarg_length| > 0.
 void iree_hal_amdgpu_device_dispatch_emplace_custom_kernargs(
+    const iree_hal_amdgpu_device_kernel_args_t* IREE_AMDGPU_RESTRICT
+        kernel_args,
+    const uint32_t workgroup_count[3], uint32_t dynamic_workgroup_local_memory,
     const iree_hal_amdgpu_device_dispatch_kernarg_layout_t* IREE_AMDGPU_RESTRICT
         layout,
     const void* IREE_AMDGPU_RESTRICT custom_kernarg_ptr,
+    size_t custom_kernarg_length,
     void* IREE_AMDGPU_RESTRICT kernarg_ptr);
 
 // Populates the builtin patch dispatch that updates an indirect-parameter
