@@ -67,6 +67,7 @@ function(iree_native_test)
   iree_package_ns(_PACKAGE_NS)
   iree_package_path(_PACKAGE_PATH)
   set(_TEST_NAME "${_PACKAGE_PATH}/${_RULE_NAME}")
+  set(_HRX_INSTALLED_TESTS_CAN_INSTALL OFF)
 
   # If driver was specified, add the corresponding test arg and label.
   if(DEFINED _RULE_DRIVER)
@@ -168,6 +169,7 @@ function(iree_native_test)
         ${_TEST_ARGS}
     )
     iree_configure_test(${_TEST_NAME})
+    set(_HRX_INSTALLED_TESTS_CAN_INSTALL ON)
 
     # Apply test environment variables after we add the test.
     if(DEFINED _TEST_ENVIRONMENT_VARS)
@@ -188,5 +190,34 @@ function(iree_native_test)
   endif()
   if(_RULE_DISABLED)
     set_property(TEST ${_TEST_NAME} PROPERTY DISABLED ${_RULE_DISABLED})
+  endif()
+
+  if(_HRX_INSTALLED_TESTS_CAN_INSTALL AND COMMAND hrx_register_installed_test)
+    set(_HRX_INSTALLED_WILL_FAIL)
+    if(_RULE_WILL_FAIL)
+      set(_HRX_INSTALLED_WILL_FAIL WILL_FAIL)
+    endif()
+    set(_HRX_INSTALLED_DISABLED)
+    if(_RULE_DISABLED)
+      set(_HRX_INSTALLED_DISABLED DISABLED)
+    endif()
+    hrx_register_installed_test(
+      NAME
+        "${_TEST_NAME}"
+      TARGET
+        "${_SRC_TARGET}"
+      ARGS
+        ${_TEST_ARGS}
+      DATA
+        ${_RULE_DATA}
+      ENVIRONMENT
+        ${_TEST_ENVIRONMENT_VARS}
+      LABELS
+        ${_RULE_LABELS}
+      TIMEOUT
+        ${_RULE_TIMEOUT}
+      ${_HRX_INSTALLED_WILL_FAIL}
+      ${_HRX_INSTALLED_DISABLED}
+    )
   endif()
 endfunction()

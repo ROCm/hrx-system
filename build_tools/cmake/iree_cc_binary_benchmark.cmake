@@ -68,7 +68,8 @@ function(iree_cc_binary_benchmark)
     ${_MAYBE_HOSTONLY}
   )
 
-
+  set(_HRX_SAVED_SKIP_INSTALLED_TEST_REGISTRATION "${HRX_SKIP_INSTALLED_TEST_REGISTRATION}")
+  set(HRX_SKIP_INSTALLED_TEST_REGISTRATION ON)
   iree_native_test(
     NAME
       ${_RULE_NAME}_test
@@ -79,4 +80,5 @@ function(iree_cc_binary_benchmark)
     LABELS
       ${_RULE_LABELS}
   )
+  set(HRX_SKIP_INSTALLED_TEST_REGISTRATION "${_HRX_SAVED_SKIP_INSTALLED_TEST_REGISTRATION}")
 endfunction()

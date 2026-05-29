@@ -116,6 +116,8 @@ function(iree_local_py_test)
   set_property(TEST ${_NAME_PATH} PROPERTY LABELS "${_RULE_LABELS}")
   set_property(TEST ${_NAME_PATH} PROPERTY TIMEOUT ${_RULE_TIMEOUT})
 
+  set(_HRX_INSTALL_PACKAGE_DIRS ${_RULE_PACKAGE_DIRS})
+
   # Extend the PYTHONPATH environment variable with _RULE_PACKAGE_DIRS.
   list(APPEND _RULE_PACKAGE_DIRS "$ENV{PYTHONPATH}")
   if(${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
@@ -130,6 +132,23 @@ function(iree_local_py_test)
   )
 
   iree_configure_test(${_NAME_PATH})
+
+  if(COMMAND hrx_register_installed_python_test)
+    hrx_register_installed_python_test(
+      NAME
+        "${_NAME_PATH}"
+      SRC
+        "${_RULE_SRC}"
+      ARGS
+        ${_RULE_ARGS}
+      LABELS
+        ${_RULE_LABELS}
+      PACKAGE_DIRS
+        ${_HRX_INSTALL_PACKAGE_DIRS}
+      TIMEOUT
+        ${_RULE_TIMEOUT}
+    )
+  endif()
 
   # TODO(marbre): Find out how to add deps to tests.
   #               Similar to _RULE_DATA in iree_lit_test().

@@ -508,6 +508,7 @@ def build_core(args: argparse.Namespace) -> None:
         f"IREE_BUILD_TESTS={'ON' if ctest_enabled else 'OFF'}",
         "IREE_BUILD_BENCHMARKS=ON",
         f"LIBHRX_BUILD_CTS={'ON' if ctest_enabled else 'OFF'}",
+        f"HRX_INSTALL_TESTS={'ON' if ctest_enabled else 'OFF'}",
         f"LIBHRX_BUILD_PASSTHROUGH={'ON' if args.passthrough else 'OFF'}",
         f"IREE_HAL_DRIVER_AMDGPU={'ON' if args.amdgpu else 'OFF'}",
         "IREE_ENABLE_LIBBACKTRACE=OFF",
@@ -539,9 +540,10 @@ def test_core(args: argparse.Namespace) -> None:
     build_dir = args.build_dir.resolve()
     install_prefix = args.install_prefix.resolve()
     smoke_build_dir = args.package_smoke_build_dir.resolve()
+    installed_tests_dir = install_prefix / "share" / "hrx-system" / "tests"
 
     require_path(rocm_root, "ROCm build root")
-    require_path(build_dir / "CTestTestfile.cmake", "build-tree CTest file")
+    require_path(installed_tests_dir / "CTestTestfile.cmake", "installed CTest file")
     require_path(install_prefix / "lib" / "libhrx.so", "installed libhrx.so")
     require_path(install_prefix / "bin" / "hrx-info", "installed hrx-info")
 
@@ -552,7 +554,7 @@ def test_core(args: argparse.Namespace) -> None:
     env["PATH"] = f"{install_prefix / 'bin'}:{env['PATH']}"
     env["CMAKE_PREFIX_PATH"] = f"{install_prefix}:{rocm_root}:{env.get('CMAKE_PREFIX_PATH', '')}"
 
-    ctest_cmd = ["ctest", "--test-dir", build_dir, "--output-on-failure"]
+    ctest_cmd = ["ctest", "--test-dir", installed_tests_dir, "--output-on-failure"]
     if args.ctest_regex:
         ctest_cmd.extend(["-R", args.ctest_regex])
     run(ctest_cmd, cwd=REPO_ROOT, env=env)

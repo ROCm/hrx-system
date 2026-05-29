@@ -41,6 +41,14 @@ cmake -S . -B build/hrx-runtime ... -DLIBHRX_BUILD_CTS=ON -DBUILD_TESTING=ON
 # Run all CTS tests
 ctest --test-dir build/hrx-runtime --output-on-failure
 
+# Run installed CTS tests
+cmake --install build/hrx-runtime --component HrxSystemInstalledTests
+ctest --test-dir <prefix>/share/hrx-system/tests --output-on-failure -R libhrx/cts
+
+# Use an external temp root for installed tests
+HRX_TEST_TMPDIR=/tmp/hrx-system-tests \
+  ctest --test-dir <prefix>/share/hrx-system/tests --output-on-failure -R libhrx/cts
+
 # Run a specific category
 build/hrx-runtime/cts/hrx_cts_allocator
 build/hrx-runtime/cts/hrx_cts_transfer

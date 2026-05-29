@@ -29,6 +29,7 @@ endif()
 
 include(CMakeDependentOption)
 include(CTest)
+include(GNUInstallDirs)
 find_package(Python3 COMPONENTS Interpreter QUIET)
 
 option(HRX_HERMETIC_BUILD
@@ -45,6 +46,12 @@ option(LIBHRX_BUILD_CUDA_BINDING
 option(IREE_BUILD_TESTS "Build IREE runtime unit tests and CTS targets." ON)
 option(LIBHRX_BUILD_CTS
   "Build libhrx conformance tests." ${IREE_BUILD_TESTS})
+option(HRX_INSTALL_TESTS
+  "Install a relocatable CTest tree and test artifacts." ${IREE_BUILD_TESTS})
+set(HRX_INSTALL_TESTS_COMPONENT "HrxSystemInstalledTests" CACHE STRING
+  "Install component for the installed HRX system test suite.")
+set(HRX_INSTALL_TESTS_DIR "${CMAKE_INSTALL_DATADIR}/hrx-system/tests" CACHE STRING
+  "Install directory for the HRX system CTest tree and test artifacts.")
 cmake_dependent_option(IREE_BUILD_BENCHMARKS
   "Build IREE runtime benchmarks." ON "NOT IREE_BUILD_TESTS" ON)
 
@@ -225,6 +232,7 @@ include(iree_lit_test)
 include(external_cc_library)
 include(flatbuffer_c_library)
 include(hrx_dependencies)
+include(hrx_installed_tests)
 include(iree_setup_toolchain)
 
 iree_setup_toolchain()
@@ -253,4 +261,5 @@ endif()
 
 if(IREE_BUILD_TESTS)
   iree_create_ctest_customization()
+  hrx_create_installed_tests()
 endif()
