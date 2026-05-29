@@ -31,33 +31,10 @@ on:
         type: boolean
         default: false
   pull_request:
-    branches:
-      - main
-      - main-staging
-    paths:
-      - ".github/workflows/**"
-      - "CMakeLists.txt"
-      - "build_tools/**"
-      - "configure-bazel.py"
-      - "libhrx/**"
-      - "runtime/**"
-      - "tools/**"
-      - "MODULE.bazel*"
-      - "BUILD.bazel"
   push:
     branches:
       - main
       - main-staging
-    paths:
-      - ".github/workflows/**"
-      - "CMakeLists.txt"
-      - "build_tools/**"
-      - "configure-bazel.py"
-      - "libhrx/**"
-      - "runtime/**"
-      - "tools/**"
-      - "MODULE.bazel*"
-      - "BUILD.bazel"
 
 permissions:
   contents: read
