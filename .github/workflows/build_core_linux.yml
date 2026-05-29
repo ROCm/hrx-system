@@ -54,6 +54,8 @@ jobs:
     name: ${{ inputs.name }}
     runs-on: aws-linux-scale-rocm-prod
     timeout-minutes: 30
+    container:
+      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:702a5133851e6d1daf1207d2c9fbb01c2667914a5b6dc5a01faeb3ce66ea6421
     env:
       HRX_OUTPUT_DIR: ${{ github.workspace }}/build/linux
       HRX_CMAKE_OPTIONS: ${{ inputs.cmake_options }}
