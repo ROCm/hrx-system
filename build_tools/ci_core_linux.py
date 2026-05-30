@@ -753,6 +753,8 @@ def test_core(args: argparse.Namespace) -> None:
     ]
     if args.ctest_regex:
         ctest_cmd.extend(["-R", args.ctest_regex])
+    if args.ctest_exclude_regex:
+        ctest_cmd.extend(["-E", args.ctest_exclude_regex])
     run(ctest_cmd, cwd=REPO_ROOT, env=env, stderr_to_stdout=True)
     run([install_root / "bin" / "hrx-info"], cwd=REPO_ROOT, env=env)
     run([install_root / "bin" / "hrx-info", "--device=cpu:0"], cwd=REPO_ROOT, env=env)
@@ -1142,6 +1144,7 @@ def add_shared_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--sanitizer", default=env_default("HRX_SANITIZER", "none"), choices=["none", "asan", "tsan", "msan", "ubsan"])
     parser.add_argument("--assertions", action=argparse.BooleanOptionalAction, default=env_bool("HRX_ASSERTIONS", False))
     parser.add_argument("--ctest-regex", default=env_default("HRX_CTEST_REGEX", ""))
+    parser.add_argument("--ctest-exclude-regex", default=env_default("HRX_CTEST_EXCLUDE_REGEX", ""))
     parser.add_argument("--ctest-parallelism", type=int, default=env_int("HRX_CTEST_PARALLELISM", 0))
     parser.add_argument("--gpu", action="store_true", default=env_bool("HRX_TEST_GPU", False))
     parser.add_argument("--package", action=argparse.BooleanOptionalAction, default=env_bool("HRX_PACKAGE", True))

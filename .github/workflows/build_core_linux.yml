@@ -36,6 +36,9 @@ on:
       ctest_regex:
         type: string
         default: ""
+      ctest_exclude_regex:
+        type: string
+        default: ""
       test_gpu:
         type: boolean
         default: false
@@ -78,6 +81,7 @@ jobs:
       HRX_ASSERTIONS: ${{ inputs.assertions }}
       HRX_CMAKE_OPTIONS: ${{ inputs.cmake_options }}
       HRX_CTEST_REGEX: ${{ inputs.ctest_regex }}
+      HRX_CTEST_EXCLUDE_REGEX: ${{ inputs.ctest_exclude_regex }}
       HRX_TEST_GPU: ${{ inputs.test_gpu }}
       HRX_PACKAGE: ${{ inputs.package }}
       HRX_PACKAGE_SUFFIX: ${{ inputs.package_suffix }}
