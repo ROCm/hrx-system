@@ -237,6 +237,14 @@ function(_hrx_configure_flatcc)
     )
     set_target_properties(iree-flatcc-cli PROPERTIES
       RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tools")
+    # This executable is a host-side generator invoked during the build. Do not
+    # MSAN-instrument it unless the host C runtime and flatcc tool dependencies
+    # are also instrumented; otherwise the build fails before runtime/test code
+    # gets compiled.
+    if(IREE_ENABLE_MSAN)
+      target_compile_options(iree-flatcc-cli PRIVATE "-fno-sanitize=memory")
+      target_link_options(iree-flatcc-cli PRIVATE "-fno-sanitize=memory")
+    endif()
   elseif(IREE_HOST_BIN_DIR)
     iree_import_binary(NAME iree-flatcc-cli)
   else()

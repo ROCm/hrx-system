@@ -216,6 +216,8 @@ static int parse_device_spec(const char *spec, hrx_accelerator_type_t *type,
 int main(int argc, char **argv) {
   const char *device_spec = NULL;
   bool test_all = false;
+  hrx_accelerator_type_t requested_type = HRX_ACCELERATOR_CPU;
+  int requested_index = 0;
 
   // Parse our args first, then let IREE have the rest.
   for (int i = 1; i < argc; i++) {
@@ -240,50 +242,54 @@ int main(int argc, char **argv) {
   if (!device_spec && !test_all) {
     return print_devices();
   }
+  if (device_spec &&
+      parse_device_spec(device_spec, &requested_type, &requested_index) != 0) {
+    return 1;
+  }
 
-  // Initialize both accelerators.
-  hrx_status_t gpu_status = hrx_gpu_initialize(0);
-  hrx_status_t cpu_status = hrx_cpu_initialize(0);
+  const bool need_gpu =
+      test_all || (device_spec && requested_type == HRX_ACCELERATOR_GPU);
+  const bool need_cpu =
+      test_all || (device_spec && requested_type == HRX_ACCELERATOR_CPU);
+  hrx_status_t gpu_status =
+      need_gpu ? hrx_gpu_initialize(0) : hrx_ok_status();
+  hrx_status_t cpu_status =
+      need_cpu ? hrx_cpu_initialize(0) : hrx_ok_status();
+  bool gpu_initialized = need_gpu && hrx_status_is_ok(gpu_status);
+  bool cpu_initialized = need_cpu && hrx_status_is_ok(cpu_status);
 
   int result = 0;
 
   if (device_spec) {
-    hrx_accelerator_type_t type;
-    int index;
-    if (parse_device_spec(device_spec, &type, &index) != 0)
-      return 1;
-
     hrx_device_t dev = NULL;
-    if (type == HRX_ACCELERATOR_GPU) {
+    if (requested_type == HRX_ACCELERATOR_GPU) {
       if (!hrx_status_is_ok(gpu_status)) {
         print_status_message(stderr,
                              "GPU accelerator not available: ", gpu_status);
         fprintf(stderr, "\n");
-        hrx_status_ignore(gpu_status);
-        hrx_status_ignore(cpu_status);
-        return 1;
+        result = 1;
+        goto cleanup;
       }
-      CHECK_STATUS(hrx_gpu_device_get(index, &dev));
+      CHECK_STATUS_CLEANUP(hrx_gpu_device_get(requested_index, &dev));
     } else {
       if (!hrx_status_is_ok(cpu_status)) {
         print_status_message(stderr,
                              "CPU accelerator not available: ", cpu_status);
         fprintf(stderr, "\n");
-        hrx_status_ignore(gpu_status);
-        hrx_status_ignore(cpu_status);
-        return 1;
+        result = 1;
+        goto cleanup;
       }
-      CHECK_STATUS(hrx_cpu_device_get(index, &dev));
+      CHECK_STATUS_CLEANUP(hrx_cpu_device_get(requested_index, &dev));
     }
     result = run_device_smoke_test(dev, device_spec);
   } else if (test_all) {
     // Test all available devices.
     if (hrx_status_is_ok(gpu_status)) {
       int count = 0;
-      CHECK_STATUS(hrx_gpu_device_count(&count));
+      CHECK_STATUS_CLEANUP(hrx_gpu_device_count(&count));
       for (int i = 0; i < count; i++) {
         hrx_device_t dev = NULL;
-        CHECK_STATUS(hrx_gpu_device_get(i, &dev));
+        CHECK_STATUS_CLEANUP(hrx_gpu_device_get(i, &dev));
         char label[32];
         snprintf(label, sizeof(label), "gpu:%d", i);
         int r = run_device_smoke_test(dev, label);
@@ -297,10 +303,10 @@ int main(int argc, char **argv) {
 
     if (hrx_status_is_ok(cpu_status)) {
       int count = 0;
-      CHECK_STATUS(hrx_cpu_device_count(&count));
+      CHECK_STATUS_CLEANUP(hrx_cpu_device_count(&count));
       for (int i = 0; i < count; i++) {
         hrx_device_t dev = NULL;
-        CHECK_STATUS(hrx_cpu_device_get(i, &dev));
+        CHECK_STATUS_CLEANUP(hrx_cpu_device_get(i, &dev));
         char label[32];
         snprintf(label, sizeof(label), "cpu:%d", i);
         int r = run_device_smoke_test(dev, label);
@@ -314,11 +320,16 @@ int main(int argc, char **argv) {
   }
 
   // Shutdown.
-  if (hrx_status_is_ok(gpu_status)) {
+cleanup:
+  if (gpu_initialized) {
     hrx_status_ignore(hrx_gpu_shutdown());
+  } else {
+    hrx_status_ignore(gpu_status);
   }
-  if (hrx_status_is_ok(cpu_status)) {
+  if (cpu_initialized) {
     hrx_status_ignore(hrx_cpu_shutdown());
+  } else {
+    hrx_status_ignore(cpu_status);
   }
 
   if (result == 0) {

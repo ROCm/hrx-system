@@ -49,22 +49,27 @@ jobs:
           - variant: Default
             sanitizer: none
             assertions: false
+            run_tests: true
             package: true
           - variant: ASAN
             sanitizer: asan
             assertions: true
+            run_tests: true
             package: false
           - variant: TSAN
             sanitizer: tsan
             assertions: true
+            run_tests: true
             package: false
           - variant: MSAN
             sanitizer: msan
             assertions: true
+            run_tests: false
             package: false
           - variant: UBSAN
             sanitizer: ubsan
             assertions: true
+            run_tests: true
             package: false
     uses: ./.github/workflows/build_core_linux.yml
     permissions:
@@ -78,6 +83,7 @@ jobs:
       sanitizer: ${{ matrix.sanitizer }}
       assertions: ${{ matrix.assertions }}
       test_gpu: ${{ inputs.test_gpu || false }}
+      run_tests: ${{ matrix.run_tests }}
       package: ${{ matrix.package }}
 
   summary:

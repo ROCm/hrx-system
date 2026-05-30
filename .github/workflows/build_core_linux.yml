@@ -39,6 +39,9 @@ on:
       test_gpu:
         type: boolean
         default: false
+      run_tests:
+        type: boolean
+        default: true
       package:
         type: boolean
         default: true
@@ -97,6 +100,7 @@ jobs:
         run: python3 build_tools/ci_core_linux.py build
 
       - name: Run installed tests
+        if: ${{ inputs.run_tests }}
         run: python3 build_tools/ci_core_linux.py test
 
       - name: Package

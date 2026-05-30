@@ -11,3 +11,12 @@ set_target_properties(iree-c-embed-data PROPERTIES
   FOLDER "${HRX_IDE_FOLDER}/build_tools"
   RUNTIME_OUTPUT_DIRECTORY "${IREE_BINARY_DIR}/build_tools"
 )
+
+# This executable is a host-side generator that CMake runs while building the
+# tree. MSAN-instrumenting it makes the build depend on an instrumented host
+# C++ runtime, which our CI images intentionally do not provide. Keep MSAN on
+# the actual runtime/test binaries while leaving this build helper clean.
+if(IREE_ENABLE_MSAN)
+  target_compile_options(iree-c-embed-data PRIVATE "-fno-sanitize=memory")
+  target_link_options(iree-c-embed-data PRIVATE "-fno-sanitize=memory")
+endif()
