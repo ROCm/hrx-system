@@ -594,6 +594,16 @@ def sanitizer_debug_options(sanitizer: str, *, assertions: bool) -> list[str]:
     ]
 
 
+def sanitizer_flag(sanitizer: str) -> str | None:
+    sanitizer_flags = {
+        "asan": "-fsanitize=address",
+        "tsan": "-fsanitize=thread",
+        "msan": "-fsanitize=memory",
+        "ubsan": "-fsanitize=undefined",
+    }
+    return sanitizer_flags.get(sanitizer)
+
+
 def sanitizer_configure_options(sanitizer: str) -> list[str]:
     if sanitizer != "msan":
         return []
@@ -749,6 +759,15 @@ def test_core(args: argparse.Namespace) -> None:
     if args.gpu:
         run([install_root / "bin" / "hrx-info", "--device=gpu:0"], cwd=REPO_ROOT, env=env)
 
+    sanitizer_link_flag = sanitizer_flag(args.sanitizer)
+    smoke_link_flags = "-fuse-ld=lld"
+    smoke_sanitizer_options = []
+    if sanitizer_link_flag:
+        smoke_link_flags = f"{smoke_link_flags} {sanitizer_link_flag}"
+        smoke_sanitizer_options = [
+            f"-DCMAKE_C_FLAGS={sanitizer_link_flag}",
+            f"-DCMAKE_CXX_FLAGS={sanitizer_link_flag}",
+        ]
     run(
         [
             "cmake",
@@ -762,9 +781,10 @@ def test_core(args: argparse.Namespace) -> None:
             f"-DCMAKE_CXX_COMPILER={rocm_tool(rocm_root, 'clang++')}",
             f"-DCMAKE_AR={rocm_tool(rocm_root, 'llvm-ar')}",
             f"-DCMAKE_RANLIB={rocm_tool(rocm_root, 'llvm-ranlib')}",
-            "-DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld",
-            "-DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld",
-            "-DCMAKE_MODULE_LINKER_FLAGS=-fuse-ld=lld",
+            *smoke_sanitizer_options,
+            f"-DCMAKE_EXE_LINKER_FLAGS={smoke_link_flags}",
+            f"-DCMAKE_SHARED_LINKER_FLAGS={smoke_link_flags}",
+            f"-DCMAKE_MODULE_LINKER_FLAGS={smoke_link_flags}",
         ],
         cwd=REPO_ROOT,
         env=env,

@@ -236,6 +236,8 @@ typedef struct hrx_buffer_s {
   hrx_device_t device;
   hrx_memory_type_t mem_type;
   size_t size;
+  iree_hal_buffer_mapping_t mapping;
+  bool is_mapped;
   void *mapped_ptr;
 } hrx_buffer_s;
 

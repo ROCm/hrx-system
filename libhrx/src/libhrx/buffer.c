@@ -8,6 +8,13 @@
 
 #include <string.h>
 
+static iree_status_t hrx_buffer_unmap_internal(hrx_buffer_t buffer) {
+  iree_status_t status = iree_hal_buffer_unmap_range(&buffer->mapping);
+  buffer->is_mapped = false;
+  buffer->mapped_ptr = NULL;
+  return status;
+}
+
 hrx_status_t hrx_buffer_allocate(hrx_stream_t stream, size_t size,
                                  hrx_memory_type_t mem_type,
                                  hrx_buffer_usage_t usage,
@@ -120,12 +127,8 @@ void hrx_buffer_release(hrx_buffer_t buffer) {
   iree_hal_pool_t *hal_pool = buffer->hal_pool;
   hrx_device_t device = buffer->device;
   if (iree_atomic_ref_count_dec(&buffer->ref_count) == 1) {
-    if (buffer->mapped_ptr) {
-      iree_hal_buffer_unmap_range(
-          &(iree_hal_buffer_mapping_t){.contents = {
-                                           .data = buffer->mapped_ptr,
-                                           .data_length = buffer->size,
-                                       }});
+    if (buffer->is_mapped) {
+      iree_status_ignore(hrx_buffer_unmap_internal(buffer));
     }
     iree_allocator_free(iree_allocator_system(), buffer);
   }
@@ -144,6 +147,11 @@ hrx_status_t hrx_buffer_map(hrx_buffer_t buffer, hrx_map_flags_t flags,
                             hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                                             "buffer or mapped_ptr is NULL"));
   }
+  if (buffer->is_mapped) {
+    HRX_RETURN_AND_END_ZONE(
+        z0, hrx_make_status(HRX_STATUS_FAILED_PRECONDITION,
+                            "buffer is already mapped"));
+  }
 
   iree_hal_memory_access_t access = 0;
   if (flags & HRX_MAP_READ)
@@ -153,16 +161,16 @@ hrx_status_t hrx_buffer_map(hrx_buffer_t buffer, hrx_map_flags_t flags,
   if (flags & HRX_MAP_DISCARD)
     access |= IREE_HAL_MEMORY_ACCESS_DISCARD_WRITE;
 
-  iree_hal_buffer_mapping_t mapping;
   iree_status_t status = iree_hal_buffer_map_range(
       buffer->hal_buffer, IREE_HAL_MAPPING_MODE_SCOPED, access,
-      (iree_device_size_t)offset, (iree_device_size_t)size, &mapping);
+      (iree_device_size_t)offset, (iree_device_size_t)size, &buffer->mapping);
   if (!iree_status_is_ok(status)) {
     HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
   }
 
-  buffer->mapped_ptr = mapping.contents.data;
-  *mapped_ptr = mapping.contents.data;
+  buffer->is_mapped = true;
+  buffer->mapped_ptr = buffer->mapping.contents.data;
+  *mapped_ptr = buffer->mapping.contents.data;
   HRX_RETURN_AND_END_ZONE(z0, hrx_ok_status());
 }
 
@@ -175,20 +183,12 @@ hrx_status_t hrx_buffer_unmap(hrx_buffer_t buffer) {
     HRX_RETURN_AND_END_ZONE(
         z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "buffer is NULL"));
   }
-  if (!buffer->mapped_ptr) {
+  if (!buffer->is_mapped) {
     HRX_RETURN_AND_END_ZONE(z0, hrx_ok_status()); // Not mapped, no-op.
   }
 
-  iree_hal_buffer_mapping_t mapping = {
-      .contents =
-          {
-              .data = buffer->mapped_ptr,
-              .data_length = buffer->size,
-          },
-  };
-  iree_hal_buffer_unmap_range(&mapping);
-  buffer->mapped_ptr = NULL;
-  HRX_RETURN_AND_END_ZONE(z0, hrx_ok_status());
+  iree_status_t status = hrx_buffer_unmap_internal(buffer);
+  HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
 }
 
 hrx_status_t hrx_buffer_get_device_ptr(hrx_buffer_t buffer, void **device_ptr) {
@@ -210,13 +210,13 @@ hrx_status_t hrx_buffer_get_device_ptr(hrx_buffer_t buffer, void **device_ptr) {
   }
 
   // Try to get a native allocation pointer.
-  iree_hal_buffer_mapping_t mapping;
   iree_status_t status = iree_hal_buffer_map_range(
       buffer->hal_buffer, IREE_HAL_MAPPING_MODE_SCOPED,
-      IREE_HAL_MEMORY_ACCESS_ALL, 0, buffer->size, &mapping);
+      IREE_HAL_MEMORY_ACCESS_ALL, 0, buffer->size, &buffer->mapping);
   if (iree_status_is_ok(status)) {
-    *device_ptr = mapping.contents.data;
-    buffer->mapped_ptr = mapping.contents.data;
+    buffer->is_mapped = true;
+    buffer->mapped_ptr = buffer->mapping.contents.data;
+    *device_ptr = buffer->mapping.contents.data;
     HRX_RETURN_AND_END_ZONE(z0, hrx_ok_status());
   }
 
