@@ -57,7 +57,7 @@ permissions:
 jobs:
   test_core_linux_gpu:
     name: ${{ inputs.name || 'Linux / CMake / GPU gfx942' }}
-    runs-on: linux-gfx942-1gpu-ossci-rocm
+    runs-on: linux-gfx942-1gpu-core42-ossci-rocm
     timeout-minutes: 20
     env:
       HRX_OUTPUT_DIR: ${{ github.workspace }}/build/linux-gpu
