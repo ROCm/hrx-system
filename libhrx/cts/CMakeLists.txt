@@ -58,6 +58,8 @@ hrx_cc_test(
   ARGS
     "--hrx-library"
     "$<TARGET_FILE:libhrx::src::libhrx::hrx>"
+  LABELS
+    "requires-gpu-amd"
 )
 
 hrx_cc_test(
@@ -72,6 +74,8 @@ hrx_cc_test(
   ARGS
     "--hrx-library"
     "$<TARGET_FILE:libhrx::src::libhrx::hrx>"
+  LABELS
+    "requires-gpu-amd"
 )
 
 hrx_cc_test(
@@ -86,6 +90,8 @@ hrx_cc_test(
   ARGS
     "--hrx-library"
     "$<TARGET_FILE:libhrx::src::libhrx::hrx>"
+  LABELS
+    "requires-gpu-amd"
 )
 
 hrx_cc_test(
@@ -100,6 +106,8 @@ hrx_cc_test(
   ARGS
     "--hrx-library"
     "$<TARGET_FILE:libhrx::src::libhrx::hrx>"
+  LABELS
+    "requires-gpu-amd"
 )
 
 hrx_cc_test(
@@ -114,6 +122,8 @@ hrx_cc_test(
   ARGS
     "--hrx-library"
     "$<TARGET_FILE:libhrx::src::libhrx::hrx>"
+  LABELS
+    "requires-gpu-amd"
 )
 
 hrx_cc_test(
@@ -128,6 +138,8 @@ hrx_cc_test(
   ARGS
     "--hrx-library"
     "$<TARGET_FILE:libhrx::src::libhrx::hrx>"
+  LABELS
+    "requires-gpu-amd"
 )
 
 hrx_cc_test(
@@ -142,6 +154,8 @@ hrx_cc_test(
   ARGS
     "--hrx-library"
     "$<TARGET_FILE:libhrx::src::libhrx::hrx>"
+  LABELS
+    "requires-gpu-amd"
 )
 
 hrx_cc_test(
@@ -156,6 +170,8 @@ hrx_cc_test(
   ARGS
     "--hrx-library"
     "$<TARGET_FILE:libhrx::src::libhrx::hrx>"
+  LABELS
+    "requires-gpu-amd"
 )
 
 hrx_cc_test(
@@ -170,6 +186,8 @@ hrx_cc_test(
   ARGS
     "--hrx-library"
     "$<TARGET_FILE:libhrx::src::libhrx::hrx>"
+  LABELS
+    "requires-gpu-amd"
 )
 
 hrx_cc_test(
@@ -184,6 +202,8 @@ hrx_cc_test(
   ARGS
     "--hrx-library"
     "$<TARGET_FILE:libhrx::src::libhrx::hrx>"
+  LABELS
+    "requires-gpu-amd"
 )
 
 hrx_cc_test(
@@ -212,6 +232,8 @@ hrx_cc_test(
   ARGS
     "--hrx-library"
     "$<TARGET_FILE:libhrx::src::libhrx::hrx>"
+  LABELS
+    "requires-gpu-amd"
 )
 
 hrx_cc_test(
@@ -226,6 +248,8 @@ hrx_cc_test(
   ARGS
     "--hrx-library"
     "$<TARGET_FILE:libhrx::src::libhrx::hrx>"
+  LABELS
+    "requires-gpu-amd"
 )
 
 hrx_cc_test(
@@ -244,3 +268,27 @@ hrx_cc_test(
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
+
+if(IREE_ROCM_TEST_TARGET_CHIP MATCHES "^gfx")
+  iree_amdgpu_binary(
+    NAME
+      hrx_cts_noop_kernel
+    TARGET
+      "amdgcn-amd-amdhsa"
+    ARCH
+      "${IREE_ROCM_TEST_TARGET_CHIP}"
+    SRCS
+      "tests/executable/noop_kernel.c"
+  )
+
+  add_dependencies(libhrx_cts_hrx_cts_executable
+    libhrx_cts_hrx_cts_noop_kernel)
+
+  install(FILES
+      "${CMAKE_CURRENT_BINARY_DIR}/hrx_cts_noop_kernel.so"
+    DESTINATION
+      "${HRX_INSTALL_TESTS_DIR}/testdata/libhrx/cts"
+    COMPONENT
+      "${HRX_INSTALL_TESTS_COMPONENT}"
+  )
+endif()

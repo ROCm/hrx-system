@@ -665,6 +665,7 @@ iree_runtime_cc_test(
     tags = [
         "driver=amdgpu",
         "nodocker",
+        "requires-gpu-gfx1100",
     ],
     deps = [
         ":libhsa",

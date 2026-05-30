@@ -37,6 +37,7 @@ on:
       - main-staging
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
@@ -95,11 +96,31 @@ jobs:
       test_gpu: ${{ inputs.test_gpu || false }}
       run_tests: ${{ matrix.run_tests }}
       ctest_exclude_regex: ${{ matrix.ctest_exclude_regex }}
+      ctest_label_exclude_regex: "requires-gpu-"
+      cmake_options: |
+        -DIREE_ROCM_TEST_TARGET_CHIP=gfx942
       package: ${{ matrix.package }}
+
+  gpu_gfx942:
+    name: Linux / CMake / GPU gfx942
+    needs: cmake_linux
+    if: ${{ needs.cmake_linux.result == 'success' }}
+    uses: ./.github/workflows/test_core_linux_gpu.yml
+    permissions:
+      actions: read
+      contents: read
+    with:
+      name: Linux / CMake / GPU gfx942
+      artifact_run_id: ${{ github.run_id }}
+      device: gpu:0
+      ctest_label_regex: requires-gpu-amd
+      ctest_parallelism: 1
 
   summary:
     name: Linux / CMake / CI / Summary
-    needs: cmake_linux
+    needs:
+      - cmake_linux
+      - gpu_gfx942
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     steps:
@@ -107,6 +128,11 @@ jobs:
         run: |
           result="${{ needs.cmake_linux.result }}"
           echo "cmake_linux result: ${result}"
+          if [[ "${result}" != "success" ]]; then
+            exit 1
+          fi
+          result="${{ needs.gpu_gfx942.result }}"
+          echo "gpu_gfx942 result: ${result}"
           if [[ "${result}" != "success" ]]; then
             exit 1
           fi

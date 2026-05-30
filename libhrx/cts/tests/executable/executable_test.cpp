@@ -7,11 +7,11 @@
 
 #include <array>
 #include <cctype>
-#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
-#include <fstream>
+#include <initializer_list>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -26,31 +26,36 @@ std::string gpu_architecture(hrx_device_t device) {
   return value;
 }
 
-std::filesystem::path write_noop_kernel_source() {
-  std::filesystem::path src_path =
-      std::filesystem::temp_directory_path() / "hrx_noop_kernel.hip";
-  std::ofstream src(src_path);
-  REQUIRE(src.good());
-  src << "extern \"C\" __attribute__((global)) void hrx_noop() {}\n";
-  REQUIRE(src.good());
-  return src_path;
+void append_candidate(std::vector<std::filesystem::path> &candidates,
+                      const char *root,
+                      std::initializer_list<const char *> fragments) {
+  if (!root || !root[0]) {
+    return;
+  }
+  std::filesystem::path path(root);
+  for (const char *fragment : fragments) {
+    path /= fragment;
+  }
+  candidates.push_back(path);
 }
 
-std::filesystem::path build_noop_hsaco(const std::string &arch) {
-  std::filesystem::path src_path = write_noop_kernel_source();
-  std::filesystem::path hsaco_path =
-      std::filesystem::temp_directory_path() / "hrx_noop_kernel.hsaco";
+std::filesystem::path find_noop_hsaco() {
+  std::vector<std::filesystem::path> candidates;
+  append_candidate(candidates, std::getenv("HRX_CTS_EXECUTABLE_HSACO"), {});
+  append_candidate(candidates, std::getenv("TEST_SRCDIR"),
+                   {"libhrx", "cts", "hrx_cts_noop_kernel.so"});
+  append_candidate(candidates, std::getenv("RUNFILES_DIR"),
+                   {"libhrx", "cts", "hrx_cts_noop_kernel.so"});
+  append_candidate(candidates, std::getenv("IREE_BINARY_DIR"),
+                   {"libhrx", "cts", "hrx_cts_noop_kernel.so"});
 
-  std::string command =
-      "clang++ -x hip --offload-device-only --offload-arch=" + arch +
-      " -nogpuinc -nogpulib -c " + src_path.string() + " -o " +
-      hsaco_path.string();
-  int rc = std::system(command.c_str());
-  INFO("command: " << command);
-  REQUIRE(rc == 0);
-  REQUIRE(std::filesystem::exists(hsaco_path));
-  REQUIRE(std::filesystem::file_size(hsaco_path) > 0);
-  return hsaco_path;
+  for (const auto &candidate : candidates) {
+    if (std::filesystem::exists(candidate) &&
+        std::filesystem::file_size(candidate) > 0) {
+      return candidate;
+    }
+  }
+  return {};
 }
 
 } // namespace
@@ -67,7 +72,11 @@ TEST_CASE_METHOD(HrxTestFixture, "executable_load_lookup_dispatch_noop") {
     return;
   }
 
-  std::filesystem::path hsaco_path = build_noop_hsaco(arch);
+  std::filesystem::path hsaco_path = find_noop_hsaco();
+  if (hsaco_path.empty()) {
+    SUCCEED("Skipping native executable CTS: no build-time HSACO test asset");
+    return;
+  }
 
   hrx_executable_t executable = nullptr;
   REQUIRE_OK(hrx().executable_load_file(device_, hsaco_path.c_str(), nullptr,

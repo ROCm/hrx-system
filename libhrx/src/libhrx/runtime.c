@@ -109,6 +109,27 @@ hrx_status_t hrx_ensure_shared_state(void) {
   return hrx_ok_status();
 }
 
+#ifdef HRX_HAS_IREE_AMDGPU_DRIVER
+static void hrx_set_gpu_architecture_from_hal(iree_hal_device_t *hal_device,
+                                              hrx_device_s *dev) {
+  int64_t gfxip = 0;
+  iree_status_t status = iree_hal_device_query_i64(
+      hal_device, iree_make_cstring_view("hal.device"),
+      iree_make_cstring_view("gfxip"), &gfxip);
+  if (!iree_status_is_ok(status)) {
+    iree_status_ignore(status);
+    snprintf(dev->architecture, sizeof(dev->architecture), "unknown");
+    return;
+  }
+
+  int major = (int)((gfxip >> 16) & 0xff);
+  int minor = (int)((gfxip >> 8) & 0xff);
+  int stepping = (int)(gfxip & 0xff);
+  snprintf(dev->architecture, sizeof(dev->architecture), "gfx%d%d%d", major,
+           minor, stepping);
+}
+#endif // HRX_HAS_IREE_AMDGPU_DRIVER
+
 static void hrx_release_shared_state(void) {
   if (!g_shared.shared_initialized)
     return;
@@ -654,12 +675,7 @@ hrx_status_t hrx_gpu_initialize(uint32_t flags) {
     memcpy(dev->name, device_infos[info_index].name.data, name_len);
     dev->name[name_len] = '\0';
 
-    iree_host_size_t arch_len = device_infos[info_index].name.size;
-    if (arch_len >= sizeof(dev->architecture)) {
-      arch_len = sizeof(dev->architecture) - 1;
-    }
-    memcpy(dev->architecture, device_infos[info_index].name.data, arch_len);
-    dev->architecture[arch_len] = '\0';
+    hrx_set_gpu_architecture_from_hal(hal_device, dev);
 
     iree_status = hrx_device_profile_begin(dev, profile_sink);
     hrx_debug_print_iree_status("begin device profiling", iree_status);

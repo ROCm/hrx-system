@@ -43,7 +43,9 @@ int main(int argc, char *argv[]) {
   Catch::Session session;
 
   std::string hrx_library;
-  std::string hrx_device_spec = "cpu:0";
+  const char *hrx_device_env = std::getenv("HRX_CTS_DEVICE");
+  std::string hrx_device_spec =
+      hrx_device_env && hrx_device_env[0] ? hrx_device_env : "cpu:0";
 
   // Parse custom args.
   auto cli = session.cli() |

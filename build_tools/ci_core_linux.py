@@ -351,6 +351,74 @@ def flatten_therock_artifact(archive_path: Path, output_dir: Path) -> set[str]:
         close_tar_archive(tf)
 
 
+def extract_package_archive(archive_path: Path, output_dir: Path) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    tf = open_tar_archive(archive_path)
+    hardlinks: list[tuple[Path, str]] = []
+    try:
+        while member := tf.next():
+            dest_path = checked_dest(output_dir, member.name)
+            if member.isdir():
+                dest_path.mkdir(parents=True, exist_ok=True)
+            elif member.isfile():
+                dest_path.parent.mkdir(parents=True, exist_ok=True)
+                if dest_path.exists() or dest_path.is_symlink():
+                    dest_path.unlink()
+                source = tf.extractfile(member)
+                if source is None:
+                    raise RuntimeError(f"Could not read {member.name}")
+                with source, dest_path.open("wb") as out:
+                    shutil.copyfileobj(source, out)
+                mode = 0o666 | (member.mode & 0o111)
+                os.chmod(dest_path, mode)
+            elif member.issym():
+                dest_path.parent.mkdir(parents=True, exist_ok=True)
+                if dest_path.exists() or dest_path.is_symlink():
+                    dest_path.unlink()
+                dest_path.symlink_to(member.linkname)
+            elif member.islnk():
+                hardlinks.append((dest_path, member.linkname))
+            else:
+                raise RuntimeError(f"Unhandled tar member type: {member.name}")
+
+        for dest_path, linkname in hardlinks:
+            target_path = checked_dest(output_dir, linkname)
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+            if dest_path.exists() or dest_path.is_symlink():
+                dest_path.unlink()
+            os.link(target_path, dest_path)
+    finally:
+        close_tar_archive(tf)
+
+
+def find_downloaded_package(artifact_dir: Path, package_name: str) -> Path:
+    candidates = sorted(artifact_dir.glob(f"**/{package_name}-*.tar.zst"))
+    if not candidates:
+        raise FileNotFoundError(
+            f"Could not find {package_name}-*.tar.zst under {artifact_dir}"
+        )
+    if len(candidates) > 1:
+        log(f"  ?? Multiple {package_name} archives found; using {candidates[-1]}")
+    return candidates[-1]
+
+
+def extract_packages(args: argparse.Namespace) -> None:
+    artifact_dir = args.artifact_download_dir.resolve()
+    require_path(artifact_dir, "downloaded artifact directory")
+    package_roots = {
+        "hrx-public-linux-x86_64": args.public_install_dir.resolve(),
+        "hrx-public-deps-linux-x86_64": args.public_deps_dir.resolve(),
+        "hrx-tests-linux-x86_64": args.tests_install_dir.resolve(),
+    }
+    for package_name, output_dir in package_roots.items():
+        archive_path = find_downloaded_package(artifact_dir, package_name)
+        if output_dir.exists():
+            remove_tree(output_dir)
+        output_dir.mkdir(parents=True)
+        log(f"  ++ Extracting {archive_path} -> {output_dir}")
+        extract_package_archive(archive_path, output_dir)
+
+
 def create_s3_client():
     try:
         from botocore import UNSIGNED
@@ -730,17 +798,30 @@ def build_core(args: argparse.Namespace) -> None:
 def test_core(args: argparse.Namespace) -> None:
     rocm_root = args.rocm_root.resolve()
     smoke_build_dir = args.package_smoke_build_dir.resolve()
-    prepare_public_deps_root(args)
+    if args.prepare_public_deps:
+        prepare_public_deps_root(args)
     install_root = prepare_composed_install_root(args)
     installed_tests_dir = install_root / "share" / "hrx-system" / "tests"
 
-    require_path(rocm_root, "ROCm build root")
     require_path(installed_tests_dir / "CTestTestfile.cmake", "installed CTest file")
     require_path(install_root / "lib" / "libhrx.so", "installed libhrx.so")
     require_path(install_root / "bin" / "hrx-info", "installed hrx-info")
 
-    env = install_runtime_env(install_root, rocm_build_env(rocm_root))
-    env = add_sanitizer_runtime_env(env, sanitizer=args.sanitizer, rocm_root=rocm_root)
+    if rocm_root.exists():
+        base_env = rocm_build_env(rocm_root)
+    elif args.sanitizer != "none" or args.package_smoke:
+        require_path(rocm_root, "ROCm build root")
+        base_env = rocm_build_env(rocm_root)
+    else:
+        base_env = dict(os.environ)
+
+    env = install_runtime_env(install_root, base_env)
+    if args.sanitizer != "none":
+        env = add_sanitizer_runtime_env(env, sanitizer=args.sanitizer, rocm_root=rocm_root)
+    if args.cts_device:
+        env["HRX_CTS_DEVICE"] = args.cts_device
+    if args.test_tmpdir is not None:
+        env["HRX_TEST_TMPDIR"] = os.fspath(args.test_tmpdir.resolve())
 
     ctest_parallelism = args.ctest_parallelism or default_ctest_parallelism()
     ctest_cmd = [
@@ -755,11 +836,18 @@ def test_core(args: argparse.Namespace) -> None:
         ctest_cmd.extend(["-R", args.ctest_regex])
     if args.ctest_exclude_regex:
         ctest_cmd.extend(["-E", args.ctest_exclude_regex])
+    if args.ctest_label_regex:
+        ctest_cmd.extend(["-L", args.ctest_label_regex])
+    if args.ctest_label_exclude_regex:
+        ctest_cmd.extend(["-LE", args.ctest_label_exclude_regex])
     run(ctest_cmd, cwd=REPO_ROOT, env=env, stderr_to_stdout=True)
     run([install_root / "bin" / "hrx-info"], cwd=REPO_ROOT, env=env)
     run([install_root / "bin" / "hrx-info", "--device=cpu:0"], cwd=REPO_ROOT, env=env)
     if args.gpu:
         run([install_root / "bin" / "hrx-info", "--device=gpu:0"], cwd=REPO_ROOT, env=env)
+
+    if not args.package_smoke:
+        return
 
     sanitizer_link_flag = sanitizer_flag(args.sanitizer)
     smoke_link_flags = "-fuse-ld=lld"
@@ -1135,6 +1223,7 @@ def add_shared_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--tests-install-dir", type=Path, default=env_path("HRX_TESTS_INSTALL_DIR", default_output / "install" / "tests"))
     parser.add_argument("--public-deps-dir", type=Path, default=env_path("HRX_PUBLIC_DEPS_DIR", default_output / "install" / "public-deps"))
     parser.add_argument("--composed-install-dir", type=Path, default=env_path("HRX_COMPOSED_INSTALL_DIR", default_output / "install" / "composed"))
+    parser.add_argument("--artifact-download-dir", type=Path, default=env_path("HRX_ARTIFACT_DOWNLOAD_DIR", default_output / "downloaded-artifacts"))
     parser.add_argument("--package-smoke-build-dir", type=Path, default=env_path("HRX_PACKAGE_SMOKE_BUILD_DIR", default_output / "build" / "package-smoke"))
     parser.add_argument("--package-output-dir", type=Path, default=env_path("HRX_PACKAGE_OUTPUT_DIR", default_output / "dist"))
     parser.add_argument("--public-component", default=env_default("HRX_PUBLIC_COMPONENT", "HrxPublicDist"))
@@ -1145,8 +1234,14 @@ def add_shared_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--assertions", action=argparse.BooleanOptionalAction, default=env_bool("HRX_ASSERTIONS", False))
     parser.add_argument("--ctest-regex", default=env_default("HRX_CTEST_REGEX", ""))
     parser.add_argument("--ctest-exclude-regex", default=env_default("HRX_CTEST_EXCLUDE_REGEX", ""))
+    parser.add_argument("--ctest-label-regex", default=env_default("HRX_CTEST_LABEL_REGEX", ""))
+    parser.add_argument("--ctest-label-exclude-regex", default=env_default("HRX_CTEST_LABEL_EXCLUDE_REGEX", ""))
     parser.add_argument("--ctest-parallelism", type=int, default=env_int("HRX_CTEST_PARALLELISM", 0))
+    parser.add_argument("--cts-device", default=env_default("HRX_CTS_DEVICE", ""))
+    parser.add_argument("--test-tmpdir", type=Path, default=Path(os.environ["HRX_TEST_TMPDIR"]) if os.environ.get("HRX_TEST_TMPDIR") else None)
     parser.add_argument("--gpu", action="store_true", default=env_bool("HRX_TEST_GPU", False))
+    parser.add_argument("--prepare-public-deps", action=argparse.BooleanOptionalAction, default=env_bool("HRX_PREPARE_PUBLIC_DEPS", True))
+    parser.add_argument("--package-smoke", action=argparse.BooleanOptionalAction, default=env_bool("HRX_PACKAGE_SMOKE", True))
     parser.add_argument("--package", action=argparse.BooleanOptionalAction, default=env_bool("HRX_PACKAGE", True))
     parser.add_argument("--package-suffix", default=env_default("HRX_PACKAGE_SUFFIX", ""))
     parser.add_argument("--passthrough", action=argparse.BooleanOptionalAction, default=env_bool("HRX_PASSTHROUGH", True))
@@ -1165,6 +1260,8 @@ def main(argv: list[str] | None = None) -> int:
     add_shared_args(build_parser)
     test_parser = subparsers.add_parser("test", help="Validate build and install trees")
     add_shared_args(test_parser)
+    extract_parser = subparsers.add_parser("extract-packages", help="Extract downloaded HRX package artifacts")
+    add_shared_args(extract_parser)
     package_parser = subparsers.add_parser("package", help="Package an installed HRX/ROCm tree")
     add_shared_args(package_parser)
     args = parser.parse_args(argv)
@@ -1187,6 +1284,8 @@ def main(argv: list[str] | None = None) -> int:
         build_core(args)
     elif args.command == "test":
         test_core(args)
+    elif args.command == "extract-packages":
+        extract_packages(args)
     elif args.command == "package":
         package_core(args)
     return 0

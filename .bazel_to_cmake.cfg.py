@@ -60,6 +60,7 @@ class CustomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         copts = kwargs.get("copts")
         defines = kwargs.get("defines")
         includes = kwargs.get("includes")
+        tags = kwargs.get("tags")
         full_deps = [
             ":core",
             "@catch2//:catch2",
@@ -79,6 +80,7 @@ class CustomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         )
         if platform_deps_block:
             self._converter.body += platform_deps_block
+        labels_block = self._convert_string_list_block("LABELS", tags)
         self._converter.body += (
             f"hrx_cc_test(\n"
             f"{name_block}"
@@ -88,6 +90,7 @@ class CustomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
             f"{deps_block}"
             f"{args_block}"
             f"{includes_block}"
+            f"{labels_block}"
             f")\n\n"
         )
 

@@ -12,11 +12,13 @@ TEST_CASE("Runtime version is valid", "[lifecycle]") {
   REQUIRE(patch >= 0);
 }
 
-TEST_CASE("CPU init and shutdown", "[lifecycle][cpu]") {
-  // CPU is already initialized by main.cpp if we're on CPU.
-  // Test that device_count works.
+TEST_CASE("Selected accelerator device_count works", "[lifecycle]") {
   int count = 0;
-  REQUIRE_OK(hrx().cpu_device_count(&count));
+  if (g_test_device_type == HRX_ACCELERATOR_GPU) {
+    REQUIRE_OK(hrx().gpu_device_count(&count));
+  } else {
+    REQUIRE_OK(hrx().cpu_device_count(&count));
+  }
   REQUIRE(count > 0);
 }
 
@@ -33,8 +35,9 @@ TEST_CASE("GPU init and shutdown", "[lifecycle][gpu]") {
 }
 
 TEST_CASE("Double init returns ALREADY_EXISTS", "[lifecycle]") {
-  // CPU is already initialized. Calling again should return error.
-  hrx_status_t status = hrx().cpu_initialize(0);
+  hrx_status_t status = g_test_device_type == HRX_ACCELERATOR_GPU
+                            ? hrx().gpu_initialize(0)
+                            : hrx().cpu_initialize(0);
   REQUIRE(!hrx_status_is_ok(status));
   REQUIRE(hrx().status_code(status) == HRX_STATUS_ALREADY_EXISTS);
   hrx().status_ignore(status);

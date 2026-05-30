@@ -729,6 +729,7 @@ iree_cc_test(
   LABELS
     "driver=amdgpu"
     "nodocker"
+    "requires-gpu-gfx1100"
   RESOURCE_GROUP
     iree-hal-drivers-amdgpu-tests
 )

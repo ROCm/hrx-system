@@ -13,6 +13,8 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
+GPU_CTS_TAGS = ["requires-gpu-amd"]
+
 hrx_cc_library(
     name = "core",
     srcs = [
@@ -47,51 +49,61 @@ hrx_cts_test(
 hrx_cts_test(
     name = "lifecycle",
     srcs = ["tests/lifecycle/lifecycle_test.cpp"],
+    tags = GPU_CTS_TAGS,
 )
 
 hrx_cts_test(
     name = "device",
     srcs = ["tests/device/device_test.cpp"],
+    tags = GPU_CTS_TAGS,
 )
 
 hrx_cts_test(
     name = "allocator",
     srcs = ["tests/allocator/allocator_test.cpp"],
+    tags = GPU_CTS_TAGS,
 )
 
 hrx_cts_test(
     name = "semaphore",
     srcs = ["tests/semaphore/semaphore_test.cpp"],
+    tags = GPU_CTS_TAGS,
 )
 
 hrx_cts_test(
     name = "stream",
     srcs = ["tests/stream/stream_test.cpp"],
+    tags = GPU_CTS_TAGS,
 )
 
 hrx_cts_test(
     name = "memory",
     srcs = ["tests/memory/memory_test.cpp"],
+    tags = GPU_CTS_TAGS,
 )
 
 hrx_cts_test(
     name = "transfer",
     srcs = ["tests/transfer/transfer_test.cpp"],
+    tags = GPU_CTS_TAGS,
 )
 
 hrx_cts_test(
     name = "stream_ops",
     srcs = ["tests/stream_ops/stream_ops_test.cpp"],
+    tags = GPU_CTS_TAGS,
 )
 
 hrx_cts_test(
     name = "executable",
     srcs = ["tests/executable/executable_test.cpp"],
+    tags = GPU_CTS_TAGS,
 )
 
 hrx_cts_test(
     name = "queue_ops",
     srcs = ["tests/queue_ops/queue_ops_test.cpp"],
+    tags = GPU_CTS_TAGS,
 )
 
 hrx_cts_test(
@@ -102,11 +114,13 @@ hrx_cts_test(
 hrx_cts_test(
     name = "refcount",
     srcs = ["tests/refcount/refcount_test.cpp"],
+    tags = GPU_CTS_TAGS,
 )
 
 hrx_cts_test(
     name = "virtual_memory",
     srcs = ["tests/virtual_memory/virtual_memory_test.cpp"],
+    tags = GPU_CTS_TAGS,
 )
 
 hrx_cts_test(
