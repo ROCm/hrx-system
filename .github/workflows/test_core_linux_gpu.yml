@@ -73,7 +73,7 @@ jobs:
       HRX_CTEST_LABEL_REGEX: ${{ inputs.ctest_label_regex || 'requires-gpu-amd' }}
       HRX_CTEST_LABEL_EXCLUDE_REGEX: ${{ inputs.ctest_label_exclude_regex || '' }}
       HRX_CTEST_PARALLELISM: ${{ inputs.ctest_parallelism || 1 }}
-      HRX_TEST_TMPDIR: ${{ runner.temp }}/hrx-system-installed-tests-${{ github.run_id }}-${{ github.run_attempt }}
+      HRX_TEST_TMPDIR: ${{ github.workspace }}/build/linux-gpu/test-tmp
       PIP_CACHE_DIR: ${{ github.workspace }}/build/linux-gpu/caches/pip
     steps:
       - name: Checkout repository
