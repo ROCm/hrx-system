@@ -97,8 +97,11 @@ static inline bool iree_shm_handle_is_valid(iree_shm_handle_t handle) {
 // binding constraint.
 #define IREE_SHM_MAX_NAME_LENGTH 255
 #else
-// Linux (and other POSIX): NAME_MAX (255) on the /dev/shm/ tmpfs.
-#define IREE_SHM_MAX_NAME_LENGTH 255
+// Linux (and other POSIX): POSIX shm_open names include the leading '/'.
+// Some libc implementations treat NAME_MAX as including the NUL terminator
+// during /dev/shm path construction, so keep the public cap one byte below
+// NAME_MAX for portable create/open behavior.
+#define IREE_SHM_MAX_NAME_LENGTH 254
 #endif  // IREE_PLATFORM_*
 
 // A mapped shared memory region.
