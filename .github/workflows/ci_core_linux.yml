@@ -41,7 +41,7 @@ permissions:
 
 jobs:
   cmake_linux:
-    name: Linux / CMake / CI / ${{ matrix.variant }}
+    name: Linux / CMake / CI
     strategy:
       fail-fast: false
       matrix:

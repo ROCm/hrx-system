@@ -130,9 +130,15 @@ def run(
     cwd: Path | None = None,
     env: dict[str, str] | None = None,
     stderr_to_stdout: bool = False,
+    pretty_command: bool = False,
 ) -> None:
     cmd = [os.fspath(arg) for arg in args]
-    log(f"++ Exec [{cwd or Path.cwd()}]$ {' '.join(shlex.quote(a) for a in cmd)}")
+    if pretty_command:
+        formatted_cmd = " \\\n  ".join(shlex.join([arg]) for arg in cmd)
+        log(f"++ Exec [{cwd or Path.cwd()}]$")
+        log(f"  {formatted_cmd}")
+    else:
+        log(f"++ Exec [{cwd or Path.cwd()}]$ {shlex.join(cmd)}")
     stderr = subprocess.STDOUT if stderr_to_stdout else None
     subprocess.run(cmd, cwd=cwd, env=env, check=True, stderr=stderr)
 
@@ -570,6 +576,62 @@ def sanitizer_options(sanitizer: str) -> list[str]:
     return [f"IREE_ENABLE_{sanitizer.upper()}=ON"]
 
 
+def sanitizer_debug_options(sanitizer: str, *, assertions: bool) -> list[str]:
+    if sanitizer == "none":
+        return []
+    flags = [
+        "-O1",
+        "-g",
+        "-fno-omit-frame-pointer",
+        "-fno-optimize-sibling-calls",
+    ]
+    if not assertions:
+        flags.append("-DNDEBUG")
+    joined_flags = " ".join(flags)
+    return [
+        f"CMAKE_C_FLAGS_RELWITHDEBINFO={joined_flags}",
+        f"CMAKE_CXX_FLAGS_RELWITHDEBINFO={joined_flags}",
+    ]
+
+
+def sanitizer_configure_options(sanitizer: str) -> list[str]:
+    if sanitizer != "msan":
+        return []
+    # Google Benchmark uses try_run checks to select its regex backend. Those
+    # checks run against uninstrumented system libraries under MSAN and can fail
+    # even though the backend builds. Preseed the backend choice so sanitizer
+    # CI still compiles benchmark binaries.
+    return [
+        "HAVE_STD_REGEX=OFF",
+        "HAVE_GNU_POSIX_REGEX=OFF",
+        "HAVE_POSIX_REGEX=ON",
+    ]
+
+
+def add_sanitizer_runtime_env(
+    env: dict[str, str], *, sanitizer: str, rocm_root: Path
+) -> dict[str, str]:
+    if sanitizer == "none":
+        return env
+    env = dict(env)
+    symbolizer_path = rocm_root / "lib" / "llvm" / "bin" / "llvm-symbolizer"
+    if symbolizer_path.exists():
+        for key in [
+            "ASAN_SYMBOLIZER_PATH",
+            "LSAN_SYMBOLIZER_PATH",
+            "MSAN_SYMBOLIZER_PATH",
+            "TSAN_SYMBOLIZER_PATH",
+            "UBSAN_SYMBOLIZER_PATH",
+        ]:
+            env.setdefault(key, os.fspath(symbolizer_path))
+    env.setdefault("ASAN_OPTIONS", "symbolize=1:fast_unwind_on_malloc=0")
+    env.setdefault("LSAN_OPTIONS", "symbolize=1:fast_unwind_on_malloc=0")
+    env.setdefault("MSAN_OPTIONS", "symbolize=1")
+    env.setdefault("TSAN_OPTIONS", "symbolize=1")
+    env.setdefault("UBSAN_OPTIONS", "print_stacktrace=1")
+    return env
+
+
 def build_core(args: argparse.Namespace) -> None:
     rocm_root = args.rocm_root.resolve()
     build_dir = args.build_dir.resolve()
@@ -609,22 +671,28 @@ def build_core(args: argparse.Namespace) -> None:
         f"IREE_ENABLE_ASSERTIONS={'ON' if args.assertions else 'OFF'}",
     ]
     cmake_defines.extend(sanitizer_options(args.sanitizer))
+    cmake_defines.extend(
+        sanitizer_debug_options(args.sanitizer, assertions=args.assertions)
+    )
+    cmake_defines.extend(sanitizer_configure_options(args.sanitizer))
     cmake_defines.extend(cmake_options_from_env())
     cmake_defines.extend(args.cmake_option)
 
     env = rocm_build_env(rocm_root)
+    cmake_configure_cmd = [
+        "cmake",
+        "-S",
+        REPO_ROOT,
+        "-B",
+        build_dir,
+        "-GNinja",
+        *[f"-D{option.removeprefix('-D')}" for option in cmake_defines],
+    ]
     run(
-        [
-            "cmake",
-            "-S",
-            REPO_ROOT,
-            "-B",
-            build_dir,
-            "-GNinja",
-            *[f"-D{option.removeprefix('-D')}" for option in cmake_defines],
-        ],
+        cmake_configure_cmd,
         cwd=REPO_ROOT,
         env=env,
+        pretty_command=True,
     )
     run(["cmake", "--build", build_dir, "--target", args.target], cwd=REPO_ROOT, env=env)
 
@@ -662,6 +730,7 @@ def test_core(args: argparse.Namespace) -> None:
     require_path(install_root / "bin" / "hrx-info", "installed hrx-info")
 
     env = install_runtime_env(install_root, rocm_build_env(rocm_root))
+    env = add_sanitizer_runtime_env(env, sanitizer=args.sanitizer, rocm_root=rocm_root)
 
     ctest_parallelism = args.ctest_parallelism or default_ctest_parallelism()
     ctest_cmd = [
