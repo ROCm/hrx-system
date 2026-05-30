@@ -32,7 +32,7 @@ on:
         default: ""
       ctest_regex:
         type: string
-        default: libhrx/cts
+        default: ""
       test_gpu:
         type: boolean
         default: false

@@ -41,7 +41,6 @@ jobs:
       artifact_set: core
       build_type: RelWithDebInfo
       sanitizer: none
-      ctest_regex: libhrx/cts
       test_gpu: false
       package: true
       package_suffix: ${{ github.ref_name }}

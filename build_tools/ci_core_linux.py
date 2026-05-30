@@ -489,7 +489,7 @@ def build_core(args: argparse.Namespace) -> None:
     ranlib = rocm_tool(rocm_root, "llvm-ranlib")
 
     cmake_prefix_path = ";".join([str(rocm_root)])
-    ctest_enabled = bool(args.ctest_regex)
+    ctest_enabled = True
     cmake_defines = [
         f"CMAKE_PREFIX_PATH={cmake_prefix_path}",
         f"CMAKE_INSTALL_PREFIX={install_prefix}",
@@ -706,7 +706,7 @@ def add_shared_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--build-type", default="RelWithDebInfo")
     parser.add_argument("--target", default="all")
     parser.add_argument("--sanitizer", default="none", choices=["none", "asan", "tsan", "ubsan"])
-    parser.add_argument("--ctest-regex", default="libhrx/cts")
+    parser.add_argument("--ctest-regex", default="")
     parser.add_argument("--gpu", action="store_true")
     parser.add_argument("--package", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--package-suffix", default="")

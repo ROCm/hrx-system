@@ -52,7 +52,6 @@ jobs:
       artifact_set: ${{ inputs.artifact_set || 'core' }}
       build_type: RelWithDebInfo
       sanitizer: none
-      ctest_regex: libhrx/cts
       test_gpu: ${{ inputs.test_gpu || false }}
       package: true
       artifact_name: hrx-core-linux-x86_64
