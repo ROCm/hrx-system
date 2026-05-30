@@ -54,4 +54,3 @@ jobs:
       sanitizer: none
       test_gpu: ${{ inputs.test_gpu || false }}
       package: true
-      artifact_name: hrx-core-linux-x86_64

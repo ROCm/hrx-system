@@ -98,4 +98,5 @@ set_target_properties(libhrx_src_passthrough_hip_buffer_tracer PROPERTIES
 )
 install(FILES hip_function_table.h
   DESTINATION include/passthrough
+  COMPONENT HrxPassthroughDist
 )

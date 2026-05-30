@@ -67,6 +67,24 @@ ARTIFACT_SETS = {
     },
 }
 
+PACKAGE_NAMES = [
+    "hrx-public-linux-x86_64",
+    "hrx-public-deps-linux-x86_64",
+    "hrx-tests-linux-x86_64",
+    "hrx-rocm-buildenv-linux-x86_64",
+]
+
+PUBLIC_DEPS_REQUIRED_GLOBS = [
+    "lib/libhsa-runtime64.so*",
+    "lib/libhsa-amd-aqlprofile64.so*",
+]
+
+PUBLIC_DEPS_OPTIONAL_GLOBS = [
+    "lib/libhsakmt.*",
+    "lib/librocprofiler-register.so*",
+    "lib/rocm_sysdeps/lib/*.so*",
+]
+
 
 @dataclass(frozen=True)
 class S3Object:
@@ -138,14 +156,46 @@ def copy_tree_contents(src: Path, dst: Path, *, skip_names: set[str] | None = No
         if child.name in skip_names:
             continue
         target = dst / child.name
-        if target.exists() or target.is_symlink():
-            remove_tree(target)
         if child.is_symlink():
+            if target.exists() or target.is_symlink():
+                remove_tree(target)
             target.symlink_to(os.readlink(child))
         elif child.is_dir():
-            shutil.copytree(child, target, symlinks=True)
+            if target.exists() or target.is_symlink():
+                if not target.is_dir() or target.is_symlink():
+                    remove_tree(target)
+                    shutil.copytree(child, target, symlinks=True)
+                else:
+                    copy_tree_contents(child, target)
+            else:
+                shutil.copytree(child, target, symlinks=True)
         else:
+            if target.exists() or target.is_symlink():
+                remove_tree(target)
             shutil.copy2(child, target, follow_symlinks=False)
+
+
+def copy_path(src: Path, dst: Path) -> None:
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if dst.exists() or dst.is_symlink():
+        remove_tree(dst)
+    if src.is_symlink():
+        dst.symlink_to(os.readlink(src))
+    elif src.is_dir():
+        shutil.copytree(src, dst, symlinks=True)
+    else:
+        shutil.copy2(src, dst, follow_symlinks=False)
+
+
+def copy_relative_path(src_root: Path, dst_root: Path, relpath: Path) -> None:
+    copy_path(src_root / relpath, dst_root / relpath)
+
+
+def path_relative_to(path: Path, root: Path) -> Path | None:
+    try:
+        return path.resolve().relative_to(root.resolve())
+    except ValueError:
+        return None
 
 
 def rocm_llvm_bin(rocm_root: Path) -> Path:
@@ -164,6 +214,20 @@ def rocm_build_env(rocm_root: Path, base_env: dict[str, str] | None = None) -> d
     llvm_bin = rocm_llvm_bin(rocm_root)
     env["PATH"] = f"{llvm_bin}:{rocm_root / 'bin'}:{env.get('PATH', '')}"
     env["CMAKE_PREFIX_PATH"] = f"{rocm_root}:{env.get('CMAKE_PREFIX_PATH', '')}"
+    return env
+
+
+def install_runtime_env(root: Path, base_env: dict[str, str] | None = None) -> dict[str, str]:
+    env = dict(base_env or os.environ)
+    lib_paths = [
+        root / "lib",
+        root / "lib" / "rocm_sysdeps" / "lib",
+    ]
+    env["LD_LIBRARY_PATH"] = ":".join(
+        [str(path) for path in lib_paths] + [env.get("LD_LIBRARY_PATH", "")]
+    )
+    env["PATH"] = f"{root / 'bin'}:{env.get('PATH', '')}"
+    env["CMAKE_PREFIX_PATH"] = f"{root}:{env.get('CMAKE_PREFIX_PATH', '')}"
     return env
 
 
@@ -509,7 +573,8 @@ def sanitizer_options(sanitizer: str) -> list[str]:
 def build_core(args: argparse.Namespace) -> None:
     rocm_root = args.rocm_root.resolve()
     build_dir = args.build_dir.resolve()
-    install_prefix = args.install_prefix.resolve()
+    public_install_dir = args.public_install_dir.resolve()
+    tests_install_dir = args.tests_install_dir.resolve()
     require_path(rocm_root, "ROCm build root")
 
     c_compiler = rocm_tool(rocm_root, "clang")
@@ -521,7 +586,7 @@ def build_core(args: argparse.Namespace) -> None:
     ctest_enabled = True
     cmake_defines = [
         f"CMAKE_PREFIX_PATH={cmake_prefix_path}",
-        f"CMAKE_INSTALL_PREFIX={install_prefix}",
+        f"CMAKE_INSTALL_PREFIX={public_install_dir}",
         "CMAKE_INSTALL_LIBDIR=lib",
         f"CMAKE_C_COMPILER={c_compiler}",
         f"CMAKE_CXX_COMPILER={cxx_compiler}",
@@ -561,27 +626,41 @@ def build_core(args: argparse.Namespace) -> None:
         env=env,
     )
     run(["cmake", "--build", build_dir, "--target", args.target], cwd=REPO_ROOT, env=env)
-    run(["cmake", "--install", build_dir], cwd=REPO_ROOT, env=env)
+
+    for install_dir, component in [
+        (public_install_dir, args.public_component),
+        (tests_install_dir, args.tests_component),
+    ]:
+        if install_dir.exists():
+            remove_tree(install_dir)
+        run(
+            [
+                "cmake",
+                "--install",
+                build_dir,
+                "--prefix",
+                install_dir,
+                "--component",
+                component,
+            ],
+            cwd=REPO_ROOT,
+            env=env,
+        )
 
 
 def test_core(args: argparse.Namespace) -> None:
     rocm_root = args.rocm_root.resolve()
-    build_dir = args.build_dir.resolve()
-    install_prefix = args.install_prefix.resolve()
     smoke_build_dir = args.package_smoke_build_dir.resolve()
-    installed_tests_dir = install_prefix / "share" / "hrx-system" / "tests"
+    prepare_public_deps_root(args)
+    install_root = prepare_composed_install_root(args)
+    installed_tests_dir = install_root / "share" / "hrx-system" / "tests"
 
     require_path(rocm_root, "ROCm build root")
     require_path(installed_tests_dir / "CTestTestfile.cmake", "installed CTest file")
-    require_path(install_prefix / "lib" / "libhrx.so", "installed libhrx.so")
-    require_path(install_prefix / "bin" / "hrx-info", "installed hrx-info")
+    require_path(install_root / "lib" / "libhrx.so", "installed libhrx.so")
+    require_path(install_root / "bin" / "hrx-info", "installed hrx-info")
 
-    env = rocm_build_env(rocm_root)
-    env["LD_LIBRARY_PATH"] = (
-        f"{install_prefix / 'lib'}:{rocm_root / 'lib'}:{env.get('LD_LIBRARY_PATH', '')}"
-    )
-    env["PATH"] = f"{install_prefix / 'bin'}:{env['PATH']}"
-    env["CMAKE_PREFIX_PATH"] = f"{install_prefix}:{rocm_root}:{env.get('CMAKE_PREFIX_PATH', '')}"
+    env = install_runtime_env(install_root, rocm_build_env(rocm_root))
 
     ctest_parallelism = args.ctest_parallelism or default_ctest_parallelism()
     ctest_cmd = [
@@ -595,10 +674,10 @@ def test_core(args: argparse.Namespace) -> None:
     if args.ctest_regex:
         ctest_cmd.extend(["-R", args.ctest_regex])
     run(ctest_cmd, cwd=REPO_ROOT, env=env, stderr_to_stdout=True)
-    run([install_prefix / "bin" / "hrx-info"], cwd=REPO_ROOT, env=env)
-    run([install_prefix / "bin" / "hrx-info", "--device=cpu:0"], cwd=REPO_ROOT, env=env)
+    run([install_root / "bin" / "hrx-info"], cwd=REPO_ROOT, env=env)
+    run([install_root / "bin" / "hrx-info", "--device=cpu:0"], cwd=REPO_ROOT, env=env)
     if args.gpu:
-        run([install_prefix / "bin" / "hrx-info", "--device=gpu:0"], cwd=REPO_ROOT, env=env)
+        run([install_root / "bin" / "hrx-info", "--device=gpu:0"], cwd=REPO_ROOT, env=env)
 
     run(
         [
@@ -608,7 +687,7 @@ def test_core(args: argparse.Namespace) -> None:
             "-B",
             smoke_build_dir,
             "-GNinja",
-            f"-DCMAKE_PREFIX_PATH={install_prefix};{rocm_root}",
+            f"-DCMAKE_PREFIX_PATH={install_root};{rocm_root}",
             f"-DCMAKE_C_COMPILER={rocm_tool(rocm_root, 'clang')}",
             f"-DCMAKE_CXX_COMPILER={rocm_tool(rocm_root, 'clang++')}",
             f"-DCMAKE_AR={rocm_tool(rocm_root, 'llvm-ar')}",
@@ -625,6 +704,31 @@ def test_core(args: argparse.Namespace) -> None:
     run([smoke_build_dir / "hrx_package_smoke_cxx"], cwd=REPO_ROOT, env=env)
 
 
+ROCM_BUILDENV_EXCLUDE_PATHS = {
+    "bin/hrx-info",
+    "env.sh",
+    "hrx-public-linux-x86_64-env.sh",
+    "hrx-public-deps-linux-x86_64-env.sh",
+    "hrx-tests-linux-x86_64-env.sh",
+    "hrx-rocm-buildenv-linux-x86_64-env.sh",
+    "include/hrx",
+    "include/passthrough",
+    "lib/cmake/hrx",
+    "lib/libhrx.so",
+    "share/hrx-cts",
+    "share/hrx-system",
+}
+
+ROCM_BUILDENV_EXCLUDE_PREFIXES = (
+    "include/hrx/",
+    "include/passthrough/",
+    "lib/cmake/hrx/",
+    "lib/libhrx.so.",
+    "share/hrx-cts/",
+    "share/hrx-system/",
+)
+
+
 def tar_filter(info: tarfile.TarInfo) -> tarfile.TarInfo:
     info.uid = 0
     info.gid = 0
@@ -633,74 +737,280 @@ def tar_filter(info: tarfile.TarInfo) -> tarfile.TarInfo:
     return info
 
 
-def create_tar_zst(source_dir: Path, tarball_path: Path) -> None:
+def make_env_script_content() -> str:
+    return """#!/usr/bin/env bash
+# Source this file to use this HRX installation overlay.
+_hrx_env_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export HRX_HOME="${_hrx_env_dir}"
+export ROCM_HOME="${_hrx_env_dir}"
+export PATH="${_hrx_env_dir}/bin:${PATH}"
+export LD_LIBRARY_PATH="${_hrx_env_dir}/lib:${_hrx_env_dir}/lib/rocm_sysdeps/lib:${LD_LIBRARY_PATH:-}"
+export CMAKE_PREFIX_PATH="${_hrx_env_dir}:${CMAKE_PREFIX_PATH:-}"
+unset _hrx_env_dir
+"""
+
+
+def should_exclude_tar_path(
+    arcname: str,
+    *,
+    exclude_paths: set[str],
+    exclude_prefixes: tuple[str, ...],
+) -> bool:
+    return arcname in exclude_paths or any(
+        arcname.startswith(prefix) for prefix in exclude_prefixes
+    )
+
+
+def create_tar_zst(
+    source_dir: Path,
+    tarball_path: Path,
+    *,
+    exclude_paths: set[str] | None = None,
+    exclude_prefixes: tuple[str, ...] = (),
+) -> None:
     try:
         import zstandard
     except ModuleNotFoundError as e:
         raise RuntimeError("Install the zstandard Python package") from e
     tarball_path.parent.mkdir(parents=True, exist_ok=True)
+    exclude_paths = exclude_paths or set()
+
+    def filter_member(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
+        if should_exclude_tar_path(
+            info.name, exclude_paths=exclude_paths, exclude_prefixes=exclude_prefixes
+        ):
+            return None
+        return tar_filter(info)
+
     cctx = zstandard.ZstdCompressor(level=3, threads=-1)
     with tarball_path.open("wb") as f:
         with cctx.stream_writer(f, closefd=False) as zstd_stream:
             with tarfile.open(fileobj=zstd_stream, mode="w|") as tf:
                 for child in sorted(source_dir.iterdir(), key=lambda p: p.name):
-                    tf.add(child, arcname=child.name, recursive=True, filter=tar_filter)
+                    tf.add(child, arcname=child.name, recursive=True, filter=filter_member)
 
 
-def write_env_script(prefix: Path) -> None:
-    content = """#!/usr/bin/env bash
-# Source this file to use this HRX core installation.
-_hrx_env_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export HRX_HOME="${_hrx_env_dir}"
-export ROCM_HOME="${_hrx_env_dir}"
-export PATH="${_hrx_env_dir}/bin:${PATH}"
-export LD_LIBRARY_PATH="${_hrx_env_dir}/lib:${LD_LIBRARY_PATH:-}"
-export CMAKE_PREFIX_PATH="${_hrx_env_dir}:${CMAKE_PREFIX_PATH:-}"
-unset _hrx_env_dir
-"""
-    path = prefix / "env.sh"
-    path.write_text(content)
-    path.chmod(0o755)
+def write_package_env_script(output_dir: Path, script_name: str) -> Path:
+    script_path = output_dir / script_name
+    script_path.write_text(make_env_script_content())
+    script_path.chmod(0o755)
+    return script_path
 
 
-def package_core(args: argparse.Namespace) -> None:
+def ldd_rocm_dependencies(rocm_root: Path, binary: Path) -> list[Path]:
+    if not binary.exists():
+        return []
+    result = subprocess.run(
+        ["ldd", binary],
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    deps: list[Path] = []
+    for line in result.stdout.splitlines():
+        match = re.search(r"=>\s+(\S+)\s+\(", line)
+        if not match:
+            match = re.match(r"\s*(/\S+)\s+\(", line)
+        if not match:
+            continue
+        dep_path = Path(match.group(1))
+        if path_relative_to(dep_path, rocm_root) is not None:
+            deps.append(dep_path)
+    return deps
+
+
+def copy_matching_rocm_paths(rocm_root: Path, dst_root: Path, patterns: list[str]) -> list[Path]:
+    copied: list[Path] = []
+    for pattern in patterns:
+        for src in sorted(rocm_root.glob(pattern)):
+            relpath = src.relative_to(rocm_root)
+            copy_relative_path(rocm_root, dst_root, relpath)
+            copied.append(relpath)
+    return copied
+
+
+def prepare_public_deps_root(args: argparse.Namespace) -> None:
     rocm_root = args.rocm_root.resolve()
-    install_prefix = args.install_prefix.resolve()
-    output_dir = args.output_dir.resolve()
-    package_root = output_dir / "hrx-core"
+    deps_root = args.public_deps_dir.resolve()
     require_path(rocm_root, "ROCm build root")
-    require_path(install_prefix / "lib" / "libhrx.so", "installed libhrx.so")
-    require_path(install_prefix / "bin" / "hrx-info", "installed hrx-info")
-    require_path(install_prefix / "lib" / "cmake" / "hrx" / "hrx-config.cmake", "installed hrx CMake package")
 
-    if package_root.exists():
-        remove_tree(package_root)
-    package_root.mkdir(parents=True)
-    log(f"Copying ROCm/HRX install root: {install_prefix} -> {package_root}")
-    copy_tree_contents(install_prefix, package_root, skip_names={".download_cache"})
-    write_env_script(package_root)
+    if deps_root.exists():
+        remove_tree(deps_root)
+    deps_root.mkdir(parents=True)
+
+    missing_required = []
+    for pattern in PUBLIC_DEPS_REQUIRED_GLOBS:
+        if not list(rocm_root.glob(pattern)):
+            missing_required.append(pattern)
+    if missing_required:
+        raise RuntimeError(
+            "Missing required public dependency files in ROCm root:\n  "
+            + "\n  ".join(missing_required)
+        )
+
+    copied = copy_matching_rocm_paths(
+        rocm_root, deps_root, PUBLIC_DEPS_REQUIRED_GLOBS + PUBLIC_DEPS_OPTIONAL_GLOBS
+    )
+    for seed in [
+        rocm_root / "lib" / "libhsa-runtime64.so",
+        rocm_root / "lib" / "libhsa-amd-aqlprofile64.so",
+    ]:
+        for dep_path in ldd_rocm_dependencies(rocm_root, seed):
+            relpath = dep_path.resolve().relative_to(rocm_root.resolve())
+            copy_relative_path(rocm_root, deps_root, relpath)
+            copied.append(relpath)
 
     manifest = {
         "generated_at": dt.datetime.now(dt.UTC).isoformat(),
-        "package": "hrx-core",
+        "package": "hrx-public-deps-linux-x86_64",
         "platform": platform.platform(),
         "rocm_root": str(rocm_root),
-        "hrx_install": str(install_prefix),
+        "copied_paths": sorted({os.fspath(path) for path in copied}),
     }
     rocm_manifest = rocm_root / ".hrx-rocm-artifacts.json"
     if rocm_manifest.exists():
         manifest["rocm_artifacts"] = json.loads(rocm_manifest.read_text())
-    (package_root / ".hrx-core-package.json").write_text(
+    (deps_root / ".hrx-package.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n"
     )
 
-    package_stem = args.package_stem or f"hrx-core-linux-x86_64-{manifest['generated_at'][:10]}"
+    log(f"Public dependency root ready: {deps_root}")
+
+
+def prepare_composed_install_root(args: argparse.Namespace) -> Path:
+    composed_root = args.composed_install_dir.resolve()
+    if composed_root.exists():
+        remove_tree(composed_root)
+    composed_root.mkdir(parents=True)
+    for source_root in [
+        args.public_deps_dir.resolve(),
+        args.public_install_dir.resolve(),
+        args.tests_install_dir.resolve(),
+    ]:
+        require_path(source_root, "install overlay root")
+        copy_tree_contents(source_root, composed_root)
+    return composed_root
+
+
+def write_package_manifest(
+    manifest_path: Path,
+    *,
+    package_name: str,
+    source_root: Path,
+    tarball_path: Path,
+    rocm_root: Path | None = None,
+) -> None:
+    manifest = {
+        "generated_at": dt.datetime.now(dt.UTC).isoformat(),
+        "package": package_name,
+        "platform": platform.platform(),
+        "source_root": str(source_root),
+        "tarball": tarball_path.name,
+        "tarball_sha256": sha256_file(tarball_path),
+    }
+    if rocm_root:
+        rocm_manifest = rocm_root / ".hrx-rocm-artifacts.json"
+        if rocm_manifest.exists():
+            manifest["rocm_artifacts"] = json.loads(rocm_manifest.read_text())
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+
+
+def package_tree(
+    *,
+    package_name: str,
+    source_root: Path,
+    output_dir: Path,
+    suffix: str,
+    rocm_root: Path | None = None,
+    env_script_name: str | None = None,
+    exclude_paths: set[str] | None = None,
+    exclude_prefixes: tuple[str, ...] = (),
+) -> None:
+    require_path(source_root, f"{package_name} source root")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    package_exclude_paths = set(exclude_paths or set())
+    package_exclude_paths.add("env.sh")
+    if env_script_name:
+        package_exclude_paths.add(env_script_name)
+
+    package_stem = f"{package_name}-{suffix}" if suffix else package_name
     tarball_path = output_dir / f"{package_stem}.tar.zst"
-    create_tar_zst(package_root, tarball_path)
+    if tarball_path.exists():
+        tarball_path.unlink()
+    create_tar_zst(
+        source_root,
+        tarball_path,
+        exclude_paths=package_exclude_paths,
+        exclude_prefixes=exclude_prefixes,
+    )
+    env_script_path = None
+    if env_script_name:
+        env_script_path = write_package_env_script(output_dir, env_script_name)
     manifest_path = output_dir / f"{package_stem}.manifest.json"
-    shutil.copy2(package_root / ".hrx-core-package.json", manifest_path)
+    write_package_manifest(
+        manifest_path,
+        package_name=package_name,
+        source_root=source_root,
+        tarball_path=tarball_path,
+        rocm_root=rocm_root,
+    )
     log(f"Created {tarball_path}")
+    if env_script_path:
+        log(f"Created {env_script_path}")
     log(f"Created {manifest_path}")
+
+
+def package_core(args: argparse.Namespace) -> None:
+    rocm_root = args.rocm_root.resolve()
+    output_dir = args.package_output_dir.resolve()
+    suffix = args.package_suffix or dt.datetime.now(dt.UTC).strftime("%Y-%m-%d")
+
+    require_path(args.public_install_dir.resolve() / "lib" / "libhrx.so", "public libhrx.so")
+    require_path(args.public_install_dir.resolve() / "bin" / "hrx-info", "public hrx-info")
+    require_path(
+        args.public_install_dir.resolve() / "lib" / "cmake" / "hrx" / "hrx-config.cmake",
+        "public hrx CMake package",
+    )
+    require_path(
+        args.tests_install_dir.resolve() / "share" / "hrx-system" / "tests" / "CTestTestfile.cmake",
+        "installed CTest file",
+    )
+    prepare_public_deps_root(args)
+
+    package_tree(
+        package_name="hrx-public-linux-x86_64",
+        source_root=args.public_install_dir.resolve(),
+        output_dir=output_dir,
+        suffix=suffix,
+        rocm_root=rocm_root,
+        env_script_name="hrx-public-linux-x86_64-env.sh",
+    )
+    package_tree(
+        package_name="hrx-public-deps-linux-x86_64",
+        source_root=args.public_deps_dir.resolve(),
+        output_dir=output_dir,
+        suffix=suffix,
+        rocm_root=rocm_root,
+        env_script_name="hrx-public-deps-linux-x86_64-env.sh",
+    )
+    package_tree(
+        package_name="hrx-tests-linux-x86_64",
+        source_root=args.tests_install_dir.resolve(),
+        output_dir=output_dir,
+        suffix=suffix,
+        rocm_root=rocm_root,
+    )
+    package_tree(
+        package_name="hrx-rocm-buildenv-linux-x86_64",
+        source_root=rocm_root,
+        output_dir=output_dir,
+        suffix=suffix,
+        rocm_root=rocm_root,
+        env_script_name="hrx-rocm-buildenv-linux-x86_64-env.sh",
+        exclude_paths=ROCM_BUILDENV_EXCLUDE_PATHS,
+        exclude_prefixes=ROCM_BUILDENV_EXCLUDE_PREFIXES,
+    )
 
 
 def run_all(args: argparse.Namespace) -> None:
@@ -717,15 +1027,7 @@ def run_all(args: argparse.Namespace) -> None:
     build_core(args)
     test_core(args)
     if args.package:
-        suffix = args.package_suffix or dt.datetime.now(dt.UTC).strftime("%Y-%m-%d")
-        package_core(
-            argparse.Namespace(
-                rocm_root=args.rocm_root,
-                install_prefix=args.install_prefix,
-                output_dir=args.package_output_dir,
-                package_stem=f"hrx-core-linux-x86_64-{suffix}",
-            )
-        )
+        package_core(args)
 
 
 def add_shared_args(parser: argparse.ArgumentParser) -> None:
@@ -737,9 +1039,14 @@ def add_shared_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--download-cache-dir", type=Path, default=env_path("HRX_DOWNLOAD_CACHE_DIR", default_output / "downloads"))
     parser.add_argument("--download-concurrency", type=int, default=env_int("HRX_DOWNLOAD_CONCURRENCY", 8))
     parser.add_argument("--build-dir", type=Path, default=env_path("HRX_BUILD_DIR", default_output / "build" / "hrx-core"))
-    parser.add_argument("--install-prefix", type=Path, default=env_path("HRX_INSTALL_PREFIX", default_output / "rocm-root"))
+    parser.add_argument("--public-install-dir", type=Path, default=env_path("HRX_PUBLIC_INSTALL_DIR", default_output / "install" / "public"))
+    parser.add_argument("--tests-install-dir", type=Path, default=env_path("HRX_TESTS_INSTALL_DIR", default_output / "install" / "tests"))
+    parser.add_argument("--public-deps-dir", type=Path, default=env_path("HRX_PUBLIC_DEPS_DIR", default_output / "install" / "public-deps"))
+    parser.add_argument("--composed-install-dir", type=Path, default=env_path("HRX_COMPOSED_INSTALL_DIR", default_output / "install" / "composed"))
     parser.add_argument("--package-smoke-build-dir", type=Path, default=env_path("HRX_PACKAGE_SMOKE_BUILD_DIR", default_output / "build" / "package-smoke"))
     parser.add_argument("--package-output-dir", type=Path, default=env_path("HRX_PACKAGE_OUTPUT_DIR", default_output / "dist"))
+    parser.add_argument("--public-component", default=env_default("HRX_PUBLIC_COMPONENT", "HrxPublicDist"))
+    parser.add_argument("--tests-component", default=env_default("HRX_TESTS_COMPONENT", "HrxTestsDist"))
     parser.add_argument("--build-type", default=env_default("HRX_BUILD_TYPE", "RelWithDebInfo"))
     parser.add_argument("--target", default=env_default("HRX_BUILD_TARGET", "all"))
     parser.add_argument("--sanitizer", default=env_default("HRX_SANITIZER", "none"), choices=["none", "asan", "tsan", "ubsan"])
@@ -787,15 +1094,7 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "test":
         test_core(args)
     elif args.command == "package":
-        suffix = args.package_suffix or dt.datetime.now(dt.UTC).strftime("%Y-%m-%d")
-        package_core(
-            argparse.Namespace(
-                rocm_root=args.rocm_root,
-                install_prefix=args.install_prefix,
-                output_dir=args.package_output_dir,
-                package_stem=f"hrx-core-linux-x86_64-{suffix}",
-            )
-        )
+        package_core(args)
     return 0
 
 

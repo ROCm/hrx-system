@@ -64,6 +64,8 @@ function(iree_cc_binary_benchmark)
       ${_RULE_DEFINES}
     LINKOPTS
       ${_RULE_LINKOPTS}
+    INSTALL_COMPONENT
+      ${HRX_INSTALL_TESTS_COMPONENT}
     ${_MAYBE_TESTONLY}
     ${_MAYBE_HOSTONLY}
   )

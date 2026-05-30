@@ -48,7 +48,9 @@ option(LIBHRX_BUILD_CTS
   "Build libhrx conformance tests." ${IREE_BUILD_TESTS})
 option(HRX_INSTALL_TESTS
   "Install a relocatable CTest tree and test artifacts." ${IREE_BUILD_TESTS})
-set(HRX_INSTALL_TESTS_COMPONENT "HrxSystemInstalledTests" CACHE STRING
+set(HRX_PUBLIC_DIST_COMPONENT "HrxPublicDist" CACHE STRING
+  "Install component for the public HRX distribution.")
+set(HRX_INSTALL_TESTS_COMPONENT "HrxTestsDist" CACHE STRING
   "Install component for the installed HRX system test suite.")
 set(HRX_INSTALL_TESTS_DIR "${CMAKE_INSTALL_DATADIR}/hrx-system/tests" CACHE STRING
   "Install directory for the HRX system CTest tree and test artifacts.")

@@ -44,7 +44,6 @@ jobs:
       test_gpu: false
       package: true
       package_suffix: ${{ github.ref_name }}
-      artifact_name: hrx-core-linux-x86_64
 
   publish_release:
     name: Publish release
@@ -54,15 +53,21 @@ jobs:
       actions: read
       contents: write
     steps:
-      - name: Download package artifact
+      - name: Download package artifacts
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p release-assets
-          gh run download "${GITHUB_RUN_ID}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --name hrx-core-linux-x86_64 \
-            --dir release-assets
+          for artifact_name in \
+            hrx-public-linux-x86_64 \
+            hrx-public-deps-linux-x86_64 \
+            hrx-tests-linux-x86_64 \
+            hrx-rocm-buildenv-linux-x86_64; do
+            gh run download "${GITHUB_RUN_ID}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --name "${artifact_name}" \
+              --dir release-assets
+          done
           ls -lh release-assets
 
       - name: Publish GitHub release

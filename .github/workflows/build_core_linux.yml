@@ -42,9 +42,6 @@ on:
       package_suffix:
         type: string
         default: ""
-      artifact_name:
-        type: string
-        default: hrx-core-linux-x86_64
 
 permissions:
   contents: read
@@ -64,7 +61,10 @@ jobs:
       HRX_ROCM_ROOT: ${{ github.workspace }}/build/linux/rocm-root
       HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/linux/downloads
       HRX_BUILD_DIR: ${{ github.workspace }}/build/linux/build/hrx-core
-      HRX_INSTALL_PREFIX: ${{ github.workspace }}/build/linux/rocm-root
+      HRX_PUBLIC_INSTALL_DIR: ${{ github.workspace }}/build/linux/install/public
+      HRX_TESTS_INSTALL_DIR: ${{ github.workspace }}/build/linux/install/tests
+      HRX_PUBLIC_DEPS_DIR: ${{ github.workspace }}/build/linux/install/public-deps
+      HRX_COMPOSED_INSTALL_DIR: ${{ github.workspace }}/build/linux/install/composed
       HRX_PACKAGE_SMOKE_BUILD_DIR: ${{ github.workspace }}/build/linux/build/package-smoke
       HRX_PACKAGE_OUTPUT_DIR: ${{ github.workspace }}/build/linux/dist
       HRX_BUILD_TYPE: ${{ inputs.build_type }}
@@ -99,12 +99,45 @@ jobs:
         if: ${{ inputs.package }}
         run: python3 build_tools/ci_core_linux.py package
 
-      - name: Upload package
+      - name: Upload public package
         if: ${{ inputs.package }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ${{ inputs.artifact_name }}
+          name: hrx-public-linux-x86_64
           path: |
-            build/linux/dist/*.tar.zst
-            build/linux/dist/*.manifest.json
+            build/linux/dist/hrx-public-linux-x86_64-*.tar.zst
+            build/linux/dist/hrx-public-linux-x86_64-*.manifest.json
+            build/linux/dist/hrx-public-linux-x86_64-env.sh
+          if-no-files-found: error
+
+      - name: Upload public dependency package
+        if: ${{ inputs.package }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hrx-public-deps-linux-x86_64
+          path: |
+            build/linux/dist/hrx-public-deps-linux-x86_64-*.tar.zst
+            build/linux/dist/hrx-public-deps-linux-x86_64-*.manifest.json
+            build/linux/dist/hrx-public-deps-linux-x86_64-env.sh
+          if-no-files-found: error
+
+      - name: Upload test package
+        if: ${{ inputs.package }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hrx-tests-linux-x86_64
+          path: |
+            build/linux/dist/hrx-tests-linux-x86_64-*.tar.zst
+            build/linux/dist/hrx-tests-linux-x86_64-*.manifest.json
+          if-no-files-found: error
+
+      - name: Upload ROCm build environment package
+        if: ${{ inputs.package }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hrx-rocm-buildenv-linux-x86_64
+          path: |
+            build/linux/dist/hrx-rocm-buildenv-linux-x86_64-*.tar.zst
+            build/linux/dist/hrx-rocm-buildenv-linux-x86_64-*.manifest.json
+            build/linux/dist/hrx-rocm-buildenv-linux-x86_64-env.sh
           if-no-files-found: error

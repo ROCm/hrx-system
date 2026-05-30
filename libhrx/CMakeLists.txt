@@ -64,15 +64,22 @@ set(_hrx_build_package_dir "${LIBHRX_BINARY_DIR}/cmake/hrx")
 
 install(TARGETS libhrx_src_libhrx_hrx EXPORT hrx-targets
   LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}"
+    NAMELINK_COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}"
   ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}"
+  RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+    COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}"
   INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/hrx")
 install(FILES
   include/hrx_runtime.h
   include/hrx_runtime_cxx.h
-  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/hrx")
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/hrx"
+  COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}")
 install(EXPORT hrx-targets
   NAMESPACE hrx::
-  DESTINATION "${_hrx_cmake_package_dir}")
+  DESTINATION "${_hrx_cmake_package_dir}"
+  COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}")
 
 configure_package_config_file(
   cmake/hrx-config.cmake.in
@@ -89,4 +96,5 @@ export(EXPORT hrx-targets
 install(FILES
   "${_hrx_build_package_dir}/hrx-config.cmake"
   "${_hrx_build_package_dir}/hrx-config-version.cmake"
-  DESTINATION "${_hrx_cmake_package_dir}")
+  DESTINATION "${_hrx_cmake_package_dir}"
+  COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}")
