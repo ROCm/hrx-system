@@ -90,25 +90,29 @@ jobs:
       - name: Install Python dependencies
         run: python3 -m pip install --upgrade zstandard
 
-      - name: Download package artifacts
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          run_id="${{ inputs.artifact_run_id }}"
-          if [[ -z "${run_id}" ]]; then
-            run_id="${{ github.run_id }}"
-          fi
-          mkdir -p "${HRX_ARTIFACT_DOWNLOAD_DIR}"
-          gh run download "${run_id}" --repo "${GITHUB_REPOSITORY}" \
-            --dir "${HRX_ARTIFACT_DOWNLOAD_DIR}" \
-            --name hrx-public-linux-x86_64
-          gh run download "${run_id}" --repo "${GITHUB_REPOSITORY}" \
-            --dir "${HRX_ARTIFACT_DOWNLOAD_DIR}" \
-            --name hrx-public-deps-linux-x86_64
-          gh run download "${run_id}" --repo "${GITHUB_REPOSITORY}" \
-            --dir "${HRX_ARTIFACT_DOWNLOAD_DIR}" \
-            --name hrx-tests-linux-x86_64
+      - name: Download public package artifact
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: hrx-public-linux-x86_64
+          path: ${{ env.HRX_ARTIFACT_DOWNLOAD_DIR }}
+          run-id: ${{ inputs.artifact_run_id || github.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download public dependency package artifact
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: hrx-public-deps-linux-x86_64
+          path: ${{ env.HRX_ARTIFACT_DOWNLOAD_DIR }}
+          run-id: ${{ inputs.artifact_run_id || github.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download test package artifact
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: hrx-tests-linux-x86_64
+          path: ${{ env.HRX_ARTIFACT_DOWNLOAD_DIR }}
+          run-id: ${{ inputs.artifact_run_id || github.run_id }}
+          github-token: ${{ github.token }}
 
       - name: Extract package artifacts
         run: python3 build_tools/ci_core_linux.py extract-packages
