@@ -58,7 +58,22 @@ jobs:
       image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:702a5133851e6d1daf1207d2c9fbb01c2667914a5b6dc5a01faeb3ce66ea6421
     env:
       HRX_OUTPUT_DIR: ${{ github.workspace }}/build/linux
+      HRX_RELEASE_TYPE: ${{ inputs.release_type }}
+      HRX_RUN_ID: ${{ inputs.run_id }}
+      HRX_ARTIFACT_SET: ${{ inputs.artifact_set }}
+      HRX_ROCM_ROOT: ${{ github.workspace }}/build/linux/rocm-root
+      HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/linux/downloads
+      HRX_BUILD_DIR: ${{ github.workspace }}/build/linux/build/hrx-core
+      HRX_INSTALL_PREFIX: ${{ github.workspace }}/build/linux/rocm-root
+      HRX_PACKAGE_SMOKE_BUILD_DIR: ${{ github.workspace }}/build/linux/build/package-smoke
+      HRX_PACKAGE_OUTPUT_DIR: ${{ github.workspace }}/build/linux/dist
+      HRX_BUILD_TYPE: ${{ inputs.build_type }}
+      HRX_SANITIZER: ${{ inputs.sanitizer }}
       HRX_CMAKE_OPTIONS: ${{ inputs.cmake_options }}
+      HRX_CTEST_REGEX: ${{ inputs.ctest_regex }}
+      HRX_TEST_GPU: ${{ inputs.test_gpu }}
+      HRX_PACKAGE: ${{ inputs.package }}
+      HRX_PACKAGE_SUFFIX: ${{ inputs.package_suffix }}
       CCACHE_DIR: ${{ github.workspace }}/build/linux/caches/ccache
       PIP_CACHE_DIR: ${{ github.workspace }}/build/linux/caches/pip
     steps:
@@ -71,35 +86,18 @@ jobs:
       - name: Install Python dependencies
         run: python3 -m pip install --upgrade boto3 zstandard
 
-      - name: Build, test, and package
-        run: |
-          args=(
-            run
-            --release-type "${{ inputs.release_type }}"
-            --artifact-set "${{ inputs.artifact_set }}"
-            --rocm-root "${HRX_OUTPUT_DIR}/rocm-root"
-            --download-cache-dir "${HRX_OUTPUT_DIR}/downloads"
-            --build-dir "${HRX_OUTPUT_DIR}/build/hrx-core"
-            --install-prefix "${HRX_OUTPUT_DIR}/rocm-root"
-            --package-smoke-build-dir "${HRX_OUTPUT_DIR}/build/package-smoke"
-            --package-output-dir "${HRX_OUTPUT_DIR}/dist"
-            --build-type "${{ inputs.build_type }}"
-            --sanitizer "${{ inputs.sanitizer }}"
-            --ctest-regex "${{ inputs.ctest_regex }}"
-          )
-          if [[ -n "${{ inputs.run_id }}" ]]; then
-            args+=(--run-id "${{ inputs.run_id }}")
-          fi
-          if [[ "${{ inputs.test_gpu }}" == "true" ]]; then
-            args+=(--gpu)
-          fi
-          if [[ "${{ inputs.package }}" != "true" ]]; then
-            args+=(--no-package)
-          fi
-          if [[ -n "${{ inputs.package_suffix }}" ]]; then
-            args+=(--package-suffix "${{ inputs.package_suffix }}")
-          fi
-          python3 build_tools/ci_core_linux.py "${args[@]}"
+      - name: Fetch ROCm artifacts
+        run: python3 build_tools/ci_core_linux.py fetch-rocm
+
+      - name: Configure, build, and install
+        run: python3 build_tools/ci_core_linux.py build
+
+      - name: Run installed tests
+        run: python3 build_tools/ci_core_linux.py test
+
+      - name: Package
+        if: ${{ inputs.package }}
+        run: python3 build_tools/ci_core_linux.py package
 
       - name: Upload package
         if: ${{ inputs.package }}

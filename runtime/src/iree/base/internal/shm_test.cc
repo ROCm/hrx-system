@@ -7,6 +7,14 @@
 #include "iree/base/internal/shm.h"
 
 #include <cstring>
+#include <string>
+#include <vector>
+
+#if defined(IREE_PLATFORM_WINDOWS)
+#include <process.h>
+#elif !defined(IREE_PLATFORM_ANDROID)
+#include <unistd.h>
+#endif
 
 #if !defined(IREE_PLATFORM_WINDOWS) && !defined(IREE_PLATFORM_ANDROID)
 #include <sys/mman.h>  // shm_unlink for test cleanup
@@ -207,14 +215,16 @@ TEST_F(ShmTest, OpenHandleSizeTooLargeFails) {
 // that support named shared memory.
 #if !defined(IREE_PLATFORM_ANDROID)
 
-// POSIX shm_open names must start with '/'. On Windows the "Local\" prefix is
-// added automatically. These tests use POSIX-style names; the implementation
-// handles the Windows prefix.
+static std::string MakeTestShmName(const char* suffix) {
+  // POSIX shm_open names live in a global namespace and can outlive a failed
+  // process. Include the process id so concurrent or previously failed CI jobs
+  // do not collide on fixed names.
 #if defined(IREE_PLATFORM_WINDOWS)
-#define TEST_SHM_NAME(suffix) "iree_shm_test_" suffix
+  return "iree_shm_test_" + std::to_string(_getpid()) + "_" + suffix;
 #else
-#define TEST_SHM_NAME(suffix) "/iree_shm_test_" suffix
+  return "/iree_shm_test_" + std::to_string(getpid()) + "_" + suffix;
 #endif  // IREE_PLATFORM_WINDOWS
+}
 
 class ShmNamedTest : public ShmTest {
  protected:
@@ -233,12 +243,12 @@ class ShmNamedTest : public ShmTest {
 };
 
 TEST_F(ShmNamedTest, CreateAndOpenNamed) {
-  const char* name = TEST_SHM_NAME("create_open");
-  TrackName(name);
+  std::string name = MakeTestShmName("create_open");
+  TrackName(name.c_str());
 
   iree_shm_mapping_t creator;
-  IREE_ASSERT_OK(iree_shm_create_named(iree_make_cstring_view(name), NULL, 4096,
-                                       &creator));
+  IREE_ASSERT_OK(iree_shm_create_named(iree_make_cstring_view(name.c_str()),
+                                       NULL, 4096, &creator));
   EXPECT_NE(creator.base, nullptr);
   EXPECT_GE(creator.size, (iree_host_size_t)4096);
 
@@ -247,8 +257,8 @@ TEST_F(ShmNamedTest, CreateAndOpenNamed) {
 
   // Open the same region by name.
   iree_shm_mapping_t opener;
-  IREE_ASSERT_OK(
-      iree_shm_open_named(iree_make_cstring_view(name), creator.size, &opener));
+  IREE_ASSERT_OK(iree_shm_open_named(iree_make_cstring_view(name.c_str()),
+                                     creator.size, &opener));
   EXPECT_NE(opener.base, nullptr);
 
   // Both mappings see the same data.
@@ -259,54 +269,56 @@ TEST_F(ShmNamedTest, CreateAndOpenNamed) {
 
   // Clean up the name on POSIX.
 #if !defined(IREE_PLATFORM_WINDOWS)
-  shm_unlink(name);
+  shm_unlink(name.c_str());
 #endif
 }
 
 TEST_F(ShmNamedTest, CreateNamedDuplicateFails) {
-  const char* name = TEST_SHM_NAME("dup_fail");
-  TrackName(name);
+  std::string name = MakeTestShmName("dup_fail");
+  TrackName(name.c_str());
 
   iree_shm_mapping_t first;
-  IREE_ASSERT_OK(
-      iree_shm_create_named(iree_make_cstring_view(name), NULL, 4096, &first));
+  IREE_ASSERT_OK(iree_shm_create_named(iree_make_cstring_view(name.c_str()),
+                                       NULL, 4096, &first));
 
   // Creating a second region with the same name must fail.
   iree_shm_mapping_t second;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_ALREADY_EXISTS,
-      iree_shm_create_named(iree_make_cstring_view(name), NULL, 4096, &second));
+      iree_shm_create_named(iree_make_cstring_view(name.c_str()), NULL, 4096,
+                            &second));
 
   iree_shm_close(&first);
 
 #if !defined(IREE_PLATFORM_WINDOWS)
-  shm_unlink(name);
+  shm_unlink(name.c_str());
 #endif
 }
 
 TEST_F(ShmNamedTest, OpenNamedNonexistentFails) {
-  const char* name = TEST_SHM_NAME("nonexistent");
+  std::string name = MakeTestShmName("nonexistent");
   iree_shm_mapping_t mapping;
   iree_status_t status =
-      iree_shm_open_named(iree_make_cstring_view(name), 4096, &mapping);
+      iree_shm_open_named(iree_make_cstring_view(name.c_str()), 4096, &mapping);
   EXPECT_FALSE(iree_status_is_ok(status));
   iree_status_ignore(status);
 }
 
 TEST_F(ShmNamedTest, CreateNamedZeroSizeFails) {
+  std::string name = MakeTestShmName("zero_create");
   iree_shm_mapping_t mapping;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      iree_shm_create_named(iree_make_cstring_view(TEST_SHM_NAME("zero")), NULL,
-                            0, &mapping));
+      iree_shm_create_named(iree_make_cstring_view(name.c_str()), NULL, 0,
+                            &mapping));
 }
 
 TEST_F(ShmNamedTest, OpenNamedZeroSizeFails) {
+  std::string name = MakeTestShmName("zero_open");
   iree_shm_mapping_t mapping;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      iree_shm_open_named(iree_make_cstring_view(TEST_SHM_NAME("zero")), 0,
-                          &mapping));
+      iree_shm_open_named(iree_make_cstring_view(name.c_str()), 0, &mapping));
 }
 
 TEST_F(ShmNamedTest, CreateNamedEmptyNameFails) {
@@ -330,18 +342,18 @@ TEST_F(ShmNamedTest, CreateNamedNameTooLongFails) {
 
 TEST_F(ShmNamedTest, CreateNamedMaxLengthSucceeds) {
   // A name at exactly the platform limit must succeed.
-  char max_name[IREE_SHM_MAX_NAME_LENGTH + 1];
-  max_name[0] = '/';
-  memset(max_name + 1, 'y', IREE_SHM_MAX_NAME_LENGTH - 1);
+  std::string max_name = MakeTestShmName("max_length");
+  ASSERT_LT(max_name.size(), IREE_SHM_MAX_NAME_LENGTH);
+  max_name.resize(IREE_SHM_MAX_NAME_LENGTH, 'y');
   iree_string_view_t name =
-      iree_make_string_view(max_name, IREE_SHM_MAX_NAME_LENGTH);
-  TrackName(std::string(max_name, IREE_SHM_MAX_NAME_LENGTH).c_str());
+      iree_make_string_view(max_name.data(), IREE_SHM_MAX_NAME_LENGTH);
+  TrackName(max_name.c_str());
   iree_shm_mapping_t mapping;
   IREE_ASSERT_OK(iree_shm_create_named(name, NULL, 4096, &mapping));
   EXPECT_NE(mapping.base, nullptr);
   iree_shm_close(&mapping);
 #if !defined(IREE_PLATFORM_WINDOWS)
-  shm_unlink(std::string(max_name, IREE_SHM_MAX_NAME_LENGTH).c_str());
+  shm_unlink(max_name.c_str());
 #endif
 }
 
@@ -649,16 +661,16 @@ TEST_F(ShmNamedTest, CreateNamedWithHugePagesFallsBack) {
   // Named SHM on Linux uses shm_open (tmpfs), which doesn't support explicit
   // huge pages. The implementation should silently fall back to THP or normal
   // pages. On Windows, named mappings can support large pages if privileged.
-  const char* name = TEST_SHM_NAME("hp_fallback");
-  TrackName(name);
+  std::string name = MakeTestShmName("hp_fallback");
+  TrackName(name.c_str());
 
   iree_numa_alloc_options_t options = iree_numa_alloc_options_default();
   options.flags = IREE_MEMORY_PLACEMENT_FLAG_EXPLICIT_HUGE_PAGES;
   options.huge_page_size = 2 * 1024 * 1024;
 
   iree_shm_mapping_t mapping;
-  IREE_ASSERT_OK(iree_shm_create_named(iree_make_cstring_view(name), &options,
-                                       4 * 1024 * 1024, &mapping));
+  IREE_ASSERT_OK(iree_shm_create_named(iree_make_cstring_view(name.c_str()),
+                                       &options, 4 * 1024 * 1024, &mapping));
   EXPECT_NE(mapping.base, nullptr);
   EXPECT_GE(mapping.size, (iree_host_size_t)(4 * 1024 * 1024));
 
@@ -668,7 +680,7 @@ TEST_F(ShmNamedTest, CreateNamedWithHugePagesFallsBack) {
   iree_shm_close(&mapping);
 
 #if !defined(IREE_PLATFORM_WINDOWS)
-  shm_unlink(name);
+  shm_unlink(name.c_str());
 #endif
 }
 #endif  // !IREE_PLATFORM_ANDROID
