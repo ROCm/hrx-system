@@ -40,17 +40,56 @@ permissions:
   contents: read
 
 jobs:
-  normal:
-    name: CMake Linux CI
+  cmake_linux:
+    name: Linux / CMake / CI / ${{ matrix.variant }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: Default
+            sanitizer: none
+            assertions: false
+            package: true
+          - variant: ASAN
+            sanitizer: asan
+            assertions: true
+            package: false
+          - variant: TSAN
+            sanitizer: tsan
+            assertions: true
+            package: false
+          - variant: MSAN
+            sanitizer: msan
+            assertions: true
+            package: false
+          - variant: UBSAN
+            sanitizer: ubsan
+            assertions: true
+            package: false
     uses: ./.github/workflows/build_core_linux.yml
     permissions:
       contents: read
     with:
-      name: Default
+      name: ${{ matrix.variant }}
       release_type: ${{ inputs.release_type || 'nightly' }}
       run_id: ${{ inputs.run_id || '' }}
       artifact_set: ${{ inputs.artifact_set || 'core' }}
       build_type: RelWithDebInfo
-      sanitizer: none
+      sanitizer: ${{ matrix.sanitizer }}
+      assertions: ${{ matrix.assertions }}
       test_gpu: ${{ inputs.test_gpu || false }}
-      package: true
+      package: ${{ matrix.package }}
+
+  summary:
+    name: Linux / CMake / CI / Summary
+    needs: cmake_linux
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check matrix result
+        run: |
+          result="${{ needs.cmake_linux.result }}"
+          echo "cmake_linux result: ${result}"
+          if [[ "${result}" != "success" ]]; then
+            exit 1
+          fi

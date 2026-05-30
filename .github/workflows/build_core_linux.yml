@@ -27,6 +27,9 @@ on:
       sanitizer:
         type: string
         default: none
+      assertions:
+        type: boolean
+        default: false
       cmake_options:
         type: string
         default: ""
@@ -69,6 +72,7 @@ jobs:
       HRX_PACKAGE_OUTPUT_DIR: ${{ github.workspace }}/build/linux/dist
       HRX_BUILD_TYPE: ${{ inputs.build_type }}
       HRX_SANITIZER: ${{ inputs.sanitizer }}
+      HRX_ASSERTIONS: ${{ inputs.assertions }}
       HRX_CMAKE_OPTIONS: ${{ inputs.cmake_options }}
       HRX_CTEST_REGEX: ${{ inputs.ctest_regex }}
       HRX_TEST_GPU: ${{ inputs.test_gpu }}

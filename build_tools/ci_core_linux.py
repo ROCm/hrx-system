@@ -606,6 +606,7 @@ def build_core(args: argparse.Namespace) -> None:
         f"LIBHRX_BUILD_PASSTHROUGH={'ON' if args.passthrough else 'OFF'}",
         f"IREE_HAL_DRIVER_AMDGPU={'ON' if args.amdgpu else 'OFF'}",
         "IREE_ENABLE_LIBBACKTRACE=OFF",
+        f"IREE_ENABLE_ASSERTIONS={'ON' if args.assertions else 'OFF'}",
     ]
     cmake_defines.extend(sanitizer_options(args.sanitizer))
     cmake_defines.extend(cmake_options_from_env())
@@ -1049,7 +1050,8 @@ def add_shared_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--tests-component", default=env_default("HRX_TESTS_COMPONENT", "HrxTestsDist"))
     parser.add_argument("--build-type", default=env_default("HRX_BUILD_TYPE", "RelWithDebInfo"))
     parser.add_argument("--target", default=env_default("HRX_BUILD_TARGET", "all"))
-    parser.add_argument("--sanitizer", default=env_default("HRX_SANITIZER", "none"), choices=["none", "asan", "tsan", "ubsan"])
+    parser.add_argument("--sanitizer", default=env_default("HRX_SANITIZER", "none"), choices=["none", "asan", "tsan", "msan", "ubsan"])
+    parser.add_argument("--assertions", action=argparse.BooleanOptionalAction, default=env_bool("HRX_ASSERTIONS", False))
     parser.add_argument("--ctest-regex", default=env_default("HRX_CTEST_REGEX", ""))
     parser.add_argument("--ctest-parallelism", type=int, default=env_int("HRX_CTEST_PARALLELISM", 0))
     parser.add_argument("--gpu", action="store_true", default=env_bool("HRX_TEST_GPU", False))
