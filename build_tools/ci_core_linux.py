@@ -624,8 +624,8 @@ def add_sanitizer_runtime_env(
             "UBSAN_SYMBOLIZER_PATH",
         ]:
             env.setdefault(key, os.fspath(symbolizer_path))
-    env.setdefault("ASAN_OPTIONS", "symbolize=1:fast_unwind_on_malloc=0")
-    env.setdefault("LSAN_OPTIONS", "symbolize=1:fast_unwind_on_malloc=0")
+    env.setdefault("ASAN_OPTIONS", "symbolize=1")
+    env.setdefault("LSAN_OPTIONS", "symbolize=1")
     env.setdefault("MSAN_OPTIONS", "symbolize=1")
     env.setdefault("TSAN_OPTIONS", "symbolize=1")
     env.setdefault("UBSAN_OPTIONS", "print_stacktrace=1")
