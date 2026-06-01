@@ -164,35 +164,45 @@ void iree_arena_deinitialize(iree_arena_allocator_t* arena) {
 void iree_arena_reset(iree_arena_allocator_t* arena) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  if (arena->allocation_head != NULL) {
-    iree_arena_oversized_allocation_t* head = arena->allocation_head;
-    do {
-      void* ptr = (void*)head;
-      head = head->next;
-      iree_allocator_free(arena->block_pool->block_allocator, ptr);
-    } while (head);
-    arena->allocation_head = NULL;
-  }
+  // Snapshot block pool + per-arena state BEFORE clearing or releasing
+  // anything. The arena struct itself may live within one of its own blocks
+  // (e.g., when an embedded object owns its enclosing arena), in which case
+  // once iree_arena_block_pool_release returns those blocks become available
+  // for reuse by another thread and any subsequent write to the arena's
+  // fields would corrupt the next owner's data. Clearing the fields up
+  // front avoids that use-after-release.
+  iree_arena_block_pool_t* block_pool = arena->block_pool;
+  iree_arena_oversized_allocation_t* allocation_head = arena->allocation_head;
+  iree_arena_block_t* block_head = arena->block_head;
+  iree_arena_block_t* block_tail = arena->block_tail;
 
-  if (arena->block_head != NULL) {
-#if defined(IREE_SANITIZER_ADDRESS)
-    iree_arena_block_t* block = arena->block_head;
-    while (block) {
-      IREE_ASAN_UNPOISON_MEMORY_REGION(
-          iree_arena_block_ptr(arena->block_pool, block),
-          arena->block_pool->usable_block_size);
-      block = block->next;
-    }
-#endif  // IREE_SANITIZER_ADDRESS
-    iree_arena_block_pool_release(arena->block_pool, arena->block_head,
-                                  arena->block_tail);
-    arena->block_head = NULL;
-    arena->block_tail = NULL;
-  }
-
+  arena->allocation_head = NULL;
+  arena->block_head = NULL;
+  arena->block_tail = NULL;
   arena->total_allocation_size = 0;
   arena->used_allocation_size = 0;
   arena->block_bytes_remaining = 0;
+
+  if (allocation_head != NULL) {
+    iree_arena_oversized_allocation_t* head = allocation_head;
+    do {
+      void* ptr = (void*)head;
+      head = head->next;
+      iree_allocator_free(block_pool->block_allocator, ptr);
+    } while (head);
+  }
+
+  if (block_head != NULL) {
+#if defined(IREE_SANITIZER_ADDRESS)
+    iree_arena_block_t* block = block_head;
+    while (block) {
+      IREE_ASAN_UNPOISON_MEMORY_REGION(iree_arena_block_ptr(block_pool, block),
+                                       block_pool->usable_block_size);
+      block = block->next;
+    }
+#endif  // IREE_SANITIZER_ADDRESS
+    iree_arena_block_pool_release(block_pool, block_head, block_tail);
+  }
 
   IREE_TRACE_ZONE_END(z0);
 }
