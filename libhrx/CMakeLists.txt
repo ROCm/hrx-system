@@ -43,7 +43,6 @@ endfunction()
 
 add_subdirectory(src/libhrx)
 add_subdirectory(src/binding/common)
-add_subdirectory(src/streaming)
 add_subdirectory(src/binding/hip)
 add_subdirectory(tools)
 

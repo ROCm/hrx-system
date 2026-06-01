@@ -27,7 +27,7 @@ hrx_cc_shared_library(
         "../../libhrx",
     ],
     deps = [
-        "//libhrx/src/streaming",
+        "//libhrx/src/binding/common",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
     ],

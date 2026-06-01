@@ -51,6 +51,33 @@ iree_cc_library(
   PUBLIC
 )
 
+iree_cc_test(
+  NAME
+    buffer_table_test
+  SRCS
+    "buffer_table_test.cc"
+  DEPS
+    ::common
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+)
+
+iree_cc_binary_benchmark(
+  NAME
+    buffer_table_benchmark
+  SRCS
+    "buffer_table_benchmark.cc"
+  DEPS
+    ::common
+    iree::base
+    iree::testing::benchmark
+    iree::testing::benchmark_main
+    libhrx_defs
+  TESTONLY
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
 
 set_target_properties(libhrx_src_binding_common_common PROPERTIES
