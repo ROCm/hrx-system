@@ -162,7 +162,6 @@ typedef struct hrx_value_list_s *hrx_value_list_t;
 typedef struct hrx_fence_s *hrx_fence_t;
 typedef struct hrx_buffer_view_s *hrx_buffer_view_t;
 typedef struct hrx_executable_s *hrx_executable_t;
-typedef struct hrx_compiler_output_s *hrx_compiler_output_t;
 typedef struct hrx_physical_memory_s *hrx_physical_memory_t;
 typedef struct hrx_event_s *hrx_event_t;
 typedef struct hrx_mem_pool_s *hrx_mem_pool_t;
@@ -569,14 +568,6 @@ HRX_API hrx_status_t hrx_module_load_vmfb(hrx_device_t device,
                                           const void *vmfb_data,
                                           size_t vmfb_size,
                                           hrx_module_t *module);
-
-// Loads a VMFB bytecode module from compiler-owned output. The module retains
-// |compiler_output| and releases that backing store when the bytecode module is
-// destroyed. The original |compiler_output| handle may be released as soon as
-// this returns successfully.
-HRX_API hrx_status_t hrx_module_load_compiler_output(
-    hrx_device_t device, hrx_compiler_output_t compiler_output,
-    hrx_module_t *module);
 
 HRX_API void hrx_module_retain(hrx_module_t module);
 HRX_API void hrx_module_release(hrx_module_t module);
