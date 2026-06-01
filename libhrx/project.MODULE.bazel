@@ -1,7 +1,9 @@
-# Copyright 2026 The IREE Authors
+# Copyright 2026 The HRX Authors
 #
 # Licensed under the Apache License v2.0 with LLVM Exceptions.
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-package(default_visibility = ["//visibility:public"])
+"""Bazel module fragment for the libhrx project."""
+
+bazel_dep(name = "catch2", version = "3.13.0", dev_dependency = True)

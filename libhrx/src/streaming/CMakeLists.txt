@@ -35,10 +35,10 @@ iree_cc_library(
     "stream.c"
     "util/buffer_table.c"
   DEPS
-    flatcc::parsing
     iree::async
     iree::async::util::proactor_pool
     iree::base
+    iree::base::internal
     iree::base::internal::arena
     iree::base::threading
     iree::hal
@@ -49,10 +49,10 @@ iree_cc_library(
   INCLUDES
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>"
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/..>"
-    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../libhrx>"
-    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../libhrx>"
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../include>"
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../../include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../libhrx>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../libhrx>"
   PUBLIC
 )
 

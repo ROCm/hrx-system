@@ -18,8 +18,8 @@ IreeFlatccInfo = provider(
     },
 )
 
-_FLATCC_RUNTIME_DEP = Label("//build_tools/third_party/flatcc:runtime")
-_FLATCC_TOOL = Label("//build_tools/third_party/flatcc:flatcc")
+_FLATCC_RUNTIME_DEP = Label("//runtime/build_tools/third_party/flatcc:runtime")
+_FLATCC_TOOL = Label("//runtime/build_tools/third_party/flatcc:flatcc")
 _FLATCC_INCLUDE_ROOT = "runtime/src"
 _FLATCC_OUTPUTS_BY_ARG = {
     "--builder": ["_builder.h"],

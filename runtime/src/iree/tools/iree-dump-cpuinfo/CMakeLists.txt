@@ -20,4 +20,13 @@ iree_cc_binary(
     iree::schemas::cpu_data
 )
 
+iree_execution_test_suite(
+  NAME
+    execution_test
+  MANIFESTS
+    "iree-dump-cpuinfo.test.yaml"
+  TOOLS
+    "iree-dump-cpuinfo=iree::tools::iree-dump-cpuinfo"
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

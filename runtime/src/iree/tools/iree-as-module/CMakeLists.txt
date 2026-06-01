@@ -21,4 +21,13 @@ iree_cc_binary(
     iree::vm::bytecode::assembler
 )
 
+iree_execution_test_suite(
+  NAME
+    execution_test
+  MANIFESTS
+    "iree-as-module.test.yaml"
+  TOOLS
+    "iree-as-module=iree::tools::iree-as-module"
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

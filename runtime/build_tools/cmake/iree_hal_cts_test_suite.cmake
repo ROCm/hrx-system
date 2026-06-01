@@ -8,9 +8,9 @@
 #
 # Two functions:
 #
-# 1. iree_hal_cts_testdata() - Compiles CTS test executables for one format
-#    and creates a testdata registration library. MLIR sources are discovered
-#    via file(GLOB) from the testdata directory.
+# 1. iree_hal_cts_testdata() - Creates an executable testdata registration
+#    library for one format. Runtime-only builds do not compile MLIR testdata;
+#    executable payload producers must provide explicit registration libraries.
 #
 # 2. iree_hal_cts_test_suite() - Creates CTS test binaries for a driver,
 #    linking against pre-built testdata libraries from iree_hal_cts_testdata().
@@ -59,22 +59,20 @@ endfunction()
 
 # iree_hal_cts_testdata()
 #
-# Compiles CTS test executables for one format and creates a testdata
-# registration library. MLIR sources are discovered via file(GLOB) from
-# the provided TESTDATA_DIR.
+# Creates an executable testdata registration library for one format.
 #
 # Creates two targets:
-#   testdata_${FORMAT_NAME}      - iree_hal_executables embedded data
+#   testdata_${FORMAT_NAME}      - empty embedded-data table
 #   testdata_${FORMAT_NAME}_lib  - registration library (link into tests)
 #
 # Parameters:
 #   FORMAT_NAME: Short name (e.g., "vmvx", "llvm_cpu", "cuda").
-#   TARGET_DEVICE: Target device for iree-compile (e.g., "local", "cuda").
+#   TARGET_DEVICE: Accepted for compatibility with old compiler-backed calls.
 #   IDENTIFIER: C identifier for the embedded data (e.g., "iree_cts_testdata_vmvx").
 #   BACKEND_NAME: Backend name for CtsRegistry (e.g., "local_task").
 #   FORMAT_STRING: C expression for the format (e.g., "vmvx-bytecode-fb").
-#   TESTDATA_DIR: Directory containing MLIR test sources.
-#   FLAGS: Additional compiler flags.
+#   TESTDATA_DIR: Accepted for compatibility with old compiler-backed calls.
+#   FLAGS: Accepted for compatibility with old compiler-backed calls.
 function(iree_hal_cts_testdata)
   cmake_parse_arguments(
     _RULE
@@ -88,31 +86,54 @@ function(iree_hal_cts_testdata)
     return()
   endif()
 
-  # Compiling testdata requires iree-compile (built or imported).
-  if(NOT IREE_BUILD_COMPILER AND NOT IREE_HOST_BIN_DIR)
-    return()
-  endif()
-
-  if(NOT DEFINED _RULE_TESTDATA_DIR)
-    message(SEND_ERROR "iree_hal_cts_testdata requires TESTDATA_DIR")
-  endif()
-
-  # Discover MLIR sources from the testdata directory.
-  file(GLOB _SRCS LIST_DIRECTORIES false CONFIGURE_DEPENDS
-    "${_RULE_TESTDATA_DIR}/*.mlir")
-  if(NOT _SRCS)
-    message(FATAL_ERROR "No MLIR files found in ${_RULE_TESTDATA_DIR}")
-  endif()
-
   set(_TESTDATA_NAME "testdata_${_RULE_FORMAT_NAME}")
 
-  # Compile all MLIR sources to HAL executables and bundle into embedded data.
-  iree_hal_executables(
+  string(TOUPPER "${_RULE_IDENTIFIER}_H" _HEADER_GUARD)
+  string(REGEX REPLACE "[^A-Z0-9_]" "_" _HEADER_GUARD "${_HEADER_GUARD}")
+
+  set(_HEADER_FILE "${CMAKE_CURRENT_BINARY_DIR}/${_TESTDATA_NAME}.h")
+  file(WRITE "${_HEADER_FILE}" "\
+#ifndef ${_HEADER_GUARD}
+#define ${_HEADER_GUARD}
+
+#include <stddef.h>
+
+#if defined(__cplusplus)
+extern \"C\" {
+#endif
+
+#ifndef IREE_FILE_TOC
+#define IREE_FILE_TOC
+typedef struct iree_file_toc_t {
+  const char* name;
+  const char* data;
+  size_t size;
+} iree_file_toc_t;
+#endif
+
+const iree_file_toc_t* ${_RULE_IDENTIFIER}_create(void);
+static inline size_t ${_RULE_IDENTIFIER}_size(void) { return 0; }
+
+#if defined(__cplusplus)
+}  // extern \"C\"
+#endif
+
+#endif  // ${_HEADER_GUARD}
+")
+
+  set(_SOURCE_FILE "${CMAKE_CURRENT_BINARY_DIR}/${_TESTDATA_NAME}.c")
+  file(WRITE "${_SOURCE_FILE}" "\
+#include \"${_TESTDATA_NAME}.h\"
+
+static const iree_file_toc_t kEmptyToc[] = {{NULL, NULL, 0}};
+
+const iree_file_toc_t* ${_RULE_IDENTIFIER}_create(void) { return kEmptyToc; }
+")
+
+  iree_cc_library(
     NAME "${_TESTDATA_NAME}"
-    SRCS ${_SRCS}
-    TARGET_DEVICE "${_RULE_TARGET_DEVICE}"
-    FLAGS ${_RULE_FLAGS}
-    IDENTIFIER "${_RULE_IDENTIFIER}"
+    SRCS "${_SOURCE_FILE}"
+    HDRS "${_HEADER_FILE}"
     TESTONLY
     PUBLIC
   )
@@ -222,10 +243,11 @@ function(iree_hal_cts_test_suite)
     )
   endforeach()
 
-  # Executable-dependent test categories (require testdata compiled by
-  # iree-compile, which may be unavailable in runtime-only builds).
+  # Executable-dependent test categories require explicit registration
+  # libraries. Runtime-only builds must not assume an in-tree compiler can
+  # synthesize those payloads from MLIR inputs.
   if(_RULE_TESTDATA_LIBS)
-    # Verify all testdata targets exist (they won't if the compiler is absent).
+    # Verify all testdata targets exist before wiring the executable suites.
     set(_TESTDATA_AVAILABLE TRUE)
     iree_package_ns(_TESTDATA_PACKAGE_NS)
     foreach(_LIB ${_RULE_TESTDATA_LIBS})

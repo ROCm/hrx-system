@@ -11,8 +11,9 @@ that can be directly evaluated and avoid more advanced features like
 variables, list comprehensions, etc.
 
 Generated CMake files will be similar in structure to their source BUILD
-files by using the functions in build_tools/cmake/ that imitate corresponding
-Bazel rules (e.g. cc_library -> iree_cc_library.cmake).
+files by using the functions in build_tools/cmake/ and product-local
+build_tools/cmake/ directories that imitate corresponding Bazel rules
+(e.g. cc_library -> iree_cc_library.cmake).
 
 Common usage:
   Run across all default paths in the project (in .bazel_to_cmake.cfg.py):
@@ -25,6 +26,13 @@ Common usage:
 
   Run on all files under a root directory (recursively - use sparingly):
       $ python build_tools/bazel_to_cmake/bazel_to_cmake.py --recursive_dir runtime/src/iree/
+
+  Inspect whether generated files are stale without writing them:
+      $ python build_tools/bazel_to_cmake/bazel_to_cmake.py --dry-run
+      $ python build_tools/bazel_to_cmake/bazel_to_cmake.py --check
+
+  Dump generated CMake contents to stdout without writing files:
+      $ python build_tools/bazel_to_cmake/bazel_to_cmake.py --preview runtime/src/iree/base/
 
 Configuration
 -------------
@@ -58,6 +66,7 @@ import os
 import re
 import sys
 import textwrap
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
@@ -84,17 +93,32 @@ class Status(Enum):
     NO_BUILD_FILE = 5
 
 
+@dataclass
+class ConversionSummary:
+    updated_count: int = 0
+    skip_count: int = 0
+    noop_count: int = 0
+
+
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Bazel to CMake conversion helper.")
-    parser.add_argument(
+    output_group = parser.add_mutually_exclusive_group()
+    output_group.add_argument(
         "--preview",
-        help="Prints results instead of writing files",
+        help="Print generated CMake contents instead of writing files.",
         action="store_true",
         default=False,
     )
-    parser.add_argument(
-        "--allow_partial_conversion",
-        help="Generates partial files, ignoring errors during conversion.",
+    output_group.add_argument(
+        "--dry-run",
+        help="Report whether files are up to date without writing generated contents.",
+        action="store_true",
+        default=False,
+    )
+    output_group.add_argument(
+        "--check",
+        help="Verify generated CMake files are up to date without writing files. "
+        "Exits with status 1 if any file would be updated.",
         action="store_true",
         default=False,
     )
@@ -106,8 +130,8 @@ def parse_arguments():
         help="Specify verbosity level where higher verbosity emits more logging."
         " 0 (default): Only output errors and summary statistics."
         " 1: Also output the name of each directory as it's being processed and"
-        " whether the directory is skipped."
-        " 2: Also output when conversion was successful.",
+        " a status line for skipped or changed generated files."
+        " 2: Also output when conversion required no update.",
     )
 
     # Specify only one of these (defaults to --recursive_dir=<main source dirs>).
@@ -161,7 +185,6 @@ def setup_environment():
             sys.exit(1)
         check_dir = new_check_dir
     repo_root = check_dir
-    log(f"Using repo root {repo_root}")
 
     # Dynamically load the config file as a module.
     orig_dont_write_bytecode = sys.dont_write_bytecode
@@ -188,30 +211,30 @@ def log(string, *args, indent=0, **kwargs):
     )
 
 
-def convert_directories(directories, write_files, allow_partial_conversion, verbosity):
+def convert_directories(directories, write_files, print_generated_content, verbosity):
+    summary = ConversionSummary()
     failure_dirs = []
-    skip_count = 0
-    success_count = 0
-    noop_count = 0
     for directory in directories:
         status = convert_directory(
             directory,
             write_files=write_files,
-            allow_partial_conversion=allow_partial_conversion,
+            print_generated_content=print_generated_content,
             verbosity=verbosity,
         )
         if status == Status.FAILED:
             failure_dirs.append(repo_relpath(directory))
         elif status == Status.SKIPPED:
-            skip_count += 1
+            summary.skip_count += 1
         elif status == Status.UPDATED:
-            success_count += 1
+            summary.updated_count += 1
         elif status == Status.NOOP:
-            noop_count += 1
+            summary.noop_count += 1
 
+    update_phrase = "were updated" if write_files else "would be updated"
     log(
-        f"{success_count} CMakeLists.txt files were updated, {skip_count} were"
-        f" skipped, and {noop_count} required no change."
+        f"{summary.updated_count} CMakeLists.txt files {update_phrase}, "
+        f"{summary.skip_count} were skipped, and {summary.noop_count} required "
+        f"no change."
     )
     if failure_dirs:
         log(
@@ -220,9 +243,10 @@ def convert_directories(directories, write_files, allow_partial_conversion, verb
         )
         log("\n".join(failure_dirs), indent=2)
         sys.exit(1)
+    return summary
 
 
-def convert_directory(directory_path, write_files, allow_partial_conversion, verbosity):
+def convert_directory(directory_path, write_files, print_generated_content, verbosity):
     if not os.path.isdir(directory_path):
         raise FileNotFoundError(f"Cannot find directory '{directory_path}'")
 
@@ -300,6 +324,8 @@ def convert_directory(directory_path, write_files, allow_partial_conversion, ver
     with open(build_file_path, "rt") as build_file:
         build_file_contents = build_file.read()
     if "bazel-to-cmake: skip" in build_file_contents:
+        if verbosity >= 1:
+            log(f"Skipped. BUILD file has bazel-to-cmake: skip.", indent=2)
         return Status.SKIPPED
     build_file_code = compile(build_file_contents, build_file_path, "exec")
     try:
@@ -307,7 +333,6 @@ def convert_directory(directory_path, write_files, allow_partial_conversion, ver
             build_file_code,
             repo_cfg=repo_cfg,
             build_dir=directory_path,
-            allow_partial_conversion=allow_partial_conversion,
             repo_root=repo_root,
         )
     except (NameError, NotImplementedError) as e:
@@ -329,10 +354,7 @@ def convert_directory(directory_path, write_files, allow_partial_conversion, ver
     converted_content = (
         preserved_header + header + converted_build_file + preserved_footer
     )
-    if write_files:
-        with open(cmakelists_file_path, "wt") as cmakelists_file:
-            cmakelists_file.write(converted_content)
-    else:
+    if print_generated_content:
         print(converted_content, end="")
 
     if converted_content == "".join(old_lines):
@@ -340,10 +362,14 @@ def convert_directory(directory_path, write_files, allow_partial_conversion, ver
             log(f"{rel_cmakelists_file_path} required no update", indent=2)
         return Status.NOOP
 
-    if verbosity >= 2:
+    if write_files:
+        with open(cmakelists_file_path, "wt") as cmakelists_file:
+            cmakelists_file.write(converted_content)
+
+    if verbosity >= 1:
+        status_label = "Updated" if write_files else "Would update"
         log(
-            f"Successfully generated {rel_cmakelists_file_path}"
-            f" from {rel_build_file_path}",
+            f"{status_label} {rel_cmakelists_file_path} from {rel_build_file_path}",
             indent=2,
         )
     return Status.UPDATED
@@ -362,7 +388,12 @@ def main(args):
     """Runs Bazel to CMake conversion."""
     global repo_root
 
-    write_files = not args.preview
+    if args.verbosity >= 1:
+        log(f"Using repo root {repo_root}")
+
+    write_files = not (args.preview or args.dry_run or args.check)
+    print_generated_content = args.preview
+    summaries = []
 
     if args.paths:
         try:
@@ -370,11 +401,13 @@ def main(args):
         except FileNotFoundError as e:
             log(f"ERROR: {e}")
             sys.exit(1)
-        convert_directories(
-            directories,
-            write_files=write_files,
-            allow_partial_conversion=args.allow_partial_conversion,
-            verbosity=args.verbosity,
+        summaries.append(
+            convert_directories(
+                directories,
+                write_files=write_files,
+                print_generated_content=print_generated_content,
+                verbosity=args.verbosity,
+            )
         )
     elif args.recursive_dir:
         for root_dir in args.recursive_dir:
@@ -383,18 +416,22 @@ def main(args):
                 log(f"ERROR: Cannot find recursive directory '{root_dir}'")
                 sys.exit(1)
             log(f"Converting directory tree rooted at: {root_directory_path}")
-            convert_directories(
-                (root for root, _, _ in os.walk(root_directory_path)),
-                write_files=write_files,
-                allow_partial_conversion=args.allow_partial_conversion,
-                verbosity=args.verbosity,
+            summaries.append(
+                convert_directories(
+                    (root for root, _, _ in os.walk(root_directory_path)),
+                    write_files=write_files,
+                    print_generated_content=print_generated_content,
+                    verbosity=args.verbosity,
+                )
             )
     elif args.dir:
-        convert_directories(
-            [os.path.join(repo_root, args.dir)],
-            write_files=write_files,
-            allow_partial_conversion=args.allow_partial_conversion,
-            verbosity=args.verbosity,
+        summaries.append(
+            convert_directories(
+                [os.path.join(repo_root, args.dir)],
+                write_files=write_files,
+                print_generated_content=print_generated_content,
+                verbosity=args.verbosity,
+            )
         )
     else:
         log(
@@ -403,6 +440,9 @@ def main(args):
             f"positional arguments, use --dir for a single directory, or "
             f"--recursive_dir to process an entire tree."
         )
+        sys.exit(1)
+
+    if args.check and any(summary.updated_count for summary in summaries):
         sys.exit(1)
 
 

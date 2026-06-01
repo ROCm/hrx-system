@@ -9,11 +9,12 @@
 bazel_dep(name = "libbacktrace", version = "1.0.0-20250926-7939218")
 
 http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
 rocm_repository = use_repo_rule("//build_tools/bazel:rocm_repository.bzl", "rocm_repository")
 
 http_archive(
     name = "flatcc",
-    build_file = "//build_tools/third_party/flatcc:flatcc.BUILD.bazel",
+    build_file = "//runtime/build_tools/third_party/flatcc:flatcc.BUILD.bazel",
     sha256 = "f77f842e996f5bbfa25305a7b38b40d1325fb44154f2bf9880c58356ece92c62",
     strip_prefix = "flatcc-9362cd00f0007d8cbee7bff86e90fb4b6b227ff3",
     url = "https://github.com/dvidelabs/flatcc/archive/9362cd00f0007d8cbee7bff86e90fb4b6b227ff3.tar.gz",
@@ -21,5 +22,5 @@ http_archive(
 
 rocm_repository(
     name = "hsa_runtime_headers",
-    build_file = "//build_tools/third_party:rocm_hsa_runtime_headers.BUILD",
+    build_file = "//runtime/build_tools/third_party:rocm_hsa_runtime_headers.BUILD",
 )

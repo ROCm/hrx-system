@@ -15,14 +15,30 @@ with AMD's GPU, NPU, and CPU products.
 - `runtime/`: core runtime components
 - `libhrx/`: the public HRX C ABI, C++ helpers, HIP compatibility binding,
   streaming support, CTS, and debug passthrough tools.
-- `build_tools/`: CMake/Bazel translation helpers, CI packaging scripts, test
-  install support, sanitizer wiring, and dependency discovery.
+- `build_tools/`: shared CMake/Bazel translation helpers, CI packaging
+  scripts, sanitizer wiring, and common build overlays.
+
+Project-specific build support lives with the project it serves. Runtime CMake
+bootstrap and dependencies are under `runtime/project.cmake` and
+`runtime/build_tools/`, while libhrx owns `libhrx/project.cmake` and
+`libhrx/build_tools/`. Shared generator and build-system mechanics stay under
+root `build_tools/`, with shared third-party CMake configuration beside the
+matching Bazel overlays in `build_tools/third_party/`.
 
 The public install exports `libhrx.so`, `hrx-info`, public HRX headers for the
 native low-latency API, CMake package files, and the HRX HIP compatibility
 layer as `lib/libamdhip64.so`.
 
 ## Building
+
+Build-tree tests that use YAML execution manifests require the locked
+development Python requirements in the interpreter CMake discovers. This is
+currently just PyYAML:
+
+```bash
+python -m venv .venv
+uv pip install --python .venv/bin/python -r requirements-dev.lock.txt
+```
 
 Use a ROCm installation or unpacked ROCm build environment that provides HSA,
 AQL profile headers, and a ROCm LLVM toolchain. The CI path uses ROCm clang and
@@ -54,7 +70,8 @@ Useful options:
 
 | Option | Default | Purpose |
 |--------|---------|---------|
-| `HRX_HERMETIC_BUILD` | OFF | Error instead of using FetchContent fallbacks. |
+| `HRX_HERMETIC_BUILD` | OFF | Error instead of using libhrx FetchContent fallbacks. |
+| `IREE_HERMETIC_BUILD` | `${HRX_HERMETIC_BUILD}` | Error instead of using IREE/shared FetchContent fallbacks. |
 | `LIBHRX_BUILD` | ON | Build libhrx and compatibility targets. |
 | `LIBHRX_BUILD_CTS` | `${IREE_BUILD_TESTS}` | Build libhrx CTS binaries. |
 | `LIBHRX_BUILD_PASSTHROUGH` | ON | Build HIP passthrough/interception tools. |
@@ -63,7 +80,7 @@ Useful options:
 | `IREE_HAL_DRIVER_AMDGPU` | ON | Build the AMDGPU runtime HAL driver. |
 | `IREE_ROCM_TEST_TARGET_CHIP` | empty | Target chip for ROCm tests that compile device code. |
 
-`HRX_HERMETIC_BUILD=ON` is intended for release and distro-style builds where
+Hermetic build options are intended for release and distro-style builds where
 all dependencies must be supplied by package discovery.
 
 ## Running Tests

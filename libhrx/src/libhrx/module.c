@@ -3,6 +3,8 @@
 
 #include "hrx_internal.h"
 
+#include "iree/vm/bytecode/module.h"
+
 #include <stdlib.h>
 #include <string.h>
 

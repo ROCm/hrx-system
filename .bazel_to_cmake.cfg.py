@@ -134,8 +134,7 @@ class CustomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
 
     def iree_generated_files(self, name, srcs, outs, args, output_args, tool, **kwargs):
         if tool != ":generate_vm_isa":
-            self._convert_unimplemented_function("iree_generated_files", tool)
-            return
+            raise NotImplementedError(f"iree_generated_files tool: {tool}")
         cmd_parts = ["python3 $(rootpath generate_vm_isa.py)"]
         cmd_parts.extend(arg.replace("$(location ", "$(rootpath ") for arg in args)
         for out in outs:
@@ -155,11 +154,6 @@ class CustomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
             kwargs["backends_lib"] = kwargs.pop("backends")
         self.iree_hal_cts_test_suite(**kwargs)
 
-    def iree_execution_test_suite(self, **kwargs):
-        # The reduced HRX runtime CMake bring-up builds the tools needed by
-        # runtime targets, but does not port the YAML execution-test harness yet.
-        pass
-
 
 class CustomTargetConverter(bazel_to_cmake_targets.TargetConverter):
     def _initialize(self):
@@ -171,21 +165,24 @@ class CustomTargetConverter(bazel_to_cmake_targets.TargetConverter):
                     "libhrx::src::libhrx::hrx"
                 ],
                 # Temporary AQL profile SDK header shape. See the comments in
-                # build_tools/cmake/hrx_dependencies.cmake and
-                # build_tools/third_party/BUILD.bazel: this should become a
-                # real ROCm-provided package/target once upstream publishes
+                # runtime/build_tools/third_party/rocm_headers.cmake
+                # and runtime/build_tools/third_party/BUILD.bazel: this should
+                # become a real ROCm-provided package/target once upstream publishes
                 # package metadata for include/aqlprofile-sdk.
-                "//build_tools/third_party:aqlprofile_sdk_headers": [
+                "//runtime/build_tools/third_party:aqlprofile_sdk_headers": [
                     "aqlprofile-sdk::headers"
+                ],
+                "//runtime/build_tools/third_party/libbacktrace": [
+                    "${IREE_LIBBACKTRACE_TARGET}"
                 ],
                 "@flatcc//:compiler": ["iree-flatcc-cli"],
                 "@flatcc//:flatcc": ["flatcc"],
                 "@flatcc//:parsing": ["flatcc::parsing"],
                 "@flatcc//:runtime": ["flatcc::runtime"],
-                "//build_tools/third_party/flatcc": ["flatcc"],
-                "//build_tools/third_party/flatcc:flatcc": ["flatcc"],
-                "//build_tools/third_party/flatcc:parsing": ["flatcc::parsing"],
-                "//build_tools/third_party/flatcc:runtime": ["flatcc::runtime"],
+                "//runtime/build_tools/third_party/flatcc": ["flatcc"],
+                "//runtime/build_tools/third_party/flatcc:flatcc": ["flatcc"],
+                "//runtime/build_tools/third_party/flatcc:parsing": ["flatcc::parsing"],
+                "//runtime/build_tools/third_party/flatcc:runtime": ["flatcc::runtime"],
                 "@catch2//:catch2": ["Catch2::Catch2"],
             }
         )

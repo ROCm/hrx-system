@@ -39,13 +39,17 @@ iree_cc_library(
     "value_list.c"
   DEPS
     ${CMAKE_DL_LIBS}
-    flatcc::parsing
+    iree::async
     iree::async::util::proactor_pool
     iree::base
+    iree::base::core_headers
+    iree::hal
     iree::hal::drivers::local_task::task_driver
     iree::hal::local::loaders::registration
     iree::hal::utils::profile_file
+    iree::io::file_handle
     iree::modules::hal
+    iree::modules::hal::types
     iree::task::api
     iree::vm
     iree::vm::bytecode::module

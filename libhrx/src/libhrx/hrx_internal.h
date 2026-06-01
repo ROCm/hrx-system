@@ -14,7 +14,6 @@
 #include "iree/modules/hal/module.h"
 #include "iree/modules/hal/types.h"
 #include "iree/vm/api.h"
-#include "iree/vm/bytecode/module.h"
 #include "iree_hal_compat.h"
 
 #ifdef __cplusplus

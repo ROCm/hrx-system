@@ -44,14 +44,18 @@ HRX_INCLUDES = [
 ]
 
 HRX_DEPS = [
-    "@flatcc//:parsing",
     "//build_tools:dl",
+    "//runtime/src/iree/async",
     "//runtime/src/iree/base",
+    "//runtime/src/iree/base:core_headers",
     "//runtime/src/iree/async/util:proactor_pool",
+    "//runtime/src/iree/hal",
     "//runtime/src/iree/hal/drivers/local_task:task_driver",
     "//runtime/src/iree/hal/local/loaders/registration",
     "//runtime/src/iree/hal/utils:profile_file",
+    "//runtime/src/iree/io:file_handle",
     "//runtime/src/iree/modules/hal",
+    "//runtime/src/iree/modules/hal:types",
     "//runtime/src/iree/task:api",
     "//runtime/src/iree/vm",
     "//runtime/src/iree/vm/bytecode:module",

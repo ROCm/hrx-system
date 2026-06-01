@@ -35,9 +35,8 @@ static inline bool iree_hal_streaming_symbol_map_is_valid_key(void *key) {
 }
 
 // Hash function for host pointers.
-// DO NOT SUBMIT evaluate/document source
 static inline uint64_t iree_hal_streaming_symbol_pointer_hash(void *ptr) {
-  // Simple hash for pointers - mix bits.
+  // Mixes pointer bits before linear-probing lookup.
   uint64_t hash = (uint64_t)ptr;
   hash ^= hash >> 33;
   hash *= 0xff51afd7ed558ccdull;

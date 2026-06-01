@@ -141,7 +141,7 @@ function(iree_cc_test)
 
   string(REPLACE "::" "/" _PACKAGE_PATH ${_PACKAGE_NS})
   set(_NAME_PATH "${_PACKAGE_PATH}/${_RULE_NAME}")
-  set(_HRX_INSTALLED_TESTS_CAN_INSTALL OFF)
+  set(_IREE_TEST_CAN_REGISTER OFF)
 
   set(_ENVIRONMENT_VARS)
   if(IREE_ENABLE_ASAN)
@@ -228,7 +228,7 @@ function(iree_cc_test)
       )
 
     iree_configure_test(${_NAME_PATH})
-    set(_HRX_INSTALLED_TESTS_CAN_INSTALL ON)
+    set(_IREE_TEST_CAN_REGISTER ON)
   endif()
 
   # TODO(benvanik): add an iree_runtime_cc_test that wraps this and adds the
@@ -254,28 +254,32 @@ function(iree_cc_test)
     set_property(TEST ${_NAME_PATH} PROPERTY RESOURCE_LOCK "${_RULE_RESOURCE_GROUP}")
   endif()
 
-  if(_HRX_INSTALLED_TESTS_CAN_INSTALL AND COMMAND hrx_register_installed_test)
-    set(_HRX_INSTALLED_RESOURCE_GROUP)
+  if(_IREE_TEST_CAN_REGISTER AND
+     IREE_TEST_REGISTRATION_FUNCTION AND
+     NOT IREE_SKIP_TEST_REGISTRATION)
+    set(_IREE_REGISTERED_RESOURCE_GROUP)
     if(_RULE_RESOURCE_GROUP)
-      set(_HRX_INSTALLED_RESOURCE_GROUP RESOURCE_GROUP "${_RULE_RESOURCE_GROUP}")
+      set(_IREE_REGISTERED_RESOURCE_GROUP RESOURCE_GROUP "${_RULE_RESOURCE_GROUP}")
     endif()
-    hrx_register_installed_test(
-      NAME
-        "${_NAME_PATH}"
-      TARGET
-        "${_NAME}"
-      ARGS
-        ${_RULE_ARGS}
-      DATA
-        ${_RULE_DATA}
-      ENVIRONMENT
-        ${_ENVIRONMENT_VARS}
-      LABELS
-        ${_RULE_LABELS}
-      TIMEOUT
-        ${_RULE_TIMEOUT}
-      ${_HRX_INSTALLED_RESOURCE_GROUP}
-    )
+    if(COMMAND ${IREE_TEST_REGISTRATION_FUNCTION})
+      cmake_language(CALL ${IREE_TEST_REGISTRATION_FUNCTION}
+        NAME
+          "${_NAME_PATH}"
+        TARGET
+          "${_NAME}"
+        ARGS
+          ${_RULE_ARGS}
+        DATA
+          ${_RULE_DATA}
+        ENVIRONMENT
+          ${_ENVIRONMENT_VARS}
+        LABELS
+          ${_RULE_LABELS}
+        TIMEOUT
+          ${_RULE_TIMEOUT}
+        ${_IREE_REGISTERED_RESOURCE_GROUP}
+      )
+    endif()
   endif()
 
   if(_RULE_GROUP)

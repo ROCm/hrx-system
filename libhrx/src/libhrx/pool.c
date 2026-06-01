@@ -4,7 +4,6 @@
 
 #include "iree/async/util/proactor_pool.h"
 #include "iree/async/notification.h"
-#include "iree/hal/detail.h"
 #include "iree/hal/pool.h"
 #include "iree/hal/resource.h"
 

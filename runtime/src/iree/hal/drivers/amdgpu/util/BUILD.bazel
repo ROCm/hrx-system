@@ -65,7 +65,7 @@ iree_runtime_cc_library(
         # resolves through @hsa_runtime_headers. The matching CMake target is
         # aqlprofile-sdk::headers and should switch to the real ROCm package
         # once one exists.
-        "//build_tools/third_party:aqlprofile_sdk_headers",
+        "//runtime/build_tools/third_party:aqlprofile_sdk_headers",
         "@hsa_runtime_headers",
     ],
 )

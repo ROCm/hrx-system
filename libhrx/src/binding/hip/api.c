@@ -359,7 +359,7 @@ static hipError_t iree_status_to_fixed_hip_result(iree_status_t status,
     return hipSuccess;
   }
 
-  // DO NOT SUBMIT
+  // Preserve a diagnostic before collapsing to the fixed HIP error code.
   iree_status_fprint(stderr, status);
 
   iree_status_free(status);
@@ -12544,11 +12544,13 @@ HIPAPI void __hipUnregisterFatBinary(void **modules) {
   if (!registry)
     return;
 
-  // DO NOT SUBMIT print status
   iree_status_t status =
       iree_hal_streaming_global_symbol_registry_unregister_module(
           registry, (iree_hal_streaming_module_registration_t *)modules);
-  iree_status_ignore(status);
+  if (!iree_status_is_ok(status)) {
+    iree_status_fprint(stderr, status);
+  }
+  iree_status_free(status);
 }
 
 // Registers a __global__ function (kernel) with the HIP runtime.
