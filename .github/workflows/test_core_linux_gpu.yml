@@ -103,7 +103,7 @@ jobs:
           python3 --version
           mkdir -p "${HRX_OUTPUT_DIR}"
           python3 -m venv "${HRX_OUTPUT_DIR}/python"
-          "${HRX_PYTHON}" -m pip install --upgrade pip zstandard
+          "${HRX_PYTHON}" -m pip install --upgrade pip cmake==3.31.6 zstandard
 
       - name: Download public package artifact
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
@@ -132,6 +132,13 @@ jobs:
       - name: Extract package artifacts
         run: |
           "${HRX_PYTHON}" build_tools/ci_core_linux.py extract-packages
+
+      - name: Report ROCm environment
+        run: |
+          export PATH="${HRX_PUBLIC_DEPS_DIR}/bin:${PATH}"
+          export LD_LIBRARY_PATH="${HRX_PUBLIC_DEPS_DIR}/lib:${HRX_PUBLIC_DEPS_DIR}/lib/rocm_sysdeps/lib:${LD_LIBRARY_PATH:-}"
+          echo "rocminfo path: $(command -v rocminfo)"
+          rocminfo
 
       - name: Run installed GPU tests
         run: |

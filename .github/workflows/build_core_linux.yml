@@ -103,7 +103,7 @@ jobs:
         run: git config --global --add safe.directory "$PWD"
 
       - name: Install Python dependencies
-        run: python3 -m pip install --upgrade boto3 zstandard
+        run: python3 -m pip install --upgrade boto3 cmake==3.31.6 zstandard
 
       - name: Fetch ROCm artifacts
         run: python3 build_tools/ci_core_linux.py fetch-rocm
