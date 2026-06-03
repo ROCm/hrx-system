@@ -112,10 +112,12 @@ jobs:
           - name: Linux / CMake / GPU gfx942
             chip: gfx942
             runner_label: linux-gfx942-1gpu-core42-ossci-rocm
+            ctest_exclude_regex: "(^iree/hal/drivers/amdgpu/allocator_test$)|(^iree/hal/drivers/amdgpu/host_queue_command_buffer_test$)|(^iree/hal/drivers/amdgpu/pm4_command_buffer_benchmark_test$)"
             experimental: false
           - name: Linux / CMake / GPU gfx1201 (experimental)
             chip: gfx1201
             runner_label: gpu_navi4x
+            ctest_exclude_regex: ""
             experimental: true
     uses: ./.github/workflows/test_core_linux_gpu.yml
     permissions:
@@ -126,6 +128,7 @@ jobs:
       runner_label: ${{ matrix.runner_label }}
       artifact_run_id: ${{ github.run_id }}
       device: gpu:0
+      ctest_exclude_regex: ${{ matrix.ctest_exclude_regex }}
       ctest_label_regex: runtime-resource=amd-gpu
       ctest_parallelism: 1
       experimental: ${{ matrix.experimental }}

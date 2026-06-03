@@ -24,6 +24,9 @@ on:
       ctest_regex:
         type: string
         default: ""
+      ctest_exclude_regex:
+        type: string
+        default: ""
       ctest_label_regex:
         type: string
         default: runtime-resource=amd-gpu
@@ -53,6 +56,10 @@ on:
       ctest_regex:
         type: string
         description: "Optional CTest name regex for installed GPU tests."
+        default: ""
+      ctest_exclude_regex:
+        type: string
+        description: "Optional CTest name exclusion regex for installed GPU tests."
         default: ""
       ctest_label_regex:
         type: string
@@ -92,6 +99,7 @@ jobs:
       HRX_TEST_GPU: "true"
       HRX_CTS_DEVICE: ${{ inputs.device || 'gpu:0' }}
       HRX_CTEST_REGEX: ${{ inputs.ctest_regex }}
+      HRX_CTEST_EXCLUDE_REGEX: ${{ inputs.ctest_exclude_regex }}
       HRX_CTEST_LABEL_REGEX: ${{ inputs.ctest_label_regex }}
       HRX_CTEST_LABEL_EXCLUDE_REGEX: ${{ inputs.ctest_label_exclude_regex }}
       HRX_CTEST_PARALLELISM: ${{ inputs.ctest_parallelism || 1 }}
