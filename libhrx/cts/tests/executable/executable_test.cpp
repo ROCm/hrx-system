@@ -38,7 +38,7 @@ void append_candidate(std::vector<std::filesystem::path>& candidates,
   candidates.push_back(path);
 }
 
-std::filesystem::path find_noop_hsaco(const std::string &arch) {
+std::filesystem::path find_noop_hsaco(const std::string& arch) {
   std::vector<std::filesystem::path> candidates;
   std::string arch_file_name = "hrx_cts_noop_kernel_" + arch + ".so";
   append_candidate(candidates, std::getenv("HRX_CTS_EXECUTABLE_HSACO"), {});
