@@ -22,7 +22,7 @@ package(
 
 iree_cmake_extra_content(
     content = """
-if(NOT IREE_ROCM_TEST_TARGET_CHIP MATCHES "^gfx")
+if(NOT IREE_ROCM_TEST_TARGET_CHIP_VALUES)
   return()
 endif()
 """,

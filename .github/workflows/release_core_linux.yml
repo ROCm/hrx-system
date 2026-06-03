@@ -44,7 +44,7 @@ jobs:
       test_gpu: false
       ctest_label_exclude_regex: "runtime-resource="
       cmake_options: |
-        -DIREE_ROCM_TEST_TARGET_CHIP=gfx942
+        -DIREE_ROCM_TEST_TARGET_CHIP=gfx942;gfx1151;gfx1201
       package: true
       package_suffix: ${{ github.ref_name }}
 

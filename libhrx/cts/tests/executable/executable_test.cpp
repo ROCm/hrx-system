@@ -38,9 +38,16 @@ void append_candidate(std::vector<std::filesystem::path>& candidates,
   candidates.push_back(path);
 }
 
-std::filesystem::path find_noop_hsaco() {
+std::filesystem::path find_noop_hsaco(const std::string &arch) {
   std::vector<std::filesystem::path> candidates;
+  std::string arch_file_name = "hrx_cts_noop_kernel_" + arch + ".so";
   append_candidate(candidates, std::getenv("HRX_CTS_EXECUTABLE_HSACO"), {});
+  append_candidate(candidates, std::getenv("TEST_SRCDIR"),
+                   {"libhrx", "cts", arch_file_name.c_str()});
+  append_candidate(candidates, std::getenv("RUNFILES_DIR"),
+                   {"libhrx", "cts", arch_file_name.c_str()});
+  append_candidate(candidates, std::getenv("IREE_BINARY_DIR"),
+                   {"libhrx", "cts", arch_file_name.c_str()});
   append_candidate(candidates, std::getenv("TEST_SRCDIR"),
                    {"libhrx", "cts", "hrx_cts_noop_kernel.so"});
   append_candidate(candidates, std::getenv("RUNFILES_DIR"),
@@ -71,7 +78,7 @@ TEST_CASE_METHOD(HrxTestFixture, "executable_load_lookup_dispatch_noop") {
     return;
   }
 
-  std::filesystem::path hsaco_path = find_noop_hsaco();
+  std::filesystem::path hsaco_path = find_noop_hsaco(arch);
   if (hsaco_path.empty()) {
     SUCCEED("Skipping native executable CTS: no build-time HSACO test asset");
     return;

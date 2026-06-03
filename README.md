@@ -53,7 +53,7 @@ python dev.py cmake configure \
   -DCMAKE_MODULE_LINKER_FLAGS="-fuse-ld=lld" \
   -DCMAKE_BUILD_TYPE=RelWithDebInfo \
   -DIREE_HAL_DRIVER_AMDGPU=ON \
-  -DIREE_ROCM_TEST_TARGET_CHIP=gfx942
+  -DIREE_ROCM_TEST_TARGET_CHIP='gfx942;gfx1151;gfx1201'
 
 python dev.py cmake build
 cmake --install ../builds/$(basename "$PWD") --prefix build/hrx-install \
@@ -79,7 +79,7 @@ cmake -S . -B build/hrx-system -GNinja \
   -DCMAKE_MODULE_LINKER_FLAGS="-fuse-ld=lld" \
   -DCMAKE_BUILD_TYPE=RelWithDebInfo \
   -DIREE_HAL_DRIVER_AMDGPU=ON \
-  -DIREE_ROCM_TEST_TARGET_CHIP=gfx942
+  -DIREE_ROCM_TEST_TARGET_CHIP='gfx942;gfx1151;gfx1201'
 
 cmake --build build/hrx-system
 cmake --install build/hrx-system --prefix build/hrx-install \
@@ -100,7 +100,7 @@ Useful options:
 | `HRX_INSTALL_TESTS` | `${IREE_BUILD_TESTS}` | Install a relocatable CTest tree. |
 | `IREE_HAL_DRIVER_AMDGPU` | ON | Build the AMDGPU runtime HAL driver. |
 | `IREE_ROCM_PATH` | empty | ROCm or TheRock SDK root used for ROCm headers and device tooling. |
-| `IREE_ROCM_TEST_TARGET_CHIP` | empty | Target chip for ROCm tests that compile device code. |
+| `IREE_ROCM_TEST_TARGET_CHIP` | empty | Target chip or semicolon-separated chips for ROCm tests that compile device code. |
 
 `IREE_DEPENDENCY_MODE=pinned` uses the checked-in source lock and is the
 repository default. `package` requires embedding or distribution builds to

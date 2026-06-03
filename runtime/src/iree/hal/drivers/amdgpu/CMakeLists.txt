@@ -551,11 +551,11 @@ iree_hal_cts_testdata(
   BACKEND_NAME
     "amdgpu"
   FORMAT_STRING
-    "\"amdgcn-amd-amdhsa--${IREE_ROCM_TEST_TARGET_CHIP}\""
+    "\"amdgcn-amd-amdhsa--${IREE_ROCM_TEST_TARGET_CHIP_PRIMARY}\""
   TESTDATA_DIR
     "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/drivers/amdgpu"
   FLAGS
-    "--iree-rocm-target=${IREE_ROCM_TEST_TARGET_CHIP}"
+    "--iree-rocm-target=${IREE_ROCM_TEST_TARGET_CHIP_PRIMARY}"
 )
 endif()
 

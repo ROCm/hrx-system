@@ -98,19 +98,30 @@ jobs:
       ctest_exclude_regex: ${{ matrix.ctest_exclude_regex }}
       ctest_label_exclude_regex: "runtime-resource="
       cmake_options: |
-        -DIREE_ROCM_TEST_TARGET_CHIP=gfx942
+        -DIREE_ROCM_TEST_TARGET_CHIP=gfx942;gfx1151;gfx1201
       package: ${{ matrix.package }}
 
-  gpu_gfx942:
-    name: Linux / CMake / GPU gfx942
+  gpu_linux:
+    name: Linux / CMake / GPU ${{ matrix.chip }}
     needs: cmake_linux
     if: ${{ needs.cmake_linux.result == 'success' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - chip: gfx942
+            runner_label: linux-gfx942-1gpu-core42-ossci-rocm
+          - chip: gfx1151
+            runner_label: linux-gfx1151-gpu-rocm
+          - chip: gfx1201
+            runner_label: linux-gfx120X-gpu-rocm
     uses: ./.github/workflows/test_core_linux_gpu.yml
     permissions:
       actions: read
       contents: read
     with:
-      name: Linux / CMake / GPU gfx942
+      name: Linux / CMake / GPU ${{ matrix.chip }}
+      runner_label: ${{ matrix.runner_label }}
       artifact_run_id: ${{ github.run_id }}
       device: gpu:0
       ctest_regex: "^libhrx/cts/"
@@ -121,7 +132,7 @@ jobs:
     name: Linux / CMake / CI / Summary
     needs:
       - cmake_linux
-      - gpu_gfx942
+      - gpu_linux
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     steps:
@@ -132,8 +143,8 @@ jobs:
           if [[ "${result}" != "success" ]]; then
             exit 1
           fi
-          result="${{ needs.gpu_gfx942.result }}"
-          echo "gpu_gfx942 result: ${result}"
+          result="${{ needs.gpu_linux.result }}"
+          echo "gpu_linux result: ${result}"
           if [[ "${result}" != "success" ]]; then
             exit 1
           fi

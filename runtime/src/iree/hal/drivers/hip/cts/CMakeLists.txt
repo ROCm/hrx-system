@@ -7,7 +7,7 @@
 # To disable autogeneration for this file entirely, delete this header.        #
 ################################################################################
 
-if(NOT IREE_ROCM_TEST_TARGET_CHIP MATCHES "^gfx")
+if(NOT IREE_ROCM_TEST_TARGET_CHIP_VALUES)
   return()
 endif()
 
