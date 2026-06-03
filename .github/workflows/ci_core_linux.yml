@@ -111,10 +111,8 @@ jobs:
         include:
           - chip: gfx942
             runner_label: linux-gfx942-1gpu-core42-ossci-rocm
-          - chip: gfx1151
-            runner_label: linux-gfx1151-gpu-rocm
           - chip: gfx1201
-            runner_label: linux-gfx120X-gpu-rocm
+            runner_label: gpu_navi4
     uses: ./.github/workflows/test_core_linux_gpu.yml
     permissions:
       actions: read
