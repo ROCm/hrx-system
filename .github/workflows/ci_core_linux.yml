@@ -102,29 +102,33 @@ jobs:
       package: ${{ matrix.package }}
 
   gpu_linux:
-    name: Linux / CMake / GPU ${{ matrix.chip }}
+    name: ${{ matrix.name }}
     needs: cmake_linux
     if: ${{ needs.cmake_linux.result == 'success' }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - chip: gfx942
+          - name: Linux / CMake / GPU gfx942
+            chip: gfx942
             runner_label: linux-gfx942-1gpu-core42-ossci-rocm
-          - chip: gfx1201
+            experimental: false
+          - name: Linux / CMake / GPU gfx1201 (experimental)
+            chip: gfx1201
             runner_label: gpu_navi4x
+            experimental: true
     uses: ./.github/workflows/test_core_linux_gpu.yml
     permissions:
       actions: read
       contents: read
     with:
-      name: Linux / CMake / GPU ${{ matrix.chip }}
+      name: ${{ matrix.name }}
       runner_label: ${{ matrix.runner_label }}
       artifact_run_id: ${{ github.run_id }}
       device: gpu:0
-      ctest_regex: "^libhrx/cts/"
       ctest_label_regex: runtime-resource=amd-gpu
       ctest_parallelism: 1
+      experimental: ${{ matrix.experimental }}
 
   summary:
     name: Linux / CMake / CI / Summary

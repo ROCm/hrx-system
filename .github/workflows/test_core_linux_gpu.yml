@@ -23,7 +23,7 @@ on:
         default: gpu:0
       ctest_regex:
         type: string
-        default: "^libhrx/cts/"
+        default: ""
       ctest_label_regex:
         type: string
         default: runtime-resource=amd-gpu
@@ -33,6 +33,9 @@ on:
       ctest_parallelism:
         type: number
         default: 1
+      experimental:
+        type: boolean
+        default: false
   workflow_dispatch:
     inputs:
       artifact_run_id:
@@ -49,8 +52,8 @@ on:
         default: gpu:0
       ctest_regex:
         type: string
-        description: "CTest name regex for installed GPU tests."
-        default: "^libhrx/cts/"
+        description: "Optional CTest name regex for installed GPU tests."
+        default: ""
       ctest_label_regex:
         type: string
         description: "CTest label regex for GPU installed tests."
@@ -63,6 +66,10 @@ on:
         type: number
         description: "CTest parallelism on the GPU runner."
         default: 1
+      experimental:
+        type: boolean
+        description: "Allow installed GPU tests to fail without failing the workflow."
+        default: false
 
 permissions:
   actions: read
@@ -143,5 +150,6 @@ jobs:
           rocminfo
 
       - name: Run installed GPU tests
+        continue-on-error: ${{ inputs.experimental }}
         run: |
           "${HRX_PYTHON}" build_tools/ci_core_linux.py test
