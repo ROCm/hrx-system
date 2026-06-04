@@ -164,6 +164,11 @@ jobs:
           "$CC" --version
           test -d "$IREE_ROCM_PATH/include"
 
+      - name: Report ROCm environment
+        run: |
+          echo "rocminfo path: $(command -v rocminfo)"
+          rocminfo
+
       - name: Run IREE Bazel CI
         run: |
           echo "python3 build_tools/devtools/ci.py ${{ matrix.command }} --target //runtime/... --keep-going"
