@@ -8,9 +8,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from build_tools.devtools.command_plan import CommandPlan, CommandStep
 from build_tools.devtools.environment import REPO_ROOT, ToolEnvironment
 
+CMAKE_BUILD_DIR_ENV = "IREE_CMAKE_BUILD_DIR"
 PROFILES = ("default", "paranoid", "ci")
 PRESUBMIT_DEFAULT_PROFILE = "ci"
 PRECOMMIT_DEFAULT_PROFILES = {
@@ -49,11 +52,14 @@ def presubmit_plan(
     lane: str,
     tool_env: ToolEnvironment,
     profile: str,
+    cmake_build_dir: Path | None = None,
     verbose: bool = False,
     project_tests: bool = True,
 ) -> CommandPlan:
     env = tool_env.path_env()
     label_name = build_system_name(lane)
+    if cmake_build_dir is not None:
+        env[CMAKE_BUILD_DIR_ENV] = str(cmake_build_dir)
     plan = CommandPlan()
     if lane == "bazel":
         command = [
@@ -112,6 +118,7 @@ def precommit_plan(
     profile: str,
     base: str | None = None,
     commit: bool = False,
+    cmake_build_dir: Path | None = None,
     staged: bool = False,
     paths: list[str] | None = None,
     verbose: bool = False,
@@ -121,6 +128,8 @@ def precommit_plan(
 
     env = tool_env.path_env()
     label_name = build_system_name(lane)
+    if cmake_build_dir is not None:
+        env[CMAKE_BUILD_DIR_ENV] = str(cmake_build_dir)
     input_args: list[str] = []
     if paths:
         input_args += paths

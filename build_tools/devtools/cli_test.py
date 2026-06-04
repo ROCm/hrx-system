@@ -547,6 +547,17 @@ class CliTest(unittest.TestCase):
         self.assertNotIn("--hygiene", description)
         self.assertIn("--profile default", description)
 
+    def test_cmake_precommit_exports_selected_build_dir(self):
+        args = cli.parse_arguments(
+            ["--cmake-build-dir", "build/cmake-ci", "cmake", "precommit"]
+        )
+
+        plan = args.handler(args)
+        description = plan.describe()
+
+        self.assertIn("IREE_CMAKE_BUILD_DIR=", description)
+        self.assertIn("build/cmake-ci", description)
+
     def test_cmake_presubmit_profile_can_be_selected(self):
         args = cli.parse_arguments(["cmake", "presubmit", "--profile", "paranoid"])
 

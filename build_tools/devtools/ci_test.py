@@ -66,6 +66,7 @@ class CiTest(unittest.TestCase):
 
         text = output.getvalue()
         self.assertIn("dev.py bazel configure", text)
+        self.assertIn("-DIREE_ROCM_DEPENDENCY_MODE=pinned", text)
         self.assertNotIn("IREE_ROCM_PATH", text)
         self.assertNotIn("/opt/rocm", text)
 
@@ -221,7 +222,8 @@ class CiTest(unittest.TestCase):
 
         self.assertEqual(
             command_lines[0],
-            "python3 dev.py bazel configure -DIREE_HAL_DRIVER_AMDGPU=ON",
+            "python3 dev.py bazel configure -DIREE_HAL_DRIVER_AMDGPU=ON "
+            "-DIREE_ROCM_DEPENDENCY_MODE=pinned",
         )
         self.assertTrue(
             any(
@@ -317,6 +319,9 @@ class CiTest(unittest.TestCase):
 
         self.assertTrue(
             any("-DIREE_HAL_DRIVER_AMDGPU=ON" in line for line in command_lines)
+        )
+        self.assertTrue(
+            any("-DIREE_ROCM_DEPENDENCY_MODE=pinned" in line for line in command_lines)
         )
         self.assertTrue(
             any(

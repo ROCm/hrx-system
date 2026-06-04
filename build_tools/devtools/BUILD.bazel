@@ -23,6 +23,7 @@ py_library(
         "help_text.py",
         "hooks.py",
         "presubmit.py",
+        "project_presubmit.py",
         "setup.py",
     ],
 )
@@ -77,6 +78,15 @@ py_test(
         "command_plan_test.py",
     ],
     main = "command_plan_test.py",
+)
+
+py_test(
+    name = "project_presubmit_test",
+    srcs = [
+        "project_presubmit.py",
+        "project_presubmit_test.py",
+    ],
+    main = "project_presubmit_test.py",
 )
 
 py_test(

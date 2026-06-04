@@ -10,12 +10,15 @@
 from __future__ import annotations
 
 import argparse
-import subprocess
 import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-CMAKE_BUILD_DIR = REPO_ROOT.parent / "builds" / REPO_ROOT.name
+sys.path.insert(0, str(REPO_ROOT))
+
+from build_tools.devtools import project_presubmit
+
+PROJECT_NAME = "runtime"
 PROJECT_ROOT = "runtime/"
 CMAKE_TEST_REGEX = "^iree/"
 GLOBAL_TEST_TRIGGERS = (
@@ -53,14 +56,9 @@ def parse_arguments() -> argparse.Namespace:
 
 
 def run_command(command: list[str], description: str) -> bool:
-    print(f"runtime presubmit: {description}")
-    print("  " + " ".join(command))
-    sys.stdout.flush()
-    result = subprocess.run(command, cwd=REPO_ROOT)
-    if result.returncode == 0:
-        return True
-    print(f"runtime presubmit: {description} failed with exit code {result.returncode}")
-    return False
+    return project_presubmit.run_command(
+        PROJECT_NAME, command, description, cwd=REPO_ROOT
+    )
 
 
 def is_global_trigger(path: str) -> bool:
@@ -107,14 +105,11 @@ def run_bazel_tests() -> bool:
 
 
 def run_cmake_tests() -> bool:
-    if not (CMAKE_BUILD_DIR / "CMakeCache.txt").is_file():
-        print(
-            "runtime presubmit: CMake build tree is not configured; "
-            "run `python dev.py cmake configure` first"
-        )
+    build_dir = project_presubmit.cmake_build_dir(REPO_ROOT)
+    if not project_presubmit.validate_cmake_build_tree(PROJECT_NAME, build_dir):
         return False
     if not run_command(
-        ["cmake", "--build", str(CMAKE_BUILD_DIR)],
+        ["cmake", "--build", str(build_dir), "--parallel"],
         "CMake build",
     ):
         return False
@@ -122,7 +117,7 @@ def run_cmake_tests() -> bool:
         [
             "ctest",
             "--test-dir",
-            str(CMAKE_BUILD_DIR),
+            str(build_dir),
             "--output-on-failure",
             "-R",
             CMAKE_TEST_REGEX,

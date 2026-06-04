@@ -27,6 +27,7 @@ CMAKE_SANITIZER_OPTIONS = {
     "tsan": ("-DIREE_ENABLE_TSAN=ON",),
     "ubsan": ("-DIREE_ENABLE_UBSAN=ON",),
 }
+ROCM_PINNED_DEPENDENCY_MODE_OPTION = "-DIREE_ROCM_DEPENDENCY_MODE=pinned"
 BAZEL_COMMANDS = {
     "iree-bazel-cpu": ("cpu", None),
     "iree-bazel-cpu-asan": ("cpu", "asan"),
@@ -115,6 +116,7 @@ def bazel_configure_step(enable_amdgpu: bool = False) -> CiStep:
     command = ["bazel", "configure"]
     if enable_amdgpu:
         command.append("-DIREE_HAL_DRIVER_AMDGPU=ON")
+        command.append(ROCM_PINNED_DEPENDENCY_MODE_OPTION)
     return CiStep("Configure Bazel", dev_command(*command))
 
 
@@ -168,6 +170,7 @@ def cmake_configure_step(
         f"-DIREE_HAL_DRIVER_AMDGPU={'ON' if enable_amdgpu else 'OFF'}",
     ]
     if enable_amdgpu:
+        command.append(ROCM_PINNED_DEPENDENCY_MODE_OPTION)
         command.append(f"-DIREE_HAL_AMDGPU_TARGETS={ci_config.AMDGPU_TARGET_SELECTOR}")
     if sanitizer is not None:
         command.append("-DIREE_ENABLE_ASSERTIONS=ON")

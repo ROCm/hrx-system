@@ -80,7 +80,6 @@ jobs:
           "${HRX_PYTHON}" build_tools/ci_core_linux.py fetch-rocm
           echo "${HRX_ROCM_ROOT}/lib/llvm/bin" >> "$GITHUB_PATH"
           echo "${HRX_ROCM_ROOT}/bin" >> "$GITHUB_PATH"
-          echo "IREE_ROCM_PATH=${HRX_ROCM_ROOT}" >> "$GITHUB_ENV"
           echo "CC=${HRX_ROCM_ROOT}/lib/llvm/bin/clang" >> "$GITHUB_ENV"
           echo "CXX=${HRX_ROCM_ROOT}/lib/llvm/bin/clang++" >> "$GITHUB_ENV"
           echo "CMAKE_PREFIX_PATH=${HRX_ROCM_ROOT}${CMAKE_PREFIX_PATH:+:${CMAKE_PREFIX_PATH}}" >> "$GITHUB_ENV"
@@ -99,7 +98,7 @@ jobs:
           ninja --version
           clang --version
           "$CC" --version
-          test -d "$IREE_ROCM_PATH/include"
+          test -d "${HRX_ROCM_ROOT}/include"
 
       - name: Run IREE CMake CI
         run: |
@@ -141,7 +140,6 @@ jobs:
           "${HRX_PYTHON}" build_tools/ci_core_linux.py fetch-rocm
           echo "${HRX_ROCM_ROOT}/lib/llvm/bin" >> "$GITHUB_PATH"
           echo "${HRX_ROCM_ROOT}/bin" >> "$GITHUB_PATH"
-          echo "IREE_ROCM_PATH=${HRX_ROCM_ROOT}" >> "$GITHUB_ENV"
           echo "CC=${HRX_ROCM_ROOT}/lib/llvm/bin/clang" >> "$GITHUB_ENV"
           echo "CXX=${HRX_ROCM_ROOT}/lib/llvm/bin/clang++" >> "$GITHUB_ENV"
           echo "CMAKE_PREFIX_PATH=${HRX_ROCM_ROOT}${CMAKE_PREFIX_PATH:+:${CMAKE_PREFIX_PATH}}" >> "$GITHUB_ENV"
@@ -160,7 +158,7 @@ jobs:
           ninja --version
           clang --version
           "$CC" --version
-          test -d "$IREE_ROCM_PATH/include"
+          test -d "${HRX_ROCM_ROOT}/include"
 
       - name: Run IREE CMake CI
         run: |
