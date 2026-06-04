@@ -19,6 +19,7 @@ iree_cc_library(
   COPTS
     "-DHRX_BUILDING_SHARED"
   HDRS
+    "buffer_table.h"
     "hrx_internal.h"
   SRCS
     "allocator.c"
@@ -26,14 +27,9 @@ iree_cc_library(
     "buffer_table.c"
     "buffer_view.c"
     "device.c"
-    "event.c"
     "executable.c"
     "fence.c"
-    "graph.c"
-    "graph_analysis.c"
-    "graph_exec.c"
     "host_allocator.c"
-    "mem_pool.c"
     "module.c"
     "pool.c"
     "queue_ops.c"
