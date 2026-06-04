@@ -10,21 +10,21 @@
 // Event management
 //===----------------------------------------------------------------------===//
 
-static void iree_hal_streaming_event_destroy(iree_hal_streaming_event_t *event);
+static void iree_hal_streaming_event_destroy(iree_hal_streaming_event_t* event);
 
 iree_status_t iree_hal_streaming_event_create(
-    iree_hal_streaming_context_t *context,
+    iree_hal_streaming_context_t* context,
     iree_hal_streaming_event_flags_t flags, iree_allocator_t host_allocator,
-    iree_hal_streaming_event_t **out_event) {
+    iree_hal_streaming_event_t** out_event) {
   IREE_ASSERT_ARGUMENT(context);
   IREE_ASSERT_ARGUMENT(out_event);
   *out_event = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  iree_hal_streaming_event_t *event = NULL;
+  iree_hal_streaming_event_t* event = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0,
-      iree_allocator_malloc(host_allocator, sizeof(*event), (void **)&event));
+      iree_allocator_malloc(host_allocator, sizeof(*event), (void**)&event));
 
   // Initialize event.
   iree_atomic_ref_count_init(&event->ref_count);
@@ -53,7 +53,7 @@ iree_status_t iree_hal_streaming_event_create(
 }
 
 static void iree_hal_streaming_event_destroy(
-    iree_hal_streaming_event_t *event) {
+    iree_hal_streaming_event_t* event) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   // Release semaphore.
@@ -76,20 +76,20 @@ static void iree_hal_streaming_event_destroy(
   IREE_TRACE_ZONE_END(z0);
 }
 
-void iree_hal_streaming_event_retain(iree_hal_streaming_event_t *event) {
+void iree_hal_streaming_event_retain(iree_hal_streaming_event_t* event) {
   if (event) {
     iree_atomic_ref_count_inc(&event->ref_count);
   }
 }
 
-void iree_hal_streaming_event_release(iree_hal_streaming_event_t *event) {
+void iree_hal_streaming_event_release(iree_hal_streaming_event_t* event) {
   if (event && iree_atomic_ref_count_dec(&event->ref_count) == 1) {
     iree_hal_streaming_event_destroy(event);
   }
 }
 
-iree_status_t iree_hal_streaming_event_query(iree_hal_streaming_event_t *event,
-                                             int *status) {
+iree_status_t iree_hal_streaming_event_query(iree_hal_streaming_event_t* event,
+                                             int* status) {
   IREE_ASSERT_ARGUMENT(event);
   IREE_ASSERT_ARGUMENT(status);
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -107,7 +107,7 @@ iree_status_t iree_hal_streaming_event_query(iree_hal_streaming_event_t *event,
 }
 
 iree_status_t iree_hal_streaming_event_record(
-    iree_hal_streaming_event_t *event, iree_hal_streaming_stream_t *stream) {
+    iree_hal_streaming_event_t* event, iree_hal_streaming_stream_t* stream) {
   IREE_ASSERT_ARGUMENT(event);
   IREE_ASSERT_ARGUMENT(stream);
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -150,7 +150,7 @@ iree_status_t iree_hal_streaming_event_record(
       .semaphores = &stream->timeline_semaphore,
       .payload_values = &wait_value,
   };
-  iree_hal_semaphore_t *semaphores[] = {stream->timeline_semaphore,
+  iree_hal_semaphore_t* semaphores[] = {stream->timeline_semaphore,
                                         event->semaphore};
   uint64_t signal_values[] = {event->signal_value, event->signal_value};
   iree_hal_semaphore_list_t signal_semaphores = {
@@ -169,7 +169,7 @@ iree_status_t iree_hal_streaming_event_record(
 }
 
 iree_status_t iree_hal_streaming_event_synchronize(
-    iree_hal_streaming_event_t *event) {
+    iree_hal_streaming_event_t* event) {
   IREE_ASSERT_ARGUMENT(event);
   IREE_TRACE_ZONE_BEGIN(z0);
 
@@ -183,8 +183,8 @@ iree_status_t iree_hal_streaming_event_synchronize(
 }
 
 iree_status_t iree_hal_streaming_event_elapsed_time(
-    float *ms, iree_hal_streaming_event_t *start,
-    iree_hal_streaming_event_t *stop) {
+    float* ms, iree_hal_streaming_event_t* start,
+    iree_hal_streaming_event_t* stop) {
   IREE_ASSERT_ARGUMENT(ms);
   IREE_ASSERT_ARGUMENT(start);
   IREE_ASSERT_ARGUMENT(stop);

@@ -127,7 +127,7 @@ static void hrx_launch_timing_dump(void) {
 static int hrx_launch_timing_enabled(void) {
   if (!g_hrx_launch_timing_initialized) {
     g_hrx_launch_timing_initialized = 1;
-    const char *enabled = getenv("HRX_LAUNCH_TIMING");
+    const char* enabled = getenv("HRX_LAUNCH_TIMING");
     g_hrx_launch_timing_enabled = enabled && enabled[0] && enabled[0] != '0';
     if (g_hrx_launch_timing_enabled) {
       atexit(hrx_launch_timing_dump);
@@ -139,7 +139,7 @@ static int hrx_launch_timing_enabled(void) {
 static int hrx_disable_dispatch_barrier_enabled(void) {
   if (!g_hrx_disable_dispatch_barrier_initialized) {
     g_hrx_disable_dispatch_barrier_initialized = 1;
-    const char *enabled = getenv("HRX_DISABLE_DISPATCH_BARRIER");
+    const char* enabled = getenv("HRX_DISABLE_DISPATCH_BARRIER");
     g_hrx_disable_dispatch_barrier_enabled =
         enabled && enabled[0] && enabled[0] != '0';
   }
@@ -149,7 +149,7 @@ static int hrx_disable_dispatch_barrier_enabled(void) {
 static int hrx_flush_each_launch_enabled(void) {
   if (!g_hrx_flush_each_launch_initialized) {
     g_hrx_flush_each_launch_initialized = 1;
-    const char *enabled = getenv("HRX_FLUSH_EACH_LAUNCH");
+    const char* enabled = getenv("HRX_FLUSH_EACH_LAUNCH");
     g_hrx_flush_each_launch_enabled =
         enabled && enabled[0] && enabled[0] != '0';
   }
@@ -159,7 +159,7 @@ static int hrx_flush_each_launch_enabled(void) {
 static int hrx_flush_interval(void) {
   if (!g_hrx_flush_interval_initialized) {
     g_hrx_flush_interval_initialized = 1;
-    const char *value = getenv("HRX_FLUSH_INTERVAL");
+    const char* value = getenv("HRX_FLUSH_INTERVAL");
     g_hrx_flush_interval = value ? atoi(value) : 0;
     if (g_hrx_flush_interval < 0) g_hrx_flush_interval = 0;
   }
@@ -169,7 +169,7 @@ static int hrx_flush_interval(void) {
 static int hrx_direct_queue_dispatch_enabled(void) {
   if (!g_hrx_direct_queue_dispatch_initialized) {
     g_hrx_direct_queue_dispatch_initialized = 1;
-    const char *enabled = getenv("HRX_DIRECT_QUEUE_DISPATCH");
+    const char* enabled = getenv("HRX_DIRECT_QUEUE_DISPATCH");
     g_hrx_direct_queue_dispatch_enabled =
         enabled && enabled[0] && enabled[0] != '0';
   }
@@ -181,21 +181,21 @@ static int hrx_direct_queue_dispatch_enabled(void) {
 //===----------------------------------------------------------------------===//
 
 static void iree_hal_streaming_stream_destroy(
-    iree_hal_streaming_stream_t *stream);
+    iree_hal_streaming_stream_t* stream);
 
 iree_status_t iree_hal_streaming_stream_create(
-    iree_hal_streaming_context_t *context,
+    iree_hal_streaming_context_t* context,
     iree_hal_streaming_stream_flags_t flags, int priority,
-    iree_allocator_t host_allocator, iree_hal_streaming_stream_t **out_stream) {
+    iree_allocator_t host_allocator, iree_hal_streaming_stream_t** out_stream) {
   IREE_ASSERT_ARGUMENT(context);
   IREE_ASSERT_ARGUMENT(out_stream);
   *out_stream = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  iree_hal_streaming_stream_t *stream = NULL;
+  iree_hal_streaming_stream_t* stream = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0,
-      iree_allocator_malloc(host_allocator, sizeof(*stream), (void **)&stream));
+      iree_allocator_malloc(host_allocator, sizeof(*stream), (void**)&stream));
   iree_atomic_ref_count_init(&stream->ref_count);
   stream->context = context;
   stream->flags = flags;
@@ -242,11 +242,11 @@ iree_status_t iree_hal_streaming_stream_create(
 }
 
 static void iree_hal_streaming_stream_destroy(
-    iree_hal_streaming_stream_t *stream) {
+    iree_hal_streaming_stream_t* stream) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   // Capture and clear context pointer to prevent re-entry during unregister.
-  iree_hal_streaming_context_t *context = stream->context;
+  iree_hal_streaming_context_t* context = stream->context;
   stream->context = NULL;
 
   // Synchronize stream before cleanup to ensure all operations complete.
@@ -286,20 +286,20 @@ static void iree_hal_streaming_stream_destroy(
   IREE_TRACE_ZONE_END(z0);
 }
 
-void iree_hal_streaming_stream_retain(iree_hal_streaming_stream_t *stream) {
+void iree_hal_streaming_stream_retain(iree_hal_streaming_stream_t* stream) {
   if (stream) {
     iree_atomic_ref_count_inc(&stream->ref_count);
   }
 }
 
-void iree_hal_streaming_stream_release(iree_hal_streaming_stream_t *stream) {
+void iree_hal_streaming_stream_release(iree_hal_streaming_stream_t* stream) {
   if (stream && iree_atomic_ref_count_dec(&stream->ref_count) == 1) {
     iree_hal_streaming_stream_destroy(stream);
   }
 }
 
 iree_status_t iree_hal_streaming_stream_begin(
-    iree_hal_streaming_stream_t *stream) {
+    iree_hal_streaming_stream_t* stream) {
   IREE_ASSERT_ARGUMENT(stream);
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_slim_mutex_lock(&stream->mutex);
@@ -333,7 +333,7 @@ iree_status_t iree_hal_streaming_stream_begin(
 }
 
 iree_status_t iree_hal_streaming_stream_flush(
-    iree_hal_streaming_stream_t *stream) {
+    iree_hal_streaming_stream_t* stream) {
   IREE_ASSERT_ARGUMENT(stream);
   IREE_TRACE_ZONE_BEGIN(z0);
   const int timing_enabled = hrx_launch_timing_enabled();
@@ -427,7 +427,7 @@ iree_status_t iree_hal_streaming_stream_flush(
 }
 
 iree_status_t iree_hal_streaming_stream_query(
-    iree_hal_streaming_stream_t *stream, int *status) {
+    iree_hal_streaming_stream_t* stream, int* status) {
   IREE_ASSERT_ARGUMENT(stream);
   IREE_ASSERT_ARGUMENT(status);
 
@@ -452,7 +452,7 @@ iree_status_t iree_hal_streaming_stream_query(
 }
 
 iree_status_t iree_hal_streaming_stream_synchronize(
-    iree_hal_streaming_stream_t *stream) {
+    iree_hal_streaming_stream_t* stream) {
   IREE_ASSERT_ARGUMENT(stream);
   IREE_TRACE_ZONE_BEGIN(z0);
   const int timing_enabled = hrx_launch_timing_enabled();
@@ -511,7 +511,7 @@ iree_status_t iree_hal_streaming_stream_synchronize(
 }
 
 iree_status_t iree_hal_streaming_stream_wait_submitted(
-    iree_hal_streaming_stream_t *stream) {
+    iree_hal_streaming_stream_t* stream) {
   IREE_ASSERT_ARGUMENT(stream);
   IREE_TRACE_ZONE_BEGIN(z0);
 
@@ -530,7 +530,7 @@ iree_status_t iree_hal_streaming_stream_wait_submitted(
 }
 
 iree_status_t iree_hal_streaming_stream_wait_event(
-    iree_hal_streaming_stream_t *stream, iree_hal_streaming_event_t *event) {
+    iree_hal_streaming_stream_t* stream, iree_hal_streaming_event_t* event) {
   IREE_ASSERT_ARGUMENT(stream);
   IREE_ASSERT_ARGUMENT(event);
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -583,10 +583,10 @@ iree_status_t iree_hal_streaming_stream_wait_event(
 //===----------------------------------------------------------------------===//
 
 iree_status_t iree_hal_streaming_unpack_parameters(
-    iree_hal_streaming_context_t *context,
-    const iree_hal_streaming_parameter_info_t *parameters,
-    const void *parameter_buffer_ptr, void *out_constants,
-    iree_hal_buffer_ref_list_t *out_bindings) {
+    iree_hal_streaming_context_t* context,
+    const iree_hal_streaming_parameter_info_t* parameters,
+    const void* parameter_buffer_ptr, void* out_constants,
+    iree_hal_buffer_ref_list_t* out_bindings) {
   IREE_ASSERT_ARGUMENT(context);
   IREE_ASSERT_ARGUMENT(parameters);
   if (parameters->buffer_size == 0) {
@@ -595,14 +595,14 @@ iree_status_t iree_hal_streaming_unpack_parameters(
   IREE_ASSERT_ARGUMENT(parameter_buffer_ptr);
   IREE_ASSERT_ARGUMENT(out_bindings);
 
-  const uint8_t *parameter_buffer = (const uint8_t *)parameter_buffer_ptr;
+  const uint8_t* parameter_buffer = (const uint8_t*)parameter_buffer_ptr;
 
   // Copy constant data spans.
   // Each copy represents one or more constants laid out contiguously and
   // copied in order. Constants are placed at their ABI offsets (dst_offset)
   // matching how they'll appear in the kernel argument buffer.
-  uint8_t *constants = (uint8_t *)out_constants;
-  const iree_hal_streaming_parameter_op_t *op = &parameters->ops[0];
+  uint8_t* constants = (uint8_t*)out_constants;
+  const iree_hal_streaming_parameter_op_t* op = &parameters->ops[0];
   for (uint32_t i = 0; i < parameters->copy_count; ++i, ++op) {
     const iree_hal_streaming_parameter_copy_op_t copy_op = op->copy;
     memcpy(constants + copy_op.dst_offset,
@@ -613,11 +613,11 @@ iree_status_t iree_hal_streaming_unpack_parameters(
   // For native kernels with NULL or external device pointers, we can't use
   // IREE's binding mechanism. In that case, the caller should use
   // CUSTOM_DIRECT_ARGUMENTS to pass the raw parameter buffer directly.
-  iree_hal_buffer_ref_t *bindings =
-      (iree_hal_buffer_ref_t *)out_bindings->values;
+  iree_hal_buffer_ref_t* bindings =
+      (iree_hal_buffer_ref_t*)out_bindings->values;
   for (uint32_t i = 0; i < parameters->binding_count; ++i, ++op) {
     const iree_hal_streaming_parameter_resolve_op_t resolve_op = op->resolve;
-    void *device_ptr = *(void **)(parameter_buffer + resolve_op.src_offset);
+    void* device_ptr = *(void**)(parameter_buffer + resolve_op.src_offset);
     // TODO(benvanik): possibly calculate proper range here? We could easily
     // (at only the cost of a cache miss) get the total buffer size and then
     // subtract the offset to get the remaining size.
@@ -646,10 +646,10 @@ iree_status_t iree_hal_streaming_unpack_parameters(
 }
 
 iree_status_t iree_hal_streaming_unpack_parameter_list(
-    iree_hal_streaming_context_t *context,
-    const iree_hal_streaming_parameter_info_t *parameters,
-    void **parameter_list, void *out_constants,
-    iree_hal_buffer_ref_list_t *out_bindings) {
+    iree_hal_streaming_context_t* context,
+    const iree_hal_streaming_parameter_info_t* parameters,
+    void** parameter_list, void* out_constants,
+    iree_hal_buffer_ref_list_t* out_bindings) {
   IREE_ASSERT_ARGUMENT(context);
   IREE_ASSERT_ARGUMENT(parameters);
   if (parameters->buffer_size == 0) {
@@ -665,14 +665,14 @@ iree_status_t iree_hal_streaming_unpack_parameter_list(
   // Copy constant data spans.
   // For each copy operation, we read from the parameter list at the source
   // ordinal and copy to the ABI offset in the constants buffer.
-  uint8_t *constants = (uint8_t *)out_constants;
-  const iree_hal_streaming_parameter_op_t *op = &parameters->ops[0];
+  uint8_t* constants = (uint8_t*)out_constants;
+  const iree_hal_streaming_parameter_op_t* op = &parameters->ops[0];
   for (uint32_t i = 0; i < parameters->copy_count; ++i, ++op) {
     const iree_hal_streaming_parameter_copy_op_t copy_op = op->copy;
     // In pointer array mode, src_ordinal is an index into the parameter_list
     // array. Each parameter_list[index] is a pointer to the actual value.
     // We need to dereference it to get the value.
-    void *param_ptr = parameter_list[copy_op.src_ordinal];
+    void* param_ptr = parameter_list[copy_op.src_ordinal];
     memcpy(constants + copy_op.dst_offset, param_ptr, copy_op.size);
   }
 
@@ -681,14 +681,14 @@ iree_status_t iree_hal_streaming_unpack_parameter_list(
   // For native kernels with NULL or external device pointers, we can't use
   // IREE's binding mechanism. In that case, the caller should use
   // CUSTOM_DIRECT_ARGUMENTS to pass the raw parameter buffer directly.
-  iree_hal_buffer_ref_t *bindings =
-      (iree_hal_buffer_ref_t *)out_bindings->values;
+  iree_hal_buffer_ref_t* bindings =
+      (iree_hal_buffer_ref_t*)out_bindings->values;
   for (uint32_t i = 0; i < parameters->binding_count; ++i, ++op) {
     const iree_hal_streaming_parameter_resolve_op_t resolve_op = op->resolve;
     // In pointer array mode, src_offset is an index into the parameter_list.
-    void *param_ptr = parameter_list[resolve_op.src_ordinal];
+    void* param_ptr = parameter_list[resolve_op.src_ordinal];
     // The parameter points to a device pointer (void*)
-    void *device_ptr = *(void **)param_ptr;
+    void* device_ptr = *(void**)param_ptr;
     // TODO(benvanik): possibly calculate proper range here? We could easily
     // (at only the cost of a cache miss) get the total buffer size and then
     // subtract the offset to get the remaining size.
@@ -717,9 +717,9 @@ iree_status_t iree_hal_streaming_unpack_parameter_list(
 }
 
 iree_status_t iree_hal_streaming_launch_kernel(
-    iree_hal_streaming_symbol_t *symbol,
-    const iree_hal_streaming_dispatch_params_t *params,
-    iree_hal_streaming_stream_t *stream) {
+    iree_hal_streaming_symbol_t* symbol,
+    const iree_hal_streaming_dispatch_params_t* params,
+    iree_hal_streaming_stream_t* stream) {
   IREE_ASSERT_ARGUMENT(symbol);
   IREE_ASSERT_ARGUMENT(params);
   IREE_ASSERT_ARGUMENT(stream);
@@ -797,7 +797,7 @@ iree_status_t iree_hal_streaming_launch_kernel(
   // Stack allocate arrays based on cached sizes.
   // Zero-initialize constants to prevent uninitialized padding bytes from
   // being misinterpreted as device pointers by the overlay scan.
-  void *constants = symbol->parameters.constant_bytes
+  void* constants = symbol->parameters.constant_bytes
                         ? iree_alloca(symbol->parameters.constant_bytes)
                         : NULL;
   if (constants) memset(constants, 0, symbol->parameters.constant_bytes);
@@ -857,8 +857,8 @@ iree_status_t iree_hal_streaming_launch_kernel(
   } else if (params->flags & IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY) {
     // Unpack parameters from array of pointers (void**).
     iree_status_t unpack_status = iree_hal_streaming_unpack_parameter_list(
-        stream->context, &symbol->parameters, (void **)params->buffer,
-        constants, &binding_list);
+        stream->context, &symbol->parameters, (void**)params->buffer, constants,
+        &binding_list);
     if (!iree_status_is_ok(unpack_status)) {
       // If unpack fails due to NULL or external device pointers, fall back
       // to raw argument passing. This handles native kernels with optional
@@ -870,9 +870,9 @@ iree_status_t iree_hal_streaming_launch_kernel(
         // Pack all parameters (copies + resolves) into a single constants
         // buffer. For native kernels, we use the parameter metadata to know the
         // layout.
-        const iree_hal_streaming_parameter_info_t *params_info =
+        const iree_hal_streaming_parameter_info_t* params_info =
             &symbol->parameters;
-        void **args_array = (void **)params->buffer;
+        void** args_array = (void**)params->buffer;
 
         // Build packed buffer from args array using the ops.
         // Stack-allocate the buffer (using constant_bytes as size).
@@ -881,12 +881,12 @@ iree_status_t iree_hal_streaming_launch_kernel(
         constants_size = params_info->constant_bytes;
 
         // Process all copy operations (constants/scalars).
-        const iree_hal_streaming_parameter_op_t *op = &params_info->ops[0];
+        const iree_hal_streaming_parameter_op_t* op = &params_info->ops[0];
         for (uint32_t i = 0; i < params_info->copy_count; ++i, ++op) {
           const iree_hal_streaming_parameter_copy_op_t copy_op = op->copy;
           // Dereference the arg pointer to get the value.
-          void *param_ptr = args_array[copy_op.src_ordinal];
-          memcpy((uint8_t *)constants + copy_op.dst_offset, param_ptr,
+          void* param_ptr = args_array[copy_op.src_ordinal];
+          memcpy((uint8_t*)constants + copy_op.dst_offset, param_ptr,
                  copy_op.size);
         }
 
@@ -896,16 +896,16 @@ iree_status_t iree_hal_streaming_launch_kernel(
         for (uint32_t i = 0; i < params_info->binding_count; ++i, ++op) {
           const iree_hal_streaming_parameter_resolve_op_t resolve_op =
               op->resolve;
-          void *param_ptr = args_array[resolve_op.src_ordinal];
+          void* param_ptr = args_array[resolve_op.src_ordinal];
           // The parameter points to a device pointer (void*)
-          void *device_ptr = *(void **)param_ptr;
+          void* device_ptr = *(void**)param_ptr;
           // Copy the raw device pointer value into the constants buffer at the
           // correct kernel ABI offset. dst_offset is the kernel's argument
           // offset (from the code object metadata), NOT src_offset (which is a
           // running total used for source buffer layout in non-args-array
           // mode).
-          memcpy((uint8_t *)constants + resolve_op.dst_offset, &device_ptr,
-                 sizeof(void *));
+          memcpy((uint8_t*)constants + resolve_op.dst_offset, &device_ptr,
+                 sizeof(void*));
         }
 
         binding_list.count = 0;  // No IREE bindings, using raw pointers.
@@ -973,7 +973,7 @@ iree_status_t iree_hal_streaming_launch_kernel(
   // When the kernel also has regular bindings (binding_count > 0), we must
   // convert those to overlay format too: write their device pointer values
   // into the constants at their ABI offsets so the scan can find them.
-  if (constants && constants_size >= sizeof(void *)) {
+  if (constants && constants_size >= sizeof(void*)) {
     // If we have regular bindings, convert them to overlay format by writing
     // the device pointer values into the constants buffer at their ABI
     // offsets. This allows the overlay scan below to find them alongside
@@ -981,23 +981,23 @@ iree_status_t iree_hal_streaming_launch_kernel(
     if (binding_list.count > 0 && !use_raw_arguments && !is_pre_packed) {
       bool is_args_array =
           (params->flags & IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY) != 0;
-      const iree_hal_streaming_parameter_op_t *op =
+      const iree_hal_streaming_parameter_op_t* op =
           &symbol->parameters.ops[symbol->parameters.copy_count];
       for (uint32_t i = 0; i < symbol->parameters.binding_count; ++i, ++op) {
         const iree_hal_streaming_parameter_resolve_op_t resolve_op =
             op->resolve;
-        void *device_ptr;
+        void* device_ptr;
         if (is_args_array) {
-          void **args_array = (void **)params->buffer;
-          device_ptr = *(void **)args_array[resolve_op.src_ordinal];
+          void** args_array = (void**)params->buffer;
+          device_ptr = *(void**)args_array[resolve_op.src_ordinal];
         } else {
-          const uint8_t *parameter_buffer = (const uint8_t *)params->buffer;
-          device_ptr = *(void **)(parameter_buffer + resolve_op.src_offset);
+          const uint8_t* parameter_buffer = (const uint8_t*)params->buffer;
+          device_ptr = *(void**)(parameter_buffer + resolve_op.src_offset);
         }
         if (device_ptr &&
-            resolve_op.dst_offset + sizeof(void *) <= constants_size) {
-          memcpy((uint8_t *)constants + resolve_op.dst_offset, &device_ptr,
-                 sizeof(void *));
+            resolve_op.dst_offset + sizeof(void*) <= constants_size) {
+          memcpy((uint8_t*)constants + resolve_op.dst_offset, &device_ptr,
+                 sizeof(void*));
         }
       }
       binding_list.count = 0;
@@ -1142,23 +1142,23 @@ iree_status_t iree_hal_streaming_launch_kernel(
 
 // Host callback wrapper structure to adapt CUDA/HIP callbacks to HAL callbacks.
 typedef struct iree_hal_streaming_host_callback_t {
-  void (*fn)(void *user_data);
-  void *user_data;
+  void (*fn)(void* user_data);
+  void* user_data;
 } iree_hal_streaming_host_callback_t;
 
 // HAL host call function that invokes the CUDA/HIP style callback.
 static iree_status_t iree_hal_streaming_host_callback_thunk(
-    void *user_data, const uint64_t args[4],
-    iree_hal_host_call_context_t *context) {
-  iree_hal_streaming_host_callback_t *callback =
-      (iree_hal_streaming_host_callback_t *)user_data;
+    void* user_data, const uint64_t args[4],
+    iree_hal_host_call_context_t* context) {
+  iree_hal_streaming_host_callback_t* callback =
+      (iree_hal_streaming_host_callback_t*)user_data;
   callback->fn(callback->user_data);
   iree_allocator_free(iree_allocator_system(), callback);
   return iree_ok_status();
 }
 
 iree_status_t iree_hal_streaming_launch_host_function(
-    iree_hal_streaming_stream_t *stream, void (*fn)(void *), void *user_data) {
+    iree_hal_streaming_stream_t* stream, void (*fn)(void*), void* user_data) {
   IREE_ASSERT_ARGUMENT(stream);
   IREE_ASSERT_ARGUMENT(fn);
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -1183,10 +1183,10 @@ iree_status_t iree_hal_streaming_launch_host_function(
   }
 
   // Allocate a wrapper structure to hold the callback and user data.
-  iree_hal_streaming_host_callback_t *callback = NULL;
+  iree_hal_streaming_host_callback_t* callback = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_allocator_malloc(iree_allocator_system(), sizeof(*callback),
-                                (void **)&callback));
+                                (void**)&callback));
   callback->fn = fn;
   callback->user_data = user_data;
 

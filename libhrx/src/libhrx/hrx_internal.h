@@ -149,7 +149,7 @@ _Static_assert(HRX_BUFFER_USAGE_DEFAULT == IREE_HAL_BUFFER_USAGE_DEFAULT,
 // HRX dispatch flags intentionally use their own bit assignments. Translate
 // them instead of casting into IREE HAL dispatch flags.
 static inline hrx_status_t hrx_iree_dispatch_flags_from_hrx(
-    uint32_t hrx_flags, iree_hal_dispatch_flags_t *out_iree_flags) {
+    uint32_t hrx_flags, iree_hal_dispatch_flags_t* out_iree_flags) {
   *out_iree_flags = IREE_HAL_DISPATCH_FLAG_NONE;
   const uint32_t supported_flags = HRX_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS |
                                    HRX_DISPATCH_FLAG_ALLOW_INLINE_EXECUTION;
@@ -230,13 +230,13 @@ _Static_assert(HRX_MAP_DISCARD == IREE_HAL_MEMORY_ACCESS_DISCARD,
 // Status payload (allocated on error, NULL = OK).
 typedef struct hrx_status_s {
   hrx_status_code_t code;
-  char *message;
+  char* message;
 } hrx_status_s;
 
 // Allocator (wraps iree_hal_allocator_t, owned by device).
 typedef struct hrx_allocator_s {
   iree_atomic_ref_count_t ref_count;
-  iree_hal_allocator_t *hal_allocator;
+  iree_hal_allocator_t* hal_allocator;
   hrx_device_t device;
 } hrx_allocator_s;
 
@@ -245,8 +245,8 @@ typedef struct hrx_device_s {
   iree_atomic_ref_count_t ref_count;
   hrx_accelerator_type_t type;
   int ordinal;
-  iree_hal_device_t *hal_device;
-  iree_hal_device_group_t *hal_device_group;
+  iree_hal_device_t* hal_device;
+  iree_hal_device_group_t* hal_device_group;
   bool profiling_active;
   hrx_allocator_s allocator;           // Inline, owned by device.
   hrx_buffer_table_t buffer_table;     // Device-pointer-to-buffer lookup.
@@ -258,7 +258,7 @@ typedef struct hrx_device_s {
 // Timeline semaphore.
 typedef struct hrx_semaphore_s {
   iree_atomic_ref_count_t ref_count;
-  iree_hal_semaphore_t *hal_semaphore;
+  iree_hal_semaphore_t* hal_semaphore;
   hrx_device_t device;
 } hrx_semaphore_s;
 
@@ -279,7 +279,7 @@ typedef struct hrx_stream_s {
   hrx_device_t device;
   hrx_semaphore_t semaphore;
   uint64_t timepoint;
-  iree_hal_command_buffer_t *pending_cb;
+  iree_hal_command_buffer_t* pending_cb;
   bool has_pending_work;
   uint32_t flags;
 } hrx_stream_s;
@@ -305,7 +305,7 @@ static inline bool hrx_graph_node_is_recordable(
 }
 
 typedef struct hrx_graph_kernel_node_attrs_internal_t {
-  iree_hal_executable_t *executable;
+  iree_hal_executable_t* executable;
   uint32_t export_ordinal;
   uint32_t grid_dim[3];
   uint32_t block_dim[3];
@@ -330,8 +330,8 @@ typedef struct hrx_graph_memset_node_attrs_internal_t {
 } hrx_graph_memset_node_attrs_internal_t;
 
 typedef struct hrx_graph_host_call_node_attrs_internal_t {
-  void (*fn)(void *user_data);
-  void *user_data;
+  void (*fn)(void* user_data);
+  void* user_data;
 } hrx_graph_host_call_node_attrs_internal_t;
 
 typedef struct hrx_graph_node_s {
@@ -344,20 +344,20 @@ typedef struct hrx_graph_node_s {
     hrx_graph_memset_node_attrs_internal_t memset;
     hrx_graph_host_call_node_attrs_internal_t host;
   } attrs;
-  struct hrx_graph_node_s *dependencies[];
+  struct hrx_graph_node_s* dependencies[];
 } hrx_graph_node_s;
 
 typedef struct hrx_graph_node_block_t {
-  struct hrx_graph_node_block_t *next;
+  struct hrx_graph_node_block_t* next;
   iree_host_size_t capacity;
   iree_host_size_t count;
-  hrx_graph_node_s *nodes[];
+  hrx_graph_node_s* nodes[];
 } hrx_graph_node_block_t;
 
 typedef struct hrx_graph_edge_t {
-  struct hrx_graph_edge_t *next;
-  hrx_graph_node_s *from;
-  hrx_graph_node_s *to;
+  struct hrx_graph_edge_t* next;
+  hrx_graph_node_s* from;
+  hrx_graph_node_s* to;
 } hrx_graph_edge_t;
 
 typedef struct hrx_graph_s {
@@ -367,15 +367,15 @@ typedef struct hrx_graph_s {
   iree_arena_allocator_t arena;
   iree_allocator_t arena_allocator;
 
-  hrx_graph_node_block_t *node_blocks;
-  hrx_graph_node_block_t *current_node_block;
+  hrx_graph_node_block_t* node_blocks;
+  hrx_graph_node_block_t* current_node_block;
   iree_host_size_t node_count;
 
-  hrx_graph_node_block_t *root_blocks;
-  hrx_graph_node_block_t *current_root_block;
+  hrx_graph_node_block_t* root_blocks;
+  hrx_graph_node_block_t* current_root_block;
   iree_host_size_t root_count;
 
-  hrx_graph_edge_t *additional_edges;
+  hrx_graph_edge_t* additional_edges;
   iree_host_size_t additional_edge_count;
 
   uint32_t flags;
@@ -383,7 +383,7 @@ typedef struct hrx_graph_s {
 } hrx_graph_s;
 
 typedef struct hrx_graph_sort_node_t {
-  hrx_graph_node_s *node;
+  hrx_graph_node_s* node;
   uint32_t original_index;
   uint32_t sorted_index;
   uint32_t max_dependency_index;
@@ -408,9 +408,9 @@ typedef struct hrx_graph_partition_t {
 } hrx_graph_partition_t;
 
 typedef struct hrx_graph_schedule_t {
-  hrx_graph_sort_node_t *sorted_nodes;
-  uint32_t *node_index_map;
-  hrx_graph_partition_t *partitions;
+  hrx_graph_sort_node_t* sorted_nodes;
+  uint32_t* node_index_map;
+  hrx_graph_partition_t* partitions;
   iree_host_size_t partition_count;
   iree_host_size_t block_count;
 } hrx_graph_schedule_t;
@@ -422,28 +422,28 @@ typedef struct hrx_graph_exec_s {
 
   iree_arena_allocator_t arena_allocator;
 
-  struct hrx_graph_exec_block_t **blocks;
+  struct hrx_graph_exec_block_t** blocks;
   uint32_t block_count;
 
   uint32_t semaphore_count;
-  iree_hal_semaphore_t **semaphores;
-  uint64_t *semaphore_base_values;
+  iree_hal_semaphore_t** semaphores;
+  uint64_t* semaphore_base_values;
 
-  iree_hal_resource_set_t *resource_set;
+  iree_hal_resource_set_t* resource_set;
   uint32_t flags;
   iree_slim_mutex_t mutex;
 } hrx_graph_exec_s;
 
 // Internal graph scheduling API (implemented in graph_analysis.c).
-iree_status_t hrx_graph_schedule_nodes(hrx_graph_node_block_t *node_blocks,
+iree_status_t hrx_graph_schedule_nodes(hrx_graph_node_block_t* node_blocks,
                                        iree_host_size_t node_count,
-                                       hrx_graph_edge_t *additional_edges,
-                                       iree_arena_allocator_t *arena,
-                                       hrx_graph_schedule_t *out_schedule);
+                                       hrx_graph_edge_t* additional_edges,
+                                       iree_arena_allocator_t* arena,
+                                       hrx_graph_schedule_t* out_schedule);
 
 // Internal graph exec APIs (implemented in graph_exec.c).
 iree_status_t hrx_graph_exec_instantiate_locked(
-    hrx_graph_exec_t exec, hrx_graph_node_block_t *node_blocks,
+    hrx_graph_exec_t exec, hrx_graph_node_block_t* node_blocks,
     iree_host_size_t node_count);
 
 //===----------------------------------------------------------------------===//
@@ -453,14 +453,14 @@ iree_status_t hrx_graph_exec_instantiate_locked(
 // Buffer allocation.
 typedef struct hrx_buffer_s {
   iree_atomic_ref_count_t ref_count;
-  iree_hal_buffer_t *hal_buffer;
-  iree_hal_pool_t *hal_pool;
+  iree_hal_buffer_t* hal_buffer;
+  iree_hal_pool_t* hal_pool;
   hrx_device_t device;
   hrx_memory_type_t mem_type;
   size_t size;
   iree_hal_buffer_mapping_t mapping;
   bool is_mapped;
-  void *mapped_ptr;
+  void* mapped_ptr;
 } hrx_buffer_s;
 
 // Memory pool (stream-ordered memory management).
@@ -479,7 +479,7 @@ typedef struct hrx_mem_pool_s {
   uint64_t used_mem_current;
   uint64_t used_mem_high;
 
-  void *platform_handle;
+  void* platform_handle;
 
   iree_slim_mutex_t mutex;
 
@@ -492,9 +492,9 @@ typedef struct hrx_mem_pool_s {
 typedef struct hrx_module_s {
   iree_atomic_ref_count_t ref_count;
   hrx_device_t device;
-  iree_vm_module_t *bytecode_module;
-  iree_vm_module_t *hal_module;
-  iree_vm_context_t *context;
+  iree_vm_module_t* bytecode_module;
+  iree_vm_module_t* hal_module;
+  iree_vm_context_t* context;
 } hrx_module_s;
 
 // Resolved VM function retained with its parent module.
@@ -507,26 +507,26 @@ typedef struct hrx_function_s {
 // Growable VM argument/result list.
 typedef struct hrx_value_list_s {
   iree_atomic_ref_count_t ref_count;
-  iree_vm_list_t *vm_list;
+  iree_vm_list_t* vm_list;
 } hrx_value_list_s;
 
 // Timeline fence wrapper.
 typedef struct hrx_fence_s {
   iree_atomic_ref_count_t ref_count;
-  iree_hal_fence_t *hal_fence;
+  iree_hal_fence_t* hal_fence;
 } hrx_fence_s;
 
 // Buffer view wrapper.
 typedef struct hrx_buffer_view_s {
   iree_atomic_ref_count_t ref_count;
-  iree_hal_buffer_view_t *hal_buffer_view;
+  iree_hal_buffer_view_t* hal_buffer_view;
 } hrx_buffer_view_s;
 
 // HAL executable wrapper for direct queue/stream dispatch.
 typedef struct hrx_executable_s {
   iree_atomic_ref_count_t ref_count;
-  iree_hal_executable_cache_t *hal_executable_cache;
-  iree_hal_executable_t *hal_executable;
+  iree_hal_executable_cache_t* hal_executable_cache;
+  iree_hal_executable_t* hal_executable;
   hrx_device_t device;
 } hrx_executable_s;
 
@@ -540,28 +540,28 @@ typedef struct hrx_cpu_state_t {
   hrx_device_s devices[HRX_MAX_DEVICES];
   int device_count;
   bool initialized;
-  iree_hal_driver_t *driver;
+  iree_hal_driver_t* driver;
 } hrx_cpu_state_t;
 
 typedef struct hrx_gpu_state_t {
   hrx_device_s devices[HRX_MAX_DEVICES];
   int device_count;
   bool initialized;
-  iree_hal_driver_t *driver;
+  iree_hal_driver_t* driver;
 } hrx_gpu_state_t;
 
 typedef struct hrx_shared_state_t {
-  iree_vm_instance_t *vm_instance;
-  iree_async_proactor_pool_t *proactor_pool;
+  iree_vm_instance_t* vm_instance;
+  iree_async_proactor_pool_t* proactor_pool;
   iree_allocator_t host_allocator;
   int init_count;
   bool shared_initialized;
 } hrx_shared_state_t;
 
 // Access global state (defined in runtime.c).
-hrx_shared_state_t *hrx_get_shared_state(void);
-hrx_gpu_state_t *hrx_get_gpu_state(void);
-hrx_cpu_state_t *hrx_get_cpu_state(void);
+hrx_shared_state_t* hrx_get_shared_state(void);
+hrx_gpu_state_t* hrx_get_gpu_state(void);
+hrx_cpu_state_t* hrx_get_cpu_state(void);
 
 // Ensure shared infrastructure is created (idempotent).
 hrx_status_t hrx_ensure_shared_state(void);
@@ -572,9 +572,9 @@ hrx_status_t hrx_status_from_iree(iree_status_t iree_status);
 // Convert hrx_status_t back to iree_status_t and consume the hrx status.
 iree_status_t hrx_status_to_iree(hrx_status_t status);
 
-iree_status_t hrx_iree_exact_pool_create(iree_hal_allocator_t *allocator,
+iree_status_t hrx_iree_exact_pool_create(iree_hal_allocator_t* allocator,
                                          iree_hal_buffer_params_t params,
-                                         iree_hal_pool_t **out_pool);
+                                         iree_hal_pool_t** out_pool);
 
 #ifdef __cplusplus
 }

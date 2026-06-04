@@ -37,7 +37,7 @@
 static inline iree_status_t hrx_to_iree_status(hrx_status_t s) {
   if (hrx_status_is_ok(s)) return iree_ok_status();
   iree_status_code_t code = (iree_status_code_t)hrx_status_code(s);
-  char *message_buf = NULL;
+  char* message_buf = NULL;
   size_t message_len = 0;
   hrx_status_t to_str_status =
       hrx_status_to_string(s, &message_buf, &message_len);
@@ -98,7 +98,7 @@ static inline hrx_host_allocator_t iree_to_hrx_allocator(iree_allocator_t a) {
 #include "hrx_internal.h"
 
 // Get the HAL device from a hrx device (for HAL calls not wrapped by hrx).
-static inline iree_hal_device_t *hrx_device_hal(hrx_device_t dev) {
+static inline iree_hal_device_t* hrx_device_hal(hrx_device_t dev) {
   return dev ? dev->hal_device : NULL;
 }
 
@@ -112,12 +112,12 @@ static inline iree_allocator_t hrx_system_iree_allocator(void) {
 // returned hrx_buffer_t with ref_count=1. |hal_buffer| may be NULL
 // for host-only allocations.
 static inline iree_status_t hrx_buffer_create_from_hal(
-    iree_hal_buffer_t *hal_buffer, hrx_device_t device,
-    hrx_memory_type_t mem_type, size_t size, void *mapped_ptr,
-    hrx_buffer_t *out_buffer) {
-  hrx_buffer_s *buf = NULL;
+    iree_hal_buffer_t* hal_buffer, hrx_device_t device,
+    hrx_memory_type_t mem_type, size_t size, void* mapped_ptr,
+    hrx_buffer_t* out_buffer) {
+  hrx_buffer_s* buf = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(iree_allocator_system(),
-                                             sizeof(*buf), (void **)&buf));
+                                             sizeof(*buf), (void**)&buf));
   memset(buf, 0, sizeof(*buf));
   iree_atomic_ref_count_init(&buf->ref_count);
   buf->hal_buffer = hal_buffer;

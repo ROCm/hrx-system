@@ -56,7 +56,7 @@ hrx_status_t hrx_synchronous_d2h(hrx_device_t device, hrx_buffer_t src,
 // Async stream transfers
 //===----------------------------------------------------------------------===//
 
-hrx_status_t hrx_stream_copy_h2d(hrx_stream_t stream, const void *host_src,
+hrx_status_t hrx_stream_copy_h2d(hrx_stream_t stream, const void* host_src,
                                  hrx_buffer_t dst, size_t dst_offset,
                                  size_t size) {
   if (!host_src || !dst) {
@@ -74,7 +74,7 @@ hrx_status_t hrx_stream_copy_h2d(hrx_stream_t stream, const void *host_src,
   // Chunked synchronous H2D (matches streaming layer: 63KB chunks for
   // inline BUFFER_UPDATE path compatibility with remote HAL).
   const size_t chunk_size = 63 * 1024;
-  const uint8_t *src_ptr = (const uint8_t *)host_src;
+  const uint8_t* src_ptr = (const uint8_t*)host_src;
   size_t remaining = size;
   size_t chunk_offset = 0;
 
@@ -95,7 +95,7 @@ hrx_status_t hrx_stream_copy_h2d(hrx_stream_t stream, const void *host_src,
 }
 
 hrx_status_t hrx_stream_copy_d2h(hrx_stream_t stream, hrx_buffer_t src,
-                                 size_t src_offset, void *host_dst,
+                                 size_t src_offset, void* host_dst,
                                  size_t size) {
   if (!src || !host_dst) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "NULL argument");
@@ -111,7 +111,7 @@ hrx_status_t hrx_stream_copy_d2h(hrx_stream_t stream, hrx_buffer_t src,
 
   // Chunked synchronous D2H (4MB chunks to avoid staging buffer overflows).
   const size_t chunk_size = 4 * 1024 * 1024;
-  uint8_t *dst_ptr = (uint8_t *)host_dst;
+  uint8_t* dst_ptr = (uint8_t*)host_dst;
   size_t remaining = size;
   size_t chunk_offset = 0;
 
