@@ -84,3 +84,37 @@ set_target_properties(libhrx_src_binding_common_common PROPERTIES
   POSITION_INDEPENDENT_CODE ON
   INTERPROCEDURAL_OPTIMIZATION TRUE
 )
+
+# CCOB fat binaries use zstd for compression (used by rocBLAS/hipBLAS and
+# most real-world HIP shipping toolchains). If the system has it, wire it in so
+# the streaming layer can decompress on the fly.
+option(HRX_ENABLE_ZSTD "Enable zstd decompression for CCOB fat binaries" ON)
+if(HRX_ENABLE_ZSTD)
+  find_package(PkgConfig QUIET)
+  if(PkgConfig_FOUND)
+    pkg_check_modules(ZSTD QUIET libzstd)
+  endif()
+  if(ZSTD_FOUND)
+    foreach(_hrx_common_target
+        libhrx_src_binding_common_common
+        libhrx_src_binding_common_common.objects)
+      target_compile_definitions(${_hrx_common_target} PRIVATE
+        HRX_ENABLE_ZSTD=1
+      )
+      target_include_directories(${_hrx_common_target} PRIVATE
+        ${ZSTD_INCLUDE_DIRS}
+      )
+    endforeach()
+    target_link_libraries(libhrx_src_binding_common_common PUBLIC
+      ${ZSTD_LIBRARIES}
+    )
+    message(STATUS
+      "hrx-runtime: CCOB zstd decompression ENABLED (libzstd ${ZSTD_VERSION})"
+    )
+  else()
+    message(STATUS
+      "hrx-runtime: libzstd not found; CCOB fat binaries will fail to load "
+      "(install libzstd-dev or disable HRX_ENABLE_ZSTD)"
+    )
+  endif()
+endif()

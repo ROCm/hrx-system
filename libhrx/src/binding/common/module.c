@@ -285,21 +285,6 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
     }
     parameter_info->constant_bytes = this_kernel_constants_size;
     
-#if 0
-    fprintf(stderr, "[MODULE] kernel[%zu] '%.*s': param_count=%u copy=%u bind=%u constant_bytes=%zu buffer_size=%u\n",
-            i, (int)(symbol->name.size > 80 ? 80 : symbol->name.size),
-            symbol->name.data ? symbol->name.data : "(null)",
-            parameter_count, copy_count, resolve_count,
-            this_kernel_constants_size, buffer_size);
-    for (uint16_t j = 0; j < parameter_count; ++j) {
-      const iree_hal_executable_export_parameter_t* parameter =
-          &parameters[parameter_base + j];
-      fprintf(stderr, "[MODULE]   param[%u]: offset=%u size=%u kernarg_offset=%u type=%u name='%.*s'\n",
-              j, parameter->offset, parameter->size, parameter->kernarg_offset, parameter->type,
-              (int)parameter->name.size, parameter->name.data ? parameter->name.data : "");
-    }
-#endif
-
     // Advance to next symbol's ops.
     parameter_base += parameter_count;
     current_ops += copy_count + resolve_count;
