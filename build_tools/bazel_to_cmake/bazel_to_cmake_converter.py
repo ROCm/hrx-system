@@ -1504,9 +1504,7 @@ class BuildFileFunctions(object):
                     f"cmake_format_variant_values entry {variant_placeholder} "
                     "is missing from flag_values"
                 )
-            variant_values_var = _BUILD_SETTING_CMAKE_LIST_VARIABLES.get(
-                variant_label
-            )
+            variant_values_var = _BUILD_SETTING_CMAKE_LIST_VARIABLES.get(variant_label)
             if not variant_values_var:
                 raise NotImplementedError(
                     f"No CMake list variable mapping for {variant_label}"
