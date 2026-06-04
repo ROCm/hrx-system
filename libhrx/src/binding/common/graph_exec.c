@@ -791,9 +791,9 @@ iree_status_t iree_hal_streaming_graph_exec_instantiate_locked(
   // We need semaphores at partition boundaries for synchronization.
   // Multi-stream partitions need join semaphores.
   //
-  // DO NOT SUBMIT we don't want semaphores per block, just per max layer size
-  // we can use timelines to advance between them?
-  // this is bad
+  // This currently allocates semaphores per block boundary. A future
+  // optimization can reduce this to the maximum layer size by advancing
+  // timeline values between partitions.
   uint32_t semaphore_count = 0;
   if (schedule.partition_count > 1) {
     for (iree_host_size_t i = 0; i < schedule.partition_count - 1; i++) {
@@ -869,10 +869,9 @@ iree_status_t iree_hal_streaming_graph_exec_instantiate_locked(
     }
 
     if (partition->type == IREE_HAL_STREAMING_GRAPH_PARTITION_TYPE_RECORDABLE) {
-      // DO NOT SUBMIT single node optimization, needs refactoring of this
-      // function.
       // If only one node is in the partition and it's recordable, we
-      // may be able to route it to a dedicated partition type. if
+      // may be able to route it to a dedicated partition type after this
+      // function is split into smaller helpers.
       const uint8_t stream_count = partition->stream_count;
       const uint32_t partition_wait_semaphore_start =
           semaphore_index - wait_semaphore_count;

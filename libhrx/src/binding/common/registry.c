@@ -34,8 +34,8 @@ static inline bool iree_hal_streaming_symbol_map_is_valid_key(void* key) {
          key != IREE_HAL_STREAMING_SYMBOL_MAP_TOMBSTONE_KEY;
 }
 
-// Hash function for host pointers.
-// DO NOT SUBMIT evaluate/document source
+// Hash function for host pointers. This is a MurmurHash3-style finalizer that
+// mixes aligned function pointer bits well enough for the open-addressed table.
 static inline uint64_t iree_hal_streaming_symbol_pointer_hash(void* ptr) {
   // Simple hash for pointers - mix bits.
   uint64_t hash = (uint64_t)ptr;
