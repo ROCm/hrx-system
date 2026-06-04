@@ -182,6 +182,43 @@ class DepsTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("MODULE.cmake.lock is stale", result.stderr)
 
+    def test_rocm_repository_locks_pinned_sources_only(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_module_files(
+                root,
+                """\
+                rocm_repository = use_repo_rule(
+                    "//build_tools/third_party/rocm:repository.bzl",
+                    "rocm_repository",
+                )
+
+                rocm_repository(
+                    name = "hsa_runtime_headers",
+                    build_file = "//build_tools/third_party/rocm:hsa_runtime_headers.BUILD.bazel",
+                    sha256 = "2222222222222222222222222222222222222222222222222222222222222222",
+                    strip_prefix = "hsa-runtime-headers",
+                    url = "https://example.com/hsa-runtime-headers.tar.gz",
+                )
+
+                rocm_repository(
+                    name = "rccl",
+                    build_file = "//build_tools/third_party/rocm:rccl_headers.BUILD.bazel",
+                    display_name = "RCCL headers",
+                )
+                """,
+            )
+
+            parsed = deps.ModuleParser(root).parse(root / "MODULE.bazel")
+
+            self.assertEqual(
+                [dependency.name for dependency in parsed],
+                [
+                    "hsa_runtime_headers",
+                ],
+            )
+            self.assertEqual(parsed[0].kind, "rocm_repository")
+
 
 if __name__ == "__main__":
     unittest.main()

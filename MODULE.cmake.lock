@@ -16,6 +16,8 @@ set(IREE_DEPENDENCY_IDS
   "libbacktrace"
   "catch2"
   "flatcc"
+  "hsa_runtime_headers"
+  "hip_api_headers"
 )
 
 set(IREE_DEP_GOOGLE_BENCHMARK_KIND "bazel_dep")
@@ -87,3 +89,31 @@ set(IREE_DEP_FLATCC_URLS
 set(IREE_DEP_FLATCC_SHA256 "f77f842e996f5bbfa25305a7b38b40d1325fb44154f2bf9880c58356ece92c62")
 set(IREE_DEP_FLATCC_STRIP_PREFIX "flatcc-9362cd00f0007d8cbee7bff86e90fb4b6b227ff3")
 set(IREE_DEP_FLATCC_BUILD_FILE "//build_tools/third_party/flatcc:flatcc.BUILD.bazel")
+
+set(IREE_DEP_HSA_RUNTIME_HEADERS_KIND "rocm_repository")
+set(IREE_DEP_HSA_RUNTIME_HEADERS_OWNER "shared")
+set(IREE_DEP_HSA_RUNTIME_HEADERS_MODULE_NAME "hsa_runtime_headers")
+set(IREE_DEP_HSA_RUNTIME_HEADERS_REPO_NAME "hsa_runtime_headers")
+set(IREE_DEP_HSA_RUNTIME_HEADERS_VERSION "")
+set(IREE_DEP_HSA_RUNTIME_HEADERS_DEV_DEPENDENCY "FALSE")
+set(IREE_DEP_HSA_RUNTIME_HEADERS_SOURCE_URL "")
+set(IREE_DEP_HSA_RUNTIME_HEADERS_URLS
+  "https://github.com/iree-org/hsa-runtime-headers/archive/cc2b5f429de4d1cb2be96ed10e6f45246e408d0e.tar.gz"
+)
+set(IREE_DEP_HSA_RUNTIME_HEADERS_SHA256 "66bd23285a3886c9b9983ac6de5efe4a828a2a293fd898d7fd75ab6c500741fb")
+set(IREE_DEP_HSA_RUNTIME_HEADERS_STRIP_PREFIX "hsa-runtime-headers-cc2b5f429de4d1cb2be96ed10e6f45246e408d0e")
+set(IREE_DEP_HSA_RUNTIME_HEADERS_BUILD_FILE "//build_tools/third_party/rocm:hsa_runtime_headers.BUILD.bazel")
+
+set(IREE_DEP_HIP_API_HEADERS_KIND "rocm_repository")
+set(IREE_DEP_HIP_API_HEADERS_OWNER "shared")
+set(IREE_DEP_HIP_API_HEADERS_MODULE_NAME "hip_api_headers")
+set(IREE_DEP_HIP_API_HEADERS_REPO_NAME "hip_api_headers")
+set(IREE_DEP_HIP_API_HEADERS_VERSION "")
+set(IREE_DEP_HIP_API_HEADERS_DEV_DEPENDENCY "FALSE")
+set(IREE_DEP_HIP_API_HEADERS_SOURCE_URL "")
+set(IREE_DEP_HIP_API_HEADERS_URLS
+  "https://github.com/iree-org/hip-build-deps/archive/c64ec391ab8eaf4c9872660b24a71fda8026b438.tar.gz"
+)
+set(IREE_DEP_HIP_API_HEADERS_SHA256 "6304eb646a811032bb4ec2db2927170afed677d3a59b8592e986b79dfaae805c")
+set(IREE_DEP_HIP_API_HEADERS_STRIP_PREFIX "hip-build-deps-c64ec391ab8eaf4c9872660b24a71fda8026b438")
+set(IREE_DEP_HIP_API_HEADERS_BUILD_FILE "//build_tools/third_party/rocm:hip_api_headers.BUILD.bazel")

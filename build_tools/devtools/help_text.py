@@ -83,8 +83,8 @@ validate the commit being replaced.""",
                 arguments="Portable -D project options or documented native Bazel rc options.",
                 epilog="""Examples:
   python dev.py bazel configure
-  python dev.py bazel configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm
-  python dev.py bazel configure --//runtime/config/hal:drivers=amdgpu,local-sync,local-task,null --repo_env=IREE_ROCM_PATH=/opt/rocm
+  python dev.py bazel configure -DIREE_HAL_DRIVER_AMDGPU=ON
+  python dev.py bazel configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm -DIREE_ROCM_DEPENDENCY_MODE=pinned
 
 This writes .bazelrc.configured. Published portable build options live in
 BUILDING.md. Use .bazelrc.local for checkout-specific Bazel overrides.""",
@@ -96,7 +96,8 @@ BUILDING.md. Use .bazelrc.local for checkout-specific Bazel overrides.""",
   python dev.py cmake configure
   python dev.py cmake configure --fresh
   python dev.py cmake configure -DCMAKE_BUILD_TYPE=Debug
-  python dev.py cmake configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm
+  python dev.py cmake configure -DIREE_HAL_DRIVER_AMDGPU=ON -DLIBHRX_BUILD=OFF
+  python dev.py cmake configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm -DIREE_ROCM_DEPENDENCY_MODE=package
   python dev.py --cmake-build-dir build/cmake-asan cmake configure -DIREE_ENABLE_ASAN=ON
 
 The build tree lives outside the checkout at ../builds/<checkout-name>/.
@@ -368,8 +369,9 @@ such as `//runtime/src/iree/base/...`, not `:target`.
 
 ```bash
 iree-bazel-configure
-iree-bazel-configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm
-iree-bazel-configure --//runtime/config/hal:drivers=amdgpu,local-sync,local-task,null --repo_env=IREE_ROCM_PATH=/opt/rocm
+iree-bazel-configure -DIREE_HAL_DRIVER_AMDGPU=ON
+iree-bazel-configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm -DIREE_ROCM_DEPENDENCY_MODE=pinned
+iree-bazel-configure --//runtime/config/hal:drivers=amdgpu,local-sync,local-task,null --repo_env=IREE_ROCM_PATH=/opt/rocm --repo_env=IREE_ROCM_DEPENDENCY_MODE=pinned
 iree-bazel-build [targets...]
 iree-bazel-test [targets...]
 iree-bazel-query 'deps(//runtime/src/iree/base)'
@@ -397,7 +399,8 @@ writes `../builds/<checkout-name>/`. `iree-cmake-build TARGET` maps to
 
 ```bash
 iree-cmake-configure
-iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm
+iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=ON
+iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm -DIREE_ROCM_DEPENDENCY_MODE=package
 iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=OFF -DLIBHRX_BUILD=OFF
 iree-cmake-build hrx
 iree-cmake-test -R hrx
@@ -420,8 +423,9 @@ personal Bazel overrides in `.bazelrc.local`.
 
 ```bash
 iree-bazel-configure
-iree-bazel-configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm
-iree-bazel-configure --//runtime/config/hal:drivers=amdgpu,local-sync,local-task,null --repo_env=IREE_ROCM_PATH=/opt/rocm
+iree-bazel-configure -DIREE_HAL_DRIVER_AMDGPU=ON
+iree-bazel-configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm -DIREE_ROCM_DEPENDENCY_MODE=pinned
+iree-bazel-configure --//runtime/config/hal:drivers=amdgpu,local-sync,local-task,null --repo_env=IREE_ROCM_PATH=/opt/rocm --repo_env=IREE_ROCM_DEPENDENCY_MODE=pinned
 ```
 
 Published portable configuration options live in `BUILDING.md`."""
@@ -574,7 +578,8 @@ Configure the CMake package/install-test build tree for this checkout.
 
 ```bash
 iree-cmake-configure
-iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm
+iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=ON
+iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm -DIREE_ROCM_DEPENDENCY_MODE=package
 iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=OFF -DLIBHRX_BUILD=OFF
 ```
 

@@ -753,6 +753,7 @@ def build_core(args: argparse.Namespace) -> None:
         f"HRX_INSTALL_TESTS={'ON' if ctest_enabled else 'OFF'}",
         f"LIBHRX_BUILD_PASSTHROUGH={'ON' if args.passthrough else 'OFF'}",
         f"IREE_HAL_DRIVER_AMDGPU={'ON' if args.amdgpu else 'OFF'}",
+        f"IREE_ROCM_PATH={rocm_root}",
         "IREE_ENABLE_LIBBACKTRACE=OFF",
         f"IREE_ENABLE_ASSERTIONS={'ON' if args.assertions else 'OFF'}",
     ]

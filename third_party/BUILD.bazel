@@ -129,7 +129,7 @@ filegroup(
 alias(
     name = "aqlprofile_sdk_headers",
     actual = select({
-        "//runtime/config/hal:driver_amdgpu": "@aqlprofile_sdk_headers//:headers",
+        "//runtime/config/hal:driver_amdgpu": "@hsa_runtime_headers//:aqlprofile_sdk_headers",
         "//conditions:default": ":empty_aqlprofile_sdk_headers",
     }),
     tags = ["manual"],
@@ -139,7 +139,7 @@ alias(
 alias(
     name = "hsa_runtime_headers",
     actual = select({
-        "//runtime/config/hal:driver_amdgpu": "@hsa_runtime_headers//:headers",
+        "//runtime/config/hal:driver_amdgpu": "@hsa_runtime_headers//:hsa_runtime_headers",
         "//conditions:default": ":empty_hsa_runtime_headers",
     }),
     tags = ["manual"],

@@ -872,6 +872,7 @@ def handle_presubmit(args: argparse.Namespace) -> CommandPlan:
         args.lane,
         existing_or_system_environment(args),
         args.profile,
+        cmake_build_dir=cmake_build_dir(args) if args.lane == "cmake" else None,
         verbose=args.verbose,
         project_tests=args.project_tests,
     )
@@ -884,6 +885,7 @@ def handle_precommit(args: argparse.Namespace) -> CommandPlan:
         args.profile,
         base=args.base,
         commit=args.commit,
+        cmake_build_dir=cmake_build_dir(args) if args.lane == "cmake" else None,
         staged=args.staged,
         paths=args.paths,
         verbose=args.verbose,

@@ -42,6 +42,7 @@ and build-lane selection consistent:
 python dev.py cmake setup
 python dev.py cmake configure \
   -DIREE_ROCM_PATH=/opt/rocm \
+  -DIREE_ROCM_DEPENDENCY_MODE=package \
   -DCMAKE_INSTALL_LIBDIR=lib \
   -DCMAKE_C_COMPILER=/opt/rocm/llvm/bin/clang \
   -DCMAKE_CXX_COMPILER=/opt/rocm/llvm/bin/clang++ \
@@ -68,6 +69,7 @@ build without `dev.py`:
 ```bash
 cmake -S . -B build/hrx-system -GNinja \
   -DIREE_ROCM_PATH=/opt/rocm \
+  -DIREE_ROCM_DEPENDENCY_MODE=package \
   -DCMAKE_INSTALL_LIBDIR=lib \
   -DCMAKE_C_COMPILER=/opt/rocm/llvm/bin/clang \
   -DCMAKE_CXX_COMPILER=/opt/rocm/llvm/bin/clang++ \
@@ -99,7 +101,8 @@ Useful options:
 | `IREE_BUILD_TESTS` | ON | Build IREE runtime tests and CTS targets. |
 | `HRX_INSTALL_TESTS` | `${IREE_BUILD_TESTS}` | Install a relocatable CTest tree. |
 | `IREE_HAL_DRIVER_AMDGPU` | ON | Build the AMDGPU runtime HAL driver. |
-| `IREE_ROCM_PATH` | empty | ROCm or TheRock SDK root used for ROCm headers and device tooling. |
+| `IREE_ROCM_DEPENDENCY_MODE` | empty | Overrides ROCm header dependency resolution: `pinned`, `package`, or `auto`; empty selects package mode when `IREE_ROCM_PATH` is set. |
+| `IREE_ROCM_PATH` | empty | ROCm or TheRock SDK root used for package-mode ROCm headers and device tooling. |
 | `IREE_HAL_AMDGPU_TARGETS` | checked-in AMDGPU generic set | AMDGPU target selectors supported by the runtime build. |
 
 `IREE_DEPENDENCY_MODE=pinned` uses the checked-in source lock and is the

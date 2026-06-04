@@ -54,6 +54,7 @@ SDK_DRIVER_PACKAGES = {
     ),
 }
 ROCM_DRIVERS = frozenset(("amdgpu", "hip"))
+DEPENDENCY_MODES = frozenset(("pinned", "package", "auto"))
 SUPPORTED_ENABLE_DRIVERS = frozenset((*HOST_DRIVERS, "amdgpu", "hip", "webgpu"))
 ALL_DRIVERS = tuple(HOST_DRIVERS) + tuple(SDK_DRIVER_PACKAGES)
 DRIVER_DEFINES = {
@@ -83,6 +84,8 @@ class ConfigRequest:
     output: Path
     enabled_drivers: set[str] = field(default_factory=lambda: set(HOST_DRIVERS))
     driver_source: str | None = None
+    dependency_mode: str = "pinned"
+    rocm_dependency_mode: str | None = None
     rocm_path: str | None = None
 
     def set_driver(self, driver: str, enabled: bool) -> None:
@@ -121,6 +124,31 @@ class ConfigRequest:
             )
         self.rocm_path = rocm_path
 
+    def set_dependency_mode(self, mode: str) -> None:
+        dependency_mode = mode.lower()
+        if dependency_mode not in DEPENDENCY_MODES:
+            raise SystemExit(
+                "IREE_DEPENDENCY_MODE must be one of pinned, package, or auto; "
+                f"got {mode!r}."
+            )
+        self.dependency_mode = dependency_mode
+
+    def set_rocm_dependency_mode(self, mode: str) -> None:
+        dependency_mode = mode.lower()
+        if dependency_mode not in DEPENDENCY_MODES:
+            raise SystemExit(
+                "IREE_ROCM_DEPENDENCY_MODE must be one of pinned, package, or auto; "
+                f"got {mode!r}."
+            )
+        self.rocm_dependency_mode = dependency_mode
+
+    def effective_rocm_dependency_mode(self) -> str:
+        if self.rocm_dependency_mode is not None:
+            return self.rocm_dependency_mode
+        if self.rocm_path is not None:
+            return "package"
+        return self.dependency_mode
+
 
 def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -130,8 +158,8 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
         ),
         epilog="""Examples:
   python build_tools/bazel/configure.py
+  python build_tools/bazel/configure.py -DIREE_HAL_DRIVER_AMDGPU=ON
   python build_tools/bazel/configure.py -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm
-  python build_tools/bazel/configure.py --//runtime/config/hal:drivers=amdgpu,local-sync,local-task,null --repo_env=IREE_ROCM_PATH=/opt/rocm
 
 Portable -D project options are documented in BUILDING.md. Other Bazel-native
 overrides belong in .bazelrc.local.""",
@@ -166,7 +194,8 @@ def check_removed_option(arg: str) -> None:
         return
     raise SystemExit(
         "{} was removed. Use portable -DIREE_HAL_DRIVER_* options and "
-        "-DIREE_ROCM_PATH=/path/to/rocm, or the native Bazel form "
+        "-DIREE_ROCM_PATH=/path/to/rocm when package-mode ROCm headers are "
+        "required. The native Bazel form is "
         "{}=amdgpu,local-sync,local-task,null "
         "--repo_env=IREE_ROCM_PATH=/path/to/rocm.".format(
             removed_option, NATIVE_DRIVER_FLAG
@@ -216,6 +245,12 @@ def apply_define(request: ConfigRequest, define: str) -> None:
     if name == "IREE_ROCM_PATH":
         request.set_rocm_path(value)
         return
+    if name == "IREE_DEPENDENCY_MODE":
+        request.set_dependency_mode(value)
+        return
+    if name == "IREE_ROCM_DEPENDENCY_MODE":
+        request.set_rocm_dependency_mode(value)
+        return
     raise SystemExit(
         f"Unsupported Bazel configure option -D{name}. Published portable "
         "configuration options are documented in BUILDING.md."
@@ -245,9 +280,17 @@ def apply_native_bazel_arg(request: ConfigRequest, arg: str) -> None:
         if name == "IREE_ROCM_PATH":
             request.set_rocm_path(value)
             return
+        if name == "IREE_DEPENDENCY_MODE":
+            request.set_dependency_mode(value)
+            return
+        if name == "IREE_ROCM_DEPENDENCY_MODE":
+            request.set_rocm_dependency_mode(value)
+            return
         raise SystemExit(
             "build_tools/bazel/configure.py only accepts "
-            "--repo_env=IREE_ROCM_PATH=... "
+            "--repo_env=IREE_ROCM_PATH=..., "
+            "--repo_env=IREE_DEPENDENCY_MODE=..., and "
+            "--repo_env=IREE_ROCM_DEPENDENCY_MODE=... "
             "for generated configuration. Put other Bazel-native overrides "
             "in .bazelrc.local."
         )
@@ -293,11 +336,17 @@ def generate_config(args: argparse.Namespace) -> str:
         if rocm_path:
             request.set_rocm_path(rocm_path)
 
-    if rocm_enabled_drivers and not request.rocm_path:
+    effective_rocm_dependency_mode = request.effective_rocm_dependency_mode()
+    if (
+        rocm_enabled_drivers
+        and effective_rocm_dependency_mode == "package"
+        and not request.rocm_path
+    ):
         raise SystemExit(
-            "-DIREE_ROCM_PATH=/path/to/rocm or "
-            "--repo_env=IREE_ROCM_PATH=/path/to/rocm or IREE_ROCM_PATH in the "
-            "environment is required when enabling {}.".format(
+            "ROCm package dependency mode requires -DIREE_ROCM_PATH=/path/to/rocm, "
+            "--repo_env=IREE_ROCM_PATH=/path/to/rocm, or IREE_ROCM_PATH in the "
+            "environment when enabling {}. Set IREE_ROCM_DEPENDENCY_MODE=pinned "
+            "or auto to use pinned ROCm headers without a ROCm root.".format(
                 ", ".join(sorted(rocm_enabled_drivers))
             )
         )
@@ -313,9 +362,27 @@ def generate_config(args: argparse.Namespace) -> str:
             + ",".join(ordered_driver_set(request.enabled_drivers)),
         ),
         "",
-        "# Optional AMDGPU device compiler toolchain.",
+        "# Source dependency mode.",
+        bazelrc_line(
+            "common",
+            "--repo_env=IREE_DEPENDENCY_MODE=" + request.dependency_mode,
+        ),
     ]
-    if "amdgpu" in request.enabled_drivers:
+    if request.rocm_dependency_mode or request.rocm_path:
+        lines.append(
+            bazelrc_line(
+                "common",
+                "--repo_env=IREE_ROCM_DEPENDENCY_MODE="
+                + effective_rocm_dependency_mode,
+            )
+        )
+    lines.extend(
+        [
+            "",
+            "# Optional AMDGPU device compiler toolchain.",
+        ]
+    )
+    if "amdgpu" in request.enabled_drivers and request.rocm_path:
         lines.append(
             bazelrc_line(
                 "common",

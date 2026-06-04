@@ -35,6 +35,9 @@ find_package(Python3 COMPONENTS Interpreter QUIET)
 set(IREE_DEPENDENCY_MODE "pinned" CACHE STRING
   "How source dependencies are resolved: pinned, package, or auto.")
 set_property(CACHE IREE_DEPENDENCY_MODE PROPERTY STRINGS pinned package auto)
+set(IREE_ROCM_DEPENDENCY_MODE "" CACHE STRING
+  "How ROCm header dependencies are resolved; empty uses package with IREE_ROCM_PATH, otherwise inherits IREE_DEPENDENCY_MODE.")
+set_property(CACHE IREE_ROCM_DEPENDENCY_MODE PROPERTY STRINGS "" pinned package auto)
 
 set(IREE_ROCM_PATH "" CACHE PATH
   "ROCm or TheRock SDK root used for ROCm headers and device tooling.")

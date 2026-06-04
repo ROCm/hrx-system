@@ -24,7 +24,7 @@ CMake package build with AMDGPU enabled:
 
 ```bash
 python dev.py cmake setup
-python dev.py cmake configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm
+python dev.py cmake configure -DIREE_HAL_DRIVER_AMDGPU=ON
 python dev.py cmake build
 python dev.py cmake test
 ```
@@ -68,7 +68,7 @@ iree-bazel-build //runtime/... --config=presubmit
 iree-bazel-cquery 'kind(cc_library, //runtime/...)'
 iree-bazel-info execution_root
 iree-bazel-run //runtime/src/iree/base:allocator_benchmark
-iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm
+iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=ON
 iree-cmake-test -R hrx
 ```
 
@@ -150,7 +150,9 @@ between Bazel and CMake.
 | `IREE_HAL_DRIVER_LOCAL_SYNC` | `ON`, `OFF` | Builds the local-sync runtime HAL driver. | Adds or removes `local-sync` from the runtime driver registry. | `--//runtime/config/hal:drivers=<complete-driver-list>` |
 | `IREE_HAL_DRIVER_LOCAL_TASK` | `ON`, `OFF` | Builds the local-task runtime HAL driver. | Adds or removes `local-task` from the runtime driver registry. | `--//runtime/config/hal:drivers=<complete-driver-list>` |
 | `IREE_HAL_DRIVER_NULL` | `ON`, `OFF` | Builds the null runtime HAL driver. | Adds or removes `null` from the runtime driver registry. | `--//runtime/config/hal:drivers=<complete-driver-list>` |
-| `IREE_ROCM_PATH` | path | Prepends the ROCm or TheRock SDK root to `CMAKE_PREFIX_PATH` and uses it for AMDGPU device tooling. | Writes `--repo_env=IREE_ROCM_PATH=<path>`. | `--repo_env=IREE_ROCM_PATH=<path>` |
+| `IREE_DEPENDENCY_MODE` | `pinned`, `package`, `auto` | Selects locked source archives, package discovery, or package-then-pinned dependency resolution. | Writes `--repo_env=IREE_DEPENDENCY_MODE=<mode>`. | `--repo_env=IREE_DEPENDENCY_MODE=<mode>` |
+| `IREE_ROCM_DEPENDENCY_MODE` | `pinned`, `package`, `auto` | Overrides dependency resolution for ROCm header facades; empty uses package mode when `IREE_ROCM_PATH` is set and otherwise inherits `IREE_DEPENDENCY_MODE`. | Writes `--repo_env=IREE_ROCM_DEPENDENCY_MODE=<mode>`. | `--repo_env=IREE_ROCM_DEPENDENCY_MODE=<mode>` |
+| `IREE_ROCM_PATH` | path | Prepends the ROCm or TheRock SDK root to `CMAKE_PREFIX_PATH`, uses it for AMDGPU device tooling, and selects ROCm package header mode by default. | Writes `--repo_env=IREE_ROCM_PATH=<path>` and `--repo_env=IREE_ROCM_DEPENDENCY_MODE=package` unless explicitly overridden. | `--repo_env=IREE_ROCM_PATH=<path>` |
 
 The Bazel native driver flag is a complete list. Include every driver you want
 enabled:
@@ -158,10 +160,26 @@ enabled:
 ```bash
 python dev.py bazel configure \
   --//runtime/config/hal:drivers=amdgpu,local-sync,local-task,null \
-  --repo_env=IREE_ROCM_PATH=/opt/rocm
+  --repo_env=IREE_ROCM_PATH=/opt/rocm \
+  --repo_env=IREE_ROCM_DEPENDENCY_MODE=pinned
 ```
 
 The portable spelling is shorter for common cases:
+
+```bash
+python dev.py bazel configure -DIREE_HAL_DRIVER_AMDGPU=ON
+```
+
+Pinned mode is the default. It lets AMDGPU host-side code compile without a
+ROCm/TheRock root; Bazel writes `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=none` when no
+ROCm path is configured:
+
+```bash
+python dev.py bazel configure -DIREE_HAL_DRIVER_AMDGPU=ON
+```
+
+Package mode intentionally tests a configured ROCm/TheRock root. Setting
+`IREE_ROCM_PATH` selects ROCm package header mode by default:
 
 ```bash
 python dev.py bazel configure \
@@ -169,18 +187,23 @@ python dev.py bazel configure \
   -DIREE_ROCM_PATH=/opt/rocm
 ```
 
-When AMDGPU is enabled, Bazel configuration also accepts `IREE_ROCM_PATH` from
-the inherited environment. This keeps CI reproduction commands independent of
-machine-local SDK paths:
+When a ROCm path is only needed for device tooling and the headers should still
+come from pinned sources, set `IREE_ROCM_DEPENDENCY_MODE=pinned` explicitly.
+
+When a ROCm path is needed, Bazel configuration also accepts `IREE_ROCM_PATH`
+from the inherited environment. This keeps CI reproduction commands independent
+of machine-local SDK paths:
 
 ```bash
-IREE_ROCM_PATH=/opt/rocm python dev.py bazel configure -DIREE_HAL_DRIVER_AMDGPU=ON
+IREE_ROCM_PATH=/opt/rocm python dev.py bazel configure \
+  -DIREE_HAL_DRIVER_AMDGPU=ON \
+  -DIREE_ROCM_DEPENDENCY_MODE=pinned
 ```
 
 The Bazel HIP HAL driver is an opt-in testing/development path, not part of the
-default libhrx build path. It is ROCm-backed, so `-DIREE_HAL_DRIVER_HIP=ON`
-also requires `IREE_ROCM_PATH` through `-DIREE_ROCM_PATH=...`,
-`--repo_env=IREE_ROCM_PATH=...`, or the inherited environment.
+default libhrx build path. It uses pinned HIP API headers by default and only
+requires `IREE_ROCM_PATH` when package mode or ROCm device/runtime tooling is
+required.
 
 Other Bazel-native overrides belong in `.bazelrc.local`.
 
@@ -199,7 +222,7 @@ tree. Bazel project availability is currently expressed by target selection.
 
 ## Dependency Resolution
 
-`IREE_DEPENDENCY_MODE` is the CMake dependency policy:
+`IREE_DEPENDENCY_MODE` is the shared dependency policy:
 
 | Value | Meaning |
 | --- | --- |
@@ -207,8 +230,13 @@ tree. Bazel project availability is currently expressed by target selection.
 | `package` | Requires dependencies to be provided as packages or parent-project targets. |
 | `auto` | Tries packages first, then falls back to pinned source dependencies. |
 
-Bazel dependency resolution is controlled by `MODULE.bazel`,
-`MODULE.bazel.lock`, and local `.bazelrc.local` overrides.
+CMake consumes this as a cache variable. Bazel consumes the same values through
+`--repo_env=IREE_DEPENDENCY_MODE=...`; `dev.py bazel configure` writes that
+repo environment into `.bazelrc.configured`. ROCm header facades also support
+`IREE_ROCM_DEPENDENCY_MODE`. When it is empty, `IREE_ROCM_PATH` selects ROCm
+package mode; without a ROCm path it inherits the global mode. libhrx TheRock
+validation should set `IREE_ROCM_PATH` while leaving ordinary source
+dependencies pinned.
 
 ## Raw Tool Equivalents
 
@@ -221,13 +249,13 @@ bazel build //runtime/...
 ```
 
 ```bash
-python dev.py bazel configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm
-python build_tools/bazel/configure.py -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm
+python dev.py bazel configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm -DIREE_ROCM_DEPENDENCY_MODE=pinned
+python build_tools/bazel/configure.py -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm -DIREE_ROCM_DEPENDENCY_MODE=pinned
 ```
 
 ```bash
-python dev.py cmake configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm
-cmake -S . -B ../builds/$(basename "$PWD") -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm
+python dev.py cmake configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm -DIREE_ROCM_DEPENDENCY_MODE=package
+cmake -S . -B ../builds/$(basename "$PWD") -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm -DIREE_ROCM_DEPENDENCY_MODE=package
 ```
 
 ```bash

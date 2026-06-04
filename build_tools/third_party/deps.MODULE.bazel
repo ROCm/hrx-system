@@ -36,21 +36,21 @@ http_archive(
 )
 
 rocm_repository(
-    name = "aqlprofile_sdk_headers",
-    build_file = "//build_tools/third_party/rocm:aqlprofile_sdk_headers.BUILD.bazel",
-    display_name = "AQL profile SDK headers",
-)
-
-rocm_repository(
     name = "hsa_runtime_headers",
     build_file = "//build_tools/third_party/rocm:hsa_runtime_headers.BUILD.bazel",
-    display_name = "HSA runtime headers",
+    display_name = "HSA runtime and AQL profile SDK headers",
+    sha256 = "66bd23285a3886c9b9983ac6de5efe4a828a2a293fd898d7fd75ab6c500741fb",
+    strip_prefix = "hsa-runtime-headers-cc2b5f429de4d1cb2be96ed10e6f45246e408d0e",
+    url = "https://github.com/iree-org/hsa-runtime-headers/archive/cc2b5f429de4d1cb2be96ed10e6f45246e408d0e.tar.gz",
 )
 
 rocm_repository(
     name = "hip_api_headers",
     build_file = "//build_tools/third_party/rocm:hip_api_headers.BUILD.bazel",
     display_name = "HIP API headers",
+    sha256 = "6304eb646a811032bb4ec2db2927170afed677d3a59b8592e986b79dfaae805c",
+    strip_prefix = "hip-build-deps-c64ec391ab8eaf4c9872660b24a71fda8026b438",
+    url = "https://github.com/iree-org/hip-build-deps/archive/c64ec391ab8eaf4c9872660b24a71fda8026b438.tar.gz",
 )
 
 rocm_repository(

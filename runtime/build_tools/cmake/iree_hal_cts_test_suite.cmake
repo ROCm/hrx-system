@@ -8,63 +8,22 @@
 #
 # Two functions:
 #
-# 1. iree_hal_cts_testdata() - Creates an executable testdata registration
-#    library for one format. Runtime-only builds do not compile MLIR testdata;
-#    executable payload producers must provide explicit registration libraries.
+# 1. iree_hal_cts_testdata() - Accepts compiler-era executable testdata calls.
+#    Runtime-only builds do not compile MLIR testdata, so the function emits no
+#    targets. Consumers use target existence to decide whether executable
+#    payload tests can be compiled.
 #
 # 2. iree_hal_cts_test_suite() - Creates CTS test binaries for a driver,
 #    linking against pre-built testdata libraries from iree_hal_cts_testdata().
 
-# Template for generated testdata registration .cc files.
-set(_IREE_CTS_TESTDATA_TEMPLATE [=[
-// Auto-generated executable format registration for CTS.
-#include "iree/hal/cts/util/registry.h"
-#include "@HEADER_PATH@"
-
-namespace iree::hal::cts {
-
-static iree_const_byte_span_t Get@FORMAT_FUNC_NAME@ExecutableData(
-    iree_string_view_t file_name) {
-  const iree_file_toc_t* toc = @IDENTIFIER@_create();
-  for (size_t i = 0; toc[i].name != nullptr; ++i) {
-    if (iree_string_view_equal(file_name,
-                               iree_make_cstring_view(toc[i].name))) {
-      return iree_make_const_byte_span(
-          reinterpret_cast<const uint8_t*>(toc[i].data), toc[i].size);
-    }
-  }
-  return iree_const_byte_span_empty();
-}
-
-static bool @FORMAT_VAR_NAME@_registered_ =
-    (CtsRegistry::RegisterExecutableFormat(
-         "@BACKEND_NAME@",
-         {"@FORMAT_NAME@", @FORMAT_STRING@, Get@FORMAT_FUNC_NAME@ExecutableData}),
-     true);
-
-}  // namespace iree::hal::cts
-]=])
-
-function(_iree_cts_camel_case INPUT OUTPUT_VAR)
-  string(REPLACE "_" ";" _PARTS "${INPUT}")
-  set(_RESULT "")
-  foreach(_PART ${_PARTS})
-    string(SUBSTRING "${_PART}" 0 1 _FIRST)
-    string(TOUPPER "${_FIRST}" _FIRST)
-    string(SUBSTRING "${_PART}" 1 -1 _REST)
-    string(APPEND _RESULT "${_FIRST}${_REST}")
-  endforeach()
-  set(${OUTPUT_VAR} "${_RESULT}" PARENT_SCOPE)
-endfunction()
-
 # iree_hal_cts_testdata()
 #
-# Creates an executable testdata registration library for one format or a set
-# of variant formats backed by the same embedded-data table.
-#
-# Creates two targets:
-#   testdata_${FORMAT_NAME}      - empty embedded-data table
-#   testdata_${FORMAT_NAME}_lib  - registration library (link into tests)
+# Accepts an executable testdata declaration from Bazel-generated CMake.
+# Runtime-only builds do not have the compiler pipeline needed to lower MLIR
+# test inputs into backend executable payloads, so this function intentionally
+# creates no targets. Generated CMake uses target existence checks around
+# executable-dependent tests and benchmarks; creating an empty table would make
+# those tests compile and then fail at runtime.
 #
 # Parameters:
 #   FORMAT_NAME: Short name (e.g., "vmvx", "llvm_cpu", "cuda").
@@ -78,126 +37,9 @@ endfunction()
 #   TESTDATA_DIR: Accepted for compatibility with old compiler-backed calls.
 #   FLAGS: Accepted for compatibility with old compiler-backed calls.
 function(iree_hal_cts_testdata)
-  cmake_parse_arguments(
-    _RULE
-    ""
-    "FORMAT_NAME;FORMAT_VARIANT_TOKEN;TARGET_DEVICE;IDENTIFIER;BACKEND_NAME;FORMAT_STRING;TESTDATA_DIR"
-    "FLAGS;FORMAT_VARIANTS"
-    ${ARGN}
-  )
-
   if(NOT IREE_BUILD_TESTS)
     return()
   endif()
-
-  set(_TESTDATA_NAME "testdata_${_RULE_FORMAT_NAME}")
-
-  string(TOUPPER "${_RULE_IDENTIFIER}_H" _HEADER_GUARD)
-  string(REGEX REPLACE "[^A-Z0-9_]" "_" _HEADER_GUARD "${_HEADER_GUARD}")
-
-  set(_HEADER_FILE "${CMAKE_CURRENT_BINARY_DIR}/${_TESTDATA_NAME}.h")
-  file(WRITE "${_HEADER_FILE}" "\
-#ifndef ${_HEADER_GUARD}
-#define ${_HEADER_GUARD}
-
-#include <stddef.h>
-
-#if defined(__cplusplus)
-extern \"C\" {
-#endif
-
-#ifndef IREE_FILE_TOC
-#define IREE_FILE_TOC
-typedef struct iree_file_toc_t {
-  const char* name;
-  const char* data;
-  size_t size;
-} iree_file_toc_t;
-#endif
-
-const iree_file_toc_t* ${_RULE_IDENTIFIER}_create(void);
-static inline size_t ${_RULE_IDENTIFIER}_size(void) { return 0; }
-
-#if defined(__cplusplus)
-}  // extern \"C\"
-#endif
-
-#endif  // ${_HEADER_GUARD}
-")
-
-  set(_SOURCE_FILE "${CMAKE_CURRENT_BINARY_DIR}/${_TESTDATA_NAME}.c")
-  file(WRITE "${_SOURCE_FILE}" "\
-#include \"${_TESTDATA_NAME}.h\"
-
-static const iree_file_toc_t kEmptyToc[] = {{NULL, NULL, 0}};
-
-const iree_file_toc_t* ${_RULE_IDENTIFIER}_create(void) { return kEmptyToc; }
-")
-
-  iree_cc_library(
-    NAME "${_TESTDATA_NAME}"
-    SRCS "${_SOURCE_FILE}"
-    HDRS "${_HEADER_FILE}"
-    TESTONLY
-    PUBLIC
-  )
-
-  set(_DEFAULT_FORMAT_VARIANT "__iree_default_format_variant__")
-  if(_RULE_FORMAT_VARIANTS)
-    set(_FORMAT_VARIANTS ${_RULE_FORMAT_VARIANTS})
-  else()
-    set(_FORMAT_VARIANTS "${_DEFAULT_FORMAT_VARIANT}")
-  endif()
-
-  if(_RULE_FORMAT_VARIANTS AND NOT _RULE_FORMAT_VARIANT_TOKEN)
-    message(SEND_ERROR
-      "iree_hal_cts_testdata FORMAT_VARIANTS requires FORMAT_VARIANT_TOKEN")
-  endif()
-
-  set(_GEN_CC_FILES)
-  foreach(_FORMAT_VARIANT IN LISTS _FORMAT_VARIANTS)
-    set(_EFFECTIVE_FORMAT_NAME "${_RULE_FORMAT_NAME}")
-    set(_EFFECTIVE_FORMAT_STRING "${_RULE_FORMAT_STRING}")
-    set(_GEN_CC_FILE "${CMAKE_CURRENT_BINARY_DIR}/${_TESTDATA_NAME}.cc")
-
-    if(NOT "${_FORMAT_VARIANT}" STREQUAL "${_DEFAULT_FORMAT_VARIANT}")
-      set(_EFFECTIVE_FORMAT_NAME "${_RULE_FORMAT_NAME}_${_FORMAT_VARIANT}")
-      string(REPLACE
-        "${_RULE_FORMAT_VARIANT_TOKEN}"
-        "${_FORMAT_VARIANT}"
-        _EFFECTIVE_FORMAT_STRING
-        "${_EFFECTIVE_FORMAT_STRING}"
-      )
-      set(_GEN_CC_FILE
-        "${CMAKE_CURRENT_BINARY_DIR}/${_TESTDATA_NAME}_${_FORMAT_VARIANT}.cc")
-    endif()
-
-    # Generate one registration .cc from the template for each effective format.
-    _iree_cts_camel_case("${_EFFECTIVE_FORMAT_NAME}" _FUNC_NAME)
-
-    set(HEADER_PATH "${_TESTDATA_NAME}.h")
-    set(FORMAT_FUNC_NAME "${_FUNC_NAME}")
-    set(IDENTIFIER "${_RULE_IDENTIFIER}")
-    set(FORMAT_VAR_NAME "${_EFFECTIVE_FORMAT_NAME}_format")
-    set(BACKEND_NAME "${_RULE_BACKEND_NAME}")
-    set(FORMAT_NAME "${_EFFECTIVE_FORMAT_NAME}")
-    set(FORMAT_STRING "${_EFFECTIVE_FORMAT_STRING}")
-
-    string(CONFIGURE "${_IREE_CTS_TESTDATA_TEMPLATE}" _GENERATED_CC @ONLY)
-    file(GENERATE OUTPUT "${_GEN_CC_FILE}" CONTENT "${_GENERATED_CC}")
-    list(APPEND _GEN_CC_FILES "${_GEN_CC_FILE}")
-  endforeach()
-
-  iree_cc_library(
-    NAME "${_TESTDATA_NAME}_lib"
-    SRCS ${_GEN_CC_FILES}
-    DEPS
-      ::${_TESTDATA_NAME}
-      iree::hal::cts::util::registry
-    TESTONLY
-    ALWAYSLINK
-    PUBLIC
-  )
 endfunction()
 
 # iree_hal_cts_test_suite()

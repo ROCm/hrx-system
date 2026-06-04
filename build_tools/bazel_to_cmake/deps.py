@@ -170,7 +170,9 @@ class ModuleParser:
                 module_file, collect_source_deps, **kwargs
             )
         if repo_rule_name == "rocm_repository":
-            return self._ignore
+            return lambda **kwargs: self._rocm_repository(
+                module_file, collect_source_deps, **kwargs
+            )
         if collect_source_deps:
             relpath = self._repo_relpath(module_file)
             raise ValueError(
@@ -221,6 +223,51 @@ class ModuleParser:
             )
         )
 
+    def _rocm_repository(
+        self,
+        module_file: Path,
+        collect_source_deps: bool,
+        **kwargs: Any,
+    ) -> None:
+        if not collect_source_deps:
+            return
+        _validate_known_fields(
+            kwargs,
+            context="rocm_repository",
+            known_fields={
+                "build_file",
+                "display_name",
+                "integrity",
+                "name",
+                "sha256",
+                "strip_prefix",
+                "url",
+                "urls",
+            },
+        )
+        name = _required_string(kwargs, "name", "rocm_repository")
+        if "url" not in kwargs and "urls" not in kwargs:
+            return
+        urls = _urls_from_kwargs(kwargs, f"rocm_repository({name})")
+        sha256 = _sha256_from_kwargs(kwargs, f"rocm_repository({name})")
+        strip_prefix = _optional_string(kwargs, "strip_prefix", "")
+        build_file = _optional_string(kwargs, "build_file", "")
+        self.dependencies.append(
+            Dependency(
+                name=name,
+                kind="rocm_repository",
+                owner=self._owner_for_module_file(module_file),
+                module_name=name,
+                repo_name=name,
+                version="",
+                dev_dependency=False,
+                urls=tuple(urls),
+                sha256=sha256,
+                strip_prefix=strip_prefix,
+                build_file=build_file,
+            )
+        )
+
     def _resolve_label(self, label: str) -> Path:
         match = re.fullmatch(r"//([^:]*):(.+)", label)
         if not match:
@@ -256,7 +303,7 @@ class LockResolver:
         self.existing_lock = existing_lock
 
     def resolve_for_update(self, dependency: Dependency) -> Dependency:
-        if dependency.kind == "http_archive":
+        if dependency.kind in {"http_archive", "rocm_repository"}:
             return dependency
         if dependency.kind != "bazel_dep":
             raise ValueError(f"unsupported dependency kind: {dependency.kind}")
@@ -274,7 +321,7 @@ class LockResolver:
         )
 
     def resolve_for_check(self, dependency: Dependency) -> Dependency:
-        if dependency.kind == "http_archive":
+        if dependency.kind in {"http_archive", "rocm_repository"}:
             return dependency
         if dependency.kind != "bazel_dep":
             raise ValueError(f"unsupported dependency kind: {dependency.kind}")

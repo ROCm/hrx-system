@@ -54,6 +54,7 @@ class ConfigureBazelTest(unittest.TestCase):
             "build --//runtime/config/hal:drivers=local-sync,local-task,null,amdgpu",
             config,
         )
+        self.assertIn("common --repo_env=IREE_DEPENDENCY_MODE=pinned", config)
         self.assertIn("common --repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=rocm", config)
         self.assertIn(f"common --repo_env=IREE_ROCM_PATH={rocm_root}", config)
         self.assertNotIn("--deleted_packages", config)
@@ -74,9 +75,29 @@ class ConfigureBazelTest(unittest.TestCase):
             "build --//runtime/config/hal:drivers=local-sync,local-task,null,amdgpu",
             config,
         )
+        self.assertIn("common --repo_env=IREE_DEPENDENCY_MODE=pinned", config)
+        self.assertIn("common --repo_env=IREE_ROCM_DEPENDENCY_MODE=package", config)
         self.assertIn("common --repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=rocm", config)
         self.assertIn(f"common --repo_env=IREE_ROCM_PATH={rocm_root}", config)
         self.assertNotIn("--deleted_packages", config)
+
+    def test_rocm_dependency_mode_overrides_rocm_path_default(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            rocm_root = self.make_rocm_root(temporary_directory)
+
+            args = self.configure_bazel.parse_arguments(
+                [
+                    "--//runtime/config/hal:drivers=amdgpu,local-sync,local-task,null",
+                    "--repo_env=IREE_ROCM_DEPENDENCY_MODE=pinned",
+                    f"--repo_env=IREE_ROCM_PATH={rocm_root}",
+                ]
+            )
+            config = self.configure_bazel.generate_config(args)
+
+        self.assertIn("common --repo_env=IREE_DEPENDENCY_MODE=pinned", config)
+        self.assertIn("common --repo_env=IREE_ROCM_DEPENDENCY_MODE=pinned", config)
+        self.assertIn("common --repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=rocm", config)
+        self.assertIn(f"common --repo_env=IREE_ROCM_PATH={rocm_root}", config)
 
     def test_portable_project_options_configure_hip(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -181,7 +202,7 @@ class ConfigureBazelTest(unittest.TestCase):
         self.assertIn("common --repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=none", config)
         self.assertIn(f"common --repo_env=IREE_ROCM_PATH={rocm_root}", config)
 
-    def test_enabled_rocm_driver_without_rocm_path_fails(self):
+    def test_pinned_rocm_driver_without_rocm_path_uses_no_device_toolchain(self):
         for driver_define in (
             "IREE_HAL_DRIVER_AMDGPU",
             "IREE_HAL_DRIVER_HIP",
@@ -190,8 +211,36 @@ class ConfigureBazelTest(unittest.TestCase):
                 args = self.configure_bazel.parse_arguments([f"-D{driver_define}=ON"])
 
                 with mock.patch.dict(self.configure_bazel.os.environ, {}, clear=True):
-                    with self.assertRaisesRegex(SystemExit, "IREE_ROCM_PATH"):
-                        self.configure_bazel.generate_config(args)
+                    config = self.configure_bazel.generate_config(args)
+
+                self.assertIn("common --repo_env=IREE_DEPENDENCY_MODE=pinned", config)
+                self.assertIn(
+                    "common --repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=none",
+                    config,
+                )
+                self.assertNotIn("IREE_ROCM_PATH", config)
+
+    def test_package_rocm_driver_without_rocm_path_fails(self):
+        args = self.configure_bazel.parse_arguments(
+            [
+                "-DIREE_HAL_DRIVER_AMDGPU=ON",
+                "-DIREE_ROCM_DEPENDENCY_MODE=package",
+            ]
+        )
+
+        with mock.patch.dict(self.configure_bazel.os.environ, {}, clear=True):
+            with self.assertRaisesRegex(SystemExit, "package dependency mode"):
+                self.configure_bazel.generate_config(args)
+
+    def test_unknown_dependency_mode_fails(self):
+        args = self.configure_bazel.parse_arguments(
+            [
+                "-DIREE_DEPENDENCY_MODE=banana",
+            ]
+        )
+
+        with self.assertRaisesRegex(SystemExit, "IREE_DEPENDENCY_MODE"):
+            self.configure_bazel.generate_config(args)
 
     def test_removed_driver_dialect_fails(self):
         args = self.configure_bazel.parse_arguments(["--enable-driver=amdgpu"])

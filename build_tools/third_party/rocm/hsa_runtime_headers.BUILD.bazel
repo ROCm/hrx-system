@@ -9,7 +9,16 @@ load("@rules_cc//cc:defs.bzl", "cc_library")
 package(default_visibility = ["//visibility:public"])
 
 cc_library(
-    name = "headers",
+    name = "aqlprofile_sdk_headers",
+    hdrs = glob(
+        ["include/aqlprofile-sdk/*.h"],
+        allow_empty = False,
+    ),
+    includes = ["include"],
+)
+
+cc_library(
+    name = "hsa_runtime_headers",
     hdrs = glob(
         ["include/hsa/*.h"],
         allow_empty = False,
