@@ -27,6 +27,10 @@ _BUILD_SETTING_CMAKE_VARIABLES = {
     "//build_tools/bazel:rocm_test_target": "IREE_ROCM_TEST_TARGET_CHIP",
 }
 
+_BUILD_SETTING_CMAKE_LIST_VARIABLES = {
+    "//build_tools/bazel:rocm_test_target": "IREE_ROCM_TEST_TARGET_CHIP_VALUES",
+}
+
 # Maps Bazel platform labels (from both select() conditions and
 # target_compatible_with) to CMake platform condition values.
 _PLATFORM_CMAKE_SYSTEM_NAME = {
@@ -1475,11 +1479,40 @@ class BuildFileFunctions(object):
         testdata,
         flags=None,
         flag_values=None,
+        cmake_format_variant_values=None,
         data=None,
         testonly=None,
         target_compatible_with=None,
         **kwargs,
     ):
+        variant_placeholders = set(cmake_format_variant_values or [])
+        variant_token = None
+        variant_values_var = None
+        if len(variant_placeholders) > 1:
+            raise NotImplementedError(
+                "iree_hal_cts_testdata supports one CMake format variant value"
+            )
+        if variant_placeholders:
+            if not flag_values:
+                raise ValueError(
+                    "cmake_format_variant_values requires matching flag_values"
+                )
+            variant_placeholder = next(iter(variant_placeholders))
+            variant_label = flag_values.get(variant_placeholder)
+            if not variant_label:
+                raise ValueError(
+                    f"cmake_format_variant_values entry {variant_placeholder} "
+                    "is missing from flag_values"
+                )
+            variant_values_var = _BUILD_SETTING_CMAKE_LIST_VARIABLES.get(
+                variant_label
+            )
+            if not variant_values_var:
+                raise NotImplementedError(
+                    f"No CMake list variable mapping for {variant_label}"
+                )
+            variant_token = "{" + variant_placeholder + "}"
+
         # Resolve {PLACEHOLDER} template variables from flag_values.
         # Build settings map to CMake variables; file targets (not in the
         # mapping) have their flags stripped since CMake auto-discovers
@@ -1490,10 +1523,11 @@ class BuildFileFunctions(object):
                 cmake_var = _BUILD_SETTING_CMAKE_VARIABLES.get(label)
                 template = "{" + placeholder + "}"
                 if cmake_var is not None:
-                    cmake_ref = "${" + cmake_var + "}"
-                    format_string = format_string.replace(template, cmake_ref)
-                    if flags:
-                        flags = [f.replace(template, cmake_ref) for f in flags]
+                    if placeholder not in variant_placeholders:
+                        cmake_ref = "${" + cmake_var + "}"
+                        format_string = format_string.replace(template, cmake_ref)
+                        if flags:
+                            flags = [f.replace(template, cmake_ref) for f in flags]
                 else:
                     file_templates.add(template)
             if flags and file_templates:
@@ -1502,6 +1536,15 @@ class BuildFileFunctions(object):
         name_block = self._convert_string_arg_block(
             "FORMAT_NAME", format_name, quote=False
         )
+        variant_token_block = self._convert_string_arg_block(
+            "FORMAT_VARIANT_TOKEN", variant_token
+        )
+        if variant_values_var:
+            format_variants_block = self._convert_string_list_block(
+                "FORMAT_VARIANTS", [f"${{{variant_values_var}}}"], quote=False
+            )
+        else:
+            format_variants_block = ""
         target_device_block = self._convert_string_arg_block(
             "TARGET_DEVICE", target_device
         )
@@ -1535,6 +1578,8 @@ class BuildFileFunctions(object):
         self._converter.body += (
             f"iree_hal_cts_testdata(\n"
             f"{name_block}"
+            f"{variant_token_block}"
+            f"{format_variants_block}"
             f"{target_device_block}"
             f"{identifier_block}"
             f"{backend_name_block}"

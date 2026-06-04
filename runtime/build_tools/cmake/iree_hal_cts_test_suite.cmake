@@ -59,7 +59,8 @@ endfunction()
 
 # iree_hal_cts_testdata()
 #
-# Creates an executable testdata registration library for one format.
+# Creates an executable testdata registration library for one format or a set
+# of variant formats backed by the same embedded-data table.
 #
 # Creates two targets:
 #   testdata_${FORMAT_NAME}      - empty embedded-data table
@@ -67,6 +68,9 @@ endfunction()
 #
 # Parameters:
 #   FORMAT_NAME: Short name (e.g., "vmvx", "llvm_cpu", "cuda").
+#   FORMAT_VARIANT_TOKEN: Optional token in FORMAT_STRING to replace per variant.
+#   FORMAT_VARIANTS: Optional variant values. Each value registers
+#     ${FORMAT_NAME}_${variant} while preserving the base target names.
 #   TARGET_DEVICE: Accepted for compatibility with old compiler-backed calls.
 #   IDENTIFIER: C identifier for the embedded data (e.g., "iree_cts_testdata_vmvx").
 #   BACKEND_NAME: Backend name for CtsRegistry (e.g., "local_task").
@@ -77,8 +81,8 @@ function(iree_hal_cts_testdata)
   cmake_parse_arguments(
     _RULE
     ""
-    "FORMAT_NAME;TARGET_DEVICE;IDENTIFIER;BACKEND_NAME;FORMAT_STRING;TESTDATA_DIR"
-    "FLAGS"
+    "FORMAT_NAME;FORMAT_VARIANT_TOKEN;TARGET_DEVICE;IDENTIFIER;BACKEND_NAME;FORMAT_STRING;TESTDATA_DIR"
+    "FLAGS;FORMAT_VARIANTS"
     ${ARGN}
   )
 
@@ -138,24 +142,55 @@ const iree_file_toc_t* ${_RULE_IDENTIFIER}_create(void) { return kEmptyToc; }
     PUBLIC
   )
 
-  # Generate the registration .cc from template.
-  _iree_cts_camel_case("${_RULE_FORMAT_NAME}" _FUNC_NAME)
+  set(_DEFAULT_FORMAT_VARIANT "__iree_default_format_variant__")
+  if(_RULE_FORMAT_VARIANTS)
+    set(_FORMAT_VARIANTS ${_RULE_FORMAT_VARIANTS})
+  else()
+    set(_FORMAT_VARIANTS "${_DEFAULT_FORMAT_VARIANT}")
+  endif()
 
-  set(HEADER_PATH "${_TESTDATA_NAME}.h")
-  set(FORMAT_FUNC_NAME "${_FUNC_NAME}")
-  set(IDENTIFIER "${_RULE_IDENTIFIER}")
-  set(FORMAT_VAR_NAME "${_RULE_FORMAT_NAME}_format")
-  set(BACKEND_NAME "${_RULE_BACKEND_NAME}")
-  set(FORMAT_NAME "${_RULE_FORMAT_NAME}")
-  set(FORMAT_STRING "${_RULE_FORMAT_STRING}")
+  if(_RULE_FORMAT_VARIANTS AND NOT _RULE_FORMAT_VARIANT_TOKEN)
+    message(SEND_ERROR
+      "iree_hal_cts_testdata FORMAT_VARIANTS requires FORMAT_VARIANT_TOKEN")
+  endif()
 
-  string(CONFIGURE "${_IREE_CTS_TESTDATA_TEMPLATE}" _GENERATED_CC @ONLY)
-  set(_GEN_CC_FILE "${CMAKE_CURRENT_BINARY_DIR}/${_TESTDATA_NAME}.cc")
-  file(GENERATE OUTPUT "${_GEN_CC_FILE}" CONTENT "${_GENERATED_CC}")
+  set(_GEN_CC_FILES)
+  foreach(_FORMAT_VARIANT IN LISTS _FORMAT_VARIANTS)
+    set(_EFFECTIVE_FORMAT_NAME "${_RULE_FORMAT_NAME}")
+    set(_EFFECTIVE_FORMAT_STRING "${_RULE_FORMAT_STRING}")
+    set(_GEN_CC_FILE "${CMAKE_CURRENT_BINARY_DIR}/${_TESTDATA_NAME}.cc")
+
+    if(NOT "${_FORMAT_VARIANT}" STREQUAL "${_DEFAULT_FORMAT_VARIANT}")
+      set(_EFFECTIVE_FORMAT_NAME "${_RULE_FORMAT_NAME}_${_FORMAT_VARIANT}")
+      string(REPLACE
+        "${_RULE_FORMAT_VARIANT_TOKEN}"
+        "${_FORMAT_VARIANT}"
+        _EFFECTIVE_FORMAT_STRING
+        "${_EFFECTIVE_FORMAT_STRING}"
+      )
+      set(_GEN_CC_FILE
+        "${CMAKE_CURRENT_BINARY_DIR}/${_TESTDATA_NAME}_${_FORMAT_VARIANT}.cc")
+    endif()
+
+    # Generate one registration .cc from the template for each effective format.
+    _iree_cts_camel_case("${_EFFECTIVE_FORMAT_NAME}" _FUNC_NAME)
+
+    set(HEADER_PATH "${_TESTDATA_NAME}.h")
+    set(FORMAT_FUNC_NAME "${_FUNC_NAME}")
+    set(IDENTIFIER "${_RULE_IDENTIFIER}")
+    set(FORMAT_VAR_NAME "${_EFFECTIVE_FORMAT_NAME}_format")
+    set(BACKEND_NAME "${_RULE_BACKEND_NAME}")
+    set(FORMAT_NAME "${_EFFECTIVE_FORMAT_NAME}")
+    set(FORMAT_STRING "${_EFFECTIVE_FORMAT_STRING}")
+
+    string(CONFIGURE "${_IREE_CTS_TESTDATA_TEMPLATE}" _GENERATED_CC @ONLY)
+    file(GENERATE OUTPUT "${_GEN_CC_FILE}" CONTENT "${_GENERATED_CC}")
+    list(APPEND _GEN_CC_FILES "${_GEN_CC_FILE}")
+  endforeach()
 
   iree_cc_library(
     NAME "${_TESTDATA_NAME}_lib"
-    SRCS "${_GEN_CC_FILE}"
+    SRCS ${_GEN_CC_FILES}
     DEPS
       ::${_TESTDATA_NAME}
       iree::hal::cts::util::registry

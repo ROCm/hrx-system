@@ -544,6 +544,10 @@ if(IREE_HAL_DRIVER_AMDGPU)
 iree_hal_cts_testdata(
   FORMAT_NAME
     amdgpu_pm4_command_buffer_benchmark
+  FORMAT_VARIANT_TOKEN
+    "{ROCM_TARGET}"
+  FORMAT_VARIANTS
+    ${IREE_ROCM_TEST_TARGET_CHIP_VALUES}
   TARGET_DEVICE
     "amdgpu"
   IDENTIFIER
@@ -551,11 +555,11 @@ iree_hal_cts_testdata(
   BACKEND_NAME
     "amdgpu"
   FORMAT_STRING
-    "\"amdgcn-amd-amdhsa--${IREE_ROCM_TEST_TARGET_CHIP}\""
+    [=["amdgcn-amd-amdhsa--{ROCM_TARGET}"]=]
   TESTDATA_DIR
     "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/drivers/amdgpu"
   FLAGS
-    "--iree-rocm-target=${IREE_ROCM_TEST_TARGET_CHIP}"
+    "--iree-rocm-target={ROCM_TARGET}"
 )
 endif()
 

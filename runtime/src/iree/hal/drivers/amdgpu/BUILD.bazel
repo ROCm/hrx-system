@@ -457,6 +457,7 @@ filegroup(
 
 iree_hal_cts_testdata(
     backend_name = "amdgpu",
+    cmake_format_variant_values = ["ROCM_TARGET"],
     flag_values = {
         "ROCM_BC_DIR": "@amdgpu_device_libs//:bitcode",
         "ROCM_TARGET": "//build_tools/bazel:rocm_test_target",

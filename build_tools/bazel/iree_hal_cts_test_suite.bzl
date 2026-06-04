@@ -89,6 +89,7 @@ def iree_hal_cts_testdata(
         testdata,
         flags = [],
         flag_values = {},
+        cmake_format_variant_values = [],
         data = [],
         testonly = True,
         **kwargs):
