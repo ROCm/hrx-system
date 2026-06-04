@@ -6,26 +6,26 @@
 // are fully implemented here; async alloc/free paths are in the binding
 // layer since they require stream host callback support.
 
-#include "hrx_internal.h"
-
 #include <stdlib.h>
+
+#include "hrx_internal.h"
 
 //===----------------------------------------------------------------------===//
 // Lifecycle
 //===----------------------------------------------------------------------===//
 
 hrx_status_t hrx_mem_pool_create(hrx_device_t device,
-                                   const hrx_mem_pool_props_t* props,
-                                   hrx_mem_pool_t* out_pool) {
+                                 const hrx_mem_pool_props_t* props,
+                                 hrx_mem_pool_t* out_pool) {
   if (!device || !props || !out_pool) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                            "device, props, or out_pool is NULL");
+                           "device, props, or out_pool is NULL");
   }
 
   hrx_mem_pool_s* pool = (hrx_mem_pool_s*)calloc(1, sizeof(hrx_mem_pool_s));
   if (!pool) {
     return hrx_make_status(HRX_STATUS_OUT_OF_MEMORY,
-                            "failed to allocate mem pool");
+                           "failed to allocate mem pool");
   }
 
   iree_atomic_ref_count_init(&pool->ref_count);
@@ -93,11 +93,11 @@ void hrx_mem_pool_release(hrx_mem_pool_t pool) {
 //===----------------------------------------------------------------------===//
 
 hrx_status_t hrx_mem_pool_get_attribute(hrx_mem_pool_t pool,
-                                          hrx_mem_pool_attr_t attr,
-                                          uint64_t* out_value) {
+                                        hrx_mem_pool_attr_t attr,
+                                        uint64_t* out_value) {
   if (!pool || !out_value) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                            "pool or out_value is NULL");
+                           "pool or out_value is NULL");
   }
   *out_value = 0;
 
@@ -131,7 +131,7 @@ hrx_status_t hrx_mem_pool_get_attribute(hrx_mem_pool_t pool,
       break;
     default:
       status = hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                                "invalid memory pool attribute");
+                               "invalid memory pool attribute");
       break;
   }
 
@@ -140,8 +140,8 @@ hrx_status_t hrx_mem_pool_get_attribute(hrx_mem_pool_t pool,
 }
 
 hrx_status_t hrx_mem_pool_set_attribute(hrx_mem_pool_t pool,
-                                          hrx_mem_pool_attr_t attr,
-                                          uint64_t value) {
+                                        hrx_mem_pool_attr_t attr,
+                                        uint64_t value) {
   if (!pool) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "pool is NULL");
   }
@@ -164,7 +164,7 @@ hrx_status_t hrx_mem_pool_set_attribute(hrx_mem_pool_t pool,
       break;
     default:
       status = hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                                "invalid or read-only memory pool attribute");
+                               "invalid or read-only memory pool attribute");
       break;
   }
 
@@ -176,8 +176,7 @@ hrx_status_t hrx_mem_pool_set_attribute(hrx_mem_pool_t pool,
 // Trim
 //===----------------------------------------------------------------------===//
 
-hrx_status_t hrx_mem_pool_trim(hrx_mem_pool_t pool,
-                                 size_t min_bytes_to_keep) {
+hrx_status_t hrx_mem_pool_trim(hrx_mem_pool_t pool, size_t min_bytes_to_keep) {
   if (!pool) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "pool is NULL");
   }

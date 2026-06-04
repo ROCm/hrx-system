@@ -1,18 +1,18 @@
 // Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 
-#include "hrx_internal.h"
-
 #include "buffer_table.h"
+#include "hrx_internal.h"
 
 //===----------------------------------------------------------------------===//
 // Node and block allocation helpers
 //===----------------------------------------------------------------------===//
 
-static iree_status_t hrx_graph_allocate_node(
-    iree_allocator_t allocator, iree_host_size_t dependency_count,
-    iree_host_size_t extra_data_size, hrx_graph_node_s** out_node,
-    uint8_t** out_extra_data) {
+static iree_status_t hrx_graph_allocate_node(iree_allocator_t allocator,
+                                             iree_host_size_t dependency_count,
+                                             iree_host_size_t extra_data_size,
+                                             hrx_graph_node_s** out_node,
+                                             uint8_t** out_extra_data) {
   IREE_ASSERT_ARGUMENT(out_node);
   *out_node = NULL;
   if (out_extra_data) *out_extra_data = NULL;
@@ -48,8 +48,7 @@ static iree_status_t hrx_graph_allocate_node_block(
     iree_allocator_t allocator, iree_host_size_t capacity,
     hrx_graph_node_block_t** out_block) {
   const iree_host_size_t block_size =
-      sizeof(hrx_graph_node_block_t) +
-      capacity * sizeof(hrx_graph_node_s*);
+      sizeof(hrx_graph_node_block_t) + capacity * sizeof(hrx_graph_node_s*);
 
   hrx_graph_node_block_t* block = NULL;
   IREE_RETURN_IF_ERROR(
@@ -62,14 +61,13 @@ static iree_status_t hrx_graph_allocate_node_block(
   return iree_ok_status();
 }
 
-static iree_status_t hrx_graph_add_node_internal(
-    hrx_graph_s* graph, hrx_graph_node_s* node) {
+static iree_status_t hrx_graph_add_node_internal(hrx_graph_s* graph,
+                                                 hrx_graph_node_s* node) {
   node->node_index = (uint32_t)graph->node_count;
 
   if (!graph->current_node_block ||
       graph->current_node_block->count >= graph->current_node_block->capacity) {
-    const iree_host_size_t block_capacity =
-        graph->node_count < 64 ? 16 : 64;
+    const iree_host_size_t block_capacity = graph->node_count < 64 ? 16 : 64;
     hrx_graph_node_block_t* new_block = NULL;
     IREE_RETURN_IF_ERROR(hrx_graph_allocate_node_block(
         graph->arena_allocator, block_capacity, &new_block));
@@ -115,7 +113,7 @@ static iree_status_t hrx_graph_add_node_internal(
 static void hrx_graph_destroy(hrx_graph_s* graph);
 
 hrx_status_t hrx_graph_create(hrx_device_t device, uint32_t flags,
-                                hrx_graph_t* out_graph) {
+                              hrx_graph_t* out_graph) {
   IREE_ASSERT_ARGUMENT(device);
   IREE_ASSERT_ARGUMENT(out_graph);
   *out_graph = NULL;
@@ -123,9 +121,8 @@ hrx_status_t hrx_graph_create(hrx_device_t device, uint32_t flags,
 
   hrx_graph_s* graph = NULL;
   HRX_RETURN_AND_END_ZONE_IF_IREE_ERROR(
-      z0,
-      iree_allocator_malloc(iree_allocator_system(), sizeof(*graph),
-                            (void**)&graph));
+      z0, iree_allocator_malloc(iree_allocator_system(), sizeof(*graph),
+                                (void**)&graph));
 
   iree_atomic_ref_count_init(&graph->ref_count);
   graph->device = device;
@@ -178,9 +175,8 @@ hrx_status_t hrx_graph_size(hrx_graph_t graph, size_t* out_count) {
   return hrx_ok_status();
 }
 
-hrx_status_t hrx_graph_get_nodes(hrx_graph_t graph,
-                                   hrx_graph_node_t* nodes,
-                                   size_t* inout_count) {
+hrx_status_t hrx_graph_get_nodes(hrx_graph_t graph, hrx_graph_node_t* nodes,
+                                 size_t* inout_count) {
   IREE_ASSERT_ARGUMENT(graph);
   IREE_ASSERT_ARGUMENT(inout_count);
 
@@ -207,16 +203,16 @@ hrx_status_t hrx_graph_get_nodes(hrx_graph_t graph,
 //===----------------------------------------------------------------------===//
 
 hrx_status_t hrx_graph_add_empty_node(hrx_graph_t graph,
-                                        const hrx_graph_node_t* deps,
-                                        size_t dep_count,
-                                        hrx_graph_node_t* out_node) {
+                                      const hrx_graph_node_t* deps,
+                                      size_t dep_count,
+                                      hrx_graph_node_t* out_node) {
   IREE_ASSERT_ARGUMENT(graph);
   IREE_TRACE_ZONE_BEGIN(z0);
 
   hrx_graph_node_s* node = NULL;
   HRX_RETURN_AND_END_ZONE_IF_IREE_ERROR(
       z0, hrx_graph_allocate_node(graph->arena_allocator, dep_count, 0, &node,
-                                   NULL));
+                                  NULL));
 
   node->type = HRX_GRAPH_NODE_TYPE_INTERNAL_EMPTY;
   node->dependency_count = dep_count;
@@ -234,8 +230,7 @@ hrx_status_t hrx_graph_add_empty_node(hrx_graph_t graph,
 
 hrx_status_t hrx_graph_add_kernel_node(
     hrx_graph_t graph, const hrx_graph_node_t* deps, size_t dep_count,
-    const hrx_graph_kernel_node_attrs_t* attrs,
-    hrx_graph_node_t* out_node) {
+    const hrx_graph_kernel_node_attrs_t* attrs, hrx_graph_node_t* out_node) {
   IREE_ASSERT_ARGUMENT(graph);
   IREE_ASSERT_ARGUMENT(attrs);
   IREE_ASSERT_ARGUMENT(attrs->executable);
@@ -249,8 +244,8 @@ hrx_status_t hrx_graph_add_kernel_node(
   hrx_graph_node_s* node = NULL;
   HRX_RETURN_AND_END_ZONE_IF_IREE_ERROR(
       z0, hrx_graph_allocate_node(graph->arena_allocator, dep_count,
-                                   constants_size + bindings_size, &node,
-                                   &extra_data));
+                                  constants_size + bindings_size, &node,
+                                  &extra_data));
 
   node->type = HRX_GRAPH_NODE_TYPE_INTERNAL_KERNEL;
   node->dependency_count = dep_count;
@@ -295,8 +290,7 @@ hrx_status_t hrx_graph_add_kernel_node(
 
 hrx_status_t hrx_graph_add_memcpy_node(
     hrx_graph_t graph, const hrx_graph_node_t* deps, size_t dep_count,
-    const hrx_graph_memcpy_node_attrs_t* attrs,
-    hrx_graph_node_t* out_node) {
+    const hrx_graph_memcpy_node_attrs_t* attrs, hrx_graph_node_t* out_node) {
   IREE_ASSERT_ARGUMENT(graph);
   IREE_ASSERT_ARGUMENT(attrs);
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -305,19 +299,19 @@ hrx_status_t hrx_graph_add_memcpy_node(
   size_t dst_offset = 0;
   HRX_RETURN_AND_END_ZONE(
       z0, hrx_buffer_table_find(&graph->device->buffer_table,
-                                 (uint64_t)(uintptr_t)attrs->dst,
-                                 &dst_buf, &dst_offset, NULL));
+                                (uint64_t)(uintptr_t)attrs->dst, &dst_buf,
+                                &dst_offset, NULL));
   hrx_buffer_t src_buf = NULL;
   size_t src_offset = 0;
   HRX_RETURN_AND_END_ZONE(
       z0, hrx_buffer_table_find(&graph->device->buffer_table,
-                                 (uint64_t)(uintptr_t)attrs->src,
-                                 &src_buf, &src_offset, NULL));
+                                (uint64_t)(uintptr_t)attrs->src, &src_buf,
+                                &src_offset, NULL));
 
   hrx_graph_node_s* node = NULL;
   HRX_RETURN_AND_END_ZONE_IF_IREE_ERROR(
       z0, hrx_graph_allocate_node(graph->arena_allocator, dep_count, 0, &node,
-                                   NULL));
+                                  NULL));
 
   node->type = HRX_GRAPH_NODE_TYPE_INTERNAL_MEMCPY;
   node->dependency_count = dep_count;
@@ -349,8 +343,7 @@ hrx_status_t hrx_graph_add_memcpy_node(
 
 hrx_status_t hrx_graph_add_memset_node(
     hrx_graph_t graph, const hrx_graph_node_t* deps, size_t dep_count,
-    const hrx_graph_memset_node_attrs_t* attrs,
-    hrx_graph_node_t* out_node) {
+    const hrx_graph_memset_node_attrs_t* attrs, hrx_graph_node_t* out_node) {
   IREE_ASSERT_ARGUMENT(graph);
   IREE_ASSERT_ARGUMENT(attrs);
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -359,13 +352,13 @@ hrx_status_t hrx_graph_add_memset_node(
   size_t dst_offset = 0;
   HRX_RETURN_AND_END_ZONE(
       z0, hrx_buffer_table_find(&graph->device->buffer_table,
-                                 (uint64_t)(uintptr_t)attrs->dst,
-                                 &dst_buf, &dst_offset, NULL));
+                                (uint64_t)(uintptr_t)attrs->dst, &dst_buf,
+                                &dst_offset, NULL));
 
   hrx_graph_node_s* node = NULL;
   HRX_RETURN_AND_END_ZONE_IF_IREE_ERROR(
       z0, hrx_graph_allocate_node(graph->arena_allocator, dep_count, 0, &node,
-                                   NULL));
+                                  NULL));
 
   node->type = HRX_GRAPH_NODE_TYPE_INTERNAL_MEMSET;
   node->dependency_count = dep_count;
@@ -394,8 +387,7 @@ hrx_status_t hrx_graph_add_memset_node(
 
 hrx_status_t hrx_graph_add_host_call_node(
     hrx_graph_t graph, const hrx_graph_node_t* deps, size_t dep_count,
-    const hrx_graph_host_call_node_attrs_t* attrs,
-    hrx_graph_node_t* out_node) {
+    const hrx_graph_host_call_node_attrs_t* attrs, hrx_graph_node_t* out_node) {
   IREE_ASSERT_ARGUMENT(graph);
   IREE_ASSERT_ARGUMENT(attrs);
   IREE_ASSERT_ARGUMENT(attrs->fn);
@@ -404,7 +396,7 @@ hrx_status_t hrx_graph_add_host_call_node(
   hrx_graph_node_s* node = NULL;
   HRX_RETURN_AND_END_ZONE_IF_IREE_ERROR(
       z0, hrx_graph_allocate_node(graph->arena_allocator, dep_count, 0, &node,
-                                   NULL));
+                                  NULL));
 
   node->type = HRX_GRAPH_NODE_TYPE_INTERNAL_HOST_CALL;
   node->dependency_count = dep_count;
@@ -425,9 +417,9 @@ hrx_status_t hrx_graph_add_host_call_node(
 }
 
 hrx_status_t hrx_graph_add_dependencies(hrx_graph_t graph,
-                                          const hrx_graph_node_t* from_nodes,
-                                          const hrx_graph_node_t* to_nodes,
-                                          size_t count) {
+                                        const hrx_graph_node_t* from_nodes,
+                                        const hrx_graph_node_t* to_nodes,
+                                        size_t count) {
   IREE_ASSERT_ARGUMENT(graph);
   if (count == 0) return hrx_ok_status();
   IREE_ASSERT_ARGUMENT(from_nodes);
@@ -463,7 +455,7 @@ hrx_status_t hrx_graph_add_dependencies(hrx_graph_t graph,
 //===----------------------------------------------------------------------===//
 
 hrx_status_t hrx_graph_instantiate(hrx_graph_t graph, uint32_t flags,
-                                     hrx_graph_exec_t* out_exec) {
+                                   hrx_graph_exec_t* out_exec) {
   IREE_ASSERT_ARGUMENT(graph);
   IREE_ASSERT_ARGUMENT(out_exec);
   *out_exec = NULL;
@@ -494,7 +486,7 @@ hrx_status_t hrx_graph_instantiate(hrx_graph_t graph, uint32_t flags,
   if (iree_status_is_ok(status)) {
     iree_slim_mutex_lock(&graph->mutex);
     status = hrx_graph_exec_instantiate_locked(exec, graph->node_blocks,
-                                                graph->node_count);
+                                               graph->node_count);
     iree_slim_mutex_unlock(&graph->mutex);
   }
 
@@ -536,8 +528,7 @@ void hrx_graph_exec_release(hrx_graph_exec_t exec) {
   }
 }
 
-hrx_status_t hrx_graph_exec_update(hrx_graph_exec_t exec,
-                                     hrx_graph_t graph) {
+hrx_status_t hrx_graph_exec_update(hrx_graph_exec_t exec, hrx_graph_t graph) {
   IREE_ASSERT_ARGUMENT(exec);
   IREE_ASSERT_ARGUMENT(graph);
   return hrx_make_status(HRX_STATUS_UNIMPLEMENTED,
@@ -549,7 +540,7 @@ hrx_status_t hrx_graph_exec_update(hrx_graph_exec_t exec,
 //===----------------------------------------------------------------------===//
 
 hrx_status_t hrx_stream_begin_capture(hrx_stream_t stream,
-                                        hrx_capture_mode_t mode) {
+                                      hrx_capture_mode_t mode) {
   IREE_ASSERT_ARGUMENT(stream);
   (void)mode;
   return hrx_make_status(HRX_STATUS_UNIMPLEMENTED,
@@ -557,7 +548,7 @@ hrx_status_t hrx_stream_begin_capture(hrx_stream_t stream,
 }
 
 hrx_status_t hrx_stream_end_capture(hrx_stream_t stream,
-                                      hrx_graph_t* out_graph) {
+                                    hrx_graph_t* out_graph) {
   IREE_ASSERT_ARGUMENT(stream);
   (void)out_graph;
   return hrx_make_status(HRX_STATUS_UNIMPLEMENTED,

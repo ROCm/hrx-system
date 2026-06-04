@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include "buffer_table.h"
+
 #include "hrx_internal.h"
 
 using iree_hal_streaming_deviceptr_t = uint64_t;
@@ -36,7 +37,6 @@ struct iree_hal_streaming_buffer_t {
   uint64_t padding[5];
 };
 
-
 static iree_status_t BufferTableStatus(hrx_status_t status) {
   if (hrx_status_is_ok(status)) return iree_ok_status();
   iree_status_code_t code = (iree_status_code_t)hrx_status_code(status);
@@ -66,9 +66,9 @@ static void iree_hal_streaming_buffer_table_free(
 static iree_status_t iree_hal_streaming_buffer_table_insert(
     iree_hal_streaming_buffer_table_t* table,
     iree_hal_streaming_buffer_t* buffer) {
-  return BufferTableStatus(hrx_buffer_table_insert(
-      table, buffer->device_ptr, buffer->host_ptr, buffer->size,
-      (hrx_buffer_t)buffer, nullptr));
+  return BufferTableStatus(
+      hrx_buffer_table_insert(table, buffer->device_ptr, buffer->host_ptr,
+                              buffer->size, (hrx_buffer_t)buffer, nullptr));
 }
 
 static iree_status_t iree_hal_streaming_buffer_table_remove(
@@ -90,9 +90,8 @@ static iree_status_t iree_hal_streaming_buffer_table_lookup_range(
     iree_hal_streaming_buffer_table_t* table, uint64_t any_ptr, size_t size,
     iree_hal_streaming_buffer_t** out_buffer) {
   hrx_buffer_t buffer = nullptr;
-  iree_status_t status = BufferTableStatus(
-      hrx_buffer_table_find_range(table, any_ptr, size, &buffer, nullptr,
-                                  nullptr));
+  iree_status_t status = BufferTableStatus(hrx_buffer_table_find_range(
+      table, any_ptr, size, &buffer, nullptr, nullptr));
   if (out_buffer) *out_buffer = (iree_hal_streaming_buffer_t*)buffer;
   return status;
 }

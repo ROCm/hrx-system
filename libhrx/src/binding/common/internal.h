@@ -255,7 +255,6 @@ struct iree_hal_streaming_context_t {
   // HIP/CUDA C++ and embedded kernels split out by the compiler. If only using
   // the driver API with explicit module management this is bypassed.
   iree_hal_streaming_context_symbol_map_t symbol_map;
-
 };
 
 //===----------------------------------------------------------------------===//
@@ -423,7 +422,8 @@ typedef struct iree_hal_streaming_stream_t {
   // Semaphore chain for synchronization.
   iree_hal_semaphore_t* timeline_semaphore;
   uint64_t pending_value;    // Next value to be used for signaling
-  uint64_t submitted_value;  // Last value that was actually submitted (for wait_submitted)
+  uint64_t submitted_value;  // Last value that was actually submitted (for
+                             // wait_submitted)
   uint64_t completed_value;  // Last value we've verified as completed
 
   // Queue affinity.
@@ -705,8 +705,9 @@ typedef enum iree_hal_streaming_dispatch_flag_bits_e {
   // The parameters are an array of pointers to values.
   IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY = 1ull << 1,
   // The parameter buffer is pre-packed in the kernel's native ABI format.
-  // This is used when HIP_LAUNCH_PARAM_BUFFER_POINTER is used to pass arguments.
-  // The buffer should be passed directly to the kernel without unpacking.
+  // This is used when HIP_LAUNCH_PARAM_BUFFER_POINTER is used to pass
+  // arguments. The buffer should be passed directly to the kernel without
+  // unpacking.
   IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED = 1ull << 2,
 } iree_hal_streaming_dispatch_flags_t;
 
@@ -858,11 +859,8 @@ iree_status_t iree_hal_streaming_device_name(
 // IREE_STATUS_OUT_OF_RANGE if |value_size| is too small to hold the property
 // (including the null terminator).
 iree_status_t iree_hal_streaming_device_get_string_property(
-    iree_hal_streaming_device_ordinal_t ordinal,
-    const char* category,
-    const char* key,
-    char* value,
-    iree_host_size_t value_size);
+    iree_hal_streaming_device_ordinal_t ordinal, const char* category,
+    const char* key, char* value, iree_host_size_t value_size);
 
 // Synchronization: none (queries current memory info).
 iree_status_t iree_hal_streaming_device_memory_info(
@@ -1368,8 +1366,8 @@ hrx_mem_pool_t iree_hal_streaming_device_default_mem_pool(
     iree_hal_streaming_device_t* device);
 hrx_mem_pool_t iree_hal_streaming_device_mem_pool(
     iree_hal_streaming_device_t* device);
-void iree_hal_streaming_device_set_mem_pool(
-    iree_hal_streaming_device_t* device, hrx_mem_pool_t pool);
+void iree_hal_streaming_device_set_mem_pool(iree_hal_streaming_device_t* device,
+                                            hrx_mem_pool_t pool);
 
 //===----------------------------------------------------------------------===//
 // Graph management

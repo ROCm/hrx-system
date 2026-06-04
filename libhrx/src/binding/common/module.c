@@ -90,9 +90,9 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
     for (iree_host_size_t i = 0; i < export_count; ++i) {
       export_executables[symbol_index] = executable;
       export_ordinals[symbol_index] = (iree_hal_executable_export_ordinal_t)i;
-      status =
-          iree_hal_executable_export_info(executable, export_ordinals[symbol_index],
-                                          &export_infos[symbol_index]);
+      status = iree_hal_executable_export_info(executable,
+                                               export_ordinals[symbol_index],
+                                               &export_infos[symbol_index]);
       if (!iree_status_is_ok(status)) break;
       total_parameter_count += export_infos[symbol_index].parameter_count;
       ++symbol_index;
@@ -107,7 +107,7 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
                                    (void**)&parameters);
   }
 
-  iree_host_size_t constants_size =  0;
+  iree_host_size_t constants_size = 0;
 
   // Analyze each export to determine operation counts.
   // We count the total operations per symbol with copy coalescing.
@@ -141,13 +141,14 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
         //  New copy operation needed.
         ++symbol_op_counts[i].copy_count;
         ++total_ops;
-        
-        if (parameters[parameter_base + j].offset + 
-          parameters[parameter_base + j].size > constants_size) {
-            // Track the maximum extent needed for the constants buffer.
-            // Constants are packed at their kernarg offsets within the buffer.
-            constants_size = parameters[parameter_base + j].offset +
-                             parameters[parameter_base + j].size;
+
+        if (parameters[parameter_base + j].offset +
+                parameters[parameter_base + j].size >
+            constants_size) {
+          // Track the maximum extent needed for the constants buffer.
+          // Constants are packed at their kernarg offsets within the buffer.
+          constants_size = parameters[parameter_base + j].offset +
+                           parameters[parameter_base + j].size;
         }
         //}
         // src_offset += parameter->size;
@@ -264,7 +265,7 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
         // }
         src_offset += parameter->size;
         buffer_size = src_offset;
-        
+
         // Track per-kernel constants size based on actual parameter extent
         size_t param_extent = parameter->offset + parameter->size;
         if (param_extent > this_kernel_constants_size) {
@@ -284,7 +285,7 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
       this_kernel_constants_size = export_constant_bytes;
     }
     parameter_info->constant_bytes = this_kernel_constants_size;
-    
+
     // Advance to next symbol's ops.
     parameter_base += parameter_count;
     current_ops += copy_count + resolve_count;
@@ -331,9 +332,8 @@ iree_status_t iree_hal_streaming_module_create_from_memory(
   // everything here and only forward a raw ELF (or native flatbuffer) to
   // the HAL executable cache, which knows how to deal with just those two.
   iree_const_byte_span_t executable_data = image;
-  const bool try_fat_unwrap =
-      context->device_entry != NULL &&
-      iree_hal_streaming_fat_binary_is_supported(image);
+  const bool try_fat_unwrap = context->device_entry != NULL &&
+                              iree_hal_streaming_fat_binary_is_supported(image);
   iree_status_t status = iree_ok_status();
   if (try_fat_unwrap) {
     iree_string_view_t target_arch =
@@ -585,4 +585,3 @@ iree_status_t iree_hal_streaming_module_global(
   if (out_size) *out_size = symbol->size_bytes;
   return iree_ok_status();
 }
-

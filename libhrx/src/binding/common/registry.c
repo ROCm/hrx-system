@@ -578,7 +578,7 @@ static iree_status_t iree_hal_streaming_context_symbol_map_prepare_module(
       iree_string_view_t registered_name =
           iree_make_cstring_view(registration->symbols[i].device_name);
       void* symbol_host_ptr = registration->symbols[i].host_pointer;
-      
+
       // Find the corresponding compiled symbol in the module by name.
       iree_hal_streaming_symbol_t* symbol = NULL;
       for (iree_host_size_t j = 0; j < entry->module->symbol_count; ++j) {
@@ -590,9 +590,13 @@ static iree_status_t iree_hal_streaming_context_symbol_map_prepare_module(
       }
       if (!symbol) {
         // Registered symbol not found - log a warning but don't fail.
-        // Some PyTorch modules may register functions that aren't in the fat binary.
-        fprintf(stderr, "[WARN] registered symbol `%.*s` not found in module with %zu symbols\n",
-                (int)registered_name.size, registered_name.data, entry->module->symbol_count);
+        // Some PyTorch modules may register functions that aren't in the fat
+        // binary.
+        fprintf(stderr,
+                "[WARN] registered symbol `%.*s` not found in module with %zu "
+                "symbols\n",
+                (int)registered_name.size, registered_name.data,
+                entry->module->symbol_count);
         // Skip this symbol and continue with the rest.
         continue;
       }
@@ -740,7 +744,10 @@ iree_status_t iree_hal_streaming_context_symbol_map_lookup(
                                                        host_pointer);
   if (!registration) {
     // Not found - return identity.
-    fprintf(stderr, "[WARN] Symbol %p not found in global registry, returning identity\n", host_pointer);
+    fprintf(
+        stderr,
+        "[WARN] Symbol %p not found in global registry, returning identity\n",
+        host_pointer);
     *out_symbol = (iree_hal_streaming_symbol_t*)host_pointer;
     return iree_ok_status();
   }
@@ -774,7 +781,9 @@ iree_status_t iree_hal_streaming_context_symbol_map_lookup(
   }
 
   // Symbol not found even after loading module (shouldn't happen).
-  fprintf(stderr, "[WARN] Symbol %p (name=%s) not found in hash table after prepare_module\n", 
+  fprintf(stderr,
+          "[WARN] Symbol %p (name=%s) not found in hash table after "
+          "prepare_module\n",
           host_pointer, registration->device_name);
   *out_symbol = (iree_hal_streaming_symbol_t*)host_pointer;
   return iree_ok_status();

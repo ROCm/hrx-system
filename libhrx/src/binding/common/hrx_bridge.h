@@ -11,11 +11,10 @@
 #ifndef HRX_STREAMING_BRIDGE_H_
 #define HRX_STREAMING_BRIDGE_H_
 
-#include "hrx_runtime.h"
-
-#include "iree/base/api.h"
-
 #include <string.h>
+
+#include "hrx_runtime.h"
+#include "iree/base/api.h"
 
 //===----------------------------------------------------------------------===//
 // Status bridging: hrx_status_t <-> iree_status_t
@@ -38,7 +37,7 @@
 static inline iree_status_t hrx_to_iree_status(hrx_status_t s) {
   if (hrx_status_is_ok(s)) return iree_ok_status();
   iree_status_code_t code = (iree_status_code_t)hrx_status_code(s);
-  char* message_buf = NULL;
+  char *message_buf = NULL;
   size_t message_len = 0;
   hrx_status_t to_str_status =
       hrx_status_to_string(s, &message_buf, &message_len);
@@ -117,8 +116,8 @@ static inline iree_status_t hrx_buffer_create_from_hal(
     hrx_memory_type_t mem_type, size_t size, void *mapped_ptr,
     hrx_buffer_t *out_buffer) {
   hrx_buffer_s *buf = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-      iree_allocator_system(), sizeof(*buf), (void **)&buf));
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(iree_allocator_system(),
+                                             sizeof(*buf), (void **)&buf));
   memset(buf, 0, sizeof(*buf));
   iree_atomic_ref_count_init(&buf->ref_count);
   buf->hal_buffer = hal_buffer;
@@ -132,4 +131,4 @@ static inline iree_status_t hrx_buffer_create_from_hal(
   return iree_ok_status();
 }
 
-#endif // HRX_STREAMING_BRIDGE_H_
+#endif  // HRX_STREAMING_BRIDGE_H_

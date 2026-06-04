@@ -10,10 +10,10 @@
 #include <random>
 #include <vector>
 
-#include "iree/base/api.h"
-#include "iree/testing/benchmark.h"
 #include "buffer_table.h"
 #include "hrx_internal.h"
+#include "iree/base/api.h"
+#include "iree/testing/benchmark.h"
 
 using iree_hal_streaming_deviceptr_t = uint64_t;
 using iree_hal_streaming_any_ptr_t = uint64_t;
@@ -33,7 +33,6 @@ struct iree_hal_streaming_buffer_t {
   // Padding to make allocation pattern and cache impacts a bit more realistic.
   uint64_t padding[5];
 };
-
 
 static iree_status_t BufferTableStatus(hrx_status_t status) {
   if (hrx_status_is_ok(status)) return iree_ok_status();
@@ -64,9 +63,9 @@ static void iree_hal_streaming_buffer_table_free(
 static iree_status_t iree_hal_streaming_buffer_table_insert(
     iree_hal_streaming_buffer_table_t* table,
     iree_hal_streaming_buffer_t* buffer) {
-  return BufferTableStatus(hrx_buffer_table_insert(
-      table, buffer->device_ptr, buffer->host_ptr, buffer->size,
-      (hrx_buffer_t)buffer, nullptr));
+  return BufferTableStatus(
+      hrx_buffer_table_insert(table, buffer->device_ptr, buffer->host_ptr,
+                              buffer->size, (hrx_buffer_t)buffer, nullptr));
 }
 
 static iree_status_t iree_hal_streaming_buffer_table_remove(
@@ -88,9 +87,8 @@ static iree_status_t iree_hal_streaming_buffer_table_lookup_range(
     iree_hal_streaming_buffer_table_t* table, uint64_t any_ptr, size_t size,
     iree_hal_streaming_buffer_t** out_buffer) {
   hrx_buffer_t buffer = nullptr;
-  iree_status_t status = BufferTableStatus(
-      hrx_buffer_table_find_range(table, any_ptr, size, &buffer, nullptr,
-                                  nullptr));
+  iree_status_t status = BufferTableStatus(hrx_buffer_table_find_range(
+      table, any_ptr, size, &buffer, nullptr, nullptr));
   if (out_buffer) *out_buffer = (iree_hal_streaming_buffer_t*)buffer;
   return status;
 }

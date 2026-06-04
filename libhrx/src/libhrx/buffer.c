@@ -232,16 +232,16 @@ hrx_status_t hrx_buffer_get_size(hrx_buffer_t buffer, size_t* size) {
   return hrx_ok_status();
 }
 
-hrx_status_t hrx_host_memory_register(hrx_device_t device, void *host_ptr,
+hrx_status_t hrx_host_memory_register(hrx_device_t device, void* host_ptr,
                                       size_t size, uint32_t flags) {
   (void)flags;
   if (!device || !host_ptr || size == 0) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "NULL argument");
   }
 
-  hrx_buffer_s *buf = NULL;
+  hrx_buffer_s* buf = NULL;
   iree_status_t alloc_s = iree_allocator_malloc(
-      iree_allocator_system(), sizeof(hrx_buffer_s), (void **)&buf);
+      iree_allocator_system(), sizeof(hrx_buffer_s), (void**)&buf);
   if (!iree_status_is_ok(alloc_s)) {
     return hrx_status_from_iree(alloc_s);
   }
@@ -254,8 +254,8 @@ hrx_status_t hrx_host_memory_register(hrx_device_t device, void *host_ptr,
   buf->hal_buffer = NULL;
 
   uint64_t key = (uint64_t)(uintptr_t)host_ptr;
-  hrx_status_t status = hrx_buffer_table_insert(
-      &device->buffer_table, key, host_ptr, size, buf, NULL);
+  hrx_status_t status = hrx_buffer_table_insert(&device->buffer_table, key,
+                                                host_ptr, size, buf, NULL);
   if (!hrx_status_is_ok(status)) {
     iree_allocator_free(iree_allocator_system(), buf);
     return status;
@@ -263,7 +263,7 @@ hrx_status_t hrx_host_memory_register(hrx_device_t device, void *host_ptr,
   return hrx_ok_status();
 }
 
-hrx_status_t hrx_host_memory_unregister(hrx_device_t device, void *host_ptr) {
+hrx_status_t hrx_host_memory_unregister(hrx_device_t device, void* host_ptr) {
   if (!device || !host_ptr) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "NULL argument");
   }
@@ -282,8 +282,8 @@ hrx_status_t hrx_host_memory_unregister(hrx_device_t device, void *host_ptr) {
   return hrx_ok_status();
 }
 
-hrx_status_t hrx_buffer_lookup(hrx_device_t device, const void *device_ptr,
-                               hrx_buffer_t *buffer, size_t *offset) {
+hrx_status_t hrx_buffer_lookup(hrx_device_t device, const void* device_ptr,
+                               hrx_buffer_t* buffer, size_t* offset) {
   if (!device || !device_ptr) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "NULL argument");
   }

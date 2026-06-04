@@ -391,46 +391,46 @@ static hipError_t wrap_hipEventElapsedTime(float* ms, hipEvent_t start,
   return err;
 }
 
-static hipError_t wrap_hipModuleLoad(hipModule_t *module, const char *fname) {
+static hipError_t wrap_hipModuleLoad(hipModule_t* module, const char* fname) {
   hipError_t err = g_real->hipModuleLoad(module, fname);
   log_msg(2, "hipModuleLoad(file=%s) -> module=%p, ret=%d",
-          fname ? fname : "(null)", module ? (void *)*module : NULL, err);
+          fname ? fname : "(null)", module ? (void*)*module : NULL, err);
   return err;
 }
 
-static hipError_t wrap_hipModuleLoadData(hipModule_t *module,
-                                         const void *image) {
+static hipError_t wrap_hipModuleLoadData(hipModule_t* module,
+                                         const void* image) {
   hipError_t err = g_real->hipModuleLoadData(module, image);
   log_msg(2, "hipModuleLoadData(image=%p) -> module=%p, ret=%d", image,
-          module ? (void *)*module : NULL, err);
+          module ? (void*)*module : NULL, err);
   return err;
 }
 
 static hipError_t wrap_hipModuleUnload(hipModule_t module) {
   hipError_t err = g_real->hipModuleUnload(module);
-  log_msg(2, "hipModuleUnload(module=%p) -> ret=%d", (void *)module, err);
+  log_msg(2, "hipModuleUnload(module=%p) -> ret=%d", (void*)module, err);
   return err;
 }
 
-static hipError_t wrap_hipModuleGetFunction(hipFunction_t *function,
+static hipError_t wrap_hipModuleGetFunction(hipFunction_t* function,
                                             hipModule_t module,
-                                            const char *kname) {
+                                            const char* kname) {
   hipError_t err = g_real->hipModuleGetFunction(function, module, kname);
   log_msg(2, "hipModuleGetFunction(module=%p, name=%s) -> function=%p, ret=%d",
-          (void *)module, kname ? kname : "(null)",
-          function ? (void *)*function : NULL, err);
+          (void*)module, kname ? kname : "(null)",
+          function ? (void*)*function : NULL, err);
   return err;
 }
 
-static hipError_t wrap_hipModuleGetGlobal(hipDeviceptr_t *dptr, size_t *bytes,
+static hipError_t wrap_hipModuleGetGlobal(hipDeviceptr_t* dptr, size_t* bytes,
                                           hipModule_t module,
-                                          const char *name) {
+                                          const char* name) {
   hipError_t err = g_real->hipModuleGetGlobal(dptr, bytes, module, name);
   log_msg(2,
           "hipModuleGetGlobal(module=%p, name=%s) -> dptr=%p, bytes=%zu, "
           "ret=%d",
-          (void *)module, name ? name : "(null)",
-          dptr ? (void *)(uintptr_t)*dptr : NULL, bytes ? *bytes : 0, err);
+          (void*)module, name ? name : "(null)",
+          dptr ? (void*)(uintptr_t)*dptr : NULL, bytes ? *bytes : 0, err);
   return err;
 }
 

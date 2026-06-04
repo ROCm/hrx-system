@@ -705,8 +705,7 @@ static iree_status_t iree_hal_streaming_graph_record_partition(
         status = iree_hal_command_buffer_dispatch(
             command_buffer, symbol->executable,
             iree_hal_executable_function_from_index(symbol->export_ordinal),
-            config,
-            attrs->constants, attrs->bindings, flags);
+            config, attrs->constants, attrs->bindings, flags);
         break;
       }
       case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEMCPY: {
@@ -1158,9 +1157,8 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
             signal_semaphores, ptrs.attrs->dispatch.executable,
             iree_hal_executable_function_from_index(
                 (uint32_t)ptrs.attrs->dispatch.entry_point),
-            ptrs.attrs->dispatch.config,
-            ptrs.attrs->dispatch.constants, bindings_list,
-            ptrs.attrs->dispatch.flags);
+            ptrs.attrs->dispatch.config, ptrs.attrs->dispatch.constants,
+            bindings_list, ptrs.attrs->dispatch.flags);
         break;
       }
       case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_EXECUTE: {

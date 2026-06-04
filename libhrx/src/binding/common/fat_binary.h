@@ -52,8 +52,7 @@ typedef struct iree_hal_streaming_fat_binary_extract_t {
 // Cheap sniff: returns true iff |data| starts with a magic that the
 // streaming-layer fat-binary unpacker knows how to crack open.
 // Raw ELF also counts as "supported" (trivially passthrough).
-bool iree_hal_streaming_fat_binary_is_supported(
-    iree_const_byte_span_t data);
+bool iree_hal_streaming_fat_binary_is_supported(iree_const_byte_span_t data);
 
 // Unwraps a fat-binary / offload-bundle / CCOB / raw ELF blob and returns
 // every contained ELF whose bundle triple matches |target_arch| (a base

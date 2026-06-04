@@ -87,11 +87,8 @@ iree_status_t iree_hal_streaming_device_name(
 }
 
 iree_status_t iree_hal_streaming_device_get_string_property(
-    iree_hal_streaming_device_ordinal_t ordinal,
-    const char* category,
-    const char* key,
-    char* value,
-    iree_host_size_t value_size) {
+    iree_hal_streaming_device_ordinal_t ordinal, const char* category,
+    const char* key, char* value, iree_host_size_t value_size) {
   IREE_ASSERT_ARGUMENT(category);
   IREE_ASSERT_ARGUMENT(key);
   IREE_ASSERT_ARGUMENT(value);
@@ -312,9 +309,8 @@ iree_status_t iree_hal_streaming_device_get_or_create_primary_context(
         .location_type = 1,  // device
         .location_id = (int)device_ordinal,
     };
-    status = HRX_CALL(
-        hrx_mem_pool_create(device->hrx_device, &props,
-                             &device->default_mem_pool));
+    status = HRX_CALL(hrx_mem_pool_create(device->hrx_device, &props,
+                                          &device->default_mem_pool));
   }
 
   if (iree_status_is_ok(status)) {
@@ -362,9 +358,8 @@ iree_status_t iree_hal_streaming_device_retain_primary_context(
           .location_type = 1,  // device
           .location_id = (int)device_ordinal,
       };
-      status = HRX_CALL(
-          hrx_mem_pool_create(device->hrx_device, &props,
-                               &device->default_mem_pool));
+      status = HRX_CALL(hrx_mem_pool_create(device->hrx_device, &props,
+                                            &device->default_mem_pool));
       if (iree_status_is_ok(status)) {
         device->current_mem_pool = device->default_mem_pool;
         hrx_mem_pool_retain(device->current_mem_pool);

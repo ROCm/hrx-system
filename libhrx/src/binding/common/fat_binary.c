@@ -148,8 +148,7 @@ static bool hrx_fat_is_wrapper(iree_const_byte_span_t data) {
   }
   uint32_t magic;
   memcpy(&magic, data.data, sizeof(magic));
-  return magic == HRX_HIP_FAT_MAGIC_HIPF ||
-         magic == HRX_HIP_FAT_MAGIC_BA55FACE;
+  return magic == HRX_HIP_FAT_MAGIC_HIPF || magic == HRX_HIP_FAT_MAGIC_BA55FACE;
 }
 
 bool iree_hal_streaming_fat_binary_is_supported(iree_const_byte_span_t data) {
@@ -186,12 +185,13 @@ static iree_status_t hrx_fat_validate_elf(iree_const_byte_span_t elf,
                             "ELF machine must be AMDGPU (%u), got %u",
                             HRX_EM_AMDGPU, h->machine);
   }
-  iree_host_size_t size = (iree_host_size_t)(h->shoff + h->shentsize * h->shnum);
+  iree_host_size_t size =
+      (iree_host_size_t)(h->shoff + h->shentsize * h->shnum);
   if (elf.data_length != 0 && size > elf.data_length) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "ELF claims size %" PRIhsz " but only %" PRIhsz " bytes available",
-        size, elf.data_length);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "ELF claims size %" PRIhsz " but only %" PRIhsz
+                            " bytes available",
+                            size, elf.data_length);
   }
   if (out_size) *out_size = size;
   return iree_ok_status();
@@ -328,8 +328,8 @@ static iree_status_t hrx_fat_extract_push(
         extract->match_capacity ? extract->match_capacity * 2 : 4;
     void* new_matches = NULL;
     IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-        extract->host_allocator,
-        new_capacity * sizeof(*extract->matches), &new_matches));
+        extract->host_allocator, new_capacity * sizeof(*extract->matches),
+        &new_matches));
     if (extract->matches) {
       memcpy(new_matches, extract->matches,
              extract->match_count * sizeof(*extract->matches));
@@ -373,10 +373,9 @@ static iree_status_t hrx_fat_extract_from_bundle(
     remaining -= sizeof(entry);
 
     if (remaining < entry.triple_size) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "offload bundle entry[%" PRIu64
-                              "] triple truncated",
-                              i);
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "offload bundle entry[%" PRIu64 "] triple truncated", i);
     }
     iree_string_view_t triple =
         iree_make_string_view((const char*)p, entry.triple_size);
@@ -391,9 +390,9 @@ static iree_status_t hrx_fat_extract_from_bundle(
     }
     if (!hrx_fat_triple_matches(triple, target_arch)) continue;
 
-    iree_const_byte_span_t entry_bytes = iree_make_const_byte_span(
-        bundle.data + (iree_host_size_t)entry.offset,
-        (iree_host_size_t)entry.size);
+    iree_const_byte_span_t entry_bytes =
+        iree_make_const_byte_span(bundle.data + (iree_host_size_t)entry.offset,
+                                  (iree_host_size_t)entry.size);
     if (!hrx_fat_is_elf(entry_bytes)) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "offload bundle entry[%" PRIu64
@@ -419,8 +418,8 @@ static iree_status_t hrx_fat_extract_concatenated_elves(
   iree_host_size_t offset = 0;
   const iree_host_size_t initial_match_count = extract->match_count;
   while (offset + 4 <= data.data_length) {
-    iree_const_byte_span_t remaining =
-        iree_make_const_byte_span(data.data + offset, data.data_length - offset);
+    iree_const_byte_span_t remaining = iree_make_const_byte_span(
+        data.data + offset, data.data_length - offset);
     if (!hrx_fat_is_elf(remaining)) {
       // Allow zero padding between images.
       if (data.data[offset] == 0) {
@@ -469,7 +468,8 @@ static iree_status_t hrx_fat_extract_from_ccob(
   if (method == HRX_CCOB_METHOD_ZLIB) {
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                             "CCOB v%u zlib compression is not supported "
-                            "(%" PRIu64 " bytes uncompressed); recompile with "
+                            "(%" PRIu64
+                            " bytes uncompressed); recompile with "
                             "zstd or provide an uncompressed bundle",
                             version, uncompressed_size);
   }
@@ -490,9 +490,9 @@ static iree_status_t hrx_fat_extract_from_ccob(
   // Allocate the decompression target upfront; the header tells us the
   // exact size so a single shot is enough.
   void* out_buffer = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-      extract->host_allocator, (iree_host_size_t)uncompressed_size,
-      &out_buffer));
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc(extract->host_allocator,
+                            (iree_host_size_t)uncompressed_size, &out_buffer));
   extract->owned_buffer = out_buffer;
   extract->owned_buffer_size = (iree_host_size_t)uncompressed_size;
 
@@ -505,8 +505,7 @@ static iree_status_t hrx_fat_extract_from_ccob(
   }
   if (actual != (size_t)uncompressed_size) {
     return iree_make_status(IREE_STATUS_DATA_LOSS,
-                            "zstd size mismatch: expected %" PRIu64
-                            " got %zu",
+                            "zstd size mismatch: expected %" PRIu64 " got %zu",
                             uncompressed_size, actual);
   }
 
@@ -550,7 +549,8 @@ iree_status_t iree_hal_streaming_fat_binary_extract_for_target(
 
   // Normalize the device-supplied arch (e.g. "gfx942:sramecc+:xnack-")
   // to a bare "gfxNNN" for apples-to-apples comparison with bundle triples.
-  iree_string_view_t normalized_target = hrx_fat_strip_feature_suffix(target_arch);
+  iree_string_view_t normalized_target =
+      hrx_fat_strip_feature_suffix(target_arch);
 
   // Peel the HIP fat-binary wrapper if present.
   iree_const_byte_span_t inner = data;
@@ -583,8 +583,8 @@ iree_status_t iree_hal_streaming_fat_binary_extract_for_target(
     if (iree_status_is_ok(status)) {
       iree_const_byte_span_t tight =
           iree_make_const_byte_span(inner.data, elf_size);
-      status = hrx_fat_extract_push(out_extract, tight,
-                                    iree_string_view_empty());
+      status =
+          hrx_fat_extract_push(out_extract, tight, iree_string_view_empty());
     }
   } else {
     const uint8_t* head =

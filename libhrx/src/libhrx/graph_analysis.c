@@ -5,7 +5,6 @@
 // detection. Pure algorithm with no binding-layer dependencies.
 
 #include "hrx_internal.h"
-
 #include "iree/base/internal/math.h"
 
 #ifndef IREE_PREFETCH_RO
@@ -33,9 +32,9 @@
 //===----------------------------------------------------------------------===//
 
 static bool hrx_graph_prepare_nodes(hrx_graph_node_block_t* node_blocks,
-                                     iree_host_size_t node_count,
-                                     hrx_graph_sort_node_t* sort_nodes,
-                                     uint32_t* node_index_map) {
+                                    iree_host_size_t node_count,
+                                    hrx_graph_sort_node_t* sort_nodes,
+                                    uint32_t* node_index_map) {
   uint32_t index = 0;
   for (hrx_graph_node_block_t* block = node_blocks; block;
        block = block->next) {
@@ -81,9 +80,9 @@ static bool hrx_graph_prepare_nodes(hrx_graph_node_block_t* node_blocks,
 //===----------------------------------------------------------------------===//
 
 static iree_status_t hrx_graph_topological_sort(
-    hrx_graph_sort_node_t* nodes, uint32_t node_count,
-    uint32_t* node_index_map, hrx_graph_edge_t* additional_edges,
-    iree_arena_allocator_t* arena, bool is_already_sorted) {
+    hrx_graph_sort_node_t* nodes, uint32_t node_count, uint32_t* node_index_map,
+    hrx_graph_edge_t* additional_edges, iree_arena_allocator_t* arena,
+    bool is_already_sorted) {
   if (is_already_sorted && !additional_edges) {
     for (uint32_t i = 0; i < node_count; ++i) {
       uint32_t max_dep = 0;
@@ -216,8 +215,8 @@ typedef struct hrx_uint32x2_t {
 } hrx_uint32x2_t;
 
 static hrx_uint32x2_t hrx_graph_partition_with_streams(
-    hrx_graph_sort_node_t* nodes, uint32_t node_count,
-    uint32_t* node_index_map, hrx_graph_partition_t* partitions) {
+    hrx_graph_sort_node_t* nodes, uint32_t node_count, uint32_t* node_index_map,
+    hrx_graph_partition_t* partitions) {
   uint32_t partition_count = 0;
   uint32_t block_count = 0;
 
@@ -257,8 +256,7 @@ static hrx_uint32x2_t hrx_graph_partition_with_streams(
       active_streams = 0;
 
       uint32_t partition_size = 0;
-      while (i < node_count &&
-             partition_size < HRX_GRAPH_MAX_PARTITION_SIZE &&
+      while (i < node_count && partition_size < HRX_GRAPH_MAX_PARTITION_SIZE &&
              hrx_graph_node_is_recordable(nodes[i].type)) {
         bool deps_satisfied = true;
         for (uint32_t j = 0; j < nodes[i].node->dependency_count; ++j) {
@@ -354,10 +352,11 @@ static hrx_uint32x2_t hrx_graph_partition_with_streams(
 // Main entry point
 //===----------------------------------------------------------------------===//
 
-iree_status_t hrx_graph_schedule_nodes(
-    hrx_graph_node_block_t* node_blocks, iree_host_size_t node_count,
-    hrx_graph_edge_t* additional_edges, iree_arena_allocator_t* arena,
-    hrx_graph_schedule_t* out_schedule) {
+iree_status_t hrx_graph_schedule_nodes(hrx_graph_node_block_t* node_blocks,
+                                       iree_host_size_t node_count,
+                                       hrx_graph_edge_t* additional_edges,
+                                       iree_arena_allocator_t* arena,
+                                       hrx_graph_schedule_t* out_schedule) {
   IREE_ASSERT_ARGUMENT(out_schedule);
 
   if (node_count == 0) {
@@ -371,8 +370,7 @@ iree_status_t hrx_graph_schedule_nodes(
   hrx_graph_sort_node_t* sorted_nodes = NULL;
   const iree_host_size_t sorted_nodes_size = node_count * sizeof(*sorted_nodes);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_arena_allocate(arena, sorted_nodes_size,
-                              (void**)&sorted_nodes));
+      z0, iree_arena_allocate(arena, sorted_nodes_size, (void**)&sorted_nodes));
 
   uint32_t* node_index_map = NULL;
   const iree_host_size_t map_size = node_count * sizeof(*node_index_map);
@@ -380,23 +378,21 @@ iree_status_t hrx_graph_schedule_nodes(
       z0, iree_arena_allocate(arena, map_size, (void**)&node_index_map));
 
   const bool is_sorted = hrx_graph_prepare_nodes(node_blocks, node_count,
-                                                   sorted_nodes,
-                                                   node_index_map);
+                                                 sorted_nodes, node_index_map);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, is_sorted);
 
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, hrx_graph_topological_sort(sorted_nodes, node_count, node_index_map,
-                                      additional_edges, arena, is_sorted));
+                                     additional_edges, arena, is_sorted));
 
   hrx_graph_partition_t* partitions = NULL;
   const iree_host_size_t partitions_size = node_count * sizeof(*partitions);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0,
-      iree_arena_allocate(arena, partitions_size, (void**)&partitions));
+      z0, iree_arena_allocate(arena, partitions_size, (void**)&partitions));
 
   const hrx_uint32x2_t partition_block_counts =
-      hrx_graph_partition_with_streams(sorted_nodes, node_count,
-                                        node_index_map, partitions);
+      hrx_graph_partition_with_streams(sorted_nodes, node_count, node_index_map,
+                                       partitions);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, partition_block_counts.values[0]);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, partition_block_counts.values[1]);
 

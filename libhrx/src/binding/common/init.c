@@ -53,10 +53,9 @@ static iree_status_t iree_hal_streaming_query_device_info(
   //   gfx942 -> 9.4, gfx950 -> 9.5
   //   gfx1030 -> 10.3, gfx1100 -> 11.0
   char arch_name[64] = {0};
-  iree_status_t arch_status =
-      hrx_to_iree_status(hrx_device_get_property(device->hrx_device,
-                                                 HRX_DEVICE_PROPERTY_ARCHITECTURE,
-                                                 arch_name, sizeof(arch_name)));
+  iree_status_t arch_status = hrx_to_iree_status(hrx_device_get_property(
+      device->hrx_device, HRX_DEVICE_PROPERTY_ARCHITECTURE, arch_name,
+      sizeof(arch_name)));
   if (iree_status_is_ok(arch_status) && arch_name[0] != '\0') {
     // Parse "gfxNNNN" to extract major.minor.
     // gfx9xx -> major=9, minor=x (e.g., gfx942 -> 9.4)
@@ -94,9 +93,9 @@ static iree_status_t iree_hal_streaming_query_device_info(
 
   // Query memory info from the HAL device.
   int64_t total_memory = 0;
-  iree_status_t status = iree_hal_device_query_i64(
-      device->hal_device, IREE_SV("hal.device"), IREE_SV("memory.total"),
-      &total_memory);
+  iree_status_t status =
+      iree_hal_device_query_i64(device->hal_device, IREE_SV("hal.device"),
+                                IREE_SV("memory.total"), &total_memory);
   if (iree_status_is_ok(status) && total_memory > 0) {
     device->total_memory = (iree_device_size_t)total_memory;
   } else {
@@ -129,9 +128,8 @@ static iree_status_t iree_hal_streaming_query_device_info(
   // Query warp/wavefront size from the HAL device.
   // AMD GPUs use 64, NVIDIA uses 32, RDNA may use 32 or 64.
   int64_t warp_size = 0;
-  status = iree_hal_device_query_i64(
-      device->hal_device, IREE_SV("hal.device"), IREE_SV("warp_size"),
-      &warp_size);
+  status = iree_hal_device_query_i64(device->hal_device, IREE_SV("hal.device"),
+                                     IREE_SV("warp_size"), &warp_size);
   if (iree_status_is_ok(status) && warp_size > 0) {
     device->warp_size = (uint32_t)warp_size;
   } else {
@@ -146,12 +144,12 @@ static iree_status_t iree_hal_streaming_query_device_info(
     // CU-to-WGP compatibility adjustment below.
     device->warp_size = 32;
   }
-  
+
   // Query multiprocessor (compute unit) count from the device.
   int64_t mp_count = 0;
-  status = iree_hal_device_query_i64(
-      device->hal_device, IREE_SV("hal.dispatch"), IREE_SV("concurrency"),
-      &mp_count);
+  status =
+      iree_hal_device_query_i64(device->hal_device, IREE_SV("hal.dispatch"),
+                                IREE_SV("concurrency"), &mp_count);
   if (iree_status_is_ok(status) && mp_count > 0) {
     uint32_t multiprocessor_count = (uint32_t)mp_count;
     // IREE/HSA reports raw compute units, while HIP reports RDNA devices in
@@ -193,8 +191,7 @@ static iree_status_t iree_hal_streaming_query_device_info(
 
 // Initializes a single device from a pyre device handle.
 static iree_status_t iree_hal_streaming_initialize_device(
-    iree_hal_streaming_device_registry_t* registry,
-    hrx_device_t hrx_dev,
+    iree_hal_streaming_device_registry_t* registry, hrx_device_t hrx_dev,
     iree_hal_streaming_device_t* out_device) {
   IREE_ASSERT_ARGUMENT(registry);
   IREE_ASSERT_ARGUMENT(hrx_dev);
@@ -294,8 +291,8 @@ static void iree_hal_streaming_deinitialize_device(
   // Get allocator from global registry for freeing string copies.
   iree_hal_streaming_device_registry_t* registry =
       iree_hal_streaming_device_registry();
-  iree_allocator_t host_allocator = registry ? registry->host_allocator
-                                             : iree_allocator_system();
+  iree_allocator_t host_allocator =
+      registry ? registry->host_allocator : iree_allocator_system();
 
   // Free the device name and path strings that were allocated during
   // initialization.
@@ -488,8 +485,7 @@ iree_status_t iree_hal_streaming_init_global(
 
   // Initialize pyre GPU subsystem (idempotent — handles HSA init,
   // driver registration, device enumeration).
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, HRX_CALL(hrx_gpu_initialize(0)));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, HRX_CALL(hrx_gpu_initialize(0)));
 
   // Create global registry.
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
@@ -518,8 +514,7 @@ iree_status_t iree_hal_streaming_init_global(
 
     for (int i = 0; i < gpu_count && i < IREE_HAL_STREAMING_MAX_DEVICES; ++i) {
       hrx_device_t hrx_dev = NULL;
-      iree_status_t dev_status =
-          HRX_CALL(hrx_gpu_device_get(i, &hrx_dev));
+      iree_status_t dev_status = HRX_CALL(hrx_gpu_device_get(i, &hrx_dev));
       if (!iree_status_is_ok(dev_status)) {
         iree_status_ignore(dev_status);
         continue;
@@ -529,8 +524,8 @@ iree_status_t iree_hal_streaming_init_global(
           &device_registry->devices[device_registry->device_count];
       device->ordinal = device_registry->device_count;
 
-      dev_status = iree_hal_streaming_initialize_device(
-          device_registry, hrx_dev, device);
+      dev_status = iree_hal_streaming_initialize_device(device_registry,
+                                                        hrx_dev, device);
       if (!iree_status_is_ok(dev_status)) {
         iree_status_ignore(dev_status);
         continue;

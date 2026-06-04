@@ -11,7 +11,8 @@
 // IREE_PREFETCH_RO was removed from main IREE. Provide a fallback definition.
 #ifndef IREE_PREFETCH_RO
 #if defined(__GNUC__) || defined(__clang__)
-#define IREE_PREFETCH_RO(ptr, locality) __builtin_prefetch((ptr), /*rw=*/0, locality)
+#define IREE_PREFETCH_RO(ptr, locality) \
+  __builtin_prefetch((ptr), /*rw=*/0, locality)
 #else
 #define IREE_PREFETCH_RO(ptr, locality) ((void)0)
 #endif

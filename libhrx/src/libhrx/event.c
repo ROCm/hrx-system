@@ -6,26 +6,25 @@
 // on one stream and waiting for it on another. Each event owns a dedicated
 // semaphore that is signaled when the recorded stream timepoint completes.
 
-#include "hrx_internal.h"
-
 #include <stdlib.h>
+
+#include "hrx_internal.h"
 
 //===----------------------------------------------------------------------===//
 // Lifecycle
 //===----------------------------------------------------------------------===//
 
-hrx_status_t hrx_event_create(hrx_device_t device,
-                                hrx_event_flags_t flags,
-                                hrx_event_t* out_event) {
+hrx_status_t hrx_event_create(hrx_device_t device, hrx_event_flags_t flags,
+                              hrx_event_t* out_event) {
   if (!device || !out_event) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                            "device or out_event is NULL");
+                           "device or out_event is NULL");
   }
 
   hrx_event_s* event = (hrx_event_s*)calloc(1, sizeof(hrx_event_s));
   if (!event) {
     return hrx_make_status(HRX_STATUS_OUT_OF_MEMORY,
-                            "failed to allocate event");
+                           "failed to allocate event");
   }
 
   iree_atomic_ref_count_init(&event->ref_count);
@@ -77,7 +76,7 @@ hrx_status_t hrx_event_release(hrx_event_t event) {
 hrx_status_t hrx_event_record(hrx_event_t event, hrx_stream_t stream) {
   if (!event || !stream) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                            "event or stream is NULL");
+                           "event or stream is NULL");
   }
 
   event->record_time_ns = (int64_t)iree_time_now();
@@ -135,7 +134,7 @@ hrx_status_t hrx_event_record(hrx_event_t event, hrx_stream_t stream) {
 hrx_status_t hrx_event_query(hrx_event_t event, bool* complete) {
   if (!event || !complete) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                            "event or complete is NULL");
+                           "event or complete is NULL");
   }
 
   uint64_t current = 0;
@@ -158,16 +157,16 @@ hrx_status_t hrx_event_synchronize(hrx_event_t event) {
 //===----------------------------------------------------------------------===//
 
 hrx_status_t hrx_event_elapsed_time(hrx_event_t start, hrx_event_t stop,
-                                      float* ms) {
+                                    float* ms) {
   if (!start || !stop || !ms) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                            "start, stop, or ms is NULL");
+                           "start, stop, or ms is NULL");
   }
 
   if ((start->flags & HRX_EVENT_FLAG_DISABLE_TIMING) ||
       (stop->flags & HRX_EVENT_FLAG_DISABLE_TIMING)) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                            "cannot measure elapsed time with timing disabled");
+                           "cannot measure elapsed time with timing disabled");
   }
 
   if (start->record_time_ns == 0 || stop->record_time_ns == 0) {
@@ -182,14 +181,14 @@ hrx_status_t hrx_event_elapsed_time(hrx_event_t start, hrx_event_t stop,
   if (!hrx_status_is_ok(status)) return status;
   if (!start_done) {
     return hrx_make_status(HRX_STATUS_UNAVAILABLE,
-                            "start event has not completed");
+                           "start event has not completed");
   }
 
   status = hrx_event_query(stop, &stop_done);
   if (!hrx_status_is_ok(status)) return status;
   if (!stop_done) {
     return hrx_make_status(HRX_STATUS_UNAVAILABLE,
-                            "stop event has not completed");
+                           "stop event has not completed");
   }
 
   int64_t elapsed_ns = stop->record_time_ns - start->record_time_ns;
@@ -201,11 +200,10 @@ hrx_status_t hrx_event_elapsed_time(hrx_event_t start, hrx_event_t stop,
 // Stream wait event
 //===----------------------------------------------------------------------===//
 
-hrx_status_t hrx_stream_wait_event(hrx_stream_t stream,
-                                     hrx_event_t event) {
+hrx_status_t hrx_stream_wait_event(hrx_stream_t stream, hrx_event_t event) {
   if (!stream || !event) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                            "stream or event is NULL");
+                           "stream or event is NULL");
   }
 
   // Flush pending work before inserting the wait barrier.

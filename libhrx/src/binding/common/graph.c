@@ -14,11 +14,10 @@
 
 static void iree_hal_streaming_graph_destroy(iree_hal_streaming_graph_t *graph);
 
-iree_status_t
-iree_hal_streaming_graph_create(iree_hal_streaming_context_t *context,
-                                iree_hal_streaming_graph_flags_t flags,
-                                iree_allocator_t host_allocator,
-                                iree_hal_streaming_graph_t **out_graph) {
+iree_status_t iree_hal_streaming_graph_create(
+    iree_hal_streaming_context_t *context,
+    iree_hal_streaming_graph_flags_t flags, iree_allocator_t host_allocator,
+    iree_hal_streaming_graph_t **out_graph) {
   IREE_ASSERT_ARGUMENT(context);
   IREE_ASSERT_ARGUMENT(out_graph);
   *out_graph = NULL;
@@ -53,8 +52,8 @@ iree_hal_streaming_graph_create(iree_hal_streaming_context_t *context,
   return iree_ok_status();
 }
 
-static void
-iree_hal_streaming_graph_destroy(iree_hal_streaming_graph_t *graph) {
+static void iree_hal_streaming_graph_destroy(
+    iree_hal_streaming_graph_t *graph) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   // Reset the arena - this frees all nodes and arrays at once.
@@ -86,8 +85,8 @@ void iree_hal_streaming_graph_release(iree_hal_streaming_graph_t *graph) {
   }
 }
 
-iree_host_size_t
-iree_hal_streaming_graph_size(iree_hal_streaming_graph_t *graph) {
+iree_host_size_t iree_hal_streaming_graph_size(
+    iree_hal_streaming_graph_t *graph) {
   IREE_ASSERT_ARGUMENT(graph);
   return graph->node_count;
 }
@@ -123,8 +122,7 @@ static iree_status_t iree_hal_streaming_graph_allocate_node(
     iree_hal_streaming_graph_node_t **out_node, uint8_t **out_extra_data) {
   IREE_ASSERT_ARGUMENT(out_node);
   *out_node = NULL;
-  if (out_extra_data)
-    *out_extra_data = NULL;
+  if (out_extra_data) *out_extra_data = NULL;
 
   // Calculate total size needed.
   const iree_host_size_t node_size = sizeof(iree_hal_streaming_graph_node_t);
@@ -178,9 +176,8 @@ static iree_status_t iree_hal_streaming_allocate_node_block(
 }
 
 // Helper to add a node to the graph.
-static iree_status_t
-iree_hal_streaming_graph_add_node(iree_hal_streaming_graph_t *graph,
-                                  iree_hal_streaming_graph_node_t *node) {
+static iree_status_t iree_hal_streaming_graph_add_node(
+    iree_hal_streaming_graph_t *graph, iree_hal_streaming_graph_node_t *node) {
   // Assign unique index to the node that can be used to get the logical index
   // in the graph for use as dependency references.
   node->node_index = (uint32_t)graph->node_count;
@@ -190,7 +187,7 @@ iree_hal_streaming_graph_add_node(iree_hal_streaming_graph_t *graph,
       graph->current_node_block->count >= graph->current_node_block->capacity) {
     // Need a new block.
     const iree_host_size_t block_capacity =
-        graph->node_count < 64 ? 16 : 64; // Grow block size for larger graphs.
+        graph->node_count < 64 ? 16 : 64;  // Grow block size for larger graphs.
     iree_hal_streaming_node_block_t *new_block = NULL;
     IREE_RETURN_IF_ERROR(iree_hal_streaming_allocate_node_block(
         graph->arena_allocator, block_capacity, &new_block));
@@ -328,10 +325,10 @@ iree_status_t iree_hal_streaming_graph_add_kernel_node(
   attrs->bindings.count = symbol->parameters.binding_count;
   attrs->bindings.values =
       (iree_hal_buffer_ref_t *)(extra_data + constants_size);
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, iree_hal_streaming_unpack_parameters(
-                                            graph->context, &symbol->parameters,
-                                            params->buffer, constants,
-                                            &attrs->bindings));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_streaming_unpack_parameters(
+              graph->context, &symbol->parameters, params->buffer, constants,
+              &attrs->bindings));
 
   iree_status_t status = iree_hal_streaming_graph_add_node(graph, node);
   if (iree_status_is_ok(status) && out_node) {
@@ -474,8 +471,7 @@ iree_status_t iree_hal_streaming_graph_add_dependencies(
     iree_hal_streaming_graph_node_t **from_nodes,
     iree_hal_streaming_graph_node_t **to_nodes, iree_host_size_t count) {
   IREE_ASSERT_ARGUMENT(graph);
-  if (count == 0)
-    return iree_ok_status();
+  if (count == 0) return iree_ok_status();
   IREE_ASSERT_ARGUMENT(from_nodes);
   IREE_ASSERT_ARGUMENT(to_nodes);
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -553,9 +549,9 @@ iree_status_t iree_hal_streaming_graph_instantiate(
 // Stream capture internal functions
 //===----------------------------------------------------------------------===//
 
-iree_status_t
-iree_hal_streaming_begin_capture(iree_hal_streaming_stream_t *stream,
-                                 iree_hal_streaming_capture_mode_t mode) {
+iree_status_t iree_hal_streaming_begin_capture(
+    iree_hal_streaming_stream_t *stream,
+    iree_hal_streaming_capture_mode_t mode) {
   IREE_ASSERT_ARGUMENT(stream);
   IREE_TRACE_ZONE_BEGIN(z0);
 
@@ -592,16 +588,16 @@ iree_hal_streaming_begin_capture(iree_hal_streaming_stream_t *stream,
   // Set capture state.
   stream->capture_status = IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE;
   stream->capture_mode = mode;
-  stream->capture_id++; // Increment capture ID.
+  stream->capture_id++;  // Increment capture ID.
 
   iree_slim_mutex_unlock(&stream->mutex);
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
 }
 
-iree_status_t
-iree_hal_streaming_end_capture(iree_hal_streaming_stream_t *stream,
-                               iree_hal_streaming_graph_t **out_graph) {
+iree_status_t iree_hal_streaming_end_capture(
+    iree_hal_streaming_stream_t *stream,
+    iree_hal_streaming_graph_t **out_graph) {
   IREE_ASSERT_ARGUMENT(stream);
   IREE_TRACE_ZONE_BEGIN(z0);
 
@@ -658,9 +654,8 @@ iree_status_t iree_hal_streaming_capture_status(
   return iree_ok_status();
 }
 
-iree_status_t
-iree_hal_streaming_is_capturing(iree_hal_streaming_stream_t *stream,
-                                bool *out_is_capturing) {
+iree_status_t iree_hal_streaming_is_capturing(
+    iree_hal_streaming_stream_t *stream, bool *out_is_capturing) {
   IREE_ASSERT_ARGUMENT(stream);
   IREE_ASSERT_ARGUMENT(out_is_capturing);
 

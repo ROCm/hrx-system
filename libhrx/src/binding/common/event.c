@@ -12,11 +12,10 @@
 
 static void iree_hal_streaming_event_destroy(iree_hal_streaming_event_t *event);
 
-iree_status_t
-iree_hal_streaming_event_create(iree_hal_streaming_context_t *context,
-                                iree_hal_streaming_event_flags_t flags,
-                                iree_allocator_t host_allocator,
-                                iree_hal_streaming_event_t **out_event) {
+iree_status_t iree_hal_streaming_event_create(
+    iree_hal_streaming_context_t *context,
+    iree_hal_streaming_event_flags_t flags, iree_allocator_t host_allocator,
+    iree_hal_streaming_event_t **out_event) {
   IREE_ASSERT_ARGUMENT(context);
   IREE_ASSERT_ARGUMENT(out_event);
   *out_event = NULL;
@@ -53,8 +52,8 @@ iree_hal_streaming_event_create(iree_hal_streaming_context_t *context,
   return status;
 }
 
-static void
-iree_hal_streaming_event_destroy(iree_hal_streaming_event_t *event) {
+static void iree_hal_streaming_event_destroy(
+    iree_hal_streaming_event_t *event) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   // Release semaphore.
@@ -101,15 +100,14 @@ iree_status_t iree_hal_streaming_event_query(iree_hal_streaming_event_t *event,
 
   *status = (current_value >= event->signal_value)
                 ? 0
-                : 1; // 0=complete, 1=not complete
+                : 1;  // 0=complete, 1=not complete
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
 }
 
-iree_status_t
-iree_hal_streaming_event_record(iree_hal_streaming_event_t *event,
-                                iree_hal_streaming_stream_t *stream) {
+iree_status_t iree_hal_streaming_event_record(
+    iree_hal_streaming_event_t *event, iree_hal_streaming_stream_t *stream) {
   IREE_ASSERT_ARGUMENT(event);
   IREE_ASSERT_ARGUMENT(stream);
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -170,8 +168,8 @@ iree_hal_streaming_event_record(iree_hal_streaming_event_t *event,
   return iree_ok_status();
 }
 
-iree_status_t
-iree_hal_streaming_event_synchronize(iree_hal_streaming_event_t *event) {
+iree_status_t iree_hal_streaming_event_synchronize(
+    iree_hal_streaming_event_t *event) {
   IREE_ASSERT_ARGUMENT(event);
   IREE_TRACE_ZONE_BEGIN(z0);
 
@@ -184,10 +182,9 @@ iree_hal_streaming_event_synchronize(iree_hal_streaming_event_t *event) {
   return iree_ok_status();
 }
 
-iree_status_t
-iree_hal_streaming_event_elapsed_time(float *ms,
-                                      iree_hal_streaming_event_t *start,
-                                      iree_hal_streaming_event_t *stop) {
+iree_status_t iree_hal_streaming_event_elapsed_time(
+    float *ms, iree_hal_streaming_event_t *start,
+    iree_hal_streaming_event_t *stop) {
   IREE_ASSERT_ARGUMENT(ms);
   IREE_ASSERT_ARGUMENT(start);
   IREE_ASSERT_ARGUMENT(stop);
@@ -223,7 +220,7 @@ iree_hal_streaming_event_elapsed_time(float *ms,
 
   // Calculate elapsed time in milliseconds.
   int64_t elapsed_ns = stop->record_time_ns - start->record_time_ns;
-  *ms = (float)elapsed_ns / 1000000.0f; // Convert nanoseconds to milliseconds.
+  *ms = (float)elapsed_ns / 1000000.0f;  // Convert nanoseconds to milliseconds.
 
   return iree_ok_status();
 }

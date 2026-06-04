@@ -30,6 +30,7 @@ iree_cc_library(
     "executable.c"
     "fence.c"
     "host_allocator.c"
+    "mem_pool.c"
     "module.c"
     "pool.c"
     "queue_ops.c"

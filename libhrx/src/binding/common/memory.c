@@ -4,10 +4,9 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "common/internal.h"
-
 #include <stdatomic.h>
 
+#include "common/internal.h"
 #include "iree/hal/buffer_transfer.h"
 
 //===----------------------------------------------------------------------===//
@@ -50,9 +49,8 @@ static iree_status_t iree_hal_streaming_buffer_wrap(
 
   // Create the pyre buffer that wraps the HAL buffer.
   hrx_buffer_t hrx_buf = NULL;
-  hrx_device_t hrx_dev = context->device_entry
-                               ? context->device_entry->hrx_device
-                               : NULL;
+  hrx_device_t hrx_dev =
+      context->device_entry ? context->device_entry->hrx_device : NULL;
   iree_status_t hrx_stat = hrx_buffer_create_from_hal(
       buffer, hrx_dev, (hrx_memory_type_t)memory_type,
       (size_t)iree_hal_buffer_byte_length(buffer), NULL, &hrx_buf);
@@ -89,8 +87,8 @@ static iree_status_t iree_hal_streaming_buffer_wrap(
       IREE_HAL_EXTERNAL_BUFFER_TYPE_DEVICE_ALLOCATION,
       IREE_HAL_EXTERNAL_BUFFER_FLAG_NONE, &external_ptr);
   if (iree_status_is_ok(device_status)) {
-    wrapper->device_ptr =
-        (iree_hal_streaming_deviceptr_t)external_ptr.handle.device_allocation.ptr;
+    wrapper->device_ptr = (iree_hal_streaming_deviceptr_t)
+                              external_ptr.handle.device_allocation.ptr;
     have_device_ptr = true;
   } else {
     iree_status_ignore(device_status);
@@ -108,8 +106,7 @@ static iree_status_t iree_hal_streaming_buffer_wrap(
       have_host_ptr = true;
       // For host-local memory, use host_ptr as device_ptr if we don't have one.
       if (!have_device_ptr) {
-        wrapper->device_ptr =
-            (iree_hal_streaming_deviceptr_t)wrapper->host_ptr;
+        wrapper->device_ptr = (iree_hal_streaming_deviceptr_t)wrapper->host_ptr;
         have_device_ptr = true;
       }
     } else {
@@ -125,7 +122,8 @@ static iree_status_t iree_hal_streaming_buffer_wrap(
     static atomic_uintptr_t g_next_synthetic =
         ATOMIC_VAR_INIT(0xDEAD000000000000ULL);
     iree_device_size_t buf_size = iree_hal_buffer_byte_length(buffer);
-    iree_device_size_t aligned_size = (buf_size + 255) & ~(iree_device_size_t)255;
+    iree_device_size_t aligned_size =
+        (buf_size + 255) & ~(iree_device_size_t)255;
     uintptr_t synthetic = atomic_fetch_add(&g_next_synthetic, aligned_size);
     wrapper->device_ptr = (iree_hal_streaming_deviceptr_t)synthetic;
     have_device_ptr = true;
@@ -215,8 +213,7 @@ static iree_status_t iree_hal_streaming_context_ensure_pageable_h2d_staging(
 
   iree_hal_streaming_buffer_t* staging = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_streaming_memory_allocate_host(
-      context, size, IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT,
-      &staging));
+      context, size, IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT, &staging));
   // The context owns this cached buffer directly. Drop the wrapper's normal
   // external retain to avoid a context -> staging -> context reference cycle.
   iree_hal_streaming_context_release(context);
@@ -243,9 +240,9 @@ iree_status_t iree_hal_streaming_memory_lookup(
   // every 8-byte word in the kernarg buffer for potential device pointers,
   // so the vast majority of calls are expected to miss. Handle the miss
   // directly without allocating an error message.
-  hrx_status_t hs = hrx_buffer_table_find(
-      &context->buffer_table, device_ptr, NULL, &offset,
-      (void**)&out_ref->buffer);
+  hrx_status_t hs =
+      hrx_buffer_table_find(&context->buffer_table, device_ptr, NULL, &offset,
+                            (void**)&out_ref->buffer);
   if (!hrx_status_is_ok(hs)) {
     iree_status_code_t code = (iree_status_code_t)hrx_status_code(hs);
     hrx_status_ignore(hs);
@@ -373,7 +370,7 @@ iree_status_t iree_hal_streaming_memory_free_device(
   iree_hal_streaming_buffer_t* wrapper = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, HRX_CALL(hrx_buffer_table_find(&context->buffer_table, ptr, NULL,
-                                            NULL, (void**)&wrapper)));
+                                         NULL, (void**)&wrapper)));
 
   // Remove from mapping table.
   hrx_buffer_table_remove(&context->buffer_table, wrapper->device_ptr);
@@ -416,9 +413,8 @@ iree_status_t iree_hal_streaming_memory_allocate_host(
                                              allocation_size, &buffer));
 
   iree_hal_streaming_buffer_t* wrapper = NULL;
-  iree_status_t status =
-      iree_hal_streaming_buffer_wrap(context, buffer, (int)memory_type,
-                                     &wrapper);
+  iree_status_t status = iree_hal_streaming_buffer_wrap(
+      context, buffer, (int)memory_type, &wrapper);
   iree_hal_buffer_release(buffer);
 
   if (iree_status_is_ok(status) && wrapper->host_ptr == NULL) {
@@ -456,9 +452,9 @@ iree_status_t iree_hal_streaming_memory_free_host(
   // we can look it up directly.
   iree_hal_streaming_buffer_t* wrapper = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, HRX_CALL(hrx_buffer_table_find(
-              &context->buffer_table, (uint64_t)(uintptr_t)ptr, NULL, NULL,
-              (void**)&wrapper)));
+      z0, HRX_CALL(hrx_buffer_table_find(&context->buffer_table,
+                                         (uint64_t)(uintptr_t)ptr, NULL, NULL,
+                                         (void**)&wrapper)));
 
   // Remove from mapping table.
   hrx_buffer_table_remove(&context->buffer_table, wrapper->device_ptr);
@@ -503,12 +499,10 @@ iree_status_t iree_hal_streaming_memory_register_host(
 
   // Create pyre buffer for registered host memory (no HAL buffer).
   hrx_buffer_t hrx_buf = NULL;
-  hrx_device_t hrx_dev = context->device_entry
-                               ? context->device_entry->hrx_device
-                               : NULL;
+  hrx_device_t hrx_dev =
+      context->device_entry ? context->device_entry->hrx_device : NULL;
   iree_status_t status = hrx_buffer_create_from_hal(
-      NULL, hrx_dev, HRX_MEMORY_TYPE_HOST_LOCAL,
-      size, ptr, &hrx_buf);
+      NULL, hrx_dev, HRX_MEMORY_TYPE_HOST_LOCAL, size, ptr, &hrx_buf);
   if (!iree_status_is_ok(status)) {
     iree_allocator_free(context->host_allocator, wrapper);
     IREE_TRACE_ZONE_END(z0);
@@ -560,13 +554,12 @@ iree_status_t iree_hal_streaming_memory_unregister_host(
   // Look up buffer from host pointer.
   iree_hal_streaming_buffer_t* wrapper = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, HRX_CALL(hrx_buffer_table_find(
-              &context->buffer_table, (uint64_t)(uintptr_t)ptr, NULL, NULL,
-              (void**)&wrapper)));
+      z0, HRX_CALL(hrx_buffer_table_find(&context->buffer_table,
+                                         (uint64_t)(uintptr_t)ptr, NULL, NULL,
+                                         (void**)&wrapper)));
 
   // Remove from buffer table.
-  hrx_buffer_table_remove(&context->buffer_table,
-                           (uint64_t)(uintptr_t)ptr);
+  hrx_buffer_table_remove(&context->buffer_table, (uint64_t)(uintptr_t)ptr);
 
   // Free wrapper (this will release the HAL buffer and context references).
   iree_hal_streaming_buffer_free(wrapper);
@@ -614,9 +607,9 @@ iree_status_t iree_hal_streaming_memory_host_flags(
 
   // Look up buffer from host pointer.
   iree_hal_streaming_buffer_t* wrapper = NULL;
-  iree_status_t status = HRX_CALL(hrx_buffer_table_find(
-      &context->buffer_table, (uint64_t)(uintptr_t)ptr, NULL, NULL,
-      (void**)&wrapper));
+  iree_status_t status = HRX_CALL(
+      hrx_buffer_table_find(&context->buffer_table, (uint64_t)(uintptr_t)ptr,
+                            NULL, NULL, (void**)&wrapper));
   if (iree_status_is_ok(status)) {
     *out_flags = wrapper->host_register_flags;
   }
@@ -874,8 +867,8 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device(
       iree_hal_streaming_buffer_t* staging = NULL;
       iree_slim_mutex_lock(&context->mutex);
       iree_status_t status =
-          iree_hal_streaming_context_ensure_pageable_h2d_staging(
-              context, size, &staging);
+          iree_hal_streaming_context_ensure_pageable_h2d_staging(context, size,
+                                                                 &staging);
       if (iree_status_is_ok(status)) {
         memcpy(staging->host_ptr, src, size);
       }
@@ -896,8 +889,8 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device(
             IREE_HAL_COPY_FLAG_NONE);
       }
       if (iree_status_is_ok(status)) {
-        status =
-            iree_hal_streaming_command_buffer_barrier(copy_stream->command_buffer);
+        status = iree_hal_streaming_command_buffer_barrier(
+            copy_stream->command_buffer);
       }
       if (iree_status_is_ok(status)) {
         status = iree_hal_streaming_stream_synchronize(copy_stream);
