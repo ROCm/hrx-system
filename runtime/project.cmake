@@ -117,6 +117,10 @@ option(IREE_HAL_DRIVER_WEBGPU
 option(IREE_HAL_DRIVER_HIP_RCCL
   "Enables RCCL collective support in the HIP HAL driver."
   OFF)
+if(IREE_HAL_DRIVER_HIP_RCCL AND NOT IREE_HAL_DRIVER_HIP)
+  message(FATAL_ERROR
+    "IREE_HAL_DRIVER_HIP_RCCL=ON requires IREE_HAL_DRIVER_HIP=ON.")
+endif()
 
 option(IREE_HAL_EXECUTABLE_LOADER_DEFAULTS
   "Sets the default value for all runtime HAL executable loaders." ON)

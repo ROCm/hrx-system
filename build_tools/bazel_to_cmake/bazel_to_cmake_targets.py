@@ -25,7 +25,7 @@ class TargetConverter:
                 f"{iree_repo}//build_tools/sanitizer:lsan_suppressions_vulkan.txt": [],
                 # HIP
                 "@hip_api_headers//:headers": [
-                    "hip_api_headers::headers",
+                    "iree::third_party::hip_api_headers",
                 ],
                 # NCCL
                 "@nccl//:headers": [
@@ -33,7 +33,7 @@ class TargetConverter:
                 ],
                 # RCCL
                 "@rccl//:headers": [
-                    "rccl::headers",
+                    "iree::third_party::rccl_headers",
                 ],
                 # Tracy.
                 "@tracy_client//:runtime": ["tracy_client::runtime"],
@@ -61,7 +61,9 @@ class TargetConverter:
                 "//third_party:aqlprofile_sdk_headers": [
                     "iree::third_party::aqlprofile_sdk_headers"
                 ],
+                "//third_party:hip_api_headers": ["iree::third_party::hip_api_headers"],
                 "//third_party:libbacktrace": ["${IREE_LIBBACKTRACE_TARGET}"],
+                "//third_party:rccl_headers": ["iree::third_party::rccl_headers"],
                 "//third_party:catch2": ["iree::third_party::catch2"],
                 "@webgpu_headers": [],
                 # py_binary targets have no CMake equivalent.

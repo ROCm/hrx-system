@@ -32,7 +32,7 @@ _RCCL_DEFINES = select({
 })
 
 _RCCL_DEPS = select({
-    "//runtime/src/iree/hal/drivers/hip:rccl_enabled": ["@rccl//:headers"],
+    "//runtime/src/iree/hal/drivers/hip:rccl_enabled": ["//third_party:rccl_headers"],
     "//conditions:default": [],
 })
 
@@ -131,7 +131,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/base/internal:dynamic_library",
         "//runtime/src/iree/base/internal:path",
-        "@hip_api_headers//:headers",
+        "//third_party:hip_api_headers",
     ] + _RCCL_DEPS,
 )
 

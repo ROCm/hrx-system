@@ -91,7 +91,7 @@ if(IREE_HAL_DRIVER_HIP_RCCL)
 endif()
 set(_dynamic_symbols_platform_deps "")
 if(IREE_HAL_DRIVER_HIP_RCCL)
-  list(APPEND _dynamic_symbols_platform_deps rccl::headers)
+  list(APPEND _dynamic_symbols_platform_deps iree::third_party::rccl_headers)
 endif()
 iree_cc_library(
   NAME
@@ -112,11 +112,11 @@ iree_cc_library(
     "rccl_status_util.c"
     "status_util.c"
   DEPS
-    hip_api_headers::headers
     iree::base
     iree::base::core_headers
     iree::base::internal::dynamic_library
     iree::base::internal::path
+    iree::third_party::hip_api_headers
     ${_dynamic_symbols_platform_deps}
   DEFINES
     ${_dynamic_symbols_platform_defines}

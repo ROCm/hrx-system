@@ -1037,13 +1037,19 @@ option(IREE_HAL_AMDGPU_LIBHSA_STATIC
        OFF)
 
 if(IREE_HAL_AMDGPU_LIBHSA_STATIC)
-  find_package(hsa-runtime64 1.0 REQUIRED)
+  if(NOT TARGET iree::third_party::hsa_runtime)
+    message(FATAL_ERROR
+      "IREE_HAL_AMDGPU_LIBHSA_STATIC=ON requires a ROCm/TheRock package "
+      "configuration that provides hsa-runtime64::hsa-runtime64. Header-only "
+      "ROCm discovery is enough for dynamic loading but cannot satisfy static "
+      "libhsa linking.")
+  endif()
   target_compile_options(iree_hal_drivers_amdgpu_util_libhsa
     PUBLIC
       "-DIREE_HAL_AMDGPU_LIBHSA_STATIC=1"
   )
   target_link_libraries(iree_hal_drivers_amdgpu_util_libhsa
     PRIVATE
-      hsa-runtime64::hsa-runtime64
+      iree::third_party::hsa_runtime
   )
 endif()

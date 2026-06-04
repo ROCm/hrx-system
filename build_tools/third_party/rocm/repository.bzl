@@ -9,12 +9,15 @@
 def _rocm_repository_impl(repository_ctx):
     rocm_path = repository_ctx.getenv("IREE_ROCM_PATH")
     if not rocm_path:
+        display_name = repository_ctx.attr.display_name or repository_ctx.name
         fail(
-            "{} requires --repo_env=IREE_ROCM_PATH=/path/to/rocm. " +
-            "Run python build_tools/bazel/configure.py with a ROCm-backed " +
-            "driver and -DIREE_ROCM_PATH=/path/to/rocm to generate " +
-            ".bazelrc.configured.".format(
-                repository_ctx.name,
+            (
+                "{} requires --repo_env=IREE_ROCM_PATH=/path/to/rocm. " +
+                "Run python build_tools/bazel/configure.py with a ROCm-backed " +
+                "driver and -DIREE_ROCM_PATH=/path/to/rocm to generate " +
+                ".bazelrc.configured."
+            ).format(
+                display_name,
             ),
         )
 
@@ -41,6 +44,9 @@ rocm_repository = repository_rule(
             allow_single_file = True,
             mandatory = True,
             doc = "BUILD file overlay for the configured ROCm root.",
+        ),
+        "display_name": attr.string(
+            doc = "Human-readable dependency name for diagnostics.",
         ),
     },
     environ = ["IREE_ROCM_PATH"],

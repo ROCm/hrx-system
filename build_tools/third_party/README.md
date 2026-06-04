@@ -76,11 +76,18 @@ from source archive locking. They are declared in the same root fragment when
 they produce repositories consumed by source targets, but they are not emitted
 into `MODULE.cmake.lock`.
 
-SDK-backed targets that cannot be built on an unconfigured machine should be
-explicit about that contract. For example, `//third_party:hsa_runtime_headers`
-is tagged `manual` so `bazel build //third_party/...` remains a cheap facade
-sanity check, while explicit AMDGPU users still fail loudly without
-`IREE_ROCM_PATH`.
+ROCm-backed targets are grouped under `build_tools/third_party/rocm/`. In
+package/system mode these targets are header overlays on a configured
+ROCm/TheRock root. They still expose separate capabilities: HSA runtime
+headers, AQL profile SDK headers, HIP API headers, and RCCL headers are distinct
+facades even when one TheRock distribution provides all of them.
+
+SDK-backed targets that cannot be built on an unconfigured machine should make
+that contract explicit. The ROCm facades are tagged `manual` and select empty
+targets when their owning runtime feature is disabled, so
+`bazel build //third_party/...` remains a cheap facade sanity check. Explicit
+AMDGPU or HIP users still fail loudly without `IREE_ROCM_PATH` in package/system
+mode.
 
 ## CMake Source Lock
 
@@ -157,7 +164,14 @@ if(IREE_ENABLE_THREADING AND IREE_BUILD_BENCHMARKS)
   iree_configure_google_benchmark()
 endif()
 if(IREE_HAL_DRIVER_AMDGPU)
-  iree_configure_rocm_headers()
+  iree_configure_rocm_hsa_runtime_headers()
+  iree_configure_rocm_aqlprofile_sdk_headers()
+endif()
+if(IREE_HAL_DRIVER_HIP)
+  iree_configure_rocm_hip_api_headers()
+endif()
+if(IREE_HAL_DRIVER_HIP_RCCL)
+  iree_configure_rocm_rccl_headers()
 endif()
 if(LIBHRX_BUILD AND LIBHRX_BUILD_CTS)
   iree_configure_catch2()
@@ -212,8 +226,12 @@ Catch2:           //third_party:catch2
                   iree::third_party::catch2
 ROCm headers:     //third_party:hsa_runtime_headers
                   //third_party:aqlprofile_sdk_headers
+                  //third_party:hip_api_headers
+                  //third_party:rccl_headers
                   iree::third_party::hsa_runtime_headers
                   iree::third_party::aqlprofile_sdk_headers
+                  iree::third_party::hip_api_headers
+                  iree::third_party::rccl_headers
 ```
 
 `iree::third_party::google_test` intentionally carries the practical
