@@ -13,6 +13,7 @@ py_library(
     srcs = [
         "__init__.py",
         "aliases.py",
+        "bazel.py",
         "ci.py",
         "ci_config.py",
         "cli.py",
@@ -55,6 +56,7 @@ py_test(
     name = "cli_test",
     srcs = [
         "aliases.py",
+        "bazel.py",
         "cli.py",
         "cli_test.py",
         "command_plan.py",

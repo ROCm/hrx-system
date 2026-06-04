@@ -20,8 +20,8 @@
 #     targets build their own adversarial configurations from fuzz input.
 #
 # All fuzzing goes through iree-bazel-fuzz — no direct binary execution,
-# no duplicate build config. Persistent corpus, dictionaries, and artifacts
-# are managed by iree-bazel-fuzz under ~/.cache/iree-fuzz-{cache,corpus}/.
+# no duplicate build config. Persistent corpora and artifacts are managed by
+# iree-bazel-fuzz under ${IREE_FUZZ_CACHE:-~/.cache/iree-fuzz-cache}/.
 #
 # Usage:
 #   ./run_fuzzers.sh                          # All fuzzers, 120s per combo
@@ -235,9 +235,6 @@ run_integration() {
 #===----------------------------------------------------------------------===#
 
 # Runs component fuzz targets using iree-bazel-fuzz's multi-target support.
-# For multi-target patterns (...), iree-bazel-fuzz's exit code is unreliable
-# (known issue with `local` outside functions under set -e). We check for
-# crash artifacts instead of relying on exit codes.
 run_component() {
   echo "================================================================"
   echo "  COMPONENT FUZZING"
@@ -254,20 +251,21 @@ run_component() {
     local artifact_count_before
     artifact_count_before=$(find "$fuzz_cache" -path "*/artifacts/crash-*" -o -path "*/artifacts/leak-*" 2>/dev/null | wc -l)
 
-    # Run fuzzer (ignore exit code for multi-target patterns).
+    local fuzzer_status=0
     "$IREE_BAZEL_FUZZ" \
       "$pattern" \
       -- \
       "-max_total_time=${DURATION}" \
-      "-jobs=${JOBS}" || true
+      "-jobs=${JOBS}" || fuzzer_status=$?
 
     # Check for new crash/leak artifacts.
     local artifact_count_after
     artifact_count_after=$(find "$fuzz_cache" -path "*/artifacts/crash-*" -o -path "*/artifacts/leak-*" 2>/dev/null | wc -l)
 
-    if [ "$artifact_count_after" -gt "$artifact_count_before" ]; then
+    if [ "$fuzzer_status" -ne 0 ] || \
+       [ "$artifact_count_after" -gt "$artifact_count_before" ]; then
       echo ""
-      echo "CRASH DETECTED in: $pattern"
+      echo "FAILURE DETECTED in: $pattern"
       echo "New artifacts:"
       find "$fuzz_cache" -path "*/artifacts/crash-*" -newer "$0" -o -path "*/artifacts/leak-*" -newer "$0" 2>/dev/null | head -10
       return 1

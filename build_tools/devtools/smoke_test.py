@@ -43,6 +43,18 @@ CI_DRY_RUN_COMMANDS = (
     ("iree-cmake-amdgpu-ubsan",),
     ("iree-cmake-amdgpu-sanitizers",),
 )
+BAZEL_WRAPPERS = (
+    "iree-bazel-dev",
+    "iree-bazel-configure",
+    "iree-bazel-build",
+    "iree-bazel-test",
+    "iree-bazel-query",
+    "iree-bazel-cquery",
+    "iree-bazel-info",
+    "iree-bazel-run",
+    "iree-bazel-try",
+    "iree-bazel-fuzz",
+)
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -109,6 +121,24 @@ def run_ci_command(checkout: Path, args: list[str]) -> None:
     subprocess.run(command, cwd=checkout, check=True)
 
 
+def run_wrapper_help(checkout: Path, wrapper_name: str) -> None:
+    command = [str(checkout / "build_tools/bin" / wrapper_name), "--help"]
+    print("smoke:", " ".join(command), flush=True)
+    subprocess.run(command, cwd=checkout, check=True)
+
+
+def run_wrapper_agents_md(checkout: Path, wrapper_name: str) -> None:
+    command = [str(checkout / "build_tools/bin" / wrapper_name), "--agents-md"]
+    print("smoke:", " ".join(command), flush=True)
+    subprocess.run(command, cwd=checkout, check=True)
+
+
+def run_wrapper_command(checkout: Path, wrapper_name: str, args: list[str]) -> None:
+    command = [str(checkout / "build_tools/bin" / wrapper_name), *args]
+    print("smoke:", " ".join(command), flush=True)
+    subprocess.run(command, cwd=checkout, check=True)
+
+
 def assert_absent(path: Path) -> None:
     if path.exists():
         raise RuntimeError(f"dry-run smoke unexpectedly created {path}")
@@ -125,6 +155,53 @@ def run_dry_run_scenario(checkout: Path) -> None:
         checkout,
         ["--dry-run", "bazel", "configure", "-DIREE_HAL_DRIVER_AMDGPU=OFF"],
     )
+    run_command(checkout, ["bazel", "build", "-n", "--config=asan"])
+    run_command(
+        checkout,
+        ["--dry-run", "bazel", "query", "kind(cc_library, //runtime/...)"],
+    )
+    run_command(
+        checkout,
+        ["--dry-run", "bazel", "cquery", "--output=files", "//runtime/..."],
+    )
+    run_command(checkout, ["--dry-run", "bazel", "info", "execution_root"])
+    run_command(
+        checkout,
+        [
+            "--dry-run",
+            "bazel",
+            "run",
+            "//runtime/src/iree/base:allocator_benchmark",
+            "--",
+            "--help",
+        ],
+    )
+    run_command(
+        checkout,
+        ["--dry-run", "bazel", "try", "-e", "int main() { return 0; }"],
+    )
+    run_command(
+        checkout,
+        [
+            "--dry-run",
+            "bazel",
+            "fuzz",
+            "//runtime/src/iree/tokenizer:special_tokens_fuzz",
+            "--",
+            "-max_total_time=1",
+        ],
+    )
+    run_command(
+        checkout,
+        [
+            "--dry-run",
+            "bazel",
+            "fuzz",
+            "//runtime/src/iree/tokenizer/...",
+            "--",
+            "-max_total_time=1",
+        ],
+    )
     run_command(
         checkout,
         [
@@ -137,6 +214,17 @@ def run_dry_run_scenario(checkout: Path) -> None:
             "-DLIBHRX_BUILD=OFF",
         ],
     )
+    run_command(
+        checkout,
+        [
+            "cmake",
+            "build",
+            "-n",
+            "--cmake-build-dir",
+            "build/smoke-cmake",
+            "hrx",
+        ],
+    )
     run_command(checkout, ["--dry-run", "bazel", "hook", "--profile", "ci"])
     run_command(checkout, ["--dry-run", "cmake", "hook", "--profile", "paranoid"])
     run_command(checkout, ["--dry-run", "bazel", "precommit", "--profile", "default"])
@@ -145,8 +233,14 @@ def run_dry_run_scenario(checkout: Path) -> None:
     run_command(checkout, ["--dry-run", "cmake", "presubmit", "--profile", "default"])
     for command in CI_DRY_RUN_COMMANDS:
         run_ci_command(checkout, [*command, "--dry-run"])
+    for wrapper_name in BAZEL_WRAPPERS:
+        run_wrapper_help(checkout, wrapper_name)
+        run_wrapper_agents_md(checkout, wrapper_name)
+    run_wrapper_command(checkout, "iree-bazel-build", ["-n", "--config=asan"])
+    run_wrapper_command(checkout, "iree-bazel-build", ["-n", "--", "--dry-run"])
     assert_absent(checkout / ".bazelrc.configured")
     assert_absent(checkout / ".venv")
+    assert_absent(checkout / ".iree-bazel-try")
     assert_absent(checkout / "lefthook-local.yml")
     assert_absent(tool_root)
 

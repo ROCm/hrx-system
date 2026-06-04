@@ -20,6 +20,14 @@ PRECOMMIT_DEFAULT_PROFILES = {
 TESTING_PROFILES = ("paranoid", "ci")
 
 
+def build_system_name(lane: str) -> str:
+    if lane == "bazel":
+        return "Bazel"
+    if lane == "cmake":
+        return "CMake"
+    raise ValueError(f"unknown lane: {lane}")
+
+
 def precommit_default_profile(lane: str) -> str:
     try:
         return PRECOMMIT_DEFAULT_PROFILES[lane]
@@ -45,6 +53,7 @@ def presubmit_plan(
     project_tests: bool = True,
 ) -> CommandPlan:
     env = tool_env.path_env()
+    label_name = build_system_name(lane)
     plan = CommandPlan()
     if lane == "bazel":
         command = [
@@ -66,7 +75,7 @@ def presubmit_plan(
                 command,
                 cwd=REPO_ROOT,
                 env=env,
-                label="run Bazel-lane presubmit",
+                label=f"run {label_name} presubmit",
             )
         )
     elif lane == "cmake":
@@ -89,7 +98,7 @@ def presubmit_plan(
                 command,
                 cwd=REPO_ROOT,
                 env=env,
-                label="run CMake-lane presubmit",
+                label=f"run {label_name} presubmit",
             )
         )
     else:
@@ -111,6 +120,7 @@ def precommit_plan(
         raise ValueError(f"unknown lane: {lane}")
 
     env = tool_env.path_env()
+    label_name = build_system_name(lane)
     input_args: list[str] = []
     if paths:
         input_args += paths
@@ -142,7 +152,7 @@ def precommit_plan(
                 command,
                 cwd=REPO_ROOT,
                 env=env,
-                label=f"apply {lane}-lane precommit fixups",
+                label=f"apply {label_name} precommit fixups",
             )
         )
 
@@ -163,7 +173,7 @@ def precommit_plan(
             command,
             cwd=REPO_ROOT,
             env=env,
-            label=f"run {lane}-lane precommit",
+            label=f"run {label_name} precommit",
         )
     )
     return plan

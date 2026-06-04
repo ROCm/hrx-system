@@ -1,10 +1,10 @@
 # Building
 
-This repository has two supported build lanes:
+This repository has two supported build systems:
 
-- Bazel is the source-tree lane and the source of truth for generated CMake
+- Bazel is the source-tree build and the source of truth for generated CMake
   build graph structure.
-- CMake is the package, install, and embedding lane.
+- CMake is the package, install, and embedding build.
 
 `dev.py` is a command router. It prepares local tools and delegates to Bazel,
 CMake, CTest, and project scripts. Anything `dev.py` does must also be possible
@@ -29,7 +29,7 @@ python dev.py cmake build
 python dev.py cmake test
 ```
 
-Install Git hooks for the lane you use for commits:
+Install Git hooks for the build system you use for commits:
 
 ```bash
 python dev.py bazel hook
@@ -43,7 +43,7 @@ python dev.py cmake hook
 
 ## Command Shape
 
-Put wrapper execution and tool-environment options before the structural lane
+Put wrapper execution and tool-environment options before the build-system
 command:
 
 ```bash
@@ -52,7 +52,7 @@ python dev.py --system bazel configure
 python dev.py --verbose cmake test -R hrx
 ```
 
-Arguments after `<lane> <command>` belong to the underlying tool:
+Arguments after `<build-system> <command>` belong to the underlying tool:
 
 ```bash
 python dev.py bazel build //runtime/... --config=presubmit
@@ -65,9 +65,25 @@ Generated aliases follow the same shape:
 
 ```bash
 iree-bazel-build //runtime/... --config=presubmit
+iree-bazel-cquery 'kind(cc_library, //runtime/...)'
+iree-bazel-info execution_root
+iree-bazel-run //runtime/src/iree/base:allocator_benchmark
 iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm
 iree-cmake-test -R hrx
 ```
+
+The repo also checks in POSIX Bazel launchers under `build_tools/bin/` for
+paths that need a stable source-tree wrapper:
+
+```bash
+build_tools/bin/iree-bazel-query 'rdeps(//runtime/..., //runtime/src/iree/base)'
+build_tools/bin/iree-bazel-cquery --output=files //runtime/src/iree/base
+build_tools/bin/iree-bazel-try -e 'int main() { return 0; }'
+```
+
+`iree-bazel-run`, `iree-bazel-try`, and `iree-bazel-fuzz` build first and then
+run the resolved executable directly, so Bazel does not hold its server lock
+while a benchmark, tool, or fuzzer is running.
 
 ## Bazel Sanitizers
 
@@ -92,7 +108,7 @@ python dev.py bazel test //runtime/src/iree/async/... --config=tsan
 
 IREE source-tree CI is run through `build_tools/devtools/ci.py` so GitHub
 workflow failures have copyable local commands. Command names are
-`iree-<build-lane>-<target-group>[-<configuration>]`. Bazel jobs take explicit
+`iree-<build-system>-<target-group>[-<configuration>]`. Bazel jobs take explicit
 target patterns. CMake jobs use generated CTest names and labels directly.
 
 ```bash

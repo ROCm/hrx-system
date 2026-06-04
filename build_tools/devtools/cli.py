@@ -12,8 +12,9 @@ import argparse
 import sys
 from pathlib import Path
 
+from build_tools.devtools import bazel as bazel_dev
 from build_tools.devtools import doctor, help_text, hooks, presubmit, setup
-from build_tools.devtools.command_plan import CommandPlan, CommandStep
+from build_tools.devtools.command_plan import CommandPlan, CommandStep, ExecCommandStep
 from build_tools.devtools.environment import (
     REPO_ROOT,
     existing_or_system_environment,
@@ -23,10 +24,32 @@ from build_tools.devtools.environment import (
 LANES = ("bazel", "cmake")
 DEFAULT_BAZEL_TARGETS = ("//runtime/...", "//libhrx/...")
 PASSTHROUGH_COMMANDS = {
-    "bazel": frozenset(("configure", "build", "test", "run", "try", "fuzz")),
+    "bazel": frozenset(
+        ("configure", "build", "test", "query", "cquery", "info", "run", "try", "fuzz")
+    ),
     "cmake": frozenset(("configure", "build", "test", "run", "try")),
 }
 HELP_FLAGS = frozenset(("-h", "--help"))
+AGENT_MD_FLAGS = frozenset(("--agent-md", "--agent_md", "--agents-md", "--agents_md"))
+HOISTED_NO_VALUE_OPTIONS = frozenset(
+    (
+        "-n",
+        "-v",
+        "--dry-run",
+        "--dry_run",
+        "--verbose",
+        "--system",
+        "--venv",
+    )
+)
+HOISTED_VALUE_OPTIONS = frozenset(
+    (
+        "--cmake-build-dir",
+        "--cmake_build_dir",
+        "--tool-root",
+        "--tool_root",
+    )
+)
 DEV_OPTIONS_WITH_VALUES = frozenset(
     (
         "--alias-dir",
@@ -84,6 +107,14 @@ def cmake_build_dir(args: argparse.Namespace | None = None) -> Path:
     return REPO_ROOT.parent / "builds" / REPO_ROOT.name
 
 
+def build_system_display_name(lane: str) -> str:
+    if lane == "bazel":
+        return "Bazel"
+    if lane == "cmake":
+        return "CMake"
+    raise ValueError(f"unknown lane: {lane}")
+
+
 def forwarded_args(args: list[str]) -> list[str]:
     if args and args[0] == "--":
         return args[1:]
@@ -106,6 +137,12 @@ def cmake_build_args(backend_args: list[str]) -> list[str]:
         cmake_args.extend(["--target", target_name])
     cmake_args.extend(raw_args)
     return cmake_args
+
+
+def bazel_targets_or_defaults(backend_args: list[str]) -> list[str]:
+    if any(not arg.startswith("-") for arg in backend_args):
+        return backend_args
+    return [*backend_args, *DEFAULT_BAZEL_TARGETS]
 
 
 def option_name(arg: str) -> str:
@@ -157,6 +194,88 @@ def normalize_passthrough_args(argv: list[str]) -> list[str]:
     if not any(arg.startswith("-") for arg in tail):
         return argv
     return [*argv[:tail_index], "--", *tail]
+
+
+def hoist_passthrough_dev_options(argv: list[str]) -> list[str]:
+    tail_index = find_passthrough_tail(argv)
+    if tail_index is None:
+        return argv
+
+    prefix = argv[:tail_index]
+    tail = argv[tail_index:]
+    hoisted_args = []
+    backend_args = []
+    index = 0
+    while index < len(tail):
+        arg = tail[index]
+        if arg == "--":
+            backend_args.extend(tail[index:])
+            break
+        if arg in HOISTED_NO_VALUE_OPTIONS:
+            hoisted_args.append(arg)
+        elif is_short_option_cluster(arg):
+            hoisted_args.extend("-" + option for option in arg[1:])
+        elif option_name(arg) in HOISTED_VALUE_OPTIONS:
+            hoisted_args.append(arg)
+            if "=" not in arg and index + 1 < len(tail):
+                index += 1
+                hoisted_args.append(tail[index])
+        else:
+            backend_args.append(arg)
+        index += 1
+
+    if not hoisted_args:
+        return argv
+    return [*hoisted_args, *prefix, *backend_args]
+
+
+def is_short_option_cluster(arg: str) -> bool:
+    return (
+        arg.startswith("-")
+        and not arg.startswith("--")
+        and len(arg) > 2
+        and all("-" + option in HOISTED_NO_VALUE_OPTIONS for option in arg[1:])
+    )
+
+
+def find_agent_md_request(argv: list[str]) -> tuple[tuple[str, ...], str | None] | None:
+    index = 0
+    while index < len(argv):
+        arg = argv[index]
+        if arg in AGENT_MD_FLAGS:
+            return LANES, None
+        if option_consumes_next_arg(arg):
+            index += 2
+            continue
+        if arg.startswith("-"):
+            index += 1
+            continue
+        if arg not in LANES:
+            return None
+
+        lane = arg
+        index += 1
+        while index < len(argv):
+            arg = argv[index]
+            if arg in AGENT_MD_FLAGS:
+                return (lane,), None
+            if option_consumes_next_arg(arg):
+                index += 2
+                continue
+            if arg.startswith("-"):
+                index += 1
+                continue
+            command = arg
+            tail = argv[index + 1 :]
+            if (
+                command in PASSTHROUGH_COMMANDS[lane]
+                and tail
+                and tail[0] in AGENT_MD_FLAGS
+            ):
+                return (lane,), command
+            return None
+        return None
+    return None
 
 
 def add_common_options(parser: argparse.ArgumentParser) -> None:
@@ -254,6 +373,12 @@ def add_profile_option(
 
 
 def parse_arguments(argv: list[str]) -> argparse.Namespace:
+    argv = hoist_passthrough_dev_options(argv)
+    agent_md_request = find_agent_md_request(argv)
+    if agent_md_request is not None:
+        print_agent_md(*agent_md_request)
+        raise SystemExit(0)
+
     argv = normalize_passthrough_args(argv)
     parser = argparse.ArgumentParser(
         prog="dev.py",
@@ -290,7 +415,7 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
         parser.error("explicit precommit paths cannot be combined with input mode")
     if args.agent_md:
         lane = getattr(args, "lane", None)
-        print_agent_md((lane,) if lane else LANES)
+        print_agent_md((lane,) if lane else LANES, None)
         raise SystemExit(0)
     if not args.command:
         parser.print_help()
@@ -343,10 +468,11 @@ def add_root_commands(subparsers: argparse._SubParsersAction) -> None:
 
 
 def add_lane_commands(subparsers: argparse._SubParsersAction, lane: str) -> None:
+    display_name = build_system_display_name(lane)
     lane_parser = subparsers.add_parser(
         lane,
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        help=f"{lane} developer commands.",
+        help=f"{display_name} developer commands.",
     )
     add_common_options(lane_parser)
     add_tool_environment_options(lane_parser)
@@ -357,7 +483,7 @@ def add_lane_commands(subparsers: argparse._SubParsersAction, lane: str) -> None
         lane_subparsers,
         "setup",
         command_help=help_text.lane_command_help(lane, "setup"),
-        help=f"Set up {lane} tools.",
+        help=f"Set up {display_name} tools.",
     )
     add_common_options(setup_parser)
     add_tool_environment_options(setup_parser)
@@ -370,7 +496,7 @@ def add_lane_commands(subparsers: argparse._SubParsersAction, lane: str) -> None
         lane_subparsers,
         "hook",
         command_help=help_text.lane_command_help(lane, "hook"),
-        help=f"Install {lane} Git hooks.",
+        help=f"Install {display_name} Git hooks.",
     )
     add_common_options(hook_parser)
     add_tool_environment_options(hook_parser)
@@ -389,7 +515,7 @@ def add_lane_commands(subparsers: argparse._SubParsersAction, lane: str) -> None
         lane_subparsers,
         "configure",
         command_help=configure_help,
-        help=f"Configure {lane}.",
+        help=f"Configure {display_name}.",
     )
     configure_parser.add_argument(
         "args",
@@ -403,7 +529,7 @@ def add_lane_commands(subparsers: argparse._SubParsersAction, lane: str) -> None
         lane_subparsers,
         "build",
         command_help=build_help,
-        help=f"Build with {lane}.",
+        help=f"Build with {display_name}.",
     )
     build_parser.add_argument(
         "args",
@@ -417,7 +543,7 @@ def add_lane_commands(subparsers: argparse._SubParsersAction, lane: str) -> None
         lane_subparsers,
         "test",
         command_help=test_help,
-        help=f"Test with {lane}.",
+        help=f"Test with {display_name}.",
     )
     test_parser.add_argument(
         "args",
@@ -426,11 +552,29 @@ def add_lane_commands(subparsers: argparse._SubParsersAction, lane: str) -> None
     )
     test_parser.set_defaults(handler=handle_test, lane=lane)
 
+    if lane == "bazel":
+        for command_name in ("query", "cquery", "info"):
+            command_help = help_text.lane_command_help(lane, command_name)
+            command_parser = add_subparser(
+                lane_subparsers,
+                command_name,
+                command_help=command_help,
+                help=f"Run Bazel {command_name}.",
+            )
+            command_parser.add_argument(
+                "args", nargs=argparse.REMAINDER, help=command_help.arguments
+            )
+            command_parser.set_defaults(
+                handler=handle_bazel_direct_command,
+                lane=lane,
+                backend_command=command_name,
+            )
+
     precommit_parser = add_subparser(
         lane_subparsers,
         "precommit",
         command_help=help_text.lane_command_help(lane, "precommit"),
-        help=f"Run {lane} checks for local changes.",
+        help=f"Run {display_name} checks for local changes.",
     )
     add_common_options(precommit_parser)
     add_tool_environment_options(precommit_parser)
@@ -469,7 +613,7 @@ def add_lane_commands(subparsers: argparse._SubParsersAction, lane: str) -> None
         lane_subparsers,
         "presubmit",
         command_help=help_text.lane_command_help(lane, "presubmit"),
-        help=f"Run {lane} presubmit.",
+        help=f"Run {display_name} presubmit.",
     )
     add_common_options(presubmit_parser)
     add_tool_environment_options(presubmit_parser)
@@ -502,7 +646,7 @@ def add_lane_commands(subparsers: argparse._SubParsersAction, lane: str) -> None
         lane_subparsers,
         "doctor",
         command_help=help_text.lane_command_help(lane, "doctor"),
-        help=f"Check {lane} tools.",
+        help=f"Check {display_name} tools.",
     )
     add_common_options(doctor_parser)
     add_tool_environment_options(doctor_parser)
@@ -516,13 +660,15 @@ def add_lane_commands(subparsers: argparse._SubParsersAction, lane: str) -> None
             lane_subparsers,
             command_name,
             command_help=command_help,
-            help=f"{command_name} with {lane}.",
+            help=f"{command_name.capitalize()} with {display_name}.",
         )
         command_parser.add_argument(
             "args", nargs=argparse.REMAINDER, help=command_help.arguments
         )
         command_parser.set_defaults(
-            handler=handle_unimplemented_backend_command,
+            handler=handle_bazel_runnable_command
+            if lane == "bazel"
+            else handle_unimplemented_backend_command,
             lane=lane,
             backend_command=command_name,
         )
@@ -623,8 +769,9 @@ def handle_build(args: argparse.Namespace) -> CommandPlan:
     tool_env = existing_or_system_environment(args)
     backend_args = forwarded_args(args.args)
     if args.lane == "bazel":
-        targets = backend_args or list(DEFAULT_BAZEL_TARGETS)
+        targets = bazel_targets_or_defaults(backend_args)
         command = [tool_env.tool("bazel"), "build", *targets]
+        step_class = ExecCommandStep
     else:
         command = [
             tool_env.tool("cmake"),
@@ -632,9 +779,10 @@ def handle_build(args: argparse.Namespace) -> CommandPlan:
             str(cmake_build_dir(args)),
             *cmake_build_args(backend_args),
         ]
+        step_class = CommandStep
     return CommandPlan(
         [
-            CommandStep(
+            step_class(
                 command,
                 cwd=REPO_ROOT,
                 env=tool_env.path_env(),
@@ -648,8 +796,9 @@ def handle_test(args: argparse.Namespace) -> CommandPlan:
     tool_env = existing_or_system_environment(args)
     backend_args = forwarded_args(args.args)
     if args.lane == "bazel":
-        targets = backend_args or list(DEFAULT_BAZEL_TARGETS)
+        targets = bazel_targets_or_defaults(backend_args)
         command = [tool_env.tool("bazel"), "test", "--config=presubmit", *targets]
+        step_class = ExecCommandStep
     else:
         command = [
             tool_env.tool("ctest"),
@@ -658,9 +807,10 @@ def handle_test(args: argparse.Namespace) -> CommandPlan:
             "--output-on-failure",
             *backend_args,
         ]
+        step_class = CommandStep
     return CommandPlan(
         [
-            CommandStep(
+            step_class(
                 command,
                 cwd=REPO_ROOT,
                 env=tool_env.path_env(),
@@ -668,6 +818,53 @@ def handle_test(args: argparse.Namespace) -> CommandPlan:
             )
         ]
     )
+
+
+def handle_bazel_direct_command(args: argparse.Namespace) -> CommandPlan:
+    tool_env = existing_or_system_environment(args)
+    return CommandPlan(
+        [
+            ExecCommandStep(
+                [
+                    tool_env.tool("bazel"),
+                    args.backend_command,
+                    *forwarded_args(args.args),
+                ],
+                cwd=REPO_ROOT,
+                env=tool_env.path_env(),
+                label=f"bazel {args.backend_command}",
+            )
+        ]
+    )
+
+
+def handle_bazel_runnable_command(args: argparse.Namespace) -> CommandPlan:
+    tool_env = existing_or_system_environment(args)
+    backend_args = forwarded_args(args.args)
+    if args.backend_command == "run":
+        command = bazel_dev.parse_bazel_run_args(backend_args, run_cwd=Path.cwd())
+        step = bazel_dev.BazelRunStep(
+            tool_env.tool("bazel"),
+            command,
+            env=tool_env.path_env(),
+        )
+    elif args.backend_command == "try":
+        command = bazel_dev.parse_bazel_try_args(backend_args, run_cwd=Path.cwd())
+        step = bazel_dev.BazelTryStep(
+            tool_env.tool("bazel"),
+            command,
+            env=tool_env.path_env(),
+        )
+    elif args.backend_command == "fuzz":
+        command = bazel_dev.parse_bazel_fuzz_args(backend_args)
+        step = bazel_dev.BazelFuzzStep(
+            tool_env.tool("bazel"),
+            command,
+            env=tool_env.path_env(),
+        )
+    else:
+        raise ValueError(f"unknown bazel command: {args.backend_command}")
+    return CommandPlan([step])
 
 
 def handle_presubmit(args: argparse.Namespace) -> CommandPlan:
@@ -719,90 +916,15 @@ def handle_unimplemented_backend_command(args: argparse.Namespace) -> CommandPla
     )
 
 
-def print_agent_md(lanes: tuple[str, ...]) -> None:
-    sections = [agent_md_header(lanes), ""]
-    for lane in lanes:
-        if lane == "bazel":
-            sections.append(agent_md_bazel_section())
-        elif lane == "cmake":
-            sections.append(agent_md_cmake_section())
-        else:
-            raise ValueError(f"unknown lane: {lane}")
-        sections.append("")
-    print("\n".join(sections).rstrip() + "\n")
-
-
-def agent_md_header(lanes: tuple[str, ...]) -> str:
-    if lanes == ("bazel",):
-        command_shape = "`python dev.py bazel <command>`."
-        wrapper_example = "`python dev.py --dry-run bazel build`"
-    elif lanes == ("cmake",):
-        command_shape = "`python dev.py cmake <command>`."
-        wrapper_example = "`python dev.py --dry-run cmake build hrx`"
-    else:
-        command_shape = (
-            "`python dev.py bazel <command>` for Bazel and "
-            "`python dev.py cmake <command>` for CMake."
-        )
-        wrapper_example = "`python dev.py --dry-run bazel build`"
-    return f"""## dev.py
-
-Run from repo root: {command_shape} Use `--help` for command details.
-Put wrapper options before the lane command: {wrapper_example}.
-Long flags accept hyphen or underscore spellings: `--dry-run`, `--dry_run`.
-Published build configuration options live in BUILDING.md."""
-
-
-def agent_md_bazel_section() -> str:
-    return """### Bazel
-
-Use Bazel for source-tree builds, tests, and review checks. `build` and `test`
-default to `//runtime/...` and `//libhrx/...` when no targets are given.
-Use absolute labels such as `//runtime/src/iree/base/...`, not `:target`.
-
-```bash
-python dev.py bazel configure
-python dev.py bazel configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm
-python dev.py bazel configure --//runtime/config/hal:drivers=amdgpu,local-sync,local-task,null --repo_env=IREE_ROCM_PATH=/opt/rocm
-python dev.py bazel build [targets...]
-python dev.py bazel test [targets...]
-python dev.py bazel precommit [paths...]
-python dev.py bazel precommit --profile paranoid
-python dev.py bazel precommit --base origin/main
-python dev.py bazel presubmit
-```
-
-`precommit` checks staged, unstaged, and untracked local changes.
-`precommit --base REF` checks branch changes from the merge base with `REF`
-through `HEAD`, plus local changes. `presubmit` is the full CI-shaped check.
-
-Outputs: `bazel-bin/`, `bazel-testlogs/`, and `bazel-out/`."""
-
-
-def agent_md_cmake_section() -> str:
-    build_dir = "../builds/<checkout-name>"
-    return f"""### CMake
-
-Use CMake for package and install-test workflows. `configure` writes
-`{build_dir}/`. `build TARGET` maps to `cmake --build ... --target TARGET`.
-
-```bash
-python dev.py cmake configure
-python dev.py cmake configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm
-python dev.py cmake configure -DIREE_HAL_DRIVER_AMDGPU=OFF -DLIBHRX_BUILD=OFF
-python dev.py --cmake-build-dir build/cmake-asan cmake configure -DIREE_ENABLE_ASAN=ON
-python dev.py cmake build hrx
-python dev.py cmake test -R hrx
-python dev.py cmake precommit
-python dev.py cmake precommit --profile paranoid
-python dev.py cmake presubmit
-```
-
-`precommit` checks local changes. `precommit --profile paranoid` adds affected
-project CMake/CTest checks. `presubmit` is the full-tree CI-shaped check."""
+def print_agent_md(lanes: tuple[str, ...], command: str | None) -> None:
+    print(help_text.agent_markdown(lanes, command=command).rstrip() + "\n")
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_arguments(sys.argv[1:] if argv is None else argv)
-    plan = args.handler(args)
+    try:
+        plan = args.handler(args)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"dev.py: {exc}", file=sys.stderr)
+        return 2
     return plan.run(dry_run=args.dry_run, verbose=args.verbose)

@@ -73,6 +73,38 @@ class CommandStep:
 
 
 @dataclass(frozen=True)
+class ExecCommandStep:
+    argv: list[str]
+    cwd: Path
+    env: dict[str, str] | None = None
+    label: str | None = None
+
+    def describe(self) -> str:
+        return CommandStep(
+            self.argv,
+            cwd=self.cwd,
+            env=self.env,
+            label=self.label,
+        ).describe()
+
+    def run(self, verbose: bool = False) -> int:
+        if verbose:
+            print(f"dev.py: {self.label or quote_command(self.argv)}")
+            print("  " + quote_command(self.argv))
+            sys.stdout.flush()
+        try:
+            os.chdir(self.cwd)
+            os.execvpe(self.argv[0], self.argv, self.env or os.environ)
+        except OSError as exc:
+            print(
+                f"dev.py: failed to exec {quote_command(self.argv)}: {exc}",
+                file=sys.stderr,
+            )
+            return 127
+        raise AssertionError("os.execvpe returned unexpectedly")
+
+
+@dataclass(frozen=True)
 class CheckCommandStep:
     argv: list[str]
     cwd: Path

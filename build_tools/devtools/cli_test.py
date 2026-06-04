@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import contextlib
 import io
+import tempfile
 import unittest
 from pathlib import Path
 
-from build_tools.devtools import cli
+from build_tools.devtools import aliases, cli
+from build_tools.devtools import bazel as bazel_dev
 from build_tools.devtools.command_plan import WriteFileStep
 
 
@@ -99,6 +101,167 @@ class CliTest(unittest.TestCase):
         self.assertIn("//runtime/...", description)
         self.assertIn("//libhrx/...", description)
 
+    def test_bazel_build_with_only_options_still_uses_default_targets(self):
+        args = cli.parse_arguments(["bazel", "build", "--config=asan"])
+
+        plan = args.handler(args)
+        description = plan.describe()
+
+        self.assertIn("--config=asan", description)
+        self.assertIn("//runtime/...", description)
+        self.assertIn("//libhrx/...", description)
+
+    def test_bazel_direct_query_commands_forward_to_bazel(self):
+        args = cli.parse_arguments(
+            ["bazel", "query", "kind(cc_library, //runtime/...)", "--output=label"]
+        )
+
+        plan = args.handler(args)
+        description = plan.describe()
+
+        self.assertIn("bazel query", description)
+        self.assertIn("kind(cc_library, //runtime/...)", description)
+        self.assertIn("--output=label", description)
+
+        args = cli.parse_arguments(
+            ["bazel", "cquery", "--output=files", "//runtime/..."]
+        )
+
+        plan = args.handler(args)
+        description = plan.describe()
+
+        self.assertIn("bazel cquery --output=files //runtime/...", description)
+
+        args = cli.parse_arguments(["bazel", "info", "execution_root"])
+
+        plan = args.handler(args)
+        self.assertIn("bazel info execution_root", plan.describe())
+
+    def test_bazel_run_builds_and_resolves_binary_before_exec(self):
+        args = cli.parse_arguments(
+            [
+                "bazel",
+                "run",
+                "--config=asan",
+                "//runtime/src/iree/base:allocator_benchmark",
+                "--",
+                "--benchmark_filter=Alloc",
+            ]
+        )
+
+        plan = args.handler(args)
+        description = plan.describe()
+
+        self.assertIn("bazel build --config=asan", description)
+        self.assertIn("bazel cquery --output=files --config=asan", description)
+        self.assertIn("exec '<built executable>' --benchmark_filter=Alloc", description)
+
+    def test_bazel_run_can_print_resolved_executable_path(self):
+        args = cli.parse_arguments(
+            [
+                "bazel",
+                "run",
+                "-p",
+                "//runtime/src/iree/base:allocator_benchmark",
+            ]
+        )
+
+        plan = args.handler(args)
+        self.assertIn("# print built executable path", plan.describe())
+
+    def test_bazel_try_generates_scratch_package(self):
+        args = cli.parse_arguments(
+            [
+                "bazel",
+                "try",
+                "-c",
+                "--dep",
+                "//runtime/src/iree/base",
+                "-e",
+                "int main() { return 0; }",
+            ]
+        )
+
+        plan = args.handler(args)
+        description = plan.describe()
+
+        self.assertIn(".iree-bazel-try/run-<pid>/BUILD.bazel", description)
+        self.assertIn("bazel build", description)
+        self.assertIn("//.iree-bazel-try/run-<pid>:snippet", description)
+        self.assertIn("# compile only", description)
+
+    def test_bazel_try_preserves_local_input_paths(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            temporary_path = Path(temporary_dir)
+            source_dir = temporary_path / "probe"
+            source_dir.mkdir()
+            (source_dir / "helper.h").write_text(
+                "static int helper(void) { return 0; }\n", encoding="utf-8"
+            )
+            (source_dir / "main.c").write_text(
+                '#include "helper.h"\nint main(void) { return helper(); }\n',
+                encoding="utf-8",
+            )
+            scratch_dir = temporary_path / "scratch"
+            scratch_dir.mkdir()
+            command = bazel_dev.BazelTryCommand(
+                files=[
+                    Path("probe/main.c"),
+                    Path("probe/helper.h"),
+                ],
+                run_cwd=temporary_path,
+            )
+            step = bazel_dev.BazelTryStep("bazel", command)
+
+            source_names, _ = step.materialize_sources(scratch_dir)
+
+            self.assertEqual(source_names, ["probe/main.c", "probe/helper.h"])
+            self.assertTrue((scratch_dir / "probe/main.c").is_file())
+            self.assertTrue((scratch_dir / "probe/helper.h").is_file())
+
+    def test_bazel_try_knows_project_include_roots(self):
+        self.assertEqual(
+            bazel_dev.header_path_for_include("iree/base/api.h"),
+            bazel_dev.REPO_ROOT / "runtime/src/iree/base/api.h",
+        )
+        self.assertEqual(
+            bazel_dev.header_path_for_include("loom/ir/module.h"),
+            bazel_dev.REPO_ROOT / "loom/src/loom/ir/module.h",
+        )
+        self.assertEqual(
+            bazel_dev.header_path_for_include("loomc/context.h"),
+            bazel_dev.REPO_ROOT / "loom/binding/c/include/loomc/context.h",
+        )
+        self.assertIsNone(bazel_dev.header_path_for_include("stdio.h"))
+
+    def test_bazel_fuzz_builds_with_fuzzer_config_before_running_binary(self):
+        args = cli.parse_arguments(
+            [
+                "bazel",
+                "fuzz",
+                "//runtime/src/iree/tokenizer:special_tokens_fuzz",
+                "--",
+                "-max_total_time=1",
+            ]
+        )
+
+        plan = args.handler(args)
+        description = plan.describe()
+
+        self.assertIn("bazel build --config=fuzzer", description)
+        self.assertIn("exec '<built fuzzer>' '<corpus>'", description)
+
+    def test_bazel_fuzz_normalizes_signal_exit_codes(self):
+        self.assertEqual(bazel_dev.process_exit_code(-2), 130)
+        self.assertEqual(bazel_dev.process_exit_code(7), 7)
+
+    def test_bazel_aliases_include_query_cquery_info(self):
+        self.assertEqual(aliases.BAZEL_ALIASES["iree-bazel-query"], ["bazel", "query"])
+        self.assertEqual(
+            aliases.BAZEL_ALIASES["iree-bazel-cquery"], ["bazel", "cquery"]
+        )
+        self.assertEqual(aliases.BAZEL_ALIASES["iree-bazel-info"], ["bazel", "info"])
+
     def test_root_verbose_survives_nested_command_parser(self):
         args = cli.parse_arguments(["--verbose", "bazel", "build"])
 
@@ -118,19 +281,58 @@ class CliTest(unittest.TestCase):
 
         self.assertTrue(args.system)
 
-    def test_forwarded_verbose_is_not_wrapper_verbose(self):
+    def test_passthrough_dry_run_and_verbose_are_wrapper_flags(self):
+        args = cli.parse_arguments(["bazel", "build", "-nv", "--config=asan"])
+
+        self.assertTrue(args.dry_run)
+        self.assertTrue(args.verbose)
+        plan = args.handler(args)
+        description = plan.describe()
+        self.assertIn("bazel build --config=asan", description)
+        self.assertNotIn("-n", description)
+        self.assertNotIn("-v", description)
+
         args = cli.parse_arguments(["bazel", "build", "--verbose"])
 
-        self.assertFalse(args.verbose)
+        self.assertTrue(args.verbose)
         plan = args.handler(args)
-        self.assertIn("bazel build --verbose", plan.describe())
+        self.assertNotIn("--verbose", plan.describe())
 
-    def test_forwarded_dry_run_is_not_wrapper_dry_run(self):
         args = cli.parse_arguments(["bazel", "build", "--dry-run"])
 
-        self.assertFalse(args.dry_run)
+        self.assertTrue(args.dry_run)
+        plan = args.handler(args)
+        self.assertNotIn("--dry-run", plan.describe())
+
+    def test_explicit_separator_forwards_conflicting_native_options(self):
+        args = cli.parse_arguments(["bazel", "build", "-n", "--", "--dry-run"])
+
+        self.assertTrue(args.dry_run)
         plan = args.handler(args)
         self.assertIn("bazel build --dry-run", plan.describe())
+
+    def test_passthrough_tool_environment_options_are_wrapper_flags(self):
+        args = cli.parse_arguments(["bazel", "build", "--system", "//runtime/..."])
+
+        self.assertTrue(args.system)
+        plan = args.handler(args)
+        self.assertNotIn("--system", plan.describe())
+
+        args = cli.parse_arguments(
+            [
+                "cmake",
+                "build",
+                "--cmake-build-dir",
+                "build/cmake-debug",
+                "hrx",
+            ]
+        )
+
+        self.assertEqual(args.cmake_build_dir, Path("build/cmake-debug"))
+        plan = args.handler(args)
+        description = plan.describe()
+        self.assertIn("build/cmake-debug", description)
+        self.assertNotIn("--cmake-build-dir", description)
 
     def test_hyphenated_flags_accept_underscore_aliases(self):
         args = cli.parse_arguments(["--dry_run", "bazel", "build"])
@@ -143,6 +345,18 @@ class CliTest(unittest.TestCase):
 
         self.assertEqual(args.tool_root, Path(".tools"))
         self.assertEqual(args.alias_dir, Path("aliases"))
+
+    def test_agents_md_survives_hoisted_wrapper_flags(self):
+        output = self.parse_agent_md(["bazel", "build", "-n", "--agents_md"])
+
+        self.assertIn("## iree-bazel-build", output)
+
+    def test_bazel_try_keep_has_short_form(self):
+        command = bazel_dev.parse_bazel_try_args(
+            ["-k", "-e", "int main(void) { return 0; }"]
+        )
+
+        self.assertTrue(command.keep)
 
     def test_root_agents_md_includes_bazel_and_cmake_sections(self):
         output = self.parse_agent_md(["--agents_md"])
@@ -161,6 +375,43 @@ class CliTest(unittest.TestCase):
 
         self.assertIn("### CMake", output)
         self.assertNotIn("### Bazel", output)
+
+    def test_bazel_build_agents_md_uses_public_wrapper_names(self):
+        output = self.parse_agent_md(["bazel", "build", "--agents_md"])
+
+        self.assertIn("## iree-bazel-build", output)
+        self.assertIn("iree-bazel-build //runtime/src/iree/base/...", output)
+        self.assertIn("iree-bazel-run", output)
+        self.assertIn("iree-bazel-fuzz", output)
+        self.assertIn("Wrapper flags", output)
+        self.assertNotIn("Pass `--agents-md`", output)
+        self.assertNotIn("python dev.py", output)
+        self.assertNotIn("### CMake", output)
+
+    def test_bazel_run_agents_md_explains_process_contract(self):
+        output = self.parse_agent_md(["bazel", "run", "--agents-md"])
+
+        self.assertIn("## iree-bazel-run", output)
+        self.assertIn(
+            "iree-bazel-run //runtime/src/tools:iree-run-module -- --help", output
+        )
+        self.assertIn("execs the binary from the current directory", output)
+        self.assertIn("Bazel server lock is not", output)
+        self.assertNotIn("python dev.py", output)
+
+    def test_bazel_try_and_fuzz_agents_md_are_focused(self):
+        try_output = self.parse_agent_md(["bazel", "try", "--agents-md"])
+        fuzz_output = self.parse_agent_md(["bazel", "fuzz", "--agents_md"])
+
+        self.assertIn("## iree-bazel-try", try_output)
+        self.assertIn("one-shot C/C++ probes", try_output)
+        self.assertIn(".iree-bazel-try/", try_output)
+        self.assertNotIn("## iree-bazel-fuzz", try_output)
+
+        self.assertIn("## iree-bazel-fuzz", fuzz_output)
+        self.assertIn("--config=fuzzer", fuzz_output)
+        self.assertIn("IREE_FUZZ_CACHE", fuzz_output)
+        self.assertNotIn("## iree-bazel-try", fuzz_output)
 
     def test_cmake_build_target_shorthand(self):
         args = cli.parse_arguments(["cmake", "build", "hrx"])

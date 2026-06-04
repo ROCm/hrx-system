@@ -1,0 +1,9 @@
+#!/usr/bin/env sh
+# Copyright 2026 The IREE Authors
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+set -eu
+SCRIPT_DIR=$(CDPATH= cd "$(dirname "$0")" && pwd)
+REPO_ROOT=$(CDPATH= cd "$SCRIPT_DIR/../.." && pwd)
+: "${PYTHON:=python3}"
+exec "$PYTHON" "$REPO_ROOT/dev.py" bazel try "$@"

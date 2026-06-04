@@ -8,12 +8,19 @@ from __future__ import annotations
 
 import contextlib
 import io
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from build_tools.devtools.command_plan import CommandPlan, CommandStep, WriteFileStep
+from build_tools.devtools.command_plan import (
+    CommandPlan,
+    CommandStep,
+    ExecCommandStep,
+    WriteFileStep,
+)
 
 
 class CommandPlanTest(unittest.TestCase):
@@ -85,6 +92,18 @@ class CommandPlanTest(unittest.TestCase):
 
         self.assertIn("dev.py: loud command", output.getvalue())
         self.assertIn(sys.executable, output.getvalue())
+
+    def test_exec_command_step_replaces_current_process(self):
+        step = ExecCommandStep(["tool", "arg"], cwd=Path.cwd(), env={"PATH": "test"})
+
+        with mock.patch.object(os, "chdir") as mock_chdir:
+            with mock.patch.object(
+                os, "execvpe", side_effect=OSError("missing")
+            ) as mock_exec:
+                self.assertEqual(step.run(), 127)
+
+        mock_chdir.assert_called_once_with(Path.cwd())
+        mock_exec.assert_called_once_with("tool", ["tool", "arg"], {"PATH": "test"})
 
 
 if __name__ == "__main__":
