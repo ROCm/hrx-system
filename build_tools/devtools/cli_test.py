@@ -283,6 +283,9 @@ class CliTest(unittest.TestCase):
         )
         self.assertEqual(aliases.BAZEL_ALIASES["iree-bazel-info"], ["bazel", "info"])
 
+    def test_cmake_aliases_include_fuzz(self):
+        self.assertEqual(aliases.CMAKE_ALIASES["iree-cmake-fuzz"], ["cmake", "fuzz"])
+
     def test_root_verbose_survives_nested_command_parser(self):
         args = cli.parse_arguments(["--verbose", "bazel", "build"])
 
@@ -444,6 +447,14 @@ class CliTest(unittest.TestCase):
         self.assertIn(".iree-cmake-try/", output)
         self.assertNotIn("## iree-cmake-run", output)
 
+    def test_cmake_fuzz_agents_md_is_focused(self):
+        output = self.parse_agent_md(["cmake", "fuzz", "--agents-md"])
+
+        self.assertIn("## iree-cmake-fuzz", output)
+        self.assertIn("IREE_ENABLE_FUZZING=ON", output)
+        self.assertIn("IREE_FUZZ_CACHE", output)
+        self.assertNotIn("## iree-cmake-try", output)
+
     def test_cmake_build_target_shorthand(self):
         args = cli.parse_arguments(["cmake", "build", "hrx"])
 
@@ -468,6 +479,26 @@ class CliTest(unittest.TestCase):
         description = plan.describe()
 
         self.assertIn("--target hrx", description)
+
+    def test_cmake_fuzz_builds_target_before_execing_binary(self):
+        args = cli.parse_arguments(
+            [
+                "cmake",
+                "fuzz",
+                "iree::tokenizer::special_tokens_fuzz",
+                "--parallel",
+                "8",
+                "--",
+                "-max_total_time=1",
+            ]
+        )
+
+        plan = args.handler(args)
+        description = plan.describe()
+
+        self.assertIn("cmake fuzz iree::tokenizer::special_tokens_fuzz", description)
+        self.assertIn("--target iree::tokenizer::special_tokens_fuzz", description)
+        self.assertIn("exec '<built fuzzer>' '<corpus>'", description)
         self.assertIn("--parallel 8", description)
 
     def test_cmake_test_forwards_options_without_separator(self):

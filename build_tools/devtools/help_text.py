@@ -318,6 +318,19 @@ deps; add --dep TARGET for anything inference misses.""",
 This builds with --config=fuzzer, resolves executable paths with cquery, then
 runs the fuzzer binaries directly. Single-target runs exec the fuzzer process.""",
         )
+    if command == "fuzz" and lane == "cmake":
+        return CommandHelp(
+            description="Build and run a CMake libFuzzer target.",
+            arguments="CMake fuzz target and build options, followed by -- and fuzzer arguments.",
+            epilog="""Examples:
+  python dev.py cmake configure -DIREE_ENABLE_FUZZING=ON -DLIBHRX_BUILD=OFF -DIREE_HAL_DRIVER_AMDGPU=OFF
+  python dev.py cmake fuzz iree::tokenizer::special_tokens_fuzz
+  python dev.py cmake fuzz iree::tokenizer::special_tokens_fuzz -- -max_total_time=60
+
+This builds the named CMake fuzz target, resolves the executable with the CMake
+File API, then execs it directly. Fuzz targets are configure-time CMake targets;
+run iree-cmake-configure -DIREE_ENABLE_FUZZING=ON first.""",
+        )
     if command == "run" and lane == "cmake":
         return CommandHelp(
             description="Run an already-built CMake executable target.",
@@ -436,6 +449,7 @@ iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=OFF -DLIBHRX_BUILD=OFF
 iree-cmake-build hrx::hrx
 iree-cmake-test -R hrx
 iree-cmake-run iree::tools::iree-run-module -- --help
+iree-cmake-fuzz iree::tokenizer::special_tokens_fuzz -- -max_total_time=60
 iree-cmake-dev precommit
 iree-cmake-dev presubmit
 ```
@@ -444,7 +458,8 @@ iree-cmake-dev presubmit
 affected project CMake/CTest checks. `iree-cmake-dev presubmit` is the
 full-tree CI-shaped check. `iree-cmake-run` resolves an already-built
 executable and does not build implicitly. `iree-cmake-try` builds temporary
-C/C++ snippets against the configured tree."""
+C/C++ snippets against the configured tree. `iree-cmake-fuzz` builds and execs
+a configured libFuzzer target."""
 
 
 def bazel_command_agent_markdown(command: str) -> str:
@@ -598,8 +613,8 @@ iree-bazel-fuzz //runtime/src/iree/tokenizer/... -- -max_total_time=60 -jobs=8
 ```
 
 Corpus and artifact directories live under
-`${IREE_FUZZ_CACHE:-~/.cache/iree-fuzz-cache}/`. Fuzzer arguments go after
-`--`."""
+`IREE_FUZZ_CACHE` when set, otherwise the platform user cache directory under
+`iree-fuzz-cache/`. Fuzzer arguments go after `--`."""
 
     return bazel_agent_markdown()
 
@@ -688,5 +703,23 @@ iree-cmake-try --compile-only --output build/snippet -e 'int main() { return 0; 
 Quoted `iree/...` and `hrx_...` includes infer common deps from configured CMake
 aliases. Add `--dep TARGET` for anything inference misses. Use `--no-infer` to
 disable inference and `-k/--keep` to inspect the generated scratch build."""
+
+    if command == "fuzz":
+        return """## iree-cmake-fuzz
+
+Use `iree-cmake-fuzz` for CMake libFuzzer targets. Configure the build tree
+with fuzzing enabled, then name the CMake target or configured alias. The
+wrapper builds that target, resolves the executable with the CMake File API,
+then execs it directly.
+
+```bash
+iree-cmake-configure -DIREE_ENABLE_FUZZING=ON -DLIBHRX_BUILD=OFF -DIREE_HAL_DRIVER_AMDGPU=OFF
+iree-cmake-fuzz iree::tokenizer::special_tokens_fuzz
+iree-cmake-fuzz iree::tokenizer::special_tokens_fuzz -- -max_total_time=60
+```
+
+Corpus and artifact directories live under
+`IREE_FUZZ_CACHE` when set, otherwise the platform user cache directory under
+`iree-fuzz-cache/cmake/`. Fuzzer arguments go after `--`."""
 
     return cmake_agent_markdown()

@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping
 
-from build_tools.devtools import cmake_file_api, cmake_try
+from build_tools.devtools import cmake_file_api, cmake_fuzz, cmake_try
 from build_tools.devtools.command_plan import (
     CommandPlan,
     CommandStep,
@@ -251,6 +251,19 @@ def run_plan(
                 env=tool_env.path_env(),
             )
         ]
+    )
+
+
+def fuzz_plan(
+    tool_env: ToolEnvironment,
+    *,
+    configured_build_dir: Path | None,
+    backend_args: list[str],
+) -> CommandPlan:
+    return cmake_fuzz.fuzz_plan(
+        tool_env,
+        configured_build_dir=build_dir(configured_build_dir),
+        backend_args=backend_args,
     )
 
 

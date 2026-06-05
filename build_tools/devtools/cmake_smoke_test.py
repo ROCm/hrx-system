@@ -24,6 +24,7 @@ CMAKE_WRAPPERS = (
     "iree-cmake-test",
     "iree-cmake-run",
     "iree-cmake-try",
+    "iree-cmake-fuzz",
 )
 
 
@@ -50,6 +51,11 @@ def run_dry_run_scenario(checkout: Path) -> None:
         checkout,
         "iree-cmake-try",
         ["-n", "-e", "int main() { return 0; }"],
+    )
+    smoke_test_lib.run_bin_wrapper(
+        checkout,
+        "iree-cmake-fuzz",
+        ["-n", "iree::tokenizer::special_tokens_fuzz", "--", "-max_total_time=1"],
     )
     smoke_test_lib.assert_absent(checkout / ".bazelrc.configured")
     smoke_test_lib.assert_absent(checkout / ".venv")

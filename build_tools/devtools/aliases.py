@@ -34,6 +34,7 @@ CMAKE_ALIASES = {
     "iree-cmake-test": ["cmake", "test"],
     "iree-cmake-run": ["cmake", "run"],
     "iree-cmake-try": ["cmake", "try"],
+    "iree-cmake-fuzz": ["cmake", "fuzz"],
 }
 
 

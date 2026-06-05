@@ -35,7 +35,7 @@ PASSTHROUGH_COMMANDS = {
     "bazel": frozenset(
         ("configure", "build", "test", "query", "cquery", "info", "run", "try", "fuzz")
     ),
-    "cmake": frozenset(("configure", "build", "test", "run", "try")),
+    "cmake": frozenset(("configure", "build", "test", "run", "try", "fuzz")),
 }
 HELP_FLAGS = frozenset(("-h", "--help"))
 AGENT_MD_FLAGS = frozenset(("--agent-md", "--agent_md", "--agents-md", "--agents_md"))
@@ -637,8 +637,6 @@ def add_lane_commands(subparsers: argparse._SubParsersAction, lane: str) -> None
     doctor_parser.set_defaults(handler=handle_lane_doctor, lane=lane)
 
     for command_name in ("run", "try", "fuzz"):
-        if lane == "cmake" and command_name == "fuzz":
-            continue
         command_help = help_text.lane_command_help(lane, command_name)
         command_parser = add_subparser(
             lane_subparsers,
@@ -842,6 +840,8 @@ def handler_for_runnable_command(lane: str, command_name: str):
         return handle_cmake_run_command
     if lane == "cmake" and command_name == "try":
         return handle_cmake_try_command
+    if lane == "cmake" and command_name == "fuzz":
+        return handle_cmake_fuzz_command
     return handle_unimplemented_backend_command
 
 
@@ -862,6 +862,15 @@ def handle_cmake_try_command(args: argparse.Namespace) -> CommandPlan:
         configured_build_dir=getattr(args, "cmake_build_dir", None),
         backend_args=forwarded_args(args.args),
         run_cwd=Path.cwd(),
+    )
+
+
+def handle_cmake_fuzz_command(args: argparse.Namespace) -> CommandPlan:
+    tool_env = existing_or_system_environment(args)
+    return cmake_dev.fuzz_plan(
+        tool_env,
+        configured_build_dir=getattr(args, "cmake_build_dir", None),
+        backend_args=forwarded_args(args.args),
     )
 
 

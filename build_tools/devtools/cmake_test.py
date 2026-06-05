@@ -12,7 +12,7 @@ import unittest
 from pathlib import Path
 
 from build_tools.devtools import cmake as cmake_dev
-from build_tools.devtools import cmake_file_api, cmake_try
+from build_tools.devtools import cmake_file_api, cmake_fuzz, cmake_try, fuzz
 from build_tools.devtools.environment import REPO_ROOT, ToolEnvironment, ToolMode
 
 
@@ -176,6 +176,63 @@ class CMakeTest(unittest.TestCase):
 
         self.assertTrue(command.print_path)
         self.assertEqual(command.target, "iree-run-module")
+
+    def test_fuzz_parse_splits_build_and_fuzzer_args(self):
+        command = cmake_fuzz.parse_fuzz_args(
+            [
+                "iree::tokenizer::special_tokens_fuzz",
+                "--parallel",
+                "8",
+                "--",
+                "-max_total_time=1",
+            ]
+        )
+
+        self.assertEqual(command.target, "iree::tokenizer::special_tokens_fuzz")
+        self.assertEqual(command.build_args, ["--parallel", "8"])
+        self.assertEqual(command.fuzzer_args, ["-max_total_time=1"])
+
+    def test_fuzz_plan_builds_then_execs_fuzzer(self):
+        tool_env = ToolEnvironment(ToolMode.SYSTEM, None)
+
+        plan = cmake_dev.fuzz_plan(
+            tool_env,
+            configured_build_dir=Path("build/cmake-fuzz"),
+            backend_args=[
+                "iree::tokenizer::special_tokens_fuzz",
+                "--parallel",
+                "8",
+                "--",
+                "-max_total_time=1",
+            ],
+        )
+        description = plan.describe()
+
+        self.assertIn("# cmake fuzz iree::tokenizer::special_tokens_fuzz", description)
+        self.assertIn("--target iree::tokenizer::special_tokens_fuzz", description)
+        self.assertIn("--parallel 8", description)
+        self.assertIn("exec '<built fuzzer>' '<corpus>'", description)
+
+    def test_fuzz_requires_fuzz_enabled_cache(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            build_dir = Path(temporary_dir)
+            (build_dir / "CMakeCache.txt").write_text(
+                "IREE_ENABLE_FUZZING:BOOL=OFF\n",
+                encoding="utf-8",
+            )
+
+            self.assertFalse(
+                cmake_fuzz.cache_bool_enabled(build_dir, "IREE_ENABLE_FUZZING")
+            )
+
+            (build_dir / "CMakeCache.txt").write_text(
+                "IREE_ENABLE_FUZZING:BOOL=ON\n",
+                encoding="utf-8",
+            )
+
+            self.assertTrue(
+                cmake_fuzz.cache_bool_enabled(build_dir, "IREE_ENABLE_FUZZING")
+            )
 
     def test_try_parse_supports_snippet_options(self):
         command = cmake_try.parse_try_args(

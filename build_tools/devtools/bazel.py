@@ -18,12 +18,12 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from build_tools.devtools import fuzz
 from build_tools.devtools.command_plan import quote_command
 from build_tools.devtools.environment import REPO_ROOT
 
 BAZEL_TRY_ROOT = REPO_ROOT / ".iree-bazel-try"
 DEFAULT_TRY_BINARY_NAME = "snippet"
-FUZZ_CACHE_DIR = Path(os.environ.get("IREE_FUZZ_CACHE", "~/.cache/iree-fuzz-cache"))
 HEADER_ROOTS: tuple[tuple[str, Path], ...] = (
     ("iree/", REPO_ROOT / "runtime/src"),
     ("loom/", REPO_ROOT / "loom/src"),
@@ -561,7 +561,7 @@ class BazelFuzzStep:
         return self.fuzzer_argv(target, binary_path)
 
     def fuzzer_argv(self, target: str, binary_path: Path) -> list[str]:
-        target_dir = fuzz_target_dir(target)
+        target_dir = fuzz.bazel_fuzz_target_dir(target)
         corpus_dir = target_dir / "corpus"
         artifact_dir = target_dir / "artifacts"
         corpus_dir.mkdir(parents=True, exist_ok=True)
@@ -837,22 +837,3 @@ def write_try_build_file(
     lines.append(")")
     lines.append("")
     path.write_text("\n".join(lines), encoding="utf-8")
-
-
-def fuzz_target_dir(target: str) -> Path:
-    package, target_name = split_target_label(target)
-    return FUZZ_CACHE_DIR.expanduser() / package / target_name
-
-
-def split_target_label(target: str) -> tuple[str, str]:
-    label = target
-    if label.startswith("@"):
-        label = label.split("//", 1)[-1]
-    elif label.startswith("//"):
-        label = label[2:]
-    if ":" in label:
-        package, target_name = label.split(":", 1)
-    else:
-        package = label
-        target_name = Path(package).name
-    return package, target_name
