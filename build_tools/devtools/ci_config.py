@@ -82,8 +82,25 @@ CPU_XFAIL_TARGETS = bazel_xfail_targets(CPU_XFAILS)
 CPU_CTEST_EXCLUDE_REGEX = ctest_exclude_regex(CPU_XFAILS)
 CPU_SANITIZERS_XFAIL_TARGETS = bazel_xfail_targets(CPU_SANITIZERS_XFAILS)
 CPU_SANITIZERS_CTEST_EXCLUDE_REGEX = ctest_exclude_regex(CPU_SANITIZERS_XFAILS)
+CPU_BAZEL_TARGET_EXCLUDES = (
+    "-//runtime/src/iree/hal/drivers/amdgpu/...",
+    "-//runtime/src/iree/hal/drivers/cuda/...",
+    "-//runtime/src/iree/hal/drivers/hip/...",
+    "-//runtime/src/iree/hal/drivers/vulkan/...",
+    "-//runtime/src/iree/hal/drivers/webgpu/...",
+)
+CPU_RESOURCE_TAG_EXCLUDES = (
+    "-iree-run-requirement=runtime.resource.amd_gpu",
+    "-iree-run-requirement=runtime.resource.nvidia_gpu",
+    "-iree-run-requirement=runtime.resource.vulkan_device",
+    "-iree-run-requirement=runtime.resource.webgpu_device",
+)
+NON_CPU_HAL_DRIVER_CTEST_REGEX = (
+    r"^iree/hal/drivers/(amdgpu|cuda|hip|metal|vulkan|webgpu)/"
+)
 
-AMDGPU_DRIVER_TARGETS = ("//runtime/src/iree/hal/drivers/amdgpu/...",)
+AMDGPU_BAZEL_DRIVER_TARGETS = ("//runtime/src/iree/hal/drivers/amdgpu/...",)
+AMDGPU_CMAKE_DRIVER_TARGETS = ("runtime/src/iree/hal/drivers/amdgpu/all",)
 AMDGPU_TARGET_SELECTOR = "gfx942"
 AMDGPU_RESOURCE_TAG = "iree-run-requirement=runtime.resource.amd_gpu"
 AMDGPU_CTEST_RESOURCE_LABEL = "runtime-resource=amd-gpu"
@@ -123,3 +140,7 @@ AMDGPU_XFAIL_TARGETS = bazel_xfail_targets(AMDGPU_XFAILS)
 AMDGPU_CTEST_EXCLUDE_REGEX = ctest_exclude_regex(AMDGPU_XFAILS)
 AMDGPU_SANITIZERS_XFAIL_TARGETS = bazel_xfail_targets(AMDGPU_SANITIZERS_XFAILS)
 AMDGPU_SANITIZERS_CTEST_EXCLUDE_REGEX = ctest_exclude_regex(AMDGPU_SANITIZERS_XFAILS)
+
+VULKAN_BAZEL_DRIVER_TARGETS = ("//runtime/src/iree/hal/drivers/vulkan/...",)
+VULKAN_CMAKE_DRIVER_TARGETS = ("runtime/src/iree/hal/drivers/vulkan/all",)
+VULKAN_CTEST_REGEX = r"^iree/hal/drivers/vulkan/"

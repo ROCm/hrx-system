@@ -12,6 +12,7 @@ on:
     paths:
       - ".bazelrc"
       - ".bazelrc.configured"
+      - ".github/scripts/**"
       - ".github/workflows/ci_iree_bazel.yml"
       - "BUILD.bazel"
       - "BUILDING.md"
@@ -32,6 +33,7 @@ on:
     paths:
       - ".bazelrc"
       - ".bazelrc.configured"
+      - ".github/scripts/**"
       - ".github/workflows/ci_iree_bazel.yml"
       - "BUILD.bazel"
       - "BUILDING.md"
@@ -80,22 +82,68 @@ jobs:
         run: git config --global --add safe.directory "$PWD"
 
       - name: Fetch ROCm toolchain
-        run: |
-          python3 -m venv "${HRX_OUTPUT_DIR}/python"
-          "${HRX_PYTHON}" -m pip install --upgrade pip boto3 zstandard
-          "${HRX_PYTHON}" build_tools/ci_core_linux.py fetch-rocm
-          echo "${HRX_ROCM_ROOT}/lib/llvm/bin" >> "$GITHUB_PATH"
-          echo "${HRX_ROCM_ROOT}/bin" >> "$GITHUB_PATH"
-          echo "CC=${HRX_ROCM_ROOT}/lib/llvm/bin/clang" >> "$GITHUB_ENV"
-          echo "CXX=${HRX_ROCM_ROOT}/lib/llvm/bin/clang++" >> "$GITHUB_ENV"
-          echo "CMAKE_PREFIX_PATH=${HRX_ROCM_ROOT}${CMAKE_PREFIX_PATH:+:${CMAKE_PREFIX_PATH}}" >> "$GITHUB_ENV"
-          echo "LD_LIBRARY_PATH=${HRX_ROCM_ROOT}/lib:${HRX_ROCM_ROOT}/lib/rocm_sysdeps/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}" >> "$GITHUB_ENV"
+        run: bash .github/scripts/fetch_rocm_toolchain.sh
 
       - name: Install developer tools
         run: |
           python3 --version
           python3 dev.py bazel setup --venv
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Check tool versions
+        run: |
+          bazel --version
+          clang --version
+          "$CC" --version
+          test -d "${HRX_ROCM_ROOT}/include"
+
+      - name: Run IREE Bazel CI
+        run: |
+          echo "python3 build_tools/devtools/ci.py ${{ matrix.command }} --target //runtime/... --keep-going"
+          python3 build_tools/devtools/ci.py ${{ matrix.command }} --target //runtime/... --keep-going
+
+  linux_bazel_vulkan:
+    name: ${{ matrix.name }}
+    runs-on: gpu_navi4x
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux / Vulkan
+            command: iree-bazel-vulkan
+          - name: Linux / Vulkan / Sanitizers
+            command: iree-bazel-vulkan-sanitizers
+    env:
+      HRX_ARTIFACT_SET: core
+      HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/iree-bazel-vulkan/downloads
+      HRX_OUTPUT_DIR: ${{ github.workspace }}/build/iree-bazel-vulkan
+      HRX_PYTHON: ${{ github.workspace }}/build/iree-bazel-vulkan/python/bin/python3
+      HRX_RELEASE_TYPE: nightly
+      HRX_ROCM_ROOT: ${{ github.workspace }}/build/iree-bazel-vulkan/rocm-root
+      PIP_CACHE_DIR: ${{ github.workspace }}/build/iree-bazel-vulkan/caches/pip
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Adjust git config
+        run: git config --global --add safe.directory "$PWD"
+
+      - name: Fetch ROCm toolchain
+        run: bash .github/scripts/fetch_rocm_toolchain.sh
+
+      - name: Check Vulkan hardware environment
+        run: bash .github/scripts/check_vulkan_hardware_environment.sh
+
+      - name: Install Bazel host tools
+        run: |
+          mkdir -p build/ci/iree-bazel-vulkan/bin
+          python3 --version
+          python3 build_tools/devtools/install.py --group bazel \
+            --bin-dir build/ci/iree-bazel-vulkan/bin
+          python3 build_tools/devtools/install.py --group bazel \
+            --bin-dir build/ci/iree-bazel-vulkan/bin --check
+          echo "$PWD/build/ci/iree-bazel-vulkan/bin" >> "$GITHUB_PATH"
 
       - name: Check tool versions
         run: |
@@ -138,16 +186,7 @@ jobs:
         run: git config --global --add safe.directory "$PWD"
 
       - name: Fetch ROCm toolchain
-        run: |
-          python3 -m venv "${HRX_OUTPUT_DIR}/python"
-          "${HRX_PYTHON}" -m pip install --upgrade pip boto3 zstandard
-          "${HRX_PYTHON}" build_tools/ci_core_linux.py fetch-rocm
-          echo "${HRX_ROCM_ROOT}/lib/llvm/bin" >> "$GITHUB_PATH"
-          echo "${HRX_ROCM_ROOT}/bin" >> "$GITHUB_PATH"
-          echo "CC=${HRX_ROCM_ROOT}/lib/llvm/bin/clang" >> "$GITHUB_ENV"
-          echo "CXX=${HRX_ROCM_ROOT}/lib/llvm/bin/clang++" >> "$GITHUB_ENV"
-          echo "CMAKE_PREFIX_PATH=${HRX_ROCM_ROOT}${CMAKE_PREFIX_PATH:+:${CMAKE_PREFIX_PATH}}" >> "$GITHUB_ENV"
-          echo "LD_LIBRARY_PATH=${HRX_ROCM_ROOT}/lib:${HRX_ROCM_ROOT}/lib/rocm_sysdeps/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}" >> "$GITHUB_ENV"
+        run: bash .github/scripts/fetch_rocm_toolchain.sh
 
       - name: Install developer tools
         run: |

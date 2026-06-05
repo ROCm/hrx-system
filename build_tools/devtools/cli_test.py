@@ -18,6 +18,11 @@ from build_tools.devtools.command_plan import WriteFileStep
 
 
 class CliTest(unittest.TestCase):
+    def planned_argv(self, arguments: list[str]) -> list[str]:
+        args = cli.parse_arguments(arguments)
+        plan = args.handler(args)
+        return plan.steps[0].argv
+
     def parse_help(self, arguments: list[str]) -> str:
         output = io.StringIO()
         with contextlib.redirect_stdout(output), self.assertRaises(SystemExit) as cm:
@@ -110,6 +115,70 @@ class CliTest(unittest.TestCase):
         self.assertIn("--config=asan", description)
         self.assertIn("//runtime/...", description)
         self.assertIn("//libhrx/...", description)
+
+    def test_bazel_build_preserves_negative_target_separator(self):
+        argv = self.planned_argv(
+            [
+                "bazel",
+                "build",
+                "--",
+                "//runtime/...",
+                "-//runtime/src/iree/hal/drivers/amdgpu/...",
+            ]
+        )
+
+        self.assertEqual(
+            argv[1:],
+            [
+                "build",
+                "--",
+                "//runtime/...",
+                "-//runtime/src/iree/hal/drivers/amdgpu/...",
+            ],
+        )
+
+    def test_bazel_test_preserves_negative_target_separator_after_options(self):
+        argv = self.planned_argv(
+            [
+                "bazel",
+                "test",
+                "--test_tag_filters=-requires-gpu",
+                "//runtime/...",
+                "-//runtime/src/iree/hal/drivers/amdgpu/...",
+            ]
+        )
+
+        self.assertEqual(
+            argv[1:],
+            [
+                "test",
+                "--config=presubmit",
+                "--test_tag_filters=-requires-gpu",
+                "--",
+                "//runtime/...",
+                "-//runtime/src/iree/hal/drivers/amdgpu/...",
+            ],
+        )
+
+    def test_bazel_query_preserves_negative_target_separator(self):
+        argv = self.planned_argv(
+            [
+                "bazel",
+                "query",
+                "//runtime/...",
+                "-//runtime/src/iree/hal/drivers/amdgpu/...",
+            ]
+        )
+
+        self.assertEqual(
+            argv[1:],
+            [
+                "query",
+                "--",
+                "//runtime/...",
+                "-//runtime/src/iree/hal/drivers/amdgpu/...",
+            ],
+        )
 
     def test_bazel_direct_query_commands_forward_to_bazel(self):
         args = cli.parse_arguments(

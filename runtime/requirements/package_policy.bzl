@@ -62,10 +62,7 @@ PACKAGE_POLICIES = [
         build_requirements = [HAL_VULKAN],
     ),
     package_policy(
-        packages = [
-            "runtime/src/iree/hal/drivers/vulkan",
-            "runtime/src/iree/hal/drivers/vulkan/cts/...",
-        ],
+        packages = ["runtime/src/iree/hal/drivers/vulkan/cts/..."],
         run_requirements = [VULKAN_DEVICE_RESOURCE],
         resource_group = "iree-hal-drivers-vulkan-tests",
     ),

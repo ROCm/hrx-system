@@ -31,6 +31,8 @@ from build_tools.devtools.environment import (
 
 LANES = ("bazel", "cmake")
 DEFAULT_BAZEL_TARGETS = ("//runtime/...", "//libhrx/...")
+BAZEL_TARGET_PATTERN_PREFIXES = ("//", "@", ":", "...")
+BAZEL_NEGATIVE_TARGET_PATTERN_PREFIXES = ("-//", "-@")
 PASSTHROUGH_COMMANDS = {
     "bazel": frozenset(
         ("configure", "build", "test", "query", "cquery", "info", "run", "try", "fuzz")
@@ -120,9 +122,31 @@ def forwarded_args(args: list[str]) -> list[str]:
 
 
 def bazel_targets_or_defaults(backend_args: list[str]) -> list[str]:
-    if any(not arg.startswith("-") for arg in backend_args):
+    if any(is_bazel_target_pattern(arg) for arg in backend_args):
         return backend_args
     return [*backend_args, *DEFAULT_BAZEL_TARGETS]
+
+
+def is_negative_bazel_target_pattern(arg: str) -> bool:
+    return arg.startswith(BAZEL_NEGATIVE_TARGET_PATTERN_PREFIXES)
+
+
+def is_bazel_target_pattern(arg: str) -> bool:
+    if is_negative_bazel_target_pattern(arg):
+        return True
+    return arg.startswith(BAZEL_TARGET_PATTERN_PREFIXES)
+
+
+def bazel_args_with_target_separator(backend_args: list[str]) -> list[str]:
+    if "--" in backend_args or not any(
+        is_negative_bazel_target_pattern(arg) for arg in backend_args
+    ):
+        return backend_args
+
+    for index, arg in enumerate(backend_args):
+        if is_bazel_target_pattern(arg):
+            return [*backend_args[:index], "--", *backend_args[index:]]
+    return backend_args
 
 
 def selected_cmake_build_dir(args: argparse.Namespace) -> Path | None:
@@ -744,7 +768,9 @@ def handle_build(args: argparse.Namespace) -> CommandPlan:
     tool_env = existing_or_system_environment(args)
     backend_args = forwarded_args(args.args)
     if args.lane == "bazel":
-        targets = bazel_targets_or_defaults(backend_args)
+        targets = bazel_args_with_target_separator(
+            bazel_targets_or_defaults(backend_args)
+        )
         command = [tool_env.tool("bazel"), "build", *targets]
         return CommandPlan(
             [
@@ -767,7 +793,9 @@ def handle_test(args: argparse.Namespace) -> CommandPlan:
     tool_env = existing_or_system_environment(args)
     backend_args = forwarded_args(args.args)
     if args.lane == "bazel":
-        targets = bazel_targets_or_defaults(backend_args)
+        targets = bazel_args_with_target_separator(
+            bazel_targets_or_defaults(backend_args)
+        )
         command = [tool_env.tool("bazel"), "test", "--config=presubmit", *targets]
         return CommandPlan(
             [
@@ -788,13 +816,14 @@ def handle_test(args: argparse.Namespace) -> CommandPlan:
 
 def handle_bazel_direct_command(args: argparse.Namespace) -> CommandPlan:
     tool_env = existing_or_system_environment(args)
+    backend_args = bazel_args_with_target_separator(forwarded_args(args.args))
     return CommandPlan(
         [
             ExecCommandStep(
                 [
                     tool_env.tool("bazel"),
                     args.backend_command,
-                    *forwarded_args(args.args),
+                    *backend_args,
                 ],
                 cwd=REPO_ROOT,
                 env=tool_env.path_env(),

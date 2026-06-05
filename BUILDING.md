@@ -114,11 +114,15 @@ target patterns. CMake jobs use generated CTest names and labels directly.
 ```bash
 python build_tools/devtools/ci.py iree-bazel-cpu --target //runtime/... --keep-going
 python build_tools/devtools/ci.py iree-bazel-cpu-sanitizers --target //runtime/... --keep-going
+python build_tools/devtools/ci.py iree-bazel-vulkan --target //runtime/... --keep-going
+python build_tools/devtools/ci.py iree-bazel-vulkan-sanitizers --target //runtime/... --keep-going
 python build_tools/devtools/ci.py iree-bazel-amdgpu --target //runtime/... --keep-going
 python build_tools/devtools/ci.py iree-bazel-amdgpu-sanitizers --target //runtime/... --keep-going
 
 python build_tools/devtools/ci.py iree-cmake-cpu --keep-going
 python build_tools/devtools/ci.py iree-cmake-cpu-sanitizers --keep-going
+python build_tools/devtools/ci.py iree-cmake-vulkan --keep-going
+python build_tools/devtools/ci.py iree-cmake-vulkan-sanitizers --keep-going
 python build_tools/devtools/ci.py iree-cmake-amdgpu --keep-going
 python build_tools/devtools/ci.py iree-cmake-amdgpu-sanitizers --keep-going
 ```
@@ -128,8 +132,10 @@ scheduling. Individual sanitizer commands are the targeted reproduction form:
 
 ```bash
 python build_tools/devtools/ci.py iree-bazel-cpu-asan --target //runtime/... --keep-going
+python build_tools/devtools/ci.py iree-bazel-vulkan-asan --target //runtime/... --keep-going
 python build_tools/devtools/ci.py iree-bazel-amdgpu-tsan --target //runtime/... --keep-going
 python build_tools/devtools/ci.py iree-cmake-cpu-ubsan --keep-going
+python build_tools/devtools/ci.py iree-cmake-vulkan-ubsan --keep-going
 python build_tools/devtools/ci.py iree-cmake-amdgpu-tsan --keep-going
 ```
 

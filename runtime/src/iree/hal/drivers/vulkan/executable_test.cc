@@ -32,6 +32,8 @@ struct BdaBindingRequirementOptions {
   uint64_t minimum_length = 0;
 };
 
+static constexpr BdaBindingRequirementOptions kValidBdaBindingRequirement{1, 1};
+
 struct WrappedVulkanExecutableOptions {
   // Dispatch ABI recorded on the exported pipeline.
   iree_hal_vulkan_DispatchAbi_enum_t dispatch_abi =
@@ -564,7 +566,8 @@ TEST(ExecutableTest, RejectsBdaLayoutWithTooManyBindings) {
 TEST(ExecutableTest, RejectsBdaBindingRequirementCountMismatch) {
   WrappedVulkanExecutableOptions options = MakeWrappedBdaExecutableOptions();
   options.binding_count = 3;
-  options.binding_requirements = {{1, 0}, {1, 0}};
+  options.binding_requirements = {kValidBdaBindingRequirement,
+                                  kValidBdaBindingRequirement};
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         CreateWrappedVulkanExecutableForValidation(options));
@@ -572,7 +575,8 @@ TEST(ExecutableTest, RejectsBdaBindingRequirementCountMismatch) {
 
 TEST(ExecutableTest, RejectsBdaBindingRequirementWithZeroAlignment) {
   WrappedVulkanExecutableOptions options = MakeWrappedBdaExecutableOptions();
-  options.binding_requirements = {{1, 0}, {0, 0}, {1, 0}};
+  options.binding_requirements = {
+      kValidBdaBindingRequirement, {0, 0}, kValidBdaBindingRequirement};
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         CreateWrappedVulkanExecutableForValidation(options));
@@ -580,7 +584,8 @@ TEST(ExecutableTest, RejectsBdaBindingRequirementWithZeroAlignment) {
 
 TEST(ExecutableTest, RejectsBdaBindingRequirementWithNonPowerOfTwoAlignment) {
   WrappedVulkanExecutableOptions options = MakeWrappedBdaExecutableOptions();
-  options.binding_requirements = {{1, 0}, {3, 0}, {1, 0}};
+  options.binding_requirements = {
+      kValidBdaBindingRequirement, {3, 0}, kValidBdaBindingRequirement};
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         CreateWrappedVulkanExecutableForValidation(options));

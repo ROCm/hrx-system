@@ -30,6 +30,12 @@ CI_DRY_RUN_COMMANDS = (
     ("iree-bazel-amdgpu-tsan",),
     ("iree-bazel-amdgpu-ubsan",),
     ("iree-bazel-amdgpu-sanitizers",),
+    ("iree-bazel-vulkan",),
+    ("iree-bazel-vulkan-asan",),
+    ("iree-bazel-vulkan-msan",),
+    ("iree-bazel-vulkan-tsan",),
+    ("iree-bazel-vulkan-ubsan",),
+    ("iree-bazel-vulkan-sanitizers",),
     ("iree-cmake-cpu",),
     ("iree-cmake-cpu-asan",),
     ("iree-cmake-cpu-msan",),
@@ -42,6 +48,12 @@ CI_DRY_RUN_COMMANDS = (
     ("iree-cmake-amdgpu-tsan",),
     ("iree-cmake-amdgpu-ubsan",),
     ("iree-cmake-amdgpu-sanitizers",),
+    ("iree-cmake-vulkan",),
+    ("iree-cmake-vulkan-asan",),
+    ("iree-cmake-vulkan-msan",),
+    ("iree-cmake-vulkan-tsan",),
+    ("iree-cmake-vulkan-ubsan",),
+    ("iree-cmake-vulkan-sanitizers",),
 )
 
 

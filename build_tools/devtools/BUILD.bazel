@@ -84,6 +84,11 @@ py_test(
         "ci_config.py",
         "ci_test.py",
     ],
+    data = [
+        "//:.github/scripts/check_vulkan_hardware_environment.sh",
+        "//:.github/workflows/ci_iree_bazel.yml",
+        "//:.github/workflows/ci_iree_cmake.yml",
+    ],
     main = "ci_test.py",
 )
 

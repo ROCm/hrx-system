@@ -69,16 +69,7 @@ jobs:
         run: git config --global --add safe.directory "$PWD"
 
       - name: Fetch ROCm toolchain
-        run: |
-          python3 -m venv "${HRX_OUTPUT_DIR}/python"
-          "${HRX_PYTHON}" -m pip install --upgrade pip boto3 zstandard
-          "${HRX_PYTHON}" build_tools/ci_core_linux.py fetch-rocm
-          echo "${HRX_ROCM_ROOT}/lib/llvm/bin" >> "${GITHUB_PATH}"
-          echo "${HRX_ROCM_ROOT}/bin" >> "${GITHUB_PATH}"
-          echo "CC=${HRX_ROCM_ROOT}/lib/llvm/bin/clang" >> "${GITHUB_ENV}"
-          echo "CXX=${HRX_ROCM_ROOT}/lib/llvm/bin/clang++" >> "${GITHUB_ENV}"
-          echo "CMAKE_PREFIX_PATH=${HRX_ROCM_ROOT}${CMAKE_PREFIX_PATH:+:${CMAKE_PREFIX_PATH}}" >> "${GITHUB_ENV}"
-          echo "LD_LIBRARY_PATH=${HRX_ROCM_ROOT}/lib:${HRX_ROCM_ROOT}/lib/rocm_sysdeps/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}" >> "${GITHUB_ENV}"
+        run: bash .github/scripts/fetch_rocm_toolchain.sh
 
       - name: Install developer tools
         run: |

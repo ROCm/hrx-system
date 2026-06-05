@@ -61,10 +61,6 @@ iree_cc_test(
     iree::third_party::vulkan_headers
   LABELS
     "iree-build-requirement=runtime.hal.vulkan"
-    "iree-run-requirement=runtime.resource.vulkan_device"
-    "runtime-resource=vulkan-device"
-  RESOURCE_GROUP
-    iree-hal-drivers-vulkan-tests
 )
 endif()
 
@@ -84,10 +80,6 @@ iree_cc_test(
     iree::testing::gtest_main
   LABELS
     "iree-build-requirement=runtime.hal.vulkan"
-    "iree-run-requirement=runtime.resource.vulkan_device"
-    "runtime-resource=vulkan-device"
-  RESOURCE_GROUP
-    iree-hal-drivers-vulkan-tests
 )
 endif()
 
@@ -105,10 +97,6 @@ iree_cc_test(
     iree::testing::gtest_main
   LABELS
     "iree-build-requirement=runtime.hal.vulkan"
-    "iree-run-requirement=runtime.resource.vulkan_device"
-    "runtime-resource=vulkan-device"
-  RESOURCE_GROUP
-    iree-hal-drivers-vulkan-tests
 )
 endif()
 
@@ -126,10 +114,6 @@ iree_cc_test(
     iree::testing::gtest_main
   LABELS
     "iree-build-requirement=runtime.hal.vulkan"
-    "iree-run-requirement=runtime.resource.vulkan_device"
-    "runtime-resource=vulkan-device"
-  RESOURCE_GROUP
-    iree-hal-drivers-vulkan-tests
 )
 endif()
 
@@ -147,10 +131,6 @@ iree_cc_test(
     iree::testing::gtest_main
   LABELS
     "iree-build-requirement=runtime.hal.vulkan"
-    "iree-run-requirement=runtime.resource.vulkan_device"
-    "runtime-resource=vulkan-device"
-  RESOURCE_GROUP
-    iree-hal-drivers-vulkan-tests
 )
 endif()
 
@@ -173,10 +153,6 @@ iree_cc_test(
     iree::testing::gtest_main
   LABELS
     "iree-build-requirement=runtime.hal.vulkan"
-    "iree-run-requirement=runtime.resource.vulkan_device"
-    "runtime-resource=vulkan-device"
-  RESOURCE_GROUP
-    iree-hal-drivers-vulkan-tests
 )
 endif()
 
@@ -194,10 +170,6 @@ iree_cc_test(
     iree::testing::gtest_main
   LABELS
     "iree-build-requirement=runtime.hal.vulkan"
-    "iree-run-requirement=runtime.resource.vulkan_device"
-    "runtime-resource=vulkan-device"
-  RESOURCE_GROUP
-    iree-hal-drivers-vulkan-tests
 )
 endif()
 
@@ -215,10 +187,6 @@ iree_cc_test(
     iree::testing::gtest_main
   LABELS
     "iree-build-requirement=runtime.hal.vulkan"
-    "iree-run-requirement=runtime.resource.vulkan_device"
-    "runtime-resource=vulkan-device"
-  RESOURCE_GROUP
-    iree-hal-drivers-vulkan-tests
 )
 endif()
 
