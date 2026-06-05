@@ -243,6 +243,10 @@ dependencies pinned.
 The `dev.py` commands are intentionally thin. These pairs are equivalent in
 normal local checkouts:
 
+The CMake raw equivalents below use the default `build/cmake` tree; replace it
+with the path selected by `--cmake-build-dir` or `IREE_CMAKE_BUILD_DIR` when
+using a different tree.
+
 ```bash
 python dev.py bazel build //runtime/...
 bazel build //runtime/...
@@ -255,15 +259,15 @@ python build_tools/bazel/configure.py -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PA
 
 ```bash
 python dev.py cmake configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm -DIREE_ROCM_DEPENDENCY_MODE=package
-cmake -S . -B ../builds/$(basename "$PWD") -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm -DIREE_ROCM_DEPENDENCY_MODE=package
+cmake -S . -B build/cmake -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm -DIREE_ROCM_DEPENDENCY_MODE=package
 ```
 
 ```bash
 python dev.py cmake build hrx
-cmake --build ../builds/$(basename "$PWD") --target hrx
+cmake --build build/cmake --target hrx
 ```
 
 ```bash
 python dev.py cmake test -R hrx
-ctest --test-dir ../builds/$(basename "$PWD") --output-on-failure -R hrx
+ctest --test-dir build/cmake --output-on-failure -R hrx
 ```

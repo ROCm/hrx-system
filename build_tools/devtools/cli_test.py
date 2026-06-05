@@ -374,6 +374,8 @@ class CliTest(unittest.TestCase):
         output = self.parse_agent_md(["cmake", "--agent_md"])
 
         self.assertIn("### CMake", output)
+        self.assertIn("iree-cmake-build", output)
+        self.assertIn("build_tools/bin/iree-*-*", output)
         self.assertNotIn("### Bazel", output)
 
     def test_bazel_build_agents_md_uses_public_wrapper_names(self):
@@ -447,6 +449,24 @@ class CliTest(unittest.TestCase):
 
         self.assertIn("-R hrx", description)
         self.assertNotIn("-- -R", description)
+
+    def test_cmake_run_resolves_existing_executable_target(self):
+        args = cli.parse_arguments(["cmake", "run", "iree-run-module", "--", "--help"])
+
+        plan = args.handler(args)
+        description = plan.describe()
+
+        self.assertIn("# cmake run iree-run-module", description)
+        self.assertIn("CMake File API", description)
+        self.assertIn("exec '<built executable>' --help", description)
+
+    def test_cmake_run_agents_md_explains_no_implicit_build(self):
+        output = self.parse_agent_md(["cmake", "run", "--agents-md"])
+
+        self.assertIn("## iree-cmake-run", output)
+        self.assertIn("iree-cmake-build iree-run-module", output)
+        self.assertIn("does not build", output)
+        self.assertNotIn("python dev.py", output)
 
     def test_bazel_precommit_defaults_to_changed_paranoid_profile(self):
         args = cli.parse_arguments(["bazel", "precommit"])
@@ -616,7 +636,9 @@ class CliTest(unittest.TestCase):
         output = self.parse_help(["cmake", "configure", "--help"])
 
         self.assertIn("Configure the CMake package/install-test build tree", output)
-        self.assertIn("../builds/<checkout-name>/", output)
+        self.assertIn("build/cmake", output)
+        self.assertIn("IREE_CMAKE_BUILD_DIR", output)
+        self.assertNotIn("../builds", output)
         self.assertNotIn("backend configure tool", output)
 
     def test_bazel_build_help_explains_default_targets(self):

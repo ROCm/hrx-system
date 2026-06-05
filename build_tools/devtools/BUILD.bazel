@@ -17,6 +17,8 @@ py_library(
         "ci.py",
         "ci_config.py",
         "cli.py",
+        "cmake.py",
+        "cmake_file_api.py",
         "command_plan.py",
         "doctor.py",
         "environment.py",
@@ -25,6 +27,7 @@ py_library(
         "presubmit.py",
         "project_presubmit.py",
         "setup.py",
+        "smoke_test_lib.py",
     ],
 )
 
@@ -38,8 +41,36 @@ py_binary(
 )
 
 py_binary(
-    name = "smoke_test",
-    srcs = ["smoke_test.py"],
+    name = "bazel_smoke_test",
+    srcs = [
+        "__init__.py",
+        "bazel_smoke_test.py",
+        "smoke_test_lib.py",
+    ],
+    imports = ["build_tools/devtools"],
+    main = "bazel_smoke_test.py",
+)
+
+py_binary(
+    name = "cli_smoke_test",
+    srcs = [
+        "__init__.py",
+        "cli_smoke_test.py",
+        "smoke_test_lib.py",
+    ],
+    imports = ["build_tools/devtools"],
+    main = "cli_smoke_test.py",
+)
+
+py_binary(
+    name = "cmake_smoke_test",
+    srcs = [
+        "__init__.py",
+        "cmake_smoke_test.py",
+        "smoke_test_lib.py",
+    ],
+    imports = ["build_tools/devtools"],
+    main = "cmake_smoke_test.py",
 )
 
 py_test(
@@ -60,6 +91,8 @@ py_test(
         "bazel.py",
         "cli.py",
         "cli_test.py",
+        "cmake.py",
+        "cmake_file_api.py",
         "command_plan.py",
         "doctor.py",
         "environment.py",
@@ -69,6 +102,28 @@ py_test(
         "setup.py",
     ],
     main = "cli_test.py",
+)
+
+py_test(
+    name = "cmake_file_api_test",
+    srcs = [
+        "cmake_file_api.py",
+        "cmake_file_api_test.py",
+    ],
+    main = "cmake_file_api_test.py",
+)
+
+py_test(
+    name = "cmake_test",
+    srcs = [
+        "__init__.py",
+        "cmake.py",
+        "cmake_file_api.py",
+        "cmake_test.py",
+        "command_plan.py",
+        "environment.py",
+    ],
+    main = "cmake_test.py",
 )
 
 py_test(

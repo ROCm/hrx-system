@@ -73,9 +73,10 @@ python dev.py cmake test
 With no explicit targets, the Bazel build and test commands cover
 `//runtime/...` and `//libhrx/...`. In the CMake lane, positional build
 arguments are target names, so `python dev.py cmake build hrx` maps to
-`cmake --build ... --target hrx`. The CMake lane writes its build tree outside
-the checkout at `../builds/<checkout-name>/`. Source-build and embedding
-configuration options are documented in `BUILDING.md`.
+`cmake --build ... --target hrx`. The first CMake configure uses `build/cmake`
+unless `--cmake-build-dir` or `IREE_CMAKE_BUILD_DIR` selects another tree, and
+the selected tree is recorded for later CMake wrapper invocations. Source-build
+and embedding configuration options are documented in `BUILDING.md`.
 
 ## Before Commit
 
@@ -145,15 +146,17 @@ Core developer-tool tests:
 bazel test --config=presubmit //build_tools/bazel:configure_test //build_tools/devtools:cli_test //build_tools/devtools:command_plan_test //build_tools/devtools:setup_test
 ```
 
-Checkout smoke test for the command router:
+Checkout smoke tests for the command router and checked-in wrappers:
 
 ```bash
-python build_tools/devtools/smoke_test.py --from-working-tree --scenario dry-run
+python build_tools/devtools/cli_smoke_test.py --from-working-tree --scenario dry-run
+python build_tools/devtools/bazel_smoke_test.py --from-working-tree --scenario dry-run
+python build_tools/devtools/cmake_smoke_test.py --from-working-tree --scenario dry-run
 ```
 
-The smoke test creates a temporary checkout, runs dry-run
-setup/configure/hook/presubmit commands, and verifies those dry-runs do not
-create a venv, hook config, generated Bazel rc, or external tool root.
+The smoke tests create temporary checkouts, run dry-run setup/configure/wrapper
+commands, and verify those dry-runs do not create a venv, hook config,
+generated Bazel rc, try workspace, or external tool root.
 
 More detail on profiles and hook internals lives in
 `build_tools/lefthook/README.md`.

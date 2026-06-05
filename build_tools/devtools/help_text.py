@@ -100,9 +100,10 @@ BUILDING.md. Use .bazelrc.local for checkout-specific Bazel overrides.""",
   python dev.py cmake configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm -DIREE_ROCM_DEPENDENCY_MODE=package
   python dev.py --cmake-build-dir build/cmake-asan cmake configure -DIREE_ENABLE_ASAN=ON
 
-The build tree lives outside the checkout at ../builds/<checkout-name>/.
-Use --cmake-build-dir to select a different tree for CI, experiments, or
-parallel configurations.
+The first configure uses build/cmake unless --cmake-build-dir or
+IREE_CMAKE_BUILD_DIR selects another tree. The selected tree is recorded for
+later iree-cmake-build, iree-cmake-test, iree-cmake-run, iree-cmake-try, and
+iree-cmake-fuzz invocations.
 Published project build options live in BUILDING.md.""",
         )
     if command == "build":
@@ -147,7 +148,7 @@ Positional arguments are target names and become cmake --build ... --target
   python dev.py cmake test -R hrx
   python dev.py cmake test --rerun-failed
 
-CTest runs in ../builds/<checkout-name>/ with --output-on-failure.""",
+CTest runs in the selected CMake build tree with --output-on-failure.""",
         )
     if command == "query" and lane == "bazel":
         return CommandHelp(
@@ -299,7 +300,18 @@ explicit --dep labels.""",
 This builds with --config=fuzzer, resolves executable paths with cquery, then
 runs the fuzzer binaries directly. Single-target runs exec the fuzzer process.""",
         )
-    if command in ("run", "try", "fuzz"):
+    if command == "run" and lane == "cmake":
+        return CommandHelp(
+            description="Run an already-built CMake executable target.",
+            arguments="CMake executable target, followed by -- and program arguments.",
+            epilog="""Examples:
+  python dev.py cmake run iree-run-module -- --help
+  python dev.py cmake run -p iree-run-module
+
+This resolves the executable with the CMake File API and then execs it from the
+current directory. It does not build; run `iree-cmake-build <target>` first.""",
+        )
+    if command in ("try", "fuzz"):
         return CommandHelp(
             description=f"{command} support for {build_system_name}.",
             arguments="Command arguments.",
@@ -348,11 +360,11 @@ def agent_markdown_header() -> str:
     return """## Developer Commands
 
 Run from the repository root. Prefer generated wrapper aliases such as
-`iree-bazel-build`; checked-in `build_tools/bin/iree-bazel-*` launchers are
-available for Bazel root-relative scripts and unconfigured shells. Long flags
-accept hyphen or underscore spellings, such as `--dry-run` and `--dry_run`.
-Common wrapper flags work after the wrapper name: `-n/--dry-run`,
-`-v/--verbose`, `--system`, `--venv`, `--tool-root DIR`, and
+`iree-bazel-build` and `iree-cmake-build`; checked-in
+`build_tools/bin/iree-*-*` launchers are available for root-relative scripts and
+unconfigured shells. Long flags accept hyphen or underscore spellings, such as
+`--dry-run` and `--dry_run`. Common wrapper flags work after the wrapper name:
+`-n/--dry-run`, `-v/--verbose`, `--system`, `--venv`, `--tool-root DIR`, and
 `--cmake-build-dir DIR`. Command-specific debugging flags include
 `iree-bazel-run -p/--print-path` and `iree-bazel-try -k/--keep`. Use `--`
 before a native option that conflicts with a wrapper flag. Published build
@@ -394,8 +406,8 @@ def cmake_agent_markdown() -> str:
     return """### CMake
 
 Use `iree-cmake-*` for package and install-test workflows. `iree-cmake-configure`
-writes `../builds/<checkout-name>/`. `iree-cmake-build TARGET` maps to
-`cmake --build ... --target TARGET`.
+records the selected build tree for later wrappers. `iree-cmake-build TARGET`
+maps to `cmake --build ... --target TARGET`.
 
 ```bash
 iree-cmake-configure
@@ -404,13 +416,15 @@ iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm -DIR
 iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=OFF -DLIBHRX_BUILD=OFF
 iree-cmake-build hrx
 iree-cmake-test -R hrx
+iree-cmake-run iree-run-module -- --help
 iree-cmake-dev precommit
 iree-cmake-dev presubmit
 ```
 
 `iree-cmake-dev precommit` checks local changes. The paranoid profile adds
 affected project CMake/CTest checks. `iree-cmake-dev presubmit` is the
-full-tree CI-shaped check."""
+full-tree CI-shaped check. `iree-cmake-run` resolves an already-built
+executable and does not build implicitly."""
 
 
 def bazel_command_agent_markdown(command: str) -> str:
@@ -583,7 +597,9 @@ iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm -DIR
 iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=OFF -DLIBHRX_BUILD=OFF
 ```
 
-The default build tree is `../builds/<checkout-name>/`."""
+The first configure uses `build/cmake` unless `--cmake-build-dir` or
+`IREE_CMAKE_BUILD_DIR` selects another tree. The selected tree is recorded for
+later CMake wrappers."""
 
     if command == "build":
         return """## iree-cmake-build
@@ -610,5 +626,21 @@ iree-cmake-test --rerun-failed
 ```
 
 CTest options are forwarded unchanged."""
+
+    if command == "run":
+        return """## iree-cmake-run
+
+Run an already-built executable target from the configured CMake build tree. It
+resolves the target with the CMake File API and execs the binary from the
+current directory. It does not build; run `iree-cmake-build <target>` first.
+
+```bash
+iree-cmake-build iree-run-module
+iree-cmake-run iree-run-module -- --help
+iree-cmake-run -p iree-run-module
+```
+
+Program arguments go after `--`. `-p/--print-path` prints the resolved binary
+without running it."""
 
     return cmake_agent_markdown()

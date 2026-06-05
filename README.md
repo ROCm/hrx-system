@@ -57,9 +57,9 @@ python dev.py cmake configure \
   -DIREE_HAL_AMDGPU_TARGETS='gfx942;gfx1151;gfx1201'
 
 python dev.py cmake build
-cmake --install ../builds/$(basename "$PWD") --prefix build/hrx-install \
+cmake --install build/cmake --prefix build/hrx-install \
   --component HrxPublicDist
-cmake --install ../builds/$(basename "$PWD") --prefix build/hrx-tests \
+cmake --install build/cmake --prefix build/hrx-tests \
   --component HrxTestsDist
 ```
 

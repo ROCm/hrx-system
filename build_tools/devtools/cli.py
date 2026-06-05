@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 from build_tools.devtools import bazel as bazel_dev
+from build_tools.devtools import cmake as cmake_dev
 from build_tools.devtools import doctor, help_text, hooks, presubmit, setup
 from build_tools.devtools.command_plan import CommandPlan, CommandStep, ExecCommandStep
 from build_tools.devtools.environment import (
@@ -97,16 +98,6 @@ def add_argument(
     return parser.add_argument(*expand_option_aliases(option_strings), **kwargs)
 
 
-def cmake_build_dir(args: argparse.Namespace | None = None) -> Path:
-    configured_build_dir = getattr(args, "cmake_build_dir", None)
-    if configured_build_dir is not None:
-        build_dir = Path(configured_build_dir)
-        if build_dir.is_absolute():
-            return build_dir
-        return REPO_ROOT / build_dir
-    return REPO_ROOT.parent / "builds" / REPO_ROOT.name
-
-
 def build_system_display_name(lane: str) -> str:
     if lane == "bazel":
         return "Bazel"
@@ -121,28 +112,14 @@ def forwarded_args(args: list[str]) -> list[str]:
     return args
 
 
-def cmake_build_args(backend_args: list[str]) -> list[str]:
-    target_names = []
-    raw_args = []
-    for index, arg in enumerate(backend_args):
-        if arg.startswith("-"):
-            raw_args = backend_args[index:]
-            break
-        target_names.append(arg)
-    else:
-        raw_args = []
-
-    cmake_args = []
-    for target_name in target_names:
-        cmake_args.extend(["--target", target_name])
-    cmake_args.extend(raw_args)
-    return cmake_args
-
-
 def bazel_targets_or_defaults(backend_args: list[str]) -> list[str]:
     if any(not arg.startswith("-") for arg in backend_args):
         return backend_args
     return [*backend_args, *DEFAULT_BAZEL_TARGETS]
+
+
+def selected_cmake_build_dir(args: argparse.Namespace) -> Path | None:
+    return getattr(args, "cmake_build_dir", None)
 
 
 def option_name(arg: str) -> str:
@@ -666,9 +643,7 @@ def add_lane_commands(subparsers: argparse._SubParsersAction, lane: str) -> None
             "args", nargs=argparse.REMAINDER, help=command_help.arguments
         )
         command_parser.set_defaults(
-            handler=handle_bazel_runnable_command
-            if lane == "bazel"
-            else handle_unimplemented_backend_command,
+            handler=handler_for_runnable_command(lane, command_name),
             lane=lane,
             backend_command=command_name,
         )
@@ -739,29 +714,24 @@ def handle_configure(args: argparse.Namespace) -> CommandPlan:
     tool_env = existing_or_system_environment(args)
     backend_args = forwarded_args(args.args)
     if args.lane == "bazel":
-        command = [
-            tool_env.python,
-            str(REPO_ROOT / "build_tools/bazel/configure.py"),
-            *backend_args,
-        ]
-    else:
-        command = [
-            tool_env.tool("cmake"),
-            "-S",
-            str(REPO_ROOT),
-            "-B",
-            str(cmake_build_dir(args)),
-            *backend_args,
-        ]
-    return CommandPlan(
-        [
-            CommandStep(
-                command,
-                cwd=REPO_ROOT,
-                env=tool_env.path_env(),
-                label=f"configure {args.lane}",
-            )
-        ]
+        return CommandPlan(
+            [
+                CommandStep(
+                    [
+                        tool_env.python,
+                        str(REPO_ROOT / "build_tools/bazel/configure.py"),
+                        *backend_args,
+                    ],
+                    cwd=REPO_ROOT,
+                    env=tool_env.path_env(),
+                    label="configure bazel",
+                )
+            ]
+        )
+    return cmake_dev.configure_plan(
+        tool_env,
+        configured_build_dir=getattr(args, "cmake_build_dir", None),
+        backend_args=backend_args,
     )
 
 
@@ -771,24 +741,20 @@ def handle_build(args: argparse.Namespace) -> CommandPlan:
     if args.lane == "bazel":
         targets = bazel_targets_or_defaults(backend_args)
         command = [tool_env.tool("bazel"), "build", *targets]
-        step_class = ExecCommandStep
-    else:
-        command = [
-            tool_env.tool("cmake"),
-            "--build",
-            str(cmake_build_dir(args)),
-            *cmake_build_args(backend_args),
-        ]
-        step_class = CommandStep
-    return CommandPlan(
-        [
-            step_class(
-                command,
-                cwd=REPO_ROOT,
-                env=tool_env.path_env(),
-                label=f"{args.lane} build",
-            )
-        ]
+        return CommandPlan(
+            [
+                ExecCommandStep(
+                    command,
+                    cwd=REPO_ROOT,
+                    env=tool_env.path_env(),
+                    label="bazel build",
+                )
+            ]
+        )
+    return cmake_dev.build_plan(
+        tool_env,
+        configured_build_dir=getattr(args, "cmake_build_dir", None),
+        backend_args=backend_args,
     )
 
 
@@ -798,25 +764,20 @@ def handle_test(args: argparse.Namespace) -> CommandPlan:
     if args.lane == "bazel":
         targets = bazel_targets_or_defaults(backend_args)
         command = [tool_env.tool("bazel"), "test", "--config=presubmit", *targets]
-        step_class = ExecCommandStep
-    else:
-        command = [
-            tool_env.tool("ctest"),
-            "--test-dir",
-            str(cmake_build_dir(args)),
-            "--output-on-failure",
-            *backend_args,
-        ]
-        step_class = CommandStep
-    return CommandPlan(
-        [
-            step_class(
-                command,
-                cwd=REPO_ROOT,
-                env=tool_env.path_env(),
-                label=f"{args.lane} test",
-            )
-        ]
+        return CommandPlan(
+            [
+                ExecCommandStep(
+                    command,
+                    cwd=REPO_ROOT,
+                    env=tool_env.path_env(),
+                    label="bazel test",
+                )
+            ]
+        )
+    return cmake_dev.test_plan(
+        tool_env,
+        configured_build_dir=getattr(args, "cmake_build_dir", None),
+        backend_args=backend_args,
     )
 
 
@@ -867,12 +828,32 @@ def handle_bazel_runnable_command(args: argparse.Namespace) -> CommandPlan:
     return CommandPlan([step])
 
 
+def handler_for_runnable_command(lane: str, command_name: str):
+    if lane == "bazel":
+        return handle_bazel_runnable_command
+    if lane == "cmake" and command_name == "run":
+        return handle_cmake_run_command
+    return handle_unimplemented_backend_command
+
+
+def handle_cmake_run_command(args: argparse.Namespace) -> CommandPlan:
+    tool_env = existing_or_system_environment(args)
+    return cmake_dev.run_plan(
+        tool_env,
+        configured_build_dir=getattr(args, "cmake_build_dir", None),
+        backend_args=forwarded_args(args.args),
+        run_cwd=Path.cwd(),
+    )
+
+
 def handle_presubmit(args: argparse.Namespace) -> CommandPlan:
     return presubmit.presubmit_plan(
         args.lane,
         existing_or_system_environment(args),
         args.profile,
-        cmake_build_dir=cmake_build_dir(args) if args.lane == "cmake" else None,
+        cmake_build_dir=(
+            selected_cmake_build_dir(args) if args.lane == "cmake" else None
+        ),
         verbose=args.verbose,
         project_tests=args.project_tests,
     )
@@ -885,7 +866,9 @@ def handle_precommit(args: argparse.Namespace) -> CommandPlan:
         args.profile,
         base=args.base,
         commit=args.commit,
-        cmake_build_dir=cmake_build_dir(args) if args.lane == "cmake" else None,
+        cmake_build_dir=(
+            selected_cmake_build_dir(args) if args.lane == "cmake" else None
+        ),
         staged=args.staged,
         paths=args.paths,
         verbose=args.verbose,
