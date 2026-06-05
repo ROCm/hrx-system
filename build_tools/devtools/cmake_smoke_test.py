@@ -38,11 +38,13 @@ def run_dry_run_scenario(checkout: Path) -> None:
         ["-n", "-DIREE_HAL_DRIVER_AMDGPU=OFF", "-DLIBHRX_BUILD=OFF"],
     )
     smoke_test_lib.run_bin_wrapper(
-        checkout, "iree-cmake-build", ["-n", "hrx", "--parallel", "8"]
+        checkout, "iree-cmake-build", ["-n", "hrx::hrx", "--parallel", "8"]
     )
     smoke_test_lib.run_bin_wrapper(checkout, "iree-cmake-test", ["-n", "-R", "hrx"])
     smoke_test_lib.run_bin_wrapper(
-        checkout, "iree-cmake-run", ["-n", "iree-run-module", "--", "--help"]
+        checkout,
+        "iree-cmake-run",
+        ["-n", "iree::tools::iree-run-module", "--", "--help"],
     )
     smoke_test_lib.assert_absent(checkout / ".bazelrc.configured")
     smoke_test_lib.assert_absent(checkout / ".venv")

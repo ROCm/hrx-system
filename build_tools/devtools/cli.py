@@ -14,7 +14,14 @@ from pathlib import Path
 
 from build_tools.devtools import bazel as bazel_dev
 from build_tools.devtools import cmake as cmake_dev
-from build_tools.devtools import doctor, help_text, hooks, presubmit, setup
+from build_tools.devtools import (
+    cmake_file_api,
+    doctor,
+    help_text,
+    hooks,
+    presubmit,
+    setup,
+)
 from build_tools.devtools.command_plan import CommandPlan, CommandStep, ExecCommandStep
 from build_tools.devtools.environment import (
     REPO_ROOT,
@@ -909,7 +916,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_arguments(sys.argv[1:] if argv is None else argv)
     try:
         plan = args.handler(args)
-    except (FileNotFoundError, ValueError) as exc:
+    except (FileNotFoundError, ValueError, cmake_file_api.FileApiError) as exc:
         print(f"dev.py: {exc}", file=sys.stderr)
         return 2
     return plan.run(dry_run=args.dry_run, verbose=args.verbose)

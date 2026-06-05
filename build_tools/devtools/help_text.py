@@ -123,12 +123,14 @@ With no explicit target, this builds //runtime/... and //libhrx/....""",
             arguments="Target names followed by native CMake build options.",
             epilog="""Examples:
   python dev.py cmake build hrx
-  python dev.py cmake build libhrx_src_libhrx_hrx
+  python dev.py cmake build hrx::hrx
   python dev.py cmake build hrx --parallel 8
   python dev.py cmake build --parallel 8
 
 Positional arguments are target names and become cmake --build ... --target
-<name>. Option-looking arguments are forwarded to CMake.""",
+<name>. Configured CMake aliases such as iree::base and hrx::hrx are translated
+to their concrete generator targets. Option-looking arguments are forwarded to
+CMake.""",
         )
     if command == "test":
         if lane == "bazel":
@@ -306,6 +308,7 @@ runs the fuzzer binaries directly. Single-target runs exec the fuzzer process.""
             arguments="CMake executable target, followed by -- and program arguments.",
             epilog="""Examples:
   python dev.py cmake run iree-run-module -- --help
+  python dev.py cmake run iree::tools::iree-run-module -- --help
   python dev.py cmake run -p iree-run-module
 
 This resolves the executable with the CMake File API and then execs it from the
@@ -414,9 +417,9 @@ iree-cmake-configure
 iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=ON
 iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm -DIREE_ROCM_DEPENDENCY_MODE=package
 iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=OFF -DLIBHRX_BUILD=OFF
-iree-cmake-build hrx
+iree-cmake-build hrx::hrx
 iree-cmake-test -R hrx
-iree-cmake-run iree-run-module -- --help
+iree-cmake-run iree::tools::iree-run-module -- --help
 iree-cmake-dev precommit
 iree-cmake-dev presubmit
 ```
@@ -608,11 +611,14 @@ Build targets in the configured CMake build tree.
 
 ```bash
 iree-cmake-build hrx
+iree-cmake-build hrx::hrx
 iree-cmake-build --parallel 8
 iree-cmake-build hrx --parallel 8
 ```
 
-Positional arguments before option-looking arguments are CMake target names."""
+Positional arguments before option-looking arguments are CMake target names.
+Configured aliases such as `iree::base` and `hrx::hrx` are translated to their
+concrete generator targets."""
 
     if command == "test":
         return """## iree-cmake-test
@@ -637,6 +643,7 @@ current directory. It does not build; run `iree-cmake-build <target>` first.
 ```bash
 iree-cmake-build iree-run-module
 iree-cmake-run iree-run-module -- --help
+iree-cmake-run iree::tools::iree-run-module -- --help
 iree-cmake-run -p iree-run-module
 ```
 

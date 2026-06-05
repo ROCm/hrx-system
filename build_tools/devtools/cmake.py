@@ -106,7 +106,12 @@ def build_dir(
     return DEFAULT_CMAKE_BUILD_DIR
 
 
-def build_args(backend_args: list[str]) -> list[str]:
+def build_args(
+    backend_args: list[str],
+    *,
+    configured_build_dir: Path | None = None,
+) -> list[str]:
+    requested_build_dir = build_dir(configured_build_dir)
     target_names = []
     raw_args = []
     for index, arg in enumerate(backend_args):
@@ -119,6 +124,10 @@ def build_args(backend_args: list[str]) -> list[str]:
 
     cmake_args = []
     for target_name in target_names:
+        target_name = cmake_file_api.resolve_target_name(
+            requested_build_dir,
+            target_name,
+        )
         cmake_args.extend(["--target", target_name])
     cmake_args.extend(raw_args)
     return cmake_args
@@ -258,7 +267,10 @@ def build_plan(
                     tool_env.tool("cmake"),
                     "--build",
                     str(build_dir(configured_build_dir)),
-                    *build_args(backend_args),
+                    *build_args(
+                        backend_args,
+                        configured_build_dir=configured_build_dir,
+                    ),
                 ],
                 cwd=REPO_ROOT,
                 env=tool_env.path_env(),

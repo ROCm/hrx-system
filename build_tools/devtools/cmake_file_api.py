@@ -28,13 +28,44 @@ def codemodel_query_path(build_dir: Path) -> Path:
     return build_dir / ".cmake/api/v1/query/codemodel-v2"
 
 
+def target_aliases_path(build_dir: Path) -> Path:
+    return build_dir / ".iree/target_aliases.json"
+
+
+def resolve_target_name(build_dir: Path, target_name: str) -> str:
+    aliases = load_target_aliases(build_dir)
+    return aliases.get(target_name, target_name)
+
+
 def resolve_executable(build_dir: Path, target_name: str) -> CMakeExecutableTarget:
+    resolved_target_name = resolve_target_name(build_dir, target_name)
     for target in executable_targets(build_dir):
-        if target.name == target_name:
+        if target.name == resolved_target_name:
             return target
     raise FileApiError(
         f"CMake executable target {target_name!r} was not found in {build_dir}"
     )
+
+
+def load_target_aliases(build_dir: Path) -> dict[str, str]:
+    alias_path = target_aliases_path(build_dir)
+    if not alias_path.is_file():
+        return {}
+    try:
+        with alias_path.open("r", encoding="utf-8") as file:
+            loaded = json.load(file)
+    except json.JSONDecodeError as exc:
+        raise FileApiError(f"CMake target alias map is invalid: {alias_path}") from exc
+    if not isinstance(loaded, dict):
+        raise FileApiError(f"CMake target alias map is not an object: {alias_path}")
+    aliases = {}
+    for alias_name, target_name in loaded.items():
+        if not isinstance(alias_name, str) or not isinstance(target_name, str):
+            raise FileApiError(
+                f"CMake target alias map contains a non-string entry: {alias_path}"
+            )
+        aliases[alias_name] = target_name
+    return aliases
 
 
 def executable_targets(build_dir: Path) -> list[CMakeExecutableTarget]:

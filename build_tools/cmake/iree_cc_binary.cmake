@@ -80,7 +80,7 @@ function(iree_cc_binary)
     if(_DEBUG_IREE_PACKAGE_NAME)
       message(STATUS "  + alias ${_PACKAGE_NS}::${_RULE_NAME}")
     endif()
-    add_executable(${_PACKAGE_NS}::${_RULE_NAME} ALIAS ${_NAME})
+    iree_add_alias_executable(${_PACKAGE_NS}::${_RULE_NAME} ${_NAME})
 
     # If the binary name matches the package then treat it as a default. For
     # example, foo/bar/ library 'bar' would end up as 'foo::bar'. This isn't
@@ -88,7 +88,7 @@ function(iree_cc_binary)
     # libraries and in Bazel.
     iree_package_dir(_PACKAGE_DIR)
     if("${_RULE_NAME}" STREQUAL "${_PACKAGE_DIR}")
-      add_executable(${_PACKAGE_NS} ALIAS ${_NAME})
+      iree_add_alias_executable(${_PACKAGE_NS} ${_NAME})
     endif()
   endif()
 

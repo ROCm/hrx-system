@@ -190,3 +190,5 @@ if(IREE_BUILD_TESTS)
   iree_create_ctest_customization()
   hrx_create_installed_tests()
 endif()
+
+iree_write_target_alias_map()

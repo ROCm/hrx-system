@@ -57,7 +57,7 @@ function(iree_cc_fuzz)
 
   add_executable(${_NAME} "")
   # Alias the iree_package_name fuzz binary to iree::package::name.
-  add_executable(${_PACKAGE_NS}::${_RULE_NAME} ALIAS ${_NAME})
+  iree_add_alias_executable(${_PACKAGE_NS}::${_RULE_NAME} ${_NAME})
 
   set_target_properties(${_NAME} PROPERTIES OUTPUT_NAME "${_RULE_NAME}")
   target_sources(${_NAME}

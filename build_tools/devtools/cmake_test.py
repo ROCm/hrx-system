@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -64,6 +66,66 @@ class CMakeTest(unittest.TestCase):
             cmake_dev.build_args(["hrx", "iree-run-module", "--parallel", "8"]),
             ["--target", "hrx", "--target", "iree-run-module", "--parallel", "8"],
         )
+
+    def test_default_fuzz_cache_dir_uses_platform_cache_roots(self):
+        self.assertEqual(
+            fuzz.default_fuzz_cache_dir(
+                environ={"XDG_CACHE_HOME": "/cache"},
+                platform="linux",
+                home=Path("/home/user"),
+            ),
+            Path("/cache/iree-fuzz-cache"),
+        )
+        self.assertEqual(
+            fuzz.default_fuzz_cache_dir(
+                environ={"LOCALAPPDATA": "C:/Users/user/AppData/Local"},
+                platform="win32",
+                home=Path("C:/Users/user"),
+            ),
+            Path("C:/Users/user/AppData/Local/iree-fuzz-cache"),
+        )
+        self.assertEqual(
+            fuzz.default_fuzz_cache_dir(
+                environ={},
+                platform="darwin",
+                home=Path("/Users/user"),
+            ),
+            Path("/Users/user/Library/Caches/iree-fuzz-cache"),
+        )
+
+    def test_default_fuzz_cache_dir_respects_environment_override(self):
+        self.assertEqual(
+            fuzz.default_fuzz_cache_dir(
+                environ={"IREE_FUZZ_CACHE": "custom-corpus"},
+                platform="linux",
+                home=Path("/home/user"),
+            ),
+            Path("custom-corpus"),
+        )
+
+    def test_build_args_translate_configured_aliases(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            build_dir = Path(temporary_dir)
+            alias_path = build_dir / ".iree/target_aliases.json"
+            alias_path.parent.mkdir()
+            alias_path.write_text(
+                json.dumps(
+                    {
+                        "iree::tools::iree-run-module": (
+                            "runtime_src_tools_iree-run-module"
+                        )
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                cmake_dev.build_args(
+                    ["iree::tools::iree-run-module", "--parallel", "8"],
+                    configured_build_dir=build_dir,
+                ),
+                ["--target", "runtime_src_tools_iree-run-module", "--parallel", "8"],
+            )
 
     def test_configure_build_and_test_plans_use_selected_build_dir(self):
         tool_env = ToolEnvironment(ToolMode.SYSTEM, None)

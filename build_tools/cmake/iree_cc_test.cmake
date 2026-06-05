@@ -80,7 +80,7 @@ function(iree_cc_test)
   # Alias the iree_package_name test binary to iree::package::name.
   # This lets us more clearly map to Bazel and makes it possible to
   # disambiguate the underscores in paths vs. the separators.
-  add_executable(${_PACKAGE_NS}::${_RULE_NAME} ALIAS ${_NAME})
+  iree_add_alias_executable(${_PACKAGE_NS}::${_RULE_NAME} ${_NAME})
 
   # If the test binary name matches the package then treat it as a default.
   # For example, foo/bar/ library 'bar' would end up as 'foo::bar'. This isn't
@@ -88,7 +88,7 @@ function(iree_cc_test)
   # libraries.
   iree_package_dir(_PACKAGE_DIR)
   if(${_RULE_NAME} STREQUAL ${_PACKAGE_DIR})
-    add_executable(${_PACKAGE_NS} ALIAS ${_NAME})
+    iree_add_alias_executable(${_PACKAGE_NS} ${_NAME})
   endif()
 
   set_target_properties(${_NAME} PROPERTIES OUTPUT_NAME "${_RULE_NAME}")

@@ -21,6 +21,10 @@ class CMakeFileApiTest(unittest.TestCase):
             reply_dir = build_dir / ".cmake/api/v1/reply"
             reply_dir.mkdir(parents=True)
             self.write_json(
+                cmake_file_api.target_aliases_path(build_dir),
+                {"iree::tools::iree-run-module": "runtime_src_tools_iree-run-module"},
+            )
+            self.write_json(
                 reply_dir / "index-1.json",
                 {"objects": [{"kind": "codemodel", "jsonFile": "codemodel-v2.json"}]},
             )
@@ -32,6 +36,10 @@ class CMakeFileApiTest(unittest.TestCase):
                             "targets": [
                                 {
                                     "name": "iree-run-module",
+                                    "jsonFile": "target-iree-run-module.json",
+                                },
+                                {
+                                    "name": "runtime_src_tools_iree-run-module",
                                     "jsonFile": "target-iree-run-module.json",
                                 },
                                 {
@@ -65,6 +73,13 @@ class CMakeFileApiTest(unittest.TestCase):
             self.assertEqual(target.name, "iree-run-module")
             self.assertEqual(target.path, build_dir / "tools/iree-run-module")
 
+            alias_target = cmake_file_api.resolve_executable(
+                build_dir,
+                "iree::tools::iree-run-module",
+            )
+
+            self.assertEqual(alias_target.path, build_dir / "tools/iree-run-module")
+
     def test_resolve_executable_reports_missing_reply(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
             with self.assertRaises(cmake_file_api.FileApiError):
@@ -74,6 +89,7 @@ class CMakeFileApiTest(unittest.TestCase):
                 )
 
     def write_json(self, path: Path, payload: object) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload), encoding="utf-8")
 
 

@@ -4,14 +4,62 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+function(_iree_json_escape OUTPUT_VARIABLE VALUE)
+  string(REPLACE "\\" "\\\\" _ESCAPED "${VALUE}")
+  string(REPLACE "\"" "\\\"" _ESCAPED "${_ESCAPED}")
+  set(${OUTPUT_VARIABLE} "${_ESCAPED}" PARENT_SCOPE)
+endfunction()
+
+function(iree_record_target_alias to_target from_target)
+  set_property(GLOBAL APPEND PROPERTY IREE_TARGET_ALIAS_MAP "${to_target}=${from_target}")
+endfunction()
+
+# Writes command-line tool metadata for CMake aliases. Generators and the CMake
+# File API expose the concrete target names that build systems understand, while
+# users naturally reach for project aliases such as iree::base and hrx::hrx.
+function(iree_write_target_alias_map)
+  get_property(_ALIAS_MAP GLOBAL PROPERTY IREE_TARGET_ALIAS_MAP)
+  set(_ALIAS_MAP_PATH "${CMAKE_BINARY_DIR}/.iree/target_aliases.json")
+  file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/.iree")
+  set(_ALIAS_MAP_JSON "{\n")
+  if(_ALIAS_MAP)
+    list(REMOVE_DUPLICATES _ALIAS_MAP)
+    list(SORT _ALIAS_MAP)
+    set(_SEPARATOR "")
+    foreach(_ALIAS_ENTRY IN LISTS _ALIAS_MAP)
+      string(FIND "${_ALIAS_ENTRY}" "=" _SEPARATOR_OFFSET)
+      if(_SEPARATOR_OFFSET EQUAL -1)
+        continue()
+      endif()
+      string(SUBSTRING "${_ALIAS_ENTRY}" 0 ${_SEPARATOR_OFFSET} _ALIAS_NAME)
+      math(EXPR _TARGET_NAME_OFFSET "${_SEPARATOR_OFFSET} + 1")
+      string(SUBSTRING "${_ALIAS_ENTRY}" ${_TARGET_NAME_OFFSET} -1 _TARGET_NAME)
+      _iree_json_escape(_JSON_ALIAS_NAME "${_ALIAS_NAME}")
+      _iree_json_escape(_JSON_TARGET_NAME "${_TARGET_NAME}")
+      string(APPEND _ALIAS_MAP_JSON
+        "${_SEPARATOR}  \"${_JSON_ALIAS_NAME}\": \"${_JSON_TARGET_NAME}\"")
+      set(_SEPARATOR ",\n")
+    endforeach()
+    string(APPEND _ALIAS_MAP_JSON "\n")
+  endif()
+  string(APPEND _ALIAS_MAP_JSON "}\n")
+  file(WRITE "${_ALIAS_MAP_PATH}" "${_ALIAS_MAP_JSON}")
+endfunction()
+
 function(iree_add_alias_library to_target from_target)
   add_library(${to_target} ALIAS ${from_target})
+  iree_record_target_alias(${to_target} ${from_target})
   # Yes: Leading-lowercase property names are load bearing and the recommended
   # way to do this: https://gitlab.kitware.com/cmake/cmake/-/issues/19261
   # We have to export the aliases on the target, and the when we generate
   # IREEConfig.cmake, generate code to re-establish the alias on import.
   # Yeah, this is completely sane.
   set_property(TARGET ${from_target} APPEND PROPERTY iree_ALIAS_TO ${to_target})
+endfunction()
+
+function(iree_add_alias_executable to_target from_target)
+  add_executable(${to_target} ALIAS ${from_target})
+  iree_record_target_alias(${to_target} ${from_target})
 endfunction()
 
 function(iree_install_targets)
