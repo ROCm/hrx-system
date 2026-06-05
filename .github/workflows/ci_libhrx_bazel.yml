@@ -1,0 +1,109 @@
+# Copyright 2026 The HRX Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+name: CI libhrx Bazel
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".bazelrc"
+      - ".bazelrc.configured"
+      - ".github/workflows/ci_libhrx_bazel.yml"
+      - "BUILD.bazel"
+      - "BUILDING.md"
+      - "MODULE.bazel"
+      - "MODULE.bazel.lock"
+      - "dev.py"
+      - "requirements-dev.in"
+      - "requirements-dev.lock.txt"
+      - "build_tools/**"
+      - "runtime/**"
+      - "libhrx/**"
+      - "third_party/**"
+  push:
+    branches: [main, main-staging]
+    paths:
+      - ".bazelrc"
+      - ".bazelrc.configured"
+      - ".github/workflows/ci_libhrx_bazel.yml"
+      - "BUILD.bazel"
+      - "BUILDING.md"
+      - "MODULE.bazel"
+      - "MODULE.bazel.lock"
+      - "dev.py"
+      - "requirements-dev.in"
+      - "requirements-dev.lock.txt"
+      - "build_tools/**"
+      - "runtime/**"
+      - "libhrx/**"
+      - "third_party/**"
+
+permissions:
+  contents: read
+
+jobs:
+  linux_amdgpu_build_host_tests:
+    name: Linux / AMDGPU Build + Host Tests
+    runs-on: aws-linux-scale-rocm-prod
+    timeout-minutes: 45
+    container:
+      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:702a5133851e6d1daf1207d2c9fbb01c2667914a5b6dc5a01faeb3ce66ea6421
+    env:
+      HRX_ARTIFACT_SET: core
+      HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/libhrx-bazel/downloads
+      HRX_OUTPUT_DIR: ${{ github.workspace }}/build/libhrx-bazel
+      HRX_PYTHON: ${{ github.workspace }}/build/libhrx-bazel/python/bin/python3
+      HRX_RELEASE_TYPE: nightly
+      HRX_ROCM_ROOT: ${{ github.workspace }}/build/libhrx-bazel/rocm-root
+      PIP_CACHE_DIR: ${{ github.workspace }}/build/libhrx-bazel/caches/pip
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Adjust git config
+        run: git config --global --add safe.directory "$PWD"
+
+      - name: Fetch ROCm toolchain
+        run: |
+          python3 -m venv "${HRX_OUTPUT_DIR}/python"
+          "${HRX_PYTHON}" -m pip install --upgrade pip boto3 zstandard
+          "${HRX_PYTHON}" build_tools/ci_core_linux.py fetch-rocm
+          echo "${HRX_ROCM_ROOT}/lib/llvm/bin" >> "${GITHUB_PATH}"
+          echo "${HRX_ROCM_ROOT}/bin" >> "${GITHUB_PATH}"
+          echo "CC=${HRX_ROCM_ROOT}/lib/llvm/bin/clang" >> "${GITHUB_ENV}"
+          echo "CXX=${HRX_ROCM_ROOT}/lib/llvm/bin/clang++" >> "${GITHUB_ENV}"
+          echo "CMAKE_PREFIX_PATH=${HRX_ROCM_ROOT}${CMAKE_PREFIX_PATH:+:${CMAKE_PREFIX_PATH}}" >> "${GITHUB_ENV}"
+          echo "LD_LIBRARY_PATH=${HRX_ROCM_ROOT}/lib:${HRX_ROCM_ROOT}/lib/rocm_sysdeps/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}" >> "${GITHUB_ENV}"
+
+      - name: Install developer tools
+        run: |
+          python3 --version
+          python3 dev.py bazel setup --venv
+          echo "$PWD/.venv/bin" >> "${GITHUB_PATH}"
+
+      - name: Check tool versions
+        run: |
+          bazel --version
+          clang --version
+          "${CC}" --version
+          test -d "${HRX_ROCM_ROOT}/include"
+
+      - name: Configure libhrx Bazel
+        run: |
+          echo "python3 dev.py bazel configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=\"${HRX_ROCM_ROOT}\" -DIREE_ROCM_DEPENDENCY_MODE=package"
+          python3 dev.py bazel configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH="${HRX_ROCM_ROOT}" -DIREE_ROCM_DEPENDENCY_MODE=package
+
+      - name: Build libhrx
+        run: |
+          echo "python3 dev.py bazel build --keep_going //libhrx/..."
+          python3 dev.py bazel build --keep_going //libhrx/...
+
+      - name: Test libhrx host coverage
+        run: |
+          echo "python3 dev.py bazel test --build_tests_only --test_tag_filters=-runtime-resource=amd-gpu --keep_going //libhrx/..."
+          python3 dev.py bazel test --build_tests_only --test_tag_filters=-runtime-resource=amd-gpu --keep_going //libhrx/...
