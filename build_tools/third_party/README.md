@@ -186,6 +186,9 @@ endif()
 if(IREE_HAL_DRIVER_HIP_RCCL)
   iree_configure_rocm_rccl_headers()
 endif()
+if(IREE_HAL_DRIVER_VULKAN)
+  iree_configure_vulkan_headers()
+endif()
 if(LIBHRX_BUILD AND LIBHRX_BUILD_CTS)
   iree_configure_catch2()
 endif()
@@ -245,6 +248,8 @@ ROCm headers:     //third_party:hsa_runtime_headers
                   iree::third_party::aqlprofile_sdk_headers
                   iree::third_party::hip_api_headers
                   iree::third_party::rccl_headers
+Vulkan headers:   //third_party:vulkan_headers
+                  iree::third_party::vulkan_headers
 ```
 
 `iree::third_party::google_test` intentionally carries the practical

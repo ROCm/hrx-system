@@ -38,10 +38,10 @@ iree_cc_library(
     "spirv.h"
   DEPS
     ::api
-    Vulkan::Headers
     iree::base
     iree::hal
     iree::hal::drivers::vulkan::util::libvulkan
+    iree::third_party::vulkan_headers
   PUBLIC
 )
 endif()
@@ -55,10 +55,10 @@ iree_cc_test(
   DEPS
     ::headers
     ::vulkan
-    Vulkan::Headers
     iree::base
     iree::testing::gtest
     iree::testing::gtest_main
+    iree::third_party::vulkan_headers
   LABELS
     "iree-build-requirement=runtime.hal.vulkan"
     "iree-run-requirement=runtime.resource.vulkan_device"
@@ -267,7 +267,6 @@ iree_cc_library(
     "syms.h"
   DEPS
     ::api
-    Vulkan::Headers
     iree::async
     iree::async::util::proactor_pool
     iree::base
@@ -291,6 +290,7 @@ iree_cc_library(
     iree::hal::utils::resource_set
     iree::schemas::executable_debug_info_c_fbs
     iree::schemas::vulkan_executable_def_c_fbs
+    iree::third_party::vulkan_headers
   PUBLIC
 )
 endif()

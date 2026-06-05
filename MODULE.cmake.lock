@@ -15,6 +15,7 @@ set(IREE_DEPENDENCY_IDS
   "googletest"
   "libbacktrace"
   "catch2"
+  "vulkan_headers"
   "flatcc"
   "hsa_runtime_headers"
   "hip_api_headers"
@@ -75,6 +76,20 @@ set(IREE_DEP_CATCH2_URLS
 set(IREE_DEP_CATCH2_SHA256 "650795f6501af514f806e78c554729847b98db6935e69076f36bb03ed2e985ef")
 set(IREE_DEP_CATCH2_STRIP_PREFIX "Catch2-3.13.0")
 set(IREE_DEP_CATCH2_BUILD_FILE "")
+
+set(IREE_DEP_VULKAN_HEADERS_KIND "http_archive")
+set(IREE_DEP_VULKAN_HEADERS_OWNER "shared")
+set(IREE_DEP_VULKAN_HEADERS_MODULE_NAME "vulkan_headers")
+set(IREE_DEP_VULKAN_HEADERS_REPO_NAME "vulkan_headers")
+set(IREE_DEP_VULKAN_HEADERS_VERSION "")
+set(IREE_DEP_VULKAN_HEADERS_DEV_DEPENDENCY "FALSE")
+set(IREE_DEP_VULKAN_HEADERS_SOURCE_URL "")
+set(IREE_DEP_VULKAN_HEADERS_URLS
+  "https://github.com/KhronosGroup/Vulkan-Headers/archive/df60f0316899460eeaaefa06d2dd7e4e300c1604.tar.gz"
+)
+set(IREE_DEP_VULKAN_HEADERS_SHA256 "70de3ec1eec289552052dfb886a49a4578b65d84fd536da3254731c8165cb3e6")
+set(IREE_DEP_VULKAN_HEADERS_STRIP_PREFIX "Vulkan-Headers-df60f0316899460eeaaefa06d2dd7e4e300c1604")
+set(IREE_DEP_VULKAN_HEADERS_BUILD_FILE "//build_tools/third_party/vulkan_headers:vulkan_headers.BUILD.bazel")
 
 set(IREE_DEP_FLATCC_KIND "http_archive")
 set(IREE_DEP_FLATCC_OWNER "shared")

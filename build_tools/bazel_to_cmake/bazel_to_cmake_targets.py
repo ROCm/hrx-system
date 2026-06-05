@@ -37,8 +37,6 @@ class TargetConverter:
                 ],
                 # Tracy.
                 "@tracy_client//:runtime": ["tracy_client::runtime"],
-                # Vulkan
-                "@vulkan_headers": ["Vulkan::Headers"],
                 # Misc single targets
                 "//third_party:google_benchmark": [
                     "iree::third_party::google_benchmark"
@@ -64,6 +62,7 @@ class TargetConverter:
                 "//third_party:hip_api_headers": ["iree::third_party::hip_api_headers"],
                 "//third_party:libbacktrace": ["${IREE_LIBBACKTRACE_TARGET}"],
                 "//third_party:rccl_headers": ["iree::third_party::rccl_headers"],
+                "//third_party:vulkan_headers": ["iree::third_party::vulkan_headers"],
                 "//third_party:catch2": ["iree::third_party::catch2"],
                 "@webgpu_headers": [],
                 # py_binary targets have no CMake equivalent.

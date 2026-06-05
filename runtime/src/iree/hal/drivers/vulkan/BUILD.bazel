@@ -44,7 +44,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers/vulkan/util:libvulkan",
-        "@vulkan_headers",
+        "//third_party:vulkan_headers",
     ],
 )
 
@@ -57,7 +57,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
-        "@vulkan_headers",
+        "//third_party:vulkan_headers",
     ],
 )
 
@@ -219,6 +219,6 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/utils:resource_set",
         "//runtime/src/iree/schemas:executable_debug_info_c_fbs",
         "//runtime/src/iree/schemas:vulkan_executable_def_c_fbs",
-        "@vulkan_headers",
+        "//third_party:vulkan_headers",
     ],
 )

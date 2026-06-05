@@ -19,11 +19,11 @@ iree_cc_library(
   SRCS
     "libvulkan.c"
   DEPS
-    Vulkan::Headers
     iree::base
     iree::base::internal::dynamic_library
     iree::base::internal::path
     iree::hal::drivers::vulkan::api
+    iree::third_party::vulkan_headers
   PUBLIC
 )
 endif()

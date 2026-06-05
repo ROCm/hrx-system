@@ -172,6 +172,18 @@ class ConfigureBazelTest(unittest.TestCase):
         self.assertNotIn("runtime/src/iree/hal/drivers/webgpu,", config)
         self.assertNotIn("runtime/src/iree/hal/drivers/webgpu/registration", config)
 
+    def test_portable_project_options_configure_vulkan(self):
+        args = self.configure_bazel.parse_arguments(["-DIREE_HAL_DRIVER_VULKAN=ON"])
+        config = self.configure_bazel.generate_config(args)
+
+        self.assertIn(
+            "build --//runtime/config/hal:drivers=local-sync,local-task,null,vulkan",
+            config,
+        )
+        self.assertIn("common --repo_env=IREE_DEPENDENCY_MODE=pinned", config)
+        self.assertIn("common --repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=none", config)
+        self.assertNotIn("IREE_ROCM_PATH", config)
+
     def test_environment_rocm_path_configures_amdgpu(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             rocm_root = self.make_rocm_root(temporary_directory)

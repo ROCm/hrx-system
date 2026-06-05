@@ -55,7 +55,9 @@ SDK_DRIVER_PACKAGES = {
 }
 ROCM_DRIVERS = frozenset(("amdgpu", "hip"))
 DEPENDENCY_MODES = frozenset(("pinned", "package", "auto"))
-SUPPORTED_ENABLE_DRIVERS = frozenset((*HOST_DRIVERS, "amdgpu", "hip", "webgpu"))
+SUPPORTED_ENABLE_DRIVERS = frozenset(
+    (*HOST_DRIVERS, "amdgpu", "hip", "vulkan", "webgpu")
+)
 ALL_DRIVERS = tuple(HOST_DRIVERS) + tuple(SDK_DRIVER_PACKAGES)
 DRIVER_DEFINES = {
     "IREE_HAL_DRIVER_AMDGPU": "amdgpu",
@@ -63,12 +65,12 @@ DRIVER_DEFINES = {
     "IREE_HAL_DRIVER_LOCAL_SYNC": "local-sync",
     "IREE_HAL_DRIVER_LOCAL_TASK": "local-task",
     "IREE_HAL_DRIVER_NULL": "null",
+    "IREE_HAL_DRIVER_VULKAN": "vulkan",
     "IREE_HAL_DRIVER_WEBGPU": "webgpu",
 }
 UNSUPPORTED_DRIVER_DEFINES = {
     "IREE_HAL_DRIVER_CUDA": "cuda",
     "IREE_HAL_DRIVER_METAL": "metal",
-    "IREE_HAL_DRIVER_VULKAN": "vulkan",
 }
 REMOVED_OPTIONS = frozenset(
     ("--enable-driver", "--include-driver", "--exclude-driver", "--rocm-path")

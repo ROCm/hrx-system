@@ -126,6 +126,10 @@ filegroup(
     name = "empty_rccl_headers",
 )
 
+filegroup(
+    name = "empty_vulkan_headers",
+)
+
 alias(
     name = "aqlprofile_sdk_headers",
     actual = select({
@@ -161,6 +165,16 @@ alias(
     actual = select({
         "//runtime/src/iree/hal/drivers/hip:rccl_enabled": "@rccl//:headers",
         "//conditions:default": ":empty_rccl_headers",
+    }),
+    tags = ["manual"],
+    visibility = [":runtime_users"],
+)
+
+alias(
+    name = "vulkan_headers",
+    actual = select({
+        "//runtime/config/hal:driver_vulkan": "@vulkan_headers//:headers",
+        "//conditions:default": ":empty_vulkan_headers",
     }),
     tags = ["manual"],
     visibility = [":runtime_users"],

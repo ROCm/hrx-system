@@ -28,6 +28,14 @@ http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "ht
 rocm_repository = use_repo_rule("//build_tools/third_party/rocm:repository.bzl", "rocm_repository")
 
 http_archive(
+    name = "vulkan_headers",
+    build_file = "//build_tools/third_party/vulkan_headers:vulkan_headers.BUILD.bazel",
+    sha256 = "70de3ec1eec289552052dfb886a49a4578b65d84fd536da3254731c8165cb3e6",
+    strip_prefix = "Vulkan-Headers-df60f0316899460eeaaefa06d2dd7e4e300c1604",
+    url = "https://github.com/KhronosGroup/Vulkan-Headers/archive/df60f0316899460eeaaefa06d2dd7e4e300c1604.tar.gz",
+)
+
+http_archive(
     name = "flatcc",
     build_file = "//build_tools/third_party/flatcc:flatcc.BUILD.bazel",
     sha256 = "f77f842e996f5bbfa25305a7b38b40d1325fb44154f2bf9880c58356ece92c62",
