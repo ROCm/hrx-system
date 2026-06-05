@@ -68,6 +68,7 @@ hrx_cc_test(
     srcs = ["buffer_table_test.cc"],
     deps = [
         ":common",
+        "//libhrx/src/libhrx:hrx_static",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -79,6 +80,7 @@ hrx_cc_benchmark(
     srcs = ["buffer_table_benchmark.cc"],
     deps = [
         ":common",
+        "//libhrx/src/libhrx:hrx_static",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:benchmark",
         "//runtime/src/iree/testing:benchmark_main",

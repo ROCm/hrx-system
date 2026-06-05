@@ -46,10 +46,13 @@ iree_cc_library(
     iree::async::util::proactor_pool
     iree::base
     iree::base::core_headers
+    iree::base::internal::arena
+    iree::base::threading
     iree::hal
     iree::hal::drivers::local_task::task_driver
     iree::hal::local::loaders::registration
     iree::hal::utils::profile_file
+    iree::hal::utils::resource_set
     iree::io::file_handle
     iree::modules::hal
     iree::modules::hal::types

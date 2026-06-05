@@ -119,8 +119,7 @@ static iree_status_t iree_hal_streaming_buffer_wrap(
   // generate a synthetic device pointer so the buffer table can still map
   // this wrapper.
   if (!have_device_ptr) {
-    static atomic_uintptr_t g_next_synthetic =
-        ATOMIC_VAR_INIT(0xDEAD000000000000ULL);
+    static atomic_uintptr_t g_next_synthetic = 0xDEAD000000000000ULL;
     iree_device_size_t buf_size = iree_hal_buffer_byte_length(buffer);
     iree_device_size_t aligned_size =
         (buf_size + 255) & ~(iree_device_size_t)255;
