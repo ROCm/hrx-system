@@ -46,8 +46,8 @@ hrx_cc_library(
     ],
     includes = [
         "..",
-        "../../libhrx",
         "../../../include",
+        "../../libhrx",
     ],
     deps = [
         "//libhrx/src/libhrx:hrx_static",
