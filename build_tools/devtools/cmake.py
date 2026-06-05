@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping
 
-from build_tools.devtools import cmake_file_api
+from build_tools.devtools import cmake_file_api, cmake_try
 from build_tools.devtools.command_plan import (
     CommandPlan,
     CommandStep,
@@ -251,6 +251,21 @@ def run_plan(
                 env=tool_env.path_env(),
             )
         ]
+    )
+
+
+def try_plan(
+    tool_env: ToolEnvironment,
+    *,
+    configured_build_dir: Path | None,
+    backend_args: list[str],
+    run_cwd: Path | None = None,
+) -> CommandPlan:
+    return cmake_try.try_plan(
+        tool_env,
+        configured_build_dir=build_dir(configured_build_dir),
+        backend_args=backend_args,
+        run_cwd=run_cwd,
     )
 
 

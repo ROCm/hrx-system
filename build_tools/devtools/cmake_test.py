@@ -12,6 +12,7 @@ import unittest
 from pathlib import Path
 
 from build_tools.devtools import cmake as cmake_dev
+from build_tools.devtools import cmake_file_api, cmake_try
 from build_tools.devtools.environment import REPO_ROOT, ToolEnvironment, ToolMode
 
 
@@ -175,6 +176,158 @@ class CMakeTest(unittest.TestCase):
 
         self.assertTrue(command.print_path)
         self.assertEqual(command.target, "iree-run-module")
+
+    def test_try_parse_supports_snippet_options(self):
+        command = cmake_try.parse_try_args(
+            [
+                "-c",
+                "--dep",
+                "iree::base",
+                "--no-infer",
+                "-x",
+                "c++",
+                "-e",
+                "int main() { return 0; }",
+                "--",
+                "--flag",
+            ]
+        )
+
+        self.assertTrue(command.compile_only)
+        self.assertEqual(command.explicit_deps, ["iree::base"])
+        self.assertFalse(command.infer_deps)
+        self.assertEqual(command.language, "c++")
+        self.assertEqual(command.inline_sources, ["int main() { return 0; }"])
+        self.assertEqual(command.program_args, ["--flag"])
+
+    def test_try_plan_configures_and_builds_scratch_tree(self):
+        tool_env = ToolEnvironment(ToolMode.SYSTEM, None)
+
+        plan = cmake_dev.try_plan(
+            tool_env,
+            configured_build_dir=Path("build/cmake-debug"),
+            backend_args=[
+                "-c",
+                "--dep",
+                "iree::base",
+                "-e",
+                "int main() { return 0; }",
+            ],
+        )
+        description = plan.describe()
+
+        self.assertIn(".iree-cmake-try/run-<pid>/try.cmake", description)
+        self.assertIn("-DIREE_CMAKE_TRY_FILE=", description)
+        self.assertIn("--target iree_cmake_try_snippet", description)
+        self.assertIn("# compile only", description)
+
+    def test_try_preserves_local_input_paths(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            temporary_path = Path(temporary_dir)
+            source_dir = temporary_path / "probe"
+            source_dir.mkdir()
+            (source_dir / "helper.h").write_text(
+                "static int helper(void) { return 0; }\n", encoding="utf-8"
+            )
+            (source_dir / "main.c").write_text(
+                '#include "helper.h"\nint main(void) { return helper(); }\n',
+                encoding="utf-8",
+            )
+            scratch_dir = temporary_path / "scratch"
+            scratch_dir.mkdir()
+            command = cmake_try.CMakeTryCommand(
+                files=[
+                    Path("probe/main.c"),
+                    Path("probe/helper.h"),
+                ],
+                run_cwd=temporary_path,
+            )
+            step = cmake_try.CMakeTryStep("cmake", command, temporary_path)
+
+            source_names, _ = step.materialize_sources(scratch_dir)
+
+            self.assertEqual(source_names, ["probe/main.c", "probe/helper.h"])
+            self.assertTrue((scratch_dir / "probe/main.c").is_file())
+            self.assertTrue((scratch_dir / "probe/helper.h").is_file())
+
+    def test_try_infers_deps_from_configured_aliases(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            build_dir = Path(temporary_dir)
+            alias_path = cmake_file_api.target_aliases_path(build_dir)
+            alias_path.parent.mkdir(parents=True)
+            alias_path.write_text(
+                json.dumps(
+                    {
+                        "iree::base": "iree_base_base",
+                        "hrx::hrx": "libhrx_src_libhrx_hrx",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            command = cmake_try.CMakeTryCommand(
+                inline_sources=[
+                    '#include "iree/base/api.h"\n'
+                    '#include "hrx_runtime.h"\n'
+                    "int main(void) { return 0; }"
+                ],
+            )
+            step = cmake_try.CMakeTryStep("cmake", command, build_dir)
+
+            self.assertEqual(
+                step.deps_for_sources(command.inline_sources),
+                ["hrx::hrx", "iree::base"],
+            )
+
+    def test_try_cache_copy_preserves_project_configuration(self):
+        entries = [
+            cmake_try.CMakeCacheEntry("IREE_HAL_DRIVER_AMDGPU", "BOOL", "OFF"),
+            cmake_try.CMakeCacheEntry("LIBHRX_BUILD", "BOOL", "OFF"),
+            cmake_try.CMakeCacheEntry("CMAKE_C_COMPILER", "FILEPATH", "/bin/cc"),
+            cmake_try.CMakeCacheEntry("BENCHMARK_ENABLE_TESTING", "BOOL", "OFF"),
+            cmake_try.CMakeCacheEntry("CMAKE_GENERATOR", "INTERNAL", "Ninja"),
+        ]
+
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            cache_path = Path(temporary_dir) / "cache.cmake"
+            cmake_try.write_initial_cache_file(cache_path, entries)
+            cache_text = cache_path.read_text(encoding="utf-8")
+
+        self.assertIn("IREE_HAL_DRIVER_AMDGPU", cache_text)
+        self.assertIn("LIBHRX_BUILD", cache_text)
+        self.assertIn("CMAKE_C_COMPILER", cache_text)
+        self.assertNotIn("BENCHMARK_ENABLE_TESTING", cache_text)
+        self.assertNotIn("CMAKE_GENERATOR", cache_text)
+
+    def test_try_reads_generator_args_from_configured_cache(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            build_dir = Path(temporary_dir)
+            (build_dir / "CMakeCache.txt").write_text(
+                "CMAKE_GENERATOR:INTERNAL=Ninja\n"
+                "CMAKE_GENERATOR_PLATFORM:INTERNAL=x64\n"
+                "CMAKE_GENERATOR_TOOLSET:INTERNAL=host=x64\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                cmake_try.cmake_generator_args(build_dir),
+                ["-G", "Ninja", "-A", "x64", "-T", "host=x64"],
+            )
+
+    def test_try_cmake_file_links_deps(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            cmake_path = Path(temporary_dir) / "try.cmake"
+            cmake_try.write_try_cmake_file(
+                cmake_path,
+                source_paths=[Path("/tmp/snippet.c")],
+                deps=["iree::base"],
+            )
+            cmake_text = cmake_path.read_text(encoding="utf-8")
+
+        self.assertIn("add_executable(iree_cmake_try_snippet", cmake_text)
+        self.assertIn(
+            "target_link_libraries(iree_cmake_try_snippet PRIVATE", cmake_text
+        )
+        self.assertIn("iree::base", cmake_text)
 
 
 if __name__ == "__main__":

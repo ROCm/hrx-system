@@ -291,6 +291,22 @@ Temporary packages are written under .iree-bazel-try/. The tool infers common
 deps from quoted iree/..., loom/..., and loomc/... includes and accepts
 explicit --dep labels.""",
         )
+    if command == "try" and lane == "cmake":
+        return CommandHelp(
+            description="Build and run a temporary C/C++ snippet with CMake.",
+            arguments="Source files, -e inline source, --dep CMake targets, and optional -- program arguments.",
+            epilog="""Examples:
+  python dev.py cmake try -e 'int main() { return 0; }'
+  python dev.py cmake try -e $'#include "iree/base/api.h"\\nint main() { return 0; }'
+  python dev.py cmake try --dep iree::base snippet.c -- --flag
+  python dev.py cmake try -k -e 'int main() { return 0; }'
+  python dev.py cmake try --compile-only --output build/snippet -e 'int main() { return 0; }'
+
+This derives a temporary build tree from the configured CMake build tree and
+injects one generated CMake file into the real repository configure. Run
+iree-cmake-configure first. Quoted iree/... and hrx_... includes infer common
+deps; add --dep TARGET for anything inference misses.""",
+        )
     if command == "fuzz" and lane == "bazel":
         return CommandHelp(
             description="Build and run Bazel libFuzzer targets without holding the Bazel lock.",
@@ -427,7 +443,8 @@ iree-cmake-dev presubmit
 `iree-cmake-dev precommit` checks local changes. The paranoid profile adds
 affected project CMake/CTest checks. `iree-cmake-dev presubmit` is the
 full-tree CI-shaped check. `iree-cmake-run` resolves an already-built
-executable and does not build implicitly."""
+executable and does not build implicitly. `iree-cmake-try` builds temporary
+C/C++ snippets against the configured tree."""
 
 
 def bazel_command_agent_markdown(command: str) -> str:
@@ -649,5 +666,27 @@ iree-cmake-run -p iree-run-module
 
 Program arguments go after `--`. `-p/--print-path` prints the resolved binary
 without running it."""
+
+    if command == "try":
+        return """## iree-cmake-try
+
+Use `iree-cmake-try` for one-shot C/C++ probes against the configured CMake
+tree. It creates a temporary build under `.iree-cmake-try/`, copies the existing
+cache configuration, injects one generated CMake file into the real repository
+configure, builds the snippet target, then runs it unless `--compile-only` is
+used.
+
+```bash
+iree-cmake-configure
+iree-cmake-try -e 'int main() { return 0; }'
+iree-cmake-try -e $'#include "iree/base/api.h"\\nint main() { return 0; }'
+iree-cmake-try --dep iree::base snippet.c -- --flag
+iree-cmake-try -k -e 'int main() { return 0; }'
+iree-cmake-try --compile-only --output build/snippet -e 'int main() { return 0; }'
+```
+
+Quoted `iree/...` and `hrx_...` includes infer common deps from configured CMake
+aliases. Add `--dep TARGET` for anything inference misses. Use `--no-infer` to
+disable inference and `-k/--keep` to inspect the generated scratch build."""
 
     return cmake_agent_markdown()

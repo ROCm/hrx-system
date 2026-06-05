@@ -186,6 +186,13 @@ if(LIBHRX_BUILD)
   add_subdirectory(libhrx)
 endif()
 
+set(IREE_CMAKE_TRY_FILE "" CACHE FILEPATH
+  "Optional developer-tool CMake file included after repository targets exist.")
+mark_as_advanced(IREE_CMAKE_TRY_FILE)
+if(IREE_CMAKE_TRY_FILE)
+  include("${IREE_CMAKE_TRY_FILE}")
+endif()
+
 if(IREE_BUILD_TESTS)
   iree_create_ctest_customization()
   hrx_create_installed_tests()

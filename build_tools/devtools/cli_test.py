@@ -190,6 +190,27 @@ class CliTest(unittest.TestCase):
         self.assertIn("//.iree-bazel-try/run-<pid>:snippet", description)
         self.assertIn("# compile only", description)
 
+    def test_cmake_try_generates_scratch_build(self):
+        args = cli.parse_arguments(
+            [
+                "cmake",
+                "try",
+                "-c",
+                "--dep",
+                "iree::base",
+                "-e",
+                "int main() { return 0; }",
+            ]
+        )
+
+        plan = args.handler(args)
+        description = plan.describe()
+
+        self.assertIn(".iree-cmake-try/run-<pid>/try.cmake", description)
+        self.assertIn("cmake -S", description)
+        self.assertIn("--target iree_cmake_try_snippet", description)
+        self.assertIn("# compile only", description)
+
     def test_bazel_try_preserves_local_input_paths(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
             temporary_path = Path(temporary_dir)
@@ -414,6 +435,14 @@ class CliTest(unittest.TestCase):
         self.assertIn("--config=fuzzer", fuzz_output)
         self.assertIn("IREE_FUZZ_CACHE", fuzz_output)
         self.assertNotIn("## iree-bazel-try", fuzz_output)
+
+    def test_cmake_try_agents_md_is_focused(self):
+        output = self.parse_agent_md(["cmake", "try", "--agents-md"])
+
+        self.assertIn("## iree-cmake-try", output)
+        self.assertIn("one-shot C/C++ probes", output)
+        self.assertIn(".iree-cmake-try/", output)
+        self.assertNotIn("## iree-cmake-run", output)
 
     def test_cmake_build_target_shorthand(self):
         args = cli.parse_arguments(["cmake", "build", "hrx"])

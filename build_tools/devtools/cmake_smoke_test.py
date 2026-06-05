@@ -46,10 +46,16 @@ def run_dry_run_scenario(checkout: Path) -> None:
         "iree-cmake-run",
         ["-n", "iree::tools::iree-run-module", "--", "--help"],
     )
+    smoke_test_lib.run_bin_wrapper(
+        checkout,
+        "iree-cmake-try",
+        ["-n", "-e", "int main() { return 0; }"],
+    )
     smoke_test_lib.assert_absent(checkout / ".bazelrc.configured")
     smoke_test_lib.assert_absent(checkout / ".venv")
     smoke_test_lib.assert_absent(checkout / ".iree")
     smoke_test_lib.assert_absent(checkout / ".iree-bazel-try")
+    smoke_test_lib.assert_absent(checkout / ".iree-cmake-try")
     smoke_test_lib.assert_absent(checkout / "lefthook-local.yml")
 
 

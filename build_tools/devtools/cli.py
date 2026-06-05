@@ -840,12 +840,24 @@ def handler_for_runnable_command(lane: str, command_name: str):
         return handle_bazel_runnable_command
     if lane == "cmake" and command_name == "run":
         return handle_cmake_run_command
+    if lane == "cmake" and command_name == "try":
+        return handle_cmake_try_command
     return handle_unimplemented_backend_command
 
 
 def handle_cmake_run_command(args: argparse.Namespace) -> CommandPlan:
     tool_env = existing_or_system_environment(args)
     return cmake_dev.run_plan(
+        tool_env,
+        configured_build_dir=getattr(args, "cmake_build_dir", None),
+        backend_args=forwarded_args(args.args),
+        run_cwd=Path.cwd(),
+    )
+
+
+def handle_cmake_try_command(args: argparse.Namespace) -> CommandPlan:
+    tool_env = existing_or_system_environment(args)
+    return cmake_dev.try_plan(
         tool_env,
         configured_build_dir=getattr(args, "cmake_build_dir", None),
         backend_args=forwarded_args(args.args),
