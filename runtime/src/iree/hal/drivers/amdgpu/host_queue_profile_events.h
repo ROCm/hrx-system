@@ -13,12 +13,13 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Allocates queue-local device-visible event rings used by dispatch and
-// queue-device timestamp profiling.
+// Allocates queue-local event rings. The CPU writes event metadata and the GPU
+// writes timestamp fields into each reserved record.
 iree_status_t iree_hal_amdgpu_host_queue_ensure_profile_event_storage(
     iree_hal_amdgpu_host_queue_t* queue);
 
-// Clears all event-ring cursors and records while preserving allocated storage.
+// Resets event-ring cursors while preserving allocated storage. Record contents
+// are initialized again when a slot is reserved.
 void iree_hal_amdgpu_host_queue_clear_profile_events(
     iree_hal_amdgpu_host_queue_t* queue);
 
@@ -26,13 +27,19 @@ void iree_hal_amdgpu_host_queue_clear_profile_events(
 void iree_hal_amdgpu_host_queue_deallocate_profile_events(
     iree_hal_amdgpu_host_queue_t* queue);
 
-// Allocates queue-local completion signals paired with dispatch event slots.
+// Allocates queue-local raw completion-signal scratch paired with dispatch
+// event slots and initializes it from the device.
 iree_status_t iree_hal_amdgpu_host_queue_ensure_profiling_completion_signals(
     iree_hal_amdgpu_host_queue_t* queue);
 
 // Releases queue-local profiling completion signals.
 void iree_hal_amdgpu_host_queue_deallocate_profiling_completion_signals(
     iree_hal_amdgpu_host_queue_t* queue);
+
+// Publishes host writes to queue-local event memory before packet headers that
+// reference the written records become visible to the command processor.
+void iree_hal_amdgpu_host_queue_publish_profile_host_writes(
+    const iree_hal_amdgpu_host_queue_t* queue);
 
 // Returns the configured dispatch event ring capacity.
 static inline uint32_t
@@ -51,23 +58,16 @@ static inline uint32_t iree_hal_amdgpu_host_queue_profile_dispatch_event_index(
 // dispatch event ring slot. The returned pointer references queue-owned
 // iree_amd_signal_t storage, not a ROCR-created HSA signal, and must never be
 // passed to host signal APIs except as an AQL packet completion_signal handle.
-// Valid only while HSA queue timestamp profiling is enabled.
+// The signal record is initialized as command-processor scratch; HSA signal
+// kind/value fields are not part of the profiling contract. Valid only while
+// HSA queue timestamp profiling is enabled.
 static inline iree_amd_signal_t*
 iree_hal_amdgpu_host_queue_profiling_completion_signal_ptr(
     const iree_hal_amdgpu_host_queue_t* queue, uint64_t event_position) {
   const uint32_t signal_index =
       iree_hal_amdgpu_host_queue_profile_dispatch_event_index(queue,
                                                               event_position);
-  const uint32_t block_index =
-      signal_index / queue->profiling.signals.signals_per_block;
-  const uint32_t block_signal_index =
-      signal_index - block_index * queue->profiling.signals.signals_per_block;
-  uint8_t* block_ptr =
-      (uint8_t*)queue->profiling.signals.blocks[block_index]->ptr;
-  iree_amd_signal_t* signal =
-      (iree_amd_signal_t*)(block_ptr +
-                           block_signal_index * sizeof(iree_amd_signal_t));
-  return signal;
+  return &queue->profiling.completion_signals[signal_index];
 }
 
 // Returns the raw profiling completion signal handle paired with

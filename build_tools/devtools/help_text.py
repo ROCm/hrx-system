@@ -18,6 +18,29 @@ class CommandHelp:
     epilog: str | None = None
 
 
+ROOT_COMMAND_EPILOG = """Common build-system commands:
+  python dev.py bazel configure
+  python dev.py bazel build
+  python dev.py bazel test
+  python dev.py bazel precommit
+  python dev.py bazel presubmit
+  python dev.py bazel run
+  python dev.py bazel try
+  python dev.py bazel fuzz
+
+  python dev.py cmake configure
+  python dev.py cmake build
+  python dev.py cmake test
+  python dev.py cmake precommit
+  python dev.py cmake presubmit
+  python dev.py cmake run
+  python dev.py cmake try
+  python dev.py cmake fuzz
+
+Use `python dev.py bazel --help` or `python dev.py cmake --help` for the full
+subcommand list for that build system."""
+
+
 def root_command_help(command: str) -> CommandHelp:
     if command == "setup":
         return CommandHelp(

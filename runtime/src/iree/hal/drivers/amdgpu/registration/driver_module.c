@@ -81,6 +81,11 @@ IREE_FLAG(bool, amdgpu_experimental_pm4_command_buffers, false,
           "targets. This is for hardware bring-up only; default automatic PM4 "
           "selection remains limited to validated GPU ISAs.");
 
+IREE_FLAG(bool, amdgpu_suppress_device_fine_memory, false,
+          "Suppresses fine-grained GPU-local memory pools even when reported "
+          "by HSA. This validates the coarse-grained device-local memory path "
+          "used on GPUs that do not expose host-coherent VRAM.");
+
 IREE_FLAG(int64_t, amdgpu_wait_active_for_ns, 0,
           "Reserved for future HSA active-wait tuning. Must be 0 today.");
 
@@ -261,6 +266,9 @@ static iree_status_t iree_hal_amdgpu_driver_factory_try_create(
 
   device_options->enable_experimental_pm4_command_buffers =
       FLAG_amdgpu_experimental_pm4_command_buffers;
+
+  device_options->suppress_device_fine_memory =
+      FLAG_amdgpu_suppress_device_fine_memory;
 
   if (FLAG_amdgpu_wait_active_for_ns < 0) {
     return iree_make_status(

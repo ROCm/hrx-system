@@ -238,6 +238,7 @@ iree_hal_amdgpu_command_buffer_replay_submit_completion_packet(
       submission.reclaim_entry->queue_device_event_count =
           profile_queue_device_events.event_count;
       queue_device_event->submission_id = submission_id;
+      iree_hal_amdgpu_host_queue_publish_profile_host_writes(replay->queue);
     }
 
     if (queue_device_event) {

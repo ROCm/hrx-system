@@ -123,6 +123,8 @@ typedef struct iree_hal_amdgpu_block_pool_t {
   hsa_amd_memory_pool_t memory_pool;
   // Stable named-memory stream for HSA backing allocations in this pool.
   iree_hal_memory_trace_t trace;
+  // True after the pool trace and mutex fields are initialized.
+  uint32_t is_initialized : 1;
   // Size in bytes of a block on device.
   iree_device_size_t block_size;
   // Number of blocks in a single device allocation.

@@ -770,6 +770,15 @@ class CliTest(unittest.TestCase):
         self.assertNotIn("../builds", output)
         self.assertNotIn("backend configure tool", output)
 
+    def test_root_help_lists_nested_build_system_commands(self):
+        output = self.parse_help(["--help"])
+
+        self.assertIn("Common build-system commands", output)
+        self.assertIn("python dev.py bazel precommit", output)
+        self.assertIn("python dev.py bazel run", output)
+        self.assertIn("python dev.py cmake precommit", output)
+        self.assertIn("python dev.py cmake run", output)
+
     def test_bazel_build_help_explains_default_targets(self):
         output = self.parse_help(["bazel", "build", "--help"])
 

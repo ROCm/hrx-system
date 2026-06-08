@@ -441,32 +441,35 @@ class CtsTestBase : public BaseType {
       iree_device_size_t buffer_size, iree_hal_buffer_t** out_buffer) {
     *out_buffer = nullptr;
     iree_hal_buffer_params_t params = {0};
-    params.type =
-        IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
-    params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
-                   IREE_HAL_BUFFER_USAGE_TRANSFER |
-                   IREE_HAL_BUFFER_USAGE_MAPPING;
-    iree_hal_buffer_t* buffer = nullptr;
-    IREE_RETURN_IF_ERROR(iree_hal_allocator_allocate_buffer(
-        device_allocator_, params, buffer_size, &buffer));
-    *out_buffer = buffer;
-    return iree_ok_status();
+    params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+    params.usage =
+        IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+    return iree_hal_allocator_allocate_buffer(device_allocator_, params,
+                                              buffer_size, out_buffer);
   }
 
   iree_status_t CreateZeroedDeviceBuffer(iree_device_size_t buffer_size,
                                          iree_hal_buffer_t** out_buffer) {
     *out_buffer = nullptr;
     iree_hal_buffer_params_t params = {0};
-    params.type =
-        IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
-    params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
-                   IREE_HAL_BUFFER_USAGE_TRANSFER |
-                   IREE_HAL_BUFFER_USAGE_MAPPING;
+    params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+    params.usage =
+        IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
     iree_hal_buffer_t* buffer = nullptr;
     iree_status_t status = iree_hal_allocator_allocate_buffer(
         device_allocator_, params, buffer_size, &buffer);
     if (iree_status_is_ok(status)) {
-      status = iree_hal_buffer_map_zero(buffer, 0, IREE_HAL_WHOLE_BUFFER);
+      uint8_t pattern = 0;
+      SemaphoreList empty_wait;
+      SemaphoreList fill_signal(device_, {0}, {1});
+      status = iree_hal_device_queue_fill(
+          device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, fill_signal, buffer,
+          /*target_offset=*/0, buffer_size, &pattern, sizeof(pattern),
+          IREE_HAL_FILL_FLAG_NONE);
+      if (iree_status_is_ok(status)) {
+        status = iree_hal_semaphore_list_wait(
+            fill_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE);
+      }
     }
     if (iree_status_is_ok(status)) {
       *out_buffer = buffer;
@@ -481,11 +484,9 @@ class CtsTestBase : public BaseType {
                                            iree_hal_buffer_t** out_buffer) {
     *out_buffer = nullptr;
     iree_hal_buffer_params_t params = {0};
-    params.type =
-        IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
-    params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
-                   IREE_HAL_BUFFER_USAGE_TRANSFER |
-                   IREE_HAL_BUFFER_USAGE_MAPPING;
+    params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+    params.usage =
+        IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
     iree_hal_buffer_t* buffer = nullptr;
     iree_status_t status = iree_hal_allocator_allocate_buffer(
         device_allocator_, params, buffer_size, &buffer);
@@ -515,17 +516,23 @@ class CtsTestBase : public BaseType {
                                          iree_hal_buffer_t** out_buffer) {
     *out_buffer = nullptr;
     iree_hal_buffer_params_t params = {0};
-    params.type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE |
-                  IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
-    params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
-                   IREE_HAL_BUFFER_USAGE_TRANSFER |
-                   IREE_HAL_BUFFER_USAGE_MAPPING;
+    params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+    params.usage =
+        IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
     iree_hal_buffer_t* buffer = nullptr;
     iree_status_t status = iree_hal_allocator_allocate_buffer(
         device_allocator_, params, buffer_size, &buffer);
     if (iree_status_is_ok(status)) {
-      status = iree_hal_buffer_map_fill(buffer, 0, IREE_HAL_WHOLE_BUFFER,
-                                        &pattern, sizeof(pattern));
+      SemaphoreList empty_wait;
+      SemaphoreList fill_signal(device_, {0}, {1});
+      status = iree_hal_device_queue_fill(
+          device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, fill_signal, buffer,
+          /*target_offset=*/0, buffer_size, &pattern, sizeof(pattern),
+          IREE_HAL_FILL_FLAG_NONE);
+      if (iree_status_is_ok(status)) {
+        status = iree_hal_semaphore_list_wait(
+            fill_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE);
+      }
     }
     if (iree_status_is_ok(status)) {
       *out_buffer = buffer;

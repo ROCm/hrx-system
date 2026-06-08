@@ -879,6 +879,10 @@ static iree_status_t iree_hal_amdgpu_host_queue_submit_indirect_dispatch(
                 resolution->inline_acquire_scope),
             IREE_HSA_FENCE_SCOPE_SYSTEM));
   }
+  if (profile_events.event_count != 0 ||
+      profile_queue_device_events.event_count != 0) {
+    iree_hal_amdgpu_host_queue_publish_profile_host_writes(queue);
+  }
   iree_hal_amdgpu_host_queue_publish_submission_kernargs(queue, &submission);
   if (queue_device_event) {
     iree_hal_amdgpu_host_queue_commit_queue_device_start_packet(

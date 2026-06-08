@@ -391,6 +391,7 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="dev.py",
         description="Repository developer command router.",
+        epilog=help_text.ROOT_COMMAND_EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     add_common_options(parser)

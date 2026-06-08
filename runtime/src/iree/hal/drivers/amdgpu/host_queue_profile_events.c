@@ -8,7 +8,9 @@
 
 #include <string.h>
 
+#include "iree/hal/drivers/amdgpu/device/blit.h"
 #include "iree/hal/drivers/amdgpu/host_queue_profile.h"
+#include "iree/hal/drivers/amdgpu/host_queue_submission.h"
 #include "iree/hal/drivers/amdgpu/profile_counters.h"
 #include "iree/hal/drivers/amdgpu/profile_traces.h"
 
@@ -34,93 +36,133 @@ static_assert(
 #define IREE_HAL_AMDGPU_HOST_QUEUE_PROFILE_QUEUE_DEVICE_EVENT_CAPACITY \
   (64 * 1024)
 
-static void iree_hal_amdgpu_host_queue_initialize_profiling_signal(
-    iree_amd_signal_t* signal) {
-  memset(signal, 0, sizeof(*signal));
-  signal->kind = IREE_AMD_SIGNAL_KIND_USER;
-  // Profiling completion signals are never waited on. Keep the value at
-  // all-bits-set so packet completion decrements never require host/device
-  // reset traffic; consumers read start_ts/end_ts after queue ordering proves
-  // the profiled packet completed.
-  signal->value = (iree_hsa_signal_value_t)-1;
+static iree_status_t
+iree_hal_amdgpu_host_queue_require_profiling_signal_memory_pool(
+    iree_hal_amdgpu_host_queue_t* queue) {
+  if (queue->profiling.memory.signal_memory_pool.handle) {
+    return iree_ok_status();
+  }
+  return iree_make_status(
+      IREE_STATUS_UNAVAILABLE,
+      "AMDGPU HSA timestamp profiling requires device-local signal memory");
+}
+
+static iree_status_t
+iree_hal_amdgpu_host_queue_require_profiling_event_memory_pool(
+    iree_hal_amdgpu_host_queue_t* queue) {
+  if (queue->profiling.memory.event_memory_pool.handle) return iree_ok_status();
+  return iree_make_status(
+      IREE_STATUS_UNAVAILABLE,
+      "AMDGPU profiling requires host-readable device-visible event memory");
+}
+
+void iree_hal_amdgpu_host_queue_publish_profile_host_writes(
+    const iree_hal_amdgpu_host_queue_t* queue) {
+  // CPU-visible device-coarse memory is not coherent until host writes are
+  // pushed through HDP. This only publishes CPU-authored event metadata; GPU
+  // timestamp writes become CPU-visible through the packet release scopes.
+  const iree_hal_amdgpu_kernarg_ring_publication_t publication =
+      queue->profiling.memory.event_host_write_publication;
+  if (publication.mode == IREE_HAL_AMDGPU_KERNARG_RING_PUBLICATION_MODE_NONE) {
+    return;
+  }
+  IREE_ASSERT(publication.mode ==
+              IREE_HAL_AMDGPU_KERNARG_RING_PUBLICATION_MODE_HDP_FLUSH);
+  IREE_ASSERT(publication.hdp_mem_flush_control);
+  iree_hal_amdgpu_kernarg_ring_host_write_fence();
+  *publication.hdp_mem_flush_control = 1u;
+  (void)*publication.hdp_mem_flush_control;
+}
+
+static iree_status_t
+iree_hal_amdgpu_host_queue_zero_profiling_completion_signals(
+    iree_hal_amdgpu_host_queue_t* queue, iree_amd_signal_t* signals,
+    iree_host_size_t signal_storage_size) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, signal_storage_size);
+
+  // Raw profiling signals are command-processor timestamp scratch records, not
+  // ROCR-created HSA synchronization objects. The command processor only needs
+  // the record address for timestamp writes/completion decrement and the device
+  // harvest kernel only reads the timestamp fields, so device-side zero-fill is
+  // sufficient initialization and keeps the storage device-local.
+  iree_hsa_kernel_dispatch_packet_t dispatch_packet;
+  memset(&dispatch_packet, 0, sizeof(dispatch_packet));
+  iree_hal_amdgpu_device_buffer_fill_kernargs_t kernargs;
+  memset(&kernargs, 0, sizeof(kernargs));
+  if (IREE_UNLIKELY(!iree_hal_amdgpu_device_buffer_fill_emplace(
+          queue->transfer_context, &dispatch_packet, signals,
+          signal_storage_size, /*pattern=*/0, /*pattern_length=*/1,
+          &kernargs))) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                             "unable to prepare profiling signal zero-fill "
+                             "dispatch for %" PRIhsz " bytes",
+                             signal_storage_size));
+  }
+
+  iree_hal_amdgpu_wait_resolution_t resolution;
+  bool ready = false;
+  uint64_t submission_epoch = 0;
+  iree_slim_mutex_lock(&queue->locks.submission_mutex);
+  iree_hal_amdgpu_host_queue_resolve_waits(
+      queue, iree_hal_semaphore_list_empty(), &resolution);
+  iree_status_t status = iree_hal_amdgpu_host_queue_submit_dispatch_packet(
+      queue, &resolution, iree_hal_semaphore_list_empty(), &dispatch_packet,
+      &kernargs, sizeof(kernargs), /*operation_resources=*/NULL,
+      /*operation_resource_count=*/0, /*profile_queue_event_info=*/NULL,
+      IREE_HAL_AMDGPU_HOST_QUEUE_SUBMISSION_FLAG_NONE, &ready,
+      &submission_epoch);
+  iree_slim_mutex_unlock(&queue->locks.submission_mutex);
+  if (iree_status_is_ok(status) && IREE_UNLIKELY(!ready)) {
+    status = iree_make_status(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        "unable to reserve AQL/kernarg capacity for profiling signal "
+        "initialization; profiling must begin while the device is idle");
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amdgpu_host_queue_wait_for_setup_epoch(queue,
+                                                             submission_epoch);
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+  return status;
 }
 
 static iree_status_t
 iree_hal_amdgpu_host_queue_allocate_profiling_completion_signals(
-    iree_hal_amdgpu_block_pool_t* signal_block_pool, uint32_t signal_count,
-    iree_allocator_t host_allocator, iree_hal_amdgpu_host_queue_t* out_queue) {
+    uint32_t signal_count, iree_hal_amdgpu_host_queue_t* queue) {
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, signal_count);
 
-  if (IREE_UNLIKELY(signal_block_pool->block_size < sizeof(iree_amd_signal_t) ||
-                    signal_block_pool->block_size % sizeof(iree_amd_signal_t) !=
-                        0)) {
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                             "profiling signal block size %" PRIdsz
-                             " must hold whole iree_amd_signal_t records",
-                             signal_block_pool->block_size));
-  }
-  const iree_host_size_t signals_per_block =
-      signal_block_pool->block_size / sizeof(iree_amd_signal_t);
-  if (IREE_UNLIKELY(signals_per_block == 0 || signals_per_block > UINT32_MAX)) {
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                             "profiling signal block size %" PRIu64
-                             " cannot hold a valid signal count",
-                             (uint64_t)signal_block_pool->block_size));
-  }
-  const iree_host_size_t signal_block_count =
-      iree_host_size_ceil_div(signal_count, signals_per_block);
-  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, signal_block_count);
-
-  iree_host_size_t signal_block_table_size = 0;
+  iree_host_size_t signal_storage_size = 0;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0,
-      IREE_STRUCT_LAYOUT(0, &signal_block_table_size,
-                         IREE_STRUCT_FIELD(signal_block_count,
-                                           iree_hal_amdgpu_block_t*, NULL)));
-  iree_hal_amdgpu_block_t** signal_blocks = NULL;
-  iree_status_t status = iree_allocator_malloc(
-      host_allocator, signal_block_table_size, (void**)&signal_blocks);
-  iree_host_size_t acquired_block_count = 0;
-  for (iree_host_size_t block_index = 0;
-       block_index < signal_block_count && iree_status_is_ok(status);
-       ++block_index) {
-    iree_hal_amdgpu_block_t* block = NULL;
-    status = iree_hal_amdgpu_block_pool_acquire(signal_block_pool, &block);
-    if (iree_status_is_ok(status)) {
-      signal_blocks[block_index] = block;
-      ++acquired_block_count;
-      if (IREE_UNLIKELY(
-              (uintptr_t)block->ptr % iree_alignof(iree_amd_signal_t) != 0)) {
-        status = iree_make_status(
-            IREE_STATUS_FAILED_PRECONDITION,
-            "profiling signal block is not aligned to %" PRIhsz " bytes",
-            (iree_host_size_t)iree_alignof(iree_amd_signal_t));
-      } else {
-        for (iree_host_size_t signal_index = 0;
-             signal_index < signals_per_block; ++signal_index) {
-          uint8_t* signal_ptr =
-              (uint8_t*)block->ptr + signal_index * sizeof(iree_amd_signal_t);
-          iree_hal_amdgpu_host_queue_initialize_profiling_signal(
-              (iree_amd_signal_t*)signal_ptr);
-        }
-      }
-    }
-  }
+      z0, IREE_STRUCT_LAYOUT(
+              0, &signal_storage_size,
+              IREE_STRUCT_FIELD(signal_count, iree_amd_signal_t, NULL)));
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, signal_storage_size);
 
+  iree_amd_signal_t* signals = NULL;
+  iree_status_t status = iree_hsa_amd_memory_pool_allocate(
+      IREE_LIBHSA(queue->libhsa), queue->profiling.memory.signal_memory_pool,
+      signal_storage_size, HSA_AMD_MEMORY_POOL_STANDARD_FLAG, (void**)&signals);
+  if (iree_status_is_ok(status) &&
+      IREE_UNLIKELY((uintptr_t)signals % iree_alignof(iree_amd_signal_t) !=
+                    0)) {
+    status = iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "profiling signal storage is not aligned to %" PRIhsz " bytes",
+        (iree_host_size_t)iree_alignof(iree_amd_signal_t));
+  }
   if (iree_status_is_ok(status)) {
-    out_queue->profiling.signals.block_pool = signal_block_pool;
-    out_queue->profiling.signals.blocks = signal_blocks;
-    out_queue->profiling.signals.block_count = (uint32_t)signal_block_count;
-    out_queue->profiling.signals.signals_per_block =
-        (uint32_t)signals_per_block;
-  } else {
-    for (iree_host_size_t i = 0; i < acquired_block_count; ++i) {
-      iree_hal_amdgpu_block_pool_release(signal_block_pool, signal_blocks[i]);
-    }
-    iree_allocator_free(host_allocator, signal_blocks);
+    status = iree_hal_amdgpu_host_queue_zero_profiling_completion_signals(
+        queue, signals, signal_storage_size);
+  }
+  if (iree_status_is_ok(status)) {
+    queue->profiling.completion_signals = signals;
+  } else if (signals) {
+    status = iree_status_join(status, iree_hsa_amd_memory_pool_free(
+                                          IREE_LIBHSA(queue->libhsa), signals));
   }
 
   IREE_TRACE_ZONE_END(z0);
@@ -129,35 +171,30 @@ iree_hal_amdgpu_host_queue_allocate_profiling_completion_signals(
 
 iree_status_t iree_hal_amdgpu_host_queue_ensure_profiling_completion_signals(
     iree_hal_amdgpu_host_queue_t* queue) {
-  if (queue->profiling.signals.blocks) return iree_ok_status();
+  if (queue->profiling.completion_signals) return iree_ok_status();
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_host_queue_require_profiling_signal_memory_pool(queue));
   return iree_hal_amdgpu_host_queue_allocate_profiling_completion_signals(
-      queue->profiling.signals.block_pool,
-      queue->profiling.dispatch_events.capacity, queue->host_allocator, queue);
+      queue->profiling.dispatch_events.capacity, queue);
 }
 
 void iree_hal_amdgpu_host_queue_deallocate_profiling_completion_signals(
     iree_hal_amdgpu_host_queue_t* queue) {
-  if (!queue->profiling.signals.blocks) {
-    return;
-  }
+  if (!queue->profiling.completion_signals) return;
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  for (uint32_t i = 0; i < queue->profiling.signals.block_count; ++i) {
-    iree_hal_amdgpu_block_pool_release(queue->profiling.signals.block_pool,
-                                       queue->profiling.signals.blocks[i]);
-  }
-  iree_allocator_free(queue->host_allocator, queue->profiling.signals.blocks);
-  queue->profiling.signals.block_pool = NULL;
-  queue->profiling.signals.blocks = NULL;
-  queue->profiling.signals.block_count = 0;
-  queue->profiling.signals.signals_per_block = 0;
+  iree_hal_amdgpu_hsa_cleanup_assert_success(iree_hsa_amd_memory_pool_free_raw(
+      queue->libhsa, queue->profiling.completion_signals));
+  queue->profiling.completion_signals = NULL;
 
   IREE_TRACE_ZONE_END(z0);
 }
 
 iree_status_t iree_hal_amdgpu_host_queue_ensure_profile_event_storage(
     iree_hal_amdgpu_host_queue_t* queue) {
-  if (queue->profiling.event_allocation.base) return iree_ok_status();
+  if (queue->profiling.event_storage) return iree_ok_status();
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_host_queue_require_profiling_event_memory_pool(queue));
 
   IREE_TRACE_ZONE_BEGIN(z0);
   const uint32_t dispatch_event_capacity =
@@ -167,6 +204,9 @@ iree_status_t iree_hal_amdgpu_host_queue_ensure_profile_event_storage(
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, dispatch_event_capacity);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, queue_device_event_capacity);
 
+  // Slots are initialized on reservation before any packet references their
+  // timestamp fields. The allocation itself intentionally starts with undefined
+  // contents so begin/clear do not perform bulk CPU writes to device memory.
   iree_host_size_t dispatch_events_offset = 0;
   iree_host_size_t queue_device_events_offset = 0;
   iree_host_size_t total_size = 0;
@@ -180,18 +220,30 @@ iree_status_t iree_hal_amdgpu_host_queue_ensure_profile_event_storage(
                                 iree_hal_amdgpu_profile_queue_device_event_t,
                                 &queue_device_events_offset)));
   void* event_storage = NULL;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0,
-      iree_hsa_amd_memory_pool_allocate(
-          IREE_LIBHSA(queue->libhsa),
-          queue->profiling.signals.block_pool->memory_pool, total_size,
-          HSA_AMD_MEMORY_POOL_STANDARD_FLAG, &event_storage),
-      "allocating profile event rings of %" PRIhsz " bytes", total_size);
-  memset(event_storage, 0, total_size);
+  iree_status_t status = iree_hsa_amd_memory_pool_allocate(
+      IREE_LIBHSA(queue->libhsa), queue->profiling.memory.event_memory_pool,
+      total_size, HSA_AMD_MEMORY_POOL_STANDARD_FLAG, &event_storage);
+  if (iree_status_is_ok(status) &&
+      queue->profiling.memory.event_access_agent_count != 0) {
+    status = iree_hsa_amd_agents_allow_access(
+        IREE_LIBHSA(queue->libhsa),
+        (uint32_t)queue->profiling.memory.event_access_agent_count,
+        queue->profiling.memory.event_access_agents, /*flags=*/NULL,
+        event_storage);
+  }
+  if (!iree_status_is_ok(status)) {
+    if (event_storage) {
+      status = iree_status_join(
+          status, iree_hsa_amd_memory_pool_free(IREE_LIBHSA(queue->libhsa),
+                                                event_storage));
+    }
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, status, "allocating profile event rings of %" PRIhsz " bytes",
+        total_size);
+  }
 
   iree_slim_mutex_lock(&queue->profiling.event_mutex);
-  queue->profiling.event_allocation.base = event_storage;
-  queue->profiling.event_allocation.size = total_size;
+  queue->profiling.event_storage = event_storage;
   queue->profiling.dispatch_events.values =
       (iree_hal_amdgpu_profile_dispatch_event_t*)((uint8_t*)event_storage +
                                                   dispatch_events_offset);
@@ -227,21 +279,16 @@ void iree_hal_amdgpu_host_queue_clear_profile_events(
   queue->profiling.queue_device_events.ready_position = 0;
   queue->profiling.queue_device_events.write_position = 0;
   queue->profiling.queue_device_events.next_event_id = 1;
-  if (queue->profiling.event_allocation.base) {
-    memset(queue->profiling.event_allocation.base, 0,
-           queue->profiling.event_allocation.size);
-  }
   iree_slim_mutex_unlock(&queue->profiling.event_mutex);
 }
 
 void iree_hal_amdgpu_host_queue_deallocate_profile_events(
     iree_hal_amdgpu_host_queue_t* queue) {
-  if (!queue->profiling.event_allocation.base) return;
+  if (!queue->profiling.event_storage) return;
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_hal_amdgpu_hsa_cleanup_assert_success(iree_hsa_amd_memory_pool_free_raw(
-      queue->libhsa, queue->profiling.event_allocation.base));
-  queue->profiling.event_allocation.base = NULL;
-  queue->profiling.event_allocation.size = 0;
+      queue->libhsa, queue->profiling.event_storage));
+  queue->profiling.event_storage = NULL;
   queue->profiling.dispatch_events.values = NULL;
   queue->profiling.dispatch_events.capacity = 0;
   queue->profiling.dispatch_events.mask = 0;

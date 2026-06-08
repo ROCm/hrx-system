@@ -1344,6 +1344,8 @@ static void iree_hal_amdgpu_logical_device_translate_physical_options(
   out_options->force_wait_barrier_defer = options->force_wait_barrier_defer;
   out_options->enable_experimental_pm4_command_buffers =
       options->enable_experimental_pm4_command_buffers;
+  out_options->suppress_device_fine_memory =
+      options->suppress_device_fine_memory;
 }
 
 static iree_status_t iree_hal_amdgpu_logical_device_verify_physical_options(
@@ -1549,6 +1551,8 @@ iree_status_t iree_hal_amdgpu_logical_device_create(
   logical_device->command_buffer_mode = options->command_buffer_mode;
   logical_device->pm4_command_buffer_publication_mode =
       options->pm4_command_buffer_publication_mode;
+  logical_device->suppress_device_fine_memory =
+      options->suppress_device_fine_memory;
   if (iree_status_is_ok(status)) {
     status = iree_hal_amdgpu_logical_device_initialize_system_and_allocator(
         logical_device, options, libhsa, topology, host_allocator);
@@ -2097,18 +2101,19 @@ static iree_status_t iree_hal_amdgpu_query_physical_topology_edge(
     const iree_hal_amdgpu_physical_device_t* destination_physical_device,
     iree_hal_amdgpu_physical_topology_edge_t* out_physical_edge) {
   hsa_agent_t source_agent = source_physical_device->device_agent;
-  hsa_agent_t destination_agent = destination_physical_device->device_agent;
 
-  // Find both memory pool types on the destination agent. Not all devices
-  // expose both pool types; missing pools are treated as NEVER_ALLOWED for that
-  // pool kind, but an agent with no global pool at all is not a usable topology
-  // node.
-  hsa_amd_memory_pool_t dst_coarse_pool = {0};
-  bool has_coarse_pool = iree_hal_amdgpu_try_find_coarse_global_memory_pool(
-      libhsa, destination_agent, &dst_coarse_pool);
-  hsa_amd_memory_pool_t dst_fine_pool = {0};
-  bool has_fine_pool = iree_hal_amdgpu_try_find_fine_global_memory_pool(
-      libhsa, destination_agent, &dst_fine_pool);
+  // Use the memory pools exposed by the destination logical device instead of
+  // rediscovering raw HSA pools. Logical-device options can suppress optional
+  // fine-grained GPU-local memory, and topology refinement must describe the
+  // memory surface the device actually exposes.
+  hsa_amd_memory_pool_t dst_coarse_pool =
+      destination_physical_device->coarse_block_pools.large.memory_pool;
+  bool has_coarse_pool =
+      destination_physical_device->coarse_block_pools.large.is_initialized;
+  hsa_amd_memory_pool_t dst_fine_pool =
+      destination_physical_device->fine_block_pools.large.memory_pool;
+  bool has_fine_pool =
+      destination_physical_device->fine_block_pools.large.is_initialized;
   if (!has_coarse_pool && !has_fine_pool) {
     return iree_make_status(
         IREE_STATUS_UNAVAILABLE,

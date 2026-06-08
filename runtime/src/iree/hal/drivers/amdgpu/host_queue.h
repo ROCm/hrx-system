@@ -76,6 +76,20 @@ typedef struct iree_hal_amdgpu_profile_queue_device_event_reservation_t {
 typedef struct iree_hal_amdgpu_host_queue_post_drain_action_t
     iree_hal_amdgpu_host_queue_post_drain_action_t;
 
+// Memory policy used for queue profiling records.
+typedef struct iree_hal_amdgpu_host_queue_profiling_memory_t {
+  // HSA memory pool used for device-owned raw completion-signal records.
+  hsa_amd_memory_pool_t signal_memory_pool;
+  // HSA memory pool used for host-readable, device-writable event records.
+  hsa_amd_memory_pool_t event_memory_pool;
+  // Agents granted explicit access to event records after allocation.
+  const hsa_agent_t* event_access_agents;
+  // Number of entries in |event_access_agents|.
+  iree_host_size_t event_access_agent_count;
+  // Publication required after CPU writes event metadata.
+  iree_hal_amdgpu_kernarg_ring_publication_t event_host_write_publication;
+} iree_hal_amdgpu_host_queue_profiling_memory_t;
+
 // Callback run after notification-ring drain has published completed entries
 // and reclaimed queue-owned ring state.
 typedef void(IREE_API_PTR* iree_hal_amdgpu_host_queue_post_drain_fn_t)(
@@ -313,26 +327,14 @@ typedef struct iree_hal_amdgpu_host_queue_t {
     uint32_t queue_device_events_enabled : 1;
     // True when selected dispatches may receive profile packet augmentation.
     uint32_t dispatch_profiling_enabled : 1;
+    // Memory pools and publication policy for queue-local profiling storage.
+    iree_hal_amdgpu_host_queue_profiling_memory_t memory;
     // Serializes profile event ring mutation and flush.
     iree_slim_mutex_t event_mutex;
-    // Raw completion-signal storage paired with dispatch event slots.
-    struct {
-      // Borrowed fine-grained GPU-agent block pool backing raw signal storage.
-      iree_hal_amdgpu_block_pool_t* block_pool;
-      // Host-side table of queue-owned GPU-agent raw signal blocks.
-      iree_hal_amdgpu_block_t** blocks;
-      // Number of entries in |blocks|.
-      uint32_t block_count;
-      // Number of iree_amd_signal_t records in each block.
-      uint32_t signals_per_block;
-    } signals;
-    // Shared device-visible allocation backing queue-local event rings.
-    struct {
-      // Allocation base returned by HSA memory pool allocation.
-      void* base;
-      // Byte length of |base|.
-      iree_host_size_t size;
-    } event_allocation;
+    // Queue-owned raw completion-signal records paired with dispatch slots.
+    iree_amd_signal_t* completion_signals;
+    // Shared host-readable, device-writable allocation backing event rings.
+    void* event_storage;
     // Device-visible dispatch event ring waiting for sink flush.
     struct {
       // Dispatch event record storage in the shared event allocation.
@@ -383,7 +385,7 @@ typedef struct iree_hal_amdgpu_host_queue_t {
       struct {
         // Host-side slot table pairing range banks with aqlprofile handles.
         iree_hal_amdgpu_profile_counter_range_slot_t* slots;
-        // Device-visible timing records for each range bank.
+        // Host-readable, device-written start/end ticks for each range bank.
         uint64_t* ticks;
         // Byte length of |ticks|.
         iree_host_size_t tick_storage_size;
@@ -614,10 +616,11 @@ void iree_hal_amdgpu_host_queue_enqueue_post_drain_action(
 // queue-device timestamp records. NONE disables profiling paths that need
 // queue-local timestamp ranges.
 //
-// |profiling_signal_block_pool| provides fine-grained GPU-agent memory used for
-// raw iree_amd_signal_t records. The host initializes these records once when
-// timestamp profiling begins; packets only use them for CP-written profiling
-// timestamps and never for host HSA waits or interrupts.
+// |profiling_memory| provides memory for queue-local profiling event rings and
+// raw iree_amd_signal_t records. Raw signals may use device-only memory because
+// packets only use them for CP-written timestamps and never for host HSA waits
+// or interrupts. Profile event records must be host-readable because the
+// profiling sink serializes them on the CPU.
 iree_status_t iree_hal_amdgpu_host_queue_initialize(
     const iree_hal_amdgpu_libhsa_t* libhsa, iree_hal_device_t* logical_device,
     iree_async_proactor_t* proactor, hsa_agent_t gpu_agent,
@@ -631,7 +634,7 @@ iree_status_t iree_hal_amdgpu_host_queue_initialize(
     iree_hal_amdgpu_pm4_timestamp_strategy_t pm4_timestamp_strategy,
     iree_hal_amdgpu_epoch_signal_table_t* epoch_table,
     iree_arena_block_pool_t* block_pool,
-    iree_hal_amdgpu_block_pool_t* profiling_signal_block_pool,
+    iree_hal_amdgpu_host_queue_profiling_memory_t profiling_memory,
     const iree_hal_amdgpu_device_buffer_transfer_context_t* transfer_context,
     const iree_hal_pool_set_t* default_pool_set, iree_hal_pool_t* default_pool,
     iree_hal_amdgpu_transient_buffer_pool_t* transient_buffer_pool,
@@ -666,6 +669,12 @@ iree_host_size_t iree_hal_amdgpu_host_queue_drain_completions(
 // affinity policy can be controlled.
 iree_host_size_t iree_hal_amdgpu_host_queue_drain_completions_for_waiter(
     iree_hal_amdgpu_host_queue_t* queue);
+
+// Waits until a queue-owned setup submission reaches |epoch|. Setup
+// submissions must not carry user-visible post-drain work; this direct waiter
+// drains only the completed notification entries it observes.
+iree_status_t iree_hal_amdgpu_host_queue_wait_for_setup_epoch(
+    iree_hal_amdgpu_host_queue_t* queue, uint64_t epoch);
 
 // Enables or disables HSA dispatch timestamp population for this queue.
 //

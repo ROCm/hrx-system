@@ -18,6 +18,7 @@
 #include "iree/hal/drivers/amdgpu/host_queue_command_buffer_scratch.h"
 #include "iree/hal/drivers/amdgpu/host_queue_policy.h"
 #include "iree/hal/drivers/amdgpu/host_queue_profile.h"
+#include "iree/hal/drivers/amdgpu/host_queue_profile_events.h"
 #include "iree/hal/drivers/amdgpu/host_queue_timestamp.h"
 #include "iree/hal/drivers/amdgpu/profile_counters.h"
 #include "iree/hal/drivers/amdgpu/profile_traces.h"
@@ -507,6 +508,10 @@ static uint64_t iree_hal_amdgpu_host_queue_finish_command_buffer_block(
   const uint64_t first_payload_packet_id =
       submission->first_packet_id + resolution->barrier_count +
       profile_queue_device_prefix_packet_count;
+  if (profile->dispatch_events.event_count != 0 ||
+      profile->queue_device_events.event_count != 0) {
+    iree_hal_amdgpu_host_queue_publish_profile_host_writes(queue);
+  }
   iree_hal_amdgpu_host_queue_publish_submission_kernargs(queue, submission);
   if (queue_device_event) {
     const uint64_t start_packet_id =

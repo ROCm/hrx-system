@@ -456,18 +456,21 @@ static iree_status_t iree_hal_amdgpu_physical_device_initialize_host_pools(
 
 static iree_status_t iree_hal_amdgpu_physical_device_query_global_memory_pools(
     iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t device_agent,
+    bool suppress_device_fine_memory,
     hsa_amd_memory_pool_t* out_coarse_block_memory_pool,
     hsa_amd_memory_pool_t* out_fine_block_memory_pool) {
   iree_status_t status = iree_hal_amdgpu_find_coarse_global_memory_pool(
       libhsa, device_agent, out_coarse_block_memory_pool);
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_amdgpu_find_fine_global_memory_pool(
-        libhsa, device_agent, out_fine_block_memory_pool);
+  if (iree_status_is_ok(status) && !suppress_device_fine_memory) {
+    bool fine_block_memory_pool_available = false;
+    status = iree_hal_amdgpu_query_fine_global_memory_pool(
+        libhsa, device_agent, &fine_block_memory_pool_available,
+        out_fine_block_memory_pool);
   }
   if (!iree_status_is_ok(status)) {
     status = iree_status_annotate(
-        status, IREE_SV("AMDGPU physical device requires coarse and fine "
-                        "device-local global memory pools"));
+        status, IREE_SV("AMDGPU physical device requires a coarse-grained "
+                        "device-local global memory pool"));
   }
   return status;
 }
@@ -675,14 +678,6 @@ iree_hal_amdgpu_physical_device_initialize_device_block_pools_and_allocators(
       libhsa, options->device_block_pools.large, device_agent,
       coarse_block_memory_pool, "coarse-large-block", device_ordinal,
       host_allocator, &out_physical_device->coarse_block_pools.large));
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_physical_device_initialize_block_pool(
-      libhsa, options->device_block_pools.small, device_agent,
-      fine_block_memory_pool, "fine-small-block", device_ordinal,
-      host_allocator, &out_physical_device->fine_block_pools.small));
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_physical_device_initialize_block_pool(
-      libhsa, options->device_block_pools.large, device_agent,
-      fine_block_memory_pool, "fine-large-block", device_ordinal,
-      host_allocator, &out_physical_device->fine_block_pools.large));
 
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_block_allocator_initialize(
       &out_physical_device->coarse_block_pools.small,
@@ -692,6 +687,16 @@ iree_hal_amdgpu_physical_device_initialize_device_block_pools_and_allocators(
       &out_physical_device->coarse_block_pools.large,
       IREE_HAL_AMDGPU_PHYSICAL_DEVICE_COARSE_BLOCK_POOL_LARGE_PAGE_SIZE,
       &out_physical_device->coarse_block_allocators.large));
+  if (!fine_block_memory_pool.handle) return iree_ok_status();
+
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_physical_device_initialize_block_pool(
+      libhsa, options->device_block_pools.small, device_agent,
+      fine_block_memory_pool, "fine-small-block", device_ordinal,
+      host_allocator, &out_physical_device->fine_block_pools.small));
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_physical_device_initialize_block_pool(
+      libhsa, options->device_block_pools.large, device_agent,
+      fine_block_memory_pool, "fine-large-block", device_ordinal,
+      host_allocator, &out_physical_device->fine_block_pools.large));
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_block_allocator_initialize(
       &out_physical_device->fine_block_pools.small,
       IREE_HAL_AMDGPU_PHYSICAL_DEVICE_FINE_BLOCK_POOL_SMALL_PAGE_SIZE,
@@ -943,8 +948,8 @@ iree_status_t iree_hal_amdgpu_physical_device_initialize(
   hsa_amd_memory_pool_t fine_block_memory_pool = {0};
   if (iree_status_is_ok(status)) {
     status = iree_hal_amdgpu_physical_device_query_global_memory_pools(
-        libhsa, device_agent, &coarse_block_memory_pool,
-        &fine_block_memory_pool);
+        libhsa, device_agent, options->suppress_device_fine_memory,
+        &coarse_block_memory_pool, &fine_block_memory_pool);
   }
   if (iree_status_is_ok(status)) {
     out_physical_device->prepublished_kernarg_storage =
@@ -1143,6 +1148,31 @@ iree_status_t iree_hal_amdgpu_physical_device_assign_frontier(
   iree_hal_amdgpu_physical_device_kernarg_ring_memory_t kernarg_ring_memory;
   iree_hal_amdgpu_physical_device_select_kernarg_ring_memory(
       physical_device, host_memory_pools, &kernarg_ring_memory);
+  iree_hal_amdgpu_host_queue_profiling_memory_t profiling_memory = {0};
+  // Raw profiling completion signals are command-processor scratch records
+  // initialized by a device fill, so they can live in coarse device memory.
+  if (physical_device->coarse_block_pools.small.is_initialized) {
+    profiling_memory.signal_memory_pool =
+        physical_device->coarse_block_pools.small.memory_pool;
+  }
+  // Event records are serialized by the CPU after the GPU writes timestamp
+  // fields. Prefer CPU-visible device-coarse memory when available so devices
+  // without fine-grained memory can still profile.
+  if (iree_hal_amdgpu_cpu_visible_device_coarse_memory_is_available(
+          &physical_device->cpu_visible_device_coarse_memory)) {
+    profiling_memory.event_memory_pool =
+        physical_device->cpu_visible_device_coarse_memory.memory_pool;
+    profiling_memory.event_access_agents =
+        physical_device->cpu_visible_device_coarse_memory.access_agents;
+    profiling_memory.event_access_agent_count =
+        physical_device->cpu_visible_device_coarse_memory.access_agent_count;
+    profiling_memory.event_host_write_publication =
+        physical_device->cpu_visible_device_coarse_memory
+            .host_write_publication;
+  } else if (physical_device->fine_block_pools.small.is_initialized) {
+    profiling_memory.event_memory_pool =
+        physical_device->fine_block_pools.small.memory_pool;
+  }
   for (iree_host_size_t queue_ordinal = 0;
        queue_ordinal < physical_device->host_queue_capacity &&
        iree_status_is_ok(status);
@@ -1167,8 +1197,7 @@ iree_status_t iree_hal_amdgpu_physical_device_assign_frontier(
         completion_thread_affinity, physical_device->wait_barrier_strategy,
         physical_device->vendor_packet_capabilities,
         physical_device->pm4_timestamp_strategy, epoch_signal_table,
-        &physical_device->fine_host_block_pool,
-        &physical_device->fine_block_pools.small,
+        &physical_device->fine_host_block_pool, profiling_memory,
         &physical_device->buffer_transfer_context,
         &physical_device->default_pool_set, physical_device->default_pool,
         &physical_device->transient_buffer_pool,

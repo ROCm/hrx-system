@@ -73,8 +73,12 @@ TEST_F(VMemTest, FindFineGlobalMemoryPool) {
   ASSERT_GE(topology.cpu_agent_count, 1);
 
   hsa_amd_memory_pool_t gpu_pool = {0};
-  IREE_ASSERT_OK(iree_hal_amdgpu_find_fine_global_memory_pool(
-      &libhsa, topology.gpu_agents[0], &gpu_pool));
+  bool gpu_pool_available = false;
+  IREE_ASSERT_OK(iree_hal_amdgpu_query_fine_global_memory_pool(
+      &libhsa, topology.gpu_agents[0], &gpu_pool_available, &gpu_pool));
+  if (!gpu_pool_available) {
+    GTEST_SKIP() << "fine-grained GPU memory pool is not available";
+  }
   EXPECT_NE(gpu_pool.handle, 0);
 
   hsa_region_global_flag_t global_flags = (hsa_region_global_flag_t)0;
@@ -97,9 +101,13 @@ TEST_F(VMemTest, RingbufferLifetime) {
   ASSERT_GE(topology.gpu_agent_count, 1);
 
   hsa_agent_t gpu_agent = topology.gpu_agents[0];
-  hsa_amd_memory_pool_t memory_pool;
-  IREE_ASSERT_OK(iree_hal_amdgpu_find_fine_global_memory_pool(
-      &libhsa, gpu_agent, &memory_pool));
+  hsa_amd_memory_pool_t memory_pool = {0};
+  bool memory_pool_available = false;
+  IREE_ASSERT_OK(iree_hal_amdgpu_query_fine_global_memory_pool(
+      &libhsa, gpu_agent, &memory_pool_available, &memory_pool));
+  if (!memory_pool_available) {
+    GTEST_SKIP() << "fine-grained GPU memory pool is not available";
+  }
 
   const iree_device_size_t min_capacity = 1 * 1024 * 1024;
   iree_hal_amdgpu_vmem_ringbuffer_t ringbuffer = {0};
@@ -122,9 +130,13 @@ TEST_F(VMemTest, RingbufferWrap) {
   ASSERT_GE(topology.gpu_agent_count, 1);
 
   hsa_agent_t gpu_agent = topology.gpu_agents[0];
-  hsa_amd_memory_pool_t memory_pool;
-  IREE_ASSERT_OK(iree_hal_amdgpu_find_fine_global_memory_pool(
-      &libhsa, gpu_agent, &memory_pool));
+  hsa_amd_memory_pool_t memory_pool = {0};
+  bool memory_pool_available = false;
+  IREE_ASSERT_OK(iree_hal_amdgpu_query_fine_global_memory_pool(
+      &libhsa, gpu_agent, &memory_pool_available, &memory_pool));
+  if (!memory_pool_available) {
+    GTEST_SKIP() << "fine-grained GPU memory pool is not available";
+  }
 
   const iree_device_size_t min_capacity = 1 * 1024 * 1024;
   iree_hal_amdgpu_vmem_ringbuffer_t ringbuffer = {0};

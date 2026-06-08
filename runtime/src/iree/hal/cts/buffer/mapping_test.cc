@@ -33,19 +33,47 @@ class BufferMappingTest : public CtsTestBase<> {
  protected:
   // Allocates a buffer with HOST_VISIBLE + MAPPING usage for mapping tests.
   // This differs from the base class helpers which use DISPATCH_STORAGE.
-  void AllocateUninitializedBuffer(iree_device_size_t buffer_size,
-                                   iree_hal_buffer_t** out_buffer) {
+  iree_status_t AllocateUninitializedBuffer(iree_device_size_t buffer_size,
+                                            iree_hal_buffer_t** out_buffer) {
+    *out_buffer = NULL;
     iree_hal_buffer_params_t params = {0};
-    params.type =
-        IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
+    params.type = IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
     params.usage =
         IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING;
+    iree_device_size_t allocation_size = buffer_size;
+    iree_hal_buffer_compatibility_t compatibility =
+        iree_hal_allocator_query_buffer_compatibility(
+            device_allocator_, params, buffer_size, &params, &allocation_size);
+    if (!iree_all_bits_set(compatibility,
+                           IREE_HAL_BUFFER_COMPATIBILITY_ALLOCATABLE)) {
+      return iree_make_status(
+          IREE_STATUS_UNAVAILABLE,
+          "allocator does not support host-visible mapped buffers");
+    }
     iree_hal_buffer_t* buffer = NULL;
-    IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(device_allocator_, params,
-                                                      buffer_size, &buffer));
+    iree_status_t status = iree_hal_allocator_allocate_buffer(
+        device_allocator_, params, allocation_size, &buffer);
+    if (!iree_status_is_ok(status)) {
+      iree_hal_buffer_release(buffer);
+      return status;
+    }
     *out_buffer = buffer;
+    return iree_ok_status();
   }
 };
+
+#define IREE_HAL_CTS_ALLOCATE_UNINITIALIZED_BUFFER_OR_SKIP(buffer_size, \
+                                                           out_buffer)  \
+  do {                                                                  \
+    iree_status_t allocate_status =                                     \
+        AllocateUninitializedBuffer((buffer_size), (out_buffer));       \
+    if (iree_status_is_unavailable(allocate_status)) {                  \
+      iree_status_free(allocate_status);                                \
+      GTEST_SKIP() << "Allocator does not support host-visible mapped " \
+                      "buffers";                                        \
+    }                                                                   \
+    IREE_ASSERT_OK(allocate_status);                                    \
+  } while (false)
 
 TEST_P(BufferMappingTest, AllocatorSupportsBufferMapping) {
   iree_hal_buffer_params_t params = {0};
@@ -56,11 +84,13 @@ TEST_P(BufferMappingTest, AllocatorSupportsBufferMapping) {
       iree_hal_allocator_query_buffer_compatibility(device_allocator_, params,
                                                     kDefaultAllocationSize,
                                                     &params, &allocation_size);
-  EXPECT_TRUE(iree_all_bits_set(compatibility,
-                                IREE_HAL_BUFFER_COMPATIBILITY_ALLOCATABLE));
+  if (!iree_all_bits_set(compatibility,
+                         IREE_HAL_BUFFER_COMPATIBILITY_ALLOCATABLE)) {
+    GTEST_SKIP() << "Allocator does not support host-visible mapped buffers";
+  }
 
   iree_hal_buffer_t* buffer = NULL;
-  AllocateUninitializedBuffer(allocation_size, &buffer);
+  IREE_HAL_CTS_ALLOCATE_UNINITIALIZED_BUFFER_OR_SKIP(allocation_size, &buffer);
 
   EXPECT_TRUE(
       iree_all_bits_set(iree_hal_buffer_memory_type(buffer), params.type));
@@ -73,7 +103,8 @@ TEST_P(BufferMappingTest, AllocatorSupportsBufferMapping) {
 
 TEST_P(BufferMappingTest, ZeroWholeBuffer) {
   iree_hal_buffer_t* buffer = NULL;
-  AllocateUninitializedBuffer(kDefaultAllocationSize, &buffer);
+  IREE_HAL_CTS_ALLOCATE_UNINITIALIZED_BUFFER_OR_SKIP(kDefaultAllocationSize,
+                                                     &buffer);
 
   IREE_ASSERT_OK(iree_hal_buffer_map_zero(buffer, /*byte_offset=*/0,
                                           IREE_HAL_WHOLE_BUFFER));
@@ -90,7 +121,7 @@ TEST_P(BufferMappingTest, ZeroWholeBuffer) {
 TEST_P(BufferMappingTest, ZeroWithOffset) {
   iree_device_size_t buffer_size = 16;
   iree_hal_buffer_t* buffer = NULL;
-  AllocateUninitializedBuffer(buffer_size, &buffer);
+  IREE_HAL_CTS_ALLOCATE_UNINITIALIZED_BUFFER_OR_SKIP(buffer_size, &buffer);
 
   // Fill the entire buffer then zero only a segment of it.
   uint8_t fill_value = 0xFF;
@@ -115,7 +146,7 @@ TEST_P(BufferMappingTest, ZeroWithOffset) {
 TEST_P(BufferMappingTest, ZeroSubspan) {
   iree_device_size_t buffer_size = 16;
   iree_hal_buffer_t* buffer = NULL;
-  AllocateUninitializedBuffer(buffer_size, &buffer);
+  IREE_HAL_CTS_ALLOCATE_UNINITIALIZED_BUFFER_OR_SKIP(buffer_size, &buffer);
 
   uint8_t fill_value = 0xFF;
   IREE_ASSERT_OK(iree_hal_buffer_map_fill(buffer, /*byte_offset=*/0,
@@ -157,7 +188,8 @@ TEST_P(BufferMappingTest, ZeroSubspan) {
 
 TEST_P(BufferMappingTest, FillEmpty) {
   iree_hal_buffer_t* buffer = NULL;
-  AllocateUninitializedBuffer(kDefaultAllocationSize, &buffer);
+  IREE_HAL_CTS_ALLOCATE_UNINITIALIZED_BUFFER_OR_SKIP(kDefaultAllocationSize,
+                                                     &buffer);
 
   // Zero the buffer then "fill" 0 bytes with a different pattern.
   IREE_ASSERT_OK(iree_hal_buffer_map_zero(buffer, 0, IREE_HAL_WHOLE_BUFFER));
@@ -180,7 +212,8 @@ TEST_P(BufferMappingTest, FillEmpty) {
 
 TEST_P(BufferMappingTest, FillWholeBuffer) {
   iree_hal_buffer_t* buffer = NULL;
-  AllocateUninitializedBuffer(kDefaultAllocationSize, &buffer);
+  IREE_HAL_CTS_ALLOCATE_UNINITIALIZED_BUFFER_OR_SKIP(kDefaultAllocationSize,
+                                                     &buffer);
 
   uint8_t fill_value = 0xFF;
   IREE_ASSERT_OK(
@@ -201,7 +234,7 @@ TEST_P(BufferMappingTest, FillWholeBuffer) {
 TEST_P(BufferMappingTest, FillWithOffset) {
   iree_device_size_t buffer_size = 16;
   iree_hal_buffer_t* buffer = NULL;
-  AllocateUninitializedBuffer(buffer_size, &buffer);
+  IREE_HAL_CTS_ALLOCATE_UNINITIALIZED_BUFFER_OR_SKIP(buffer_size, &buffer);
 
   IREE_ASSERT_OK(iree_hal_buffer_map_zero(buffer, 0, IREE_HAL_WHOLE_BUFFER));
   uint8_t fill_value = 0xFF;
@@ -226,7 +259,7 @@ TEST_P(BufferMappingTest, FillWithOffset) {
 TEST_P(BufferMappingTest, FillSubspan) {
   iree_device_size_t buffer_size = 16;
   iree_hal_buffer_t* buffer = NULL;
-  AllocateUninitializedBuffer(buffer_size, &buffer);
+  IREE_HAL_CTS_ALLOCATE_UNINITIALIZED_BUFFER_OR_SKIP(buffer_size, &buffer);
 
   IREE_ASSERT_OK(iree_hal_buffer_map_zero(buffer, 0, IREE_HAL_WHOLE_BUFFER));
 
@@ -267,7 +300,7 @@ TEST_P(BufferMappingTest, FillSubspan) {
 TEST_P(BufferMappingTest, ReadData) {
   iree_device_size_t buffer_size = 16;
   iree_hal_buffer_t* buffer = NULL;
-  AllocateUninitializedBuffer(buffer_size, &buffer);
+  IREE_HAL_CTS_ALLOCATE_UNINITIALIZED_BUFFER_OR_SKIP(buffer_size, &buffer);
 
   IREE_ASSERT_OK(
       iree_hal_buffer_map_zero(buffer, /*byte_offset=*/0, /*byte_length=*/8));
@@ -303,7 +336,7 @@ TEST_P(BufferMappingTest, ReadData) {
 TEST_P(BufferMappingTest, ReadDataSubspan) {
   iree_device_size_t buffer_size = 16;
   iree_hal_buffer_t* buffer = NULL;
-  AllocateUninitializedBuffer(buffer_size, &buffer);
+  IREE_HAL_CTS_ALLOCATE_UNINITIALIZED_BUFFER_OR_SKIP(buffer_size, &buffer);
 
   // Fill segments with distinct values.
   uint8_t value = 0xAA;
@@ -346,7 +379,7 @@ TEST_P(BufferMappingTest, ReadDataSubspan) {
 TEST_P(BufferMappingTest, WriteDataWholeBuffer) {
   iree_device_size_t buffer_size = 16;
   iree_hal_buffer_t* buffer = NULL;
-  AllocateUninitializedBuffer(buffer_size, &buffer);
+  IREE_HAL_CTS_ALLOCATE_UNINITIALIZED_BUFFER_OR_SKIP(buffer_size, &buffer);
 
   uint8_t fill_value = 0xFF;
   std::vector<uint8_t> reference_buffer(buffer_size, fill_value);
@@ -365,7 +398,7 @@ TEST_P(BufferMappingTest, WriteDataWholeBuffer) {
 TEST_P(BufferMappingTest, WriteDataWithOffset) {
   iree_device_size_t buffer_size = 16;
   iree_hal_buffer_t* buffer = NULL;
-  AllocateUninitializedBuffer(buffer_size, &buffer);
+  IREE_HAL_CTS_ALLOCATE_UNINITIALIZED_BUFFER_OR_SKIP(buffer_size, &buffer);
 
   IREE_ASSERT_OK(iree_hal_buffer_map_zero(buffer, 0, IREE_HAL_WHOLE_BUFFER));
 
@@ -389,7 +422,7 @@ TEST_P(BufferMappingTest, WriteDataWithOffset) {
 TEST_P(BufferMappingTest, WriteDataSubspan) {
   iree_device_size_t buffer_size = 16;
   iree_hal_buffer_t* buffer = NULL;
-  AllocateUninitializedBuffer(buffer_size, &buffer);
+  IREE_HAL_CTS_ALLOCATE_UNINITIALIZED_BUFFER_OR_SKIP(buffer_size, &buffer);
 
   IREE_ASSERT_OK(iree_hal_buffer_map_zero(buffer, 0, IREE_HAL_WHOLE_BUFFER));
 
@@ -430,8 +463,10 @@ TEST_P(BufferMappingTest, WriteDataSubspan) {
 TEST_P(BufferMappingTest, CopyData) {
   iree_hal_buffer_t* buffer_a = NULL;
   iree_hal_buffer_t* buffer_b = NULL;
-  AllocateUninitializedBuffer(kDefaultAllocationSize, &buffer_a);
-  AllocateUninitializedBuffer(kDefaultAllocationSize, &buffer_b);
+  IREE_HAL_CTS_ALLOCATE_UNINITIALIZED_BUFFER_OR_SKIP(kDefaultAllocationSize,
+                                                     &buffer_a);
+  IREE_HAL_CTS_ALLOCATE_UNINITIALIZED_BUFFER_OR_SKIP(kDefaultAllocationSize,
+                                                     &buffer_b);
 
   uint8_t fill_value = 0x07;
   IREE_ASSERT_OK(
@@ -458,7 +493,7 @@ TEST_P(BufferMappingTest, CopyData) {
 TEST_P(BufferMappingTest, MapRangeRead) {
   iree_device_size_t buffer_size = 16;
   iree_hal_buffer_t* buffer = NULL;
-  AllocateUninitializedBuffer(buffer_size, &buffer);
+  IREE_HAL_CTS_ALLOCATE_UNINITIALIZED_BUFFER_OR_SKIP(buffer_size, &buffer);
 
   uint8_t fill_value = 0xEF;
   IREE_ASSERT_OK(iree_hal_buffer_map_fill(buffer, /*byte_offset=*/0,
@@ -486,7 +521,7 @@ TEST_P(BufferMappingTest, MapRangeRead) {
 TEST_P(BufferMappingTest, MapRangeWrite) {
   iree_device_size_t buffer_size = 16;
   iree_hal_buffer_t* buffer = NULL;
-  AllocateUninitializedBuffer(buffer_size, &buffer);
+  IREE_HAL_CTS_ALLOCATE_UNINITIALIZED_BUFFER_OR_SKIP(buffer_size, &buffer);
 
   iree_hal_buffer_mapping_t mapping;
   IREE_ASSERT_OK(iree_hal_buffer_map_range(
@@ -513,5 +548,7 @@ TEST_P(BufferMappingTest, MapRangeWrite) {
 }
 
 CTS_REGISTER_TEST_SUITE(BufferMappingTest);
+
+#undef IREE_HAL_CTS_ALLOCATE_UNINITIALIZED_BUFFER_OR_SKIP
 
 }  // namespace iree::hal::cts

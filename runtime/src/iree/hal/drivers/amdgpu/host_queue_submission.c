@@ -252,6 +252,35 @@ iree_hal_amdgpu_host_queue_final_pm4_ib_packet_control(
           queue, signal_semaphore_list));
 }
 
+// Returns the packet control for the final queue-device profiling packet. The
+// timestamp packet writes timestamp fields in host-read profile records, so the
+// queue epoch signal must publish those device writes at system scope.
+static iree_hal_amdgpu_aql_packet_control_t
+iree_hal_amdgpu_host_queue_final_profile_pm4_ib_packet_control(
+    iree_hal_amdgpu_host_queue_t* queue,
+    const iree_hal_amdgpu_wait_resolution_t* resolution,
+    const iree_hal_semaphore_list_t signal_semaphore_list) {
+  return iree_hal_amdgpu_aql_packet_control_barrier(
+      iree_hal_amdgpu_host_queue_max_fence_scope(
+          IREE_HSA_FENCE_SCOPE_AGENT, resolution->inline_acquire_scope),
+      iree_hal_amdgpu_host_queue_max_fence_scope(
+          IREE_HSA_FENCE_SCOPE_SYSTEM,
+          iree_hal_amdgpu_host_queue_signal_list_release_scope(
+              queue, signal_semaphore_list)));
+}
+
+static void iree_hal_amdgpu_host_queue_publish_submission_profile_host_writes(
+    const iree_hal_amdgpu_host_queue_t* queue,
+    iree_hal_amdgpu_profile_dispatch_event_reservation_t dispatch_events,
+    iree_hal_amdgpu_profile_queue_device_event_reservation_t
+        queue_device_events) {
+  if (dispatch_events.event_count == 0 &&
+      queue_device_events.event_count == 0) {
+    return;
+  }
+  iree_hal_amdgpu_host_queue_publish_profile_host_writes(queue);
+}
+
 // Returns the packet control for a non-final PM4-IB packet in a larger
 // submission. The final packet owns user-visible release and queue completion.
 static iree_hal_amdgpu_aql_packet_control_t
@@ -309,7 +338,7 @@ void iree_hal_amdgpu_host_queue_commit_queue_device_end_packet(
   const uint16_t header = iree_hal_amdgpu_aql_emit_pm4_ib(
       &packet->pm4_ib, pm4_ib_slot,
       iree_hal_amdgpu_pm4_ib_builder_dword_count(&builder),
-      iree_hal_amdgpu_host_queue_final_pm4_ib_packet_control(
+      iree_hal_amdgpu_host_queue_final_profile_pm4_ib_packet_control(
           queue, resolution, signal_semaphore_list),
       iree_hal_amdgpu_notification_ring_epoch_signal(&queue->notification_ring),
       &setup);
@@ -996,6 +1025,9 @@ uint64_t iree_hal_amdgpu_host_queue_finish_dispatch_submission(
       IREE_HSA_PACKET_TYPE_KERNEL_DISPATCH, dispatch_packet_control);
   const uint32_t profile_queue_device_prefix_packet_count =
       queue_device_event ? 1u : 0u;
+  iree_hal_amdgpu_host_queue_publish_submission_profile_host_writes(
+      queue, submission->profile_events,
+      submission->profile_queue_device_events);
   iree_hal_amdgpu_host_queue_publish_submission_kernargs(queue,
                                                          &submission->kernel);
   if (queue_device_event) {
@@ -1104,6 +1136,9 @@ iree_status_t iree_hal_amdgpu_host_queue_finish_pm4_ib_submission(
     submission->kernel.reclaim_entry->queue_device_event_count =
         submission->profile_queue_device_events.event_count;
     queue_device_event->submission_id = submission_epoch;
+    iree_hal_amdgpu_host_queue_publish_submission_profile_host_writes(
+        queue, (iree_hal_amdgpu_profile_dispatch_event_reservation_t){0},
+        submission->profile_queue_device_events);
     iree_hal_amdgpu_host_queue_commit_queue_device_start_packet(
         queue, resolution,
         submission->kernel.first_packet_id + resolution->barrier_count,
@@ -1450,6 +1485,8 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_pm4_ib_with_binding_table_fixup(
         event->submission_id = submission_epoch;
       }
     }
+    iree_hal_amdgpu_host_queue_publish_submission_profile_host_writes(
+        queue, profile_events, profile_queue_device_events);
     iree_hal_amdgpu_host_queue_publish_submission_kernargs(queue, &submission);
     iree_hal_amdgpu_queue_upload_ring_publish_host_writes(
         &queue->queue_upload_ring);
@@ -1569,6 +1606,9 @@ uint64_t iree_hal_amdgpu_host_queue_finish_barrier_submission(
         submission->profile_queue_device_events.event_count;
     queue_device_event->submission_id = submission_epoch;
   }
+  iree_hal_amdgpu_host_queue_publish_submission_profile_host_writes(
+      queue, (iree_hal_amdgpu_profile_dispatch_event_reservation_t){0},
+      submission->profile_queue_device_events);
   if (post_commit_callback.fn) {
     post_commit_callback.fn(post_commit_callback.user_data,
                             iree_hal_amdgpu_host_queue_const_frontier(queue),
@@ -1589,7 +1629,7 @@ uint64_t iree_hal_amdgpu_host_queue_finish_barrier_submission(
     completion_header = iree_hal_amdgpu_aql_emit_pm4_ib(
         &completion_slot->pm4_ib, pm4_ib_slot,
         iree_hal_amdgpu_pm4_ib_builder_dword_count(&builder),
-        iree_hal_amdgpu_host_queue_final_pm4_ib_packet_control(
+        iree_hal_amdgpu_host_queue_final_profile_pm4_ib_packet_control(
             queue, resolution, signal_semaphore_list),
         iree_hal_amdgpu_notification_ring_epoch_signal(
             &queue->notification_ring),

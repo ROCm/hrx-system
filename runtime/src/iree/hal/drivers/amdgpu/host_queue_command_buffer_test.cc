@@ -136,8 +136,9 @@ static iree_status_t CreateHostVisibleTransferBuffer(
     iree_hal_allocator_t* allocator, iree_device_size_t buffer_size,
     iree_hal_buffer_t** out_buffer) {
   iree_hal_buffer_params_t params = {0};
-  params.type =
-      IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
+  params.type = IREE_HAL_MEMORY_TYPE_OPTIMAL |
+                IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
+                IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
   params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING;
   return iree_hal_allocator_allocate_buffer(allocator, params, buffer_size,
                                             out_buffer);
@@ -147,8 +148,9 @@ static iree_status_t CreateHostVisibleDispatchBuffer(
     iree_hal_allocator_t* allocator, iree_device_size_t buffer_size,
     iree_hal_buffer_t** out_buffer) {
   iree_hal_buffer_params_t params = {0};
-  params.type =
-      IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
+  params.type = IREE_HAL_MEMORY_TYPE_OPTIMAL |
+                IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
+                IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
   params.access = IREE_HAL_MEMORY_ACCESS_ALL;
   params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
                  IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING;
@@ -160,8 +162,9 @@ static iree_status_t CreateHostVisibleIndirectParameterBuffer(
     iree_hal_allocator_t* allocator, iree_device_size_t buffer_size,
     iree_hal_buffer_t** out_buffer) {
   iree_hal_buffer_params_t params = {0};
-  params.type =
-      IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
+  params.type = IREE_HAL_MEMORY_TYPE_OPTIMAL |
+                IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
+                IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
   params.access = IREE_HAL_MEMORY_ACCESS_ALL;
   params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_INDIRECT_PARAMETERS |
                  IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING;
@@ -1502,6 +1505,10 @@ TEST_F(HostQueueCommandBufferTest,
   ASSERT_GT(logical_device->physical_device_count, 0u);
   const iree_hal_amdgpu_aql_prepublished_kernarg_storage_t* storage =
       &logical_device->physical_devices[0]->prepublished_kernarg_storage;
+  if (storage->strategy ==
+      IREE_HAL_AMDGPU_AQL_PREPUBLISHED_KERNARG_STORAGE_STRATEGY_DISABLED) {
+    GTEST_SKIP() << "fine-grained GPU memory pool is not available";
+  }
 
   EXPECT_EQ(
       storage->strategy,
@@ -1525,6 +1532,16 @@ TEST_F(HostQueueCommandBufferTest, DirectDispatchUsesPrepublishedKernargs) {
   TestLogicalDevice test_device;
   IREE_ASSERT_OK(
       test_device.Initialize(&options, &libhsa_, &topology_, host_allocator_));
+
+  iree_hal_amdgpu_logical_device_t* logical_device =
+      test_device.logical_device();
+  ASSERT_GT(logical_device->physical_device_count, 0u);
+  const iree_hal_amdgpu_aql_prepublished_kernarg_storage_t* storage =
+      &logical_device->physical_devices[0]->prepublished_kernarg_storage;
+  if (storage->strategy ==
+      IREE_HAL_AMDGPU_AQL_PREPUBLISHED_KERNARG_STORAGE_STRATEGY_DISABLED) {
+    GTEST_SKIP() << "fine-grained GPU memory pool is not available";
+  }
 
   iree_hal_executable_cache_t* executable_cache = NULL;
   iree_hal_executable_t* executable = NULL;
@@ -2892,6 +2909,56 @@ TEST_F(HostQueueCommandBufferTest, SinklessProfilingBeginFails) {
                             test_device.base_device(), &profiling_options));
   IREE_EXPECT_OK(iree_hal_device_profiling_flush(test_device.base_device()));
   IREE_EXPECT_OK(iree_hal_device_profiling_end(test_device.base_device()));
+}
+
+TEST_F(HostQueueCommandBufferTest,
+       SuppressedDeviceFineMemoryAllowsDispatchProfiling) {
+  iree_hal_amdgpu_logical_device_options_t options;
+  iree_hal_amdgpu_logical_device_options_initialize(&options);
+  options.preallocate_pools = 0;
+  options.suppress_device_fine_memory = 1;
+
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(
+      test_device.Initialize(&options, &libhsa_, &topology_, host_allocator_));
+
+  ExpectQueueEventProfilingCanBeginAndEnd(&test_device);
+
+  CommandBufferProfileSink sink = {};
+  CommandBufferProfileSinkInitialize(&sink);
+  DeviceProfilingScope profiling(test_device.base_device());
+  IREE_ASSERT_OK(profiling.Begin(IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS,
+                                 CommandBufferProfileSinkAsBase(&sink)));
+  IREE_ASSERT_OK(profiling.End());
+  EXPECT_EQ(1, sink.begin_count);
+  EXPECT_EQ(1, sink.end_count);
+}
+
+TEST_F(HostQueueCommandBufferTest,
+       SuppressedDeviceFineMemoryAllowsQueueDeviceProfiling) {
+  iree_hal_amdgpu_logical_device_options_t options;
+  iree_hal_amdgpu_logical_device_options_initialize(&options);
+  options.preallocate_pools = 0;
+  options.suppress_device_fine_memory = 1;
+
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(
+      test_device.Initialize(&options, &libhsa_, &topology_, host_allocator_));
+
+  CommandBufferProfileSink sink = {};
+  CommandBufferProfileSinkInitialize(&sink);
+  DeviceProfilingScope profiling(test_device.base_device());
+  iree_status_t status =
+      profiling.Begin(IREE_HAL_DEVICE_PROFILING_DATA_DEVICE_QUEUE_EVENTS,
+                      CommandBufferProfileSinkAsBase(&sink));
+  if (IsQueueDeviceProfilingUnavailable(status)) {
+    iree_status_free(status);
+    GTEST_SKIP() << "queue-device profiling data family unsupported by backend";
+  }
+  IREE_ASSERT_OK(status);
+  IREE_ASSERT_OK(profiling.End());
+  EXPECT_EQ(1, sink.begin_count);
+  EXPECT_EQ(1, sink.end_count);
 }
 
 TEST_F(HostQueueCommandBufferTest, NestedProfilingBeginFails) {

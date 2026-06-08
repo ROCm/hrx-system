@@ -1123,6 +1123,14 @@ iree_status_t iree_hal_amdgpu_host_queue_enable_profile_counters(
         IREE_STATUS_FAILED_PRECONDITION,
         "AMDGPU counter range profiling requires PM4 timestamp range support");
   }
+  if (IREE_UNLIKELY(enable_queue_ranges &&
+                    !queue->profiling.memory.event_memory_pool.handle)) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(
+        IREE_STATUS_UNAVAILABLE,
+        "AMDGPU counter range profiling requires host-readable "
+        "device-visible timestamp memory");
+  }
   if (IREE_UNLIKELY(queue->profiling.counters.session)) {
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
@@ -1193,13 +1201,21 @@ iree_status_t iree_hal_amdgpu_host_queue_enable_profile_counters(
     }
     if (iree_status_is_ok(status)) {
       status = iree_hsa_amd_memory_pool_allocate(
-          IREE_LIBHSA(queue->libhsa),
-          queue->profiling.signals.block_pool->memory_pool,
+          IREE_LIBHSA(queue->libhsa), queue->profiling.memory.event_memory_pool,
           range_tick_storage_size, HSA_AMD_MEMORY_POOL_STANDARD_FLAG,
           (void**)&range_ticks);
     }
+    if (iree_status_is_ok(status) &&
+        queue->profiling.memory.event_access_agent_count != 0) {
+      status = iree_hsa_amd_agents_allow_access(
+          IREE_LIBHSA(queue->libhsa),
+          (uint32_t)queue->profiling.memory.event_access_agent_count,
+          queue->profiling.memory.event_access_agents, /*flags=*/NULL,
+          range_ticks);
+    }
     if (iree_status_is_ok(status)) {
-      memset(range_ticks, 0, range_tick_storage_size);
+      // Range ticks are pure device timestamp outputs. Start/flush packets
+      // overwrite both fields before the stopped bank is read by the CPU.
       for (iree_host_size_t i = 0;
            i < range_slot_count && iree_status_is_ok(status); ++i) {
         const uint32_t counter_set_ordinal =
@@ -1547,8 +1563,6 @@ static void iree_hal_amdgpu_host_queue_commit_profile_counter_range_start(
   }
   iree_hal_amdgpu_profile_counter_range_ticks_t* ticks =
       iree_hal_amdgpu_host_queue_profile_counter_range_ticks(queue, bank);
-  ticks->start_tick = 0;
-  ticks->end_tick = 0;
   iree_hal_amdgpu_host_queue_commit_timestamp_start(
       queue, first_packet_id + queue->profiling.counters.set_count,
       packet_control, &ticks->start_tick);
