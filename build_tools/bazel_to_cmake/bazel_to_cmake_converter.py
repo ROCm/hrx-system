@@ -1238,6 +1238,7 @@ class BuildFileFunctions(object):
         internal_hdrs=[],
         copts=[],
         linkopts=[],
+        out=None,
         tags=None,
         target_compatible_with=None,
         **kwargs,
@@ -1245,6 +1246,7 @@ class BuildFileFunctions(object):
         if self._should_skip_target(tags=tags, **kwargs):
             return
         name_block = self._convert_string_arg_block("NAME", name, quote=False)
+        out_block = self._convert_string_arg_block("OUT", out)
         target_block = self._convert_string_arg_block("TARGET", target, quote=False)
         arch_block = self._convert_string_arg_block("ARCH", arch, quote=False)
         hdrs_block = self._convert_srcs_block(internal_hdrs, block_name="INTERNAL_HDRS")
@@ -1258,12 +1260,71 @@ class BuildFileFunctions(object):
         self._converter.body += (
             f"iree_amdgpu_binary(\n"
             f"{name_block}"
+            f"{out_block}"
             f"{target_block}"
             f"{arch_block}"
             f"{hdrs_block}"
             f"{srcs_block}"
             f"{copts_block}"
             f"{linkopts_block}"
+            f")\n\n"
+        )
+        self._emit_platform_guard_end(target_compatible_with)
+
+    def _iree_amdgpu_hal_cts_testdata(
+        self,
+        name,
+        srcs,
+        target_selectors_flag,
+        format_name,
+        format_string,
+        identifier,
+        backend_name="amdgpu",
+        target="amdgcn-amd-amdhsa",
+        internal_hdrs=None,
+        testonly=True,
+        tags=None,
+        target_compatible_with=None,
+        **kwargs,
+    ):
+        if self._should_skip_target(tags=tags, **kwargs):
+            return
+        name_block = self._convert_string_arg_block("NAME", name, quote=False)
+        target_block = self._convert_string_arg_block("TARGET", target, quote=False)
+        targets_block = self._convert_amdgpu_target_selectors_block(
+            target_selectors_flag
+        )
+        format_name_block = self._convert_string_arg_block(
+            "FORMAT_NAME", format_name, quote=False
+        )
+        if "${" in format_string:
+            escaped_format_string = format_string.replace("\\", "\\\\").replace(
+                '"', '\\"'
+            )
+            format_string_block = f'  FORMAT_STRING\n    "{escaped_format_string}"\n'
+        else:
+            format_string_block = f"  FORMAT_STRING\n    [=[{format_string}]=]\n"
+        identifier_block = self._convert_string_arg_block("IDENTIFIER", identifier)
+        backend_name_block = self._convert_string_arg_block(
+            "BACKEND_NAME", backend_name
+        )
+        hdrs_block = self._convert_srcs_block(internal_hdrs, block_name="INTERNAL_HDRS")
+        srcs_block = self._convert_srcs_block(srcs)
+        testonly_block = self._convert_option_block("TESTONLY", testonly)
+
+        self._emit_platform_guard_begin(target_compatible_with)
+        self._converter.body += (
+            f"iree_amdgpu_hal_cts_testdata(\n"
+            f"{name_block}"
+            f"{target_block}"
+            f"{targets_block}"
+            f"{format_name_block}"
+            f"{format_string_block}"
+            f"{identifier_block}"
+            f"{backend_name_block}"
+            f"{hdrs_block}"
+            f"{srcs_block}"
+            f"{testonly_block}"
             f")\n\n"
         )
         self._emit_platform_guard_end(target_compatible_with)

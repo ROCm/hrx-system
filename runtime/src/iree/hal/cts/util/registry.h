@@ -228,6 +228,14 @@ class CtsRegistry {
   static void RegisterExecutableFormat(const char* backend_name,
                                        ExecutableFormat format);
 
+  // Returns executable formats currently registered for |backend_name|.
+  //
+  // This is intentionally independent from test-suite instantiation so tools
+  // and benchmarks can load linked CTS-style executable data without creating
+  // gtest parameterizations or requiring a BackendConfig registration.
+  static std::vector<ExecutableFormat> ListExecutableFormats(
+      const char* backend_name);
+
   //===--------------------------------------------------------------------===//
   // Instantiation (called from main, before RUN_ALL_TESTS)
   //===--------------------------------------------------------------------===//

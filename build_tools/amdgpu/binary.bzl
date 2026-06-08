@@ -54,6 +54,7 @@ def iree_amdgpu_binary(
         lld_tool = AMDGPU_LLD_TOOL,
         objcopy_tool = AMDGPU_LLVM_OBJCOPY_TOOL,
         minimize = False,
+        out = None,
         builtin_headers_dep = AMDGPU_CLANG_RESOURCE_HEADERS,
         builtin_headers_marker = AMDGPU_CLANG_RESOURCE_MARKER,
         builtin_headers_include_flag = _CLANG_RESOURCE_INCLUDE_FLAG,
@@ -78,6 +79,7 @@ def iree_amdgpu_binary(
         minimize: whether to apply the optional post-link symbol-table
                   minimization pass. This is only valid for opaque code-object
                   data blobs whose kernels are not looked up by name.
+        out: output binary path. Defaults to `<name>.so`.
         builtin_headers_dep: target containing clang builtin headers.
         builtin_headers_marker: optional single builtin header file used to
                                 derive the builtin header include directory.
@@ -198,7 +200,7 @@ def iree_amdgpu_binary(
         "--discard-locals",
     ]
 
-    out = "%s.so" % (name)
+    out = out or ("%s.so" % (name))
     version_script = "$(@D)/%s.local.version" % (name,)
     link_output = "$(location %s)" % (out)
     lld_linkopts = base_linkopts + linkopts

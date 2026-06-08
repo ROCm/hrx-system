@@ -149,6 +149,10 @@ class RuntimeBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         kwargs = self._apply_runtime_cmake_policy(kwargs)
         self._iree_hal_cts_testdata(**kwargs)
 
+    def iree_amdgpu_hal_cts_testdata(self, **kwargs):
+        kwargs = self._apply_runtime_cmake_policy(kwargs)
+        self._iree_amdgpu_hal_cts_testdata(**kwargs)
+
     def iree_amdgpu_binary(self, **kwargs):
         kwargs = self._apply_runtime_cmake_policy(kwargs)
         self._iree_amdgpu_binary(**kwargs)

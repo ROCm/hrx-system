@@ -524,6 +524,7 @@ iree_cc_test(
     ::queue_affinity
     iree::base
     iree::hal
+    iree::hal::cts::util::registry
     iree::hal::cts::util::test_base
     iree::hal::drivers::amdgpu::cts::testdata_amdgpu
     iree::hal::drivers::amdgpu::util::packet

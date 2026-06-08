@@ -25,6 +25,9 @@ def _camel_case(snake_str):
         result += part.capitalize()
     return result
 
+def _ignore_unused(*_args):
+    pass
+
 def _empty_testdata_impl(ctx):
     guard = "%s_H_" % ctx.attr.identifier.upper()
     header = "\n".join([
@@ -125,6 +128,24 @@ def iree_hal_cts_testdata(
         data = [],
         testonly = True,
         **kwargs):
+    """Registers an empty CTS executable-data library for legacy callsites.
+
+    Args:
+      format_name: CTS executable format name.
+      target_device: Legacy compiler target device name.
+      identifier: C identifier prefix for the empty TOC.
+      backend_name: CTS backend name.
+      format_string: HAL executable format string.
+      testdata: Legacy compiler testdata sources.
+      flags: Legacy compiler flags.
+      flag_values: Placeholder values used by CMake format variants.
+      cmake_format_variant_values: Optional CMake format variant placeholders.
+      data: Legacy data dependencies.
+      testonly: Whether generated targets are test-only.
+      **kwargs: Common attributes forwarded to generated targets.
+    """
+    _ignore_unused(target_device, testdata, flags, data)
+
     testdata_name = "testdata_%s" % format_name
     header = "%s.h" % testdata_name
     source = "%s.c" % testdata_name
@@ -205,7 +226,32 @@ def iree_hal_cts_test_suite(
         testdata = None,
         flag_values = {},
         **kwargs):
+    """Creates runtime HAL CTS tests from explicit testdata libraries.
+
+    Args:
+      backends_lib: Driver-specific backend registration library.
+      executable_formats: Legacy compiler-driven executable formats.
+      testdata_libs: Prebuilt CTS executable-data registration libraries.
+      testdata: Legacy compiler testdata sources.
+      flag_values: Legacy compiler format placeholder values.
+      **kwargs: Common attributes forwarded to generated targets.
+    """
+    _ignore_unused(flag_values)
+
+    if executable_formats:
+        fail(
+            "iree_hal_cts_test_suite cannot compile CTS executable testdata " +
+            "from executable_formats; generate explicit testdata libraries " +
+            "and pass them via testdata_libs",
+        )
+    if testdata != None:
+        fail(
+            "iree_hal_cts_test_suite does not consume compiler testdata " +
+            "sources; pass prebuilt registration libraries via testdata_libs",
+        )
+
     iree_runtime_hal_cts_test_suite(
         backends = backends_lib,
+        testdata_libs = testdata_libs,
         **kwargs
     )

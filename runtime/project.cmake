@@ -160,6 +160,7 @@ set(IREE_HAL_AMDGPU_TARGETS
 include(flatbuffer_c_library)
 include(binary)
 include(selectors)
+include(cts)
 include(iree_execution_test_suite)
 include(iree_runtime_amdgpu_toolchain)
 include(iree_vmasm_module)

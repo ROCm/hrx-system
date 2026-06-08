@@ -147,9 +147,17 @@ function(iree_amdgpu_binary)
     list(APPEND _LINKOPTS "--version-script=${_VERSION_SCRIPT}")
   endif()
 
+  get_filename_component(_LINK_OUT_DIR "${_LINK_OUT}" DIRECTORY)
+  set(_LINK_OUT_MAKE_DIRECTORY_COMMAND)
+  if(_LINK_OUT_DIR)
+    set(_LINK_OUT_MAKE_DIRECTORY_COMMAND
+      COMMAND ${CMAKE_COMMAND} "-E" "make_directory" "${_LINK_OUT_DIR}"
+    )
+  endif()
   add_custom_command(
     OUTPUT
       "${_LINK_OUT}"
+    ${_LINK_OUT_MAKE_DIRECTORY_COMMAND}
     COMMAND
       ${IREE_LLD_BINARY}
       "-flavor" "gnu"
@@ -177,9 +185,17 @@ function(iree_amdgpu_binary)
     VERBATIM
   )
   if(_RULE_MINIMIZE)
+    get_filename_component(_OUT_DIR "${_OUT}" DIRECTORY)
+    set(_OUT_MAKE_DIRECTORY_COMMAND)
+    if(_OUT_DIR)
+      set(_OUT_MAKE_DIRECTORY_COMMAND
+        COMMAND ${CMAKE_COMMAND} "-E" "make_directory" "${_OUT_DIR}"
+      )
+    endif()
     add_custom_command(
       OUTPUT
         "${_OUT}"
+      ${_OUT_MAKE_DIRECTORY_COMMAND}
       COMMAND
         ${IREE_LLVM_OBJCOPY_BINARY}
         "-R" ".comment"

@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "iree/hal/api.h"
+#include "iree/hal/cts/util/registry.h"
 #include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/drivers/amdgpu/aql_command_buffer.h"
 #include "iree/hal/drivers/amdgpu/executable.h"
@@ -25,7 +26,6 @@
 #include "iree/hal/drivers/amdgpu/util/aql_emitter.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
-#include "runtime/src/iree/hal/drivers/amdgpu/cts/testdata_amdgpu.h"
 
 namespace iree::hal::amdgpu {
 namespace {
@@ -172,17 +172,12 @@ static iree_status_t CreateHostVisibleIndirectParameterBuffer(
                                             out_buffer);
 }
 
-static iree_const_byte_span_t FindCtsExecutableData(
-    iree_string_view_t file_name) {
-  const iree_file_toc_t* toc = iree_cts_testdata_amdgpu_create();
-  for (iree_host_size_t i = 0; toc[i].name != nullptr; ++i) {
-    if (iree_string_view_equal(file_name,
-                               iree_make_cstring_view(toc[i].name))) {
-      return iree_make_const_byte_span(
-          reinterpret_cast<const uint8_t*>(toc[i].data), toc[i].size);
-    }
-  }
-  return iree_const_byte_span_empty();
+static bool IsAmdgpuCtsExecutableFormat(
+    const iree::hal::cts::ExecutableFormat& format) {
+  if (format.format == nullptr || format.data_fn == nullptr) return false;
+  return iree_string_view_starts_with(
+      iree_make_string_view(format.name.data(), format.name.size()),
+      IREE_SV("amdgpu_"));
 }
 
 static iree_status_t LoadCtsExecutable(
@@ -192,47 +187,58 @@ static iree_status_t LoadCtsExecutable(
   *out_executable_cache = NULL;
   *out_executable = NULL;
 
-  iree_const_byte_span_t executable_data = FindCtsExecutableData(file_name);
-  if (IREE_UNLIKELY(executable_data.data_length == 0)) {
+  const auto formats =
+      iree::hal::cts::CtsRegistry::ListExecutableFormats("amdgpu");
+  iree_status_t candidate_status = iree_ok_status();
+  bool found_format = false;
+  bool found_executable_data = false;
+  for (const auto& format : formats) {
+    if (!IsAmdgpuCtsExecutableFormat(format)) continue;
+    found_format = true;
+    iree_const_byte_span_t executable_data = format.data_fn(file_name);
+    if (executable_data.data_length == 0) continue;
+    found_executable_data = true;
+
+    iree_hal_executable_cache_t* executable_cache = NULL;
+    iree_hal_executable_t* executable = NULL;
+    iree_status_t status = iree_hal_executable_cache_create(
+        device, iree_make_cstring_view("default"), &executable_cache);
+    if (iree_status_is_ok(status)) {
+      iree_hal_executable_params_t executable_params;
+      iree_hal_executable_params_initialize(&executable_params);
+      executable_params.caching_mode =
+          IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA;
+      executable_params.executable_format =
+          iree_make_cstring_view(format.format);
+      executable_params.executable_data = executable_data;
+      status = iree_hal_executable_cache_prepare_executable(
+          executable_cache, &executable_params, &executable);
+    }
+
+    if (iree_status_is_ok(status)) {
+      *out_executable_cache = executable_cache;
+      *out_executable = executable;
+      return iree_ok_status();
+    }
+    iree_hal_executable_release(executable);
+    iree_hal_executable_cache_release(executable_cache);
+    candidate_status = iree_status_join(candidate_status, status);
+  }
+
+  if (!iree_status_is_ok(candidate_status)) {
+    return candidate_status;
+  }
+  if (!found_format) {
+    return iree_make_status(IREE_STATUS_NOT_FOUND,
+                            "no registered AMDGPU CTS executable formats");
+  }
+  if (!found_executable_data) {
     return iree_make_status(IREE_STATUS_NOT_FOUND,
                             "AMDGPU CTS executable not found");
   }
-
-  iree_hal_executable_cache_t* executable_cache = NULL;
-  iree_hal_executable_t* executable = NULL;
-  iree_status_t status = iree_hal_executable_cache_create(
-      device, iree_make_cstring_view("default"), &executable_cache);
-
-  char executable_format[128] = {0};
-  iree_host_size_t inferred_size = 0;
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_executable_cache_infer_format(
-        executable_cache, IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA,
-        executable_data, IREE_ARRAYSIZE(executable_format), executable_format,
-        &inferred_size);
-  }
-  (void)inferred_size;
-
-  if (iree_status_is_ok(status)) {
-    iree_hal_executable_params_t executable_params;
-    iree_hal_executable_params_initialize(&executable_params);
-    executable_params.caching_mode =
-        IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA;
-    executable_params.executable_format =
-        iree_make_cstring_view(executable_format);
-    executable_params.executable_data = executable_data;
-    status = iree_hal_executable_cache_prepare_executable(
-        executable_cache, &executable_params, &executable);
-  }
-
-  if (iree_status_is_ok(status)) {
-    *out_executable_cache = executable_cache;
-    *out_executable = executable;
-  } else {
-    iree_hal_executable_release(executable);
-    iree_hal_executable_cache_release(executable_cache);
-  }
-  return status;
+  return iree_make_status(
+      IREE_STATUS_NOT_FOUND,
+      "registered AMDGPU CTS executable data was not accepted by the device");
 }
 
 static iree_status_t QueueTransientTransferBuffer(

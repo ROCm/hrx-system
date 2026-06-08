@@ -61,6 +61,26 @@ void CtsRegistry::RegisterExecutableFormat(const char* backend_name,
       {std::string(backend_name), std::move(format)});
 }
 
+std::vector<ExecutableFormat> CtsRegistry::ListExecutableFormats(
+    const char* backend_name) {
+  auto& data = GetRegistryData();
+  std::lock_guard<std::mutex> lock(data.mutex);
+
+  std::vector<ExecutableFormat> formats;
+  for (const auto& pending : data.pending_formats) {
+    if (pending.backend_name == backend_name) {
+      formats.push_back(pending.format);
+    }
+  }
+  for (const auto& backend : data.backends) {
+    if (std::string(backend.name) == backend_name) {
+      formats.insert(formats.end(), backend.executable_formats.begin(),
+                     backend.executable_formats.end());
+    }
+  }
+  return formats;
+}
+
 //===----------------------------------------------------------------------===//
 // Instantiation
 //===----------------------------------------------------------------------===//
