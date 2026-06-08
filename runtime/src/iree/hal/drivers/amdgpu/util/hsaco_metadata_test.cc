@@ -466,7 +466,7 @@ TEST(HsacoMetadataTest, ParsesValidMetadata) {
   iree_hal_amdgpu_hsaco_metadata_deinitialize(&metadata);
 }
 
-TEST(HsacoMetadataTest, PopulatesFlatbufferHalExportParameters) {
+TEST(HsacoMetadataTest, PopulatesHalAbiExportParameters) {
   std::vector<uint8_t> elf = BuildElfWithMetadata(BuildKernelMetadata());
 
   iree_hal_amdgpu_hsaco_metadata_t metadata;
@@ -476,7 +476,7 @@ TEST(HsacoMetadataTest, PopulatesFlatbufferHalExportParameters) {
   const iree_hal_amdgpu_hsaco_metadata_kernel_t& kernel = metadata.kernels[0];
   iree_hal_amdgpu_hsaco_metadata_export_parameter_requirements_t requirements;
   IREE_ASSERT_OK(
-      iree_hal_amdgpu_hsaco_metadata_calculate_flatbuffer_hal_export_parameter_requirements(
+      iree_hal_amdgpu_hsaco_metadata_calculate_hal_abi_export_parameter_requirements(
           &kernel, &requirements));
   EXPECT_EQ(requirements.parameter_count, 4);
   EXPECT_EQ(requirements.binding_count, 2);
@@ -487,7 +487,7 @@ TEST(HsacoMetadataTest, PopulatesFlatbufferHalExportParameters) {
       requirements.parameter_count);
   std::vector<char> name_storage(requirements.name_storage_size);
   IREE_ASSERT_OK(
-      iree_hal_amdgpu_hsaco_metadata_populate_flatbuffer_hal_export_parameters(
+      iree_hal_amdgpu_hsaco_metadata_populate_hal_abi_export_parameters(
           &kernel, parameters.size(), parameters.data(), name_storage.size(),
           name_storage.data()));
 
@@ -517,7 +517,7 @@ TEST(HsacoMetadataTest, PopulatesFlatbufferHalExportParameters) {
 
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_RESOURCE_EXHAUSTED,
-      iree_hal_amdgpu_hsaco_metadata_populate_flatbuffer_hal_export_parameters(
+      iree_hal_amdgpu_hsaco_metadata_populate_hal_abi_export_parameters(
           &kernel, parameters.size() - 1, parameters.data(),
           name_storage.size(), name_storage.data()));
 
@@ -569,7 +569,40 @@ TEST(HsacoMetadataTest, PopulatesNativeKernargExportParameters) {
   iree_hal_amdgpu_hsaco_metadata_deinitialize(&metadata);
 }
 
-TEST(HsacoMetadataTest, FlatbufferHalExportParametersSkipHiddenArguments) {
+TEST(HsacoMetadataTest, AnalyzesHalAbiCompatibleKernel) {
+  std::vector<uint8_t> elf = BuildElfWithMetadata(BuildKernelMetadata());
+
+  iree_hal_amdgpu_hsaco_metadata_t metadata;
+  IREE_ASSERT_OK(iree_hal_amdgpu_hsaco_metadata_initialize_from_elf(
+      ByteSpan(elf), iree_allocator_system(), &metadata));
+
+  iree_hal_amdgpu_hsaco_metadata_hal_abi_analysis_t analysis;
+  IREE_ASSERT_OK(iree_hal_amdgpu_hsaco_metadata_analyze_hal_abi(
+      &metadata.kernels[0], &analysis));
+  EXPECT_TRUE(analysis.is_compatible);
+  EXPECT_EQ(analysis.requirements.binding_count, 2);
+  EXPECT_EQ(analysis.requirements.constant_count, 2);
+
+  iree_hal_amdgpu_hsaco_metadata_deinitialize(&metadata);
+}
+
+TEST(HsacoMetadataTest, AnalyzesInterleavedHiddenArgsAsHalAbiIncompatible) {
+  std::vector<uint8_t> elf =
+      BuildElfWithMetadata(BuildHiddenArgumentMetadata());
+
+  iree_hal_amdgpu_hsaco_metadata_t metadata;
+  IREE_ASSERT_OK(iree_hal_amdgpu_hsaco_metadata_initialize_from_elf(
+      ByteSpan(elf), iree_allocator_system(), &metadata));
+
+  iree_hal_amdgpu_hsaco_metadata_hal_abi_analysis_t analysis;
+  IREE_ASSERT_OK(iree_hal_amdgpu_hsaco_metadata_analyze_hal_abi(
+      &metadata.kernels[0], &analysis));
+  EXPECT_FALSE(analysis.is_compatible);
+
+  iree_hal_amdgpu_hsaco_metadata_deinitialize(&metadata);
+}
+
+TEST(HsacoMetadataTest, HalAbiExportParametersSkipHiddenArguments) {
   std::vector<uint8_t> elf =
       BuildElfWithMetadata(BuildHiddenArgumentMetadata());
 
@@ -585,7 +618,7 @@ TEST(HsacoMetadataTest, FlatbufferHalExportParametersSkipHiddenArguments) {
 
   iree_hal_amdgpu_hsaco_metadata_export_parameter_requirements_t requirements;
   IREE_ASSERT_OK(
-      iree_hal_amdgpu_hsaco_metadata_calculate_flatbuffer_hal_export_parameter_requirements(
+      iree_hal_amdgpu_hsaco_metadata_calculate_hal_abi_export_parameter_requirements(
           &kernel, &requirements));
   EXPECT_EQ(requirements.parameter_count, 2);
   EXPECT_EQ(requirements.binding_count, 1);
@@ -596,7 +629,7 @@ TEST(HsacoMetadataTest, FlatbufferHalExportParametersSkipHiddenArguments) {
       requirements.parameter_count);
   std::vector<char> name_storage(requirements.name_storage_size);
   IREE_ASSERT_OK(
-      iree_hal_amdgpu_hsaco_metadata_populate_flatbuffer_hal_export_parameters(
+      iree_hal_amdgpu_hsaco_metadata_populate_hal_abi_export_parameters(
           &kernel, parameters.size(), parameters.data(), name_storage.size(),
           name_storage.data()));
   EXPECT_EQ(ToString(parameters[0].name), "buffer");
@@ -609,7 +642,7 @@ TEST(HsacoMetadataTest, FlatbufferHalExportParametersSkipHiddenArguments) {
   iree_hal_amdgpu_hsaco_metadata_deinitialize(&metadata);
 }
 
-TEST(HsacoMetadataTest, RejectsNarrowByValueFlatbufferHalExportParameter) {
+TEST(HsacoMetadataTest, RejectsNarrowByValueHalAbiExportParameter) {
   std::vector<uint8_t> elf = BuildElfWithMetadata(BuildKernelMetadata(
       /*out_of_range_arg=*/false, /*unknown_value_kind=*/false,
       /*narrow_by_value_arg=*/true));
@@ -621,7 +654,7 @@ TEST(HsacoMetadataTest, RejectsNarrowByValueFlatbufferHalExportParameter) {
   iree_hal_amdgpu_hsaco_metadata_export_parameter_requirements_t requirements;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      iree_hal_amdgpu_hsaco_metadata_calculate_flatbuffer_hal_export_parameter_requirements(
+      iree_hal_amdgpu_hsaco_metadata_calculate_hal_abi_export_parameter_requirements(
           &metadata.kernels[0], &requirements));
 
   iree_hal_amdgpu_hsaco_metadata_deinitialize(&metadata);
@@ -684,7 +717,7 @@ TEST(HsacoMetadataTest, AllowsUnknownValueKindAsOpaqueMetadata) {
   iree_hal_amdgpu_hsaco_metadata_export_parameter_requirements_t requirements;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      iree_hal_amdgpu_hsaco_metadata_calculate_flatbuffer_hal_export_parameter_requirements(
+      iree_hal_amdgpu_hsaco_metadata_calculate_hal_abi_export_parameter_requirements(
           &metadata.kernels[0], &requirements));
 
   iree_hal_amdgpu_hsaco_metadata_deinitialize(&metadata);

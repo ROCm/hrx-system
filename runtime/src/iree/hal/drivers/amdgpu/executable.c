@@ -1377,25 +1377,35 @@ static iree_status_t iree_hal_amdgpu_executable_allocate(
       IREE_STRUCT_FIELD_FAM(
           topology->gpu_agent_count,
           IREE_AMDGPU_DEVICE_PTR const iree_hal_amdgpu_device_kernel_args_t*),
-      IREE_STRUCT_FIELD(export_count, iree_hal_executable_function_info_t,
-                        &export_infos_offset),
+      IREE_STRUCT_FIELD_ALIGNED(
+          export_count, iree_hal_executable_function_info_t,
+          iree_alignof(iree_hal_executable_function_info_t),
+          &export_infos_offset),
       IREE_STRUCT_FIELD(export_name_storage_size, char,
                         &export_name_storage_offset),
-      IREE_STRUCT_FIELD(export_parameter_offset_count, iree_host_size_t,
-                        &export_parameter_offsets_offset),
-      IREE_STRUCT_FIELD(export_parameter_count,
-                        iree_hal_executable_function_parameter_t,
-                        &export_parameters_offset),
+      IREE_STRUCT_FIELD_ALIGNED(export_parameter_offset_count, iree_host_size_t,
+                                iree_alignof(iree_host_size_t),
+                                &export_parameter_offsets_offset),
+      IREE_STRUCT_FIELD_ALIGNED(
+          export_parameter_count, iree_hal_executable_function_parameter_t,
+          iree_alignof(iree_hal_executable_function_parameter_t),
+          &export_parameters_offset),
       IREE_STRUCT_FIELD(export_parameter_name_storage_size, char,
                         &export_parameter_name_storage_offset),
-      IREE_STRUCT_FIELD(export_count, bool, &custom_direct_only_exports_offset),
-      IREE_STRUCT_FIELD(export_count, iree_hal_amdgpu_device_kernel_args_t,
-                        &host_kernel_args_offset),
-      IREE_STRUCT_FIELD(dispatch_descriptor_count,
-                        iree_hal_amdgpu_executable_dispatch_descriptor_t,
-                        &host_dispatch_descriptors_offset),
-      IREE_STRUCT_FIELD(topology->gpu_agent_count, hsa_agent_t,
-                        &device_agents_offset)));
+      IREE_STRUCT_FIELD_ALIGNED(export_count, bool, iree_alignof(bool),
+                                &custom_direct_only_exports_offset),
+      IREE_STRUCT_FIELD_ALIGNED(
+          export_count, iree_hal_amdgpu_device_kernel_args_t,
+          iree_alignof(iree_hal_amdgpu_device_kernel_args_t),
+          &host_kernel_args_offset),
+      IREE_STRUCT_FIELD_ALIGNED(
+          dispatch_descriptor_count,
+          iree_hal_amdgpu_executable_dispatch_descriptor_t,
+          iree_alignof(iree_hal_amdgpu_executable_dispatch_descriptor_t),
+          &host_dispatch_descriptors_offset),
+      IREE_STRUCT_FIELD_ALIGNED(topology->gpu_agent_count, hsa_agent_t,
+                                iree_alignof(hsa_agent_t),
+                                &device_agents_offset)));
 
   iree_hal_amdgpu_executable_t* executable = NULL;
   IREE_RETURN_IF_ERROR(
@@ -1636,7 +1646,7 @@ static iree_status_t iree_hal_amdgpu_executable_calculate_reflection_storage(
 
     iree_hal_amdgpu_hsaco_metadata_export_parameter_requirements_t requirements;
     IREE_RETURN_IF_ERROR(
-        iree_hal_amdgpu_hsaco_metadata_calculate_flatbuffer_hal_export_parameter_requirements(
+        iree_hal_amdgpu_hsaco_metadata_calculate_hal_abi_export_parameter_requirements(
             kernel, &requirements),
         "projecting HSACO parameters for export `%.*s`", (int)symbol_name.size,
         symbol_name.data);
@@ -1704,13 +1714,41 @@ static void iree_hal_amdgpu_executable_raw_hsaco_workgroup_size(
     out_workgroup_size[1] = kernel->required_workgroup_size[1];
     out_workgroup_size[2] = kernel->required_workgroup_size[2];
   } else {
-    // Raw HSACO without `.reqd_workgroup_size` is represented as a dynamic
-    // workgroup-size export with 1x1x1 minimum granularity. The actual launch
-    // geometry must come from the dispatch config.
+    // Standard C `amdgpu_kernel` functions do not carry a required workgroup
+    // size. Synthesize a 1x1x1 default so HAL-shaped raw HSACO can dispatch
+    // without an IREE compiler metadata wrapper.
     out_workgroup_size[0] = 1;
     out_workgroup_size[1] = 1;
     out_workgroup_size[2] = 1;
   }
+}
+
+typedef struct iree_hal_amdgpu_raw_hsaco_parameter_projection_t {
+  // True when the kernel does not follow the normal HAL ABI and must be
+  // launched with custom-direct kernargs.
+  bool custom_direct_only;
+  // Export reflection and dispatch argument counts for the selected projection.
+  iree_hal_amdgpu_hsaco_metadata_export_parameter_requirements_t requirements;
+} iree_hal_amdgpu_raw_hsaco_parameter_projection_t;
+
+static iree_status_t iree_hal_amdgpu_executable_project_raw_hsaco_parameters(
+    const iree_hal_amdgpu_hsaco_metadata_kernel_t* kernel,
+    iree_hal_amdgpu_raw_hsaco_parameter_projection_t* out_projection) {
+  memset(out_projection, 0, sizeof(*out_projection));
+
+  iree_hal_amdgpu_hsaco_metadata_hal_abi_analysis_t hal_abi_analysis;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_hsaco_metadata_analyze_hal_abi(kernel, &hal_abi_analysis),
+      "analyzing HAL ABI compatibility for raw kernel `%.*s`",
+      (int)kernel->symbol_name.size, kernel->symbol_name.data);
+  if (hal_abi_analysis.is_compatible) {
+    out_projection->requirements = hal_abi_analysis.requirements;
+    return iree_ok_status();
+  }
+
+  out_projection->custom_direct_only = true;
+  return iree_hal_amdgpu_hsaco_metadata_calculate_native_kernarg_export_parameter_requirements(
+      kernel, &out_projection->requirements);
 }
 
 static iree_status_t
@@ -1735,17 +1773,17 @@ iree_hal_amdgpu_executable_calculate_raw_hsaco_reflection_storage(
                               "export name storage size overflow");
     }
 
-    iree_hal_amdgpu_hsaco_metadata_export_parameter_requirements_t requirements;
+    iree_hal_amdgpu_raw_hsaco_parameter_projection_t projection;
     IREE_RETURN_IF_ERROR(
-        iree_hal_amdgpu_hsaco_metadata_calculate_native_kernarg_export_parameter_requirements(
-            kernel, &requirements),
+        iree_hal_amdgpu_executable_project_raw_hsaco_parameters(kernel,
+                                                                &projection),
         "projecting HSACO parameters for raw kernel `%.*s`",
         (int)kernel->symbol_name.size, kernel->symbol_name.data);
     if (!iree_host_size_checked_add(export_parameter_count,
-                                    requirements.parameter_count,
+                                    projection.requirements.parameter_count,
                                     &export_parameter_count) ||
         !iree_host_size_checked_add(export_parameter_name_storage_size,
-                                    requirements.name_storage_size,
+                                    projection.requirements.name_storage_size,
                                     &export_parameter_name_storage_size)) {
       return iree_make_status(
           IREE_STATUS_OUT_OF_RANGE,
@@ -1795,7 +1833,7 @@ static iree_status_t iree_hal_amdgpu_executable_initialize_export_infos(
 
     iree_hal_amdgpu_hsaco_metadata_export_parameter_requirements_t requirements;
     IREE_RETURN_IF_ERROR(
-        iree_hal_amdgpu_hsaco_metadata_calculate_flatbuffer_hal_export_parameter_requirements(
+        iree_hal_amdgpu_hsaco_metadata_calculate_hal_abi_export_parameter_requirements(
             kernel, &requirements),
         "projecting HSACO parameters for export `%.*s`", (int)symbol_name.size,
         symbol_name.data);
@@ -1834,7 +1872,7 @@ static iree_status_t iree_hal_amdgpu_executable_initialize_export_infos(
     char* export_parameter_name_base =
         requirements.name_storage_size ? export_parameter_name_storage : NULL;
     IREE_RETURN_IF_ERROR(
-        iree_hal_amdgpu_hsaco_metadata_populate_flatbuffer_hal_export_parameters(
+        iree_hal_amdgpu_hsaco_metadata_populate_hal_abi_export_parameters(
             kernel, requirements.parameter_count, export_parameter_base,
             requirements.name_storage_size, export_parameter_name_base),
         "populating reflected parameters for export `%.*s`",
@@ -1862,10 +1900,10 @@ iree_status_t iree_hal_amdgpu_executable_initialize_raw_hsaco_export_infos(
     iree_hal_executable_function_info_t* info = &export_infos[i];
     export_parameter_offsets[i] = export_parameter_offset;
 
-    iree_hal_amdgpu_hsaco_metadata_export_parameter_requirements_t requirements;
+    iree_hal_amdgpu_raw_hsaco_parameter_projection_t projection;
     IREE_RETURN_IF_ERROR(
-        iree_hal_amdgpu_hsaco_metadata_calculate_native_kernarg_export_parameter_requirements(
-            kernel, &requirements),
+        iree_hal_amdgpu_executable_project_raw_hsaco_parameters(kernel,
+                                                                &projection),
         "projecting HSACO parameters for raw kernel `%.*s`",
         (int)kernel->symbol_name.size, kernel->symbol_name.data);
 
@@ -1877,32 +1915,44 @@ iree_status_t iree_hal_amdgpu_executable_initialize_raw_hsaco_export_infos(
     memset(info, 0, sizeof(*info));
     info->name = iree_make_string_view(export_name_storage, name.size);
     info->flags =
-        kernel->has_required_workgroup_size
+        kernel->has_required_workgroup_size || !projection.custom_direct_only
             ? IREE_HAL_EXECUTABLE_FUNCTION_FLAG_NONE
             : IREE_HAL_EXECUTABLE_FUNCTION_FLAG_WORKGROUP_SIZE_DYNAMIC;
-    info->constant_count = requirements.constant_count;
-    info->binding_count = requirements.binding_count;
-    info->parameter_count = requirements.parameter_count;
+    info->constant_count = projection.requirements.constant_count;
+    info->binding_count = projection.requirements.binding_count;
+    info->parameter_count = projection.requirements.parameter_count;
     iree_hal_amdgpu_executable_raw_hsaco_workgroup_size(kernel,
                                                         info->workgroup_size);
-    custom_direct_only_exports[i] = true;
+    custom_direct_only_exports[i] = projection.custom_direct_only;
 
     iree_hal_executable_function_parameter_t* export_parameter_base =
-        requirements.parameter_count
+        projection.requirements.parameter_count
             ? &export_parameters[export_parameter_offset]
             : NULL;
-    char* export_parameter_name_base =
-        requirements.name_storage_size ? export_parameter_name_storage : NULL;
-    IREE_RETURN_IF_ERROR(
-        iree_hal_amdgpu_hsaco_metadata_populate_native_kernarg_export_parameters(
-            kernel, requirements.parameter_count, export_parameter_base,
-            requirements.name_storage_size, export_parameter_name_base),
-        "populating reflected parameters for raw kernel `%.*s`",
-        (int)kernel->symbol_name.size, kernel->symbol_name.data);
+    char* export_parameter_name_base = projection.requirements.name_storage_size
+                                           ? export_parameter_name_storage
+                                           : NULL;
+    if (projection.custom_direct_only) {
+      IREE_RETURN_IF_ERROR(
+          iree_hal_amdgpu_hsaco_metadata_populate_native_kernarg_export_parameters(
+              kernel, projection.requirements.parameter_count,
+              export_parameter_base, projection.requirements.name_storage_size,
+              export_parameter_name_base),
+          "populating reflected parameters for raw kernel `%.*s`",
+          (int)kernel->symbol_name.size, kernel->symbol_name.data);
+    } else {
+      IREE_RETURN_IF_ERROR(
+          iree_hal_amdgpu_hsaco_metadata_populate_hal_abi_export_parameters(
+              kernel, projection.requirements.parameter_count,
+              export_parameter_base, projection.requirements.name_storage_size,
+              export_parameter_name_base),
+          "populating HAL ABI parameters for raw kernel `%.*s`",
+          (int)kernel->symbol_name.size, kernel->symbol_name.data);
+    }
 
     export_name_storage += name.size;
-    export_parameter_offset += requirements.parameter_count;
-    export_parameter_name_storage += requirements.name_storage_size;
+    export_parameter_offset += projection.requirements.parameter_count;
+    export_parameter_name_storage += projection.requirements.name_storage_size;
   }
   for (iree_host_size_t i = 0; i < hsaco_metadata->elf_kernel_symbol_count;
        ++i) {
@@ -1995,19 +2045,19 @@ static iree_status_t iree_hal_amdgpu_executable_resolve_raw_hsaco_kernel_args(
       "looking up HSA symbol for raw kernel `%.*s`", (int)symbol_name.size,
       symbol_name.data);
 
-  iree_hal_amdgpu_hsaco_metadata_export_parameter_requirements_t requirements;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_amdgpu_hsaco_metadata_calculate_native_kernarg_export_parameter_requirements(
-          kernel, &requirements),
-      "projecting HSACO parameters for raw kernel `%.*s`",
-      (int)symbol_name.size, symbol_name.data);
+  iree_hal_amdgpu_raw_hsaco_parameter_projection_t projection;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_executable_project_raw_hsaco_parameters(
+                           kernel, &projection),
+                       "projecting HSACO parameters for raw kernel `%.*s`",
+                       (int)symbol_name.size, symbol_name.data);
 
   uint32_t workgroup_size[3] = {0};
   iree_hal_amdgpu_executable_raw_hsaco_workgroup_size(kernel, workgroup_size);
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_executable_resolve_kernel_args_from_symbol(
-          libhsa, symbol, workgroup_size, requirements.constant_count,
-          requirements.binding_count, out_host_kernel_args),
+          libhsa, symbol, workgroup_size,
+          projection.requirements.constant_count,
+          projection.requirements.binding_count, out_host_kernel_args),
       "resolving kernel args for raw kernel `%.*s`", (int)symbol_name.size,
       symbol_name.data);
 
@@ -2326,10 +2376,15 @@ static iree_status_t iree_hal_amdgpu_executable_create_from_raw_hsaco(
           libhsa, executable->handle, kernel, any_device_agent,
           host_kernel_args);
       if (iree_status_is_ok(status)) {
-        status = iree_hal_amdgpu_executable_raw_hsaco_custom_kernarg_layout(
-            kernel, host_kernel_args,
-            &custom_explicit_kernarg_sizes[kernel_ordinal],
-            &custom_implicit_args_offsets[kernel_ordinal]);
+        if (executable->custom_direct_only_exports[kernel_ordinal]) {
+          status = iree_hal_amdgpu_executable_raw_hsaco_custom_kernarg_layout(
+              kernel, host_kernel_args,
+              &custom_explicit_kernarg_sizes[kernel_ordinal],
+              &custom_implicit_args_offsets[kernel_ordinal]);
+        } else {
+          custom_explicit_kernarg_sizes[kernel_ordinal] = 0;
+          custom_implicit_args_offsets[kernel_ordinal] = UINT16_MAX;
+        }
       }
     }
     for (iree_host_size_t i = 0; iree_status_is_ok(status) &&

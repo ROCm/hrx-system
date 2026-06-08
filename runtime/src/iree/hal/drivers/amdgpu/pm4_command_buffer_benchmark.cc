@@ -18,6 +18,7 @@
 #include "iree/base/threading/numa.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/hal/api.h"
+#include "iree/hal/cts/util/registry.h"
 #include "iree/hal/drivers/amdgpu/abi/command_buffer.h"
 #include "iree/hal/drivers/amdgpu/api.h"
 #include "iree/hal/drivers/amdgpu/aql_command_buffer.h"
@@ -27,7 +28,6 @@
 #include "iree/hal/drivers/amdgpu/pm4_command_buffer.h"
 #include "iree/hal/drivers/amdgpu/util/benchmark_flags.h"
 #include "iree/hal/drivers/amdgpu/util/benchmark_profile.h"
-#include "runtime/src/iree/hal/drivers/amdgpu/testdata_amdgpu_pm4_command_buffer_benchmark.h"
 
 IREE_FLAG(
     bool, pm4_collect_finalize_timings, false,
@@ -92,17 +92,10 @@ bool HandleStatus(benchmark::State& state, iree_status_t status,
   return false;
 }
 
-iree_const_byte_span_t FindExecutableData(iree_string_view_t file_name) {
-  const iree_file_toc_t* toc =
-      iree_pm4_command_buffer_benchmark_testdata_amdgpu_create();
-  for (iree_host_size_t i = 0; toc[i].name != nullptr; ++i) {
-    if (iree_string_view_equal(file_name,
-                               iree_make_cstring_view(toc[i].name))) {
-      return iree_make_const_byte_span(
-          reinterpret_cast<const uint8_t*>(toc[i].data), toc[i].size);
-    }
-  }
-  return iree_const_byte_span_empty();
+bool IsFormatNamePrefix(const iree::hal::cts::ExecutableFormat& format,
+                        iree_string_view_t prefix) {
+  return iree_string_view_starts_with(
+      iree_make_string_view(format.name.data(), format.name.size()), prefix);
 }
 
 bool IsDynamicPath(CommandBufferPath path) {
@@ -343,46 +336,61 @@ class Pm4CommandBufferBenchmark : public benchmark::Fixture {
   }
 
   static iree_status_t LoadExecutable(DeviceBundle* bundle) {
-    iree_const_byte_span_t executable_data = FindExecutableData(
-        iree_make_cstring_view("pm4_command_buffer_benchmark_testdata.bin"));
-    if (executable_data.data_length == 0) {
-      return iree_make_status(
-          IREE_STATUS_NOT_FOUND,
-          "AMDGPU PM4 command-buffer benchmark executable not found");
-    }
-
     iree_status_t status = iree_hal_executable_cache_create(
         bundle->device, iree_make_cstring_view("pm4_command_buffer_benchmark"),
         &bundle->executable_cache);
+    if (!iree_status_is_ok(status)) return status;
 
-    char executable_format[128] = {0};
-    iree_host_size_t inferred_size = 0;
-    if (iree_status_is_ok(status)) {
-      status = iree_hal_executable_cache_infer_format(
-          bundle->executable_cache,
-          IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA, executable_data,
-          IREE_ARRAYSIZE(executable_format), executable_format, &inferred_size);
-    }
-    if (iree_status_is_ok(status)) {
+    const auto formats =
+        iree::hal::cts::CtsRegistry::ListExecutableFormats("amdgpu");
+    iree_status_t candidate_status = iree_ok_status();
+    bool found_executable_data = false;
+    for (const auto& format : formats) {
+      if (format.format == nullptr || format.data_fn == nullptr) continue;
+      if (!IsFormatNamePrefix(
+              format, IREE_SV("amdgpu_pm4_command_buffer_benchmark_"))) {
+        continue;
+      }
+      iree_const_byte_span_t executable_data =
+          format.data_fn(IREE_SV("pm4_command_buffer_benchmark_testdata.bin"));
+      if (executable_data.data_length == 0) continue;
+      found_executable_data = true;
+
       iree_hal_executable_params_t executable_params;
       iree_hal_executable_params_initialize(&executable_params);
       executable_params.caching_mode =
           IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA;
       executable_params.executable_format =
-          iree_make_cstring_view(executable_format);
+          iree_make_cstring_view(format.format);
       executable_params.executable_data = executable_data;
+      iree_hal_executable_t* executable = nullptr;
       status = iree_hal_executable_cache_prepare_executable(
-          bundle->executable_cache, &executable_params, &bundle->executable);
+          bundle->executable_cache, &executable_params, &executable);
+      if (iree_status_is_ok(status)) {
+        bundle->executable = executable;
+        status = iree_hal_executable_lookup_function_by_name(
+            bundle->executable, IREE_SV("model_a"), &bundle->model_a);
+        if (iree_status_is_ok(status)) {
+          status = iree_hal_executable_lookup_function_by_name(
+              bundle->executable, IREE_SV("model_b"), &bundle->model_b);
+        }
+        return status;
+      }
+      iree_hal_executable_release(executable);
+      candidate_status = iree_status_join(candidate_status, status);
     }
-    if (iree_status_is_ok(status)) {
-      status = iree_hal_executable_lookup_function_by_name(
-          bundle->executable, IREE_SV("model_a"), &bundle->model_a);
+    if (!iree_status_is_ok(candidate_status)) {
+      return candidate_status;
     }
-    if (iree_status_is_ok(status)) {
-      status = iree_hal_executable_lookup_function_by_name(
-          bundle->executable, IREE_SV("model_b"), &bundle->model_b);
+    if (!found_executable_data) {
+      return iree_make_status(
+          IREE_STATUS_NOT_FOUND,
+          "AMDGPU PM4 command-buffer benchmark executable not found");
     }
-    return status;
+    return iree_make_status(
+        IREE_STATUS_NOT_FOUND,
+        "registered AMDGPU PM4 command-buffer benchmark executable data was "
+        "not accepted by the device");
   }
 
   static iree_status_t AllocateBuffers(DeviceBundle* bundle) {

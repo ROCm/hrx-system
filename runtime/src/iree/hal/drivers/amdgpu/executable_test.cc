@@ -234,13 +234,52 @@ TEST(ExecutableTest, InfersWrappedFlatbufferTargetIdFromEmbeddedElf) {
   EXPECT_EQ(inferred_size, executable_data.size());
 }
 
-TEST(ExecutableTest, RawHsacoMetadataExportsAreCustomDirectOnly) {
+TEST(ExecutableTest, RawHsacoHalAbiMetadataExportsUseNormalDispatch) {
   const iree_hal_amdgpu_hsaco_metadata_arg_t args[] = {
-      MakeArg(IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_BY_VALUE, /*offset=*/0,
+      MakeArg(IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_GLOBAL_BUFFER,
+              /*offset=*/0, /*size=*/8, IREE_SV("input")),
+      MakeArg(IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_BY_VALUE, /*offset=*/8,
+              /*size=*/4, IREE_SV("scale")),
+  };
+  iree_hal_amdgpu_hsaco_metadata_kernel_t kernel =
+      MakeKernel(/*kernarg_size=*/12, args, IREE_ARRAYSIZE(args));
+  iree_hal_amdgpu_hsaco_metadata_t metadata = {};
+  metadata.kernel_count = 1;
+  metadata.kernels = &kernel;
+
+  bool custom_direct_only_exports[1] = {};
+  iree_hal_executable_function_info_t export_infos[1] = {};
+  iree_host_size_t export_parameter_offsets[2] = {};
+  iree_hal_executable_function_parameter_t export_parameters[2] = {};
+  char export_name_storage[16] = {};
+  char export_parameter_name_storage[16] = {};
+  IREE_ASSERT_OK(iree_hal_amdgpu_executable_initialize_raw_hsaco_export_infos(
+      &metadata, custom_direct_only_exports, export_infos,
+      export_parameter_offsets, export_parameters, export_name_storage,
+      export_parameter_name_storage));
+
+  EXPECT_FALSE(custom_direct_only_exports[0]);
+  EXPECT_EQ(export_infos[0].flags, IREE_HAL_EXECUTABLE_FUNCTION_FLAG_NONE);
+  EXPECT_EQ(export_infos[0].parameter_count, 2u);
+  EXPECT_EQ(export_infos[0].binding_count, 1u);
+  EXPECT_EQ(export_infos[0].constant_count, 1u);
+  EXPECT_EQ(export_parameter_offsets[0], 0u);
+  EXPECT_EQ(export_parameter_offsets[1], 2u);
+  EXPECT_EQ(export_parameters[0].type,
+            IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_BINDING);
+  EXPECT_EQ(export_parameters[0].offset, 0u);
+  EXPECT_EQ(export_parameters[1].type,
+            IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_CONSTANT);
+  EXPECT_EQ(export_parameters[1].offset, 0u);
+}
+
+TEST(ExecutableTest, RawHsacoNativeMetadataExportsRemainCustomDirectOnly) {
+  const iree_hal_amdgpu_hsaco_metadata_arg_t args[] = {
+      MakeArg(IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_BY_VALUE, /*offset=*/8,
               /*size=*/4, IREE_SV("x")),
   };
   iree_hal_amdgpu_hsaco_metadata_kernel_t kernel =
-      MakeKernel(/*kernarg_size=*/4, args, IREE_ARRAYSIZE(args));
+      MakeKernel(/*kernarg_size=*/12, args, IREE_ARRAYSIZE(args));
   iree_hal_amdgpu_hsaco_metadata_t metadata = {};
   metadata.kernel_count = 1;
   metadata.kernels = &kernel;
@@ -258,9 +297,8 @@ TEST(ExecutableTest, RawHsacoMetadataExportsAreCustomDirectOnly) {
 
   EXPECT_TRUE(custom_direct_only_exports[0]);
   EXPECT_EQ(export_infos[0].parameter_count, 1u);
-  EXPECT_EQ(export_infos[0].constant_count, 1u);
-  EXPECT_EQ(export_parameter_offsets[0], 0u);
-  EXPECT_EQ(export_parameter_offsets[1], 1u);
+  EXPECT_EQ(export_infos[0].constant_count, 3u);
+  EXPECT_EQ(export_parameters[0].offset, 8u);
 }
 
 TEST(ExecutableTest, RawHsacoCustomKernargLayoutRequiresVisibleExtent) {

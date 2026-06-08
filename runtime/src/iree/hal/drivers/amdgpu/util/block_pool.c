@@ -140,10 +140,11 @@ static iree_status_t iree_hal_amdgpu_block_pool_grow(
 
   // Allocate host memory container for the allocation.
   iree_hal_amdgpu_block_allocation_t* block_allocation = NULL;
-  iree_status_t status = iree_allocator_malloc(
+  iree_status_t status = iree_allocator_malloc_aligned(
       block_pool->host_allocator,
       sizeof(*block_allocation) + block_pool->blocks_per_allocation *
                                       sizeof(block_allocation->blocks[0]),
+      iree_alignof(iree_hal_amdgpu_block_allocation_t), /*offset=*/0,
       (void**)&block_allocation);
   if (iree_status_is_ok(status)) {
     block_allocation->next = block_pool->allocations_head;
@@ -228,7 +229,7 @@ void iree_hal_amdgpu_block_pool_trim(iree_hal_amdgpu_block_pool_t* block_pool) {
       } else {
         prev_allocation->next = next_allocation;
       }
-      iree_allocator_free(block_pool->host_allocator, allocation);
+      iree_allocator_free_aligned(block_pool->host_allocator, allocation);
     } else {
       // Skip as blocks still outstanding.
       prev_allocation = allocation;

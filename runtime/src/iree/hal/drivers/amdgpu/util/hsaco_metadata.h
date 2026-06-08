@@ -144,6 +144,14 @@ typedef struct iree_hal_amdgpu_hsaco_metadata_export_parameter_requirements_t {
   iree_host_size_t name_storage_size;
 } iree_hal_amdgpu_hsaco_metadata_export_parameter_requirements_t;
 
+// Analysis result for raw HSACO kernels that may already follow the HAL ABI.
+typedef struct iree_hal_amdgpu_hsaco_metadata_hal_abi_analysis_t {
+  // True when the decoded kernarg metadata exactly matches the HAL ABI.
+  bool is_compatible;
+  // Requirements for normal HAL reflection when |is_compatible| is true.
+  iree_hal_amdgpu_hsaco_metadata_export_parameter_requirements_t requirements;
+} iree_hal_amdgpu_hsaco_metadata_hal_abi_analysis_t;
+
 // Initializes |out_metadata| from a raw AMDGPU ELF code object.
 //
 // This locates the `AMDGPU`/`NT_AMDGPU_METADATA` note and decodes only the
@@ -159,35 +167,49 @@ iree_status_t iree_hal_amdgpu_hsaco_metadata_initialize_from_elf(
 void iree_hal_amdgpu_hsaco_metadata_deinitialize(
     iree_hal_amdgpu_hsaco_metadata_t* metadata);
 
-// Calculates the storage and export-info counts required by the flatbuffer HAL
-// ABI reflection projection for |kernel|.
+// Calculates the storage and export-info counts required by the HAL ABI
+// reflection projection for |kernel|.
 //
 // This projection maps `.value_kind == "global_buffer"` arguments to bindings
 // using compact binding ordinals and `.value_kind == "by_value"` arguments to
 // constants using compact byte offsets. Reflected by-value sizes must be whole
 // 32-bit constants. Hidden ABI arguments are skipped. Any other visible
 // argument kind fails with IREE_STATUS_INVALID_ARGUMENT so callers do not
-// accidentally publish partial reflection for unsupported ABIs.
+// accidentally publish partial reflection for unsupported ABIs. This helper
+// does not prove that raw kernarg offsets follow the HAL ABI; raw HSACO callers
+// must use iree_hal_amdgpu_hsaco_metadata_analyze_hal_abi first.
 iree_status_t
-iree_hal_amdgpu_hsaco_metadata_calculate_flatbuffer_hal_export_parameter_requirements(
+iree_hal_amdgpu_hsaco_metadata_calculate_hal_abi_export_parameter_requirements(
     const iree_hal_amdgpu_hsaco_metadata_kernel_t* kernel,
     iree_hal_amdgpu_hsaco_metadata_export_parameter_requirements_t*
         out_requirements);
 
-// Populates |out_parameters| using the flatbuffer HAL ABI reflection
-// projection.
+// Populates |out_parameters| using the HAL ABI reflection projection.
 //
 // |parameter_capacity| and |name_storage_capacity| must satisfy the
 // requirements returned by
-// iree_hal_amdgpu_hsaco_metadata_calculate_flatbuffer_hal_export_parameter_requirements.
+// iree_hal_amdgpu_hsaco_metadata_calculate_hal_abi_export_parameter_requirements.
 // Reflected parameter names are cloned into |name_storage| and borrowed by the
 // returned parameter records. No NUL terminators are written or required.
-iree_status_t
-iree_hal_amdgpu_hsaco_metadata_populate_flatbuffer_hal_export_parameters(
+iree_status_t iree_hal_amdgpu_hsaco_metadata_populate_hal_abi_export_parameters(
     const iree_hal_amdgpu_hsaco_metadata_kernel_t* kernel,
     iree_host_size_t parameter_capacity,
     iree_hal_executable_function_parameter_t* out_parameters,
     iree_host_size_t name_storage_capacity, char* name_storage);
+
+// Analyzes whether |kernel| can be dispatched through the normal HAL ABI.
+//
+// Compatible raw HSACO kernels must place all global-buffer bindings first as
+// tightly packed 64-bit entries, followed by all by-value constants as tightly
+// packed 32-bit multiples. Hidden HIP/OpenCL ABI arguments are accepted only as
+// a suffix that begins at the 8-byte aligned end of the explicit HAL arguments.
+// Any visible native padding, interleaving, unsupported argument kind, or
+// binding after a constant makes the kernel incompatible with normal HAL
+// dispatch. Incompatible kernels may still be usable through custom-direct
+// dispatch if the native projection supports their visible arguments.
+iree_status_t iree_hal_amdgpu_hsaco_metadata_analyze_hal_abi(
+    const iree_hal_amdgpu_hsaco_metadata_kernel_t* kernel,
+    iree_hal_amdgpu_hsaco_metadata_hal_abi_analysis_t* out_analysis);
 
 // Calculates the storage and export-info counts required by the native raw
 // kernarg reflection projection for |kernel|.

@@ -1625,7 +1625,7 @@ static iree_status_t iree_hal_amdgpu_hsaco_metadata_add_parameter_name_size(
 }
 
 iree_status_t
-iree_hal_amdgpu_hsaco_metadata_calculate_flatbuffer_hal_export_parameter_requirements(
+iree_hal_amdgpu_hsaco_metadata_calculate_hal_abi_export_parameter_requirements(
     const iree_hal_amdgpu_hsaco_metadata_kernel_t* kernel,
     iree_hal_amdgpu_hsaco_metadata_export_parameter_requirements_t*
         out_requirements) {
@@ -1718,8 +1718,7 @@ iree_hal_amdgpu_hsaco_metadata_calculate_flatbuffer_hal_export_parameter_require
   return iree_ok_status();
 }
 
-iree_status_t
-iree_hal_amdgpu_hsaco_metadata_populate_flatbuffer_hal_export_parameters(
+iree_status_t iree_hal_amdgpu_hsaco_metadata_populate_hal_abi_export_parameters(
     const iree_hal_amdgpu_hsaco_metadata_kernel_t* kernel,
     iree_host_size_t parameter_capacity,
     iree_hal_executable_function_parameter_t* out_parameters,
@@ -1730,7 +1729,7 @@ iree_hal_amdgpu_hsaco_metadata_populate_flatbuffer_hal_export_parameters(
 
   iree_hal_amdgpu_hsaco_metadata_export_parameter_requirements_t requirements;
   IREE_RETURN_IF_ERROR(
-      iree_hal_amdgpu_hsaco_metadata_calculate_flatbuffer_hal_export_parameter_requirements(
+      iree_hal_amdgpu_hsaco_metadata_calculate_hal_abi_export_parameter_requirements(
           kernel, &requirements));
   if (parameter_capacity < requirements.parameter_count ||
       name_storage_capacity < requirements.name_storage_size) {
@@ -1789,6 +1788,159 @@ iree_hal_amdgpu_hsaco_metadata_populate_flatbuffer_hal_export_parameters(
             (int)arg->value_kind.size, arg->value_kind.data);
     }
   }
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_amdgpu_hsaco_metadata_align_hal_explicit_size(
+    iree_host_size_t binding_count, iree_host_size_t constant_byte_count,
+    iree_host_size_t* out_explicit_size) {
+  iree_host_size_t binding_bytes = 0;
+  if (!iree_host_size_checked_mul(binding_count, sizeof(uint64_t),
+                                  &binding_bytes)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "AMDGPU metadata HAL binding byte count overflow");
+  }
+  iree_host_size_t aligned_constant_bytes = 0;
+  if (!iree_host_size_checked_align(constant_byte_count, sizeof(uint64_t),
+                                    &aligned_constant_bytes)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "AMDGPU metadata HAL constant byte count alignment overflow");
+  }
+  if (!iree_host_size_checked_add(binding_bytes, aligned_constant_bytes,
+                                  out_explicit_size)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "AMDGPU metadata HAL explicit kernarg size overflow");
+  }
+  return iree_ok_status();
+}
+
+static void iree_hal_amdgpu_hsaco_metadata_hal_abi_mark_incompatible(
+    iree_hal_amdgpu_hsaco_metadata_hal_abi_analysis_t* analysis) {
+  memset(&analysis->requirements, 0, sizeof(analysis->requirements));
+  analysis->is_compatible = false;
+}
+
+iree_status_t iree_hal_amdgpu_hsaco_metadata_analyze_hal_abi(
+    const iree_hal_amdgpu_hsaco_metadata_kernel_t* kernel,
+    iree_hal_amdgpu_hsaco_metadata_hal_abi_analysis_t* out_analysis) {
+  IREE_ASSERT_ARGUMENT(kernel);
+  IREE_ASSERT_ARGUMENT(out_analysis);
+  memset(out_analysis, 0, sizeof(*out_analysis));
+
+  iree_host_size_t parameter_count = 0;
+  iree_host_size_t binding_count = 0;
+  iree_host_size_t constant_byte_count = 0;
+  iree_host_size_t next_visible_offset = 0;
+  iree_host_size_t hidden_args_offset = IREE_HOST_SIZE_MAX;
+  iree_host_size_t name_storage_size = 0;
+  bool constants_started = false;
+  bool hidden_args_started = false;
+  for (iree_host_size_t i = 0; i < kernel->arg_count; ++i) {
+    const iree_hal_amdgpu_hsaco_metadata_arg_t* arg = &kernel->args[i];
+    if (iree_hal_amdgpu_hsaco_metadata_arg_kind_is_hidden(arg->kind)) {
+      hidden_args_started = true;
+      hidden_args_offset =
+          iree_min(hidden_args_offset, (iree_host_size_t)arg->offset);
+      continue;
+    }
+    if (hidden_args_started) {
+      iree_hal_amdgpu_hsaco_metadata_hal_abi_mark_incompatible(out_analysis);
+      return iree_ok_status();
+    }
+
+    switch (arg->kind) {
+      case IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_GLOBAL_BUFFER:
+        if (constants_started || arg->size != sizeof(uint64_t) ||
+            arg->offset != next_visible_offset) {
+          iree_hal_amdgpu_hsaco_metadata_hal_abi_mark_incompatible(
+              out_analysis);
+          return iree_ok_status();
+        }
+        ++parameter_count;
+        ++binding_count;
+        if (!iree_host_size_checked_add(next_visible_offset, arg->size,
+                                        &next_visible_offset)) {
+          return iree_make_status(
+              IREE_STATUS_OUT_OF_RANGE,
+              "AMDGPU metadata HAL visible kernarg offset overflow");
+        }
+        IREE_RETURN_IF_ERROR(
+            iree_hal_amdgpu_hsaco_metadata_add_parameter_name_size(
+                arg, &name_storage_size));
+        break;
+      case IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_BY_VALUE:
+        if (arg->size % sizeof(uint32_t) != 0 ||
+            arg->offset != next_visible_offset) {
+          iree_hal_amdgpu_hsaco_metadata_hal_abi_mark_incompatible(
+              out_analysis);
+          return iree_ok_status();
+        }
+        constants_started = true;
+        ++parameter_count;
+        if (!iree_host_size_checked_add(next_visible_offset, arg->size,
+                                        &next_visible_offset)) {
+          return iree_make_status(
+              IREE_STATUS_OUT_OF_RANGE,
+              "AMDGPU metadata HAL visible kernarg offset overflow");
+        }
+        if (!iree_host_size_checked_add(constant_byte_count, arg->size,
+                                        &constant_byte_count)) {
+          return iree_make_status(
+              IREE_STATUS_OUT_OF_RANGE,
+              "AMDGPU metadata HAL constant byte count overflow");
+        }
+        IREE_RETURN_IF_ERROR(
+            iree_hal_amdgpu_hsaco_metadata_add_parameter_name_size(
+                arg, &name_storage_size));
+        break;
+      default:
+        iree_hal_amdgpu_hsaco_metadata_hal_abi_mark_incompatible(out_analysis);
+        return iree_ok_status();
+    }
+  }
+
+  if (kernel->kernarg_segment_size < next_visible_offset) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AMDGPU metadata HAL visible kernargs end at %" PRIhsz
+        " but kernarg segment size is only %u",
+        next_visible_offset, kernel->kernarg_segment_size);
+  }
+
+  iree_host_size_t explicit_size = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_hsaco_metadata_align_hal_explicit_size(
+      binding_count, constant_byte_count, &explicit_size));
+  if (hidden_args_started) {
+    if (hidden_args_offset != explicit_size) {
+      iree_hal_amdgpu_hsaco_metadata_hal_abi_mark_incompatible(out_analysis);
+      return iree_ok_status();
+    }
+  } else if (kernel->kernarg_segment_size > explicit_size) {
+    iree_hal_amdgpu_hsaco_metadata_hal_abi_mark_incompatible(out_analysis);
+    return iree_ok_status();
+  }
+
+  if (constant_byte_count > UINT16_MAX) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "AMDGPU metadata reflected constant byte count exceeds HAL range");
+  }
+  const iree_host_size_t constant_count =
+      constant_byte_count / sizeof(uint32_t);
+  if (parameter_count > UINT16_MAX || binding_count > UINT16_MAX ||
+      constant_count > UINT16_MAX) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "AMDGPU metadata reflected parameter counts exceed HAL ranges");
+  }
+
+  out_analysis->is_compatible = true;
+  out_analysis->requirements.parameter_count = (uint16_t)parameter_count;
+  out_analysis->requirements.constant_count = (uint16_t)constant_count;
+  out_analysis->requirements.binding_count = (uint16_t)binding_count;
+  out_analysis->requirements.name_storage_size = name_storage_size;
   return iree_ok_status();
 }
 
