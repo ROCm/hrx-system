@@ -1934,6 +1934,11 @@ HIPAPI hipError_t hipDeviceGetSharedMemConfig(hipSharedMemConfig* config) {
 // Primary context
 //===----------------------------------------------------------------------===//
 
+static void iree_hip_free_and_reset_contiguous_pool(
+    iree_hal_streaming_context_t* context);
+static void iree_hip_reset_contiguous_pool_if_owned_by(
+    iree_hal_streaming_context_t* context);
+
 // Retains the primary context for a device.
 //
 // Parameters:
@@ -2031,6 +2036,14 @@ HIPAPI hipError_t hipDevicePrimaryCtxRelease(hipDevice_t dev) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidDevice);
   }
+
+  iree_hal_streaming_context_t* context_to_release = NULL;
+  iree_slim_mutex_lock(&device->primary_context_mutex);
+  if (device->primary_context_ref_count == 1) {
+    context_to_release = device->primary_context;
+  }
+  iree_slim_mutex_unlock(&device->primary_context_mutex);
+  iree_hip_reset_contiguous_pool_if_owned_by(context_to_release);
 
   // Release the primary context (destroys when ref count reaches 0).
   HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
@@ -2232,8 +2245,6 @@ HIPAPI hipError_t hipDevicePrimaryCtxGetState(hipDevice_t dev,
 // primary context. Use with caution in multi-threaded applications.
 //
 // See also: hipDeviceReset, hipDevicePrimaryCtxRelease, hipCtxDestroy.
-static void iree_hip_free_and_reset_contiguous_pool(
-    iree_hal_streaming_context_t* context);
 HIPAPI hipError_t hipDevicePrimaryCtxReset(hipDevice_t dev) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
@@ -3062,6 +3073,7 @@ HIPAPI hipError_t hipMemGetInfo(size_t* free, size_t* total) {
 #endif
 
 static iree_hal_streaming_buffer_t* g_contiguous_pool = NULL;
+static iree_hal_streaming_context_t* g_contiguous_pool_context = NULL;
 static size_t g_pool_size = 0;      // Usable pool size (excludes tail guard)
 static size_t g_pool_raw_size = 0;  // Actual allocated pool size
 static size_t g_pool_offset = 0;
@@ -3090,18 +3102,30 @@ static pthread_mutex_t g_pool_mutex = PTHREAD_MUTEX_INITIALIZER;
 static void iree_hip_free_and_reset_contiguous_pool(
     iree_hal_streaming_context_t* context) {
   pthread_mutex_lock(&g_pool_mutex);
-  if (g_contiguous_pool && context) {
+  if (g_contiguous_pool) {
+    iree_hal_streaming_context_t* pool_context = g_contiguous_pool->context;
+    iree_hal_streaming_context_t* owner_context =
+        pool_context ? pool_context : context;
+    iree_allocator_t host_allocator =
+        owner_context ? owner_context->host_allocator : iree_allocator_system();
+
     // Remove from buffer table and release the underlying HAL buffer.
-    hrx_buffer_table_remove(&context->buffer_table,
-                            g_contiguous_pool->device_ptr);
+    if (owner_context) {
+      hrx_buffer_table_remove(&owner_context->buffer_table,
+                              g_contiguous_pool->device_ptr);
+    }
     if (g_contiguous_pool->hrx_buf) {
       hrx_buffer_release(g_contiguous_pool->hrx_buf);
       g_contiguous_pool->hrx_buf = NULL;
       g_contiguous_pool->buffer = NULL;
     }
-    iree_allocator_free(context->host_allocator, g_contiguous_pool);
+    if (pool_context) {
+      iree_hal_streaming_context_release(pool_context);
+    }
+    iree_allocator_free(host_allocator, g_contiguous_pool);
   }
   g_contiguous_pool = NULL;
+  g_contiguous_pool_context = NULL;
   g_pool_size = 0;
   g_pool_raw_size = 0;
   g_pool_offset = 0;
@@ -3110,17 +3134,41 @@ static void iree_hip_free_and_reset_contiguous_pool(
   pthread_mutex_unlock(&g_pool_mutex);
 }
 
+static void iree_hip_reset_contiguous_pool_if_owned_by(
+    iree_hal_streaming_context_t* context) {
+  if (!context) return;
+  pthread_mutex_lock(&g_pool_mutex);
+  const bool is_owner =
+      g_contiguous_pool && g_contiguous_pool_context == context;
+  pthread_mutex_unlock(&g_pool_mutex);
+  if (is_owner) {
+    iree_hip_free_and_reset_contiguous_pool(context);
+  }
+}
+
 static hipError_t iree_hip_ensure_pool(iree_hal_streaming_context_t* context) {
   // Double-check locking pattern for pool initialization
-  if (g_contiguous_pool) {
+  if (g_contiguous_pool && g_contiguous_pool_context == context) {
     return hipSuccess;
+  }
+  if (g_contiguous_pool) {
+    iree_hip_free_and_reset_contiguous_pool(g_contiguous_pool_context);
   }
 
   pthread_mutex_lock(&g_pool_mutex);
   // Check again after acquiring lock
-  if (g_contiguous_pool) {
+  if (g_contiguous_pool && g_contiguous_pool_context == context) {
     pthread_mutex_unlock(&g_pool_mutex);
     return hipSuccess;
+  }
+  if (g_contiguous_pool) {
+    pthread_mutex_unlock(&g_pool_mutex);
+    iree_hip_free_and_reset_contiguous_pool(g_contiguous_pool_context);
+    pthread_mutex_lock(&g_pool_mutex);
+    if (g_contiguous_pool && g_contiguous_pool_context == context) {
+      pthread_mutex_unlock(&g_pool_mutex);
+      return hipSuccess;
+    }
   }
 
   // Determine pool size adaptively: 75% of total device memory, with a
@@ -3160,6 +3208,7 @@ static hipError_t iree_hip_ensure_pool(iree_hal_streaming_context_t* context) {
   }
 
   g_pool_raw_size = actual_pool_size;
+  g_contiguous_pool_context = context;
   g_pool_size = actual_pool_size > POOL_TAIL_GUARD
                     ? actual_pool_size - POOL_TAIL_GUARD
                     : actual_pool_size;
