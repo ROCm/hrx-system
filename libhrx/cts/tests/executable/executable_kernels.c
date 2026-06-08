@@ -5,3 +5,8 @@
   [[clang::amdgpu_kernel, gnu::visibility("protected")]]
 
 HRX_CTS_TEST_ATTRIBUTE_KERNEL void hrx_noop(void) {}
+
+HRX_CTS_TEST_ATTRIBUTE_KERNEL void hrx_store_output(unsigned int* output,
+                                                    unsigned int value) {
+  output[0] = value;
+}

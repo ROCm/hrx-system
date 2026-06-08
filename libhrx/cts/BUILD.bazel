@@ -17,13 +17,13 @@ package(
 AMD_GPU_CTS_TAGS = ["runtime-resource=amd-gpu"]
 
 iree_amdgpu_binary_variants_embed_data(
-    name = "amdgpu_executable_noop_kernels",
+    name = "amdgpu_executable_test_kernels",
     testonly = True,
-    srcs = ["tests/executable/noop_kernel.c"],
-    binary_name_prefix = "hrx_cts_noop_kernel",
-    c_file_output = "amdgpu_executable_noop_kernels.c",
-    h_file_output = "amdgpu_executable_noop_kernels.h",
-    identifier = "hrx_cts_amdgpu_executable_noop_kernels",
+    srcs = ["tests/executable/executable_kernels.c"],
+    binary_name_prefix = "hrx_cts_executable_kernel",
+    c_file_output = "amdgpu_executable_test_kernels.c",
+    h_file_output = "amdgpu_executable_test_kernels.h",
+    identifier = "hrx_cts_amdgpu_executable_test_kernels",
     tags = ["manual"],
     target = "amdgcn-amd-amdhsa",
     target_selectors_flag = "//runtime/src/iree/hal/drivers/amdgpu:targets",
@@ -113,7 +113,7 @@ hrx_cts_test(
     srcs = ["tests/executable/executable_test.cpp"],
     tags = AMD_GPU_CTS_TAGS,
     deps = [
-        ":amdgpu_executable_noop_kernels",
+        ":amdgpu_executable_test_kernels",
         "//build_tools/amdgpu:target_map_h",
     ],
 )

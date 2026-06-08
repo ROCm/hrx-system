@@ -6,16 +6,98 @@
 
 #include "hrx_internal.h"
 
+static iree_status_t hrx_executable_snapshot_export_names(
+    iree_hal_executable_t* hal_executable, iree_host_size_t* out_export_count,
+    const char*** out_export_names) {
+  *out_export_count = 0;
+  *out_export_names = NULL;
+
+  const iree_host_size_t export_count =
+      iree_hal_executable_export_count(hal_executable);
+  if (export_count == 0) return iree_ok_status();
+  if (export_count > UINT32_MAX) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "executable export count exceeds HRX ordinal range");
+  }
+
+  iree_host_size_t storage_size = 0;
+  for (iree_host_size_t i = 0; i < export_count; ++i) {
+    iree_hal_executable_export_info_t hal_info;
+    IREE_RETURN_IF_ERROR(iree_hal_executable_export_info(
+        hal_executable, (iree_hal_executable_export_ordinal_t)i, &hal_info));
+    if (hal_info.name.size > 0 && !hal_info.name.data) {
+      return iree_make_status(IREE_STATUS_INTERNAL,
+                              "executable export name is missing storage");
+    }
+    iree_host_size_t name_storage_size = 0;
+    if (IREE_UNLIKELY(!iree_host_size_checked_add(hal_info.name.size, /*NUL=*/1,
+                                                  &name_storage_size) ||
+                      !iree_host_size_checked_add(
+                          storage_size, name_storage_size, &storage_size))) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "executable export name storage overflow");
+    }
+  }
+
+  iree_host_size_t pointer_table_size = 0;
+  iree_host_size_t total_size = 0;
+  if (IREE_UNLIKELY(!iree_host_size_checked_mul(export_count,
+                                                sizeof(const char*),
+                                                &pointer_table_size) ||
+                    !iree_host_size_checked_add(pointer_table_size,
+                                                storage_size, &total_size))) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "executable export name table overflow");
+  }
+
+  const char** export_names = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_uninitialized(
+      iree_allocator_system(), total_size, (void**)&export_names));
+
+  char* name_storage = (char*)export_names + pointer_table_size;
+  for (iree_host_size_t i = 0; i < export_count; ++i) {
+    iree_hal_executable_export_info_t hal_info;
+    iree_status_t status = iree_hal_executable_export_info(
+        hal_executable, (iree_hal_executable_export_ordinal_t)i, &hal_info);
+    if (!iree_status_is_ok(status)) {
+      iree_allocator_free(iree_allocator_system(), export_names);
+      return status;
+    }
+    export_names[i] = name_storage;
+    if (hal_info.name.size > 0) {
+      memcpy(name_storage, hal_info.name.data, hal_info.name.size);
+    }
+    name_storage[hal_info.name.size] = '\0';
+    name_storage += hal_info.name.size + 1;
+  }
+
+  *out_export_count = export_count;
+  *out_export_names = export_names;
+  return iree_ok_status();
+}
+
 static hrx_status_t hrx_executable_wrap(
     hrx_device_t device, iree_hal_executable_cache_t* hal_executable_cache,
     iree_hal_executable_t* hal_executable, hrx_executable_t* executable) {
-  hrx_executable_t value = NULL;
-  iree_status_t alloc_status = iree_allocator_malloc(
-      iree_allocator_system(), sizeof(*value), (void**)&value);
-  if (!iree_status_is_ok(alloc_status)) {
+  iree_host_size_t export_count = 0;
+  const char** export_names = NULL;
+  iree_status_t status = hrx_executable_snapshot_export_names(
+      hal_executable, &export_count, &export_names);
+  if (!iree_status_is_ok(status)) {
     iree_hal_executable_release(hal_executable);
     iree_hal_executable_cache_release(hal_executable_cache);
-    return hrx_status_from_iree(alloc_status);
+    return hrx_status_from_iree(status);
+  }
+
+  hrx_executable_t value = NULL;
+  status = iree_allocator_malloc(iree_allocator_system(), sizeof(*value),
+                                 (void**)&value);
+  if (!iree_status_is_ok(status)) {
+    iree_allocator_free(iree_allocator_system(), export_names);
+    iree_hal_executable_release(hal_executable);
+    iree_hal_executable_cache_release(hal_executable_cache);
+    return hrx_status_from_iree(status);
   }
 
   memset(value, 0, sizeof(*value));
@@ -23,6 +105,8 @@ static hrx_status_t hrx_executable_wrap(
   value->hal_executable_cache = hal_executable_cache;
   value->hal_executable = hal_executable;
   value->device = device;
+  value->export_count = export_count;
+  value->export_names = export_names;
   hrx_device_retain(device);
   *executable = value;
   return hrx_ok_status();
@@ -148,6 +232,7 @@ void hrx_executable_release(hrx_executable_t executable) {
   iree_hal_executable_t* hal_executable = executable->hal_executable;
   hrx_device_t device = executable->device;
   if (iree_atomic_ref_count_dec(&executable->ref_count) == 1) {
+    iree_allocator_free(iree_allocator_system(), executable->export_names);
     iree_allocator_free(iree_allocator_system(), executable);
   }
   iree_hal_executable_release(hal_executable);
@@ -161,7 +246,7 @@ hrx_status_t hrx_executable_export_count(hrx_executable_t executable,
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                            "executable or count is NULL");
   }
-  *count = iree_hal_executable_export_count(executable->hal_executable);
+  *count = executable->export_count;
   return hrx_ok_status();
 }
 
@@ -171,6 +256,10 @@ hrx_status_t hrx_executable_export_info(
   if (!executable || !out_info) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                            "executable or out_info is NULL");
+  }
+  if (export_ordinal >= executable->export_count) {
+    return hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
+                           "executable export ordinal is out of range");
   }
 
   iree_hal_executable_export_info_t hal_info;
@@ -182,7 +271,7 @@ hrx_status_t hrx_executable_export_info(
   }
 
   memset(out_info, 0, sizeof(*out_info));
-  out_info->name = hal_info.name.data;
+  out_info->name = executable->export_names[export_ordinal];
   out_info->flags = (uint32_t)hal_info.flags;
   out_info->constant_count = hal_info.constant_count;
   out_info->binding_count = hal_info.binding_count;

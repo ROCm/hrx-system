@@ -11,21 +11,21 @@ iree_add_all_subdirs()
 
 iree_amdgpu_binary_variants_embed_data(
   NAME
-    amdgpu_executable_noop_kernels
+    amdgpu_executable_test_kernels
   TARGET
     amdgcn-amd-amdhsa
   TARGETS
     ${IREE_HAL_AMDGPU_TARGETS}
   BINARY_NAME_PREFIX
-    hrx_cts_noop_kernel
+    hrx_cts_executable_kernel
   C_FILE_OUTPUT
-    "amdgpu_executable_noop_kernels.c"
+    "amdgpu_executable_test_kernels.c"
   H_FILE_OUTPUT
-    "amdgpu_executable_noop_kernels.h"
+    "amdgpu_executable_test_kernels.h"
   IDENTIFIER
-    "hrx_cts_amdgpu_executable_noop_kernels"
+    "hrx_cts_amdgpu_executable_test_kernels"
   SRCS
-    "tests/executable/noop_kernel.c"
+    "tests/executable/executable_kernels.c"
   TESTONLY
   PUBLIC
 )
@@ -201,7 +201,7 @@ hrx_cc_test(
   SRCS
     "tests/executable/executable_test.cpp"
   DEPS
-    ::amdgpu_executable_noop_kernels
+    ::amdgpu_executable_test_kernels
     ::core
     iree::third_party::catch2
     libhrx_defs
