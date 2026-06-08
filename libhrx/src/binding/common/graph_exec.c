@@ -1009,21 +1009,39 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0,
                                     iree_hal_streaming_stream_flush(stream));
 
-  // Query current values of internal semaphores for delta encoding.
-  // Strategy A: Reuse semaphores - query current values.
-  for (uint32_t i = 0; i < exec->semaphore_count; i++) {
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_semaphore_query(exec->semaphores[i],
-                                     &exec->semaphore_base_values[i]));
-  }
-
-  // Mutex needed for launch per CUDA docs.
+  // Mutex needed for launch per CUDA docs. It also protects the executable
+  // semaphore base values below, which are reused and advanced across launches
+  // of the same executable graph.
   iree_slim_mutex_lock(&exec->mutex);
 
-  // Save the stream's initial state.
-  uint64_t stream_wait_value = stream->completed_value;
-  ++stream->pending_value;
-  uint64_t stream_signal_value = stream->pending_value;
+  // Each graph block stores semaphore payload offsets relative to these base
+  // values. Refresh the bases from the device, but never move them backward.
+  // Back-to-back graph launches can submit a later launch before an earlier one
+  // has completed; in that case the queried device value may still be behind
+  // the last payload value this exec submitted.
+  for (uint32_t i = 0; i < exec->semaphore_count; i++) {
+    uint64_t current_value = 0;
+    iree_status_t status =
+        iree_hal_semaphore_query(exec->semaphores[i], &current_value);
+    if (!iree_status_is_ok(status)) {
+      iree_slim_mutex_unlock(&exec->mutex);
+      IREE_TRACE_ZONE_END(z0);
+      return status;
+    }
+    exec->semaphore_base_values[i] =
+        iree_max(exec->semaphore_base_values[i], current_value);
+  }
+
+  iree_slim_mutex_lock(&stream->mutex);
+
+  // Reserve the next stream timeline value while holding the stream lock so
+  // concurrent host threads cannot submit same-stream work with the same wait
+  // or signal value. The graph waits on the current stream tail, not the last
+  // completion observed by the host; HIP stream ordering requires repeated
+  // graph launches on the same stream to execute FIFO even when the caller does
+  // not synchronize between launches.
+  uint64_t stream_wait_value = stream->pending_value;
+  uint64_t stream_signal_value = stream_wait_value + 1;
 
   // Submit all blocks. They will synchronize with each other via internal
   // semaphores. This allows concurrent execution of independent blocks.
@@ -1194,7 +1212,12 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
     memcpy(exec->semaphore_base_values, new_base_values,
            exec->semaphore_count * sizeof(uint64_t));
   }
+  if (iree_status_is_ok(status)) {
+    stream->pending_value = stream_signal_value;
+    stream->submitted_value = stream_signal_value;
+  }
 
+  iree_slim_mutex_unlock(&stream->mutex);
   iree_slim_mutex_unlock(&exec->mutex);
   IREE_TRACE_ZONE_END(z0);
   return status;

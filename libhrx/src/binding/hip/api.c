@@ -10547,45 +10547,6 @@ HIPAPI hipError_t hipGraphAddMemcpyNode1D(hipGraphNode_t* pGraphNode,
 // Warning: Destination address captured at creation.
 // Ensure memory remains valid for all graph launches.
 //
-// Callback data for host-based memset in graph nodes.
-typedef struct iree_hip_graph_memset_callback_data_t {
-  void* dst;
-  int value;
-  size_t elementSize;
-  size_t count;
-  iree_hal_streaming_context_t* context;
-} iree_hip_graph_memset_callback_data_t;
-
-// Host callback function for memset operations.
-// Uses host-to-device transfer with a pattern buffer for synchronous memset.
-static void iree_hip_graph_memset_callback(void* user_data) {
-  iree_hip_graph_memset_callback_data_t* data =
-      (iree_hip_graph_memset_callback_data_t*)user_data;
-
-  // Create a host buffer with the pattern and use H2D transfer.
-  // This works because iree_hal_streaming_memcpy_host_to_device with NULL
-  // stream uses synchronous transfer via iree_hal_device_transfer_h2d.
-  size_t total_size = data->count * data->elementSize;
-
-  // Allocate a temporary host buffer with the pattern using standard malloc.
-  void* pattern_buffer = malloc(total_size);
-  if (!pattern_buffer) {
-    return;
-  }
-
-  // Fill the pattern buffer.
-  uint8_t pattern_byte = (uint8_t)data->value;
-  memset(pattern_buffer, pattern_byte, total_size);
-
-  // Copy to device using synchronous H2D transfer.
-  iree_status_t status = iree_hal_streaming_memcpy_host_to_device(
-      data->context, (iree_hal_streaming_deviceptr_t)data->dst, pattern_buffer,
-      total_size, NULL);
-  iree_status_ignore(status);
-
-  free(pattern_buffer);
-}
-
 // See also: hipGraphAddMemcpyNode, hipGraphAddKernelNode,
 //           hipMemsetAsync, hipGraphMemsetNodeSetParams.
 HIPAPI hipError_t hipGraphAddMemsetNode(hipGraphNode_t* pGraphNode,
@@ -10611,31 +10572,12 @@ HIPAPI hipError_t hipGraphAddMemsetNode(hipGraphNode_t* pGraphNode,
 
   iree_hal_streaming_graph_node_t* node = NULL;
 
-  // Use host callback approach for memset nodes.
-  // This avoids issues with buffer table lookups and works reliably.
-  // Allocate callback data in the graph's arena.
-  iree_hip_graph_memset_callback_data_t* callback_data = NULL;
-  iree_status_t alloc_status = iree_arena_allocate(
-      &stream_graph->arena, sizeof(iree_hip_graph_memset_callback_data_t),
-      (void**)&callback_data);
-  if (!iree_status_is_ok(alloc_status)) {
-    iree_status_ignore(alloc_status);
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(hipErrorOutOfMemory);
-  }
-
-  callback_data->dst = (void*)params->dst;
-  callback_data->value = params->value;
-  callback_data->elementSize = params->elementSize;
-  callback_data->count = params->width * params->height;
-  callback_data->context = stream_graph->context;
-
-  // Create a host callback node that performs the memset.
   HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
       z0,
-      iree_hal_streaming_graph_add_host_call_node(
-          stream_graph, deps, numDependencies, iree_hip_graph_memset_callback,
-          callback_data, &node),
+      iree_hal_streaming_graph_add_memset_node(
+          stream_graph, deps, numDependencies,
+          (iree_hal_streaming_deviceptr_t)params->dst, params->value,
+          params->elementSize, params->width * params->height, &node),
       hipErrorInvalidValue);
 
   *pGraphNode = (hipGraphNode_t)node;

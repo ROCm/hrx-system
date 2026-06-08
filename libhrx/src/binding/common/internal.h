@@ -421,7 +421,7 @@ typedef struct iree_hal_streaming_stream_t {
 
   // Semaphore chain for synchronization.
   iree_hal_semaphore_t* timeline_semaphore;
-  uint64_t pending_value;    // Next value to be used for signaling
+  uint64_t pending_value;    // Last stream timeline value reserved.
   uint64_t submitted_value;  // Last value that was actually submitted (for
                              // wait_submitted)
   uint64_t completed_value;  // Last value we've verified as completed
