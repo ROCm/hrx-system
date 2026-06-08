@@ -2138,13 +2138,19 @@ iree_status_t iree_hal_amdgpu_executable_raw_hsaco_custom_kernarg_layout(
     if (!iree_host_size_checked_add(
             (iree_host_size_t)implicit_args_offset,
             (iree_host_size_t)IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE,
-            &implicit_args_end) ||
-        kernel_args->kernarg_size < implicit_args_end) {
+            &implicit_args_end)) {
       return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "AMDGPU kernel `%.*s` has truncated implicit kernarg suffix",
+          IREE_STATUS_OUT_OF_RANGE,
+          "AMDGPU kernel `%.*s` implicit kernarg suffix offset overflows",
           (int)symbol_name.size, symbol_name.data);
     }
+    // NOTE: kernel_args->kernarg_size may be smaller than implicit_args_end for
+    // hand-written assembly kernels (e.g. MIOpen miopenSp3AsmConv*) that
+    // declare a partial hidden suffix. That is valid: the custom-direct
+    // dispatch path reserves max(kernarg_size, explicit, implicit_offset +
+    // IMPLICIT_SIZE) and zero-fills the remainder, so accept it rather than
+    // rejecting the load.
+    (void)implicit_args_end;
     *out_implicit_args_offset = implicit_args_offset;
   }
   return iree_ok_status();
