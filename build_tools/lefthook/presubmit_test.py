@@ -87,6 +87,12 @@ class PresubmitTest(unittest.TestCase):
         )
         self.assertFalse(presubmit.is_root_devtools_trigger("runtime/requirements.txt"))
 
+    def test_existing_project_scripts_include_loom(self):
+        self.assertIn(
+            "loom",
+            {project.name for project in presubmit.existing_project_scripts()},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
