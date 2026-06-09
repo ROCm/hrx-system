@@ -1149,8 +1149,9 @@ iree_status_t iree_hal_amdgpu_physical_device_assign_frontier(
   iree_hal_amdgpu_physical_device_select_kernarg_ring_memory(
       physical_device, host_memory_pools, &kernarg_ring_memory);
   iree_hal_amdgpu_host_queue_profiling_memory_t profiling_memory = {0};
-  // Raw profiling completion signals are command-processor scratch records
-  // initialized by a device fill, so they can live in coarse device memory.
+  // Raw profiling completion signals are user-signal-shaped CP timestamp
+  // targets initialized by a device dispatch, so they can live in coarse
+  // device memory.
   if (physical_device->coarse_block_pools.small.is_initialized) {
     profiling_memory.signal_memory_pool =
         physical_device->coarse_block_pools.small.memory_pool;

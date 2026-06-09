@@ -3814,7 +3814,7 @@ TEST_F(HostQueueCommandBufferTest,
 
   CommandBufferProfileSink sink = {};
   CommandBufferProfileSinkInitialize(&sink);
-  std::string export_pattern = "scale_*";
+  std::string export_pattern = "command_buffer_dispatch_*";
   iree_hal_device_profiling_options_t profiling_options = {0};
   profiling_options.data_families =
       IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS;

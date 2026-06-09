@@ -8,7 +8,7 @@
 
 #include <string.h>
 
-#include "iree/hal/drivers/amdgpu/device/blit.h"
+#include "iree/hal/drivers/amdgpu/device/timestamp.h"
 #include "iree/hal/drivers/amdgpu/host_queue_profile.h"
 #include "iree/hal/drivers/amdgpu/host_queue_submission.h"
 #include "iree/hal/drivers/amdgpu/profile_counters.h"
@@ -75,31 +75,26 @@ void iree_hal_amdgpu_host_queue_publish_profile_host_writes(
 }
 
 static iree_status_t
-iree_hal_amdgpu_host_queue_zero_profiling_completion_signals(
+iree_hal_amdgpu_host_queue_initialize_profiling_completion_signals(
     iree_hal_amdgpu_host_queue_t* queue, iree_amd_signal_t* signals,
-    iree_host_size_t signal_storage_size) {
+    uint32_t signal_count) {
   IREE_TRACE_ZONE_BEGIN(z0);
-  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, signal_storage_size);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, signal_count);
 
-  // Raw profiling signals are command-processor timestamp scratch records, not
-  // ROCR-created HSA synchronization objects. The command processor only needs
-  // the record address for timestamp writes/completion decrement and the device
-  // harvest kernel only reads the timestamp fields, so device-side zero-fill is
-  // sufficient initialization and keeps the storage device-local.
+  // Raw profiling signals are command-processor timestamp scratch records that
+  // intentionally live in device-local memory. They are not ROCR-created host
+  // HSA signal objects, but the packet completion_signal field still carries a
+  // signal ABI pointer; initialize and arm the ABI-visible user-signal fields
+  // on-device so stricter CP implementations treat each dispatch completion as
+  // a normal signal transition while populating start/end timestamps.
   iree_hsa_kernel_dispatch_packet_t dispatch_packet;
   memset(&dispatch_packet, 0, sizeof(dispatch_packet));
-  iree_hal_amdgpu_device_buffer_fill_kernargs_t kernargs;
+  iree_hal_amdgpu_dispatch_timestamp_signal_initialize_args_t kernargs;
   memset(&kernargs, 0, sizeof(kernargs));
-  if (IREE_UNLIKELY(!iree_hal_amdgpu_device_buffer_fill_emplace(
-          queue->transfer_context, &dispatch_packet, signals,
-          signal_storage_size, /*pattern=*/0, /*pattern_length=*/1,
-          &kernargs))) {
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                             "unable to prepare profiling signal zero-fill "
-                             "dispatch for %" PRIhsz " bytes",
-                             signal_storage_size));
-  }
+  iree_hal_amdgpu_device_timestamp_emplace_signal_initialization(
+      &queue->transfer_context->kernels
+           ->iree_hal_amdgpu_device_timestamp_initialize_completion_signals,
+      signals, signal_count, &dispatch_packet, &kernargs);
 
   iree_hal_amdgpu_wait_resolution_t resolution;
   bool ready = false;
@@ -110,7 +105,8 @@ iree_hal_amdgpu_host_queue_zero_profiling_completion_signals(
   iree_status_t status = iree_hal_amdgpu_host_queue_submit_dispatch_packet(
       queue, &resolution, iree_hal_semaphore_list_empty(), &dispatch_packet,
       &kernargs, sizeof(kernargs), /*operation_resources=*/NULL,
-      /*operation_resource_count=*/0, /*profile_queue_event_info=*/NULL,
+      /*operation_resource_count=*/0, IREE_HSA_FENCE_SCOPE_NONE,
+      IREE_HSA_FENCE_SCOPE_SYSTEM, /*profile_queue_event_info=*/NULL,
       IREE_HAL_AMDGPU_HOST_QUEUE_SUBMISSION_FLAG_NONE, &ready,
       &submission_epoch);
   iree_slim_mutex_unlock(&queue->locks.submission_mutex);
@@ -155,8 +151,8 @@ iree_hal_amdgpu_host_queue_allocate_profiling_completion_signals(
         (iree_host_size_t)iree_alignof(iree_amd_signal_t));
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_amdgpu_host_queue_zero_profiling_completion_signals(
-        queue, signals, signal_storage_size);
+    status = iree_hal_amdgpu_host_queue_initialize_profiling_completion_signals(
+        queue, signals, signal_count);
   }
   if (iree_status_is_ok(status)) {
     queue->profiling.completion_signals = signals;

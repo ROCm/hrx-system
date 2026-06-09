@@ -708,7 +708,7 @@ static iree_status_t iree_hal_amdgpu_host_queue_submit_indirect_dispatch(
       profile_queue_device_suffix_packet_count;
   const uint32_t payload_packet_count =
       profile_queue_device_packet_count + 2u + profile_counter_packet_count +
-      profile_trace_packet_count + (profile_dispatch_packet ? 1u : 0u);
+      profile_trace_packet_count + (profile_dispatch_packet ? 2u : 0u);
   const uint32_t profile_harvest_kernarg_block_count =
       profile_dispatch_packet
           ? (uint32_t)iree_host_size_ceil_div(
@@ -745,9 +745,12 @@ static iree_status_t iree_hal_amdgpu_host_queue_submit_indirect_dispatch(
   iree_hal_amdgpu_aql_packet_t* dispatch_packet =
       iree_hal_amdgpu_aql_ring_packet(&queue->aql_ring, dispatch_packet_id);
   iree_hal_amdgpu_aql_packet_t* profile_harvest_packet = NULL;
+  iree_hal_amdgpu_aql_packet_t* profile_completion_barrier_packet = NULL;
   if (profile_dispatch_packet) {
     profile_harvest_packet = iree_hal_amdgpu_aql_ring_packet(
         &queue->aql_ring, profile_harvest_packet_id);
+    profile_completion_barrier_packet = iree_hal_amdgpu_aql_ring_packet(
+        &queue->aql_ring, profile_harvest_packet_id - 1u);
   }
   iree_hal_amdgpu_kernarg_block_t* kernarg_blocks = submission.kernargs.blocks;
   uint8_t* patch_kernarg_data = kernarg_blocks[0].data;
@@ -923,6 +926,13 @@ static iree_status_t iree_hal_amdgpu_host_queue_submit_indirect_dispatch(
         dispatch_packet_id + 1u + profile_trace_stop_packet_count,
         iree_hal_amdgpu_aql_packet_control_barrier(IREE_HSA_FENCE_SCOPE_AGENT,
                                                    IREE_HSA_FENCE_SCOPE_AGENT));
+  }
+  if (profile_completion_barrier_packet) {
+    const iree_hsa_signal_t profiling_completion_signal =
+        iree_hal_amdgpu_host_queue_profiling_completion_signal(
+            queue, profile_events.first_event_position);
+    iree_hal_amdgpu_host_queue_commit_signal_barrier(
+        profile_completion_barrier_packet, profiling_completion_signal);
   }
   if (profile_dispatch_packet) {
     iree_hal_amdgpu_aql_ring_commit(profile_harvest_packet,

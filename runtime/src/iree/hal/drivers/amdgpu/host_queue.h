@@ -618,9 +618,11 @@ void iree_hal_amdgpu_host_queue_enqueue_post_drain_action(
 //
 // |profiling_memory| provides memory for queue-local profiling event rings and
 // raw iree_amd_signal_t records. Raw signals may use device-only memory because
-// packets only use them for CP-written timestamps and never for host HSA waits
-// or interrupts. Profile event records must be host-readable because the
-// profiling sink serializes them on the CPU.
+// packets only use them as CP-written timestamp targets and never as host HSA
+// waits or interrupts. They are still initialized into the armed user-signal
+// ABI shape before being placed in packet completion_signal fields. Profile
+// event records must be host-readable because the profiling sink serializes
+// them on the CPU.
 iree_status_t iree_hal_amdgpu_host_queue_initialize(
     const iree_hal_amdgpu_libhsa_t* libhsa, iree_hal_device_t* logical_device,
     iree_async_proactor_t* proactor, hsa_agent_t gpu_agent,

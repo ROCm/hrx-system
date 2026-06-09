@@ -132,14 +132,14 @@ static void iree_hal_amdgpu_host_queue_fill_noop_packets(
   }
 }
 
-static void iree_hal_amdgpu_host_queue_commit_signal_barrier(
+void iree_hal_amdgpu_host_queue_commit_signal_barrier(
     iree_hal_amdgpu_aql_packet_t* packet, iree_hsa_signal_t signal) {
   IREE_ASSERT(!iree_hsa_signal_is_null(signal),
               "signal barrier requires a non-null dependency signal");
   const uint16_t header = iree_hal_amdgpu_aql_emit_barrier_and(
       &packet->barrier_and, &signal, /*dep_count=*/1,
       iree_hal_amdgpu_aql_packet_control_barrier(IREE_HSA_FENCE_SCOPE_SYSTEM,
-                                                 IREE_HSA_FENCE_SCOPE_NONE),
+                                                 IREE_HSA_FENCE_SCOPE_AGENT),
       iree_hsa_signal_null());
   iree_hal_amdgpu_aql_ring_commit(packet, header, /*setup=*/0);
 }
@@ -673,7 +673,7 @@ iree_status_t iree_hal_amdgpu_host_queue_try_begin_dispatch_submission(
       profile_queue_device_events.event_count != 0 ? 2u : 0u;
   const uint32_t payload_packet_count =
       1u + profile_counter_packet_count + profile_trace_packet_count +
-      (use_profiling_completion_signal ? 1u : 0u) +
+      (use_profiling_completion_signal ? 2u : 0u) +
       profile_queue_device_packet_count;
   const uint32_t profile_harvest_kernarg_block_count =
       use_profiling_completion_signal
@@ -721,6 +721,11 @@ iree_status_t iree_hal_amdgpu_host_queue_try_begin_dispatch_submission(
           &queue->aql_ring, out_submission->kernel.first_packet_id +
                                 out_submission->kernel.packet_count - 1 -
                                 profile_queue_device_suffix_packet_count);
+      out_submission->profile_completion_barrier_slot =
+          iree_hal_amdgpu_aql_ring_packet(
+              &queue->aql_ring, out_submission->kernel.first_packet_id +
+                                    out_submission->kernel.packet_count - 2 -
+                                    profile_queue_device_suffix_packet_count);
       out_submission->profile_harvest_kernarg_blocks =
           &out_submission->kernel.kernargs.blocks[kernarg_block_count];
       out_submission->minimum_release_scope =
@@ -1086,6 +1091,14 @@ uint64_t iree_hal_amdgpu_host_queue_finish_dispatch_submission(
         iree_hal_amdgpu_aql_packet_control_barrier(IREE_HSA_FENCE_SCOPE_AGENT,
                                                    IREE_HSA_FENCE_SCOPE_AGENT));
   }
+  if (submission->profile_completion_barrier_slot) {
+    const iree_hsa_signal_t profiling_completion_signal =
+        iree_hal_amdgpu_host_queue_profiling_completion_signal(
+            queue, submission->profile_events.first_event_position);
+    iree_hal_amdgpu_host_queue_commit_signal_barrier(
+        submission->profile_completion_barrier_slot,
+        profiling_completion_signal);
+  }
   if (submission->profile_harvest_slot) {
     iree_hal_amdgpu_aql_ring_commit(submission->profile_harvest_slot,
                                     profile_harvest_header,
@@ -1196,6 +1209,8 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_dispatch_packet(
     const void* kernargs, iree_host_size_t kernarg_length,
     iree_hal_resource_t* const* operation_resources,
     iree_host_size_t operation_resource_count,
+    iree_hsa_fence_scope_t minimum_acquire_scope,
+    iree_hsa_fence_scope_t minimum_release_scope,
     const iree_hal_amdgpu_host_queue_profile_event_info_t*
         profile_queue_event_info,
     iree_hal_amdgpu_host_queue_submission_flags_t submission_flags,
@@ -1223,6 +1238,8 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_dispatch_packet(
           &submission.dispatch_slot->dispatch, dispatch_packet_template,
           submission.kernel.kernargs.blocks->data,
           submission.dispatch_completion_signal);
+  submission.minimum_acquire_scope = minimum_acquire_scope;
+  submission.minimum_release_scope = minimum_release_scope;
   const uint64_t submission_epoch =
       iree_hal_amdgpu_host_queue_finish_dispatch_submission(
           queue, resolution, signal_semaphore_list, operation_resources,

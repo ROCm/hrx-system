@@ -25,6 +25,7 @@ namespace iree::hal::amdgpu {
 namespace {
 
 constexpr uint32_t kNoHarvestPacketOffset = UINT32_MAX;
+constexpr uint32_t kNoCompletionBarrierPacketOffset = UINT32_MAX;
 constexpr uint32_t kNoPublicationPacketOffset = UINT32_MAX;
 
 class HostQueueSubmissionTest : public ::testing::Test {
@@ -214,6 +215,26 @@ TEST(HostQueueSubmissionUnitTest, WritesPersistentPm4IbPacketBody) {
   EXPECT_EQ(packet.dw_cnt_remain, 0xAu);
 }
 
+TEST(HostQueueSubmissionUnitTest, CommitsSignalBarrierPacket) {
+  iree_hal_amdgpu_aql_packet_t packet = {};
+  const iree_hsa_signal_t signal = {.handle = 0x12345678u};
+
+  iree_hal_amdgpu_host_queue_commit_signal_barrier(&packet, signal);
+
+  const iree_hal_amdgpu_aql_packet_control_t packet_control =
+      iree_hal_amdgpu_aql_packet_control_barrier(IREE_HSA_FENCE_SCOPE_SYSTEM,
+                                                 IREE_HSA_FENCE_SCOPE_AGENT);
+  EXPECT_EQ(packet.barrier_and.header,
+            iree_hal_amdgpu_aql_make_header(IREE_HSA_PACKET_TYPE_BARRIER_AND,
+                                            packet_control));
+  EXPECT_EQ(packet.barrier_and.dep_signal[0].handle, signal.handle);
+  for (iree_host_size_t i = 1;
+       i < IREE_ARRAYSIZE(packet.barrier_and.dep_signal); ++i) {
+    EXPECT_EQ(packet.barrier_and.dep_signal[i].handle, 0u);
+  }
+  EXPECT_EQ(packet.barrier_and.completion_signal.handle, 0u);
+}
+
 typedef struct DispatchSubmissionPlanCase {
   // Number of wait-barrier packets preceding the dispatch payload.
   uint8_t barrier_count;
@@ -225,6 +246,9 @@ typedef struct DispatchSubmissionPlanCase {
   uint32_t expected_packet_count;
   // Expected dispatch packet offset from the first reserved packet.
   uint32_t expected_dispatch_packet_offset;
+  // Expected profiling completion barrier offset, or
+  // kNoCompletionBarrierPacketOffset when absent.
+  uint32_t expected_completion_barrier_packet_offset;
   // Expected harvest packet offset, or kNoHarvestPacketOffset when absent.
   uint32_t expected_harvest_packet_offset;
   // True when the dispatch packet should signal queue completion directly.
@@ -272,6 +296,18 @@ static void ExpectDispatchSubmissionPlan(
 
     const bool has_harvest_packet =
         plan_case.expected_harvest_packet_offset != kNoHarvestPacketOffset;
+    const bool has_completion_barrier =
+        plan_case.expected_completion_barrier_packet_offset !=
+        kNoCompletionBarrierPacketOffset;
+    if (has_completion_barrier) {
+      EXPECT_EQ(iree_hal_amdgpu_aql_ring_packet(
+                    &queue->aql_ring,
+                    submission.kernel.first_packet_id +
+                        plan_case.expected_completion_barrier_packet_offset),
+                submission.profile_completion_barrier_slot);
+    } else {
+      EXPECT_EQ(NULL, submission.profile_completion_barrier_slot);
+    }
     if (has_harvest_packet) {
       EXPECT_EQ(
           iree_hal_amdgpu_aql_ring_packet(
@@ -411,6 +447,8 @@ TEST_F(HostQueueSubmissionTest, DispatchPacketAccountingCombinations) {
           /*reserve_queue_device_event=*/false,
           /*expected_packet_count=*/1,
           /*expected_dispatch_packet_offset=*/0,
+          /*expected_completion_barrier_packet_offset=*/
+          kNoCompletionBarrierPacketOffset,
           /*expected_harvest_packet_offset=*/kNoHarvestPacketOffset,
           /*expect_dispatch_completion_signal=*/true,
       },
@@ -420,6 +458,8 @@ TEST_F(HostQueueSubmissionTest, DispatchPacketAccountingCombinations) {
           /*reserve_queue_device_event=*/false,
           /*expected_packet_count=*/3,
           /*expected_dispatch_packet_offset=*/2,
+          /*expected_completion_barrier_packet_offset=*/
+          kNoCompletionBarrierPacketOffset,
           /*expected_harvest_packet_offset=*/kNoHarvestPacketOffset,
           /*expect_dispatch_completion_signal=*/true,
       },
@@ -429,6 +469,8 @@ TEST_F(HostQueueSubmissionTest, DispatchPacketAccountingCombinations) {
           /*reserve_queue_device_event=*/true,
           /*expected_packet_count=*/3,
           /*expected_dispatch_packet_offset=*/1,
+          /*expected_completion_barrier_packet_offset=*/
+          kNoCompletionBarrierPacketOffset,
           /*expected_harvest_packet_offset=*/kNoHarvestPacketOffset,
           /*expect_dispatch_completion_signal=*/false,
       },
@@ -436,27 +478,30 @@ TEST_F(HostQueueSubmissionTest, DispatchPacketAccountingCombinations) {
           /*barrier_count=*/0,
           /*reserve_dispatch_event=*/true,
           /*reserve_queue_device_event=*/false,
-          /*expected_packet_count=*/2,
+          /*expected_packet_count=*/3,
           /*expected_dispatch_packet_offset=*/0,
-          /*expected_harvest_packet_offset=*/1,
+          /*expected_completion_barrier_packet_offset=*/1,
+          /*expected_harvest_packet_offset=*/2,
           /*expect_dispatch_completion_signal=*/true,
       },
       {
           /*barrier_count=*/2,
           /*reserve_dispatch_event=*/true,
           /*reserve_queue_device_event=*/false,
-          /*expected_packet_count=*/4,
+          /*expected_packet_count=*/5,
           /*expected_dispatch_packet_offset=*/2,
-          /*expected_harvest_packet_offset=*/3,
+          /*expected_completion_barrier_packet_offset=*/3,
+          /*expected_harvest_packet_offset=*/4,
           /*expect_dispatch_completion_signal=*/true,
       },
       {
           /*barrier_count=*/0,
           /*reserve_dispatch_event=*/true,
           /*reserve_queue_device_event=*/true,
-          /*expected_packet_count=*/4,
+          /*expected_packet_count=*/5,
           /*expected_dispatch_packet_offset=*/1,
-          /*expected_harvest_packet_offset=*/2,
+          /*expected_completion_barrier_packet_offset=*/2,
+          /*expected_harvest_packet_offset=*/3,
           /*expect_dispatch_completion_signal=*/true,
       },
   };

@@ -898,6 +898,13 @@ iree_hal_amdgpu_aql_block_processor_profile_packet_flags(
       IREE_HAL_AMDGPU_HOST_QUEUE_COMMAND_BUFFER_PACKET_FLAG_NONE;
   if (iree_hal_amdgpu_aql_block_processor_dispatch_profile_has(
           profile,
+          IREE_HAL_AMDGPU_AQL_BLOCK_PROCESSOR_DISPATCH_PROFILE_FLAG_DISPATCH_PACKET)) {
+    flags =
+        iree_hal_amdgpu_host_queue_command_buffer_packet_flags_set_fence_scopes(
+            flags, IREE_HSA_FENCE_SCOPE_NONE, IREE_HSA_FENCE_SCOPE_AGENT);
+  }
+  if (iree_hal_amdgpu_aql_block_processor_dispatch_profile_has(
+          profile,
           IREE_HAL_AMDGPU_AQL_BLOCK_PROCESSOR_DISPATCH_PROFILE_FLAG_COUNTER_PACKETS |
               IREE_HAL_AMDGPU_AQL_BLOCK_PROCESSOR_DISPATCH_PROFILE_FLAG_TRACE_PACKETS)) {
     flags = iree_hal_amdgpu_aql_block_processor_profile_packet_flags_merge(

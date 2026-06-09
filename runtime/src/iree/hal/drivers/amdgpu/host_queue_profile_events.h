@@ -58,9 +58,10 @@ static inline uint32_t iree_hal_amdgpu_host_queue_profile_dispatch_event_index(
 // dispatch event ring slot. The returned pointer references queue-owned
 // iree_amd_signal_t storage, not a ROCR-created HSA signal, and must never be
 // passed to host signal APIs except as an AQL packet completion_signal handle.
-// The signal record is initialized as command-processor scratch; HSA signal
-// kind/value fields are not part of the profiling contract. Valid only while
-// HSA queue timestamp profiling is enabled.
+// The record is initialized on-device as user-signal-shaped command-processor
+// scratch so the CP can write start/end timestamps while the CPU never needs to
+// map or wait on the signal memory. Valid only while HSA queue timestamp
+// profiling is enabled.
 static inline iree_amd_signal_t*
 iree_hal_amdgpu_host_queue_profiling_completion_signal_ptr(
     const iree_hal_amdgpu_host_queue_t* queue, uint64_t event_position) {
