@@ -14,11 +14,17 @@ iree_py_library(
     target_info
   SRCS
     "__init__.py"
-    "isa_xml.py"
     "target_info.py"
   DEPS
     loom::py::loom::target::low_descriptors
     loom::py::loom::target::arch::package
+)
+
+iree_py_library(
+  NAME
+    isa_xml
+  SRCS
+    "isa_xml.py"
 )
 
 iree_py_library(
@@ -60,9 +66,9 @@ iree_py_library(
     "descriptors/sets.py"
     "descriptors/workgroup.py"
     "encoding.py"
-    "isa_xml.py"
     "target_info.py"
   DEPS
+    loom::py::loom::target::arch::amdgpu::isa_xml
     loom::py::loom::target::arch::amdgpu::target_info
     loom::py::loom::target::low_descriptors
     loom::py::loom::target::arch::package
@@ -77,6 +83,7 @@ iree_py_test(
     "loom.target.arch.amdgpu.isa_xml_test"
     "loom.target.arch.amdgpu.target_info_test"
   DEPS
+    loom::py::loom::target::arch::amdgpu::isa_xml
     loom::py::loom::target::arch::amdgpu::target_info
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
@@ -93,6 +100,7 @@ iree_py_test(
     "loom.target.arch.amdgpu.descriptors_test"
   DEPS
     loom::py::loom::target::arch::amdgpu::descriptors
+    loom::py::loom::target::arch::amdgpu::isa_xml
     loom::py::loom::target::low_descriptors
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"

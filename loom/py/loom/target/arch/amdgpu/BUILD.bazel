@@ -15,13 +15,17 @@ iree_py_library(
     name = "target_info",
     srcs = [
         "__init__.py",
-        "isa_xml.py",
         "target_info.py",
     ],
     deps = [
         "//loom/py/loom/target:low_descriptors",
         "//loom/py/loom/target/arch:package",
     ],
+)
+
+iree_py_library(
+    name = "isa_xml",
+    srcs = ["isa_xml.py"],
 )
 
 iree_py_library(
@@ -61,10 +65,10 @@ iree_py_library(
         "descriptors/sets.py",
         "descriptors/workgroup.py",
         "encoding.py",
-        "isa_xml.py",
         "target_info.py",
     ],
     deps = [
+        ":isa_xml",
         ":target_info",
         "//loom/py/loom/target:low_descriptors",
         "//loom/py/loom/target/arch:package",
@@ -83,7 +87,10 @@ iree_py_test(
         "loom.target.arch.amdgpu.target_info_test",
     ],
     main = "pytest_style_runner.py",
-    deps = [":target_info"],
+    deps = [
+        ":isa_xml",
+        ":target_info",
+    ],
 )
 
 iree_py_test(
@@ -101,6 +108,7 @@ iree_py_test(
     main = "pytest_style_runner.py",
     deps = [
         ":descriptors",
+        ":isa_xml",
         "//loom/py/loom/target:low_descriptors",
     ],
 )

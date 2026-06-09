@@ -16,7 +16,7 @@ overlays keyed by the normalized instruction facts produced here.
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 from xml.etree import ElementTree
@@ -198,13 +198,41 @@ class AmdgpuIsaSpec:
     encodings: tuple[AmdgpuIsaEncoding, ...]
     instructions: tuple[AmdgpuIsaInstruction, ...]
     operand_types: tuple[AmdgpuIsaOperandType, ...]
+    _encoding_lookup_cache: dict[str, AmdgpuIsaEncoding] | None = field(
+        default=None,
+        init=False,
+        repr=False,
+        compare=False,
+        hash=False,
+    )
+    _instruction_lookup_cache: dict[bool, dict[str, AmdgpuIsaInstruction]] = field(
+        default_factory=dict,
+        init=False,
+        repr=False,
+        compare=False,
+        hash=False,
+    )
+    _operand_type_lookup_cache: dict[str, AmdgpuIsaOperandType] | None = field(
+        default=None,
+        init=False,
+        repr=False,
+        compare=False,
+        hash=False,
+    )
+
+    def _encoding_lookup(self) -> dict[str, AmdgpuIsaEncoding]:
+        lookup = self._encoding_lookup_cache
+        if lookup is None:
+            lookup = {encoding.name: encoding for encoding in self.encodings}
+            object.__setattr__(self, "_encoding_lookup_cache", lookup)
+        return lookup
 
     def encoding_map(self) -> dict[str, AmdgpuIsaEncoding]:
-        return {encoding.name: encoding for encoding in self.encodings}
+        return dict(self._encoding_lookup())
 
     def select_encodings(self, names: Iterable[str]) -> tuple[AmdgpuIsaEncoding, ...]:
         requested_names = tuple(names)
-        encodings_by_name = self.encoding_map()
+        encodings_by_name = self._encoding_lookup()
         selected: dict[str, AmdgpuIsaEncoding] = {}
         missing_names: list[str] = []
         for name in requested_names:
@@ -247,9 +275,13 @@ class AmdgpuIsaSpec:
             )
         )
 
-    def instruction_map(
+    def _instruction_lookup(
         self, *, include_aliases: bool = False
     ) -> dict[str, AmdgpuIsaInstruction]:
+        cache = self._instruction_lookup_cache
+        lookup = cache.get(include_aliases)
+        if lookup is not None:
+            return lookup
         instructions: dict[str, AmdgpuIsaInstruction] = {}
         for instruction in self.instructions:
             _insert_unique_instruction_name(
@@ -260,7 +292,13 @@ class AmdgpuIsaSpec:
                     _insert_unique_instruction_name(
                         instructions, alias, instruction, self.source_name
                     )
+        cache[include_aliases] = instructions
         return instructions
+
+    def instruction_map(
+        self, *, include_aliases: bool = False
+    ) -> dict[str, AmdgpuIsaInstruction]:
+        return dict(self._instruction_lookup(include_aliases=include_aliases))
 
     def select_instructions(
         self,
@@ -269,7 +307,7 @@ class AmdgpuIsaSpec:
         include_aliases: bool = True,
     ) -> tuple[AmdgpuIsaInstruction, ...]:
         requested_names = tuple(names)
-        instructions_by_name = self.instruction_map(include_aliases=include_aliases)
+        instructions_by_name = self._instruction_lookup(include_aliases=include_aliases)
         selected: dict[str, AmdgpuIsaInstruction] = {}
         missing_names: list[str] = []
         for name in requested_names:
@@ -285,11 +323,20 @@ class AmdgpuIsaSpec:
             )
         return tuple(selected[name] for name in sorted(selected))
 
+    def _operand_type_lookup(self) -> dict[str, AmdgpuIsaOperandType]:
+        lookup = self._operand_type_lookup_cache
+        if lookup is None:
+            lookup = {
+                operand_type.name: operand_type for operand_type in self.operand_types
+            }
+            object.__setattr__(self, "_operand_type_lookup_cache", lookup)
+        return lookup
+
     def operand_type_map(self) -> dict[str, AmdgpuIsaOperandType]:
-        return {operand_type.name: operand_type for operand_type in self.operand_types}
+        return dict(self._operand_type_lookup())
 
     def operand_predefined_value(self, operand_type_name: str, value_name: str) -> int:
-        operand_type = self.operand_type_map().get(operand_type_name)
+        operand_type = self._operand_type_lookup().get(operand_type_name)
         if operand_type is None:
             raise AmdgpuIsaXmlError(
                 f"{self.source_name}: unknown AMDGPU ISA operand type "

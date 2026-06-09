@@ -543,6 +543,7 @@ iree_py_library(
   DEPS
     loom::py::loom::gen::generated_file
     loom::py::loom::target::low_descriptors
+    loom::py::loom::target::arch::amdgpu::isa_xml
     loom::py::loom::target::arch::amdgpu::target_info
 )
 
@@ -569,6 +570,7 @@ iree_py_library(
     loom::py::loom::gen::low_descriptors
     loom::py::loom::target::low_descriptors
     loom::py::loom::target::arch::amdgpu::descriptors
+    loom::py::loom::target::arch::amdgpu::isa_xml
     loom::py::loom::target::arch::amdgpu::target_info
 )
 
@@ -583,6 +585,7 @@ iree_py_test(
     loom::py::loom::gen::low_descriptors
     loom::py::loom::target::low_descriptors
     loom::py::loom::target::arch::amdgpu::descriptors
+    loom::py::loom::target::arch::amdgpu::isa_xml
     loom::py::loom::target::arch::amdgpu::target_info
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
@@ -600,6 +603,7 @@ iree_py_library(
     loom::py::loom::gen::generated_file
     loom::py::loom::target::low_descriptors
     loom::py::loom::target::arch::amdgpu::descriptors
+    loom::py::loom::target::arch::amdgpu::isa_xml
     loom::py::loom::target::arch::amdgpu::target_info
 )
 
@@ -673,6 +677,7 @@ iree_py_library(
     loom::py::loom::gen::generated_file
     loom::py::loom::target::low_descriptors
     loom::py::loom::target::arch::amdgpu::descriptors
+    loom::py::loom::target::arch::amdgpu::isa_xml
     loom::py::loom::target::arch::amdgpu::target_info
 )
 
