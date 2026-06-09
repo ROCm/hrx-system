@@ -433,6 +433,36 @@ class CtsTestBase : public BaseType {
     return data_fn(file_name);
   }
 
+  // Prepares |file_name| using the current test executable format.
+  //
+  // Executable CTS parameterization represents the formats linked into the
+  // test binary. Some backends can link more targets than the current device
+  // can execute; those unsupported format/device pairs must be skipped without
+  // weakening real loader errors for runnable formats.
+  void PrepareExecutableOrSkipUnsupported(
+      iree_hal_executable_cache_t* executable_cache, const char* file_name,
+      iree_hal_executable_t** out_executable) {
+    *out_executable = nullptr;
+    iree_hal_executable_params_t executable_params;
+    iree_hal_executable_params_initialize(&executable_params);
+    executable_params.caching_mode =
+        IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA;
+    executable_params.executable_format =
+        iree_make_cstring_view(executable_format());
+    executable_params.executable_data =
+        executable_data(iree_make_cstring_view(file_name));
+
+    iree_status_t status = iree_hal_executable_cache_prepare_executable(
+        executable_cache, &executable_params, out_executable);
+    if (iree_status_is_incompatible(status)) {
+      iree_status_free(status);
+      GTEST_SKIP() << "Executable format '" << executable_format()
+                   << "' is incompatible with CTS backend/device '"
+                   << this->GetParam().name << "'";
+    }
+    IREE_ASSERT_OK(status);
+  }
+
   //===--------------------------------------------------------------------===//
   // Buffer helpers
   //===--------------------------------------------------------------------===//

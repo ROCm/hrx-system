@@ -42,30 +42,15 @@ class DispatchReuseTest : public CtsTestBase<> {
         device_, iree_make_cstring_view("default"), &executable_cache_));
 
     // Load the workgroup-ID kernel: writes workgroup_id[0] to buffer[wg_id].
-    {
-      iree_hal_executable_params_t params;
-      iree_hal_executable_params_initialize(&params);
-      params.caching_mode =
-          IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA;
-      params.executable_format = iree_make_cstring_view(executable_format());
-      params.executable_data = executable_data(iree_make_cstring_view(
-          "command_buffer_dispatch_multi_workgroup_test.bin"));
-      IREE_ASSERT_OK(iree_hal_executable_cache_prepare_executable(
-          executable_cache_, &params, &workgroup_id_executable_));
-    }
+    PrepareExecutableOrSkipUnsupported(
+        executable_cache_, "command_buffer_dispatch_multi_workgroup_test.bin",
+        &workgroup_id_executable_);
+    if (HasFatalFailure() || IsSkipped()) return;
 
     // Load the absf kernel: output[i] = abs(input[i]).
-    {
-      iree_hal_executable_params_t params;
-      iree_hal_executable_params_initialize(&params);
-      params.caching_mode =
-          IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA;
-      params.executable_format = iree_make_cstring_view(executable_format());
-      params.executable_data = executable_data(
-          iree_make_cstring_view("command_buffer_dispatch_test.bin"));
-      IREE_ASSERT_OK(iree_hal_executable_cache_prepare_executable(
-          executable_cache_, &params, &absf_executable_));
-    }
+    PrepareExecutableOrSkipUnsupported(executable_cache_,
+                                       "command_buffer_dispatch_test.bin",
+                                       &absf_executable_);
   }
 
   void TearDown() override {
