@@ -49,8 +49,9 @@ bazel-to-cmake, generated AMDGPU target metadata, watchwords, merge-conflict
 markers, and basic text hygiene.
 
 `paranoid` adds affected project tests for the selected build lane and the
-static-analysis lane. The static-analysis lane is intentionally empty until
-providers such as clang-tidy or CodeQL are wired in.
+static-analysis lane. Semgrep hard rules are the first configured provider.
+Rules that inventory existing drift stay at `WARNING` or `INFO` severity until
+their baseline is cleaned up and the rule is promoted.
 
 `ci` is the full-tree, non-mutating profile. It checks all tracked files and
 runs all configured project presubmit tests.
@@ -142,7 +143,9 @@ custom manual hook groups in addition to Git hook names.
 
 Python-packaged local tools are pinned in `requirements-dev.lock.txt`. That
 lock contains only local development tools; Bazel build and test dependencies
-belong in Bazel module fragments and `MODULE.bazel.lock`.
+belong in Bazel module fragments and `MODULE.bazel.lock`. Semgrep is
+intentionally outside this lock because it is an optional static-analysis tool,
+not part of the Python toolchain used to build or test project code.
 
 Standalone binaries are installed by `build_tools/devtools/install.py` into the
 selected tool environment. The Bazel lane installs Bazelisk and buildifier with
@@ -155,9 +158,39 @@ python dev.py bazel setup
 The CMake lane currently has no standalone tool downloads; it uses system CMake
 and CTest plus the shared Python-packaged tools.
 
-Optional future providers can be added to the installer manifest without being
-part of the default install set. Presubmit providers that are optional should
-skip when their tool is unavailable and print the missing executable.
+Optional static-analysis providers should skip outside CI when their tool is
+unavailable and print the missing executable. CI installs those tools explicitly
+before running the presubmit profile that requires them. `dev.py doctor`
+reports optional tool availability; today Semgrep and clang-tidy are warnings
+for local setup rather than part of the locked developer requirements.
+
+## Static Analysis
+
+The root static-analysis lane dispatches providers from
+`build_tools/lefthook/presubmit.py`. Provider-specific rule configuration stays
+native to each provider. Semgrep is an external developer tool, not a dependency
+locked in `requirements-dev.lock.txt`; install the pinned version locally with
+your preferred Python environment or package manager:
+
+```bash
+python3 -m pip install --user semgrep==1.164.0
+```
+
+Semgrep rules live under `build_tools/static_analysis/semgrep/` and can be run
+directly:
+
+```bash
+semgrep scan --metrics=off --disable-version-check \
+  --config build_tools/static_analysis/semgrep/iree.yml runtime/src/iree
+```
+
+Presubmit runs Semgrep with `--severity ERROR --error`; only promoted hard
+rules gate commits and CI. Lower-severity rules remain available for cleanup
+campaigns and rule prototyping without flooding the new CI lane. Semgrep
+parallelism is controlled by `IREE_SEMGREP_JOBS`; when unset, the dispatcher
+uses roughly 85% of detected logical CPUs capped at 14 jobs. That cap avoids
+Semgrep's current high-core-count OCaml-domain failure mode while keeping the
+local/CI default comfortably fast for this repository size.
 
 ## Project Dispatch
 

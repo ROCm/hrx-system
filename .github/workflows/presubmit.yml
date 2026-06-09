@@ -37,15 +37,11 @@ jobs:
         run: |
           python3 --version
           python3 dev.py bazel setup --venv
+          .venv/bin/python -m pip install semgrep==1.164.0
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
       - name: Check tool versions
-        run: |
-          bazel --version
-          buildifier --version
-          clang-format --version
-          ruff --version
-          lefthook version
+        run: python3 dev.py bazel doctor
 
       - name: Run presubmit
         run: python3 dev.py bazel presubmit --profile ci --no-project-tests

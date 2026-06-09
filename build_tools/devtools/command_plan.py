@@ -149,6 +149,61 @@ class CheckCommandStep:
 
 
 @dataclass(frozen=True)
+class OptionalCheckCommandStep:
+    argv: list[str]
+    cwd: Path
+    expected_pattern: str | None = None
+    env: dict[str, str] | None = None
+    label: str | None = None
+
+    def describe(self) -> str:
+        command = quote_command(self.argv)
+        if self.expected_pattern:
+            command += f"  # optional, expect /{self.expected_pattern}/"
+        else:
+            command += "  # optional"
+        if self.cwd != Path.cwd():
+            return f"(cd {shlex.quote(str(self.cwd))} && {command})"
+        return command
+
+    def run(self, verbose: bool = False) -> int:
+        if verbose:
+            print(f"dev.py: {self.label or quote_command(self.argv)}")
+            print("  " + quote_command(self.argv))
+            sys.stdout.flush()
+        try:
+            result = subprocess.run(
+                self.argv,
+                cwd=self.cwd,
+                env=self.env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+        except FileNotFoundError:
+            print(
+                f"dev.py: warning: optional tool {quote_command(self.argv)} "
+                "is not available"
+            )
+            return 0
+        output = result.stdout.rstrip()
+        if output:
+            print(output)
+        if result.returncode != 0:
+            print(
+                f"dev.py: warning: optional tool {quote_command(self.argv)} "
+                f"exited {result.returncode}"
+            )
+            return 0
+        if self.expected_pattern and not re.search(self.expected_pattern, output):
+            print(
+                f"dev.py: warning: expected {quote_command(self.argv)} output "
+                f"to match /{self.expected_pattern}/"
+            )
+        return 0
+
+
+@dataclass(frozen=True)
 class EnsureDirectoryStep:
     path: Path
 

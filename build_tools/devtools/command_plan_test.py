@@ -19,6 +19,7 @@ from build_tools.devtools.command_plan import (
     CommandPlan,
     CommandStep,
     ExecCommandStep,
+    OptionalCheckCommandStep,
     WriteFileStep,
 )
 
@@ -104,6 +105,23 @@ class CommandPlanTest(unittest.TestCase):
 
         mock_chdir.assert_called_once_with(Path.cwd())
         mock_exec.assert_called_once_with("tool", ["tool", "arg"], {"PATH": "test"})
+
+    def test_optional_check_step_warns_without_failing(self):
+        plan = CommandPlan(
+            [
+                OptionalCheckCommandStep(
+                    ["definitely-not-an-iree-tool"],
+                    cwd=Path.cwd(),
+                    label="missing optional tool",
+                )
+            ]
+        )
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(plan.run(), 0)
+
+        self.assertIn("warning", output.getvalue())
 
 
 if __name__ == "__main__":

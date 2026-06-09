@@ -27,6 +27,7 @@ import time
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -51,6 +52,14 @@ C_FORMAT_EXTENSIONS = {
     ".m",
     ".mm",
 }
+SEMGREP_CONFIG = "build_tools/static_analysis/semgrep/iree.yml"
+SEMGREP_EXTENSIONS = C_FORMAT_EXTENSIONS
+SEMGREP_PATH_PREFIXES = (
+    "runtime/src/iree/",
+    "loom/src/loom/",
+    "libhrx/",
+)
+SEMGREP_DEFAULT_MAX_JOBS = 14
 PYTHON_EXTENSIONS = {".py"}
 WATCHWORD_PATTERNS = (
     re.compile("DO " + "NOT SUBMIT"),
@@ -114,9 +123,17 @@ ROOT_DEVTOOLS_TRIGGERS = (
     "dev.py",
     "lefthook.yml",
     "requirements-dev",
+    "build_tools/static_analysis/",
     "build_tools/devtools/",
     "build_tools/lefthook/",
 )
+
+
+@dataclass(frozen=True)
+class StaticAnalysisProvider:
+    name: str
+    profiles: frozenset[str]
+    runner: Callable[[list[str], str, bool], bool]
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -406,6 +423,18 @@ def require_tool(tool: str, description: str) -> bool:
     return False
 
 
+def require_static_tool(tool: str, description: str, profile: str) -> bool:
+    if shutil.which(tool):
+        return True
+    if profile == "ci":
+        print(f"[fail] {description}: required tool '{tool}' was not found on PATH.")
+        return False
+    return skip_step(
+        description,
+        f"tool '{tool}' was not found on PATH; see build_tools/lefthook/README.md",
+    )
+
+
 def git_list(args: list[str]) -> list[str]:
     result = subprocess.run(
         ["git", *args],
@@ -514,6 +543,56 @@ def is_buildifier_file(path: str) -> bool:
 
 def is_c_format_file(path: str) -> bool:
     return Path(path).suffix in C_FORMAT_EXTENSIONS
+
+
+def is_semgrep_candidate_file(path: str) -> bool:
+    return path.startswith(SEMGREP_PATH_PREFIXES) and (
+        Path(path).suffix in SEMGREP_EXTENSIONS
+    )
+
+
+def semgrep_jobs() -> int:
+    configured_jobs = os.environ.get("IREE_SEMGREP_JOBS")
+    if configured_jobs:
+        try:
+            jobs = int(configured_jobs)
+        except ValueError:
+            return 1
+        return max(1, jobs)
+    cpu_count = os.cpu_count() or 1
+    return min(SEMGREP_DEFAULT_MAX_JOBS, max(1, int(cpu_count * 0.85)))
+
+
+def semgrep_scan_command(files: list[str]) -> list[str]:
+    return [
+        "semgrep",
+        "scan",
+        "--metrics=off",
+        "--disable-version-check",
+        "--strict",
+        "--error",
+        "--severity",
+        "ERROR",
+        "--jobs",
+        str(semgrep_jobs()),
+        "--config",
+        SEMGREP_CONFIG,
+        "--",
+        *files,
+    ]
+
+
+def semgrep_validate_command() -> list[str]:
+    return [
+        "semgrep",
+        "scan",
+        "--metrics=off",
+        "--disable-version-check",
+        "--strict",
+        "--validate",
+        "--config",
+        SEMGREP_CONFIG,
+    ]
 
 
 def is_python_file(path: str) -> bool:
@@ -790,6 +869,7 @@ def run_root_devtools_tests(paths: list[str], verbose: bool) -> bool:
                 "test",
                 "--config=presubmit",
                 "//build_tools/devtools:all",
+                "//build_tools/lefthook:all",
             ],
             "Root devtools Bazel tests",
             verbose,
@@ -874,10 +954,50 @@ def is_root_devtools_trigger(path: str) -> bool:
     )
 
 
-def run_static_analysis(paths: list[str]) -> bool:
+def run_semgrep(paths: list[str], profile: str, verbose: bool) -> bool:
+    files = existing_files([path for path in paths if is_semgrep_candidate_file(path)])
+    validate_config = SEMGREP_CONFIG in paths
+    if not files and not validate_config:
+        return skip_step("Semgrep", "no C/C++ runtime inputs")
+    if not require_static_tool("semgrep", "Semgrep", profile):
+        return False
+
+    ok = True
+    if validate_config:
+        ok = run_command(
+            semgrep_validate_command(), "Semgrep config validation", verbose
+        )
+    if files:
+        ok = (
+            run_command(semgrep_scan_command(files), "Semgrep hard rules", verbose)
+            and ok
+        )
+    return ok
+
+
+STATIC_ANALYSIS_PROVIDERS = (
+    StaticAnalysisProvider(
+        name="Semgrep",
+        profiles=frozenset(("paranoid", "ci")),
+        runner=run_semgrep,
+    ),
+)
+
+
+def run_static_analysis(paths: list[str], profile: str, verbose: bool) -> bool:
     if not paths:
         return True
-    return skip_step("Static analysis", "no providers configured")
+    ok = True
+    selected_providers = [
+        provider
+        for provider in STATIC_ANALYSIS_PROVIDERS
+        if profile in provider.profiles
+    ]
+    if not selected_providers:
+        return skip_step("Static analysis", f"no providers for {profile} profile")
+    for provider in selected_providers:
+        ok = provider.runner(paths, profile, verbose) and ok
+    return ok
 
 
 def print_plan(
@@ -1017,7 +1137,10 @@ def main() -> int:
             ok = skip_step("Project tests", "disabled by --no-project-tests") and ok
     if args.static_analysis:
         print_section("Static Analysis")
-        ok = run_static_analysis(paths) and ok
+        ok = (
+            run_static_analysis(paths, profile=args.profile, verbose=args.verbose)
+            and ok
+        )
     print_suggested_actions(args, ok)
     return 0 if ok else 1
 
