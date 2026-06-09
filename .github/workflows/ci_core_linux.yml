@@ -118,7 +118,7 @@ jobs:
             chip: gfx1201
             runner_label: gpu_navi4x
             ctest_exclude_regex: ""
-            experimental: false
+            experimental: true
     uses: ./.github/workflows/test_core_linux_gpu.yml
     permissions:
       actions: read

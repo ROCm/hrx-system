@@ -197,6 +197,9 @@ jobs:
           "$CC" --version
           test -d "${HRX_ROCM_ROOT}/include"
 
+      - name: Report ROCm environment
+        run: bash .github/scripts/check_rocm_environment.sh
+
       - name: Run IREE CMake CI
         run: |
           echo "python3 build_tools/devtools/ci.py ${{ matrix.command }} --keep-going"

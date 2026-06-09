@@ -151,13 +151,15 @@ jobs:
           "${HRX_PYTHON}" build_tools/ci_core_linux.py extract-packages
 
       - name: Report ROCm environment
+        id: rocm_environment
+        continue-on-error: ${{ inputs.experimental }}
         run: |
           export PATH="${HRX_PUBLIC_DEPS_DIR}/bin:${PATH}"
           export LD_LIBRARY_PATH="${HRX_PUBLIC_DEPS_DIR}/lib:${HRX_PUBLIC_DEPS_DIR}/lib/rocm_sysdeps/lib:${LD_LIBRARY_PATH:-}"
-          echo "rocminfo path: $(command -v rocminfo)"
-          rocminfo || echo "::warning::rocminfo failed; continuing to installed GPU tests"
+          bash .github/scripts/check_rocm_environment.sh
 
       - name: Run installed GPU tests
+        if: ${{ steps.rocm_environment.outcome == 'success' }}
         continue-on-error: ${{ inputs.experimental }}
         run: |
           "${HRX_PYTHON}" build_tools/ci_core_linux.py test

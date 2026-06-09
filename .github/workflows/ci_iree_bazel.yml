@@ -202,9 +202,7 @@ jobs:
           test -d "${HRX_ROCM_ROOT}/include"
 
       - name: Report ROCm environment
-        run: |
-          echo "rocminfo path: $(command -v rocminfo)"
-          rocminfo
+        run: bash .github/scripts/check_rocm_environment.sh
 
       - name: Run IREE Bazel CI
         run: |
