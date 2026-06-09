@@ -253,6 +253,17 @@ class CiTest(unittest.TestCase):
             self.assertTrue(
                 any(xfail_target in step.argv for step in sanitizer_test_steps)
             )
+        tsan_test_steps = [
+            step for step in sanitizer_test_steps if "--config=tsan" in step.argv
+        ]
+        non_tsan_test_steps = [
+            step for step in sanitizer_test_steps if "--config=tsan" not in step.argv
+        ]
+        for xfail_target in ci_config.AMDGPU_TSAN_XFAIL_TARGETS:
+            self.assertTrue(any(xfail_target in step.argv for step in tsan_test_steps))
+            self.assertFalse(
+                any(xfail_target in step.argv for step in non_tsan_test_steps)
+            )
 
     def test_bazel_amdgpu_single_sanitizer_command_runs_one_configuration(self):
         args = ci.parse_arguments(
@@ -279,9 +290,35 @@ class CiTest(unittest.TestCase):
                 for line in command_lines
             )
         )
+        self.assertTrue(
+            any(
+                "-//runtime/src/iree/hal/drivers/amdgpu/util:pm4_dispatch_live_test"
+                in line
+                for line in command_lines
+            )
+        )
         self.assertFalse(any("--config=asan" in line for line in command_lines))
         self.assertFalse(any("--config=ubsan" in line for line in command_lines))
         self.assertFalse(any("--config=msan" in line for line in command_lines))
+
+    def test_bazel_amdgpu_asan_omits_tsan_specific_xfails(self):
+        args = ci.parse_arguments(
+            [
+                "iree-bazel-amdgpu-asan",
+                "--target",
+                "//runtime/...",
+            ]
+        )
+
+        command_lines = [step.command_line() for step in ci.steps_from_args(args)]
+
+        self.assertFalse(
+            any(
+                "-//runtime/src/iree/hal/drivers/amdgpu/util:pm4_dispatch_live_test"
+                in line
+                for line in command_lines
+            )
+        )
 
     def test_vulkan_command_builds_and_runs_vulkan_package_tests(self):
         args = ci.parse_arguments(
@@ -405,6 +442,14 @@ class CiTest(unittest.TestCase):
             "^iree/hal/drivers/amdgpu/util/pm4_program_test$",
             ci_config.AMDGPU_SANITIZERS_CTEST_EXCLUDE_REGEX,
         )
+        self.assertNotIn(
+            "^iree/hal/drivers/amdgpu/util/pm4_dispatch_live_test$",
+            ci_config.AMDGPU_SANITIZERS_CTEST_EXCLUDE_REGEX,
+        )
+        self.assertIn(
+            "^iree/hal/drivers/amdgpu/util/pm4_dispatch_live_test$",
+            ci_config.AMDGPU_TSAN_CTEST_EXCLUDE_REGEX,
+        )
 
     def test_cmake_cpu_sanitizer_command_uses_cmake_build_dir_and_xfails(self):
         args = ci.parse_arguments(["iree-cmake-cpu-ubsan"])
@@ -503,6 +548,30 @@ class CiTest(unittest.TestCase):
         )
         self.assertTrue(
             any("-L runtime-resource=amd-gpu" in line for line in command_lines)
+        )
+
+    def test_cmake_amdgpu_tsan_uses_tsan_specific_xfails(self):
+        args = ci.parse_arguments(["iree-cmake-amdgpu-tsan"])
+
+        command_lines = [step.command_line() for step in ci.steps_from_args(args)]
+
+        self.assertTrue(
+            any(
+                "^iree/hal/drivers/amdgpu/util/pm4_dispatch_live_test$" in line
+                for line in command_lines
+            )
+        )
+
+    def test_cmake_amdgpu_asan_omits_tsan_specific_xfails(self):
+        args = ci.parse_arguments(["iree-cmake-amdgpu-asan"])
+
+        command_lines = [step.command_line() for step in ci.steps_from_args(args)]
+
+        self.assertFalse(
+            any(
+                "^iree/hal/drivers/amdgpu/util/pm4_dispatch_live_test$" in line
+                for line in command_lines
+            )
         )
 
     def test_cmake_vulkan_command_scopes_build_and_tests_to_vulkan(self):

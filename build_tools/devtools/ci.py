@@ -330,10 +330,15 @@ def amdgpu_sanitizer_steps(targets: tuple[str, ...]) -> list[CiStep]:
 
 def amdgpu_config_steps(targets: tuple[str, ...], config: str) -> list[CiStep]:
     if config in ci_config.SANITIZER_TEST_CONFIGS:
+        xfail_targets = (
+            ci_config.AMDGPU_TSAN_SANITIZERS_XFAIL_TARGETS
+            if config == "tsan"
+            else ci_config.AMDGPU_SANITIZERS_XFAIL_TARGETS
+        )
         return amdgpu_test_steps(
             targets,
             config=config,
-            xfail_targets=ci_config.AMDGPU_SANITIZERS_XFAIL_TARGETS,
+            xfail_targets=xfail_targets,
         )
     if config in ci_config.SANITIZER_BUILD_CONFIGS:
         return [
@@ -421,11 +426,12 @@ def cmake_cpu_steps(command_name: str, sanitizer: str | None) -> list[CiStep]:
 
 def cmake_amdgpu_steps(command_name: str, sanitizer: str | None) -> list[CiStep]:
     sanitizer_name = f" with {sanitizer.upper()}" if sanitizer is not None else ""
-    xfail_regex = (
-        ci_config.AMDGPU_SANITIZERS_CTEST_EXCLUDE_REGEX
-        if sanitizer is not None
-        else ci_config.AMDGPU_CTEST_EXCLUDE_REGEX
-    )
+    if sanitizer == "tsan":
+        xfail_regex = ci_config.AMDGPU_TSAN_SANITIZERS_CTEST_EXCLUDE_REGEX
+    elif sanitizer is not None:
+        xfail_regex = ci_config.AMDGPU_SANITIZERS_CTEST_EXCLUDE_REGEX
+    else:
+        xfail_regex = ci_config.AMDGPU_CTEST_EXCLUDE_REGEX
     steps = [
         cmake_configure_step(
             command_name,

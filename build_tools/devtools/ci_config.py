@@ -136,10 +136,24 @@ AMDGPU_SANITIZERS_XFAILS = (
     bazel_xfail("//runtime/src/iree/hal/drivers/amdgpu/util:pm4_program_test"),
     bazel_xfail("//runtime/src/iree/hal/drivers/amdgpu/util:queue_benchmark_test"),
 )
+AMDGPU_TSAN_XFAILS = (
+    # This live PM4 path intentionally loads ROCR and submits real GPU work.
+    # ThreadSanitizer cannot model ROCR's uninstrumented async worker threads,
+    # and reports races in ROCr runtime bookkeeping during HSA object setup.
+    bazel_xfail("//runtime/src/iree/hal/drivers/amdgpu/util:pm4_dispatch_live_test"),
+)
 AMDGPU_XFAIL_TARGETS = bazel_xfail_targets(AMDGPU_XFAILS)
 AMDGPU_CTEST_EXCLUDE_REGEX = ctest_exclude_regex(AMDGPU_XFAILS)
 AMDGPU_SANITIZERS_XFAIL_TARGETS = bazel_xfail_targets(AMDGPU_SANITIZERS_XFAILS)
 AMDGPU_SANITIZERS_CTEST_EXCLUDE_REGEX = ctest_exclude_regex(AMDGPU_SANITIZERS_XFAILS)
+AMDGPU_TSAN_XFAIL_TARGETS = bazel_xfail_targets(AMDGPU_TSAN_XFAILS)
+AMDGPU_TSAN_CTEST_EXCLUDE_REGEX = ctest_exclude_regex(AMDGPU_TSAN_XFAILS)
+AMDGPU_TSAN_SANITIZERS_XFAIL_TARGETS = bazel_xfail_targets(
+    AMDGPU_SANITIZERS_XFAILS + AMDGPU_TSAN_XFAILS
+)
+AMDGPU_TSAN_SANITIZERS_CTEST_EXCLUDE_REGEX = ctest_exclude_regex(
+    AMDGPU_SANITIZERS_XFAILS + AMDGPU_TSAN_XFAILS
+)
 
 VULKAN_BAZEL_DRIVER_TARGETS = ("//runtime/src/iree/hal/drivers/vulkan/...",)
 VULKAN_CMAKE_DRIVER_TARGETS = ("runtime/src/iree/hal/drivers/vulkan/all",)
