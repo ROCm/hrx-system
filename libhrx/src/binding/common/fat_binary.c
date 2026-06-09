@@ -3,10 +3,14 @@
 
 #include "common/fat_binary.h"
 
+#include <pthread.h>
 #include <stdint.h>
 #include <string.h>
 
 #include "iree/base/api.h"
+#if defined(HRX_ENABLE_KPACK)
+#include "rocm_kpack/kpack.h"
+#endif
 
 #if defined(HRX_ENABLE_ZSTD)
 #include <zstd.h>
@@ -21,6 +25,11 @@
 // 0xBA55FACE that ships via `__hipRegisterFatBinary` in more recent ROCm.
 #define HRX_HIP_FAT_MAGIC_HIPF 0x48495046u
 #define HRX_HIP_FAT_MAGIC_BA55FACE 0xBA55FACEu
+// Newer ROCm (7.x) emits a wrapper whose first four bytes are the literal
+// ASCII "HIPK" (48 49 50 4b) instead of the numeric HIPF/BA55FACE field. It
+// uses the same 24-byte {magic, version, binary, reserved} layout (observed
+// version 1) — confirmed from nightly torch's __hipRegisterFatBinary blobs.
+#define HRX_HIP_FAT_MAGIC_HIPK 0x4b504948u  // "HIPK", little-endian
 #define HRX_HIP_FAT_VERSION 1
 
 // __CLANG_OFFLOAD_BUNDLE__ (uncompressed bundle).
@@ -148,7 +157,9 @@ static bool hrx_fat_is_wrapper(iree_const_byte_span_t data) {
   }
   uint32_t magic;
   memcpy(&magic, data.data, sizeof(magic));
-  return magic == HRX_HIP_FAT_MAGIC_HIPF || magic == HRX_HIP_FAT_MAGIC_BA55FACE;
+  return magic == HRX_HIP_FAT_MAGIC_HIPF ||
+         magic == HRX_HIP_FAT_MAGIC_BA55FACE ||
+         magic == HRX_HIP_FAT_MAGIC_HIPK;
 }
 
 bool iree_hal_streaming_fat_binary_is_supported(iree_const_byte_span_t data) {
@@ -541,6 +552,111 @@ void iree_hal_streaming_fat_binary_extract_reset(
   memset(extract, 0, sizeof(*extract));
 }
 
+//===----------------------------------------------------------------------===//
+// kpack (out-of-band code objects)
+//===----------------------------------------------------------------------===//
+// Nightly ROCm strips code objects out of the host .so into sibling .kpack
+// archives; __hipRegisterFatBinary then hands us a "HIPK" wrapper whose binary
+// pointer is msgpack metadata, not a code object. Resolve it through the vendor
+// loader librocm_kpack into the real HSACO ELF, then reuse the normal path.
+// Compiled only when rocm-kpack is available (HRX_ENABLE_KPACK, set by CMake
+// when find_package(rocm-kpack) succeeds); otherwise HIPK wrappers resolve to
+// a propagating IREE_STATUS_UNAVAILABLE in the dispatch below.
+
+#if defined(HRX_ENABLE_KPACK)
+static kpack_cache_t g_hrx_kpack_cache = NULL;
+static pthread_once_t g_hrx_kpack_once = PTHREAD_ONCE_INIT;
+
+static void hrx_kpack_cache_init(void) {
+  if (kpack_cache_create(&g_hrx_kpack_cache) != KPACK_SUCCESS) {
+    g_hrx_kpack_cache = NULL;
+  }
+}
+
+static kpack_cache_t hrx_kpack_cache(void) {
+  pthread_once(&g_hrx_kpack_once, hrx_kpack_cache_init);
+  return g_hrx_kpack_cache;
+}
+
+// Resolves a HIPK msgpack-metadata blob into a code object via librocm_kpack and
+// feeds it through the normal ELF/bundle extraction path. |co_index| selects the
+// translation unit for -fgpu-rdc multi-TU binaries (0 for single-TU).
+static iree_status_t hrx_fat_extract_from_hipk(
+    const void* hipk_metadata, iree_string_view_t target_arch,
+    uint32_t co_index, iree_hal_streaming_fat_binary_extract_t* extract) {
+  kpack_cache_t cache = hrx_kpack_cache();
+  if (!cache) {
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "librocm_kpack cache unavailable; cannot resolve "
+                            "HIPK out-of-band code objects");
+  }
+
+  // Find the host binary that owns the metadata so kpack can resolve the
+  // archive paths embedded as relative ("../.kpack/...") strings.
+  char binary_path[4096];
+  kpack_error_t kerr = kpack_discover_binary_path(hipk_metadata, binary_path,
+                                                  sizeof(binary_path), NULL);
+  if (kerr != KPACK_SUCCESS) {
+    return iree_make_status(IREE_STATUS_NOT_FOUND,
+                            "kpack_discover_binary_path failed (%d)", (int)kerr);
+  }
+
+  // Arch priority list: full feature string (gfx942:sramecc+:xnack-) then bare
+  // gfxNNN, so we match whichever key the archive was built with.
+  char full_arch[128];
+  iree_host_size_t fn = iree_min(target_arch.size, sizeof(full_arch) - 1);
+  memcpy(full_arch, target_arch.data, fn);
+  full_arch[fn] = '\0';
+  iree_string_view_t bare = hrx_fat_strip_feature_suffix(target_arch);
+  char bare_arch[128];
+  iree_host_size_t bn = iree_min(bare.size, sizeof(bare_arch) - 1);
+  memcpy(bare_arch, bare.data, bn);
+  bare_arch[bn] = '\0';
+  const char* arch_list[2] = {full_arch, bare_arch};
+  size_t arch_count =
+      (bn == fn && memcmp(full_arch, bare_arch, fn) == 0) ? 1 : 2;
+
+  void* co = NULL;
+  size_t co_size = 0;
+  kerr = kpack_load_code_object(cache, hipk_metadata, binary_path, co_index,
+                                arch_list, arch_count, &co, &co_size);
+  if (kerr != KPACK_SUCCESS) {
+    return iree_make_status(
+        IREE_STATUS_NOT_FOUND,
+        "kpack_load_code_object failed (%d) for arch '%s' in %s", (int)kerr,
+        full_arch, binary_path);
+  }
+
+  // Copy into an iree-owned buffer so the extract owns a single backing store
+  // (matches point into it); release the kpack allocation immediately.
+  void* owned = NULL;
+  iree_status_t status =
+      iree_allocator_malloc(extract->host_allocator, co_size, &owned);
+  if (iree_status_is_ok(status)) {
+    memcpy(owned, co, co_size);
+    extract->owned_buffer = owned;
+    extract->owned_buffer_size = co_size;
+  }
+  kpack_free_code_object(co);
+  IREE_RETURN_IF_ERROR(status);
+
+  // The resolved code object is a raw ELF (or a bundle of them) — same handling
+  // as a decompressed CCOB payload.
+  iree_const_byte_span_t span = iree_make_const_byte_span(owned, co_size);
+  if (hrx_fat_is_elf(span)) {
+    return hrx_fat_extract_concatenated_elves(span, extract);
+  }
+  if (hrx_fat_is_uncompressed_bundle(span)) {
+    // Pass the bare arch (gfxNNN): hrx_fat_extract_from_bundle strips each
+    // bundle triple's feature suffix and compares for equality, so a full
+    // feature string (gfx942:sramecc+:xnack-) here would never match.
+    return hrx_fat_extract_from_bundle(span, bare, extract);
+  }
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "kpack code object is neither ELF nor offload bundle");
+}
+#endif  // HRX_ENABLE_KPACK
+
 iree_status_t iree_hal_streaming_fat_binary_extract_for_target(
     iree_const_byte_span_t data, iree_string_view_t target_arch,
     iree_allocator_t host_allocator,
@@ -567,6 +683,31 @@ iree_status_t iree_hal_streaming_fat_binary_extract_for_target(
     if (!header.binary) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "HIP fat-binary wrapper has NULL binary pointer");
+    }
+    if (header.magic == HRX_HIP_FAT_MAGIC_HIPK) {
+      // HIPK: header.binary is msgpack metadata pointing at an out-of-band
+      // .kpack archive, not an inline code object. header.reserved carries the
+      // multi-TU code-object index (0 for single-TU).
+#if defined(HRX_ENABLE_KPACK)
+      uint32_t co_index = (uint32_t)(uintptr_t)header.reserved;
+      iree_status_t kp = hrx_fat_extract_from_hipk(header.binary, target_arch,
+                                                   co_index, out_extract);
+      if (iree_status_is_ok(kp) && out_extract->match_count == 0) {
+        kp = iree_make_status(IREE_STATUS_NOT_FOUND,
+                              "no code object in kpack archive matches target "
+                              "'%.*s'",
+                              (int)target_arch.size, target_arch.data);
+      }
+      if (!iree_status_is_ok(kp)) {
+        iree_hal_streaming_fat_binary_extract_reset(out_extract);
+      }
+      return kp;
+#else
+      return iree_make_status(
+          IREE_STATUS_UNAVAILABLE,
+          "HRX was built without rocm-kpack; cannot resolve HIPK out-of-band "
+          "code objects (install the rocm-kpack package and rebuild)");
+#endif  // HRX_ENABLE_KPACK
     }
     // The wrapper points at an absolute address — it does NOT have to lie
     // inside |data|. HIP embeds a pointer to the bundle in a separate

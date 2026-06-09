@@ -569,8 +569,17 @@ static iree_status_t iree_hal_streaming_context_symbol_map_prepare_module(
   iree_status_t status = iree_hal_streaming_module_create_from_memory(
       map->context, caching_mode, module_data, map->host_allocator,
       &entry->module);
-  // fprintf(stderr, "[REGISTRY] module load %s\n",
-  //         iree_status_is_ok(status) ? "OK" : "FAILED");
+  if (!iree_status_is_ok(status)) {
+    // Bring-up diagnostic: a silent module-load failure here surfaces to the
+    // caller only as hipErrorInvalidDeviceFunction at kernel launch. Log the
+    // real reason (fat-binary extract / format inference / executable prepare).
+    char _msg[512];
+    iree_host_size_t _msg_len = 0;
+    iree_status_format(status, sizeof(_msg), _msg, &_msg_len);
+    fprintf(stderr, "[HRX] module load FAILED for fat binary %p: %.*s\n",
+            registration->module_binary, (int)_msg_len, _msg);
+    fflush(stderr);
+  }
   if (iree_status_is_ok(status)) {
     // Insert all symbols from the module into the hash table.
     for (iree_host_size_t i = 0; i < registration->symbol_count; ++i) {
