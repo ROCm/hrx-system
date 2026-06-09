@@ -410,9 +410,8 @@ iree_status_t iree_hal_streaming_device_release_primary_context(
     iree_hal_streaming_context_t* released_context = device->primary_context;
 
     // Wait for all operations to complete.
-    iree_status_t status =
-        iree_hal_streaming_context_wait_idle(released_context,
-                                             iree_infinite_timeout());
+    iree_status_t status = iree_hal_streaming_context_wait_idle(
+        released_context, iree_infinite_timeout());
     if (!iree_status_is_ok(status)) {
       iree_status_free(status);
     }
@@ -437,7 +436,6 @@ iree_status_t iree_hal_streaming_device_release_primary_context(
       hrx_mem_pool_release(device->default_mem_pool);
       device->default_mem_pool = NULL;
     }
-
   }
 
   iree_slim_mutex_unlock(&device->primary_context_mutex);
