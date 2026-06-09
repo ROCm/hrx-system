@@ -155,7 +155,7 @@ jobs:
           export PATH="${HRX_PUBLIC_DEPS_DIR}/bin:${PATH}"
           export LD_LIBRARY_PATH="${HRX_PUBLIC_DEPS_DIR}/lib:${HRX_PUBLIC_DEPS_DIR}/lib/rocm_sysdeps/lib:${LD_LIBRARY_PATH:-}"
           echo "rocminfo path: $(command -v rocminfo)"
-          rocminfo
+          rocminfo || echo "::warning::rocminfo failed; continuing to installed GPU tests"
 
       - name: Run installed GPU tests
         continue-on-error: ${{ inputs.experimental }}

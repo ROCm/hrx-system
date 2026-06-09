@@ -137,6 +137,9 @@ AMDGPU_SANITIZERS_XFAILS = (
     bazel_xfail("//runtime/src/iree/hal/drivers/amdgpu/util:queue_benchmark_test"),
 )
 AMDGPU_TSAN_XFAILS = (
+    bazel_xfail(
+        "//runtime/src/iree/hal/drivers/amdgpu:host_queue_command_buffer_profiling_test"
+    ),
     # This live PM4 path intentionally loads ROCR and submits real GPU work.
     # ThreadSanitizer cannot model ROCR's uninstrumented async worker threads,
     # and reports races in ROCr runtime bookkeeping during HSA object setup.

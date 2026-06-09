@@ -197,7 +197,7 @@ TEST_P(QueueDispatchTest, DispatchWithConstantsAndBindingsWhileProfiling) {
   EXPECT_TRUE(sink.saw_device_metadata);
   EXPECT_TRUE(sink.saw_queue_metadata);
   EXPECT_FALSE(sink.write_after_end);
-  ExpectDispatchEventsWithinClockCorrelationRange(sink);
+  ExpectDispatchEventsHaveClockCorrelations(sink);
 }
 
 // HAL-native CPU profiling should produce host queue and execution records for
@@ -696,7 +696,7 @@ class QueueDispatchIndirectParametersTest : public CtsTestBase<> {
     EXPECT_TRUE(sink.saw_device_metadata);
     EXPECT_TRUE(sink.saw_queue_metadata);
     EXPECT_FALSE(sink.write_after_end);
-    ExpectDispatchEventsWithinClockCorrelationRange(sink);
+    ExpectDispatchEventsHaveClockCorrelations(sink);
     ExpectQueueDeviceEventsWithinClockCorrelationRange(sink);
   }
 

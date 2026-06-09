@@ -286,7 +286,7 @@ TEST_P(DispatchReuseTest, DispatchProfilingRecordsCommandBufferDispatch) {
   EXPECT_TRUE(sink.saw_device_metadata);
   EXPECT_TRUE(sink.saw_queue_metadata);
   EXPECT_FALSE(sink.write_after_end);
-  ExpectDispatchEventsWithinClockCorrelationRange(sink);
+  ExpectDispatchEventsHaveClockCorrelations(sink);
 }
 
 // Submits a reusable command buffer with large workgroup counts. The existing
@@ -701,7 +701,7 @@ TEST_P(DispatchReuseTest, MultiDispatchProfilingFiltersCommandIndex) {
     }
   }
   EXPECT_EQ(2u, matching_dispatch_operation_count);
-  ExpectDispatchEventsWithinClockCorrelationRange(sink);
+  ExpectDispatchEventsHaveClockCorrelations(sink);
 }
 
 // Resubmits a multi-dispatch command buffer multiple times with different

@@ -159,10 +159,9 @@ iree_hal_profile_sink_t* TestProfileSinkAsBase(TestProfileSink* sink);
 // profiling mode in a cross-backend CTS test.
 bool IsProfilingUnsupported(iree_status_t status);
 
-// Verifies all dispatch events have device ticks bracketed by clock
-// correlation records for their physical device.
-void ExpectDispatchEventsWithinClockCorrelationRange(
-    const TestProfileSink& sink);
+// Verifies all dispatch events have clock correlation records for their
+// physical device.
+void ExpectDispatchEventsHaveClockCorrelations(const TestProfileSink& sink);
 
 // Verifies all queue device events have device ticks bracketed by clock
 // correlation records for their physical device.

@@ -561,6 +561,13 @@ class CiTest(unittest.TestCase):
                 for line in command_lines
             )
         )
+        self.assertTrue(
+            any(
+                "^iree/hal/drivers/amdgpu/host_queue_command_buffer_profiling_test$"
+                in line
+                for line in command_lines
+            )
+        )
 
     def test_cmake_amdgpu_asan_omits_tsan_specific_xfails(self):
         args = ci.parse_arguments(["iree-cmake-amdgpu-asan"])
@@ -570,6 +577,13 @@ class CiTest(unittest.TestCase):
         self.assertFalse(
             any(
                 "^iree/hal/drivers/amdgpu/util/pm4_dispatch_live_test$" in line
+                for line in command_lines
+            )
+        )
+        self.assertFalse(
+            any(
+                "^iree/hal/drivers/amdgpu/host_queue_command_buffer_profiling_test$"
+                in line
                 for line in command_lines
             )
         )

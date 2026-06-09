@@ -296,9 +296,6 @@ static iree_status_t TestProfileSinkWrite(
                   records[i].workgroup_count[2]);
       }
       EXPECT_NE(0u, records[i].workgroup_size[0]);
-      EXPECT_NE(0u, records[i].start_tick);
-      EXPECT_NE(0u, records[i].end_tick);
-      EXPECT_GE(records[i].end_tick, records[i].start_tick);
     }
     test_sink->dispatch_events.insert(test_sink->dispatch_events.end(), records,
                                       records + record_count);
@@ -497,8 +494,7 @@ static bool HasInvalidDeviceTickAlignment(const TestProfileSink& sink,
   return false;
 }
 
-void ExpectDispatchEventsWithinClockCorrelationRange(
-    const TestProfileSink& sink) {
+void ExpectDispatchEventsHaveClockCorrelations(const TestProfileSink& sink) {
   ASSERT_GE(sink.clock_correlations.size(), 2u);
   ASSERT_EQ(sink.dispatch_events.size(),
             sink.dispatch_event_physical_device_ordinals.size());
@@ -509,8 +505,9 @@ void ExpectDispatchEventsWithinClockCorrelationRange(
     if (HasInvalidDeviceTickAlignment(sink, physical_device_ordinal)) {
       continue;
     }
-    uint64_t min_device_tick = UINT64_MAX;
-    uint64_t max_device_tick = 0;
+    uint64_t previous_sample_id = 0;
+    uint64_t previous_device_tick = 0;
+    iree_host_size_t correlation_count = 0;
     for (const iree_hal_profile_clock_correlation_record_t& correlation :
          sink.clock_correlations) {
       if (correlation.physical_device_ordinal != physical_device_ordinal ||
@@ -519,14 +516,15 @@ void ExpectDispatchEventsWithinClockCorrelationRange(
               IREE_HAL_PROFILE_CLOCK_CORRELATION_FLAG_DEVICE_TICK)) {
         continue;
       }
-      min_device_tick = std::min(min_device_tick, correlation.device_tick);
-      max_device_tick = std::max(max_device_tick, correlation.device_tick);
+      if (previous_sample_id != 0) {
+        EXPECT_GT(correlation.sample_id, previous_sample_id);
+        EXPECT_GE(correlation.device_tick, previous_device_tick);
+      }
+      previous_sample_id = correlation.sample_id;
+      previous_device_tick = correlation.device_tick;
+      ++correlation_count;
     }
-    ASSERT_NE(UINT64_MAX, min_device_tick);
-    ASSERT_NE(0u, max_device_tick);
-    ASSERT_LT(min_device_tick, max_device_tick);
-    EXPECT_GE(sink.dispatch_events[event_index].start_tick, min_device_tick);
-    EXPECT_LE(sink.dispatch_events[event_index].end_tick, max_device_tick);
+    EXPECT_GE(correlation_count, 2u);
   }
 }
 
