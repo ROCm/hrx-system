@@ -153,6 +153,7 @@ class OptionalCheckCommandStep:
     argv: list[str]
     cwd: Path
     expected_pattern: str | None = None
+    hint: str | None = None
     env: dict[str, str] | None = None
     label: str | None = None
 
@@ -185,6 +186,8 @@ class OptionalCheckCommandStep:
                 f"dev.py: warning: optional tool {quote_command(self.argv)} "
                 "is not available"
             )
+            if self.hint:
+                print(f"dev.py: hint: {self.hint}")
             return 0
         output = result.stdout.rstrip()
         if output:
@@ -194,12 +197,16 @@ class OptionalCheckCommandStep:
                 f"dev.py: warning: optional tool {quote_command(self.argv)} "
                 f"exited {result.returncode}"
             )
+            if self.hint:
+                print(f"dev.py: hint: {self.hint}")
             return 0
         if self.expected_pattern and not re.search(self.expected_pattern, output):
             print(
                 f"dev.py: warning: expected {quote_command(self.argv)} output "
                 f"to match /{self.expected_pattern}/"
             )
+            if self.hint:
+                print(f"dev.py: hint: {self.hint}")
         return 0
 
 

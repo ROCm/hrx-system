@@ -141,11 +141,16 @@ custom manual hook groups in addition to Git hook names.
 
 ## Tool Installation
 
-Python-packaged local tools are pinned in `requirements-dev.lock.txt`. That
-lock contains only local development tools; Bazel build and test dependencies
-belong in Bazel module fragments and `MODULE.bazel.lock`. Semgrep is
-intentionally outside this lock because it is an optional static-analysis tool,
-not part of the Python toolchain used to build or test project code.
+Python-packaged local tools are split by role. Core developer tools are pinned
+in `requirements-dev.lock.txt`. Optional static-analysis providers are pinned
+in `requirements-analysis.lock.txt` so analyzer dependency churn stays out of
+the smaller build/test tool environment. Bazel build and test dependencies
+belong in Bazel module fragments and `MODULE.bazel.lock`.
+
+Managed setup installs both Python locks. The analysis lock is installed with
+`--only-binary=:all:` so an incompatible Python package wheel fails setup
+clearly instead of falling back to a source distribution that may produce a
+broken analyzer executable.
 
 Standalone binaries are installed by `build_tools/devtools/install.py` into the
 selected tool environment. The Bazel lane installs Bazelisk and buildifier with
@@ -158,22 +163,22 @@ python dev.py bazel setup
 The CMake lane currently has no standalone tool downloads; it uses system CMake
 and CTest plus the shared Python-packaged tools.
 
-Optional static-analysis providers should skip outside CI when their tool is
-unavailable and print the missing executable. CI installs those tools explicitly
-before running the presubmit profile that requires them. `dev.py doctor`
-reports optional tool availability; today Semgrep and clang-tidy are warnings
-for local setup rather than part of the locked developer requirements.
+Outside CI, optional static-analysis providers skip when their tool is
+unavailable and print the missing executable. CI requires the providers selected
+by the CI profile. `dev.py doctor` reports optional tool availability; Semgrep
+includes the managed setup command in its warning when it is missing or the
+wrong version. Clang-tidy remains a system/LLVM tool warning until the
+clang-tidy plugin workflow is wired in.
 
 ## Static Analysis
 
 The root static-analysis lane dispatches providers from
 `build_tools/lefthook/presubmit.py`. Provider-specific rule configuration stays
-native to each provider. Semgrep is an external developer tool, not a dependency
-locked in `requirements-dev.lock.txt`; install the pinned version locally with
-your preferred Python environment or package manager:
+native to each provider. Semgrep is installed by managed setup through
+`requirements-analysis.lock.txt`:
 
 ```bash
-python3 -m pip install --user semgrep==1.164.0
+python dev.py bazel setup --venv
 ```
 
 Semgrep rules live under `build_tools/static_analysis/semgrep/` and can be run

@@ -80,6 +80,13 @@ class PresubmitTest(unittest.TestCase):
         self.assertIn("[skip]", output.getvalue())
         self.assertIn("[fail]", output.getvalue())
 
+    def test_requirements_files_trigger_root_devtools_tests(self):
+        self.assertTrue(presubmit.is_root_devtools_trigger("requirements-analysis.in"))
+        self.assertTrue(
+            presubmit.is_root_devtools_trigger("requirements-analysis.lock.txt")
+        )
+        self.assertFalse(presubmit.is_root_devtools_trigger("runtime/requirements.txt"))
+
 
 if __name__ == "__main__":
     unittest.main()

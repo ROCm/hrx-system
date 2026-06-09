@@ -57,6 +57,22 @@ def common_setup_plan(tool_env: ToolEnvironment) -> CommandPlan:
             label="install Python developer tools",
         )
     )
+    plan.add(
+        CommandStep(
+            [
+                tool_env.python,
+                "-m",
+                "pip",
+                "install",
+                "--require-hashes",
+                "--only-binary=:all:",
+                "-r",
+                str(REPO_ROOT / "requirements-analysis.lock.txt"),
+            ],
+            cwd=REPO_ROOT,
+            label="install static-analysis tools",
+        )
+    )
     return plan
 
 

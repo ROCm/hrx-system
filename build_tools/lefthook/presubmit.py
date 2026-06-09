@@ -122,6 +122,7 @@ ROOT_DEVTOOLS_TRIGGERS = (
     "README.md",
     "dev.py",
     "lefthook.yml",
+    "requirements-analysis",
     "requirements-dev",
     "build_tools/static_analysis/",
     "build_tools/devtools/",
@@ -431,7 +432,7 @@ def require_static_tool(tool: str, description: str, profile: str) -> bool:
         return False
     return skip_step(
         description,
-        f"tool '{tool}' was not found on PATH; see build_tools/lefthook/README.md",
+        f"tool '{tool}' was not found on PATH; run python dev.py bazel setup --venv",
     )
 
 
@@ -946,7 +947,9 @@ def run_root_devtools_tests_for_lane(
 
 
 def is_root_devtools_trigger(path: str) -> bool:
-    if path.startswith("requirements") and path.endswith(".txt"):
+    if path.startswith("requirements-") and (
+        path.endswith(".in") or path.endswith(".lock.txt")
+    ):
         return True
     return any(
         path == trigger or path.startswith(trigger)

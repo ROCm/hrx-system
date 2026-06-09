@@ -21,9 +21,16 @@ COMMON_TOOLS = (
     ("ruff", "--version", r"\b0\.15\.15\b"),
     ("clang-format", "--version", r"\b22\.1\.3\b"),
 )
+SEMGREP_WARNING_FILTER = "ignore:pkg_resources is deprecated as an API:UserWarning"
 OPTIONAL_COMMON_TOOLS = (
-    ("semgrep", "--version", r"\b1\.164\.0\b"),
-    ("clang-tidy", "--version", None),
+    (
+        "semgrep",
+        ("--disable-version-check", "--version"),
+        r"\b1\.96\.0\b",
+        "run python dev.py bazel setup --venv to install the managed tool environment",
+        SEMGREP_WARNING_FILTER,
+    ),
+    ("clang-tidy", ("--version",), None, None, None),
 )
 LANE_TOOLS = {
     "bazel": (
@@ -58,13 +65,18 @@ def doctor_plan(lane: str | None, tool_env: ToolEnvironment) -> CommandPlan:
                 label=f"check {tool}",
             )
         )
-    for tool, version_arg, expected_pattern in OPTIONAL_COMMON_TOOLS:
+    for optional_tool in OPTIONAL_COMMON_TOOLS:
+        tool, version_args, expected_pattern, hint, python_warnings = optional_tool
+        step_env = env
+        if python_warnings:
+            step_env = {**env, "PYTHONWARNINGS": python_warnings}
         plan.add(
             OptionalCheckCommandStep(
-                [tool_env.tool(tool), version_arg],
+                [tool_env.tool(tool), *version_args],
                 cwd=REPO_ROOT,
-                env=env,
+                env=step_env,
                 expected_pattern=expected_pattern,
+                hint=hint,
                 label=f"check optional {tool}",
             )
         )

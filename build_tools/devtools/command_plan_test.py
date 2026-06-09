@@ -123,6 +123,24 @@ class CommandPlanTest(unittest.TestCase):
 
         self.assertIn("warning", output.getvalue())
 
+    def test_optional_check_step_reports_hint(self):
+        plan = CommandPlan(
+            [
+                OptionalCheckCommandStep(
+                    ["definitely-not-an-iree-tool"],
+                    cwd=Path.cwd(),
+                    hint="run setup",
+                    label="missing optional tool",
+                )
+            ]
+        )
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(plan.run(), 0)
+
+        self.assertIn("dev.py: hint: run setup", output.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()
