@@ -785,10 +785,13 @@ typedef struct iree_hal_streaming_graph_host_call_node_attrs_t {
 // [padding to iree_max_align_t]
 // [extra_data (e.g., packed kernel arguments)]
 typedef struct iree_hal_streaming_graph_node_t {
+  // Graph that owns the node while it remains part of a graph template.
+  iree_hal_streaming_graph_t* graph;
   // Type of the node indicating which attribute data is valid.
   iree_hal_streaming_graph_node_type_t type;
-  // Unique index assigned when added to graph.
+  // Dense index used by graph analysis while the node is active.
   uint32_t node_index;
+  // Number of embedded dependency pointers in |dependencies|.
   uint32_t dependency_count;
 
   // Node-specific data.
@@ -1434,6 +1437,9 @@ iree_status_t iree_hal_streaming_graph_add_host_call_node(
     iree_hal_streaming_graph_node_t** dependencies,
     iree_host_size_t dependency_count, void (*fn)(void*), void* user_data,
     iree_hal_streaming_graph_node_t** out_node);
+
+iree_status_t iree_hal_streaming_graph_destroy_node(
+    iree_hal_streaming_graph_node_t* node);
 
 // Synchronization: none (creates executable graph).
 iree_status_t iree_hal_streaming_graph_instantiate(

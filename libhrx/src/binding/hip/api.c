@@ -10875,12 +10875,18 @@ HIPAPI hipError_t hipGraphGetNodes(hipGraph_t graph, hipGraphNode_t* pNodes,
   // Get nodes from the graph (up to the requested count).
   if (pNodes != NULL) {
     const size_t requested_count = *numNodes;
+    const size_t copied_count =
+        total_count < requested_count ? total_count : requested_count;
     iree_hal_streaming_graph_get_nodes(
         stream_graph, requested_count,
         (iree_hal_streaming_graph_node_t**)pNodes);
+    for (size_t i = copied_count; i < requested_count; ++i) {
+      pNodes[i] = NULL;
+    }
+    *numNodes = copied_count;
+  } else {
+    *numNodes = total_count;
   }
-
-  *numNodes = total_count;
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
 }
@@ -11058,18 +11064,46 @@ HIPAPI hipError_t hipGraphNodeGetDependentNodes(hipGraphNode_t node,
   return hipSuccess;
 }
 
+static hipGraphNodeType hip_graph_node_type_from_streaming_type(
+    iree_hal_streaming_graph_node_type_t type) {
+  switch (type) {
+    case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_KERNEL:
+      return hipGraphNodeTypeKernel;
+    case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEMCPY:
+      return hipGraphNodeTypeMemcpy;
+    case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEMSET:
+      return hipGraphNodeTypeMemset;
+    case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_HOST_CALL:
+      return hipGraphNodeTypeHost;
+    case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_GRAPH:
+      return hipGraphNodeTypeGraph;
+    case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EMPTY:
+    default:
+      return hipGraphNodeTypeEmpty;
+  }
+}
+
 // Gets the type of a node.
 HIPAPI hipError_t hipGraphNodeGetType(hipGraphNode_t node,
                                       hipGraphNodeType* pType) {
-  (void)node;
-  if (pType) *pType = hipGraphNodeTypeEmpty;
+  if (!node || !pType) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  iree_hal_streaming_graph_node_t* stream_node =
+      (iree_hal_streaming_graph_node_t*)node;
+  if (!stream_node->graph) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  *pType = hip_graph_node_type_from_streaming_type(stream_node->type);
   return hipSuccess;
 }
 
 // Destroys a graph node.
 HIPAPI hipError_t hipGraphDestroyNode(hipGraphNode_t node) {
-  (void)node;
-  return hipSuccess;  // No-op since we don't track nodes individually
+  HIP_RETURN_STATUS(iree_hal_streaming_graph_destroy_node(
+                        (iree_hal_streaming_graph_node_t*)node),
+                    hipErrorInvalidValue);
+  return hipSuccess;
 }
 
 // Clones a graph.
