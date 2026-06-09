@@ -238,17 +238,11 @@ class CiTest(unittest.TestCase):
                 for line in command_lines
             )
         )
-        self.assertTrue(
-            any(
-                "--test_tag_filters=" + ci_config.LOOM_AMDGPU_RESOURCE_TAG in line
-                for line in command_lines
-            )
-        )
         runtime_resource_test = next(
             step for step in steps if step.name == "Test IREE AMDGPU runtime resources"
         )
         self.assertIn("//runtime/...", runtime_resource_test.argv)
-        self.assertIn("//loom/...", runtime_resource_test.argv)
+        self.assertNotIn("//loom/...", runtime_resource_test.argv)
         for target in ci_config.AMDGPU_XFAIL_TARGETS:
             self.assertIn(target, runtime_resource_test.argv)
         self.assertNotIn(
@@ -259,8 +253,33 @@ class CiTest(unittest.TestCase):
             step for step in steps if step.name == "Test IREE AMDGPU Loom resources"
         )
         self.assertIn("//loom/...", loom_resource_test.argv)
+        self.assertNotIn("//runtime/...", loom_resource_test.argv)
         self.assertIn(
-            "--test_tag_filters=" + ci_config.LOOM_AMDGPU_RESOURCE_TAG,
+            "--test_tag_filters=" + ci_config.RUNTIME_AMDGPU_RESOURCE_TAG,
+            loom_resource_test.argv,
+        )
+
+    def test_amdgpu_resource_slices_share_resource_tag_without_target_overlap(self):
+        args = ci.parse_arguments(["iree-bazel-amdgpu", "--target", "//..."])
+
+        steps = ci.steps_from_args(args)
+        runtime_resource_test = next(
+            step for step in steps if step.name == "Test IREE AMDGPU runtime resources"
+        )
+        loom_resource_test = next(
+            step for step in steps if step.name == "Test IREE AMDGPU Loom resources"
+        )
+
+        self.assertIn("//runtime/...", runtime_resource_test.argv)
+        self.assertNotIn("//loom/...", runtime_resource_test.argv)
+        self.assertIn("//loom/...", loom_resource_test.argv)
+        self.assertNotIn("//runtime/...", loom_resource_test.argv)
+        self.assertIn(
+            "--test_tag_filters=" + ci_config.RUNTIME_AMDGPU_RESOURCE_TAG,
+            runtime_resource_test.argv,
+        )
+        self.assertIn(
+            "--test_tag_filters=" + ci_config.RUNTIME_AMDGPU_RESOURCE_TAG,
             loom_resource_test.argv,
         )
 
@@ -315,14 +334,6 @@ class CiTest(unittest.TestCase):
             any(
                 "bazel test --config=tsan --test_tag_filters="
                 + ci_config.RUNTIME_AMDGPU_RESOURCE_TAG
-                in line
-                for line in command_lines
-            )
-        )
-        self.assertTrue(
-            any(
-                "bazel test --config=tsan --test_tag_filters="
-                + ci_config.LOOM_AMDGPU_RESOURCE_TAG
                 in line
                 for line in command_lines
             )

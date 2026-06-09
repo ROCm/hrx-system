@@ -15,7 +15,6 @@ load(
 )
 load(
     "//loom/requirements:defs.bzl",
-    "AMDGPU_RESOURCE",
     "EMIT_AMDGPU",
     "EMIT_IREE_VM",
     "EMIT_LLVMIR",
@@ -30,12 +29,13 @@ load(
     "TARGET_ARCH_SPIRV",
     "TARGET_ARCH_WASM",
     "TARGET_ARCH_X86",
-    "VULKAN_DEVICE_RESOURCE",
 )
 load(
     "//runtime/requirements:defs.bzl",
+    "AMDGPU_RESOURCE",
     "HAL_AMDGPU",
     "HAL_VULKAN",
+    "VULKAN_DEVICE_RESOURCE",
 )
 
 PACKAGE_POLICIES = [

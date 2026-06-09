@@ -107,8 +107,8 @@ loom_cc_test(
     loom::binding::c::target::spirv::vulkan
   LABELS
     "driver=vulkan"
-    "iree-run-requirement=loom.resource.vulkan_device"
-    "loom-resource=vulkan-device"
+    "iree-run-requirement=runtime.resource.vulkan_device"
+    "runtime-resource=vulkan-device"
   RESOURCE_GROUP
     loom-vulkan-tests
   SANITIZER_SUPPRESSIONS
@@ -135,8 +135,8 @@ loom_cc_test(
     loom::binding::c::target::spirv::iree_hal
   LABELS
     "driver=vulkan"
-    "iree-run-requirement=loom.resource.vulkan_device"
-    "loom-resource=vulkan-device"
+    "iree-run-requirement=runtime.resource.vulkan_device"
+    "runtime-resource=vulkan-device"
   RESOURCE_GROUP
     loom-vulkan-tests
 )

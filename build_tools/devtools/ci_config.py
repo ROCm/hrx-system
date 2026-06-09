@@ -130,17 +130,13 @@ AMDGPU_CMAKE_TEST_BUILD_TARGETS = (
 )
 AMDGPU_TARGET_SELECTOR = "gfx942"
 RUNTIME_AMDGPU_RESOURCE_TAG = "iree-run-requirement=runtime.resource.amd_gpu"
-LOOM_AMDGPU_RESOURCE_TAG = "iree-run-requirement=loom.resource.amd_gpu"
 AMDGPU_BAZEL_RESOURCE_SLICES = (
-    ("runtime", RUNTIME_AMDGPU_RESOURCE_TAG),
-    ("Loom", LOOM_AMDGPU_RESOURCE_TAG),
+    ("runtime", "//runtime", "//runtime/...", RUNTIME_AMDGPU_RESOURCE_TAG),
+    ("Loom", "//loom", "//loom/...", RUNTIME_AMDGPU_RESOURCE_TAG),
 )
 RUNTIME_CTEST_RESOURCE_LABEL_PREFIX = "runtime-resource="
-LOOM_CTEST_RESOURCE_LABEL_PREFIX = "loom-resource="
-CTEST_RESOURCE_LABEL_EXCLUDE_REGEX = (
-    RUNTIME_CTEST_RESOURCE_LABEL_PREFIX + "|" + LOOM_CTEST_RESOURCE_LABEL_PREFIX
-)
-AMDGPU_CTEST_RESOURCE_LABEL_REGEX = "runtime-resource=amd-gpu|loom-resource=amd-gpu"
+CTEST_RESOURCE_LABEL_EXCLUDE_REGEX = RUNTIME_CTEST_RESOURCE_LABEL_PREFIX
+AMDGPU_CTEST_RESOURCE_LABEL_REGEX = "runtime-resource=amd-gpu"
 AMDGPU_XFAILS = (
     bazel_xfail("//runtime/src/iree/hal/drivers/amdgpu/cts/..."),
     bazel_xfail("//runtime/src/iree/hal/drivers/amdgpu:allocator_test"),

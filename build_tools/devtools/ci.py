@@ -313,15 +313,61 @@ def amdgpu_test_steps(
     xfail_targets: tuple[str, ...] = (),
 ) -> list[CiStep]:
     config_name = f" and {config.upper()}" if config is not None else ""
-    return [
-        bazel_test_step(
-            f"Test IREE AMDGPU {slice_name} resources{config_name}",
+    steps = []
+    for (
+        slice_name,
+        target_prefix,
+        default_target,
+        resource_tag,
+    ) in ci_config.AMDGPU_BAZEL_RESOURCE_SLICES:
+        slice_targets = resource_slice_targets(
             targets + xfail_targets,
-            config=config,
-            test_tag_filters=(resource_tag,),
+            target_prefix=target_prefix,
+            default_target=default_target,
         )
-        for slice_name, resource_tag in ci_config.AMDGPU_BAZEL_RESOURCE_SLICES
-    ]
+        if not slice_targets:
+            continue
+        steps.append(
+            bazel_test_step(
+                f"Test IREE AMDGPU {slice_name} resources{config_name}",
+                slice_targets,
+                config=config,
+                test_tag_filters=(resource_tag,),
+            )
+        )
+    return steps
+
+
+def resource_slice_targets(
+    targets: tuple[str, ...],
+    *,
+    target_prefix: str,
+    default_target: str,
+) -> tuple[str, ...]:
+    slice_targets = []
+    seen_targets = set()
+    for target in targets:
+        is_negative = target.startswith("-")
+        raw_target = target[1:] if is_negative else target
+        if raw_target in ("//...", "..."):
+            selected_target = "-" + default_target if is_negative else default_target
+        elif target_in_prefix(raw_target, target_prefix):
+            selected_target = target
+        else:
+            continue
+        if selected_target in seen_targets:
+            continue
+        slice_targets.append(selected_target)
+        seen_targets.add(selected_target)
+    return tuple(slice_targets)
+
+
+def target_in_prefix(target: str, target_prefix: str) -> bool:
+    return (
+        target == target_prefix
+        or target.startswith(target_prefix + "/")
+        or target.startswith(target_prefix + ":")
+    )
 
 
 def amdgpu_steps(targets: tuple[str, ...]) -> list[CiStep]:

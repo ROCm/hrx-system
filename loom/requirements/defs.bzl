@@ -9,7 +9,6 @@
 load(
     "//build_tools/bazel:requirements.bzl",
     "build_requirement",
-    "run_requirement",
 )
 
 EMIT_AMDGPU = build_requirement(
@@ -110,22 +109,7 @@ TARGET_ARCH_X86 = build_requirement(
     cmake_condition = "LOOM_TARGET_ARCH_X86",
 )
 
-AMDGPU_RESOURCE = run_requirement(
-    id = "loom.resource.amd_gpu",
-    label = "//loom/requirements:amd_gpu",
-    cmake_label = "loom-resource=amd-gpu",
-    skip_contract = "Tests skip when no compatible AMD GPU/HSA agent is available.",
-)
-
-VULKAN_DEVICE_RESOURCE = run_requirement(
-    id = "loom.resource.vulkan_device",
-    label = "//loom/requirements:vulkan_device",
-    cmake_label = "loom-resource=vulkan-device",
-    skip_contract = "Tests skip when no compatible Vulkan device is available.",
-)
-
 REQUIREMENTS = [
-    AMDGPU_RESOURCE,
     EMIT_AMDGPU,
     EMIT_IREE_VM,
     EMIT_LLVMIR,
@@ -140,5 +124,4 @@ REQUIREMENTS = [
     TARGET_ARCH_SPIRV,
     TARGET_ARCH_WASM,
     TARGET_ARCH_X86,
-    VULKAN_DEVICE_RESOURCE,
 ]
