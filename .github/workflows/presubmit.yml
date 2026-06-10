@@ -36,6 +36,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
 
       - name: Adjust git config
         run: git config --global --add safe.directory "$PWD"
@@ -58,4 +60,14 @@ jobs:
           test -d "${HRX_ROCM_ROOT}/lib/llvm/include"
 
       - name: Run presubmit
-        run: python3 dev.py bazel presubmit --profile ci --no-project-tests
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            python3 dev.py bazel presubmit \
+              --profile ci \
+              --no-project-tests \
+              --base "${{ github.event.pull_request.base.sha }}"
+          else
+            python3 dev.py bazel presubmit \
+              --profile ci \
+              --no-project-tests
+          fi

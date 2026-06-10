@@ -284,6 +284,7 @@ Repo-relative paths and git scopes use the configured CMake compile database.
             epilog=f"""Examples:
   python dev.py {lane} presubmit
   python dev.py {lane} presubmit --profile paranoid
+  python dev.py {lane} presubmit --base origin/main
   python dev.py {lane} presubmit --no-project-tests
   python dev.py {lane} presubmit --verbose
 
@@ -295,6 +296,8 @@ Profiles:
 The default profile is ci. This is intentionally the expensive full-tree check
 that approximates the project test workflows a developer can run locally. Use
 --no-project-tests only for CI jobs that have separate project test workflows.
+`--base` runs the same presubmit profile on the branch diff and lets static
+analysis providers conservatively escalate when a change affects wider state.
 Use `python dev.py {lane} precommit` for local changes only.""",
         )
     if command == "precommit":

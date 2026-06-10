@@ -52,6 +52,7 @@ def presubmit_plan(
     lane: str,
     tool_env: ToolEnvironment,
     profile: str,
+    base: str | None = None,
     cmake_build_dir: Path | None = None,
     verbose: bool = False,
     project_tests: bool = True,
@@ -70,8 +71,8 @@ def presubmit_plan(
             "--profile",
             profile,
             "--check",
-            "--all",
         ]
+        command += ["--base", base] if base is not None else ["--all"]
         if verbose:
             command.append("--verbose")
         if not project_tests:
@@ -93,8 +94,8 @@ def presubmit_plan(
             "--profile",
             profile,
             "--check",
-            "--all",
         ]
+        command += ["--base", base] if base is not None else ["--all"]
         if verbose:
             command.append("--verbose")
         if not project_tests:

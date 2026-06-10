@@ -971,6 +971,16 @@ class CliTest(unittest.TestCase):
         self.assertIn("--profile default", description)
         self.assertIn("--all", description)
 
+    def test_bazel_presubmit_can_use_base_ref(self):
+        args = cli.parse_arguments(["bazel", "presubmit", "--base", "origin/main"])
+
+        plan = args.handler(args)
+        description = plan.describe()
+
+        self.assertIn("--lane bazel", description)
+        self.assertIn("--base origin/main", description)
+        self.assertNotIn("--all", description)
+
     def test_bazel_presubmit_can_skip_project_tests(self):
         args = cli.parse_arguments(["bazel", "presubmit", "--no_project_tests"])
 
@@ -1051,6 +1061,7 @@ class CliTest(unittest.TestCase):
 
         self.assertIn("The default profile is ci", output)
         self.assertIn("full-tree", output)
+        self.assertIn("--base", output)
         self.assertIn("precommit", output)
 
     def test_bazel_clang_tidy_help_explains_modes(self):

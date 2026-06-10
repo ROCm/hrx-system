@@ -855,6 +855,12 @@ def add_lane_commands(subparsers: argparse._SubParsersAction, lane: str) -> None
     )
     add_argument(
         presubmit_parser,
+        "--base",
+        metavar="GIT_REF",
+        help="Run presubmit over branch changes since GIT_REF plus local changes.",
+    )
+    add_argument(
+        presubmit_parser,
         "--no-project-tests",
         dest="project_tests",
         action="store_false",
@@ -1209,6 +1215,7 @@ def handle_presubmit(args: argparse.Namespace) -> CommandPlan:
         args.lane,
         existing_or_system_environment(args),
         args.profile,
+        base=args.base,
         cmake_build_dir=configured_cmake_build_dir(args)
         if args.lane == "cmake"
         else None,

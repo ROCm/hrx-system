@@ -21,6 +21,8 @@ IreeClangTidyInfo = provider(
     doc = "clang-tidy artifacts collected from configured C/C++ targets.",
     fields = {
         "fixes": "depset of per-translation-unit clang-tidy replacement YAML files.",
+        "local_fixes": "depset of direct per-translation-unit clang-tidy replacement YAML files.",
+        "local_reports": "depset of direct per-translation-unit clang-tidy report files.",
         "reports": "depset of per-translation-unit clang-tidy report files.",
     },
 )
@@ -186,9 +188,16 @@ def _collect_clang_tidy_aspect_impl(target, ctx):
     fixes = depset(local_fixes, transitive = transitive_fixes)
     reports = depset(local_reports, transitive = transitive_reports)
     return [
-        IreeClangTidyInfo(fixes = fixes, reports = reports),
+        IreeClangTidyInfo(
+            fixes = fixes,
+            local_fixes = depset(local_fixes),
+            local_reports = depset(local_reports),
+            reports = reports,
+        ),
         OutputGroupInfo(
             iree_clang_tidy_fixes = fixes,
+            iree_clang_tidy_local_fixes = depset(local_fixes),
+            iree_clang_tidy_local_reports = depset(local_reports),
             iree_clang_tidy_reports = reports,
         ),
     ]
@@ -237,18 +246,31 @@ collect_clang_tidy_aspect = aspect(
 
 def _iree_clang_tidy_impl(ctx):
     transitive_fixes = []
+    transitive_local_fixes = []
+    transitive_local_reports = []
     transitive_reports = []
     for target in ctx.attr.targets:
         if IreeClangTidyInfo in target:
             transitive_fixes.append(target[IreeClangTidyInfo].fixes)
+            transitive_local_fixes.append(target[IreeClangTidyInfo].local_fixes)
+            transitive_local_reports.append(target[IreeClangTidyInfo].local_reports)
             transitive_reports.append(target[IreeClangTidyInfo].reports)
     fixes = depset(transitive = transitive_fixes)
+    local_fixes = depset(transitive = transitive_local_fixes)
+    local_reports = depset(transitive = transitive_local_reports)
     reports = depset(transitive = transitive_reports)
     return [
         DefaultInfo(files = reports),
-        IreeClangTidyInfo(fixes = fixes, reports = reports),
+        IreeClangTidyInfo(
+            fixes = fixes,
+            local_fixes = local_fixes,
+            local_reports = local_reports,
+            reports = reports,
+        ),
         OutputGroupInfo(
             iree_clang_tidy_fixes = fixes,
+            iree_clang_tidy_local_fixes = local_fixes,
+            iree_clang_tidy_local_reports = local_reports,
             iree_clang_tidy_reports = reports,
         ),
     ]

@@ -25,6 +25,21 @@ sys.modules[PRESUBMIT_SPEC.name] = presubmit
 PRESUBMIT_SPEC.loader.exec_module(presubmit)
 
 
+def input_scope(
+    paths: list[str],
+    *,
+    mode: str = "explicit",
+    changed_paths: list[str] | None = None,
+    tracked_paths: list[str] | None = None,
+) -> presubmit.PresubmitInputs:
+    return presubmit.PresubmitInputs(
+        mode=mode,
+        selected_paths=paths,
+        changed_paths=changed_paths if changed_paths is not None else paths,
+        tracked_paths=tracked_paths,
+    )
+
+
 class PresubmitTest(unittest.TestCase):
     def test_semgrep_candidates_require_configured_prefix_and_extension(self):
         with (
@@ -121,13 +136,16 @@ class PresubmitTest(unittest.TestCase):
     def test_clang_tidy_candidates_require_configured_prefix_and_extension(self):
         with (
             mock.patch.object(presubmit, "CLANG_TIDY_PATH_PREFIXES", ("project/src/",)),
-            mock.patch.object(presubmit, "CLANG_TIDY_EXTENSIONS", {".c", ".h"}),
+            mock.patch.object(presubmit, "CLANG_TIDY_EXTENSIONS", {".c", ".h", ".inl"}),
         ):
             self.assertTrue(
                 presubmit.is_clang_tidy_candidate_file("project/src/file.c")
             )
             self.assertTrue(
                 presubmit.is_clang_tidy_candidate_file("project/src/file.h")
+            )
+            self.assertTrue(
+                presubmit.is_clang_tidy_candidate_file("project/src/file.inl")
             )
             self.assertFalse(
                 presubmit.is_clang_tidy_candidate_file("project/src/file.py")
@@ -165,6 +183,19 @@ class PresubmitTest(unittest.TestCase):
             command,
         )
         self.assertIn("--build_event_json_file=.tmp/fixes/build_events.json", command)
+
+    def test_clang_tidy_bazel_command_can_use_local_output_groups(self):
+        command = presubmit.clang_tidy_bazel_command(
+            ["//runtime/src/iree/base:all"],
+            emit_fixes=True,
+            local_outputs=True,
+        )
+
+        self.assertIn("--aspects_parameters=emit_fixes=true", command)
+        self.assertIn(
+            "--output_groups=iree_clang_tidy_local_reports,iree_clang_tidy_local_fixes",
+            command,
+        )
 
     def test_clang_tidy_fix_paths_filter_to_selected_translation_units(self):
         fix_paths = [
@@ -269,7 +300,7 @@ class PresubmitTest(unittest.TestCase):
             ),
         ):
             ok = presubmit.run_clang_tidy(
-                ["runtime/src/iree/base/status.c"],
+                input_scope(["runtime/src/iree/base/status.c"]),
                 profile="paranoid",
                 lane="bazel",
                 verbose=False,
@@ -291,7 +322,7 @@ class PresubmitTest(unittest.TestCase):
             ),
         ):
             ok = presubmit.run_clang_tidy(
-                ["runtime/src/iree/base/status.c"],
+                input_scope(["runtime/src/iree/base/status.c"]),
                 profile="ci",
                 lane="bazel",
                 verbose=False,
@@ -313,7 +344,9 @@ class PresubmitTest(unittest.TestCase):
             ) as run_command,
         ):
             ok = presubmit.run_clang_tidy(
-                ["build_tools/bazel/test/cc_benchmark_smoke_test_fixture.c"],
+                input_scope(
+                    ["build_tools/bazel/test/cc_benchmark_smoke_test_fixture.c"]
+                ),
                 profile="paranoid",
                 lane="bazel",
                 verbose=False,
@@ -322,6 +355,9 @@ class PresubmitTest(unittest.TestCase):
         self.assertTrue(ok)
         command = run_command.call_args.args[0]
         self.assertNotIn("--keep_going", command)
+        self.assertIn(
+            f"--output_groups={presubmit.CLANG_TIDY_LOCAL_OUTPUT_GROUP}", command
+        )
         self.assertIn("//build_tools/bazel/test:all", command)
 
     def test_clang_tidy_ci_runs_bazel_packages_keep_going(self):
@@ -337,7 +373,9 @@ class PresubmitTest(unittest.TestCase):
             ) as run_command,
         ):
             ok = presubmit.run_clang_tidy(
-                ["build_tools/bazel/test/cc_benchmark_smoke_test_fixture.c"],
+                input_scope(
+                    ["build_tools/bazel/test/cc_benchmark_smoke_test_fixture.c"]
+                ),
                 profile="ci",
                 lane="bazel",
                 verbose=False,
@@ -346,7 +384,93 @@ class PresubmitTest(unittest.TestCase):
         self.assertTrue(ok)
         command = run_command.call_args.args[0]
         self.assertIn("--keep_going", command)
+        self.assertIn(
+            f"--output_groups={presubmit.CLANG_TIDY_LOCAL_OUTPUT_GROUP}", command
+        )
         self.assertIn("//build_tools/bazel/test:all", command)
+
+    def test_clang_tidy_base_implementation_scope_stays_bounded(self):
+        inputs = input_scope(
+            ["runtime/src/iree/base/status.c"],
+            mode="base",
+            tracked_paths=[
+                "runtime/src/iree/base/status.c",
+                "runtime/src/iree/base/allocator.c",
+            ],
+        )
+
+        self.assertEqual(
+            presubmit.clang_tidy_analysis_paths(inputs),
+            ["runtime/src/iree/base/status.c"],
+        )
+
+    def test_clang_tidy_base_header_scope_escalates_to_full(self):
+        inputs = input_scope(
+            ["runtime/src/iree/base/status.h"],
+            mode="base",
+            tracked_paths=[
+                "runtime/src/iree/base/status.c",
+                "runtime/src/iree/base/status.h",
+                "runtime/src/iree/base/allocator.c",
+            ],
+        )
+
+        self.assertEqual(
+            presubmit.clang_tidy_analysis_paths(inputs),
+            [
+                "runtime/src/iree/base/status.c",
+                "runtime/src/iree/base/status.h",
+                "runtime/src/iree/base/allocator.c",
+            ],
+        )
+
+    def test_clang_tidy_base_inl_scope_escalates_to_full(self):
+        inputs = input_scope(
+            ["runtime/src/iree/base/table.inl"],
+            mode="base",
+            tracked_paths=[
+                "runtime/src/iree/base/status.c",
+                "runtime/src/iree/base/table.inl",
+            ],
+        )
+
+        self.assertEqual(
+            presubmit.clang_tidy_analysis_paths(inputs),
+            [
+                "runtime/src/iree/base/status.c",
+                "runtime/src/iree/base/table.inl",
+            ],
+        )
+
+    def test_clang_tidy_base_infra_scope_escalates_and_runs_plugin_tests(self):
+        inputs = input_scope(
+            ["build_tools/clang_tidy/iree/IreeTidyModule.cc"],
+            mode="base",
+            tracked_paths=[
+                "runtime/src/iree/base/status.c",
+                "build_tools/clang_tidy/iree/IreeTidyModule.cc",
+            ],
+        )
+        with (
+            mock.patch.object(
+                presubmit, "clang_tidy_llvm_available", return_value=True
+            ),
+            mock.patch.object(
+                presubmit, "run_command", return_value=True
+            ) as run_command,
+        ):
+            ok = presubmit.run_clang_tidy(
+                inputs,
+                profile="paranoid",
+                lane="bazel",
+                verbose=False,
+            )
+
+        self.assertTrue(ok)
+        plugin_test_command = run_command.call_args_list[0].args[0]
+        self.assertIn("//build_tools/clang_tidy:plugin_smoke_test", plugin_test_command)
+        clang_tidy_command = run_command.call_args_list[-1].args[0]
+        self.assertIn("//runtime/src/iree/base:all", clang_tidy_command)
 
     def test_clang_tidy_infra_runs_plugin_tests(self):
         with (
@@ -358,7 +482,7 @@ class PresubmitTest(unittest.TestCase):
             ) as run_command,
         ):
             ok = presubmit.run_clang_tidy(
-                ["build_tools/clang_tidy/iree/IreeTidyModule.cc"],
+                input_scope(["build_tools/clang_tidy/iree/IreeTidyModule.cc"]),
                 profile="paranoid",
                 lane="bazel",
                 verbose=False,
@@ -373,7 +497,7 @@ class PresubmitTest(unittest.TestCase):
 
     def test_default_profile_has_no_static_analysis_provider(self):
         ok = presubmit.run_static_analysis(
-            ["runtime/src/iree/base/status.c"],
+            input_scope(["runtime/src/iree/base/status.c"]),
             profile="default",
             lane="bazel",
             verbose=False,

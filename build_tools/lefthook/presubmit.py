@@ -61,10 +61,16 @@ C_FORMAT_EXTENSIONS = {
     ".m",
     ".mm",
 }
+C_INCLUDE_FRAGMENT_EXTENSIONS = {
+    ".def",
+    ".inc",
+    ".inl",
+}
+C_ANALYSIS_EXTENSIONS = C_FORMAT_EXTENSIONS | C_INCLUDE_FRAGMENT_EXTENSIONS
 C_FORMAT_BATCH_SIZE = 64
 C_FORMAT_DEFAULT_MAX_JOBS = 16
 SEMGREP_CONFIG = "build_tools/static_analysis/semgrep/iree.yml"
-SEMGREP_EXTENSIONS = C_FORMAT_EXTENSIONS
+SEMGREP_EXTENSIONS = C_ANALYSIS_EXTENSIONS
 SEMGREP_PATH_PREFIXES = (
     "runtime/src/iree/",
     "loom/src/loom/",
@@ -72,18 +78,25 @@ SEMGREP_PATH_PREFIXES = (
 )
 SEMGREP_DEFAULT_MAX_JOBS = 14
 CLANG_TIDY_ASPECT = "//build_tools/clang_tidy:clang_tidy.bzl%collect_clang_tidy_aspect"
-CLANG_TIDY_EXTENSIONS = {
+CLANG_TIDY_TRANSLATION_UNIT_EXTENSIONS = {
     ".c",
     ".cc",
     ".cpp",
     ".cxx",
+}
+CLANG_TIDY_HEADER_EXTENSIONS = {
     ".h",
     ".hh",
     ".hpp",
     ".hxx",
-}
+} | C_INCLUDE_FRAGMENT_EXTENSIONS
+CLANG_TIDY_EXTENSIONS = (
+    CLANG_TIDY_TRANSLATION_UNIT_EXTENSIONS | CLANG_TIDY_HEADER_EXTENSIONS
+)
 CLANG_TIDY_INFRA_PREFIX = "build_tools/clang_tidy/"
 CLANG_TIDY_FIXES_OUTPUT_GROUP = "iree_clang_tidy_fixes"
+CLANG_TIDY_LOCAL_FIXES_OUTPUT_GROUP = "iree_clang_tidy_local_fixes"
+CLANG_TIDY_LOCAL_OUTPUT_GROUP = "iree_clang_tidy_local_reports"
 CLANG_TIDY_OUTPUT_GROUP = "iree_clang_tidy_reports"
 CLANG_TIDY_PATH_PREFIXES = SEMGREP_PATH_PREFIXES
 CLANG_TIDY_REPO_ENV = "--repo_env=IREE_CLANG_TIDY_LLVM=auto"
@@ -174,13 +187,45 @@ ROOT_DEVTOOLS_TRIGGERS = (
     "build_tools/devtools/",
     "build_tools/lefthook/",
 )
+CLANG_TIDY_FULL_SCOPE_EXACT_PATHS = {
+    ".bazelrc",
+    ".bazelversion",
+    ".github/workflows/presubmit.yml",
+    "MODULE.bazel",
+    "MODULE.bazel.lock",
+    "WORKSPACE",
+    "WORKSPACE.bazel",
+    "WORKSPACE.bzlmod",
+    "dev.py",
+}
+CLANG_TIDY_FULL_SCOPE_PREFIXES = (
+    "build_tools/bazel/",
+    "build_tools/devtools/",
+    "build_tools/lefthook/",
+    CLANG_TIDY_INFRA_PREFIX,
+)
+
+
+@dataclass(frozen=True)
+class PresubmitInputs:
+    mode: str
+    selected_paths: list[str]
+    changed_paths: list[str]
+    tracked_paths: list[str] | None = None
+    base: str | None = None
+
+    def all_paths(self) -> list[str]:
+        tracked_paths = self.tracked_paths
+        if tracked_paths is None:
+            tracked_paths = git_list(["ls-files", "-z"])
+        return unique_paths([*tracked_paths, *self.changed_paths])
 
 
 @dataclass(frozen=True)
 class StaticAnalysisProvider:
     name: str
     profiles: frozenset[str]
-    runner: Callable[[list[str], str, str, bool], bool]
+    runner: Callable[[PresubmitInputs, str, str, bool], bool]
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -623,19 +668,50 @@ def commit_files() -> list[str]:
     )
 
 
-def selected_files(args: argparse.Namespace) -> list[str]:
+def tracked_files() -> list[str]:
+    return git_list(["ls-files", "-z"])
+
+
+def presubmit_inputs(args: argparse.Namespace) -> PresubmitInputs:
     if args.paths:
-        return args.paths
+        return PresubmitInputs(
+            mode="explicit",
+            selected_paths=args.paths,
+            changed_paths=args.paths,
+        )
     if args.changed:
-        return changed_files()
+        paths = changed_files()
+        return PresubmitInputs(
+            mode="changed",
+            selected_paths=paths,
+            changed_paths=paths,
+        )
     if args.staged:
-        return git_list(["diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR"])
+        paths = git_list(
+            ["diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR"]
+        )
+        return PresubmitInputs(
+            mode="staged",
+            selected_paths=paths,
+            changed_paths=paths,
+        )
     if args.commit:
-        return commit_files()
+        paths = commit_files()
+        return PresubmitInputs(
+            mode="commit",
+            selected_paths=paths,
+            changed_paths=paths,
+        )
     if args.all:
-        return git_list(["ls-files", "-z"])
+        paths = tracked_files()
+        return PresubmitInputs(
+            mode="all",
+            selected_paths=paths,
+            changed_paths=paths,
+            tracked_paths=paths,
+        )
     if args.base:
-        return unique_paths(
+        paths = unique_paths(
             [
                 *git_list(
                     [
@@ -650,12 +726,33 @@ def selected_files(args: argparse.Namespace) -> list[str]:
                 *changed_files(),
             ]
         )
+        return PresubmitInputs(
+            mode="base",
+            selected_paths=paths,
+            changed_paths=paths,
+            tracked_paths=tracked_files(),
+            base=args.base,
+        )
     if args.files_from:
         with open(args.files_from, encoding="utf-8") as file_list:
-            return [line.strip() for line in file_list if line.strip()]
-    return git_list(
+            paths = [line.strip() for line in file_list if line.strip()]
+        return PresubmitInputs(
+            mode="files-from",
+            selected_paths=paths,
+            changed_paths=paths,
+        )
+    paths = git_list(
         ["diff", "--name-only", "-z", "--diff-filter=ACMR", args.since, "--"]
     )
+    return PresubmitInputs(
+        mode="since",
+        selected_paths=paths,
+        changed_paths=paths,
+    )
+
+
+def selected_files(args: argparse.Namespace) -> list[str]:
+    return presubmit_inputs(args).selected_paths
 
 
 def existing_files(paths: list[str]) -> list[str]:
@@ -711,6 +808,37 @@ def is_clang_tidy_candidate_file(path: str) -> bool:
 
 def is_clang_tidy_infra_file(path: str) -> bool:
     return path.startswith(CLANG_TIDY_INFRA_PREFIX)
+
+
+def is_bazel_graph_file(path: str) -> bool:
+    file_path = Path(path)
+    return (
+        path in CLANG_TIDY_FULL_SCOPE_EXACT_PATHS
+        or file_path.name in BUILDIFIER_NAMES
+        or file_path.suffix in BUILDIFIER_EXTENSIONS
+    )
+
+
+def is_clang_tidy_full_scope_trigger(path: str) -> bool:
+    if is_bazel_graph_file(path):
+        return True
+    if any(path.startswith(prefix) for prefix in CLANG_TIDY_FULL_SCOPE_PREFIXES):
+        return True
+    return path.startswith(CLANG_TIDY_PATH_PREFIXES) and (
+        Path(path).suffix in CLANG_TIDY_HEADER_EXTENSIONS
+    )
+
+
+def clang_tidy_uses_full_scope(inputs: PresubmitInputs) -> bool:
+    return inputs.mode == "base" and any(
+        is_clang_tidy_full_scope_trigger(path) for path in inputs.changed_paths
+    )
+
+
+def clang_tidy_analysis_paths(inputs: PresubmitInputs) -> list[str]:
+    if clang_tidy_uses_full_scope(inputs):
+        return inputs.all_paths()
+    return inputs.selected_paths
 
 
 def is_executable_path(path: str) -> bool:
@@ -1252,7 +1380,8 @@ def is_root_devtools_trigger(path: str) -> bool:
     )
 
 
-def run_semgrep(paths: list[str], profile: str, verbose: bool) -> bool:
+def run_semgrep(inputs: PresubmitInputs, profile: str, verbose: bool) -> bool:
+    paths = inputs.selected_paths
     files = existing_files([path for path in paths if is_semgrep_candidate_file(path)])
     validate_config = SEMGREP_CONFIG in paths
     if not files and not validate_config:
@@ -1279,6 +1408,7 @@ def clang_tidy_bazel_command(
     *,
     build_events_path: Path | None = None,
     emit_fixes: bool = False,
+    local_outputs: bool = False,
 ) -> list[str]:
     command = [
         "bazel",
@@ -1286,9 +1416,15 @@ def clang_tidy_bazel_command(
     ]
     if keep_going:
         command.append("--keep_going")
-    output_groups = [CLANG_TIDY_OUTPUT_GROUP]
+    output_groups = [
+        CLANG_TIDY_LOCAL_OUTPUT_GROUP if local_outputs else CLANG_TIDY_OUTPUT_GROUP
+    ]
     if emit_fixes:
-        output_groups.append(CLANG_TIDY_FIXES_OUTPUT_GROUP)
+        output_groups.append(
+            CLANG_TIDY_LOCAL_FIXES_OUTPUT_GROUP
+            if local_outputs
+            else CLANG_TIDY_FIXES_OUTPUT_GROUP
+        )
     command += [
         CLANG_TIDY_REPO_ENV,
         f"--aspects={CLANG_TIDY_ASPECT}",
@@ -1554,11 +1690,12 @@ def clang_apply_replacements_command(
 
 
 def run_clang_tidy_cmake(
-    paths: list[str], profile: str, verbose: bool, fix: bool = False
+    inputs: PresubmitInputs, profile: str, verbose: bool, fix: bool = False
 ) -> bool:
+    paths = clang_tidy_analysis_paths(inputs)
     candidate_files = cmake_clang_tidy_candidate_files(paths)
     infra_files = existing_files(
-        [path for path in paths if is_clang_tidy_infra_file(path)]
+        [path for path in inputs.changed_paths if is_clang_tidy_infra_file(path)]
     )
     if not candidate_files and not infra_files:
         return skip_step("clang-tidy", "no C/C++ runtime inputs")
@@ -1701,6 +1838,7 @@ def run_clang_tidy_bazel_fix(
     package_targets: list[str],
     profile: str,
     verbose: bool,
+    local_outputs: bool,
 ) -> bool:
     clang_apply_replacements = clang_tidy_apply_replacements_tool()
     if not clang_apply_replacements:
@@ -1722,6 +1860,7 @@ def run_clang_tidy_bazel_fix(
                 keep_going=True,
                 build_events_path=build_events_path,
                 emit_fixes=True,
+                local_outputs=local_outputs,
             ),
             "clang-tidy Bazel fix export",
             verbose,
@@ -1731,7 +1870,9 @@ def run_clang_tidy_bazel_fix(
 
         fix_paths = bazel_output_paths_from_bep(
             build_events_path,
-            output_group=CLANG_TIDY_FIXES_OUTPUT_GROUP,
+            output_group=CLANG_TIDY_LOCAL_FIXES_OUTPUT_GROUP
+            if local_outputs
+            else CLANG_TIDY_FIXES_OUTPUT_GROUP,
             suffix=".clang_tidy_fixes.yaml",
         )
         if not fix_paths:
@@ -1751,6 +1892,7 @@ def run_clang_tidy_bazel_fix(
                     clang_tidy_bazel_command(
                         package_targets,
                         keep_going=profile == "ci",
+                        local_outputs=local_outputs,
                     ),
                     "clang-tidy Bazel actions after fixes",
                     verbose,
@@ -1774,6 +1916,7 @@ def run_clang_tidy_bazel_fix(
             clang_tidy_bazel_command(
                 package_targets,
                 keep_going=profile == "ci",
+                local_outputs=local_outputs,
             ),
             "clang-tidy Bazel actions after fixes",
             verbose,
@@ -1783,22 +1926,23 @@ def run_clang_tidy_bazel_fix(
 
 
 def run_clang_tidy(
-    paths: list[str],
+    inputs: PresubmitInputs,
     profile: str,
     lane: str,
     verbose: bool,
     fix: bool = False,
 ) -> bool:
     if lane == "cmake":
-        return run_clang_tidy_cmake(paths, profile, verbose, fix=fix)
+        return run_clang_tidy_cmake(inputs, profile, verbose, fix=fix)
     if lane != "bazel":
         return skip_step("clang-tidy", "unknown build-system lane")
 
+    paths = clang_tidy_analysis_paths(inputs)
     candidate_files = existing_files(
         [path for path in paths if is_clang_tidy_candidate_file(path)]
     )
     infra_files = existing_files(
-        [path for path in paths if is_clang_tidy_infra_file(path)]
+        [path for path in inputs.changed_paths if is_clang_tidy_infra_file(path)]
     )
     if not candidate_files and not infra_files:
         return skip_step("clang-tidy", "no C/C++ runtime inputs")
@@ -1850,6 +1994,7 @@ def run_clang_tidy(
         ]
     )
     if package_targets:
+        local_outputs = True
         if fix:
             ok = (
                 run_clang_tidy_bazel_fix(
@@ -1857,6 +2002,7 @@ def run_clang_tidy(
                     package_targets=package_targets,
                     profile=profile,
                     verbose=verbose,
+                    local_outputs=local_outputs,
                 )
                 and ok
             )
@@ -1866,6 +2012,7 @@ def run_clang_tidy(
                     clang_tidy_bazel_command(
                         package_targets,
                         keep_going=profile == "ci",
+                        local_outputs=local_outputs,
                     ),
                     "clang-tidy Bazel actions",
                     verbose,
@@ -1881,8 +2028,8 @@ STATIC_ANALYSIS_PROVIDERS = (
     StaticAnalysisProvider(
         name="Semgrep",
         profiles=frozenset(("paranoid", "ci")),
-        runner=lambda paths, profile, lane, verbose: run_semgrep(
-            paths, profile, verbose
+        runner=lambda inputs, profile, lane, verbose: run_semgrep(
+            inputs, profile, verbose
         ),
     ),
     StaticAnalysisProvider(
@@ -1894,9 +2041,9 @@ STATIC_ANALYSIS_PROVIDERS = (
 
 
 def run_static_analysis(
-    paths: list[str], profile: str, lane: str, verbose: bool
+    inputs: PresubmitInputs, profile: str, lane: str, verbose: bool
 ) -> bool:
-    if not paths:
+    if not inputs.selected_paths:
         return True
     ok = True
     selected_providers = [
@@ -1907,13 +2054,14 @@ def run_static_analysis(
     if not selected_providers:
         return skip_step("Static analysis", f"no providers for {profile} profile")
     for provider in selected_providers:
-        ok = provider.runner(paths, profile, lane, verbose) and ok
+        ok = provider.runner(inputs, profile, lane, verbose) and ok
     return ok
 
 
 def print_plan(
-    args: argparse.Namespace, paths: list[str], projects: list[Project]
+    args: argparse.Namespace, inputs: PresubmitInputs, projects: list[Project]
 ) -> None:
+    paths = inputs.selected_paths
     mutation = "fix" if args.fix else "check"
     if args.paths:
         input_mode = "explicit paths"
@@ -2018,10 +2166,11 @@ def print_suggested_actions(args: argparse.Namespace, ok: bool) -> None:
 
 
 def run_presubmit(
-    args: argparse.Namespace, paths: list[str], projects: list[Project]
+    args: argparse.Namespace, inputs: PresubmitInputs, projects: list[Project]
 ) -> int:
+    paths = inputs.selected_paths
     if args.print_plan:
-        print_plan(args, paths, projects)
+        print_plan(args, inputs, projects)
 
     ok = True
     if args.hygiene:
@@ -2051,7 +2200,7 @@ def run_presubmit(
         print_section("Static Analysis")
         ok = (
             run_static_analysis(
-                paths, profile=args.profile, lane=args.lane, verbose=args.verbose
+                inputs, profile=args.profile, lane=args.lane, verbose=args.verbose
             )
             and ok
         )
@@ -2059,7 +2208,7 @@ def run_presubmit(
         print_section("clang-tidy")
         ok = (
             run_clang_tidy(
-                paths,
+                inputs,
                 profile=args.profile,
                 lane=args.lane,
                 verbose=args.verbose,
@@ -2072,12 +2221,12 @@ def run_presubmit(
 
 
 def run_presubmit_with_source_guard(
-    args: argparse.Namespace, paths: list[str], projects: list[Project]
+    args: argparse.Namespace, inputs: PresubmitInputs, projects: list[Project]
 ) -> int:
     snapshot = NonEmptyTrackedFileSnapshot.capture_tracked_package_initializers(
         REPO_ROOT
     )
-    result = run_presubmit(args, paths, projects)
+    result = run_presubmit(args, inputs, projects)
     if not snapshot.verify(REPO_ROOT):
         result = 1
     return result
@@ -2085,12 +2234,12 @@ def run_presubmit_with_source_guard(
 
 def main() -> int:
     args = parse_arguments()
-    paths = selected_files(args)
-    projects = projects_for_paths(paths)
+    inputs = presubmit_inputs(args)
+    projects = projects_for_paths(inputs.selected_paths)
     if args.fix:
         with source_mutation_lock(REPO_ROOT, "root-presubmit-fix"):
-            return run_presubmit_with_source_guard(args, paths, projects)
-    return run_presubmit_with_source_guard(args, paths, projects)
+            return run_presubmit_with_source_guard(args, inputs, projects)
+    return run_presubmit_with_source_guard(args, inputs, projects)
 
 
 if __name__ == "__main__":
