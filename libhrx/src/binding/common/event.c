@@ -112,8 +112,8 @@ iree_status_t iree_hal_streaming_event_query(iree_hal_streaming_event_t* event,
 // hipEventElapsedTime reflect real GPU progress instead of host enqueue latency
 // (which is ~0 and breaks consumers like MIOpen's kernel auto-tuner, which
 // rejects non-positive elapsed times).
-static void iree_hal_streaming_event_capture_timestamp(void *user_data) {
-  iree_hal_streaming_event_t *event = (iree_hal_streaming_event_t *)user_data;
+static void iree_hal_streaming_event_capture_timestamp(void* user_data) {
+  iree_hal_streaming_event_t* event = (iree_hal_streaming_event_t*)user_data;
   event->record_time_ns = iree_time_now();
 }
 
@@ -133,11 +133,12 @@ iree_status_t iree_hal_streaming_event_record(
         "event record during graph capture not yet implemented");
   }
 
-  // Capture the timestamp via a stream-ordered host callback so it reflects when
-  // the GPU reaches this point, not host enqueue time. The callback advances the
-  // stream timeline, so the completion barrier below waits for it — meaning
-  // hipEventQuery/Synchronize observe completion only after record_time_ns is
-  // set (no race). Timing-disabled events skip this and keep the cheapest record.
+  // Capture the timestamp via a stream-ordered host callback so it reflects
+  // when the GPU reaches this point, not host enqueue time. The callback
+  // advances the stream timeline, so the completion barrier below waits for it
+  // — meaning hipEventQuery/Synchronize observe completion only after
+  // record_time_ns is set (no race). Timing-disabled events skip this and keep
+  // the cheapest record.
   event->record_time_ns = 0;
   if (!(event->flags & IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING)) {
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
@@ -246,8 +247,9 @@ iree_status_t iree_hal_streaming_event_elapsed_time(
   // returning a bogus negative value would reintroduce the non-positive-elapsed
   // failure this fixes, so reject it. NOTE: this is coarse host-observed
   // GPU-reach timing (a stream-ordered callback samples iree_time_now), not a
-  // device timestamp; cross-stream and concurrent re-record are out of scope
-  // (see the review notes) but sufficient for the MIOpen unblock.
+  // device timestamp; cross-stream measurement and concurrent re-record are
+  // unsupported, but this is sufficient for per-launch kernel timing such as
+  // library auto-tuners.
   int64_t elapsed_ns = stop->record_time_ns - start->record_time_ns;
   if (elapsed_ns < 0) {
     return iree_make_status(
