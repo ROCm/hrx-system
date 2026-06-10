@@ -6,9 +6,9 @@
 # Override with ROCM_HOME=/path/to/sdk. The ROCm find_package() calls are REQUIRED,
 # so a wrong/missing SDK hard-fails instead of falling back to a system /opt/rocm.
 #
-# Option names follow the post-#27 "split CMake ownership" layout
+# Option names follow the split CMake ownership layout
 # (runtime/project.cmake, libhrx/project.cmake). Default build is LEAN: the binding +
-# amdgpu HAL only. Turn CTS/tests on for the test phase.
+# amdgpu HAL only. Turn CTS/tests on with the flags below when testing.
 #
 # Usage: configure_hrx.sh [--build-dir DIR] [--chip gfx942]
 #                         [--cts on|off] [--tests on|off] [--passthrough on|off] [--no-build]

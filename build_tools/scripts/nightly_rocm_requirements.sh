@@ -18,7 +18,8 @@ set -euo pipefail
 INDEX_URL="https://rocm.nightlies.amd.com/whl-multi-arch/"
 PYTHON="${PYTHON:-python3.12}"
 
-# Default venv = sibling of the repo root (…/<parent>/hrx-venv), matching the existing layout.
+# Default venv = sibling of the repo root (…/<parent>/hrx-venv), kept outside
+# the repo so builds and `git clean` never touch it. Override with --venv/HRX_VENV.
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VENV="${HRX_VENV:-$(dirname "$REPO_ROOT")/hrx-venv}"
 DEVICE="${ROCM_DEVICE:-}"
