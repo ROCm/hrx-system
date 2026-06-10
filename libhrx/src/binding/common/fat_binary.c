@@ -25,10 +25,10 @@
 // 0xBA55FACE that ships via `__hipRegisterFatBinary` in more recent ROCm.
 #define HRX_HIP_FAT_MAGIC_HIPF 0x48495046u
 #define HRX_HIP_FAT_MAGIC_BA55FACE 0xBA55FACEu
-// Newer ROCm (7.x) emits a wrapper whose first four bytes are the literal
-// ASCII "HIPK" (48 49 50 4b) instead of the numeric HIPF/BA55FACE field. It
-// uses the same 24-byte {magic, version, binary, reserved} layout (observed
-// version 1) — confirmed from nightly torch's __hipRegisterFatBinary blobs.
+// Newer ROCm (7.x kpack packaging) emits a wrapper whose first four bytes are
+// the literal ASCII "HIPK" (48 49 50 4b) instead of the numeric HIPF/BA55FACE
+// field. It uses the same 24-byte {magic, version, binary, reserved} layout
+// with version 1.
 #define HRX_HIP_FAT_MAGIC_HIPK 0x4b504948u  // "HIPK", little-endian
 #define HRX_HIP_FAT_VERSION 1
 
@@ -158,8 +158,7 @@ static bool hrx_fat_is_wrapper(iree_const_byte_span_t data) {
   uint32_t magic;
   memcpy(&magic, data.data, sizeof(magic));
   return magic == HRX_HIP_FAT_MAGIC_HIPF ||
-         magic == HRX_HIP_FAT_MAGIC_BA55FACE ||
-         magic == HRX_HIP_FAT_MAGIC_HIPK;
+         magic == HRX_HIP_FAT_MAGIC_BA55FACE || magic == HRX_HIP_FAT_MAGIC_HIPK;
 }
 
 bool iree_hal_streaming_fat_binary_is_supported(iree_const_byte_span_t data) {
@@ -555,13 +554,14 @@ void iree_hal_streaming_fat_binary_extract_reset(
 //===----------------------------------------------------------------------===//
 // kpack (out-of-band code objects)
 //===----------------------------------------------------------------------===//
-// Nightly ROCm strips code objects out of the host .so into sibling .kpack
-// archives; __hipRegisterFatBinary then hands us a "HIPK" wrapper whose binary
-// pointer is msgpack metadata, not a code object. Resolve it through the vendor
-// loader librocm_kpack into the real HSACO ELF, then reuse the normal path.
-// Compiled only when rocm-kpack is available (HRX_ENABLE_KPACK, set by CMake
-// when find_package(rocm-kpack) succeeds); otherwise HIPK wrappers resolve to
-// a propagating IREE_STATUS_UNAVAILABLE in the dispatch below.
+// kpack-packaged ROCm builds strip code objects out of the host .so into
+// sibling .kpack archives; __hipRegisterFatBinary then hands us a "HIPK"
+// wrapper whose binary pointer is msgpack metadata, not a code object. Resolve
+// it through the vendor loader librocm_kpack into the real HSACO ELF, then
+// reuse the normal path. Compiled only when rocm-kpack is available
+// (HRX_ENABLE_KPACK, set by CMake when find_package(rocm-kpack) succeeds);
+// otherwise HIPK wrappers resolve to a propagating IREE_STATUS_UNAVAILABLE in
+// the dispatch below.
 
 #if defined(HRX_ENABLE_KPACK)
 static kpack_cache_t g_hrx_kpack_cache = NULL;
@@ -578,9 +578,10 @@ static kpack_cache_t hrx_kpack_cache(void) {
   return g_hrx_kpack_cache;
 }
 
-// Resolves a HIPK msgpack-metadata blob into a code object via librocm_kpack and
-// feeds it through the normal ELF/bundle extraction path. |co_index| selects the
-// translation unit for -fgpu-rdc multi-TU binaries (0 for single-TU).
+// Resolves a HIPK msgpack-metadata blob into a code object via librocm_kpack
+// and feeds it through the normal ELF/bundle extraction path. |co_index|
+// selects the translation unit for -fgpu-rdc multi-TU binaries (0 for
+// single-TU).
 static iree_status_t hrx_fat_extract_from_hipk(
     const void* hipk_metadata, iree_string_view_t target_arch,
     uint32_t co_index, iree_hal_streaming_fat_binary_extract_t* extract) {
@@ -598,7 +599,8 @@ static iree_status_t hrx_fat_extract_from_hipk(
                                                   sizeof(binary_path), NULL);
   if (kerr != KPACK_SUCCESS) {
     return iree_make_status(IREE_STATUS_NOT_FOUND,
-                            "kpack_discover_binary_path failed (%d)", (int)kerr);
+                            "kpack_discover_binary_path failed (%d)",
+                            (int)kerr);
   }
 
   // Arch priority list: full feature string (gfx942:sramecc+:xnack-) then bare
@@ -652,8 +654,9 @@ static iree_status_t hrx_fat_extract_from_hipk(
     // feature string (gfx942:sramecc+:xnack-) here would never match.
     return hrx_fat_extract_from_bundle(span, bare, extract);
   }
-  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                          "kpack code object is neither ELF nor offload bundle");
+  return iree_make_status(
+      IREE_STATUS_INVALID_ARGUMENT,
+      "kpack code object is neither ELF nor offload bundle");
 }
 #endif  // HRX_ENABLE_KPACK
 

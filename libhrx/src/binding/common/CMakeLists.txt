@@ -119,11 +119,11 @@ if(HRX_ENABLE_ZSTD)
   endif()
 endif()
 
-# Out-of-band code objects (nightly ROCm "kpack"): __hipRegisterFatBinary hands
-# us a "HIPK" wrapper whose payload is msgpack metadata pointing at a sibling
-# .kpack archive rather than an inline code object. fat_binary.c resolves it with
-# the vendor loader librocm_kpack. find_package resolves via the rocm-sdk
-# CMAKE_PREFIX_PATH set by configure_hrx.sh (rocm-sdk path --cmake).
+# Out-of-band code objects (ROCm "kpack" packaging): __hipRegisterFatBinary
+# hands us a "HIPK" wrapper whose payload is msgpack metadata pointing at a
+# sibling .kpack archive rather than an inline code object. fat_binary.c
+# resolves it with the vendor loader librocm_kpack. find_package locates it
+# through CMAKE_PREFIX_PATH (for rocm-sdk wheels: `rocm-sdk path --cmake`).
 find_package(rocm-kpack CONFIG QUIET)
 if(TARGET rocm::rocm_kpack)
   target_link_libraries(libhrx_src_binding_common_common PUBLIC rocm::rocm_kpack)
@@ -132,5 +132,5 @@ if(TARGET rocm::rocm_kpack)
 else()
   message(WARNING
     "rocm-kpack not found: HRX will build, but HIPK out-of-band code objects "
-    "(nightly torch kernels) resolve to hipErrorNotSupported at load.")
+    "(kpack-packaged ROCm libraries) will fail to load at registration.")
 endif()
