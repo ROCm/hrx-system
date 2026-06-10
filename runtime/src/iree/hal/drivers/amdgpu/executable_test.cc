@@ -366,8 +366,12 @@ TEST(ExecutableTest, RawHsacoCustomKernargLayoutAcceptsFullImplicitSuffix) {
   EXPECT_EQ(implicit_args_offset, 16u);
 }
 
-TEST(ExecutableTest,
-     RawHsacoCustomKernargLayoutRejectsTruncatedImplicitSuffix) {
+// Hand-written assembly kernels may declare only a partial hidden suffix
+// (kernarg_size < implicit offset + IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE).
+// The layout must accept this: dispatch reserves
+// max(kernarg_size, implicit offset + implicit size) and zero-fills, so a
+// short declared size is harmless.
+TEST(ExecutableTest, RawHsacoCustomKernargLayoutAcceptsPartialImplicitSuffix) {
   const iree_hal_amdgpu_hsaco_metadata_arg_t args[] = {
       MakeArg(IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_GLOBAL_BUFFER,
               /*offset=*/0, /*size=*/8),
@@ -381,11 +385,10 @@ TEST(ExecutableTest,
 
   iree_host_size_t explicit_kernarg_size = 0;
   uint16_t implicit_args_offset = 0;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      iree_hal_amdgpu_executable_raw_hsaco_custom_kernarg_layout(
-          &kernel, &kernel_args, &explicit_kernarg_size,
-          &implicit_args_offset));
+  IREE_ASSERT_OK(iree_hal_amdgpu_executable_raw_hsaco_custom_kernarg_layout(
+      &kernel, &kernel_args, &explicit_kernarg_size, &implicit_args_offset));
+  EXPECT_EQ(explicit_kernarg_size, 8u);
+  EXPECT_EQ(implicit_args_offset, 16u);
 }
 
 }  // namespace
