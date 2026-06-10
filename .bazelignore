@@ -1,0 +1,3 @@
+# Local CMake and experiment build trees. Bazel does not read .gitignore.
+build
+runtime/build
