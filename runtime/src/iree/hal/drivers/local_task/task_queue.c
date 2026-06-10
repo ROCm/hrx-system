@@ -134,7 +134,7 @@ static void iree_hal_task_queue_debug_record_destroy(
 
 // Optional trailing profiling state for one queue operation. This is allocated
 // from the operation arena only while a local CPU profile session is active so
-// the disabled path does not grow task_queue_op_t or its memset footprint.
+// the disabled path does not allocate the profile payload.
 typedef struct iree_hal_task_queue_profile_operation_t {
   // Recorder captured at operation allocation time.
   iree_hal_local_profile_recorder_t* recorder;
@@ -245,7 +245,11 @@ static uint32_t iree_hal_task_queue_profile_operation_count(
 
 static iree_hal_task_queue_profile_operation_t*
 iree_hal_task_queue_profile_operation(iree_hal_task_queue_op_t* operation) {
-  if (IREE_LIKELY(!operation->queue->profile_recorder)) return NULL;
+  if (IREE_LIKELY(!iree_any_bit_set(
+          operation->flags,
+          IREE_HAL_TASK_QUEUE_OP_FLAG_HAS_PROFILE_OPERATION))) {
+    return NULL;
+  }
   const iree_host_size_t profile_operation_offset =
       iree_hal_task_queue_profile_operation_offset();
   return (iree_hal_task_queue_profile_operation_t*)((uint8_t*)operation +
@@ -253,12 +257,15 @@ iree_hal_task_queue_profile_operation(iree_hal_task_queue_op_t* operation) {
 }
 
 static void iree_hal_task_queue_profile_operation_initialize(
-    iree_hal_task_queue_t* queue, iree_hal_task_queue_op_type_t type,
+    iree_hal_local_profile_recorder_t* profile_recorder,
+    iree_hal_local_profile_queue_scope_t profile_scope,
+    iree_atomic_int64_t* profile_submission_counter,
+    iree_hal_task_queue_op_type_t type,
     const iree_hal_semaphore_list_t* signal_semaphores,
     iree_hal_task_queue_profile_operation_t* profile_operation) {
   memset(profile_operation, 0, sizeof(*profile_operation));
-  profile_operation->recorder = queue->profile_recorder;
-  profile_operation->scope = queue->profile_scope;
+  profile_operation->recorder = profile_recorder;
+  profile_operation->scope = profile_scope;
   profile_operation->type = iree_hal_task_queue_profile_type(type);
   profile_operation->operation_count =
       iree_hal_task_queue_profile_operation_count(type);
@@ -272,9 +279,9 @@ static void iree_hal_task_queue_profile_operation_initialize(
   }
   iree_atomic_store(&profile_operation->start_host_time_ns, 0,
                     iree_memory_order_relaxed);
-  if (queue->profile_submission_counter) {
+  if (profile_submission_counter) {
     profile_operation->submission_id = (uint64_t)iree_atomic_fetch_add(
-        queue->profile_submission_counter, 1, iree_memory_order_relaxed);
+        profile_submission_counter, 1, iree_memory_order_relaxed);
   }
 }
 
@@ -557,14 +564,14 @@ static void iree_hal_task_queue_profile_finish_host_execution(
   iree_hal_task_queue_profile_operation_t* profile_operation =
       iree_hal_task_queue_profile_operation(operation);
   if (!profile_operation) return;
+  const iree_time_t start_host_time_ns = iree_atomic_exchange(
+      &profile_operation->start_host_time_ns, 0, iree_memory_order_acq_rel);
+  if (start_host_time_ns == 0) return;
   if (!iree_hal_local_profile_recorder_is_enabled(
           profile_operation->recorder,
           IREE_HAL_DEVICE_PROFILING_DATA_HOST_EXECUTION_EVENTS)) {
     return;
   }
-  const iree_time_t start_host_time_ns = iree_atomic_exchange(
-      &profile_operation->start_host_time_ns, 0, iree_memory_order_acq_rel);
-  if (start_host_time_ns == 0) return;
 
   iree_hal_local_profile_host_execution_event_info_t event_info =
       iree_hal_local_profile_host_execution_event_info_default();
@@ -766,13 +773,15 @@ static iree_status_t iree_hal_task_queue_op_allocate(
 
   // Allocate the operation from the arena.
   iree_hal_task_queue_op_t* operation = NULL;
-  const bool has_profile_operation =
-      IREE_UNLIKELY(queue->profile_recorder != NULL);
-  const iree_host_size_t operation_size =
-      has_profile_operation
-          ? iree_hal_task_queue_profile_operation_offset() +
-                sizeof(iree_hal_task_queue_profile_operation_t)
-          : sizeof(*operation);
+  iree_hal_local_profile_recorder_t* profile_recorder = queue->profile_recorder;
+  iree_hal_task_queue_op_flags_t operation_flags =
+      IREE_HAL_TASK_QUEUE_OP_FLAG_NONE;
+  iree_host_size_t operation_size = sizeof(*operation);
+  if (IREE_UNLIKELY(profile_recorder != NULL)) {
+    operation_flags |= IREE_HAL_TASK_QUEUE_OP_FLAG_HAS_PROFILE_OPERATION;
+    operation_size = iree_hal_task_queue_profile_operation_offset() +
+                     sizeof(iree_hal_task_queue_profile_operation_t);
+  }
   iree_status_t status =
       iree_arena_allocate(&arena, operation_size, (void**)&operation);
   if (!iree_status_is_ok(status)) {
@@ -788,12 +797,17 @@ static iree_status_t iree_hal_task_queue_op_allocate(
   operation->axis = queue->axis;
   operation->epoch_counter = &queue->epoch;
   operation->queue = queue;
+  operation->flags = operation_flags;
   iree_hal_task_queue_debug_record_submit(queue, operation);
-  if (has_profile_operation) {
+  if (IREE_UNLIKELY(iree_any_bit_set(
+          operation_flags,
+          IREE_HAL_TASK_QUEUE_OP_FLAG_HAS_PROFILE_OPERATION))) {
     iree_hal_task_queue_profile_operation_t* profile_operation =
         iree_hal_task_queue_profile_operation(operation);
     iree_hal_task_queue_profile_operation_initialize(
-        queue, type, signal_semaphores, profile_operation);
+        profile_recorder, queue->profile_scope,
+        queue->profile_submission_counter, type, signal_semaphores,
+        profile_operation);
   }
 
   // Clone signal semaphores into the arena.

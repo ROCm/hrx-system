@@ -84,6 +84,12 @@ typedef enum iree_hal_task_queue_op_type_e {
   IREE_HAL_TASK_QUEUE_OP_DISPATCH,
 } iree_hal_task_queue_op_type_t;
 
+typedef uint32_t iree_hal_task_queue_op_flags_t;
+enum iree_hal_task_queue_op_flag_bits_e {
+  IREE_HAL_TASK_QUEUE_OP_FLAG_NONE = 0u,
+  IREE_HAL_TASK_QUEUE_OP_FLAG_HAS_PROFILE_OPERATION = 1u << 0,
+};
+
 typedef struct iree_hal_task_queue_op_t iree_hal_task_queue_op_t;
 typedef struct iree_hal_task_queue_alloca_memory_wait_t
     iree_hal_task_queue_alloca_memory_wait_t;
@@ -108,6 +114,9 @@ struct iree_hal_task_queue_op_t {
 
   // Operation type.
   iree_hal_task_queue_op_type_t type;
+
+  // Bitfield of iree_hal_task_queue_op_flag_bits_e.
+  iree_hal_task_queue_op_flags_t flags;
 
   // Arena owning this operation and all transient allocations (semaphore
   // list storage, wait entries, binding table copies). The arena is
