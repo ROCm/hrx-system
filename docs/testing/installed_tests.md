@@ -2,12 +2,15 @@
 
 HRX can install a relocatable CTest tree and the artifacts needed to run it
 outside the build directory. The installed suite is enabled by
-`HRX_INSTALL_TESTS` and is installed with the dedicated
-`HrxSystemInstalledTests` component.
+`HRX_INSTALL_TESTS` and is installed with the component named by
+`HRX_INSTALL_TESTS_COMPONENT`, which defaults to `HrxTestsDist`.
 
 ```bash
-cmake --install build/hrx-runtime --component HrxSystemInstalledTests
-ctest --test-dir <prefix>/share/hrx-system/tests --output-on-failure
+cmake --install build/hrx-runtime \
+  --prefix build/hrx-runtime/install \
+  --component HrxTestsDist
+ctest --test-dir build/hrx-runtime/install/share/hrx-system/tests \
+  --output-on-failure
 ```
 
 The installed CTest tree defaults to creating per-test temporary directories
