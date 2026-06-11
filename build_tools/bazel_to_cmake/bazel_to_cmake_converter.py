@@ -150,6 +150,15 @@ class MixedDeps:
         return NotImplemented
 
 
+_SPIRV_TOOL_TARGET_COMPATIBLE_WITH = ConditionSelect(
+    {
+        "//loom/config/target:spirv_artifacts": [],
+        "//runtime/config/hal:driver_vulkan": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }
+)
+
+
 class _SelectsModule:
     """No-op subset of @bazel_skylib//lib:selects.bzl used in BUILD files."""
 
@@ -177,6 +186,7 @@ class BuildFileFunctions(object):
             self._build_dir = build_dir
         self._filegroup_srcs = {}
         self._target_file_labels = set()
+        self._target_file_paths = {}
         self.selects = _SelectsModule()
         self._custom_initialize()
 
@@ -595,6 +605,12 @@ class BuildFileFunctions(object):
                 self._cmake_source_location_path(src)
                 for src in self._filegroup_srcs[name]
             ]
+        canonical_label = self._canonical_location_label(label)
+        if canonical_label in self._target_file_paths:
+            path = self._target_file_paths[canonical_label]
+            if package == self._current_package():
+                return [path]
+            return [f"${{PROJECT_BINARY_DIR}}/{package}/{path}"]
         source_path = self._cmake_source_location_path(label)
         if self._repo_root:
             concrete_source_path = os.path.join(self._repo_root, package, name)
@@ -1748,6 +1764,7 @@ class BuildFileFunctions(object):
         flatten=None,
         identifier=None,
         deps=None,
+        target_compatible_with=None,
         **kwargs,
     ):
         if self._should_skip_target(**kwargs):
@@ -1766,6 +1783,7 @@ class BuildFileFunctions(object):
         flatten_block = self._convert_option_block("FLATTEN", flatten)
         deps_block = self._convert_target_list_block("DEPS", deps)
 
+        self._emit_platform_guard_begin(target_compatible_with)
         self._converter.body += (
             f"iree_c_embed_data(\n"
             f"{name_block}"
@@ -1779,6 +1797,7 @@ class BuildFileFunctions(object):
             f"{flatten_block}"
             f"  PUBLIC\n)\n\n"
         )
+        self._emit_platform_guard_end(target_compatible_with)
 
     def _iree_amdgpu_binary(
         self,
@@ -2087,6 +2106,57 @@ class BuildFileFunctions(object):
             f"{name_block}"
             f"{src_block}"
             f"{module_name_block}"
+            f"{assemble_tool_block}"
+            f"{c_identifier_block}"
+            f"{deps_block}"
+            f"{testonly_block}"
+            f"  PUBLIC\n)\n\n"
+        )
+        self._emit_platform_guard_end(target_compatible_with)
+
+    def iree_spirv_asm_module(
+        self,
+        name,
+        src,
+        out=None,
+        target_env=None,
+        spirv_as_args=None,
+        assemble_tool=None,
+        c_identifier=None,
+        deps=None,
+        testonly=None,
+        tags=None,
+        target_compatible_with=None,
+        **kwargs,
+    ):
+        if self._should_skip_target(tags=tags, **kwargs):
+            return
+        if target_compatible_with is None:
+            target_compatible_with = _SPIRV_TOOL_TARGET_COMPATIBLE_WITH
+        out_file = out or ("%s.spv" % name)
+        self._target_file_paths[self._current_target_label(name)] = out_file
+        name_block = self._convert_string_arg_block("NAME", name, quote=False)
+        src_block = self._convert_string_arg_block("SRC", src)
+        out_block = self._convert_string_arg_block("OUT", out)
+        target_env_block = self._convert_string_arg_block("TARGET_ENV", target_env)
+        spirv_as_args_block = self._convert_string_list_block(
+            "SPIRV_AS_ARGS", spirv_as_args, sort=False
+        )
+        assemble_tool_block = self._convert_target_block("ASSEMBLE_TOOL", assemble_tool)
+        c_identifier_block = self._convert_string_arg_block(
+            "C_IDENTIFIER", c_identifier
+        )
+        deps_block = self._convert_target_list_block("DEPS", deps)
+        testonly_block = self._convert_option_block("TESTONLY", testonly)
+
+        self._emit_platform_guard_begin(target_compatible_with)
+        self._converter.body += (
+            f"iree_spirv_asm_module(\n"
+            f"{name_block}"
+            f"{src_block}"
+            f"{out_block}"
+            f"{target_env_block}"
+            f"{spirv_as_args_block}"
             f"{assemble_tool_block}"
             f"{c_identifier_block}"
             f"{deps_block}"

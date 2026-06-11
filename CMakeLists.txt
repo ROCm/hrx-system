@@ -105,6 +105,7 @@ hrx_fix_ndebug()
 
 list(APPEND CMAKE_MODULE_PATH
   "${CMAKE_CURRENT_LIST_DIR}/build_tools/cmake"
+  "${CMAKE_CURRENT_LIST_DIR}/build_tools/spirv"
   "${CMAKE_CURRENT_LIST_DIR}/build_tools/sanitizer"
 )
 
@@ -125,6 +126,7 @@ include(iree_cc_fuzz)
 include(iree_import_binary)
 include(iree_install_support)
 include(iree_c_embed_data)
+include(iree_spirv_asm_module)
 include(iree_add_all_subdirs)
 include(iree_configure_testing)
 include(iree_native_test)
@@ -197,6 +199,7 @@ if(IREE_HAL_DRIVER_VULKAN)
 endif()
 
 add_subdirectory(build_tools/embed_data)
+add_subdirectory(build_tools/spirv)
 add_subdirectory(runtime/src)
 
 if(LOOM_BUILD)

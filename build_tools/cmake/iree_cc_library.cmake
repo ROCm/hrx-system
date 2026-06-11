@@ -439,7 +439,17 @@ function(iree_cc_library)
     # If the library name matches the final component of the package then treat
     # it as a default. For example, foo/bar/ library 'bar' would end up as
     # 'foo::bar'.
-    iree_package_dir(_PACKAGE_DIR)
+    if(_RULE_PACKAGE)
+      string(FIND "${_PACKAGE_NS}" "::" _END_OFFSET REVERSE)
+      if(_END_OFFSET EQUAL -1)
+        set(_PACKAGE_DIR "${_PACKAGE_NS}")
+      else()
+        math(EXPR _END_OFFSET "${_END_OFFSET} + 2")
+        string(SUBSTRING "${_PACKAGE_NS}" ${_END_OFFSET} -1 _PACKAGE_DIR)
+      endif()
+    else()
+      iree_package_dir(_PACKAGE_DIR)
+    endif()
     if("${_RULE_NAME}" STREQUAL "${_PACKAGE_DIR}")
       iree_add_alias_library(${_PACKAGE_NS} ${_NAME})
     endif()
