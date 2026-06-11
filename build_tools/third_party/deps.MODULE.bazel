@@ -28,6 +28,22 @@ http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "ht
 rocm_repository = use_repo_rule("//build_tools/third_party/rocm:repository.bzl", "rocm_repository")
 
 http_archive(
+    name = "spirv_headers",
+    build_file = "//build_tools/third_party/spirv_tools:spirv_headers.BUILD.bazel",
+    sha256 = "cab0a654c4917e16367483296b44cdb1d614e3120c721beafcd37e3a8580486c",
+    strip_prefix = "SPIRV-Headers-vulkan-sdk-1.4.341.0",
+    url = "https://github.com/KhronosGroup/SPIRV-Headers/archive/refs/tags/vulkan-sdk-1.4.341.0.tar.gz",
+)
+
+http_archive(
+    name = "spirv_tools",
+    build_file = "//build_tools/third_party/spirv_tools:spirv_tools.BUILD.bazel",
+    sha256 = "35dc16cf2dc64be5b6bbbe86d210e6f4a82b070cffd751605a3365cd8bce2d7e",
+    strip_prefix = "SPIRV-Tools-2026.1",
+    url = "https://github.com/KhronosGroup/SPIRV-Tools/archive/refs/tags/v2026.1.tar.gz",
+)
+
+http_archive(
     name = "vulkan_headers",
     build_file = "//build_tools/third_party/vulkan_headers:vulkan_headers.BUILD.bazel",
     sha256 = "70de3ec1eec289552052dfb886a49a4578b65d84fd536da3254731c8165cb3e6",

@@ -129,6 +129,10 @@ filegroup(
 )
 
 filegroup(
+    name = "empty_spirv_tool",
+)
+
+filegroup(
     name = "empty_vulkan_headers",
 )
 
@@ -189,6 +193,40 @@ alias(
     }),
     tags = ["manual"],
     visibility = [
+        ":loom_users",
+        ":runtime_users",
+    ],
+)
+
+alias(
+    name = "spirv_as",
+    actual = selects.with_or({
+        (
+            "//loom/config/target:spirv_artifacts",
+            "//runtime/config/hal:driver_vulkan",
+        ): "@spirv_tools//:spirv-as",
+        "//conditions:default": ":empty_spirv_tool",
+    }),
+    tags = ["manual"],
+    visibility = [
+        ":build_tool_users",
+        ":loom_users",
+        ":runtime_users",
+    ],
+)
+
+alias(
+    name = "spirv_dis",
+    actual = selects.with_or({
+        (
+            "//loom/config/target:spirv_artifacts",
+            "//runtime/config/hal:driver_vulkan",
+        ): "@spirv_tools//:spirv-dis",
+        "//conditions:default": ":empty_spirv_tool",
+    }),
+    tags = ["manual"],
+    visibility = [
+        ":build_tool_users",
         ":loom_users",
         ":runtime_users",
     ],

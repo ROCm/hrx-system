@@ -1,0 +1,234 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
+load("@rules_python//python:defs.bzl", "py_binary")
+
+package(default_visibility = ["//visibility:private"])
+
+COMMON_COPTS = [
+    "-DSPIRV_CHECK_CONTEXT",
+    "-DSPIRV_COLOR_TERMINAL",
+] + select({
+    "@platforms//os:windows": [],
+    "//conditions:default": [
+        "-DSPIRV_LINUX",
+        "-DSPIRV_TIMER_ENABLED",
+        "-fvisibility=hidden",
+        "-fno-exceptions",
+        "-fno-rtti",
+        "-std=c++17",
+        "-Wall",
+        "-Wextra",
+        "-Wnon-virtual-dtor",
+        "-Wno-missing-field-initializers",
+        "-Wno-long-long",
+        "-Wshadow",
+        "-Wundef",
+        "-Wconversion",
+        "-Wno-sign-conversion",
+    ],
+})
+
+py_binary(
+    name = "ggt",
+    srcs = [
+        "utils/Table/Context.py",
+        "utils/Table/IndexRange.py",
+        "utils/Table/Operand.py",
+        "utils/Table/StringList.py",
+        "utils/Table/__init__.py",
+        "utils/ggt.py",
+    ],
+    main = "utils/ggt.py",
+)
+
+py_binary(
+    name = "generate_language_headers",
+    srcs = ["utils/generate_language_headers.py"],
+)
+
+genrule(
+    name = "gen_compressed_tables",
+    srcs = [
+        "@spirv_headers//:spirv_core_grammar_unified1",
+        "@spirv_headers//:spirv_ext_inst_arm_motion_engine_100",
+        "@spirv_headers//:spirv_ext_inst_debuginfo_grammar_unified1",
+        "@spirv_headers//:spirv_ext_inst_nonsemantic_clspvreflection_grammar_unified1",
+        "@spirv_headers//:spirv_ext_inst_nonsemantic_shader_debuginfo_100_grammar_unified1",
+        "@spirv_headers//:spirv_ext_inst_nonsemantic_vkspreflection_grammar_unified1",
+        "@spirv_headers//:spirv_ext_inst_opencl_debuginfo_100_grammar_unified1",
+        "@spirv_headers//:spirv_ext_inst_spv_amd_gcn_shader_grammar_unified1",
+        "@spirv_headers//:spirv_ext_inst_spv_amd_shader_ballot_grammar_unified1",
+        "@spirv_headers//:spirv_ext_inst_spv_amd_shader_explicit_vertex_parameter_grammar_unified1",
+        "@spirv_headers//:spirv_ext_inst_spv_amd_shader_trinary_minmax_grammar_unified1",
+        "@spirv_headers//:spirv_ext_inst_tosa_001000_1",
+        "@spirv_headers//:spirv_glsl_grammar_unified1",
+        "@spirv_headers//:spirv_opencl_grammar_unified1",
+    ],
+    outs = [
+        "core_tables_body.inc",
+        "core_tables_header.inc",
+    ],
+    cmd = (
+        "$(location :ggt)" +
+        " --spirv-core-grammar=$(location @spirv_headers//:spirv_core_grammar_unified1)" +
+        " --core-tables-body-output=$(location core_tables_body.inc)" +
+        " --core-tables-header-output=$(location core_tables_header.inc)" +
+        " --extinst=,$(location @spirv_headers//:spirv_glsl_grammar_unified1)" +
+        " --extinst=,$(location @spirv_headers//:spirv_opencl_grammar_unified1)" +
+        " --extinst=CLDEBUG100_,$(location @spirv_headers//:spirv_ext_inst_opencl_debuginfo_100_grammar_unified1)" +
+        " --extinst=SHDEBUG100_,$(location @spirv_headers//:spirv_ext_inst_nonsemantic_shader_debuginfo_100_grammar_unified1)" +
+        " --extinst=TOSA_,$(location @spirv_headers//:spirv_ext_inst_tosa_001000_1)" +
+        " --extinst=,$(location @spirv_headers//:spirv_ext_inst_arm_motion_engine_100)" +
+        " --extinst=,$(location @spirv_headers//:spirv_ext_inst_spv_amd_shader_explicit_vertex_parameter_grammar_unified1)" +
+        " --extinst=,$(location @spirv_headers//:spirv_ext_inst_spv_amd_shader_trinary_minmax_grammar_unified1)" +
+        " --extinst=,$(location @spirv_headers//:spirv_ext_inst_spv_amd_gcn_shader_grammar_unified1)" +
+        " --extinst=,$(location @spirv_headers//:spirv_ext_inst_spv_amd_shader_ballot_grammar_unified1)" +
+        " --extinst=,$(location @spirv_headers//:spirv_ext_inst_debuginfo_grammar_unified1)" +
+        " --extinst=,$(location @spirv_headers//:spirv_ext_inst_nonsemantic_clspvreflection_grammar_unified1)" +
+        " --extinst=,$(location @spirv_headers//:spirv_ext_inst_nonsemantic_vkspreflection_grammar_unified1)"
+    ),
+    tools = [":ggt"],
+)
+
+genrule(
+    name = "gen_extinst_lang_headers_DebugInfo",
+    srcs = ["@spirv_headers//:spirv_ext_inst_debuginfo_grammar_unified1"],
+    outs = ["DebugInfo.h"],
+    cmd = "$(location :generate_language_headers) --extinst-grammar=$< --extinst-output-path=$(location DebugInfo.h)",
+    tools = [":generate_language_headers"],
+)
+
+genrule(
+    name = "gen_extinst_lang_headers_NonSemanticShaderDebugInfo100",
+    srcs = ["@spirv_headers//:spirv_ext_inst_nonsemantic_shader_debuginfo_100_grammar_unified1"],
+    outs = ["NonSemanticShaderDebugInfo100.h"],
+    cmd = "$(location :generate_language_headers) --extinst-grammar=$< --extinst-output-path=$(location NonSemanticShaderDebugInfo100.h)",
+    tools = [":generate_language_headers"],
+)
+
+genrule(
+    name = "gen_extinst_lang_headers_OpenCLDebugInfo100",
+    srcs = ["@spirv_headers//:spirv_ext_inst_opencl_debuginfo_100_grammar_unified1"],
+    outs = ["OpenCLDebugInfo100.h"],
+    cmd = "$(location :generate_language_headers) --extinst-grammar=$< --extinst-output-path=$(location OpenCLDebugInfo100.h)",
+    tools = [":generate_language_headers"],
+)
+
+py_binary(
+    name = "generate_registry_tables",
+    srcs = ["utils/generate_registry_tables.py"],
+)
+
+genrule(
+    name = "generators_inc",
+    srcs = ["@spirv_headers//:spirv_xml_registry"],
+    outs = ["generators.inc"],
+    cmd = "$(location :generate_registry_tables) --xml=$(location @spirv_headers//:spirv_xml_registry) --generator-output=$(location generators.inc)",
+    tools = [":generate_registry_tables"],
+)
+
+py_binary(
+    name = "update_build_version",
+    srcs = ["utils/update_build_version.py"],
+)
+
+genrule(
+    name = "build_version_inc",
+    srcs = ["CHANGES"],
+    outs = ["build-version.inc"],
+    cmd = "SOURCE_DATE_EPOCH=0 $(location :update_build_version) $(location CHANGES) $(location build-version.inc)",
+    tools = [":update_build_version"],
+)
+
+cc_library(
+    name = "spirv_tools",
+    hdrs = [
+        "include/spirv-tools/libspirv.h",
+        "include/spirv-tools/libspirv.hpp",
+    ],
+    copts = COMMON_COPTS,
+    includes = ["include"],
+    linkstatic = 1,
+    visibility = ["//visibility:public"],
+    deps = [":spirv_tools_internal"],
+)
+
+cc_library(
+    name = "spirv_tools_internal",
+    srcs = glob(
+        [
+            "source/*.cpp",
+            "source/util/*.cpp",
+            "source/val/*.cpp",
+        ],
+        exclude = ["source/mimalloc.cpp"],
+    ) + [
+        ":build_version_inc",
+        ":gen_compressed_tables",
+        ":gen_extinst_lang_headers_DebugInfo",
+        ":gen_extinst_lang_headers_NonSemanticShaderDebugInfo100",
+        ":gen_extinst_lang_headers_OpenCLDebugInfo100",
+        ":generators_inc",
+    ],
+    hdrs = [
+        "include/spirv-tools/libspirv.h",
+        "include/spirv-tools/libspirv.hpp",
+        ":gen_extinst_lang_headers_DebugInfo",
+        ":gen_extinst_lang_headers_NonSemanticShaderDebugInfo100",
+        ":gen_extinst_lang_headers_OpenCLDebugInfo100",
+    ] + glob([
+        "source/*.h",
+        "source/util/*.h",
+        "source/val/*.h",
+    ]),
+    copts = COMMON_COPTS,
+    includes = ["include"],
+    deps = [
+        "@spirv_headers//:spirv_common_headers",
+        "@spirv_headers//:spirv_cpp11_headers",
+    ],
+)
+
+cc_library(
+    name = "tools_io",
+    srcs = ["tools/io.cpp"],
+    hdrs = ["tools/io.h"],
+    copts = COMMON_COPTS,
+)
+
+cc_library(
+    name = "tools_util",
+    srcs = glob(["tools/util/*.cpp"]),
+    hdrs = glob(["tools/util/*.h"]),
+    copts = COMMON_COPTS,
+    deps = [":spirv_tools"],
+)
+
+cc_binary(
+    name = "spirv-as",
+    srcs = ["tools/as/as.cpp"],
+    copts = COMMON_COPTS,
+    visibility = ["//visibility:public"],
+    deps = [
+        ":spirv_tools_internal",
+        ":tools_io",
+        ":tools_util",
+    ],
+)
+
+cc_binary(
+    name = "spirv-dis",
+    srcs = ["tools/dis/dis.cpp"],
+    copts = COMMON_COPTS,
+    visibility = ["//visibility:public"],
+    deps = [
+        ":spirv_tools",
+        ":tools_io",
+        ":tools_util",
+    ],
+)

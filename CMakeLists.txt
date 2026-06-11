@@ -139,6 +139,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/google_benchmark/goog
 include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/flatcc/flatcc.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/libbacktrace/libbacktrace.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/rocm/headers.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/spirv_tools/spirv_tools.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/vulkan_headers/vulkan_headers.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/catch2/catch2.cmake")
 
@@ -163,6 +164,10 @@ if(IREE_HAL_DRIVER_HIP_RCCL)
 endif()
 if(IREE_HAL_DRIVER_VULKAN)
   iree_configure_vulkan_headers()
+endif()
+if(IREE_BUILD_TESTS AND (IREE_HAL_DRIVER_VULKAN OR
+    (LOOM_BUILD AND LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)))
+  iree_configure_spirv_tools()
 endif()
 if(LIBHRX_BUILD AND LIBHRX_BUILD_CTS)
   iree_configure_catch2()
