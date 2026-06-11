@@ -753,7 +753,7 @@ TEST(AqlBlockProcessorTest,
   EXPECT_EQ(second_block->terminator_opcode,
             IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_RETURN);
 
-  iree_hal_amdgpu_aql_program_release(&program);
+  iree_hal_amdgpu_aql_program_deinitialize(&program);
   iree_arena_block_pool_deinitialize(&block_pool);
 }
 

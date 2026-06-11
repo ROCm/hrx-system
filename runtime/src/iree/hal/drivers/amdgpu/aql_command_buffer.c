@@ -287,7 +287,7 @@ static void iree_hal_amdgpu_aql_command_buffer_reset_resources(
 
 static void iree_hal_amdgpu_aql_command_buffer_discard_recording(
     iree_hal_amdgpu_aql_command_buffer_t* command_buffer) {
-  iree_hal_amdgpu_aql_program_release(&command_buffer->program);
+  iree_hal_amdgpu_aql_program_deinitialize(&command_buffer->program);
   iree_hal_amdgpu_aql_program_builder_deinitialize(&command_buffer->builder);
   iree_hal_amdgpu_aql_program_builder_initialize(
       command_buffer->block_pools.program, &command_buffer->builder);
@@ -850,7 +850,7 @@ static void iree_hal_amdgpu_aql_command_buffer_destroy(
   iree_allocator_t host_allocator = command_buffer->host_allocator;
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  iree_hal_amdgpu_aql_program_release(&command_buffer->program);
+  iree_hal_amdgpu_aql_program_deinitialize(&command_buffer->program);
   iree_hal_amdgpu_aql_program_builder_deinitialize(&command_buffer->builder);
   iree_hal_amdgpu_aql_command_buffer_reset_resources(command_buffer);
   iree_arena_deinitialize(&command_buffer->recording_arena);

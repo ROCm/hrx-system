@@ -81,9 +81,10 @@ iree_hal_amdgpu_aql_program_block_next(
 // Recording Output
 //===----------------------------------------------------------------------===//
 
-void iree_hal_amdgpu_aql_program_release(
+void iree_hal_amdgpu_aql_program_deinitialize(
     iree_hal_amdgpu_aql_program_t* program) {
   if (!program->first_block) {
+    memset(program, 0, sizeof(*program));
     return;
   }
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -134,7 +135,7 @@ void iree_hal_amdgpu_aql_program_builder_deinitialize(
         .block_pool = builder->block_pool,
         .first_block = builder->first_block,
     };
-    iree_hal_amdgpu_aql_program_release(&program);
+    iree_hal_amdgpu_aql_program_deinitialize(&program);
   }
 
   memset(builder, 0, sizeof(*builder));
