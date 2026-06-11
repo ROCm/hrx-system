@@ -114,6 +114,9 @@ static inline iree_status_t iree_hal_hip_event_create(
 }
 
 void iree_hal_hip_event_retain(iree_hal_hip_event_t* event) {
+  if (!event) {
+    return;
+  }
   iree_atomic_ref_count_inc(&event->ref_count);
 }
 
@@ -253,6 +256,9 @@ static void iree_hal_hip_event_pool_free(
 }
 
 void iree_hal_hip_event_pool_retain(iree_hal_hip_event_pool_t* event_pool) {
+  if (!event_pool) {
+    return;
+  }
   iree_atomic_ref_count_inc(&event_pool->ref_count);
 }
 

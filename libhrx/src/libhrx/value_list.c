@@ -31,6 +31,7 @@ hrx_status_t hrx_value_list_create(size_t capacity, hrx_value_list_t* list) {
 }
 
 void hrx_value_list_retain(hrx_value_list_t list) {
+  if (!list) return;
   iree_vm_list_retain(list->vm_list);
   iree_atomic_ref_count_inc(&list->ref_count);
 }

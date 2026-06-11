@@ -57,6 +57,7 @@ hrx_status_t hrx_fence_create_at(hrx_semaphore_t semaphore, uint64_t value,
 }
 
 void hrx_fence_retain(hrx_fence_t fence) {
+  if (!fence) return;
   iree_hal_fence_retain(fence->hal_fence);
   iree_atomic_ref_count_inc(&fence->ref_count);
 }

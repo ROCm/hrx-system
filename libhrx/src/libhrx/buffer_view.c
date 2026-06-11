@@ -71,6 +71,7 @@ hrx_status_t hrx_buffer_view_create(hrx_buffer_t buffer, size_t shape_rank,
 }
 
 void hrx_buffer_view_retain(hrx_buffer_view_t buffer_view) {
+  if (!buffer_view) return;
   iree_hal_buffer_view_retain(buffer_view->hal_buffer_view);
   iree_atomic_ref_count_inc(&buffer_view->ref_count);
 }

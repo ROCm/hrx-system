@@ -209,7 +209,9 @@ void iree_async_region_destroy(iree_async_region_t* region);
 
 // Retains a reference to the region.
 static inline void iree_async_region_retain(iree_async_region_t* region) {
-  iree_atomic_ref_count_inc(&region->ref_count);
+  if (region) {
+    iree_atomic_ref_count_inc(&region->ref_count);
+  }
 }
 
 // Releases a reference to the region. When the last reference is released,

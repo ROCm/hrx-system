@@ -10,6 +10,7 @@ hrx_allocator_t hrx_device_allocator(hrx_device_t device) {
 }
 
 void hrx_allocator_retain(hrx_allocator_t allocator) {
+  if (!allocator) return;
   iree_hal_allocator_retain(allocator->hal_allocator);
   hrx_device_retain(allocator->device);
 }

@@ -76,6 +76,7 @@ hrx_status_t hrx_stream_create(hrx_device_t device, uint32_t flags,
 }
 
 void hrx_stream_retain(hrx_stream_t stream) {
+  if (!stream) return;
   hrx_device_retain(stream->device);
   hrx_semaphore_retain(stream->semaphore);
   iree_atomic_ref_count_inc(&stream->ref_count);

@@ -36,6 +36,9 @@ class RefCountChecksTest(clang_tidy_test.ClangTidyAssertions):
                 "refcounted release function "
                 "iree_clang_tidy_refcount_asserting_release "
                 "must be null-safe",
+                "refcounted retain function "
+                "iree_clang_tidy_refcount_unguarded_retain "
+                "must be null-safe",
                 "iree_atomic_ref_count_dec return value must be checked",
                 "iree_atomic_ref_count_t field ref_count must be the first "
                 "field in a refcounted object",
@@ -79,6 +82,8 @@ class RefCountChecksTest(clang_tidy_test.ClangTidyAssertions):
                 "iree_clang_tidy_refcount_void_retain",
                 "refcounted retain/release function "
                 "iree_clang_tidy_refcount_void_release",
+                "iree_clang_tidy_refcount_inline_null_retain",
+                "iree_clang_tidy_refcount_likely_null_retain",
                 "iree_clang_tidy_refcount_early_null_release",
                 "iree_clang_tidy_refcount_inline_null_release",
                 "iree_clang_tidy_refcount_likely_null_release",

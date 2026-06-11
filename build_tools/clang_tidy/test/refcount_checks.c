@@ -62,6 +62,28 @@ iree_status_t iree_clang_tidy_refcount_status_release(
 
 void iree_clang_tidy_refcount_void_retain(
     iree_clang_tidy_refcounted_t* resource) {
+  if (!resource) {
+    return;
+  }
+  iree_atomic_ref_count_inc(&resource->ref_count);
+}
+
+void iree_clang_tidy_refcount_inline_null_retain(
+    iree_clang_tidy_refcounted_t* resource) {
+  if (resource) {
+    iree_atomic_ref_count_inc(&resource->ref_count);
+  }
+}
+
+void iree_clang_tidy_refcount_likely_null_retain(
+    iree_clang_tidy_refcounted_t* resource) {
+  if (IREE_LIKELY(resource)) {
+    iree_atomic_ref_count_inc(&resource->ref_count);
+  }
+}
+
+void iree_clang_tidy_refcount_unguarded_retain(
+    iree_clang_tidy_refcounted_t* resource) {
   iree_atomic_ref_count_inc(&resource->ref_count);
 }
 

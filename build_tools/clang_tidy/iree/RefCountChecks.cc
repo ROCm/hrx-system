@@ -308,25 +308,26 @@ bool HasIgnoredRefCountDecrement(StringRef NormalizedBody) {
   }
 }
 
-bool RefCountDecrementReferencesParameter(StringRef NormalizedBody,
-                                          StringRef ParameterName) {
-  static constexpr StringRef RefCountDec = "iree_atomic_ref_count_dec";
+bool RefCountMutationReferencesParameter(StringRef NormalizedBody,
+                                         StringRef MutationName,
+                                         StringRef ParameterName) {
   size_t SearchPosition = 0;
   while (true) {
-    size_t DecPosition = NormalizedBody.find(RefCountDec, SearchPosition);
-    if (DecPosition == StringRef::npos) {
+    size_t MutationPosition = NormalizedBody.find(MutationName, SearchPosition);
+    if (MutationPosition == StringRef::npos) {
       return false;
     }
-    size_t StatementEnd = NormalizedBody.find(';', DecPosition);
+    size_t StatementEnd = NormalizedBody.find(';', MutationPosition);
     if (StatementEnd == StringRef::npos) {
       StatementEnd = NormalizedBody.size();
     }
     if (SourceContainsIdentifier(
-            NormalizedBody.substr(DecPosition, StatementEnd - DecPosition),
+            NormalizedBody.substr(MutationPosition,
+                                  StatementEnd - MutationPosition),
             ParameterName)) {
       return true;
     }
-    SearchPosition = DecPosition + RefCountDec.size();
+    SearchPosition = MutationPosition + MutationName.size();
   }
 }
 
@@ -386,6 +387,47 @@ bool HasArgumentAssert(StringRef NormalizedBody, StringRef ParameterName) {
   return false;
 }
 
+bool IsInsideOpenBlock(StringRef NormalizedBody, size_t BlockPosition,
+                       size_t TargetPosition) {
+  int Depth = 0;
+  for (size_t I = BlockPosition; I < TargetPosition; ++I) {
+    if (NormalizedBody[I] == '{') {
+      ++Depth;
+    } else if (NormalizedBody[I] == '}') {
+      --Depth;
+    }
+  }
+  return Depth > 0;
+}
+
+bool HasGuardedRefCountIncrement(StringRef NormalizedBody,
+                                 StringRef ParameterName) {
+  static constexpr StringRef RefCountInc = "iree_atomic_ref_count_inc";
+  size_t SearchPosition = 0;
+  while (true) {
+    size_t IncPosition = NormalizedBody.find(RefCountInc, SearchPosition);
+    if (IncPosition == StringRef::npos) {
+      return false;
+    }
+    StringRef Prefix = NormalizedBody.substr(0, IncPosition);
+    size_t IfPosition = Prefix.rfind("if(");
+    if (IfPosition != StringRef::npos) {
+      size_t BlockPosition = NormalizedBody.find('{', IfPosition);
+      bool IncrementIsInsideThenBlock =
+          BlockPosition != StringRef::npos && BlockPosition < IncPosition &&
+          IsInsideOpenBlock(NormalizedBody, BlockPosition, IncPosition);
+      if (IncrementIsInsideThenBlock) {
+        StringRef Condition = NormalizedBody.substr(
+            IfPosition + 3, BlockPosition - IfPosition - 3);
+        if (SourceContainsIdentifier(Condition, ParameterName)) {
+          return true;
+        }
+      }
+    }
+    SearchPosition = IncPosition + RefCountInc.size();
+  }
+}
+
 bool IsRefCountReleaseNullSafe(const FunctionDecl* Function,
                                StringRef NormalizedBody) {
   if (Function->getNumParams() != 1) {
@@ -397,7 +439,8 @@ bool IsRefCountReleaseNullSafe(const FunctionDecl* Function,
   }
   StringRef ParameterName = Parameter->getName();
   if (ParameterName.empty() ||
-      !RefCountDecrementReferencesParameter(NormalizedBody, ParameterName)) {
+      !RefCountMutationReferencesParameter(
+          NormalizedBody, "iree_atomic_ref_count_dec", ParameterName)) {
     return true;
   }
   if (HasArgumentAssert(NormalizedBody, ParameterName)) {
@@ -405,6 +448,28 @@ bool IsRefCountReleaseNullSafe(const FunctionDecl* Function,
   }
   return HasEarlyNullReturn(NormalizedBody, ParameterName) ||
          HasGuardedRefCountDecrement(NormalizedBody, ParameterName);
+}
+
+bool IsRefCountRetainNullSafe(const FunctionDecl* Function,
+                              StringRef NormalizedBody) {
+  if (Function->getNumParams() != 1) {
+    return true;
+  }
+  const ParmVarDecl* Parameter = Function->getParamDecl(0);
+  if (!Parameter->getType()->isAnyPointerType()) {
+    return true;
+  }
+  StringRef ParameterName = Parameter->getName();
+  if (ParameterName.empty() ||
+      !RefCountMutationReferencesParameter(
+          NormalizedBody, "iree_atomic_ref_count_inc", ParameterName)) {
+    return true;
+  }
+  if (HasArgumentAssert(NormalizedBody, ParameterName)) {
+    return false;
+  }
+  return HasEarlyNullReturn(NormalizedBody, ParameterName) ||
+         HasGuardedRefCountIncrement(NormalizedBody, ParameterName);
 }
 
 const Expr* IgnoreExprNoise(const Expr* Expression) {
@@ -868,6 +933,14 @@ void RefCountLifecycleCheck::check(
       !IsRefCountReleaseNullSafe(Function, NormalizedBody)) {
     diag(SourceManager.getExpansionLoc(Function->getLocation()),
          "refcounted release function %0 must be null-safe")
+        << FunctionName;
+    return;
+  }
+  if (Function->getReturnType()->isVoidType() &&
+      FunctionName.ends_with("_retain") &&
+      !IsRefCountRetainNullSafe(Function, NormalizedBody)) {
+    diag(SourceManager.getExpansionLoc(Function->getLocation()),
+         "refcounted retain function %0 must be null-safe")
         << FunctionName;
     return;
   }

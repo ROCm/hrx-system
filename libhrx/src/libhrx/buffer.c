@@ -112,6 +112,7 @@ hrx_status_t hrx_buffer_allocate(hrx_stream_t stream, size_t size,
 }
 
 void hrx_buffer_retain(hrx_buffer_t buffer) {
+  if (!buffer) return;
   iree_hal_buffer_retain(buffer->hal_buffer);
   iree_hal_pool_retain(buffer->hal_pool);
   hrx_device_retain(buffer->device);

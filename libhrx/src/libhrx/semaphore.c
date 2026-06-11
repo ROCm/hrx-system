@@ -36,6 +36,7 @@ hrx_status_t hrx_semaphore_create(hrx_device_t device, uint64_t initial_value,
 }
 
 void hrx_semaphore_retain(hrx_semaphore_t semaphore) {
+  if (!semaphore) return;
   iree_hal_semaphore_retain(semaphore->hal_semaphore);
   hrx_device_retain(semaphore->device);
   iree_atomic_ref_count_inc(&semaphore->ref_count);

@@ -106,6 +106,7 @@ hrx_status_t hrx_module_load_vmfb(hrx_device_t device, const void* vmfb_data,
 }
 
 void hrx_module_retain(hrx_module_t module) {
+  if (!module) return;
   iree_vm_context_retain(module->context);
   iree_vm_module_retain(module->hal_module);
   iree_vm_module_retain(module->bytecode_module);
@@ -161,6 +162,7 @@ hrx_status_t hrx_module_lookup_function(hrx_module_t module, const char* name,
 }
 
 void hrx_function_retain(hrx_function_t function) {
+  if (!function) return;
   hrx_module_retain(function->module);
   iree_atomic_ref_count_inc(&function->ref_count);
 }
