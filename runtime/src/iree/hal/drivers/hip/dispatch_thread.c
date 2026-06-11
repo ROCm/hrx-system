@@ -85,7 +85,7 @@ static int iree_hal_hip_dispatch_thread_main(void* param) {
   return 0;
 }
 
-iree_status_t iree_hal_hip_dispatch_thread_initialize(
+iree_status_t iree_hal_hip_dispatch_thread_allocate(
     iree_allocator_t host_allocator,
     iree_hal_hip_dispatch_thread_t** out_thread) {
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -121,8 +121,7 @@ iree_status_t iree_hal_hip_dispatch_thread_initialize(
   return status;
 }
 
-void iree_hal_hip_dispatch_thread_deinitialize(
-    iree_hal_hip_dispatch_thread_t* thread) {
+void iree_hal_hip_dispatch_thread_free(iree_hal_hip_dispatch_thread_t* thread) {
   if (!thread) {
     return;
   }

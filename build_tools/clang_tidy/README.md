@@ -217,6 +217,20 @@ void iree_hal_buffer_retain(iree_hal_buffer_t* buffer);
 void iree_hal_buffer_release(iree_hal_buffer_t* buffer);
 ```
 
+Factories that publish refcounted objects through `out_*` pointer-to-pointer
+parameters use create naming, even when the implementation allocates heap
+storage internally:
+
+```c
+iree_status_t iree_hal_buffer_view_create(
+    iree_hal_buffer_t* buffer,
+    iree_hal_buffer_view_t** out_buffer_view);
+```
+
+`allocate/free` naming is reserved for storage-oriented resources that are not
+themselves refcounted objects, and `initialize/deinitialize` naming is reserved
+for caller-owned storage passed as a single pointer.
+
 Retain and release operations that mutate the reference count return `void`.
 Release functions are null-safe so cleanup code can call them unconditionally
 without adding noisy guards:

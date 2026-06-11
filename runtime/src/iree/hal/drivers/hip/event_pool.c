@@ -180,7 +180,7 @@ struct iree_hal_hip_event_pool_t {
 
 static void iree_hal_hip_event_pool_free(iree_hal_hip_event_pool_t* event_pool);
 
-iree_status_t iree_hal_hip_event_pool_allocate(
+iree_status_t iree_hal_hip_event_pool_create(
     const iree_hal_hip_dynamic_symbols_t* symbols,
     iree_host_size_t available_capacity, iree_allocator_t host_allocator,
     hipCtx_t device_context, iree_hal_hip_event_pool_t** out_event_pool) {

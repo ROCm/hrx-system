@@ -46,6 +46,12 @@ class RefCountChecksTest(clang_tidy_test.ClangTidyAssertions):
                 "object lifetime",
                 "iree_atomic_ref_count_t field queued_callbacks must model "
                 "object lifetime",
+                "refcounted object factory "
+                "iree_clang_tidy_refcounted_allocate publishes "
+                "out_resource through allocate naming",
+                "refcounted object factory "
+                "iree_clang_tidy_refcounted_with_base_allocate publishes "
+                "out_resource through allocate naming",
                 "resource is dereferenced after "
                 "iree_clang_tidy_refcount_void_release releases it",
                 "resources is dereferenced after "
@@ -100,6 +106,10 @@ class RefCountChecksTest(clang_tidy_test.ClangTidyAssertions):
                 "retained_merged_resource",
                 "iree_clang_tidy_refcount_local_counter_release",
                 "iree_clang_tidy_refcount_lookup_retain",
+                "iree_clang_tidy_refcounted_create",
+                "iree_clang_tidy_plain_allocate",
+                "iree_clang_tidy_refcounted_output_name_ignored_allocate",
+                "iree_clang_tidy_refcounted_initialize",
                 "iree_clang_tidy_virtual_memory_release",
                 "status_released_resource",
                 "guarded_status_released_resource",

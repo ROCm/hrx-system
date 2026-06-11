@@ -23,6 +23,20 @@ typedef struct iree_clang_tidy_refcounted_t {
   iree_atomic_ref_count_t ref_count;
 } iree_clang_tidy_refcounted_t;
 
+typedef struct iree_clang_tidy_refcounted_base_t {
+  iree_atomic_ref_count_t ref_count;
+  const void* vtable;
+} iree_clang_tidy_refcounted_base_t;
+
+typedef struct iree_clang_tidy_refcounted_with_base_t {
+  iree_clang_tidy_refcounted_base_t resource;
+  int payload;
+} iree_clang_tidy_refcounted_with_base_t;
+
+typedef struct iree_clang_tidy_plain_allocated_t {
+  int payload;
+} iree_clang_tidy_plain_allocated_t;
+
 typedef struct iree_clang_tidy_refcounted_misaligned_t {
   int state;
   iree_atomic_ref_count_t ref_count;
@@ -45,6 +59,42 @@ typedef struct iree_clang_tidy_not_refcount_anchored_t {
 void iree_atomic_ref_count_inc(iree_atomic_ref_count_t* ref_count);
 int iree_atomic_ref_count_dec(iree_atomic_ref_count_t* ref_count);
 iree_status_t iree_ok_status(void);
+
+iree_status_t iree_clang_tidy_refcounted_create(
+    iree_clang_tidy_refcounted_t** out_resource) {
+  (void)out_resource;
+  return iree_ok_status();
+}
+
+iree_status_t iree_clang_tidy_refcounted_allocate(
+    iree_clang_tidy_refcounted_t** out_resource) {
+  (void)out_resource;
+  return iree_ok_status();
+}
+
+iree_status_t iree_clang_tidy_refcounted_with_base_allocate(
+    iree_clang_tidy_refcounted_with_base_t** out_resource) {
+  (void)out_resource;
+  return iree_ok_status();
+}
+
+iree_status_t iree_clang_tidy_plain_allocate(
+    iree_clang_tidy_plain_allocated_t** out_resource) {
+  (void)out_resource;
+  return iree_ok_status();
+}
+
+iree_status_t iree_clang_tidy_refcounted_output_name_ignored_allocate(
+    iree_clang_tidy_refcounted_t** resource) {
+  (void)resource;
+  return iree_ok_status();
+}
+
+iree_status_t iree_clang_tidy_refcounted_initialize(
+    iree_clang_tidy_refcounted_t* out_resource) {
+  (void)out_resource;
+  return iree_ok_status();
+}
 
 iree_status_t iree_clang_tidy_refcount_status_retain(
     iree_clang_tidy_refcounted_t* resource) {

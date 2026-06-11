@@ -404,18 +404,18 @@ static iree_status_t iree_hal_hip_device_initialize_internal(
       host_allocator, &device->device_allocator);
 
   if (iree_status_is_ok(status)) {
-    status = iree_hal_hip_cleanup_thread_initialize(symbols, host_allocator,
-                                                    &device->cleanup_thread);
+    status = iree_hal_hip_cleanup_thread_allocate(symbols, host_allocator,
+                                                  &device->cleanup_thread);
   }
 
   if (iree_status_is_ok(status)) {
-    status = iree_hal_hip_cleanup_thread_initialize(
-        symbols, host_allocator, &device->buffer_free_thread);
+    status = iree_hal_hip_cleanup_thread_allocate(symbols, host_allocator,
+                                                  &device->buffer_free_thread);
   }
 
   if (iree_status_is_ok(status)) {
     for (iree_host_size_t i = 0; i < device->device_count; ++i) {
-      status = iree_hal_hip_dispatch_thread_initialize(
+      status = iree_hal_hip_dispatch_thread_allocate(
           host_allocator, &device->devices[i].dispatch_thread);
       if (!iree_status_is_ok(status)) {
         break;
@@ -583,7 +583,7 @@ iree_status_t iree_hal_hip_device_create(
 
   for (iree_host_size_t i = 0; i < device_count && iree_status_is_ok(status);
        ++i) {
-    status = iree_hal_hip_event_pool_allocate(
+    status = iree_hal_hip_event_pool_create(
         symbols, params->event_pool_capacity, host_allocator,
         device->devices[i].hip_context, &device->devices[i].device_event_pool);
   }
@@ -627,16 +627,15 @@ static void iree_hal_hip_device_destroy(iree_hal_device_t* base_device) {
   const iree_hal_hip_dynamic_symbols_t* symbols = device->hip_symbols;
 
   for (iree_host_size_t i = 0; i < device->device_count; ++i) {
-    iree_hal_hip_dispatch_thread_deinitialize(
-        device->devices[i].dispatch_thread);
+    iree_hal_hip_dispatch_thread_free(device->devices[i].dispatch_thread);
   }
 
   iree_hal_hip_device_clear_topology_info(device);
 
   // Join with the threads and clear them so that subsequent resource
   // cleanup does not get scheduled on these threads.
-  iree_hal_hip_cleanup_thread_deinitialize(device->cleanup_thread);
-  iree_hal_hip_cleanup_thread_deinitialize(device->buffer_free_thread);
+  iree_hal_hip_cleanup_thread_free(device->cleanup_thread);
+  iree_hal_hip_cleanup_thread_free(device->buffer_free_thread);
   device->cleanup_thread = NULL;
   device->buffer_free_thread = NULL;
 

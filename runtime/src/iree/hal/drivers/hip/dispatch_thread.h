@@ -34,14 +34,13 @@ typedef struct iree_hal_hip_event_t iree_hal_hip_event_t;
 typedef iree_status_t (*iree_hal_hip_dispatch_callback_t)(void* user_data,
                                                           iree_status_t status);
 
-// Initializes the dispatch thread for HIP driver.
-iree_status_t iree_hal_hip_dispatch_thread_initialize(
+// Allocates the dispatch thread for HIP driver.
+iree_status_t iree_hal_hip_dispatch_thread_allocate(
     iree_allocator_t host_allocator,
     iree_hal_hip_dispatch_thread_t** out_thread);
 
-// Deinitializes the dispatch thread for HIP driver.
-void iree_hal_hip_dispatch_thread_deinitialize(
-    iree_hal_hip_dispatch_thread_t* thread);
+// Frees the dispatch thread for HIP driver.
+void iree_hal_hip_dispatch_thread_free(iree_hal_hip_dispatch_thread_t* thread);
 
 // Adds a dispatch to the thread, which will be executed
 // in order.

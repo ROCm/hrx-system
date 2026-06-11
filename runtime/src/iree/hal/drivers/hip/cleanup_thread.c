@@ -92,7 +92,7 @@ static int iree_hal_hip_cleanup_thread_main(void* param) {
   return 0;
 }
 
-iree_status_t iree_hal_hip_cleanup_thread_initialize(
+iree_status_t iree_hal_hip_cleanup_thread_allocate(
     const iree_hal_hip_dynamic_symbols_t* symbols,
     iree_allocator_t host_allocator,
     iree_hal_hip_cleanup_thread_t** out_thread) {
@@ -129,8 +129,7 @@ iree_status_t iree_hal_hip_cleanup_thread_initialize(
   return status;
 }
 
-void iree_hal_hip_cleanup_thread_deinitialize(
-    iree_hal_hip_cleanup_thread_t* thread) {
+void iree_hal_hip_cleanup_thread_free(iree_hal_hip_cleanup_thread_t* thread) {
   if (!thread) return;
   IREE_TRACE_ZONE_BEGIN(z0);
 

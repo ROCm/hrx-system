@@ -992,7 +992,7 @@ iree_hal_amdgpu_executable_const_cast(const iree_hal_executable_t* base_value) {
   return (const iree_hal_amdgpu_executable_t*)base_value;
 }
 
-static iree_status_t iree_hal_amdgpu_executable_allocate(
+static iree_status_t iree_hal_amdgpu_executable_create_empty(
     iree_hal_device_t* device, const iree_hal_amdgpu_libhsa_t* libhsa,
     const iree_hal_amdgpu_topology_t* topology,
     const iree_hal_amdgpu_queue_affinity_physical_device_set_t*
@@ -1424,7 +1424,7 @@ static iree_status_t iree_hal_amdgpu_executable_create_from_raw_hsaco(
 
   iree_hal_amdgpu_executable_t* executable = NULL;
   if (iree_status_is_ok(status)) {
-    status = iree_hal_amdgpu_executable_allocate(
+    status = iree_hal_amdgpu_executable_create_empty(
         device, libhsa, topology, physical_devices,
         metadata_counts.export_count, host_allocator, &executable);
   }

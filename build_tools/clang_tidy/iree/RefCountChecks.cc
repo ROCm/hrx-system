@@ -187,6 +187,10 @@ bool IsRefCountLifecycleFunctionName(StringRef FunctionName) {
          FunctionName.ends_with("_release");
 }
 
+bool IsAllocateFunctionName(StringRef FunctionName) {
+  return FunctionName.ends_with("_allocate");
+}
+
 bool IsReleaseFunctionName(StringRef FunctionName) {
   return FunctionName.ends_with("_release");
 }
@@ -250,6 +254,74 @@ bool IsRefCountAnchorField(const FieldDecl* Field,
 bool IsRefCountAnchoredRecord(const RecordDecl* Record,
                               const SourceManager& SourceManager) {
   return IsRefCountAnchorField(FirstField(Record), SourceManager);
+}
+
+const RecordDecl* RecordDefinition(const RecordDecl* Record) {
+  if (!Record) {
+    return nullptr;
+  }
+  return Record->getDefinition() ? Record->getDefinition() : Record;
+}
+
+const RecordDecl* RecordFromType(QualType Type) {
+  Type = Type.getCanonicalType().getUnqualifiedType();
+  const auto* Record = Type->getAs<RecordType>();
+  return RecordDefinition(Record ? Record->getDecl() : nullptr);
+}
+
+bool IsRefCountAnchoredRecordOrBase(
+    const RecordDecl* Record, const SourceManager& SourceManager,
+    llvm::SmallPtrSetImpl<const RecordDecl*>& VisitedRecords) {
+  Record = RecordDefinition(Record);
+  if (!Record || !VisitedRecords.insert(Record).second) {
+    return false;
+  }
+  const FieldDecl* First = FirstField(Record);
+  if (!First) {
+    return false;
+  }
+  if (IsRefCountAnchorField(First, SourceManager)) {
+    return true;
+  }
+  const RecordDecl* BaseRecord = RecordFromType(First->getType());
+  return BaseRecord && IsRefCountAnchoredRecordOrBase(BaseRecord, SourceManager,
+                                                      VisitedRecords);
+}
+
+bool IsRefCountAnchoredRecordOrBase(const RecordDecl* Record,
+                                    const SourceManager& SourceManager) {
+  llvm::SmallPtrSet<const RecordDecl*, 4> VisitedRecords;
+  return IsRefCountAnchoredRecordOrBase(Record, SourceManager, VisitedRecords);
+}
+
+const RecordDecl* OutParameterPointeeRecord(const ParmVarDecl* Parameter) {
+  if (!Parameter || !Parameter->getName().starts_with("out_")) {
+    return nullptr;
+  }
+  QualType Type = Parameter->getType().getCanonicalType().getUnqualifiedType();
+  if (!Type->isPointerType()) {
+    return nullptr;
+  }
+  QualType PointeeType =
+      Type->getPointeeType().getCanonicalType().getUnqualifiedType();
+  if (!PointeeType->isPointerType()) {
+    return nullptr;
+  }
+  return RecordFromType(PointeeType->getPointeeType());
+}
+
+const ParmVarDecl* RefCountedAllocateOutParameter(
+    const FunctionDecl* Function, const SourceManager& SourceManager) {
+  if (!Function || !IsAllocateFunctionName(Function->getName())) {
+    return nullptr;
+  }
+  for (const ParmVarDecl* Parameter : Function->parameters()) {
+    const RecordDecl* Record = OutParameterPointeeRecord(Parameter);
+    if (Record && IsRefCountAnchoredRecordOrBase(Record, SourceManager)) {
+      return Parameter;
+    }
+  }
+  return nullptr;
 }
 
 enum class RefCountFieldDiagnostic {
@@ -935,6 +1007,14 @@ void RefCountLifecycleCheck::check(
   }
   const SourceManager& SourceManager = *Result.SourceManager;
   if (IsExternalMacroBody(Function->getLocation(), SourceManager)) {
+    return;
+  }
+  if (const ParmVarDecl* Parameter =
+          RefCountedAllocateOutParameter(Function, SourceManager)) {
+    diag(SourceManager.getExpansionLoc(Parameter->getLocation()),
+         "refcounted object factory %0 publishes %1 through allocate naming; "
+         "use create/destroy/retain/release naming")
+        << Function->getName() << Parameter->getName();
     return;
   }
   const Stmt* Body = Function->getBody();
