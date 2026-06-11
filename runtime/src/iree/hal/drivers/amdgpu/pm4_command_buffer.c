@@ -3488,11 +3488,7 @@ static void iree_hal_amdgpu_pm4_command_buffer_destroy(
     command_buffer->resident_allocation = NULL;
     memset(&command_buffer->program, 0, sizeof(command_buffer->program));
   } else {
-    iree_status_t release_status =
-        iree_hal_amdgpu_pm4_program_release(&command_buffer->program);
-    IREE_ASSERT(iree_status_is_ok(release_status),
-                "PM4 command-buffer program release failed");
-    iree_status_free(release_status);
+    iree_hal_amdgpu_pm4_program_deinitialize(&command_buffer->program);
   }
   iree_hal_amdgpu_pm4_command_buffer_fixup_reset(command_buffer);
   if (command_buffer->recording_state ==

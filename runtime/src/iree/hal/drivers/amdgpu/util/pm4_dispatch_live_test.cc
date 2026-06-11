@@ -608,7 +608,7 @@ TEST_F(PM4DispatchLiveTest, AqlAndAqlPm4IbLaunchMixedKernels) {
   WaitForCompletionWord(&memory->completion, /*value=*/1);
   EXPECT_EQ(memory->outputs[0], kPm4ValueA);
   EXPECT_EQ(memory->outputs[1], kPm4ValueB + 0x100u);
-  IREE_ASSERT_OK(iree_hal_amdgpu_pm4_program_release(&pm4_program));
+  iree_hal_amdgpu_pm4_program_deinitialize(&pm4_program);
 
   memset(memory, 0, sizeof(*memory));
   pm4_dword_count = 0;
@@ -660,7 +660,7 @@ TEST_F(PM4DispatchLiveTest, AqlAndAqlPm4IbLaunchMixedKernels) {
   WaitForCompletionWord(&memory->completion, /*value=*/2);
   EXPECT_EQ(memory->scratch[0], kPm4BarrierValue);
   EXPECT_EQ(memory->outputs[2], kPm4BarrierValue + kPm4BarrierAdd);
-  IREE_ASSERT_OK(iree_hal_amdgpu_pm4_program_release(&pm4_program));
+  iree_hal_amdgpu_pm4_program_deinitialize(&pm4_program);
 
   memset(memory, 0, sizeof(*memory));
   memory->store_kernargs[2] = {.target = &memory->outputs[3],
@@ -760,13 +760,12 @@ TEST_F(PM4DispatchLiveTest, AqlAndAqlPm4IbLaunchMixedKernels) {
   WaitForCompletionWord(&memory->completion, /*value=*/3);
   EXPECT_EQ(memory->outputs[2], kPm4PatchValue + 0x100u);
   EXPECT_EQ(memory->outputs[3], 0u);
-  IREE_ASSERT_OK(iree_hal_amdgpu_pm4_program_release(&pm4_program));
-  IREE_ASSERT_OK(iree_hal_amdgpu_pm4_program_release(&target_pm4_program));
+  iree_hal_amdgpu_pm4_program_deinitialize(&pm4_program);
+  iree_hal_amdgpu_pm4_program_deinitialize(&target_pm4_program);
   EXPECT_EQ(queue_error.callback_count.load(std::memory_order_relaxed), 0u);
   EXPECT_EQ(queue_error.status.load(std::memory_order_relaxed),
             static_cast<uint32_t>(HSA_STATUS_SUCCESS));
 
-  IREE_ASSERT_OK(iree_hal_amdgpu_pm4_program_release(&pm4_program));
   IREE_ASSERT_OK(
       iree_hsa_signal_destroy(IREE_LIBHSA(&libhsa), completion_signal));
   IREE_ASSERT_OK(iree_hsa_queue_destroy(IREE_LIBHSA(&libhsa), queue));
