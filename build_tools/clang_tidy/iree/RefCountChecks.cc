@@ -736,7 +736,14 @@ class ReleaseFlowAnalyzer final
         }
       } else if (std::optional<DirectRefCountOperation> Retain =
                      DirectRetainStatement(Child)) {
-        if (!Released.contains(Retain->Variable)) {
+        auto It = Released.find(Retain->Variable);
+        if (It != Released.end() &&
+            !IsExternalMacroBody(Retain->Location, SourceManager)) {
+          Check.diag(SourceManager.getExpansionLoc(Retain->Location),
+                     "%0 is retained by %1 after %2 already released it")
+              << Retain->Variable->getName() << Retain->Function->getName()
+              << It->second.Function->getName();
+        } else {
           unsigned& ReferenceCount = ReferenceCounts[Retain->Variable];
           if (ReferenceCount == 0) {
             ReferenceCount = 1;

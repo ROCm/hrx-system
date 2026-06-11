@@ -50,6 +50,9 @@ class RefCountChecksTest(clang_tidy_test.ClangTidyAssertions):
                 "resource is released by "
                 "iree_clang_tidy_refcount_void_release after "
                 "iree_clang_tidy_refcount_void_release already released it",
+                "retained_resource is retained by "
+                "iree_clang_tidy_refcount_void_retain after "
+                "iree_clang_tidy_refcount_void_release already released it",
                 "resource is used after "
                 "iree_clang_tidy_refcount_void_release releases it",
                 "cast_resource is used after "
@@ -72,6 +75,7 @@ class RefCountChecksTest(clang_tidy_test.ClangTidyAssertions):
         self.assertContainsNone(
             output,
             [
+                "refcounted retain/release function "
                 "iree_clang_tidy_refcount_void_retain",
                 "refcounted retain/release function "
                 "iree_clang_tidy_refcount_void_release",

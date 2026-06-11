@@ -142,6 +142,12 @@ void iree_clang_tidy_refcount_release_then_release(
   iree_clang_tidy_refcount_void_release(resource);
 }
 
+void iree_clang_tidy_refcount_release_then_retain(
+    iree_clang_tidy_refcounted_t* retained_resource) {
+  iree_clang_tidy_refcount_void_release(retained_resource);
+  iree_clang_tidy_refcount_void_retain(retained_resource);
+}
+
 void iree_clang_tidy_refcount_release_then_call(
     iree_clang_tidy_refcounted_t* resource) {
   iree_clang_tidy_refcount_void_release(resource);
