@@ -538,6 +538,9 @@ class PresubmitTest(unittest.TestCase):
         plugin_test_command = run_command.call_args_list[0].args[0]
         self.assertIn("//build_tools/clang_tidy:plugin_smoke_test", plugin_test_command)
         self.assertIn(
+            "//build_tools/clang_tidy:refcount_checks_test", plugin_test_command
+        )
+        self.assertIn(
             "//build_tools/clang_tidy:status_checks_test", plugin_test_command
         )
         self.assertIn("//build_tools/clang_tidy:style_checks_test", plugin_test_command)

@@ -48,6 +48,16 @@ class RefCountChecksTest(clang_tidy_test.ClangTidyAssertions):
                 "resource is released by "
                 "iree_clang_tidy_refcount_void_release after "
                 "iree_clang_tidy_refcount_void_release already released it",
+                "resource is used after "
+                "iree_clang_tidy_refcount_void_release releases it",
+                "cast_resource is used after "
+                "iree_clang_tidy_refcount_void_release releases it",
+                "assigned_resource is used after "
+                "iree_clang_tidy_refcount_void_release releases it",
+                "aliased_resource is used after "
+                "iree_clang_tidy_refcount_void_release releases it",
+                "returned_resource is used after "
+                "iree_clang_tidy_refcount_void_release releases it",
                 "[iree-refcount-lifecycle]",
             ],
         )
@@ -67,6 +77,7 @@ class RefCountChecksTest(clang_tidy_test.ClangTidyAssertions):
                 "iree_clang_tidy_refcount_local_counter_release",
                 "iree_clang_tidy_refcount_lookup_retain",
                 "iree_clang_tidy_virtual_memory_release",
+                "status_released_resource",
                 "side_counter",
             ],
         )

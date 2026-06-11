@@ -395,7 +395,7 @@ bool IsRefCountReleaseNullSafe(const FunctionDecl* Function,
 }
 
 const Expr* IgnoreExprNoise(const Expr* Expression) {
-  return Expression ? Expression->IgnoreParenImpCasts() : nullptr;
+  return Expression ? Expression->IgnoreParenCasts() : nullptr;
 }
 
 const VarDecl* ReferencedVariable(const Expr* Expression) {
@@ -442,7 +442,8 @@ std::optional<DirectRefCountOperation> DirectRefCountOperationStatement(
     return std::nullopt;
   }
   const FunctionDecl* Callee = Call->getDirectCallee();
-  if (!Callee || !FunctionNamePredicate(Callee->getName())) {
+  if (!Callee || !Callee->getReturnType()->isVoidType() ||
+      !FunctionNamePredicate(Callee->getName())) {
     return std::nullopt;
   }
   const VarDecl* Variable = ReferencedVariable(Call->getArg(0));
@@ -524,6 +525,52 @@ class ReleasedUseVisitor final
     VisitChildren(Expression);
   }
 
+  void VisitBinaryOperator(const BinaryOperator* Expression) {
+    if (Expression->isAssignmentOp()) {
+      if (const VarDecl* Variable = ReferencedVariable(Expression->getRHS())) {
+        DiagnoseUse(Variable, Expression->getRHS()->getBeginLoc());
+      }
+    }
+    VisitChildren(Expression);
+  }
+
+  void VisitCallExpr(const CallExpr* Expression) {
+    const FunctionDecl* Callee = Expression->getDirectCallee();
+    if (Callee && (IsReleaseFunctionName(Callee->getName()) ||
+                   IsRetainFunctionName(Callee->getName()))) {
+      VisitChildren(Expression);
+      return;
+    }
+    for (const Expr* Argument : Expression->arguments()) {
+      if (const VarDecl* Variable = ReferencedVariable(Argument)) {
+        DiagnoseUse(Variable, Argument->getBeginLoc());
+      }
+    }
+    VisitChildren(Expression);
+  }
+
+  void VisitDeclStmt(const DeclStmt* Statement) {
+    for (const Decl* Declaration : Statement->decls()) {
+      const auto* Variable = dyn_cast<VarDecl>(Declaration);
+      if (!Variable || !Variable->hasInit()) {
+        continue;
+      }
+      if (const VarDecl* Referenced = ReferencedVariable(Variable->getInit())) {
+        DiagnoseUse(Referenced, Variable->getInit()->getBeginLoc());
+      }
+    }
+    VisitChildren(Statement);
+  }
+
+  void VisitReturnStmt(const ReturnStmt* Statement) {
+    if (const Expr* ReturnValue = Statement->getRetValue()) {
+      if (const VarDecl* Variable = ReferencedVariable(ReturnValue)) {
+        DiagnoseUse(Variable, ReturnValue->getBeginLoc());
+      }
+    }
+    VisitChildren(Statement);
+  }
+
  private:
   void VisitChildren(const Stmt* Statement) {
     for (const Stmt* Child : Statement->children()) {
@@ -544,6 +591,20 @@ class ReleasedUseVisitor final
     Diagnosed.insert(Variable);
     Check.diag(SourceManager.getExpansionLoc(Location),
                "%0 is dereferenced after %1 releases it")
+        << Variable->getName() << It->second.Function->getName();
+  }
+
+  void DiagnoseUse(const VarDecl* Variable, SourceLocation Location) {
+    auto It = Released.find(Variable);
+    if (It == Released.end() || Diagnosed.contains(Variable)) {
+      return;
+    }
+    if (IsExternalMacroBody(Location, SourceManager)) {
+      return;
+    }
+    Diagnosed.insert(Variable);
+    Check.diag(SourceManager.getExpansionLoc(Location),
+               "%0 is used after %1 releases it")
         << Variable->getName() << It->second.Function->getName();
   }
 

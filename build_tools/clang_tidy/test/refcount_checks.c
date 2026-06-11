@@ -69,6 +69,10 @@ void iree_clang_tidy_refcount_void_release(
   }
 }
 
+void iree_clang_tidy_refcount_observe(iree_clang_tidy_refcounted_t* resource) {
+  (void)resource;
+}
+
 void iree_clang_tidy_refcount_unguarded_release(
     iree_clang_tidy_refcounted_t* resource) {
   if (iree_atomic_ref_count_dec(&resource->ref_count) == 1) {
@@ -133,6 +137,39 @@ void iree_clang_tidy_refcount_release_then_release(
   iree_clang_tidy_refcount_void_release(resource);
 }
 
+void iree_clang_tidy_refcount_release_then_call(
+    iree_clang_tidy_refcounted_t* resource) {
+  iree_clang_tidy_refcount_void_release(resource);
+  iree_clang_tidy_refcount_observe(resource);
+}
+
+void iree_clang_tidy_refcount_release_then_cast_call(
+    iree_clang_tidy_refcounted_t* cast_resource) {
+  iree_clang_tidy_refcount_void_release(cast_resource);
+  iree_clang_tidy_refcount_observe(
+      (iree_clang_tidy_refcounted_t*)cast_resource);
+}
+
+void iree_clang_tidy_refcount_release_then_assign(
+    iree_clang_tidy_refcounted_t* assigned_resource,
+    iree_clang_tidy_refcounted_t** out_resource) {
+  iree_clang_tidy_refcount_void_release(assigned_resource);
+  *out_resource = assigned_resource;
+}
+
+void iree_clang_tidy_refcount_release_then_alias(
+    iree_clang_tidy_refcounted_t* aliased_resource) {
+  iree_clang_tidy_refcount_void_release(aliased_resource);
+  iree_clang_tidy_refcounted_t* alias = aliased_resource;
+  (void)alias;
+}
+
+iree_clang_tidy_refcounted_t* iree_clang_tidy_refcount_release_then_return(
+    iree_clang_tidy_refcounted_t* returned_resource) {
+  iree_clang_tidy_refcount_void_release(returned_resource);
+  return returned_resource;
+}
+
 void iree_clang_tidy_refcount_retain_then_double_release(
     iree_clang_tidy_refcounted_t* resource) {
   iree_clang_tidy_refcount_void_retain(resource);
@@ -186,4 +223,10 @@ iree_status_t iree_clang_tidy_refcount_lookup_retain(
 iree_status_t iree_clang_tidy_virtual_memory_release(void* memory) {
   (void)memory;
   return iree_ok_status();
+}
+
+void iree_clang_tidy_refcount_status_release_then_use(
+    iree_clang_tidy_refcounted_t* status_released_resource) {
+  (void)iree_clang_tidy_virtual_memory_release(status_released_resource);
+  iree_clang_tidy_refcount_observe(status_released_resource);
 }

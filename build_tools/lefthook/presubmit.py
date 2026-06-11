@@ -2012,6 +2012,7 @@ def run_clang_tidy(
                     "--config=presubmit",
                     CLANG_TIDY_REPO_ENV,
                     "//build_tools/clang_tidy:plugin_smoke_test",
+                    "//build_tools/clang_tidy:refcount_checks_test",
                     "//build_tools/clang_tidy:status_checks_test",
                     "//build_tools/clang_tidy:style_checks_test",
                     "//build_tools/clang_tidy:trace_checks_test",
