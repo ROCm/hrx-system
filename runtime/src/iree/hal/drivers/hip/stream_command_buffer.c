@@ -493,7 +493,6 @@ static iree_status_t iree_hal_hip_stream_command_buffer_dispatch(
     iree_hal_buffer_ref_list_t bindings, iree_hal_dispatch_flags_t flags) {
   iree_hal_hip_stream_command_buffer_t* command_buffer =
       iree_hal_hip_stream_command_buffer_cast(base_command_buffer);
-  IREE_TRACE_ZONE_BEGIN(z0);
 
   // TODO: we can support CUSTOM_DIRECT_ARGUMENTS quite easily here.
   // Static indirect arguments and parameters are also easy (as we can
@@ -509,6 +508,8 @@ static iree_status_t iree_hal_hip_stream_command_buffer_dispatch(
         IREE_STATUS_UNIMPLEMENTED,
         "indirect parameters are not supported in CUDA streams");
   }
+
+  IREE_TRACE_ZONE_BEGIN(z0);
 
   // If any of the workgroup counts are zero, we can skip execution
   // of the kernel. This prevents a 'hipErrorInvalidConfiguration' error when

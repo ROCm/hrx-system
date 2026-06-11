@@ -325,8 +325,9 @@ iree_status_t iree_hal_hip_native_executable_create(
             flatbuffers_string_len(
                 iree_hal_hip_ExportDef_kernel_name_get(export_def)),
             &total_export_name_length))) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "export name storage size overflow");
+      IREE_RETURN_AND_END_ZONE_IF_ERROR(
+          z0, iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                               "export name storage size overflow"));
     }
     IREE_TRACE({
       total_export_info_length += iree_hal_debug_calculate_export_info_size(
@@ -359,13 +360,15 @@ iree_status_t iree_hal_hip_native_executable_create(
           !iree_host_size_checked_add(native_executable_device_info_size,
                                       total_export_info_length,
                                       &native_executable_device_info_size))) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "executable storage size overflow");
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                             "executable storage size overflow"));
   }
   if (IREE_UNLIKELY(native_executable_device_info_size >
                     IREE_HOST_SIZE_MAX - iree_max_align_t)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "executable storage size overflow");
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                             "executable storage size overflow"));
   }
   native_executable_device_info_size =
       iree_host_align(native_executable_device_info_size, iree_max_align_t);
@@ -383,8 +386,9 @@ iree_status_t iree_hal_hip_native_executable_create(
                                       &total_size) ||
           !iree_host_size_checked_add(
               total_size, native_executable_device_infos_size, &total_size))) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "executable storage size overflow");
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                             "executable storage size overflow"));
   }
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0,

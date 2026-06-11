@@ -1496,28 +1496,9 @@ static iree_status_t iree_hal_hip_device_stream_wait_for_semaphores(
        i < wait_semaphore_list.count && iree_status_is_ok(status); ++i) {
     IREE_TRACE_ZONE_BEGIN_NAMED(
         z1, "iree_hal_hip_device_stream_wait_for_semaphores_get_hip_event");
-    iree_hal_hip_event_t* event = NULL;
     status = iree_hal_hip_semaphore_wait_hip_events(
         wait_semaphore_list.semaphores[i],
         wait_semaphore_list.payload_values[i], stream);
-    if (!iree_status_is_ok(status)) {
-      IREE_TRACE_ZONE_END(z1);
-      break;
-    }
-    // If we don't have an event, then we don't have to wait for it since it
-    // has already been signaled on the host.
-    if (!event) {
-      IREE_TRACE_ZONE_END(z1);
-      continue;
-    }
-
-    IREE_TRACE_ZONE_BEGIN_NAMED(
-        z3, "iree_hal_hip_device_stream_wait_for_semaphores_wait_hip_event");
-    status = IREE_HIP_CALL_TO_STATUS(
-        device->hip_symbols,
-        hipStreamWaitEvent(stream, iree_hal_hip_event_handle(event), 0));
-    iree_hal_hip_event_release(event);
-    IREE_TRACE_ZONE_END(z3);
     IREE_TRACE_ZONE_END(z1);
   }
 
