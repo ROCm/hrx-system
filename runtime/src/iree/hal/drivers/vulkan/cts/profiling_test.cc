@@ -204,7 +204,8 @@ TEST_P(VulkanProfilingTest, ExecutableMetadataRecordsDirectDispatchFunctions) {
   Ref<iree_hal_executable_t> executable;
   IREE_ASSERT_OK(CreateScaleAndOffsetExecutable(executable_cache, executable));
   if (!executable) {
-    GTEST_SKIP() << "descriptor executable format is disabled on this device";
+    GTEST_SKIP()
+        << "Vulkan SPIR-V executable format is disabled on this device";
   }
 
   Ref<iree_hal_buffer_t> input_buffer;

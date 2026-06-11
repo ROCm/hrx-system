@@ -57,14 +57,6 @@ iree_runtime_flatbuffer_c_library(
 )
 
 iree_runtime_flatbuffer_c_library(
-    name = "vulkan_executable_def_c_fbs",
-    srcs = ["vulkan_executable_def.fbs"],
-    flatcc_args = FLATCC_ARGS,
-    flatcc_includes = ["executable_debug_info.fbs"],
-    deps = [":executable_debug_info_c_fbs"],
-)
-
-iree_runtime_flatbuffer_c_library(
     name = "webgpu_executable_def_c_fbs",
     srcs = ["webgpu_executable_def.fbs"],
     flatcc_args = FLATCC_ARGS,

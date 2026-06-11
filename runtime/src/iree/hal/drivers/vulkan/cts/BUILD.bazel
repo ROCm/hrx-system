@@ -29,9 +29,9 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
-    name = "bda_backends",
+    name = "replay_cache_backends",
     testonly = True,
-    srcs = ["bda_backends.cc"],
+    srcs = ["replay_cache_backends.cc"],
     deps = [
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:registry",
@@ -56,18 +56,8 @@ iree_runtime_cc_library(
 iree_hal_cts_testdata(
     backend_name = "vulkan",
     format_name = "vulkan_spirv",
-    format_string = '"vulkan-spirv-fb"',
+    format_string = '"vulkan-spirv-bda"',
     identifier = "iree_cts_testdata_vulkan_spirv",
-    target_device = "vulkan",
-    testdata = "//runtime/src/iree/hal/cts/testdata:executable_srcs",
-)
-
-iree_hal_cts_testdata(
-    backend_name = "vulkan_bda",
-    flags = ["--iree-vulkan-dispatch-abi=bda"],
-    format_name = "vulkan_spirv_bda",
-    format_string = '"vulkan-spirv-bda-v1"',
-    identifier = "iree_cts_testdata_vulkan_spirv_bda",
     target_device = "vulkan",
     testdata = "//runtime/src/iree/hal/cts/testdata:executable_srcs",
 )
@@ -254,45 +244,11 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
-    name = "bda_command_buffer_dispatch_tests",
-    srcs = ["//runtime/src/iree/hal/cts/util:test_main.cc"],
-    tags = [
-        "vulkan_uses_vk_khr_buffer_device_address",
-    ],
-    deps = [
-        ":bda_backends",
-        ":testdata_vulkan_spirv_bda_lib",
-        "//runtime/src/iree/base/tooling:flags",
-        "//runtime/src/iree/hal/cts/command_buffer:dispatch_test",
-        "//runtime/src/iree/hal/cts/util:registry",
-        "//runtime/src/iree/hal/cts/util:test_base",
-        "//runtime/src/iree/testing:gtest",
-    ],
-)
-
-iree_runtime_cc_test(
     name = "command_buffer_dispatch_pipeline_tests",
     srcs = ["//runtime/src/iree/hal/cts/util:test_main.cc"],
     deps = [
         ":backends",
         ":testdata_vulkan_spirv_lib",
-        "//runtime/src/iree/base/tooling:flags",
-        "//runtime/src/iree/hal/cts/command_buffer:dispatch_pipeline_test",
-        "//runtime/src/iree/hal/cts/util:registry",
-        "//runtime/src/iree/hal/cts/util:test_base",
-        "//runtime/src/iree/testing:gtest",
-    ],
-)
-
-iree_runtime_cc_test(
-    name = "bda_command_buffer_dispatch_pipeline_tests",
-    srcs = ["//runtime/src/iree/hal/cts/util:test_main.cc"],
-    tags = [
-        "vulkan_uses_vk_khr_buffer_device_address",
-    ],
-    deps = [
-        ":bda_backends",
-        ":testdata_vulkan_spirv_bda_lib",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal/cts/command_buffer:dispatch_pipeline_test",
         "//runtime/src/iree/hal/cts/util:registry",
@@ -316,45 +272,11 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
-    name = "bda_command_buffer_dispatch_reuse_tests",
-    srcs = ["//runtime/src/iree/hal/cts/util:test_main.cc"],
-    tags = [
-        "vulkan_uses_vk_khr_buffer_device_address",
-    ],
-    deps = [
-        ":bda_backends",
-        ":testdata_vulkan_spirv_bda_lib",
-        "//runtime/src/iree/base/tooling:flags",
-        "//runtime/src/iree/hal/cts/command_buffer:dispatch_reuse_test",
-        "//runtime/src/iree/hal/cts/util:registry",
-        "//runtime/src/iree/hal/cts/util:test_base",
-        "//runtime/src/iree/testing:gtest",
-    ],
-)
-
-iree_runtime_cc_test(
     name = "command_buffer_dispatch_constants_bindings_tests",
     srcs = ["//runtime/src/iree/hal/cts/util:test_main.cc"],
     deps = [
         ":backends",
         ":testdata_vulkan_spirv_lib",
-        "//runtime/src/iree/base/tooling:flags",
-        "//runtime/src/iree/hal/cts/command_buffer:dispatch_constants_bindings_test",
-        "//runtime/src/iree/hal/cts/util:registry",
-        "//runtime/src/iree/hal/cts/util:test_base",
-        "//runtime/src/iree/testing:gtest",
-    ],
-)
-
-iree_runtime_cc_test(
-    name = "bda_command_buffer_dispatch_constants_bindings_tests",
-    srcs = ["//runtime/src/iree/hal/cts/util:test_main.cc"],
-    tags = [
-        "vulkan_uses_vk_khr_buffer_device_address",
-    ],
-    deps = [
-        ":bda_backends",
-        ":testdata_vulkan_spirv_bda_lib",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal/cts/command_buffer:dispatch_constants_bindings_test",
         "//runtime/src/iree/hal/cts/util:registry",
@@ -378,45 +300,11 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
-    name = "bda_command_buffer_dispatch_constants_tests",
-    srcs = ["//runtime/src/iree/hal/cts/util:test_main.cc"],
-    tags = [
-        "vulkan_uses_vk_khr_buffer_device_address",
-    ],
-    deps = [
-        ":bda_backends",
-        ":testdata_vulkan_spirv_bda_lib",
-        "//runtime/src/iree/base/tooling:flags",
-        "//runtime/src/iree/hal/cts/command_buffer:dispatch_constants_test",
-        "//runtime/src/iree/hal/cts/util:registry",
-        "//runtime/src/iree/hal/cts/util:test_base",
-        "//runtime/src/iree/testing:gtest",
-    ],
-)
-
-iree_runtime_cc_test(
     name = "command_buffer_dispatch_indirect_parameters_tests",
     srcs = ["//runtime/src/iree/hal/cts/util:test_main.cc"],
     deps = [
         ":backends",
         ":testdata_vulkan_spirv_lib",
-        "//runtime/src/iree/base/tooling:flags",
-        "//runtime/src/iree/hal/cts/command_buffer:dispatch_indirect_parameters_test",
-        "//runtime/src/iree/hal/cts/util:registry",
-        "//runtime/src/iree/hal/cts/util:test_base",
-        "//runtime/src/iree/testing:gtest",
-    ],
-)
-
-iree_runtime_cc_test(
-    name = "bda_command_buffer_dispatch_indirect_parameters_tests",
-    srcs = ["//runtime/src/iree/hal/cts/util:test_main.cc"],
-    tags = [
-        "vulkan_uses_vk_khr_buffer_device_address",
-    ],
-    deps = [
-        ":bda_backends",
-        ":testdata_vulkan_spirv_bda_lib",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal/cts/command_buffer:dispatch_indirect_parameters_test",
         "//runtime/src/iree/hal/cts/util:registry",
@@ -440,45 +328,11 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
-    name = "bda_command_buffer_dispatch_multi_entrypoint_tests",
-    srcs = ["//runtime/src/iree/hal/cts/util:test_main.cc"],
-    tags = [
-        "vulkan_uses_vk_khr_buffer_device_address",
-    ],
-    deps = [
-        ":bda_backends",
-        ":testdata_vulkan_spirv_bda_lib",
-        "//runtime/src/iree/base/tooling:flags",
-        "//runtime/src/iree/hal/cts/command_buffer:dispatch_multi_entrypoint_test",
-        "//runtime/src/iree/hal/cts/util:registry",
-        "//runtime/src/iree/hal/cts/util:test_base",
-        "//runtime/src/iree/testing:gtest",
-    ],
-)
-
-iree_runtime_cc_test(
     name = "command_buffer_dispatch_multi_workgroup_tests",
     srcs = ["//runtime/src/iree/hal/cts/util:test_main.cc"],
     deps = [
         ":backends",
         ":testdata_vulkan_spirv_lib",
-        "//runtime/src/iree/base/tooling:flags",
-        "//runtime/src/iree/hal/cts/command_buffer:dispatch_multi_workgroup_test",
-        "//runtime/src/iree/hal/cts/util:registry",
-        "//runtime/src/iree/hal/cts/util:test_base",
-        "//runtime/src/iree/testing:gtest",
-    ],
-)
-
-iree_runtime_cc_test(
-    name = "bda_command_buffer_dispatch_multi_workgroup_tests",
-    srcs = ["//runtime/src/iree/hal/cts/util:test_main.cc"],
-    tags = [
-        "vulkan_uses_vk_khr_buffer_device_address",
-    ],
-    deps = [
-        ":bda_backends",
-        ":testdata_vulkan_spirv_bda_lib",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal/cts/command_buffer:dispatch_multi_workgroup_test",
         "//runtime/src/iree/hal/cts/util:registry",
@@ -515,23 +369,6 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
-    name = "bda_executable_tests",
-    srcs = ["//runtime/src/iree/hal/cts/util:test_main.cc"],
-    tags = [
-        "vulkan_uses_vk_khr_buffer_device_address",
-    ],
-    deps = [
-        ":bda_backends",
-        ":testdata_vulkan_spirv_bda_lib",
-        "//runtime/src/iree/base/tooling:flags",
-        "//runtime/src/iree/hal/cts/core:all_executable_tests",
-        "//runtime/src/iree/hal/cts/util:registry",
-        "//runtime/src/iree/hal/cts/util:test_base",
-        "//runtime/src/iree/testing:gtest",
-    ],
-)
-
-iree_runtime_cc_test(
     name = "bda_dispatch_validation_tests",
     srcs = [
         "bda_dispatch_validation_test.cc",
@@ -541,30 +378,27 @@ iree_runtime_cc_test(
         "vulkan_uses_vk_khr_buffer_device_address",
     ],
     deps = [
-        ":bda_backends",
-        ":testdata_vulkan_spirv_bda_lib",
-        "//runtime/src/iree/base/internal/flatcc:building",
+        ":backends",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:registry",
         "//runtime/src/iree/hal/cts/util:test_base",
-        "//runtime/src/iree/hal/utils:executable_header",
-        "//runtime/src/iree/schemas:vulkan_executable_def_c_fbs",
         "//runtime/src/iree/testing:gtest",
     ],
 )
 
 iree_runtime_cc_test(
-    name = "bda_raw_spirv_tests",
+    name = "bda_spirv_tests",
     srcs = [
-        "bda_raw_spirv_test.cc",
+        "bda_spirv_test.cc",
         "//runtime/src/iree/hal/cts/util:test_main.cc",
     ],
     tags = [
         "vulkan_uses_vk_khr_buffer_device_address",
     ],
     deps = [
-        ":bda_backends",
+        ":backends",
+        ":replay_cache_backends",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:profile_test_util",
@@ -639,44 +473,6 @@ iree_runtime_cc_test(
     deps = [
         ":backends",
         ":testdata_vulkan_spirv_lib",
-        "//runtime/src/iree/base/tooling:flags",
-        "//runtime/src/iree/hal/cts/queue:queue_dispatch_test",
-        "//runtime/src/iree/hal/cts/util:profile_test_util",
-        "//runtime/src/iree/hal/cts/util:registry",
-        "//runtime/src/iree/hal/cts/util:test_base",
-        "//runtime/src/iree/testing:gtest",
-    ],
-)
-
-iree_runtime_cc_test(
-    name = "bda_queue_dispatch_direct_tests",
-    srcs = ["//runtime/src/iree/hal/cts/util:test_main.cc"],
-    args = ["--gtest_filter=CTS/QueueDispatchTest.*"],
-    tags = [
-        "vulkan_uses_vk_khr_buffer_device_address",
-    ],
-    deps = [
-        ":bda_backends",
-        ":testdata_vulkan_spirv_bda_lib",
-        "//runtime/src/iree/base/tooling:flags",
-        "//runtime/src/iree/hal/cts/queue:queue_dispatch_test",
-        "//runtime/src/iree/hal/cts/util:profile_test_util",
-        "//runtime/src/iree/hal/cts/util:registry",
-        "//runtime/src/iree/hal/cts/util:test_base",
-        "//runtime/src/iree/testing:gtest",
-    ],
-)
-
-iree_runtime_cc_test(
-    name = "bda_queue_dispatch_indirect_parameters_tests",
-    srcs = ["//runtime/src/iree/hal/cts/util:test_main.cc"],
-    args = ["--gtest_filter=CTS/QueueDispatchIndirectParametersTest.*"],
-    tags = [
-        "vulkan_uses_vk_khr_buffer_device_address",
-    ],
-    deps = [
-        ":bda_backends",
-        ":testdata_vulkan_spirv_bda_lib",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal/cts/queue:queue_dispatch_test",
         "//runtime/src/iree/hal/cts/util:profile_test_util",

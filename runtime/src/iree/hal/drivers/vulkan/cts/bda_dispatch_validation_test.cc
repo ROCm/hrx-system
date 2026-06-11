@@ -9,12 +9,10 @@
 
 #include <cstdint>
 #include <cstring>
+#include <initializer_list>
 #include <vector>
 
-#include "iree/base/internal/flatcc/building.h"
 #include "iree/hal/cts/util/test_base.h"
-#include "iree/hal/utils/executable_header.h"
-#include "iree/schemas/vulkan_executable_def_builder.h"
 
 namespace iree::hal::cts {
 
@@ -22,9 +20,6 @@ using iree::testing::status::StatusIs;
 
 static constexpr uint32_t kRequiredBindingAlignment = 2;
 static constexpr uint64_t kRequiredBindingLength = 17;
-static constexpr uint32_t kBdaDispatchRootLength = 32;
-// VK_SHADER_STAGE_COMPUTE_BIT without depending on private Vulkan headers.
-static constexpr uint32_t kComputeShaderStageFlag = 0x00000020u;
 
 // Descriptor-free BDA-environment no-op shader. The shader does not need to
 // consume bindings because these tests fail while publishing the host-validated
@@ -77,176 +72,25 @@ static const uint32_t kBdaNoopSpirv[] = {
     0x00010038u,
 };
 
-static iree_status_t MakeBdaRequirementExecutableData(
-    std::vector<uint8_t>* out_executable_data) {
-  out_executable_data->clear();
+static void AppendOpModuleProcessed(std::vector<uint32_t>* module,
+                                    const char* text) {
+  const size_t byte_length = std::strlen(text) + 1;
+  const size_t string_word_count =
+      (byte_length + sizeof(uint32_t) - 1) / sizeof(uint32_t);
+  std::vector<uint32_t> instruction(1 + string_word_count, 0);
+  instruction[0] = ((uint32_t)instruction.size() << 16) | 330u;
+  std::memcpy(&instruction[1], text, byte_length);
+  module->insert(module->begin() + 12, instruction.begin(), instruction.end());
+}
 
-  flatbuffers_builder_t builder;
-  if (IREE_UNLIKELY(flatcc_builder_init(&builder) != 0)) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "failed to initialize flatbuffer builder");
+static std::vector<uint32_t> MakeBdaExecutableWords(
+    std::initializer_list<const char*> metadata_strings) {
+  std::vector<uint32_t> words(kBdaNoopSpirv,
+                              kBdaNoopSpirv + IREE_ARRAYSIZE(kBdaNoopSpirv));
+  for (const char* metadata_string : metadata_strings) {
+    AppendOpModuleProcessed(&words, metadata_string);
   }
-
-  iree_status_t status = iree_ok_status();
-  if (IREE_UNLIKELY(flatbuffers_failed(
-          iree_hal_vulkan_ExecutableDef_start_as_root(&builder)))) {
-    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                              "failed to start Vulkan executable flatbuffer");
-  }
-
-  flatbuffers_string_ref_t entry_point_ref = 0;
-  if (iree_status_is_ok(status)) {
-    entry_point_ref = flatbuffers_string_create_str(&builder, "main");
-    if (!entry_point_ref) {
-      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                                "failed to create entry point string");
-    }
-  }
-
-  iree_hal_vulkan_BdaBindingDef_vec_ref_t bda_bindings_ref = 0;
-  if (iree_status_is_ok(status)) {
-    iree_hal_vulkan_BdaBindingDef_ref_t binding_requirements[2] = {
-        iree_hal_vulkan_BdaBindingDef_create(&builder, /*minimum_alignment=*/1,
-                                             kRequiredBindingLength),
-        iree_hal_vulkan_BdaBindingDef_create(
-            &builder, kRequiredBindingAlignment, /*minimum_length=*/0),
-    };
-    bda_bindings_ref = iree_hal_vulkan_BdaBindingDef_vec_create(
-        &builder, binding_requirements, IREE_ARRAYSIZE(binding_requirements));
-    if (!binding_requirements[0] || !binding_requirements[1] ||
-        !bda_bindings_ref) {
-      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                                "failed to create BDA binding requirements");
-    }
-  }
-
-  iree_hal_vulkan_BdaDispatchLayoutDef_ref_t bda_dispatch_layout_ref = 0;
-  if (iree_status_is_ok(status)) {
-    if (flatbuffers_failed(
-            iree_hal_vulkan_BdaDispatchLayoutDef_start(&builder)) ||
-        flatbuffers_failed(iree_hal_vulkan_BdaDispatchLayoutDef_abi_version_add(
-            &builder, 1)) ||
-        flatbuffers_failed(
-            iree_hal_vulkan_BdaDispatchLayoutDef_root_push_constant_offset_add(
-                &builder, 0)) ||
-        flatbuffers_failed(
-            iree_hal_vulkan_BdaDispatchLayoutDef_root_push_constant_length_add(
-                &builder, kBdaDispatchRootLength)) ||
-        flatbuffers_failed(
-            iree_hal_vulkan_BdaDispatchLayoutDef_constant_push_constant_offset_add(
-                &builder, kBdaDispatchRootLength)) ||
-        flatbuffers_failed(
-            iree_hal_vulkan_BdaDispatchLayoutDef_binding_count_add(&builder,
-                                                                   2)) ||
-        flatbuffers_failed(
-            iree_hal_vulkan_BdaDispatchLayoutDef_binding_table_entry_type_add(
-                &builder,
-                iree_hal_vulkan_BdaBindingTableEntryType_ADDRESS64)) ||
-        flatbuffers_failed(iree_hal_vulkan_BdaDispatchLayoutDef_bindings_add(
-            &builder, bda_bindings_ref)) ||
-        !(bda_dispatch_layout_ref =
-              iree_hal_vulkan_BdaDispatchLayoutDef_end(&builder))) {
-      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                                "failed to create BDA dispatch layout");
-    }
-  }
-
-  iree_hal_vulkan_PipelineDef_ref_t pipeline_ref = 0;
-  iree_hal_vulkan_PipelineDef_vec_ref_t pipelines_ref = 0;
-  if (iree_status_is_ok(status)) {
-    if (flatbuffers_failed(iree_hal_vulkan_PipelineDef_start(&builder)) ||
-        flatbuffers_failed(iree_hal_vulkan_PipelineDef_entry_point_add(
-            &builder, entry_point_ref)) ||
-        flatbuffers_failed(iree_hal_vulkan_PipelineDef_dispatch_abi_add(
-            &builder, iree_hal_vulkan_DispatchAbi_BDA_V1)) ||
-        flatbuffers_failed(iree_hal_vulkan_PipelineDef_bda_dispatch_layout_add(
-            &builder, bda_dispatch_layout_ref)) ||
-        !(pipeline_ref = iree_hal_vulkan_PipelineDef_end(&builder)) ||
-        !(pipelines_ref = iree_hal_vulkan_PipelineDef_vec_create(
-              &builder, &pipeline_ref, 1))) {
-      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                                "failed to create pipeline definition");
-    }
-  }
-
-  iree_hal_vulkan_PipelineLayoutDef_ref_t pipeline_layout_ref = 0;
-  iree_hal_vulkan_PipelineLayoutDef_vec_ref_t pipeline_layouts_ref = 0;
-  if (iree_status_is_ok(status)) {
-    iree_hal_vulkan_PushConstantRange push_constant_range = {
-        /*.stage_flags=*/kComputeShaderStageFlag,
-        /*.offset=*/0,
-        /*.size=*/kBdaDispatchRootLength,
-    };
-    iree_hal_vulkan_PushConstantRange_vec_ref_t push_constant_ranges_ref =
-        iree_hal_vulkan_PushConstantRange_vec_create(&builder,
-                                                     &push_constant_range, 1);
-    if (!push_constant_ranges_ref ||
-        flatbuffers_failed(iree_hal_vulkan_PipelineLayoutDef_start(&builder)) ||
-        flatbuffers_failed(
-            iree_hal_vulkan_PipelineLayoutDef_push_constant_ranges_add(
-                &builder, push_constant_ranges_ref)) ||
-        !(pipeline_layout_ref =
-              iree_hal_vulkan_PipelineLayoutDef_end(&builder)) ||
-        !(pipeline_layouts_ref = iree_hal_vulkan_PipelineLayoutDef_vec_create(
-              &builder, &pipeline_layout_ref, 1))) {
-      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                                "failed to create pipeline layout");
-    }
-  }
-
-  iree_hal_vulkan_ShaderModuleDef_ref_t shader_module_ref = 0;
-  iree_hal_vulkan_ShaderModuleDef_vec_ref_t shader_modules_ref = 0;
-  if (iree_status_is_ok(status)) {
-    flatbuffers_uint32_vec_ref_t spirv_code_ref = flatbuffers_uint32_vec_create(
-        &builder, kBdaNoopSpirv, IREE_ARRAYSIZE(kBdaNoopSpirv));
-    shader_module_ref =
-        iree_hal_vulkan_ShaderModuleDef_create(&builder, spirv_code_ref);
-    shader_modules_ref = iree_hal_vulkan_ShaderModuleDef_vec_create(
-        &builder, &shader_module_ref, 1);
-    if (!spirv_code_ref || !shader_module_ref || !shader_modules_ref) {
-      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                                "failed to create shader module definitions");
-    }
-  }
-
-  if (iree_status_is_ok(status) &&
-      (flatbuffers_failed(iree_hal_vulkan_ExecutableDef_pipelines_add(
-           &builder, pipelines_ref)) ||
-       flatbuffers_failed(iree_hal_vulkan_ExecutableDef_pipeline_layouts_add(
-           &builder, pipeline_layouts_ref)) ||
-       flatbuffers_failed(iree_hal_vulkan_ExecutableDef_shader_modules_add(
-           &builder, shader_modules_ref)) ||
-       !iree_hal_vulkan_ExecutableDef_end_as_root(&builder))) {
-    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                              "failed to finish Vulkan executable flatbuffer");
-  }
-
-  size_t flatbuffer_size = 0;
-  void* flatbuffer_data = NULL;
-  if (iree_status_is_ok(status)) {
-    flatbuffer_data =
-        flatcc_builder_finalize_aligned_buffer(&builder, &flatbuffer_size);
-    if (!flatbuffer_data || flatbuffer_size == 0) {
-      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                                "failed to finalize Vulkan executable");
-    }
-  }
-  if (iree_status_is_ok(status)) {
-    iree_flatbuffer_file_header_t header = {};
-    memcpy(&header.magic, iree_hal_vulkan_ExecutableDef_file_identifier,
-           sizeof(header.magic));
-    header.version = 0;
-    header.content_size = flatbuffer_size;
-
-    out_executable_data->resize(sizeof(header) + flatbuffer_size);
-    memcpy(out_executable_data->data(), &header, sizeof(header));
-    memcpy(out_executable_data->data() + sizeof(header), flatbuffer_data,
-           flatbuffer_size);
-  }
-
-  flatcc_builder_aligned_free(flatbuffer_data);
-  flatcc_builder_clear(&builder);
-  return status;
+  return words;
 }
 
 class BdaDispatchValidationTest : public CtsTestBase<> {
@@ -258,29 +102,22 @@ class BdaDispatchValidationTest : public CtsTestBase<> {
     IREE_ASSERT_OK(iree_hal_executable_cache_create(
         device_, iree_make_cstring_view("default"), &executable_cache_));
 
-    iree_hal_executable_params_t executable_params;
-    iree_hal_executable_params_initialize(&executable_params);
-    executable_params.caching_mode =
-        IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA;
-    executable_params.executable_format =
-        iree_make_cstring_view(executable_format());
-    executable_params.executable_data = executable_data(iree_make_cstring_view(
-        "command_buffer_dispatch_constants_bindings_test.bin"));
-    IREE_ASSERT_OK(iree_hal_executable_cache_prepare_executable(
-        executable_cache_, &executable_params, &executable_));
+    std::vector<uint32_t> executable_words = MakeBdaExecutableWords({
+        "iree.vulkan.bda.v1.constant_length=8",
+        "iree.vulkan.bda.v1.bindings=2",
+        "iree.vulkan.bda.v1",
+    });
+    IREE_ASSERT_OK(PrepareBdaExecutable(executable_words, &executable_));
 
-    std::vector<uint8_t> requirement_executable_data;
-    IREE_ASSERT_OK(
-        MakeBdaRequirementExecutableData(&requirement_executable_data));
-    iree_hal_executable_params_t requirement_executable_params;
-    iree_hal_executable_params_initialize(&requirement_executable_params);
-    requirement_executable_params.executable_format =
-        iree_make_cstring_view("vulkan-spirv-bda-v1");
-    requirement_executable_params.executable_data = iree_make_const_byte_span(
-        requirement_executable_data.data(), requirement_executable_data.size());
-    IREE_ASSERT_OK(iree_hal_executable_cache_prepare_executable(
-        executable_cache_, &requirement_executable_params,
-        &requirement_executable_));
+    std::vector<uint32_t> requirement_executable_words =
+        MakeBdaExecutableWords({
+            "iree.vulkan.bda.v1.binding.1=2,0",
+            "iree.vulkan.bda.v1.binding.0=1,17",
+            "iree.vulkan.bda.v1.bindings=2",
+            "iree.vulkan.bda.v1",
+        });
+    IREE_ASSERT_OK(PrepareBdaExecutable(requirement_executable_words,
+                                        &requirement_executable_));
   }
 
   void TearDown() override {
@@ -295,6 +132,22 @@ class BdaDispatchValidationTest : public CtsTestBase<> {
 
   iree_const_byte_span_t constants() const {
     return iree_make_const_byte_span(constant_data_, sizeof(constant_data_));
+  }
+
+  iree_status_t PrepareBdaExecutable(
+      const std::vector<uint32_t>& executable_words,
+      iree_hal_executable_t** out_executable) {
+    iree_hal_executable_params_t executable_params;
+    iree_hal_executable_params_initialize(&executable_params);
+    executable_params.caching_mode =
+        IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA |
+        IREE_HAL_EXECUTABLE_CACHING_MODE_DISABLE_VERIFICATION;
+    executable_params.executable_format =
+        iree_make_cstring_view("vulkan-spirv-bda");
+    executable_params.executable_data = iree_make_const_byte_span(
+        executable_words.data(), executable_words.size() * sizeof(uint32_t));
+    return iree_hal_executable_cache_prepare_executable(
+        executable_cache_, &executable_params, out_executable);
   }
 
   iree_status_t CreateInputOutputBuffers(
@@ -605,6 +458,6 @@ TEST_P(BdaDispatchValidationTest,
   iree_hal_buffer_release(input_buffer);
 }
 
-CTS_REGISTER_EXECUTABLE_TEST_SUITE(BdaDispatchValidationTest);
+CTS_REGISTER_TEST_SUITE(BdaDispatchValidationTest);
 
 }  // namespace iree::hal::cts

@@ -317,6 +317,7 @@ static iree_status_t loom_spirv_module_abi_bda_metadata_u32_pair(
 static iree_status_t loom_spirv_module_abi_bda_metadata(
     loom_spirv_module_abi_context_t* context, uint16_t binding_count,
     uint16_t constant_word_count) {
+  const uint32_t constant_byte_length = (uint32_t)constant_word_count * 4u;
   IREE_RETURN_IF_ERROR(loom_spirv_module_abi_module_processed(
       context, IREE_SV("iree.vulkan.bda.v1")));
   IREE_RETURN_IF_ERROR(loom_spirv_module_abi_bda_metadata_u32_pair(
@@ -326,7 +327,8 @@ static iree_status_t loom_spirv_module_abi_bda_metadata(
       context, "iree.vulkan.bda.v1.constant_offset=%" PRIu32,
       LOOM_SPIRV_BDA_ROOT_CONSTANT_BYTE_OFFSET));
   IREE_RETURN_IF_ERROR(loom_spirv_module_abi_bda_metadata_u32(
-      context, "iree.vulkan.bda.v1.constants=%" PRIu32, constant_word_count));
+      context, "iree.vulkan.bda.v1.constant_length=%" PRIu32,
+      constant_byte_length));
   return loom_spirv_module_abi_bda_metadata_u32(
       context, "iree.vulkan.bda.v1.bindings=%" PRIu32, binding_count);
 }

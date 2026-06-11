@@ -134,7 +134,7 @@ TEST(LoomcSpirvIreeHalExecutionTest,
   target.artifact_format = loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV);
   target.artifact_identifier =
       loomc_make_cstring_view("double_i32_at_byte_offset.spv");
-  target.executable_format = IREE_SV("vulkan-spirv-bda-raw");
+  target.executable_format = IREE_SV("vulkan-spirv-bda");
   target.profile_providers = profile_providers;
   target.profile_provider_count = 1;
   target.create_target_environment = CreateSpirvTargetEnvironment;

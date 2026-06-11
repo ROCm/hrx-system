@@ -266,10 +266,9 @@ static loomc_status_t loomc_spirv_iree_hal_query_facts(
   if (!iree_hal_executable_cache_can_prepare_format(
           options->executable_cache,
           IREE_HAL_EXECUTABLE_CACHING_MODE_ALLOW_OPTIMIZATION,
-          IREE_SV("vulkan-spirv-bda-raw"))) {
+          IREE_SV("vulkan-spirv-bda"))) {
     return loomc_spirv_iree_hal_fail_cstring(
-        result,
-        "IREE HAL executable cache cannot prepare vulkan-spirv-bda-raw");
+        result, "IREE HAL executable cache cannot prepare vulkan-spirv-bda");
   }
 
   uint32_t api_version = 0;

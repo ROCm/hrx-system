@@ -76,8 +76,7 @@ static bool fake_executable_cache_can_prepare_format(
   fake_executable_cache_t* executable_cache =
       (fake_executable_cache_t*)base_executable_cache;
   return executable_cache->raw_bda_supported &&
-         iree_string_view_equal(executable_format,
-                                IREE_SV("vulkan-spirv-bda-raw"));
+         iree_string_view_equal(executable_format, IREE_SV("vulkan-spirv-bda"));
 }
 
 static const iree_hal_device_vtable_t kFakeHalDeviceVtable = {
@@ -309,7 +308,7 @@ TEST_F(SpirvVulkanHalArtifactProviderTest, EmitsRawBdaSpirvArtifact) {
 
   EXPECT_TRUE(emitted);
   EXPECT_TRUE(iree_string_view_equal(artifact.executable_format,
-                                     IREE_SV("vulkan-spirv-bda-raw")));
+                                     IREE_SV("vulkan-spirv-bda")));
   EXPECT_EQ(artifact.target_bundle, target.target_bundle);
   EXPECT_EQ(artifact.target_artifact_format,
             LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY);
@@ -366,7 +365,8 @@ TEST_F(SpirvVulkanHalArtifactProviderTest, EmitsAllCompatibleEntries) {
   EXPECT_EQ(metadata.root_push_constant_offset, 0u);
   EXPECT_EQ(metadata.root_push_constant_length, 32u);
   EXPECT_EQ(metadata.constant_push_constant_offset, 32u);
-  EXPECT_EQ(metadata.constant_count, 2u);
+  EXPECT_EQ(metadata.constant_byte_length, 8u);
+  EXPECT_TRUE(metadata.binding_count_known);
   EXPECT_EQ(metadata.binding_count, 2u);
   iree_hal_vulkan_spirv_bda_dispatch_metadata_deinitialize(
       &metadata, iree_allocator_system());

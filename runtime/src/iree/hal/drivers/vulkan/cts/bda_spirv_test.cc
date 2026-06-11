@@ -4,9 +4,9 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Vulkan raw SPIR-V BDA coverage. Raw BDA executables deliberately have no IREE
-// flatbuffer metadata; the driver publishes the exact HAL binding table the
-// dispatch provides and the shader consumes it through the hidden BDA root.
+// Vulkan SPIR-V BDA coverage. The driver publishes the exact HAL binding
+// table the dispatch provides and the shader consumes it through the hidden BDA
+// root.
 
 #include <cstdint>
 #include <cstring>
@@ -27,7 +27,7 @@ using ::testing::ContainerEq;
 //
 // The shader reads input/output addresses from the BDA binding table addressed
 // by iree_hal_vulkan_bda_dispatch_root_v1_t::binding_table_address.
-static const uint32_t kRawBdaSpirv[] = {
+static const uint32_t kBdaSpirv[] = {
     0x07230203, 0x00010600, 0x0008000b, 0x0000004c, 0x00000000, 0x00020011,
     0x00000001, 0x00020011, 0x0000000b, 0x00020011, 0x000014e3, 0x0006000b,
     0x00000001, 0x4c534c47, 0x6474732e, 0x3035342e, 0x00000000, 0x0003000e,
@@ -134,10 +134,10 @@ static const uint32_t kRawBdaSpirv[] = {
 };
 
 // Valid descriptor-free BDA-environment no-op shader with no push-constant
-// root. Normal raw loading rejects it because reflection cannot prove the HAL
-// root convention; explicitly unverified raw loading accepts it for
+// root. Normal loading rejects it because reflection cannot prove the HAL root
+// convention; explicitly unverified loading accepts it for
 // hand-authored/custom-argument kernels.
-static const uint32_t kRawBdaNoopSpirvWithoutPushConstantRoot[] = {
+static const uint32_t kBdaNoopSpirvWithoutPushConstantRoot[] = {
     0x07230203u,
     0x00010600u,
     0u,
@@ -186,7 +186,7 @@ static const uint32_t kRawBdaNoopSpirvWithoutPushConstantRoot[] = {
 };
 
 static const uint32_t
-    kRawBdaSpirvMissingPhysicalStorageBufferAddressesCapability[] = {
+    kBdaSpirvMissingPhysicalStorageBufferAddressesCapability[] = {
         0x07230203u,
         0x00010600u,
         0u,
@@ -211,7 +211,7 @@ static const uint32_t
         1u,
 };
 
-static const uint32_t kRawBdaSpirvWithoutComputeEntryPoints[] = {
+static const uint32_t kBdaSpirvWithoutComputeEntryPoints[] = {
     0x07230203u,
     0x00010600u,
     0u,
@@ -229,7 +229,7 @@ static const uint32_t kRawBdaSpirvWithoutComputeEntryPoints[] = {
     1u,
 };
 
-static const uint32_t kRawBdaSpirvWithDuplicateComputeEntryNames[] = {
+static const uint32_t kBdaSpirvWithDuplicateComputeEntryNames[] = {
     0x07230203u,
     0x00010600u,
     0u,
@@ -259,7 +259,7 @@ static const uint32_t kRawBdaSpirvWithDuplicateComputeEntryNames[] = {
     0u,
 };
 
-static const uint32_t kRawBdaSpirvWithTruncatedLocalSize[] = {
+static const uint32_t kBdaSpirvWithTruncatedLocalSize[] = {
     0x07230203u,
     0x00010600u,
     0u,
@@ -288,7 +288,7 @@ static const uint32_t kRawBdaSpirvWithTruncatedLocalSize[] = {
     1u,
 };
 
-static const uint32_t kRawBdaSpirvMissingPushConstantRoot[] = {
+static const uint32_t kBdaSpirvMissingPushConstantRoot[] = {
     0x07230203u,
     0x00010600u,
     0u,
@@ -316,7 +316,7 @@ static const uint32_t kRawBdaSpirvMissingPushConstantRoot[] = {
     1u,
 };
 
-static const uint32_t kRawBdaSpirvWithDescriptorStorageVariable[] = {
+static const uint32_t kBdaSpirvWithDescriptorStorageVariable[] = {
     0x07230203u,
     0x00010600u,
     0u,
@@ -354,17 +354,6 @@ static const uint32_t kRawBdaSpirvWithDescriptorStorageVariable[] = {
     12u,
 };
 
-static std::vector<uint32_t> MakeDescriptorDecoratedRawBdaSpirv() {
-  std::vector<uint32_t> spirv(kRawBdaSpirv,
-                              kRawBdaSpirv + IREE_ARRAYSIZE(kRawBdaSpirv));
-  // Appends OpDecorate %root DescriptorSet 0.
-  spirv.push_back(0x00040047u);
-  spirv.push_back(0x0000000fu);
-  spirv.push_back(0x00000022u);
-  spirv.push_back(0x00000000u);
-  return spirv;
-}
-
 static void AppendSpirvStringInstruction(uint16_t opcode, const char* value,
                                          std::vector<uint32_t>* words) {
   const size_t byte_length = std::strlen(value) + 1;
@@ -377,11 +366,11 @@ static void AppendSpirvStringInstruction(uint16_t opcode, const char* value,
   std::memcpy(&(*words)[string_word_offset], value, byte_length);
 }
 
-static std::vector<uint32_t> MakeRawBdaSpirvWithMetadata(
+static std::vector<uint32_t> MakeBdaSpirvWithMetadata(
+    const uint32_t* source_words, iree_host_size_t source_word_count,
     std::initializer_list<const char*> metadata_strings) {
-  std::vector<uint32_t> source(kRawBdaSpirv,
-                               kRawBdaSpirv + IREE_ARRAYSIZE(kRawBdaSpirv));
-  iree_host_size_t insertion_offset = IREE_ARRAYSIZE(kRawBdaSpirv);
+  std::vector<uint32_t> source(source_words, source_words + source_word_count);
+  iree_host_size_t insertion_offset = source_word_count;
   for (iree_host_size_t word_offset = 5; word_offset < source.size();) {
     const uint32_t instruction = source[word_offset];
     const uint16_t word_count = (uint16_t)(instruction >> 16);
@@ -390,6 +379,7 @@ static std::vector<uint32_t> MakeRawBdaSpirvWithMetadata(
       insertion_offset = word_offset;
       break;
     }
+    if (word_count == 0) break;
     word_offset += word_count;
   }
 
@@ -403,7 +393,24 @@ static std::vector<uint32_t> MakeRawBdaSpirvWithMetadata(
   return spirv;
 }
 
-class BdaRawSpirvTest : public CtsTestBase<> {
+static std::vector<uint32_t> MakeBdaSpirvWithMetadata(
+    std::initializer_list<const char*> metadata_strings) {
+  return MakeBdaSpirvWithMetadata(kBdaSpirv, IREE_ARRAYSIZE(kBdaSpirv),
+                                  metadata_strings);
+}
+
+static std::vector<uint32_t> MakeDescriptorDecoratedBdaSpirv() {
+  std::vector<uint32_t> spirv =
+      MakeBdaSpirvWithMetadata({"iree.vulkan.bda.v1"});
+  // Appends OpDecorate %root DescriptorSet 0.
+  spirv.push_back(0x00040047u);
+  spirv.push_back(0x0000000fu);
+  spirv.push_back(0x00000022u);
+  spirv.push_back(0x00000000u);
+  return spirv;
+}
+
+class BdaSpirvTest : public CtsTestBase<> {
  protected:
   static constexpr iree_host_size_t kElementCount = 4;
   static constexpr iree_device_size_t kDispatchByteLength =
@@ -416,8 +423,11 @@ class BdaRawSpirvTest : public CtsTestBase<> {
     IREE_ASSERT_OK(iree_hal_executable_cache_create(
         device_, iree_make_cstring_view("default"), &executable_cache_));
 
-    IREE_ASSERT_OK(PrepareRawBdaExecutable(
-        iree_make_const_byte_span(kRawBdaSpirv, sizeof(kRawBdaSpirv)),
+    std::vector<uint32_t> executable_spirv =
+        MakeBdaSpirvWithMetadata({"iree.vulkan.bda.v1"});
+    IREE_ASSERT_OK(PrepareBdaExecutable(
+        iree_make_const_byte_span(executable_spirv.data(),
+                                  executable_spirv.size() * sizeof(uint32_t)),
         &executable_));
   }
 
@@ -429,7 +439,7 @@ class BdaRawSpirvTest : public CtsTestBase<> {
     CtsTestBase::TearDown();
   }
 
-  iree_status_t PrepareRawBdaExecutable(
+  iree_status_t PrepareBdaExecutable(
       iree_const_byte_span_t executable_data,
       iree_hal_executable_caching_mode_t caching_mode,
       iree_hal_executable_t** out_executable) {
@@ -438,16 +448,15 @@ class BdaRawSpirvTest : public CtsTestBase<> {
     iree_hal_executable_params_initialize(&executable_params);
     executable_params.caching_mode = caching_mode;
     executable_params.executable_format =
-        iree_make_cstring_view("vulkan-spirv-bda-raw");
+        iree_make_cstring_view("vulkan-spirv-bda");
     executable_params.executable_data = executable_data;
     return iree_hal_executable_cache_prepare_executable(
         executable_cache_, &executable_params, out_executable);
   }
 
-  iree_status_t PrepareRawBdaExecutable(
-      iree_const_byte_span_t executable_data,
-      iree_hal_executable_t** out_executable) {
-    return PrepareRawBdaExecutable(
+  iree_status_t PrepareBdaExecutable(iree_const_byte_span_t executable_data,
+                                     iree_hal_executable_t** out_executable) {
+    return PrepareBdaExecutable(
         executable_data, IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA,
         out_executable);
   }
@@ -599,12 +608,12 @@ static iree_hal_buffer_params_t SparseDispatchBufferParams() {
   return params;
 }
 
-TEST_P(BdaRawSpirvTest, PrepareRejectsDescriptorDecoratedRawBdaSpirv) {
-  std::vector<uint32_t> decorated_spirv = MakeDescriptorDecoratedRawBdaSpirv();
+TEST_P(BdaSpirvTest, PrepareRejectsDescriptorDecoratedBdaSpirv) {
+  std::vector<uint32_t> decorated_spirv = MakeDescriptorDecoratedBdaSpirv();
   iree_hal_executable_t* decorated_executable = nullptr;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      PrepareRawBdaExecutable(
+      PrepareBdaExecutable(
           iree_make_const_byte_span(decorated_spirv.data(),
                                     decorated_spirv.size() * sizeof(uint32_t)),
           &decorated_executable));
@@ -612,101 +621,116 @@ TEST_P(BdaRawSpirvTest, PrepareRejectsDescriptorDecoratedRawBdaSpirv) {
   iree_hal_executable_release(decorated_executable);
 }
 
-TEST_P(BdaRawSpirvTest,
-       PrepareRejectsRawBdaSpirvWithoutPhysicalStorageBufferAddresses) {
+TEST_P(BdaSpirvTest,
+       PrepareRejectsBdaSpirvWithoutPhysicalStorageBufferAddresses) {
+  std::vector<uint32_t> spirv = MakeBdaSpirvWithMetadata(
+      kBdaSpirvMissingPhysicalStorageBufferAddressesCapability,
+      IREE_ARRAYSIZE(kBdaSpirvMissingPhysicalStorageBufferAddressesCapability),
+      {"iree.vulkan.bda.v1"});
   iree_hal_executable_t* executable = nullptr;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      PrepareRawBdaExecutable(
-          iree_make_const_byte_span(
-              kRawBdaSpirvMissingPhysicalStorageBufferAddressesCapability,
-              sizeof(
-                  kRawBdaSpirvMissingPhysicalStorageBufferAddressesCapability)),
-          &executable));
+      PrepareBdaExecutable(iree_make_const_byte_span(
+                               spirv.data(), spirv.size() * sizeof(uint32_t)),
+                           &executable));
   EXPECT_EQ(nullptr, executable);
   iree_hal_executable_release(executable);
 }
 
-TEST_P(BdaRawSpirvTest, PrepareRejectsMalformedRawBdaSpirvHeader) {
-  const uint32_t not_spirv[5] = {0};
-  iree_hal_executable_t* executable = nullptr;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      PrepareRawBdaExecutable(
-          iree_make_const_byte_span(not_spirv, sizeof(not_spirv)),
-          &executable));
-  EXPECT_EQ(nullptr, executable);
-  iree_hal_executable_release(executable);
-}
-
-TEST_P(BdaRawSpirvTest, PrepareRejectsRawBdaSpirvWithoutComputeEntryPoints) {
+TEST_P(BdaSpirvTest, PrepareRejectsBdaSpirvWithoutMetadata) {
   iree_hal_executable_t* executable = nullptr;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        PrepareRawBdaExecutable(
-                            iree_make_const_byte_span(
-                                kRawBdaSpirvWithoutComputeEntryPoints,
-                                sizeof(kRawBdaSpirvWithoutComputeEntryPoints)),
-                            &executable));
+                        PrepareBdaExecutable(iree_make_const_byte_span(
+                                                 kBdaSpirv, sizeof(kBdaSpirv)),
+                                             &executable));
   EXPECT_EQ(nullptr, executable);
   iree_hal_executable_release(executable);
 }
 
-TEST_P(BdaRawSpirvTest, PrepareRejectsRawBdaSpirvWithDuplicateEntryNames) {
+TEST_P(BdaSpirvTest, PrepareRejectsMalformedBdaSpirvHeader) {
+  const uint32_t not_spirv[5] = {0};
+  iree_hal_executable_t* executable = nullptr;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        PrepareBdaExecutable(iree_make_const_byte_span(
+                                                 not_spirv, sizeof(not_spirv)),
+                                             &executable));
+  EXPECT_EQ(nullptr, executable);
+  iree_hal_executable_release(executable);
+}
+
+TEST_P(BdaSpirvTest, PrepareRejectsBdaSpirvWithoutComputeEntryPoints) {
   iree_hal_executable_t* executable = nullptr;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      PrepareRawBdaExecutable(
-          iree_make_const_byte_span(
-              kRawBdaSpirvWithDuplicateComputeEntryNames,
-              sizeof(kRawBdaSpirvWithDuplicateComputeEntryNames)),
+      PrepareBdaExecutable(
+          iree_make_const_byte_span(kBdaSpirvWithoutComputeEntryPoints,
+                                    sizeof(kBdaSpirvWithoutComputeEntryPoints)),
           &executable));
   EXPECT_EQ(nullptr, executable);
   iree_hal_executable_release(executable);
 }
 
-TEST_P(BdaRawSpirvTest, PrepareRejectsRawBdaSpirvWithTruncatedLocalSize) {
+TEST_P(BdaSpirvTest, PrepareRejectsBdaSpirvWithDuplicateEntryNames) {
   iree_hal_executable_t* executable = nullptr;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      PrepareRawBdaExecutable(
-          iree_make_const_byte_span(kRawBdaSpirvWithTruncatedLocalSize,
-                                    sizeof(kRawBdaSpirvWithTruncatedLocalSize)),
+      PrepareBdaExecutable(iree_make_const_byte_span(
+                               kBdaSpirvWithDuplicateComputeEntryNames,
+                               sizeof(kBdaSpirvWithDuplicateComputeEntryNames)),
+                           &executable));
+  EXPECT_EQ(nullptr, executable);
+  iree_hal_executable_release(executable);
+}
+
+TEST_P(BdaSpirvTest, PrepareRejectsBdaSpirvWithTruncatedLocalSize) {
+  iree_hal_executable_t* executable = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      PrepareBdaExecutable(
+          iree_make_const_byte_span(kBdaSpirvWithTruncatedLocalSize,
+                                    sizeof(kBdaSpirvWithTruncatedLocalSize)),
           &executable));
   EXPECT_EQ(nullptr, executable);
   iree_hal_executable_release(executable);
 }
 
-TEST_P(BdaRawSpirvTest, PrepareRejectsRawBdaSpirvWithoutPushConstantRoot) {
+TEST_P(BdaSpirvTest, PrepareRejectsBdaSpirvWithoutPushConstantRoot) {
+  std::vector<uint32_t> spirv = MakeBdaSpirvWithMetadata(
+      kBdaSpirvMissingPushConstantRoot,
+      IREE_ARRAYSIZE(kBdaSpirvMissingPushConstantRoot), {"iree.vulkan.bda.v1"});
   iree_hal_executable_t* executable = nullptr;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      PrepareRawBdaExecutable(iree_make_const_byte_span(
-                                  kRawBdaSpirvMissingPushConstantRoot,
-                                  sizeof(kRawBdaSpirvMissingPushConstantRoot)),
-                              &executable));
+      PrepareBdaExecutable(iree_make_const_byte_span(
+                               spirv.data(), spirv.size() * sizeof(uint32_t)),
+                           &executable));
   EXPECT_EQ(nullptr, executable);
   iree_hal_executable_release(executable);
 }
 
-TEST_P(BdaRawSpirvTest, PrepareRejectsRawBdaNoopWithoutVerificationDisabled) {
+TEST_P(BdaSpirvTest, PrepareRejectsBdaNoopWithoutVerificationDisabled) {
+  std::vector<uint32_t> spirv = MakeBdaSpirvWithMetadata(
+      kBdaNoopSpirvWithoutPushConstantRoot,
+      IREE_ARRAYSIZE(kBdaNoopSpirvWithoutPushConstantRoot),
+      {"iree.vulkan.bda.v1"});
   iree_hal_executable_t* executable = nullptr;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      PrepareRawBdaExecutable(
-          iree_make_const_byte_span(
-              kRawBdaNoopSpirvWithoutPushConstantRoot,
-              sizeof(kRawBdaNoopSpirvWithoutPushConstantRoot)),
-          &executable));
+      PrepareBdaExecutable(iree_make_const_byte_span(
+                               spirv.data(), spirv.size() * sizeof(uint32_t)),
+                           &executable));
   EXPECT_EQ(nullptr, executable);
   iree_hal_executable_release(executable);
 }
 
-TEST_P(BdaRawSpirvTest, QueueDispatchExecutesUnverifiedRawBdaNoop) {
+TEST_P(BdaSpirvTest, QueueDispatchExecutesUnverifiedBdaNoop) {
+  std::vector<uint32_t> spirv = MakeBdaSpirvWithMetadata(
+      kBdaNoopSpirvWithoutPushConstantRoot,
+      IREE_ARRAYSIZE(kBdaNoopSpirvWithoutPushConstantRoot),
+      {"iree.vulkan.bda.v1"});
   Ref<iree_hal_executable_t> executable;
-  IREE_ASSERT_OK(PrepareRawBdaExecutable(
-      iree_make_const_byte_span(
-          kRawBdaNoopSpirvWithoutPushConstantRoot,
-          sizeof(kRawBdaNoopSpirvWithoutPushConstantRoot)),
+  IREE_ASSERT_OK(PrepareBdaExecutable(
+      iree_make_const_byte_span(spirv.data(), spirv.size() * sizeof(uint32_t)),
       IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA |
           IREE_HAL_EXECUTABLE_CACHING_MODE_DISABLE_VERIFICATION,
       executable.out()));
@@ -723,15 +747,17 @@ TEST_P(BdaRawSpirvTest, QueueDispatchExecutesUnverifiedRawBdaNoop) {
       dispatch_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
 }
 
-TEST_P(BdaRawSpirvTest, PrepareRejectsRawBdaSpirvWithDescriptorVariable) {
+TEST_P(BdaSpirvTest, PrepareRejectsBdaSpirvWithDescriptorVariable) {
+  std::vector<uint32_t> spirv = MakeBdaSpirvWithMetadata(
+      kBdaSpirvWithDescriptorStorageVariable,
+      IREE_ARRAYSIZE(kBdaSpirvWithDescriptorStorageVariable),
+      {"iree.vulkan.bda.v1"});
   iree_hal_executable_t* executable = nullptr;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      PrepareRawBdaExecutable(
-          iree_make_const_byte_span(
-              kRawBdaSpirvWithDescriptorStorageVariable,
-              sizeof(kRawBdaSpirvWithDescriptorStorageVariable)),
-          &executable));
+      PrepareBdaExecutable(iree_make_const_byte_span(
+                               spirv.data(), spirv.size() * sizeof(uint32_t)),
+                           &executable));
   EXPECT_EQ(nullptr, executable);
   iree_hal_executable_release(executable);
 }
@@ -794,7 +820,7 @@ class BdaSparsePhysicalMemoryRef {
   iree_hal_physical_memory_t* memory_ = nullptr;
 };
 
-TEST_P(BdaRawSpirvTest, QueueDispatchExecutesRawBdaShader) {
+TEST_P(BdaSpirvTest, QueueDispatchExecutesBdaShader) {
   Ref<iree_hal_buffer_t> input_buffer;
   Ref<iree_hal_buffer_t> output_buffer;
   CreateInputOutputBuffers(&input_buffer, &output_buffer);
@@ -815,13 +841,13 @@ TEST_P(BdaRawSpirvTest, QueueDispatchExecutesRawBdaShader) {
   ExpectOutput(output_buffer);
 }
 
-TEST_P(BdaRawSpirvTest, QueueDispatchExecutesRawBdaShaderWithMetadata) {
-  std::vector<uint32_t> metadata_spirv = MakeRawBdaSpirvWithMetadata({
+TEST_P(BdaSpirvTest, QueueDispatchExecutesBdaShaderWithMetadata) {
+  std::vector<uint32_t> metadata_spirv = MakeBdaSpirvWithMetadata({
       "iree.vulkan.bda.v1",
       "iree.vulkan.bda.v1.bindings=2",
   });
   Ref<iree_hal_executable_t> executable;
-  IREE_ASSERT_OK(PrepareRawBdaExecutable(
+  IREE_ASSERT_OK(PrepareBdaExecutable(
       iree_make_const_byte_span(metadata_spirv.data(),
                                 metadata_spirv.size() * sizeof(uint32_t)),
       executable.out()));
@@ -847,13 +873,13 @@ TEST_P(BdaRawSpirvTest, QueueDispatchExecutesRawBdaShaderWithMetadata) {
   ExpectOutput(output_buffer);
 }
 
-TEST_P(BdaRawSpirvTest, QueueDispatchRejectsRawBdaMetadataBindingMismatch) {
-  std::vector<uint32_t> metadata_spirv = MakeRawBdaSpirvWithMetadata({
+TEST_P(BdaSpirvTest, QueueDispatchRejectsBdaMetadataBindingMismatch) {
+  std::vector<uint32_t> metadata_spirv = MakeBdaSpirvWithMetadata({
       "iree.vulkan.bda.v1",
       "iree.vulkan.bda.v1.bindings=2",
   });
   Ref<iree_hal_executable_t> executable;
-  IREE_ASSERT_OK(PrepareRawBdaExecutable(
+  IREE_ASSERT_OK(PrepareBdaExecutable(
       iree_make_const_byte_span(metadata_spirv.data(),
                                 metadata_spirv.size() * sizeof(uint32_t)),
       executable.out()));
@@ -881,14 +907,14 @@ TEST_P(BdaRawSpirvTest, QueueDispatchRejectsRawBdaMetadataBindingMismatch) {
           iree_const_byte_span_empty(), bindings, IREE_HAL_DISPATCH_FLAG_NONE));
 }
 
-TEST_P(BdaRawSpirvTest, QueueDispatchRejectsRawBdaMetadataBindingLength) {
-  std::vector<uint32_t> metadata_spirv = MakeRawBdaSpirvWithMetadata({
+TEST_P(BdaSpirvTest, QueueDispatchRejectsBdaMetadataBindingLength) {
+  std::vector<uint32_t> metadata_spirv = MakeBdaSpirvWithMetadata({
       "iree.vulkan.bda.v1",
       "iree.vulkan.bda.v1.bindings=2",
       "iree.vulkan.bda.v1.binding.1=4,17",
   });
   Ref<iree_hal_executable_t> executable;
-  IREE_ASSERT_OK(PrepareRawBdaExecutable(
+  IREE_ASSERT_OK(PrepareBdaExecutable(
       iree_make_const_byte_span(metadata_spirv.data(),
                                 metadata_spirv.size() * sizeof(uint32_t)),
       executable.out()));
@@ -911,14 +937,14 @@ TEST_P(BdaRawSpirvTest, QueueDispatchRejectsRawBdaMetadataBindingLength) {
           iree_const_byte_span_empty(), bindings, IREE_HAL_DISPATCH_FLAG_NONE));
 }
 
-TEST_P(BdaRawSpirvTest, QueueDispatchUsesRawBdaMetadataConstantCount) {
-  std::vector<uint32_t> metadata_spirv = MakeRawBdaSpirvWithMetadata({
+TEST_P(BdaSpirvTest, QueueDispatchUsesBdaMetadataConstantLength) {
+  std::vector<uint32_t> metadata_spirv = MakeBdaSpirvWithMetadata({
       "iree.vulkan.bda.v1",
       "iree.vulkan.bda.v1.bindings=2",
-      "iree.vulkan.bda.v1.constants=1",
+      "iree.vulkan.bda.v1.constant_length=4",
   });
   Ref<iree_hal_executable_t> executable;
-  IREE_ASSERT_OK(PrepareRawBdaExecutable(
+  IREE_ASSERT_OK(PrepareBdaExecutable(
       iree_make_const_byte_span(metadata_spirv.data(),
                                 metadata_spirv.size() * sizeof(uint32_t)),
       executable.out()));
@@ -954,7 +980,7 @@ TEST_P(BdaRawSpirvTest, QueueDispatchUsesRawBdaMetadataConstantCount) {
   ExpectOutput(output_buffer);
 }
 
-TEST_P(BdaRawSpirvTest, QueueDispatchHandlesOversizedBdaPublication) {
+TEST_P(BdaSpirvTest, QueueDispatchHandlesOversizedBdaPublication) {
   Ref<iree_hal_buffer_t> input_buffer;
   Ref<iree_hal_buffer_t> output_buffer;
   CreateInputOutputBuffers(&input_buffer, &output_buffer);
@@ -978,7 +1004,7 @@ TEST_P(BdaRawSpirvTest, QueueDispatchHandlesOversizedBdaPublication) {
   ExpectOutput(output_buffer);
 }
 
-TEST_P(BdaRawSpirvTest, CommandBufferExecutesRawBdaShader) {
+TEST_P(BdaSpirvTest, CommandBufferExecutesBdaShader) {
   Ref<iree_hal_buffer_t> input_buffer;
   Ref<iree_hal_buffer_t> output_buffer;
   CreateInputOutputBuffers(&input_buffer, &output_buffer);
@@ -1008,7 +1034,7 @@ TEST_P(BdaRawSpirvTest, CommandBufferExecutesRawBdaShader) {
             1);
 }
 
-TEST_P(BdaRawSpirvTest, CommandBufferCachesBdaPublicationRequirements) {
+TEST_P(BdaSpirvTest, CommandBufferCachesBdaPublicationRequirements) {
   Ref<iree_hal_buffer_t> input_buffer;
   Ref<iree_hal_buffer_t> output_buffer;
   CreateInputOutputBuffers(&input_buffer, &output_buffer);
@@ -1060,7 +1086,7 @@ TEST_P(BdaRawSpirvTest, CommandBufferCachesBdaPublicationRequirements) {
             (bindings.count + oversized_bindings.size()) * sizeof(uint64_t));
 }
 
-TEST_P(BdaRawSpirvTest, TrimDropsIdleOversizedBdaPublicationBlock) {
+TEST_P(BdaSpirvTest, TrimDropsIdleOversizedBdaPublicationBlock) {
   IREE_ASSERT_OK(iree_hal_device_trim(device_));
   const int64_t initial_block_count =
       QueryBdaPublicationCache(IREE_SV("block_count"));
@@ -1092,7 +1118,7 @@ TEST_P(BdaRawSpirvTest, TrimDropsIdleOversizedBdaPublicationBlock) {
             initial_block_count);
 }
 
-TEST_P(BdaRawSpirvTest, CommandBufferReusesCachedNativeReplay) {
+TEST_P(BdaSpirvTest, CommandBufferReusesCachedNativeReplay) {
   if (QueryNativeReplayCache(IREE_SV("max_instance_count")) == 0) {
     GTEST_SKIP() << "Vulkan BDA native replay cache is disabled";
   }
@@ -1143,7 +1169,7 @@ TEST_P(BdaRawSpirvTest, CommandBufferReusesCachedNativeReplay) {
   IREE_ASSERT_OK(iree_hal_device_trim(device_));
 }
 
-TEST_P(BdaRawSpirvTest, CommandBufferProfilingBypassesCachedNativeReplay) {
+TEST_P(BdaSpirvTest, CommandBufferProfilingBypassesCachedNativeReplay) {
   if (QueryNativeReplayCache(IREE_SV("max_instance_count")) == 0) {
     GTEST_SKIP() << "Vulkan BDA native replay cache is disabled";
   }
@@ -1200,7 +1226,7 @@ TEST_P(BdaRawSpirvTest, CommandBufferProfilingBypassesCachedNativeReplay) {
   EXPECT_GE(sink.dispatch_event_count, 1);
 }
 
-TEST_P(BdaRawSpirvTest, CommandBufferHandlesOversizedBdaPublication) {
+TEST_P(BdaSpirvTest, CommandBufferHandlesOversizedBdaPublication) {
   Ref<iree_hal_buffer_t> input_buffer;
   Ref<iree_hal_buffer_t> output_buffer;
   CreateInputOutputBuffers(&input_buffer, &output_buffer);
@@ -1228,7 +1254,7 @@ TEST_P(BdaRawSpirvTest, CommandBufferHandlesOversizedBdaPublication) {
   ExpectOutput(output_buffer);
 }
 
-TEST_P(BdaRawSpirvTest, CommandBufferExecutesRawBdaShaderWithSparseBindings) {
+TEST_P(BdaSpirvTest, CommandBufferExecutesBdaShaderWithSparseBindings) {
   if (!iree_hal_allocator_supports_virtual_memory(device_allocator_)) {
     GTEST_SKIP() << "Vulkan sparse virtual memory is not available";
   }
@@ -1325,9 +1351,9 @@ TEST_P(BdaRawSpirvTest, CommandBufferExecutesRawBdaShaderWithSparseBindings) {
       recommended_page_size));
 }
 
-class BdaRawSpirvReplayCacheTest : public BdaRawSpirvTest {};
+class BdaSpirvReplayCacheTest : public BdaSpirvTest {};
 
-TEST_P(BdaRawSpirvReplayCacheTest, TrimDropsIdleCachedNativeReplay) {
+TEST_P(BdaSpirvReplayCacheTest, TrimDropsIdleCachedNativeReplay) {
   ASSERT_EQ(0, QueryNativeReplayCache(IREE_SV("retained_instance_count")));
 
   IREE_ASSERT_OK(iree_hal_device_trim(device_));
@@ -1361,7 +1387,7 @@ TEST_P(BdaRawSpirvReplayCacheTest, TrimDropsIdleCachedNativeReplay) {
             1);
 }
 
-TEST_P(BdaRawSpirvReplayCacheTest, CommandBufferSkipsUnchangedBdaPublication) {
+TEST_P(BdaSpirvReplayCacheTest, CommandBufferSkipsUnchangedBdaPublication) {
   ASSERT_GE(QueryNativeReplayCache(IREE_SV("max_instance_count")), 1);
   ASSERT_EQ(0, QueryNativeReplayCache(IREE_SV("retained_instance_count")));
 
@@ -1417,8 +1443,7 @@ TEST_P(BdaRawSpirvReplayCacheTest, CommandBufferSkipsUnchangedBdaPublication) {
             QueryNativeReplayCache(IREE_SV("publication_update_count")));
 }
 
-TEST_P(BdaRawSpirvReplayCacheTest,
-       CommandBufferRepublishesChangedBdaPublication) {
+TEST_P(BdaSpirvReplayCacheTest, CommandBufferRepublishesChangedBdaPublication) {
   ASSERT_GE(QueryNativeReplayCache(IREE_SV("max_instance_count")), 1);
   ASSERT_EQ(0, QueryNativeReplayCache(IREE_SV("retained_instance_count")));
 
@@ -1468,7 +1493,7 @@ TEST_P(BdaRawSpirvReplayCacheTest,
             1);
 }
 
-TEST_P(BdaRawSpirvReplayCacheTest, ConcurrentExecutionsForkCachedNativeReplay) {
+TEST_P(BdaSpirvReplayCacheTest, ConcurrentExecutionsForkCachedNativeReplay) {
   ASSERT_GE(QueryNativeReplayCache(IREE_SV("max_instance_count")), 2);
   ASSERT_EQ(0, QueryNativeReplayCache(IREE_SV("retained_instance_count")));
 
@@ -1543,9 +1568,9 @@ TEST_P(BdaRawSpirvReplayCacheTest, ConcurrentExecutionsForkCachedNativeReplay) {
   EXPECT_EQ(0, QueryNativeReplayCache(IREE_SV("instance_count")));
 }
 
-CTS_REGISTER_TEST_SUITE_WITH_TAGS(BdaRawSpirvTest, {"vulkan_bda"},
-                                  {"vulkan_bda_replay_cache"});
-CTS_REGISTER_TEST_SUITE_WITH_TAGS(BdaRawSpirvReplayCacheTest,
-                                  {"vulkan_bda_replay_cache"}, {});
+CTS_REGISTER_TEST_SUITE_WITH_TAGS(BdaSpirvTest, {"vulkan"},
+                                  {"vulkan_replay_cache"});
+CTS_REGISTER_TEST_SUITE_WITH_TAGS(BdaSpirvReplayCacheTest,
+                                  {"vulkan_replay_cache"}, {});
 
 }  // namespace iree::hal::cts

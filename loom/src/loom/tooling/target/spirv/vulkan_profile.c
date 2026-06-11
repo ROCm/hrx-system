@@ -152,7 +152,7 @@ iree_status_t loom_spirv_vulkan_hal_profile_query(
   *out_facts = (loom_spirv_vulkan_hal_profile_facts_t){0};
   if (iree_hal_executable_cache_can_prepare_format(
           executable_cache, IREE_HAL_EXECUTABLE_CACHING_MODE_ALLOW_OPTIMIZATION,
-          IREE_SV("vulkan-spirv-bda-raw"))) {
+          IREE_SV("vulkan-spirv-bda"))) {
     out_facts->flags |= LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_RAW_BDA_EXECUTABLE;
   }
 
@@ -438,7 +438,7 @@ iree_status_t loom_spirv_vulkan_hal_profile_initialize_target_bundle(
   IREE_RETURN_IF_ERROR(loom_spirv_vulkan_hal_profile_require_flag(
       facts, LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_RAW_BDA_EXECUTABLE,
       IREE_SV("Vulkan HAL executable cache does not support "
-              "vulkan-spirv-bda-raw")));
+              "vulkan-spirv-bda")));
   IREE_RETURN_IF_ERROR(loom_spirv_vulkan_hal_profile_require_flag(
       facts, LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_BUFFER_DEVICE_ADDRESS,
       IREE_SV("Vulkan device does not expose buffer device addresses")));

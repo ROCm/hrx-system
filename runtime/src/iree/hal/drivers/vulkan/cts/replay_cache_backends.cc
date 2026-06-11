@@ -4,8 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// CTS backend registration for Vulkan devices constrained to the BDA dispatch
-// ABI.
+// CTS backend registration for Vulkan devices using native replay caching.
 
 #include "iree/hal/api.h"
 #include "iree/hal/cts/util/registry.h"
@@ -13,7 +12,7 @@
 
 namespace iree::hal::cts {
 
-static iree_status_t CreateVulkanBdaDeviceWithUri(
+static iree_status_t CreateVulkanReplayCacheDevice(
     iree_string_view_t uri,
     const iree_hal_device_create_params_t* create_params,
     iree_hal_driver_t** out_driver, iree_hal_device_t** out_device) {
@@ -47,42 +46,24 @@ static iree_status_t CreateVulkanBdaDeviceWithUri(
   return status;
 }
 
-static iree_status_t CreateVulkanBdaDevice(
+static iree_status_t CreateVulkanReplayCacheDeviceWithCache(
     const iree_hal_device_create_params_t* create_params,
     iree_hal_driver_t** out_driver, iree_hal_device_t** out_device) {
-  return CreateVulkanBdaDeviceWithUri(
-      iree_make_cstring_view("vulkan://?dispatch_abi=bda"), create_params,
-      out_driver, out_device);
-}
-
-static iree_status_t CreateVulkanBdaReplayCacheDevice(
-    const iree_hal_device_create_params_t* create_params,
-    iree_hal_driver_t** out_driver, iree_hal_device_t** out_device) {
-  return CreateVulkanBdaDeviceWithUri(
-      iree_make_cstring_view(
-          "vulkan://?dispatch_abi=bda&cached_bda_replay_instances=2&"
-          "retained_cached_bda_replay_instances=0"),
+  return CreateVulkanReplayCacheDevice(
+      iree_make_cstring_view("vulkan://?cached_bda_replay_instances=2&"
+                             "retained_cached_bda_replay_instances=0"),
       create_params, out_driver, out_device);
 }
 
-static bool vulkan_bda_registered_ =
+static bool vulkan_replay_cache_registered_ =
     (CtsRegistry::RegisterBackend({
-         "vulkan_bda",
-         {"vulkan_bda", CreateVulkanBdaDevice,
+         "vulkan_replay_cache",
+         {"vulkan_replay_cache", CreateVulkanReplayCacheDeviceWithCache,
           /*executable_format=*/nullptr,
           /*executable_data=*/nullptr, RecordingMode::kDirect,
           /*unsupported_tests=*/{},
           /*expected_failures=*/{}},
-         {"async_queue", "file_io", "vulkan_bda"},
-     }),
-     CtsRegistry::RegisterBackend({
-         "vulkan_bda_replay_cache",
-         {"vulkan_bda_replay_cache", CreateVulkanBdaReplayCacheDevice,
-          /*executable_format=*/nullptr,
-          /*executable_data=*/nullptr, RecordingMode::kDirect,
-          /*unsupported_tests=*/{},
-          /*expected_failures=*/{}},
-         {"async_queue", "file_io", "vulkan_bda", "vulkan_bda_replay_cache"},
+         {"async_queue", "file_io", "vulkan", "vulkan_replay_cache"},
      }),
      true);
 

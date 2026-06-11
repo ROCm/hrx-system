@@ -23,7 +23,6 @@ TEST(DeviceOptionsTest, InitializesDefaults) {
   iree_hal_vulkan_device_options_initialize(&options);
 
   EXPECT_EQ(IREE_HAL_VULKAN_DEVICE_FLAG_NONE, options.flags);
-  EXPECT_EQ(IREE_HAL_VULKAN_DISPATCH_ABI_ALL_RECOGNIZED, options.dispatch_abis);
   EXPECT_EQ(16u, options.max_cached_bda_replay_instances);
   EXPECT_EQ(64ull * 1024ull * 1024ull,
             options.max_cached_bda_replay_publication_bytes);
@@ -34,7 +33,6 @@ TEST(DeviceOptionsTest, ParsesStringPairs) {
   iree_hal_vulkan_device_options_t options;
   iree_hal_vulkan_device_options_initialize(&options);
   iree_string_pair_t pairs[] = {
-      iree_make_cstring_pair("dispatch_abi", "bda"),
       iree_make_cstring_pair("cached_bda_replay_instances", "4"),
       iree_make_cstring_pair("cached_bda_replay_publication_bytes", "1024"),
       iree_make_cstring_pair("retained_cached_bda_replay_instances", "3"),
@@ -43,7 +41,6 @@ TEST(DeviceOptionsTest, ParsesStringPairs) {
   IREE_ASSERT_OK(iree_hal_vulkan_device_options_parse(
       &options, PairList(IREE_ARRAYSIZE(pairs), pairs)));
 
-  EXPECT_EQ(IREE_HAL_VULKAN_DISPATCH_ABI_BDA, options.dispatch_abis);
   EXPECT_EQ(4u, options.max_cached_bda_replay_instances);
   EXPECT_EQ(1024u, options.max_cached_bda_replay_publication_bytes);
   EXPECT_EQ(3u, options.retained_cached_bda_replay_instances);
@@ -53,7 +50,6 @@ TEST(DeviceOptionsTest, ParsesPrefixedAliases) {
   iree_hal_vulkan_device_options_t options;
   iree_hal_vulkan_device_options_initialize(&options);
   iree_string_pair_t pairs[] = {
-      iree_make_cstring_pair("vulkan_dispatch_abi", "descriptors"),
       iree_make_cstring_pair("vulkan_cached_bda_replay_instances", "8"),
       iree_make_cstring_pair("vulkan_cached_bda_replay_publication_bytes",
                              "2048"),
@@ -64,7 +60,6 @@ TEST(DeviceOptionsTest, ParsesPrefixedAliases) {
   IREE_ASSERT_OK(iree_hal_vulkan_device_options_parse(
       &options, PairList(IREE_ARRAYSIZE(pairs), pairs)));
 
-  EXPECT_EQ(IREE_HAL_VULKAN_DISPATCH_ABI_DESCRIPTOR, options.dispatch_abis);
   EXPECT_EQ(8u, options.max_cached_bda_replay_instances);
   EXPECT_EQ(2048u, options.max_cached_bda_replay_publication_bytes);
   EXPECT_EQ(2u, options.retained_cached_bda_replay_instances);
@@ -107,15 +102,6 @@ TEST(DeviceOptionsTest, RejectsUnknownDeviceOptionFlags) {
   iree_hal_vulkan_device_options_t options;
   iree_hal_vulkan_device_options_initialize(&options);
   options.flags = 0x80000000u;
-
-  IREE_EXPECT_STATUS_IS(StatusCode::kInvalidArgument,
-                        iree_hal_vulkan_device_options_verify(&options));
-}
-
-TEST(DeviceOptionsTest, RejectsEmptyDispatchAbiMask) {
-  iree_hal_vulkan_device_options_t options;
-  iree_hal_vulkan_device_options_initialize(&options);
-  options.dispatch_abis = IREE_HAL_VULKAN_DISPATCH_ABI_NONE;
 
   IREE_EXPECT_STATUS_IS(StatusCode::kInvalidArgument,
                         iree_hal_vulkan_device_options_verify(&options));

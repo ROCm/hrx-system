@@ -25,6 +25,7 @@ class PhysicalDeviceSnapshotBuilder {
     snapshot_.properties2.properties.apiVersion = VK_API_VERSION_1_3;
     snapshot_.features12.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    snapshot_.features12.bufferDeviceAddress = VK_TRUE;
     snapshot_.features12.timelineSemaphore = VK_TRUE;
     snapshot_.features12.scalarBlockLayout = VK_TRUE;
     snapshot_.features11.sType =
@@ -60,6 +61,10 @@ class PhysicalDeviceSnapshotBuilder {
 
   void EnableBufferDeviceAddress() {
     snapshot_.features12.bufferDeviceAddress = VK_TRUE;
+  }
+
+  void DisableBufferDeviceAddress() {
+    snapshot_.features12.bufferDeviceAddress = VK_FALSE;
   }
 
   void EnableScalarShaderFeatures() {
@@ -161,8 +166,6 @@ TEST(DevicePlanTest, OwnedCreatePrefersDedicatedComputeFamily) {
   EXPECT_EQ(0u, plan.queue_assignment.compute.queue_index);
   EXPECT_EQ(2u, plan.queue_assignment.transfer.family_index);
   EXPECT_EQ(0u, plan.queue_assignment.transfer.queue_index);
-  EXPECT_EQ(IREE_HAL_VULKAN_DISPATCH_ABI_DESCRIPTOR,
-            plan.enabled_dispatch_abis);
   EXPECT_EQ(2u, plan.queue_create_info_count);
 }
 
@@ -228,36 +231,36 @@ TEST(DevicePlanTest, OwnedCreateRequiresCompleteSparseResidencyRequest) {
           sparse_residency_without_sparse_binding, &plan));
 }
 
-TEST(DevicePlanTest, OwnedCreateRequiresBdaForBdaOnlyDispatch) {
+TEST(DevicePlanTest, OwnedCreateRequiresBufferDeviceAddressBaseline) {
   PhysicalDeviceSnapshotBuilder builder;
   builder.AddQueueFamily(VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT, 1);
+  builder.DisableBufferDeviceAddress();
 
   iree_hal_vulkan_device_options_t options = DefaultDeviceOptions();
-  options.dispatch_abis = IREE_HAL_VULKAN_DISPATCH_ABI_BDA;
 
   iree_hal_vulkan_device_plan_t plan;
   IREE_EXPECT_STATUS_IS(
       StatusCode::kUnavailable,
       iree_hal_vulkan_device_plan_initialize_for_create(
           builder.snapshot(), &options, IREE_HAL_VULKAN_REQUEST_FLAG_NONE,
-          IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES, &plan));
+          IREE_HAL_VULKAN_FEATURE_NONE, &plan));
 }
 
-TEST(DevicePlanTest, OwnedCreateEnablesBdaDispatchWhenAvailable) {
+TEST(DevicePlanTest, OwnedCreateEnablesBaselineBufferDeviceAddress) {
   PhysicalDeviceSnapshotBuilder builder;
   builder.AddQueueFamily(VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT, 1);
-  builder.EnableBufferDeviceAddress();
 
   iree_hal_vulkan_device_options_t options = DefaultDeviceOptions();
 
   iree_hal_vulkan_device_plan_t plan;
   IREE_ASSERT_OK(iree_hal_vulkan_device_plan_initialize_for_create(
       builder.snapshot(), &options, IREE_HAL_VULKAN_REQUEST_FLAG_NONE,
-      IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES, &plan));
+      IREE_HAL_VULKAN_FEATURE_NONE, &plan));
 
   EXPECT_TRUE(plan.enabled_features12.bufferDeviceAddress);
-  EXPECT_EQ(IREE_HAL_VULKAN_DISPATCH_ABI_ALL_RECOGNIZED,
-            plan.enabled_dispatch_abis);
+  EXPECT_TRUE(iree_all_bits_set(
+      plan.enabled_features,
+      IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES));
 }
 
 TEST(DevicePlanTest, OwnedCreateReportsAvailableScalarShaderFeatures) {
@@ -524,8 +527,6 @@ TEST(DevicePlanTest, WrapInfersTransferFromComputeWhenSupported) {
   EXPECT_EQ(0u, plan.queue_assignment.transfer.family_index);
   EXPECT_EQ(0u, plan.queue_assignment.transfer.queue_index);
   EXPECT_EQ(1ull << 1, plan.queue_assignment.transfer.affinity);
-  EXPECT_EQ(IREE_HAL_VULKAN_DISPATCH_ABI_DESCRIPTOR,
-            plan.enabled_dispatch_abis);
 }
 
 TEST(DevicePlanTest, WrapCarriesRequestFlags) {

@@ -148,7 +148,7 @@ static iree_status_t loom_spirv_hal_artifact_provider_emit_entries(
     const iree_const_byte_span_t module_bytes =
         loom_spirv_module_binary_byte_span(&storage->module);
     *out_artifact = (loom_run_hal_artifact_t){
-        .executable_format = IREE_SV("vulkan-spirv-bda-raw"),
+        .executable_format = IREE_SV("vulkan-spirv-bda"),
         .target_bundle = target->target_bundle,
         .target_artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY,
         .target_artifact_data = module_bytes,

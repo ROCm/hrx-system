@@ -90,8 +90,7 @@ static bool FakeExecutableCacheCanPrepareFormat(
   FakeExecutableCache* executable_cache =
       reinterpret_cast<FakeExecutableCache*>(base_executable_cache);
   return executable_cache->raw_bda_supported &&
-         iree_string_view_equal(executable_format,
-                                IREE_SV("vulkan-spirv-bda-raw"));
+         iree_string_view_equal(executable_format, IREE_SV("vulkan-spirv-bda"));
 }
 
 static const iree_hal_device_vtable_t kFakeHalDeviceVtable = {

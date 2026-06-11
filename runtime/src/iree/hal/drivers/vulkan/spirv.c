@@ -524,8 +524,8 @@ typedef struct iree_hal_vulkan_spirv_bda_metadata_parse_state_t {
   // Whether constant offset metadata was already parsed.
   bool has_constant_offset;
 
-  // Whether constant count metadata was already parsed.
-  bool has_constant_count;
+  // Whether constant byte length metadata was already parsed.
+  bool has_constant_byte_length;
 
   // Whether binding count metadata was already parsed.
   bool has_binding_count;
@@ -618,17 +618,17 @@ static iree_status_t iree_hal_vulkan_spirv_parse_bda_metadata_string(
     return iree_ok_status();
   }
 
-  if (iree_string_view_consume_prefix(&value, IREE_SV("constants="))) {
-    if (state->has_constant_count) {
+  if (iree_string_view_consume_prefix(&value, IREE_SV("constant_length="))) {
+    if (state->has_constant_byte_length) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "Vulkan BDA metadata constant count is "
+                              "Vulkan BDA metadata constant length is "
                               "duplicated");
     }
-    state->has_constant_count = true;
-    uint32_t constant_count = 0;
+    state->has_constant_byte_length = true;
+    uint32_t constant_byte_length = 0;
     IREE_RETURN_IF_ERROR(iree_hal_vulkan_spirv_parse_metadata_uint32(
-        value, UINT16_MAX, "constants", &constant_count));
-    metadata->constant_count = (uint16_t)constant_count;
+        value, UINT32_MAX, "constant_length", &constant_byte_length));
+    metadata->constant_byte_length = constant_byte_length;
     return iree_ok_status();
   }
 
@@ -642,6 +642,7 @@ static iree_status_t iree_hal_vulkan_spirv_parse_bda_metadata_string(
     uint32_t binding_count = 0;
     IREE_RETURN_IF_ERROR(iree_hal_vulkan_spirv_parse_metadata_uint32(
         value, UINT16_MAX, "bindings", &binding_count));
+    metadata->binding_count_known = true;
     metadata->binding_count = (uint16_t)binding_count;
     return iree_ok_status();
   }
@@ -730,13 +731,13 @@ static iree_status_t iree_hal_vulkan_spirv_validate_bda_metadata(
   if (metadata->root_push_constant_offset != 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "raw Vulkan BDA metadata root push constant offset must be zero");
+        "Vulkan BDA metadata root push constant offset must be zero");
   }
   if (metadata->root_push_constant_length !=
       IREE_HAL_VULKAN_SPIRV_BDA_ROOT_BYTE_LENGTH) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "raw Vulkan BDA metadata root push constant length %u does not match "
+        "Vulkan BDA metadata root push constant length %u does not match "
         "ABI v1 length %u",
         metadata->root_push_constant_length,
         IREE_HAL_VULKAN_SPIRV_BDA_ROOT_BYTE_LENGTH);
@@ -744,17 +745,21 @@ static iree_status_t iree_hal_vulkan_spirv_validate_bda_metadata(
   if ((metadata->constant_push_constant_offset % sizeof(uint32_t)) != 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "raw Vulkan BDA metadata constant push constant offset must be "
+        "Vulkan BDA metadata constant push constant offset must be "
         "4-byte aligned");
   }
-  const uint64_t constant_length =
-      (uint64_t)metadata->constant_count * sizeof(uint32_t);
+  if ((metadata->constant_byte_length % sizeof(uint32_t)) != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Vulkan BDA metadata constant byte length must "
+                            "be 4-byte aligned");
+  }
+  const uint64_t constant_length = metadata->constant_byte_length;
   const uint64_t constant_end =
       (uint64_t)metadata->constant_push_constant_offset + constant_length;
   if (constant_end > UINT32_MAX) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
-        "raw Vulkan BDA metadata constant push constant range overflows");
+        "Vulkan BDA metadata constant push constant range overflows");
   }
   const uint64_t root_end = (uint64_t)metadata->root_push_constant_offset +
                             metadata->root_push_constant_length;
@@ -763,17 +768,17 @@ static iree_status_t iree_hal_vulkan_spirv_validate_bda_metadata(
       metadata->constant_push_constant_offset < root_end) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "raw Vulkan BDA metadata inline constants overlap the hidden root");
+        "Vulkan BDA metadata inline constants overlap the hidden root");
   }
   if (state->has_binding_requirements && !state->has_binding_count) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "raw Vulkan BDA binding requirements require an "
+                            "Vulkan BDA binding requirements require an "
                             "explicit binding count");
   }
   if (state->has_binding_requirements && metadata->binding_count == 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "raw Vulkan BDA binding requirements require a non-zero binding count");
+        "Vulkan BDA binding requirements require a non-zero binding count");
   }
   return iree_ok_status();
 }
@@ -849,7 +854,7 @@ static iree_status_t iree_hal_vulkan_spirv_find_push_constant_pointee_type(
     if (operands[1] != IREE_HAL_VULKAN_SPIRV_STORAGE_CLASS_PUSH_CONSTANT) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "raw Vulkan BDA root variable type is not a PushConstant pointer");
+          "Vulkan BDA root variable type is not a PushConstant pointer");
     }
     *out_pointee_type_id = operands[2];
     return iree_ok_status();
@@ -857,7 +862,7 @@ static iree_status_t iree_hal_vulkan_spirv_find_push_constant_pointee_type(
 
   return iree_make_status(
       IREE_STATUS_INVALID_ARGUMENT,
-      "raw Vulkan BDA root variable pointer type is not declared");
+      "Vulkan BDA root variable pointer type is not declared");
 }
 
 static iree_status_t iree_hal_vulkan_spirv_verify_bda_root_struct_layout(
@@ -888,7 +893,7 @@ static iree_status_t iree_hal_vulkan_spirv_verify_bda_root_struct_layout(
         if (word_count - 2 < IREE_HAL_VULKAN_SPIRV_BDA_ROOT_MEMBER_COUNT) {
           return iree_make_status(
               IREE_STATUS_INVALID_ARGUMENT,
-              "raw Vulkan BDA root has %u members but expected at least %u",
+              "Vulkan BDA root has %u members but expected at least %u",
               (uint32_t)(word_count - 2),
               IREE_HAL_VULKAN_SPIRV_BDA_ROOT_MEMBER_COUNT);
         }
@@ -934,24 +939,24 @@ static iree_status_t iree_hal_vulkan_spirv_verify_bda_root_struct_layout(
   if (!has_struct_type) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "raw Vulkan BDA root PushConstant struct type is not declared");
+        "Vulkan BDA root PushConstant struct type is not declared");
   }
   if (!has_block_decoration) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "raw Vulkan BDA root PushConstant struct must be Block-decorated");
+        "Vulkan BDA root PushConstant struct must be Block-decorated");
   }
 
   for (uint32_t i = 0; i < IREE_HAL_VULKAN_SPIRV_BDA_ROOT_MEMBER_COUNT; ++i) {
     if (!has_member_offsets[i]) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "raw Vulkan BDA root member %u has no Offset decoration", i);
+          "Vulkan BDA root member %u has no Offset decoration", i);
     }
     if (member_offsets[i] != iree_hal_vulkan_spirv_bda_root_member_offsets[i]) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "raw Vulkan BDA root member %u has offset %u but expected %u", i,
+          "Vulkan BDA root member %u has offset %u but expected %u", i,
           member_offsets[i], iree_hal_vulkan_spirv_bda_root_member_offsets[i]);
     }
   }
@@ -965,7 +970,7 @@ iree_hal_vulkan_spirv_verify_bda_root_push_constant_layout_from_analysis(
   if (analysis->push_constant_variable_count != 1) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "raw Vulkan BDA executable must declare exactly one PushConstant root "
+        "Vulkan BDA executable must declare exactly one PushConstant root "
         "variable; found %" PRIhsz,
         analysis->push_constant_variable_count);
   }

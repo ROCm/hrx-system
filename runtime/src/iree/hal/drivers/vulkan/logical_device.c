@@ -96,9 +96,6 @@ struct iree_hal_vulkan_logical_device_t {
   // HAL feature bits enabled on the logical device.
   iree_hal_vulkan_features_t enabled_features;
 
-  // Executable dispatch ABI bits enabled on the logical device.
-  iree_hal_vulkan_dispatch_abis_t enabled_dispatch_abis;
-
   // Host block pool for command-buffer resource sets and future command blocks.
   iree_arena_block_pool_t command_buffer_block_pool;
 
@@ -628,11 +625,10 @@ static iree_status_t iree_hal_vulkan_logical_device_query_i64(
     return iree_ok_status();
   }
   if (iree_string_view_equal(category, IREE_SV("hal.executable.format"))) {
-    *out_value =
-        iree_hal_vulkan_executable_format_supported(
-            device->enabled_features, device->enabled_dispatch_abis, key)
-            ? 1
-            : 0;
+    *out_value = iree_hal_vulkan_executable_format_supported(
+                     device->enabled_features, key)
+                     ? 1
+                     : 0;
     return iree_ok_status();
   }
   if (iree_string_view_equal(category, IREE_SV("hal.device"))) {
@@ -1129,8 +1125,7 @@ static iree_status_t iree_hal_vulkan_logical_device_create_executable_cache(
   return iree_hal_vulkan_executable_cache_create(
       &device->syms, device->logical_device, &device->physical_device,
       device->enabled_features, device->enabled_extensions, identifier,
-      device->enabled_dispatch_abis, device->host_allocator,
-      out_executable_cache);
+      device->host_allocator, out_executable_cache);
 }
 
 static iree_status_t iree_hal_vulkan_logical_device_import_file(
@@ -1877,7 +1872,6 @@ static iree_status_t iree_hal_vulkan_logical_device_initialize_queue_lane(
       .debug_utils = &device->debug_utils,
       .logical_device = device->logical_device,
       .builtins = &device->builtins,
-      .enabled_dispatch_abis = device->enabled_dispatch_abis,
       .queue = queue->handle,
       .queue_flags = queue->selection.flags,
       .timestamp_valid_bits = queue->selection.timestamp_valid_bits,
@@ -1978,7 +1972,6 @@ static iree_status_t iree_hal_vulkan_logical_device_initialize_from_plan(
   if (iree_status_is_ok(status)) {
     device->enabled_features = device_plan->enabled_features;
     device->enabled_extensions = device_plan->enabled_extensions;
-    device->enabled_dispatch_abis = device_plan->enabled_dispatch_abis;
     device->max_cached_bda_replay_instances =
         device_options->max_cached_bda_replay_instances;
     device->max_cached_bda_replay_publication_bytes =

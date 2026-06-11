@@ -893,7 +893,7 @@ TEST(SpirvTest, ParsesBdaDispatchMetadata) {
   std::vector<uint32_t> module = MakeBdaMetadataModule({
       "iree.vulkan.bda.v1",
       "iree.vulkan.bda.v1.bindings=2",
-      "iree.vulkan.bda.v1.constants=3",
+      "iree.vulkan.bda.v1.constant_length=12",
       "iree.vulkan.bda.v1.constant_offset=48",
       "iree.vulkan.bda.v1.binding.1=16,64",
   });
@@ -905,7 +905,8 @@ TEST(SpirvTest, ParsesBdaDispatchMetadata) {
   EXPECT_EQ(0u, metadata.root_push_constant_offset);
   EXPECT_EQ(32u, metadata.root_push_constant_length);
   EXPECT_EQ(48u, metadata.constant_push_constant_offset);
-  EXPECT_EQ(3u, metadata.constant_count);
+  EXPECT_EQ(12u, metadata.constant_byte_length);
+  EXPECT_TRUE(metadata.binding_count_known);
   EXPECT_EQ(2u, metadata.binding_count);
   ASSERT_EQ(2u, metadata.binding_requirement_count);
   EXPECT_EQ(1u, metadata.binding_requirements[0].minimum_alignment);

@@ -389,7 +389,7 @@ low.kernel.def target(@hal_target) workgroup_size(1, 1, 1) @spirv_raw_bda_storag
                OpModuleProcessed "iree.vulkan.bda.v1"
                OpModuleProcessed "iree.vulkan.bda.v1.root=0,32"
                OpModuleProcessed "iree.vulkan.bda.v1.constant_offset=32"
-               OpModuleProcessed "iree.vulkan.bda.v1.constants=2"
+               OpModuleProcessed "iree.vulkan.bda.v1.constant_length=8"
                OpModuleProcessed "iree.vulkan.bda.v1.bindings=2"
                OpDecorate %_arr_uint_uint_2 ArrayStride 4
                OpDecorate %_struct_6 Block
@@ -510,7 +510,7 @@ low.kernel.def target(@hal_target) workgroup_size(1, 2, 1) @spirv_raw_bda_builti
                OpModuleProcessed "iree.vulkan.bda.v1"
                OpModuleProcessed "iree.vulkan.bda.v1.root=0,32"
                OpModuleProcessed "iree.vulkan.bda.v1.constant_offset=32"
-               OpModuleProcessed "iree.vulkan.bda.v1.constants=0"
+               OpModuleProcessed "iree.vulkan.bda.v1.constant_length=0"
                OpModuleProcessed "iree.vulkan.bda.v1.bindings=2"
                OpDecorate %_struct_4 Block
                OpMemberDecorate %_struct_4 0 Offset 0
@@ -638,7 +638,7 @@ low.kernel.def target(@hal_target) workgroup_size(1, 1, 1) @spirv_raw_bda_storag
                OpModuleProcessed "iree.vulkan.bda.v1"
                OpModuleProcessed "iree.vulkan.bda.v1.root=0,32"
                OpModuleProcessed "iree.vulkan.bda.v1.constant_offset=32"
-               OpModuleProcessed "iree.vulkan.bda.v1.constants=4"
+               OpModuleProcessed "iree.vulkan.bda.v1.constant_length=16"
                OpModuleProcessed "iree.vulkan.bda.v1.bindings=2"
                OpDecorate %_arr_uint_uint_4 ArrayStride 4
                OpDecorate %_struct_6 Block
@@ -767,7 +767,7 @@ low.kernel.def target(@hal_target) workgroup_size(1, 1, 1) @spirv_raw_bda_storag
                OpModuleProcessed "iree.vulkan.bda.v1"
                OpModuleProcessed "iree.vulkan.bda.v1.root=0,32"
                OpModuleProcessed "iree.vulkan.bda.v1.constant_offset=32"
-               OpModuleProcessed "iree.vulkan.bda.v1.constants=4"
+               OpModuleProcessed "iree.vulkan.bda.v1.constant_length=16"
                OpModuleProcessed "iree.vulkan.bda.v1.bindings=2"
                OpDecorate %_arr_uint_uint_4 ArrayStride 4
                OpDecorate %_struct_6 Block
@@ -957,7 +957,7 @@ low.kernel.def target(@hal_target) workgroup_size(1, 1, 1) @spirv_raw_bda_storag
                OpModuleProcessed "iree.vulkan.bda.v1"
                OpModuleProcessed "iree.vulkan.bda.v1.root=0,32"
                OpModuleProcessed "iree.vulkan.bda.v1.constant_offset=32"
-               OpModuleProcessed "iree.vulkan.bda.v1.constants=2"
+               OpModuleProcessed "iree.vulkan.bda.v1.constant_length=8"
                OpModuleProcessed "iree.vulkan.bda.v1.bindings=2"
                OpDecorate %_arr_uint_uint_2 ArrayStride 4
                OpDecorate %_struct_6 Block
@@ -1070,7 +1070,7 @@ low.kernel.def target(@hal_target) workgroup_size(1, 1, 1) @spirv_raw_bda_storag
                OpModuleProcessed "iree.vulkan.bda.v1"
                OpModuleProcessed "iree.vulkan.bda.v1.root=0,32"
                OpModuleProcessed "iree.vulkan.bda.v1.constant_offset=32"
-               OpModuleProcessed "iree.vulkan.bda.v1.constants=2"
+               OpModuleProcessed "iree.vulkan.bda.v1.constant_length=8"
                OpModuleProcessed "iree.vulkan.bda.v1.bindings=2"
                OpDecorate %_arr_uint_uint_2 ArrayStride 4
                OpDecorate %_struct_6 Block
@@ -1239,7 +1239,7 @@ low.kernel.def target(@hal_target) workgroup_size(1, 1, 1) @spirv_raw_bda_storag
                OpModuleProcessed "iree.vulkan.bda.v1"
                OpModuleProcessed "iree.vulkan.bda.v1.root=0,32"
                OpModuleProcessed "iree.vulkan.bda.v1.constant_offset=32"
-               OpModuleProcessed "iree.vulkan.bda.v1.constants=2"
+               OpModuleProcessed "iree.vulkan.bda.v1.constant_length=8"
                OpModuleProcessed "iree.vulkan.bda.v1.bindings=10"
                OpDecorate %_arr_uint_uint_2 ArrayStride 4
                OpDecorate %_struct_6 Block
@@ -1819,7 +1819,7 @@ low.kernel.def target(@hal_target_scalar_payloads) abi_layout({spirv_arg_value_t
                OpModuleProcessed "iree.vulkan.bda.v1"
                OpModuleProcessed "iree.vulkan.bda.v1.root=0,32"
                OpModuleProcessed "iree.vulkan.bda.v1.constant_offset=32"
-               OpModuleProcessed "iree.vulkan.bda.v1.constants=12"
+               OpModuleProcessed "iree.vulkan.bda.v1.constant_length=48"
                OpModuleProcessed "iree.vulkan.bda.v1.bindings=8"
                OpDecorate %_arr_uint_uint_12 ArrayStride 4
                OpDecorate %_struct_6 Block
@@ -2116,7 +2116,7 @@ low.kernel.def target(@hal_target) workgroup_size(1, 1, 1) @spirv_raw_bda_scalar
                OpModuleProcessed "iree.vulkan.bda.v1"
                OpModuleProcessed "iree.vulkan.bda.v1.root=0,32"
                OpModuleProcessed "iree.vulkan.bda.v1.constant_offset=32"
-               OpModuleProcessed "iree.vulkan.bda.v1.constants=2"
+               OpModuleProcessed "iree.vulkan.bda.v1.constant_length=8"
                OpModuleProcessed "iree.vulkan.bda.v1.bindings=12"
                OpDecorate %_arr_uint_uint_2 ArrayStride 4
                OpDecorate %_struct_6 Block
@@ -2331,7 +2331,7 @@ low.kernel.def target(@hal_target_coop_f16) workgroup_size(32, 1, 1) @spirv_raw_
                OpModuleProcessed "iree.vulkan.bda.v1"
                OpModuleProcessed "iree.vulkan.bda.v1.root=0,32"
                OpModuleProcessed "iree.vulkan.bda.v1.constant_offset=32"
-               OpModuleProcessed "iree.vulkan.bda.v1.constants=2"
+               OpModuleProcessed "iree.vulkan.bda.v1.constant_length=8"
                OpModuleProcessed "iree.vulkan.bda.v1.bindings=4"
                OpDecorate %_arr_uint_uint_2 ArrayStride 4
                OpDecorate %_struct_6 Block
@@ -2480,7 +2480,7 @@ low.kernel.def target(@hal_target_coop_s8) workgroup_size(32, 1, 1) @spirv_raw_b
                OpModuleProcessed "iree.vulkan.bda.v1"
                OpModuleProcessed "iree.vulkan.bda.v1.root=0,32"
                OpModuleProcessed "iree.vulkan.bda.v1.constant_offset=32"
-               OpModuleProcessed "iree.vulkan.bda.v1.constants=2"
+               OpModuleProcessed "iree.vulkan.bda.v1.constant_length=8"
                OpModuleProcessed "iree.vulkan.bda.v1.bindings=4"
                OpDecorate %_arr_uint_uint_2 ArrayStride 4
                OpDecorate %_struct_6 Block
@@ -2628,7 +2628,7 @@ low.kernel.def target(@hal_target_coop_u8) workgroup_size(32, 1, 1) @spirv_raw_b
                OpModuleProcessed "iree.vulkan.bda.v1"
                OpModuleProcessed "iree.vulkan.bda.v1.root=0,32"
                OpModuleProcessed "iree.vulkan.bda.v1.constant_offset=32"
-               OpModuleProcessed "iree.vulkan.bda.v1.constants=2"
+               OpModuleProcessed "iree.vulkan.bda.v1.constant_length=8"
                OpModuleProcessed "iree.vulkan.bda.v1.bindings=4"
                OpDecorate %_arr_uint_uint_2 ArrayStride 4
                OpDecorate %_struct_6 Block
@@ -2778,7 +2778,7 @@ low.kernel.def target(@hal_target_coop_bf16) workgroup_size(32, 1, 1) @spirv_raw
                OpModuleProcessed "iree.vulkan.bda.v1"
                OpModuleProcessed "iree.vulkan.bda.v1.root=0,32"
                OpModuleProcessed "iree.vulkan.bda.v1.constant_offset=32"
-               OpModuleProcessed "iree.vulkan.bda.v1.constants=2"
+               OpModuleProcessed "iree.vulkan.bda.v1.constant_length=8"
                OpModuleProcessed "iree.vulkan.bda.v1.bindings=4"
                OpDecorate %_arr_uint_uint_2 ArrayStride 4
                OpDecorate %_struct_6 Block

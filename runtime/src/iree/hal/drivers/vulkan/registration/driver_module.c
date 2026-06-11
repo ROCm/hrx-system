@@ -35,10 +35,6 @@ IREE_FLAG(bool, vulkan_sparse_binding, true,
           "Requests sparse binding for large virtual buffers.");
 IREE_FLAG(bool, vulkan_sparse_residency, true,
           "Requests sparse residency and aliased sparse buffer mappings.");
-IREE_FLAG(bool, vulkan_buffer_device_addresses, true,
-          "Requests buffer device addresses for pointer-first executables.");
-IREE_FLAG(string, vulkan_dispatch_abi, "all",
-          "Executable dispatch ABI policy: descriptor, bda, or all.");
 IREE_FLAG(
     int32_t, vulkan_cached_bda_replay_instances, 16,
     "Maximum cached native BDA command-buffer replay instances per queue lane; "
@@ -80,9 +76,6 @@ static iree_status_t iree_hal_vulkan_driver_factory_try_create(
 
   options.libvulkan_search_paths = FLAG_vulkan_libvulkan_search_path_list();
   options.debug_verbosity = FLAG_vulkan_debug_verbosity;
-  IREE_RETURN_IF_ERROR(iree_hal_vulkan_dispatch_abis_parse(
-      iree_make_cstring_view(FLAG_vulkan_dispatch_abi),
-      &options.device_options.dispatch_abis));
   if (FLAG_vulkan_cached_bda_replay_instances < 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -131,10 +124,6 @@ static iree_status_t iree_hal_vulkan_driver_factory_try_create(
   if (FLAG_vulkan_sparse_residency) {
     options.requested_features |=
         IREE_HAL_VULKAN_FEATURE_ENABLE_SPARSE_RESIDENCY_ALIASED;
-  }
-  if (FLAG_vulkan_buffer_device_addresses) {
-    options.requested_features |=
-        IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES;
   }
   if (FLAG_vulkan_dedicated_compute_queue) {
     options.device_options.flags |=

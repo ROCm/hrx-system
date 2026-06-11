@@ -37,9 +37,6 @@ typedef struct iree_hal_vulkan_executable_cache_t {
   // Recognized Vulkan device extension bits enabled on the logical device.
   iree_hal_vulkan_device_extensions_t enabled_extensions;
 
-  // Executable dispatch ABI bits enabled on the logical device.
-  iree_hal_vulkan_dispatch_abis_t enabled_dispatch_abis;
-
   // Vulkan pipeline cache owned by this HAL executable cache.
   VkPipelineCache pipeline_cache;
 } iree_hal_vulkan_executable_cache_t;
@@ -58,9 +55,7 @@ iree_status_t iree_hal_vulkan_executable_cache_create(
     const iree_hal_vulkan_physical_device_snapshot_t* physical_device,
     iree_hal_vulkan_features_t enabled_features,
     iree_hal_vulkan_device_extensions_t enabled_extensions,
-    iree_string_view_t identifier,
-    iree_hal_vulkan_dispatch_abis_t enabled_dispatch_abis,
-    iree_allocator_t host_allocator,
+    iree_string_view_t identifier, iree_allocator_t host_allocator,
     iree_hal_executable_cache_t** out_executable_cache) {
   IREE_ASSERT_ARGUMENT(syms);
   IREE_ASSERT_ARGUMENT(logical_device);
@@ -83,7 +78,6 @@ iree_status_t iree_hal_vulkan_executable_cache_create(
   executable_cache->physical_device = physical_device;
   executable_cache->enabled_features = enabled_features;
   executable_cache->enabled_extensions = enabled_extensions;
-  executable_cache->enabled_dispatch_abis = enabled_dispatch_abis;
 
   VkPipelineCacheCreateInfo create_info = {
       .sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO,
@@ -145,8 +139,7 @@ static bool iree_hal_vulkan_executable_cache_can_prepare_format(
   iree_hal_vulkan_executable_cache_t* executable_cache =
       iree_hal_vulkan_executable_cache_cast(base_executable_cache);
   return iree_hal_vulkan_executable_format_supported(
-      executable_cache->enabled_features,
-      executable_cache->enabled_dispatch_abis, executable_format);
+      executable_cache->enabled_features, executable_format);
 }
 
 static iree_status_t iree_hal_vulkan_executable_cache_prepare_executable(
@@ -157,7 +150,6 @@ static iree_status_t iree_hal_vulkan_executable_cache_prepare_executable(
       iree_hal_vulkan_executable_cache_cast(base_executable_cache);
   if (!iree_hal_vulkan_executable_format_supported(
           executable_cache->enabled_features,
-          executable_cache->enabled_dispatch_abis,
           executable_params->executable_format)) {
     return iree_make_status(
         IREE_STATUS_NOT_FOUND,
@@ -169,8 +161,7 @@ static iree_status_t iree_hal_vulkan_executable_cache_prepare_executable(
       executable_cache->syms, executable_cache->logical_device,
       executable_cache->physical_device, executable_cache->enabled_features,
       executable_cache->enabled_extensions, executable_cache->pipeline_cache,
-      executable_cache->enabled_dispatch_abis, executable_params,
-      executable_cache->host_allocator, out_executable);
+      executable_params, executable_cache->host_allocator, out_executable);
 }
 
 static const iree_hal_executable_cache_vtable_t
