@@ -432,6 +432,58 @@ const VarDecl* ReferencedVariableThroughIndirection(const Expr* Expression) {
   return nullptr;
 }
 
+bool IsNullPointerConstant(const Expr* Expression, ASTContext& Context) {
+  Expression = IgnoreExprNoise(Expression);
+  return Expression && Expression->isNullPointerConstant(
+                           Context, Expr::NPC_ValueDependentIsNotNull);
+}
+
+const VarDecl* PositivePointerGuardVariable(const Expr* Condition,
+                                            ASTContext& Context) {
+  Condition = IgnoreExprNoise(Condition);
+  if (const VarDecl* Variable = ReferencedVariable(Condition)) {
+    return Variable->getType()->isAnyPointerType() ? Variable : nullptr;
+  }
+
+  const auto* Binary = dyn_cast_or_null<BinaryOperator>(Condition);
+  if (!Binary || Binary->getOpcode() != BO_NE) {
+    return nullptr;
+  }
+  const VarDecl* LeftVariable = ReferencedVariable(Binary->getLHS());
+  const VarDecl* RightVariable = ReferencedVariable(Binary->getRHS());
+  if (LeftVariable && !RightVariable &&
+      IsNullPointerConstant(Binary->getRHS(), Context)) {
+    return LeftVariable->getType()->isAnyPointerType() ? LeftVariable : nullptr;
+  }
+  if (RightVariable && !LeftVariable &&
+      IsNullPointerConstant(Binary->getLHS(), Context)) {
+    return RightVariable->getType()->isAnyPointerType() ? RightVariable
+                                                        : nullptr;
+  }
+  return nullptr;
+}
+
+const Stmt* SingleStatementBody(const Stmt* Body) {
+  if (!Body) {
+    return nullptr;
+  }
+  const auto* Compound = dyn_cast<CompoundStmt>(Body);
+  if (!Compound) {
+    return Body;
+  }
+  const Stmt* OnlyStatement = nullptr;
+  for (const Stmt* Statement : Compound->body()) {
+    if (!Statement) {
+      continue;
+    }
+    if (OnlyStatement) {
+      return nullptr;
+    }
+    OnlyStatement = Statement;
+  }
+  return OnlyStatement;
+}
+
 struct DirectRefCountOperation {
   const VarDecl* Variable = nullptr;
   const FunctionDecl* Function = nullptr;
@@ -478,6 +530,24 @@ std::optional<DirectRefCountOperation> DirectReleaseStatement(
 std::optional<DirectRefCountOperation> DirectRetainStatement(
     const Stmt* Statement) {
   return DirectRefCountOperationStatement(Statement, IsRetainFunctionName);
+}
+
+std::optional<DirectRefCountOperation> GuardedReleaseStatement(
+    const IfStmt* Statement, ASTContext& Context) {
+  if (!Statement || Statement->getElse()) {
+    return std::nullopt;
+  }
+  const VarDecl* GuardedVariable =
+      PositivePointerGuardVariable(Statement->getCond(), Context);
+  if (!GuardedVariable) {
+    return std::nullopt;
+  }
+  std::optional<DirectRefCountOperation> Release =
+      DirectReleaseStatement(SingleStatementBody(Statement->getThen()));
+  if (!Release || Release->Variable != GuardedVariable) {
+    return std::nullopt;
+  }
+  return Release;
 }
 
 const VarDecl* DirectVariableAssignment(const Stmt* Statement) {
@@ -710,6 +780,9 @@ void RefCountLifecycleCheck::registerMatchers(
   Finder->addMatcher(
       fieldDecl(unless(isExpansionInSystemHeader())).bind("refcount-field"),
       this);
+  Finder->addMatcher(
+      ifStmt(unless(isExpansionInSystemHeader())).bind("guarded-release-if"),
+      this);
 }
 
 void RefCountLifecycleCheck::check(
@@ -734,6 +807,23 @@ void RefCountLifecycleCheck::check(
              "in a refcounted object");
         return;
     }
+  }
+
+  if (const auto* If = Result.Nodes.getNodeAs<IfStmt>("guarded-release-if")) {
+    const SourceManager& SourceManager = *Result.SourceManager;
+    if (IsExternalMacroBody(If->getIfLoc(), SourceManager)) {
+      return;
+    }
+    std::optional<DirectRefCountOperation> Release =
+        GuardedReleaseStatement(If, *Result.Context);
+    if (!Release || IsExternalMacroBody(Release->Location, SourceManager)) {
+      return;
+    }
+    diag(SourceManager.getExpansionLoc(If->getIfLoc()),
+         "%0 is null-guarded before %1, but release functions must be "
+         "null-safe")
+        << Release->Variable->getName() << Release->Function->getName();
+    return;
   }
 
   const auto* Function = Result.Nodes.getNodeAs<FunctionDecl>("function");
