@@ -1009,9 +1009,9 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0,
                                     iree_hal_streaming_stream_flush(stream));
 
-  // Mutex needed for launch per CUDA docs. It also protects the executable
-  // semaphore base values below, which are reused and advanced across launches
-  // of the same executable graph.
+  // Mutex needed for launch as multiple threads can submit at once.
+  // It also protects the executable semaphore base values below, which
+  // are reused and advanced across launches of the same executable graph.
   iree_slim_mutex_lock(&exec->mutex);
 
   // Each graph block stores semaphore payload offsets relative to these base
