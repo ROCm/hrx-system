@@ -396,7 +396,7 @@ typedef struct loom_llvm_temp_file_t {
   char path[MAX_PATH];
 } loom_llvm_temp_file_t;
 
-static iree_status_t loom_llvm_temp_file_allocate(
+static iree_status_t loom_llvm_temp_file_initialize(
     const char* prefix, loom_llvm_temp_file_t* out_file) {
   memset(out_file, 0, sizeof(*out_file));
   char temp_directory[MAX_PATH] = {0};
@@ -664,7 +664,7 @@ typedef struct loom_llvm_temp_file_t {
   char path[4096];
 } loom_llvm_temp_file_t;
 
-static iree_status_t loom_llvm_temp_file_allocate(
+static iree_status_t loom_llvm_temp_file_initialize(
     const char* stem, loom_llvm_temp_file_t* out_file) {
   memset(out_file, 0, sizeof(*out_file));
   int length =
@@ -801,7 +801,7 @@ typedef struct loom_llvm_temp_file_t {
   uint8_t unused;
 } loom_llvm_temp_file_t;
 
-static iree_status_t loom_llvm_temp_file_allocate(
+static iree_status_t loom_llvm_temp_file_initialize(
     const char* stem, loom_llvm_temp_file_t* out_file) {
   (void)stem;
   (void)out_file;
@@ -948,7 +948,7 @@ iree_status_t loom_llvm_tool_disassemble_bitcode(
   *out_text = (loom_llvm_tool_output_t){0};
 
   loom_llvm_temp_file_t input_file;
-  iree_status_t status = loom_llvm_temp_file_allocate("bc", &input_file);
+  iree_status_t status = loom_llvm_temp_file_initialize("bc", &input_file);
   if (iree_status_is_ok(status)) {
     status = iree_io_file_contents_write(loom_llvm_temp_file_path(&input_file),
                                          bitcode, allocator);
@@ -1053,9 +1053,9 @@ static iree_status_t loom_llvm_tool_run_bytes_to_file_output(
   loom_llvm_temp_file_t input_file = {0};
   loom_llvm_temp_file_t output_file = {0};
   iree_status_t status =
-      loom_llvm_temp_file_allocate(input_suffix, &input_file);
+      loom_llvm_temp_file_initialize(input_suffix, &input_file);
   if (iree_status_is_ok(status)) {
-    status = loom_llvm_temp_file_allocate(output_suffix, &output_file);
+    status = loom_llvm_temp_file_initialize(output_suffix, &output_file);
   }
   if (iree_status_is_ok(status)) {
     status = iree_io_file_contents_write(loom_llvm_temp_file_path(&input_file),
@@ -1174,7 +1174,7 @@ iree_status_t loom_llvm_tool_disassemble_object(
   *out_text = (loom_llvm_tool_output_t){0};
 
   loom_llvm_temp_file_t input_file = {0};
-  iree_status_t status = loom_llvm_temp_file_allocate("obj", &input_file);
+  iree_status_t status = loom_llvm_temp_file_initialize("obj", &input_file);
   if (iree_status_is_ok(status)) {
     status = iree_io_file_contents_write(loom_llvm_temp_file_path(&input_file),
                                          object, allocator);

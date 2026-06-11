@@ -188,7 +188,7 @@ static iree_status_t loom_spirv_tool_write_temp_binary(
     iree_const_byte_span_t binary, iree_allocator_t allocator,
     loom_tool_temp_file_t* out_file) {
   IREE_RETURN_IF_ERROR(
-      loom_tool_temp_file_allocate(IREE_SV("loom-spirv"), out_file));
+      loom_tool_temp_file_initialize(IREE_SV("loom-spirv"), out_file));
   iree_status_t status = iree_io_file_contents_write(
       loom_tool_temp_file_path(out_file), binary, allocator);
   if (!iree_status_is_ok(status)) {

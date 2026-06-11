@@ -669,8 +669,8 @@ iree_string_view_t loom_tool_temp_file_path(const loom_tool_temp_file_t* file) {
 
 #if defined(IREE_PLATFORM_WINDOWS)
 
-iree_status_t loom_tool_temp_file_allocate(iree_string_view_t stem,
-                                           loom_tool_temp_file_t* out_file) {
+iree_status_t loom_tool_temp_file_initialize(iree_string_view_t stem,
+                                             loom_tool_temp_file_t* out_file) {
   memset(out_file, 0, sizeof(*out_file));
 
   char stem_buffer[32] = {0};
@@ -706,8 +706,8 @@ void loom_tool_temp_file_deinitialize(loom_tool_temp_file_t* file) {
 
 #elif LOOM_TOOL_PROCESS_POSIX
 
-iree_status_t loom_tool_temp_file_allocate(iree_string_view_t stem,
-                                           loom_tool_temp_file_t* out_file) {
+iree_status_t loom_tool_temp_file_initialize(iree_string_view_t stem,
+                                             loom_tool_temp_file_t* out_file) {
   memset(out_file, 0, sizeof(*out_file));
 
   char stem_buffer[32] = {0};
@@ -751,8 +751,8 @@ void loom_tool_temp_file_deinitialize(loom_tool_temp_file_t* file) {
 
 #else
 
-iree_status_t loom_tool_temp_file_allocate(iree_string_view_t stem,
-                                           loom_tool_temp_file_t* out_file) {
+iree_status_t loom_tool_temp_file_initialize(iree_string_view_t stem,
+                                             loom_tool_temp_file_t* out_file) {
   (void)stem;
   memset(out_file, 0, sizeof(*out_file));
   return iree_make_status(

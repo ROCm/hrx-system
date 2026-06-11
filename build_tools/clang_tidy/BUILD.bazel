@@ -52,6 +52,8 @@ cc_binary(
     name = "IREEClangTidyPlugin.so",
     srcs = [
         "iree/IreeTidyModule.cc",
+        "iree/LifecycleChecks.cc",
+        "iree/LifecycleChecks.h",
         "iree/RefCountChecks.cc",
         "iree/RefCountChecks.h",
         "iree/SmokeCheck.cc",
@@ -112,6 +114,27 @@ py_test(
     ],
     imports = ["test"],
     main = "test/status_checks_test.py",
+    tags = ["manual"],
+    target_compatible_with = CLANG_TIDY_LLVM_TARGET_COMPATIBLE_WITH,
+)
+
+py_test(
+    name = "lifecycle_checks_test",
+    srcs = [
+        "test/clang_tidy_test.py",
+        "test/lifecycle_checks_test.py",
+    ],
+    args = [
+        "--clang-tidy=$(location @iree_clang_tidy_llvm//:clang-tidy)",
+        "--plugin=$(location :IREEClangTidyPlugin.so)",
+    ],
+    data = [
+        "test/lifecycle_checks.c",
+        ":IREEClangTidyPlugin.so",
+        "@iree_clang_tidy_llvm//:clang-tidy",
+    ],
+    imports = ["test"],
+    main = "test/lifecycle_checks_test.py",
     tags = ["manual"],
     target_compatible_with = CLANG_TIDY_LLVM_TARGET_COMPATIBLE_WITH,
 )

@@ -68,10 +68,10 @@ iree_status_t loom_tool_process_run(iree_string_view_t executable_path,
                                     iree_allocator_t allocator,
                                     loom_tool_process_result_t* out_result);
 
-// Allocates a temporary filesystem path and creates an empty file there. The
+// Initializes a temporary filesystem path and creates an empty file there. The
 // caller may rewrite the file before passing the path to a tool.
-iree_status_t loom_tool_temp_file_allocate(iree_string_view_t stem,
-                                           loom_tool_temp_file_t* out_file);
+iree_status_t loom_tool_temp_file_initialize(iree_string_view_t stem,
+                                             loom_tool_temp_file_t* out_file);
 
 // Returns the current filesystem path for |file|.
 iree_string_view_t loom_tool_temp_file_path(const loom_tool_temp_file_t* file);

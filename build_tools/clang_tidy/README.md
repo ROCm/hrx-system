@@ -199,6 +199,46 @@ status transfer helpers, C++ status wrapper constructors, and status observer
 functions. Pure observer expressions such as multiple `iree_status_is_*` checks
 do not transfer ownership and are accepted.
 
+### `iree-lifecycle-naming`
+
+`iree-lifecycle-naming` diagnoses caller-owned output records that use
+`allocate` naming but have a matching `deinitialize` cleanup function:
+
+```c
+iree_status_t iree_tool_temp_file_allocate(
+    iree_string_view_t stem, iree_tool_temp_file_t* out_file);
+void iree_tool_temp_file_deinitialize(iree_tool_temp_file_t* file);
+```
+
+The paired cleanup contract says the caller owns the record storage and the
+function initializes that storage. The acquisition side should use
+`initialize` naming even when initialization creates external resources or
+allocates backing storage:
+
+```c
+iree_status_t iree_tool_temp_file_initialize(
+    iree_string_view_t stem, iree_tool_temp_file_t* out_file);
+void iree_tool_temp_file_deinitialize(iree_tool_temp_file_t* file);
+```
+
+`allocate/free` naming remains the storage-oriented shape for APIs that publish
+heap or pool objects through pointer-to-pointer outputs, allocator operations
+such as buffer allocation, and arena helpers that allocate backing storage into
+descriptors without owning a deinitialize contract.
+
+`initialize` functions that publish a pointer-to-pointer output must name the
+caller-owned storage backing that typed view:
+
+```c
+iree_status_t iree_vm_stack_initialize(
+    iree_byte_span_t storage, iree_vm_invocation_flags_t flags,
+    iree_vm_stack_t** out_stack);
+```
+
+Without an explicit `storage` or `*_storage` parameter, a pointer-to-pointer
+output reads like a callee-owned object factory and should use
+`create/destroy/retain/release` or `allocate/free` naming instead.
+
 ### `iree-refcount-lifecycle`
 
 `iree-refcount-lifecycle` treats `iree_atomic_ref_count_t` as an object
