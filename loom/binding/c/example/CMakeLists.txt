@@ -106,7 +106,6 @@ loom_cc_test(
     loom::binding::c::target::spirv
     loom::binding::c::target::spirv::vulkan
   LABELS
-    "driver=vulkan"
     "iree-run-requirement=runtime.resource.vulkan_device"
     "runtime-resource=vulkan-device"
   RESOURCE_GROUP
@@ -134,7 +133,6 @@ loom_cc_test(
     loom::binding::c::target::spirv
     loom::binding::c::target::spirv::iree_hal
   LABELS
-    "driver=vulkan"
     "iree-run-requirement=runtime.resource.vulkan_device"
     "runtime-resource=vulkan-device"
   RESOURCE_GROUP

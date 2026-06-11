@@ -164,8 +164,8 @@ jobs:
 
       - name: Run IREE Bazel CI
         run: |
-          echo "python3 build_tools/devtools/ci.py ${{ matrix.command }} --target //runtime/... --keep-going"
-          python3 build_tools/devtools/ci.py ${{ matrix.command }} --target //runtime/... --keep-going
+          echo "python3 build_tools/devtools/ci.py ${{ matrix.command }} --keep-going"
+          python3 build_tools/devtools/ci.py ${{ matrix.command }} --keep-going
 
   linux_bazel_amdgpu:
     name: ${{ matrix.name }}

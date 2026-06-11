@@ -2053,7 +2053,7 @@ static iree_status_t iree_hal_vulkan_logical_device_create_from_selection(
 
   if (iree_status_is_ok(status)) {
     *out_device = (iree_hal_device_t*)device;
-  } else if (device) {
+  } else {
     iree_hal_device_release((iree_hal_device_t*)device);
   }
   IREE_TRACE_ZONE_END(z0);
@@ -2215,7 +2215,7 @@ IREE_API_EXPORT iree_status_t iree_hal_vulkan_wrap_device(
   }
   if (iree_status_is_ok(status)) {
     *out_device = (iree_hal_device_t*)device;
-  } else if (device) {
+  } else {
     iree_hal_device_release((iree_hal_device_t*)device);
   }
 

@@ -12,9 +12,7 @@
 #
 # Parameters:
 # NAME: name of target
-# DRIVER: If specified, will pass --device=DRIVER to the test binary and adds
-#     a driver label to the test.
-#     TODO(scotttodd): Remove automatic args/labels, push those up a level
+# DRIVER: If specified, will pass --device=DRIVER to the test binary.
 # DATA: Additional input files needed by the test binary. When running tests on
 #     a separate device (e.g. Android), these files will be pushed to the
 #     device. TEST_INPUT_FILE_ARG is automatically added if specified.
@@ -74,11 +72,9 @@ function(iree_native_test)
   set(_TEST_NAME "${_PACKAGE_PATH}/${_RULE_NAME}")
   set(_IREE_TEST_CAN_REGISTER OFF)
 
-  # If driver was specified, add the corresponding test arg and label.
+  # If driver was specified, add the corresponding test arg.
   if(DEFINED _RULE_DRIVER)
     list(APPEND _RULE_ARGS "--device=${_RULE_DRIVER}")
-    list(APPEND _RULE_LABELS "driver=${_RULE_DRIVER}")
-
   endif()
 
   set(_TEST_ENVIRONMENT_VARS)
@@ -192,6 +188,13 @@ function(iree_native_test)
   set_property(TEST ${_TEST_NAME} PROPERTY LABELS "${_RULE_LABELS}")
   set_property(TEST "${_TEST_NAME}" PROPERTY REQUIRED_FILES "${_RULE_DATA}")
   set_property(TEST ${_TEST_NAME} PROPERTY TIMEOUT ${_RULE_TIMEOUT})
+  iree_package_target_name(_TEST_BUILD_TARGET "${_RULE_SRC}")
+  iree_register_test_resource_build_target(
+    TEST_BUILD_TARGET
+      "${_TEST_BUILD_TARGET}"
+    LABELS
+      ${_RULE_LABELS}
+  )
   if(_RULE_RESOURCE_GROUP)
     set_property(TEST ${_TEST_NAME} PROPERTY RESOURCE_LOCK "${_RULE_RESOURCE_GROUP}")
   endif()

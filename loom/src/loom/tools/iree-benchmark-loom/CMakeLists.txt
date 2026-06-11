@@ -247,7 +247,6 @@ iree_execution_test_suite(
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/amdgpu_hal_actual.loom"
   LABELS
-    "driver=amdgpu"
     "manual"
     "requires-gpu-amd"
 )
@@ -270,7 +269,6 @@ iree_execution_test_suite(
     lsan
     vulkan
   LABELS
-    "driver=vulkan"
     "manual"
     "requires-gpu-vulkan"
 )

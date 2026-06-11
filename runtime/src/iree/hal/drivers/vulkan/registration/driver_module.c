@@ -14,11 +14,7 @@ IREE_FLAG_LIST(string, vulkan_libvulkan_search_path,
                "Search path (directory or file) for the Vulkan loader library "
                "(`libvulkan.so`, `vulkan-1.dll`, etc).");
 
-#ifndef NDEBUG
-#define IREE_HAL_VULKAN_DEBUG_FLAG_DEFAULT true
-#else
 #define IREE_HAL_VULKAN_DEBUG_FLAG_DEFAULT false
-#endif  // !NDEBUG
 
 IREE_FLAG(bool, vulkan_validation_layers, IREE_HAL_VULKAN_DEBUG_FLAG_DEFAULT,
           "Requests Vulkan validation layers.");

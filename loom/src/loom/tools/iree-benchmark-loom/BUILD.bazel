@@ -289,7 +289,6 @@ iree_execution_test_suite(
     ],
     manifests = ["iree-benchmark-loom_amdgpu.test.json"],
     tags = [
-        "driver=amdgpu",
         "manual",
         "requires-gpu-amd",
     ],
@@ -310,7 +309,6 @@ iree_execution_test_suite(
     manifests = ["iree-benchmark-loom_spirv_vulkan.test.json"],
     sanitizer_suppressions = vulkan_suppressions,
     tags = [
-        "driver=vulkan",
         "manual",
         "requires-gpu-vulkan",
     ],

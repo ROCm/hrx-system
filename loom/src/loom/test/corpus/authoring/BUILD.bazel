@@ -87,7 +87,6 @@ iree_executable_test(
         "ffn_gate_up_swiglu_q6q8.loom",
     ],
     tags = [
-        "driver=amdgpu",
         "manual",
         "requires-gpu-amd",
     ],
@@ -113,7 +112,6 @@ iree_executable_test(
         "memset_i8.loom",
     ],
     tags = [
-        "driver=amdgpu",
         "manual",
         "requires-gpu-amd",
     ],
@@ -139,7 +137,6 @@ iree_executable_test(
         "mlp_down_projection_residual_bf16.loom",
     ],
     tags = [
-        "driver=amdgpu",
         "manual",
         "requires-gpu-amd",
     ],

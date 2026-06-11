@@ -59,7 +59,7 @@ def _test_cc_benchmark_smoke_test_args_and_tags(name, **kwargs):
         resource_group = "gpu",
         srcs = [name + "_subject.cc"],
         tags = [
-            "driver=vulkan",
+            "requires-gpu-vulkan",
             "manual",
         ],
     )
@@ -82,7 +82,7 @@ def _test_cc_benchmark_smoke_test_args_and_tags_impl(env, target):
     if attrs.args != expected_args:
         env.fail("expected smoke test args %r, got %r" % (expected_args, attrs.args))
     for expected_tag in [
-        "driver=vulkan",
+        "requires-gpu-vulkan",
         "exclusive-if-local",
         "resource_group:gpu",
     ]:

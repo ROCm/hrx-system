@@ -68,7 +68,6 @@ iree_native_test(
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
-    "driver=amdgpu"
     "manual"
     "requires-gpu-amd"
 )
@@ -92,7 +91,6 @@ iree_native_test(
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
-    "driver=amdgpu"
     "manual"
     "requires-gpu-amd"
 )
@@ -116,7 +114,6 @@ iree_native_test(
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
-    "driver=amdgpu"
     "manual"
     "requires-gpu-amd"
 )

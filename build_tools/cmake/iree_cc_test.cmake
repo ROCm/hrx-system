@@ -243,6 +243,12 @@ function(iree_cc_test)
   list(APPEND _RULE_LABELS "${_PACKAGE_PATH}")
   set_property(TEST ${_NAME_PATH} PROPERTY LABELS "${_RULE_LABELS}")
   set_property(TEST ${_NAME_PATH} PROPERTY TIMEOUT ${_RULE_TIMEOUT})
+  iree_register_test_resource_build_target(
+    TEST_BUILD_TARGET
+      "${_NAME}"
+    LABELS
+      ${_RULE_LABELS}
+  )
 
   if(_RULE_RESOURCE_GROUP)
     set_property(TEST ${_NAME_PATH} PROPERTY RESOURCE_LOCK "${_RULE_RESOURCE_GROUP}")

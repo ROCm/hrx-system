@@ -238,6 +238,17 @@ def cmake_build_step(
     )
 
 
+def cmake_runtime_resource_build_target(resource_label: str) -> str:
+    prefix = ci_config.RUNTIME_CTEST_RESOURCE_LABEL_PREFIX
+    if not resource_label.startswith(prefix):
+        raise ValueError(f"expected CTest runtime resource label: {resource_label}")
+    resource_name = resource_label.removeprefix(prefix)
+    resource_target_suffix = "".join(
+        c if c.isalnum() or c in "_.+-" else "-" for c in resource_name
+    )
+    return "iree-test-resource-" + resource_target_suffix
+
+
 def combine_ctest_regex(*regexes: str) -> str:
     return "|".join(f"({regex})" for regex in regexes if regex)
 
@@ -432,15 +443,40 @@ def amdgpu_config_steps(targets: tuple[str, ...], config: str) -> list[CiStep]:
     raise ValueError(f"unknown Bazel AMDGPU sanitizer config: {config}")
 
 
-def vulkan_test_steps(config: str | None = None) -> list[CiStep]:
+def vulkan_test_steps(
+    targets: tuple[str, ...],
+    config: str | None = None,
+) -> list[CiStep]:
     config_name = f" with {config.upper()}" if config is not None else ""
-    return [
+    steps = [
         bazel_test_step(
-            f"Test IREE Vulkan tests{config_name}",
-            ci_config.VULKAN_BAZEL_DRIVER_TARGETS,
+            f"Test IREE Vulkan package tests{config_name}",
+            ci_config.VULKAN_BAZEL_DRIVER_TARGETS + ci_config.VULKAN_XFAIL_TARGETS,
             config=config,
         ),
     ]
+    for (
+        slice_name,
+        target_prefix,
+        default_target,
+        resource_tag,
+    ) in ci_config.VULKAN_BAZEL_RESOURCE_SLICES:
+        slice_targets = resource_slice_targets(
+            targets,
+            target_prefix=target_prefix,
+            default_target=default_target,
+        )
+        if not slice_targets:
+            continue
+        steps.append(
+            bazel_test_step(
+                f"Test IREE Vulkan {slice_name} resources{config_name}",
+                slice_targets,
+                config=config,
+                test_tag_filters=(resource_tag,),
+            )
+        )
+    return steps
 
 
 def vulkan_steps(targets: tuple[str, ...]) -> list[CiStep]:
@@ -450,7 +486,7 @@ def vulkan_steps(targets: tuple[str, ...]) -> list[CiStep]:
             "Build IREE with Vulkan",
             ci_config.VULKAN_BAZEL_DRIVER_TARGETS,
         ),
-        *vulkan_test_steps(),
+        *vulkan_test_steps(targets),
     ]
 
 
@@ -464,8 +500,17 @@ def vulkan_sanitizer_steps(targets: tuple[str, ...]) -> list[CiStep]:
 
 
 def vulkan_config_steps(targets: tuple[str, ...], config: str) -> list[CiStep]:
+    # Vulkan hardware tests execute the system loader and ICD in-process. Keep
+    # sanitizer coverage to compile-time checks here; the unsanitized Vulkan
+    # lane owns execution on real devices.
     if config in ci_config.SANITIZER_TEST_CONFIGS:
-        return vulkan_test_steps(config=config)
+        return [
+            bazel_build_step(
+                f"Build IREE with Vulkan and {config.upper()}",
+                ci_config.VULKAN_BAZEL_DRIVER_TARGETS,
+                config=config,
+            )
+        ]
     if config in ci_config.SANITIZER_BUILD_CONFIGS:
         return [
             bazel_build_step(
@@ -515,11 +560,13 @@ def cmake_amdgpu_steps(command_name: str, sanitizer: str | None) -> list[CiStep]
         xfail_regex = ci_config.AMDGPU_SANITIZERS_CTEST_EXCLUDE_REGEX
     else:
         xfail_regex = ci_config.AMDGPU_CTEST_EXCLUDE_REGEX
-    build_targets = (
-        ci_config.AMDGPU_CMAKE_TEST_BUILD_TARGETS
-        if tests_enabled
-        else ci_config.AMDGPU_CMAKE_DRIVER_TARGETS
-    )
+    build_targets = ci_config.AMDGPU_CMAKE_DRIVER_TARGETS
+    if tests_enabled:
+        build_targets += (
+            cmake_runtime_resource_build_target(
+                ci_config.AMDGPU_CTEST_RESOURCE_LABEL_REGEX
+            ),
+        )
     steps = [
         cmake_configure_step(
             command_name,
@@ -584,6 +631,13 @@ def cmake_loom_amdgpu_steps(command_name: str) -> list[CiStep]:
 def cmake_vulkan_steps(command_name: str, sanitizer: str | None) -> list[CiStep]:
     sanitizer_name = f" with {sanitizer.upper()}" if sanitizer is not None else ""
     tests_enabled = cmake_tests_enabled(sanitizer)
+    build_targets = ci_config.VULKAN_CMAKE_DRIVER_TARGETS
+    if tests_enabled:
+        build_targets += (
+            cmake_runtime_resource_build_target(
+                ci_config.VULKAN_CTEST_RESOURCE_LABEL_REGEX
+            ),
+        )
     steps = [
         cmake_configure_step(
             command_name,
@@ -593,15 +647,24 @@ def cmake_vulkan_steps(command_name: str, sanitizer: str | None) -> list[CiStep]
         cmake_build_step(
             command_name,
             f"Build IREE CMake Vulkan{sanitizer_name}",
-            ci_config.VULKAN_CMAKE_DRIVER_TARGETS,
+            build_targets,
         ),
     ]
     if tests_enabled:
         steps.append(
             cmake_test_step(
                 command_name,
-                f"Test IREE CMake Vulkan tests{sanitizer_name}",
+                f"Test IREE CMake Vulkan package tests{sanitizer_name}",
                 regex=ci_config.VULKAN_CTEST_REGEX,
+                env=sanitizer_env(sanitizer),
+            )
+        )
+        steps.append(
+            cmake_test_step(
+                command_name,
+                f"Test IREE CMake Vulkan resource tests{sanitizer_name}",
+                label_regex=ci_config.VULKAN_CTEST_RESOURCE_LABEL_REGEX,
+                exclude_regex=ci_config.VULKAN_CTEST_REGEX,
                 env=sanitizer_env(sanitizer),
             )
         )

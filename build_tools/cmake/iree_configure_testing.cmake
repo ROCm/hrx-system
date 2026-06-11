@@ -12,6 +12,62 @@ enable_testing(iree)
 # A property is apparently the only way to get an uncached global variable.
 set_property(GLOBAL PROPERTY IREE_TEST_TMPDIRS "")
 set(IREE_TEST_TMPDIR_ROOT "${IREE_BINARY_DIR}/test_tmpdir")
+set(IREE_RUNTIME_RESOURCE_LABEL_PREFIX "runtime-resource=")
+
+# iree_register_test_resource_build_target
+#
+# Adds TEST_BUILD_TARGET to aggregate build targets keyed by runtime resource
+# labels. This lets CI build all tests for a resource class before selecting
+# them with CTest labels without keeping a central inventory of test packages.
+#
+# Parameters:
+#   TEST_BUILD_TARGET: CMake target that must be built before running the test.
+#   LABELS: labels assigned to the test.
+function(iree_register_test_resource_build_target)
+  cmake_parse_arguments(
+    _RULE
+    ""
+    "TEST_BUILD_TARGET"
+    "LABELS"
+    ${ARGN}
+  )
+
+  if(NOT _RULE_TEST_BUILD_TARGET OR NOT TARGET "${_RULE_TEST_BUILD_TARGET}")
+    return()
+  endif()
+
+  get_target_property(
+    _IREE_TEST_RESOURCE_IMPORTED
+    "${_RULE_TEST_BUILD_TARGET}"
+    IMPORTED
+  )
+  if(_IREE_TEST_RESOURCE_IMPORTED)
+    return()
+  endif()
+
+  foreach(_LABEL IN LISTS _RULE_LABELS)
+    if(NOT _LABEL MATCHES "^${IREE_RUNTIME_RESOURCE_LABEL_PREFIX}(.+)$")
+      continue()
+    endif()
+    set(_RESOURCE_NAME "${CMAKE_MATCH_1}")
+    string(
+      REGEX REPLACE "[^A-Za-z0-9_.+-]" "-"
+      _RESOURCE_TARGET_SUFFIX "${_RESOURCE_NAME}"
+    )
+    set(_RESOURCE_TARGET "iree-test-resource-${_RESOURCE_TARGET_SUFFIX}")
+    if(NOT TARGET "${_RESOURCE_TARGET}")
+      add_custom_target("${_RESOURCE_TARGET}"
+        COMMENT
+          "Building IREE tests requiring ${IREE_RUNTIME_RESOURCE_LABEL_PREFIX}${_RESOURCE_NAME}"
+      )
+      set_property(
+        TARGET "${_RESOURCE_TARGET}"
+        PROPERTY FOLDER ${IREE_IDE_FOLDER}/test
+      )
+    endif()
+    add_dependencies("${_RESOURCE_TARGET}" "${_RULE_TEST_BUILD_TARGET}")
+  endforeach()
+endfunction()
 
 # iree_configure_test
 #

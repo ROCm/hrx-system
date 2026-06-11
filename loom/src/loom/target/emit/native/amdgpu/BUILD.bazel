@@ -418,7 +418,6 @@ loom_cc_test(
     name = "hsaco_hsa_test",
     srcs = ["hsaco_hsa_test.cc"],
     tags = [
-        "driver=amdgpu",
         "nodocker",
         "requires-gpu-amd",
     ],

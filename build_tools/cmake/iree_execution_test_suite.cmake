@@ -127,6 +127,12 @@ function(iree_execution_test_suite)
   set_property(TEST ${_TEST_NAME} PROPERTY LABELS "${_RULE_LABELS}")
   set_property(TEST ${_TEST_NAME} PROPERTY TIMEOUT "${_RULE_TIMEOUT}")
   set_property(TEST ${_TEST_NAME} PROPERTY REQUIRED_FILES "${_REQUIRED_FILES}")
+  iree_register_test_resource_build_target(
+    TEST_BUILD_TARGET
+      "${_TEST_TARGET_NAME}"
+    LABELS
+      ${_RULE_LABELS}
+  )
   set(_ENVIRONMENT_VARS "PYTHONDONTWRITEBYTECODE=1")
   if(_RULE_SANITIZER_SUPPRESSIONS)
     iree_append_sanitizer_suppression_environment(

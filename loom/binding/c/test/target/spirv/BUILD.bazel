@@ -87,7 +87,8 @@ loom_cc_test(
     name = "iree_hal_execution_test",
     srcs = ["iree_hal_execution_test.cc"],
     tags = [
-        "driver=vulkan",
+        "iree-run-requirement=runtime.resource.vulkan_device",
+        "runtime-resource=vulkan-device",
     ],
     target_compatible_with = LOOMC_TARGET_SPIRV_VULKAN_COMPATIBLE_WITH,
     deps = [

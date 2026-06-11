@@ -420,13 +420,36 @@ class CiTest(unittest.TestCase):
                 for line in command_lines
             )
         )
-        host_test = next(
-            step for step in steps if step.name == "Test IREE Vulkan tests"
+        package_test = next(
+            step for step in steps if step.name == "Test IREE Vulkan package tests"
         )
-        self.assertIn(ci_config.VULKAN_BAZEL_DRIVER_TARGETS[0], host_test.argv)
-        self.assertFalse(any("--test_tag_filters" in arg for arg in host_test.argv))
+        self.assertIn(ci_config.VULKAN_BAZEL_DRIVER_TARGETS[0], package_test.argv)
+        for xfail_target in ci_config.VULKAN_XFAIL_TARGETS:
+            self.assertIn(xfail_target, package_test.argv)
+        self.assertFalse(any("--test_tag_filters" in arg for arg in package_test.argv))
+        self.assertFalse(
+            any(step.name == "Test IREE Vulkan loom resources" for step in steps)
+        )
 
-    def test_bazel_vulkan_single_sanitizer_command_runs_one_configuration(self):
+    def test_vulkan_command_runs_resource_slices_by_requirement_label(self):
+        args = ci.parse_arguments(["iree-bazel-vulkan"])
+
+        steps = ci.steps_from_args(args)
+        resource_test = next(
+            step for step in steps if step.name == "Test IREE Vulkan loom resources"
+        )
+        command_line = resource_test.command_line()
+
+        self.assertIn("//loom/...", resource_test.argv)
+        self.assertIn(
+            "--test_tag_filters=" + ci_config.RUNTIME_VULKAN_RESOURCE_TAG,
+            resource_test.argv,
+        )
+        self.assertNotIn(":spirv_vulkan_execution_test", command_line)
+        self.assertNotIn(":emit_spirv_vulkan_test", command_line)
+        self.assertNotIn(":emit_spirv_iree_hal_test", command_line)
+
+    def test_bazel_vulkan_single_sanitizer_command_builds_one_configuration(self):
         args = ci.parse_arguments(
             [
                 "iree-bazel-vulkan-asan",
@@ -439,13 +462,16 @@ class CiTest(unittest.TestCase):
         command_lines = [step.command_line() for step in steps]
 
         self.assertTrue(
+            any("bazel build --config=asan" in line for line in command_lines)
+        )
+        self.assertFalse(
             any("bazel test --config=asan" in line for line in command_lines)
         )
         self.assertFalse(any("--config=ubsan" in line for line in command_lines))
         self.assertFalse(any("--config=tsan" in line for line in command_lines))
         self.assertFalse(any("--config=msan" in line for line in command_lines))
 
-    def test_bazel_vulkan_sanitizers_use_generic_clang_configs(self):
+    def test_bazel_vulkan_sanitizers_build_with_generic_clang_configs(self):
         args = ci.parse_arguments(
             [
                 "iree-bazel-vulkan-sanitizers",
@@ -458,17 +484,18 @@ class CiTest(unittest.TestCase):
         command_lines = [step.command_line() for step in steps]
 
         self.assertTrue(
-            any("bazel test --config=asan" in line for line in command_lines)
+            any("bazel build --config=asan" in line for line in command_lines)
         )
         self.assertTrue(
-            any("bazel test --config=tsan" in line for line in command_lines)
+            any("bazel build --config=tsan" in line for line in command_lines)
         )
         self.assertTrue(
-            any("bazel test --config=ubsan" in line for line in command_lines)
+            any("bazel build --config=ubsan" in line for line in command_lines)
         )
         self.assertTrue(
             any("bazel build --config=msan" in line for line in command_lines)
         )
+        self.assertFalse(any("bazel test --config=" in line for line in command_lines))
 
     def test_vulkan_workflows_require_hardware_preflight(self):
         for path, job_name in (
@@ -761,8 +788,17 @@ class CiTest(unittest.TestCase):
         build_steps = [step for step in steps if step.name.startswith("Build IREE")]
         for target in ci_config.AMDGPU_CMAKE_DRIVER_TARGETS:
             self.assertTrue(any(target in step.argv for step in build_steps))
-        for target in ci_config.AMDGPU_CMAKE_RESOURCE_TEST_BUILD_TARGETS:
-            self.assertTrue(any(target in step.argv for step in build_steps))
+        resource_target = ci.cmake_runtime_resource_build_target(
+            ci_config.AMDGPU_CTEST_RESOURCE_LABEL_REGEX
+        )
+        self.assertTrue(any(resource_target in step.argv for step in build_steps))
+        self.assertFalse(
+            any(
+                "loom_tools_iree-test-loom_amdgpu_execution_test" in arg
+                for step in build_steps
+                for arg in step.argv
+            )
+        )
         self.assertTrue(
             any("-R '^iree/hal/drivers/amdgpu/'" in line for line in command_lines)
         )
@@ -837,8 +873,10 @@ class CiTest(unittest.TestCase):
         build_steps = [step for step in steps if step.name.startswith("Build IREE")]
         for target in ci_config.AMDGPU_CMAKE_DRIVER_TARGETS:
             self.assertTrue(any(target in step.argv for step in build_steps))
-        for target in ci_config.AMDGPU_CMAKE_RESOURCE_TEST_BUILD_TARGETS:
-            self.assertFalse(any(target in step.argv for step in build_steps))
+        resource_target = ci.cmake_runtime_resource_build_target(
+            ci_config.AMDGPU_CTEST_RESOURCE_LABEL_REGEX
+        )
+        self.assertFalse(any(resource_target in step.argv for step in build_steps))
         self.assertFalse(any("Test IREE CMake AMDGPU" in step.name for step in steps))
 
     def test_cmake_loom_amdgpu_command_runs_compile_coverage_without_driver(self):
@@ -889,10 +927,34 @@ class CiTest(unittest.TestCase):
             any("-DIREE_HAL_DRIVER_AMDGPU=OFF" in line for line in command_lines)
         )
         build_steps = [step for step in steps if step.name.startswith("Build IREE")]
-        for target in ci_config.VULKAN_CMAKE_DRIVER_TARGETS:
+        resource_target = ci.cmake_runtime_resource_build_target(
+            ci_config.VULKAN_CTEST_RESOURCE_LABEL_REGEX
+        )
+        for target in ci_config.VULKAN_CMAKE_DRIVER_TARGETS + (resource_target,):
             self.assertTrue(any(target in step.argv for step in build_steps))
+        for target in (
+            "loom/src/loom/tools/iree-test-loom/all",
+            "loom/binding/c/example/all",
+            "loom/binding/c/test/target/spirv/all",
+        ):
+            self.assertFalse(any(target in step.argv for step in build_steps))
+        package_test = next(
+            step
+            for step in steps
+            if step.name == "Test IREE CMake Vulkan package tests"
+        )
         self.assertTrue(
-            any(ci_config.VULKAN_CTEST_REGEX in line for line in command_lines)
+            any(ci_config.VULKAN_CTEST_REGEX in arg for arg in package_test.argv)
+        )
+        resource_test = next(
+            step
+            for step in steps
+            if step.name == "Test IREE CMake Vulkan resource tests"
+        )
+        self.assertIn(ci_config.VULKAN_CTEST_RESOURCE_LABEL_REGEX, resource_test.argv)
+        self.assertIn(ci_config.VULKAN_CTEST_REGEX, resource_test.argv)
+        self.assertFalse(
+            any("emit_spirv_vulkan_test" in arg for arg in resource_test.argv)
         )
         self.assertFalse(any("-fuse-ld=lld" in line for line in command_lines))
 

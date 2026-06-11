@@ -105,9 +105,6 @@ loom_cc_test(
     name = "emit_spirv_vulkan_test",
     srcs = ["emit_spirv_vulkan.c"],
     sanitizer_suppressions = vulkan_suppressions,
-    tags = [
-        "driver=vulkan",
-    ],
     target_compatible_with = LOOMC_TARGET_SPIRV_VULKAN_COMPATIBLE_WITH,
     deps = [
         "//build_tools:dl",
@@ -120,9 +117,6 @@ loom_cc_test(
 loom_cc_test(
     name = "emit_spirv_iree_hal_test",
     srcs = ["emit_spirv_iree_hal.c"],
-    tags = [
-        "driver=vulkan",
-    ],
     target_compatible_with = LOOMC_TARGET_SPIRV_VULKAN_COMPATIBLE_WITH,
     deps = [
         "//loom/binding/c:loomc",

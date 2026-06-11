@@ -96,7 +96,6 @@ iree_execution_test_suite(
   DATA
     "testdata/amdgpu_hal_actual.loom"
   LABELS
-    "driver=amdgpu"
     "iree-run-requirement=runtime.resource.amd_gpu"
     "requires-gpu-amd"
     "runtime-resource=amd-gpu"
@@ -120,7 +119,6 @@ iree_execution_test_suite(
     lsan
     vulkan
   LABELS
-    "driver=vulkan"
     "iree-run-requirement=runtime.resource.vulkan_device"
     "requires-gpu-vulkan"
     "runtime-resource=vulkan-device"

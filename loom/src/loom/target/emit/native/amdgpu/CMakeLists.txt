@@ -573,7 +573,6 @@ loom_cc_test(
     loom::target::arch::amdgpu::target_info
     loom::target::low_descriptor_registry
   LABELS
-    "driver=amdgpu"
     "nodocker"
     "requires-gpu-amd"
     "iree-build-requirement=loom.target.arch.amdgpu"
