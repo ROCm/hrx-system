@@ -252,16 +252,29 @@ bool IsRefCountAnchoredRecord(const RecordDecl* Record,
   return IsRefCountAnchorField(FirstField(Record), SourceManager);
 }
 
-bool ShouldDiagnoseRefCountField(const FieldDecl* Field,
-                                 const SourceManager& SourceManager) {
+enum class RefCountFieldDiagnostic {
+  kNone,
+  kMisusedCounter,
+  kRefCountNotFirst,
+};
+
+RefCountFieldDiagnostic DiagnoseRefCountField(
+    const FieldDecl* Field, const SourceManager& SourceManager) {
   if (!IsRefCountField(Field)) {
-    return false;
+    return RefCountFieldDiagnostic::kNone;
   }
   const RecordDecl* Record = EnclosingRecord(Field);
   if (Field == FirstField(Record)) {
-    return !IsAllowedRefCountFieldName(Field, SourceManager);
+    return IsAllowedRefCountFieldName(Field, SourceManager)
+               ? RefCountFieldDiagnostic::kNone
+               : RefCountFieldDiagnostic::kMisusedCounter;
   }
-  return IsRefCountAnchoredRecord(Record, SourceManager);
+  if (Field->getName() == "ref_count") {
+    return RefCountFieldDiagnostic::kRefCountNotFirst;
+  }
+  return IsRefCountAnchoredRecord(Record, SourceManager)
+             ? RefCountFieldDiagnostic::kMisusedCounter
+             : RefCountFieldDiagnostic::kNone;
 }
 
 bool BodyContainsRefCountMutation(StringRef BodyText) {
@@ -706,14 +719,21 @@ void RefCountLifecycleCheck::check(
     if (IsExternalMacroBody(Field->getLocation(), SourceManager)) {
       return;
     }
-    if (!ShouldDiagnoseRefCountField(Field, SourceManager)) {
-      return;
+    switch (DiagnoseRefCountField(Field, SourceManager)) {
+      case RefCountFieldDiagnostic::kNone:
+        return;
+      case RefCountFieldDiagnostic::kMisusedCounter:
+        diag(SourceManager.getExpansionLoc(Field->getLocation()),
+             "iree_atomic_ref_count_t field %0 must model object lifetime; "
+             "use an explicit atomic integer type for counters")
+            << Field->getName();
+        return;
+      case RefCountFieldDiagnostic::kRefCountNotFirst:
+        diag(SourceManager.getExpansionLoc(Field->getLocation()),
+             "iree_atomic_ref_count_t field ref_count must be the first field "
+             "in a refcounted object");
+        return;
     }
-    diag(SourceManager.getExpansionLoc(Field->getLocation()),
-         "iree_atomic_ref_count_t field %0 must model object lifetime; use an "
-         "explicit atomic integer type for counters")
-        << Field->getName();
-    return;
   }
 
   const auto* Function = Result.Nodes.getNodeAs<FunctionDecl>("function");

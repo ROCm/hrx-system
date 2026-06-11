@@ -37,6 +37,8 @@ class RefCountChecksTest(clang_tidy_test.ClangTidyAssertions):
                 "iree_clang_tidy_refcount_asserting_release "
                 "must be null-safe",
                 "iree_atomic_ref_count_dec return value must be checked",
+                "iree_atomic_ref_count_t field ref_count must be the first "
+                "field in a refcounted object",
                 "iree_atomic_ref_count_t field pending_submissions must model "
                 "object lifetime",
                 "iree_atomic_ref_count_t field queued_callbacks must model "
