@@ -72,6 +72,11 @@ class RefCountChecksTest(clang_tidy_test.ClangTidyAssertions):
                 "iree_clang_tidy_refcount_void_release",
                 "reversed_null_compared_resource is null-guarded before "
                 "iree_clang_tidy_refcount_void_release",
+                "merged_resource is dereferenced after "
+                "iree_clang_tidy_refcount_void_release releases it",
+                "merged_released_resource is released by "
+                "iree_clang_tidy_refcount_void_release after "
+                "iree_clang_tidy_refcount_void_release already released it",
                 "[iree-refcount-lifecycle]",
             ],
         )
@@ -92,6 +97,7 @@ class RefCountChecksTest(clang_tidy_test.ClangTidyAssertions):
                 "iree_clang_tidy_refcount_release_then_replace",
                 "conditionally_released_resource",
                 "iree_clang_tidy_refcount_release_in_branch_then_use",
+                "retained_merged_resource",
                 "iree_clang_tidy_refcount_local_counter_release",
                 "iree_clang_tidy_refcount_lookup_retain",
                 "iree_clang_tidy_virtual_memory_release",

@@ -269,6 +269,37 @@ void iree_clang_tidy_refcount_release_in_branch_then_use(
   resource->ref_count = 0;
 }
 
+void iree_clang_tidy_refcount_if_else_release_then_use(
+    iree_clang_tidy_refcounted_t* merged_resource, int condition) {
+  if (condition) {
+    iree_clang_tidy_refcount_void_release(merged_resource);
+  } else {
+    iree_clang_tidy_refcount_void_release(merged_resource);
+  }
+  merged_resource->ref_count = 0;
+}
+
+void iree_clang_tidy_refcount_if_else_release_then_release(
+    iree_clang_tidy_refcounted_t* merged_released_resource, int condition) {
+  if (condition) {
+    iree_clang_tidy_refcount_void_release(merged_released_resource);
+  } else {
+    iree_clang_tidy_refcount_void_release(merged_released_resource);
+  }
+  iree_clang_tidy_refcount_void_release(merged_released_resource);
+}
+
+void iree_clang_tidy_refcount_if_else_release_after_retain_then_use(
+    iree_clang_tidy_refcounted_t* retained_merged_resource, int condition) {
+  iree_clang_tidy_refcount_void_retain(retained_merged_resource);
+  if (condition) {
+    iree_clang_tidy_refcount_void_release(retained_merged_resource);
+  } else {
+    iree_clang_tidy_refcount_void_release(retained_merged_resource);
+  }
+  retained_merged_resource->ref_count = 0;
+}
+
 void iree_clang_tidy_refcount_local_counter_release(
     iree_clang_tidy_refcounted_t* resource) {
   iree_atomic_ref_count_t* ref_count = &resource->ref_count;

@@ -247,16 +247,26 @@ iree_hal_buffer_release(buffer);
 iree_hal_buffer_release(buffer);
 ```
 
-This rule is intentionally local. It does not yet merge release state across
-branch exits, and assignment resets the handle state:
+This rule is intentionally local. It merges the narrow branch shape where both
+arms directly release the same handle, and assignment resets the handle state:
 
 ```c
+if (condition) {
+  iree_hal_buffer_release(buffer);
+} else {
+  iree_hal_buffer_release(buffer);
+}
+buffer->data = NULL;  // The handle was released on every branch.
+
 iree_hal_buffer_release(buffer);
 buffer = NULL;
 
 iree_hal_buffer_release(buffer);
 buffer = replacement_buffer;
 ```
+
+Partial branch releases do not poison the outer handle state because the local
+checker only reports state it can prove on every path through that statement.
 
 If a release drops one retained edge while another owner keeps the object alive,
 the code should still avoid reading through the released handle spelling. Take

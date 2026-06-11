@@ -615,6 +615,27 @@ std::optional<DirectRefCountOperation> GuardedReleaseStatement(
   return Release;
 }
 
+std::optional<DirectRefCountOperation> IfElseMergedReleaseStatement(
+    const IfStmt* Statement) {
+  if (!Statement || !Statement->getElse()) {
+    return std::nullopt;
+  }
+  std::optional<DirectRefCountOperation> ThenRelease =
+      DirectReleaseStatement(SingleStatementBody(Statement->getThen()));
+  std::optional<DirectRefCountOperation> ElseRelease =
+      DirectReleaseStatement(SingleStatementBody(Statement->getElse()));
+  if (!ThenRelease || !ElseRelease ||
+      ThenRelease->Variable != ElseRelease->Variable ||
+      ThenRelease->Function != ElseRelease->Function) {
+    return std::nullopt;
+  }
+  return DirectRefCountOperation{
+      .Variable = ThenRelease->Variable,
+      .Function = ThenRelease->Function,
+      .Location = Statement->getIfLoc(),
+  };
+}
+
 const VarDecl* DirectVariableAssignment(const Stmt* Statement) {
   if (!Statement) {
     return nullptr;
@@ -781,24 +802,11 @@ class ReleaseFlowAnalyzer final
       UseVisitor.Visit(Child);
       if (std::optional<DirectRefCountOperation> Release =
               DirectReleaseStatement(Child)) {
-        auto It = Released.find(Release->Variable);
-        if (It != Released.end() &&
-            !IsExternalMacroBody(Release->Location, SourceManager)) {
-          Check.diag(SourceManager.getExpansionLoc(Release->Location),
-                     "%0 is released by %1 after %2 already released it")
-              << Release->Variable->getName() << Release->Function->getName()
-              << It->second.Function->getName();
-        } else {
-          unsigned& ReferenceCount = ReferenceCounts[Release->Variable];
-          if (ReferenceCount == 0) {
-            ReferenceCount = 1;
-          }
-          --ReferenceCount;
-          if (ReferenceCount == 0) {
-            Released[Release->Variable] = ReleaseInfo{
-                .Function = Release->Function, .Location = Release->Location};
-          }
-        }
+        ConsumeRelease(*Release, Released, ReferenceCounts);
+      } else if (const auto* If = dyn_cast<IfStmt>(Child);
+                 std::optional<DirectRefCountOperation> Release =
+                     IfElseMergedReleaseStatement(If)) {
+        ConsumeRelease(*Release, Released, ReferenceCounts);
       } else if (std::optional<DirectRefCountOperation> Retain =
                      DirectRetainStatement(Child)) {
         auto It = Released.find(Retain->Variable);
@@ -824,6 +832,29 @@ class ReleaseFlowAnalyzer final
   }
 
  private:
+  void ConsumeRelease(
+      const DirectRefCountOperation& Release, ReleasedVariables& Released,
+      llvm::DenseMap<const VarDecl*, unsigned>& ReferenceCounts) {
+    auto It = Released.find(Release.Variable);
+    if (It != Released.end() &&
+        !IsExternalMacroBody(Release.Location, SourceManager)) {
+      Check.diag(SourceManager.getExpansionLoc(Release.Location),
+                 "%0 is released by %1 after %2 already released it")
+          << Release.Variable->getName() << Release.Function->getName()
+          << It->second.Function->getName();
+      return;
+    }
+    unsigned& ReferenceCount = ReferenceCounts[Release.Variable];
+    if (ReferenceCount == 0) {
+      ReferenceCount = 1;
+    }
+    --ReferenceCount;
+    if (ReferenceCount == 0) {
+      Released[Release.Variable] = ReleaseInfo{.Function = Release.Function,
+                                               .Location = Release.Location};
+    }
+  }
+
   void VisitChildren(const Stmt* Statement) {
     for (const Stmt* Child : Statement->children()) {
       if (Child) {
