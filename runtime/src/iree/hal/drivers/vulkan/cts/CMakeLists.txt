@@ -75,6 +75,191 @@ iree_hal_cts_testdata(
 )
 endif()
 
+if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV OR IREE_HAL_DRIVER_VULKAN)
+iree_spirv_asm_module(
+  NAME
+    bda_descriptor_storage_variable
+  SRC
+    "testdata/bda_descriptor_storage_variable.spvasm"
+  TARGET_ENV
+    "vulkan1.3"
+  TESTONLY
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV OR IREE_HAL_DRIVER_VULKAN)
+iree_spirv_asm_module(
+  NAME
+    bda_i32_add7
+  SRC
+    "testdata/bda_i32_add7.spvasm"
+  TARGET_ENV
+    "vulkan1.3"
+  TESTONLY
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV OR IREE_HAL_DRIVER_VULKAN)
+iree_spirv_asm_module(
+  NAME
+    bda_i32_add7_binding_1_length_4_17
+  SRC
+    "testdata/bda_i32_add7_binding_1_length_4_17.spvasm"
+  TARGET_ENV
+    "vulkan1.3"
+  TESTONLY
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV OR IREE_HAL_DRIVER_VULKAN)
+iree_spirv_asm_module(
+  NAME
+    bda_i32_add7_bindings_2
+  SRC
+    "testdata/bda_i32_add7_bindings_2.spvasm"
+  TARGET_ENV
+    "vulkan1.3"
+  TESTONLY
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV OR IREE_HAL_DRIVER_VULKAN)
+iree_spirv_asm_module(
+  NAME
+    bda_i32_add7_constant_length_4
+  SRC
+    "testdata/bda_i32_add7_constant_length_4.spvasm"
+  TARGET_ENV
+    "vulkan1.3"
+  TESTONLY
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV OR IREE_HAL_DRIVER_VULKAN)
+iree_spirv_asm_module(
+  NAME
+    bda_i32_add7_descriptor_decorated
+  SRC
+    "testdata/bda_i32_add7_descriptor_decorated.spvasm"
+  TARGET_ENV
+    "vulkan1.3"
+  TESTONLY
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV OR IREE_HAL_DRIVER_VULKAN)
+iree_spirv_asm_module(
+  NAME
+    bda_i32_add7_no_metadata
+  SRC
+    "testdata/bda_i32_add7_no_metadata.spvasm"
+  TARGET_ENV
+    "vulkan1.3"
+  TESTONLY
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV OR IREE_HAL_DRIVER_VULKAN)
+iree_spirv_asm_module(
+  NAME
+    bda_missing_physical_storage_buffer_addresses
+  SRC
+    "testdata/bda_missing_physical_storage_buffer_addresses.spvasm"
+  TARGET_ENV
+    "vulkan1.3"
+  TESTONLY
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV OR IREE_HAL_DRIVER_VULKAN)
+iree_spirv_asm_module(
+  NAME
+    bda_missing_push_constant_root
+  SRC
+    "testdata/bda_missing_push_constant_root.spvasm"
+  TARGET_ENV
+    "vulkan1.3"
+  TESTONLY
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV OR IREE_HAL_DRIVER_VULKAN)
+iree_spirv_asm_module(
+  NAME
+    bda_noop_binding_requirements
+  SRC
+    "testdata/bda_noop_binding_requirements.spvasm"
+  TARGET_ENV
+    "vulkan1.3"
+  TESTONLY
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV OR IREE_HAL_DRIVER_VULKAN)
+iree_spirv_asm_module(
+  NAME
+    bda_noop_bindings_2_constant_length_8
+  SRC
+    "testdata/bda_noop_bindings_2_constant_length_8.spvasm"
+  TARGET_ENV
+    "vulkan1.3"
+  TESTONLY
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV OR IREE_HAL_DRIVER_VULKAN)
+iree_spirv_asm_module(
+  NAME
+    bda_noop_without_push_constant_root
+  SRC
+    "testdata/bda_noop_without_push_constant_root.spvasm"
+  TARGET_ENV
+    "vulkan1.3"
+  TESTONLY
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_VULKAN)
+iree_c_embed_data(
+  NAME
+    bda_spirv_test_spv
+  SRCS
+    "bda_descriptor_storage_variable.spv"
+    "bda_i32_add7.spv"
+    "bda_i32_add7_binding_1_length_4_17.spv"
+    "bda_i32_add7_bindings_2.spv"
+    "bda_i32_add7_constant_length_4.spv"
+    "bda_i32_add7_descriptor_decorated.spv"
+    "bda_i32_add7_no_metadata.spv"
+    "bda_missing_physical_storage_buffer_addresses.spv"
+    "bda_missing_push_constant_root.spv"
+    "bda_noop_binding_requirements.spv"
+    "bda_noop_bindings_2_constant_length_8.spv"
+    "bda_noop_without_push_constant_root.spv"
+  C_FILE_OUTPUT
+    "bda_spirv_test_spv.c"
+  H_FILE_OUTPUT
+    "bda_spirv_test_spv.h"
+  IDENTIFIER
+    "iree_hal_vulkan_cts_bda_spirv_test_spv"
+  TESTONLY
+  FLATTEN
+  PUBLIC
+)
+endif()
+
 if(IREE_HAL_DRIVER_VULKAN)
 iree_cc_test(
   NAME
@@ -195,6 +380,7 @@ iree_cc_test(
     "allocator_virtual_memory_test.cc"
   DEPS
     ::backends
+    ::bda_spirv_test_spv
     iree::base::tooling::flags
     iree::hal
     iree::hal::cts::util::registry
@@ -622,6 +808,7 @@ iree_cc_test(
     "bda_dispatch_validation_test.cc"
   DEPS
     ::backends
+    ::bda_spirv_test_spv
     iree::base::tooling::flags
     iree::hal
     iree::hal::cts::util::registry
@@ -646,6 +833,7 @@ iree_cc_test(
     "bda_spirv_test.cc"
   DEPS
     ::backends
+    ::bda_spirv_test_spv
     ::replay_cache_backends
     iree::base::tooling::flags
     iree::hal

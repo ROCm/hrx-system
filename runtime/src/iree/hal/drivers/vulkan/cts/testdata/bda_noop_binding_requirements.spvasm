@@ -1,0 +1,20 @@
+; SPIR-V
+; Version: 1.6
+; Generator: Khronos; 0
+; Bound: 5
+; Schema: 0
+               OpCapability Shader
+               OpCapability PhysicalStorageBufferAddresses
+               OpMemoryModel PhysicalStorageBuffer64 GLSL450
+               OpEntryPoint GLCompute %3 "main"
+               OpExecutionMode %3 LocalSize 1 1 1
+       %void = OpTypeVoid
+          %2 = OpTypeFunction %void
+          %3 = OpFunction %void None %2
+          %4 = OpLabel
+               OpReturn
+               OpFunctionEnd
+               OpModuleProcessed "iree.vulkan.bda.v1"
+               OpModuleProcessed "iree.vulkan.bda.v1.bindings=2"
+               OpModuleProcessed "iree.vulkan.bda.v1.binding.0=1,17"
+               OpModuleProcessed "iree.vulkan.bda.v1.binding.1=2,0"

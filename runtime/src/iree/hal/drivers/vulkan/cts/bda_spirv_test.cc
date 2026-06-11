@@ -10,207 +10,49 @@
 
 #include <cstdint>
 #include <cstring>
-#include <initializer_list>
 #include <vector>
 
 #include "iree/hal/cts/util/profile_test_util.h"
 #include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/drivers/vulkan/command_buffer.h"
+#include "iree/hal/drivers/vulkan/cts/bda_spirv_test_spv.h"
 
 namespace iree::hal::cts {
 
 using ::testing::ContainerEq;
 
-// Shader contract:
-//   layout(local_size_x = 1) in;
-//   output[i] = input[i] + 7;
-//
-// The shader reads input/output addresses from the BDA binding table addressed
-// by iree_hal_vulkan_bda_dispatch_root_v1_t::binding_table_address.
-static const uint32_t kBdaSpirv[] = {
-    0x07230203, 0x00010600, 0x0008000b, 0x0000004c, 0x00000000, 0x00020011,
-    0x00000001, 0x00020011, 0x0000000b, 0x00020011, 0x000014e3, 0x0006000b,
-    0x00000001, 0x4c534c47, 0x6474732e, 0x3035342e, 0x00000000, 0x0003000e,
-    0x000014e4, 0x00000001, 0x0007000f, 0x00000005, 0x00000004, 0x6e69616d,
-    0x00000000, 0x0000000f, 0x00000036, 0x00060010, 0x00000004, 0x00000011,
-    0x00000001, 0x00000001, 0x00000001, 0x00030003, 0x00000002, 0x000001cc,
-    0x00070004, 0x455f4c47, 0x625f5458, 0x65666675, 0x65725f72, 0x65726566,
-    0x0065636e, 0x00080004, 0x455f4c47, 0x735f5458, 0x616c6163, 0x6c625f72,
-    0x5f6b636f, 0x6f79616c, 0x00007475, 0x000d0004, 0x455f4c47, 0x735f5458,
-    0x65646168, 0x78655f72, 0x63696c70, 0x615f7469, 0x68746972, 0x6974656d,
-    0x79745f63, 0x5f736570, 0x36746e69, 0x00000034, 0x00040005, 0x00000004,
-    0x6e69616d, 0x00000000, 0x00060005, 0x00000009, 0x72646441, 0x54737365,
-    0x656c6261, 0x00000000, 0x00050006, 0x00000009, 0x00000000, 0x72646461,
-    0x00737365, 0x00060005, 0x0000000b, 0x646e6962, 0x5f676e69, 0x6c626174,
-    0x00000065, 0x00040005, 0x0000000d, 0x746f6f52, 0x00000000, 0x00090006,
-    0x0000000d, 0x00000000, 0x646e6962, 0x5f676e69, 0x6c626174, 0x64615f65,
-    0x73657264, 0x00000073, 0x00080006, 0x0000000d, 0x00000001, 0x736e6f63,
-    0x746e6174, 0x64615f73, 0x73657264, 0x00000073, 0x00070006, 0x0000000d,
-    0x00000002, 0x646e6962, 0x5f676e69, 0x65736162, 0x00000000, 0x00070006,
-    0x0000000d, 0x00000003, 0x736e6f63, 0x746e6174, 0x7361625f, 0x00000065,
-    0x00050006, 0x0000000d, 0x00000004, 0x67616c66, 0x00000073, 0x00060006,
-    0x0000000d, 0x00000005, 0x65736572, 0x64657672, 0x00000030, 0x00040005,
-    0x0000000f, 0x746f6f72, 0x00000000, 0x00050005, 0x00000020, 0x75706e49,
-    0x66754274, 0x00726566, 0x00050006, 0x00000020, 0x00000000, 0x756c6176,
-    0x00000065, 0x00060005, 0x00000022, 0x75706e69, 0x75625f74, 0x72656666,
-    0x00000000, 0x00060005, 0x0000002a, 0x7074754f, 0x75427475, 0x72656666,
-    0x00000000, 0x00050006, 0x0000002a, 0x00000000, 0x756c6176, 0x00000065,
-    0x00060005, 0x0000002c, 0x7074756f, 0x625f7475, 0x65666675, 0x00000072,
-    0x00040005, 0x00000033, 0x65646e69, 0x00000078, 0x00080005, 0x00000036,
-    0x475f6c67, 0x61626f6c, 0x766e496c, 0x7461636f, 0x496e6f69, 0x00000044,
-    0x00040047, 0x00000008, 0x00000006, 0x00000008, 0x00030047, 0x00000009,
-    0x00000002, 0x00040048, 0x00000009, 0x00000000, 0x00000018, 0x00050048,
-    0x00000009, 0x00000000, 0x00000023, 0x00000000, 0x00030047, 0x0000000b,
-    0x000014ec, 0x00030047, 0x0000000d, 0x00000002, 0x00050048, 0x0000000d,
-    0x00000000, 0x00000023, 0x00000000, 0x00050048, 0x0000000d, 0x00000001,
-    0x00000023, 0x00000008, 0x00050048, 0x0000000d, 0x00000002, 0x00000023,
-    0x00000010, 0x00050048, 0x0000000d, 0x00000003, 0x00000023, 0x00000014,
-    0x00050048, 0x0000000d, 0x00000004, 0x00000023, 0x00000018, 0x00050048,
-    0x0000000d, 0x00000005, 0x00000023, 0x0000001c, 0x00040047, 0x0000001f,
-    0x00000006, 0x00000004, 0x00030047, 0x00000020, 0x00000002, 0x00040048,
-    0x00000020, 0x00000000, 0x00000018, 0x00050048, 0x00000020, 0x00000000,
-    0x00000023, 0x00000000, 0x00030047, 0x00000022, 0x000014ec, 0x00040047,
-    0x00000029, 0x00000006, 0x00000004, 0x00030047, 0x0000002a, 0x00000002,
-    0x00040048, 0x0000002a, 0x00000000, 0x00000019, 0x00050048, 0x0000002a,
-    0x00000000, 0x00000023, 0x00000000, 0x00030047, 0x0000002c, 0x000014ec,
-    0x00040047, 0x00000036, 0x0000000b, 0x0000001c, 0x00020013, 0x00000002,
-    0x00030021, 0x00000003, 0x00000002, 0x00030027, 0x00000006, 0x000014e5,
-    0x00040015, 0x00000007, 0x00000040, 0x00000000, 0x0003001d, 0x00000008,
-    0x00000007, 0x0003001e, 0x00000009, 0x00000008, 0x00040020, 0x00000006,
-    0x000014e5, 0x00000009, 0x00040020, 0x0000000a, 0x00000007, 0x00000006,
-    0x00040015, 0x0000000c, 0x00000020, 0x00000000, 0x0008001e, 0x0000000d,
-    0x00000007, 0x00000007, 0x0000000c, 0x0000000c, 0x0000000c, 0x0000000c,
-    0x00040020, 0x0000000e, 0x00000009, 0x0000000d, 0x0004003b, 0x0000000e,
-    0x0000000f, 0x00000009, 0x00040015, 0x00000010, 0x00000020, 0x00000001,
-    0x0004002b, 0x00000010, 0x00000011, 0x00000000, 0x00040020, 0x00000012,
-    0x00000009, 0x00000007, 0x0004002b, 0x00000010, 0x00000015, 0x00000002,
-    0x00040020, 0x00000016, 0x00000009, 0x0000000c, 0x0005002b, 0x00000007,
-    0x0000001a, 0x00000008, 0x00000000, 0x00030027, 0x0000001e, 0x000014e5,
-    0x0003001d, 0x0000001f, 0x00000010, 0x0003001e, 0x00000020, 0x0000001f,
-    0x00040020, 0x0000001e, 0x000014e5, 0x00000020, 0x00040020, 0x00000021,
-    0x00000007, 0x0000001e, 0x00040020, 0x00000024, 0x000014e5, 0x00000007,
-    0x00030027, 0x00000028, 0x000014e5, 0x0003001d, 0x00000029, 0x00000010,
-    0x0003001e, 0x0000002a, 0x00000029, 0x00040020, 0x00000028, 0x000014e5,
-    0x0000002a, 0x00040020, 0x0000002b, 0x00000007, 0x00000028, 0x0004002b,
-    0x00000010, 0x0000002e, 0x00000001, 0x00040020, 0x00000032, 0x00000007,
-    0x0000000c, 0x00040017, 0x00000034, 0x0000000c, 0x00000003, 0x00040020,
-    0x00000035, 0x00000001, 0x00000034, 0x0004003b, 0x00000035, 0x00000036,
-    0x00000001, 0x0004002b, 0x0000000c, 0x00000037, 0x00000000, 0x00040020,
-    0x00000038, 0x00000001, 0x0000000c, 0x00040020, 0x0000003f, 0x000014e5,
-    0x00000010, 0x0004002b, 0x00000010, 0x00000042, 0x00000004, 0x0004002b,
-    0x00000010, 0x00000047, 0x00000007, 0x0004002b, 0x0000000c, 0x0000004a,
-    0x00000001, 0x0006002c, 0x00000034, 0x0000004b, 0x0000004a, 0x0000004a,
-    0x0000004a, 0x00050036, 0x00000002, 0x00000004, 0x00000000, 0x00000003,
-    0x000200f8, 0x00000005, 0x0004003b, 0x0000000a, 0x0000000b, 0x00000007,
-    0x0004003b, 0x00000021, 0x00000022, 0x00000007, 0x0004003b, 0x0000002b,
-    0x0000002c, 0x00000007, 0x0004003b, 0x00000032, 0x00000033, 0x00000007,
-    0x00050041, 0x00000012, 0x00000013, 0x0000000f, 0x00000011, 0x0004003d,
-    0x00000007, 0x00000014, 0x00000013, 0x00050041, 0x00000016, 0x00000017,
-    0x0000000f, 0x00000015, 0x0004003d, 0x0000000c, 0x00000018, 0x00000017,
-    0x00040071, 0x00000007, 0x00000019, 0x00000018, 0x00050084, 0x00000007,
-    0x0000001b, 0x00000019, 0x0000001a, 0x00050080, 0x00000007, 0x0000001c,
-    0x00000014, 0x0000001b, 0x00040078, 0x00000006, 0x0000001d, 0x0000001c,
-    0x0003003e, 0x0000000b, 0x0000001d, 0x0004003d, 0x00000006, 0x00000023,
-    0x0000000b, 0x00060041, 0x00000024, 0x00000025, 0x00000023, 0x00000011,
-    0x00000011, 0x0006003d, 0x00000007, 0x00000026, 0x00000025, 0x00000002,
-    0x00000008, 0x00040078, 0x0000001e, 0x00000027, 0x00000026, 0x0003003e,
-    0x00000022, 0x00000027, 0x0004003d, 0x00000006, 0x0000002d, 0x0000000b,
-    0x00060041, 0x00000024, 0x0000002f, 0x0000002d, 0x00000011, 0x0000002e,
-    0x0006003d, 0x00000007, 0x00000030, 0x0000002f, 0x00000002, 0x00000008,
-    0x00040078, 0x00000028, 0x00000031, 0x00000030, 0x0003003e, 0x0000002c,
-    0x00000031, 0x00050041, 0x00000038, 0x00000039, 0x00000036, 0x00000037,
-    0x0004003d, 0x0000000c, 0x0000003a, 0x00000039, 0x0003003e, 0x00000033,
-    0x0000003a, 0x0004003d, 0x00000028, 0x0000003b, 0x0000002c, 0x0004003d,
-    0x0000000c, 0x0000003c, 0x00000033, 0x0004003d, 0x0000001e, 0x0000003d,
-    0x00000022, 0x0004003d, 0x0000000c, 0x0000003e, 0x00000033, 0x00060041,
-    0x0000003f, 0x00000040, 0x0000003d, 0x00000011, 0x0000003e, 0x0006003d,
-    0x00000010, 0x00000041, 0x00000040, 0x00000002, 0x00000004, 0x00050041,
-    0x00000016, 0x00000043, 0x0000000f, 0x00000042, 0x0004003d, 0x0000000c,
-    0x00000044, 0x00000043, 0x0004007c, 0x00000010, 0x00000045, 0x00000044,
-    0x00050080, 0x00000010, 0x00000046, 0x00000041, 0x00000045, 0x00050080,
-    0x00000010, 0x00000048, 0x00000046, 0x00000047, 0x00060041, 0x0000003f,
-    0x00000049, 0x0000003b, 0x00000011, 0x0000003c, 0x0005003e, 0x00000049,
-    0x00000048, 0x00000002, 0x00000004, 0x000100fd, 0x00010038,
-};
+constexpr char kBdaSpirvAdd7[] = "bda_i32_add7.spv";
+constexpr char kBdaSpirvAdd7Binding1Length4_17[] =
+    "bda_i32_add7_binding_1_length_4_17.spv";
+constexpr char kBdaSpirvAdd7Bindings2[] = "bda_i32_add7_bindings_2.spv";
+constexpr char kBdaSpirvAdd7ConstantLength4[] =
+    "bda_i32_add7_constant_length_4.spv";
+constexpr char kBdaSpirvAdd7DescriptorDecorated[] =
+    "bda_i32_add7_descriptor_decorated.spv";
+constexpr char kBdaSpirvAdd7NoMetadata[] = "bda_i32_add7_no_metadata.spv";
+constexpr char kBdaSpirvDescriptorStorageVariable[] =
+    "bda_descriptor_storage_variable.spv";
+constexpr char kBdaSpirvMissingPhysicalStorageBufferAddresses[] =
+    "bda_missing_physical_storage_buffer_addresses.spv";
+constexpr char kBdaSpirvMissingPushConstantRoot[] =
+    "bda_missing_push_constant_root.spv";
+constexpr char kBdaSpirvNoopWithoutPushConstantRoot[] =
+    "bda_noop_without_push_constant_root.spv";
 
-// Valid descriptor-free BDA-environment no-op shader with no push-constant
-// root. Normal loading rejects it because reflection cannot prove the HAL root
-// convention; explicitly unverified loading accepts it for
-// hand-authored/custom-argument kernels.
-static const uint32_t kBdaNoopSpirvWithoutPushConstantRoot[] = {
-    0x07230203u,
-    0x00010600u,
-    0u,
-    5u,
-    0u,
-    // Declares OpCapability Shader.
-    0x00020011u,
-    1u,
-    // Declares OpCapability PhysicalStorageBufferAddresses.
-    0x00020011u,
-    5347u,
-    // Declares OpMemoryModel PhysicalStorageBuffer64 GLSL450.
-    0x0003000eu,
-    5348u,
-    1u,
-    // Declares OpEntryPoint GLCompute %main "main".
-    0x0005000fu,
-    5u,
-    3u,
-    0x6e69616du,
-    0u,
-    // Declares OpExecutionMode %main LocalSize 1 1 1.
-    0x00060010u,
-    3u,
-    17u,
-    1u,
-    1u,
-    1u,
-    // Declares OpTypeVoid %void.
-    0x00020013u,
-    1u,
-    // Declares OpTypeFunction %fn %void.
-    0x00030021u,
-    2u,
-    1u,
-    // Defines %main as an empty compute function.
-    0x00050036u,
-    1u,
-    3u,
-    0u,
-    2u,
-    0x000200f8u,
-    4u,
-    0x000100fdu,
-    0x00010038u,
-};
+static iree_const_byte_span_t BdaSpirvFixture(const char* file_name) {
+  const iree_file_toc_t* toc = iree_hal_vulkan_cts_bda_spirv_test_spv_create();
+  for (iree_host_size_t i = 0;
+       i < iree_hal_vulkan_cts_bda_spirv_test_spv_size(); ++i) {
+    if (std::strcmp(toc[i].name, file_name) == 0) {
+      return iree_make_const_byte_span(toc[i].data, toc[i].size);
+    }
+  }
+  ADD_FAILURE() << "BDA SPIR-V fixture not found: " << file_name;
+  return iree_const_byte_span_empty();
+}
 
-static const uint32_t
-    kBdaSpirvMissingPhysicalStorageBufferAddressesCapability[] = {
-        0x07230203u,
-        0x00010600u,
-        0u,
-        8u,
-        0u,
-        // Declares OpMemoryModel PhysicalStorageBuffer64 GLSL450.
-        0x0003000eu,
-        5348u,
-        1u,
-        // Declares OpEntryPoint GLCompute %1 "main".
-        0x0005000fu,
-        5u,
-        1u,
-        0x6e69616du,
-        0u,
-        // Declares OpExecutionMode %1 LocalSize 1 1 1.
-        0x00060010u,
-        1u,
-        17u,
-        1u,
-        1u,
-        1u,
-};
-
+// Small hand-authored malformed word sequences for parser states that cannot
+// be represented as ordinary SPIR-V assembly fixtures.
 static const uint32_t kBdaSpirvWithoutComputeEntryPoints[] = {
     0x07230203u,
     0x00010600u,
@@ -288,128 +130,6 @@ static const uint32_t kBdaSpirvWithTruncatedLocalSize[] = {
     1u,
 };
 
-static const uint32_t kBdaSpirvMissingPushConstantRoot[] = {
-    0x07230203u,
-    0x00010600u,
-    0u,
-    8u,
-    0u,
-    // Declares OpCapability PhysicalStorageBufferAddresses.
-    0x00020011u,
-    5347u,
-    // Declares OpMemoryModel PhysicalStorageBuffer64 GLSL450.
-    0x0003000eu,
-    5348u,
-    1u,
-    // Declares OpEntryPoint GLCompute %1 "main".
-    0x0005000fu,
-    5u,
-    1u,
-    0x6e69616du,
-    0u,
-    // Declares OpExecutionMode %1 LocalSize 1 1 1.
-    0x00060010u,
-    1u,
-    17u,
-    1u,
-    1u,
-    1u,
-};
-
-static const uint32_t kBdaSpirvWithDescriptorStorageVariable[] = {
-    0x07230203u,
-    0x00010600u,
-    0u,
-    8u,
-    0u,
-    // Declares OpCapability PhysicalStorageBufferAddresses.
-    0x00020011u,
-    5347u,
-    // Declares OpMemoryModel PhysicalStorageBuffer64 GLSL450.
-    0x0003000eu,
-    5348u,
-    1u,
-    // Declares OpEntryPoint GLCompute %1 "main".
-    0x0005000fu,
-    5u,
-    1u,
-    0x6e69616du,
-    0u,
-    // Declares OpExecutionMode %1 LocalSize 1 1 1.
-    0x00060010u,
-    1u,
-    17u,
-    1u,
-    1u,
-    1u,
-    // Declares OpVariable %3 in PushConstant storage class.
-    0x0004003bu,
-    2u,
-    3u,
-    9u,
-    // Declares OpVariable %5 in StorageBuffer storage class.
-    0x0004003bu,
-    4u,
-    5u,
-    12u,
-};
-
-static void AppendSpirvStringInstruction(uint16_t opcode, const char* value,
-                                         std::vector<uint32_t>* words) {
-  const size_t byte_length = std::strlen(value) + 1;
-  const size_t string_word_count =
-      (byte_length + sizeof(uint32_t) - 1) / sizeof(uint32_t);
-  words->push_back(
-      (uint32_t)(((string_word_count + 1) << 16) | (uint32_t)opcode));
-  const size_t string_word_offset = words->size();
-  words->resize(string_word_offset + string_word_count, 0);
-  std::memcpy(&(*words)[string_word_offset], value, byte_length);
-}
-
-static std::vector<uint32_t> MakeBdaSpirvWithMetadata(
-    const uint32_t* source_words, iree_host_size_t source_word_count,
-    std::initializer_list<const char*> metadata_strings) {
-  std::vector<uint32_t> source(source_words, source_words + source_word_count);
-  iree_host_size_t insertion_offset = source_word_count;
-  for (iree_host_size_t word_offset = 5; word_offset < source.size();) {
-    const uint32_t instruction = source[word_offset];
-    const uint16_t word_count = (uint16_t)(instruction >> 16);
-    const uint16_t opcode = (uint16_t)(instruction & 0xFFFFu);
-    if (opcode == 71u) {
-      insertion_offset = word_offset;
-      break;
-    }
-    if (word_count == 0) break;
-    word_offset += word_count;
-  }
-
-  std::vector<uint32_t> spirv;
-  spirv.insert(spirv.end(), source.begin(), source.begin() + insertion_offset);
-  for (const char* metadata_string : metadata_strings) {
-    AppendSpirvStringInstruction(/*OpModuleProcessed=*/330u, metadata_string,
-                                 &spirv);
-  }
-  spirv.insert(spirv.end(), source.begin() + insertion_offset, source.end());
-  return spirv;
-}
-
-static std::vector<uint32_t> MakeBdaSpirvWithMetadata(
-    std::initializer_list<const char*> metadata_strings) {
-  return MakeBdaSpirvWithMetadata(kBdaSpirv, IREE_ARRAYSIZE(kBdaSpirv),
-                                  metadata_strings);
-}
-
-static std::vector<uint32_t> MakeDescriptorDecoratedBdaSpirv() {
-  std::vector<uint32_t> spirv =
-      MakeBdaSpirvWithMetadata({"iree.vulkan.bda.v1"});
-  // Appends OpDecorate %root DescriptorSet 0.
-  spirv.push_back(0x00040047u);
-  spirv.push_back(0x0000000fu);
-  spirv.push_back(0x00000022u);
-  spirv.push_back(0x00000000u);
-  return spirv;
-}
-
 class BdaSpirvTest : public CtsTestBase<> {
  protected:
   static constexpr iree_host_size_t kElementCount = 4;
@@ -423,12 +143,8 @@ class BdaSpirvTest : public CtsTestBase<> {
     IREE_ASSERT_OK(iree_hal_executable_cache_create(
         device_, iree_make_cstring_view("default"), &executable_cache_));
 
-    std::vector<uint32_t> executable_spirv =
-        MakeBdaSpirvWithMetadata({"iree.vulkan.bda.v1"});
-    IREE_ASSERT_OK(PrepareBdaExecutable(
-        iree_make_const_byte_span(executable_spirv.data(),
-                                  executable_spirv.size() * sizeof(uint32_t)),
-        &executable_));
+    IREE_ASSERT_OK(
+        PrepareBdaExecutable(BdaSpirvFixture(kBdaSpirvAdd7), &executable_));
   }
 
   void TearDown() override {
@@ -609,40 +325,33 @@ static iree_hal_buffer_params_t SparseDispatchBufferParams() {
 }
 
 TEST_P(BdaSpirvTest, PrepareRejectsDescriptorDecoratedBdaSpirv) {
-  std::vector<uint32_t> decorated_spirv = MakeDescriptorDecoratedBdaSpirv();
   iree_hal_executable_t* decorated_executable = nullptr;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      PrepareBdaExecutable(
-          iree_make_const_byte_span(decorated_spirv.data(),
-                                    decorated_spirv.size() * sizeof(uint32_t)),
-          &decorated_executable));
+      PrepareBdaExecutable(BdaSpirvFixture(kBdaSpirvAdd7DescriptorDecorated),
+                           &decorated_executable));
   EXPECT_EQ(nullptr, decorated_executable);
   iree_hal_executable_release(decorated_executable);
 }
 
 TEST_P(BdaSpirvTest,
        PrepareRejectsBdaSpirvWithoutPhysicalStorageBufferAddresses) {
-  std::vector<uint32_t> spirv = MakeBdaSpirvWithMetadata(
-      kBdaSpirvMissingPhysicalStorageBufferAddressesCapability,
-      IREE_ARRAYSIZE(kBdaSpirvMissingPhysicalStorageBufferAddressesCapability),
-      {"iree.vulkan.bda.v1"});
   iree_hal_executable_t* executable = nullptr;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      PrepareBdaExecutable(iree_make_const_byte_span(
-                               spirv.data(), spirv.size() * sizeof(uint32_t)),
-                           &executable));
+      PrepareBdaExecutable(
+          BdaSpirvFixture(kBdaSpirvMissingPhysicalStorageBufferAddresses),
+          &executable));
   EXPECT_EQ(nullptr, executable);
   iree_hal_executable_release(executable);
 }
 
 TEST_P(BdaSpirvTest, PrepareRejectsBdaSpirvWithoutMetadata) {
   iree_hal_executable_t* executable = nullptr;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        PrepareBdaExecutable(iree_make_const_byte_span(
-                                                 kBdaSpirv, sizeof(kBdaSpirv)),
-                                             &executable));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      PrepareBdaExecutable(BdaSpirvFixture(kBdaSpirvAdd7NoMetadata),
+                           &executable));
   EXPECT_EQ(nullptr, executable);
   iree_hal_executable_release(executable);
 }
@@ -695,42 +404,29 @@ TEST_P(BdaSpirvTest, PrepareRejectsBdaSpirvWithTruncatedLocalSize) {
 }
 
 TEST_P(BdaSpirvTest, PrepareRejectsBdaSpirvWithoutPushConstantRoot) {
-  std::vector<uint32_t> spirv = MakeBdaSpirvWithMetadata(
-      kBdaSpirvMissingPushConstantRoot,
-      IREE_ARRAYSIZE(kBdaSpirvMissingPushConstantRoot), {"iree.vulkan.bda.v1"});
   iree_hal_executable_t* executable = nullptr;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      PrepareBdaExecutable(iree_make_const_byte_span(
-                               spirv.data(), spirv.size() * sizeof(uint32_t)),
+      PrepareBdaExecutable(BdaSpirvFixture(kBdaSpirvMissingPushConstantRoot),
                            &executable));
   EXPECT_EQ(nullptr, executable);
   iree_hal_executable_release(executable);
 }
 
 TEST_P(BdaSpirvTest, PrepareRejectsBdaNoopWithoutVerificationDisabled) {
-  std::vector<uint32_t> spirv = MakeBdaSpirvWithMetadata(
-      kBdaNoopSpirvWithoutPushConstantRoot,
-      IREE_ARRAYSIZE(kBdaNoopSpirvWithoutPushConstantRoot),
-      {"iree.vulkan.bda.v1"});
   iree_hal_executable_t* executable = nullptr;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      PrepareBdaExecutable(iree_make_const_byte_span(
-                               spirv.data(), spirv.size() * sizeof(uint32_t)),
-                           &executable));
+      PrepareBdaExecutable(
+          BdaSpirvFixture(kBdaSpirvNoopWithoutPushConstantRoot), &executable));
   EXPECT_EQ(nullptr, executable);
   iree_hal_executable_release(executable);
 }
 
 TEST_P(BdaSpirvTest, QueueDispatchExecutesUnverifiedBdaNoop) {
-  std::vector<uint32_t> spirv = MakeBdaSpirvWithMetadata(
-      kBdaNoopSpirvWithoutPushConstantRoot,
-      IREE_ARRAYSIZE(kBdaNoopSpirvWithoutPushConstantRoot),
-      {"iree.vulkan.bda.v1"});
   Ref<iree_hal_executable_t> executable;
   IREE_ASSERT_OK(PrepareBdaExecutable(
-      iree_make_const_byte_span(spirv.data(), spirv.size() * sizeof(uint32_t)),
+      BdaSpirvFixture(kBdaSpirvNoopWithoutPushConstantRoot),
       IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA |
           IREE_HAL_EXECUTABLE_CACHING_MODE_DISABLE_VERIFICATION,
       executable.out()));
@@ -748,15 +444,10 @@ TEST_P(BdaSpirvTest, QueueDispatchExecutesUnverifiedBdaNoop) {
 }
 
 TEST_P(BdaSpirvTest, PrepareRejectsBdaSpirvWithDescriptorVariable) {
-  std::vector<uint32_t> spirv = MakeBdaSpirvWithMetadata(
-      kBdaSpirvWithDescriptorStorageVariable,
-      IREE_ARRAYSIZE(kBdaSpirvWithDescriptorStorageVariable),
-      {"iree.vulkan.bda.v1"});
   iree_hal_executable_t* executable = nullptr;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      PrepareBdaExecutable(iree_make_const_byte_span(
-                               spirv.data(), spirv.size() * sizeof(uint32_t)),
+      PrepareBdaExecutable(BdaSpirvFixture(kBdaSpirvDescriptorStorageVariable),
                            &executable));
   EXPECT_EQ(nullptr, executable);
   iree_hal_executable_release(executable);
@@ -842,15 +533,9 @@ TEST_P(BdaSpirvTest, QueueDispatchExecutesBdaShader) {
 }
 
 TEST_P(BdaSpirvTest, QueueDispatchExecutesBdaShaderWithMetadata) {
-  std::vector<uint32_t> metadata_spirv = MakeBdaSpirvWithMetadata({
-      "iree.vulkan.bda.v1",
-      "iree.vulkan.bda.v1.bindings=2",
-  });
   Ref<iree_hal_executable_t> executable;
-  IREE_ASSERT_OK(PrepareBdaExecutable(
-      iree_make_const_byte_span(metadata_spirv.data(),
-                                metadata_spirv.size() * sizeof(uint32_t)),
-      executable.out()));
+  IREE_ASSERT_OK(PrepareBdaExecutable(BdaSpirvFixture(kBdaSpirvAdd7Bindings2),
+                                      executable.out()));
 
   Ref<iree_hal_buffer_t> input_buffer;
   Ref<iree_hal_buffer_t> output_buffer;
@@ -874,15 +559,9 @@ TEST_P(BdaSpirvTest, QueueDispatchExecutesBdaShaderWithMetadata) {
 }
 
 TEST_P(BdaSpirvTest, QueueDispatchRejectsBdaMetadataBindingMismatch) {
-  std::vector<uint32_t> metadata_spirv = MakeBdaSpirvWithMetadata({
-      "iree.vulkan.bda.v1",
-      "iree.vulkan.bda.v1.bindings=2",
-  });
   Ref<iree_hal_executable_t> executable;
-  IREE_ASSERT_OK(PrepareBdaExecutable(
-      iree_make_const_byte_span(metadata_spirv.data(),
-                                metadata_spirv.size() * sizeof(uint32_t)),
-      executable.out()));
+  IREE_ASSERT_OK(PrepareBdaExecutable(BdaSpirvFixture(kBdaSpirvAdd7Bindings2),
+                                      executable.out()));
 
   Ref<iree_hal_buffer_t> input_buffer;
   Ref<iree_hal_buffer_t> output_buffer;
@@ -908,16 +587,9 @@ TEST_P(BdaSpirvTest, QueueDispatchRejectsBdaMetadataBindingMismatch) {
 }
 
 TEST_P(BdaSpirvTest, QueueDispatchRejectsBdaMetadataBindingLength) {
-  std::vector<uint32_t> metadata_spirv = MakeBdaSpirvWithMetadata({
-      "iree.vulkan.bda.v1",
-      "iree.vulkan.bda.v1.bindings=2",
-      "iree.vulkan.bda.v1.binding.1=4,17",
-  });
   Ref<iree_hal_executable_t> executable;
   IREE_ASSERT_OK(PrepareBdaExecutable(
-      iree_make_const_byte_span(metadata_spirv.data(),
-                                metadata_spirv.size() * sizeof(uint32_t)),
-      executable.out()));
+      BdaSpirvFixture(kBdaSpirvAdd7Binding1Length4_17), executable.out()));
 
   Ref<iree_hal_buffer_t> input_buffer;
   Ref<iree_hal_buffer_t> output_buffer;
@@ -938,16 +610,9 @@ TEST_P(BdaSpirvTest, QueueDispatchRejectsBdaMetadataBindingLength) {
 }
 
 TEST_P(BdaSpirvTest, QueueDispatchUsesBdaMetadataConstantLength) {
-  std::vector<uint32_t> metadata_spirv = MakeBdaSpirvWithMetadata({
-      "iree.vulkan.bda.v1",
-      "iree.vulkan.bda.v1.bindings=2",
-      "iree.vulkan.bda.v1.constant_length=4",
-  });
   Ref<iree_hal_executable_t> executable;
   IREE_ASSERT_OK(PrepareBdaExecutable(
-      iree_make_const_byte_span(metadata_spirv.data(),
-                                metadata_spirv.size() * sizeof(uint32_t)),
-      executable.out()));
+      BdaSpirvFixture(kBdaSpirvAdd7ConstantLength4), executable.out()));
 
   Ref<iree_hal_buffer_t> input_buffer;
   Ref<iree_hal_buffer_t> output_buffer;

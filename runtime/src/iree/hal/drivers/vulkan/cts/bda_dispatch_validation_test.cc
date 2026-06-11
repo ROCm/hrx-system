@@ -9,10 +9,9 @@
 
 #include <cstdint>
 #include <cstring>
-#include <initializer_list>
-#include <vector>
 
 #include "iree/hal/cts/util/test_base.h"
+#include "iree/hal/drivers/vulkan/cts/bda_spirv_test_spv.h"
 
 namespace iree::hal::cts {
 
@@ -21,76 +20,22 @@ using iree::testing::status::StatusIs;
 static constexpr uint32_t kRequiredBindingAlignment = 2;
 static constexpr uint64_t kRequiredBindingLength = 17;
 
-// Descriptor-free BDA-environment no-op shader. The shader does not need to
-// consume bindings because these tests fail while publishing the host-validated
-// BDA table.
-static const uint32_t kBdaNoopSpirv[] = {
-    0x07230203u,
-    0x00010600u,
-    0u,
-    5u,
-    0u,
-    // Declares OpCapability Shader.
-    0x00020011u,
-    1u,
-    // Declares OpCapability PhysicalStorageBufferAddresses.
-    0x00020011u,
-    5347u,
-    // Declares OpMemoryModel PhysicalStorageBuffer64 GLSL450.
-    0x0003000eu,
-    5348u,
-    1u,
-    // Declares OpEntryPoint GLCompute %main "main".
-    0x0005000fu,
-    5u,
-    3u,
-    0x6e69616du,
-    0u,
-    // Declares OpExecutionMode %main LocalSize 1 1 1.
-    0x00060010u,
-    3u,
-    17u,
-    1u,
-    1u,
-    1u,
-    // Declares OpTypeVoid %void.
-    0x00020013u,
-    1u,
-    // Declares OpTypeFunction %fn %void.
-    0x00030021u,
-    2u,
-    1u,
-    // Defines %main as an empty compute function.
-    0x00050036u,
-    1u,
-    3u,
-    0u,
-    2u,
-    0x000200f8u,
-    4u,
-    0x000100fdu,
-    0x00010038u,
-};
+constexpr char kBdaSpirvNoopBindingRequirements[] =
+    "bda_noop_binding_requirements.spv";
+constexpr char kBdaSpirvNoopBindings2ConstantLength8[] =
+    "bda_noop_bindings_2_constant_length_8.spv";
 
-static void AppendOpModuleProcessed(std::vector<uint32_t>* module,
-                                    const char* text) {
-  const size_t byte_length = std::strlen(text) + 1;
-  const size_t string_word_count =
-      (byte_length + sizeof(uint32_t) - 1) / sizeof(uint32_t);
-  std::vector<uint32_t> instruction(1 + string_word_count, 0);
-  instruction[0] = ((uint32_t)instruction.size() << 16) | 330u;
-  std::memcpy(&instruction[1], text, byte_length);
-  module->insert(module->begin() + 12, instruction.begin(), instruction.end());
-}
-
-static std::vector<uint32_t> MakeBdaExecutableWords(
-    std::initializer_list<const char*> metadata_strings) {
-  std::vector<uint32_t> words(kBdaNoopSpirv,
-                              kBdaNoopSpirv + IREE_ARRAYSIZE(kBdaNoopSpirv));
-  for (const char* metadata_string : metadata_strings) {
-    AppendOpModuleProcessed(&words, metadata_string);
+static iree_const_byte_span_t BdaDispatchValidationSpirvFixture(
+    const char* file_name) {
+  const iree_file_toc_t* toc = iree_hal_vulkan_cts_bda_spirv_test_spv_create();
+  for (iree_host_size_t i = 0;
+       i < iree_hal_vulkan_cts_bda_spirv_test_spv_size(); ++i) {
+    if (std::strcmp(toc[i].name, file_name) == 0) {
+      return iree_make_const_byte_span(toc[i].data, toc[i].size);
+    }
   }
-  return words;
+  ADD_FAILURE() << "BDA SPIR-V fixture not found: " << file_name;
+  return iree_const_byte_span_empty();
 }
 
 class BdaDispatchValidationTest : public CtsTestBase<> {
@@ -102,22 +47,13 @@ class BdaDispatchValidationTest : public CtsTestBase<> {
     IREE_ASSERT_OK(iree_hal_executable_cache_create(
         device_, iree_make_cstring_view("default"), &executable_cache_));
 
-    std::vector<uint32_t> executable_words = MakeBdaExecutableWords({
-        "iree.vulkan.bda.v1.constant_length=8",
-        "iree.vulkan.bda.v1.bindings=2",
-        "iree.vulkan.bda.v1",
-    });
-    IREE_ASSERT_OK(PrepareBdaExecutable(executable_words, &executable_));
-
-    std::vector<uint32_t> requirement_executable_words =
-        MakeBdaExecutableWords({
-            "iree.vulkan.bda.v1.binding.1=2,0",
-            "iree.vulkan.bda.v1.binding.0=1,17",
-            "iree.vulkan.bda.v1.bindings=2",
-            "iree.vulkan.bda.v1",
-        });
-    IREE_ASSERT_OK(PrepareBdaExecutable(requirement_executable_words,
-                                        &requirement_executable_));
+    IREE_ASSERT_OK(
+        PrepareBdaExecutable(BdaDispatchValidationSpirvFixture(
+                                 kBdaSpirvNoopBindings2ConstantLength8),
+                             &executable_));
+    IREE_ASSERT_OK(PrepareBdaExecutable(
+        BdaDispatchValidationSpirvFixture(kBdaSpirvNoopBindingRequirements),
+        &requirement_executable_));
   }
 
   void TearDown() override {
@@ -134,9 +70,8 @@ class BdaDispatchValidationTest : public CtsTestBase<> {
     return iree_make_const_byte_span(constant_data_, sizeof(constant_data_));
   }
 
-  iree_status_t PrepareBdaExecutable(
-      const std::vector<uint32_t>& executable_words,
-      iree_hal_executable_t** out_executable) {
+  iree_status_t PrepareBdaExecutable(iree_const_byte_span_t executable_data,
+                                     iree_hal_executable_t** out_executable) {
     iree_hal_executable_params_t executable_params;
     iree_hal_executable_params_initialize(&executable_params);
     executable_params.caching_mode =
@@ -144,8 +79,7 @@ class BdaDispatchValidationTest : public CtsTestBase<> {
         IREE_HAL_EXECUTABLE_CACHING_MODE_DISABLE_VERIFICATION;
     executable_params.executable_format =
         iree_make_cstring_view("vulkan-spirv-bda");
-    executable_params.executable_data = iree_make_const_byte_span(
-        executable_words.data(), executable_words.size() * sizeof(uint32_t));
+    executable_params.executable_data = executable_data;
     return iree_hal_executable_cache_prepare_executable(
         executable_cache_, &executable_params, out_executable);
   }

@@ -7,6 +7,8 @@
 # Focused CTS coverage for the Vulkan HAL.
 
 load("//build_tools/bazel:iree_hal_cts_test_suite.bzl", "iree_hal_cts_testdata")
+load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
+load("//build_tools/spirv:asm_module.bzl", "iree_spirv_asm_module")
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
 load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
 
@@ -60,6 +62,45 @@ iree_hal_cts_testdata(
     identifier = "iree_cts_testdata_vulkan_spirv",
     target_device = "vulkan",
     testdata = "//runtime/src/iree/hal/cts/testdata:executable_srcs",
+)
+
+_BDA_SPIRV_TEST_FIXTURES = [
+    "bda_descriptor_storage_variable",
+    "bda_i32_add7",
+    "bda_i32_add7_binding_1_length_4_17",
+    "bda_i32_add7_bindings_2",
+    "bda_i32_add7_constant_length_4",
+    "bda_i32_add7_descriptor_decorated",
+    "bda_i32_add7_no_metadata",
+    "bda_missing_physical_storage_buffer_addresses",
+    "bda_missing_push_constant_root",
+    "bda_noop_binding_requirements",
+    "bda_noop_bindings_2_constant_length_8",
+    "bda_noop_without_push_constant_root",
+]
+
+[
+    iree_spirv_asm_module(
+        name = fixture,
+        testonly = True,
+        src = "testdata/%s.spvasm" % fixture,
+        target_env = "vulkan1.3",
+    )
+    for fixture in _BDA_SPIRV_TEST_FIXTURES
+]
+
+iree_c_embed_data(
+    name = "bda_spirv_test_spv",
+    testonly = True,
+    srcs = [":%s" % fixture for fixture in _BDA_SPIRV_TEST_FIXTURES],
+    c_file_output = "bda_spirv_test_spv.c",
+    flatten = True,
+    h_file_output = "bda_spirv_test_spv.h",
+    identifier = "iree_hal_vulkan_cts_bda_spirv_test_spv",
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_vulkan": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
 )
 
 iree_runtime_cc_test(
@@ -138,6 +179,7 @@ iree_runtime_cc_test(
     ],
     deps = [
         ":backends",
+        ":bda_spirv_test_spv",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:registry",
@@ -379,6 +421,7 @@ iree_runtime_cc_test(
     ],
     deps = [
         ":backends",
+        ":bda_spirv_test_spv",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:registry",
@@ -398,6 +441,7 @@ iree_runtime_cc_test(
     ],
     deps = [
         ":backends",
+        ":bda_spirv_test_spv",
         ":replay_cache_backends",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal",

@@ -1,0 +1,10 @@
+; SPIR-V
+; Version: 1.6
+; Generator: Khronos; 0
+; Bound: 8
+; Schema: 0
+               OpCapability PhysicalStorageBufferAddresses
+               OpMemoryModel PhysicalStorageBuffer64 GLSL450
+               OpEntryPoint GLCompute %1 "main"
+               OpExecutionMode %1 LocalSize 1 1 1
+               OpModuleProcessed "iree.vulkan.bda.v1"
