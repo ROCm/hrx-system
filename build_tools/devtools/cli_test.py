@@ -893,7 +893,11 @@ class CliTest(unittest.TestCase):
 
         self.assertEqual(len(plan.steps), 2)
         self.assertIn("--fix", plan.steps[0].argv)
+        self.assertIn("--hygiene", plan.steps[0].argv)
         self.assertIn("--check", plan.steps[1].argv)
+        self.assertNotIn("--hygiene", plan.steps[1].argv)
+        self.assertIn("--tests", plan.steps[1].argv)
+        self.assertIn("--static-analysis", plan.steps[1].argv)
         self.assertIn("--commit", description)
         self.assertNotIn("--changed", description)
 
@@ -905,7 +909,11 @@ class CliTest(unittest.TestCase):
 
         self.assertEqual(len(plan.steps), 2)
         self.assertIn("--fix", plan.steps[0].argv)
+        self.assertIn("--hygiene", plan.steps[0].argv)
         self.assertIn("--check", plan.steps[1].argv)
+        self.assertNotIn("--hygiene", plan.steps[1].argv)
+        self.assertIn("--tests", plan.steps[1].argv)
+        self.assertIn("--static-analysis", plan.steps[1].argv)
         self.assertIn("--staged", description)
         self.assertNotIn("--changed", description)
 
@@ -917,7 +925,11 @@ class CliTest(unittest.TestCase):
 
         self.assertEqual(len(plan.steps), 2)
         self.assertIn("--fix", plan.steps[0].argv)
+        self.assertIn("--hygiene", plan.steps[0].argv)
         self.assertIn("--check", plan.steps[1].argv)
+        self.assertNotIn("--hygiene", plan.steps[1].argv)
+        self.assertIn("--tests", plan.steps[1].argv)
+        self.assertIn("--static-analysis", plan.steps[1].argv)
         self.assertIn("README.md dev.py", description)
         self.assertNotIn("--changed", description)
         self.assertNotIn("--staged", description)

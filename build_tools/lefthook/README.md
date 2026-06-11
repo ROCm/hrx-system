@@ -20,10 +20,12 @@ python dev.py <lane> precommit --profile <profile> --commit
 ```
 
 This fix-then-check path is used for `paranoid` and `ci` when the input is the
-generated hook's commit scope or an explicit `--staged` precommit, because those
-profiles run affected tests after any mutation. Broader local-change precommit
-runs stay check-only. The `default` profile remains check-only. Local fixups are
-also available through explicit commands:
+generated hook's commit scope or an explicit `--staged` precommit. The mutating
+pass is limited to hygiene fixers and is also the hygiene validation boundary:
+unfixable diagnostics fail there. The validation pass then runs affected tests
+and static analysis once against the post-fix tree. Broader local-change
+precommit runs stay check-only. The `default` profile remains check-only. Local
+fixups are also available through explicit commands:
 
 ```bash
 python dev.py bazel fix

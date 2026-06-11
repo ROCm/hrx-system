@@ -144,13 +144,15 @@ def precommit_plan(
         input_args.append("--changed")
 
     plan = CommandPlan()
-    if precommit_should_autofix(profile, commit, staged, paths):
+    should_autofix = precommit_should_autofix(profile, commit, staged, paths)
+    if should_autofix:
         command = [
             tool_env.python,
             str(REPO_ROOT / "build_tools/lefthook/presubmit.py"),
             "--lane",
             lane,
             "--fix",
+            "--hygiene",
             *input_args,
             "--profile",
             profile,
@@ -176,6 +178,8 @@ def precommit_plan(
         "--profile",
         profile,
     ]
+    if should_autofix:
+        command += ["--tests", "--static-analysis"]
     if verbose:
         command.append("--verbose")
     plan.add(
