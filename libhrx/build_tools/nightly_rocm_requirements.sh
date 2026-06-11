@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Create/refresh a Python venv with the LATEST NIGHTLY ROCm (TheRock) + PyTorch wheels.
+# Create/refresh a Python venv with the latest NIGHTLY ROCm (TheRock) wheels.
 #
-# Source of truth for these commands:
-#   https://github.com/ROCm/TheRock/blob/main/RELEASES.md
-# Unified nightly index:  https://rocm.nightlies.amd.com/whl-multi-arch/
+# CORE ROCm ONLY — no PyTorch. The optional torch layer used by downstream A/B
+# testing lives in torch/nightly_torch_requirements.sh and installs on top of
+# the venv this script creates; keeping them split means the HRX build deps
+# never pull in torch.
+#
+# Source of truth: https://github.com/ROCm/TheRock/blob/main/RELEASES.md
+# Unified nightly index: https://rocm.nightlies.amd.com/whl-multi-arch/
 # Wheels are pulled with --no-cache-dir so we always fetch the freshest nightly.
 #
 # Usage:
-#   nightly_rocm_requirements.sh [--venv PATH] [--device SPEC] [--python BIN] [--yes]
+#   libhrx/build_tools/nightly_rocm_requirements.sh [--venv PATH] [--device SPEC] [--python BIN] [--yes]
 # Env overrides: HRX_VENV, ROCM_DEVICE, PYTHON
-#
-# Examples:
-#   ./nightly_rocm_requirements.sh                          # prompts for device (default device-gfx942)
-#   ./nightly_rocm_requirements.sh --device device-gfx942 --yes
 set -euo pipefail
 
 INDEX_URL="https://rocm.nightlies.amd.com/whl-multi-arch/"
@@ -31,7 +31,7 @@ while [[ $# -gt 0 ]]; do
     --device) DEVICE="$2"; shift 2;;
     --python) PYTHON="$2"; shift 2;;
     --yes|-y) ASSUME_YES=1; shift;;
-    -h|--help) sed -n '2,15p' "$0"; exit 0;;
+    -h|--help) sed -n '2,14p' "$0"; exit 0;;
     *) echo "unknown arg: $1" >&2; exit 2;;
   esac
 done
@@ -58,19 +58,14 @@ rm -rf "$VENV"
 source "$VENV/bin/activate"
 python -m pip install --no-cache-dir --upgrade pip
 
-# ROCm SDK: libraries + devel + the device package, from the nightly multi-arch index.
+# ROCm SDK only: libraries + devel + the device package, from the nightly index.
 pip install --no-cache-dir --index-url "$INDEX_URL" "rocm[libraries,devel,${DEVICE}]"
-
-# PyTorch stack from the same unified nightly index.
-pip install --no-cache-dir --index-url "$INDEX_URL" \
-    "torch[${DEVICE}]" "torchvision[${DEVICE}]" torchaudio
 
 echo "== verify =="
 rocm-sdk test || echo "WARNING: 'rocm-sdk test' reported issues"
-echo "ROCM_HOME      (rocm-sdk path --root):  $(rocm-sdk path --root)"
-echo "CMAKE prefix   (rocm-sdk path --cmake): $(rocm-sdk path --cmake)"
-python - <<'PY'
-import torch
-print("torch", torch.__version__, "| hip", getattr(torch.version, "hip", None),
-      "| cuda-avail", torch.cuda.is_available())
-PY
+echo "ROCM_HOME    (rocm-sdk path --root):  $(rocm-sdk path --root)"
+echo "CMAKE prefix (rocm-sdk path --cmake): $(rocm-sdk path --cmake)"
+echo
+echo "Next: configure HRX with  libhrx/build_tools/configure_hrx.sh"
+echo "Torch (optional, downstream A/B only, keep this venv active):"
+echo "      libhrx/build_tools/torch/nightly_torch_requirements.sh"
