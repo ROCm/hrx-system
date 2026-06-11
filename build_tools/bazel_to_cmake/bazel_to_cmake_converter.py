@@ -29,7 +29,9 @@ _BUILD_SETTING_CMAKE_LIST_VARIABLES = {
     "//runtime/src/iree/hal/drivers/amdgpu:targets": "_IREE_HAL_AMDGPU_EXACT_TARGETS",
 }
 
-_LOCATION_PATTERN = re.compile(r"\$\((location|locations) ([^)]+)\)")
+_LOCATION_PATTERN = re.compile(
+    r"\$\((location|locations|rootpath|rootpaths|execpath|execpaths) ([^)]+)\)"
+)
 
 # Maps Bazel platform labels (from both select() conditions and
 # target_compatible_with) to CMake platform condition values.
@@ -589,6 +591,31 @@ class BuildFileFunctions(object):
             return None
         return [self._convert_native_test_location_arg(arg) for arg in args]
 
+    def _convert_native_test_env(self, env):
+        if not env:
+            return None
+        converted_env = []
+        for key, value in sorted(env.items()):
+            if self._has_unresolved_external_location(value):
+                continue
+            converted_values = self._convert_location_arg(value)
+            converted_value = " ".join(converted_values)
+            converted_env.append("%s=%s" % (key, converted_value))
+        return converted_env or None
+
+    def _has_unresolved_external_location(self, value):
+        for match in _LOCATION_PATTERN.finditer(value):
+            label = match.group(2)
+            if not label.startswith("@"):
+                continue
+            try:
+                cmake_targets = self._targets.convert_target(label)
+            except (KeyError, ValueError):
+                return True
+            if len(cmake_targets) != 1 or not cmake_targets[0]:
+                return True
+        return False
+
     def _location_label_keys(self, args):
         if args is None:
             return set()
@@ -599,6 +626,14 @@ class BuildFileFunctions(object):
         return labels
 
     def _cmake_location_paths(self, label):
+        if label.startswith("@"):
+            try:
+                cmake_targets = self._targets.convert_target(label)
+            except (KeyError, ValueError):
+                return [label.replace("//:", "///").replace(":", "/")]
+            if len(cmake_targets) == 1 and cmake_targets[0]:
+                return [f"$<TARGET_FILE:{cmake_targets[0]}>"]
+            return [label.replace("//:", "///").replace(":", "/")]
         package, name = self._split_location_label(label)
         if package == self._current_package() and name in self._filegroup_srcs:
             return [
@@ -621,8 +656,7 @@ class BuildFileFunctions(object):
         except (KeyError, ValueError):
             return [source_path]
         if len(cmake_targets) == 1 and cmake_targets[0]:
-            target = cmake_targets[0].replace("::", "_")
-            return [f"$<TARGET_FILE:{target}>"]
+            return [f"$<TARGET_FILE:{cmake_targets[0]}>"]
         return [source_path]
 
     def _split_location_label(self, label):
@@ -2603,6 +2637,9 @@ class BuildFileFunctions(object):
         args_block = self._convert_string_list_block(
             "ARGS", self._convert_native_test_location_args(args)
         )
+        env_block = self._convert_string_list_block(
+            "ENV", self._convert_native_test_env(env), sort=False
+        )
         labels_block = self._convert_string_list_block("LABELS", tags)
         sanitizer_suppressions_block = self._convert_sanitizer_suppressions_block(
             sanitizer_suppressions
@@ -2615,6 +2652,7 @@ class BuildFileFunctions(object):
             f"{name_block}"
             f"{args_block}"
             f"{test_binary_block}"
+            f"{env_block}"
             f"{labels_block}"
             f"{sanitizer_suppressions_block}"
             f"{timeout_block}"

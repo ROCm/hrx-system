@@ -284,6 +284,9 @@ iree_native_test(
     "${CMAKE_CURRENT_SOURCE_DIR}/test/barrier.loom-test"
   SRC
     loom::tools::loom-check::loom-check
+  ENV
+    "LOOM_SPIRV_DIS=$<TARGET_FILE:iree::third_party::spirv_dis>"
+    "LOOM_SPIRV_VAL=$<TARGET_FILE:iree::third_party::spirv_val>"
   LABELS
     "loom-check"
 )
@@ -297,6 +300,9 @@ iree_native_test(
     "${CMAKE_CURRENT_SOURCE_DIR}/test/emit.loom-test"
   SRC
     loom::tools::loom-check::loom-check
+  ENV
+    "LOOM_SPIRV_DIS=$<TARGET_FILE:iree::third_party::spirv_dis>"
+    "LOOM_SPIRV_VAL=$<TARGET_FILE:iree::third_party::spirv_val>"
   LABELS
     "loom-check"
 )
@@ -310,6 +316,9 @@ iree_native_test(
     "${CMAKE_CURRENT_SOURCE_DIR}/test/source_structured_control.loom-test"
   SRC
     loom::tools::loom-check::loom-check
+  ENV
+    "LOOM_SPIRV_DIS=$<TARGET_FILE:iree::third_party::spirv_dis>"
+    "LOOM_SPIRV_VAL=$<TARGET_FILE:iree::third_party::spirv_val>"
   LABELS
     "loom-check"
 )
@@ -323,6 +332,9 @@ iree_native_test(
     "${CMAKE_CURRENT_SOURCE_DIR}/test/workgroup_storage.loom-test"
   SRC
     loom::tools::loom-check::loom-check
+  ENV
+    "LOOM_SPIRV_DIS=$<TARGET_FILE:iree::third_party::spirv_dis>"
+    "LOOM_SPIRV_VAL=$<TARGET_FILE:iree::third_party::spirv_val>"
   LABELS
     "loom-check"
 )

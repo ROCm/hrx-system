@@ -23,6 +23,7 @@
 #     File-related arguments can be passed with `{{}}` locator,
 #     e.g., --input=@{{foo.npy}}. The locator is used to portably
 #     pass the file arguments to tests and add the file to DATA.
+# ENV: Additional KEY=VALUE environment variables set while the test runs.
 # SRC: binary target to run as the test.
 # WILL_FAIL: The target will run, but its pass/fail status will be inverted.
 # DISABLED: The target will be skipped and its status will be 'Not Run'.
@@ -61,7 +62,7 @@ function(iree_native_test)
     _RULE
     ""
     "NAME;SRC;DRIVER;WILL_FAIL;DISABLED;RESOURCE_GROUP"
-    "ARGS;LABELS;DATA;TIMEOUT;SANITIZER_SUPPRESSIONS"
+    "ARGS;ENV;LABELS;DATA;TIMEOUT;SANITIZER_SUPPRESSIONS"
     ${ARGN}
   )
 
@@ -80,12 +81,14 @@ function(iree_native_test)
 
   endif()
 
+  set(_TEST_ENVIRONMENT_VARS)
   if(_RULE_SANITIZER_SUPPRESSIONS)
     iree_append_sanitizer_suppression_environment(
       _TEST_ENVIRONMENT_VARS
       ${_RULE_SANITIZER_SUPPRESSIONS}
     )
   endif()
+  list(APPEND _TEST_ENVIRONMENT_VARS ${_RULE_ENV})
 
   if(ANDROID)
     set(_ANDROID_ABS_DIR "/data/local/tmp/${_PACKAGE_PATH}/${_RULE_NAME}")
@@ -151,7 +154,8 @@ function(iree_native_test)
         ${_TEST_ARGS}
     )
     iree_configure_test(${_TEST_NAME})
-    set_property(TEST ${_TEST_NAME} PROPERTY ENVIRONMENT "QEMU_CPU_FLAGS=${RISCV_QEMU_CPU_FLAGS}")
+    set_property(TEST ${_TEST_NAME} APPEND PROPERTY ENVIRONMENT
+      "QEMU_CPU_FLAGS=${RISCV_QEMU_CPU_FLAGS}")
   elseif(IREE_ARCH STREQUAL "arm_64" AND "requires-arm-sme" IN_LIST _RULE_LABELS)
     add_test(
       NAME
@@ -172,11 +176,12 @@ function(iree_native_test)
     )
     iree_configure_test(${_TEST_NAME})
     set(_IREE_TEST_CAN_REGISTER ON)
+  endif()
 
-    # Apply test environment variables after we add the test.
-    if(DEFINED _TEST_ENVIRONMENT_VARS)
-      set_property(TEST ${_TEST_NAME} PROPERTY ENVIRONMENT ${_TEST_ENVIRONMENT_VARS})
-    endif()
+  # Apply accumulated test environment variables after the test exists.
+  if(_TEST_ENVIRONMENT_VARS)
+    set_property(TEST ${_TEST_NAME} APPEND PROPERTY ENVIRONMENT
+      ${_TEST_ENVIRONMENT_VARS})
   endif()
 
   if (NOT DEFINED _RULE_TIMEOUT OR "${_RULE_TIMEOUT}" STREQUAL "")

@@ -34,7 +34,8 @@ endfunction()
 
 function(iree_configure_spirv_tools)
   if(TARGET iree::third_party::spirv_as AND
-      TARGET iree::third_party::spirv_dis)
+      TARGET iree::third_party::spirv_dis AND
+      TARGET iree::third_party::spirv_val)
     return()
   endif()
 
@@ -42,7 +43,9 @@ function(iree_configure_spirv_tools)
   if(_package_discovery_allowed)
     find_program(IREE_SPIRV_AS_EXECUTABLE NAMES spirv-as)
     find_program(IREE_SPIRV_DIS_EXECUTABLE NAMES spirv-dis)
-    if(IREE_SPIRV_AS_EXECUTABLE AND IREE_SPIRV_DIS_EXECUTABLE)
+    find_program(IREE_SPIRV_VAL_EXECUTABLE NAMES spirv-val)
+    if(IREE_SPIRV_AS_EXECUTABLE AND IREE_SPIRV_DIS_EXECUTABLE AND
+        IREE_SPIRV_VAL_EXECUTABLE)
       _iree_add_imported_spirv_tool(
         iree::third_party::spirv_as
         iree_spirv_as
@@ -51,11 +54,16 @@ function(iree_configure_spirv_tools)
         iree::third_party::spirv_dis
         iree_spirv_dis
         "${IREE_SPIRV_DIS_EXECUTABLE}")
+      _iree_add_imported_spirv_tool(
+        iree::third_party::spirv_val
+        iree_spirv_val
+        "${IREE_SPIRV_VAL_EXECUTABLE}")
     endif()
   endif()
 
   if(NOT TARGET iree::third_party::spirv_as OR
-      NOT TARGET iree::third_party::spirv_dis)
+      NOT TARGET iree::third_party::spirv_dis OR
+      NOT TARGET iree::third_party::spirv_val)
     iree_dependency_require_pinned_source_allowed("SPIRV-Tools")
     iree_populate_locked_fetch_content(
       spirv_headers _iree_spirv_headers_source_dir)
@@ -72,5 +80,7 @@ function(iree_configure_spirv_tools)
       iree::third_party::spirv_as spirv-as)
     _iree_add_spirv_tool_alias(
       iree::third_party::spirv_dis spirv-dis)
+    _iree_add_spirv_tool_alias(
+      iree::third_party::spirv_val spirv-val)
   endif()
 endfunction()

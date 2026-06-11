@@ -231,3 +231,20 @@ alias(
         ":runtime_users",
     ],
 )
+
+alias(
+    name = "spirv_val",
+    actual = selects.with_or({
+        (
+            "//loom/config/target:spirv_artifacts",
+            "//runtime/config/hal:driver_vulkan",
+        ): "@spirv_tools//:spirv-val",
+        "//conditions:default": ":empty_spirv_tool",
+    }),
+    tags = ["manual"],
+    visibility = [
+        ":build_tool_users",
+        ":loom_users",
+        ":runtime_users",
+    ],
+)

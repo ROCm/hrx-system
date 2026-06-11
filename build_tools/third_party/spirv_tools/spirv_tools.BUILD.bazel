@@ -232,3 +232,15 @@ cc_binary(
         ":tools_util",
     ],
 )
+
+cc_binary(
+    name = "spirv-val",
+    srcs = ["tools/val/val.cpp"],
+    copts = COMMON_COPTS,
+    visibility = ["//visibility:public"],
+    deps = [
+        ":spirv_tools",
+        ":tools_io",
+        ":tools_util",
+    ],
+)

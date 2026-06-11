@@ -100,7 +100,7 @@ iree_py_test(
   ARGS
     "mlir"
     "--fail-on-skip"
-    "--loom-opt=$<TARGET_FILE:loom_tools_loom-opt_loom-opt>"
+    "--loom-opt=$<TARGET_FILE:loom::tools::loom-opt::loom-opt>"
     "${PROJECT_SOURCE_DIR}/loom/py/loom/importers/mlir/testdata/vector_reduce_amdgpu.mlir"
   DEPS
     loom::py::loom::importers::mlir::mlir_packages

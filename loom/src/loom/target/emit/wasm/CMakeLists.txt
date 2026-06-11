@@ -156,8 +156,6 @@ iree_native_test(
     "${CMAKE_CURRENT_SOURCE_DIR}/test/assembly.loom-test"
   SRC
     loom::tools::loom-check::loom-check
-  DATA
-    "@wasi_sdk///llvm-objdump"
   LABELS
     "loom-check"
 )

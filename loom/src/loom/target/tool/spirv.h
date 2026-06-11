@@ -24,17 +24,21 @@ typedef enum loom_spirv_tool_kind_e {
   LOOM_SPIRV_TOOL_SPIRV_AS = 0,
   LOOM_SPIRV_TOOL_SPIRV_DIS = 1,
   LOOM_SPIRV_TOOL_SPIRV_VAL = 2,
+  LOOM_SPIRV_TOOL_COUNT = 3,
 } loom_spirv_tool_kind_t;
 
 typedef struct loom_spirv_toolchain_t {
   // Directory containing SPIR-V tool executables, or empty to search PATH.
   iree_string_view_t root_path;
+  // Explicit executable paths indexed by loom_spirv_tool_kind_t.
+  iree_string_view_t tool_paths[LOOM_SPIRV_TOOL_COUNT];
 } loom_spirv_toolchain_t;
 
 typedef loom_tool_output_t loom_spirv_tool_output_t;
 
-// Initializes |out_toolchain| from LOOM_SPIRV_TOOLCHAIN_ROOT, then
-// LOOM_SPIRV_TOOLCHAIN_BIN, falling back to PATH lookup when both are absent.
+// Initializes |out_toolchain| from LOOM_SPIRV_AS, LOOM_SPIRV_DIS,
+// LOOM_SPIRV_VAL, LOOM_SPIRV_TOOLCHAIN_ROOT, and LOOM_SPIRV_TOOLCHAIN_BIN,
+// falling back to PATH lookup for tools without an explicit path or root.
 void loom_spirv_toolchain_initialize_from_environment(
     loom_spirv_toolchain_t* out_toolchain);
 

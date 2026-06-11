@@ -809,8 +809,10 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
             return None
         converted_data = []
         for label in data:
+            if label.startswith("@") or label.startswith("//third_party:"):
+                continue
             converted_data.append(self._normalize_label(label))
-        return converted_data
+        return converted_data or None
 
     def loom_check_runner_binary(
         self,
@@ -844,6 +846,7 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         name,
         src,
         data=None,
+        env=None,
         tags=None,
         runner="//loom/src/loom/tools/loom-check:loom-check",
         target_compatible_with=None,
@@ -864,6 +867,9 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         data_block = self._convert_string_list_block(
             "DATA", self._convert_loom_check_data(data)
         )
+        env_block = self._convert_string_list_block(
+            "ENV", self._convert_native_test_env(env), sort=False
+        )
         labels_block = self._convert_string_list_block("LABELS", combined_tags)
         self._emit_platform_guard_begin(target_compatible_with)
         self._converter.body += (
@@ -872,6 +878,7 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
             f"{args_block}"
             f"{test_binary_block}"
             f"{data_block}"
+            f"{env_block}"
             f"{labels_block}"
             f")\n\n"
         )
@@ -882,6 +889,7 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         name,
         srcs,
         data=None,
+        env=None,
         tags=None,
         runner="//loom/src/loom/tools/loom-check:loom-check",
         test_name_prefix_to_strip="",
@@ -896,6 +904,9 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         test_binary_block = self._convert_single_target_block("SRC", runner)
         data_block = self._convert_string_list_block(
             "DATA", self._convert_loom_check_data(data)
+        )
+        env_block = self._convert_string_list_block(
+            "ENV", self._convert_native_test_env(env), sort=False
         )
         combined_tags = (tags or []) + ["loom-check"]
         labels_block = self._convert_string_list_block("LABELS", combined_tags)
@@ -917,6 +928,7 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
                 f"{args_block}"
                 f"{test_binary_block}"
                 f"{data_block}"
+                f"{env_block}"
                 f"{labels_block}"
                 f")\n\n"
             )

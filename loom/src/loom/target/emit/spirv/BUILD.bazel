@@ -26,6 +26,16 @@ _SPIRV_CHECK_VISIBILITY = ["//loom/src/loom/tools/loom-check:__pkg__"]
 
 _SPIRV_TOOLING_VISIBILITY = ["//loom/src/loom/tooling/target/spirv:__pkg__"]
 
+_SPIRV_TOOL_DATA = [
+    "//third_party:spirv_dis",
+    "//third_party:spirv_val",
+]
+
+_SPIRV_TOOL_ENV = {
+    "LOOM_SPIRV_DIS": "$(rootpath //third_party:spirv_dis)",
+    "LOOM_SPIRV_VAL": "$(rootpath //third_party:spirv_val)",
+}
+
 #===------------------------------------------------------------------------===#
 # SPIR-V emission
 #===------------------------------------------------------------------------===#
@@ -238,5 +248,7 @@ loom_check_test_suite(
         "test/source_structured_control.loom-test",
         "test/workgroup_storage.loom-test",
     ],
+    data = _SPIRV_TOOL_DATA,
+    env = _SPIRV_TOOL_ENV,
     test_name_prefix_to_strip = "test/",
 )

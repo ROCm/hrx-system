@@ -43,6 +43,17 @@ void loom_spirv_toolchain_initialize_from_environment(
       .root_path = root_path ? iree_make_cstring_view(root_path)
                              : iree_string_view_empty(),
   };
+  static const char* kToolPathEnv[LOOM_SPIRV_TOOL_COUNT] = {
+      [LOOM_SPIRV_TOOL_SPIRV_AS] = "LOOM_SPIRV_AS",
+      [LOOM_SPIRV_TOOL_SPIRV_DIS] = "LOOM_SPIRV_DIS",
+      [LOOM_SPIRV_TOOL_SPIRV_VAL] = "LOOM_SPIRV_VAL",
+  };
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(kToolPathEnv); ++i) {
+    const char* tool_path = getenv(kToolPathEnv[i]);
+    if (tool_path != NULL && tool_path[0] != '\0') {
+      out_toolchain->tool_paths[i] = iree_make_cstring_view(tool_path);
+    }
+  }
 }
 
 iree_string_view_t loom_spirv_tool_name(loom_spirv_tool_kind_t tool_kind) {
@@ -65,6 +76,8 @@ iree_string_view_t loom_spirv_tool_name(loom_spirv_tool_kind_t tool_kind) {
 #else
       return IREE_SV("spirv-val");
 #endif
+    case LOOM_SPIRV_TOOL_COUNT:
+      break;
   }
   return iree_string_view_empty();
 }
@@ -81,6 +94,11 @@ static iree_status_t loom_spirv_tool_executable_path(
   if (iree_string_view_is_empty(tool_name)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "unknown SPIR-V tool kind %d", (int)tool_kind);
+  }
+  if (tool_kind < LOOM_SPIRV_TOOL_COUNT &&
+      !iree_string_view_is_empty(toolchain->tool_paths[tool_kind])) {
+    return loom_spirv_tool_dup_cstring(toolchain->tool_paths[tool_kind],
+                                       allocator, out_executable_path);
   }
   if (iree_string_view_is_empty(toolchain->root_path)) {
     *out_search_path = true;

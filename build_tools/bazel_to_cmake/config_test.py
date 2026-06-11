@@ -267,7 +267,7 @@ class ConfigTest(unittest.TestCase):
         )
 
         self.assertIn(
-            "$<TARGET_FILE:iree_hal_local_elf_testdata_elementwise_mul_library.so>",
+            "$<TARGET_FILE:iree::hal::local::elf::testdata::elementwise_mul_library.so>",
             converter.body,
         )
         self.assertNotIn('"elementwise_mul_library.so"', converter.body)
@@ -305,7 +305,7 @@ class ConfigTest(unittest.TestCase):
 
         functions.iree_c_embed_data(
             name="elementwise_mul_source",
-            srcs=[":elementwise_mul_library.c"],
+            srcs=[":elementwise_mul.mlir"],
             c_file_output="elementwise_mul_source.c",
             h_file_output="elementwise_mul_source.h",
             testonly=True,
@@ -314,7 +314,7 @@ class ConfigTest(unittest.TestCase):
 
         self.assertIn(
             '"${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/local/elf/testdata/'
-            'elementwise_mul_library.c"',
+            'elementwise_mul.mlir"',
             converter.body,
         )
         self.assertNotIn("$<TARGET_FILE:", converter.body)
@@ -381,6 +381,54 @@ class ConfigTest(unittest.TestCase):
             '"--flag={{${PROJECT_SOURCE_DIR}/pkg/nested/input.bin}}"',
             converter.body,
         )
+
+    def test_native_test_converts_location_env(self):
+        converter = SimpleNamespace(body="")
+        functions = bazel_to_cmake_converter.BuildFileFunctions(
+            converter=converter,
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            build_dir="/repo/pkg",
+            repo_root="/repo",
+        )
+
+        functions.native_test(
+            name="location_env_test",
+            src="//tools:runner",
+            env={
+                "FIXTURE": "$(location input.txt)",
+                "SPIRV_VAL": "$(rootpath //third_party:spirv_val)",
+            },
+        )
+
+        self.assertIn("ENV", converter.body)
+        self.assertIn(
+            '"FIXTURE=${PROJECT_SOURCE_DIR}/pkg/input.txt"',
+            converter.body,
+        )
+        self.assertIn(
+            '"SPIRV_VAL=$<TARGET_FILE:iree::third_party::spirv_val>"',
+            converter.body,
+        )
+
+    def test_native_test_omits_unresolved_external_location_env(self):
+        converter = SimpleNamespace(body="")
+        functions = bazel_to_cmake_converter.BuildFileFunctions(
+            converter=converter,
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            build_dir="/repo/pkg",
+            repo_root="/repo",
+        )
+
+        functions.native_test(
+            name="external_env_test",
+            src="//tools:runner",
+            env={
+                "LLVM_OBJDUMP": "$(rootpath @wasi_sdk//:llvm-objdump)",
+            },
+        )
+
+        self.assertNotIn("ENV", converter.body)
+        self.assertNotIn("TARGET_FILE:pkg_@wasi_sdk", converter.body)
 
     def test_cc_test_emits_sanitizer_suppressions(self):
         converter = SimpleNamespace(body="")
