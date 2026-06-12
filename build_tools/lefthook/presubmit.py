@@ -1665,13 +1665,55 @@ def cmake_run_clang_tidy_fix_command(
     ]
 
 
+CLANG_TIDY_REPLACEMENT_PATH_FIELD_RE = re.compile(
+    r"^(\s*(?:-\s*)?(?:MainSourceFile|FilePath|BuildDirectory):\s*)'(.*)'(\s*)$"
+)
+BAZEL_EXECROOT_MARKER = "/execroot/_main/"
+
+
+def clang_tidy_worktree_replacement_path(value: str) -> str:
+    if not value:
+        return value
+    if BAZEL_EXECROOT_MARKER in value:
+        relative_path = value.split(BAZEL_EXECROOT_MARKER, 1)[1]
+        return str(REPO_ROOT / relative_path)
+    path = Path(value)
+    if not path.is_absolute():
+        return str(REPO_ROOT / path)
+    return value
+
+
+def normalize_clang_tidy_replacements_yaml(text: str) -> str:
+    normalized_lines = []
+    for line in text.splitlines(keepends=True):
+        line_without_newline = line.removesuffix("\n")
+        newline = "\n" if line.endswith("\n") else ""
+        match = CLANG_TIDY_REPLACEMENT_PATH_FIELD_RE.match(line_without_newline)
+        if not match:
+            normalized_lines.append(line)
+            continue
+        prefix, value, suffix = match.groups()
+        if prefix.lstrip().startswith("BuildDirectory:"):
+            value = str(REPO_ROOT)
+        else:
+            value = clang_tidy_worktree_replacement_path(value)
+        normalized_lines.append(f"{prefix}'{value}'{suffix}{newline}")
+    return "".join(normalized_lines)
+
+
 def prepare_clang_tidy_replacements_dir(
     scratch_dir: Path, fix_paths: list[Path]
 ) -> Path:
     replacements_dir = scratch_dir / "replacements"
     replacements_dir.mkdir(parents=True, exist_ok=True)
     for fix_path in fix_paths:
-        shutil.copy2(fix_path, replacements_dir / fix_path.name)
+        replacement_path = replacements_dir / fix_path.name
+        replacement_path.write_text(
+            normalize_clang_tidy_replacements_yaml(
+                fix_path.read_text(encoding="utf-8")
+            ),
+            encoding="utf-8",
+        )
     return replacements_dir
 
 

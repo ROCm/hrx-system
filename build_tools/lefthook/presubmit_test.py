@@ -218,6 +218,32 @@ class PresubmitTest(unittest.TestCase):
             command,
         )
 
+    def test_clang_tidy_replacements_are_rebased_to_worktree_paths(self):
+        sandbox_path = (
+            "/tmp/bazel/123/sandbox/linux-sandbox/1/"
+            "execroot/_main/runtime/src/iree/base/status.c"
+        )
+        text = (
+            "---\n"
+            f"MainSourceFile: '{sandbox_path}'\n"
+            f"FilePath: '{sandbox_path}'\n"
+            "Replacements:\n"
+            f"  - FilePath: '{sandbox_path}'\n"
+            "    Offset: 1\n"
+            "BuildDirectory: '/tmp/bazel/123/sandbox/linux-sandbox/1/"
+            "execroot/_main'\n"
+            "...\n"
+        )
+
+        normalized = presubmit.normalize_clang_tidy_replacements_yaml(text)
+
+        expected_path = str(presubmit.REPO_ROOT / "runtime/src/iree/base/status.c")
+        self.assertIn(f"MainSourceFile: '{expected_path}'", normalized)
+        self.assertIn(f"FilePath: '{expected_path}'", normalized)
+        self.assertIn(f"  - FilePath: '{expected_path}'", normalized)
+        self.assertIn(f"BuildDirectory: '{presubmit.REPO_ROOT}'", normalized)
+        self.assertNotIn("/execroot/_main/", normalized)
+
     def test_clang_tidy_fix_paths_filter_to_selected_translation_units(self):
         fix_paths = [
             Path(
