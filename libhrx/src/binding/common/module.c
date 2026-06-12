@@ -319,6 +319,7 @@ iree_status_t iree_hal_streaming_module_create_from_memory(
       iree_allocator_malloc(host_allocator, sizeof(*module), (void**)&module));
   memset(module, 0, sizeof(*module));
   iree_atomic_ref_count_init(&module->ref_count);
+  iree_slim_mutex_initialize(&module->global_mutex);
   module->context = context;
   iree_hal_streaming_context_retain(context);
   module->host_allocator = host_allocator;
@@ -477,6 +478,16 @@ static void iree_hal_streaming_module_destroy(
   // Release symbol metadata.
   iree_allocator_free(module->host_allocator, module->symbols);
 
+  // Release cached executable globals while both the context pointer map and
+  // executable-owned global buffers are still live.
+  for (iree_host_size_t i = 0; i < module->global_count; ++i) {
+    iree_hal_streaming_memory_release_wrapped_buffer(
+        module->globals[i]->global_buffer);
+    iree_allocator_free(host_allocator, module->globals[i]);
+  }
+  iree_allocator_free(host_allocator, module->globals);
+  iree_slim_mutex_deinitialize(&module->global_mutex);
+
   // Release executable before the fat-binary extract: the HAL's code
   // object reader may still alias pointers into the (possibly owned)
   // backing store held by the extract until the executable drops.
@@ -516,6 +527,15 @@ void iree_hal_streaming_module_release(iree_hal_streaming_module_t* module) {
   }
 }
 
+static bool iree_hal_streaming_module_symbol_name_matches(
+    iree_string_view_t symbol_name, iree_string_view_t name) {
+  if (iree_string_view_equal(symbol_name, name)) return true;
+  iree_string_view_t stripped_name =
+      iree_string_view_strip_suffix(name, IREE_SV(".kd"));
+  return stripped_name.size != name.size &&
+         iree_string_view_equal(symbol_name, stripped_name);
+}
+
 iree_status_t iree_hal_streaming_module_symbol(
     iree_hal_streaming_module_t* module, const char* name,
     iree_hal_streaming_symbol_type_t expected_type,
@@ -527,12 +547,9 @@ iree_status_t iree_hal_streaming_module_symbol(
 
   iree_string_view_t name_view =
       iree_string_view_trim(iree_make_cstring_view(name));
-  iree_string_view_t stripped_name =
-      iree_string_view_strip_suffix(name_view, IREE_SV(".kd"));
   for (uint32_t i = 0; i < module->symbol_count; ++i) {
-    if (iree_string_view_equal(module->symbols[i].name, name_view) ||
-        (stripped_name.size != name_view.size &&
-         iree_string_view_equal(module->symbols[i].name, stripped_name))) {
+    if (iree_hal_streaming_module_symbol_name_matches(module->symbols[i].name,
+                                                      name_view)) {
       // Check if the symbol type matches expected type.
       if (module->symbols[i].type == expected_type) {
         // Return symbol info as pointer.
@@ -545,7 +562,6 @@ iree_status_t iree_hal_streaming_module_symbol(
             (int)name_view.size, name_view.data, expected_type,
             module->symbols[i].type);
       }
-      break;
     }
   }
   return iree_make_status(IREE_STATUS_NOT_FOUND,
@@ -560,6 +576,159 @@ iree_status_t iree_hal_streaming_module_function(
       module, name, IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION, out_function);
 }
 
+static iree_hal_streaming_symbol_t*
+iree_hal_streaming_module_find_global_locked(
+    iree_hal_streaming_module_t* module, iree_string_view_t name) {
+  for (iree_host_size_t i = 0; i < module->global_count; ++i) {
+    iree_hal_streaming_symbol_t* symbol = module->globals[i];
+    if (iree_hal_streaming_module_symbol_name_matches(symbol->name, name)) {
+      return symbol;
+    }
+  }
+  return NULL;
+}
+
+static iree_status_t iree_hal_streaming_module_grow_globals_locked(
+    iree_hal_streaming_module_t* module, iree_host_size_t minimum_capacity) {
+  if (minimum_capacity <= module->global_capacity) return iree_ok_status();
+
+  iree_host_size_t new_capacity =
+      module->global_capacity ? module->global_capacity : 4;
+  while (new_capacity < minimum_capacity) {
+    if (!iree_host_size_checked_mul(new_capacity, 2, &new_capacity)) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "module global cache capacity overflow growing to %" PRIhsz,
+          minimum_capacity);
+    }
+  }
+
+  void* new_globals = module->globals;
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_realloc_array(module->host_allocator, new_capacity,
+                                   sizeof(*module->globals), &new_globals));
+  module->globals = (iree_hal_streaming_symbol_t**)new_globals;
+  module->global_capacity = new_capacity;
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_streaming_module_create_global_symbol_locked(
+    iree_hal_streaming_module_t* module, iree_hal_executable_t* executable,
+    iree_hal_executable_global_t global_handle,
+    iree_hal_streaming_symbol_t** out_symbol) {
+  IREE_ASSERT_ARGUMENT(module);
+  IREE_ASSERT_ARGUMENT(executable);
+  IREE_ASSERT_ARGUMENT(out_symbol);
+  *out_symbol = NULL;
+
+  iree_hal_executable_global_info_t global_info;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_executable_global_info(executable, global_handle, &global_info));
+
+  iree_hal_buffer_t* global_buffer = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_executable_global_buffer(
+      executable, global_handle, IREE_HAL_QUEUE_AFFINITY_ANY, &global_buffer));
+
+  iree_hal_streaming_buffer_t* streaming_buffer = NULL;
+  iree_status_t status = iree_hal_streaming_memory_wrap_buffer(
+      module->context, global_buffer,
+      IREE_HAL_STREAMING_BUFFER_CONTEXT_BORROWED, &streaming_buffer);
+
+  iree_hal_streaming_symbol_t* symbol = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc(module->host_allocator, sizeof(*symbol),
+                                   (void**)&symbol);
+  }
+  if (iree_status_is_ok(status)) {
+    memset(symbol, 0, sizeof(*symbol));
+    symbol->module = module;
+    symbol->name = global_info.name;
+    symbol->type = IREE_HAL_STREAMING_SYMBOL_TYPE_GLOBAL;
+    symbol->executable = executable;
+    symbol->global_handle = global_handle;
+    symbol->global_buffer = streaming_buffer;
+    symbol->device_address =
+        iree_hal_streaming_buffer_device_pointer(streaming_buffer);
+    symbol->size_bytes = global_info.byte_length;
+    status = iree_hal_streaming_module_grow_globals_locked(
+        module, module->global_count + 1);
+  }
+
+  if (iree_status_is_ok(status)) {
+    module->globals[module->global_count++] = symbol;
+    *out_symbol = symbol;
+  } else {
+    iree_allocator_free(module->host_allocator, symbol);
+    iree_hal_streaming_memory_release_wrapped_buffer(streaming_buffer);
+  }
+  return status;
+}
+
+iree_status_t iree_hal_streaming_module_global_symbol(
+    iree_hal_streaming_module_t* module, const char* name,
+    iree_hal_streaming_symbol_t** out_global) {
+  IREE_ASSERT_ARGUMENT(module);
+  IREE_ASSERT_ARGUMENT(name);
+  IREE_ASSERT_ARGUMENT(out_global);
+  *out_global = NULL;
+
+  iree_string_view_t name_view =
+      iree_string_view_trim(iree_make_cstring_view(name));
+
+  for (iree_host_size_t i = 0; i < module->symbol_count; ++i) {
+    iree_hal_streaming_symbol_t* symbol = &module->symbols[i];
+    if ((symbol->type == IREE_HAL_STREAMING_SYMBOL_TYPE_GLOBAL ||
+         symbol->type == IREE_HAL_STREAMING_SYMBOL_TYPE_DATA) &&
+        iree_hal_streaming_module_symbol_name_matches(symbol->name,
+                                                      name_view)) {
+      *out_global = symbol;
+      return iree_ok_status();
+    }
+  }
+
+  iree_status_t status = iree_ok_status();
+  iree_slim_mutex_lock(&module->global_mutex);
+
+  iree_hal_streaming_symbol_t* cached_symbol =
+      iree_hal_streaming_module_find_global_locked(module, name_view);
+  if (cached_symbol) {
+    *out_global = cached_symbol;
+  } else {
+    const iree_host_size_t executable_count =
+        module->executable_count ? module->executable_count : 1;
+    for (iree_host_size_t executable_ordinal = 0;
+         executable_ordinal < executable_count; ++executable_ordinal) {
+      iree_hal_executable_t* executable =
+          module->executables ? module->executables[executable_ordinal]
+                              : module->executable;
+      iree_hal_executable_global_t global_handle =
+          iree_hal_executable_global_invalid();
+      status = iree_hal_executable_lookup_global_by_name(executable, name_view,
+                                                         &global_handle);
+      if (iree_status_is_not_found(status)) {
+        // Merged HIP fat binaries are represented as several HAL executables.
+        // A miss in one entry is expected while probing for the entry that owns
+        // the global; the terminal miss below is the user-visible error.
+        iree_status_ignore(status);
+        status = iree_ok_status();
+        continue;
+      }
+      if (!iree_status_is_ok(status)) break;
+      status = iree_hal_streaming_module_create_global_symbol_locked(
+          module, executable, global_handle, out_global);
+      break;
+    }
+    if (iree_status_is_ok(status) && !*out_global) {
+      status = iree_make_status(IREE_STATUS_NOT_FOUND,
+                                "global '%.*s' not found in module",
+                                (int)name_view.size, name_view.data);
+    }
+  }
+
+  iree_slim_mutex_unlock(&module->global_mutex);
+  return status;
+}
+
 iree_status_t iree_hal_streaming_module_global(
     iree_hal_streaming_module_t* module, const char* name,
     iree_hal_streaming_deviceptr_t* out_device_ptr,
@@ -570,15 +739,9 @@ iree_status_t iree_hal_streaming_module_global(
   *out_device_ptr = 0;
   if (out_size) *out_size = 0;
 
-  // Module globals live entirely in the streaming layer: every exported
-  // global is discovered at module load time (see
-  // iree_hal_streaming_module_extract_metadata) and cached in
-  // module->symbols[]. We intentionally do NOT fall back to a HAL-level
-  // executable lookup; the IREE HAL does not expose a by-name global
-  // lookup and all supported lookups are resolved here.
   iree_hal_streaming_symbol_t* symbol = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_streaming_module_symbol(
-      module, name, IREE_HAL_STREAMING_SYMBOL_TYPE_GLOBAL, &symbol));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_streaming_module_global_symbol(module, name, &symbol));
 
   *out_device_ptr = symbol->device_address;
   if (out_size) *out_size = symbol->size_bytes;

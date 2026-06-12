@@ -196,6 +196,27 @@ static void iree_hal_streaming_buffer_free(
   IREE_TRACE_ZONE_END(z0);
 }
 
+iree_status_t iree_hal_streaming_memory_wrap_buffer(
+    iree_hal_streaming_context_t* context, iree_hal_buffer_t* buffer,
+    iree_hal_streaming_buffer_context_ownership_t context_ownership,
+    iree_hal_streaming_buffer_t** out_buffer) {
+  IREE_ASSERT_ARGUMENT(context);
+  IREE_ASSERT_ARGUMENT(buffer);
+  IREE_ASSERT_ARGUMENT(out_buffer);
+  *out_buffer = NULL;
+
+  return iree_hal_streaming_buffer_wrap(
+      context, buffer, (int)iree_hal_buffer_memory_type(buffer),
+      context_ownership, out_buffer);
+}
+
+void iree_hal_streaming_memory_release_wrapped_buffer(
+    iree_hal_streaming_buffer_t* buffer) {
+  if (!buffer) return;
+  hrx_buffer_table_remove(&buffer->context->buffer_table, buffer->device_ptr);
+  iree_hal_streaming_buffer_free(buffer);
+}
+
 static void iree_hal_streaming_temporary_host_buffer_free(
     iree_hal_streaming_context_t* context,
     iree_hal_streaming_buffer_t* buffer) {
