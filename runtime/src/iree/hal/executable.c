@@ -59,13 +59,33 @@ IREE_API_EXPORT iree_status_t iree_hal_executable_lookup_function_by_name(
 
 IREE_API_EXPORT iree_status_t iree_hal_executable_lookup_global_by_name(
     iree_hal_executable_t* executable, iree_string_view_t name,
+    iree_hal_executable_global_t* out_global) {
+  IREE_ASSERT_ARGUMENT(executable);
+  IREE_ASSERT_ARGUMENT(out_global);
+  *out_global = iree_hal_executable_global_invalid();
+  iree_status_t status = _VTABLE_DISPATCH(executable, lookup_global_by_name)(
+      executable, name, out_global);
+  return status;
+}
+
+IREE_API_EXPORT iree_status_t iree_hal_executable_global_info(
+    iree_hal_executable_t* executable, iree_hal_executable_global_t global,
+    iree_hal_executable_global_info_t* out_info) {
+  IREE_ASSERT_ARGUMENT(executable);
+  IREE_ASSERT_ARGUMENT(out_info);
+  memset(out_info, 0, sizeof(*out_info));
+  iree_status_t status =
+      _VTABLE_DISPATCH(executable, global_info)(executable, global, out_info);
+  return status;
+}
+
+IREE_API_EXPORT iree_status_t iree_hal_executable_global_buffer(
+    iree_hal_executable_t* executable, iree_hal_executable_global_t global,
     iree_hal_queue_affinity_t queue_affinity, iree_hal_buffer_t** out_buffer) {
   IREE_ASSERT_ARGUMENT(executable);
   IREE_ASSERT_ARGUMENT(out_buffer);
-  IREE_TRACE_ZONE_BEGIN(z0);
   *out_buffer = NULL;
-  iree_status_t status = _VTABLE_DISPATCH(executable, lookup_global_by_name)(
-      executable, name, queue_affinity, out_buffer);
-  IREE_TRACE_ZONE_END(z0);
+  iree_status_t status = _VTABLE_DISPATCH(executable, global_buffer)(
+      executable, global, queue_affinity, out_buffer);
   return status;
 }

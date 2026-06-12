@@ -388,6 +388,37 @@ static iree_status_t iree_hal_webgpu_executable_lookup_function_by_name(
                           (int)name.size, name.data);
 }
 
+static iree_status_t iree_hal_webgpu_executable_lookup_global_by_name(
+    iree_hal_executable_t* base_executable, iree_string_view_t name,
+    iree_hal_executable_global_t* out_global) {
+  (void)base_executable;
+  (void)name;
+  *out_global = iree_hal_executable_global_invalid();
+  return iree_make_status(IREE_STATUS_NOT_FOUND,
+                          "WebGPU executable has no globals");
+}
+
+static iree_status_t iree_hal_webgpu_executable_global_info(
+    iree_hal_executable_t* base_executable, iree_hal_executable_global_t global,
+    iree_hal_executable_global_info_t* out_info) {
+  (void)base_executable;
+  (void)global;
+  memset(out_info, 0, sizeof(*out_info));
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "invalid WebGPU executable global");
+}
+
+static iree_status_t iree_hal_webgpu_executable_global_buffer(
+    iree_hal_executable_t* base_executable, iree_hal_executable_global_t global,
+    iree_hal_queue_affinity_t queue_affinity, iree_hal_buffer_t** out_buffer) {
+  (void)base_executable;
+  (void)global;
+  (void)queue_affinity;
+  *out_buffer = NULL;
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "invalid WebGPU executable global");
+}
+
 static const iree_hal_executable_vtable_t iree_hal_webgpu_executable_vtable = {
     .destroy = iree_hal_webgpu_executable_destroy,
     .function_count = iree_hal_webgpu_executable_function_count,
@@ -395,4 +426,7 @@ static const iree_hal_executable_vtable_t iree_hal_webgpu_executable_vtable = {
     .function_parameters = iree_hal_webgpu_executable_function_parameters,
     .lookup_function_by_name =
         iree_hal_webgpu_executable_lookup_function_by_name,
+    .lookup_global_by_name = iree_hal_webgpu_executable_lookup_global_by_name,
+    .global_info = iree_hal_webgpu_executable_global_info,
+    .global_buffer = iree_hal_webgpu_executable_global_buffer,
 };

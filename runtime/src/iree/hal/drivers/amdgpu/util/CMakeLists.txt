@@ -163,6 +163,75 @@ iree_cc_test(
 endif()
 
 if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_library(
+  NAME
+    global_table
+  HDRS
+    "global_table.h"
+  SRCS
+    "global_table.c"
+  DEPS
+    ::libhsa
+    iree::base
+    iree::base::internal
+    iree::base::threading
+    iree::hal
+    iree::hal::drivers::amdgpu::buffer
+    iree::hal::drivers::amdgpu::queue_affinity
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    global_table_test
+  SRCS
+    "global_table_test.cc"
+  DEPS
+    ::global_table
+    iree::base
+    iree::hal
+    iree::hal::drivers::amdgpu
+    iree::hal::drivers::amdgpu::queue_affinity
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_binary_benchmark(
+  NAME
+    global_table_benchmark
+  SRCS
+    "global_table_benchmark.cc"
+  DEPS
+    ::global_table
+    iree::base
+    iree::hal
+    iree::hal::drivers::amdgpu
+    iree::hal::drivers::amdgpu::queue_affinity
+    iree::testing::benchmark
+    iree::testing::benchmark_main
+    iree::third_party::google_benchmark
+  TESTONLY
+  LABELS
+    "benchmark"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
 iree_cc_fuzz(
   NAME
     hsaco_metadata_fuzz
@@ -460,6 +529,7 @@ iree_cc_library(
     ::block_pool
     ::device_library
     ::device_library_target
+    ::global_table
     ::info
     ::kfd
     ::loaded_code_object

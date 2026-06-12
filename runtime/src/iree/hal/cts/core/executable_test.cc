@@ -134,14 +134,12 @@ TEST_P(ExecutableTest, LookupExportByName) {
   EXPECT_EQ(ordinal.value, 0);
 }
 
-TEST_P(ExecutableTest, LookupGlobalByNameNotFoundOrUnsupported) {
-  iree_hal_buffer_t* buffer = nullptr;
+TEST_P(ExecutableTest, LookupGlobalByNameNotFound) {
+  iree_hal_executable_global_t global = iree_hal_executable_global_invalid();
   EXPECT_THAT(Status(iree_hal_executable_lookup_global_by_name(
-                  executable_, IREE_SV("NOT_FOUND"),
-                  IREE_HAL_QUEUE_AFFINITY_ANY, &buffer)),
-              AnyOf(StatusIs(StatusCode::kNotFound),
-                    StatusIs(StatusCode::kUnimplemented)));
-  EXPECT_EQ(buffer, nullptr);
+                  executable_, IREE_SV("NOT_FOUND"), &global)),
+              StatusIs(StatusCode::kNotFound));
+  EXPECT_FALSE(iree_hal_executable_global_is_valid(global));
 }
 
 CTS_REGISTER_EXECUTABLE_TEST_SUITE(ExecutableTest);

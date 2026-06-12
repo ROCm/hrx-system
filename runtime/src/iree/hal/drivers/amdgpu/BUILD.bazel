@@ -32,6 +32,21 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "buffer",
+    srcs = ["buffer.c"],
+    hdrs = ["buffer.h"],
+    deps = [
+        ":headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:libhsa",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "access_policy",
     srcs = ["access_policy.c"],
     hdrs = ["access_policy.h"],
@@ -110,8 +125,6 @@ iree_runtime_cc_library(
         "aql_program_builder.h",
         "aql_program_validation.c",
         "aql_program_validation.h",
-        "buffer.c",
-        "buffer.h",
         "driver.c",
         "driver.h",
         "executable.c",
@@ -194,6 +207,7 @@ iree_runtime_cc_library(
     ],
     deps = [
         ":access_policy",
+        ":buffer",
         ":executable_metadata",
         ":executable_metadata_hsaco",
         ":kernarg_layout",
@@ -218,6 +232,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/drivers/amdgpu/util:code_object_target",
         "//runtime/src/iree/hal/drivers/amdgpu/util:device_clock",
         "//runtime/src/iree/hal/drivers/amdgpu/util:device_library",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:global_table",
         "//runtime/src/iree/hal/drivers/amdgpu/util:hsaco_metadata",
         "//runtime/src/iree/hal/drivers/amdgpu/util:info",
         "//runtime/src/iree/hal/drivers/amdgpu/util:kfd",
@@ -246,6 +261,7 @@ iree_runtime_cc_library(
 iree_runtime_cc_library(
     name = "headers",
     hdrs = [
+        "api.h",
         "aql_block_processor.h",
         "aql_block_processor_timestamp.h",
         "aql_command_buffer.h",

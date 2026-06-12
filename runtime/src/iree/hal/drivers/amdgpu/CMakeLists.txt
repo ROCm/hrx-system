@@ -27,6 +27,26 @@ endif()
 if(IREE_HAL_DRIVER_AMDGPU)
 iree_cc_library(
   NAME
+    buffer
+  HDRS
+    "buffer.h"
+  SRCS
+    "buffer.c"
+  DEPS
+    ::headers
+    iree::base
+    iree::base::internal
+    iree::base::internal::arena
+    iree::base::threading
+    iree::hal
+    iree::hal::drivers::amdgpu::util::libhsa
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_library(
+  NAME
     access_policy
   HDRS
     "access_policy.h"
@@ -132,8 +152,6 @@ iree_cc_library(
     "aql_program_builder.h"
     "aql_program_validation.c"
     "aql_program_validation.h"
-    "buffer.c"
-    "buffer.h"
     "driver.c"
     "driver.h"
     "executable.c"
@@ -212,6 +230,7 @@ iree_cc_library(
     "virtual_queue.h"
   DEPS
     ::access_policy
+    ::buffer
     ::executable_metadata
     ::executable_metadata_hsaco
     ::kernarg_layout
@@ -236,6 +255,7 @@ iree_cc_library(
     iree::hal::drivers::amdgpu::util::code_object_target
     iree::hal::drivers::amdgpu::util::device_clock
     iree::hal::drivers::amdgpu::util::device_library
+    iree::hal::drivers::amdgpu::util::global_table
     iree::hal::drivers::amdgpu::util::hsaco_metadata
     iree::hal::drivers::amdgpu::util::info
     iree::hal::drivers::amdgpu::util::kfd
@@ -265,6 +285,7 @@ iree_cc_library(
   NAME
     headers
   HDRS
+    "api.h"
     "aql_block_processor.h"
     "aql_block_processor_timestamp.h"
     "aql_command_buffer.h"

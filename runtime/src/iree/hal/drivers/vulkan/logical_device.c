@@ -1667,7 +1667,7 @@ static iree_status_t iree_hal_vulkan_logical_device_external_capture_end(
   return iree_hal_vulkan_unimplemented(IREE_SV("external capture"));
 }
 
-static iree_status_t iree_hal_vulkan_logical_device_allocate(
+static iree_status_t iree_hal_vulkan_logical_device_create(
     iree_string_view_t identifier, const iree_hal_vulkan_libvulkan_t* libvulkan,
     iree_allocator_t host_allocator,
     iree_hal_vulkan_logical_device_t** out_device) {
@@ -2024,8 +2024,8 @@ static iree_status_t iree_hal_vulkan_logical_device_create_from_selection(
 
   iree_hal_vulkan_logical_device_t* device = NULL;
   if (iree_status_is_ok(status)) {
-    status = iree_hal_vulkan_logical_device_allocate(identifier, libvulkan,
-                                                     host_allocator, &device);
+    status = iree_hal_vulkan_logical_device_create(identifier, libvulkan,
+                                                   host_allocator, &device);
   }
   if (iree_status_is_ok(status)) {
     device->instance = *instance;
@@ -2201,7 +2201,7 @@ IREE_API_EXPORT iree_status_t iree_hal_vulkan_wrap_device(
 
   iree_hal_vulkan_logical_device_t* device = NULL;
   if (iree_status_is_ok(status)) {
-    status = iree_hal_vulkan_logical_device_allocate(
+    status = iree_hal_vulkan_logical_device_create(
         identifier, &instance_syms->libvulkan, host_allocator, &device);
   }
   if (iree_status_is_ok(status)) {
