@@ -207,6 +207,12 @@ static iree_status_t iree_hal_amdgpu_global_table_hsa_try_verify(
       table, symbol, /*out_address=*/NULL, out_found, out_byte_length);
 }
 
+static void iree_hal_amdgpu_global_table_borrowed_buffer_release(
+    void* user_data, iree_hal_buffer_t* buffer) {
+  (void)user_data;
+  (void)buffer;
+}
+
 static iree_status_t iree_hal_amdgpu_global_table_hsa_create_buffer(
     void* user_data, iree_string_view_t name,
     iree_device_size_t expected_byte_length,
@@ -255,13 +261,16 @@ static iree_status_t iree_hal_amdgpu_global_table_hsa_create_buffer(
       .queue_affinity = selected_queue_affinity,
       .flags = IREE_HAL_BUFFER_PLACEMENT_FLAG_NONE,
   };
+  iree_hal_buffer_release_callback_t release_callback = {
+      .fn = iree_hal_amdgpu_global_table_borrowed_buffer_release,
+      .user_data = NULL,
+  };
   return iree_hal_amdgpu_buffer_create(
       table->hsa.libhsa, placement, IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
       IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
       IREE_HAL_BUFFER_USAGE_DEFAULT, expected_byte_length, expected_byte_length,
-      (void*)(uintptr_t)variable_address,
-      iree_hal_buffer_release_callback_null(), table->host_allocator,
-      out_buffer);
+      (void*)(uintptr_t)variable_address, release_callback,
+      table->host_allocator, out_buffer);
 }
 
 static iree_status_t iree_hal_amdgpu_global_table_first_loaded_device(

@@ -144,6 +144,41 @@ TEST_P(ExecutableTest, TryLookupGlobalByNameNotFound) {
   EXPECT_FALSE(iree_hal_executable_global_is_valid(global));
 }
 
+TEST_P(ExecutableTest, LookupGlobalByName) {
+  bool found = false;
+  iree_hal_executable_global_t global = iree_hal_executable_global_invalid();
+  IREE_ASSERT_OK(iree_hal_executable_try_lookup_global_by_name(
+      executable_, IREE_SV("executable_test_global"), &found, &global));
+  if (!found) GTEST_SKIP() << "executable testdata has no globals";
+  ASSERT_TRUE(iree_hal_executable_global_is_valid(global));
+
+  iree_hal_executable_global_info_t info;
+  IREE_ASSERT_OK(iree_hal_executable_global_info(executable_, global, &info));
+  EXPECT_EQ(std::string_view(info.name.data, info.name.size),
+            "executable_test_global");
+  ASSERT_EQ(info.byte_length, sizeof(uint64_t));
+
+  iree_hal_buffer_t* global_buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_executable_global_buffer(
+      executable_, global, IREE_HAL_QUEUE_AFFINITY_ANY, &global_buffer));
+  ASSERT_NE(global_buffer, nullptr);
+  EXPECT_EQ(iree_hal_buffer_byte_length(global_buffer), sizeof(uint64_t));
+
+  const uint64_t expected_value = 0xFEEDFACECAFEBEEFull;
+  SemaphoreList empty_wait;
+  SemaphoreList update_signal(device_, {0}, {1});
+  IREE_ASSERT_OK(iree_hal_device_queue_update(
+      device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, update_signal,
+      &expected_value, /*source_offset=*/0, global_buffer, /*target_offset=*/0,
+      sizeof(expected_value), IREE_HAL_UPDATE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
+      update_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+
+  std::vector<uint64_t> data = ReadBufferData<uint64_t>(global_buffer);
+  ASSERT_EQ(data.size(), 1u);
+  EXPECT_EQ(data[0], expected_value);
+}
+
 TEST_P(ExecutableTest, LookupGlobalByNameNotFound) {
   iree_hal_executable_global_t global = iree_hal_executable_global_invalid();
   EXPECT_THAT(Status(iree_hal_executable_lookup_global_by_name(
