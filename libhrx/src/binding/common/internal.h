@@ -1114,8 +1114,17 @@ iree_status_t iree_hal_streaming_module_function(
     iree_hal_streaming_module_t* module, const char* name,
     iree_hal_streaming_symbol_t** out_function);
 
-// Resolves a global symbol by name, lazily querying HAL executable globals.
-// Returned storage is owned by |module| and remains valid while it is live.
+// Tries to resolve a global symbol by name, lazily querying HAL executable
+// globals. Returned storage is owned by |module| and remains valid while it is
+// live.
+// Synchronization: module (global cache).
+iree_status_t iree_hal_streaming_module_try_lookup_global_symbol(
+    iree_hal_streaming_module_t* module, const char* name, bool* out_found,
+    iree_hal_streaming_symbol_t** out_global);
+
+// Resolves a required global symbol by name, lazily querying HAL executable
+// globals. Returned storage is owned by |module| and remains valid while it is
+// live.
 // Synchronization: module (global cache).
 iree_status_t iree_hal_streaming_module_global_symbol(
     iree_hal_streaming_module_t* module, const char* name,

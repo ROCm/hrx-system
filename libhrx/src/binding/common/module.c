@@ -592,24 +592,12 @@ static iree_status_t iree_hal_streaming_module_grow_globals_locked(
     iree_hal_streaming_module_t* module, iree_host_size_t minimum_capacity) {
   if (minimum_capacity <= module->global_capacity) return iree_ok_status();
 
-  iree_host_size_t new_capacity =
-      module->global_capacity ? module->global_capacity : 4;
-  while (new_capacity < minimum_capacity) {
-    if (!iree_host_size_checked_mul(new_capacity, 2, &new_capacity)) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "module global cache capacity overflow growing to %" PRIhsz,
-          minimum_capacity);
-    }
-  }
-
-  void* new_globals = module->globals;
-  IREE_RETURN_IF_ERROR(
-      iree_allocator_realloc_array(module->host_allocator, new_capacity,
-                                   sizeof(*module->globals), &new_globals));
-  module->globals = (iree_hal_streaming_symbol_t**)new_globals;
-  module->global_capacity = new_capacity;
-  return iree_ok_status();
+  const iree_host_size_t minimum_allocated_capacity =
+      minimum_capacity < 4 ? 4 : minimum_capacity;
+  return iree_allocator_grow_array(
+      module->host_allocator, minimum_allocated_capacity,
+      sizeof(*module->globals), &module->global_capacity,
+      (void**)&module->globals);
 }
 
 static iree_status_t iree_hal_streaming_module_create_global_symbol_locked(
@@ -664,12 +652,14 @@ static iree_status_t iree_hal_streaming_module_create_global_symbol_locked(
   return status;
 }
 
-iree_status_t iree_hal_streaming_module_global_symbol(
-    iree_hal_streaming_module_t* module, const char* name,
+iree_status_t iree_hal_streaming_module_try_lookup_global_symbol(
+    iree_hal_streaming_module_t* module, const char* name, bool* out_found,
     iree_hal_streaming_symbol_t** out_global) {
   IREE_ASSERT_ARGUMENT(module);
   IREE_ASSERT_ARGUMENT(name);
+  IREE_ASSERT_ARGUMENT(out_found);
   IREE_ASSERT_ARGUMENT(out_global);
+  *out_found = false;
   *out_global = NULL;
 
   iree_string_view_t name_view =
@@ -681,6 +671,7 @@ iree_status_t iree_hal_streaming_module_global_symbol(
          symbol->type == IREE_HAL_STREAMING_SYMBOL_TYPE_DATA) &&
         iree_hal_streaming_module_symbol_name_matches(symbol->name,
                                                       name_view)) {
+      *out_found = true;
       *out_global = symbol;
       return iree_ok_status();
     }
@@ -692,6 +683,7 @@ iree_status_t iree_hal_streaming_module_global_symbol(
   iree_hal_streaming_symbol_t* cached_symbol =
       iree_hal_streaming_module_find_global_locked(module, name_view);
   if (cached_symbol) {
+    *out_found = true;
     *out_global = cached_symbol;
   } else {
     const iree_host_size_t executable_count =
@@ -710,17 +702,33 @@ iree_status_t iree_hal_streaming_module_global_symbol(
       if (!found) continue;
       status = iree_hal_streaming_module_create_global_symbol_locked(
           module, executable, global_handle, out_global);
+      if (iree_status_is_ok(status)) *out_found = true;
       break;
-    }
-    if (iree_status_is_ok(status) && !*out_global) {
-      status = iree_make_status(IREE_STATUS_NOT_FOUND,
-                                "global '%.*s' not found in module",
-                                (int)name_view.size, name_view.data);
     }
   }
 
   iree_slim_mutex_unlock(&module->global_mutex);
   return status;
+}
+
+iree_status_t iree_hal_streaming_module_global_symbol(
+    iree_hal_streaming_module_t* module, const char* name,
+    iree_hal_streaming_symbol_t** out_global) {
+  IREE_ASSERT_ARGUMENT(module);
+  IREE_ASSERT_ARGUMENT(name);
+  IREE_ASSERT_ARGUMENT(out_global);
+  *out_global = NULL;
+
+  bool found = false;
+  IREE_RETURN_IF_ERROR(iree_hal_streaming_module_try_lookup_global_symbol(
+      module, name, &found, out_global));
+  if (found) return iree_ok_status();
+
+  iree_string_view_t name_view =
+      iree_string_view_trim(iree_make_cstring_view(name));
+  return iree_make_status(IREE_STATUS_NOT_FOUND,
+                          "global '%.*s' not found in module",
+                          (int)name_view.size, name_view.data);
 }
 
 iree_status_t iree_hal_streaming_module_global(
