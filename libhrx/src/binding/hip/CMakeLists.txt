@@ -19,6 +19,7 @@ iree_cc_library(
   HDRS
     "api.h"
   SRCS
+    "abi_stubs.c"
     "api.c"
   DEPS
     iree::base
@@ -44,6 +45,7 @@ set_target_properties(libhrx_src_binding_hip_amdhip64 PROPERTIES
   SOVERSION 7
   POSITION_INDEPENDENT_CODE ON
   INSTALL_RPATH "$ORIGIN"
+  LINK_FLAGS "-Wl,--undefined-version -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/amdhip64.map"
 )
 
 install(TARGETS libhrx_src_binding_hip_amdhip64

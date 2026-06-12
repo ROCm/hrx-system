@@ -1701,6 +1701,22 @@ HIPAPI hipError_t hipDeviceGetStreamPriorityRange(int* leastPriority,
   return hipSuccess;
 }
 
+HIPAPI hipError_t hipDeviceGetGraphMemAttribute(int device, int attr,
+                                                void* value) {
+  (void)device;
+  (void)attr;
+  if (!value) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  *(uint64_t*)value = 0;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipDeviceGraphMemTrim(int device) {
+  (void)device;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
 // Waits for all operations on the current device to complete.
 //
 // Parameters: None.
@@ -3676,6 +3692,11 @@ HIPAPI hipError_t hipFree(void* ptr) {
   return result;
 }
 
+HIPAPI hipError_t hipFreeArray(hipArray_t array) {
+  (void)array;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
 // Allocates page-locked host memory accessible from device.
 //
 // Parameters:
@@ -4837,6 +4858,23 @@ HIPAPI hipError_t hipMemcpy2D(void* dst, size_t dpitch, const void* src,
   return result;
 }
 
+HIPAPI hipError_t hipMemcpy3D(const hipMemcpy3DParms* p) {
+  (void)p;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipChannelFormatDesc hipCreateChannelDesc(int x, int y, int z, int w,
+                                                 hipChannelFormatKind f) {
+  hipChannelFormatDesc desc = {
+      .x = x,
+      .y = y,
+      .z = z,
+      .w = w,
+      .f = f,
+  };
+  return desc;
+}
+
 // Sets 2D device memory to a value (asynchronous).
 //
 // Parameters:
@@ -4991,6 +5029,19 @@ HIPAPI hipError_t hipMalloc3D(hipPitchedPtr* pitchedDevPtr, hipExtent extent) {
 
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
+}
+
+HIPAPI hipError_t hipMalloc3DArray(hipArray_t* array,
+                                   const hipChannelFormatDesc* desc,
+                                   hipExtent extent, unsigned int flags) {
+  (void)desc;
+  (void)extent;
+  (void)flags;
+  if (!array) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  *array = NULL;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
 }
 
 // Copies data from host memory to device memory (synchronous).
@@ -11163,6 +11214,378 @@ HIPAPI hipError_t hipGraphDebugDotPrint(hipGraph_t graph, const char* path,
   return hipSuccess;
 }
 
+HIPAPI hipError_t hipGraphAddChildGraphNode(hipGraphNode_t* pGraphNode,
+                                            hipGraph_t graph,
+                                            const hipGraphNode_t* pDependencies,
+                                            size_t numDependencies,
+                                            hipGraph_t childGraph) {
+  (void)graph;
+  (void)pDependencies;
+  (void)numDependencies;
+  (void)childGraph;
+  if (pGraphNode) *pGraphNode = NULL;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipGraphAddMemcpyNodeFromSymbol(
+    hipGraphNode_t* pGraphNode, hipGraph_t graph,
+    const hipGraphNode_t* pDependencies, size_t numDependencies, void* dst,
+    const void* symbol, size_t count, size_t offset, hipMemcpyKind kind) {
+  (void)graph;
+  (void)pDependencies;
+  (void)numDependencies;
+  (void)dst;
+  (void)symbol;
+  (void)count;
+  (void)offset;
+  (void)kind;
+  if (pGraphNode) *pGraphNode = NULL;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipGraphAddMemcpyNodeToSymbol(
+    hipGraphNode_t* pGraphNode, hipGraph_t graph,
+    const hipGraphNode_t* pDependencies, size_t numDependencies,
+    const void* symbol, const void* src, size_t count, size_t offset,
+    hipMemcpyKind kind) {
+  (void)graph;
+  (void)pDependencies;
+  (void)numDependencies;
+  (void)symbol;
+  (void)src;
+  (void)count;
+  (void)offset;
+  (void)kind;
+  if (pGraphNode) *pGraphNode = NULL;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipGraphAddMemAllocNode(hipGraphNode_t* pGraphNode,
+                                          hipGraph_t graph,
+                                          const hipGraphNode_t* pDependencies,
+                                          size_t numDependencies,
+                                          void* allocParams) {
+  (void)graph;
+  (void)pDependencies;
+  (void)numDependencies;
+  (void)allocParams;
+  if (pGraphNode) *pGraphNode = NULL;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipGraphAddMemFreeNode(hipGraphNode_t* pGraphNode,
+                                         hipGraph_t graph,
+                                         const hipGraphNode_t* pDependencies,
+                                         size_t numDependencies, void* dptr) {
+  (void)graph;
+  (void)pDependencies;
+  (void)numDependencies;
+  (void)dptr;
+  if (pGraphNode) *pGraphNode = NULL;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipGraphAddNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
+                                  const hipGraphNode_t* pDependencies,
+                                  size_t numDependencies,
+                                  const void* nodeParams) {
+  (void)graph;
+  (void)pDependencies;
+  (void)numDependencies;
+  (void)nodeParams;
+  if (pGraphNode) *pGraphNode = NULL;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipGraphAddBatchMemOpNode(hipGraphNode_t* pGraphNode,
+                                            hipGraph_t graph,
+                                            const hipGraphNode_t* pDependencies,
+                                            size_t numDependencies,
+                                            const void* nodeParams) {
+  (void)graph;
+  (void)pDependencies;
+  (void)numDependencies;
+  (void)nodeParams;
+  if (pGraphNode) *pGraphNode = NULL;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipGraphBatchMemOpNodeGetParams(hipGraphNode_t node,
+                                                  void* nodeParams) {
+  (void)node;
+  (void)nodeParams;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipGraphBatchMemOpNodeSetParams(hipGraphNode_t node,
+                                                  const void* nodeParams) {
+  (void)node;
+  (void)nodeParams;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipGraphChildGraphNodeGetGraph(hipGraphNode_t node,
+                                                 hipGraph_t* pGraph) {
+  (void)node;
+  if (pGraph) *pGraph = NULL;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipGraphEventRecordNodeGetEvent(hipGraphNode_t node,
+                                                  hipEvent_t* event_out) {
+  (void)node;
+  if (event_out) *event_out = NULL;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipGraphEventRecordNodeSetEvent(hipGraphNode_t node,
+                                                  hipEvent_t event) {
+  (void)node;
+  (void)event;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipGraphEventWaitNodeGetEvent(hipGraphNode_t node,
+                                                hipEvent_t* event_out) {
+  (void)node;
+  if (event_out) *event_out = NULL;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipGraphEventWaitNodeSetEvent(hipGraphNode_t node,
+                                                hipEvent_t event) {
+  (void)node;
+  (void)event;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipGraphExecBatchMemOpNodeSetParams(hipGraphExec_t graphExec,
+                                                      hipGraphNode_t node,
+                                                      const void* nodeParams) {
+  (void)graphExec;
+  (void)node;
+  (void)nodeParams;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipGraphExecEventRecordNodeSetEvent(hipGraphExec_t graphExec,
+                                                      hipGraphNode_t node,
+                                                      hipEvent_t event) {
+  (void)graphExec;
+  (void)node;
+  (void)event;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipGraphExecGetFlags(hipGraphExec_t graphExec,
+                                       unsigned long long* flags) {
+  (void)graphExec;
+  if (flags) *flags = 0;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipGraphExecHostNodeSetParams(hipGraphExec_t graphExec,
+                                                hipGraphNode_t node,
+                                                const void* pNodeParams) {
+  (void)graphExec;
+  (void)node;
+  (void)pNodeParams;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipGraphExecMemcpyNodeSetParams(hipGraphExec_t graphExec,
+                                                  hipGraphNode_t node,
+                                                  const void* pNodeParams) {
+  (void)graphExec;
+  (void)node;
+  (void)pNodeParams;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipGraphExecMemcpyNodeSetParams1D(
+    hipGraphExec_t graphExec, hipGraphNode_t node, void* dst, const void* src,
+    size_t count, hipMemcpyKind kind) {
+  (void)graphExec;
+  (void)node;
+  (void)dst;
+  (void)src;
+  (void)count;
+  (void)kind;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipGraphExecMemcpyNodeSetParamsFromSymbol(
+    hipGraphExec_t graphExec, hipGraphNode_t node, void* dst,
+    const void* symbol, size_t count, size_t offset, hipMemcpyKind kind) {
+  (void)graphExec;
+  (void)node;
+  (void)dst;
+  (void)symbol;
+  (void)count;
+  (void)offset;
+  (void)kind;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipGraphExecMemcpyNodeSetParamsToSymbol(
+    hipGraphExec_t graphExec, hipGraphNode_t node, const void* symbol,
+    const void* src, size_t count, size_t offset, hipMemcpyKind kind) {
+  (void)graphExec;
+  (void)node;
+  (void)symbol;
+  (void)src;
+  (void)count;
+  (void)offset;
+  (void)kind;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipGraphExecMemsetNodeSetParams(hipGraphExec_t graphExec,
+                                                  hipGraphNode_t node,
+                                                  const void* pNodeParams) {
+  (void)graphExec;
+  (void)node;
+  (void)pNodeParams;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipGraphExecNodeSetParams(hipGraphExec_t graphExec,
+                                            hipGraphNode_t node,
+                                            const void* nodeParams) {
+  (void)graphExec;
+  (void)node;
+  (void)nodeParams;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipGraphHostNodeSetParams(hipGraphNode_t node,
+                                            const void* pNodeParams) {
+  (void)node;
+  (void)pNodeParams;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipGraphInstantiateWithParams(hipGraphExec_t* pGraphExec,
+                                                hipGraph_t graph,
+                                                void* instantiateParams) {
+  (void)graph;
+  (void)instantiateParams;
+  if (pGraphExec) *pGraphExec = NULL;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipGraphKernelNodeGetParams(hipGraphNode_t node,
+                                              void* pNodeParams) {
+  (void)node;
+  (void)pNodeParams;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipGraphKernelNodeSetParams(hipGraphNode_t node,
+                                              const void* pNodeParams) {
+  (void)node;
+  (void)pNodeParams;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipGraphMemFreeNodeGetParams(hipGraphNode_t node,
+                                               void* dptr_out) {
+  (void)node;
+  if (dptr_out) *(void**)dptr_out = NULL;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipGraphMemcpyNodeGetParams(hipGraphNode_t node,
+                                              void* pNodeParams) {
+  (void)node;
+  (void)pNodeParams;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipGraphMemcpyNodeSetParams1D(hipGraphNode_t node,
+                                                void* dst, const void* src,
+                                                size_t count,
+                                                hipMemcpyKind kind) {
+  (void)node;
+  (void)dst;
+  (void)src;
+  (void)count;
+  (void)kind;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipGraphMemcpyNodeSetParamsFromSymbol(
+    hipGraphNode_t node, void* dst, const void* symbol, size_t count,
+    size_t offset, hipMemcpyKind kind) {
+  (void)node;
+  (void)dst;
+  (void)symbol;
+  (void)count;
+  (void)offset;
+  (void)kind;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipGraphMemcpyNodeSetParamsToSymbol(
+    hipGraphNode_t node, const void* symbol, const void* src, size_t count,
+    size_t offset, hipMemcpyKind kind) {
+  (void)node;
+  (void)symbol;
+  (void)src;
+  (void)count;
+  (void)offset;
+  (void)kind;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipGraphMemsetNodeGetParams(hipGraphNode_t node,
+                                              void* pNodeParams) {
+  (void)node;
+  (void)pNodeParams;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipGraphMemsetNodeSetParams(hipGraphNode_t node,
+                                              const void* pNodeParams) {
+  (void)node;
+  (void)pNodeParams;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipGraphNodeSetParams(hipGraphNode_t node,
+                                        const void* nodeParams) {
+  (void)node;
+  (void)nodeParams;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipDrvGraphAddMemcpyNode(hipGraphNode_t* pGraphNode,
+                                           hipGraph_t graph,
+                                           const hipGraphNode_t* pDependencies,
+                                           size_t numDependencies,
+                                           const void* pCopyParams,
+                                           void* ctx) {
+  (void)ctx;
+  return hipGraphAddMemcpyNode(pGraphNode, graph, pDependencies,
+                               numDependencies, pCopyParams);
+}
+
+HIPAPI hipError_t hipDrvGraphAddMemFreeNode(
+    hipGraphNode_t* pGraphNode, hipGraph_t graph,
+    const hipGraphNode_t* pDependencies, size_t numDependencies, void* dptr,
+    void* ctx) {
+  (void)ctx;
+  return hipGraphAddMemFreeNode(pGraphNode, graph, pDependencies,
+                                numDependencies, dptr);
+}
+
+HIPAPI hipError_t hipDrvGraphExecMemcpyNodeSetParams(
+    hipGraphExec_t graphExec, hipGraphNode_t node, const void* pNodeParams,
+    void* ctx) {
+  (void)ctx;
+  return hipGraphExecMemcpyNodeSetParams(graphExec, node, pNodeParams);
+}
+
 //===----------------------------------------------------------------------===//
 // Stream capture
 //===----------------------------------------------------------------------===//
@@ -11257,6 +11680,21 @@ HIPAPI hipError_t hipStreamBeginCapture(hipStream_t stream,
 
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
+}
+
+HIPAPI hipError_t hipStreamBeginCaptureToGraph(
+    hipStream_t stream, hipGraph_t graph, const hipGraphNode_t* dependencies,
+    const void* dependencyData, size_t numDependencies,
+    hipStreamCaptureMode mode) {
+  (void)graph;
+  (void)dependencies;
+  (void)dependencyData;
+  (void)numDependencies;
+  (void)mode;
+  if (!stream) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  HIP_RETURN_ERROR(hipErrorNotSupported);
 }
 
 // Ends stream capture and returns the captured graph.
@@ -12566,6 +13004,25 @@ HIPAPI const char* hipGetErrorName(hipError_t error) {
   return hipGetErrorString(error);
 }
 
+HIPAPI hipError_t hipGetProcAddress(const char* symbol, void** pfn,
+                                    int hipVersion, uint64_t flags,
+                                    void* symbolStatus) {
+  (void)hipVersion;
+  (void)flags;
+  (void)symbolStatus;
+  if (!symbol || !pfn) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  void* process = dlopen(NULL, RTLD_LAZY);
+  if (!process) {
+    *pfn = NULL;
+    HIP_RETURN_ERROR(hipErrorSharedObjectInitFailed);
+  }
+  *pfn = dlsym(process, symbol);
+  HIP_RETURN_ERROR(*pfn ? hipSuccess : hipErrorNotFound);
+}
+
 // Driver API version of hipGetErrorString.
 //
 // Parameters:
@@ -12913,6 +13370,18 @@ HIPAPI void __hipRegisterManagedVar(void* hipModule, void** pointer,
           registry, (iree_hal_streaming_module_registration_t*)hipModule,
           *pointer, name, size, align);
   iree_status_ignore(status);
+}
+
+HIPAPI void __hipRegisterTexture(void** modules, void* var, char* hostVar,
+                                 char* deviceVar, int type, int norm,
+                                 int ext) {
+  (void)modules;
+  (void)var;
+  (void)hostVar;
+  (void)deviceVar;
+  (void)type;
+  (void)norm;
+  (void)ext;
 }
 
 // Registers a __device__ or __constant__ variable with the HIP runtime.
