@@ -674,9 +674,11 @@ static iree_status_t iree_hal_cuda_native_executable_lookup_export_by_name(
 #define IREE_HAL_CUDA_MAX_STACK_GLOBAL_NAME_LENGTH \
   ((iree_host_size_t)(4 * 1024))
 
-static iree_status_t iree_hal_cuda_native_executable_query_global(
+static iree_status_t iree_hal_cuda_native_executable_try_query_global(
     iree_hal_cuda_native_executable_t* executable, iree_string_view_t name,
-    CUdeviceptr* out_global_device_ptr, iree_device_size_t* out_byte_length) {
+    bool* out_found, CUdeviceptr* out_global_device_ptr,
+    iree_device_size_t* out_byte_length) {
+  *out_found = false;
   if (out_global_device_ptr) *out_global_device_ptr = 0;
   *out_byte_length = 0;
 
@@ -703,12 +705,9 @@ static iree_status_t iree_hal_cuda_native_executable_query_global(
           executable->symbols, terminal_result, __FILE__, __LINE__);
     }
   }
-  if (terminal_result != CUDA_SUCCESS) {
-    return iree_make_status(IREE_STATUS_NOT_FOUND,
-                            "executable global `%.*s` not found",
-                            (int)name.size, name.data);
-  }
+  if (terminal_result != CUDA_SUCCESS) return iree_ok_status();
 
+  *out_found = true;
   if (out_global_device_ptr) *out_global_device_ptr = global_device_ptr;
   *out_byte_length = (iree_device_size_t)global_size;
   return iree_ok_status();
@@ -729,11 +728,12 @@ static iree_status_t iree_hal_cuda_native_executable_validate_global_name(
   return iree_ok_status();
 }
 
-static iree_status_t iree_hal_cuda_native_executable_lookup_global_by_name(
+static iree_status_t iree_hal_cuda_native_executable_try_lookup_global_by_name(
     iree_hal_executable_t* base_executable, iree_string_view_t name,
-    iree_hal_executable_global_t* out_global) {
+    bool* out_found, iree_hal_executable_global_t* out_global) {
   iree_hal_cuda_native_executable_t* executable =
       iree_hal_cuda_native_executable_cast(base_executable);
+  *out_found = false;
   *out_global = iree_hal_executable_global_invalid();
 
   IREE_RETURN_IF_ERROR(
@@ -743,6 +743,7 @@ static iree_status_t iree_hal_cuda_native_executable_lookup_global_by_name(
   iree_hal_cuda_native_executable_global_t* global =
       iree_hal_cuda_native_executable_find_global_locked(executable, name);
   if (global) {
+    *out_found = true;
     *out_global =
         iree_hal_executable_global_from_value((uint64_t)(uintptr_t)global);
     iree_slim_mutex_unlock(&executable->global_mutex);
@@ -751,8 +752,11 @@ static iree_status_t iree_hal_cuda_native_executable_lookup_global_by_name(
   iree_slim_mutex_unlock(&executable->global_mutex);
 
   iree_device_size_t byte_length = 0;
-  IREE_RETURN_IF_ERROR(iree_hal_cuda_native_executable_query_global(
-      executable, name, /*out_global_device_ptr=*/NULL, &byte_length));
+  bool query_found = false;
+  IREE_RETURN_IF_ERROR(iree_hal_cuda_native_executable_try_query_global(
+      executable, name, &query_found, /*out_global_device_ptr=*/NULL,
+      &byte_length));
+  if (!query_found) return iree_ok_status();
 
   iree_hal_cuda_native_executable_global_t* new_global = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_cuda_native_executable_global_allocate(
@@ -761,11 +765,13 @@ static iree_status_t iree_hal_cuda_native_executable_lookup_global_by_name(
   iree_slim_mutex_lock(&executable->global_mutex);
   global = iree_hal_cuda_native_executable_find_global_locked(executable, name);
   if (global) {
+    *out_found = true;
     *out_global =
         iree_hal_executable_global_from_value((uint64_t)(uintptr_t)global);
   } else {
     new_global->next = executable->global_list;
     executable->global_list = new_global;
+    *out_found = true;
     *out_global =
         iree_hal_executable_global_from_value((uint64_t)(uintptr_t)new_global);
     new_global = NULL;
@@ -825,8 +831,14 @@ static iree_status_t iree_hal_cuda_native_executable_global_buffer(
 
   CUdeviceptr global_device_ptr = 0;
   iree_device_size_t byte_length = 0;
-  IREE_RETURN_IF_ERROR(iree_hal_cuda_native_executable_query_global(
-      executable, name, &global_device_ptr, &byte_length));
+  bool found = false;
+  IREE_RETURN_IF_ERROR(iree_hal_cuda_native_executable_try_query_global(
+      executable, name, &found, &global_device_ptr, &byte_length));
+  if (IREE_UNLIKELY(!found)) {
+    return iree_make_status(IREE_STATUS_INTERNAL,
+                            "verified executable global `%.*s` disappeared",
+                            (int)name.size, name.data);
+  }
   if (IREE_UNLIKELY(byte_length != expected_byte_length)) {
     return iree_make_status(
         IREE_STATUS_INTERNAL,
@@ -882,8 +894,8 @@ static const iree_hal_executable_vtable_t
             iree_hal_cuda_native_executable_export_parameters,
         .lookup_function_by_name =
             iree_hal_cuda_native_executable_lookup_export_by_name,
-        .lookup_global_by_name =
-            iree_hal_cuda_native_executable_lookup_global_by_name,
+        .try_lookup_global_by_name =
+            iree_hal_cuda_native_executable_try_lookup_global_by_name,
         .global_info = iree_hal_cuda_native_executable_global_info,
         .global_buffer = iree_hal_cuda_native_executable_global_buffer,
 };

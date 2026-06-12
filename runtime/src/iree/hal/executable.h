@@ -249,8 +249,17 @@ IREE_API_EXPORT iree_status_t iree_hal_executable_lookup_function_by_name(
 //
 // The returned global is an executable-local handle. It remains valid while the
 // executable remains live and must only be used with the executable that
-// returned it. Returns IREE_STATUS_NOT_FOUND when no such global variable
+// returned it. Returns OK with |out_found| false when no such global variable
 // exists.
+IREE_API_EXPORT iree_status_t iree_hal_executable_try_lookup_global_by_name(
+    iree_hal_executable_t* executable, iree_string_view_t name, bool* out_found,
+    iree_hal_executable_global_t* out_global);
+
+// Finds the executable global variable with the given |name|.
+//
+// The returned global follows the same lifetime rules as
+// iree_hal_executable_try_lookup_global_by_name. Returns IREE_STATUS_NOT_FOUND
+// when no such global variable exists.
 IREE_API_EXPORT iree_status_t iree_hal_executable_lookup_global_by_name(
     iree_hal_executable_t* executable, iree_string_view_t name,
     iree_hal_executable_global_t* out_global);
@@ -297,9 +306,9 @@ typedef struct iree_hal_executable_vtable_t {
       iree_hal_executable_t* executable, iree_string_view_t name,
       iree_hal_executable_function_t* out_function);
 
-  iree_status_t(IREE_API_PTR* lookup_global_by_name)(
+  iree_status_t(IREE_API_PTR* try_lookup_global_by_name)(
       iree_hal_executable_t* executable, iree_string_view_t name,
-      iree_hal_executable_global_t* out_global);
+      bool* out_found, iree_hal_executable_global_t* out_global);
 
   iree_status_t(IREE_API_PTR* global_info)(
       iree_hal_executable_t* executable, iree_hal_executable_global_t global,

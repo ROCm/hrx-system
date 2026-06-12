@@ -61,7 +61,7 @@ static iree_status_t iree_hal_amdgpu_global_table_validate_params(
                             params->physical_device_count);
   }
 
-  if (IREE_UNLIKELY(!params->resolver.verify ||
+  if (IREE_UNLIKELY(!params->resolver.try_verify ||
                     !params->resolver.create_buffer)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "AMDGPU global table resolver is incomplete");
@@ -94,9 +94,12 @@ static iree_status_t iree_hal_amdgpu_global_table_validate_hsa_params(
   return iree_ok_status();
 }
 
-static iree_status_t iree_hal_amdgpu_global_table_get_symbol_by_name(
+static iree_status_t iree_hal_amdgpu_global_table_try_get_symbol_by_name(
     const iree_hal_amdgpu_global_table_t* table, iree_string_view_t name,
-    hsa_agent_t device_agent, hsa_executable_symbol_t* out_symbol) {
+    hsa_agent_t device_agent, bool* out_found,
+    hsa_executable_symbol_t* out_symbol) {
+  *out_found = false;
+  memset(out_symbol, 0, sizeof(*out_symbol));
   if (iree_string_view_is_empty(name)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "executable global name is empty");
@@ -112,25 +115,35 @@ static iree_status_t iree_hal_amdgpu_global_table_get_symbol_by_name(
   char* name_storage = (char*)iree_alloca(name.size + 1);
   memcpy(name_storage, name.data, name.size);
   name_storage[name.size] = 0;
-  return iree_hsa_executable_get_symbol_by_name(
-      IREE_LIBHSA(table->hsa.libhsa), table->hsa.executable, name_storage,
-      &device_agent, out_symbol);
+  hsa_status_t hsa_status = iree_hsa_executable_get_symbol_by_name_raw(
+      table->hsa.libhsa, table->hsa.executable, name_storage, &device_agent,
+      out_symbol);
+  if (hsa_status == HSA_STATUS_SUCCESS) {
+    *out_found = true;
+    return iree_ok_status();
+  }
+  if (hsa_status == HSA_STATUS_ERROR_INVALID_SYMBOL_NAME) {
+    return iree_ok_status();
+  }
+  return iree_status_from_hsa_status(
+      __FILE__, __LINE__, hsa_status, "hsa_executable_get_symbol_by_name",
+      "failed to resolve executable global symbol");
 }
 
-static iree_status_t iree_hal_amdgpu_global_table_query_variable(
+static iree_status_t iree_hal_amdgpu_global_table_try_query_variable(
     const iree_hal_amdgpu_global_table_t* table, hsa_executable_symbol_t symbol,
-    iree_string_view_t name, iree_host_size_t physical_device_ordinal,
-    iree_status_code_t wrong_kind_status_code, uint64_t* out_address,
+    uint64_t* out_address, bool* out_found,
     iree_device_size_t* out_byte_length) {
+  *out_found = false;
+  if (out_address) *out_address = 0;
+  *out_byte_length = 0;
+
   hsa_symbol_kind_t symbol_kind = HSA_SYMBOL_KIND_KERNEL;
   IREE_RETURN_IF_ERROR(iree_hsa_executable_symbol_get_info(
       IREE_LIBHSA(table->hsa.libhsa), symbol, HSA_EXECUTABLE_SYMBOL_INFO_TYPE,
       &symbol_kind));
   if (symbol_kind != HSA_SYMBOL_KIND_VARIABLE) {
-    return iree_make_status(wrong_kind_status_code,
-                            "executable global `%.*s` is not a variable on "
-                            "physical device %" PRIhsz,
-                            (int)name.size, name.data, physical_device_ordinal);
+    return iree_ok_status();
   }
 
   if (out_address) {
@@ -144,15 +157,34 @@ static iree_status_t iree_hal_amdgpu_global_table_query_variable(
       IREE_LIBHSA(table->hsa.libhsa), symbol,
       HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_SIZE, &variable_size));
   *out_byte_length = variable_size;
+  *out_found = true;
   return iree_ok_status();
 }
 
-static iree_status_t iree_hal_amdgpu_global_table_hsa_verify(
+static iree_status_t iree_hal_amdgpu_global_table_query_variable(
+    const iree_hal_amdgpu_global_table_t* table, hsa_executable_symbol_t symbol,
+    iree_string_view_t name, iree_host_size_t physical_device_ordinal,
+    iree_status_code_t wrong_kind_status_code, uint64_t* out_address,
+    iree_device_size_t* out_byte_length) {
+  bool found = false;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_global_table_try_query_variable(
+      table, symbol, out_address, &found, out_byte_length));
+  if (!found) {
+    return iree_make_status(wrong_kind_status_code,
+                            "executable global `%.*s` is not a variable on "
+                            "physical device %" PRIhsz,
+                            (int)name.size, name.data, physical_device_ordinal);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_amdgpu_global_table_hsa_try_verify(
     void* user_data, iree_string_view_t name,
-    iree_host_size_t verification_physical_device_ordinal,
+    iree_host_size_t verification_physical_device_ordinal, bool* out_found,
     iree_device_size_t* out_byte_length) {
   iree_hal_amdgpu_global_table_t* table =
       (iree_hal_amdgpu_global_table_t*)user_data;
+  *out_found = false;
   *out_byte_length = 0;
 
   if (IREE_UNLIKELY(verification_physical_device_ordinal >=
@@ -165,13 +197,14 @@ static iree_status_t iree_hal_amdgpu_global_table_hsa_verify(
   }
 
   hsa_executable_symbol_t symbol = {0};
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_global_table_get_symbol_by_name(
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_global_table_try_get_symbol_by_name(
       table, name,
-      table->hsa.device_agents[verification_physical_device_ordinal], &symbol));
+      table->hsa.device_agents[verification_physical_device_ordinal], out_found,
+      &symbol));
+  if (!*out_found) return iree_ok_status();
 
-  return iree_hal_amdgpu_global_table_query_variable(
-      table, symbol, name, verification_physical_device_ordinal,
-      IREE_STATUS_NOT_FOUND, /*out_address=*/NULL, out_byte_length);
+  return iree_hal_amdgpu_global_table_try_query_variable(
+      table, symbol, /*out_address=*/NULL, out_found, out_byte_length);
 }
 
 static iree_status_t iree_hal_amdgpu_global_table_hsa_create_buffer(
@@ -192,8 +225,16 @@ static iree_status_t iree_hal_amdgpu_global_table_hsa_create_buffer(
   }
 
   hsa_executable_symbol_t symbol = {0};
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_global_table_get_symbol_by_name(
-      table, name, table->hsa.device_agents[physical_device_ordinal], &symbol));
+  bool found = false;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_global_table_try_get_symbol_by_name(
+      table, name, table->hsa.device_agents[physical_device_ordinal], &found,
+      &symbol));
+  if (IREE_UNLIKELY(!found)) {
+    return iree_make_status(IREE_STATUS_INTERNAL,
+                            "verified executable global `%.*s` disappeared on "
+                            "physical device %" PRIhsz,
+                            (int)name.size, name.data, physical_device_ordinal);
+  }
 
   uint64_t variable_address = 0;
   iree_device_size_t byte_length = 0;
@@ -363,7 +404,7 @@ iree_status_t iree_hal_amdgpu_global_table_initialize_hsa(
       .resolver =
           {
               .user_data = out_table,
-              .verify = iree_hal_amdgpu_global_table_hsa_verify,
+              .try_verify = iree_hal_amdgpu_global_table_hsa_try_verify,
               .create_buffer = iree_hal_amdgpu_global_table_hsa_create_buffer,
           },
   };
@@ -388,11 +429,13 @@ void iree_hal_amdgpu_global_table_deinitialize(
   memset(table, 0, sizeof(*table));
 }
 
-iree_status_t iree_hal_amdgpu_global_table_lookup(
+iree_status_t iree_hal_amdgpu_global_table_try_lookup(
     iree_hal_amdgpu_global_table_t* table, iree_string_view_t name,
-    iree_hal_executable_global_t* out_global) {
+    bool* out_found, iree_hal_executable_global_t* out_global) {
   IREE_ASSERT_ARGUMENT(table);
+  IREE_ASSERT_ARGUMENT(out_found);
   IREE_ASSERT_ARGUMENT(out_global);
+  *out_found = false;
   *out_global = iree_hal_executable_global_invalid();
 
   if (iree_string_view_is_empty(name)) {
@@ -404,6 +447,7 @@ iree_status_t iree_hal_amdgpu_global_table_lookup(
   iree_hal_amdgpu_global_table_entry_t* entry =
       iree_hal_amdgpu_global_table_find_entry_locked(table, name);
   if (entry) {
+    *out_found = true;
     *out_global = iree_hal_executable_global_from_value(entry->handle_value);
     iree_slim_mutex_unlock(&table->mutex);
     return iree_ok_status();
@@ -415,9 +459,11 @@ iree_status_t iree_hal_amdgpu_global_table_lookup(
       table, &verification_physical_device_ordinal));
 
   iree_device_size_t byte_length = 0;
-  IREE_RETURN_IF_ERROR(table->resolver.verify(
+  bool resolved = false;
+  IREE_RETURN_IF_ERROR(table->resolver.try_verify(
       table->resolver.user_data, name, verification_physical_device_ordinal,
-      &byte_length));
+      &resolved, &byte_length));
+  if (!resolved) return iree_ok_status();
 
   iree_hal_amdgpu_global_table_entry_t* new_entry = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_global_table_entry_allocate(
@@ -426,6 +472,7 @@ iree_status_t iree_hal_amdgpu_global_table_lookup(
   iree_slim_mutex_lock(&table->mutex);
   entry = iree_hal_amdgpu_global_table_find_entry_locked(table, name);
   if (entry) {
+    *out_found = true;
     *out_global = iree_hal_executable_global_from_value(entry->handle_value);
   } else {
     const uint64_t handle_value = table->entry_count;
@@ -434,6 +481,7 @@ iree_status_t iree_hal_amdgpu_global_table_lookup(
     if (iree_status_is_ok(status)) {
       new_entry->handle_value = handle_value;
       table->entries[table->entry_count++] = new_entry;
+      *out_found = true;
       *out_global = iree_hal_executable_global_from_value(handle_value);
       new_entry = NULL;
     }
@@ -446,6 +494,20 @@ iree_status_t iree_hal_amdgpu_global_table_lookup(
   iree_slim_mutex_unlock(&table->mutex);
 
   iree_hal_amdgpu_global_table_entry_free(table, new_entry);
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_amdgpu_global_table_lookup(
+    iree_hal_amdgpu_global_table_t* table, iree_string_view_t name,
+    iree_hal_executable_global_t* out_global) {
+  bool found = false;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_global_table_try_lookup(table, name, &found, out_global));
+  if (!found) {
+    return iree_make_status(IREE_STATUS_NOT_FOUND,
+                            "executable global `%.*s` not found",
+                            (int)name.size, name.data);
+  }
   return iree_ok_status();
 }
 

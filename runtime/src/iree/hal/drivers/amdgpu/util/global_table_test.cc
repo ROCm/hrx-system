@@ -20,30 +20,30 @@ struct FakeResolver {
   iree_hal_queue_affinity_t last_create_queue_affinity = 0;
 };
 
-static iree_status_t LookupFakeGlobal(iree_string_view_t name,
-                                      iree_device_size_t* out_byte_length) {
+static bool TryLookupFakeGlobal(iree_string_view_t name,
+                                iree_device_size_t* out_byte_length) {
   if (iree_string_view_equal(name, IREE_SV("global_a"))) {
     *out_byte_length = 64;
-    return iree_ok_status();
+    return true;
   }
   if (iree_string_view_equal(name, IREE_SV("global_b"))) {
     *out_byte_length = 128;
-    return iree_ok_status();
+    return true;
   }
   *out_byte_length = 0;
-  return iree_make_status(IREE_STATUS_NOT_FOUND, "fake global `%.*s` not found",
-                          (int)name.size, name.data);
+  return false;
 }
 
-static iree_status_t FakeVerify(
+static iree_status_t FakeTryVerify(
     void* user_data, iree_string_view_t name,
-    iree_host_size_t verification_physical_device_ordinal,
+    iree_host_size_t verification_physical_device_ordinal, bool* out_found,
     iree_device_size_t* out_byte_length) {
   auto* resolver = static_cast<FakeResolver*>(user_data);
   ++resolver->verify_call_count;
   resolver->last_verify_physical_device_ordinal =
       verification_physical_device_ordinal;
-  return LookupFakeGlobal(name, out_byte_length);
+  *out_found = TryLookupFakeGlobal(name, out_byte_length);
+  return iree_ok_status();
 }
 
 static void FakeBufferRelease(void* user_data, iree_hal_buffer_t* buffer) {
@@ -63,7 +63,9 @@ static iree_status_t FakeCreateBuffer(
   *out_buffer = nullptr;
 
   iree_device_size_t byte_length = 0;
-  IREE_RETURN_IF_ERROR(LookupFakeGlobal(name, &byte_length));
+  if (!TryLookupFakeGlobal(name, &byte_length)) {
+    return iree_make_status(IREE_STATUS_INTERNAL, "fake global not verified");
+  }
   if (byte_length != expected_byte_length) {
     return iree_make_status(IREE_STATUS_INTERNAL, "fake global size mismatch");
   }
@@ -114,7 +116,7 @@ class GlobalTableTest : public ::testing::Test {
         .resolver =
             {
                 .user_data = &resolver_,
-                .verify = FakeVerify,
+                .try_verify = FakeTryVerify,
                 .create_buffer = FakeCreateBuffer,
             },
     };
@@ -227,7 +229,7 @@ TEST(GlobalTableStandaloneTest, BufferRejectsUnloadedPhysicalDevice) {
       .resolver =
           {
               .user_data = &resolver,
-              .verify = FakeVerify,
+              .try_verify = FakeTryVerify,
               .create_buffer = FakeCreateBuffer,
           },
   };

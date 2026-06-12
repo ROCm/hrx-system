@@ -324,16 +324,17 @@ iree_hal_replay_recorder_executable_lookup_function_by_name(
                            executable->base_executable, name, out_function));
 }
 
-static iree_status_t iree_hal_replay_recorder_executable_lookup_global_by_name(
+static iree_status_t
+iree_hal_replay_recorder_executable_try_lookup_global_by_name(
     iree_hal_executable_t* base_executable, iree_string_view_t name,
-    iree_hal_executable_global_t* out_global) {
+    bool* out_found, iree_hal_executable_global_t* out_global) {
   iree_hal_replay_recorder_executable_t* executable =
       iree_hal_replay_recorder_executable_cast(base_executable);
   (void)executable;
   (void)name;
+  *out_found = false;
   *out_global = iree_hal_executable_global_invalid();
-  return iree_make_status(IREE_STATUS_NOT_FOUND,
-                          "replay recorder executable does not expose globals");
+  return iree_ok_status();
 }
 
 static iree_status_t iree_hal_replay_recorder_executable_global_info(
@@ -801,8 +802,8 @@ static const iree_hal_executable_vtable_t
             iree_hal_replay_recorder_executable_function_parameters,
         .lookup_function_by_name =
             iree_hal_replay_recorder_executable_lookup_function_by_name,
-        .lookup_global_by_name =
-            iree_hal_replay_recorder_executable_lookup_global_by_name,
+        .try_lookup_global_by_name =
+            iree_hal_replay_recorder_executable_try_lookup_global_by_name,
         .global_info = iree_hal_replay_recorder_executable_global_info,
         .global_buffer = iree_hal_replay_recorder_executable_global_buffer,
 };

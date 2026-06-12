@@ -1812,13 +1812,13 @@ static iree_status_t iree_hal_amdgpu_executable_lookup_export_by_name(
                           (int)name.size, name.data);
 }
 
-static iree_status_t iree_hal_amdgpu_executable_lookup_global_by_name(
+static iree_status_t iree_hal_amdgpu_executable_try_lookup_global_by_name(
     iree_hal_executable_t* base_executable, iree_string_view_t name,
-    iree_hal_executable_global_t* out_global) {
+    bool* out_found, iree_hal_executable_global_t* out_global) {
   iree_hal_amdgpu_executable_t* executable =
       iree_hal_amdgpu_executable_cast(base_executable);
-  return iree_hal_amdgpu_global_table_lookup(&executable->global_table, name,
-                                             out_global);
+  return iree_hal_amdgpu_global_table_try_lookup(&executable->global_table,
+                                                 name, out_found, out_global);
 }
 
 static iree_status_t iree_hal_amdgpu_executable_global_info(
@@ -1845,7 +1845,8 @@ static const iree_hal_executable_vtable_t iree_hal_amdgpu_executable_vtable = {
     .function_info = iree_hal_amdgpu_executable_export_info,
     .function_parameters = iree_hal_amdgpu_executable_export_parameters,
     .lookup_function_by_name = iree_hal_amdgpu_executable_lookup_export_by_name,
-    .lookup_global_by_name = iree_hal_amdgpu_executable_lookup_global_by_name,
+    .try_lookup_global_by_name =
+        iree_hal_amdgpu_executable_try_lookup_global_by_name,
     .global_info = iree_hal_amdgpu_executable_global_info,
     .global_buffer = iree_hal_amdgpu_executable_global_buffer,
 };

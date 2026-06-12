@@ -703,17 +703,11 @@ iree_status_t iree_hal_streaming_module_global_symbol(
                               : module->executable;
       iree_hal_executable_global_t global_handle =
           iree_hal_executable_global_invalid();
-      status = iree_hal_executable_lookup_global_by_name(executable, name_view,
-                                                         &global_handle);
-      if (iree_status_is_not_found(status)) {
-        // Merged HIP fat binaries are represented as several HAL executables.
-        // A miss in one entry is expected while probing for the entry that owns
-        // the global; the terminal miss below is the user-visible error.
-        iree_status_ignore(status);
-        status = iree_ok_status();
-        continue;
-      }
+      bool found = false;
+      status = iree_hal_executable_try_lookup_global_by_name(
+          executable, name_view, &found, &global_handle);
       if (!iree_status_is_ok(status)) break;
+      if (!found) continue;
       status = iree_hal_streaming_module_create_global_symbol_locked(
           module, executable, global_handle, out_global);
       break;

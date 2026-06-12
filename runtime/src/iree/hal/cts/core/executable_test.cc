@@ -134,6 +134,16 @@ TEST_P(ExecutableTest, LookupExportByName) {
   EXPECT_EQ(ordinal.value, 0);
 }
 
+TEST_P(ExecutableTest, TryLookupGlobalByNameNotFound) {
+  bool found = true;
+  iree_hal_executable_global_t global =
+      iree_hal_executable_global_from_value(0);
+  IREE_ASSERT_OK(iree_hal_executable_try_lookup_global_by_name(
+      executable_, IREE_SV("NOT_FOUND"), &found, &global));
+  EXPECT_FALSE(found);
+  EXPECT_FALSE(iree_hal_executable_global_is_valid(global));
+}
+
 TEST_P(ExecutableTest, LookupGlobalByNameNotFound) {
   iree_hal_executable_global_t global = iree_hal_executable_global_invalid();
   EXPECT_THAT(Status(iree_hal_executable_lookup_global_by_name(

@@ -24,11 +24,13 @@ typedef struct iree_hal_amdgpu_global_table_resolver_t {
   // Resolver-specific state passed to all callbacks.
   void* user_data;
 
-  // Verifies that |name| resolves to an executable variable and returns its
-  // byte length. The table calls this on the first loaded physical device only.
-  iree_status_t (*verify)(void* user_data, iree_string_view_t name,
-                          iree_host_size_t verification_physical_device_ordinal,
-                          iree_device_size_t* out_byte_length);
+  // Tries to verify that |name| resolves to an executable variable and returns
+  // its byte length when found. The table calls this on the first loaded
+  // physical device only.
+  iree_status_t (*try_verify)(
+      void* user_data, iree_string_view_t name,
+      iree_host_size_t verification_physical_device_ordinal, bool* out_found,
+      iree_device_size_t* out_byte_length);
 
   // Creates an executable-owned buffer alias for |name| on one physical device.
   iree_status_t (*create_buffer)(
@@ -144,6 +146,11 @@ iree_status_t iree_hal_amdgpu_global_table_initialize_hsa(
 // Releases cached buffer aliases and table storage.
 void iree_hal_amdgpu_global_table_deinitialize(
     iree_hal_amdgpu_global_table_t* table);
+
+// Tries to find a variable symbol by name and interns a global handle for it.
+iree_status_t iree_hal_amdgpu_global_table_try_lookup(
+    iree_hal_amdgpu_global_table_t* table, iree_string_view_t name,
+    bool* out_found, iree_hal_executable_global_t* out_global);
 
 // Finds a variable symbol by name and interns a global handle for it.
 iree_status_t iree_hal_amdgpu_global_table_lookup(

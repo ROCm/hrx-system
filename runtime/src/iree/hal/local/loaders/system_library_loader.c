@@ -372,14 +372,14 @@ static iree_status_t iree_hal_system_executable_lookup_export_by_name(
       executable->library.v0, name, out_export_ordinal);
 }
 
-static iree_status_t iree_hal_system_executable_lookup_global_by_name(
+static iree_status_t iree_hal_system_executable_try_lookup_global_by_name(
     iree_hal_executable_t* base_executable, iree_string_view_t name,
-    iree_hal_executable_global_t* out_global) {
+    bool* out_found, iree_hal_executable_global_t* out_global) {
   (void)base_executable;
   (void)name;
+  *out_found = false;
   *out_global = iree_hal_executable_global_invalid();
-  return iree_make_status(IREE_STATUS_NOT_FOUND,
-                          "local system executable has no globals");
+  return iree_ok_status();
 }
 
 static iree_status_t iree_hal_system_executable_global_info(
@@ -414,8 +414,8 @@ static const iree_hal_local_executable_vtable_t
                     iree_hal_system_executable_export_parameters,
                 .lookup_function_by_name =
                     iree_hal_system_executable_lookup_export_by_name,
-                .lookup_global_by_name =
-                    iree_hal_system_executable_lookup_global_by_name,
+                .try_lookup_global_by_name =
+                    iree_hal_system_executable_try_lookup_global_by_name,
                 .global_info = iree_hal_system_executable_global_info,
                 .global_buffer = iree_hal_system_executable_global_buffer,
             },

@@ -592,14 +592,15 @@ static iree_status_t iree_hal_metal_executable_lookup_export_by_name(
                           (int)name.size, name.data);
 }
 
-static iree_status_t iree_hal_metal_executable_lookup_global_by_name(
-    iree_hal_executable_t* base_executable, iree_string_view_t name,
+static iree_status_t iree_hal_metal_executable_try_lookup_global_by_name(
+    iree_hal_executable_t* base_executable, iree_string_view_t name, bool* out_found,
     iree_hal_executable_global_t* out_global) {
   iree_hal_metal_executable_t* executable = iree_hal_metal_executable_cast(base_executable);
   (void)executable;
   (void)name;
+  *out_found = false;
   *out_global = iree_hal_executable_global_invalid();
-  return iree_make_status(IREE_STATUS_NOT_FOUND, "Metal executable has no globals");
+  return iree_ok_status();
 }
 
 static iree_status_t iree_hal_metal_executable_global_info(
@@ -629,7 +630,7 @@ static const iree_hal_executable_vtable_t iree_hal_metal_executable_vtable = {
     .function_info = iree_hal_metal_executable_export_info,
     .function_parameters = iree_hal_metal_executable_export_parameters,
     .lookup_function_by_name = iree_hal_metal_executable_lookup_export_by_name,
-    .lookup_global_by_name = iree_hal_metal_executable_lookup_global_by_name,
+    .try_lookup_global_by_name = iree_hal_metal_executable_try_lookup_global_by_name,
     .global_info = iree_hal_metal_executable_global_info,
     .global_buffer = iree_hal_metal_executable_global_buffer,
 };

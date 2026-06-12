@@ -62,41 +62,46 @@ typedef struct iree_hal_amdgpu_global_table_benchmark_fixture_t {
   iree_hal_amdgpu_global_table_t table;
 } iree_hal_amdgpu_global_table_benchmark_fixture_t;
 
-static iree_status_t iree_hal_amdgpu_global_table_benchmark_parse_name(
+static bool iree_hal_amdgpu_global_table_benchmark_try_parse_name(
     iree_string_view_t name, iree_host_size_t global_count,
     iree_host_size_t* out_global_ordinal) {
   *out_global_ordinal = 0;
 
   static const iree_string_view_t prefix = IREE_SV("global_");
   if (!iree_string_view_starts_with(name, prefix)) {
-    return iree_make_status(IREE_STATUS_NOT_FOUND, "global not found");
+    return false;
   }
   iree_string_view_t ordinal_string =
       iree_string_view_strip_prefix(name, prefix);
   uint64_t global_ordinal = 0;
   if (!iree_string_view_atoi_uint64_base(ordinal_string, 10, &global_ordinal)) {
-    return iree_make_status(IREE_STATUS_NOT_FOUND, "global not found");
+    return false;
   }
   if (global_ordinal >= global_count) {
-    return iree_make_status(IREE_STATUS_NOT_FOUND, "global not found");
+    return false;
   }
 
   *out_global_ordinal = (iree_host_size_t)global_ordinal;
-  return iree_ok_status();
+  return true;
 }
 
-static iree_status_t iree_hal_amdgpu_global_table_benchmark_verify(
+static iree_status_t iree_hal_amdgpu_global_table_benchmark_try_verify(
     void* user_data, iree_string_view_t name,
-    iree_host_size_t verification_physical_device_ordinal,
+    iree_host_size_t verification_physical_device_ordinal, bool* out_found,
     iree_device_size_t* out_byte_length) {
   (void)verification_physical_device_ordinal;
+  *out_found = false;
+  *out_byte_length = 0;
 
   iree_hal_amdgpu_global_table_benchmark_resolver_t* resolver =
       (iree_hal_amdgpu_global_table_benchmark_resolver_t*)user_data;
   iree_host_size_t global_ordinal = 0;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_global_table_benchmark_parse_name(
-      name, resolver->global_count, &global_ordinal));
+  if (!iree_hal_amdgpu_global_table_benchmark_try_parse_name(
+          name, resolver->global_count, &global_ordinal)) {
+    return iree_ok_status();
+  }
 
+  *out_found = true;
   *out_byte_length = 64;
   return iree_ok_status();
 }
@@ -113,8 +118,11 @@ static iree_status_t iree_hal_amdgpu_global_table_benchmark_create_buffer(
       (iree_hal_amdgpu_global_table_benchmark_resolver_t*)user_data;
 
   iree_host_size_t global_ordinal = 0;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_global_table_benchmark_parse_name(
-      name, resolver->global_count, &global_ordinal));
+  if (!iree_hal_amdgpu_global_table_benchmark_try_parse_name(
+          name, resolver->global_count, &global_ordinal)) {
+    return iree_make_status(IREE_STATUS_INTERNAL,
+                            "verified benchmark global disappeared");
+  }
 
   iree_hal_buffer_retain(resolver->buffer);
   *out_buffer = resolver->buffer;
@@ -251,7 +259,7 @@ static iree_status_t iree_hal_amdgpu_global_table_benchmark_fixture_initialize(
       .resolver =
           {
               .user_data = &out_fixture->resolver,
-              .verify = iree_hal_amdgpu_global_table_benchmark_verify,
+              .try_verify = iree_hal_amdgpu_global_table_benchmark_try_verify,
               .create_buffer =
                   iree_hal_amdgpu_global_table_benchmark_create_buffer,
           },
