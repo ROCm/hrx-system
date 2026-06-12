@@ -237,19 +237,19 @@ TEST(Diagnostic, RelatedLocationsFormatAsNotes) {
       (iree_host_size_t)(consume_text - source_text);
   iree_host_size_t consume_length = strcspn(consume_text, "\n");
   loom_diagnostic_related_location_t related_locations[] = {{
-      .label = IREE_SV("consumed here"),
-      .source_location =
-          {
-              .provenance = LOOM_SOURCE_PROVENANCE_EXACT_SOURCE,
-              .filename = IREE_SV("test.loom"),
-              .source = source,
-              .start = consume_start,
-              .end = consume_start + consume_length,
-              .start_line = 1,
-              .start_column = 1,
-              .end_line = 1,
-              .end_column = 1 + (uint32_t)consume_length,
-          },
+      /*.label=*/IREE_SV("consumed here"),
+      /*.source_location=*/
+      {
+          /*.provenance=*/LOOM_SOURCE_PROVENANCE_EXACT_SOURCE,
+          /*.filename=*/IREE_SV("test.loom"),
+          /*.source=*/source,
+          /*.start=*/consume_start,
+          /*.end=*/consume_start + consume_length,
+          /*.start_line=*/1,
+          /*.start_column=*/1,
+          /*.end_line=*/1,
+          /*.end_column=*/1 + (uint32_t)consume_length,
+      },
   }};
 
   const char* use_text = strstr(source_text, "test.use %arg : f32");
@@ -266,15 +266,15 @@ TEST(Diagnostic, RelatedLocationsFormatAsNotes) {
   diagnostic.params = params;
   diagnostic.param_count = IREE_ARRAYSIZE(params);
   diagnostic.origin = {
-      .provenance = LOOM_SOURCE_PROVENANCE_EXACT_SOURCE,
-      .filename = IREE_SV("test.loom"),
-      .source = source,
-      .start = use_start,
-      .end = use_start + use_length,
-      .start_line = 2,
-      .start_column = 1,
-      .end_line = 2,
-      .end_column = 1 + (uint32_t)use_length,
+      /*.provenance=*/LOOM_SOURCE_PROVENANCE_EXACT_SOURCE,
+      /*.filename=*/IREE_SV("test.loom"),
+      /*.source=*/source,
+      /*.start=*/use_start,
+      /*.end=*/use_start + use_length,
+      /*.start_line=*/2,
+      /*.start_column=*/1,
+      /*.end_line=*/2,
+      /*.end_column=*/1 + (uint32_t)use_length,
   };
   diagnostic.related_locations = related_locations;
   diagnostic.related_location_count = IREE_ARRAYSIZE(related_locations);

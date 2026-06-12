@@ -111,12 +111,12 @@ typedef struct loom_tokenizer_error_t {
 // user-authored source token.
 static inline loom_token_t loom_token_none(void) {
   loom_token_t token = {
-      .text = iree_string_view_empty(),
-      .source_text = iree_string_view_empty(),
-      .line = 0,
-      .column = 0,
-      .end_column = 0,
-      .kind = LOOM_TOKEN_NONE,
+      /*.text=*/iree_string_view_empty(),
+      /*.source_text=*/iree_string_view_empty(),
+      /*.line=*/0,
+      /*.column=*/0,
+      /*.end_column=*/0,
+      /*.kind=*/LOOM_TOKEN_NONE,
   };
   return token;
 }

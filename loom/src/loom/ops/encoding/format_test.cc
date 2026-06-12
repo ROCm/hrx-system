@@ -28,11 +28,11 @@ using ::loom::testing::ExpectError;
 using ::loom::testing::GetStringParam;
 
 static const loom_encoding_vtable_t kQ8_0EncodingVtable = {
-    .name = IREE_SV("q8_0"),
+    /*.name=*/IREE_SV("q8_0"),
 };
 
 static const loom_encoding_vtable_t kQuantizationEncodingVtable = {
-    .name = IREE_SV("quantization"),
+    /*.name=*/IREE_SV("quantization"),
 };
 
 class EncodingFormatTest : public ::testing::Test {

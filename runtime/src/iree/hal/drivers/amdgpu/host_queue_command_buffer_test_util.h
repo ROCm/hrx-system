@@ -91,10 +91,10 @@ static iree_status_t QueueAffinityForPhysicalDevice(
   iree_hal_amdgpu_logical_device_t* logical_device =
       test_device.logical_device();
   const iree_hal_amdgpu_queue_affinity_domain_t domain = {
-      .supported_affinity = logical_device->queue_affinity_mask,
-      .physical_device_count = logical_device->physical_device_count,
-      .queue_count_per_physical_device =
-          logical_device->system->topology.gpu_agent_queue_count,
+      /*.supported_affinity=*/logical_device->queue_affinity_mask,
+      /*.physical_device_count=*/logical_device->physical_device_count,
+      /*.queue_count_per_physical_device=*/
+      logical_device->system->topology.gpu_agent_queue_count,
   };
   return iree_hal_amdgpu_queue_affinity_for_physical_device(
       domain, physical_device_ordinal, out_queue_affinity);

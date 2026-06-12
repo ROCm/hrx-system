@@ -56,10 +56,10 @@ void InitializeTestLowLowerPolicyRegistryForProvider(
 }
 
 const loom_target_provider_t kTestTargetProvider = {
-    .initialize_low_descriptor_registry =
-        InitializeTestLowDescriptorRegistryForProvider,
-    .initialize_low_lower_policy_registry =
-        InitializeTestLowLowerPolicyRegistryForProvider,
+    /*.register_context=*/{}, /*.initialize_low_descriptor_registry=*/
+    InitializeTestLowDescriptorRegistryForProvider,
+    /*.initialize_low_lower_policy_registry=*/
+    InitializeTestLowLowerPolicyRegistryForProvider,
 };
 
 const loom_target_provider_t* const kTestTargetProviders[] = {
@@ -97,10 +97,10 @@ iree_status_t TestRequirementProviderAppendNames(
 }
 
 const loom_check_requirement_provider_t kTestRequirementProvider = {
-    .name = IREE_SVL("test"),
-    .match = TestRequirementProviderMatches,
-    .query = TestRequirementProviderQuery,
-    .append_names = TestRequirementProviderAppendNames,
+    /*.name=*/IREE_SVL("test"),
+    /*.match=*/TestRequirementProviderMatches,
+    /*.query=*/TestRequirementProviderQuery,
+    /*.append_names=*/TestRequirementProviderAppendNames,
 };
 
 const loom_check_requirement_provider_t* const kTestRequirementProviders[] = {
@@ -123,11 +123,11 @@ iree_status_t TestEmitProviderExecute(
         loom_param_string(IREE_SV("fake.emit")),
     };
     loom_diagnostic_t diagnostic = {
-        .severity = LOOM_DIAGNOSTIC_ERROR,
-        .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 6),
-        .params = params,
-        .param_count = IREE_ARRAYSIZE(params),
-        .emitter = LOOM_EMITTER_PASS,
+        /*.severity=*/LOOM_DIAGNOSTIC_ERROR,
+        /*.error=*/loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 6),
+        /*.params=*/params,
+        /*.param_count=*/IREE_ARRAYSIZE(params),
+        /*.emitter=*/LOOM_EMITTER_PASS,
     };
     IREE_RETURN_IF_ERROR(loom_check_diagnostic_collector_sink(
         request->diagnostic_collector, &diagnostic));
@@ -146,11 +146,11 @@ iree_status_t TestEmitProviderAppendNames(
 }
 
 const loom_check_emit_provider_t kTestEmitProvider = {
-    .name = IREE_SVL("test"),
-    .match = TestEmitProviderMatches,
-    .check_requirements = nullptr,
-    .execute = TestEmitProviderExecute,
-    .append_names = TestEmitProviderAppendNames,
+    /*.name=*/IREE_SVL("test"),
+    /*.match=*/TestEmitProviderMatches,
+    /*.check_requirements=*/nullptr,
+    /*.execute=*/TestEmitProviderExecute,
+    /*.append_names=*/TestEmitProviderAppendNames,
 };
 
 const loom_check_emit_provider_t* const kTestEmitProviders[] = {
@@ -158,44 +158,51 @@ const loom_check_emit_provider_t* const kTestEmitProviders[] = {
 };
 
 const loom_check_environment_t kExecuteTestEnvironment = {
-    .register_context =
-        {
-            .fn = RegisterTestContext,
-            .user_data = nullptr,
-        },
-    .initialize_low_descriptor_registry =
-        {
-            .fn = InitializeTestLowDescriptorRegistry,
-            .user_data = nullptr,
-        },
-    .initialize_low_lower_policy_registry =
-        {
-            .fn = InitializeTestLowLowerPolicyRegistry,
-            .user_data = nullptr,
-        },
+    /*.register_context=*/{
+        /*.fn=*/RegisterTestContext,
+        /*.user_data=*/nullptr,
+    },
+    /*.target_environment=*/{},
+    /*.initialize_low_descriptor_registry=*/
+    {
+        /*.fn=*/InitializeTestLowDescriptorRegistry,
+        /*.user_data=*/nullptr,
+    },
+    /*.initialize_low_lower_policy_registry=*/
+    {
+        /*.fn=*/InitializeTestLowLowerPolicyRegistry,
+        /*.user_data=*/nullptr,
+    },
 };
 
 const loom_check_environment_t kExecuteTestProviderEnvironment = {
-    .register_context =
-        {
-            .fn = RegisterTestContext,
-            .user_data = nullptr,
-        },
-    .initialize_low_descriptor_registry =
-        {
-            .fn = InitializeTestLowDescriptorRegistry,
-            .user_data = nullptr,
-        },
-    .emit_providers =
-        {
-            .providers = kTestEmitProviders,
-            .provider_count = IREE_ARRAYSIZE(kTestEmitProviders),
-        },
-    .requirement_providers =
-        {
-            .providers = kTestRequirementProviders,
-            .provider_count = IREE_ARRAYSIZE(kTestRequirementProviders),
-        },
+    /*.register_context=*/{
+        /*.fn=*/RegisterTestContext,
+        /*.user_data=*/nullptr,
+    },
+    /*.target_environment=*/{},
+    /*.initialize_low_descriptor_registry=*/
+    {
+        /*.fn=*/InitializeTestLowDescriptorRegistry,
+        /*.user_data=*/nullptr,
+    },
+    /*.initialize_low_lower_policy_registry=*/{},
+    /*.initialize_math_policy_registry=*/{},
+    /*.pass_registry=*/{},
+    /*.low_legality_provider_list=*/{},
+    /*.legalizer_provider_list=*/{},
+    /*.low_packet_diagnostic_provider_list=*/{},
+    /*.low_verify_provider_list=*/{},
+    /*.emit_providers=*/
+    {
+        /*.providers=*/kTestEmitProviders,
+        /*.provider_count=*/IREE_ARRAYSIZE(kTestEmitProviders),
+    },
+    /*.requirement_providers=*/
+    {
+        /*.providers=*/kTestRequirementProviders,
+        /*.provider_count=*/IREE_ARRAYSIZE(kTestRequirementProviders),
+    },
 };
 
 class ExecuteTest : public ::testing::Test {

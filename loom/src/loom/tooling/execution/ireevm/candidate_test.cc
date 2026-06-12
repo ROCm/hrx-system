@@ -522,13 +522,13 @@ class IreeVmCandidateTest : public ::testing::Test {
     loom_run_session_options_t options = {};
     loom_run_session_options_initialize(&options);
     options.register_context = (loom_run_register_context_callback_t){
-        .fn = RegisterContext,
-        .user_data = &target_environment_,
+        /*.fn=*/RegisterContext,
+        /*.user_data=*/&target_environment_,
     };
     options.initialize_low_descriptor_registry =
         (loom_run_initialize_low_descriptor_registry_callback_t){
-            .fn = InitializeLowDescriptorRegistry,
-            .user_data = &target_environment_,
+            /*.fn=*/InitializeLowDescriptorRegistry,
+            /*.user_data=*/&target_environment_,
         };
     IREE_ASSERT_OK(loom_run_session_initialize(&options, &session_));
   }

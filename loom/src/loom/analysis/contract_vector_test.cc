@@ -160,14 +160,17 @@ class ContractVectorTest : public ::testing::Test {
 
   loom_contract_vector_mma_options_t GpuMatrixMmaOptions() {
     return (loom_contract_vector_mma_options_t){
-        .k_group_size = 1,
-        .fragment =
-            (loom_contract_fragment_t){
-                .atom_bits = LOOM_CONTRACT_FRAGMENT_SUBGROUP_LANE,
-                .subgroup_size = 64,
-            },
-        .capability_class = LOOM_CONTRACT_CAPABILITY_CLASS_GPU_MATRIX,
-        .policy = LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED,
+        /*.k_group_size=*/1,
+        /*.fragment=*/
+        (loom_contract_fragment_t){
+            /*.atom_bits=*/LOOM_CONTRACT_FRAGMENT_SUBGROUP_LANE,
+            /*.vector_bit_width=*/{},
+            /*.source_lane_count=*/{},
+            /*.result_lane_count=*/{},
+            /*.subgroup_size=*/64,
+        },
+        /*.capability_class=*/LOOM_CONTRACT_CAPABILITY_CLASS_GPU_MATRIX,
+        /*.policy=*/LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED,
     };
   }
 

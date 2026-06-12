@@ -97,7 +97,8 @@ class ModuleIndexTest : public ::testing::Test {
                        iree_string_view_t filename = IREE_SV("test.loom")) {
     loom_module_t* module = nullptr;
     loom_text_parse_options_t parse_options = {
-        .max_errors = 20,
+        /*.diagnostic_sink=*/{},
+        /*.max_errors=*/20,
     };
     IREE_EXPECT_OK(loom_text_parse(source, filename, &context_, &block_pool_,
                                    &parse_options, &module));
@@ -152,8 +153,8 @@ func.def @helper(%x: i32) -> (i32) {
 )"));
   IndexPtr index = CreateIndex();
   loom_link_module_index_add_options_t options = {
-      .provider_name = IREE_SV("app"),
-      .role = LOOM_LINK_PROVIDER_ROLE_INPUT,
+      /*.provider_name=*/IREE_SV("app"),
+      /*.role=*/LOOM_LINK_PROVIDER_ROLE_INPUT,
   };
   IREE_ASSERT_OK(loom_link_module_index_add_materialized(
       index.get(), module, &options, /*out_provider_ordinal=*/nullptr));
@@ -203,8 +204,8 @@ func.def public @entry(%x: i32) -> (i32) {
 
   IndexPtr index = CreateIndex();
   loom_link_module_index_add_options_t library_options = {
-      .provider_name = IREE_SV("kernel-lib"),
-      .role = LOOM_LINK_PROVIDER_ROLE_LIBRARY,
+      /*.provider_name=*/IREE_SV("kernel-lib"),
+      /*.role=*/LOOM_LINK_PROVIDER_ROLE_LIBRARY,
   };
   IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
       index.get(),
@@ -212,8 +213,8 @@ func.def public @entry(%x: i32) -> (i32) {
       IREE_SV("kernel-lib.loombc"), /*read_options=*/nullptr, &library_options,
       /*out_provider_ordinal=*/nullptr));
   loom_link_module_index_add_options_t input_options = {
-      .provider_name = IREE_SV("input"),
-      .role = LOOM_LINK_PROVIDER_ROLE_INPUT,
+      /*.provider_name=*/IREE_SV("input"),
+      /*.role=*/LOOM_LINK_PROVIDER_ROLE_INPUT,
   };
   IREE_ASSERT_OK(loom_link_module_index_add_materialized(
       index.get(), input, &input_options, /*out_provider_ordinal=*/nullptr));
@@ -248,8 +249,8 @@ func.decl public import("math", "dot") @dot(%a: f32, %b: f32) -> (f32)
 )"));
   IndexPtr index = CreateIndex();
   loom_link_module_index_add_options_t options = {
-      .provider_name = IREE_SV("imports"),
-      .role = LOOM_LINK_PROVIDER_ROLE_INPUT,
+      /*.provider_name=*/IREE_SV("imports"),
+      /*.role=*/LOOM_LINK_PROVIDER_ROLE_INPUT,
   };
   IREE_ASSERT_OK(loom_link_module_index_add_materialized(
       index.get(), module, &options, /*out_provider_ordinal=*/nullptr));
@@ -274,8 +275,8 @@ func.def public @exported(%x: i32) -> (i32) {
 
   IndexPtr index = CreateIndex();
   loom_link_module_index_add_options_t options = {
-      .provider_name = IREE_SV("bytecode-provider"),
-      .role = LOOM_LINK_PROVIDER_ROLE_LIBRARY,
+      /*.provider_name=*/IREE_SV("bytecode-provider"),
+      /*.role=*/LOOM_LINK_PROVIDER_ROLE_LIBRARY,
   };
   IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
       index.get(), iree_make_const_byte_span(bytes.data(), bytes.size()),
@@ -312,8 +313,8 @@ check.benchmark<@kernel_case> @kernel_bench {}
 
   IndexPtr index = CreateIndex();
   loom_link_module_index_add_options_t options = {
-      .provider_name = IREE_SV("checks"),
-      .role = LOOM_LINK_PROVIDER_ROLE_INPUT,
+      /*.provider_name=*/IREE_SV("checks"),
+      /*.role=*/LOOM_LINK_PROVIDER_ROLE_INPUT,
   };
   IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
       index.get(), iree_make_const_byte_span(bytes.data(), bytes.size()),
@@ -343,8 +344,8 @@ check.benchmark<@kernel_case> @kernel_bench {}
 TEST_F(ModuleIndexTest, IndexesTextProviderThroughMaterializedColdPath) {
   IndexPtr index = CreateIndex();
   loom_link_module_index_add_options_t options = {
-      .provider_name = IREE_SV("text-provider"),
-      .role = LOOM_LINK_PROVIDER_ROLE_INPUT,
+      /*.provider_name=*/IREE_SV("text-provider"),
+      /*.role=*/LOOM_LINK_PROVIDER_ROLE_INPUT,
   };
   IREE_ASSERT_OK(loom_link_module_index_add_text(
       index.get(), IREE_SV(R"(
@@ -385,14 +386,14 @@ func.def @helper(%x: i32) -> (i32) {
 
   IndexPtr index = CreateIndex();
   loom_link_module_index_add_options_t first_options = {
-      .provider_name = IREE_SV("first"),
-      .role = LOOM_LINK_PROVIDER_ROLE_INPUT,
+      /*.provider_name=*/IREE_SV("first"),
+      /*.role=*/LOOM_LINK_PROVIDER_ROLE_INPUT,
   };
   IREE_ASSERT_OK(loom_link_module_index_add_materialized(
       index.get(), first, &first_options, /*out_provider_ordinal=*/nullptr));
   loom_link_module_index_add_options_t second_options = {
-      .provider_name = IREE_SV("second"),
-      .role = LOOM_LINK_PROVIDER_ROLE_INPUT,
+      /*.provider_name=*/IREE_SV("second"),
+      /*.role=*/LOOM_LINK_PROVIDER_ROLE_INPUT,
   };
   IREE_ASSERT_OK(loom_link_module_index_add_materialized(
       index.get(), second, &second_options, /*out_provider_ordinal=*/nullptr));

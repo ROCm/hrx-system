@@ -46,17 +46,22 @@ static iree_status_t hal_testbench_actual_test_resolve_target(
                             "test target symbol does not exist");
   }
   *out_target_ref = (loom_symbol_ref_t){
-      .module_id = 0,
-      .symbol_id = target_symbol_id,
+      /*.module_id=*/0,
+      /*.symbol_id=*/target_symbol_id,
   };
   return iree_ok_status();
 }
 
 static const loom_run_hal_artifact_provider_t
     hal_testbench_actual_test_artifact_provider = {
-        .name = IREE_SVL("test-hal"),
-        .target_family_name = IREE_SVL("test"),
-        .resolve_device_target_ref = hal_testbench_actual_test_resolve_target,
+        /*.name=*/IREE_SVL("test-hal"),
+        /*.hal_driver_name=*/{},
+        /*.target_family_name=*/IREE_SVL("test"),
+        /*.default_pipeline_options=*/{},
+        /*.select_device_target=*/{},
+        /*.select_target_key=*/{},
+        /*.deinitialize_device_target=*/{},
+        /*.resolve_device_target_ref=*/hal_testbench_actual_test_resolve_target,
 };
 
 static bool hal_testbench_actual_test_symbol_refs_equal(loom_symbol_ref_t lhs,
@@ -106,7 +111,8 @@ class HalTestbenchActualTest : public ::testing::Test {
   ModulePtr ParseModule(const char* source) {
     loom_module_t* module = nullptr;
     loom_text_parse_options_t options = {
-        .max_errors = 20,
+        /*.diagnostic_sink=*/{},
+        /*.max_errors=*/20,
     };
     IREE_CHECK_OK(loom_text_parse(iree_make_cstring_view(source),
                                   IREE_SV("hal_testbench_actual_test.loom"),
@@ -121,7 +127,7 @@ class HalTestbenchActualTest : public ::testing::Test {
     IREE_ASSERT(name_id != LOOM_STRING_ID_INVALID);
     const uint16_t symbol_id = loom_module_find_symbol(module, name_id);
     IREE_ASSERT(symbol_id != LOOM_SYMBOL_ID_INVALID);
-    return (loom_symbol_ref_t){.module_id = 0, .symbol_id = symbol_id};
+    return (loom_symbol_ref_t){/*.module_id=*/0, /*.symbol_id=*/symbol_id};
   }
 
   loom_op_t* FindKernel(loom_module_t* module, iree_string_view_t name) {

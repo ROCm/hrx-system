@@ -61,7 +61,8 @@ static loom_module_t* fuzz_parse_text(iree_string_view_t source,
                                       iree_string_view_t filename,
                                       iree_arena_block_pool_t* block_pool) {
   loom_text_parse_options_t options = {
-      .max_errors = 16,
+      /*.diagnostic_sink=*/{},
+      /*.max_errors=*/16,
   };
   loom_module_t* module = NULL;
   fuzz_ignore_status_or_trap(loom_text_parse(source, filename, &g_context,
@@ -121,8 +122,8 @@ static void fuzz_strategy_raw_parse(const uint8_t* data, size_t size) {
   iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);
 
   iree_string_view_t source = {
-      .data = (const char*)data,
-      .size = (iree_host_size_t)size,
+      /*.data=*/(const char*)data,
+      /*.size=*/(iree_host_size_t)size,
   };
   loom_module_t* module =
       fuzz_parse_text(source, IREE_SV("<raw-fuzz>"), &block_pool);

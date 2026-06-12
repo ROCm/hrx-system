@@ -41,9 +41,9 @@ class LoopDomainTest : public ::testing::Test {
 
 TEST_F(LoopDomainTest, SameSsaValuesAreEqualWithoutFacts) {
   loom_loop_domain_t domain = {
-      .lower_bound = 1,
-      .upper_bound = 2,
-      .step = 3,
+      /*.lower_bound=*/1,
+      /*.upper_bound=*/2,
+      /*.step=*/3,
   };
 
   EXPECT_TRUE(loom_loop_domain_equal(nullptr, domain, domain));
@@ -51,9 +51,9 @@ TEST_F(LoopDomainTest, SameSsaValuesAreEqualWithoutFacts) {
 
 TEST_F(LoopDomainTest, InvalidValuesAreNotEqual) {
   loom_loop_domain_t domain = {
-      .lower_bound = LOOM_VALUE_ID_INVALID,
-      .upper_bound = 2,
-      .step = 3,
+      /*.lower_bound=*/LOOM_VALUE_ID_INVALID,
+      /*.upper_bound=*/2,
+      /*.step=*/3,
   };
 
   EXPECT_FALSE(loom_loop_domain_equal(nullptr, domain, domain));
@@ -68,14 +68,14 @@ TEST_F(LoopDomainTest, ExactIntegerFactsProveEquivalentValues) {
   DefineFacts(6, loom_value_facts_exact_i64(1));
 
   loom_loop_domain_t lhs = {
-      .lower_bound = 1,
-      .upper_bound = 2,
-      .step = 3,
+      /*.lower_bound=*/1,
+      /*.upper_bound=*/2,
+      /*.step=*/3,
   };
   loom_loop_domain_t rhs = {
-      .lower_bound = 4,
-      .upper_bound = 5,
-      .step = 6,
+      /*.lower_bound=*/4,
+      /*.upper_bound=*/5,
+      /*.step=*/6,
   };
 
   EXPECT_TRUE(loom_loop_domain_equal(&fact_table_, lhs, rhs));
@@ -88,14 +88,14 @@ TEST_F(LoopDomainTest, RangeFactsDoNotProveEquality) {
   DefineFacts(4, loom_value_facts_make(0, 16, 1));
 
   loom_loop_domain_t lhs = {
-      .lower_bound = 1,
-      .upper_bound = 2,
-      .step = 3,
+      /*.lower_bound=*/1,
+      /*.upper_bound=*/2,
+      /*.step=*/3,
   };
   loom_loop_domain_t rhs = {
-      .lower_bound = 4,
-      .upper_bound = 2,
-      .step = 3,
+      /*.lower_bound=*/4,
+      /*.upper_bound=*/2,
+      /*.step=*/3,
   };
 
   EXPECT_FALSE(loom_loop_domain_equal(&fact_table_, lhs, rhs));
@@ -108,14 +108,14 @@ TEST_F(LoopDomainTest, FloatFactsDoNotProveEquality) {
   DefineFacts(4, loom_value_facts_exact_f64(0.0));
 
   loom_loop_domain_t lhs = {
-      .lower_bound = 1,
-      .upper_bound = 2,
-      .step = 3,
+      /*.lower_bound=*/1,
+      /*.upper_bound=*/2,
+      /*.step=*/3,
   };
   loom_loop_domain_t rhs = {
-      .lower_bound = 4,
-      .upper_bound = 2,
-      .step = 3,
+      /*.lower_bound=*/4,
+      /*.upper_bound=*/2,
+      /*.step=*/3,
   };
 
   EXPECT_FALSE(loom_loop_domain_equal(&fact_table_, lhs, rhs));

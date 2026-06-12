@@ -22,18 +22,18 @@ using ModulePtr = ::loom::testing::ModulePtr;
 
 const loom_pass_info_t* TargetAlphaPassInfo(void) {
   static const loom_pass_info_t kInfo = {
-      .name = IREE_SVL("target-alpha"),
-      .description = IREE_SVL("Target alpha pass."),
-      .kind = LOOM_PASS_FUNCTION,
+      /*.name=*/IREE_SVL("target-alpha"),
+      /*.description=*/IREE_SVL("Target alpha pass."),
+      /*.kind=*/LOOM_PASS_FUNCTION,
   };
   return &kInfo;
 }
 
 const loom_pass_info_t* TargetBetaPassInfo(void) {
   static const loom_pass_info_t kInfo = {
-      .name = IREE_SVL("target-beta"),
-      .description = IREE_SVL("Target beta pass."),
-      .kind = LOOM_PASS_FUNCTION,
+      /*.name=*/IREE_SVL("target-beta"),
+      /*.description=*/IREE_SVL("Target beta pass."),
+      /*.kind=*/LOOM_PASS_FUNCTION,
   };
   return &kInfo;
 }
@@ -41,6 +41,15 @@ const loom_pass_info_t* TargetBetaPassInfo(void) {
 iree_status_t NoopFunctionPass(loom_pass_t* pass, loom_module_t* module,
                                loom_func_like_t function) {
   return iree_ok_status();
+}
+
+static loom_pass_descriptor_t MakeFunctionPassDescriptor(
+    iree_string_view_t key, loom_pass_info_fn_t info) {
+  loom_pass_descriptor_t descriptor = {};
+  descriptor.key = key;
+  descriptor.info = info;
+  descriptor.function_run = NoopFunctionPass;
+  return descriptor;
 }
 
 static iree_status_t ContributeMaterialization(
@@ -122,10 +131,30 @@ class TargetProviderTest : public ::testing::Test {
 
 TEST_F(TargetProviderTest, ContributesPassIrByPhase) {
   static const loom_target_provider_t materialization_provider = {
-      .contribute_pipeline = ContributeMaterialization,
+      /*.register_context=*/{},
+      /*.initialize_low_descriptor_registry=*/{},
+      /*.initialize_low_lower_policy_registry=*/{},
+      /*.initialize_math_policy_registry=*/{},
+      /*.low_legality_provider_list=*/{},
+      /*.legalizer_provider_list=*/{},
+      /*.low_packet_diagnostic_provider_list=*/{},
+      /*.low_verify_provider_list=*/{},
+      /*.emitter_list=*/{},
+      /*.pass_registry=*/{},
+      /*.contribute_pipeline=*/ContributeMaterialization,
   };
   static const loom_target_provider_t preparation_provider = {
-      .contribute_pipeline = ContributePreparation,
+      /*.register_context=*/{},
+      /*.initialize_low_descriptor_registry=*/{},
+      /*.initialize_low_lower_policy_registry=*/{},
+      /*.initialize_math_policy_registry=*/{},
+      /*.low_legality_provider_list=*/{},
+      /*.legalizer_provider_list=*/{},
+      /*.low_packet_diagnostic_provider_list=*/{},
+      /*.low_verify_provider_list=*/{},
+      /*.emitter_list=*/{},
+      /*.pass_registry=*/{},
+      /*.contribute_pipeline=*/ContributePreparation,
   };
   static const loom_target_provider_t* const providers[] = {
       &materialization_provider,
@@ -140,7 +169,7 @@ TEST_F(TargetProviderTest, ContributesPassIrByPhase) {
   ModulePtr module;
   IREE_ASSERT_OK(AllocateModule(IREE_SV("pipeline"), &module));
   PipelineBuildData build_data = {
-      .environment = &environment,
+      /*.environment=*/&environment,
   };
   loom_op_t* pipeline_op = nullptr;
   IREE_ASSERT_OK(loom_pass_ir_build_pipeline(
@@ -173,32 +202,42 @@ TEST_F(TargetProviderTest, ContributesPassIrByPhase) {
 
 TEST_F(TargetProviderTest, ComposesTargetPassRegistries) {
   static const loom_pass_descriptor_t first_descriptors[] = {
-      {
-          .key = IREE_SVL("target-beta"),
-          .info = TargetBetaPassInfo,
-          .function_run = NoopFunctionPass,
-      },
+      MakeFunctionPassDescriptor(IREE_SV("target-beta"), TargetBetaPassInfo),
   };
   static const loom_pass_descriptor_t second_descriptors[] = {
-      {
-          .key = IREE_SVL("target-alpha"),
-          .info = TargetAlphaPassInfo,
-          .function_run = NoopFunctionPass,
-      },
+      MakeFunctionPassDescriptor(IREE_SV("target-alpha"), TargetAlphaPassInfo),
   };
   static const loom_pass_registry_t first_registry = {
-      .descriptors = first_descriptors,
-      .descriptor_count = IREE_ARRAYSIZE(first_descriptors),
+      /*.descriptors=*/first_descriptors,
+      /*.descriptor_count=*/IREE_ARRAYSIZE(first_descriptors),
   };
   static const loom_pass_registry_t second_registry = {
-      .descriptors = second_descriptors,
-      .descriptor_count = IREE_ARRAYSIZE(second_descriptors),
+      /*.descriptors=*/second_descriptors,
+      /*.descriptor_count=*/IREE_ARRAYSIZE(second_descriptors),
   };
   static const loom_target_provider_t first_provider = {
-      .pass_registry = &first_registry,
+      /*.register_context=*/{},
+      /*.initialize_low_descriptor_registry=*/{},
+      /*.initialize_low_lower_policy_registry=*/{},
+      /*.initialize_math_policy_registry=*/{},
+      /*.low_legality_provider_list=*/{},
+      /*.legalizer_provider_list=*/{},
+      /*.low_packet_diagnostic_provider_list=*/{},
+      /*.low_verify_provider_list=*/{},
+      /*.emitter_list=*/{},
+      /*.pass_registry=*/&first_registry,
   };
   static const loom_target_provider_t second_provider = {
-      .pass_registry = &second_registry,
+      /*.register_context=*/{},
+      /*.initialize_low_descriptor_registry=*/{},
+      /*.initialize_low_lower_policy_registry=*/{},
+      /*.initialize_math_policy_registry=*/{},
+      /*.low_legality_provider_list=*/{},
+      /*.legalizer_provider_list=*/{},
+      /*.low_packet_diagnostic_provider_list=*/{},
+      /*.low_verify_provider_list=*/{},
+      /*.emitter_list=*/{},
+      /*.pass_registry=*/&second_registry,
   };
   static const loom_target_provider_t* const providers[] = {
       &first_provider,

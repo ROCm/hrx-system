@@ -42,7 +42,7 @@ class GreedyRewriteTest : public ::testing::Test {
                                               IREE_SV("test_fn"), &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_ASSERT_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
-    loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
+    loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
     loom_op_t* func_op = NULL;
     IREE_ASSERT_OK(loom_test_func_build(&module_builder, 0, 0, 0, callee, NULL,
                                         0, NULL, 0, NULL, 0, NULL, 0,
@@ -207,7 +207,8 @@ TEST_F(GreedyRewriteTest, SeedFactsPreserveTargetBundleScope) {
   loom_greedy_rewrite_driver_initialize(module_, &arena, &fact_owner, &driver);
 
   const loom_greedy_rewrite_options_t options = {
-      .seed_facts = &seed_facts,
+      /*.max_iterations=*/{},
+      /*.seed_facts=*/&seed_facts,
   };
   IREE_ASSERT_OK(loom_greedy_rewrite_run_region(
       &driver, function_, loom_func_like_body(function_), function_.op,

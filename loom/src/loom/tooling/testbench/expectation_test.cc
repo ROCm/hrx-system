@@ -314,11 +314,11 @@ check.case @custom {
 
   loom_testbench_expectation_provider_t providers[] = {
       {
-          .name = IREE_SV("always.fails"),
-          .evaluate =
-              {
-                  .fn = AlwaysFailsExpectation,
-              },
+          /*.name=*/IREE_SV("always.fails"),
+          /*.evaluate=*/
+          {
+              /*.fn=*/AlwaysFailsExpectation,
+          },
       },
   };
   loom_testbench_expectation_options_t expectation_options = {};

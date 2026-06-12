@@ -90,13 +90,13 @@ static std::vector<uint8_t> fuzz_write_module(
 static loom_bytecode_read_options_t fuzz_read_options(
     uint8_t control_byte, uint32_t* diagnostic_count) {
   return loom_bytecode_read_options_t{
-      .diagnostic_sink =
-          {
-              .fn = fuzz_capture_diagnostic,
-              .user_data = diagnostic_count,
-          },
-      .verify_module = (control_byte & 1) != 0,
-      .verify_max_errors = 16,
+      /*.diagnostic_sink=*/
+      {
+          /*.fn=*/fuzz_capture_diagnostic,
+          /*.user_data=*/diagnostic_count,
+      },
+      /*.verify_module=*/(control_byte & 1) != 0,
+      /*.verify_max_errors=*/16,
   };
 }
 

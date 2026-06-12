@@ -50,8 +50,8 @@ struct DiagnosticEmissionCapture {
 
   iree_diagnostic_emitter_t emitter() {
     return iree_diagnostic_emitter_t{
-        .fn = CaptureEmission,
-        .user_data = this,
+        /*.fn=*/CaptureEmission,
+        /*.user_data=*/this,
     };
   }
 
@@ -150,8 +150,8 @@ struct DiagnosticCapture {
 
   loom_diagnostic_sink_t sink() {
     return loom_diagnostic_sink_t{
-        .fn = CaptureDiagnostic,
-        .user_data = this,
+        /*.fn=*/CaptureDiagnostic,
+        /*.user_data=*/this,
     };
   }
 

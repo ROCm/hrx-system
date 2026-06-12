@@ -55,9 +55,9 @@ typedef struct loom_low_lower_rule_mapped_value_t {
 static inline loom_low_lower_rule_mapped_value_t
 loom_low_lower_rule_mapped_value_none(void) {
   return (loom_low_lower_rule_mapped_value_t){
-      .is_register = false,
-      .descriptor_register_class_id = LOOM_LOW_REG_CLASS_NONE,
-      .register_unit_count = 0,
+      /*.is_register=*/false,
+      /*.descriptor_register_class_id=*/LOOM_LOW_REG_CLASS_NONE,
+      /*.register_unit_count=*/0,
   };
 }
 
@@ -66,9 +66,9 @@ static inline loom_low_lower_rule_mapped_value_t
 loom_low_lower_rule_mapped_value_register(uint16_t descriptor_register_class_id,
                                           uint32_t register_unit_count) {
   return (loom_low_lower_rule_mapped_value_t){
-      .is_register = true,
-      .descriptor_register_class_id = descriptor_register_class_id,
-      .register_unit_count = register_unit_count,
+      /*.is_register=*/true,
+      /*.descriptor_register_class_id=*/descriptor_register_class_id,
+      /*.register_unit_count=*/register_unit_count,
   };
 }
 
@@ -281,8 +281,8 @@ typedef struct loom_low_lower_plan_t {
 static inline loom_low_lower_plan_t loom_low_lower_plan_make(
     loom_low_lower_plan_id_t id, const void* target_data) {
   return (loom_low_lower_plan_t){
-      .id = id,
-      .target_data = target_data,
+      /*.id=*/id,
+      /*.target_data=*/target_data,
   };
 }
 

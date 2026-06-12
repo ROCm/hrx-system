@@ -74,8 +74,8 @@ class ViewRegionsTest : public ::testing::Test {
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_ASSERT_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
     loom_symbol_ref_t callee = {
-        .module_id = 0,
-        .symbol_id = symbol_id,
+        /*.module_id=*/0,
+        /*.symbol_id=*/symbol_id,
     };
     loom_op_t* func_op = nullptr;
     IREE_ASSERT_OK(loom_test_func_build(&module_builder, 0, 0, 0, callee, NULL,
@@ -210,14 +210,14 @@ class ViewRegionsTest : public ::testing::Test {
     strides[0] = loom_value_facts_exact_i64(row_stride);
     strides[1] = loom_value_facts_exact_i64(column_stride);
     loom_value_fact_encoding_summary_t summary = {
-        .role = LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
-        .static_spec_encoding_id = 0,
-        .address_layout =
-            {
-                .kind = LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
-                .rank = 2,
-                .strides = strides,
-            },
+        /*.role=*/LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
+        /*.static_spec_encoding_id=*/0,
+        /*.address_layout=*/
+        {
+            /*.kind=*/LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
+            /*.rank=*/2,
+            /*.strides=*/strides,
+        },
     };
     loom_value_facts_t layout_facts = loom_value_facts_unknown();
     IREE_CHECK_OK(loom_value_facts_make_encoding_summary(

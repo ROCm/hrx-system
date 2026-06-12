@@ -59,9 +59,11 @@ class LivenessTest : public ::testing::Test {
         loom_test_low_core_descriptor_set,
     };
     loom_low_descriptor_registry_t descriptor_registry = {
-        .descriptor_set_providers = descriptor_set_providers,
-        .descriptor_set_provider_count =
-            IREE_ARRAYSIZE(descriptor_set_providers),
+        /*.descriptor_sets=*/{},
+        /*.descriptor_set_count=*/{},
+        /*.descriptor_set_providers=*/descriptor_set_providers,
+        /*.descriptor_set_provider_count=*/
+        IREE_ARRAYSIZE(descriptor_set_providers),
     };
     loom_low_descriptor_text_asm_environment_initialize(
         &descriptor_registry, &options.low_asm_environment);
@@ -359,9 +361,9 @@ low.func.def target(@test_target) @high_pressure(%a0: reg<test.i32>, %a1: reg<te
   EXPECT_EQ(pressure->peak_live_units, 6u);
 
   loom_liveness_pressure_budget_t budget = {
-      .value_class = pressure->value_class,
-      .max_live_units = 4,
-      .max_live_values = 4,
+      /*.value_class=*/pressure->value_class,
+      /*.max_live_units=*/4,
+      /*.max_live_values=*/4,
   };
   const loom_liveness_pressure_budget_violation_t* violations = nullptr;
   iree_host_size_t violation_count = 0;

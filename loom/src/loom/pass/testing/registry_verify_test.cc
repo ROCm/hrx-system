@@ -189,8 +189,8 @@ static bool SatisfyTestRequirement(
 }
 
 static const loom_pass_environment_capability_type_t kTestRequirementType = {
-    .name = IREE_SVL("test.requirements"),
-    .satisfies_requirement = SatisfyTestRequirement,
+    /*.name=*/IREE_SVL("test.requirements"),
+    /*.satisfies_requirement=*/SatisfyTestRequirement,
 };
 
 TEST(PassRegistryCoreTest, SyntheticRegistryVerifies) {
@@ -231,8 +231,8 @@ TEST(PassRegistryCoreTest, RejectsMissingStatisticMetadata) {
   descriptor.key = IREE_SVL("test.broken-statistics");
   descriptor.info = BrokenStatisticsPassInfo;
   const loom_pass_registry_t registry = {
-      .descriptors = &descriptor,
-      .descriptor_count = 1,
+      /*.descriptors=*/&descriptor,
+      /*.descriptor_count=*/1,
   };
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
@@ -298,14 +298,15 @@ TEST(PassRegistryCoreTest, RejectsTooManyStatisticFields) {
 TEST(PassRegistryCoreTest, VerifiesRequirementMetadata) {
   const loom_pass_requirement_def_t requirements[] = {
       {
-          .capability_type = &kTestRequirementType,
-          .key = IREE_SVL("analysis.liveness"),
-          .description = IREE_SVL("Requires precomputed liveness."),
+          /*.capability_type=*/&kTestRequirementType,
+          /*.key=*/IREE_SVL("analysis.liveness"),
+          /*.description=*/IREE_SVL("Requires precomputed liveness."),
       },
       {
-          .capability_type = &kTestRequirementType,
-          .key = IREE_SVL("target.low-descriptor-registry"),
-          .description = IREE_SVL("Requires a target-low descriptor registry."),
+          /*.capability_type=*/&kTestRequirementType,
+          /*.key=*/IREE_SVL("target.low-descriptor-registry"),
+          /*.description=*/
+          IREE_SVL("Requires a target-low descriptor registry."),
       },
   };
   loom_pass_descriptor_t descriptor =
@@ -313,8 +314,8 @@ TEST(PassRegistryCoreTest, VerifiesRequirementMetadata) {
   descriptor.requirement_defs = requirements;
   descriptor.requirement_count = IREE_ARRAYSIZE(requirements);
   const loom_pass_registry_t registry = {
-      .descriptors = &descriptor,
-      .descriptor_count = 1,
+      /*.descriptors=*/&descriptor,
+      /*.descriptor_count=*/1,
   };
 
   IREE_ASSERT_OK(loom_pass_registry_verify(&registry));
@@ -323,8 +324,9 @@ TEST(PassRegistryCoreTest, VerifiesRequirementMetadata) {
 TEST(PassRegistryCoreTest, RejectsRequirementWithoutCapabilityType) {
   const loom_pass_requirement_def_t requirements[] = {
       {
-          .key = IREE_SVL("analysis.liveness"),
-          .description = IREE_SVL("Requires precomputed liveness."),
+          /*.capability_type=*/{},
+          /*.key=*/IREE_SVL("analysis.liveness"),
+          /*.description=*/IREE_SVL("Requires precomputed liveness."),
       },
   };
   loom_pass_descriptor_t descriptor =
@@ -332,8 +334,8 @@ TEST(PassRegistryCoreTest, RejectsRequirementWithoutCapabilityType) {
   descriptor.requirement_defs = requirements;
   descriptor.requirement_count = IREE_ARRAYSIZE(requirements);
   const loom_pass_registry_t registry = {
-      .descriptors = &descriptor,
-      .descriptor_count = 1,
+      /*.descriptors=*/&descriptor,
+      /*.descriptor_count=*/1,
   };
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
@@ -343,14 +345,15 @@ TEST(PassRegistryCoreTest, RejectsRequirementWithoutCapabilityType) {
 TEST(PassRegistryCoreTest, RejectsUnsortedRequirementMetadata) {
   const loom_pass_requirement_def_t requirements[] = {
       {
-          .capability_type = &kTestRequirementType,
-          .key = IREE_SVL("target.low-descriptor-registry"),
-          .description = IREE_SVL("Requires a target-low descriptor registry."),
+          /*.capability_type=*/&kTestRequirementType,
+          /*.key=*/IREE_SVL("target.low-descriptor-registry"),
+          /*.description=*/
+          IREE_SVL("Requires a target-low descriptor registry."),
       },
       {
-          .capability_type = &kTestRequirementType,
-          .key = IREE_SVL("analysis.liveness"),
-          .description = IREE_SVL("Requires precomputed liveness."),
+          /*.capability_type=*/&kTestRequirementType,
+          /*.key=*/IREE_SVL("analysis.liveness"),
+          /*.description=*/IREE_SVL("Requires precomputed liveness."),
       },
   };
   loom_pass_descriptor_t descriptor =
@@ -358,8 +361,8 @@ TEST(PassRegistryCoreTest, RejectsUnsortedRequirementMetadata) {
   descriptor.requirement_defs = requirements;
   descriptor.requirement_count = IREE_ARRAYSIZE(requirements);
   const loom_pass_registry_t registry = {
-      .descriptors = &descriptor,
-      .descriptor_count = 1,
+      /*.descriptors=*/&descriptor,
+      /*.descriptor_count=*/1,
   };
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,

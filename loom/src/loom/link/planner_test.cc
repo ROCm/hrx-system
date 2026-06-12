@@ -89,7 +89,8 @@ class LinkPlannerTest : public ::testing::Test {
                        iree_string_view_t filename = IREE_SV("test.loom")) {
     loom_module_t* module = nullptr;
     loom_text_parse_options_t parse_options = {
-        .max_errors = 20,
+        /*.diagnostic_sink=*/{},
+        /*.max_errors=*/20,
     };
     IREE_EXPECT_OK(loom_text_parse(source, filename, &context_, &block_pool_,
                                    &parse_options, &module));
@@ -130,8 +131,8 @@ class LinkPlannerTest : public ::testing::Test {
                        const loom_module_t* module, iree_string_view_t name,
                        loom_link_provider_role_t role) {
     loom_link_module_index_add_options_t options = {
-        .provider_name = name,
-        .role = role,
+        /*.provider_name=*/name,
+        /*.role=*/role,
     };
     IREE_ASSERT_OK(loom_link_module_index_add_materialized(
         index, module, &options, /*out_provider_ordinal=*/nullptr));
@@ -293,8 +294,8 @@ func.def @unused_private(%x: i32) -> (i32) {
                   LOOM_LINK_PROVIDER_ROLE_INPUT);
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   loom_link_plan_options_t options = {
-      .mode = LOOM_LINK_PLAN_SELECTIVE,
-      .root_symbols = {.count = IREE_ARRAYSIZE(roots), .values = roots},
+      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
   PlanPtr plan = BuildPlan(index.get(), &options);
 
@@ -349,8 +350,8 @@ func.def public @unused(%x: i32) -> (i32) {
 
   IndexPtr index = CreateIndex();
   loom_link_module_index_add_options_t used_options = {
-      .provider_name = IREE_SV("used-lib"),
-      .role = LOOM_LINK_PROVIDER_ROLE_LIBRARY,
+      /*.provider_name=*/IREE_SV("used-lib"),
+      /*.role=*/LOOM_LINK_PROVIDER_ROLE_LIBRARY,
   };
   IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
       index.get(),
@@ -358,8 +359,8 @@ func.def public @unused(%x: i32) -> (i32) {
       IREE_SV("used.loombc"), /*read_options=*/nullptr, &used_options,
       /*out_provider_ordinal=*/nullptr));
   loom_link_module_index_add_options_t unused_options = {
-      .provider_name = IREE_SV("unused-lib"),
-      .role = LOOM_LINK_PROVIDER_ROLE_LIBRARY,
+      /*.provider_name=*/IREE_SV("unused-lib"),
+      /*.role=*/LOOM_LINK_PROVIDER_ROLE_LIBRARY,
   };
   IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
       index.get(),
@@ -377,14 +378,19 @@ func.def public @unused(%x: i32) -> (i32) {
   EXPECT_EQ(unused_module->materialized_module, nullptr);
 
   BytecodePlanMaterializer materializer = {
-      .used_module = used,
+      /*.used_module=*/used,
   };
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   loom_link_plan_options_t options = {
-      .mode = LOOM_LINK_PLAN_SELECTIVE,
-      .root_symbols = {.count = IREE_ARRAYSIZE(roots), .values = roots},
-      .materialize_module = MaterializeUsedBytecodeModule,
-      .materialize_module_user_data = &materializer,
+      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
+      /*.include_exported_roots=*/{},
+      /*.unresolved_policy=*/{},
+      /*.check_policy=*/{},
+      /*.strip_symbol=*/{},
+      /*.strip_symbol_user_data=*/{},
+      /*.materialize_module=*/MaterializeUsedBytecodeModule,
+      /*.materialize_module_user_data=*/&materializer,
   };
   PlanPtr plan = BuildPlan(index.get(), &options);
 
@@ -426,8 +432,8 @@ func.template<demo.unused> @unused_provider(%x: i32) -> (i32) {
   AddMaterialized(index.get(), harness, IREE_SV("harness"),
                   LOOM_LINK_PROVIDER_ROLE_INPUT);
   loom_link_module_index_add_options_t used_options = {
-      .provider_name = IREE_SV("used-lib"),
-      .role = LOOM_LINK_PROVIDER_ROLE_LIBRARY,
+      /*.provider_name=*/IREE_SV("used-lib"),
+      /*.role=*/LOOM_LINK_PROVIDER_ROLE_LIBRARY,
   };
   IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
       index.get(),
@@ -435,8 +441,8 @@ func.template<demo.unused> @unused_provider(%x: i32) -> (i32) {
       IREE_SV("used.loombc"), /*read_options=*/nullptr, &used_options,
       /*out_provider_ordinal=*/nullptr));
   loom_link_module_index_add_options_t unused_options = {
-      .provider_name = IREE_SV("unused-lib"),
-      .role = LOOM_LINK_PROVIDER_ROLE_LIBRARY,
+      /*.provider_name=*/IREE_SV("unused-lib"),
+      /*.role=*/LOOM_LINK_PROVIDER_ROLE_LIBRARY,
   };
   IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
       index.get(),
@@ -445,14 +451,23 @@ func.template<demo.unused> @unused_provider(%x: i32) -> (i32) {
       /*out_provider_ordinal=*/nullptr));
 
   BytecodePlanMaterializer materializer = {
-      .used_module = used,
+      /*.used_module=*/used,
   };
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   loom_link_plan_options_t options = {
-      .mode = LOOM_LINK_PLAN_SELECTIVE,
-      .root_symbols = {.count = IREE_ARRAYSIZE(roots), .values = roots},
-      .materialize_module = MaterializeUsedBytecodeModule,
-      .materialize_module_user_data = &materializer,
+      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.root_symbols=*/
+      {
+          /*.count=*/IREE_ARRAYSIZE(roots),
+          /*.values=*/roots,
+      },
+      /*.include_exported_roots=*/{},
+      /*.unresolved_policy=*/{},
+      /*.check_policy=*/{},
+      /*.strip_symbol=*/{},
+      /*.strip_symbol_user_data=*/{},
+      /*.materialize_module=*/MaterializeUsedBytecodeModule,
+      /*.materialize_module_user_data=*/&materializer,
   };
   PlanPtr plan = BuildPlan(index.get(), &options);
 
@@ -495,8 +510,8 @@ func.def @helper(%x: i32) -> (i32) {
                   LOOM_LINK_PROVIDER_ROLE_INPUT);
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   loom_link_plan_options_t options = {
-      .mode = LOOM_LINK_PLAN_SELECTIVE,
-      .root_symbols = {.count = IREE_ARRAYSIZE(roots), .values = roots},
+      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
   PlanPtr plan = BuildPlan(index.get(), &options);
 
@@ -539,8 +554,8 @@ func.def public @unused(%x: i32) -> (i32) {
                   LOOM_LINK_PROVIDER_ROLE_LIBRARY);
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   loom_link_plan_options_t options = {
-      .mode = LOOM_LINK_PLAN_SELECTIVE,
-      .root_symbols = {.count = IREE_ARRAYSIZE(roots), .values = roots},
+      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
   PlanPtr plan = BuildPlan(index.get(), &options);
 
@@ -598,8 +613,8 @@ func.def @callee(%x: i32) -> (i32) {
                   LOOM_LINK_PROVIDER_ROLE_LIBRARY);
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   loom_link_plan_options_t options = {
-      .mode = LOOM_LINK_PLAN_SELECTIVE,
-      .root_symbols = {.count = IREE_ARRAYSIZE(roots), .values = roots},
+      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
   PlanPtr plan = BuildPlan(index.get(), &options);
 
@@ -659,8 +674,12 @@ func.template<demo.unused> @unused_provider(%x: i32) -> (i32) {
                   LOOM_LINK_PROVIDER_ROLE_LIBRARY);
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   loom_link_plan_options_t options = {
-      .mode = LOOM_LINK_PLAN_SELECTIVE,
-      .root_symbols = {.count = IREE_ARRAYSIZE(roots), .values = roots},
+      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.root_symbols=*/
+      {
+          /*.count=*/IREE_ARRAYSIZE(roots),
+          /*.values=*/roots,
+      },
   };
   PlanPtr plan = BuildPlan(index.get(), &options);
 
@@ -732,8 +751,8 @@ func.def public @unused(%x: i32) -> (i32) {
                   LOOM_LINK_PROVIDER_ROLE_LIBRARY);
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   loom_link_plan_options_t options = {
-      .mode = LOOM_LINK_PLAN_SELECTIVE,
-      .root_symbols = {.count = IREE_ARRAYSIZE(roots), .values = roots},
+      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
   PlanPtr plan = BuildPlan(index.get(), &options);
 
@@ -793,8 +812,9 @@ func.def public @same(%x: i32) -> (i32) {
   AddMaterialized(index.get(), second, IREE_SV("second"),
                   LOOM_LINK_PROVIDER_ROLE_LIBRARY);
   loom_link_plan_options_t options = {
-      .mode = LOOM_LINK_PLAN_SELECTIVE,
-      .include_exported_roots = true,
+      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.root_symbols=*/{},
+      /*.include_exported_roots=*/true,
   };
 
   PlanPtr plan;
@@ -814,8 +834,8 @@ func.def public @entry(%x: i32) -> (i32) {
                   LOOM_LINK_PROVIDER_ROLE_INPUT);
   iree_string_view_t roots[] = {IREE_SV("@missing")};
   loom_link_plan_options_t options = {
-      .mode = LOOM_LINK_PLAN_SELECTIVE,
-      .root_symbols = {.count = IREE_ARRAYSIZE(roots), .values = roots},
+      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
 
   PlanPtr plan;
@@ -849,10 +869,13 @@ func.def @helper(%x: i32) -> (i32) {
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   iree_string_view_t stripped_name = IREE_SV("helper");
   loom_link_plan_options_t options = {
-      .mode = LOOM_LINK_PLAN_SELECTIVE,
-      .root_symbols = {.count = IREE_ARRAYSIZE(roots), .values = roots},
-      .strip_symbol = StripNamedSymbol,
-      .strip_symbol_user_data = &stripped_name,
+      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
+      /*.include_exported_roots=*/{},
+      /*.unresolved_policy=*/{},
+      /*.check_policy=*/{},
+      /*.strip_symbol=*/StripNamedSymbol,
+      /*.strip_symbol_user_data=*/&stripped_name,
   };
 
   PlanPtr plan;
@@ -893,8 +916,8 @@ check.benchmark<@kernel_case> @kernel_bench
 
   IndexPtr index = CreateIndex();
   loom_link_module_index_add_options_t provider_options = {
-      .provider_name = IREE_SV("kernel-lib"),
-      .role = LOOM_LINK_PROVIDER_ROLE_INPUT,
+      /*.provider_name=*/IREE_SV("kernel-lib"),
+      /*.role=*/LOOM_LINK_PROVIDER_ROLE_INPUT,
   };
   IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
       index.get(), iree_make_const_byte_span(bytes.data(), bytes.size()),
@@ -906,8 +929,11 @@ check.benchmark<@kernel_case> @kernel_bench
   EXPECT_EQ(indexed_module->materialized_module, nullptr);
 
   loom_link_plan_options_t strip_options = {
-      .mode = LOOM_LINK_PLAN_ARCHIVE,
-      .check_policy = LOOM_LINK_PLAN_CHECK_STRIP,
+      /*.mode=*/LOOM_LINK_PLAN_ARCHIVE,
+      /*.root_symbols=*/{},
+      /*.include_exported_roots=*/{},
+      /*.unresolved_policy=*/{},
+      /*.check_policy=*/LOOM_LINK_PLAN_CHECK_STRIP,
   };
   PlanPtr plan = BuildPlan(index.get(), &strip_options);
 
@@ -942,8 +968,8 @@ check.case public @kernel_case {
                   LOOM_LINK_PROVIDER_ROLE_INPUT);
   iree_string_view_t roots[] = {IREE_SV("@kernel_case")};
   loom_link_plan_options_t options = {
-      .mode = LOOM_LINK_PLAN_SELECTIVE,
-      .root_symbols = {.count = IREE_ARRAYSIZE(roots), .values = roots},
+      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
   PlanPtr plan = BuildPlan(index.get(), &options);
 
@@ -967,9 +993,11 @@ check.case public @kernel_case {
                   LOOM_LINK_PROVIDER_ROLE_INPUT);
   iree_string_view_t roots[] = {IREE_SV("@kernel_case")};
   loom_link_plan_options_t options = {
-      .mode = LOOM_LINK_PLAN_SELECTIVE,
-      .root_symbols = {.count = IREE_ARRAYSIZE(roots), .values = roots},
-      .check_policy = LOOM_LINK_PLAN_CHECK_STRIP,
+      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
+      /*.include_exported_roots=*/{},
+      /*.unresolved_policy=*/{},
+      /*.check_policy=*/LOOM_LINK_PLAN_CHECK_STRIP,
   };
 
   PlanPtr plan;
@@ -997,8 +1025,9 @@ func.def public @second(%x: i32) -> (i32) {
   AddMaterialized(index.get(), module, IREE_SV("input"),
                   LOOM_LINK_PROVIDER_ROLE_INPUT);
   loom_link_plan_options_t options = {
-      .mode = LOOM_LINK_PLAN_SELECTIVE,
-      .include_exported_roots = true,
+      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.root_symbols=*/{},
+      /*.include_exported_roots=*/true,
   };
   PlanPtr plan = BuildPlan(index.get(), &options);
 

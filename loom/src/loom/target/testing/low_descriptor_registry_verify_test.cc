@@ -102,12 +102,14 @@ TEST(LowDescriptorRegistryTest, BundleSelectionFailsWhenLinkedSetIsMissing) {
   loom_target_core_test_low_descriptor_registry_initialize(&registry);
 
   const loom_target_config_t missing_config = {
-      .name = IREE_SVL("missing"),
-      .contract_set_key = IREE_SVL("target.missing"),
+      /*.name=*/IREE_SVL("missing"),
+      /*.contract_set_key=*/IREE_SVL("target.missing"),
   };
   const loom_target_bundle_t missing_bundle = {
-      .name = IREE_SVL("missing-bundle"),
-      .config = &missing_config,
+      /*.name=*/IREE_SVL("missing-bundle"),
+      /*.snapshot=*/{},
+      /*.export_plan=*/{},
+      /*.config=*/&missing_config,
   };
   const loom_low_descriptor_set_t* descriptor_set = nullptr;
   IREE_EXPECT_STATUS_IS(

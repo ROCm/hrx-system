@@ -58,7 +58,8 @@ class AmdgpuHalArtifactProviderTest : public ::testing::Test {
 
   loom_text_parse_options_t ParseOptions() const {
     loom_text_parse_options_t options = {
-        .max_errors = 20,
+        /*.diagnostic_sink=*/{},
+        /*.max_errors=*/20,
     };
     loom_low_descriptor_text_asm_environment_initialize(
         &low_registry_.registry, &options.low_asm_environment);
@@ -167,8 +168,10 @@ kernel.def @entry() {
         loom_amdgpu_target_info_lookup_processor(c.processor_name, &processor));
     ASSERT_NE(processor, nullptr);
     loom_run_hal_device_target_t target = {
-        .data = processor,
-        .target_key = processor->processor,
+        /*.data=*/processor,
+        /*.target_storage=*/{},
+        /*.target_bundle=*/{},
+        /*.target_key=*/processor->processor,
     };
 
     loom_symbol_ref_t target_ref = loom_symbol_ref_null();
@@ -228,9 +231,10 @@ TEST_F(AmdgpuHalArtifactProviderTest, RecordsDetailedReportRows) {
   ASSERT_NE(target_bundle, nullptr);
 
   loom_run_hal_device_target_t target = {
-      .data = processor,
-      .target_bundle = target_bundle,
-      .target_key = processor->processor,
+      /*.data=*/processor,
+      /*.target_storage=*/{},
+      /*.target_bundle=*/target_bundle,
+      /*.target_key=*/processor->processor,
   };
   loom_run_hal_artifact_t artifact = {};
   bool emitted = false;

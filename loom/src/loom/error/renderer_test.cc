@@ -326,14 +326,15 @@ TEST(Renderer, BoolParam) {
       {"flag", LOOM_PARAM_BOOL},
   };
   static const loom_error_def_t bool_error = {
-      .domain = LOOM_ERROR_DOMAIN_STRUCTURE,
-      .severity = LOOM_DIAGNOSTIC_ERROR,
-      .code = 99,
-      .summary = "Test",
-      .message_template = "flag is {flag}",
-      .fix_hint_template = nullptr,
-      .param_defs = bool_param_defs,
-      .param_count = 1,
+      /*.error_id=*/{},
+      /*.domain=*/LOOM_ERROR_DOMAIN_STRUCTURE,
+      /*.severity=*/LOOM_DIAGNOSTIC_ERROR,
+      /*.code=*/99,
+      /*.summary=*/"Test",
+      /*.message_template=*/"flag is {flag}",
+      /*.fix_hint_template=*/nullptr,
+      /*.param_defs=*/bool_param_defs,
+      /*.param_count=*/1,
   };
 
   loom_diagnostic_param_t params_true[1] = {

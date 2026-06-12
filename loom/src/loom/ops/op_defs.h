@@ -115,8 +115,8 @@ typedef struct loom_named_value_slice_t {
 static inline loom_named_value_slice_t loom_make_named_value_slice(
     const loom_named_value_t* entries, iree_host_size_t count) {
   loom_named_value_slice_t slice = {
-      .entries = count > 0 ? entries : NULL,
-      .count = count,
+      /*.entries=*/count > 0 ? entries : NULL,
+      /*.count=*/count,
   };
   return slice;
 }
@@ -1572,8 +1572,8 @@ loom_attribute_t loom_memory_access_atomic_scope(loom_memory_access_t access);
       start += counts[_i];                                             \
     }                                                                  \
     return (loom_value_slice_t){                                       \
-        .values = loom_op_operands(op) + start,                        \
-        .count = counts[(field_index)],                                \
+        /*.values=*/loom_op_operands(op) + start,                      \
+        /*.count=*/counts[(field_index)],                              \
     };                                                                 \
   }
 

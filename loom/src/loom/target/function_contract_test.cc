@@ -162,28 +162,30 @@ low.kernel.def target(@test_target) export("dispatch") linkage(dso_local) @kerne
 TEST_F(TargetFunctionContractTest,
        BundleCompatibilityAllowsFeatureAndLimitRefinement) {
   const loom_target_snapshot_t module_snapshot = {
-      .name = IREE_SVL("spirv-vulkan1.3"),
-      .codegen_format = LOOM_TARGET_CODEGEN_FORMAT_SPIRV,
-      .artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY,
-      .default_pointer_bitwidth = 64,
-      .index_bitwidth = 32,
-      .offset_bitwidth = 64,
-      .max_flat_workgroup_size = 64,
+      /*.name=*/IREE_SVL("spirv-vulkan1.3"),
+      /*.codegen_format=*/LOOM_TARGET_CODEGEN_FORMAT_SPIRV,
+      /*.artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY,
+      /*.default_pointer_bitwidth=*/64,
+      /*.index_bitwidth=*/32,
+      /*.offset_bitwidth=*/64,
+      /*.max_workgroup_size=*/{},
+      /*.max_flat_workgroup_size=*/64,
   };
   const loom_target_export_plan_t module_export = {
-      .name = IREE_SVL("spirv-shader-entry-point"),
-      .abi_kind = LOOM_TARGET_ABI_HAL_KERNEL,
+      /*.name=*/IREE_SVL("spirv-shader-entry-point"),
+      /*.export_symbol=*/{},
+      /*.abi_kind=*/LOOM_TARGET_ABI_HAL_KERNEL,
   };
   const loom_target_config_t module_config = {
-      .name = IREE_SVL("spirv.logical.core"),
-      .contract_set_key = IREE_SVL("spirv.logical.core"),
-      .contract_feature_bits = 1,
+      /*.name=*/IREE_SVL("spirv.logical.core"),
+      /*.contract_set_key=*/IREE_SVL("spirv.logical.core"),
+      /*.contract_feature_bits=*/1,
   };
   const loom_target_bundle_t module_bundle = {
-      .name = IREE_SVL("spirv-vulkan1.3"),
-      .snapshot = &module_snapshot,
-      .export_plan = &module_export,
-      .config = &module_config,
+      /*.name=*/IREE_SVL("spirv-vulkan1.3"),
+      /*.snapshot=*/&module_snapshot,
+      /*.export_plan=*/&module_export,
+      /*.config=*/&module_config,
   };
 
   loom_target_snapshot_t selected_snapshot = module_snapshot;
@@ -195,10 +197,10 @@ TEST_F(TargetFunctionContractTest,
   selected_config.name = IREE_SV("spirv.logical.core.vulkan1.3.bda");
   selected_config.contract_feature_bits = 7;
   const loom_target_bundle_t selected_bundle = {
-      .name = IREE_SVL("spirv-vulkan1.3-bda-hal"),
-      .snapshot = &selected_snapshot,
-      .export_plan = &selected_export,
-      .config = &selected_config,
+      /*.name=*/IREE_SVL("spirv-vulkan1.3-bda-hal"),
+      /*.snapshot=*/&selected_snapshot,
+      /*.export_plan=*/&selected_export,
+      /*.config=*/&selected_config,
   };
 
   EXPECT_TRUE(loom_target_function_contract_bundles_compatible(
@@ -207,33 +209,34 @@ TEST_F(TargetFunctionContractTest,
 
 TEST_F(TargetFunctionContractTest, BundleCompatibilityRejectsContractShape) {
   loom_target_snapshot_t module_snapshot = {
-      .name = IREE_SVL("spirv-vulkan1.3"),
-      .codegen_format = LOOM_TARGET_CODEGEN_FORMAT_SPIRV,
-      .artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY,
+      /*.name=*/IREE_SVL("spirv-vulkan1.3"),
+      /*.codegen_format=*/LOOM_TARGET_CODEGEN_FORMAT_SPIRV,
+      /*.artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY,
   };
   loom_target_export_plan_t module_export = {
-      .name = IREE_SVL("spirv-shader-entry-point"),
-      .abi_kind = LOOM_TARGET_ABI_HAL_KERNEL,
+      /*.name=*/IREE_SVL("spirv-shader-entry-point"),
+      /*.export_symbol=*/{},
+      /*.abi_kind=*/LOOM_TARGET_ABI_HAL_KERNEL,
   };
   loom_target_config_t module_config = {
-      .name = IREE_SVL("spirv.logical.core"),
-      .contract_set_key = IREE_SVL("spirv.logical.core"),
+      /*.name=*/IREE_SVL("spirv.logical.core"),
+      /*.contract_set_key=*/IREE_SVL("spirv.logical.core"),
   };
   const loom_target_bundle_t module_bundle = {
-      .name = IREE_SVL("spirv-vulkan1.3"),
-      .snapshot = &module_snapshot,
-      .export_plan = &module_export,
-      .config = &module_config,
+      /*.name=*/IREE_SVL("spirv-vulkan1.3"),
+      /*.snapshot=*/&module_snapshot,
+      /*.export_plan=*/&module_export,
+      /*.config=*/&module_config,
   };
 
   loom_target_snapshot_t selected_snapshot = module_snapshot;
   loom_target_export_plan_t selected_export = module_export;
   loom_target_config_t selected_config = module_config;
   const loom_target_bundle_t selected_bundle = {
-      .name = IREE_SVL("selected"),
-      .snapshot = &selected_snapshot,
-      .export_plan = &selected_export,
-      .config = &selected_config,
+      /*.name=*/IREE_SVL("selected"),
+      /*.snapshot=*/&selected_snapshot,
+      /*.export_plan=*/&selected_export,
+      /*.config=*/&selected_config,
   };
 
   selected_snapshot.codegen_format = LOOM_TARGET_CODEGEN_FORMAT_LLVMIR;

@@ -25,6 +25,8 @@ class IreeTidyModule final : public ClangTidyModule {
     CheckFactories.registerCheck<StatusLifetimeCheck>("iree-status-lifetime");
     CheckFactories.registerCheck<StatusTransferOrderCheck>(
         "iree-status-transfer-order");
+    CheckFactories.registerCheck<DesignatedInitializerCheck>(
+        "iree-cpp-designated-initializer");
     CheckFactories.registerCheck<DirectGotoCheck>("iree-direct-goto");
     CheckFactories.registerCheck<GuardedReleaseCheck>("iree-guarded-release");
     CheckFactories.registerCheck<LifecycleNamingCheck>("iree-lifecycle-naming");

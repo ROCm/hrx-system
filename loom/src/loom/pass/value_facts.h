@@ -58,15 +58,15 @@ typedef struct loom_pass_value_fact_scope_t {
 static inline loom_pass_value_fact_scope_t loom_pass_value_fact_scope_none(
     void) {
   return (loom_pass_value_fact_scope_t){
-      .kind = LOOM_PASS_VALUE_FACT_SCOPE_NONE,
+      /*.kind=*/LOOM_PASS_VALUE_FACT_SCOPE_NONE,
   };
 }
 
 static inline loom_pass_value_fact_scope_t loom_pass_value_fact_scope_function(
     loom_func_like_t function) {
   return (loom_pass_value_fact_scope_t){
-      .kind = LOOM_PASS_VALUE_FACT_SCOPE_FUNCTION,
-      .function = function,
+      /*.kind=*/LOOM_PASS_VALUE_FACT_SCOPE_FUNCTION,
+      /*.function=*/function,
   };
 }
 
@@ -74,19 +74,21 @@ static inline loom_pass_value_fact_scope_t
 loom_pass_value_fact_scope_function_for_target(
     loom_func_like_t function, const loom_target_bundle_t* target_bundle) {
   return (loom_pass_value_fact_scope_t){
-      .kind = LOOM_PASS_VALUE_FACT_SCOPE_FUNCTION,
-      .function = function,
-      .target_bundle = target_bundle,
+      /*.kind=*/LOOM_PASS_VALUE_FACT_SCOPE_FUNCTION,
+      /*.function=*/function,
+      /*.region=*/{},
+      /*.parent_op=*/{},
+      /*.target_bundle=*/target_bundle,
   };
 }
 
 static inline loom_pass_value_fact_scope_t loom_pass_value_fact_scope_region(
     loom_func_like_t function, loom_region_t* region, loom_op_t* parent_op) {
   return (loom_pass_value_fact_scope_t){
-      .kind = LOOM_PASS_VALUE_FACT_SCOPE_REGION,
-      .function = function,
-      .region = region,
-      .parent_op = parent_op,
+      /*.kind=*/LOOM_PASS_VALUE_FACT_SCOPE_REGION,
+      /*.function=*/function,
+      /*.region=*/region,
+      /*.parent_op=*/parent_op,
   };
 }
 
@@ -95,18 +97,18 @@ loom_pass_value_fact_scope_region_for_target(
     loom_func_like_t function, loom_region_t* region, loom_op_t* parent_op,
     const loom_target_bundle_t* target_bundle) {
   return (loom_pass_value_fact_scope_t){
-      .kind = LOOM_PASS_VALUE_FACT_SCOPE_REGION,
-      .function = function,
-      .region = region,
-      .parent_op = parent_op,
-      .target_bundle = target_bundle,
+      /*.kind=*/LOOM_PASS_VALUE_FACT_SCOPE_REGION,
+      /*.function=*/function,
+      /*.region=*/region,
+      /*.parent_op=*/parent_op,
+      /*.target_bundle=*/target_bundle,
   };
 }
 
 static inline loom_pass_value_fact_scope_t loom_pass_value_fact_scope_module(
     void) {
   return (loom_pass_value_fact_scope_t){
-      .kind = LOOM_PASS_VALUE_FACT_SCOPE_MODULE,
+      /*.kind=*/LOOM_PASS_VALUE_FACT_SCOPE_MODULE,
   };
 }
 

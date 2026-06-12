@@ -65,7 +65,8 @@ class VectorToScalarTest : public ::testing::Test {
 
   loom_module_t* Parse(iree_string_view_t source) {
     const loom_text_parse_options_t parse_options = {
-        .max_errors = 20,
+        /*.diagnostic_sink=*/{},
+        /*.max_errors=*/20,
     };
     loom_module_t* module = nullptr;
     IREE_CHECK_OK(loom_text_parse(source, IREE_SV("to_scalar_test.loom"),
@@ -81,56 +82,56 @@ class VectorToScalarTest : public ::testing::Test {
 };
 
 static const loom_matrix_fragment_layout_t kTinyDistributedMmaLayout = {
-    .kind = 1,
-    .name = IREE_SVL("test.tiny.distributed.mma"),
-    .wave_size = 2,
-    .tile_shape =
-        {
-            .result_row_count = 2,
-            .result_column_count = 2,
-            .reduction_count = 2,
-        },
-    .lhs =
-        {
-            .role = LOOM_CONTRACT_OPERAND_ROLE_LHS,
-            .map_kind = LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_PACKED_REDUCTION,
-            .register_count = 2,
-            .elements_per_register = 1,
-            .element_bit_count = 16,
-            .coordinate_flags = LOOM_MATRIX_FRAGMENT_COORDINATE_ROW |
-                                LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION,
-        },
-    .rhs =
-        {
-            .role = LOOM_CONTRACT_OPERAND_ROLE_RHS,
-            .map_kind =
-                LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_COLUMN_PACKED_REDUCTION,
-            .register_count = 2,
-            .elements_per_register = 1,
-            .element_bit_count = 16,
-            .coordinate_flags = LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN |
-                                LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION,
-        },
-    .accumulator =
-        {
-            .role = LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR,
-            .map_kind = LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN,
-            .register_count = 2,
-            .elements_per_register = 1,
-            .element_bit_count = 32,
-            .coordinate_flags = LOOM_MATRIX_FRAGMENT_COORDINATE_ROW |
-                                LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN,
-        },
-    .result =
-        {
-            .role = LOOM_CONTRACT_OPERAND_ROLE_RESULT,
-            .map_kind = LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN,
-            .register_count = 2,
-            .elements_per_register = 1,
-            .element_bit_count = 32,
-            .coordinate_flags = LOOM_MATRIX_FRAGMENT_COORDINATE_ROW |
-                                LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN,
-        },
+    /*.kind=*/1,
+    /*.name=*/IREE_SVL("test.tiny.distributed.mma"),
+    /*.wave_size=*/2,
+    /*.tile_shape=*/
+    {
+        /*.result_row_count=*/2,
+        /*.result_column_count=*/2,
+        /*.reduction_count=*/2,
+    },
+    /*.lhs=*/
+    {
+        /*.role=*/LOOM_CONTRACT_OPERAND_ROLE_LHS,
+        /*.map_kind=*/LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_PACKED_REDUCTION,
+        /*.register_count=*/2,
+        /*.elements_per_register=*/1,
+        /*.element_bit_count=*/16,
+        /*.coordinate_flags=*/LOOM_MATRIX_FRAGMENT_COORDINATE_ROW |
+            LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION,
+    },
+    /*.rhs=*/
+    {
+        /*.role=*/LOOM_CONTRACT_OPERAND_ROLE_RHS,
+        /*.map_kind=*/
+        LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_COLUMN_PACKED_REDUCTION,
+        /*.register_count=*/2,
+        /*.elements_per_register=*/1,
+        /*.element_bit_count=*/16,
+        /*.coordinate_flags=*/LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN |
+            LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION,
+    },
+    /*.accumulator=*/
+    {
+        /*.role=*/LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR,
+        /*.map_kind=*/LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN,
+        /*.register_count=*/2,
+        /*.elements_per_register=*/1,
+        /*.element_bit_count=*/32,
+        /*.coordinate_flags=*/LOOM_MATRIX_FRAGMENT_COORDINATE_ROW |
+            LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN,
+    },
+    /*.result=*/
+    {
+        /*.role=*/LOOM_CONTRACT_OPERAND_ROLE_RESULT,
+        /*.map_kind=*/LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN,
+        /*.register_count=*/2,
+        /*.elements_per_register=*/1,
+        /*.element_bit_count=*/32,
+        /*.coordinate_flags=*/LOOM_MATRIX_FRAGMENT_COORDINATE_ROW |
+            LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN,
+    },
 };
 
 static loom_op_t* FindFirstOp(loom_region_t* region, loom_op_kind_t kind) {
@@ -173,7 +174,8 @@ static uint32_t CountOps(loom_region_t* region, loom_op_kind_t kind) {
 
 static void ExpectModuleVerifies(const loom_module_t* module) {
   const loom_verify_options_t verify_options = {
-      .max_errors = 20,
+      /*.sink=*/{},
+      /*.max_errors=*/20,
   };
   loom_verify_result_t verify_result = {};
   IREE_ASSERT_OK(loom_verify_module(module, &verify_options, &verify_result));
@@ -242,8 +244,8 @@ TEST_F(VectorToScalarTest, TargetFragmentLayoutEnablesDistributedMmaFallback) {
                        LOOM_CONTRACT_REJECTION_FRAGMENT));
 
   const loom_vector_mma_to_scalar_options_t distributed_options = {
-      .matrix_fragment_layout = &kTinyDistributedMmaLayout,
-      .flags = LOOM_VECTOR_TO_SCALAR_FLAG_ALLOW_SUBGROUP_COMMUNICATION,
+      /*.matrix_fragment_layout=*/&kTinyDistributedMmaLayout,
+      /*.flags=*/LOOM_VECTOR_TO_SCALAR_FLAG_ALLOW_SUBGROUP_COMMUNICATION,
   };
   EXPECT_EQ(loom_vector_mma_to_scalar_reference_rejection_bits(
                 &pass, &rewriter, mma_op, distributed_options),

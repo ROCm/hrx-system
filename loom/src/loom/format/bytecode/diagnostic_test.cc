@@ -68,8 +68,8 @@ static iree_status_t CaptureDiagnostic(void* user_data,
 TEST(BytecodeDiagnostic, InvalidRecordFieldRendersPathAndOffset) {
   CapturedDiagnostic captured = {};
   loom_bytecode_reader_diagnostic_context_t context = {
-      .sink = {CaptureDiagnostic, &captured},
-      .filename = IREE_SV("model.loombc"),
+      /*.sink=*/{CaptureDiagnostic, &captured},
+      /*.filename=*/IREE_SV("model.loombc"),
   };
   uint64_t offset = UINT64_C(4294967296);
 
@@ -112,8 +112,8 @@ TEST(BytecodeDiagnostic, InvalidRecordFieldRendersPathAndOffset) {
 TEST(BytecodeDiagnostic, InvalidRangeRendersStructuredBounds) {
   CapturedDiagnostic captured = {};
   loom_bytecode_reader_diagnostic_context_t context = {
-      .sink = {CaptureDiagnostic, &captured},
-      .filename = IREE_SV("model.loombc"),
+      /*.sink=*/{CaptureDiagnostic, &captured},
+      /*.filename=*/IREE_SV("model.loombc"),
   };
 
   IREE_ASSERT_OK(loom_bytecode_reader_emit_invalid_range(

@@ -102,14 +102,14 @@ static inline bool loom_spirv_abi_value_type_encode(
 static inline bool loom_spirv_abi_value_type_decode(
     int64_t code, loom_spirv_value_type_t* out_value_type) {
   *out_value_type = (loom_spirv_value_type_t){
-      .value_class = LOOM_SPIRV_VALUE_CLASS_UNKNOWN,
+      /*.value_class=*/LOOM_SPIRV_VALUE_CLASS_UNKNOWN,
   };
   if (code == LOOM_SPIRV_ABI_VALUE_TYPE_NONE) {
     return true;
   }
   if (code == LOOM_SPIRV_ABI_VALUE_TYPE_BOOL) {
     *out_value_type = (loom_spirv_value_type_t){
-        .value_class = LOOM_SPIRV_VALUE_CLASS_BOOL,
+        /*.value_class=*/LOOM_SPIRV_VALUE_CLASS_BOOL,
     };
     return true;
   }
@@ -126,8 +126,8 @@ static inline bool loom_spirv_abi_value_type_decode(
     return false;
   }
   *out_value_type = (loom_spirv_value_type_t){
-      .value_class = LOOM_SPIRV_VALUE_CLASS_SCALAR,
-      .scalar_type = scalar_type,
+      /*.value_class=*/LOOM_SPIRV_VALUE_CLASS_SCALAR,
+      /*.scalar_type=*/scalar_type,
   };
   return true;
 }

@@ -51,7 +51,7 @@ TEST_F(PassVerifyTest, RejectsNullPipelineOp) {
   loom_module_t* module = Parse(IREE_SV(""));
   ASSERT_NE(module, nullptr);
   loom_pass_verify_options_t options = {
-      .registry = loom_test_pass_registry(),
+      /*.registry=*/loom_test_pass_registry(),
   };
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,

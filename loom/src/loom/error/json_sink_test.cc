@@ -26,8 +26,8 @@ static iree_status_t EmitJsonStatus(const loom_diagnostic_t* diagnostic,
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
   loom_json_sink_options_t options = {
-      .stream = &stream,
-      .type_formatter = type_formatter,
+      /*.stream=*/&stream,
+      /*.type_formatter=*/type_formatter,
   };
   iree_status_t status = loom_diagnostic_json_sink(&options, diagnostic);
   out_json->clear();
@@ -308,11 +308,11 @@ TEST(JsonSink, SerializesSourceRangesAndHighlights) {
   const char source[] = "%x = test.constant 0 : i32";
   loom_highlight_range_t highlights[] = {
       {
-          .start = 0,
-          .end = 2,
-          .field_ref =
-              loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_OPERAND, 0),
-          .param_index = 0,
+          /*.start=*/0,
+          /*.end=*/2,
+          /*.field_ref=*/
+          loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_OPERAND, 0),
+          /*.param_index=*/0,
       },
       {5, 18},
   };
@@ -400,8 +400,8 @@ TEST(JsonSink, SerializesClippedSourceExcerpt) {
       loom_param_string(IREE_SV("x")),
   };
   loom_highlight_range_t highlights[] = {{
-      .start = 160,
-      .end = 163,
+      /*.start=*/160,
+      /*.end=*/163,
   }};
   loom_diagnostic_t diagnostic = {};
   diagnostic.severity = LOOM_DIAGNOSTIC_ERROR;
@@ -472,19 +472,19 @@ TEST(JsonSink, SerializesRelatedLocations) {
       "test.use %arg : f32\n";
   iree_host_size_t consume_length = strcspn(source_text, "\n");
   loom_diagnostic_related_location_t related_locations[] = {{
-      .label = IREE_SV("consumed here"),
-      .source_location =
-          {
-              .provenance = LOOM_SOURCE_PROVENANCE_EXACT_SOURCE,
-              .filename = IREE_SV("model.loom"),
-              .source = iree_make_cstring_view(source_text),
-              .start = 0,
-              .end = consume_length,
-              .start_line = 3,
-              .start_column = 3,
-              .end_line = 3,
-              .end_column = 3 + (uint32_t)consume_length,
-          },
+      /*.label=*/IREE_SV("consumed here"),
+      /*.source_location=*/
+      {
+          /*.provenance=*/LOOM_SOURCE_PROVENANCE_EXACT_SOURCE,
+          /*.filename=*/IREE_SV("model.loom"),
+          /*.source=*/iree_make_cstring_view(source_text),
+          /*.start=*/0,
+          /*.end=*/consume_length,
+          /*.start_line=*/3,
+          /*.start_column=*/3,
+          /*.end_line=*/3,
+          /*.end_column=*/3 + (uint32_t)consume_length,
+      },
   }};
   loom_diagnostic_param_t params[] = {
       loom_param_string(IREE_SV("arg")),
@@ -575,10 +575,11 @@ TEST(JsonSink, RejectsHighlightWithInvalidParamIndex) {
       loom_param_string(IREE_SV("x")),
   };
   loom_highlight_range_t highlights[] = {{
-      .start = 0,
-      .end = 2,
-      .field_ref = loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_OPERAND, 0),
-      .param_index = 1,
+      /*.start=*/0,
+      /*.end=*/2,
+      /*.field_ref=*/
+      loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_OPERAND, 0),
+      /*.param_index=*/1,
   }};
 
   loom_diagnostic_t diagnostic = {};
@@ -604,8 +605,8 @@ TEST(JsonSink, MultipleDiagnostics) {
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
   loom_json_sink_options_t options = {
-      .stream = &stream,
-      .type_formatter = {nullptr, nullptr},
+      /*.stream=*/&stream,
+      /*.type_formatter=*/{nullptr, nullptr},
   };
 
   loom_diagnostic_param_t params1[] = {

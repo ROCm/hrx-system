@@ -506,8 +506,8 @@ TEST_F(BuilderTest, OperandDictBuilderCanonicalizesNames) {
       loom_builder_intern_string(&builder_, IREE_SV("beta"), &beta_name));
 
   loom_named_value_t params[] = {
-      {.name_id = beta_name, .reserved = 0, .value_id = beta},
-      {.name_id = alpha_name, .reserved = 0, .value_id = alpha},
+      {/*.name_id=*/beta_name, /*.reserved=*/0, /*.value_id=*/beta},
+      {/*.name_id=*/alpha_name, /*.reserved=*/0, /*.value_id=*/alpha},
   };
   loom_op_t* op = NULL;
   IREE_ASSERT_OK(loom_test_operand_dict_build(
@@ -575,11 +575,12 @@ TEST_F(BuilderTest, ReplaceAllUsesWithUpdatesPredicateAttrs) {
 
   loom_value_id_t values[] = {old_id, bound_id};
   loom_predicate_t predicates[] = {{
-      .kind = LOOM_PREDICATE_LT,
-      .arg_count = 2,
-      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE,
-                   LOOM_PRED_ARG_NONE},
-      .args = {(int64_t)old_id, (int64_t)bound_id, 0},
+      /*.kind=*/LOOM_PREDICATE_LT,
+      /*.arg_count=*/2,
+      /*.arg_tags=*/
+      {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_NONE},
+      /*.reserved=*/{},
+      /*.args=*/{(int64_t)old_id, (int64_t)bound_id, 0},
   }};
   loom_type_t result_types[] = {index, index};
 
@@ -638,7 +639,8 @@ TEST_F(BuilderTest, ReplaceAllUsesWithUpdatesTypeAttrs) {
   IREE_ASSERT_OK(
       loom_module_intern_string(module_, IREE_SV("shape"), &type_attr_name));
   loom_named_attr_t entries[] = {
-      {.name_id = type_attr_name, .value = loom_attr_type(vector_type_id)},
+      {/*.name_id=*/type_attr_name, /*.reserved=*/{},
+       /*.value=*/loom_attr_type(vector_type_id)},
   };
   loom_op_t* attrs_op = NULL;
   IREE_ASSERT_OK(loom_test_attrs_build(
@@ -1083,8 +1085,8 @@ TEST_F(BuilderTest, AttrsBuilderCanonicalizesDict) {
       loom_module_intern_string(module_, IREE_SV("alpha"), &alpha_id));
 
   loom_named_attr_t entries[2] = {
-      {.name_id = zeta_id, .value = loom_attr_i64(2)},
-      {.name_id = alpha_id, .value = loom_attr_i64(1)},
+      {/*.name_id=*/zeta_id, /*.reserved=*/{}, /*.value=*/loom_attr_i64(2)},
+      {/*.name_id=*/alpha_id, /*.reserved=*/{}, /*.value=*/loom_attr_i64(1)},
   };
   loom_op_t* op = NULL;
   IREE_ASSERT_OK(loom_test_attrs_build(
@@ -1111,8 +1113,8 @@ TEST_F(BuilderTest, AttrsBuilderRejectsDuplicateDictKeys) {
   IREE_ASSERT_OK(loom_module_intern_string(module_, IREE_SV("axis"), &axis_id));
 
   loom_named_attr_t entries[2] = {
-      {.name_id = axis_id, .value = loom_attr_i64(0)},
-      {.name_id = axis_id, .value = loom_attr_i64(1)},
+      {/*.name_id=*/axis_id, /*.reserved=*/{}, /*.value=*/loom_attr_i64(0)},
+      {/*.name_id=*/axis_id, /*.reserved=*/{}, /*.value=*/loom_attr_i64(1)},
   };
   loom_op_t* op = NULL;
   IREE_EXPECT_STATUS_IS(
@@ -1266,7 +1268,7 @@ TEST_F(BuilderTest, OpRemoveResultsCompactsDefinitionsAndTiedResults) {
   loom_value_id_t operands[] = {operand};
   loom_type_t result_types[] = {f32, f32, f32};
   loom_tied_result_t tied[] = {
-      {.result_index = 2, .operand_index = 0, .has_type_change = false}};
+      {/*.result_index=*/2, /*.operand_index=*/0, /*.has_type_change=*/false}};
   loom_symbol_ref_t callee = {0, 1};
   loom_op_t* op = NULL;
   IREE_ASSERT_OK(loom_test_invoke_build(
@@ -2357,7 +2359,7 @@ TEST_F(BuilderTest, InvokeBuilderWithDynamicTied) {
   loom_value_id_t operands[] = {5, 6};
   loom_type_t result_types[] = {f32, index_type};
   loom_tied_result_t tied[] = {
-      {.result_index = 0, .operand_index = 0, .has_type_change = false}};
+      {/*.result_index=*/0, /*.operand_index=*/0, /*.has_type_change=*/false}};
   loom_symbol_ref_t callee = {0, 1};
   loom_op_t* op = NULL;
   IREE_ASSERT_OK(loom_test_invoke_build(&builder_, callee, operands, 2,

@@ -6,6 +6,6 @@
 
 static const loom_target_math_policy_registry_entry_t kWasmMathPolicyEntries[] =
     {
-        {.contract_set_key = IREE_SVL("wasm.core.simd128"),
-         .policy = &kWasmMathPolicy},
+        {/*.contract_set_key=*/IREE_SVL("wasm.core.simd128"),
+         /*.policy=*/&kWasmMathPolicy},
 };

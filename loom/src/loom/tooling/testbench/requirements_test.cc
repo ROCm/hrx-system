@@ -108,9 +108,9 @@ check.case @explicit_skip {
 
   const loom_testbench_requirement_provider_t providers[] = {
       {
-          .name = IREE_SV("fake.enabled"),
-          .user_data = nullptr,
-          .query = QueryEnabled,
+          /*.name=*/IREE_SV("fake.enabled"),
+          /*.user_data=*/nullptr,
+          /*.query=*/QueryEnabled,
       },
   };
   loom_testbench_requirement_provider_registry_t registry = {};

@@ -94,29 +94,29 @@ size_t Align4(size_t value) { return (value + 3u) & ~3u; }
 
 loom_amdgpu_metadata_kernel_t MinimalKernel() {
   return {
-      .name = IREE_SV("loom_kernel"),
-      .descriptor_symbol = IREE_SV("loom_kernel.kd"),
-      .kernarg_segment_size = 0,
-      .kernarg_segment_alignment = 8,
-      .wavefront_size = 32,
-      .group_segment_fixed_size = 0,
-      .private_segment_fixed_size = 0,
-      .sgpr_count = 3,
-      .vgpr_count = 0,
-      .max_flat_workgroup_size = 64,
-      .required_workgroup_size = {.x = 64, .y = 1, .z = 1},
-      .has_required_workgroup_size = true,
-      .arguments = nullptr,
-      .argument_count = 0,
+      /*.name=*/IREE_SV("loom_kernel"),
+      /*.descriptor_symbol=*/IREE_SV("loom_kernel.kd"),
+      /*.kernarg_segment_size=*/0,
+      /*.kernarg_segment_alignment=*/8,
+      /*.wavefront_size=*/32,
+      /*.group_segment_fixed_size=*/0,
+      /*.private_segment_fixed_size=*/0,
+      /*.sgpr_count=*/3,
+      /*.vgpr_count=*/0,
+      /*.max_flat_workgroup_size=*/64,
+      /*.required_workgroup_size=*/{/*.x=*/64, /*.y=*/1, /*.z=*/1},
+      /*.has_required_workgroup_size=*/true,
+      /*.arguments=*/nullptr,
+      /*.argument_count=*/0,
   };
 }
 
 loom_amdgpu_code_object_metadata_t MetadataForKernel(
     const loom_amdgpu_metadata_kernel_t* kernel) {
   return {
-      .target = IREE_SV("amdgcn-amd-amdhsa--gfx1100"),
-      .kernels = kernel,
-      .kernel_count = 1,
+      /*.target=*/IREE_SV("amdgcn-amd-amdhsa--gfx1100"),
+      /*.kernels=*/kernel,
+      /*.kernel_count=*/1,
   };
 }
 
@@ -223,36 +223,39 @@ TEST(AmdgpuMetadataTest, WritesElfEnvelopeContainingMetadataNote) {
   iree_string_builder_deinitialize(&note_builder);
 
   const loom_native_elf64le_section_t sections[] = {{
-      .name = IREE_SV(".note"),
-      .type = LOOM_NATIVE_ELF_SECTION_TYPE_NOTE,
-      .flags = LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC,
-      .address = 0,
-      .alignment = 4,
-      .entry_size = 0,
-      .link = 0,
-      .info = 0,
-      .contents = iree_make_const_byte_span(note.data(), note.size()),
+      /*.name=*/IREE_SV(".note"),
+      /*.type=*/LOOM_NATIVE_ELF_SECTION_TYPE_NOTE,
+      /*.flags=*/LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC,
+      /*.address=*/0,
+      /*.alignment=*/4,
+      /*.entry_size=*/0,
+      /*.link=*/0,
+      /*.info=*/0,
+      /*.contents=*/iree_make_const_byte_span(note.data(), note.size()),
   }};
   const loom_native_elf64le_segment_t segments[] = {{
-      .type = LOOM_NATIVE_ELF_PROGRAM_TYPE_NOTE,
-      .flags = LOOM_NATIVE_ELF_PROGRAM_FLAG_READ,
-      .first_section = 0,
-      .section_count = 1,
-      .virtual_address = 0,
-      .physical_address = 0,
-      .alignment = 4,
+      /*.type=*/LOOM_NATIVE_ELF_PROGRAM_TYPE_NOTE,
+      /*.flags=*/LOOM_NATIVE_ELF_PROGRAM_FLAG_READ,
+      /*.file_offset=*/{},
+      /*.file_size=*/{},
+      /*.memory_size=*/{},
+      /*.first_section=*/0,
+      /*.section_count=*/1,
+      /*.virtual_address=*/0,
+      /*.physical_address=*/0,
+      /*.alignment=*/4,
   }};
   const loom_native_elf64le_file_t file = {
-      .type = LOOM_NATIVE_ELF_FILE_TYPE_DYN,
-      .machine = LOOM_NATIVE_ELF_MACHINE_AMDGPU,
-      .os_abi = LOOM_NATIVE_ELF_OS_ABI_AMDGPU_HSA,
-      .abi_version = LOOM_NATIVE_ELF_ABI_VERSION_AMDGPU_HSA_V5,
-      .flags = LOOM_NATIVE_ELF_AMDGPU_FLAG_MACH_GFX1100,
-      .entry = 0,
-      .sections = sections,
-      .section_count = IREE_ARRAYSIZE(sections),
-      .segments = segments,
-      .segment_count = IREE_ARRAYSIZE(segments),
+      /*.type=*/LOOM_NATIVE_ELF_FILE_TYPE_DYN,
+      /*.machine=*/LOOM_NATIVE_ELF_MACHINE_AMDGPU,
+      /*.os_abi=*/LOOM_NATIVE_ELF_OS_ABI_AMDGPU_HSA,
+      /*.abi_version=*/LOOM_NATIVE_ELF_ABI_VERSION_AMDGPU_HSA_V5,
+      /*.flags=*/LOOM_NATIVE_ELF_AMDGPU_FLAG_MACH_GFX1100,
+      /*.entry=*/0,
+      /*.sections=*/sections,
+      /*.section_count=*/IREE_ARRAYSIZE(sections),
+      /*.segments=*/segments,
+      /*.segment_count=*/IREE_ARRAYSIZE(segments),
   };
 
   StreamPtr stream = CreateStream();
@@ -282,21 +285,21 @@ TEST(AmdgpuMetadataTest, WritesElfEnvelopeContainingMetadataNote) {
 TEST(AmdgpuMetadataTest, AppendsArgumentMetadata) {
   const loom_amdgpu_metadata_argument_t arguments[] = {
       {
-          .name = IREE_SV("lhs"),
-          .offset = 0,
-          .size = 8,
-          .alignment = 8,
-          .kind = LOOM_AMDGPU_METADATA_ARGUMENT_GLOBAL_BUFFER,
-          .address_space = IREE_SV("global"),
-          .access = IREE_SV("read_write"),
-          .actual_access = IREE_SV("read_only"),
+          /*.name=*/IREE_SV("lhs"),
+          /*.offset=*/0,
+          /*.size=*/8,
+          /*.alignment=*/8,
+          /*.kind=*/LOOM_AMDGPU_METADATA_ARGUMENT_GLOBAL_BUFFER,
+          /*.address_space=*/IREE_SV("global"),
+          /*.access=*/IREE_SV("read_write"),
+          /*.actual_access=*/IREE_SV("read_only"),
       },
       {
-          .name = IREE_SV("scale"),
-          .offset = 8,
-          .size = 4,
-          .alignment = 4,
-          .kind = LOOM_AMDGPU_METADATA_ARGUMENT_BY_VALUE,
+          /*.name=*/IREE_SV("scale"),
+          /*.offset=*/8,
+          /*.size=*/4,
+          /*.alignment=*/4,
+          /*.kind=*/LOOM_AMDGPU_METADATA_ARGUMENT_BY_VALUE,
       },
   };
   loom_amdgpu_metadata_kernel_t kernel = MinimalKernel();
@@ -339,16 +342,18 @@ TEST(AmdgpuMetadataTest, AppendsArgumentMetadata) {
 TEST(AmdgpuMetadataTest, RejectsInvalidArgumentRange) {
   const loom_amdgpu_metadata_argument_t arguments[] = {
       {
-          .offset = 0,
-          .size = 8,
-          .alignment = 8,
-          .kind = LOOM_AMDGPU_METADATA_ARGUMENT_GLOBAL_BUFFER,
+          /*.name=*/{},
+          /*.offset=*/0,
+          /*.size=*/8,
+          /*.alignment=*/8,
+          /*.kind=*/LOOM_AMDGPU_METADATA_ARGUMENT_GLOBAL_BUFFER,
       },
       {
-          .offset = 4,
-          .size = 4,
-          .alignment = 4,
-          .kind = LOOM_AMDGPU_METADATA_ARGUMENT_BY_VALUE,
+          /*.name=*/{},
+          /*.offset=*/4,
+          /*.size=*/4,
+          /*.alignment=*/4,
+          /*.kind=*/LOOM_AMDGPU_METADATA_ARGUMENT_BY_VALUE,
       },
   };
   loom_amdgpu_metadata_kernel_t kernel = MinimalKernel();

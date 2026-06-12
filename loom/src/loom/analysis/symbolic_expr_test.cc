@@ -239,10 +239,11 @@ TEST_F(SymbolicExprTest, AssumedValueRelationPredicatesProveRelations) {
   loom_value_id_t induction = DefineIndexValue();
   loom_value_id_t upper_bound = DefineIndexValue();
   loom_predicate_t predicate = {
-      .kind = LOOM_PREDICATE_LT,
-      .arg_count = 2,
-      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
-      .args = {induction, upper_bound},
+      /*.kind=*/LOOM_PREDICATE_LT,
+      /*.arg_count=*/2,
+      /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
+      /*.reserved=*/{},
+      /*.args=*/{induction, upper_bound},
   };
   loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
   loom_op_t* assume_op = nullptr;
@@ -278,10 +279,11 @@ TEST_F(SymbolicExprTest, AssumedRightValueRelationPredicatesAreSwapped) {
   loom_value_id_t induction = DefineIndexValue();
   loom_value_id_t upper_bound = DefineIndexValue();
   loom_predicate_t predicate = {
-      .kind = LOOM_PREDICATE_GT,
-      .arg_count = 2,
-      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
-      .args = {upper_bound, induction},
+      /*.kind=*/LOOM_PREDICATE_GT,
+      /*.arg_count=*/2,
+      /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
+      /*.reserved=*/{},
+      /*.args=*/{upper_bound, induction},
   };
   loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
   loom_op_t* assume_op = nullptr;
@@ -302,10 +304,11 @@ TEST_F(SymbolicExprTest, ScalarAssumePredicatesProveRelations) {
   loom_value_id_t element = DefineI64Value();
   loom_value_id_t bound = DefineI64Value();
   loom_predicate_t predicate = {
-      .kind = LOOM_PREDICATE_LE,
-      .arg_count = 2,
-      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
-      .args = {element, bound},
+      /*.kind=*/LOOM_PREDICATE_LE,
+      /*.arg_count=*/2,
+      /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
+      /*.reserved=*/{},
+      /*.args=*/{element, bound},
   };
   loom_type_t i64_type = loom_type_scalar(LOOM_SCALAR_TYPE_I64);
   loom_op_t* assume_op = nullptr;
@@ -326,10 +329,11 @@ TEST_F(SymbolicExprTest, MemoTableGrowthPreservesOuterExpansion) {
   loom_value_id_t old_element = DefineI64Value();
   loom_value_id_t bound = DefineI64Value();
   loom_predicate_t predicate = {
-      .kind = LOOM_PREDICATE_LT,
-      .arg_count = 2,
-      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
-      .args = {old_element, bound},
+      /*.kind=*/LOOM_PREDICATE_LT,
+      /*.arg_count=*/2,
+      /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
+      /*.reserved=*/{},
+      /*.args=*/{old_element, bound},
   };
   loom_type_t i64_type = loom_type_scalar(LOOM_SCALAR_TYPE_I64);
   loom_type_t result_types[] = {i64_type, i64_type};
@@ -342,10 +346,11 @@ TEST_F(SymbolicExprTest, MemoTableGrowthPreservesOuterExpansion) {
       loom_scalar_assume_results(bounded_op).values[0];
 
   loom_predicate_t nonnegative_predicate = {
-      .kind = LOOM_PREDICATE_GE,
-      .arg_count = 2,
-      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST},
-      .args = {bounded_element, 0},
+      /*.kind=*/LOOM_PREDICATE_GE,
+      /*.arg_count=*/2,
+      /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST},
+      /*.reserved=*/{},
+      /*.args=*/{bounded_element, 0},
   };
   loom_op_t* nonnegative_op = nullptr;
   IREE_ASSERT_OK(loom_scalar_assume_build(
@@ -470,11 +475,12 @@ TEST_F(SymbolicExprTest, ProvesLessEqualFromTermFacts) {
 TEST_F(SymbolicExprTest, ProvesLessEqualFromExpressionFactsAfterExpansion) {
   loom_value_id_t value_id = DefineIndexValue();
   loom_predicate_t predicate = {
-      .kind = LOOM_PREDICATE_RANGE,
-      .arg_count = 3,
-      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST,
-                   LOOM_PRED_ARG_CONST},
-      .args = {value_id, 0, 10},
+      /*.kind=*/LOOM_PREDICATE_RANGE,
+      /*.arg_count=*/3,
+      /*.arg_tags=*/
+      {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST, LOOM_PRED_ARG_CONST},
+      /*.reserved=*/{},
+      /*.args=*/{value_id, 0, 10},
   };
   loom_op_t* assume_op = nullptr;
   loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);

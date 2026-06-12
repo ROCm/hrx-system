@@ -58,8 +58,8 @@ static inline loom_pass_environment_t loom_pass_environment_make(
     const loom_pass_environment_capability_t* const* capabilities,
     iree_host_size_t capability_count) {
   return (loom_pass_environment_t){
-      .capabilities = capabilities,
-      .capability_count = capability_count,
+      /*.capabilities=*/capabilities,
+      /*.capability_count=*/capability_count,
   };
 }
 

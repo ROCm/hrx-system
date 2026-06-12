@@ -120,14 +120,14 @@ TEST_F(HalInvocationTest,
   request.runtime = &runtime;
   request.artifact = &executable;
   request.bindings = (loom_run_hal_binding_specs_t){
-      .values = bindings,
-      .conventions = binding_conventions,
-      .count = IREE_ARRAYSIZE(bindings),
+      /*.values=*/bindings,
+      /*.conventions=*/binding_conventions,
+      /*.count=*/IREE_ARRAYSIZE(bindings),
   };
   request.expected_bindings = (loom_run_hal_binding_specs_t){
-      .values = expected_bindings,
-      .conventions = expected_binding_conventions,
-      .count = IREE_ARRAYSIZE(expected_bindings),
+      /*.values=*/expected_bindings,
+      /*.conventions=*/expected_binding_conventions,
+      /*.count=*/IREE_ARRAYSIZE(expected_bindings),
   };
 
   loom_run_hal_invocation_result_t result = {};
@@ -294,7 +294,8 @@ TEST_F(HalInvocationTest,
        DispatchBatchRejectsZeroDispatchCountBeforeDeviceUse) {
   loom_run_hal_runtime_t runtime = {};
   loom_run_hal_prepared_candidate_t candidate = {
-      .executable = reinterpret_cast<iree_hal_executable_t*>(1),
+      /*.target_bundle=*/{},
+      /*.executable=*/reinterpret_cast<iree_hal_executable_t*>(1),
   };
   loom_run_hal_invocation_plan_t plan = {};
   loom_run_hal_invocation_plan_initialize(&plan);
@@ -322,27 +323,40 @@ TEST_F(HalInvocationTest,
 TEST_F(HalInvocationTest,
        DispatchPlanRejectsTargetLimitViolationBeforeDeviceUse) {
   static const loom_target_snapshot_t snapshot = {
-      .name = IREE_SVL("test-snapshot"),
-      .max_workgroup_count = {.x = 4, .y = 4, .z = 4},
+      /*.name=*/IREE_SVL("test-snapshot"),
+      /*.codegen_format=*/{},
+      /*.artifact_format=*/{},
+      /*.default_pointer_bitwidth=*/{},
+      /*.index_bitwidth=*/{},
+      /*.offset_bitwidth=*/{},
+      /*.max_workgroup_size=*/{},
+      /*.max_flat_workgroup_size=*/{},
+      /*.max_workgroup_storage_bytes=*/{},
+      /*.subgroup_size=*/{},
+      /*.max_grid_size=*/{},
+      /*.max_flat_grid_size=*/{},
+      /*.max_workgroup_count=*/{/*.x=*/4, /*.y=*/4, /*.z=*/4},
   };
   static const loom_target_export_plan_t export_plan = {
-      .name = IREE_SVL("test-export"),
-      .abi_kind = LOOM_TARGET_ABI_HAL_KERNEL,
-      .hal_kernel =
-          {
-              .required_workgroup_size = {.x = 0, .y = 0, .z = 0},
-          },
+      /*.name=*/IREE_SVL("test-export"),
+      /*.export_symbol=*/{},
+      /*.abi_kind=*/LOOM_TARGET_ABI_HAL_KERNEL,
+      /*.linkage=*/{},
+      /*.hal_kernel=*/
+      {
+          /*.required_workgroup_size=*/{/*.x=*/0, /*.y=*/0, /*.z=*/0},
+      },
   };
   static const loom_target_bundle_t target_bundle = {
-      .name = IREE_SVL("test-bundle"),
-      .snapshot = &snapshot,
-      .export_plan = &export_plan,
+      /*.name=*/IREE_SVL("test-bundle"),
+      /*.snapshot=*/&snapshot,
+      /*.export_plan=*/&export_plan,
   };
 
   loom_run_hal_runtime_t runtime = {};
   loom_run_hal_prepared_candidate_t candidate = {
-      .target_bundle = &target_bundle,
-      .executable = reinterpret_cast<iree_hal_executable_t*>(1),
+      /*.target_bundle=*/&target_bundle,
+      /*.executable=*/reinterpret_cast<iree_hal_executable_t*>(1),
   };
   loom_run_hal_invocation_plan_t plan = {};
   loom_run_hal_invocation_plan_initialize(&plan);

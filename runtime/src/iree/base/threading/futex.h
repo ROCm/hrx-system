@@ -251,8 +251,8 @@ static inline iree_status_code_t iree_futex_wait(void* address,
                                                  iree_time_t deadline_ns) {
   uint32_t timeout_ms = iree_absolute_deadline_to_timeout_ms(deadline_ns);
   struct timespec timeout = {
-      .tv_sec = timeout_ms / 1000,
-      .tv_nsec = (timeout_ms % 1000) * 1000000,
+      /*.tv_sec=*/timeout_ms / 1000,
+      /*.tv_nsec=*/(timeout_ms % 1000) * 1000000,
   };
   int rc = syscall(
       SYS_futex, address, FUTEX_WAIT | FUTEX_PRIVATE_FLAG, expected_value,
@@ -277,8 +277,8 @@ static inline iree_status_code_t iree_futex_wait_shared(
     void* address, uint32_t expected_value, iree_time_t deadline_ns) {
   uint32_t timeout_ms = iree_absolute_deadline_to_timeout_ms(deadline_ns);
   struct timespec timeout = {
-      .tv_sec = timeout_ms / 1000,
-      .tv_nsec = (timeout_ms % 1000) * 1000000,
+      /*.tv_sec=*/timeout_ms / 1000,
+      /*.tv_nsec=*/(timeout_ms % 1000) * 1000000,
   };
   int rc = syscall(SYS_futex, address, FUTEX_WAIT, expected_value,
                    timeout_ms == IREE_INFINITE_TIMEOUT_MS ? NULL : &timeout,

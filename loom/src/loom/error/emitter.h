@@ -51,9 +51,9 @@ typedef struct loom_diagnostic_field_ref_t {
 
 static inline loom_diagnostic_field_ref_t loom_diagnostic_field_ref_none(void) {
   return (loom_diagnostic_field_ref_t){
-      .kind = LOOM_DIAGNOSTIC_FIELD_NONE,
-      .index = 0,
-      .occurrence = 0,
+      /*.kind=*/LOOM_DIAGNOSTIC_FIELD_NONE,
+      /*.index=*/0,
+      /*.occurrence=*/0,
   };
 }
 
@@ -61,9 +61,9 @@ static inline loom_diagnostic_field_ref_t
 loom_diagnostic_field_ref_with_occurrence(loom_diagnostic_field_kind_t kind,
                                           uint16_t index, uint16_t occurrence) {
   return (loom_diagnostic_field_ref_t){
-      .kind = kind,
-      .index = index,
-      .occurrence = occurrence,
+      /*.kind=*/kind,
+      /*.index=*/index,
+      /*.occurrence=*/occurrence,
   };
 }
 

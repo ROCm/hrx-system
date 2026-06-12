@@ -54,7 +54,7 @@ class CallableInlineTest : public ::testing::Test {
     loom_string_id_t name_id = InternString(name);
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_CHECK_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
-    return (loom_symbol_ref_t){.module_id = 0, .symbol_id = symbol_id};
+    return (loom_symbol_ref_t){/*.module_id=*/0, /*.symbol_id=*/symbol_id};
   }
 
   loom_string_id_t InternString(iree_string_view_t string) {
@@ -772,7 +772,7 @@ class CallableImportTest : public ::testing::Test {
     IREE_CHECK_OK(loom_builder_intern_string(builder, name, &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_CHECK_OK(loom_module_add_symbol(module, name_id, &symbol_id));
-    return (loom_symbol_ref_t){.module_id = 0, .symbol_id = symbol_id};
+    return (loom_symbol_ref_t){/*.module_id=*/0, /*.symbol_id=*/symbol_id};
   }
 
   loom_builder_t BodyBuilder(loom_module_t* module, loom_op_t* func_op) {
@@ -874,7 +874,7 @@ static iree_status_t RemapSymbolByName(void* user_data,
     IREE_RETURN_IF_ERROR(loom_module_add_symbol(target_module, target_name_id,
                                                 &target_symbol_id));
   }
-  *out_target_ref = {.module_id = 0, .symbol_id = target_symbol_id};
+  *out_target_ref = {/*.module_id=*/0, /*.symbol_id=*/target_symbol_id};
   return iree_ok_status();
 }
 
@@ -977,8 +977,8 @@ TEST_F(CallableImportTest, ImportRemapsExternalSymbolWithPolicy) {
   loom_op_t* wrapper_op = BuildCallWrapperFunction(
       source_, &source_builder_, wrapper_ref, helper_ref, i32);
   loom_callable_import_options_t options = {
-      .external_symbol_remap =
-          loom_ir_remap_symbol_callback_make(RemapSymbolByName, NULL),
+      /*.external_symbol_remap=*/
+      loom_ir_remap_symbol_callback_make(RemapSymbolByName, NULL),
   };
 
   loom_func_like_t imported = {};

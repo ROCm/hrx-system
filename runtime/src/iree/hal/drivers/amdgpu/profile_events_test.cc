@@ -92,10 +92,10 @@ static iree_status_t CapturingProfileSinkEndSession(
 }
 
 static const iree_hal_profile_sink_vtable_t kCapturingProfileSinkVTable = {
-    .destroy = CapturingProfileSinkDestroy,
-    .begin_session = CapturingProfileSinkBeginSession,
-    .write = CapturingProfileSinkWrite,
-    .end_session = CapturingProfileSinkEndSession,
+    /*.destroy=*/CapturingProfileSinkDestroy,
+    /*.begin_session=*/CapturingProfileSinkBeginSession,
+    /*.write=*/CapturingProfileSinkWrite,
+    /*.end_session=*/CapturingProfileSinkEndSession,
 };
 
 static void CapturingProfileSinkInitialize(CapturingProfileSink* sink) {

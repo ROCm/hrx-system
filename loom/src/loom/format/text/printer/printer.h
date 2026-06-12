@@ -141,8 +141,8 @@ typedef struct loom_print_field_ref_t {
 static inline loom_print_field_ref_t loom_print_field_ref(
     loom_print_field_kind_t kind, uint16_t index) {
   return (loom_print_field_ref_t){
-      .kind = kind,
-      .index = index,
+      /*.kind=*/kind,
+      /*.index=*/index,
   };
 }
 

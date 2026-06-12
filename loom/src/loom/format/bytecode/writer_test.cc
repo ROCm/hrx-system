@@ -83,7 +83,7 @@ class WriterTest : public ::testing::Test {
                                              &func_name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_CHECK_OK(loom_module_add_symbol(module, func_name_id, &symbol_id));
-    loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
+    loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
 
     loom_type_t arg_types[1] = {f32_type};
     loom_type_t result_types[1] = {f32_type};
@@ -136,24 +136,26 @@ class WriterTest : public ::testing::Test {
     }
 
     loom_named_attr_t meta_entries[2] = {
-        reverse_attr_order
-            ? loom_named_attr_t{
-                  .name_id = phase_id,
-                  .value = loom_attr_string(link_id),
-              }
-            : loom_named_attr_t{
-                  .name_id = opt_id,
-                  .value = loom_attr_i64(3),
-              },
-        reverse_attr_order
-            ? loom_named_attr_t{
-                  .name_id = opt_id,
-                  .value = loom_attr_i64(3),
-              }
-            : loom_named_attr_t{
-                  .name_id = phase_id,
-                  .value = loom_attr_string(link_id),
-              },
+        reverse_attr_order ? loom_named_attr_t{
+                                 /*.name_id=*/phase_id,
+                                 /*.reserved=*/{},
+                                 /*.value=*/loom_attr_string(link_id),
+                             }
+                           : loom_named_attr_t{
+                                 /*.name_id=*/opt_id,
+                                 /*.reserved=*/{},
+                                 /*.value=*/loom_attr_i64(3),
+                             },
+        reverse_attr_order ? loom_named_attr_t{
+                                 /*.name_id=*/opt_id,
+                                 /*.reserved=*/{},
+                                 /*.value=*/loom_attr_i64(3),
+                             }
+                           : loom_named_attr_t{
+                                 /*.name_id=*/phase_id,
+                                 /*.reserved=*/{},
+                                 /*.value=*/loom_attr_string(link_id),
+                             },
     };
     loom_attribute_t meta_attr = {0};
     IREE_CHECK_OK(loom_module_make_canonical_attr_dict(
@@ -162,24 +164,26 @@ class WriterTest : public ::testing::Test {
         &meta_attr));
 
     loom_named_attr_t entries[2] = {
-        reverse_attr_order
-            ? loom_named_attr_t{
-                  .name_id = meta_id,
-                  .value = meta_attr,
-              }
-            : loom_named_attr_t{
-                  .name_id = axis_id,
-                  .value = loom_attr_i64(0),
-              },
-        reverse_attr_order
-            ? loom_named_attr_t{
-                  .name_id = axis_id,
-                  .value = loom_attr_i64(0),
-              }
-            : loom_named_attr_t{
-                  .name_id = meta_id,
-                  .value = meta_attr,
-              },
+        reverse_attr_order ? loom_named_attr_t{
+                                 /*.name_id=*/meta_id,
+                                 /*.reserved=*/{},
+                                 /*.value=*/meta_attr,
+                             }
+                           : loom_named_attr_t{
+                                 /*.name_id=*/axis_id,
+                                 /*.reserved=*/{},
+                                 /*.value=*/loom_attr_i64(0),
+                             },
+        reverse_attr_order ? loom_named_attr_t{
+                                 /*.name_id=*/axis_id,
+                                 /*.reserved=*/{},
+                                 /*.value=*/loom_attr_i64(0),
+                             }
+                           : loom_named_attr_t{
+                                 /*.name_id=*/meta_id,
+                                 /*.reserved=*/{},
+                                 /*.value=*/meta_attr,
+                             },
     };
     loom_op_t* attrs_op = nullptr;
     IREE_CHECK_OK(loom_test_attrs_build(
@@ -310,9 +314,9 @@ class WriterTest : public ::testing::Test {
     entries.reserve((size_t)section_count);
     for (uint64_t i = 0; i < section_count; ++i) {
       entries.push_back(SectionEntry{
-          .kind = ReadU16LE(bytes, section_offset),
-          .offset = ReadU64LE(bytes, section_offset + 8),
-          .length = ReadU64LE(bytes, section_offset + 16),
+          /*.kind=*/ReadU16LE(bytes, section_offset),
+          /*.offset=*/ReadU64LE(bytes, section_offset + 8),
+          /*.length=*/ReadU64LE(bytes, section_offset + 16),
       });
       section_offset += sizeof(loom_bytecode_section_dir_entry_t);
     }
@@ -620,7 +624,7 @@ TEST_F(WriterTest, ModuleWithFunction) {
       loom_builder_intern_string(&module_builder, IREE_SV("add"), &name_id));
   uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
   IREE_ASSERT_OK(loom_module_add_symbol(module, name_id, &symbol_id));
-  loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
+  loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
   loom_type_t arg_types[2] = {i32_type, i32_type};
   loom_type_t result_types[1] = {i32_type};
   loom_op_t* func_op = nullptr;
@@ -735,7 +739,7 @@ TEST_F(WriterTest, FunctionBodySummaryAndOpTableRefsUseNewWireShape) {
       loom_builder_intern_string(&module_builder, IREE_SV("f"), &func_name_id));
   uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
   IREE_ASSERT_OK(loom_module_add_symbol(module, func_name_id, &symbol_id));
-  loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
+  loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
 
   loom_type_t arg_types[2] = {i32_type, i32_type};
   loom_op_t* func_op = nullptr;
@@ -833,7 +837,7 @@ TEST_F(WriterTest, FunctionBodySuccessorsUseRegionBlockOrdinals) {
                                             &func_name_id));
   uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
   IREE_ASSERT_OK(loom_module_add_symbol(module, func_name_id, &symbol_id));
-  loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
+  loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
 
   loom_op_t* func_op = nullptr;
   IREE_ASSERT_OK(loom_test_func_build(
@@ -947,7 +951,7 @@ TEST_F(WriterTest, OptionalAbsentBodyAttrWrites) {
       loom_builder_intern_string(&module_builder, IREE_SV("f"), &func_name_id));
   uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
   IREE_ASSERT_OK(loom_module_add_symbol(module, func_name_id, &symbol_id));
-  loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
+  loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
 
   loom_op_t* func_op = nullptr;
   IREE_ASSERT_OK(loom_test_func_build(
@@ -994,7 +998,7 @@ TEST_F(WriterTest, ZeroExtentVectorTypeWrites) {
       loom_builder_intern_string(&module_builder, IREE_SV("empty"), &name_id));
   uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
   IREE_ASSERT_OK(loom_module_add_symbol(module, name_id, &symbol_id));
-  loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
+  loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
   loom_op_t* func_op = nullptr;
   IREE_ASSERT_OK(loom_test_func_build(
       &module_builder, 0, /*visibility=*/0, /*cc=*/0, callee, &vector_type, 1,
@@ -1070,7 +1074,7 @@ TEST_F(WriterTest, ClosedEnumAttributeRejectsFutureOrdinal) {
       loom_builder_intern_string(&module_builder, IREE_SV("f"), &name_id));
   uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
   IREE_ASSERT_OK(loom_module_add_symbol(module, name_id, &symbol_id));
-  loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
+  loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
   loom_op_t* func_op = nullptr;
   IREE_ASSERT_OK(loom_test_func_build(
       &module_builder, 0, /*visibility=*/0, /*cc=*/0, callee, &i32_type, 1,
@@ -1115,7 +1119,7 @@ TEST_F(WriterTest, RankZeroVectorTypeFails) {
       loom_builder_intern_string(&module_builder, IREE_SV("bad"), &name_id));
   uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
   IREE_ASSERT_OK(loom_module_add_symbol(module, name_id, &symbol_id));
-  loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
+  loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
   loom_op_t* func_op = nullptr;
   IREE_ASSERT_OK(loom_test_func_build(
       &module_builder, 0, /*visibility=*/0, /*cc=*/0, callee, &vector_type, 1,
@@ -1151,7 +1155,7 @@ TEST_F(WriterTest, VectorEncodingAttachmentFails) {
       loom_builder_intern_string(&module_builder, IREE_SV("bad"), &name_id));
   uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
   IREE_ASSERT_OK(loom_module_add_symbol(module, name_id, &symbol_id));
-  loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
+  loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
   loom_op_t* func_op = nullptr;
   IREE_ASSERT_OK(loom_test_func_build(
       &module_builder, 0, /*visibility=*/0, /*cc=*/0, callee, &vector_type, 1,
@@ -1188,7 +1192,7 @@ TEST_F(WriterTest, InvalidEncodingRoleFails) {
       loom_builder_intern_string(&module_builder, IREE_SV("bad"), &name_id));
   uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
   IREE_ASSERT_OK(loom_module_add_symbol(module, name_id, &symbol_id));
-  loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
+  loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
   loom_op_t* func_op = nullptr;
   IREE_ASSERT_OK(loom_test_func_build(
       &module_builder, 0, /*visibility=*/0, /*cc=*/0, callee, &encoding_type, 1,
@@ -1235,7 +1239,7 @@ TEST_F(WriterTest, GlobalSymbolWritesDefiningOpPayload) {
   IREE_ASSERT_OK(loom_builder_intern_string(&builder, IREE_SV("pi"), &name_id));
   uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
   IREE_ASSERT_OK(loom_module_add_symbol(module, name_id, &symbol_id));
-  loom_symbol_ref_t symbol = {.module_id = 0, .symbol_id = symbol_id};
+  loom_symbol_ref_t symbol = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
   loom_op_t* global_op = nullptr;
   IREE_ASSERT_OK(loom_global_constant_build(
       &builder, symbol, f32_type, /*predicates=*/nullptr,
@@ -1284,10 +1288,11 @@ TEST_F(WriterTest, GlobalSymbolWritesDeclarationLocalValues) {
   IREE_ASSERT_OK(iree_arena_allocate_array(
       &module->arena, 1, sizeof(loom_predicate_t), (void**)&predicates));
   predicates[0] = loom_predicate_t{
-      .kind = LOOM_PREDICATE_MUL,
-      .arg_count = 2,
-      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST},
-      .args = {(int64_t)dim_id, 16},
+      /*.kind=*/LOOM_PREDICATE_MUL,
+      /*.arg_count=*/2,
+      /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST},
+      /*.reserved=*/{},
+      /*.args=*/{(int64_t)dim_id, 16},
   };
 
   loom_builder_t builder;
@@ -1298,7 +1303,7 @@ TEST_F(WriterTest, GlobalSymbolWritesDeclarationLocalValues) {
       loom_builder_intern_string(&builder, IREE_SV("weights"), &name_id));
   uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
   IREE_ASSERT_OK(loom_module_add_symbol(module, name_id, &symbol_id));
-  loom_symbol_ref_t symbol = {.module_id = 0, .symbol_id = symbol_id};
+  loom_symbol_ref_t symbol = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
   loom_op_t* global_op = nullptr;
   IREE_ASSERT_OK(loom_global_constant_build(&builder, symbol, tile_type,
                                             predicates, 1, loom_attr_absent(),

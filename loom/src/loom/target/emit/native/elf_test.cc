@@ -90,36 +90,39 @@ TEST(NativeElfTest, WritesAmdgpuNoteElfEnvelope) {
       "payload!",
       28);
   const loom_native_elf64le_section_t sections[] = {{
-      .name = IREE_SV(".note"),
-      .type = LOOM_NATIVE_ELF_SECTION_TYPE_NOTE,
-      .flags = LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC,
-      .address = 0,
-      .alignment = 4,
-      .entry_size = 0,
-      .link = 0,
-      .info = 0,
-      .contents = iree_make_const_byte_span(note.data(), note.size()),
+      /*.name=*/IREE_SV(".note"),
+      /*.type=*/LOOM_NATIVE_ELF_SECTION_TYPE_NOTE,
+      /*.flags=*/LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC,
+      /*.address=*/0,
+      /*.alignment=*/4,
+      /*.entry_size=*/0,
+      /*.link=*/0,
+      /*.info=*/0,
+      /*.contents=*/iree_make_const_byte_span(note.data(), note.size()),
   }};
   const loom_native_elf64le_segment_t segments[] = {{
-      .type = LOOM_NATIVE_ELF_PROGRAM_TYPE_NOTE,
-      .flags = LOOM_NATIVE_ELF_PROGRAM_FLAG_READ,
-      .first_section = 0,
-      .section_count = 1,
-      .virtual_address = 0,
-      .physical_address = 0,
-      .alignment = 4,
+      /*.type=*/LOOM_NATIVE_ELF_PROGRAM_TYPE_NOTE,
+      /*.flags=*/LOOM_NATIVE_ELF_PROGRAM_FLAG_READ,
+      /*.file_offset=*/{},
+      /*.file_size=*/{},
+      /*.memory_size=*/{},
+      /*.first_section=*/0,
+      /*.section_count=*/1,
+      /*.virtual_address=*/0,
+      /*.physical_address=*/0,
+      /*.alignment=*/4,
   }};
   const loom_native_elf64le_file_t file = {
-      .type = LOOM_NATIVE_ELF_FILE_TYPE_DYN,
-      .machine = LOOM_NATIVE_ELF_MACHINE_AMDGPU,
-      .os_abi = LOOM_NATIVE_ELF_OS_ABI_AMDGPU_HSA,
-      .abi_version = LOOM_NATIVE_ELF_ABI_VERSION_AMDGPU_HSA_V5,
-      .flags = LOOM_NATIVE_ELF_AMDGPU_FLAG_MACH_GFX1100,
-      .entry = 0,
-      .sections = sections,
-      .section_count = IREE_ARRAYSIZE(sections),
-      .segments = segments,
-      .segment_count = IREE_ARRAYSIZE(segments),
+      /*.type=*/LOOM_NATIVE_ELF_FILE_TYPE_DYN,
+      /*.machine=*/LOOM_NATIVE_ELF_MACHINE_AMDGPU,
+      /*.os_abi=*/LOOM_NATIVE_ELF_OS_ABI_AMDGPU_HSA,
+      /*.abi_version=*/LOOM_NATIVE_ELF_ABI_VERSION_AMDGPU_HSA_V5,
+      /*.flags=*/LOOM_NATIVE_ELF_AMDGPU_FLAG_MACH_GFX1100,
+      /*.entry=*/0,
+      /*.sections=*/sections,
+      /*.section_count=*/IREE_ARRAYSIZE(sections),
+      /*.segments=*/segments,
+      /*.segment_count=*/IREE_ARRAYSIZE(segments),
   };
 
   StreamPtr stream = CreateStream();
@@ -199,16 +202,25 @@ TEST(NativeElfTest, WritesAmdgpuNoteElfEnvelope) {
 TEST(NativeElfTest, RejectsInvalidSectionAlignment) {
   const uint8_t contents[] = {0};
   const loom_native_elf64le_section_t sections[] = {{
-      .name = IREE_SV(".bad"),
-      .type = LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS,
-      .alignment = 3,
-      .contents = iree_make_const_byte_span(contents, sizeof(contents)),
+      /*.name=*/IREE_SV(".bad"),
+      /*.type=*/LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS,
+      /*.flags=*/{},
+      /*.address=*/{},
+      /*.alignment=*/3,
+      /*.entry_size=*/{},
+      /*.link=*/{},
+      /*.info=*/{},
+      /*.contents=*/iree_make_const_byte_span(contents, sizeof(contents)),
   }};
   const loom_native_elf64le_file_t file = {
-      .type = LOOM_NATIVE_ELF_FILE_TYPE_REL,
-      .machine = LOOM_NATIVE_ELF_MACHINE_X86_64,
-      .sections = sections,
-      .section_count = IREE_ARRAYSIZE(sections),
+      /*.type=*/LOOM_NATIVE_ELF_FILE_TYPE_REL,
+      /*.machine=*/LOOM_NATIVE_ELF_MACHINE_X86_64,
+      /*.os_abi=*/{},
+      /*.abi_version=*/{},
+      /*.flags=*/{},
+      /*.entry=*/{},
+      /*.sections=*/sections,
+      /*.section_count=*/IREE_ARRAYSIZE(sections),
   };
 
   StreamPtr stream = CreateStream();
@@ -221,24 +233,39 @@ TEST(NativeElfTest, RejectsInvalidSectionAlignment) {
 TEST(NativeElfTest, RejectsInvalidSegmentRange) {
   const uint8_t contents[] = {0};
   const loom_native_elf64le_section_t sections[] = {{
-      .name = IREE_SV(".note"),
-      .type = LOOM_NATIVE_ELF_SECTION_TYPE_NOTE,
-      .alignment = 4,
-      .contents = iree_make_const_byte_span(contents, sizeof(contents)),
+      /*.name=*/IREE_SV(".note"),
+      /*.type=*/LOOM_NATIVE_ELF_SECTION_TYPE_NOTE,
+      /*.flags=*/{},
+      /*.address=*/{},
+      /*.alignment=*/4,
+      /*.entry_size=*/{},
+      /*.link=*/{},
+      /*.info=*/{},
+      /*.contents=*/iree_make_const_byte_span(contents, sizeof(contents)),
   }};
   const loom_native_elf64le_segment_t segments[] = {{
-      .type = LOOM_NATIVE_ELF_PROGRAM_TYPE_NOTE,
-      .first_section = 1,
-      .section_count = 1,
-      .alignment = 4,
+      /*.type=*/LOOM_NATIVE_ELF_PROGRAM_TYPE_NOTE,
+      /*.flags=*/{},
+      /*.file_offset=*/{},
+      /*.file_size=*/{},
+      /*.memory_size=*/{},
+      /*.first_section=*/1,
+      /*.section_count=*/1,
+      /*.virtual_address=*/{},
+      /*.physical_address=*/{},
+      /*.alignment=*/4,
   }};
   const loom_native_elf64le_file_t file = {
-      .type = LOOM_NATIVE_ELF_FILE_TYPE_DYN,
-      .machine = LOOM_NATIVE_ELF_MACHINE_AMDGPU,
-      .sections = sections,
-      .section_count = IREE_ARRAYSIZE(sections),
-      .segments = segments,
-      .segment_count = IREE_ARRAYSIZE(segments),
+      /*.type=*/LOOM_NATIVE_ELF_FILE_TYPE_DYN,
+      /*.machine=*/LOOM_NATIVE_ELF_MACHINE_AMDGPU,
+      /*.os_abi=*/{},
+      /*.abi_version=*/{},
+      /*.flags=*/{},
+      /*.entry=*/{},
+      /*.sections=*/sections,
+      /*.section_count=*/IREE_ARRAYSIZE(sections),
+      /*.segments=*/segments,
+      /*.segment_count=*/IREE_ARRAYSIZE(segments),
   };
 
   StreamPtr stream = CreateStream();

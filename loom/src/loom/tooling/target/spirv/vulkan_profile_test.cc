@@ -66,28 +66,36 @@ static bool fake_executable_cache_can_prepare_format(
          iree_string_view_equal(executable_format, IREE_SV("vulkan-spirv-bda"));
 }
 
-static const iree_hal_device_vtable_t kFakeHalDeviceVtable = {
-    .query_i64 = fake_hal_device_query_i64,
-};
+static iree_hal_device_vtable_t MakeFakeHalDeviceVtable() {
+  iree_hal_device_vtable_t vtable = {};
+  vtable.query_i64 = fake_hal_device_query_i64;
+  return vtable;
+}
 
-static const iree_hal_executable_cache_vtable_t kFakeExecutableCacheVtable = {
-    .can_prepare_format = fake_executable_cache_can_prepare_format,
-};
+static const iree_hal_device_vtable_t kFakeHalDeviceVtable =
+    MakeFakeHalDeviceVtable();
+
+static iree_hal_executable_cache_vtable_t MakeFakeExecutableCacheVtable() {
+  iree_hal_executable_cache_vtable_t vtable = {};
+  vtable.can_prepare_format = fake_executable_cache_can_prepare_format;
+  return vtable;
+}
+
+static const iree_hal_executable_cache_vtable_t kFakeExecutableCacheVtable =
+    MakeFakeExecutableCacheVtable();
 
 static fake_hal_device_t FakeDevice(const fake_query_row_t* rows,
                                     iree_host_size_t row_count) {
-  fake_hal_device_t device = {
-      .rows = rows,
-      .row_count = row_count,
-  };
+  fake_hal_device_t device = {};
+  device.rows = rows;
+  device.row_count = row_count;
   iree_hal_resource_initialize(&kFakeHalDeviceVtable, &device.resource);
   return device;
 }
 
 static fake_executable_cache_t FakeExecutableCache(bool raw_bda_supported) {
-  fake_executable_cache_t executable_cache = {
-      .raw_bda_supported = raw_bda_supported,
-  };
+  fake_executable_cache_t executable_cache = {};
+  executable_cache.raw_bda_supported = raw_bda_supported;
   iree_hal_resource_initialize(&kFakeExecutableCacheVtable,
                                &executable_cache.resource);
   return executable_cache;
@@ -95,82 +103,86 @@ static fake_executable_cache_t FakeExecutableCache(bool raw_bda_supported) {
 
 static loom_spirv_vulkan_hal_profile_facts_t BaselineFacts() {
   return loom_spirv_vulkan_hal_profile_facts_t{
-      .api_version = LOOM_SPIRV_VULKAN_API_VERSION_1_3,
-      .flags = LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_RAW_BDA_EXECUTABLE |
-               LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_BUFFER_DEVICE_ADDRESS |
-               LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_SHADER_INT64,
-      .subgroup_size = 32,
-      .max_compute_workgroup_invocations = 256,
-      .max_compute_workgroup_size =
-          {
-              .x = 256,
-              .y = 128,
-              .z = 64,
-          },
-      .max_compute_workgroup_count =
-          {
-              .x = 65535,
-              .y = 65535,
-              .z = 65535,
-          },
+      /*.api_version=*/LOOM_SPIRV_VULKAN_API_VERSION_1_3,
+      /*.flags=*/LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_RAW_BDA_EXECUTABLE |
+          LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_BUFFER_DEVICE_ADDRESS |
+          LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_SHADER_INT64,
+      /*.subgroup_size=*/32,
+      /*.max_compute_workgroup_invocations=*/256,
+      /*.max_compute_workgroup_size=*/
+      {
+          /*.x=*/256,
+          /*.y=*/128,
+          /*.z=*/64,
+      },
+      /*.max_compute_workgroup_count=*/
+      {
+          /*.x=*/65535,
+          /*.y=*/65535,
+          /*.z=*/65535,
+      },
   };
 }
 
 static loom_spirv_cooperative_matrix_query_t F16MatrixQuery() {
   return {
-      .m_size = 16,
-      .n_size = 16,
-      .k_size = 16,
-      .lhs_type = LOOM_SPIRV_SCALAR_TYPE_F16,
-      .rhs_type = LOOM_SPIRV_SCALAR_TYPE_F16,
-      .accumulator_type = LOOM_SPIRV_SCALAR_TYPE_F32,
-      .result_type = LOOM_SPIRV_SCALAR_TYPE_F32,
-      .scope = LOOM_SPIRV_SCOPE_SUBGROUP,
-      .layout = LOOM_SPIRV_COOPERATIVE_MATRIX_LAYOUT_ROW_MAJOR_KHR,
-      .storage_class = LOOM_SPIRV_STORAGE_CLASS_PHYSICAL_STORAGE_BUFFER,
-      .policy = LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED,
+      /*.m_size=*/16,
+      /*.n_size=*/16,
+      /*.k_size=*/16,
+      /*.lhs_type=*/LOOM_SPIRV_SCALAR_TYPE_F16,
+      /*.rhs_type=*/LOOM_SPIRV_SCALAR_TYPE_F16,
+      /*.accumulator_type=*/LOOM_SPIRV_SCALAR_TYPE_F32,
+      /*.result_type=*/LOOM_SPIRV_SCALAR_TYPE_F32,
+      /*.scope=*/LOOM_SPIRV_SCOPE_SUBGROUP,
+      /*.layout=*/LOOM_SPIRV_COOPERATIVE_MATRIX_LAYOUT_ROW_MAJOR_KHR,
+      /*.storage_class=*/LOOM_SPIRV_STORAGE_CLASS_PHYSICAL_STORAGE_BUFFER,
+      /*.operand_flags=*/{},
+      /*.policy=*/LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED,
   };
 }
 
 static iree_hal_vulkan_cooperative_matrix_property_t F16DeviceMatrixRow() {
   return {
-      .m_size = 16,
-      .n_size = 16,
-      .k_size = 16,
-      .a_type = LOOM_SPIRV_COMPONENT_TYPE_FLOAT16_NV,
-      .b_type = LOOM_SPIRV_COMPONENT_TYPE_FLOAT16_NV,
-      .c_type = LOOM_SPIRV_COMPONENT_TYPE_FLOAT32_NV,
-      .result_type = LOOM_SPIRV_COMPONENT_TYPE_FLOAT32_NV,
-      .scope = LOOM_SPIRV_SCOPE_SUBGROUP,
+      /*.m_size=*/16,
+      /*.n_size=*/16,
+      /*.k_size=*/16,
+      /*.a_type=*/LOOM_SPIRV_COMPONENT_TYPE_FLOAT16_NV,
+      /*.b_type=*/LOOM_SPIRV_COMPONENT_TYPE_FLOAT16_NV,
+      /*.c_type=*/LOOM_SPIRV_COMPONENT_TYPE_FLOAT32_NV,
+      /*.result_type=*/LOOM_SPIRV_COMPONENT_TYPE_FLOAT32_NV,
+      /*.saturating_accumulation=*/{},
+      /*.scope=*/LOOM_SPIRV_SCOPE_SUBGROUP,
   };
 }
 
 static loom_spirv_cooperative_matrix_query_t U8MatrixQuery() {
   return {
-      .m_size = 16,
-      .n_size = 16,
-      .k_size = 32,
-      .lhs_type = LOOM_SPIRV_SCALAR_TYPE_U8,
-      .rhs_type = LOOM_SPIRV_SCALAR_TYPE_U8,
-      .accumulator_type = LOOM_SPIRV_SCALAR_TYPE_U32,
-      .result_type = LOOM_SPIRV_SCALAR_TYPE_U32,
-      .scope = LOOM_SPIRV_SCOPE_SUBGROUP,
-      .layout = LOOM_SPIRV_COOPERATIVE_MATRIX_LAYOUT_ROW_MAJOR_KHR,
-      .storage_class = LOOM_SPIRV_STORAGE_CLASS_PHYSICAL_STORAGE_BUFFER,
-      .policy = LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED,
+      /*.m_size=*/16,
+      /*.n_size=*/16,
+      /*.k_size=*/32,
+      /*.lhs_type=*/LOOM_SPIRV_SCALAR_TYPE_U8,
+      /*.rhs_type=*/LOOM_SPIRV_SCALAR_TYPE_U8,
+      /*.accumulator_type=*/LOOM_SPIRV_SCALAR_TYPE_U32,
+      /*.result_type=*/LOOM_SPIRV_SCALAR_TYPE_U32,
+      /*.scope=*/LOOM_SPIRV_SCOPE_SUBGROUP,
+      /*.layout=*/LOOM_SPIRV_COOPERATIVE_MATRIX_LAYOUT_ROW_MAJOR_KHR,
+      /*.storage_class=*/LOOM_SPIRV_STORAGE_CLASS_PHYSICAL_STORAGE_BUFFER,
+      /*.operand_flags=*/{},
+      /*.policy=*/LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED,
   };
 }
 
 static iree_hal_vulkan_cooperative_matrix_property_t U8DeviceMatrixRow() {
   return {
-      .m_size = 16,
-      .n_size = 16,
-      .k_size = 32,
-      .a_type = LOOM_SPIRV_COMPONENT_TYPE_UNSIGNED_INT8_NV,
-      .b_type = LOOM_SPIRV_COMPONENT_TYPE_UNSIGNED_INT8_NV,
-      .c_type = LOOM_SPIRV_COMPONENT_TYPE_UNSIGNED_INT32_NV,
-      .result_type = LOOM_SPIRV_COMPONENT_TYPE_UNSIGNED_INT32_NV,
-      .scope = LOOM_SPIRV_SCOPE_SUBGROUP,
+      /*.m_size=*/16,
+      /*.n_size=*/16,
+      /*.k_size=*/32,
+      /*.a_type=*/LOOM_SPIRV_COMPONENT_TYPE_UNSIGNED_INT8_NV,
+      /*.b_type=*/LOOM_SPIRV_COMPONENT_TYPE_UNSIGNED_INT8_NV,
+      /*.c_type=*/LOOM_SPIRV_COMPONENT_TYPE_UNSIGNED_INT32_NV,
+      /*.result_type=*/LOOM_SPIRV_COMPONENT_TYPE_UNSIGNED_INT32_NV,
+      /*.saturating_accumulation=*/{},
+      /*.scope=*/LOOM_SPIRV_SCOPE_SUBGROUP,
   };
 }
 

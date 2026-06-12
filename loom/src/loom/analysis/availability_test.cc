@@ -105,10 +105,11 @@ TEST_F(AvailabilityTest, PredicateAttrRejectsValueDefinedAfterInsertion) {
   loom_value_id_t late = loom_test_constant_result(late_op);
 
   loom_predicate_t predicate = {
-      .kind = LOOM_PREDICATE_EQ,
-      .arg_count = 2,
-      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST},
-      .args = {(int64_t)late, 2},
+      /*.kind=*/LOOM_PREDICATE_EQ,
+      /*.arg_count=*/2,
+      /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST},
+      /*.reserved=*/{},
+      /*.args=*/{(int64_t)late, 2},
   };
   loom_op_t* assume_op = nullptr;
   IREE_ASSERT_OK(loom_test_assume_build(&builder_, &input, 1, &predicate, 1,
@@ -148,10 +149,11 @@ TEST_F(AvailabilityTest, PredicateAttrAllowsValueDefinedInsideMovingSubtree) {
 
   EnterRegion(map_op, map_body);
   loom_predicate_t predicate = {
-      .kind = LOOM_PREDICATE_EQ,
-      .arg_count = 2,
-      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
-      .args = {(int64_t)element, (int64_t)element},
+      /*.kind=*/LOOM_PREDICATE_EQ,
+      /*.arg_count=*/2,
+      /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
+      /*.reserved=*/{},
+      /*.args=*/{(int64_t)element, (int64_t)element},
   };
   loom_op_t* assume_op = nullptr;
   IREE_ASSERT_OK(loom_test_assume_build(&builder_, &element, 1, &predicate, 1,
@@ -197,8 +199,9 @@ TEST_F(AvailabilityTest, TypeAttrRejectsUnavailableDynamicDimension) {
   IREE_ASSERT_OK(
       loom_builder_intern_string(&builder_, IREE_SV("type"), &type_key));
   loom_named_attr_t attrs[1] = {{
-      .name_id = type_key,
-      .value = loom_attr_type(captured_type_id),
+      /*.name_id=*/type_key,
+      /*.reserved=*/{},
+      /*.value=*/loom_attr_type(captured_type_id),
   }};
   loom_attribute_t dict = {0};
   IREE_ASSERT_OK(loom_module_make_canonical_attr_dict(

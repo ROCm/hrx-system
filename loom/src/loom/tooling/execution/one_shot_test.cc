@@ -32,11 +32,11 @@ class OneShotTest : public ::testing::Test {
     loom_run_session_options_t options = {};
     loom_run_session_options_initialize(&options);
     options.register_context = (loom_run_register_context_callback_t){
-        .fn = RegisterContext,
+        /*.fn=*/RegisterContext,
     };
     options.initialize_low_descriptor_registry =
         (loom_run_initialize_low_descriptor_registry_callback_t){
-            .fn = InitializeLowDescriptorRegistry,
+            /*.fn=*/InitializeLowDescriptorRegistry,
         };
     IREE_ASSERT_OK(loom_run_session_initialize(&options, &session_));
   }

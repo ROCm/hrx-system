@@ -18,26 +18,84 @@ namespace {
 
 loom_liveness_value_class_t ValueClass(uint16_t register_class_id) {
   return loom_liveness_value_class_t{
-      .type_kind = LOOM_TYPE_REGISTER,
-      .register_class_id = register_class_id,
+      /*.type_kind=*/LOOM_TYPE_REGISTER,
+      /*.element_type=*/{},
+      /*.register_descriptor_set_stable_id=*/{},
+      /*.register_class_id=*/register_class_id,
   };
 }
 
 const loom_low_descriptor_set_t* AliasDescriptorSet() {
   static const loom_low_reg_class_t kRegClasses[] = {
       {
-          .alias_set_id = 1,
+          /*.name_string_offset=*/{},
+          /*.target_bank_id=*/{},
+          /*.flags=*/{},
+          /*.alloc_unit_bits=*/{},
+          /*.allocatable_count=*/{},
+          /*.alias_set_id=*/1,
       },
       {
-          .alias_set_id = 1,
+          /*.name_string_offset=*/{},
+          /*.target_bank_id=*/{},
+          /*.flags=*/{},
+          /*.alloc_unit_bits=*/{},
+          /*.allocatable_count=*/{},
+          /*.alias_set_id=*/1,
       },
       {
-          .alias_set_id = 0,
+          /*.name_string_offset=*/{},
+          /*.target_bank_id=*/{},
+          /*.flags=*/{},
+          /*.alloc_unit_bits=*/{},
+          /*.allocatable_count=*/{},
+          /*.alias_set_id=*/0,
       },
   };
   static const loom_low_descriptor_set_t kDescriptorSet = {
-      .reg_classes = kRegClasses,
-      .reg_class_count = IREE_ARRAYSIZE(kRegClasses),
+      /*.abi_version=*/{},
+      /*.generator_version=*/{},
+      /*.stable_id=*/{},
+      /*.target_stable_id=*/{},
+      /*.descriptor_set_ordinal=*/{},
+      /*.key_string_offset=*/{},
+      /*.target_key_string_offset=*/{},
+      /*.feature_key_string_offset=*/{},
+      /*.string_table=*/{},
+      /*.descriptors=*/{},
+      /*.descriptor_count=*/{},
+      /*.descriptor_refs=*/{},
+      /*.descriptor_ref_count=*/{},
+      /*.asm_forms=*/{},
+      /*.asm_form_count=*/{},
+      /*.asm_operand_indices=*/{},
+      /*.asm_operand_index_count=*/{},
+      /*.asm_immediates=*/{},
+      /*.asm_immediate_count=*/{},
+      /*.operands=*/{},
+      /*.operand_count=*/{},
+      /*.immediates=*/{},
+      /*.immediate_count=*/{},
+      /*.immediate_encoding_slices=*/{},
+      /*.immediate_encoding_slice_count=*/{},
+      /*.enum_domains=*/{},
+      /*.enum_domain_count=*/{},
+      /*.enum_values=*/{},
+      /*.enum_value_count=*/{},
+      /*.effects=*/{},
+      /*.effect_count=*/{},
+      /*.constraints=*/{},
+      /*.constraint_count=*/{},
+      /*.storage_leases=*/{},
+      /*.storage_lease_count=*/{},
+      /*.operand_forms=*/{},
+      /*.operand_form_count=*/{},
+      /*.operand_form_matches=*/{},
+      /*.operand_form_match_count=*/{},
+      /*.operand_form_operand_indices=*/{},
+      /*.operand_form_operand_index_count=*/{},
+      /*.reg_classes=*/kRegClasses,
+      /*.reg_class_count=*/IREE_ARRAYSIZE(kRegClasses),
   };
   return &kDescriptorSet;
 }
@@ -45,18 +103,18 @@ const loom_low_descriptor_set_t* AliasDescriptorSet() {
 loom_low_move_location_t Location(uint32_t ordinal,
                                   uint16_t register_class_id = 0) {
   return loom_low_move_location_t{
-      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-      .value_class = ValueClass(register_class_id),
-      .descriptor_reg_class_id = register_class_id,
-      .location = ordinal,
+      /*.location_kind=*/LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      /*.value_class=*/ValueClass(register_class_id),
+      /*.descriptor_reg_class_id=*/register_class_id,
+      /*.location=*/ordinal,
   };
 }
 
 loom_low_move_t Move(uint32_t destination, uint32_t source,
                      uint16_t register_class_id = 0) {
   return loom_low_move_t{
-      .destination = Location(destination, register_class_id),
-      .source = Location(source, register_class_id),
+      /*.destination=*/Location(destination, register_class_id),
+      /*.source=*/Location(source, register_class_id),
   };
 }
 
@@ -65,8 +123,8 @@ loom_low_move_t MoveBetween(uint32_t destination,
                             uint32_t source,
                             uint16_t source_register_class_id) {
   return loom_low_move_t{
-      .destination = Location(destination, destination_register_class_id),
-      .source = Location(source, source_register_class_id),
+      /*.destination=*/Location(destination, destination_register_class_id),
+      /*.source=*/Location(source, source_register_class_id),
   };
 }
 
@@ -129,14 +187,14 @@ std::vector<std::string> EmitMoves(
   }
   std::vector<std::string> emitted_moves;
   loom_low_move_sequence_options_t options = {
-      .descriptor_set = descriptor_set,
-      .temporary_locations = temporary_storage,
-      .temporary_location_count = temporary_count,
-      .emit_move =
-          {
-              .fn = RecordMove,
-              .user_data = &emitted_moves,
-          },
+      /*.descriptor_set=*/descriptor_set,
+      /*.temporary_locations=*/temporary_storage,
+      /*.temporary_location_count=*/temporary_count,
+      /*.emit_move=*/
+      {
+          /*.fn=*/RecordMove,
+          /*.user_data=*/&emitted_moves,
+      },
   };
   IREE_EXPECT_OK(loom_low_move_sequence_emit(&scratch, move_count, &options));
   return emitted_moves;
@@ -238,11 +296,14 @@ TEST(LowMoveSequenceTest, RejectsCycleWithoutTemporary) {
   };
   std::vector<std::string> emitted_moves;
   loom_low_move_sequence_options_t options = {
-      .emit_move =
-          {
-              .fn = RecordMove,
-              .user_data = &emitted_moves,
-          },
+      /*.descriptor_set=*/{},
+      /*.temporary_locations=*/{},
+      /*.temporary_location_count=*/{},
+      /*.emit_move=*/
+      {
+          /*.fn=*/RecordMove,
+          /*.user_data=*/&emitted_moves,
+      },
   };
   TestArena arena;
   loom_low_move_sequence_scratch_t scratch;
@@ -267,12 +328,14 @@ TEST(LowMoveSequenceTest, RejectsAliasDuplicateDestinations) {
   };
   std::vector<std::string> emitted_moves;
   loom_low_move_sequence_options_t options = {
-      .descriptor_set = AliasDescriptorSet(),
-      .emit_move =
-          {
-              .fn = RecordMove,
-              .user_data = &emitted_moves,
-          },
+      /*.descriptor_set=*/AliasDescriptorSet(),
+      /*.temporary_locations=*/{},
+      /*.temporary_location_count=*/{},
+      /*.emit_move=*/
+      {
+          /*.fn=*/RecordMove,
+          /*.user_data=*/&emitted_moves,
+      },
   };
   TestArena arena;
   loom_low_move_sequence_scratch_t scratch;
@@ -297,11 +360,14 @@ TEST(LowMoveSequenceTest, RejectsDuplicateDestinations) {
   };
   std::vector<std::string> emitted_moves;
   loom_low_move_sequence_options_t options = {
-      .emit_move =
-          {
-              .fn = RecordMove,
-              .user_data = &emitted_moves,
-          },
+      /*.descriptor_set=*/{},
+      /*.temporary_locations=*/{},
+      /*.temporary_location_count=*/{},
+      /*.emit_move=*/
+      {
+          /*.fn=*/RecordMove,
+          /*.user_data=*/&emitted_moves,
+      },
   };
   TestArena arena;
   loom_low_move_sequence_scratch_t scratch;

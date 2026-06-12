@@ -14,9 +14,9 @@ namespace {
 
 static iree_hal_amdgpu_queue_affinity_domain_t TwoDeviceDomain() {
   return (iree_hal_amdgpu_queue_affinity_domain_t){
-      .supported_affinity = 0xFull,
-      .physical_device_count = 2,
-      .queue_count_per_physical_device = 2,
+      /*.supported_affinity=*/0xFull,
+      /*.physical_device_count=*/2,
+      /*.queue_count_per_physical_device=*/2,
   };
 }
 
@@ -143,9 +143,9 @@ TEST(QueueAffinityTest, SelectPhysicalDevicesRejectsUnmappedAffinity) {
 
 TEST(QueueAffinityTest, SelectPhysicalDevicesRejectsUnrepresentableMask) {
   iree_hal_amdgpu_queue_affinity_domain_t domain = {
-      .supported_affinity = 1ull,
-      .physical_device_count = 65,
-      .queue_count_per_physical_device = 1,
+      /*.supported_affinity=*/1ull,
+      /*.physical_device_count=*/65,
+      /*.queue_count_per_physical_device=*/1,
   };
 
   iree_hal_amdgpu_queue_affinity_physical_device_set_t physical_devices;

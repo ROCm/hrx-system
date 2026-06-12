@@ -65,7 +65,7 @@ class MaterializeTest : public ::testing::Test {
 
   loom_ir_remap_t InitializeSameModuleRemap(bool allow_unmapped_values) {
     loom_ir_remap_options_t options = {
-        .allow_unmapped_values = allow_unmapped_values,
+        /*.allow_unmapped_values=*/allow_unmapped_values,
     };
     loom_ir_remap_t remap = {};
     IREE_CHECK_OK(loom_ir_remap_initialize(source_, source_, &remap_arena_,
@@ -371,14 +371,14 @@ TEST_F(MaterializeTest, ClonesOperandDictOps) {
       loom_module_intern_string(source_, IREE_SV("alpha"), &source_alpha_name));
   loom_named_value_t source_params[] = {
       {
-          .name_id = source_beta_name,
-          .reserved = 0,
-          .value_id = source_beta,
+          /*.name_id=*/source_beta_name,
+          /*.reserved=*/0,
+          /*.value_id=*/source_beta,
       },
       {
-          .name_id = source_alpha_name,
-          .reserved = 0,
-          .value_id = source_alpha,
+          /*.name_id=*/source_alpha_name,
+          /*.reserved=*/0,
+          /*.value_id=*/source_alpha,
       },
   };
   loom_op_t* source_dict_op = nullptr;
@@ -447,7 +447,7 @@ TEST_F(MaterializeTest, ClonesBlockOpsCanOmitTerminators) {
 
   loom_ir_remap_t remap = InitializeRemap();
   loom_ir_clone_block_options_t options = {
-      .omit_terminators = true,
+      /*.omit_terminators=*/true,
   };
   IREE_ASSERT_OK(loom_ir_clone_block_ops(&target_builder_,
                                          loom_region_entry_block(source_region),
@@ -502,7 +502,7 @@ TEST_F(MaterializeTest, MovesBlockOpsAndRemapsCapturedBlockArgs) {
       InitializeSameModuleRemap(/*allow_unmapped_values=*/true);
   IREE_ASSERT_OK(loom_ir_remap_map_value(&remap, element, replacement));
   loom_ir_move_block_options_t options = {
-      .omit_terminators = true,
+      /*.omit_terminators=*/true,
   };
   IREE_ASSERT_OK(loom_ir_move_block_ops_before(
       &rewriter, loom_region_entry_block(body), sentinel_op, &remap, &options));
@@ -593,10 +593,11 @@ TEST_F(MaterializeTest, MovesBlockOpsAndRemapsPredicateAttrs) {
   loom_builder_initialize(source_, &source_->arena, source_block,
                           &source_region_builder);
   loom_predicate_t predicate = {
-      .kind = LOOM_PREDICATE_MUL,
-      .arg_count = 2,
-      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST},
-      .args = {(int64_t)source_dim, 16},
+      /*.kind=*/LOOM_PREDICATE_MUL,
+      /*.arg_count=*/2,
+      /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST},
+      /*.reserved=*/{},
+      /*.args=*/{(int64_t)source_dim, 16},
   };
   loom_op_t* assume_op = nullptr;
   IREE_ASSERT_OK(loom_test_assume_build(&source_region_builder, &source_dim, 1,

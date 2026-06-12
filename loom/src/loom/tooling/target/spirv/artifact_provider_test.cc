@@ -79,28 +79,36 @@ static bool fake_executable_cache_can_prepare_format(
          iree_string_view_equal(executable_format, IREE_SV("vulkan-spirv-bda"));
 }
 
-static const iree_hal_device_vtable_t kFakeHalDeviceVtable = {
-    .query_i64 = fake_hal_device_query_i64,
-};
+static iree_hal_device_vtable_t MakeFakeHalDeviceVtable() {
+  iree_hal_device_vtable_t vtable = {};
+  vtable.query_i64 = fake_hal_device_query_i64;
+  return vtable;
+}
 
-static const iree_hal_executable_cache_vtable_t kFakeExecutableCacheVtable = {
-    .can_prepare_format = fake_executable_cache_can_prepare_format,
-};
+static const iree_hal_device_vtable_t kFakeHalDeviceVtable =
+    MakeFakeHalDeviceVtable();
+
+static iree_hal_executable_cache_vtable_t MakeFakeExecutableCacheVtable() {
+  iree_hal_executable_cache_vtable_t vtable = {};
+  vtable.can_prepare_format = fake_executable_cache_can_prepare_format;
+  return vtable;
+}
+
+static const iree_hal_executable_cache_vtable_t kFakeExecutableCacheVtable =
+    MakeFakeExecutableCacheVtable();
 
 static fake_hal_device_t FakeDevice(const fake_query_row_t* rows,
                                     iree_host_size_t row_count) {
-  fake_hal_device_t device = {
-      .rows = rows,
-      .row_count = row_count,
-  };
+  fake_hal_device_t device = {};
+  device.rows = rows;
+  device.row_count = row_count;
   iree_hal_resource_initialize(&kFakeHalDeviceVtable, &device.resource);
   return device;
 }
 
 static fake_executable_cache_t FakeExecutableCache(bool raw_bda_supported) {
-  fake_executable_cache_t executable_cache = {
-      .raw_bda_supported = raw_bda_supported,
-  };
+  fake_executable_cache_t executable_cache = {};
+  executable_cache.raw_bda_supported = raw_bda_supported;
   iree_hal_resource_initialize(&kFakeExecutableCacheVtable,
                                &executable_cache.resource);
   return executable_cache;
@@ -171,9 +179,8 @@ class SpirvVulkanHalArtifactProviderTest : public ::testing::Test {
   }
 
   loom_text_parse_options_t ParseOptions() const {
-    loom_text_parse_options_t options = {
-        .max_errors = 20,
-    };
+    loom_text_parse_options_t options = {};
+    options.max_errors = 20;
     loom_low_descriptor_text_asm_environment_initialize(
         &low_registry_.registry, &options.low_asm_environment);
     return options;
@@ -260,10 +267,9 @@ class SpirvVulkanHalArtifactProviderTest : public ::testing::Test {
     fake_hal_device_t device =
         FakeDevice(kBaselineQueryRows, IREE_ARRAYSIZE(kBaselineQueryRows));
     fake_executable_cache_t executable_cache = FakeExecutableCache(true);
-    const loom_run_hal_runtime_t runtime = {
-        .device = (iree_hal_device_t*)&device,
-        .executable_cache = (iree_hal_executable_cache_t*)&executable_cache,
-    };
+    loom_run_hal_runtime_t runtime = {};
+    runtime.device = (iree_hal_device_t*)&device;
+    runtime.executable_cache = (iree_hal_executable_cache_t*)&executable_cache;
     return loom_spirv_vulkan_hal_artifact_provider.select_device_target(
         &loom_spirv_vulkan_hal_artifact_provider, &runtime,
         iree_allocator_system(), out_target);

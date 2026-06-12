@@ -79,7 +79,7 @@ class ArtifactManifestCollectTest : public ::testing::Test {
     loom_target_entry_diagnostic_emitter_initialize(
         module, &options, LOOM_EMITTER_VERIFIER, &diagnostic_emitter);
     const loom_target_entry_predicate_t predicate = {
-        .fn = AcceptEntry,
+        /*.fn=*/AcceptEntry,
     };
     bool selected = false;
     IREE_RETURN_IF_ERROR(loom_target_entry_select_all_entries(
@@ -111,7 +111,7 @@ class ArtifactManifestCollectTest : public ::testing::Test {
     loom_output_stream_t stream;
     loom_output_stream_for_builder(builder, &stream);
     const loom_target_artifact_manifest_format_options_t format_options = {
-        .mode = format_mode,
+        /*.mode=*/format_mode,
     };
     IREE_CHECK_OK(loom_target_artifact_manifest_format_json(
         &manifest, &format_options, &stream));

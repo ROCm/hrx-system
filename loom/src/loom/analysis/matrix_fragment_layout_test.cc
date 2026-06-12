@@ -25,71 +25,74 @@ loom_matrix_fragment_role_layout_t RoleLayout(
     uint16_t register_count, uint16_t elements_per_register,
     loom_matrix_fragment_coordinate_flags_t coordinate_flags) {
   return (loom_matrix_fragment_role_layout_t){
-      .role = role,
-      .map_kind = map_kind,
-      .register_count = register_count,
-      .elements_per_register = elements_per_register,
-      .element_bit_count = 16,
-      .coordinate_flags = coordinate_flags,
+      /*.role=*/role,
+      /*.map_kind=*/map_kind,
+      /*.register_count=*/register_count,
+      /*.elements_per_register=*/elements_per_register,
+      /*.element_bit_count=*/16,
+      /*.coordinate_flags=*/coordinate_flags,
   };
 }
 
 loom_matrix_fragment_layout_t RdnaLayout() {
   return (loom_matrix_fragment_layout_t){
-      .kind = 1,
-      .name = IREE_SV("test.rdna"),
-      .wave_size = 32,
-      .tile_shape =
-          {
-              .result_row_count = 16,
-              .result_column_count = 16,
-              .reduction_count = 16,
-          },
-      .lhs = RoleLayout(LOOM_CONTRACT_OPERAND_ROLE_LHS,
-                        LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_PACKED_REDUCTION,
-                        8, 2, kRowReduction),
-      .rhs =
-          RoleLayout(LOOM_CONTRACT_OPERAND_ROLE_RHS,
-                     LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_COLUMN_PACKED_REDUCTION,
-                     8, 2, kColumnReduction),
-      .accumulator =
-          RoleLayout(LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR,
-                     LOOM_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN,
-                     8, 1, kRowColumn),
-      .result =
-          RoleLayout(LOOM_CONTRACT_OPERAND_ROLE_RESULT,
-                     LOOM_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN,
-                     8, 1, kRowColumn),
+      /*.kind=*/1,
+      /*.name=*/IREE_SV("test.rdna"),
+      /*.wave_size=*/32,
+      /*.tile_shape=*/
+      {
+          /*.result_row_count=*/16,
+          /*.result_column_count=*/16,
+          /*.reduction_count=*/16,
+      },
+      /*.lhs=*/
+      RoleLayout(LOOM_CONTRACT_OPERAND_ROLE_LHS,
+                 LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_PACKED_REDUCTION, 8, 2,
+                 kRowReduction),
+      /*.rhs=*/
+      RoleLayout(LOOM_CONTRACT_OPERAND_ROLE_RHS,
+                 LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_COLUMN_PACKED_REDUCTION, 8,
+                 2, kColumnReduction),
+      /*.accumulator=*/
+      RoleLayout(LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR,
+                 LOOM_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN, 8, 1,
+                 kRowColumn),
+      /*.result=*/
+      RoleLayout(LOOM_CONTRACT_OPERAND_ROLE_RESULT,
+                 LOOM_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN, 8, 1,
+                 kRowColumn),
   };
 }
 
 loom_matrix_fragment_layout_t CdnaLayout() {
   return (loom_matrix_fragment_layout_t){
-      .kind = 2,
-      .name = IREE_SV("test.cdna"),
-      .wave_size = 64,
-      .tile_shape =
-          {
-              .result_row_count = 16,
-              .result_column_count = 16,
-              .reduction_count = 16,
-          },
-      .lhs = RoleLayout(
+      /*.kind=*/2,
+      /*.name=*/IREE_SV("test.cdna"),
+      /*.wave_size=*/64,
+      /*.tile_shape=*/
+      {
+          /*.result_row_count=*/16,
+          /*.result_column_count=*/16,
+          /*.reduction_count=*/16,
+      },
+      /*.lhs=*/
+      RoleLayout(
           LOOM_CONTRACT_OPERAND_ROLE_LHS,
           LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_LANE_GROUP_PACKED_REDUCTION, 2,
           2, kRowReduction),
-      .rhs = RoleLayout(
+      /*.rhs=*/
+      RoleLayout(
           LOOM_CONTRACT_OPERAND_ROLE_RHS,
           LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_COLUMN_LANE_GROUP_PACKED_REDUCTION,
           2, 2, kColumnReduction),
-      .accumulator =
-          RoleLayout(LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR,
-                     LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN, 4,
-                     1, kRowColumn),
-      .result =
-          RoleLayout(LOOM_CONTRACT_OPERAND_ROLE_RESULT,
-                     LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN, 4,
-                     1, kRowColumn),
+      /*.accumulator=*/
+      RoleLayout(LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR,
+                 LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN, 4, 1,
+                 kRowColumn),
+      /*.result=*/
+      RoleLayout(LOOM_CONTRACT_OPERAND_ROLE_RESULT,
+                 LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN, 4, 1,
+                 kRowColumn),
   };
 }
 
@@ -110,26 +113,28 @@ void ExpectCoordinate(const loom_matrix_fragment_layout_t* layout,
 loom_matrix_fragment_coordinate_t RowReduction(uint16_t row,
                                                uint16_t reduction) {
   return (loom_matrix_fragment_coordinate_t){
-      .coordinate_flags = kRowReduction,
-      .row = row,
-      .reduction = reduction,
+      /*.coordinate_flags=*/kRowReduction,
+      /*.row=*/row,
+      /*.column=*/{},
+      /*.reduction=*/reduction,
   };
 }
 
 loom_matrix_fragment_coordinate_t ColumnReduction(uint16_t column,
                                                   uint16_t reduction) {
   return (loom_matrix_fragment_coordinate_t){
-      .coordinate_flags = kColumnReduction,
-      .column = column,
-      .reduction = reduction,
+      /*.coordinate_flags=*/kColumnReduction,
+      /*.row=*/{},
+      /*.column=*/column,
+      /*.reduction=*/reduction,
   };
 }
 
 loom_matrix_fragment_coordinate_t RowColumn(uint16_t row, uint16_t column) {
   return (loom_matrix_fragment_coordinate_t){
-      .coordinate_flags = kRowColumn,
-      .row = row,
-      .column = column,
+      /*.coordinate_flags=*/kRowColumn,
+      /*.row=*/row,
+      /*.column=*/column,
   };
 }
 

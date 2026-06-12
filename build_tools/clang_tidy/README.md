@@ -199,6 +199,57 @@ status transfer helpers, C++ status wrapper constructors, and status observer
 functions. Pure observer expressions such as multiple `iree_status_is_*` checks
 do not transfer ownership and are accepted.
 
+### `iree-cpp-designated-initializer`
+
+`iree-cpp-designated-initializer` diagnoses C++ designated initializers. MSVC
+does not support this syntax, so C++ aggregate initializers should use IREE's
+comment field-label convention instead:
+
+```c++
+iree_hal_buffer_params_t params = {
+    /*.type=*/IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+    /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
+    /*.usage=*/IREE_HAL_BUFFER_USAGE_DEFAULT,
+};
+```
+
+The check is C++-only. C designated initializers remain valid and are not
+diagnosed:
+
+```c
+iree_hal_buffer_params_t params = {
+    .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+    .access = IREE_HAL_MEMORY_ACCESS_ALL,
+    .usage = IREE_HAL_BUFFER_USAGE_DEFAULT,
+};
+```
+
+The simple `.field = value` C++ form is fixable with `clang-tidy --fix`. The
+fix replaces the designator with `/*.field=*/` and leaves the initializer value
+unchanged. When an initializer skips a field, the fix inserts an explicit
+zero-initialized placeholder so the positional initializer keeps the original
+designated-initializer semantics:
+
+```c++
+// Before.
+iree_example_t example = {
+    .mode = IREE_EXAMPLE_MODE_DEFAULT,
+    .name = IREE_SVL("example"),
+};
+
+// After, assuming `flags` is declared between `mode` and `name`.
+iree_example_t example = {
+    /*.mode=*/IREE_EXAMPLE_MODE_DEFAULT,
+    /*.flags=*/{},
+    /*.name=*/IREE_SVL("example"),
+};
+```
+
+Macro expansions are diagnosed but not automatically fixed. For macro bodies,
+update the macro definition. For macro arguments, rewrite the argument at the
+callsite or use zero-initialization plus field assignment when the initializer
+is intentionally sparse.
+
 ### `iree-lifecycle-naming`
 
 `iree-lifecycle-naming` diagnoses caller-owned output records that use

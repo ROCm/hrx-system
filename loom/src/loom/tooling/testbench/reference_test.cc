@@ -54,9 +54,10 @@ class ReferenceTest : public ::testing::Test {
         iree_hal_allocator_create_heap(IREE_SV("testbench"), host_allocator_,
                                        host_allocator_, &device_allocator_));
     reference_options_ = {
-        .device_allocator = device_allocator_,
-        .result_buffer_params = BufferParams(),
-        .host_allocator = host_allocator_,
+        /*.device=*/{},
+        /*.device_allocator=*/device_allocator_,
+        /*.result_buffer_params=*/BufferParams(),
+        /*.host_allocator=*/host_allocator_,
     };
   }
 
@@ -70,12 +71,12 @@ class ReferenceTest : public ::testing::Test {
 
   iree_hal_buffer_params_t BufferParams() {
     return iree_hal_buffer_params_t{
-        .usage = IREE_HAL_BUFFER_USAGE_DEFAULT |
-                 IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING,
-        .access = IREE_HAL_MEMORY_ACCESS_ALL,
-        .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
-                IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
-        .queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY,
+        /*.usage=*/IREE_HAL_BUFFER_USAGE_DEFAULT |
+            IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING,
+        /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
+        /*.type=*/IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+            IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+        /*.queue_affinity=*/IREE_HAL_QUEUE_AFFINITY_ANY,
     };
   }
 
@@ -84,8 +85,8 @@ class ReferenceTest : public ::testing::Test {
                                    iree_hal_element_type_t element_type,
                                    const std::vector<T>& values) {
     BufferContents<T> contents = {
-        .values = values.data(),
-        .count = values.size(),
+        /*.values=*/values.data(),
+        /*.count=*/values.size(),
     };
     iree_hal_buffer_view_t* buffer_view = nullptr;
     IREE_CHECK_OK(iree_hal_buffer_view_generate_buffer(
@@ -167,11 +168,14 @@ class ReferenceTest : public ::testing::Test {
         loom_module_intern_string(module_, accumulator, &accumulator_value));
     IREE_CHECK_OK(loom_module_intern_string(module_, result, &result_value));
     const loom_named_attr_t attrs[] = {
-        {.name_id = lhs_name, .value = loom_attr_string(lhs_value)},
-        {.name_id = rhs_name, .value = loom_attr_string(rhs_value)},
-        {.name_id = accumulator_name,
-         .value = loom_attr_string(accumulator_value)},
-        {.name_id = result_name, .value = loom_attr_string(result_value)},
+        {/*.name_id=*/lhs_name, /*.reserved=*/{},
+         /*.value=*/loom_attr_string(lhs_value)},
+        {/*.name_id=*/rhs_name, /*.reserved=*/{},
+         /*.value=*/loom_attr_string(rhs_value)},
+        {/*.name_id=*/accumulator_name,
+         /*.reserved=*/{}, /*.value=*/loom_attr_string(accumulator_value)},
+        {/*.name_id=*/result_name, /*.reserved=*/{},
+         /*.value=*/loom_attr_string(result_value)},
     };
     loom_attribute_t attr = {};
     IREE_CHECK_OK(loom_module_make_canonical_attr_dict(
@@ -217,7 +221,8 @@ TEST_F(ReferenceTest, ComputesF16MatmulWithF32Accumulator) {
 
   iree_vm_variant_t results[1] = {iree_vm_variant_empty()};
   loom_testbench_invocation_plan_t invocation = {
-      .module = module_,
+      /*.kind=*/{},
+      /*.module=*/module_,
   };
   IREE_ASSERT_OK(provider.invoke.fn(provider.invoke.user_data, &invocation,
                                     IREE_ARRAYSIZE(inputs), inputs,
@@ -248,9 +253,15 @@ TEST_F(ReferenceTest, ComputesU8MatmulWithF32Accumulator) {
 
   iree_vm_variant_t results[1] = {iree_vm_variant_empty()};
   loom_testbench_invocation_plan_t invocation = {
-      .module = module_,
-      .attrs = MakeMatmulContractAttrs(IREE_SV("u8"), IREE_SV("u8"),
-                                       IREE_SV("f32"), IREE_SV("f32")),
+      /*.kind=*/{},
+      /*.module=*/module_,
+      /*.op=*/{},
+      /*.callee_ref=*/{},
+      /*.provider_id=*/{},
+      /*.provider=*/{},
+      /*.attrs=*/
+      MakeMatmulContractAttrs(IREE_SV("u8"), IREE_SV("u8"), IREE_SV("f32"),
+                              IREE_SV("f32")),
   };
   IREE_ASSERT_OK(provider.invoke.fn(provider.invoke.user_data, &invocation,
                                     IREE_ARRAYSIZE(inputs), inputs,
@@ -293,7 +304,8 @@ TEST_F(ReferenceTest, ComputesTilePackedF16MatmulWithF32Accumulator) {
 
   iree_vm_variant_t results[1] = {iree_vm_variant_empty()};
   loom_testbench_invocation_plan_t invocation = {
-      .module = module_,
+      /*.kind=*/{},
+      /*.module=*/module_,
   };
   IREE_ASSERT_OK(provider.invoke.fn(provider.invoke.user_data, &invocation,
                                     IREE_ARRAYSIZE(inputs), inputs,
@@ -337,7 +349,8 @@ TEST_F(ReferenceTest, ComputesTilePackedBF16MatmulWithF32Accumulator) {
 
   iree_vm_variant_t results[1] = {iree_vm_variant_empty()};
   loom_testbench_invocation_plan_t invocation = {
-      .module = module_,
+      /*.kind=*/{},
+      /*.module=*/module_,
   };
   IREE_ASSERT_OK(provider.invoke.fn(provider.invoke.user_data, &invocation,
                                     IREE_ARRAYSIZE(inputs), inputs,
@@ -370,9 +383,15 @@ TEST_F(ReferenceTest, ComputesTilePackedU8MatmulWithI32Accumulator) {
 
   iree_vm_variant_t results[1] = {iree_vm_variant_empty()};
   loom_testbench_invocation_plan_t invocation = {
-      .module = module_,
-      .attrs = MakeMatmulContractAttrs(IREE_SV("u8"), IREE_SV("u8"),
-                                       IREE_SV("i32"), IREE_SV("i32")),
+      /*.kind=*/{},
+      /*.module=*/module_,
+      /*.op=*/{},
+      /*.callee_ref=*/{},
+      /*.provider_id=*/{},
+      /*.provider=*/{},
+      /*.attrs=*/
+      MakeMatmulContractAttrs(IREE_SV("u8"), IREE_SV("u8"), IREE_SV("i32"),
+                              IREE_SV("i32")),
   };
   IREE_ASSERT_OK(provider.invoke.fn(provider.invoke.user_data, &invocation,
                                     IREE_ARRAYSIZE(inputs), inputs,
@@ -405,9 +424,15 @@ TEST_F(ReferenceTest, RejectsIntegerAccumulatorOverflow) {
 
   iree_vm_variant_t results[1] = {iree_vm_variant_empty()};
   loom_testbench_invocation_plan_t invocation = {
-      .module = module_,
-      .attrs = MakeMatmulContractAttrs(IREE_SV("u8"), IREE_SV("u8"),
-                                       IREE_SV("i8"), IREE_SV("i8")),
+      /*.kind=*/{},
+      /*.module=*/module_,
+      /*.op=*/{},
+      /*.callee_ref=*/{},
+      /*.provider_id=*/{},
+      /*.provider=*/{},
+      /*.attrs=*/
+      MakeMatmulContractAttrs(IREE_SV("u8"), IREE_SV("u8"), IREE_SV("i8"),
+                              IREE_SV("i8")),
   };
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_OUT_OF_RANGE,

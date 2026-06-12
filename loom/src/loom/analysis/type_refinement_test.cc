@@ -87,9 +87,9 @@ TEST_F(AnalysisTypeRefinementTest, FloatDimensionFactConflicts) {
 
 TEST_F(AnalysisTypeRefinementTest, EncodingSummaryNarrowsSsaEncoding) {
   loom_value_fact_encoding_summary_t summary = {
-      .role = LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
-      .static_spec_encoding_id = 11,
-      .address_layout = {},
+      /*.role=*/LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
+      /*.static_spec_encoding_id=*/11,
+      /*.address_layout=*/{},
   };
   loom_value_facts_t encoding_facts = loom_value_facts_unknown();
   IREE_ASSERT_OK(loom_value_facts_make_encoding_summary(

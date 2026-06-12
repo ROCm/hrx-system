@@ -124,7 +124,7 @@ class ReaderTest : public ::testing::Test {
         &builder, iree_make_cstring_view(name), &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_CHECK_OK(loom_module_add_symbol(module, name_id, &symbol_id));
-    loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
+    loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
     loom_type_t arg_types[1] = {i32_type};
     loom_type_t result_types[1] = {i32_type};
     loom_op_t* func_op = nullptr;
@@ -175,7 +175,7 @@ class ReaderTest : public ::testing::Test {
         loom_builder_intern_string(&builder, IREE_SV("decl"), &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_CHECK_OK(loom_module_add_symbol(module, name_id, &symbol_id));
-    loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
+    loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
     loom_string_id_t import_module_id = LOOM_STRING_ID_INVALID;
     IREE_CHECK_OK(loom_builder_intern_string(&builder, IREE_SV("kernel_lib"),
                                              &import_module_id));
@@ -209,7 +209,7 @@ class ReaderTest : public ::testing::Test {
         loom_builder_intern_string(&builder, IREE_SV("future"), &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_CHECK_OK(loom_module_add_symbol(module, name_id, &symbol_id));
-    loom_symbol_ref_t symbol = {.module_id = 0, .symbol_id = symbol_id};
+    loom_symbol_ref_t symbol = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
     loom_op_t* record_op = nullptr;
     IREE_CHECK_OK(loom_test_record_build(
         &builder, LOOM_TEST_RECORD_BUILD_FLAG_HAS_KIND,
@@ -233,7 +233,7 @@ class ReaderTest : public ::testing::Test {
         loom_builder_intern_string(&builder, IREE_SV("answer"), &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_CHECK_OK(loom_module_add_symbol(module, name_id, &symbol_id));
-    loom_symbol_ref_t symbol = {.module_id = 0, .symbol_id = symbol_id};
+    loom_symbol_ref_t symbol = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
     loom_op_t* global_op = nullptr;
     IREE_CHECK_OK(loom_global_constant_build(
         &builder, symbol, index_type, /*predicates=*/nullptr,
@@ -257,7 +257,7 @@ class ReaderTest : public ::testing::Test {
         loom_builder_intern_string(&builder, IREE_SV("reg_decl"), &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_CHECK_OK(loom_module_add_symbol(module, name_id, &symbol_id));
-    loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
+    loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
     loom_op_t* decl_op = nullptr;
     IREE_CHECK_OK(loom_test_decl_build(
         &builder, 0, /*visibility=*/0, /*cc=*/0, callee, &reg_type,
@@ -286,10 +286,11 @@ class ReaderTest : public ::testing::Test {
     IREE_CHECK_OK(iree_arena_allocate_array(
         &module->arena, 1, sizeof(loom_predicate_t), (void**)&predicates));
     predicates[0] = loom_predicate_t{
-        .kind = LOOM_PREDICATE_MUL,
-        .arg_count = 2,
-        .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST},
-        .args = {(int64_t)dim_id, 16},
+        /*.kind=*/LOOM_PREDICATE_MUL,
+        /*.arg_count=*/2,
+        /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST},
+        /*.reserved=*/{},
+        /*.args=*/{(int64_t)dim_id, 16},
     };
 
     loom_builder_t builder;
@@ -300,7 +301,7 @@ class ReaderTest : public ::testing::Test {
         loom_builder_intern_string(&builder, IREE_SV("weights"), &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_CHECK_OK(loom_module_add_symbol(module, name_id, &symbol_id));
-    loom_symbol_ref_t symbol = {.module_id = 0, .symbol_id = symbol_id};
+    loom_symbol_ref_t symbol = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
     loom_op_t* global_op = nullptr;
     IREE_CHECK_OK(loom_global_constant_build(
         &builder, symbol, tile_type, predicates, 1, loom_attr_absent(),
@@ -350,7 +351,7 @@ class ReaderTest : public ::testing::Test {
         loom_builder_intern_string(&builder, IREE_SV("cfg"), &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_CHECK_OK(loom_module_add_symbol(module, name_id, &symbol_id));
-    loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
+    loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
     loom_op_t* func_op = nullptr;
     IREE_CHECK_OK(loom_test_func_build(
         &builder, 0, /*visibility=*/0, /*cc=*/0, callee,
@@ -393,7 +394,7 @@ class ReaderTest : public ::testing::Test {
     IREE_CHECK_OK(loom_builder_intern_string(&builder, IREE_SV("f"), &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_CHECK_OK(loom_module_add_symbol(module, name_id, &symbol_id));
-    loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
+    loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
     loom_op_t* func_op = nullptr;
     IREE_CHECK_OK(loom_test_func_build(
         &builder, 0, /*visibility=*/0, /*cc=*/0, callee, arg_types,
@@ -432,7 +433,7 @@ class ReaderTest : public ::testing::Test {
     IREE_CHECK_OK(loom_builder_intern_string(&builder, IREE_SV("f"), &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_CHECK_OK(loom_module_add_symbol(module, name_id, &symbol_id));
-    loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
+    loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
     loom_op_t* func_op = nullptr;
     IREE_CHECK_OK(loom_test_func_build(
         &builder, 0, /*visibility=*/0, /*cc=*/0, callee, arg_types,
@@ -469,7 +470,7 @@ class ReaderTest : public ::testing::Test {
     IREE_CHECK_OK(loom_builder_intern_string(&builder, IREE_SV("f"), &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_CHECK_OK(loom_module_add_symbol(module, name_id, &symbol_id));
-    loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
+    loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
     loom_op_t* func_op = nullptr;
     IREE_CHECK_OK(loom_test_func_build(
         &builder, 0, /*visibility=*/0, /*cc=*/0, callee, arg_types,
@@ -518,7 +519,7 @@ class ReaderTest : public ::testing::Test {
     IREE_CHECK_OK(loom_builder_intern_string(&builder, IREE_SV("f"), &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_CHECK_OK(loom_module_add_symbol(module, name_id, &symbol_id));
-    loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
+    loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
     loom_type_t arg_types[1] = {f32_type};
     loom_type_t result_types[1] = {f32_type};
     loom_op_t* func_op = nullptr;
@@ -551,12 +552,14 @@ class ReaderTest : public ::testing::Test {
 
     loom_named_attr_t meta_entries[2] = {
         {
-            .name_id = opt_id,
-            .value = loom_attr_i64(3),
+            /*.name_id=*/opt_id,
+            /*.reserved=*/{},
+            /*.value=*/loom_attr_i64(3),
         },
         {
-            .name_id = phase_id,
-            .value = loom_attr_string(link_id),
+            /*.name_id=*/phase_id,
+            /*.reserved=*/{},
+            /*.value=*/loom_attr_string(link_id),
         },
     };
     loom_attribute_t meta_attr = {0};
@@ -567,12 +570,14 @@ class ReaderTest : public ::testing::Test {
 
     loom_named_attr_t entries[2] = {
         {
-            .name_id = axis_id,
-            .value = loom_attr_i64(0),
+            /*.name_id=*/axis_id,
+            /*.reserved=*/{},
+            /*.value=*/loom_attr_i64(0),
         },
         {
-            .name_id = meta_id,
-            .value = meta_attr,
+            /*.name_id=*/meta_id,
+            /*.reserved=*/{},
+            /*.value=*/meta_attr,
         },
     };
     loom_region_t* body = loom_func_like_body(func_like);
@@ -603,7 +608,7 @@ class ReaderTest : public ::testing::Test {
     IREE_CHECK_OK(loom_builder_intern_string(&builder, IREE_SV("f"), &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_CHECK_OK(loom_module_add_symbol(module, name_id, &symbol_id));
-    loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
+    loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
     loom_type_t arg_types[1] = {f32_type};
     loom_type_t result_types[1] = {f32_type};
     loom_op_t* func_op = nullptr;
@@ -626,18 +631,20 @@ class ReaderTest : public ::testing::Test {
     IREE_CHECK_OK(iree_arena_allocate_array(
         &module->arena, 2, sizeof(loom_predicate_t), (void**)&predicates));
     predicates[0] = loom_predicate_t{
-        .kind = LOOM_PREDICATE_MUL,
-        .arg_count = 2,
-        .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST,
-                     LOOM_PRED_ARG_NONE},
-        .args = {(int64_t)arg_ids[0], 16, 0},
+        /*.kind=*/LOOM_PREDICATE_MUL,
+        /*.arg_count=*/2,
+        /*.arg_tags=*/
+        {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST, LOOM_PRED_ARG_NONE},
+        /*.reserved=*/{},
+        /*.args=*/{(int64_t)arg_ids[0], 16, 0},
     };
     predicates[1] = loom_predicate_t{
-        .kind = LOOM_PREDICATE_RANGE,
-        .arg_count = 3,
-        .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST,
-                     LOOM_PRED_ARG_CONST},
-        .args = {(int64_t)arg_ids[0], 32, 512},
+        /*.kind=*/LOOM_PREDICATE_RANGE,
+        /*.arg_count=*/3,
+        /*.arg_tags=*/
+        {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST, LOOM_PRED_ARG_CONST},
+        /*.reserved=*/{},
+        /*.args=*/{(int64_t)arg_ids[0], 32, 512},
     };
     loom_op_attrs(func_op)[func_like.vtable->predicates_attr_index] =
         loom_attr_predicate_list(predicates, 2);
@@ -656,7 +663,7 @@ class ReaderTest : public ::testing::Test {
     IREE_CHECK_OK(loom_builder_intern_string(&builder, IREE_SV("f"), &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_CHECK_OK(loom_module_add_symbol(module, name_id, &symbol_id));
-    loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
+    loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
     loom_op_t* func_op = nullptr;
     IREE_CHECK_OK(loom_test_func_build(
         &builder, 0, /*visibility=*/0, /*cc=*/0, callee, arg_types,
@@ -674,7 +681,8 @@ class ReaderTest : public ::testing::Test {
     loom_builder_t body_builder;
     loom_builder_initialize(module, &module->arena,
                             loom_region_entry_block(body), &body_builder);
-    loom_tied_result_t tied_result = {.result_index = 0, .operand_index = 0};
+    loom_tied_result_t tied_result = {/*.result_index=*/0,
+                                      /*.operand_index=*/0};
     loom_op_t* map_op = nullptr;
     IREE_CHECK_OK(loom_test_map_build(&body_builder, arg_ids, arg_count,
                                       i32_type, &tied_result, 1,
@@ -701,7 +709,7 @@ class ReaderTest : public ::testing::Test {
     IREE_CHECK_OK(loom_builder_intern_string(&builder, IREE_SV("f"), &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_CHECK_OK(loom_module_add_symbol(module, name_id, &symbol_id));
-    loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
+    loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
     loom_type_t arg_types[1] = {i32_type};
     loom_op_t* func_op = nullptr;
     IREE_CHECK_OK(loom_test_func_build(
@@ -764,7 +772,7 @@ class ReaderTest : public ::testing::Test {
                                              IREE_SV("segmented"), &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_CHECK_OK(loom_module_add_symbol(module, name_id, &symbol_id));
-    loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
+    loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
     loom_type_t arg_types[5] = {i32, i32, i32, i32, i32};
     loom_type_t result_types[1] = {i32};
     loom_op_t* func_op = NULL;
@@ -825,11 +833,11 @@ class ReaderTest : public ::testing::Test {
       std::vector<std::string>* error_ids) {
     loom_bytecode_read_result_t result = {0};
     loom_bytecode_read_options_t options = {
-        .diagnostic_sink =
-            {
-                .fn = CaptureDiagnostic,
-                .user_data = error_ids,
-            },
+        /*.diagnostic_sink=*/
+        {
+            /*.fn=*/CaptureDiagnostic,
+            /*.user_data=*/error_ids,
+        },
     };
     IREE_CHECK_OK(loom_bytecode_read_metadata(
         iree_make_const_byte_span(bytes.data(), bytes.size()),
@@ -848,11 +856,11 @@ class ReaderTest : public ::testing::Test {
       std::vector<std::string>* error_ids) {
     loom_bytecode_read_result_t result = {0};
     loom_bytecode_read_options_t options = {
-        .diagnostic_sink =
-            {
-                .fn = CaptureDiagnostic,
-                .user_data = error_ids,
-            },
+        /*.diagnostic_sink=*/
+        {
+            /*.fn=*/CaptureDiagnostic,
+            /*.user_data=*/error_ids,
+        },
     };
     IREE_CHECK_OK(loom_bytecode_read_index(
         iree_make_const_byte_span(bytes.data(), bytes.size()),
@@ -868,12 +876,12 @@ class ReaderTest : public ::testing::Test {
                                          bool verify_module = false) {
     loom_bytecode_read_result_t result = {0};
     loom_bytecode_read_options_t options = {
-        .diagnostic_sink =
-            {
-                .fn = CaptureDiagnostic,
-                .user_data = error_ids,
-            },
-        .verify_module = verify_module,
+        /*.diagnostic_sink=*/
+        {
+            /*.fn=*/CaptureDiagnostic,
+            /*.user_data=*/error_ids,
+        },
+        /*.verify_module=*/verify_module,
     };
     IREE_CHECK_OK(loom_bytecode_read_module(
         iree_make_const_byte_span(bytes.data(), bytes.size()),
@@ -895,12 +903,12 @@ class ReaderTest : public ::testing::Test {
       bool verify_module = false) {
     loom_bytecode_read_result_t result = {0};
     loom_bytecode_read_options_t options = {
-        .diagnostic_sink =
-            {
-                .fn = CaptureDiagnostic,
-                .user_data = error_ids,
-            },
-        .verify_module = verify_module,
+        /*.diagnostic_sink=*/
+        {
+            /*.fn=*/CaptureDiagnostic,
+            /*.user_data=*/error_ids,
+        },
+        /*.verify_module=*/verify_module,
     };
     IREE_CHECK_OK(loom_bytecode_read_module_ordinal(
         iree_make_const_byte_span(bytes.data(), bytes.size()),
@@ -1219,10 +1227,10 @@ class ReaderTest : public ::testing::Test {
     entries.reserve((size_t)section_count);
     for (uint64_t i = 0; i < section_count; ++i) {
       entries.push_back(SectionEntry{
-          .kind = ReadU16LE(bytes, section_offset),
-          .directory_entry_offset = section_offset,
-          .offset = ReadU64LE(bytes, section_offset + 8),
-          .length = ReadU64LE(bytes, section_offset + 16),
+          /*.kind=*/ReadU16LE(bytes, section_offset),
+          /*.directory_entry_offset=*/section_offset,
+          /*.offset=*/ReadU64LE(bytes, section_offset + 8),
+          /*.length=*/ReadU64LE(bytes, section_offset + 16),
       });
       section_offset += sizeof(loom_bytecode_section_dir_entry_t);
     }
@@ -2504,8 +2512,8 @@ TEST_F(ReaderTest, RejectsUnknownEncodingFamily) {
   IREE_ASSERT_OK(
       loom_module_intern_string(module, IREE_SV("mystery"), &encoding_name));
   loom_encoding_t encoding = {
-      .name_id = encoding_name,
-      .alias_id = LOOM_STRING_ID_INVALID,
+      /*.name_id=*/encoding_name,
+      /*.alias_id=*/LOOM_STRING_ID_INVALID,
   };
   uint16_t encoding_id = 0;
   IREE_ASSERT_OK(loom_module_add_encoding(module, &encoding, &encoding_id));

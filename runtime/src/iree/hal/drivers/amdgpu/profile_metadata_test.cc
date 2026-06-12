@@ -117,14 +117,14 @@ TEST_F(ProfileMetadataTest, RegisterExecutableArtifactsAttachToIdentity) {
   const uint8_t code_object_data[] = {0x7f, 'E', 'L', 'F', 0x01};
   const iree_hal_amdgpu_profile_code_object_load_info_t load_infos[] = {
       {
-          .physical_device_ordinal = 0,
-          .load_delta = 0x1000,
-          .load_size = 0x2000,
+          /*.physical_device_ordinal=*/0,
+          /*.load_delta=*/0x1000,
+          /*.load_size=*/0x2000,
       },
       {
-          .physical_device_ordinal = 1,
-          .load_delta = 0x3000,
-          .load_size = 0x4000,
+          /*.physical_device_ordinal=*/1,
+          /*.load_delta=*/0x3000,
+          /*.load_size=*/0x4000,
       },
   };
   IREE_ASSERT_OK(iree_hal_amdgpu_profile_metadata_register_executable_artifacts(

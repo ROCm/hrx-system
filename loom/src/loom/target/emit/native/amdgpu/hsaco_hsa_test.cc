@@ -549,7 +549,7 @@ bool TryFindFirstGpuAgent(const HsaApi& api, hsa_agent_t* out_agent,
   IREE_ASSERT_ARGUMENT(out_agent);
   IREE_ASSERT_ARGUMENT(out_agent_name);
   IREE_ASSERT_ARGUMENT(out_skip_reason);
-  GpuAgentSearch search = {.api = &api};
+  GpuAgentSearch search = {/*.api=*/&api};
   hsa_status_t status =
       CallHsa(api.hsa_iterate_agents, FindFirstAgent, &search);
   if (status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK) {
@@ -616,7 +616,7 @@ bool TryDiscoverCurrentAmdgpuTarget(const HsaApi& api,
     return false;
   }
 
-  AgentIsaSearch isa_search = {.api = &api};
+  AgentIsaSearch isa_search = {/*.api=*/&api};
   hsa_status_t status = CallHsa(api.hsa_agent_iterate_isas, agent,
                                 FindFirstAgentIsa, &isa_search);
   if (status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK) {
@@ -644,11 +644,11 @@ bool TryDiscoverCurrentAmdgpuTarget(const HsaApi& api,
   }
 
   *out_target = {
-      .agent = agent,
-      .agent_name = std::move(agent_name),
-      .isa_name = std::move(isa_search.isa_name),
-      .processor = std::move(processor),
-      .feature_suffix = std::move(feature_suffix),
+      /*.agent=*/agent,
+      /*.agent_name=*/std::move(agent_name),
+      /*.isa_name=*/std::move(isa_search.isa_name),
+      /*.processor=*/std::move(processor),
+      /*.feature_suffix=*/std::move(feature_suffix),
   };
   return true;
 }
@@ -721,8 +721,11 @@ class LowKernelEmitter {
         module_, low_function, &fixed_values, &fixed_value_count, arena));
 
     loom_low_verify_options_t verify_options = {
-        .descriptor_registry = &target_registry_.registry,
-        .max_errors = 20,
+        /*.descriptor_registry=*/&target_registry_.registry,
+        /*.target_selection=*/{},
+        /*.emitter=*/{},
+        /*.provider_list=*/{},
+        /*.max_errors=*/20,
     };
     loom_low_verify_result_t verify_result = {};
     loom_low_verify_scratch_t verify_scratch =
@@ -737,10 +740,19 @@ class LowKernelEmitter {
     loom_low_storage_lease_provider_t storage_lease_provider = {};
     loom_amdgpu_storage_lease_provider(&storage_lease_provider);
     loom_low_emission_frame_options_t frame_options = {
-        .descriptor_registry = &target_registry_.registry,
-        .allocation_fixed_values = fixed_values,
-        .allocation_fixed_value_count = fixed_value_count,
-        .storage_lease_provider = &storage_lease_provider,
+        /*.descriptor_registry=*/&target_registry_.registry,
+        /*.target_selection=*/{},
+        /*.memory_access_table=*/{},
+        /*.schedule_pressure_cliffs=*/{},
+        /*.schedule_strategy=*/{},
+        /*.schedule_diagnostic_flags=*/{},
+        /*.allocation_budgets=*/{},
+        /*.allocation_budget_count=*/{},
+        /*.allocation_fixed_values=*/fixed_values,
+        /*.allocation_fixed_value_count=*/fixed_value_count,
+        /*.allocation_reserved_ranges=*/{},
+        /*.allocation_reserved_range_count=*/{},
+        /*.storage_lease_provider=*/&storage_lease_provider,
     };
     loom_low_emission_frame_t frame = {};
     IREE_RETURN_IF_ERROR(loom_low_emission_frame_build(
@@ -752,8 +764,9 @@ class LowKernelEmitter {
 
     StreamPtr stream = CreateStream();
     const loom_amdgpu_kernel_hsaco_options_t hsaco_options = {
-        .abi_layout = &materialization.abi_layout,
-        .packet_plan = &packet_plan,
+        /*.abi_layout=*/&materialization.abi_layout,
+        /*.preflight=*/{},
+        /*.packet_plan=*/&packet_plan,
     };
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_emit_kernel_hsaco(&frame.schedule, &frame.allocation,
@@ -773,8 +786,8 @@ class LowKernelEmitter {
   iree_status_t ParseSource(const std::string& source) {
     ResetModule();
     loom_text_parse_options_t parse_options = {
-        .diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr},
-        .max_errors = 20,
+        /*.diagnostic_sink=*/{loom_diagnostic_stderr_sink, nullptr},
+        /*.max_errors=*/20,
     };
     loom_low_descriptor_text_asm_environment_initialize(
         &target_registry_.registry, &parse_options.low_asm_environment);

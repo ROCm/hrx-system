@@ -91,8 +91,8 @@ class FuncProviderCatalogTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_func_ukernel_build(
         &builder, LOOM_FUNC_UKERNEL_BUILD_FLAG_HAS_PRIORITY, contract_id, 0, 0,
         0, 0, 0, loom_symbol_ref_null(), priority,
-        (loom_symbol_ref_t){.module_id = 0, .symbol_id = symbol_id}, &i32, 1,
-        &i32, 1, nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &op));
+        (loom_symbol_ref_t){/*.module_id=*/0, /*.symbol_id=*/symbol_id}, &i32,
+        1, &i32, 1, nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &op));
     ASSERT_NE(op, nullptr);
   }
 

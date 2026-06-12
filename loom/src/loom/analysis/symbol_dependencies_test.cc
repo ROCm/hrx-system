@@ -90,8 +90,8 @@ class SymbolDependenciesTest : public ::testing::Test {
     loom_symbol_id_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_CHECK_OK(loom_module_add_symbol(module, name_id, &symbol_id));
     return {
-        .module_id = 0,
-        .symbol_id = symbol_id,
+        /*.module_id=*/0,
+        /*.symbol_id=*/symbol_id,
     };
   }
 
@@ -101,8 +101,9 @@ class SymbolDependenciesTest : public ::testing::Test {
     loom_string_id_t key_id = LOOM_STRING_ID_INVALID;
     IREE_CHECK_OK(loom_module_intern_string(module, key, &key_id));
     return {
-        .name_id = key_id,
-        .value = loom_attr_symbol(ref),
+        /*.name_id=*/key_id,
+        /*.reserved=*/{},
+        /*.value=*/loom_attr_symbol(ref),
     };
   }
 
@@ -390,13 +391,16 @@ TEST_F(SymbolDependenciesTest, TypeAndEncodingRefsUseOneTable) {
   IREE_ASSERT_OK(
       loom_module_intern_string(module.get(), IREE_SV("refs"), &refs_key_id));
   loom_named_attr_t encoding_attrs[] = {{
-      .name_id = refs_key_id,
-      .value = nested_encoding_dict,
+      /*.name_id=*/refs_key_id,
+      /*.reserved=*/{},
+      /*.value=*/nested_encoding_dict,
   }};
   loom_encoding_t encoding = {
-      .name_id = encoding_name_id,
-      .attribute_count = IREE_ARRAYSIZE(encoding_attrs),
-      .attributes = encoding_attrs,
+      /*.name_id=*/encoding_name_id,
+      /*.alias_id=*/{},
+      /*.attribute_count=*/IREE_ARRAYSIZE(encoding_attrs),
+      /*.reserved=*/{},
+      /*.attributes=*/encoding_attrs,
   };
   uint16_t encoding_id = 0;
   IREE_ASSERT_OK(
@@ -417,12 +421,14 @@ TEST_F(SymbolDependenciesTest, TypeAndEncodingRefsUseOneTable) {
                                            &encoding_key_id));
   loom_named_attr_t owner_attrs[] = {
       {
-          .name_id = type_key_id,
-          .value = loom_attr_type(encoded_type_id),
+          /*.name_id=*/type_key_id,
+          /*.reserved=*/{},
+          /*.value=*/loom_attr_type(encoded_type_id),
       },
       {
-          .name_id = encoding_key_id,
-          .value = loom_attr_encoding(encoding_id),
+          /*.name_id=*/encoding_key_id,
+          /*.reserved=*/{},
+          /*.value=*/loom_attr_encoding(encoding_id),
       },
   };
 

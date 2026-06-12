@@ -111,7 +111,9 @@ class TargetPredicateTest : public ::testing::Test {
     iree_arena_allocator_t scratch_arena;
     iree_arena_initialize(&block_pool_, &scratch_arena);
     const loom_pass_verify_options_t options = {
-        .predicate_provider = predicate_provider_,
+        /*.registry=*/{},
+        /*.environment=*/{},
+        /*.predicate_provider=*/predicate_provider_,
     };
     iree_status_t status = loom_pass_verify_pipeline_op(
         module, FindPipeline(module, pipeline_name), &options, &scratch_arena);
@@ -125,13 +127,13 @@ class TargetPredicateTest : public ::testing::Test {
     loom_func_like_t function = FindFunction(module, function_name);
     bool match = false;
     const loom_pass_predicate_evaluate_context_t context = {
-        .pipeline_module = module,
-        .where_op = where_op,
-        .anchor_kind = LOOM_PASS_FUNCTION,
-        .predicate = IREE_SV("target"),
-        .target_module = module,
-        .symbol = symbol,
-        .function = function,
+        /*.pipeline_module=*/module,
+        /*.where_op=*/where_op,
+        /*.anchor_kind=*/LOOM_PASS_FUNCTION,
+        /*.predicate=*/IREE_SV("target"),
+        /*.target_module=*/module,
+        /*.symbol=*/symbol,
+        /*.function=*/function,
     };
     IREE_CHECK_OK(predicate_provider_.evaluate(predicate_provider_.user_data,
                                                &context, &match));

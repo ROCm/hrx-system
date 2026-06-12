@@ -16,17 +16,18 @@ namespace {
 
 loom_amdgpu_metadata_kernel_t MinimalMetadataKernel() {
   return loom_amdgpu_metadata_kernel_t{
-      .name = IREE_SV("loom_kernel"),
-      .descriptor_symbol = IREE_SV("loom_kernel.kd"),
-      .kernarg_segment_size = 0,
-      .kernarg_segment_alignment = 8,
-      .wavefront_size = 32,
-      .group_segment_fixed_size = 0,
-      .private_segment_fixed_size = 0,
-      .sgpr_count = 0,
-      .vgpr_count = 0,
-      .max_flat_workgroup_size = 64,
-      .has_required_workgroup_size = false,
+      /*.name=*/IREE_SV("loom_kernel"),
+      /*.descriptor_symbol=*/IREE_SV("loom_kernel.kd"),
+      /*.kernarg_segment_size=*/0,
+      /*.kernarg_segment_alignment=*/8,
+      /*.wavefront_size=*/32,
+      /*.group_segment_fixed_size=*/0,
+      /*.private_segment_fixed_size=*/0,
+      /*.sgpr_count=*/0,
+      /*.vgpr_count=*/0,
+      /*.max_flat_workgroup_size=*/64,
+      /*.required_workgroup_size=*/{},
+      /*.has_required_workgroup_size=*/false,
   };
 }
 

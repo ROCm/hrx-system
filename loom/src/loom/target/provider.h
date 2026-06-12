@@ -179,8 +179,8 @@ typedef struct loom_target_emitter_list_t {
 static inline loom_target_emitter_list_t loom_target_emitter_list_make(
     const loom_target_emitter_t* const* values, iree_host_size_t count) {
   return (loom_target_emitter_list_t){
-      .values = values,
-      .count = count,
+      /*.values=*/values,
+      /*.count=*/count,
   };
 }
 
@@ -316,8 +316,8 @@ static inline loom_target_provider_set_t loom_target_provider_set_make(
     const loom_target_provider_t* const* providers,
     iree_host_size_t provider_count) {
   return (loom_target_provider_set_t){
-      .providers = providers,
-      .provider_count = provider_count,
+      /*.providers=*/providers,
+      /*.provider_count=*/provider_count,
   };
 }
 

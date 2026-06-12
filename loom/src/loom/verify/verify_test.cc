@@ -155,7 +155,7 @@ class VerifyTest : public ::testing::Test {
         loom_builder_intern_string(&builder_, IREE_SV("test"), &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_ASSERT_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
-    loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
+    loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
     loom_op_t* func_op = nullptr;
     IREE_ASSERT_OK(loom_test_func_build(
         &builder_, 0, 0, 0, callee, arg_types, arg_count, nullptr, 0, nullptr,
@@ -181,7 +181,7 @@ class VerifyTest : public ::testing::Test {
         loom_builder_intern_string(&builder_, IREE_SV("callee"), &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_EXPECT_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
-    return (loom_symbol_ref_t){.module_id = 0, .symbol_id = symbol_id};
+    return (loom_symbol_ref_t){/*.module_id=*/0, /*.symbol_id=*/symbol_id};
   }
 
   loom_verify_result_t Verify() {
@@ -247,14 +247,14 @@ class VerifyTest : public ::testing::Test {
       loom_module_t* parsed_module, const char* source, const char* filename,
       DiagnosticCapture* capture) {
     loom_source_entry_t source_entries[] = {{
-        .source_id = FindModuleSourceId(parsed_module, filename),
-        .source = iree_make_cstring_view(source),
-        .filename = iree_make_cstring_view(filename),
+        /*.source_id=*/FindModuleSourceId(parsed_module, filename),
+        /*.source=*/iree_make_cstring_view(source),
+        /*.filename=*/iree_make_cstring_view(filename),
     }};
     EXPECT_NE(source_entries[0].source_id, LOOM_SOURCE_ID_INVALID);
     loom_source_table_resolver_t resolver_data = {
-        .entries = source_entries,
-        .count = IREE_ARRAYSIZE(source_entries),
+        /*.entries=*/source_entries,
+        /*.count=*/IREE_ARRAYSIZE(source_entries),
     };
 
     loom_verify_options_t options = {};
@@ -357,7 +357,7 @@ static void ExpectBadTraitDiagnostic(const loom_op_vtable_t* bad_vtable,
       loom_builder_intern_string(&builder, IREE_SV("test"), &name_id));
   uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
   IREE_ASSERT_OK(loom_module_add_symbol(module, name_id, &symbol_id));
-  loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
+  loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
   loom_op_t* func_op = nullptr;
   IREE_ASSERT_OK(loom_test_func_build(&builder, 0, 0, 0, callee, nullptr, 0,
                                       nullptr, 0, nullptr, 0, nullptr, 0,
@@ -400,8 +400,29 @@ TEST(VerifyTraitConsistencyTest, RejectsDeclaredIncompatibleHintTraits) {
       8, 3, 'b', 'a', 'd', '.', 'h', 'i', 'n', 't', '\0',
   };
   static const loom_op_vtable_t kBadHintVtable = {
-      .traits = LOOM_TRAIT_HINT | LOOM_TRAIT_PURE,
-      .name = kBadHintName,
+      /*.traits=*/LOOM_TRAIT_HINT | LOOM_TRAIT_PURE,
+      /*.fixed_operand_count=*/{},
+      /*.fixed_result_count=*/{},
+      /*.attribute_count=*/{},
+      /*.region_count=*/{},
+      /*.vtable_flags=*/{},
+      /*.symbol_kind=*/{},
+      /*.constraint_count=*/{},
+      /*.operand_descriptor_count=*/{},
+      /*.control_flow_flags=*/{},
+      /*.control_flow_reserved=*/{},
+      /*.successor_selector_operand_index=*/{},
+      /*.canonicalize=*/{},
+      /*.infer_facts=*/{},
+      /*.effective_traits=*/{},
+      /*.attr_descriptors=*/{},
+      /*.operand_descriptors=*/{},
+      /*.type_transfer=*/{},
+      /*.result_descriptors=*/{},
+      /*.region_descriptors=*/{},
+      /*.constraints=*/{},
+      /*.verify=*/{},
+      /*.name=*/kBadHintName,
   };
   ExpectBadTraitDiagnostic(&kBadHintVtable, "bad.hint", "HINT", "PURE");
 }
@@ -411,9 +432,29 @@ TEST(VerifyTraitConsistencyTest, RejectsEffectiveIncompatibleHintTraits) {
       8, 3, 'b', 'a', 'd', '.', 'h', 'i', 'n', 't', '\0',
   };
   static const loom_op_vtable_t kBadHintVtable = {
-      .traits = LOOM_TRAIT_HINT,
-      .effective_traits = BadHintPureEffectiveTraits,
-      .name = kBadHintName,
+      /*.traits=*/LOOM_TRAIT_HINT,
+      /*.fixed_operand_count=*/{},
+      /*.fixed_result_count=*/{},
+      /*.attribute_count=*/{},
+      /*.region_count=*/{},
+      /*.vtable_flags=*/{},
+      /*.symbol_kind=*/{},
+      /*.constraint_count=*/{},
+      /*.operand_descriptor_count=*/{},
+      /*.control_flow_flags=*/{},
+      /*.control_flow_reserved=*/{},
+      /*.successor_selector_operand_index=*/{},
+      /*.canonicalize=*/{},
+      /*.infer_facts=*/{},
+      /*.effective_traits=*/BadHintPureEffectiveTraits,
+      /*.attr_descriptors=*/{},
+      /*.operand_descriptors=*/{},
+      /*.type_transfer=*/{},
+      /*.result_descriptors=*/{},
+      /*.region_descriptors=*/{},
+      /*.constraints=*/{},
+      /*.verify=*/{},
+      /*.name=*/kBadHintName,
   };
   ExpectBadTraitDiagnostic(&kBadHintVtable, "bad.hint", "HINT", "PURE");
 }
@@ -423,8 +464,29 @@ TEST(VerifyTraitConsistencyTest, RejectsDeclaredIncompatibleSpeculationTraits) {
       8, 3, 'b', 'a', 'd', '.', 's', 'p', 'e', 'c', '\0',
   };
   static const loom_op_vtable_t kBadSpecVtable = {
-      .traits = LOOM_TRAIT_SAFE_TO_SPECULATE | LOOM_TRAIT_UNKNOWN_EFFECTS,
-      .name = kBadSpecName,
+      /*.traits=*/LOOM_TRAIT_SAFE_TO_SPECULATE | LOOM_TRAIT_UNKNOWN_EFFECTS,
+      /*.fixed_operand_count=*/{},
+      /*.fixed_result_count=*/{},
+      /*.attribute_count=*/{},
+      /*.region_count=*/{},
+      /*.vtable_flags=*/{},
+      /*.symbol_kind=*/{},
+      /*.constraint_count=*/{},
+      /*.operand_descriptor_count=*/{},
+      /*.control_flow_flags=*/{},
+      /*.control_flow_reserved=*/{},
+      /*.successor_selector_operand_index=*/{},
+      /*.canonicalize=*/{},
+      /*.infer_facts=*/{},
+      /*.effective_traits=*/{},
+      /*.attr_descriptors=*/{},
+      /*.operand_descriptors=*/{},
+      /*.type_transfer=*/{},
+      /*.result_descriptors=*/{},
+      /*.region_descriptors=*/{},
+      /*.constraints=*/{},
+      /*.verify=*/{},
+      /*.name=*/kBadSpecName,
   };
   ExpectBadTraitDiagnostic(&kBadSpecVtable, "bad.spec", "SAFE_TO_SPECULATE",
                            "UNKNOWN_EFFECTS");
@@ -435,8 +497,29 @@ TEST(VerifyTraitConsistencyTest, RejectsDeclaredSpeculatableConvergentTraits) {
       8, 3, 'b', 'a', 'd', '.', 'c', 'o', 'n', 'v', '\0',
   };
   static const loom_op_vtable_t kBadConvergentVtable = {
-      .traits = LOOM_TRAIT_SAFE_TO_SPECULATE | LOOM_TRAIT_CONVERGENT,
-      .name = kBadConvergentName,
+      /*.traits=*/LOOM_TRAIT_SAFE_TO_SPECULATE | LOOM_TRAIT_CONVERGENT,
+      /*.fixed_operand_count=*/{},
+      /*.fixed_result_count=*/{},
+      /*.attribute_count=*/{},
+      /*.region_count=*/{},
+      /*.vtable_flags=*/{},
+      /*.symbol_kind=*/{},
+      /*.constraint_count=*/{},
+      /*.operand_descriptor_count=*/{},
+      /*.control_flow_flags=*/{},
+      /*.control_flow_reserved=*/{},
+      /*.successor_selector_operand_index=*/{},
+      /*.canonicalize=*/{},
+      /*.infer_facts=*/{},
+      /*.effective_traits=*/{},
+      /*.attr_descriptors=*/{},
+      /*.operand_descriptors=*/{},
+      /*.type_transfer=*/{},
+      /*.result_descriptors=*/{},
+      /*.region_descriptors=*/{},
+      /*.constraints=*/{},
+      /*.verify=*/{},
+      /*.name=*/kBadConvergentName,
   };
   ExpectBadTraitDiagnostic(&kBadConvergentVtable, "bad.conv",
                            "SAFE_TO_SPECULATE", "CONVERGENT");
@@ -473,10 +556,11 @@ TEST_F(VerifyTest, RejectsPredicateArityMismatch) {
   EnterTestFunc(&index_type, 1, &argument);
 
   loom_predicate_t predicate = {
-      .kind = LOOM_PREDICATE_POW2,
-      .arg_count = 2,
-      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST},
-      .args = {(int64_t)argument, 16},
+      /*.kind=*/LOOM_PREDICATE_POW2,
+      /*.arg_count=*/2,
+      /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST},
+      /*.reserved=*/{},
+      /*.args=*/{(int64_t)argument, 16},
   };
   loom_op_t* assume_op = nullptr;
   IREE_ASSERT_OK(loom_test_assume_build(&builder_, &argument, 1, &predicate, 1,
@@ -567,7 +651,7 @@ TEST_F(VerifyTest, OperandDictOperandsRequireNamesAttribute) {
   IREE_ASSERT_OK(
       loom_builder_intern_string(&builder_, IREE_SV("alpha"), &alpha_name));
   loom_named_value_t parameters[] = {
-      {.name_id = alpha_name, .reserved = 0, .value_id = arguments[1]},
+      {/*.name_id=*/alpha_name, /*.reserved=*/0, /*.value_id=*/arguments[1]},
   };
   loom_op_t* op = nullptr;
   IREE_ASSERT_OK(loom_test_operand_dict_build(
@@ -601,14 +685,14 @@ TEST_F(VerifyTest, OperandDictOrdinalsMustStayInOperandRange) {
   IREE_ASSERT_OK(
       loom_builder_intern_string(&builder_, IREE_SV("alpha"), &alpha_name));
   loom_named_value_t parameters[] = {
-      {.name_id = alpha_name, .reserved = 0, .value_id = arguments[1]},
+      {/*.name_id=*/alpha_name, /*.reserved=*/0, /*.value_id=*/arguments[1]},
   };
   loom_op_t* op = nullptr;
   IREE_ASSERT_OK(loom_test_operand_dict_build(
       &builder_, arguments[0], parameters, IREE_ARRAYSIZE(parameters), f32_type,
       LOOM_LOCATION_UNKNOWN, &op));
   loom_named_attr_t names[] = {
-      {.name_id = alpha_name, .reserved = 0, .value = loom_attr_i64(1)},
+      {/*.name_id=*/alpha_name, /*.reserved=*/0, /*.value=*/loom_attr_i64(1)},
   };
   loom_op_attrs(op)[0] =
       loom_make_canonical_attr_dict(names, IREE_ARRAYSIZE(names));
@@ -704,8 +788,8 @@ TEST_F(VerifyTest, OpAfterTerminatorReportsTerminatorLocation) {
   loom_op_t* func_op = nullptr;
   IREE_ASSERT_OK(loom_test_func_build(
       &builder_, 0, 0, 0,
-      (loom_symbol_ref_t){.module_id = 0, .symbol_id = symbol_id}, nullptr, 0,
-      nullptr, 0, nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &func_op));
+      (loom_symbol_ref_t){/*.module_id=*/0, /*.symbol_id=*/symbol_id}, nullptr,
+      0, nullptr, 0, nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &func_op));
   loom_builder_set_block(&builder_,
                          loom_region_entry_block(loom_test_func_body(func_op)));
 
@@ -1026,16 +1110,16 @@ TEST_F(VerifyTest, ParsedSourceResolverHighlightsExactResultAndOperandTokens) {
 
   loom_source_entry_t source_entries[] = {
       {
-          .source_id =
-              FindModuleSourceId(parsed_module, "parsed_verify_test.loom"),
-          .source = iree_make_cstring_view(kSource),
-          .filename = IREE_SV("parsed_verify_test.loom"),
+          /*.source_id=*/
+          FindModuleSourceId(parsed_module, "parsed_verify_test.loom"),
+          /*.source=*/iree_make_cstring_view(kSource),
+          /*.filename=*/IREE_SV("parsed_verify_test.loom"),
       },
   };
   ASSERT_NE(source_entries[0].source_id, LOOM_SOURCE_ID_INVALID);
   loom_source_table_resolver_t resolver_data = {
-      .entries = source_entries,
-      .count = IREE_ARRAYSIZE(source_entries),
+      /*.entries=*/source_entries,
+      /*.count=*/IREE_ARRAYSIZE(source_entries),
   };
 
   DiagnosticCapture structured;
@@ -1098,15 +1182,15 @@ TEST_F(VerifyTest, ParsedUseAfterConsumeReportsRelatedConsumeLocation) {
   ASSERT_NE(parsed_module, nullptr);
 
   loom_source_entry_t source_entries[] = {{
-      .source_id =
-          FindModuleSourceId(parsed_module, "parsed_use_after_consume.loom"),
-      .source = iree_make_cstring_view(kSource),
-      .filename = IREE_SV("parsed_use_after_consume.loom"),
+      /*.source_id=*/
+      FindModuleSourceId(parsed_module, "parsed_use_after_consume.loom"),
+      /*.source=*/iree_make_cstring_view(kSource),
+      /*.filename=*/IREE_SV("parsed_use_after_consume.loom"),
   }};
   ASSERT_NE(source_entries[0].source_id, LOOM_SOURCE_ID_INVALID);
   loom_source_table_resolver_t resolver_data = {
-      .entries = source_entries,
-      .count = IREE_ARRAYSIZE(source_entries),
+      /*.entries=*/source_entries,
+      /*.count=*/IREE_ARRAYSIZE(source_entries),
   };
 
   DiagnosticCapture structured;
@@ -1612,20 +1696,20 @@ TEST_F(VerifyTest, DuplicateTiedResultIndexDetected) {
       AddFileLocation(filename, 1, 1, 1, (uint16_t)sizeof(kSource));
   loom_location_field_span_t field_spans[] = {
       {
-          .kind = LOOM_LOCATION_FIELD_RESULT,
-          .index = 0,
-          .start_line = 1,
-          .start_col = 1,
-          .end_line = 1,
-          .end_col = 7,
+          /*.kind=*/LOOM_LOCATION_FIELD_RESULT,
+          /*.index=*/0,
+          /*.start_line=*/1,
+          /*.start_col=*/1,
+          /*.end_line=*/1,
+          /*.end_col=*/7,
       },
       {
-          .kind = LOOM_LOCATION_FIELD_RESULT,
-          .index = 0,
-          .start_line = 1,
-          .start_col = 9,
-          .end_line = 1,
-          .end_col = 16,
+          /*.kind=*/LOOM_LOCATION_FIELD_RESULT,
+          /*.index=*/0,
+          /*.start_line=*/1,
+          /*.start_col=*/9,
+          /*.end_line=*/1,
+          /*.end_col=*/16,
       },
   };
   IREE_ASSERT_OK(loom_module_attach_location_field_spans(
@@ -1633,8 +1717,8 @@ TEST_F(VerifyTest, DuplicateTiedResultIndexDetected) {
 
   loom_type_t result_types[] = {f32_type, f32_type};
   loom_tied_result_t tied_results[] = {
-      {.result_index = 0, .operand_index = 0, .has_type_change = false},
-      {.result_index = 0, .operand_index = 1, .has_type_change = false},
+      {/*.result_index=*/0, /*.operand_index=*/0, /*.has_type_change=*/false},
+      {/*.result_index=*/0, /*.operand_index=*/1, /*.has_type_change=*/false},
   };
   loom_op_t* op = nullptr;
   IREE_ASSERT_OK(loom_test_invoke_build(
@@ -1642,13 +1726,13 @@ TEST_F(VerifyTest, DuplicateTiedResultIndexDetected) {
       IREE_ARRAYSIZE(tied_results), location, &op));
 
   loom_source_entry_t source_entries[] = {{
-      .source_id = FindModuleSourceId(module_, filename),
-      .source = iree_make_cstring_view(kSource),
-      .filename = IREE_SV("duplicate_tied_result.loom"),
+      /*.source_id=*/FindModuleSourceId(module_, filename),
+      /*.source=*/iree_make_cstring_view(kSource),
+      /*.filename=*/IREE_SV("duplicate_tied_result.loom"),
   }};
   loom_source_table_resolver_t resolver_data = {
-      .entries = source_entries,
-      .count = IREE_ARRAYSIZE(source_entries),
+      /*.entries=*/source_entries,
+      /*.count=*/IREE_ARRAYSIZE(source_entries),
   };
   options_.source_resolver = {loom_source_table_resolve, &resolver_data};
 
@@ -1696,8 +1780,8 @@ TEST_F(VerifyTest, DuplicateTiedOperandIndexDetected) {
 
   loom_type_t result_types[] = {f32_type, f32_type};
   loom_tied_result_t tied_results[] = {
-      {.result_index = 0, .operand_index = 0, .has_type_change = false},
-      {.result_index = 1, .operand_index = 0, .has_type_change = false},
+      {/*.result_index=*/0, /*.operand_index=*/0, /*.has_type_change=*/false},
+      {/*.result_index=*/1, /*.operand_index=*/0, /*.has_type_change=*/false},
   };
   loom_op_t* op = nullptr;
   IREE_ASSERT_OK(loom_test_invoke_build(
@@ -1780,7 +1864,7 @@ TEST_F(VerifyTest, AmbiguousRepeatedOperandValueDetected) {
   loom_value_id_t operands[] = {args[0], args[0]};
   loom_type_t result_types[] = {f32_type};
   loom_tied_result_t tied_results[] = {
-      {.result_index = 0, .operand_index = 1, .has_type_change = false},
+      {/*.result_index=*/0, /*.operand_index=*/1, /*.has_type_change=*/false},
   };
   loom_op_t* op = nullptr;
   IREE_ASSERT_OK(loom_test_invoke_build(
@@ -1808,11 +1892,11 @@ TEST_F(VerifyTest, FuncDefTiedResultUsesEntryBlockArgsWithoutConsumingThem) {
       loom_builder_intern_string(&builder_, IREE_SV("identity"), &name_id));
   uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
   IREE_ASSERT_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
-  loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
+  loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
 
   loom_type_t f32_type = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
   loom_tied_result_t tied_results[] = {
-      {.result_index = 0, .operand_index = 0, .has_type_change = false},
+      {/*.result_index=*/0, /*.operand_index=*/0, /*.has_type_change=*/false},
   };
   loom_op_t* func_op = nullptr;
   IREE_ASSERT_OK(loom_test_func_build(&builder_, 0, 0, 0, callee, &f32_type, 1,
@@ -1842,11 +1926,11 @@ TEST_F(VerifyTest, FuncDeclTiedResultUsesSignatureOperandsWithoutDominance) {
       &builder_, IREE_SV("extern_identity"), &name_id));
   uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
   IREE_ASSERT_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
-  loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
+  loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
 
   loom_type_t f32_type = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
   loom_tied_result_t tied_results[] = {
-      {.result_index = 0, .operand_index = 0, .has_type_change = false},
+      {/*.result_index=*/0, /*.operand_index=*/0, /*.has_type_change=*/false},
   };
   loom_op_t* func_op = nullptr;
   IREE_ASSERT_OK(loom_test_decl_build(
@@ -1867,7 +1951,7 @@ TEST_F(VerifyTest, RejectsNonLocalSymbolRef) {
       loom_builder_intern_string(&builder_, IREE_SV("foreign"), &name_id));
   uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
   IREE_ASSERT_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
-  loom_symbol_ref_t callee = {.module_id = 1, .symbol_id = symbol_id};
+  loom_symbol_ref_t callee = {/*.module_id=*/1, /*.symbol_id=*/symbol_id};
 
   loom_op_t* decl_op = nullptr;
   IREE_ASSERT_OK(loom_test_decl_build(&builder_, 0, 0, 0, callee, nullptr, 0,
@@ -1890,7 +1974,7 @@ TEST_F(VerifyTest, RejectsDuplicateSymbolDefinition) {
       loom_builder_intern_string(&builder_, IREE_SV("duplicate"), &name_id));
   uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
   IREE_ASSERT_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
-  loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
+  loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
 
   loom_op_t* first_decl = nullptr;
   IREE_ASSERT_OK(loom_test_decl_build(&builder_, 0, 0, 0, callee, nullptr, 0,

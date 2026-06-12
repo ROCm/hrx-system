@@ -16,9 +16,9 @@ using iree::testing::status::StatusIs;
 
 TEST(ExecutableMetadataTest, AllocatesHotAndColdTables) {
   iree_hal_amdgpu_executable_metadata_counts_t counts = {
-      .export_count = 2,
-      .parameter_count = 3,
-      .layout_blob_byte_length = 128,
+      /*.export_count=*/2,
+      /*.parameter_count=*/3,
+      /*.layout_blob_byte_length=*/128,
   };
 
   iree_hal_amdgpu_executable_metadata_t* metadata = nullptr;
@@ -46,8 +46,9 @@ TEST(ExecutableMetadataTest, AppendsAndResolvesLayout) {
   IREE_ASSERT_OK(iree_hal_amdgpu_kernarg_layout_storage_size(
       /*binding_count=*/1, /*constant_span_count=*/1, &layout_byte_length));
   iree_hal_amdgpu_executable_metadata_counts_t counts = {
-      .export_count = 1,
-      .layout_blob_byte_length = layout_byte_length,
+      /*.export_count=*/1,
+      /*.parameter_count=*/{},
+      /*.layout_blob_byte_length=*/layout_byte_length,
   };
   iree_hal_amdgpu_executable_metadata_t* metadata = nullptr;
   IREE_ASSERT_OK(iree_hal_amdgpu_executable_metadata_allocate(
@@ -62,25 +63,25 @@ TEST(ExecutableMetadataTest, AppendsAndResolvesLayout) {
   EXPECT_EQ(layout_storage.data_length, layout_byte_length);
 
   const iree_hal_amdgpu_kernarg_binding_slot_t binding_slots[] = {
-      {.target_qword_index = 0},
+      {/*.target_qword_index=*/0},
   };
   const iree_hal_amdgpu_kernarg_constant_span_t constant_spans[] = {
       {
-          .target_byte_offset = 8,
-          .source_byte_offset = 0,
-          .byte_length = 4,
+          /*.target_byte_offset=*/8,
+          /*.source_byte_offset=*/0,
+          /*.byte_length=*/4,
       },
   };
   iree_hal_amdgpu_kernarg_layout_params_t params = {
-      .kernarg_byte_length = 16,
-      .kernarg_alignment = 8,
-      .constant_byte_length = 4,
-      .implicit_args_byte_offset =
-          IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE,
-      .binding_count = IREE_ARRAYSIZE(binding_slots),
-      .binding_slots = binding_slots,
-      .constant_span_count = IREE_ARRAYSIZE(constant_spans),
-      .constant_spans = constant_spans,
+      /*.kernarg_byte_length=*/16,
+      /*.kernarg_alignment=*/8,
+      /*.constant_byte_length=*/4,
+      /*.implicit_args_byte_offset=*/
+      IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE,
+      /*.binding_count=*/IREE_ARRAYSIZE(binding_slots),
+      /*.binding_slots=*/binding_slots,
+      /*.constant_span_count=*/IREE_ARRAYSIZE(constant_spans),
+      /*.constant_spans=*/constant_spans,
   };
   IREE_ASSERT_OK(iree_hal_amdgpu_kernarg_layout_initialize(
       &params, layout_storage.data_length,
@@ -100,8 +101,9 @@ TEST(ExecutableMetadataTest, AppendsAndResolvesLayout) {
 
 TEST(ExecutableMetadataTest, RejectsLayoutBlobOverflow) {
   iree_hal_amdgpu_executable_metadata_counts_t counts = {
-      .export_count = 1,
-      .layout_blob_byte_length = 8,
+      /*.export_count=*/1,
+      /*.parameter_count=*/{},
+      /*.layout_blob_byte_length=*/8,
   };
   iree_hal_amdgpu_executable_metadata_t* metadata = nullptr;
   IREE_ASSERT_OK(iree_hal_amdgpu_executable_metadata_allocate(
@@ -122,8 +124,9 @@ TEST(ExecutableMetadataTest, RejectsLayoutBlobOverflow) {
 
 TEST(ExecutableMetadataTest, RejectsInvalidLayoutReference) {
   iree_hal_amdgpu_executable_metadata_counts_t counts = {
-      .export_count = 1,
-      .layout_blob_byte_length = 16,
+      /*.export_count=*/1,
+      /*.parameter_count=*/{},
+      /*.layout_blob_byte_length=*/16,
   };
   iree_hal_amdgpu_executable_metadata_t* metadata = nullptr;
   IREE_ASSERT_OK(iree_hal_amdgpu_executable_metadata_allocate(
@@ -143,7 +146,7 @@ TEST(ExecutableMetadataTest, RejectsInvalidLayoutReference) {
       metadata, /*layout_byte_length=*/16, &layout_ref, &layout_storage));
   EXPECT_THAT(
       Status(iree_hal_amdgpu_executable_metadata_resolve_layout(
-          metadata, iree_hal_amdgpu_kernarg_layout_ref_t{.byte_offset = 1},
+          metadata, iree_hal_amdgpu_kernarg_layout_ref_t{/*.byte_offset=*/1},
           &resolved_layout)),
       StatusIs(StatusCode::kInvalidArgument));
   EXPECT_EQ(resolved_layout, nullptr);

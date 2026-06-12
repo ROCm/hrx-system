@@ -91,11 +91,11 @@ class VmInvocationTest : public ::testing::Test {
     loom_run_session_options_t options = {};
     loom_run_session_options_initialize(&options);
     options.register_context = (loom_run_register_context_callback_t){
-        .fn = RegisterContext,
+        /*.fn=*/RegisterContext,
     };
     options.initialize_low_descriptor_registry =
         (loom_run_initialize_low_descriptor_registry_callback_t){
-            .fn = InitializeLowDescriptorRegistry,
+            /*.fn=*/InitializeLowDescriptorRegistry,
         };
     IREE_ASSERT_OK(loom_run_session_initialize(&options, &session_));
     IREE_ASSERT_OK(
@@ -149,12 +149,12 @@ class VmInvocationTest : public ::testing::Test {
     request.archive = archive;
     request.options.function_name = IREE_SV("branchy");
     request.options.inputs = (loom_run_vm_value_specs_t){
-        .values = inputs,
-        .count = IREE_ARRAYSIZE(inputs),
+        /*.values=*/inputs,
+        /*.count=*/IREE_ARRAYSIZE(inputs),
     };
     request.options.expected_outputs = (loom_run_vm_value_specs_t){
-        .values = expected_outputs,
-        .count = IREE_ARRAYSIZE(expected_outputs),
+        /*.values=*/expected_outputs,
+        /*.count=*/IREE_ARRAYSIZE(expected_outputs),
     };
     return loom_run_vm_invocation_run(&request, iree_allocator_system(),
                                       result);
@@ -179,12 +179,12 @@ class VmInvocationTest : public ::testing::Test {
     request.archive = archive;
     request.options.function_name = IREE_SV("wide_numeric");
     request.options.inputs = (loom_run_vm_value_specs_t){
-        .values = inputs,
-        .count = IREE_ARRAYSIZE(inputs),
+        /*.values=*/inputs,
+        /*.count=*/IREE_ARRAYSIZE(inputs),
     };
     request.options.expected_outputs = (loom_run_vm_value_specs_t){
-        .values = expected_outputs,
-        .count = IREE_ARRAYSIZE(expected_outputs),
+        /*.values=*/expected_outputs,
+        /*.count=*/IREE_ARRAYSIZE(expected_outputs),
     };
     return loom_run_vm_invocation_run(&request, iree_allocator_system(),
                                       result);
@@ -210,12 +210,12 @@ class VmInvocationTest : public ::testing::Test {
     loom_run_vm_invocation_options_t options = {};
     loom_run_vm_invocation_options_initialize(&options);
     options.inputs = (loom_run_vm_value_specs_t){
-        .values = inputs,
-        .count = IREE_ARRAYSIZE(inputs),
+        /*.values=*/inputs,
+        /*.count=*/IREE_ARRAYSIZE(inputs),
     };
     options.expected_outputs = (loom_run_vm_value_specs_t){
-        .values = expected_outputs,
-        .count = IREE_ARRAYSIZE(expected_outputs),
+        /*.values=*/expected_outputs,
+        /*.count=*/IREE_ARRAYSIZE(expected_outputs),
     };
     IREE_ASSERT_OK(loom_run_vm_invocation_plan_prepare_from_prepared(
         candidate, &options, iree_allocator_system(), out_plan));
@@ -299,8 +299,8 @@ TEST_F(VmInvocationTest, RunFormatsOutputsWhenNoExpectationIsProvided) {
   request.archive = &candidate.archive;
   request.options.function_name = IREE_SV("branchy");
   request.options.inputs = (loom_run_vm_value_specs_t){
-      .values = inputs,
-      .count = IREE_ARRAYSIZE(inputs),
+      /*.values=*/inputs,
+      /*.count=*/IREE_ARRAYSIZE(inputs),
   };
 
   loom_run_vm_invocation_result_t result = {};
@@ -408,18 +408,18 @@ TEST_F(VmInvocationTest, PlanPrepareFromSpecsMaterializesExpectedOutputs) {
   loom_run_vm_invocation_options_t options = {};
   loom_run_vm_invocation_options_initialize(&options);
   options.inputs = (loom_run_vm_value_specs_t){
-      .values = inputs,
-      .count = IREE_ARRAYSIZE(inputs),
+      /*.values=*/inputs,
+      /*.count=*/IREE_ARRAYSIZE(inputs),
   };
   options.expected_outputs = (loom_run_vm_value_specs_t){
-      .values = expected_outputs,
-      .count = IREE_ARRAYSIZE(expected_outputs),
+      /*.values=*/expected_outputs,
+      /*.count=*/IREE_ARRAYSIZE(expected_outputs),
   };
 
   const loom_run_vm_invocation_plan_prepare_request_t prepare_request = {
-      .options = &options,
-      .arguments_cconv = IREE_SV("ii"),
-      .results_cconv = IREE_SV("i"),
+      /*.options=*/&options,
+      /*.arguments_cconv=*/IREE_SV("ii"),
+      /*.results_cconv=*/IREE_SV("i"),
   };
   loom_run_vm_invocation_plan_t plan = {};
 
@@ -440,18 +440,18 @@ TEST_F(VmInvocationTest, PlanPrepareUsesOutputSpecsAsMaterializationPolicy) {
   loom_run_vm_invocation_options_t options = {};
   loom_run_vm_invocation_options_initialize(&options);
   options.inputs = (loom_run_vm_value_specs_t){
-      .values = inputs,
-      .count = IREE_ARRAYSIZE(inputs),
+      /*.values=*/inputs,
+      /*.count=*/IREE_ARRAYSIZE(inputs),
   };
   options.outputs = (loom_run_vm_value_specs_t){
-      .values = outputs,
-      .count = IREE_ARRAYSIZE(outputs),
+      /*.values=*/outputs,
+      /*.count=*/IREE_ARRAYSIZE(outputs),
   };
 
   const loom_run_vm_invocation_plan_prepare_request_t prepare_request = {
-      .options = &options,
-      .arguments_cconv = IREE_SV("ii"),
-      .results_cconv = IREE_SV("i"),
+      /*.options=*/&options,
+      /*.arguments_cconv=*/IREE_SV("ii"),
+      /*.results_cconv=*/IREE_SV("i"),
   };
   loom_run_vm_invocation_plan_t plan = {};
 

@@ -33,8 +33,8 @@ TEST(MeasurementTest, DisabledMeasurementRunsCallbackWithoutSamples) {
 
   int value = 0;
   const loom_run_measurement_step_callback_t callback = {
-      .fn = IncrementStep,
-      .user_data = &value,
+      /*.fn=*/IncrementStep,
+      /*.user_data=*/&value,
   };
   IREE_ASSERT_OK(loom_run_measurement_run_step(
       &options, LOOM_RUN_MEASUREMENT_BOUNDARY_INVOKE, callback, &result));
@@ -55,8 +55,8 @@ TEST(MeasurementTest, TimingRecordsSelectedBoundary) {
 
   int value = 0;
   const loom_run_measurement_step_callback_t callback = {
-      .fn = IncrementStep,
-      .user_data = &value,
+      /*.fn=*/IncrementStep,
+      /*.user_data=*/&value,
   };
   IREE_ASSERT_OK(loom_run_measurement_run_step(
       &options, LOOM_RUN_MEASUREMENT_BOUNDARY_INVOKE, callback, &result));
@@ -81,8 +81,8 @@ TEST(MeasurementTest, TimingSkipsUnselectedBoundary) {
 
   int value = 0;
   const loom_run_measurement_step_callback_t callback = {
-      .fn = IncrementStep,
-      .user_data = &value,
+      /*.fn=*/IncrementStep,
+      /*.user_data=*/&value,
   };
   IREE_ASSERT_OK(loom_run_measurement_run_step(
       &options, LOOM_RUN_MEASUREMENT_BOUNDARY_INVOKE, callback, &result));
@@ -101,8 +101,8 @@ TEST(MeasurementTest, TimingRequiresSampleCapacityBeforeCallback) {
 
   int value = 0;
   const loom_run_measurement_step_callback_t callback = {
-      .fn = IncrementStep,
-      .user_data = &value,
+      /*.fn=*/IncrementStep,
+      /*.user_data=*/&value,
   };
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
@@ -124,7 +124,7 @@ TEST(MeasurementTest, CallbackFailureStillRecordsStatusCode) {
                                          &result);
 
   const loom_run_measurement_step_callback_t callback = {
-      .fn = FailStep,
+      /*.fn=*/FailStep,
   };
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
@@ -147,8 +147,8 @@ TEST(MeasurementTest, UnsupportedMeasurementKindsFailLoud) {
 
   int value = 0;
   const loom_run_measurement_step_callback_t callback = {
-      .fn = IncrementStep,
-      .user_data = &value,
+      /*.fn=*/IncrementStep,
+      /*.user_data=*/&value,
   };
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_UNIMPLEMENTED,

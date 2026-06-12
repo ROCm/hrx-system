@@ -79,7 +79,7 @@ iree_hal_amdgpu_host_queue_profiling_completion_signal(
   iree_amd_signal_t* signal =
       iree_hal_amdgpu_host_queue_profiling_completion_signal_ptr(
           queue, event_position);
-  return (iree_hsa_signal_t){.handle = (uint64_t)(uintptr_t)signal};
+  return (iree_hsa_signal_t){/*.handle=*/(uint64_t)(uintptr_t)signal};
 }
 
 // Reserves queue-local dispatch profile event records.

@@ -651,12 +651,12 @@ typedef struct {
     iree_allocator_inline_storage_t header;                  \
     uint8_t data[storage_capacity];                          \
   } var = {                                                  \
-      .header =                                              \
-          {                                                  \
-              .capacity = sizeof((var).data),                \
-              .length = 0,                                   \
-              .buffer = &(var).data[0],                      \
-          },                                                 \
+      /*.header=*/{                                          \
+          /*.capacity=*/sizeof((var).data),                  \
+          /*.length=*/0,                                     \
+          /*.head_size=*/0,                                  \
+          /*.buffer=*/&(var).data[0],                        \
+      },                                                     \
   };
 
 // Inline arena allocator controller used by iree_allocator_inline_arena.

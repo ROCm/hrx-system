@@ -11,30 +11,28 @@
 
 #define LOOM_AMDGPU_DIRECT_ROW(op_kind, select_fn, emit_fn, verify_fn) \
   {                                                                    \
-      .source_op_kind = (op_kind),                                     \
-      .plan_data_size = 0,                                             \
-      .select = (select_fn),                                           \
-      .emit = (emit_fn),                                               \
-      .verify = (verify_fn),                                           \
+      /*.source_op_kind=*/(op_kind), /*.plan_data_size=*/0,            \
+      /*.select=*/(select_fn),       /*.emit=*/(emit_fn),              \
+      /*.verify=*/(verify_fn),                                         \
   }
 
 #define LOOM_AMDGPU_DATA_ROW(op_kind, plan_type, select_fn, emit_fn, \
                              verify_fn)                              \
   {                                                                  \
-      .source_op_kind = (op_kind),                                   \
-      .plan_data_size = sizeof(plan_type),                           \
-      .select = (select_fn),                                         \
-      .emit = (emit_fn),                                             \
-      .verify = (verify_fn),                                         \
+      /*.source_op_kind=*/(op_kind),                                 \
+      /*.plan_data_size=*/sizeof(plan_type),                         \
+      /*.select=*/(select_fn),                                       \
+      /*.emit=*/(emit_fn),                                           \
+      /*.verify=*/(verify_fn),                                       \
   }
 
 #define LOOM_AMDGPU_LEGALITY_ROW(op_kind, verify_fn) \
   {                                                  \
-      .source_op_kind = (op_kind),                   \
-      .plan_data_size = 0,                           \
-      .select = NULL,                                \
-      .emit = NULL,                                  \
-      .verify = (verify_fn),                         \
+      /*.source_op_kind=*/(op_kind),                 \
+      /*.plan_data_size=*/0,                         \
+      /*.select=*/NULL,                              \
+      /*.emit=*/NULL,                                \
+      /*.verify=*/(verify_fn),                       \
   }
 
 static const loom_amdgpu_lower_dispatch_row_t

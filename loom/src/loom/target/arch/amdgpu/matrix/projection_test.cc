@@ -14,8 +14,8 @@ namespace {
 loom_contract_operand_t Operand(loom_contract_operand_role_t role,
                                 loom_contract_numeric_type_t numeric_type) {
   return (loom_contract_operand_t){
-      .role = role,
-      .numeric_type = numeric_type,
+      /*.role=*/role,
+      /*.numeric_type=*/numeric_type,
   };
 }
 
@@ -75,9 +75,9 @@ loom_contract_request_t MatrixRequest(
   request.kind = LOOM_CONTRACT_KIND_MATRIX_MULTIPLY;
   request.arithmetic = LOOM_CONTRACT_ARITHMETIC_MIXED_DOT;
   request.shape = {
-      .m = m,
-      .n = n,
-      .k = k,
+      /*.m=*/m,
+      /*.n=*/n,
+      /*.k=*/k,
   };
   request.k_group_size = 1;
   request.lhs = Operand(LOOM_CONTRACT_OPERAND_ROLE_LHS, lhs_numeric_type);
@@ -87,8 +87,11 @@ loom_contract_request_t MatrixRequest(
   request.result =
       Operand(LOOM_CONTRACT_OPERAND_ROLE_RESULT, result_numeric_type);
   request.fragment = {
-      .atom_bits = LOOM_CONTRACT_FRAGMENT_SUBGROUP_LANE,
-      .subgroup_size = 64,
+      /*.atom_bits=*/LOOM_CONTRACT_FRAGMENT_SUBGROUP_LANE,
+      /*.vector_bit_width=*/{},
+      /*.source_lane_count=*/{},
+      /*.result_lane_count=*/{},
+      /*.subgroup_size=*/64,
   };
   request.capability_class = LOOM_CONTRACT_CAPABILITY_CLASS_GPU_MATRIX;
   request.policy = LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED;

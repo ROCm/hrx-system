@@ -71,7 +71,7 @@ class CallGraphTest : public ::testing::Test {
         &module_builder_, iree_make_cstring_view(name), &name_id));
     loom_symbol_id_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_CHECK_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
-    return (loom_symbol_ref_t){.module_id = 0, .symbol_id = symbol_id};
+    return (loom_symbol_ref_t){/*.module_id=*/0, /*.symbol_id=*/symbol_id};
   }
 
   FuncInfo create_func(const char* name) {
@@ -92,8 +92,8 @@ class CallGraphTest : public ::testing::Test {
                             loom_region_entry_block(caller.body),
                             &body_builder);
     body_builder.ip.parent_op = caller.func_op;
-    loom_symbol_ref_t callee_ref = {.module_id = 0,
-                                    .symbol_id = callee_symbol_id};
+    loom_symbol_ref_t callee_ref = {/*.module_id=*/0,
+                                    /*.symbol_id=*/callee_symbol_id};
     loom_op_t* call_op = NULL;
     switch (kind) {
       case CallKind::kSemantic: {

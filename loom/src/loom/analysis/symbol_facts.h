@@ -91,8 +91,8 @@ static inline loom_symbol_fact_resource_list_t
 loom_make_symbol_fact_resource_list(const loom_symbol_fact_resource_t* values,
                                     iree_host_size_t count) {
   loom_symbol_fact_resource_list_t list = {
-      .values = count > 0 ? values : NULL,
-      .count = count,
+      /*.values=*/count > 0 ? values : NULL,
+      /*.count=*/count,
   };
   return list;
 }

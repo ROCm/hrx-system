@@ -19,6 +19,14 @@ class DirectGotoCheck final : public ClangTidyCheck {
   void check(const ast_matchers::MatchFinder::MatchResult& Result) override;
 };
 
+class DesignatedInitializerCheck final : public ClangTidyCheck {
+ public:
+  DesignatedInitializerCheck(StringRef Name, ClangTidyContext* Context);
+
+  void registerMatchers(ast_matchers::MatchFinder* Finder) override;
+  void check(const ast_matchers::MatchFinder::MatchResult& Result) override;
+};
+
 class GuardedReleaseCheck final : public ClangTidyCheck {
  public:
   GuardedReleaseCheck(StringRef Name, ClangTidyContext* Context);

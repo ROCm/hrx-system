@@ -13,8 +13,8 @@ namespace {
 loom_contract_operand_t Operand(loom_contract_operand_role_t role,
                                 loom_contract_numeric_type_t numeric_type) {
   return (loom_contract_operand_t){
-      .role = role,
-      .numeric_type = numeric_type,
+      /*.role=*/role,
+      /*.numeric_type=*/numeric_type,
   };
 }
 
@@ -44,7 +44,7 @@ loom_contract_request_t CompletePackedDotRequest() {
   loom_contract_request_initialize(&request);
   request.kind = LOOM_CONTRACT_KIND_MATRIX_MULTIPLY;
   request.arithmetic = LOOM_CONTRACT_ARITHMETIC_FLOAT_DOT;
-  request.shape = {.m = 8, .n = 1, .k = 16};
+  request.shape = {/*.m=*/8, /*.n=*/1, /*.k=*/16};
   request.k_group_size = 2;
   request.lhs =
       Operand(LOOM_CONTRACT_OPERAND_ROLE_LHS, LOOM_CONTRACT_NUMERIC_BF16);
@@ -72,10 +72,10 @@ TEST(ContractTest, ValidatesDynamicShapeWithValueRefs) {
   loom_contract_request_t request = CompletePackedDotRequest();
   request.shape = {};
   request.shape_value_refs = {
-      .m = loom_contract_value_ref_from_value_id(10),
-      .n = loom_contract_value_ref_from_value_id(11),
-      .k = loom_contract_value_ref_from_value_id(12),
-      .k_group_size = loom_contract_value_ref_from_value_id(13),
+      /*.m=*/loom_contract_value_ref_from_value_id(10),
+      /*.n=*/loom_contract_value_ref_from_value_id(11),
+      /*.k=*/loom_contract_value_ref_from_value_id(12),
+      /*.k_group_size=*/loom_contract_value_ref_from_value_id(13),
   };
   request.k_group_size = 0;
 
@@ -185,7 +185,7 @@ TEST(ContractTest, RejectsMissingShapeRoleAndCapability) {
   loom_contract_request_initialize(&request);
   request.kind = LOOM_CONTRACT_KIND_MATRIX_MULTIPLY;
   request.arithmetic = LOOM_CONTRACT_ARITHMETIC_INTEGER_DOT;
-  request.shape = {.m = 16, .n = 16, .k = 0};
+  request.shape = {/*.m=*/16, /*.n=*/16, /*.k=*/0};
   request.k_group_size = 4;
   request.lhs =
       Operand(LOOM_CONTRACT_OPERAND_ROLE_LHS, LOOM_CONTRACT_NUMERIC_U8);

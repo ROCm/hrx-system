@@ -81,30 +81,39 @@ TEST(NativeContributionTest, AssemblesAlignedSectionsAndWritesElf) {
   const uint8_t text1[] = {0x10, 0x11};
   const loom_native_section_contribution_t contributions[] = {
       {
-          .section_name = iree_make_string_view(text_section_name,
-                                                sizeof(text_section_name) - 1u),
-          .section_type = LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS,
-          .section_flags = LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC |
-                           LOOM_NATIVE_ELF_SECTION_FLAG_EXECINSTR,
-          .contribution_alignment = 4,
-          .contents = iree_make_const_byte_span(text0, sizeof(text0)),
+          /*.section_name=*/iree_make_string_view(
+              text_section_name, sizeof(text_section_name) - 1u),
+          /*.section_type=*/LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS,
+          /*.section_flags=*/LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC |
+              LOOM_NATIVE_ELF_SECTION_FLAG_EXECINSTR,
+          /*.contribution_alignment=*/4,
+          /*.entry_size=*/{},
+          /*.link=*/{},
+          /*.info=*/{},
+          /*.contents=*/iree_make_const_byte_span(text0, sizeof(text0)),
       },
       {
-          .section_name = iree_make_string_view(
+          /*.section_name=*/iree_make_string_view(
               rodata_section_name, sizeof(rodata_section_name) - 1u),
-          .section_type = LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS,
-          .section_flags = LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC,
-          .contribution_alignment = 1,
-          .contents = iree_make_const_byte_span(rodata0, sizeof(rodata0)),
+          /*.section_type=*/LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS,
+          /*.section_flags=*/LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC,
+          /*.contribution_alignment=*/1,
+          /*.entry_size=*/{},
+          /*.link=*/{},
+          /*.info=*/{},
+          /*.contents=*/iree_make_const_byte_span(rodata0, sizeof(rodata0)),
       },
       {
-          .section_name = iree_make_string_view(text_section_name,
-                                                sizeof(text_section_name) - 1u),
-          .section_type = LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS,
-          .section_flags = LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC |
-                           LOOM_NATIVE_ELF_SECTION_FLAG_EXECINSTR,
-          .contribution_alignment = 8,
-          .contents = iree_make_const_byte_span(text1, sizeof(text1)),
+          /*.section_name=*/iree_make_string_view(
+              text_section_name, sizeof(text_section_name) - 1u),
+          /*.section_type=*/LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS,
+          /*.section_flags=*/LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC |
+              LOOM_NATIVE_ELF_SECTION_FLAG_EXECINSTR,
+          /*.contribution_alignment=*/8,
+          /*.entry_size=*/{},
+          /*.link=*/{},
+          /*.info=*/{},
+          /*.contents=*/iree_make_const_byte_span(text1, sizeof(text1)),
       },
   };
 
@@ -139,13 +148,14 @@ TEST(NativeContributionTest, AssemblesAlignedSectionsAndWritesElf) {
             std::string("\xa0\xa1", 2));
 
   const loom_native_elf64le_file_t file = {
-      .type = LOOM_NATIVE_ELF_FILE_TYPE_DYN,
-      .machine = LOOM_NATIVE_ELF_MACHINE_AMDGPU,
-      .os_abi = LOOM_NATIVE_ELF_OS_ABI_AMDGPU_HSA,
-      .abi_version = LOOM_NATIVE_ELF_ABI_VERSION_AMDGPU_HSA_V5,
-      .flags = LOOM_NATIVE_ELF_AMDGPU_FLAG_MACH_GFX1100,
-      .sections = assembly.sections,
-      .section_count = assembly.section_count,
+      /*.type=*/LOOM_NATIVE_ELF_FILE_TYPE_DYN,
+      /*.machine=*/LOOM_NATIVE_ELF_MACHINE_AMDGPU,
+      /*.os_abi=*/LOOM_NATIVE_ELF_OS_ABI_AMDGPU_HSA,
+      /*.abi_version=*/LOOM_NATIVE_ELF_ABI_VERSION_AMDGPU_HSA_V5,
+      /*.flags=*/LOOM_NATIVE_ELF_AMDGPU_FLAG_MACH_GFX1100,
+      /*.entry=*/{},
+      /*.sections=*/assembly.sections,
+      /*.section_count=*/assembly.section_count,
   };
   StreamPtr stream = CreateStream();
   IREE_ASSERT_OK(
@@ -176,18 +186,24 @@ TEST(NativeContributionTest, RejectsConflictingSectionMetadata) {
   const uint8_t byte = 0;
   const loom_native_section_contribution_t contributions[] = {
       {
-          .section_name = IREE_SV(".text"),
-          .section_type = LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS,
-          .section_flags = LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC,
-          .contribution_alignment = 4,
-          .contents = iree_make_const_byte_span(&byte, sizeof(byte)),
+          /*.section_name=*/IREE_SV(".text"),
+          /*.section_type=*/LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS,
+          /*.section_flags=*/LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC,
+          /*.contribution_alignment=*/4,
+          /*.entry_size=*/{},
+          /*.link=*/{},
+          /*.info=*/{},
+          /*.contents=*/iree_make_const_byte_span(&byte, sizeof(byte)),
       },
       {
-          .section_name = IREE_SV(".text"),
-          .section_type = LOOM_NATIVE_ELF_SECTION_TYPE_NOTE,
-          .section_flags = LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC,
-          .contribution_alignment = 4,
-          .contents = iree_make_const_byte_span(&byte, sizeof(byte)),
+          /*.section_name=*/IREE_SV(".text"),
+          /*.section_type=*/LOOM_NATIVE_ELF_SECTION_TYPE_NOTE,
+          /*.section_flags=*/LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC,
+          /*.contribution_alignment=*/4,
+          /*.entry_size=*/{},
+          /*.link=*/{},
+          /*.info=*/{},
+          /*.contents=*/iree_make_const_byte_span(&byte, sizeof(byte)),
       },
   };
 
@@ -202,10 +218,14 @@ TEST(NativeContributionTest, RejectsConflictingSectionMetadata) {
 TEST(NativeContributionTest, RejectsInvalidAlignment) {
   const uint8_t byte = 0;
   const loom_native_section_contribution_t contribution = {
-      .section_name = IREE_SV(".text"),
-      .section_type = LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS,
-      .contribution_alignment = 3,
-      .contents = iree_make_const_byte_span(&byte, sizeof(byte)),
+      /*.section_name=*/IREE_SV(".text"),
+      /*.section_type=*/LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS,
+      /*.section_flags=*/{},
+      /*.contribution_alignment=*/3,
+      /*.entry_size=*/{},
+      /*.link=*/{},
+      /*.info=*/{},
+      /*.contents=*/iree_make_const_byte_span(&byte, sizeof(byte)),
   };
 
   TestArena arena;

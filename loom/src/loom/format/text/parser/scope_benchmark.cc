@@ -54,7 +54,8 @@ class ParserScopeBenchmark {
 
   iree_status_t Parse(iree_string_view_t source, loom_module_t** out_module) {
     loom_text_parse_options_t options = {
-        .max_errors = 1,
+        /*.diagnostic_sink=*/{},
+        /*.max_errors=*/1,
     };
     return loom_text_parse(source, IREE_SV("scope_benchmark.loom"), &context_,
                            &block_pool_, &options, out_module);

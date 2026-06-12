@@ -108,10 +108,10 @@ iree_status_t EmitEvent(loom_low_packet_progress_emit_fn_t emit,
                         loom_low_packet_progress_action_t action,
                         uint32_t units) {
   const loom_low_packet_progress_event_t event = {
-      .progress_class_id = progress_class_id,
-      .progress_class_name = progress_class_name,
-      .action = action,
-      .units = units,
+      /*.progress_class_id=*/progress_class_id,
+      /*.progress_class_name=*/progress_class_name,
+      /*.action=*/action,
+      /*.units=*/units,
   };
   return emit(emit_user_data, &event);
 }
@@ -155,7 +155,8 @@ iree_status_t EmptyProgressQuery(void* user_data,
 
 TEST_F(LowPacketProgressTest, BuildsSyntheticTargetProgressRecords) {
   const loom_low_packet_progress_provider_t provider = {
-      .query = SyntheticProgressQuery,
+      /*.user_data=*/{},
+      /*.query=*/SyntheticProgressQuery,
   };
   loom_low_packet_progress_table_t table = {};
   IREE_ASSERT_OK(loom_low_packet_progress_build(
@@ -195,7 +196,8 @@ TEST_F(LowPacketProgressTest, BuildsSyntheticTargetProgressRecords) {
 
 TEST_F(LowPacketProgressTest, BuildsEmptyProgressTable) {
   const loom_low_packet_progress_provider_t provider = {
-      .query = EmptyProgressQuery,
+      /*.user_data=*/{},
+      /*.query=*/EmptyProgressQuery,
   };
   loom_low_packet_progress_table_t table = {};
   IREE_ASSERT_OK(loom_low_packet_progress_build(
@@ -220,7 +222,8 @@ iree_status_t InvalidProgressQuery(
 
 TEST_F(LowPacketProgressTest, RejectsInvalidProgressEvents) {
   const loom_low_packet_progress_provider_t provider = {
-      .query = InvalidProgressQuery,
+      /*.user_data=*/{},
+      /*.query=*/InvalidProgressQuery,
   };
   loom_low_packet_progress_table_t table = {};
   IREE_EXPECT_STATUS_IS(

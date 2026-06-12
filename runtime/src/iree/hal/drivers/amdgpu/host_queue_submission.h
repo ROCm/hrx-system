@@ -40,8 +40,8 @@ typedef struct iree_hal_amdgpu_host_queue_post_commit_callback_t {
 static inline iree_hal_amdgpu_host_queue_post_commit_callback_t
 iree_hal_amdgpu_host_queue_post_commit_callback_null(void) {
   iree_hal_amdgpu_host_queue_post_commit_callback_t callback = {
-      .fn = NULL,
-      .user_data = NULL,
+      /*.fn=*/NULL,
+      /*.user_data=*/NULL,
   };
   return callback;
 }

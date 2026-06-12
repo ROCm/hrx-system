@@ -67,10 +67,10 @@ TEST(DispatchTest, EmplaceImplicitArgsWritesSuffix) {
       /*kernarg_size=*/32 + IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE,
       /*kernarg_alignment=*/16);
   iree_hal_amdgpu_device_dispatch_kernarg_layout_t layout = {
-      .explicit_kernarg_size = 32,
-      .implicit_args_offset = 32,
-      .total_kernarg_size = 32 + IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE,
-      .has_implicit_args = true,
+      /*.explicit_kernarg_size=*/32,
+      /*.implicit_args_offset=*/32,
+      /*.total_kernarg_size=*/32 + IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE,
+      /*.has_implicit_args=*/true,
   };
   const uint32_t workgroup_count[3] = {7, 8, 9};
   alignas(16) std::array<uint8_t, 256> kernargs = {};

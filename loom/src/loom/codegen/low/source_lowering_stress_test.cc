@@ -47,10 +47,10 @@ class SourceLoweringStressTest : public ::testing::Test {
 TEST_F(SourceLoweringStressTest, GeneratedSupportedSourceLowersAndPacketizes) {
   loom_low_source_workload_pipeline_counters_t aggregate = {};
   const loom_low_source_workload_pipeline_options_t pipeline_options = {
-      .pass_registry = loom_pass_builtin_registry(),
-      .descriptor_registry = &descriptor_registry_.registry,
-      .policy_registry = &policy_registry_,
-      .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_PRESSURE,
+      /*.pass_registry=*/loom_pass_builtin_registry(),
+      /*.descriptor_registry=*/&descriptor_registry_.registry,
+      /*.policy_registry=*/&policy_registry_,
+      /*.schedule_strategy=*/LOOM_LOW_SCHEDULE_STRATEGY_PRESSURE,
   };
 
   for (uint64_t seed = 0; seed < 16; ++seed) {

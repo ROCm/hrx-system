@@ -271,8 +271,8 @@ TEST_F(JsonOutputTest, EmbedsUpdateEdit) {
   };
   results[0].update_edit.present = true;
   results[0].update_edit.value = (loom_check_update_edit_t){
-      .kind = LOOM_CHECK_UPDATE_EDIT_REPLACE_EXPECTED_OUTPUT,
-      .range = file.cases[0].expected_range,
+      /*.kind=*/LOOM_CHECK_UPDATE_EDIT_REPLACE_EXPECTED_OUTPUT,
+      /*.range=*/file.cases[0].expected_range,
   };
   IREE_ASSERT_OK(iree_string_builder_append_cstring(
       &results[0].update_edit.text, "func.def @f() {\n}\n"));

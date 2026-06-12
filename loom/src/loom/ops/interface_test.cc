@@ -70,7 +70,7 @@ class InterfaceTest : public ::testing::Test {
                                               IREE_SV("host_fn"), &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_ASSERT_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
-    func_ref_ = {.module_id = 0, .symbol_id = symbol_id};
+    func_ref_ = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
     IREE_ASSERT_OK(loom_test_func_build(&module_builder, 0, 0, 0, func_ref_,
                                         NULL, 0, NULL, 0, NULL, 0, NULL, 0,
                                         LOOM_LOCATION_UNKNOWN, &func_op_));

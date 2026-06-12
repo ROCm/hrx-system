@@ -24,7 +24,7 @@ class ContextTest : public ::testing::Test {
 };
 
 static const loom_encoding_vtable_t kQ8_0EncodingVtable = {
-    .name = IREE_SV("q8_0"),
+    /*.name=*/IREE_SV("q8_0"),
 };
 
 TEST_F(ContextTest, FinalizeBuildsOpNameLookupTable) {
@@ -32,7 +32,29 @@ TEST_F(ContextTest, FinalizeBuildsOpNameLookupTable) {
       8, 4, 't', 'e', 's', 't', '.', 'n', 'o', 'p', '\0',
   };
   static const loom_op_vtable_t kTestOpVtable = {
-      .name = kTestOpName,
+      /*.traits=*/{},
+      /*.fixed_operand_count=*/{},
+      /*.fixed_result_count=*/{},
+      /*.attribute_count=*/{},
+      /*.region_count=*/{},
+      /*.vtable_flags=*/{},
+      /*.symbol_kind=*/{},
+      /*.constraint_count=*/{},
+      /*.operand_descriptor_count=*/{},
+      /*.control_flow_flags=*/{},
+      /*.control_flow_reserved=*/{},
+      /*.successor_selector_operand_index=*/{},
+      /*.canonicalize=*/{},
+      /*.infer_facts=*/{},
+      /*.effective_traits=*/{},
+      /*.attr_descriptors=*/{},
+      /*.operand_descriptors=*/{},
+      /*.type_transfer=*/{},
+      /*.result_descriptors=*/{},
+      /*.region_descriptors=*/{},
+      /*.constraints=*/{},
+      /*.verify=*/{},
+      /*.name=*/kTestOpName,
   };
   static const loom_op_vtable_t* const kTestDialectVtables[] = {
       &kTestOpVtable,
@@ -56,15 +78,37 @@ TEST_F(ContextTest, RegisterDialectSemanticsResolvesByOpKind) {
       8, 4, 't', 'e', 's', 't', '.', 'n', 'o', 'p', '\0',
   };
   static const loom_op_vtable_t kTestOpVtable = {
-      .name = kTestOpName,
+      /*.traits=*/{},
+      /*.fixed_operand_count=*/{},
+      /*.fixed_result_count=*/{},
+      /*.attribute_count=*/{},
+      /*.region_count=*/{},
+      /*.vtable_flags=*/{},
+      /*.symbol_kind=*/{},
+      /*.constraint_count=*/{},
+      /*.operand_descriptor_count=*/{},
+      /*.control_flow_flags=*/{},
+      /*.control_flow_reserved=*/{},
+      /*.successor_selector_operand_index=*/{},
+      /*.canonicalize=*/{},
+      /*.infer_facts=*/{},
+      /*.effective_traits=*/{},
+      /*.attr_descriptors=*/{},
+      /*.operand_descriptors=*/{},
+      /*.type_transfer=*/{},
+      /*.result_descriptors=*/{},
+      /*.region_descriptors=*/{},
+      /*.constraints=*/{},
+      /*.verify=*/{},
+      /*.name=*/kTestOpName,
   };
   static const loom_op_vtable_t* const kTestDialectVtables[] = {
       &kTestOpVtable,
   };
   static const loom_op_semantics_t kTestDialectSemantics[] = {
       {
-          .phase = LOOM_OP_PHASE_EXECUTABLE,
-          .contract_families = LOOM_CONTRACT_VECTOR_CONTRACTION,
+          /*.phase=*/LOOM_OP_PHASE_EXECUTABLE,
+          /*.contract_families=*/LOOM_CONTRACT_VECTOR_CONTRACTION,
       },
   };
 
@@ -92,14 +136,36 @@ TEST_F(ContextTest, RegisterDialectSemanticsRequiresMatchingVtables) {
       8, 4, 't', 'e', 's', 't', '.', 'n', 'o', 'p', '\0',
   };
   static const loom_op_vtable_t kTestOpVtable = {
-      .name = kTestOpName,
+      /*.traits=*/{},
+      /*.fixed_operand_count=*/{},
+      /*.fixed_result_count=*/{},
+      /*.attribute_count=*/{},
+      /*.region_count=*/{},
+      /*.vtable_flags=*/{},
+      /*.symbol_kind=*/{},
+      /*.constraint_count=*/{},
+      /*.operand_descriptor_count=*/{},
+      /*.control_flow_flags=*/{},
+      /*.control_flow_reserved=*/{},
+      /*.successor_selector_operand_index=*/{},
+      /*.canonicalize=*/{},
+      /*.infer_facts=*/{},
+      /*.effective_traits=*/{},
+      /*.attr_descriptors=*/{},
+      /*.operand_descriptors=*/{},
+      /*.type_transfer=*/{},
+      /*.result_descriptors=*/{},
+      /*.region_descriptors=*/{},
+      /*.constraints=*/{},
+      /*.verify=*/{},
+      /*.name=*/kTestOpName,
   };
   static const loom_op_vtable_t* const kTestDialectVtables[] = {
       &kTestOpVtable,
   };
   static const loom_op_semantics_t kTestDialectSemantics[] = {
       {
-          .phase = LOOM_OP_PHASE_EXECUTABLE,
+          /*.phase=*/LOOM_OP_PHASE_EXECUTABLE,
       },
   };
 
@@ -132,7 +198,7 @@ TEST_F(ContextTest, RegisterEncodingVtableRejectsDuplicateName) {
       loom_context_register_encoding_vtable(&context_, &kQ8_0EncodingVtable));
 
   static const loom_encoding_vtable_t kDuplicate = {
-      .name = IREE_SV("q8_0"),
+      /*.name=*/IREE_SV("q8_0"),
   };
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_ALREADY_EXISTS,

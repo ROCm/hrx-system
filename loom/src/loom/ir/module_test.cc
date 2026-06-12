@@ -16,16 +16,16 @@ namespace loom {
 namespace {
 
 static const loom_encoding_vtable_t kQ8_0EncodingVtable = {
-    .name = IREE_SV("q8_0"),
+    /*.name=*/IREE_SV("q8_0"),
 };
 
 static const loom_encoding_vtable_t kQ6KEncodingVtable = {
-    .name = IREE_SV("q6_k"),
+    /*.name=*/IREE_SV("q6_k"),
 };
 
 static const loom_encoding_vtable_t kDenseEncodingVtable = {
-    .name = IREE_SV("dense"),
-    .role = LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
+    /*.name=*/IREE_SV("dense"),
+    /*.role=*/LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
 };
 
 class ModuleTest : public ::testing::Test {
@@ -259,8 +259,9 @@ TEST_F(ModuleTest, CompactSymbolsDropsUnreferencedTombstonesAndRenumbersRefs) {
   IREE_ASSERT_OK(
       loom_module_intern_string(module, IREE_SV("peer"), &peer_name));
   loom_named_attr_t keep_a_dict[] = {{
-      .name_id = peer_name,
-      .value = loom_attr_symbol((loom_symbol_ref_t){0, keep_b_symbol_id}),
+      /*.name_id=*/peer_name,
+      /*.reserved=*/{},
+      /*.value=*/loom_attr_symbol((loom_symbol_ref_t){0, keep_b_symbol_id}),
   }};
 
   loom_builder_t builder;
@@ -1051,8 +1052,8 @@ TEST_F(ModuleTest, MakeCanonicalAttrDictSortsByKeySpellingAndCopiesEntries) {
          " same as spelling order";
 
   loom_named_attr_t entries[2] = {
-      {.name_id = zeta_id, .value = loom_attr_i64(2)},
-      {.name_id = alpha_id, .value = loom_attr_i64(1)},
+      {/*.name_id=*/zeta_id, /*.reserved=*/{}, /*.value=*/loom_attr_i64(2)},
+      {/*.name_id=*/alpha_id, /*.reserved=*/{}, /*.value=*/loom_attr_i64(1)},
   };
 
   loom_attribute_t attr = {0};
@@ -1097,28 +1098,34 @@ TEST_F(ModuleTest, MakeCanonicalAttrDictRecursivelyCanonicalizesNestedDicts) {
 
   int64_t original_values[3] = {7, 8, 9};
   loom_predicate_t original_predicates[1] = {{
-      .kind = LOOM_PREDICATE_RANGE,
-      .arg_count = 2,
-      .arg_tags = {LOOM_PRED_ARG_CONST, LOOM_PRED_ARG_CONST, 0},
-      .args = {0, 16, 0},
+      /*.kind=*/LOOM_PREDICATE_RANGE,
+      /*.arg_count=*/2,
+      /*.arg_tags=*/{LOOM_PRED_ARG_CONST, LOOM_PRED_ARG_CONST, 0},
+      /*.reserved=*/{},
+      /*.args=*/{0, 16, 0},
   }};
   loom_named_attr_t inner_entries[2] = {
       {
-          .name_id = inner_zeta_id,
-          .value = loom_attr_i64_array(original_values, 3),
+          /*.name_id=*/inner_zeta_id,
+          /*.reserved=*/{},
+          /*.value=*/loom_attr_i64_array(original_values, 3),
       },
       {
-          .name_id = inner_alpha_id,
-          .value = loom_attr_predicate_list(original_predicates, 1),
+          /*.name_id=*/inner_alpha_id,
+          /*.reserved=*/{},
+          /*.value=*/loom_attr_predicate_list(original_predicates, 1),
       },
   };
   loom_named_attr_t outer_entries[2] = {
       {
-          .name_id = outer_zeta_id,
-          .value = loom_make_canonical_attr_dict(inner_entries,
-                                                 IREE_ARRAYSIZE(inner_entries)),
+          /*.name_id=*/outer_zeta_id,
+          /*.reserved=*/{},
+          /*.value=*/
+          loom_make_canonical_attr_dict(inner_entries,
+                                        IREE_ARRAYSIZE(inner_entries)),
       },
-      {.name_id = outer_axis_id, .value = loom_attr_i64(4)},
+      {/*.name_id=*/outer_axis_id, /*.reserved=*/{},
+       /*.value=*/loom_attr_i64(4)},
   };
 
   loom_attribute_t attr = {0};
@@ -1175,8 +1182,8 @@ TEST_F(ModuleTest, MakeCanonicalAttrDictRejectsDuplicateKeys) {
   IREE_ASSERT_OK(loom_module_intern_string(module, IREE_SV("axis"), &key_id));
 
   loom_named_attr_t entries[2] = {
-      {.name_id = key_id, .value = loom_attr_i64(0)},
-      {.name_id = key_id, .value = loom_attr_i64(1)},
+      {/*.name_id=*/key_id, /*.reserved=*/{}, /*.value=*/loom_attr_i64(0)},
+      {/*.name_id=*/key_id, /*.reserved=*/{}, /*.value=*/loom_attr_i64(1)},
   };
 
   loom_attribute_t attr = {0};
@@ -1216,12 +1223,12 @@ TEST_F(ModuleTest, MakeCanonicalAttrDictNormalizesEqualityAndHash) {
       loom_module_intern_string(module, IREE_SV("alpha"), &alpha_id));
 
   loom_named_attr_t zeta_first_entries[2] = {
-      {.name_id = zeta_id, .value = loom_attr_i64(2)},
-      {.name_id = alpha_id, .value = loom_attr_i64(1)},
+      {/*.name_id=*/zeta_id, /*.reserved=*/{}, /*.value=*/loom_attr_i64(2)},
+      {/*.name_id=*/alpha_id, /*.reserved=*/{}, /*.value=*/loom_attr_i64(1)},
   };
   loom_named_attr_t alpha_first_entries[2] = {
-      {.name_id = alpha_id, .value = loom_attr_i64(1)},
-      {.name_id = zeta_id, .value = loom_attr_i64(2)},
+      {/*.name_id=*/alpha_id, /*.reserved=*/{}, /*.value=*/loom_attr_i64(1)},
+      {/*.name_id=*/zeta_id, /*.reserved=*/{}, /*.value=*/loom_attr_i64(2)},
   };
 
   loom_attribute_t zeta_first_attr = {0};
@@ -1250,8 +1257,9 @@ TEST_F(ModuleTest, MakeCanonicalAttrDictRejectsUnknownKeyStringId) {
                                       NULL, iree_allocator_system(), &module));
 
   loom_named_attr_t entries[1] = {{
-      .name_id = 99,
-      .value = loom_attr_i64(1),
+      /*.name_id=*/99,
+      /*.reserved=*/{},
+      /*.value=*/loom_attr_i64(1),
   }};
 
   loom_attribute_t attr = {0};
@@ -1279,8 +1287,8 @@ TEST_F(ModuleTest,
   IREE_ASSERT_OK(loom_module_intern_string(module, IREE_SV("zeta"), &zeta_id));
 
   loom_named_attr_t base_entries[2] = {
-      {.name_id = alpha_id, .value = loom_attr_i64(1)},
-      {.name_id = zeta_id, .value = loom_attr_i64(3)},
+      {/*.name_id=*/alpha_id, /*.reserved=*/{}, /*.value=*/loom_attr_i64(1)},
+      {/*.name_id=*/zeta_id, /*.reserved=*/{}, /*.value=*/loom_attr_i64(3)},
   };
   loom_named_attr_update_t updates[3] = {
       loom_named_attr_replace(zeta_id, loom_attr_i64(30)),
@@ -1317,7 +1325,7 @@ TEST_F(ModuleTest, ReplaceCanonicalAttrDictRejectsDuplicateUpdateKeysByNameId) {
       loom_module_intern_string(module, IREE_SV("alpha"), &alpha_id));
 
   loom_named_attr_t base_entries[1] = {
-      {.name_id = alpha_id, .value = loom_attr_i64(1)},
+      {/*.name_id=*/alpha_id, /*.reserved=*/{}, /*.value=*/loom_attr_i64(1)},
   };
   loom_named_attr_update_t updates[2] = {
       loom_named_attr_replace(alpha_id, loom_attr_i64(2)),
@@ -1353,11 +1361,11 @@ TEST_F(ModuleTest,
   IREE_ASSERT_OK(loom_module_intern_string(module, IREE_SV("zeta"), &zeta_id));
 
   loom_named_attr_t nested_entries[2] = {
-      {.name_id = zeta_id, .value = loom_attr_i64(2)},
-      {.name_id = alpha_id, .value = loom_attr_i64(1)},
+      {/*.name_id=*/zeta_id, /*.reserved=*/{}, /*.value=*/loom_attr_i64(2)},
+      {/*.name_id=*/alpha_id, /*.reserved=*/{}, /*.value=*/loom_attr_i64(1)},
   };
   loom_named_attr_t base_entries[1] = {
-      {.name_id = outer_id, .value = loom_attr_i64(0)},
+      {/*.name_id=*/outer_id, /*.reserved=*/{}, /*.value=*/loom_attr_i64(0)},
   };
   loom_named_attr_update_t updates[1] = {
       loom_named_attr_replace(
@@ -1401,8 +1409,8 @@ TEST_F(ModuleTest, VerifyCanonicalAttrDictRejectsUnsortedInput) {
       loom_module_intern_string(module, IREE_SV("alpha"), &alpha_id));
 
   loom_named_attr_t entries[2] = {
-      {.name_id = zeta_id, .value = loom_attr_i64(2)},
-      {.name_id = alpha_id, .value = loom_attr_i64(1)},
+      {/*.name_id=*/zeta_id, /*.reserved=*/{}, /*.value=*/loom_attr_i64(2)},
+      {/*.name_id=*/alpha_id, /*.reserved=*/{}, /*.value=*/loom_attr_i64(1)},
   };
   loom_attribute_t attr =
       loom_make_canonical_attr_dict(entries, IREE_ARRAYSIZE(entries));
@@ -1422,8 +1430,8 @@ TEST_F(ModuleTest, VerifyCanonicalAttrDictRejectsDuplicateKeys) {
   IREE_ASSERT_OK(loom_module_intern_string(module, IREE_SV("axis"), &key_id));
 
   loom_named_attr_t entries[2] = {
-      {.name_id = key_id, .value = loom_attr_i64(0)},
-      {.name_id = key_id, .value = loom_attr_i64(1)},
+      {/*.name_id=*/key_id, /*.reserved=*/{}, /*.value=*/loom_attr_i64(0)},
+      {/*.name_id=*/key_id, /*.reserved=*/{}, /*.value=*/loom_attr_i64(1)},
   };
   loom_attribute_t attr =
       loom_make_canonical_attr_dict(entries, IREE_ARRAYSIZE(entries));
@@ -1456,14 +1464,14 @@ TEST_F(ModuleTest, VerifyCanonicalAttrDictRejectsEmptyDictWithNonNullEntries) {
   loom_string_id_t key_id = LOOM_STRING_ID_INVALID;
   IREE_ASSERT_OK(loom_module_intern_string(module, IREE_SV("axis"), &key_id));
   loom_named_attr_t entries[1] = {{
-      .name_id = key_id,
-      .value = loom_attr_i64(0),
+      /*.name_id=*/key_id,
+      /*.reserved=*/{},
+      /*.value=*/loom_attr_i64(0),
   }};
-  loom_attribute_t attr = {
-      .kind = LOOM_ATTR_DICT,
-      .count = 0,
-      .dict_entries = entries,
-  };
+  loom_attribute_t attr = {};
+  attr.kind = LOOM_ATTR_DICT;
+  attr.count = 0;
+  attr.dict_entries = entries;
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_module_verify_canonical_attr_dict(module, attr));
@@ -1882,10 +1890,10 @@ TEST_F(ModuleTest, BlockAppendSupportsMoreThanUint16Ops) {
 
 TEST_F(ModuleTest, SizeHints) {
   loom_module_size_hints_t hints = {
-      .value_count = 100,
-      .string_count = 50,
-      .type_count = 20,
-      .symbol_count = 10,
+      /*.value_count=*/100,
+      /*.string_count=*/50,
+      /*.type_count=*/20,
+      /*.symbol_count=*/10,
   };
   loom_module_t* module = NULL;
   IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
@@ -1937,15 +1945,17 @@ TEST_F(ModuleTest, AddEncodingBasic) {
   IREE_ASSERT_OK(
       loom_module_intern_string(module, IREE_SV("block"), &block_id));
   loom_named_attr_t param = {
-      .name_id = block_id,
-      .value = loom_attr_i64(32),
+      /*.name_id=*/block_id,
+      /*.reserved=*/{},
+      /*.value=*/loom_attr_i64(32),
   };
 
   loom_encoding_t encoding = {
-      .name_id = name_id,
-      .alias_id = LOOM_STRING_ID_INVALID,
-      .attribute_count = 1,
-      .attributes = &param,
+      /*.name_id=*/name_id,
+      /*.alias_id=*/LOOM_STRING_ID_INVALID,
+      /*.attribute_count=*/1,
+      /*.reserved=*/{},
+      /*.attributes=*/&param,
   };
 
   uint16_t encoding_id = 0;
@@ -1973,9 +1983,9 @@ TEST_F(ModuleTest, AddEncodingDedup) {
   IREE_ASSERT_OK(loom_module_intern_string(module, IREE_SV("dense"), &name_id));
 
   loom_encoding_t encoding = {
-      .name_id = name_id,
-      .alias_id = LOOM_STRING_ID_INVALID,
-      .attribute_count = 0,
+      /*.name_id=*/name_id,
+      /*.alias_id=*/LOOM_STRING_ID_INVALID,
+      /*.attribute_count=*/0,
   };
 
   uint16_t id1 = 0, id2 = 0;
@@ -2003,25 +2013,28 @@ TEST_F(ModuleTest, AddEncodingDedupStructuralParamsAndBackfillsAlias) {
   int64_t shape_a[] = {16, 32};
   int64_t shape_b[] = {16, 32};
   loom_named_attr_t attrs_a[] = {{
-      .name_id = shape_id,
-      .value = loom_attr_i64_array(shape_a, IREE_ARRAYSIZE(shape_a)),
+      /*.name_id=*/shape_id,
+      /*.reserved=*/{},
+      /*.value=*/loom_attr_i64_array(shape_a, IREE_ARRAYSIZE(shape_a)),
   }};
   loom_named_attr_t attrs_b[] = {{
-      .name_id = shape_id,
-      .value = loom_attr_i64_array(shape_b, IREE_ARRAYSIZE(shape_b)),
+      /*.name_id=*/shape_id,
+      /*.reserved=*/{},
+      /*.value=*/loom_attr_i64_array(shape_b, IREE_ARRAYSIZE(shape_b)),
   }};
 
   loom_encoding_t plain = {
-      .name_id = name_id,
-      .alias_id = LOOM_STRING_ID_INVALID,
-      .attribute_count = 1,
-      .attributes = attrs_a,
+      /*.name_id=*/name_id,
+      /*.alias_id=*/LOOM_STRING_ID_INVALID,
+      /*.attribute_count=*/1,
+      /*.reserved=*/{},
+      /*.attributes=*/attrs_a,
   };
   loom_encoding_t aliased = {
-      .name_id = name_id,
-      .alias_id = alias_id,
-      .attribute_count = 1,
-      .attributes = attrs_b,
+      /*.name_id=*/name_id,
+      /*.alias_id=*/alias_id,
+      /*.attribute_count=*/1,
+      /*.reserved=*/{},       /*.attributes=*/attrs_b,
   };
 
   uint16_t plain_id = 0;
@@ -2058,16 +2071,16 @@ TEST_F(ModuleTest, AddEncodingRejectsDuplicateAliasForDifferentEncodings) {
   IREE_ASSERT_OK(loom_module_intern_string(module, IREE_SV("enc"), &alias_id));
 
   loom_encoding_t q8_encoding = {
-      .name_id = q8_name_id,
-      .alias_id = alias_id,
+      /*.name_id=*/q8_name_id,
+      /*.alias_id=*/alias_id,
   };
   uint16_t q8_encoding_id = 0;
   IREE_ASSERT_OK(
       loom_module_add_encoding(module, &q8_encoding, &q8_encoding_id));
 
   loom_encoding_t dense_encoding = {
-      .name_id = dense_name_id,
-      .alias_id = alias_id,
+      /*.name_id=*/dense_name_id,
+      /*.alias_id=*/alias_id,
   };
   uint16_t dense_encoding_id = 0;
   IREE_EXPECT_STATUS_IS(
@@ -2090,20 +2103,24 @@ TEST_F(ModuleTest, AddEncodingDifferentParams) {
       loom_module_intern_string(module, IREE_SV("block"), &block_id));
 
   // Same name, different block size — two distinct entries.
-  loom_named_attr_t param32 = {.name_id = block_id, .value = loom_attr_i64(32)};
-  loom_named_attr_t param64 = {.name_id = block_id, .value = loom_attr_i64(64)};
+  loom_named_attr_t param32 = {/*.name_id=*/block_id, /*.reserved=*/{},
+                               /*.value=*/loom_attr_i64(32)};
+  loom_named_attr_t param64 = {/*.name_id=*/block_id, /*.reserved=*/{},
+                               /*.value=*/loom_attr_i64(64)};
 
   loom_encoding_t enc32 = {
-      .name_id = name_id,
-      .alias_id = LOOM_STRING_ID_INVALID,
-      .attribute_count = 1,
-      .attributes = &param32,
+      /*.name_id=*/name_id,
+      /*.alias_id=*/LOOM_STRING_ID_INVALID,
+      /*.attribute_count=*/1,
+      /*.reserved=*/{},
+      /*.attributes=*/&param32,
   };
   loom_encoding_t enc64 = {
-      .name_id = name_id,
-      .alias_id = LOOM_STRING_ID_INVALID,
-      .attribute_count = 1,
-      .attributes = &param64,
+      /*.name_id=*/name_id,
+      /*.alias_id=*/LOOM_STRING_ID_INVALID,
+      /*.attribute_count=*/1,
+      /*.reserved=*/{},
+      /*.attributes=*/&param64,
   };
 
   uint16_t id32 = 0, id64 = 0;
@@ -2124,8 +2141,8 @@ TEST_F(ModuleTest, AddEncodingRejectsUnknownFamilyWhenRegistryIsPopulated) {
   IREE_ASSERT_OK(loom_module_intern_string(module, IREE_SV("mystery_q"),
                                            &unknown_name_id));
   loom_encoding_t encoding = {
-      .name_id = unknown_name_id,
-      .alias_id = LOOM_STRING_ID_INVALID,
+      /*.name_id=*/unknown_name_id,
+      /*.alias_id=*/LOOM_STRING_ID_INVALID,
   };
   uint16_t encoding_id = 0;
   IREE_EXPECT_STATUS_IS(
@@ -2144,8 +2161,8 @@ TEST_F(ModuleTest, EncodingVtableLookupReturnsRegisteredFamily) {
   loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
   IREE_ASSERT_OK(loom_module_intern_string(module, IREE_SV("q8_0"), &name_id));
   loom_encoding_t encoding = {
-      .name_id = name_id,
-      .alias_id = LOOM_STRING_ID_INVALID,
+      /*.name_id=*/name_id,
+      /*.alias_id=*/LOOM_STRING_ID_INVALID,
   };
   uint16_t encoding_id = 0;
   IREE_ASSERT_OK(loom_module_add_encoding(module, &encoding, &encoding_id));

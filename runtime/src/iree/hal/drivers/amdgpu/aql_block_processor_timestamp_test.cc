@@ -321,23 +321,23 @@ TEST(AqlBlockProcessorTimestampTest,
   iree_hal_amdgpu_dispatch_timestamp_record_t records[2] = {};
   const iree_hal_amdgpu_aql_block_processor_timestamp_dispatch_list_params_t
       params = {
-          .summaries =
-              {
-                  .first = summaries,
-                  .count = 2,
-              },
-          .metadata =
-              {
-                  .command_buffer_id = 0xCAFE,
-                  .block_ordinal = 5,
-                  .first_record_ordinal = 9,
-              },
-          .storage =
-              {
-                  .dispatches = dispatches,
-                  .completion_signals = completion_signals,
-                  .records = records,
-              },
+          /*.summaries=*/
+          {
+              /*.first=*/summaries,
+              /*.count=*/2,
+          },
+          /*.metadata=*/
+          {
+              /*.command_buffer_id=*/0xCAFE,
+              /*.block_ordinal=*/5,
+              /*.first_record_ordinal=*/9,
+          },
+          /*.storage=*/
+          {
+              /*.dispatches=*/dispatches,
+              /*.completion_signals=*/completion_signals,
+              /*.records=*/records,
+          },
       };
 
   iree_hal_amdgpu_aql_block_processor_timestamp_dispatch_list_t list;

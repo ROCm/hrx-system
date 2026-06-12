@@ -413,8 +413,8 @@ TEST_F(HostQueuePendingTest,
   IREE_ASSERT_OK(iree_hal_amdgpu_host_queue_enqueue_host_action(
       queue, wait_list,
       iree_hal_amdgpu_reclaim_action_t{
-          .fn = RecordHostAction,
-          .user_data = &action_state,
+          /*.fn=*/RecordHostAction,
+          /*.user_data=*/&action_state,
       },
       /*operation_resources=*/NULL, /*operation_resource_count=*/0));
 
@@ -523,8 +523,8 @@ TEST_F(HostQueuePendingTest, CapacityParkedHostActionRetriesAfterPostDrain) {
     status = iree_hal_amdgpu_host_queue_enqueue_host_action(
         queue, iree_hal_semaphore_list_empty(),
         iree_hal_amdgpu_reclaim_action_t{
-            .fn = RecordHostAction,
-            .user_data = &action_state,
+            /*.fn=*/RecordHostAction,
+            /*.user_data=*/&action_state,
         },
         /*operation_resources=*/NULL, /*operation_resource_count=*/0);
   }

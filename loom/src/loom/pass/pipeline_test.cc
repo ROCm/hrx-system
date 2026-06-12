@@ -58,8 +58,8 @@ TEST(PassPipelineParseTest, ParsesOptionAssignments) {
   IREE_ASSERT_OK(loom_pass_options_parse(IREE_SV("canonicalize"),
                                          IREE_SV("max-iterations = 7"),
                                          (loom_pass_option_parse_callback_t){
-                                             .fn = capture_option,
-                                             .user_data = &parsed_option,
+                                             /*.fn=*/capture_option,
+                                             /*.user_data=*/&parsed_option,
                                          }));
   EXPECT_EQ(parsed_option.count, 1);
   EXPECT_TRUE(
@@ -92,23 +92,23 @@ TEST(PassPipelineParseTest, RejectsMalformedOptionAssignments) {
                         loom_pass_options_parse(
                             IREE_SV("canonicalize"), IREE_SV("max-iterations"),
                             (loom_pass_option_parse_callback_t){
-                                .fn = capture_option,
-                                .user_data = &parsed_option,
+                                /*.fn=*/capture_option,
+                                /*.user_data=*/&parsed_option,
                             }));
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       loom_pass_options_parse(IREE_SV("canonicalize"), IREE_SV("=7"),
                               (loom_pass_option_parse_callback_t){
-                                  .fn = capture_option,
-                                  .user_data = &parsed_option,
+                                  /*.fn=*/capture_option,
+                                  /*.user_data=*/&parsed_option,
                               }));
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       loom_pass_options_parse(IREE_SV("canonicalize"),
                               IREE_SV("max-iterations=7,"),
                               (loom_pass_option_parse_callback_t){
-                                  .fn = capture_option,
-                                  .user_data = &parsed_option,
+                                  /*.fn=*/capture_option,
+                                  /*.user_data=*/&parsed_option,
                               }));
 }
 

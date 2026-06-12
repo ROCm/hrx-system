@@ -107,13 +107,13 @@ class BytecodeFixture {
 static loom_bytecode_read_options_t ReadOptions(bool verify_module,
                                                 uint32_t* diagnostic_count) {
   return loom_bytecode_read_options_t{
-      .diagnostic_sink =
-          {
-              .fn = IgnoreDiagnostic,
-              .user_data = diagnostic_count,
-          },
-      .verify_module = verify_module,
-      .verify_max_errors = 16,
+      /*.diagnostic_sink=*/
+      {
+          /*.fn=*/IgnoreDiagnostic,
+          /*.user_data=*/diagnostic_count,
+      },
+      /*.verify_module=*/verify_module,
+      /*.verify_max_errors=*/16,
   };
 }
 

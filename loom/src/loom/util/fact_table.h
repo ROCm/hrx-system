@@ -69,8 +69,8 @@ typedef struct loom_value_fact_type_domain_resolver_callback_t {
 static inline loom_value_fact_type_domain_resolver_callback_t
 loom_value_fact_type_domain_resolver_callback_empty(void) {
   return (loom_value_fact_type_domain_resolver_callback_t){
-      .fn = NULL,
-      .user_data = NULL,
+      /*.fn=*/NULL,
+      /*.user_data=*/NULL,
   };
 }
 
@@ -78,8 +78,8 @@ static inline loom_value_fact_type_domain_resolver_callback_t
 loom_value_fact_type_domain_resolver_callback_make(
     loom_value_fact_type_domain_resolver_fn_t fn, void* user_data) {
   return (loom_value_fact_type_domain_resolver_callback_t){
-      .fn = fn,
-      .user_data = user_data,
+      /*.fn=*/fn,
+      /*.user_data=*/user_data,
   };
 }
 

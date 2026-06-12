@@ -60,10 +60,10 @@ static iree_status_t EmitEncodingParamError(iree_diagnostic_emitter_t emitter,
       loom_param_string(param_name),
   };
   loom_diagnostic_emission_t emission = {
-      .op = op,
-      .error = error,
-      .params = diagnostic_params,
-      .param_count = IREE_ARRAYSIZE(diagnostic_params),
+      /*.op=*/op,
+      /*.error=*/error,
+      /*.params=*/diagnostic_params,
+      /*.param_count=*/IREE_ARRAYSIZE(diagnostic_params),
   };
   return iree_diagnostic_emit(emitter, &emission);
 }
@@ -79,10 +79,10 @@ static iree_status_t EmitEncodingParamTypeError(
       loom_param_string(expected_type),
   };
   loom_diagnostic_emission_t emission = {
-      .op = op,
-      .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_ENCODING, 9),
-      .params = diagnostic_params,
-      .param_count = IREE_ARRAYSIZE(diagnostic_params),
+      /*.op=*/op,
+      /*.error=*/loom_error_def_lookup(LOOM_ERROR_DOMAIN_ENCODING, 9),
+      /*.params=*/diagnostic_params,
+      /*.param_count=*/IREE_ARRAYSIZE(diagnostic_params),
   };
   return iree_diagnostic_emit(emitter, &emission);
 }
@@ -126,8 +126,10 @@ static iree_status_t VerifyRequiresLayoutDefine(
 }
 
 static const loom_encoding_vtable_t kRequiresLayoutEncodingVtable = {
-    .name = IREE_SV("requires_layout"),
-    .verify_define = VerifyRequiresLayoutDefine,
+    /*.name=*/IREE_SV("requires_layout"),
+    /*.role=*/{},
+    /*.verify=*/{},
+    /*.verify_define=*/VerifyRequiresLayoutDefine,
 };
 
 class EncodingVerifyTest : public ::testing::Test {

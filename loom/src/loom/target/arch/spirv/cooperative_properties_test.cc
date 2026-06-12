@@ -43,91 +43,95 @@ void PreparePropertySet(loom_spirv_feature_bits_t feature_bits,
 loom_spirv_cooperative_matrix_query_t F16MatrixQuery(
     loom_lowering_policy_t policy) {
   return {
-      .m_size = 16,
-      .n_size = 16,
-      .k_size = 16,
-      .lhs_type = LOOM_SPIRV_SCALAR_TYPE_F16,
-      .rhs_type = LOOM_SPIRV_SCALAR_TYPE_F16,
-      .accumulator_type = LOOM_SPIRV_SCALAR_TYPE_F32,
-      .result_type = LOOM_SPIRV_SCALAR_TYPE_F32,
-      .scope = LOOM_SPIRV_SCOPE_SUBGROUP,
-      .layout = LOOM_SPIRV_COOPERATIVE_MATRIX_LAYOUT_ROW_MAJOR_KHR,
-      .storage_class = LOOM_SPIRV_STORAGE_CLASS_PHYSICAL_STORAGE_BUFFER,
-      .policy = policy,
+      /*.m_size=*/16,
+      /*.n_size=*/16,
+      /*.k_size=*/16,
+      /*.lhs_type=*/LOOM_SPIRV_SCALAR_TYPE_F16,
+      /*.rhs_type=*/LOOM_SPIRV_SCALAR_TYPE_F16,
+      /*.accumulator_type=*/LOOM_SPIRV_SCALAR_TYPE_F32,
+      /*.result_type=*/LOOM_SPIRV_SCALAR_TYPE_F32,
+      /*.scope=*/LOOM_SPIRV_SCOPE_SUBGROUP,
+      /*.layout=*/LOOM_SPIRV_COOPERATIVE_MATRIX_LAYOUT_ROW_MAJOR_KHR,
+      /*.storage_class=*/LOOM_SPIRV_STORAGE_CLASS_PHYSICAL_STORAGE_BUFFER,
+      /*.operand_flags=*/{},
+      /*.policy=*/policy,
   };
 }
 
 loom_spirv_cooperative_matrix_query_t Bf16MatrixQuery(
     loom_lowering_policy_t policy) {
   return {
-      .m_size = 16,
-      .n_size = 16,
-      .k_size = 16,
-      .lhs_type = LOOM_SPIRV_SCALAR_TYPE_BF16,
-      .rhs_type = LOOM_SPIRV_SCALAR_TYPE_BF16,
-      .accumulator_type = LOOM_SPIRV_SCALAR_TYPE_F32,
-      .result_type = LOOM_SPIRV_SCALAR_TYPE_F32,
-      .scope = LOOM_SPIRV_SCOPE_SUBGROUP,
-      .layout = LOOM_SPIRV_COOPERATIVE_MATRIX_LAYOUT_ROW_MAJOR_KHR,
-      .storage_class = LOOM_SPIRV_STORAGE_CLASS_PHYSICAL_STORAGE_BUFFER,
-      .policy = policy,
+      /*.m_size=*/16,
+      /*.n_size=*/16,
+      /*.k_size=*/16,
+      /*.lhs_type=*/LOOM_SPIRV_SCALAR_TYPE_BF16,
+      /*.rhs_type=*/LOOM_SPIRV_SCALAR_TYPE_BF16,
+      /*.accumulator_type=*/LOOM_SPIRV_SCALAR_TYPE_F32,
+      /*.result_type=*/LOOM_SPIRV_SCALAR_TYPE_F32,
+      /*.scope=*/LOOM_SPIRV_SCOPE_SUBGROUP,
+      /*.layout=*/LOOM_SPIRV_COOPERATIVE_MATRIX_LAYOUT_ROW_MAJOR_KHR,
+      /*.storage_class=*/LOOM_SPIRV_STORAGE_CLASS_PHYSICAL_STORAGE_BUFFER,
+      /*.operand_flags=*/{},
+      /*.policy=*/policy,
   };
 }
 
 loom_spirv_cooperative_matrix_query_t S8MatrixQuery(
     loom_lowering_policy_t policy) {
   return {
-      .m_size = 16,
-      .n_size = 16,
-      .k_size = 32,
-      .lhs_type = LOOM_SPIRV_SCALAR_TYPE_S8,
-      .rhs_type = LOOM_SPIRV_SCALAR_TYPE_S8,
-      .accumulator_type = LOOM_SPIRV_SCALAR_TYPE_S32,
-      .result_type = LOOM_SPIRV_SCALAR_TYPE_S32,
-      .scope = LOOM_SPIRV_SCOPE_SUBGROUP,
-      .layout = LOOM_SPIRV_COOPERATIVE_MATRIX_LAYOUT_ROW_MAJOR_KHR,
-      .storage_class = LOOM_SPIRV_STORAGE_CLASS_PHYSICAL_STORAGE_BUFFER,
-      .operand_flags =
-          LOOM_SPIRV_COOPERATIVE_MATRIX_OPERAND_A_SIGNED_COMPONENTS |
+      /*.m_size=*/16,
+      /*.n_size=*/16,
+      /*.k_size=*/32,
+      /*.lhs_type=*/LOOM_SPIRV_SCALAR_TYPE_S8,
+      /*.rhs_type=*/LOOM_SPIRV_SCALAR_TYPE_S8,
+      /*.accumulator_type=*/LOOM_SPIRV_SCALAR_TYPE_S32,
+      /*.result_type=*/LOOM_SPIRV_SCALAR_TYPE_S32,
+      /*.scope=*/LOOM_SPIRV_SCOPE_SUBGROUP,
+      /*.layout=*/LOOM_SPIRV_COOPERATIVE_MATRIX_LAYOUT_ROW_MAJOR_KHR,
+      /*.storage_class=*/LOOM_SPIRV_STORAGE_CLASS_PHYSICAL_STORAGE_BUFFER,
+      /*.operand_flags=*/
+      LOOM_SPIRV_COOPERATIVE_MATRIX_OPERAND_A_SIGNED_COMPONENTS |
           LOOM_SPIRV_COOPERATIVE_MATRIX_OPERAND_B_SIGNED_COMPONENTS |
           LOOM_SPIRV_COOPERATIVE_MATRIX_OPERAND_C_SIGNED_COMPONENTS |
           LOOM_SPIRV_COOPERATIVE_MATRIX_OPERAND_RESULT_SIGNED_COMPONENTS |
           LOOM_SPIRV_COOPERATIVE_MATRIX_OPERAND_SATURATING_ACCUMULATION,
-      .policy = policy,
+      /*.policy=*/policy,
   };
 }
 
 loom_spirv_cooperative_matrix_query_t U8MatrixQuery(
     loom_lowering_policy_t policy) {
   return {
-      .m_size = 16,
-      .n_size = 16,
-      .k_size = 32,
-      .lhs_type = LOOM_SPIRV_SCALAR_TYPE_U8,
-      .rhs_type = LOOM_SPIRV_SCALAR_TYPE_U8,
-      .accumulator_type = LOOM_SPIRV_SCALAR_TYPE_U32,
-      .result_type = LOOM_SPIRV_SCALAR_TYPE_U32,
-      .scope = LOOM_SPIRV_SCOPE_SUBGROUP,
-      .layout = LOOM_SPIRV_COOPERATIVE_MATRIX_LAYOUT_ROW_MAJOR_KHR,
-      .storage_class = LOOM_SPIRV_STORAGE_CLASS_PHYSICAL_STORAGE_BUFFER,
-      .policy = policy,
+      /*.m_size=*/16,
+      /*.n_size=*/16,
+      /*.k_size=*/32,
+      /*.lhs_type=*/LOOM_SPIRV_SCALAR_TYPE_U8,
+      /*.rhs_type=*/LOOM_SPIRV_SCALAR_TYPE_U8,
+      /*.accumulator_type=*/LOOM_SPIRV_SCALAR_TYPE_U32,
+      /*.result_type=*/LOOM_SPIRV_SCALAR_TYPE_U32,
+      /*.scope=*/LOOM_SPIRV_SCOPE_SUBGROUP,
+      /*.layout=*/LOOM_SPIRV_COOPERATIVE_MATRIX_LAYOUT_ROW_MAJOR_KHR,
+      /*.storage_class=*/LOOM_SPIRV_STORAGE_CLASS_PHYSICAL_STORAGE_BUFFER,
+      /*.operand_flags=*/{},
+      /*.policy=*/policy,
   };
 }
 
 loom_spirv_cooperative_vector_query_t PackedS8VectorQuery(
     loom_lowering_policy_t policy) {
   return {
-      .m_size = 32,
-      .k_size = 32,
-      .input_type = LOOM_SPIRV_COMPONENT_TYPE_UNSIGNED_INT32_NV,
-      .input_interpretation = LOOM_SPIRV_COMPONENT_TYPE_SIGNED_INT8_PACKED_NV,
-      .matrix_interpretation = LOOM_SPIRV_COMPONENT_TYPE_SIGNED_INT8_NV,
-      .bias_interpretation = LOOM_SPIRV_COMPONENT_TYPE_SIGNED_INT32_NV,
-      .result_type = LOOM_SPIRV_COMPONENT_TYPE_SIGNED_INT32_NV,
-      .matrix_layout =
-          LOOM_SPIRV_COOPERATIVE_VECTOR_MATRIX_LAYOUT_INFERENCING_OPTIMAL_NV,
-      .storage_class = LOOM_SPIRV_STORAGE_CLASS_PHYSICAL_STORAGE_BUFFER,
-      .policy = policy,
+      /*.m_size=*/32,
+      /*.k_size=*/32,
+      /*.input_type=*/LOOM_SPIRV_COMPONENT_TYPE_UNSIGNED_INT32_NV,
+      /*.input_interpretation=*/LOOM_SPIRV_COMPONENT_TYPE_SIGNED_INT8_PACKED_NV,
+      /*.matrix_interpretation=*/LOOM_SPIRV_COMPONENT_TYPE_SIGNED_INT8_NV,
+      /*.bias_interpretation=*/LOOM_SPIRV_COMPONENT_TYPE_SIGNED_INT32_NV,
+      /*.result_type=*/LOOM_SPIRV_COMPONENT_TYPE_SIGNED_INT32_NV,
+      /*.matrix_layout=*/
+      LOOM_SPIRV_COOPERATIVE_VECTOR_MATRIX_LAYOUT_INFERENCING_OPTIMAL_NV,
+      /*.storage_class=*/LOOM_SPIRV_STORAGE_CLASS_PHYSICAL_STORAGE_BUFFER,
+      /*.flags=*/{},
+      /*.policy=*/policy,
   };
 }
 
@@ -138,17 +142,18 @@ loom_spirv_cooperative_vector_query_t F8E4M3VectorQuery(
   EXPECT_TRUE(loom_spirv_component_type_from_numeric_format(
       LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3, &f8e4m3_component_type));
   return {
-      .m_size = 16,
-      .k_size = 32,
-      .input_type = LOOM_SPIRV_COMPONENT_TYPE_FLOAT16_NV,
-      .input_interpretation = f8e4m3_component_type,
-      .matrix_interpretation = f8e4m3_component_type,
-      .bias_interpretation = LOOM_SPIRV_COMPONENT_TYPE_FLOAT16_NV,
-      .result_type = LOOM_SPIRV_COMPONENT_TYPE_FLOAT16_NV,
-      .matrix_layout =
-          LOOM_SPIRV_COOPERATIVE_VECTOR_MATRIX_LAYOUT_INFERENCING_OPTIMAL_NV,
-      .storage_class = LOOM_SPIRV_STORAGE_CLASS_PHYSICAL_STORAGE_BUFFER,
-      .policy = policy,
+      /*.m_size=*/16,
+      /*.k_size=*/32,
+      /*.input_type=*/LOOM_SPIRV_COMPONENT_TYPE_FLOAT16_NV,
+      /*.input_interpretation=*/f8e4m3_component_type,
+      /*.matrix_interpretation=*/f8e4m3_component_type,
+      /*.bias_interpretation=*/LOOM_SPIRV_COMPONENT_TYPE_FLOAT16_NV,
+      /*.result_type=*/LOOM_SPIRV_COMPONENT_TYPE_FLOAT16_NV,
+      /*.matrix_layout=*/
+      LOOM_SPIRV_COOPERATIVE_VECTOR_MATRIX_LAYOUT_INFERENCING_OPTIMAL_NV,
+      /*.storage_class=*/LOOM_SPIRV_STORAGE_CLASS_PHYSICAL_STORAGE_BUFFER,
+      /*.flags=*/{},
+      /*.policy=*/policy,
   };
 }
 

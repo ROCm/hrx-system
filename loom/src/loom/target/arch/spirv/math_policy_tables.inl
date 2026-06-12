@@ -6,6 +6,6 @@
 
 static const loom_target_math_policy_registry_entry_t
     kSpirvMathPolicyEntries[] = {
-        {.contract_set_key = IREE_SVL("spirv.logical.core"),
-         .policy = &kSpirvMathPolicy},
+        {/*.contract_set_key=*/IREE_SVL("spirv.logical.core"),
+         /*.policy=*/&kSpirvMathPolicy},
 };

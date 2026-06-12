@@ -128,14 +128,14 @@ std::vector<Section> ReadSections(const std::string& bytes) {
     const uint32_t name_offset = LoadLeU32(bytes, header_offset);
     EXPECT_LT(name_offset, section_name_size);
     sections.push_back({
-        .index = i,
-        .name =
-            ReadNullTerminatedString(bytes, section_name_offset + name_offset),
-        .type = LoadLeU32(bytes, header_offset + 4),
-        .offset = LoadLeU64(bytes, header_offset + 24),
-        .size = LoadLeU64(bytes, header_offset + 32),
-        .link = LoadLeU32(bytes, header_offset + 40),
-        .entry_size = LoadLeU64(bytes, header_offset + 56),
+        /*.index=*/i,
+        /*.name=*/
+        ReadNullTerminatedString(bytes, section_name_offset + name_offset),
+        /*.type=*/LoadLeU32(bytes, header_offset + 4),
+        /*.offset=*/LoadLeU64(bytes, header_offset + 24),
+        /*.size=*/LoadLeU64(bytes, header_offset + 32),
+        /*.link=*/LoadLeU32(bytes, header_offset + 40),
+        /*.entry_size=*/LoadLeU64(bytes, header_offset + 56),
     });
   }
   return sections;
@@ -155,20 +155,20 @@ const Section& FindSection(const std::vector<Section>& sections,
 loom_amdgpu_metadata_kernel_t MinimalKernel(iree_string_view_t name,
                                             iree_string_view_t symbol) {
   return {
-      .name = name,
-      .descriptor_symbol = symbol,
-      .kernarg_segment_size = 0,
-      .kernarg_segment_alignment = 8,
-      .wavefront_size = 32,
-      .group_segment_fixed_size = 0,
-      .private_segment_fixed_size = 0,
-      .sgpr_count = 4,
-      .vgpr_count = 1,
-      .max_flat_workgroup_size = 64,
-      .required_workgroup_size = {.x = 64, .y = 1, .z = 1},
-      .has_required_workgroup_size = true,
-      .arguments = nullptr,
-      .argument_count = 0,
+      /*.name=*/name,
+      /*.descriptor_symbol=*/symbol,
+      /*.kernarg_segment_size=*/0,
+      /*.kernarg_segment_alignment=*/8,
+      /*.wavefront_size=*/32,
+      /*.group_segment_fixed_size=*/0,
+      /*.private_segment_fixed_size=*/0,
+      /*.sgpr_count=*/4,
+      /*.vgpr_count=*/1,
+      /*.max_flat_workgroup_size=*/64,
+      /*.required_workgroup_size=*/{/*.x=*/64, /*.y=*/1, /*.z=*/1},
+      /*.has_required_workgroup_size=*/true,
+      /*.arguments=*/nullptr,
+      /*.argument_count=*/0,
   };
 }
 
@@ -176,19 +176,20 @@ loom_amdgpu_kernel_hsaco_contribution_t Contribution(
     iree_string_view_t name, iree_string_view_t descriptor_symbol,
     iree_const_byte_span_t text) {
   return {
-      .target = IREE_SV("amdgcn-amd-amdhsa--gfx1100"),
-      .processor = IREE_SV("gfx1100"),
-      .kernel =
-          {
-              .metadata = MinimalKernel(name, descriptor_symbol),
-              .text = text,
-          },
-      .summary =
-          {
-              .instruction_count = 1,
-              .text_byte_count = text.data_length,
-              .text_storage_byte_count = text.data_length,
-          },
+      /*.target=*/IREE_SV("amdgcn-amd-amdhsa--gfx1100"),
+      /*.processor=*/IREE_SV("gfx1100"),
+      /*.kernel=*/
+      {
+          /*.metadata=*/MinimalKernel(name, descriptor_symbol),
+          /*.descriptor_options=*/{},
+          /*.text=*/text,
+      },
+      /*.summary=*/
+      {
+          /*.instruction_count=*/1,
+          /*.text_byte_count=*/text.data_length,
+          /*.text_storage_byte_count=*/text.data_length,
+      },
   };
 }
 

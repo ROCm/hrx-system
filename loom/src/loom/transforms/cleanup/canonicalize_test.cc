@@ -61,7 +61,7 @@ class CanonicalizeTest : public ::testing::Test {
                                               IREE_SV("test_fn"), &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_ASSERT_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
-    loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
+    loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
     loom_op_t* func_op = NULL;
     IREE_ASSERT_OK(loom_test_func_build(&module_builder, 0, 0, 0, callee, NULL,
                                         0, NULL, 0, NULL, 0, NULL, 0,
@@ -115,8 +115,8 @@ class CanonicalizeTest : public ::testing::Test {
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_module_add_symbol(module_, name_id, &symbol_id));
     *out_symbol_ref = (loom_symbol_ref_t){
-        .module_id = 0,
-        .symbol_id = symbol_id,
+        /*.module_id=*/0,
+        /*.symbol_id=*/symbol_id,
     };
     return iree_ok_status();
   }
@@ -582,7 +582,8 @@ TEST_F(CanonicalizeTest, DriverAcceptsSeedFacts) {
                                                &value_facts, &canonicalizer));
   loom_canonicalizer_result_t result;
   loom_canonicalizer_options_t options = {
-      .seed_facts = &seed_facts,
+      /*.max_iterations=*/{},
+      /*.seed_facts=*/&seed_facts,
   };
   IREE_ASSERT_OK(loom_canonicalizer_run_function(&canonicalizer, func_like_,
                                                  &options, &result));
@@ -652,7 +653,8 @@ TEST_F(CanonicalizeTest, RegionDriverAcceptsSeedFacts) {
                                                &value_facts, &canonicalizer));
   loom_canonicalizer_result_t result;
   loom_canonicalizer_options_t options = {
-      .seed_facts = &seed_facts,
+      /*.max_iterations=*/{},
+      /*.seed_facts=*/&seed_facts,
   };
   IREE_ASSERT_OK(loom_canonicalizer_run_region(
       &canonicalizer, split_func, config, split_op, &options, &result));

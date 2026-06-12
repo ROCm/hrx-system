@@ -131,8 +131,8 @@ static inline loom_named_attr_slice_t loom_named_attr_slice_empty(void) {
 static inline loom_named_attr_slice_t loom_make_named_attr_slice(
     const loom_named_attr_t* entries, iree_host_size_t count) {
   loom_named_attr_slice_t slice = {
-      .entries = count > 0 ? entries : NULL,
-      .count = count,
+      /*.entries=*/count > 0 ? entries : NULL,
+      /*.count=*/count,
   };
   return slice;
 }
@@ -218,7 +218,7 @@ static inline loom_attribute_t loom_attr_absent(void) {
 static inline loom_attribute_t loom_attr_make_present(
     loom_attr_kind_t attr_kind) {
   loom_attribute_t attr = {
-      .kind = (uint8_t)attr_kind,
+      /*.kind=*/(uint8_t)attr_kind,
   };
   return attr;
 }
@@ -355,9 +355,9 @@ typedef struct loom_named_attr_update_slice_t {
 static inline loom_named_attr_update_t loom_named_attr_replace(
     loom_string_id_t name_id, loom_attribute_t value) {
   loom_named_attr_update_t update = {
-      .name_id = name_id,
-      .remove = false,
-      .value = value,
+      /*.name_id=*/name_id,
+      /*.remove=*/false,
+      /*.value=*/value,
   };
   return update;
 }
@@ -365,9 +365,9 @@ static inline loom_named_attr_update_t loom_named_attr_replace(
 static inline loom_named_attr_update_t loom_named_attr_remove(
     loom_string_id_t name_id) {
   loom_named_attr_update_t update = {
-      .name_id = name_id,
-      .remove = true,
-      .value = {0},
+      /*.name_id=*/name_id,
+      /*.remove=*/true,
+      /*.value=*/{0},
   };
   return update;
 }
@@ -375,8 +375,8 @@ static inline loom_named_attr_update_t loom_named_attr_remove(
 static inline loom_named_attr_update_slice_t loom_make_named_attr_update_slice(
     const loom_named_attr_update_t* updates, iree_host_size_t count) {
   loom_named_attr_update_slice_t slice = {
-      .updates = count > 0 ? updates : NULL,
-      .count = count,
+      /*.updates=*/count > 0 ? updates : NULL,
+      /*.count=*/count,
   };
   return slice;
 }

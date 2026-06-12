@@ -81,15 +81,15 @@ static inline loom_source_range_t loom_source_range_from_token(
   iree_host_size_t start =
       (iree_host_size_t)(token_source_text.data - source.data);
   return (loom_source_range_t){
-      .provenance = LOOM_SOURCE_PROVENANCE_EXACT_SOURCE,
-      .filename = filename,
-      .source = source,
-      .start = start,
-      .end = start + token_source_text.size,
-      .start_line = line,
-      .start_column = column,
-      .end_line = line,
-      .end_column = end_column,
+      /*.provenance=*/LOOM_SOURCE_PROVENANCE_EXACT_SOURCE,
+      /*.filename=*/filename,
+      /*.source=*/source,
+      /*.start=*/start,
+      /*.end=*/start + token_source_text.size,
+      /*.start_line=*/line,
+      /*.start_column=*/column,
+      /*.end_line=*/line,
+      /*.end_column=*/end_column,
   };
 }
 

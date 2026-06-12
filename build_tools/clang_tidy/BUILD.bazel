@@ -197,6 +197,7 @@ py_test(
         "fixtures/status_macro_scope.c",
         "test/status_macro_scope_test.cc",
         "test/style_checks.c",
+        "test/style_checks.cc",
         ":IREEClangTidyPlugin.so",
         "@iree_clang_tidy_llvm//:clang-tidy",
     ],

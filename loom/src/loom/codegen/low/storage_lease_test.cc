@@ -110,19 +110,19 @@ iree_status_t EmitEvent(loom_low_storage_lease_emit_fn_t emit,
                         iree_string_view_t release_class_name,
                         loom_low_storage_lease_flags_t flags) {
   const loom_low_storage_lease_event_t event = {
-      .kind = kind,
-      .attachment = attachment,
-      .attachment_index = attachment_index,
-      .unit_offset = unit_offset,
-      .unit_count = unit_count,
-      .release_scope = LOOM_LOW_STORAGE_LEASE_RELEASE_SCOPE_PROGRESS_CLASS,
-      .release_class_id = release_class_id,
-      .release_class_name = release_class_name,
-      .release_action_id = kSyntheticReleaseActionWait,
-      .release_action_name = IREE_SV("synthetic.wait"),
-      .release_reason_id = kSyntheticReleaseReasonStorage,
-      .release_reason_name = IREE_SV("synthetic.storage-reuse"),
-      .flags = flags,
+      /*.kind=*/kind,
+      /*.attachment=*/attachment,
+      /*.attachment_index=*/attachment_index,
+      /*.unit_offset=*/unit_offset,
+      /*.unit_count=*/unit_count,
+      /*.release_scope=*/LOOM_LOW_STORAGE_LEASE_RELEASE_SCOPE_PROGRESS_CLASS,
+      /*.release_class_id=*/release_class_id,
+      /*.release_class_name=*/release_class_name,
+      /*.release_action_id=*/kSyntheticReleaseActionWait,
+      /*.release_action_name=*/IREE_SV("synthetic.wait"),
+      /*.release_reason_id=*/kSyntheticReleaseReasonStorage,
+      /*.release_reason_name=*/IREE_SV("synthetic.storage-reuse"),
+      /*.flags=*/flags,
   };
   return emit(emit_user_data, &event);
 }
@@ -167,7 +167,8 @@ iree_status_t EmptyLeaseQuery(void* user_data,
 
 TEST_F(LowStorageLeaseTest, BuildsSyntheticTargetLeaseRecords) {
   const loom_low_storage_lease_provider_t provider = {
-      .query = SyntheticLeaseQuery,
+      /*.user_data=*/{},
+      /*.query=*/SyntheticLeaseQuery,
   };
   loom_low_storage_lease_table_t table = {};
   IREE_ASSERT_OK(loom_low_storage_lease_build(&state_.schedule, &provider,
@@ -219,7 +220,8 @@ TEST_F(LowStorageLeaseTest, BuildsSyntheticTargetLeaseRecords) {
 
 TEST_F(LowStorageLeaseTest, BuildsEmptyLeaseTable) {
   const loom_low_storage_lease_provider_t provider = {
-      .query = EmptyLeaseQuery,
+      /*.user_data=*/{},
+      /*.query=*/EmptyLeaseQuery,
   };
   loom_low_storage_lease_table_t table = {};
   IREE_ASSERT_OK(loom_low_storage_lease_build(&state_.schedule, &provider,
@@ -244,7 +246,8 @@ iree_status_t InvalidAttachmentLeaseQuery(
 
 TEST_F(LowStorageLeaseTest, RejectsInvalidAttachmentIndex) {
   const loom_low_storage_lease_provider_t provider = {
-      .query = InvalidAttachmentLeaseQuery,
+      /*.user_data=*/{},
+      /*.query=*/InvalidAttachmentLeaseQuery,
   };
   loom_low_storage_lease_table_t table = {};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
@@ -269,7 +272,8 @@ iree_status_t InvalidFlagsLeaseQuery(void* user_data,
 
 TEST_F(LowStorageLeaseTest, RejectsContradictoryBoundaryFlags) {
   const loom_low_storage_lease_provider_t provider = {
-      .query = InvalidFlagsLeaseQuery,
+      /*.user_data=*/{},
+      /*.query=*/InvalidFlagsLeaseQuery,
   };
   loom_low_storage_lease_table_t table = {};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,

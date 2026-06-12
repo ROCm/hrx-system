@@ -42,8 +42,8 @@ class VectorFragmentTest : public ::testing::Test {
   static loom_value_slice_t ValueSlice(loom_value_id_t* values,
                                        uint16_t count) {
     return loom_value_slice_t{
-        .values = values,
-        .count = count,
+        /*.values=*/values,
+        /*.count=*/count,
     };
   }
 
@@ -110,16 +110,19 @@ TEST_F(VectorFragmentTest, ParameterViewResolveMapsSchemaAndAuxiliaryKeys) {
   loom_value_id_t parameter_values[] = {12, 34, 56};
   loom_named_attr_t parameter_names[] = {
       {
-          .name_id = Intern(IREE_SV("schema")),
-          .value = loom_attr_i64(0),
+          /*.name_id=*/Intern(IREE_SV("schema")),
+          /*.reserved=*/{},
+          /*.value=*/loom_attr_i64(0),
       },
       {
-          .name_id = Intern(IREE_SV("scale")),
-          .value = loom_attr_i64(1),
+          /*.name_id=*/Intern(IREE_SV("scale")),
+          /*.reserved=*/{},
+          /*.value=*/loom_attr_i64(1),
       },
       {
-          .name_id = Intern(IREE_SV("amax")),
-          .value = loom_attr_i64(2),
+          /*.name_id=*/Intern(IREE_SV("amax")),
+          /*.reserved=*/{},
+          /*.value=*/loom_attr_i64(2),
       },
   };
 
@@ -147,8 +150,9 @@ TEST_F(VectorFragmentTest, ParameterViewResolveReportsUnknownKeys) {
   loom_value_id_t parameter_values[] = {12};
   loom_named_attr_t parameter_names[] = {
       {
-          .name_id = Intern(IREE_SV("mystery")),
-          .value = loom_attr_i64(0),
+          /*.name_id=*/Intern(IREE_SV("mystery")),
+          /*.reserved=*/{},
+          /*.value=*/loom_attr_i64(0),
       },
   };
 

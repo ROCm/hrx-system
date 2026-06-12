@@ -608,8 +608,10 @@ TEST(LowDescriptorsTest, ProviderBackedRegistryVerifiesAndLooksUpDescriptors) {
       ProvideTestDescriptorSet,
   };
   const loom_low_descriptor_registry_t registry = {
-      .descriptor_set_providers = providers,
-      .descriptor_set_provider_count = IREE_ARRAYSIZE(providers),
+      /*.descriptor_sets=*/{},
+      /*.descriptor_set_count=*/{},
+      /*.descriptor_set_providers=*/providers,
+      /*.descriptor_set_provider_count=*/IREE_ARRAYSIZE(providers),
   };
 
   EXPECT_EQ(loom_low_descriptor_registry_descriptor_set_count(&registry), 1u);
@@ -633,8 +635,10 @@ TEST(LowDescriptorsTest, RegistryRejectsNullDescriptorSetProvider) {
       ProvideNullDescriptorSet,
   };
   const loom_low_descriptor_registry_t registry = {
-      .descriptor_set_providers = providers,
-      .descriptor_set_provider_count = IREE_ARRAYSIZE(providers),
+      /*.descriptor_sets=*/{},
+      /*.descriptor_set_count=*/{},
+      /*.descriptor_set_providers=*/providers,
+      /*.descriptor_set_provider_count=*/IREE_ARRAYSIZE(providers),
   };
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
@@ -650,10 +654,10 @@ TEST(LowDescriptorsTest, RegistryRejectsDuplicateDirectAndProviderKeys) {
       ProvideTestDescriptorSet,
   };
   const loom_low_descriptor_registry_t registry = {
-      .descriptor_sets = direct_sets,
-      .descriptor_set_count = IREE_ARRAYSIZE(direct_sets),
-      .descriptor_set_providers = providers,
-      .descriptor_set_provider_count = IREE_ARRAYSIZE(providers),
+      /*.descriptor_sets=*/direct_sets,
+      /*.descriptor_set_count=*/IREE_ARRAYSIZE(direct_sets),
+      /*.descriptor_set_providers=*/providers,
+      /*.descriptor_set_provider_count=*/IREE_ARRAYSIZE(providers),
   };
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_ALREADY_EXISTS,
@@ -1052,14 +1056,14 @@ TEST(LowDescriptorsTest, AcceptsSlicedImmediateEncoding) {
   InitializeTestTables(&tables);
   tables.immediates[0].encoding_slice_count = 2;
   tables.immediate_encoding_slices[0] = {
-      .encoding_field_id = 7,
-      .source_bit_offset = 0,
-      .bit_count = 16,
+      /*.encoding_field_id=*/7,
+      /*.source_bit_offset=*/0,
+      /*.bit_count=*/16,
   };
   tables.immediate_encoding_slices[1] = {
-      .encoding_field_id = 8,
-      .source_bit_offset = 16,
-      .bit_count = 16,
+      /*.encoding_field_id=*/8,
+      /*.source_bit_offset=*/16,
+      /*.bit_count=*/16,
   };
   tables.set.immediate_encoding_slice_count = 2;
 
@@ -1072,9 +1076,9 @@ TEST(LowDescriptorsTest, RejectsImmediateWithDirectAndSlicedEncoding) {
   tables.immediates[0].encoding_field_id = 7;
   tables.immediates[0].encoding_slice_count = 1;
   tables.immediate_encoding_slices[0] = {
-      .encoding_field_id = 8,
-      .source_bit_offset = 0,
-      .bit_count = 32,
+      /*.encoding_field_id=*/8,
+      /*.source_bit_offset=*/0,
+      /*.bit_count=*/32,
   };
   tables.set.immediate_encoding_slice_count = 1;
 
@@ -1087,9 +1091,9 @@ TEST(LowDescriptorsTest, RejectsIncompleteSlicedImmediateEncoding) {
   InitializeTestTables(&tables);
   tables.immediates[0].encoding_slice_count = 1;
   tables.immediate_encoding_slices[0] = {
-      .encoding_field_id = 7,
-      .source_bit_offset = 0,
-      .bit_count = 16,
+      /*.encoding_field_id=*/7,
+      /*.source_bit_offset=*/0,
+      /*.bit_count=*/16,
   };
   tables.set.immediate_encoding_slice_count = 1;
 

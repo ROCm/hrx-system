@@ -50,9 +50,9 @@ TEST(TargetLowProviderVerifyTest, AcceptsEmptyLists) {
 
 TEST(TargetLowProviderVerifyTest, AcceptsProviderRows) {
   const loom_target_low_legality_provider_t legality_provider = {
-      .name = IREE_SVL("test-legality-provider"),
-      .builtin_dialect_bits = 1u << LOOM_DIALECT_VECTOR,
-      .try_verify_op = IgnoreProviderOp,
+      /*.name=*/IREE_SVL("test-legality-provider"),
+      /*.builtin_dialect_bits=*/1u << LOOM_DIALECT_VECTOR,
+      /*.try_verify_op=*/IgnoreProviderOp,
   };
   const loom_target_low_legality_provider_t* legality_values[] = {
       &legality_provider,
@@ -63,8 +63,8 @@ TEST(TargetLowProviderVerifyTest, AcceptsProviderRows) {
   IREE_EXPECT_OK(loom_target_low_legality_provider_list_verify(legality_list));
 
   const loom_target_low_packet_diagnostic_provider_t diagnostic_provider = {
-      .name = IREE_SVL("test-packet-provider"),
-      .try_diagnose_packet = IgnorePacketDiagnostic,
+      /*.name=*/IREE_SVL("test-packet-provider"),
+      /*.try_diagnose_packet=*/IgnorePacketDiagnostic,
   };
   const loom_target_low_packet_diagnostic_provider_t* diagnostic_values[] = {
       &diagnostic_provider,
@@ -80,11 +80,13 @@ TEST(TargetLowProviderVerifyTest, RejectsMissingTables) {
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       loom_target_low_legality_provider_list_verify(
-          (loom_target_low_legality_provider_list_t){.count = 1}));
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_target_low_packet_diagnostic_provider_list_verify(
-          (loom_target_low_packet_diagnostic_provider_list_t){.count = 1}));
+          (loom_target_low_legality_provider_list_t){/*.count=*/1,
+                                                     /*.values=*/NULL}));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_target_low_packet_diagnostic_provider_list_verify(
+                            (loom_target_low_packet_diagnostic_provider_list_t){
+                                /*.count=*/1,
+                                /*.values=*/NULL}));
 }
 
 }  // namespace

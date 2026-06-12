@@ -261,8 +261,8 @@ func.def @no_config(%x: i32) -> (i32) {
 )");
 
   loom_tooling_config_binding_t binding = {
-      .key = IREE_SV("model36.model.hidden_size"),
-      .value = IREE_SV("4096"),
+      /*.key=*/IREE_SV("model36.model.hidden_size"),
+      /*.value=*/IREE_SV("4096"),
   };
   loom_tooling_config_materialize_result_t result = {0};
   IREE_ASSERT_OK(Materialize(module.get(), &binding, 1, 0, &result));
@@ -285,8 +285,8 @@ func.def @read_config() -> (index) {
 )");
 
   loom_tooling_config_binding_t binding = {
-      .key = IREE_SV("model36.model.hidden_size"),
-      .value = IREE_SV("4096"),
+      /*.key=*/IREE_SV("model36.model.hidden_size"),
+      /*.value=*/IREE_SV("4096"),
   };
   loom_tooling_config_materialize_result_t result = {0};
   IREE_ASSERT_OK(Materialize(module.get(), &binding, 1,
@@ -309,8 +309,8 @@ config.decl @model36.model.hidden_size : %value: index where [range(%value, 0, 8
 )");
 
   loom_tooling_config_binding_t binding = {
-      .key = IREE_SV("model36.model.hidden_size"),
-      .value = IREE_SV("4103"),
+      /*.key=*/IREE_SV("model36.model.hidden_size"),
+      /*.value=*/IREE_SV("4103"),
   };
   iree_status_t status =
       Materialize(module.get(), &binding, 1,
@@ -325,8 +325,8 @@ config.decl @model36.layout : encoding<layout>
 )");
 
   loom_tooling_config_binding_t binding = {
-      .key = IREE_SV("@model36.layout"),
-      .value = IREE_SV(" #dense "),
+      /*.key=*/IREE_SV("@model36.layout"),
+      /*.value=*/IREE_SV(" #dense "),
   };
   loom_tooling_config_materialize_result_t result = {0};
   IREE_ASSERT_OK(Materialize(module.get(), &binding, 1,
@@ -346,8 +346,8 @@ config.decl @model36.layout : encoding<layout>
 )");
 
   loom_tooling_config_binding_t binding = {
-      .key = IREE_SV("model36.layout"),
-      .value = IREE_SV("#ggml_q4_0<block_elems=32, storage_bytes=18>"),
+      /*.key=*/IREE_SV("model36.layout"),
+      /*.value=*/IREE_SV("#ggml_q4_0<block_elems=32, storage_bytes=18>"),
   };
   iree_status_t status =
       Materialize(module.get(), &binding, 1,

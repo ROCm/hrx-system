@@ -160,10 +160,10 @@ static iree_status_t QueueBenchmarkDiscardProfileSinkEndSession(
 
 static const iree_hal_profile_sink_vtable_t
     kQueueBenchmarkDiscardProfileSinkVtable = {
-        .destroy = QueueBenchmarkDiscardProfileSinkDestroy,
-        .begin_session = QueueBenchmarkDiscardProfileSinkBeginSession,
-        .write = QueueBenchmarkDiscardProfileSinkWrite,
-        .end_session = QueueBenchmarkDiscardProfileSinkEndSession,
+        /*.destroy=*/QueueBenchmarkDiscardProfileSinkDestroy,
+        /*.begin_session=*/QueueBenchmarkDiscardProfileSinkBeginSession,
+        /*.write=*/QueueBenchmarkDiscardProfileSinkWrite,
+        /*.end_session=*/QueueBenchmarkDiscardProfileSinkEndSession,
 };
 
 iree_status_t QueueBenchmarkDiscardProfileSinkCreate(
@@ -437,10 +437,10 @@ class QueueBenchmark : public benchmark::Fixture {
     auto* logical_device =
         reinterpret_cast<iree_hal_amdgpu_logical_device_t*>(device_);
     const iree_hal_amdgpu_queue_affinity_domain_t domain = {
-        .supported_affinity = logical_device->queue_affinity_mask,
-        .physical_device_count = logical_device->physical_device_count,
-        .queue_count_per_physical_device =
-            logical_device->system->topology.gpu_agent_queue_count,
+        /*.supported_affinity=*/logical_device->queue_affinity_mask,
+        /*.physical_device_count=*/logical_device->physical_device_count,
+        /*.queue_count_per_physical_device=*/
+        logical_device->system->topology.gpu_agent_queue_count,
     };
     iree_hal_amdgpu_queue_affinity_resolved_t resolved;
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_queue_affinity_resolve(

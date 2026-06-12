@@ -167,8 +167,8 @@ loom_target_legalizer_provider_list_make(
     const loom_target_legalizer_provider_t* const* values,
     iree_host_size_t count) {
   return (loom_target_legalizer_provider_list_t){
-      .count = count,
-      .values = values,
+      /*.count=*/count,
+      /*.values=*/values,
   };
 }
 
@@ -195,8 +195,8 @@ typedef struct loom_target_legalizer_op_entry_t {
 static inline loom_target_legalizer_op_entry_t
 loom_target_legalizer_op_entry_empty(void) {
   return (loom_target_legalizer_op_entry_t){
-      .entry_start = UINT16_MAX,
-      .entry_count = 0,
+      /*.entry_start=*/UINT16_MAX,
+      /*.entry_count=*/0,
   };
 }
 

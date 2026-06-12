@@ -50,6 +50,15 @@ typedef struct iree_clang_tidy_style_pool_t iree_clang_tidy_style_pool_t;
 typedef unsigned long iree_clang_tidy_style_handle_t;
 typedef int iree_status_t;
 
+typedef struct {
+  int value;
+} iree_clang_tidy_style_c_designated_init_t;
+
+iree_clang_tidy_style_c_designated_init_t
+    iree_clang_tidy_style_c_designated_init = {
+        .value = 1,
+};
+
 void iree_clang_tidy_style_resource_release(
     iree_clang_tidy_style_resource_t* resource);
 void iree_clang_tidy_style_resource_deinitialize(

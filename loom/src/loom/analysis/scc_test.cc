@@ -48,9 +48,10 @@ class SccTest : public ::testing::Test {
   loom_scc_graph_t MakeGraph(iree_host_size_t node_count,
                              const TestGraph* graph) {
     return {
-        .node_count = node_count,
-        .visit_successors = loom_scc_visit_successors_callback_make(
-            VisitTestGraphSuccessors, const_cast<TestGraph*>(graph)),
+        /*.node_count=*/node_count,
+        /*.visit_successors=*/
+        loom_scc_visit_successors_callback_make(VisitTestGraphSuccessors,
+                                                const_cast<TestGraph*>(graph)),
     };
   }
 
@@ -71,8 +72,8 @@ TEST_F(SccTest, AcyclicGraphIsSuccessorBeforePredecessor) {
   const iree_host_size_t* successors[] = {successors0, successors1, nullptr};
   const iree_host_size_t successor_counts[] = {1, 1, 0};
   TestGraph test_graph = {
-      .successors = successors,
-      .successor_counts = successor_counts,
+      /*.successors=*/successors,
+      /*.successor_counts=*/successor_counts,
   };
 
   loom_scc_list_t sccs = {};
@@ -93,8 +94,8 @@ TEST_F(SccTest, SelfRecursionIsCycle) {
   const iree_host_size_t* successors[] = {successors0};
   const iree_host_size_t successor_counts[] = {1};
   TestGraph test_graph = {
-      .successors = successors,
-      .successor_counts = successor_counts,
+      /*.successors=*/successors,
+      /*.successor_counts=*/successor_counts,
   };
 
   loom_scc_list_t sccs = {};
@@ -115,8 +116,8 @@ TEST_F(SccTest, MultiNodeCycleIsOneComponent) {
                                           successors2};
   const iree_host_size_t successor_counts[] = {1, 1, 1};
   TestGraph test_graph = {
-      .successors = successors,
-      .successor_counts = successor_counts,
+      /*.successors=*/successors,
+      /*.successor_counts=*/successor_counts,
   };
 
   loom_scc_list_t sccs = {};
@@ -135,8 +136,8 @@ TEST_F(SccTest, DisconnectedNodesAppearInWholeGraphMode) {
   const iree_host_size_t* successors[] = {successors0, nullptr, nullptr};
   const iree_host_size_t successor_counts[] = {1, 0, 0};
   TestGraph test_graph = {
-      .successors = successors,
-      .successor_counts = successor_counts,
+      /*.successors=*/successors,
+      /*.successor_counts=*/successor_counts,
   };
 
   loom_scc_list_t sccs = {};
@@ -154,13 +155,13 @@ TEST_F(SccTest, RootFilteredModeSkipsUnreachableNodes) {
   const iree_host_size_t* successors[] = {successors0, nullptr, nullptr};
   const iree_host_size_t successor_counts[] = {1, 0, 0};
   TestGraph test_graph = {
-      .successors = successors,
-      .successor_counts = successor_counts,
+      /*.successors=*/successors,
+      /*.successor_counts=*/successor_counts,
   };
   const iree_host_size_t roots[] = {0};
   loom_scc_options_t options = {
-      .root_nodes = roots,
-      .root_count = IREE_ARRAYSIZE(roots),
+      /*.root_nodes=*/roots,
+      /*.root_count=*/IREE_ARRAYSIZE(roots),
   };
 
   loom_scc_list_t sccs = {};
@@ -176,13 +177,13 @@ TEST_F(SccTest, EmptyRootListProducesEmptyResult) {
   const iree_host_size_t* successors[] = {nullptr};
   const iree_host_size_t successor_counts[] = {0};
   TestGraph test_graph = {
-      .successors = successors,
-      .successor_counts = successor_counts,
+      /*.successors=*/successors,
+      /*.successor_counts=*/successor_counts,
   };
   const iree_host_size_t roots[] = {0};
   loom_scc_options_t options = {
-      .root_nodes = roots,
-      .root_count = 0,
+      /*.root_nodes=*/roots,
+      /*.root_count=*/0,
   };
 
   loom_scc_list_t sccs = {};
@@ -197,8 +198,8 @@ TEST_F(SccTest, InvalidSuccessorReportsApiError) {
   const iree_host_size_t* successors[] = {successors0};
   const iree_host_size_t successor_counts[] = {1};
   TestGraph test_graph = {
-      .successors = successors,
-      .successor_counts = successor_counts,
+      /*.successors=*/successors,
+      /*.successor_counts=*/successor_counts,
   };
 
   loom_scc_list_t sccs = {};
@@ -211,12 +212,12 @@ TEST_F(SccTest, NonZeroRootCountRequiresRootArray) {
   const iree_host_size_t* successors[] = {nullptr};
   const iree_host_size_t successor_counts[] = {0};
   TestGraph test_graph = {
-      .successors = successors,
-      .successor_counts = successor_counts,
+      /*.successors=*/successors,
+      /*.successor_counts=*/successor_counts,
   };
   loom_scc_options_t options = {
-      .root_nodes = nullptr,
-      .root_count = 1,
+      /*.root_nodes=*/nullptr,
+      /*.root_count=*/1,
   };
 
   loom_scc_list_t sccs = {};

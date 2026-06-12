@@ -54,7 +54,7 @@ typedef struct iree_hal_amdgpu_kernarg_layout_ref_t {
 static inline iree_hal_amdgpu_kernarg_layout_ref_t
 iree_hal_amdgpu_kernarg_layout_ref_invalid(void) {
   return (iree_hal_amdgpu_kernarg_layout_ref_t){
-      .byte_offset = IREE_HOST_SIZE_MAX,
+      /*.byte_offset=*/IREE_HOST_SIZE_MAX,
   };
 }
 

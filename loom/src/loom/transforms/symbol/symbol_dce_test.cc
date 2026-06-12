@@ -89,8 +89,8 @@ class SymbolDCETest : public ::testing::Test {
     loom_low_descriptor_text_asm_environment_initialize(
         &low_descriptor_registry_, &low_asm_environment);
     loom_text_print_options_t options = {
-        .flags = LOOM_TEXT_PRINT_DEFAULT,
-        .low_asm_environment = low_asm_environment,
+        /*.flags=*/LOOM_TEXT_PRINT_DEFAULT,
+        /*.low_asm_environment=*/low_asm_environment,
     };
     iree_string_builder_t builder;
     iree_string_builder_initialize(iree_allocator_system(), &builder);
@@ -151,8 +151,9 @@ class SymbolDCETest : public ::testing::Test {
 
   loom_module_t* ReadModule(const std::vector<uint8_t>& bytes) {
     loom_bytecode_read_options_t options = {
-        .verify_module = true,
-        .verify_max_errors = 20,
+        /*.diagnostic_sink=*/{},
+        /*.verify_module=*/true,
+        /*.verify_max_errors=*/20,
     };
     loom_bytecode_read_result_t result = {0};
     loom_module_t* module = nullptr;

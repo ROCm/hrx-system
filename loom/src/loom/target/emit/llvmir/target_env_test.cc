@@ -339,27 +339,28 @@ TEST(LlvmIrTargetEnvTest, LooksUpRegisteredProfilesByName) {
 
 TEST(LlvmIrTargetEnvTest, ProjectsX86ProfileByDescriptorSetKey) {
   static const loom_target_snapshot_t kSnapshot = {
-      .name = IREE_SVL("native-x86-debug"),
-      .codegen_format = LOOM_TARGET_CODEGEN_FORMAT_LOW_NATIVE,
-      .artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF,
-      .default_pointer_bitwidth = 64,
-      .index_bitwidth = 64,
-      .offset_bitwidth = 64,
+      /*.name=*/IREE_SVL("native-x86-debug"),
+      /*.codegen_format=*/LOOM_TARGET_CODEGEN_FORMAT_LOW_NATIVE,
+      /*.artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_ELF,
+      /*.default_pointer_bitwidth=*/64,
+      /*.index_bitwidth=*/64,
+      /*.offset_bitwidth=*/64,
   };
   static const loom_target_export_plan_t kExportPlan = {
-      .name = IREE_SVL("native-x86-debug"),
-      .abi_kind = LOOM_TARGET_ABI_OBJECT_FUNCTION,
-      .linkage = LOOM_TARGET_LINKAGE_DSO_LOCAL,
+      /*.name=*/IREE_SVL("native-x86-debug"),
+      /*.export_symbol=*/{},
+      /*.abi_kind=*/LOOM_TARGET_ABI_OBJECT_FUNCTION,
+      /*.linkage=*/LOOM_TARGET_LINKAGE_DSO_LOCAL,
   };
   static const loom_target_config_t kConfig = {
-      .name = IREE_SVL("x86.avx2.core"),
-      .contract_set_key = IREE_SVL("x86.avx2.core"),
+      /*.name=*/IREE_SVL("x86.avx2.core"),
+      /*.contract_set_key=*/IREE_SVL("x86.avx2.core"),
   };
   static const loom_target_bundle_t kBundle = {
-      .name = IREE_SVL("x86-avx2"),
-      .snapshot = &kSnapshot,
-      .export_plan = &kExportPlan,
-      .config = &kConfig,
+      /*.name=*/IREE_SVL("x86-avx2"),
+      /*.snapshot=*/&kSnapshot,
+      /*.export_plan=*/&kExportPlan,
+      /*.config=*/&kConfig,
   };
 
   const loom_llvmir_target_profile_provider_t* provider =

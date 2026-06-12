@@ -53,8 +53,8 @@ static inline loom_ir_remap_symbol_callback_t
 loom_ir_remap_symbol_callback_make(loom_ir_remap_symbol_fn_t fn,
                                    void* user_data) {
   return (loom_ir_remap_symbol_callback_t){
-      .fn = fn,
-      .user_data = user_data,
+      /*.fn=*/fn,
+      /*.user_data=*/user_data,
   };
 }
 

@@ -101,7 +101,7 @@ check.benchmark<@sampled_choice> @sampled_choice_value7 {value = 7}
   configuration.tool_name = "iree-benchmark-loom-test";
   configuration.initialize_low_descriptor_registry =
       (loom_run_initialize_low_descriptor_registry_callback_t){
-          .fn = InitializeLowDescriptorRegistry,
+          /*.fn=*/InitializeLowDescriptorRegistry,
       };
   iree_benchmark_loom_file_run_options_t run_options = {};
   run_options.configuration = &configuration;
@@ -162,7 +162,7 @@ check.benchmark<@sampled_choice> @sampled_choice_value7 {value = 7}
   configuration.tool_name = "iree-benchmark-loom-test";
   configuration.initialize_low_descriptor_registry =
       (loom_run_initialize_low_descriptor_registry_callback_t){
-          .fn = InitializeLowDescriptorRegistry,
+          /*.fn=*/InitializeLowDescriptorRegistry,
       };
   iree_benchmark_loom_file_run_options_t run_options = {};
   run_options.configuration = &configuration;

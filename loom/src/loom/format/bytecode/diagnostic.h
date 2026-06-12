@@ -39,8 +39,8 @@ typedef struct loom_bytecode_reader_byte_range_t {
 static inline loom_bytecode_reader_byte_range_t loom_bytecode_reader_byte_range(
     uint64_t offset, uint64_t length) {
   return (loom_bytecode_reader_byte_range_t){
-      .offset = offset,
-      .length = length,
+      /*.offset=*/offset,
+      /*.length=*/length,
   };
 }
 

@@ -65,8 +65,9 @@ class LowAsmPrinterTest : public ::testing::Test {
     loom_low_descriptor_text_asm_environment_initialize(
         &low_descriptor_registry_, &environment);
     loom_text_parse_options_t options = {
-        .max_errors = 100,
-        .low_asm_environment = environment,
+        /*.diagnostic_sink=*/{},
+        /*.max_errors=*/100,
+        /*.low_asm_environment=*/environment,
     };
     loom_module_t* module = nullptr;
     IREE_EXPECT_OK(loom_text_parse(iree_make_cstring_view(source),
@@ -82,9 +83,9 @@ class LowAsmPrinterTest : public ::testing::Test {
     loom_low_descriptor_text_asm_environment_initialize(
         &low_descriptor_registry_, &environment);
     loom_text_print_options_t options = {
-        .flags = LOOM_TEXT_PRINT_DEFAULT,
-        .low_asm_environment = environment,
-        .low_asm_descriptor_set_key = descriptor_set_key,
+        /*.flags=*/LOOM_TEXT_PRINT_DEFAULT,
+        /*.low_asm_environment=*/environment,
+        /*.low_asm_descriptor_set_key=*/descriptor_set_key,
     };
     iree_string_builder_t builder;
     iree_string_builder_initialize(iree_allocator_system(), &builder);
@@ -109,9 +110,9 @@ class LowAsmPrinterTest : public ::testing::Test {
           &low_descriptor_registry_, &environment);
     }
     loom_text_print_options_t options = {
-        .flags = LOOM_TEXT_PRINT_DEFAULT,
-        .low_asm_environment = environment,
-        .low_asm_descriptor_set_key = descriptor_set_key,
+        /*.flags=*/LOOM_TEXT_PRINT_DEFAULT,
+        /*.low_asm_environment=*/environment,
+        /*.low_asm_descriptor_set_key=*/descriptor_set_key,
     };
     iree_string_builder_t builder;
     iree_string_builder_initialize(iree_allocator_system(), &builder);

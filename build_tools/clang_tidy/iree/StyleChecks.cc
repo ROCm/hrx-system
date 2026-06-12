@@ -8,9 +8,11 @@
 
 #include <algorithm>
 #include <cctype>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/Decl.h"
@@ -109,6 +111,20 @@ std::optional<std::string> SourceText(CharSourceRange Range,
     return std::nullopt;
   }
   return Text.str();
+}
+
+std::optional<std::string> CompactSourceText(CharSourceRange Range,
+                                             const SourceManager& SourceManager,
+                                             const LangOptions& LangOptions) {
+  std::optional<std::string> Text =
+      SourceText(Range, SourceManager, LangOptions);
+  if (!Text) {
+    return std::nullopt;
+  }
+  Text->erase(std::remove_if(Text->begin(), Text->end(),
+                             [](unsigned char c) { return std::isspace(c); }),
+              Text->end());
+  return Text;
 }
 
 std::optional<CharSourceRange> StatementCharRange(
@@ -392,6 +408,144 @@ std::optional<std::string> GuardedReleaseReplacementText(
                              : std::optional<std::string>(Replacement);
 }
 
+std::optional<CharSourceRange> DesignatedInitializerFixRange(
+    const DesignatedInitExpr* Init, const SourceManager& SourceManager,
+    const LangOptions& LangOptions) {
+  if (!Init || Init->size() == 0 || Init->isDirectInit()) {
+    return std::nullopt;
+  }
+  SourceLocation Begin = Init->getDesignator(0)->getBeginLoc();
+  SourceLocation Equal = Init->getEqualOrColonLoc();
+  if (Begin.isInvalid() || Equal.isInvalid()) {
+    return std::nullopt;
+  }
+  if (Begin.isMacroID() || Equal.isMacroID() ||
+      SourceManager.getFileID(Begin) != SourceManager.getFileID(Equal)) {
+    return std::nullopt;
+  }
+  SourceLocation End =
+      Lexer::getLocForEndOfToken(Equal, 0, SourceManager, LangOptions);
+  if (End.isInvalid()) {
+    return std::nullopt;
+  }
+  std::pair<FileID, unsigned> Decomposed = SourceManager.getDecomposedLoc(End);
+  bool Invalid = false;
+  StringRef Buffer = SourceManager.getBufferData(Decomposed.first, &Invalid);
+  if (Invalid) {
+    return std::nullopt;
+  }
+  while (
+      Decomposed.second < Buffer.size() &&
+      (Buffer[Decomposed.second] == ' ' || Buffer[Decomposed.second] == '\t')) {
+    End = End.getLocWithOffset(1);
+    ++Decomposed.second;
+  }
+  return CharSourceRange::getCharRange(Begin, End);
+}
+
+const InitListExpr* SourceInitializerList(const InitListExpr* Parent) {
+  if (!Parent) {
+    return nullptr;
+  }
+  return Parent->getSyntacticForm() ? Parent->getSyntacticForm() : Parent;
+}
+
+const FieldDecl* SingleFieldDesignator(const DesignatedInitExpr* Init) {
+  if (!Init || Init->size() != 1) {
+    return nullptr;
+  }
+  const DesignatedInitExpr::Designator* Designator = Init->getDesignator(0);
+  if (!Designator || !Designator->isFieldDesignator()) {
+    return nullptr;
+  }
+  return Designator->getFieldDecl();
+}
+
+std::optional<std::vector<const FieldDecl*>> PositionalFields(
+    const RecordDecl* Record) {
+  if (!Record) {
+    return std::nullopt;
+  }
+  std::vector<const FieldDecl*> Fields;
+  Fields.reserve(std::distance(Record->field_begin(), Record->field_end()));
+  for (const FieldDecl* Field : Record->fields()) {
+    if (Field->isUnnamedBitField()) {
+      continue;
+    }
+    if (Field->getName().empty()) {
+      return std::nullopt;
+    }
+    Fields.push_back(Field);
+  }
+  return Fields;
+}
+
+std::optional<unsigned> PositionalFieldIndex(const FieldDecl* Field) {
+  if (!Field) {
+    return std::nullopt;
+  }
+  unsigned FieldIndex = 0;
+  for (const FieldDecl* Candidate : Field->getParent()->fields()) {
+    if (Candidate->isUnnamedBitField()) {
+      continue;
+    }
+    if (Candidate->getCanonicalDecl() == Field->getCanonicalDecl()) {
+      return FieldIndex;
+    }
+    ++FieldIndex;
+  }
+  return std::nullopt;
+}
+
+std::optional<std::string> DesignatedInitializerReplacementText(
+    const DesignatedInitExpr* Init, const InitListExpr* Parent,
+    StringRef DesignatorText) {
+  const InitListExpr* SourceParent = SourceInitializerList(Parent);
+  if (!SourceParent || SourceParent->getNumInits() == 0) {
+    return std::nullopt;
+  }
+  const RecordDecl* Record = nullptr;
+  std::optional<std::vector<const FieldDecl*>> Fields;
+  unsigned NextFieldIndex = 0;
+  std::optional<std::string> Replacement;
+  for (const Expr* Child : SourceParent->inits()) {
+    const auto* DesignatedChild = dyn_cast_or_null<DesignatedInitExpr>(Child);
+    const FieldDecl* Field = SingleFieldDesignator(DesignatedChild);
+    if (!Field) {
+      return std::nullopt;
+    }
+    if (!Record) {
+      Record = Field->getParent();
+      Fields = PositionalFields(Record);
+      if (!Fields) {
+        return std::nullopt;
+      }
+    } else if (Record->getCanonicalDecl() !=
+               Field->getParent()->getCanonicalDecl()) {
+      return std::nullopt;
+    }
+    std::optional<unsigned> FieldIndex = PositionalFieldIndex(Field);
+    if (!FieldIndex || *FieldIndex < NextFieldIndex ||
+        *FieldIndex >= Fields->size()) {
+      return std::nullopt;
+    }
+    if (DesignatedChild == Init) {
+      std::string Text;
+      for (unsigned I = NextFieldIndex; I < *FieldIndex; ++I) {
+        Text.append("/*.");
+        Text.append((*Fields)[I]->getNameAsString());
+        Text.append("=*/{}, ");
+      }
+      Text.append("/*");
+      Text.append(DesignatorText);
+      Text.append("*/");
+      Replacement = std::move(Text);
+    }
+    NextFieldIndex = *FieldIndex + 1;
+  }
+  return Replacement;
+}
+
 }  // namespace
 
 DirectGotoCheck::DirectGotoCheck(StringRef Name, ClangTidyContext* Context)
@@ -417,6 +571,67 @@ void DirectGotoCheck::check(
   diag(Location,
        "direct goto is not allowed; split lifetime management from mutation "
        "logic or use structured control flow");
+}
+
+DesignatedInitializerCheck::DesignatedInitializerCheck(
+    StringRef Name, ClangTidyContext* Context)
+    : ClangTidyCheck(Name, Context) {}
+
+void DesignatedInitializerCheck::registerMatchers(
+    ast_matchers::MatchFinder* Finder) {
+  using namespace ast_matchers;
+  Finder->addMatcher(
+      initListExpr(
+          forEach(designatedInitExpr(unless(isExpansionInSystemHeader()))
+                      .bind("designated_init")))
+          .bind("syntactic_init"),
+      this);
+}
+
+void DesignatedInitializerCheck::check(
+    const ast_matchers::MatchFinder::MatchResult& Result) {
+  if (!Result.Context->getLangOpts().CPlusPlus) {
+    return;
+  }
+  const auto* Init =
+      Result.Nodes.getNodeAs<DesignatedInitExpr>("designated_init");
+  const auto* ParentInit =
+      Result.Nodes.getNodeAs<InitListExpr>("syntactic_init");
+  if (!Init || !ParentInit || Init->size() == 0) {
+    return;
+  }
+  const SourceManager& SourceManager = *Result.SourceManager;
+  if (IsExternalMacroBody(Init->getBeginLoc(), SourceManager)) {
+    return;
+  }
+  SourceLocation DesignatorLocation = Init->getDesignator(0)->getBeginLoc();
+  SourceLocation Location =
+      SourceManager.isMacroBodyExpansion(DesignatorLocation)
+          ? SourceManager.getSpellingLoc(DesignatorLocation)
+          : SourceManager.getExpansionLoc(DesignatorLocation);
+  DiagnosticBuilder Diagnostic =
+      diag(Location,
+           "C++ code must use comment field labels instead of designated "
+           "initializers for MSVC portability");
+
+  std::optional<CharSourceRange> ReplacementRange =
+      DesignatedInitializerFixRange(Init, SourceManager,
+                                    Result.Context->getLangOpts());
+  if (!ReplacementRange) {
+    return;
+  }
+  std::optional<std::string> DesignatorText = CompactSourceText(
+      *ReplacementRange, SourceManager, Result.Context->getLangOpts());
+  if (!DesignatorText || !StringRef(*DesignatorText).ends_with("=")) {
+    return;
+  }
+  std::optional<std::string> ReplacementText =
+      DesignatedInitializerReplacementText(Init, ParentInit, *DesignatorText);
+  if (!ReplacementText) {
+    return;
+  }
+  Diagnostic << FixItHint::CreateReplacement(*ReplacementRange,
+                                             *ReplacementText);
 }
 
 GuardedReleaseCheck::GuardedReleaseCheck(StringRef Name,

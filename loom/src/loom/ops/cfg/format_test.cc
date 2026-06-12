@@ -45,7 +45,8 @@ class CfgFormatTest : public ::testing::Test {
 
   loom_module_t* ParseOk(const char* source) {
     loom_text_parse_options_t options = {
-        .max_errors = 100,
+        /*.diagnostic_sink=*/{},
+        /*.max_errors=*/100,
     };
     loom_module_t* module = nullptr;
     IREE_EXPECT_OK(loom_text_parse(iree_make_cstring_view(source),

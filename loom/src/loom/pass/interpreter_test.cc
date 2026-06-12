@@ -241,7 +241,9 @@ TEST_F(PassInterpreterTest, AppliesProviderPredicateToCurrentFunction) {
   ASSERT_NE(module, nullptr);
 
   PassTestPredicateCapture predicate_capture = {
-      .selected_symbol = IREE_SV("selected"),
+      /*.verify_count=*/{},
+      /*.evaluate_count=*/{},
+      /*.selected_symbol=*/IREE_SV("selected"),
   };
   loom_pass_predicate_provider_t predicate_provider =
       PassTestTargetPredicateProvider(&predicate_capture);
@@ -355,8 +357,8 @@ TEST_F(PassInterpreterTest, PropagatesDescriptorCallbackFailure) {
   DiagnosticCapture diagnostic_capture;
   loom_pass_interpreter_options_t options =
       InterpreterOptions(&trace, (iree_diagnostic_emitter_t){
-                                     .fn = CaptureDiagnostic,
-                                     .user_data = &diagnostic_capture,
+                                     /*.fn=*/CaptureDiagnostic,
+                                     /*.user_data=*/&diagnostic_capture,
                                  });
   loom_pass_run_result_t result = {};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INTERNAL,

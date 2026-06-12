@@ -37,8 +37,8 @@ typedef struct loom_scc_successor_callback_t {
 static inline loom_scc_successor_callback_t loom_scc_successor_callback_make(
     loom_scc_successor_fn_t fn, void* user_data) {
   return (loom_scc_successor_callback_t){
-      .fn = fn,
-      .user_data = user_data,
+      /*.fn=*/fn,
+      /*.user_data=*/user_data,
   };
 }
 
@@ -60,8 +60,8 @@ static inline loom_scc_visit_successors_callback_t
 loom_scc_visit_successors_callback_make(loom_scc_visit_successors_fn_t fn,
                                         void* user_data) {
   return (loom_scc_visit_successors_callback_t){
-      .fn = fn,
-      .user_data = user_data,
+      /*.fn=*/fn,
+      /*.user_data=*/user_data,
   };
 }
 

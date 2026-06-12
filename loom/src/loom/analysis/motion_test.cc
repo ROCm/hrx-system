@@ -57,7 +57,7 @@ class MotionTest : public ::testing::Test {
                                               IREE_SV("test_fn"), &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_ASSERT_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
-    loom_symbol_ref_t callee = {.module_id = 0, .symbol_id = symbol_id};
+    loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
     IREE_ASSERT_OK(loom_test_func_build(
         &module_builder, 0, 0, 0, callee, nullptr, 0, nullptr, 0, nullptr, 0,
         nullptr, 0, LOOM_LOCATION_UNKNOWN, &function_op_));
@@ -408,10 +408,11 @@ TEST_F(MotionTest, SubtreeRejectsUnavailablePredicateAttrReference) {
   loom_value_id_t late = loom_test_constant_result(late_op);
 
   loom_predicate_t predicate = {
-      .kind = LOOM_PREDICATE_EQ,
-      .arg_count = 2,
-      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST},
-      .args = {(int64_t)late, 2},
+      /*.kind=*/LOOM_PREDICATE_EQ,
+      /*.arg_count=*/2,
+      /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST},
+      /*.reserved=*/{},
+      /*.args=*/{(int64_t)late, 2},
   };
   loom_op_t* assume_op = nullptr;
   IREE_ASSERT_OK(loom_test_assume_build(&builder_, &input, 1, &predicate, 1,

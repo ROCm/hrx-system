@@ -16,6 +16,81 @@ _ARGS = clang_tidy_test.parse_arguments()
 
 
 class StyleChecksTest(clang_tidy_test.ClangTidyAssertions):
+    def test_cpp_designated_initializers_are_diagnosed(self):
+        output = clang_tidy_test.run_clang_tidy(
+            clang_tidy=_ARGS.clang_tidy,
+            plugin=_ARGS.plugin,
+            checks="-*,iree-cpp-designated-initializer",
+            source=clang_tidy_test.source_path(__file__, "style_checks.cc"),
+            compiler_args=["-std=c++20"],
+        )
+        self.assertContainsAll(
+            output,
+            [
+                "C++ code must use comment field labels instead of designated "
+                "initializers for MSVC portability",
+                ".ordinal = 1",
+                '.name = "device"',
+                '.name = "skipped"',
+                ".traits = 1",
+                '.name = "sparse"',
+                "IREE_CLANG_TIDY_STYLE_CPP_ACCEPT_CONFIG",
+                "[iree-cpp-designated-initializer]",
+            ],
+        )
+        self.assertContainsNone(
+            output,
+            [
+                "iree_clang_tidy_style_cpp_comment_labels",
+            ],
+        )
+
+    def test_cpp_designated_initializers_are_fixed(self):
+        output, fixed_source = clang_tidy_test.run_clang_tidy_fix(
+            clang_tidy=_ARGS.clang_tidy,
+            plugin=_ARGS.plugin,
+            checks="-*,iree-cpp-designated-initializer",
+            source=clang_tidy_test.source_path(__file__, "style_checks.cc"),
+            compiler_args=["-std=c++20"],
+        )
+        self.assertContainsAll(
+            output,
+            [
+                "C++ code must use comment field labels instead of designated "
+                "initializers for MSVC portability",
+                "[iree-cpp-designated-initializer]",
+            ],
+        )
+        self.assertIn("/*.ordinal=*/1,", fixed_source)
+        self.assertIn('/*.name=*/"device",', fixed_source)
+        self.assertIn('/*.ordinal=*/{}, /*.name=*/"skipped"', fixed_source)
+        self.assertIn("/*.traits=*/1,", fixed_source)
+        self.assertIn('/*.effective_traits=*/{}, /*.name=*/"sparse"', fixed_source)
+        self.assertIn(".ordinal = 3", fixed_source)
+        self.assertIn('.name = "macro-arg"', fixed_source)
+        self.assertNotIn(".ordinal = 1", fixed_source)
+        self.assertNotIn('.name = "device"', fixed_source)
+        self.assertNotIn('.name = "skipped"', fixed_source)
+        self.assertNotIn(".traits = 1", fixed_source)
+        self.assertNotIn('.name = "sparse"', fixed_source)
+
+    def test_c_designated_initializers_are_allowed(self):
+        output = clang_tidy_test.run_clang_tidy(
+            clang_tidy=_ARGS.clang_tidy,
+            plugin=_ARGS.plugin,
+            checks="-*,iree-cpp-designated-initializer",
+            source=clang_tidy_test.source_path(__file__, "style_checks.c"),
+            compiler_args=["-std=gnu11"],
+        )
+        self.assertContainsNone(
+            output,
+            [
+                "C++ code must use comment field labels instead of designated "
+                "initializers for MSVC portability",
+                "[iree-cpp-designated-initializer]",
+            ],
+        )
+
     def test_direct_goto_is_diagnosed(self):
         output = clang_tidy_test.run_clang_tidy(
             clang_tidy=_ARGS.clang_tidy,

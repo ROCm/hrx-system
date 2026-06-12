@@ -20,74 +20,74 @@ constexpr uint32_t kTestSourceRejectionDetail = 4;
 TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
   loom_target_compile_report_pressure_row_t pressure_rows[] = {
       {
-          .register_class = IREE_SVL("test.i32"),
-          .type_kind = LOOM_TYPE_REGISTER,
-          .element_type = LOOM_SCALAR_TYPE_I32,
-          .peak_live_units = 7,
-          .peak_live_values = 4,
-          .peak_point = 3,
-          .peak_block_name = IREE_SVL("entry"),
-          .peak_operation_name = IREE_SVL("low.op<test.add.i32>"),
+          /*.register_class=*/IREE_SVL("test.i32"),
+          /*.type_kind=*/LOOM_TYPE_REGISTER,
+          /*.element_type=*/LOOM_SCALAR_TYPE_I32,
+          /*.peak_live_units=*/7,
+          /*.peak_live_values=*/4,
+          /*.peak_point=*/3,
+          /*.peak_block_name=*/IREE_SVL("entry"),
+          /*.peak_operation_name=*/IREE_SVL("low.op<test.add.i32>"),
       },
   };
   loom_target_compile_report_spill_row_t spill_rows[] = {
       {
-          .value_name = IREE_SVL("rhs"),
-          .register_class = IREE_SVL("test.i32"),
-          .type_kind = LOOM_TYPE_REGISTER,
-          .element_type = LOOM_SCALAR_TYPE_I32,
-          .assignment_index = 2,
-          .slot_index = 1,
-          .slot_space = IREE_SVL("stack"),
-          .byte_size = 4,
-          .byte_alignment = 4,
-          .store_count = 1,
-          .reload_count = 2,
+          /*.value_name=*/IREE_SVL("rhs"),
+          /*.register_class=*/IREE_SVL("test.i32"),
+          /*.type_kind=*/LOOM_TYPE_REGISTER,
+          /*.element_type=*/LOOM_SCALAR_TYPE_I32,
+          /*.assignment_index=*/2,
+          /*.slot_index=*/1,
+          /*.slot_space=*/IREE_SVL("stack"),
+          /*.byte_size=*/4,
+          /*.byte_alignment=*/4,
+          /*.store_count=*/1,
+          /*.reload_count=*/2,
       },
   };
   loom_target_compile_report_source_low_row_t source_low_rows[] = {
       {
-          .function_name = IREE_SVL("branchy"),
-          .source_op_name = IREE_SVL("scalar.addi"),
-          .source_op_kind = 42,
-          .selection_kind =
-              LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_SELECTION_RULE,
-          .rule_set_index = 0,
-          .rule_index = 1,
-          .plan_id = UINT64_MAX,
-          .descriptor_id = 7,
-          .emitted_low_op_count = 1,
+          /*.function_name=*/IREE_SVL("branchy"),
+          /*.source_op_name=*/IREE_SVL("scalar.addi"),
+          /*.source_op_kind=*/42,
+          /*.selection_kind=*/
+          LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_SELECTION_RULE,
+          /*.rule_set_index=*/0,
+          /*.rule_index=*/1,
+          /*.plan_id=*/UINT64_MAX,
+          /*.descriptor_id=*/7,
+          /*.emitted_low_op_count=*/1,
       },
   };
   loom_target_compile_report_legalization_row_t target_legalization_rows[] = {
       {
-          .function_name = IREE_SVL("branchy"),
-          .source_op_name = IREE_SVL("vector.reduce.axes"),
-          .source_op_kind = 73,
-          .target_bundle_name = IREE_SVL("vm_target"),
-          .target_config_name = IREE_SVL("vm_o0"),
-          .legalizer_name = IREE_SVL("vector"),
-          .legalizer_strategy =
-              LOOM_TARGET_COMPILE_REPORT_LEGALIZER_STRATEGY_REFERENCE,
-          .mode = LOOM_TARGET_COMPILE_REPORT_LEGALIZATION_MODE_FINAL,
-          .policy =
-              LOOM_TARGET_COMPILE_REPORT_LEGALIZATION_POLICY_REFERENCE_ONLY,
-          .action = LOOM_TARGET_COMPILE_REPORT_LEGALIZATION_ACTION_REWRITTEN,
-          .contract_outcome =
-              LOOM_TARGET_COMPILE_REPORT_CONTRACT_OUTCOME_UNSUPPORTED,
-          .binding_index = 0,
-          .case_index = 2,
-          .rule_set_index = 3,
-          .rule_index = 4,
-          .diagnostic_index = UINT16_MAX,
-          .descriptor_id = UINT64_MAX,
-          .source_rejection_bits = 0x1,
-          .source_rejection_detail = kTestSourceRejectionDetail,
-          .target_rejection_bits = 0x2,
-          .missing_feature_bits = 0x4,
-          .missing_fact_bits = 0x8,
-          .created_op_count = 6,
-          .erased_op_count = 1,
+          /*.function_name=*/IREE_SVL("branchy"),
+          /*.source_op_name=*/IREE_SVL("vector.reduce.axes"),
+          /*.source_op_kind=*/73,
+          /*.target_bundle_name=*/IREE_SVL("vm_target"),
+          /*.target_config_name=*/IREE_SVL("vm_o0"),
+          /*.legalizer_name=*/IREE_SVL("vector"),
+          /*.legalizer_strategy=*/
+          LOOM_TARGET_COMPILE_REPORT_LEGALIZER_STRATEGY_REFERENCE,
+          /*.mode=*/LOOM_TARGET_COMPILE_REPORT_LEGALIZATION_MODE_FINAL,
+          /*.policy=*/
+          LOOM_TARGET_COMPILE_REPORT_LEGALIZATION_POLICY_REFERENCE_ONLY,
+          /*.action=*/LOOM_TARGET_COMPILE_REPORT_LEGALIZATION_ACTION_REWRITTEN,
+          /*.contract_outcome=*/
+          LOOM_TARGET_COMPILE_REPORT_CONTRACT_OUTCOME_UNSUPPORTED,
+          /*.binding_index=*/0,
+          /*.case_index=*/2,
+          /*.rule_set_index=*/3,
+          /*.rule_index=*/4,
+          /*.diagnostic_index=*/UINT16_MAX,
+          /*.descriptor_id=*/UINT64_MAX,
+          /*.source_rejection_bits=*/0x1,
+          /*.source_rejection_detail=*/kTestSourceRejectionDetail,
+          /*.target_rejection_bits=*/0x2,
+          /*.missing_feature_bits=*/0x4,
+          /*.missing_fact_bits=*/0x8,
+          /*.created_op_count=*/6,
+          /*.erased_op_count=*/1,
       },
   };
   loom_target_compile_report_t report = {};
@@ -112,14 +112,23 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
       &report,
       LOOM_TARGET_COMPILE_REPORT_MOVE_CAUSE_OPERAND_BANK_MATERIALIZATION, 1, 1);
   const loom_target_compile_report_static_instruction_mix_t instruction_mix = {
-      .descriptor_count = 9,
-      .scalar_alu_count = 2,
-      .vector_alu_count = 3,
-      .matrix_count = 1,
-      .wmma_count = 1,
-      .global_memory_count = 2,
-      .barrier_count = 1,
-      .conversion_count = 1,
+      /*.descriptor_count=*/9,
+      /*.unknown_count=*/{},
+      /*.scalar_alu_count=*/2,
+      /*.vector_alu_count=*/3,
+      /*.matrix_count=*/1,
+      /*.mfma_count=*/{},
+      /*.wmma_count=*/1,
+      /*.dot_count=*/{},
+      /*.global_memory_count=*/2,
+      /*.local_memory_count=*/{},
+      /*.scalar_memory_count=*/{},
+      /*.generic_memory_count=*/{},
+      /*.atomic_count=*/{},
+      /*.branch_count=*/{},
+      /*.barrier_count=*/1,
+      /*.control_count=*/{},
+      /*.conversion_count=*/1,
   };
   loom_target_compile_report_record_static_instruction_mix(&report,
                                                            &instruction_mix);
@@ -139,7 +148,7 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);
   const loom_target_compile_report_format_options_t options = {
-      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
   };
   IREE_ASSERT_OK(
       loom_target_compile_report_format_text(&report, &options, &builder));
@@ -291,12 +300,12 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
 TEST(CompileReportFormatTest, FormatsJsonSummaryWithoutDetailRows) {
   loom_target_compile_report_pressure_row_t pressure_rows[] = {
       {
-          .register_class = IREE_SVL("test.i32"),
-          .type_kind = LOOM_TYPE_REGISTER,
-          .element_type = LOOM_SCALAR_TYPE_I32,
-          .peak_live_units = 7,
-          .peak_live_values = 4,
-          .peak_point = 3,
+          /*.register_class=*/IREE_SVL("test.i32"),
+          /*.type_kind=*/LOOM_TYPE_REGISTER,
+          /*.element_type=*/LOOM_SCALAR_TYPE_I32,
+          /*.peak_live_units=*/7,
+          /*.peak_live_values=*/4,
+          /*.peak_point=*/3,
       },
   };
   loom_target_compile_report_t report = {};
@@ -312,7 +321,7 @@ TEST(CompileReportFormatTest, FormatsJsonSummaryWithoutDetailRows) {
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
   const loom_target_compile_report_format_options_t options = {
-      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
+      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
   };
   IREE_ASSERT_OK(
       loom_target_compile_report_format_json(&report, &options, &stream));
@@ -345,7 +354,7 @@ TEST(CompileReportFormatTest, FormatsJsonEscapedStrings) {
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
   const loom_target_compile_report_format_options_t options = {
-      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
+      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
   };
   IREE_ASSERT_OK(
       loom_target_compile_report_format_json(&report, &options, &stream));
@@ -368,7 +377,7 @@ TEST(CompileReportFormatTest, JsonModeNoneWritesNothing) {
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
   const loom_target_compile_report_format_options_t options = {
-      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_NONE,
+      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_NONE,
   };
   IREE_ASSERT_OK(
       loom_target_compile_report_format_json(&report, &options, &stream));

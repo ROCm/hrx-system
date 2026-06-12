@@ -72,8 +72,8 @@ class MovementTest : public ::testing::Test {
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_ASSERT_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
     const loom_symbol_ref_t symbol = {
-        .module_id = 0,
-        .symbol_id = symbol_id,
+        /*.module_id=*/0,
+        /*.symbol_id=*/symbol_id,
     };
     loom_op_t* func_op = nullptr;
     IREE_ASSERT_OK(loom_test_func_build(

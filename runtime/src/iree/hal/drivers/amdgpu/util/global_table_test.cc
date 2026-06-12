@@ -77,13 +77,13 @@ static iree_status_t FakeCreateBuffer(
   memset(storage, 0, expected_byte_length);
 
   iree_hal_buffer_placement_t placement = {
-      .device = nullptr,
-      .queue_affinity = selected_queue_affinity,
-      .flags = IREE_HAL_BUFFER_PLACEMENT_FLAG_NONE,
+      /*.device=*/nullptr,
+      /*.queue_affinity=*/selected_queue_affinity,
+      /*.flags=*/IREE_HAL_BUFFER_PLACEMENT_FLAG_NONE,
   };
   iree_hal_buffer_release_callback_t release_callback = {
-      .fn = FakeBufferRelease,
-      .user_data = storage,
+      /*.fn=*/FakeBufferRelease,
+      /*.user_data=*/storage,
   };
   iree_status_t status = iree_hal_heap_buffer_wrap(
       placement, IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
@@ -99,9 +99,9 @@ static iree_status_t FakeCreateBuffer(
 
 static iree_hal_amdgpu_queue_affinity_domain_t TwoDeviceDomain() {
   return (iree_hal_amdgpu_queue_affinity_domain_t){
-      .supported_affinity = 0xFull,
-      .physical_device_count = 2,
-      .queue_count_per_physical_device = 2,
+      /*.supported_affinity=*/0xFull,
+      /*.physical_device_count=*/2,
+      /*.queue_count_per_physical_device=*/2,
   };
 }
 
@@ -109,16 +109,16 @@ class GlobalTableTest : public ::testing::Test {
  protected:
   void SetUp() override {
     const iree_hal_amdgpu_global_table_params_t params = {
-        .host_allocator = iree_allocator_system(),
-        .queue_affinity_domain = TwoDeviceDomain(),
-        .loaded_physical_device_mask = 0x3ull,
-        .physical_device_count = 2,
-        .resolver =
-            {
-                .user_data = &resolver_,
-                .try_verify = FakeTryVerify,
-                .create_buffer = FakeCreateBuffer,
-            },
+        /*.host_allocator=*/iree_allocator_system(),
+        /*.queue_affinity_domain=*/TwoDeviceDomain(),
+        /*.loaded_physical_device_mask=*/0x3ull,
+        /*.physical_device_count=*/2,
+        /*.resolver=*/
+        {
+            /*.user_data=*/&resolver_,
+            /*.try_verify=*/FakeTryVerify,
+            /*.create_buffer=*/FakeCreateBuffer,
+        },
     };
     IREE_ASSERT_OK(iree_hal_amdgpu_global_table_initialize(&params, &table_));
   }
@@ -222,16 +222,16 @@ TEST(GlobalTableStandaloneTest, BufferRejectsUnloadedPhysicalDevice) {
   FakeResolver resolver;
   iree_hal_amdgpu_global_table_t table;
   const iree_hal_amdgpu_global_table_params_t params = {
-      .host_allocator = iree_allocator_system(),
-      .queue_affinity_domain = TwoDeviceDomain(),
-      .loaded_physical_device_mask = 0x1ull,
-      .physical_device_count = 2,
-      .resolver =
-          {
-              .user_data = &resolver,
-              .try_verify = FakeTryVerify,
-              .create_buffer = FakeCreateBuffer,
-          },
+      /*.host_allocator=*/iree_allocator_system(),
+      /*.queue_affinity_domain=*/TwoDeviceDomain(),
+      /*.loaded_physical_device_mask=*/0x1ull,
+      /*.physical_device_count=*/2,
+      /*.resolver=*/
+      {
+          /*.user_data=*/&resolver,
+          /*.try_verify=*/FakeTryVerify,
+          /*.create_buffer=*/FakeCreateBuffer,
+      },
   };
   IREE_ASSERT_OK(iree_hal_amdgpu_global_table_initialize(&params, &table));
 

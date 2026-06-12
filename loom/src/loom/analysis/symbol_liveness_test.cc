@@ -122,7 +122,8 @@ func.def @dead() {
 )");
 
   loom_symbol_liveness_options_t options = {
-      .root_query = RootPublicFunc,
+      /*.flags=*/{},
+      /*.root_query=*/RootPublicFunc,
   };
   loom_symbol_liveness_t liveness = ComputeLiveness(module.get(), &options);
 
@@ -162,19 +163,21 @@ func.def @dead_user(%arg0: i32) -> (i32) {
 )");
 
   ApplyEdgeTestState apply_state = {
-      .contract_id =
-          loom_module_lookup_string(module.get(), IREE_SV("demo.contract")),
-      .provider_symbol_id = FindSymbol(module.get(), IREE_SV("provider")),
+      /*.contract_id=*/
+      loom_module_lookup_string(module.get(), IREE_SV("demo.contract")),
+      /*.provider_symbol_id=*/FindSymbol(module.get(), IREE_SV("provider")),
   };
   ASSERT_NE(apply_state.contract_id, LOOM_STRING_ID_INVALID);
   loom_symbol_liveness_contributor_t contributor = {
-      .visit_op = MarkProviderForApply,
-      .user_data = &apply_state,
+      /*.visit_op=*/MarkProviderForApply,
+      /*.user_data=*/&apply_state,
   };
   loom_symbol_liveness_options_t options = {
-      .root_query = RootPublicFunc,
-      .contributors = &contributor,
-      .contributor_count = 1,
+      /*.flags=*/{},
+      /*.root_query=*/RootPublicFunc,
+      /*.root_query_user_data=*/{},
+      /*.contributors=*/&contributor,
+      /*.contributor_count=*/1,
   };
   loom_symbol_liveness_t liveness = ComputeLiveness(module.get(), &options);
 

@@ -127,10 +127,10 @@ static iree_status_t FactTableTestRawWidenExtension(
 }
 
 static const loom_value_fact_domain_t kTestRawFactDomain = {
-    .extensions_equal = FactTableTestRawExtensionsEqual,
-    .clone_extension = FactTableTestRawCloneExtension,
-    .meet_extension = FactTableTestRawMeetExtension,
-    .widen_extension = FactTableTestRawWidenExtension,
+    /*.extensions_equal=*/FactTableTestRawExtensionsEqual,
+    /*.clone_extension=*/FactTableTestRawCloneExtension,
+    /*.meet_extension=*/FactTableTestRawMeetExtension,
+    /*.widen_extension=*/FactTableTestRawWidenExtension,
 };
 
 //===----------------------------------------------------------------------===//
@@ -378,8 +378,8 @@ TEST_F(FactTableTest, SmallStaticLanesExtensionRoundTrips) {
       loom_value_facts_unknown(),
   };
   loom_value_fact_small_static_lanes_t lane_slice = {
-      .lanes = lanes,
-      .count = IREE_ARRAYSIZE(lanes),
+      /*.lanes=*/lanes,
+      /*.count=*/IREE_ARRAYSIZE(lanes),
   };
   loom_value_facts_t facts = loom_value_facts_unknown();
   IREE_ASSERT_OK(loom_value_facts_make_small_static_lanes(&table.context,
@@ -401,8 +401,8 @@ TEST_F(FactTableTest, OversizedSmallStaticLanesDegradesToUnknown) {
 
   loom_value_facts_t lanes[LOOM_VALUE_FACT_SMALL_STATIC_LANE_LIMIT + 1] = {};
   loom_value_fact_small_static_lanes_t lane_slice = {
-      .lanes = lanes,
-      .count = IREE_ARRAYSIZE(lanes),
+      /*.lanes=*/lanes,
+      /*.count=*/IREE_ARRAYSIZE(lanes),
   };
   loom_value_facts_t facts = loom_value_facts_exact_i64(123);
   IREE_ASSERT_OK(loom_value_facts_make_small_static_lanes(&table.context,
@@ -418,8 +418,8 @@ TEST_F(FactTableTest, VectorIotaExtensionRoundTrips) {
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 0));
 
   loom_value_fact_vector_iota_t iota = {
-      .base = loom_value_facts_exact_i64(2),
-      .step = loom_value_facts_exact_i64(3),
+      /*.base=*/loom_value_facts_exact_i64(2),
+      /*.step=*/loom_value_facts_exact_i64(3),
   };
   loom_value_facts_t facts = loom_value_facts_unknown();
   IREE_ASSERT_OK(
@@ -439,9 +439,9 @@ TEST_F(FactTableTest, VectorPrefixMaskExtensionRoundTrips) {
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 0));
 
   loom_value_fact_vector_prefix_mask_t mask = {
-      .lower_bound = loom_value_facts_exact_i64(0),
-      .upper_bound = loom_value_facts_make(0, 16, 1),
-      .step = loom_value_facts_exact_i64(1),
+      /*.lower_bound=*/loom_value_facts_exact_i64(0),
+      /*.upper_bound=*/loom_value_facts_make(0, 16, 1),
+      /*.step=*/loom_value_facts_exact_i64(1),
   };
   loom_value_facts_t facts = loom_value_facts_unknown();
   IREE_ASSERT_OK(
@@ -460,14 +460,14 @@ TEST_F(FactTableTest, EncodingSummaryDenseLayoutRoundTrips) {
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 0));
 
   loom_value_fact_encoding_summary_t summary = {
-      .role = LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
-      .static_spec_encoding_id = 0,
-      .address_layout =
-          {
-              .kind = LOOM_VALUE_FACT_ADDRESS_LAYOUT_DENSE,
-              .rank = 0,
-              .strides = nullptr,
-          },
+      /*.role=*/LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
+      /*.static_spec_encoding_id=*/0,
+      /*.address_layout=*/
+      {
+          /*.kind=*/LOOM_VALUE_FACT_ADDRESS_LAYOUT_DENSE,
+          /*.rank=*/0,
+          /*.strides=*/nullptr,
+      },
   };
   loom_value_facts_t facts = loom_value_facts_unknown();
   IREE_ASSERT_OK(
@@ -489,14 +489,14 @@ TEST_F(FactTableTest, EncodingSummaryStridedLayoutInternsStrideFacts) {
       loom_value_facts_exact_i64(1),
   };
   loom_value_fact_encoding_summary_t summary = {
-      .role = LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
-      .static_spec_encoding_id = 0,
-      .address_layout =
-          {
-              .kind = LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
-              .rank = IREE_ARRAYSIZE(strides),
-              .strides = strides,
-          },
+      /*.role=*/LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
+      /*.static_spec_encoding_id=*/0,
+      /*.address_layout=*/
+      {
+          /*.kind=*/LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
+          /*.rank=*/IREE_ARRAYSIZE(strides),
+          /*.strides=*/strides,
+      },
   };
   loom_value_facts_t lhs = loom_value_facts_unknown();
   loom_value_facts_t rhs = loom_value_facts_unknown();
@@ -526,14 +526,14 @@ TEST_F(FactTableTest, CloneDefinedFactsReinternsExtensions) {
       loom_value_facts_exact_i64(1),
   };
   loom_value_fact_encoding_summary_t summary = {
-      .role = LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
-      .static_spec_encoding_id = 0,
-      .address_layout =
-          {
-              .kind = LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
-              .rank = IREE_ARRAYSIZE(strides),
-              .strides = strides,
-          },
+      /*.role=*/LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
+      /*.static_spec_encoding_id=*/0,
+      /*.address_layout=*/
+      {
+          /*.kind=*/LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
+          /*.rank=*/IREE_ARRAYSIZE(strides),
+          /*.strides=*/strides,
+      },
   };
   loom_value_facts_t source_facts = loom_value_facts_unknown();
   IREE_ASSERT_OK(loom_value_facts_make_encoding_summary(
@@ -571,14 +571,14 @@ TEST_F(FactTableTest, CrossTableFactsEqualComparesExtensionPayloads) {
       loom_value_facts_exact_i64(1),
   };
   loom_value_fact_encoding_summary_t summary = {
-      .role = LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
-      .static_spec_encoding_id = 0,
-      .address_layout =
-          {
-              .kind = LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
-              .rank = IREE_ARRAYSIZE(strides),
-              .strides = strides,
-          },
+      /*.role=*/LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
+      /*.static_spec_encoding_id=*/0,
+      /*.address_layout=*/
+      {
+          /*.kind=*/LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
+          /*.rank=*/IREE_ARRAYSIZE(strides),
+          /*.strides=*/strides,
+      },
   };
   loom_value_facts_t source_facts = loom_value_facts_unknown();
   IREE_ASSERT_OK(loom_value_facts_make_encoding_summary(

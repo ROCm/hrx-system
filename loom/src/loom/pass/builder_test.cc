@@ -74,8 +74,9 @@ static iree_status_t BuildForBody(loom_builder_t* builder, void* user_data) {
   IREE_RETURN_IF_ERROR(loom_module_intern_string(
       builder->module, IREE_SV("matmul"), &matmul_value));
   loom_named_attr_t attrs[] = {{
-      .name_id = value_name,
-      .value = loom_attr_string(matmul_value),
+      /*.name_id=*/value_name,
+      /*.reserved=*/{},
+      /*.value=*/loom_attr_string(matmul_value),
   }};
 
   loom_op_t* where_op = nullptr;
@@ -138,7 +139,7 @@ TEST_F(PassBuilderTest, BuildsNestedPassControls) {
                                              LOOM_PASS_ANCHOR_MODULE,
                                              BuildOneRun, nullptr, &callee_op));
   MainPipelineBuildData build_data = {
-      .callee = loom_pass_pipeline_symbol(callee_op),
+      /*.callee=*/loom_pass_pipeline_symbol(callee_op),
   };
   loom_op_t* main_op = nullptr;
   IREE_ASSERT_OK(loom_pass_ir_build_pipeline(

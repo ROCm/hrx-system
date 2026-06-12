@@ -107,8 +107,8 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
   void ParseSource(iree_string_view_t source, loom_module_t** out_module) {
     DiagnosticCapture parse_capture;
     loom_text_parse_options_t parse_options = {
-        .diagnostic_sink = parse_capture.sink(),
-        .max_errors = 20,
+        /*.diagnostic_sink=*/parse_capture.sink(),
+        /*.max_errors=*/20,
     };
     loom_low_descriptor_text_asm_environment_initialize(
         &low_registry_.registry, &parse_options.low_asm_environment);
@@ -226,9 +226,11 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
 
     loom_amdgpu_hal_kernel_library_t library = {};
     loom_amdgpu_hal_kernel_library_options_t options = {
-        .processor = processor,
-        .diagnostic_sink = capture->sink(),
-        .max_errors = 20,
+        /*.processor=*/processor,
+        /*.target_selection=*/{},
+        /*.diagnostic_sink=*/capture->sink(),
+        /*.source_resolver=*/{},
+        /*.max_errors=*/20,
     };
     iree_status_t status = loom_amdgpu_emit_hal_kernel_library(
         module, &options, iree_allocator_system(), out_emitted, &library);
@@ -244,9 +246,11 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
 
     loom_amdgpu_hal_kernel_library_t library = {};
     loom_amdgpu_hal_kernel_library_options_t options = {
-        .processor = IREE_SV("gfx942"),
-        .diagnostic_sink = capture->sink(),
-        .max_errors = 20,
+        /*.processor=*/IREE_SV("gfx942"),
+        /*.target_selection=*/{},
+        /*.diagnostic_sink=*/capture->sink(),
+        /*.source_resolver=*/{},
+        /*.max_errors=*/20,
     };
     iree_status_t status = loom_amdgpu_emit_hal_kernel_library(
         module, &options, iree_allocator_system(), out_emitted, &library);
@@ -327,8 +331,11 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsEveryLinkedSupportedProcessor) {
     DiagnosticCapture capture;
     loom_amdgpu_hal_kernel_library_t library = {};
     loom_amdgpu_hal_kernel_library_options_t options = {
-        .diagnostic_sink = capture.sink(),
-        .max_errors = 20,
+        /*.processor=*/{},
+        /*.target_selection=*/{},
+        /*.diagnostic_sink=*/capture.sink(),
+        /*.source_resolver=*/{},
+        /*.max_errors=*/20,
     };
     bool emitted = false;
     IREE_ASSERT_OK(loom_amdgpu_emit_hal_kernel_library(
@@ -370,8 +377,11 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsArgumentMetadataFromLowKernelAbi) {
   DiagnosticCapture capture;
   loom_amdgpu_hal_kernel_library_t library = {};
   loom_amdgpu_hal_kernel_library_options_t options = {
-      .diagnostic_sink = capture.sink(),
-      .max_errors = 20,
+      /*.processor=*/{},
+      /*.target_selection=*/{},
+      /*.diagnostic_sink=*/capture.sink(),
+      /*.source_resolver=*/{},
+      /*.max_errors=*/20,
   };
   bool emitted = false;
   IREE_ASSERT_OK(loom_amdgpu_emit_hal_kernel_library(
@@ -399,8 +409,11 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsAllCompatibleKernels) {
   DiagnosticCapture capture;
   loom_amdgpu_hal_kernel_library_t library = {};
   loom_amdgpu_hal_kernel_library_options_t options = {
-      .diagnostic_sink = capture.sink(),
-      .max_errors = 20,
+      /*.processor=*/{},
+      /*.target_selection=*/{},
+      /*.diagnostic_sink=*/capture.sink(),
+      /*.source_resolver=*/{},
+      /*.max_errors=*/20,
   };
   bool emitted = false;
   IREE_ASSERT_OK(loom_amdgpu_emit_hal_kernel_library(

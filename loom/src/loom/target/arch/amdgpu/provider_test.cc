@@ -109,7 +109,7 @@ TEST_F(AmdgpuProviderTest, ContributesHalKernelAbiMaterialization) {
   IREE_ASSERT_OK(AllocateModule(IREE_SV("pipeline"), &module));
 
   PipelineBuildData build_data = {
-      .environment = &target_environment_,
+      /*.environment=*/&target_environment_,
   };
   loom_op_t* pipeline_op = nullptr;
   IREE_ASSERT_OK(loom_pass_ir_build_pipeline(

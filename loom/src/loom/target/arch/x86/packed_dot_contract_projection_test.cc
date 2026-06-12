@@ -28,12 +28,12 @@ loom_contract_view_payload_t PlainPayload(
     loom_contract_operand_role_t role,
     loom_contract_numeric_type_t numeric_type) {
   return (loom_contract_view_payload_t){
-      .kind = LOOM_CONTRACT_VIEW_PAYLOAD_PLAIN_ELEMENT,
-      .operand =
-          (loom_contract_operand_t){
-              .role = role,
-              .numeric_type = numeric_type,
-          },
+      /*.kind=*/LOOM_CONTRACT_VIEW_PAYLOAD_PLAIN_ELEMENT,
+      /*.operand=*/
+      (loom_contract_operand_t){
+          /*.role=*/role,
+          /*.numeric_type=*/numeric_type,
+      },
   };
 }
 
@@ -46,9 +46,9 @@ bool BuildPackedDotRequest(
     uint16_t k_group_size, loom_contract_request_t* out_request) {
   loom_contract_matrix_request_options_t options = {};
   options.shape = {
-      .m = result_lane_count,
-      .n = 1,
-      .k = source_lane_count,
+      /*.m=*/result_lane_count,
+      /*.n=*/1,
+      /*.k=*/source_lane_count,
   };
   options.k_group_size = k_group_size;
   options.lhs = PlainPayload(LOOM_CONTRACT_OPERAND_ROLE_LHS, lhs_numeric_type);
@@ -57,10 +57,10 @@ bool BuildPackedDotRequest(
   options.result_numeric_type = result_numeric_type;
   options.arithmetic = ArithmeticForAccumulator(accumulator_numeric_type);
   options.fragment = {
-      .atom_bits = LOOM_CONTRACT_FRAGMENT_VECTOR_LANE,
-      .vector_bit_width = vector_bit_width,
-      .source_lane_count = source_lane_count,
-      .result_lane_count = result_lane_count,
+      /*.atom_bits=*/LOOM_CONTRACT_FRAGMENT_VECTOR_LANE,
+      /*.vector_bit_width=*/vector_bit_width,
+      /*.source_lane_count=*/source_lane_count,
+      /*.result_lane_count=*/result_lane_count,
   };
   options.capability_class = LOOM_CONTRACT_CAPABILITY_CLASS_CPU_PACKED_DOT;
   options.policy = LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED;

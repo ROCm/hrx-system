@@ -348,7 +348,7 @@ TEST(ArtifactManifestTest, RejectsUndeclaredTargetReferences) {
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
   const loom_target_artifact_manifest_format_options_t options = {
-      .mode = LOOM_TARGET_ARTIFACT_MANIFEST_MODE_SUMMARY,
+      /*.mode=*/LOOM_TARGET_ARTIFACT_MANIFEST_MODE_SUMMARY,
   };
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,

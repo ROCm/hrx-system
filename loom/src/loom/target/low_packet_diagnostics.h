@@ -63,8 +63,8 @@ loom_target_low_packet_diagnostic_provider_list_make(
     const loom_target_low_packet_diagnostic_provider_t* const* values,
     iree_host_size_t count) {
   loom_target_low_packet_diagnostic_provider_list_t list = {
-      .count = count,
-      .values = values,
+      /*.count=*/count,
+      /*.values=*/values,
   };
   return list;
 }

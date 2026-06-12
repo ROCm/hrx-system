@@ -64,9 +64,10 @@ static inline loom_encoding_define_param_view_t loom_encoding_define_param_view(
   const loom_encoding_t* spec =
       loom_module_encoding(module, loom_encoding_define_spec(op));
   loom_encoding_define_param_view_t view = {
-      .spec = spec,
-      .dynamic_values = loom_encoding_define_params(op),
-      .dynamic_names = loom_encoding_define_param_names(op),
+      /*.spec=*/spec,
+      /*.static_attrs=*/{},
+      /*.dynamic_values=*/loom_encoding_define_params(op),
+      /*.dynamic_names=*/loom_encoding_define_param_names(op),
   };
   if (spec) {
     view.static_attrs = loom_encoding_attrs(spec);

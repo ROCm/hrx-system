@@ -71,8 +71,8 @@ static inline loom_low_verify_provider_list_t
 loom_low_verify_provider_list_make(
     const loom_low_verify_provider_t* const* values, iree_host_size_t count) {
   return (loom_low_verify_provider_list_t){
-      .count = count,
-      .values = values,
+      /*.count=*/count,
+      /*.values=*/values,
   };
 }
 
@@ -121,7 +121,7 @@ typedef struct loom_low_verify_scratch_t {
 static inline loom_low_verify_scratch_t loom_low_verify_scratch_for_module(
     loom_module_t* module) {
   return (loom_low_verify_scratch_t){
-      .value_scratch = &module->scratch.values,
+      /*.value_scratch=*/&module->scratch.values,
   };
 }
 

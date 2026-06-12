@@ -161,8 +161,8 @@ static_assert(kPackedStringEnd == sizeof(kPackedStrings) - 1,
 
 TEST(BStringTable, ContainsValidOffsets) {
   const loom_bstring_table_t table = {
-      .data = kPackedStrings,
-      .data_length = sizeof(kPackedStrings) - 1,
+      /*.data=*/kPackedStrings,
+      /*.data_length=*/sizeof(kPackedStrings) - 1,
   };
   const loom_bstring_table_offset_t hello_offset =
       static_cast<loom_bstring_table_offset_t>(kPackedStringHello);
@@ -182,8 +182,8 @@ TEST(BStringTable, ContainsValidOffsets) {
 TEST(BStringTable, RejectsInvalidOffsets) {
   static const uint8_t kTruncated[] = {5, 'h', 'e'};
   const loom_bstring_table_t table = {
-      .data = kTruncated,
-      .data_length = sizeof(kTruncated),
+      /*.data=*/kTruncated,
+      /*.data_length=*/sizeof(kTruncated),
   };
 
   EXPECT_FALSE(loom_bstring_table_contains(&table, 0));

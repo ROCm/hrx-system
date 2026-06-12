@@ -78,7 +78,8 @@ class LowLowerPassTest : public ::testing::Test {
 
   ModulePtr Parse(iree_string_view_t source) {
     loom_text_parse_options_t parse_options = {
-        .max_errors = 20,
+        /*.diagnostic_sink=*/{},
+        /*.max_errors=*/20,
     };
     loom_module_t* module = nullptr;
     IREE_CHECK_OK(loom_text_parse(source, IREE_SV("source_to_low_test.loom"),
@@ -114,8 +115,8 @@ class LowLowerPassTest : public ::testing::Test {
     pass.value_facts = &value_facts;
     if (collector != nullptr) {
       pass.diagnostic_emitter = {
-          .fn = CollectDiagnosticEmission,
-          .user_data = collector,
+          /*.fn=*/CollectDiagnosticEmission,
+          /*.user_data=*/collector,
       };
     }
 
@@ -137,10 +138,10 @@ class LowLowerPassTest : public ::testing::Test {
 static loom_target_bundle_storage_t CopyTargetBundle(
     const loom_target_bundle_t* bundle) {
   loom_target_bundle_storage_t storage = {
-      .snapshot = *bundle->snapshot,
-      .export_plan = *bundle->export_plan,
-      .config = *bundle->config,
-      .bundle = *bundle,
+      /*.snapshot=*/*bundle->snapshot,
+      /*.export_plan=*/*bundle->export_plan,
+      /*.config=*/*bundle->config,
+      /*.bundle=*/*bundle,
   };
   loom_target_bundle_storage_rebind(&storage);
   return storage;
@@ -164,12 +165,14 @@ TEST_F(LowLowerPassTest,
   iree_arena_allocator_t arena;
   iree_arena_initialize(&block_pool_, &arena);
   loom_low_source_selection_options_t options = {
-      .policy_registry = &policy_registry,
-      .target_selection =
-          {
-              .bundle = &selected_storage.bundle,
-              .data = &target_payload,
-          },
+      /*.policy_registry=*/&policy_registry,
+      /*.diagnostic_emitter=*/{},
+      /*.lowering_kind=*/{},
+      /*.target_selection=*/
+      {
+          /*.bundle=*/&selected_storage.bundle,
+          /*.data=*/&target_payload,
+      },
   };
   loom_low_source_selection_list_t selections = {};
   IREE_ASSERT_OK(loom_low_select_source_symbols(module.get(), &options, &arena,
@@ -197,12 +200,14 @@ TEST_F(LowLowerPassTest, SourceSelectionAppliesRuntimeTargetDataOnly) {
   iree_arena_allocator_t arena;
   iree_arena_initialize(&block_pool_, &arena);
   loom_low_source_selection_options_t options = {
-      .policy_registry = &policy_registry,
-      .target_selection =
-          {
-              .bundle = NULL,
-              .data = &target_payload,
-          },
+      /*.policy_registry=*/&policy_registry,
+      /*.diagnostic_emitter=*/{},
+      /*.lowering_kind=*/{},
+      /*.target_selection=*/
+      {
+          /*.bundle=*/NULL,
+          /*.data=*/&target_payload,
+      },
   };
   loom_low_source_selection_list_t selections = {};
   IREE_ASSERT_OK(loom_low_select_source_symbols(module.get(), &options, &arena,
@@ -234,12 +239,14 @@ TEST_F(LowLowerPassTest,
   iree_arena_allocator_t arena;
   iree_arena_initialize(&block_pool_, &arena);
   loom_low_source_selection_options_t options = {
-      .policy_registry = &policy_registry,
-      .target_selection =
-          {
-              .bundle = &selected_storage.bundle,
-              .data = &target_payload,
-          },
+      /*.policy_registry=*/&policy_registry,
+      /*.diagnostic_emitter=*/{},
+      /*.lowering_kind=*/{},
+      /*.target_selection=*/
+      {
+          /*.bundle=*/&selected_storage.bundle,
+          /*.data=*/&target_payload,
+      },
   };
   loom_low_source_selection_list_t selections = {};
   IREE_ASSERT_OK(loom_low_select_source_symbols(module.get(), &options, &arena,
@@ -271,13 +278,13 @@ TEST_F(LowLowerPassTest,
   };
   loom_low_lower_policy_t policy = *loom_test_low_lower_policy();
   policy.rule_sets = {
-      .count = IREE_ARRAYSIZE(rule_sets),
-      .values = rule_sets,
+      /*.count=*/IREE_ARRAYSIZE(rule_sets),
+      /*.values=*/rule_sets,
   };
   const loom_low_lower_policy_registry_entry_t entries[] = {
       {
-          .contract_set_key = IREE_SVL("test.low.core"),
-          .policy = &policy,
+          /*.contract_set_key=*/IREE_SVL("test.low.core"),
+          /*.policy=*/&policy,
       },
   };
   loom_low_lower_policy_registry_t policy_registry = {};

@@ -176,9 +176,9 @@ test.record @target {lanes = 64}
       loom_module_lookup_string(module.get(), IREE_SV("lanes"));
   ASSERT_NE(lanes_name_id, LOOM_STRING_ID_INVALID);
   loom_named_attr_t entry = {
-      .name_id = lanes_name_id,
-      .reserved = 0,
-      .value = loom_attr_i64(128),
+      /*.name_id=*/lanes_name_id,
+      /*.reserved=*/0,
+      /*.value=*/loom_attr_i64(128),
   };
   loom_attribute_t dict = {};
   IREE_ASSERT_OK(loom_module_make_canonical_attr_dict(
@@ -223,14 +223,14 @@ test.record @second {lanes = 2}
 
 TEST_F(SymbolFactsTest, DomainsCanUseInjectedResources) {
   const loom_test_record_symbol_fact_resource_t resource = {
-      .lane_bias = 8,
+      /*.lane_bias=*/8,
   };
   const loom_symbol_fact_resource_t resources[] = {{
-      .key = &loom_test_record_symbol_fact_resource_key,
-      .value = &resource,
+      /*.key=*/&loom_test_record_symbol_fact_resource_key,
+      /*.value=*/&resource,
   }};
   const loom_symbol_fact_table_options_t options = {
-      .resources = loom_make_symbol_fact_resource_list(
+      /*.resources=*/loom_make_symbol_fact_resource_list(
           resources, IREE_ARRAYSIZE(resources)),
   };
   loom_symbol_fact_table_initialize_with_options(&fact_table_, &options,

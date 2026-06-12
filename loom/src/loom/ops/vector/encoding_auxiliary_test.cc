@@ -42,8 +42,8 @@ class VectorEncodingAuxiliaryTest : public ::testing::Test {
   static loom_value_slice_t ValueSlice(loom_value_id_t* values,
                                        uint16_t count) {
     return loom_value_slice_t{
-        .values = values,
-        .count = count,
+        /*.values=*/values,
+        /*.count=*/count,
     };
   }
 
@@ -79,12 +79,14 @@ TEST_F(VectorEncodingAuxiliaryTest, ViewResolveMapsNamesToDenseValueSlots) {
   loom_value_id_t auxiliary_values[] = {12, 34};
   loom_named_attr_t auxiliary_names[] = {
       {
-          .name_id = Intern(IREE_SV("scale")),
-          .value = loom_attr_i64(0),
+          /*.name_id=*/Intern(IREE_SV("scale")),
+          /*.reserved=*/{},
+          /*.value=*/loom_attr_i64(0),
       },
       {
-          .name_id = Intern(IREE_SV("amax")),
-          .value = loom_attr_i64(1),
+          /*.name_id=*/Intern(IREE_SV("amax")),
+          /*.reserved=*/{},
+          /*.value=*/loom_attr_i64(1),
       },
   };
 
@@ -109,8 +111,9 @@ TEST_F(VectorEncodingAuxiliaryTest, ViewResolveReportsUnknownKeys) {
   loom_value_id_t auxiliary_values[] = {12};
   loom_named_attr_t auxiliary_names[] = {
       {
-          .name_id = Intern(IREE_SV("mystery")),
-          .value = loom_attr_i64(0),
+          /*.name_id=*/Intern(IREE_SV("mystery")),
+          /*.reserved=*/{},
+          /*.value=*/loom_attr_i64(0),
       },
   };
 
@@ -126,12 +129,23 @@ TEST_F(VectorEncodingAuxiliaryTest, ViewResolveReportsUnknownKeys) {
 
 TEST(VectorEncodingAuxiliaryKeysTest, RequiredKeysComeFromSchemaFacts) {
   loom_value_fact_encoded_operand_schema_t schema = {
-      .scale_topology = LOOM_VALUE_FACT_SCALE_TOPOLOGY_RUNTIME_AMAX_DERIVED,
-      .affine_policy = LOOM_VALUE_FACT_AFFINE_POLICY_SCALE_PLUS_ZERO_POINT |
-                       LOOM_VALUE_FACT_AFFINE_POLICY_SUM_CORRECTION,
-      .codebook_policy = LOOM_VALUE_FACT_CODEBOOK_POLICY_DYNAMIC_TABLE_OPERAND,
-      .sparsity_policy = LOOM_VALUE_FACT_SPARSITY_POLICY_MASK,
-      .scale_operand_count = 2,
+      /*.element_format=*/{},
+      /*.scale_format=*/{},
+      /*.secondary_scale_format=*/{},
+      /*.payload_packing=*/{},
+      /*.scale_topology=*/LOOM_VALUE_FACT_SCALE_TOPOLOGY_RUNTIME_AMAX_DERIVED,
+      /*.affine_policy=*/LOOM_VALUE_FACT_AFFINE_POLICY_SCALE_PLUS_ZERO_POINT |
+          LOOM_VALUE_FACT_AFFINE_POLICY_SUM_CORRECTION,
+      /*.rounding_policy=*/{},
+      /*.codebook_policy=*/
+      LOOM_VALUE_FACT_CODEBOOK_POLICY_DYNAMIC_TABLE_OPERAND,
+      /*.sparsity_policy=*/LOOM_VALUE_FACT_SPARSITY_POLICY_MASK,
+      /*.flags=*/{},
+      /*.reserved=*/{},
+      /*.payload_register_count=*/{},
+      /*.payload_element_count=*/{},
+      /*.scale_group_element_count=*/{},
+      /*.scale_operand_count=*/2,
   };
 
   loom_vector_encoding_auxiliary_key_flags_t required_keys = 0;
@@ -150,7 +164,21 @@ TEST(VectorEncodingAuxiliaryKeysTest, RequiredKeysComeFromSchemaFacts) {
 
 TEST(VectorEncodingAuxiliaryKeysTest, RequiredKeysRejectUnsupportedScaleCount) {
   loom_value_fact_encoded_operand_schema_t schema = {
-      .scale_operand_count = 9,
+      /*.element_format=*/{},
+      /*.scale_format=*/{},
+      /*.secondary_scale_format=*/{},
+      /*.payload_packing=*/{},
+      /*.scale_topology=*/{},
+      /*.affine_policy=*/{},
+      /*.rounding_policy=*/{},
+      /*.codebook_policy=*/{},
+      /*.sparsity_policy=*/{},
+      /*.flags=*/{},
+      /*.reserved=*/{},
+      /*.payload_register_count=*/{},
+      /*.payload_element_count=*/{},
+      /*.scale_group_element_count=*/{},
+      /*.scale_operand_count=*/9,
   };
 
   uint16_t unsupported_scale_index = UINT16_MAX;

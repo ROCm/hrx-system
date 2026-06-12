@@ -56,7 +56,7 @@ static inline loom_low_register_type_resolver_t
 loom_low_register_type_resolver_for_descriptor_set(
     const loom_low_descriptor_set_t* descriptor_set) {
   return (loom_low_register_type_resolver_t){
-      .descriptor_set = descriptor_set,
+      /*.descriptor_set=*/descriptor_set,
   };
 }
 

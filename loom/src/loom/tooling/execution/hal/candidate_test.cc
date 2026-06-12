@@ -49,16 +49,17 @@ loom_target_compile_report_t* g_fake_hal_emit_report = nullptr;
 const uint8_t kFakeHalExecutableData[] = {0x7F, 'E', 'L', 'F'};
 const uint8_t kFakeHalTargetArtifactData[] = {'h', 's', 'a', 'c', 'o'};
 static const loom_target_snapshot_t kFakeSnapshot = {
-    .name = IREE_SVL("fake-snapshot"),
+    /*.name=*/IREE_SVL("fake-snapshot"),
 };
 static const loom_target_export_plan_t kFakeExportPlan = {
-    .name = IREE_SVL("fake-export"),
-    .abi_kind = LOOM_TARGET_ABI_HAL_KERNEL,
+    /*.name=*/IREE_SVL("fake-export"),
+    /*.export_symbol=*/{},
+    /*.abi_kind=*/LOOM_TARGET_ABI_HAL_KERNEL,
 };
 static const loom_target_bundle_t kFakeTargetBundle = {
-    .name = IREE_SVL("fake-bundle"),
-    .snapshot = &kFakeSnapshot,
-    .export_plan = &kFakeExportPlan,
+    /*.name=*/IREE_SVL("fake-bundle"),
+    /*.snapshot=*/&kFakeSnapshot,
+    /*.export_plan=*/&kFakeExportPlan,
 };
 
 const loom_run_hal_runtime_t* FakeHalRuntime() {
@@ -73,9 +74,10 @@ iree_status_t FakeHalSelectDeviceTarget(
   (void)runtime;
   (void)allocator;
   *out_target = (loom_run_hal_device_target_t){
-      .data = &kFakeHalTarget,
-      .target_bundle = &kFakeTargetBundle,
-      .target_key = IREE_SVL("fake-hal"),
+      /*.data=*/&kFakeHalTarget,
+      /*.target_storage=*/{},
+      /*.target_bundle=*/&kFakeTargetBundle,
+      /*.target_key=*/IREE_SVL("fake-hal"),
   };
   return iree_ok_status();
 }
@@ -109,13 +111,20 @@ iree_status_t FakeHalEmitArtifact(
                             "unexpected fake HAL target payload");
   }
   *out_artifact = (loom_run_hal_artifact_t){
-      .executable_format = IREE_SVL("fake-hal-format"),
-      .target_artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF,
-      .target_artifact_data = iree_make_const_byte_span(
-          kFakeHalTargetArtifactData, sizeof(kFakeHalTargetArtifactData)),
-      .executable_data = iree_make_const_byte_span(
-          kFakeHalExecutableData, sizeof(kFakeHalExecutableData)),
-      .storage = &kFakeHalTarget,
+      /*.executable_format=*/IREE_SVL("fake-hal-format"),
+      /*.target_bundle=*/{},
+      /*.target_artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_ELF,
+      /*.target_artifact_data=*/
+      iree_make_const_byte_span(kFakeHalTargetArtifactData,
+                                sizeof(kFakeHalTargetArtifactData)),
+      /*.target_listing_format=*/{},
+      /*.target_listing_data=*/{},
+      /*.sidecars=*/{},
+      /*.sidecar_count=*/{},
+      /*.executable_data=*/
+      iree_make_const_byte_span(kFakeHalExecutableData,
+                                sizeof(kFakeHalExecutableData)),
+      /*.storage=*/&kFakeHalTarget,
   };
   *out_emitted = true;
   return iree_ok_status();
@@ -130,12 +139,16 @@ void FakeHalDeinitializeArtifact(
 }
 
 const loom_run_hal_artifact_provider_t kFakeHalArtifactProvider = {
-    .name = IREE_SVL("fake-hal"),
-    .hal_driver_name = IREE_SVL("fake"),
-    .target_family_name = IREE_SVL("fake"),
-    .select_device_target = FakeHalSelectDeviceTarget,
-    .emit_artifact = FakeHalEmitArtifact,
-    .deinitialize_artifact = FakeHalDeinitializeArtifact,
+    /*.name=*/IREE_SVL("fake-hal"),
+    /*.hal_driver_name=*/IREE_SVL("fake"),
+    /*.target_family_name=*/IREE_SVL("fake"),
+    /*.default_pipeline_options=*/{},
+    /*.select_device_target=*/FakeHalSelectDeviceTarget,
+    /*.select_target_key=*/{},
+    /*.deinitialize_device_target=*/{},
+    /*.resolve_device_target_ref=*/{},
+    /*.emit_artifact=*/FakeHalEmitArtifact,
+    /*.deinitialize_artifact=*/FakeHalDeinitializeArtifact,
 };
 
 class HalCandidateTest : public ::testing::Test {
@@ -147,11 +160,11 @@ class HalCandidateTest : public ::testing::Test {
     loom_run_session_options_t options = {};
     loom_run_session_options_initialize(&options);
     options.register_context = (loom_run_register_context_callback_t){
-        .fn = RegisterContext,
+        /*.fn=*/RegisterContext,
     };
     options.initialize_low_descriptor_registry =
         (loom_run_initialize_low_descriptor_registry_callback_t){
-            .fn = InitializeLowDescriptorRegistry,
+            /*.fn=*/InitializeLowDescriptorRegistry,
         };
     IREE_ASSERT_OK(loom_run_session_initialize(&options, &session_));
   }
@@ -296,7 +309,7 @@ TEST_F(HalCandidateTest, CompileHalRequiresHooks) {
   options.report = &report;
 
   const loom_run_hal_artifact_provider_t provider = {
-      .name = IREE_SVL("missing-hooks"),
+      /*.name=*/IREE_SVL("missing-hooks"),
   };
   loom_run_hal_candidate_t candidate = {};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,

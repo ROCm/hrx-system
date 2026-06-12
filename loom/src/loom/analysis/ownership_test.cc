@@ -122,8 +122,8 @@ func.def @ownership(%size: index) {
 )");
 
   loom_ownership_resource_family_t pool_family = {
-      .name = IREE_SV("pool"),
-      .type_matches = PoolTypeMatches,
+      /*.name=*/IREE_SV("pool"),
+      /*.type_matches=*/PoolTypeMatches,
   };
 
   loom_ownership_result_effect_t result_effect = {};

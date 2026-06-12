@@ -49,12 +49,12 @@ TEST(LowLowerPolicyRegistryTest, RejectsMissingContractKey) {
 TEST(LowLowerPolicyRegistryTest, ReturnsFirstDuplicateContractKey) {
   const loom_low_lower_policy_registry_entry_t entries[] = {
       {
-          .contract_set_key = IREE_SVL("test.low.core"),
-          .policy = loom_test_low_lower_policy(),
+          /*.contract_set_key=*/IREE_SVL("test.low.core"),
+          /*.policy=*/loom_test_low_lower_policy(),
       },
       {
-          .contract_set_key = IREE_SVL("test.low.core"),
-          .policy = loom_test_low_lower_policy(),
+          /*.contract_set_key=*/IREE_SVL("test.low.core"),
+          /*.policy=*/loom_test_low_lower_policy(),
       },
   };
   loom_low_lower_policy_registry_t registry = {};

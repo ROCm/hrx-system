@@ -299,7 +299,9 @@ TEST(LowPacketTest, MapsBlocksAndHazardGapsToPacketIndices) {
             LOOM_LOW_PACKET_INDEX_NONE);
 
   const loom_low_schedule_hazard_gap_t hazard_gap = {
-      .block_index = 0,
+      /*.producer_node=*/{},
+      /*.consumer_node=*/{},
+      /*.block_index=*/0,
   };
   EXPECT_EQ(
       loom_low_packet_hazard_gap_packet_index(&state.schedule, &hazard_gap, 2),

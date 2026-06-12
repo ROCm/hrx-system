@@ -106,32 +106,49 @@ void InitializeAddressabilityTestState(
   state->reg_classes[0].name_string_offset =
       ADDRESSABILITY_STRING_OFFSET(reg_gpr);
   state->reg_class_alts[0] = (loom_low_reg_class_alt_t){
-      .reg_class_id = 0,
-      .flags = LOOM_LOW_REG_CLASS_ALT_FLAG_PREFERRED,
+      /*.reg_class_id=*/0,
+      /*.flags=*/LOOM_LOW_REG_CLASS_ALT_FLAG_PREFERRED,
   };
   state->operands[0] = (loom_low_operand_t){
-      .field_name_string_offset = ADDRESSABILITY_STRING_OFFSET(field_dst),
-      .role = LOOM_LOW_OPERAND_ROLE_RESULT,
-      .reg_class_alt_start = 0,
-      .reg_class_alt_count = 1,
-      .unit_count = 1,
-      .register_part_id = LOOM_LOW_REGISTER_PART_NONE,
+      /*.field_name_string_offset=*/ADDRESSABILITY_STRING_OFFSET(field_dst),
+      /*.encoding_field_id=*/{},
+      /*.role=*/LOOM_LOW_OPERAND_ROLE_RESULT,
+      /*.flags=*/{},
+      /*.reg_class_alt_start=*/0,
+      /*.reg_class_alt_count=*/1,
+      /*.unit_count=*/1,
+      /*.address_map_kind=*/{},
+      /*.addressable_unit_count=*/{},
+      /*.data_format_id=*/{},
+      /*.register_part_id=*/LOOM_LOW_REGISTER_PART_NONE,
   };
   state->operands[1] = (loom_low_operand_t){
-      .field_name_string_offset = ADDRESSABILITY_STRING_OFFSET(field_src),
-      .role = LOOM_LOW_OPERAND_ROLE_OPERAND,
-      .reg_class_alt_start = 0,
-      .reg_class_alt_count = 1,
-      .unit_count = static_cast<uint16_t>(assigned_count),
-      .address_map_kind = address_map_kind,
-      .addressable_unit_count = addressable_unit_count,
-      .register_part_id = LOOM_LOW_REGISTER_PART_NONE,
+      /*.field_name_string_offset=*/ADDRESSABILITY_STRING_OFFSET(field_src),
+      /*.encoding_field_id=*/{},
+      /*.role=*/LOOM_LOW_OPERAND_ROLE_OPERAND,
+      /*.flags=*/{},
+      /*.reg_class_alt_start=*/0,
+      /*.reg_class_alt_count=*/1,
+      /*.unit_count=*/static_cast<uint16_t>(assigned_count),
+      /*.address_map_kind=*/address_map_kind,
+      /*.addressable_unit_count=*/addressable_unit_count,
+      /*.data_format_id=*/{},
+      /*.register_part_id=*/LOOM_LOW_REGISTER_PART_NONE,
   };
   state->descriptors[0] = (loom_low_descriptor_t){
-      .key_string_offset = ADDRESSABILITY_STRING_OFFSET(descriptor_packet),
-      .operand_start = 0,
-      .operand_count = IREE_ARRAYSIZE(state->operands),
-      .result_count = 1,
+      /*.key_string_offset=*/ADDRESSABILITY_STRING_OFFSET(descriptor_packet),
+      /*.stable_id=*/{},
+      /*.mnemonic_string_offset=*/{},
+      /*.semantic_tag_string_offset=*/{},
+      /*.feature_mask_word_start=*/{},
+      /*.feature_mask_word_count=*/{},
+      /*.encoding_field_value_start=*/{},
+      /*.encoding_field_value_count=*/{},
+      /*.encoding_format_id=*/{},
+      /*.encoding_id=*/{},
+      /*.operand_start=*/0,
+      /*.operand_count=*/IREE_ARRAYSIZE(state->operands),
+      /*.result_count=*/1,
   };
 
   state->nodes[0].op = &state->packet_op;
@@ -155,34 +172,38 @@ void InitializeAddressabilityTestState(
       IREE_ARRAYSIZE(state->scheduled_node_indices);
 
   state->assignments[0] = (loom_low_allocation_assignment_t){
-      .value_id = 0,
-      .value_class =
-          {
-              .type_kind = LOOM_TYPE_REGISTER,
-              .register_descriptor_set_stable_id =
-                  state->descriptor_set.stable_id,
-              .register_class_id = 0,
-          },
-      .descriptor_reg_class_id = 0,
-      .unit_count = assigned_count,
-      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-      .location_base = 0,
-      .location_count = 1,
+      /*.value_id=*/0,
+      /*.value_class=*/
+      {
+          /*.type_kind=*/LOOM_TYPE_REGISTER,
+          /*.element_type=*/{}, /*.register_descriptor_set_stable_id=*/
+          state->descriptor_set.stable_id,
+          /*.register_class_id=*/0,
+      },
+      /*.descriptor_reg_class_id=*/0,
+      /*.start_point=*/{},
+      /*.end_point=*/{},
+      /*.unit_count=*/assigned_count,
+      /*.location_kind=*/LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      /*.location_base=*/0,
+      /*.location_count=*/1,
   };
   state->assignments[1] = (loom_low_allocation_assignment_t){
-      .value_id = 1,
-      .value_class =
-          {
-              .type_kind = LOOM_TYPE_REGISTER,
-              .register_descriptor_set_stable_id =
-                  state->descriptor_set.stable_id,
-              .register_class_id = 0,
-          },
-      .descriptor_reg_class_id = 0,
-      .unit_count = assigned_count,
-      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-      .location_base = assigned_base,
-      .location_count = assigned_count,
+      /*.value_id=*/1,
+      /*.value_class=*/
+      {
+          /*.type_kind=*/LOOM_TYPE_REGISTER,
+          /*.element_type=*/{}, /*.register_descriptor_set_stable_id=*/
+          state->descriptor_set.stable_id,
+          /*.register_class_id=*/0,
+      },
+      /*.descriptor_reg_class_id=*/0,
+      /*.start_point=*/{},
+      /*.end_point=*/{},
+      /*.unit_count=*/assigned_count,
+      /*.location_kind=*/LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      /*.location_base=*/assigned_base,
+      /*.location_count=*/assigned_count,
   };
   state->assignment_indices_by_value_ordinal[0] = 0;
   state->assignment_indices_by_value_ordinal[1] = 1;
@@ -207,8 +228,8 @@ TEST(LowAddressabilityTest, AcceptsDirectAddressMap) {
 
   CapturedDiagnostic captured;
   const iree_diagnostic_emitter_t emitter = {
-      .fn = CaptureDiagnostic,
-      .user_data = &captured,
+      /*.fn=*/CaptureDiagnostic,
+      /*.user_data=*/&captured,
   };
   loom_low_addressability_validation_result_t result = {};
   IREE_ASSERT_OK(loom_low_addressability_validate_allocated_packets(
@@ -239,8 +260,8 @@ TEST(LowAddressabilityTest, ReportsLowSubsetUnaddressableAssignment) {
 
   CapturedDiagnostic captured;
   const iree_diagnostic_emitter_t emitter = {
-      .fn = CaptureDiagnostic,
-      .user_data = &captured,
+      /*.fn=*/CaptureDiagnostic,
+      /*.user_data=*/&captured,
   };
   loom_low_addressability_validation_result_t result = {};
   IREE_ASSERT_OK(loom_low_addressability_validate_allocated_packets(
@@ -275,8 +296,8 @@ TEST(LowAddressabilityTest, ReportsTargetStateAssignmentCrossingWindow) {
 
   CapturedDiagnostic captured;
   const iree_diagnostic_emitter_t emitter = {
-      .fn = CaptureDiagnostic,
-      .user_data = &captured,
+      /*.fn=*/CaptureDiagnostic,
+      /*.user_data=*/&captured,
   };
   loom_low_addressability_validation_result_t result = {};
   IREE_ASSERT_OK(loom_low_addressability_validate_allocated_packets(
