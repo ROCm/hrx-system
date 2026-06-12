@@ -291,6 +291,9 @@ typedef enum hipStreamFlags {
   hipStreamNonBlocking = 0x01
 } hipStreamFlags_t;
 
+#define hipStreamPerThread ((hipStream_t)2)
+#define hipStreamLegacy ((hipStream_t)1)
+
 // Host register flags.
 typedef enum hipHostRegisterFlags {
   hipHostRegisterDefault = 0x00,
@@ -821,6 +824,21 @@ typedef struct hipKernelNodeParams {
   void** extra;                 // Extra options.
 } hipKernelNodeParams;
 
+typedef enum hipChannelFormatKind {
+  hipChannelFormatKindSigned = 0,
+  hipChannelFormatKindUnsigned = 1,
+  hipChannelFormatKindFloat = 2,
+  hipChannelFormatKindNone = 3,
+} hipChannelFormatKind;
+
+typedef struct hipChannelFormatDesc {
+  int x;                    // Bits in x component.
+  int y;                    // Bits in y component.
+  int z;                    // Bits in z component.
+  int w;                    // Bits in w component.
+  hipChannelFormatKind f;   // Component format kind.
+} hipChannelFormatDesc;
+
 // Memory copy node parameters.
 typedef struct hipMemcpy3DParms {
   hipArray_t srcArray;  // Source array.
@@ -867,6 +885,9 @@ HIPAPI hipError_t hipInit(unsigned int flags);
 HIPAPI hipError_t hipHALDeinit(void);  // HAL extension
 HIPAPI hipError_t hipDriverGetVersion(int* driverVersion);
 HIPAPI hipError_t hipRuntimeGetVersion(int* runtimeVersion);
+HIPAPI hipError_t hipGetProcAddress(const char* symbol, void** pfn,
+                                    int hipVersion, uint64_t flags,
+                                    void* symbolStatus);
 
 // Device management
 HIPAPI hipError_t hipGetDevice(int* device);
@@ -887,6 +908,9 @@ HIPAPI hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, int device);
 HIPAPI hipError_t hipDeviceGetByPCIBusId(int* device, const char* pciBusId);
 HIPAPI hipError_t hipDeviceGetStreamPriorityRange(int* leastPriority,
                                                   int* greatestPriority);
+HIPAPI hipError_t hipDeviceGetGraphMemAttribute(int device, int attr,
+                                                void* value);
+HIPAPI hipError_t hipDeviceGraphMemTrim(int device);
 HIPAPI hipError_t hipDeviceSynchronize(void);
 HIPAPI hipError_t hipDeviceReset(void);
 HIPAPI hipError_t hipSetDeviceFlags(unsigned int flags);
@@ -938,7 +962,11 @@ HIPAPI hipError_t hipExtMallocWithFlags(void** ptr, size_t sizeBytes,
 HIPAPI hipError_t hipMallocPitch(void** devPtr, size_t* pitch, size_t width,
                                  size_t height);
 HIPAPI hipError_t hipMalloc3D(hipPitchedPtr* pitchedDevPtr, hipExtent extent);
+HIPAPI hipError_t hipMalloc3DArray(hipArray_t* array,
+                                   const hipChannelFormatDesc* desc,
+                                   hipExtent extent, unsigned int flags);
 HIPAPI hipError_t hipFree(hipDeviceptr_t dptr);
+HIPAPI hipError_t hipFreeArray(hipArray_t array);
 HIPAPI hipError_t hipMallocHost(void** pp, size_t bytesize);
 HIPAPI hipError_t hipFreeHost(void* p);
 HIPAPI hipError_t hipHostAlloc(void** pp, size_t bytesize, unsigned int flags);
@@ -990,6 +1018,20 @@ HIPAPI hipError_t hipMemcpyDtoHAsync(void* dst, hipDeviceptr_t src,
                                      size_t sizeBytes, hipStream_t stream);
 HIPAPI hipError_t hipMemcpyDtoDAsync(hipDeviceptr_t dst, hipDeviceptr_t src,
                                      size_t sizeBytes, hipStream_t stream);
+HIPAPI hipError_t hipMemcpy2DAsync(void* dst, size_t dpitch, const void* src,
+                                   size_t spitch, size_t width, size_t height,
+                                   hipMemcpyKind kind, hipStream_t stream);
+HIPAPI hipError_t hipMemcpyToSymbolAsync(const void* symbol, const void* src,
+                                         size_t sizeBytes, size_t offset,
+                                         hipMemcpyKind kind,
+                                         hipStream_t stream);
+HIPAPI hipError_t hipMemcpyFromSymbolAsync(void* dst, const void* symbol,
+                                           size_t sizeBytes, size_t offset,
+                                           hipMemcpyKind kind,
+                                           hipStream_t stream);
+HIPAPI hipError_t hipMemcpy3D(const hipMemcpy3DParms* p);
+HIPAPI hipChannelFormatDesc hipCreateChannelDesc(int x, int y, int z, int w,
+                                                 hipChannelFormatKind f);
 
 // Memory set
 HIPAPI hipError_t hipMemset(void* dst, int value, size_t sizeBytes);
@@ -1193,6 +1235,9 @@ HIPAPI hipError_t hipGraphExecUpdate(hipGraphExec_t hGraphExec,
                                      hipGraph_t hGraph,
                                      hipGraphNode_t* hErrorNode_out,
                                      unsigned int flags);
+HIPAPI hipError_t hipGraphExecMemcpyNodeSetParamsToSymbol(
+    hipGraphExec_t graphExec, hipGraphNode_t node, const void* symbol,
+    const void* src, size_t count, size_t offset, hipMemcpyKind kind);
 HIPAPI hipError_t hipGraphAddKernelNode(hipGraphNode_t* pGraphNode,
                                         hipGraph_t graph,
                                         const hipGraphNode_t* pDependencies,
@@ -1263,6 +1308,35 @@ HIPAPI hipError_t hipGraphNodeFindInClone(hipGraphNode_t* pNode,
                                           hipGraph_t clonedGraph);
 HIPAPI hipError_t hipGraphDebugDotPrint(hipGraph_t graph, const char* path,
                                         unsigned int flags);
+HIPAPI hipError_t hipGraphAddChildGraphNode(hipGraphNode_t* pGraphNode,
+                                            hipGraph_t graph,
+                                            const hipGraphNode_t* pDependencies,
+                                            size_t numDependencies,
+                                            hipGraph_t childGraph);
+HIPAPI hipError_t hipGraphChildGraphNodeGetGraph(hipGraphNode_t node,
+                                                 hipGraph_t* pGraph);
+HIPAPI hipError_t hipGraphHostNodeSetParams(hipGraphNode_t node,
+                                            const void* pNodeParams);
+HIPAPI hipError_t hipGraphKernelNodeGetParams(hipGraphNode_t node,
+                                              void* pNodeParams);
+HIPAPI hipError_t hipGraphKernelNodeSetParams(hipGraphNode_t node,
+                                              const void* pNodeParams);
+HIPAPI hipError_t hipGraphMemcpyNodeGetParams(hipGraphNode_t node,
+                                              void* pNodeParams);
+HIPAPI hipError_t hipGraphMemcpyNodeSetParams1D(hipGraphNode_t node,
+                                                void* dst, const void* src,
+                                                size_t count,
+                                                hipMemcpyKind kind);
+HIPAPI hipError_t hipGraphMemcpyNodeSetParamsFromSymbol(
+    hipGraphNode_t node, void* dst, const void* symbol, size_t count,
+    size_t offset, hipMemcpyKind kind);
+HIPAPI hipError_t hipGraphMemcpyNodeSetParamsToSymbol(
+    hipGraphNode_t node, const void* symbol, const void* src, size_t count,
+    size_t offset, hipMemcpyKind kind);
+HIPAPI hipError_t hipGraphMemsetNodeGetParams(hipGraphNode_t node,
+                                              void* pNodeParams);
+HIPAPI hipError_t hipGraphMemsetNodeSetParams(hipGraphNode_t node,
+                                              const void* pNodeParams);
 
 // Stream capture
 HIPAPI hipError_t hipStreamBeginCapture(hipStream_t stream,
@@ -1276,6 +1350,10 @@ HIPAPI hipError_t hipStreamGetCaptureInfo(
 HIPAPI hipError_t hipStreamUpdateCaptureDependencies(
     hipStream_t stream, hipGraphNode_t* dependencies, size_t numDependencies,
     unsigned int flags);
+HIPAPI hipError_t hipStreamBeginCaptureToGraph(
+    hipStream_t stream, hipGraph_t graph, const hipGraphNode_t* dependencies,
+    const void* dependencyData, size_t numDependencies,
+    hipStreamCaptureMode mode);
 
 //===----------------------------------------------------------------------===//
 // Memory pool types and definitions

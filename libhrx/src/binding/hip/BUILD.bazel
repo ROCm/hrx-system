@@ -14,7 +14,10 @@ package(
 
 hrx_cc_shared_library(
     name = "amdhip64",
-    srcs = ["api.c"],
+    srcs = [
+        "abi_stubs.c",
+        "api.c",
+    ],
     hdrs = ["api.h"],
     copts = [
         "-DIREE_HAL_STREAMING_HIP_EXPORTS",
@@ -30,5 +33,10 @@ hrx_cc_shared_library(
         "//libhrx/src/binding/common",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+    ],
+    data = ["amdhip64.map"],
+    linkopts = [
+        "-Wl,--undefined-version",
+        "-Wl,--version-script=$(location :amdhip64.map)",
     ],
 )
