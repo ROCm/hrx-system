@@ -44,8 +44,8 @@ def _loom_check_wrapper_content(ctx):
         "#!/usr/bin/env bash\n" +
         "set -euo pipefail\n" +
         "RUNFILES=\"${{RUNFILES_DIR:-$0.runfiles}}\"\n" +
-        "exec \"${{RUNFILES}}/{workspace}/{runner}\" " +
-        "\"$@\" \"${{RUNFILES}}/{workspace}/{fixture}\"\n"
+        "cd \"${{RUNFILES}}/{workspace}\"\n" +
+        "exec \"${{PWD}}/{runner}\" \"$@\" \"{fixture}\"\n"
     ).format(
         workspace = ctx.workspace_name,
         runner = ctx.executable.runner.short_path,

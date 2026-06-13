@@ -14,7 +14,7 @@ fi
 
 fixture="$2"
 case "${fixture}" in
-  */loom/build_tools/bazel/test/roundtrip.loom-test) ;;
+  loom/build_tools/bazel/test/roundtrip.loom-test) ;;
   *)
     printf "unexpected fixture path: %s\n" "${fixture}" >&2
     exit 1
