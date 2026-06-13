@@ -1,5 +1,5 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/memory_cache_policy_non_temporal.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low diagnostics=memory output=low
 
 amdgpu.target<gfx950> @target
 kernel.def target(@target) @cache_device_non_temporal_load_store() {
@@ -11,7 +11,9 @@ kernel.def target(@target) @cache_device_non_temporal_load_store() {
   %zero = index.constant 0 : offset
   %input_view = buffer.view %input[%zero] : buffer -> view<64x4xi32, #dense>
   %output_view = buffer.view %output[%zero] : buffer -> view<64x4xi32, #dense>
+  // REMARK@+1: BACKEND/040 "selected cache policy 'device/non_temporal'" "decision 'memory_cache_policy.gfx950_nt_sc0_sc1'" "scope_attr present false value 0" "nt_attr present true value 1"
   %loaded = vector.load %input_view[%tid, 0] {cache_scope = device, cache_temporal = non_temporal} : view<64x4xi32, #dense> -> vector<4xi32>
+  // REMARK@+1: BACKEND/040 "selected cache policy 'device/non_temporal'" "decision 'memory_cache_policy.gfx950_nt_sc0_sc1'" "th_attr present false value 0" "nt_attr present true value 1"
   vector.store %loaded, %output_view[%tid, 0] {cache_scope = device, cache_temporal = non_temporal} : vector<4xi32>, view<64x4xi32, #dense>
   kernel.return
 }

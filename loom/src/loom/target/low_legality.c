@@ -242,6 +242,72 @@ iree_status_t loom_target_low_legality_record_memory_access(
                                        params, IREE_ARRAYSIZE(params));
 }
 
+iree_status_t loom_target_low_legality_record_memory_cache_policy(
+    loom_target_low_legality_context_t* context, const loom_op_t* op,
+    iree_string_view_t memory_space, iree_string_view_t operation_kind,
+    iree_string_view_t cache_scope, iree_string_view_t cache_temporal,
+    iree_string_view_t decision_key, iree_string_view_t decision,
+    iree_string_view_t encoding_key, bool scope_attr_present,
+    int64_t scope_attr, bool th_attr_present, int64_t th_attr,
+    bool nt_attr_present, int64_t nt_attr) {
+  loom_diagnostic_param_t params[] = {
+      loom_param_string(
+          loom_target_low_legality_target_key(context->options->bundle)),
+      loom_param_string(
+          loom_target_low_legality_export_name(context->options->bundle)),
+      loom_param_string(
+          loom_target_low_legality_config_key(context->options->bundle)),
+      loom_param_string(loom_target_low_legality_function_name(context)),
+      loom_param_string(loom_op_name(context->module, op)),
+      loom_param_string(memory_space),
+      loom_param_string(operation_kind),
+      loom_param_string(cache_scope),
+      loom_param_string(cache_temporal),
+      loom_param_string(decision_key),
+      loom_param_string(decision),
+      loom_param_string(encoding_key),
+      loom_param_bool(scope_attr_present),
+      loom_param_i64(scope_attr),
+      loom_param_bool(th_attr_present),
+      loom_param_i64(th_attr),
+      loom_param_bool(nt_attr_present),
+      loom_param_i64(nt_attr),
+  };
+  return loom_target_low_legality_emit(context, op, LOOM_ERR_BACKEND_040,
+                                       params, IREE_ARRAYSIZE(params));
+}
+
+iree_status_t loom_target_low_legality_record_memory_prefetch(
+    loom_target_low_legality_context_t* context, const loom_op_t* op,
+    iree_string_view_t memory_space, iree_string_view_t prefetch_intent,
+    iree_string_view_t prefetch_locality, iree_string_view_t decision_key,
+    iree_string_view_t decision, iree_string_view_t packet_key,
+    int64_t immediate_offset, uint32_t scalar_byte_offset,
+    iree_string_view_t dynamic_index_kind, uint32_t count) {
+  loom_diagnostic_param_t params[] = {
+      loom_param_string(
+          loom_target_low_legality_target_key(context->options->bundle)),
+      loom_param_string(
+          loom_target_low_legality_export_name(context->options->bundle)),
+      loom_param_string(
+          loom_target_low_legality_config_key(context->options->bundle)),
+      loom_param_string(loom_target_low_legality_function_name(context)),
+      loom_param_string(loom_op_name(context->module, op)),
+      loom_param_string(memory_space),
+      loom_param_string(prefetch_intent),
+      loom_param_string(prefetch_locality),
+      loom_param_string(decision_key),
+      loom_param_string(decision),
+      loom_param_string(packet_key),
+      loom_param_i64(immediate_offset),
+      loom_param_u32(scalar_byte_offset),
+      loom_param_string(dynamic_index_kind),
+      loom_param_u32(count),
+  };
+  return loom_target_low_legality_emit(context, op, LOOM_ERR_BACKEND_041,
+                                       params, IREE_ARRAYSIZE(params));
+}
+
 const loom_module_t* loom_target_low_legality_module(
     const loom_target_low_legality_context_t* context) {
   return context->module;

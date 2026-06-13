@@ -178,6 +178,16 @@ iree_status_t loom_amdgpu_make_memory_attrs(
 bool loom_amdgpu_memory_cache_policy_is_present(
     const loom_vector_memory_cache_policy_t* policy);
 
+// Returns the stable diagnostic key for the selected descriptor-set cache
+// policy encoding.
+iree_string_view_t loom_amdgpu_memory_cache_policy_encoding_key(
+    const loom_low_descriptor_set_t* descriptor_set);
+
+// Returns the stable diagnostic decision key for a selected cache-policy
+// encoding.
+iree_string_view_t loom_amdgpu_memory_cache_policy_selected_key(
+    const loom_low_descriptor_set_t* descriptor_set);
+
 // Returns true when the selected descriptor set can encode the cache policy on
 // the memory access plan.
 bool loom_amdgpu_memory_cache_policy_can_lower(
@@ -234,6 +244,19 @@ iree_status_t loom_amdgpu_record_memory_access_diagnostic(
     const loom_amdgpu_memory_access_t* access,
     loom_amdgpu_memory_operation_kind_t kind);
 
+// Records optional cache-policy diagnostics for a selected memory access plan.
+iree_status_t loom_amdgpu_record_memory_cache_policy_diagnostic(
+    loom_target_low_legality_context_t* context, const loom_op_t* op,
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_amdgpu_memory_access_t* access,
+    loom_amdgpu_memory_operation_kind_t kind);
+
+// Records optional cache-policy diagnostics for a rejected memory access plan.
+iree_status_t loom_amdgpu_record_memory_cache_policy_rejection_diagnostic(
+    loom_target_low_legality_context_t* context, const loom_op_t* op,
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_amdgpu_memory_access_t* access);
+
 // Selects an AMDGPU source memory-load packet plan.
 iree_status_t loom_amdgpu_select_memory_load_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
@@ -274,6 +297,11 @@ iree_status_t loom_amdgpu_select_view_prefetch_plan(
 iree_status_t loom_amdgpu_lower_view_prefetch(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_prefetch_plan_t* plan);
+
+// Records optional prefetch diagnostics for source view.prefetch hints.
+iree_status_t loom_amdgpu_record_view_prefetch_diagnostic(
+    loom_target_low_legality_context_t* context, const loom_op_t* source_op,
+    const loom_low_descriptor_set_t* descriptor_set);
 
 // Verifies source memory legality for AMDGPU target-low selection.
 iree_status_t loom_amdgpu_low_legality_verify_memory(

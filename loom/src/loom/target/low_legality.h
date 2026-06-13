@@ -40,8 +40,8 @@ typedef struct loom_local_value_domain_t loom_local_value_domain_t;
 typedef struct loom_view_region_table_t loom_view_region_table_t;
 
 typedef enum loom_target_low_legality_diagnostic_flag_bits_e {
-  // Emit target memory-access selection remarks from providers that support
-  // them.
+  // Emit target source-memory decision remarks from providers that support
+  // them, including access, cache-policy, and prefetch selection.
   LOOM_TARGET_LOW_LEGALITY_DIAGNOSTIC_MEMORY_ACCESS = 1u << 0,
   // All target-low legality diagnostic flags known to this header.
   LOOM_TARGET_LOW_LEGALITY_DIAGNOSTIC_ALL =
@@ -241,6 +241,25 @@ iree_status_t loom_target_low_legality_record_memory_access(
     uint32_t dynamic_stride_bytes, uint32_t vector_lane_stride_bytes,
     uint32_t bank_stride_words, uint32_t bank_conflict_degree,
     iree_string_view_t bank_conflict_kind);
+
+// Emits ERR_BACKEND_040 for a source memory cache-policy decision.
+iree_status_t loom_target_low_legality_record_memory_cache_policy(
+    loom_target_low_legality_context_t* context, const loom_op_t* op,
+    iree_string_view_t memory_space, iree_string_view_t operation_kind,
+    iree_string_view_t cache_scope, iree_string_view_t cache_temporal,
+    iree_string_view_t decision_key, iree_string_view_t decision,
+    iree_string_view_t encoding_key, bool scope_attr_present,
+    int64_t scope_attr, bool th_attr_present, int64_t th_attr,
+    bool nt_attr_present, int64_t nt_attr);
+
+// Emits ERR_BACKEND_041 for a source memory prefetch decision.
+iree_status_t loom_target_low_legality_record_memory_prefetch(
+    loom_target_low_legality_context_t* context, const loom_op_t* op,
+    iree_string_view_t memory_space, iree_string_view_t prefetch_intent,
+    iree_string_view_t prefetch_locality, iree_string_view_t decision_key,
+    iree_string_view_t decision, iree_string_view_t packet_key,
+    int64_t immediate_offset, uint32_t scalar_byte_offset,
+    iree_string_view_t dynamic_index_kind, uint32_t count);
 
 #ifdef __cplusplus
 }  // extern "C"

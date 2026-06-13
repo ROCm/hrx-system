@@ -825,6 +825,8 @@ typedef struct loom_amdgpu_atomic_plan_t {
 typedef struct loom_amdgpu_prefetch_plan_t {
   // Descriptor row selected for the prefetch packet.
   loom_low_lower_resolved_descriptor_t descriptor;
+  // Descriptor ordinal selected from the active descriptor set.
+  uint32_t descriptor_ordinal;
   // Module string ID for the descriptor's offset attribute.
   loom_string_id_t offset_attr_name_id;
   // Module string ID for the descriptor's count attribute.

@@ -1,10 +1,11 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/memory_prefetch.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low diagnostics=memory output=low
 
 amdgpu.target<gfx1200> @target
 func.def target(@target) @prefetch_static(%input: buffer) {
   %base = index.constant 16 : offset
   %input_view = buffer.view %input[%base] : buffer -> view<64xi32, #dense>
+  // REMARK@+1: BACKEND/041 "selected prefetch 'read/l1'" "decision 'prefetch.s_buffer_prefetch_data'" "immediate offset 32" "dynamic index 'none'"
   view.prefetch %input_view[4] {intent = read, locality = l1} : view<64xi32, #dense>
   func.return
 }
@@ -30,6 +31,7 @@ kernel.def target(@target) @prefetch_workgroup_id() {
   %bounded_gid = index.assume %gid [range(%gid, 0, 1024)] : index
   %zero = index.constant 0 : offset
   %input_view = buffer.view %input[%zero] : buffer -> view<64xi32, #dense>
+  // REMARK@+1: BACKEND/041 "selected prefetch 'read/l2'" "immediate offset 0" "dynamic index 'soffset'" "count 1"
   view.prefetch %input_view[%bounded_gid] {intent = read, locality = l2} : view<64xi32, #dense>
   kernel.return
 }
@@ -63,6 +65,7 @@ kernel.def target(@target) @prefetch_fixed_query_offset() {
   %offset = index.add %offset1, %subgroup_count : index
   %zero = index.constant 0 : offset
   %input_view = buffer.view %input[%zero] : buffer -> view<64xi32, #dense>
+  // REMARK@+1: BACKEND/041 "selected prefetch 'read/l1'" "immediate offset 180" "scalar byte offset 0" "dynamic index 'none'"
   view.prefetch %input_view[%offset] {intent = read, locality = l1} : view<64xi32, #dense>
   kernel.return
 }
@@ -74,4 +77,26 @@ low.kernel.def target(@target) workgroup_size(8, 4, 1) @prefetch_fixed_query_off
   %21 = low.op<amdgpu.hal.buffer_descriptor>(%input_view) {cache_swizzle_stride = 0, extent = 256} : (reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x4>
   low.op<amdgpu.s_buffer_prefetch_data>(%21, %20) {count = 1, offset = 180} : (reg<amdgpu.sgpr x4>, reg<amdgpu.sgpr>)
   low.return
+}
+
+// ====
+
+amdgpu.target<gfx1200> @target
+kernel.def target(@target) @prefetch_workitem_dropped() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%input: buffer) {
+  %tid0 = kernel.workitem.id<x> : index
+  %tid = index.assume %tid0 [range(%tid0, 0, 63)] : index
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<64xi32, #dense>
+  // REMARK@+1: BACKEND/041 "dropped prefetch 'read/l1'" "decision 'prefetch.dynamic_index'" "packet '<none>'" "count 0"
+  view.prefetch %input_view[%tid] {intent = read, locality = l1} : view<64xi32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) @prefetch_workitem_dropped() {
+  return
 }

@@ -911,6 +911,76 @@ ERR_BACKEND_039 = ErrorDef(
     ),
 )
 
+# ERR_BACKEND_040: Source memory cache-policy decision was recorded.
+ERR_BACKEND_040 = ErrorDef(
+    domain=ErrorDomain.BACKEND,
+    code=40,
+    severity=Severity.REMARK,
+    summary="Source memory cache-policy decision recorded.",
+    message=(
+        "target '{target_key}' export '{export_name}' config '{config_key}' "
+        "{decision} cache policy '{cache_scope}/{cache_temporal}' for "
+        "'@{function_name}' op '{op_name}' {operation_kind} in "
+        "{memory_space}: decision '{decision_key}', encoding "
+        "'{encoding_key}', scope_attr present {scope_attr_present} value "
+        "{scope_attr}, th_attr present {th_attr_present} value {th_attr}, "
+        "nt_attr present {nt_attr_present} value {nt_attr}"
+    ),
+    params=(
+        ErrorParam("target_key", ParamKind.STRING),
+        ErrorParam("export_name", ParamKind.STRING),
+        ErrorParam("config_key", ParamKind.STRING),
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("op_name", ParamKind.STRING),
+        ErrorParam("memory_space", ParamKind.STRING),
+        ErrorParam("operation_kind", ParamKind.STRING),
+        ErrorParam("cache_scope", ParamKind.STRING),
+        ErrorParam("cache_temporal", ParamKind.STRING),
+        ErrorParam("decision_key", ParamKind.STRING),
+        ErrorParam("decision", ParamKind.STRING),
+        ErrorParam("encoding_key", ParamKind.STRING),
+        ErrorParam("scope_attr_present", ParamKind.BOOL),
+        ErrorParam("scope_attr", ParamKind.I64),
+        ErrorParam("th_attr_present", ParamKind.BOOL),
+        ErrorParam("th_attr", ParamKind.I64),
+        ErrorParam("nt_attr_present", ParamKind.BOOL),
+        ErrorParam("nt_attr", ParamKind.I64),
+    ),
+)
+
+# ERR_BACKEND_041: Source memory prefetch decision was recorded.
+ERR_BACKEND_041 = ErrorDef(
+    domain=ErrorDomain.BACKEND,
+    code=41,
+    severity=Severity.REMARK,
+    summary="Source memory prefetch decision recorded.",
+    message=(
+        "target '{target_key}' export '{export_name}' config '{config_key}' "
+        "{decision} prefetch '{prefetch_intent}/{prefetch_locality}' for "
+        "'@{function_name}' op '{op_name}' in {memory_space}: decision "
+        "'{decision_key}', packet '{packet_key}', immediate offset "
+        "{immediate_offset}, scalar byte offset {scalar_byte_offset}, dynamic "
+        "index '{dynamic_index_kind}', count {count}"
+    ),
+    params=(
+        ErrorParam("target_key", ParamKind.STRING),
+        ErrorParam("export_name", ParamKind.STRING),
+        ErrorParam("config_key", ParamKind.STRING),
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("op_name", ParamKind.STRING),
+        ErrorParam("memory_space", ParamKind.STRING),
+        ErrorParam("prefetch_intent", ParamKind.STRING),
+        ErrorParam("prefetch_locality", ParamKind.STRING),
+        ErrorParam("decision_key", ParamKind.STRING),
+        ErrorParam("decision", ParamKind.STRING),
+        ErrorParam("packet_key", ParamKind.STRING),
+        ErrorParam("immediate_offset", ParamKind.I64),
+        ErrorParam("scalar_byte_offset", ParamKind.U32),
+        ErrorParam("dynamic_index_kind", ParamKind.STRING),
+        ErrorParam("count", ParamKind.U32),
+    ),
+)
+
 ALL_BACKEND_ERRORS: tuple[ErrorDef, ...] = (
     ERR_BACKEND_003,
     ERR_BACKEND_005,
@@ -945,4 +1015,6 @@ ALL_BACKEND_ERRORS: tuple[ErrorDef, ...] = (
     ERR_BACKEND_037,
     ERR_BACKEND_038,
     ERR_BACKEND_039,
+    ERR_BACKEND_040,
+    ERR_BACKEND_041,
 )

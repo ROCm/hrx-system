@@ -375,6 +375,16 @@ static bool loom_low_lower_op_uses_policy(const loom_module_t* module,
          !loom_low_lower_op_is_source_metadata(op->kind);
 }
 
+static bool loom_low_lower_op_is_discardable_hint(const loom_module_t* module,
+                                                  const loom_op_t* op) {
+  if (op->result_count != 0 || op->region_count != 0 ||
+      op->tied_result_count != 0) {
+    return false;
+  }
+  const loom_trait_flags_t traits = loom_op_effective_traits(module, op);
+  return iree_any_bit_set(traits, LOOM_TRAIT_HINT);
+}
+
 static void loom_low_lower_mark_value_storage_required(
     loom_low_lower_context_t* context, loom_value_id_t source_value_id) {
   const loom_value_ordinal_t source_ordinal =
@@ -654,6 +664,10 @@ static void loom_low_lower_analyze_storage_demands(
   for (iree_host_size_t i = 0; i < context->lowering.selected_plan_count; ++i) {
     loom_low_lower_selected_plan_t* selected_plan =
         &context->lowering.selected_plans[i];
+    if (iree_any_bit_set(selected_plan->flags,
+                         LOOM_LOW_LOWER_SELECTED_PLAN_ELIDED)) {
+      continue;
+    }
     switch (selected_plan->kind) {
       case LOOM_LOW_LOWER_SELECTED_PLAN_RULE:
         loom_low_lower_mark_rule_storage_demands(context, selected_plan);
@@ -745,6 +759,22 @@ static void loom_low_lower_record_selected_plan(
                  context->lowering.selected_plan_capacity);
   context->lowering.selected_plans[context->lowering.selected_plan_count++] =
       selected_plan;
+}
+
+static void loom_low_lower_record_elided_hint_plan(
+    loom_low_lower_context_t* context, const loom_op_t* source_op) {
+  loom_low_lower_record_selected_plan(
+      context, (loom_low_lower_selected_plan_t){
+                   .source_op = source_op,
+                   .kind = LOOM_LOW_LOWER_SELECTED_PLAN_CALLBACK,
+                   .flags = LOOM_LOW_LOWER_SELECTED_PLAN_ELIDED,
+                   .rule_set_index = UINT16_MAX,
+                   .rule_index = UINT16_MAX,
+                   .rule_set = NULL,
+                   .rule = NULL,
+                   .resolved_emits = NULL,
+                   .plan = loom_low_lower_plan_empty(),
+               });
 }
 
 static iree_status_t loom_low_lower_record_selected_rule_plan(
@@ -1351,6 +1381,10 @@ static iree_status_t loom_low_lower_plan_op(loom_low_lower_context_t* context,
   if (failed_rule_set != NULL) {
     return loom_low_lower_rule_set_emit_selection_failure(
         context, failed_rule_set, source_op, failed_rule_selection);
+  }
+  if (loom_low_lower_op_is_discardable_hint(context->module, source_op)) {
+    loom_low_lower_record_elided_hint_plan(context, source_op);
+    return iree_ok_status();
   }
   return loom_low_lower_emit_no_target_contract(context, source_op);
 }

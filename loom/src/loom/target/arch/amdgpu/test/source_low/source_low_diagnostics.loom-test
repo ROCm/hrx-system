@@ -284,6 +284,7 @@ kernel.def target(@target) @cache_policy_non_temporal_load_rejected() {
   %tid = index.assume %tid0 [range(%tid0, 0, 63)] : index
   %zero = index.constant 0 : offset
   %input_view = buffer.view %input[%zero] : buffer -> view<64x4xi32, #dense>
+  // REMARK@+2: BACKEND/040 "rejected cache policy 'device/non_temporal'" "decision 'memory_cache_policy.descriptor_encoding'" "encoding 'gfx9_11_glc_slc_dlc'"
   // ERROR@+1: AMDGPU/024 {constraint_key="memory_cache_policy.descriptor_encoding", memory_space="global", cache_scope="device", cache_temporal="non_temporal", descriptor_set_key="amdgpu.rdna3.core"}
   %loaded = vector.load %input_view[%tid, 0] {cache_scope = device, cache_temporal = non_temporal} : view<64x4xi32, #dense> -> vector<4xi32>
   kernel.return
@@ -304,6 +305,7 @@ kernel.def target(@target) @cache_policy_workgroup_store_rejected() {
   %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
   %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64x4xi32, #dense>
   %one = vector.constant 1 : vector<4xi32>
+  // REMARK@+2: BACKEND/040 "rejected cache policy 'device/non_temporal'" "decision 'memory_cache_policy.workgroup'" "store in workgroup"
   // ERROR@+1: AMDGPU/024 {constraint_key="memory_cache_policy.workgroup", memory_space="workgroup", cache_scope="device", cache_temporal="non_temporal", descriptor_set_key="amdgpu.rdna3.core"}
   vector.store %one, %scratch_view[%tid, 0] {cache_scope = device, cache_temporal = non_temporal} : vector<4xi32>, view<64x4xi32, #dense>
   kernel.return

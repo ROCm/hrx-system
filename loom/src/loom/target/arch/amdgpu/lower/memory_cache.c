@@ -153,6 +153,59 @@ loom_amdgpu_memory_cache_policy_encoding_row(
   return NULL;
 }
 
+static iree_string_view_t loom_amdgpu_memory_cache_policy_encoding_name(
+    loom_amdgpu_vector_memory_cache_policy_encoding_t encoding) {
+  switch (encoding) {
+    case LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_NONE:
+      return IREE_SV("none");
+    case LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX9_11_GLC_SLC_DLC:
+      return IREE_SV("gfx9_11_glc_slc_dlc");
+    case LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX12_NV_SCOPE_TH:
+      return IREE_SV("gfx12_nv_scope_th");
+    case LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX950_NT_SC0_SC1:
+      return IREE_SV("gfx950_nt_sc0_sc1");
+  }
+  return IREE_SV("invalid");
+}
+
+static iree_string_view_t loom_amdgpu_memory_cache_policy_selected_name(
+    loom_amdgpu_vector_memory_cache_policy_encoding_t encoding) {
+  switch (encoding) {
+    case LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_NONE:
+      return IREE_SV("memory_cache_policy.none");
+    case LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX9_11_GLC_SLC_DLC:
+      return IREE_SV("memory_cache_policy.gfx9_11_glc_slc_dlc");
+    case LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX12_NV_SCOPE_TH:
+      return IREE_SV("memory_cache_policy.gfx12_nv_scope_th");
+    case LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX950_NT_SC0_SC1:
+      return IREE_SV("memory_cache_policy.gfx950_nt_sc0_sc1");
+  }
+  return IREE_SV("memory_cache_policy.invalid");
+}
+
+static loom_amdgpu_vector_memory_cache_policy_encoding_t
+loom_amdgpu_memory_cache_policy_descriptor_encoding(
+    const loom_low_descriptor_set_t* descriptor_set) {
+  const loom_amdgpu_descriptor_set_info_t* descriptor_set_info =
+      loom_amdgpu_target_info_descriptor_set_at(
+          descriptor_set->descriptor_set_ordinal);
+  return descriptor_set_info
+             ? descriptor_set_info->vector_memory_cache_policy_encoding
+             : LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_NONE;
+}
+
+iree_string_view_t loom_amdgpu_memory_cache_policy_encoding_key(
+    const loom_low_descriptor_set_t* descriptor_set) {
+  return loom_amdgpu_memory_cache_policy_encoding_name(
+      loom_amdgpu_memory_cache_policy_descriptor_encoding(descriptor_set));
+}
+
+iree_string_view_t loom_amdgpu_memory_cache_policy_selected_key(
+    const loom_low_descriptor_set_t* descriptor_set) {
+  return loom_amdgpu_memory_cache_policy_selected_name(
+      loom_amdgpu_memory_cache_policy_descriptor_encoding(descriptor_set));
+}
+
 static bool loom_amdgpu_memory_cache_policy_bits_contain(uint32_t bits,
                                                          uint8_t ordinal) {
   return ordinal < 32 && iree_any_bit_set(bits, (uint32_t)1u << ordinal);

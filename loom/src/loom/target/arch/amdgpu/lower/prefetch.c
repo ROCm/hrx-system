@@ -12,6 +12,47 @@
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 
+static iree_string_view_t loom_amdgpu_prefetch_intent_name(uint8_t intent) {
+  switch ((loom_view_prefetch_intent_t)intent) {
+    case LOOM_VIEW_PREFETCH_INTENT_READ:
+      return IREE_SV("read");
+    case LOOM_VIEW_PREFETCH_INTENT_WRITE:
+      return IREE_SV("write");
+    case LOOM_VIEW_PREFETCH_INTENT_COUNT_:
+      break;
+  }
+  return IREE_SV("invalid");
+}
+
+static iree_string_view_t loom_amdgpu_prefetch_locality_name(uint8_t locality) {
+  switch ((loom_view_prefetch_locality_t)locality) {
+    case LOOM_VIEW_PREFETCH_LOCALITY_NONE:
+      return IREE_SV("none");
+    case LOOM_VIEW_PREFETCH_LOCALITY_L1:
+      return IREE_SV("l1");
+    case LOOM_VIEW_PREFETCH_LOCALITY_L2:
+      return IREE_SV("l2");
+    case LOOM_VIEW_PREFETCH_LOCALITY_L3:
+      return IREE_SV("l3");
+    case LOOM_VIEW_PREFETCH_LOCALITY_COUNT_:
+      break;
+  }
+  return IREE_SV("invalid");
+}
+
+static iree_string_view_t loom_amdgpu_prefetch_dynamic_index_kind_name(
+    loom_amdgpu_memory_dynamic_index_kind_t kind) {
+  switch (kind) {
+    case LOOM_AMDGPU_MEMORY_DYNAMIC_INDEX_NONE:
+      return IREE_SV("none");
+    case LOOM_AMDGPU_MEMORY_DYNAMIC_INDEX_VADDR:
+      return IREE_SV("vaddr");
+    case LOOM_AMDGPU_MEMORY_DYNAMIC_INDEX_SOFFSET:
+      return IREE_SV("soffset");
+  }
+  return IREE_SV("invalid");
+}
+
 static bool loom_amdgpu_prefetch_static_offset_split(
     const loom_amdgpu_descriptor_offset_immediate_info_t* offset_info,
     loom_amdgpu_prefetch_plan_t* plan) {
@@ -110,24 +151,31 @@ static bool loom_amdgpu_prefetch_memory_space_is_buffer_backed(
   return false;
 }
 
-static iree_status_t loom_amdgpu_prefetch_select(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    loom_amdgpu_prefetch_plan_t* out_plan, bool* out_selected) {
-  *out_plan = (loom_amdgpu_prefetch_plan_t){0};
-  *out_selected = false;
+static bool loom_amdgpu_prefetch_select_source(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_view_region_table_t* view_regions, const loom_op_t* source_op,
+    loom_amdgpu_prefetch_plan_t* out_plan,
+    const loom_low_descriptor_t** out_descriptor,
+    iree_string_view_t* out_decision_key) {
+  *out_plan = (loom_amdgpu_prefetch_plan_t){
+      .descriptor_ordinal = LOOM_LOW_DESCRIPTOR_ORDINAL_NONE,
+  };
+  *out_descriptor = NULL;
+  *out_decision_key = IREE_SV("prefetch.unhandled");
   if (!loom_view_prefetch_isa(source_op)) {
-    return iree_ok_status();
+    return false;
   }
   if (loom_view_prefetch_intent(source_op) != LOOM_VIEW_PREFETCH_INTENT_READ) {
-    return iree_ok_status();
+    *out_decision_key = IREE_SV("prefetch.intent");
+    return false;
   }
 
-  const loom_low_descriptor_set_t* descriptor_set =
-      loom_low_lower_context_descriptor_set(context);
   const uint32_t descriptor_ordinal = loom_amdgpu_descriptor_ref_ordinal(
       descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_S_BUFFER_PREFETCH_DATA);
   if (descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
-    return iree_ok_status();
+    *out_decision_key = IREE_SV("prefetch.descriptor_missing");
+    return false;
   }
   const loom_low_descriptor_t* descriptor =
       loom_low_descriptor_set_descriptor_at(descriptor_set, descriptor_ordinal);
@@ -136,8 +184,49 @@ static iree_status_t loom_amdgpu_prefetch_select(
   if (!loom_amdgpu_descriptor_offset_immediate_info(
           descriptor_set, descriptor_ordinal, 1,
           LOOM_LOW_IMMEDIATE_KIND_UNSIGNED, &offset_info)) {
-    return iree_ok_status();
+    *out_decision_key = IREE_SV("prefetch.offset_immediate");
+    return false;
   }
+
+  loom_low_source_memory_access_diagnostic_t source_diagnostic = {0};
+  if (!loom_low_source_memory_access_plan_build(module, fact_table, source_op,
+                                                &out_plan->source,
+                                                &source_diagnostic)) {
+    *out_decision_key = source_diagnostic.rejection_bits != 0
+                            ? loom_low_source_memory_access_rejection_key(
+                                  source_diagnostic.rejection_bits)
+                            : IREE_SV("prefetch.source_memory_access");
+    return false;
+  }
+  if (!loom_amdgpu_prefetch_memory_space_is_buffer_backed(
+          out_plan->source.memory_space)) {
+    *out_decision_key = IREE_SV("prefetch.memory_space");
+    return false;
+  }
+  if (!loom_amdgpu_prefetch_select_dynamic_index(module, fact_table,
+                                                 view_regions, out_plan)) {
+    *out_decision_key = IREE_SV("prefetch.dynamic_index");
+    return false;
+  }
+  if (!loom_amdgpu_prefetch_static_offset_split(&offset_info, out_plan)) {
+    *out_decision_key = IREE_SV("prefetch.offset_range");
+    return false;
+  }
+  if (!loom_amdgpu_view_prefetch_count(source_op, &out_plan->count)) {
+    *out_decision_key = IREE_SV("prefetch.locality");
+    return false;
+  }
+
+  out_plan->descriptor_ordinal = descriptor_ordinal;
+  *out_descriptor = descriptor;
+  *out_decision_key = IREE_SV("prefetch.s_buffer_prefetch_data");
+  return true;
+}
+
+static iree_status_t loom_amdgpu_prefetch_select(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_amdgpu_prefetch_plan_t* out_plan, bool* out_selected) {
+  *out_selected = false;
 
   const loom_module_t* module = loom_low_lower_context_module(context);
   const loom_value_fact_table_t* fact_table =
@@ -145,24 +234,13 @@ static iree_status_t loom_amdgpu_prefetch_select(
   const loom_view_region_table_t* view_regions = NULL;
   IREE_RETURN_IF_ERROR(
       loom_low_lower_context_view_regions(context, &view_regions));
-  loom_low_source_memory_access_diagnostic_t unused_diagnostic = {0};
-  if (!loom_low_source_memory_access_plan_build(module, fact_table, source_op,
-                                                &out_plan->source,
-                                                &unused_diagnostic)) {
-    return iree_ok_status();
-  }
-  if (!loom_amdgpu_prefetch_memory_space_is_buffer_backed(
-          out_plan->source.memory_space)) {
-    return iree_ok_status();
-  }
-  if (!loom_amdgpu_prefetch_select_dynamic_index(module, fact_table,
-                                                 view_regions, out_plan)) {
-    return iree_ok_status();
-  }
-  if (!loom_amdgpu_prefetch_static_offset_split(&offset_info, out_plan)) {
-    return iree_ok_status();
-  }
-  if (!loom_amdgpu_view_prefetch_count(source_op, &out_plan->count)) {
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_low_lower_context_descriptor_set(context);
+  const loom_low_descriptor_t* descriptor = NULL;
+  iree_string_view_t unused_decision_key = iree_string_view_empty();
+  if (!loom_amdgpu_prefetch_select_source(module, fact_table, descriptor_set,
+                                          view_regions, source_op, out_plan,
+                                          &descriptor, &unused_decision_key)) {
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(loom_low_lower_resolve_descriptor_row(
@@ -173,6 +251,41 @@ static iree_status_t loom_amdgpu_prefetch_select(
                                           &out_plan->count_attr_name_id));
   *out_selected = true;
   return iree_ok_status();
+}
+
+iree_status_t loom_amdgpu_record_view_prefetch_diagnostic(
+    loom_target_low_legality_context_t* context, const loom_op_t* source_op,
+    const loom_low_descriptor_set_t* descriptor_set) {
+  if (!iree_any_bit_set(loom_target_low_legality_diagnostic_flags(context),
+                        LOOM_TARGET_LOW_LEGALITY_DIAGNOSTIC_MEMORY_ACCESS) ||
+      !loom_view_prefetch_isa(source_op)) {
+    return iree_ok_status();
+  }
+
+  const loom_view_region_table_t* view_regions = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_target_low_legality_view_regions(context, &view_regions));
+  loom_amdgpu_prefetch_plan_t plan = {0};
+  const loom_low_descriptor_t* descriptor = NULL;
+  iree_string_view_t decision_key = iree_string_view_empty();
+  const bool selected = loom_amdgpu_prefetch_select_source(
+      loom_target_low_legality_module(context),
+      loom_target_low_legality_fact_table(context), descriptor_set,
+      view_regions, source_op, &plan, &descriptor, &decision_key);
+  const iree_string_view_t packet_key =
+      descriptor ? loom_low_descriptor_set_string(descriptor_set,
+                                                  descriptor->key_string_offset)
+                 : IREE_SV("<none>");
+  return loom_target_low_legality_record_memory_prefetch(
+      context, source_op,
+      loom_amdgpu_memory_space_name(plan.source.memory_space),
+      loom_amdgpu_prefetch_intent_name(loom_view_prefetch_intent(source_op)),
+      loom_amdgpu_prefetch_locality_name(
+          loom_view_prefetch_locality(source_op)),
+      decision_key, selected ? IREE_SV("selected") : IREE_SV("dropped"),
+      packet_key, plan.immediate_offset, plan.scalar_byte_offset,
+      loom_amdgpu_prefetch_dynamic_index_kind_name(plan.dynamic_term_kind),
+      plan.count);
 }
 
 iree_status_t loom_amdgpu_select_view_prefetch_plan(

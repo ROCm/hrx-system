@@ -122,7 +122,8 @@ static const loom_amdgpu_lower_dispatch_row_t
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_VIEW_PREFETCH)] = LOOM_AMDGPU_DATA_ROW(
             LOOM_OP_VIEW_PREFETCH, loom_amdgpu_prefetch_plan_t,
             loom_amdgpu_select_view_prefetch_dispatch,
-            loom_amdgpu_emit_view_prefetch_dispatch, NULL),
+            loom_amdgpu_emit_view_prefetch_dispatch,
+            loom_amdgpu_low_legality_verify_memory),
 };
 
 static const loom_amdgpu_lower_dispatch_row_t
