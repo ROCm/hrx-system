@@ -256,6 +256,10 @@ typedef struct iree_net_session_options_t {
   // Capabilities to advertise. See iree_net_bootstrap_capability_bits_e.
   uint32_t capabilities;
 
+  // Capabilities that must be present in the negotiated peer intersection.
+  // Must be a subset of |capabilities|.
+  uint32_t required_capabilities;
+
   // Number of application endpoints the session user will open after the
   // control endpoint is established. Session setup validates the connection has
   // at least one control endpoint plus this many application endpoints.

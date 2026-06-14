@@ -143,6 +143,7 @@ iree_cc_library(
     "session_test.cc"
   DEPS
     iree::async
+    iree::net::bootstrap
     iree::net::carrier::cts::util::registry
     iree::net::carrier::cts::util::session_test_base
     iree::net::channel::queue::frame

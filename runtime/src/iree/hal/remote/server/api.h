@@ -95,9 +95,9 @@ typedef struct iree_hal_remote_file_index_t iree_hal_remote_file_index_t;
 // Flags controlling remote server behavior.
 enum iree_hal_remote_server_flag_bits_e {
   IREE_HAL_REMOTE_SERVER_FLAG_NONE = 0u,
-  // Enables RDMA for bulk transfers when available.
-  // Falls back to the transport's default bulk transfer if RDMA is not
-  // supported.
+  // Requires RDMA for bulk transfers. Server creation fails if the transport
+  // does not advertise RDMA support, and session bootstrap fails if the client
+  // does not negotiate RDMA support.
   IREE_HAL_REMOTE_SERVER_FLAG_ENABLE_RDMA = 1u << 0,
   // Enables tracing of server operations for debugging.
   IREE_HAL_REMOTE_SERVER_FLAG_TRACE_SERVER_OPS = 1u << 1,
@@ -164,7 +164,7 @@ IREE_API_EXPORT void iree_hal_remote_server_options_initialize(
 // Recognized parameters:
 //   bind=<address>        Bind address (format depends on transport)
 //   max_connections=<n>   Maximum concurrent connections
-//   rdma=true|false       Enable/disable RDMA for bulk transfers
+//   rdma=true|false       Require RDMA for bulk transfers
 //   trace=true|false      Enable server operation tracing
 IREE_API_EXPORT iree_status_t iree_hal_remote_server_options_parse(
     iree_hal_remote_server_options_t* options, iree_string_pair_list_t params);

@@ -90,6 +90,17 @@ static iree_status_t iree_hal_remote_server_options_verify(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "local_topology must expose a queue axis");
   }
+  if (iree_all_bits_set(options->flags,
+                        IREE_HAL_REMOTE_SERVER_FLAG_ENABLE_RDMA)) {
+    iree_net_transport_capabilities_t capabilities =
+        iree_net_transport_factory_query_capabilities(
+            options->transport_factory);
+    if (!iree_all_bits_set(capabilities, IREE_NET_TRANSPORT_CAPABILITY_RDMA)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "rdma=true requires a transport factory with RDMA capability");
+    }
+  }
   return iree_ok_status();
 }
 
@@ -414,6 +425,12 @@ static void iree_hal_remote_server_on_accept(
         iree_net_session_options_default();
     session_options.local_topology = server->local_topology;
     session_options.capabilities = IREE_NET_BOOTSTRAP_CAPABILITY_BULK_TRANSFER;
+    if (iree_all_bits_set(server->options.flags,
+                          IREE_HAL_REMOTE_SERVER_FLAG_ENABLE_RDMA)) {
+      session_options.capabilities |= IREE_NET_BOOTSTRAP_CAPABILITY_RDMA;
+      session_options.required_capabilities |=
+          IREE_NET_BOOTSTRAP_CAPABILITY_RDMA;
+    }
     session_options.application_endpoint_count =
         IREE_HAL_REMOTE_APPLICATION_ENDPOINT_COUNT;
     session_options.session_id = session_id;

@@ -57,7 +57,7 @@ IREE_FLAG(string, bind, "tcp://0.0.0.0:5000",
 IREE_FLAG(int32_t, max_connections, 16,
           "Maximum number of concurrent client connections.");
 
-IREE_FLAG(bool, rdma, false, "Enable RDMA for bulk transfers when available.");
+IREE_FLAG(bool, rdma, false, "Require RDMA for bulk transfers.");
 
 IREE_FLAG_LIST(
     string, remote_file_allow,

@@ -84,9 +84,9 @@ typedef struct iree_hal_remote_recv_pool_t iree_hal_remote_recv_pool_t;
 // Flags controlling remote client device behavior.
 enum iree_hal_remote_client_device_flag_bits_e {
   IREE_HAL_REMOTE_CLIENT_DEVICE_FLAG_NONE = 0u,
-  // Enables RDMA for bulk transfers when available.
-  // Falls back to the transport's default bulk transfer if RDMA is not
-  // supported.
+  // Requires RDMA for bulk transfers. Device creation fails if the transport
+  // does not advertise RDMA support, and connection fails if the server does
+  // not negotiate RDMA support.
   IREE_HAL_REMOTE_CLIENT_DEVICE_FLAG_ENABLE_RDMA = 1u << 0,
   // Enables tracing of remote operations for debugging.
   IREE_HAL_REMOTE_CLIENT_DEVICE_FLAG_TRACE_REMOTE_OPS = 1u << 1,
@@ -187,7 +187,7 @@ IREE_API_EXPORT void iree_hal_remote_client_device_options_initialize(
 // Recognized parameters:
 //   server=<address>     Server address (format depends on transport)
 //   connect_timeout=<ms> Connection timeout in milliseconds
-//   rdma=true|false      Enable/disable RDMA for bulk transfers
+//   rdma=true|false      Require RDMA for bulk transfers
 //   trace=true|false     Enable remote operation tracing
 IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_options_parse(
     iree_hal_remote_client_device_options_t* options,

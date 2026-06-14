@@ -466,6 +466,54 @@ TEST_F(RemoteSessionTest, ConnectBeforeDisconnected) {
   ASSERT_TRUE(PollUntil([&]() { return client_connect_fired_; }));
 }
 
+TEST_F(RemoteSessionTest, ClientCreateRejectsRdmaWithoutTransportCapability) {
+  iree_hal_remote_client_device_options_t client_options;
+  iree_hal_remote_client_device_options_initialize(&client_options);
+  client_options.transport_factory = factory_;
+  client_options.server_address = IREE_SV("test-server");
+  client_options.flags |= IREE_HAL_REMOTE_CLIENT_DEVICE_FLAG_ENABLE_RDMA;
+
+  iree_hal_device_create_params_t create_params =
+      iree_hal_device_create_params_default();
+  iree_hal_device_t* client_device = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_remote_client_device_create(
+          IREE_SV("remote"), &client_options, &create_params, recv_pool_,
+          iree_allocator_system(), &client_device));
+  iree_hal_device_release(client_device);
+}
+
+TEST_F(RemoteSessionTest, ServerCreateRejectsRdmaWithoutTransportCapability) {
+  CreateMockDevice();
+
+  iree_async_axis_t server_axes[] = {0x0200};
+  uint64_t server_epochs[] = {0};
+  iree_net_session_topology_t server_topology = {};
+  server_topology.axes = server_axes;
+  server_topology.current_epochs = server_epochs;
+  server_topology.axis_count = 1;
+  server_topology.machine_index = 1;
+  server_topology.session_epoch = 1;
+
+  iree_hal_remote_server_options_t server_options;
+  iree_hal_remote_server_options_initialize(&server_options);
+  server_options.transport_factory = factory_;
+  server_options.bind_address = IREE_SV("test-server");
+  server_options.local_topology = &server_topology;
+  server_options.flags |= IREE_HAL_REMOTE_SERVER_FLAG_ENABLE_RDMA;
+
+  iree_hal_device_t* devices[] = {mock_device_};
+  iree_hal_remote_server_t* server = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_remote_server_create(
+          &server_options, devices, 1, proactor_, server_tracker_,
+          iree_hal_remote_recv_pool_buffer_pool(recv_pool_),
+          iree_allocator_system(), &server));
+  iree_hal_remote_server_release(server);
+}
+
 TEST_F(RemoteSessionTest, MultipleClientsConnect) {
   CreateAndStartServer();
 

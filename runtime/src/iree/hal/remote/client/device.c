@@ -101,6 +101,17 @@ static iree_status_t iree_hal_remote_client_device_options_verify(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "server_address is required");
   }
+  if (iree_all_bits_set(options->flags,
+                        IREE_HAL_REMOTE_CLIENT_DEVICE_FLAG_ENABLE_RDMA)) {
+    iree_net_transport_capabilities_t capabilities =
+        iree_net_transport_factory_query_capabilities(
+            options->transport_factory);
+    if (!iree_all_bits_set(capabilities, IREE_NET_TRANSPORT_CAPABILITY_RDMA)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "rdma=true requires a transport factory with RDMA capability");
+    }
+  }
   return iree_ok_status();
 }
 
@@ -1546,6 +1557,11 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_connect(
   iree_net_session_options_t session_options =
       iree_net_session_options_default();
   session_options.capabilities = IREE_NET_BOOTSTRAP_CAPABILITY_BULK_TRANSFER;
+  if (iree_all_bits_set(device->options.flags,
+                        IREE_HAL_REMOTE_CLIENT_DEVICE_FLAG_ENABLE_RDMA)) {
+    session_options.capabilities |= IREE_NET_BOOTSTRAP_CAPABILITY_RDMA;
+    session_options.required_capabilities |= IREE_NET_BOOTSTRAP_CAPABILITY_RDMA;
+  }
   session_options.application_endpoint_count =
       IREE_HAL_REMOTE_APPLICATION_ENDPOINT_COUNT;
   if (device->options.connect_timeout_ns) {

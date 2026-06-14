@@ -24,6 +24,7 @@
 #include <string>
 #include <vector>
 
+#include "iree/net/bootstrap.h"
 #include "iree/net/carrier/cts/util/registry.h"
 #include "iree/net/carrier/cts/util/session_test_base.h"
 #include "iree/net/channel/queue/frame.h"
@@ -154,6 +155,81 @@ TEST_P(SessionTest, SessionIdAssignment) {
   // Both sides should agree on the server-assigned session ID.
   EXPECT_EQ(iree_net_session_id(client_session_), 99u);
   EXPECT_EQ(iree_net_session_id(server_session_), 99u);
+}
+
+TEST_P(SessionTest, RequiredCapabilitiesRejectMissingPeerSupport) {
+  IREE_ASSERT_OK_AND_ASSIGN(std::string bind_str, MakeBindAddress());
+  iree_string_view_t bind_addr = iree_make_cstring_view(bind_str.c_str());
+
+  struct AcceptCtx {
+    iree_async_proactor_t* proactor = nullptr;
+    iree_async_frontier_tracker_t* tracker = nullptr;
+    SessionCallbackTracker* callbacks = nullptr;
+    iree_net_session_t** out_session = nullptr;
+    iree::Status status;
+  } accept_ctx;
+  accept_ctx.proactor = proactor_;
+  accept_ctx.tracker = server_tracker_;
+  accept_ctx.callbacks = &server_callbacks_;
+  accept_ctx.out_session = &server_session_;
+
+  IREE_ASSERT_OK(iree_net_transport_factory_create_listener(
+      factory_, bind_addr, proactor_, recv_pool_,
+      [](void* user_data, iree_status_t status,
+         iree_net_connection_t* connection) {
+        auto* ctx = static_cast<AcceptCtx*>(user_data);
+        ctx->status = iree::Status(std::move(status));
+
+        if (ctx->status.ok()) {
+          iree_net_session_options_t server_options =
+              iree_net_session_options_default();
+          server_options.session_id = 42;
+          server_options.capabilities =
+              IREE_NET_BOOTSTRAP_CAPABILITY_BULK_TRANSFER |
+              IREE_NET_BOOTSTRAP_CAPABILITY_RDMA;
+          server_options.required_capabilities =
+              IREE_NET_BOOTSTRAP_CAPABILITY_RDMA;
+
+          ctx->status = iree::Status(iree_net_session_accept(
+              connection, ctx->proactor, ctx->tracker, &server_options,
+              ctx->callbacks->MakeCallbacks(), iree_allocator_system(),
+              ctx->out_session));
+        }
+
+        iree_net_connection_release(connection);
+      },
+      &accept_ctx, iree_allocator_system(), &listener_));
+
+  IREE_ASSERT_OK_AND_ASSIGN(std::string connect_str,
+                            ResolveConnectAddress(bind_str, listener_));
+
+  iree_net_session_options_t client_options =
+      iree_net_session_options_default();
+  client_options.capabilities = IREE_NET_BOOTSTRAP_CAPABILITY_BULK_TRANSFER;
+  client_options.bootstrap_timeout_ns = iree_make_duration_ms(200);
+
+  IREE_ASSERT_OK(iree_net_session_connect(
+      factory_, iree_make_string_view(connect_str.c_str(), connect_str.size()),
+      proactor_, recv_pool_, client_tracker_, &client_options,
+      client_callbacks_.MakeCallbacks(), iree_allocator_system(),
+      &client_session_));
+
+  ASSERT_TRUE(PollUntil([&]() {
+    return !accept_ctx.status.ok() || server_callbacks_.error_fired;
+  })) << "Server on_error never fired for missing required capability";
+  IREE_ASSERT_OK(accept_ctx.status);
+
+  EXPECT_EQ(iree_net_session_state(server_session_),
+            IREE_NET_SESSION_STATE_ERROR);
+  EXPECT_EQ(server_callbacks_.error_code, IREE_STATUS_UNAVAILABLE);
+  EXPECT_FALSE(server_callbacks_.ready_fired);
+
+  PollUntil(
+      [&]() {
+        return iree_net_session_state(client_session_) !=
+               IREE_NET_SESSION_STATE_BOOTSTRAPPING;
+      },
+      iree_make_duration_ms(500));
 }
 
 //===----------------------------------------------------------------------===//

@@ -332,11 +332,14 @@ Available paths in this branch:
   registration probe described in
   [`runtime/src/iree/net/carrier/rdma/README.md`](/runtime/src/iree/net/carrier/rdma/README.md).
 
-The remote HAL client/server APIs already carry `rdma=true|false` options and
-flags for enabling RDMA bulk transfer paths when the active transport exposes
-the required carrier capabilities. Review of RDMA behavior should start below
-the HAL layer: transport factory setup, carrier capabilities, registered
-regions, direct write/read budget, memory-window lifetime, and the carrier CTS.
+The remote HAL client/server APIs treat `rdma=true` as a requirement, not a
+preference. Device or server creation validates that the selected transport
+factory advertises `IREE_NET_TRANSPORT_CAPABILITY_RDMA`; session bootstrap then
+advertises and requires `IREE_NET_BOOTSTRAP_CAPABILITY_RDMA` so peer mismatch
+fails instead of silently falling back to message bulk transfer. Review of RDMA
+behavior should start below the HAL layer: transport factory setup, carrier
+capabilities, registered regions, direct write/read budget, memory-window
+lifetime, and the carrier CTS.
 
 ## Debugging Map
 

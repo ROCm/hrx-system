@@ -124,6 +124,8 @@ struct iree_net_session_t {
   uint32_t protocol_version;
   // Capability bits advertised during bootstrap.
   uint32_t capabilities;
+  // Capability bits required in the negotiated peer intersection.
+  uint32_t required_capabilities;
   // Number of application endpoint slots reserved during setup.
   uint32_t application_endpoint_count;
   // Bootstrap timeout in nanoseconds.
@@ -209,6 +211,21 @@ static iree_status_t iree_net_session_validate_endpoint_capacity(
         session->application_endpoint_count);
   }
   return iree_ok_status();
+}
+
+static iree_status_t iree_net_session_validate_required_capabilities(
+    const iree_net_session_t* session) {
+  iree_net_bootstrap_capabilities_t missing_capabilities =
+      session->required_capabilities & ~session->negotiated_capabilities;
+  if (missing_capabilities == IREE_NET_BOOTSTRAP_CAPABILITY_NONE) {
+    return iree_ok_status();
+  }
+  return iree_make_status(
+      IREE_STATUS_UNAVAILABLE,
+      "required session capabilities were not negotiated: required=0x%08x "
+      "negotiated=0x%08x missing=0x%08x",
+      session->required_capabilities, session->negotiated_capabilities,
+      missing_capabilities);
 }
 
 //===----------------------------------------------------------------------===//
@@ -643,6 +660,8 @@ static iree_status_t iree_net_session_handle_hello(
 
   // Negotiate capabilities.
   session->negotiated_capabilities = hello.capabilities & session->capabilities;
+  IREE_RETURN_IF_ERROR(
+      iree_net_session_validate_required_capabilities(session));
 
   // Session ID was set from options during session_accept().
 
@@ -700,6 +719,8 @@ static iree_status_t iree_net_session_handle_hello_ack(
 
   session->session_id = ack.session_id;
   session->negotiated_capabilities = ack.negotiated_capabilities;
+  IREE_RETURN_IF_ERROR(
+      iree_net_session_validate_required_capabilities(session));
 
   // Register remote (server) axes and complete bootstrap.
   const iree_net_bootstrap_axis_entry_t* entries =
@@ -1080,6 +1101,13 @@ static iree_status_t iree_net_session_create_common(
                             "application endpoint count overflows required "
                             "endpoint count");
   }
+  if ((options->required_capabilities & ~options->capabilities) != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "required session capabilities must be advertised: capabilities=0x%08x "
+        "required=0x%08x",
+        options->capabilities, options->required_capabilities);
+  }
 
   // Validate axis count fits in the wire format (uint16_t in HELLO/HELLO_ACK).
   uint32_t local_axis_count = options->local_topology.axis_count;
@@ -1118,6 +1146,7 @@ static iree_status_t iree_net_session_create_common(
                                   ? options->protocol_version
                                   : IREE_NET_BOOTSTRAP_PROTOCOL_VERSION;
   session->capabilities = options->capabilities;
+  session->required_capabilities = options->required_capabilities;
   session->application_endpoint_count = options->application_endpoint_count;
   session->bootstrap_timeout_ns = options->bootstrap_timeout_ns;
 
