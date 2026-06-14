@@ -272,6 +272,7 @@ hip_4.3 {
     hipDestroyExternalSemaphore;
     hipDrvMemcpy2DUnaligned;
     hipExternalMemoryGetMappedBuffer;
+    hipExternalMemoryGetMappedMipmappedArray;
     hipGLGetDevices;
     hipGraphAddKernelNode;
     hipGraphAddMemcpyNode;
