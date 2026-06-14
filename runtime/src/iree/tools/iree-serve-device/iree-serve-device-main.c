@@ -23,14 +23,13 @@
 #include "iree/base/threading/numa.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/hal/api.h"
-#include "iree/hal/remote/protocol/common.h"
 #include "iree/hal/remote/server/api.h"
 #include "iree/hal/remote/server/file_index.h"
 #include "iree/hal/remote/util/recv_pool.h"
-#include "iree/net/carrier/shm/factory.h"
-#include "iree/net/carrier/tcp/factory.h"
 #include "iree/net/session.h"
+#include "iree/net/transport_factory.h"
 #include "iree/tooling/device_util.h"
+#include "iree/tools/iree-serve-device/transport.h"
 
 IREE_FLAG(string, bind, "tcp://0.0.0.0:5000",
           "Address to bind the server to.\n"
@@ -111,52 +110,6 @@ typedef struct iree_serve_device_state_t {
   // Set to 1 by the server stopped callback once shutdown has drained.
   iree_atomic_int32_t server_stopped;
 } iree_serve_device_state_t;
-
-static iree_status_t iree_serve_device_parse_bind_uri(
-    iree_string_view_t bind_uri, iree_string_view_t* out_transport,
-    iree_string_view_t* out_address) {
-  iree_string_view_t remainder = bind_uri;
-  if (iree_string_view_consume_prefix(&remainder, IREE_SV("tcp://"))) {
-    *out_transport = IREE_SV("tcp");
-    *out_address = remainder;
-    return iree_ok_status();
-  }
-  if (iree_string_view_consume_prefix(&remainder, IREE_SV("shm://"))) {
-    *out_transport = IREE_SV("shm");
-    *out_address = remainder;
-    return iree_ok_status();
-  }
-  return iree_make_status(
-      IREE_STATUS_INVALID_ARGUMENT,
-      "bind URI must have a transport prefix (tcp://, shm://), got: '%.*s'",
-      (int)bind_uri.size, bind_uri.data);
-}
-
-static iree_status_t iree_serve_device_create_transport(
-    iree_string_view_t transport_name, iree_allocator_t host_allocator,
-    iree_net_transport_factory_t** out_factory) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-  if (iree_string_view_equal(transport_name, IREE_SV("tcp"))) {
-    iree_net_tcp_carrier_options_t tcp_options =
-        iree_net_tcp_carrier_options_default();
-    // HAL remote requires control, queue, and bulk endpoints per connection.
-    tcp_options.max_endpoint_count = IREE_HAL_REMOTE_REQUIRED_ENDPOINT_COUNT;
-    iree_status_t status =
-        iree_net_tcp_factory_create(tcp_options, host_allocator, out_factory);
-    IREE_TRACE_ZONE_END(z0);
-    return status;
-  }
-  if (iree_string_view_equal(transport_name, IREE_SV("shm"))) {
-    iree_status_t status = iree_net_shm_factory_create(
-        iree_net_shm_carrier_options_default(), host_allocator, out_factory);
-    IREE_TRACE_ZONE_END(z0);
-    return status;
-  }
-  IREE_TRACE_ZONE_END(z0);
-  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                          "unsupported transport: %.*s",
-                          (int)transport_name.size, transport_name.data);
-}
 
 static iree_status_t iree_serve_device_add_file_allow_list(
     iree_hal_remote_file_index_t* file_index, iree_string_view_t flag_name,
@@ -488,13 +441,12 @@ static iree_status_t iree_serve_device_run(void) {
         state.host_allocator, &state.device);
   }
 
-  iree_string_view_t transport_name = iree_string_view_empty();
-  iree_string_view_t bind_address = iree_string_view_empty();
+  iree_serve_device_bind_t bind = {0};
   if (iree_status_is_ok(status)) {
     iree_string_view_t device_id = iree_hal_device_id(state.device);
     fprintf(stdout, "Device: %.*s\n", (int)device_id.size, device_id.data);
     status = iree_serve_device_parse_bind_uri(iree_make_cstring_view(FLAG_bind),
-                                              &transport_name, &bind_address);
+                                              &bind);
   }
 
   // Create a proactor pool for the server's networking.
@@ -534,18 +486,19 @@ static iree_status_t iree_serve_device_run(void) {
   }
 
   if (iree_status_is_ok(status)) {
-    status = iree_serve_device_create_transport(
-        transport_name, state.host_allocator, &state.factory);
+    status = iree_serve_device_create_transport_factory(
+        bind.transport_name, state.host_allocator, &state.factory);
   }
   if (iree_status_is_ok(status)) {
     status = iree_serve_device_create_file_index_from_flags(&state);
   }
   if (iree_status_is_ok(status)) {
     fprintf(stdout, "Serving on %.*s://%.*s (Ctrl+C to stop)\n",
-            (int)transport_name.size, transport_name.data,
-            (int)bind_address.size, bind_address.data);
+            (int)bind.transport_name.size, bind.transport_name.data,
+            (int)bind.bind_address.size, bind.bind_address.data);
     fflush(stdout);
-    status = iree_serve_device_create_and_start_server(&state, bind_address);
+    status =
+        iree_serve_device_create_and_start_server(&state, bind.bind_address);
   }
   if (iree_status_is_ok(status)) {
     status = iree_serve_device_wait_for_shutdown_signal(&state);

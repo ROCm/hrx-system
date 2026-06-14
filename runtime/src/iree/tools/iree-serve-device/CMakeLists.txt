@@ -9,12 +9,42 @@
 
 iree_add_all_subdirs()
 
+iree_cc_library(
+  NAME
+    transport
+  HDRS
+    "transport.h"
+  SRCS
+    "transport.c"
+  DEPS
+    iree::base
+    iree::hal::remote::protocol::common
+    iree::net::carrier::shm::factory
+    iree::net::carrier::tcp::factory
+    iree::net::transport_factory
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    transport_test
+  SRCS
+    "transport_test.cc"
+  DEPS
+    ::transport
+    iree::base
+    iree::net::transport_factory
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 iree_cc_binary(
   NAME
     iree-serve-device
   SRCS
     "iree-serve-device-main.c"
   DEPS
+    ::transport
     iree::async
     iree::async::platform
     iree::async::util::proactor_pool
@@ -23,12 +53,10 @@ iree_cc_binary(
     iree::base::threading
     iree::base::tooling::flags
     iree::hal
-    iree::hal::remote::protocol::common
     iree::hal::remote::server
     iree::hal::remote::util::recv_pool
-    iree::net::carrier::shm::factory
-    iree::net::carrier::tcp::factory
     iree::net::session
+    iree::net::transport_factory
     iree::tooling::device_util
 )
 
