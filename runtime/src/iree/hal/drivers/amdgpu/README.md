@@ -83,7 +83,7 @@ The wrapper requires a `tracy-capture` binary in `PATH`, or one supplied through
 
 ```sh
 IREE_TRACY_CAPTURE=/path/to/tracy-capture \
-  build_tools/bin/iree-bazel-run \
+  iree-bazel-run \
   --trace \
   --trace_name=amdgpu_runtime \
   //tools:iree-run-module \

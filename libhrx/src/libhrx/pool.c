@@ -25,10 +25,27 @@ static const hrx_iree_exact_pool_t* hrx_iree_exact_pool_const_cast(
   return (const hrx_iree_exact_pool_t*)base;
 }
 
+static bool hrx_iree_queue_affinity_matches(iree_hal_queue_affinity_t lhs,
+                                            iree_hal_queue_affinity_t rhs) {
+  if (iree_hal_queue_affinity_is_empty(lhs) ||
+      iree_hal_queue_affinity_is_any(lhs)) {
+    return true;
+  }
+  if (iree_hal_queue_affinity_is_empty(rhs) ||
+      iree_hal_queue_affinity_is_any(rhs)) {
+    return true;
+  }
+  return lhs == rhs;
+}
+
 static bool hrx_iree_buffer_params_match(iree_hal_buffer_params_t lhs,
                                          iree_hal_buffer_params_t rhs) {
+  iree_hal_buffer_params_canonicalize(&lhs);
+  iree_hal_buffer_params_canonicalize(&rhs);
   return lhs.type == rhs.type && lhs.access == rhs.access &&
-         lhs.usage == rhs.usage && lhs.queue_affinity == rhs.queue_affinity &&
+         lhs.usage == rhs.usage &&
+         hrx_iree_queue_affinity_matches(lhs.queue_affinity,
+                                         rhs.queue_affinity) &&
          lhs.min_alignment == rhs.min_alignment;
 }
 

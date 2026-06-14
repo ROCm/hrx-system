@@ -15,6 +15,7 @@
 #include "hrx_internal.h"
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
+#include "iree/base/threading/notification.h"
 #include "iree/hal/drivers/local_task/task_driver.h"
 #include "iree/hal/utils/profile_file.h"
 #include "iree/io/file_handle.h"
@@ -23,6 +24,12 @@
 
 #ifdef HRX_HAS_IREE_AMDGPU_DRIVER
 #include "iree/hal/drivers/amdgpu/registration/driver_module.h"
+#endif
+
+#ifdef HRX_HAS_IREE_REMOTE_DRIVER
+#include "iree/base/internal/path.h"
+#include "iree/hal/remote/client/api.h"
+#include "iree/hal/remote/client/registration/driver_module.h"
 #endif
 
 //===----------------------------------------------------------------------===//
@@ -264,7 +271,6 @@ hrx_status_t hrx_ensure_shared_state(void) {
   return hrx_ok_status();
 }
 
-#ifdef HRX_HAS_IREE_AMDGPU_DRIVER
 static iree_status_t hrx_set_gpu_architecture_from_hal(
     iree_hal_device_t* hal_device, hrx_device_s* dev) {
   const iree_hal_device_spec_t* device_spec = iree_hal_device_spec(hal_device);
@@ -301,7 +307,6 @@ static iree_status_t hrx_set_gpu_architecture_from_hal(
   dev->architecture[target_key.size] = 0;
   return iree_ok_status();
 }
-#endif  // HRX_HAS_IREE_AMDGPU_DRIVER
 
 static void hrx_release_shared_state(void) {
   if (!g_shared.shared_initialized) return;
@@ -414,6 +419,50 @@ static hrx_status_t hrx_create_local_task_device(
   *out_driver = driver;
   *out_hal_device = hal_device;
   return hrx_ok_status();
+}
+
+static void hrx_copy_string_view_to_cstr(iree_string_view_t source,
+                                         char* target,
+                                         iree_host_size_t target_capacity) {
+  if (target_capacity == 0) return;
+  iree_host_size_t length = source.size;
+  if (length >= target_capacity) length = target_capacity - 1;
+  if (length > 0) memcpy(target, source.data, length);
+  target[length] = '\0';
+}
+
+static iree_status_t hrx_initialize_device_from_hal(
+    hrx_device_s* dev, hrx_accelerator_type_t type, int ordinal,
+    iree_hal_device_t* hal_device, iree_string_view_t name,
+    iree_string_view_t architecture, iree_allocator_t host_allocator) {
+  iree_hal_device_group_t* device_group = NULL;
+  IREE_RETURN_IF_ERROR(hrx_create_single_device_group(
+      hal_device, host_allocator, &device_group));
+
+  memset(dev, 0, sizeof(*dev));
+  iree_atomic_ref_count_init(&dev->ref_count);
+  dev->type = type;
+  dev->ordinal = ordinal;
+  dev->hal_device = hal_device;
+  dev->hal_device_group = device_group;
+  dev->allocator.hal_allocator = iree_hal_device_allocator(hal_device);
+  iree_hal_allocator_retain(dev->allocator.hal_allocator);
+  iree_atomic_ref_count_init(&dev->allocator.ref_count);
+  dev->allocator.device = dev;
+  hrx_buffer_table_initialize(&dev->buffer_table);
+  iree_arena_block_pool_initialize(/*block_size=*/32 * 1024,
+                                   iree_allocator_system(), &dev->block_pool);
+  hrx_copy_string_view_to_cstr(name, dev->name, sizeof(dev->name));
+  hrx_copy_string_view_to_cstr(architecture, dev->architecture,
+                               sizeof(dev->architecture));
+  return iree_ok_status();
+}
+
+static void hrx_release_initialized_device(hrx_device_s* dev) {
+  if (!dev || !dev->hal_device) return;
+  hrx_buffer_table_deinitialize(&dev->buffer_table);
+  iree_arena_block_pool_deinitialize(&dev->block_pool);
+  hrx_device_release(dev);
 }
 
 static const char* hrx_get_gpu_driver_name(void) {
@@ -554,7 +603,7 @@ static iree_status_t hrx_gpu_end_all_profiling(void) {
 static void hrx_gpu_release_created_devices(int count) {
   for (int i = 0; i < count; ++i) {
     iree_status_ignore(hrx_device_profile_end(&g_gpu.devices[i]));
-    hrx_device_release(&g_gpu.devices[i]);
+    hrx_release_initialized_device(&g_gpu.devices[i]);
   }
 }
 
@@ -571,6 +620,225 @@ static void hrx_debug_print_iree_status(const char* label,
   } else {
     fprintf(stderr, "hrx gpu debug: %s: (could not format status)\n", label);
   }
+}
+
+static bool hrx_is_remote_hal_uri(const char* value) {
+  if (!value) return false;
+  const char* separator = strstr(value, "://");
+  return separator && strncmp(value, "remote-", 7) == 0;
+}
+
+#ifdef HRX_HAS_IREE_REMOTE_DRIVER
+typedef struct hrx_remote_device_connect_state_t {
+  // Notification posted after the remote connect callback stores |status|.
+  iree_notification_t notification;
+  // Connect completion status transferred from the proactor callback.
+  iree_status_t status;
+  // Non-zero after |status| has been populated.
+  iree_atomic_int32_t complete;
+} hrx_remote_device_connect_state_t;
+
+typedef struct hrx_remote_device_deactivate_state_t {
+  // Notification posted after the remote deactivation callback runs.
+  iree_notification_t notification;
+  // Non-zero after the remote device has drained all callbacks and endpoints.
+  iree_atomic_int32_t complete;
+} hrx_remote_device_deactivate_state_t;
+
+static bool hrx_remote_device_connect_complete(void* user_data) {
+  const hrx_remote_device_connect_state_t* state =
+      (const hrx_remote_device_connect_state_t*)user_data;
+  return iree_atomic_load(&state->complete, iree_memory_order_acquire) != 0;
+}
+
+static void hrx_remote_device_connected(void* user_data, iree_status_t status) {
+  hrx_remote_device_connect_state_t* state =
+      (hrx_remote_device_connect_state_t*)user_data;
+  state->status = status;
+  iree_atomic_store(&state->complete, 1, iree_memory_order_release);
+  iree_notification_post(&state->notification, IREE_ALL_WAITERS);
+}
+
+static bool hrx_remote_device_deactivate_complete(void* user_data) {
+  const hrx_remote_device_deactivate_state_t* state =
+      (const hrx_remote_device_deactivate_state_t*)user_data;
+  return iree_atomic_load(&state->complete, iree_memory_order_acquire) != 0;
+}
+
+static void hrx_remote_device_deactivated(void* user_data) {
+  hrx_remote_device_deactivate_state_t* state =
+      (hrx_remote_device_deactivate_state_t*)user_data;
+  iree_atomic_store(&state->complete, 1, iree_memory_order_release);
+  iree_notification_post(&state->notification, IREE_ALL_WAITERS);
+}
+
+static iree_status_t hrx_connect_remote_hal_device(
+    iree_string_view_t device_uri, iree_hal_device_t* hal_device) {
+  hrx_remote_device_connect_state_t connect_state;
+  memset(&connect_state, 0, sizeof(connect_state));
+  iree_notification_initialize(&connect_state.notification);
+
+  iree_hal_remote_client_device_connected_callback_t callback = {
+      .fn = hrx_remote_device_connected,
+      .user_data = &connect_state,
+  };
+  iree_status_t status =
+      iree_hal_remote_client_device_connect(hal_device, callback);
+  if (iree_status_is_ok(status)) {
+    const bool connected = iree_notification_await(
+        &connect_state.notification, hrx_remote_device_connect_complete,
+        &connect_state, iree_infinite_timeout());
+    if (connected) {
+      status = connect_state.status;
+    } else {
+      status = iree_make_status(IREE_STATUS_INTERNAL,
+                                "remote device connect did not complete");
+    }
+  }
+
+  iree_notification_deinitialize(&connect_state.notification);
+  if (!iree_status_is_ok(status)) {
+    status = iree_status_annotate_f(status, "connecting remote device '%.*s'",
+                                    (int)device_uri.size, device_uri.data);
+  }
+  return status;
+}
+
+static iree_status_t hrx_deactivate_remote_hal_device(
+    iree_hal_device_t* hal_device) {
+  hrx_remote_device_deactivate_state_t deactivate_state;
+  memset(&deactivate_state, 0, sizeof(deactivate_state));
+  iree_notification_initialize(&deactivate_state.notification);
+
+  iree_hal_remote_client_device_deactivated_callback_t callback = {
+      .fn = hrx_remote_device_deactivated,
+      .user_data = &deactivate_state,
+  };
+  iree_status_t status =
+      iree_hal_remote_client_device_deactivate(hal_device, callback);
+  if (iree_status_is_ok(status)) {
+    const bool deactivated = iree_notification_await(
+        &deactivate_state.notification, hrx_remote_device_deactivate_complete,
+        &deactivate_state, iree_infinite_timeout());
+    if (!deactivated) {
+      status = iree_make_status(IREE_STATUS_INTERNAL,
+                                "remote device deactivation did not complete");
+    }
+  }
+
+  iree_notification_deinitialize(&deactivate_state.notification);
+  return status;
+}
+#endif  // HRX_HAS_IREE_REMOTE_DRIVER
+
+static hrx_status_t hrx_create_remote_gpu_device(
+    const char* device_uri_cstr, iree_allocator_t host_allocator,
+    iree_hal_driver_t** out_driver, iree_hal_device_t** out_hal_device) {
+  *out_driver = NULL;
+  *out_hal_device = NULL;
+
+#ifndef HRX_HAS_IREE_REMOTE_DRIVER
+  (void)device_uri_cstr;
+  (void)host_allocator;
+  return hrx_make_status(
+      HRX_STATUS_UNAVAILABLE,
+      "remote HAL GPU driver requested but HRX was built without remote HAL "
+      "support");
+#else
+  iree_string_view_t device_uri = iree_make_cstring_view(device_uri_cstr);
+  iree_string_view_t driver_name = iree_uri_schema(device_uri);
+  if (!iree_string_view_starts_with(driver_name, IREE_SV("remote-"))) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "remote GPU driver must be a remote-* HAL URI");
+  }
+
+  iree_hal_driver_registry_t* registry = NULL;
+  iree_status_t status =
+      iree_hal_driver_registry_allocate(host_allocator, &registry);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_client_driver_module_register(registry);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_driver_registry_try_create(registry, driver_name,
+                                                 host_allocator, out_driver);
+  }
+  iree_hal_driver_registry_free(registry);
+
+  iree_hal_device_create_params_t create_params =
+      iree_hal_device_create_params_default();
+  create_params.proactor_pool = g_shared.proactor_pool;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_driver_create_device_by_uri(
+        *out_driver, device_uri, &create_params, host_allocator,
+        out_hal_device);
+  }
+  if (iree_status_is_ok(status)) {
+    status = hrx_connect_remote_hal_device(device_uri, *out_hal_device);
+  }
+
+  if (!iree_status_is_ok(status)) {
+    if (*out_hal_device) {
+      status = iree_status_join(
+          status, hrx_deactivate_remote_hal_device(*out_hal_device));
+      iree_hal_device_release(*out_hal_device);
+    }
+    *out_hal_device = NULL;
+    iree_hal_driver_release(*out_driver);
+    *out_driver = NULL;
+    return hrx_status_from_iree(status);
+  }
+  return hrx_ok_status();
+#endif  // HRX_HAS_IREE_REMOTE_DRIVER
+}
+
+static hrx_status_t hrx_gpu_initialize_remote(const char* device_uri,
+                                              iree_allocator_t host_allocator) {
+  iree_hal_driver_t* driver = NULL;
+  iree_hal_device_t* hal_device = NULL;
+  hrx_status_t create_status = hrx_create_remote_gpu_device(
+      device_uri, host_allocator, &driver, &hal_device);
+  if (!hrx_status_is_ok(create_status)) return create_status;
+
+  char name[128] = {0};
+  snprintf(name, sizeof(name), "Remote GPU (%s)", device_uri);
+  iree_status_t status = hrx_initialize_device_from_hal(
+      &g_gpu.devices[0], HRX_ACCELERATOR_GPU, 0, hal_device,
+      iree_make_cstring_view(name), IREE_SV("unknown"), host_allocator);
+  const bool device_initialized = iree_status_is_ok(status);
+  if (iree_status_is_ok(status)) {
+    status = hrx_set_gpu_architecture_from_hal(hal_device, &g_gpu.devices[0]);
+  }
+
+  iree_hal_profile_sink_t* profile_sink = NULL;
+  const char* profile_file_path = hrx_get_profile_file_path();
+  if (iree_status_is_ok(status) && profile_file_path) {
+    status = hrx_profile_file_sink_create(profile_file_path, host_allocator,
+                                          &profile_sink);
+  }
+  if (iree_status_is_ok(status)) {
+    status = hrx_device_profile_begin(&g_gpu.devices[0], profile_sink);
+  }
+  iree_hal_profile_sink_release(profile_sink);
+
+  if (iree_status_is_ok(status)) {
+    g_gpu.driver = driver;
+    g_gpu.device_count = 1;
+    g_gpu.backend = HRX_GPU_BACKEND_REMOTE;
+    g_gpu.initialized = true;
+    return hrx_ok_status();
+  }
+
+#ifdef HRX_HAS_IREE_REMOTE_DRIVER
+  status =
+      iree_status_join(status, hrx_deactivate_remote_hal_device(hal_device));
+#endif  // HRX_HAS_IREE_REMOTE_DRIVER
+  if (device_initialized) {
+    hrx_release_initialized_device(&g_gpu.devices[0]);
+  } else {
+    iree_hal_device_release(hal_device);
+  }
+  iree_hal_driver_release(driver);
+  return hrx_status_from_iree(status);
 }
 
 #ifdef HRX_HAS_IREE_AMDGPU_DRIVER
@@ -638,32 +906,15 @@ hrx_status_t hrx_cpu_initialize(uint32_t flags) {
     return status;
   }
 
-  iree_hal_device_group_t* device_group = NULL;
-  iree_status_t iree_status = hrx_create_single_device_group(
-      hal_device, g_shared.host_allocator, &device_group);
+  iree_status_t iree_status = hrx_initialize_device_from_hal(
+      &g_cpu.devices[0], HRX_ACCELERATOR_CPU, 0, hal_device,
+      IREE_SV("CPU 0 (local-task)"), IREE_SV("host"), g_shared.host_allocator);
   if (!iree_status_is_ok(iree_status)) {
     iree_hal_device_release(hal_device);
     iree_hal_driver_release(driver);
     hrx_release_shared_state();
     return hrx_status_from_iree(iree_status);
   }
-
-  hrx_device_s* dev = &g_cpu.devices[0];
-  memset(dev, 0, sizeof(*dev));
-  iree_atomic_ref_count_init(&dev->ref_count);
-  dev->type = HRX_ACCELERATOR_CPU;
-  dev->ordinal = 0;
-  dev->hal_device = hal_device;
-  dev->hal_device_group = device_group;
-  dev->allocator.hal_allocator = iree_hal_device_allocator(hal_device);
-  iree_hal_allocator_retain(dev->allocator.hal_allocator);
-  iree_atomic_ref_count_init(&dev->allocator.ref_count);
-  dev->allocator.device = dev;
-  hrx_buffer_table_initialize(&dev->buffer_table);
-  iree_arena_block_pool_initialize(/*block_size=*/32 * 1024,
-                                   iree_allocator_system(), &dev->block_pool);
-  snprintf(dev->name, sizeof(dev->name), "CPU 0 (local-task)");
-  snprintf(dev->architecture, sizeof(dev->architecture), "host");
 
   g_cpu.driver = driver;
   g_cpu.device_count = 1;
@@ -678,9 +929,7 @@ hrx_status_t hrx_cpu_shutdown(void) {
   }
 
   for (int i = 0; i < g_cpu.device_count; i++) {
-    hrx_buffer_table_deinitialize(&g_cpu.devices[i].buffer_table);
-    iree_arena_block_pool_deinitialize(&g_cpu.devices[i].block_pool);
-    hrx_device_release(&g_cpu.devices[i]);
+    hrx_release_initialized_device(&g_cpu.devices[i]);
   }
   iree_hal_driver_release(g_cpu.driver);
   g_cpu.driver = NULL;
@@ -732,16 +981,25 @@ hrx_status_t hrx_gpu_initialize_with_device_extensions(
                            "GPU accelerator already initialized");
   }
 
-#ifndef HRX_HAS_IREE_AMDGPU_DRIVER
-  return hrx_make_status(
-      HRX_STATUS_UNAVAILABLE,
-      "no GPU driver available (built without AMDGPU support)");
-#else
   hrx_status_t status = hrx_ensure_shared_state();
   if (!hrx_status_is_ok(status)) return status;
 
   iree_allocator_t alloc = g_shared.host_allocator;
+  const char* driver_name = hrx_get_gpu_driver_name();
+  if (hrx_is_remote_hal_uri(driver_name)) {
+    status = hrx_gpu_initialize_remote(driver_name, alloc);
+    if (!hrx_status_is_ok(status)) {
+      hrx_release_shared_state();
+    }
+    return status;
+  }
 
+#ifndef HRX_HAS_IREE_AMDGPU_DRIVER
+  hrx_release_shared_state();
+  return hrx_make_status(
+      HRX_STATUS_UNAVAILABLE,
+      "no GPU driver available (built without AMDGPU support)");
+#else
   iree_hal_driver_t* driver = NULL;
   status = hrx_create_gpu_driver(alloc, &driver);
   if (!hrx_status_is_ok(status)) {
@@ -842,9 +1100,9 @@ hrx_status_t hrx_gpu_initialize_with_device_extensions(
       return hrx_status_from_iree(iree_status);
     }
 
-    iree_hal_device_group_t* device_group = NULL;
-    iree_status =
-        hrx_create_single_device_group(hal_device, alloc, &device_group);
+    iree_status = hrx_initialize_device_from_hal(
+        &g_gpu.devices[created_count], HRX_ACCELERATOR_GPU, created_count,
+        hal_device, device_infos[info_index].name, IREE_SV("unknown"), alloc);
     if (!iree_status_is_ok(iree_status)) {
       iree_hal_device_release(hal_device);
       hrx_gpu_release_created_devices(created_count);
@@ -856,28 +1114,9 @@ hrx_status_t hrx_gpu_initialize_with_device_extensions(
     }
 
     hrx_device_s* dev = &g_gpu.devices[created_count];
-    memset(dev, 0, sizeof(*dev));
-    iree_atomic_ref_count_init(&dev->ref_count);
-    dev->type = HRX_ACCELERATOR_GPU;
-    dev->ordinal = created_count;
-    dev->hal_device = hal_device;
-    dev->hal_device_group = device_group;
-    dev->allocator.hal_allocator = iree_hal_device_allocator(hal_device);
-    iree_hal_allocator_retain(dev->allocator.hal_allocator);
-    iree_atomic_ref_count_init(&dev->allocator.ref_count);
-    dev->allocator.device = dev;
-    hrx_buffer_table_initialize(&dev->buffer_table);
-    iree_arena_block_pool_initialize(/*block_size=*/32 * 1024,
-                                     iree_allocator_system(), &dev->block_pool);
-
-    iree_host_size_t name_len = device_infos[info_index].name.size;
-    if (name_len >= sizeof(dev->name)) name_len = sizeof(dev->name) - 1;
-    memcpy(dev->name, device_infos[info_index].name.data, name_len);
-    dev->name[name_len] = '\0';
-
     iree_status = hrx_set_gpu_architecture_from_hal(hal_device, dev);
     if (!iree_status_is_ok(iree_status)) {
-      hrx_device_release(dev);
+      hrx_release_initialized_device(dev);
       hrx_gpu_release_created_devices(created_count);
       iree_hal_profile_sink_release(profile_sink);
       iree_allocator_free(alloc, device_infos);
@@ -889,7 +1128,7 @@ hrx_status_t hrx_gpu_initialize_with_device_extensions(
     iree_status = hrx_device_profile_begin(dev, profile_sink);
     hrx_debug_print_iree_status("begin device profiling", iree_status);
     if (!iree_status_is_ok(iree_status)) {
-      hrx_device_release(dev);
+      hrx_release_initialized_device(dev);
       hrx_gpu_release_created_devices(created_count);
       iree_hal_profile_sink_release(profile_sink);
       iree_allocator_free(alloc, device_infos);
@@ -905,6 +1144,7 @@ hrx_status_t hrx_gpu_initialize_with_device_extensions(
   iree_allocator_free(alloc, device_infos);
   g_gpu.driver = driver;
   g_gpu.device_count = created_count;
+  g_gpu.backend = HRX_GPU_BACKEND_NATIVE;
   g_gpu.initialized = true;
   return hrx_ok_status();
 #endif  // HRX_HAS_IREE_AMDGPU_DRIVER
@@ -921,20 +1161,27 @@ hrx_status_t hrx_gpu_shutdown(void) {
                            "GPU accelerator not initialized");
   }
 
-  iree_status_t profiling_status = hrx_gpu_end_all_profiling();
+  iree_status_t status = hrx_gpu_end_all_profiling();
+#ifdef HRX_HAS_IREE_REMOTE_DRIVER
+  if (g_gpu.backend == HRX_GPU_BACKEND_REMOTE) {
+    for (int i = 0; i < g_gpu.device_count; ++i) {
+      status = iree_status_join(status, hrx_deactivate_remote_hal_device(
+                                            g_gpu.devices[i].hal_device));
+    }
+  }
+#endif  // HRX_HAS_IREE_REMOTE_DRIVER
   for (int i = 0; i < g_gpu.device_count; i++) {
-    hrx_buffer_table_deinitialize(&g_gpu.devices[i].buffer_table);
-    iree_arena_block_pool_deinitialize(&g_gpu.devices[i].block_pool);
-    hrx_device_release(&g_gpu.devices[i]);
+    hrx_release_initialized_device(&g_gpu.devices[i]);
   }
   iree_hal_driver_release(g_gpu.driver);
   g_gpu.driver = NULL;
 
   g_gpu.device_count = 0;
+  g_gpu.backend = HRX_GPU_BACKEND_NONE;
   g_gpu.initialized = false;
   hrx_release_shared_state();
-  if (!iree_status_is_ok(profiling_status)) {
-    return hrx_status_from_iree(profiling_status);
+  if (!iree_status_is_ok(status)) {
+    return hrx_status_from_iree(status);
   }
   return hrx_ok_status();
 }

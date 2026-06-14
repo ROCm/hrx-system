@@ -238,6 +238,44 @@ This path is for running HIP-based applications on the HRX compatibility layer.
 The passthrough/debug libraries under `libhrx/src/passthrough/` are separate
 developer tools for comparing behavior against the real ROCm HIP runtime.
 
+## Remote HAL Smoke Path
+
+HRX can also target an IREE remote HAL endpoint. The remote endpoint is selected
+through the existing GPU driver setting so HRX, the HIP compatibility layer, and
+CTS still use the normal `hrx_gpu_initialize()` and `hrx_gpu_device_get(0)`
+path.
+
+A local smoke run can use `local-task` behind `iree-serve-device`:
+
+```bash
+# Terminal 1: serve a local device.
+iree-bazel-run \
+  --//runtime/config/hal:drivers=local-sync,local-task,null,remote \
+  //runtime/src/iree/tools/iree-serve-device:iree-serve-device -- \
+  --device=local-task \
+  --bind=tcp://127.0.0.1:5000
+
+# Terminal 2: run HRX through the remote HAL client.
+iree-bazel-run \
+  --//runtime/config/hal:drivers=local-sync,local-task,null,remote \
+  //libhrx/tools:hrx-info -- \
+  --device=remote-tcp://127.0.0.1:5000
+```
+
+For preloaded HIP applications the same selection is just an environment
+change:
+
+```bash
+export HRX_GPU_DRIVER=remote-tcp://127.0.0.1:5000
+LD_PRELOAD="${HRX_ROOT}/lib/libamdhip64.so" ./my_hip_application
+```
+
+`remote-rdma://address?rdma=true` works the same way when HRX is built with the
+remote HAL and RDMA transport enabled and the server is started with an RDMA
+bind URI. If a local `.bazelrc.configured` already includes `remote` in
+`//runtime/config/hal:drivers`, the explicit driver flag is redundant; keeping
+it in the smoke command makes the client capability visible and reproducible.
+
 ## More Documentation
 
 - `BUILDING.md`: source-build, embedding, and build configuration options.

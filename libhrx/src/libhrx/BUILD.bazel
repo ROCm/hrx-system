@@ -88,11 +88,25 @@ HRX_DEPS = [
         "//runtime/src/iree/hal/drivers/amdgpu/registration",
     ],
     "//conditions:default": [],
+}) + iree_select({
+    "//runtime/config/hal:driver_remote": [
+        "//runtime/src/iree/base/internal:path",
+        "//runtime/src/iree/hal/remote/client",
+        "//runtime/src/iree/hal/remote/client/registration",
+    ],
+    "//conditions:default": [],
 })
 
 HRX_AMDGPU_COPTS = iree_select({
     "//runtime/config/hal:driver_amdgpu": [
         "-DHRX_HAS_IREE_AMDGPU_DRIVER",
+    ],
+    "//conditions:default": [],
+})
+
+HRX_REMOTE_COPTS = iree_select({
+    "//runtime/config/hal:driver_remote": [
+        "-DHRX_HAS_IREE_REMOTE_DRIVER",
     ],
     "//conditions:default": [],
 })
@@ -103,7 +117,7 @@ hrx_cc_library(
     name = "hrx_static",
     srcs = HRX_SRCS,
     hdrs = HRX_HDRS,
-    copts = HRX_AMDGPU_COPTS,
+    copts = HRX_AMDGPU_COPTS + HRX_REMOTE_COPTS,
     defines = ["HRX_STATIC"],
     includes = HRX_INCLUDES,
     deps = HRX_DEPS,
@@ -115,7 +129,7 @@ hrx_cc_shared_library(
     hdrs = HRX_HDRS,
     copts = [
         "-DHRX_BUILDING_SHARED",
-    ] + HRX_AMDGPU_COPTS,
+    ] + HRX_AMDGPU_COPTS + HRX_REMOTE_COPTS,
     includes = HRX_INCLUDES,
     deps = HRX_DEPS,
 )

@@ -27,6 +27,11 @@ void printStatusAndConsume(HrxLoader& loader, const char* context,
   loader.status_ignore(status);
 }
 
+bool isRemoteDeviceSpec(const std::string& device_spec) {
+  return device_spec.compare(0, 7, "remote-") == 0 &&
+         device_spec.find("://") != std::string::npos;
+}
+
 }  // namespace
 
 int main(int argc, char* argv[]) {
@@ -45,7 +50,7 @@ int main(int argc, char* argv[]) {
              Catch::Clara::Opt(hip_library, "path")["--hip-library"](
                  "Path to libamdhip64.so") |
              Catch::Clara::Opt(hrx_device_spec, "spec")["--hrx-device"](
-                 "Device spec (gpu:N, cpu:N, or none)");
+                 "Device spec (gpu:N, cpu:N, remote-*://URI, or none)");
   session.cli(cli);
 
   int ret = session.applyCommandLine(argc, argv);
@@ -73,12 +78,25 @@ int main(int argc, char* argv[]) {
     // Parse device spec.
     hrx_accelerator_type_t type = HRX_ACCELERATOR_CPU;
     int index = 0;
-    if (hrx_device_spec.substr(0, 4) == "gpu:") {
+    if (isRemoteDeviceSpec(hrx_device_spec)) {
+      type = HRX_ACCELERATOR_GPU;
+      if (setenv("HRX_GPU_DRIVER", hrx_device_spec.c_str(),
+                 /*overwrite=*/1) != 0) {
+        fprintf(stderr, "Failed to set HRX_GPU_DRIVER for remote device\n");
+        return 1;
+      }
+    } else if (hrx_device_spec.substr(0, 4) == "gpu:") {
       type = HRX_ACCELERATOR_GPU;
       index = std::atoi(hrx_device_spec.c_str() + 4);
     } else if (hrx_device_spec.substr(0, 4) == "cpu:") {
       type = HRX_ACCELERATOR_CPU;
       index = std::atoi(hrx_device_spec.c_str() + 4);
+    } else {
+      fprintf(stderr,
+              "Invalid HRX device spec '%s' (expected gpu:N, cpu:N, or "
+              "remote-*://URI)\n",
+              hrx_device_spec.c_str());
+      return 1;
     }
 
     // Initialize accelerator.

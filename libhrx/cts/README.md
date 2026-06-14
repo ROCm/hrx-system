@@ -45,3 +45,28 @@ ctest --test-dir build/hrx-runtime --output-on-failure
 build/hrx-runtime/cts/hrx_cts_allocator
 build/hrx-runtime/cts/hrx_cts_transfer
 ```
+
+### Remote HAL Device
+
+The CTS launcher accepts the same remote HAL URI shape as `hrx-info`. A local
+smoke run can serve an AMDGPU device over TCP and run a focused CTS binary
+through the remote HAL client:
+
+```bash
+# Terminal 1: serve a local device.
+iree-bazel-run \
+  --//runtime/config/hal:drivers=amdgpu,remote \
+  //runtime/src/iree/tools/iree-serve-device:iree-serve-device -- \
+  --device=amdgpu://0 \
+  --bind=tcp://127.0.0.1:5000
+
+# Terminal 2: run the CTS through the remote HAL client.
+iree-bazel-test \
+  --//runtime/config/hal:drivers=remote \
+  //libhrx/cts:hrx_cts_transfer \
+  --test_arg=--hrx-device=remote-tcp://127.0.0.1:5000
+```
+
+The launcher maps `remote-*://...` specs to `HRX_GPU_DRIVER` before calling
+`hrx_gpu_initialize()`, so the tests exercise the same HRX device lifecycle and
+stream/buffer API as a preloaded HIP application.

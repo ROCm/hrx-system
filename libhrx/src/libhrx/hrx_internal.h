@@ -618,10 +618,22 @@ typedef struct hrx_cpu_state_t {
   iree_hal_driver_t* driver;
 } hrx_cpu_state_t;
 
+typedef enum hrx_gpu_backend_e {
+  HRX_GPU_BACKEND_NONE = 0,
+  HRX_GPU_BACKEND_NATIVE = 1,
+  HRX_GPU_BACKEND_REMOTE = 2,
+} hrx_gpu_backend_t;
+
 typedef struct hrx_gpu_state_t {
+  // Inline storage for the enumerated GPU devices.
   hrx_device_s devices[HRX_MAX_DEVICES];
+  // Number of initialized entries in |devices|.
   int device_count;
+  // True while the GPU subsystem owns the driver and devices.
   bool initialized;
+  // Backend kind controlling backend-specific teardown.
+  hrx_gpu_backend_t backend;
+  // Retained HAL driver owning the devices.
   iree_hal_driver_t* driver;
 } hrx_gpu_state_t;
 

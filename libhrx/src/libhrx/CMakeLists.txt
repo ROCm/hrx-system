@@ -94,6 +94,11 @@ set(_hrx_platform_deps "")
 if(IREE_HAL_DRIVER_AMDGPU)
   list(APPEND _hrx_platform_deps iree::hal::drivers::amdgpu::registration)
 endif()
+if(IREE_HAL_DRIVER_REMOTE)
+  list(APPEND _hrx_platform_deps iree::base::internal::path)
+  list(APPEND _hrx_platform_deps iree::hal::remote::client)
+  list(APPEND _hrx_platform_deps iree::hal::remote::client::registration)
+endif()
 iree_cc_library(
   NAME
     hrx
@@ -216,6 +221,16 @@ if(IREE_HAL_DRIVER_AMDGPU)
   )
   target_compile_definitions(libhrx_src_libhrx_hrx.objects PRIVATE
     HRX_HAS_IREE_AMDGPU_DRIVER
+  )
+endif()
+if(IREE_HAL_DRIVER_REMOTE)
+  target_link_libraries(libhrx_src_libhrx_hrx PRIVATE
+    iree::base::internal::path
+    iree::hal::remote::client
+    iree::hal::remote::client::registration
+  )
+  target_compile_definitions(libhrx_src_libhrx_hrx.objects PRIVATE
+    HRX_HAS_IREE_REMOTE_DRIVER
   )
 endif()
 # IREE's allocator selector is exposed as a compile definition on the base

@@ -225,9 +225,18 @@ static int run_device_smoke_test(hrx_device_t device, const char* label) {
   return result;
 }
 
+static bool is_remote_device_spec(const char* spec) {
+  if (!spec) return false;
+  return strncmp(spec, "remote-", 7) == 0 && strstr(spec, "://");
+}
+
 static int parse_device_spec(const char* spec, hrx_accelerator_type_t* type,
                              int* index) {
-  if (strncmp(spec, "gpu:", 4) == 0) {
+  if (is_remote_device_spec(spec)) {
+    *type = HRX_ACCELERATOR_GPU;
+    *index = 0;
+    return 0;
+  } else if (strncmp(spec, "gpu:", 4) == 0) {
     *type = HRX_ACCELERATOR_GPU;
     *index = atoi(spec + 4);
     return 0;
@@ -236,7 +245,10 @@ static int parse_device_spec(const char* spec, hrx_accelerator_type_t* type,
     *index = atoi(spec + 4);
     return 0;
   }
-  fprintf(stderr, "Invalid device spec: %s (expected gpu:N or cpu:N)\n", spec);
+  fprintf(
+      stderr,
+      "Invalid device spec: %s (expected gpu:N, cpu:N, or remote-*://URI)\n",
+      spec);
   return 1;
 }
 
@@ -253,7 +265,9 @@ int main(int argc, char** argv) {
     } else if (strcmp(argv[i], "--test=all") == 0) {
       test_all = true;
     } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
-      printf("Usage: hrx-info [--device=gpu:0|cpu:0] [--test=all]\n");
+      printf(
+          "Usage: hrx-info [--device=gpu:0|cpu:0|remote-*://URI] "
+          "[--test=all]\n");
       printf("  (no args)      Print version and device list\n");
       printf("  --device=DEV   Run smoke test on specific device\n");
       printf("  --test=all     Run smoke tests on all devices\n");
@@ -272,6 +286,12 @@ int main(int argc, char** argv) {
   if (device_spec &&
       parse_device_spec(device_spec, &requested_type, &requested_index) != 0) {
     return 1;
+  }
+  if (device_spec && is_remote_device_spec(device_spec)) {
+    if (setenv("HRX_GPU_DRIVER", device_spec, /*overwrite=*/1) != 0) {
+      fprintf(stderr, "Failed to set HRX_GPU_DRIVER for remote device\n");
+      return 1;
+    }
   }
 
   const bool need_gpu =
