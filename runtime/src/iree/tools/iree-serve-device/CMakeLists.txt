@@ -9,6 +9,14 @@
 
 iree_add_all_subdirs()
 
+set(_transport_platform_defines "")
+if(IREE_NET_TRANSPORT_RDMA)
+  list(APPEND _transport_platform_defines "IREE_HAVE_NET_RDMA_TRANSPORT=1")
+endif()
+set(_transport_platform_deps "")
+if(IREE_NET_TRANSPORT_RDMA)
+  list(APPEND _transport_platform_deps iree::net::carrier::rdma::factory)
+endif()
 iree_cc_library(
   NAME
     transport
@@ -22,6 +30,9 @@ iree_cc_library(
     iree::net::carrier::shm::factory
     iree::net::carrier::tcp::factory
     iree::net::transport_factory
+    ${_transport_platform_deps}
+  DEFINES
+    ${_transport_platform_defines}
   PUBLIC
 )
 

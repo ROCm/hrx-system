@@ -10,6 +10,10 @@
 #include "iree/net/carrier/shm/factory.h"
 #include "iree/net/carrier/tcp/factory.h"
 
+#if defined(IREE_HAVE_NET_RDMA_TRANSPORT)
+#include "iree/net/carrier/rdma/factory.h"
+#endif  // IREE_HAVE_NET_RDMA_TRANSPORT
+
 iree_status_t iree_serve_device_parse_bind_uri(
     iree_string_view_t bind_uri, iree_serve_device_bind_t* out_bind) {
   iree_string_view_t remainder = bind_uri;
@@ -23,10 +27,22 @@ iree_status_t iree_serve_device_parse_bind_uri(
     out_bind->bind_address = remainder;
     return iree_ok_status();
   }
+#if defined(IREE_HAVE_NET_RDMA_TRANSPORT)
+  if (iree_string_view_consume_prefix(&remainder, IREE_SV("rdma://"))) {
+    out_bind->transport_name = IREE_SV("rdma");
+    out_bind->bind_address = remainder;
+    return iree_ok_status();
+  }
+#endif  // IREE_HAVE_NET_RDMA_TRANSPORT
+#if defined(IREE_HAVE_NET_RDMA_TRANSPORT)
+  const char* expected_prefixes = "tcp://, shm://, rdma://";
+#else
+  const char* expected_prefixes = "tcp://, shm://";
+#endif  // IREE_HAVE_NET_RDMA_TRANSPORT
   return iree_make_status(
       IREE_STATUS_INVALID_ARGUMENT,
-      "bind URI must have a transport prefix (tcp://, shm://), got: '%.*s'",
-      (int)bind_uri.size, bind_uri.data);
+      "bind URI must have a transport prefix (%s), got: '%.*s'",
+      expected_prefixes, (int)bind_uri.size, bind_uri.data);
 }
 
 iree_status_t iree_serve_device_create_transport_factory(
@@ -49,6 +65,18 @@ iree_status_t iree_serve_device_create_transport_factory(
     IREE_TRACE_ZONE_END(z0);
     return status;
   }
+#if defined(IREE_HAVE_NET_RDMA_TRANSPORT)
+  if (iree_string_view_equal(transport_name, IREE_SV("rdma"))) {
+    iree_net_rdma_factory_options_t rdma_options =
+        iree_net_rdma_factory_options_default();
+    // HAL remote requires control, queue, and bulk endpoints per connection.
+    rdma_options.max_endpoint_count = IREE_HAL_REMOTE_REQUIRED_ENDPOINT_COUNT;
+    iree_status_t status =
+        iree_net_rdma_factory_create(rdma_options, host_allocator, out_factory);
+    IREE_TRACE_ZONE_END(z0);
+    return status;
+  }
+#endif  // IREE_HAVE_NET_RDMA_TRANSPORT
   IREE_TRACE_ZONE_END(z0);
   return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                           "unsupported transport: %.*s",

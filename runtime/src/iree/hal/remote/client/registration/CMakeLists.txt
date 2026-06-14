@@ -29,6 +29,11 @@ if(IREE_NET_TRANSPORT_SHM)
   list(APPEND _DEPS iree::net::carrier::shm::factory)
 endif()
 
+if(IREE_NET_TRANSPORT_RDMA)
+  list(APPEND _DEFINES "IREE_HAVE_NET_RDMA_TRANSPORT=1")
+  list(APPEND _DEPS iree::net::carrier::rdma::factory)
+endif()
+
 iree_cc_library(
   NAME
     registration

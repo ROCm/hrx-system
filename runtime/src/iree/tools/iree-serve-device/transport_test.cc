@@ -32,6 +32,13 @@ TEST(ServeDeviceTransportTest, ParsesShmBindUri) {
              IREE_SV("/dev/shm/iree-gpu"));
 }
 
+#if defined(IREE_HAVE_NET_RDMA_TRANSPORT)
+TEST(ServeDeviceTransportTest, ParsesRdmaBindUri) {
+  ExpectBind(IREE_SV("rdma://192.0.2.10:7471"), IREE_SV("rdma"),
+             IREE_SV("192.0.2.10:7471"));
+}
+#endif  // IREE_HAVE_NET_RDMA_TRANSPORT
+
 TEST(ServeDeviceTransportTest, RejectsBindUriWithoutKnownTransport) {
   iree_serve_device_bind_t bind;
   IREE_EXPECT_STATUS_IS(
@@ -63,6 +70,20 @@ TEST(ServeDeviceTransportTest, CreatesShmTransportFactory) {
   EXPECT_TRUE(capabilities & IREE_NET_TRANSPORT_CAPABILITY_ORDERED);
   iree_net_transport_factory_release(factory);
 }
+
+#if defined(IREE_HAVE_NET_RDMA_TRANSPORT)
+TEST(ServeDeviceTransportTest, CreatesRdmaTransportFactory) {
+  iree_net_transport_factory_t* factory = nullptr;
+  IREE_ASSERT_OK(iree_serve_device_create_transport_factory(
+      IREE_SV("rdma"), iree_allocator_system(), &factory));
+  iree_net_transport_capabilities_t capabilities =
+      iree_net_transport_factory_query_capabilities(factory);
+  EXPECT_TRUE(capabilities & IREE_NET_TRANSPORT_CAPABILITY_RELIABLE);
+  EXPECT_TRUE(capabilities & IREE_NET_TRANSPORT_CAPABILITY_ORDERED);
+  EXPECT_TRUE(capabilities & IREE_NET_TRANSPORT_CAPABILITY_RDMA);
+  iree_net_transport_factory_release(factory);
+}
+#endif  // IREE_HAVE_NET_RDMA_TRANSPORT
 
 TEST(ServeDeviceTransportTest, RejectsUnsupportedTransportFactory) {
   iree_net_transport_factory_t* factory = nullptr;

@@ -569,7 +569,7 @@ iree_cc_test(
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA AND IREE_HAL_DRIVER_AMDGPU)
 iree_cc_test(
   NAME
     dmabuf_registration_test

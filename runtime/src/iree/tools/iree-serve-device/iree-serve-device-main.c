@@ -31,11 +31,28 @@
 #include "iree/tooling/device_util.h"
 #include "iree/tools/iree-serve-device/transport.h"
 
+#if defined(IREE_HAVE_NET_RDMA_TRANSPORT)
+#define IREE_SERVE_DEVICE_RDMA_BIND_HELP \
+  "  rdma://address       RDMA CM (Linux)\n"
+#define IREE_SERVE_DEVICE_RDMA_USAGE_EXAMPLE                             \
+  "\n"                                                                   \
+  "  # Serve over RDMA\n"                                                \
+  "  iree-serve-device --device=hip://0 --bind=rdma://192.0.2.10:7471\n" \
+  "\n"                                                                   \
+  "  # Connect over RDMA\n"                                              \
+  "  iree-run-module --device=remote-rdma://192.0.2.10:7471 "            \
+  "--module=model.vmfb\n"
+#else
+#define IREE_SERVE_DEVICE_RDMA_BIND_HELP ""
+#define IREE_SERVE_DEVICE_RDMA_USAGE_EXAMPLE ""
+#endif  // IREE_HAVE_NET_RDMA_TRANSPORT
+
 IREE_FLAG(string, bind, "tcp://0.0.0.0:5000",
           "Address to bind the server to.\n"
           "Transport prefixes:\n"
           "  tcp://host:port       TCP sockets (default)\n"
-          "  shm:///path           Shared memory (local IPC)");
+          "  shm:///path           Shared memory (local "
+          "IPC)\n" IREE_SERVE_DEVICE_RDMA_BIND_HELP);
 
 IREE_FLAG(int32_t, max_connections, 16,
           "Maximum number of concurrent client connections.");
@@ -539,7 +556,7 @@ int main(int argc, char** argv) {
       "\n"
       "  # Connect via shared memory\n"
       "  iree-run-module --device=remote-shm:///dev/shm/iree-gpu "
-      "--module=model.vmfb\n");
+      "--module=model.vmfb\n" IREE_SERVE_DEVICE_RDMA_USAGE_EXAMPLE);
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
 
   iree_status_t status = iree_serve_device_run();

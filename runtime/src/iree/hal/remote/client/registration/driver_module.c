@@ -19,11 +19,16 @@
 #include "iree/net/carrier/shm/factory.h"
 #endif  // IREE_HAVE_NET_SHM_TRANSPORT
 
+#if defined(IREE_HAVE_NET_RDMA_TRANSPORT)
+#include "iree/net/carrier/rdma/factory.h"
+#endif  // IREE_HAVE_NET_RDMA_TRANSPORT
+
 // Remote HAL drivers organized by transport name.
 // Each transport uses the same URI scheme (host:port or path) but different
 // underlying transport mechanisms. This allows:
 //   --device=remote-tcp://server:5000   (TCP sockets)
 //   --device=remote-shm:///dev/shm/iree (Shared memory for testing)
+//   --device=remote-rdma://addr         (RDMA CM)
 //
 // The transport name after "remote-" determines which factory is created.
 // Available transports depend on what has been compiled in via the
@@ -46,6 +51,12 @@ static const iree_hal_driver_info_t iree_hal_remote_driver_infos[] = {
         .full_name = IREE_SVL("Remote HAL Client (Shared Memory)"),
     },
 #endif  // IREE_HAVE_NET_SHM_TRANSPORT
+#if defined(IREE_HAVE_NET_RDMA_TRANSPORT)
+    {
+        .driver_name = IREE_SVL("remote-rdma"),
+        .full_name = IREE_SVL("Remote HAL Client (RDMA)"),
+    },
+#endif  // IREE_HAVE_NET_RDMA_TRANSPORT
 };
 
 static iree_status_t iree_hal_remote_client_driver_factory_enumerate(
@@ -102,6 +113,17 @@ static iree_status_t iree_hal_remote_client_create_transport_factory(
                                        host_allocator, out_factory);
   }
 #endif  // IREE_HAVE_NET_SHM_TRANSPORT
+
+#if defined(IREE_HAVE_NET_RDMA_TRANSPORT)
+  if (iree_string_view_equal(transport_name, IREE_SV("rdma"))) {
+    iree_net_rdma_factory_options_t rdma_options =
+        iree_net_rdma_factory_options_default();
+    // HAL remote requires control, queue, and bulk endpoints per connection.
+    rdma_options.max_endpoint_count = IREE_HAL_REMOTE_REQUIRED_ENDPOINT_COUNT;
+    return iree_net_rdma_factory_create(rdma_options, host_allocator,
+                                        out_factory);
+  }
+#endif  // IREE_HAVE_NET_RDMA_TRANSPORT
 
   return iree_make_status(IREE_STATUS_UNAVAILABLE,
                           "transport '%.*s' not compiled in",

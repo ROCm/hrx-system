@@ -27,6 +27,13 @@ _RDMA_TRANSPORT_ENABLED = select({
 
 _RDMA_COMPATIBLE = _LINUX_ONLY + _RDMA_TRANSPORT_ENABLED
 
+_AMDGPU_DRIVER_ENABLED = select({
+    "//runtime/config/hal:driver_amdgpu": [],
+    "//conditions:default": ["@platforms//:incompatible"],
+})
+
+_RDMA_AMDGPU_COMPATIBLE = _RDMA_COMPATIBLE + _AMDGPU_DRIVER_ENABLED
+
 iree_runtime_cc_library(
     name = "libverbs",
     srcs = [
@@ -512,7 +519,7 @@ iree_runtime_cc_test(
         "nodocker",
         "requires-gpu-amd",
     ],
-    target_compatible_with = _RDMA_COMPATIBLE,
+    target_compatible_with = _RDMA_AMDGPU_COMPATIBLE,
     deps = [
         ":libverbs",
         "//runtime/src/iree/base",

@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/bazel:select.bzl", "iree_select")
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_binary", "iree_runtime_cc_library")
 load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
 
@@ -17,13 +18,20 @@ iree_runtime_cc_library(
     name = "transport",
     srcs = ["transport.c"],
     hdrs = ["transport.h"],
+    defines = iree_select({
+        "//runtime/config/net:transport_rdma": ["IREE_HAVE_NET_RDMA_TRANSPORT=1"],
+        "//conditions:default": [],
+    }),
     deps = [
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal/remote/protocol:common",
         "//runtime/src/iree/net:transport_factory",
         "//runtime/src/iree/net/carrier/shm:factory",
         "//runtime/src/iree/net/carrier/tcp:factory",
-    ],
+    ] + iree_select({
+        "//runtime/config/net:transport_rdma": ["//runtime/src/iree/net/carrier/rdma:factory"],
+        "//conditions:default": [],
+    }),
 )
 
 iree_runtime_cc_test(

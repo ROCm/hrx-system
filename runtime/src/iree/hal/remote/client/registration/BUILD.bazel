@@ -25,6 +25,9 @@ iree_runtime_cc_library(
     }) + iree_select({
         "//runtime/config/net:transport_shm": ["IREE_HAVE_NET_SHM_TRANSPORT=1"],
         "//conditions:default": [],
+    }) + iree_select({
+        "//runtime/config/net:transport_rdma": ["IREE_HAVE_NET_RDMA_TRANSPORT=1"],
+        "//conditions:default": [],
     }),
     deps = [
         "//runtime/src/iree/base",
@@ -37,6 +40,9 @@ iree_runtime_cc_library(
         "//conditions:default": [],
     }) + iree_select({
         "//runtime/config/net:transport_shm": ["//runtime/src/iree/net/carrier/shm:factory"],
+        "//conditions:default": [],
+    }) + iree_select({
+        "//runtime/config/net:transport_rdma": ["//runtime/src/iree/net/carrier/rdma:factory"],
         "//conditions:default": [],
     }),
 )
