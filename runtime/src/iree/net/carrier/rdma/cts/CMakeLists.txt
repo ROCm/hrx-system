@@ -9,7 +9,7 @@
 
 iree_add_all_subdirs()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_library(
   NAME
     backends
@@ -32,7 +32,7 @@ iree_cc_library(
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_test(
   NAME
     rdma_tests
@@ -52,7 +52,7 @@ iree_cc_test(
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_binary_benchmark(
   NAME
     rdma_benchmarks
@@ -69,7 +69,7 @@ iree_cc_binary_benchmark(
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_fuzz(
   NAME
     rdma_carrier_fuzz

@@ -26,6 +26,8 @@ iree_hal_cts_testdata(
     "--iree-hal-local-target-device-backends=vmvx"
 )
 
+iree_package_ns(_IREE_OPTIONAL_TESTDATA_PACKAGE_NS)
+if(TARGET ${_IREE_OPTIONAL_TESTDATA_PACKAGE_NS}::testdata_vmvx)
 iree_cc_test(
   NAME
     remote_session_test
@@ -54,5 +56,7 @@ iree_cc_test(
     iree::testing::gtest_main
     iree::testing::temp_file
 )
+
+endif()
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

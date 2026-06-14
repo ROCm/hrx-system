@@ -1047,21 +1047,17 @@ class BuildFileFunctions(object):
             return self._convert_string_arg_block("INTERNALIZE", "OFF", quote=False)
         return ""
 
-    def _local_cts_testdata_lib_deps(self, deps):
+    def _optional_cts_testdata_deps(self, deps):
         if isinstance(deps, MixedDeps):
             deps = deps.unconditional
         if not deps:
             return []
         return [
-            dep
-            for dep in deps
-            if isinstance(dep, str)
-            and dep.startswith(":testdata_")
-            and dep.endswith("_lib")
+            dep for dep in deps if isinstance(dep, str) and dep.startswith(":testdata_")
         ]
 
-    def _emit_optional_local_cts_testdata_guard_begin(self, deps):
-        testdata_deps = self._local_cts_testdata_lib_deps(deps)
+    def _emit_optional_cts_testdata_guard_begin(self, deps):
+        testdata_deps = self._optional_cts_testdata_deps(deps)
         if not testdata_deps:
             return False
 
@@ -1083,7 +1079,7 @@ class BuildFileFunctions(object):
         )
         return True
 
-    def _emit_optional_local_cts_testdata_guard_end(self, did_emit_guard):
+    def _emit_optional_cts_testdata_guard_end(self, did_emit_guard):
         if did_emit_guard:
             self._converter.body += "endif()\n\n"
 
@@ -1803,9 +1799,7 @@ class BuildFileFunctions(object):
         )
 
         self._emit_platform_guard_begin(target_compatible_with)
-        did_emit_testdata_guard = self._emit_optional_local_cts_testdata_guard_begin(
-            deps
-        )
+        did_emit_testdata_guard = self._emit_optional_cts_testdata_guard_begin(deps)
         if platform_copts_block:
             self._converter.body += platform_copts_block
         if platform_defines_block:
@@ -1831,7 +1825,7 @@ class BuildFileFunctions(object):
             f"{sanitizer_suppressions_block}"
             f")\n\n"
         )
-        self._emit_optional_local_cts_testdata_guard_end(did_emit_testdata_guard)
+        self._emit_optional_cts_testdata_guard_end(did_emit_testdata_guard)
         self._emit_platform_guard_end(target_compatible_with)
 
     def iree_cc_test(self, **kwargs):

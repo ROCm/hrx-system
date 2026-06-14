@@ -20,11 +20,18 @@ _LINUX_ONLY = select({
     "//conditions:default": ["@platforms//:incompatible"],
 })
 
+_RDMA_TRANSPORT_ENABLED = select({
+    "//runtime/config/net:transport_rdma": [],
+    "//conditions:default": ["@platforms//:incompatible"],
+})
+
+_RDMA_COMPATIBLE = _LINUX_ONLY + _RDMA_TRANSPORT_ENABLED
+
 iree_runtime_cc_library(
     name = "backends",
     testonly = True,
     srcs = ["backends.cc"],
-    target_compatible_with = _LINUX_ONLY,
+    target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         "//runtime/src/iree/async",
         "//runtime/src/iree/async:platform",
@@ -50,7 +57,7 @@ iree_runtime_cc_test(
     tags = [
         "nodocker",
     ],
-    target_compatible_with = _LINUX_ONLY,
+    target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         ":backends",
         "//runtime/src/iree/async",
@@ -67,7 +74,7 @@ iree_runtime_cc_benchmark(
     tags = [
         "nodocker",
     ],
-    target_compatible_with = _LINUX_ONLY,
+    target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         ":backends",
         "//runtime/src/iree/net/carrier/cts:all_benchmarks",
@@ -81,7 +88,7 @@ iree_runtime_cc_fuzz(
     tags = [
         "nodocker",
     ],
-    target_compatible_with = _LINUX_ONLY,
+    target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         ":backends",
         "//runtime/src/iree/net/carrier/cts:carrier_fuzz_lib",
