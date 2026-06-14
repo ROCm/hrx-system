@@ -150,6 +150,16 @@ static inline void iree_hal_remote_client_buffer_set_resource_id(
   ((iree_hal_remote_client_buffer_t*)buffer)->resource_id = resolved_id;
 }
 
+// Disarms server-side resource release for a buffer whose remote allocation
+// was explicitly released by another allocator API.
+static inline void iree_hal_remote_client_buffer_disown_remote_resource(
+    iree_hal_buffer_t* buffer) {
+  iree_hal_buffer_t* allocated = iree_hal_buffer_allocated_buffer(buffer);
+  if (allocated) buffer = allocated;
+  ((iree_hal_remote_client_buffer_t*)buffer)->owns_remote_resource = false;
+  ((iree_hal_remote_client_buffer_t*)buffer)->resource_id = 0;
+}
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

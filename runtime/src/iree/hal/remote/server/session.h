@@ -142,6 +142,18 @@ typedef struct iree_hal_remote_server_session_t {
     // Capacity of each provisional map array.
     iree_host_size_t capacity;
   } provisional_map;
+
+  // Buffer resource IDs that represent virtual address reservations. These
+  // must be released through iree_hal_allocator_virtual_memory_release instead
+  // of the generic buffer destructor.
+  struct {
+    // Resource IDs in |resource_table| that are virtual reservations.
+    iree_hal_remote_resource_id_t* resource_ids;
+    // Number of virtual reservation IDs currently tracked.
+    iree_host_size_t count;
+    // Capacity of |resource_ids|.
+    iree_host_size_t capacity;
+  } virtual_buffer_map;
 } iree_hal_remote_server_session_t;
 
 // Called when session bootstrap completes and the session is ready for use.
@@ -207,6 +219,11 @@ void iree_hal_remote_server_session_deinitialize_windows(
 
 // Deinitializes provisional mappings and releases any parked queue commands.
 void iree_hal_remote_server_session_deinitialize_provisionals(
+    iree_hal_remote_server_session_t* session_slot,
+    iree_allocator_t host_allocator);
+
+// Deinitializes the resource table and VM-reservation metadata.
+void iree_hal_remote_server_session_deinitialize_resource_table(
     iree_hal_remote_server_session_t* session_slot,
     iree_allocator_t host_allocator);
 

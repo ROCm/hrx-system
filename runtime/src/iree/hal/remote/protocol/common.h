@@ -76,6 +76,7 @@ typedef enum iree_hal_remote_resource_type_e {
   IREE_HAL_REMOTE_RESOURCE_TYPE_COMMAND_BUFFER = 0x04,
   IREE_HAL_REMOTE_RESOURCE_TYPE_FILE = 0x05,
   IREE_HAL_REMOTE_RESOURCE_TYPE_EVENT = 0x06,
+  IREE_HAL_REMOTE_RESOURCE_TYPE_PHYSICAL_MEMORY = 0x07,
 } iree_hal_remote_resource_type_t;
 
 // Resource ID flag bits (bits [55:48] of resource ID).

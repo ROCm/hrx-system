@@ -122,6 +122,16 @@ typedef enum iree_hal_remote_control_type_e {
   IREE_HAL_REMOTE_CONTROL_BUFFER_MAP = 0x0052,
   IREE_HAL_REMOTE_CONTROL_BUFFER_UNMAP = 0x0053,
   IREE_HAL_REMOTE_CONTROL_BUFFER_QUERY_HEAPS = 0x0054,
+  IREE_HAL_REMOTE_CONTROL_BUFFER_VIRTUAL_QUERY_CAPABILITIES = 0x0055,
+  IREE_HAL_REMOTE_CONTROL_BUFFER_VIRTUAL_QUERY_GRANULARITY = 0x0056,
+  IREE_HAL_REMOTE_CONTROL_BUFFER_VIRTUAL_RESERVE = 0x0057,  // [epoch]
+  IREE_HAL_REMOTE_CONTROL_BUFFER_VIRTUAL_RELEASE = 0x0058,  // [epoch]
+  IREE_HAL_REMOTE_CONTROL_BUFFER_PHYSICAL_ALLOC = 0x0059,   // [epoch]
+  IREE_HAL_REMOTE_CONTROL_BUFFER_PHYSICAL_FREE = 0x005A,    // [epoch]
+  IREE_HAL_REMOTE_CONTROL_BUFFER_VIRTUAL_MAP = 0x005B,
+  IREE_HAL_REMOTE_CONTROL_BUFFER_VIRTUAL_UNMAP = 0x005C,
+  IREE_HAL_REMOTE_CONTROL_BUFFER_VIRTUAL_PROTECT = 0x005D,
+  IREE_HAL_REMOTE_CONTROL_BUFFER_VIRTUAL_ADVISE = 0x005E,
 
   // ── Host Call ───────────────────────────────────────────────────────────
   // Reserved for future explicit server-side named handlers. HAL
@@ -744,6 +754,139 @@ typedef struct iree_hal_remote_buffer_query_heaps_response_t {
   //   iree_hal_remote_memory_heap_t heaps[heap_count]
 } iree_hal_remote_buffer_query_heaps_response_t;
 static_assert(sizeof(iree_hal_remote_buffer_query_heaps_response_t) == 8, "");
+
+// BUFFER_VIRTUAL_QUERY_CAPABILITIES request. Queries allocator-level virtual
+// memory capabilities that are not parameter-specific.
+typedef struct iree_hal_remote_buffer_virtual_query_capabilities_request_t {
+  uint32_t flags;     // Reserved, must be 0.
+  uint32_t reserved;  // Must be 0.
+} iree_hal_remote_buffer_virtual_query_capabilities_request_t;
+static_assert(
+    sizeof(iree_hal_remote_buffer_virtual_query_capabilities_request_t) == 8,
+    "");
+
+// BUFFER_VIRTUAL_QUERY_CAPABILITIES response. Nonzero when the server allocator
+// exposes the HAL virtual memory surface.
+typedef struct iree_hal_remote_buffer_virtual_query_capabilities_response_t {
+  uint32_t supports_virtual_memory;
+  uint32_t reserved;  // Must be 0.
+} iree_hal_remote_buffer_virtual_query_capabilities_response_t;
+static_assert(
+    sizeof(iree_hal_remote_buffer_virtual_query_capabilities_response_t) == 8,
+    "");
+
+// BUFFER_VIRTUAL_QUERY_GRANULARITY request.
+typedef struct iree_hal_remote_buffer_virtual_query_granularity_request_t {
+  iree_hal_remote_buffer_params_t params;
+} iree_hal_remote_buffer_virtual_query_granularity_request_t;
+static_assert(
+    sizeof(iree_hal_remote_buffer_virtual_query_granularity_request_t) == 32,
+    "");
+
+// BUFFER_VIRTUAL_QUERY_GRANULARITY response.
+typedef struct iree_hal_remote_buffer_virtual_query_granularity_response_t {
+  uint64_t minimum_page_size;
+  uint64_t recommended_page_size;
+} iree_hal_remote_buffer_virtual_query_granularity_response_t;
+static_assert(
+    sizeof(iree_hal_remote_buffer_virtual_query_granularity_response_t) == 16,
+    "");
+
+// BUFFER_VIRTUAL_RESERVE request. Reserves a virtual address range on the
+// server.
+typedef struct iree_hal_remote_buffer_virtual_reserve_request_t {
+  uint64_t queue_affinity;  // iree_hal_queue_affinity_t
+  uint64_t size;
+} iree_hal_remote_buffer_virtual_reserve_request_t;
+static_assert(sizeof(iree_hal_remote_buffer_virtual_reserve_request_t) == 16,
+              "");
+
+// BUFFER_VIRTUAL_RESERVE response. Returns the resolved virtual buffer
+// resource.
+typedef struct iree_hal_remote_buffer_virtual_reserve_response_t {
+  iree_hal_remote_resource_id_t resolved_id;
+  iree_hal_remote_buffer_params_t params;
+  uint64_t allocation_size;
+  uint32_t placement_flags;  // iree_hal_buffer_placement_flags_t
+  uint32_t reserved;         // Must be 0.
+} iree_hal_remote_buffer_virtual_reserve_response_t;
+static_assert(sizeof(iree_hal_remote_buffer_virtual_reserve_response_t) == 56,
+              "");
+
+// BUFFER_VIRTUAL_RELEASE request. Releases a virtual address reservation.
+typedef struct iree_hal_remote_buffer_virtual_release_request_t {
+  iree_hal_remote_resource_id_t buffer_id;
+} iree_hal_remote_buffer_virtual_release_request_t;
+static_assert(sizeof(iree_hal_remote_buffer_virtual_release_request_t) == 8,
+              "");
+// Response: status only (no body).
+
+// BUFFER_PHYSICAL_ALLOC request. Allocates physical memory for later mapping.
+typedef struct iree_hal_remote_buffer_physical_alloc_request_t {
+  iree_hal_remote_buffer_params_t params;
+  uint64_t size;
+} iree_hal_remote_buffer_physical_alloc_request_t;
+static_assert(sizeof(iree_hal_remote_buffer_physical_alloc_request_t) == 40,
+              "");
+
+// BUFFER_PHYSICAL_ALLOC response.
+typedef struct iree_hal_remote_buffer_physical_alloc_response_t {
+  iree_hal_remote_resource_id_t resolved_id;
+} iree_hal_remote_buffer_physical_alloc_response_t;
+static_assert(sizeof(iree_hal_remote_buffer_physical_alloc_response_t) == 8,
+              "");
+
+// BUFFER_PHYSICAL_FREE request. Frees physical memory.
+typedef struct iree_hal_remote_buffer_physical_free_request_t {
+  iree_hal_remote_resource_id_t physical_memory_id;
+} iree_hal_remote_buffer_physical_free_request_t;
+static_assert(sizeof(iree_hal_remote_buffer_physical_free_request_t) == 8, "");
+// Response: status only (no body).
+
+// BUFFER_VIRTUAL_MAP request. Maps physical memory into a virtual reservation.
+typedef struct iree_hal_remote_buffer_virtual_map_request_t {
+  iree_hal_remote_resource_id_t buffer_id;
+  iree_hal_remote_resource_id_t physical_memory_id;
+  uint64_t virtual_offset;
+  uint64_t physical_offset;
+  uint64_t size;
+} iree_hal_remote_buffer_virtual_map_request_t;
+static_assert(sizeof(iree_hal_remote_buffer_virtual_map_request_t) == 40, "");
+// Response: status only (no body).
+
+// BUFFER_VIRTUAL_UNMAP request. Unmaps part of a virtual reservation.
+typedef struct iree_hal_remote_buffer_virtual_unmap_request_t {
+  iree_hal_remote_resource_id_t buffer_id;
+  uint64_t virtual_offset;
+  uint64_t size;
+} iree_hal_remote_buffer_virtual_unmap_request_t;
+static_assert(sizeof(iree_hal_remote_buffer_virtual_unmap_request_t) == 24, "");
+// Response: status only (no body).
+
+// BUFFER_VIRTUAL_PROTECT request. Changes protection on a virtual memory range.
+typedef struct iree_hal_remote_buffer_virtual_protect_request_t {
+  iree_hal_remote_resource_id_t buffer_id;
+  uint64_t virtual_offset;
+  uint64_t size;
+  uint64_t queue_affinity;  // iree_hal_queue_affinity_t
+  uint64_t protection;      // iree_hal_memory_protection_t
+} iree_hal_remote_buffer_virtual_protect_request_t;
+static_assert(sizeof(iree_hal_remote_buffer_virtual_protect_request_t) == 40,
+              "");
+// Response: status only (no body).
+
+// BUFFER_VIRTUAL_ADVISE request. Applies usage advice to a virtual memory
+// range.
+typedef struct iree_hal_remote_buffer_virtual_advise_request_t {
+  iree_hal_remote_resource_id_t buffer_id;
+  uint64_t virtual_offset;
+  uint64_t size;
+  uint64_t queue_affinity;  // iree_hal_queue_affinity_t
+  uint64_t advice;          // iree_hal_memory_advice_t
+} iree_hal_remote_buffer_virtual_advise_request_t;
+static_assert(sizeof(iree_hal_remote_buffer_virtual_advise_request_t) == 40,
+              "");
+// Response: status only (no body).
 
 //===----------------------------------------------------------------------===//
 // Profiling messages

@@ -1477,6 +1477,44 @@ TEST_F(RemoteBufferTest, AllocateAndDeallocate) {
   iree_hal_buffer_release(buffer);
 }
 
+TEST_F(RemoteBufferTest, VirtualMemoryUnsupportedMatchesServerAllocator) {
+  iree_hal_allocator_t* remote_allocator =
+      iree_hal_device_allocator(client_device_);
+  iree_hal_allocator_t* local_allocator =
+      iree_hal_device_allocator(local_task_device_);
+
+  ASSERT_FALSE(iree_hal_allocator_supports_virtual_memory(local_allocator));
+  EXPECT_FALSE(iree_hal_allocator_supports_virtual_memory(remote_allocator));
+
+  iree_hal_buffer_params_t params = {0};
+  params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
+  params.access = IREE_HAL_MEMORY_ACCESS_ALL;
+  params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+
+  iree_device_size_t minimum_page_size = 1;
+  iree_device_size_t recommended_page_size = 1;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
+                        iree_hal_allocator_virtual_memory_query_granularity(
+                            remote_allocator, params, &minimum_page_size,
+                            &recommended_page_size));
+  EXPECT_EQ(minimum_page_size, 0);
+  EXPECT_EQ(recommended_page_size, 0);
+
+  iree_hal_buffer_t* virtual_buffer = nullptr;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
+                        iree_hal_allocator_virtual_memory_reserve(
+                            remote_allocator, IREE_HAL_QUEUE_AFFINITY_ANY, 4096,
+                            &virtual_buffer));
+  EXPECT_EQ(virtual_buffer, nullptr);
+
+  iree_hal_physical_memory_t* physical_memory = nullptr;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
+                        iree_hal_allocator_physical_memory_allocate(
+                            remote_allocator, params, 4096,
+                            iree_allocator_system(), &physical_memory));
+  EXPECT_EQ(physical_memory, nullptr);
+}
+
 TEST_F(RemoteBufferTest, WriteDiscardThenReadBack) {
   iree_hal_allocator_t* allocator = iree_hal_device_allocator(client_device_);
 

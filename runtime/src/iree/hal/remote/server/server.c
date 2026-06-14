@@ -270,8 +270,8 @@ static void iree_hal_remote_server_destroy(iree_hal_remote_server_t* server) {
   // find the session still in the slot.
   for (uint32_t i = 0; i < server->options.max_connections; ++i) {
     // Release resource table before releasing the session.
-    iree_hal_remote_resource_table_deinitialize(
-        &server->sessions[i].resource_table, host_allocator);
+    iree_hal_remote_server_session_deinitialize_resource_table(
+        &server->sessions[i], host_allocator);
 
     // Release epoch→semaphore mapping (retained local semaphores).
     for (iree_host_size_t j = 0;
@@ -466,8 +466,8 @@ static void iree_hal_remote_server_on_accept(
     // because the error may be from before a slot was acquired (server not
     // running, or all slots full).
     if (slot >= 0) {
-      iree_hal_remote_resource_table_deinitialize(
-          &server->sessions[slot].resource_table, server->host_allocator);
+      iree_hal_remote_server_session_deinitialize_resource_table(
+          &server->sessions[slot], server->host_allocator);
       iree_hal_remote_server_session_deinitialize_windows(
           &server->sessions[slot]);
       iree_hal_remote_server_bulk_session_free(

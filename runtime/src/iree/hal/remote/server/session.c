@@ -256,6 +256,222 @@ static int32_t iree_hal_remote_server_find_session_slot(
 }
 
 //===----------------------------------------------------------------------===//
+// Physical memory resources
+//===----------------------------------------------------------------------===//
+
+typedef struct iree_hal_remote_server_physical_memory_t {
+  // HAL resource header used to store the wrapper in the session resource
+  // table.
+  iree_hal_resource_t resource;
+  // Allocator that produced |physical_memory| and must free it.
+  iree_hal_allocator_t* allocator;
+  // Opaque physical memory handle owned by this wrapper.
+  iree_hal_physical_memory_t* physical_memory;
+  // Host allocator used to free this wrapper.
+  iree_allocator_t host_allocator;
+} iree_hal_remote_server_physical_memory_t;
+
+static iree_status_t iree_hal_remote_server_physical_memory_free(
+    iree_hal_remote_server_physical_memory_t* physical_memory) {
+  if (!physical_memory->physical_memory) return iree_ok_status();
+  iree_status_t status = iree_hal_allocator_physical_memory_free(
+      physical_memory->allocator, physical_memory->physical_memory);
+  if (iree_status_is_ok(status)) {
+    physical_memory->physical_memory = NULL;
+  }
+  return status;
+}
+
+static void iree_hal_remote_server_physical_memory_destroy(
+    iree_hal_resource_t* resource) {
+  iree_hal_remote_server_physical_memory_t* physical_memory =
+      (iree_hal_remote_server_physical_memory_t*)resource;
+  iree_allocator_t host_allocator = physical_memory->host_allocator;
+  iree_status_ignore(
+      iree_hal_remote_server_physical_memory_free(physical_memory));
+  iree_hal_allocator_release(physical_memory->allocator);
+  iree_allocator_free(host_allocator, physical_memory);
+}
+
+static const iree_hal_resource_vtable_t
+    iree_hal_remote_server_physical_memory_vtable = {
+        .destroy = iree_hal_remote_server_physical_memory_destroy,
+};
+
+static iree_status_t iree_hal_remote_server_physical_memory_create(
+    iree_hal_allocator_t* allocator,
+    iree_hal_physical_memory_t* physical_memory,
+    iree_allocator_t host_allocator,
+    iree_hal_remote_server_physical_memory_t** out_physical_memory) {
+  *out_physical_memory = NULL;
+  iree_hal_remote_server_physical_memory_t* wrapper = NULL;
+  iree_status_t status =
+      iree_allocator_malloc(host_allocator, sizeof(*wrapper), (void**)&wrapper);
+  if (iree_status_is_ok(status)) {
+    iree_hal_resource_initialize(&iree_hal_remote_server_physical_memory_vtable,
+                                 &wrapper->resource);
+    iree_hal_allocator_retain(allocator);
+    wrapper->allocator = allocator;
+    wrapper->physical_memory = physical_memory;
+    wrapper->host_allocator = host_allocator;
+    *out_physical_memory = wrapper;
+  }
+  return status;
+}
+
+//===----------------------------------------------------------------------===//
+// Buffer params helpers
+//===----------------------------------------------------------------------===//
+
+static iree_hal_buffer_params_t iree_hal_remote_server_wire_params_to_hal(
+    iree_hal_remote_buffer_params_t wire_params) {
+  return (iree_hal_buffer_params_t){
+      .usage = (iree_hal_buffer_usage_t)wire_params.usage,
+      .access = (iree_hal_memory_access_t)wire_params.access,
+      .type = (iree_hal_memory_type_t)wire_params.type,
+      .queue_affinity = (iree_hal_queue_affinity_t)wire_params.queue_affinity,
+      .min_alignment = (iree_device_size_t)wire_params.min_alignment,
+  };
+}
+
+static iree_hal_remote_buffer_params_t
+iree_hal_remote_server_buffer_to_wire_params(iree_hal_buffer_t* buffer) {
+  iree_hal_buffer_placement_t placement =
+      iree_hal_buffer_allocation_placement(buffer);
+  return (iree_hal_remote_buffer_params_t){
+      .usage = iree_hal_buffer_allowed_usage(buffer),
+      .access = (uint16_t)iree_hal_buffer_allowed_access(buffer),
+      .type = iree_hal_buffer_memory_type(buffer),
+      .queue_affinity = (uint64_t)placement.queue_affinity,
+      .min_alignment = 0,
+  };
+}
+
+//===----------------------------------------------------------------------===//
+// Virtual buffer resources
+//===----------------------------------------------------------------------===//
+
+static bool iree_hal_remote_server_find_virtual_buffer(
+    iree_hal_remote_server_session_t* session_slot,
+    iree_hal_remote_resource_id_t resource_id, iree_host_size_t* out_index) {
+  *out_index = 0;
+  for (iree_host_size_t i = 0; i < session_slot->virtual_buffer_map.count;
+       ++i) {
+    if (session_slot->virtual_buffer_map.resource_ids[i] == resource_id) {
+      *out_index = i;
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool iree_hal_remote_server_is_virtual_buffer(
+    iree_hal_remote_server_session_t* session_slot,
+    iree_hal_remote_resource_id_t resource_id) {
+  iree_host_size_t index = 0;
+  return iree_hal_remote_server_find_virtual_buffer(session_slot, resource_id,
+                                                    &index);
+}
+
+static iree_status_t iree_hal_remote_server_track_virtual_buffer(
+    iree_hal_remote_server_session_t* session_slot,
+    iree_hal_remote_resource_id_t resource_id,
+    iree_allocator_t host_allocator) {
+  iree_host_size_t index = 0;
+  if (iree_hal_remote_server_find_virtual_buffer(session_slot, resource_id,
+                                                 &index)) {
+    return iree_make_status(
+        IREE_STATUS_ALREADY_EXISTS,
+        "virtual buffer 0x%016" PRIx64 " is already tracked", resource_id);
+  }
+
+  iree_host_size_t minimum_capacity =
+      session_slot->virtual_buffer_map.count + 1;
+  if (minimum_capacity > session_slot->virtual_buffer_map.capacity) {
+    iree_host_size_t new_capacity = session_slot->virtual_buffer_map.capacity;
+    IREE_RETURN_IF_ERROR(iree_allocator_grow_array(
+        host_allocator, minimum_capacity,
+        sizeof(*session_slot->virtual_buffer_map.resource_ids), &new_capacity,
+        (void**)&session_slot->virtual_buffer_map.resource_ids));
+    session_slot->virtual_buffer_map.capacity = new_capacity;
+  }
+
+  session_slot->virtual_buffer_map
+      .resource_ids[session_slot->virtual_buffer_map.count++] = resource_id;
+  return iree_ok_status();
+}
+
+static void iree_hal_remote_server_untrack_virtual_buffer(
+    iree_hal_remote_server_session_t* session_slot,
+    iree_hal_remote_resource_id_t resource_id) {
+  iree_host_size_t index = 0;
+  if (!iree_hal_remote_server_find_virtual_buffer(session_slot, resource_id,
+                                                  &index)) {
+    return;
+  }
+  --session_slot->virtual_buffer_map.count;
+  session_slot->virtual_buffer_map.resource_ids[index] =
+      session_slot->virtual_buffer_map
+          .resource_ids[session_slot->virtual_buffer_map.count];
+}
+
+static iree_status_t iree_hal_remote_server_release_virtual_buffer(
+    iree_hal_remote_server_session_t* session_slot,
+    iree_hal_remote_resource_id_t resource_id) {
+  iree_hal_buffer_t* virtual_buffer =
+      (iree_hal_buffer_t*)iree_hal_remote_resource_table_lookup(
+          &session_slot->resource_table, IREE_HAL_REMOTE_RESOURCE_TYPE_BUFFER,
+          resource_id);
+  if (!virtual_buffer) {
+    return iree_make_status(IREE_STATUS_NOT_FOUND,
+                            "virtual buffer 0x%016" PRIx64 " not found",
+                            resource_id);
+  }
+
+  iree_hal_allocator_t* allocator =
+      iree_hal_device_allocator(session_slot->server->devices[0]);
+  iree_status_t status =
+      iree_hal_allocator_virtual_memory_release(allocator, virtual_buffer);
+  if (iree_status_is_ok(status)) {
+    // virtual_memory_release destroys |virtual_buffer| directly after enforcing
+    // the backend's no-live-mappings contract. The resource table's retain is
+    // now only a stale bookkeeping edge, so detach without releasing it again.
+    (void)iree_hal_remote_resource_table_detach(&session_slot->resource_table,
+                                                resource_id);
+    iree_hal_remote_server_untrack_virtual_buffer(session_slot, resource_id);
+  }
+  return status;
+}
+
+void iree_hal_remote_server_session_deinitialize_resource_table(
+    iree_hal_remote_server_session_t* session_slot,
+    iree_allocator_t host_allocator) {
+  while (session_slot->virtual_buffer_map.count > 0) {
+    iree_hal_remote_resource_id_t resource_id =
+        session_slot->virtual_buffer_map
+            .resource_ids[session_slot->virtual_buffer_map.count - 1];
+    iree_status_t status = iree_hal_remote_server_release_virtual_buffer(
+        session_slot, resource_id);
+    if (!iree_status_is_ok(status)) {
+      iree_status_ignore(status);
+      // The backend rejected release, usually because mappings are still live.
+      // Detach the reservation so generic resource-table teardown cannot run a
+      // plain buffer destructor that bypasses the allocator's mapping registry.
+      (void)iree_hal_remote_resource_table_detach(&session_slot->resource_table,
+                                                  resource_id);
+      iree_hal_remote_server_untrack_virtual_buffer(session_slot, resource_id);
+    }
+  }
+  iree_allocator_free(host_allocator,
+                      session_slot->virtual_buffer_map.resource_ids);
+  memset(&session_slot->virtual_buffer_map, 0,
+         sizeof(session_slot->virtual_buffer_map));
+
+  iree_hal_remote_resource_table_deinitialize(&session_slot->resource_table,
+                                              host_allocator);
+}
+
+//===----------------------------------------------------------------------===//
 // Session removal
 //===----------------------------------------------------------------------===//
 
@@ -309,8 +525,8 @@ void iree_hal_remote_server_remove_session(iree_hal_remote_server_t* server,
   iree_net_queue_channel_t* queue_channel = NULL;
 
   // Snapshot the resource table and epoch mapping for cleanup outside the lock.
-  iree_hal_remote_resource_table_t resource_table;
-  memset(&resource_table, 0, sizeof(resource_table));
+  iree_hal_remote_server_session_t resource_table_snapshot;
+  memset(&resource_table_snapshot, 0, sizeof(resource_table_snapshot));
   iree_hal_remote_server_epoch_slot_state_t* epoch_map_states = NULL;
   iree_async_axis_t* epoch_map_axes = NULL;
   uint64_t* epoch_map_epochs = NULL;
@@ -328,9 +544,15 @@ void iree_hal_remote_server_remove_session(iree_hal_remote_server_t* server,
     queue_channel = server->sessions[slot].queue_channel;
     server->sessions[slot].queue_channel = NULL;
 
-    resource_table = server->sessions[slot].resource_table;
+    resource_table_snapshot.server = server;
+    resource_table_snapshot.resource_table =
+        server->sessions[slot].resource_table;
     memset(&server->sessions[slot].resource_table, 0,
            sizeof(server->sessions[slot].resource_table));
+    resource_table_snapshot.virtual_buffer_map =
+        server->sessions[slot].virtual_buffer_map;
+    memset(&server->sessions[slot].virtual_buffer_map, 0,
+           sizeof(server->sessions[slot].virtual_buffer_map));
 
     epoch_map_states = server->sessions[slot].epoch_semaphore_map.states;
     epoch_map_axes = server->sessions[slot].epoch_semaphore_map.axes;
@@ -365,8 +587,8 @@ void iree_hal_remote_server_remove_session(iree_hal_remote_server_t* server,
   iree_hal_remote_server_profile_relay_deinitialize(&server->sessions[slot]);
 
   // Release all resources in the table.
-  iree_hal_remote_resource_table_deinitialize(&resource_table,
-                                              server->host_allocator);
+  iree_hal_remote_server_session_deinitialize_resource_table(
+      &resource_table_snapshot, server->host_allocator);
 
   // Release all local semaphores in the epoch mapping.
   for (iree_host_size_t i = 0; i < epoch_map_capacity; ++i) {
@@ -2568,6 +2790,561 @@ static iree_status_t iree_hal_remote_server_handle_buffer_query_heaps(
       response_body, response_body_length);
 }
 
+static iree_status_t
+iree_hal_remote_server_handle_buffer_virtual_query_capabilities(
+    iree_hal_remote_server_session_t* entry,
+    const iree_hal_remote_control_envelope_t* envelope, const uint8_t* body,
+    iree_host_size_t body_length) {
+  if (body_length <
+      sizeof(iree_hal_remote_buffer_virtual_query_capabilities_request_t)) {
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope,
+        iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "BUFFER_VIRTUAL_QUERY_CAPABILITIES body too small: %" PRIhsz
+            " bytes",
+            body_length));
+  }
+
+  const iree_hal_remote_buffer_virtual_query_capabilities_request_t* request =
+      (const iree_hal_remote_buffer_virtual_query_capabilities_request_t*)body;
+  if (request->flags != 0 || request->reserved != 0) {
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope,
+        iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "BUFFER_VIRTUAL_QUERY_CAPABILITIES reserved fields must "
+            "be 0"));
+  }
+
+  iree_hal_allocator_t* allocator =
+      iree_hal_device_allocator(entry->server->devices[0]);
+  iree_hal_remote_buffer_virtual_query_capabilities_response_t response;
+  memset(&response, 0, sizeof(response));
+  response.supports_virtual_memory =
+      iree_hal_allocator_supports_virtual_memory(allocator) ? 1u : 0u;
+  return iree_hal_remote_server_send_response(
+      entry->server->host_allocator, entry->session, envelope, IREE_STATUS_OK,
+      &response, sizeof(response));
+}
+
+static iree_status_t
+iree_hal_remote_server_handle_buffer_virtual_query_granularity(
+    iree_hal_remote_server_session_t* entry,
+    const iree_hal_remote_control_envelope_t* envelope, const uint8_t* body,
+    iree_host_size_t body_length) {
+  if (body_length <
+      sizeof(iree_hal_remote_buffer_virtual_query_granularity_request_t)) {
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope,
+        iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "BUFFER_VIRTUAL_QUERY_GRANULARITY body too small: %" PRIhsz
+            " bytes",
+            body_length));
+  }
+
+  const iree_hal_remote_buffer_virtual_query_granularity_request_t* request =
+      (const iree_hal_remote_buffer_virtual_query_granularity_request_t*)body;
+  iree_hal_allocator_t* allocator =
+      iree_hal_device_allocator(entry->server->devices[0]);
+  iree_hal_buffer_params_t params =
+      iree_hal_remote_server_wire_params_to_hal(request->params);
+
+  iree_device_size_t minimum_page_size = 0;
+  iree_device_size_t recommended_page_size = 0;
+  iree_status_t status = iree_hal_allocator_virtual_memory_query_granularity(
+      allocator, params, &minimum_page_size, &recommended_page_size);
+  if (!iree_status_is_ok(status)) {
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope, status);
+  }
+
+  iree_hal_remote_buffer_virtual_query_granularity_response_t response = {
+      .minimum_page_size = (uint64_t)minimum_page_size,
+      .recommended_page_size = (uint64_t)recommended_page_size,
+  };
+  return iree_hal_remote_server_send_response(
+      entry->server->host_allocator, entry->session, envelope, IREE_STATUS_OK,
+      &response, sizeof(response));
+}
+
+static iree_status_t iree_hal_remote_server_handle_buffer_virtual_reserve(
+    iree_hal_remote_server_session_t* entry,
+    const iree_hal_remote_control_envelope_t* envelope, const uint8_t* body,
+    iree_host_size_t body_length) {
+  if (body_length < sizeof(iree_hal_remote_buffer_virtual_reserve_request_t)) {
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope,
+        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                         "BUFFER_VIRTUAL_RESERVE body too small: %" PRIhsz
+                         " bytes",
+                         body_length));
+  }
+
+  const iree_hal_remote_buffer_virtual_reserve_request_t* request =
+      (const iree_hal_remote_buffer_virtual_reserve_request_t*)body;
+  iree_status_t status = iree_ok_status();
+  if (request->size > IREE_DEVICE_SIZE_MAX) {
+    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "BUFFER_VIRTUAL_RESERVE size %" PRIu64
+                              " exceeds device size max %" PRIu64,
+                              request->size, (uint64_t)IREE_DEVICE_SIZE_MAX);
+  }
+
+  iree_hal_allocator_t* allocator =
+      iree_hal_device_allocator(entry->server->devices[0]);
+  iree_hal_buffer_t* virtual_buffer = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_allocator_virtual_memory_reserve(
+        allocator, (iree_hal_queue_affinity_t)request->queue_affinity,
+        (iree_device_size_t)request->size, &virtual_buffer);
+  }
+  if (iree_status_is_ok(status) && !virtual_buffer) {
+    status = iree_make_status(
+        IREE_STATUS_INTERNAL,
+        "BUFFER_VIRTUAL_RESERVE allocator returned success without a buffer");
+  }
+
+  iree_hal_remote_resource_id_t resolved_id = 0;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_resource_table_assign(
+        &entry->resource_table, IREE_HAL_REMOTE_RESOURCE_TYPE_BUFFER,
+        virtual_buffer, &resolved_id);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_server_track_virtual_buffer(
+        entry, resolved_id, entry->server->host_allocator);
+  }
+
+  iree_hal_remote_buffer_virtual_reserve_response_t response;
+  memset(&response, 0, sizeof(response));
+  if (iree_status_is_ok(status)) {
+    iree_hal_buffer_placement_t placement =
+        iree_hal_buffer_allocation_placement(virtual_buffer);
+    response.resolved_id = resolved_id;
+    response.params =
+        iree_hal_remote_server_buffer_to_wire_params(virtual_buffer);
+    response.allocation_size =
+        (uint64_t)iree_hal_buffer_allocation_size(virtual_buffer);
+    response.placement_flags = placement.flags;
+  } else if (virtual_buffer) {
+    if (resolved_id != 0) {
+      iree_hal_buffer_t* table_buffer =
+          (iree_hal_buffer_t*)iree_hal_remote_resource_table_detach(
+              &entry->resource_table, resolved_id);
+      iree_hal_buffer_release(table_buffer);
+      iree_hal_remote_server_untrack_virtual_buffer(entry, resolved_id);
+    }
+    status = iree_status_join(status, iree_hal_allocator_virtual_memory_release(
+                                          allocator, virtual_buffer));
+    virtual_buffer = NULL;
+  }
+
+  iree_hal_buffer_release(virtual_buffer);
+  if (!iree_status_is_ok(status)) {
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope, status);
+  }
+
+  return iree_hal_remote_server_send_response(
+      entry->server->host_allocator, entry->session, envelope, IREE_STATUS_OK,
+      &response, sizeof(response));
+}
+
+static iree_status_t iree_hal_remote_server_handle_buffer_virtual_release(
+    iree_hal_remote_server_session_t* entry,
+    const iree_hal_remote_control_envelope_t* envelope, const uint8_t* body,
+    iree_host_size_t body_length) {
+  if (body_length < sizeof(iree_hal_remote_buffer_virtual_release_request_t)) {
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope,
+        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                         "BUFFER_VIRTUAL_RELEASE body too small: %" PRIhsz
+                         " bytes",
+                         body_length));
+  }
+
+  const iree_hal_remote_buffer_virtual_release_request_t* request =
+      (const iree_hal_remote_buffer_virtual_release_request_t*)body;
+  iree_hal_remote_resource_id_t resolved_id =
+      iree_hal_remote_server_resolve_resource_id(entry, request->buffer_id);
+  iree_status_t status =
+      iree_hal_remote_server_is_virtual_buffer(entry, resolved_id)
+          ? iree_hal_remote_server_release_virtual_buffer(entry, resolved_id)
+          : iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "BUFFER_VIRTUAL_RELEASE buffer 0x%016" PRIx64
+                             " is not a virtual reservation",
+                             resolved_id);
+  if (!iree_status_is_ok(status)) {
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope, status);
+  }
+  return iree_hal_remote_server_send_response(entry->server->host_allocator,
+                                              entry->session, envelope,
+                                              IREE_STATUS_OK, NULL, 0);
+}
+
+static iree_status_t iree_hal_remote_server_handle_buffer_physical_alloc(
+    iree_hal_remote_server_session_t* entry,
+    const iree_hal_remote_control_envelope_t* envelope, const uint8_t* body,
+    iree_host_size_t body_length) {
+  if (body_length < sizeof(iree_hal_remote_buffer_physical_alloc_request_t)) {
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope,
+        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                         "BUFFER_PHYSICAL_ALLOC body too small: %" PRIhsz
+                         " bytes",
+                         body_length));
+  }
+
+  const iree_hal_remote_buffer_physical_alloc_request_t* request =
+      (const iree_hal_remote_buffer_physical_alloc_request_t*)body;
+  iree_status_t status = iree_ok_status();
+  if (request->size > IREE_DEVICE_SIZE_MAX) {
+    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "BUFFER_PHYSICAL_ALLOC size %" PRIu64
+                              " exceeds device size max %" PRIu64,
+                              request->size, (uint64_t)IREE_DEVICE_SIZE_MAX);
+  }
+
+  iree_hal_allocator_t* allocator =
+      iree_hal_device_allocator(entry->server->devices[0]);
+  iree_hal_buffer_params_t params =
+      iree_hal_remote_server_wire_params_to_hal(request->params);
+  iree_hal_physical_memory_t* physical_memory = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_allocator_physical_memory_allocate(
+        allocator, params, (iree_device_size_t)request->size,
+        entry->server->host_allocator, &physical_memory);
+  }
+  if (iree_status_is_ok(status) && !physical_memory) {
+    status = iree_make_status(
+        IREE_STATUS_INTERNAL,
+        "BUFFER_PHYSICAL_ALLOC allocator returned success without physical "
+        "memory");
+  }
+
+  iree_hal_remote_server_physical_memory_t* wrapper = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_server_physical_memory_create(
+        allocator, physical_memory, entry->server->host_allocator, &wrapper);
+    if (iree_status_is_ok(status)) physical_memory = NULL;
+  }
+
+  iree_hal_remote_resource_id_t resolved_id = 0;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_remote_resource_table_assign(
+        &entry->resource_table, IREE_HAL_REMOTE_RESOURCE_TYPE_PHYSICAL_MEMORY,
+        wrapper, &resolved_id);
+  }
+
+  iree_hal_resource_release(wrapper);
+  if (physical_memory) {
+    status = iree_status_join(status, iree_hal_allocator_physical_memory_free(
+                                          allocator, physical_memory));
+  }
+  if (!iree_status_is_ok(status)) {
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope, status);
+  }
+
+  iree_hal_remote_buffer_physical_alloc_response_t response = {
+      .resolved_id = resolved_id,
+  };
+  return iree_hal_remote_server_send_response(
+      entry->server->host_allocator, entry->session, envelope, IREE_STATUS_OK,
+      &response, sizeof(response));
+}
+
+static iree_status_t iree_hal_remote_server_handle_buffer_physical_free(
+    iree_hal_remote_server_session_t* entry,
+    const iree_hal_remote_control_envelope_t* envelope, const uint8_t* body,
+    iree_host_size_t body_length) {
+  if (body_length < sizeof(iree_hal_remote_buffer_physical_free_request_t)) {
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope,
+        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                         "BUFFER_PHYSICAL_FREE body too small: %" PRIhsz
+                         " bytes",
+                         body_length));
+  }
+
+  const iree_hal_remote_buffer_physical_free_request_t* request =
+      (const iree_hal_remote_buffer_physical_free_request_t*)body;
+  iree_hal_remote_resource_id_t resolved_id =
+      iree_hal_remote_server_resolve_resource_id(entry,
+                                                 request->physical_memory_id);
+  iree_hal_remote_server_physical_memory_t* physical_memory =
+      (iree_hal_remote_server_physical_memory_t*)
+          iree_hal_remote_resource_table_lookup(
+              &entry->resource_table,
+              IREE_HAL_REMOTE_RESOURCE_TYPE_PHYSICAL_MEMORY, resolved_id);
+  iree_status_t status = iree_ok_status();
+  if (!physical_memory) {
+    status = iree_make_status(
+        IREE_STATUS_NOT_FOUND,
+        "BUFFER_PHYSICAL_FREE physical memory 0x%016" PRIx64 " not found",
+        resolved_id);
+  } else {
+    status = iree_hal_remote_server_physical_memory_free(physical_memory);
+  }
+  if (iree_status_is_ok(status)) {
+    iree_hal_resource_t* detached =
+        (iree_hal_resource_t*)iree_hal_remote_resource_table_detach(
+            &entry->resource_table, resolved_id);
+    iree_hal_resource_release(detached);
+  }
+  if (!iree_status_is_ok(status)) {
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope, status);
+  }
+  return iree_hal_remote_server_send_response(entry->server->host_allocator,
+                                              entry->session, envelope,
+                                              IREE_STATUS_OK, NULL, 0);
+}
+
+static iree_status_t iree_hal_remote_server_handle_buffer_virtual_map(
+    iree_hal_remote_server_session_t* entry,
+    const iree_hal_remote_control_envelope_t* envelope, const uint8_t* body,
+    iree_host_size_t body_length) {
+  if (body_length < sizeof(iree_hal_remote_buffer_virtual_map_request_t)) {
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope,
+        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                         "BUFFER_VIRTUAL_MAP body too small: %" PRIhsz " bytes",
+                         body_length));
+  }
+
+  const iree_hal_remote_buffer_virtual_map_request_t* request =
+      (const iree_hal_remote_buffer_virtual_map_request_t*)body;
+  iree_hal_remote_resource_id_t buffer_id =
+      iree_hal_remote_server_resolve_resource_id(entry, request->buffer_id);
+  iree_hal_remote_resource_id_t physical_memory_id =
+      iree_hal_remote_server_resolve_resource_id(entry,
+                                                 request->physical_memory_id);
+  iree_hal_buffer_t* virtual_buffer =
+      (iree_hal_buffer_t*)iree_hal_remote_resource_table_lookup(
+          &entry->resource_table, IREE_HAL_REMOTE_RESOURCE_TYPE_BUFFER,
+          buffer_id);
+  iree_hal_remote_server_physical_memory_t* physical_memory =
+      (iree_hal_remote_server_physical_memory_t*)
+          iree_hal_remote_resource_table_lookup(
+              &entry->resource_table,
+              IREE_HAL_REMOTE_RESOURCE_TYPE_PHYSICAL_MEMORY,
+              physical_memory_id);
+
+  iree_status_t status = iree_ok_status();
+  if (!virtual_buffer) {
+    status = iree_make_status(IREE_STATUS_NOT_FOUND,
+                              "BUFFER_VIRTUAL_MAP virtual buffer 0x%016" PRIx64
+                              " not found",
+                              buffer_id);
+  } else if (!iree_hal_remote_server_is_virtual_buffer(entry, buffer_id)) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "BUFFER_VIRTUAL_MAP buffer 0x%016" PRIx64
+                              " is not a virtual reservation",
+                              buffer_id);
+  } else if (!physical_memory) {
+    status = iree_make_status(IREE_STATUS_NOT_FOUND,
+                              "BUFFER_VIRTUAL_MAP physical memory 0x%016" PRIx64
+                              " not found",
+                              physical_memory_id);
+  } else if (request->virtual_offset > IREE_DEVICE_SIZE_MAX ||
+             request->physical_offset > IREE_DEVICE_SIZE_MAX ||
+             request->size > IREE_DEVICE_SIZE_MAX) {
+    status =
+        iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                         "BUFFER_VIRTUAL_MAP range exceeds device size max");
+  } else {
+    iree_hal_allocator_t* allocator =
+        iree_hal_device_allocator(entry->server->devices[0]);
+    status = iree_hal_allocator_virtual_memory_map(
+        allocator, virtual_buffer, (iree_device_size_t)request->virtual_offset,
+        physical_memory->physical_memory,
+        (iree_device_size_t)request->physical_offset,
+        (iree_device_size_t)request->size);
+  }
+
+  if (!iree_status_is_ok(status)) {
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope, status);
+  }
+  return iree_hal_remote_server_send_response(entry->server->host_allocator,
+                                              entry->session, envelope,
+                                              IREE_STATUS_OK, NULL, 0);
+}
+
+static iree_status_t iree_hal_remote_server_handle_buffer_virtual_unmap(
+    iree_hal_remote_server_session_t* entry,
+    const iree_hal_remote_control_envelope_t* envelope, const uint8_t* body,
+    iree_host_size_t body_length) {
+  if (body_length < sizeof(iree_hal_remote_buffer_virtual_unmap_request_t)) {
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope,
+        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                         "BUFFER_VIRTUAL_UNMAP body too small: %" PRIhsz
+                         " bytes",
+                         body_length));
+  }
+
+  const iree_hal_remote_buffer_virtual_unmap_request_t* request =
+      (const iree_hal_remote_buffer_virtual_unmap_request_t*)body;
+  iree_hal_remote_resource_id_t buffer_id =
+      iree_hal_remote_server_resolve_resource_id(entry, request->buffer_id);
+  iree_hal_buffer_t* virtual_buffer =
+      (iree_hal_buffer_t*)iree_hal_remote_resource_table_lookup(
+          &entry->resource_table, IREE_HAL_REMOTE_RESOURCE_TYPE_BUFFER,
+          buffer_id);
+
+  iree_status_t status = iree_ok_status();
+  if (!virtual_buffer) {
+    status = iree_make_status(
+        IREE_STATUS_NOT_FOUND,
+        "BUFFER_VIRTUAL_UNMAP virtual buffer 0x%016" PRIx64 " not found",
+        buffer_id);
+  } else if (!iree_hal_remote_server_is_virtual_buffer(entry, buffer_id)) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "BUFFER_VIRTUAL_UNMAP buffer 0x%016" PRIx64
+                              " is not a virtual reservation",
+                              buffer_id);
+  } else if (request->virtual_offset > IREE_DEVICE_SIZE_MAX ||
+             request->size > IREE_DEVICE_SIZE_MAX) {
+    status =
+        iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                         "BUFFER_VIRTUAL_UNMAP range exceeds device size max");
+  } else {
+    iree_hal_allocator_t* allocator =
+        iree_hal_device_allocator(entry->server->devices[0]);
+    status = iree_hal_allocator_virtual_memory_unmap(
+        allocator, virtual_buffer, (iree_device_size_t)request->virtual_offset,
+        (iree_device_size_t)request->size);
+  }
+
+  if (!iree_status_is_ok(status)) {
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope, status);
+  }
+  return iree_hal_remote_server_send_response(entry->server->host_allocator,
+                                              entry->session, envelope,
+                                              IREE_STATUS_OK, NULL, 0);
+}
+
+static iree_status_t iree_hal_remote_server_handle_buffer_virtual_protect(
+    iree_hal_remote_server_session_t* entry,
+    const iree_hal_remote_control_envelope_t* envelope, const uint8_t* body,
+    iree_host_size_t body_length) {
+  if (body_length < sizeof(iree_hal_remote_buffer_virtual_protect_request_t)) {
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope,
+        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                         "BUFFER_VIRTUAL_PROTECT body too small: %" PRIhsz
+                         " bytes",
+                         body_length));
+  }
+
+  const iree_hal_remote_buffer_virtual_protect_request_t* request =
+      (const iree_hal_remote_buffer_virtual_protect_request_t*)body;
+  iree_hal_remote_resource_id_t buffer_id =
+      iree_hal_remote_server_resolve_resource_id(entry, request->buffer_id);
+  iree_hal_buffer_t* virtual_buffer =
+      (iree_hal_buffer_t*)iree_hal_remote_resource_table_lookup(
+          &entry->resource_table, IREE_HAL_REMOTE_RESOURCE_TYPE_BUFFER,
+          buffer_id);
+
+  iree_status_t status = iree_ok_status();
+  if (!virtual_buffer) {
+    status = iree_make_status(
+        IREE_STATUS_NOT_FOUND,
+        "BUFFER_VIRTUAL_PROTECT virtual buffer 0x%016" PRIx64 " not found",
+        buffer_id);
+  } else if (!iree_hal_remote_server_is_virtual_buffer(entry, buffer_id)) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "BUFFER_VIRTUAL_PROTECT buffer 0x%016" PRIx64
+                              " is not a virtual reservation",
+                              buffer_id);
+  } else if (request->virtual_offset > IREE_DEVICE_SIZE_MAX ||
+             request->size > IREE_DEVICE_SIZE_MAX) {
+    status =
+        iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                         "BUFFER_VIRTUAL_PROTECT range exceeds device size "
+                         "max");
+  } else {
+    iree_hal_allocator_t* allocator =
+        iree_hal_device_allocator(entry->server->devices[0]);
+    status = iree_hal_allocator_virtual_memory_protect(
+        allocator, virtual_buffer, (iree_device_size_t)request->virtual_offset,
+        (iree_device_size_t)request->size,
+        (iree_hal_queue_affinity_t)request->queue_affinity,
+        (iree_hal_memory_protection_t)request->protection);
+  }
+
+  if (!iree_status_is_ok(status)) {
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope, status);
+  }
+  return iree_hal_remote_server_send_response(entry->server->host_allocator,
+                                              entry->session, envelope,
+                                              IREE_STATUS_OK, NULL, 0);
+}
+
+static iree_status_t iree_hal_remote_server_handle_buffer_virtual_advise(
+    iree_hal_remote_server_session_t* entry,
+    const iree_hal_remote_control_envelope_t* envelope, const uint8_t* body,
+    iree_host_size_t body_length) {
+  if (body_length < sizeof(iree_hal_remote_buffer_virtual_advise_request_t)) {
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope,
+        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                         "BUFFER_VIRTUAL_ADVISE body too small: %" PRIhsz
+                         " bytes",
+                         body_length));
+  }
+
+  const iree_hal_remote_buffer_virtual_advise_request_t* request =
+      (const iree_hal_remote_buffer_virtual_advise_request_t*)body;
+  iree_hal_remote_resource_id_t buffer_id =
+      iree_hal_remote_server_resolve_resource_id(entry, request->buffer_id);
+  iree_hal_buffer_t* virtual_buffer =
+      (iree_hal_buffer_t*)iree_hal_remote_resource_table_lookup(
+          &entry->resource_table, IREE_HAL_REMOTE_RESOURCE_TYPE_BUFFER,
+          buffer_id);
+
+  iree_status_t status = iree_ok_status();
+  if (!virtual_buffer) {
+    status = iree_make_status(
+        IREE_STATUS_NOT_FOUND,
+        "BUFFER_VIRTUAL_ADVISE virtual buffer 0x%016" PRIx64 " not found",
+        buffer_id);
+  } else if (!iree_hal_remote_server_is_virtual_buffer(entry, buffer_id)) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "BUFFER_VIRTUAL_ADVISE buffer 0x%016" PRIx64
+                              " is not a virtual reservation",
+                              buffer_id);
+  } else if (request->virtual_offset > IREE_DEVICE_SIZE_MAX ||
+             request->size > IREE_DEVICE_SIZE_MAX) {
+    status =
+        iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                         "BUFFER_VIRTUAL_ADVISE range exceeds device size max");
+  } else {
+    iree_hal_allocator_t* allocator =
+        iree_hal_device_allocator(entry->server->devices[0]);
+    status = iree_hal_allocator_virtual_memory_advise(
+        allocator, virtual_buffer, (iree_device_size_t)request->virtual_offset,
+        (iree_device_size_t)request->size,
+        (iree_hal_queue_affinity_t)request->queue_affinity,
+        (iree_hal_memory_advice_t)request->advice);
+  }
+
+  if (!iree_status_is_ok(status)) {
+    return iree_hal_remote_server_send_error_response(
+        entry->server->host_allocator, entry->session, envelope, status);
+  }
+  return iree_hal_remote_server_send_response(entry->server->host_allocator,
+                                              entry->session, envelope,
+                                              IREE_STATUS_OK, NULL, 0);
+}
+
 // Sends a control channel response with a variable-length data payload.
 static iree_status_t iree_hal_remote_server_send_response_with_data(
     iree_hal_remote_server_session_t* entry,
@@ -4301,8 +5078,14 @@ static iree_status_t iree_hal_remote_server_release_resource_ids(
     iree_hal_remote_resource_id_t resolved_id =
         iree_hal_remote_server_resolve_resource_id(entry, resource_ids[i]);
     if (!IREE_HAL_REMOTE_RESOURCE_ID_IS_PROVISIONAL(resolved_id)) {
-      iree_hal_remote_resource_table_release(&entry->resource_table,
-                                             resolved_id);
+      if (iree_hal_remote_server_is_virtual_buffer(entry, resolved_id)) {
+        status = iree_status_join(
+            status,
+            iree_hal_remote_server_release_virtual_buffer(entry, resolved_id));
+      } else {
+        iree_hal_remote_resource_table_release(&entry->resource_table,
+                                               resolved_id);
+      }
     }
     if (resolved_id != resource_ids[i] ||
         IREE_HAL_REMOTE_RESOURCE_ID_IS_PROVISIONAL(resource_ids[i])) {
@@ -5517,6 +6300,36 @@ iree_status_t iree_hal_remote_server_on_control_data(
                                                         body_length);
     case IREE_HAL_REMOTE_CONTROL_BUFFER_QUERY_HEAPS:
       return iree_hal_remote_server_handle_buffer_query_heaps(
+          entry, envelope, body, body_length);
+    case IREE_HAL_REMOTE_CONTROL_BUFFER_VIRTUAL_QUERY_CAPABILITIES:
+      return iree_hal_remote_server_handle_buffer_virtual_query_capabilities(
+          entry, envelope, body, body_length);
+    case IREE_HAL_REMOTE_CONTROL_BUFFER_VIRTUAL_QUERY_GRANULARITY:
+      return iree_hal_remote_server_handle_buffer_virtual_query_granularity(
+          entry, envelope, body, body_length);
+    case IREE_HAL_REMOTE_CONTROL_BUFFER_VIRTUAL_RESERVE:
+      return iree_hal_remote_server_handle_buffer_virtual_reserve(
+          entry, envelope, body, body_length);
+    case IREE_HAL_REMOTE_CONTROL_BUFFER_VIRTUAL_RELEASE:
+      return iree_hal_remote_server_handle_buffer_virtual_release(
+          entry, envelope, body, body_length);
+    case IREE_HAL_REMOTE_CONTROL_BUFFER_PHYSICAL_ALLOC:
+      return iree_hal_remote_server_handle_buffer_physical_alloc(
+          entry, envelope, body, body_length);
+    case IREE_HAL_REMOTE_CONTROL_BUFFER_PHYSICAL_FREE:
+      return iree_hal_remote_server_handle_buffer_physical_free(
+          entry, envelope, body, body_length);
+    case IREE_HAL_REMOTE_CONTROL_BUFFER_VIRTUAL_MAP:
+      return iree_hal_remote_server_handle_buffer_virtual_map(
+          entry, envelope, body, body_length);
+    case IREE_HAL_REMOTE_CONTROL_BUFFER_VIRTUAL_UNMAP:
+      return iree_hal_remote_server_handle_buffer_virtual_unmap(
+          entry, envelope, body, body_length);
+    case IREE_HAL_REMOTE_CONTROL_BUFFER_VIRTUAL_PROTECT:
+      return iree_hal_remote_server_handle_buffer_virtual_protect(
+          entry, envelope, body, body_length);
+    case IREE_HAL_REMOTE_CONTROL_BUFFER_VIRTUAL_ADVISE:
+      return iree_hal_remote_server_handle_buffer_virtual_advise(
           entry, envelope, body, body_length);
     case IREE_HAL_REMOTE_CONTROL_EXECUTABLE_UPLOAD:
       return iree_hal_remote_server_handle_executable_upload(entry, envelope,

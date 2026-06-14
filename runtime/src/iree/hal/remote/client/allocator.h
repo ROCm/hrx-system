@@ -16,6 +16,13 @@ extern "C" {
 
 typedef struct iree_hal_remote_client_device_t iree_hal_remote_client_device_t;
 
+enum iree_hal_remote_client_allocator_flag_bits_e {
+  IREE_HAL_REMOTE_CLIENT_ALLOCATOR_FLAG_NONE = 0u,
+  IREE_HAL_REMOTE_CLIENT_ALLOCATOR_FLAG_VIRTUAL_MEMORY_QUERIED = 1u << 0,
+  IREE_HAL_REMOTE_CLIENT_ALLOCATOR_FLAG_VIRTUAL_MEMORY_SUPPORTED = 1u << 1,
+};
+typedef uint32_t iree_hal_remote_client_allocator_flags_t;
+
 // Remote client allocator. Proxies allocation requests to the server via
 // control channel RPCs. Buffer objects are lightweight proxies that cache
 // immutable properties locally and carry a server-assigned resource_id for
@@ -34,6 +41,9 @@ typedef struct iree_hal_remote_client_allocator_t {
   // NULL until the first successful query_memory_heaps call.
   iree_hal_allocator_memory_heap_t* heaps;
   iree_host_size_t heap_count;
+
+  // Cached allocator capability bits.
+  iree_hal_remote_client_allocator_flags_t flags;
 
   iree_string_view_t identifier;
   char identifier_storage[];
