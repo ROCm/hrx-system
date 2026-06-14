@@ -39,66 +39,69 @@ serialization, bulk transfer engines, file registration, and profiling relay.
 
 Client-side public API:
 
-- [`runtime/src/iree/hal/remote/client/api.h`](/runtime/src/iree/hal/remote/client/api.h):
+- [`runtime/src/iree/hal/remote/client/api.h`](runtime/src/iree/hal/remote/client/api.h):
   remote client driver/device options, connection lifecycle, and server-side
   file open entry points.
-- [`runtime/src/iree/hal/remote/client/registration/driver_module.c`](/runtime/src/iree/hal/remote/client/registration/driver_module.c):
-  driver registration for URI-style names such as `remote-tcp` and
-  `remote-shm`.
-- [`runtime/src/iree/hal/remote/client/device.c`](/runtime/src/iree/hal/remote/client/device.c):
+- [`runtime/src/iree/hal/remote/client/registration/driver_module.c`](runtime/src/iree/hal/remote/client/registration/driver_module.c):
+  driver registration for URI-style names such as `remote-tcp`, `remote-shm`,
+  and `remote-rdma`.
+- [`runtime/src/iree/hal/remote/client/device.c`](runtime/src/iree/hal/remote/client/device.c):
   client device creation, session connection, control RPC dispatch, queue/bulk
   endpoint publication, and error propagation.
-- [`runtime/src/iree/hal/remote/client/queue.c`](/runtime/src/iree/hal/remote/client/queue.c):
+- [`runtime/src/iree/hal/remote/client/queue.c`](runtime/src/iree/hal/remote/client/queue.c):
   HAL queue operation lowering to queue channel `COMMAND` frames and
   client-side semaphore signal handling.
 
 Server-side public API:
 
-- [`runtime/src/iree/hal/remote/server/api.h`](/runtime/src/iree/hal/remote/server/api.h):
+- [`runtime/src/iree/hal/remote/server/api.h`](runtime/src/iree/hal/remote/server/api.h):
   remote server options, start/stop lifecycle, device exposure, topology, and
   file allow-list configuration.
-- [`runtime/src/iree/hal/remote/server/server.c`](/runtime/src/iree/hal/remote/server/server.c):
+- [`runtime/src/iree/hal/remote/server/server.c`](runtime/src/iree/hal/remote/server/server.c):
   listener setup, accepted session slots, local device retention, executable
   cache setup, and server shutdown.
-- [`runtime/src/iree/hal/remote/server/session.c`](/runtime/src/iree/hal/remote/server/session.c):
+- [`runtime/src/iree/hal/remote/server/session.c`](runtime/src/iree/hal/remote/server/session.c):
   control message handlers, queue command replay on the wrapped device,
   provisional resource resolution, and ordered `ADVANCE` emission.
 
 Protocol and channel contracts:
 
-- [`runtime/src/iree/hal/remote/protocol/common.h`](/runtime/src/iree/hal/remote/protocol/common.h):
+- [`runtime/src/iree/hal/remote/protocol/common.h`](runtime/src/iree/hal/remote/protocol/common.h):
   shared wire conventions, endpoint counts, resource ID encoding, buffer
   params, bindings, dispatch config, and memory heap descriptions.
-- [`runtime/src/iree/hal/remote/protocol/control.h`](/runtime/src/iree/hal/remote/protocol/control.h):
+- [`runtime/src/iree/hal/remote/protocol/control.h`](runtime/src/iree/hal/remote/protocol/control.h):
   device, buffer, semaphore, file, executable, command-buffer, lifecycle, and
   profiling control messages.
-- [`runtime/src/iree/hal/remote/protocol/queue.h`](/runtime/src/iree/hal/remote/protocol/queue.h):
+- [`runtime/src/iree/hal/remote/protocol/queue.h`](runtime/src/iree/hal/remote/protocol/queue.h):
   queue `COMMAND` payloads and server `ADVANCE` payloads.
-- [`runtime/src/iree/hal/remote/protocol/commands.h`](/runtime/src/iree/hal/remote/protocol/commands.h):
+- [`runtime/src/iree/hal/remote/protocol/commands.h`](runtime/src/iree/hal/remote/protocol/commands.h):
   serialized command-buffer command stream format.
-- [`runtime/src/iree/hal/remote/protocol/profile.h`](/runtime/src/iree/hal/remote/protocol/profile.h):
+- [`runtime/src/iree/hal/remote/protocol/profile.h`](runtime/src/iree/hal/remote/protocol/profile.h):
   bulk payload metadata for server-to-client profile sink callbacks.
-- [`runtime/src/iree/net/session.h`](/runtime/src/iree/net/session.h):
+- [`runtime/src/iree/net/session.h`](runtime/src/iree/net/session.h):
   net session bootstrap, topology exchange, proxy semaphore creation, control
   DATA, endpoint opening, and GOAWAY/error semantics.
-- [`runtime/src/iree/net/channel/queue/queue_channel.h`](/runtime/src/iree/net/channel/queue/queue_channel.h):
+- [`runtime/src/iree/net/channel/queue/queue_channel.h`](runtime/src/iree/net/channel/queue/queue_channel.h):
   ordered queue traffic with frontiers.
-- [`runtime/src/iree/net/channel/bulk/bulk_channel.h`](/runtime/src/iree/net/channel/bulk/bulk_channel.h):
+- [`runtime/src/iree/net/channel/bulk/bulk_channel.h`](runtime/src/iree/net/channel/bulk/bulk_channel.h):
   transfer-ID keyed bulk START/DATA/COMPLETE/ABORT/CREDIT framing.
-- [`runtime/src/iree/net/carrier.h`](/runtime/src/iree/net/carrier.h):
+- [`runtime/src/iree/net/carrier.h`](runtime/src/iree/net/carrier.h):
   transport-agnostic carrier interface, capabilities, direct operations, remote
   memory handles, and file handle transfer.
 
 Tooling and tests:
 
-- [`runtime/src/iree/tools/iree-serve-device/iree-serve-device-main.c`](/runtime/src/iree/tools/iree-serve-device/iree-serve-device-main.c):
-  command-line server that exposes a local device over TCP or shared memory.
-- [`runtime/src/iree/hal/remote/cts/loopback_adapter.cc`](/runtime/src/iree/hal/remote/cts/loopback_adapter.cc):
+- [`runtime/src/iree/tools/iree-serve-device/iree-serve-device-main.c`](runtime/src/iree/tools/iree-serve-device/iree-serve-device-main.c):
+  command-line server that exposes a local device over TCP, shared memory, or
+  RDMA.
+- [`runtime/src/iree/tools/iree-serve-device/transport.c`](runtime/src/iree/tools/iree-serve-device/transport.c):
+  server bind URI parsing and transport factory construction.
+- [`runtime/src/iree/hal/remote/cts/loopback_adapter.cc`](runtime/src/iree/hal/remote/cts/loopback_adapter.cc):
   HAL CTS adapter that wraps ordinary HAL CTS backends behind a loopback remote
   server/client pair.
-- [`runtime/src/iree/net/carrier/cts`](/runtime/src/iree/net/carrier/cts):
+- [`runtime/src/iree/net/carrier/cts`](runtime/src/iree/net/carrier/cts):
   reusable carrier CTS used by loopback, TCP, shared-memory, and RDMA carriers.
-- [`runtime/src/iree/net/carrier/rdma/README.md`](/runtime/src/iree/net/carrier/rdma/README.md):
+- [`runtime/src/iree/net/carrier/rdma/README.md`](runtime/src/iree/net/carrier/rdma/README.md):
   Linux RDMA and GPU dma-buf registration notes.
 
 ## Running It
@@ -109,6 +112,7 @@ Tooling and tests:
 iree-serve-device --device=local-task --bind=tcp://0.0.0.0:5000
 iree-serve-device --device=hip://0 --bind=tcp://0.0.0.0:5000
 iree-serve-device --device=hip://0 --bind=shm:///dev/shm/iree-gpu
+iree-serve-device --device=hip://0 --bind=rdma://192.0.2.10:7471 --rdma
 ```
 
 Clients use a remote driver name whose suffix selects the transport factory:
@@ -116,18 +120,24 @@ Clients use a remote driver name whose suffix selects the transport factory:
 ```bash
 iree-run-module --device=remote-tcp://server:5000 --module=model.vmfb
 iree-run-module --device=remote-shm:///dev/shm/iree-gpu --module=model.vmfb
+iree-run-module --device='remote-rdma://192.0.2.10:7471?rdma=true' \
+  --module=model.vmfb
 ```
 
-The client registration module enables TCP by default. Shared-memory transport
-is opt-in in both build systems:
+The client registration module enables TCP by default. Shared-memory and RDMA
+transports are opt-in in both build systems; RDMA is Linux-only:
 
 ```bash
-# Bazel
---//runtime/config/net:transports=tcp,shm
+# Bazel: the string-list flag replaces the default list.
+--//runtime/config/net:transports=tcp,shm,rdma
 
 # CMake
--DIREE_NET_TRANSPORT_SHM=ON
+-DIREE_NET_TRANSPORT_SHM=ON -DIREE_NET_TRANSPORT_RDMA=ON
 ```
+
+`remote-rdma` and `rdma://` select the RDMA carrier. The `rdma=true` client
+parameter and `iree-serve-device --rdma` flag require RDMA-capable bulk
+transfer during session bootstrap; they are not downgrade preferences.
 
 Server-side files are not implicitly exposed to clients. `iree-serve-device`
 builds an explicit logical namespace from repeated allow-list flags:
@@ -216,7 +226,7 @@ is signaled, then re-enters queue submission with a concrete frontier.
 ## Resources
 
 Remote resources are session-scoped 64-bit IDs defined in
-[`runtime/src/iree/hal/remote/protocol/common.h`](/runtime/src/iree/hal/remote/protocol/common.h).
+[`runtime/src/iree/hal/remote/protocol/common.h`](runtime/src/iree/hal/remote/protocol/common.h).
 The ID encodes resource type, flags, generation, server proactor index, and
 resource-table slot. Client-created resources begin as provisional IDs. The
 server resolves them to canonical IDs and piggybacks the mapping on queue
@@ -229,7 +239,7 @@ provisional ID is resolved, the server parks the command on that provisional
 entry and resumes it once resolution succeeds or fails.
 
 Server-side resource lifetime is controlled by per-session resource tables in
-[`runtime/src/iree/hal/remote/server/resource_table.h`](/runtime/src/iree/hal/remote/server/resource_table.h).
+[`runtime/src/iree/hal/remote/server/resource_table.h`](runtime/src/iree/hal/remote/server/resource_table.h).
 Client-side releases are batched and tagged with the greatest submission epoch
 that could still mention the resource. The server releases table entries only
 after it has observed queue traffic through that epoch, which prevents a
@@ -259,7 +269,7 @@ Large control payloads avoid unnecessary copies by using
 `iree_net_session_send_control_data`; small stack-backed messages use the copy
 helper. Command-buffer upload and executable upload support both inline data
 and bulk references, selected by the upload flags in
-[`runtime/src/iree/hal/remote/protocol/control.h`](/runtime/src/iree/hal/remote/protocol/control.h).
+[`runtime/src/iree/hal/remote/protocol/control.h`](runtime/src/iree/hal/remote/protocol/control.h).
 
 ## Queue Channel
 
@@ -305,8 +315,8 @@ Current remote HAL bulk users:
 
 The generic bulk channel only validates framing and manages bounded send
 contexts and peer receive credits. The HAL-specific engines under
-[`runtime/src/iree/hal/remote/client`](/runtime/src/iree/hal/remote/client) and
-[`runtime/src/iree/hal/remote/server`](/runtime/src/iree/hal/remote/server) own
+[`runtime/src/iree/hal/remote/client`](runtime/src/iree/hal/remote/client) and
+[`runtime/src/iree/hal/remote/server`](runtime/src/iree/hal/remote/server) own
 transfer semantics, staging pools, file views, profile metadata, cancellation,
 and completion coupling back to queue/control responses.
 
@@ -325,12 +335,12 @@ Available paths in this branch:
   local IPC and low-noise tests.
 - Loopback: test-only in-process transport used by the remote HAL CTS adapter.
 - RDMA: carrier and CTS infrastructure under
-  [`runtime/src/iree/net/carrier/rdma`](/runtime/src/iree/net/carrier/rdma).
+  [`runtime/src/iree/net/carrier/rdma`](runtime/src/iree/net/carrier/rdma).
   The carrier uses libibverbs and librdmacm through dynamic loaders, so
   binaries can run on systems without RDMA installed. Linux RDMA-over-Ethernet
   development and GPU-direct prerequisites live there, including the dma-buf
   registration probe described in
-  [`runtime/src/iree/net/carrier/rdma/README.md`](/runtime/src/iree/net/carrier/rdma/README.md).
+  [`runtime/src/iree/net/carrier/rdma/README.md`](runtime/src/iree/net/carrier/rdma/README.md).
 
 The remote HAL client/server APIs treat `rdma=true` as a requirement, not a
 preference. Device or server creation validates that the selected transport
@@ -418,6 +428,25 @@ Full Bazel presubmit for this worktree:
 
 ```bash
 python dev.py bazel presubmit
+```
+
+RDMA-focused build and CTS coverage:
+
+```bash
+bazel test --//runtime/config/net:transports=rdma \
+  //runtime/src/iree/net/carrier/rdma:all \
+  //runtime/src/iree/net/carrier/rdma/cts:all
+
+cmake -S . -B /tmp/iree-rdma -GNinja \
+  -DIREE_BUILD_TESTS=ON \
+  -DIREE_BUILD_BENCHMARKS=ON \
+  -DIREE_MODULE_VMVX=ON \
+  -DIREE_NET_TRANSPORT_RDMA=ON
+
+cmake --build /tmp/iree-rdma --target \
+  iree_net_carrier_rdma_factory \
+  iree_tools_iree-serve-device_transport_test \
+  iree_hal_remote_client_registration_registration
 ```
 
 The remote HAL CTS adapter composes with existing HAL CTS backends by wrapping
