@@ -1,0 +1,35 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("@bazel_skylib//rules:common_settings.bzl", "string_list_flag")
+
+package(default_visibility = ["//visibility:public"])
+
+# Network transport registration defaults to TCP so remote HAL clients can
+# connect across machines without pulling in IPC-specific plumbing.
+DEFAULT_TRANSPORTS = [
+    "tcp",
+]
+
+SUPPORTED_TRANSPORTS = [
+    "shm",
+    "tcp",
+]
+
+string_list_flag(
+    name = "transports",
+    build_setting_default = DEFAULT_TRANSPORTS,
+)
+
+[
+    config_setting(
+        name = "transport_{}".format(transport.replace("-", "_")),
+        flag_values = {
+            ":transports": transport,
+        },
+    )
+    for transport in SUPPORTED_TRANSPORTS
+]

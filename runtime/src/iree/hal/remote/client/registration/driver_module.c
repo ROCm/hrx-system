@@ -27,8 +27,8 @@
 //
 // The transport name after "remote-" determines which factory is created.
 // Available transports depend on what has been compiled in via the
-// IREE_HAVE_NET_*_TRANSPORT defines, controlled by the enabled_transports
-// build flag.
+// IREE_HAVE_NET_*_TRANSPORT defines, controlled by //runtime/config/net
+// transport settings.
 
 static const iree_string_view_t IREE_HAL_REMOTE_DRIVER_PREFIX =
     iree_string_view_literal("remote-");

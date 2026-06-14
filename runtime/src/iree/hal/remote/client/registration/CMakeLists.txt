@@ -10,11 +10,6 @@ if(NOT IREE_HAL_DRIVER_REMOTE)
   return()
 endif()
 
-# Transport options controlling which factories are compiled into the
-# registration module. TCP is enabled by default; SHM is opt-in.
-option(IREE_NET_TRANSPORT_TCP "Enable TCP transport for remote HAL" ON)
-option(IREE_NET_TRANSPORT_SHM "Enable SHM transport for remote HAL" OFF)
-
 set(_DEFINES "IREE_HAVE_HAL_REMOTE_CLIENT_DRIVER_MODULE=1")
 set(_DEPS
   iree::base

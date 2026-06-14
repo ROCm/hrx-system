@@ -123,7 +123,7 @@ is opt-in in both build systems:
 
 ```bash
 # Bazel
---//runtime/src/iree/hal/remote/client/registration:enabled_transports=tcp,shm
+--//runtime/config/net:transports=tcp,shm
 
 # CMake
 -DIREE_NET_TRANSPORT_SHM=ON
