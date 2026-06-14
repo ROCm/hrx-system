@@ -70,6 +70,9 @@ _RUNTIME_HAL_DRIVER_CMAKE_OPTIONS = {
     "//runtime/config/hal:executable_loader_vmvx_module": "IREE_HAL_EXECUTABLE_LOADER_VMVX_MODULE",
     "//runtime/config/hal:executable_plugin_embedded_elf": "IREE_HAL_EXECUTABLE_PLUGIN_EMBEDDED_ELF",
     "//runtime/config/hal:executable_plugin_system_library": "IREE_HAL_EXECUTABLE_PLUGIN_SYSTEM_LIBRARY",
+    "//runtime/config/net:transport_rdma": "IREE_NET_TRANSPORT_RDMA",
+    "//runtime/config/net:transport_shm": "IREE_NET_TRANSPORT_SHM",
+    "//runtime/config/net:transport_tcp": "IREE_NET_TRANSPORT_TCP",
     "//runtime/src/iree/hal/drivers/hip:rccl_enabled": "IREE_HAL_DRIVER_HIP_RCCL",
 }
 

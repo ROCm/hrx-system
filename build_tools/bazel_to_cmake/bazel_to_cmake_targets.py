@@ -59,12 +59,14 @@ class TargetConverter:
                 "//third_party:hip_api_headers": ["iree::third_party::hip_api_headers"],
                 "//third_party:libbacktrace": ["${IREE_LIBBACKTRACE_TARGET}"],
                 "//third_party:rccl_headers": ["iree::third_party::rccl_headers"],
+                "//third_party:rdma_core_headers": [
+                    "iree::third_party::rdma_core_headers"
+                ],
                 "//third_party:spirv_as": ["iree::third_party::spirv_as"],
                 "//third_party:spirv_dis": ["iree::third_party::spirv_dis"],
                 "//third_party:spirv_val": ["iree::third_party::spirv_val"],
                 "//third_party:vulkan_headers": ["iree::third_party::vulkan_headers"],
                 "//third_party:catch2": ["iree::third_party::catch2"],
-                "@rdma_core_headers": ["rdma_core::headers"],
                 "@webgpu_headers": [],
                 # py_binary targets have no CMake equivalent.
                 # This is the only target bazel needs to execute the lit tests.

@@ -15,6 +15,18 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
+_LINUX_ONLY = select({
+    "@platforms//os:linux": [],
+    "//conditions:default": ["@platforms//:incompatible"],
+})
+
+_RDMA_TRANSPORT_ENABLED = select({
+    "//runtime/config/net:transport_rdma": [],
+    "//conditions:default": ["@platforms//:incompatible"],
+})
+
+_RDMA_COMPATIBLE = _LINUX_ONLY + _RDMA_TRANSPORT_ENABLED
+
 iree_runtime_cc_library(
     name = "libverbs",
     srcs = [
@@ -23,10 +35,7 @@ iree_runtime_cc_library(
     hdrs = [
         "libverbs.h",
     ],
-    target_compatible_with = select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = _RDMA_COMPATIBLE,
     textual_hdrs = [
         "libverbs_tables.h",
     ],
@@ -35,7 +44,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:dynamic_library",
         "//runtime/src/iree/base/internal:path",
-        "@rdma_core_headers",
+        "//third_party:rdma_core_headers",
     ],
 )
 
@@ -47,10 +56,7 @@ iree_runtime_cc_library(
     hdrs = [
         "librdmacm.h",
     ],
-    target_compatible_with = select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = _RDMA_COMPATIBLE,
     textual_hdrs = [
         "librdmacm_tables.h",
     ],
@@ -60,7 +66,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:dynamic_library",
         "//runtime/src/iree/base/internal:path",
-        "@rdma_core_headers",
+        "//third_party:rdma_core_headers",
     ],
 )
 
@@ -68,10 +74,7 @@ iree_runtime_cc_library(
     name = "carrier",
     srcs = ["carrier.c"],
     hdrs = ["carrier.h"],
-    target_compatible_with = select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         ":completion_queue",
         ":connection_data",
@@ -89,17 +92,14 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/net:carrier",
-        "@rdma_core_headers",
+        "//third_party:rdma_core_headers",
     ],
 )
 
 iree_runtime_cc_test(
     name = "carrier_test",
     srcs = ["carrier_test.cc"],
-    target_compatible_with = select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         ":carrier",
         "//runtime/src/iree/base",
@@ -112,10 +112,7 @@ iree_runtime_cc_library(
     name = "memory_window",
     srcs = ["memory_window.c"],
     hdrs = ["memory_window.h"],
-    target_compatible_with = select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         ":context",
         ":libverbs",
@@ -123,7 +120,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
         "//runtime/src/iree/net:carrier",
-        "@rdma_core_headers",
+        "//third_party:rdma_core_headers",
     ],
 )
 
@@ -131,17 +128,14 @@ iree_runtime_cc_library(
     name = "cm_channel",
     srcs = ["cm_channel.c"],
     hdrs = ["cm_channel.h"],
-    target_compatible_with = select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         ":librdmacm",
         ":pollable_fd",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
-        "@rdma_core_headers",
+        "//third_party:rdma_core_headers",
     ],
 )
 
@@ -151,10 +145,7 @@ iree_runtime_cc_test(
     tags = [
         "nodocker",
     ],
-    target_compatible_with = select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         ":cm_channel",
         "//runtime/src/iree/async",
@@ -162,7 +153,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
-        "@rdma_core_headers",
+        "//third_party:rdma_core_headers",
     ],
 )
 
@@ -170,16 +161,13 @@ iree_runtime_cc_library(
     name = "completion_queue",
     srcs = ["completion_queue.c"],
     hdrs = ["completion_queue.h"],
-    target_compatible_with = select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         ":context",
         ":pollable_fd",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
-        "@rdma_core_headers",
+        "//third_party:rdma_core_headers",
     ],
 )
 
@@ -189,10 +177,7 @@ iree_runtime_cc_test(
     tags = [
         "nodocker",
     ],
-    target_compatible_with = select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         ":completion_queue",
         "//runtime/src/iree/async",
@@ -200,7 +185,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
-        "@rdma_core_headers",
+        "//third_party:rdma_core_headers",
     ],
 )
 
@@ -208,10 +193,7 @@ iree_runtime_cc_library(
     name = "connection_data",
     srcs = ["connection_data.c"],
     hdrs = ["connection_data.h"],
-    target_compatible_with = select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         "//runtime/src/iree/base",
         "//runtime/src/iree/base:core_headers",
@@ -221,10 +203,7 @@ iree_runtime_cc_library(
 iree_runtime_cc_test(
     name = "connection_data_test",
     srcs = ["connection_data_test.cc"],
-    target_compatible_with = select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         ":connection_data",
         "//runtime/src/iree/base",
@@ -237,17 +216,14 @@ iree_runtime_cc_library(
     name = "credit_memory",
     srcs = ["credit_memory.c"],
     hdrs = ["credit_memory.h"],
-    target_compatible_with = select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         ":connection_data",
         ":context",
         ":libverbs",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
-        "@rdma_core_headers",
+        "//third_party:rdma_core_headers",
     ],
 )
 
@@ -257,10 +233,7 @@ iree_runtime_cc_test(
     tags = [
         "nodocker",
     ],
-    target_compatible_with = select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         ":credit_memory",
         "//runtime/src/iree/base",
@@ -274,10 +247,7 @@ iree_runtime_cc_library(
     name = "endpoint_data",
     srcs = ["endpoint_data.c"],
     hdrs = ["endpoint_data.h"],
-    target_compatible_with = select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         ":connection_data",
         "//runtime/src/iree/base",
@@ -288,10 +258,7 @@ iree_runtime_cc_library(
 iree_runtime_cc_test(
     name = "endpoint_data_test",
     srcs = ["endpoint_data_test.cc"],
-    target_compatible_with = select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         ":endpoint_data",
         "//runtime/src/iree/base",
@@ -304,10 +271,7 @@ iree_runtime_cc_library(
     name = "pollable_fd",
     srcs = ["pollable_fd.c"],
     hdrs = ["pollable_fd.h"],
-    target_compatible_with = select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         "//runtime/src/iree/base",
     ],
@@ -316,10 +280,7 @@ iree_runtime_cc_library(
 iree_runtime_cc_test(
     name = "pollable_fd_test",
     srcs = ["pollable_fd_test.cc"],
-    target_compatible_with = select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         ":pollable_fd",
         "//runtime/src/iree/base",
@@ -332,25 +293,19 @@ iree_runtime_cc_library(
     name = "queue_pair",
     srcs = ["queue_pair.c"],
     hdrs = ["queue_pair.h"],
-    target_compatible_with = select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         ":completion_queue",
         ":context",
         "//runtime/src/iree/base",
-        "@rdma_core_headers",
+        "//third_party:rdma_core_headers",
     ],
 )
 
 iree_runtime_cc_test(
     name = "queue_pair_test",
     srcs = ["queue_pair_test.cc"],
-    target_compatible_with = select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         ":queue_pair",
         "//runtime/src/iree/base",
@@ -363,34 +318,28 @@ iree_runtime_cc_library(
     name = "receive_queue",
     srcs = ["receive_queue.c"],
     hdrs = ["receive_queue.h"],
-    target_compatible_with = select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         ":queue_pair",
         ":sge",
         ":work_request_table",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
-        "@rdma_core_headers",
+        "//third_party:rdma_core_headers",
     ],
 )
 
 iree_runtime_cc_test(
     name = "receive_queue_test",
     srcs = ["receive_queue_test.cc"],
-    target_compatible_with = select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         ":receive_queue",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
-        "@rdma_core_headers",
+        "//third_party:rdma_core_headers",
     ],
 )
 
@@ -398,17 +347,14 @@ iree_runtime_cc_library(
     name = "region",
     srcs = ["region.c"],
     hdrs = ["region.h"],
-    target_compatible_with = select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         ":context",
         ":libverbs",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
-        "@rdma_core_headers",
+        "//third_party:rdma_core_headers",
     ],
 )
 
@@ -418,10 +364,7 @@ iree_runtime_cc_test(
     tags = [
         "nodocker",
     ],
-    target_compatible_with = select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         ":region",
         "//runtime/src/iree/async",
@@ -435,10 +378,7 @@ iree_runtime_cc_library(
     name = "send_reservation_table",
     srcs = ["send_reservation_table.c"],
     hdrs = ["send_reservation_table.h"],
-    target_compatible_with = select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         ":connection_data",
         "//runtime/src/iree/async",
@@ -450,10 +390,7 @@ iree_runtime_cc_library(
 iree_runtime_cc_test(
     name = "send_reservation_table_test",
     srcs = ["send_reservation_table_test.cc"],
-    target_compatible_with = select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         ":send_reservation_table",
         "//runtime/src/iree/base",
@@ -466,10 +403,7 @@ iree_runtime_cc_library(
     name = "send_window",
     srcs = ["send_window.c"],
     hdrs = ["send_window.h"],
-    target_compatible_with = select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         "//runtime/src/iree/base",
     ],
@@ -478,10 +412,7 @@ iree_runtime_cc_library(
 iree_runtime_cc_test(
     name = "send_window_test",
     srcs = ["send_window_test.cc"],
-    target_compatible_with = select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         ":send_window",
         "//runtime/src/iree/base",
@@ -494,25 +425,19 @@ iree_runtime_cc_library(
     name = "sge",
     srcs = ["sge.c"],
     hdrs = ["sge.h"],
-    target_compatible_with = select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         ":libverbs",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
-        "@rdma_core_headers",
+        "//third_party:rdma_core_headers",
     ],
 )
 
 iree_runtime_cc_test(
     name = "sge_test",
     srcs = ["sge_test.cc"],
-    target_compatible_with = select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         ":sge",
         "//runtime/src/iree/async",
@@ -526,10 +451,7 @@ iree_runtime_cc_library(
     name = "work_request_table",
     srcs = ["work_request_table.c"],
     hdrs = ["work_request_table.h"],
-    target_compatible_with = select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
@@ -539,10 +461,7 @@ iree_runtime_cc_library(
 iree_runtime_cc_test(
     name = "work_request_table_test",
     srcs = ["work_request_table_test.cc"],
-    target_compatible_with = select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         ":work_request_table",
         "//runtime/src/iree/base",
@@ -559,16 +478,13 @@ iree_runtime_cc_library(
     hdrs = [
         "context.h",
     ],
-    target_compatible_with = select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         ":librdmacm",
         ":libverbs",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
-        "@rdma_core_headers",
+        "//third_party:rdma_core_headers",
     ],
 )
 
@@ -578,16 +494,13 @@ iree_runtime_cc_test(
     tags = [
         "nodocker",
     ],
-    target_compatible_with = select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         ":context",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
-        "@rdma_core_headers",
+        "//third_party:rdma_core_headers",
     ],
 )
 
@@ -599,10 +512,7 @@ iree_runtime_cc_test(
         "nodocker",
         "requires-gpu-amd",
     ],
-    target_compatible_with = select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         ":libverbs",
         "//runtime/src/iree/base",
@@ -618,10 +528,7 @@ iree_runtime_cc_library(
     name = "factory",
     srcs = ["factory.c"],
     hdrs = ["factory.h"],
-    target_compatible_with = select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         ":carrier",
         ":cm_channel",
@@ -635,17 +542,14 @@ iree_runtime_cc_library(
         "//runtime/src/iree/net:message_endpoint",
         "//runtime/src/iree/net:transport_factory",
         "//runtime/src/iree/net/channel/util:frame_sender",
-        "@rdma_core_headers",
+        "//third_party:rdma_core_headers",
     ],
 )
 
 iree_runtime_cc_test(
     name = "factory_test",
     srcs = ["factory_test.cc"],
-    target_compatible_with = select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = _RDMA_COMPATIBLE,
     deps = [
         ":factory",
         "//runtime/src/iree/base",

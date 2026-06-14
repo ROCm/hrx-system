@@ -15,6 +15,7 @@ DEFAULT_TRANSPORTS = [
 ]
 
 SUPPORTED_TRANSPORTS = [
+    "rdma",
     "shm",
     "tcp",
 ]

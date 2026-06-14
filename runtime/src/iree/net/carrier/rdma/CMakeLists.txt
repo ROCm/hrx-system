@@ -9,7 +9,7 @@
 
 iree_add_all_subdirs()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_library(
   NAME
     libverbs
@@ -24,12 +24,12 @@ iree_cc_library(
     iree::base::internal
     iree::base::internal::dynamic_library
     iree::base::internal::path
-    rdma_core::headers
+    iree::third_party::rdma_core_headers
   PUBLIC
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_library(
   NAME
     librdmacm
@@ -45,12 +45,12 @@ iree_cc_library(
     iree::base::internal
     iree::base::internal::dynamic_library
     iree::base::internal::path
-    rdma_core::headers
+    iree::third_party::rdma_core_headers
   PUBLIC
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_library(
   NAME
     carrier
@@ -75,12 +75,12 @@ iree_cc_library(
     iree::base
     iree::base::threading
     iree::net::carrier
-    rdma_core::headers
+    iree::third_party::rdma_core_headers
   PUBLIC
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_test(
   NAME
     carrier_test
@@ -94,7 +94,7 @@ iree_cc_test(
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_library(
   NAME
     memory_window
@@ -109,12 +109,12 @@ iree_cc_library(
     iree::async
     iree::base
     iree::net::carrier
-    rdma_core::headers
+    iree::third_party::rdma_core_headers
   PUBLIC
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_library(
   NAME
     cm_channel
@@ -128,12 +128,12 @@ iree_cc_library(
     iree::async
     iree::base
     iree::base::threading
-    rdma_core::headers
+    iree::third_party::rdma_core_headers
   PUBLIC
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_test(
   NAME
     cm_channel_test
@@ -146,13 +146,13 @@ iree_cc_test(
     iree::base
     iree::testing::gtest
     iree::testing::gtest_main
-    rdma_core::headers
+    iree::third_party::rdma_core_headers
   LABELS
     "nodocker"
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_library(
   NAME
     completion_queue
@@ -165,12 +165,12 @@ iree_cc_library(
     ::pollable_fd
     iree::async
     iree::base
-    rdma_core::headers
+    iree::third_party::rdma_core_headers
   PUBLIC
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_test(
   NAME
     completion_queue_test
@@ -183,13 +183,13 @@ iree_cc_test(
     iree::base
     iree::testing::gtest
     iree::testing::gtest_main
-    rdma_core::headers
+    iree::third_party::rdma_core_headers
   LABELS
     "nodocker"
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_library(
   NAME
     connection_data
@@ -204,7 +204,7 @@ iree_cc_library(
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_test(
   NAME
     connection_data_test
@@ -218,7 +218,7 @@ iree_cc_test(
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_library(
   NAME
     credit_memory
@@ -232,12 +232,12 @@ iree_cc_library(
     ::libverbs
     iree::base
     iree::base::internal
-    rdma_core::headers
+    iree::third_party::rdma_core_headers
   PUBLIC
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_test(
   NAME
     credit_memory_test
@@ -254,7 +254,7 @@ iree_cc_test(
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_library(
   NAME
     endpoint_data
@@ -270,7 +270,7 @@ iree_cc_library(
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_test(
   NAME
     endpoint_data_test
@@ -284,7 +284,7 @@ iree_cc_test(
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_library(
   NAME
     pollable_fd
@@ -298,7 +298,7 @@ iree_cc_library(
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_test(
   NAME
     pollable_fd_test
@@ -312,7 +312,7 @@ iree_cc_test(
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_library(
   NAME
     queue_pair
@@ -324,12 +324,12 @@ iree_cc_library(
     ::completion_queue
     ::context
     iree::base
-    rdma_core::headers
+    iree::third_party::rdma_core_headers
   PUBLIC
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_test(
   NAME
     queue_pair_test
@@ -343,7 +343,7 @@ iree_cc_test(
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_library(
   NAME
     receive_queue
@@ -357,12 +357,12 @@ iree_cc_library(
     ::work_request_table
     iree::async
     iree::base
-    rdma_core::headers
+    iree::third_party::rdma_core_headers
   PUBLIC
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_test(
   NAME
     receive_queue_test
@@ -374,11 +374,11 @@ iree_cc_test(
     iree::base
     iree::testing::gtest
     iree::testing::gtest_main
-    rdma_core::headers
+    iree::third_party::rdma_core_headers
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_library(
   NAME
     region
@@ -392,12 +392,12 @@ iree_cc_library(
     iree::async
     iree::base
     iree::base::internal
-    rdma_core::headers
+    iree::third_party::rdma_core_headers
   PUBLIC
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_test(
   NAME
     region_test
@@ -414,7 +414,7 @@ iree_cc_test(
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_library(
   NAME
     send_reservation_table
@@ -431,7 +431,7 @@ iree_cc_library(
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_test(
   NAME
     send_reservation_table_test
@@ -445,7 +445,7 @@ iree_cc_test(
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_library(
   NAME
     send_window
@@ -459,7 +459,7 @@ iree_cc_library(
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_test(
   NAME
     send_window_test
@@ -473,7 +473,7 @@ iree_cc_test(
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_library(
   NAME
     sge
@@ -485,12 +485,12 @@ iree_cc_library(
     ::libverbs
     iree::async
     iree::base
-    rdma_core::headers
+    iree::third_party::rdma_core_headers
   PUBLIC
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_test(
   NAME
     sge_test
@@ -505,7 +505,7 @@ iree_cc_test(
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_library(
   NAME
     work_request_table
@@ -520,7 +520,7 @@ iree_cc_library(
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_test(
   NAME
     work_request_table_test
@@ -534,7 +534,7 @@ iree_cc_test(
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_library(
   NAME
     context
@@ -547,12 +547,12 @@ iree_cc_library(
     ::libverbs
     iree::base
     iree::base::internal
-    rdma_core::headers
+    iree::third_party::rdma_core_headers
   PUBLIC
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_test(
   NAME
     context_test
@@ -563,13 +563,13 @@ iree_cc_test(
     iree::base
     iree::testing::gtest
     iree::testing::gtest_main
-    rdma_core::headers
+    iree::third_party::rdma_core_headers
   LABELS
     "nodocker"
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_test(
   NAME
     dmabuf_registration_test
@@ -590,7 +590,7 @@ iree_cc_test(
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_library(
   NAME
     factory
@@ -611,12 +611,12 @@ iree_cc_library(
     iree::net::connection
     iree::net::message_endpoint
     iree::net::transport_factory
-    rdma_core::headers
+    iree::third_party::rdma_core_headers
   PUBLIC
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_NET_TRANSPORT_RDMA)
 iree_cc_test(
   NAME
     factory_test

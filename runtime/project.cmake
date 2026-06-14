@@ -66,12 +66,22 @@ endif()
 if(NOT DEFINED IREE_NET_TRANSPORT_SHM_DEFAULT)
   set(IREE_NET_TRANSPORT_SHM_DEFAULT ${IREE_NET_TRANSPORT_DEFAULTS})
 endif()
+if(NOT DEFINED IREE_NET_TRANSPORT_RDMA_DEFAULT)
+  set(IREE_NET_TRANSPORT_RDMA_DEFAULT ${IREE_NET_TRANSPORT_DEFAULTS})
+endif()
 option(IREE_NET_TRANSPORT_TCP
   "Enables the TCP runtime network transport."
   ${IREE_NET_TRANSPORT_TCP_DEFAULT})
 option(IREE_NET_TRANSPORT_SHM
   "Enables the shared-memory runtime network transport."
   ${IREE_NET_TRANSPORT_SHM_DEFAULT})
+option(IREE_NET_TRANSPORT_RDMA
+  "Enables the RDMA runtime network transport."
+  ${IREE_NET_TRANSPORT_RDMA_DEFAULT})
+if(IREE_NET_TRANSPORT_RDMA AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  message(FATAL_ERROR
+    "IREE_NET_TRANSPORT_RDMA=ON requires Linux.")
+endif()
 
 option(IREE_HAL_DRIVER_DEFAULTS
   "Default value for opt-in runtime HAL drivers." OFF)

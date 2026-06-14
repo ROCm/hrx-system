@@ -129,6 +129,10 @@ filegroup(
 )
 
 filegroup(
+    name = "empty_rdma_core_headers",
+)
+
+filegroup(
     name = "empty_spirv_tool",
 )
 
@@ -183,6 +187,16 @@ alias(
         ":loom_users",
         ":runtime_users",
     ],
+)
+
+alias(
+    name = "rdma_core_headers",
+    actual = select({
+        "//runtime/config/net:transport_rdma": "@rdma_core_headers//:rdma_core_headers",
+        "//conditions:default": ":empty_rdma_core_headers",
+    }),
+    tags = ["manual"],
+    visibility = [":runtime_users"],
 )
 
 alias(
