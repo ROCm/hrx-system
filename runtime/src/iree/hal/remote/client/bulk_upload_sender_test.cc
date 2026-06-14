@@ -166,8 +166,8 @@ class ClientBulkUploadSenderTest : public ::testing::Test {
           proactor_, slab, IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE, &region);
     }
     if (iree_status_is_ok(status)) {
-      status = iree_async_buffer_pool_allocate(region, iree_allocator_system(),
-                                               &buffer_pool);
+      status = iree_async_buffer_pool_create(region, iree_allocator_system(),
+                                             &buffer_pool);
     }
     if (iree_status_is_ok(status)) {
       status =
@@ -179,7 +179,7 @@ class ClientBulkUploadSenderTest : public ::testing::Test {
       buffer_pool = NULL;
     }
 
-    iree_async_buffer_pool_free(buffer_pool);
+    iree_async_buffer_pool_release(buffer_pool);
     iree_async_region_release(region);
     iree_async_slab_release(slab);
     return status;

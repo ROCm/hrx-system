@@ -168,10 +168,8 @@ class SharedBufferPoolTest : public CtsTestBase<> {
   }
 
   void TeardownSide(SharedPoolSide* side) {
-    if (side->pool) {
-      iree_async_buffer_pool_free(side->pool);
-      side->pool = nullptr;
-    }
+    iree_async_buffer_pool_release(side->pool);
+    side->pool = nullptr;
     iree_async_region_release(side->region);
     side->region = nullptr;
     iree_async_slab_release(side->slab);

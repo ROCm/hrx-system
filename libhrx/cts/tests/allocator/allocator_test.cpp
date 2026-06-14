@@ -75,8 +75,26 @@ TEST_CASE_METHOD(HrxTestFixture, "allocator_import_buffer from host ptr",
   params.usage = HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SCOPED;
 
   hrx_buffer_t buf = nullptr;
-  REQUIRE_OK(
-      hrx().allocator_import_buffer(alloc, params, host_data, 128, &buf));
+  hrx_status_t import_status =
+      hrx().allocator_import_buffer(alloc, params, host_data, 128, &buf);
+  if (!hrx_status_is_ok(import_status)) {
+    const hrx_status_code_t import_status_code =
+        hrx().status_code(import_status);
+    if (import_status_code == HRX_STATUS_UNAVAILABLE) {
+      hrx().status_ignore(import_status);
+      hrx().host_allocator_free_aligned(ha, host_raw);
+      SKIP("host-pointer import is not available on this device allocator");
+    }
+
+    char* msg = nullptr;
+    size_t len = 0;
+    hrx().status_to_string(import_status, &msg, &len);
+    INFO("hrx error: " << (msg ? msg : "?"));
+    hrx().status_free_message(msg);
+    hrx().status_ignore(import_status);
+    hrx().host_allocator_free_aligned(ha, host_raw);
+    REQUIRE(false);
+  }
   REQUIRE(buf != nullptr);
 
   size_t size = 0;

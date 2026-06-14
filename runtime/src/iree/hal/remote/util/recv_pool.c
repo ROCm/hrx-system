@@ -40,7 +40,7 @@ struct iree_hal_remote_recv_pool_t {
 static void iree_hal_remote_recv_pool_destroy(
     iree_hal_remote_recv_pool_t* recv_pool) {
   iree_allocator_t host_allocator = recv_pool->host_allocator;
-  iree_async_buffer_pool_free(recv_pool->buffer_pool);
+  iree_async_buffer_pool_release(recv_pool->buffer_pool);
   iree_async_region_release(recv_pool->region);
   iree_async_slab_release(recv_pool->slab);
   iree_async_proactor_release(recv_pool->proactor);
@@ -110,8 +110,8 @@ iree_status_t iree_hal_remote_recv_pool_create(
 
   // Create the lock-free buffer pool over the registered region.
   if (iree_status_is_ok(status)) {
-    status = iree_async_buffer_pool_allocate(recv_pool->region, host_allocator,
-                                             &recv_pool->buffer_pool);
+    status = iree_async_buffer_pool_create(recv_pool->region, host_allocator,
+                                           &recv_pool->buffer_pool);
   }
 
   if (iree_status_is_ok(status)) {

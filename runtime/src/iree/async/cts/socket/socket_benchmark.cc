@@ -597,7 +597,7 @@ static void BM_ThroughputZC(::benchmark::State& state,
     }
 
     status =
-        iree_async_buffer_pool_allocate(region, iree_allocator_system(), &pool);
+        iree_async_buffer_pool_create(region, iree_allocator_system(), &pool);
     if (!iree_status_is_ok(status)) {
       state.SkipWithError("Pool allocation failed");
       iree_status_ignore(status);
@@ -612,7 +612,7 @@ static void BM_ThroughputZC(::benchmark::State& state,
     if (!iree_status_is_ok(status)) {
       state.SkipWithError("Buffer acquire failed");
       iree_status_ignore(status);
-      iree_async_buffer_pool_free(pool);
+      iree_async_buffer_pool_release(pool);
       iree_async_region_release(region);
       iree_async_slab_release(slab);
       DestroyLoopbackContext(ctx);
@@ -690,7 +690,7 @@ static void BM_ThroughputZC(::benchmark::State& state,
   // Cleanup.
   if (using_fixed) {
     iree_async_buffer_lease_release(&lease);
-    iree_async_buffer_pool_free(pool);
+    iree_async_buffer_pool_release(pool);
     iree_async_region_release(region);
     iree_async_slab_release(slab);
   }

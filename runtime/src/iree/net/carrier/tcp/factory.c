@@ -29,6 +29,21 @@ typedef struct iree_net_tcp_factory_t {
 
 typedef struct iree_net_tcp_connection_t iree_net_tcp_connection_t;
 
+// Maximum number of frames the TCP mux will queue for a stream that has not
+// been activated locally yet. Valid peers may briefly outrun local deferred
+// endpoint activation; sustained sends to unopened streams are a protocol
+// error/backpressure failure.
+#define IREE_NET_TCP_STREAM_PENDING_FRAME_LIMIT 8
+
+typedef struct iree_net_tcp_pending_frame_t {
+  // Next pending frame for the same stream slot.
+  struct iree_net_tcp_pending_frame_t* next;
+  // Payload byte count stored in |payload|.
+  iree_host_size_t payload_length;
+  // Copied payload bytes delivered when the stream activates.
+  uint8_t payload[];
+} iree_net_tcp_pending_frame_t;
+
 // Per-stream state within a TCP connection.
 //
 // Each stream slot maps to one message endpoint visible to the caller. The
@@ -44,6 +59,12 @@ typedef struct iree_net_tcp_stream_t {
     iree_net_message_endpoint_deactivate_fn_t fn;
     void* user_data;
   } deactivate;
+  // Frames received before this stream was activated locally.
+  iree_net_tcp_pending_frame_t* pending_head;
+  // Tail pointer for O(1) pending frame append.
+  iree_net_tcp_pending_frame_t* pending_tail;
+  // Number of queued pending frames.
+  iree_host_size_t pending_count;
   // Whether this stream is actively receiving frames.
   bool active;
 } iree_net_tcp_stream_t;
@@ -180,6 +201,91 @@ static iree_host_size_t iree_net_tcp_frame_length(
 // Mux dispatch
 //===----------------------------------------------------------------------===//
 
+static void iree_net_tcp_stream_clear_pending_frames(
+    iree_net_tcp_stream_t* stream, iree_allocator_t host_allocator) {
+  iree_net_tcp_pending_frame_t* pending_frame = stream->pending_head;
+  while (pending_frame) {
+    iree_net_tcp_pending_frame_t* next_frame = pending_frame->next;
+    iree_allocator_free(host_allocator, pending_frame);
+    pending_frame = next_frame;
+  }
+  stream->pending_head = NULL;
+  stream->pending_tail = NULL;
+  stream->pending_count = 0;
+}
+
+static iree_status_t iree_net_tcp_stream_enqueue_pending_frame(
+    iree_net_tcp_stream_t* stream, iree_const_byte_span_t payload) {
+  if (stream->pending_count >= IREE_NET_TCP_STREAM_PENDING_FRAME_LIMIT) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "stream has %" PRIhsz
+                            " pending frames before activation",
+                            stream->pending_count);
+  }
+
+  iree_host_size_t total_size = 0;
+  IREE_RETURN_IF_ERROR(
+      IREE_STRUCT_LAYOUT(sizeof(iree_net_tcp_pending_frame_t), &total_size,
+                         IREE_STRUCT_FIELD_FAM(payload.data_length, uint8_t)));
+
+  iree_net_tcp_connection_t* connection = stream->connection;
+  iree_allocator_t host_allocator = connection->base.host_allocator;
+  iree_net_tcp_pending_frame_t* pending_frame = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, total_size,
+                                             (void**)&pending_frame));
+  memset(pending_frame, 0, sizeof(*pending_frame));
+  pending_frame->payload_length = payload.data_length;
+  memcpy(pending_frame->payload, payload.data, payload.data_length);
+
+  if (stream->pending_tail) {
+    stream->pending_tail->next = pending_frame;
+  } else {
+    stream->pending_head = pending_frame;
+  }
+  stream->pending_tail = pending_frame;
+  ++stream->pending_count;
+  return iree_ok_status();
+}
+
+static iree_status_t iree_net_tcp_stream_deliver_pending_frames(
+    iree_net_tcp_stream_t* stream) {
+  iree_net_tcp_connection_t* connection = stream->connection;
+  iree_allocator_t host_allocator = connection->base.host_allocator;
+  iree_status_t status = iree_ok_status();
+  while (iree_status_is_ok(status) && stream->pending_head) {
+    iree_net_tcp_pending_frame_t* pending_frame = stream->pending_head;
+    stream->pending_head = pending_frame->next;
+    if (!stream->pending_head) stream->pending_tail = NULL;
+    --stream->pending_count;
+
+    iree_async_buffer_lease_t lease;
+    status = iree_async_buffer_pool_acquire(connection->recv_pool, &lease);
+    if (iree_status_is_ok(status)) {
+      if (pending_frame->payload_length > lease.span.length) {
+        status =
+            iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                             "pending stream frame length %" PRIhsz
+                             " exceeds receive buffer length %" PRIhsz,
+                             pending_frame->payload_length, lease.span.length);
+      } else {
+        uint8_t* payload_data = iree_async_span_ptr(lease.span);
+        memcpy(payload_data, pending_frame->payload,
+               pending_frame->payload_length);
+        iree_const_byte_span_t payload = iree_make_const_byte_span(
+            payload_data, pending_frame->payload_length);
+        status = stream->callbacks.on_message(stream->callbacks.user_data,
+                                              payload, &lease);
+      }
+      iree_async_buffer_lease_release(&lease);
+    }
+    iree_allocator_free(host_allocator, pending_frame);
+  }
+  if (!iree_status_is_ok(status)) {
+    iree_net_tcp_stream_clear_pending_frames(stream, host_allocator);
+  }
+  return status;
+}
+
 // Dispatches a complete frame to the appropriate stream based on stream_id.
 //
 // Reads the uint16_t stream_id from the frame header at offset 12, then strips
@@ -202,22 +308,25 @@ static iree_status_t iree_net_tcp_mux_dispatch(
   }
   uint16_t stream_id;
   memcpy(&stream_id, message.data + 12, sizeof(stream_id));
-  if (stream_id >= connection->max_stream_count ||
-      !connection->streams[stream_id].active) {
+  if (stream_id >= connection->max_stream_count) {
     return iree_make_status(IREE_STATUS_NOT_FOUND,
                             "no handler for stream_id %u", (unsigned)stream_id);
   }
-  if (!connection->streams[stream_id].callbacks.on_message) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "stream_id %u has no message handler",
-                            (unsigned)stream_id);
-  }
+  iree_net_tcp_stream_t* stream = &connection->streams[stream_id];
   // Strip the frame header — deliver only the payload to the consumer.
   iree_const_byte_span_t payload = iree_make_const_byte_span(
       message.data + IREE_NET_TCP_FRAME_HEADER_SIZE,
       message.data_length - IREE_NET_TCP_FRAME_HEADER_SIZE);
-  return connection->streams[stream_id].callbacks.on_message(
-      connection->streams[stream_id].callbacks.user_data, payload, lease);
+  if (!stream->active) {
+    return iree_net_tcp_stream_enqueue_pending_frame(stream, payload);
+  }
+  if (!stream->callbacks.on_message) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "stream_id %u has no message handler",
+                            (unsigned)stream_id);
+  }
+  return stream->callbacks.on_message(stream->callbacks.user_data, payload,
+                                      lease);
 }
 
 // Propagates a transport error to all active streams.
@@ -280,10 +389,14 @@ static iree_status_t iree_net_tcp_stream_activate(void* self) {
   ++connection->activated_stream_count;
 
   // First stream activation triggers the underlying adapter activation.
+  iree_status_t status = iree_ok_status();
   if (first_activation) {
-    return iree_net_message_endpoint_activate(connection->shared_endpoint);
+    status = iree_net_message_endpoint_activate(connection->shared_endpoint);
   }
-  return iree_ok_status();
+  if (iree_status_is_ok(status)) {
+    status = iree_net_tcp_stream_deliver_pending_frames(stream);
+  }
+  return status;
 }
 
 // NOP completion for non-last deactivation (delivers callback async).
@@ -499,6 +612,8 @@ static void iree_net_tcp_connection_deactivate(
   // deactivates the underlying carrier through the framing adapter.
   for (uint16_t i = 0; i < connection->max_stream_count; ++i) {
     connection->streams[i].active = false;
+    iree_net_tcp_stream_clear_pending_frames(&connection->streams[i],
+                                             connection->base.host_allocator);
   }
   connection->activated_stream_count = 0;
 
@@ -523,6 +638,10 @@ static void iree_net_tcp_connection_destroy(
               "call iree_net_connection_deactivate before releasing",
               (unsigned)connection->activated_stream_count);
   // Adapter owns the carrier — freeing it releases both.
+  for (uint16_t i = 0; i < connection->max_stream_count; ++i) {
+    iree_net_tcp_stream_clear_pending_frames(&connection->streams[i],
+                                             host_allocator);
+  }
   if (connection->adapter) {
     iree_net_framing_adapter_free(connection->adapter);
   }

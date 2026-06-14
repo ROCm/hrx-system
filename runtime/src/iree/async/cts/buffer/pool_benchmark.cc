@@ -77,8 +77,8 @@ static BufferPoolContext* CreateBufferPoolContext(
   }
 
   // Create pool over registered region.
-  status = iree_async_buffer_pool_allocate(ctx->region, iree_allocator_system(),
-                                           &ctx->pool);
+  status = iree_async_buffer_pool_create(ctx->region, iree_allocator_system(),
+                                         &ctx->pool);
   if (!iree_status_is_ok(status)) {
     state.SkipWithError("Pool allocation failed");
     iree_status_ignore(status);
@@ -94,7 +94,7 @@ static BufferPoolContext* CreateBufferPoolContext(
 
 static void DestroyBufferPoolContext(BufferPoolContext* ctx) {
   if (!ctx) return;
-  iree_async_buffer_pool_free(ctx->pool);
+  iree_async_buffer_pool_release(ctx->pool);
   iree_async_region_release(ctx->region);
   iree_async_slab_release(ctx->slab);
   iree_async_proactor_release(ctx->proactor);

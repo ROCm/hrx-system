@@ -69,7 +69,7 @@ static iree::StatusOr<iree_async_buffer_pool_t*> CreateHeaderPool() {
 
   iree_async_buffer_pool_t* pool = nullptr;
   iree_status_t status =
-      iree_async_buffer_pool_allocate(region, iree_allocator_system(), &pool);
+      iree_async_buffer_pool_create(region, iree_allocator_system(), &pool);
   iree_async_region_release(region);  // Pool retains it.
   if (!iree_status_is_ok(status)) return iree::Status(std::move(status));
   return pool;

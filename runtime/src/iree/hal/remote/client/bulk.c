@@ -385,7 +385,7 @@ static void iree_hal_remote_client_device_on_bulk_endpoint_ready(
       iree_hal_remote_client_device_complete_connect(device, iree_ok_status());
     } else {
       iree_net_bulk_channel_release(bulk_channel);
-      iree_async_buffer_pool_free(header_pool);
+      iree_async_buffer_pool_release(header_pool);
       iree_net_queue_channel_release(queue_channel);
       iree_hal_remote_client_device_store_state(
           device, IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_ERROR);

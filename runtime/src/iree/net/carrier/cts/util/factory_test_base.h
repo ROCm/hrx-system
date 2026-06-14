@@ -102,7 +102,7 @@ class FactoryTestBase : public ::testing::TestWithParam<BackendInfo> {
         iree_async_slab_create(slab_options, iree_allocator_system(), &slab_));
     IREE_ASSERT_OK(iree_async_proactor_register_slab(
         proactor_, slab_, IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE, &region_));
-    IREE_ASSERT_OK(iree_async_buffer_pool_allocate(
+    IREE_ASSERT_OK(iree_async_buffer_pool_create(
         region_, iree_allocator_system(), &recv_pool_));
 
     iree_status_t factory_status =
@@ -120,10 +120,8 @@ class FactoryTestBase : public ::testing::TestWithParam<BackendInfo> {
   void TearDown() override {
     iree_net_transport_factory_release(factory_);
     factory_ = nullptr;
-    if (recv_pool_) {
-      iree_async_buffer_pool_free(recv_pool_);
-      recv_pool_ = nullptr;
-    }
+    iree_async_buffer_pool_release(recv_pool_);
+    recv_pool_ = nullptr;
     iree_async_region_release(region_);
     region_ = nullptr;
     iree_async_slab_release(slab_);

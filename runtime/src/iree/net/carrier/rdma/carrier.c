@@ -1586,9 +1586,9 @@ static void iree_net_rdma_carrier_destroy(iree_net_carrier_t* base_carrier) {
       &carrier->send_reservation_table);
   if (iree_any_bit_set(carrier->flags,
                        IREE_NET_RDMA_CARRIER_FLAG_OWNS_RECV_POOL)) {
-    iree_async_buffer_pool_free(carrier->recv_pool);
+    iree_async_buffer_pool_release(carrier->recv_pool);
   }
-  iree_async_buffer_pool_free(carrier->send_staging_pool);
+  iree_async_buffer_pool_release(carrier->send_staging_pool);
   iree_net_rdma_carrier_consume_failure_status(carrier);
   iree_net_rdma_credit_memory_release(carrier->credit_grant_memory);
   iree_net_rdma_credit_memory_release(carrier->credit_memory);
@@ -3183,8 +3183,8 @@ static iree_status_t iree_net_rdma_carrier_create_send_staging_pool(
         carrier->base.host_allocator, &region);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_async_buffer_pool_allocate(
-        region, carrier->base.host_allocator, &carrier->send_staging_pool);
+    status = iree_async_buffer_pool_create(region, carrier->base.host_allocator,
+                                           &carrier->send_staging_pool);
   }
   iree_async_region_release(region);
   iree_async_slab_release(slab);
@@ -3208,8 +3208,8 @@ static iree_status_t iree_net_rdma_carrier_create_recv_pool(
         carrier->base.host_allocator, &region);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_async_buffer_pool_allocate(
-        region, carrier->base.host_allocator, &carrier->recv_pool);
+    status = iree_async_buffer_pool_create(region, carrier->base.host_allocator,
+                                           &carrier->recv_pool);
   }
   if (iree_status_is_ok(status)) {
     carrier->flags |= IREE_NET_RDMA_CARRIER_FLAG_OWNS_RECV_POOL;

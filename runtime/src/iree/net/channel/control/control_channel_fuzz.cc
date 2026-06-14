@@ -412,7 +412,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   fuzz_region.buffer_count = FUZZ_POOL_BUFFER_COUNT;
 
   iree_async_buffer_pool_t* header_pool = NULL;
-  iree_status_t status = iree_async_buffer_pool_allocate(
+  iree_status_t status = iree_async_buffer_pool_create(
       &fuzz_region, iree_allocator_system(), &header_pool);
   if (!iree_status_is_ok(status)) {
     iree_status_ignore(status);
@@ -443,7 +443,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
       callbacks, iree_allocator_system(), &channel);
   if (!iree_status_is_ok(status)) {
     iree_status_ignore(status);
-    iree_async_buffer_pool_free(header_pool);
+    iree_async_buffer_pool_release(header_pool);
     return 0;
   }
 
@@ -451,7 +451,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   if (!iree_status_is_ok(status)) {
     iree_status_ignore(status);
     iree_net_control_channel_release(channel);
-    iree_async_buffer_pool_free(header_pool);
+    iree_async_buffer_pool_release(header_pool);
     return 0;
   }
 
@@ -465,7 +465,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   if (!operation_mode) {
     fuzz_inject_message(&mock_endpoint, stream, remaining);
     iree_net_control_channel_release(channel);
-    iree_async_buffer_pool_free(header_pool);
+    iree_async_buffer_pool_release(header_pool);
     return 0;
   }
 
@@ -603,6 +603,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   }
 
   iree_net_control_channel_release(channel);
-  iree_async_buffer_pool_free(header_pool);
+  iree_async_buffer_pool_release(header_pool);
   return 0;
 }

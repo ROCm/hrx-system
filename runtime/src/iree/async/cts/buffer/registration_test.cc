@@ -336,8 +336,8 @@ TEST_P(BufferRegistrationTest, RecvPoolConfiguration) {
 
   // Create pool over registered region.
   iree_async_buffer_pool_t* pool = nullptr;
-  IREE_ASSERT_OK(iree_async_buffer_pool_allocate(
-      region.get(), iree_allocator_system(), &pool));
+  IREE_ASSERT_OK(iree_async_buffer_pool_create(region.get(),
+                                               iree_allocator_system(), &pool));
   ASSERT_NE(pool, nullptr);
 
   // Verify pool configuration.
@@ -349,7 +349,7 @@ TEST_P(BufferRegistrationTest, RecvPoolConfiguration) {
   EXPECT_NE(pool_region, nullptr);
   EXPECT_NE(pool_region->type, IREE_ASYNC_REGION_TYPE_NONE);
 
-  iree_async_buffer_pool_free(pool);
+  iree_async_buffer_pool_release(pool);
 }
 
 // Test that non-power-of-2 buffer_count may be rejected for recv pools.
@@ -399,8 +399,8 @@ TEST_P(BufferRegistrationTest, RecvPoolBufferRecycling) {
   IREE_ASSERT_OK_AND_ASSIGN(AsyncRegionPtr region, std::move(region_or));
 
   iree_async_buffer_pool_t* pool = nullptr;
-  IREE_ASSERT_OK(iree_async_buffer_pool_allocate(
-      region.get(), iree_allocator_system(), &pool));
+  IREE_ASSERT_OK(iree_async_buffer_pool_create(region.get(),
+                                               iree_allocator_system(), &pool));
 
   // Acquire all buffers.
   iree_async_buffer_lease_t leases[4];
@@ -424,7 +424,7 @@ TEST_P(BufferRegistrationTest, RecvPoolBufferRecycling) {
     iree_async_buffer_lease_release(&leases[i]);
   }
 
-  iree_async_buffer_pool_free(pool);
+  iree_async_buffer_pool_release(pool);
 }
 
 // io_uring must hide PBUF_RING availability from SOCKET_RECV_POOL users. When
@@ -458,8 +458,8 @@ TEST_P(BufferRegistrationTest,
   ASSERT_LT(region->handles.iouring.buffer_group_id, 0);
 
   iree_async_buffer_pool_t* pool = nullptr;
-  IREE_ASSERT_OK(iree_async_buffer_pool_allocate(
-      region.get(), iree_allocator_system(), &pool));
+  IREE_ASSERT_OK(iree_async_buffer_pool_create(region.get(),
+                                               iree_allocator_system(), &pool));
 
   iree_async_socket_t* client = nullptr;
   iree_async_socket_t* server = nullptr;
@@ -553,7 +553,7 @@ TEST_P(BufferRegistrationTest,
   iree_async_socket_release(client);
   iree_async_socket_release(server);
   iree_async_socket_release(listener);
-  iree_async_buffer_pool_free(pool);
+  iree_async_buffer_pool_release(pool);
 }
 
 //===----------------------------------------------------------------------===//
@@ -740,8 +740,8 @@ TEST_P(BufferRegistrationTest, RecvPoolRejectsReadOnlyRegion) {
 
   // Create pool over the READ-only region.
   iree_async_buffer_pool_t* pool = nullptr;
-  IREE_ASSERT_OK(iree_async_buffer_pool_allocate(
-      region.get(), iree_allocator_system(), &pool));
+  IREE_ASSERT_OK(iree_async_buffer_pool_create(region.get(),
+                                               iree_allocator_system(), &pool));
 
   // Verify the region has no buffer ring (io_uring uses buffer_group_id = -1).
   if (region->type == IREE_ASYNC_REGION_TYPE_IOURING) {
@@ -795,7 +795,7 @@ TEST_P(BufferRegistrationTest, RecvPoolRejectsReadOnlyRegion) {
   iree_async_socket_release(server);
   iree_async_socket_release(client);
   iree_async_socket_release(listener);
-  iree_async_buffer_pool_free(pool);
+  iree_async_buffer_pool_release(pool);
 }
 
 // Verifies that releasing a buffer lease is idempotent. Double-releasing the
@@ -818,8 +818,8 @@ TEST_P(BufferRegistrationTest, LeaseDoubleReleaseIsIdempotent) {
   IREE_ASSERT_OK_AND_ASSIGN(AsyncRegionPtr region, std::move(region_or));
 
   iree_async_buffer_pool_t* pool = nullptr;
-  IREE_ASSERT_OK(iree_async_buffer_pool_allocate(
-      region.get(), iree_allocator_system(), &pool));
+  IREE_ASSERT_OK(iree_async_buffer_pool_create(region.get(),
+                                               iree_allocator_system(), &pool));
 
   // Acquire a lease.
   iree_async_buffer_lease_t lease;
@@ -863,7 +863,7 @@ TEST_P(BufferRegistrationTest, LeaseDoubleReleaseIsIdempotent) {
     }
   }
 
-  iree_async_buffer_pool_free(pool);
+  iree_async_buffer_pool_release(pool);
 }
 
 //===----------------------------------------------------------------------===//

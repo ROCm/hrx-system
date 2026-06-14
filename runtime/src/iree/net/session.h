@@ -302,7 +302,7 @@ static inline iree_net_session_options_t iree_net_session_options_default(
 //
 // |factory| is retained by the session.
 // |frontier_tracker| is retained by the session.
-// |recv_pool| is borrowed (must outlive the session).
+// |recv_pool| is retained until the session's asynchronous teardown completes.
 // |proactor| is retained by the session.
 //
 // |callbacks.on_ready| and |callbacks.on_control_data| must be non-NULL.

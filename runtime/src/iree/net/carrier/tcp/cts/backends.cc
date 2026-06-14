@@ -50,11 +50,11 @@ struct TcpPairContext {
   iree_async_buffer_pool_t* server_pool = nullptr;
 
   ~TcpPairContext() {
-    iree_async_buffer_pool_free(client_pool);
+    iree_async_buffer_pool_release(client_pool);
     iree_async_region_release(client_region);
     iree_async_slab_release(client_slab);
 
-    iree_async_buffer_pool_free(server_pool);
+    iree_async_buffer_pool_release(server_pool);
     iree_async_region_release(server_region);
     iree_async_slab_release(server_slab);
 
@@ -88,8 +88,8 @@ static iree_status_t CreateBufferPool(iree_async_proactor_t* proactor,
     return status;
   }
 
-  status = iree_async_buffer_pool_allocate(*out_region, iree_allocator_system(),
-                                           out_pool);
+  status = iree_async_buffer_pool_create(*out_region, iree_allocator_system(),
+                                         out_pool);
   if (!iree_status_is_ok(status)) {
     iree_async_region_release(*out_region);
     *out_region = nullptr;

@@ -2936,11 +2936,11 @@ void iree_hal_remote_client_device_on_queue_endpoint_ready(
 
   if (!iree_status_is_ok(status)) {
     // Cleanup on failure. Channel owns the pool if it was created
-    // successfully; otherwise we must free the pool ourselves.
+    // successfully; otherwise we must release the pool ourselves.
     if (queue_channel) {
       iree_net_queue_channel_release(queue_channel);
     } else {
-      iree_async_buffer_pool_free(header_pool);
+      iree_async_buffer_pool_release(header_pool);
     }
 
     iree_hal_remote_client_device_store_state(

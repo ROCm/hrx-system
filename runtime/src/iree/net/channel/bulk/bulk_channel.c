@@ -641,7 +641,7 @@ iree_status_t iree_net_bulk_channel_create(
       iree_net_bulk_send_context_pool_deinitialize(&channel->send_context_pool);
       iree_allocator_free(host_allocator, channel);
     }
-    iree_async_buffer_pool_free(header_pool);
+    iree_async_buffer_pool_release(header_pool);
   }
 
   IREE_TRACE_ZONE_END(z0);
@@ -691,7 +691,7 @@ static void iree_net_bulk_channel_destroy(iree_net_bulk_channel_t* channel) {
 
   iree_net_frame_sender_deinitialize(&channel->sender);
   iree_net_bulk_send_context_pool_deinitialize(&channel->send_context_pool);
-  iree_async_buffer_pool_free(channel->header_pool);
+  iree_async_buffer_pool_release(channel->header_pool);
 
   iree_allocator_t host_allocator = channel->host_allocator;
   iree_allocator_free(host_allocator, channel);

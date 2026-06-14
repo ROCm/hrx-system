@@ -304,7 +304,7 @@ struct FactoryXProcContext {
     }
     iree_net_connection_release(connection);
     iree_net_transport_factory_release(factory);
-    iree_async_buffer_pool_free(recv_pool);
+    iree_async_buffer_pool_release(recv_pool);
     iree_async_region_release(region);
     iree_async_slab_release(slab);
     iree_async_proactor_release(proactor);
@@ -322,7 +322,7 @@ struct FactoryXProcContext {
         iree_async_slab_create(slab_options, iree_allocator_system(), &slab));
     IREE_RETURN_IF_ERROR(iree_async_proactor_register_slab(
         proactor, slab, IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE, &region));
-    IREE_RETURN_IF_ERROR(iree_async_buffer_pool_allocate(
+    IREE_RETURN_IF_ERROR(iree_async_buffer_pool_create(
         region, iree_allocator_system(), &recv_pool));
 
     iree_net_shm_carrier_options_t options =

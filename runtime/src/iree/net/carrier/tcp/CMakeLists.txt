@@ -67,6 +67,7 @@ iree_cc_test(
     iree::async
     iree::async::platform
     iree::net::connection
+    iree::net::message_endpoint
     iree::net::transport_factory
     iree::testing::gtest
     iree::testing::gtest_main

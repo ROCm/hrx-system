@@ -64,15 +64,13 @@ class TcpCarrierTest : public ::testing::Test {
         proactor_, slab_, IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE, &region_));
 
     // Create buffer pool over region.
-    IREE_ASSERT_OK(iree_async_buffer_pool_allocate(
+    IREE_ASSERT_OK(iree_async_buffer_pool_create(
         region_, iree_allocator_system(), &recv_pool_));
   }
 
   void ReleaseAsyncResources() {
-    if (recv_pool_) {
-      iree_async_buffer_pool_free(recv_pool_);
-      recv_pool_ = nullptr;
-    }
+    iree_async_buffer_pool_release(recv_pool_);
+    recv_pool_ = nullptr;
     iree_async_region_release(region_);
     region_ = nullptr;
     iree_async_slab_release(slab_);

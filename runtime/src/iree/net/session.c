@@ -73,8 +73,8 @@ static iree_status_t iree_net_session_create_header_pool(
   pool_region->base.buffer_count = IREE_NET_SESSION_HEADER_POOL_BUFFER_COUNT;
   pool_region->host_allocator = host_allocator;
 
-  status = iree_async_buffer_pool_allocate(&pool_region->base, host_allocator,
-                                           out_pool);
+  status = iree_async_buffer_pool_create(&pool_region->base, host_allocator,
+                                         out_pool);
   // Release our ref — pool retains the region. On failure, both refs are
   // released and the region self-destructs.
   iree_async_region_release(&pool_region->base);
@@ -163,7 +163,7 @@ struct iree_net_session_t {
   // (either expiry or cancellation). NULL means no timer pending.
   iree_async_timer_operation_t* bootstrap_timer;
 
-  // Buffer pool (borrowed, client path only).
+  // Retained receive buffer pool (client path only).
   iree_async_buffer_pool_t* recv_pool;
 
   // Server address (copied, client path only — for factory.connect).
@@ -1181,19 +1181,22 @@ static void iree_net_session_complete_teardown(iree_net_session_t* session) {
   // Release control channel. All carrier completions have drained, so the
   // frame_sender's sends_in_flight is 0 and deinitialize is safe. Must happen
   // before connection release (carrier memory is still valid) and before header
-  // pool free (batch lease may be returned to the pool during deinitialize).
+  // pool release (batch lease may be returned to the pool during deinitialize).
   iree_net_control_channel_release(session->control_channel);
 
   // Release connection. Safe now — all carriers are deactivated, so releasing
   // cannot trigger use-after-free on pending proactor operations.
   iree_net_connection_release(session->connection);
 
-  // Free header pool (releases the backing region). Safe after control channel
-  // release — all carrier completions have released their leases and the
-  // frame_sender has returned any batch lease.
-  if (session->control_header_pool) {
-    iree_async_buffer_pool_free(session->control_header_pool);
-  }
+  // Release the client receive pool after connection teardown. Carriers borrow
+  // this pool for recv operations and may still hold leases until connection
+  // deactivation completes.
+  iree_async_buffer_pool_release(session->recv_pool);
+
+  // Release header pool (releases the backing region). Safe after control
+  // channel release — all carrier completions have released their leases and
+  // the frame_sender has returned any batch lease.
+  iree_async_buffer_pool_release(session->control_header_pool);
 
   // Release transport factory (client path only).
   iree_net_transport_factory_release(session->transport_factory);
@@ -1295,6 +1298,7 @@ IREE_API_EXPORT iree_status_t iree_net_session_connect(
   session->proactor = proactor;
   iree_async_proactor_retain(proactor);
   session->recv_pool = recv_pool;
+  iree_async_buffer_pool_retain(recv_pool);
 
   // Copy server address (the string_view may not outlive this call).
   if (server_address.size > 0) {

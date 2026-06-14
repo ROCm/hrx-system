@@ -361,7 +361,7 @@ TEST_P(SendFlagsTest, ZeroCopySendRegisteredSlab) {
   // Create pool over region for lock-free acquire/release.
   iree_async_buffer_pool_t* pool = nullptr;
   IREE_ASSERT_OK(
-      iree_async_buffer_pool_allocate(region, iree_allocator_system(), &pool));
+      iree_async_buffer_pool_create(region, iree_allocator_system(), &pool));
 
   // Establish connection with ZERO_COPY enabled on client.
   iree_async_socket_t* client = nullptr;
@@ -411,7 +411,7 @@ TEST_P(SendFlagsTest, ZeroCopySendRegisteredSlab) {
   iree_async_socket_release(server);
   iree_async_socket_release(client);
   iree_async_socket_release(listener);
-  iree_async_buffer_pool_free(pool);
+  iree_async_buffer_pool_release(pool);
   iree_async_region_release(region);
   iree_async_slab_release(slab);
 }
@@ -434,7 +434,7 @@ TEST_P(SendFlagsTest, ZeroCopySendRegisteredLargeTransfer) {
 
   iree_async_buffer_pool_t* pool = nullptr;
   IREE_ASSERT_OK(
-      iree_async_buffer_pool_allocate(region, iree_allocator_system(), &pool));
+      iree_async_buffer_pool_create(region, iree_allocator_system(), &pool));
 
   // Establish connection with ZERO_COPY enabled on client.
   iree_async_socket_t* client = nullptr;
@@ -491,7 +491,7 @@ TEST_P(SendFlagsTest, ZeroCopySendRegisteredLargeTransfer) {
   iree_async_socket_release(server);
   iree_async_socket_release(client);
   iree_async_socket_release(listener);
-  iree_async_buffer_pool_free(pool);
+  iree_async_buffer_pool_release(pool);
   iree_async_region_release(region);
   iree_async_slab_release(slab);
 }
@@ -513,7 +513,7 @@ TEST_P(SendFlagsTest, ZeroCopySendPartialBuffer) {
 
   iree_async_buffer_pool_t* pool = nullptr;
   IREE_ASSERT_OK(
-      iree_async_buffer_pool_allocate(region, iree_allocator_system(), &pool));
+      iree_async_buffer_pool_create(region, iree_allocator_system(), &pool));
 
   // Establish connection with ZERO_COPY enabled on client.
   iree_async_socket_t* client = nullptr;
@@ -575,7 +575,7 @@ TEST_P(SendFlagsTest, ZeroCopySendPartialBuffer) {
   iree_async_socket_release(server);
   iree_async_socket_release(client);
   iree_async_socket_release(listener);
-  iree_async_buffer_pool_free(pool);
+  iree_async_buffer_pool_release(pool);
   iree_async_region_release(region);
   iree_async_slab_release(slab);
 }
@@ -598,7 +598,7 @@ TEST_P(SendFlagsTest, ScatterGatherFromRegistered) {
 
   iree_async_buffer_pool_t* pool = nullptr;
   IREE_ASSERT_OK(
-      iree_async_buffer_pool_allocate(region, iree_allocator_system(), &pool));
+      iree_async_buffer_pool_create(region, iree_allocator_system(), &pool));
 
   // Establish connection with ZERO_COPY enabled on client.
   iree_async_socket_t* client = nullptr;
@@ -662,7 +662,7 @@ TEST_P(SendFlagsTest, ScatterGatherFromRegistered) {
   iree_async_socket_release(server);
   iree_async_socket_release(client);
   iree_async_socket_release(listener);
-  iree_async_buffer_pool_free(pool);
+  iree_async_buffer_pool_release(pool);
   iree_async_region_release(region);
   iree_async_slab_release(slab);
 }
@@ -684,7 +684,7 @@ TEST_P(SendFlagsTest, ConcurrentRegisteredSends) {
 
   iree_async_buffer_pool_t* pool = nullptr;
   IREE_ASSERT_OK(
-      iree_async_buffer_pool_allocate(region, iree_allocator_system(), &pool));
+      iree_async_buffer_pool_create(region, iree_allocator_system(), &pool));
 
   // Establish connection with ZERO_COPY enabled on client.
   iree_async_socket_t* client = nullptr;
@@ -769,7 +769,7 @@ TEST_P(SendFlagsTest, ConcurrentRegisteredSends) {
   iree_async_socket_release(server);
   iree_async_socket_release(client);
   iree_async_socket_release(listener);
-  iree_async_buffer_pool_free(pool);
+  iree_async_buffer_pool_release(pool);
   iree_async_region_release(region);
   iree_async_slab_release(slab);
 }
@@ -853,7 +853,7 @@ TEST_P(SendFlagsTest, ScatterGatherMixedRegistration) {
 
   iree_async_buffer_pool_t* pool = nullptr;
   IREE_ASSERT_OK(
-      iree_async_buffer_pool_allocate(region, iree_allocator_system(), &pool));
+      iree_async_buffer_pool_create(region, iree_allocator_system(), &pool));
 
   // Establish connection with ZERO_COPY enabled on client.
   iree_async_socket_t* client = nullptr;
@@ -918,7 +918,7 @@ TEST_P(SendFlagsTest, ScatterGatherMixedRegistration) {
   iree_async_socket_release(server);
   iree_async_socket_release(client);
   iree_async_socket_release(listener);
-  iree_async_buffer_pool_free(pool);
+  iree_async_buffer_pool_release(pool);
   iree_async_region_release(region);
   iree_async_slab_release(slab);
 }
@@ -1001,7 +1001,7 @@ TEST_P(SendFlagsTest, ZeroCopySendMultipleSlabs) {
       proactor_, slab_a, IREE_ASYNC_BUFFER_ACCESS_FLAG_READ, &region_a));
 
   iree_async_buffer_pool_t* pool_a = nullptr;
-  IREE_ASSERT_OK(iree_async_buffer_pool_allocate(
+  IREE_ASSERT_OK(iree_async_buffer_pool_create(
       region_a, iree_allocator_system(), &pool_a));
 
   // Create second slab (2KB buffers).
@@ -1026,7 +1026,7 @@ TEST_P(SendFlagsTest, ZeroCopySendMultipleSlabs) {
     // Fall back to testing with just one slab (acquire multiple buffers).
   } else {
     has_two_slabs = true;
-    IREE_ASSERT_OK(iree_async_buffer_pool_allocate(
+    IREE_ASSERT_OK(iree_async_buffer_pool_create(
         region_b, iree_allocator_system(), &pool_b));
   }
 
@@ -1139,11 +1139,11 @@ TEST_P(SendFlagsTest, ZeroCopySendMultipleSlabs) {
   iree_async_socket_release(server);
   iree_async_socket_release(client);
   iree_async_socket_release(listener);
-  iree_async_buffer_pool_free(pool_a);
+  iree_async_buffer_pool_release(pool_a);
   iree_async_region_release(region_a);
   iree_async_slab_release(slab_a);
   if (has_two_slabs) {
-    iree_async_buffer_pool_free(pool_b);
+    iree_async_buffer_pool_release(pool_b);
     iree_async_region_release(region_b);
   }
   iree_async_slab_release(slab_b);

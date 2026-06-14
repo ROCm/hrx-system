@@ -217,19 +217,15 @@ class TestBufferPool {
     region_->buffer_count = static_cast<uint32_t>(buffer_count);
 
     // Create the real pool.
-    iree_status_t status = iree_async_buffer_pool_allocate(
-        region_, iree_allocator_system(), &pool_);
+    iree_status_t status =
+        iree_async_buffer_pool_create(region_, iree_allocator_system(), &pool_);
     IREE_CHECK_OK(status);
 
     // Pool took a reference, we can release ours.
     iree_async_region_release(region_);
   }
 
-  ~TestBufferPool() {
-    if (pool_) {
-      iree_async_buffer_pool_free(pool_);
-    }
-  }
+  ~TestBufferPool() { iree_async_buffer_pool_release(pool_); }
 
   iree_async_buffer_pool_t* get() { return pool_; }
 

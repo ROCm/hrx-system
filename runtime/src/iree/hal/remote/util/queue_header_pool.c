@@ -48,8 +48,8 @@ iree_status_t iree_hal_remote_create_queue_header_pool(
     pool_region->base.buffer_count = buffer_count;
     pool_region->host_allocator = host_allocator;
 
-    status = iree_async_buffer_pool_allocate(&pool_region->base, host_allocator,
-                                             out_pool);
+    status = iree_async_buffer_pool_create(&pool_region->base, host_allocator,
+                                           out_pool);
     // Release our ref -- pool retains the region. On failure, both refs are
     // released and the region self-destructs.
     iree_async_region_release(&pool_region->base);

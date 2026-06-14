@@ -54,16 +54,14 @@ class TestBufferPool {
     region_->buffer_size = buffer_size;
     region_->buffer_count = static_cast<uint32_t>(buffer_count);
 
-    iree_status_t status = iree_async_buffer_pool_allocate(
-        region_, iree_allocator_system(), &pool_);
+    iree_status_t status =
+        iree_async_buffer_pool_create(region_, iree_allocator_system(), &pool_);
     iree_async_region_release(region_);
     region_ = nullptr;
     return status;
   }
 
-  ~TestBufferPool() {
-    if (pool_) iree_async_buffer_pool_free(pool_);
-  }
+  ~TestBufferPool() { iree_async_buffer_pool_release(pool_); }
 
   iree_async_buffer_pool_t* release() {
     iree_async_buffer_pool_t* pool = pool_;

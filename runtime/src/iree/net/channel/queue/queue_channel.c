@@ -414,7 +414,7 @@ iree_status_t iree_net_queue_channel_create(
 
   if (!callbacks.on_command) {
     // Free the pool we would have taken ownership of.
-    iree_async_buffer_pool_free(header_pool);
+    iree_async_buffer_pool_release(header_pool);
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "on_command callback is required");
@@ -424,7 +424,7 @@ iree_status_t iree_net_queue_channel_create(
   iree_status_t status =
       iree_allocator_malloc(host_allocator, sizeof(*channel), (void**)&channel);
   if (!iree_status_is_ok(status)) {
-    iree_async_buffer_pool_free(header_pool);
+    iree_async_buffer_pool_release(header_pool);
     IREE_TRACE_ZONE_END(z0);
     return status;
   }
@@ -451,7 +451,7 @@ iree_status_t iree_net_queue_channel_create(
       max_send_spans, header_pool, send_complete, host_allocator,
       host_allocator);
   if (!iree_status_is_ok(status)) {
-    iree_async_buffer_pool_free(channel->header_pool);
+    iree_async_buffer_pool_release(channel->header_pool);
     iree_allocator_free(host_allocator, channel);
     IREE_TRACE_ZONE_END(z0);
     return status;
@@ -529,7 +529,7 @@ static void iree_net_queue_channel_destroy(iree_net_queue_channel_t* channel) {
 
   // Free the owned header pool. Must happen after sender deinitialize since
   // the sender borrows the pool pointer.
-  iree_async_buffer_pool_free(channel->header_pool);
+  iree_async_buffer_pool_release(channel->header_pool);
 
   iree_allocator_t host_allocator = channel->host_allocator;
   iree_allocator_free(host_allocator, channel);

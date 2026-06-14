@@ -40,7 +40,7 @@ class ReceiveQueueTest : public ::testing::Test {
     region->handles.rdma.lkey = kLocalKey;
     test_region_ = region;
 
-    IREE_ASSERT_OK(iree_async_buffer_pool_allocate(
+    IREE_ASSERT_OK(iree_async_buffer_pool_create(
         test_region_, iree_allocator_system(), &buffer_pool_));
 
     std::memset(&verbs_context_, 0, sizeof(verbs_context_));
@@ -58,7 +58,7 @@ class ReceiveQueueTest : public ::testing::Test {
   void TearDown() override {
     iree_net_rdma_receive_queue_deinitialize(&receive_queue_);
     iree_net_rdma_work_request_table_deinitialize(&work_request_table_);
-    iree_async_buffer_pool_free(buffer_pool_);
+    iree_async_buffer_pool_release(buffer_pool_);
     iree_async_region_release(test_region_);
   }
 

@@ -49,7 +49,7 @@ class ServerLifecycleTest : public ::testing::Test {
     IREE_ASSERT_OK(iree_async_proactor_register_slab(
         proactor_, slab, IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE, &region));
     iree_async_buffer_pool_t* buffer_pool = nullptr;
-    IREE_ASSERT_OK(iree_async_buffer_pool_allocate(
+    IREE_ASSERT_OK(iree_async_buffer_pool_create(
         region, iree_allocator_system(), &buffer_pool));
     IREE_ASSERT_OK(
         iree_hal_remote_recv_pool_wrap(proactor_, slab, region, buffer_pool,

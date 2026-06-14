@@ -54,7 +54,7 @@ class BufferPoolTest : public CtsTestBase<> {
     }
 
     // Create pool over region.
-    status = iree_async_buffer_pool_allocate(
+    status = iree_async_buffer_pool_create(
         out_setup->region, iree_allocator_system(), &out_setup->pool);
     if (!iree_status_is_ok(status)) {
       iree_async_region_release(out_setup->region);
@@ -68,7 +68,7 @@ class BufferPoolTest : public CtsTestBase<> {
   }
 
   void TeardownPool(PoolSetup* setup) {
-    iree_async_buffer_pool_free(setup->pool);
+    iree_async_buffer_pool_release(setup->pool);
     setup->pool = nullptr;
     iree_async_region_release(setup->region);
     setup->region = nullptr;
@@ -97,7 +97,7 @@ TEST_P(BufferPoolTest, CreateAndFree) {
 
 // Free with NULL is a no-op.
 TEST_P(BufferPoolTest, FreeNullIsNoOp) {
-  iree_async_buffer_pool_free(nullptr);  // Should not crash.
+  iree_async_buffer_pool_release(nullptr);  // Should not crash.
 }
 
 // Zero buffer_size slab is rejected.
@@ -336,10 +336,10 @@ TEST_P(BufferPoolTest, NonPowerOfTwoCount) {
   if (iree_status_is_ok(status)) {
     // Backend accepted it. Create pool and verify it works.
     iree_async_buffer_pool_t* pool = nullptr;
-    IREE_ASSERT_OK(iree_async_buffer_pool_allocate(
-        region, iree_allocator_system(), &pool));
+    IREE_ASSERT_OK(
+        iree_async_buffer_pool_create(region, iree_allocator_system(), &pool));
     EXPECT_EQ(iree_async_buffer_pool_capacity(pool), 7u);
-    iree_async_buffer_pool_free(pool);
+    iree_async_buffer_pool_release(pool);
     iree_async_region_release(region);
   } else {
     // Backend rejected non-power-of-2 (io_uring behavior).
@@ -398,7 +398,7 @@ TEST_P(BufferPoolTest, SlabWrapExternalMemory) {
 
   iree_async_buffer_pool_t* pool = nullptr;
   IREE_ASSERT_OK(
-      iree_async_buffer_pool_allocate(region, iree_allocator_system(), &pool));
+      iree_async_buffer_pool_create(region, iree_allocator_system(), &pool));
 
   iree_async_buffer_lease_t lease;
   IREE_ASSERT_OK(iree_async_buffer_pool_acquire(pool, &lease));
@@ -409,7 +409,7 @@ TEST_P(BufferPoolTest, SlabWrapExternalMemory) {
   EXPECT_LT(ptr, (uint8_t*)external_memory + buffer_size * buffer_count);
 
   iree_async_buffer_lease_release(&lease);
-  iree_async_buffer_pool_free(pool);
+  iree_async_buffer_pool_release(pool);
   iree_async_region_release(region);
   iree_async_slab_release(slab);
 

@@ -7,6 +7,7 @@
 #include "iree/async/buffer_pool.h"
 
 #include "iree/base/internal/atomic_freelist.h"
+#include "iree/base/internal/atomics.h"
 
 //===----------------------------------------------------------------------===//
 // Shared pool memory layout
@@ -66,11 +67,14 @@ static iree_status_t iree_async_shared_buffer_pool_compute_layout(
 //===----------------------------------------------------------------------===//
 
 struct iree_async_buffer_pool_t {
+  // Reference count for shared pool handle ownership.
+  iree_atomic_ref_count_t ref_count;
+
   // Allocator used for this pool struct's memory.
   iree_allocator_t allocator;
 
   // Registered region providing buffer memory and backend handles.
-  // Retained reference; released in pool_free.
+  // Retained reference; released when the pool handle is destroyed.
   iree_async_region_t* region;
 
   // Active freelist pointers used by acquire/release.
@@ -108,7 +112,7 @@ static void iree_async_buffer_pool_lease_release(void* context,
 // Pool lifecycle
 //===----------------------------------------------------------------------===//
 
-IREE_API_EXPORT iree_status_t iree_async_buffer_pool_allocate(
+IREE_API_EXPORT iree_status_t iree_async_buffer_pool_create(
     iree_async_region_t* region, iree_allocator_t allocator,
     iree_async_buffer_pool_t** out_pool) {
   IREE_ASSERT_ARGUMENT(region);
@@ -145,6 +149,7 @@ IREE_API_EXPORT iree_status_t iree_async_buffer_pool_allocate(
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_allocator_malloc(allocator, total_size, (void**)&pool));
   memset(pool, 0, total_size);
+  iree_atomic_ref_count_init(&pool->ref_count);
   pool->allocator = allocator;
   pool->region = region;
   iree_async_region_retain(region);
@@ -168,8 +173,7 @@ IREE_API_EXPORT iree_status_t iree_async_buffer_pool_allocate(
   return status;
 }
 
-IREE_API_EXPORT void iree_async_buffer_pool_free(
-    iree_async_buffer_pool_t* pool) {
+static void iree_async_buffer_pool_destroy(iree_async_buffer_pool_t* pool) {
   if (!pool) return;
   IREE_TRACE_ZONE_BEGIN(z0);
 
@@ -194,6 +198,20 @@ IREE_API_EXPORT void iree_async_buffer_pool_free(
   iree_allocator_free(allocator, pool);
 
   IREE_TRACE_ZONE_END(z0);
+}
+
+IREE_API_EXPORT void iree_async_buffer_pool_retain(
+    iree_async_buffer_pool_t* pool) {
+  if (pool) {
+    iree_atomic_ref_count_inc(&pool->ref_count);
+  }
+}
+
+IREE_API_EXPORT void iree_async_buffer_pool_release(
+    iree_async_buffer_pool_t* pool) {
+  if (pool && iree_atomic_ref_count_dec(&pool->ref_count) == 1) {
+    iree_async_buffer_pool_destroy(pool);
+  }
 }
 
 //===----------------------------------------------------------------------===//
@@ -225,6 +243,7 @@ static iree_status_t iree_async_buffer_pool_bind_shared(
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(allocator, sizeof(*pool), (void**)&pool));
   memset(pool, 0, sizeof(*pool));
+  iree_atomic_ref_count_init(&pool->ref_count);
   pool->allocator = allocator;
   pool->region = region;
   iree_async_region_retain(region);

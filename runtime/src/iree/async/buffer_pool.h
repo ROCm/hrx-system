@@ -37,7 +37,7 @@
 //
 //   // 3. Create pool over region.
 //   iree_async_buffer_pool_t* pool = NULL;
-//   IREE_RETURN_IF_ERROR(iree_async_buffer_pool_allocate(region, allocator,
+//   IREE_RETURN_IF_ERROR(iree_async_buffer_pool_create(region, allocator,
 //                                                        &pool));
 //
 //   // 4. Use pool for send operations.
@@ -47,7 +47,7 @@
 //   iree_async_buffer_lease_release(&lease);
 //
 //   // 5. Cleanup.
-//   iree_async_buffer_pool_free(pool);
+//   iree_async_buffer_pool_release(pool);
 //   iree_async_region_release(region);
 //
 // ## Shared (cross-process) pools
@@ -167,7 +167,7 @@ static inline void iree_async_buffer_lease_release(
 // Pool lifecycle
 //===----------------------------------------------------------------------===//
 
-// Allocates a buffer pool over a registered region.
+// Creates a buffer pool over a registered region.
 //
 // The pool provides lock-free acquire/release over the buffers described by
 // the region. The region must have been created via register_slab and must
@@ -177,11 +177,16 @@ static inline void iree_async_buffer_lease_release(
 // All buffers start as available in the freelist.
 //
 // On failure, no resources are leaked and |out_pool| is set to NULL.
-IREE_API_EXPORT iree_status_t iree_async_buffer_pool_allocate(
+IREE_API_EXPORT iree_status_t iree_async_buffer_pool_create(
     iree_async_region_t* region, iree_allocator_t allocator,
     iree_async_buffer_pool_t** out_pool);
 
-// Frees a buffer pool (local or shared). The caller must ensure all I/O
+// Retains the given |pool| for the caller.
+IREE_API_EXPORT void iree_async_buffer_pool_retain(
+    iree_async_buffer_pool_t* pool);
+
+// Releases a buffer pool reference (local or shared). The pool is freed when
+// the last reference is released. The final releaser must ensure all I/O
 // operations using buffers from this pool have completed.
 //
 // For local pools: all leases must have been returned (asserted in debug).
@@ -189,8 +194,9 @@ IREE_API_EXPORT iree_status_t iree_async_buffer_pool_allocate(
 // the process-local handle and region reference. The shared memory freelist
 // remains valid for other processes until the shared memory is unmapped.
 //
-// Releases the region reference acquired during allocation/create/open.
-IREE_API_EXPORT void iree_async_buffer_pool_free(
+// Releases the region reference acquired during
+// create/create_shared/open_shared.
+IREE_API_EXPORT void iree_async_buffer_pool_release(
     iree_async_buffer_pool_t* pool);
 
 //===----------------------------------------------------------------------===//

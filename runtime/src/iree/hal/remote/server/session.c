@@ -5244,7 +5244,7 @@ static void iree_hal_remote_server_on_queue_endpoint_ready(
     // Channel create failed or wasn't reached. The channel owns the pool after
     // create is called; otherwise header_pool remains local.
     iree_net_queue_channel_release(queue_channel);
-    iree_async_buffer_pool_free(header_pool);
+    iree_async_buffer_pool_release(header_pool);
     // Shut down the session so it transitions to a terminal state and frees
     // its slot. A session without a queue channel cannot process commands.
     iree_status_t shutdown_status = iree_net_session_shutdown(
@@ -5336,7 +5336,7 @@ static void iree_hal_remote_server_on_bulk_endpoint_ready(
     if (bulk_channel) {
       iree_net_bulk_channel_release(bulk_channel);
     } else {
-      iree_async_buffer_pool_free(header_pool);
+      iree_async_buffer_pool_release(header_pool);
     }
     iree_status_t shutdown_status = iree_net_session_shutdown(
         session, /*reason_code=*/0,

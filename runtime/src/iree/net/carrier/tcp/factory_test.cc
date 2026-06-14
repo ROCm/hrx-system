@@ -12,12 +12,14 @@
 
 #include "iree/net/carrier/tcp/factory.h"
 
+#include <cstring>
 #include <string>
 
 #include "iree/async/buffer_pool.h"
 #include "iree/async/proactor_platform.h"
 #include "iree/async/slab.h"
 #include "iree/net/connection.h"
+#include "iree/net/message_endpoint.h"
 #include "iree/net/transport_factory.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -44,21 +46,21 @@ class TcpFactoryTest : public ::testing::Test {
         iree_async_slab_create(slab_options, iree_allocator_system(), &slab_));
     IREE_ASSERT_OK(iree_async_proactor_register_slab(
         proactor_, slab_, IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE, &region_));
-    IREE_ASSERT_OK(iree_async_buffer_pool_allocate(
+    IREE_ASSERT_OK(iree_async_buffer_pool_create(
         region_, iree_allocator_system(), &recv_pool_));
 
-    IREE_ASSERT_OK(
-        iree_net_tcp_factory_create(iree_net_tcp_carrier_options_default(),
-                                    iree_allocator_system(), &factory_));
+    iree_net_tcp_carrier_options_t tcp_options =
+        iree_net_tcp_carrier_options_default();
+    tcp_options.max_endpoint_count = 3;
+    IREE_ASSERT_OK(iree_net_tcp_factory_create(
+        tcp_options, iree_allocator_system(), &factory_));
   }
 
   void TearDown() override {
     iree_net_transport_factory_release(factory_);
     factory_ = nullptr;
-    if (recv_pool_) {
-      iree_async_buffer_pool_free(recv_pool_);
-      recv_pool_ = nullptr;
-    }
+    iree_async_buffer_pool_release(recv_pool_);
+    recv_pool_ = nullptr;
     iree_async_region_release(region_);
     region_ = nullptr;
     iree_async_slab_release(slab_);
@@ -134,6 +136,61 @@ static void TrackConnectCallback(void* user_data, iree_status_t status,
   iree_status_ignore(status);
 }
 
+struct EndpointResult {
+  bool fired = false;
+  iree_status_code_t status_code = IREE_STATUS_OK;
+  iree_net_message_endpoint_t endpoint = {nullptr, nullptr};
+};
+
+static void TrackEndpointReady(void* user_data, iree_status_t status,
+                               iree_net_message_endpoint_t endpoint) {
+  auto* result = static_cast<EndpointResult*>(user_data);
+  result->fired = true;
+  result->status_code = iree_status_code(status);
+  result->endpoint = endpoint;
+  iree_status_ignore(status);
+}
+
+struct MessageCapture {
+  bool message_fired = false;
+  bool error_fired = false;
+  iree_status_code_t error_code = IREE_STATUS_OK;
+  std::string message;
+
+  static iree_status_t OnMessage(void* user_data,
+                                 iree_const_byte_span_t message,
+                                 iree_async_buffer_lease_t* lease) {
+    auto* capture = static_cast<MessageCapture*>(user_data);
+    capture->message_fired = true;
+    capture->message.assign(reinterpret_cast<const char*>(message.data),
+                            message.data_length);
+    return iree_ok_status();
+  }
+
+  static void OnError(void* user_data, iree_status_t status) {
+    auto* capture = static_cast<MessageCapture*>(user_data);
+    capture->error_fired = true;
+    capture->error_code = iree_status_code(status);
+    iree_status_ignore(status);
+  }
+
+  iree_net_message_endpoint_callbacks_t callbacks() {
+    return {
+        /*.on_message=*/MessageCapture::OnMessage,
+        /*.on_error=*/MessageCapture::OnError,
+        /*.user_data=*/this,
+    };
+  }
+};
+
+struct DeactivateResult {
+  bool fired = false;
+
+  static void Callback(void* user_data) {
+    static_cast<DeactivateResult*>(user_data)->fired = true;
+  }
+};
+
 //===----------------------------------------------------------------------===//
 // TCP-specific tests
 //===----------------------------------------------------------------------===//
@@ -205,6 +262,121 @@ TEST_F(TcpFactoryTest, ListenerEphemeralPort) {
   EXPECT_GT(port, 0);
   EXPECT_LE(port, 65535);
 
+  StopAndWait(info.listener);
+  iree_net_listener_free(info.listener);
+}
+
+TEST_F(TcpFactoryTest, QueuesFrameForFutureStreamUntilActivation) {
+  ConnectResult accept_result;
+  auto info = CreateListener(TrackConnectCallback, &accept_result);
+
+  ConnectResult connect_result;
+  IREE_ASSERT_OK(iree_net_transport_factory_connect(
+      factory_, iree_make_cstring_view(info.connect_address.c_str()), proactor_,
+      recv_pool_, TrackConnectCallback, &connect_result));
+
+  ASSERT_TRUE(PollUntil([&]() {
+    return accept_result.fired && connect_result.fired;
+  })) << "TCP connect/accept timed out";
+  ASSERT_EQ(accept_result.status_code, IREE_STATUS_OK);
+  ASSERT_EQ(connect_result.status_code, IREE_STATUS_OK);
+  ASSERT_NE(accept_result.connection, nullptr);
+  ASSERT_NE(connect_result.connection, nullptr);
+
+  iree_net_connection_t* server_connection = accept_result.connection;
+  iree_net_connection_t* client_connection = connect_result.connection;
+
+  EndpointResult client_control_endpoint;
+  EndpointResult server_control_endpoint;
+  IREE_ASSERT_OK(iree_net_connection_open_endpoint(
+      client_connection, {TrackEndpointReady, &client_control_endpoint}));
+  IREE_ASSERT_OK(iree_net_connection_open_endpoint(
+      server_connection, {TrackEndpointReady, &server_control_endpoint}));
+  ASSERT_TRUE(PollUntil([&]() {
+    return client_control_endpoint.fired && server_control_endpoint.fired;
+  })) << "Control endpoint open timed out";
+  ASSERT_EQ(client_control_endpoint.status_code, IREE_STATUS_OK);
+  ASSERT_EQ(server_control_endpoint.status_code, IREE_STATUS_OK);
+
+  MessageCapture client_control_capture;
+  MessageCapture server_control_capture;
+  iree_net_message_endpoint_set_callbacks(client_control_endpoint.endpoint,
+                                          client_control_capture.callbacks());
+  iree_net_message_endpoint_set_callbacks(server_control_endpoint.endpoint,
+                                          server_control_capture.callbacks());
+  IREE_ASSERT_OK(
+      iree_net_message_endpoint_activate(client_control_endpoint.endpoint));
+  IREE_ASSERT_OK(
+      iree_net_message_endpoint_activate(server_control_endpoint.endpoint));
+
+  EndpointResult server_future_endpoint;
+  IREE_ASSERT_OK(iree_net_connection_open_endpoint(
+      server_connection, {TrackEndpointReady, &server_future_endpoint}));
+  ASSERT_TRUE(PollUntil([&]() { return server_future_endpoint.fired; }))
+      << "Server future endpoint open timed out";
+  ASSERT_EQ(server_future_endpoint.status_code, IREE_STATUS_OK);
+
+  MessageCapture server_future_capture;
+  iree_net_message_endpoint_set_callbacks(server_future_endpoint.endpoint,
+                                          server_future_capture.callbacks());
+  IREE_ASSERT_OK(
+      iree_net_message_endpoint_activate(server_future_endpoint.endpoint));
+
+  const char* early_payload = "early stream payload";
+  iree_async_span_t early_span =
+      iree_async_span_from_ptr((void*)early_payload, strlen(early_payload));
+  iree_async_span_list_t early_span_list =
+      iree_async_span_list_make(&early_span, 1);
+  iree_net_message_endpoint_send_params_t early_send = {
+      /*.data=*/early_span_list,
+      /*.user_data=*/0,
+  };
+  IREE_ASSERT_OK(iree_net_message_endpoint_send(server_future_endpoint.endpoint,
+                                                &early_send));
+
+  for (int i = 0; i < 5 && !client_control_capture.error_fired; ++i) {
+    iree_host_size_t count = 0;
+    iree_status_t status =
+        iree_async_proactor_poll(proactor_, iree_make_timeout_ms(10), &count);
+    if (iree_status_is_deadline_exceeded(status)) {
+      iree_status_ignore(status);
+    } else {
+      IREE_ASSERT_OK(status);
+    }
+  }
+  ASSERT_FALSE(client_control_capture.error_fired)
+      << "Early future-stream frame caused control stream error "
+      << client_control_capture.error_code;
+
+  EndpointResult client_future_endpoint;
+  IREE_ASSERT_OK(iree_net_connection_open_endpoint(
+      client_connection, {TrackEndpointReady, &client_future_endpoint}));
+  ASSERT_TRUE(PollUntil([&]() { return client_future_endpoint.fired; }))
+      << "Client future endpoint open timed out";
+  ASSERT_EQ(client_future_endpoint.status_code, IREE_STATUS_OK);
+
+  MessageCapture client_future_capture;
+  iree_net_message_endpoint_set_callbacks(client_future_endpoint.endpoint,
+                                          client_future_capture.callbacks());
+  IREE_ASSERT_OK(
+      iree_net_message_endpoint_activate(client_future_endpoint.endpoint));
+
+  ASSERT_TRUE(PollUntil([&]() { return client_future_capture.message_fired; }))
+      << "Queued future-stream frame was not delivered";
+  EXPECT_EQ(client_future_capture.message, early_payload);
+
+  DeactivateResult client_deactivated;
+  DeactivateResult server_deactivated;
+  iree_net_connection_deactivate(
+      client_connection, {DeactivateResult::Callback, &client_deactivated});
+  iree_net_connection_deactivate(
+      server_connection, {DeactivateResult::Callback, &server_deactivated});
+  ASSERT_TRUE(PollUntil([&]() {
+    return client_deactivated.fired && server_deactivated.fired;
+  })) << "TCP connection deactivation timed out";
+
+  iree_net_connection_release(client_connection);
+  iree_net_connection_release(server_connection);
   StopAndWait(info.listener);
   iree_net_listener_free(info.listener);
 }

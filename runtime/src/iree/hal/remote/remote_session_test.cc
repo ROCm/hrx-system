@@ -1084,7 +1084,7 @@ class RemoteShmFileRegistrationTest : public ::testing::Test {
         proactor, slab, IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE, &region));
 
     iree_async_buffer_pool_t* buffer_pool = nullptr;
-    IREE_ASSERT_OK(iree_async_buffer_pool_allocate(
+    IREE_ASSERT_OK(iree_async_buffer_pool_create(
         region, iree_allocator_system(), &buffer_pool));
 
     iree_hal_remote_recv_pool_t* recv_pool = nullptr;

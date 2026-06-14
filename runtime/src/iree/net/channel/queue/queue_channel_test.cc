@@ -42,23 +42,21 @@ class TestBufferPool {
     region_->buffer_size = buffer_size;
     region_->buffer_count = static_cast<uint32_t>(buffer_count);
 
-    iree_status_t status = iree_async_buffer_pool_allocate(
-        region_, iree_allocator_system(), &pool_);
+    iree_status_t status =
+        iree_async_buffer_pool_create(region_, iree_allocator_system(), &pool_);
     IREE_CHECK_OK(status);
     // Transfer sole ownership to the pool (pool retained the region).
     iree_async_region_release(region_);
   }
 
-  ~TestBufferPool() {
-    if (pool_) iree_async_buffer_pool_free(pool_);
-  }
+  ~TestBufferPool() { iree_async_buffer_pool_release(pool_); }
 
   // Returns the pool pointer. The TestBufferPool retains ownership and will
-  // free the pool in its destructor.
+  // release the pool in its destructor.
   iree_async_buffer_pool_t* get() { return pool_; }
 
   // Transfers ownership of the pool to the caller. The TestBufferPool will
-  // no longer free the pool in its destructor.
+  // no longer release the pool in its destructor.
   iree_async_buffer_pool_t* release() {
     iree_async_buffer_pool_t* pool = pool_;
     pool_ = nullptr;
