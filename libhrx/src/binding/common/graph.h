@@ -58,9 +58,6 @@ typedef struct iree_hal_streaming_graph_t {
   uint32_t flags;
   iree_hal_streaming_context_t* context;
 
-  // Mutex only needed for instantiate/clone operations per CUDA docs.
-  iree_slim_mutex_t mutex;
-
   iree_allocator_t host_allocator;
 } iree_hal_streaming_graph_t;
 
@@ -99,7 +96,7 @@ iree_status_t iree_hal_streaming_graph_exec_create(
     iree_allocator_t host_allocator,
     iree_hal_streaming_graph_exec_t** out_exec);
 
-iree_status_t iree_hal_streaming_graph_exec_instantiate_locked(
+iree_status_t iree_hal_streaming_graph_exec_instantiate_from_template(
     iree_hal_streaming_graph_exec_t* exec,
     iree_hal_streaming_node_block_t* node_blocks, iree_host_size_t node_count);
 

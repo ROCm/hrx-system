@@ -46,7 +46,6 @@ iree_status_t iree_hal_streaming_graph_create(
   graph->flags = flags;
   graph->context = context;
   iree_hal_streaming_context_retain(context);
-  iree_slim_mutex_initialize(&graph->mutex);
   graph->host_allocator = host_allocator;
 
   *out_graph = graph;
@@ -64,9 +63,6 @@ static void iree_hal_streaming_graph_destroy(
 
   // Release context.
   iree_hal_streaming_context_release(graph->context);
-
-  // Deinitialize synchronization.
-  iree_slim_mutex_deinitialize(&graph->mutex);
 
   // Free graph memory itself (not allocated from arena).
   const iree_allocator_t host_allocator = graph->host_allocator;
@@ -166,8 +162,7 @@ static bool iree_hal_streaming_graph_remove_from_blocks(
 }
 
 static void iree_hal_streaming_graph_remove_dependency_refs(
-    iree_hal_streaming_graph_t* graph,
-    iree_hal_streaming_graph_node_t* node) {
+    iree_hal_streaming_graph_t* graph, iree_hal_streaming_graph_node_t* node) {
   for (iree_hal_streaming_node_block_t* block = graph->node_blocks; block;
        block = block->next) {
     for (iree_host_size_t i = 0; i < block->count; ++i) {
@@ -189,8 +184,7 @@ static void iree_hal_streaming_graph_remove_dependency_refs(
 }
 
 static void iree_hal_streaming_graph_remove_additional_edges(
-    iree_hal_streaming_graph_t* graph,
-    iree_hal_streaming_graph_node_t* node) {
+    iree_hal_streaming_graph_t* graph, iree_hal_streaming_graph_node_t* node) {
   iree_hal_streaming_graph_edge_t** next_edge = &graph->additional_edges;
   while (*next_edge) {
     iree_hal_streaming_graph_edge_t* edge = *next_edge;
@@ -585,11 +579,10 @@ iree_status_t iree_hal_streaming_graph_add_dependencies(
     if (!iree_hal_streaming_graph_node_is_active_in_graph(graph, from_node) ||
         !iree_hal_streaming_graph_node_is_active_in_graph(graph, to_node)) {
       IREE_TRACE_ZONE_END(z0);
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "dependency node at index %" PRIhsz
-          " does not belong to the target graph",
-          i);
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "dependency node at index %" PRIhsz
+                              " does not belong to the target graph",
+                              i);
     }
     if (iree_hal_streaming_graph_dependency_exists(graph, from_node, to_node)) {
       IREE_TRACE_ZONE_END(z0);
@@ -638,8 +631,6 @@ iree_status_t iree_hal_streaming_graph_destroy_node(
   iree_hal_streaming_graph_t* graph = node->graph;
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  iree_slim_mutex_lock(&graph->mutex);
-
   iree_hal_streaming_graph_remove_dependency_refs(graph, node);
   iree_hal_streaming_graph_remove_additional_edges(graph, node);
 
@@ -657,7 +648,6 @@ iree_status_t iree_hal_streaming_graph_destroy_node(
     node->dependency_count = 0;
   }
 
-  iree_slim_mutex_unlock(&graph->mutex);
   IREE_TRACE_ZONE_END(z0);
 
   if (!removed_from_nodes) {
@@ -686,15 +676,12 @@ iree_status_t iree_hal_streaming_graph_instantiate(
       z0, iree_hal_streaming_graph_exec_create(graph->context, graph, flags,
                                                graph->host_allocator, &exec));
 
-  // Mutex needed for instantiate per CUDA docs.
-  iree_slim_mutex_lock(&graph->mutex);
-
-  // Instantiate the graph exec on the given context and with our nodes.
-  // NOTE: this must happen under the graph lock (so nodes cannot change).
-  iree_status_t status = iree_hal_streaming_graph_exec_instantiate_locked(
-      exec, graph->node_blocks, graph->node_count);
-
-  iree_slim_mutex_unlock(&graph->mutex);
+  // Instantiate from the graph template. HIP/CUDA graph objects are not
+  // internally synchronized; callers must externally serialize access to a
+  // graph while it is being modified, queried, or instantiated.
+  iree_status_t status =
+      iree_hal_streaming_graph_exec_instantiate_from_template(
+          exec, graph->node_blocks, graph->node_count);
 
   if (iree_status_is_ok(status)) {
     *out_exec = exec;

@@ -754,7 +754,7 @@ static iree_status_t iree_hal_streaming_graph_record_partition(
   return status;
 }
 
-iree_status_t iree_hal_streaming_graph_exec_instantiate_locked(
+iree_status_t iree_hal_streaming_graph_exec_instantiate_from_template(
     iree_hal_streaming_graph_exec_t* exec,
     iree_hal_streaming_node_block_t* node_blocks, iree_host_size_t node_count) {
   IREE_ASSERT_ARGUMENT(exec);
