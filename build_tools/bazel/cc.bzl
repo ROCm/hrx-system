@@ -141,6 +141,10 @@ iree_cc_binary = macro(
         cc_attrs.binary_source,
         cc_attrs.link,
         {
+            "additional_linker_inputs": attr.label_list(
+                allow_files = True,
+                doc = "Extra files made available to the link action, such as linker version scripts referenced from linkopts.",
+            ),
             "args": attr.string_list(
                 doc = "Command-line arguments used when this binary is run by Bazel.",
             ),

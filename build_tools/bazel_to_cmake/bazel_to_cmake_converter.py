@@ -383,7 +383,7 @@ class BuildFileFunctions(object):
         return deps_block, var_block
 
     def _convert_platform_select_strings(
-        self, name, block_name, values, quote=True, sort=False
+        self, name, block_name, values, quote=True, sort=False, expand_locations=False
     ):
         """Handles string lists that may contain ConditionSelect entries.
 
@@ -391,12 +391,21 @@ class BuildFileFunctions(object):
         MixedDeps or ConditionSelect, emits a CMake list variable with
         if/elseif/else blocks before the target and returns the normal argument
         block with an additional variable reference.
+
+        When expand_locations is set, $(location ...) make-variables in each
+        string are expanded so flags such as
+        -Wl,--version-script=$(location :foo.map) resolve under CMake. A
+        same-package source file resolves to ${CMAKE_CURRENT_SOURCE_DIR}/<name>,
+        which is correct even when the target lives in a CMake sub-project whose
+        PROJECT_SOURCE_DIR is not the repo root.
         """
         if values is None:
             return self._convert_string_list_block(block_name, None), ""
         if isinstance(values, ConditionSelect):
             values = MixedDeps(unconditional=[], selects=[values])
         if not isinstance(values, MixedDeps):
+            if expand_locations:
+                values = self._convert_linkopt_location_args(values)
             return self._convert_string_list_block(
                 block_name, values, quote=quote, sort=sort
             ), ""
@@ -421,6 +430,10 @@ class BuildFileFunctions(object):
                 var_block += f"{keyword}({cond})\n"
                 if sort:
                     selected_values = sorted(selected_values)
+                if expand_locations:
+                    selected_values = self._convert_linkopt_location_args(
+                        selected_values
+                    )
                 for value in selected_values:
                     var_block += append_value(value)
                 first = False
@@ -429,6 +442,8 @@ class BuildFileFunctions(object):
                 var_block += "else()\n"
                 if sort:
                     default_values = sorted(default_values)
+                if expand_locations:
+                    default_values = self._convert_linkopt_location_args(default_values)
                 for value in default_values:
                     var_block += append_value(value)
             var_block += "endif()\n"
@@ -436,6 +451,8 @@ class BuildFileFunctions(object):
         unconditional = values.unconditional
         if sort:
             unconditional = sorted(unconditional)
+        if expand_locations:
+            unconditional = self._convert_linkopt_location_args(unconditional)
         string_block = self._convert_string_list_block(
             block_name, unconditional, quote=quote, sort=False
         )
@@ -576,6 +593,30 @@ class BuildFileFunctions(object):
         converted_args = []
         for arg in args:
             converted_args.extend(self._convert_location_arg(arg))
+        return converted_args
+
+    def _convert_linkopt_location_arg(self, arg):
+        # Linkopts such as -Wl,--version-script=$(location :foo.map) must resolve
+        # to a path the linker can open at link time. A same-package source file
+        # maps to ${CMAKE_CURRENT_SOURCE_DIR}/<name>, which is correct regardless
+        # of the enclosing CMake project root -- unlike ${PROJECT_SOURCE_DIR},
+        # which is the repo root only for the top-level project and not for
+        # sub-projects such as libhrx.
+        def replace_location(match):
+            label = match.group(2)
+            package, name = self._split_location_label(label)
+            if package == self._current_package():
+                return f"${{CMAKE_CURRENT_SOURCE_DIR}}/{name}"
+            return " ".join(self._cmake_location_paths(label))
+
+        return [_LOCATION_PATTERN.sub(replace_location, arg)]
+
+    def _convert_linkopt_location_args(self, args):
+        if args is None:
+            return None
+        converted_args = []
+        for arg in args:
+            converted_args.extend(self._convert_linkopt_location_arg(arg))
         return converted_args
 
     def _convert_native_test_location_arg(self, arg):
@@ -1521,7 +1562,7 @@ class BuildFileFunctions(object):
         alwayslink_block = self._convert_option_block("ALWAYSLINK", alwayslink)
         shared_block = self._convert_option_block("SHARED", shared)
         linkopts_block, platform_linkopts_block = self._convert_platform_select_strings(
-            name, "LINKOPTS", linkopts
+            name, "LINKOPTS", linkopts, expand_locations=True
         )
         includes_block = self._convert_includes_block(includes)
         system_includes_block = self._convert_string_list_block(
@@ -1680,7 +1721,7 @@ class BuildFileFunctions(object):
             name, "DEFINES", defines
         )
         linkopts_block, platform_linkopts_block = self._convert_platform_select_strings(
-            name, "LINKOPTS", linkopts
+            name, "LINKOPTS", linkopts, expand_locations=True
         )
         srcs_block = self._convert_srcs_block(srcs)
         data_block = self._convert_target_list_block("DATA", data)
@@ -1758,7 +1799,7 @@ class BuildFileFunctions(object):
             name, "DEFINES", defines
         )
         linkopts_block, platform_linkopts_block = self._convert_platform_select_strings(
-            name, "LINKOPTS", linkopts
+            name, "LINKOPTS", linkopts, expand_locations=True
         )
         labels_block = self._convert_string_list_block("LABELS", tags)
 

@@ -27,6 +27,9 @@ iree_cc_library(
     libhrx::src::binding::common
     libhrx_defs
   SHARED
+  LINKOPTS
+    "-Wl,--undefined-version"
+    "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/amdhip64.map"
   INCLUDES
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>"
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../..>"
@@ -39,13 +42,15 @@ iree_cc_library(
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
 
+# The symbol version script and --undefined-version are applied through the
+# generated LINKOPTS above (from linkopts in BUILD.bazel). Keep them out of
+# LINK_FLAGS here so the version script is not applied twice.
 set_target_properties(libhrx_src_binding_hip_amdhip64 PROPERTIES
   OUTPUT_NAME amdhip64
   VERSION 7.9999.0
   SOVERSION 7
   POSITION_INDEPENDENT_CODE ON
   INSTALL_RPATH "$ORIGIN"
-  LINK_FLAGS "-Wl,--undefined-version -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/amdhip64.map"
 )
 
 install(TARGETS libhrx_src_binding_hip_amdhip64

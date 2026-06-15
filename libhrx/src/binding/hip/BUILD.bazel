@@ -19,6 +19,7 @@ hrx_cc_shared_library(
         "api.c",
     ],
     hdrs = ["api.h"],
+    additional_linker_inputs = ["amdhip64.map"],
     copts = [
         "-DIREE_HAL_STREAMING_HIP_EXPORTS",
         "-Wno-attributes",
@@ -29,14 +30,13 @@ hrx_cc_shared_library(
         "../../../include",
         "../../libhrx",
     ],
+    linkopts = [
+        "-Wl,--undefined-version",
+        "-Wl,--version-script=$(location :amdhip64.map)",
+    ],
     deps = [
         "//libhrx/src/binding/common",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
-    ],
-    data = ["amdhip64.map"],
-    linkopts = [
-        "-Wl,--undefined-version",
-        "-Wl,--version-script=$(location :amdhip64.map)",
     ],
 )

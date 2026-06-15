@@ -244,6 +244,35 @@ class ConfigTest(unittest.TestCase):
         self.assertIn("  TESTONLY\n", converter.body)
         self.assertIn("iree::hal::local::executable_library", converter.body)
 
+    def test_cc_library_linkopts_expand_location_make_variables(self):
+        converter = SimpleNamespace(body="")
+        functions = bazel_to_cmake_converter.BuildFileFunctions(
+            converter=converter,
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            build_dir="libhrx/src/binding/hip",
+        )
+
+        functions.cc_library(
+            name="amdhip64",
+            srcs=["api.c"],
+            linkopts=[
+                "-Wl,--undefined-version",
+                "-Wl,--version-script=$(location :amdhip64.map)",
+            ],
+            shared=True,
+        )
+
+        self.assertIn("  LINKOPTS\n", converter.body)
+        self.assertIn("-Wl,--undefined-version", converter.body)
+        # A same-package $(location ...) resolves to a current-source-dir path
+        # (correct even in a CMake sub-project), not a literal make-variable nor
+        # a ${PROJECT_SOURCE_DIR} path relative to the repo root.
+        self.assertNotIn("$(location", converter.body)
+        self.assertIn(
+            "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/amdhip64.map",
+            converter.body,
+        )
+
     def test_c_embed_data_srcs_can_reference_generated_targets(self):
         repo_root = Path(__file__).resolve().parents[2]
         converter = SimpleNamespace(body="")
