@@ -1016,9 +1016,18 @@ iree_status_t loom_amdgpu_hal_binding_materialize(
       loom_amdgpu_hal_binding_set_entry_insertion_point(&rewriter, function_op);
     }
   }
-  const loom_amdgpu_hal_binding_load_flags_t available_load_flags =
-      inserted_live_in ? LOOM_AMDGPU_HAL_BINDING_LOAD_FLAG_REUSE_KERNARG_STORAGE
-                       : 0;
+  // Do not reuse the kernarg segment pointer SGPRs as the destination of a
+  // kernarg SMEM load. That can emit adjacent instructions such as:
+  //
+  //   s_load_b64  s[0:1], s[0:1], offset
+  //   s_load_b128 s[4:7], s[0:1], 0
+  //
+  // The second load is intended to use the original kernarg pointer, but the
+  // first load also writes that same SGPR pair. Treating this as a benign
+  // same-width tied result relies on source operand timing for outstanding
+  // scalar memory instructions and can make later binding loads read through a
+  // just-loaded buffer pointer instead of the kernarg segment.
+  const loom_amdgpu_hal_binding_load_flags_t available_load_flags = 0;
   if (iree_status_is_ok(status)) {
     status = loom_amdgpu_hal_binding_materialize_direct_args(
         &rewriter, function_op, &layout, kernarg_ptr, descriptor_set, sgpr_type,
