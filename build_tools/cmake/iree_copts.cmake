@@ -402,8 +402,6 @@ iree_select_compiler_opts(IREE_DEFAULT_LINKOPTS
   CLANG_OR_GCC
     ${_IREE_MATH_LINKOPTS}
     ${_IREE_LOGGING_LINKOPTS}
-  MSVC
-    "-natvis:${IREE_ROOT_DIR}/runtime/iree.natvis"
 )
 
 if(EMSCRIPTEN AND IREE_EXTERNAL_WEBGPU_HAL_DRIVER_FOUND)

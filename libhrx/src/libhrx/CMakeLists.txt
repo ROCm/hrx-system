@@ -104,10 +104,14 @@ set_target_properties(libhrx_src_libhrx_hrx PROPERTIES
   VERSION ${PROJECT_VERSION}
   SOVERSION 0
   EXPORT_NAME hrx
-  C_VISIBILITY_PRESET hidden
   POSITION_INDEPENDENT_CODE ON
-  LINK_FLAGS "-Wl,--version-script=${LIBHRX_SOURCE_DIR}/cmake/hrx_exports.lds"
 )
+if(NOT WIN32)
+  set_target_properties(libhrx_src_libhrx_hrx PROPERTIES
+    C_VISIBILITY_PRESET hidden
+    LINK_FLAGS "-Wl,--version-script=${LIBHRX_SOURCE_DIR}/cmake/hrx_exports.lds"
+  )
+endif()
 set_property(TARGET libhrx_src_libhrx_hrx PROPERTY
   INTERFACE_LINK_LIBRARIES ""
 )

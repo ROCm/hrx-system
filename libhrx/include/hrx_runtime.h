@@ -16,7 +16,11 @@ extern "C" {
 // Export macros
 //===----------------------------------------------------------------------===//
 
-#if defined(HRX_BUILDING_SHARED)
+#if defined(_WIN32) && defined(HRX_BUILDING_SHARED)
+#define HRX_API __declspec(dllexport)
+#elif defined(_WIN32) && !defined(HRX_STATIC)
+#define HRX_API __declspec(dllimport)
+#elif defined(HRX_BUILDING_SHARED)
 #define HRX_API __attribute__((visibility("default")))
 #elif defined(HRX_STATIC)
 #define HRX_API
@@ -38,14 +42,9 @@ typedef struct hrx_host_allocator_t {
   void* ctl;
 } hrx_host_allocator_t;
 
-// Pre-initialized system allocator. Valid as soon as libhrx.so is loaded
-// (no hrx_*_initialize() required). On ELF this is a direct data export;
-// Windows will need __declspec(dllimport) when we get there.
-HRX_API extern hrx_host_allocator_t hrx_host_allocator_system_value;
-
-static inline hrx_host_allocator_t hrx_host_allocator_system(void) {
-  return hrx_host_allocator_system_value;
-}
+// Returns the process-wide system allocator. Valid as soon as libhrx is loaded
+// (no hrx_*_initialize() required).
+HRX_API hrx_host_allocator_t hrx_host_allocator_system(void);
 
 //===----------------------------------------------------------------------===//
 // Version

@@ -111,7 +111,7 @@ class RuntimeBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
     def iree_generated_files(self, name, srcs, outs, args, output_args, tool, **kwargs):
         if tool != ":generate_vm_isa":
             raise NotImplementedError(f"iree_generated_files tool: {tool}")
-        cmd_parts = ["python3 $(rootpath generate_vm_isa.py)"]
+        cmd_parts = ["${Python3_EXECUTABLE} $(rootpath generate_vm_isa.py)"]
         cmd_parts.extend(arg.replace("$(location ", "$(rootpath ") for arg in args)
         for out in outs:
             cmd_parts.extend([output_args[out], f"$(execpath {out})"])

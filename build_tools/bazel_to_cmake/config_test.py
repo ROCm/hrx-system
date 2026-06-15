@@ -371,6 +371,35 @@ class ConfigTest(unittest.TestCase):
                 deps=[],
             )
 
+    def test_runtime_generated_files_use_discovered_python_interpreter(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        runtime = bazel_to_cmake_config.include_project(
+            str(repo_root / ".bazel_to_cmake.cfg.py"),
+            "runtime/.bazel_to_cmake.cfg.py",
+        )
+        converter = SimpleNamespace(body="")
+        functions = runtime.build_file_functions(
+            converter=converter,
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            build_dir=str(repo_root / "runtime/src/iree/vm/bytecode/isa"),
+            repo_root=str(repo_root),
+        )
+
+        functions.iree_generated_files(
+            name="op_table_gen",
+            srcs=["isa.json"],
+            outs=["op_table.h"],
+            args=["--schema", "$(location isa.json)"],
+            output_args={"op_table.h": "--op-table"},
+            tool=":generate_vm_isa",
+        )
+
+        self.assertIn(
+            "${Python3_EXECUTABLE} $(rootpath generate_vm_isa.py)",
+            converter.body,
+        )
+        self.assertNotIn("python3 $(rootpath generate_vm_isa.py)", converter.body)
+
     def test_requirement_policy_loads_cross_project_requirement_defs(self):
         repo_root = Path(__file__).resolve().parents[2]
         policy = bazel_to_cmake_requirements.load_project_policy(

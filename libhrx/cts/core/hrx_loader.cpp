@@ -55,8 +55,7 @@ void HrxLoader::load(const std::string& path) {
 #define LOAD(name) name = (decltype(name))loadSymbol("hrx_" #name)
 #define LOAD_FULL(field, sym) field = (decltype(field))loadSymbol(#sym)
 
-  host_allocator_system_ptr =
-      (hrx_host_allocator_t*)loadSymbol("hrx_host_allocator_system_value");
+  LOAD_FULL(host_allocator_system_fn, hrx_host_allocator_system);
 
   LOAD(host_allocator_malloc);
   LOAD(host_allocator_malloc_uninitialized);

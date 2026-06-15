@@ -22,10 +22,10 @@ class HrxLoader {
   static HrxLoader& instance();
   static void setLibraryPath(const std::string& path);
 
-  // Host allocator. system_value is a data symbol loaded via dlsym.
-  hrx_host_allocator_t* host_allocator_system_ptr;
+  // Host allocator.
+  decltype(&hrx_host_allocator_system) host_allocator_system_fn;
   hrx_host_allocator_t host_allocator_system() {
-    return *host_allocator_system_ptr;
+    return host_allocator_system_fn();
   }
 
   decltype(&hrx_host_allocator_malloc) host_allocator_malloc;
