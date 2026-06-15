@@ -11402,9 +11402,11 @@ HIPAPI hipError_t hipGraphExecMemcpyNodeSetParams(hipGraphExec_t graphExec,
   HIP_RETURN_ERROR(hipErrorNotSupported);
 }
 
-HIPAPI hipError_t hipGraphExecMemcpyNodeSetParams1D(
-    hipGraphExec_t graphExec, hipGraphNode_t node, void* dst, const void* src,
-    size_t count, hipMemcpyKind kind) {
+HIPAPI hipError_t hipGraphExecMemcpyNodeSetParams1D(hipGraphExec_t graphExec,
+                                                    hipGraphNode_t node,
+                                                    void* dst, const void* src,
+                                                    size_t count,
+                                                    hipMemcpyKind kind) {
   (void)graphExec;
   (void)node;
   (void)dst;
@@ -11502,9 +11504,8 @@ HIPAPI hipError_t hipGraphMemcpyNodeGetParams(hipGraphNode_t node,
   HIP_RETURN_ERROR(hipErrorNotSupported);
 }
 
-HIPAPI hipError_t hipGraphMemcpyNodeSetParams1D(hipGraphNode_t node,
-                                                void* dst, const void* src,
-                                                size_t count,
+HIPAPI hipError_t hipGraphMemcpyNodeSetParams1D(hipGraphNode_t node, void* dst,
+                                                const void* src, size_t count,
                                                 hipMemcpyKind kind) {
   (void)node;
   (void)dst;
@@ -11563,25 +11564,26 @@ HIPAPI hipError_t hipDrvGraphAddMemcpyNode(hipGraphNode_t* pGraphNode,
                                            hipGraph_t graph,
                                            const hipGraphNode_t* pDependencies,
                                            size_t numDependencies,
-                                           const void* pCopyParams,
-                                           void* ctx) {
+                                           const void* pCopyParams, void* ctx) {
   (void)ctx;
   return hipGraphAddMemcpyNode(pGraphNode, graph, pDependencies,
                                numDependencies, pCopyParams);
 }
 
-HIPAPI hipError_t hipDrvGraphAddMemFreeNode(
-    hipGraphNode_t* pGraphNode, hipGraph_t graph,
-    const hipGraphNode_t* pDependencies, size_t numDependencies, void* dptr,
-    void* ctx) {
+HIPAPI hipError_t hipDrvGraphAddMemFreeNode(hipGraphNode_t* pGraphNode,
+                                            hipGraph_t graph,
+                                            const hipGraphNode_t* pDependencies,
+                                            size_t numDependencies, void* dptr,
+                                            void* ctx) {
   (void)ctx;
   return hipGraphAddMemFreeNode(pGraphNode, graph, pDependencies,
                                 numDependencies, dptr);
 }
 
-HIPAPI hipError_t hipDrvGraphExecMemcpyNodeSetParams(
-    hipGraphExec_t graphExec, hipGraphNode_t node, const void* pNodeParams,
-    void* ctx) {
+HIPAPI hipError_t hipDrvGraphExecMemcpyNodeSetParams(hipGraphExec_t graphExec,
+                                                     hipGraphNode_t node,
+                                                     const void* pNodeParams,
+                                                     void* ctx) {
   (void)ctx;
   return hipGraphExecMemcpyNodeSetParams(graphExec, node, pNodeParams);
 }
@@ -13373,8 +13375,7 @@ HIPAPI void __hipRegisterManagedVar(void* hipModule, void** pointer,
 }
 
 HIPAPI void __hipRegisterTexture(void** modules, void* var, char* hostVar,
-                                 char* deviceVar, int type, int norm,
-                                 int ext) {
+                                 char* deviceVar, int type, int norm, int ext) {
   (void)modules;
   (void)var;
   (void)hostVar;

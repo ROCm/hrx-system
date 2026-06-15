@@ -832,11 +832,11 @@ typedef enum hipChannelFormatKind {
 } hipChannelFormatKind;
 
 typedef struct hipChannelFormatDesc {
-  int x;                    // Bits in x component.
-  int y;                    // Bits in y component.
-  int z;                    // Bits in z component.
-  int w;                    // Bits in w component.
-  hipChannelFormatKind f;   // Component format kind.
+  int x;                   // Bits in x component.
+  int y;                   // Bits in y component.
+  int z;                   // Bits in z component.
+  int w;                   // Bits in w component.
+  hipChannelFormatKind f;  // Component format kind.
 } hipChannelFormatDesc;
 
 // Memory copy node parameters.
@@ -1323,9 +1323,8 @@ HIPAPI hipError_t hipGraphKernelNodeSetParams(hipGraphNode_t node,
                                               const void* pNodeParams);
 HIPAPI hipError_t hipGraphMemcpyNodeGetParams(hipGraphNode_t node,
                                               void* pNodeParams);
-HIPAPI hipError_t hipGraphMemcpyNodeSetParams1D(hipGraphNode_t node,
-                                                void* dst, const void* src,
-                                                size_t count,
+HIPAPI hipError_t hipGraphMemcpyNodeSetParams1D(hipGraphNode_t node, void* dst,
+                                                const void* src, size_t count,
                                                 hipMemcpyKind kind);
 HIPAPI hipError_t hipGraphMemcpyNodeSetParamsFromSymbol(
     hipGraphNode_t node, void* dst, const void* symbol, size_t count,

@@ -760,7 +760,8 @@ HIPAPI hipError_t hipGraphExternalSemaphoresWaitNodeGetParams(
 }
 
 HIPAPI hipError_t hipGraphExternalSemaphoresWaitNodeSetParams(
-    hipGraphNode_t hNode, const hipExternalSemaphoreWaitNodeParams* nodeParams) {
+    hipGraphNode_t hNode,
+    const hipExternalSemaphoreWaitNodeParams* nodeParams) {
   (void)hNode;
   (void)nodeParams;
   return hipErrorNotSupported;
@@ -876,14 +877,15 @@ HIPAPI hipError_t hipGraphicsUnmapResources(int count,
   return hipErrorNotSupported;
 }
 
-HIPAPI hipError_t hipGraphicsUnregisterResource(hipGraphicsResource_t resource) {
+HIPAPI hipError_t
+hipGraphicsUnregisterResource(hipGraphicsResource_t resource) {
   (void)resource;
   return hipErrorNotSupported;
 }
 
-HIPAPI hipError_t hipImportExternalMemory(
-    hipExternalMemory_t* extMem_out,
-    const hipExternalMemoryHandleDesc* memHandleDesc) {
+HIPAPI hipError_t
+hipImportExternalMemory(hipExternalMemory_t* extMem_out,
+                        const hipExternalMemoryHandleDesc* memHandleDesc) {
   (void)extMem_out;
   (void)memHandleDesc;
   return hipErrorNotSupported;
@@ -1797,23 +1799,23 @@ HIPAPI hipError_t hipTexRefGetMipMappedArray(hipMipmappedArray_t* pArray,
   return hipErrorNotSupported;
 }
 
-HIPAPI hipError_t hipTexRefGetMipmapFilterMode(
-    enum hipTextureFilterMode* pfm, const textureReference* texRef) {
+HIPAPI hipError_t hipTexRefGetMipmapFilterMode(enum hipTextureFilterMode* pfm,
+                                               const textureReference* texRef) {
   (void)pfm;
   (void)texRef;
   return hipErrorNotSupported;
 }
 
-HIPAPI hipError_t hipTexRefGetMipmapLevelBias(
-    float* pbias, const textureReference* texRef) {
+HIPAPI hipError_t hipTexRefGetMipmapLevelBias(float* pbias,
+                                              const textureReference* texRef) {
   (void)pbias;
   (void)texRef;
   return hipErrorNotSupported;
 }
 
-HIPAPI hipError_t hipTexRefGetMipmapLevelClamp(
-    float* pminMipmapLevelClamp, float* pmaxMipmapLevelClamp,
-    const textureReference* texRef) {
+HIPAPI hipError_t hipTexRefGetMipmapLevelClamp(float* pminMipmapLevelClamp,
+                                               float* pmaxMipmapLevelClamp,
+                                               const textureReference* texRef) {
   (void)pminMipmapLevelClamp;
   (void)pmaxMipmapLevelClamp;
   (void)texRef;
@@ -1894,8 +1896,8 @@ HIPAPI hipError_t hipTexRefSetMaxAnisotropy(textureReference* texRef,
   return hipErrorNotSupported;
 }
 
-HIPAPI hipError_t hipTexRefSetMipmapFilterMode(
-    textureReference* texRef, enum hipTextureFilterMode fm) {
+HIPAPI hipError_t hipTexRefSetMipmapFilterMode(textureReference* texRef,
+                                               enum hipTextureFilterMode fm) {
   (void)texRef;
   (void)fm;
   return hipErrorNotSupported;
@@ -1908,9 +1910,9 @@ HIPAPI hipError_t hipTexRefSetMipmapLevelBias(textureReference* texRef,
   return hipErrorNotSupported;
 }
 
-HIPAPI hipError_t hipTexRefSetMipmapLevelClamp(
-    textureReference* texRef, float minMipMapLevelClamp,
-    float maxMipMapLevelClamp) {
+HIPAPI hipError_t hipTexRefSetMipmapLevelClamp(textureReference* texRef,
+                                               float minMipMapLevelClamp,
+                                               float maxMipMapLevelClamp) {
   (void)texRef;
   (void)minMipMapLevelClamp;
   (void)maxMipMapLevelClamp;
@@ -2085,9 +2087,10 @@ HIPAPI hipError_t hipMemcpyToSymbol_spt(const void* symbol, const void* src,
   return result == hipSuccess ? hipStreamSynchronize(stream) : result;
 }
 
-HIPAPI hipError_t hipMemcpyToSymbolAsync_spt(
-    const void* symbol, const void* src, size_t size_bytes, size_t offset,
-    hipMemcpyKind kind, hipStream_t stream) {
+HIPAPI hipError_t hipMemcpyToSymbolAsync_spt(const void* symbol,
+                                             const void* src, size_t size_bytes,
+                                             size_t offset, hipMemcpyKind kind,
+                                             hipStream_t stream) {
   hipStream_t resolved_stream = NULL;
   hipError_t result = hrx_hip_spt_stream_or_explicit(stream, &resolved_stream);
   if (result != hipSuccess) return result;
@@ -2153,8 +2156,7 @@ HIPAPI hipError_t hipMemset_spt(void* dst, int value, size_t size_bytes) {
 
 HIPAPI hipError_t hipStreamAddCallback_spt(hipStream_t stream,
                                            hipStreamCallback_t callback,
-                                           void* userData,
-                                           unsigned int flags) {
+                                           void* userData, unsigned int flags) {
   hipStream_t resolved_stream = NULL;
   hipError_t result = hrx_hip_spt_stream_or_explicit(stream, &resolved_stream);
   if (result != hipSuccess) return result;
