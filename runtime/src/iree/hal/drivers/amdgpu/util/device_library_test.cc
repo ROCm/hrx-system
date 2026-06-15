@@ -58,13 +58,14 @@ TEST_F(DeviceLibraryTest, Load) {
   for (iree_host_size_t i = 0; i < topology.gpu_agent_count; ++i) {
     hsa_agent_t agent = topology.gpu_agents[i];
 
-    // Code range should be non-zero and somewhere in the process address space.
-    iree_hal_amdgpu_code_range_t code_range = {0};
-    IREE_ASSERT_OK(iree_hal_amdgpu_device_library_populate_agent_code_range(
-        &library, agent, &code_range));
-    ASSERT_NE(code_range.host_ptr, nullptr);
-    ASSERT_NE(code_range.device_ptr, 0);
-    ASSERT_NE(code_range.size, 0);
+    // Loaded code-object range should be non-zero and host-mapped.
+    iree_hal_amdgpu_loaded_code_object_range_t code_range = {0};
+    IREE_ASSERT_OK(
+        iree_hal_amdgpu_device_library_populate_agent_loaded_code_object_range(
+            &library, agent, &code_range));
+    ASSERT_NE(code_range.host_pointer, nullptr);
+    ASSERT_NE(code_range.device_pointer, 0);
+    ASSERT_NE(code_range.byte_length, 0);
 
     // Kernel information should be populated but we don't really care with what
     // here as we aren't running anything.

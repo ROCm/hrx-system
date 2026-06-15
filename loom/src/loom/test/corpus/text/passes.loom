@@ -1,0 +1,21 @@
+pass.pipeline<module> @cleanup pipeline {
+  canonicalize(max_iterations = 10)
+  repeat until_converged(max_iterations = 8) {
+    cse
+    dce
+  }
+}
+
+pass.pipeline<func> @function_cleanup pipeline {
+  for func {
+    where name(value = "matmul") {
+      vector-memory-footprint(budget_bytes = 4096)
+    }
+  }
+}
+
+pass.pipeline<module> @debug pipeline {
+  call @cleanup
+  fail "expected cleanup to run"
+  halt "inspect IR"
+}

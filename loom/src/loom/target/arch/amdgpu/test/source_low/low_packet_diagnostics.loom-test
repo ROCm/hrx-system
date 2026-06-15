@@ -1,0 +1,11 @@
+// RUN: emit low-packet-json @gfx11_lds_crosslane diagnostics=packets output=none
+amdgpu.target<gfx1100> @gfx11_lds_crosslane_target
+low.func.def target(@gfx11_lds_crosslane_target) @gfx11_lds_crosslane(%addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  // REMARK@+1: BACKEND/018 "selected lds-crosslane low packet 'amdgpu.ds_swizzle_b32'"
+  %swizzled = ds_swizzle_b32 %addr {offset = 32}
+  // REMARK@+1: BACKEND/018 "selected lds-crosslane low packet 'amdgpu.ds_permute_b32'"
+  %permuted = ds_permute_b32 %addr, %swizzled {offset = 4}
+  // REMARK@+1: BACKEND/018 "selected lds-crosslane low packet 'amdgpu.ds_bpermute_b32'"
+  %bpermuted = ds_bpermute_b32 %addr, %permuted {offset = 8}
+  return %bpermuted
+}

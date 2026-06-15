@@ -1,0 +1,98 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_fuzz", "loom_cc_library", "loom_cc_test")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+#===------------------------------------------------------------------------===#
+# Common text infrastructure
+#===------------------------------------------------------------------------===#
+
+loom_cc_library(
+    name = "low_asm",
+    hdrs = ["low_asm.h"],
+    deps = [
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "tokenizer",
+    srcs = ["tokenizer.c"],
+    hdrs = ["tokenizer.h"],
+    deps = [
+        "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/error:error_defs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/base/internal:unicode",
+    ],
+)
+
+loom_cc_test(
+    name = "tokenizer_test",
+    srcs = ["tokenizer_test.cc"],
+    deps = [
+        ":tokenizer",
+        "//loom/src/loom/error:error_defs",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_fuzz(
+    name = "tokenizer_fuzz",
+    srcs = ["tokenizer_fuzz.cc"],
+    deps = [
+        ":tokenizer",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/base/internal:unicode",
+    ],
+)
+
+#===------------------------------------------------------------------------===#
+# Public parser/printer facades
+#===------------------------------------------------------------------------===#
+
+loom_cc_library(
+    name = "parser",
+    hdrs = ["parser.h"],
+    deps = [
+        "//loom/src/loom/format/text/parser:parser_impl",
+    ],
+)
+
+loom_cc_library(
+    name = "printer",
+    hdrs = ["printer.h"],
+    deps = [
+        "//loom/src/loom/format/text/printer:printer_impl",
+    ],
+)
+
+loom_cc_fuzz(
+    name = "parser_fuzz",
+    srcs = ["parser_fuzz.cc"],
+    deps = [
+        ":parser",
+        ":printer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/testing:context",
+        "//loom/src/loom/testing:gen",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)

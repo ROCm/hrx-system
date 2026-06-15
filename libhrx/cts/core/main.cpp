@@ -18,6 +18,16 @@ hrx_accelerator_type_t g_test_device_type = HRX_ACCELERATOR_CPU;
 
 namespace {
 
+void printStatusAndConsume(HrxLoader& loader, const char* context,
+                           hrx_status_t status) {
+  char* message = nullptr;
+  size_t message_length = 0;
+  loader.status_to_string(status, &message, &message_length);
+  fprintf(stderr, "%s: %s\n", context, message ? message : "(unknown error)");
+  loader.status_free_message(message);
+  loader.status_ignore(status);
+}
+
 void seedInstalledCtsSourceDir(const char* argv0) {
   if (std::getenv("HRX_CTS_SOURCE_DIR") || !argv0) {
     return;
@@ -88,23 +98,23 @@ int main(int argc, char* argv[]) {
     if (type == HRX_ACCELERATOR_GPU) {
       status = loader.gpu_initialize(0);
       if (!hrx_status_is_ok(status)) {
-        fprintf(stderr, "Failed to initialize GPU accelerator\n");
-        loader.status_ignore(status);
+        printStatusAndConsume(loader, "Failed to initialize GPU accelerator",
+                              status);
         return 1;
       }
       status = loader.gpu_device_get(index, &g_test_device);
     } else {
       status = loader.cpu_initialize(0);
       if (!hrx_status_is_ok(status)) {
-        fprintf(stderr, "Failed to initialize CPU accelerator\n");
-        loader.status_ignore(status);
+        printStatusAndConsume(loader, "Failed to initialize CPU accelerator",
+                              status);
         return 1;
       }
       status = loader.cpu_device_get(index, &g_test_device);
     }
     if (!hrx_status_is_ok(status)) {
-      fprintf(stderr, "Failed to get device %s\n", hrx_device_spec.c_str());
-      loader.status_ignore(status);
+      std::string context = "Failed to get device " + hrx_device_spec;
+      printStatusAndConsume(loader, context.c_str(), status);
       return 1;
     }
     g_test_device_type = type;

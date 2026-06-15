@@ -1,0 +1,52 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+    "loom_config_compatible_with",
+)
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_AMDGPU_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/target/arch:amdgpu",
+    "//loom/config/emit:amdgpu",
+])
+
+loom_cc_library(
+    name = "amdgpu",
+    srcs = ["amdgpu.c"],
+    hdrs = [
+        "//loom/binding/c:include/loomc/target/amdgpu.h",
+        "//loom/binding/c:include/loomc/target/amdgpu/base.h",
+        "//loom/binding/c:include/loomc/target/amdgpu/emit.h",
+        "//loom/binding/c:include/loomc/target/amdgpu/profile.h",
+    ],
+    linkstatic = True,
+    target_compatible_with = _AMDGPU_COMPATIBLE_WITH,
+    deps = [
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target:types",
+        "//loom/src/loom/target/arch/amdgpu:provider",
+        "//loom/src/loom/target/arch/amdgpu:target_info",
+        "//loom/src/loom/target/arch/amdgpu/ops",
+        "//loom/src/loom/target/arch/amdgpu/records:target_records",
+        "//loom/src/loom/target/emit/native/amdgpu:hal_kernel_library",
+        "//runtime/src/iree/base",
+    ],
+    alwayslink = True,
+)

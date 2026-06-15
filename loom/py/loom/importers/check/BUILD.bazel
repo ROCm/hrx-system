@@ -1,0 +1,85 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:python.bzl", "iree_py_binary", "iree_py_library", "iree_py_test")
+load("//loom/build_tools/bazel:build_defs.bzl", "iree_select")
+
+package(
+    default_visibility = ["//visibility:public"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+exports_files(["import_test.py"])
+
+_IMPORTER_PACKAGE_DEPS = (
+    iree_select({
+        "//loom/config/import:mlir": [
+            "//loom/py/loom/importers/mlir:mlir_packages",
+        ],
+        "//conditions:default": [],
+    }) +
+    iree_select({
+        "//loom/config/import:tilelang": [
+            "//loom/py/loom/importers/tilelang:tilelang_packages",
+        ],
+        "//conditions:default": [],
+    })
+)
+
+iree_py_library(
+    name = "check",
+    srcs = [
+        "__init__.py",
+        "annotations.py",
+        "cases.py",
+        "loom_verifier.py",
+        "main.py",
+        "python.py",
+        "registry.py",
+        "results.py",
+        "updates.py",
+    ],
+    deps = [
+        "//loom/py/loom:package",
+        "//loom/py/loom/tools:loom_opt",
+    ],
+)
+
+iree_py_binary(
+    name = "loom_import_check",
+    srcs = ["__main__.py"],
+    main = "__main__.py",
+    deps = [
+        ":check",
+        "//loom/py/loom/importers/check/mlir",
+        "//loom/py/loom/importers/check/tilelang",
+    ] + _IMPORTER_PACKAGE_DEPS,
+)
+
+iree_py_test(
+    name = "check_test",
+    srcs = [
+        "annotations_test.py",
+        "cases_test.py",
+        "main_test.py",
+        "python_test.py",
+        "registry_test.py",
+        "results_test.py",
+        "updates_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = [
+        "loom.importers.check.annotations_test",
+        "loom.importers.check.cases_test",
+        "loom.importers.check.main_test",
+        "loom.importers.check.python_test",
+        "loom.importers.check.registry_test",
+        "loom.importers.check.results_test",
+        "loom.importers.check.updates_test",
+    ],
+    main = "pytest_style_runner.py",
+    deps = [":check"],
+)

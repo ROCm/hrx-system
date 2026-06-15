@@ -119,9 +119,7 @@ iree_tokenizer_segmenter_t* CreateSplitSegmenter(const char* pattern) {
       iree_make_cstring_view(pattern),
       IREE_TOKENIZER_UTIL_REGEX_COMPILE_FLAG_NONE, iree_allocator_system(),
       &dfa, &dfa_storage, &error);
-  if (!iree_status_is_ok(status)) {
-    return nullptr;
-  }
+  IREE_CHECK_OK(status);
 
   iree_tokenizer_segmenter_t* segmenter = nullptr;
   status = iree_tokenizer_segmenter_split_allocate(
@@ -129,7 +127,7 @@ iree_tokenizer_segmenter_t* CreateSplitSegmenter(const char* pattern) {
       iree_allocator_system(), &segmenter);
   if (!iree_status_is_ok(status)) {
     iree_allocator_free(iree_allocator_system(), dfa_storage);
-    return nullptr;
+    IREE_CHECK_OK(status);
   }
 
   return segmenter;
@@ -1144,6 +1142,7 @@ TEST_F(TokenizerStreamingTest, LargeCJKTextWithCappedBuffer) {
 
     if (!iree_status_is_ok(status)) {
       iree_status_fprint(stderr, status);
+      iree_status_free(status);
       FAIL() << "Streaming encode failed at byte "
              << (cjk_text.length() - remaining.size);
     }
@@ -1225,6 +1224,7 @@ TEST_F(TokenizerStreamingTest, ChunkedEncodeWithUTF8BoundarySplits) {
       std::cerr << "Chunk at offset " << offset << " (length " << length
                 << ") failed:\n";
       iree_status_fprint(stderr, status);
+      iree_status_free(status);
       FAIL() << "One-shot encode should handle chunks with split UTF-8";
     }
     total_tokens += token_count;
@@ -2566,16 +2566,14 @@ static iree_tokenizer_segmenter_t* CreateSplitSegmenterWithBehavior(
       iree_make_cstring_view(pattern),
       IREE_TOKENIZER_UTIL_REGEX_COMPILE_FLAG_NONE, iree_allocator_system(),
       &dfa, &dfa_storage, &error);
-  if (!iree_status_is_ok(status)) {
-    return nullptr;
-  }
+  IREE_CHECK_OK(status);
 
   iree_tokenizer_segmenter_t* segmenter = nullptr;
   status = iree_tokenizer_segmenter_split_allocate(
       dfa, dfa_storage, behavior, false, iree_allocator_system(), &segmenter);
   if (!iree_status_is_ok(status)) {
     iree_allocator_free(iree_allocator_system(), dfa_storage);
-    return nullptr;
+    IREE_CHECK_OK(status);
   }
 
   return segmenter;

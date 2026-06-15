@@ -1,0 +1,30 @@
+// RUN: pass canonicalize,dce
+
+// A CFG block argument meet must account for every reachable predecessor. If
+// one incoming edge is unknown, a known incoming edge cannot keep its precision.
+func.def @join_meets_unknown_incoming_edge(%condition: i1, %unknown: index) -> (i64, i64) {
+  %known = index.constant 4 : index
+  cfg.cond_br %condition, ^known_edge, ^unknown_edge
+^known_edge:
+  cfg.br ^join(%known: index)
+^unknown_edge:
+  cfg.br ^join(%unknown: index)
+^join(%value: index):
+  %lo = test.fact_range_lo %value : index -> i64
+  %hi = test.fact_range_hi %value : index -> i64
+  func.return %lo, %hi : i64, i64
+}
+
+// ----
+func.def @join_meets_unknown_incoming_edge(%condition: i1, %unknown: index) -> (i64, i64) {
+  %known = index.constant 4 : index
+  cfg.cond_br %condition, ^known_edge, ^unknown_edge
+^known_edge:
+  cfg.br ^join(%known: index)
+^unknown_edge:
+  cfg.br ^join(%unknown: index)
+^join(%value: index):
+  %lo = scalar.constant -9223372036854775808 : i64
+  %hi = scalar.constant 9223372036854775807 : i64
+  func.return %lo, %hi : i64, i64
+}

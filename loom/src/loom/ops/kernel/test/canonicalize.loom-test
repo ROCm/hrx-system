@@ -1,0 +1,112 @@
+// RUN: pass canonicalize
+
+kernel.def @exit_moves_tail_to_false_path() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%done: i1, %value: i32) {
+  kernel.exit %done : i1
+  test.use %value : i32
+  kernel.return
+}
+
+// ----
+kernel.def @exit_moves_tail_to_false_path() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%done: i1, %value: i32) {
+  scf.if %done {
+  } else {
+    test.use %value : i32
+  }
+  kernel.return
+}
+
+// ====
+
+kernel.def @exit_body_moves_to_true_path() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%done: i1, %value: i32) {
+  kernel.exit %done : i1 {
+    test.use %value : i32
+    kernel.return
+  }
+  kernel.return
+}
+
+// ----
+kernel.def @exit_body_moves_to_true_path() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%done: i1, %value: i32) {
+  scf.if %done {
+    test.use %value : i32
+  } else {
+  }
+  kernel.return
+}
+
+// ====
+
+kernel.def @false_exit_erases() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%value: i32) {
+  %done = scalar.constant false : i1
+  kernel.exit %done : i1
+  test.use %value : i32
+  kernel.return
+}
+
+// ----
+kernel.def @false_exit_erases() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%value: i32) {
+  test.use %value : i32
+  kernel.return
+}
+
+// ====
+
+kernel.def @true_exit_erases() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%value: i32) {
+  %done = scalar.constant true : i1
+  kernel.exit %done : i1
+  test.use %value : i32
+  kernel.return
+}
+
+// ----
+kernel.def @true_exit_erases() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%value: i32) {
+  kernel.return
+}
+
+// ====
+
+kernel.def @true_exit_inlines_body() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%value: i32, %dead: i32) {
+  %done = scalar.constant true : i1
+  kernel.exit %done : i1 {
+    test.use %value : i32
+    kernel.return
+  }
+  test.use %dead : i32
+  kernel.return
+}
+
+// ----
+kernel.def @true_exit_inlines_body() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%value: i32, %dead: i32) {
+  test.use %value : i32
+  kernel.return
+}

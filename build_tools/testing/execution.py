@@ -72,6 +72,43 @@ def resolve_runfile(path: str) -> Path:
     raise FileNotFoundError(path)
 
 
+_SANITIZER_OPTION_ENV_NAMES = (
+    "ASAN_OPTIONS",
+    "LSAN_OPTIONS",
+    "MSAN_OPTIONS",
+    "TSAN_OPTIONS",
+    "UBSAN_OPTIONS",
+)
+
+_SANITIZER_RUNFILE_OPTIONS = frozenset({"suppressions"})
+
+
+def _resolve_sanitizer_options(value: str) -> str:
+    """Resolves runfile paths inside sanitizer option strings."""
+    entries = value.split(os.pathsep)
+    for index, entry in enumerate(entries):
+        key, separator, option_value = entry.partition("=")
+        if (
+            separator
+            and key in _SANITIZER_RUNFILE_OPTIONS
+            and option_value
+            and not Path(option_value).is_absolute()
+        ):
+            try:
+                option_value = str(resolve_runfile(option_value))
+            except FileNotFoundError:
+                pass
+            entries[index] = key + separator + option_value
+    return os.pathsep.join(entries)
+
+
+def _resolve_sanitizer_env(env: dict[str, str]) -> None:
+    """Resolves sanitizer option runfiles before launching child tools."""
+    for name in _SANITIZER_OPTION_ENV_NAMES:
+        if name in env:
+            env[name] = _resolve_sanitizer_options(env[name])
+
+
 def _load_manifest(path: Path) -> Any:
     with path.open(encoding="utf-8") as file:
         try:
@@ -298,6 +335,7 @@ class ExecutionRunner:
                 ).items()
             }
         )
+        _resolve_sanitizer_env(env)
         cwd = Path(
             _as_string(step.get("cwd", str(temp_dir)), f"{case_name}:{step_name}.cwd")
         )

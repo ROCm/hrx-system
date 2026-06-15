@@ -436,9 +436,7 @@ void iree_hal_streaming_context_symbol_map_deinitialize(
   iree_hal_streaming_context_module_entry_t* module_entry = map->modules;
   while (module_entry) {
     iree_hal_streaming_context_module_entry_t* next = module_entry->next;
-    if (module_entry->module) {
-      iree_hal_streaming_module_release(module_entry->module);
-    }
+    iree_hal_streaming_module_release(module_entry->module);
     iree_allocator_free(host_allocator, module_entry);
     module_entry = next;
   }
@@ -573,7 +571,8 @@ static iree_status_t iree_hal_streaming_context_symbol_map_prepare_module(
   //         iree_status_is_ok(status) ? "OK" : "FAILED");
   if (iree_status_is_ok(status)) {
     // Insert all symbols from the module into the hash table.
-    for (iree_host_size_t i = 0; i < registration->symbol_count; ++i) {
+    for (iree_host_size_t i = 0;
+         iree_status_is_ok(status) && i < registration->symbol_count; ++i) {
       // Get the registered symbol's device name
       iree_string_view_t registered_name =
           iree_make_cstring_view(registration->symbols[i].device_name);
@@ -581,10 +580,41 @@ static iree_status_t iree_hal_streaming_context_symbol_map_prepare_module(
 
       // Find the corresponding compiled symbol in the module by name.
       iree_hal_streaming_symbol_t* symbol = NULL;
-      for (iree_host_size_t j = 0; j < entry->module->symbol_count; ++j) {
-        if (iree_string_view_equal(registered_name,
-                                   entry->module->symbols[j].name)) {
-          symbol = &entry->module->symbols[j];
+      bool found = false;
+      switch (registration->symbols[i].type) {
+        case IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION:
+          for (iree_host_size_t j = 0; j < entry->module->symbol_count; ++j) {
+            if (iree_string_view_equal(registered_name,
+                                       entry->module->symbols[j].name)) {
+              symbol = &entry->module->symbols[j];
+              break;
+            }
+          }
+          break;
+        case IREE_HAL_STREAMING_SYMBOL_TYPE_GLOBAL:
+        case IREE_HAL_STREAMING_SYMBOL_TYPE_DATA:
+          status = iree_hal_streaming_module_try_lookup_global_symbol(
+              entry->module, registration->symbols[i].device_name, &found,
+              &symbol);
+          break;
+        default:
+          status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                    "unsupported registered symbol type %d",
+                                    registration->symbols[i].type);
+          break;
+      }
+      if (!iree_status_is_ok(status)) {
+        break;
+      }
+      if (symbol && symbol->type != registration->symbols[i].type) {
+        if (!(registration->symbols[i].type ==
+                  IREE_HAL_STREAMING_SYMBOL_TYPE_DATA &&
+              symbol->type == IREE_HAL_STREAMING_SYMBOL_TYPE_GLOBAL)) {
+          status = iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "registered symbol `%.*s` type mismatch (expected %d, got %d)",
+              (int)registered_name.size, registered_name.data,
+              registration->symbols[i].type, symbol->type);
           break;
         }
       }

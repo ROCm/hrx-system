@@ -11,10 +11,13 @@ on:
   pull_request:
     paths:
       - ".github/workflows/ci_iree_cmake.yml"
+      - ".github/scripts/**"
       - "BUILDING.md"
       - "CMakeLists.txt"
       - "MODULE.cmake.lock"
       - "dev.py"
+      - "requirements-analysis.in"
+      - "requirements-analysis.lock.txt"
       - "requirements-dev.in"
       - "requirements-dev.lock.txt"
       - "build_tools/**"
@@ -28,10 +31,13 @@ on:
       - main-staging
     paths:
       - ".github/workflows/ci_iree_cmake.yml"
+      - ".github/scripts/**"
       - "BUILDING.md"
       - "CMakeLists.txt"
       - "MODULE.cmake.lock"
       - "dev.py"
+      - "requirements-analysis.in"
+      - "requirements-analysis.lock.txt"
       - "requirements-dev.in"
       - "requirements-dev.lock.txt"
       - "build_tools/**"
@@ -56,8 +62,8 @@ jobs:
         include:
           - name: Linux / CPU
             command: iree-cmake-cpu
-          - name: Linux / CPU / Sanitizers
-            command: iree-cmake-cpu-sanitizers
+          - name: Linux / CPU / Sanitizer Smoke
+            command: iree-cmake-sanitizer-smoke
     env:
       HRX_ARTIFACT_SET: core
       HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/iree-cmake/downloads
@@ -74,22 +80,64 @@ jobs:
         run: git config --global --add safe.directory "$PWD"
 
       - name: Fetch ROCm toolchain
-        run: |
-          python3 -m venv "${HRX_OUTPUT_DIR}/python"
-          "${HRX_PYTHON}" -m pip install --upgrade pip boto3 zstandard
-          "${HRX_PYTHON}" build_tools/ci_core_linux.py fetch-rocm
-          echo "${HRX_ROCM_ROOT}/lib/llvm/bin" >> "$GITHUB_PATH"
-          echo "${HRX_ROCM_ROOT}/bin" >> "$GITHUB_PATH"
-          echo "CC=${HRX_ROCM_ROOT}/lib/llvm/bin/clang" >> "$GITHUB_ENV"
-          echo "CXX=${HRX_ROCM_ROOT}/lib/llvm/bin/clang++" >> "$GITHUB_ENV"
-          echo "CMAKE_PREFIX_PATH=${HRX_ROCM_ROOT}${CMAKE_PREFIX_PATH:+:${CMAKE_PREFIX_PATH}}" >> "$GITHUB_ENV"
-          echo "LD_LIBRARY_PATH=${HRX_ROCM_ROOT}/lib:${HRX_ROCM_ROOT}/lib/rocm_sysdeps/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}" >> "$GITHUB_ENV"
+        run: bash .github/scripts/fetch_rocm_toolchain.sh
 
       - name: Install developer tools
         run: |
           python3 --version
           python3 dev.py cmake setup --venv
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Check tool versions
+        run: |
+          cmake --version
+          ctest --version
+          ninja --version
+          clang --version
+          "$CC" --version
+          test -d "${HRX_ROCM_ROOT}/include"
+
+      - name: Run IREE CMake CI
+        run: |
+          echo "python3 build_tools/devtools/ci.py ${{ matrix.command }} --keep-going"
+          python3 build_tools/devtools/ci.py ${{ matrix.command }} --keep-going
+
+  linux_cmake_vulkan:
+    name: ${{ matrix.name }}
+    runs-on: gpu_navi4x
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux / Vulkan
+            command: iree-cmake-vulkan
+    env:
+      HRX_ARTIFACT_SET: core
+      HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/iree-cmake-vulkan/downloads
+      HRX_OUTPUT_DIR: ${{ github.workspace }}/build/iree-cmake-vulkan
+      HRX_PYTHON: ${{ github.workspace }}/build/iree-cmake-vulkan/python/bin/python3
+      HRX_RELEASE_TYPE: nightly
+      HRX_ROCM_ROOT: ${{ github.workspace }}/build/iree-cmake-vulkan/rocm-root
+      PIP_CACHE_DIR: ${{ github.workspace }}/build/iree-cmake-vulkan/caches/pip
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Adjust git config
+        run: git config --global --add safe.directory "$PWD"
+
+      - name: Fetch ROCm toolchain
+        run: bash .github/scripts/fetch_rocm_toolchain.sh
+
+      - name: Check Vulkan hardware environment
+        run: bash .github/scripts/check_vulkan_hardware_environment.sh
+
+      - name: Install CMake host tools
+        run: |
+          python3 --version
+          "${HRX_PYTHON}" -m pip install --upgrade cmake==3.31.6 ninja
+          echo "${HRX_OUTPUT_DIR}/python/bin" >> "$GITHUB_PATH"
 
       - name: Check tool versions
         run: |
@@ -115,8 +163,6 @@ jobs:
         include:
           - name: Linux / AMDGPU
             command: iree-cmake-amdgpu
-          - name: Linux / AMDGPU / Sanitizers
-            command: iree-cmake-amdgpu-sanitizers
     env:
       HRX_ARTIFACT_SET: core
       HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/iree-cmake-gpu/downloads
@@ -134,16 +180,7 @@ jobs:
         run: git config --global --add safe.directory "$PWD"
 
       - name: Fetch ROCm toolchain
-        run: |
-          python3 -m venv "${HRX_OUTPUT_DIR}/python"
-          "${HRX_PYTHON}" -m pip install --upgrade pip boto3 zstandard
-          "${HRX_PYTHON}" build_tools/ci_core_linux.py fetch-rocm
-          echo "${HRX_ROCM_ROOT}/lib/llvm/bin" >> "$GITHUB_PATH"
-          echo "${HRX_ROCM_ROOT}/bin" >> "$GITHUB_PATH"
-          echo "CC=${HRX_ROCM_ROOT}/lib/llvm/bin/clang" >> "$GITHUB_ENV"
-          echo "CXX=${HRX_ROCM_ROOT}/lib/llvm/bin/clang++" >> "$GITHUB_ENV"
-          echo "CMAKE_PREFIX_PATH=${HRX_ROCM_ROOT}${CMAKE_PREFIX_PATH:+:${CMAKE_PREFIX_PATH}}" >> "$GITHUB_ENV"
-          echo "LD_LIBRARY_PATH=${HRX_ROCM_ROOT}/lib:${HRX_ROCM_ROOT}/lib/rocm_sysdeps/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}" >> "$GITHUB_ENV"
+        run: bash .github/scripts/fetch_rocm_toolchain.sh
 
       - name: Install developer tools
         run: |
@@ -159,6 +196,9 @@ jobs:
           clang --version
           "$CC" --version
           test -d "${HRX_ROCM_ROOT}/include"
+
+      - name: Report ROCm environment
+        run: bash .github/scripts/check_rocm_environment.sh
 
       - name: Run IREE CMake CI
         run: |

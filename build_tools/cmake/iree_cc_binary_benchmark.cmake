@@ -23,6 +23,7 @@
 # COPTS: List of private compile options for the binary
 # DEFINES: List of public defines for the binary
 # LINKOPTS: List of link options for the binary
+# ARGS: Additional arguments passed to the benchmark smoke test
 # TESTONLY: whether the binary should only be compiled for tests
 # HOSTONLY: whether the binary should be compiled using host toolchain when
 #   cross-compiling
@@ -42,7 +43,7 @@ function(iree_cc_binary_benchmark)
     _RULE
     "HOSTONLY;TESTONLY"
     "NAME;RESOURCE_GROUP"
-    "SRCS;COPTS;DEFINES;LINKOPTS;DATA;DEPS;LABELS"
+    "SRCS;COPTS;DEFINES;LINKOPTS;DATA;DEPS;ARGS;LABELS"
     ${ARGN}
   )
 
@@ -86,6 +87,7 @@ function(iree_cc_binary_benchmark)
       ${_RULE_NAME}_test
     ARGS
       "--benchmark_min_time=0s"
+      ${_RULE_ARGS}
     SRC
       ::${_RULE_NAME}
     LABELS

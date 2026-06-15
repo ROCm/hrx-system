@@ -606,7 +606,7 @@ iree_status_t iree_hal_cuda_device_create(
 
   iree_hal_cuda_event_pool_t* device_event_pool = NULL;
   if (iree_status_is_ok(status)) {
-    status = iree_hal_cuda_event_pool_allocate(
+    status = iree_hal_cuda_event_pool_create(
         cuda_symbols, params->event_pool_capacity, host_allocator,
         &device_event_pool);
   }
@@ -626,7 +626,7 @@ iree_status_t iree_hal_cuda_device_create(
   } else {
     // Release resources we have acquired after HAL device creation.
     if (timepoint_pool) iree_hal_cuda_timepoint_pool_free(timepoint_pool);
-    if (device_event_pool) iree_hal_cuda_event_pool_release(device_event_pool);
+    iree_hal_cuda_event_pool_release(device_event_pool);
     // Release other resources via the HAL device.
     iree_hal_device_release(*out_device);
   }
@@ -687,9 +687,7 @@ static void iree_hal_cuda_device_destroy(iree_hal_device_t* base_device) {
   if (device->timepoint_pool) {
     iree_hal_cuda_timepoint_pool_free(device->timepoint_pool);
   }
-  if (device->device_event_pool) {
-    iree_hal_cuda_event_pool_release(device->device_event_pool);
-  }
+  iree_hal_cuda_event_pool_release(device->device_event_pool);
 
   IREE_CUDA_IGNORE_ERROR(symbols, cuStreamDestroy(device->dispatch_cu_stream));
 

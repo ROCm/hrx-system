@@ -1,0 +1,43 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+)
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+loom_cc_library(
+    name = "pipeline",
+    srcs = ["pipeline.c"],
+    hdrs = ["pipeline.h"],
+    deps = [
+        "//loom/src/loom/codegen/low/pipeline:pass_environment",
+        "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/pass:builtin_registry",
+        "//loom/src/loom/pass:interpreter",
+        "//loom/src/loom/pass:registry",
+        "//loom/src/loom/pass:tooling",
+        "//loom/src/loom/pass:trace",
+        "//loom/src/loom/target:compile_report",
+        "//loom/src/loom/target:entry_selection",
+        "//loom/src/loom/target:low_descriptor_registry",
+        "//loom/src/loom/target:math_policy",
+        "//loom/src/loom/target:pipeline",
+        "//loom/src/loom/target:predicate",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target:types",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)

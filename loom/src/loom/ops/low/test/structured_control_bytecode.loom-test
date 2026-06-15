@@ -1,0 +1,15 @@
+// RUN: format bytecode
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @structured_control_bytecode(%condition: reg<test.i32>, %lower: reg<test.i32>, %upper: reg<test.i32>, %step: reg<test.i32>, %init: reg<test.i32>, %then_value: reg<test.i32>, %else_value: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) {
+  %if_result = low.scf.if %condition -> (reg<test.i32>) {
+    low.scf.yield %then_value : reg<test.i32>
+  } else {
+    low.scf.yield %else_value : reg<test.i32>
+  }
+  %for_result = low.scf.for [%lower to %upper step %step] iter_args(%init: reg<test.i32>) -> (reg<test.i32>) unroll do(%iv: reg<test.i32>, %acc: reg<test.i32>) {
+    low.scf.yield %acc : reg<test.i32>
+  }
+  low.return %if_result, %for_result : reg<test.i32>, reg<test.i32>
+}

@@ -214,12 +214,8 @@ TEST_F(BlockBuilderTest, CommandOpSplitKeepsBindingIndicesBlockLocal) {
   iree_hal_cmd_block_builder_initialize(&block_pool_, &builder);
   IREE_ASSERT_OK(iree_hal_cmd_block_builder_begin(&builder));
 
-  iree_hal_executable_dispatch_attrs_v0_t dispatch_attrs = {
-      /*.flags=*/0,
-      /*.local_memory_pages=*/0,
-      /*.constant_count=*/0,
-      /*.binding_count=*/12,
-  };
+  iree_hal_executable_dispatch_attrs_v0_t dispatch_attrs = {};
+  dispatch_attrs.binding_count = 12;
   iree_hal_local_executable_t executable = {};
   executable.dispatch_attrs = &dispatch_attrs;
   executable.export_count = 1;

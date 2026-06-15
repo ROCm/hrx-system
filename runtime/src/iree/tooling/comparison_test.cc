@@ -90,6 +90,25 @@ TEST_F(ComparisonTest, CompareEqualLists) {
   EXPECT_EQ(result, "");
 }
 
+TEST_F(ComparisonTest, CompareEqualPrimitiveValues) {
+  auto value_strings = std::vector<std::string>{"42"};
+  std::string result;
+  EXPECT_TRUE(ParseAndCompareVariantLists(IREE_SV("i"), value_strings,
+                                          value_strings, &result));
+  EXPECT_EQ(result, "");
+}
+
+TEST_F(ComparisonTest, CompareDifferingPrimitiveValues) {
+  auto expected_strings = std::vector<std::string>{"42"};
+  auto actual_strings = std::vector<std::string>{"43"};
+  std::string result;
+  EXPECT_FALSE(ParseAndCompareVariantLists(IREE_SV("i"), expected_strings,
+                                           actual_strings, &result));
+  EXPECT_THAT(result, HasSubstr("i32 values differ"));
+  EXPECT_THAT(result, HasSubstr("expected: 42"));
+  EXPECT_THAT(result, HasSubstr("actual: 43"));
+}
+
 TEST_F(ComparisonTest, CompareListsWithIgnored) {
   std::string buf_string1 = "2x2xi32=[42 43][44 45]";
   std::string buf_string2 = "2x3xf64=[1 2 999][4 5 6]";

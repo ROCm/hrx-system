@@ -1,0 +1,98 @@
+// RUN: pass canonicalize
+
+func.def @bitwise_identities(%x: i32) -> (i32, i32, i32, i32, i32, i32, i32, i32) {
+  %zero = scalar.constant 0 : i32
+  %ones = scalar.constant -1 : i32
+  %and_self = scalar.andi %x, %x : i32
+  %and_zero = scalar.andi %x, %zero : i32
+  %and_ones = scalar.andi %x, %ones : i32
+  %or_self = scalar.ori %x, %x : i32
+  %or_zero = scalar.ori %x, %zero : i32
+  %or_ones = scalar.ori %x, %ones : i32
+  %xor_zero = scalar.xori %x, %zero : i32
+  %xor_self = scalar.xori %x, %x : i32
+  func.return %and_self, %and_zero, %and_ones, %or_self, %or_zero, %or_ones, %xor_zero, %xor_self : i32, i32, i32, i32, i32, i32, i32, i32
+}
+
+// ----
+func.def @bitwise_identities(%x: i32) -> (i32, i32, i32, i32, i32, i32, i32, i32) {
+  %ones = scalar.constant -1 : i32
+  %and_zero = scalar.constant 0 : i32
+  %xor_self = scalar.constant 0 : i32
+  func.return %x, %and_zero, %x, %x, %x, %ones, %x, %xor_self : i32, i32, i32, i32, i32, i32, i32, i32
+}
+
+// ====
+
+func.def @xori_cancels_nested_operand(%x: i32, %y: i32) -> (i32, i32) {
+  %lhs_nested = scalar.xori %x, %y : i32
+  %lhs_cancel = scalar.xori %lhs_nested, %y : i32
+  %rhs_nested = scalar.xori %y, %x : i32
+  %rhs_cancel = scalar.xori %x, %rhs_nested : i32
+  func.return %lhs_cancel, %rhs_cancel : i32, i32
+}
+
+// ----
+func.def @xori_cancels_nested_operand(%x: i32, %y: i32) -> (i32, i32) {
+  func.return %x, %y : i32, i32
+}
+
+// ====
+
+func.def @xori_cancels_duplicate_exact_constants(%x: i32) -> (i32) {
+  %c1 = scalar.constant 7 : i32
+  %c2 = scalar.constant 7 : i32
+  %nested = scalar.xori %x, %c1 : i32
+  %r = scalar.xori %nested, %c2 : i32
+  func.return %r : i32
+}
+
+// ----
+func.def @xori_cancels_duplicate_exact_constants(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+
+// ====
+
+func.def @shift_identities_and_reassociation(%x: i32) -> (i32, i32, i32, i32, i32, i32) {
+  %zero = scalar.constant 0 : i32
+  %one = scalar.constant 1 : i32
+  %two = scalar.constant 2 : i32
+  %shl_zero_amount = scalar.shli %x, %zero : i32
+  %shrsi_zero_amount = scalar.shrsi %x, %zero : i32
+  %shrui_zero_amount = scalar.shrui %x, %zero : i32
+  %shl_zero_value = scalar.shli %zero, %one : i32
+  %inner_shl = scalar.shli %x, %one : i32
+  %reassoc_shl = scalar.shli %inner_shl, %two : i32
+  %inner_shr = scalar.shrui %x, %one : i32
+  %reassoc_shr = scalar.shrui %inner_shr, %two : i32
+  func.return %shl_zero_amount, %shrsi_zero_amount, %shrui_zero_amount, %shl_zero_value, %reassoc_shl, %reassoc_shr : i32, i32, i32, i32, i32, i32
+}
+
+// ----
+func.def @shift_identities_and_reassociation(%x: i32) -> (i32, i32, i32, i32, i32, i32) {
+  %shl_zero_value = scalar.constant 0 : i32
+  %20 = scalar.constant 3 : i32
+  %reassoc_shl = scalar.shli %x, %20 : i32
+  %18 = scalar.constant 3 : i32
+  %reassoc_shr = scalar.shrui %x, %18 : i32
+  func.return %x, %x, %x, %shl_zero_value, %reassoc_shl, %reassoc_shr : i32, i32, i32, i32, i32, i32
+}
+
+// ====
+
+func.def @rotate_identities_and_direction(%x: i32) -> (i32, i32, i32) {
+  %zero = scalar.constant 0 : i32
+  %eight = scalar.constant 8 : i32
+  %rotl_zero = scalar.rotli %x, %zero : i32
+  %rotr_zero = scalar.rotri %x, %zero : i32
+  %rotr = scalar.rotri %x, %eight : i32
+  func.return %rotl_zero, %rotr_zero, %rotr : i32, i32, i32
+}
+
+// ----
+func.def @rotate_identities_and_direction(%x: i32) -> (i32, i32, i32) {
+  %9 = scalar.constant 24 : i32
+  %rotr = scalar.rotli %x, %9 : i32
+  func.return %x, %x, %rotr : i32, i32, i32
+}

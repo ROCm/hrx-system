@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "iree/base/internal/debugging.h"
 #include "iree/hal/drivers/vulkan/physical_device.h"
 
 typedef struct iree_hal_vulkan_fill_unaligned_push_constants_t {
@@ -231,9 +232,11 @@ static iree_status_t iree_hal_vulkan_builtins_create_compute_pipeline(
       .codeSize = spirv_code_size,
       .pCode = spirv_code,
   };
+  IREE_LEAK_CHECK_DISABLE_PUSH();
   iree_status_t status = iree_vkCreateShaderModule(
       IREE_VULKAN_DEVICE(&builtins->syms), builtins->logical_device,
       &shader_module_create_info, /*pAllocator=*/NULL, &shader_module);
+  IREE_LEAK_CHECK_DISABLE_POP();
   if (iree_status_is_ok(status)) {
     VkPipelineShaderStageCreateInfo stage_create_info = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -246,10 +249,12 @@ static iree_status_t iree_hal_vulkan_builtins_create_compute_pipeline(
         .stage = stage_create_info,
         .layout = builtins->storage_buffer_pipeline_layout,
     };
+    IREE_LEAK_CHECK_DISABLE_PUSH();
     status = iree_vkCreateComputePipelines(
         IREE_VULKAN_DEVICE(&builtins->syms), builtins->logical_device,
         /*pipelineCache=*/VK_NULL_HANDLE, /*createInfoCount=*/1,
         &pipeline_create_info, /*pAllocator=*/NULL, out_pipeline);
+    IREE_LEAK_CHECK_DISABLE_POP();
   }
   if (shader_module) {
     iree_vkDestroyShaderModule(IREE_VULKAN_DEVICE(&builtins->syms),
@@ -298,10 +303,12 @@ iree_status_t iree_hal_vulkan_builtins_initialize(
       .bindingCount = 1,
       .pBindings = &fill_layout_binding,
   };
+  IREE_LEAK_CHECK_DISABLE_PUSH();
   iree_status_t status = iree_vkCreateDescriptorSetLayout(
       IREE_VULKAN_DEVICE(&out_builtins->syms), out_builtins->logical_device,
       &descriptor_set_layout_create_info, /*pAllocator=*/NULL,
       &out_builtins->storage_buffer_descriptor_set_layout);
+  IREE_LEAK_CHECK_DISABLE_POP();
 
   if (iree_status_is_ok(status)) {
     VkPushConstantRange push_constant_range = {
@@ -317,10 +324,12 @@ iree_status_t iree_hal_vulkan_builtins_initialize(
         .pushConstantRangeCount = 1,
         .pPushConstantRanges = &push_constant_range,
     };
+    IREE_LEAK_CHECK_DISABLE_PUSH();
     status = iree_vkCreatePipelineLayout(
         IREE_VULKAN_DEVICE(&out_builtins->syms), out_builtins->logical_device,
         &pipeline_layout_create_info, /*pAllocator=*/NULL,
         &out_builtins->storage_buffer_pipeline_layout);
+    IREE_LEAK_CHECK_DISABLE_POP();
   }
 
   if (iree_status_is_ok(status)) {

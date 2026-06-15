@@ -154,7 +154,7 @@ typedef struct iree_hal_amdgpu_reclaim_entry_t iree_hal_amdgpu_reclaim_entry_t;
 // callback execution.
 typedef void(IREE_API_PTR* iree_hal_amdgpu_reclaim_action_fn_t)(
     iree_hal_amdgpu_reclaim_entry_t* entry, void* user_data,
-    iree_status_t status);
+    const iree_status_t status);
 
 typedef struct iree_hal_amdgpu_reclaim_action_t {
   // Callback invoked with |user_data| when the epoch is retired or failed.
@@ -453,7 +453,7 @@ iree_host_size_t iree_hal_amdgpu_notification_ring_drain(
 //
 // Returns the number of entries failed.
 iree_host_size_t iree_hal_amdgpu_notification_ring_fail_all_reclaim_positions(
-    iree_hal_amdgpu_notification_ring_t* ring, iree_status_t error_status,
+    iree_hal_amdgpu_notification_ring_t* ring, const iree_status_t error_status,
     iree_hal_amdgpu_reclaim_positions_t* out_reclaim_positions);
 
 // Stores the highest kernarg_write_position across all failed entries in
@@ -461,7 +461,7 @@ iree_host_size_t iree_hal_amdgpu_notification_ring_fail_all_reclaim_positions(
 //
 // Returns the number of entries failed.
 iree_host_size_t iree_hal_amdgpu_notification_ring_fail_all(
-    iree_hal_amdgpu_notification_ring_t* ring, iree_status_t error_status,
+    iree_hal_amdgpu_notification_ring_t* ring, const iree_status_t error_status,
     uint64_t* out_kernarg_reclaim_position);
 
 #ifdef __cplusplus

@@ -627,7 +627,7 @@ iree_status_t iree_hal_streaming_end_capture(
 
   if (out_graph) {
     *out_graph = graph;
-  } else if (graph) {
+  } else {
     iree_hal_streaming_graph_release(graph);
   }
 

@@ -75,10 +75,9 @@ static DirectDispatchBlock MakeDirectDispatchBlock() {
   block.dispatch_command.payload_reference = sizeof(block.dispatch_command);
   block.dispatch_command.kernarg_length_qwords =
       sizeof(block.tail) / sizeof(uint64_t);
-  block.dispatch_command.payload.tail_length_qwords =
-      sizeof(block.tail) / sizeof(uint64_t);
-  block.dispatch_command.kernarg_strategy =
-      IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STRATEGY_CUSTOM_DIRECT;
+  block.dispatch_command.payload.binding_source_count = 0;
+  block.dispatch_command.kernarg_storage_mode =
+      IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STORAGE_MODE_CUSTOM_DIRECT;
   block.dispatch_command.implicit_args_offset_qwords = UINT16_MAX;
   block.dispatch_command.setup = 3;
   block.dispatch_command.workgroup_size[0] = 4;
@@ -322,23 +321,23 @@ TEST(AqlBlockProcessorTimestampTest,
   iree_hal_amdgpu_dispatch_timestamp_record_t records[2] = {};
   const iree_hal_amdgpu_aql_block_processor_timestamp_dispatch_list_params_t
       params = {
-          .summaries =
-              {
-                  .first = summaries,
-                  .count = 2,
-              },
-          .metadata =
-              {
-                  .command_buffer_id = 0xCAFE,
-                  .block_ordinal = 5,
-                  .first_record_ordinal = 9,
-              },
-          .storage =
-              {
-                  .dispatches = dispatches,
-                  .completion_signals = completion_signals,
-                  .records = records,
-              },
+          /*.summaries=*/
+          {
+              /*.first=*/summaries,
+              /*.count=*/2,
+          },
+          /*.metadata=*/
+          {
+              /*.command_buffer_id=*/0xCAFE,
+              /*.block_ordinal=*/5,
+              /*.first_record_ordinal=*/9,
+          },
+          /*.storage=*/
+          {
+              /*.dispatches=*/dispatches,
+              /*.completion_signals=*/completion_signals,
+              /*.records=*/records,
+          },
       };
 
   iree_hal_amdgpu_aql_block_processor_timestamp_dispatch_list_t list;

@@ -1,0 +1,417 @@
+// RUN: pass canonicalize
+
+// Buffer entry arguments seed storage-root facts.
+func.def @buffer_arg_reference(%buffer: buffer) -> (i1) {
+  %is = test.fact_is_buffer_reference %buffer : buffer -> i1
+  func.return %is : i1
+}
+// ----
+func.def @buffer_arg_reference(%buffer: buffer) -> (i1) {
+  %is = scalar.constant true : i1
+  func.return %is : i1
+}
+
+// ====
+
+// Generic function buffer arguments are storage roots but do not imply a
+// concrete memory space.
+func.def @buffer_arg_memory_space_unknown(%buffer: buffer) -> (i64) {
+  %space = test.fact_buffer_memory_space %buffer : buffer -> i64
+  func.return %space : i64
+}
+// ----
+func.def @buffer_arg_memory_space_unknown(%buffer: buffer) -> (i64) {
+  %space = scalar.constant -1 : i64
+  func.return %space : i64
+}
+
+// ====
+
+// Kernel buffer arguments seed global memory facts for both the launch-config
+// projection and the executable body.
+kernel.def @kernel_buffer_arg_memory_space_global(%buffer: buffer) {
+  %config_space = test.fact_buffer_memory_space %buffer : buffer -> i64
+  %workgroups = index.cast %config_space : i64 to index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%workgroups, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%buffer: buffer) {
+  %zero = index.constant 0 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%zero] : buffer -> view<1xi64, %layout>
+  %body_space = test.fact_buffer_memory_space %buffer : buffer -> i64
+  %view_space = test.fact_view_memory_space %view : view<1xi64, %layout> -> i64
+  %sum = scalar.addi %body_space, %view_space : i64
+  view.store %sum, %view[0] : i64, view<1xi64, %layout>
+  kernel.return
+}
+// ----
+kernel.def @kernel_buffer_arg_memory_space_global(%buffer: buffer) {
+  %workgroups = index.constant 1 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%workgroups, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%buffer: buffer) {
+  %zero = index.constant 0 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%zero] : buffer -> view<1xi64, %layout>
+  %sum = scalar.constant 2 : i64
+  view.store %sum, %view[0] : i64, view<1xi64, %layout>
+  kernel.return
+}
+
+// ====
+
+// Scratch buffer roots seed extent, base alignment, memory-space, and non-null
+// facts. Views derived from them keep the root facts while computing their own
+// typed byte footprint.
+func.def @workgroup_alloca_reference() -> (i64, i64, i64, i64, i64) {
+  %bytes = index.constant 256 : offset
+  %zero = index.constant 0 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %view = buffer.view %scratch[%zero] : buffer -> view<16xf32, %layout>
+  %buffer_space = test.fact_buffer_memory_space %scratch : buffer -> i64
+  %buffer_align = test.fact_buffer_min_alignment %scratch : buffer -> i64
+  %view_space = test.fact_view_memory_space %view : view<16xf32, %layout> -> i64
+  %view_root_align = test.fact_view_root_min_alignment %view : view<16xf32, %layout> -> i64
+  %view_length = test.fact_view_byte_length_hi %view : view<16xf32, %layout> -> i64
+  func.return %buffer_space, %buffer_align, %view_space, %view_root_align, %view_length : i64, i64, i64, i64, i64
+}
+// ----
+func.def @workgroup_alloca_reference() -> (i64, i64, i64, i64, i64) {
+  %buffer_space = scalar.constant 2 : i64
+  %buffer_align = scalar.constant 64 : i64
+  %view_space = scalar.constant 2 : i64
+  %view_root_align = scalar.constant 64 : i64
+  %view_length = scalar.constant 64 : i64
+  func.return %buffer_space, %buffer_align, %view_space, %view_root_align, %view_length : i64, i64, i64, i64, i64
+}
+
+// ====
+
+// Explicit memory-space assumptions refine buffer arguments and propagate
+// through later view construction.
+func.def @assume_memory_space_feeds_view(%buffer: buffer, %offset: offset) -> (i64, i64) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %global = buffer.assume.memory_space<global> %buffer : buffer
+  %view = buffer.view %global[%offset] : buffer -> view<4xf32, %layout>
+  %buffer_space = test.fact_buffer_memory_space %global : buffer -> i64
+  %view_space = test.fact_view_memory_space %view : view<4xf32, %layout> -> i64
+  func.return %buffer_space, %view_space : i64, i64
+}
+// ----
+func.def @assume_memory_space_feeds_view(%buffer: buffer, %offset: offset) -> (i64, i64) {
+  %buffer_space = scalar.constant 1 : i64
+  %view_space = scalar.constant 1 : i64
+  func.return %buffer_space, %view_space : i64, i64
+}
+
+// ====
+
+// External buffer arguments are storage provenance roots but do not get a
+// comparable noalias scope until an explicit contract says so.
+func.def @external_buffer_arg_has_no_alias_scope(%buffer: buffer) -> (i1) {
+  %known = test.fact_alias_scope_known %buffer : buffer -> i1
+  func.return %known : i1
+}
+// ----
+func.def @external_buffer_arg_has_no_alias_scope(%buffer: buffer) -> (i1) {
+  %known = scalar.constant false : i1
+  func.return %known : i1
+}
+
+// ====
+
+// Variadic noalias assumptions mark each buffer root comparable and the proof
+// propagates through view construction.
+func.def @assume_noalias_feeds_view_scope(%lhs: buffer, %rhs: buffer, %offset: offset) -> (i1, i1, i1, i1) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %lhs_unique, %rhs_unique = buffer.assume.noalias %lhs, %rhs : buffer, buffer
+  %lhs_view = buffer.view %lhs_unique[%offset] : buffer -> view<4xf32, %layout>
+  %rhs_view = buffer.view %rhs_unique[%offset] : buffer -> view<4xf32, %layout>
+  %lhs_buffer_known = test.fact_alias_scope_known %lhs_unique : buffer -> i1
+  %lhs_view_known = test.fact_alias_scope_known %lhs_view : view<4xf32, %layout> -> i1
+  %rhs_buffer_known = test.fact_alias_scope_known %rhs_unique : buffer -> i1
+  %rhs_view_known = test.fact_alias_scope_known %rhs_view : view<4xf32, %layout> -> i1
+  func.return %lhs_buffer_known, %lhs_view_known, %rhs_buffer_known, %rhs_view_known : i1, i1, i1, i1
+}
+// ----
+func.def @assume_noalias_feeds_view_scope(%lhs: buffer, %rhs: buffer, %offset: offset) -> (i1, i1, i1, i1) {
+  %lhs_buffer_known = scalar.constant true : i1
+  %lhs_view_known = scalar.constant true : i1
+  %rhs_buffer_known = scalar.constant true : i1
+  %rhs_view_known = scalar.constant true : i1
+  func.return %lhs_buffer_known, %lhs_view_known, %rhs_buffer_known, %rhs_view_known : i1, i1, i1, i1
+}
+
+// ====
+
+// A same-root assumption moves both root identity and comparable alias scope to
+// the chosen root while preserving the refined buffer value.
+func.def @assume_same_root_feeds_view_scope(%lhs: buffer, %rhs: buffer, %offset: offset) -> (i1, i1) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %lhs_unique = buffer.assume.noalias %lhs : buffer
+  %rhs_same = buffer.assume.same_root %rhs, %lhs_unique : buffer
+  %view = buffer.view %rhs_same[%offset] : buffer -> view<4xf32, %layout>
+  %root_matches = test.fact_view_root_matches %view, %lhs_unique : view<4xf32, %layout>, buffer -> i1
+  %scope_matches = test.fact_alias_scope_matches %view, %lhs_unique : view<4xf32, %layout>, buffer -> i1
+  func.return %root_matches, %scope_matches : i1, i1
+}
+// ----
+func.def @assume_same_root_feeds_view_scope(%lhs: buffer, %rhs: buffer, %offset: offset) -> (i1, i1) {
+  %root_matches = scalar.constant true : i1
+  %scope_matches = scalar.constant true : i1
+  func.return %root_matches, %scope_matches : i1, i1
+}
+
+// ====
+
+// Subview/refine preserve the underlying root memory-space facts.
+func.def @subview_refine_preserves_memory_space() -> (i64, i64) {
+  %bytes = index.constant 256 : offset
+  %zero = index.constant 0 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %scratch = buffer.alloca %bytes {base_alignment = 128, memory_space = workgroup} : buffer
+  %source = buffer.view %scratch[%zero] : buffer -> view<16xf32, %layout>
+  %sub = view.subview %source[4] : view<16xf32, %layout> -> view<8xf32, %layout>
+  %refined = view.refine %sub : view<8xf32, %layout> -> view<4xf32, %layout>
+  %space = test.fact_view_memory_space %refined : view<4xf32, %layout> -> i64
+  %root_align = test.fact_view_root_min_alignment %refined : view<4xf32, %layout> -> i64
+  func.return %space, %root_align : i64, i64
+}
+// ----
+func.def @subview_refine_preserves_memory_space() -> (i64, i64) {
+  %space = scalar.constant 2 : i64
+  %root_align = scalar.constant 128 : i64
+  func.return %space, %root_align : i64, i64
+}
+
+// ====
+
+// Dense static views compute exact base, footprint, alignment, and element
+// byte facts.
+func.def @dense_static_view_facts(%buffer: buffer) -> (i64, i64, i64, i64, i64, i64) {
+  %offset = index.constant 64 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %layout>
+  %offset_lo = test.fact_view_byte_offset_lo %view : view<4xf32, %layout> -> i64
+  %offset_hi = test.fact_view_byte_offset_hi %view : view<4xf32, %layout> -> i64
+  %length_lo = test.fact_view_byte_length_lo %view : view<4xf32, %layout> -> i64
+  %length_hi = test.fact_view_byte_length_hi %view : view<4xf32, %layout> -> i64
+  %align = test.fact_view_min_alignment %view : view<4xf32, %layout> -> i64
+  %bytes = test.fact_view_element_bytes %view : view<4xf32, %layout> -> i64
+  func.return %offset_lo, %offset_hi, %length_lo, %length_hi, %align, %bytes : i64, i64, i64, i64, i64, i64
+}
+// ----
+func.def @dense_static_view_facts(%buffer: buffer) -> (i64, i64, i64, i64, i64, i64) {
+  %offset_lo = scalar.constant 64 : i64
+  %offset_hi = scalar.constant 64 : i64
+  %length_lo = scalar.constant 16 : i64
+  %length_hi = scalar.constant 16 : i64
+  %align = scalar.constant 64 : i64
+  %bytes = scalar.constant 4 : i64
+  func.return %offset_lo, %offset_hi, %length_lo, %length_hi, %align, %bytes : i64, i64, i64, i64, i64, i64
+}
+
+// ====
+
+// Strided layouts compute a conservative byte envelope including padding gaps.
+func.def @strided_static_footprint(%buffer: buffer) -> (i64) {
+  %offset = index.constant 0 : offset
+  %layout = encoding.layout.strided [8, 1] : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4x4xf32, %layout>
+  %length_hi = test.fact_view_byte_length_hi %view : view<4x4xf32, %layout> -> i64
+  func.return %length_hi : i64
+}
+// ----
+func.def @strided_static_footprint(%buffer: buffer) -> (i64) {
+  %length_hi = scalar.constant 112 : i64
+  func.return %length_hi : i64
+}
+
+// ====
+
+// Physical-storage encodings resolve through their nested layout parameter
+// instead of forcing fact consumers to special-case storage schemas.
+func.def @physical_storage_resolves_layout(%buffer: buffer) -> (i64) {
+  %offset = index.constant 0 : offset
+  %layout = encoding.layout.strided [8, 1] : encoding<layout>
+  %schema = encoding.define #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
+  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4x4xf32, %storage>
+  %length_hi = test.fact_view_byte_length_hi %view : view<4x4xf32, %storage> -> i64
+  func.return %length_hi : i64
+}
+// ----
+func.def @physical_storage_resolves_layout(%buffer: buffer) -> (i64) {
+  %length_hi = scalar.constant 112 : i64
+  func.return %length_hi : i64
+}
+
+// ====
+
+// Static shaped-type layouts are layout facts too; they should not require a
+// local SSA layout op just to recover dense footprints.
+func.def @static_dense_type_layout_facts(%buffer: buffer) -> (i64) {
+  %offset = index.constant 0 : offset
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, #dense>
+  %length_hi = test.fact_view_byte_length_hi %view : view<4xf32, #dense> -> i64
+  func.return %length_hi : i64
+}
+// ----
+func.def @static_dense_type_layout_facts(%buffer: buffer) -> (i64) {
+  %length_hi = scalar.constant 16 : i64
+  func.return %length_hi : i64
+}
+
+// ====
+
+// Static strided type layouts feed the same footprint logic as dynamic layout
+// values.
+func.def @static_strided_type_layout_facts(%buffer: buffer) -> (i64) {
+  %offset = index.constant 0 : offset
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, #strided<stride=8>>
+  %length_hi = test.fact_view_byte_length_hi %view : view<4xf32, #strided<stride=8>> -> i64
+  func.return %length_hi : i64
+}
+// ----
+func.def @static_strided_type_layout_facts(%buffer: buffer) -> (i64) {
+  %length_hi = scalar.constant 100 : i64
+  func.return %length_hi : i64
+}
+
+// ====
+
+// Static physical-storage encodings expose their nested address layout through
+// encoding facts even when the local op resolver has no dynamic layout operand
+// to chase.
+func.def @static_physical_storage_resolves_layout(%buffer: buffer) -> (i64) {
+  %offset = index.constant 0 : offset
+  %storage = encoding.define #physical_storage<layout=#dense, schema=#ggml_q4_0<block_elems=32, storage_bytes=18>> : encoding<storage>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %storage>
+  %length_hi = test.fact_view_byte_length_hi %view : view<4xf32, %storage> -> i64
+  func.return %length_hi : i64
+}
+// ----
+func.def @static_physical_storage_resolves_layout(%buffer: buffer) -> (i64) {
+  %length_hi = scalar.constant 16 : i64
+  func.return %length_hi : i64
+}
+
+// ====
+
+// Refinement preserves the source storage identity and byte base while letting
+// the result type provide a narrower, fact-bearing footprint.
+func.def @refine_preserves_root_and_refines_footprint(%buffer: buffer, %m: index) -> (i1, i64) {
+  %offset = index.constant 64 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %source = buffer.view %buffer[%offset] : buffer -> view<[%m]xf32, %layout>
+  %refined = view.refine %source : view<[%m]xf32, %layout> -> view<16xf32, %layout>
+  %same = test.fact_view_root_matches %refined, %buffer : view<16xf32, %layout>, buffer -> i1
+  %length_hi = test.fact_view_byte_length_hi %refined : view<16xf32, %layout> -> i64
+  func.return %same, %length_hi : i1, i64
+}
+// ----
+func.def @refine_preserves_root_and_refines_footprint(%buffer: buffer, %m: index) -> (i1, i64) {
+  %same = scalar.constant true : i1
+  %length_hi = scalar.constant 64 : i64
+  func.return %same, %length_hi : i1, i64
+}
+
+// ====
+
+// Argument layouts can be locally refined before being attached to a view type;
+// later fact consumers only need the refined SSA value.
+func.def @argument_layout_assume_dense_feeds_view_facts(%buffer: buffer, %layout: encoding<layout>) -> (i64) {
+  %offset = index.constant 0 : offset
+  %dense = encoding.layout.assume.dense %layout : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %dense>
+  %length_hi = test.fact_view_byte_length_hi %view : view<4xf32, %dense> -> i64
+  func.return %length_hi : i64
+}
+// ----
+func.def @argument_layout_assume_dense_feeds_view_facts(%buffer: buffer, %layout: encoding<layout>) -> (i64) {
+  %length_hi = scalar.constant 16 : i64
+  func.return %length_hi : i64
+}
+
+// ====
+
+// Strided layout assumptions preserve the view-reference summary but leave
+// exact footprint bounds unknown when stride values are not available.
+func.def @argument_layout_assume_strided_degrades_footprint(%buffer: buffer, %layout: encoding<layout>) -> (i1, i64) {
+  %offset = index.constant 0 : offset
+  %strided = encoding.layout.assume.strided %layout {rank = 2} : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4x4xf32, %strided>
+  %is = test.fact_is_view_reference %view : view<4x4xf32, %strided> -> i1
+  %length_hi = test.fact_view_byte_length_hi %view : view<4x4xf32, %strided> -> i64
+  func.return %is, %length_hi : i1, i64
+}
+// ----
+func.def @argument_layout_assume_strided_degrades_footprint(%buffer: buffer, %layout: encoding<layout>) -> (i1, i64) {
+  %is = scalar.constant true : i1
+  %length_hi = scalar.constant 9223372036854775807 : i64
+  func.return %is, %length_hi : i1, i64
+}
+
+// ====
+
+// Subviews compose byte-base facts with the source layout and keep the same
+// storage root.
+func.def @subview_composes_base_and_root(%buffer: buffer) -> (i1, i64, i64, i64) {
+  %offset = index.constant 64 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %source = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  %sub = view.subview %source[4] : view<16xf32, %layout> -> view<4xf32, %layout>
+  %same = test.fact_view_root_matches %sub, %buffer : view<4xf32, %layout>, buffer -> i1
+  %offset_hi = test.fact_view_byte_offset_hi %sub : view<4xf32, %layout> -> i64
+  %length_hi = test.fact_view_byte_length_hi %sub : view<4xf32, %layout> -> i64
+  %align = test.fact_view_min_alignment %sub : view<4xf32, %layout> -> i64
+  func.return %same, %offset_hi, %length_hi, %align : i1, i64, i64, i64
+}
+// ----
+func.def @subview_composes_base_and_root(%buffer: buffer) -> (i1, i64, i64, i64) {
+  %same = scalar.constant true : i1
+  %offset_hi = scalar.constant 80 : i64
+  %length_hi = scalar.constant 16 : i64
+  %align = scalar.constant 16 : i64
+  func.return %same, %offset_hi, %length_hi, %align : i1, i64, i64, i64
+}
+
+// ====
+
+// Offset predicates survive into view facts, preserving range and divisibility.
+func.def @dynamic_offset_facts(%buffer: buffer, %base: offset) -> (i64, i64, i64) {
+  %base2 = index.assume %base [range(%base, 0, 4096), mul(%base, 64)] : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%base2] : buffer -> view<4xf32, %layout>
+  %offset_lo = test.fact_view_byte_offset_lo %view : view<4xf32, %layout> -> i64
+  %offset_hi = test.fact_view_byte_offset_hi %view : view<4xf32, %layout> -> i64
+  %align = test.fact_view_min_alignment %view : view<4xf32, %layout> -> i64
+  func.return %offset_lo, %offset_hi, %align : i64, i64, i64
+}
+// ----
+func.def @dynamic_offset_facts(%buffer: buffer, %base: offset) -> (i64, i64, i64) {
+  %offset_lo = scalar.constant 0 : i64
+  %offset_hi = scalar.constant 4096 : i64
+  %align = scalar.constant 64 : i64
+  func.return %offset_lo, %offset_hi, %align : i64, i64, i64
+}
+
+// ====
+
+// Unknown dynamic strides degrade the footprint envelope without losing the
+// view-reference summary itself.
+func.def @unknown_dynamic_stride_degrades_footprint(%buffer: buffer, %stride: index) -> (i1, i64) {
+  %offset = index.constant 0 : offset
+  %layout = encoding.layout.strided [%stride, 1] : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4x4xf32, %layout>
+  %is = test.fact_is_view_reference %view : view<4x4xf32, %layout> -> i1
+  %length_hi = test.fact_view_byte_length_hi %view : view<4x4xf32, %layout> -> i64
+  func.return %is, %length_hi : i1, i64
+}
+// ----
+func.def @unknown_dynamic_stride_degrades_footprint(%buffer: buffer, %stride: index) -> (i1, i64) {
+  %is = scalar.constant true : i1
+  %length_hi = scalar.constant 9223372036854775807 : i64
+  func.return %is, %length_hi : i1, i64
+}

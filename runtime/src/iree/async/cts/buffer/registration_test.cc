@@ -40,7 +40,7 @@ namespace iree::async::cts {
 // failure, etc.).
 struct SlabDeleter {
   void operator()(iree_async_slab_t* slab) const {
-    if (slab) iree_async_slab_release(slab);
+    iree_async_slab_release(slab);
   }
 };
 using AsyncSlabPtr = std::unique_ptr<iree_async_slab_t, SlabDeleter>;
@@ -49,7 +49,7 @@ using AsyncSlabPtr = std::unique_ptr<iree_async_slab_t, SlabDeleter>;
 // destruction.
 struct RegionDeleter {
   void operator()(iree_async_region_t* region) const {
-    if (region) iree_async_region_release(region);
+    iree_async_region_release(region);
   }
 };
 using AsyncRegionPtr = std::unique_ptr<iree_async_region_t, RegionDeleter>;
@@ -61,8 +61,8 @@ static StatusOr<AsyncSlabPtr> CreateSlab(
   iree_status_t status =
       iree_async_slab_create(slab_options, iree_allocator_system(), &slab);
   if (!iree_status_is_ok(status)) {
-    return iree::Status(static_cast<iree::StatusCode>(iree_status_code(status)),
-                        "slab creation failed");
+    return iree::Status(iree_status_annotate(
+        status, iree_make_cstring_view("slab creation failed")));
   }
   return AsyncSlabPtr(slab);
 }
@@ -85,8 +85,8 @@ static StatusOr<AsyncRegionPtr> RegisterSlab(
                         "(RLIMIT_MEMLOCK); skipping test");
   }
   if (!iree_status_is_ok(status)) {
-    return iree::Status(static_cast<iree::StatusCode>(iree_status_code(status)),
-                        "slab registration failed");
+    return iree::Status(iree_status_annotate(
+        status, iree_make_cstring_view("slab registration failed")));
   }
   return AsyncRegionPtr(region);
 }

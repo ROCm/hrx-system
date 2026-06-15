@@ -1,0 +1,85 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
+load("//build_tools/bazel:python.bzl", "iree_py_library", "iree_py_test")
+
+package(
+    default_visibility = ["//visibility:public"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_cmake_extra_content(
+    content = """
+set(IREE_PACKAGE_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+set(IREE_PACKAGE_ROOT_PREFIX "loom/py/loom")
+""",
+)
+
+iree_py_library(
+    name = "package",
+    srcs = ["__init__.py"],
+    imports = [".."],
+    deps = [
+        ":core",
+        "//loom/py/loom/dialect:package",
+        "//loom/py/loom/error",
+    ],
+)
+
+iree_py_library(
+    name = "core",
+    srcs = [
+        "__init__.py",
+        "assembly.py",
+        "builder.py",
+        "builder_model.py",
+        "builders.py",
+        "builtin_types.py",
+        "diagnostics.py",
+        "dsl.py",
+        "errors.py",
+        "fields.py",
+        "ir.py",
+        "stable_id.py",
+        "verify.py",
+    ],
+    imports = [".."],
+)
+
+iree_py_test(
+    name = "core_test",
+    srcs = [
+        "assembly_test.py",
+        "builder_test.py",
+        "builders_test.py",
+        "diagnostics_test.py",
+        "dsl_test.py",
+        "fields_test.py",
+        "ir_test.py",
+        "projected_region_test.py",
+        "verify_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = [
+        "loom.assembly_test",
+        "loom.builder_test",
+        "loom.builders_test",
+        "loom.diagnostics_test",
+        "loom.dsl_test",
+        "loom.fields_test",
+        "loom.ir_test",
+        "loom.projected_region_test",
+        "loom.verify_test",
+    ],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":package",
+        "//loom/py/loom/dialect/test",
+        "//loom/py/loom/format/bytecode",
+        "//loom/py/loom/format/text",
+    ],
+)

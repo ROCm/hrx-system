@@ -1,0 +1,334 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1100> @target
+kernel.def target(@target) @subgroup_broadcast_dynamic_lane_rejected() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%input: buffer) {
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<1xi32, #dense>
+  %lane_vector = vector.load %input_view[0] : view<1xi32, #dense> -> vector<1xi32>
+  %lane = vector.extract %lane_vector[0] : vector<1xi32> -> i32
+  %value = scalar.constant 1 : i32
+  // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_broadcast.lane_range"}
+  %broadcast = kernel.subgroup.broadcast %value from %lane : i32, i32
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @subgroup_broadcast_lane_out_of_range_rejected() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %value = scalar.constant 1 : i32
+  %lane = scalar.constant 32 : i32
+  // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_broadcast.lane_range"}
+  %broadcast = kernel.subgroup.broadcast %value from %lane : i32, i32
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @subgroup_broadcast_payload_rejected() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %value = vector.constant 1 : vector<4xi8>
+  %lane = scalar.constant 0 : i32
+  // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_broadcast.payload"}
+  %broadcast = kernel.subgroup.broadcast %value from %lane : vector<4xi8>, i32
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @subgroup_broadcast_first_payload_rejected() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %value = vector.constant 1 : vector<4xi8>
+  // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_broadcast_first.payload"}
+  %broadcast = kernel.subgroup.broadcast.first %value : vector<4xi8>
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @subgroup_shuffle_dynamic_offset_rejected() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%input: buffer) {
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<1xi32, #dense>
+  %offset_vector = vector.load %input_view[0] : view<1xi32, #dense> -> vector<1xi32>
+  %offset = vector.extract %offset_vector[0] : vector<1xi32> -> i32
+  %width = scalar.constant 32 : i32
+  %value = scalar.constant 1 : i32
+  // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_shuffle.exact_lane"}
+  %shuffle, %valid = kernel.subgroup.shuffle<xor> %value, %offset, %width : i32, i32, i32
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @subgroup_shuffle_partial_width_rejected() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %value = scalar.constant 1 : i32
+  %offset = scalar.constant 1 : i32
+  %width = scalar.constant 16 : i32
+  // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_shuffle.full_wave_width"}
+  %shuffle, %valid = kernel.subgroup.shuffle<down> %value, %offset, %width : i32, i32, i32
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @subgroup_shuffle_offset_out_of_range_rejected() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %value = scalar.constant 1 : i32
+  %offset = scalar.constant 32 : i32
+  %width = scalar.constant 32 : i32
+  // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_shuffle.lane_range"}
+  %shuffle, %valid = kernel.subgroup.shuffle<index> %value, %offset, %width : i32, i32, i32
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @subgroup_shuffle_payload_rejected() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %value = vector.constant 1 : vector<4xi8>
+  %offset = scalar.constant 0 : i32
+  %width = scalar.constant 32 : i32
+  // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_shuffle.payload"}
+  %shuffle, %valid = kernel.subgroup.shuffle<index> %value, %offset, %width : vector<4xi8>, i32, i32
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @subgroup_reduce_cluster_rejected() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %value = scalar.constant 1 : i32
+  // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_reduce.full_subgroup"}
+  %sum = kernel.subgroup.reduce<addi> %value {cluster_size = 16} : i32
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @subgroup_reduce_kind_rejected() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %value = scalar.constant 1.0 : f32
+  // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_reduce.combining_kind"}
+  %min = kernel.subgroup.reduce<minimumf> %value : f32
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @subgroup_reduce_partial_wave_rejected() {
+  %c1 = index.constant 1 : index
+  %c48 = index.constant 48 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c48, %c1, %c1) : index
+} launch() {
+  %value = scalar.constant 1 : i32
+  // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_reduce.fixed_workgroup_wave_multiple"}
+  %sum = kernel.subgroup.reduce<addi> %value : i32
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @subgroup_reduce_payload_rejected() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %value = vector.constant 1 : vector<4xi8>
+  // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_reduce.payload"}
+  %sum = kernel.subgroup.reduce<addi> %value : vector<4xi8>
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @subgroup_scan_cluster_rejected() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %value = scalar.constant 1 : i32
+  // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_scan.full_subgroup"}
+  %prefix = kernel.subgroup.scan<addi> %value {cluster_size = 16, direction = forward, mode = inclusive} : i32
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @subgroup_scan_kind_rejected() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %value = scalar.constant 1.0 : f32
+  // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_scan.combining_kind"}
+  %prefix = kernel.subgroup.scan<minimumf> %value {direction = forward, mode = inclusive} : f32
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @subgroup_scan_partial_wave_rejected() {
+  %c1 = index.constant 1 : index
+  %c48 = index.constant 48 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c48, %c1, %c1) : index
+} launch() {
+  %value = scalar.constant 1 : i32
+  // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_scan.fixed_workgroup_wave_multiple"}
+  %prefix = kernel.subgroup.scan<addi> %value {direction = forward, mode = inclusive} : i32
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @subgroup_scan_payload_rejected() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %value = vector.constant 1 : vector<4xi8>
+  // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_scan.payload"}
+  %prefix = kernel.subgroup.scan<addi> %value {direction = forward, mode = inclusive} : vector<4xi8>
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @workgroup_scan_wave_count_rejected() {
+  %c1 = index.constant 1 : index
+  %c1056 = index.constant 1056 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1056, %c1, %c1) : index
+} launch() {
+  %value = scalar.constant 1 : i32
+  // ERROR@+1: AMDGPU/023 {constraint_key="workgroup_scan.wave_count"}
+  %prefix = kernel.workgroup.scan<addi> %value {direction = forward, mode = inclusive} : i32
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @subgroup_match_any_f32_requires_legalization() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %value = scalar.constant 1.0 : f32
+  // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_match.target_legalization"}
+  %mask = kernel.subgroup.match.any %value : f32 -> i64
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @subgroup_match_all_f32_requires_legalization() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %value = scalar.constant 1.0 : f32
+  // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_match.target_legalization"}
+  %mask, %all = kernel.subgroup.match.all %value : f32 -> i32, i1
+  cfg.cond_br %all, ^then, ^else
+^then:
+  kernel.return
+^else:
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @subgroup_vote_ballot_uniform_predicate_rejected() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %lhs = scalar.constant 1 : i32
+  %rhs = scalar.constant 2 : i32
+  %predicate = scalar.cmpi slt, %lhs, %rhs : i32
+  // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_ballot.native_predicate"}
+  %mask = kernel.subgroup.vote.ballot %predicate : i1 -> i32
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx950> @target
+kernel.def target(@target) @subgroup_active_mask_i32_wave64_rejected() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_mask.wavefront_coverage"}
+  %mask = kernel.subgroup.active.mask : i32
+  kernel.return
+}

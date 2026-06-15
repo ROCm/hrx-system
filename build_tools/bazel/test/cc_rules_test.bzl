@@ -189,7 +189,7 @@ def _test_cc_test_applies_resource_group_tags(name, **kwargs):
         srcs = [name + "_subject.cc"],
         resource_group = "gpu",
         tags = [
-            "driver=vulkan",
+            "requires-gpu-vulkan",
             "manual",
         ],
     )
@@ -206,7 +206,7 @@ def _test_cc_test_applies_resource_group_tags(name, **kwargs):
 def _test_cc_test_applies_resource_group_tags_impl(env, target):
     tags = target[TestingAspectInfo].attrs.tags
     for expected_tag in [
-        "driver=vulkan",
+        "requires-gpu-vulkan",
         "exclusive-if-local",
         "resource_group:gpu",
     ]:

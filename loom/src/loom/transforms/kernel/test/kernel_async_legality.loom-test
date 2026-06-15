@@ -1,0 +1,175 @@
+// RUN: pass kernel-async-legality
+
+func.def @single_group_wait() {
+  %group = kernel.async.group -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return
+}
+
+// ====
+
+func.def @two_group_pipeline_waits_oldest_first() {
+  %load0 = kernel.async.group -> kernel.async.group
+  %load1 = kernel.async.group -> kernel.async.group
+  kernel.async.wait %load0 {newer_groups = 1} : kernel.async.group
+  kernel.async.wait %load1 {newer_groups = 0} : kernel.async.group
+  func.return
+}
+
+// ====
+
+func.def @rejects_wrong_newer_group_count() {
+  %load0 = kernel.async.group -> kernel.async.group
+  %load1 = kernel.async.group -> kernel.async.group
+  // ERROR@+1: LOWERING/031 {op_name="kernel.async.wait", phase_name="kernel-async-legality", actual_newer_groups="0", expected_newer_groups="1"}
+  kernel.async.wait %load0 {newer_groups = 0} : kernel.async.group
+  kernel.async.wait %load1 {newer_groups = 0} : kernel.async.group
+  func.return
+}
+
+// ====
+
+func.def @rejects_wait_before_local_group(%group: kernel.async.group) {
+  // ERROR@+1: LOWERING/029 {op_name="kernel.async.wait", phase_name="kernel-async-legality"}
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return
+}
+
+// ====
+
+func.def @rejects_completed_group_wait() {
+  %load0 = kernel.async.group -> kernel.async.group
+  %load1 = kernel.async.group -> kernel.async.group
+  kernel.async.wait %load1 {newer_groups = 0} : kernel.async.group
+  // ERROR@+1: LOWERING/030 {op_name="kernel.async.wait", phase_name="kernel-async-legality"}
+  kernel.async.wait %load0 {newer_groups = 0} : kernel.async.group
+  func.return
+}
+
+// ====
+
+func.def @rejects_carried_group_use() {
+  // ERROR@+1: LOWERING/023 {op_name="kernel.async.group", phase_name="kernel-async-legality"}
+  %group = kernel.async.group -> kernel.async.group
+  test.use %group : kernel.async.group
+  func.return
+}
+
+// ====
+
+func.def @rejects_unwaited_group() {
+  // ERROR@+1: LOWERING/022 {op_name="kernel.async.group", phase_name="kernel-async-legality"}
+  %group = kernel.async.group -> kernel.async.group
+  func.return
+}
+
+// ====
+
+func.def @rejects_region_wait_without_parent_wait(%cond: i1) {
+  // ERROR@+1: LOWERING/032 {op_name="kernel.async.group", phase_name="kernel-async-legality"}
+  %group = kernel.async.group -> kernel.async.group
+  scf.if %cond {
+    kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+    scf.yield
+  } else {
+    scf.yield
+  }
+  func.return
+}
+
+// ====
+
+func.def @allows_static_disjoint_pending_async_destinations(%input: buffer) {
+  %zero = index.constant 0 : offset
+  %sixteen = index.constant 16 : offset
+  %bytes = index.constant 64 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source0 = buffer.view %global[%zero] : buffer -> view<16xi8, #dense>
+  %source1 = buffer.view %global[%sixteen] : buffer -> view<16xi8, #dense>
+  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %dest0 = buffer.view %scratch[%zero] : buffer -> view<16xi8, #dense>
+  %dest1 = buffer.view %scratch[%sixteen] : buffer -> view<16xi8, #dense>
+  %copy0 = kernel.async.copy %source0 to %dest0 {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8, #dense> to view<16xi8, #dense> -> kernel.async.token
+  %group0 = kernel.async.group %copy0 : kernel.async.token -> kernel.async.group
+  %copy1 = kernel.async.copy %source1 to %dest1 {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8, #dense> to view<16xi8, #dense> -> kernel.async.token
+  %group1 = kernel.async.group %copy1 : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group0 {newer_groups = 1} : kernel.async.group
+  kernel.async.wait %group1 {newer_groups = 0} : kernel.async.group
+  func.return
+}
+
+// ====
+
+func.def @rejects_overlapping_pending_async_destinations(%input: buffer) {
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 64 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source = buffer.view %global[%zero] : buffer -> view<16xi8, #dense>
+  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %dest0 = buffer.view %scratch[%zero] : buffer -> view<16xi8, #dense>
+  %dest1 = buffer.view %scratch[%zero] : buffer -> view<16xi8, #dense>
+  %copy0 = kernel.async.copy %source to %dest0 {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8, #dense> to view<16xi8, #dense> -> kernel.async.token
+  %group0 = kernel.async.group %copy0 : kernel.async.token -> kernel.async.group
+  %copy1 = kernel.async.copy %source to %dest1 {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8, #dense> to view<16xi8, #dense> -> kernel.async.token
+  // ERROR@+1: LOWERING/026 {op_name="kernel.async.group", phase_name="kernel-async-legality"}
+  %group1 = kernel.async.group %copy1 : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group0 {newer_groups = 1} : kernel.async.group
+  kernel.async.wait %group1 {newer_groups = 0} : kernel.async.group
+  func.return
+}
+
+// ====
+
+func.def @rejects_unknown_same_root_pending_async_overlap(%input: buffer, %dest_offset: offset) {
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 64 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source = buffer.view %global[%zero] : buffer -> view<16xi8, #dense>
+  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %dest0 = buffer.view %scratch[%zero] : buffer -> view<16xi8, #dense>
+  %dest1 = buffer.view %scratch[%dest_offset] : buffer -> view<16xi8, #dense>
+  %copy0 = kernel.async.copy %source to %dest0 {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8, #dense> to view<16xi8, #dense> -> kernel.async.token
+  %group0 = kernel.async.group %copy0 : kernel.async.token -> kernel.async.group
+  %copy1 = kernel.async.copy %source to %dest1 {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8, #dense> to view<16xi8, #dense> -> kernel.async.token
+  // ERROR@+1: LOWERING/026 {op_name="kernel.async.group", phase_name="kernel-async-legality"}
+  %group1 = kernel.async.group %copy1 : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group0 {newer_groups = 1} : kernel.async.group
+  kernel.async.wait %group1 {newer_groups = 0} : kernel.async.group
+  func.return
+}
+
+// ====
+
+func.def @rejects_destination_overwrite_before_wait(%input: buffer) {
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 64 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source = buffer.view %global[%zero] : buffer -> view<16xi8, #dense>
+  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %dest = buffer.view %scratch[%zero] : buffer -> view<16xi8, #dense>
+  %copy = kernel.async.copy %source to %dest {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8, #dense> to view<16xi8, #dense> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  %value = scalar.constant 1 : i8
+  // ERROR@+1: LOWERING/027 {op_name="view.store", phase_name="kernel-async-legality"}
+  view.store %value, %dest[0] : i8, view<16xi8, #dense>
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return
+}
+
+// ====
+
+func.def @rejects_destination_read_before_wait(%input: buffer) {
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 64 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source = buffer.view %global[%zero] : buffer -> view<16xi8, #dense>
+  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %dest = buffer.view %scratch[%zero] : buffer -> view<16xi8, #dense>
+  %copy = kernel.async.copy %source to %dest {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8, #dense> to view<16xi8, #dense> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  // ERROR@+1: LOWERING/028 {op_name="view.load", phase_name="kernel-async-legality"}
+  %loaded = view.load %dest[0] : view<16xi8, #dense> -> i8
+  test.use %loaded : i8
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return
+}

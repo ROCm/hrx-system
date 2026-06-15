@@ -81,13 +81,12 @@ iree_status_t iree_hal_local_executable_dispatch_inline(
             config.workgroup_size[1] ? config.workgroup_size[1] : 1,
         .workgroup_size_z =
             (uint16_t)(config.workgroup_size[2] ? config.workgroup_size[2] : 1),
-        .constant_count = (uint16_t)(constants.data_length / sizeof(uint32_t)),
         .workgroup_count_x = config.workgroup_count[0],
         .workgroup_count_y = config.workgroup_count[1],
         .workgroup_count_z = (uint16_t)config.workgroup_count[2],
         .max_concurrency = 1,
         .binding_count = (uint8_t)binding_count,
-        .constants = (const uint32_t*)constants.data,
+        .constants = {constants.data, constants.data_length},
         .binding_ptrs = binding_ptrs,
         .binding_lengths = binding_lengths,
     };

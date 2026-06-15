@@ -88,10 +88,10 @@ iree_status_t iree_hal_amdgpu_host_queue_create_binding_table_resource_set(
 
 static void iree_hal_amdgpu_host_queue_retire_pm4_publication_reference(
     iree_hal_amdgpu_reclaim_entry_t* entry, void* user_data,
-    iree_status_t status) {
+    const iree_status_t status) {
   (void)entry;
   iree_hal_amdgpu_pm4_command_buffer_retire_publication_reference(
-      (iree_hal_command_buffer_t*)user_data, status);
+      (iree_hal_command_buffer_t*)user_data, iree_status_code(status));
 }
 
 static iree_hal_amdgpu_reclaim_action_t

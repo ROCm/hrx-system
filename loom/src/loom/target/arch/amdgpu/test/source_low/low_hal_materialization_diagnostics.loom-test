@@ -1,0 +1,27 @@
+// RUN: pass amdgpu-materialize-hal-kernel-abi
+
+amdgpu.target<gfx1100> @target
+low.kernel.def target(@target) workgroup_size(64, 1, 1) @duplicate_kernarg_live_in() {
+  %a = low.live_in<amdgpu.kernarg_segment_ptr> : reg<amdgpu.sgpr x2>
+  // ERROR@+1: AMDGPU/015 {source_name="amdgpu.kernarg_segment_ptr"}
+  %b = low.live_in<amdgpu.kernarg_segment_ptr> : reg<amdgpu.sgpr x2>
+  low.return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+// ERROR@+1: AMDGPU/025 {argument_index="0", expected_reg_class_id="0", expected_unit_count="2"}
+low.kernel.def target(@target) workgroup_size(64, 1, 1) @bad_direct_arg(%value: reg<amdgpu.vgpr>) {
+  low.return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+low.kernel.def target(@target) workgroup_size(64, 1, 1) @unsupported_swizzle() {
+  %view = low.resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
+  // ERROR@+1: AMDGPU/014 {descriptor_set_key="amdgpu.rdna3.core", cache_swizzle_stride="14"}
+  %descriptor = low.op<amdgpu.hal.buffer_descriptor>(%view) {cache_swizzle_stride = 14, extent = 16} : (reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x4>
+  low.return
+}

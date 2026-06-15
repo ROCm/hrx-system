@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "iree/base/internal/debugging.h"
 #include "iree/base/internal/dynamic_library.h"
 #include "iree/base/internal/path.h"
 
@@ -158,7 +159,9 @@ static iree_status_t iree_hal_vulkan_lookup_loader(
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "Vulkan loader is not initialized");
   }
+  IREE_LEAK_CHECK_DISABLE_PUSH();
   *out_fn = libvulkan->vkGetInstanceProcAddr(VK_NULL_HANDLE, symbol);
+  IREE_LEAK_CHECK_DISABLE_POP();
   if (!*out_fn) {
     return iree_make_status(IREE_STATUS_NOT_FOUND,
                             "Vulkan loader symbol '%s' not found", symbol);
@@ -176,7 +179,9 @@ static iree_status_t iree_hal_vulkan_lookup_instance(
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "Vulkan loader is not initialized");
   }
+  IREE_LEAK_CHECK_DISABLE_PUSH();
   *out_fn = libvulkan->vkGetInstanceProcAddr(instance, symbol);
+  IREE_LEAK_CHECK_DISABLE_POP();
   if (!*out_fn) {
     return iree_make_status(IREE_STATUS_NOT_FOUND,
                             "Vulkan instance symbol '%s' not found", symbol);
@@ -191,7 +196,9 @@ static void iree_hal_vulkan_lookup_instance_optional(
   IREE_ASSERT_ARGUMENT(out_fn);
   *out_fn = NULL;
   if (libvulkan->vkGetInstanceProcAddr) {
+    IREE_LEAK_CHECK_DISABLE_PUSH();
     *out_fn = libvulkan->vkGetInstanceProcAddr(instance, symbol);
+    IREE_LEAK_CHECK_DISABLE_POP();
   }
 }
 
@@ -205,7 +212,9 @@ static iree_status_t iree_hal_vulkan_lookup_device(
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "Vulkan device symbol resolver is not loaded");
   }
+  IREE_LEAK_CHECK_DISABLE_PUSH();
   *out_fn = instance_syms->vkGetDeviceProcAddr(device, symbol);
+  IREE_LEAK_CHECK_DISABLE_POP();
   if (!*out_fn) {
     return iree_make_status(IREE_STATUS_NOT_FOUND,
                             "Vulkan device symbol '%s' not found", symbol);
@@ -220,7 +229,9 @@ static void iree_hal_vulkan_lookup_device_optional(
   IREE_ASSERT_ARGUMENT(out_fn);
   *out_fn = NULL;
   if (instance_syms->vkGetDeviceProcAddr) {
+    IREE_LEAK_CHECK_DISABLE_PUSH();
     *out_fn = instance_syms->vkGetDeviceProcAddr(device, symbol);
+    IREE_LEAK_CHECK_DISABLE_POP();
   }
 }
 
@@ -499,9 +510,12 @@ IREE_API_EXPORT iree_status_t iree_hal_vulkan_libvulkan_load_device_syms(
 static iree_status_t iree_hal_vulkan_libvulkan_load_symbols(
     iree_dynamic_library_t* library,
     iree_hal_vulkan_libvulkan_t* out_libvulkan) {
-  IREE_RETURN_IF_ERROR(iree_dynamic_library_lookup_symbol(
+  IREE_LEAK_CHECK_DISABLE_PUSH();
+  iree_status_t status = iree_dynamic_library_lookup_symbol(
       library, "vkGetInstanceProcAddr",
-      (void**)&out_libvulkan->vkGetInstanceProcAddr));
+      (void**)&out_libvulkan->vkGetInstanceProcAddr);
+  IREE_LEAK_CHECK_DISABLE_POP();
+  IREE_RETURN_IF_ERROR(status);
   return iree_hal_vulkan_libvulkan_load_loader_syms(out_libvulkan);
 }
 
@@ -514,8 +528,10 @@ static iree_status_t iree_hal_vulkan_libvulkan_try_load_library_from_file(
   IREE_TRACE_ZONE_APPEND_TEXT(z0, file_path);
   *out_library = NULL;
 
+  IREE_LEAK_CHECK_DISABLE_PUSH();
   iree_status_t status = iree_dynamic_library_load_from_file(
       file_path, flags, host_allocator, out_library);
+  IREE_LEAK_CHECK_DISABLE_POP();
   if (!iree_status_is_ok(status)) {
     iree_status_t load_status = status;
     status = iree_string_builder_append_format(

@@ -31,14 +31,29 @@ from build_tools.devtools.environment import (
 
 LANES = ("bazel", "cmake")
 DEFAULT_BAZEL_TARGETS = ("//runtime/...", "//libhrx/...")
+BAZEL_TARGET_PATTERN_PREFIXES = ("//", "@", ":", "...")
+BAZEL_NEGATIVE_TARGET_PATTERN_PREFIXES = ("-//", "-@")
 PASSTHROUGH_COMMANDS = {
     "bazel": frozenset(
-        ("configure", "build", "test", "query", "cquery", "info", "run", "try", "fuzz")
+        (
+            "configure",
+            "build",
+            "test",
+            "query",
+            "cquery",
+            "info",
+            "run",
+            "try",
+            "fuzz",
+            "compile-commands",
+        )
     ),
-    "cmake": frozenset(("configure", "build", "test", "run", "try", "fuzz")),
+    "cmake": frozenset(
+        ("configure", "build", "test", "run", "try", "fuzz", "compile-commands")
+    ),
 }
 HELP_FLAGS = frozenset(("-h", "--help"))
-AGENT_MD_FLAGS = frozenset(("--agent-md", "--agent_md", "--agents-md", "--agents_md"))
+AGENTS_MD_FLAGS = frozenset(("--agents_md",))
 HOISTED_NO_VALUE_OPTIONS = frozenset(
     (
         "-n",
@@ -120,13 +135,39 @@ def forwarded_args(args: list[str]) -> list[str]:
 
 
 def bazel_targets_or_defaults(backend_args: list[str]) -> list[str]:
-    if any(not arg.startswith("-") for arg in backend_args):
+    if any(is_bazel_target_pattern(arg) for arg in backend_args):
         return backend_args
     return [*backend_args, *DEFAULT_BAZEL_TARGETS]
 
 
+def is_negative_bazel_target_pattern(arg: str) -> bool:
+    return arg.startswith(BAZEL_NEGATIVE_TARGET_PATTERN_PREFIXES)
+
+
+def is_bazel_target_pattern(arg: str) -> bool:
+    if is_negative_bazel_target_pattern(arg):
+        return True
+    return arg.startswith(BAZEL_TARGET_PATTERN_PREFIXES)
+
+
+def bazel_args_with_target_separator(backend_args: list[str]) -> list[str]:
+    if "--" in backend_args or not any(
+        is_negative_bazel_target_pattern(arg) for arg in backend_args
+    ):
+        return backend_args
+
+    for index, arg in enumerate(backend_args):
+        if is_bazel_target_pattern(arg):
+            return [*backend_args[:index], "--", *backend_args[index:]]
+    return backend_args
+
+
 def selected_cmake_build_dir(args: argparse.Namespace) -> Path | None:
     return getattr(args, "cmake_build_dir", None)
+
+
+def configured_cmake_build_dir(args: argparse.Namespace) -> Path:
+    return cmake_dev.build_dir(selected_cmake_build_dir(args))
 
 
 def option_name(arg: str) -> str:
@@ -222,11 +263,13 @@ def is_short_option_cluster(arg: str) -> bool:
     )
 
 
-def find_agent_md_request(argv: list[str]) -> tuple[tuple[str, ...], str | None] | None:
+def find_agents_md_request(
+    argv: list[str],
+) -> tuple[tuple[str, ...], str | None] | None:
     index = 0
     while index < len(argv):
         arg = argv[index]
-        if arg in AGENT_MD_FLAGS:
+        if arg in AGENTS_MD_FLAGS:
             return LANES, None
         if option_consumes_next_arg(arg):
             index += 2
@@ -241,7 +284,7 @@ def find_agent_md_request(argv: list[str]) -> tuple[tuple[str, ...], str | None]
         index += 1
         while index < len(argv):
             arg = argv[index]
-            if arg in AGENT_MD_FLAGS:
+            if arg in AGENTS_MD_FLAGS:
                 return (lane,), None
             if option_consumes_next_arg(arg):
                 index += 2
@@ -254,7 +297,7 @@ def find_agent_md_request(argv: list[str]) -> tuple[tuple[str, ...], str | None]
             if (
                 command in PASSTHROUGH_COMMANDS[lane]
                 and tail
-                and tail[0] in AGENT_MD_FLAGS
+                and tail[0] in AGENTS_MD_FLAGS
             ):
                 return (lane,), command
             return None
@@ -265,11 +308,10 @@ def find_agent_md_request(argv: list[str]) -> tuple[tuple[str, ...], str | None]
 def add_common_options(parser: argparse.ArgumentParser) -> None:
     add_argument(
         parser,
-        "--agent-md",
-        "--agents-md",
+        "--agents_md",
         action="store_true",
         default=argparse.SUPPRESS,
-        dest="agent_md",
+        dest="agents_md",
         help="Print AGENTS.md-ready command guidance.",
     )
     add_argument(
@@ -358,15 +400,16 @@ def add_profile_option(
 
 def parse_arguments(argv: list[str]) -> argparse.Namespace:
     argv = hoist_passthrough_dev_options(argv)
-    agent_md_request = find_agent_md_request(argv)
-    if agent_md_request is not None:
-        print_agent_md(*agent_md_request)
+    agents_md_request = find_agents_md_request(argv)
+    if agents_md_request is not None:
+        print_agents_md(*agents_md_request)
         raise SystemExit(0)
 
     argv = normalize_passthrough_args(argv)
     parser = argparse.ArgumentParser(
         prog="dev.py",
         description="Repository developer command router.",
+        epilog=help_text.ROOT_COMMAND_EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     add_common_options(parser)
@@ -378,8 +421,8 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
         add_lane_commands(subparsers, lane)
 
     args = parser.parse_args(argv)
-    if not hasattr(args, "agent_md"):
-        args.agent_md = False
+    if not hasattr(args, "agents_md"):
+        args.agents_md = False
     if not hasattr(args, "dry_run"):
         args.dry_run = False
     if not hasattr(args, "verbose"):
@@ -397,9 +440,43 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
         or getattr(args, "commit", False)
     ):
         parser.error("explicit precommit paths cannot be combined with input mode")
-    if args.agent_md:
+    clang_tidy_inputs = getattr(args, "clang_tidy_inputs", None)
+    if clang_tidy_inputs and (
+        getattr(args, "all_files", False)
+        or getattr(args, "base", None) is not None
+        or getattr(args, "changed", False)
+        or getattr(args, "commit", False)
+        or getattr(args, "since", None) is not None
+        or getattr(args, "staged", False)
+    ):
+        parser.error("explicit clang-tidy inputs cannot be combined with input mode")
+    if clang_tidy_inputs:
+        if getattr(args, "lane", None) == "cmake" and any(
+            is_bazel_target_pattern(input_arg) for input_arg in clang_tidy_inputs
+        ):
+            parser.error(
+                "cmake clang-tidy accepts repo-relative paths, not Bazel targets"
+            )
+        has_target_pattern = any(
+            is_bazel_target_pattern(input_arg) for input_arg in clang_tidy_inputs
+        )
+        if has_target_pattern and not all(
+            is_bazel_target_pattern(input_arg) for input_arg in clang_tidy_inputs
+        ):
+            parser.error("clang-tidy inputs must be all Bazel targets or all paths")
+        if has_target_pattern and getattr(args, "fix", False):
+            parser.error(
+                "clang-tidy --fix accepts paths or git scopes, not Bazel targets"
+            )
+    if (
+        getattr(args, "backend_command", None) == "clang-tidy"
+        and getattr(args, "fix", False)
+        and getattr(args, "all_files", False)
+    ):
+        parser.error("clang-tidy --fix requires a bounded path or git scope")
+    if args.agents_md:
         lane = getattr(args, "lane", None)
-        print_agent_md((lane,) if lane else LANES, None)
+        print_agents_md((lane,) if lane else LANES, None)
         raise SystemExit(0)
     if not args.command:
         parser.print_help()
@@ -554,6 +631,177 @@ def add_lane_commands(subparsers: argparse._SubParsersAction, lane: str) -> None
                 backend_command=command_name,
             )
 
+        command_help = help_text.lane_command_help(lane, "compile-commands")
+        command_parser = add_subparser(
+            lane_subparsers,
+            "compile-commands",
+            command_help=command_help,
+            help="Generate a Bazel compile_commands.json.",
+        )
+        command_parser.add_argument(
+            "args", nargs=argparse.REMAINDER, help=command_help.arguments
+        )
+        command_parser.set_defaults(
+            handler=handle_bazel_compile_commands,
+            lane=lane,
+            backend_command="compile-commands",
+        )
+
+        command_help = help_text.lane_command_help(lane, "clang-tidy")
+        command_parser = add_subparser(
+            lane_subparsers,
+            "clang-tidy",
+            command_help=command_help,
+            help="Run Bazel-backed clang-tidy checks.",
+        )
+        add_common_options(command_parser)
+        add_tool_environment_options(command_parser)
+        add_profile_option(
+            command_parser,
+            default=presubmit.precommit_default_profile(lane),
+            command="clang-tidy",
+        )
+        add_argument(
+            command_parser,
+            "--fix",
+            action="store_true",
+            help="Apply clang-tidy fix-its for the selected path scope, then re-check.",
+        )
+        input_group = command_parser.add_mutually_exclusive_group()
+        add_argument(
+            input_group,
+            "--all",
+            dest="all_files",
+            action="store_true",
+            help="Check all tracked files through the clang-tidy provider.",
+        )
+        add_argument(
+            input_group,
+            "--base",
+            metavar="GIT_REF",
+            help="Check branch changes since GIT_REF plus local changes.",
+        )
+        add_argument(
+            input_group,
+            "--changed",
+            action="store_true",
+            help="Check local staged, unstaged, and untracked files.",
+        )
+        add_argument(
+            input_group,
+            "--commit",
+            action="store_true",
+            help="Check the Git hook commit scope.",
+        )
+        add_argument(
+            input_group,
+            "--since",
+            metavar="GIT_REF",
+            help="Check tracked files changed since GIT_REF.",
+        )
+        add_argument(
+            input_group,
+            "--staged",
+            action="store_true",
+            help="Check only files staged for commit.",
+        )
+        command_parser.add_argument(
+            "clang_tidy_inputs",
+            nargs="*",
+            help="Bazel target patterns or repo-relative paths. Defaults to --changed.",
+        )
+        command_parser.set_defaults(
+            handler=handle_bazel_clang_tidy,
+            lane=lane,
+            backend_command="clang-tidy",
+        )
+
+    if lane == "cmake":
+        command_help = help_text.lane_command_help(lane, "compile-commands")
+        command_parser = add_subparser(
+            lane_subparsers,
+            "compile-commands",
+            command_help=command_help,
+            help="Print or copy the configured CMake compile_commands.json path.",
+        )
+        command_parser.add_argument(
+            "args", nargs=argparse.REMAINDER, help=command_help.arguments
+        )
+        command_parser.set_defaults(
+            handler=handle_cmake_compile_commands,
+            lane=lane,
+            backend_command="compile-commands",
+        )
+
+        command_help = help_text.lane_command_help(lane, "clang-tidy")
+        command_parser = add_subparser(
+            lane_subparsers,
+            "clang-tidy",
+            command_help=command_help,
+            help="Run CMake-backed clang-tidy checks.",
+        )
+        add_common_options(command_parser)
+        add_tool_environment_options(command_parser)
+        add_profile_option(
+            command_parser,
+            default=presubmit.precommit_default_profile(lane),
+            command="clang-tidy",
+        )
+        add_argument(
+            command_parser,
+            "--fix",
+            action="store_true",
+            help="Apply clang-tidy fix-its for the selected path scope, then re-check.",
+        )
+        input_group = command_parser.add_mutually_exclusive_group()
+        add_argument(
+            input_group,
+            "--all",
+            dest="all_files",
+            action="store_true",
+            help="Check all tracked files through the clang-tidy provider.",
+        )
+        add_argument(
+            input_group,
+            "--base",
+            metavar="GIT_REF",
+            help="Check branch changes since GIT_REF plus local changes.",
+        )
+        add_argument(
+            input_group,
+            "--changed",
+            action="store_true",
+            help="Check local staged, unstaged, and untracked files.",
+        )
+        add_argument(
+            input_group,
+            "--commit",
+            action="store_true",
+            help="Check the Git hook commit scope.",
+        )
+        add_argument(
+            input_group,
+            "--since",
+            metavar="GIT_REF",
+            help="Check tracked files changed since GIT_REF.",
+        )
+        add_argument(
+            input_group,
+            "--staged",
+            action="store_true",
+            help="Check only files staged for commit.",
+        )
+        command_parser.add_argument(
+            "clang_tidy_inputs",
+            nargs="*",
+            help="Repo-relative paths. Defaults to --changed.",
+        )
+        command_parser.set_defaults(
+            handler=handle_cmake_clang_tidy,
+            lane=lane,
+            backend_command="clang-tidy",
+        )
+
     precommit_parser = add_subparser(
         lane_subparsers,
         "precommit",
@@ -605,6 +853,12 @@ def add_lane_commands(subparsers: argparse._SubParsersAction, lane: str) -> None
         presubmit_parser,
         default=presubmit.PRESUBMIT_DEFAULT_PROFILE,
         command="Presubmit",
+    )
+    add_argument(
+        presubmit_parser,
+        "--base",
+        metavar="GIT_REF",
+        help="Run presubmit over branch changes since GIT_REF plus local changes.",
     )
     add_argument(
         presubmit_parser,
@@ -744,7 +998,9 @@ def handle_build(args: argparse.Namespace) -> CommandPlan:
     tool_env = existing_or_system_environment(args)
     backend_args = forwarded_args(args.args)
     if args.lane == "bazel":
-        targets = bazel_targets_or_defaults(backend_args)
+        targets = bazel_args_with_target_separator(
+            bazel_targets_or_defaults(backend_args)
+        )
         command = [tool_env.tool("bazel"), "build", *targets]
         return CommandPlan(
             [
@@ -767,7 +1023,9 @@ def handle_test(args: argparse.Namespace) -> CommandPlan:
     tool_env = existing_or_system_environment(args)
     backend_args = forwarded_args(args.args)
     if args.lane == "bazel":
-        targets = bazel_targets_or_defaults(backend_args)
+        targets = bazel_args_with_target_separator(
+            bazel_targets_or_defaults(backend_args)
+        )
         command = [tool_env.tool("bazel"), "test", "--config=presubmit", *targets]
         return CommandPlan(
             [
@@ -788,19 +1046,98 @@ def handle_test(args: argparse.Namespace) -> CommandPlan:
 
 def handle_bazel_direct_command(args: argparse.Namespace) -> CommandPlan:
     tool_env = existing_or_system_environment(args)
+    backend_args = bazel_args_with_target_separator(forwarded_args(args.args))
     return CommandPlan(
         [
             ExecCommandStep(
                 [
                     tool_env.tool("bazel"),
                     args.backend_command,
-                    *forwarded_args(args.args),
+                    *backend_args,
                 ],
                 cwd=REPO_ROOT,
                 env=tool_env.path_env(),
                 label=f"bazel {args.backend_command}",
             )
         ]
+    )
+
+
+def handle_bazel_compile_commands(args: argparse.Namespace) -> CommandPlan:
+    tool_env = existing_or_system_environment(args)
+    command = bazel_dev.parse_bazel_compile_commands_args(
+        forwarded_args(args.args),
+        run_cwd=Path.cwd(),
+    )
+    return CommandPlan(
+        [
+            bazel_dev.BazelCompileCommandsStep(
+                tool_env.tool("bazel"),
+                command,
+                env=tool_env.path_env(),
+            )
+        ]
+    )
+
+
+def handle_bazel_clang_tidy(args: argparse.Namespace) -> CommandPlan:
+    tool_env = existing_or_system_environment(args)
+    inputs = list(args.clang_tidy_inputs)
+    if inputs and all(is_bazel_target_pattern(input_arg) for input_arg in inputs):
+        command = bazel_dev.clang_tidy_build_argv(
+            tool_env.tool("bazel"),
+            inputs,
+            keep_going=args.profile == "ci",
+        )
+        return CommandPlan(
+            [
+                ExecCommandStep(
+                    command,
+                    cwd=REPO_ROOT,
+                    env=tool_env.path_env(),
+                    label="bazel clang-tidy",
+                )
+            ]
+        )
+    return presubmit.clang_tidy_plan(
+        args.lane,
+        tool_env,
+        args.profile,
+        all_files=args.all_files,
+        base=args.base,
+        commit=args.commit,
+        fix=args.fix,
+        since=args.since,
+        staged=args.staged,
+        paths=inputs,
+        verbose=args.verbose,
+    )
+
+
+def handle_cmake_compile_commands(args: argparse.Namespace) -> CommandPlan:
+    tool_env = existing_or_system_environment(args)
+    return cmake_dev.compile_commands_plan(
+        tool_env,
+        configured_build_dir=getattr(args, "cmake_build_dir", None),
+        backend_args=forwarded_args(args.args),
+        run_cwd=Path.cwd(),
+    )
+
+
+def handle_cmake_clang_tidy(args: argparse.Namespace) -> CommandPlan:
+    return presubmit.clang_tidy_plan(
+        args.lane,
+        existing_or_system_environment(args),
+        args.profile,
+        all_files=args.all_files,
+        base=args.base,
+        cmake_build_dir=configured_cmake_build_dir(args),
+        commit=args.commit,
+        fix=args.fix,
+        since=args.since,
+        staged=args.staged,
+        paths=list(args.clang_tidy_inputs),
+        verbose=args.verbose,
     )
 
 
@@ -879,9 +1216,10 @@ def handle_presubmit(args: argparse.Namespace) -> CommandPlan:
         args.lane,
         existing_or_system_environment(args),
         args.profile,
-        cmake_build_dir=(
-            selected_cmake_build_dir(args) if args.lane == "cmake" else None
-        ),
+        base=args.base,
+        cmake_build_dir=configured_cmake_build_dir(args)
+        if args.lane == "cmake"
+        else None,
         verbose=args.verbose,
         project_tests=args.project_tests,
     )
@@ -894,9 +1232,9 @@ def handle_precommit(args: argparse.Namespace) -> CommandPlan:
         args.profile,
         base=args.base,
         commit=args.commit,
-        cmake_build_dir=(
-            selected_cmake_build_dir(args) if args.lane == "cmake" else None
-        ),
+        cmake_build_dir=configured_cmake_build_dir(args)
+        if args.lane == "cmake"
+        else None,
         staged=args.staged,
         paths=args.paths,
         verbose=args.verbose,
@@ -929,7 +1267,7 @@ def handle_unimplemented_backend_command(args: argparse.Namespace) -> CommandPla
     )
 
 
-def print_agent_md(lanes: tuple[str, ...], command: str | None) -> None:
+def print_agents_md(lanes: tuple[str, ...], command: str | None) -> None:
     print(help_text.agent_markdown(lanes, command=command).rstrip() + "\n")
 
 

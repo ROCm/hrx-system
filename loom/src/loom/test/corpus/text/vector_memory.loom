@@ -1,0 +1,12 @@
+func.def @vector_memory(%buffer: buffer, %offset: offset, %lane: index, %mask: vector<4xi1>, %indices: vector<4xindex>, %values: vector<4xf32>, %acc: f32) -> (vector<4xf32>, f32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  %loaded = vector.load %view[%lane] : view<16xf32, %layout> -> vector<4xf32>
+  %masked = vector.load.mask %view[%lane], %mask, %values : view<16xf32, %layout>, vector<4xi1>, vector<4xf32>
+  %gathered = vector.gather %view[%lane][%indices] : view<16xf32, %layout>, vector<4xindex> -> vector<4xf32>
+  vector.store %values, %view[%lane] : vector<4xf32>, view<16xf32, %layout>
+  vector.store.mask %masked, %view[%lane], %mask : vector<4xf32>, view<16xf32, %layout>, vector<4xi1>
+  vector.scatter %gathered, %view[%lane][%indices] : vector<4xf32>, view<16xf32, %layout>, vector<4xindex>
+  %dot = vector.dotf %loaded, %masked, %acc : vector<4xf32>, vector<4xf32>, f32
+  func.return %gathered, %dot : vector<4xf32>, f32
+}

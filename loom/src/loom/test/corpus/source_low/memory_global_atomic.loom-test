@@ -1,0 +1,153 @@
+// RUN: roundtrip
+
+kernel.def @global_atomic_add_i32() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%input: buffer) {
+  %tid = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %view = buffer.view %global[%zero] : buffer -> view<64xi32, #dense>
+  %one = scalar.constant 1 : i32
+  view.atomic.reduce<addi> %one, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense>
+  %old = view.atomic.rmw<addi> %one, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense> -> i32
+  kernel.return
+}
+
+// ====
+
+kernel.def @global_atomic_add_f32() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%input: buffer) {
+  %tid = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %view = buffer.view %global[%zero] : buffer -> view<64xf32, #dense>
+  %one = scalar.constant 1.0 : f32
+  view.atomic.reduce<addf> %one, %view[%tid] {ordering = relaxed, scope = device} : f32, view<64xf32, #dense>
+  %old = view.atomic.rmw<addf> %one, %view[%tid] {ordering = relaxed, scope = device} : f32, view<64xf32, #dense> -> f32
+  kernel.return
+}
+
+// ====
+
+kernel.def @global_atomic_minnum_maxnum_f32() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%input: buffer) {
+  %tid = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %view = buffer.view %global[%zero] : buffer -> view<64xf32, #dense>
+  %limit = scalar.constant 1.0 : f32
+  view.atomic.reduce<minnumf> %limit, %view[%tid] {ordering = relaxed, scope = device} : f32, view<64xf32, #dense>
+  view.atomic.reduce<maxnumf> %limit, %view[%tid] {ordering = relaxed, scope = device} : f32, view<64xf32, #dense>
+  %old_min = view.atomic.rmw<minnumf> %limit, %view[%tid] {ordering = relaxed, scope = device} : f32, view<64xf32, #dense> -> f32
+  %old_max = view.atomic.rmw<maxnumf> %limit, %view[%tid] {ordering = relaxed, scope = device} : f32, view<64xf32, #dense> -> f32
+  kernel.return
+}
+
+// ====
+
+kernel.def @global_atomic_dynamic_minnum_f32() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%input: buffer, %value: f32) {
+  %tid = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %view = buffer.view %global[%zero] : buffer -> view<64xf32, #dense>
+  %old_min = view.atomic.rmw<minnumf> %value, %view[%tid] {ordering = relaxed, scope = device} : f32, view<64xf32, #dense> -> f32
+  %old_max = view.atomic.rmw<maxnumf> %value, %view[%tid] {ordering = relaxed, scope = device} : f32, view<64xf32, #dense> -> f32
+  kernel.return
+}
+
+// ====
+
+kernel.def @global_atomic_bitwise_i32() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%input: buffer) {
+  %tid = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %view = buffer.view %global[%zero] : buffer -> view<64xi32, #dense>
+  %mask = scalar.constant 255 : i32
+  view.atomic.reduce<andi> %mask, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense>
+  view.atomic.reduce<ori> %mask, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense>
+  view.atomic.reduce<xori> %mask, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense>
+  %old_and = view.atomic.rmw<andi> %mask, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense> -> i32
+  %old_or = view.atomic.rmw<ori> %mask, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense> -> i32
+  %old_xor = view.atomic.rmw<xori> %mask, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense> -> i32
+  kernel.return
+}
+
+// ====
+
+kernel.def @global_atomic_sub_i32() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%input: buffer) {
+  %tid = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %view = buffer.view %global[%zero] : buffer -> view<64xi32, #dense>
+  %delta = scalar.constant 1 : i32
+  view.atomic.reduce<subi> %delta, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense>
+  %old_sub = view.atomic.rmw<subi> %delta, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense> -> i32
+  kernel.return
+}
+
+// ====
+
+kernel.def @global_atomic_exchange_i32() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%input: buffer) {
+  %tid = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %view = buffer.view %global[%zero] : buffer -> view<64xi32, #dense>
+  %value = scalar.constant 7 : i32
+  %old = view.atomic.rmw<xchgi> %value, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense> -> i32
+  kernel.return
+}
+
+// ====
+
+kernel.def @global_atomic_cmpxchg_i32() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%input: buffer) {
+  %tid = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %view = buffer.view %global[%zero] : buffer -> view<64xi32, #dense>
+  %expected = scalar.constant 7 : i32
+  %replacement = scalar.constant 9 : i32
+  %old = view.atomic.cmpxchg %expected, %replacement, %view[%tid] {failure_ordering = relaxed, scope = device, success_ordering = relaxed} : i32, view<64xi32, #dense> -> i32
+  kernel.return
+}
+
+// ====
+
+kernel.def @global_atomic_minmax_i32() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%input: buffer) {
+  %tid = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %view = buffer.view %global[%zero] : buffer -> view<64xi32, #dense>
+  %limit = scalar.constant 1 : i32
+  view.atomic.reduce<minsi> %limit, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense>
+  view.atomic.reduce<maxsi> %limit, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense>
+  view.atomic.reduce<minui> %limit, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense>
+  view.atomic.reduce<maxui> %limit, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense>
+  %old_minsi = view.atomic.rmw<minsi> %limit, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense> -> i32
+  %old_maxsi = view.atomic.rmw<maxsi> %limit, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense> -> i32
+  %old_minui = view.atomic.rmw<minui> %limit, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense> -> i32
+  %old_maxui = view.atomic.rmw<maxui> %limit, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense> -> i32
+  kernel.return
+}

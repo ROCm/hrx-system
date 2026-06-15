@@ -1,0 +1,42 @@
+// RUN: emit low-packet-hazard-plan-json @physical_overlap_action case=action fixed=%producer:physical_register:0:1 fixed=%consumer:physical_register:0:1
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @physical_overlap_action(%lhs: reg<test.phys>, %rhs: reg<test.phys>, %other: reg<test.phys>) -> (reg<test.phys>) asm<test.low.core> {
+  %producer = test.add.phys %lhs, %rhs
+  %consumer = test.add.phys %producer, %other
+  return %consumer
+}
+
+// ----
+{"format":"loom.low.packet_hazard_plan.v1","function":"physical_overlap_action","target":"test_target","descriptor_set":"test.low.core","progress_count":2,"hazard_count":1,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":1,"class_name":"synthetic.issue","action":"advance","units":1},{"index":1,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":1,"class_name":"synthetic.issue","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"synthetic.padding","reason_id":1,"reason_name":"synthetic.physical-overlap","producer_node":0,"producer_packet":0,"producer_scheduled_ordinal":0,"consumer_node":1,"insertion_packet":1,"block":0,"scheduled_ordinal":1,"progress_class_id":1,"progress_class_name":"synthetic.issue","required":2,"observed":0,"residual":2}]}
+
+// ====
+
+// RUN: emit low-packet-hazard-plan-json @physical_overlap_negative case=action fixed=%producer:physical_register:0:1 fixed=%consumer:physical_register:4:1
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @physical_overlap_negative(%lhs: reg<test.phys>, %rhs: reg<test.phys>, %other: reg<test.phys>) -> (reg<test.phys>) asm<test.low.core> {
+  %producer = test.add.phys %lhs, %rhs
+  %consumer = test.add.phys %producer, %other
+  return %consumer
+}
+
+// ----
+{"format":"loom.low.packet_hazard_plan.v1","function":"physical_overlap_negative","target":"test_target","descriptor_set":"test.low.core","progress_count":2,"hazard_count":0,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":1,"class_name":"synthetic.issue","action":"advance","units":1},{"index":1,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":1,"class_name":"synthetic.issue","action":"advance","units":1}],"hazards":[]}
+
+// ====
+
+// RUN: emit low-packet-hazard-plan-json @missing_target_data case=missing
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @missing_target_data(%lhs: reg<test.phys>, %rhs: reg<test.phys>, %other: reg<test.phys>) -> (reg<test.phys>) asm<test.low.core> {
+  %producer = test.add.phys %lhs, %rhs
+  %consumer = test.add.phys %producer, %other
+  return %consumer
+}
+
+// ----
+{"format":"loom.low.packet_hazard_plan.v1","function":"missing_target_data","target":"test_target","descriptor_set":"test.low.core","progress_count":2,"hazard_count":1,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":1,"class_name":"synthetic.issue","action":"advance","units":1},{"index":1,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":1,"class_name":"synthetic.issue","action":"advance","units":1}],"hazards":[{"index":0,"kind":"missing_target_data","action_id":null,"action_name":null,"reason_id":2,"reason_name":"synthetic.missing-target-data","producer_node":null,"producer_packet":null,"producer_scheduled_ordinal":null,"consumer_node":0,"insertion_packet":0,"block":0,"scheduled_ordinal":0,"progress_class_id":null,"progress_class_name":null,"required":null,"observed":null,"residual":null,"target_detail":"synthetic semantic tag unavailable"}]}

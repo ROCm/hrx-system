@@ -140,11 +140,15 @@ static iree_status_t iree_hal_webgpu_poll_until_complete(
   while (!request->completed) {
     iree_status_t poll_status =
         iree_async_proactor_poll(proactor, iree_infinite_timeout(), NULL);
-    // DEADLINE_EXCEEDED means poll found nothing this iteration — retry.
-    if (!iree_status_is_ok(poll_status) &&
-        !iree_status_is_deadline_exceeded(poll_status)) {
-      return poll_status;
+    if (iree_status_is_ok(poll_status)) {
+      continue;
     }
+    // DEADLINE_EXCEEDED means poll found nothing this iteration — retry.
+    if (iree_status_is_deadline_exceeded(poll_status)) {
+      iree_status_free(poll_status);
+      continue;
+    }
+    return poll_status;
   }
   return request->result_status;
 }

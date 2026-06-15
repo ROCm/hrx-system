@@ -1,0 +1,75 @@
+# Loom C API documentation.
+#
+# Run through loom/binding/c/doc/generate.sh so the output directory is
+# selected by the script and generated files stay outside the source tree.
+
+PROJECT_NAME           = "Loom C API"
+PROJECT_BRIEF          = "Public Loom compiler C API"
+OUTPUT_DIRECTORY       = $(LOOMC_DOXYGEN_OUTPUT_DIRECTORY)
+OUTPUT_LANGUAGE        = English
+
+INPUT                  = loom/binding/c/include/loomc \
+                         loom/binding/c/doc/mainpage.md
+USE_MDFILE_AS_MAINPAGE = loom/binding/c/doc/mainpage.md
+RECURSIVE              = YES
+FILE_PATTERNS          = *.h \
+                         *.md
+
+OPTIMIZE_OUTPUT_FOR_C  = YES
+TYPEDEF_HIDES_STRUCT   = YES
+FULL_PATH_NAMES        = NO
+STRIP_FROM_PATH        = loom/binding/c/include \
+                         loom/binding/c
+
+EXTRACT_ALL            = NO
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = NO
+HIDE_UNDOC_MEMBERS     = NO
+HIDE_UNDOC_CLASSES     = NO
+SHOW_INCLUDE_FILES     = NO
+SOURCE_BROWSER         = NO
+INLINE_SOURCES         = NO
+REFERENCES_LINK_SOURCE = NO
+
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = YES
+WARN_IF_DOC_ERROR      = YES
+WARN_NO_PARAMDOC       = YES
+WARN_AS_ERROR          = FAIL_ON_WARNINGS_PRINT
+WARN_FORMAT            = "$file:$line: $text"
+
+MARKDOWN_SUPPORT       = YES
+AUTOLINK_SUPPORT       = YES
+JAVADOC_AUTOBRIEF      = YES
+MULTILINE_CPP_IS_BRIEF = NO
+TOC_INCLUDE_HEADINGS   = 3
+
+ALIASES               += ownership="@par Ownership"
+ALIASES               += lifetime="@par Lifetime"
+ALIASES               += thread_safety="@par Thread safety"
+ALIASES               += error_contract="@par Error contract"
+
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = YES
+SKIP_FUNCTION_MACROS   = YES
+PREDEFINED             = LOOMC_API_EXPORT= \
+                         LOOMC_API_PTR= \
+                         __attribute__(x)= \
+                         __declspec(x)=
+
+GENERATE_HTML          = YES
+HTML_OUTPUT            = html
+GENERATE_TREEVIEW      = YES
+SEARCHENGINE           = YES
+SERVER_BASED_SEARCH    = NO
+
+GENERATE_XML           = YES
+XML_OUTPUT             = xml
+XML_PROGRAMLISTING     = NO
+
+GENERATE_LATEX         = NO
+GENERATE_MAN           = NO
+GENERATE_RTF           = NO
+GENERATE_DOCBOOK       = NO
+HAVE_DOT               = NO

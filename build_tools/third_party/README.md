@@ -12,6 +12,23 @@ Source dependency declarations live at the repository root. The root lock files
 live next to the root module because they describe the complete resolved
 repository state shipped to users and CI.
 
+## Bazel Lock Updates
+
+Normal Bazel commands run with `--lockfile_mode=error` through `.bazelrc`. This
+keeps build, test, query, and module-inspection commands from silently rewriting
+`MODULE.bazel.lock` as a side effect of loading the dependency graph.
+
+Refresh `MODULE.bazel.lock` only when changing Bazel module declarations or
+intentionally accepting Bazel module metadata churn:
+
+```bash
+bazel mod deps --config=lockfile-update
+```
+
+Review the resulting diff before committing. Large transitive Python package
+fact blocks are usually a sign that a build-tool dependency path is leaking into
+the root Bazel lock instead of staying in the appropriate tool-specific lock.
+
 ## Ownership
 
 Build-system dependencies are not source dependencies. They stay under the

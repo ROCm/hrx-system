@@ -112,6 +112,7 @@ hrx_status_t hrx_buffer_allocate(hrx_stream_t stream, size_t size,
 }
 
 void hrx_buffer_retain(hrx_buffer_t buffer) {
+  if (!buffer) return;
   iree_hal_buffer_retain(buffer->hal_buffer);
   iree_hal_pool_retain(buffer->hal_pool);
   hrx_device_retain(buffer->device);
@@ -119,10 +120,9 @@ void hrx_buffer_retain(hrx_buffer_t buffer) {
 }
 
 void hrx_buffer_release(hrx_buffer_t buffer) {
+  if (!buffer) return;
   HRX_TRACE_ZONE_BEGIN(z0, "hrx_buffer_release");
-  if (buffer) {
-    HRX_TRACE_ZONE_APPEND_BYTES(z0, buffer->size);
-  }
+  HRX_TRACE_ZONE_APPEND_BYTES(z0, buffer->size);
   iree_hal_buffer_t* hal_buffer = buffer->hal_buffer;
   iree_hal_pool_t* hal_pool = buffer->hal_pool;
   hrx_device_t device = buffer->device;

@@ -1,0 +1,41 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+#
+# bazel-to-cmake: skip
+
+load("//build_tools/bazel:executable.bzl", "iree_executable_test")
+load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test")
+load(":loom_check_rules_test.bzl", "loom_check_rules_test_suite")
+
+package(default_visibility = ["//visibility:public"])
+
+loom_check_test(
+    name = "loom_check_wrapper_subject",
+    src = "roundtrip.loom-test",
+    runner = "loom_check_fixture_runner.sh",
+    tags = ["manual"],
+)
+
+loom_check_rules_test_suite(name = "loom_check_rules_tests")
+
+iree_executable_test(
+    name = "loom_check_wrapper_direct_test",
+    src = "loom_check_wrapper_direct_test.sh",
+    args = ["$(rootpath :loom_check_wrapper_subject)"],
+    data = [
+        "loom_check_fixture_runner.sh",
+        "roundtrip.loom-test",
+        ":loom_check_wrapper_subject",
+    ],
+)
+
+test_suite(
+    name = "test",
+    tests = [
+        ":loom_check_rules_tests",
+        ":loom_check_wrapper_direct_test",
+    ],
+)

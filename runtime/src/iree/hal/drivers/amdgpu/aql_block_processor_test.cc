@@ -175,8 +175,8 @@ static void InitializeDirectDispatchCommand(
   out_command->header.command_index = command_index;
   out_command->kernel_object = 0xABCDEF0000000000ull + command_index;
   out_command->payload_reference = sizeof(*out_command);
-  out_command->kernarg_strategy =
-      IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STRATEGY_CUSTOM_DIRECT;
+  out_command->kernarg_storage_mode =
+      IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STORAGE_MODE_CUSTOM_DIRECT;
   out_command->implicit_args_offset_qwords = UINT16_MAX;
   out_command->setup = 3;
   out_command->workgroup_size[0] = 1;
@@ -298,10 +298,9 @@ static DirectDispatchBlock MakeDirectDispatchBlock() {
   block.dispatch_command.payload_reference = sizeof(block.dispatch_command);
   block.dispatch_command.kernarg_length_qwords =
       sizeof(block.tail) / sizeof(uint64_t);
-  block.dispatch_command.payload.tail_length_qwords =
-      sizeof(block.tail) / sizeof(uint64_t);
-  block.dispatch_command.kernarg_strategy =
-      IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STRATEGY_CUSTOM_DIRECT;
+  block.dispatch_command.payload.binding_source_count = 0;
+  block.dispatch_command.kernarg_storage_mode =
+      IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STORAGE_MODE_CUSTOM_DIRECT;
   block.dispatch_command.implicit_args_offset_qwords = UINT16_MAX;
   block.dispatch_command.setup = 3;
   block.dispatch_command.workgroup_size[0] = 4;
@@ -351,8 +350,8 @@ static IndirectDispatchBlock MakeIndirectDispatchBlock(
       block.header.binding_source_offset;
   block.dispatch_command.dispatch_flags =
       IREE_HAL_AMDGPU_COMMAND_BUFFER_DISPATCH_FLAG_INDIRECT_PARAMETERS;
-  block.dispatch_command.kernarg_strategy =
-      IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STRATEGY_CUSTOM_DIRECT;
+  block.dispatch_command.kernarg_storage_mode =
+      IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STORAGE_MODE_CUSTOM_DIRECT;
   block.dispatch_command.implicit_args_offset_qwords = UINT16_MAX;
   block.dispatch_command.setup = 3;
   block.dispatch_command.workgroup_size[0] = 4;
@@ -685,8 +684,8 @@ TEST(AqlBlockProcessorTest,
             command);
     dispatch_command->kernel_object = 0xABCDEF0000000000ull + i;
     dispatch_command->payload_reference = sizeof(*dispatch_command);
-    dispatch_command->kernarg_strategy =
-        IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STRATEGY_CUSTOM_DIRECT;
+    dispatch_command->kernarg_storage_mode =
+        IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STORAGE_MODE_CUSTOM_DIRECT;
     dispatch_command->implicit_args_offset_qwords = UINT16_MAX;
     dispatch_command->setup = 3;
     dispatch_command->workgroup_size[0] = 1;
@@ -754,7 +753,7 @@ TEST(AqlBlockProcessorTest,
   EXPECT_EQ(second_block->terminator_opcode,
             IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_RETURN);
 
-  iree_hal_amdgpu_aql_program_release(&program);
+  iree_hal_amdgpu_aql_program_deinitialize(&program);
   iree_arena_block_pool_deinitialize(&block_pool);
 }
 

@@ -68,6 +68,26 @@ IREE_API_EXPORT iree_host_size_t iree_string_view_find_char(
   return result != NULL ? result - value.data : IREE_STRING_VIEW_NPOS;
 }
 
+IREE_API_EXPORT iree_host_size_t iree_string_view_find(
+    iree_string_view_t value, iree_string_view_t needle, iree_host_size_t pos) {
+  if (needle.size == 0) return pos <= value.size ? pos : IREE_STRING_VIEW_NPOS;
+  if (needle.size > value.size) return IREE_STRING_VIEW_NPOS;
+  // Safe: needle.size <= value.size, so subtraction cannot underflow.
+  if (pos > value.size - needle.size) return IREE_STRING_VIEW_NPOS;
+  // Single character: delegate to memchr.
+  if (needle.size == 1) {
+    return iree_string_view_find_char(value, needle.data[0], pos);
+  }
+  // Brute-force scan. Fine for the string sizes we deal with.
+  iree_host_size_t limit = value.size - needle.size;
+  for (iree_host_size_t i = pos; i <= limit; ++i) {
+    if (memcmp(value.data + i, needle.data, needle.size) == 0) {
+      return i;
+    }
+  }
+  return IREE_STRING_VIEW_NPOS;
+}
+
 IREE_API_EXPORT iree_host_size_t iree_string_view_find_first_of(
     iree_string_view_t value, iree_string_view_t s, iree_host_size_t pos) {
   if (iree_string_view_is_empty(value) || iree_string_view_is_empty(s)) {
@@ -384,7 +404,7 @@ IREE_API_EXPORT bool iree_string_view_atoi_int32_base(iree_string_view_t value,
   // Attempt to parse.
   errno = 0;
   char* end = NULL;
-  long parsed_value = strtol(temp, &end, 0);
+  long parsed_value = strtol(temp, &end, base);
   if (temp == end) return false;
   if ((parsed_value == LONG_MIN || parsed_value == LONG_MAX) &&
       errno == ERANGE) {

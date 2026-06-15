@@ -1,0 +1,109 @@
+// RUN: pass canonicalize
+
+// Scalar config definitions are exact fact sources. Reads fold through ordinary
+// arithmetic and disappear once every use is exact.
+config.def @answer = 40 : index
+
+func.def @read_scalar_config() -> (index) {
+  %value = config.get @answer : index
+  %two = index.constant 2 : index
+  %result = index.add %value, %two : index
+  func.return %result : index
+}
+
+// ----
+config.def @answer = 40 : index
+
+func.def @read_scalar_config() -> (index) {
+  %result = index.constant 42 : index
+  func.return %result : index
+}
+
+// ====
+
+// Boolean config definitions seed exact i1 facts.
+config.def @feature_enabled = true : i1
+
+func.def @read_boolean_config() -> (i32) {
+  %cond = config.get @feature_enabled : i1
+  %enabled = scalar.constant 1 : i32
+  %disabled = scalar.constant 0 : i32
+  %result = scf.select %cond, %enabled, %disabled : i32
+  func.return %result : i32
+}
+
+// ----
+config.def @feature_enabled = true : i1
+
+func.def @read_boolean_config() -> (i32) {
+  %result = scalar.constant 1 : i32
+  func.return %result : i32
+}
+
+// ====
+
+// Declarations do not invent exact values. The unresolved read stays visible
+// for specialization/linking.
+config.decl @runtime_batch_size : index
+
+func.def @read_decl_config() -> (index) {
+  %value = config.get @runtime_batch_size : index
+  %zero = index.constant 0 : index
+  %result = index.add %value, %zero : index
+  func.return %result : index
+}
+
+// ----
+config.decl @runtime_batch_size : index
+
+func.def @read_decl_config() -> (index) {
+  %value = config.get @runtime_batch_size : index
+  func.return %value : index
+}
+
+// ====
+
+// Declaration predicates apply to config.get results until specialization
+// replaces the declaration with an exact definition.
+config.decl @runtime_chunk_size : %value: index where [range(%value, 0, 131072), mul(%value, 16)]
+
+func.def @read_decl_config_predicate() -> (index) {
+  %value = config.get @runtime_chunk_size : index
+  test.use %value : index
+  %sixteen = index.constant 16 : index
+  %remainder = index.rem %value, %sixteen : index
+  func.return %remainder : index
+}
+
+// ----
+config.decl @runtime_chunk_size : %value: index where [range(%value, 0, 131072), mul(%value, 16)]
+
+func.def @read_decl_config_predicate() -> (index) {
+  %value = config.get @runtime_chunk_size : index
+  test.use %value : index
+  %remainder = index.constant 0 : index
+  func.return %remainder : index
+}
+
+// ====
+
+// Declaration predicates are ordinary facts on every config.get result.
+config.decl @runtime_tile_count : %value: index where [range(%value, 4, 64), mul(%value, 4)]
+
+func.def @read_decl_config_facts() -> (i64, i64, i64) {
+  %value = config.get @runtime_tile_count : index
+  %lo = test.fact_range_lo %value : index -> i64
+  %hi = test.fact_range_hi %value : index -> i64
+  %divisor = test.fact_divisor %value : index -> i64
+  func.return %lo, %hi, %divisor : i64, i64, i64
+}
+
+// ----
+config.decl @runtime_tile_count : %value: index where [range(%value, 4, 64), mul(%value, 4)]
+
+func.def @read_decl_config_facts() -> (i64, i64, i64) {
+  %lo = scalar.constant 4 : i64
+  %hi = scalar.constant 64 : i64
+  %divisor = scalar.constant 4 : i64
+  func.return %lo, %hi, %divisor : i64, i64, i64
+}

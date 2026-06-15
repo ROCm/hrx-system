@@ -1,0 +1,9 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/packed_dot_i4_mixed.loom-test
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx950> @target
+func.def target(@target) @dot8i4_u4s4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="amdgpu.v_dot8_i32_iu4", constraint_key="amdgpu.dot8i4.mixed_descriptor"}
+  %dot = vector.dot8i4<u4s4> %lhs, %rhs, %acc : vector<1xi32>
+  func.return %dot : vector<1xi32>
+}

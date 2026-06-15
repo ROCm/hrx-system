@@ -11,6 +11,7 @@
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/amdgpu/abi/kernel_args.h"
 #include "iree/hal/drivers/amdgpu/device/dispatch.h"
+#include "iree/hal/drivers/amdgpu/kernarg_layout.h"
 #include "iree/hal/drivers/amdgpu/profile_metadata.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
 #include "iree/hal/drivers/amdgpu/util/pm4_dispatch.h"
@@ -54,14 +55,6 @@ iree_status_t iree_hal_amdgpu_executable_format_supported(
 // iree_hal_amdgpu_executable_t
 //===----------------------------------------------------------------------===//
 
-// The maximum number of per-dispatch bindings allowed.
-// This is limited by the field size in iree_hal_amdgpu_device_kernel_args_t.
-#define IREE_HAL_AMDGPU_MAX_DISPATCH_BINDING_COUNT UINT16_MAX
-
-// The maximum number of per-dispatch constants allowed.
-// This is limited by the field size in iree_hal_amdgpu_device_kernel_args_t.
-#define IREE_HAL_AMDGPU_MAX_DISPATCH_CONSTANT_COUNT UINT16_MAX
-
 // Host-resident dispatch metadata precomputed for one executable export on one
 // physical device.
 //
@@ -72,12 +65,12 @@ iree_status_t iree_hal_amdgpu_executable_format_supported(
 typedef struct iree_hal_amdgpu_executable_dispatch_descriptor_t {
   // Device-specific kernel arguments with a valid kernel_object for dispatch.
   iree_hal_amdgpu_device_kernel_args_t kernel_args;
-  // HAL ABI kernarg layout derived from |kernel_args|.
-  iree_hal_amdgpu_device_dispatch_kernarg_layout_t hal_kernarg_layout;
+  // Native kernarg layout for normal metadata-described dispatches.
+  const iree_hal_amdgpu_kernarg_layout_t* kernarg_layout;
   // Custom direct-argument kernarg layout derived from |kernel_args|.
   iree_hal_amdgpu_device_dispatch_kernarg_layout_t custom_kernarg_layout;
-  // Queue kernarg-ring block count for HAL ABI dispatches.
-  uint32_t hal_kernarg_block_count;
+  // Queue kernarg-ring block count for normal metadata-described dispatches.
+  uint32_t kernarg_block_count;
   // Queue kernarg-ring block count for custom direct-argument dispatches.
   uint32_t custom_kernarg_block_count;
   // Maximum static workgroup count accepted for each dimension.
@@ -104,8 +97,6 @@ typedef struct iree_hal_amdgpu_executable_dispatch_descriptor_t {
 // Returns the canonical target-ID format string and total size of the
 // executable data.
 //
-// Wrapped AMDGPU flatbuffers infer the target ID from the embedded ELF image
-// instead of trusting the flatbuffer metadata target label.
 iree_status_t iree_hal_amdgpu_executable_infer_format(
     iree_const_byte_span_t executable_data,
     iree_host_size_t executable_format_capacity, char* executable_format,

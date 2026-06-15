@@ -114,7 +114,8 @@ static iree_status_t iree_hal_amdgpu_host_call_state_create(
 }
 
 static void iree_hal_amdgpu_host_call_fail_with_borrowed_status(
-    iree_hal_semaphore_list_t signal_semaphore_list, iree_status_t status) {
+    iree_hal_semaphore_list_t signal_semaphore_list,
+    const iree_status_t status) {
   if (signal_semaphore_list.count == 0) {
     return;
   }
@@ -142,7 +143,7 @@ static void iree_hal_amdgpu_host_call_consume_unobservable_status(
 
 static void iree_hal_amdgpu_host_call_execute(
     iree_hal_amdgpu_reclaim_entry_t* entry, void* user_data,
-    iree_status_t status) {
+    const iree_status_t status) {
   (void)entry;
   iree_hal_amdgpu_host_call_state_t* state =
       (iree_hal_amdgpu_host_call_state_t*)user_data;

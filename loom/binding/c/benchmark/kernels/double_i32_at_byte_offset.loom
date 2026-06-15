@@ -1,0 +1,19 @@
+spirv.target<vulkan1_3> @target {abi = hal_kernel}
+
+config.decl @tuner.workgroup_size : %value: index where [range(%value, 1, 256)]
+
+kernel.def target(@target) @double_i32_at_byte_offset() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = config.get @tuner.workgroup_size : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %byte_offset: offset) {
+  %byte_offset_aligned = index.assume %byte_offset [mul(%byte_offset, 4)] : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%byte_offset_aligned] : buffer -> view<1xi32, #dense>
+  %loaded = view.load %input_view[0] : view<1xi32, #dense> -> i32
+  %doubled = scalar.addi %loaded, %loaded : i32
+  %output_view = buffer.view %output_aligned[%byte_offset_aligned] : buffer -> view<1xi32, #dense>
+  view.store %doubled, %output_view[0] : i32, view<1xi32, #dense>
+  kernel.return
+}

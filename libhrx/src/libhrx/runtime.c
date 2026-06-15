@@ -130,14 +130,10 @@ static void hrx_release_shared_state(void) {
   g_shared.init_count--;
   if (g_shared.init_count > 0) return;
 
-  if (g_shared.proactor_pool) {
-    iree_async_proactor_pool_release(g_shared.proactor_pool);
-    g_shared.proactor_pool = NULL;
-  }
-  if (g_shared.vm_instance) {
-    iree_vm_instance_release(g_shared.vm_instance);
-    g_shared.vm_instance = NULL;
-  }
+  iree_async_proactor_pool_release(g_shared.proactor_pool);
+  g_shared.proactor_pool = NULL;
+  iree_vm_instance_release(g_shared.vm_instance);
+  g_shared.vm_instance = NULL;
   g_shared.shared_initialized = false;
 }
 
@@ -356,7 +352,7 @@ static void hrx_gpu_release_created_devices(int count) {
 }
 
 static void hrx_debug_print_iree_status(const char* label,
-                                        iree_status_t status) {
+                                        const iree_status_t status) {
   if (!hrx_gpu_debug_enabled() || iree_status_is_ok(status)) return;
   iree_allocator_t allocator = iree_allocator_system();
   char* message = NULL;
@@ -485,10 +481,8 @@ hrx_status_t hrx_cpu_shutdown(void) {
     iree_arena_block_pool_deinitialize(&g_cpu.devices[i].block_pool);
     hrx_device_release(&g_cpu.devices[i]);
   }
-  if (g_cpu.driver) {
-    iree_hal_driver_release(g_cpu.driver);
-    g_cpu.driver = NULL;
-  }
+  iree_hal_driver_release(g_cpu.driver);
+  g_cpu.driver = NULL;
 
   g_cpu.device_count = 0;
   g_cpu.initialized = false;
@@ -703,10 +697,8 @@ hrx_status_t hrx_gpu_shutdown(void) {
     iree_arena_block_pool_deinitialize(&g_gpu.devices[i].block_pool);
     hrx_device_release(&g_gpu.devices[i]);
   }
-  if (g_gpu.driver) {
-    iree_hal_driver_release(g_gpu.driver);
-    g_gpu.driver = NULL;
-  }
+  iree_hal_driver_release(g_gpu.driver);
+  g_gpu.driver = NULL;
 
   g_gpu.device_count = 0;
   g_gpu.initialized = false;

@@ -37,7 +37,6 @@ TEST_P(AllocatorTest, BaselineBufferCompatibility) {
       iree_hal_allocator_query_buffer_compatibility(
           device_allocator_, host_local_params, kAllocationSize,
           &host_local_params, &host_local_allocation_size);
-  EXPECT_GE(host_local_allocation_size, kAllocationSize);
 
   iree_hal_buffer_params_t device_local_params = {0};
   device_local_params.type =
@@ -48,20 +47,25 @@ TEST_P(AllocatorTest, BaselineBufferCompatibility) {
       iree_hal_allocator_query_buffer_compatibility(
           device_allocator_, device_local_params, kAllocationSize,
           &device_local_params, &device_allocation_size);
-  EXPECT_GE(device_allocation_size, kAllocationSize);
 
   iree_hal_buffer_compatibility_t required_transfer_compatibility =
       IREE_HAL_BUFFER_COMPATIBILITY_ALLOCATABLE |
       IREE_HAL_BUFFER_COMPATIBILITY_QUEUE_TRANSFER;
-  EXPECT_TRUE(iree_all_bits_set(transfer_compatibility_host,
-                                required_transfer_compatibility) ||
-              iree_all_bits_set(transfer_compatibility_device,
-                                required_transfer_compatibility));
+  const bool host_transfer_compatible = iree_all_bits_set(
+      transfer_compatibility_host, required_transfer_compatibility);
+  const bool device_transfer_compatible = iree_all_bits_set(
+      transfer_compatibility_device, required_transfer_compatibility);
+  if (host_transfer_compatible) {
+    EXPECT_GE(host_local_allocation_size, kAllocationSize);
+  }
+  if (device_transfer_compatible) {
+    EXPECT_GE(device_allocation_size, kAllocationSize);
+  }
+  EXPECT_TRUE(host_transfer_compatible || device_transfer_compatible);
 
   // Need to be able to use some type of buffer as dispatch inputs or outputs.
   iree_hal_buffer_params_t dispatch_params = {0};
-  dispatch_params.type =
-      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
+  dispatch_params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
   dispatch_params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE;
   iree_device_size_t dispatch_allocation_size = 0;
   iree_hal_buffer_compatibility_t dispatch_compatibility =

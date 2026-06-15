@@ -1,0 +1,258 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+    "loom_cc_test",
+)
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+loom_cc_library(
+    name = "testbench",
+    srcs = ["testbench.c"],
+    hdrs = ["testbench.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/check",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "value_materializer",
+    srcs = ["value_materializer.c"],
+    hdrs = ["value_materializer.h"],
+    deps = [
+        ":testbench",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/util:math",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:prng",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/modules/hal:types",
+        "//runtime/src/iree/tooling:numpy_io",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_library(
+    name = "invocation",
+    srcs = ["invocation.c"],
+    hdrs = ["invocation.h"],
+    deps = [
+        ":testbench",
+        ":value_materializer",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_library(
+    name = "expectation",
+    srcs = ["expectation.c"],
+    hdrs = ["expectation.h"],
+    deps = [
+        ":testbench",
+        ":value_materializer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/modules/hal:types",
+        "//runtime/src/iree/tooling:buffer_view_matchers",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_library(
+    name = "executor",
+    srcs = ["executor.c"],
+    hdrs = ["executor.h"],
+    deps = [
+        ":expectation",
+        ":invocation",
+        ":testbench",
+        ":value_materializer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "requirements",
+    srcs = ["requirements.c"],
+    hdrs = ["requirements.h"],
+    deps = [
+        ":testbench",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/check",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "reference",
+    srcs = ["reference.c"],
+    hdrs = ["reference.h"],
+    deps = [
+        ":invocation",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/modules/hal:types",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_test(
+    name = "testbench_test",
+    srcs = ["testbench_test.cc"],
+    deps = [
+        ":testbench",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/check",
+        "//loom/src/loom/ops/test",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "invocation_test",
+    srcs = ["invocation_test.cc"],
+    deps = [
+        ":invocation",
+        ":testbench",
+        ":value_materializer",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/check",
+        "//loom/src/loom/ops/test",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_test(
+    name = "expectation_test",
+    srcs = ["expectation_test.cc"],
+    deps = [
+        ":expectation",
+        ":testbench",
+        ":value_materializer",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/check",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/modules/hal:types",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_test(
+    name = "executor_test",
+    srcs = ["executor_test.cc"],
+    deps = [
+        ":executor",
+        ":testbench",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/check",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_test(
+    name = "reference_test",
+    srcs = ["reference_test.cc"],
+    deps = [
+        ":reference",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/modules/hal:types",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_test(
+    name = "requirements_test",
+    srcs = ["requirements_test.cc"],
+    deps = [
+        ":requirements",
+        ":testbench",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/check",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "value_materializer_test",
+    srcs = ["value_materializer_test.cc"],
+    deps = [
+        ":testbench",
+        ":value_materializer",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/check",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/modules/hal:types",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/tooling:numpy_io",
+        "//runtime/src/iree/tooling/testdata/npy",
+        "//runtime/src/iree/vm",
+    ],
+)

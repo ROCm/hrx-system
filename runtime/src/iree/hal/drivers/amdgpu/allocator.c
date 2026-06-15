@@ -475,10 +475,15 @@ static bool iree_hal_amdgpu_allocator_resolve_placement(
       requested_type & ~IREE_HAL_MEMORY_TYPE_OPTIMAL;
   const bool requires_host_local =
       iree_all_bits_set(required_type, IREE_HAL_MEMORY_TYPE_HOST_LOCAL);
-  const bool requires_host_visible =
-      iree_all_bits_set(required_type, IREE_HAL_MEMORY_TYPE_HOST_VISIBLE);
+  const bool requires_host_access = iree_any_bit_set(
+      required_type,
+      IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_HOST_COHERENT |
+          IREE_HAL_MEMORY_TYPE_HOST_CACHED | IREE_HAL_MEMORY_TYPE_HOST_LOCAL);
   const bool requires_device_local =
       iree_all_bits_set(required_type, IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL);
+  const bool prefers_device_local =
+      iree_any_bit_set(requested_type, IREE_HAL_MEMORY_TYPE_OPTIMAL) &&
+      iree_any_bit_set(required_type, IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE);
 
   const iree_hal_amdgpu_allocator_memory_pool_t* memory_pool = NULL;
   iree_hal_memory_type_t memory_type = 0;
@@ -495,11 +500,19 @@ static bool iree_hal_amdgpu_allocator_resolve_placement(
     memory_pool = &allocator->memory_pools.host_fine[device_ordinal];
     memory_type =
         IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
-  } else if (requires_host_visible) {
+  } else if (requires_host_access &&
+             (requires_device_local ||
+              (prefers_device_local &&
+               allocator->memory_pools.device_fine[device_ordinal]
+                   .memory_pool.handle))) {
     memory_pool = &allocator->memory_pools.device_fine[device_ordinal];
     memory_type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
                   IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
                   IREE_HAL_MEMORY_TYPE_HOST_COHERENT;
+  } else if (requires_host_access) {
+    memory_pool = &allocator->memory_pools.host_fine[device_ordinal];
+    memory_type =
+        IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
   } else {
     memory_pool = &allocator->memory_pools.device_coarse[device_ordinal];
     memory_type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
@@ -575,19 +588,14 @@ iree_status_t iree_hal_amdgpu_allocator_create(
     }
 
     hsa_amd_memory_pool_t device_fine_pool = {0};
-    if (iree_status_is_ok(status)) {
-      status = iree_hal_amdgpu_find_fine_global_memory_pool(
-          libhsa, topology->gpu_agents[i], &device_fine_pool);
-      if (!iree_status_is_ok(status)) {
-        status = iree_status_annotate_f(
-            status,
-            "AMDGPU allocator requires fine-grained device-local memory for "
-            "host-coherent DEVICE_LOCAL|HOST_VISIBLE allocations on physical "
-            "device %" PRIhsz,
-            i);
-      }
+    if (iree_status_is_ok(status) &&
+        !logical_device->suppress_device_fine_memory) {
+      bool device_fine_pool_available = false;
+      status = iree_hal_amdgpu_query_fine_global_memory_pool(
+          libhsa, topology->gpu_agents[i], &device_fine_pool_available,
+          &device_fine_pool);
     }
-    if (iree_status_is_ok(status)) {
+    if (iree_status_is_ok(status) && device_fine_pool.handle) {
       status = iree_hal_amdgpu_allocator_query_pool_properties(
           libhsa, device_fine_pool, &allocator->memory_pools.device_fine[i]);
     }
@@ -648,13 +656,17 @@ static iree_device_size_t iree_hal_amdgpu_allocator_min_pool_limit(
   return lhs < rhs ? lhs : rhs;
 }
 
-static void iree_hal_amdgpu_allocator_query_pool_family_limits(
+static bool iree_hal_amdgpu_allocator_query_pool_family_limits(
     const iree_hal_amdgpu_allocator_memory_pool_t* pools,
     iree_host_size_t pool_count, iree_device_size_t* out_max_allocation_size,
     iree_device_size_t* out_min_alignment) {
+  *out_max_allocation_size = 0;
+  *out_min_alignment = 0;
+  if (!pools[0].memory_pool.handle) return false;
   iree_device_size_t max_allocation_size = pools[0].max_allocation_size;
   iree_device_size_t min_alignment = pools[0].allocation_alignment;
   for (iree_host_size_t i = 1; i < pool_count; ++i) {
+    if (!pools[i].memory_pool.handle) return false;
     max_allocation_size = iree_hal_amdgpu_allocator_min_pool_limit(
         max_allocation_size, pools[i].max_allocation_size);
     min_alignment = iree_hal_amdgpu_allocator_min_pool_limit(
@@ -662,6 +674,7 @@ static void iree_hal_amdgpu_allocator_query_pool_family_limits(
   }
   *out_max_allocation_size = max_allocation_size;
   *out_min_alignment = min_alignment;
+  return true;
 }
 
 static iree_status_t iree_hal_amdgpu_allocator_query_memory_heaps(
@@ -671,33 +684,29 @@ static iree_status_t iree_hal_amdgpu_allocator_query_memory_heaps(
     iree_host_size_t* IREE_RESTRICT out_count) {
   iree_hal_amdgpu_allocator_t* allocator =
       iree_hal_amdgpu_allocator_cast(base_allocator);
-  const iree_host_size_t heap_count = 3;
-  *out_count = heap_count;
-  if (capacity < heap_count) {
-    // NOTE: lightweight as this is hit in normal pre-sizing usage.
-    return iree_status_from_code(IREE_STATUS_OUT_OF_RANGE);
-  }
-
-  memset(heaps, 0, heap_count * sizeof(*heaps));
-
   iree_device_size_t device_coarse_max_allocation_size = 0;
   iree_device_size_t device_coarse_min_alignment = 0;
-  iree_hal_amdgpu_allocator_query_pool_family_limits(
-      allocator->memory_pools.device_coarse,
-      allocator->topology->gpu_agent_count, &device_coarse_max_allocation_size,
-      &device_coarse_min_alignment);
+  const bool device_coarse_available =
+      iree_hal_amdgpu_allocator_query_pool_family_limits(
+          allocator->memory_pools.device_coarse,
+          allocator->topology->gpu_agent_count,
+          &device_coarse_max_allocation_size, &device_coarse_min_alignment);
 
   iree_device_size_t device_fine_max_allocation_size = 0;
   iree_device_size_t device_fine_min_alignment = 0;
-  iree_hal_amdgpu_allocator_query_pool_family_limits(
-      allocator->memory_pools.device_fine, allocator->topology->gpu_agent_count,
-      &device_fine_max_allocation_size, &device_fine_min_alignment);
+  const bool device_fine_available =
+      iree_hal_amdgpu_allocator_query_pool_family_limits(
+          allocator->memory_pools.device_fine,
+          allocator->topology->gpu_agent_count,
+          &device_fine_max_allocation_size, &device_fine_min_alignment);
 
   iree_device_size_t host_fine_max_allocation_size = 0;
   iree_device_size_t host_fine_min_alignment = 0;
-  iree_hal_amdgpu_allocator_query_pool_family_limits(
-      allocator->memory_pools.host_fine, allocator->topology->gpu_agent_count,
-      &host_fine_max_allocation_size, &host_fine_min_alignment);
+  const bool host_fine_available =
+      iree_hal_amdgpu_allocator_query_pool_family_limits(
+          allocator->memory_pools.host_fine,
+          allocator->topology->gpu_agent_count, &host_fine_max_allocation_size,
+          &host_fine_min_alignment);
 
   // Sharing hints do not affect HSA pool selection.
   const iree_hal_buffer_usage_t sharing_usage =
@@ -712,27 +721,43 @@ static iree_status_t iree_hal_amdgpu_allocator_query_memory_heaps(
       IREE_HAL_BUFFER_USAGE_MAPPING_ACCESS_RANDOM |
       IREE_HAL_BUFFER_USAGE_MAPPING_ACCESS_SEQUENTIAL_WRITE;
 
-  // Heap 0: coarse-grained device-local memory.
-  heaps[0].type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-  heaps[0].allowed_usage = IREE_HAL_BUFFER_USAGE_TRANSFER |
-                           IREE_HAL_BUFFER_USAGE_DISPATCH | sharing_usage;
-  heaps[0].max_allocation_size = device_coarse_max_allocation_size;
-  heaps[0].min_alignment = device_coarse_min_alignment;
+  iree_hal_allocator_memory_heap_t available_heaps[3] = {0};
+  iree_host_size_t heap_count = 0;
+  if (device_coarse_available) {
+    available_heaps[heap_count++] = (iree_hal_allocator_memory_heap_t){
+        .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+        .allowed_usage = IREE_HAL_BUFFER_USAGE_TRANSFER |
+                         IREE_HAL_BUFFER_USAGE_DISPATCH | sharing_usage,
+        .max_allocation_size = device_coarse_max_allocation_size,
+        .min_alignment = device_coarse_min_alignment,
+    };
+  }
+  if (device_fine_available) {
+    available_heaps[heap_count++] = (iree_hal_allocator_memory_heap_t){
+        .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
+                IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
+                IREE_HAL_MEMORY_TYPE_HOST_COHERENT,
+        .allowed_usage = mappable_usage,
+        .max_allocation_size = device_fine_max_allocation_size,
+        .min_alignment = device_fine_min_alignment,
+    };
+  }
+  if (host_fine_available) {
+    available_heaps[heap_count++] = (iree_hal_allocator_memory_heap_t){
+        .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+                IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+        .allowed_usage = mappable_usage,
+        .max_allocation_size = host_fine_max_allocation_size,
+        .min_alignment = host_fine_min_alignment,
+    };
+  }
 
-  // Heap 1: fine-grained device-local memory for explicit host visibility.
-  heaps[1].type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
-                  IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
-                  IREE_HAL_MEMORY_TYPE_HOST_COHERENT;
-  heaps[1].allowed_usage = mappable_usage;
-  heaps[1].max_allocation_size = device_fine_max_allocation_size;
-  heaps[1].min_alignment = device_fine_min_alignment;
-
-  // Heap 2: fine-grained host-local memory visible to the device.
-  heaps[2].type =
-      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
-  heaps[2].allowed_usage = mappable_usage;
-  heaps[2].max_allocation_size = host_fine_max_allocation_size;
-  heaps[2].min_alignment = host_fine_min_alignment;
+  *out_count = heap_count;
+  if (capacity < heap_count) {
+    // NOTE: lightweight as this is hit in normal pre-sizing usage.
+    return iree_status_from_code(IREE_STATUS_OUT_OF_RANGE);
+  }
+  memcpy(heaps, available_heaps, heap_count * sizeof(*heaps));
 
   return iree_ok_status();
 }

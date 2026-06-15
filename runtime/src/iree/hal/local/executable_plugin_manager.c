@@ -539,6 +539,7 @@ static iree_status_t iree_hal_executable_plugin_manager_resolve(
       continue;
     } else {
       // Other failure we need to propagate (may be JIT issues or something).
+      IREE_TRACE_ZONE_END(z0);
       return provider_status;
     }
   }

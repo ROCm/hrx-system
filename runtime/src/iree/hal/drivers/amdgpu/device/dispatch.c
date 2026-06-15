@@ -67,29 +67,6 @@ void iree_hal_amdgpu_device_dispatch_emplace_implicit_args(
   implicit_args->dynamic_lds_size = dynamic_workgroup_local_memory;
 }
 
-void iree_hal_amdgpu_device_dispatch_emplace_hal_kernargs(
-    const iree_hal_amdgpu_device_kernel_args_t* IREE_AMDGPU_RESTRICT
-        kernel_args,
-    const iree_hal_amdgpu_device_dispatch_kernarg_layout_t* IREE_AMDGPU_RESTRICT
-        layout,
-    const uint64_t* IREE_AMDGPU_RESTRICT binding_ptrs,
-    const uint32_t* IREE_AMDGPU_RESTRICT constants,
-    void* IREE_AMDGPU_RESTRICT kernarg_ptr) {
-  iree_amdgpu_memset(kernarg_ptr, 0, layout->total_kernarg_size);
-
-  const size_t binding_bytes =
-      (size_t)kernel_args->binding_count * sizeof(uint64_t);
-  const size_t constant_bytes =
-      (size_t)kernel_args->constant_count * sizeof(uint32_t);
-  if (binding_bytes > 0) {
-    iree_amdgpu_memcpy(kernarg_ptr, binding_ptrs, binding_bytes);
-  }
-  if (constant_bytes > 0) {
-    iree_amdgpu_memcpy((uint8_t*)kernarg_ptr + binding_bytes, constants,
-                       constant_bytes);
-  }
-}
-
 void iree_hal_amdgpu_device_dispatch_emplace_custom_kernargs(
     const iree_hal_amdgpu_device_dispatch_kernarg_layout_t* IREE_AMDGPU_RESTRICT
         layout,

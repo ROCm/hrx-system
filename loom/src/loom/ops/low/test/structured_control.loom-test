@@ -1,0 +1,128 @@
+// RUN: roundtrip
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @void_if(%condition: reg<test.i32>) {
+  low.scf.if %condition {
+    low.scf.yield
+  }
+  low.return
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @void_if(%condition: reg<test.i32>) {
+  low.scf.if %condition {
+  }
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @if_single_result(%condition: reg<test.i32>, %then_value: reg<test.i32>, %else_value: reg<test.i32>) -> (reg<test.i32>) {
+  %result = low.scf.if %condition -> (reg<test.i32>) {
+    low.scf.yield %then_value : reg<test.i32>
+  } else {
+    low.scf.yield %else_value : reg<test.i32>
+  }
+  low.return %result : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @if_multi_result(%condition: reg<test.i32>, %then_i32: reg<test.i32>, %else_i32: reg<test.i32>, %then_ptr: reg<test.ptr>, %else_ptr: reg<test.ptr>) -> (reg<test.i32>, reg<test.ptr>) {
+  %i32_result, %ptr_result = low.scf.if %condition -> (reg<test.i32>, reg<test.ptr>) {
+    low.scf.yield %then_i32, %then_ptr : reg<test.i32>, reg<test.ptr>
+  } else {
+    low.scf.yield %else_i32, %else_ptr : reg<test.i32>, reg<test.ptr>
+  }
+  low.return %i32_result, %ptr_result : reg<test.i32>, reg<test.ptr>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @for_carried(%lower: reg<test.i32>, %upper: reg<test.i32>, %step: reg<test.i32>, %init: reg<test.i32>, %factor: reg<test.i32>) -> (reg<test.i32>) {
+  %result = low.scf.for [%lower to %upper step %step] iter_args(%init: reg<test.i32>) -> (reg<test.i32>) unroll(%factor) do(%iv: reg<test.i32>, %acc: reg<test.i32>) {
+    low.scf.yield %acc : reg<test.i32>
+  }
+  low.return %result : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @for_bare_unroll(%lower: reg<test.i32>, %upper: reg<test.i32>, %step: reg<test.i32>) {
+  low.scf.for [%lower to %upper step %step] unroll do(%iv: reg<test.i32>) {
+    low.scf.yield
+  }
+  low.return
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @for_bare_unroll(%lower: reg<test.i32>, %upper: reg<test.i32>, %step: reg<test.i32>) {
+  low.scf.for [%lower to %upper step %step] unroll do(%iv: reg<test.i32>) {
+  }
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @asm_nested_if(%condition: reg<test.i32>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm<test.low.core> {
+  %result = low.scf.if %condition -> (reg<test.i32>) {
+    %then_sum = test.add.i32 %lhs, %rhs
+    low.scf.yield %then_sum : reg<test.i32>
+  } else {
+    %else_sum = test.add.i32 %rhs, %lhs
+    low.scf.yield %else_sum : reg<test.i32>
+  }
+  return %result
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @asm_nested_if(%condition: reg<test.i32>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) {
+  %result = low.scf.if %condition -> (reg<test.i32>) {
+    %then_sum = low.op<test.add.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+    low.scf.yield %then_sum : reg<test.i32>
+  } else {
+    %else_sum = low.op<test.add.i32>(%rhs, %lhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+    low.scf.yield %else_sum : reg<test.i32>
+  }
+  low.return %result : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @asm_nested_for(%lower: reg<test.i32>, %upper: reg<test.i32>, %step: reg<test.i32>, %init: reg<test.i32>) -> (reg<test.i32>) asm<test.low.core> {
+  %result = low.scf.for [%lower to %upper step %step] iter_args(%init: reg<test.i32>) -> (reg<test.i32>) do(%iv: reg<test.i32>, %acc: reg<test.i32>) {
+    %next = test.add.i32 %acc, %iv
+    low.scf.yield %next : reg<test.i32>
+  }
+  return %result
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @asm_nested_for(%lower: reg<test.i32>, %upper: reg<test.i32>, %step: reg<test.i32>, %init: reg<test.i32>) -> (reg<test.i32>) {
+  %result = low.scf.for [%lower to %upper step %step] iter_args(%init: reg<test.i32>) -> (reg<test.i32>) do(%iv: reg<test.i32>, %acc: reg<test.i32>) {
+    %next = low.op<test.add.i32>(%acc, %iv) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+    low.scf.yield %next : reg<test.i32>
+  }
+  low.return %result : reg<test.i32>
+}

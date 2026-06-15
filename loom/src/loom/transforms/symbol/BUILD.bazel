@@ -1,0 +1,141 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+loom_cc_library(
+    name = "template_selection",
+    srcs = ["template_selection.c"],
+    hdrs = ["template_selection.h"],
+    deps = [
+        ":symbol_pruning",
+        "//loom/src/loom/analysis:func_provider_catalog",
+        "//loom/src/loom/analysis:symbol_dependencies",
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/analysis:symbol_liveness",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/pass:pipeline",
+        "//loom/src/loom/pass:registry",
+        "//loom/src/loom/pass:report",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/pass:value_facts",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/target:selection",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "inline_callables",
+    srcs = ["inline_callables.c"],
+    hdrs = ["inline_callables.h"],
+    deps = [
+        "//loom/src/loom/analysis:scc",
+        "//loom/src/loom/analysis:symbol_dependencies",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/rewrite:callable",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/target:selection",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "refine_boundaries",
+    srcs = ["refine_boundaries.c"],
+    hdrs = ["refine_boundaries.h"],
+    deps = [
+        "//loom/src/loom/analysis:scc",
+        "//loom/src/loom/analysis:type_refinement",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ir:type_refinement",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:special_values",
+        "//loom/src/loom/ops:type_registry",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/pass:pipeline",
+        "//loom/src/loom/pass:registry",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/rewrite:materialize",
+        "//loom/src/loom/rewrite:remap",
+        "//loom/src/loom/transforms/cleanup:canonicalize",
+        "//loom/src/loom/util:fact_table",
+        "//loom/src/loom/util:walk",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "symbol_pruning",
+    srcs = ["symbol_pruning.c"],
+    hdrs = ["symbol_pruning.h"],
+    deps = [
+        "//loom/src/loom/analysis:symbol_liveness",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/kernel",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "symbol_dce",
+    srcs = ["symbol_dce.c"],
+    hdrs = ["symbol_dce.h"],
+    deps = [
+        ":symbol_pruning",
+        "//loom/src/loom/analysis:symbol_dependencies",
+        "//loom/src/loom/analysis:symbol_liveness",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/target:selection",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "symbol_dce_test",
+    srcs = ["symbol_dce_test.cc"],
+    deps = [
+        ":symbol_dce",
+        "//loom/src/loom/codegen/low:text_asm",
+        "//loom/src/loom/format/bytecode:reader",
+        "//loom/src/loom/format/bytecode:writer",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/format/text:printer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/config",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/target/test:descriptors",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

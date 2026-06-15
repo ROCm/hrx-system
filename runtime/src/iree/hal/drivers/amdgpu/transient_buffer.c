@@ -343,10 +343,8 @@ void iree_hal_amdgpu_transient_buffer_decommit(iree_hal_buffer_t* base_buffer) {
   iree_hal_amdgpu_transient_buffer_t* buffer =
       iree_hal_amdgpu_transient_buffer_cast(base_buffer);
   iree_atomic_store(&buffer->committed_backing, 0, iree_memory_order_release);
-  if (buffer->staged_backing) {
-    iree_hal_buffer_release(buffer->staged_backing);
-    buffer->staged_backing = NULL;
-  }
+  iree_hal_buffer_release(buffer->staged_backing);
+  buffer->staged_backing = NULL;
 }
 
 bool iree_hal_amdgpu_transient_buffer_begin_dealloca(

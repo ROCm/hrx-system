@@ -1,0 +1,132 @@
+// RUN: pass branch-sink
+
+// A producer used only in one branch sinks into that branch before the first
+// consumer. This removes unconditional work without cloning the producer.
+func.def @sinks_then_only_chain(%cond: i1, %a: i32, %b: i32) {
+  %doubled = test.addi %a, %a : i32
+  %sum = test.addi %doubled, %b : i32
+  scf.if %cond {
+    test.use %sum : i32
+    scf.yield
+  } else {
+    scf.yield
+  }
+  func.return
+}
+
+// ----
+func.def @sinks_then_only_chain(%cond: i1, %a: i32, %b: i32) {
+  scf.if %cond {
+    %doubled = test.addi %a, %a : i32
+    %sum = test.addi %doubled, %b : i32
+    test.use %sum : i32
+  } else {
+  }
+  func.return
+}
+
+// ====
+
+// Uses in different branch alternatives keep the producer outside. Duplicating
+// the producer belongs to a cloning-aware pass, not this one.
+func.def @keeps_cross_branch_use(%cond: i1, %a: i32, %b: i32) {
+  %sum = test.addi %a, %b : i32
+  scf.if %cond {
+    test.use %sum : i32
+    scf.yield
+  } else {
+    test.use %sum : i32
+    scf.yield
+  }
+  func.return
+}
+
+// ----
+func.def @keeps_cross_branch_use(%cond: i1, %a: i32, %b: i32) {
+  %sum = test.addi %a, %b : i32
+  scf.if %cond {
+    test.use %sum : i32
+  } else {
+    test.use %sum : i32
+  }
+  func.return
+}
+
+// ====
+
+// A use after the branch keeps the producer outside because the result still
+// needs to dominate non-branch code.
+func.def @keeps_external_use(%cond: i1, %a: i32, %b: i32) {
+  %sum = test.addi %a, %b : i32
+  scf.if %cond {
+    test.use %sum : i32
+    scf.yield
+  } else {
+    scf.yield
+  }
+  test.use %sum : i32
+  func.return
+}
+
+// ----
+func.def @keeps_external_use(%cond: i1, %a: i32, %b: i32) {
+  %sum = test.addi %a, %b : i32
+  scf.if %cond {
+    test.use %sum : i32
+  } else {
+  }
+  test.use %sum : i32
+  func.return
+}
+
+// ====
+
+// Type uses are uses too: %extent appears only in the view type inside the
+// then branch, so the producer can move with the branch-local type carrier.
+func.def @sinks_type_use_only(%cond: i1, %buffer: buffer, %offset: offset, %n: index) {
+  %extent = index.add %n, %n : index
+  scf.if %cond {
+    %layout = encoding.layout.dense : encoding<layout>
+    %view = buffer.view %buffer[%offset] : buffer -> view<[%extent]xf32, %layout>
+    test.use %view : view<[%extent]xf32, %layout>
+    scf.yield
+  } else {
+    scf.yield
+  }
+  func.return
+}
+
+// ----
+func.def @sinks_type_use_only(%cond: i1, %buffer: buffer, %offset: offset, %n: index) {
+  scf.if %cond {
+    %extent = index.add %n, %n : index
+    %layout = encoding.layout.dense : encoding<layout>
+    %view = buffer.view %buffer[%offset] : buffer -> view<[%extent]xf32, %layout>
+    test.use %view : view<[%extent]xf32, %layout>
+  } else {
+  }
+  func.return
+}
+
+// ====
+
+// The branch selector is not a branch-local use, so it cannot be sunk into
+// either branch.
+func.def @keeps_condition_producer(%a: i32, %b: i32) {
+  %cond = test.cmp lt, %a, %b : i32
+  scf.if %cond {
+    scf.yield
+  } else {
+    scf.yield
+  }
+  func.return
+}
+
+// ----
+func.def @keeps_condition_producer(%a: i32, %b: i32) {
+  %cond = test.cmp lt, %a, %b : i32
+  scf.if %cond {
+  } else {
+  }
+  func.return
+}

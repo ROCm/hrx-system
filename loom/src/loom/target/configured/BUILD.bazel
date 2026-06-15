@@ -1,0 +1,122 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "iree_select",
+    "loom_cc_library",
+)
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_CONFIGURED_TARGET_COPTS = (
+    iree_select({
+        "//loom/config/target/arch:amdgpu": [
+            "-DLOOM_CONFIG_TARGET_HAVE_AMDGPU=1",
+        ],
+        "//conditions:default": [],
+    }) +
+    iree_select({
+        "//loom/config/target/arch:iree_vm": [
+            "-DLOOM_CONFIG_TARGET_HAVE_IREE_VM=1",
+        ],
+        "//conditions:default": [],
+    }) +
+    iree_select({
+        "//loom/config/target/arch:llvmir": [
+            "-DLOOM_CONFIG_TARGET_HAVE_LLVMIR=1",
+        ],
+        "//conditions:default": [],
+    }) +
+    iree_select({
+        "//loom/config/target/arch:spirv": [
+            "-DLOOM_CONFIG_TARGET_HAVE_SPIRV=1",
+        ],
+        "//conditions:default": [],
+    }) +
+    iree_select({
+        "//loom/config/target/arch:wasm": [
+            "-DLOOM_CONFIG_TARGET_HAVE_WASM=1",
+        ],
+        "//conditions:default": [],
+    }) +
+    iree_select({
+        "//loom/config/target/arch:x86": [
+            "-DLOOM_CONFIG_TARGET_HAVE_X86=1",
+        ],
+        "//conditions:default": [],
+    })
+)
+
+_CONFIGURED_TARGET_DEPS = (
+    iree_select({
+        "//loom/config/target/arch:amdgpu": [
+            "//loom/src/loom/target/arch/amdgpu:provider",
+        ],
+        "//conditions:default": [],
+    }) +
+    iree_select({
+        "//loom/config/target/arch:iree_vm": [
+            "//loom/src/loom/target/arch/ireevm:provider",
+        ],
+        "//conditions:default": [],
+    }) +
+    iree_select({
+        "//loom/config/target/arch:llvmir": [
+            "//loom/src/loom/target/arch/llvmir:provider",
+        ],
+        "//conditions:default": [],
+    }) +
+    iree_select({
+        "//loom/config/target/arch:spirv": [
+            "//loom/src/loom/target/arch/spirv:provider",
+        ],
+        "//conditions:default": [],
+    }) +
+    iree_select({
+        "//loom/config/target/arch:wasm": [
+            "//loom/src/loom/target/arch/wasm:provider",
+        ],
+        "//conditions:default": [],
+    }) +
+    iree_select({
+        "//loom/config/target/arch:x86": [
+            "//loom/src/loom/target/arch/x86:provider",
+        ],
+        "//conditions:default": [],
+    })
+)
+
+loom_cc_library(
+    name = "provider",
+    srcs = ["provider.c"],
+    hdrs = ["provider.h"],
+    copts = _CONFIGURED_TARGET_COPTS,
+    visibility = ["//loom/src/loom/tools:__subpackages__"],
+    deps = [
+        "//loom/src/loom/target:provider",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+    ] + _CONFIGURED_TARGET_DEPS,
+)
+
+loom_cc_library(
+    name = "low_registry",
+    srcs = ["low_registry.c"],
+    hdrs = ["low_registry.h"],
+    deps = [
+        ":provider",
+        "//loom/src/loom/codegen/low/lower",
+        "//loom/src/loom/target:legalization",
+        "//loom/src/loom/target:low_descriptor_registry",
+        "//loom/src/loom/target:low_legality",
+        "//runtime/src/iree/base",
+    ],
+)

@@ -1,0 +1,4 @@
+# Dialect files use one-op-per-line declarations that are intentionally long.
+# No line-length limit for formatting — each op is a single readable line.
+extend = "../../ruff.toml"
+line-length = 200

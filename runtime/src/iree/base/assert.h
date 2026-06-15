@@ -72,6 +72,14 @@ IREE_ATTRIBUTE_NORETURN static inline void iree_abort(void) { abort(); }
 #define IREE_ASSERT_FALSE(expr, ...) IREE_ASSERT(!(expr), __VA_ARGS__)
 
 #define IREE_ASSERT_UNREACHABLE(...) IREE_ASSERT(false, __VA_ARGS__)
+// Asserts in debug builds and always aborts. Use only in switch default cases
+// that guard fully-covered enum domains; ordinary impossible states should be
+// made unrepresentable, asserted, or handled by the owner of the invariant.
+#define IREE_CHECK_UNREACHABLE(...)       \
+  do {                                    \
+    IREE_ASSERT_UNREACHABLE(__VA_ARGS__); \
+    iree_abort();                         \
+  } while (0)
 
 #define IREE_ASSERT_EQ(x, y, ...) _IREE_ASSERT_CMP(x, ==, y, __VA_ARGS__)
 #define IREE_ASSERT_NE(x, y, ...) _IREE_ASSERT_CMP(x, !=, y, __VA_ARGS__)

@@ -1,0 +1,63 @@
+// RUN: roundtrip
+
+func.def @packed_i8_dequant_gemv_two_outputs(%packed: vector<1xi32>, %scale: f16, %rhs0: vector<4xf32>, %rhs1: vector<4xf32>, %acc0: f32, %acc1: f32) -> (f32, f32) {
+  %q_i32 = vector.bitunpacks<8> %packed : vector<1xi32> -> vector<4xi32>
+  %q_f32 = vector.sitofp %q_i32 : vector<4xi32> to vector<4xf32>
+  %scale_f32 = scalar.extf %scale : f16 to f32
+  %scale_vector = vector.splat %scale_f32 : vector<4xf32>
+  %scaled_q = vector.mulf<reassoc|nnan|ninf|nsz|contract> %q_f32, %scale_vector : vector<4xf32>
+  %dot0 = vector.dotf %scaled_q, %rhs0, %acc0 : vector<4xf32>, vector<4xf32>, f32
+  %dot1 = vector.dotf %scaled_q, %rhs1, %acc1 : vector<4xf32>, vector<4xf32>, f32
+  func.return %dot0, %dot1 : f32, f32
+}
+
+// ====
+
+func.def @packed_i8_dequant_gemv_two_k_blocks(%packed0: vector<1xi32>, %packed1: vector<1xi32>, %scale0: f16, %scale1: f16, %rhs0: vector<4xf32>, %rhs1: vector<4xf32>, %acc: f32) -> (f32) {
+  %q0_i32 = vector.bitunpacks<8> %packed0 : vector<1xi32> -> vector<4xi32>
+  %q1_i32 = vector.bitunpacks<8> %packed1 : vector<1xi32> -> vector<4xi32>
+  %q0_f32 = vector.sitofp %q0_i32 : vector<4xi32> to vector<4xf32>
+  %q1_f32 = vector.sitofp %q1_i32 : vector<4xi32> to vector<4xf32>
+  %scale0_f32 = scalar.extf %scale0 : f16 to f32
+  %scale1_f32 = scalar.extf %scale1 : f16 to f32
+  %scale0_vector = vector.splat %scale0_f32 : vector<4xf32>
+  %scale1_vector = vector.splat %scale1_f32 : vector<4xf32>
+  %scaled_q0 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %q0_f32, %scale0_vector : vector<4xf32>
+  %scaled_q1 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %q1_f32, %scale1_vector : vector<4xf32>
+  %partial = vector.dotf %scaled_q0, %rhs0, %acc : vector<4xf32>, vector<4xf32>, f32
+  %dot = vector.dotf %scaled_q1, %rhs1, %partial : vector<4xf32>, vector<4xf32>, f32
+  func.return %dot : f32
+}
+
+// ====
+
+func.def @bf16_gemv_dot2_two_outputs(%lhs: vector<8xbf16>, %rhs0: vector<8xbf16>, %rhs1: vector<8xbf16>, %acc0: vector<4xf32>, %acc1: vector<4xf32>) -> (vector<4xf32>, vector<4xf32>) {
+  %dot0 = vector.dot2f %lhs, %rhs0, %acc0 : vector<8xbf16>, vector<8xbf16>, vector<4xf32>
+  %dot1 = vector.dot2f %lhs, %rhs1, %acc1 : vector<8xbf16>, vector<8xbf16>, vector<4xf32>
+  func.return %dot0, %dot1 : vector<4xf32>, vector<4xf32>
+}
+
+// ====
+
+func.def @fp8bf8_dot4_two_outputs(%lhs: vector<2xi32>, %rhs0: vector<2xi32>, %rhs1: vector<2xi32>, %acc0: vector<2xf32>, %acc1: vector<2xf32>) -> (vector<2xf32>, vector<2xf32>) {
+  %dot0 = vector.dot4f8<fp8bf8> %lhs, %rhs0, %acc0 : vector<2xi32>, vector<2xf32>
+  %dot1 = vector.dot4f8<fp8bf8> %lhs, %rhs1, %acc1 : vector<2xi32>, vector<2xf32>
+  func.return %dot0, %dot1 : vector<2xf32>, vector<2xf32>
+}
+
+// ====
+
+func.def @i4_dot8_two_k_blocks(%lhs0: vector<2xi32>, %rhs0: vector<2xi32>, %lhs1: vector<2xi32>, %rhs1: vector<2xi32>, %acc: vector<2xi32>) -> (vector<2xi32>) {
+  %partial = vector.dot8i4<s4u4> %lhs0, %rhs0, %acc : vector<2xi32>
+  %dot = vector.dot8i4<s4u4> %lhs1, %rhs1, %partial : vector<2xi32>
+  func.return %dot : vector<2xi32>
+}
+
+// ====
+
+func.def @tail_selected_f32_dot(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %acc: f32, %lane: i32, %limit: i32) -> (f32) {
+  %dot = vector.dotf %lhs, %rhs, %acc : vector<4xf32>, vector<4xf32>, f32
+  %inside = scalar.cmpi slt, %lane, %limit : i32
+  %selected = scf.select %inside, %dot, %acc : f32
+  func.return %selected : f32
+}

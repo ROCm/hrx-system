@@ -27,8 +27,8 @@ enum iree_task_scope_flag_bits_e {
 };
 typedef uint32_t iree_task_scope_flags_t;
 
-// iree_task_scope_t is an atomic reference-counting helper posting a
-// notification when the reference count is decremended to 0.
+// iree_task_scope_t tracks pending work with an atomic counter and posts a
+// notification when the counter is decremented to 0.
 //
 // It is used as a loose way of grouping tasks within the task system.
 // Each scope represents a unique collection of tasks that have some related
@@ -72,7 +72,7 @@ typedef struct iree_task_scope_t {
   // Each submission has a fence that references this value and decrements it
   // as it is reached indicating that all memory used by all tasks within that
   // submission is available for reuse.
-  iree_atomic_ref_count_t pending_submissions;
+  iree_atomic_uint32_t pending_submissions;
 
   // A notification signaled when the scope transitions to having no pending
   // tasks or completes all pending tasks after a failure.
@@ -123,28 +123,26 @@ void iree_task_scope_fail(iree_task_scope_t* scope, iree_status_t status);
 // The scope is considered active until it is notified execution has completed
 // with iree_task_scope_end.
 //
-// Memory ordering: this does a iree_atomic_ref_count_inc.
-// That typically means only a 'relaxed' order operation -- no ordering.
+// Memory ordering: this increments pending_submissions with relaxed ordering.
+// The increment only makes the scope non-idle; task memory publication is
+// provided by the matching iree_task_scope_end.
 void iree_task_scope_begin(iree_task_scope_t* scope);
 
 // Notifies the scope that a previously begun execution task has completed.
 //
-// Memory ordering: this does a iree_atomic_ref_count_dec.
-// That means a guarantee that all writes made before calling
-// iree_task_scope_end on one thread are visible to any other thread that has
-// observed the reference count falling to zero (e.g. iree_task_scope_is_idle
-// returned true).
+// Memory ordering: this decrements pending_submissions with acquire/release
+// ordering. All writes made before iree_task_scope_end on one thread are
+// visible to any other thread that observes the counter falling to zero (for
+// example, iree_task_scope_is_idle returned true).
 void iree_task_scope_end(iree_task_scope_t* scope);
 
 // Returns true if the scope has no pending or in-flight tasks.
 //
-// Memory ordering: this does iree_atomic_ref_count_load.
-// That means a guarantee that subsequent memory read accesses can't be
-// reordered before a call to iree_task_scope_is_idle, and that when
-// iree_task_scope_is_idle returns true as a result of another thread
-// having just called iree_task_scope_end, all memory writes made on that thread
-// before calling iree_task_scope_end are visible on this thread after
-// iree_task_scope_is_idle has returned.
+// Memory ordering: this loads pending_submissions with acquire ordering. When
+// iree_task_scope_is_idle returns true after another thread called
+// iree_task_scope_end, all memory writes made by that thread before
+// iree_task_scope_end are visible on this thread after
+// iree_task_scope_is_idle returns.
 bool iree_task_scope_is_idle(iree_task_scope_t* scope);
 
 // Waits for the scope to become idle indicating that all pending and in-flight

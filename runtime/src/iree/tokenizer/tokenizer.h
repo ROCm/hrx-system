@@ -559,8 +559,8 @@ void iree_tokenizer_encode_state_deinitialize(
 //
 // |flags| can change between resets (e.g., different offset tracking per item).
 // The transform_buffer and offset_runs remain as set during initialization.
-void iree_tokenizer_encode_state_reset(iree_tokenizer_encode_state_t* state,
-                                       iree_tokenizer_encode_flags_t flags);
+iree_status_t iree_tokenizer_encode_state_reset(
+    iree_tokenizer_encode_state_t* state, iree_tokenizer_encode_flags_t flags);
 
 // Returns true if the encode state has pending data that would produce tokens
 // on finalize. Useful for determining whether to call finalize or whether the

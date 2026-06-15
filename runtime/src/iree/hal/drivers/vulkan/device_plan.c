@@ -341,32 +341,6 @@ static void iree_hal_vulkan_device_plan_initialize_queue_create_infos(
   }
 }
 
-static iree_status_t iree_hal_vulkan_device_plan_select_enabled_dispatch_abis(
-    iree_hal_vulkan_features_t enabled_features,
-    iree_hal_vulkan_dispatch_abis_t requested_dispatch_abis,
-    iree_hal_vulkan_dispatch_abis_t* out_enabled_dispatch_abis) {
-  *out_enabled_dispatch_abis = IREE_HAL_VULKAN_DISPATCH_ABI_NONE;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_vulkan_dispatch_abis_verify(requested_dispatch_abis));
-
-  iree_hal_vulkan_dispatch_abis_t enabled_dispatch_abis =
-      requested_dispatch_abis;
-  if (iree_all_bits_set(requested_dispatch_abis,
-                        IREE_HAL_VULKAN_DISPATCH_ABI_BDA) &&
-      !iree_all_bits_set(
-          enabled_features,
-          IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES)) {
-    enabled_dispatch_abis &= ~IREE_HAL_VULKAN_DISPATCH_ABI_BDA;
-  }
-  if (enabled_dispatch_abis == IREE_HAL_VULKAN_DISPATCH_ABI_NONE) {
-    return iree_make_status(
-        IREE_STATUS_UNAVAILABLE,
-        "Vulkan BDA dispatch ABI requires bufferDeviceAddress");
-  }
-  *out_enabled_dispatch_abis = enabled_dispatch_abis;
-  return iree_ok_status();
-}
-
 static iree_status_t iree_hal_vulkan_device_plan_verify_device_options(
     const iree_hal_vulkan_device_options_t* device_options) {
   const iree_hal_vulkan_device_flags_t recognized_device_flags =
@@ -463,6 +437,11 @@ iree_status_t iree_hal_vulkan_device_plan_initialize_for_create(
       iree_hal_vulkan_device_plan_verify_request_flags(request_flags));
   IREE_RETURN_IF_ERROR(iree_hal_vulkan_device_plan_verify_requested_features(
       requested_features));
+  if (!iree_hal_vulkan_physical_device_supports_baseline(snapshot)) {
+    return iree_make_status(
+        IREE_STATUS_UNAVAILABLE,
+        "Vulkan physical device does not satisfy the Vulkan 1.3 baseline");
+  }
   out_plan->request_flags = request_flags;
   IREE_RETURN_IF_ERROR(iree_hal_vulkan_select_queue_assignment(
       snapshot, device_options, &out_plan->queue_assignment));
@@ -493,7 +472,7 @@ iree_status_t iree_hal_vulkan_device_plan_initialize_for_create(
       .shaderInt8 = snapshot->features12.shaderInt8,
       .scalarBlockLayout = VK_TRUE,
       .timelineSemaphore = VK_TRUE,
-      .bufferDeviceAddress = VK_FALSE,
+      .bufferDeviceAddress = VK_TRUE,
       .vulkanMemoryModel = snapshot->features12.vulkanMemoryModel,
       .vulkanMemoryModelDeviceScope =
           snapshot->features12.vulkanMemoryModel &&
@@ -575,18 +554,6 @@ iree_status_t iree_hal_vulkan_device_plan_initialize_for_create(
     out_plan->enabled_features2.features.sparseResidencyAliased = VK_TRUE;
     out_plan->enabled_features |=
         IREE_HAL_VULKAN_FEATURE_ENABLE_SPARSE_RESIDENCY_ALIASED;
-  }
-  if (iree_any_bit_set(
-          requested_features,
-          IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES)) {
-    if (!snapshot->features12.bufferDeviceAddress) {
-      return iree_make_status(
-          IREE_STATUS_UNAVAILABLE,
-          "requested Vulkan bufferDeviceAddress is not available");
-    }
-    out_plan->enabled_features12.bufferDeviceAddress = VK_TRUE;
-    out_plan->enabled_features |=
-        IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES;
   }
   if (iree_any_bit_set(requested_features,
                        IREE_HAL_VULKAN_FEATURE_ENABLE_SUBGROUP_SIZE_CONTROL) &&
@@ -692,9 +659,7 @@ iree_status_t iree_hal_vulkan_device_plan_initialize_for_create(
           ? VK_TRUE
           : VK_FALSE;
 
-  return iree_hal_vulkan_device_plan_select_enabled_dispatch_abis(
-      out_plan->enabled_features, device_options->dispatch_abis,
-      &out_plan->enabled_dispatch_abis);
+  return iree_ok_status();
 }
 
 static iree_status_t iree_hal_vulkan_verify_external_enabled_features(
@@ -720,6 +685,9 @@ static iree_status_t iree_hal_vulkan_verify_external_enabled_features(
       IREE_HAL_VULKAN_FEATURE_ENABLE_SYNCHRONIZATION2, "synchronization2");
   IREE_HAL_VULKAN_REQUIRE_ENABLED_FEATURE(
       IREE_HAL_VULKAN_FEATURE_ENABLE_SCALAR_BLOCK_LAYOUT, "scalarBlockLayout");
+  IREE_HAL_VULKAN_REQUIRE_ENABLED_FEATURE(
+      IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES,
+      "bufferDeviceAddress");
 #undef IREE_HAL_VULKAN_REQUIRE_ENABLED_FEATURE
 
   if (!iree_hal_vulkan_physical_device_supports_baseline(snapshot)) {
@@ -1062,9 +1030,6 @@ iree_status_t iree_hal_vulkan_device_plan_initialize_for_wrap(
   }
   IREE_RETURN_IF_ERROR(iree_hal_vulkan_verify_external_device_contract(
       snapshot, external_device_params));
-  IREE_RETURN_IF_ERROR(iree_hal_vulkan_device_plan_select_enabled_dispatch_abis(
-      external_device_params->enabled_features, device_options->dispatch_abis,
-      &out_plan->enabled_dispatch_abis));
   IREE_RETURN_IF_ERROR(iree_hal_vulkan_select_external_queue_assignment(
       snapshot, external_device_params, &out_plan->queue_assignment));
   if (iree_all_bits_set(external_device_params->enabled_features,

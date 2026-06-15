@@ -1,0 +1,23 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_scalar_f32.loom-test
+// RUN: emit source-low output=low
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @scalar_f32_arith(%lhs: f32, %rhs: f32, %bias: f32) -> (f32) {
+  %sum = scalar.addf %lhs, %rhs : f32
+  %difference = scalar.subf %sum, %bias : f32
+  %product = scalar.mulf %difference, %rhs : f32
+  %result = scalar.fmaf %product, %rhs, %bias : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @scalar_f32_arith(%lhs: reg<llvmir.f32>, %rhs: reg<llvmir.f32>, %bias: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+  %sum = add.f32 %lhs, %rhs
+  %difference = sub.f32 %sum, %bias
+  %product = mul.f32 %difference, %rhs
+  %result = fma.f32 %product, %rhs, %bias
+  return %result
+}

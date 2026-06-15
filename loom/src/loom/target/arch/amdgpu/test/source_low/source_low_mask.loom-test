@@ -1,0 +1,354 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/vector_mask_select.loom-test
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @i32_cmpi_select(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %true_value: vector<2xi32>, %false_value: vector<2xi32>) -> (vector<2xi32>) {
+  %mask = vector.cmpi slt, %lhs, %rhs : vector<2xi32> -> vector<2xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<2xi32>
+  func.return %selected : vector<2xi32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @i32_cmpi_select(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %true_value: reg<amdgpu.vgpr x2>, %false_value: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.rdna3.core> {
+  %12 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %13 = slice %rhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %14 = v_cmp_lt_i32 %12, %13
+  %15 = slice %lhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %16 = slice %rhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %17 = v_cmp_lt_i32 %15, %16
+  %20 = slice %true_value[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %21 = slice %false_value[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %22 = v_cndmask_b32 %21, %20, %14
+  %24 = slice %true_value[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %25 = slice %false_value[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %26 = v_cndmask_b32 %25, %24, %17
+  %selected = concat(%22, %26) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %selected
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @f32_cmpf_select(%lhs: vector<1xf32>, %rhs: vector<1xf32>, %true_value: vector<1xf32>, %false_value: vector<1xf32>) -> (vector<1xf32>) {
+  %mask = vector.cmpf olt, %lhs, %rhs : vector<1xf32> -> vector<1xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<1xf32>
+  func.return %selected : vector<1xf32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @f32_cmpf_select(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %mask = v_cmp_lt_f32 %lhs, %rhs
+  %selected = v_cndmask_b32 %false_value, %true_value, %mask
+  return %selected
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @i32_cmpi_select_zero_inline(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %false_value: vector<2xi32>) -> (vector<2xi32>) {
+  %mask = vector.cmpi slt, %lhs, %rhs : vector<2xi32> -> vector<2xi1>
+  %zero = scalar.constant 0 : i32
+  %true_value = vector.splat %zero : vector<2xi32>
+  %selected = vector.select %mask, %true_value, %false_value : vector<2xi32>
+  func.return %selected : vector<2xi32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @i32_cmpi_select_zero_inline(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %false_value: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.rdna3.core> {
+  %13 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %14 = slice %rhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %15 = v_cmp_lt_i32 %13, %14
+  %16 = slice %lhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %17 = slice %rhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %18 = v_cmp_lt_i32 %16, %17
+  %24 = slice %false_value[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %25 = v_cndmask_b32_src1_inline %24, %15 {true_value = 0}
+  %27 = slice %false_value[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %28 = v_cndmask_b32_src1_inline %27, %18 {true_value = 0}
+  %selected = concat(%25, %28) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %selected
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @i32_cmpi_select_small_inline(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %false_value: vector<2xi32>) -> (vector<2xi32>) {
+  %small = scalar.constant 3 : i32
+  %mask = vector.cmpi slt, %lhs, %rhs : vector<2xi32> -> vector<2xi1>
+  %true_value = vector.splat %small : vector<2xi32>
+  %selected = vector.select %mask, %true_value, %false_value : vector<2xi32>
+  func.return %selected : vector<2xi32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @i32_cmpi_select_small_inline(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %false_value: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.rdna3.core> {
+  %13 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %14 = slice %rhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %15 = v_cmp_lt_i32 %13, %14
+  %16 = slice %lhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %17 = slice %rhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %18 = v_cmp_lt_i32 %16, %17
+  %24 = slice %false_value[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %25 = v_cndmask_b32_src1_inline %24, %15 {true_value = 3}
+  %27 = slice %false_value[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %28 = v_cndmask_b32_src1_inline %27, %18 {true_value = 3}
+  %selected = concat(%25, %28) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %selected
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @i32_cmpi_select_noninline_constant(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %false_value: vector<2xi32>) -> (vector<2xi32>) {
+  %constant = scalar.constant 65 : i32
+  %mask = vector.cmpi slt, %lhs, %rhs : vector<2xi32> -> vector<2xi1>
+  %true_value = vector.splat %constant : vector<2xi32>
+  %selected = vector.select %mask, %true_value, %false_value : vector<2xi32>
+  func.return %selected : vector<2xi32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @i32_cmpi_select_noninline_constant(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %false_value: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.rdna3.core> {
+  %13 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %14 = slice %rhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %15 = v_cmp_lt_i32 %13, %14
+  %16 = slice %lhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %17 = slice %rhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %18 = v_cmp_lt_i32 %16, %17
+  %24 = slice %false_value[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %25 = v_cndmask_b32_src1_lit %24, %15, 65
+  %27 = slice %false_value[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %28 = v_cndmask_b32_src1_lit %27, %18, 65
+  %selected = concat(%25, %28) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %selected
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @i64_vector_mask_select(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %true_value: vector<2xi64>, %false_value: vector<2xi64>) -> (vector<2xi64>) {
+  %mask = vector.cmpi slt, %lhs, %rhs : vector<2xi32> -> vector<2xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<2xi64>
+  func.return %selected : vector<2xi64>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @i64_vector_mask_select(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %true_value: reg<amdgpu.vgpr x4>, %false_value: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.rdna3.core> {
+  %12 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %13 = slice %rhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %14 = v_cmp_lt_i32 %12, %13
+  %15 = slice %lhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %16 = slice %rhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %17 = v_cmp_lt_i32 %15, %16
+  %20 = slice %true_value[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %21 = slice %false_value[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %22 = v_cndmask_b32 %21, %20, %14
+  %24 = slice %true_value[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %25 = slice %false_value[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %26 = v_cndmask_b32 %25, %24, %14
+  %28 = slice %true_value[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %29 = slice %false_value[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %30 = v_cndmask_b32 %29, %28, %17
+  %32 = slice %true_value[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %33 = slice %false_value[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %34 = v_cndmask_b32 %33, %32, %17
+  %selected = concat(%22, %26, %30, %34) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  return %selected
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @f64_vector_mask_select(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %true_value: vector<2xf64>, %false_value: vector<2xf64>) -> (vector<2xf64>) {
+  %mask = vector.cmpi slt, %lhs, %rhs : vector<2xi32> -> vector<2xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<2xf64>
+  func.return %selected : vector<2xf64>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @f64_vector_mask_select(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %true_value: reg<amdgpu.vgpr x4>, %false_value: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.rdna3.core> {
+  %12 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %13 = slice %rhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %14 = v_cmp_lt_i32 %12, %13
+  %15 = slice %lhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %16 = slice %rhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %17 = v_cmp_lt_i32 %15, %16
+  %20 = slice %true_value[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %21 = slice %false_value[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %22 = v_cndmask_b32 %21, %20, %14
+  %24 = slice %true_value[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %25 = slice %false_value[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %26 = v_cndmask_b32 %25, %24, %14
+  %28 = slice %true_value[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %29 = slice %false_value[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %30 = v_cndmask_b32 %29, %28, %17
+  %32 = slice %true_value[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %33 = slice %false_value[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %34 = v_cndmask_b32 %33, %32, %17
+  %selected = concat(%22, %26, %30, %34) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  return %selected
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @i8_scalar_mask_select(%lhs: i32, %rhs: i32, %true_value: vector<4xi8>, %false_value: vector<4xi8>) -> (vector<4xi8>) {
+  %condition = scalar.cmpi slt, %lhs, %rhs : i32
+  %mask = vector.splat %condition : vector<4xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<4xi8>
+  func.return %selected : vector<4xi8>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @i8_scalar_mask_select(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %13 = v_mov_b32_copy %lhs
+  %14 = v_mov_b32_copy %rhs
+  %condition = v_cmp_lt_i32 %13, %14
+  %selected = v_cndmask_b32 %false_value, %true_value, %condition
+  return %selected
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @i16_scalar_mask_select(%lhs: i32, %rhs: i32, %true_value: vector<2xi16>, %false_value: vector<2xi16>) -> (vector<2xi16>) {
+  %condition = scalar.cmpi slt, %lhs, %rhs : i32
+  %mask = vector.splat %condition : vector<2xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<2xi16>
+  func.return %selected : vector<2xi16>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @i16_scalar_mask_select(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %13 = v_mov_b32_copy %lhs
+  %14 = v_mov_b32_copy %rhs
+  %condition = v_cmp_lt_i32 %13, %14
+  %selected = v_cndmask_b32 %false_value, %true_value, %condition
+  return %selected
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @bf16_scalar_mask_select_v4(%lhs: i32, %rhs: i32, %true_value: vector<4xbf16>, %false_value: vector<4xbf16>) -> (vector<4xbf16>) {
+  %condition = scalar.cmpi slt, %lhs, %rhs : i32
+  %mask = vector.splat %condition : vector<4xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<4xbf16>
+  func.return %selected : vector<4xbf16>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @bf16_scalar_mask_select_v4(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr x2>, %false_value: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.rdna3.core> {
+  %13 = v_mov_b32_copy %lhs
+  %14 = v_mov_b32_copy %rhs
+  %condition = v_cmp_lt_i32 %13, %14
+  %17 = slice %true_value[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %18 = slice %false_value[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %19 = v_cndmask_b32 %18, %17, %condition
+  %20 = slice %true_value[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %21 = slice %false_value[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %22 = v_cndmask_b32 %21, %20, %condition
+  %selected = concat(%19, %22) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %selected
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @bf16_scalar_mask_select_v16(%lhs: i32, %rhs: i32, %true_value: vector<16xbf16>, %false_value: vector<16xbf16>) -> (vector<16xbf16>) {
+  %condition = scalar.cmpi slt, %lhs, %rhs : i32
+  %mask = vector.splat %condition : vector<16xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<16xbf16>
+  func.return %selected : vector<16xbf16>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @bf16_scalar_mask_select_v16(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr x8>, %false_value: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm<amdgpu.rdna3.core> {
+  %13 = v_mov_b32_copy %lhs
+  %14 = v_mov_b32_copy %rhs
+  %condition = v_cmp_lt_i32 %13, %14
+  %17 = slice %true_value[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %18 = slice %false_value[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %19 = v_cndmask_b32 %18, %17, %condition
+  %20 = slice %true_value[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %21 = slice %false_value[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %22 = v_cndmask_b32 %21, %20, %condition
+  %23 = slice %true_value[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %24 = slice %false_value[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %25 = v_cndmask_b32 %24, %23, %condition
+  %26 = slice %true_value[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %27 = slice %false_value[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %28 = v_cndmask_b32 %27, %26, %condition
+  %29 = slice %true_value[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %30 = slice %false_value[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %31 = v_cndmask_b32 %30, %29, %condition
+  %32 = slice %true_value[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %33 = slice %false_value[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %34 = v_cndmask_b32 %33, %32, %condition
+  %35 = slice %true_value[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %36 = slice %false_value[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %37 = v_cndmask_b32 %36, %35, %condition
+  %38 = slice %true_value[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %39 = slice %false_value[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %40 = v_cndmask_b32 %39, %38, %condition
+  %selected = concat(%19, %22, %25, %28, %31, %34, %37, %40) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
+  return %selected
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @f16_scalar_mask_select_v4(%lhs: i32, %rhs: i32, %true_value: vector<4xf16>, %false_value: vector<4xf16>) -> (vector<4xf16>) {
+  %condition = scalar.cmpi slt, %lhs, %rhs : i32
+  %mask = vector.splat %condition : vector<4xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<4xf16>
+  func.return %selected : vector<4xf16>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @f16_scalar_mask_select_v4(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr x2>, %false_value: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.rdna3.core> {
+  %13 = v_mov_b32_copy %lhs
+  %14 = v_mov_b32_copy %rhs
+  %condition = v_cmp_lt_i32 %13, %14
+  %17 = slice %true_value[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %18 = slice %false_value[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %19 = v_cndmask_b32 %18, %17, %condition
+  %20 = slice %true_value[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %21 = slice %false_value[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %22 = v_cndmask_b32 %21, %20, %condition
+  %selected = concat(%19, %22) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %selected
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @i64_splat(%value: i64) -> (vector<2xi64>) {
+  %splat = vector.splat %value : vector<2xi64>
+  func.return %splat : vector<2xi64>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @i64_splat(%value: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.rdna3.core> {
+  %5 = slice %value[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %6 = v_mov_b32_copy %5
+  %7 = slice %value[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %8 = v_mov_b32_copy %7
+  %9 = concat(%6, %8) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %splat = concat(%9, %9) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
+  return %splat
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @f64_splat(%value: f64) -> (vector<2xf64>) {
+  %splat = vector.splat %value : vector<2xf64>
+  func.return %splat : vector<2xf64>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @f64_splat(%value: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.rdna3.core> {
+  %splat = concat(%value, %value) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
+  return %splat
+}

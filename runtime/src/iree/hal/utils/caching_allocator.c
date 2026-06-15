@@ -279,7 +279,7 @@ static iree_status_t iree_hal_caching_allocator_pool_acquire(
   if (iree_status_is_ok(status)) {
     *out_buffer = buffer;
   } else {
-    if (buffer) iree_hal_buffer_release(buffer);
+    iree_hal_buffer_release(buffer);
     iree_slim_mutex_lock(&pool->mutex);
     pool->total_allocated_size -= allocation_size;
     iree_slim_mutex_unlock(&pool->mutex);
@@ -366,8 +366,9 @@ iree_status_t iree_hal_caching_allocator_create_unbounded(
   // Query heaps from the underlying allocator.
   iree_hal_allocator_memory_heap_t heaps[8];
   iree_host_size_t heap_count = 0;
-  IREE_RETURN_IF_ERROR(iree_hal_allocator_query_memory_heaps(
-      device_allocator, IREE_ARRAYSIZE(heaps), heaps, &heap_count));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_allocator_query_memory_heaps(
+              device_allocator, IREE_ARRAYSIZE(heaps), heaps, &heap_count));
 
   // Setup pool parameters for each heap.
   iree_hal_caching_allocator_pool_params_t* heap_pool_params =

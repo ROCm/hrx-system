@@ -1,0 +1,120 @@
+// RUN: roundtrip
+
+func.def @i32_cmpi_select(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %true_value: vector<2xi32>, %false_value: vector<2xi32>) -> (vector<2xi32>) {
+  %mask = vector.cmpi slt, %lhs, %rhs : vector<2xi32> -> vector<2xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<2xi32>
+  func.return %selected : vector<2xi32>
+}
+
+// ====
+
+func.def @f32_cmpf_select(%lhs: vector<1xf32>, %rhs: vector<1xf32>, %true_value: vector<1xf32>, %false_value: vector<1xf32>) -> (vector<1xf32>) {
+  %mask = vector.cmpf olt, %lhs, %rhs : vector<1xf32> -> vector<1xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<1xf32>
+  func.return %selected : vector<1xf32>
+}
+
+// ====
+
+func.def @i32_cmpi_select_zero_inline(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %false_value: vector<2xi32>) -> (vector<2xi32>) {
+  %mask = vector.cmpi slt, %lhs, %rhs : vector<2xi32> -> vector<2xi1>
+  %zero = scalar.constant 0 : i32
+  %true_value = vector.splat %zero : vector<2xi32>
+  %selected = vector.select %mask, %true_value, %false_value : vector<2xi32>
+  func.return %selected : vector<2xi32>
+}
+
+// ====
+
+func.def @i32_cmpi_select_small_inline(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %false_value: vector<2xi32>) -> (vector<2xi32>) {
+  %small = scalar.constant 3 : i32
+  %mask = vector.cmpi slt, %lhs, %rhs : vector<2xi32> -> vector<2xi1>
+  %true_value = vector.splat %small : vector<2xi32>
+  %selected = vector.select %mask, %true_value, %false_value : vector<2xi32>
+  func.return %selected : vector<2xi32>
+}
+
+// ====
+
+func.def @i32_cmpi_select_noninline_constant(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %false_value: vector<2xi32>) -> (vector<2xi32>) {
+  %constant = scalar.constant 65 : i32
+  %mask = vector.cmpi slt, %lhs, %rhs : vector<2xi32> -> vector<2xi1>
+  %true_value = vector.splat %constant : vector<2xi32>
+  %selected = vector.select %mask, %true_value, %false_value : vector<2xi32>
+  func.return %selected : vector<2xi32>
+}
+
+// ====
+
+func.def @i64_vector_mask_select(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %true_value: vector<2xi64>, %false_value: vector<2xi64>) -> (vector<2xi64>) {
+  %mask = vector.cmpi slt, %lhs, %rhs : vector<2xi32> -> vector<2xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<2xi64>
+  func.return %selected : vector<2xi64>
+}
+
+// ====
+
+func.def @f64_vector_mask_select(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %true_value: vector<2xf64>, %false_value: vector<2xf64>) -> (vector<2xf64>) {
+  %mask = vector.cmpi slt, %lhs, %rhs : vector<2xi32> -> vector<2xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<2xf64>
+  func.return %selected : vector<2xf64>
+}
+
+// ====
+
+func.def @i8_scalar_mask_select(%lhs: i32, %rhs: i32, %true_value: vector<4xi8>, %false_value: vector<4xi8>) -> (vector<4xi8>) {
+  %condition = scalar.cmpi slt, %lhs, %rhs : i32
+  %mask = vector.splat %condition : vector<4xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<4xi8>
+  func.return %selected : vector<4xi8>
+}
+
+// ====
+
+func.def @i16_scalar_mask_select(%lhs: i32, %rhs: i32, %true_value: vector<2xi16>, %false_value: vector<2xi16>) -> (vector<2xi16>) {
+  %condition = scalar.cmpi slt, %lhs, %rhs : i32
+  %mask = vector.splat %condition : vector<2xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<2xi16>
+  func.return %selected : vector<2xi16>
+}
+
+// ====
+
+func.def @bf16_scalar_mask_select_v4(%lhs: i32, %rhs: i32, %true_value: vector<4xbf16>, %false_value: vector<4xbf16>) -> (vector<4xbf16>) {
+  %condition = scalar.cmpi slt, %lhs, %rhs : i32
+  %mask = vector.splat %condition : vector<4xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<4xbf16>
+  func.return %selected : vector<4xbf16>
+}
+
+// ====
+
+func.def @bf16_scalar_mask_select_v16(%lhs: i32, %rhs: i32, %true_value: vector<16xbf16>, %false_value: vector<16xbf16>) -> (vector<16xbf16>) {
+  %condition = scalar.cmpi slt, %lhs, %rhs : i32
+  %mask = vector.splat %condition : vector<16xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<16xbf16>
+  func.return %selected : vector<16xbf16>
+}
+
+// ====
+
+func.def @f16_scalar_mask_select_v4(%lhs: i32, %rhs: i32, %true_value: vector<4xf16>, %false_value: vector<4xf16>) -> (vector<4xf16>) {
+  %condition = scalar.cmpi slt, %lhs, %rhs : i32
+  %mask = vector.splat %condition : vector<4xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<4xf16>
+  func.return %selected : vector<4xf16>
+}
+
+// ====
+
+func.def @i64_splat(%value: i64) -> (vector<2xi64>) {
+  %splat = vector.splat %value : vector<2xi64>
+  func.return %splat : vector<2xi64>
+}
+
+// ====
+
+func.def @f64_splat(%value: f64) -> (vector<2xf64>) {
+  %splat = vector.splat %value : vector<2xf64>
+  func.return %splat : vector<2xf64>
+}

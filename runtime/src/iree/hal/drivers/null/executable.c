@@ -129,17 +129,41 @@ static iree_status_t iree_hal_null_executable_lookup_export_by_name(
                           "reflection not implemented");
 }
 
-static iree_status_t iree_hal_null_executable_lookup_global_by_name(
+static iree_status_t iree_hal_null_executable_try_lookup_global_by_name(
     iree_hal_executable_t* base_executable, iree_string_view_t name,
-    iree_hal_queue_affinity_t queue_affinity, iree_hal_buffer_t** out_buffer) {
+    bool* out_found, iree_hal_executable_global_t* out_global) {
   iree_hal_null_executable_t* executable =
       iree_hal_null_executable_cast(base_executable);
   (void)executable;
   (void)name;
+  *out_found = false;
+  *out_global = iree_hal_executable_global_invalid();
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_null_executable_global_info(
+    iree_hal_executable_t* base_executable, iree_hal_executable_global_t global,
+    iree_hal_executable_global_info_t* out_info) {
+  iree_hal_null_executable_t* executable =
+      iree_hal_null_executable_cast(base_executable);
+  (void)executable;
+  (void)global;
+  memset(out_info, 0, sizeof(*out_info));
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "invalid null executable global");
+}
+
+static iree_status_t iree_hal_null_executable_global_buffer(
+    iree_hal_executable_t* base_executable, iree_hal_executable_global_t global,
+    iree_hal_queue_affinity_t queue_affinity, iree_hal_buffer_t** out_buffer) {
+  iree_hal_null_executable_t* executable =
+      iree_hal_null_executable_cast(base_executable);
+  (void)executable;
+  (void)global;
   (void)queue_affinity;
   *out_buffer = NULL;
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "global lookup not implemented");
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "invalid null executable global");
 }
 
 static const iree_hal_executable_vtable_t iree_hal_null_executable_vtable = {
@@ -148,5 +172,8 @@ static const iree_hal_executable_vtable_t iree_hal_null_executable_vtable = {
     .function_info = iree_hal_null_executable_export_info,
     .function_parameters = iree_hal_null_executable_export_parameters,
     .lookup_function_by_name = iree_hal_null_executable_lookup_export_by_name,
-    .lookup_global_by_name = iree_hal_null_executable_lookup_global_by_name,
+    .try_lookup_global_by_name =
+        iree_hal_null_executable_try_lookup_global_by_name,
+    .global_info = iree_hal_null_executable_global_info,
+    .global_buffer = iree_hal_null_executable_global_buffer,
 };

@@ -1,0 +1,35 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_workgroup_indexed.loom-test
+// RUN: emit source-low output=low
+
+llvmir.target<object> @target {
+  triple = "amdgcn-amd-amdhsa"
+}
+kernel.def target(@target) @workgroup_memory_workitem_x_b32() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %tid0 = kernel.workitem.id<x> : index
+  %tid = index.assume %tid0 [range(%tid0, 0, 63)] : index
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 256 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64xi32, #dense>
+  %one = vector.constant 1 : vector<1xi32>
+  vector.store %one, %scratch_view[%tid] : vector<1xi32>, view<64xi32, #dense>
+  %loaded = vector.load %scratch_view[%tid] : view<64xi32, #dense> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%tid] : vector<1xi32>, view<64xi32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) @workgroup_memory_workitem_x_b32() asm<llvmir.generic.core> {
+  %tid = kernel.workitem_id.x
+  %bytes = const.i64 256
+  %scratch_view = alloca.workgroup.i8 %bytes, 16
+  %one = const.i32 1
+  store.indexed.i32 %one, %scratch_view, %tid, 0, 4
+  %loaded = load.indexed.i32 %scratch_view, %tid, 0, 4
+  store.indexed.i32 %loaded, %scratch_view, %tid, 0, 4
+  return
+}

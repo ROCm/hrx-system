@@ -1,0 +1,175 @@
+// RUN: emit source-low output=low
+
+x86.target<scalar> @target
+
+func.def target(@target) @scalar_i64_arithmetic(%lhs: i64, %rhs: i64, %factor: i64) -> (i64) {
+  %bias = scalar.constant 17 : i64
+  %sum = scalar.addi %lhs, %rhs : i64
+  %difference = scalar.subi %sum, %factor : i64
+  %product = scalar.muli %difference, %rhs : i64
+  %result = scalar.addi %product, %bias : i64
+  func.return %result : i64
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @scalar_i64_arithmetic(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>, %factor: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm<x86.scalar.core> {
+  %bias = mov.imm64 17
+  %14 = copy %lhs : reg<x86.gpr64> -> reg<x86.gpr64>
+  %sum = add.gpr64 %14, %rhs
+  %16 = copy %sum : reg<x86.gpr64> -> reg<x86.gpr64>
+  %difference = sub.gpr64 %16, %factor
+  %18 = copy %difference : reg<x86.gpr64> -> reg<x86.gpr64>
+  %product = imul.gpr64 %18, %rhs
+  %20 = copy %product : reg<x86.gpr64> -> reg<x86.gpr64>
+  %result = add.gpr64 %20, %bias
+  return %result
+}
+
+// ====
+
+x86.target<scalar> @target
+
+func.def target(@target) @scalar_i64_bitwise(%lhs: i64, %rhs: i64) -> (i64) {
+  %mask = scalar.constant 255 : i64
+  %masked = scalar.andi %lhs, %mask : i64
+  %tag = scalar.constant 240 : i64
+  %tagged = scalar.ori %masked, %tag : i64
+  %invert = scalar.constant -1 : i64
+  %inverted = scalar.xori %tagged, %invert : i64
+  %mixed = scalar.xori %inverted, %rhs : i64
+  %left_amount = scalar.constant 33 : i64
+  %left = scalar.shli %mixed, %left_amount : i64
+  %arithmetic_amount = scalar.constant 7 : i64
+  %arithmetic = scalar.shrsi %left, %arithmetic_amount : i64
+  %logical_amount = scalar.constant 9 : i64
+  %result = scalar.shrui %arithmetic, %logical_amount : i64
+  func.return %result : i64
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @scalar_i64_bitwise(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm<x86.scalar.core> {
+  %mask = mov.imm64 255
+  %20 = copy %lhs : reg<x86.gpr64> -> reg<x86.gpr64>
+  %masked = and.gpr64 %20, %mask
+  %tag = mov.imm64 240
+  %23 = copy %masked : reg<x86.gpr64> -> reg<x86.gpr64>
+  %tagged = or.gpr64 %23, %tag
+  %invert = mov.imm64 -1
+  %26 = copy %tagged : reg<x86.gpr64> -> reg<x86.gpr64>
+  %inverted = xor.gpr64 %26, %invert
+  %28 = copy %inverted : reg<x86.gpr64> -> reg<x86.gpr64>
+  %mixed = xor.gpr64 %28, %rhs
+  %30 = copy %mixed : reg<x86.gpr64> -> reg<x86.gpr64>
+  %left = shl.imm.gpr64 %30 {shift = 33}
+  %32 = copy %left : reg<x86.gpr64> -> reg<x86.gpr64>
+  %arithmetic = sar.imm.gpr64 %32 {shift = 7}
+  %34 = copy %arithmetic : reg<x86.gpr64> -> reg<x86.gpr64>
+  %result = shr.imm.gpr64 %34 {shift = 9}
+  return %result
+}
+
+// ====
+
+x86.target<scalar> @target
+
+func.def target(@target) @scalar_i64_compare_predicates(%lhs: i64, %rhs: i64) -> (i1, i1, i1, i1, i1, i1, i1, i1, i1, i1) {
+  %eq = scalar.cmpi eq, %lhs, %rhs : i64
+  %ne = scalar.cmpi ne, %lhs, %rhs : i64
+  %slt = scalar.cmpi slt, %lhs, %rhs : i64
+  %sle = scalar.cmpi sle, %lhs, %rhs : i64
+  %sgt = scalar.cmpi sgt, %lhs, %rhs : i64
+  %sge = scalar.cmpi sge, %lhs, %rhs : i64
+  %ult = scalar.cmpi ult, %lhs, %rhs : i64
+  %ule = scalar.cmpi ule, %lhs, %rhs : i64
+  %ugt = scalar.cmpi ugt, %lhs, %rhs : i64
+  %uge = scalar.cmpi uge, %lhs, %rhs : i64
+  func.return %eq, %ne, %slt, %sle, %sgt, %sge, %ult, %ule, %ugt, %uge : i1, i1, i1, i1, i1, i1, i1, i1, i1, i1
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @scalar_i64_compare_predicates(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>) -> (reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>) asm<x86.scalar.core> {
+  %eq = cmp.eq.gpr64 %lhs, %rhs
+  %ne = cmp.ne.gpr64 %lhs, %rhs
+  %slt = cmp.slt.gpr64 %lhs, %rhs
+  %sle = cmp.sle.gpr64 %lhs, %rhs
+  %sgt = cmp.sgt.gpr64 %lhs, %rhs
+  %sge = cmp.sge.gpr64 %lhs, %rhs
+  %ult = cmp.ult.gpr64 %lhs, %rhs
+  %ule = cmp.ule.gpr64 %lhs, %rhs
+  %ugt = cmp.ugt.gpr64 %lhs, %rhs
+  %uge = cmp.uge.gpr64 %lhs, %rhs
+  return %eq, %ne, %slt, %sle, %sgt, %sge, %ult, %ule, %ugt, %uge
+}
+
+// ====
+
+x86.target<scalar> @target
+
+func.def target(@target) @scalar_i64_compare_control(%lhs: i64, %rhs: i64, %true_value: i64, %false_value: i64) -> (i64) {
+  %signed = scalar.cmpi slt, %lhs, %rhs : i64
+  %unsigned = scalar.cmpi uge, %lhs, %rhs : i64
+  %condition = scalar.xori %signed, %unsigned : i1
+  cfg.cond_br %condition, ^then, ^else
+^then:
+  func.return %true_value : i64
+^else:
+  func.return %false_value : i64
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @scalar_i64_compare_control(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>, %true_value: reg<x86.gpr64>, %false_value: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm<x86.scalar.core> {
+  %signed = cmp.slt.gpr64 %lhs, %rhs
+  %unsigned = cmp.uge.gpr64 %lhs, %rhs
+  %15 = copy %signed : reg<x86.gpr32> -> reg<x86.gpr32>
+  %condition = xor.gpr32 %15, %unsigned
+  low.cond_br %condition, ^then, ^else : reg<x86.gpr32>
+^then:
+  return %true_value
+^else:
+  return %false_value
+}
+
+// ====
+
+x86.target<scalar> @target
+
+func.def target(@target) @scalar_i64_static_memory(%input: buffer, %output: buffer) {
+  %input_base = index.constant 8 : offset
+  %output_base = index.constant 16 : offset
+  %input_view = buffer.view %input[%input_base] : buffer -> view<8xi64, #dense>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<8xi64, #dense>
+  %loaded = view.load %input_view[2] : view<8xi64, #dense> -> i64
+  view.store %loaded, %output_view[3] : i64, view<8xi64, #dense>
+  func.return
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @scalar_i64_static_memory(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>) asm<x86.scalar.core> {
+  %loaded = mov.load.gpr64 %input_view {disp32 = 24}
+  mov.store.gpr64 %loaded, %output_view {disp32 = 40}
+  return
+}
+
+// ====
+
+x86.target<scalar> @target
+
+func.def target(@target) @scalar_i64_dynamic_memory(%input: buffer, %output: buffer, %i: index) {
+  %zero = index.constant 0 : offset
+  %bounded_i = index.assume %i [range(%i, 0, 8)] : index
+  %input_view = buffer.view %input[%zero] : buffer -> view<8xi64, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<8xi64, #dense>
+  %loaded = view.load %input_view[%bounded_i] : view<8xi64, #dense> -> i64
+  %incremented = scalar.addi %loaded, %loaded : i64
+  view.store %incremented, %output_view[%bounded_i] : i64, view<8xi64, #dense>
+  func.return
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @scalar_i64_dynamic_memory(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %bounded_i: reg<x86.gpr64>) asm<x86.scalar.core> {
+  %loaded = mov.load.indexed.gpr64 %input_view, %bounded_i {disp32 = 0, scale = 8}
+  %13 = copy %loaded : reg<x86.gpr64> -> reg<x86.gpr64>
+  %incremented = add.gpr64 %13, %loaded
+  mov.store.indexed.gpr64 %incremented, %output_view, %bounded_i {disp32 = 0, scale = 8}
+  return
+}

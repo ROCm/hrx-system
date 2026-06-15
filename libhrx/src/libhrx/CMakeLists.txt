@@ -27,6 +27,7 @@ iree_cc_library(
     "buffer_table.c"
     "buffer_view.c"
     "device.c"
+    "event.c"
     "executable.c"
     "fence.c"
     "host_allocator.c"

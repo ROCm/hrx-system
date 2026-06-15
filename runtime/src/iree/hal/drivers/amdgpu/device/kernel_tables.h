@@ -76,4 +76,6 @@ IREE_HAL_AMDGPU_DEVICE_KERNEL(
 //===----------------------------------------------------------------------===//
 
 IREE_HAL_AMDGPU_DEVICE_KERNEL(
+    iree_hal_amdgpu_device_timestamp_initialize_completion_signals, 32, 1, 1)
+IREE_HAL_AMDGPU_DEVICE_KERNEL(
     iree_hal_amdgpu_device_timestamp_harvest_dispatch_records, 32, 1, 1)

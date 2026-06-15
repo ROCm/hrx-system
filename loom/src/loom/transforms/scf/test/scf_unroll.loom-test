@@ -1,0 +1,276 @@
+// RUN: pass unroll-scf-for
+
+func.def @unmarked_static_loop_stays_structured() {
+  %start = index.constant 0 : index
+  %end = index.constant 3 : index
+  %step = index.constant 1 : index
+  scf.for %i = [%start to %end step %step] {
+    test.use %i : index
+  }
+  func.return
+}
+
+// ----
+func.def @unmarked_static_loop_stays_structured() {
+  %start = index.constant 0 : index
+  %end = index.constant 3 : index
+  %step = index.constant 1 : index
+  scf.for %i = [%start to %end step %step] {
+    test.use %i : index
+  }
+  func.return
+}
+
+// ====
+
+func.def @bare_unroll_resultless_loop() {
+  %start = index.constant 0 : index
+  %end = index.constant 3 : index
+  %step = index.constant 1 : index
+  scf.for %i = [%start to %end step %step] unroll {
+    test.use %i : index
+  }
+  func.return
+}
+
+// ----
+func.def @bare_unroll_resultless_loop() {
+  %start = index.constant 0 : index
+  %end = index.constant 3 : index
+  %step = index.constant 1 : index
+  %i_0 = index.constant 0 : index
+  test.use %i_0 : index
+  %i_1 = index.constant 1 : index
+  test.use %i_1 : index
+  %i_2 = index.constant 2 : index
+  test.use %i_2 : index
+  func.return
+}
+
+// ====
+
+func.def @bare_unroll_result_loop(%input: i32) -> (i32) {
+  %start = index.constant 0 : index
+  %end = index.constant 3 : index
+  %step = index.constant 1 : index
+  %result = scf.for %i = [%start to %end step %step](%acc = %input : i32) -> (i32) unroll {
+    %next = test.addi %acc, %acc : i32
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @bare_unroll_result_loop(%input: i32) -> (i32) {
+  %start = index.constant 0 : index
+  %end = index.constant 3 : index
+  %step = index.constant 1 : index
+  %i_0 = index.constant 0 : index
+  %next = test.addi %input, %input : i32
+  %i_1 = index.constant 1 : index
+  %next_1 = test.addi %next, %next : i32
+  %i_2 = index.constant 2 : index
+  %next_2 = test.addi %next_1, %next_1 : i32
+  func.return %next_2 : i32
+}
+
+// ====
+
+func.def @bare_unroll_zero_trip_result_loop(%input: i32) -> (i32) {
+  %start = index.constant 0 : index
+  %end = index.constant 0 : index
+  %step = index.constant 1 : index
+  %result = scf.for %i = [%start to %end step %step](%acc = %input : i32) -> (i32) unroll {
+    %next = test.addi %acc, %acc : i32
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @bare_unroll_zero_trip_result_loop(%input: i32) -> (i32) {
+  %start = index.constant 0 : index
+  %end = index.constant 0 : index
+  %step = index.constant 1 : index
+  func.return %input : i32
+}
+
+// ====
+
+func.def @bare_unroll_single_trip_result_loop(%input: i32) -> (i32) {
+  %start = index.constant 0 : index
+  %end = index.constant 1 : index
+  %step = index.constant 1 : index
+  %result = scf.for %i = [%start to %end step %step](%acc = %input : i32) -> (i32) unroll {
+    %next = test.addi %acc, %acc : i32
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @bare_unroll_single_trip_result_loop(%input: i32) -> (i32) {
+  %start = index.constant 0 : index
+  %end = index.constant 1 : index
+  %step = index.constant 1 : index
+  %i_0 = index.constant 0 : index
+  %next = test.addi %input, %input : i32
+  func.return %next : i32
+}
+
+// ====
+
+func.def @dynamic_exact_unroll_factor(%input: i32) -> (i32) {
+  %start = index.constant 0 : index
+  %end = index.constant 3 : index
+  %step = index.constant 1 : index
+  %factor = index.constant 3 : index
+  %result = scf.for %i = [%start to %end step %step](%acc = %input : i32) -> (i32) unroll(%factor) {
+    %next = test.addi %acc, %acc : i32
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @dynamic_exact_unroll_factor(%input: i32) -> (i32) {
+  %start = index.constant 0 : index
+  %end = index.constant 3 : index
+  %step = index.constant 1 : index
+  %factor = index.constant 3 : index
+  %i_0 = index.constant 0 : index
+  %next = test.addi %input, %input : i32
+  %i_1 = index.constant 1 : index
+  %next_1 = test.addi %next, %next : i32
+  %i_2 = index.constant 2 : index
+  %next_2 = test.addi %next_1, %next_1 : i32
+  func.return %next_2 : i32
+}
+
+// ====
+
+func.def @dynamic_zero_factor_clears_policy() {
+  %start = index.constant 0 : index
+  %end = index.constant 3 : index
+  %step = index.constant 1 : index
+  %factor = index.constant 0 : index
+  scf.for %i = [%start to %end step %step] unroll(%factor) {
+    test.use %i : index
+  }
+  func.return
+}
+
+// ----
+func.def @dynamic_zero_factor_clears_policy() {
+  %start = index.constant 0 : index
+  %end = index.constant 3 : index
+  %step = index.constant 1 : index
+  %factor = index.constant 0 : index
+  scf.for %i = [%start to %end step %step] {
+    test.use %i : index
+  }
+  func.return
+}
+
+// ====
+
+func.def @dynamic_one_factor_clears_policy(%input: i32) -> (i32) {
+  %start = index.constant 0 : index
+  %end = index.constant 3 : index
+  %step = index.constant 1 : index
+  %factor = index.constant 1 : index
+  %result = scf.for %i = [%start to %end step %step](%acc = %input : i32) -> (i32) unroll(%factor) {
+    %next = test.addi %acc, %acc : i32
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @dynamic_one_factor_clears_policy(%input: i32) -> (i32) {
+  %start = index.constant 0 : index
+  %end = index.constant 3 : index
+  %step = index.constant 1 : index
+  %factor = index.constant 1 : index
+  %result = scf.for %i = [%start to %end step %step](%acc = %input : i32) -> (i32) {
+    %next = test.addi %acc, %acc : i32
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+// ====
+
+func.def @dynamic_partial_factor_rejected() {
+  %start = index.constant 0 : index
+  %end = index.constant 3 : index
+  %step = index.constant 1 : index
+  %factor = index.constant 2 : index
+  // ERROR@+1: STRUCTURE/014 {attr_name="unroll_factor", actual_value="2", expected_constraint="0, 1, or the exact full trip count"}
+  scf.for %i = [%start to %end step %step] unroll(%factor) {
+    test.use %i : index
+  }
+  func.return
+}
+
+// ====
+
+func.def @dynamic_unresolved_factor_rejected(%factor: index) {
+  %start = index.constant 0 : index
+  %end = index.constant 3 : index
+  %step = index.constant 1 : index
+  // ERROR@+1: STRUCTURE/014 {attr_name="unroll_factor", expected_constraint="compile-time exact i64 value"}
+  scf.for %i = [%start to %end step %step] unroll(%factor) {
+    test.use %i : index
+  }
+  func.return
+}
+
+// ====
+
+func.def @bare_unroll_dynamic_lower_static_trip_count(%slot0: index) {
+  %slot = index.assume %slot0 [range(%slot0, 0, 7)] : index
+  %end = index.constant 16 : index
+  %step = index.constant 8 : index
+  scf.for %i = [%slot to %end step %step] unroll {
+    test.use %i : index
+  }
+  func.return
+}
+
+// ----
+func.def @bare_unroll_dynamic_lower_static_trip_count(%slot0: index) {
+  %slot = index.assume %slot0 [range(%slot0, 0, 7)] : index
+  %end = index.constant 16 : index
+  %step = index.constant 8 : index
+  test.use %slot : index
+  %5 = index.constant 8 : index
+  %i_8 = index.add %slot, %5 : index
+  test.use %i_8 : index
+  func.return
+}
+
+// ====
+
+func.def @bare_unroll_range_dependent_dynamic_lower_rejected(%slot0: index) {
+  %slot = index.assume %slot0 [range(%slot0, 0, 8)] : index
+  %end = index.constant 16 : index
+  %step = index.constant 8 : index
+  // ERROR@+1: STRUCTURE/014 {attr_name="unroll", expected_constraint="static trip count independent of lower-bound range"}
+  scf.for %i = [%slot to %end step %step] unroll {
+    test.use %i : index
+  }
+  func.return
+}
+
+// ====
+
+func.def @bare_unroll_dynamic_trip_count_rejected(%end: index) {
+  %start = index.constant 0 : index
+  %step = index.constant 1 : index
+  // ERROR@+1: STRUCTURE/014 {attr_name="unroll", expected_constraint="exact static trip count"}
+  scf.for %i = [%start to %end step %step] unroll {
+    test.use %i : index
+  }
+  func.return
+}

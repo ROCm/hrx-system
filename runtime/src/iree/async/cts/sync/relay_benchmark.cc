@@ -237,8 +237,8 @@ static StatusOr<std::unique_ptr<RelayChannel>> CreateRelayChannel(
   iree_status_t status = iree_async_notification_create(
       proactor, IREE_ASYNC_NOTIFICATION_FLAG_NONE, &channel->source);
   if (!iree_status_is_ok(status)) {
-    return iree::Status(static_cast<iree::StatusCode>(iree_status_code(status)),
-                        "Source notification creation failed");
+    return iree::Status(iree_status_annotate(
+        status, iree_make_cstring_view("source notification creation failed")));
   }
 
   status = iree_async_notification_create(
@@ -246,8 +246,8 @@ static StatusOr<std::unique_ptr<RelayChannel>> CreateRelayChannel(
   if (!iree_status_is_ok(status)) {
     iree_async_notification_release(channel->source);
     channel->source = nullptr;
-    return iree::Status(static_cast<iree::StatusCode>(iree_status_code(status)),
-                        "Sink notification creation failed");
+    return iree::Status(iree_status_annotate(
+        status, iree_make_cstring_view("sink notification creation failed")));
   }
 
   iree_async_relay_source_t source_desc =
@@ -262,8 +262,8 @@ static StatusOr<std::unique_ptr<RelayChannel>> CreateRelayChannel(
     iree_async_notification_release(channel->source);
     channel->sink = nullptr;
     channel->source = nullptr;
-    return iree::Status(static_cast<iree::StatusCode>(iree_status_code(status)),
-                        "Relay registration failed");
+    return iree::Status(iree_status_annotate(
+        status, iree_make_cstring_view("relay registration failed")));
   }
 
   return channel;

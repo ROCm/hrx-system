@@ -1033,11 +1033,12 @@ TEST_P(SendFlagsTest, ZeroCopySendMultipleSlabs) {
   iree_async_buffer_pool_t* pool_b = nullptr;
   iree_status_t status = iree_async_proactor_register_slab(
       proactor_, slab_b, IREE_ASYNC_BUFFER_ACCESS_FLAG_READ, &region_b);
-  bool has_two_slabs = iree_status_is_ok(status);
-  if (!has_two_slabs) {
+  bool has_two_slabs = false;
+  if (!iree_status_is_ok(status)) {
     iree_status_ignore(status);
     // Fall back to testing with just one slab (acquire multiple buffers).
   } else {
+    has_two_slabs = true;
     IREE_ASSERT_OK(iree_async_buffer_pool_allocate(
         region_b, iree_allocator_system(), &pool_b));
   }

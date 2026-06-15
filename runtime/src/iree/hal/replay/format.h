@@ -379,8 +379,8 @@ typedef struct iree_hal_replay_executable_function_metadata_t {
   uint64_t flags;
   // Static or minimum workgroup size of the function.
   uint32_t workgroup_size[3];
-  // Total number of 32-bit constants expected by the function.
-  uint16_t constant_count;
+  // Total byte length of constants expected by the function.
+  uint32_t constant_byte_length;
   // Total number of buffer bindings expected by the function.
   uint16_t binding_count;
   // Number of parameter metadata records for this function.

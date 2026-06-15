@@ -244,7 +244,7 @@ void iree_hal_amdgpu_pm4_command_buffer_cancel_publication_reference(
 // Retires one acquired publication reference after a queue submission that
 // waited on the publication signal has retired.
 void iree_hal_amdgpu_pm4_command_buffer_retire_publication_reference(
-    iree_hal_command_buffer_t* command_buffer, iree_status_t status);
+    iree_hal_command_buffer_t* command_buffer, iree_status_code_t status_code);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -716,7 +716,7 @@ static void iree_hal_sync_device_profile_operation_record_begin(
 static void iree_hal_sync_device_profile_operation_record_end(
     iree_hal_sync_device_t* device,
     const iree_hal_sync_device_profile_operation_t* operation,
-    iree_status_t operation_status) {
+    iree_status_code_t operation_status_code) {
   iree_hal_local_profile_recorder_t* recorder = device->profile_recorder;
   if (IREE_UNLIKELY(!recorder || operation->submission_id == 0)) {
     return;
@@ -730,7 +730,7 @@ static void iree_hal_sync_device_profile_operation_record_end(
       iree_hal_local_profile_host_execution_event_info_default();
   event_info.type = operation->type;
   event_info.flags = operation->host_flags;
-  event_info.status_code = iree_status_code(operation_status);
+  event_info.status_code = operation_status_code;
   event_info.scope = operation->scope;
   event_info.submission_id = operation->submission_id;
   event_info.command_buffer_id = operation->command_buffer_id;
@@ -804,8 +804,8 @@ static iree_status_t iree_hal_sync_device_profiled_queue_op_end(
     const iree_hal_semaphore_list_t signal_semaphore_list,
     const iree_hal_sync_device_profile_operation_t* operation,
     iree_status_t operation_status) {
-  iree_hal_sync_device_profile_operation_record_end(device, operation,
-                                                    operation_status);
+  iree_hal_sync_device_profile_operation_record_end(
+      device, operation, iree_status_code(operation_status));
   return iree_hal_sync_device_queue_op_end(device, signal_semaphore_list,
                                            operation_status);
 }
@@ -1446,7 +1446,7 @@ static iree_status_t iree_hal_sync_device_queue_host_call_profiled(
 
   if (is_nonblocking || call_status_code == IREE_STATUS_DEFERRED) {
     iree_hal_sync_device_profile_operation_record_end(
-        device, &profile_operation, iree_status_from_code(call_status_code));
+        device, &profile_operation, call_status_code);
     // Dependencies have already been signaled by contract; the callback status
     // cannot be represented on the queue timeline. Deferred callbacks will
     // signal in the future or are fire-and-forget.
@@ -1458,7 +1458,7 @@ static iree_status_t iree_hal_sync_device_queue_host_call_profiled(
         device, signal_semaphore_list, &profile_operation, call_status);
   } else {
     iree_hal_sync_device_profile_operation_record_end(
-        device, &profile_operation, call_status);
+        device, &profile_operation, iree_status_code(call_status));
     iree_async_frontier_tracker_fail_axis(
         device->frontier_tracker, device->axis,
         iree_status_from_code(iree_status_code(call_status)));

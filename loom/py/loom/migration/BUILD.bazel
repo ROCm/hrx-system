@@ -1,0 +1,61 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:python.bzl", "iree_py_binary", "iree_py_library", "iree_py_test")
+
+package(
+    default_visibility = ["//visibility:public"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_py_library(
+    name = "migration",
+    srcs = [
+        "__init__.py",
+        "cli.py",
+        "driver.py",
+        "manifest.py",
+        "rules.py",
+        "source.py",
+    ],
+    deps = [
+        "//loom/py/loom:core",
+        "//loom/py/loom/dialect:package",
+        "//loom/py/loom/format/bytecode",
+        "//loom/py/loom/format/text",
+        "//loom/py/loom/importers/check",
+        "//loom/py/loom/target/arch:all_targets",
+        "//loom/py/loom/target/test:descriptors",
+    ],
+)
+
+iree_py_binary(
+    name = "loom-migrate",
+    srcs = ["cli.py"],
+    main = "cli.py",
+    deps = [":migration"],
+)
+
+iree_py_test(
+    name = "migration_test",
+    srcs = [
+        "cli_test.py",
+        "driver_test.py",
+        "manifest_test.py",
+        "rules_test.py",
+        "source_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = [
+        "loom.migration.cli_test",
+        "loom.migration.driver_test",
+        "loom.migration.manifest_test",
+        "loom.migration.rules_test",
+        "loom.migration.source_test",
+    ],
+    main = "pytest_style_runner.py",
+    deps = [":migration"],
+)

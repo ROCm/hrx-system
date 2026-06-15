@@ -1,0 +1,60 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+)
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+#===------------------------------------------------------------------------===#
+# All-target convenience registry
+#===------------------------------------------------------------------------===#
+
+ALL_TARGETS_ENABLED = [
+    "//loom/config/target/arch:amdgpu",
+    "//loom/config/target/arch:iree_vm",
+    "//loom/config/target/arch:spirv",
+    "//loom/config/target/arch:wasm",
+    "//loom/config/target/arch:x86",
+]
+
+loom_cc_library(
+    name = "provider",
+    srcs = ["provider.c"],
+    hdrs = ["provider.h"],
+    target_compatible_with = ALL_TARGETS_ENABLED,
+    deps = [
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target/arch/amdgpu:provider",
+        "//loom/src/loom/target/arch/ireevm:provider",
+        "//loom/src/loom/target/arch/spirv:provider",
+        "//loom/src/loom/target/arch/wasm:provider",
+        "//loom/src/loom/target/arch/x86:provider",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+    ],
+)
+
+loom_cc_library(
+    name = "low_registry",
+    srcs = ["low_registry.c"],
+    hdrs = ["low_registry.h"],
+    target_compatible_with = ALL_TARGETS_ENABLED,
+    deps = [
+        ":provider",
+        "//loom/src/loom/codegen/low/lower",
+        "//loom/src/loom/target:legalization",
+        "//loom/src/loom/target:low_descriptor_registry",
+        "//loom/src/loom/target:low_legality",
+        "//runtime/src/iree/base",
+    ],
+)

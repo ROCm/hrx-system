@@ -7,9 +7,11 @@
 
 """Installs pinned standalone developer tools.
 
-Python-packaged tools belong in requirements-dev.in. Standalone release
-binaries belong in this manifest so local setup and CI use the same versions,
-download URLs, and hashes.
+Required shared Python-packaged tools belong in requirements-dev.in. Optional
+static-analysis providers belong in requirements-analysis.in so their
+transitive environments are locked separately from the core developer tool
+environment. Standalone release binaries belong in this manifest so local setup
+and CI use the same versions, download URLs, and hashes.
 """
 
 from __future__ import annotations

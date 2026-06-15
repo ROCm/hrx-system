@@ -1,0 +1,48 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+exports_files([
+    "lane_distribution.loom",
+    "packed_field_contracts.loom",
+    "q8_block_unroll.loom",
+    "q8_hip_shaped_unroll_unresolved.loom",
+    "q8_load_width.loom",
+    "q8_q4_signedness.loom",
+    "target_provider_selection.loom",
+])
+
+_AMDGPU_ARTIFACTS_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/target:amdgpu_artifacts",
+])
+
+iree_execution_test_suite(
+    name = "execution_test",
+    data = [
+        "lane_distribution.loom",
+        "packed_field_contracts.loom",
+        "q8_block_unroll.loom",
+        "q8_hip_shaped_unroll_unresolved.loom",
+        "q8_load_width.loom",
+        "q8_q4_signedness.loom",
+        "target_provider_selection.loom",
+    ],
+    manifests = ["hip_authoring.test.json"],
+    tags = ["hostonly"],
+    target_compatible_with = _AMDGPU_ARTIFACTS_COMPATIBLE_WITH,
+    tools = {
+        "iree-benchmark-loom": "//loom/src/loom/tools/iree-benchmark-loom",
+        "loom-opt": "//loom/src/loom/tools/loom-opt",
+    },
+)

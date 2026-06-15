@@ -1,0 +1,290 @@
+// RUN: pass scf-to-cfg
+
+func.def @lowers_if_result(%cond: i1, %a: i32, %b: i32) -> (i32) {
+  %result = scf.if %cond -> (i32) {
+    %then = test.addi %a, %b : i32
+    scf.yield %then : i32
+  } else {
+    %else = test.addi %b, %b : i32
+    scf.yield %else : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @lowers_if_result(%cond: i1, %a: i32, %b: i32) -> (i32) {
+  cfg.cond_br %cond, ^_bb1, ^_bb2
+^_bb1:
+  %then = test.addi %a, %b : i32
+  cfg.br ^_bb3(%then: i32)
+^_bb2:
+  %else = test.addi %b, %b : i32
+  cfg.br ^_bb3(%else: i32)
+^_bb3(%result: i32):
+  func.return %result : i32
+}
+
+// ====
+
+func.def @lowers_if_result_before_existing_cfg(%cond: i1, %guard: i1, %a: i32, %b: i32) {
+  %selected = scf.if %cond -> (i32) {
+    scf.yield %a : i32
+  } else {
+    scf.yield %b : i32
+  }
+  cfg.cond_br %guard, ^use, ^done
+^use:
+  test.use %selected : i32
+  cfg.br ^done
+^done:
+  func.return
+}
+
+// ----
+func.def @lowers_if_result_before_existing_cfg(%cond: i1, %guard: i1, %a: i32, %b: i32) {
+  cfg.cond_br %cond, ^_bb1, ^_bb2
+^_bb1:
+  cfg.br ^_bb3(%a: i32)
+^_bb2:
+  cfg.br ^_bb3(%b: i32)
+^_bb3(%selected: i32):
+  cfg.cond_br %guard, ^use, ^done
+^use:
+  test.use %selected : i32
+  cfg.br ^done
+^done:
+  func.return
+}
+
+// ====
+
+func.def @lowers_if_without_else(%cond: i1, %a: i32, %b: i32) {
+  scf.if %cond {
+    %then = test.addi %a, %b : i32
+    test.use %then : i32
+    scf.yield
+  }
+  func.return
+}
+
+// ----
+func.def @lowers_if_without_else(%cond: i1, %a: i32, %b: i32) {
+  cfg.cond_br %cond, ^_bb1, ^_bb2
+^_bb1:
+  %then = test.addi %a, %b : i32
+  test.use %then : i32
+  cfg.br ^_bb2
+^_bb2:
+  func.return
+}
+
+// ====
+
+func.def @lowers_counted_for(%n: index, %seed: i32, %x: i32) -> (i32) {
+  %start = index.constant 0 : index
+  %step = index.constant 1 : index
+  %sum = scf.for %i = [%start to %n step %step](%acc = %seed : i32) -> (i32) {
+    %next = test.addi %acc, %x : i32
+    scf.yield %next : i32
+  }
+  func.return %sum : i32
+}
+
+// ----
+func.def @lowers_counted_for(%n: index, %seed: i32, %x: i32) -> (i32) {
+  %start = index.constant 0 : index
+  %step = index.constant 1 : index
+  cfg.br ^_bb1(%start: index, %seed: i32)
+^_bb1(%i: index, %acc: i32):
+  %13 = index.cmp slt, %i, %n : index
+  cfg.cond_br %13, ^_bb2, ^_bb3
+^_bb2:
+  %next = test.addi %acc, %x : i32
+  %14 = index.add %i, %step : index
+  cfg.br ^_bb1(%14: index, %next: i32)
+^_bb3:
+  cfg.br ^_bb4(%acc: i32)
+^_bb4(%sum: i32):
+  func.return %sum : i32
+}
+
+// ====
+
+func.def @preserves_static_for_iv_facts() {
+  %start = index.constant 0 : index
+  %limit = index.constant 4 : index
+  %step = index.constant 2 : index
+  scf.for %i = [%start to %limit step %step] {
+    test.use %i : index
+    scf.yield
+  }
+  func.return
+}
+
+// ----
+func.def @preserves_static_for_iv_facts() {
+  %start = index.constant 0 : index
+  %limit = index.constant 4 : index
+  %step = index.constant 2 : index
+  cfg.br ^_bb1(%start: index)
+^_bb1(%4: index):
+  %6 = index.cmp slt, %4, %limit : index
+  cfg.cond_br %6, ^_bb2, ^_bb3
+^_bb2:
+  %i = index.assume %4 [range(%4, 0, 2), mul(%4, 2)] : index
+  test.use %i : index
+  %7 = index.add %i, %step : index
+  cfg.br ^_bb1(%7: index)
+^_bb3:
+  func.return
+}
+
+// ====
+
+kernel.def @preserves_kernel_for_iv_facts() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch() {
+  %start = index.constant 0 : index
+  %limit = index.constant 4 : index
+  %step = index.constant 2 : index
+  scf.for %i = [%start to %limit step %step] {
+    test.use %i : index
+    scf.yield
+  }
+  kernel.return
+}
+
+// ----
+kernel.def @preserves_kernel_for_iv_facts() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch() {
+  %start = index.constant 0 : index
+  %limit = index.constant 4 : index
+  %step = index.constant 2 : index
+  cfg.br ^_bb1(%start: index)
+^_bb1(%5: index):
+  %7 = index.cmp slt, %5, %limit : index
+  cfg.cond_br %7, ^_bb2, ^_bb3
+^_bb2:
+  %i = index.assume %5 [range(%5, 0, 2), mul(%5, 2)] : index
+  test.use %i : index
+  %8 = index.add %i, %step : index
+  cfg.br ^_bb1(%8: index)
+^_bb3:
+  kernel.return
+}
+
+// ====
+
+func.def @lowers_while(%cond: i1, %seed: i32, %x: i32) -> (i32) {
+  %result = scf.while(%before = %seed : i32) -> (i32) {
+    %forwarded = test.addi %before, %x : i32
+    scf.condition %cond, %forwarded : i1, i32
+  } do(%body: i32) {
+    %next = test.addi %body, %x : i32
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @lowers_while(%cond: i1, %seed: i32, %x: i32) -> (i32) {
+  cfg.br ^_bb1(%seed: i32)
+^_bb1(%before: i32):
+  %forwarded = test.addi %before, %x : i32
+  cfg.cond_br %cond, ^_bb2, ^_bb3
+^_bb2:
+  %next = test.addi %forwarded, %x : i32
+  cfg.br ^_bb1(%next: i32)
+^_bb3:
+  cfg.br ^_bb4(%forwarded: i32)
+^_bb4(%result: i32):
+  func.return %result : i32
+}
+
+// ====
+
+func.def @lowers_switch(%selector: index, %a: i32, %b: i32) -> (i32) {
+  %result = scf.switch %selector -> (i32) {
+    case 0 {
+      %case0 = test.addi %a, %a : i32
+      scf.yield %case0 : i32
+    }
+    case 2 {
+      %case2 = test.addi %a, %b : i32
+      scf.yield %case2 : i32
+    }
+    default {
+      %fallback = test.addi %b, %b : i32
+      scf.yield %fallback : i32
+    }
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @lowers_switch(%selector: index, %a: i32, %b: i32) -> (i32) {
+  %9 = index.constant 0 : index
+  %10 = index.cmp eq, %selector, %9 : index
+  cfg.cond_br %10, ^_bb2, ^_bb1
+^_bb1:
+  %11 = index.constant 2 : index
+  %12 = index.cmp eq, %selector, %11 : index
+  cfg.cond_br %12, ^_bb3, ^_bb4
+^_bb2:
+  %case0 = test.addi %a, %a : i32
+  cfg.br ^_bb5(%case0: i32)
+^_bb3:
+  %case2 = test.addi %a, %b : i32
+  cfg.br ^_bb5(%case2: i32)
+^_bb4:
+  %fallback = test.addi %b, %b : i32
+  cfg.br ^_bb5(%fallback: i32)
+^_bb5(%result: i32):
+  func.return %result : i32
+}
+
+// ====
+
+func.def @remaps_join_argument_dependent_type(%cond: i1, %buffer: buffer, %offset: offset) {
+  %layout, %view = scf.if %cond -> (encoding<layout>, view<4xf32, %layout>) {
+    %dense = encoding.layout.dense : encoding<layout>
+    %then_view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %dense>
+    scf.yield %dense, %then_view : encoding<layout>, view<4xf32, %dense>
+  } else {
+    %strided = encoding.layout.strided [1] : encoding<layout>
+    %else_view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %strided>
+    scf.yield %strided, %else_view : encoding<layout>, view<4xf32, %strided>
+  }
+  test.use %view : view<4xf32, %layout>
+  func.return
+}
+
+// ----
+func.def @remaps_join_argument_dependent_type(%cond: i1, %buffer: buffer, %offset: offset) {
+  cfg.cond_br %cond, ^_bb1, ^_bb2
+^_bb1:
+  %dense = encoding.layout.dense : encoding<layout>
+  %then_view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %dense>
+  cfg.br ^_bb3(%dense: encoding<layout>, %then_view: view<4xf32, %dense>)
+^_bb2:
+  %strided = encoding.layout.strided [1] : encoding<layout>
+  %else_view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %strided>
+  cfg.br ^_bb3(%strided: encoding<layout>, %else_view: view<4xf32, %strided>)
+^_bb3(%layout: encoding<layout>, %view: view<4xf32, %layout>):
+  test.use %view : view<4xf32, %layout>
+  func.return
+}
+
+// ====
+
+func.def @rejects_unknown_for_step(%n: index, %step: index) {
+  %zero = index.constant 0 : index
+  // ERROR@+1: STRUCTURE/035 {op_name="scf.for", pass_name="scf-to-cfg"}
+  scf.for %i = [%zero to %n step %step] {
+    scf.yield
+  }
+  func.return
+}

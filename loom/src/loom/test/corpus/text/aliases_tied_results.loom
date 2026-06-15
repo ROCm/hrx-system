@@ -1,0 +1,7 @@
+#q8 = #q8_0<block=32>
+func.decl @mutate(%m: index, %input: tile<[%m]xf32, #q8>) -> (%input as tile<[%m]xf32, #q8>)
+
+func.def @call_tied(%m: index, %input: tile<[%m]xf32, #q8>) -> (tile<[%m]xf32, #q8>) {
+  %out = func.call @mutate(%m, %input) : (index, tile<[%m]xf32, #q8>) -> (%input as tile<[%m]xf32, #q8>)
+  func.return %out : tile<[%m]xf32, #q8>
+}

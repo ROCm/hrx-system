@@ -1,0 +1,335 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/vector_v4.loom-test
+// RUN: emit source-low output=low
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @i32x4_arith(%lhs: vector<4xi32>, %rhs: vector<4xi32>) -> (vector<4xi32>) {
+  %sum = vector.addi %lhs, %rhs : vector<4xi32>
+  %diff = vector.subi %sum, %rhs : vector<4xi32>
+  func.return %diff : vector<4xi32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i32x4_arith(%lhs: reg<llvmir.i32 x4>, %rhs: reg<llvmir.i32 x4>) -> (reg<llvmir.i32 x4>) asm<llvmir.generic.core> {
+  %sum = add.v4i32 %lhs, %rhs
+  %diff = sub.v4i32 %sum, %rhs
+  return %diff
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @f32x4_arith(%lhs: vector<4xf32>, %rhs: vector<4xf32>) -> (vector<4xf32>) {
+  %sum = vector.addf %lhs, %rhs : vector<4xf32>
+  %product = vector.mulf %sum, %rhs : vector<4xf32>
+  func.return %product : vector<4xf32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f32x4_arith(%lhs: reg<llvmir.f32 x4>, %rhs: reg<llvmir.f32 x4>) -> (reg<llvmir.f32 x4>) asm<llvmir.generic.core> {
+  %sum = add.v4f32 %lhs, %rhs
+  %product = mul.v4f32 %sum, %rhs
+  return %product
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @f32x4_lane_extract(%v: vector<4xf32>, %x: f32) -> (f32) {
+  %lane = vector.extract %v[2] : vector<4xf32> -> f32
+  %sum = scalar.addf %lane, %x : f32
+  func.return %sum : f32
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f32x4_lane_extract(%v: reg<llvmir.f32 x4>, %x: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+  %lane = extract.v4f32 %v, 2
+  %sum = add.f32 %lane, %x
+  return %sum
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @f32x4_lane_edit(%v: vector<4xf32>, %x: f32) -> (vector<4xf32>) {
+  %lane = vector.extract %v[1] : vector<4xf32> -> f32
+  %sum = scalar.addf %lane, %x : f32
+  %updated = vector.insert %sum into %v[2] : f32, vector<4xf32>
+  func.return %updated : vector<4xf32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f32x4_lane_edit(%v: reg<llvmir.f32 x4>, %x: reg<llvmir.f32>) -> (reg<llvmir.f32 x4>) asm<llvmir.generic.core> {
+  %lane = extract.v4f32 %v, 1
+  %sum = add.f32 %lane, %x
+  %updated = insert.v4f32 %v, %sum, 2
+  return %updated
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @i32x4_splat_add(%value: i32, %rhs: vector<4xi32>) -> (vector<4xi32>) {
+  %splat = vector.splat %value : vector<4xi32>
+  %sum = vector.addi %splat, %rhs : vector<4xi32>
+  func.return %sum : vector<4xi32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i32x4_splat_add(%value: reg<llvmir.i32>, %rhs: reg<llvmir.i32 x4>) -> (reg<llvmir.i32 x4>) asm<llvmir.generic.core> {
+  %splat = splat.v4i32 %value
+  %sum = add.v4i32 %splat, %rhs
+  return %sum
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @i32x4_lane_edit(%v: vector<4xi32>, %x: i32) -> (vector<4xi32>) {
+  %lane = vector.extract %v[1] : vector<4xi32> -> i32
+  %sum = scalar.addi %lane, %x : i32
+  %updated = vector.insert %sum into %v[2] : i32, vector<4xi32>
+  func.return %updated : vector<4xi32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i32x4_lane_edit(%v: reg<llvmir.i32 x4>, %x: reg<llvmir.i32>) -> (reg<llvmir.i32 x4>) asm<llvmir.generic.core> {
+  %lane = extract.v4i32 %v, 1
+  %sum = add.i32 %lane, %x
+  %updated = insert.v4i32 %v, %sum, 2
+  return %updated
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @i32x4_shuffle(%v: vector<4xi32>) -> (vector<4xi32>) {
+  %shuffled = vector.shuffle<[3, 2, 1, 0]> %v : vector<4xi32>
+  func.return %shuffled : vector<4xi32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i32x4_shuffle(%v: reg<llvmir.i32 x4>) -> (reg<llvmir.i32 x4>) asm<llvmir.generic.core> {
+  %shuffled = shuffle.v4i32 %v, 3, 2, 1, 0
+  return %shuffled
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @i32x4_shuffle_reduce(%v: vector<4xi32>, %init: i32) -> (i32) {
+  %reversed = vector.shuffle<[3, 2, 1, 0]> %v : vector<4xi32>
+  %sum = vector.reduce<addi> %reversed, %init : vector<4xi32>, i32
+  func.return %sum : i32
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i32x4_shuffle_reduce(%v: reg<llvmir.i32 x4>, %init: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {
+  %16 = extract.v4i32 %v, 3
+  %17 = add.i32 %init, %16
+  %18 = extract.v4i32 %v, 2
+  %19 = add.i32 %17, %18
+  %20 = extract.v4i32 %v, 1
+  %21 = add.i32 %19, %20
+  %22 = extract.v4i32 %v, 0
+  %sum = add.i32 %21, %22
+  return %sum
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @f32x4_shuffle(%v: vector<4xf32>) -> (vector<4xf32>) {
+  %shuffled = vector.shuffle<[3, 1, 2, 0]> %v : vector<4xf32>
+  func.return %shuffled : vector<4xf32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f32x4_shuffle(%v: reg<llvmir.f32 x4>) -> (reg<llvmir.f32 x4>) asm<llvmir.generic.core> {
+  %shuffled = shuffle.v4f32 %v, 3, 1, 2, 0
+  return %shuffled
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @f32x4_shuffle_reduce(%v: vector<4xf32>, %init: f32) -> (f32) {
+  %shuffled = vector.shuffle<[3, 1, 2, 0]> %v : vector<4xf32>
+  %sum = vector.reduce<addf> %shuffled, %init : vector<4xf32>, f32
+  func.return %sum : f32
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f32x4_shuffle_reduce(%v: reg<llvmir.f32 x4>, %init: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+  %16 = extract.v4f32 %v, 3
+  %17 = add.f32 %init, %16
+  %18 = extract.v4f32 %v, 1
+  %19 = add.f32 %17, %18
+  %20 = extract.v4f32 %v, 2
+  %21 = add.f32 %19, %20
+  %22 = extract.v4f32 %v, 0
+  %sum = add.f32 %21, %22
+  return %sum
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @i32x4_select(%lhs: vector<4xi32>, %rhs: vector<4xi32>, %true_value: vector<4xi32>, %false_value: vector<4xi32>) -> (vector<4xi32>) {
+  %mask = vector.cmpi slt, %lhs, %rhs : vector<4xi32> -> vector<4xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<4xi32>
+  func.return %selected : vector<4xi32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i32x4_select(%lhs: reg<llvmir.i32 x4>, %rhs: reg<llvmir.i32 x4>, %true_value: reg<llvmir.i32 x4>, %false_value: reg<llvmir.i32 x4>) -> (reg<llvmir.i32 x4>) asm<llvmir.generic.core> {
+  %mask = cmp.slt.v4i32 %lhs, %rhs
+  %selected = select.v4i32 %mask, %true_value, %false_value
+  return %selected
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @f32x4_select(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %true_value: vector<4xf32>, %false_value: vector<4xf32>) -> (vector<4xf32>) {
+  %mask = vector.cmpf olt, %lhs, %rhs : vector<4xf32> -> vector<4xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<4xf32>
+  func.return %selected : vector<4xf32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f32x4_select(%lhs: reg<llvmir.f32 x4>, %rhs: reg<llvmir.f32 x4>, %true_value: reg<llvmir.f32 x4>, %false_value: reg<llvmir.f32 x4>) -> (reg<llvmir.f32 x4>) asm<llvmir.generic.core> {
+  %mask = cmp.olt.v4f32 %lhs, %rhs
+  %selected = select.v4f32 %mask, %true_value, %false_value
+  return %selected
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @i32x4_memory_copy(%input: buffer, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<4xi32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<4xi32, #dense>
+  %loaded = vector.load %input_view[0] : view<4xi32, #dense> -> vector<4xi32>
+  vector.store %loaded, %output_view[0] : vector<4xi32>, view<4xi32, #dense>
+  func.return
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i32x4_memory_copy(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>) asm<llvmir.generic.core> {
+  %loaded = load.v4i32 %input_view, 0
+  store.v4i32 %loaded, %output_view, 0
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @i32x4_memory_indexed(%input: buffer, %output: buffer, %i: index) {
+  %bounded_i = index.assume %i [range(%i, 0, 12)] : index
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<16xi32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<16xi32, #dense>
+  %loaded = vector.load %input_view[%bounded_i] : view<16xi32, #dense> -> vector<4xi32>
+  vector.store %loaded, %output_view[%bounded_i] : vector<4xi32>, view<16xi32, #dense>
+  func.return
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i32x4_memory_indexed(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>, %bounded_i: reg<llvmir.i64>) asm<llvmir.generic.core> {
+  %loaded = load.indexed.v4i32 %input_view, %bounded_i, 0, 4
+  store.indexed.v4i32 %loaded, %output_view, %bounded_i, 0, 4
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @f32x4_memory_copy(%input: buffer, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<4xf32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<4xf32, #dense>
+  %loaded = vector.load %input_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  vector.store %loaded, %output_view[0] : vector<4xf32>, view<4xf32, #dense>
+  func.return
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f32x4_memory_copy(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>) asm<llvmir.generic.core> {
+  %loaded = load.v4f32 %input_view, 0
+  store.v4f32 %loaded, %output_view, 0
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @f32x4_memory_indexed_add(%lhs: buffer, %rhs: buffer, %output: buffer, %i: index) {
+  %bounded_i = index.assume %i [range(%i, 0, 12)] : index
+  %zero = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs[%zero] : buffer -> view<16xf32, #dense>
+  %rhs_view = buffer.view %rhs[%zero] : buffer -> view<16xf32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<16xf32, #dense>
+  %lhs_v = vector.load %lhs_view[%bounded_i] : view<16xf32, #dense> -> vector<4xf32>
+  %rhs_v = vector.load %rhs_view[%bounded_i] : view<16xf32, #dense> -> vector<4xf32>
+  %sum = vector.addf %lhs_v, %rhs_v : vector<4xf32>
+  vector.store %sum, %output_view[%bounded_i] : vector<4xf32>, view<16xf32, #dense>
+  func.return
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f32x4_memory_indexed_add(%lhs_view: reg<llvmir.ptr>, %rhs_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>, %bounded_i: reg<llvmir.i64>) asm<llvmir.generic.core> {
+  %lhs_v = load.indexed.v4f32 %lhs_view, %bounded_i, 0, 4
+  %rhs_v = load.indexed.v4f32 %rhs_view, %bounded_i, 0, 4
+  %sum = add.v4f32 %lhs_v, %rhs_v
+  store.indexed.v4f32 %sum, %output_view, %bounded_i, 0, 4
+  return
+}

@@ -1,0 +1,59 @@
+// HIP concept: `#if defined(__gfx1100__)` / `#if defined(__gfx1200__)`.
+// Loom spelling: target records are symbols. Providers and functions can refer
+// to them with `target(@...)` instead of baking architecture ifdefs into every
+// call site.
+amdgpu.target<gfx1100> @gfx1100
+amdgpu.target<gfx1200> @gfx1200
+
+// HIP concept:
+//   template <typename Arch> int scale_i32(int value);
+//   gfx1100 specialization: multiply by 2.
+// Loom spelling: a `func.template<contract>` provider filtered by target and
+// ranked by priority. `target(@gfx1100)` says where this provider is legal.
+func.template<hip.recipe.scale_i32> target(@gfx1100) priority(20) @scale_i32_gfx1100(%value: i32) -> (i32) {
+  %two = scalar.constant 2 : i32
+  %scaled = scalar.muli %value, %two : i32
+  func.return %scaled : i32
+}
+
+// HIP concept: another architecture specialization. It is semantically the
+// same as the gfx1100 provider so a single check case can stay target-neutral,
+// but its body is intentionally different so the selected provider is visible
+// after inlining.
+func.template<hip.recipe.scale_i32> target(@gfx1200) priority(20) @scale_i32_gfx1200(%value: i32) -> (i32) {
+  %scaled = scalar.addi %value, %value : i32
+  func.return %scaled : i32
+}
+
+// HIP concept: generic fallback for targets without a specialization.
+// Loom spelling: omit `target(@...)` so it applies everywhere, and give it a
+// lower priority than target-specific providers.
+func.template<hip.recipe.scale_i32> priority(1) @scale_i32_fallback(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+// HIP concept:
+//   int y = scale_i32<CurrentArch>(x);
+// Loom spelling: `func.apply<contract>` demands an implementation without
+// naming it. `select-templates` uses this function's target to pick
+// `@scale_i32_gfx1100`, and `inline-callables` then materializes the body.
+func.def public target(@gfx1100) @selects_gfx1100_provider(%value: i32) -> (i32) {
+  %scaled = func.apply<hip.recipe.scale_i32>(%value) : (i32) -> (i32)
+  func.return %scaled : i32
+}
+
+// HIP concept: a scalar unit test for the provider contract before using it in
+// a kernel. This deliberately tests behavior, while the pass-report test in
+// hip_authoring.test.json tests which provider was selected.
+// Loom spelling: check cases can call ordinary functions, not just kernels.
+check.case @case_target_provider_selection {
+  %input = check.literal value(7) : i32
+  %actual = func.call @selects_gfx1100_provider(%input) : (i32) -> (i32)
+  %expected = check.literal value(14) : i32
+  check.expect.equal actual(%actual) expected(%expected) : i32
+  check.return
+}
+
+// HIP concept: benchmark the same provider-selection path after correctness.
+// Loom spelling: keep the benchmark row attached to the checked scenario.
+check.benchmark<@case_target_provider_selection> @bench_target_provider_selection

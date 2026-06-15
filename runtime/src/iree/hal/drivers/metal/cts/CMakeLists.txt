@@ -42,6 +42,4 @@ iree_hal_cts_test_suite(
     ::backends
   TESTDATA_LIBS
     ::testdata_metal_spirv_lib
-  LABELS
-    "driver=metal"
 )

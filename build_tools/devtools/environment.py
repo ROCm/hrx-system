@@ -13,8 +13,11 @@ import sys
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from typing import Mapping
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+DEVTOOLS_TMP_ENV = "IREE_DEVTOOLS_TMP"
+DEFAULT_LOCAL_TMP_ROOT = REPO_ROOT / ".tmp"
 
 
 class ToolMode(Enum):
@@ -60,6 +63,20 @@ class ToolEnvironment:
         current_path = env.get("PATH", "")
         env["PATH"] = os.pathsep.join([str(self.bin_dir), current_path])
         return env
+
+
+def local_tmp_root(environ: Mapping[str, str] | None = None) -> Path:
+    environ = os.environ if environ is None else environ
+    value = environ.get(DEVTOOLS_TMP_ENV)
+    if not value:
+        return DEFAULT_LOCAL_TMP_ROOT
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = REPO_ROOT / path
+    return path
+
+
+LOCAL_TMP_ROOT = local_tmp_root()
 
 
 def executable_name(name: str) -> str:

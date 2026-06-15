@@ -165,10 +165,8 @@ static void iree_hal_vmvx_worker_state_deinitialize(
     iree_hal_vmvx_worker_state_t* state) {
   IREE_ASSERT_ARGUMENT(state);
   IREE_TRACE_ZONE_BEGIN(z0);
-  if (state->context) {
-    iree_vm_context_release(state->context);
-    state->context = NULL;
-  }
+  iree_vm_context_release(state->context);
+  state->context = NULL;
   IREE_TRACE_ZONE_END(z0);
 }
 
@@ -311,7 +309,8 @@ static iree_status_t iree_hal_vmvx_executable_create(
       if (!iree_string_view_is_empty(constant_count_str)) {
         iree_string_view_atoi_uint32(constant_count_str, &constant_count);
       }
-      dispatch_attrs[i].constant_count = (uint8_t)constant_count;
+      dispatch_attrs[i].constant_byte_length =
+          constant_count * sizeof(uint32_t);
 
       iree_string_view_t binding_count_str =
           iree_vm_function_lookup_attr_by_name(
@@ -432,9 +431,7 @@ static iree_status_t iree_hal_vmvx_executable_issue_call(
                             dispatch_state->binding_lengths[i]),
         iree_allocator_null(), binding_buffer);
     iree_vm_ref_t ref = {0};
-    status =
-        iree_vm_ref_wrap_assign(binding_buffer, iree_vm_buffer_type(), &ref);
-    if (!iree_status_is_ok(status)) break;
+    iree_vm_ref_wrap_assign(binding_buffer, iree_vm_buffer_type(), &ref);
     status = iree_vm_list_push_ref_retain(binding_list, &ref);
     if (!iree_status_is_ok(status)) break;
   }
@@ -455,8 +452,8 @@ static iree_status_t iree_hal_vmvx_executable_issue_call(
   iree_vm_buffer_t constants_buffer;
   iree_vm_buffer_initialize(
       IREE_VM_BUFFER_ACCESS_ORIGIN_HOST,
-      iree_make_byte_span((void*)dispatch_state->constants,
-                          sizeof(uint32_t) * dispatch_state->constant_count),
+      iree_make_byte_span((void*)dispatch_state->constants.data,
+                          dispatch_state->constants.data_length),
       iree_allocator_null(), &constants_buffer);
 
   // Prepare call argument buffer. We've verified the signature on creation and
@@ -591,7 +588,7 @@ static iree_status_t iree_hal_vmvx_executable_export_info(
           IREE_HAL_EXECUTABLE_DISPATCH_FLAG_V0_WORKGROUP_SIZE_DYNAMIC)) {
     out_info->flags |= IREE_HAL_EXECUTABLE_FUNCTION_FLAG_WORKGROUP_SIZE_DYNAMIC;
   }
-  out_info->constant_count = dispatch_attrs->constant_count;
+  out_info->constant_byte_length = dispatch_attrs->constant_byte_length;
   out_info->binding_count = dispatch_attrs->binding_count;
   out_info->parameter_count = dispatch_attrs->parameter_count;
   out_info->workgroup_size[0] = dispatch_attrs->workgroup_size_x;
@@ -644,15 +641,35 @@ static iree_status_t iree_hal_vmvx_executable_lookup_export_by_name(
       (int)name.size, name.data);
 }
 
-static iree_status_t iree_hal_vmvx_executable_lookup_global_by_name(
+static iree_status_t iree_hal_vmvx_executable_try_lookup_global_by_name(
     iree_hal_executable_t* base_executable, iree_string_view_t name,
-    iree_hal_queue_affinity_t queue_affinity, iree_hal_buffer_t** out_buffer) {
+    bool* out_found, iree_hal_executable_global_t* out_global) {
   (void)base_executable;
   (void)name;
+  *out_found = false;
+  *out_global = iree_hal_executable_global_invalid();
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_vmvx_executable_global_info(
+    iree_hal_executable_t* base_executable, iree_hal_executable_global_t global,
+    iree_hal_executable_global_info_t* out_info) {
+  (void)base_executable;
+  (void)global;
+  memset(out_info, 0, sizeof(*out_info));
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "invalid VMVX executable global");
+}
+
+static iree_status_t iree_hal_vmvx_executable_global_buffer(
+    iree_hal_executable_t* base_executable, iree_hal_executable_global_t global,
+    iree_hal_queue_affinity_t queue_affinity, iree_hal_buffer_t** out_buffer) {
+  (void)base_executable;
+  (void)global;
   (void)queue_affinity;
   *out_buffer = NULL;
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "VMVX executable global lookup not implemented");
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "invalid VMVX executable global");
 }
 
 static const iree_hal_local_executable_vtable_t
@@ -666,8 +683,10 @@ static const iree_hal_local_executable_vtable_t
                     iree_hal_vmvx_executable_export_parameters,
                 .lookup_function_by_name =
                     iree_hal_vmvx_executable_lookup_export_by_name,
-                .lookup_global_by_name =
-                    iree_hal_vmvx_executable_lookup_global_by_name,
+                .try_lookup_global_by_name =
+                    iree_hal_vmvx_executable_try_lookup_global_by_name,
+                .global_info = iree_hal_vmvx_executable_global_info,
+                .global_buffer = iree_hal_vmvx_executable_global_buffer,
             },
         .issue_call = iree_hal_vmvx_executable_issue_call,
 };

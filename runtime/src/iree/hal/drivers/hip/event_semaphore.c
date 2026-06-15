@@ -847,8 +847,10 @@ static iree_status_t iree_hal_hip_semaphore_import_timepoint(
 
   uint64_t current_value = semaphore->max_value_to_be_signaled;
   iree_slim_mutex_unlock(&semaphore->mutex);
-  iree_hal_hip_semaphore_notify_forward_progress_to(base_semaphore,
-                                                    current_value);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_hip_semaphore_notify_forward_progress_to(base_semaphore,
+                                                               current_value);
+  }
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -921,7 +923,7 @@ static bool iree_hal_hip_semaphore_timepoint_already_exported_thunk(void* arg) {
       (iree_hal_hip_semaphore_external_timepoint_wait_data_t*)arg);
 }
 
-iree_status_t iree_hal_hip_semaphore_for_exported_timepoints(
+void iree_hal_hip_semaphore_for_exported_timepoints(
     iree_hal_semaphore_t* base_semaphore, uint64_t value) {
   int64_t value_to_wait_for = 0;
   iree_hal_hip_semaphore_t* semaphore =
@@ -958,7 +960,6 @@ iree_status_t iree_hal_hip_semaphore_for_exported_timepoints(
         iree_infinite_timeout());
     IREE_TRACE_ZONE_END(z0);
   }
-  return iree_ok_status();
 }
 
 static const iree_hal_semaphore_vtable_t iree_hal_hip_semaphore_vtable = {

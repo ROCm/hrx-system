@@ -42,7 +42,7 @@ jobs:
       build_type: RelWithDebInfo
       sanitizer: none
       test_gpu: false
-      ctest_label_exclude_regex: "runtime-resource="
+      ctest_label_exclude_regex: "runtime-resource=|manual"
       cmake_options: |
         -DIREE_HAL_AMDGPU_TARGETS=gfx942;gfx1151;gfx1201
       package: true

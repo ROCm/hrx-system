@@ -42,14 +42,9 @@ class DispatchPipelineTest : public CtsTestBase<> {
     // Load the scale_and_offset kernel:
     //   output[i] = input[i] * scale + offset
     //   2 push constants (scale, offset), 2 bindings (input, output)
-    iree_hal_executable_params_t params;
-    iree_hal_executable_params_initialize(&params);
-    params.caching_mode = IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA;
-    params.executable_format = iree_make_cstring_view(executable_format());
-    params.executable_data = executable_data(iree_make_cstring_view(
-        "command_buffer_dispatch_constants_bindings_test.bin"));
-    IREE_ASSERT_OK(iree_hal_executable_cache_prepare_executable(
-        executable_cache_, &params, &executable_));
+    PrepareExecutableOrSkipUnsupported(
+        executable_cache_,
+        "command_buffer_dispatch_constants_bindings_test.bin", &executable_);
   }
 
   void TearDown() override {

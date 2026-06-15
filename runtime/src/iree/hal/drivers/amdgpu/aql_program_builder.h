@@ -51,8 +51,9 @@ typedef struct iree_hal_amdgpu_aql_program_t {
   uint32_t max_block_kernarg_length;
 } iree_hal_amdgpu_aql_program_t;
 
-// Releases all blocks in |program| back to its block pool.
-void iree_hal_amdgpu_aql_program_release(
+// Deinitializes |program|, returning all blocks to its block pool and clearing
+// it.
+void iree_hal_amdgpu_aql_program_deinitialize(
     iree_hal_amdgpu_aql_program_t* program);
 
 // Returns the block following |block| in program order.

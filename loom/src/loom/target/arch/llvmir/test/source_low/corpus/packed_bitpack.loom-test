@@ -1,0 +1,30 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/packed_bitpack.loom-test
+// RUN: emit source-low output=low
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @i32x4_to_i8x4_bitpack(%codes: vector<4xi32>) -> (vector<4xi8>) {
+  %packed = vector.bitpack<8> %codes : vector<4xi32> -> vector<4xi8>
+  func.return %packed : vector<4xi8>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i32x4_to_i8x4_bitpack(%codes: reg<llvmir.i32 x4>) -> (reg<llvmir.i8 x4>) asm<llvmir.generic.core> {
+  %30 = extract.v4i32 %codes, 0
+  %31 = const.i32 255
+  %32 = and.i32 %30, %31
+  %33 = trunc.i32.i8 %32
+  %34 = extract.v4i32 %codes, 1
+  %35 = and.i32 %34, %31
+  %36 = trunc.i32.i8 %35
+  %37 = extract.v4i32 %codes, 2
+  %38 = and.i32 %37, %31
+  %39 = trunc.i32.i8 %38
+  %40 = extract.v4i32 %codes, 3
+  %41 = and.i32 %40, %31
+  %42 = trunc.i32.i8 %41
+  %packed = from_elements.v4i8 %33, %36, %39, %42
+  return %packed
+}

@@ -1,0 +1,39 @@
+// RUN: pass low-dce
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @drops_dead_low_packets(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm<test.low.core> {
+  %dead_const = test.const.i32 7
+  %dead_sum = test.add.i32 %lhs, %dead_const
+  %out = test.add.i32 %lhs, %rhs
+  return %out
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @drops_dead_low_packets(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) {
+  %out = low.op<test.add.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.return %out : reg<test.i32>
+}
+
+// ====
+
+// Descriptor-backed convergent low packets are retained even when their result
+// is unused. They are PURE for memory reasoning, but not dead-removable.
+// RUN: pass low-dce
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @keeps_dead_convergent_low_packets(%value: reg<test.i32>) -> (reg<test.i32>) asm<test.low.core> {
+  %dead = test.convergent.i32 %value
+  return %value
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @keeps_dead_convergent_low_packets(%value: reg<test.i32>) -> (reg<test.i32>) {
+  %dead = low.op<test.convergent.i32>(%value) : (reg<test.i32>) -> reg<test.i32>
+  low.return %value : reg<test.i32>
+}

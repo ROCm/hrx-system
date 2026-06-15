@@ -35,16 +35,6 @@ iree_status_t iree_hal_amdgpu_block_pool_initialize(
                              options.block_size));
   }
 
-  out_block_pool->libhsa = libhsa;
-  out_block_pool->host_allocator = host_allocator;
-  out_block_pool->agent = agent;
-  out_block_pool->memory_pool = memory_pool;
-  out_block_pool->block_size = options.block_size;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_memory_trace_initialize_pool(
-              options.trace_name, IREE_HAL_AMDGPU_BLOCK_POOL_TRACE_ID,
-              host_allocator, &out_block_pool->trace));
-
   // Query the memory pool for its allocation granularity.
   // This is not the minimum allocation size
   // (HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_GRANULE) but the recommended size
@@ -60,6 +50,12 @@ iree_status_t iree_hal_amdgpu_block_pool_initialize(
       "querying HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE to "
       "determine blocks/allocation");
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, alloc_rec_granule);
+
+  out_block_pool->libhsa = libhsa;
+  out_block_pool->host_allocator = host_allocator;
+  out_block_pool->agent = agent;
+  out_block_pool->memory_pool = memory_pool;
+  out_block_pool->block_size = options.block_size;
 
   // If no min block count was provided we pick one as either the number that
   // will fit into the recommended allocation granule.
@@ -77,7 +73,12 @@ iree_status_t iree_hal_amdgpu_block_pool_initialize(
       (iree_host_size_t)(allocation_size / options.block_size);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, out_block_pool->blocks_per_allocation);
 
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_memory_trace_initialize_pool(
+              options.trace_name, IREE_HAL_AMDGPU_BLOCK_POOL_TRACE_ID,
+              host_allocator, &out_block_pool->trace));
   iree_slim_mutex_initialize(&out_block_pool->mutex);
+  out_block_pool->is_initialized = true;
   iree_slim_mutex_lock(&out_block_pool->mutex);
 
   // Preallocate as many allocations as required to hold the requested initial
@@ -101,7 +102,7 @@ iree_status_t iree_hal_amdgpu_block_pool_initialize(
 
 void iree_hal_amdgpu_block_pool_deinitialize(
     iree_hal_amdgpu_block_pool_t* block_pool) {
-  IREE_ASSERT_ARGUMENT(block_pool);
+  if (!block_pool || !block_pool->is_initialized) return;
   IREE_TRACE_ZONE_BEGIN(z0);
 
   // Should have freed everything so we can just trim the pool to drop all
@@ -112,6 +113,7 @@ void iree_hal_amdgpu_block_pool_deinitialize(
 
   iree_slim_mutex_deinitialize(&block_pool->mutex);
   iree_hal_memory_trace_deinitialize(&block_pool->trace);
+  memset(block_pool, 0, sizeof(*block_pool));
 
   IREE_TRACE_ZONE_END(z0);
 }
@@ -138,10 +140,11 @@ static iree_status_t iree_hal_amdgpu_block_pool_grow(
 
   // Allocate host memory container for the allocation.
   iree_hal_amdgpu_block_allocation_t* block_allocation = NULL;
-  iree_status_t status = iree_allocator_malloc(
+  iree_status_t status = iree_allocator_malloc_aligned(
       block_pool->host_allocator,
       sizeof(*block_allocation) + block_pool->blocks_per_allocation *
                                       sizeof(block_allocation->blocks[0]),
+      iree_alignof(iree_hal_amdgpu_block_allocation_t), /*offset=*/0,
       (void**)&block_allocation);
   if (iree_status_is_ok(status)) {
     block_allocation->next = block_pool->allocations_head;
@@ -173,6 +176,7 @@ static iree_status_t iree_hal_amdgpu_block_pool_grow(
 }
 
 void iree_hal_amdgpu_block_pool_trim(iree_hal_amdgpu_block_pool_t* block_pool) {
+  if (!block_pool || !block_pool->is_initialized) return;
   IREE_TRACE_ZONE_BEGIN(z0);
 
   // NOTE: we could steal the whole list and free it outside of the lock but we
@@ -225,7 +229,7 @@ void iree_hal_amdgpu_block_pool_trim(iree_hal_amdgpu_block_pool_t* block_pool) {
       } else {
         prev_allocation->next = next_allocation;
       }
-      iree_allocator_free(block_pool->host_allocator, allocation);
+      iree_allocator_free_aligned(block_pool->host_allocator, allocation);
     } else {
       // Skip as blocks still outstanding.
       prev_allocation = allocation;
@@ -243,6 +247,7 @@ iree_status_t iree_hal_amdgpu_block_pool_acquire(
     iree_hal_amdgpu_block_t** out_block) {
   IREE_ASSERT_ARGUMENT(block_pool);
   IREE_ASSERT_ARGUMENT(out_block);
+  IREE_ASSERT(block_pool->is_initialized);
   IREE_TRACE_ZONE_BEGIN(z0);
   *out_block = NULL;
 
@@ -276,6 +281,7 @@ void iree_hal_amdgpu_block_pool_release(
     iree_hal_amdgpu_block_pool_t* block_pool, iree_hal_amdgpu_block_t* block) {
   IREE_ASSERT_ARGUMENT(block_pool);
   if (!block) return;
+  IREE_ASSERT(block_pool->is_initialized);
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_slim_mutex_lock(&block_pool->mutex);
@@ -295,6 +301,7 @@ void iree_hal_amdgpu_block_pool_release_list(
     iree_hal_amdgpu_block_t* block_head) {
   IREE_ASSERT_ARGUMENT(block_pool);
   if (!block_head) return;
+  IREE_ASSERT(block_pool->is_initialized);
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_slim_mutex_lock(&block_pool->mutex);
@@ -460,7 +467,7 @@ iree_status_t iree_hal_amdgpu_block_allocator_initialize(
 
 void iree_hal_amdgpu_block_allocator_deinitialize(
     iree_hal_amdgpu_block_allocator_t* allocator) {
-  if (!allocator) return;
+  if (!allocator || !allocator->block_pool) return;
 
   IREE_ASSERT_EQ(allocator->block_head, NULL);
   IREE_ASSERT_EQ(allocator->block_tail, NULL);

@@ -1,0 +1,44 @@
+// RUN: emit source-low output=low
+
+x86.target<scalar> @target
+
+func.def target(@target) @scalar_i32_static_memory(%input: buffer, %output: buffer) {
+  %input_base = index.constant 8 : offset
+  %output_base = index.constant 16 : offset
+  %input_view = buffer.view %input[%input_base] : buffer -> view<8xi32, #dense>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<8xi32, #dense>
+  %loaded = view.load %input_view[2] : view<8xi32, #dense> -> i32
+  view.store %loaded, %output_view[3] : i32, view<8xi32, #dense>
+  func.return
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @scalar_i32_static_memory(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>) asm<x86.scalar.core> {
+  %loaded = mov.load.gpr32 %input_view {disp32 = 16}
+  mov.store.gpr32 %loaded, %output_view {disp32 = 28}
+  return
+}
+
+// ====
+
+x86.target<scalar> @target
+
+func.def target(@target) @scalar_i32_dynamic_memory(%input: buffer, %output: buffer, %i: index) {
+  %zero = index.constant 0 : offset
+  %bounded_i = index.assume %i [range(%i, 0, 8)] : index
+  %input_view = buffer.view %input[%zero] : buffer -> view<8xi32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<8xi32, #dense>
+  %loaded = view.load %input_view[%bounded_i] : view<8xi32, #dense> -> i32
+  %incremented = scalar.addi %loaded, %loaded : i32
+  view.store %incremented, %output_view[%bounded_i] : i32, view<8xi32, #dense>
+  func.return
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @scalar_i32_dynamic_memory(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %bounded_i: reg<x86.gpr64>) asm<x86.scalar.core> {
+  %loaded = mov.load.indexed.gpr32 %input_view, %bounded_i {disp32 = 0, scale = 4}
+  %13 = copy %loaded : reg<x86.gpr32> -> reg<x86.gpr32>
+  %incremented = add.gpr32 %13, %loaded
+  mov.store.indexed.gpr32 %incremented, %output_view, %bounded_i {disp32 = 0, scale = 4}
+  return
+}

@@ -76,12 +76,14 @@ hrx_status_t hrx_stream_create(hrx_device_t device, uint32_t flags,
 }
 
 void hrx_stream_retain(hrx_stream_t stream) {
+  if (!stream) return;
   hrx_device_retain(stream->device);
   hrx_semaphore_retain(stream->semaphore);
   iree_atomic_ref_count_inc(&stream->ref_count);
 }
 
 void hrx_stream_release(hrx_stream_t stream) {
+  if (!stream) return;
   hrx_device_t device = stream->device;
   hrx_semaphore_t semaphore = stream->semaphore;
   if (iree_atomic_ref_count_dec(&stream->ref_count) == 1) {
@@ -92,9 +94,7 @@ void hrx_stream_release(hrx_stream_t stream) {
       hrx_status_ignore(
           hrx_semaphore_wait(stream->semaphore, stream->timepoint, UINT64_MAX));
     }
-    if (stream->pending_cb) {
-      iree_hal_command_buffer_release(stream->pending_cb);
-    }
+    iree_hal_command_buffer_release(stream->pending_cb);
     free(stream);
   }
   hrx_semaphore_release(semaphore);

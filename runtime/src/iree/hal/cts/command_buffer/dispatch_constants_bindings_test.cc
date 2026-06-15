@@ -27,19 +27,9 @@ class DispatchConstantsBindingsTest : public CtsTestBase<> {
     IREE_ASSERT_OK(iree_hal_executable_cache_create(
         device_, iree_make_cstring_view("default"), &executable_cache_));
 
-    iree_hal_executable_params_t executable_params;
-    iree_hal_executable_params_initialize(&executable_params);
-    executable_params.caching_mode =
-        IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA;
-    executable_params.executable_format =
-        iree_make_cstring_view(executable_format());
-    executable_params.executable_data = executable_data(iree_make_cstring_view(
-        "command_buffer_dispatch_constants_bindings_test.bin"));
-    executable_params.constant_count = 0;
-    executable_params.constants = nullptr;
-
-    IREE_ASSERT_OK(iree_hal_executable_cache_prepare_executable(
-        executable_cache_, &executable_params, &executable_));
+    PrepareExecutableOrSkipUnsupported(
+        executable_cache_,
+        "command_buffer_dispatch_constants_bindings_test.bin", &executable_);
   }
 
   void TearDown() override {

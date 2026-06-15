@@ -1786,7 +1786,6 @@ IREE_VM_ABI_EXPORT(iree_hal_module_fence_query,  //
 
   iree_status_t query_status = iree_hal_fence_query(fence);
   rets->i0 = iree_status_consume_code(query_status);
-  iree_status_ignore(query_status);
 
   return iree_ok_status();
 }
@@ -1858,7 +1857,6 @@ static iree_status_t iree_hal_module_fence_await_begin(
   // Fast-path for no semaphores (empty/immediate fences).
   if (total_timepoint_capacity == 0) {
     *out_wait_status = iree_ok_status();
-    IREE_TRACE_ZONE_END(zone_id);
     return iree_ok_status();
   }
 
@@ -1977,7 +1975,8 @@ IREE_VM_ABI_EXPORT(iree_hal_module_fence_await,  //
             iree_hal_module_fence_await_begin(stack, fence_count, fences,
                                               timeout, zone_id, &wait_status));
         if (iree_status_is_deferred(wait_status)) {
-          zone_id = 0;  // ownership transferred to wait frame
+          IREE_TRACE_ZONE_TRANSFER(zone_id);
+          return wait_status;
         }
       }
     }
@@ -1987,6 +1986,7 @@ IREE_VM_ABI_EXPORT(iree_hal_module_fence_await,  //
     IREE_RETURN_IF_ERROR(iree_vm_stack_wait_leave(stack, &wait_result));
     wait_status = wait_result.status;
     IREE_TRACE(zone_id = wait_result.trace_zone);
+    IREE_TRACE_ZONE_ADOPT(zone_id);
   }
 
   iree_status_t status = iree_ok_status();
@@ -1994,8 +1994,8 @@ IREE_VM_ABI_EXPORT(iree_hal_module_fence_await,  //
     // Successful wait.
     rets->i0 = 0;
   } else if (iree_status_is_deferred(wait_status)) {
-    // Yielding; resume required.
-    // NOTE: zone not ended as it's reserved on the stack.
+    // Propagate an unexpected deferred status. The wait-frame yield path
+    // returns above after transferring trace-zone ownership to the frame.
     status = wait_status;
   } else if (iree_status_is_deadline_exceeded(wait_status)) {
     // Propagate deadline exceeded back to the VM.
@@ -2024,9 +2024,7 @@ IREE_VM_ABI_EXPORT(iree_hal_module_fence_await,  //
     status = wait_status;
   }
 
-  IREE_TRACE({
-    if (zone_id) IREE_TRACE_ZONE_END(zone_id);
-  });
+  IREE_TRACE_ZONE_END(zone_id);
   return status;
 }
 
@@ -2113,7 +2111,8 @@ IREE_API_EXPORT iree_status_t iree_hal_module_create(
   iree_host_size_t total_size =
       iree_vm_native_module_size() + sizeof(iree_hal_module_t);
   iree_vm_module_t* base_module = NULL;
-  IREE_RETURN_IF_ERROR(
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0,
       iree_allocator_malloc(host_allocator, total_size, (void**)&base_module));
   memset(base_module, 0, total_size);
   iree_status_t status =

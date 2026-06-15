@@ -1,0 +1,11 @@
+func.def @encodings(%buffer: buffer, %offset: offset, %group_size: index, %layout_arg: encoding<layout>, %scale: f32) {
+  %dense = encoding.layout.dense : encoding<layout>
+  %strided = encoding.layout.strided [4096, 1] : encoding<layout>
+  %known_dense = encoding.layout.assume.dense %layout_arg : encoding<layout>
+  %known_strided = encoding.layout.assume.strided %layout_arg {rank = 2} : encoding<layout>
+  %schema = encoding.define #q8_0<block=32> {group_size = %group_size : index, scale = %scale : f32} : encoding<schema>
+  %storage = encoding.define #physical_storage {layout = %strided : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %view = buffer.view %buffer[%offset] : buffer -> view<8x16xi8, %storage>
+  test.use %dense, %known_dense, %known_strided, %schema, %view : encoding<layout>, encoding<layout>, encoding<layout>, encoding<schema>, view<8x16xi8, %storage>
+  func.return
+}

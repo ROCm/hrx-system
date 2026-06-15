@@ -1,0 +1,36 @@
+// RUN: pass canonicalize
+
+func.def @cfg_join_unknown_and_zero_is_not_exact_zero(%cond: i1, %input: buffer) -> (f32) {
+  %base = index.constant 0 : offset
+  %index = index.constant 0 : index
+  %zero = scalar.constant 0.0 : f32
+  %scale = scalar.constant 2.0 : f32
+  %view = buffer.view %input[%base] : buffer -> view<1xf32, #dense>
+  cfg.cond_br %cond, ^load, ^pad
+^load:
+  %loaded = view.load %view[%index] : view<1xf32, #dense> -> f32
+  cfg.br ^join(%loaded: f32)
+^pad:
+  cfg.br ^join(%zero: f32)
+^join(%value: f32):
+  %scaled = scalar.mulf<nnan|ninf|nsz> %value, %scale : f32
+  func.return %scaled : f32
+}
+
+// ----
+func.def @cfg_join_unknown_and_zero_is_not_exact_zero(%cond: i1, %input: buffer) -> (f32) {
+  %base = index.constant 0 : offset
+  %index = index.constant 0 : index
+  %zero = scalar.constant 0.0 : f32
+  %scale = scalar.constant 2.0 : f32
+  %view = buffer.view %input[%base] : buffer -> view<1xf32, #dense>
+  cfg.cond_br %cond, ^load, ^pad
+^load:
+  %loaded = view.load %view[%index] : view<1xf32, #dense> -> f32
+  cfg.br ^join(%loaded: f32)
+^pad:
+  cfg.br ^join(%zero: f32)
+^join(%value: f32):
+  %scaled = scalar.mulf<nnan|ninf|nsz> %value, %scale : f32
+  func.return %scaled : f32
+}

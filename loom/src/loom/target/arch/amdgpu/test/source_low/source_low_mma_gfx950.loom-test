@@ -1,0 +1,62 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx950> @target
+func.def target(@target) @f16_mfma_gfx950_k32(%lhs_data: vector<8xf16>, %rhs_data: vector<8xf16>, %init_data: vector<4xf32>) -> (vector<4xf32>) {
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 32 : index
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] : vector<8xf16>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] : vector<8xf16>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<8xf16>, vector<8xf16>, vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @f16_mfma_gfx950_k32(%lhs: reg<amdgpu.vgpr x4>, %rhs: reg<amdgpu.vgpr x4>, %init: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.cdna4.core> {
+  %15 = copy %init : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %result = v_mfma_f32_16x16x32_f16 %lhs, %rhs, %15
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx950> @target
+func.def target(@target) @f16_mfma_gfx950_32x32x16(%lhs_data: vector<8xf16>, %rhs_data: vector<8xf16>, %init_data: vector<16xf32>) -> (vector<16xf32>) {
+  %m = index.constant 32 : index
+  %n = index.constant 32 : index
+  %k = index.constant 16 : index
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] : vector<8xf16>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] : vector<8xf16>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<16xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<8xf16>, vector<8xf16>, vector<16xf32>
+  func.return %result : vector<16xf32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @f16_mfma_gfx950_32x32x16(%lhs: reg<amdgpu.vgpr x4>, %rhs: reg<amdgpu.vgpr x4>, %init: reg<amdgpu.vgpr x16>) -> (reg<amdgpu.vgpr x16>) asm<amdgpu.cdna4.core> {
+  %15 = copy %init : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x16>
+  %result = v_mfma_f32_32x32x16_f16 %lhs, %rhs, %15
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx950> @target
+func.def target(@target) @bf16_mfma_gfx950_32x32x16(%lhs_data: vector<8xbf16>, %rhs_data: vector<8xbf16>, %init_data: vector<16xf32>) -> (vector<16xf32>) {
+  %m = index.constant 32 : index
+  %n = index.constant 32 : index
+  %k = index.constant 16 : index
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] : vector<8xbf16>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] : vector<8xbf16>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<16xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<8xbf16>, vector<8xbf16>, vector<16xf32>
+  func.return %result : vector<16xf32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @bf16_mfma_gfx950_32x32x16(%lhs: reg<amdgpu.vgpr x4>, %rhs: reg<amdgpu.vgpr x4>, %init: reg<amdgpu.vgpr x16>) -> (reg<amdgpu.vgpr x16>) asm<amdgpu.cdna4.core> {
+  %15 = copy %init : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x16>
+  %result = v_mfma_f32_32x32x16_bf16 %lhs, %rhs, %15
+  return %result
+}

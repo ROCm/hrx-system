@@ -26,13 +26,13 @@ void BM_ThreadCreate(benchmark::State& state) {
     memset(&params, 0, sizeof(params));
 
     iree_thread_t* thread = nullptr;
-    iree_thread_create(
+    IREE_CHECK_OK(iree_thread_create(
         +[](void* arg) -> int {
           auto* completed = static_cast<std::atomic<bool>*>(arg);
           completed->store(true, std::memory_order_release);
           return 0;
         },
-        &completed, params, iree_allocator_system(), &thread);
+        &completed, params, iree_allocator_system(), &thread));
 
     // Wait for thread to complete.
     while (!completed.load(std::memory_order_acquire)) {
@@ -51,9 +51,9 @@ void BM_ThreadCreateRelease(benchmark::State& state) {
     memset(&params, 0, sizeof(params));
 
     iree_thread_t* thread = nullptr;
-    iree_thread_create(
+    IREE_CHECK_OK(iree_thread_create(
         +[](void*) -> int { return 0; }, nullptr, params,
-        iree_allocator_system(), &thread);
+        iree_allocator_system(), &thread));
 
     // Release internally joins/waits for completion.
     iree_thread_release(thread);
@@ -70,13 +70,13 @@ void BM_ThreadCreateSuspendedResume(benchmark::State& state) {
     params.create_suspended = true;
 
     iree_thread_t* thread = nullptr;
-    iree_thread_create(
+    IREE_CHECK_OK(iree_thread_create(
         +[](void* arg) -> int {
           auto* completed = static_cast<std::atomic<bool>*>(arg);
           completed->store(true, std::memory_order_release);
           return 0;
         },
-        &completed, params, iree_allocator_system(), &thread);
+        &completed, params, iree_allocator_system(), &thread));
 
     iree_thread_resume(thread);
 
@@ -142,7 +142,7 @@ void BM_ThreadPriorityOverride(benchmark::State& state) {
   std::atomic<bool> keep_running{true};
 
   iree_thread_t* thread = nullptr;
-  iree_thread_create(
+  IREE_CHECK_OK(iree_thread_create(
       +[](void* arg) -> int {
         auto* keep_running = static_cast<std::atomic<bool>*>(arg);
         while (keep_running->load(std::memory_order_acquire)) {
@@ -150,7 +150,7 @@ void BM_ThreadPriorityOverride(benchmark::State& state) {
         }
         return 0;
       },
-      &keep_running, params, iree_allocator_system(), &thread);
+      &keep_running, params, iree_allocator_system(), &thread));
 
   for (auto _ : state) {
     iree_thread_override_t* override_token =
@@ -175,7 +175,7 @@ void BM_ThreadRequestAffinity(benchmark::State& state) {
   std::atomic<bool> keep_running{true};
 
   iree_thread_t* thread = nullptr;
-  iree_thread_create(
+  IREE_CHECK_OK(iree_thread_create(
       +[](void* arg) -> int {
         auto* keep_running = static_cast<std::atomic<bool>*>(arg);
         while (keep_running->load(std::memory_order_acquire)) {
@@ -183,7 +183,7 @@ void BM_ThreadRequestAffinity(benchmark::State& state) {
         }
         return 0;
       },
-      &keep_running, params, iree_allocator_system(), &thread);
+      &keep_running, params, iree_allocator_system(), &thread));
 
   iree_thread_affinity_t affinity;
   iree_thread_affinity_set_group_any(0, &affinity);

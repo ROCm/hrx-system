@@ -224,8 +224,8 @@ TEST_F(AqlCommandBufferTest, MemoryBarrierRecordingPreservesFenceScopes) {
   ASSERT_NE(command_buffer, nullptr);
 
   const iree_hal_memory_barrier_t memory_barrier = {
-      .source_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
-      .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ,
+      /*.source_scope=*/IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
+      /*.target_scope=*/IREE_HAL_ACCESS_SCOPE_DISPATCH_READ,
   };
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer.get()));
   IREE_ASSERT_OK(iree_hal_command_buffer_execution_barrier(

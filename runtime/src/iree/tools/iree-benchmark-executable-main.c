@@ -535,7 +535,7 @@ int main(int argc, char** argv) {
       "    --device=cuda\n"
       "    --executable_format=cuda-nvptx-fb\n"
       "    --device=vulkan\n"
-      "    --executable_format=vulkan-spirv-fb\n"
+      "    --executable_format=vulkan-spirv-bda\n"
       "\n"
       "Note that this tool is intentionally low level: you must specify all\n"
       "of the push constant/binding parameters precisely as they are expected\n"

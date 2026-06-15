@@ -1,0 +1,25 @@
+// Targetless root workload that asks a linked provider library for the i32
+// scaling implementation.
+kernel.def export("scale_i32_buffer") @scale_i32_buffer(%element_count: index) {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  %rounding = index.constant 63 : index
+  %rounded_count = index.add %element_count, %rounding : index
+  %workgroups = index.div %rounded_count, %workgroup_size : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%element_count: index, %input: buffer, %output: buffer) {
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size = index.constant 64 : index
+  %zero_offset = index.constant 0 : offset
+  %element_index = index.madd %workgroup, %workgroup_size, %lane : index
+  %in_bounds = index.cmp ult, %element_index, %element_count : index
+  %input_view = buffer.view %input[%zero_offset] : buffer -> view<[%element_count]xi32, #dense>
+  %output_view = buffer.view %output[%zero_offset] : buffer -> view<[%element_count]xi32, #dense>
+  scf.if %in_bounds {
+    %value = view.load %input_view[%element_index] : view<[%element_count]xi32, #dense> -> i32
+    %scaled = func.apply<authoring.link.scale_i32>(%value) : (i32) -> (i32)
+    view.store %scaled, %output_view[%element_index] : i32, view<[%element_count]xi32, #dense>
+  }
+  kernel.return
+}

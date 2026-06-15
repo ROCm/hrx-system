@@ -1,0 +1,353 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/vector_v16.loom-test
+// RUN: emit source-low output=low
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @i32x16_arith(%lhs: vector<16xi32>, %rhs: vector<16xi32>) -> (vector<16xi32>) {
+  %sum = vector.addi %lhs, %rhs : vector<16xi32>
+  %diff = vector.subi %sum, %rhs : vector<16xi32>
+  func.return %diff : vector<16xi32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i32x16_arith(%lhs: reg<llvmir.i32 x16>, %rhs: reg<llvmir.i32 x16>) -> (reg<llvmir.i32 x16>) asm<llvmir.generic.core> {
+  %sum = add.v16i32 %lhs, %rhs
+  %diff = sub.v16i32 %sum, %rhs
+  return %diff
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @i32x16_minmax_logic(%lhs: vector<16xi32>, %rhs: vector<16xi32>) -> (vector<16xi32>) {
+  %min_s = vector.minsi %lhs, %rhs : vector<16xi32>
+  %max_s = vector.maxsi %lhs, %rhs : vector<16xi32>
+  %min_u = vector.minui %lhs, %rhs : vector<16xi32>
+  %max_u = vector.maxui %lhs, %rhs : vector<16xi32>
+  %mask = vector.andi %min_s, %max_s : vector<16xi32>
+  %mixed = vector.xori %mask, %min_u : vector<16xi32>
+  %result = vector.ori %mixed, %max_u : vector<16xi32>
+  func.return %result : vector<16xi32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i32x16_minmax_logic(%lhs: reg<llvmir.i32 x16>, %rhs: reg<llvmir.i32 x16>) -> (reg<llvmir.i32 x16>) asm<llvmir.generic.core> {
+  %13 = cmp.slt.v16i32 %lhs, %rhs
+  %min_s = select.v16i32 %13, %lhs, %rhs
+  %15 = cmp.sgt.v16i32 %lhs, %rhs
+  %max_s = select.v16i32 %15, %lhs, %rhs
+  %17 = cmp.ult.v16i32 %lhs, %rhs
+  %min_u = select.v16i32 %17, %lhs, %rhs
+  %19 = cmp.ugt.v16i32 %lhs, %rhs
+  %max_u = select.v16i32 %19, %lhs, %rhs
+  %mask = and.v16i32 %min_s, %max_s
+  %mixed = xor.v16i32 %mask, %min_u
+  %result = or.v16i32 %mixed, %max_u
+  return %result
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @i32x16_variable_shift(%value: vector<16xi32>, %amount: vector<16xi32>) -> (vector<16xi32>) {
+  %left = vector.shli %value, %amount : vector<16xi32>
+  %signed = vector.shrsi %left, %amount : vector<16xi32>
+  %result = vector.shrui %signed, %amount : vector<16xi32>
+  func.return %result : vector<16xi32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i32x16_variable_shift(%value: reg<llvmir.i32 x16>, %amount: reg<llvmir.i32 x16>) -> (reg<llvmir.i32 x16>) asm<llvmir.generic.core> {
+  %left = shl.v16i32 %value, %amount
+  %signed = ashr.v16i32 %left, %amount
+  %result = lshr.v16i32 %signed, %amount
+  return %result
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @i32x16_splat_add(%value: i32, %rhs: vector<16xi32>) -> (vector<16xi32>) {
+  %splat = vector.splat %value : vector<16xi32>
+  %sum = vector.addi %splat, %rhs : vector<16xi32>
+  func.return %sum : vector<16xi32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i32x16_splat_add(%value: reg<llvmir.i32>, %rhs: reg<llvmir.i32 x16>) -> (reg<llvmir.i32 x16>) asm<llvmir.generic.core> {
+  %splat = splat.v16i32 %value
+  %sum = add.v16i32 %splat, %rhs
+  return %sum
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @i32x16_compare_select(%lhs: vector<16xi32>, %rhs: vector<16xi32>, %fallback: vector<16xi32>) -> (vector<16xi32>) {
+  %signed = vector.cmpi sgt, %lhs, %rhs : vector<16xi32> -> vector<16xi1>
+  %unsigned = vector.cmpi ugt, %lhs, %rhs : vector<16xi32> -> vector<16xi1>
+  %selected = vector.select %signed, %lhs, %rhs : vector<16xi32>
+  %result = vector.select %unsigned, %selected, %fallback : vector<16xi32>
+  func.return %result : vector<16xi32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i32x16_compare_select(%lhs: reg<llvmir.i32 x16>, %rhs: reg<llvmir.i32 x16>, %fallback: reg<llvmir.i32 x16>) -> (reg<llvmir.i32 x16>) asm<llvmir.generic.core> {
+  %signed = cmp.sgt.v16i32 %lhs, %rhs
+  %unsigned = cmp.ugt.v16i32 %lhs, %rhs
+  %selected = select.v16i32 %signed, %lhs, %rhs
+  %result = select.v16i32 %unsigned, %selected, %fallback
+  return %result
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @i32x16_mask_and_select(%lhs: vector<16xi32>, %rhs: vector<16xi32>, %fallback: vector<16xi32>) -> (vector<16xi32>) {
+  %greater = vector.cmpi sgt, %lhs, %rhs : vector<16xi32> -> vector<16xi1>
+  %less = vector.cmpi slt, %lhs, %rhs : vector<16xi32> -> vector<16xi1>
+  %either = vector.ori %greater, %less : vector<16xi1>
+  %greater_again = vector.andi %either, %greater : vector<16xi1>
+  %condition = vector.xori %greater_again, %less : vector<16xi1>
+  %result = vector.select %condition, %lhs, %fallback : vector<16xi32>
+  func.return %result : vector<16xi32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i32x16_mask_and_select(%lhs: reg<llvmir.i32 x16>, %rhs: reg<llvmir.i32 x16>, %fallback: reg<llvmir.i32 x16>) -> (reg<llvmir.i32 x16>) asm<llvmir.generic.core> {
+  %greater = cmp.sgt.v16i32 %lhs, %rhs
+  %less = cmp.slt.v16i32 %lhs, %rhs
+  %either = or.v16i1 %greater, %less
+  %greater_again = and.v16i1 %either, %greater
+  %condition = xor.v16i1 %greater_again, %less
+  %result = select.v16i32 %condition, %lhs, %fallback
+  return %result
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @f32x16_arith(%lhs: vector<16xf32>, %rhs: vector<16xf32>) -> (vector<16xf32>) {
+  %sum = vector.addf %lhs, %rhs : vector<16xf32>
+  %difference = vector.subf %sum, %lhs : vector<16xf32>
+  %product = vector.mulf %difference, %rhs : vector<16xf32>
+  %fma = vector.fmaf %lhs, %rhs, %product : vector<16xf32>
+  func.return %fma : vector<16xf32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f32x16_arith(%lhs: reg<llvmir.f32 x16>, %rhs: reg<llvmir.f32 x16>) -> (reg<llvmir.f32 x16>) asm<llvmir.generic.core> {
+  %sum = add.v16f32 %lhs, %rhs
+  %difference = sub.v16f32 %sum, %lhs
+  %product = mul.v16f32 %difference, %rhs
+  %fma = fma.v16f32 %lhs, %rhs, %product
+  return %fma
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @f32x16_splat_add(%value: f32, %rhs: vector<16xf32>) -> (vector<16xf32>) {
+  %splat = vector.splat %value : vector<16xf32>
+  %sum = vector.addf %splat, %rhs : vector<16xf32>
+  func.return %sum : vector<16xf32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f32x16_splat_add(%value: reg<llvmir.f32>, %rhs: reg<llvmir.f32 x16>) -> (reg<llvmir.f32 x16>) asm<llvmir.generic.core> {
+  %splat = splat.v16f32 %value
+  %sum = add.v16f32 %splat, %rhs
+  return %sum
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @f32x16_reduce_add(%v: vector<16xf32>, %init: f32) -> (f32) {
+  %sum = vector.reduce<addf> %v, %init : vector<16xf32>, f32
+  func.return %sum : f32
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f32x16_reduce_add(%v: reg<llvmir.f32 x16>, %init: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+  %39 = extract.v16f32 %v, 0
+  %40 = add.f32 %init, %39
+  %41 = extract.v16f32 %v, 1
+  %42 = add.f32 %40, %41
+  %43 = extract.v16f32 %v, 2
+  %44 = add.f32 %42, %43
+  %45 = extract.v16f32 %v, 3
+  %46 = add.f32 %44, %45
+  %47 = extract.v16f32 %v, 4
+  %48 = add.f32 %46, %47
+  %49 = extract.v16f32 %v, 5
+  %50 = add.f32 %48, %49
+  %51 = extract.v16f32 %v, 6
+  %52 = add.f32 %50, %51
+  %53 = extract.v16f32 %v, 7
+  %54 = add.f32 %52, %53
+  %55 = extract.v16f32 %v, 8
+  %56 = add.f32 %54, %55
+  %57 = extract.v16f32 %v, 9
+  %58 = add.f32 %56, %57
+  %59 = extract.v16f32 %v, 10
+  %60 = add.f32 %58, %59
+  %61 = extract.v16f32 %v, 11
+  %62 = add.f32 %60, %61
+  %63 = extract.v16f32 %v, 12
+  %64 = add.f32 %62, %63
+  %65 = extract.v16f32 %v, 13
+  %66 = add.f32 %64, %65
+  %67 = extract.v16f32 %v, 14
+  %68 = add.f32 %66, %67
+  %69 = extract.v16f32 %v, 15
+  %sum = add.f32 %68, %69
+  return %sum
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @f32x16_compare_select(%lhs: vector<16xf32>, %rhs: vector<16xf32>, %fallback: vector<16xf32>) -> (vector<16xf32>) {
+  %ordered_lt = vector.cmpf olt, %lhs, %rhs : vector<16xf32> -> vector<16xi1>
+  %unordered_ne = vector.cmpf une, %lhs, %rhs : vector<16xf32> -> vector<16xi1>
+  %selected = vector.select %ordered_lt, %lhs, %rhs : vector<16xf32>
+  %result = vector.select %unordered_ne, %selected, %fallback : vector<16xf32>
+  func.return %result : vector<16xf32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f32x16_compare_select(%lhs: reg<llvmir.f32 x16>, %rhs: reg<llvmir.f32 x16>, %fallback: reg<llvmir.f32 x16>) -> (reg<llvmir.f32 x16>) asm<llvmir.generic.core> {
+  %ordered_lt = cmp.olt.v16f32 %lhs, %rhs
+  %unordered_ne = cmp.une.v16f32 %lhs, %rhs
+  %selected = select.v16f32 %ordered_lt, %lhs, %rhs
+  %result = select.v16f32 %unordered_ne, %selected, %fallback
+  return %result
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @f32x16_static_memory(%input: buffer, %output: buffer) {
+  %input_base = index.constant 16 : offset
+  %output_base = index.constant 32 : offset
+  %input_view = buffer.view %input[%input_base] : buffer -> view<32xf32, #dense>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<32xf32, #dense>
+  %loaded = vector.load %input_view[4] : view<32xf32, #dense> -> vector<16xf32>
+  vector.store %loaded, %output_view[8] : vector<16xf32>, view<32xf32, #dense>
+  func.return
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f32x16_static_memory(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>) asm<llvmir.generic.core> {
+  %loaded = load.v16f32 %input_view, 32
+  store.v16f32 %loaded, %output_view, 64
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @f32x16_dynamic_memory(%input: buffer, %output: buffer, %i: index) {
+  %input_base = index.constant 16 : offset
+  %output_base = index.constant 32 : offset
+  %bounded_i = index.assume %i [range(%i, 0, 16)] : index
+  %input_view = buffer.view %input[%input_base] : buffer -> view<32xf32, #dense>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<32xf32, #dense>
+  %loaded = vector.load %input_view[%bounded_i] : view<32xf32, #dense> -> vector<16xf32>
+  vector.store %loaded, %output_view[%bounded_i] : vector<16xf32>, view<32xf32, #dense>
+  func.return
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f32x16_dynamic_memory(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>, %bounded_i: reg<llvmir.i64>) asm<llvmir.generic.core> {
+  %loaded = load.indexed.v16f32 %input_view, %bounded_i, 16, 4
+  store.indexed.v16f32 %loaded, %output_view, %bounded_i, 32, 4
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @f32x16_index_add_memory(%input: buffer, %output: buffer, %i: index, %j: index) {
+  %zero = index.constant 0 : offset
+  %sum = index.add %i, %j : index
+  %bounded_sum = index.assume %sum [range(%sum, 0, 16)] : index
+  %input_view = buffer.view %input[%zero] : buffer -> view<32xf32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<32xf32, #dense>
+  %loaded = vector.load %input_view[%bounded_sum] : view<32xf32, #dense> -> vector<16xf32>
+  vector.store %loaded, %output_view[%bounded_sum] : vector<16xf32>, view<32xf32, #dense>
+  func.return
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f32x16_index_add_memory(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>, %i: reg<llvmir.i64>, %j: reg<llvmir.i64>) asm<llvmir.generic.core> {
+  %bounded_sum = add.i64 %i, %j
+  %loaded = load.indexed.v16f32 %input_view, %bounded_sum, 0, 4
+  store.indexed.v16f32 %loaded, %output_view, %bounded_sum, 0, 4
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @f32x16_index_madd_memory(%input: buffer, %output: buffer, %row: index, %stride: index, %col: index) {
+  %zero = index.constant 0 : offset
+  %linear = index.madd %row, %stride, %col : index
+  %bounded_linear = index.assume %linear [range(%linear, 0, 16)] : index
+  %input_view = buffer.view %input[%zero] : buffer -> view<32xf32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<32xf32, #dense>
+  %loaded = vector.load %input_view[%bounded_linear] : view<32xf32, #dense> -> vector<16xf32>
+  vector.store %loaded, %output_view[%bounded_linear] : vector<16xf32>, view<32xf32, #dense>
+  func.return
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f32x16_index_madd_memory(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>, %row: reg<llvmir.i64>, %stride: reg<llvmir.i64>, %col: reg<llvmir.i64>) asm<llvmir.generic.core> {
+  %16 = mul.i64 %row, %stride
+  %bounded_linear = add.i64 %16, %col
+  %loaded = load.indexed.v16f32 %input_view, %bounded_linear, 0, 4
+  store.indexed.v16f32 %loaded, %output_view, %bounded_linear, 0, 4
+  return
+}

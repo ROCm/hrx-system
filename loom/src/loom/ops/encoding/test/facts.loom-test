@@ -1,0 +1,252 @@
+// RUN: pass canonicalize
+
+// Dense layout ops seed address-layout summary facts.
+func.def @dense_layout_summary() -> (i64) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %kind = test.fact_encoding_layout_kind %layout : encoding<layout> -> i64
+  func.return %kind : i64
+}
+// ----
+func.def @dense_layout_summary() -> (i64) {
+  %kind = scalar.constant 1 : i64
+  func.return %kind : i64
+}
+
+// ====
+
+// Dynamic strided layout ops preserve stride facts in axis order.
+func.def @strided_layout_summary(%stride: index) -> (i64, i64) {
+  %stride2 = index.assume %stride [range(%stride, 8, 16), mul(%stride, 8)] : index
+  %layout = encoding.layout.strided [%stride2, 1] : encoding<layout>
+  %kind = test.fact_encoding_layout_kind %layout : encoding<layout> -> i64
+  %stride_hi = test.fact_encoding_layout_stride_hi %layout[0] : encoding<layout> -> i64
+  func.return %kind, %stride_hi : i64, i64
+}
+// ----
+func.def @strided_layout_summary(%stride: index) -> (i64, i64) {
+  %kind = scalar.constant 2 : i64
+  %stride_hi = scalar.constant 16 : i64
+  func.return %kind, %stride_hi : i64, i64
+}
+
+// ====
+
+// Layout assumptions seed facts for layout values that arrive as arguments
+// instead of being constructed locally.
+func.def @assume_dense_layout_summary(%layout: encoding<layout>) -> (i64) {
+  %dense = encoding.layout.assume.dense %layout : encoding<layout>
+  %kind = test.fact_encoding_layout_kind %dense : encoding<layout> -> i64
+  func.return %kind : i64
+}
+// ----
+func.def @assume_dense_layout_summary(%layout: encoding<layout>) -> (i64) {
+  %kind = scalar.constant 1 : i64
+  func.return %kind : i64
+}
+
+// ====
+
+// Strided layout assumptions carry rank and unknown nonnegative stride facts.
+func.def @assume_strided_layout_summary(%layout: encoding<layout>) -> (i64, i64) {
+  %strided = encoding.layout.assume.strided %layout {rank = 2} : encoding<layout>
+  %kind = test.fact_encoding_layout_kind %strided : encoding<layout> -> i64
+  %stride_hi = test.fact_encoding_layout_stride_hi %strided[0] : encoding<layout> -> i64
+  func.return %kind, %stride_hi : i64, i64
+}
+// ----
+func.def @assume_strided_layout_summary(%layout: encoding<layout>) -> (i64, i64) {
+  %kind = scalar.constant 2 : i64
+  %stride_hi = scalar.constant 9223372036854775807 : i64
+  func.return %kind, %stride_hi : i64, i64
+}
+
+// ====
+
+// Exact static-spec assumptions expose static physical-storage layout facts
+// for schema/storage arguments selected by a specialization thunk.
+func.def @assume_spec_physical_storage_layout_summary(%storage: encoding<storage>) -> (i64) {
+  %storage2 = encoding.assume.spec %storage, #physical_storage<layout=#dense, schema=#ggml_q4_0<block_elems=32, storage_bytes=18>> : encoding<storage>
+  %kind = test.fact_encoding_layout_kind %storage2 : encoding<storage> -> i64
+  func.return %kind : i64
+}
+// ----
+func.def @assume_spec_physical_storage_layout_summary(%storage: encoding<storage>) -> (i64) {
+  %kind = scalar.constant 1 : i64
+  func.return %kind : i64
+}
+
+// ====
+
+// Static strided specs expose exact per-axis stride facts through the shared
+// static layout decoder.
+func.def @assume_spec_static_strided_layout_summary(%layout: encoding<layout>) -> (i64, i64) {
+  %layout2 = encoding.assume.spec %layout, #strided<stride=64> : encoding<layout>
+  %kind = test.fact_encoding_layout_kind %layout2 : encoding<layout> -> i64
+  %stride_hi = test.fact_encoding_layout_stride_hi %layout2[0] : encoding<layout> -> i64
+  func.return %kind, %stride_hi : i64, i64
+}
+// ----
+func.def @assume_spec_static_strided_layout_summary(%layout: encoding<layout>) -> (i64, i64) {
+  %kind = scalar.constant 2 : i64
+  %stride_hi = scalar.constant 64 : i64
+  func.return %kind, %stride_hi : i64, i64
+}
+
+// ====
+
+// Physical-storage encodings carry the nested address-layout summary through
+// the storage value.
+func.def @physical_storage_layout_summary(%stride: index) -> (i64, i64) {
+  %stride2 = index.assume %stride [range(%stride, 8, 16), mul(%stride, 8)] : index
+  %layout = encoding.layout.strided [%stride2, 1] : encoding<layout>
+  %schema = encoding.define #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
+  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %kind = test.fact_encoding_layout_kind %storage : encoding<storage> -> i64
+  %stride_hi = test.fact_encoding_layout_stride_hi %storage[0] : encoding<storage> -> i64
+  func.return %kind, %stride_hi : i64, i64
+}
+// ----
+func.def @physical_storage_layout_summary(%stride: index) -> (i64, i64) {
+  %kind = scalar.constant 2 : i64
+  %stride_hi = scalar.constant 16 : i64
+  func.return %kind, %stride_hi : i64, i64
+}
+
+// ====
+
+// Static physical-storage parameters can seed the same summary when their
+// nested layout is static.
+func.def @static_physical_storage_layout_summary() -> (i64) {
+  %storage = encoding.define #physical_storage<layout=#dense, schema=#ggml_q4_0<block_elems=32, storage_bytes=18>> : encoding<storage>
+  %kind = test.fact_encoding_layout_kind %storage : encoding<storage> -> i64
+  func.return %kind : i64
+}
+// ----
+func.def @static_physical_storage_layout_summary() -> (i64) {
+  %kind = scalar.constant 1 : i64
+  func.return %kind : i64
+}
+
+// ====
+
+// Static physical-storage summaries recurse through static strided layouts too.
+func.def @static_strided_physical_storage_layout_summary() -> (i64, i64) {
+  %storage = encoding.define #physical_storage<layout=#strided<stride=64>, schema=#ggml_q4_0<block_elems=32, storage_bytes=18>> : encoding<storage>
+  %kind = test.fact_encoding_layout_kind %storage : encoding<storage> -> i64
+  %stride_hi = test.fact_encoding_layout_stride_hi %storage[0] : encoding<storage> -> i64
+  func.return %kind, %stride_hi : i64, i64
+}
+// ----
+func.def @static_strided_physical_storage_layout_summary() -> (i64, i64) {
+  %kind = scalar.constant 2 : i64
+  %stride_hi = scalar.constant 64 : i64
+  func.return %kind, %stride_hi : i64, i64
+}
+
+// ====
+
+// Matrix operand storage schemas seed target-independent encoded payload facts
+// without adding fp6/fp4 scalar types.
+func.def @matrix_operand_schema_summary() -> (i64, i64, i64, i64, i64, i64) {
+  %schema = encoding.define #matrix_operand<element_format=f6e3m2, payload_elements=32, payload_registers=6, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %format = test.fact_encoding_matrix_field %schema["element_format"] : encoding<schema> -> i64
+  %packing = test.fact_encoding_matrix_field %schema["payload_packing"] : encoding<schema> -> i64
+  %scale = test.fact_encoding_matrix_field %schema["scale_topology"] : encoding<schema> -> i64
+  %group = test.fact_encoding_matrix_field %schema["scale_group_elements"] : encoding<schema> -> i64
+  %registers = test.fact_encoding_matrix_field %schema["payload_registers"] : encoding<schema> -> i64
+  %fallback = test.fact_encoding_matrix_field %schema["zero_scale_fallback"] : encoding<schema> -> i64
+  func.return %format, %packing, %scale, %group, %registers, %fallback : i64, i64, i64, i64, i64, i64
+}
+// ----
+func.def @matrix_operand_schema_summary() -> (i64, i64, i64, i64, i64, i64) {
+  %format = scalar.constant 268435456 : i64
+  %packing = scalar.constant 256 : i64
+  %scale = scalar.constant 32 : i64
+  %group = scalar.constant 32 : i64
+  %registers = scalar.constant 6 : i64
+  %fallback = scalar.constant 1 : i64
+  func.return %format, %packing, %scale, %group, %registers, %fallback : i64, i64, i64, i64, i64, i64
+}
+
+// ====
+
+// GGML Q8_0 is a concrete block-quant schema: dense signed i8 payload lanes
+// with one f16 block scale covering 32 logical elements.
+func.def @ggml_q8_0_schema_summary() -> (i64, i64, i64, i64, i64, i64, i64) {
+  %schema = encoding.define #ggml_q8_0<block_elems=32, storage_bytes=34> : encoding<schema>
+  %format = test.fact_encoding_matrix_field %schema["element_format"] : encoding<schema> -> i64
+  %scale_format = test.fact_encoding_matrix_field %schema["scale_format"] : encoding<schema> -> i64
+  %packing = test.fact_encoding_matrix_field %schema["payload_packing"] : encoding<schema> -> i64
+  %scale = test.fact_encoding_matrix_field %schema["scale_topology"] : encoding<schema> -> i64
+  %affine = test.fact_encoding_matrix_field %schema["affine"] : encoding<schema> -> i64
+  %elements = test.fact_encoding_matrix_field %schema["payload_elements"] : encoding<schema> -> i64
+  %operands = test.fact_encoding_matrix_field %schema["scale_operands"] : encoding<schema> -> i64
+  func.return %format, %scale_format, %packing, %scale, %affine, %elements, %operands : i64, i64, i64, i64, i64, i64, i64
+}
+// ----
+func.def @ggml_q8_0_schema_summary() -> (i64, i64, i64, i64, i64, i64, i64) {
+  %format = scalar.constant 34359738368 : i64
+  %scale_format = scalar.constant 8 : i64
+  %packing = scalar.constant 1 : i64
+  %scale = scalar.constant 32 : i64
+  %affine = scalar.constant 1 : i64
+  %elements = scalar.constant 32 : i64
+  %operands = scalar.constant 1 : i64
+  func.return %format, %scale_format, %packing, %scale, %affine, %elements, %operands : i64, i64, i64, i64, i64, i64, i64
+}
+
+// ====
+
+// Dynamic physical-storage composition carries nested schema facts along with
+// layout facts, giving consumers one encoding value to query.
+func.def @physical_storage_matrix_schema_summary() -> (i64, i64, i64, i64) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %schema = encoding.define #matrix_operand<element_format=f4e2m1, payload_elements=128, payload_registers=16, scale_format=f8e4m3, scale_group_elements=16, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %format = test.fact_encoding_matrix_field %storage["element_format"] : encoding<storage> -> i64
+  %scale_format = test.fact_encoding_matrix_field %storage["scale_format"] : encoding<storage> -> i64
+  %group = test.fact_encoding_matrix_field %storage["scale_group_elements"] : encoding<storage> -> i64
+  %elements = test.fact_encoding_matrix_field %storage["payload_elements"] : encoding<storage> -> i64
+  func.return %format, %scale_format, %group, %elements : i64, i64, i64, i64
+}
+// ----
+func.def @physical_storage_matrix_schema_summary() -> (i64, i64, i64, i64) {
+  %format = scalar.constant 2147483648 : i64
+  %scale_format = scalar.constant 8388608 : i64
+  %group = scalar.constant 16 : i64
+  %elements = scalar.constant 128 : i64
+  func.return %format, %scale_format, %group, %elements : i64, i64, i64, i64
+}
+
+// ====
+
+// Static physical-storage specs recurse through their nested schema too.
+func.def @static_physical_storage_matrix_schema_summary() -> (i64, i64) {
+  %storage = encoding.define #physical_storage<layout=#dense, schema=#matrix_operand<element_format=bf6, payload_elements=32, payload_registers=6>> : encoding<storage>
+  %format = test.fact_encoding_matrix_field %storage["element_format"] : encoding<storage> -> i64
+  %registers = test.fact_encoding_matrix_field %storage["payload_registers"] : encoding<storage> -> i64
+  func.return %format, %registers : i64, i64
+}
+// ----
+func.def @static_physical_storage_matrix_schema_summary() -> (i64, i64) {
+  %format = scalar.constant 1073741824 : i64
+  %registers = scalar.constant 6 : i64
+  func.return %format, %registers : i64, i64
+}
+
+// ====
+
+// Exact static-spec assumptions can seed matrix schema facts for encoding
+// arguments that cross function or kernel boundaries.
+func.def @assume_spec_matrix_schema_summary(%schema: encoding<schema>) -> (i64, i64) {
+  %schema2 = encoding.assume.spec %schema, #matrix_operand<element_format=bf8, payload_elements=32, payload_registers=8, scale_format=f8e5m2, scale_group_elements=32, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %format = test.fact_encoding_matrix_field %schema2["element_format"] : encoding<schema> -> i64
+  %scale_format = test.fact_encoding_matrix_field %schema2["scale_format"] : encoding<schema> -> i64
+  func.return %format, %scale_format : i64, i64
+}
+// ----
+func.def @assume_spec_matrix_schema_summary(%schema: encoding<schema>) -> (i64, i64) {
+  %format = scalar.constant 134217728 : i64
+  %scale_format = scalar.constant 16777216 : i64
+  func.return %format, %scale_format : i64, i64
+}

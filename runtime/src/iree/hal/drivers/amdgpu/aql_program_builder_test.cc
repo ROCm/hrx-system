@@ -98,6 +98,24 @@ TEST(CommandBufferAbiTest, BuilderRejectsOversizedUsableBlockSize) {
   iree_arena_block_pool_deinitialize(&block_pool);
 }
 
+TEST_F(AqlProgramBuilderTest, DeinitializesEmptyProgram) {
+  iree_hal_amdgpu_aql_program_t program = {};
+  program.block_pool = block_pool();
+  program.block_count = 1;
+  program.command_count = 2;
+  program.max_block_aql_packet_count = 3;
+  program.max_block_kernarg_length = 4;
+
+  iree_hal_amdgpu_aql_program_deinitialize(&program);
+
+  EXPECT_EQ(program.block_pool, nullptr);
+  EXPECT_EQ(program.first_block, nullptr);
+  EXPECT_EQ(program.block_count, 0u);
+  EXPECT_EQ(program.command_count, 0u);
+  EXPECT_EQ(program.max_block_aql_packet_count, 0u);
+  EXPECT_EQ(program.max_block_kernarg_length, 0u);
+}
+
 TEST_F(AqlProgramBuilderTest, EmptyProgramRecordsReturnBlock) {
   iree_hal_amdgpu_aql_program_builder_t builder;
   iree_hal_amdgpu_aql_program_builder_initialize(block_pool(), &builder);
@@ -137,7 +155,7 @@ TEST_F(AqlProgramBuilderTest, EmptyProgramRecordsReturnBlock) {
 
   IREE_EXPECT_OK(iree_hal_amdgpu_aql_program_validate_metadata_only(&program));
 
-  iree_hal_amdgpu_aql_program_release(&program);
+  iree_hal_amdgpu_aql_program_deinitialize(&program);
 }
 
 TEST_F(AqlProgramBuilderTest, AppendsCommandAndBindingSources) {
@@ -207,7 +225,7 @@ TEST_F(AqlProgramBuilderTest, AppendsCommandAndBindingSources) {
   EXPECT_EQ(return_command->opcode,
             IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_RETURN);
 
-  iree_hal_amdgpu_aql_program_release(&program);
+  iree_hal_amdgpu_aql_program_deinitialize(&program);
 }
 
 TEST_F(AqlProgramBuilderTest, PatchesBarrierScopesAtRecordingTime) {
@@ -267,7 +285,7 @@ TEST_F(AqlProgramBuilderTest, PatchesBarrierScopesAtRecordingTime) {
                 second_dispatch->flags),
             IREE_HSA_FENCE_SCOPE_NONE);
 
-  iree_hal_amdgpu_aql_program_release(&program);
+  iree_hal_amdgpu_aql_program_deinitialize(&program);
 }
 
 TEST_F(AqlProgramBuilderTest, ForcedBarrierKeepsPendingAcquireScope) {
@@ -307,7 +325,7 @@ TEST_F(AqlProgramBuilderTest, ForcedBarrierKeepsPendingAcquireScope) {
                 dispatch->flags),
             IREE_HSA_FENCE_SCOPE_AGENT);
 
-  iree_hal_amdgpu_aql_program_release(&program);
+  iree_hal_amdgpu_aql_program_deinitialize(&program);
 }
 
 TEST_F(AqlProgramBuilderTest, SplitsBlocksWithBranchTerminator) {
@@ -353,7 +371,7 @@ TEST_F(AqlProgramBuilderTest, SplitsBlocksWithBranchTerminator) {
             IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_RETURN);
   EXPECT_EQ(second_block->terminator_target_block_ordinal, 0u);
 
-  iree_hal_amdgpu_aql_program_release(&program);
+  iree_hal_amdgpu_aql_program_deinitialize(&program);
 }
 
 TEST_F(AqlProgramBuilderTest, ValidatesSplitMetadataOnlyProgram) {
@@ -371,7 +389,7 @@ TEST_F(AqlProgramBuilderTest, ValidatesSplitMetadataOnlyProgram) {
   ASSERT_EQ(program.max_block_aql_packet_count, 0u);
   IREE_EXPECT_OK(iree_hal_amdgpu_aql_program_validate_metadata_only(&program));
 
-  iree_hal_amdgpu_aql_program_release(&program);
+  iree_hal_amdgpu_aql_program_deinitialize(&program);
 }
 
 TEST_F(AqlProgramBuilderTest, MetadataOnlyValidationRejectsPayloadBlocks) {
@@ -395,7 +413,7 @@ TEST_F(AqlProgramBuilderTest, MetadataOnlyValidationRejectsPayloadBlocks) {
       IREE_STATUS_INVALID_ARGUMENT,
       iree_hal_amdgpu_aql_program_validate_metadata_only(&program));
 
-  iree_hal_amdgpu_aql_program_release(&program);
+  iree_hal_amdgpu_aql_program_deinitialize(&program);
 }
 
 TEST_F(AqlProgramBuilderTest, MetadataOnlyValidationRejectsProfileMarkers) {
@@ -420,7 +438,7 @@ TEST_F(AqlProgramBuilderTest, MetadataOnlyValidationRejectsProfileMarkers) {
       IREE_STATUS_UNIMPLEMENTED,
       iree_hal_amdgpu_aql_program_validate_metadata_only(&program));
 
-  iree_hal_amdgpu_aql_program_release(&program);
+  iree_hal_amdgpu_aql_program_deinitialize(&program);
 }
 
 TEST_F(AqlProgramBuilderTest,
@@ -441,7 +459,7 @@ TEST_F(AqlProgramBuilderTest,
       IREE_STATUS_INVALID_ARGUMENT,
       iree_hal_amdgpu_aql_program_validate_metadata_only(&program));
 
-  iree_hal_amdgpu_aql_program_release(&program);
+  iree_hal_amdgpu_aql_program_deinitialize(&program);
 }
 
 TEST_F(AqlProgramBuilderTest, RejectsOversizedCommand) {

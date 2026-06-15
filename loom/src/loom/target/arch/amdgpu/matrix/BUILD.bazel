@@ -1,0 +1,101 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+    "loom_cc_test",
+    "loom_target_table_cc_library",
+)
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_AMDGPU_MATRIX_CONTRACT_TABLE_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu/matrix:contract_tables"
+
+loom_cc_library(
+    name = "types",
+    hdrs = ["types.h"],
+    deps = [
+        "//loom/src/loom/analysis:contract_roles",
+        "//loom/src/loom/analysis:matrix_fragment_layout",
+        "//loom/src/loom/target/arch/amdgpu:target_info_defs",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_target_table_cc_library(
+    name = "contract_tables",
+    args = ["--public-header=loom/target/arch/amdgpu/matrix/contract_tables.h"],
+    generator = _AMDGPU_MATRIX_CONTRACT_TABLE_GENERATOR,
+    deps = [
+        ":types",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "contract",
+    srcs = ["contract.c"],
+    hdrs = ["contract.h"],
+    visibility = [
+        "//loom/src/loom/target/arch/amdgpu:__pkg__",
+        "//loom/src/loom/target/arch/amdgpu/lower:__pkg__",
+        "//loom/src/loom/target/arch/amdgpu/planning:__pkg__",
+    ],
+    deps = [
+        ":contract_tables",
+        ":types",
+        "//loom/src/loom/analysis:contract_roles",
+        "//loom/src/loom/analysis:matrix_fragment_layout",
+        "//loom/src/loom/target/arch/amdgpu:target_info",
+        "//loom/src/loom/target/arch/amdgpu:target_info_defs",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "projection",
+    srcs = ["projection.c"],
+    hdrs = ["projection.h"],
+    visibility = [
+        "//loom/src/loom/target/arch/amdgpu:__pkg__",
+        "//loom/src/loom/target/arch/amdgpu/lower:__pkg__",
+    ],
+    deps = [
+        ":contract",
+        "//loom/src/loom/analysis:contract",
+        "//loom/src/loom/analysis:contract_storage",
+    ],
+)
+
+loom_cc_test(
+    name = "contract_test",
+    srcs = ["contract_test.cc"],
+    deps = [
+        ":contract",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "projection_test",
+    srcs = ["projection_test.cc"],
+    deps = [
+        ":contract",
+        ":projection",
+        "//loom/src/loom/analysis:contract_storage",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

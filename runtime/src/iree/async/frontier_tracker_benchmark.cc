@@ -205,9 +205,9 @@ static void BM_Advance_UnaffectedWaiters(benchmark::State& state) {
   for (int i = 0; i < waiter_count; ++i) {
     frontier_storage[i].Initialize(1);
     frontier_storage[i].SetEntry(0, Axis(1), 1000000);  // Never satisfied.
-    iree_async_frontier_tracker_wait(fixture.tracker(),
-                                     frontier_storage[i].frontier(),
-                                     MinimalCallback, nullptr, &waiters[i]);
+    IREE_CHECK_OK(iree_async_frontier_tracker_wait(
+        fixture.tracker(), frontier_storage[i].frontier(), MinimalCallback,
+        nullptr, &waiters[i]));
   }
 
   uint64_t epoch = 1;
@@ -248,9 +248,9 @@ static void BM_Advance_DispatchOne(benchmark::State& state) {
   for (auto _ : state) {
     state.PauseTiming();
     fixture.ResetEpochs();
-    iree_async_frontier_tracker_wait(fixture.tracker(),
-                                     frontier_storage.frontier(),
-                                     MinimalCallback, nullptr, &waiter);
+    IREE_CHECK_OK(iree_async_frontier_tracker_wait(
+        fixture.tracker(), frontier_storage.frontier(), MinimalCallback,
+        nullptr, &waiter));
     state.ResumeTiming();
 
     iree_host_size_t dispatched =
@@ -282,9 +282,9 @@ static void BM_Advance_DispatchOnly(benchmark::State& state) {
     // Reset and register all waiters (not timed).
     fixture.ResetEpochs();
     for (int i = 0; i < kBatchSize; ++i) {
-      iree_async_frontier_tracker_wait(fixture.tracker(),
-                                       frontiers[i].frontier(), MinimalCallback,
-                                       nullptr, &waiters[i]);
+      IREE_CHECK_OK(iree_async_frontier_tracker_wait(
+          fixture.tracker(), frontiers[i].frontier(), MinimalCallback, nullptr,
+          &waiters[i]));
     }
     state.ResumeTiming();
 
@@ -316,9 +316,9 @@ static void BM_Advance_DispatchMany(benchmark::State& state) {
     state.PauseTiming();
     fixture.ResetEpochs();
     for (int i = 0; i < waiter_count; ++i) {
-      iree_async_frontier_tracker_wait(fixture.tracker(),
-                                       frontier_storage[i].frontier(),
-                                       MinimalCallback, nullptr, &waiters[i]);
+      IREE_CHECK_OK(iree_async_frontier_tracker_wait(
+          fixture.tracker(), frontier_storage[i].frontier(), MinimalCallback,
+          nullptr, &waiters[i]));
     }
     state.ResumeTiming();
 
@@ -358,9 +358,9 @@ static void BM_Advance_MultiEntryFrontier(benchmark::State& state) {
       iree_async_frontier_tracker_advance(fixture.tracker(),
                                           Axis(static_cast<uint8_t>(i)), epoch);
     }
-    iree_async_frontier_tracker_wait(fixture.tracker(),
-                                     frontier_storage.frontier(),
-                                     MinimalCallback, nullptr, &waiter);
+    IREE_CHECK_OK(iree_async_frontier_tracker_wait(
+        fixture.tracker(), frontier_storage.frontier(), MinimalCallback,
+        nullptr, &waiter));
     state.ResumeTiming();
 
     // Advance the last axis to trigger satisfaction check.
@@ -398,6 +398,7 @@ static void BM_Wait_ImmediatelySatisfied(benchmark::State& state) {
         fixture.tracker(), frontier_storage.frontier(), MinimalCallback,
         nullptr, &waiter);
     benchmark::DoNotOptimize(status);
+    IREE_CHECK_OK(status);
   }
   state.SetItemsProcessed(state.iterations());
 }
@@ -419,6 +420,7 @@ static void BM_Wait_Pending(benchmark::State& state) {
         fixture.tracker(), frontier_storage.frontier(), MinimalCallback,
         nullptr, &waiter);
     benchmark::DoNotOptimize(status);
+    IREE_CHECK_OK(status);
 
     state.PauseTiming();
     iree_async_frontier_tracker_cancel_wait(fixture.tracker(), &waiter);
@@ -451,6 +453,7 @@ static void BM_Wait_MultiEntrySatisfied(benchmark::State& state) {
         fixture.tracker(), frontier_storage.frontier(), MinimalCallback,
         nullptr, &waiter);
     benchmark::DoNotOptimize(status);
+    IREE_CHECK_OK(status);
   }
   state.SetItemsProcessed(state.iterations());
 }
@@ -472,9 +475,9 @@ static void BM_Cancel_Head(benchmark::State& state) {
   iree_async_frontier_waiter_t waiter;
   for (auto _ : state) {
     state.PauseTiming();
-    iree_async_frontier_tracker_wait(fixture.tracker(),
-                                     frontier_storage.frontier(),
-                                     MinimalCallback, nullptr, &waiter);
+    IREE_CHECK_OK(iree_async_frontier_tracker_wait(
+        fixture.tracker(), frontier_storage.frontier(), MinimalCallback,
+        nullptr, &waiter));
     state.ResumeTiming();
 
     iree_async_frontier_tracker_cancel_wait(fixture.tracker(), &waiter);
@@ -501,9 +504,9 @@ static void BM_Cancel_Tail(benchmark::State& state) {
   for (auto _ : state) {
     state.PauseTiming();
     for (int i = 0; i < list_length; ++i) {
-      iree_async_frontier_tracker_wait(fixture.tracker(),
-                                       frontier_storage[i].frontier(),
-                                       MinimalCallback, nullptr, &waiters[i]);
+      IREE_CHECK_OK(iree_async_frontier_tracker_wait(
+          fixture.tracker(), frontier_storage[i].frontier(), MinimalCallback,
+          nullptr, &waiters[i]));
     }
     state.ResumeTiming();
 
@@ -543,9 +546,9 @@ static void BM_Scenario_GPUCompletionDispatch(benchmark::State& state) {
     state.ResumeTiming();
 
     // Register a waiter (simulates operation waiting for GPU).
-    iree_async_frontier_tracker_wait(fixture.tracker(),
-                                     frontier_storage.frontier(),
-                                     MinimalCallback, nullptr, &waiter);
+    IREE_CHECK_OK(iree_async_frontier_tracker_wait(
+        fixture.tracker(), frontier_storage.frontier(), MinimalCallback,
+        nullptr, &waiter));
 
     // Advance (simulates GPU completion signal).
     iree_host_size_t dispatched =
@@ -580,9 +583,9 @@ static void BM_Scenario_FanIn(benchmark::State& state) {
     state.ResumeTiming();
 
     // Register waiter waiting on all queues.
-    iree_async_frontier_tracker_wait(fixture.tracker(),
-                                     frontier_storage.frontier(),
-                                     MinimalCallback, nullptr, &waiter);
+    IREE_CHECK_OK(iree_async_frontier_tracker_wait(
+        fixture.tracker(), frontier_storage.frontier(), MinimalCallback,
+        nullptr, &waiter));
 
     // Simulate queues completing one by one.
     for (int i = 0; i < queue_count; ++i) {
@@ -616,9 +619,9 @@ static void BM_Scenario_FanOut(benchmark::State& state) {
 
     // Register all waiters.
     for (int i = 0; i < waiter_count; ++i) {
-      iree_async_frontier_tracker_wait(fixture.tracker(),
-                                       frontier_storage[i].frontier(),
-                                       MinimalCallback, nullptr, &waiters[i]);
+      IREE_CHECK_OK(iree_async_frontier_tracker_wait(
+          fixture.tracker(), frontier_storage[i].frontier(), MinimalCallback,
+          nullptr, &waiters[i]));
     }
 
     // Single advance dispatches all waiters.

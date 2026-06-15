@@ -369,10 +369,8 @@ iree_status_t iree_hal_streaming_device_retain_primary_context(
     if (!iree_status_is_ok(status)) {
       // Creation failed - decrement ref count back to 0.
       device->primary_context_ref_count--;
-      if (device->primary_context) {
-        iree_hal_streaming_context_release(device->primary_context);
-        device->primary_context = NULL;
-      }
+      iree_hal_streaming_context_release(device->primary_context);
+      device->primary_context = NULL;
       iree_slim_mutex_unlock(&device->primary_context_mutex);
       IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
     }
@@ -407,33 +405,31 @@ iree_status_t iree_hal_streaming_device_release_primary_context(
 
   // If count reached 0, destroy the context.
   if (device->primary_context_ref_count == 0 && device->primary_context) {
+    iree_hal_streaming_context_t* released_context = device->primary_context;
+
     // Wait for all operations to complete.
     iree_status_t status = iree_hal_streaming_context_wait_idle(
-        device->primary_context, iree_infinite_timeout());
+        released_context, iree_infinite_timeout());
     if (!iree_status_is_ok(status)) {
       iree_status_free(status);
-    }
-
-    // Release the context.
-    iree_hal_streaming_context_release(device->primary_context);
-    device->primary_context = NULL;
-
-    // Also clear memory pools.
-    if (device->current_mem_pool) {
-      hrx_mem_pool_release(device->current_mem_pool);
-      device->current_mem_pool = NULL;
-    }
-    if (device->default_mem_pool) {
-      hrx_mem_pool_release(device->default_mem_pool);
-      device->default_mem_pool = NULL;
     }
 
     // Clear current context if it was the primary context.
     iree_hal_streaming_context_t* current_context =
         iree_hal_streaming_context_current();
-    if (current_context && current_context == device->primary_context) {
+    if (current_context == released_context) {
       iree_hal_streaming_context_set_current(NULL);
     }
+
+    // Release the context.
+    iree_hal_streaming_context_release(released_context);
+    device->primary_context = NULL;
+
+    // Also clear memory pools.
+    hrx_mem_pool_release(device->current_mem_pool);
+    device->current_mem_pool = NULL;
+    hrx_mem_pool_release(device->default_mem_pool);
+    device->default_mem_pool = NULL;
   }
 
   iree_slim_mutex_unlock(&device->primary_context_mutex);

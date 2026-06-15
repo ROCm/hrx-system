@@ -97,6 +97,24 @@ endif()
 # General utilities
 #-------------------------------------------------------------------------------
 
+if(NOT TARGET iree_generated_compile_inputs)
+  add_custom_target(iree_generated_compile_inputs)
+endif()
+
+# Registers a target that materializes generated C/C++ compile inputs.
+#
+# Compile-database consumers such as clang-tidy read compile_commands.json
+# without asking CMake to build the source target first. Generated headers and
+# sources therefore need a stable aggregate target that prepares the filesystem
+# view before external analysis starts.
+function(iree_register_generated_compile_input TARGET_NAME)
+  if(NOT TARGET "${TARGET_NAME}")
+    message(FATAL_ERROR
+      "Generated compile input target ${TARGET_NAME} was not found")
+  endif()
+  add_dependencies(iree_generated_compile_inputs "${TARGET_NAME}")
+endfunction()
+
 # iree_to_bool
 #
 # Sets `variable` to `ON` if `value` is true and `OFF` otherwise.
@@ -266,6 +284,36 @@ function(iree_package_name PACKAGE_NAME)
   iree_package_ns(_PACKAGE_NS)
   string(REPLACE "::" "_" _PACKAGE_NAME "${_PACKAGE_NS}")
   set(${PACKAGE_NAME} ${_PACKAGE_NAME} PARENT_SCOPE)
+endfunction()
+
+# Resolves a package-relative or aliased target name to the concrete CMake
+# target name used by rules that cannot consume aliases directly.
+function(iree_package_target_name OUTPUT_TARGET_NAME TARGET_NAME)
+  iree_package_ns(_PACKAGE_NS)
+  set(_TARGET_NAME "${TARGET_NAME}")
+  string(REGEX REPLACE "^::" "${_PACKAGE_NS}::" _TARGET_NAME "${_TARGET_NAME}")
+
+  if(TARGET "${_TARGET_NAME}")
+    get_target_property(_ALIASED_TARGET "${_TARGET_NAME}" ALIASED_TARGET)
+    if(_ALIASED_TARGET)
+      set(_TARGET_NAME "${_ALIASED_TARGET}")
+    endif()
+  elseif("${_TARGET_NAME}" MATCHES "::")
+    string(REPLACE "::" "_" _TARGET_NAME "${_TARGET_NAME}")
+  endif()
+
+  set(${OUTPUT_TARGET_NAME} "${_TARGET_NAME}" PARENT_SCOPE)
+endfunction()
+
+# Resolves a list of package-relative or aliased target names to concrete CMake
+# target names.
+function(iree_package_target_names OUTPUT_TARGET_NAMES)
+  set(_TARGET_NAMES)
+  foreach(_TARGET_NAME ${ARGN})
+    iree_package_target_name(_RESOLVED_TARGET_NAME "${_TARGET_NAME}")
+    list(APPEND _TARGET_NAMES "${_RESOLVED_TARGET_NAME}")
+  endforeach()
+  set(${OUTPUT_TARGET_NAMES} "${_TARGET_NAMES}" PARENT_SCOPE)
 endfunction()
 
 # Sets ${PACKAGE_PATH} to the IREE-root relative package path.

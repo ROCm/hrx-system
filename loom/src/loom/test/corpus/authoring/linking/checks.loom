@@ -1,0 +1,16 @@
+func.decl @scale_i32_buffer(%element_count: index, %input: tensor<[%element_count]xi32>, %output: tensor<[%element_count]xi32>)
+
+check.case public @scale_i32_buffer_case {
+  %element_count = check.param.choice values([17, 64, 193]) name("element_count") : index
+  %input = check.generate.fill value(7) : tensor<[%element_count]xi32>
+  %output = check.generate.fill value(0) : tensor<[%element_count]xi32>
+  %expected = check.generate.fill value(14) : tensor<[%element_count]xi32>
+  func.call @scale_i32_buffer(%element_count, %input, %output) : (index, tensor<[%element_count]xi32>, tensor<[%element_count]xi32>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<[%element_count]xi32>
+  check.return
+}
+
+check.benchmark<@scale_i32_buffer_case>
+check.benchmark<@scale_i32_buffer_case> @scale_i32_buffer_tail {element_count = 17}
+check.benchmark<@scale_i32_buffer_case> @scale_i32_buffer_workgroup {element_count = 64}
+check.benchmark<@scale_i32_buffer_case> @scale_i32_buffer_large_tail {element_count = 193}

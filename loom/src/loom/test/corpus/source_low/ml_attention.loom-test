@@ -1,0 +1,100 @@
+// RUN: roundtrip
+
+// Online attention keeps numerically stable softmax state across score blocks:
+// the running max rescales the previous sum/accumulator and the new score
+// contributes one weighted value vector.
+func.def @online_softmax_update(%old_max: f32, %old_sum: f32, %old_acc: vector<4xf32>, %score: f32, %value: vector<4xf32>) -> (f32, f32, vector<4xf32>) {
+  %new_max = scalar.maxnumf %old_max, %score : f32
+  %old_delta = scalar.subf %old_max, %new_max : f32
+  %score_delta = scalar.subf %score, %new_max : f32
+  %old_scale = scalar.expf<afn> %old_delta : f32
+  %score_weight = scalar.expf<afn> %score_delta : f32
+  %scaled_sum = scalar.mulf<reassoc|nnan|nsz|contract> %old_sum, %old_scale : f32
+  %new_sum = scalar.addf<reassoc|nnan|nsz> %scaled_sum, %score_weight : f32
+  %old_scale_vector = vector.splat %old_scale : vector<4xf32>
+  %score_weight_vector = vector.splat %score_weight : vector<4xf32>
+  %rescaled_acc = vector.mulf<reassoc|nnan|nsz|contract> %old_acc, %old_scale_vector : vector<4xf32>
+  %weighted_value = vector.mulf<reassoc|nnan|nsz|contract> %value, %score_weight_vector : vector<4xf32>
+  %new_acc = vector.addf<reassoc|nnan|nsz> %rescaled_acc, %weighted_value : vector<4xf32>
+  func.return %new_max, %new_sum, %new_acc : f32, f32, vector<4xf32>
+}
+
+// ====
+
+// Tail handling for a score block should mask invalid lanes before reductions.
+func.def @tail_masked_score_block(%scores: vector<4xf32>, %valid_count: i32) -> (f32, f32) {
+  %start = scalar.constant 0 : i32
+  %step = scalar.constant 1 : i32
+  %lanes = vector.iota %start step %step : vector<4xi32>
+  %valid_limits = vector.splat %valid_count : vector<4xi32>
+  %valid = vector.cmpi slt, %lanes, %valid_limits : vector<4xi32> -> vector<4xi1>
+  %negative_large = scalar.constant -1000000000.0 : f32
+  %sentinels = vector.splat %negative_large : vector<4xf32>
+  %masked_scores = vector.select %valid, %scores, %sentinels : vector<4xf32>
+  %block_max = vector.reduce<maxnumf, reassoc|nnan|nsz> %masked_scores, %negative_large : vector<4xf32>, f32
+  %zero = scalar.constant 0.0 : f32
+  %zeros = vector.splat %zero : vector<4xf32>
+  %sum_scores = vector.select %valid, %scores, %zeros : vector<4xf32>
+  %block_sum = vector.reduce<addf, reassoc|nnan|nsz> %sum_scores, %zero : vector<4xf32>, f32
+  func.return %block_max, %block_sum : f32, f32
+}
+
+// ====
+
+// Paged key/value traversal is byte-offset math over a page table and page pool.
+func.def @paged_kv_cache_block_load(%page_table: buffer, %page_pool: buffer, %sequence0: index, %block0: index, %lane0: index) -> (i32, vector<4xbf16>) {
+  %sequence = index.assume %sequence0 [range(%sequence0, 0, 63)] : index
+  %block = index.assume %block0 [range(%block0, 0, 127)] : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 15)] : index
+  %page_entry_byte_stride = index.constant 4 : offset
+  %page_table_row_byte_stride = index.constant 512 : offset
+  %page_byte_stride = index.constant 4096 : offset
+  %lane_byte_stride = index.constant 8 : offset
+  %row_base = index.scale %sequence, %page_table_row_byte_stride : index, offset -> offset
+  %block_entry_offset = index.scale %block, %page_entry_byte_stride : index, offset -> offset
+  %page_entry_offset = index.add %row_base, %block_entry_offset : offset
+  %page_table_global = buffer.assume.memory_space<global> %page_table : buffer
+  %page_entry_view = buffer.view %page_table_global[%page_entry_offset] : buffer -> view<1xi32, #dense>
+  %page_i32 = view.load %page_entry_view[0] : view<1xi32, #dense> -> i32
+  %page0 = index.cast %page_i32 : i32 to index
+  %page = index.assume %page0 [range(%page0, 0, 4095)] : index
+  %page_base = index.scale %page, %page_byte_stride : index, offset -> offset
+  %lane_offset = index.scale %lane, %lane_byte_stride : index, offset -> offset
+  %kv_offset = index.add %page_base, %lane_offset : offset
+  %page_pool_global = buffer.assume.memory_space<global> %page_pool : buffer
+  %kv_view = buffer.view %page_pool_global[%kv_offset] : buffer -> view<4xbf16, #dense>
+  %key_values = vector.load %kv_view[0] : view<4xbf16, #dense> -> vector<4xbf16>
+  func.return %page_i32, %key_values : i32, vector<4xbf16>
+}
+
+// ====
+
+// RoPE-style pair rotation keeps the math explicit so targets can choose sin/cos
+// recipes or native approximations without hiding the dataflow from analysis.
+func.def @rope_pair_rotate(%even: f32, %odd: f32, %angle: f32) -> (f32, f32) {
+  %sine = scalar.sinf<afn> %angle : f32
+  %cosine = scalar.cosf<afn> %angle : f32
+  %even_cos = scalar.mulf<reassoc|nnan|nsz|contract> %even, %cosine : f32
+  %odd_sin = scalar.mulf<reassoc|nnan|nsz|contract> %odd, %sine : f32
+  %rotated_even = scalar.subf<reassoc|nnan|nsz> %even_cos, %odd_sin : f32
+  %even_sin = scalar.mulf<reassoc|nnan|nsz|contract> %even, %sine : f32
+  %odd_cos = scalar.mulf<reassoc|nnan|nsz|contract> %odd, %cosine : f32
+  %rotated_odd = scalar.addf<reassoc|nnan|nsz> %even_sin, %odd_cos : f32
+  func.return %rotated_even, %rotated_odd : f32, f32
+}
+
+// ====
+
+// Top-2 routing updates are small but branchy; keeping them scalar source IR
+// gives targets a chance to select compare/cndmask forms instead of CFG.
+func.def @routing_top2_update(%score: f32, %expert: i32, %best_score: f32, %best_expert: i32, %second_score: f32, %second_expert: i32) -> (f32, i32, f32, i32) {
+  %beats_best = scalar.cmpf olt, %best_score, %score : f32
+  %beats_second = scalar.cmpf olt, %second_score, %score : f32
+  %candidate_second_score = scf.select %beats_second, %score, %second_score : f32
+  %candidate_second_expert = scf.select %beats_second, %expert, %second_expert : i32
+  %new_best_score = scf.select %beats_best, %score, %best_score : f32
+  %new_best_expert = scf.select %beats_best, %expert, %best_expert : i32
+  %new_second_score = scf.select %beats_best, %best_score, %candidate_second_score : f32
+  %new_second_expert = scf.select %beats_best, %best_expert, %candidate_second_expert : i32
+  func.return %new_best_score, %new_best_expert, %new_second_score, %new_second_expert : f32, i32, f32, i32
+}

@@ -88,4 +88,5 @@ function(iree_genrule)
   add_custom_target("${_RULE_NAME}"
     DEPENDS ${_RULE_OUTS}
   )
+  iree_register_generated_compile_input("${_RULE_NAME}")
 endfunction()

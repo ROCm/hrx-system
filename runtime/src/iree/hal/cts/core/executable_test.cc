@@ -22,28 +22,15 @@ class ExecutableTest : public CtsTestBase<> {
     IREE_ASSERT_OK(iree_hal_executable_cache_create(
         device_, iree_make_cstring_view("default"), &executable_cache_));
 
-    iree_hal_executable_params_t executable_params;
-    iree_hal_executable_params_initialize(&executable_params);
-    executable_params.caching_mode =
-        IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA;
-    executable_params.executable_format =
-        iree_make_cstring_view(executable_format());
-    executable_params.executable_data =
-        executable_data(iree_make_cstring_view("executable_test.bin"));
-
-    IREE_ASSERT_OK(iree_hal_executable_cache_prepare_executable(
-        executable_cache_, &executable_params, &executable_));
+    PrepareExecutableOrSkipUnsupported(executable_cache_, "executable_test.bin",
+                                       &executable_);
   }
 
   void TearDown() override {
-    if (executable_) {
-      iree_hal_executable_release(executable_);
-      executable_ = nullptr;
-    }
-    if (executable_cache_) {
-      iree_hal_executable_cache_release(executable_cache_);
-      executable_cache_ = nullptr;
-    }
+    iree_hal_executable_release(executable_);
+    executable_ = nullptr;
+    iree_hal_executable_cache_release(executable_cache_);
+    executable_cache_ = nullptr;
     CtsTestBase::TearDown();
   }
 
@@ -87,8 +74,10 @@ TEST_P(ExecutableTest, ExportInfo) {
   IREE_ASSERT_OK(iree_hal_executable_function_info(
       executable_, iree_hal_executable_function_from_index(0), &info));
   EXPECT_EQ(std::string_view(info.name.data, info.name.size), "export0");
-  EXPECT_EQ(info.flags, IREE_HAL_EXECUTABLE_FUNCTION_FLAG_NONE);
-  EXPECT_EQ(info.constant_count, 2);
+  EXPECT_EQ(
+      info.flags & ~IREE_HAL_EXECUTABLE_FUNCTION_FLAG_WORKGROUP_SIZE_DYNAMIC,
+      IREE_HAL_EXECUTABLE_FUNCTION_FLAG_NONE);
+  EXPECT_EQ(info.constant_byte_length, 2 * sizeof(uint32_t));
   EXPECT_EQ(info.binding_count, 2);
 }
 
@@ -145,14 +134,57 @@ TEST_P(ExecutableTest, LookupExportByName) {
   EXPECT_EQ(ordinal.value, 0);
 }
 
-TEST_P(ExecutableTest, LookupGlobalByNameNotFoundOrUnsupported) {
-  iree_hal_buffer_t* buffer = nullptr;
+TEST_P(ExecutableTest, TryLookupGlobalByNameNotFound) {
+  bool found = true;
+  iree_hal_executable_global_t global =
+      iree_hal_executable_global_from_value(0);
+  IREE_ASSERT_OK(iree_hal_executable_try_lookup_global_by_name(
+      executable_, IREE_SV("NOT_FOUND"), &found, &global));
+  EXPECT_FALSE(found);
+  EXPECT_FALSE(iree_hal_executable_global_is_valid(global));
+}
+
+TEST_P(ExecutableTest, LookupGlobalByName) {
+  bool found = false;
+  iree_hal_executable_global_t global = iree_hal_executable_global_invalid();
+  IREE_ASSERT_OK(iree_hal_executable_try_lookup_global_by_name(
+      executable_, IREE_SV("executable_test_global"), &found, &global));
+  if (!found) GTEST_SKIP() << "executable testdata has no globals";
+  ASSERT_TRUE(iree_hal_executable_global_is_valid(global));
+
+  iree_hal_executable_global_info_t info;
+  IREE_ASSERT_OK(iree_hal_executable_global_info(executable_, global, &info));
+  EXPECT_EQ(std::string_view(info.name.data, info.name.size),
+            "executable_test_global");
+  ASSERT_EQ(info.byte_length, sizeof(uint64_t));
+
+  iree_hal_buffer_t* global_buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_executable_global_buffer(
+      executable_, global, IREE_HAL_QUEUE_AFFINITY_ANY, &global_buffer));
+  ASSERT_NE(global_buffer, nullptr);
+  EXPECT_EQ(iree_hal_buffer_byte_length(global_buffer), sizeof(uint64_t));
+
+  const uint64_t expected_value = 0xFEEDFACECAFEBEEFull;
+  SemaphoreList empty_wait;
+  SemaphoreList update_signal(device_, {0}, {1});
+  IREE_ASSERT_OK(iree_hal_device_queue_update(
+      device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, update_signal,
+      &expected_value, /*source_offset=*/0, global_buffer, /*target_offset=*/0,
+      sizeof(expected_value), IREE_HAL_UPDATE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
+      update_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+
+  std::vector<uint64_t> data = ReadBufferData<uint64_t>(global_buffer);
+  ASSERT_EQ(data.size(), 1u);
+  EXPECT_EQ(data[0], expected_value);
+}
+
+TEST_P(ExecutableTest, LookupGlobalByNameNotFound) {
+  iree_hal_executable_global_t global = iree_hal_executable_global_invalid();
   EXPECT_THAT(Status(iree_hal_executable_lookup_global_by_name(
-                  executable_, IREE_SV("NOT_FOUND"),
-                  IREE_HAL_QUEUE_AFFINITY_ANY, &buffer)),
-              AnyOf(StatusIs(StatusCode::kNotFound),
-                    StatusIs(StatusCode::kUnimplemented)));
-  EXPECT_EQ(buffer, nullptr);
+                  executable_, IREE_SV("NOT_FOUND"), &global)),
+              StatusIs(StatusCode::kNotFound));
+  EXPECT_FALSE(iree_hal_executable_global_is_valid(global));
 }
 
 CTS_REGISTER_EXECUTABLE_TEST_SUITE(ExecutableTest);

@@ -1,0 +1,169 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "emits textual LLVMIR from source",
+      "steps": [
+        {
+          "name": "write-source",
+          "write": {
+            "path": "{tmp}/add.loom",
+            "text": "llvmir.target<object> @target {\n  triple = \"loom-direct64-unknown-none\",\n  data_layout = \"e-p:64:64-i64:64-n8:16:32:64-S128\"\n}\n\nfunc.def public target(@target) @add(%lhs: i32, %rhs: i32) -> (i32) {\n  %sum = scalar.addi %lhs, %rhs : i32\n  func.return %sum : i32\n}\n"
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{tmp}/add.loom",
+              "--backend=llvmir-text",
+              "--output=-",
+              "--compile-report=summary",
+              "--compile-report-output={tmp}/report.json"
+            ]
+          },
+          "stdout": {
+            "contains": [
+              "target triple = \"loom-direct64-unknown-none\"",
+              "define dso_local i32 @add(i32 %lhs, i32 %rhs)"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/report.json",
+              "contains": [
+                "\"artifact_kind\":\"target-artifact\"",
+                "\"backend\":\"llvmir-text\"",
+                "\"executable_format\":\"llvmir-text\"",
+                "\"status_code\":0"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "emits LLVM bitcode from source",
+      "steps": [
+        {
+          "name": "write-source",
+          "write": {
+            "path": "{tmp}/mul.loom",
+            "text": "llvmir.target<object> @target {\n  triple = \"loom-direct64-unknown-none\",\n  data_layout = \"e-p:64:64-i64:64-n8:16:32:64-S128\"\n}\n\nfunc.def public target(@target) @mul(%lhs: i32, %rhs: i32) -> (i32) {\n  %product = scalar.muli %lhs, %rhs : i32\n  func.return %product : i32\n}\n"
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{tmp}/mul.loom",
+              "--backend=llvmir-bitcode",
+              "--output={tmp}/mul.bc"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/mul.bc",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "emits textual LLVMIR from prepared low IR",
+      "steps": [
+        {
+          "name": "write-source",
+          "write": {
+            "path": "{tmp}/low_add.loom",
+            "text": "llvmir.target<object> @target {\n  triple = \"loom-direct64-unknown-none\",\n  data_layout = \"e-p:64:64-i64:64-n8:16:32:64-S128\"\n}\n\nlow.func.def target(@target) abi(object_function) @low_add(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {\n  %sum = add.i32 %lhs, %rhs\n  return %sum\n}\n"
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{tmp}/low_add.loom",
+              "--backend=llvmir-text",
+              "--pipeline=none",
+              "--output=-"
+            ]
+          },
+          "stdout": {
+            "contains": [
+              "define dso_local i32 @low_add(i32 %lhs, i32 %rhs)",
+              "%sum = add i32 %lhs, %rhs"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "emits textual LLVMIR for AMDGCN kernel low IR",
+      "steps": [
+        {
+          "name": "write-source",
+          "write": {
+            "path": "{tmp}/amdgcn_kernel.loom",
+            "text": "llvmir.target<object> @target {\n  triple = \"amdgcn-amd-amdhsa\"\n}\n\nlow.kernel.def target(@target) workgroup_size(64, 1, 1) @dispatch() asm<llvmir.generic.core> {\n  %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>\n  %value = load.i32 %input, 4\n  return\n}\n"
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{tmp}/amdgcn_kernel.loom",
+              "--backend=llvmir-text",
+              "--pipeline=none",
+              "--output=-"
+            ]
+          },
+          "stdout": {
+            "contains": [
+              "target triple = \"amdgcn-amd-amdhsa\"",
+              "define amdgpu_kernel void @dispatch(ptr addrspace(1) inreg noundef %input)",
+              "\"amdgpu-flat-work-group-size\"=\"1,1024\""
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "rejects HAL sidecar path for LLVMIR emitters",
+      "steps": [
+        {
+          "name": "write-source",
+          "write": {
+            "path": "{tmp}/sidecar.loom",
+            "text": "llvmir.target<object> @target {\n  triple = \"loom-direct64-unknown-none\",\n  data_layout = \"e-p:64:64-i64:64-n8:16:32:64-S128\"\n}\n\nfunc.def public target(@target) @sidecar(%lhs: i32) -> (i32) {\n  func.return %lhs : i32\n}\n"
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{tmp}/sidecar.loom",
+              "--backend=llvmir-text",
+              "--emit-target-artifact={tmp}/unused.ll",
+              "--output={tmp}/sidecar.ll"
+            ]
+          },
+          "exit": {
+            "nonzero": true
+          },
+          "stderr": {
+            "contains": [
+              "--emit-target-artifact is only valid for HAL artifact providers"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

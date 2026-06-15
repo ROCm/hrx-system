@@ -103,6 +103,43 @@ function(iree_c_embed_data)
     COMMAND ${IREE_C_EMBED_DATA_TOOL_BINARY} ${_ARGS} ${_RESOLVED_SRCS}
     DEPENDS ${IREE_C_EMBED_DATA_TOOL_BINARY} ${_RESOLVED_SRCS}
   )
+  set(_REGISTER_COMPILE_INPUT TRUE)
+  foreach(_RESOLVED_SRC IN LISTS _RESOLVED_SRCS)
+    cmake_path(ABSOLUTE_PATH _RESOLVED_SRC NORMALIZE
+      OUTPUT_VARIABLE _RESOLVED_SRC_ABSOLUTE)
+    foreach(_BINARY_PREFIX
+        "${IREE_BINARY_DIR}"
+        "${PROJECT_BINARY_DIR}"
+        "${CMAKE_BINARY_DIR}"
+        "${CMAKE_CURRENT_BINARY_DIR}")
+      cmake_path(ABSOLUTE_PATH _BINARY_PREFIX NORMALIZE
+        OUTPUT_VARIABLE _BINARY_PREFIX_ABSOLUTE)
+      string(FIND "${_RESOLVED_SRC_ABSOLUTE}/" "${_BINARY_PREFIX_ABSOLUTE}/"
+        _BINARY_PREFIX_INDEX)
+      if(_BINARY_PREFIX_INDEX EQUAL 0)
+        set(_REGISTER_COMPILE_INPUT FALSE)
+      endif()
+    endforeach()
+  endforeach()
+  foreach(_SRC IN LISTS _RULE_SRCS)
+    if("${_SRC}" MATCHES "[.]vmfb$")
+      set(_REGISTER_COMPILE_INPUT TRUE)
+    endif()
+  endforeach()
+  if(_REGISTER_COMPILE_INPUT)
+    if(_RULE_PACKAGE)
+      string(REPLACE "::" "_" _PACKAGE_NAME "${_RULE_PACKAGE}")
+    else()
+      iree_package_name(_PACKAGE_NAME)
+    endif()
+    set(_GEN_TARGET "${_PACKAGE_NAME}_${_RULE_NAME}_c_embed_data_gen")
+    add_custom_target("${_GEN_TARGET}"
+      DEPENDS
+        "${_RULE_H_FILE_OUTPUT}"
+        "${_RULE_C_FILE_OUTPUT}"
+    )
+    iree_register_generated_compile_input("${_GEN_TARGET}")
+  endif()
 
   if(_RULE_TESTONLY)
     set(_TESTONLY_ARG "TESTONLY")
@@ -121,4 +158,13 @@ function(iree_c_embed_data)
     "${_PUBLIC_ARG}"
     "${_TESTONLY_ARG}"
   )
+  if(_REGISTER_COMPILE_INPUT)
+    set(_LIB_TARGET "${_PACKAGE_NAME}_${_RULE_NAME}")
+    if(TARGET "${_LIB_TARGET}")
+      add_dependencies("${_LIB_TARGET}" "${_GEN_TARGET}")
+    endif()
+    if(TARGET "${_LIB_TARGET}.objects")
+      add_dependencies("${_LIB_TARGET}.objects" "${_GEN_TARGET}")
+    endif()
+  endif()
 endfunction()

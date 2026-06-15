@@ -374,7 +374,7 @@ static iree_status_t FakeLocalExecutableFunctionInfo(
   switch (function.value) {
     case 0:
       out_info->name = IREE_SV("dispatch_a");
-      out_info->constant_count = 1;
+      out_info->constant_byte_length = sizeof(uint32_t);
       out_info->binding_count = 2;
       out_info->parameter_count = 3;
       out_info->workgroup_size[0] = 4;

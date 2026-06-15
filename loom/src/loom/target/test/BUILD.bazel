@@ -1,0 +1,109 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+    "loom_low_descriptor_cc_library",
+)
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_TEST_LOW_LOWER_VISIBILITY = [
+    "//loom/src/loom/codegen/low:__pkg__",
+    "//loom/src/loom/codegen/low/lower:__pkg__",
+    "//loom/src/loom/codegen/low/transforms/pipeline:__pkg__",
+    "//loom/src/loom/tools/loom-check:__pkg__",
+]
+
+_TEST_LOW_REGISTRY_VISIBILITY = [
+    "//loom/src/loom/codegen/low:__pkg__",
+    "//loom/src/loom/codegen/low/transforms/pipeline:__pkg__",
+    "//loom/src/loom/target:__pkg__",
+]
+
+#===------------------------------------------------------------------------===#
+# Backend-independent low test descriptors
+#===------------------------------------------------------------------------===#
+
+loom_low_descriptor_cc_library(
+    name = "descriptors",
+    testonly = True,
+    args = ["--descriptor-set=test_low_core"],
+    generator = "//loom/py/loom/gen/target/low:test_low_descriptor_shard",
+    deps = ["//loom/src/loom/codegen/low:descriptors"],
+)
+
+loom_low_descriptor_cc_library(
+    name = "alt_descriptors",
+    testonly = True,
+    args = ["--descriptor-set=test_low_alt"],
+    generator = "//loom/py/loom/gen/target/low:test_low_descriptor_shard",
+    deps = ["//loom/src/loom/codegen/low:descriptors"],
+)
+
+loom_cc_library(
+    name = "target_record_table",
+    srcs = ["target_records.c"],
+    hdrs = ["target_records.h"],
+    deps = [
+        "//loom/src/loom/target:types",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "provider",
+    testonly = True,
+    srcs = ["provider.c"],
+    hdrs = ["provider.h"],
+    visibility = [
+        "//loom/src/loom/tools/loom-check:__pkg__",
+    ],
+    deps = [
+        ":lower",
+        "//loom/src/loom/pass/test:registry",
+        "//loom/src/loom/target:low_descriptor_registry_core_test",
+        "//loom/src/loom/target:provider",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "low_registry",
+    testonly = True,
+    srcs = ["low_registry.c"],
+    hdrs = ["low_registry.h"],
+    visibility = _TEST_LOW_REGISTRY_VISIBILITY,
+    deps = [
+        ":descriptors",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/target:low_descriptor_registry",
+        "//loom/src/loom/target:types",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "lower",
+    testonly = True,
+    srcs = ["lower/registry.c"],
+    hdrs = ["lower.h"],
+    visibility = _TEST_LOW_LOWER_VISIBILITY,
+    deps = [
+        ":descriptors",
+        "//loom/src/loom/codegen/low/lower",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/test/contracts",
+        "//runtime/src/iree/base",
+    ],
+)

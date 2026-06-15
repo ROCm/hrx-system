@@ -1,0 +1,96 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_test", "loom_generated_cc_library")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_LOW_OPS_VISIBILITY = [
+    "//loom/binding/c:__pkg__",
+    "//loom/src/loom/analysis:__pkg__",
+    "//loom/src/loom/codegen/low:__pkg__",
+    "//loom/src/loom/codegen/low/allocation:__pkg__",
+    "//loom/src/loom/codegen/low/lower:__pkg__",
+    "//loom/src/loom/codegen/low/schedule:__pkg__",
+    "//loom/src/loom/codegen/low/testing:__pkg__",
+    "//loom/src/loom/codegen/low/transforms:__subpackages__",
+    "//loom/src/loom/format/text/parser:__pkg__",
+    "//loom/src/loom/format/text/printer:__pkg__",
+    "//loom/src/loom/ops:__pkg__",
+    "//loom/src/loom/target:__pkg__",
+    "//loom/src/loom/target/arch:__subpackages__",
+    "//loom/src/loom/target/emit:__subpackages__",
+    "//loom/src/loom/tools/loom-check:__pkg__",
+    "//loom/src/loom/transforms/cfg:__pkg__",
+    "//loom/src/loom/transforms/symbol:__pkg__",
+    "//loom/src/loom/verify:__pkg__",
+]
+
+loom_generated_cc_library(
+    name = "low",
+    srcs = [
+        "canonicalize.c",
+        "facts.c",
+        "kernel.c",
+        "verify.c",
+    ],
+    hdrs = [
+        "kernel.h",
+        "ops.h",
+    ],
+    args = ["--dialect=low"],
+    generated_src_flags = [
+        "--builders",
+        "--tables",
+    ],
+    generated_srcs = [
+        "builders.c",
+        "tables.c",
+    ],
+    generator = "//loom/py/loom/gen/ops:c_tables_low_generator",
+    visibility = _LOW_OPS_VISIBILITY,
+    deps = [
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:func_symbol_facts",
+        "//loom/src/loom/ops:function_contract_verify",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:storage_facts",
+        "//loom/src/loom/ops:successor_verify",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target:types",
+        "//loom/src/loom/util:fact_table",
+        "//loom/src/loom/util:stable_id",
+    ],
+)
+
+loom_cc_test(
+    name = "hidden_attr_verify_test",
+    srcs = ["hidden_attr_verify_test.cc"],
+    deps = [
+        ":low",
+        "//loom/src/loom/codegen/low:text_asm",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/target:low_descriptor_registry_core_test",
+        "//loom/src/loom/testing:diagnostic_matchers",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

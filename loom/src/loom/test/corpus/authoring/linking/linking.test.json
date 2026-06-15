@@ -1,0 +1,202 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "prints selective link plan for source providers",
+      "run": {
+        "tool": "loom-link",
+        "args": [
+          "{srcdir}/root.loom",
+          "--library={srcdir}/providers.loom",
+          "--root=@scale_i32_buffer",
+          "--print-plan"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "root @scale_i32_buffer",
+            "provider @scale_i32_gfx1100",
+            "provider @scale_i32_gfx1200",
+            "provider @scale_i32_fallback"
+          ]
+        },
+        "not_contains": [
+          "@unused_provider"
+        ]
+      }
+    },
+    {
+      "name": "prints authoring check plan",
+      "run": {
+        "tool": "loom-link",
+        "args": [
+          "{srcdir}/checks.loom",
+          "--library={srcdir}/root.loom",
+          "--library={srcdir}/providers.loom",
+          "--root=@scale_i32_buffer_case",
+          "--print-plan"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "root @scale_i32_buffer_case",
+            "dependency @scale_i32_buffer",
+            "provider @scale_i32_gfx1100",
+            "provider @scale_i32_gfx1200",
+            "provider @scale_i32_fallback"
+          ]
+        },
+        "not_contains": [
+          "@unused_provider"
+        ]
+      }
+    },
+    {
+      "name": "links bytecode provider library",
+      "steps": [
+        {
+          "name": "encode-providers",
+          "run": {
+            "tool": "loom-format",
+            "args": [
+              "--from=text",
+              "--to=bc",
+              "--output={tmp}/providers.loombc",
+              "{srcdir}/providers.loom"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/providers.loombc",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "link-text",
+          "run": {
+            "tool": "loom-link",
+            "args": [
+              "{srcdir}/root.loom",
+              "--library={tmp}/providers.loombc",
+              "--root=@scale_i32_buffer",
+              "--strip-check",
+              "--output={tmp}/linked.loom"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/linked.loom",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "show-linked",
+          "run": {
+            "tool": "loom-format",
+            "args": [
+              "{tmp}/linked.loom"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "kernel.def export(\"scale_i32_buffer\") @scale_i32_buffer",
+                "func.template<authoring.link.scale_i32> target(@gfx1100)",
+                "func.template<authoring.link.scale_i32> target(@gfx1200)",
+                "func.template<authoring.link.scale_i32> priority(1) @scale_i32_fallback"
+              ]
+            },
+            "not_contains": [
+              "check.case",
+              "@unused_provider"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "compiles linked bytecode for selected amdgpu target",
+      "steps": [
+        {
+          "name": "encode-providers",
+          "run": {
+            "tool": "loom-format",
+            "args": [
+              "--from=text",
+              "--to=bc",
+              "--output={tmp}/providers.loombc",
+              "{srcdir}/providers.loom"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/providers.loombc",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "link-bytecode",
+          "run": {
+            "tool": "loom-link",
+            "args": [
+              "{srcdir}/root.loom",
+              "--library={tmp}/providers.loombc",
+              "--root=@scale_i32_buffer",
+              "--strip-check",
+              "--to=bc",
+              "--output={tmp}/linked.loombc"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/linked.loombc",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{tmp}/linked.loombc",
+              "--backend=amdgpu-hal",
+              "--target=gfx1100",
+              "--output={tmp}/scale_i32.vmfb",
+              "--emit-target-artifact={tmp}/scale_i32.hsaco",
+              "--artifact-manifest=summary",
+              "--compile-report=summary"
+            ]
+          },
+          "stderr": {
+            "contains": {
+              "unordered": [
+                "\"target_key\":\"gfx1100\"",
+                "\"status\":\"OK\""
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/scale_i32.vmfb",
+              "non_empty": true
+            },
+            {
+              "path": "{tmp}/scale_i32.hsaco",
+              "non_empty": true
+            },
+            {
+              "path": "{tmp}/scale_i32.hsaco.manifest.json",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

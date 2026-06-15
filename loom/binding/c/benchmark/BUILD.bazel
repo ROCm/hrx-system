@@ -1,0 +1,71 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_benchmark",
+    "loom_cc_library",
+)
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_c_embed_data(
+    name = "benchmark_kernels",
+    testonly = True,
+    srcs = [
+        "kernels/double_i32_at_byte_offset.loom",
+    ],
+    c_file_output = "benchmark_kernels.c",
+    flatten = True,
+    h_file_output = "benchmark_kernels.h",
+    identifier = "loomc_benchmark_kernels",
+)
+
+loom_cc_library(
+    name = "compile_pool_prototype",
+    testonly = True,
+    srcs = ["util/compile_pool_prototype.c"],
+    hdrs = ["util/compile_pool_prototype.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/threading:thread",
+        "//runtime/src/iree/task",
+    ],
+)
+
+loom_cc_library(
+    name = "compile_throughput_benchmark_harness",
+    testonly = True,
+    srcs = ["compile_throughput_benchmark.cc"],
+    hdrs = ["compile_throughput_benchmark.h"],
+    deps = [
+        ":benchmark_kernels",
+        ":compile_pool_prototype",
+        "//loom/binding/c:loomc",
+        "//runtime/src/iree/base",
+        "//third_party:google_benchmark",
+    ],
+)
+
+loom_cc_benchmark(
+    name = "compile_throughput_benchmark",
+    srcs = ["targetless_compile_throughput_benchmark.cc"],
+    args = [
+        "--benchmark_filter=Smoke",
+    ],
+    deps = [
+        ":compile_throughput_benchmark_harness",
+        "//loom/binding/c:loomc",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:benchmark_main",
+    ],
+)

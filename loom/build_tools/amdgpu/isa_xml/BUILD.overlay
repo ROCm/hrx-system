@@ -1,0 +1,27 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+package(
+    default_visibility = ["//visibility:public"],
+    licenses = ["notice"],  # AMD GPUOpen machine-readable ISA specifications.
+)
+
+exports_files([
+    "amdgpu_isa_cdna1.xml",
+    "amdgpu_isa_cdna2.xml",
+    "amdgpu_isa_cdna3.xml",
+    "amdgpu_isa_cdna4.xml",
+    "amdgpu_isa_rdna1.xml",
+    "amdgpu_isa_rdna2.xml",
+    "amdgpu_isa_rdna3.xml",
+    "amdgpu_isa_rdna3_5.xml",
+    "amdgpu_isa_rdna4.xml",
+])
+
+filegroup(
+    name = "all_xml",
+    srcs = glob(["*.xml"]),
+)

@@ -45,28 +45,22 @@ hrx_status_t hrx_event_create(hrx_device_t device, hrx_event_flags_t flags,
   return hrx_ok_status();
 }
 
-hrx_status_t hrx_event_retain(hrx_event_t event) {
+void hrx_event_retain(hrx_event_t event) {
   if (!event) {
-    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "event is NULL");
+    return;
   }
   iree_atomic_ref_count_inc(&event->ref_count);
-  return hrx_ok_status();
 }
 
-hrx_status_t hrx_event_release(hrx_event_t event) {
+void hrx_event_release(hrx_event_t event) {
   if (!event) {
-    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "event is NULL");
+    return;
   }
   if (iree_atomic_ref_count_dec(&event->ref_count) == 1) {
-    if (event->semaphore) {
-      hrx_semaphore_release(event->semaphore);
-    }
-    if (event->recording_stream) {
-      hrx_stream_release(event->recording_stream);
-    }
+    hrx_semaphore_release(event->semaphore);
+    hrx_stream_release(event->recording_stream);
     free(event);
   }
-  return hrx_ok_status();
 }
 
 //===----------------------------------------------------------------------===//
@@ -83,9 +77,7 @@ hrx_status_t hrx_event_record(hrx_event_t event, hrx_stream_t stream) {
 
   // Track recording stream (retain new, release old).
   if (event->recording_stream != stream) {
-    if (event->recording_stream) {
-      hrx_stream_release(event->recording_stream);
-    }
+    hrx_stream_release(event->recording_stream);
     event->recording_stream = stream;
     hrx_stream_retain(stream);
   }

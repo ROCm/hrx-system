@@ -1,0 +1,94 @@
+// RUN: pass low-materialize-allocation{budgets=test.i32=3}
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @spill(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) {
+  %ab = low.op<test.add.i32>(%a, %b) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %bc = low.op<test.add.i32>(%b, %c) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %sum = low.op<test.add.i32>(%ab, %bc) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %out = low.op<test.add.i32>(%sum, %a) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.return %out : reg<test.i32>
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @spill(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) {
+  %spill_spill_storage_0 = low.storage.reserve {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  low.spill %a, %spill_spill_storage_0 : reg<test.i32>, low.storage<private>
+  %9 = low.reload %spill_spill_storage_0 : low.storage<private> -> reg<test.i32>
+  %ab = low.op<test.add.i32>(%9, %b) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %bc = low.op<test.add.i32>(%b, %c) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %sum = low.op<test.add.i32>(%ab, %bc) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %10 = low.reload %spill_spill_storage_0 : low.storage<private> -> reg<test.i32>
+  %out = low.op<test.add.i32>(%sum, %10) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.return %out : reg<test.i32>
+}
+
+// ====
+
+// RUN: pass low-materialize-allocation{budgets=test.i32=2}
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @block_arg_spill(%row: reg<test.i32>, %carry: reg<test.i32>) -> (reg<test.i32>) asm<test.low.core> {
+  low.br ^late
+^join(%state: reg<test.i32>):
+  %sum = test.add.i32 %row, %carry
+  %out = test.add.i32 %sum, %state
+  return %out
+^late:
+  %late_state = test.const.i32 7
+  low.br ^join(%late_state: reg<test.i32>)
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @block_arg_spill(%row: reg<test.i32>, %carry: reg<test.i32>) -> (reg<test.i32>) {
+  %block_arg_spill_spill_storage_0 = low.storage.reserve {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %block_arg_spill_spill_storage_1 = low.storage.reserve {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %block_arg_spill_spill_storage_2 = low.storage.reserve {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  low.spill %row, %block_arg_spill_spill_storage_0 : reg<test.i32>, low.storage<private>
+  low.spill %carry, %block_arg_spill_spill_storage_1 : reg<test.i32>, low.storage<private>
+  low.br ^late
+^join:
+  %8 = low.reload %block_arg_spill_spill_storage_0 : low.storage<private> -> reg<test.i32>
+  %10 = low.reload %block_arg_spill_spill_storage_1 : low.storage<private> -> reg<test.i32>
+  %sum = low.op<test.add.i32>(%8, %10) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %12 = low.reload %block_arg_spill_spill_storage_2 : low.storage<private> -> reg<test.i32>
+  %out = low.op<test.add.i32>(%sum, %12) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.return %out : reg<test.i32>
+^late:
+  %late_state = low.const<test.const.i32> {i32_value = 7} : reg<test.i32>
+  low.spill %late_state, %block_arg_spill_spill_storage_2 : reg<test.i32>, low.storage<private>
+  low.br ^join
+}
+
+// ====
+
+// RUN: pass low-materialize-allocation{budgets=test.i32=3,diagnostics=spills}
+
+test.target<low_core> @test_target
+
+// WARNING@+1: BACKEND/009 "test_target" "value 'a'" "test.i32" "spill_spill_storage_0"
+low.func.def target(@test_target) @spill(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) {
+  %ab = low.op<test.add.i32>(%a, %b) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %bc = low.op<test.add.i32>(%b, %c) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %sum = low.op<test.add.i32>(%ab, %bc) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %out = low.op<test.add.i32>(%sum, %a) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.return %out : reg<test.i32>
+}
+
+// ----
+
+// ====
+
+// RUN: pass low-materialize-allocation{spill-storage-spaces=private}
+
+test.target<low_core> @test_target
+
+// ERROR@+1: BACKEND/019 {function_name="unsupported_stack_spill_space", value_class="test.alias32", spill_slot_space="stack", storage_space="stack"}
+low.func.def target(@test_target) @unsupported_stack_spill_space(%lhs: reg<test.alias32>, %rhs: reg<test.alias32>) -> (reg<test.alias32>, reg<test.alias32>) {
+  low.return %lhs, %rhs : reg<test.alias32>, reg<test.alias32>
+}

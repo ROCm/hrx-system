@@ -59,10 +59,10 @@ static iree_status_t iree_hal_amdgpu_benchmark_discard_profile_sink_end(
 
 static const iree_hal_profile_sink_vtable_t
     iree_hal_amdgpu_benchmark_discard_profile_sink_vtable = {
-        .destroy = iree_hal_amdgpu_benchmark_discard_profile_sink_destroy,
-        .begin_session = iree_hal_amdgpu_benchmark_discard_profile_sink_begin,
-        .write = iree_hal_amdgpu_benchmark_discard_profile_sink_write,
-        .end_session = iree_hal_amdgpu_benchmark_discard_profile_sink_end,
+        /*.destroy=*/iree_hal_amdgpu_benchmark_discard_profile_sink_destroy,
+        /*.begin_session=*/iree_hal_amdgpu_benchmark_discard_profile_sink_begin,
+        /*.write=*/iree_hal_amdgpu_benchmark_discard_profile_sink_write,
+        /*.end_session=*/iree_hal_amdgpu_benchmark_discard_profile_sink_end,
 };
 
 iree_status_t iree_hal_amdgpu_benchmark_discard_profile_sink_create(

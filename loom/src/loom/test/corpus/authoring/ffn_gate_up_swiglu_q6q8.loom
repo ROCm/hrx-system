@@ -1,0 +1,201 @@
+// q6_K stores low bits and sign/high-bit state separately. The q6/q8 dot path
+// calls this concrete sign-pack helper directly.
+func.def inline @q6_signed_pack_dot4i(%code: vector<1xi32>) -> (vector<4xi8>) {
+  %one_i32v = vector.constant 1 : vector<1xi32>
+  %two_i32v = vector.constant 2 : vector<1xi32>
+  %low5_mask = vector.constant 522133279 : vector<1xi32>
+  %bit5_mask = vector.constant 538976288 : vector<1xi32>
+  %sign_mask = vector.constant -522133280 : vector<1xi32>
+  %low5 = vector.andi %code, %low5_mask : vector<1xi32>
+  %bit5 = vector.andi %code, %bit5_mask : vector<1xi32>
+  %bit6 = vector.shli %bit5, %one_i32v : vector<1xi32>
+  %bit7 = vector.shli %bit5, %two_i32v : vector<1xi32>
+  %high01 = vector.ori %bit5, %bit6 : vector<1xi32>
+  %high = vector.ori %high01, %bit7 : vector<1xi32>
+  %sign = vector.xori %high, %sign_mask : vector<1xi32>
+  %signed_i32 = vector.ori %low5, %sign : vector<1xi32>
+  %signed = vector.bitcast %signed_i32 : vector<1xi32> to vector<4xi8>
+  func.return %signed : vector<4xi8>
+}
+
+// One q6/q8 part performs the mechanical unpack, dot4i, and scale product for
+// either gate or up weights. This is a provider boundary instead of a concrete
+// call: future libraries can offer different implementations of the same
+// packed accumulation contract without changing the model-shaped kernel body.
+func.template<model.q6q8.accumulate_part> device priority(10) @q6q8_accumulate_part(%acc: f32, %weight_i8: view<55695360xi8, #dense>, %weight_i16: view<27847680xi16, #dense>, %weight_f16: view<27847680xf16, #dense>, %q8_i32: view<31248xi32, #dense>, %q8_f16: view<62496xf16, #dense>, %row_i8_base: index, %row_i16_base: index, %q8_i32_row_base: index, %q8_f16_row_base: index, %block: index, %part: index, %lane: index, %vh_index: index, %vh_shift_i32: i32, %bq8_offset: index, %q8_qword: index, %scale_lane_base: index) -> (f32) {
+  %two = index.constant 2 : index
+  %four = index.constant 4 : index
+  %eight = index.constant 8 : index
+  %nine = index.constant 9 : index
+  %eighteen = index.constant 18 : index
+  %block_i16_stride = index.constant 105 : index
+  %block_i8_stride = index.constant 210 : index
+  %qh_add = index.constant 64 : index
+  %d_add = index.constant 104 : index
+  %scale_add = index.constant 192 : index
+  %zero_i32v = vector.constant 0 : vector<1xi32>
+  %four_i32v = vector.constant 4 : vector<1xi32>
+  %nibble_mask = vector.constant 252645135 : vector<1xi32>
+  %q6_high_mask = vector.constant 808464432 : vector<1xi32>
+
+  %block_i16 = index.mul %block, %block_i16_stride : index
+  %block_i8 = index.mul %block, %block_i8_stride : index
+  %lane_i16 = index.mul %lane, %two : index
+  %ql_row_index = index.add %block_i16, %lane_i16 : index
+  %ql_index = index.add %row_i16_base, %ql_row_index : index
+  %vh_lane0 = index.mul %vh_index, %two : index
+  %qh_base = index.add %block_i16, %qh_add : index
+  %qh_row_index = index.add %qh_base, %vh_lane0 : index
+  %qh_index = index.add %row_i16_base, %qh_row_index : index
+  %d_row_index = index.add %block_i16, %d_add : index
+  %d_index = index.add %row_i16_base, %d_row_index : index
+  %ql_h = vector.load %weight_i16[%ql_index] : view<27847680xi16, #dense> -> vector<2xi16>
+  %qh_h = vector.load %weight_i16[%qh_index] : view<27847680xi16, #dense> -> vector<2xi16>
+  %vl_raw = vector.bitcast %ql_h : vector<2xi16> to vector<1xi32>
+  %vh = vector.bitcast %qh_h : vector<2xi16> to vector<1xi32>
+  %d_f16 = view.load %weight_f16[%d_index] : view<27847680xf16, #dense> -> f16
+  %d = scalar.extf %d_f16 : f16 to f32
+
+  %part_shift_index = index.mul %part, %four : index
+  %part_shift_i32 = index.cast %part_shift_index : index to i32
+  %part_shift = vector.splat %part_shift_i32 : vector<1xi32>
+  %vl = vector.shrui %vl_raw, %part_shift : vector<1xi32>
+  %vil = vector.andi %vl, %nibble_mask : vector<1xi32>
+  %vh_shift_part_i32 = scalar.addi %vh_shift_i32, %part_shift_i32 : i32
+  %vh_shift = vector.splat %vh_shift_part_i32 : vector<1xi32>
+  %vh0 = vector.shrui %vh, %vh_shift : vector<1xi32>
+  %vh1 = vector.shli %vh0, %four_i32v : vector<1xi32>
+  %vih = vector.andi %vh1, %q6_high_mask : vector<1xi32>
+  %code = vector.ori %vil, %vih : vector<1xi32>
+  %signed = func.call @q6_signed_pack_dot4i(%code) : (vector<1xi32>) -> (vector<4xi8>)
+
+  %q8_block_base = index.mul %block, %eight : index
+  %q8_part_add = index.mul %part, %two : index
+  %q8_block_part = index.add %q8_block_base, %q8_part_add : index
+  %q8_block = index.add %q8_block_part, %bq8_offset : index
+  %q8_i32_block = index.mul %q8_block, %nine : index
+  %q8_i32_base = index.add %q8_i32_row_base, %q8_i32_block : index
+  %q8_i32_index = index.add %q8_i32_base, %q8_qword : index
+  %q8_word = vector.load %q8_i32[%q8_i32_index] : view<31248xi32, #dense> -> vector<1xi32>
+  %q8 = vector.bitcast %q8_word : vector<1xi32> to vector<4xi8>
+  %dot = vector.dot4i<s8s8> %signed, %q8, %zero_i32v : vector<4xi8>, vector<4xi8>, vector<1xi32>
+  %dot_i32 = vector.extract %dot[0] : vector<1xi32> -> i32
+  %dot_f32 = scalar.sitofp %dot_i32 : i32 to f32
+
+  %scale_base = index.add %block_i8, %scale_add : index
+  %scale_lane = index.add %scale_lane_base, %part_shift_index : index
+  %scale_row_index = index.add %scale_base, %scale_lane : index
+  %scale_index = index.add %row_i8_base, %scale_row_index : index
+  %scale_i8 = view.load %weight_i8[%scale_index] : view<55695360xi8, #dense> -> i8
+  %scale = scalar.sitofp %scale_i8 : i8 to f32
+  %q8_f16_block = index.mul %q8_block, %eighteen : index
+  %q8_d_index = index.add %q8_f16_row_base, %q8_f16_block : index
+  %q8_d_f16 = view.load %q8_f16[%q8_d_index] : view<62496xf16, #dense> -> f16
+  %q8_d = scalar.extf %q8_d_f16 : f16 to f32
+  %scaled0 = scalar.mulf<reassoc|nnan|ninf|nsz> %dot_f32, %scale : f32
+  %scaled1 = scalar.mulf<reassoc|nnan|ninf|nsz> %scaled0, %d : f32
+  %scaled2 = scalar.mulf<reassoc|nnan|ninf|nsz> %scaled1, %q8_d : f32
+  %next = scalar.addf<reassoc|nnan|ninf|nsz> %acc, %scaled2 : f32
+  func.return %next : f32
+}
+
+kernel.def @ffn_gate_up_swiglu_q6q8() {
+  %rows = index.constant 31 : index
+  %channel_groups = index.constant 1184 : index
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 512 : index
+  kernel.launch.config workgroups(%rows, %channel_groups, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%q8_input: buffer, %gate_weight: buffer, %up_weight: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %row = kernel.workgroup.id<x> : index
+  %channel_group = kernel.workgroup.id<y> : index
+  %subgroup_id = kernel.subgroup.id : index
+  %lane = kernel.subgroup.lane.id : index
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %four = index.constant 4 : index
+  %eight = index.constant 8 : index
+  %fourteen = index.constant 14 : index
+  %sixteen = index.constant 16 : index
+  %q8_i32_row_stride = index.constant 1008 : index
+  %q8_f16_row_stride = index.constant 2016 : index
+  %weight_i8_row_stride = index.constant 2940 : index
+  %weight_i16_row_stride = index.constant 1470 : index
+  %zero_f32 = scalar.constant 0.0 : f32
+  %zero_i32 = scalar.constant 0 : i32
+  %channel_base0 = index.mul %channel_group, %sixteen : index
+  %channel0 = index.add %channel_base0, %subgroup_id : index
+  %channel = index.assume %channel0 [range(%channel0, 0, 18943)] : index
+  %q8_i32_row_base = index.mul %row, %q8_i32_row_stride : index
+  %q8_f16_row_base = index.mul %row, %q8_f16_row_stride : index
+  %lane_mod8 = index.rem %lane, %eight : index
+  %lane_mod16 = index.rem %lane, %sixteen : index
+  %lane_div16 = index.div %lane, %sixteen : index
+  %lane_div8_in_16 = index.div %lane_mod16, %eight : index
+  %lane_div4_in_16 = index.div %lane_mod16, %four : index
+  %vh_hi_group = index.mul %lane_div16, %eight : index
+  %vh_index0 = index.add %vh_hi_group, %lane_mod8 : index
+  %vh_index = index.assume %vh_index0 [range(%vh_index0, 0, 15)] : index
+  %vh_shift_index = index.mul %lane_div8_in_16, %two : index
+  %vh_shift_i32 = index.cast %vh_shift_index : index to i32
+  %bq8_hi_group = index.mul %lane_div16, %four : index
+  %bq8_offset0 = index.add %bq8_hi_group, %lane_div8_in_16 : index
+  %bq8_offset = index.assume %bq8_offset0 [range(%bq8_offset0, 0, 5)] : index
+  %q8_qword0 = index.add %lane_mod8, %one : index
+  %q8_qword = index.assume %q8_qword0 [range(%q8_qword0, 1, 8)] : index
+  %scale_hi_group = index.mul %lane_div16, %eight : index
+  %scale_lane_base0 = index.add %scale_hi_group, %lane_div4_in_16 : index
+  %scale_lane_base = index.assume %scale_lane_base0 [range(%scale_lane_base0, 0, 11)] : index
+
+  %q8_noalias, %gate_noalias, %up_noalias, %output_noalias = buffer.assume.noalias %q8_input, %gate_weight, %up_weight, %output : buffer, buffer, buffer, buffer
+  %q8_i32_view = buffer.view %q8_noalias[%base] : buffer -> view<31248xi32, #dense>
+  %q8_f16_view = buffer.view %q8_noalias[%base] : buffer -> view<62496xf16, #dense>
+  %gate_i8_view = buffer.view %gate_noalias[%base] : buffer -> view<55695360xi8, #dense>
+  %gate_i16_view = buffer.view %gate_noalias[%base] : buffer -> view<27847680xi16, #dense>
+  %gate_f16_view = buffer.view %gate_noalias[%base] : buffer -> view<27847680xf16, #dense>
+  %up_i8_view = buffer.view %up_noalias[%base] : buffer -> view<55695360xi8, #dense>
+  %up_i16_view = buffer.view %up_noalias[%base] : buffer -> view<27847680xi16, #dense>
+  %up_f16_view = buffer.view %up_noalias[%base] : buffer -> view<27847680xf16, #dense>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<31x18944xf32, #dense>
+  %gate_row_i8_base = index.mul %channel, %weight_i8_row_stride : index
+  %gate_row_i16_base = index.mul %channel, %weight_i16_row_stride : index
+  %up_row_i8_base = index.mul %channel, %weight_i8_row_stride : index
+  %up_row_i16_base = index.mul %channel, %weight_i16_row_stride : index
+
+  // These loops are local transform intent, not source expansion. Full unroll is
+  // requested where the q6_K block/part trip counts are tiny and compile-time
+  // known, and the source still exposes the logical reduction structure.
+  %gate_acc, %up_acc = scf.for %block = [%zero to %fourteen step %one](%gate_block_acc = %zero_f32 : f32, %up_block_acc = %zero_f32 : f32) -> (f32, f32) unroll {
+    %gate_next, %up_next = scf.for %part = [%zero to %two step %one](%gate_part_acc = %gate_block_acc : f32, %up_part_acc = %up_block_acc : f32) -> (f32, f32) unroll {
+      %gate_step = func.apply<model.q6q8.accumulate_part>(%gate_part_acc, %gate_i8_view, %gate_i16_view, %gate_f16_view, %q8_i32_view, %q8_f16_view, %gate_row_i8_base, %gate_row_i16_base, %q8_i32_row_base, %q8_f16_row_base, %block, %part, %lane, %vh_index, %vh_shift_i32, %bq8_offset, %q8_qword, %scale_lane_base) : (f32, view<55695360xi8, #dense>, view<27847680xi16, #dense>, view<27847680xf16, #dense>, view<31248xi32, #dense>, view<62496xf16, #dense>, index, index, index, index, index, index, index, index, i32, index, index, index) -> (f32)
+      %up_step = func.apply<model.q6q8.accumulate_part>(%up_part_acc, %up_i8_view, %up_i16_view, %up_f16_view, %q8_i32_view, %q8_f16_view, %up_row_i8_base, %up_row_i16_base, %q8_i32_row_base, %q8_f16_row_base, %block, %part, %lane, %vh_index, %vh_shift_i32, %bq8_offset, %q8_qword, %scale_lane_base) : (f32, view<55695360xi8, #dense>, view<27847680xi16, #dense>, view<27847680xf16, #dense>, view<31248xi32, #dense>, view<62496xf16, #dense>, index, index, index, index, index, index, index, index, i32, index, index, index) -> (f32)
+      scf.yield %gate_step, %up_step : f32, f32
+    }
+    scf.yield %gate_next, %up_next : f32, f32
+  }
+
+  %gate_dot = kernel.subgroup.reduce<addf> %gate_acc : f32
+  %up_dot = kernel.subgroup.reduce<addf> %up_acc : f32
+  %lane_i32 = index.cast %lane : index to i32
+  %is_lane0 = scalar.cmpi eq, %lane_i32, %zero_i32 : i32
+  scf.if %is_lane0 {
+    %gate_silu = scalar.siluf %gate_dot : f32
+    %result = scalar.mulf<nnan|ninf|nsz> %gate_silu, %up_dot : f32
+    view.store %result, %output_view[%row, %channel] : f32, view<31x18944xf32, #dense>
+  }
+  kernel.return
+}
+
+check.case public @ffn_gate_up_swiglu_q6q8_zero_case {
+  %q8_input = check.generate.fill value(0) : tensor<124992xi8>
+  %gate_weight = check.generate.fill value(0) : tensor<55695360xi8>
+  %up_weight = check.generate.fill value(0) : tensor<55695360xi8>
+  %output = check.generate.fill value(1.0) : tensor<31x18944xf32>
+  %expected = check.generate.fill value(0.0) : tensor<31x18944xf32>
+  func.call @ffn_gate_up_swiglu_q6q8(%q8_input, %gate_weight, %up_weight, %output) : (tensor<124992xi8>, tensor<55695360xi8>, tensor<55695360xi8>, tensor<31x18944xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<31x18944xf32>
+  check.return
+}
+
+check.benchmark<@ffn_gate_up_swiglu_q6q8_zero_case>

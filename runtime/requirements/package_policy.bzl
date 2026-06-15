@@ -62,10 +62,7 @@ PACKAGE_POLICIES = [
         build_requirements = [HAL_VULKAN],
     ),
     package_policy(
-        packages = [
-            "runtime/src/iree/hal/drivers/vulkan",
-            "runtime/src/iree/hal/drivers/vulkan/cts/...",
-        ],
+        packages = ["runtime/src/iree/hal/drivers/vulkan/cts/..."],
         run_requirements = [VULKAN_DEVICE_RESOURCE],
         resource_group = "iree-hal-drivers-vulkan-tests",
     ),
@@ -83,8 +80,8 @@ PACKAGE_POLICIES = [
 def _current_policy():
     return collect_package_policy(native.package_name(), PACKAGE_POLICIES)
 
-def apply_runtime_target_policy(kwargs):
-    return apply_target_policy(kwargs, _current_policy())
+def apply_runtime_target_policy(kwargs, name = None):
+    return apply_target_policy(kwargs, _current_policy(), name = name)
 
-def apply_runtime_test_policy(kwargs):
-    return apply_test_policy(kwargs, _current_policy())
+def apply_runtime_test_policy(kwargs, name = None):
+    return apply_test_policy(kwargs, _current_policy(), name = name)

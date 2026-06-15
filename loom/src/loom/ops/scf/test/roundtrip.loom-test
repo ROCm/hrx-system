@@ -1,0 +1,271 @@
+// RUN: roundtrip
+
+// scf.for: minimal counted loop, no iter_args, no results.
+func.def @simple_loop(%lo: index, %hi: index, %step: index) {
+  scf.for %iv = [%lo to %hi step %step] {
+    scf.yield
+  }
+  func.return
+}
+
+// ----
+func.def @simple_loop(%lo: index, %hi: index, %step: index) {
+  scf.for %iv = [%lo to %hi step %step] {
+  }
+  func.return
+}
+
+// ====
+
+// scf.for with a single iter_arg accumulating a constant.
+func.def @sum_loop(%lo: index, %hi: index, %step: index, %init: f32) -> (f32) {
+  %result = scf.for %iv = [%lo to %hi step %step](%acc = %init : f32) -> (f32) {
+    scf.yield %acc : f32
+  }
+  func.return %result : f32
+}
+
+// ====
+
+// scf.for with multiple iter_args of different types.
+func.def @multi_iter(%lo: index, %hi: index, %step: index, %a: f32, %b: i32) -> (f32, i32) {
+  %x, %y = scf.for %iv = [%lo to %hi step %step](%fa = %a : f32, %fb = %b : i32) -> (f32, i32) {
+    scf.yield %fa, %fb : f32, i32
+  }
+  func.return %x, %y : f32, i32
+}
+
+// ====
+
+// scf.for with bare local unroll policy.
+func.def @bare_unroll_policy(%lo: index, %hi: index, %step: index) {
+  scf.for %iv = [%lo to %hi step %step] unroll {
+    scf.yield
+  }
+  func.return
+}
+
+// ----
+func.def @bare_unroll_policy(%lo: index, %hi: index, %step: index) {
+  scf.for %iv = [%lo to %hi step %step] unroll {
+  }
+  func.return
+}
+
+// ====
+
+// scf.for with an SSA unroll factor policy after the loop signature.
+func.def @dynamic_unroll_policy(%lo: index, %hi: index, %step: index, %factor: index, %init: f32) -> (f32) {
+  %result = scf.for %iv = [%lo to %hi step %step](%acc = %init : f32) -> (f32) unroll(%factor) {
+    scf.yield %acc : f32
+  }
+  func.return %result : f32
+}
+
+// ====
+
+// scf.for also accepts grouped iter_arg type lists, then prints the canonical
+// per-binding type form.
+func.def @multi_vector_iter_grouped_types(%lo: index, %hi: index, %step: index, %gate_zero: vector<1xf32>, %up_zero: vector<1xf32>) -> (vector<1xf32>, vector<1xf32>) {
+  %gate, %up = scf.for %hidden = [%lo to %hi step %step](%gate_acc = %gate_zero, %up_acc = %up_zero : vector<1xf32>, vector<1xf32>) -> (vector<1xf32>, vector<1xf32>) {
+    scf.yield %gate_acc, %up_acc : vector<1xf32>, vector<1xf32>
+  }
+  func.return %gate, %up : vector<1xf32>, vector<1xf32>
+}
+
+// ----
+func.def @multi_vector_iter_grouped_types(%lo: index, %hi: index, %step: index, %gate_zero: vector<1xf32>, %up_zero: vector<1xf32>) -> (vector<1xf32>, vector<1xf32>) {
+  %gate, %up = scf.for %hidden = [%lo to %hi step %step](%gate_acc = %gate_zero : vector<1xf32>, %up_acc = %up_zero : vector<1xf32>) -> (vector<1xf32>, vector<1xf32>) {
+    scf.yield %gate_acc, %up_acc : vector<1xf32>, vector<1xf32>
+  }
+  func.return %gate, %up : vector<1xf32>, vector<1xf32>
+}
+
+// ====
+
+// scf.for body containing a non-trivial inner op.
+func.def @loop_body_op(%lo: index, %hi: index, %step: index, %init: f32) -> (f32) {
+  %result = scf.for %iv = [%lo to %hi step %step](%acc = %init : f32) -> (f32) {
+    %next = scalar.addf %acc, %acc : f32
+    scf.yield %next : f32
+  }
+  func.return %result : f32
+}
+
+// ====
+
+// scf.while without loop-carried values.
+func.def @void_while(%cond: i1) {
+  scf.while {
+    scf.condition %cond : i1
+  } do {
+    scf.yield
+  }
+  func.return
+}
+
+// ====
+
+// scf.while with one loop-carried value. The before region uses a binding list
+// for the current value, while the after region spells its block args directly.
+func.def @count_while(%init: index, %limit: index, %one: index) -> (index) {
+  %result = scf.while(%before = %init : index) -> (index) {
+    %keep_going = index.cmp slt, %before, %limit : index
+    scf.condition %keep_going, %before : i1, index
+  } do(%body: index) {
+    %next = index.add %body, %one : index
+    scf.yield %next : index
+  }
+  func.return %result : index
+}
+
+// ====
+
+// scf.if without results and without an else region.
+func.def @void_if_no_else(%cond: i1) {
+  scf.if %cond {
+    scf.yield
+  }
+  func.return
+}
+
+// ----
+func.def @void_if_no_else(%cond: i1) {
+  scf.if %cond {
+  }
+  func.return
+}
+
+// ====
+
+// scf.if without results and with both branches present.
+func.def @void_if(%cond: i1) {
+  scf.if %cond {
+    scf.yield
+  } else {
+    scf.yield
+  }
+  func.return
+}
+
+// ----
+func.def @void_if(%cond: i1) {
+  scf.if %cond {
+  } else {
+  }
+  func.return
+}
+
+// ====
+
+// scf.if with a single result.
+func.def @if_single(%cond: i1, %a: f32, %b: f32) -> (f32) {
+  %r = scf.if %cond -> (f32) {
+    scf.yield %a : f32
+  } else {
+    scf.yield %b : f32
+  }
+  func.return %r : f32
+}
+
+// ====
+
+// scf.if with multiple heterogeneous results.
+func.def @if_multi(%cond: i1, %a: f32, %b: f32, %x: i32, %y: i32) -> (f32, i32) {
+  %fr, %ir = scf.if %cond -> (f32, i32) {
+    scf.yield %a, %x : f32, i32
+  } else {
+    scf.yield %b, %y : f32, i32
+  }
+  func.return %fr, %ir : f32, i32
+}
+
+// ====
+
+// scf.lookup selects a whole row of SSA values from sorted explicit cases or
+// the default row.
+func.def @lookup_dispatch(%variant: index, %gemm0: index, %gemm1: index, %fallback: index, %x0: index, %x1: index, %x2: index, %xf: index, %y0: index, %y1: index, %y2: index, %yf: index, %z0: index, %z1: index, %z2: index, %zf: index) -> (index, index, index, index) {
+  %ordinal, %wgx, %wgy, %wgz = scf.lookup %variant {
+    0 = (%gemm0, %x0, %y0, %z0),
+    1 = (%gemm1, %x1, %y1, %z1),
+    2 = (%gemm1, %x2, %y2, %z2)
+  } default(%fallback, %xf, %yf, %zf) : index, index, index, index
+  func.return %ordinal, %wgx, %wgy, %wgz : index, index, index, index
+}
+
+// ====
+
+// scf.switch selects a whole region by sorted explicit cases or the mandatory
+// default region.
+func.def @switch_dispatch(%variant: index, %a: index, %b: index, %fallback: index) -> (index) {
+  %result = scf.switch %variant -> (index) {
+    case 0 {
+      scf.yield %a : index
+    }
+    case 1 {
+      scf.yield %b : index
+    }
+    default {
+      scf.yield %fallback : index
+    }
+  }
+  func.return %result : index
+}
+
+// ====
+
+// scf.if with side-effecting body ops in branches.
+func.def @if_with_body(%cond: i1, %a: f32) -> (f32) {
+  %r = scf.if %cond -> (f32) {
+    %doubled = scalar.addf %a, %a : f32
+    scf.yield %doubled : f32
+  } else {
+    %negated = scalar.negf %a : f32
+    scf.yield %negated : f32
+  }
+  func.return %r : f32
+}
+
+// ====
+
+// Nested scf.for inside scf.for accumulating across both loops.
+func.def @nested_for(%lo: index, %hi: index, %step: index, %init: f32) -> (f32) {
+  %outer = scf.for %i = [%lo to %hi step %step](%a = %init : f32) -> (f32) {
+    %inner = scf.for %j = [%lo to %hi step %step](%b = %a : f32) -> (f32) {
+      scf.yield %b : f32
+    }
+    scf.yield %inner : f32
+  }
+  func.return %outer : f32
+}
+
+// ====
+
+// scf.if nested inside scf.for body.
+func.def @if_in_for(%lo: index, %hi: index, %step: index, %cond: i1, %init: f32) -> (f32) {
+  %result = scf.for %iv = [%lo to %hi step %step](%acc = %init : f32) -> (f32) {
+    %next = scf.if %cond -> (f32) {
+      %doubled = scalar.addf %acc, %acc : f32
+      scf.yield %doubled : f32
+    } else {
+      scf.yield %acc : f32
+    }
+    scf.yield %next : f32
+  }
+  func.return %result : f32
+}
+
+// ====
+
+// scf.for nested inside scf.if branches.
+func.def @for_in_if(%cond: i1, %lo: index, %hi: index, %step: index, %init: f32) -> (f32) {
+  %r = scf.if %cond -> (f32) {
+    %sum = scf.for %iv = [%lo to %hi step %step](%acc = %init : f32) -> (f32) {
+      scf.yield %acc : f32
+    }
+    scf.yield %sum : f32
+  } else {
+    scf.yield %init : f32
+  }
+  func.return %r : f32
+}

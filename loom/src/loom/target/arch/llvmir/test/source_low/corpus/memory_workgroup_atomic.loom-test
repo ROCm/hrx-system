@@ -1,0 +1,298 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_workgroup_atomic.loom-test
+// RUN: emit source-low output=low
+
+llvmir.target<object> @target {
+  triple = "amdgcn-amd-amdhsa"
+}
+kernel.def target(@target) @lds_atomic_add_i32() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  %tid = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 256 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
+  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64xi32, #dense>
+  %one = scalar.constant 1 : i32
+  view.atomic.reduce<addi> %one, %scratch_view[%tid] {ordering = relaxed, scope = workgroup} : i32, view<64xi32, #dense>
+  %old = view.atomic.rmw<addi> %one, %scratch_view[%tid] {ordering = relaxed, scope = workgroup} : i32, view<64xi32, #dense> -> i32
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(1, 1, 1) @lds_atomic_add_i32() asm<llvmir.generic.core> {
+  %bytes = const.i64 256
+  %scratch_view = alloca.workgroup.i8 %bytes, 4
+  %one = const.i32 1
+  atomic.reduce.add.i32 %one, %scratch_view, 0, 0, 2
+  %old = atomic.rmw.add.i32 %one, %scratch_view, 0, 0, 2
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "amdgcn-amd-amdhsa"
+}
+kernel.def target(@target) @lds_atomic_ordering_i32() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  %tid = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 256 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
+  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64xi32, #dense>
+  %one = scalar.constant 1 : i32
+  view.atomic.reduce<addi> %one, %scratch_view[%tid] {ordering = release, scope = workgroup} : i32, view<64xi32, #dense>
+  %old_acquire = view.atomic.rmw<addi> %one, %scratch_view[%tid] {ordering = acquire, scope = workgroup} : i32, view<64xi32, #dense> -> i32
+  %old_release = view.atomic.rmw<addi> %one, %scratch_view[%tid] {ordering = release, scope = workgroup} : i32, view<64xi32, #dense> -> i32
+  %old_acq_rel = view.atomic.rmw<addi> %one, %scratch_view[%tid] {ordering = acq_rel, scope = workgroup} : i32, view<64xi32, #dense> -> i32
+  %old_seq_cst = view.atomic.rmw<addi> %one, %scratch_view[%tid] {ordering = seq_cst, scope = workgroup} : i32, view<64xi32, #dense> -> i32
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(1, 1, 1) @lds_atomic_ordering_i32() asm<llvmir.generic.core> {
+  %bytes = const.i64 256
+  %scratch_view = alloca.workgroup.i8 %bytes, 4
+  %one = const.i32 1
+  atomic.reduce.add.i32 %one, %scratch_view, 0, 2, 2
+  %old_acquire = atomic.rmw.add.i32 %one, %scratch_view, 0, 1, 2
+  %old_release = atomic.rmw.add.i32 %one, %scratch_view, 0, 2, 2
+  %old_acq_rel = atomic.rmw.add.i32 %one, %scratch_view, 0, 3, 2
+  %old_seq_cst = atomic.rmw.add.i32 %one, %scratch_view, 0, 4, 2
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "amdgcn-amd-amdhsa"
+}
+kernel.def target(@target) @lds_atomic_add_f32() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  %tid = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 256 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
+  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64xf32, #dense>
+  %one = scalar.constant 1.0 : f32
+  view.atomic.reduce<addf> %one, %scratch_view[%tid] {ordering = relaxed, scope = workgroup} : f32, view<64xf32, #dense>
+  %old = view.atomic.rmw<addf> %one, %scratch_view[%tid] {ordering = relaxed, scope = workgroup} : f32, view<64xf32, #dense> -> f32
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(1, 1, 1) @lds_atomic_add_f32() asm<llvmir.generic.core> {
+  %bytes = const.i64 256
+  %scratch_view = alloca.workgroup.i8 %bytes, 4
+  %one = const.f32 1065353216
+  atomic.reduce.fadd.f32 %one, %scratch_view, 0, 0, 2
+  %old = atomic.rmw.fadd.f32 %one, %scratch_view, 0, 0, 2
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "amdgcn-amd-amdhsa"
+}
+kernel.def target(@target) @lds_atomic_minnum_maxnum_f32() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  %tid = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 256 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
+  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64xf32, #dense>
+  %limit = scalar.constant 1.0 : f32
+  view.atomic.reduce<minnumf> %limit, %scratch_view[%tid] {ordering = relaxed, scope = workgroup} : f32, view<64xf32, #dense>
+  view.atomic.reduce<maxnumf> %limit, %scratch_view[%tid] {ordering = relaxed, scope = workgroup} : f32, view<64xf32, #dense>
+  %old_min = view.atomic.rmw<minnumf> %limit, %scratch_view[%tid] {ordering = relaxed, scope = workgroup} : f32, view<64xf32, #dense> -> f32
+  %old_max = view.atomic.rmw<maxnumf> %limit, %scratch_view[%tid] {ordering = relaxed, scope = workgroup} : f32, view<64xf32, #dense> -> f32
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(1, 1, 1) @lds_atomic_minnum_maxnum_f32() asm<llvmir.generic.core> {
+  %bytes = const.i64 256
+  %scratch_view = alloca.workgroup.i8 %bytes, 4
+  %limit = const.f32 1065353216
+  atomic.reduce.fmin.f32 %limit, %scratch_view, 0, 0, 2
+  atomic.reduce.fmax.f32 %limit, %scratch_view, 0, 0, 2
+  %old_min = atomic.rmw.fmin.f32 %limit, %scratch_view, 0, 0, 2
+  %old_max = atomic.rmw.fmax.f32 %limit, %scratch_view, 0, 0, 2
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "amdgcn-amd-amdhsa"
+}
+kernel.def target(@target) @lds_atomic_bitwise_i32() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  %tid = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 256 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
+  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64xi32, #dense>
+  %mask = scalar.constant 255 : i32
+  view.atomic.reduce<andi> %mask, %scratch_view[%tid] {ordering = relaxed, scope = workgroup} : i32, view<64xi32, #dense>
+  view.atomic.reduce<ori> %mask, %scratch_view[%tid] {ordering = relaxed, scope = workgroup} : i32, view<64xi32, #dense>
+  view.atomic.reduce<xori> %mask, %scratch_view[%tid] {ordering = relaxed, scope = workgroup} : i32, view<64xi32, #dense>
+  %old_and = view.atomic.rmw<andi> %mask, %scratch_view[%tid] {ordering = relaxed, scope = workgroup} : i32, view<64xi32, #dense> -> i32
+  %old_or = view.atomic.rmw<ori> %mask, %scratch_view[%tid] {ordering = relaxed, scope = workgroup} : i32, view<64xi32, #dense> -> i32
+  %old_xor = view.atomic.rmw<xori> %mask, %scratch_view[%tid] {ordering = relaxed, scope = workgroup} : i32, view<64xi32, #dense> -> i32
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(1, 1, 1) @lds_atomic_bitwise_i32() asm<llvmir.generic.core> {
+  %bytes = const.i64 256
+  %scratch_view = alloca.workgroup.i8 %bytes, 4
+  %mask = const.i32 255
+  atomic.reduce.and.i32 %mask, %scratch_view, 0, 0, 2
+  atomic.reduce.or.i32 %mask, %scratch_view, 0, 0, 2
+  atomic.reduce.xor.i32 %mask, %scratch_view, 0, 0, 2
+  %old_and = atomic.rmw.and.i32 %mask, %scratch_view, 0, 0, 2
+  %old_or = atomic.rmw.or.i32 %mask, %scratch_view, 0, 0, 2
+  %old_xor = atomic.rmw.xor.i32 %mask, %scratch_view, 0, 0, 2
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "amdgcn-amd-amdhsa"
+}
+kernel.def target(@target) @lds_atomic_sub_i32() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  %tid = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 256 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
+  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64xi32, #dense>
+  %delta = scalar.constant 1 : i32
+  view.atomic.reduce<subi> %delta, %scratch_view[%tid] {ordering = relaxed, scope = workgroup} : i32, view<64xi32, #dense>
+  %old_sub = view.atomic.rmw<subi> %delta, %scratch_view[%tid] {ordering = relaxed, scope = workgroup} : i32, view<64xi32, #dense> -> i32
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(1, 1, 1) @lds_atomic_sub_i32() asm<llvmir.generic.core> {
+  %bytes = const.i64 256
+  %scratch_view = alloca.workgroup.i8 %bytes, 4
+  %delta = const.i32 1
+  atomic.reduce.sub.i32 %delta, %scratch_view, 0, 0, 2
+  %old_sub = atomic.rmw.sub.i32 %delta, %scratch_view, 0, 0, 2
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "amdgcn-amd-amdhsa"
+}
+kernel.def target(@target) @lds_atomic_exchange_i32() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  %tid = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 256 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
+  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64xi32, #dense>
+  %value = scalar.constant 7 : i32
+  %old = view.atomic.rmw<xchgi> %value, %scratch_view[%tid] {ordering = relaxed, scope = workgroup} : i32, view<64xi32, #dense> -> i32
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(1, 1, 1) @lds_atomic_exchange_i32() asm<llvmir.generic.core> {
+  %bytes = const.i64 256
+  %scratch_view = alloca.workgroup.i8 %bytes, 4
+  %value = const.i32 7
+  %old = atomic.rmw.xchg.i32 %value, %scratch_view, 0, 0, 2
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "amdgcn-amd-amdhsa"
+}
+kernel.def target(@target) @lds_atomic_cmpxchg_i32() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  %tid = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 256 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
+  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64xi32, #dense>
+  %expected = scalar.constant 7 : i32
+  %replacement = scalar.constant 9 : i32
+  %old = view.atomic.cmpxchg %expected, %replacement, %scratch_view[%tid] {failure_ordering = relaxed, scope = workgroup, success_ordering = relaxed} : i32, view<64xi32, #dense> -> i32
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(1, 1, 1) @lds_atomic_cmpxchg_i32() asm<llvmir.generic.core> {
+  %bytes = const.i64 256
+  %scratch_view = alloca.workgroup.i8 %bytes, 4
+  %expected = const.i32 7
+  %replacement = const.i32 9
+  %old = atomic.cmpxchg.i32 %expected, %replacement, %scratch_view, 0, 0, 0, 2
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "amdgcn-amd-amdhsa"
+}
+kernel.def target(@target) @lds_atomic_minmax_i32() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  %tid = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 256 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
+  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64xi32, #dense>
+  %limit = scalar.constant 1 : i32
+  view.atomic.reduce<minsi> %limit, %scratch_view[%tid] {ordering = relaxed, scope = workgroup} : i32, view<64xi32, #dense>
+  view.atomic.reduce<maxsi> %limit, %scratch_view[%tid] {ordering = relaxed, scope = workgroup} : i32, view<64xi32, #dense>
+  view.atomic.reduce<minui> %limit, %scratch_view[%tid] {ordering = relaxed, scope = workgroup} : i32, view<64xi32, #dense>
+  view.atomic.reduce<maxui> %limit, %scratch_view[%tid] {ordering = relaxed, scope = workgroup} : i32, view<64xi32, #dense>
+  %old_minsi = view.atomic.rmw<minsi> %limit, %scratch_view[%tid] {ordering = relaxed, scope = workgroup} : i32, view<64xi32, #dense> -> i32
+  %old_maxsi = view.atomic.rmw<maxsi> %limit, %scratch_view[%tid] {ordering = relaxed, scope = workgroup} : i32, view<64xi32, #dense> -> i32
+  %old_minui = view.atomic.rmw<minui> %limit, %scratch_view[%tid] {ordering = relaxed, scope = workgroup} : i32, view<64xi32, #dense> -> i32
+  %old_maxui = view.atomic.rmw<maxui> %limit, %scratch_view[%tid] {ordering = relaxed, scope = workgroup} : i32, view<64xi32, #dense> -> i32
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(1, 1, 1) @lds_atomic_minmax_i32() asm<llvmir.generic.core> {
+  %bytes = const.i64 256
+  %scratch_view = alloca.workgroup.i8 %bytes, 4
+  %limit = const.i32 1
+  atomic.reduce.min.i32 %limit, %scratch_view, 0, 0, 2
+  atomic.reduce.max.i32 %limit, %scratch_view, 0, 0, 2
+  atomic.reduce.umin.i32 %limit, %scratch_view, 0, 0, 2
+  atomic.reduce.umax.i32 %limit, %scratch_view, 0, 0, 2
+  %old_minsi = atomic.rmw.min.i32 %limit, %scratch_view, 0, 0, 2
+  %old_maxsi = atomic.rmw.max.i32 %limit, %scratch_view, 0, 0, 2
+  %old_minui = atomic.rmw.umin.i32 %limit, %scratch_view, 0, 0, 2
+  %old_maxui = atomic.rmw.umax.i32 %limit, %scratch_view, 0, 0, 2
+  return
+}

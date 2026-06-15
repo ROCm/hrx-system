@@ -1,0 +1,60 @@
+// RUN: roundtrip
+
+// Required scalar config declarations.
+config.decl @model36.model.hidden_size : index
+
+config.decl @model36.features.enable_mtp : i1
+
+// ====
+
+// Required scalar config declaration with facts on the unresolved value.
+config.decl @model36.model.max_context : %value: index where [range(%value, 1, 131072)]
+
+// ====
+
+// Required encoding config declarations.
+config.decl @model36.quant.dense_schema : encoding<schema>
+
+config.decl @model36.kv_cache.layout : encoding<layout>
+
+// ====
+
+// Scalar config definitions.
+config.def @model36.model.hidden_size = 2048 : index
+
+config.def @model36.features.enable_mtp = true : i1
+
+config.def @model36.model.rope_theta = 1000000.0 : f32
+
+// ====
+
+// Static encoding config definitions.
+config.def @model36.quant.dense_schema = #q8_0<block=32> : encoding<schema>
+
+config.def @model36.kv_cache.layout = #dense : encoding<layout>
+
+// ====
+
+// Reads from scalar configs.
+config.def @hidden_size = 2048 : index
+
+config.def @enable_mtp = true : i1
+
+func.def @read_scalar_configs() -> (index, i1) {
+  %hidden = config.get @hidden_size : index
+  %enabled = config.get @enable_mtp : i1
+  func.return %hidden, %enabled : index, i1
+}
+
+// ====
+
+// Reads from encoding configs.
+config.def @dense_schema = #q8_0<block=32> : encoding<schema>
+
+config.def @dense_layout = #dense : encoding<layout>
+
+func.def @read_encoding_configs() -> (encoding<schema>, encoding<layout>) {
+  %schema = config.get @dense_schema : encoding<schema>
+  %layout = config.get @dense_layout : encoding<layout>
+  func.return %schema, %layout : encoding<schema>, encoding<layout>
+}

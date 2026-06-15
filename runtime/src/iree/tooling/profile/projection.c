@@ -1088,10 +1088,10 @@ static void iree_profile_executable_print_text_function(
       function_info->flags,
       IREE_HAL_PROFILE_EXECUTABLE_FUNCTION_FLAG_FUNCTION_HASH);
   fprintf(file,
-          "  function %u: %.*s flags=%u constants=%u bindings=%u "
+          "  function %u: %.*s flags=%u constant_bytes=%u bindings=%u "
           "parameters=%u workgroup_size=%ux%ux%u function_hash=",
           function_info->function_ordinal, (int)key.size, key.data,
-          function_info->flags, function_info->constant_count,
+          function_info->flags, function_info->constant_byte_length,
           function_info->binding_count, function_info->parameter_count,
           function_info->workgroup_size[0], function_info->workgroup_size[1],
           function_info->workgroup_size[2]);
@@ -1289,10 +1289,10 @@ static void iree_profile_executable_print_jsonl_function(
           function_info->flags);
   iree_profile_fprint_json_string(file, key);
   fprintf(file,
-          ",\"constant_count\":%u,\"binding_count\":%u"
+          ",\"constant_byte_length\":%u,\"binding_count\":%u"
           ",\"parameter_count\":%u,\"workgroup_size\":[%u,%u,%u]"
           ",\"function_hash_present\":%s,\"function_hash\":",
-          function_info->constant_count, function_info->binding_count,
+          function_info->constant_byte_length, function_info->binding_count,
           function_info->parameter_count, function_info->workgroup_size[0],
           function_info->workgroup_size[1], function_info->workgroup_size[2],
           has_function_hash ? "true" : "false");

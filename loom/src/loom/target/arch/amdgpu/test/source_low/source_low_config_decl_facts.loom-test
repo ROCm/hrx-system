@@ -1,0 +1,75 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1100> @target
+
+config.decl @runtime.column_count : %value: index where [range(%value, 4, 64), mul(%value, 4)]
+
+kernel.def target(@target) @config_decl_facts_bound_dynamic_view() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 4 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %columns = config.get @runtime.column_count : index
+  %input_view = buffer.view %input[%base] : buffer -> view<[%columns]xi32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<[%columns]xi32, #dense>
+  %loaded = vector.load %input_view[%lane] : view<[%columns]xi32, #dense> -> vector<1xi32>
+  vector.store %loaded, %output_view[%lane] : vector<1xi32>, view<[%columns]xi32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(4, 1, 1) @config_decl_facts_bound_dynamic_view() asm<amdgpu.rdna3.core> {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %14 = v_lshlrev_b32_src0_inline %lane, 2
+  %loaded = global_load_b32_saddr %14, %input_view
+  global_store_b32_saddr %14, %loaded, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+config.decl @runtime.column_count : index
+
+kernel.def target(@target) @config_decl_missing_bounds_for_dynamic_view() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 4 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %columns = config.get @runtime.column_count : index
+  %input_view = buffer.view %input[%base] : buffer -> view<[%columns]xi32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<[%columns]xi32, #dense>
+  // ERROR@+1: SUBRANGE/018 {config_key="runtime.column_count", constraint_key="config_decl.where.vector_footprint_upper_bound"}
+  %loaded = vector.load %input_view[%lane] : view<[%columns]xi32, #dense> -> vector<1xi32>
+  // ERROR@+1: SUBRANGE/018 {config_key="runtime.column_count", constraint_key="config_decl.where.vector_footprint_upper_bound"}
+  vector.store %loaded, %output_view[%lane] : vector<1xi32>, view<[%columns]xi32, #dense>
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+config.decl @runtime.scalar_count : %value: index where [range(%value, 4, 64), mul(%value, 4)]
+
+kernel.def target(@target) @config_decl_runtime_use_stays_illegal() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi32, #dense>
+  // ERROR@+1: TARGET/003 {subject_role="value", subject_name="result", constraint_key="no_ordinary_uses"}
+  %columns = config.get @runtime.scalar_count : index
+  %columns_i32 = index.cast %columns : index to i32
+  %stored = vector.splat %columns_i32 : vector<1xi32>
+  vector.store %stored, %output_view[%zero] : vector<1xi32>, view<1xi32, #dense>
+  kernel.return
+}

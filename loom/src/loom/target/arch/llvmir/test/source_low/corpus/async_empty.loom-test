@@ -1,0 +1,14 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/async_empty.loom-test
+// RUN: emit source-low output=low
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @async_empty_group_wait() {
+  // ERROR@+1: TARGET/032 {op_name="kernel.async.group", op_constraint="target_contract.kernel_async.provider_required"}
+  %group = kernel.async.group -> kernel.async.group
+  // ERROR@+1: TARGET/032 {op_name="kernel.async.wait", op_constraint="target_contract.kernel_async.provider_required"}
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return
+}

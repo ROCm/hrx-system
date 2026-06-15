@@ -1,0 +1,62 @@
+// RUN: pass cse,dce,cfg-simplify
+
+func.def @structured_region_stays_structured(%cond: i1, %input: i32) -> (i32) {
+  %result = scf.if %cond -> (i32) {
+    %lhs = test.constant 7 : i32
+    %rhs = test.constant 7 : i32
+    %sum = test.addi %lhs, %rhs : i32
+    scf.yield %sum : i32
+  } else {
+    scf.yield %input : i32
+  }
+  func.return %result : i32
+}
+
+func.def @cfg_region_stays_cfg(%cond: i1, %a: i32, %b: i32) -> (i32) {
+  %dead = test.constant 99 : i32
+  cfg.cond_br %cond, ^then, ^else
+^then:
+  %sum = test.addi %a, %b : i32
+  cfg.br ^join(%sum: i32)
+^else:
+  cfg.br ^join(%a: i32)
+^join(%result: i32):
+  func.return %result : i32
+}
+
+// ----
+func.def @structured_region_stays_structured(%cond: i1, %input: i32) -> (i32) {
+  %result = scf.if %cond -> (i32) {
+    %lhs = test.constant 7 : i32
+    %sum = test.addi %lhs, %lhs : i32
+    scf.yield %sum : i32
+  } else {
+    scf.yield %input : i32
+  }
+  func.return %result : i32
+}
+
+func.def @cfg_region_stays_cfg(%cond: i1, %a: i32, %b: i32) -> (i32) {
+  cfg.cond_br %cond, ^then, ^else
+^then:
+  %sum = test.addi %a, %b : i32
+  cfg.br ^join(%sum: i32)
+^else:
+  cfg.br ^join(%a: i32)
+^join(%result: i32):
+  func.return %result : i32
+}
+
+// ====
+
+// RUN: pass branch-fusion,branch-sink,loop-fusion
+
+func.def @scf_shape_passes_ignore_cfg_blocks(%cond: i1) {
+  cfg.cond_br %cond, ^left, ^right
+^left:
+  cfg.br ^exit
+^right:
+  cfg.br ^exit
+^exit:
+  func.return
+}

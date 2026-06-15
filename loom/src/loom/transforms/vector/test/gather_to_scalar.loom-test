@@ -1,0 +1,97 @@
+// RUN: pass vector-gather-to-scalar,canonicalize,cse
+
+func.def @gather_preserves_vector_dot(%latent: vector<8xbf16>, %weights: buffer, %origin: index) -> (vector<4xf32>) {
+  %base = index.constant 0 : offset
+  %start = index.constant 0 : index
+  %stride = index.constant 7 : index
+  %zero_acc = vector.constant 0.0 : vector<4xf32>
+  %weights_view = buffer.view %weights[%base] : buffer -> view<4096xbf16, #dense>
+  %offsets = vector.iota %start step %stride : vector<8xindex>
+  %weight = vector.gather %weights_view[%origin][%offsets] : view<4096xbf16, #dense>, vector<8xindex> -> vector<8xbf16>
+  %dot = vector.dot2f %latent, %weight, %zero_acc : vector<8xbf16>, vector<8xbf16>, vector<4xf32>
+  func.return %dot : vector<4xf32>
+}
+
+// ----
+func.def @gather_preserves_vector_dot(%latent: vector<8xbf16>, %weights: buffer, %origin: index) -> (vector<4xf32>) {
+  %base = index.constant 0 : offset
+  %zero_acc = vector.constant 0.0 : vector<4xf32>
+  %weights_view = buffer.view %weights[%base] : buffer -> view<4096xbf16, #dense>
+  %15 = view.load %weights_view[%origin] : view<4096xbf16, #dense> -> bf16
+  %19 = index.constant 7 : index
+  %20 = index.add %origin, %19 : index
+  %21 = view.load %weights_view[%20] : view<4096xbf16, #dense> -> bf16
+  %25 = index.constant 14 : index
+  %26 = index.add %origin, %25 : index
+  %27 = view.load %weights_view[%26] : view<4096xbf16, #dense> -> bf16
+  %31 = index.constant 21 : index
+  %32 = index.add %origin, %31 : index
+  %33 = view.load %weights_view[%32] : view<4096xbf16, #dense> -> bf16
+  %37 = index.constant 28 : index
+  %38 = index.add %origin, %37 : index
+  %39 = view.load %weights_view[%38] : view<4096xbf16, #dense> -> bf16
+  %43 = index.constant 35 : index
+  %44 = index.add %origin, %43 : index
+  %45 = view.load %weights_view[%44] : view<4096xbf16, #dense> -> bf16
+  %49 = index.constant 42 : index
+  %50 = index.add %origin, %49 : index
+  %51 = view.load %weights_view[%50] : view<4096xbf16, #dense> -> bf16
+  %55 = index.constant 49 : index
+  %56 = index.add %origin, %55 : index
+  %57 = view.load %weights_view[%56] : view<4096xbf16, #dense> -> bf16
+  %weight = vector.from_elements %15, %21, %27, %33, %39, %45, %51, %57 : vector<8xbf16>
+  %dot = vector.dot2f %latent, %weight, %zero_acc : vector<8xbf16>, vector<8xbf16>, vector<4xf32>
+  func.return %dot : vector<4xf32>
+}
+
+// ====
+
+func.def @masked_gather_uses_passthrough_lanes(%values: buffer, %mask: vector<4xi1>, %old: vector<4xf32>) -> (vector<4xf32>) {
+  %base = index.constant 0 : offset
+  %start = index.constant 0 : index
+  %step = index.constant 2 : index
+  %view = buffer.view %values[%base] : buffer -> view<64xf32, #dense>
+  %offsets = vector.iota %start step %step : vector<4xindex>
+  %gathered = vector.gather.mask %view[4][%offsets], %mask, %old : view<64xf32, #dense>, vector<4xindex>, vector<4xi1>, vector<4xf32>
+  func.return %gathered : vector<4xf32>
+}
+
+// ----
+func.def @masked_gather_uses_passthrough_lanes(%values: buffer, %mask: vector<4xi1>, %old: vector<4xf32>) -> (vector<4xf32>) {
+  %base = index.constant 0 : offset
+  %view = buffer.view %values[%base] : buffer -> view<64xf32, #dense>
+  %10 = vector.extract %mask[0] : vector<4xi1> -> i1
+  %11 = scf.if %10 -> (f32) {
+    %15 = view.load %view[4] : view<64xf32, #dense> -> f32
+    scf.yield %15 : f32
+  } else {
+    %16 = vector.extract %old[0] : vector<4xf32> -> f32
+    scf.yield %16 : f32
+  }
+  %17 = vector.extract %mask[1] : vector<4xi1> -> i1
+  %18 = scf.if %17 -> (f32) {
+    %22 = view.load %view[6] : view<64xf32, #dense> -> f32
+    scf.yield %22 : f32
+  } else {
+    %23 = vector.extract %old[1] : vector<4xf32> -> f32
+    scf.yield %23 : f32
+  }
+  %24 = vector.extract %mask[2] : vector<4xi1> -> i1
+  %25 = scf.if %24 -> (f32) {
+    %29 = view.load %view[8] : view<64xf32, #dense> -> f32
+    scf.yield %29 : f32
+  } else {
+    %30 = vector.extract %old[2] : vector<4xf32> -> f32
+    scf.yield %30 : f32
+  }
+  %31 = vector.extract %mask[3] : vector<4xi1> -> i1
+  %32 = scf.if %31 -> (f32) {
+    %36 = view.load %view[10] : view<64xf32, #dense> -> f32
+    scf.yield %36 : f32
+  } else {
+    %37 = vector.extract %old[3] : vector<4xf32> -> f32
+    scf.yield %37 : f32
+  }
+  %gathered = vector.from_elements %11, %18, %25, %32 : vector<4xf32>
+  func.return %gathered : vector<4xf32>
+}

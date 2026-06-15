@@ -17,15 +17,14 @@ typedef struct iree_hal_hip_event_t iree_hal_hip_event_t;
 typedef iree_status_t (*iree_hal_hip_cleanup_callback_t)(
     void* user_data, iree_hal_hip_event_t* event, iree_status_t status);
 
-// Initializes the cleanup thread for HIP driver.
-iree_status_t iree_hal_hip_cleanup_thread_initialize(
+// Allocates the cleanup thread for HIP driver.
+iree_status_t iree_hal_hip_cleanup_thread_allocate(
     const iree_hal_hip_dynamic_symbols_t* symbols,
     iree_allocator_t host_allocator,
     iree_hal_hip_cleanup_thread_t** out_thread);
 
-// Deinitializes the cleanup thread for HIP driver.
-void iree_hal_hip_cleanup_thread_deinitialize(
-    iree_hal_hip_cleanup_thread_t* thread);
+// Frees the cleanup thread for HIP driver.
+void iree_hal_hip_cleanup_thread_free(iree_hal_hip_cleanup_thread_t* thread);
 
 // Adds a pending cleanup to the thread.
 //

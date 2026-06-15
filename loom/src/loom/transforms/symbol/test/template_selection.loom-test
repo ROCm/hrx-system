@@ -1,0 +1,453 @@
+// RUN: pass select-templates
+
+func.template<demo.double> @double_template(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32
+  func.return %doubled : i32
+}
+
+func.def public @entry(%arg: i32) -> (i32) {
+  %result = func.apply<demo.double>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+func.template<demo.double> @double_template(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32
+  func.return %doubled : i32
+}
+
+func.def public @entry(%arg: i32) -> (i32) {
+  %result = func.call inline @double_template(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+// RUN: pass select-templates,inline-callables
+
+func.template<demo.double> @double_template(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32
+  func.return %doubled : i32
+}
+
+func.def public @entry(%arg: i32) -> (i32) {
+  %result = func.apply<demo.double>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+func.def public @entry(%arg: i32) -> (i32) {
+  %doubled = test.addi %arg, %arg : i32
+  func.return %doubled : i32
+}
+
+// ====
+
+// RUN: pass select-templates
+
+func.template<demo.priority> priority(1) @slow(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.template<demo.priority> priority(10) @fast(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32
+  func.return %doubled : i32
+}
+
+func.def public @entry(%arg: i32) -> (i32) {
+  %result = func.apply<demo.priority>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+func.template<demo.priority> priority(10) @fast(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32
+  func.return %doubled : i32
+}
+
+func.def public @entry(%arg: i32) -> (i32) {
+  %result = func.call inline @fast(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+// RUN: pass select-templates{mode=final}
+
+func.def public @entry(%arg: i32) -> (i32) {
+  // ERROR@+1: LOWERING/045 {op_name="func.apply", phase_name="select-templates", contract_key="demo.missing", failure_code="no_provider"}
+  %result = func.apply<demo.missing>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+// RUN: pass select-templates{mode=final}
+
+func.template<demo.reject> @wrong_type(%value: f32) -> (f32) {
+  func.return %value : f32
+}
+
+func.def public @entry(%arg: i32) -> (i32) {
+  // ERROR@+1: LOWERING/045 {op_name="func.apply", phase_name="select-templates", contract_key="demo.reject", failure_code="all_rejected"}
+  %result = func.apply<demo.reject>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+// RUN: pass select-templates{mode=final}
+
+func.template<demo.tie> priority(10) @lhs(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.template<demo.tie> priority(10) @rhs(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32
+  func.return %doubled : i32
+}
+
+func.def public @entry(%arg: i32) -> (i32) {
+  // ERROR@+1: LOWERING/045 {op_name="func.apply", phase_name="select-templates", contract_key="demo.tie", failure_code="ambiguous"}
+  %result = func.apply<demo.tie>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+// RUN: pass select-templates
+
+func.template<demo.dead> @dead_provider(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def @dead_user(%arg: i32) -> (i32) {
+  %result = func.apply<demo.dead>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+func.def public @entry(%arg: i32) -> (i32) {
+  func.return %arg : i32
+}
+
+// ----
+func.def public @entry(%arg: i32) -> (i32) {
+  func.return %arg : i32
+}
+
+// ====
+
+// RUN: pass select-templates
+
+func.template<demo.dynamic> @identity(%m: index, %arg: tensor<[%m]xf32>) -> (tensor<[%m]xf32>) {
+  func.return %arg : tensor<[%m]xf32>
+}
+
+func.def public @entry(%n: index, %arg: tensor<[%n]xf32>) -> (tensor<[%n]xf32>) {
+  %result = func.apply<demo.dynamic>(%n, %arg) : (index, tensor<[%n]xf32>) -> (tensor<[%n]xf32>)
+  func.return %result : tensor<[%n]xf32>
+}
+
+// ----
+func.template<demo.dynamic> @identity(%m: index, %arg: tensor<[%m]xf32>) -> (tensor<[%m]xf32>) {
+  func.return %arg : tensor<[%m]xf32>
+}
+
+func.def public @entry(%n: index, %arg: tensor<[%n]xf32>) -> (tensor<[%n]xf32>) {
+  %result = func.call inline @identity(%n, %arg) : (index, tensor<[%n]xf32>) -> (tensor<[%n]xf32>)
+  func.return %result : tensor<[%n]xf32>
+}
+
+// ====
+
+// RUN: pass select-templates
+
+func.template<demo.maybe> priority(10) @predicated(%m: index, %arg: tensor<[%m]xf32>) -> (tensor<[%m]xf32>) where [mul(%m, 16)] {
+  func.return %arg : tensor<[%m]xf32>
+}
+
+func.template<demo.maybe> priority(1) @fallback(%m: index, %arg: tensor<[%m]xf32>) -> (tensor<[%m]xf32>) {
+  func.return %arg : tensor<[%m]xf32>
+}
+
+func.def public @entry(%n: index, %arg: tensor<[%n]xf32>) -> (tensor<[%n]xf32>) {
+  %result = func.apply<demo.maybe>(%n, %arg) : (index, tensor<[%n]xf32>) -> (tensor<[%n]xf32>)
+  func.return %result : tensor<[%n]xf32>
+}
+
+// ====
+
+// RUN: pass select-templates
+
+func.template<demo.predicates> priority(10) @aligned(%m: index) -> (index) where [range(%m, 64, 64), mul(%m, 16)] {
+  func.return %m : index
+}
+
+func.template<demo.predicates> priority(1) @fallback(%m: index) -> (index) {
+  func.return %m : index
+}
+
+func.def public @entry(%n: index) -> (index) {
+  %aligned = index.assume %n [range(%n, 64, 64), mul(%n, 16)] : index
+  %result = func.apply<demo.predicates>(%aligned) : (index) -> (index)
+  func.return %result : index
+}
+
+// ----
+func.template<demo.predicates> priority(10) @aligned(%m: index) -> (index) where [range(%m, 64, 64), mul(%m, 16)] {
+  func.return %m : index
+}
+
+func.def public @entry(%n: index) -> (index) {
+  %aligned = index.assume %n [range(%n, 64, 64), mul(%n, 16)] : index
+  %result = func.call inline @aligned(%aligned) : (index) -> (index)
+  func.return %result : index
+}
+
+// ====
+
+// Function-level where predicates seed facts for entry block arguments, so
+// callers do not need a redundant index.assume before func.apply.
+// RUN: pass select-templates
+
+func.template<demo.function_where_fact_seed> priority(10) @aligned(%m: index) -> (index) where [mul(%m, 16)] {
+  func.return %m : index
+}
+
+func.template<demo.function_where_fact_seed> priority(1) @fallback(%m: index) -> (index) {
+  func.return %m : index
+}
+
+func.def public @entry(%n: index) -> (index) where [mul(%n, 16)] {
+  %result = func.apply<demo.function_where_fact_seed>(%n) : (index) -> (index)
+  func.return %result : index
+}
+
+// ----
+func.template<demo.function_where_fact_seed> priority(10) @aligned(%m: index) -> (index) where [mul(%m, 16)] {
+  func.return %m : index
+}
+
+func.def public @entry(%n: index) -> (index) where [mul(%n, 16)] {
+  %result = func.call inline @aligned(%n) : (index) -> (index)
+  func.return %result : index
+}
+
+// ====
+
+// RUN: pass select-templates
+
+func.template<demo.rejected_predicate> priority(10) @aligned(%m: index) -> (index) where [mul(%m, 16)] {
+  func.return %m : index
+}
+
+func.template<demo.rejected_predicate> priority(1) @fallback(%m: index) -> (index) {
+  func.return %m : index
+}
+
+func.def public @entry() -> (index) {
+  %n = index.constant 15 : index
+  %result = func.apply<demo.rejected_predicate>(%n) : (index) -> (index)
+  func.return %result : index
+}
+
+// ----
+func.template<demo.rejected_predicate> priority(1) @fallback(%m: index) -> (index) {
+  func.return %m : index
+}
+
+func.def public @entry() -> (index) {
+  %n = index.constant 15 : index
+  %result = func.call inline @fallback(%n) : (index) -> (index)
+  func.return %result : index
+}
+
+// ====
+
+// RUN: pass select-templates
+
+func.template<demo.same_value> priority(10) @same(%m: index, %n: index) -> (index) where [eq(%m, %n)] {
+  func.return %m : index
+}
+
+func.template<demo.same_value> priority(1) @fallback(%m: index, %n: index) -> (index) {
+  func.return %m : index
+}
+
+func.def public @entry(%n: index) -> (index) {
+  %result = func.apply<demo.same_value>(%n, %n) : (index, index) -> (index)
+  func.return %result : index
+}
+
+// ----
+func.template<demo.same_value> priority(10) @same(%m: index, %n: index) -> (index) where [eq(%m, %n)] {
+  func.return %m : index
+}
+
+func.def public @entry(%n: index) -> (index) {
+  %result = func.call inline @same(%n, %n) : (index, index) -> (index)
+  func.return %result : index
+}
+
+// ====
+
+// RUN: pass select-templates{mode=final}
+
+func.template<demo.final_maybe> priority(10) @large(%m: index) -> (index) where [ge(%m, 1024)] {
+  func.return %m : index
+}
+
+func.template<demo.final_maybe> priority(1) @fallback(%m: index) -> (index) {
+  func.return %m : index
+}
+
+func.def public @entry(%n: index) -> (index) {
+  // ERROR@+1: LOWERING/045 {op_name="func.apply", phase_name="select-templates", contract_key="demo.final_maybe", failure_code="missing_facts"}
+  %result = func.apply<demo.final_maybe>(%n) : (index) -> (index)
+  func.return %result : index
+}
+
+// ====
+
+// RUN: pass select-templates{mode=final}
+
+func.ukernel<demo.ukernel> priority(10) @opaque(%value: i32) -> (i32)
+
+func.template<demo.ukernel> priority(1) @fallback(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def public @entry(%arg: i32) -> (i32) {
+  // ERROR@+1: LOWERING/045 {op_name="func.apply", phase_name="select-templates", contract_key="demo.ukernel", failure_code="materialization_blocked"}
+  %result = func.apply<demo.ukernel>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+// RUN: pass select-templates,inline-callables
+
+test.target<low_core> @gfx11
+test.target<low_core> @gfx12
+
+func.template<demo.targeted> target(@gfx12) priority(20) @gfx12_provider(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.template<demo.targeted> target(@gfx11) priority(10) @gfx11_provider(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32
+  func.return %doubled : i32
+}
+
+func.template<demo.targeted> priority(1) @fallback(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def public target(@gfx11) @entry(%arg: i32) -> (i32) {
+  %result = func.apply<demo.targeted>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+test.target<low_core> @gfx11
+
+test.target<low_core> @gfx12
+
+func.def public target(@gfx11) @entry(%arg: i32) -> (i32) {
+  %doubled = test.addi %arg, %arg : i32
+  func.return %doubled : i32
+}
+
+// ====
+
+// RUN: pass select-templates,inline-callables
+
+test.target<low_core> @gfx11
+test.target<low_core> @gfx12
+
+func.template<demo.target_fallback> target(@gfx12) priority(20) @gfx12_provider(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32
+  func.return %doubled : i32
+}
+
+func.template<demo.target_fallback> priority(1) @fallback(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def public target(@gfx11) @entry(%arg: i32) -> (i32) {
+  %result = func.apply<demo.target_fallback>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+test.target<low_core> @gfx11
+
+test.target<low_core> @gfx12
+
+func.def public target(@gfx11) @entry(%arg: i32) -> (i32) {
+  func.return %arg : i32
+}
+
+// ====
+
+// RUN: pass select-templates,inline-callables
+
+test.target<low_core> @gfx11
+test.target<low_core> @gfx12
+
+func.ukernel<demo.ukernel_target> target(@gfx12) priority(20) @gfx12_opaque(%value: i32) -> (i32)
+
+func.template<demo.ukernel_target> priority(1) @fallback(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def public target(@gfx11) @entry(%arg: i32) -> (i32) {
+  %result = func.apply<demo.ukernel_target>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+test.target<low_core> @gfx11
+
+test.target<low_core> @gfx12
+
+func.def public target(@gfx11) @entry(%arg: i32) -> (i32) {
+  func.return %arg : i32
+}
+
+// ====
+
+// RUN: pass select-templates{mode=final}
+
+test.target<low_core> @gfx11
+
+func.template<demo.targetless_only> target(@gfx11) @gfx11_provider(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def public @entry(%arg: i32) -> (i32) {
+  // ERROR@+1: LOWERING/045 {op_name="func.apply", phase_name="select-templates", contract_key="demo.targetless_only", failure_code="target_mismatch"}
+  %result = func.apply<demo.targetless_only>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+// RUN: pass select-templates
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @target_entry(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def @dead_helper(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+// ----
+test.target<low_core> @test_target
+
+func.def target(@test_target) @target_entry(%value: i32) -> (i32) {
+  func.return %value : i32
+}

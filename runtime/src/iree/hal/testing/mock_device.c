@@ -16,7 +16,7 @@ static const iree_string_view_t iree_hal_mock_executable_format =
     IREE_SVL("mock-executable");
 
 typedef struct iree_hal_mock_executable_function_record_t {
-  // Number of 32-bit constants reflected for the function.
+  // Number of 32-bit constant words reflected for the function.
   uint8_t constant_count;
   // Number of buffer bindings reflected for the function.
   uint8_t binding_count;
@@ -143,7 +143,8 @@ static iree_status_t iree_hal_mock_executable_create(
         executable_name_storage + name_offset, record->name_length);
     name_offset += record->name_length;
     executable->functions[i].flags = record->flags;
-    executable->functions[i].constant_count = record->constant_count;
+    executable->functions[i].constant_byte_length =
+        record->constant_count * sizeof(uint32_t);
     executable->functions[i].binding_count = record->binding_count;
     executable->functions[i].parameter_count = 0;
     executable->functions[i].workgroup_size[0] = record->workgroup_size[0];
@@ -212,14 +213,33 @@ static iree_status_t iree_hal_mock_executable_lookup_function_by_name(
   return iree_make_status(IREE_STATUS_NOT_FOUND);
 }
 
-static iree_status_t iree_hal_mock_executable_lookup_global_by_name(
+static iree_status_t iree_hal_mock_executable_try_lookup_global_by_name(
     iree_hal_executable_t* base_executable, iree_string_view_t name,
-    iree_hal_queue_affinity_t queue_affinity, iree_hal_buffer_t** out_buffer) {
+    bool* out_found, iree_hal_executable_global_t* out_global) {
   (void)base_executable;
   (void)name;
+  *out_found = false;
+  *out_global = iree_hal_executable_global_invalid();
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_mock_executable_global_info(
+    iree_hal_executable_t* base_executable, iree_hal_executable_global_t global,
+    iree_hal_executable_global_info_t* out_info) {
+  (void)base_executable;
+  (void)global;
+  memset(out_info, 0, sizeof(*out_info));
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT);
+}
+
+static iree_status_t iree_hal_mock_executable_global_buffer(
+    iree_hal_executable_t* base_executable, iree_hal_executable_global_t global,
+    iree_hal_queue_affinity_t queue_affinity, iree_hal_buffer_t** out_buffer) {
+  (void)base_executable;
+  (void)global;
   (void)queue_affinity;
   *out_buffer = NULL;
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED);
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT);
 }
 
 static const iree_hal_executable_vtable_t iree_hal_mock_executable_vtable = {
@@ -228,7 +248,10 @@ static const iree_hal_executable_vtable_t iree_hal_mock_executable_vtable = {
     .function_info = iree_hal_mock_executable_function_info,
     .function_parameters = iree_hal_mock_executable_function_parameters,
     .lookup_function_by_name = iree_hal_mock_executable_lookup_function_by_name,
-    .lookup_global_by_name = iree_hal_mock_executable_lookup_global_by_name,
+    .try_lookup_global_by_name =
+        iree_hal_mock_executable_try_lookup_global_by_name,
+    .global_info = iree_hal_mock_executable_global_info,
+    .global_buffer = iree_hal_mock_executable_global_buffer,
 };
 
 typedef struct iree_hal_mock_executable_cache_t {

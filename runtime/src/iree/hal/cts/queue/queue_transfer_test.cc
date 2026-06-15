@@ -79,10 +79,11 @@ class QueueTransferTest : public CtsTestBase<> {
                                                 IREE_ASYNC_WAIT_FLAG_NONE));
   }
 
-  // Writes |pattern| to the entire host-visible source buffer.
-  void FillBufferFromHost(iree_hal_buffer_t* buffer, uint32_t pattern) {
-    IREE_ASSERT_OK(iree_hal_buffer_map_fill(buffer, 0, IREE_HAL_WHOLE_BUFFER,
-                                            &pattern, sizeof(pattern)));
+  // Writes |pattern| to the entire source buffer.
+  void FillBuffer(iree_hal_buffer_t* buffer, uint32_t pattern) {
+    QueueFillAndWait(buffer, /*target_offset=*/0,
+                     iree_hal_buffer_byte_length(buffer), &pattern,
+                     sizeof(pattern));
   }
 };
 
@@ -555,7 +556,7 @@ TEST_P(QueueTransferTest, BurstCopySubmit) {
 
   for (int iteration = 0; iteration < kBurstSubmitIterations; ++iteration) {
     uint32_t pattern = (uint32_t)(0xC0DE0000 | iteration);
-    FillBufferFromHost(source, pattern);
+    FillBuffer(source, pattern);
 
     SemaphoreList empty_wait;
     std::vector<SemaphoreList> copy_signals;
@@ -602,7 +603,7 @@ TEST_P(QueueTransferTest, FillAndCopyHostQueueEventProfiling) {
       profiling.Begin(IREE_HAL_DEVICE_PROFILING_DATA_QUEUE_EVENTS |
                           IREE_HAL_DEVICE_PROFILING_DATA_HOST_EXECUTION_EVENTS,
                       TestProfileSinkAsBase(&sink));
-  if (IsProfilingUnsupported(profiling_status)) {
+  if (IsProfilingUnsupported(iree_status_code(profiling_status))) {
     iree_status_free(profiling_status);
     GTEST_SKIP() << "host queue profiling unsupported by backend";
   }

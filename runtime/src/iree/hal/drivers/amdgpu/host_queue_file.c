@@ -211,7 +211,7 @@ static iree_status_t iree_hal_amdgpu_host_queue_validate_direct_file_handle(
 }
 
 static void iree_hal_amdgpu_file_action_fail_with_borrowed_status(
-    iree_hal_amdgpu_file_action_state_t* state, iree_status_t status) {
+    iree_hal_amdgpu_file_action_state_t* state, const iree_status_t status) {
   if (iree_hal_semaphore_list_is_empty(state->signal_semaphore_list)) {
     return;
   }
@@ -447,15 +447,15 @@ static iree_status_t iree_hal_amdgpu_file_action_start_async(
 
 static void iree_hal_amdgpu_file_action_execute(
     iree_hal_amdgpu_reclaim_entry_t* entry, void* user_data,
-    iree_status_t status) {
+    const iree_status_t status) {
   (void)entry;
   iree_hal_amdgpu_file_action_state_t* state =
       (iree_hal_amdgpu_file_action_state_t*)user_data;
 
   if (iree_status_is_ok(status)) {
-    status = iree_hal_amdgpu_file_action_start_async(state);
-    if (!iree_status_is_ok(status)) {
-      iree_hal_semaphore_list_fail(state->signal_semaphore_list, status);
+    iree_status_t start_status = iree_hal_amdgpu_file_action_start_async(state);
+    if (!iree_status_is_ok(start_status)) {
+      iree_hal_semaphore_list_fail(state->signal_semaphore_list, start_status);
     }
   } else {
     iree_hal_amdgpu_file_action_fail_with_borrowed_status(state, status);

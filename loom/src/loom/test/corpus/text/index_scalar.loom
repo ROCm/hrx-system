@@ -1,0 +1,13 @@
+func.def @scalar_index(%i: index, %j: index, %x: i32, %y: i32, %a: f32, %b: f32, %cond: i1) -> (index, i32, f32) {
+  %c4 = index.constant 4 : index
+  %sum = index.add %i, %c4 : index
+  %product = index.mul %sum, %j : index
+  %inside = index.cmp ult, %product, %j : index
+  %selected = scf.select %cond, %product, %j : index
+  %xi = scalar.addi<nuw> %x, %y : i32
+  %bits = scalar.andi %xi, %y : i32
+  %xf = scalar.fmaf %a, %b, %a : f32
+  %chosen = scf.select %inside, %xf, %b : f32
+  test.use %bits : i32
+  func.return %selected, %bits, %chosen : index, i32, f32
+}

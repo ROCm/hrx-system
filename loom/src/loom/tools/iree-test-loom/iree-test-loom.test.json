@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "prints agent documentation",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": ["--agents_md"]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "## iree-test-loom",
+            "--case=@case_q8_block_unroll_wg64",
+            "--sample=1",
+            "--max-samples-per-case=16",
+            "loom.test.v0",
+            "failed_sample_count",
+            "{case, provider, op, code, provider_code}",
+            "`display_message` is human-facing only"
+          ]
+        }
+      }
+    },
+    {
+      "name": "runs selected sampled case",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/testdata/scalar_cases.loom",
+          "--case=@sampled_choice",
+          "--sample=1"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          "\"case_count\":1",
+          "\"sample_count\":1",
+          "\"failed_sample_count\":0",
+          "\"skipped_case_count\":0",
+          "\"case\":\"sampled_choice\",\"sample_ordinal\":1,\"passed\":true"
+        ]
+      }
+    },
+    {
+      "name": "runs all scalar cases",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": ["{srcdir}/testdata/scalar_cases.loom"]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          "\"case_count\":2",
+          "\"sample_count\":3",
+          "\"failed_sample_count\":0",
+          "\"skipped_case_count\":0",
+          "\"case\":\"scalar_equal\",\"sample_ordinal\":0,\"passed\":true",
+          "\"case\":\"sampled_choice\",\"sample_ordinal\":0,\"passed\":true",
+          "\"case\":\"sampled_choice\",\"sample_ordinal\":1,\"passed\":true"
+        ]
+      }
+    },
+    {
+      "name": "reports skipped requirements with stable codes",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": ["{srcdir}/testdata/requirement_cases.loom"]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          "\"case_count\":2",
+          "\"sample_count\":0",
+          "\"failed_sample_count\":0",
+          "\"skipped_case_count\":2",
+          "\"case\":\"missing_provider_requirement\",\"provider\":\"missing.provider\",\"op\":\"requires\",\"code\":\"provider_not_registered\"",
+          "\"case\":\"missing_provider_skip_if\",\"provider\":\"missing.provider\",\"op\":\"skip_if\",\"code\":\"provider_not_registered\",\"display_message\":\"human skip display text\""
+        ],
+        "not_contains": ["\"reason\""]
+      }
+    }
+  ]
+}

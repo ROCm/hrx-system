@@ -11,7 +11,16 @@ common --enable_bzlmod
 # Treat stale direct dependency pins as errors instead of background warnings.
 common --check_direct_dependencies=error
 
-# Opt-in configuration for CI/hooks that must not rewrite dependency state.
+# Bazel's default lockfile mode is "update", which lets ordinary read-only
+# commands such as "bazel mod graph" silently rewrite MODULE.bazel.lock when
+# module extension facts change. Normal development, CI, and agent workflows
+# must fail loudly instead of changing dependency state as a side effect.
+common --lockfile_mode=error
+
+# Explicit dependency-maintenance escape hatch for intentional lock refreshes.
+common:lockfile-update --lockfile_mode=update
+
+# Compatibility spelling for CI/hooks that want to state the locked intent.
 common:locked --lockfile_mode=error
 
 # -----------------------------------------------------------------------------
@@ -27,6 +36,11 @@ build --guard_against_concurrent_changes
 # Preserve runfiles trees on Windows and Unix-like hosts.
 startup --windows_enable_symlinks
 build --enable_runfiles
+
+# Python runfiles must use explicit checked-in package initializers. Bazel's
+# legacy implicit init generation can synthesize empty __init__.py files in
+# runfiles trees, which is brittle around symlinked source runfiles.
+build --incompatible_default_to_explicit_init_py
 
 # -----------------------------------------------------------------------------
 # Test presets.

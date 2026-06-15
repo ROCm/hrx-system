@@ -1,0 +1,7 @@
+// RUN: roundtrip
+
+func.def @async_empty_group_wait() {
+  %group = kernel.async.group -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return
+}

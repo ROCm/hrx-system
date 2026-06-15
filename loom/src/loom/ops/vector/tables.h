@@ -1,0 +1,178 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// GENERATED FILE: DO NOT EDIT.
+// Generator: loom.gen.ops.c_tables.
+
+#ifndef LOOM_OPS_VECTOR_TABLES_H_
+#define LOOM_OPS_VECTOR_TABLES_H_
+
+#include "loom/ops/vector/ops.h"
+
+#define _BSTRING(length, value) LOOM_BSTRING_REF(length, value)
+#define _OP_NAME(length, namespace_length, value) \
+  LOOM_OP_NAME_REF(length, namespace_length, value)
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+extern const loom_op_vtable_t loom_vector_constant_vtable;
+extern const loom_op_vtable_t loom_vector_poison_vtable;
+extern const loom_op_vtable_t loom_vector_empty_vtable;
+extern const loom_op_vtable_t loom_vector_splat_vtable;
+extern const loom_op_vtable_t loom_vector_iota_vtable;
+extern const loom_op_vtable_t loom_vector_mask_range_vtable;
+extern const loom_op_vtable_t loom_vector_broadcast_vtable;
+extern const loom_op_vtable_t loom_vector_from_elements_vtable;
+extern const loom_op_vtable_t loom_vector_extract_vtable;
+extern const loom_op_vtable_t loom_vector_insert_vtable;
+extern const loom_op_vtable_t loom_vector_slice_vtable;
+extern const loom_op_vtable_t loom_vector_concat_vtable;
+extern const loom_op_vtable_t loom_vector_transpose_vtable;
+extern const loom_op_vtable_t loom_vector_shuffle_vtable;
+extern const loom_op_vtable_t loom_vector_interleave_vtable;
+extern const loom_op_vtable_t loom_vector_deinterleave_vtable;
+extern const loom_op_vtable_t loom_vector_table_lookup_vtable;
+extern const loom_op_vtable_t loom_vector_table_quantize_vtable;
+extern const loom_op_vtable_t loom_vector_transform_vtable;
+extern const loom_op_vtable_t loom_vector_fragment_load_vtable;
+extern const loom_op_vtable_t loom_vector_fragment_store_vtable;
+extern const loom_op_vtable_t loom_vector_load_vtable;
+extern const loom_op_vtable_t loom_vector_store_vtable;
+extern const loom_op_vtable_t loom_vector_load_mask_vtable;
+extern const loom_op_vtable_t loom_vector_store_mask_vtable;
+extern const loom_op_vtable_t loom_vector_load_expand_vtable;
+extern const loom_op_vtable_t loom_vector_store_compress_vtable;
+extern const loom_op_vtable_t loom_vector_gather_vtable;
+extern const loom_op_vtable_t loom_vector_scatter_vtable;
+extern const loom_op_vtable_t loom_vector_gather_mask_vtable;
+extern const loom_op_vtable_t loom_vector_scatter_mask_vtable;
+extern const loom_op_vtable_t loom_vector_atomic_reduce_vtable;
+extern const loom_op_vtable_t loom_vector_atomic_reduce_mask_vtable;
+extern const loom_op_vtable_t loom_vector_atomic_rmw_vtable;
+extern const loom_op_vtable_t loom_vector_atomic_rmw_mask_vtable;
+extern const loom_op_vtable_t loom_vector_atomic_cmpxchg_vtable;
+extern const loom_op_vtable_t loom_vector_select_vtable;
+extern const loom_op_vtable_t loom_vector_cmpi_vtable;
+extern const loom_op_vtable_t loom_vector_cmpf_vtable;
+extern const loom_op_vtable_t loom_vector_addf_vtable;
+extern const loom_op_vtable_t loom_vector_subf_vtable;
+extern const loom_op_vtable_t loom_vector_mulf_vtable;
+extern const loom_op_vtable_t loom_vector_divf_vtable;
+extern const loom_op_vtable_t loom_vector_remf_vtable;
+extern const loom_op_vtable_t loom_vector_negf_vtable;
+extern const loom_op_vtable_t loom_vector_absf_vtable;
+extern const loom_op_vtable_t loom_vector_minimumf_vtable;
+extern const loom_op_vtable_t loom_vector_maximumf_vtable;
+extern const loom_op_vtable_t loom_vector_minnumf_vtable;
+extern const loom_op_vtable_t loom_vector_maxnumf_vtable;
+extern const loom_op_vtable_t loom_vector_clampf_vtable;
+extern const loom_op_vtable_t loom_vector_copysignf_vtable;
+extern const loom_op_vtable_t loom_vector_fmaf_vtable;
+extern const loom_op_vtable_t loom_vector_addi_vtable;
+extern const loom_op_vtable_t loom_vector_subi_vtable;
+extern const loom_op_vtable_t loom_vector_muli_vtable;
+extern const loom_op_vtable_t loom_vector_divsi_vtable;
+extern const loom_op_vtable_t loom_vector_divui_vtable;
+extern const loom_op_vtable_t loom_vector_remsi_vtable;
+extern const loom_op_vtable_t loom_vector_remui_vtable;
+extern const loom_op_vtable_t loom_vector_ceildivsi_vtable;
+extern const loom_op_vtable_t loom_vector_ceildivui_vtable;
+extern const loom_op_vtable_t loom_vector_floordivsi_vtable;
+extern const loom_op_vtable_t loom_vector_negi_vtable;
+extern const loom_op_vtable_t loom_vector_absi_vtable;
+extern const loom_op_vtable_t loom_vector_minsi_vtable;
+extern const loom_op_vtable_t loom_vector_maxsi_vtable;
+extern const loom_op_vtable_t loom_vector_minui_vtable;
+extern const loom_op_vtable_t loom_vector_maxui_vtable;
+extern const loom_op_vtable_t loom_vector_fmai_vtable;
+extern const loom_op_vtable_t loom_vector_andi_vtable;
+extern const loom_op_vtable_t loom_vector_ori_vtable;
+extern const loom_op_vtable_t loom_vector_xori_vtable;
+extern const loom_op_vtable_t loom_vector_shli_vtable;
+extern const loom_op_vtable_t loom_vector_shrsi_vtable;
+extern const loom_op_vtable_t loom_vector_shrui_vtable;
+extern const loom_op_vtable_t loom_vector_rotli_vtable;
+extern const loom_op_vtable_t loom_vector_rotri_vtable;
+extern const loom_op_vtable_t loom_vector_ctlzi_vtable;
+extern const loom_op_vtable_t loom_vector_cttzi_vtable;
+extern const loom_op_vtable_t loom_vector_ctpopi_vtable;
+extern const loom_op_vtable_t loom_vector_expf_vtable;
+extern const loom_op_vtable_t loom_vector_exp2f_vtable;
+extern const loom_op_vtable_t loom_vector_expm1f_vtable;
+extern const loom_op_vtable_t loom_vector_logf_vtable;
+extern const loom_op_vtable_t loom_vector_log2f_vtable;
+extern const loom_op_vtable_t loom_vector_log10f_vtable;
+extern const loom_op_vtable_t loom_vector_log1pf_vtable;
+extern const loom_op_vtable_t loom_vector_powf_vtable;
+extern const loom_op_vtable_t loom_vector_sqrtf_vtable;
+extern const loom_op_vtable_t loom_vector_rsqrtf_vtable;
+extern const loom_op_vtable_t loom_vector_cbrtf_vtable;
+extern const loom_op_vtable_t loom_vector_sinf_vtable;
+extern const loom_op_vtable_t loom_vector_cosf_vtable;
+extern const loom_op_vtable_t loom_vector_sinturnsf_vtable;
+extern const loom_op_vtable_t loom_vector_costurnsf_vtable;
+extern const loom_op_vtable_t loom_vector_tanf_vtable;
+extern const loom_op_vtable_t loom_vector_asinf_vtable;
+extern const loom_op_vtable_t loom_vector_acosf_vtable;
+extern const loom_op_vtable_t loom_vector_atanf_vtable;
+extern const loom_op_vtable_t loom_vector_atan2f_vtable;
+extern const loom_op_vtable_t loom_vector_sinhf_vtable;
+extern const loom_op_vtable_t loom_vector_coshf_vtable;
+extern const loom_op_vtable_t loom_vector_tanhf_vtable;
+extern const loom_op_vtable_t loom_vector_asinhf_vtable;
+extern const loom_op_vtable_t loom_vector_acoshf_vtable;
+extern const loom_op_vtable_t loom_vector_atanhf_vtable;
+extern const loom_op_vtable_t loom_vector_erff_vtable;
+extern const loom_op_vtable_t loom_vector_erfcf_vtable;
+extern const loom_op_vtable_t loom_vector_logisticf_vtable;
+extern const loom_op_vtable_t loom_vector_siluf_vtable;
+extern const loom_op_vtable_t loom_vector_softplusf_vtable;
+extern const loom_op_vtable_t loom_vector_geluf_vtable;
+extern const loom_op_vtable_t loom_vector_ceilf_vtable;
+extern const loom_op_vtable_t loom_vector_floorf_vtable;
+extern const loom_op_vtable_t loom_vector_roundf_vtable;
+extern const loom_op_vtable_t loom_vector_roundevenf_vtable;
+extern const loom_op_vtable_t loom_vector_truncf_vtable;
+extern const loom_op_vtable_t loom_vector_isnanf_vtable;
+extern const loom_op_vtable_t loom_vector_isinff_vtable;
+extern const loom_op_vtable_t loom_vector_isfinitef_vtable;
+extern const loom_op_vtable_t loom_vector_signf_vtable;
+extern const loom_op_vtable_t loom_vector_signi_vtable;
+extern const loom_op_vtable_t loom_vector_extf_vtable;
+extern const loom_op_vtable_t loom_vector_fptrunc_vtable;
+extern const loom_op_vtable_t loom_vector_extsi_vtable;
+extern const loom_op_vtable_t loom_vector_extui_vtable;
+extern const loom_op_vtable_t loom_vector_trunci_vtable;
+extern const loom_op_vtable_t loom_vector_sitofp_vtable;
+extern const loom_op_vtable_t loom_vector_uitofp_vtable;
+extern const loom_op_vtable_t loom_vector_fptosi_vtable;
+extern const loom_op_vtable_t loom_vector_fptoui_vtable;
+extern const loom_op_vtable_t loom_vector_bitcast_vtable;
+extern const loom_op_vtable_t loom_vector_bitfield_extractu_vtable;
+extern const loom_op_vtable_t loom_vector_bitfield_extracts_vtable;
+extern const loom_op_vtable_t loom_vector_bitfield_insert_vtable;
+extern const loom_op_vtable_t loom_vector_bitpack_vtable;
+extern const loom_op_vtable_t loom_vector_bitunpacku_vtable;
+extern const loom_op_vtable_t loom_vector_bitunpacks_vtable;
+extern const loom_op_vtable_t loom_vector_dotf_vtable;
+extern const loom_op_vtable_t loom_vector_dot2f_vtable;
+extern const loom_op_vtable_t loom_vector_dot4i_vtable;
+extern const loom_op_vtable_t loom_vector_dot8i4_vtable;
+extern const loom_op_vtable_t loom_vector_dot4f8_vtable;
+extern const loom_op_vtable_t loom_vector_mma_vtable;
+extern const loom_op_vtable_t loom_vector_reduce_vtable;
+extern const loom_op_vtable_t loom_vector_reduce_axes_vtable;
+extern const loom_op_vtable_t loom_vector_decode_vtable;
+extern const loom_op_vtable_t loom_vector_encode_vtable;
+extern const loom_op_vtable_t loom_vector_fragment_vtable;
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif
+
+#endif  // LOOM_OPS_VECTOR_TABLES_H_

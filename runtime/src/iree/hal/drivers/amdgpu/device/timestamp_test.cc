@@ -16,7 +16,7 @@
 namespace iree::hal::amdgpu {
 namespace {
 
-static iree_hal_amdgpu_device_kernel_args_t MakeHarvestKernelArgs() {
+static iree_hal_amdgpu_device_kernel_args_t MakeTimestampKernelArgs() {
   iree_hal_amdgpu_device_kernel_args_t kernel_args = {};
   kernel_args.kernel_object = 0x12345678ull;
   kernel_args.setup = 2;
@@ -32,6 +32,8 @@ TEST(TimestampTest, AbiRecordLayoutIsFixed) {
   EXPECT_EQ(sizeof(iree_hal_amdgpu_timestamp_record_header_t), 16u);
   EXPECT_EQ(sizeof(iree_hal_amdgpu_command_buffer_timestamp_record_t), 48u);
   EXPECT_EQ(sizeof(iree_hal_amdgpu_dispatch_timestamp_record_t), 64u);
+  EXPECT_EQ(sizeof(iree_hal_amdgpu_dispatch_timestamp_signal_initialize_args_t),
+            16u);
   EXPECT_EQ(offsetof(iree_hal_amdgpu_command_buffer_timestamp_record_t, ticks),
             32u);
   EXPECT_EQ(offsetof(iree_hal_amdgpu_dispatch_timestamp_record_t, ticks), 48u);
@@ -80,7 +82,7 @@ TEST(TimestampTest, ProfileDispatchHarvestUsesTimestampRangeTarget) {
 }
 
 TEST(TimestampTest, EmplacesDispatchHarvestPacketAndKernargs) {
-  iree_hal_amdgpu_device_kernel_args_t kernel_args = MakeHarvestKernelArgs();
+  iree_hal_amdgpu_device_kernel_args_t kernel_args = MakeTimestampKernelArgs();
   iree_hsa_kernel_dispatch_packet_t packet = {};
   packet.header = 0xFFFFu;
   alignas(16) std::array<uint8_t, 256> kernargs = {};
@@ -108,6 +110,36 @@ TEST(TimestampTest, EmplacesDispatchHarvestPacketAndKernargs) {
   EXPECT_EQ(packet.workgroup_size[1], 1u);
   EXPECT_EQ(packet.workgroup_size[2], 1u);
   EXPECT_EQ(packet.grid_size[0], 96u);
+  EXPECT_EQ(packet.grid_size[1], 1u);
+  EXPECT_EQ(packet.grid_size[2], 1u);
+  EXPECT_EQ(packet.kernel_object, 0x12345678ull);
+  EXPECT_EQ(packet.kernarg_address, kernargs.data());
+  EXPECT_EQ(packet.completion_signal.handle, iree_hsa_signal_null().handle);
+}
+
+TEST(TimestampTest, EmplacesSignalInitializationPacketAndKernargs) {
+  iree_hal_amdgpu_device_kernel_args_t kernel_args = MakeTimestampKernelArgs();
+  iree_hsa_kernel_dispatch_packet_t packet = {};
+  packet.header = 0xFFFFu;
+  std::array<iree_amd_signal_t, 3> signals = {};
+  alignas(16) std::array<uint8_t, 64> kernargs = {};
+  const uint32_t signal_count = static_cast<uint32_t>(signals.size());
+
+  iree_hal_amdgpu_device_timestamp_emplace_signal_initialization(
+      &kernel_args, signals.data(), signal_count, &packet, kernargs.data());
+  const auto* args = reinterpret_cast<
+      const iree_hal_amdgpu_dispatch_timestamp_signal_initialize_args_t*>(
+      kernargs.data());
+
+  EXPECT_EQ(args->signals, signals.data());
+  EXPECT_EQ(args->signal_count, signal_count);
+  EXPECT_EQ(args->reserved0, 0u);
+  EXPECT_EQ(packet.header, 0xFFFFu);
+  EXPECT_EQ(packet.setup, 2u);
+  EXPECT_EQ(packet.workgroup_size[0], 32u);
+  EXPECT_EQ(packet.workgroup_size[1], 1u);
+  EXPECT_EQ(packet.workgroup_size[2], 1u);
+  EXPECT_EQ(packet.grid_size[0], 32u);
   EXPECT_EQ(packet.grid_size[1], 1u);
   EXPECT_EQ(packet.grid_size[2], 1u);
   EXPECT_EQ(packet.kernel_object, 0x12345678ull);

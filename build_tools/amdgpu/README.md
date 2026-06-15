@@ -38,12 +38,16 @@ The current generic-family map is:
 | `gfx9-4` CDNA | `gfx940`, `gfx941`, `gfx942`, `gfx950` | `gfx9-4-generic` |
 | `gfx10.1` RDNA | `gfx1010`, `gfx1011`, `gfx1012`, `gfx1013` | `gfx10-1-generic` |
 | `gfx10.3` RDNA | `gfx1030`, `gfx1031`, `gfx1032`, `gfx1033`, `gfx1034`, `gfx1035`, `gfx1036` | `gfx10-3-generic` |
-| `gfx11` RDNA/APU | `gfx1100`, `gfx1101`, `gfx1102`, `gfx1103`, `gfx1150`, `gfx1151`, `gfx1152`, `gfx1153`, `gfx1170`, `gfx1171`, `gfx1172` | `gfx11-generic` |
+| `gfx11` RDNA/APU | `gfx1100`, `gfx1101`, `gfx1102`, `gfx1103`, `gfx1150`, `gfx1151`, `gfx1152`, `gfx1153` | `gfx11-generic` |
+| `gfx11.7` RDNA 4m | `gfx1170`, `gfx1171`, `gfx1172` | exact target only |
 | `gfx12` RDNA | `gfx1200`, `gfx1201` | `gfx12-generic` |
 | `gfx12.5` RDNA | `gfx1250`, `gfx1251` | `gfx12-5-generic` |
 
-`gfx12-5-generic` is available as an explicit selector, but consumers decide
-whether it belongs in their default checked-in artifact sets.
+`gfx11.7` processors are available as explicit exact selectors, but they are
+not folded into `gfx11-generic` because LLVM models them as separate processors
+outside the `gfx11-generic` compatibility set today. `gfx12-5-generic` is
+available as an explicit selector, but consumers decide whether it belongs in
+their default checked-in artifact sets.
 
 ## Generated Files
 

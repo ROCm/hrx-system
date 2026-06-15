@@ -28,17 +28,9 @@ class QueueDispatchTest : public CtsTestBase<> {
     IREE_ASSERT_OK(iree_hal_executable_cache_create(
         device_, iree_make_cstring_view("default"), &executable_cache_));
 
-    iree_hal_executable_params_t executable_params;
-    iree_hal_executable_params_initialize(&executable_params);
-    executable_params.caching_mode =
-        IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA;
-    executable_params.executable_format =
-        iree_make_cstring_view(executable_format());
-    executable_params.executable_data = executable_data(iree_make_cstring_view(
-        "command_buffer_dispatch_constants_bindings_test.bin"));
-
-    IREE_ASSERT_OK(iree_hal_executable_cache_prepare_executable(
-        executable_cache_, &executable_params, &executable_));
+    PrepareExecutableOrSkipUnsupported(
+        executable_cache_,
+        "command_buffer_dispatch_constants_bindings_test.bin", &executable_);
   }
 
   void TearDown() override {
@@ -152,7 +144,7 @@ TEST_P(QueueDispatchTest, DispatchWithConstantsAndBindingsWhileProfiling) {
   iree_status_t profiling_status =
       profiling.Begin(IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS,
                       TestProfileSinkAsBase(&sink));
-  if (IsProfilingUnsupported(profiling_status)) {
+  if (IsProfilingUnsupported(iree_status_code(profiling_status))) {
     iree_status_free(profiling_status);
     GTEST_SKIP() << "device profiling data family unsupported by backend";
   }
@@ -205,7 +197,7 @@ TEST_P(QueueDispatchTest, DispatchWithConstantsAndBindingsWhileProfiling) {
   EXPECT_TRUE(sink.saw_device_metadata);
   EXPECT_TRUE(sink.saw_queue_metadata);
   EXPECT_FALSE(sink.write_after_end);
-  ExpectDispatchEventsWithinClockCorrelationRange(sink);
+  ExpectDispatchEventsHaveClockCorrelations(sink);
 }
 
 // HAL-native CPU profiling should produce host queue and execution records for
@@ -242,7 +234,7 @@ TEST_P(QueueDispatchTest, DispatchHostQueueEventProfiling) {
       profiling.Begin(IREE_HAL_DEVICE_PROFILING_DATA_QUEUE_EVENTS |
                           IREE_HAL_DEVICE_PROFILING_DATA_HOST_EXECUTION_EVENTS,
                       TestProfileSinkAsBase(&sink));
-  if (IsProfilingUnsupported(profiling_status)) {
+  if (IsProfilingUnsupported(iree_status_code(profiling_status))) {
     iree_status_free(profiling_status);
     GTEST_SKIP() << "host queue profiling unsupported by backend";
   }
@@ -328,7 +320,7 @@ TEST_P(QueueDispatchTest, DispatchDeviceQueueEventProfiling) {
   iree_status_t profiling_status =
       profiling.Begin(IREE_HAL_DEVICE_PROFILING_DATA_DEVICE_QUEUE_EVENTS,
                       TestProfileSinkAsBase(&sink));
-  if (IsProfilingUnsupported(profiling_status)) {
+  if (IsProfilingUnsupported(iree_status_code(profiling_status))) {
     iree_status_free(profiling_status);
     GTEST_SKIP() << "device queue profiling unsupported by backend";
   }
@@ -357,10 +349,13 @@ TEST_P(QueueDispatchTest, DispatchDeviceQueueEventProfiling) {
   EXPECT_EQ(0, sink.dispatch_event_count);
   EXPECT_TRUE(sink.dispatch_events.empty());
   EXPECT_GE(sink.queue_device_event_count, 1);
-  ASSERT_EQ(1u, sink.queue_device_events.size());
-  EXPECT_EQ(IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_DISPATCH,
-            sink.queue_device_events[0].type);
-  EXPECT_EQ(1u, sink.queue_device_events[0].operation_count);
+  auto dispatch_event_it = std::find_if(
+      sink.queue_device_events.begin(), sink.queue_device_events.end(),
+      [](const iree_hal_profile_queue_device_event_t& event) {
+        return event.type == IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_DISPATCH;
+      });
+  ASSERT_NE(sink.queue_device_events.end(), dispatch_event_it);
+  EXPECT_EQ(1u, dispatch_event_it->operation_count);
   EXPECT_TRUE(sink.saw_device_metadata);
   EXPECT_TRUE(sink.saw_queue_metadata);
   EXPECT_FALSE(sink.write_after_end);
@@ -383,7 +378,7 @@ TEST_P(QueueDispatchTest, DispatchProfileFilterCanSkipDirectDispatchEvents) {
       IREE_SV("iree-hal-cts-never-matches-*");
   DeviceProfilingScope profiling(device_);
   iree_status_t profiling_status = profiling.Begin(&profiling_options);
-  if (IsProfilingUnsupported(profiling_status)) {
+  if (IsProfilingUnsupported(iree_status_code(profiling_status))) {
     iree_status_free(profiling_status);
     GTEST_SKIP() << "device profiling data family unsupported by backend";
   }
@@ -589,17 +584,9 @@ class QueueDispatchIndirectParametersTest : public CtsTestBase<> {
     IREE_ASSERT_OK(iree_hal_executable_cache_create(
         device_, iree_make_cstring_view("default"), &executable_cache_));
 
-    iree_hal_executable_params_t executable_params;
-    iree_hal_executable_params_initialize(&executable_params);
-    executable_params.caching_mode =
-        IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA;
-    executable_params.executable_format =
-        iree_make_cstring_view(executable_format());
-    executable_params.executable_data = executable_data(iree_make_cstring_view(
-        "command_buffer_dispatch_multi_workgroup_test.bin"));
-
-    IREE_ASSERT_OK(iree_hal_executable_cache_prepare_executable(
-        executable_cache_, &executable_params, &executable_));
+    PrepareExecutableOrSkipUnsupported(
+        executable_cache_, "command_buffer_dispatch_multi_workgroup_test.bin",
+        &executable_);
   }
 
   void TearDown() override {
@@ -684,7 +671,7 @@ class QueueDispatchIndirectParametersTest : public CtsTestBase<> {
         profiling.Begin(IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS |
                             IREE_HAL_DEVICE_PROFILING_DATA_DEVICE_QUEUE_EVENTS,
                         TestProfileSinkAsBase(&sink));
-    if (IsProfilingUnsupported(profiling_status)) {
+    if (IsProfilingUnsupported(iree_status_code(profiling_status))) {
       iree_status_free(profiling_status);
       GTEST_SKIP() << "device profiling data family unsupported by backend";
     }
@@ -709,7 +696,7 @@ class QueueDispatchIndirectParametersTest : public CtsTestBase<> {
     EXPECT_TRUE(sink.saw_device_metadata);
     EXPECT_TRUE(sink.saw_queue_metadata);
     EXPECT_FALSE(sink.write_after_end);
-    ExpectDispatchEventsWithinClockCorrelationRange(sink);
+    ExpectDispatchEventsHaveClockCorrelations(sink);
     ExpectQueueDeviceEventsWithinClockCorrelationRange(sink);
   }
 

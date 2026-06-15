@@ -253,7 +253,7 @@ static void iree_async_proactor_iocp_dispatch_completion(
     iree_async_socket_t* socket =
         iree_async_proactor_iocp_socket_from_io_operation(operation);
     if (socket) {
-      iree_async_socket_set_failure(socket, status);
+      iree_async_socket_set_failure(socket, iree_status_code(status));
     }
   }
   if (!iree_any_bit_set(flags, IREE_ASYNC_COMPLETION_FLAG_MORE)) {

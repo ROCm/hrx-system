@@ -1,0 +1,15 @@
+// RUN: verify
+
+amdgpu.target<gfx1100> @gfx11_target
+low.kernel.def target(@gfx11_target) workgroup_size(64, 1, 1) @gfx11_wmma_zero_hal_kernel() {
+  %output = low.resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %zero = low.const<amdgpu.v_mov_b32> {imm32 = 0} : reg<amdgpu.vgpr>
+  %a = low.concat(%zero, %zero, %zero, %zero) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %b = low.concat(%zero, %zero, %zero, %zero) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %acc_low = low.concat(%zero, %zero, %zero, %zero) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %acc = low.concat(%acc_low, %acc_low) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
+  %wmma = low.op<amdgpu.v_wmma_i32_16x16x16_iu8>(%a, %b, %acc) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x8>) -> %acc as reg<amdgpu.vgpr x8>
+  %stored = low.slice %wmma[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x4>
+  low.op<amdgpu.global_store_b128_saddr>(%zero, %stored, %output) {offset = 0} : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x4>, reg<amdgpu.sgpr x2>)
+  low.return
+}

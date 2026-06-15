@@ -1,0 +1,300 @@
+// RUN: verify
+
+func.def @buffer_alloca_rejects_index_size(%size: index) {
+  // ERROR@+1: TYPE/003 "byte_length" "index" "offset"
+  %scratch = buffer.alloca %size {base_alignment = 64, memory_space = workgroup} : buffer
+  func.return
+}
+
+// ====
+
+func.def @buffer_alloca_rejects_zero_alignment(%size: offset) {
+  // ERROR@+1: STRUCTURE/014 "base_alignment" "0" "positive power-of-two byte alignment"
+  %scratch = buffer.alloca %size {base_alignment = 0, memory_space = workgroup} : buffer
+  func.return
+}
+
+// ====
+
+func.def @buffer_alloca_rejects_non_power_of_two_alignment(%size: offset) {
+  // ERROR@+1: STRUCTURE/014 "base_alignment" "96" "positive power-of-two byte alignment"
+  %scratch = buffer.alloca %size {base_alignment = 96, memory_space = workgroup} : buffer
+  func.return
+}
+
+// ====
+
+func.def @buffer_alloca_rejects_unknown_memory_space(%size: offset) {
+  // ERROR@+1: STRUCTURE/014 "memory_space" "0" "workgroup or private memory space"
+  %scratch = buffer.alloca %size {base_alignment = 64, memory_space = unknown} : buffer
+  func.return
+}
+
+// ====
+
+func.def @buffer_alloca_rejects_global_memory_space(%size: offset) {
+  // ERROR@+1: STRUCTURE/014 "memory_space" "1" "workgroup or private memory space"
+  %scratch = buffer.alloca %size {base_alignment = 64, memory_space = global} : buffer
+  func.return
+}
+
+// ====
+
+func.def @buffer_assume_rejects_unknown_memory_space(%buffer: buffer) {
+  // ERROR@+1: STRUCTURE/014 "memory_space" "0" "concrete memory space"
+  %scratch = buffer.assume.memory_space<unknown> %buffer : buffer
+  func.return
+}
+
+// ====
+
+func.def @buffer_assume_rejects_contradictory_memory_space(%size: offset) {
+  %scratch = buffer.alloca %size {base_alignment = 64, memory_space = workgroup} : buffer
+  // ERROR@+1: STRUCTURE/014 "memory_space" "3" "existing memory-space fact 2"
+  %private = buffer.assume.memory_space<private> %scratch : buffer
+  func.return
+}
+
+// ====
+
+// buffer.view consumes a physical byte offset, not a logical index. Logical
+// coordinates only appear inside the view's index list consumers.
+func.def @buffer_view_rejects_index_offset(%buffer: buffer, %index: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  // ERROR@+1: TYPE/003 "byte_offset" "index" "offset"
+  %view = buffer.view %buffer[%index] : buffer -> view<4xf32, %layout>
+  func.return
+}
+
+// ====
+
+func.def @buffer_view_rejects_integer_offset(%buffer: buffer, %byte_count: i64) {
+  %layout = encoding.layout.dense : encoding<layout>
+  // ERROR@+1: TYPE/003 "byte_offset" "i64" "offset"
+  %view = buffer.view %buffer[%byte_count] : buffer -> view<4xf32, %layout>
+  func.return
+}
+
+// ====
+
+// buffer.view result types must carry the address layout in their encoding slot
+// so the root-to-view relationship remains explicit in the IR.
+func.def @buffer_view_missing_layout(%buffer: buffer, %offset: offset) {
+  // ERROR@+1: ENCODING/001 "result type layout" "view result type"
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32>
+  func.return
+}
+
+// ====
+
+// view.subview requires one logical offset position per source rank.
+func.def @subview_offset_count(%buffer: buffer, %offset: offset) {
+  %layout = encoding.layout.strided [4, 1] : encoding<layout>
+  %source = buffer.view %buffer[%offset] : buffer -> view<4x4xf32, %layout>
+  // ERROR@+1: SUBRANGE/001 "source" "1" "2"
+  %sub = view.subview %source[0] : view<4x4xf32, %layout> -> view<4x4xf32, %layout>
+  func.return
+}
+
+// ====
+
+// view.refine can narrow dynamic shape information, but it must not assert an
+// obvious static shape contradiction.
+func.def @refine_static_dimension_mismatch(%buffer: buffer, %offset: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %source = buffer.view %buffer[%offset] : buffer -> view<4xf32, %layout>
+  // ERROR@+1: SHAPE/001 "source static dimension" "4" "result static dimension" "8"
+  %refined = view.refine %source : view<4xf32, %layout> -> view<8xf32, %layout>
+  func.return
+}
+
+// ====
+
+// view.refine result types still need an explicit layout/encoding attachment;
+// otherwise later memory math would have to guess.
+func.def @refine_missing_result_layout(%buffer: buffer, %offset: offset, %m: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %source = buffer.view %buffer[%offset] : buffer -> view<[%m]xf32, %layout>
+  // ERROR@+1: ENCODING/001 "result type layout" "view type"
+  %refined = view.refine %source : view<[%m]xf32, %layout> -> view<16xf32>
+  func.return
+}
+
+// ====
+
+// A static strided layout must provide one stride per result view rank.
+func.def @buffer_view_stride_rank_mismatch(%buffer: buffer, %offset: offset) {
+  // ERROR@+1: SHAPE/001 "result type" "2" "layout stride list" "1"
+  %view = buffer.view %buffer[%offset] : buffer -> view<4x4xf32, #strided<stride=1>>
+  func.return
+}
+
+// ====
+
+// view.prefetch names one logical index position per view rank.
+func.def @prefetch_index_count_mismatch(%buffer: buffer, %offset: offset, %row: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4x4xf32, %layout>
+  // ERROR@+1: SUBRANGE/001 "view" "1" "2"
+  view.prefetch %view[%row] {intent = read, locality = l1} : view<4x4xf32, %layout>
+  func.return
+}
+
+// ====
+
+// view.load names one logical element index per view axis.
+func.def @load_index_count_mismatch(%buffer: buffer, %offset: offset, %row: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4x4xf32, %layout>
+  // ERROR@+1: SUBRANGE/001 "view" "1" "2"
+  %value = view.load %view[%row] : view<4x4xf32, %layout> -> f32
+  func.return
+}
+
+// ====
+
+// view.store uses the same logical element-index contract as view.load.
+func.def @store_index_count_mismatch(%buffer: buffer, %offset: offset, %row: index, %value: f32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4x4xf32, %layout>
+  // ERROR@+1: SUBRANGE/001 "view" "1" "2"
+  view.store %value, %view[%row] : f32, view<4x4xf32, %layout>
+  func.return
+}
+
+// ====
+
+// Statically known scalar element accesses are checked against static view
+// bounds immediately instead of waiting for a later footprint proof.
+func.def @load_static_index_out_of_bounds(%buffer: buffer, %offset: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4x4xf32, %layout>
+  // ERROR@+1: SUBRANGE/004
+  %value = view.load %view[4, 0] : view<4x4xf32, %layout> -> f32
+  func.return
+}
+
+// ====
+
+// Cache policies are explicit paired contracts: one cache attribute without
+// the other is malformed because target lowering cannot infer the missing half.
+func.def @load_cache_policy_missing_temporal(%buffer: buffer, %offset: offset, %row: index, %col: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4x4xf32, %layout>
+  // ERROR@+1: STRUCTURE/014 "cache_temporal" "0" "present when cache_scope is present"
+  %value = view.load %view[%row, %col] {cache_scope = device} : view<4x4xf32, %layout> -> f32
+  func.return
+}
+
+// ====
+
+// Load-only cache policies cannot be attached to scalar stores.
+func.def @store_rejects_last_use_cache_policy(%buffer: buffer, %offset: offset, %row: index, %col: index, %value: f32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4x4xf32, %layout>
+  // ERROR@+1: STRUCTURE/014 "cache_temporal" "3" "store-compatible temporal hint"
+  view.store %value, %view[%row, %col] {cache_scope = device, cache_temporal = last_use} : f32, view<4x4xf32, %layout>
+  func.return
+}
+
+// ====
+
+// Scalar atomics observe their update value through the memory system.
+func.def @atomic_reduce_observes_poison(%buffer: buffer, %offset: offset, %row: index, %col: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4x4xi32, %layout>
+  %poison = scalar.poison : i32
+  // ERROR@+1: TYPE/012 "poison" "effectful operation" "view.atomic.reduce"
+  view.atomic.reduce<addi> %poison, %view[%row, %col] {ordering = relaxed, scope = workgroup} : i32, view<4x4xi32, %layout>
+  func.return
+}
+
+// ====
+
+// Atomic memory order and scope are required explicit attributes.
+func.def @atomic_missing_ordering_and_scope(%buffer: buffer, %offset: offset, %row: index, %col: index, %value: i32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4x4xi32, %layout>
+  // ERROR@+2: TYPE/005 "ordering"
+  // ERROR@+1: TYPE/005 "scope"
+  view.atomic.reduce<addi> %value, %view[%row, %col] : i32, view<4x4xi32, %layout>
+  func.return
+}
+
+// ====
+
+// Atomic ordering values are parsed as a typed enum, not arbitrary strings.
+func.def @atomic_invalid_ordering(%buffer: buffer, %offset: offset, %row: index, %col: index, %value: i32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4x4xi32, %layout>
+  // ERROR@+1: PARSE/017 "ordering"
+  view.atomic.reduce<addi> %value, %view[%row, %col] {ordering = unordered, scope = workgroup} : i32, view<4x4xi32, %layout>
+  func.return
+}
+
+// ====
+
+// Compare-exchange failure ordering cannot include release semantics.
+func.def @atomic_cmpxchg_failure_rejects_release(%buffer: buffer, %offset: offset, %row: index, %col: index, %value: i32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4x4xi32, %layout>
+  // ERROR@+1: STRUCTURE/014 "failure_ordering" "2" "relaxed, acquire, or seq_cst failure ordering"
+  %old = view.atomic.cmpxchg %value, %value, %view[%row, %col] {success_ordering = acq_rel, failure_ordering = release, scope = workgroup} : i32, view<4x4xi32, %layout> -> i32
+  func.return
+}
+
+// ====
+
+// Compare-exchange failure ordering must not be stronger than success.
+func.def @atomic_cmpxchg_failure_not_stronger_than_success(%buffer: buffer, %offset: offset, %row: index, %col: index, %value: i32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4x4xi32, %layout>
+  // ERROR@+1: STRUCTURE/014 "failure_ordering" "1" "failure ordering no stronger than success ordering"
+  %old = view.atomic.cmpxchg %value, %value, %view[%row, %col] {success_ordering = relaxed, failure_ordering = acquire, scope = workgroup} : i32, view<4x4xi32, %layout> -> i32
+  func.return
+}
+
+// ====
+
+// Atomic kind spelling is tied to the scalar element family.
+func.def @atomic_kind_mismatch(%buffer: buffer, %offset: offset, %row: index, %col: index, %value: i32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4x4xi32, %layout>
+  // ERROR@+1: TYPE/003 "floating-point element type for atomic kind"
+  view.atomic.reduce<addf> %value, %view[%row, %col] {ordering = relaxed, scope = workgroup} : i32, view<4x4xi32, %layout>
+  func.return
+}
+
+// ====
+
+// Exchange is an RMW operation, not a no-result reduction/update.
+func.def @atomic_reduce_rejects_exchange(%buffer: buffer, %offset: offset, %row: index, %col: index, %value: i32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4x4xi32, %layout>
+  // ERROR@+1: STRUCTURE/014 "non-exchange atomic reduce kind"
+  view.atomic.reduce<xchgi> %value, %view[%row, %col] {ordering = relaxed, scope = workgroup} : i32, view<4x4xi32, %layout>
+  func.return
+}
+
+// ====
+
+// Atomics only accept the cache-policy subset that can preserve atomic
+// synchronization semantics across the current lowering targets.
+func.def @atomic_rejects_high_temporal_cache_policy(%buffer: buffer, %offset: offset, %row: index, %col: index, %value: i32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4x4xi32, %layout>
+  // ERROR@+1: STRUCTURE/014 "cache_temporal" "2" "regular or non_temporal temporal hint"
+  view.atomic.reduce<addi> %value, %view[%row, %col] {cache_scope = device, cache_temporal = high_temporal, ordering = relaxed, scope = workgroup} : i32, view<4x4xi32, %layout>
+  func.return
+}
+
+// ====
+
+// Scalar atomics use the same logical element-index contract as load/store.
+func.def @atomic_rmw_index_count_mismatch(%buffer: buffer, %offset: offset, %row: index, %value: i32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4x4xi32, %layout>
+  // ERROR@+1: SUBRANGE/001 "view" "1" "2"
+  %old = view.atomic.rmw<addi> %value, %view[%row] {ordering = relaxed, scope = workgroup} : i32, view<4x4xi32, %layout> -> i32
+  func.return
+}

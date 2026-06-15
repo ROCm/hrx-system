@@ -11,12 +11,24 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
-    module
+    archive
   HDRS
     "archive.h"
-    "module.h"
   SRCS
     "archive.c"
+  DEPS
+    iree::base
+    iree::base::internal::flatcc::parsing
+    iree::schemas::bytecode_module_def_c_fbs
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
+    module
+  HDRS
+    "module.h"
+  SRCS
     "disassembler.c"
     "disassembler.h"
     "dispatch.c"
@@ -26,6 +38,7 @@ iree_cc_library(
     "verifier.c"
     "verifier.h"
   DEPS
+    ::archive
     iree::base
     iree::base::internal
     iree::schemas::bytecode_module_def_c_fbs

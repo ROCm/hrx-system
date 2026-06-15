@@ -172,14 +172,10 @@ class SharedBufferPoolTest : public CtsTestBase<> {
       iree_async_buffer_pool_free(side->pool);
       side->pool = nullptr;
     }
-    if (side->region) {
-      iree_async_region_release(side->region);
-      side->region = nullptr;
-    }
-    if (side->slab) {
-      iree_async_slab_release(side->slab);
-      side->slab = nullptr;
-    }
+    iree_async_region_release(side->region);
+    side->region = nullptr;
+    iree_async_slab_release(side->slab);
+    side->slab = nullptr;
     iree_shm_close(&side->shm);
   }
 };

@@ -1,0 +1,9 @@
+// RUN: roundtrip
+
+func.def @scalar_f32_arith(%lhs: f32, %rhs: f32, %bias: f32) -> (f32) {
+  %sum = scalar.addf %lhs, %rhs : f32
+  %difference = scalar.subf %sum, %bias : f32
+  %product = scalar.mulf %difference, %rhs : f32
+  %result = scalar.fmaf %product, %rhs, %bias : f32
+  func.return %result : f32
+}

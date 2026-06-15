@@ -1,0 +1,12 @@
+// RUN: pass canonicalize
+
+// Dead poison paths disappear before propagation is needed.
+func.def @dead_poison_path(%x: i32) -> (i32) {
+  %p = scalar.poison : i32
+  %dead = scalar.addi %p, %x : i32
+  func.return %x : i32
+}
+// ----
+func.def @dead_poison_path(%x: i32) -> (i32) {
+  func.return %x : i32
+}

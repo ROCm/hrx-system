@@ -745,8 +745,12 @@ iree_status_t iree_async_proactor_io_uring_register_slab(
       // This is a programming error if it fails (we just registered these
       // slots moments ago with no I/O in-flight), so hard-abort.
       if (slab_region->registered_fixed_buffers) {
-        IREE_CHECK_OK(iree_async_io_uring_slab_region_unregister_fixed_buffers(
-            slab_region, proactor));
+        iree_status_t unregister_status =
+            iree_async_io_uring_slab_region_unregister_fixed_buffers(
+                slab_region, proactor);
+        if (!iree_status_is_ok(unregister_status)) {
+          iree_status_abort(iree_status_join(status, unregister_status));
+        }
       }
       iree_allocator_free(base_proactor->allocator, slab_region);
       IREE_TRACE_ZONE_END(z0);

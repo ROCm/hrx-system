@@ -1,0 +1,218 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/vector_slice.loom-test
+// RUN: emit source-low output=low
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @i32x4_slice_middle(%values: vector<4xi32>) -> (vector<2xi32>) {
+  %middle = vector.slice %values[1] : vector<4xi32> -> vector<2xi32>
+  func.return %middle : vector<2xi32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i32x4_slice_middle(%values: reg<llvmir.i32 x4>) -> (reg<llvmir.i32 x2>) asm<llvmir.generic.core> {
+  %middle = slice.v4i32.v2i32 %values, 1
+  return %middle
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @i8x4_slice_low_half(%bytes: vector<4xi8>) -> (vector<2xi8>) {
+  %low = vector.slice %bytes[0] : vector<4xi8> -> vector<2xi8>
+  func.return %low : vector<2xi8>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i8x4_slice_low_half(%bytes: reg<llvmir.i8 x4>) -> (reg<llvmir.i8 x2>) asm<llvmir.generic.core> {
+  %low = slice.v4i8.v2i8 %bytes, 0
+  return %low
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @i8x4_slice_high_half(%bytes: vector<4xi8>) -> (vector<2xi8>) {
+  %high = vector.slice %bytes[2] : vector<4xi8> -> vector<2xi8>
+  func.return %high : vector<2xi8>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i8x4_slice_high_half(%bytes: reg<llvmir.i8 x4>) -> (reg<llvmir.i8 x2>) asm<llvmir.generic.core> {
+  %high = slice.v4i8.v2i8 %bytes, 2
+  return %high
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @f16x4_slice_low_half(%values: vector<4xf16>) -> (vector<2xf16>) {
+  %low = vector.slice %values[0] : vector<4xf16> -> vector<2xf16>
+  func.return %low : vector<2xf16>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f16x4_slice_low_half(%values: reg<llvmir.f16 x4>) -> (reg<llvmir.f16 x2>) asm<llvmir.generic.core> {
+  %low = slice.v4f16.v2f16 %values, 0
+  return %low
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @f16x4_slice_high_half(%values: vector<4xf16>) -> (vector<2xf16>) {
+  %high = vector.slice %values[2] : vector<4xf16> -> vector<2xf16>
+  func.return %high : vector<2xf16>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f16x4_slice_high_half(%values: reg<llvmir.f16 x4>) -> (reg<llvmir.f16 x2>) asm<llvmir.generic.core> {
+  %high = slice.v4f16.v2f16 %values, 2
+  return %high
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @bf16x4_slice_high_half(%values: vector<4xbf16>) -> (vector<2xbf16>) {
+  %high = vector.slice %values[2] : vector<4xbf16> -> vector<2xbf16>
+  func.return %high : vector<2xbf16>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @bf16x4_slice_high_half(%values: reg<llvmir.bf16 x4>) -> (reg<llvmir.bf16 x2>) asm<llvmir.generic.core> {
+  %high = slice.v4bf16.v2bf16 %values, 2
+  return %high
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @f32x4_insert_static(%values: vector<4xf32>, %value: f32) -> (vector<4xf32>) {
+  %updated = vector.insert %value into %values[2] : f32, vector<4xf32>
+  func.return %updated : vector<4xf32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f32x4_insert_static(%values: reg<llvmir.f32 x4>, %value: reg<llvmir.f32>) -> (reg<llvmir.f32 x4>) asm<llvmir.generic.core> {
+  %updated = insert.v4f32 %values, %value, 2
+  return %updated
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @f16x4_insert_static(%values: vector<4xf16>, %value: f16) -> (vector<4xf16>) {
+  %updated = vector.insert %value into %values[1] : f16, vector<4xf16>
+  func.return %updated : vector<4xf16>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f16x4_insert_static(%values: reg<llvmir.f16 x4>, %value: reg<llvmir.f16>) -> (reg<llvmir.f16 x4>) asm<llvmir.generic.core> {
+  %updated = insert.v4f16 %values, %value, 1
+  return %updated
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @bf16x8_insert_static_constant(%values: vector<8xbf16>) -> (vector<8xbf16>) {
+  %zero = scalar.constant 0.0 : bf16
+  %updated = vector.insert %zero into %values[5] : bf16, vector<8xbf16>
+  func.return %updated : vector<8xbf16>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @bf16x8_insert_static_constant(%values: reg<llvmir.bf16 x8>) -> (reg<llvmir.bf16 x8>) asm<llvmir.generic.core> {
+  %zero = const.bf16 0
+  %updated = insert.v8bf16 %values, %zero, 5
+  return %updated
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @f32x1_insert_dynamic(%values: vector<1xf32>, %value: f32, %lane: index) -> (vector<1xf32>) {
+  // ERROR@+1: TARGET/004 {op_name="vector.insert", subject_role="operand_segment", subject_name="indices", constraint_key="operand_segment_count", expected_count="0"}
+  %updated = vector.insert %value into %values[%lane] : f32, vector<1xf32>
+  func.return %updated : vector<1xf32>
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @f32x4_insert_dynamic(%values: vector<4xf32>, %value: f32, %lane: index) -> (vector<4xf32>) {
+  %updated = vector.insert %value into %values[%lane] : f32, vector<4xf32>
+  func.return %updated : vector<4xf32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f32x4_insert_dynamic(%values: reg<llvmir.f32 x4>, %value: reg<llvmir.f32>, %lane: reg<llvmir.i64>) -> (reg<llvmir.f32 x4>) asm<llvmir.generic.core> {
+  %updated = insert.dynamic.v4f32 %values, %value, %lane
+  return %updated
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @i32x4_insert_dynamic(%values: vector<4xi32>, %value: i32, %lane: index) -> (vector<4xi32>) {
+  %updated = vector.insert %value into %values[%lane] : i32, vector<4xi32>
+  func.return %updated : vector<4xi32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i32x4_insert_dynamic(%values: reg<llvmir.i32 x4>, %value: reg<llvmir.i32>, %lane: reg<llvmir.i64>) -> (reg<llvmir.i32 x4>) asm<llvmir.generic.core> {
+  %updated = insert.dynamic.v4i32 %values, %value, %lane
+  return %updated
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @bf16x4_insert_dynamic(%values: vector<4xbf16>, %value: bf16, %lane: index) -> (vector<4xbf16>) {
+  %updated = vector.insert %value into %values[%lane] : bf16, vector<4xbf16>
+  func.return %updated : vector<4xbf16>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @bf16x4_insert_dynamic(%values: reg<llvmir.bf16 x4>, %value: reg<llvmir.bf16>, %lane: reg<llvmir.i64>) -> (reg<llvmir.bf16 x4>) asm<llvmir.generic.core> {
+  %updated = insert.dynamic.v4bf16 %values, %value, %lane
+  return %updated
+}

@@ -1,0 +1,62 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_generated_cc_library")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+loom_generated_cc_library(
+    name = "scalar",
+    srcs = [
+        "canonicalize.c",
+        "combining.c",
+        "compare.c",
+        "facts.c",
+        "verify.c",
+    ],
+    hdrs = [
+        "combining.h",
+        "compare.h",
+        "ops.h",
+        "tables.h",
+    ],
+    args = ["--dialect=scalar"],
+    generated_src_flags = [
+        "--builders",
+        "--tables",
+        "--table-shard=analysis",
+        "--table-shard=arithmetic",
+        "--table-shard=bitwise",
+        "--table-shard=comparison",
+        "--table-shard=conversion",
+        "--table-shard=math",
+    ],
+    generated_srcs = [
+        "builders.c",
+        "tables.c",
+        "tables/analysis.c",
+        "tables/arithmetic.c",
+        "tables/bitwise.c",
+        "tables/comparison.c",
+        "tables/conversion.c",
+        "tables/math.c",
+    ],
+    generator = "//loom/py/loom/gen/ops:c_tables_scalar_generator",
+    deps = [
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops:combining",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/util:math",
+    ],
+)

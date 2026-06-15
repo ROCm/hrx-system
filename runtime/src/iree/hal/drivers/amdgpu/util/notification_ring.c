@@ -113,7 +113,7 @@ void iree_hal_amdgpu_reclaim_entry_release(
 }
 
 static inline void iree_hal_amdgpu_reclaim_entry_execute_pre_signal_action(
-    iree_hal_amdgpu_reclaim_entry_t* entry, iree_status_t status) {
+    iree_hal_amdgpu_reclaim_entry_t* entry, const iree_status_t status) {
   if (!entry->pre_signal_action.fn) return;
   iree_hal_amdgpu_reclaim_action_fn_t fn = entry->pre_signal_action.fn;
   void* user_data = entry->pre_signal_action.user_data;
@@ -695,7 +695,7 @@ iree_host_size_t iree_hal_amdgpu_notification_ring_drain(
 }
 
 iree_host_size_t iree_hal_amdgpu_notification_ring_fail_all_reclaim_positions(
-    iree_hal_amdgpu_notification_ring_t* ring, iree_status_t error_status,
+    iree_hal_amdgpu_notification_ring_t* ring, const iree_status_t error_status,
     iree_hal_amdgpu_reclaim_positions_t* out_reclaim_positions) {
   IREE_ASSERT_ARGUMENT(ring);
   IREE_ASSERT_ARGUMENT(out_reclaim_positions);
@@ -764,7 +764,7 @@ iree_host_size_t iree_hal_amdgpu_notification_ring_fail_all_reclaim_positions(
 }
 
 iree_host_size_t iree_hal_amdgpu_notification_ring_fail_all(
-    iree_hal_amdgpu_notification_ring_t* ring, iree_status_t error_status,
+    iree_hal_amdgpu_notification_ring_t* ring, const iree_status_t error_status,
     uint64_t* out_kernarg_reclaim_position) {
   IREE_ASSERT_ARGUMENT(out_kernarg_reclaim_position);
   iree_hal_amdgpu_reclaim_positions_t reclaim_positions = {0};

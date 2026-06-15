@@ -60,8 +60,8 @@ iree_status_t iree_hal_amdgpu_pm4_program_initialize_with_stats(
     iree_hal_amdgpu_pm4_program_publish_stats_t* out_stats,
     iree_hal_amdgpu_pm4_program_t* out_program);
 
-// Releases the executable storage backing |program| and clears it on success.
-iree_status_t iree_hal_amdgpu_pm4_program_release(
+// Deinitializes the executable storage backing |program| and clears it.
+void iree_hal_amdgpu_pm4_program_deinitialize(
     iree_hal_amdgpu_pm4_program_t* program);
 
 #ifdef __cplusplus

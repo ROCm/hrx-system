@@ -82,7 +82,8 @@ static inline iree_status_t iree_hal_cuda_event_create(
   if (iree_status_is_ok(status)) {
     *out_event = event;
   } else {
-    iree_atomic_ref_count_dec(&event->ref_count);  // -> 0
+    int32_t old_ref_count = iree_atomic_ref_count_dec(&event->ref_count);
+    IREE_ASSERT_EQ(old_ref_count, 1);
     iree_hal_cuda_event_destroy(event);
   }
 
@@ -91,6 +92,9 @@ static inline iree_status_t iree_hal_cuda_event_create(
 }
 
 void iree_hal_cuda_event_retain(iree_hal_cuda_event_t* event) {
+  if (!event) {
+    return;
+  }
   iree_atomic_ref_count_inc(&event->ref_count);
 }
 
@@ -99,6 +103,9 @@ static void iree_hal_cuda_event_pool_release_event(
     iree_hal_cuda_event_t** events);
 
 void iree_hal_cuda_event_release(iree_hal_cuda_event_t* event) {
+  if (!event) {
+    return;
+  }
   if (iree_atomic_ref_count_dec(&event->ref_count) == 1) {
     iree_hal_cuda_event_pool_t* pool = event->pool;
     // Release back to the pool if the reference count becomes 0.
@@ -141,7 +148,7 @@ struct iree_hal_cuda_event_pool_t {
 static void iree_hal_cuda_event_pool_free(
     iree_hal_cuda_event_pool_t* event_pool);
 
-iree_status_t iree_hal_cuda_event_pool_allocate(
+iree_status_t iree_hal_cuda_event_pool_create(
     const iree_hal_cuda_dynamic_symbols_t* symbols,
     iree_host_size_t available_capacity, iree_allocator_t host_allocator,
     iree_hal_cuda_event_pool_t** out_event_pool) {
@@ -188,7 +195,8 @@ static void iree_hal_cuda_event_pool_free(
 
   for (iree_host_size_t i = 0; i < event_pool->available_count; ++i) {
     iree_hal_cuda_event_t* event = event_pool->available_list[i];
-    iree_atomic_ref_count_dec(&event->ref_count);  // -> 0
+    int32_t old_ref_count = iree_atomic_ref_count_dec(&event->ref_count);
+    IREE_ASSERT_EQ(old_ref_count, 1);
     iree_hal_cuda_event_destroy(event);
   }
   IREE_ASSERT_REF_COUNT_ZERO(&event_pool->ref_count);
@@ -200,10 +208,16 @@ static void iree_hal_cuda_event_pool_free(
 }
 
 void iree_hal_cuda_event_pool_retain(iree_hal_cuda_event_pool_t* event_pool) {
+  if (!event_pool) {
+    return;
+  }
   iree_atomic_ref_count_inc(&event_pool->ref_count);
 }
 
 void iree_hal_cuda_event_pool_release(iree_hal_cuda_event_pool_t* event_pool) {
+  if (!event_pool) {
+    return;
+  }
   if (iree_atomic_ref_count_dec(&event_pool->ref_count) == 1) {
     iree_hal_cuda_event_pool_free(event_pool);
   }

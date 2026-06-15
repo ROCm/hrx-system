@@ -335,7 +335,7 @@ TEST(PassthroughPool, WrapReservationUsesProviderHook) {
       &mapping));
   memset(mapping.contents.data, 0x6B, 256);
   EXPECT_EQ(((uint8_t*)mapping.contents.data)[255], 0x6B);
-  iree_hal_buffer_unmap_range(&mapping);
+  IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
 
   EXPECT_EQ(
       1,
@@ -377,7 +377,7 @@ TEST_F(PassthroughPoolTest, BufferMemoryAccess) {
   memset(mapping.contents.data, 0xCD, 256);
   EXPECT_EQ(((uint8_t*)mapping.contents.data)[0], 0xCD);
   EXPECT_EQ(((uint8_t*)mapping.contents.data)[255], 0xCD);
-  iree_hal_buffer_unmap_range(&mapping);
+  IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
 
   iree_hal_buffer_release(buffer);
 }
@@ -467,7 +467,7 @@ TEST_F(PassthroughPoolTest, WrappedBuffersBorrowPool) {
                                            IREE_HAL_MEMORY_ACCESS_WRITE, 0, 512,
                                            &mapping));
   memset(mapping.contents.data, 0xEF, 512);
-  iree_hal_buffer_unmap_range(&mapping);
+  IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
 
   iree_hal_buffer_release(buffer);
 }

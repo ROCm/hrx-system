@@ -1,0 +1,94 @@
+// RUN: pass canonicalize
+
+// Specializing a dynamic extent with divisibility facts removes the tail path
+// while keeping the main block-count computation dynamic.
+func.def @tail_branch_pruned_by_divisibility(%n: index) -> (index) {
+  %n_aligned = index.assume %n [range(%n, 16, 4096), mul(%n, 16)] : index
+  %tile = index.constant 16 : index
+  %zero = index.constant 0 : index
+  %remainder = index.rem %n_aligned, %tile : index
+  %has_tail = index.cmp ne, %remainder, %zero : index
+  %result = scf.if %has_tail -> (index) {
+    %tail = index.add %remainder, %tile : index
+    scf.yield %tail : index
+  } else {
+    %blocks = index.div %n_aligned, %tile : index
+    scf.yield %blocks : index
+  }
+  func.return %result : index
+}
+
+// ----
+func.def @tail_branch_pruned_by_divisibility(%n: index) -> (index) {
+  %n_aligned = index.assume %n [range(%n, 16, 4096), mul(%n, 16)] : index
+  %11 = index.constant 4 : index
+  %blocks = index.shrui %n_aligned, %11 : index
+  func.return %blocks : index
+}
+
+// ====
+
+// Optional features with a specialized zero extent erase their loop body
+// instead of forcing frontends to avoid emitting the structurally valid path.
+func.def @zero_extent_loop_erases(%features: index, %init: f32) -> (f32) {
+  %disabled = index.assume %features [range(%features, 0, 0)] : index
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %result = scf.for %iv = [%zero to %disabled step %one](%acc = %init : f32) -> (f32) {
+    %next = test.neg %acc : f32
+    scf.yield %next : f32
+  }
+  func.return %result : f32
+}
+
+// ----
+func.def @zero_extent_loop_erases(%features: index, %init: f32) -> (f32) {
+  func.return %init : f32
+}
+
+// ====
+
+// A dynamic single-tile extent becomes straight-line code once specialization
+// proves the loop trip count.
+func.def @single_tile_loop_inlines(%tiles: index, %init: i32) -> (i32) {
+  %one_tile = index.assume %tiles [range(%tiles, 1, 1)] : index
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %result = scf.for %iv = [%zero to %one_tile step %one](%acc = %init : i32) -> (i32) {
+    %next = test.addi %acc, %acc : i32
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @single_tile_loop_inlines(%tiles: index, %init: i32) -> (i32) {
+  %next = test.addi %init, %init : i32
+  func.return %next : i32
+}
+
+// ====
+
+// Layout-style address math can prove a bounds guard structurally: the same
+// symbolic base plus a positive vector width is always beyond the base address.
+func.def @layout_guard_pruned_by_symbolic_address_order(%row: index, %lane: index) -> (index) {
+  %lane_bounded = index.assume %lane [range(%lane, 0, 15)] : index
+  %stride = index.constant 16 : index
+  %base = index.mul %row, %stride : index
+  %address = index.add %base, %lane_bounded : index
+  %end = index.add %address, %stride : index
+  %in_bounds = index.cmp slt, %address, %end : index
+  %result = scf.if %in_bounds -> (index) {
+    scf.yield %lane_bounded : index
+  } else {
+    %fallback = index.constant -1 : index
+    scf.yield %fallback : index
+  }
+  func.return %result : index
+}
+
+// ----
+func.def @layout_guard_pruned_by_symbolic_address_order(%row: index, %lane: index) -> (index) {
+  %lane_bounded = index.assume %lane [range(%lane, 0, 15)] : index
+  func.return %lane_bounded : index
+}

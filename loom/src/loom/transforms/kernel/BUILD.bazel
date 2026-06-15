@@ -1,0 +1,63 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+loom_cc_library(
+    name = "kernel_async_legality",
+    srcs = ["kernel_async_legality.c"],
+    hdrs = ["kernel_async_legality.h"],
+    deps = [
+        "//loom/src/loom/analysis:kernel_async_legality",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/pass:value_facts",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "kernel_resources",
+    srcs = ["kernel_resources.c"],
+    hdrs = ["kernel_resources.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/pass:value_facts",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "promote_private_fragments",
+    srcs = ["promote_private_fragments.c"],
+    hdrs = ["promote_private_fragments.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/ops/view",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/util:dominance",
+        "//loom/src/loom/util:walk",
+        "//runtime/src/iree/base",
+    ],
+)

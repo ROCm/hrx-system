@@ -1,0 +1,16 @@
+// RUN: pass source-to-low{control-flow=structured-low}
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @structured_control_option_smoke(%lhs: i32, %rhs: i32) -> (i32) {
+  %sum = scalar.addi %lhs, %rhs : i32
+  func.return %sum : i32
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) abi(object_function) @structured_control_option_smoke(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) {
+  %sum = low.op<test.add.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.return %sum : reg<test.i32>
+}

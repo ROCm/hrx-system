@@ -1,0 +1,18 @@
+func.def @kernel_async(%source_buffer: buffer, %byte_offset: offset) {
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 16384 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %i32_zero = scalar.constant 0 : i32
+  %d0 = vector.splat %i32_zero : vector<4xi32>
+  %d1 = vector.splat %i32_zero : vector<8xi32>
+  %desc = kernel.tensor.lds.descriptor dgroups(%d0, %d1) : vector<4xi32>, vector<8xi32> -> kernel.tensor.lds.descriptor
+  %global = buffer.assume.memory_space<global> %source_buffer : buffer
+  %source = buffer.view %global[%byte_offset] : buffer -> view<64x64xf32, %layout>
+  %scratch = buffer.alloca %bytes {base_alignment = 256, memory_space = workgroup} : buffer
+  %dest = buffer.view %scratch[%zero] : buffer -> view<64x64xf32, %layout>
+  %copy = kernel.async.tensor.load.to.lds %source to %dest using %desc {cache_scope = cu, cache_temporal = regular} : view<64x64xf32, %layout> to view<64x64xf32, %layout>, kernel.tensor.lds.descriptor -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  func.return
+}

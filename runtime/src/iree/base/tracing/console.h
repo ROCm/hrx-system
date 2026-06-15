@@ -179,6 +179,10 @@ void iree_tracing_memory_free(const char* name, size_t name_length, void* ptr);
 
 #define IREE_TRACE_ZONE_END(zone_id) iree_tracing_zone_end(zone_id)
 
+#define IREE_TRACE_ZONE_ADOPT(zone_id) (void)(zone_id)
+
+#define IREE_TRACE_ZONE_TRANSFER(zone_id) (zone_id) = 0
+
 #define IREE_RETURN_AND_END_ZONE_IF_ERROR(zone_id, ...) \
   IREE_RETURN_AND_EVAL_IF_ERROR(IREE_TRACE_ZONE_END(zone_id), __VA_ARGS__)
 

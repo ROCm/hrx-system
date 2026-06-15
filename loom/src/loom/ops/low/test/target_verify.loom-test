@@ -1,0 +1,194 @@
+// RUN: verify
+
+test.target<low_core> @test_target
+low.func.def target(@test_target) @add(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) {
+  %sum = low.op<test.add.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.return %sum : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+low.func.def target(@test_target) @resource_too_many_units() {
+  // ERROR@+1: TARGET/043 {function_name="resource_too_many_units", value_kind="resource", value_name="low.resource", actual_type="reg<test.special x2>", unit_count="2", descriptor_set="test.low.core", allocatable_count="1"}
+  %resource = low.resource<native_pointer> {index = 0, source_type = buffer} : reg<test.special x2>
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+low.func.def target(@test_target) @partial_register_pair(%ptr: reg<test.ptr>, %rhs: reg<test.i32>) -> (reg<test.i32>) {
+  %low = low.op<test.write.low16.i32>(%ptr) : (reg<test.ptr>) -> reg<test.i32>
+  %full = low.op<test.write.high16.i32>(%low, %ptr) : (reg<test.i32>, reg<test.ptr>) -> %low as reg<test.i32>
+  %sum = low.op<test.add.i32>(%full, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.return %sum : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+low.func.def target(@test_target) @partial_register_full_use(%ptr: reg<test.ptr>, %rhs: reg<test.i32>) -> (reg<test.i32>) {
+  %low = low.op<test.write.low16.i32>(%ptr) : (reg<test.ptr>) -> reg<test.i32>
+  // ERROR@+1: DOMINANCE/011 {op_name="test.add.i32", field_name="lhs"}
+  %sum = low.op<test.add.i32>(%low, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.return %sum : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+low.func.def target(@test_target) @partial_register_structural_use(%ptr: reg<test.ptr>) -> (reg<test.i32>) {
+  %low = low.op<test.write.low16.i32>(%ptr) : (reg<test.ptr>) -> reg<test.i32>
+  // ERROR@+1: DOMINANCE/011 {op_name="low.return", field_name="operand"}
+  low.return %low : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+low.func.def target(@test_target) @concat(%lo: reg<test.i32>, %hi: reg<test.i32>) -> (reg<test.i32 x2>) {
+  %pair = low.concat(%lo, %hi) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %lane = low.slice %pair[1] : reg<test.i32 x2> -> reg<test.i32>
+  low.return %pair : reg<test.i32 x2>
+}
+
+// ====
+
+test.target<low_core> @test_target
+low.func.def target(@test_target) @copy_bad_units(%pair: reg<test.i32 x2>) {
+  // ERROR@+1: TYPE/001 {field_a="source", type_a="reg<test.i32 x2>", field_b="result", type_b="reg<test.i32>"}
+  %copy = low.copy %pair : reg<test.i32 x2> -> reg<test.i32>
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+low.func.def target(@test_target) @slice_bad_class(%pair: reg<test.i32 x2>) {
+  // ERROR@+1: TYPE/001
+  %lane = low.slice %pair[0] : reg<test.i32 x2> -> reg<test.i64>
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+low.func.def target(@test_target) @slice_negative_offset(%pair: reg<test.i32 x2>) {
+  // ERROR@+1: STRUCTURE/014 {attr_name="offset", actual_value="-1", expected_constraint="non-negative register-unit offset"}
+  %lane = low.slice %pair[-1] : reg<test.i32 x2> -> reg<test.i32>
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+low.func.def target(@test_target) @slice_out_of_range(%pair: reg<test.i32 x2>) {
+  // ERROR@+1: SUBRANGE/004 {dim_index="0", offset="2", size="1", total="3", bound="2"}
+  %lane = low.slice %pair[2] : reg<test.i32 x2> -> reg<test.i32>
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+low.func.def target(@test_target) @concat_bad_class(%lo: reg<test.i32>, %hi: reg<test.i64>) {
+  // ERROR@+1: TYPE/001
+  %pair = low.concat(%lo, %hi) : (reg<test.i32>, reg<test.i64>) -> reg<test.i32 x2>
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+low.func.def target(@test_target) @concat_bad_units(%lo: reg<test.i32>) {
+  // ERROR@+1: TYPE/004
+  %pair = low.concat(%lo) : (reg<test.i32>) -> reg<test.i32 x2>
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target {contract_set_key = "missing.low"}
+
+// ERROR@+1: TARGET/044 "missing.low"
+low.func.def target(@test_target) @constant() {
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+low.func.def target(@test_target) @add(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) {
+  // ERROR@+1: TARGET/045 "test.missing.i32"
+  %sum = low.op<test.missing.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.return %sum : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+low.func.def target(@test_target) @constant() -> (reg<test.i32>) {
+  // ERROR@+1: TARGET/047 "i32_value"
+  %c0 = low.const<test.const.i32> : reg<test.i32>
+  low.return %c0 : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+low.func.def target(@test_target) @add(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) {
+  // ERROR@+1: TARGET/048 "junk"
+  %sum = low.op<test.add.i32>(%lhs, %rhs) {junk = 1} : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.return %sum : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+low.func.def target(@test_target) @constant() -> (reg<test.i32>) {
+  // ERROR@+1: TARGET/049 "i64 signed integer"
+  %c0 = low.const<test.const.i32> {i32_value = "wrong"} : reg<test.i32>
+  low.return %c0 : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+low.func.def target(@test_target) @constant() -> (reg<test.i32>) {
+  // ERROR@+1: STRUCTURE/014 "i32_value" "2147483648"
+  %c0 = low.const<test.const.i32> {i32_value = 2147483648} : reg<test.i32>
+  low.return %c0 : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+low.func.def target(@test_target) @branch(%arg: reg<test.i32>) -> (reg<test.i32>) {
+  // ERROR@+1: STRUCTURE/025 "low.br" "successor 0" "expected 1"
+  low.br ^exit
+^exit(%value: reg<test.i32>):
+  low.return %value : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+low.func.def target(@test_target) @branch(%arg: reg<test.i32>) {
+  // ERROR@+1: STRUCTURE/026 "low.br" "successor 0" "expected reg<test.i64>"
+  low.br ^exit(%arg: reg<test.i32>)
+^exit(%value: reg<test.i64>):
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+low.func.def target(@test_target) @branch(%cond: reg<test.i32>) {
+  // ERROR@+1: STRUCTURE/025 "low.cond_br" "successor 0" "expected 1"
+  low.cond_br %cond, ^then, ^else : reg<test.i32>
+^then(%value: reg<test.i32>):
+  low.return
+^else:
+  low.return
+}

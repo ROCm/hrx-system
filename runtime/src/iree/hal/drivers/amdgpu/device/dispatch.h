@@ -39,45 +39,6 @@ typedef struct iree_hal_amdgpu_device_dispatch_kernarg_layout_t {
   bool has_implicit_args;
 } iree_hal_amdgpu_device_dispatch_kernarg_layout_t;
 
-// Returns the HAL ABI kernarg layout for |kernel_args|.
-//
-// Explicit args are laid out as:
-//   uint64_t bindings[kernel_args->binding_count]
-//   uint32_t constants[kernel_args->constant_count]
-//   zero padding to 8-byte alignment
-//
-// If kernel metadata declares more bytes than those explicit args, a
-// HIP/OpenCL implicit-args suffix is appended at the aligned explicit size and
-// the reservation is extended to cover at least
-// IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE bytes of suffix storage.
-//
-// Caller must have validated that kernel_args->kernarg_size is not smaller than
-// the explicit HAL ABI size if that is considered malformed for the current
-// executable.
-static inline iree_hal_amdgpu_device_dispatch_kernarg_layout_t
-iree_hal_amdgpu_device_dispatch_make_hal_kernarg_layout(
-    const iree_hal_amdgpu_device_kernel_args_t* kernel_args) {
-  const size_t binding_bytes =
-      (size_t)kernel_args->binding_count * sizeof(uint64_t);
-  const size_t constant_bytes = iree_amdgpu_align(
-      (size_t)kernel_args->constant_count * sizeof(uint32_t), 8);
-  const size_t explicit_kernarg_size = binding_bytes + constant_bytes;
-  const bool has_implicit_args =
-      (size_t)kernel_args->kernarg_size > explicit_kernarg_size;
-  const size_t total_kernarg_size =
-      has_implicit_args
-          ? IREE_AMDGPU_MAX(
-                (size_t)kernel_args->kernarg_size,
-                explicit_kernarg_size + IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE)
-          : explicit_kernarg_size;
-  return (iree_hal_amdgpu_device_dispatch_kernarg_layout_t){
-      .explicit_kernarg_size = explicit_kernarg_size,
-      .implicit_args_offset = explicit_kernarg_size,
-      .total_kernarg_size = total_kernarg_size,
-      .has_implicit_args = has_implicit_args,
-  };
-}
-
 //===----------------------------------------------------------------------===//
 // Dispatch Packet/Kernarg Emission
 //===----------------------------------------------------------------------===//
@@ -153,29 +114,6 @@ void iree_hal_amdgpu_device_dispatch_emplace_implicit_args(
     const uint32_t workgroup_count[3], uint32_t dynamic_workgroup_local_memory,
     const iree_hal_amdgpu_device_dispatch_kernarg_layout_t* IREE_AMDGPU_RESTRICT
         layout,
-    void* IREE_AMDGPU_RESTRICT kernarg_ptr);
-
-// Populates HAL ABI explicit kernargs in already-reserved storage.
-//
-// |binding_ptrs| must provide |kernel_args->binding_count| device pointers as
-// raw 64-bit values. |constants| must provide
-// |kernel_args->constant_count * sizeof(uint32_t)| bytes. Either pointer may be
-// NULL when its corresponding count is zero.
-//
-// Preconditions:
-//   - |kernel_args|, |workgroup_count|, |layout|, and |kernarg_ptr| are
-//     non-NULL.
-//   - |layout| was derived from |kernel_args| using
-//     iree_hal_amdgpu_device_dispatch_make_hal_kernarg_layout.
-//   - |kernarg_ptr| points to at least |layout->total_kernarg_size| bytes of
-//     writable storage.
-void iree_hal_amdgpu_device_dispatch_emplace_hal_kernargs(
-    const iree_hal_amdgpu_device_kernel_args_t* IREE_AMDGPU_RESTRICT
-        kernel_args,
-    const iree_hal_amdgpu_device_dispatch_kernarg_layout_t* IREE_AMDGPU_RESTRICT
-        layout,
-    const uint64_t* IREE_AMDGPU_RESTRICT binding_ptrs,
-    const uint32_t* IREE_AMDGPU_RESTRICT constants,
     void* IREE_AMDGPU_RESTRICT kernarg_ptr);
 
 // Populates custom direct explicit kernargs in already-reserved storage.

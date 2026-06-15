@@ -1,0 +1,51 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:python.bzl", "iree_py_library", "iree_py_test")
+
+package(
+    default_visibility = ["//visibility:public"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_py_library(
+    name = "error",
+    srcs = [
+        "__init__.py",
+        "amdgpu.py",
+        "backend.py",
+        "bytecode.py",
+        "dominance.py",
+        "encoding.py",
+        "fold.py",
+        "lowering.py",
+        "parse.py",
+        "shape.py",
+        "spirv.py",
+        "structure.py",
+        "subrange.py",
+        "symbol.py",
+        "target.py",
+        "type.py",
+        "wasm.py",
+        "x86.py",
+    ],
+    deps = ["//loom/py/loom:core"],
+)
+
+iree_py_test(
+    name = "error_test",
+    srcs = [
+        "error_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.error.error_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":error",
+        "//loom/py/loom:package",
+    ],
+)

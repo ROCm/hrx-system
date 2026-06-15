@@ -1,0 +1,72 @@
+// HIP -> Loom load-width recipe.
+//
+// HIP concept tags: `global_load_b32`, `global_load_b128`, `uint32_t`,
+// `uint4`, `reinterpret_cast`, adjacent scalar loads, vectorized load,
+// coalescing, packed q8/q4 storage.
+//
+// Position: load width is an authored storage contract at this Loom level.
+// Four neighboring scalar loads are four scalar loads; a 128-bit load is a
+// `vector.load ... -> vector<4xi32>`.
+kernel.def @q8_load_widths() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %scalar_output: buffer, %vector_output: buffer) {
+  %base = index.constant 0 : offset
+
+  // HIP concept:
+  //   const uint32_t *p = reinterpret_cast<const uint32_t *>(q8_bytes);
+  // Loom spelling: kernel ABI buffers already carry global memory-space facts.
+  // State the noalias fact only if the source contract has it, then make a
+  // typed i32 view. The byte-to-word reinterpretation lives here, not in a
+  // hidden backend coalescer.
+  %input_noalias, %scalar_output_noalias, %vector_output_noalias = buffer.assume.noalias %input, %scalar_output, %vector_output : buffer, buffer, buffer
+  %input_words = buffer.view %input_noalias[%base] : buffer -> view<4xi32, #dense>
+  %scalar_words = buffer.view %scalar_output_noalias[%base] : buffer -> view<4xi32, #dense>
+  %vector_words = buffer.view %vector_output_noalias[%base] : buffer -> view<4xi32, #dense>
+
+  // HIP concept:
+  //   uint32_t w0 = p[0];
+  //   uint32_t w1 = p[1];
+  //   uint32_t w2 = p[2];
+  //   uint32_t w3 = p[3];
+  // Loom spelling: each `vector<1xi32>` load is one scalar memory operation.
+  // This path is correct, but it does not ask Loom to fuse the four loads.
+  %w0 = vector.load %input_words[0] : view<4xi32, #dense> -> vector<1xi32>
+  %w1 = vector.load %input_words[1] : view<4xi32, #dense> -> vector<1xi32>
+  %w2 = vector.load %input_words[2] : view<4xi32, #dense> -> vector<1xi32>
+  %w3 = vector.load %input_words[3] : view<4xi32, #dense> -> vector<1xi32>
+  vector.store %w0, %scalar_words[0] : vector<1xi32>, view<4xi32, #dense>
+  vector.store %w1, %scalar_words[1] : vector<1xi32>, view<4xi32, #dense>
+  vector.store %w2, %scalar_words[2] : vector<1xi32>, view<4xi32, #dense>
+  vector.store %w3, %scalar_words[3] : vector<1xi32>, view<4xi32, #dense>
+
+  // HIP concept:
+  //   uint4 words = *reinterpret_cast<const uint4 *>(p);
+  //   // or inline asm/load intrinsic expecting a b128/global vector load.
+  // Loom spelling: a single `vector.load` names the four-lane memory operation
+  // directly. Later target selection can choose the exact instruction form, but
+  // it should not have to infer that the author wanted a wide source load.
+  %wide = vector.load %input_words[0] : view<4xi32, #dense> -> vector<4xi32>
+  vector.store %wide, %vector_words[0] : vector<4xi32>, view<4xi32, #dense>
+
+  kernel.return
+}
+
+// HIP concept: behavioral equivalence test for both source shapes.
+// Loom spelling: `check.case` proves both paths copy the same packed storage.
+// The transform proof in hip_authoring.test.json checks the memory op shape.
+check.case @case_q8_load_widths {
+  %input = check.generate.iota offset(1) step(1) : tensor<4xi32>
+  %scalar_output = check.generate.fill value(0) : tensor<4xi32>
+  %vector_output = check.generate.fill value(0) : tensor<4xi32>
+  %expected = check.generate.iota offset(1) step(1) : tensor<4xi32>
+  func.call @q8_load_widths(%input, %scalar_output, %vector_output) : (tensor<4xi32>, tensor<4xi32>, tensor<4xi32>)
+  check.expect.equal actual(%scalar_output) expected(%expected) : tensor<4xi32>
+  check.expect.equal actual(%vector_output) expected(%expected) : tensor<4xi32>
+  check.return
+}
+
+// HIP concept: benchmark the scalar and vector source shapes together when
+// tuning a port; split them later only if the benchmark question needs that.
+// Loom spelling: the benchmark row is still attached to the checked scenario.
+check.benchmark<@case_q8_load_widths> @bench_q8_load_widths

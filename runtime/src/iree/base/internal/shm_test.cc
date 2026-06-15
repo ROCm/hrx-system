@@ -201,8 +201,7 @@ TEST_F(ShmTest, OpenHandleSizeTooLargeFails) {
   iree_shm_mapping_t opener;
   iree_status_t status =
       iree_shm_open_handle(shared_handle, creator.size * 1024, &opener);
-  EXPECT_FALSE(iree_status_is_ok(status));
-  iree_status_ignore(status);
+  IREE_EXPECT_NOT_OK(status);
 
   iree_shm_handle_close(&shared_handle);
   iree_shm_close(&creator);
@@ -300,8 +299,7 @@ TEST_F(ShmNamedTest, OpenNamedNonexistentFails) {
   iree_shm_mapping_t mapping;
   iree_status_t status =
       iree_shm_open_named(iree_make_cstring_view(name.c_str()), 4096, &mapping);
-  EXPECT_FALSE(iree_status_is_ok(status));
-  iree_status_ignore(status);
+  IREE_EXPECT_NOT_OK(status);
 }
 
 TEST_F(ShmNamedTest, CreateNamedZeroSizeFails) {
@@ -462,8 +460,7 @@ TEST_F(ShmTest, SealWriteFailsWithSecondWritableMapping) {
 
   // Sealing the creator must fail because the second mapping is writable.
   iree_status_t status = iree_shm_seal(&creator, IREE_SHM_SEAL_WRITE);
-  EXPECT_FALSE(iree_status_is_ok(status));
-  iree_status_ignore(status);
+  IREE_EXPECT_NOT_OK(status);
 
   // The creator mapping must still be valid and readable after rollback.
   EXPECT_NE(creator.base, nullptr);
@@ -488,8 +485,7 @@ TEST_F(ShmTest, SealSealPreventsNewSeals) {
 
   // Attempting to add SEAL_WRITE after SEAL_SEAL must fail.
   iree_status_t status = iree_shm_seal(&mapping, IREE_SHM_SEAL_WRITE);
-  EXPECT_FALSE(iree_status_is_ok(status));
-  iree_status_ignore(status);
+  IREE_EXPECT_NOT_OK(status);
 
   iree_shm_close(&mapping);
 }

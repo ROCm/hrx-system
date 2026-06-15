@@ -1,0 +1,59 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+)
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_SPIRV_ROOT_VISIBILITY = ["//loom/src/loom/target/arch/spirv:__pkg__"]
+
+loom_cc_library(
+    name = "lower",
+    srcs = [
+        "matrix.c",
+        "registry.c",
+        "workgroup.c",
+    ],
+    hdrs = [
+        "lower.h",
+        "matrix.h",
+        "workgroup.h",
+    ],
+    visibility = _SPIRV_ROOT_VISIBILITY,
+    deps = [
+        "//loom/src/loom/analysis:contract_vector",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low:source_memory_plan",
+        "//loom/src/loom/codegen/low/lower",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/arch/spirv:abi",
+        "//loom/src/loom/target/arch/spirv:cooperative_properties",
+        "//loom/src/loom/target/arch/spirv:profile",
+        "//loom/src/loom/target/arch/spirv:registers",
+        "//loom/src/loom/target/arch/spirv:scalar_types",
+        "//loom/src/loom/target/arch/spirv/contracts",
+        "//loom/src/loom/target/arch/spirv/descriptors",
+        "//loom/src/loom/target/arch/spirv/descriptors:descriptors_ids",
+        "//loom/src/loom/util:fact_table",
+        "//loom/src/loom/util:math",
+        "//runtime/src/iree/base",
+    ],
+)

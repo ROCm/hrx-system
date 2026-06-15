@@ -439,6 +439,7 @@ static iree_status_t iree_tokenizer_parse_sequence_decoder(
     iree_allocator_free(allocator, children);
   }
 
+  IREE_TRACE_ZONE_END(z0);
   return status;
 }
 

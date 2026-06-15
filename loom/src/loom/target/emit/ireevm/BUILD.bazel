@@ -1,0 +1,100 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+)
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+#===------------------------------------------------------------------------===#
+# IREE VM emission
+#===------------------------------------------------------------------------===#
+
+loom_cc_library(
+    name = "module_plan",
+    srcs = ["module_plan.c"],
+    hdrs = ["module_plan.h"],
+    deps = [
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:func_symbol_facts",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:function_contract",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target:types",
+        "//loom/src/loom/target/arch/ireevm/descriptors",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "function_bytecode",
+    srcs = ["function_bytecode.c"],
+    hdrs = ["function_bytecode.h"],
+    deps = [
+        ":module_plan",
+        "//loom/src/loom/codegen/low:allocation",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low:packet",
+        "//loom/src/loom/codegen/low/schedule",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target/arch/ireevm/descriptors",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "module_archive",
+    srcs = ["module_archive.c"],
+    hdrs = ["module_archive.h"],
+    deps = [
+        ":function_bytecode",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal/flatcc:building",
+        "//runtime/src/iree/schemas:bytecode_module_def_c_fbs",
+        "//runtime/src/iree/vm/bytecode/isa",
+        "//runtime/src/iree/vm/bytecode/utils",
+    ],
+)
+
+loom_cc_library(
+    name = "archive_emitter",
+    srcs = ["archive_emitter.c"],
+    hdrs = ["archive_emitter.h"],
+    deps = [
+        ":function_bytecode",
+        ":module_archive",
+        ":module_plan",
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/codegen/low:frame",
+        "//loom/src/loom/codegen/low:verify",
+        "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/target:compile_report",
+        "//loom/src/loom/target:compile_report_low",
+        "//loom/src/loom/target:entry_selection",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/arch/ireevm:provider",
+        "//loom/src/loom/target/arch/ireevm/descriptors",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)

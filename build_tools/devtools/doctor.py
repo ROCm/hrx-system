@@ -8,13 +8,30 @@
 
 from __future__ import annotations
 
-from build_tools.devtools.command_plan import CheckCommandStep, CommandPlan, CommandStep
+from build_tools.devtools.command_plan import (
+    CheckCommandStep,
+    CommandPlan,
+    CommandStep,
+    OptionalCheckCommandStep,
+)
 from build_tools.devtools.environment import REPO_ROOT, ToolEnvironment
 
 COMMON_TOOLS = (
     ("lefthook", "version", r"\b2\.1\.9\b"),
     ("ruff", "--version", r"\b0\.15\.15\b"),
     ("clang-format", "--version", r"\b22\.1\.3\b"),
+)
+SEMGREP_WARNING_FILTER = "ignore:pkg_resources is deprecated as an API:UserWarning"
+OPTIONAL_COMMON_TOOLS = (
+    (
+        "semgrep",
+        ("--disable-version-check", "--version"),
+        r"\b1\.96\.0\b",
+        "run python dev.py bazel setup --venv to install the managed tool environment",
+        SEMGREP_WARNING_FILTER,
+    ),
+    ("clang-tidy", ("--version",), None, None, None),
+    ("clang-apply-replacements", ("--version",), None, None, None),
 )
 LANE_TOOLS = {
     "bazel": (
@@ -47,6 +64,21 @@ def doctor_plan(lane: str | None, tool_env: ToolEnvironment) -> CommandPlan:
                 env=env,
                 expected_pattern=expected_pattern,
                 label=f"check {tool}",
+            )
+        )
+    for optional_tool in OPTIONAL_COMMON_TOOLS:
+        tool, version_args, expected_pattern, hint, python_warnings = optional_tool
+        step_env = env
+        if python_warnings:
+            step_env = {**env, "PYTHONWARNINGS": python_warnings}
+        plan.add(
+            OptionalCheckCommandStep(
+                [tool_env.tool(tool), *version_args],
+                cwd=REPO_ROOT,
+                env=step_env,
+                expected_pattern=expected_pattern,
+                hint=hint,
+                label=f"check optional {tool}",
             )
         )
     if lane:

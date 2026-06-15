@@ -6,12 +6,9 @@
 
 # Runtime-only CTS test binaries for the AMDGPU HAL driver.
 
+load("//build_tools/amdgpu:cts.bzl", "iree_amdgpu_hal_cts_testdata")
 load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
-load(
-    "//build_tools/bazel:iree_hal_cts_test_suite.bzl",
-    "iree_hal_cts_test_suite",
-    "iree_hal_cts_testdata",
-)
+load("//build_tools/bazel:iree_hal_cts_test_suite.bzl", "iree_hal_cts_test_suite")
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
 
 package(
@@ -45,19 +42,30 @@ iree_runtime_cc_library(
     alwayslink = True,
 )
 
-iree_hal_cts_testdata(
-    backend_name = "amdgpu",
-    cmake_format_variant_values = ["AMDGPU_TARGET"],
-    flag_values = {
-        "AMDGPU_TARGET": "//runtime/src/iree/hal/drivers/amdgpu:targets",
-    },
+iree_amdgpu_hal_cts_testdata(
+    name = "testdata_amdgpu",
+    srcs = [
+        "testdata/command_buffer_dispatch_constants_bindings_test.c",
+        "testdata/command_buffer_dispatch_constants_test.c",
+        "testdata/command_buffer_dispatch_indirect_parameters_test.c",
+        "testdata/command_buffer_dispatch_multi_entrypoint_test.c",
+        "testdata/command_buffer_dispatch_multi_workgroup_test.c",
+        "testdata/command_buffer_dispatch_test.c",
+        "testdata/executable_cache_test.c",
+        "testdata/executable_test.c",
+    ],
     format_name = "amdgpu",
     format_string = '"amdgcn-amd-amdhsa--{AMDGPU_TARGET}"',
     identifier = "iree_cts_testdata_amdgpu",
-    target_device = "amdgpu",
-    testdata = "//runtime/src/iree/hal/cts/testdata:executable_srcs",
+    internal_hdrs = [
+        "//runtime/src/iree/hal/drivers/amdgpu/abi:amdgpu_abi_bitcode_hdrs",
+        "//runtime/src/iree/hal/drivers/amdgpu/device:bitcode_hdrs",
+    ],
+    tags = ["manual"],
+    target_selectors_flag = "//runtime/src/iree/hal/drivers/amdgpu:targets",
 )
 
 iree_hal_cts_test_suite(
     backends_lib = ":backends",
+    testdata_libs = [":testdata_amdgpu"],
 )

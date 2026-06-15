@@ -171,6 +171,12 @@ typedef struct iree_hal_amdgpu_logical_device_options_t {
   // selection remains limited to validated GPU ISAs when this is unset.
   uint64_t enable_experimental_pm4_command_buffers : 1;
 
+  // Suppresses fine-grained GPU-local memory pools even if the HSA agent
+  // reports them. This is a hardware bring-up and compatibility testing
+  // override for validating the coarse-grained device-local memory path used on
+  // GPUs that do not expose host-coherent VRAM.
+  uint64_t suppress_device_fine_memory : 1;
+
   // Reserved for future HSA active-wait tuning. Must be zero today because no
   // wait path consumes it yet.
   iree_duration_t wait_active_for_ns;

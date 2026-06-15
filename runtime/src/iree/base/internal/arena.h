@@ -66,8 +66,10 @@ typedef struct iree_arena_block_pool_t {
 
 // Initializes a new block pool in |out_block_pool|.
 // |block_allocator| will be used to allocate and free blocks for the pool.
-// Each block allocated will be |total_block_size| but have a slightly smaller
-// usable size due to the tracking overhead. Prefer powers of two.
+// Each block allocated will be at least |total_block_size| but have a slightly
+// smaller usable size due to the tracking overhead. The block size is aligned
+// upward during initialization so the trailer remains naturally aligned. Prefer
+// powers of two.
 void iree_arena_block_pool_initialize(iree_host_size_t total_block_size,
                                       iree_allocator_t block_allocator,
                                       iree_arena_block_pool_t* out_block_pool);
@@ -104,9 +106,15 @@ void iree_arena_block_pool_release(iree_arena_block_pool_t* block_pool,
 // iree_arena_allocator_t
 //===----------------------------------------------------------------------===//
 
-typedef struct iree_arena_oversized_allocation_t {
+// Padded to iree_max_align_t so that the data pointer following this
+// header inherits the system allocator's alignment guarantee.
+typedef struct iree_alignas(iree_max_align_t)
+    iree_arena_oversized_allocation_t {
   struct iree_arena_oversized_allocation_t* next;
 } iree_arena_oversized_allocation_t;
+
+static_assert(sizeof(iree_arena_oversized_allocation_t) % iree_max_align_t == 0,
+              "oversized header must be a multiple of iree_max_align_t");
 
 // A lightweight bump-pointer arena allocator using a shared block pool.
 // As allocations are made from the arena and block capacity is exhausted new
@@ -165,6 +173,38 @@ iree_status_t iree_arena_allocate_aligned(iree_arena_allocator_t* arena,
                                           iree_host_size_t byte_length,
                                           iree_host_size_t min_alignment,
                                           void** out_ptr);
+
+// Allocates an array of |count| elements of |element_size| bytes from
+// the arena with checked multiplication. Returns
+// IREE_STATUS_RESOURCE_EXHAUSTED on size overflow.
+iree_status_t iree_arena_allocate_array(iree_arena_allocator_t* arena,
+                                        iree_host_size_t count,
+                                        iree_host_size_t element_size,
+                                        void** out_ptr);
+
+// Allocates an array of |count| elements of |element_size| bytes from
+// the arena with the returned pointer aligned to at least |min_alignment|.
+// Uses checked multiplication. Returns IREE_STATUS_RESOURCE_EXHAUSTED
+// on size overflow.
+iree_status_t iree_arena_allocate_array_aligned(iree_arena_allocator_t* arena,
+                                                iree_host_size_t count,
+                                                iree_host_size_t element_size,
+                                                iree_host_size_t min_alignment,
+                                                void** out_ptr);
+
+// Grows an array allocation using a 2x doubling strategy.
+// The new capacity is max(|minimum_capacity|, |*inout_capacity| * 2).
+// On success |*inout_capacity| is updated and |*inout_ptr| points to
+// the new allocation with existing elements copied. The old allocation
+// is abandoned in the arena (arenas cannot free individual allocations).
+// Copies |existing_count| * |element_size| bytes from the old array.
+// Returns IREE_STATUS_OUT_OF_RANGE if the capacity calculation overflows.
+iree_status_t iree_arena_grow_array(iree_arena_allocator_t* arena,
+                                    iree_host_size_t existing_count,
+                                    iree_host_size_t minimum_capacity,
+                                    iree_host_size_t element_size,
+                                    iree_host_size_t* inout_capacity,
+                                    void** inout_ptr);
 
 // Returns an iree_allocator_t that allocates from the given |arena|.
 // Frees are ignored as arenas can only be reset as a whole.

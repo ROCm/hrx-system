@@ -103,9 +103,6 @@ typedef struct iree_hal_vulkan_queue_params_t {
   // Device-owned built-in pipelines. Borrowed.
   const iree_hal_vulkan_builtins_t* builtins;
 
-  // Executable dispatch ABI bits enabled on the logical device.
-  iree_hal_vulkan_dispatch_abis_t enabled_dispatch_abis;
-
   // Vulkan queue handle borrowed from the logical device.
   VkQueue queue;
 
@@ -165,9 +162,6 @@ typedef struct iree_hal_vulkan_queue_t {
 
   // Device allocator used for queue-owned staging resources. Borrowed.
   iree_hal_allocator_t* device_allocator;
-
-  // Executable dispatch ABI bits enabled on this queue.
-  iree_hal_vulkan_dispatch_abis_t enabled_dispatch_abis;
 
   // Vulkan queue handle borrowed from the logical device.
   VkQueue queue;

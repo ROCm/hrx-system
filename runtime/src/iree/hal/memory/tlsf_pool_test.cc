@@ -661,7 +661,7 @@ TEST_F(TLSFPoolTest, WrapReservationCreatesBuffer) {
       IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE, 0, 128,
       &mapping));
   memset(mapping.contents.data, 0x7C, 128);
-  iree_hal_buffer_unmap_range(&mapping);
+  IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
 
   iree_hal_pool_stats_t stats;
   iree_hal_pool_query_stats(pool_, &stats);
@@ -747,7 +747,7 @@ TEST(TLSFPool, WrapReservationUsesProviderHook) {
       &mapping));
   memset(mapping.contents.data, 0x4D, 128);
   EXPECT_EQ(((uint8_t*)mapping.contents.data)[127], 0x4D);
-  iree_hal_buffer_unmap_range(&mapping);
+  IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
 
   EXPECT_EQ(
       1,

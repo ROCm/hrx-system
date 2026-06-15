@@ -57,18 +57,9 @@ iree_hal_amdgpu_aql_command_buffer_profile_dispatch_binding_flags(
 
   iree_hal_profile_command_operation_flags_t flags =
       IREE_HAL_PROFILE_COMMAND_OPERATION_FLAG_NONE;
-  switch (dispatch_command->kernarg_strategy) {
-    case IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STRATEGY_PREPUBLISHED:
+  switch (dispatch_command->kernarg_storage_mode) {
+    case IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STORAGE_MODE_PREPUBLISHED:
       return IREE_HAL_PROFILE_COMMAND_OPERATION_FLAG_STATIC_BINDINGS;
-    case IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STRATEGY_PATCHED_TEMPLATE:
-      if (dispatch_command->payload.patch_source_count != 0) {
-        flags |= IREE_HAL_PROFILE_COMMAND_OPERATION_FLAG_DYNAMIC_BINDINGS;
-      }
-      if (dispatch_command->payload.patch_source_count <
-          dispatch_command->binding_count) {
-        flags |= IREE_HAL_PROFILE_COMMAND_OPERATION_FLAG_STATIC_BINDINGS;
-      }
-      return flags;
     default:
       break;
   }
@@ -83,12 +74,17 @@ iree_hal_amdgpu_aql_command_buffer_profile_dispatch_binding_flags(
       (const iree_hal_amdgpu_command_buffer_binding_source_t*)(block_base +
                                                                binding_source_offset);
   for (uint16_t binding_ordinal = 0;
-       binding_ordinal < dispatch_command->binding_count; ++binding_ordinal) {
+       binding_ordinal < dispatch_command->payload.binding_source_count;
+       ++binding_ordinal) {
     flags |= iree_any_bit_set(
                  binding_sources[binding_ordinal].flags,
                  IREE_HAL_AMDGPU_COMMAND_BUFFER_BINDING_SOURCE_FLAG_DYNAMIC)
                  ? IREE_HAL_PROFILE_COMMAND_OPERATION_FLAG_DYNAMIC_BINDINGS
                  : IREE_HAL_PROFILE_COMMAND_OPERATION_FLAG_STATIC_BINDINGS;
+  }
+  if (dispatch_command->payload.binding_source_count <
+      dispatch_command->binding_count) {
+    flags |= IREE_HAL_PROFILE_COMMAND_OPERATION_FLAG_STATIC_BINDINGS;
   }
   return flags;
 }
@@ -131,8 +127,8 @@ static void iree_hal_amdgpu_aql_command_buffer_initialize_profile_operation(
         record.flags |=
             IREE_HAL_PROFILE_COMMAND_OPERATION_FLAG_INDIRECT_PARAMETERS;
       }
-      if (dispatch_command->kernarg_strategy ==
-          IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STRATEGY_PREPUBLISHED) {
+      if (dispatch_command->kernarg_storage_mode ==
+          IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STORAGE_MODE_PREPUBLISHED) {
         record.flags |=
             IREE_HAL_PROFILE_COMMAND_OPERATION_FLAG_PREPUBLISHED_ARGUMENTS;
       }

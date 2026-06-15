@@ -154,9 +154,7 @@ IREE_API_EXPORT iree_status_t iree_io_stdio_stream_open(
   if (iree_status_is_ok(status)) {
     *out_stream = stream;
   } else {
-    if (stream) {
-      iree_io_stream_release(stream);
-    }
+    iree_io_stream_release(stream);
     if (handle) {
       fclose(handle);
     }

@@ -20,6 +20,7 @@ iree_cc_library(
     "libvulkan.c"
   DEPS
     iree::base
+    iree::base::internal
     iree::base::internal::dynamic_library
     iree::base::internal::path
     iree::hal::drivers::vulkan::api

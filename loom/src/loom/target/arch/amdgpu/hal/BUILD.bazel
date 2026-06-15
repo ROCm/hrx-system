@@ -1,0 +1,91 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+)
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+loom_cc_library(
+    name = "kernel_abi",
+    srcs = ["kernel_abi.c"],
+    hdrs = [
+        "binding_descriptor.h",
+        "kernel_abi.h",
+    ],
+    visibility = [
+        "//loom/src/loom/target/arch/amdgpu:__pkg__",
+        "//loom/src/loom/target/arch/amdgpu/lower:__pkg__",
+        "//loom/src/loom/target/emit/native/amdgpu:__pkg__",
+    ],
+    deps = [
+        "//loom/src/loom/codegen/low:allocation",
+        "//loom/src/loom/codegen/low:function",
+        "//loom/src/loom/codegen/low:target_binding",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target:types",
+        "//loom/src/loom/target/arch/amdgpu:error_defs",
+        "//loom/src/loom/target/arch/amdgpu:target_info",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "binding_materialization",
+    srcs = ["binding_materialization.c"],
+    hdrs = ["binding_materialization.h"],
+    visibility = [
+        "//loom/src/loom/target/arch/amdgpu:__pkg__",
+        "//loom/src/loom/target/emit/native/amdgpu:__pkg__",
+    ],
+    deps = [
+        ":kernel_abi",
+        "//loom/src/loom/codegen/low:allocation",
+        "//loom/src/loom/codegen/low:builder",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low:function",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/target:types",
+        "//loom/src/loom/target/arch/amdgpu:target_info",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "binding_materialization_pass",
+    srcs = ["binding_materialization_pass.c"],
+    hdrs = ["binding_materialization_pass.h"],
+    visibility = [
+        "//loom/src/loom/target/arch/amdgpu:__pkg__",
+    ],
+    deps = [
+        ":binding_materialization",
+        ":kernel_abi",
+        "//loom/src/loom/codegen/low:function",
+        "//loom/src/loom/codegen/low:target_binding",
+        "//loom/src/loom/codegen/low/pipeline:pass_environment",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/target/arch/amdgpu/ops",
+        "//runtime/src/iree/base",
+    ],
+)

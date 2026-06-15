@@ -205,10 +205,10 @@ class HostQueueStagingTest : public ::testing::Test {
 
       iree_hal_queue_affinity_t queue_affinity_mask = 0;
       const iree_hal_amdgpu_queue_affinity_domain_t domain = {
-          .supported_affinity = logical_device->queue_affinity_mask,
-          .physical_device_count = logical_device->physical_device_count,
-          .queue_count_per_physical_device =
-              physical_device->host_queue_capacity,
+          /*.supported_affinity=*/logical_device->queue_affinity_mask,
+          /*.physical_device_count=*/logical_device->physical_device_count,
+          /*.queue_count_per_physical_device=*/
+          physical_device->host_queue_capacity,
       };
       IREE_RETURN_IF_ERROR(iree_hal_amdgpu_queue_affinity_for_physical_device(
           domain, physical_device->device_ordinal, &queue_affinity_mask));

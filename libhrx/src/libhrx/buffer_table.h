@@ -41,6 +41,15 @@ HRX_API hrx_status_t hrx_buffer_table_insert(hrx_buffer_table_t* table,
                                              hrx_buffer_t buffer,
                                              void* user_data);
 
+// Like hrx_buffer_table_insert, but treats an already-registered pointer as
+// success (returns OK). Genuine failures (e.g. out-of-memory growing the
+// table) are propagated to the caller instead of being silently dropped.
+HRX_API hrx_status_t hrx_buffer_table_insert_if_new(hrx_buffer_table_t* table,
+                                                    uint64_t device_ptr,
+                                                    void* host_ptr, size_t size,
+                                                    hrx_buffer_t buffer,
+                                                    void* user_data);
+
 HRX_API hrx_status_t hrx_buffer_table_remove(hrx_buffer_table_t* table,
                                              uint64_t any_ptr);
 

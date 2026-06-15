@@ -1,0 +1,99 @@
+// RUN: pass canonicalize
+
+// extui reinterprets the source bits as unsigned before widening.
+func.def @extui_negative_exact() -> (i64, i64) {
+  %c = scalar.constant -1 : i8
+  %r = scalar.extui %c : i8 to i32
+  %lo = test.fact_range_lo %r : i32 -> i64
+  %hi = test.fact_range_hi %r : i32 -> i64
+  func.return %lo, %hi : i64, i64
+}
+// ----
+func.def @extui_negative_exact() -> (i64, i64) {
+  %lo = scalar.constant 255 : i64
+  %hi = scalar.constant 255 : i64
+  func.return %lo, %hi : i64, i64
+}
+
+// ====
+
+// trunci exact facts wrap to the destination width and signed domain.
+func.def @trunci_exact_wraps_positive() -> (i64, i64) {
+  %c = scalar.constant 300 : i32
+  %r = scalar.trunci %c : i32 to i8
+  %lo = test.fact_range_lo %r : i8 -> i64
+  %hi = test.fact_range_hi %r : i8 -> i64
+  func.return %lo, %hi : i64, i64
+}
+// ----
+func.def @trunci_exact_wraps_positive() -> (i64, i64) {
+  %lo = scalar.constant 44 : i64
+  %hi = scalar.constant 44 : i64
+  func.return %lo, %hi : i64, i64
+}
+
+// ====
+
+// trunci exact facts sign-extend the destination bit pattern.
+func.def @trunci_exact_wraps_negative() -> (i64, i64) {
+  %c = scalar.constant 200 : i32
+  %r = scalar.trunci %c : i32 to i8
+  %lo = test.fact_range_lo %r : i8 -> i64
+  %hi = test.fact_range_hi %r : i8 -> i64
+  func.return %lo, %hi : i64, i64
+}
+// ----
+func.def @trunci_exact_wraps_negative() -> (i64, i64) {
+  %lo = scalar.constant -56 : i64
+  %hi = scalar.constant -56 : i64
+  func.return %lo, %hi : i64, i64
+}
+
+// ====
+
+// Dynamic extui of a full i8 domain is bounded to the unsigned source domain.
+func.def @extui_dynamic_i8_domain(%x: i8) -> (i64, i64) {
+  %r = scalar.extui %x : i8 to i32
+  %lo = test.fact_range_lo %r : i32 -> i64
+  %hi = test.fact_range_hi %r : i32 -> i64
+  func.return %lo, %hi : i64, i64
+}
+// ----
+func.def @extui_dynamic_i8_domain(%x: i8) -> (i64, i64) {
+  %lo = scalar.constant 0 : i64
+  %hi = scalar.constant 255 : i64
+  func.return %lo, %hi : i64, i64
+}
+
+// ====
+
+// Dynamic trunci to i8 may wrap to any value in the signed result domain.
+func.def @trunci_dynamic_i8_domain(%x: i32) -> (i64, i64) {
+  %r = scalar.trunci %x : i32 to i8
+  %lo = test.fact_range_lo %r : i8 -> i64
+  %hi = test.fact_range_hi %r : i8 -> i64
+  func.return %lo, %hi : i64, i64
+}
+// ----
+func.def @trunci_dynamic_i8_domain(%x: i32) -> (i64, i64) {
+  %lo = scalar.constant -128 : i64
+  %hi = scalar.constant 127 : i64
+  func.return %lo, %hi : i64, i64
+}
+
+// ====
+
+// Truncation preserves range facts when assumptions prove the value fits.
+func.def @trunci_value_preserving_range(%x: i32) -> (i64, i64) {
+  %bounded = scalar.assume %x [range(%x, 0, 100)] : i32
+  %r = scalar.trunci %bounded : i32 to i8
+  %lo = test.fact_range_lo %r : i8 -> i64
+  %hi = test.fact_range_hi %r : i8 -> i64
+  func.return %lo, %hi : i64, i64
+}
+// ----
+func.def @trunci_value_preserving_range(%x: i32) -> (i64, i64) {
+  %lo = scalar.constant 0 : i64
+  %hi = scalar.constant 100 : i64
+  func.return %lo, %hi : i64, i64
+}

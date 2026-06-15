@@ -351,8 +351,10 @@ static iree_status_t hrx_fat_extract_from_bundle(
     iree_const_byte_span_t bundle, iree_string_view_t target_arch,
     iree_hal_streaming_fat_binary_extract_t* extract) {
   const uint8_t* p = bundle.data + HRX_OFFLOAD_BUNDLE_MAGIC_SIZE;
+  const bool is_unbounded = bundle.data_length == 0;
   iree_host_size_t remaining =
-      bundle.data_length - HRX_OFFLOAD_BUNDLE_MAGIC_SIZE;
+      is_unbounded ? IREE_HOST_SIZE_MAX
+                   : bundle.data_length - HRX_OFFLOAD_BUNDLE_MAGIC_SIZE;
   if (remaining < sizeof(uint64_t)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "offload bundle truncated before entry count");
@@ -382,8 +384,8 @@ static iree_status_t hrx_fat_extract_from_bundle(
     p += entry.triple_size;
     remaining -= entry.triple_size;
 
-    if (entry.offset > bundle.data_length ||
-        entry.size > bundle.data_length - entry.offset) {
+    if (!is_unbounded && (entry.offset > bundle.data_length ||
+                          entry.size > bundle.data_length - entry.offset)) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "offload bundle entry[%" PRIu64 "] out of range",
                               i);

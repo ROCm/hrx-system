@@ -1,0 +1,65 @@
+// RUN: pass source-to-low
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @rejects_reduce_axes_without_target_legalization(%v: vector<4xi32>, %init: i32) -> (i32) {
+  // ERROR@+1: TARGET/001 {op_name="vector.reduce.axes"}
+  %r = vector.reduce.axes<addi> %v, %init axes [0] : vector<4xi32>, i32
+  func.return %r : i32
+}
+
+// ====
+// RUN: pass source-to-low
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @rejects_mma_without_target_legalization(%lhs_data: vector<4xi32>, %rhs_data: vector<4xi32>, %init_data: vector<4xi32>) -> (vector<4xi32>) {
+  %m = index.constant 2 : index
+  %n = index.constant 2 : index
+  %k = index.constant 2 : index
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] : vector<4xi32>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] : vector<4xi32>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xi32>
+  // ERROR@+1: TARGET/001 {op_name="vector.mma"}
+  %result = vector.mma %lhs, %rhs, %init : vector<4xi32>, vector<4xi32>, vector<4xi32>
+  func.return %result : vector<4xi32>
+}
+
+// ====
+// RUN: pass target-legalize{mode=final}
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @rejects_unsupported_source_op_in_final_mode(%v: vector<4xf32>) -> (vector<4xf32>) {
+  // ERROR@+1: TARGET/001 {op_name="vector.logisticf"}
+  %r = vector.logisticf %v : vector<4xf32>
+  func.return %r : vector<4xf32>
+}
+
+// ====
+// RUN: pass target-legalize{mode=final}
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @rejects_target_shaped_mma_without_layout_fallback(%lhs_data: vector<16xf16>, %rhs_data: vector<16xf16>, %init_data: vector<8xf32>) -> (vector<8xf32>) {
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] : vector<16xf16>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] : vector<16xf16>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
+  // ERROR@+1: TARGET/039 {source_contract="target.reference", matrix_constraint="reference.lhs_fragment_ownership"}
+  %result = vector.mma %lhs, %rhs, %init : vector<16xf16>, vector<16xf16>, vector<8xf32>
+  func.return %result : vector<8xf32>
+}
+
+// ====
+// RUN: pass target-legalize{mode=final,policy=require-native}
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @require_native_rejects_reduce_axes_reference_fallback(%v: vector<4xi32>, %init: i32) -> (i32) {
+  // ERROR@+1: TARGET/039 {source_contract="target.reference", matrix_constraint="reference.policy"}
+  %r = vector.reduce.axes<addi> %v, %init axes [0] : vector<4xi32>, i32
+  func.return %r : i32
+}

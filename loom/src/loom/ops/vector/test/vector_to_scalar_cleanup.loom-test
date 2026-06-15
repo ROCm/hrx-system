@@ -1,0 +1,79 @@
+// RUN: pass vector-to-scalar,canonicalize
+
+// A fact-known zero offset vector makes gather equivalent to a repeated regular
+// load from the base address. The scalarized IR should not retain offset-vector
+// extraction or add-by-zero address math.
+func.def @gather_zero_offsets(%buffer: buffer, %byte_offset: offset) -> (vector<2xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%byte_offset] : buffer -> view<8xf32, %layout>
+  %offsets = vector.constant 0 : vector<2xindex>
+  %loaded = vector.gather %view[3][%offsets] : view<8xf32, %layout>, vector<2xindex> -> vector<2xf32>
+  func.return %loaded : vector<2xf32>
+}
+
+// ----
+func.def @gather_zero_offsets(%buffer: buffer, %byte_offset: offset) -> (vector<2xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%byte_offset] : buffer -> view<8xf32, %layout>
+  %8 = view.load %view[3] : view<8xf32, %layout> -> f32
+  %10 = view.load %view[3] : view<8xf32, %layout> -> f32
+  %loaded = vector.from_elements %8, %10 : vector<2xf32>
+  func.return %loaded : vector<2xf32>
+}
+
+// ====
+
+// A contiguous iota offset vector is fact-visible to lowering. After index
+// canonicalization, dynamic gather has the same address shape as regular
+// vector.load scalarization: origin + loop_iv.
+func.def @gather_iota_offsets(%n: index, %buffer: buffer, %byte_offset: offset, %origin: index) -> (vector<[%n]xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%byte_offset] : buffer -> view<[%n]xf32, %layout>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %offsets = vector.iota %c0 step %c1 : vector<[%n]xindex>
+  %loaded = vector.gather %view[%origin][%offsets] : view<[%n]xf32, %layout>, vector<[%n]xindex> -> vector<[%n]xf32>
+  func.return %loaded : vector<[%n]xf32>
+}
+
+// ----
+func.def @gather_iota_offsets(%n: index, %buffer: buffer, %byte_offset: offset, %origin: index) -> (vector<[%n]xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%byte_offset] : buffer -> view<[%n]xf32, %layout>
+  %11 = vector.constant 0.0 : vector<[%n]xf32>
+  %12 = index.constant 0 : index
+  %13 = index.constant 1 : index
+  %loaded = scf.for %14 = [%12 to %n step %13](%15 = %11 : vector<[%n]xf32>) -> (vector<[%n]xf32>) {
+    %19 = index.add %origin, %14 : index
+    %20 = view.load %view[%19] : view<[%n]xf32, %layout> -> f32
+    %21 = vector.insert %20 into %15[%14] : f32, vector<[%n]xf32>
+    scf.yield %21 : vector<[%n]xf32>
+  }
+  func.return %loaded : vector<[%n]xf32>
+}
+
+// ====
+
+// A full mask.range canonicalizes before scalarized memory cleanup, so masked
+// load becomes regular load and avoids per-lane scf.if scaffolding.
+func.def @load_full_range_mask(%buffer: buffer, %byte_offset: offset) -> (vector<2xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%byte_offset] : buffer -> view<8xf32, %layout>
+  %old = vector.constant 0.0 : vector<2xf32>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %mask = vector.mask.range [%c0 to %c2 step %c1] : index -> vector<2xi1>
+  %loaded = vector.load.mask %view[3], %mask, %old : view<8xf32, %layout>, vector<2xi1>, vector<2xf32>
+  func.return %loaded : vector<2xf32>
+}
+
+// ----
+func.def @load_full_range_mask(%buffer: buffer, %byte_offset: offset) -> (vector<2xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%byte_offset] : buffer -> view<8xf32, %layout>
+  %16 = view.load %view[3] : view<8xf32, %layout> -> f32
+  %23 = view.load %view[4] : view<8xf32, %layout> -> f32
+  %loaded = vector.from_elements %16, %23 : vector<2xf32>
+  func.return %loaded : vector<2xf32>
+}

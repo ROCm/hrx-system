@@ -163,6 +163,75 @@ iree_cc_test(
 endif()
 
 if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_library(
+  NAME
+    global_table
+  HDRS
+    "global_table.h"
+  SRCS
+    "global_table.c"
+  DEPS
+    ::libhsa
+    iree::base
+    iree::base::internal
+    iree::base::threading
+    iree::hal
+    iree::hal::drivers::amdgpu::buffer
+    iree::hal::drivers::amdgpu::queue_affinity
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    global_table_test
+  SRCS
+    "global_table_test.cc"
+  DEPS
+    ::global_table
+    iree::base
+    iree::hal
+    iree::hal::drivers::amdgpu
+    iree::hal::drivers::amdgpu::queue_affinity
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_binary_benchmark(
+  NAME
+    global_table_benchmark
+  SRCS
+    "global_table_benchmark.cc"
+  DEPS
+    ::global_table
+    iree::base
+    iree::hal
+    iree::hal::drivers::amdgpu
+    iree::hal::drivers::amdgpu::queue_affinity
+    iree::testing::benchmark
+    iree::testing::benchmark_main
+    iree::third_party::google_benchmark
+  TESTONLY
+  LABELS
+    "benchmark"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
 iree_cc_fuzz(
   NAME
     hsaco_metadata_fuzz
@@ -411,11 +480,27 @@ iree_cc_library(
   DEPS
     ::device_library_target
     ::libhsa
+    ::loaded_code_object
     ::topology
     iree::base
     iree::base::internal
     iree::hal::drivers::amdgpu::device::binaries::toc
     iree::hal::drivers::amdgpu::device::headers
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_library(
+  NAME
+    loaded_code_object
+  HDRS
+    "loaded_code_object.h"
+  SRCS
+    "loaded_code_object.c"
+  DEPS
+    ::libhsa
+    iree::base
   PUBLIC
 )
 endif()
@@ -444,8 +529,10 @@ iree_cc_library(
     ::block_pool
     ::device_library
     ::device_library_target
+    ::global_table
     ::info
     ::kfd
+    ::loaded_code_object
     ::packet
     ::pm4_dispatch
     ::pm4_program
@@ -882,43 +969,28 @@ iree_cc_test(
 )
 endif()
 
-if(TARGET iree::hal::drivers::amdgpu::cts::testdata_amdgpu)
-  iree_amdgpu_expand_target_selectors(
-    _IREE_HAL_AMDGPU_EXACT_TARGETS
-    "${IREE_AMDGPU_TARGET_EXPANSION_EXACT}"
-    ${IREE_HAL_AMDGPU_TARGETS}
-  )
-endif()
-if(_IREE_HAL_AMDGPU_EXACT_TARGETS)
-
-add_custom_command(OUTPUT queue_benchmark_testdata_srcs.stamp
-    COMMAND ${CMAKE_COMMAND} -E touch queue_benchmark_testdata_srcs.stamp
-  DEPENDS
-    "queue_benchmark_testdata.mlir"
-)
-
-add_custom_target(queue_benchmark_testdata_srcs
-    DEPENDS queue_benchmark_testdata_srcs.stamp
-)
-
 if(IREE_HAL_DRIVER_AMDGPU)
-iree_hal_cts_testdata(
+iree_amdgpu_hal_cts_testdata(
+  NAME
+    testdata_amdgpu_queue_benchmark
+  TARGET
+    amdgcn-amd-amdhsa
+  TARGETS
+    ${IREE_HAL_AMDGPU_TARGETS}
   FORMAT_NAME
     amdgpu_queue_benchmark
-  FORMAT_VARIANT_TOKEN
-    "{AMDGPU_TARGET}"
-  FORMAT_VARIANTS
-    ${_IREE_HAL_AMDGPU_EXACT_TARGETS}
-  TARGET_DEVICE
-    "amdgpu"
+  FORMAT_STRING
+    [=["amdgcn-amd-amdhsa--{AMDGPU_TARGET}"]=]
   IDENTIFIER
     "iree_queue_benchmark_testdata_amdgpu"
   BACKEND_NAME
     "amdgpu"
-  FORMAT_STRING
-    [=["amdgcn-amd-amdhsa--{AMDGPU_TARGET}"]=]
-  TESTDATA_DIR
-    "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/drivers/amdgpu/util"
+  INTERNAL_HDRS
+    "${PROJECT_BINARY_DIR}/runtime/src/iree/hal/drivers/amdgpu/abi/amdgpu_abi_bitcode_hdrs.stamp"
+    "${PROJECT_BINARY_DIR}/runtime/src/iree/hal/drivers/amdgpu/device/bitcode_hdrs.stamp"
+  SRCS
+    "queue_benchmark_testdata.c"
+  TESTONLY
 )
 endif()
 
@@ -937,6 +1009,7 @@ iree_cc_binary_benchmark(
     iree::base::threading
     iree::base::tooling::flags
     iree::hal
+    iree::hal::cts::util::registry
     iree::hal::drivers::amdgpu
     iree::hal::drivers::amdgpu::cts::testdata_amdgpu
     iree::hal::drivers::amdgpu::device::dispatch
@@ -957,7 +1030,7 @@ iree_cc_binary_benchmark(
     iree-hal-drivers-amdgpu-tests
 )
 endif()
-endif()
+
 if(IREE_HAL_DRIVER_AMDGPU)
 iree_cc_test(
   NAME

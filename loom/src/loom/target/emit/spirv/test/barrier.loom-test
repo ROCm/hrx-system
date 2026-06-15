@@ -1,0 +1,34 @@
+// RUN: emit spirv-dis validate
+// REQUIRES: spirv-dis, spirv-val
+
+spirv.target<vulkan1_3> @target
+
+low.func.def target(@target) abi(shader_entry_point) @spirv_barriers() asm<spirv.logical.core> {
+  OpControlBarrier.subgroup.workgroup.acq_rel
+  OpControlBarrier.workgroup.workgroup.acq_rel
+  return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %spirv_barriers "spirv_barriers"
+               OpExecutionMode %spirv_barriers LocalSize 1 1 1
+               OpName %spirv_barriers "spirv_barriers"
+       %void = OpTypeVoid
+          %3 = OpTypeFunction %void
+       %uint = OpTypeInt 32 0
+     %uint_3 = OpConstant %uint 3
+     %uint_2 = OpConstant %uint 2
+   %uint_264 = OpConstant %uint 264
+%spirv_barriers = OpFunction %void None %3
+          %4 = OpLabel
+               OpControlBarrier %uint_3 %uint_2 %uint_264
+               OpControlBarrier %uint_2 %uint_2 %uint_264
+               OpReturn
+               OpFunctionEnd

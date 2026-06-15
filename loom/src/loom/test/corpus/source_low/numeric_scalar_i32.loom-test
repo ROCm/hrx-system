@@ -1,0 +1,51 @@
+// RUN: roundtrip
+
+func.def @scalar_i32_uniform_sgpr(%lhs: i32, %rhs: i32, %shift: i32) -> (i32) {
+  %add = scalar.addi %lhs, %rhs : i32
+  %sub = scalar.subi %add, %rhs : i32
+  %product = scalar.muli %sub, %rhs : i32
+  %and = scalar.andi %product, %lhs : i32
+  %or = scalar.ori %and, %rhs : i32
+  %xor = scalar.xori %or, %lhs : i32
+  %shl = scalar.shli %xor, %shift : i32
+  %ashr = scalar.shrsi %shl, %shift : i32
+  %lshr = scalar.shrui %ashr, %shift : i32
+  func.return %lshr : i32
+}
+
+// ====
+
+func.def @scalar_i32_bitfield_sgpr(%word: i32) -> (i32, i32, i32, i32) {
+  %unsigned_byte = scalar.bitfield.extractu %word {offset = 8, width = 8} : i32 -> i32
+  %signed_byte = scalar.bitfield.extracts %word {offset = 16, width = 8} : i32 -> i32
+  %unsigned_nibble = scalar.bitfield.extractu %word {offset = 4, width = 4} : i32 -> i32
+  %signed_nibble = scalar.bitfield.extracts %word {offset = 4, width = 4} : i32 -> i32
+  func.return %unsigned_byte, %signed_byte, %unsigned_nibble, %signed_nibble : i32, i32, i32, i32
+}
+
+// ====
+
+func.def @scalar_i32_compare_scc(%lhs: i32, %rhs: i32) -> (i1) {
+  %cmp = scalar.cmpi slt, %lhs, %rhs : i32
+  func.return %cmp : i1
+}
+
+// ====
+
+func.def @scalar_i1_constants_scc() -> (i1, i1) {
+  %true = scalar.constant true : i1
+  %false = scalar.constant false : i1
+  func.return %true, %false : i1, i1
+}
+
+// ====
+
+func.def @scalar_i1_bitwise_scc(%lhs: i32, %rhs: i32) -> (i1) {
+  %zero = scalar.constant 0 : i32
+  %lhs_nonzero = scalar.cmpi ne, %lhs, %zero : i32
+  %rhs_nonzero = scalar.cmpi ne, %rhs, %zero : i32
+  %both_nonzero = scalar.andi %lhs_nonzero, %rhs_nonzero : i1
+  %either_nonzero = scalar.ori %lhs_nonzero, %rhs_nonzero : i1
+  %one_nonzero = scalar.xori %both_nonzero, %either_nonzero : i1
+  func.return %one_nonzero : i1
+}

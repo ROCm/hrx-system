@@ -42,30 +42,15 @@ class DispatchReuseTest : public CtsTestBase<> {
         device_, iree_make_cstring_view("default"), &executable_cache_));
 
     // Load the workgroup-ID kernel: writes workgroup_id[0] to buffer[wg_id].
-    {
-      iree_hal_executable_params_t params;
-      iree_hal_executable_params_initialize(&params);
-      params.caching_mode =
-          IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA;
-      params.executable_format = iree_make_cstring_view(executable_format());
-      params.executable_data = executable_data(iree_make_cstring_view(
-          "command_buffer_dispatch_multi_workgroup_test.bin"));
-      IREE_ASSERT_OK(iree_hal_executable_cache_prepare_executable(
-          executable_cache_, &params, &workgroup_id_executable_));
-    }
+    PrepareExecutableOrSkipUnsupported(
+        executable_cache_, "command_buffer_dispatch_multi_workgroup_test.bin",
+        &workgroup_id_executable_);
+    if (HasFatalFailure() || IsSkipped()) return;
 
     // Load the absf kernel: output[i] = abs(input[i]).
-    {
-      iree_hal_executable_params_t params;
-      iree_hal_executable_params_initialize(&params);
-      params.caching_mode =
-          IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA;
-      params.executable_format = iree_make_cstring_view(executable_format());
-      params.executable_data = executable_data(
-          iree_make_cstring_view("command_buffer_dispatch_test.bin"));
-      IREE_ASSERT_OK(iree_hal_executable_cache_prepare_executable(
-          executable_cache_, &params, &absf_executable_));
-    }
+    PrepareExecutableOrSkipUnsupported(executable_cache_,
+                                       "command_buffer_dispatch_test.bin",
+                                       &absf_executable_);
   }
 
   void TearDown() override {
@@ -100,14 +85,14 @@ class DispatchReuseTest : public CtsTestBase<> {
   // Records a reusable command buffer that dispatches the workgroup-ID kernel
   // with the given workgroup count. Uses a single indirect binding (slot 0)
   // for the output buffer.
-  void RecordWorkgroupIdDispatch(
-      iree_host_size_t workgroup_count,
-      iree_hal_command_buffer_t** out_command_buffer) {
+  void RecordWorkgroupIdDispatch(iree_host_size_t workgroup_count,
+                                 iree_hal_command_buffer_t** out_command_buffer,
+                                 iree_hal_command_buffer_mode_t mode =
+                                     IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT) {
     iree_hal_command_buffer_t* command_buffer = nullptr;
     IREE_ASSERT_OK(iree_hal_command_buffer_create(
-        device_, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-        IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
-        /*binding_capacity=*/1, &command_buffer));
+        device_, mode, IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+        IREE_HAL_QUEUE_AFFINITY_ANY, /*binding_capacity=*/1, &command_buffer));
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
 
     iree_hal_buffer_ref_t binding_refs[1] = {{
@@ -139,12 +124,13 @@ class DispatchReuseTest : public CtsTestBase<> {
   // dispatch is followed by a barrier.
   void RecordTwoWorkgroupIdDispatches(
       iree_host_size_t workgroup_count,
-      iree_hal_command_buffer_t** out_command_buffer) {
+      iree_hal_command_buffer_t** out_command_buffer,
+      iree_hal_command_buffer_mode_t mode =
+          IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT) {
     iree_hal_command_buffer_t* command_buffer = nullptr;
     IREE_ASSERT_OK(iree_hal_command_buffer_create(
-        device_, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-        IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
-        /*binding_capacity=*/2, &command_buffer));
+        device_, mode, IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+        IREE_HAL_QUEUE_AFFINITY_ANY, /*binding_capacity=*/2, &command_buffer));
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
 
     for (uint32_t buffer_slot = 0; buffer_slot < 2; ++buffer_slot) {
@@ -229,7 +215,9 @@ TEST_P(DispatchReuseTest, DispatchProfilingRecordsCommandBufferDispatch) {
   const iree_device_size_t buffer_size = kWorkgroupCount * sizeof(uint32_t);
 
   Ref<iree_hal_command_buffer_t> command_buffer;
-  RecordWorkgroupIdDispatch(kWorkgroupCount, command_buffer.out());
+  RecordWorkgroupIdDispatch(
+      kWorkgroupCount, command_buffer.out(),
+      IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA);
 
   Ref<iree_hal_buffer_t> output;
   IREE_ASSERT_OK(CreateZeroedDeviceBuffer(buffer_size, output.out()));
@@ -257,7 +245,7 @@ TEST_P(DispatchReuseTest, DispatchProfilingRecordsCommandBufferDispatch) {
   iree_status_t profiling_status =
       profiling.Begin(IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS,
                       TestProfileSinkAsBase(&sink));
-  if (IsProfilingUnsupported(profiling_status)) {
+  if (IsProfilingUnsupported(iree_status_code(profiling_status))) {
     iree_status_free(profiling_status);
     GTEST_SKIP() << "device dispatch profiling unsupported by backend";
   }
@@ -298,7 +286,7 @@ TEST_P(DispatchReuseTest, DispatchProfilingRecordsCommandBufferDispatch) {
   EXPECT_TRUE(sink.saw_device_metadata);
   EXPECT_TRUE(sink.saw_queue_metadata);
   EXPECT_FALSE(sink.write_after_end);
-  ExpectDispatchEventsWithinClockCorrelationRange(sink);
+  ExpectDispatchEventsHaveClockCorrelations(sink);
 }
 
 // Submits a reusable command buffer with large workgroup counts. The existing
@@ -641,7 +629,9 @@ TEST_P(DispatchReuseTest, MultiDispatchProfilingFiltersCommandIndex) {
   const iree_device_size_t buffer_size = kWorkgroupCount * sizeof(uint32_t);
 
   Ref<iree_hal_command_buffer_t> command_buffer;
-  RecordTwoWorkgroupIdDispatches(kWorkgroupCount, command_buffer.out());
+  RecordTwoWorkgroupIdDispatches(
+      kWorkgroupCount, command_buffer.out(),
+      IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA);
 
   Ref<iree_hal_buffer_t> output_a;
   IREE_ASSERT_OK(CreateZeroedDeviceBuffer(buffer_size, output_a.out()));
@@ -673,7 +663,7 @@ TEST_P(DispatchReuseTest, MultiDispatchProfilingFiltersCommandIndex) {
 
   DeviceProfilingScope profiling(device_);
   iree_status_t profiling_status = profiling.Begin(&profiling_options);
-  if (IsProfilingUnsupported(profiling_status)) {
+  if (IsProfilingUnsupported(iree_status_code(profiling_status))) {
     iree_status_free(profiling_status);
     GTEST_SKIP() << "device dispatch profiling unsupported by backend";
   }
@@ -711,7 +701,7 @@ TEST_P(DispatchReuseTest, MultiDispatchProfilingFiltersCommandIndex) {
     }
   }
   EXPECT_EQ(2u, matching_dispatch_operation_count);
-  ExpectDispatchEventsWithinClockCorrelationRange(sink);
+  ExpectDispatchEventsHaveClockCorrelations(sink);
 }
 
 // Resubmits a multi-dispatch command buffer multiple times with different

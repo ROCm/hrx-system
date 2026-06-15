@@ -244,9 +244,8 @@ TEST_F(HipAllocatorTest, DeviceLocalMappingPromotesToHostVisible) {
   iree_hal_buffer_t* buffer = nullptr;
   iree_status_t status =
       iree_hal_allocator_allocate_buffer(allocator, params, kSize, &buffer);
-  ASSERT_TRUE(iree_status_is_ok(status))
-      << "DEVICE_LOCAL + MAPPING allocation should succeed after promotion; "
-      << iree_status_code_string(iree_status_code(status));
+  IREE_ASSERT_OK(status)
+      << "DEVICE_LOCAL + MAPPING allocation should succeed after promotion";
   ASSERT_NE(nullptr, buffer);
 
   // The buffer must be mappable.
@@ -254,10 +253,11 @@ TEST_F(HipAllocatorTest, DeviceLocalMappingPromotesToHostVisible) {
   status = iree_hal_buffer_map_range(buffer, IREE_HAL_MAPPING_MODE_SCOPED,
                                      IREE_HAL_MEMORY_ACCESS_READ, 0, kSize,
                                      &mapping);
-  EXPECT_TRUE(iree_status_is_ok(status))
-      << "Promoted buffer should be mappable";
   if (iree_status_is_ok(status)) {
-    iree_hal_buffer_unmap_range(&mapping);
+    iree_status_free(status);
+    IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
+  } else {
+    IREE_EXPECT_OK(status) << "Promoted buffer should be mappable";
   }
 
   iree_hal_buffer_release(buffer);

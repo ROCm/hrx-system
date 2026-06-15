@@ -50,10 +50,6 @@ typedef struct iree_hal_amdgpu_device_kernel_args_t {
   // which is the maximum of 16 and the maximum alignment of any of the kernel
   // arguments.
   uint16_t kernarg_alignment;
-  // Total number of 4-byte constants used by the dispatch (if a HAL dispatch).
-  uint16_t constant_count;
-  // Total number of bindings used by the dispatch (if a HAL dispatch).
-  uint16_t binding_count;
   // Reserved for future hot kernel metadata. Must be zero.
   uint32_t reserved;
 } iree_hal_amdgpu_device_kernel_args_t;

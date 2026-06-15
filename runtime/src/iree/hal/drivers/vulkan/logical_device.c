@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "iree/base/internal/arena.h"
+#include "iree/base/internal/debugging.h"
 #include "iree/base/target_platform.h"
 
 #if defined(IREE_PLATFORM_WINDOWS)
@@ -94,9 +95,6 @@ struct iree_hal_vulkan_logical_device_t {
 
   // HAL feature bits enabled on the logical device.
   iree_hal_vulkan_features_t enabled_features;
-
-  // Executable dispatch ABI bits enabled on the logical device.
-  iree_hal_vulkan_dispatch_abis_t enabled_dispatch_abis;
 
   // Host block pool for command-buffer resource sets and future command blocks.
   iree_arena_block_pool_t command_buffer_block_pool;
@@ -627,11 +625,10 @@ static iree_status_t iree_hal_vulkan_logical_device_query_i64(
     return iree_ok_status();
   }
   if (iree_string_view_equal(category, IREE_SV("hal.executable.format"))) {
-    *out_value =
-        iree_hal_vulkan_executable_format_supported(
-            device->enabled_features, device->enabled_dispatch_abis, key)
-            ? 1
-            : 0;
+    *out_value = iree_hal_vulkan_executable_format_supported(
+                     device->enabled_features, key)
+                     ? 1
+                     : 0;
     return iree_ok_status();
   }
   if (iree_string_view_equal(category, IREE_SV("hal.device"))) {
@@ -1128,8 +1125,7 @@ static iree_status_t iree_hal_vulkan_logical_device_create_executable_cache(
   return iree_hal_vulkan_executable_cache_create(
       &device->syms, device->logical_device, &device->physical_device,
       device->enabled_features, device->enabled_extensions, identifier,
-      device->enabled_dispatch_abis, device->host_allocator,
-      out_executable_cache);
+      device->host_allocator, out_executable_cache);
 }
 
 static iree_status_t iree_hal_vulkan_logical_device_import_file(
@@ -1671,7 +1667,7 @@ static iree_status_t iree_hal_vulkan_logical_device_external_capture_end(
   return iree_hal_vulkan_unimplemented(IREE_SV("external capture"));
 }
 
-static iree_status_t iree_hal_vulkan_logical_device_allocate(
+static iree_status_t iree_hal_vulkan_logical_device_create(
     iree_string_view_t identifier, const iree_hal_vulkan_libvulkan_t* libvulkan,
     iree_allocator_t host_allocator,
     iree_hal_vulkan_logical_device_t** out_device) {
@@ -1876,7 +1872,6 @@ static iree_status_t iree_hal_vulkan_logical_device_initialize_queue_lane(
       .debug_utils = &device->debug_utils,
       .logical_device = device->logical_device,
       .builtins = &device->builtins,
-      .enabled_dispatch_abis = device->enabled_dispatch_abis,
       .queue = queue->handle,
       .queue_flags = queue->selection.flags,
       .timestamp_valid_bits = queue->selection.timestamp_valid_bits,
@@ -1977,7 +1972,6 @@ static iree_status_t iree_hal_vulkan_logical_device_initialize_from_plan(
   if (iree_status_is_ok(status)) {
     device->enabled_features = device_plan->enabled_features;
     device->enabled_extensions = device_plan->enabled_extensions;
-    device->enabled_dispatch_abis = device_plan->enabled_dispatch_abis;
     device->max_cached_bda_replay_instances =
         device_options->max_cached_bda_replay_instances;
     device->max_cached_bda_replay_publication_bytes =
@@ -2030,8 +2024,8 @@ static iree_status_t iree_hal_vulkan_logical_device_create_from_selection(
 
   iree_hal_vulkan_logical_device_t* device = NULL;
   if (iree_status_is_ok(status)) {
-    status = iree_hal_vulkan_logical_device_allocate(identifier, libvulkan,
-                                                     host_allocator, &device);
+    status = iree_hal_vulkan_logical_device_create(identifier, libvulkan,
+                                                   host_allocator, &device);
   }
   if (iree_status_is_ok(status)) {
     device->instance = *instance;
@@ -2044,10 +2038,12 @@ static iree_status_t iree_hal_vulkan_logical_device_create_from_selection(
     VkDeviceCreateInfo device_create_info;
     iree_hal_vulkan_device_plan_make_create_info(&device_plan,
                                                  &device_create_info);
+    IREE_LEAK_CHECK_DISABLE_PUSH();
     status =
         iree_vkCreateDevice(IREE_VULKAN_INSTANCE(&device->instance.syms),
                             device->physical_device.handle, &device_create_info,
                             /*pAllocator=*/NULL, &device->logical_device);
+    IREE_LEAK_CHECK_DISABLE_POP();
   }
   if (iree_status_is_ok(status)) {
     device->owns_logical_device = true;
@@ -2057,7 +2053,7 @@ static iree_status_t iree_hal_vulkan_logical_device_create_from_selection(
 
   if (iree_status_is_ok(status)) {
     *out_device = (iree_hal_device_t*)device;
-  } else if (device) {
+  } else {
     iree_hal_device_release((iree_hal_device_t*)device);
   }
   IREE_TRACE_ZONE_END(z0);
@@ -2205,7 +2201,7 @@ IREE_API_EXPORT iree_status_t iree_hal_vulkan_wrap_device(
 
   iree_hal_vulkan_logical_device_t* device = NULL;
   if (iree_status_is_ok(status)) {
-    status = iree_hal_vulkan_logical_device_allocate(
+    status = iree_hal_vulkan_logical_device_create(
         identifier, &instance_syms->libvulkan, host_allocator, &device);
   }
   if (iree_status_is_ok(status)) {
@@ -2219,7 +2215,7 @@ IREE_API_EXPORT iree_status_t iree_hal_vulkan_wrap_device(
   }
   if (iree_status_is_ok(status)) {
     *out_device = (iree_hal_device_t*)device;
-  } else if (device) {
+  } else {
     iree_hal_device_release((iree_hal_device_t*)device);
   }
 

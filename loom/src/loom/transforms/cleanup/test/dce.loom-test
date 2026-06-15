@@ -1,0 +1,67 @@
+// RUN: pass dce
+
+// Dead code elimination on a single function.
+func.def @dce_single(%x: i32) -> (i32) {
+  %dead = test.constant 42 : i32
+  func.return %x : i32
+}
+// ----
+func.def @dce_single(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+
+// ====
+
+// RUN: pass dce
+
+// DCE runs on all functions in a module.
+func.def @first(%x: i32) -> (i32) {
+  %dead = test.constant 1 : i32
+  func.return %x : i32
+}
+
+func.def @second(%y: i32) -> (i32) {
+  %dead = test.constant 2 : i32
+  func.return %y : i32
+}
+// ----
+func.def @first(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+
+func.def @second(%y: i32) -> (i32) {
+  func.return %y : i32
+}
+
+// ====
+
+// RUN: pass dce
+
+// Bodyless declarations are preserved unchanged.
+func.decl @external(%z: i32) -> (i32)
+
+func.def @has_body(%x: i32) -> (i32) {
+  %dead = test.constant 99 : i32
+  func.return %x : i32
+}
+// ----
+func.decl @external(%z: i32) -> (i32)
+
+func.def @has_body(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+
+// ====
+
+// RUN: pass dce
+
+// No-op: all code is live.
+func.def @all_live(%a: i32, %b: i32) -> (i32) {
+  %c = test.addi %a, %b : i32
+  func.return %c : i32
+}
+// ----
+func.def @all_live(%a: i32, %b: i32) -> (i32) {
+  %c = test.addi %a, %b : i32
+  func.return %c : i32
+}

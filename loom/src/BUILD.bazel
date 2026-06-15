@@ -1,0 +1,41 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:cc.bzl", "iree_cc_library")
+load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_cmake_extra_content(
+    content = """
+iree_setup_c_src_root(
+  PACKAGE_ROOT_PREFIX "loom/src"
+  DEFAULT_EXPORT_SET Runtime
+  DEFAULT_INSTALL_COMPONENT IREEDevLibraries-Runtime
+  IMPLICIT_DEFS_TARGET loom_defs
+)
+set(IREE_PACKAGE_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+set(IREE_PACKAGE_ROOT_PREFIX "loom/src")
+set(IREE_HDRS_ROOT_PATH "${CMAKE_CURRENT_SOURCE_DIR}")
+set(IREE_COMPILER_TABLEGEN_INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}")
+set(IREE_IMPLICIT_DEFS_CC_DEPS loom_defs)
+
+include("${PROJECT_SOURCE_DIR}/loom/build_tools/cmake/loom_cc.cmake")
+include("${PROJECT_SOURCE_DIR}/loom/build_tools/cmake/loom_low_descriptor.cmake")
+include("${PROJECT_SOURCE_DIR}/loom/build_tools/cmake/loom_generated.cmake")
+""",
+)
+
+iree_cc_library(
+    name = "defines",
+    includes = [
+        ".",
+    ],
+)

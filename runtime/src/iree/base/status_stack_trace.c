@@ -60,10 +60,14 @@ static iree_string_view_t iree_status_trim_file_path(const char* file_name) {
 static iree_host_size_t iree_string_buffer_append_cstr(
     iree_host_size_t buffer_capacity, char* buffer,
     iree_host_size_t buffer_length, const char* str) {
-  iree_host_size_t n =
-      iree_snprintf(buffer ? buffer + buffer_length : NULL,
-                    buffer ? buffer_capacity - buffer_length : 0, "%s", str);
-  return IREE_UNLIKELY(n < 0) ? 0 : buffer_length + n;
+  iree_host_size_t remaining_capacity =
+      buffer && buffer_length < buffer_capacity
+          ? buffer_capacity - buffer_length
+          : 0;
+  char* output_buffer = remaining_capacity > 0 ? buffer + buffer_length : NULL;
+  int n = iree_snprintf(output_buffer, remaining_capacity, "%s", str);
+  return IREE_UNLIKELY(n < 0) ? buffer_length
+                              : buffer_length + (iree_host_size_t)n;
 }
 
 static iree_host_size_t IREE_PRINTF_ATTRIBUTE(4, 5)
@@ -73,11 +77,15 @@ static iree_host_size_t IREE_PRINTF_ATTRIBUTE(4, 5)
                                      const char* format, ...) {
   va_list varargs;
   va_start(varargs, format);
-  iree_host_size_t n = iree_vsnprintf(
-      buffer ? buffer + buffer_length : NULL,
-      buffer ? buffer_capacity - buffer_length : 0, format, varargs);
+  iree_host_size_t remaining_capacity =
+      buffer && buffer_length < buffer_capacity
+          ? buffer_capacity - buffer_length
+          : 0;
+  char* output_buffer = remaining_capacity > 0 ? buffer + buffer_length : NULL;
+  int n = iree_vsnprintf(output_buffer, remaining_capacity, format, varargs);
   va_end(varargs);
-  return IREE_UNLIKELY(n < 0) ? 0 : buffer_length + n;
+  return IREE_UNLIKELY(n < 0) ? buffer_length
+                              : buffer_length + (iree_host_size_t)n;
 }
 
 #if defined(IREE_USE_LIBBACKTRACE)
@@ -455,18 +463,23 @@ static iree_host_size_t iree_status_payload_stack_trace_format_frame(
 static void iree_status_payload_stack_trace_formatter(
     const iree_status_payload_t* base_payload, iree_host_size_t buffer_capacity,
     char* buffer, iree_host_size_t* out_buffer_length) {
+  *out_buffer_length = 0;
   iree_status_payload_stack_trace_t* payload =
       (iree_status_payload_stack_trace_t*)base_payload;
-  if (payload->frame_count - payload->skip_frames == 0) return;
+  iree_host_size_t first_frame = (iree_host_size_t)payload->skip_frames + 1;
+  if (first_frame >= payload->frame_count) return;
   iree_host_size_t buffer_length =
       iree_string_buffer_append_cstr(buffer_capacity, buffer, 0, "stack:\n");
-  for (iree_host_size_t i = payload->skip_frames + 1; i < payload->frame_count;
-       ++i) {
+  for (iree_host_size_t i = first_frame; i < payload->frame_count; ++i) {
+    iree_host_size_t remaining_capacity =
+        buffer && buffer_length < buffer_capacity
+            ? buffer_capacity - buffer_length
+            : 0;
+    char* output_buffer =
+        remaining_capacity > 0 ? buffer + buffer_length : NULL;
     buffer_length += iree_status_payload_stack_trace_format_frame(
-        (void*)payload->addresses[i],
-        buffer ? buffer_capacity - buffer_length : 0,
-        buffer ? buffer + buffer_length : NULL);
-    if (buffer_length > buffer_capacity) buffer = NULL;
+        (void*)payload->addresses[i], remaining_capacity, output_buffer);
+    if (buffer_length >= buffer_capacity) buffer = NULL;
   }
   *out_buffer_length = buffer_length;
 }

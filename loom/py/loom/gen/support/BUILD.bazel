@@ -1,0 +1,55 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:python.bzl", "iree_py_library", "iree_py_test")
+
+package(
+    default_visibility = ["//loom/py/loom/gen:__subpackages__"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+GENERATED_FILE_VISIBILITY = [
+    "//loom/py/loom/gen:__subpackages__",
+    "//loom/py/loom/tools:__pkg__",
+]
+
+iree_py_library(
+    name = "support",
+    srcs = [
+        "__init__.py",
+        "c.py",
+        "c_arrays.py",
+        "files.py",
+        "generated_file.py",
+        "string_pool.py",
+    ],
+    visibility = GENERATED_FILE_VISIBILITY,
+    deps = [
+        "//loom/py/loom:core",
+        "//loom/py/loom/gen:package",
+    ],
+)
+
+iree_py_test(
+    name = "support_test",
+    srcs = [
+        "c_arrays_test.py",
+        "c_test.py",
+        "files_test.py",
+        "generated_file_test.py",
+        "string_pool_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = [
+        "loom.gen.support.c_arrays_test",
+        "loom.gen.support.c_test",
+        "loom.gen.support.files_test",
+        "loom.gen.support.generated_file_test",
+        "loom.gen.support.string_pool_test",
+    ],
+    main = "pytest_style_runner.py",
+    deps = [":support"],
+)

@@ -370,6 +370,7 @@ void iree_async_proactor_io_uring_submit_continuation_chain(
 
 // Pushes a completed software operation to the MPSC queue for callback
 // delivery on the poll thread (in proactor.c, used by proactor_submit.c).
+// Takes ownership of |status| and carries it with |operation|.
 void iree_async_proactor_io_uring_push_software_completion(
     iree_async_proactor_io_uring_t* proactor, iree_async_operation_t* operation,
     iree_status_t status);

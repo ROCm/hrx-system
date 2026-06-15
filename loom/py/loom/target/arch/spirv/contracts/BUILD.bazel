@@ -1,0 +1,37 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:python.bzl", "iree_py_library")
+
+package(
+    default_visibility = ["//visibility:public"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_py_library(
+    name = "contracts",
+    srcs = [
+        "__init__.py",
+        "logical_core.py",
+    ],
+    deps = [
+        "//loom/py/loom:core",
+        "//loom/py/loom/dialect/buffer",
+        "//loom/py/loom/dialect/index",
+        "//loom/py/loom/dialect/kernel",
+        "//loom/py/loom/dialect/scalar",
+        "//loom/py/loom/dialect/scf",
+        "//loom/py/loom/dialect/vector",
+        "//loom/py/loom/dialect/view",
+        "//loom/py/loom/target/arch/spirv:builtins",
+        "//loom/py/loom/target/arch/spirv:cooperative_matrix",
+        "//loom/py/loom/target/arch/spirv:descriptors",
+        "//loom/py/loom/target/arch/spirv:scalar_alu",
+        "//loom/py/loom/target/arch/spirv:scalar_conversion",
+        "//loom/py/loom/target/arch/spirv:scalar_memory",
+        "//loom/py/loom/target/contracts",
+    ],
+)

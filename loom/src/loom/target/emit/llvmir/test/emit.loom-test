@@ -1,0 +1,44 @@
+// RUN: emit llvmir
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+
+func.def target(@target) @add(%lhs: i32, %rhs: i32) -> (i32) {
+  %sum = scalar.addi %lhs, %rhs : i32
+  func.return %sum : i32
+}
+
+// ----
+target datalayout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+target triple = "loom-direct64-unknown-none"
+
+define dso_local i32 @add(i32 %lhs, i32 %rhs) {
+entry:
+  %sum = add i32 %lhs, %rhs
+  ret i32 %sum
+}
+
+// ====
+
+// RUN: emit llvmir-body
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+
+func.def target(@target) @select_i64(%lhs: i64, %rhs: i64, %true_value: i64, %false_value: i64) -> (i64) {
+  %predicate = scalar.cmpi sgt, %lhs, %rhs : i64
+  %selected = scf.select %predicate, %true_value, %false_value : i64
+  func.return %selected : i64
+}
+
+// ----
+define dso_local i64 @select_i64(i64 %lhs, i64 %rhs, i64 %true_value, i64 %false_value) {
+entry:
+  %predicate = icmp sgt i64 %lhs, %rhs
+  %selected = select i1 %predicate, i64 %true_value, i64 %false_value
+  ret i64 %selected
+}

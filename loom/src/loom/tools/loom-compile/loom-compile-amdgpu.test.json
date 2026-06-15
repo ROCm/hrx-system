@@ -1,0 +1,223 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "uses invocation AMDGPU target for HAL root without target attr",
+      "steps": [
+        {
+          "name": "write-source",
+          "write": {
+            "path": "{tmp}/targetless_amdgpu.loom",
+            "text": "kernel.def export(\"targetless_store_i32\") @targetless_store_i32() {\n  %unit = index.constant 1 : index\n  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index\n} launch(%output: buffer) {\n  %zero_offset = index.constant 0 : offset\n  %zero_index = index.constant 0 : index\n  %value = scalar.constant 42 : i32\n  %global = buffer.assume.memory_space<global> %output : buffer\n  %view = buffer.view %global[%zero_offset] : buffer -> view<1xi32, #dense>\n  view.store %value, %view[%zero_index] : i32, view<1xi32, #dense>\n  kernel.return\n}\n"
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{tmp}/targetless_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx11-generic",
+              "--output={tmp}/targetless_amdgpu.vmfb",
+              "--emit-target-artifact={tmp}/targetless_amdgpu.hsaco",
+              "--artifact-manifest=summary",
+              "--compile-report=summary"
+            ]
+          },
+          "stderr": {
+            "contains": {
+              "unordered": [
+                "\"target_key\":\"gfx11-generic\"",
+                "\"executable_format\":\"amdgcn-amd-amdhsa--gfx11-generic\"",
+                "\"status\":\"OK\""
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/targetless_amdgpu.vmfb",
+              "non_empty": true
+            },
+            {
+              "path": "{tmp}/targetless_amdgpu.hsaco",
+              "non_empty": true
+            },
+            {
+              "path": "{tmp}/targetless_amdgpu.hsaco.manifest.json",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "reports multi-entry AMDGPU HAL artifacts by emitted function",
+      "steps": [
+        {
+          "name": "write-source",
+          "write": {
+            "path": "{tmp}/multi_entry_report_amdgpu.loom",
+            "text": "kernel.def export(\"compile_report_store_i32\") @compile_report_store_i32() {\n  %unit = index.constant 1 : index\n  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index\n} launch(%output: buffer) {\n  %zero_offset = index.constant 0 : offset\n  %zero_index = index.constant 0 : index\n  %value = scalar.constant 42 : i32\n  %global = buffer.assume.memory_space<global> %output : buffer\n  %view = buffer.view %global[%zero_offset] : buffer -> view<1xi32, #dense>\n  view.store %value, %view[%zero_index] : i32, view<1xi32, #dense>\n  kernel.return\n}\n\nkernel.def export(\"compile_report_store_i8\") @compile_report_store_i8() {\n  %unit = index.constant 1 : index\n  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index\n} launch(%output: buffer) {\n  %zero_offset = index.constant 0 : offset\n  %zero_index = index.constant 0 : index\n  %value = scalar.constant 7 : i8\n  %global = buffer.assume.memory_space<global> %output : buffer\n  %view = buffer.view %global[%zero_offset] : buffer -> view<1xi8, #dense>\n  view.store %value, %view[%zero_index] : i8, view<1xi8, #dense>\n  kernel.return\n}\n"
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{tmp}/multi_entry_report_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx11-generic",
+              "--output={tmp}/multi_entry_report_amdgpu.hsaco",
+              "--artifact-manifest=summary",
+              "--compile-report=details"
+            ]
+          },
+          "stderr": {
+            "contains": {
+              "unordered": [
+                "\"target_export\":null",
+                "\"entries\":{\"count\":2,\"rows\":[",
+                "\"function\":\"compile_report_store_i32\"",
+                "\"function\":\"compile_report_store_i8\"",
+                "\"source_function\":\"compile_report_store_i32\"",
+                "\"source_function\":\"compile_report_store_i8\"",
+                "\"pressure_rows\":{\"count\":",
+                "\"status\":\"OK\""
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/multi_entry_report_amdgpu.hsaco",
+              "non_empty": true
+            },
+            {
+              "path": "{tmp}/multi_entry_report_amdgpu.hsaco.manifest.json",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "requires invocation target for AMDGPU HAL root without target attr",
+      "steps": [
+        {
+          "name": "write-source",
+          "write": {
+            "path": "{tmp}/targetless_amdgpu.loom",
+            "text": "kernel.def export(\"targetless_store_i32\") @targetless_store_i32() {\n  %unit = index.constant 1 : index\n  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index\n} launch(%output: buffer) {\n  %zero_offset = index.constant 0 : offset\n  %zero_index = index.constant 0 : index\n  %value = scalar.constant 42 : i32\n  %global = buffer.assume.memory_space<global> %output : buffer\n  %view = buffer.view %global[%zero_offset] : buffer -> view<1xi32, #dense>\n  view.store %value, %view[%zero_index] : i32, view<1xi32, #dense>\n  kernel.return\n}\n"
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{tmp}/targetless_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--output={tmp}/targetless_amdgpu.vmfb"
+            ]
+          },
+          "exit": {
+            "nonzero": true
+          },
+          "stderr": {
+            "contains": [
+              "HAL backend 'amdgpu-hal' requires --target= when 1 kernel.def root omit target(...) attrs"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "compiles 64-bit direct arg narrowing for AMDGPU HAL kernel",
+      "steps": [
+        {
+          "name": "write-source",
+          "write": {
+            "path": "{tmp}/amdgpu_i64_to_i8.loom",
+            "text": "kernel.def export(\"narrow_i64_to_i8\") @narrow_i64_to_i8() {\n  %unit = index.constant 1 : index\n  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index\n} launch(%output: buffer, %pattern: i64) {\n  %zero_offset = index.constant 0 : offset\n  %zero_index = index.constant 0 : index\n  %value = scalar.trunci %pattern : i64 to i8\n  %global = buffer.assume.memory_space<global> %output : buffer\n  %view = buffer.view %global[%zero_offset] : buffer -> view<1xi8, #dense>\n  view.store %value, %view[%zero_index] : i8, view<1xi8, #dense>\n  kernel.return\n}\n"
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{tmp}/amdgpu_i64_to_i8.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx11-generic",
+              "--output={tmp}/amdgpu_i64_to_i8.hsaco",
+              "--compile-report=summary"
+            ]
+          },
+          "stderr": {
+            "contains": {
+              "unordered": [
+                "\"target_key\":\"gfx11-generic\"",
+                "\"executable_format\":\"amdgcn-amd-amdhsa--gfx11-generic\"",
+                "\"status\":\"OK\""
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/amdgpu_i64_to_i8.hsaco",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "preserves configured dynamic-width vector reduction loads",
+      "steps": [
+        {
+          "name": "write-source",
+          "write": {
+            "path": "{tmp}/configured_vector_reduce_amdgpu.loom",
+            "text": "config.decl @runtime.vector_width : %value: index where [range(%value, 2, 4)]\n\nkernel.def export(\"configured_vector_reduce\") @configured_vector_reduce() {\n  %one = index.constant 1 : index\n  %workgroup_size = index.constant 64 : index\n  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index\n} launch(%input: buffer, %output: buffer) {\n  %zero_offset = index.constant 0 : offset\n  %lane0 = kernel.workitem.id<x> : index\n  %lane = index.assume %lane0 [range(%lane0, 0, 63)] : index\n  %vector_width = config.get @runtime.vector_width : index\n  %vector_width_bounded = index.assume %vector_width [range(%vector_width, 2, 4)] : index\n  %element_count = index.constant 256 : index\n  %input_view = buffer.view %input[%zero_offset] : buffer -> view<[%element_count]xf32, #dense>\n  %output_view = buffer.view %output[%zero_offset] : buffer -> view<1xf32, #dense>\n  %linear0 = index.mul %lane, %vector_width_bounded : index\n  %linear = index.assume %linear0 [range(%linear0, 0, 252)] : index\n  %loaded = vector.load %input_view[%linear] : view<[%element_count]xf32, #dense> -> vector<[%vector_width_bounded]xf32>\n  %squared = vector.mulf<reassoc|nnan|ninf|nsz|contract> %loaded, %loaded : vector<[%vector_width_bounded]xf32>\n  %zero_f32 = scalar.constant 0.0 : f32\n  %sum = vector.reduce<addf, reassoc|nnan|ninf|nsz|contract> %squared, %zero_f32 : vector<[%vector_width_bounded]xf32>, f32\n  %stored = vector.from_elements %sum : vector<1xf32>\n  vector.store %stored, %output_view[0] : vector<1xf32>, view<1xf32, #dense>\n  kernel.return\n}\n"
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{tmp}/configured_vector_reduce_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx11-generic",
+              "--config=runtime.vector_width=4",
+              "--output={tmp}/configured_vector_reduce_amdgpu.hsaco",
+              "--compile-report=summary",
+              "--dump-ir-after=low-dce",
+              "--dump-ir-format=text",
+              "--dump-ir-output=stderr"
+            ]
+          },
+          "stderr": {
+            "contains": {
+              "unordered": [
+                "\"target_key\":\"gfx11-generic\"",
+                "\"status\":\"OK\"",
+                "global_load_b128_saddr"
+              ]
+            },
+            "not_contains": [
+              "global_load_b32_saddr"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/configured_vector_reduce_amdgpu.hsaco",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

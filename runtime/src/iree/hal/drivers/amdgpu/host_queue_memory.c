@@ -90,7 +90,7 @@ typedef struct iree_hal_amdgpu_host_queue_release_reservation_state_t {
 
 static void iree_hal_amdgpu_host_queue_commit_transient_buffer(
     iree_hal_amdgpu_reclaim_entry_t* entry, void* user_data,
-    iree_status_t status) {
+    const iree_status_t status) {
   (void)entry;
   if (!iree_status_is_ok(status)) return;
   iree_hal_amdgpu_transient_buffer_commit((iree_hal_buffer_t*)user_data);
@@ -98,7 +98,7 @@ static void iree_hal_amdgpu_host_queue_commit_transient_buffer(
 
 static void iree_hal_amdgpu_host_queue_decommit_transient_buffer(
     iree_hal_amdgpu_reclaim_entry_t* entry, void* user_data,
-    iree_status_t status) {
+    const iree_status_t status) {
   (void)entry;
   if (!iree_status_is_ok(status)) return;
   iree_hal_amdgpu_transient_buffer_decommit((iree_hal_buffer_t*)user_data);

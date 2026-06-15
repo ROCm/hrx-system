@@ -17,8 +17,7 @@ namespace iree::hal::amdgpu {
 namespace {
 
 static iree_hal_amdgpu_device_kernel_args_t MakeKernelArgs(
-    uint64_t kernel_object, uint16_t kernarg_size, uint16_t kernarg_alignment,
-    uint16_t binding_count, uint16_t constant_count) {
+    uint64_t kernel_object, uint16_t kernarg_size, uint16_t kernarg_alignment) {
   iree_hal_amdgpu_device_kernel_args_t kernel_args = {};
   kernel_args.kernel_object = kernel_object;
   kernel_args.setup = 3;
@@ -29,47 +28,13 @@ static iree_hal_amdgpu_device_kernel_args_t MakeKernelArgs(
   kernel_args.group_segment_size = 8;
   kernel_args.kernarg_size = kernarg_size;
   kernel_args.kernarg_alignment = kernarg_alignment;
-  kernel_args.constant_count = constant_count;
-  kernel_args.binding_count = binding_count;
   return kernel_args;
-}
-
-TEST(DispatchTest, MakeHalKernargLayoutWithoutImplicitArgs) {
-  iree_hal_amdgpu_device_kernel_args_t kernel_args =
-      MakeKernelArgs(/*kernel_object=*/0x1234u, /*kernarg_size=*/32,
-                     /*kernarg_alignment=*/16, /*binding_count=*/2,
-                     /*constant_count=*/3);
-
-  iree_hal_amdgpu_device_dispatch_kernarg_layout_t layout =
-      iree_hal_amdgpu_device_dispatch_make_hal_kernarg_layout(&kernel_args);
-
-  EXPECT_EQ(layout.explicit_kernarg_size, 32u);
-  EXPECT_EQ(layout.implicit_args_offset, 32u);
-  EXPECT_EQ(layout.total_kernarg_size, 32u);
-  EXPECT_FALSE(layout.has_implicit_args);
-}
-
-TEST(DispatchTest, MakeHalKernargLayoutWithImplicitArgs) {
-  iree_hal_amdgpu_device_kernel_args_t kernel_args =
-      MakeKernelArgs(/*kernel_object=*/0x1234u, /*kernarg_size=*/40,
-                     /*kernarg_alignment=*/16, /*binding_count=*/2,
-                     /*constant_count=*/3);
-
-  iree_hal_amdgpu_device_dispatch_kernarg_layout_t layout =
-      iree_hal_amdgpu_device_dispatch_make_hal_kernarg_layout(&kernel_args);
-
-  EXPECT_EQ(layout.explicit_kernarg_size, 32u);
-  EXPECT_EQ(layout.implicit_args_offset, 32u);
-  EXPECT_EQ(layout.total_kernarg_size,
-            32u + IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE);
-  EXPECT_TRUE(layout.has_implicit_args);
 }
 
 TEST(DispatchTest, EmplacePacketPreservesZeroWorkgroupCounts) {
   iree_hal_amdgpu_device_kernel_args_t kernel_args =
       MakeKernelArgs(/*kernel_object=*/0xBEEFu, /*kernarg_size=*/0,
-                     /*kernarg_alignment=*/16, /*binding_count=*/0,
-                     /*constant_count=*/0);
+                     /*kernarg_alignment=*/16);
   iree_hsa_kernel_dispatch_packet_t packet = {};
   packet.header = 0xFFFFu;
   alignas(16) std::array<uint8_t, 64> kernargs = {};
@@ -96,40 +61,26 @@ TEST(DispatchTest, EmplacePacketPreservesZeroWorkgroupCounts) {
   EXPECT_EQ(packet.completion_signal.handle, iree_hsa_signal_null().handle);
 }
 
-TEST(DispatchTest, EmplaceHalKernargsWritesBindingsConstantsAndImplicitArgs) {
+TEST(DispatchTest, EmplaceImplicitArgsWritesSuffix) {
   iree_hal_amdgpu_device_kernel_args_t kernel_args = MakeKernelArgs(
       /*kernel_object=*/0x1234u,
       /*kernarg_size=*/32 + IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE,
-      /*kernarg_alignment=*/16, /*binding_count=*/2,
-      /*constant_count=*/3);
-  iree_hal_amdgpu_device_dispatch_kernarg_layout_t layout =
-      iree_hal_amdgpu_device_dispatch_make_hal_kernarg_layout(&kernel_args);
+      /*kernarg_alignment=*/16);
+  iree_hal_amdgpu_device_dispatch_kernarg_layout_t layout = {
+      /*.explicit_kernarg_size=*/32,
+      /*.implicit_args_offset=*/32,
+      /*.total_kernarg_size=*/32 + IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE,
+      /*.has_implicit_args=*/true,
+  };
   const uint32_t workgroup_count[3] = {7, 8, 9};
-  const uint64_t bindings[2] = {0x1111222233334444ull, 0x5555666677778888ull};
-  const uint32_t constants[3] = {0xAAu, 0xBBu, 0xCCu};
   alignas(16) std::array<uint8_t, 256> kernargs = {};
   kernargs.fill(0xFD);
 
-  iree_hal_amdgpu_device_dispatch_emplace_hal_kernargs(
-      &kernel_args, &layout, bindings, constants, kernargs.data());
   iree_hal_amdgpu_device_dispatch_emplace_implicit_args(
       &kernel_args, workgroup_count, /*dynamic_workgroup_local_memory=*/13,
       &layout, kernargs.data());
 
-  const uint64_t* binding_words =
-      reinterpret_cast<const uint64_t*>(kernargs.data());
-  EXPECT_EQ(binding_words[0], 0x1111222233334444ull);
-  EXPECT_EQ(binding_words[1], 0x5555666677778888ull);
-
-  const uint32_t* constant_words =
-      reinterpret_cast<const uint32_t*>(kernargs.data() + 16);
-  EXPECT_EQ(constant_words[0], 0xAAu);
-  EXPECT_EQ(constant_words[1], 0xBBu);
-  EXPECT_EQ(constant_words[2], 0xCCu);
-  EXPECT_EQ(kernargs[28], 0u);
-  EXPECT_EQ(kernargs[29], 0u);
-  EXPECT_EQ(kernargs[30], 0u);
-  EXPECT_EQ(kernargs[31], 0u);
+  EXPECT_EQ(kernargs[31], 0xFDu);
 
   const auto* implicit_args =
       reinterpret_cast<const iree_amdgpu_kernel_implicit_args_t*>(

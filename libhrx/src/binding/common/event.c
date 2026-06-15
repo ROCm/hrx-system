@@ -57,14 +57,10 @@ static void iree_hal_streaming_event_destroy(
   IREE_TRACE_ZONE_BEGIN(z0);
 
   // Release semaphore.
-  if (event->semaphore) {
-    iree_hal_semaphore_release(event->semaphore);
-  }
+  iree_hal_semaphore_release(event->semaphore);
 
   // Release recording stream reference.
-  if (event->recording_stream) {
-    iree_hal_streaming_stream_release(event->recording_stream);
-  }
+  iree_hal_streaming_stream_release(event->recording_stream);
 
   // Release context.
   iree_hal_streaming_context_release(event->context);
@@ -127,9 +123,7 @@ iree_status_t iree_hal_streaming_event_record(
   // Set recording stream so we can track when we cross streams in a signal/wait
   // sequence.
   if (event->recording_stream != stream) {
-    if (event->recording_stream) {
-      iree_hal_streaming_stream_release(event->recording_stream);
-    }
+    iree_hal_streaming_stream_release(event->recording_stream);
     event->recording_stream = stream;
     iree_hal_streaming_stream_retain(stream);
   }

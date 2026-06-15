@@ -1,0 +1,221 @@
+// RUN: pass licm
+
+// A chain of pure ops whose operands are all loop-invariant moves before the
+// loop in program order. The effectful sink stays in the loop body.
+func.def @hoists_invariant_chain(%n: index) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  scf.for %iv = [%zero to %n step %one] {
+    %a = test.constant 2 : i32
+    %b = test.constant 3 : i32
+    %sum = test.addi %a, %b : i32
+    test.use %sum : i32
+    scf.yield
+  }
+  func.return
+}
+
+// ----
+func.def @hoists_invariant_chain(%n: index) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %a = test.constant 2 : i32
+  %b = test.constant 3 : i32
+  %sum = test.addi %a, %b : i32
+  scf.for %iv = [%zero to %n step %one] {
+    test.use %sum : i32
+  }
+  func.return
+}
+
+// ====
+
+// The induction variable and loop-carried block arguments are loop-local
+// definitions, so pure users of them remain in the loop.
+func.def @keeps_loop_local_values(%n: index, %init: i32) -> (i32) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %result = scf.for %iv = [%zero to %n step %one](%acc = %init : i32) -> (i32) {
+    %address = index.add %iv, %one : index
+    test.use %address : index
+    %next = test.addi %acc, %acc : i32
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+// ====
+
+// Unknown-effect ops are not hoisted even when every operand is loop-invariant.
+func.def @keeps_unknown_effects_inside_loop(%n: index, %value: i32) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  scf.for %iv = [%zero to %n step %one] {
+    test.use %value : i32
+    scf.yield
+  }
+  func.return
+}
+
+// ----
+func.def @keeps_unknown_effects_inside_loop(%n: index, %value: i32) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  scf.for %iv = [%zero to %n step %one] {
+    test.use %value : i32
+  }
+  func.return
+}
+
+// ====
+
+// A pure region op can move as a unit when its condition, branch computations,
+// yielded values, and result type references are all loop-invariant.
+func.def @hoists_pure_region_op(%cond: i1, %n: index, %a: i32, %b: i32) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  scf.for %iv = [%zero to %n step %one] {
+    %selected = scf.if %cond -> (i32) {
+      %doubled = test.addi %a, %a : i32
+      scf.yield %doubled : i32
+    } else {
+      scf.yield %b : i32
+    }
+    test.use %selected : i32
+    scf.yield
+  }
+  func.return
+}
+
+// ----
+func.def @hoists_pure_region_op(%cond: i1, %n: index, %a: i32, %b: i32) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %selected = scf.if %cond -> (i32) {
+    %doubled = test.addi %a, %a : i32
+    scf.yield %doubled : i32
+  } else {
+    scf.yield %b : i32
+  }
+  scf.for %iv = [%zero to %n step %one] {
+    test.use %selected : i32
+  }
+  func.return
+}
+
+// ====
+
+// Pure nested work can move out of the loop even when its parent region stays
+// in place because of nested effects.
+func.def @hoists_from_nested_pure_region(%cond: i1, %n: index, %value: i32) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  scf.for %iv = [%zero to %n step %one] {
+    scf.if %cond {
+      %doubled = test.addi %value, %value : i32
+      test.use %doubled : i32
+      scf.yield
+    } else {
+      scf.yield
+    }
+    scf.yield
+  }
+  func.return
+}
+
+// ----
+func.def @hoists_from_nested_pure_region(%cond: i1, %n: index, %value: i32) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %doubled = test.addi %value, %value : i32
+  scf.for %iv = [%zero to %n step %one] {
+    scf.if %cond {
+      test.use %doubled : i32
+    } else {
+    }
+  }
+  func.return
+}
+
+// ====
+
+// Result types are dependencies too: the view result references %layout, and
+// %layout depends on the loop IV, so buffer.view must stay in the loop.
+func.def @keeps_type_ref_to_loop_local_layout(%buffer: buffer, %offset: offset, %n: index) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  scf.for %iv = [%zero to %n step %one] {
+    %layout = encoding.layout.strided [%iv] : encoding<layout>
+    %view = buffer.view %buffer[%offset] : buffer -> view<1xf32, %layout>
+    test.use %view : view<1xf32, %layout>
+    scf.yield
+  }
+  func.return
+}
+
+// ----
+func.def @keeps_type_ref_to_loop_local_layout(%buffer: buffer, %offset: offset, %n: index) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  scf.for %iv = [%zero to %n step %one] {
+    %layout = encoding.layout.strided [%iv] : encoding<layout>
+    %view = buffer.view %buffer[%offset] : buffer -> view<1xf32, %layout>
+    test.use %view : view<1xf32, %layout>
+  }
+  func.return
+}
+
+// ====
+
+// scf.while uses the after region as its LoopLike body. Pure body ops whose
+// operands are available before the while op hoist in the same way as scf.for.
+func.def @hoists_from_while_after(%cond: i1, %init: i32) -> (i32) {
+  %result = scf.while(%before = %init : i32) -> (i32) {
+    scf.condition %cond, %before : i1, i32
+  } do(%body: i32) {
+    %sum = test.addi %init, %init : i32
+    test.use %sum : i32
+    scf.yield %body : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @hoists_from_while_after(%cond: i1, %init: i32) -> (i32) {
+  %sum = test.addi %init, %init : i32
+  %result = scf.while(%before = %init : i32) -> (i32) {
+    scf.condition %cond, %before : i1, i32
+  } do(%body: i32) {
+    test.use %sum : i32
+    scf.yield %body : i32
+  }
+  func.return %result : i32
+}
+
+// ====
+
+// Values defined by the while body entry block are loop-local. Pure users of
+// those values stay inside the after region and can still feed scf.yield.
+func.def @keeps_while_body_arg_dependency(%cond: i1, %init: i32) -> (i32) {
+  %result = scf.while(%before = %init : i32) -> (i32) {
+    scf.condition %cond, %before : i1, i32
+  } do(%body: i32) {
+    %next = test.addi %body, %body : i32
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+// ====
+
+// Effectful work in a while after region is not hoisted even when all operands
+// are available before the loop.
+func.def @keeps_while_effects_inside_after(%cond: i1, %init: i32) -> (i32) {
+  %result = scf.while(%before = %init : i32) -> (i32) {
+    scf.condition %cond, %before : i1, i32
+  } do(%body: i32) {
+    test.use %init : i32
+    scf.yield %body : i32
+  }
+  func.return %result : i32
+}

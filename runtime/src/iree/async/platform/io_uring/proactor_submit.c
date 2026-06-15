@@ -1157,6 +1157,22 @@ void iree_async_proactor_io_uring_dispatch_continuation_chain(
           proactor, op, &deferred);
     }
 
+    // Extract next in chain before push (push repurposes linked_next for the
+    // completion status).
+    iree_async_operation_t* next = op->linked_next;
+    op->linked_next = NULL;
+
+    if (!iree_status_is_ok(op_status)) {
+      // Software op failed. Cancel remaining chain via MPSC.
+      iree_async_proactor_io_uring_push_software_completion(proactor, op,
+                                                            op_status);
+      if (next) {
+        iree_async_proactor_io_uring_cancel_continuation_chain_to_mpsc(proactor,
+                                                                       next);
+      }
+      return;
+    }
+
     if (deferred) {
       // Tracker holds the continuation chain (transferred from linked_next
       // by execute_semaphore_wait). The WAIT completion arrives later via
@@ -1167,23 +1183,9 @@ void iree_async_proactor_io_uring_dispatch_continuation_chain(
       return;
     }
 
-    // Extract next in chain before push (push repurposes linked_next for the
-    // completion status).
-    iree_async_operation_t* next = op->linked_next;
-    op->linked_next = NULL;
-
     // Push this op's completion to MPSC.
     iree_async_proactor_io_uring_push_software_completion(proactor, op,
                                                           op_status);
-
-    if (!iree_status_is_ok(op_status)) {
-      // Software op failed. Cancel remaining chain via MPSC.
-      if (next) {
-        iree_async_proactor_io_uring_cancel_continuation_chain_to_mpsc(proactor,
-                                                                       next);
-      }
-      return;
-    }
 
     op = next;
   }
@@ -1860,17 +1862,27 @@ iree_status_t iree_async_proactor_io_uring_submit(
           proactor, operation, &deferred);
     }
 
+    // Extract continuation before pushing completion (push repurposes
+    // linked_next to carry the completion status through the MPSC queue).
+    iree_async_operation_t* continuation = operation->linked_next;
+    operation->linked_next = NULL;
+
+    if (!iree_status_is_ok(op_status)) {
+      iree_async_proactor_io_uring_push_software_completion(proactor, operation,
+                                                            op_status);
+      if (continuation) {
+        iree_async_proactor_io_uring_cancel_continuation_chain_to_mpsc(
+            proactor, continuation);
+      }
+      continue;
+    }
+
     if (deferred) {
       // Timepoints registered. Completion arrives later via
       // pending_semaphore_waits. The tracker holds the continuation chain
       // (transferred from linked_next in execute_semaphore_wait).
       continue;
     }
-
-    // Extract continuation before pushing completion (push repurposes
-    // linked_next to carry the completion status through the MPSC queue).
-    iree_async_operation_t* continuation = operation->linked_next;
-    operation->linked_next = NULL;
 
     // Push this op's completion to MPSC BEFORE dispatching its continuation.
     // This preserves callback ordering: trigger fires first, then
@@ -1880,13 +1892,8 @@ iree_status_t iree_async_proactor_io_uring_submit(
 
     // Dispatch linked continuation chain (if any).
     if (continuation) {
-      if (iree_status_is_ok(op_status)) {
-        iree_async_proactor_io_uring_dispatch_continuation_chain(proactor,
-                                                                 continuation);
-      } else {
-        iree_async_proactor_io_uring_cancel_continuation_chain_to_mpsc(
-            proactor, continuation);
-      }
+      iree_async_proactor_io_uring_dispatch_continuation_chain(proactor,
+                                                               continuation);
     }
   }
 

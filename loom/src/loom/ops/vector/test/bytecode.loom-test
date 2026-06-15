@@ -1,0 +1,66 @@
+// RUN: format bytecode
+
+// Fragment movement uses keyed attributes, dynamic shape operands, dynamic view
+// origins, cache attrs, and a trailing store without a result. Keep bytecode
+// coverage separate from the larger text roundtrip corpus so wire-format gaps
+// are easy to localize.
+func.def @fragment_memory(%buffer: buffer, %offset: offset, %row: index, %col: index, %m: index, %n: index, %k: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %a = buffer.view %buffer[%offset] : buffer -> view<[%m]x[%k]xf16, %layout>
+  %b = buffer.view %buffer[%offset] : buffer -> view<[%k]x[%n]xf16, %layout>
+  %c = buffer.view %buffer[%offset] : buffer -> view<[%m]x[%n]xf32, %layout>
+  %lhs = vector.fragment.load<lhs> %a[%row, 0] shape [%m, %k] {cache_scope = device, cache_temporal = high_temporal} : view<[%m]x[%k]xf16, %layout> -> vector<16xf16>
+  %rhs = vector.fragment.load<rhs> %b[0, %col] shape [%k, %n] {cache_scope = device, cache_temporal = non_temporal} : view<[%k]x[%n]xf16, %layout> -> vector<16xf16>
+  %init = vector.fragment.load<init> %c[%row, %col] shape [%m, %n] : view<[%m]x[%n]xf32, %layout> -> vector<8xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<16xf16>, vector<16xf16>, vector<8xf32>
+  vector.fragment.store<result> %result, %c[%row, %col] shape [%m, %n] {cache_scope = system, cache_temporal = writeback} : vector<8xf32>, view<[%m]x[%n]xf32, %layout>
+  func.return
+}
+
+// ====
+
+// Source-level fragment interpretation keeps schema and auxiliary data as
+// ordinary SSA operands. The bytecode path must preserve the sorted
+// key-to-operand dictionary, shape operands, predicates, and the compact
+// vector.mma consumer form.
+func.def @fragment_interpretation(%lhs_payload: vector<6xi32>, %rhs_payload: vector<6xi32>, %init_payload: vector<8xf32>, %scale_a: vector<1xf16>, %scale_b: vector<1xf16>, %m: index, %n: index, %k: index) {
+  %schema = encoding.define #matrix_operand<element_format=f6e3m2, payload_elements=32, payload_registers=6, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %lhs = vector.fragment<lhs> %lhs_payload shape [%m, %k] using {schema = %schema : encoding<schema>, scale = %scale_a : vector<1xf16>} where [mul(%k, 32)] : vector<6xi32>
+  %rhs = vector.fragment<rhs> %rhs_payload shape [%k, %n] using {scale = %scale_b : vector<1xf16>, schema = %schema : encoding<schema>} : vector<6xi32>
+  %init = vector.fragment<init> %init_payload shape [%m, %n] : vector<8xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<6xi32>, vector<6xi32>, vector<8xf32>
+  test.use %result : vector<8xf32>
+  func.return
+}
+
+// ----
+func.def @fragment_interpretation(%lhs_payload: vector<6xi32>, %rhs_payload: vector<6xi32>, %init_payload: vector<8xf32>, %scale_a: vector<1xf16>, %scale_b: vector<1xf16>, %m: index, %n: index, %k: index) {
+  %schema = encoding.define #matrix_operand<element_format=f6e3m2, payload_elements=32, payload_registers=6, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %lhs = vector.fragment<lhs> %lhs_payload shape [%m, %k] using {scale = %scale_a : vector<1xf16>, schema = %schema : encoding<schema>} where [mul(%k, 32)] : vector<6xi32>
+  %rhs = vector.fragment<rhs> %rhs_payload shape [%k, %n] using {scale = %scale_b : vector<1xf16>, schema = %schema : encoding<schema>} : vector<6xi32>
+  %init = vector.fragment<init> %init_payload shape [%m, %n] : vector<8xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<6xi32>, vector<6xi32>, vector<8xf32>
+  test.use %result : vector<8xf32>
+  func.return
+}
+
+// ====
+
+// Activation math bytecode preserves fastmath flags, GELU variant, and
+// optional scale without formula expansion.
+func.def @activation_math(%x: vector<8xf32>) -> (vector<8xf32>) {
+  %logistic = vector.logisticf<afn> %x : vector<8xf32>
+  %silu = vector.siluf<afn> %logistic : vector<8xf32>
+  %softplus = vector.softplusf<afn> %silu : vector<8xf32>
+  %gelu = vector.geluf<logistic, afn> %softplus {scale = 1.702} : vector<8xf32>
+  %clamped = vector.clampf<number, nnan|nsz> %gelu, %logistic, %softplus : vector<8xf32>
+  func.return %clamped : vector<8xf32>
+}
+
+// ====
+
+func.def @turn_trig_math(%x: vector<8xf32>) -> (vector<8xf32>, vector<8xf32>) {
+  %sin = vector.sinturnsf<afn> %x : vector<8xf32>
+  %cos = vector.costurnsf<afn> %x : vector<8xf32>
+  func.return %sin, %cos : vector<8xf32>, vector<8xf32>
+}

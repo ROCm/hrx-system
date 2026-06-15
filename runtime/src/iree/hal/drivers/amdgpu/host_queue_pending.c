@@ -188,7 +188,7 @@ static void iree_hal_amdgpu_pending_op_release_execute_binding_resource_set(
 }
 
 static void iree_hal_amdgpu_pending_op_fail_host_action(
-    iree_hal_amdgpu_pending_op_t* op, iree_status_t status) {
+    iree_hal_amdgpu_pending_op_t* op, const iree_status_t status) {
   if (op->type != IREE_HAL_AMDGPU_PENDING_OP_HOST_ACTION ||
       !op->host_action.action.fn) {
     return;

@@ -1,0 +1,25 @@
+// RUN: emit llvmir-body
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+
+func.def target(@target) @unsupported_vector_shape(%lhs: vector<32xi32>, %rhs: vector<32xi32>) -> (vector<32xi32>) {
+  // ERROR@+1: TARGET/002 {field_name="lhs", actual_type="vector<32xi32>", expected_type="vector<2xi32>"}
+  %sum = vector.addi %lhs, %rhs : vector<32xi32>
+  func.return %sum : vector<32xi32>
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+
+// ERROR@+1: TARGET/054 {function_name="multi_result", emitter_key="llvmir.low", subject_kind="function_result", actual_count="2", expected_count="1"}
+low.func.def target(@target) abi(object_function) @multi_result(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>) -> (reg<llvmir.i32>, reg<llvmir.i32>) asm<llvmir.generic.core> {
+  %sum = add.i32 %lhs, %rhs
+  return %sum, %lhs
+}

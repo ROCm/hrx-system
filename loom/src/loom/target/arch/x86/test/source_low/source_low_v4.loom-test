@@ -1,0 +1,307 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/vector_v4.loom-test
+// RUN: emit source-low output=low
+
+x86.target<avx512> @target
+
+func.def target(@target) @i32x4_arith(%lhs: vector<4xi32>, %rhs: vector<4xi32>) -> (vector<4xi32>) {
+  %sum = vector.addi %lhs, %rhs : vector<4xi32>
+  %diff = vector.subi %sum, %rhs : vector<4xi32>
+  func.return %diff : vector<4xi32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i32x4_arith(%lhs: reg<x86.xmm>, %rhs: reg<x86.xmm>) -> (reg<x86.xmm>) asm<x86.avx512.core> {
+  %sum = vpaddd.xmm %lhs, %rhs
+  %diff = vpsubd.xmm %sum, %rhs
+  return %diff
+}
+
+// ====
+
+x86.target<avx512> @target
+
+func.def target(@target) @f32x4_arith(%lhs: vector<4xf32>, %rhs: vector<4xf32>) -> (vector<4xf32>) {
+  %sum = vector.addf %lhs, %rhs : vector<4xf32>
+  %product = vector.mulf %sum, %rhs : vector<4xf32>
+  func.return %product : vector<4xf32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f32x4_arith(%lhs: reg<x86.xmm>, %rhs: reg<x86.xmm>) -> (reg<x86.xmm>) asm<x86.avx512.core> {
+  %sum = vaddps.xmm %lhs, %rhs
+  %product = vmulps.xmm %sum, %rhs
+  return %product
+}
+
+// ====
+
+x86.target<avx512> @target
+
+func.def target(@target) @f32x4_lane_extract(%v: vector<4xf32>, %x: f32) -> (f32) {
+  %lane = vector.extract %v[2] : vector<4xf32> -> f32
+  %sum = scalar.addf %lane, %x : f32
+  func.return %sum : f32
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f32x4_lane_extract(%v: reg<x86.xmm>, %x: reg<x86.xmm>) -> (reg<x86.xmm>) asm<x86.avx512.core> {
+  %lane = vpermilps.xmm %v, 2
+  %sum = vaddss.xmm %lane, %x
+  return %sum
+}
+
+// ====
+
+x86.target<avx512> @target
+
+func.def target(@target) @f32x4_lane_edit(%v: vector<4xf32>, %x: f32) -> (vector<4xf32>) {
+  %lane = vector.extract %v[1] : vector<4xf32> -> f32
+  %sum = scalar.addf %lane, %x : f32
+  %updated = vector.insert %sum into %v[2] : f32, vector<4xf32>
+  func.return %updated : vector<4xf32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f32x4_lane_edit(%v: reg<x86.xmm>, %x: reg<x86.xmm>) -> (reg<x86.xmm>) asm<x86.avx512.core> {
+  %lane = vpermilps.xmm %v, 1
+  %sum = vaddss.xmm %lane, %x
+  %updated = vinsertps.xmm %v, %sum, 32
+  return %updated
+}
+
+// ====
+
+x86.target<avx512> @target
+
+func.def target(@target) @i32x4_splat_add(%value: i32, %rhs: vector<4xi32>) -> (vector<4xi32>) {
+  %splat = vector.splat %value : vector<4xi32>
+  %sum = vector.addi %splat, %rhs : vector<4xi32>
+  func.return %sum : vector<4xi32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i32x4_splat_add(%value: reg<x86.gpr32>, %rhs: reg<x86.xmm>) -> (reg<x86.xmm>) asm<x86.avx512.core> {
+  %splat = vpbroadcastd.xmm %value
+  %sum = vpaddd.xmm %splat, %rhs
+  return %sum
+}
+
+// ====
+
+x86.target<avx512> @target
+
+func.def target(@target) @i32x4_lane_edit(%v: vector<4xi32>, %x: i32) -> (vector<4xi32>) {
+  %lane = vector.extract %v[1] : vector<4xi32> -> i32
+  %sum = scalar.addi %lane, %x : i32
+  %updated = vector.insert %sum into %v[2] : i32, vector<4xi32>
+  func.return %updated : vector<4xi32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i32x4_lane_edit(%v: reg<x86.xmm>, %x: reg<x86.gpr32>) -> (reg<x86.xmm>) asm<x86.avx512.core> {
+  %lane = vpextrd.xmm %v, 1
+  %10 = copy %lane : reg<x86.gpr32> -> reg<x86.gpr32>
+  %sum = add.gpr32 %10, %x
+  %updated = vpinsrd.xmm %v, %sum, 2
+  return %updated
+}
+
+// ====
+
+x86.target<avx512> @target
+
+func.def target(@target) @i32x4_shuffle(%v: vector<4xi32>) -> (vector<4xi32>) {
+  %shuffled = vector.shuffle<[3, 2, 1, 0]> %v : vector<4xi32>
+  func.return %shuffled : vector<4xi32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i32x4_shuffle(%v: reg<x86.xmm>) -> (reg<x86.xmm>) asm<x86.avx512.core> {
+  %shuffled = vpshufd.xmm %v, 27
+  return %shuffled
+}
+
+// ====
+
+x86.target<avx512> @target
+
+func.def target(@target) @i32x4_shuffle_reduce(%v: vector<4xi32>, %init: i32) -> (i32) {
+  %reversed = vector.shuffle<[3, 2, 1, 0]> %v : vector<4xi32>
+  %sum = vector.reduce<addi> %reversed, %init : vector<4xi32>, i32
+  func.return %sum : i32
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i32x4_shuffle_reduce(%v: reg<x86.xmm>, %init: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm<x86.avx512.core> {
+  %reversed = vpshufd.xmm %v, 27
+  %9 = vpextrd.xmm %reversed, 0
+  %10 = copy %init : reg<x86.gpr32> -> reg<x86.gpr32>
+  %11 = add.gpr32 %10, %9
+  %12 = vpextrd.xmm %reversed, 1
+  %13 = copy %11 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %14 = add.gpr32 %13, %12
+  %15 = vpextrd.xmm %reversed, 2
+  %16 = copy %14 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %17 = add.gpr32 %16, %15
+  %18 = vpextrd.xmm %reversed, 3
+  %19 = copy %17 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %sum = add.gpr32 %19, %18
+  return %sum
+}
+
+// ====
+
+x86.target<avx512> @target
+
+func.def target(@target) @f32x4_shuffle(%v: vector<4xf32>) -> (vector<4xf32>) {
+  %shuffled = vector.shuffle<[3, 1, 2, 0]> %v : vector<4xf32>
+  func.return %shuffled : vector<4xf32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f32x4_shuffle(%v: reg<x86.xmm>) -> (reg<x86.xmm>) asm<x86.avx512.core> {
+  %shuffled = vpermilps.xmm %v, 39
+  return %shuffled
+}
+
+// ====
+
+x86.target<avx512> @target
+
+func.def target(@target) @f32x4_shuffle_reduce(%v: vector<4xf32>, %init: f32) -> (f32) {
+  %shuffled = vector.shuffle<[3, 1, 2, 0]> %v : vector<4xf32>
+  %sum = vector.reduce<addf> %shuffled, %init : vector<4xf32>, f32
+  func.return %sum : f32
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f32x4_shuffle_reduce(%v: reg<x86.xmm>, %init: reg<x86.xmm>) -> (reg<x86.xmm>) asm<x86.avx512.core> {
+  %shuffled = vpermilps.xmm %v, 39
+  %9 = vpermilps.xmm %shuffled, 78
+  %10 = vaddps.xmm %shuffled, %9
+  %11 = vpermilps.xmm %10, 177
+  %12 = vaddps.xmm %10, %11
+  %sum = vaddss.xmm %init, %12
+  return %sum
+}
+
+// ====
+
+x86.target<avx512> @target
+
+func.def target(@target) @i32x4_select(%lhs: vector<4xi32>, %rhs: vector<4xi32>, %true_value: vector<4xi32>, %false_value: vector<4xi32>) -> (vector<4xi32>) {
+  %mask = vector.cmpi slt, %lhs, %rhs : vector<4xi32> -> vector<4xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<4xi32>
+  func.return %selected : vector<4xi32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i32x4_select(%lhs: reg<x86.xmm>, %rhs: reg<x86.xmm>, %true_value: reg<x86.xmm>, %false_value: reg<x86.xmm>) -> (reg<x86.xmm>) asm<x86.avx512.core> {
+  %mask = vpcmpd.slt.xmm %lhs, %rhs
+  %selected = vpblendmd.xmm %mask, %true_value, %false_value
+  return %selected
+}
+
+// ====
+
+x86.target<avx512> @target
+
+func.def target(@target) @f32x4_select(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %true_value: vector<4xf32>, %false_value: vector<4xf32>) -> (vector<4xf32>) {
+  %mask = vector.cmpf olt, %lhs, %rhs : vector<4xf32> -> vector<4xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<4xf32>
+  func.return %selected : vector<4xf32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f32x4_select(%lhs: reg<x86.xmm>, %rhs: reg<x86.xmm>, %true_value: reg<x86.xmm>, %false_value: reg<x86.xmm>) -> (reg<x86.xmm>) asm<x86.avx512.core> {
+  %mask = vcmpps.olt.xmm %lhs, %rhs
+  %selected = vblendmps.xmm %mask, %true_value, %false_value
+  return %selected
+}
+
+// ====
+
+x86.target<avx512> @target
+
+func.def target(@target) @i32x4_memory_copy(%input: buffer, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<4xi32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<4xi32, #dense>
+  %loaded = vector.load %input_view[0] : view<4xi32, #dense> -> vector<4xi32>
+  vector.store %loaded, %output_view[0] : vector<4xi32>, view<4xi32, #dense>
+  func.return
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i32x4_memory_copy(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>) asm<x86.avx512.core> {
+  %loaded = vmovdqu32.load.xmm %input_view {disp32 = 0}
+  vmovdqu32.store.xmm %loaded, %output_view {disp32 = 0}
+  return
+}
+
+// ====
+
+x86.target<avx512> @target
+
+func.def target(@target) @i32x4_memory_indexed(%input: buffer, %output: buffer, %i: index) {
+  %bounded_i = index.assume %i [range(%i, 0, 12)] : index
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<16xi32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<16xi32, #dense>
+  %loaded = vector.load %input_view[%bounded_i] : view<16xi32, #dense> -> vector<4xi32>
+  vector.store %loaded, %output_view[%bounded_i] : vector<4xi32>, view<16xi32, #dense>
+  func.return
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i32x4_memory_indexed(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %bounded_i: reg<x86.gpr64>) asm<x86.avx512.core> {
+  %loaded = vmovdqu32.load.indexed.xmm %input_view, %bounded_i {disp32 = 0, scale = 4}
+  vmovdqu32.store.indexed.xmm %loaded, %output_view, %bounded_i {disp32 = 0, scale = 4}
+  return
+}
+
+// ====
+
+x86.target<avx512> @target
+
+func.def target(@target) @f32x4_memory_copy(%input: buffer, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<4xf32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<4xf32, #dense>
+  %loaded = vector.load %input_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  vector.store %loaded, %output_view[0] : vector<4xf32>, view<4xf32, #dense>
+  func.return
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f32x4_memory_copy(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>) asm<x86.avx512.core> {
+  %loaded = vmovdqu32.load.xmm %input_view {disp32 = 0}
+  vmovdqu32.store.xmm %loaded, %output_view {disp32 = 0}
+  return
+}
+
+// ====
+
+x86.target<avx512> @target
+
+func.def target(@target) @f32x4_memory_indexed_add(%lhs: buffer, %rhs: buffer, %output: buffer, %i: index) {
+  %bounded_i = index.assume %i [range(%i, 0, 12)] : index
+  %zero = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs[%zero] : buffer -> view<16xf32, #dense>
+  %rhs_view = buffer.view %rhs[%zero] : buffer -> view<16xf32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<16xf32, #dense>
+  %lhs_v = vector.load %lhs_view[%bounded_i] : view<16xf32, #dense> -> vector<4xf32>
+  %rhs_v = vector.load %rhs_view[%bounded_i] : view<16xf32, #dense> -> vector<4xf32>
+  %sum = vector.addf %lhs_v, %rhs_v : vector<4xf32>
+  vector.store %sum, %output_view[%bounded_i] : vector<4xf32>, view<16xf32, #dense>
+  func.return
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f32x4_memory_indexed_add(%lhs_view: reg<x86.gpr64>, %rhs_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %bounded_i: reg<x86.gpr64>) asm<x86.avx512.core> {
+  %lhs_v = vmovdqu32.load.indexed.xmm %lhs_view, %bounded_i {disp32 = 0, scale = 4}
+  %rhs_v = vmovdqu32.load.indexed.xmm %rhs_view, %bounded_i {disp32 = 0, scale = 4}
+  %sum = vaddps.xmm %lhs_v, %rhs_v
+  vmovdqu32.store.indexed.xmm %sum, %output_view, %bounded_i {disp32 = 0, scale = 4}
+  return
+}

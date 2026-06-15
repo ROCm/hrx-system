@@ -323,7 +323,9 @@ IREE_API_EXPORT iree_status_t iree_io_build_parameter_archive(
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_io_parameter_archive_builder_t builder;
-  iree_io_parameter_archive_builder_initialize(host_allocator, &builder);
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0,
+      iree_io_parameter_archive_builder_initialize(host_allocator, &builder));
 
   // Declare a parameter for each entry in the index.
   // This lets us calculate the size we require to store the entry metadata and

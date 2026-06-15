@@ -1,0 +1,65 @@
+// RUN: emit low-allocation-json @vm_i32_values_allocate_one_scalar_slot
+
+ireevm.target<core> @vm_target
+
+low.func.def target(@vm_target) @vm_i32_values_allocate_one_scalar_slot(%lhs: reg<ireevm.i32>, %rhs: reg<ireevm.i32>) -> (reg<ireevm.i32>) asm<ireevm.core> {
+  %sum = ireevm.add.i32 %lhs, %rhs
+  return %sum
+}
+
+// ----
+{"format":"loom.low.allocation.v0","function":"vm_i32_values_allocate_one_scalar_slot","target":"vm_target","descriptor_set":"ireevm.core","allocation_mode":"virtual","assignment_count":3,"remark_count":0,"copy_decision_count":0,"spill_count":0,"spill_plan_count":0,"coalesced_copy_count":0,"materialized_copy_count":0,"assignments":[{"index":0,"value":{"id":0,"name":"lhs","type":"reg<ireevm.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"ireevm.i32"},"start_point":0,"end_point":1,"unit_count":1,"location":{"kind":"target_id","base":0,"count":1}},{"index":1,"value":{"id":1,"name":"rhs","type":"reg<ireevm.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"ireevm.i32"},"start_point":0,"end_point":1,"unit_count":1,"location":{"kind":"target_id","base":1,"count":1}},{"index":2,"value":{"id":3,"name":"sum","type":"reg<ireevm.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"ireevm.i32"},"start_point":1,"end_point":2,"unit_count":1,"location":{"kind":"target_id","base":0,"count":1}}],"spill_plans":[],"copy_decisions":[],"remarks":[]}
+
+// ====
+
+// RUN: emit low-allocation-json @vm_i64_block_arguments_allocate_two_slots
+
+ireevm.target<core> @vm_target
+
+low.func.def target(@vm_target) @vm_i64_block_arguments_allocate_two_slots(%start: reg<ireevm.i64 x2>, %limit: reg<ireevm.i64 x2>, %step: reg<ireevm.i64 x2>) -> (reg<ireevm.i64 x2>) asm<ireevm.core> {
+  low.br ^loop(%start: reg<ireevm.i64 x2>)
+^loop(%current: reg<ireevm.i64 x2>):
+  %keep_going = ireevm.cmp.lt.s.i64 %current, %limit
+  low.cond_br %keep_going, ^body, ^exit : reg<ireevm.i32>
+^body:
+  %next = ireevm.add.i64 %current, %step
+  low.br ^loop(%next: reg<ireevm.i64 x2>)
+^exit:
+  return %current
+}
+
+// ----
+{"format":"loom.low.allocation.v0","function":"vm_i64_block_arguments_allocate_two_slots","target":"vm_target","descriptor_set":"ireevm.core","allocation_mode":"virtual","assignment_count":6,"remark_count":0,"copy_decision_count":0,"spill_count":0,"spill_plan_count":0,"coalesced_copy_count":0,"materialized_copy_count":0,"assignments":[{"index":0,"value":{"id":0,"name":"start","type":"reg<ireevm.i64 x2>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"ireevm.i64"},"start_point":0,"end_point":1,"unit_count":2,"location":{"kind":"target_id","base":0,"count":2}},{"index":1,"value":{"id":1,"name":"limit","type":"reg<ireevm.i64 x2>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"ireevm.i64"},"start_point":0,"end_point":8,"unit_count":2,"location":{"kind":"target_id","base":2,"count":2}},{"index":2,"value":{"id":2,"name":"step","type":"reg<ireevm.i64 x2>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"ireevm.i64"},"start_point":0,"end_point":8,"unit_count":2,"location":{"kind":"target_id","base":4,"count":2}},{"index":3,"value":{"id":4,"name":"current","type":"reg<ireevm.i64 x2>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"ireevm.i64"},"start_point":2,"end_point":9,"unit_count":2,"location":{"kind":"target_id","base":0,"count":2}},{"index":4,"value":{"id":5,"name":"keep_going","type":"reg<ireevm.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"ireevm.i32"},"start_point":3,"end_point":4,"unit_count":1,"location":{"kind":"target_id","base":6,"count":1}},{"index":5,"value":{"id":6,"name":"next","type":"reg<ireevm.i64 x2>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"ireevm.i64"},"start_point":6,"end_point":7,"unit_count":2,"location":{"kind":"target_id","base":6,"count":2}}],"spill_plans":[],"copy_decisions":[],"remarks":[]}
+
+// ====
+
+// RUN: emit low-allocation-json @vm_scalar_alias_classes_share_storage ireevm.i32=2 diagnostics=predicted-spills output=none
+
+ireevm.target<core> @vm_target
+
+// WARNING@+1: BACKEND/008 {function_name="vm_scalar_alias_classes_share_storage", value_name="narrow", value_class="ireevm.i32", spill_cause="register-budget-conflict"}
+low.func.def target(@vm_target) @vm_scalar_alias_classes_share_storage(%wide: reg<ireevm.i64 x2>, %narrow: reg<ireevm.i32>) -> (reg<ireevm.i64 x2>, reg<ireevm.i32>) asm<ireevm.core> {
+  return %wide, %narrow
+}
+
+// ====
+
+// RUN: emit low-allocation-json @vm_i64_values_consume_two_scalar_slots ireevm.i32=2 diagnostics=predicted-spills output=none
+
+ireevm.target<core> @vm_target
+
+// WARNING@+1: BACKEND/008 {function_name="vm_i64_values_consume_two_scalar_slots", value_name="rhs", value_class="ireevm.i64", spill_cause="register-budget-conflict"}
+low.func.def target(@vm_target) @vm_i64_values_consume_two_scalar_slots(%lhs: reg<ireevm.i64 x2>, %rhs: reg<ireevm.i64 x2>) -> (reg<ireevm.i64 x2>, reg<ireevm.i64 x2>) asm<ireevm.core> {
+  return %lhs, %rhs
+}
+
+// ====
+
+// RUN: pass low-materialize-allocation{budgets=ireevm.i32=2,spill-storage-spaces=none}
+
+ireevm.target<core> @vm_target
+
+// ERROR@+1: BACKEND/019 {function_name="vm_forced_spill_reports_missing_storage_support", value_class="ireevm.i32", spill_slot_space="private", storage_space="private"}
+low.func.def target(@vm_target) @vm_forced_spill_reports_missing_storage_support(%wide: reg<ireevm.i64 x2>, %narrow: reg<ireevm.i32>) -> (reg<ireevm.i64 x2>, reg<ireevm.i32>) asm<ireevm.core> {
+  return %wide, %narrow
+}

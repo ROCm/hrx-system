@@ -1,0 +1,309 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:python.bzl", "iree_py_binary", "iree_py_library", "iree_py_test")
+
+package(
+    default_visibility = ["//loom/py/loom/gen:__subpackages__"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+GENERATOR_VISIBILITY = [
+    "//loom/py/loom/gen:__subpackages__",
+    "//loom/src/loom/ops:__pkg__",
+    "//loom/src/loom/ops:__subpackages__",
+    "//loom/src/loom/target/arch/amdgpu/ops:__pkg__",
+    "//loom/src/loom/target/arch/ireevm/ops:__pkg__",
+    "//loom/src/loom/target/arch/spirv/ops:__pkg__",
+    "//loom/src/loom/target/arch/wasm/ops:__pkg__",
+    "//loom/src/loom/target/arch/x86/ops:__pkg__",
+]
+
+C_TABLE_MODEL_ALL_DIALECT_DEPS = [
+    "//loom/py/loom/dialect:package",
+    "//loom/py/loom/target/arch/amdgpu:dialect",
+    "//loom/py/loom/target/arch/ireevm:dialect",
+    "//loom/py/loom/target/arch/spirv:dialect",
+    "//loom/py/loom/target/arch/wasm:dialect",
+    "//loom/py/loom/target/arch/x86:dialect",
+]
+
+iree_py_library(
+    name = "model",
+    srcs = [
+        "__init__.py",
+        "model.py",
+    ],
+    deps = ["//loom/py/loom:core"],
+)
+
+C_TABLES_SRCS = [
+    "__init__.py",
+    "c_builder_declarations.py",
+    "c_builder_model.py",
+    "c_builder_source.py",
+    "c_builders.py",
+    "c_dialect.py",
+    "c_enum_attrs.py",
+    "c_enums.py",
+    "c_format.py",
+    "c_interfaces.py",
+    "c_metadata_tables.py",
+    "c_names.py",
+    "c_ops_header.py",
+    "c_queries.py",
+    "c_registry.py",
+    "c_symbols.py",
+    "c_tables.py",
+    "c_traits.py",
+    "keywords.py",
+    "type_registry.py",
+]
+
+C_TABLES_BASE_DEPS = [
+    ":model",
+    "//loom/py/loom:core",
+    "//loom/py/loom/error",
+    "//loom/py/loom/gen:bootstrap",
+    "//loom/py/loom/gen/assembly:tokens",
+    "//loom/py/loom/gen/support",
+]
+
+iree_py_library(
+    name = "c_tables",
+    srcs = C_TABLES_SRCS,
+    deps = C_TABLES_BASE_DEPS,
+)
+
+iree_py_binary(
+    name = "c_tables_generator",
+    srcs = C_TABLES_SRCS,
+    main = "c_tables.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = C_TABLES_BASE_DEPS + C_TABLE_MODEL_ALL_DIALECT_DEPS,
+)
+
+iree_py_binary(
+    name = "c_tables_amdgpu_generator",
+    srcs = C_TABLES_SRCS,
+    main = "c_tables.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/target/arch/amdgpu:dialect"],
+)
+
+iree_py_binary(
+    name = "c_tables_buffer_generator",
+    srcs = C_TABLES_SRCS,
+    main = "c_tables.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/dialect/buffer"],
+)
+
+iree_py_binary(
+    name = "c_tables_cfg_generator",
+    srcs = C_TABLES_SRCS,
+    main = "c_tables.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/dialect/cfg"],
+)
+
+iree_py_binary(
+    name = "c_tables_check_generator",
+    srcs = C_TABLES_SRCS,
+    main = "c_tables.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/dialect/check"],
+)
+
+iree_py_binary(
+    name = "c_tables_config_generator",
+    srcs = C_TABLES_SRCS,
+    main = "c_tables.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/dialect/config"],
+)
+
+iree_py_binary(
+    name = "c_tables_encoding_generator",
+    srcs = C_TABLES_SRCS,
+    main = "c_tables.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/dialect/encoding"],
+)
+
+iree_py_binary(
+    name = "c_tables_func_generator",
+    srcs = C_TABLES_SRCS,
+    main = "c_tables.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = C_TABLES_BASE_DEPS + [
+        "//loom/py/loom/dialect/func",
+        "//loom/py/loom/dialect/target",
+    ],
+)
+
+iree_py_binary(
+    name = "c_tables_global_generator",
+    srcs = C_TABLES_SRCS,
+    main = "c_tables.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/dialect/globals"],
+)
+
+iree_py_binary(
+    name = "c_tables_index_generator",
+    srcs = C_TABLES_SRCS,
+    main = "c_tables.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/dialect/index"],
+)
+
+iree_py_binary(
+    name = "c_tables_ireevm_generator",
+    srcs = C_TABLES_SRCS,
+    main = "c_tables.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/target/arch/ireevm:dialect"],
+)
+
+iree_py_binary(
+    name = "c_tables_kernel_generator",
+    srcs = C_TABLES_SRCS,
+    main = "c_tables.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = C_TABLES_BASE_DEPS + [
+        "//loom/py/loom/dialect/kernel",
+        "//loom/py/loom/dialect/target",
+    ],
+)
+
+iree_py_binary(
+    name = "c_tables_llvmir_generator",
+    srcs = C_TABLES_SRCS,
+    main = "c_tables.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = C_TABLES_BASE_DEPS + [
+        "//loom/py/loom/dialect/llvmir",
+        "//loom/py/loom/dialect/target",
+    ],
+)
+
+iree_py_binary(
+    name = "c_tables_low_generator",
+    srcs = C_TABLES_SRCS,
+    main = "c_tables.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = C_TABLES_BASE_DEPS + [
+        "//loom/py/loom/dialect/low",
+        "//loom/py/loom/dialect/target",
+    ],
+)
+
+iree_py_binary(
+    name = "c_tables_pass_generator",
+    srcs = C_TABLES_SRCS,
+    main = "c_tables.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/dialect/pass_"],
+)
+
+iree_py_binary(
+    name = "c_tables_pool_generator",
+    srcs = C_TABLES_SRCS,
+    main = "c_tables.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/dialect/pool"],
+)
+
+iree_py_binary(
+    name = "c_tables_scalar_generator",
+    srcs = C_TABLES_SRCS,
+    main = "c_tables.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/dialect/scalar"],
+)
+
+iree_py_binary(
+    name = "c_tables_scf_generator",
+    srcs = C_TABLES_SRCS,
+    main = "c_tables.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/dialect/scf"],
+)
+
+iree_py_binary(
+    name = "c_tables_spirv_generator",
+    srcs = C_TABLES_SRCS,
+    main = "c_tables.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/target/arch/spirv:dialect"],
+)
+
+iree_py_binary(
+    name = "c_tables_target_generator",
+    srcs = C_TABLES_SRCS,
+    main = "c_tables.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/dialect/target"],
+)
+
+iree_py_binary(
+    name = "c_tables_test_generator",
+    srcs = C_TABLES_SRCS,
+    main = "c_tables.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = C_TABLES_BASE_DEPS + [
+        "//loom/py/loom/dialect/target",
+        "//loom/py/loom/dialect/test",
+    ],
+)
+
+iree_py_binary(
+    name = "c_tables_vector_generator",
+    srcs = C_TABLES_SRCS,
+    main = "c_tables.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/dialect/vector"],
+)
+
+iree_py_binary(
+    name = "c_tables_view_generator",
+    srcs = C_TABLES_SRCS,
+    main = "c_tables.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/dialect/view"],
+)
+
+iree_py_binary(
+    name = "c_tables_wasm_generator",
+    srcs = C_TABLES_SRCS,
+    main = "c_tables.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/target/arch/wasm:dialect"],
+)
+
+iree_py_binary(
+    name = "c_tables_x86_generator",
+    srcs = C_TABLES_SRCS,
+    main = "c_tables.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/target/arch/x86:dialect"],
+)
+
+iree_py_test(
+    name = "c_tables_test",
+    srcs = [
+        "c_tables_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.gen.ops.c_tables_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":c_tables",
+        ":model",
+        "//loom/py/loom/error",
+    ],
+)

@@ -1,0 +1,45 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:python.bzl", "iree_py_library", "iree_py_test")
+
+package(
+    default_visibility = ["//loom/py/loom/gen:__subpackages__"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+TEXTMATE_DEPS = [
+    "//loom/py/loom:core",
+    "//loom/py/loom/error",
+    "//loom/py/loom/gen:bootstrap",
+    "//loom/py/loom/gen/assembly:tokens",
+    "//loom/py/loom/gen/support",
+]
+
+iree_py_library(
+    name = "textmate",
+    srcs = [
+        "__init__.py",
+        "textmate.py",
+    ],
+    deps = TEXTMATE_DEPS,
+)
+
+iree_py_test(
+    name = "textmate_test",
+    srcs = [
+        "textmate_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.gen.editor.textmate_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":textmate",
+        "//loom/py/loom:core",
+        "//loom/py/loom/dialect:package",
+        "//loom/py/loom/target/arch/ireevm:dialect",
+    ],
+)

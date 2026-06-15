@@ -104,6 +104,11 @@ static iree_status_t iree_json_skip_whitespace_and_comments(
   return iree_ok_status();
 }
 
+iree_status_t iree_json_consume_insignificant(iree_string_view_t* str) {
+  iree_json_skip_bom(str);
+  return iree_json_skip_whitespace_and_comments(str);
+}
+
 iree_status_t iree_json_consume_keyword(iree_string_view_t* str,
                                         iree_string_view_t keyword,
                                         iree_string_view_t* out_value) {
@@ -418,6 +423,60 @@ iree_status_t iree_json_enumerate_object(iree_string_view_t object_value,
     IREE_RETURN_IF_ERROR(iree_json_consume_value(&str, &value));
     // Emit the key-value pair.
     iree_status_t status = visitor(user_data, key, value);
+    if (iree_status_is_cancelled(status)) {
+      iree_status_ignore(status);
+      cancelled = true;
+      break;
+    }
+    IREE_RETURN_IF_ERROR(status);
+    // Skip whitespace/comments before comma or closing brace.
+    IREE_RETURN_IF_ERROR(iree_json_skip_whitespace_and_comments(&str));
+    // If there's a comma then continue to next member (trailing commas
+    // allowed).
+    if (!iree_string_view_consume_prefix_char(&str, ',')) break;
+    IREE_RETURN_IF_ERROR(iree_json_skip_whitespace_and_comments(&str));
+  }
+  // Verify closing brace (unless cancelled early).
+  if (!cancelled && !iree_string_view_starts_with_char(str, '}')) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "missing object }");
+  }
+  return iree_ok_status();
+}
+
+iree_status_t iree_json_enumerate_object_typed(
+    iree_string_view_t object_value,
+    iree_json_object_visitor_typed_fn_t visitor, void* user_data) {
+  iree_string_view_t str = object_value;
+  if (!iree_string_view_consume_prefix_char(&str, '{')) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "missing object {");
+  }
+  IREE_RETURN_IF_ERROR(iree_json_skip_whitespace_and_comments(&str));
+  bool cancelled = false;
+  while (!iree_string_view_is_empty(str)) {
+    // Check for end of object.
+    if (iree_string_view_starts_with_char(str, '}')) break;
+    // Try to parse key string.
+    iree_string_view_t key = iree_string_view_empty();
+    IREE_RETURN_IF_ERROR(iree_json_consume_string(&str, &key));
+    IREE_RETURN_IF_ERROR(iree_json_skip_whitespace_and_comments(&str));
+    // Expect : separator.
+    if (!iree_string_view_consume_prefix_char(&str, ':')) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "missing object member separator");
+    }
+    IREE_RETURN_IF_ERROR(iree_json_skip_whitespace_and_comments(&str));
+    if (iree_string_view_is_empty(str)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "expected object member value");
+    }
+    // Infer the value type from the first character BEFORE consuming.
+    // This allows distinguishing string "{" from object { at the lexical level.
+    iree_json_value_type_t type = iree_json_infer_value_type(str.data[0]);
+    // Scan ahead to get the value span.
+    iree_string_view_t value = iree_string_view_empty();
+    IREE_RETURN_IF_ERROR(iree_json_consume_value(&str, &value));
+    // Emit the key-value pair with its type.
+    iree_status_t status = visitor(user_data, key, type, value);
     if (iree_status_is_cancelled(status)) {
       iree_status_ignore(status);
       cancelled = true;
@@ -1383,9 +1442,9 @@ iree_status_t iree_json_parse_codepoint(iree_string_view_t value,
   iree_host_size_t unescaped_length = 0;
   iree_status_t status =
       iree_json_unescape_string(value, 0, NULL, &unescaped_length);
-  if (!iree_status_is_ok(status) &&
-      !iree_status_is_resource_exhausted(status)) {
-    return status;
+  if (!iree_status_is_ok(status)) {
+    if (!iree_status_is_resource_exhausted(status)) return status;
+    iree_status_ignore(status);
   }
 
   // Allocate a small stack buffer for the unescaped character.

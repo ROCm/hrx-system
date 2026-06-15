@@ -368,10 +368,10 @@ static iree_status_t iree_profile_export_process_executable_function_records(
       iree_profile_fprint_json_string(file, name);
       fprintf(
           file,
-          ",\"constant_count\":%u,\"binding_count\":%u"
+          ",\"constant_byte_length\":%u,\"binding_count\":%u"
           ",\"parameter_count\":%u,\"workgroup_size\":[%u,%u,%u]"
           ",\"function_hash_present\":%s,\"function_hash\":",
-          function_record.constant_count, function_record.binding_count,
+          function_record.constant_byte_length, function_record.binding_count,
           function_record.parameter_count, function_record.workgroup_size[0],
           function_record.workgroup_size[1], function_record.workgroup_size[2],
           has_function_hash ? "true" : "false");

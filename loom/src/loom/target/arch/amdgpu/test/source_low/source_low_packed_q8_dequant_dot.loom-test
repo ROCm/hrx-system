@@ -1,0 +1,209 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/packed_q8_dequant_dot.loom-test
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @q8_packed_word_dequant_dot4(%packed: vector<1xi32>, %scale: f16, %rhs: vector<4xf32>, %acc: f32) -> (f32) {
+  %q_i32 = vector.bitunpacks<8> %packed : vector<1xi32> -> vector<4xi32>
+  %q_f32 = vector.sitofp %q_i32 : vector<4xi32> to vector<4xf32>
+  %scale_f32 = scalar.extf %scale : f16 to f32
+  %scale_vector = vector.splat %scale_f32 : vector<4xf32>
+  %scaled_q = vector.mulf<reassoc|nnan|ninf|nsz|contract> %q_f32, %scale_vector : vector<4xf32>
+  %dot = vector.dotf %scaled_q, %rhs, %acc : vector<4xf32>, vector<4xf32>, f32
+  func.return %dot : f32
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @q8_packed_word_dequant_dot4(%packed: reg<amdgpu.vgpr>, %scale: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr x4>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %16 = v_bfe_i32_offset_width_inline %packed {offset = 0, width = 8}
+  %17 = v_bfe_i32_offset_width_inline %packed {offset = 8, width = 8}
+  %18 = v_bfe_i32_offset_width_inline %packed {offset = 16, width = 8}
+  %19 = v_ashrrev_i32_src0_inline %packed, 24
+  %22 = v_cvt_f32_i32 %16
+  %24 = v_cvt_f32_i32 %17
+  %26 = v_cvt_f32_i32 %18
+  %28 = v_cvt_f32_i32 %19
+  %31 = v_fma_mix_f32_f16lo_f32_f32_src2_lit %scale, %22, 0
+  %33 = v_fma_mix_f32_f16lo_f32_f32_src2_lit %scale, %24, 0
+  %35 = v_fma_mix_f32_f16lo_f32_f32_src2_lit %scale, %26, 0
+  %37 = v_fma_mix_f32_f16lo_f32_f32_src2_lit %scale, %28, 0
+  %40 = slice %rhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %41 = v_fma_f32 %31, %40, %acc
+  %43 = slice %rhs[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %44 = v_fmac_f32 %41, %33, %43
+  %46 = slice %rhs[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %47 = v_fmac_f32 %44, %35, %46
+  %49 = slice %rhs[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %dot = v_fmac_f32 %47, %37, %49
+  return %dot
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+kernel.def target(@target) @q8_packed_word_global_dequant_dot4_kernel() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%weights: buffer, %rhs_buffer: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %four = index.constant 4 : index
+  %four_bytes = index.constant 4 : offset
+  %eight = index.constant 8 : index
+  %lane = kernel.workitem.id<x> : index
+  %weights_global = buffer.assume.memory_space<global> %weights : buffer
+  %rhs_global = buffer.assume.memory_space<global> %rhs_buffer : buffer
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %weights_noalias, %rhs_noalias, %output_noalias = buffer.assume.noalias %weights_global, %rhs_global, %output_global : buffer, buffer, buffer
+  %q_byte_offset = index.scale %lane, %four_bytes : index, offset -> offset
+  %scale_index = index.div %lane, %eight : index
+  %rhs_index = index.mul %lane, %four : index
+  %q_word_view = buffer.view %weights_noalias[%q_byte_offset] : buffer -> view<1xi32, #dense>
+  %scale_view = buffer.view %weights_noalias[%base] : buffer -> view<1024xf16, #dense>
+  %rhs_view = buffer.view %rhs_noalias[%base] : buffer -> view<1024xf32, #dense>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<64xf32, #dense>
+  %packed = vector.load %q_word_view[%zero] : view<1xi32, #dense> -> vector<1xi32>
+  %scale = view.load %scale_view[%scale_index] : view<1024xf16, #dense> -> f16
+  %rhs = vector.load %rhs_view[%rhs_index] : view<1024xf32, #dense> -> vector<4xf32>
+  %q_i32 = vector.bitunpacks<8> %packed : vector<1xi32> -> vector<4xi32>
+  %q_f32 = vector.sitofp %q_i32 : vector<4xi32> to vector<4xf32>
+  %scale_f32 = scalar.extf %scale : f16 to f32
+  %scale_vector = vector.splat %scale_f32 : vector<4xf32>
+  %scaled_q = vector.mulf<reassoc|nnan|ninf|nsz|contract> %q_f32, %scale_vector : vector<4xf32>
+  %acc = scalar.constant 0.0 : f32
+  %dot = vector.dotf %scaled_q, %rhs, %acc : vector<4xf32>, vector<4xf32>, f32
+  view.store %dot, %output_view[%lane] : f32, view<64xf32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) @q8_packed_word_global_dequant_dot4_kernel() asm<amdgpu.rdna3.core> {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %scale_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4096} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
+  %scale_index = v_lshrrev_b32_lit %lane, 3
+  %48 = v_lshlrev_b32_src0_inline %lane, 2
+  %packed = global_load_b32_saddr %48, %scale_view
+  %50 = v_lshlrev_b32_src0_inline %scale_index, 1
+  %scale = global_load_d16_b16_saddr %50, %scale_view
+  %52 = v_lshlrev_b32_src0_inline %lane, 4
+  %rhs = global_load_b128_saddr %52, %rhs_view
+  %54 = v_bfe_i32_offset_width_inline %packed {offset = 0, width = 8}
+  %55 = v_bfe_i32_offset_width_inline %packed {offset = 8, width = 8}
+  %56 = v_bfe_i32_offset_width_inline %packed {offset = 16, width = 8}
+  %57 = v_ashrrev_i32_src0_inline %packed, 24
+  %60 = v_cvt_f32_i32 %54
+  %62 = v_cvt_f32_i32 %55
+  %64 = v_cvt_f32_i32 %56
+  %66 = v_cvt_f32_i32 %57
+  %69 = v_fma_mix_f32_f16lo_f32_f32_src2_lit %scale, %60, 0
+  %71 = v_fma_mix_f32_f16lo_f32_f32_src2_lit %scale, %62, 0
+  %73 = v_fma_mix_f32_f16lo_f32_f32_src2_lit %scale, %64, 0
+  %75 = v_fma_mix_f32_f16lo_f32_f32_src2_lit %scale, %66, 0
+  %acc = v_mov_b32 0
+  %79 = slice %rhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %80 = v_fmac_f32 %acc, %69, %79
+  %82 = slice %rhs[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %83 = v_fmac_f32 %80, %71, %82
+  %85 = slice %rhs[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %86 = v_fmac_f32 %83, %73, %85
+  %88 = slice %rhs[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %dot = v_fmac_f32 %86, %75, %88
+  global_store_b32_saddr %48, %dot, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @q8_packed_word_two_rhs_dequant_dot4(%packed: vector<1xi32>, %scale: f16, %rhs0: vector<4xf32>, %rhs1: vector<4xf32>, %acc0: f32, %acc1: f32) -> (f32, f32) {
+  %q_i32 = vector.bitunpacks<8> %packed : vector<1xi32> -> vector<4xi32>
+  %q_f32 = vector.sitofp %q_i32 : vector<4xi32> to vector<4xf32>
+  %scale_f32 = scalar.extf %scale : f16 to f32
+  %scale_vector = vector.splat %scale_f32 : vector<4xf32>
+  %scaled_q = vector.mulf<reassoc|nnan|ninf|nsz|contract> %q_f32, %scale_vector : vector<4xf32>
+  %dot0 = vector.dotf %scaled_q, %rhs0, %acc0 : vector<4xf32>, vector<4xf32>, f32
+  %dot1 = vector.dotf %scaled_q, %rhs1, %acc1 : vector<4xf32>, vector<4xf32>, f32
+  func.return %dot0, %dot1 : f32, f32
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @q8_packed_word_two_rhs_dequant_dot4(%packed: reg<amdgpu.vgpr>, %scale: reg<amdgpu.vgpr>, %rhs0: reg<amdgpu.vgpr x4>, %rhs1: reg<amdgpu.vgpr x4>, %acc0: reg<amdgpu.vgpr>, %acc1: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %23 = v_bfe_i32_offset_width_inline %packed {offset = 0, width = 8}
+  %24 = v_bfe_i32_offset_width_inline %packed {offset = 8, width = 8}
+  %25 = v_bfe_i32_offset_width_inline %packed {offset = 16, width = 8}
+  %26 = v_ashrrev_i32_src0_inline %packed, 24
+  %29 = v_cvt_f32_i32 %23
+  %31 = v_cvt_f32_i32 %24
+  %33 = v_cvt_f32_i32 %25
+  %35 = v_cvt_f32_i32 %26
+  %38 = v_fma_mix_f32_f16lo_f32_f32_src2_lit %scale, %29, 0
+  %40 = v_fma_mix_f32_f16lo_f32_f32_src2_lit %scale, %31, 0
+  %42 = v_fma_mix_f32_f16lo_f32_f32_src2_lit %scale, %33, 0
+  %44 = v_fma_mix_f32_f16lo_f32_f32_src2_lit %scale, %35, 0
+  %47 = slice %rhs0[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %48 = v_fma_f32 %38, %47, %acc0
+  %50 = slice %rhs0[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %51 = v_fmac_f32 %48, %40, %50
+  %53 = slice %rhs0[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %54 = v_fmac_f32 %51, %42, %53
+  %56 = slice %rhs0[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %dot0 = v_fmac_f32 %54, %44, %56
+  %59 = slice %rhs1[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %60 = v_fma_f32 %38, %59, %acc1
+  %62 = slice %rhs1[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %63 = v_fmac_f32 %60, %40, %62
+  %65 = slice %rhs1[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %66 = v_fmac_f32 %63, %42, %65
+  %68 = slice %rhs1[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %dot1 = v_fmac_f32 %66, %44, %68
+  return %dot0, %dot1
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @q8_packed_word_scalar_extract_dequant_dot4(%packed: i32, %scale: f16, %rhs: vector<4xf32>, %acc: f32) -> (f32) {
+  %q0_i32 = scalar.bitfield.extracts %packed {offset = 0, width = 8} : i32 -> i32
+  %q1_i32 = scalar.bitfield.extracts %packed {offset = 8, width = 8} : i32 -> i32
+  %q2_i32 = scalar.bitfield.extracts %packed {offset = 16, width = 8} : i32 -> i32
+  %q3_i32 = scalar.bitfield.extracts %packed {offset = 24, width = 8} : i32 -> i32
+  %q0_f32 = scalar.sitofp %q0_i32 : i32 to f32
+  %q1_f32 = scalar.sitofp %q1_i32 : i32 to f32
+  %q2_f32 = scalar.sitofp %q2_i32 : i32 to f32
+  %q3_f32 = scalar.sitofp %q3_i32 : i32 to f32
+  %scale_f32 = scalar.extf %scale : f16 to f32
+  %s0 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %q0_f32, %scale_f32 : f32
+  %s1 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %q1_f32, %scale_f32 : f32
+  %s2 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %q2_f32, %scale_f32 : f32
+  %s3 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %q3_f32, %scale_f32 : f32
+  %scaled_q = vector.from_elements %s0, %s1, %s2, %s3 : vector<4xf32>
+  %dot = vector.dotf %scaled_q, %rhs, %acc : vector<4xf32>, vector<4xf32>, f32
+  func.return %dot : f32
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @q8_packed_word_scalar_extract_dequant_dot4(%packed: reg<amdgpu.sgpr>, %scale: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr x4>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %q0_i32 = s_bfe_i32_lit %packed, 2048
+  %q1_i32 = s_bfe_i32_lit %packed, 2056
+  %q2_i32 = s_bfe_i32_lit %packed, 2064
+  %q3_i32 = s_bfe_i32_lit %packed, 2072
+  %q0_f32 = v_cvt_f32_i32 %q0_i32
+  %q1_f32 = v_cvt_f32_i32 %q1_i32
+  %q2_f32 = v_cvt_f32_i32 %q2_i32
+  %q3_f32 = v_cvt_f32_i32 %q3_i32
+  %s0 = v_fma_mix_f32_f16lo_f32_f32_src2_lit %scale, %q0_f32, 0
+  %s1 = v_fma_mix_f32_f16lo_f32_f32_src2_lit %scale, %q1_f32, 0
+  %s2 = v_fma_mix_f32_f16lo_f32_f32_src2_lit %scale, %q2_f32, 0
+  %s3 = v_fma_mix_f32_f16lo_f32_f32_src2_lit %scale, %q3_f32, 0
+  %39 = slice %rhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %40 = v_fma_f32 %s0, %39, %acc
+  %42 = slice %rhs[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %43 = v_fmac_f32 %40, %s1, %42
+  %45 = slice %rhs[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %46 = v_fmac_f32 %43, %s2, %45
+  %48 = slice %rhs[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %dot = v_fmac_f32 %46, %s3, %48
+  return %dot
+}

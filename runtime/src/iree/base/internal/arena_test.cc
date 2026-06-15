@@ -164,6 +164,37 @@ TEST(Arena, OversizedAllocation) {
   iree_arena_block_pool_deinitialize(&pool);
 }
 
+TEST(Arena, AllocationThatOnlyFitsBeforeAlignmentIsOversized) {
+  static constexpr iree_host_size_t kOddBlockSize =
+      sizeof(iree_arena_block_t) + iree_max_align_t * 8 + 1;
+  iree_arena_block_pool_t pool;
+  iree_arena_block_pool_initialize(kOddBlockSize, iree_allocator_system(),
+                                   &pool);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&pool, &arena);
+
+  ASSERT_FALSE(
+      iree_host_size_has_alignment(pool.usable_block_size, iree_max_align_t));
+
+  void* near_block_limit = NULL;
+  IREE_ASSERT_OK(
+      iree_arena_allocate(&arena, pool.usable_block_size, &near_block_limit));
+  ASSERT_NE(near_block_limit, nullptr);
+  memset(near_block_limit, 0xAB, pool.usable_block_size);
+  EXPECT_EQ(arena.block_head, nullptr);
+  EXPECT_NE(arena.allocation_head, nullptr);
+
+  void* block_allocation = NULL;
+  IREE_ASSERT_OK(iree_arena_allocate(&arena, 32, &block_allocation));
+  ASSERT_NE(block_allocation, nullptr);
+  memset(block_allocation, 0xCD, 32);
+  EXPECT_NE(arena.block_head, nullptr);
+  EXPECT_LE(arena.block_bytes_remaining, pool.usable_block_size);
+
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&pool);
+}
+
 TEST(Arena, Reset) {
   iree_arena_block_pool_t pool;
   iree_arena_block_pool_initialize(kBlockSize, iree_allocator_system(), &pool);
@@ -180,6 +211,54 @@ TEST(Arena, Reset) {
     ASSERT_NE(ptr, nullptr);
     iree_arena_reset(&arena);
   }
+
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&pool);
+}
+
+TEST(Arena, OversizedAllocationAlignment) {
+  iree_arena_block_pool_t pool;
+  iree_arena_block_pool_initialize(kBlockSize, iree_allocator_system(), &pool);
+
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&pool, &arena);
+
+  // Allocate something larger than a single block to force the oversized path.
+  void* ptr = NULL;
+  IREE_ASSERT_OK(iree_arena_allocate(&arena, kBlockSize * 2, &ptr));
+  ASSERT_NE(ptr, nullptr);
+  EXPECT_EQ((uintptr_t)ptr % iree_max_align_t, 0u)
+      << "oversized allocation must be aligned to iree_max_align_t";
+
+  // A second oversized allocation should also be aligned.
+  void* ptr2 = NULL;
+  IREE_ASSERT_OK(iree_arena_allocate(&arena, kBlockSize + 1, &ptr2));
+  ASSERT_NE(ptr2, nullptr);
+  EXPECT_EQ((uintptr_t)ptr2 % iree_max_align_t, 0u)
+      << "oversized allocation must be aligned to iree_max_align_t";
+
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&pool);
+}
+
+TEST(Arena, ArrayAllocationCheckedMul) {
+  iree_arena_block_pool_t pool;
+  iree_arena_block_pool_initialize(kBlockSize, iree_allocator_system(), &pool);
+
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&pool, &arena);
+
+  // Normal array allocation should succeed.
+  void* ptr = NULL;
+  IREE_ASSERT_OK(iree_arena_allocate_array(&arena, 10, 8, &ptr));
+  ASSERT_NE(ptr, nullptr);
+
+  // Overflow should return RESOURCE_EXHAUSTED.
+  void* overflow_ptr = NULL;
+  iree_status_t status = iree_arena_allocate_array(
+      &arena, IREE_HOST_SIZE_MAX, IREE_HOST_SIZE_MAX, &overflow_ptr);
+  EXPECT_TRUE(iree_status_is_resource_exhausted(status));
+  iree_status_ignore(status);
 
   iree_arena_deinitialize(&arena);
   iree_arena_block_pool_deinitialize(&pool);
@@ -287,6 +366,87 @@ TEST(Arena, AlignedZeroLength) {
   IREE_ASSERT_OK(iree_arena_allocate_aligned(&arena, 0, 64, &ptr));
   ASSERT_NE(ptr, nullptr);
   EXPECT_EQ(reinterpret_cast<uintptr_t>(ptr) % 64, 0u);
+
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&pool);
+}
+
+//===----------------------------------------------------------------------===//
+// iree_arena_grow_array
+//===----------------------------------------------------------------------===//
+
+TEST(Arena, GrowArrayFromEmpty) {
+  iree_arena_block_pool_t pool;
+  iree_arena_block_pool_initialize(kBlockSize, iree_allocator_system(), &pool);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&pool, &arena);
+
+  iree_host_size_t capacity = 0;
+  void* ptr = NULL;
+  IREE_ASSERT_OK(iree_arena_grow_array(&arena, /*existing_count=*/0,
+                                       /*minimum_capacity=*/4, sizeof(uint32_t),
+                                       &capacity, &ptr));
+  EXPECT_GE(capacity, 4u);
+  EXPECT_NE(ptr, nullptr);
+
+  // Write to verify the allocation is usable.
+  uint32_t* array = (uint32_t*)ptr;
+  for (iree_host_size_t i = 0; i < capacity; ++i) {
+    array[i] = (uint32_t)i;
+  }
+
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&pool);
+}
+
+TEST(Arena, GrowArrayCopiesExisting) {
+  iree_arena_block_pool_t pool;
+  iree_arena_block_pool_initialize(kBlockSize, iree_allocator_system(), &pool);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&pool, &arena);
+
+  // Start with an initial allocation.
+  iree_host_size_t capacity = 4;
+  void* ptr = NULL;
+  IREE_ASSERT_OK(
+      iree_arena_allocate_array(&arena, capacity, sizeof(uint32_t), &ptr));
+  uint32_t* array = (uint32_t*)ptr;
+  array[0] = 100;
+  array[1] = 200;
+  array[2] = 300;
+  array[3] = 400;
+
+  // Grow. Existing 4 elements should be preserved.
+  IREE_ASSERT_OK(iree_arena_grow_array(&arena, /*existing_count=*/4,
+                                       /*minimum_capacity=*/0, sizeof(uint32_t),
+                                       &capacity, &ptr));
+  EXPECT_GE(capacity, 8u);  // Doubled from 4.
+  array = (uint32_t*)ptr;
+  EXPECT_EQ(array[0], 100u);
+  EXPECT_EQ(array[1], 200u);
+  EXPECT_EQ(array[2], 300u);
+  EXPECT_EQ(array[3], 400u);
+
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&pool);
+}
+
+TEST(Arena, GrowArrayRespectsMinimum) {
+  iree_arena_block_pool_t pool;
+  iree_arena_block_pool_initialize(kBlockSize, iree_allocator_system(), &pool);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&pool, &arena);
+
+  iree_host_size_t capacity = 2;
+  void* ptr = NULL;
+  IREE_ASSERT_OK(
+      iree_arena_allocate_array(&arena, capacity, sizeof(uint32_t), &ptr));
+
+  // minimum_capacity (100) > doubled (4), so should use 100.
+  IREE_ASSERT_OK(iree_arena_grow_array(&arena, /*existing_count=*/2,
+                                       /*minimum_capacity=*/100,
+                                       sizeof(uint32_t), &capacity, &ptr));
+  EXPECT_GE(capacity, 100u);
 
   iree_arena_deinitialize(&arena);
   iree_arena_block_pool_deinitialize(&pool);

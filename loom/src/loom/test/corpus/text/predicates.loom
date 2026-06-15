@@ -1,0 +1,6 @@
+func.decl public @all_predicates(%m: index, %n: index, %k: index, %a: tensor<[%m]x[%n]xf32>) -> (tensor<[%m]xf32>, %idx: index) where [eq(%m, %n), ne(%k, 0), lt(%m, 1024), le(%n, 1024), gt(%k, 1), ge(%m, 16), mul(%m, 16), min(%n, 8), max(%k, 4096), pow2(%n), range(%m, 32, 512)]
+
+func.def @assume_predicates(%m: index, %n: index) -> (index, index) {
+  %m2, %n2 = index.assume %m, %n [eq(%m, %n), ne(%n, 0), range(%m, 0, 1024)] : index, index
+  func.return %m2, %n2 : index, index
+}

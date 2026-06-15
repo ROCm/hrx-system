@@ -1,0 +1,179 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "runs scalar latency benchmark",
+      "run": {
+        "tool": "iree-benchmark-loom",
+        "args": [
+          "{srcdir}/testdata/scalar_benchmarks.loom",
+          "--output-format=jsonl",
+          "--benchmark=@scalar_equal_latency"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"row\":\"run\"",
+          "\"row\":\"plan\"",
+          "\"benchmark\":\"scalar_equal_latency\"",
+          "\"case\":\"scalar_equal\"",
+          "\"measure\":\"case_end_to_end\"",
+          "\"row\":\"sample\"",
+          "\"passed\":true",
+          "\"row\":\"benchmark\"",
+          "\"status\":\"ok\"",
+          "\"row\":\"summary\"",
+          "\"failure_count\":0",
+          "\"failed_benchmark_count\":0"
+        ]
+      }
+    },
+    {
+      "name": "honors sampled benchmark selection and cli iteration overrides",
+      "run": {
+        "tool": "iree-benchmark-loom",
+        "args": [
+          "{srcdir}/testdata/scalar_benchmarks.loom",
+          "--output-format=jsonl",
+          "--benchmark=@sampled_choice_latency",
+          "--sample=1",
+          "--iterations=2",
+          "--warmup-iterations=0"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"selected_sample\":1",
+          "\"case\":\"sampled_choice\"",
+          "\"sample_ordinal\":1",
+          "\"benchmark\":\"sampled_choice_latency\"",
+          "\"warmup_iterations\":0",
+          "\"iterations\":2",
+          "\"correctness_sample_count\":1"
+        ]
+      }
+    },
+    {
+      "name": "writes dry-run output file",
+      "run": {
+        "tool": "iree-benchmark-loom",
+        "args": [
+          "{srcdir}/testdata/scalar_benchmarks.loom",
+          "--output-format=jsonl",
+          "--benchmark=@scalar_equal_latency",
+          "--dry-run",
+          "--output={tmp}/dry_run.jsonl"
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/dry_run.jsonl",
+          "non_empty": true
+        }
+      ]
+    },
+    {
+      "name": "writes dry-run artifact bundle",
+      "run": {
+        "tool": "iree-benchmark-loom",
+        "args": [
+          "{srcdir}/testdata/scalar_benchmarks.loom",
+          "--output-format=jsonl",
+          "--benchmark=@scalar_equal_latency",
+          "--dry-run",
+          "--artifact-bundle-dir={tmp}/bundle"
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/bundle/results.jsonl",
+          "non_empty": true
+        },
+        {
+          "path": "{tmp}/bundle/manifest.json",
+          "non_empty": true
+        }
+      ]
+    },
+    {
+      "name": "rejects dispatch measurement without actual invocation",
+      "run": {
+        "tool": "iree-benchmark-loom",
+        "args": [
+          "{srcdir}/testdata/scalar_benchmarks.loom",
+          "--output-format=jsonl",
+          "--benchmark=@scalar_equal_dispatch_latency",
+          "--measure=dispatch_complete"
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stderr": {
+        "contains": [
+          "HAL actual invocations require exactly one actual invocation"
+        ]
+      }
+    },
+    {
+      "name": "reports duplicate symbols",
+      "run": {
+        "tool": "iree-benchmark-loom",
+        "args": [
+          "{srcdir}/testdata/duplicate_symbol.loom",
+          "--output-format=jsonl",
+          "--benchmark=@duplicate_symbol_latency"
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stdout": {
+        "contains": [
+          "\"row\":\"failure\"",
+          "\"stage\":\"verify\"",
+          "\"domain\":\"SYMBOL\"",
+          "\"message\":\"symbol '@duplicate_symbol' is already defined\"",
+          "\"row\":\"summary\"",
+          "\"failure_count\":1"
+        ]
+      }
+    },
+    {
+      "name": "prints agent documentation",
+      "run": {
+        "tool": "iree-benchmark-loom",
+        "args": ["--agents_md"]
+      },
+      "stdout": {
+        "contains": [
+          "## iree-benchmark-loom",
+          "default output is a compact JSON snapshot",
+          "work_items",
+          "--output-format=jsonl",
+          "compile_report_path",
+          "artifact_manifest_path",
+          "target_artifact_path"
+        ]
+      }
+    },
+    {
+      "name": "prints help",
+      "run": {
+        "tool": "iree-benchmark-loom",
+        "args": ["--help"]
+      },
+      "stdout": {
+        "contains": [
+          "Runs correctness-gated check.benchmark records from a Loom module.",
+          "Snapshot output (default)",
+          "JSONL event stream (--output-format=jsonl)",
+          "results.json in snapshot mode",
+          "compile_report_path",
+          "artifact_manifest_path",
+          "target_artifact_path"
+        ]
+      }
+    }
+  ]
+}

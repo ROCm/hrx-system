@@ -1,0 +1,30 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_cache_policy_scopes.loom-test
+// RUN: emit source-low diagnostics=memory output=low
+
+amdgpu.target<gfx1200> @target
+kernel.def target(@target) @cache_system_bypass_load_device_writeback_store() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<64x4xi32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<64x4xi32, #dense>
+  // REMARK@+1: BACKEND/040 "selected cache policy 'system/bypass'" "decision 'memory_cache_policy.gfx12_nv_scope_th'" "scope_attr present true value 3" "th_attr present true value 3"
+  %loaded = vector.load %input_view[%lane, 0] {cache_scope = system, cache_temporal = bypass} : view<64x4xi32, #dense> -> vector<4xi32>
+  // REMARK@+1: BACKEND/040 "selected cache policy 'device/non_temporal_writeback'" "scope_attr present true value 2" "th_attr present true value 7" "nt_attr present false value 0"
+  vector.store %loaded, %output_view[%lane, 0] {cache_scope = device, cache_temporal = non_temporal_writeback} : vector<4xi32>, view<64x4xi32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) @cache_system_bypass_load_device_writeback_store() asm<amdgpu.rdna4.core> {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
+  %12 = v_lshlrev_b32_src0_inline %lane, 4
+  %loaded = global_load_b128_saddr %12, %input_view {scope = 3, th = 3}
+  global_store_b128_saddr %12, %loaded, %output_view {scope = 2, th = 7}
+  return
+}

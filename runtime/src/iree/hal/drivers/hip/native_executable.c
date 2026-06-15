@@ -10,6 +10,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/math.h"
+#include "iree/base/threading/mutex.h"
 #include "iree/hal/drivers/hip/context_util.h"
 #include "iree/hal/drivers/hip/dynamic_symbols.h"
 #include "iree/hal/drivers/hip/hip_buffer.h"
@@ -39,6 +40,20 @@ typedef struct iree_hal_hip_native_executable_per_device_data_t {
   iree_hal_hip_kernel_params_t exports[];
 } iree_hal_hip_native_executable_per_device_data_t;
 
+typedef struct iree_hal_hip_native_executable_global_t {
+  // Next executable-owned global entry.
+  struct iree_hal_hip_native_executable_global_t* next;
+
+  // Persistent executable-owned global name.
+  iree_string_view_t name;
+
+  // Byte length verified against the first loaded HIP device.
+  iree_device_size_t byte_length;
+
+  // One executable-owned buffer alias per loaded HIP device.
+  iree_hal_buffer_t** device_buffers;
+} iree_hal_hip_native_executable_global_t;
+
 typedef struct iree_hal_hip_native_executable_t {
   // Abstract resource used for injecting reference counting and vtable;
   // must be at offset 0.
@@ -53,6 +68,13 @@ typedef struct iree_hal_hip_native_executable_t {
 
   // Number of HIP devices this executable was loaded onto.
   iree_host_size_t num_devices;
+
+  // Guards executable-owned global entry and buffer publication.
+  iree_slim_mutex_t global_mutex;
+
+  // Executable-owned globals interned by name.
+  iree_hal_hip_native_executable_global_t* global_list;
+
   // Per-device module and export tables.
   iree_hal_hip_native_executable_per_device_data_t* per_device_data[];
 } iree_hal_hip_native_executable_t;
@@ -325,8 +347,9 @@ iree_status_t iree_hal_hip_native_executable_create(
             flatbuffers_string_len(
                 iree_hal_hip_ExportDef_kernel_name_get(export_def)),
             &total_export_name_length))) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "export name storage size overflow");
+      IREE_RETURN_AND_END_ZONE_IF_ERROR(
+          z0, iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                               "export name storage size overflow"));
     }
     IREE_TRACE({
       total_export_info_length += iree_hal_debug_calculate_export_info_size(
@@ -359,13 +382,15 @@ iree_status_t iree_hal_hip_native_executable_create(
           !iree_host_size_checked_add(native_executable_device_info_size,
                                       total_export_info_length,
                                       &native_executable_device_info_size))) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "executable storage size overflow");
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                             "executable storage size overflow"));
   }
   if (IREE_UNLIKELY(native_executable_device_info_size >
                     IREE_HOST_SIZE_MAX - iree_max_align_t)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "executable storage size overflow");
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                             "executable storage size overflow"));
   }
   native_executable_device_info_size =
       iree_host_align(native_executable_device_info_size, iree_max_align_t);
@@ -383,8 +408,9 @@ iree_status_t iree_hal_hip_native_executable_create(
                                       &total_size) ||
           !iree_host_size_checked_add(
               total_size, native_executable_device_infos_size, &total_size))) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "executable storage size overflow");
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                             "executable storage size overflow"));
   }
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0,
@@ -396,6 +422,7 @@ iree_status_t iree_hal_hip_native_executable_create(
   executable->device = device;
   executable->symbols = symbols;
   executable->num_devices = topology.count;
+  iree_slim_mutex_initialize(&executable->global_mutex);
   const uint8_t* per_device_data_location =
       (uint8_t*)executable + sizeof(*executable);
 
@@ -566,12 +593,100 @@ iree_status_t iree_hal_hip_native_executable_create(
   return status;
 }
 
+static iree_hal_hip_native_executable_global_t*
+iree_hal_hip_native_executable_find_global_locked(
+    iree_hal_hip_native_executable_t* executable, iree_string_view_t name) {
+  for (iree_hal_hip_native_executable_global_t* global =
+           executable->global_list;
+       global; global = global->next) {
+    if (iree_string_view_equal(global->name, name)) return global;
+  }
+  return NULL;
+}
+
+static iree_hal_hip_native_executable_global_t*
+iree_hal_hip_native_executable_global_from_handle_locked(
+    iree_hal_hip_native_executable_t* executable,
+    iree_hal_executable_global_t global) {
+  if (!iree_hal_executable_global_is_valid(global)) return NULL;
+  iree_hal_hip_native_executable_global_t* expected_global =
+      (iree_hal_hip_native_executable_global_t*)(uintptr_t)global.value;
+  for (iree_hal_hip_native_executable_global_t* current_global =
+           executable->global_list;
+       current_global; current_global = current_global->next) {
+    if (current_global == expected_global) return current_global;
+  }
+  return NULL;
+}
+
+static iree_status_t iree_hal_hip_native_executable_global_allocate(
+    iree_hal_hip_native_executable_t* executable, iree_string_view_t name,
+    iree_device_size_t byte_length,
+    iree_hal_hip_native_executable_global_t** out_global) {
+  *out_global = NULL;
+
+  iree_host_size_t name_storage_size = 0;
+  if (IREE_UNLIKELY(
+          !iree_host_size_checked_add(name.size, 1, &name_storage_size))) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "HIP executable global name storage overflow");
+  }
+
+  iree_host_size_t total_size = 0;
+  iree_host_size_t device_buffers_offset = 0;
+  iree_host_size_t name_offset = 0;
+  IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
+      sizeof(iree_hal_hip_native_executable_global_t), &total_size,
+      IREE_STRUCT_FIELD(executable->num_devices, iree_hal_buffer_t*,
+                        &device_buffers_offset),
+      IREE_STRUCT_FIELD(name_storage_size, char, &name_offset)));
+
+  iree_hal_hip_native_executable_global_t* global = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(executable->host_allocator,
+                                             total_size, (void**)&global));
+  memset(global, 0, total_size);
+
+  global->name = iree_make_string_view((char*)global + name_offset, name.size);
+  memcpy((void*)global->name.data, name.data, name.size);
+  ((char*)global->name.data)[name.size] = 0;
+  global->byte_length = byte_length;
+  global->device_buffers =
+      (iree_hal_buffer_t**)((uint8_t*)global + device_buffers_offset);
+
+  *out_global = global;
+  return iree_ok_status();
+}
+
+static void iree_hal_hip_native_executable_global_free(
+    iree_hal_hip_native_executable_t* executable,
+    iree_hal_hip_native_executable_global_t* global) {
+  if (!global) return;
+  for (iree_host_size_t i = 0; i < executable->num_devices; ++i) {
+    iree_hal_buffer_release(global->device_buffers[i]);
+  }
+  iree_allocator_free(executable->host_allocator, global);
+}
+
+static void iree_hal_hip_native_executable_global_list_free(
+    iree_hal_hip_native_executable_t* executable) {
+  iree_hal_hip_native_executable_global_t* global = executable->global_list;
+  while (global) {
+    iree_hal_hip_native_executable_global_t* next_global = global->next;
+    iree_hal_hip_native_executable_global_free(executable, global);
+    global = next_global;
+  }
+  executable->global_list = NULL;
+}
+
 static void iree_hal_hip_native_executable_destroy(
     iree_hal_executable_t* base_executable) {
   iree_hal_hip_native_executable_t* executable =
       iree_hal_hip_native_executable_cast(base_executable);
   iree_allocator_t host_allocator = executable->host_allocator;
   IREE_TRACE_ZONE_BEGIN(z0);
+
+  iree_hal_hip_native_executable_global_list_free(executable);
+  iree_slim_mutex_deinitialize(&executable->global_mutex);
 
   for (iree_host_size_t i = 0; i < executable->num_devices; ++i) {
     const iree_hal_hip_native_executable_per_device_data_t* data =
@@ -638,7 +753,8 @@ static iree_status_t iree_hal_hip_native_executable_export_info(
   memset(out_info, 0, sizeof(*out_info));
   out_info->name = kernel_params->name;
   out_info->flags = IREE_HAL_EXECUTABLE_FUNCTION_FLAG_NONE;
-  out_info->constant_count = (uint16_t)kernel_params->constant_count;
+  out_info->constant_byte_length =
+      kernel_params->constant_count * sizeof(uint32_t);
   out_info->binding_count = (uint16_t)kernel_params->binding_count;
   memcpy(out_info->workgroup_size, kernel_params->block_dims,
          sizeof(out_info->workgroup_size));
@@ -717,34 +833,14 @@ static iree_status_t iree_hal_hip_native_executable_select_global_device(
   return iree_ok_status();
 }
 
-static void iree_hal_hip_native_executable_global_buffer_release(
-    void* user_data, iree_hal_buffer_t* buffer) {
-  (void)buffer;
-  iree_hal_executable_release((iree_hal_executable_t*)user_data);
-}
-
-static iree_status_t iree_hal_hip_native_executable_lookup_global_by_name(
-    iree_hal_executable_t* base_executable, iree_string_view_t name,
-    iree_hal_queue_affinity_t queue_affinity, iree_hal_buffer_t** out_buffer) {
-  iree_hal_hip_native_executable_t* executable =
-      iree_hal_hip_native_executable_cast(base_executable);
-  *out_buffer = NULL;
-
-  if (iree_string_view_is_empty(name)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "executable global name is empty");
-  }
-  if (name.size > IREE_HAL_HIP_MAX_STACK_GLOBAL_NAME_LENGTH) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "executable global name `%.*s` exceeds maximum length %" PRIhsz,
-        (int)name.size, name.data, IREE_HAL_HIP_MAX_STACK_GLOBAL_NAME_LENGTH);
-  }
-
-  iree_host_size_t device_ordinal = 0;
-  iree_hal_queue_affinity_t selected_queue_affinity = 0;
-  IREE_RETURN_IF_ERROR(iree_hal_hip_native_executable_select_global_device(
-      executable, queue_affinity, &device_ordinal, &selected_queue_affinity));
+static iree_status_t iree_hal_hip_native_executable_try_query_global(
+    iree_hal_hip_native_executable_t* executable, iree_string_view_t name,
+    iree_host_size_t device_ordinal, bool* out_found,
+    hipDeviceptr_t* out_global_device_ptr,
+    iree_device_size_t* out_byte_length) {
+  *out_found = false;
+  if (out_global_device_ptr) *out_global_device_ptr = 0;
+  *out_byte_length = 0;
 
   const iree_hal_hip_native_executable_per_device_data_t* per_device_data =
       executable->per_device_data[device_ordinal];
@@ -769,10 +865,156 @@ static iree_status_t iree_hal_hip_native_executable_lookup_global_by_name(
       return IREE_HIP_RESULT_TO_STATUS(executable->symbols, terminal_result);
     }
   }
-  if (terminal_result != hipSuccess) {
-    return iree_make_status(IREE_STATUS_NOT_FOUND,
-                            "executable global `%.*s` not found",
-                            (int)name.size, name.data);
+  if (terminal_result != hipSuccess) return iree_ok_status();
+
+  *out_found = true;
+  if (out_global_device_ptr) *out_global_device_ptr = global_device_ptr;
+  *out_byte_length = (iree_device_size_t)global_size;
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_hip_native_executable_validate_global_name(
+    iree_string_view_t name) {
+  if (iree_string_view_is_empty(name)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "executable global name is empty");
+  }
+  if (name.size > IREE_HAL_HIP_MAX_STACK_GLOBAL_NAME_LENGTH) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "executable global name `%.*s` exceeds maximum length %" PRIhsz,
+        (int)name.size, name.data, IREE_HAL_HIP_MAX_STACK_GLOBAL_NAME_LENGTH);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_hip_native_executable_try_lookup_global_by_name(
+    iree_hal_executable_t* base_executable, iree_string_view_t name,
+    bool* out_found, iree_hal_executable_global_t* out_global) {
+  iree_hal_hip_native_executable_t* executable =
+      iree_hal_hip_native_executable_cast(base_executable);
+  *out_found = false;
+  *out_global = iree_hal_executable_global_invalid();
+
+  IREE_RETURN_IF_ERROR(
+      iree_hal_hip_native_executable_validate_global_name(name));
+
+  iree_slim_mutex_lock(&executable->global_mutex);
+  iree_hal_hip_native_executable_global_t* global =
+      iree_hal_hip_native_executable_find_global_locked(executable, name);
+  if (global) {
+    *out_found = true;
+    *out_global =
+        iree_hal_executable_global_from_value((uint64_t)(uintptr_t)global);
+    iree_slim_mutex_unlock(&executable->global_mutex);
+    return iree_ok_status();
+  }
+  iree_slim_mutex_unlock(&executable->global_mutex);
+
+  iree_device_size_t byte_length = 0;
+  bool query_found = false;
+  IREE_RETURN_IF_ERROR(iree_hal_hip_native_executable_try_query_global(
+      executable, name, /*device_ordinal=*/0, &query_found,
+      /*out_global_device_ptr=*/NULL, &byte_length));
+  if (!query_found) return iree_ok_status();
+
+  iree_hal_hip_native_executable_global_t* new_global = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_hip_native_executable_global_allocate(
+      executable, name, byte_length, &new_global));
+
+  iree_slim_mutex_lock(&executable->global_mutex);
+  global = iree_hal_hip_native_executable_find_global_locked(executable, name);
+  if (global) {
+    *out_found = true;
+    *out_global =
+        iree_hal_executable_global_from_value((uint64_t)(uintptr_t)global);
+  } else {
+    new_global->next = executable->global_list;
+    executable->global_list = new_global;
+    *out_found = true;
+    *out_global =
+        iree_hal_executable_global_from_value((uint64_t)(uintptr_t)new_global);
+    new_global = NULL;
+  }
+  iree_slim_mutex_unlock(&executable->global_mutex);
+
+  iree_hal_hip_native_executable_global_free(executable, new_global);
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_hip_native_executable_global_info(
+    iree_hal_executable_t* base_executable, iree_hal_executable_global_t global,
+    iree_hal_executable_global_info_t* out_info) {
+  iree_hal_hip_native_executable_t* executable =
+      iree_hal_hip_native_executable_cast(base_executable);
+  memset(out_info, 0, sizeof(*out_info));
+
+  iree_slim_mutex_lock(&executable->global_mutex);
+  iree_hal_hip_native_executable_global_t* global_entry =
+      iree_hal_hip_native_executable_global_from_handle_locked(executable,
+                                                               global);
+  if (!global_entry) {
+    iree_slim_mutex_unlock(&executable->global_mutex);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "invalid HIP executable global handle");
+  }
+  out_info->name = global_entry->name;
+  out_info->byte_length = global_entry->byte_length;
+  iree_slim_mutex_unlock(&executable->global_mutex);
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_hip_native_executable_global_buffer(
+    iree_hal_executable_t* base_executable, iree_hal_executable_global_t global,
+    iree_hal_queue_affinity_t queue_affinity, iree_hal_buffer_t** out_buffer) {
+  iree_hal_hip_native_executable_t* executable =
+      iree_hal_hip_native_executable_cast(base_executable);
+  *out_buffer = NULL;
+
+  iree_host_size_t device_ordinal = 0;
+  iree_hal_queue_affinity_t selected_queue_affinity = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_hip_native_executable_select_global_device(
+      executable, queue_affinity, &device_ordinal, &selected_queue_affinity));
+
+  iree_slim_mutex_lock(&executable->global_mutex);
+  iree_hal_hip_native_executable_global_t* global_entry =
+      iree_hal_hip_native_executable_global_from_handle_locked(executable,
+                                                               global);
+  if (!global_entry) {
+    iree_slim_mutex_unlock(&executable->global_mutex);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "invalid HIP executable global handle");
+  }
+  iree_hal_buffer_t* cached_buffer =
+      global_entry->device_buffers[device_ordinal];
+  if (cached_buffer) {
+    *out_buffer = cached_buffer;
+    iree_slim_mutex_unlock(&executable->global_mutex);
+    return iree_ok_status();
+  }
+  iree_string_view_t name = global_entry->name;
+  iree_device_size_t expected_byte_length = global_entry->byte_length;
+  iree_slim_mutex_unlock(&executable->global_mutex);
+
+  hipDeviceptr_t global_device_ptr = 0;
+  iree_device_size_t byte_length = 0;
+  bool found = false;
+  IREE_RETURN_IF_ERROR(iree_hal_hip_native_executable_try_query_global(
+      executable, name, device_ordinal, &found, &global_device_ptr,
+      &byte_length));
+  if (IREE_UNLIKELY(!found)) {
+    return iree_make_status(
+        IREE_STATUS_INTERNAL,
+        "verified executable global `%.*s` disappeared on HIP device %" PRIhsz,
+        (int)name.size, name.data, device_ordinal);
+  }
+  if (IREE_UNLIKELY(byte_length != expected_byte_length)) {
+    return iree_make_status(
+        IREE_STATUS_INTERNAL,
+        "verified executable global `%.*s` changed size on HIP device %" PRIhsz
+        " from %" PRIu64 " to %" PRIu64,
+        (int)name.size, name.data, device_ordinal,
+        (uint64_t)expected_byte_length, (uint64_t)byte_length);
   }
 
   iree_hal_buffer_placement_t placement = {
@@ -780,22 +1022,35 @@ static iree_status_t iree_hal_hip_native_executable_lookup_global_by_name(
       .queue_affinity = selected_queue_affinity,
       .flags = IREE_HAL_BUFFER_PLACEMENT_FLAG_NONE,
   };
-  iree_hal_buffer_release_callback_t release_callback = {
-      .fn = iree_hal_hip_native_executable_global_buffer_release,
-      .user_data = base_executable,
-  };
-  iree_hal_executable_retain(base_executable);
-  iree_status_t status = iree_hal_hip_buffer_wrap(
+  iree_hal_buffer_t* new_buffer = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_hip_buffer_wrap(
       placement, IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
       IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
-      IREE_HAL_BUFFER_USAGE_DEFAULT, global_size, /*byte_offset=*/0,
-      global_size, IREE_HAL_HIP_BUFFER_TYPE_EXTERNAL, global_device_ptr,
-      /*host_ptr=*/NULL, release_callback, executable->host_allocator,
-      out_buffer);
-  if (!iree_status_is_ok(status)) {
-    iree_hal_executable_release(base_executable);
+      IREE_HAL_BUFFER_USAGE_DEFAULT, byte_length, /*byte_offset=*/0,
+      byte_length, IREE_HAL_HIP_BUFFER_TYPE_EXTERNAL, global_device_ptr,
+      /*host_ptr=*/NULL, iree_hal_buffer_release_callback_null(),
+      executable->host_allocator, &new_buffer));
+
+  iree_slim_mutex_lock(&executable->global_mutex);
+  global_entry = iree_hal_hip_native_executable_global_from_handle_locked(
+      executable, global);
+  if (!global_entry) {
+    iree_slim_mutex_unlock(&executable->global_mutex);
+    iree_hal_buffer_release(new_buffer);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "invalid HIP executable global handle");
   }
-  return status;
+  cached_buffer = global_entry->device_buffers[device_ordinal];
+  if (cached_buffer) {
+    *out_buffer = cached_buffer;
+    iree_slim_mutex_unlock(&executable->global_mutex);
+    iree_hal_buffer_release(new_buffer);
+  } else {
+    global_entry->device_buffers[device_ordinal] = new_buffer;
+    *out_buffer = new_buffer;
+    iree_slim_mutex_unlock(&executable->global_mutex);
+  }
+  return iree_ok_status();
 }
 
 static const iree_hal_executable_vtable_t
@@ -806,6 +1061,8 @@ static const iree_hal_executable_vtable_t
         .function_parameters = iree_hal_hip_native_executable_export_parameters,
         .lookup_function_by_name =
             iree_hal_hip_native_executable_lookup_export_by_name,
-        .lookup_global_by_name =
-            iree_hal_hip_native_executable_lookup_global_by_name,
+        .try_lookup_global_by_name =
+            iree_hal_hip_native_executable_try_lookup_global_by_name,
+        .global_info = iree_hal_hip_native_executable_global_info,
+        .global_buffer = iree_hal_hip_native_executable_global_buffer,
 };

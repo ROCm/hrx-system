@@ -1,0 +1,57 @@
+// RUN: verify
+
+// Minimal valid check case.
+check.case @empty {
+  check.return
+}
+
+// ====
+
+// Body ops belong in check.case regions.
+func.def @literal_outside_case() {
+  // ERROR@+1: STRUCTURE/029 "check.literal" "required" "check.case" "func.def"
+  %x = check.literal value(1) : i32
+  func.return
+}
+
+// ====
+
+// check.case regions must terminate with check.return.
+// ERROR@+1: STRUCTURE/018 "check.case" "check.return" "func.return"
+check.case @wrong_terminator {
+  func.return
+}
+
+// ====
+
+// check.benchmark references a concrete check.case symbol.
+// ERROR@+1: SYMBOL/002 "missing_case"
+check.benchmark<@missing_case> @missing_case_benchmark {}
+
+// ====
+
+// check.benchmark cannot point at an arbitrary function symbol.
+func.decl @not_a_case()
+
+// ERROR@+1: SYMBOL/003 "expected check case"
+check.benchmark<@not_a_case> @wrong_case_kind {}
+
+// ====
+
+// Literal payloads must match the result element type.
+check.case @bad_literal_payload {
+  // ERROR@+1: TYPE/005 "value"
+  %x = check.literal value(1.0) : i32
+  check.return
+}
+
+// ====
+
+// Expectation operands must have the same type.
+check.case @bad_expect_types {
+  %actual = check.literal value(1) : i32
+  %expected = check.literal value(1) : i64
+  // ERROR@+1: TYPE/001 "actual" "expected"
+  check.expect.equal actual(%actual) expected(%expected) : i32
+  check.return
+}

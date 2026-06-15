@@ -1,0 +1,14 @@
+; SPIR-V
+; Version: 1.0
+; Bound: 6
+; Schema: 0
+OpCapability Shader
+OpMemoryModel Logical GLSL450
+OpEntryPoint GLCompute %main "main"
+OpExecutionMode %main LocalSize 1 1 1
+%void = OpTypeVoid
+%function = OpTypeFunction %void
+%main = OpFunction %void None %function
+%entry = OpLabel
+OpReturn
+OpFunctionEnd

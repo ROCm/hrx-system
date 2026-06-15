@@ -110,8 +110,105 @@ static inline void iree_memcpy_stream_dst(void* IREE_RESTRICT dst,
 }
 
 //===----------------------------------------------------------------------===//
-// Checked arithmetic for allocation size calculations
+// Checked arithmetic helpers
 //===----------------------------------------------------------------------===//
+
+// Performs a checked signed 32-bit addition of |a| and |b|, storing the result
+// in |out_result|. Returns true if the addition succeeded without overflow,
+// false if overflow occurred (|out_result| is undefined on overflow).
+static inline bool iree_checked_add_i32(int32_t a, int32_t b,
+                                        int32_t* out_result) {
+#if IREE_HAVE_BUILTIN(__builtin_add_overflow)
+  return !__builtin_add_overflow(a, b, out_result);
+#else
+  if ((b > 0 && a > INT32_MAX - b) || (b < 0 && a < INT32_MIN - b)) {
+    return false;
+  }
+  *out_result = a + b;
+  return true;
+#endif
+}
+
+// Performs a checked signed 32-bit multiplication of |a| and |b|, storing the
+// result in |out_result|. Returns true if the multiplication succeeded without
+// overflow, false if overflow occurred (|out_result| is undefined on overflow).
+static inline bool iree_checked_mul_i32(int32_t a, int32_t b,
+                                        int32_t* out_result) {
+#if IREE_HAVE_BUILTIN(__builtin_mul_overflow)
+  return !__builtin_mul_overflow(a, b, out_result);
+#else
+  int64_t result = (int64_t)a * (int64_t)b;
+  if (result < INT32_MIN || result > INT32_MAX) return false;
+  *out_result = (int32_t)result;
+  return true;
+#endif
+}
+
+// Performs checked computation of |base| + |lhs| * |rhs|, storing the result in
+// |out_result|. Returns true if the computation succeeded without overflow,
+// false if overflow occurred (|out_result| is undefined on overflow).
+static inline bool iree_checked_mul_add_i32(int32_t base, int32_t lhs,
+                                            int32_t rhs, int32_t* out_result) {
+  int32_t product = 0;
+  if (!iree_checked_mul_i32(lhs, rhs, &product)) return false;
+  return iree_checked_add_i32(base, product, out_result);
+}
+
+// Performs a checked signed 64-bit addition of |a| and |b|, storing the result
+// in |out_result|. Returns true if the addition succeeded without overflow,
+// false if overflow occurred (|out_result| is undefined on overflow).
+static inline bool iree_checked_add_i64(int64_t a, int64_t b,
+                                        int64_t* out_result) {
+#if IREE_HAVE_BUILTIN(__builtin_add_overflow)
+  return !__builtin_add_overflow(a, b, out_result);
+#else
+  if ((b > 0 && a > INT64_MAX - b) || (b < 0 && a < INT64_MIN - b)) {
+    return false;
+  }
+  *out_result = a + b;
+  return true;
+#endif
+}
+
+// Performs a checked signed 64-bit multiplication of |a| and |b|, storing the
+// result in |out_result|. Returns true if the multiplication succeeded without
+// overflow, false if overflow occurred (|out_result| is undefined on overflow).
+static inline bool iree_checked_mul_i64(int64_t a, int64_t b,
+                                        int64_t* out_result) {
+#if IREE_HAVE_BUILTIN(__builtin_mul_overflow)
+  return !__builtin_mul_overflow(a, b, out_result);
+#else
+  if (a == 0 || b == 0) {
+    *out_result = 0;
+    return true;
+  }
+  if (a == -1 && b == INT64_MIN) return false;
+  if (b == -1 && a == INT64_MIN) return false;
+  if (a > 0) {
+    if (b > 0) {
+      if (a > INT64_MAX / b) return false;
+    } else if (b < INT64_MIN / a) {
+      return false;
+    }
+  } else if (b > 0) {
+    if (a < INT64_MIN / b) return false;
+  } else if (a < INT64_MAX / b) {
+    return false;
+  }
+  *out_result = a * b;
+  return true;
+#endif
+}
+
+// Performs checked computation of |base| + |lhs| * |rhs|, storing the result in
+// |out_result|. Returns true if the computation succeeded without overflow,
+// false if overflow occurred (|out_result| is undefined on overflow).
+static inline bool iree_checked_mul_add_i64(int64_t base, int64_t lhs,
+                                            int64_t rhs, int64_t* out_result) {
+  int64_t product = 0;
+  if (!iree_checked_mul_i64(lhs, rhs, &product)) return false;
+  return iree_checked_add_i64(base, product, out_result);
+}
 
 // Performs a checked addition of |a| and |b|, storing the result in
 // |out_result|. Returns true if the addition succeeded without overflow, false
@@ -554,12 +651,12 @@ typedef struct {
     iree_allocator_inline_storage_t header;                  \
     uint8_t data[storage_capacity];                          \
   } var = {                                                  \
-      .header =                                              \
-          {                                                  \
-              .capacity = sizeof((var).data),                \
-              .length = 0,                                   \
-              .buffer = &(var).data[0],                      \
-          },                                                 \
+      /*.header=*/{                                          \
+          /*.capacity=*/sizeof((var).data),                  \
+          /*.length=*/0,                                     \
+          /*.head_size=*/0,                                  \
+          /*.buffer=*/&(var).data[0],                        \
+      },                                                     \
   };
 
 // Inline arena allocator controller used by iree_allocator_inline_arena.

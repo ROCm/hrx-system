@@ -1,0 +1,169 @@
+// RUN: pass ireevm-ref-lifetime
+
+func.def @materializes_ref_release(%resource: ireevm.ref<ireevm.list<i32>>) {
+  %owned = ireevm.ref.retain %resource : ireevm.ref<ireevm.list<i32>> -> ireevm.ref<ireevm.list<i32>>
+  func.return
+}
+// ----
+func.def @materializes_ref_release(%resource: ireevm.ref<ireevm.list<i32>>) {
+  %owned = ireevm.ref.retain %resource : ireevm.ref<ireevm.list<i32>> -> ireevm.ref<ireevm.list<i32>>
+  ireevm.ref.release %resource : ireevm.ref<ireevm.list<i32>>
+  ireevm.ref.release %owned : ireevm.ref<ireevm.list<i32>>
+  func.return
+}
+
+// ====
+
+// RUN: pass ireevm-ref-lifetime
+
+func.def @materializes_ref_on_split_edge(%cond: i1, %resource: ireevm.ref<ireevm.list<i32>>) {
+  %owned = ireevm.ref.retain %resource : ireevm.ref<ireevm.list<i32>> -> ireevm.ref<ireevm.list<i32>>
+  cfg.cond_br %cond, ^use, ^done
+^use:
+  ireevm.ref.release %owned : ireevm.ref<ireevm.list<i32>>
+  cfg.br ^done
+^done:
+  func.return
+}
+// ----
+func.def @materializes_ref_on_split_edge(%cond: i1, %resource: ireevm.ref<ireevm.list<i32>>) {
+  %owned = ireevm.ref.retain %resource : ireevm.ref<ireevm.list<i32>> -> ireevm.ref<ireevm.list<i32>>
+  cfg.cond_br %cond, ^_bb3, ^_bb4
+^use:
+  ireevm.ref.release %owned : ireevm.ref<ireevm.list<i32>>
+  cfg.br ^done
+^done:
+  func.return
+^_bb3:
+  ireevm.ref.release %resource : ireevm.ref<ireevm.list<i32>>
+  cfg.br ^use
+^_bb4:
+  ireevm.ref.release %resource : ireevm.ref<ireevm.list<i32>>
+  ireevm.ref.release %owned : ireevm.ref<ireevm.list<i32>>
+  cfg.br ^done
+}
+
+// ====
+
+// RUN: pass ireevm-ref-lifetime
+
+func.def @materializes_ref_dead_branch_payload(%resource: ireevm.ref<ireevm.list<i32>>) {
+  %owned = ireevm.ref.retain %resource : ireevm.ref<ireevm.list<i32>> -> ireevm.ref<ireevm.list<i32>>
+  cfg.br ^join(%owned: ireevm.ref<ireevm.list<i32>>)
+^join(%unused: ireevm.ref<ireevm.list<i32>>):
+  func.return
+}
+// ----
+func.def @materializes_ref_dead_branch_payload(%resource: ireevm.ref<ireevm.list<i32>>) {
+  %owned = ireevm.ref.retain %resource : ireevm.ref<ireevm.list<i32>> -> ireevm.ref<ireevm.list<i32>>
+  ireevm.ref.release %resource : ireevm.ref<ireevm.list<i32>>
+  cfg.br ^join(%owned: ireevm.ref<ireevm.list<i32>>)
+^join(%unused: ireevm.ref<ireevm.list<i32>>):
+  ireevm.ref.release %unused : ireevm.ref<ireevm.list<i32>>
+  func.return
+}
+
+// ====
+
+// RUN: pass ireevm-ref-lifetime
+
+func.def @materializes_ref_before_multiple_returns(%cond: i1, %resource: ireevm.ref<ireevm.list<i32>>) {
+  %owned = ireevm.ref.retain %resource : ireevm.ref<ireevm.list<i32>> -> ireevm.ref<ireevm.list<i32>>
+  cfg.cond_br %cond, ^early, ^late
+^early:
+  func.return
+^late:
+  func.return
+}
+// ----
+func.def @materializes_ref_before_multiple_returns(%cond: i1, %resource: ireevm.ref<ireevm.list<i32>>) {
+  %owned = ireevm.ref.retain %resource : ireevm.ref<ireevm.list<i32>> -> ireevm.ref<ireevm.list<i32>>
+  cfg.cond_br %cond, ^_bb3, ^_bb4
+^early:
+  func.return
+^late:
+  func.return
+^_bb3:
+  ireevm.ref.release %resource : ireevm.ref<ireevm.list<i32>>
+  ireevm.ref.release %owned : ireevm.ref<ireevm.list<i32>>
+  cfg.br ^early
+^_bb4:
+  ireevm.ref.release %resource : ireevm.ref<ireevm.list<i32>>
+  ireevm.ref.release %owned : ireevm.ref<ireevm.list<i32>>
+  cfg.br ^late
+}
+
+// ====
+
+// RUN: pass ireevm-ref-lifetime
+
+func.def @make_ref(%resource: ireevm.ref<ireevm.list<i32>>) -> (ireevm.ref<ireevm.list<i32>>) {
+  %owned = ireevm.ref.retain %resource : ireevm.ref<ireevm.list<i32>> -> ireevm.ref<ireevm.list<i32>>
+  func.return %owned : ireevm.ref<ireevm.list<i32>>
+}
+
+func.def @calls_owned_ref_producer(%resource: ireevm.ref<ireevm.list<i32>>) {
+  %owned = func.call @make_ref(%resource) : (ireevm.ref<ireevm.list<i32>>) -> (ireevm.ref<ireevm.list<i32>>)
+  func.return
+}
+// ----
+func.def @make_ref(%resource: ireevm.ref<ireevm.list<i32>>) -> (ireevm.ref<ireevm.list<i32>>) {
+  %owned = ireevm.ref.retain %resource : ireevm.ref<ireevm.list<i32>> -> ireevm.ref<ireevm.list<i32>>
+  ireevm.ref.release %resource : ireevm.ref<ireevm.list<i32>>
+  func.return %owned : ireevm.ref<ireevm.list<i32>>
+}
+
+func.def @calls_owned_ref_producer(%resource: ireevm.ref<ireevm.list<i32>>) {
+  %owned = func.call @make_ref(%resource) : (ireevm.ref<ireevm.list<i32>>) -> (ireevm.ref<ireevm.list<i32>>)
+  ireevm.ref.release %owned : ireevm.ref<ireevm.list<i32>>
+  func.return
+}
+
+// ====
+
+// RUN: pass ireevm-ref-lifetime
+
+ireevm.target<core> @vm_target
+
+ireevm.import.decl target(@vm_target) symbol("hal.ref.produce") @produce_ref(%resource: ireevm.ref<ireevm.list<i32>>) -> (ireevm.ref<ireevm.list<i32>>)
+
+func.def @external_ref_results_are_owned(%resource: ireevm.ref<ireevm.list<i32>>) {
+  %owned = func.call @produce_ref(%resource) : (ireevm.ref<ireevm.list<i32>>) -> (ireevm.ref<ireevm.list<i32>>)
+  func.return
+}
+// ----
+ireevm.target<core> @vm_target
+
+ireevm.import.decl target(@vm_target) symbol("hal.ref.produce") @produce_ref(%resource: ireevm.ref<ireevm.list<i32>>) -> (ireevm.ref<ireevm.list<i32>>)
+
+func.def @external_ref_results_are_owned(%resource: ireevm.ref<ireevm.list<i32>>) {
+  %owned = func.call @produce_ref(%resource) : (ireevm.ref<ireevm.list<i32>>) -> (ireevm.ref<ireevm.list<i32>>)
+  ireevm.ref.release %resource : ireevm.ref<ireevm.list<i32>>
+  ireevm.ref.release %owned : ireevm.ref<ireevm.list<i32>>
+  func.return
+}
+
+// ====
+
+// RUN: pass ireevm-ref-lifetime
+
+ireevm.target<core> @vm_target
+
+ireevm.import.decl target(@vm_target) symbol("hal.ref.produce") @produce_ref(%resource: ireevm.ref<ireevm.list<i32>>) -> (ireevm.ref<ireevm.list<i32>>)
+
+func.def @allows_release_of_external_owned_ref(%resource: ireevm.ref<ireevm.list<i32>>) {
+  %owned = func.call @produce_ref(%resource) : (ireevm.ref<ireevm.list<i32>>) -> (ireevm.ref<ireevm.list<i32>>)
+  ireevm.ref.release %owned : ireevm.ref<ireevm.list<i32>>
+  func.return
+}
+// ----
+ireevm.target<core> @vm_target
+
+ireevm.import.decl target(@vm_target) symbol("hal.ref.produce") @produce_ref(%resource: ireevm.ref<ireevm.list<i32>>) -> (ireevm.ref<ireevm.list<i32>>)
+
+func.def @allows_release_of_external_owned_ref(%resource: ireevm.ref<ireevm.list<i32>>) {
+  %owned = func.call @produce_ref(%resource) : (ireevm.ref<ireevm.list<i32>>) -> (ireevm.ref<ireevm.list<i32>>)
+  ireevm.ref.release %owned : ireevm.ref<ireevm.list<i32>>
+  ireevm.ref.release %resource : ireevm.ref<ireevm.list<i32>>
+  func.return
+}

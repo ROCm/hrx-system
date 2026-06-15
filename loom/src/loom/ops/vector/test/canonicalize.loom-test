@@ -1,0 +1,967 @@
+// RUN: pass canonicalize
+
+// Zero-lane construction produces the empty aggregate even when the source
+// scalar is poison: no vector lane observes the operand.
+func.def @empty_splat_ignores_poison() -> (vector<0xf32>) {
+  %p = scalar.poison : f32
+  %r = vector.splat %p : vector<0xf32>
+  func.return %r : vector<0xf32>
+}
+// ----
+func.def @empty_splat_ignores_poison() -> (vector<0xf32>) {
+  %r = vector.empty : vector<0xf32>
+  func.return %r : vector<0xf32>
+}
+
+// ====
+
+// Zero-lane lanewise computation has exactly one valid result: vector.empty.
+func.def @empty_lanewise(%a: vector<0xf32>, %b: vector<0xf32>) -> (vector<0xf32>) {
+  %r = vector.addf %a, %b : vector<0xf32>
+  func.return %r : vector<0xf32>
+}
+// ----
+func.def @empty_lanewise(%a: vector<0xf32>, %b: vector<0xf32>) -> (vector<0xf32>) {
+  %r = vector.empty : vector<0xf32>
+  func.return %r : vector<0xf32>
+}
+
+// ====
+
+// A zero-lane iota has no observable coordinate lanes.
+func.def @empty_iota(%base: index, %step: index) -> (vector<0xindex>) {
+  %r = vector.iota %base step %step : vector<0xindex>
+  func.return %r : vector<0xindex>
+}
+// ----
+func.def @empty_iota(%base: index, %step: index) -> (vector<0xindex>) {
+  %r = vector.empty : vector<0xindex>
+  func.return %r : vector<0xindex>
+}
+
+// ====
+
+// A small static iota with exact base and step materializes explicit lanes.
+func.def @static_iota_to_from_elements() -> (vector<4xi32>) {
+  %base = scalar.constant 3 : i32
+  %step = scalar.constant 4 : i32
+  %r = vector.iota %base step %step : vector<4xi32>
+  func.return %r : vector<4xi32>
+}
+// ----
+func.def @static_iota_to_from_elements() -> (vector<4xi32>) {
+  %4 = scalar.constant 3 : i32
+  %5 = scalar.constant 7 : i32
+  %6 = scalar.constant 11 : i32
+  %7 = scalar.constant 15 : i32
+  %r = vector.from_elements %4, %5, %6, %7 : vector<4xi32>
+  func.return %r : vector<4xi32>
+}
+
+// ====
+
+// Static extraction from iota folds through the lane-coordinate formula.
+func.def @extract_iota_static_lane_to_constant() -> (index, i32) {
+  %base = index.constant 5 : index
+  %step = index.constant 2 : index
+  %lanes = vector.iota %base step %step : vector<4xindex>
+  %lane2 = vector.extract %lanes[2] : vector<4xindex> -> index
+  %i32_base = scalar.constant 3 : i32
+  %i32_step = scalar.constant 4 : i32
+  %offsets = vector.iota %i32_base step %i32_step : vector<4xi32>
+  %lane3 = vector.extract %offsets[3] : vector<4xi32> -> i32
+  func.return %lane2, %lane3 : index, i32
+}
+// ----
+func.def @extract_iota_static_lane_to_constant() -> (index, i32) {
+  %lane2 = index.constant 9 : index
+  %lane3 = scalar.constant 15 : i32
+  func.return %lane2, %lane3 : index, i32
+}
+
+// ====
+
+// Dynamic extraction with an exact lane index becomes a static extraction, then
+// folds through from_elements.
+func.def @extract_from_elements_dynamic_exact_lane() -> (i32) {
+  %lane_index = index.constant 1 : index
+  %lane0 = scalar.constant 4 : i32
+  %lane1 = scalar.constant 5 : i32
+  %lanes = vector.from_elements %lane0, %lane1 : vector<2xi32>
+  %r = vector.extract %lanes[%lane_index] : vector<2xi32> -> i32
+  func.return %r : i32
+}
+// ----
+func.def @extract_from_elements_dynamic_exact_lane() -> (i32) {
+  %r = scalar.constant 5 : i32
+  func.return %r : i32
+}
+
+// ====
+
+// Dynamic extraction with an exact lane index also folds through iota's lane
+// formula.
+func.def @extract_iota_dynamic_exact_lane_to_constant() -> (index, i32) {
+  %lane_index = index.constant 2 : index
+  %base = index.constant 5 : index
+  %step = index.constant 2 : index
+  %index_lanes = vector.iota %base step %step : vector<4xindex>
+  %index_lane = vector.extract %index_lanes[%lane_index] : vector<4xindex> -> index
+  %i32_base = scalar.constant 3 : i32
+  %i32_step = scalar.constant 4 : i32
+  %i32_lanes = vector.iota %i32_base step %i32_step : vector<4xi32>
+  %i32_lane = vector.extract %i32_lanes[%lane_index] : vector<4xi32> -> i32
+  func.return %index_lane, %i32_lane : index, i32
+}
+// ----
+func.def @extract_iota_dynamic_exact_lane_to_constant() -> (index, i32) {
+  %index_lane = index.constant 9 : index
+  %i32_lane = scalar.constant 11 : i32
+  func.return %index_lane, %i32_lane : index, i32
+}
+
+// ====
+
+// Static extraction from dynamic iota lanes lowers to the scalar lane formula.
+func.def @extract_iota_dynamic_values_to_scalar_formula(%base: index, %step: index, %i32_base: i32, %i32_step: i32) -> (index, index, index, i32) {
+  %index_lanes = vector.iota %base step %step : vector<4xindex>
+  %index_lane0 = vector.extract %index_lanes[0] : vector<4xindex> -> index
+  %index_lane1 = vector.extract %index_lanes[1] : vector<4xindex> -> index
+  %index_lane2 = vector.extract %index_lanes[2] : vector<4xindex> -> index
+  %i32_lanes = vector.iota %i32_base step %i32_step : vector<4xi32>
+  %i32_lane2 = vector.extract %i32_lanes[2] : vector<4xi32> -> i32
+  func.return %index_lane0, %index_lane1, %index_lane2, %i32_lane2 : index, index, index, i32
+}
+// ----
+func.def @extract_iota_dynamic_values_to_scalar_formula(%base: index, %step: index, %i32_base: i32, %i32_step: i32) -> (index, index, index, i32) {
+  %index_lane1 = index.add %base, %step : index
+  %19 = index.constant 2 : index
+  %index_lane2 = index.madd %step, %19, %base : index
+  %17 = scalar.constant 1 : i32
+  %18 = scalar.shli %i32_step, %17 : i32
+  %i32_lane2 = scalar.addi %i32_base, %18 : i32
+  func.return %base, %index_lane1, %index_lane2, %i32_lane2 : index, index, index, i32
+}
+
+// ====
+
+// The from_elements workaround for explicit dynamic lane formulas folds back to
+// the selected scalar operand.
+func.def @extract_from_elements_dynamic_operands_to_operand(%base: i32, %next: i32) -> (i32) {
+  %lanes = vector.from_elements %base, %next : vector<2xi32>
+  %r = vector.extract %lanes[1] : vector<2xi32> -> i32
+  func.return %r : i32
+}
+// ----
+func.def @extract_from_elements_dynamic_operands_to_operand(%base: i32, %next: i32) -> (i32) {
+  func.return %next : i32
+}
+
+// ====
+
+// A single scalar lane extracted from a vector load can narrow to a scalar
+// view.load. This avoids forcing wide payload lowering for table-style record
+// loads where only one field is used.
+func.def @extract_single_use_load_to_view_load(%input: buffer, %offset: offset) -> (i32) {
+  %view = buffer.view %input[%offset] : buffer -> view<4xi32, #dense>
+  %wide = vector.load %view[0] : view<4xi32, #dense> -> vector<4xi32>
+  %lane2 = vector.extract %wide[2] : vector<4xi32> -> i32
+  func.return %lane2 : i32
+}
+// ----
+func.def @extract_single_use_load_to_view_load(%input: buffer, %offset: offset) -> (i32) {
+  %view = buffer.view %input[%offset] : buffer -> view<4xi32, #dense>
+  %lane2 = view.load %view[2] : view<4xi32, #dense> -> i32
+  func.return %lane2 : i32
+}
+
+// ====
+
+// When multiple scalar lanes are extracted, the wide vector load is still the
+// better canonical form: target lowering can select one coalesced memory op and
+// slice registers instead of scalarizing into several smaller loads.
+func.def @extract_multi_use_load_keeps_wide_load(%input: buffer, %offset: offset) -> (i32, i32) {
+  %view = buffer.view %input[%offset] : buffer -> view<4xi32, #dense>
+  %wide = vector.load %view[0] : view<4xi32, #dense> -> vector<4xi32>
+  %lane1 = vector.extract %wide[1] : vector<4xi32> -> i32
+  %lane2 = vector.extract %wide[2] : vector<4xi32> -> i32
+  func.return %lane1, %lane2 : i32, i32
+}
+
+// ====
+
+// A zero-lane range mask performs no range tests.
+func.def @empty_mask_range(%lo: index, %hi: index, %step: index) -> (vector<0xi1>) {
+  %r = vector.mask.range [%lo to %hi step %step] : index -> vector<0xi1>
+  func.return %r : vector<0xi1>
+}
+// ----
+func.def @empty_mask_range(%lo: index, %hi: index, %step: index) -> (vector<0xi1>) {
+  %r = vector.empty : vector<0xi1>
+  func.return %r : vector<0xi1>
+}
+
+// ====
+
+// A static range covering every lane becomes an all-true mask constant.
+func.def @mask_range_static_all_true() -> (vector<4xi1>) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c4 = index.constant 4 : index
+  %r = vector.mask.range [%c0 to %c4 step %c1] : index -> vector<4xi1>
+  func.return %r : vector<4xi1>
+}
+// ----
+func.def @mask_range_static_all_true() -> (vector<4xi1>) {
+  %r = vector.constant true : vector<4xi1>
+  func.return %r : vector<4xi1>
+}
+
+// ====
+
+// A non-negative static range that starts at the exclusive bound is all false.
+func.def @mask_range_static_all_false() -> (vector<4xi1>) {
+  %c1 = index.constant 1 : index
+  %c4 = index.constant 4 : index
+  %r = vector.mask.range [%c4 to %c4 step %c1] : index -> vector<4xi1>
+  func.return %r : vector<4xi1>
+}
+// ----
+func.def @mask_range_static_all_false() -> (vector<4xi1>) {
+  %r = vector.constant false : vector<4xi1>
+  func.return %r : vector<4xi1>
+}
+
+// ====
+
+// A negative step can make later lanes true even when lane 0 is false.
+func.def @mask_range_negative_step_not_all_false() -> (vector<2xi1>) {
+  %c10 = index.constant 10 : index
+  %c5 = index.constant 5 : index
+  %cn10 = index.constant -10 : index
+  %r = vector.mask.range [%c10 to %c5 step %cn10] : index -> vector<2xi1>
+  func.return %r : vector<2xi1>
+}
+
+// ====
+
+// Reducing zero lanes observes no input lanes and returns the explicit init.
+func.def @empty_reduce(%v: vector<0xf32>, %init: f32) -> (f32) {
+  %r = vector.reduce<addf> %v, %init : vector<0xf32>, f32
+  func.return %r : f32
+}
+// ----
+func.def @empty_reduce(%v: vector<0xf32>, %init: f32) -> (f32) {
+  func.return %init : f32
+}
+
+// ====
+
+// Reducing every source axis is the scalar horizontal reduction form.
+func.def @reduce_axes_all_axes_to_reduce(%v: vector<2x3xf32>, %init: f32) -> (f32) {
+  %r = vector.reduce.axes<addf> %v, %init axes [0, 1] : vector<2x3xf32>, f32
+  func.return %r : f32
+}
+
+// ----
+func.def @reduce_axes_all_axes_to_reduce(%v: vector<2x3xf32>, %init: f32) -> (f32) {
+  %r = vector.reduce<addf> %v, %init : vector<2x3xf32>, f32
+  func.return %r : f32
+}
+
+// ====
+
+// Dotting zero lanes observes no vector lanes and returns the explicit init.
+func.def @empty_dotf(%lhs: vector<0xf32>, %rhs: vector<0xf32>, %init: f32) -> (f32) {
+  %r = vector.dotf %lhs, %rhs, %init : vector<0xf32>, vector<0xf32>, f32
+  func.return %r : f32
+}
+// ----
+func.def @empty_dotf(%lhs: vector<0xf32>, %rhs: vector<0xf32>, %init: f32) -> (f32) {
+  func.return %init : f32
+}
+
+// ====
+
+// Contracted product reductions are the source spelling of a dot contraction.
+func.def @contracted_product_reduce_to_dotf(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %init: f32) -> (f32) {
+  %product = vector.mulf<reassoc|nnan|ninf|nsz|contract> %lhs, %rhs : vector<4xf32>
+  %r = vector.reduce<addf, reassoc|nnan|ninf|nsz|contract> %product, %init : vector<4xf32>, f32
+  func.return %r : f32
+}
+// ----
+func.def @contracted_product_reduce_to_dotf(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %init: f32) -> (f32) {
+  %r = vector.dotf<reassoc|nnan|ninf|nsz|contract> %lhs, %rhs, %init : vector<4xf32>, vector<4xf32>, f32
+  func.return %r : f32
+}
+
+// ====
+
+// Exact product reductions keep their separately rounded product and add ops.
+func.def @exact_product_reduce_stays_separate(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %init: f32) -> (f32) {
+  %product = vector.mulf %lhs, %rhs : vector<4xf32>
+  %r = vector.reduce<addf> %product, %init : vector<4xf32>, f32
+  func.return %r : f32
+}
+
+// ====
+
+// Extracting a scalar from a statically empty axis observes an impossible lane,
+// but a dead observation folds away before it reaches a poison boundary.
+func.def @extract_from_empty_axis(%v: vector<0xf32>) {
+  %r = vector.extract %v[0] : vector<0xf32> -> f32
+  func.return
+}
+// ----
+func.def @extract_from_empty_axis(%v: vector<0xf32>) {
+  func.return
+}
+
+// ====
+
+// A zero-lane load has no memory footprint and returns vector.empty.
+func.def @empty_load(%buffer: buffer, %offset: offset) -> (vector<0xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  %r = vector.load %view[0] : view<16xf32, %layout> -> vector<0xf32>
+  func.return %r : vector<0xf32>
+}
+// ----
+func.def @empty_load(%buffer: buffer, %offset: offset) -> (vector<0xf32>) {
+  %r = vector.empty : vector<0xf32>
+  func.return %r : vector<0xf32>
+}
+
+// ====
+
+// A zero-lane store has no memory footprint and erases completely.
+func.def @empty_store(%buffer: buffer, %offset: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  %v = vector.empty : vector<0xf32>
+  vector.store %v, %view[0] : vector<0xf32>, view<16xf32, %layout>
+  func.return
+}
+// ----
+func.def @empty_store(%buffer: buffer, %offset: offset) {
+  func.return
+}
+
+// ====
+
+// Exact scalar facts splatted into a vector become a vector constant directly.
+func.def @splat_constant_to_vector_constant() -> (vector<4xi32>) {
+  %c = scalar.constant 7 : i32
+  %v = vector.splat %c : vector<4xi32>
+  func.return %v : vector<4xi32>
+}
+// ----
+func.def @splat_constant_to_vector_constant() -> (vector<4xi32>) {
+  %v = vector.constant 7 : vector<4xi32>
+  func.return %v : vector<4xi32>
+}
+
+// ====
+
+// Uniform vector facts let lanewise ops materialize vector constants.
+func.def @addi_uniform_constants_to_vector_constant() -> (vector<4xi32>) {
+  %a = vector.constant 2 : vector<4xi32>
+  %b = vector.constant 3 : vector<4xi32>
+  %r = vector.addi %a, %b : vector<4xi32>
+  func.return %r : vector<4xi32>
+}
+// ----
+func.def @addi_uniform_constants_to_vector_constant() -> (vector<4xi32>) {
+  %r = vector.constant 5 : vector<4xi32>
+  func.return %r : vector<4xi32>
+}
+
+// ====
+
+// Dynamic vector shapes still use fact-driven integer identities.
+func.def @addi_dynamic_zero_identity(%n: index, %x: vector<[%n]xi32>) -> (vector<[%n]xi32>) {
+  %zero_scalar = scalar.constant 0 : i32
+  %zero = vector.splat %zero_scalar : vector<[%n]xi32>
+  %r = vector.addi %x, %zero : vector<[%n]xi32>
+  func.return %r : vector<[%n]xi32>
+}
+// ----
+func.def @addi_dynamic_zero_identity(%n: index, %x: vector<[%n]xi32>) -> (vector<[%n]xi32>) {
+  func.return %x : vector<[%n]xi32>
+}
+
+// ====
+
+// Floating-point subtraction identities require signed-zero freedom and keep
+// negation explicit instead of relying on target-specific subtract literals.
+func.def @subf_zero_identities(%n: index, %x: vector<[%n]xf32>) -> (vector<[%n]xf32>, vector<[%n]xf32>) {
+  %zero = vector.constant 0.0 : vector<[%n]xf32>
+  %sub_rhs = vector.subf<nsz> %x, %zero : vector<[%n]xf32>
+  %sub_lhs = vector.subf<nnan|nsz> %zero, %x : vector<[%n]xf32>
+  func.return %sub_rhs, %sub_lhs : vector<[%n]xf32>, vector<[%n]xf32>
+}
+// ----
+func.def @subf_zero_identities(%n: index, %x: vector<[%n]xf32>) -> (vector<[%n]xf32>, vector<[%n]xf32>) {
+  %sub_lhs = vector.negf<nnan|nsz> %x : vector<[%n]xf32>
+  func.return %x, %sub_lhs : vector<[%n]xf32>, vector<[%n]xf32>
+}
+
+// ====
+
+// A negated input multiplied by an exact constant keeps the sign on the
+// constant so target lowering does not need a separate negation instruction.
+func.def @mulf_absorbs_negated_input_constant(%x: vector<4xf32>) -> (vector<4xf32>) {
+  %zero = vector.constant 0.0 : vector<4xf32>
+  %neg = vector.subf<nnan|nsz> %zero, %x : vector<4xf32>
+  %scale = vector.constant 1.4426950408889634 : vector<4xf32>
+  %scaled = vector.mulf<nnan|ninf|nsz> %neg, %scale : vector<4xf32>
+  func.return %scaled : vector<4xf32>
+}
+// ----
+func.def @mulf_absorbs_negated_input_constant(%x: vector<4xf32>) -> (vector<4xf32>) {
+  %7 = vector.constant -1.4426950408889634 : vector<4xf32>
+  %scaled = vector.mulf<nnan|ninf|nsz> %x, %7 : vector<4xf32>
+  func.return %scaled : vector<4xf32>
+}
+
+// ====
+
+// A uniform all-true mask selects the true vector as a whole.
+func.def @select_uniform_true(%a: vector<4xi32>, %b: vector<4xi32>) -> (vector<4xi32>) {
+  %mask = vector.constant true : vector<4xi1>
+  %r = vector.select %mask, %a, %b : vector<4xi32>
+  func.return %r : vector<4xi32>
+}
+// ----
+func.def @select_uniform_true(%a: vector<4xi32>, %b: vector<4xi32>) -> (vector<4xi32>) {
+  func.return %a : vector<4xi32>
+}
+
+// ====
+
+// Repeated scalar operands are more regular as a splat.
+func.def @from_elements_same_operand_to_splat(%x: f32) -> (vector<4xf32>) {
+  %v = vector.from_elements %x, %x, %x, %x : vector<4xf32>
+  func.return %v : vector<4xf32>
+}
+// ----
+func.def @from_elements_same_operand_to_splat(%x: f32) -> (vector<4xf32>) {
+  %v = vector.splat %x : vector<4xf32>
+  func.return %v : vector<4xf32>
+}
+
+// ====
+
+// Extracting any proven in-bounds lane from a static splat returns the scalar.
+func.def @extract_splat_to_scalar(%x: f32) -> (f32) {
+  %v = vector.splat %x : vector<4xf32>
+  %r = vector.extract %v[2] : vector<4xf32> -> f32
+  func.return %r : f32
+}
+// ----
+func.def @extract_splat_to_scalar(%x: f32) -> (f32) {
+  func.return %x : f32
+}
+
+// ====
+
+// Static extraction from vector.from_elements selects the source SSA value.
+func.def @extract_from_elements_to_operand() -> (i32) {
+  %c0 = scalar.constant 1 : i32
+  %c1 = scalar.constant 2 : i32
+  %c2 = scalar.constant 3 : i32
+  %v = vector.from_elements %c0, %c1, %c2 : vector<3xi32>
+  %r = vector.extract %v[1] : vector<3xi32> -> i32
+  func.return %r : i32
+}
+// ----
+func.def @extract_from_elements_to_operand() -> (i32) {
+  %r = scalar.constant 2 : i32
+  func.return %r : i32
+}
+
+// ====
+
+// Exact dynamic indices are represented as static extract coordinates.
+func.def @extract_constant_dynamic_index(%v: vector<4xi32>) -> (i32) {
+  %lane = index.constant 2 : index
+  %r = vector.extract %v[%lane] : vector<4xi32> -> i32
+  func.return %r : i32
+}
+// ----
+func.def @extract_constant_dynamic_index(%v: vector<4xi32>) -> (i32) {
+  %r = vector.extract %v[2] : vector<4xi32> -> i32
+  func.return %r : i32
+}
+
+// ====
+
+// Constant coordinates fold independently while true dynamic coordinates stay
+// explicit.
+func.def @extract_mixed_dynamic_indices(%v: vector<4x4xi32>, %row: index) -> (i32) {
+  %col = index.constant 1 : index
+  %r = vector.extract %v[%row, %col] : vector<4x4xi32> -> i32
+  func.return %r : i32
+}
+// ----
+func.def @extract_mixed_dynamic_indices(%v: vector<4x4xi32>, %row: index) -> (i32) {
+  %r = vector.extract %v[%row, 1] : vector<4x4xi32> -> i32
+  func.return %r : i32
+}
+
+// ====
+
+// Identity shuffles do not need to survive as explicit register traffic.
+func.def @shuffle_identity(%v: vector<4xf32>) -> (vector<4xf32>) {
+  %r = vector.shuffle<[0, 1, 2, 3]> %v : vector<4xf32>
+  func.return %r : vector<4xf32>
+}
+// ----
+func.def @shuffle_identity(%v: vector<4xf32>) -> (vector<4xf32>) {
+  func.return %v : vector<4xf32>
+}
+
+// ====
+
+// Reducing identity lanes leaves the explicit accumulator unchanged.
+func.def @reduce_dynamic_zero_to_init(%n: index, %init: i32) -> (i32) {
+  %zero_scalar = scalar.constant 0 : i32
+  %zero = vector.splat %zero_scalar : vector<[%n]xi32>
+  %r = vector.reduce<addi> %zero, %init : vector<[%n]xi32>, i32
+  func.return %r : i32
+}
+// ----
+func.def @reduce_dynamic_zero_to_init(%n: index, %init: i32) -> (i32) {
+  func.return %init : i32
+}
+
+// ====
+
+// Identity lanes preserve vector accumulators across dynamic reduced extents.
+func.def @reduce_axes_dynamic_zero_to_init(%n: index, %init: vector<2xi32>) -> (vector<2xi32>) {
+  %zero_scalar = scalar.constant 0 : i32
+  %zero = vector.splat %zero_scalar : vector<[%n]x2xi32>
+  %r = vector.reduce.axes<addi> %zero, %init axes [0] : vector<[%n]x2xi32>, vector<2xi32>
+  func.return %r : vector<2xi32>
+}
+
+// ----
+func.def @reduce_axes_dynamic_zero_to_init(%n: index, %init: vector<2xi32>) -> (vector<2xi32>) {
+  func.return %init : vector<2xi32>
+}
+
+// ====
+
+// Integer identities fold without requiring the vector shape to become static.
+func.def @integer_identities(%n: index, %x: vector<[%n]xi32>) -> (vector<[%n]xi32>, vector<[%n]xi32>, vector<[%n]xi32>) {
+  %zero = vector.constant 0 : vector<[%n]xi32>
+  %sub = vector.subi %x, %zero : vector<[%n]xi32>
+  %xor = vector.xori %x, %x : vector<[%n]xi32>
+  %and = vector.andi %x, %x : vector<[%n]xi32>
+  func.return %sub, %xor, %and : vector<[%n]xi32>, vector<[%n]xi32>, vector<[%n]xi32>
+}
+// ----
+func.def @integer_identities(%n: index, %x: vector<[%n]xi32>) -> (vector<[%n]xi32>, vector<[%n]xi32>, vector<[%n]xi32>) {
+  %xor = vector.constant 0 : vector<[%n]xi32>
+  func.return %x, %xor, %x : vector<[%n]xi32>, vector<[%n]xi32>, vector<[%n]xi32>
+}
+
+// ====
+
+// Integer comparisons against the same value fold when the predicate is total.
+func.def @cmpi_same_operand(%x: vector<4xi32>) -> (vector<4xi1>, vector<4xi1>) {
+  %le = vector.cmpi sle, %x, %x : vector<4xi32> -> vector<4xi1>
+  %gt = vector.cmpi sgt, %x, %x : vector<4xi32> -> vector<4xi1>
+  func.return %le, %gt : vector<4xi1>, vector<4xi1>
+}
+// ----
+func.def @cmpi_same_operand(%x: vector<4xi32>) -> (vector<4xi1>, vector<4xi1>) {
+  %le = vector.constant true : vector<4xi1>
+  %gt = vector.constant false : vector<4xi1>
+  func.return %le, %gt : vector<4xi1>, vector<4xi1>
+}
+
+// ====
+
+// Floating-point self-comparisons fold only for NaN-stable predicates.
+func.def @cmpf_same_operand(%x: vector<4xf32>) -> (vector<4xi1>, vector<4xi1>) {
+  %ueq = vector.cmpf ueq, %x, %x : vector<4xf32> -> vector<4xi1>
+  %one = vector.cmpf one, %x, %x : vector<4xf32> -> vector<4xi1>
+  func.return %ueq, %one : vector<4xi1>, vector<4xi1>
+}
+// ----
+func.def @cmpf_same_operand(%x: vector<4xf32>) -> (vector<4xi1>, vector<4xi1>) {
+  %ueq = vector.constant true : vector<4xi1>
+  %one = vector.constant false : vector<4xi1>
+  func.return %ueq, %one : vector<4xi1>, vector<4xi1>
+}
+
+// ====
+
+// All-false masked loads perform no memory reads and return the passthrough.
+func.def @load_mask_all_false_to_passthrough(%buffer: buffer, %offset: offset, %old: vector<4xf32>) -> (vector<4xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  %mask = vector.constant false : vector<4xi1>
+  %r = vector.load.mask %view[0], %mask, %old : view<16xf32, %layout>, vector<4xi1>, vector<4xf32>
+  func.return %r : vector<4xf32>
+}
+// ----
+func.def @load_mask_all_false_to_passthrough(%buffer: buffer, %offset: offset, %old: vector<4xf32>) -> (vector<4xf32>) {
+  func.return %old : vector<4xf32>
+}
+
+// ====
+
+// All-false masked stores perform no memory writes.
+func.def @store_mask_all_false_erases(%buffer: buffer, %offset: offset, %value: vector<4xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  %mask = vector.constant false : vector<4xi1>
+  vector.store.mask %value, %view[0], %mask : vector<4xf32>, view<16xf32, %layout>, vector<4xi1>
+  func.return
+}
+// ----
+func.def @store_mask_all_false_erases(%buffer: buffer, %offset: offset, %value: vector<4xf32>) {
+  func.return
+}
+
+// ====
+
+// All-false expand loads consume no packed memory elements.
+func.def @load_expand_all_false_to_passthrough(%buffer: buffer, %offset: offset, %old: vector<4xf32>) -> (vector<4xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  %mask = vector.constant false : vector<4xi1>
+  %r = vector.load.expand %view[0], %mask, %old : view<16xf32, %layout>, vector<4xi1>, vector<4xf32>
+  func.return %r : vector<4xf32>
+}
+// ----
+func.def @load_expand_all_false_to_passthrough(%buffer: buffer, %offset: offset, %old: vector<4xf32>) -> (vector<4xf32>) {
+  func.return %old : vector<4xf32>
+}
+
+// ====
+
+// All-false compress stores produce no packed memory elements.
+func.def @store_compress_all_false_erases(%buffer: buffer, %offset: offset, %value: vector<4xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  %mask = vector.constant false : vector<4xi1>
+  vector.store.compress %value, %view[0], %mask : vector<4xf32>, view<16xf32, %layout>, vector<4xi1>
+  func.return
+}
+// ----
+func.def @store_compress_all_false_erases(%buffer: buffer, %offset: offset, %value: vector<4xf32>) {
+  func.return
+}
+
+// ====
+
+// All-false gather masks are also no reads, regardless of offset vector facts.
+func.def @gather_mask_all_false_to_passthrough(%buffer: buffer, %offset: offset, %offsets: vector<4xi32>, %old: vector<4xf32>) -> (vector<4xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  %mask = vector.constant false : vector<4xi1>
+  %r = vector.gather.mask %view[0][%offsets], %mask, %old : view<16xf32, %layout>, vector<4xi32>, vector<4xi1>, vector<4xf32>
+  func.return %r : vector<4xf32>
+}
+// ----
+func.def @gather_mask_all_false_to_passthrough(%buffer: buffer, %offset: offset, %offsets: vector<4xi32>, %old: vector<4xf32>) -> (vector<4xf32>) {
+  func.return %old : vector<4xf32>
+}
+
+// ====
+
+// All-false scatter masks do not require address uniqueness because no lane
+// reaches memory.
+func.def @scatter_mask_all_false_erases(%buffer: buffer, %offset: offset, %offsets: vector<4xi32>, %value: vector<4xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  %mask = vector.constant false : vector<4xi1>
+  vector.scatter.mask %value, %view[0][%offsets], %mask : vector<4xf32>, view<16xf32, %layout>, vector<4xi32>, vector<4xi1>
+  func.return
+}
+// ----
+func.def @scatter_mask_all_false_erases(%buffer: buffer, %offset: offset, %offsets: vector<4xi32>, %value: vector<4xf32>) {
+  func.return
+}
+
+// ====
+
+// A rank-1 gather with iota(0, 1) offsets is the regular contiguous vector
+// load form.
+func.def @gather_iota_to_load(%n: index, %buffer: buffer, %offset: offset, %origin: index) -> (vector<[%n]xf32>) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<[%n]xf32, %layout>
+  %offsets = vector.iota %c0 step %c1 : vector<[%n]xindex>
+  %r = vector.gather %view[%origin][%offsets] {cache_scope = device, cache_temporal = high_temporal} : view<[%n]xf32, %layout>, vector<[%n]xindex> -> vector<[%n]xf32>
+  func.return %r : vector<[%n]xf32>
+}
+// ----
+func.def @gather_iota_to_load(%n: index, %buffer: buffer, %offset: offset, %origin: index) -> (vector<[%n]xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<[%n]xf32, %layout>
+  %r = vector.load %view[%origin] {cache_scope = device, cache_temporal = high_temporal} : view<[%n]xf32, %layout> -> vector<[%n]xf32>
+  func.return %r : vector<[%n]xf32>
+}
+
+// ====
+
+// The same contiguous-offset proof preserves masked load inactive-lane
+// semantics instead of forcing a gather spelling downstream.
+func.def @gather_mask_iota_to_load_mask(%buffer: buffer, %offset: offset, %origin: index, %mask: vector<4xi1>, %old: vector<4xf32>) -> (vector<4xf32>) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  %offsets = vector.iota %c0 step %c1 : vector<4xindex>
+  %r = vector.gather.mask %view[%origin][%offsets], %mask, %old : view<16xf32, %layout>, vector<4xindex>, vector<4xi1>, vector<4xf32>
+  func.return %r : vector<4xf32>
+}
+// ----
+func.def @gather_mask_iota_to_load_mask(%buffer: buffer, %offset: offset, %origin: index, %mask: vector<4xi1>, %old: vector<4xf32>) -> (vector<4xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  %r = vector.load.mask %view[%origin], %mask, %old : view<16xf32, %layout>, vector<4xi1>, vector<4xf32>
+  func.return %r : vector<4xf32>
+}
+
+// ====
+
+// A rank-1 scatter with iota(0, 1) offsets is the regular contiguous vector
+// store form.
+func.def @scatter_iota_to_store(%buffer: buffer, %offset: offset, %origin: index, %value: vector<4xf32>) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  %offsets = vector.iota %c0 step %c1 : vector<4xindex>
+  vector.scatter %value, %view[%origin][%offsets] : vector<4xf32>, view<16xf32, %layout>, vector<4xindex>
+  func.return
+}
+// ----
+func.def @scatter_iota_to_store(%buffer: buffer, %offset: offset, %origin: index, %value: vector<4xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  vector.store %value, %view[%origin] : vector<4xf32>, view<16xf32, %layout>
+  func.return
+}
+
+// ====
+
+// Masked contiguous scatters become masked stores and keep the same inactive
+// lane behavior.
+func.def @scatter_mask_iota_to_store_mask(%buffer: buffer, %offset: offset, %origin: index, %mask: vector<4xi1>, %value: vector<4xf32>) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  %offsets = vector.iota %c0 step %c1 : vector<4xindex>
+  vector.scatter.mask %value, %view[%origin][%offsets], %mask : vector<4xf32>, view<16xf32, %layout>, vector<4xindex>, vector<4xi1>
+  func.return
+}
+// ----
+func.def @scatter_mask_iota_to_store_mask(%buffer: buffer, %offset: offset, %origin: index, %mask: vector<4xi1>, %value: vector<4xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  vector.store.mask %value, %view[%origin], %mask : vector<4xf32>, view<16xf32, %layout>, vector<4xi1>
+  func.return
+}
+
+// ====
+
+// All-false atomic RMW masks return passthrough and do not touch memory.
+func.def @atomic_rmw_mask_all_false_to_passthrough(%buffer: buffer, %offset: offset, %offsets: vector<4xindex>, %value: vector<4xi32>, %old: vector<4xi32>) -> (vector<4xi32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xi32, %layout>
+  %mask = vector.constant false : vector<4xi1>
+  %r = vector.atomic.rmw.mask<addi> %value, %view[0][%offsets], %mask, %old {ordering = relaxed, scope = workgroup} : vector<4xi32>, view<16xi32, %layout>, vector<4xindex>, vector<4xi1>, vector<4xi32>
+  func.return %r : vector<4xi32>
+}
+// ----
+func.def @atomic_rmw_mask_all_false_to_passthrough(%buffer: buffer, %offset: offset, %offsets: vector<4xindex>, %value: vector<4xi32>, %old: vector<4xi32>) -> (vector<4xi32>) {
+  func.return %old : vector<4xi32>
+}
+
+// ====
+
+// All-false atomic reductions are also no-ops, including duplicate addresses.
+func.def @atomic_reduce_mask_all_false_erases(%buffer: buffer, %offset: offset, %offsets: vector<4xindex>, %value: vector<4xi32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xi32, %layout>
+  %mask = vector.constant false : vector<4xi1>
+  vector.atomic.reduce.mask<addi> %value, %view[0][%offsets], %mask {ordering = relaxed, scope = workgroup} : vector<4xi32>, view<16xi32, %layout>, vector<4xindex>, vector<4xi1>
+  func.return
+}
+// ----
+func.def @atomic_reduce_mask_all_false_erases(%buffer: buffer, %offset: offset, %offsets: vector<4xindex>, %value: vector<4xi32>) {
+  func.return
+}
+
+// ====
+
+// All-true masked loads are ordinary loads; passthrough is unreachable.
+func.def @load_mask_all_true_to_load(%buffer: buffer, %offset: offset, %old: vector<4xf32>) -> (vector<4xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  %mask = vector.constant true : vector<4xi1>
+  %r = vector.load.mask %view[0], %mask, %old {cache_scope = device, cache_temporal = non_temporal} : view<16xf32, %layout>, vector<4xi1>, vector<4xf32>
+  func.return %r : vector<4xf32>
+}
+// ----
+func.def @load_mask_all_true_to_load(%buffer: buffer, %offset: offset, %old: vector<4xf32>) -> (vector<4xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  %r = vector.load %view[0] {cache_scope = device, cache_temporal = non_temporal} : view<16xf32, %layout> -> vector<4xf32>
+  func.return %r : vector<4xf32>
+}
+
+// ====
+
+// Full static range masks are normalized before masked memory canonicalizes.
+func.def @load_mask_full_range_to_load(%buffer: buffer, %offset: offset, %old: vector<4xf32>) -> (vector<4xf32>) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c4 = index.constant 4 : index
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  %mask = vector.mask.range [%c0 to %c4 step %c1] : index -> vector<4xi1>
+  %r = vector.load.mask %view[0], %mask, %old : view<16xf32, %layout>, vector<4xi1>, vector<4xf32>
+  func.return %r : vector<4xf32>
+}
+// ----
+func.def @load_mask_full_range_to_load(%buffer: buffer, %offset: offset, %old: vector<4xf32>) -> (vector<4xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  %r = vector.load %view[0] : view<16xf32, %layout> -> vector<4xf32>
+  func.return %r : vector<4xf32>
+}
+
+// ====
+
+// All-true masked stores are ordinary stores.
+func.def @store_mask_all_true_to_store(%buffer: buffer, %offset: offset, %value: vector<4xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  %mask = vector.constant true : vector<4xi1>
+  vector.store.mask %value, %view[0], %mask {cache_scope = system, cache_temporal = writeback} : vector<4xf32>, view<16xf32, %layout>, vector<4xi1>
+  func.return
+}
+// ----
+func.def @store_mask_all_true_to_store(%buffer: buffer, %offset: offset, %value: vector<4xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  vector.store %value, %view[0] {cache_scope = system, cache_temporal = writeback} : vector<4xf32>, view<16xf32, %layout>
+  func.return
+}
+
+// ====
+
+// All-true expand loads consume every packed element, matching vector.load.
+func.def @load_expand_all_true_to_load(%buffer: buffer, %offset: offset, %old: vector<4xf32>) -> (vector<4xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  %mask = vector.constant true : vector<4xi1>
+  %r = vector.load.expand %view[0], %mask, %old : view<16xf32, %layout>, vector<4xi1>, vector<4xf32>
+  func.return %r : vector<4xf32>
+}
+// ----
+func.def @load_expand_all_true_to_load(%buffer: buffer, %offset: offset, %old: vector<4xf32>) -> (vector<4xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  %r = vector.load %view[0] : view<16xf32, %layout> -> vector<4xf32>
+  func.return %r : vector<4xf32>
+}
+
+// ====
+
+// All-true compress stores produce every packed element, matching vector.store.
+func.def @store_compress_all_true_to_store(%buffer: buffer, %offset: offset, %value: vector<4xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  %mask = vector.constant true : vector<4xi1>
+  vector.store.compress %value, %view[0], %mask : vector<4xf32>, view<16xf32, %layout>, vector<4xi1>
+  func.return
+}
+// ----
+func.def @store_compress_all_true_to_store(%buffer: buffer, %offset: offset, %value: vector<4xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  vector.store %value, %view[0] : vector<4xf32>, view<16xf32, %layout>
+  func.return
+}
+
+// ====
+
+// All-true gathers are ordinary gathers.
+func.def @gather_mask_all_true_to_gather(%buffer: buffer, %offset: offset, %offsets: vector<4xi32>, %old: vector<4xf32>) -> (vector<4xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  %mask = vector.constant true : vector<4xi1>
+  %r = vector.gather.mask %view[0][%offsets], %mask, %old : view<16xf32, %layout>, vector<4xi32>, vector<4xi1>, vector<4xf32>
+  func.return %r : vector<4xf32>
+}
+// ----
+func.def @gather_mask_all_true_to_gather(%buffer: buffer, %offset: offset, %offsets: vector<4xi32>, %old: vector<4xf32>) -> (vector<4xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  %r = vector.gather %view[0][%offsets] : view<16xf32, %layout>, vector<4xi32> -> vector<4xf32>
+  func.return %r : vector<4xf32>
+}
+
+// ====
+
+// All-true scatters are ordinary scatters.
+func.def @scatter_mask_all_true_to_scatter(%buffer: buffer, %offset: offset, %offsets: vector<4xi32>, %value: vector<4xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  %mask = vector.constant true : vector<4xi1>
+  vector.scatter.mask %value, %view[0][%offsets], %mask : vector<4xf32>, view<16xf32, %layout>, vector<4xi32>, vector<4xi1>
+  func.return
+}
+// ----
+func.def @scatter_mask_all_true_to_scatter(%buffer: buffer, %offset: offset, %offsets: vector<4xi32>, %value: vector<4xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  vector.scatter %value, %view[0][%offsets] : vector<4xf32>, view<16xf32, %layout>, vector<4xi32>
+  func.return
+}
+
+// ====
+
+// All-true atomic RMW masks are ordinary vector atomic RMWs.
+func.def @atomic_rmw_mask_all_true_to_atomic_rmw(%buffer: buffer, %offset: offset, %offsets: vector<4xindex>, %value: vector<4xi32>, %old: vector<4xi32>) -> (vector<4xi32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xi32, %layout>
+  %mask = vector.constant true : vector<4xi1>
+  %r = vector.atomic.rmw.mask<addi> %value, %view[0][%offsets], %mask, %old {ordering = relaxed, scope = workgroup} : vector<4xi32>, view<16xi32, %layout>, vector<4xindex>, vector<4xi1>, vector<4xi32>
+  func.return %r : vector<4xi32>
+}
+// ----
+func.def @atomic_rmw_mask_all_true_to_atomic_rmw(%buffer: buffer, %offset: offset, %offsets: vector<4xindex>, %value: vector<4xi32>, %old: vector<4xi32>) -> (vector<4xi32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xi32, %layout>
+  %r = vector.atomic.rmw<addi> %value, %view[0][%offsets] {ordering = relaxed, scope = workgroup} : vector<4xi32>, view<16xi32, %layout>, vector<4xindex>
+  func.return %r : vector<4xi32>
+}
+
+// ====
+
+// All-true atomic reductions are ordinary vector atomic reductions.
+func.def @atomic_reduce_mask_all_true_to_atomic_reduce(%buffer: buffer, %offset: offset, %offsets: vector<4xindex>, %value: vector<4xi32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xi32, %layout>
+  %mask = vector.constant true : vector<4xi1>
+  vector.atomic.reduce.mask<addi> %value, %view[0][%offsets], %mask {cache_scope = device, cache_temporal = non_temporal, ordering = relaxed, scope = workgroup} : vector<4xi32>, view<16xi32, %layout>, vector<4xindex>, vector<4xi1>
+  func.return
+}
+// ----
+func.def @atomic_reduce_mask_all_true_to_atomic_reduce(%buffer: buffer, %offset: offset, %offsets: vector<4xindex>, %value: vector<4xi32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xi32, %layout>
+  vector.atomic.reduce<addi> %value, %view[0][%offsets] {cache_scope = device, cache_temporal = non_temporal, ordering = relaxed, scope = workgroup} : vector<4xi32>, view<16xi32, %layout>, vector<4xindex>
+  func.return
+}

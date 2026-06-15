@@ -41,13 +41,13 @@ iree_status_t iree_hal_executable_library_verify(
   for (uint32_t i = 0; i < library->exports.count; ++i) {
     const iree_hal_executable_dispatch_attrs_v0_t dispatch_attrs =
         library->exports.attrs[i];
-    if (dispatch_attrs.constant_count >
-        IREE_HAL_EXECUTABLE_MAX_CONSTANT_COUNT) {
+    if (dispatch_attrs.constant_byte_length >
+        IREE_HAL_EXECUTABLE_MAX_CONSTANT_BYTE_LENGTH) {
       return iree_make_status(
           IREE_STATUS_OUT_OF_RANGE,
-          "dispatch requiring %u constants exceeds limit of %d",
-          dispatch_attrs.constant_count,
-          IREE_HAL_EXECUTABLE_MAX_CONSTANT_COUNT);
+          "dispatch requiring %u constant bytes exceeds limit of %" PRIhsz,
+          dispatch_attrs.constant_byte_length,
+          (iree_host_size_t)IREE_HAL_EXECUTABLE_MAX_CONSTANT_BYTE_LENGTH);
     }
     if (dispatch_attrs.binding_count > IREE_HAL_EXECUTABLE_MAX_BINDING_COUNT) {
       return iree_make_status(
@@ -170,7 +170,7 @@ iree_status_t iree_hal_executable_library_export_info(
           IREE_HAL_EXECUTABLE_FUNCTION_FLAG_WORKGROUP_SIZE_DYNAMIC;
     }
 
-    out_info->constant_count = attrs->constant_count;
+    out_info->constant_byte_length = attrs->constant_byte_length;
     out_info->binding_count = attrs->binding_count;
     out_info->parameter_count = attrs->parameter_count;
 

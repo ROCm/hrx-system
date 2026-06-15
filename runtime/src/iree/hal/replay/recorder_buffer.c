@@ -528,7 +528,7 @@ static iree_status_t iree_hal_replay_recorder_buffer_flush_range(
       &pending_record);
   if (!iree_status_is_ok(begin_status)) {
     iree_allocator_free(buffer->host_allocator, data_snapshot);
-    return begin_status;
+    return iree_status_join(begin_status, status);
   }
   if (iree_status_is_ok(status)) {
     status = IREE_HAL_REPLAY_VTABLE_DISPATCH(buffer->base_buffer,

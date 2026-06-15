@@ -404,16 +404,13 @@ static void iree_status_payload_message_formatter(
     char* buffer, iree_host_size_t* out_buffer_length) {
   iree_status_payload_message_t* payload =
       (iree_status_payload_message_t*)base_payload;
-  if (!buffer) {
-    *out_buffer_length = payload->message.size;
-    return;
+  if (buffer && buffer_capacity > 0) {
+    iree_host_size_t copy_length =
+        iree_min(payload->message.size, buffer_capacity - 1);
+    memcpy(buffer, payload->message.data, copy_length);
+    buffer[copy_length] = '\0';
   }
-  iree_host_size_t n = buffer_capacity < payload->message.size
-                           ? buffer_capacity
-                           : payload->message.size;
-  memcpy(buffer, payload->message.data, n);
-  buffer[n] = '\0';
-  *out_buffer_length = n;
+  *out_buffer_length = payload->message.size;
 }
 
 // Captures the current stack and attaches it to the status storage.
@@ -852,6 +849,7 @@ static bool iree_status_format_message(iree_status_t status,
                                        iree_host_size_t* out_buffer_length,
                                        bool has_prefix) {
   *out_buffer_length = 0;
+  bool is_buffer_sufficient = true;
 
   // Grab storage which may have a message and zero or more payloads.
   iree_status_storage_t* storage = iree_status_storage(status);
@@ -867,23 +865,22 @@ static bool iree_status_format_message(iree_status_t status,
 #if (IREE_STATUS_FEATURES & IREE_STATUS_FEATURE_ANNOTATIONS) != 0
   // Append base storage message.
   if (storage && !iree_string_view_is_empty(storage->message)) {
-    n = iree_snprintf(buffer ? buffer + buffer_length : NULL,
-                      buffer ? buffer_capacity - buffer_length : 0,
-                      has_prefix ? "; %.*s" : "%.*s",
+    iree_host_size_t remaining_capacity =
+        buffer && buffer_length < buffer_capacity
+            ? buffer_capacity - buffer_length
+            : 0;
+    n = iree_snprintf(remaining_capacity > 0 ? buffer + buffer_length : NULL,
+                      remaining_capacity, has_prefix ? "; %.*s" : "%.*s",
                       (int)storage->message.size, storage->message.data);
     if (IREE_UNLIKELY(n < 0)) {
       return false;
-    } else if (buffer && n >= buffer_capacity - buffer_length) {
+    } else if (buffer && (iree_host_size_t)n >= remaining_capacity) {
       buffer = NULL;
+      is_buffer_sufficient = false;
     }
     buffer_length += n;
   }
 #endif  // has IREE_STATUS_FEATURE_ANNOTATIONS
-  if (IREE_UNLIKELY(n < 0)) {
-    return false;
-  } else if (buffer && n >= buffer_capacity) {
-    buffer = NULL;
-  }
 
 #if IREE_STATUS_FEATURES != 0
   // Append each payload separated by a newline.
@@ -896,9 +893,14 @@ static bool iree_status_format_message(iree_status_t status,
     }
 
     // Append newline to join with message above and other payloads.
+    iree_host_size_t remaining_capacity =
+        buffer && buffer_length < buffer_capacity
+            ? buffer_capacity - buffer_length
+            : 0;
     if (buffer) {
-      if (2 >= buffer_capacity - buffer_length) {
+      if (remaining_capacity <= 2) {
         buffer = NULL;
+        is_buffer_sufficient = false;
       } else {
         buffer[buffer_length] = ';';
         buffer[buffer_length + 1] = ' ';
@@ -908,11 +910,15 @@ static bool iree_status_format_message(iree_status_t status,
 
     // Append payload via custom formatter callback.
     iree_host_size_t payload_buffer_length = 0;
-    payload->formatter(payload, buffer ? buffer_capacity - buffer_length : 0,
-                       buffer ? buffer + buffer_length : NULL,
+    remaining_capacity = buffer && buffer_length < buffer_capacity
+                             ? buffer_capacity - buffer_length
+                             : 0;
+    payload->formatter(payload, remaining_capacity,
+                       remaining_capacity > 0 ? buffer + buffer_length : NULL,
                        &payload_buffer_length);
-    if (buffer && payload_buffer_length >= buffer_capacity - buffer_length) {
+    if (buffer && payload_buffer_length >= remaining_capacity) {
       buffer = NULL;
+      is_buffer_sufficient = false;
     }
     buffer_length += payload_buffer_length;
 
@@ -921,7 +927,7 @@ static bool iree_status_format_message(iree_status_t status,
 #endif  // has IREE_STATUS_FEATURES
 
   *out_buffer_length = buffer_length;
-  return true;
+  return is_buffer_sufficient;
 }
 
 IREE_API_EXPORT bool iree_status_format(iree_status_t status,
@@ -936,6 +942,7 @@ IREE_API_EXPORT bool iree_status_format(iree_status_t status,
 
   // Prefix with source location and status code string (may be 'OK').
   iree_host_size_t prefix_buffer_length = 0;
+  bool is_buffer_sufficient = true;
   iree_status_code_t status_code = iree_status_code(status);
   int n = 0;
 #if (IREE_STATUS_FEATURES & IREE_STATUS_FEATURE_SOURCE_LOCATION) != 0
@@ -956,19 +963,22 @@ IREE_API_EXPORT bool iree_status_format(iree_status_t status,
     return false;
   } else if (buffer && n >= buffer_capacity) {
     buffer = NULL;
+    is_buffer_sufficient = false;
   }
   prefix_buffer_length += n;
 
   iree_host_size_t message_buffer_length = 0;
+  iree_host_size_t remaining_capacity =
+      buffer && prefix_buffer_length < buffer_capacity
+          ? buffer_capacity - prefix_buffer_length
+          : 0;
   bool ret = iree_status_format_message(
-      status, buffer ? buffer_capacity - prefix_buffer_length : 0,
-      buffer ? buffer + prefix_buffer_length : NULL, &message_buffer_length,
+      status, remaining_capacity,
+      remaining_capacity > 0 ? buffer + prefix_buffer_length : NULL,
+      &message_buffer_length,
       /*has_prefix=*/true);
-  if (!ret) {
-    return false;
-  }
   *out_buffer_length = prefix_buffer_length + message_buffer_length;
-  return true;
+  return is_buffer_sufficient && ret;
 }
 
 //===----------------------------------------------------------------------===//

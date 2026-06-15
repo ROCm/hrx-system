@@ -1,0 +1,63 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+    "loom_cc_test",
+)
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_LLVMIR_VISIBILITY = [
+    "//loom/src/loom/target/emit/llvmir:__pkg__",
+    "//loom/src/loom/tools/loom-compile:__pkg__",
+]
+
+_LLVMIR_TARGET_ENV_VISIBILITY = _LLVMIR_VISIBILITY + [
+    "//loom/src/loom/tools/loom-check:__pkg__",
+]
+
+loom_cc_library(
+    name = "intrinsics",
+    srcs = ["intrinsics.c"],
+    hdrs = ["intrinsics.h"],
+    visibility = _LLVMIR_VISIBILITY,
+    deps = [
+        "//loom/src/loom/target/emit/llvmir:core",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "target_env",
+    srcs = ["target_env.c"],
+    hdrs = ["target_env.h"],
+    visibility = _LLVMIR_TARGET_ENV_VISIBILITY,
+    deps = [
+        "//loom/src/loom/target:types",
+        "//loom/src/loom/target/arch/amdgpu:target_info_defs",
+        "//loom/src/loom/target/emit/llvmir:target_presets",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "target_env_test",
+    srcs = ["target_env_test.cc"],
+    deps = [
+        ":target_env",
+        "//loom/src/loom/target/emit/llvmir:core",
+        "//loom/src/loom/target/emit/llvmir:target_env",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

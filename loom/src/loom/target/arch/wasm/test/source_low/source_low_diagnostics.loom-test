@@ -1,0 +1,52 @@
+// RUN: emit source-low output=low
+
+wasm.target<simd128> @target
+
+func.def target(@target) @scalar_powf_rejected_by_math_policy(%base: f32, %exponent: f32) -> (f32) {
+  // ERROR@+1: LOWERING/036 {op_name="scalar.powf", phase_name="legalize-math", policy_name="wasm-math", math_op="powf", lane_domain="scalar", element_type="f32", constraint_key="math.op.supported"}
+  %result = scalar.powf<afn> %base, %exponent : f32
+  func.return %result : f32
+}
+
+// ====
+
+wasm.target<simd128> @target
+
+func.def target(@target) @scalar_tanhf_rejected_by_math_policy(%input: f32) -> (f32) {
+  // ERROR@+1: LOWERING/036 {op_name="scalar.tanhf", phase_name="legalize-math", policy_name="wasm-math", math_op="tanhf", lane_domain="scalar", element_type="f32", constraint_key="math.op.supported"}
+  %result = scalar.tanhf<afn> %input : f32
+  func.return %result : f32
+}
+
+// ====
+
+wasm.target<simd128> @target
+
+func.def target(@target) @unsupported_vector_shape(%lhs: vector<8xi32>, %rhs: vector<8xi32>) -> (vector<8xi32>) {
+  // ERROR@+1: WASM/001 {field_name="lhs", required_type="vector<4xi32>"}
+  %sum = vector.addi %lhs, %rhs : vector<8xi32>
+  func.return %sum : vector<8xi32>
+}
+
+// ====
+
+wasm.target<simd128> @target
+
+func.def target(@target) @unsupported_source_op(%lhs: i32, %rhs: i32) -> (i32) {
+  // ERROR@+1: TARGET/001 {op_name="scalar.muli"}
+  %product = scalar.muli %lhs, %rhs : i32
+  func.return %product : i32
+}
+
+// ====
+
+wasm.target<simd128> @target
+
+func.def target(@target) @rejects_wasm32_address_overflow(%input: buffer, %i: index) -> (vector<4xi32>) {
+  %bounded_i = index.assume %i [range(%i, 0, 1073741824)] : index
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<1073741828xi32, #dense>
+  // ERROR@+1: WASM/006 {bit_count="32"}
+  %loaded = vector.load %input_view[%bounded_i] : view<1073741828xi32, #dense> -> vector<4xi32>
+  func.return %loaded : vector<4xi32>
+}

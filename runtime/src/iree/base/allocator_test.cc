@@ -151,6 +151,111 @@ TEST(CheckedArithmetic, AlignNearMaxNoOverflow) {
 }
 
 //===----------------------------------------------------------------------===//
+// Checked arithmetic tests - fixed-width signed integers
+//===----------------------------------------------------------------------===//
+
+TEST(CheckedArithmeticSignedI32, AddNoOverflow) {
+  int32_t result = 0;
+  EXPECT_TRUE(iree_checked_add_i32(-100, 250, &result));
+  EXPECT_EQ(result, 150);
+}
+
+TEST(CheckedArithmeticSignedI32, AddOverflowPositive) {
+  int32_t result = 0;
+  EXPECT_FALSE(iree_checked_add_i32(INT32_MAX, 1, &result));
+}
+
+TEST(CheckedArithmeticSignedI32, AddOverflowNegative) {
+  int32_t result = 0;
+  EXPECT_FALSE(iree_checked_add_i32(INT32_MIN, -1, &result));
+}
+
+TEST(CheckedArithmeticSignedI32, MulNoOverflow) {
+  int32_t result = 0;
+  EXPECT_TRUE(iree_checked_mul_i32(-100, 200, &result));
+  EXPECT_EQ(result, -20000);
+}
+
+TEST(CheckedArithmeticSignedI32, MulOverflowPositive) {
+  int32_t result = 0;
+  EXPECT_FALSE(iree_checked_mul_i32(INT32_MAX, 2, &result));
+}
+
+TEST(CheckedArithmeticSignedI32, MulOverflowNegative) {
+  int32_t result = 0;
+  EXPECT_FALSE(iree_checked_mul_i32(INT32_MIN, -1, &result));
+}
+
+TEST(CheckedArithmeticSignedI32, MulAddNoOverflow) {
+  int32_t result = 0;
+  EXPECT_TRUE(iree_checked_mul_add_i32(100, -10, 20, &result));
+  EXPECT_EQ(result, -100);
+}
+
+TEST(CheckedArithmeticSignedI32, MulAddMulOverflow) {
+  int32_t result = 0;
+  EXPECT_FALSE(iree_checked_mul_add_i32(0, INT32_MAX, 2, &result));
+}
+
+TEST(CheckedArithmeticSignedI32, MulAddAddOverflow) {
+  int32_t result = 0;
+  EXPECT_FALSE(iree_checked_mul_add_i32(INT32_MAX, 1, 1, &result));
+}
+
+TEST(CheckedArithmeticSignedI64, AddNoOverflow) {
+  int64_t result = 0;
+  EXPECT_TRUE(iree_checked_add_i64(-100, 250, &result));
+  EXPECT_EQ(result, 150);
+}
+
+TEST(CheckedArithmeticSignedI64, AddOverflowPositive) {
+  int64_t result = 0;
+  EXPECT_FALSE(iree_checked_add_i64(INT64_MAX, 1, &result));
+}
+
+TEST(CheckedArithmeticSignedI64, AddOverflowNegative) {
+  int64_t result = 0;
+  EXPECT_FALSE(iree_checked_add_i64(INT64_MIN, -1, &result));
+}
+
+TEST(CheckedArithmeticSignedI64, MulNoOverflow) {
+  int64_t result = 0;
+  EXPECT_TRUE(iree_checked_mul_i64(-100, 200, &result));
+  EXPECT_EQ(result, -20000);
+}
+
+TEST(CheckedArithmeticSignedI64, MulOverflowPositive) {
+  int64_t result = 0;
+  EXPECT_FALSE(iree_checked_mul_i64(INT64_MAX, 2, &result));
+}
+
+TEST(CheckedArithmeticSignedI64, MulOverflowNegative) {
+  int64_t result = 0;
+  EXPECT_FALSE(iree_checked_mul_i64(INT64_MIN, -1, &result));
+}
+
+TEST(CheckedArithmeticSignedI64, MulOverflowBothNegative) {
+  int64_t result = 0;
+  EXPECT_FALSE(iree_checked_mul_i64(INT64_MIN, -2, &result));
+}
+
+TEST(CheckedArithmeticSignedI64, MulAddNoOverflow) {
+  int64_t result = 0;
+  EXPECT_TRUE(iree_checked_mul_add_i64(100, -10, 20, &result));
+  EXPECT_EQ(result, -100);
+}
+
+TEST(CheckedArithmeticSignedI64, MulAddMulOverflow) {
+  int64_t result = 0;
+  EXPECT_FALSE(iree_checked_mul_add_i64(0, INT64_MAX, 2, &result));
+}
+
+TEST(CheckedArithmeticSignedI64, MulAddAddOverflow) {
+  int64_t result = 0;
+  EXPECT_FALSE(iree_checked_mul_add_i64(INT64_MAX, 1, 1, &result));
+}
+
+//===----------------------------------------------------------------------===//
 // Checked arithmetic tests - iree_device_size_t
 //===----------------------------------------------------------------------===//
 

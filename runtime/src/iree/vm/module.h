@@ -367,8 +367,11 @@ typedef enum iree_vm_signal_e {
 typedef struct iree_vm_module_t {
   IREE_API_UNSTABLE
 
-  void* self;
+  // Reference count used to manage module lifetime.
   iree_atomic_ref_count_t ref_count;
+
+  // User-defined pointer passed to all module interface functions.
+  void* self;
 
   // Destroys |self| when all references to the module have been released.
   void(IREE_API_PTR* destroy)(void* self);

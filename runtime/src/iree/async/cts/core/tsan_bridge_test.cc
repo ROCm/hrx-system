@@ -189,22 +189,22 @@ static void SenderThreadFn(SenderArgs args) {
     if (args.stop->load(std::memory_order_relaxed)) return;
 
     // Spin until a slot is available or stop is requested.
-    int index;
-    for (;;) {
+    int index = 0;
+    bool claimed = false;
+    while (!claimed) {
       if (args.stop->load(std::memory_order_relaxed)) return;
       uint32_t bitmap = args.free_bitmap->load(std::memory_order_acquire);
-      while (bitmap != 0) {
+      while (bitmap != 0 && !claimed) {
         index = iree_math_count_trailing_zeros_u32(bitmap);
         uint32_t cleared = bitmap & ~(1u << index);
         if (args.free_bitmap->compare_exchange_weak(
                 bitmap, cleared, std::memory_order_acq_rel,
                 std::memory_order_acquire)) {
-          goto claimed;
+          claimed = true;
         }
       }
-      std::this_thread::yield();
+      if (!claimed) std::this_thread::yield();
     }
-  claimed:
 
     iree_async_nop_operation_t* nop = &args.slots[index];
     iree_async_operation_zero(&nop->base, sizeof(*nop));

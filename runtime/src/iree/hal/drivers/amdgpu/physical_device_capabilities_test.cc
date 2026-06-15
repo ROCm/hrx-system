@@ -513,13 +513,13 @@ TEST_F(PhysicalDeviceCapabilitiesTest,
 TEST_F(PhysicalDeviceCapabilitiesTest, SelectsPrepublishedKernargStorage) {
   iree_hal_amdgpu_aql_prepublished_kernarg_storage_t storage =
       iree_hal_amdgpu_select_prepublished_kernarg_storage(MemoryPool(0));
-  EXPECT_EQ(storage.strategy,
-            IREE_HAL_AMDGPU_AQL_PREPUBLISHED_KERNARG_STORAGE_STRATEGY_DISABLED);
+  EXPECT_EQ(storage.mode,
+            IREE_HAL_AMDGPU_AQL_PREPUBLISHED_KERNARG_STORAGE_MODE_DISABLED);
 
   storage = iree_hal_amdgpu_select_prepublished_kernarg_storage(MemoryPool(42));
   EXPECT_EQ(
-      storage.strategy,
-      IREE_HAL_AMDGPU_AQL_PREPUBLISHED_KERNARG_STORAGE_STRATEGY_DEVICE_FINE_HOST_COHERENT);
+      storage.mode,
+      IREE_HAL_AMDGPU_AQL_PREPUBLISHED_KERNARG_STORAGE_MODE_DEVICE_FINE_HOST_COHERENT);
   EXPECT_TRUE(iree_all_bits_set(storage.buffer_params.type,
                                 IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
                                     IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |

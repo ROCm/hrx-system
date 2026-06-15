@@ -1,0 +1,669 @@
+// RUN: emit x86-asm @x86_fragment
+x86.target<avx512> @x86_target
+
+low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %lhs: reg<x86.zmm>, %rhs: reg<x86.zmm>) asm<x86.avx512.core> {
+  %loaded = vmovdqu32.load %base {disp32 = 0}
+  %sum = vpaddd %loaded, %lhs
+  vmovdqu32.store %sum, %base {disp32 = 64}
+  return
+}
+// ----
+  vmovdqu32 zmm0, [rax]
+  vpaddd zmm0, zmm0, zmm1
+  vmovdqu32 [rax + 64], zmm0
+  ret
+
+// ====
+
+x86.target<avx512> @x86_target
+
+low.func.def target(@x86_target) @x86_fragment(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>, %i: reg<x86.gpr64>, %j: reg<x86.gpr64>) asm<x86.avx512.core> {
+  %index = lea %i, %j
+  %loaded = vmovdqu32.load.indexed %input, %index {disp32 = 16, scale = 4}
+  vmovdqu32.store.indexed %loaded, %output, %index {disp32 = 32, scale = 4}
+  return
+}
+
+// ----
+  lea rax, [rax + rcx]
+  vmovdqu32 zmm0, [rdx + rax * 4 + 16]
+  vmovdqu32 [rbx + rax * 4 + 32], zmm0
+  ret
+
+// ====
+
+x86.target<scalar> @x86_target
+
+low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %index: reg<x86.gpr64>, %rhs: reg<x86.gpr64>) asm<x86.scalar.core> {
+  %base_disp = lea.disp %base {disp32 = 24}
+  %base_neg = lea.disp %base {disp32 = -8}
+  %scaled1 = lea.add_scale %base_disp, %index {disp32 = 0, scale = 1}
+  %scaled2 = lea.add_scale %base_neg, %index {disp32 = 8, scale = 2}
+  %scaled4 = lea.add_scale %base, %index {disp32 = -16, scale = 4}
+  %scaled8 = lea.scale %index {disp32 = 32, scale = 8}
+  %sum = lea %scaled8, %rhs
+  return
+}
+
+// ----
+  lea rbx, [rax + 24]
+  lea rsp, [rax - 8]
+  lea rbx, [rbx + rcx]
+  lea rbx, [rsp + rcx * 2 + 8]
+  lea rax, [rax + rcx * 4 - 16]
+  lea rax, [rcx * 8 + 32]
+  lea rax, [rax + rdx]
+  ret
+
+// ====
+
+x86.target<scalar> @x86_target
+
+low.func.def target(@x86_target) @x86_fragment(%lhs: reg<x86.gpr32>, %rhs: reg<x86.gpr32>, %factor: reg<x86.gpr32>) asm<x86.scalar.core> {
+  %sum = add.gpr32 %lhs, %rhs
+  %difference = sub.gpr32 %sum, %factor
+  %result = imul.gpr32 %difference, %rhs
+  return
+}
+
+// ----
+  add eax, edx
+  sub eax, ecx
+  imul eax, edx
+  ret
+
+// ====
+
+x86.target<scalar> @x86_target
+
+low.func.def target(@x86_target) @x86_fragment(%lhs: reg<x86.gpr32>, %rhs: reg<x86.gpr32>) asm<x86.scalar.core> {
+  %mask = mov.imm32 255
+  %masked = and.gpr32 %lhs, %mask
+  %tag = mov.imm32 240
+  %tagged = or.gpr32 %masked, %tag
+  %invert = mov.imm32 -1
+  %inverted = xor.gpr32 %tagged, %invert
+  %mixed = xor.gpr32 %inverted, %rhs
+  %left = shl.imm.gpr32 %mixed {shift = 3}
+  %arithmetic = sar.imm.gpr32 %left {shift = 1}
+  %result = shr.imm.gpr32 %arithmetic {shift = 2}
+  return
+}
+
+// ----
+  mov edx, 255
+  and eax, edx
+  mov edx, 240
+  or eax, edx
+  mov edx, -1
+  xor eax, edx
+  xor eax, ecx
+  shl eax, 3
+  sar eax, 1
+  shr eax, 2
+  ret
+
+// ====
+
+x86.target<scalar> @x86_target
+
+low.func.def target(@x86_target) @x86_fragment(%condition: reg<x86.gpr32>) asm<x86.scalar.core> {
+  low.cond_br %condition, ^then, ^else : reg<x86.gpr32>
+^then:
+  return
+^else:
+  return
+}
+
+// ----
+  test eax, eax
+  jnz .Lbb1
+  jmp .Lbb2
+.Lbb1:
+  ret
+.Lbb2:
+  ret
+
+// ====
+
+x86.target<scalar> @x86_target
+
+low.func.def target(@x86_target) @x86_fragment(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>, %index: reg<x86.gpr64>) asm<x86.scalar.core> {
+  %static = mov.load.gpr32 %input {disp32 = 8}
+  %loaded = mov.load.indexed.gpr32 %input, %index {disp32 = 12, scale = 4}
+  %sum = add.gpr32 %static, %loaded
+  mov.store.gpr32 %sum, %output {disp32 = 16}
+  mov.store.indexed.gpr32 %loaded, %output, %index {disp32 = -4, scale = 4}
+  return
+}
+
+// ----
+  mov ebx, [rax + 8]
+  mov eax, [rax + rdx * 4 + 12]
+  add ebx, eax
+  mov [rcx + 16], ebx
+  mov [rcx + rdx * 4 - 4], eax
+  ret
+
+// ====
+
+x86.target<scalar> @x86_target
+
+low.func.def target(@x86_target) @x86_fragment(%lhs: reg<x86.gpr32>, %rhs: reg<x86.gpr32>) asm<x86.scalar.core> {
+  %eq = cmp.eq.gpr32 %lhs, %rhs
+  %signed = cmp.slt.gpr32 %lhs, %rhs
+  %unsigned = cmp.uge.gpr32 %lhs, %rhs
+  %condition = xor.gpr32 %signed, %unsigned
+  low.cond_br %condition, ^then, ^else : reg<x86.gpr32>
+^then:
+  return
+^else:
+  return
+}
+
+// ----
+  cmp eax, ecx
+  sete dl
+  movzx edx, dl
+  cmp eax, ecx
+  setl dl
+  movzx edx, dl
+  cmp eax, ecx
+  setae al
+  movzx eax, al
+  xor edx, eax
+  test edx, edx
+  jnz .Lbb1
+  jmp .Lbb2
+.Lbb1:
+  ret
+.Lbb2:
+  ret
+
+// ====
+
+x86.target<scalar> @x86_target
+
+low.func.def target(@x86_target) @x86_fragment(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>, %index: reg<x86.gpr64>, %lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>) asm<x86.scalar.core> {
+  %bias = mov.imm64 17
+  %sum = add.gpr64 %lhs, %rhs
+  %difference = sub.gpr64 %sum, %bias
+  %product = imul.gpr64 %difference, %rhs
+  %mask = mov.imm64 255
+  %masked = and.gpr64 %product, %mask
+  %tagged = or.gpr64 %masked, %rhs
+  %mixed = xor.gpr64 %tagged, %rhs
+  %left = shl.imm.gpr64 %mixed {shift = 33}
+  %arithmetic = sar.imm.gpr64 %left {shift = 7}
+  %logical = shr.imm.gpr64 %arithmetic {shift = 9}
+  %static = mov.load.gpr64 %input {disp32 = 8}
+  %loaded = mov.load.indexed.gpr64 %input, %index {disp32 = 16, scale = 8}
+  %store_value = add.gpr64 %logical, %loaded
+  mov.store.gpr64 %store_value, %output {disp32 = 24}
+  mov.store.indexed.gpr64 %static, %output, %index {disp32 = -8, scale = 8}
+  %signed = cmp.slt.gpr64 %store_value, %rhs
+  %unsigned = cmp.uge.gpr64 %store_value, %rhs
+  %condition = xor.gpr32 %signed, %unsigned
+  low.cond_br %condition, ^then, ^else : reg<x86.gpr32>
+^then:
+  return
+^else:
+  return
+}
+
+// ----
+  mov rbp, 17
+  add rax, rsp
+  sub rax, rbp
+  imul rax, rsp
+  mov rbp, 255
+  and rax, rbp
+  or rax, rsp
+  xor rax, rsp
+  shl rax, 33
+  sar rax, 7
+  shr rax, 9
+  mov rbp, [rcx + 8]
+  mov rcx, [rcx + rbx * 8 + 16]
+  add rax, rcx
+  mov [rdx + 24], rax
+  mov [rdx + rbx * 8 - 8], rbp
+  cmp rax, rsp
+  setl cl
+  movzx ecx, cl
+  cmp rax, rsp
+  setae al
+  movzx eax, al
+  xor ecx, eax
+  test ecx, ecx
+  jnz .Lbb1
+  jmp .Lbb2
+.Lbb1:
+  ret
+.Lbb2:
+  ret
+
+// ====
+
+x86.target<avx512> @x86_target
+
+low.func.def target(@x86_target) @x86_fragment(%lhs: reg<x86.zmm>, %rhs: reg<x86.zmm>, %base: reg<x86.gpr64>) asm<x86.avx512.core> {
+  %copy = copy %lhs : reg<x86.zmm> -> reg<x86.zmm>
+  %sum = vpaddd %copy, %rhs
+  %second = vpaddd %lhs, %sum
+  vmovdqu32.store %second, %base {disp32 = 128}
+  return
+}
+
+// ----
+  vpaddd zmm0, zmm1, zmm0
+  vpaddd zmm0, zmm1, zmm0
+  vmovdqu32 [rax + 128], zmm0
+  ret
+
+// ====
+
+x86.target<avx512> @x86_target
+
+low.func.def target(@x86_target) @x86_fragment(%value: reg<x86.zmm>) asm<x86.avx512.core> {
+  %addr = mov.imm64 1024
+  vmovdqu32.store %value, %addr {disp32 = -16}
+  return
+}
+
+// ----
+  mov rax, 1024
+  vmovdqu32 [rax - 16], zmm0
+  ret
+
+// ====
+
+x86.target<avx512> @x86_target
+
+low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %value: reg<x86.gpr32>, %rhs: reg<x86.zmm>) asm<x86.avx512.core> {
+  %splat = vpbroadcastd %value
+  %sum = vpaddd %splat, %rhs
+  vmovdqu32.store %sum, %base {disp32 = 128}
+  return
+}
+
+// ----
+  vpbroadcastd zmm1, eax
+  vpaddd zmm0, zmm1, zmm0
+  vmovdqu32 [rcx + 128], zmm0
+  ret
+
+// ====
+
+x86.target<avx512> @x86_target
+
+low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %value: reg<x86.xmm>, %rhs: reg<x86.zmm>) asm<x86.avx512.core> {
+  %splat = vbroadcastss %value
+  %sum = vaddps %splat, %rhs
+  vmovdqu32.store %sum, %base {disp32 = 192}
+  return
+}
+
+// ----
+  vbroadcastss zmm0, xmm0
+  vaddps zmm0, zmm0, zmm1
+  vmovdqu32 [rax + 192], zmm0
+  ret
+
+// ====
+
+x86.target<avx512> @x86_target
+
+low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %lhs: reg<x86.zmm>, %rhs: reg<x86.zmm>) asm<x86.avx512.core> {
+  %min_s = vpminsd %lhs, %rhs
+  %max_s = vpmaxsd %lhs, %rhs
+  %min_u = vpminud %lhs, %rhs
+  %max_u = vpmaxud %lhs, %rhs
+  %mask = vpandd %min_s, %max_s
+  %mixed = vpxord %mask, %min_u
+  %logic = vpord %mixed, %max_u
+  %left = vpsllvd %logic, %rhs
+  %signed = vpsravd %left, %rhs
+  %result = vpsrlvd %signed, %rhs
+  vmovdqu32.store %result, %base {disp32 = 128}
+  return
+}
+
+// ----
+  vpminsd zmm2, zmm0, zmm1
+  vpmaxsd zmm3, zmm0, zmm1
+  vpminud zmm4, zmm0, zmm1
+  vpmaxud zmm0, zmm0, zmm1
+  vpandd zmm2, zmm2, zmm3
+  vpxord zmm2, zmm2, zmm4
+  vpord zmm0, zmm2, zmm0
+  vpsllvd zmm0, zmm0, zmm1
+  vpsravd zmm0, zmm0, zmm1
+  vpsrlvd zmm0, zmm0, zmm1
+  vmovdqu32 [rax + 128], zmm0
+  ret
+
+// ====
+
+x86.target<avx512> @x86_target
+
+low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %lhs: reg<x86.zmm>, %rhs: reg<x86.zmm>, %fallback: reg<x86.zmm>) asm<x86.avx512.core> {
+  %signed = vpcmpd.sgt %lhs, %rhs
+  %unsigned = vpcmpud.ugt %lhs, %rhs
+  %ordered_lt = vcmpps.olt %lhs, %rhs
+  %integer_selected = vpblendmd %signed, %lhs, %rhs
+  %mixed_integer = vpblendmd %unsigned, %integer_selected, %fallback
+  %float_selected = vblendmps %ordered_lt, %lhs, %mixed_integer
+  vmovdqu32.store %float_selected, %base {disp32 = 192}
+  return
+}
+
+// ----
+  vpcmpd.sgt k0, zmm2, zmm0
+  vpcmpud.ugt k1, zmm2, zmm0
+  vcmpps.olt k2, zmm2, zmm0
+  vpblendmd zmm0, k0, zmm2, zmm0
+  vpblendmd zmm0, k1, zmm0, zmm1
+  vblendmps zmm0, k2, zmm2, zmm0
+  vmovdqu32 [rax + 192], zmm0
+  ret
+
+// ====
+
+x86.target<avx512> @x86_target
+
+low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %lhs: reg<x86.zmm>, %rhs: reg<x86.zmm>) asm<x86.avx512.core> {
+  %greater = vpcmpd.sgt %lhs, %rhs
+  %less = vpcmpd.slt %lhs, %rhs
+  %either = korq %greater, %less
+  %greater_again = kandq %either, %greater
+  %condition = kxorq %greater_again, %less
+  low.cond_br %condition, ^then, ^else : reg<x86.k>
+^then:
+  vmovdqu32.store %lhs, %base {disp32 = 0}
+  return
+^else:
+  vmovdqu32.store %rhs, %base {disp32 = 64}
+  return
+}
+
+// ----
+  vpcmpd.sgt k0, zmm0, zmm1
+  vpcmpd.slt k1, zmm0, zmm1
+  korq k2, k0, k1
+  kandq k0, k2, k0
+  kxorq k0, k0, k1
+  kortestq k0, k0
+  jnz .Lbb1
+  jmp .Lbb2
+.Lbb1:
+  vmovdqu32 [rax], zmm0
+  ret
+.Lbb2:
+  vmovdqu32 [rax + 64], zmm1
+  ret
+
+// ====
+
+x86.target<avx512> @x86_target
+
+low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %lhs: reg<x86.zmm>) asm<x86.avx512.core> {
+  low.br ^join(%lhs: reg<x86.zmm>)
+^join(%incoming: reg<x86.zmm>):
+  %sum = vpaddd %incoming, %lhs
+  vmovdqu32.store %sum, %base {disp32 = 256}
+  return
+}
+
+// ----
+  vmovdqa32 zmm1, zmm0
+  jmp .Lbb1
+.Lbb1:
+  vpaddd zmm0, zmm1, zmm0
+  vmovdqu32 [rax + 256], zmm0
+  ret
+
+// ====
+
+x86.target<avx512> @x86_target
+
+low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %lhs: reg<x86.zmm>, %rhs: reg<x86.zmm>) asm<x86.avx512.core> {
+  low.br ^join(%rhs: reg<x86.zmm>, %lhs: reg<x86.zmm>)
+^join(%a: reg<x86.zmm>, %b: reg<x86.zmm>):
+  %sum = vpaddd %a, %b
+  vmovdqu32.store %sum, %base {disp32 = 512}
+  return
+}
+
+// ----
+  jmp .Lbb1
+.Lbb1:
+  vpaddd zmm0, zmm1, zmm0
+  vmovdqu32 [rax + 512], zmm0
+  ret
+
+// ====
+
+x86.target<avx512> @x86_target
+
+low.func.def target(@x86_target) @x86_fragment(%lhs: reg<x86.zmm>, %rhs: reg<x86.zmm>) asm<x86.avx512.core> {
+  low.br ^loop(%rhs: reg<x86.zmm>, %lhs: reg<x86.zmm>)
+^loop(%a: reg<x86.zmm>, %b: reg<x86.zmm>):
+  low.br ^loop(%b: reg<x86.zmm>, %a: reg<x86.zmm>)
+}
+
+// ----
+  jmp .Lbb1
+.Lbb1:
+  vmovdqa32 zmm2, zmm1
+  vmovdqa32 zmm1, zmm0
+  vmovdqa32 zmm0, zmm2
+  jmp .Lbb1
+
+// ====
+
+x86.target<avx512> @x86_target
+
+low.func.def target(@x86_target) @x86_fragment(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>, %row: reg<x86.gpr64>, %stride: reg<x86.gpr64>, %col: reg<x86.gpr64>) asm<x86.avx512.core> {
+  %bias = mov.imm64 256
+  %row_copy = copy %row : reg<x86.gpr64> -> reg<x86.gpr64>
+  %linear = imul.gpr64 %row_copy, %stride
+  %index = lea %linear, %col
+  %biased_index = lea %index, %bias
+  %loaded = vmovdqu32.load.indexed %input, %biased_index {disp32 = 0, scale = 4}
+  vmovdqu32.store.indexed %loaded, %output, %biased_index {disp32 = 64, scale = 4}
+  return
+}
+
+// ----
+  mov rbp, 256
+  imul rax, rcx
+  lea rax, [rax + rdx]
+  lea rax, [rax + rbp]
+  vmovdqu32 zmm0, [rbx + rax * 4]
+  vmovdqu32 [rsp + rax * 4 + 64], zmm0
+  ret
+
+// ====
+
+x86.target<avx512> @x86_target
+
+low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %v: reg<x86.zmm>) asm<x86.avx512.core> {
+  %quarter = vextractf32x4.xmm %v, 2
+  vmovdqu32.store.xmm %quarter, %base {disp32 = 112}
+  return
+}
+
+// ----
+  vextractf32x4 xmm0, zmm0, 2
+  vmovdqu32 [rax + 112], xmm0
+  ret
+
+// ====
+
+x86.target<avx2> @x86_target
+
+low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %v: reg<x86.xmm>, %init: reg<x86.gpr32>) asm<x86.avx2.core> {
+  %reversed = vpshufd.xmm %v, 27
+  %lane0 = vpextrd.xmm %reversed, 0
+  %init_copy = copy %init : reg<x86.gpr32> -> reg<x86.gpr32>
+  %acc0 = add.gpr32 %init_copy, %lane0
+  %lane1 = vpextrd.xmm %reversed, 1
+  %acc0_copy = copy %acc0 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %acc1 = add.gpr32 %acc0_copy, %lane1
+  %lane2 = vpextrd.xmm %reversed, 2
+  %acc1_copy = copy %acc1 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %acc2 = add.gpr32 %acc1_copy, %lane2
+  %lane3 = vpextrd.xmm %reversed, 3
+  %acc2_copy = copy %acc2 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %sum = add.gpr32 %acc2_copy, %lane3
+  %stored = vpinsrd.xmm %v, %sum, 0
+  vmovdqu32.store.xmm %stored, %base {disp32 = 0}
+  return
+}
+
+// ----
+  vpshufd xmm1, xmm0, 27
+  vpextrd edx, xmm1, 0
+  add eax, edx
+  vpextrd edx, xmm1, 1
+  add eax, edx
+  vpextrd edx, xmm1, 2
+  add eax, edx
+  vpextrd edx, xmm1, 3
+  add eax, edx
+  vpinsrd xmm0, xmm0, eax, 0
+  vmovdqu32 [rcx], xmm0
+  ret
+
+// ====
+
+x86.target<avx512> @x86_target
+
+low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %v: reg<x86.xmm>) asm<x86.avx512.core> {
+  %shuffled = vpermilps.xmm %v, 39
+  vmovdqu32.store.xmm %shuffled, %base {disp32 = 32}
+  return
+}
+
+// ----
+  vpermilps xmm0, xmm0, 39
+  vmovdqu32 [rax + 32], xmm0
+  ret
+
+// ====
+
+x86.target<avx512> @x86_target
+
+low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %v: reg<x86.xmm>, %x: reg<x86.xmm>) asm<x86.avx512.core> {
+  %lane = vpermilps.xmm %v, 1
+  %sum = vaddss.xmm %lane, %x
+  %updated = vinsertps.xmm %v, %sum, 32
+  vmovdqu32.store.xmm %updated, %base {disp32 = 48}
+  return
+}
+
+// ----
+  vpermilps xmm2, xmm1, 1
+  vaddss xmm0, xmm2, xmm0
+  vinsertps xmm0, xmm1, xmm0, 32
+  vmovdqu32 [rax + 48], xmm0
+  ret
+
+// ====
+
+x86.target<avx512> @x86_target
+
+low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %v: reg<x86.xmm>, %init: reg<x86.xmm>) asm<x86.avx512.core> {
+  %paired = vpermilps.xmm %v, 78
+  %pair_sum = vaddps.xmm %v, %paired
+  %neighbor = vpermilps.xmm %pair_sum, 177
+  %vector_sum = vaddps.xmm %pair_sum, %neighbor
+  %sum = vaddss.xmm %init, %vector_sum
+  vmovdqu32.store.xmm %sum, %base {disp32 = 64}
+  return
+}
+
+// ----
+  vpermilps xmm2, xmm0, 78
+  vaddps xmm0, xmm0, xmm2
+  vpermilps xmm2, xmm0, 177
+  vaddps xmm0, xmm0, xmm2
+  vaddss xmm0, xmm1, xmm0
+  vmovdqu32 [rax + 64], xmm0
+  ret
+
+// ====
+
+x86.target<avx2> @x86_target
+
+low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %lhs: reg<x86.xmm>, %rhs: reg<x86.xmm>, %bias: reg<x86.xmm>) asm<x86.avx2.core> {
+  %sum = vaddss.xmm %lhs, %rhs
+  %difference = vsubss.xmm %sum, %bias
+  %product = vmulss.xmm %difference, %rhs
+  %bias_copy = copy %bias : reg<x86.xmm> -> reg<x86.xmm>
+  %result = vfmadd231ss.xmm %bias_copy, %product, %rhs
+  vmovdqu32.store.xmm %result, %base {disp32 = 96}
+  return
+}
+
+// ----
+  vaddss xmm0, xmm0, xmm2
+  vsubss xmm0, xmm0, xmm1
+  vmulss xmm0, xmm0, xmm2
+  vfmadd231ss xmm1, xmm0, xmm2
+  vmovdqu32 [rax + 96], xmm1
+  ret
+
+// ====
+
+x86.target<avx512_packed_dot> @x86_target
+
+low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %bf16_acc: reg<x86.zmm>, %bf16_lhs: reg<x86.zmm>, %bf16_rhs: reg<x86.zmm>, %i8_acc: reg<x86.zmm>, %i8_lhs: reg<x86.zmm>, %i8_rhs: reg<x86.zmm>) asm<x86.avx512_packed_dot.core> {
+  %bf16_dot = avx512_bf16.vdpbf16ps %bf16_acc, %bf16_lhs, %bf16_rhs
+  vmovdqu32.store %bf16_dot, %base {disp32 = 0}
+  %i8_dot = avx512_vnni.vpdpbusd %i8_acc, %i8_lhs, %i8_rhs
+  vmovdqu32.store %i8_dot, %base {disp32 = 64}
+  return
+}
+
+// ----
+  vdpbf16ps zmm0, zmm1, zmm2
+  vmovdqu32 [rax], zmm0
+  vpdpbusd zmm3, zmm4, zmm5
+  vmovdqu32 [rax + 64], zmm3
+  ret
+
+// ====
+
+// RUN: emit x86-asm @x86_avx2_low_subset_rejects_high_xmm strategy=source fixed=%sum:physical_register:16:1
+x86.target<avx512> @x86_target
+
+low.func.def target(@x86_target) @x86_avx2_low_subset_rejects_high_xmm(%lhs: reg<x86.xmm>, %rhs: reg<x86.xmm>) -> (reg<x86.xmm>) {
+  // ERROR@+1: BACKEND/020 {function_name="x86_avx2_low_subset_rejects_high_xmm", packet_key="x86.avx2.vpaddd.xmm", operand_field="dst", value_name="sum", value_class="x86.xmm", assigned_base="16", address_map_kind="low_subset", addressable_units="16"}
+  %sum = low.op<x86.avx2.vpaddd.xmm>(%lhs, %rhs) : (reg<x86.xmm>, reg<x86.xmm>) -> reg<x86.xmm>
+  low.return %sum : reg<x86.xmm>
+}
+
+// ====
+
+// RUN: emit x86-asm @x86_avx_vnni_low_subset_rejects_high_ymm strategy=source fixed=%acc_copy:physical_register:16:1 fixed=%dot:physical_register:16:1
+x86.target<avx512_packed_dot> @x86_target
+
+low.func.def target(@x86_target) @x86_avx_vnni_low_subset_rejects_high_ymm(%acc: reg<x86.ymm>, %lhs: reg<x86.ymm>, %rhs: reg<x86.ymm>) -> (reg<x86.ymm>) {
+  %acc_copy = low.copy %acc : reg<x86.ymm> -> reg<x86.ymm>
+  // ERROR@+2: BACKEND/020 {function_name="x86_avx_vnni_low_subset_rejects_high_ymm", packet_key="x86.avx_vnni.vpdpbusd.ymm", operand_field="acc", value_name="acc_copy", value_class="x86.ymm", assigned_base="16", address_map_kind="low_subset", addressable_units="16"}
+  // ERROR@+1: BACKEND/020 {function_name="x86_avx_vnni_low_subset_rejects_high_ymm", packet_key="x86.avx_vnni.vpdpbusd.ymm", operand_field="dst", value_name="dot", value_class="x86.ymm", assigned_base="16", address_map_kind="low_subset", addressable_units="16"}
+  %dot = low.op<x86.avx_vnni.vpdpbusd.ymm>(%acc_copy, %lhs, %rhs) : (reg<x86.ymm>, reg<x86.ymm>, reg<x86.ymm>) -> %acc_copy as reg<x86.ymm>
+  low.return %dot : reg<x86.ymm>
+}
+
+// ====
+
+// RUN: emit x86-asm @x86_spill_traffic_register_exhaustion_reports_allocation_gap x86.gpr32=1
+x86.target<scalar> @x86_target
+
+// ERROR@+1: BACKEND/005 {function_name="x86_spill_traffic_register_exhaustion_reports_allocation_gap", value_class="x86.gpr32", budget="1", failure_code="spill-traffic-register-exhausted"}
+low.func.def target(@x86_target) @x86_spill_traffic_register_exhaustion_reports_allocation_gap(%lhs: reg<x86.gpr32>, %rhs: reg<x86.gpr32>) -> (reg<x86.gpr32>, reg<x86.gpr32>) asm<x86.scalar.core> {
+  return %lhs, %rhs
+}

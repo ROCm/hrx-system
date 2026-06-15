@@ -46,6 +46,7 @@ class NumpyIOTest : public ::testing::Test {
       iree_status_free(status);
       GTEST_SKIP();
     }
+    IREE_ASSERT_OK(status);
     device_allocator_ = iree_hal_device_allocator(device_);
   }
 

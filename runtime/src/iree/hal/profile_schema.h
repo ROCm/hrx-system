@@ -360,8 +360,8 @@ typedef struct iree_hal_profile_executable_function_record_t {
   uint64_t executable_id;
   // Profile-local function ordinal used by dispatch events.
   uint32_t function_ordinal;
-  // Number of constant words expected by the HAL ABI function.
-  uint32_t constant_count;
+  // Byte length of constants expected by the HAL function.
+  uint32_t constant_byte_length;
   // Number of binding pointer slots expected by the HAL ABI function.
   uint32_t binding_count;
   // Number of reflected function parameters.

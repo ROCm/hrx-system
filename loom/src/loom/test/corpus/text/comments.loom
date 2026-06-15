@@ -1,0 +1,9 @@
+// Top-level comments attach to the following operation.
+func.def @comment_surface() {
+// Block comments attach to the following explicit block label.
+^entry:
+  // Operation comments attach to the following operation.
+  %c = test.constant 42 : i32
+  // Terminator comments are preserved like any other op comment.
+  test.yield
+}

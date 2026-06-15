@@ -1,0 +1,118 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+    "loom_cc_test",
+)
+
+package(
+    default_visibility = ["//loom/src/loom/codegen/low:__pkg__"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+loom_cc_library(
+    name = "descriptors_verify",
+    testonly = True,
+    srcs = ["descriptors_verify.c"],
+    hdrs = ["descriptors_verify.h"],
+    deps = [
+        "//loom/src/loom/codegen/low:descriptors",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "descriptors_verify_test",
+    srcs = ["descriptors_verify_test.cc"],
+    deps = [
+        ":descriptors_verify",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "source_workload",
+    testonly = True,
+    srcs = ["source_workload.c"],
+    hdrs = ["source_workload.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:combining",
+        "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/cfg",
+        "//loom/src/loom/ops/encoding",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/ops/pass",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/ops/vector",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/base/internal:prng",
+    ],
+)
+
+loom_cc_library(
+    name = "source_workload_pipeline",
+    testonly = True,
+    srcs = ["source_workload_pipeline.c"],
+    hdrs = ["source_workload_pipeline.h"],
+    deps = [
+        ":source_workload",
+        "//loom/src/loom/codegen/low:frame",
+        "//loom/src/loom/codegen/low:function",
+        "//loom/src/loom/codegen/low:verify",
+        "//loom/src/loom/codegen/low/lower",
+        "//loom/src/loom/codegen/low/lower:source_selection",
+        "//loom/src/loom/codegen/low/pipeline",
+        "//loom/src/loom/codegen/low/pipeline:pass_environment",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/pass:builder",
+        "//loom/src/loom/pass:interpreter",
+        "//loom/src/loom/pass:program",
+        "//loom/src/loom/pass:registry",
+        "//loom/src/loom/pass:value_facts",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "ir_match_test_util",
+    testonly = True,
+    srcs = ["ir_match_test_util.cc"],
+    hdrs = ["ir_match_test_util.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "text_asm_test_util",
+    testonly = True,
+    srcs = ["text_asm_test_util.cc"],
+    hdrs = ["text_asm_test_util.h"],
+    deps = [
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low:text_asm",
+        "//loom/src/loom/format/text:low_asm",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)

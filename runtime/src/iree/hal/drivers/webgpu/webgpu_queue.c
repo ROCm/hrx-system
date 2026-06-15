@@ -728,7 +728,8 @@ static void iree_hal_webgpu_queue_op_wait_completion(
           iree_hal_webgpu_import_queue_write_buffer(
               queue->queue_handle, gpu_handle, gpu_offset,
               (uint32_t)(uintptr_t)mapping.contents.data, state->read.length);
-          iree_hal_buffer_unmap_range(&mapping);
+          work_status = iree_status_join(work_status,
+                                         iree_hal_buffer_unmap_range(&mapping));
         }
       } else {
         // FD: use zero-copy bridge import.
@@ -1310,7 +1311,7 @@ static iree_status_t iree_hal_webgpu_queue_read_inline(
       iree_hal_webgpu_import_queue_write_buffer(
           queue->queue_handle, gpu_handle, gpu_offset,
           (uint32_t)(uintptr_t)mapping.contents.data, length);
-      iree_hal_buffer_unmap_range(&mapping);
+      status = iree_status_join(status, iree_hal_buffer_unmap_range(&mapping));
     }
   } else {
     // FD: use zero-copy bridge import. The import_file dispatch guarantees
@@ -1454,9 +1455,9 @@ static void iree_hal_webgpu_queue_write_state_fail(
     iree_hal_webgpu_queue_write_state_t* state, iree_status_t error) {
   iree_hal_semaphore_list_fail(state->signal_semaphore_list, error);
   iree_hal_webgpu_queue_advance_tracker(state->queue, state->epoch);
-  if (state->source_buffer) iree_hal_buffer_release(state->source_buffer);
-  if (state->target_storage) iree_hal_buffer_release(state->target_storage);
-  if (state->target_file) iree_hal_file_release(state->target_file);
+  iree_hal_buffer_release(state->source_buffer);
+  iree_hal_buffer_release(state->target_storage);
+  iree_hal_file_release(state->target_file);
   if (state->staging_handle) {
     iree_hal_webgpu_import_buffer_destroy(state->staging_handle);
   }
@@ -1585,7 +1586,7 @@ static void iree_hal_webgpu_queue_write_phase3(
       iree_hal_webgpu_import_buffer_get_mapped_range(
           state->staging_handle, /*offset=*/0, state->length,
           (uint32_t)(uintptr_t)mapping.contents.data);
-      iree_hal_buffer_unmap_range(&mapping);
+      status = iree_status_join(status, iree_hal_buffer_unmap_range(&mapping));
     }
   } else {
     // FD: write from mapped staging buffer directly to the file object.
@@ -1601,14 +1602,10 @@ static void iree_hal_webgpu_queue_write_phase3(
   state->staging_handle = 0;
 
   // Release target resources.
-  if (state->target_storage) {
-    iree_hal_buffer_release(state->target_storage);
-    state->target_storage = NULL;
-  }
-  if (state->target_file) {
-    iree_hal_file_release(state->target_file);
-    state->target_file = NULL;
-  }
+  iree_hal_buffer_release(state->target_storage);
+  state->target_storage = NULL;
+  iree_hal_file_release(state->target_file);
+  state->target_file = NULL;
 
   // Signal or fail.
   if (iree_status_is_ok(status)) {

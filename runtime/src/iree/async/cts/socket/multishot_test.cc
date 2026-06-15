@@ -126,7 +126,7 @@ TEST_P(MultishotTest, MultishotAccept_MultipleConnections) {
   }
 
   // Cancel the multishot accept and wait for the cancellation completion.
-  iree_async_proactor_cancel(proactor_, &accept_op.base);
+  IREE_ASSERT_OK(iree_async_proactor_cancel(proactor_, &accept_op.base));
   {
     iree_time_t deadline = iree_time_now() + iree_make_duration_ms(2000);
     while (!accept_log.final_received && iree_time_now() < deadline) {
@@ -202,7 +202,7 @@ TEST_P(MultishotTest, MultishotAccept_ListenerClose) {
   accept_op.accepted_socket = nullptr;
 
   // Cancel the multishot accept and wait for the cancellation completion.
-  iree_async_proactor_cancel(proactor_, &accept_op.base);
+  IREE_ASSERT_OK(iree_async_proactor_cancel(proactor_, &accept_op.base));
   {
     iree_time_t deadline = iree_time_now() + iree_make_duration_ms(2000);
     while (!accept_log.final_received && iree_time_now() < deadline) {
@@ -305,7 +305,7 @@ TEST_P(MultishotTest, MultishotRecv_MultipleMessages) {
   }
 
   // Cancel the multishot recv and wait for the cancellation completion.
-  iree_async_proactor_cancel(proactor_, &recv_op.base);
+  IREE_ASSERT_OK(iree_async_proactor_cancel(proactor_, &recv_op.base));
   {
     iree_time_t deadline = iree_time_now() + iree_make_duration_ms(2000);
     while (!recv_log.final_received && iree_time_now() < deadline) {

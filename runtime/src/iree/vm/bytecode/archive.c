@@ -6,7 +6,10 @@
 
 #include "iree/vm/bytecode/archive.h"
 
-#include "iree/vm/bytecode/isa/isa.h"
+#include <string.h>
+
+#include "iree/base/internal/flatcc/parsing.h"
+#include "iree/schemas/bytecode_module_def_reader.h"
 
 // ZIP local file header (comes immediately before each file in the archive).
 // In order to find the starting offset of the FlatBuffer in a polyglot archive

@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import bazel_to_cmake_config
 import bazel_to_cmake_converter
+import bazel_to_cmake_requirements
 import bazel_to_cmake_targets
 
 
@@ -102,6 +103,35 @@ class ConfigTest(unittest.TestCase):
             ["root:other::thing"],
         )
 
+    def test_loom_c_root_targets_strip_filesystem_staging_prefix(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        loom = bazel_to_cmake_config.include_project(
+            str(repo_root / ".bazel_to_cmake.cfg.py"),
+            "loom/.bazel_to_cmake.cfg.py",
+        )
+
+        converter = bazel_to_cmake_config.ProjectTargetConverter(
+            repo_map={"@iree": ""},
+            projects=[loom],
+        )
+
+        self.assertEqual(
+            converter.convert_target("//loom/src/loom/ir"),
+            ["loom::ir"],
+        )
+        self.assertEqual(
+            converter.convert_target("@iree//loom/src/loom/tools/loom-check"),
+            ["loom::tools::loom-check"],
+        )
+        self.assertEqual(
+            converter.convert_target("//loom/src/loom/tools/loom-check:loom-check"),
+            ["loom::tools::loom-check::loom-check"],
+        )
+        self.assertEqual(
+            converter.convert_target("//loom/src:defines"),
+            [],
+        )
+
     def test_rejects_compiler_monorepo_external_targets(self):
         converter = bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""})
 
@@ -144,6 +174,24 @@ class ConfigTest(unittest.TestCase):
             functions._convert_select_condition("//runtime/config/hal:driver_hip"),
             "IREE_HAL_DRIVER_HIP",
         )
+        self.assertEqual(
+            functions._convert_select_condition(
+                "//loom/config/target:amdgpu_artifacts"
+            ),
+            "LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU",
+        )
+        self.assertEqual(
+            functions._convert_select_condition(
+                "//loom/config/target:llvmir_artifacts"
+            ),
+            "LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR",
+        )
+        self.assertEqual(
+            functions._convert_select_condition(
+                "//loom/config/target:spirv_vulkan_artifacts"
+            ),
+            "LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND IREE_HAL_DRIVER_VULKAN",
+        )
         with self.assertRaises(NotImplementedError):
             functions.select(
                 {
@@ -159,17 +207,301 @@ class ConfigTest(unittest.TestCase):
             build_dir="",
         )
 
-        target_compatible_with = functions.select(
+        target_compatible_with = [
+            SimpleNamespace(cmake_condition="IREE_HAL_DRIVER_WEBGPU"),
+            SimpleNamespace(cmake_condition="IREE_HAL_DRIVER_WEBGPU"),
+        ] + functions.select(
             {
                 "@platforms//cpu:wasm32": [],
                 "//conditions:default": ["@platforms//:incompatible"],
             }
-        ) + [SimpleNamespace(cmake_condition="IREE_HAL_DRIVER_WEBGPU")]
+        )
 
         self.assertEqual(
             functions._target_compatible_condition(target_compatible_with),
             'IREE_HAL_DRIVER_WEBGPU AND IREE_ARCH STREQUAL "wasm_32"',
         )
+
+    def test_cc_binary_linkshared_emits_shared_library(self):
+        converter = SimpleNamespace(body="")
+        functions = bazel_to_cmake_converter.BuildFileFunctions(
+            converter=converter,
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            build_dir="runtime/src/iree/hal/local/elf/testdata",
+        )
+
+        functions.cc_binary(
+            name="elementwise_mul_library.so",
+            srcs=["elementwise_mul_library.c"],
+            deps=["//runtime/src/iree/hal/local:executable_library"],
+            testonly=True,
+            linkshared=True,
+        )
+
+        self.assertIn("iree_cc_library(", converter.body)
+        self.assertNotIn("iree_cc_binary(", converter.body)
+        self.assertIn("  SHARED\n", converter.body)
+        self.assertIn("  TESTONLY\n", converter.body)
+        self.assertIn("iree::hal::local::executable_library", converter.body)
+
+    def test_c_embed_data_srcs_can_reference_generated_targets(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        converter = SimpleNamespace(body="")
+        functions = bazel_to_cmake_converter.BuildFileFunctions(
+            converter=converter,
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            build_dir="runtime/src/iree/hal/local/elf/testdata",
+            repo_root=str(repo_root),
+        )
+
+        functions.cc_binary(
+            name="elementwise_mul_library.so",
+            srcs=["elementwise_mul_library.c"],
+            deps=["//runtime/src/iree/hal/local:executable_library"],
+            testonly=True,
+            linkshared=True,
+        )
+        converter.body = ""
+
+        functions.iree_c_embed_data(
+            name="elementwise_mul",
+            srcs=[":elementwise_mul_library.so"],
+            c_file_output="elementwise_mul.c",
+            h_file_output="elementwise_mul.h",
+            testonly=True,
+            flatten=True,
+        )
+
+        self.assertIn(
+            "$<TARGET_FILE:iree::hal::local::elf::testdata::elementwise_mul_library.so>",
+            converter.body,
+        )
+        self.assertNotIn('"elementwise_mul_library.so"', converter.body)
+
+    def test_c_embed_data_srcs_preserve_generated_file_labels(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        converter = SimpleNamespace(body="")
+        functions = bazel_to_cmake_converter.BuildFileFunctions(
+            converter=converter,
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            build_dir="runtime/src/iree/vm/test",
+            repo_root=str(repo_root),
+        )
+
+        functions.iree_c_embed_data(
+            name="all_bytecode_modules_c",
+            srcs=[":arithmetic_ops.vmfb"],
+            c_file_output="all_bytecode_modules.c",
+            h_file_output="all_bytecode_modules.h",
+            flatten=True,
+        )
+
+        self.assertIn('"arithmetic_ops.vmfb"', converter.body)
+        self.assertNotIn("$<TARGET_FILE:", converter.body)
+
+    def test_c_embed_data_srcs_preserve_source_file_labels(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        converter = SimpleNamespace(body="")
+        functions = bazel_to_cmake_converter.BuildFileFunctions(
+            converter=converter,
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            build_dir="runtime/src/iree/hal/local/elf/testdata",
+            repo_root=str(repo_root),
+        )
+
+        functions.iree_c_embed_data(
+            name="elementwise_mul_source",
+            srcs=[":elementwise_mul.mlir"],
+            c_file_output="elementwise_mul_source.c",
+            h_file_output="elementwise_mul_source.h",
+            testonly=True,
+            flatten=True,
+        )
+
+        self.assertIn(
+            '"${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/local/elf/testdata/'
+            'elementwise_mul.mlir"',
+            converter.body,
+        )
+        self.assertNotIn("$<TARGET_FILE:", converter.body)
+
+    def test_requirement_policy_loads_cross_project_requirement_defs(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        policy = bazel_to_cmake_requirements.load_project_policy(
+            str(repo_root),
+            "loom",
+        )
+
+        collected = policy.collect("loom/src/loom/tooling/target/amdgpu/execution")
+        conditions = [
+            condition.cmake_condition for condition in collected.cmake_conditions()
+        ]
+
+        self.assertIn("LOOM_EXECUTE_IREE_HAL", conditions)
+        self.assertIn("IREE_HAL_DRIVER_AMDGPU", conditions)
+        self.assertNotIn("LOOM_EXECUTE_AMDGPU", conditions)
+
+    def test_native_test_emits_target_compatible_guard(self):
+        converter = SimpleNamespace(body="")
+        functions = bazel_to_cmake_converter.BuildFileFunctions(
+            converter=converter,
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            build_dir="",
+        )
+
+        functions.native_test(
+            name="portable_test",
+            src="//tools:runner",
+            target_compatible_with=functions.select(
+                {
+                    "@platforms//cpu:wasm32": [],
+                    "//conditions:default": ["@platforms//:incompatible"],
+                }
+            ),
+        )
+
+        self.assertIn('if(IREE_ARCH STREQUAL "wasm_32")', converter.body)
+        self.assertIn("iree_native_test(", converter.body)
+        self.assertIn("endif()", converter.body)
+
+    def test_native_test_converts_location_args_to_file_locators(self):
+        converter = SimpleNamespace(body="")
+        functions = bazel_to_cmake_converter.BuildFileFunctions(
+            converter=converter,
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            build_dir="/repo/pkg",
+            repo_root="/repo",
+        )
+
+        functions.native_test(
+            name="location_test",
+            src="//tools:runner",
+            args=[
+                "$(location input.txt)",
+                "--flag=$(location nested/input.bin)",
+            ],
+        )
+
+        self.assertIn('"{{${PROJECT_SOURCE_DIR}/pkg/input.txt}}"', converter.body)
+        self.assertIn(
+            '"--flag={{${PROJECT_SOURCE_DIR}/pkg/nested/input.bin}}"',
+            converter.body,
+        )
+
+    def test_native_test_converts_location_env(self):
+        converter = SimpleNamespace(body="")
+        functions = bazel_to_cmake_converter.BuildFileFunctions(
+            converter=converter,
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            build_dir="/repo/pkg",
+            repo_root="/repo",
+        )
+
+        functions.native_test(
+            name="location_env_test",
+            src="//tools:runner",
+            env={
+                "FIXTURE": "$(location input.txt)",
+                "SPIRV_VAL": "$(rootpath //third_party:spirv_val)",
+            },
+        )
+
+        self.assertIn("ENV", converter.body)
+        self.assertIn(
+            '"FIXTURE=${PROJECT_SOURCE_DIR}/pkg/input.txt"',
+            converter.body,
+        )
+        self.assertIn(
+            '"SPIRV_VAL=$<TARGET_FILE:iree::third_party::spirv_val>"',
+            converter.body,
+        )
+
+    def test_native_test_omits_unresolved_external_location_env(self):
+        converter = SimpleNamespace(body="")
+        functions = bazel_to_cmake_converter.BuildFileFunctions(
+            converter=converter,
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            build_dir="/repo/pkg",
+            repo_root="/repo",
+        )
+
+        functions.native_test(
+            name="external_env_test",
+            src="//tools:runner",
+            env={
+                "LLVM_OBJDUMP": "$(rootpath @wasi_sdk//:llvm-objdump)",
+            },
+        )
+
+        self.assertNotIn("ENV", converter.body)
+        self.assertNotIn("TARGET_FILE:pkg_@wasi_sdk", converter.body)
+
+    def test_cc_test_emits_sanitizer_suppressions(self):
+        converter = SimpleNamespace(body="")
+        functions = bazel_to_cmake_converter.BuildFileFunctions(
+            converter=converter,
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            build_dir="",
+        )
+
+        functions.cc_test(
+            name="vulkan_test",
+            srcs=["vulkan_test.cc"],
+            sanitizer_suppressions={
+                "lsan": "//build_tools/sanitizer:lsan_suppressions_vulkan.txt",
+            },
+        )
+
+        self.assertIn("SANITIZER_SUPPRESSIONS", converter.body)
+        self.assertIn("    lsan", converter.body)
+        self.assertIn("    vulkan", converter.body)
+
+    def test_execution_test_suite_emits_target_compatible_guard(self):
+        converter = SimpleNamespace(body="")
+        functions = bazel_to_cmake_converter.BuildFileFunctions(
+            converter=converter,
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            build_dir="/repo/pkg",
+            repo_root="/repo",
+        )
+
+        functions.iree_execution_test_suite(
+            name="execution_test",
+            manifests=["test.json"],
+            tools={"runner": "//tools:runner"},
+            target_compatible_with=functions.select(
+                {
+                    "@platforms//cpu:wasm32": [],
+                    "//conditions:default": ["@platforms//:incompatible"],
+                }
+            ),
+        )
+
+        self.assertIn('if(IREE_ARCH STREQUAL "wasm_32")', converter.body)
+        self.assertIn("iree_execution_test_suite(", converter.body)
+        self.assertIn("endif()", converter.body)
+
+    def test_execution_test_suite_emits_sanitizer_suppressions(self):
+        converter = SimpleNamespace(body="")
+        functions = bazel_to_cmake_converter.BuildFileFunctions(
+            converter=converter,
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            build_dir="/repo/pkg",
+            repo_root="/repo",
+        )
+
+        functions.iree_execution_test_suite(
+            name="execution_test",
+            manifests=["test.json"],
+            tools={"runner": "//tools:runner"},
+            sanitizer_suppressions={
+                "lsan": "//build_tools/sanitizer:lsan_suppressions_vulkan.txt",
+            },
+        )
+
+        self.assertIn("SANITIZER_SUPPRESSIONS", converter.body)
+        self.assertIn("    lsan", converter.body)
+        self.assertIn("    vulkan", converter.body)
 
 
 if __name__ == "__main__":

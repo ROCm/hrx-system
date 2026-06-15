@@ -28,7 +28,7 @@ static int dispatch_tile_a(
     const iree_hal_executable_dispatch_state_v0_t* dispatch_state,
     const iree_hal_executable_workgroup_state_v0_t* workgroup_state) {
   const dispatch_tile_a_constants_t* constants =
-      (const dispatch_tile_a_constants_t*)dispatch_state->constants;
+      (const dispatch_tile_a_constants_t*)dispatch_state->constants.data;
   const float* src = ((const float*)dispatch_state->binding_ptrs[0]);
   float* dst = ((float*)dispatch_state->binding_ptrs[1]);
   const uint32_t x = workgroup_state->workgroup_id_x;
@@ -130,12 +130,13 @@ static const char* parameter_names[3] = {
 };
 
 // Attributes for each dispatch function used by the runtime.
-// Required to specify constant and binding counts for dispatch validation.
+// Required to specify constant byte lengths and binding counts for dispatch
+// validation.
 static const iree_hal_executable_dispatch_attrs_v0_t entry_attrs[2] = {
     {
         .flags = IREE_HAL_EXECUTABLE_DISPATCH_FLAG_V0_NONE,
         .local_memory_pages = 0,
-        .constant_count = 1,
+        .constant_byte_length = sizeof(dispatch_tile_a_constants_t),
         .binding_count = 2,
         .workgroup_size_x = 0,  // runtime specified
         .workgroup_size_y = 0,  // runtime specified
@@ -146,7 +147,7 @@ static const iree_hal_executable_dispatch_attrs_v0_t entry_attrs[2] = {
     {
         .flags = IREE_HAL_EXECUTABLE_DISPATCH_FLAG_V0_NONE,
         .local_memory_pages = 0,
-        .constant_count = 0,
+        .constant_byte_length = 0,
         .binding_count = 2,
         .workgroup_size_x = 0,  // runtime specified
         .workgroup_size_y = 0,  // runtime specified
@@ -206,7 +207,7 @@ static const iree_hal_executable_library_v0_t library = {
 const iree_hal_executable_library_header_t** demo_executable_library_query(
     iree_hal_executable_library_version_t max_version,
     const iree_hal_executable_environment_v0_t* environment) {
-  return max_version <= IREE_HAL_EXECUTABLE_LIBRARY_VERSION_LATEST
+  return max_version >= IREE_HAL_EXECUTABLE_LIBRARY_VERSION_LATEST
              ? (const iree_hal_executable_library_header_t**)&library
              : NULL;
 }

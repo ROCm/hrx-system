@@ -1,0 +1,152 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/packed_bitfield.loom-test
+// RUN: emit source-low output=low
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @i32_bitfield_extractu(%input: buffer, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<1xi32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<1xi32, #dense>
+  %loaded = vector.load %input_view[0] : view<1xi32, #dense> -> vector<1xi32>
+  %nibble = vector.bitfield.extractu %loaded {offset = 4, width = 4} : vector<1xi32> -> vector<1xi32>
+  vector.store %nibble, %output_view[0] : vector<1xi32>, view<1xi32, #dense>
+  func.return
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i32_bitfield_extractu(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>) asm<llvmir.generic.core> {
+  %16 = load.i32 %input_view, 0
+  %17 = const.i32 4
+  %18 = lshr.i32 %16, %17
+  %19 = const.i32 15
+  %nibble = and.i32 %18, %19
+  store.i32 %nibble, %output_view, 0
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @i32_bitfield_extracts(%input: buffer, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<1xi32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<1xi32, #dense>
+  %loaded = vector.load %input_view[0] : view<1xi32, #dense> -> vector<1xi32>
+  %nibble = vector.bitfield.extracts %loaded {offset = 4, width = 4} : vector<1xi32> -> vector<1xi32>
+  vector.store %nibble, %output_view[0] : vector<1xi32>, view<1xi32, #dense>
+  func.return
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i32_bitfield_extracts(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>) asm<llvmir.generic.core> {
+  %16 = load.i32 %input_view, 0
+  %17 = const.i32 24
+  %18 = shl.i32 %16, %17
+  %19 = const.i32 28
+  %nibble = ashr.i32 %18, %19
+  store.i32 %nibble, %output_view, 0
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @i32_bitfield_insert(%field_buffer: buffer, %base_buffer: buffer, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %field_view = buffer.view %field_buffer[%zero] : buffer -> view<1xi32, #dense>
+  %base_view = buffer.view %base_buffer[%zero] : buffer -> view<1xi32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<1xi32, #dense>
+  %field = vector.load %field_view[0] : view<1xi32, #dense> -> vector<1xi32>
+  %base = vector.load %base_view[0] : view<1xi32, #dense> -> vector<1xi32>
+  %inserted = vector.bitfield.insert %field into %base {offset = 8, width = 4} : vector<1xi32>, vector<1xi32>
+  vector.store %inserted, %output_view[0] : vector<1xi32>, view<1xi32, #dense>
+  func.return
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i32_bitfield_insert(%field_view: reg<llvmir.ptr>, %base_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>) asm<llvmir.generic.core> {
+  %27 = load.i32 %field_view, 0
+  %28 = load.i32 %base_view, 0
+  %29 = const.i32 15
+  %30 = and.i32 %27, %29
+  %31 = const.i32 8
+  %32 = shl.i32 %30, %31
+  %33 = const.i32 -3841
+  %34 = and.i32 %28, %33
+  %inserted = or.i32 %34, %32
+  store.i32 %inserted, %output_view, 0
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @i32_bitfield_b128_shape(%input: buffer, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<4xi32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<4xi32, #dense>
+  %loaded = vector.load %input_view[0] : view<4xi32, #dense> -> vector<4xi32>
+  %low = vector.bitfield.extractu %loaded {offset = 0, width = 4} : vector<4xi32> -> vector<4xi32>
+  %high = vector.bitfield.extractu %loaded {offset = 4, width = 2} : vector<4xi32> -> vector<4xi32>
+  %merged = vector.bitfield.insert %high into %low {offset = 4, width = 2} : vector<4xi32>, vector<4xi32>
+  %bias = vector.constant 32 : vector<4xi32>
+  %result = vector.subi %merged, %bias : vector<4xi32>
+  vector.store %result, %output_view[0] : vector<4xi32>, view<4xi32, #dense>
+  func.return
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i32_bitfield_b128_shape(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>) asm<llvmir.generic.core> {
+  %86 = load.i32 %input_view, 0
+  %87 = const.i32 4
+  %88 = lshr.i32 %86, %87
+  %89 = const.i32 3
+  %90 = and.i32 %88, %89
+  %91 = const.i32 15
+  %92 = and.i32 %86, %91
+  %93 = and.i32 %90, %89
+  %94 = shl.i32 %93, %87
+  %95 = const.i32 -49
+  %96 = and.i32 %92, %95
+  %97 = or.i32 %96, %94
+  %98 = load.i32 %input_view, 4
+  %99 = lshr.i32 %98, %87
+  %100 = and.i32 %99, %89
+  %101 = and.i32 %98, %91
+  %102 = and.i32 %100, %89
+  %103 = shl.i32 %102, %87
+  %104 = and.i32 %101, %95
+  %105 = or.i32 %104, %103
+  %106 = load.i32 %input_view, 8
+  %107 = lshr.i32 %106, %87
+  %108 = and.i32 %107, %89
+  %109 = and.i32 %106, %91
+  %110 = and.i32 %108, %89
+  %111 = shl.i32 %110, %87
+  %112 = and.i32 %109, %95
+  %113 = or.i32 %112, %111
+  %114 = load.i32 %input_view, 12
+  %115 = lshr.i32 %114, %87
+  %116 = and.i32 %115, %89
+  %117 = and.i32 %114, %91
+  %118 = and.i32 %116, %89
+  %119 = shl.i32 %118, %87
+  %120 = and.i32 %117, %95
+  %121 = or.i32 %120, %119
+  %merged = from_elements.v4i32 %97, %105, %113, %121
+  %bias = const.v4i32 32
+  %result = sub.v4i32 %merged, %bias
+  store.v4i32 %result, %output_view, 0
+  return
+}

@@ -7,6 +7,7 @@
 #ifndef IREE_BASE_INTERNAL_DEBUGGING_H_
 #define IREE_BASE_INTERNAL_DEBUGGING_H_
 
+#include "iree/base/attributes.h"
 #include "iree/base/target_platform.h"
 
 #ifdef __cplusplus

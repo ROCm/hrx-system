@@ -42,9 +42,9 @@ static inline const char* iree_amdgpu_code_object_target_for_exact(
   if (strcmp(exact_target, "gfx1151") == 0) return "gfx11-generic";
   if (strcmp(exact_target, "gfx1152") == 0) return "gfx11-generic";
   if (strcmp(exact_target, "gfx1153") == 0) return "gfx11-generic";
-  if (strcmp(exact_target, "gfx1170") == 0) return "gfx11-generic";
-  if (strcmp(exact_target, "gfx1171") == 0) return "gfx11-generic";
-  if (strcmp(exact_target, "gfx1172") == 0) return "gfx11-generic";
+  if (strcmp(exact_target, "gfx1170") == 0) return "gfx1170";
+  if (strcmp(exact_target, "gfx1171") == 0) return "gfx1171";
+  if (strcmp(exact_target, "gfx1172") == 0) return "gfx1172";
   if (strcmp(exact_target, "gfx1200") == 0) return "gfx12-generic";
   if (strcmp(exact_target, "gfx1201") == 0) return "gfx12-generic";
   if (strcmp(exact_target, "gfx1250") == 0) return "gfx12-5-generic";

@@ -1,0 +1,550 @@
+// RUN: verify
+
+test.target<low_core> @test_target
+
+// ERROR@+1: STRUCTURE/014 {attr_name="export", actual_value="0", expected_constraint="present when linkage is present"}
+low.kernel.def target(@test_target) linkage(dso_local) @kernel_linkage_requires_export() {
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+// ERROR@+1: STRUCTURE/014 {attr_name="workgroup_size_x", actual_value="0", expected_constraint="positive u32"}
+low.kernel.def target(@test_target) workgroup_size(0, 1, 1) @kernel_rejects_zero_workgroup_size() {
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.kernel.def target(@test_target) @kernel_return_rejects_values(%value: reg<test.i32>) {
+  // ERROR@+1: STRUCTURE/001 {op_name="low.return", actual_count="1", expected_count="0"}
+  low.return %value : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @storage_view_passes(%value: reg<test.i32>) -> (reg<test.i32>) {
+  %storage = low.storage.reserve {byte_alignment = 16, byte_length = 64} : low.storage<scratch>
+  %view = low.storage.view %storage {offset = 16, byte_length = 16} : low.storage<scratch> -> low.storage<scratch>
+  low.spill %value, %view : reg<test.i32>, low.storage<scratch>
+  %reload = low.reload %view : low.storage<scratch> -> reg<test.i32>
+  low.return %reload : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @storage_view_rejects_overflowing_length() {
+  %storage = low.storage.reserve {byte_alignment = 16, byte_length = 64} : low.storage<scratch>
+  // ERROR@+1: SUBRANGE/004 {dim_index="0", offset="48", size="32", total="80", bound="64"}
+  %view = low.storage.view %storage {offset = 48, byte_length = 32} : low.storage<scratch> -> low.storage<scratch>
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @storage_view_bounds_storage_traffic(%value: reg<test.i32>) {
+  %storage = low.storage.reserve {byte_alignment = 16, byte_length = 64} : low.storage<scratch>
+  %view = low.storage.view %storage {offset = 16, byte_length = 16} : low.storage<scratch> -> low.storage<scratch>
+  // ERROR@+1: SUBRANGE/004 {dim_index="0", offset="16", size="1", total="17", bound="16"}
+  low.spill %value, %view {offset = 16} : reg<test.i32>, low.storage<scratch>
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+// low.live_in and low.resource form the entry-block preamble.
+low.func.def target(@test_target) @entry_preamble() -> (reg<test.ptr>) {
+  %state = low.resource<native_pointer> {index = 0, source_type = buffer} : reg<test.ptr>
+  %arg0 = low.live_in<test.arg0> : reg<test.ptr>
+  %copy = low.copy %state : reg<test.ptr> -> reg<test.ptr>
+  low.return %copy : reg<test.ptr>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @live_in_after_preamble(%input: reg<test.i32>) -> (reg<test.i32>) {
+  %arg0 = low.live_in<test.arg0> : reg<test.i32>
+  %copy = low.copy %arg0 : reg<test.i32> -> reg<test.i32>
+  // ERROR@+1: STRUCTURE/030 {op_name="low.live_in", placement="before", reference_name="ordinary low packets"}
+  %late = low.live_in<test.arg1> : reg<test.i32>
+  low.return %late : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @resource_after_preamble() -> (reg<test.ptr>) {
+  %arg0 = low.live_in<test.arg0> : reg<test.ptr>
+  %copy = low.copy %arg0 : reg<test.ptr> -> reg<test.ptr>
+  // ERROR@+1: STRUCTURE/030 {op_name="low.resource", placement="before", reference_name="ordinary low packets"}
+  %late = low.resource<native_pointer> {index = 0, source_type = buffer} : reg<test.ptr>
+  low.return %late : reg<test.ptr>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @live_in_non_entry_block() -> (reg<test.i32>) {
+  %arg0 = low.live_in<test.arg0> : reg<test.i32>
+  low.br ^exit
+^exit:
+  // ERROR@+1: STRUCTURE/031 {op_name="low.live_in", expected_block="the low entry block", actual_block="a non-entry block"}
+  %late = low.live_in<test.arg1> : reg<test.i32>
+  low.return %late : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+// Import attrs on low.func.decl are valid without changing the referenced low
+// descriptor contract set.
+low.func.decl import(vm, "iree.vm.core.add_i32") target(@test_target) @extern_imported(%lhs: reg<test.i32>) -> (reg<test.i32>)
+
+// ====
+
+test.target<low_core> @test_target
+
+func.def @semantic(%value: i32, %state: vm.state) -> (i32) {
+  func.return %value : i32
+}
+
+low.func.def target(@test_target) @semantic_low(%value: reg<test.i32>) -> (reg<test.i32>) {
+  low.return %value : reg<test.i32>
+}
+
+func.def @invoke_explicit_low(%value: i32, %state: vm.state) -> (i32) {
+  %result = low.invoke @semantic_low(%value, %state) : (i32, vm.state) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @semantic_low(%value: reg<test.i32>) -> (reg<test.i32>) {
+  low.return %value : reg<test.i32>
+}
+
+// low.invoke crosses from source IR to a low entry and therefore does not
+// require the low callee's register signature to match the source signature.
+func.def @invoke_source_signature(%value: f32) -> (i32) {
+  %result = low.invoke @semantic_low(%value) : (f32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+func.decl @semantic(%arg: i32) -> (i32)
+
+func.def @invoke_non_low(%lhs: i32) -> (i32) {
+  // ERROR@+1: SYMBOL/003 {symbol_name="semantic", actual_kind="function", expected_kind="low function"}
+  %sum = low.invoke @semantic(%lhs) : (i32) -> (i32)
+  func.return %sum : i32
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.decl target(@test_target) @extern_add(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>)
+
+low.func.def target(@test_target) @low_call(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) {
+  %sum = low.func.call @extern_add(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> (reg<test.i32>)
+  low.return %sum : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.decl target(@test_target) @extern_add()
+
+func.def @low_call_outside_low_body() {
+  // ERROR@+1: STRUCTURE/029 {op_name="low.func.call", constraint_kind="required", ancestor_name="low executable", actual_ancestor="func.def"}
+  low.func.call @extern_add() : ()
+  func.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.decl target(@test_target) @semantic_low()
+
+low.func.def target(@test_target) @invoke_in_low_body() {
+  // ERROR@+1: STRUCTURE/029 {op_name="low.invoke", constraint_kind="forbidden", ancestor_name="low.func.def", actual_ancestor="low.func.def"}
+  low.invoke @semantic_low() : ()
+  low.return
+}
+
+// ====
+
+func.decl @semantic(%arg: i32) -> (i32)
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @low_call_non_low(%lhs: reg<test.i32>) -> (reg<test.i32>) {
+  // ERROR@+1: SYMBOL/003 {symbol_name="semantic", actual_kind="function", expected_kind="low function"}
+  %sum = low.func.call @semantic(%lhs) : (reg<test.i32>) -> (reg<test.i32>)
+  low.return %sum : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @gfx1100
+test.target<low_core> @gfx1200
+
+low.func.decl target(@gfx1200) @extern_add(%lhs: reg<test.i32>) -> (reg<test.i32>)
+
+low.func.def target(@gfx1100) @low_call_cross_target(%lhs: reg<test.i32>) -> (reg<test.i32>) {
+  // ERROR@+1: TARGET/040 {op_name="low.func.call", field_name="callee", callee_target_name="gfx1200", caller_target_name="gfx1100"}
+  %sum = low.func.call @extern_add(%lhs) : (reg<test.i32>) -> (reg<test.i32>)
+  low.return %sum : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.decl target(@test_target) @extern_add(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>)
+
+low.func.def target(@test_target) @low_call_operand_count(%lhs: reg<test.i32>) -> (reg<test.i32>) {
+  // ERROR@+1: STRUCTURE/001 {op_name="low.func.call", actual_count="1", expected_count="2"}
+  %sum = low.func.call @extern_add(%lhs) : (reg<test.i32>) -> (reg<test.i32>)
+  low.return %sum : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+// Values consumed by tied low results are path-sensitive in CFG regions. A
+// backedge forwarding the fresh tied result redefines the block argument for
+// the next iteration and the exit path observes that fresh block argument.
+low.func.def target(@test_target) @cfg_tied_loop_carried_value(%condition: reg<test.i32>, %seed: reg<test.i32>) -> (reg<test.i32>) {
+  low.br ^loop(%seed: reg<test.i32>)
+^loop(%state: reg<test.i32>):
+  low.cond_br %condition, ^body, ^exit : reg<test.i32>
+^body:
+  %next = low.op<test.tied.any>(%state) : (reg<test.i32>) -> %state as reg<test.i32>
+  low.br ^loop(%next: reg<test.i32>)
+^exit:
+  low.br ^join(%state: reg<test.i32>)
+^join(%result: reg<test.i32>):
+  low.return %result : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+// A body-local value defined before a tied op is recreated on each dynamic
+// entry to the block. A backedge to the consuming block must not treat the tied
+// operand spelling as a later reuse of the prior iteration's consumed value.
+low.func.def target(@test_target) @cfg_tied_body_local_value(%condition: reg<test.i32>, %seed: reg<test.i32>) -> (reg<test.i32>) {
+  low.br ^loop(%seed: reg<test.i32>)
+^loop(%state: reg<test.i32>):
+  low.cond_br %condition, ^body, ^exit : reg<test.i32>
+^body:
+  %copy = low.copy %state : reg<test.i32> -> reg<test.i32>
+  %next = low.op<test.tied.any>(%copy) : (reg<test.i32>) -> %copy as reg<test.i32>
+  low.br ^loop(%next: reg<test.i32>)
+^exit:
+  low.return %state : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @cfg_tied_outer_value_reused_by_backedge(%condition: reg<test.i32>, %seed: reg<test.i32>) -> (reg<test.i32>) {
+  %copy = low.copy %seed : reg<test.i32> -> reg<test.i32>
+  low.br ^loop(%seed: reg<test.i32>)
+^loop(%state: reg<test.i32>):
+  low.cond_br %condition, ^body, ^exit : reg<test.i32>
+^body:
+  // ERROR@+1: DOMINANCE/002 {value_name="copy"}
+  %next = low.op<test.tied.any>(%copy) : (reg<test.i32>) -> %copy as reg<test.i32>
+  low.br ^loop(%next: reg<test.i32>)
+^exit:
+  low.return %state : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @cfg_tied_rejects_same_path_reuse(%condition: reg<test.i32>, %seed: reg<test.i32>) -> (reg<test.i32>) {
+  low.br ^loop(%seed: reg<test.i32>)
+^loop(%state: reg<test.i32>):
+  low.cond_br %condition, ^body, ^exit : reg<test.i32>
+^body:
+  %next = low.op<test.tied.any>(%state) : (reg<test.i32>) -> %state as reg<test.i32>
+  // ERROR@+1: DOMINANCE/002 {value_name="state"}
+  low.br ^join(%state: reg<test.i32>)
+^exit:
+  low.br ^join(%state: reg<test.i32>)
+^join(%result: reg<test.i32>):
+  low.return %result : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.decl target(@test_target) @extern_add(%lhs: reg<test.i32>, %rhs: reg<test.ptr>) -> (reg<test.i32>)
+
+low.func.def target(@test_target) @low_call_operand_type(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) {
+  // ERROR@+1: TYPE/001 {field_a="operand 1", type_a="reg<test.i32>", field_b="callee argument 1", type_b="reg<test.ptr>"}
+  %sum = low.func.call @extern_add(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> (reg<test.i32>)
+  low.return %sum : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.decl target(@test_target) @extern_add(%lhs: reg<test.i32>) -> (reg<test.i32>)
+
+func.def @pure_invoke_impure_low(%lhs: i32) -> (i32) {
+  // ERROR@+1: STRUCTURE/034 {callee_name="extern_add", boundary_name="extern_add"}
+  %sum = low.invoke pure @extern_add(%lhs) : (i32) -> (i32)
+  func.return %sum : i32
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+// Storage traffic is valid when all traffic stays inside owned storage views.
+low.func.def target(@test_target) @slot_roundtrip(%input: reg<test.i32>) -> (reg<test.i32>) {
+  %storage = low.storage.reserve {byte_alignment = 4, byte_length = 4} : low.storage<scratch>
+  %view = low.storage.view %storage {byte_length = 4} : low.storage<scratch> -> low.storage<scratch>
+  low.spill %input, %view {offset = 0} : reg<test.i32>, low.storage<scratch>
+  %reload = low.reload %view {offset = 0} : low.storage<scratch> -> reg<test.i32>
+  %addr = low.storage.address %view : low.storage<scratch> -> reg<test.ptr>
+  low.return %reload : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @resource_negative_extent() -> (reg<test.ptr>) {
+  // ERROR@+1: STRUCTURE/014 {attr_name="extent", actual_value="-1", expected_constraint=">= 0"}
+  %binding = low.resource<native_pointer> {index = 0, source_type = buffer, extent = -1} : reg<test.ptr>
+  low.return %binding : reg<test.ptr>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @resource_dynamic_extent(%extent: reg<test.i32>) -> (reg<test.ptr>) {
+  %binding = low.resource<native_pointer> extent(%extent) {index = 0, source_type = buffer} : reg<test.ptr>
+  low.return %binding : reg<test.ptr>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @resource_dynamic_static_extent(%extent: reg<test.i32>) -> (reg<test.ptr>) {
+  // ERROR@+1: STRUCTURE/014 {attr_name="extent", actual_value="16", expected_constraint="absent when extent operand is present"}
+  %binding = low.resource<native_pointer> extent(%extent) {index = 0, source_type = buffer, extent = 16} : reg<test.ptr>
+  low.return %binding : reg<test.ptr>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @resource_bad_swizzle_stride() -> (reg<test.ptr>) {
+  // ERROR@+1: STRUCTURE/014 {attr_name="cache_swizzle_stride", actual_value="16384", expected_constraint="14-bit non-negative byte stride"}
+  %binding = low.resource<native_pointer> {index = 0, source_type = buffer, cache_swizzle_stride = 16384} : reg<test.ptr>
+  low.return %binding : reg<test.ptr>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) abi(object_function) @resource_wrong_export_abi() -> (reg<test.ptr>) {
+  // ERROR@+1: TARGET/041 {op_name="low.resource", field_name="import_kind", import_kind="vm_state", expected_abi="vm_module_function", actual_abi="object_function"}
+  %state = low.resource<vm_state> {index = 0, source_type = vm.state} : reg<test.ptr>
+  low.return %state : reg<test.ptr>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @if_result_missing_else(%condition: reg<test.i32>, %value: reg<test.i32>) -> (reg<test.i32>) {
+  // ERROR@+1: STRUCTURE/013 "else_region" "0" "present when low.scf.if has results" "1"
+  %result = low.scf.if %condition -> (reg<test.i32>) {
+    low.scf.yield %value : reg<test.i32>
+  }
+  low.return %result : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @if_yield_count_mismatch(%condition: reg<test.i32>, %value: reg<test.i32>) -> (reg<test.i32>) {
+  // ERROR@+1: STRUCTURE/008
+  %result = low.scf.if %condition -> (reg<test.i32>) {
+    low.scf.yield
+  } else {
+    low.scf.yield %value : reg<test.i32>
+  }
+  low.return %result : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @if_yield_type_mismatch(%condition: reg<test.i32>, %value: reg<test.ptr>, %fallback: reg<test.i32>) -> (reg<test.i32>) {
+  // ERROR@+1: TYPE/009
+  %result = low.scf.if %condition -> (reg<test.i32>) {
+    low.scf.yield %value : reg<test.ptr>
+  } else {
+    low.scf.yield %fallback : reg<test.i32>
+  }
+  low.return %result : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @if_rejects_branch_args(%condition: reg<test.i32>) {
+  // ERROR@+1: STRUCTURE/013 "then_region" "1" "0 branch arguments" "0"
+  low.scf.if %condition {
+  ^then(%arg: reg<test.i32>):
+    low.scf.yield
+  }
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @for_body_arg_count(%lower: reg<test.i32>, %upper: reg<test.i32>, %step: reg<test.i32>, %init: reg<test.i32>) -> (reg<test.i32>) {
+  // ERROR@+1: STRUCTURE/013 "body" "1" "1 + iter_args" "2"
+  %result = low.scf.for [%lower to %upper step %step] iter_args(%init: reg<test.i32>) -> (reg<test.i32>) do(%iv: reg<test.i32>) {
+    low.scf.yield %init : reg<test.i32>
+  }
+  low.return %result : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @for_body_arg_non_register(%lower: reg<test.i32>, %upper: reg<test.i32>, %step: reg<test.i32>) {
+  // ERROR@+1: TYPE/014
+  low.scf.for [%lower to %upper step %step] do(%iv: i32) {
+    low.scf.yield
+  }
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @for_bound_type_mismatch(%lower: reg<test.i32>, %upper: reg<test.ptr>, %step: reg<test.i32>) {
+  // ERROR@+1: TYPE/001 "lower_bound" "upper_bound"
+  low.scf.for [%lower to %upper step %step] do(%iv: reg<test.i32>) {
+    low.scf.yield
+  }
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @for_iv_type_mismatch(%lower: reg<test.i32>, %upper: reg<test.i32>, %step: reg<test.i32>) {
+  // ERROR@+1: TYPE/001 "body[0]" "lower_bound"
+  low.scf.for [%lower to %upper step %step] do(%iv: reg<test.ptr>) {
+    low.scf.yield
+  }
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @for_body_arg_type_mismatch(%lower: reg<test.i32>, %upper: reg<test.i32>, %step: reg<test.i32>, %init: reg<test.i32>) -> (reg<test.i32>) {
+  // ERROR@+1: TYPE/001 "body[1]" "iter_args[0]"
+  %result = low.scf.for [%lower to %upper step %step] iter_args(%init: reg<test.i32>) -> (reg<test.i32>) do(%iv: reg<test.i32>, %acc: reg<test.ptr>) {
+    low.scf.yield %init : reg<test.i32>
+  }
+  low.return %result : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @for_yield_type_mismatch(%lower: reg<test.i32>, %upper: reg<test.i32>, %step: reg<test.i32>, %init: reg<test.i32>, %wrong: reg<test.ptr>) -> (reg<test.i32>) {
+  // ERROR@+1: TYPE/009
+  %result = low.scf.for [%lower to %upper step %step] iter_args(%init: reg<test.i32>) -> (reg<test.i32>) do(%iv: reg<test.i32>, %acc: reg<test.i32>) {
+    low.scf.yield %wrong : reg<test.ptr>
+  }
+  low.return %result : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @for_unroll_policy_is_exclusive(%lower: reg<test.i32>, %upper: reg<test.i32>, %step: reg<test.i32>, %factor: reg<test.i32>) {
+  // ERROR@+1: STRUCTURE/014 {attr_name="unroll", actual_value="2", expected_constraint="either bare unroll or unroll factor, not both"}
+  low.scf.for [%lower to %upper step %step] unroll(%factor) unroll do(%iv: reg<test.i32>) {
+  }
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @if_wrong_terminator(%condition: reg<test.i32>) {
+  // ERROR@+1: STRUCTURE/018 "low.scf.if" "0" "low.scf.yield" "low.return"
+  low.scf.if %condition {
+    low.return
+  }
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @asm_nested_if_malformed(%condition: reg<test.i32>) asm<test.low.core> {
+  // ERROR@+1: PARSE/003 "expected '{'"
+  low.scf.if %condition bogus
+  return
+}

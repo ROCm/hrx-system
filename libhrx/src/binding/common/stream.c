@@ -263,9 +263,7 @@ static void iree_hal_streaming_stream_destroy(
   // Clean up recorded events.
   if (stream->recorded_events) {
     for (iree_host_size_t i = 0; i < stream->event_count; ++i) {
-      if (stream->recorded_events[i]) {
-        iree_hal_streaming_event_release(stream->recorded_events[i]);
-      }
+      iree_hal_streaming_event_release(stream->recorded_events[i]);
     }
     iree_allocator_free(stream->host_allocator, stream->recorded_events);
   }

@@ -1,0 +1,168 @@
+// RUN: verify
+
+func.def @constant_rejects_integer_result() -> (i64) {
+  // ERROR@+1: TYPE/004 "expected address"
+  %c = index.constant 4 : i64
+  func.return %c : i64
+}
+
+// ====
+
+func.def @constant_rejects_float_payload() -> (index) {
+  // ERROR@+1: TYPE/005 "value"
+  %c = index.constant 4.0 : index
+  func.return %c : index
+}
+
+// ====
+
+func.def @constant_rejects_bool_payload() -> (offset) {
+  // ERROR@+1: TYPE/005 "value"
+  %c = index.constant true : offset
+  func.return %c : offset
+}
+
+// ====
+
+func.def @constant_rejects_negative_offset_payload() -> (offset) {
+  // ERROR@+1: STRUCTURE/014 "value" "-1" "element type domain"
+  %c = index.constant -1 : offset
+  func.return %c : offset
+}
+
+// ====
+
+func.def @cast_rejects_float_input(%x: f32) -> (index) {
+  // ERROR@+1: TYPE/003 "input" "f32" "integer, index, or offset"
+  %i = index.cast %x : f32 to index
+  func.return %i : index
+}
+
+// ====
+
+func.def @cast_rejects_float_result(%x: index) -> (f32) {
+  // ERROR@+1: TYPE/004 "result" "f32" "integer, index, or offset"
+  %f = index.cast %x : index to f32
+  func.return %f : f32
+}
+
+// ====
+
+func.def @cast_rejects_integer_to_integer(%x: i32) -> (i64) {
+  // ERROR@+1: TYPE/004 "result" "i64" "index or offset boundary"
+  %wide = index.cast %x : i32 to i64
+  func.return %wide : i64
+}
+
+// ====
+
+func.def @add_rejects_integer_payload(%x: i64, %y: index) -> (index) {
+  // ERROR@+2: TYPE/003 "lhs"
+  // ERROR@+1: TYPE/001 "lhs" "rhs"
+  %r = index.add %x, %y : index
+  func.return %r : index
+}
+
+// ====
+
+func.def @mul_rejects_offset(%x: offset, %y: offset) -> (offset) {
+  // ERROR@+3: TYPE/003 "lhs"
+  // ERROR@+2: TYPE/003 "rhs"
+  // ERROR@+1: TYPE/004 "result"
+  %r = index.mul %x, %y : offset
+  func.return %r : offset
+}
+
+// ====
+
+func.def @div_rejects_offset(%x: offset, %y: offset) -> (offset) {
+  // ERROR@+3: TYPE/003 "lhs"
+  // ERROR@+2: TYPE/003 "rhs"
+  // ERROR@+1: TYPE/004 "result"
+  %r = index.div %x, %y : offset
+  func.return %r : offset
+}
+
+// ====
+
+func.def @rem_rejects_offset(%x: offset, %y: offset) -> (offset) {
+  // ERROR@+3: TYPE/003 "lhs"
+  // ERROR@+2: TYPE/003 "rhs"
+  // ERROR@+1: TYPE/004 "result"
+  %r = index.rem %x, %y : offset
+  func.return %r : offset
+}
+
+// ====
+
+func.def @min_rejects_offset(%x: offset, %y: offset) -> (offset) {
+  // ERROR@+3: TYPE/003 "lhs"
+  // ERROR@+2: TYPE/003 "rhs"
+  // ERROR@+1: TYPE/004 "result"
+  %r = index.min %x, %y : offset
+  func.return %r : offset
+}
+
+// ====
+
+func.def @max_rejects_offset(%x: offset, %y: offset) -> (offset) {
+  // ERROR@+3: TYPE/003 "lhs"
+  // ERROR@+2: TYPE/003 "rhs"
+  // ERROR@+1: TYPE/004 "result"
+  %r = index.max %x, %y : offset
+  func.return %r : offset
+}
+
+// ====
+
+func.def @madd_rejects_offset(%x: offset, %y: offset, %z: offset) -> (offset) {
+  // ERROR@+4: TYPE/003 "a"
+  // ERROR@+3: TYPE/003 "b"
+  // ERROR@+2: TYPE/003 "c"
+  // ERROR@+1: TYPE/004 "result"
+  %r = index.madd %x, %y, %z : offset
+  func.return %r : offset
+}
+
+// ====
+
+func.def @bitwise_rejects_offset(%x: offset, %y: offset) -> (offset) {
+  // ERROR@+3: TYPE/003 "lhs"
+  // ERROR@+2: TYPE/003 "rhs"
+  // ERROR@+1: TYPE/004 "result"
+  %r = index.andi %x, %y : offset
+  func.return %r : offset
+}
+
+// ====
+
+func.def @bit_count_rejects_offset(%x: offset) -> (offset) {
+  // ERROR@+2: TYPE/003 "input"
+  // ERROR@+1: TYPE/004 "result"
+  %r = index.ctpopi %x : offset
+  func.return %r : offset
+}
+
+// ====
+
+func.def @assume_rejects_integer_payload(%x: i64) -> (index) {
+  // ERROR@+1: TYPE/003 "values[0]" "i64" "address"
+  %r = index.assume %x [] : index
+  func.return %r : index
+}
+
+// ====
+
+func.def @assume_rejects_result_type_mismatch(%x: index) -> (offset) {
+  // ERROR@+1: TYPE/001 "values[0]" "index" "results[0]" "offset"
+  %r = index.assume %x [] : offset
+  func.return %r : offset
+}
+
+// ====
+
+func.def @assume_rejects_count_mismatch(%x: index, %y: index) -> (index) {
+  // ERROR@+1: STRUCTURE/013 "values" "2" "results" "1"
+  %r = index.assume %x, %y [] : index
+  func.return %r : index
+}

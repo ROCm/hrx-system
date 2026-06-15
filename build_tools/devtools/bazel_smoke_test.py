@@ -34,7 +34,7 @@ BAZEL_WRAPPERS = (
 def run_dry_run_scenario(checkout: Path) -> None:
     for wrapper_name in BAZEL_WRAPPERS:
         smoke_test_lib.run_bin_wrapper(checkout, wrapper_name, ["--help"])
-        smoke_test_lib.run_bin_wrapper(checkout, wrapper_name, ["--agents-md"])
+        smoke_test_lib.run_bin_wrapper(checkout, wrapper_name, ["--agents_md"])
 
     smoke_test_lib.run_bin_wrapper(
         checkout, "iree-bazel-build", ["-n", "--config=asan"]
@@ -44,7 +44,8 @@ def run_dry_run_scenario(checkout: Path) -> None:
     )
     smoke_test_lib.assert_absent(checkout / ".bazelrc.configured")
     smoke_test_lib.assert_absent(checkout / ".venv")
-    smoke_test_lib.assert_absent(checkout / ".iree-bazel-try")
+    smoke_test_lib.assert_absent(checkout / ".iree")
+    smoke_test_lib.assert_absent(checkout / ".tmp/iree-bazel-compile-commands")
     smoke_test_lib.assert_absent(checkout / "lefthook-local.yml")
 
 

@@ -1,0 +1,75 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_scalar_i32.loom-test
+// RUN: emit source-low output=low
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @scalar_i32_uniform_sgpr(%lhs: i32, %rhs: i32, %shift: i32) -> (i32) {
+  %add = scalar.addi %lhs, %rhs : i32
+  %sub = scalar.subi %add, %rhs : i32
+  %product = scalar.muli %sub, %rhs : i32
+  %and = scalar.andi %product, %lhs : i32
+  %or = scalar.ori %and, %rhs : i32
+  %xor = scalar.xori %or, %lhs : i32
+  %shl = scalar.shli %xor, %shift : i32
+  %ashr = scalar.shrsi %shl, %shift : i32
+  %lshr = scalar.shrui %ashr, %shift : i32
+  func.return %lshr : i32
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @scalar_i32_uniform_sgpr(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>, %shift: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {
+  %product = mul.i32 %lhs, %rhs
+  %and = and.i32 %product, %lhs
+  %or = or.i32 %and, %rhs
+  %xor = xor.i32 %or, %lhs
+  %shl = shl.i32 %xor, %shift
+  %ashr = ashr.i32 %shl, %shift
+  %lshr = lshr.i32 %ashr, %shift
+  return %lshr
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @scalar_i32_compare_scc(%lhs: i32, %rhs: i32) -> (i1) {
+  %cmp = scalar.cmpi slt, %lhs, %rhs : i32
+  func.return %cmp : i1
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @scalar_i32_compare_scc(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>) -> (reg<llvmir.i1>) asm<llvmir.generic.core> {
+  %cmp = cmp.slt.i32 %lhs, %rhs
+  return %cmp
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @scalar_i1_bitwise_scc(%lhs: i32, %rhs: i32) -> (i1) {
+  %zero = scalar.constant 0 : i32
+  %lhs_nonzero = scalar.cmpi ne, %lhs, %zero : i32
+  %rhs_nonzero = scalar.cmpi ne, %rhs, %zero : i32
+  %both_nonzero = scalar.andi %lhs_nonzero, %rhs_nonzero : i1
+  %either_nonzero = scalar.ori %lhs_nonzero, %rhs_nonzero : i1
+  %one_nonzero = scalar.xori %both_nonzero, %either_nonzero : i1
+  func.return %one_nonzero : i1
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @scalar_i1_bitwise_scc(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>) -> (reg<llvmir.i1>) asm<llvmir.generic.core> {
+  %zero = const.i32 0
+  %lhs_nonzero = cmp.ne.i32 %lhs, %zero
+  %rhs_nonzero = cmp.ne.i32 %rhs, %zero
+  %both_nonzero = and.i1 %lhs_nonzero, %rhs_nonzero
+  %either_nonzero = or.i1 %lhs_nonzero, %rhs_nonzero
+  %one_nonzero = xor.i1 %both_nonzero, %either_nonzero
+  return %one_nonzero
+}

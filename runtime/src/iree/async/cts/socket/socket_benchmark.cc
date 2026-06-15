@@ -219,8 +219,10 @@ static LoopbackContext* CreateLoopbackContext(
 
   // Bind to loopback and listen.
   iree_async_address_t bind_addr;
-  iree_async_address_from_ipv4(IREE_SV("127.0.0.1"), 0, &bind_addr);
-  status = iree_async_socket_bind(ctx->listener, &bind_addr);
+  status = iree_async_address_from_ipv4(IREE_SV("127.0.0.1"), 0, &bind_addr);
+  if (iree_status_is_ok(status)) {
+    status = iree_async_socket_bind(ctx->listener, &bind_addr);
+  }
   if (iree_status_is_ok(status)) {
     status = iree_async_socket_listen(ctx->listener, 16);
   }
@@ -306,11 +308,9 @@ static LoopbackContext* CreateLoopbackContext(
     iree_host_size_t count = 0;
     status = iree_async_proactor_poll(ctx->proactor, iree_make_timeout_ms(100),
                                       &count);
-    if (!iree_status_is_ok(status) &&
-        !iree_status_is_deadline_exceeded(status)) {
+    if (!iree_status_is_ok(status)) {
       iree_status_ignore(status);
     }
-    iree_status_ignore(status);
     completions += (int)count;
   }
 
@@ -474,8 +474,10 @@ static void BM_AcceptRate(::benchmark::State& state,
   }
 
   iree_async_address_t bind_addr;
-  iree_async_address_from_ipv4(IREE_SV("127.0.0.1"), 0, &bind_addr);
-  status = iree_async_socket_bind(listener, &bind_addr);
+  status = iree_async_address_from_ipv4(IREE_SV("127.0.0.1"), 0, &bind_addr);
+  if (iree_status_is_ok(status)) {
+    status = iree_async_socket_bind(listener, &bind_addr);
+  }
   if (iree_status_is_ok(status)) {
     status = iree_async_socket_listen(listener, 128);
   }
@@ -532,9 +534,7 @@ static void BM_AcceptRate(::benchmark::State& state,
     }
     if (!ctx_data.PollForCompletions(2)) {
       state.SkipWithError("Accept/connect timeout");
-      if (accept_op.accepted_socket) {
-        iree_async_socket_release(accept_op.accepted_socket);
-      }
+      iree_async_socket_release(accept_op.accepted_socket);
       iree_async_socket_release(client);
       break;
     }

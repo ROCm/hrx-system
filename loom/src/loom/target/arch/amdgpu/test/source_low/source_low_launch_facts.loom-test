@@ -1,0 +1,164 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @dynamic_tail_dispatch_id_global_b32(%element_count: index) {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  %rounding = index.constant 63 : index
+  %rounded = index.add %element_count, %rounding : index
+  %workgroups = index.div %rounded, %workgroup_size : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %element_count: index) {
+  %base = index.constant 0 : offset
+  %linear = kernel.workitem.dispatch.id<x> : index
+  %input_view = buffer.view %input[%base] : buffer -> view<[%element_count]xf32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<[%element_count]xf32, #dense>
+  %in_bounds = index.cmp ult, %linear, %element_count : index
+  scf.if %in_bounds {
+    %loaded = vector.load %input_view[%linear] : view<[%element_count]xf32, #dense> -> vector<1xf32>
+    vector.store %loaded, %output_view[%linear] : vector<1xf32>, view<[%element_count]xf32, #dense>
+  }
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) @dynamic_tail_dispatch_id_global_b32(%element_count: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+  %17 = live_in<amdgpu.workgroup_id.x> : reg<amdgpu.sgpr>
+  %18 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %21 = v_mov_b32_copy %17
+  %22 = v_lshlrev_b32_src0_inline %21, 6
+  %linear = v_add_u32 %22, %18
+  %24 = v_mov_b32_copy %element_count
+  %in_bounds = v_cmp_lt_u32 %linear, %24
+  %26, %27 = s_and_saveexec_b64 %in_bounds
+  low.cond_br %27, ^_bb1, ^_bb2 : reg<amdgpu.scc>
+^_bb1:
+  %28 = v_lshlrev_b32_src0_inline %linear, 2
+  %29 = v_lshrrev_b32_src0_inline %linear, 30
+  %30 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %31 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %32, %33 = v_add_co_u32 %30, %28
+  %34 = v_mov_b32_copy %31
+  %35, %36 = v_add_co_ci_u32 %34, %29, %33
+  %37 = concat(%32, %35) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %loaded = global_load_b32_vaddr %37
+  %41 = slice %output_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %42 = slice %output_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %43, %44 = v_add_co_u32 %41, %28
+  %45 = v_mov_b32_copy %42
+  %46, %47 = v_add_co_ci_u32 %45, %29, %44
+  %48 = concat(%43, %46) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b32_vaddr %48, %loaded
+  low.br ^_bb2
+^_bb2:
+  s_mov_b64_exec %26
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @dynamic_tail_manual_madd_global_b32(%element_count: index) {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  %rounding = index.constant 63 : index
+  %rounded = index.add %element_count, %rounding : index
+  %workgroups = index.div %rounded, %workgroup_size : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %element_count: index) {
+  %base = index.constant 0 : offset
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size = index.constant 64 : index
+  %linear = index.madd %workgroup, %workgroup_size, %lane : index
+  %input_view = buffer.view %input[%base] : buffer -> view<[%element_count]xf32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<[%element_count]xf32, #dense>
+  %in_bounds = index.cmp ult, %linear, %element_count : index
+  scf.if %in_bounds {
+    %loaded = vector.load %input_view[%linear] : view<[%element_count]xf32, #dense> -> vector<1xf32>
+    vector.store %loaded, %output_view[%linear] : vector<1xf32>, view<[%element_count]xf32, #dense>
+  }
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) @dynamic_tail_manual_madd_global_b32(%element_count: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+  %workgroup = live_in<amdgpu.workgroup_id.x> : reg<amdgpu.sgpr>
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %linear = v_lshl_add_u32_shift_imm %workgroup, %lane, 6
+  %25 = v_mov_b32_copy %element_count
+  %in_bounds = v_cmp_lt_u32 %linear, %25
+  %27, %28 = s_and_saveexec_b64 %in_bounds
+  low.cond_br %28, ^_bb1, ^_bb2 : reg<amdgpu.scc>
+^_bb1:
+  %29 = v_lshlrev_b32_src0_inline %lane, 2
+  %30 = s_mov_b32 0
+  %31 = concat(%workgroup, %30) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %32 = s_mov_b32 8
+  %33 = s_lshl_b64 %31, %32
+  %34 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %35 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %36 = slice %33[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %37 = slice %33[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %38 = s_add_u32 %34, %36
+  %39 = s_addc_u32 %35, %37
+  %40 = concat(%38, %39) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %loaded = global_load_b32_saddr %29, %40
+  %44 = concat(%workgroup, %30) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %46 = s_lshl_b64 %44, %32
+  %47 = slice %output_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %48 = slice %output_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %49 = slice %46[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %50 = slice %46[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %51 = s_add_u32 %47, %49
+  %52 = s_addc_u32 %48, %50
+  %53 = concat(%51, %52) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  global_store_b32_saddr %29, %loaded, %53
+  low.br ^_bb2
+^_bb2:
+  s_mov_b64_exec %27
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @fixed_multidim_madd_global_b32() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 8 : index
+  %workgroup_size_y = index.constant 4 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size_x, %workgroup_size_y, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %x = kernel.workitem.id<x> : index
+  %y = kernel.workitem.id<y> : index
+  %row_stride = index.constant 8 : index
+  %linear = index.madd %y, %row_stride, %x : index
+  %input_view = buffer.view %input[%base] : buffer -> view<32xi32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<32xi32, #dense>
+  %loaded = vector.load %input_view[%linear] : view<32xi32, #dense> -> vector<1xi32>
+  vector.store %loaded, %output_view[%linear] : vector<1xi32>, view<32xi32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(8, 4, 1) @fixed_multidim_madd_global_b32() asm<amdgpu.rdna3.core> {
+  %packed_tid = live_in<amdgpu.workitem_id.packed.xy> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 128} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 128} : reg<amdgpu.sgpr x2>
+  %x = v_and_b32_lit %packed_tid, 1023
+  %17 = v_lshrrev_b32_src0_inline %packed_tid, 10
+  %y = v_and_b32_lit %17, 1023
+  %linear = v_lshl_add_u32_shift_imm %y, %x, 3
+  %20 = v_lshlrev_b32_src0_inline %linear, 2
+  %loaded = global_load_b32_saddr %20, %input_view
+  global_store_b32_saddr %20, %loaded, %output_view
+  return
+}

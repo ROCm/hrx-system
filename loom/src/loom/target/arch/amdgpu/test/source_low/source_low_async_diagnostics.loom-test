@@ -1,0 +1,84 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @async_group_argument_rejected(%group: kernel.async.group) {
+  // ERROR@+1: LOWERING/029 {op_name="kernel.async.wait", phase_name="source-low"}
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+func.def target(@target) @async_copy_transfer_rejected(%input: buffer) {
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 64 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source = buffer.view %global[%zero] : buffer -> view<16xi8, #dense>
+  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %dest = buffer.view %scratch[%zero] : buffer -> view<16xi8, #dense>
+  // ERROR@+1: AMDGPU/023 {constraint_key="async.transfer_packet"}
+  %copy = kernel.async.copy %source to %dest {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8, #dense> to view<16xi8, #dense> -> kernel.async.token
+  // ERROR@+1: AMDGPU/023 {constraint_key="async_group.local_gather_tokens"}
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  // ERROR@+1: AMDGPU/023 {constraint_key="async_wait.group_token"}
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return
+}
+
+// ====
+
+amdgpu.target<gfx950> @target
+
+kernel.def target(@target) @async_gather_destination_read_before_wait() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%input: buffer, %output: buffer) {
+  %tid = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 256 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%zero] : buffer -> view<64x4xi8, #dense>
+  %source = view.subview %source_base[%tid, 0] : view<64x4xi8, #dense> -> view<1x4xi8, #dense>
+  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %dest = buffer.view %scratch[%zero] : buffer -> view<64x1x4xi8, #dense>
+  %copy = kernel.async.gather %source to %dest {cache_scope = device, cache_temporal = regular} : view<1x4xi8, #dense> to view<64x1x4xi8, #dense> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  // ERROR@+1: LOWERING/028 {op_name="view.load", phase_name="source-low"}
+  %loaded = view.load %dest[0, 0, 0] : view<64x1x4xi8, #dense> -> i8
+  %output_view = buffer.view %output[%zero] : buffer -> view<1xi8, #dense>
+  view.store %loaded, %output_view[0] : i8, view<1xi8, #dense>
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx950> @target
+kernel.def target(@target) @async_gather_dynamic_offset_sum_rejected() {
+  %c1 = index.constant 1 : index
+  %c4 = index.constant 4 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c4, %c1) : index
+} launch(%input: buffer) {
+  %lane_x = kernel.workitem.id<x> : index
+  %base_x = index.constant 4294966000 : index
+  %x = index.add %lane_x, %base_x : index
+  %lane_y = kernel.workitem.id<y> : index
+  %base_y = index.constant 2000 : index
+  %y = index.add %lane_y, %base_y : index
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 256 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %layout = encoding.layout.strided [1, 1, 1] : encoding<layout>
+  %source_base = buffer.view %global[%zero] : buffer -> view<4294967296x4096x4xi8, %layout>
+  %source = view.subview %source_base[%x, %y, 0] : view<4294967296x4096x4xi8, %layout> -> view<1x1x4xi8, %layout>
+  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %dest = buffer.view %scratch[%zero] : buffer -> view<64x1x1x4xi8, #dense>
+  // ERROR@+1: AMDGPU/023 {constraint_key="async_gather.offset_immediate"}
+  %copy = kernel.async.gather %source to %dest {cache_scope = device, cache_temporal = regular} : view<1x1x4xi8, %layout> to view<64x1x1x4xi8, #dense> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}

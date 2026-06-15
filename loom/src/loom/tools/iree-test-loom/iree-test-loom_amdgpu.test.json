@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "runs amdgpu cases",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/testdata/amdgpu_hal_actual.loom",
+          "--device=amdgpu"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "\"format\":\"loom.test.v0\"",
+            { "regex": "\"case\":\"store_i32_case\"[^}]*\"passed\":true" },
+            {
+              "regex": "\"case\":\"store_then_double_i32_case\"[^}]*\"passed\":true"
+            },
+            "\"failed_sample_count\":0"
+          ]
+        }
+      }
+    }
+  ]
+}

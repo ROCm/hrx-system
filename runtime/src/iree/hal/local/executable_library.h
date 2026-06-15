@@ -88,11 +88,12 @@ typedef struct iree_hal_executable_environment_v0_t
 typedef uint32_t iree_hal_executable_library_version_t;
 
 #define IREE_HAL_EXECUTABLE_LIBRARY_VERSION_0_6 0x00000006u
+#define IREE_HAL_EXECUTABLE_LIBRARY_VERSION_0_7 0x00000007u
 
 // The latest version of the library API; can be used to populate the
 // iree_hal_executable_library_header_t::version when building libraries.
 #define IREE_HAL_EXECUTABLE_LIBRARY_VERSION_LATEST \
-  IREE_HAL_EXECUTABLE_LIBRARY_VERSION_0_6
+  IREE_HAL_EXECUTABLE_LIBRARY_VERSION_0_7
 
 // A header present at the top of all versions of the library API used by the
 // runtime to ensure version compatibility.
@@ -133,6 +134,13 @@ typedef const iree_hal_executable_library_header_t** (
 // Function name exported from dynamic libraries (pass to dlsym).
 #define IREE_HAL_EXECUTABLE_LIBRARY_EXPORT_NAME \
   "iree_hal_executable_library_query"
+
+#if defined(_WIN32) || defined(__CYGWIN__)
+#define IREE_HAL_EXECUTABLE_LIBRARY_EXPORT __declspec(dllexport)
+#else
+#define IREE_HAL_EXECUTABLE_LIBRARY_EXPORT \
+  __attribute__((visibility("default")))
+#endif
 
 //===----------------------------------------------------------------------===//
 // IREE_HAL_EXECUTABLE_LIBRARY_VERSION_0_*
@@ -263,6 +271,14 @@ typedef struct iree_hal_executable_environment_v0_t {
   iree_hal_processor_v0_t processor;
 } iree_hal_executable_environment_v0_t;
 
+// A span of constant bytes.
+typedef struct iree_hal_executable_const_byte_span_v0_t {
+  // Base pointer to the first byte in the span.
+  const uint8_t* data;
+  // Total number of bytes in the span.
+  size_t data_length;
+} iree_hal_executable_const_byte_span_v0_t;
+
 // Read-only per-dispatch state passed to each workgroup in a dispatch.
 //
 // We layout to try to fit everything commonly used into the first cache line
@@ -273,20 +289,18 @@ typedef struct iree_hal_executable_environment_v0_t {
 // usually in the 1-16 range; any higher and it can pessimize scheduling. Almost
 // all GPUs also have this limitation (max Z of 65K) for the same reason.
 typedef struct iree_hal_executable_dispatch_state_v0_t {
-  // Workgroup size chosen for the dispatch. For compilation modes where the
-  // workgroup size is constant this may be ignored.
+  // X dimension of the workgroup size chosen for the dispatch.
   uint32_t workgroup_size_x;
+  // Y dimension of the workgroup size chosen for the dispatch.
   uint32_t workgroup_size_y;
+  // Z dimension of the workgroup size chosen for the dispatch.
   uint16_t workgroup_size_z;
 
-  // Total number of available 4 byte push constant values in |constants|.
-  uint16_t constant_count;
-
-  // Total workgroup count for the dispatch. This is sourced from either the
-  // original dispatch call (for iree_hal_command_buffer_dispatch) or the
-  // indirection buffer (for iree_hal_command_buffer_dispatch_indirect).
+  // X dimension of the workgroup count for the dispatch.
   uint32_t workgroup_count_x;
+  // Y dimension of the workgroup count for the dispatch.
   uint32_t workgroup_count_y;
+  // Z dimension of the workgroup count for the dispatch.
   uint16_t workgroup_count_z;
 
   // Estimated maximum concurrent workgroups; loosely maps to the number of
@@ -299,8 +313,8 @@ typedef struct iree_hal_executable_dispatch_state_v0_t {
   // used (known at compile-time).
   uint8_t binding_count;
 
-  // |constant_count| values.
-  const uint32_t* constants;
+  // Dispatch constants available to the dispatch.
+  iree_hal_executable_const_byte_span_v0_t constants;
   // Base pointers to each binding buffer.
   void* const* binding_ptrs;
   // The length of each binding in bytes, 1:1 with |binding_ptrs|.
@@ -319,11 +333,11 @@ static_assert(sizeof(iree_hal_executable_dispatch_state_v0_t) <= 64,
 // We layout to try to fit everything commonly used into the first cache line
 // (on archs with 64-bit pointers; 32-bit fits in a single line).
 typedef struct iree_hal_executable_workgroup_state_v0_t {
-  // Workgroup ID of the currently executing workgroup.
-  // This is in the range of 0-workgroup_count and each unique workgroup is to
-  // perform workgroup_size invocations.
+  // X dimension of the currently executing workgroup ID.
   uint32_t workgroup_id_x;
+  // Y dimension of the currently executing workgroup ID.
   uint32_t workgroup_id_y;
+  // Z dimension of the currently executing workgroup ID.
   uint16_t workgroup_id_z;
 
   // Reserved for future use.
@@ -374,8 +388,11 @@ typedef int (*iree_hal_executable_dispatch_v0_t)(
 // This is chosen to match the common page size of devices.
 #define IREE_HAL_EXECUTABLE_WORKGROUP_LOCAL_MEMORY_PAGE_SIZE 4096
 
-// Maximum number of constants that can be used by a single dispatch.
+// Maximum number of 4-byte constants that can be used by a single dispatch.
 #define IREE_HAL_EXECUTABLE_MAX_CONSTANT_COUNT 64
+// Maximum number of constant bytes that can be used by a single dispatch.
+#define IREE_HAL_EXECUTABLE_MAX_CONSTANT_BYTE_LENGTH \
+  (IREE_HAL_EXECUTABLE_MAX_CONSTANT_COUNT * sizeof(uint32_t))
 // Maximum number of bindings that can be used by a single dispatch.
 #define IREE_HAL_EXECUTABLE_MAX_BINDING_COUNT 64
 
@@ -393,8 +410,9 @@ enum iree_hal_executable_dispatch_flag_v0_bits_e {
 };
 typedef uint64_t iree_hal_executable_dispatch_flags_v0_t;
 
-// Attributes for exported dispatch functions defining how they are to be
-// executed. Required for all dispatches to specify constant and binding counts.
+// Attributes for exported dispatch functions defining how they are to execute.
+// Required for all dispatches to specify their dispatch constant byte length
+// and binding count.
 typedef struct iree_hal_executable_dispatch_attrs_v0_t {
   // Flags defining dispatch behavior.
   iree_hal_executable_dispatch_flags_v0_t flags;
@@ -403,20 +421,24 @@ typedef struct iree_hal_executable_dispatch_attrs_v0_t {
   // dispatch. This is the size of the buffer referenced by the `local_memory`
   // argument.
   uint16_t local_memory_pages;
-  // Total number of 32-bit constants used by the dispatch.
-  uint8_t constant_count;
   // Total number of bindings used by the dispatch.
   uint8_t binding_count;
-  // Constant workgroup size if specified by the compiler.
+  // Unused. Must be 0.
+  uint8_t reserved_0;
+  // X dimension of the required workgroup size, or 0 if runtime-specified.
   uint32_t workgroup_size_x;
+  // Y dimension of the required workgroup size, or 0 if runtime-specified.
   uint32_t workgroup_size_y;
+  // Z dimension of the required workgroup size, or 0 if runtime-specified.
   uint16_t workgroup_size_z;
   // Total number of logical parameters.
   // Indicates the size of the parameter array for this function in the export
   // table.
   uint16_t parameter_count;
+  // Total number of dispatch constant bytes used by the dispatch.
+  uint32_t constant_byte_length;
   // Unused. Must be 0.
-  uint64_t reserved_1[5];
+  uint64_t reserved_1[4];
 } iree_hal_executable_dispatch_attrs_v0_t;
 static_assert(sizeof(iree_hal_executable_dispatch_attrs_v0_t) <= 64,
               "try keeping dispatch attrs small enough to fit in a cache line");
@@ -508,8 +530,8 @@ typedef struct iree_hal_executable_export_table_v0_t {
 
   // Optional parameter declarations per function in original logical order.
   // The offset of each parameter for a particular function may jump around
-  // as alignment and padding are accounted for. Each function has as many
-  // parameters as the attributes constant_count + binding_count indicate.
+  // as alignment and padding are accounted for. Each function has
+  // attributes.parameter_count entries in its parameter table.
   // When omitted the function is assumed to follow the IREE HAL ABI.
   //
   // Example of a raw C function:
@@ -535,7 +557,7 @@ typedef struct iree_hal_executable_export_table_v0_t {
   // parameters roughly follows:
   //   for (param, value) in zip(params[function_index], param_values):
   //     if param.type == constant || buffer_ptr:
-  //       memcpy(constants[param.offset / 4], &value, param.size)
+  //       memcpy(constants + param.offset, &value, param.size)
   //     elif param.type == binding:
   //       bindings[param.offset] = make_binding(value, IREE_HAL_WHOLE_BUFFER)
   const iree_hal_executable_dispatch_parameter_v0_t** params;

@@ -778,6 +778,7 @@ static iree_status_t iree_hal_format_buffer_elements_recursive(
           buffer ? buffer + buffer_length : NULL, &actual_length);
       buffer_length += actual_length;
       if (iree_status_is_out_of_range(status)) {
+        iree_status_free(status);
         buffer = NULL;
       } else if (!iree_status_is_ok(status)) {
         return status;
@@ -810,6 +811,7 @@ static iree_status_t iree_hal_format_buffer_elements_recursive(
       subdata.data += element_stride;
       buffer_length += actual_length;
       if (iree_status_is_out_of_range(status)) {
+        iree_status_free(status);
         buffer = NULL;
       } else if (!iree_status_is_ok(status)) {
         return status;

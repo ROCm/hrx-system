@@ -1,0 +1,57 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:python.bzl", "iree_py_library", "iree_py_test")
+load("//loom/build_tools/bazel:build_defs.bzl", "iree_cmake_extra_content", "iree_select")
+
+package(
+    default_visibility = ["//visibility:public"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_MLIR_IMPORTER_COMPATIBLE = iree_select({
+    "//loom/config/import:mlir": [],
+    "//conditions:default": ["@platforms//:incompatible"],
+})
+
+iree_py_library(
+    name = "mlir",
+    srcs = [
+        "__init__.py",
+        "backend.py",
+        "runner.py",
+    ],
+    deps = [
+        "//loom/py/loom/importers/check",
+        "//loom/py/loom/importers/mlir",
+    ],
+)
+
+iree_cmake_extra_content(
+    content = """
+if(LOOM_IMPORT_MLIR)
+""",
+    inline = True,
+)
+
+iree_py_test(
+    name = "mlir_test",
+    srcs = [
+        "runner_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.importers.check.mlir.runner_test"],
+    main = "pytest_style_runner.py",
+    target_compatible_with = _MLIR_IMPORTER_COMPATIBLE,
+    deps = [":mlir"],
+)
+
+iree_cmake_extra_content(
+    content = """
+endif()
+""",
+    inline = True,
+)

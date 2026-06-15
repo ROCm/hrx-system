@@ -1,0 +1,313 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_minmax.loom-test
+// RUN: emit source-low output=low
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @scalar_f32_minnum_maxnum(%lhs: f32, %rhs: f32) -> (f32) {
+  %min = scalar.minnumf %lhs, %rhs : f32
+  %max = scalar.maxnumf %lhs, %rhs : f32
+  %sum = scalar.addf %min, %max : f32
+  func.return %sum : f32
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @scalar_f32_minnum_maxnum(%lhs: reg<llvmir.f32>, %rhs: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+  %min = minnum.f32 %lhs, %rhs
+  %max = maxnum.f32 %lhs, %rhs
+  %sum = add.f32 %min, %max
+  return %sum
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @vector_f32_minnum_maxnum(%lhs: vector<2xf32>, %rhs: vector<2xf32>) -> (vector<2xf32>) {
+  %min = vector.minnumf %lhs, %rhs : vector<2xf32>
+  %max = vector.maxnumf %lhs, %rhs : vector<2xf32>
+  %sum = vector.addf %min, %max : vector<2xf32>
+  func.return %sum : vector<2xf32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @vector_f32_minnum_maxnum(%lhs: reg<llvmir.f32 x2>, %rhs: reg<llvmir.f32 x2>) -> (reg<llvmir.f32 x2>) asm<llvmir.generic.core> {
+  %min = minnum.v2f32 %lhs, %rhs
+  %max = maxnum.v2f32 %lhs, %rhs
+  %sum = add.v2f32 %min, %max
+  return %sum
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @scalar_f32_clampf_number(%input: f32) -> (f32) {
+  %lower = scalar.constant -1.0 : f32
+  %upper = scalar.constant 1.0 : f32
+  %result = scalar.clampf<number, nnan|nsz> %input, %lower, %upper : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @scalar_f32_clampf_number(%input: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+  %lower = const.f32 3212836864
+  %upper = const.f32 1065353216
+  %9 = maxnum.f32 %input, %lower
+  %result = minnum.f32 %9, %upper
+  return %result
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @vector_f32_clampf_number(%input: vector<2xf32>) -> (vector<2xf32>) {
+  %lower = vector.constant -1.0 : vector<2xf32>
+  %upper = vector.constant 1.0 : vector<2xf32>
+  %result = vector.clampf<number, nnan|nsz> %input, %lower, %upper : vector<2xf32>
+  func.return %result : vector<2xf32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @vector_f32_clampf_number(%input: reg<llvmir.f32 x2>) -> (reg<llvmir.f32 x2>) asm<llvmir.generic.core> {
+  %lower = const.v2f32 3212836864
+  %upper = const.v2f32 1065353216
+  %9 = maxnum.v2f32 %input, %lower
+  %result = minnum.v2f32 %9, %upper
+  return %result
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @scalar_f32_clampf_ordered(%input: f32, %lower: f32, %upper: f32) -> (f32) {
+  %result = scalar.clampf<ordered> %input, %lower, %upper : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @scalar_f32_clampf_ordered(%input: reg<llvmir.f32>, %lower: reg<llvmir.f32>, %upper: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+  %9 = cmp.olt.f32 %input, %lower
+  %10 = select.f32 %9, %lower, %input
+  %11 = cmp.ogt.f32 %10, %upper
+  %result = select.f32 %11, %upper, %10
+  return %result
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @vector_f32_clampf_ordered(%input: vector<2xf32>, %lower: vector<2xf32>, %upper: vector<2xf32>) -> (vector<2xf32>) {
+  %result = vector.clampf<ordered> %input, %lower, %upper : vector<2xf32>
+  func.return %result : vector<2xf32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @vector_f32_clampf_ordered(%input: reg<llvmir.f32 x2>, %lower: reg<llvmir.f32 x2>, %upper: reg<llvmir.f32 x2>) -> (reg<llvmir.f32 x2>) asm<llvmir.generic.core> {
+  %9 = cmp.olt.v2f32 %input, %lower
+  %10 = select.v2f32 %9, %lower, %input
+  %11 = cmp.ogt.v2f32 %10, %upper
+  %result = select.v2f32 %11, %upper, %10
+  return %result
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @index_minmax_sgpr(%lhs0: index, %rhs0: index) -> (index) {
+  %lhs = index.assume %lhs0 [range(%lhs0, 0, 1024)] : index
+  %rhs = index.assume %rhs0 [range(%rhs0, 0, 1024)] : index
+  %min = index.min %lhs, %rhs : index
+  %max = index.max %lhs, %rhs : index
+  %sum = index.add %min, %max : index
+  func.return %sum : index
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @index_minmax_sgpr(%lhs: reg<llvmir.i64>, %rhs: reg<llvmir.i64>) -> (reg<llvmir.i64>) asm<llvmir.generic.core> {
+  %11 = cmp.slt.i64 %lhs, %rhs
+  %min = select.i64 %11, %lhs, %rhs
+  %13 = cmp.sgt.i64 %lhs, %rhs
+  %max = select.i64 %13, %lhs, %rhs
+  %sum = add.i64 %min, %max
+  return %sum
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @scf_select_sgpr(%lhs: i32, %rhs: i32, %a: i32, %b: i32) -> (i32) {
+  %cond = scalar.cmpi slt, %lhs, %rhs : i32
+  %selected = scf.select %cond, %a, %b : i32
+  func.return %selected : i32
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @scf_select_sgpr(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>, %a: reg<llvmir.i32>, %b: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {
+  %cond = cmp.slt.i32 %lhs, %rhs
+  %selected = select.i32 %cond, %a, %b
+  return %selected
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @scf_select_i64_sgpr(%lhs: i32, %rhs: i32, %a: i64, %b: i64) -> (i64) {
+  %cond = scalar.cmpi slt, %lhs, %rhs : i32
+  %selected = scf.select %cond, %a, %b : i64
+  func.return %selected : i64
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @scf_select_i64_sgpr(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>, %a: reg<llvmir.i64>, %b: reg<llvmir.i64>) -> (reg<llvmir.i64>) asm<llvmir.generic.core> {
+  %cond = cmp.slt.i32 %lhs, %rhs
+  %selected = select.i64 %cond, %a, %b
+  return %selected
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @scf_select_vgpr(%lhs: f32, %rhs: f32, %a: f32, %b: f32) -> (f32) {
+  %cond = scalar.cmpf olt, %lhs, %rhs : f32
+  %selected = scf.select %cond, %a, %b : f32
+  func.return %selected : f32
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @scf_select_vgpr(%lhs: reg<llvmir.f32>, %rhs: reg<llvmir.f32>, %a: reg<llvmir.f32>, %b: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+  %cond = cmp.olt.f32 %lhs, %rhs
+  %selected = select.f32 %cond, %a, %b
+  return %selected
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @scf_select_chained_vgpr_i32(%values: vector<2xi32>, %limit: i32, %fallback: i32) -> (i32) {
+  %lane = vector.extract %values[0] : vector<2xi32> -> i32
+  %is_lane = scalar.cmpi slt, %lane, %limit : i32
+  %selected = scf.select %is_lane, %lane, %fallback : i32
+  %is_selected = scalar.cmpi ne, %selected, %fallback : i32
+  %result = scf.select %is_selected, %selected, %fallback : i32
+  func.return %result : i32
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @scf_select_chained_vgpr_i32(%values: reg<llvmir.i32 x2>, %limit: reg<llvmir.i32>, %fallback: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {
+  %lane = extract.v2i32 %values, 0
+  %is_lane = cmp.slt.i32 %lane, %limit
+  %selected = select.i32 %is_lane, %lane, %fallback
+  %is_selected = cmp.ne.i32 %selected, %fallback
+  %result = select.i32 %is_selected, %selected, %fallback
+  return %result
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "amdgcn-amd-amdhsa"
+}
+kernel.def target(@target) @index_minmax_vgpr_select() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%output: buffer) {
+  %tid0 = kernel.workitem.id<x> : index
+  %tid = index.assume %tid0 [range(%tid0, 0, 63)] : index
+  %limit = index.constant 31 : index
+  %min = index.min %tid, %limit : index
+  %max = index.max %tid, %limit : index
+  %cond = index.cmp slt, %tid, %limit : index
+  %selected = scf.select %cond, %min, %max : index
+  %zero = index.constant 0 : offset
+  %output_view = buffer.view %output[%zero] : buffer -> view<64xi32, #dense>
+  %stored = vector.constant 1 : vector<1xi32>
+  vector.store %stored, %output_view[%selected] : vector<1xi32>, view<64xi32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) @index_minmax_vgpr_select() asm<llvmir.generic.core> {
+  %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
+  %tid = kernel.workitem_id.x
+  %limit = const.i64 31
+  %16 = cmp.slt.i64 %tid, %limit
+  %min = select.i64 %16, %tid, %limit
+  %18 = cmp.sgt.i64 %tid, %limit
+  %max = select.i64 %18, %tid, %limit
+  %selected = select.i64 %16, %min, %max
+  %stored = const.i32 1
+  store.indexed.i32 %stored, %output_view, %selected, 0, 4
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @f32_reduce_minnum_maxnum(%input: buffer, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<4xf32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<2xf32, #dense>
+  %loaded = vector.load %input_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %min_init = scalar.constant 1000.0 : f32
+  %min = vector.reduce<minnumf, reassoc|nnan|nsz> %loaded, %min_init : vector<4xf32>, f32
+  %max_init = scalar.constant -1000.0 : f32
+  %max = vector.reduce<maxnumf, reassoc|nnan|nsz> %loaded, %max_init : vector<4xf32>, f32
+  %stored = vector.from_elements %min, %max : vector<2xf32>
+  vector.store %stored, %output_view[0] : vector<2xf32>, view<2xf32, #dense>
+  func.return
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f32_reduce_minnum_maxnum(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>) asm<llvmir.generic.core> {
+  %min_init = const.f32 1148846080
+  %30 = load.f32 %input_view, 0
+  %31 = load.f32 %input_view, 4
+  %32 = minnum.f32 %30, %31
+  %33 = load.f32 %input_view, 8
+  %34 = load.f32 %input_view, 12
+  %35 = minnum.f32 %33, %34
+  %36 = minnum.f32 %32, %35
+  %min = minnum.f32 %min_init, %36
+  %max_init = const.f32 3296329728
+  %39 = maxnum.f32 %30, %31
+  %40 = maxnum.f32 %33, %34
+  %41 = maxnum.f32 %39, %40
+  %max = maxnum.f32 %max_init, %41
+  %stored = from_elements.v2f32 %min, %max
+  store.v2f32 %stored, %output_view, 0
+  return
+}

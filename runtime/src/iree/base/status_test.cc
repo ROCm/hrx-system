@@ -8,6 +8,7 @@
 #include <string>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 #include "iree/base/api.h"
 #include "iree/testing/gtest.h"
@@ -123,7 +124,7 @@ TEST(StatusJoin, FailedBaseKeepsPrimaryAndPreservesSecondary) {
 }
 
 // Helper: collects iree_status_format_to output into a std::string.
-static std::string FormatStatusTo(iree_status_t status) {
+static std::string FormatStatusTo(const iree_status_t& status) {
   std::string result;
   iree_status_format_to(
       status,
@@ -137,17 +138,68 @@ static std::string FormatStatusTo(iree_status_t status) {
 }
 
 // Helper: collects iree_status_format output into a std::string.
-static std::string FormatStatusBuffer(iree_status_t status) {
+static std::string FormatStatusBuffer(const iree_status_t& status) {
   iree_host_size_t buffer_length = 0;
   if (!iree_status_format(status, 0, NULL, &buffer_length)) return "<!>";
-  std::string result(buffer_length, '\0');
+  std::vector<char> buffer(buffer_length + 1, '\0');
   iree_host_size_t actual_length = 0;
-  if (!iree_status_format(status, result.size() + 1,
-                          const_cast<char*>(result.data()), &actual_length)) {
+  if (!iree_status_format(status, buffer.size(), buffer.data(),
+                          &actual_length)) {
     return "<!>";
   }
-  result.resize(actual_length);
-  return result;
+  return std::string(buffer.data(), actual_length);
+}
+
+static void ExpectStatusFormatTruncated(const iree_status_t& status,
+                                        iree_host_size_t buffer_capacity) {
+  iree_host_size_t required_length = 0;
+  EXPECT_TRUE(iree_status_format(status, 0, NULL, &required_length));
+  ASSERT_GE(required_length, buffer_capacity);
+
+  constexpr char kSentinel = '\x7F';
+  std::vector<char> buffer(buffer_capacity + 16, kSentinel);
+  iree_host_size_t actual_length = 0;
+  EXPECT_FALSE(iree_status_format(status, buffer_capacity, buffer.data(),
+                                  &actual_length));
+  EXPECT_EQ(required_length, actual_length);
+  for (iree_host_size_t i = buffer_capacity; i < buffer.size(); ++i) {
+    EXPECT_EQ(kSentinel, buffer[i]) << "index " << i;
+  }
+}
+
+static void ExpectStatusFormatTruncatedAtAllSmallerCapacities(
+    const iree_status_t& status) {
+  iree_host_size_t required_length = 0;
+  ASSERT_TRUE(iree_status_format(status, 0, NULL, &required_length));
+  ASSERT_GT(required_length, 0u);
+  for (iree_host_size_t buffer_capacity = 0; buffer_capacity < required_length;
+       ++buffer_capacity) {
+    ExpectStatusFormatTruncated(status, buffer_capacity);
+  }
+}
+
+static void ExpectStatusFormatRequiresTerminator(const iree_status_t& status) {
+  iree_host_size_t required_length = 0;
+  ASSERT_TRUE(iree_status_format(status, 0, NULL, &required_length));
+  ASSERT_GT(required_length, 0u);
+  ExpectStatusFormatTruncated(status, required_length);
+}
+
+static void ExpectStatusFormatFitsExactly(const iree_status_t& status) {
+  std::string expected = FormatStatusTo(status);
+  ASSERT_FALSE(expected.empty());
+
+  constexpr char kSentinel = '\x7F';
+  std::vector<char> buffer(expected.size() + 17, kSentinel);
+  iree_host_size_t actual_length = 0;
+  EXPECT_TRUE(iree_status_format(status, expected.size() + 1, buffer.data(),
+                                 &actual_length));
+  EXPECT_EQ(expected.size(), actual_length);
+  EXPECT_EQ(expected, std::string(buffer.data(), actual_length));
+  EXPECT_EQ('\0', buffer[actual_length]);
+  for (iree_host_size_t i = actual_length + 1; i < buffer.size(); ++i) {
+    EXPECT_EQ(kSentinel, buffer[i]) << "index " << i;
+  }
 }
 
 TEST(StatusFormatTo, OkStatus) {
@@ -166,6 +218,27 @@ TEST(StatusFormatTo, CodeOnly) {
   EXPECT_THAT(cb_result, HasSubstr("INTERNAL"));
 }
 
+TEST(StatusFormatTo, CodeOnlyTruncatedBuffer) {
+  iree_status_t status = iree_status_from_code(IREE_STATUS_INTERNAL);
+  ExpectStatusFormatTruncated(status, /*buffer_capacity=*/4);
+}
+
+TEST(StatusFormatTo, CodeOnlyTinyBuffers) {
+  iree_status_t status = iree_status_from_code(IREE_STATUS_INTERNAL);
+  ExpectStatusFormatTruncated(status, /*buffer_capacity=*/0);
+  ExpectStatusFormatTruncated(status, /*buffer_capacity=*/1);
+}
+
+TEST(StatusFormatTo, CodeOnlyRequiresTerminator) {
+  iree_status_t status = iree_status_from_code(IREE_STATUS_INTERNAL);
+  ExpectStatusFormatRequiresTerminator(status);
+}
+
+TEST(StatusFormatTo, CodeOnlyExactFit) {
+  iree_status_t status = iree_status_from_code(IREE_STATUS_INTERNAL);
+  ExpectStatusFormatFitsExactly(status);
+}
+
 #if (IREE_STATUS_FEATURES & IREE_STATUS_FEATURE_ANNOTATIONS) != 0
 
 TEST(StatusFormatTo, WithMessage) {
@@ -177,6 +250,39 @@ TEST(StatusFormatTo, WithMessage) {
   EXPECT_EQ(cb_result, buffer_result);
   EXPECT_THAT(cb_result, HasSubstr("NOT_FOUND"));
   EXPECT_THAT(cb_result, HasSubstr("something missing"));
+  iree_status_free(status);
+}
+
+TEST(StatusFormatTo, WithMessageTruncatedBuffer) {
+  iree_status_t status =
+      iree_status_allocate(IREE_STATUS_INTERNAL, NULL, 0,
+                           iree_make_cstring_view("error with more detail"));
+  ExpectStatusFormatTruncated(status, /*buffer_capacity=*/8);
+  iree_status_free(status);
+}
+
+TEST(StatusFormatTo, WithMessageTinyBuffers) {
+  iree_status_t status =
+      iree_status_allocate(IREE_STATUS_INTERNAL, NULL, 0,
+                           iree_make_cstring_view("error with more detail"));
+  ExpectStatusFormatTruncated(status, /*buffer_capacity=*/0);
+  ExpectStatusFormatTruncated(status, /*buffer_capacity=*/1);
+  iree_status_free(status);
+}
+
+TEST(StatusFormatTo, WithMessageRequiresTerminator) {
+  iree_status_t status =
+      iree_status_allocate(IREE_STATUS_INTERNAL, NULL, 0,
+                           iree_make_cstring_view("error with more detail"));
+  ExpectStatusFormatRequiresTerminator(status);
+  iree_status_free(status);
+}
+
+TEST(StatusFormatTo, WithMessageExactFit) {
+  iree_status_t status =
+      iree_status_allocate(IREE_STATUS_INTERNAL, NULL, 0,
+                           iree_make_cstring_view("error with more detail"));
+  ExpectStatusFormatFitsExactly(status);
   iree_status_free(status);
 }
 
@@ -220,6 +326,34 @@ TEST(StatusFormatTo, WithMultipleAnnotations) {
   iree_status_free(status);
 }
 
+TEST(StatusFormatTo, WithMultipleAnnotationsTruncatedAtAllBoundaries) {
+  iree_status_t status =
+      iree_status_allocate_f(IREE_STATUS_UNAVAILABLE, NULL, 0, "root cause");
+  status = iree_status_annotate_f(status, "layer 1: %s", "retry failed");
+  status = iree_status_annotate_f(status, "layer 2: attempt %d of %d", 3, 3);
+  ExpectStatusFormatTruncatedAtAllSmallerCapacities(status);
+  ExpectStatusFormatRequiresTerminator(status);
+  ExpectStatusFormatFitsExactly(status);
+  iree_status_free(status);
+}
+
+#if (IREE_STATUS_FEATURES & IREE_STATUS_FEATURE_STACK_TRACE) != 0
+
+TEST(StatusFormatTo, WithStackTraceTruncatedBuffer) {
+  iree_status_t status =
+      iree_make_status(IREE_STATUS_UNAVAILABLE, "stack trace payload");
+
+  iree_host_size_t required_length = 0;
+  EXPECT_TRUE(iree_status_format(status, 0, NULL, &required_length));
+  ASSERT_GT(required_length, 64u);
+  iree_host_size_t buffer_capacity =
+      required_length > 512 ? 512 : required_length - 1;
+  ExpectStatusFormatTruncated(status, buffer_capacity);
+  iree_status_free(status);
+}
+
+#endif  // has IREE_STATUS_FEATURE_STACK_TRACE
+
 TEST(StatusFormatTo, CallbackShortCircuit) {
   iree_status_t status =
       iree_status_allocate_f(IREE_STATUS_INTERNAL, NULL, 0, "error %d", 42);
@@ -255,8 +389,10 @@ TEST(StatusToString, SinglePass) {
   iree_allocator_t allocator = iree_allocator_system();
   char* buffer = NULL;
   iree_host_size_t buffer_length = 0;
-  ASSERT_TRUE(
-      iree_status_to_string(status, &allocator, &buffer, &buffer_length));
+  const bool converted =
+      iree_status_to_string(status, &allocator, &buffer, &buffer_length);
+  iree_status_free(status);
+  ASSERT_TRUE(converted);
   std::string result(buffer, buffer_length);
   EXPECT_THAT(result, HasSubstr("INTERNAL"));
   EXPECT_THAT(result, HasSubstr("error 42"));
@@ -264,7 +400,6 @@ TEST(StatusToString, SinglePass) {
   // Verify NUL termination.
   EXPECT_EQ(buffer[buffer_length], '\0');
   iree_allocator_free(allocator, buffer);
-  iree_status_free(status);
 }
 
 #endif  // has IREE_STATUS_FEATURE_ANNOTATIONS

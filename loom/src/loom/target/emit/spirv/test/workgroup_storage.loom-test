@@ -1,0 +1,55 @@
+// RUN: emit spirv-dis validate
+// REQUIRES: spirv-dis, spirv-val
+
+spirv.target<vulkan1_3> @target
+
+low.func.def target(@target) abi(shader_entry_point) @spirv_workgroup_storage_i32_roundtrip() asm<spirv.logical.core> {
+  %storage = storage {byte_alignment = 4, byte_length = 16} : low.storage<workgroup>
+  %base = storage_address %storage : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
+  %index = OpConstant.i32 0
+  %value = OpConstant.i32 7
+  %ptr = OpAccessChain.workgroup.i32.element_index %base, %index
+  OpStore.workgroup.i32 %ptr, %value
+  OpControlBarrier.workgroup.workgroup.acq_rel
+  %loaded = OpLoad.workgroup.i32 %ptr
+  return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %spirv_workgroup_storage_i32_roundtrip "spirv_workgroup_storage_i32_roundtrip"
+               OpExecutionMode %spirv_workgroup_storage_i32_roundtrip LocalSize 1 1 1
+               OpName %spirv_workgroup_storage_i32_roundtrip "spirv_workgroup_storage_i32_roundtrip"
+               OpName %base "base"
+               OpName %index "index"
+               OpName %value "value"
+               OpName %ptr "ptr"
+               OpName %loaded "loaded"
+               OpDecorate %_arr_int_uint_4 ArrayStride 4
+       %void = OpTypeVoid
+          %3 = OpTypeFunction %void
+        %int = OpTypeInt 32 1
+       %uint = OpTypeInt 32 0
+     %uint_4 = OpConstant %uint 4
+%_arr_int_uint_4 = OpTypeArray %int %uint_4
+%_ptr_Workgroup__arr_int_uint_4 = OpTypePointer Workgroup %_arr_int_uint_4
+       %base = OpVariable %_ptr_Workgroup__arr_int_uint_4 Workgroup
+      %index = OpConstant %int 0
+      %value = OpConstant %int 7
+%_ptr_Workgroup_int = OpTypePointer Workgroup %int
+     %uint_2 = OpConstant %uint 2
+   %uint_264 = OpConstant %uint 264
+%spirv_workgroup_storage_i32_roundtrip = OpFunction %void None %3
+          %4 = OpLabel
+        %ptr = OpAccessChain %_ptr_Workgroup_int %base %index
+               OpStore %ptr %value Aligned 4
+               OpControlBarrier %uint_2 %uint_2 %uint_264
+     %loaded = OpLoad %int %ptr Aligned 4
+               OpReturn
+               OpFunctionEnd

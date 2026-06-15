@@ -401,13 +401,14 @@ static iree_status_t iree_hal_buffer_view_parse_impl(
   if (!iree_status_is_ok(shape_result) &&
       !iree_status_is_out_of_range(shape_result)) {
     return shape_result;
-  } else if (shape_rank > 128) {
+  }
+  iree_status_free(shape_result);
+  if (shape_rank > 128) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "a shape rank of %" PRIhsz
                             " is just a little bit excessive, eh?",
                             shape_rank);
   }
-  shape_result = iree_status_ignore(shape_result);
   iree_hal_dim_t* shape =
       (iree_hal_dim_t*)iree_alloca(shape_rank * sizeof(iree_hal_dim_t));
   IREE_RETURN_IF_ERROR(
@@ -485,7 +486,7 @@ static iree_status_t iree_hal_buffer_view_format_impl(
         buffer ? buffer + buffer_length : NULL, &shape_length);
     buffer_length += shape_length;
     if (iree_status_is_out_of_range(status)) {
-      status = iree_status_ignore(status);
+      iree_status_free(status);
       buffer = NULL;
     } else if (!iree_status_is_ok(status)) {
       return status;
@@ -503,7 +504,7 @@ static iree_status_t iree_hal_buffer_view_format_impl(
       buffer ? buffer + buffer_length : NULL, &element_type_length);
   buffer_length += element_type_length;
   if (iree_status_is_out_of_range(status)) {
-    status = iree_status_ignore(status);
+    iree_status_free(status);
     buffer = NULL;
   } else if (!iree_status_is_ok(status)) {
     return status;
@@ -532,7 +533,7 @@ static iree_status_t iree_hal_buffer_view_format_impl(
   status =
       iree_status_join(status, iree_hal_buffer_unmap_range(&buffer_mapping));
   if (iree_status_is_out_of_range(status)) {
-    status = iree_status_ignore(status);
+    iree_status_free(status);
     buffer = NULL;
   } else if (!iree_status_is_ok(status)) {
     return status;
@@ -574,6 +575,7 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_view_fprint(
     IREE_TRACE_ZONE_END(z0);
     return status;
   }
+  iree_status_free(status);
 
   // Allocate scratch space to format in to.
   // We should be streaming.
@@ -611,6 +613,7 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_view_append_to_builder(
       buffer_view, max_element_count, /*buffer_capacity=*/0, /*buffer=*/NULL,
       &required_length);
   if (!iree_status_is_out_of_range(status)) return status;
+  iree_status_free(status);
   char* buffer = NULL;
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_inline(builder, required_length, &buffer));

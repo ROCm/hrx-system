@@ -723,7 +723,9 @@ iree_async_proactor_run_progress(iree_async_proactor_t* proactor);
 
 // Retains a reference to the proactor.
 static inline void iree_async_proactor_retain(iree_async_proactor_t* proactor) {
-  iree_atomic_ref_count_inc(&proactor->ref_count);
+  if (proactor) {
+    iree_atomic_ref_count_inc(&proactor->ref_count);
+  }
 }
 
 // Releases a reference to the proactor. Destroys when count reaches zero.

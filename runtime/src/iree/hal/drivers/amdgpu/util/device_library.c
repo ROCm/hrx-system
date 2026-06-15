@@ -358,109 +358,17 @@ void iree_hal_amdgpu_device_library_deinitialize(
   IREE_TRACE_ZONE_END(z0);
 }
 
-typedef struct iree_hal_amdgpu_find_loaded_code_object_state_t {
-  const iree_hal_amdgpu_libhsa_t* libhsa;
-  hsa_agent_t agent;
-  hsa_loaded_code_object_t loaded_code_object;
-} iree_hal_amdgpu_find_loaded_code_object_state_t;
-static hsa_status_t iree_hal_amdgpu_iterate_loaded_code_object(
-    hsa_executable_t executable, hsa_loaded_code_object_t loaded_code_object,
-    void* user_data) {
-  iree_hal_amdgpu_find_loaded_code_object_state_t* find_state =
-      (iree_hal_amdgpu_find_loaded_code_object_state_t*)user_data;
-  hsa_agent_t agent = {0};
-  hsa_status_t hsa_status =
-      find_state->libhsa->amd_loader
-          .hsa_ven_amd_loader_loaded_code_object_get_info(
-              loaded_code_object,
-              HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_AGENT, &agent);
-  if (hsa_status != HSA_STATUS_SUCCESS) return hsa_status;
-  if (agent.handle == find_state->agent.handle) {
-    find_state->loaded_code_object = loaded_code_object;
-    return HSA_STATUS_INFO_BREAK;  // found
-  }
-  return HSA_STATUS_SUCCESS;  // continue
-}
-
-// Finds the loaded code object in |executable| for the given |agent|.
-static iree_status_t iree_hal_amdgpu_find_loaded_code_object(
-    const iree_hal_amdgpu_libhsa_t* libhsa, hsa_executable_t executable,
-    hsa_agent_t agent, hsa_loaded_code_object_t* out_loaded_code_object) {
-  // Iterate over the code objects and find the first that matches the agent.
-  iree_hal_amdgpu_find_loaded_code_object_state_t find_state = {
-      .libhsa = libhsa,
-      .agent = agent,
-      .loaded_code_object = {0},
-  };
-  hsa_status_t hsa_status =
-      libhsa->amd_loader
-          .hsa_ven_amd_loader_executable_iterate_loaded_code_objects(
-              executable, iree_hal_amdgpu_iterate_loaded_code_object,
-              &find_state);
-  if (hsa_status == HSA_STATUS_SUCCESS) {
-    // None found.
-    return iree_make_status(IREE_STATUS_NOT_FOUND,
-                            "no loaded code object found for the given agent");
-  } else if (hsa_status != HSA_STATUS_INFO_BREAK) {
-    // Error during iteration.
-    return iree_status_from_hsa_status(
-        __FILE__, __LINE__, hsa_status,
-        "hsa_ven_amd_loader_executable_iterate_loaded_code_objects",
-        "iterating loaded code objects");
-  }
-  *out_loaded_code_object = find_state.loaded_code_object;
-  return iree_ok_status();
-}
-
-iree_status_t iree_hal_amdgpu_device_library_populate_agent_code_range(
+iree_status_t
+iree_hal_amdgpu_device_library_populate_agent_loaded_code_object_range(
     const iree_hal_amdgpu_device_library_t* library, hsa_agent_t device_agent,
-    iree_hal_amdgpu_code_range_t* out_range) {
+    iree_hal_amdgpu_loaded_code_object_range_t* out_range) {
   IREE_ASSERT_ARGUMENT(library);
   IREE_ASSERT_ARGUMENT(out_range);
   IREE_TRACE_ZONE_BEGIN(z0);
   memset(out_range, 0, sizeof(*out_range));
 
-  const iree_hal_amdgpu_libhsa_t* libhsa = library->libhsa;
-
-  // Lookup the loaded code object for the given device agent.
-  // Each agent has its own copy and the virtual address ranges will differ for
-  // each.
-  hsa_loaded_code_object_t loaded_code_object = {0};
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_amdgpu_find_loaded_code_object(
-              libhsa, library->executable, device_agent, &loaded_code_object));
-
-  hsa_status_t hsa_status = HSA_STATUS_SUCCESS;
-
-  // Query the requested information.
-  iree_hal_amdgpu_code_range_t range = {0};
-  if (hsa_status == HSA_STATUS_SUCCESS) {
-    hsa_status =
-        libhsa->amd_loader.hsa_ven_amd_loader_loaded_code_object_get_info(
-            loaded_code_object,
-            HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_BASE,
-            &range.device_ptr);
-  }
-  if (hsa_status == HSA_STATUS_SUCCESS) {
-    hsa_status = libhsa->amd_loader.hsa_ven_amd_loader_query_host_address(
-        (void*)range.device_ptr, (const void**)&range.host_ptr);
-  }
-  if (hsa_status == HSA_STATUS_SUCCESS) {
-    hsa_status =
-        libhsa->amd_loader.hsa_ven_amd_loader_loaded_code_object_get_info(
-            loaded_code_object,
-            HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_SIZE, &range.size);
-  }
-
-  iree_status_t status = iree_ok_status();
-  if (hsa_status == HSA_STATUS_SUCCESS) {
-    *out_range = range;
-  } else {
-    status = iree_status_from_hsa_status(
-        __FILE__, __LINE__, hsa_status,
-        "hsa_ven_amd_loader_loaded_code_object_get_info",
-        "querying code object info");
-  }
+  iree_status_t status = iree_hal_amdgpu_loaded_code_object_query_agent_range(
+      library->libhsa, library->executable, device_agent, out_range);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }

@@ -81,7 +81,7 @@ void iree_benchmark_set_items_processed(iree_benchmark_state_t* state,
 // iree_benchmark_def_t
 //===----------------------------------------------------------------------===//
 
-static std::string StatusToString(iree_status_t status) {
+static std::string StatusToString(const iree_status_t& status) {
   if (iree_status_is_ok(status)) {
     return "OK";
   }

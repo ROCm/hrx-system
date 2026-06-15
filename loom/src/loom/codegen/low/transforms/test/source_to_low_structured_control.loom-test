@@ -1,0 +1,125 @@
+// RUN: pass source-to-low{control-flow=structured-low}
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @structured_if_without_results(%cond: i1) {
+  scf.if %cond {
+    scf.yield
+  }
+  func.return
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) abi(object_function) @structured_if_without_results(%cond: reg<test.i32>) {
+  low.scf.if %cond {
+  }
+  low.return
+}
+
+// ====
+// RUN: pass source-to-low{control-flow=structured-low}
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @structured_if_with_results(%cond: i1, %lhs: i32, %rhs: i32, %fallback: i32) -> (i32) {
+  %result = scf.if %cond -> (i32) {
+    %then = scalar.addi %lhs, %rhs : i32
+    scf.yield %then : i32
+  } else {
+    %else = scalar.addi %fallback, %rhs : i32
+    scf.yield %else : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) abi(object_function) @structured_if_with_results(%cond: reg<test.i32>, %lhs: reg<test.i32>, %rhs: reg<test.i32>, %fallback: reg<test.i32>) -> (reg<test.i32>) {
+  %result = low.scf.if %cond -> (reg<test.i32>) {
+    %then = low.op<test.add.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+    low.scf.yield %then : reg<test.i32>
+  } else {
+    %else = low.op<test.add.i32>(%fallback, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+    low.scf.yield %else : reg<test.i32>
+  }
+  low.return %result : reg<test.i32>
+}
+
+// ====
+// RUN: pass source-to-low{control-flow=structured-low}
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @structured_for_with_iter_arg(%lo: index, %hi: index, %step: index, %factor: index, %init: i32, %bias: i32) -> (i32) {
+  %result = scf.for %iv = [%lo to %hi step %step](%acc = %init : i32) -> (i32) unroll(%factor) {
+    %next = scalar.addi %acc, %bias : i32
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) abi(object_function) @structured_for_with_iter_arg(%lo: reg<test.i32>, %hi: reg<test.i32>, %step: reg<test.i32>, %factor: reg<test.i32>, %init: reg<test.i32>, %bias: reg<test.i32>) -> (reg<test.i32>) {
+  %result = low.scf.for [%lo to %hi step %step] iter_args(%init: reg<test.i32>) -> (reg<test.i32>) unroll(%factor) do(%iv: reg<test.i32>, %acc: reg<test.i32>) {
+    %next = low.op<test.add.i32>(%acc, %bias) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+    low.scf.yield %next : reg<test.i32>
+  }
+  low.return %result : reg<test.i32>
+}
+
+// ====
+// RUN: pass source-to-low{control-flow=structured-low}
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @nested_if_inside_for(%cond: i1, %lo: index, %hi: index, %step: index, %init: i32, %bias: i32) -> (i32) {
+  %result = scf.for %iv = [%lo to %hi step %step](%acc = %init : i32) -> (i32) {
+    %next = scf.if %cond -> (i32) {
+      %then = scalar.addi %acc, %bias : i32
+      scf.yield %then : i32
+    } else {
+      scf.yield %acc : i32
+    }
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) abi(object_function) @nested_if_inside_for(%cond: reg<test.i32>, %lo: reg<test.i32>, %hi: reg<test.i32>, %step: reg<test.i32>, %init: reg<test.i32>, %bias: reg<test.i32>) -> (reg<test.i32>) {
+  %result = low.scf.for [%lo to %hi step %step] iter_args(%init: reg<test.i32>) -> (reg<test.i32>) do(%iv: reg<test.i32>, %acc: reg<test.i32>) {
+    %next = low.scf.if %cond -> (reg<test.i32>) {
+      %then = low.op<test.add.i32>(%acc, %bias) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+      low.scf.yield %then : reg<test.i32>
+    } else {
+      low.scf.yield %acc : reg<test.i32>
+    }
+    low.scf.yield %next : reg<test.i32>
+  }
+  low.return %result : reg<test.i32>
+}
+
+// ====
+// RUN: pass source-to-low{control-flow=structured-low}
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @rejects_unsupported_structured_region_op(%selector: index, %a: i32, %b: i32) -> (i32) {
+  // ERROR@+1: TARGET/030 {op_name="scf.switch", region_count="2"}
+  %result = scf.switch %selector -> (i32) {
+    case 0 {
+      scf.yield %a : i32
+    }
+    default {
+      scf.yield %b : i32
+    }
+  }
+  func.return %result : i32
+}

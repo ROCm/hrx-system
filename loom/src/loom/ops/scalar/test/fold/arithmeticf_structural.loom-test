@@ -1,0 +1,95 @@
+// RUN: pass canonicalize
+
+func.def @add_sub_nsz_identities(%x: f32) -> (f32, f32, f32, f32) {
+  %zero = scalar.constant 0.0 : f32
+  %add_lhs = scalar.addf<nsz> %zero, %x : f32
+  %add_rhs = scalar.addf<nsz> %x, %zero : f32
+  %sub_rhs = scalar.subf<nsz> %x, %zero : f32
+  %sub_lhs = scalar.subf<nnan|nsz> %zero, %x : f32
+  func.return %add_lhs, %add_rhs, %sub_rhs, %sub_lhs : f32, f32, f32, f32
+}
+
+// ----
+func.def @add_sub_nsz_identities(%x: f32) -> (f32, f32, f32, f32) {
+  %sub_lhs = scalar.negf<nnan|nsz> %x : f32
+  func.return %x, %x, %x, %sub_lhs : f32, f32, f32, f32
+}
+
+// ====
+
+func.def @strict_add_zero_preserves_signed_zero(%x: f32) -> (f32) {
+  %zero = scalar.constant 0.0 : f32
+  %r = scalar.addf %x, %zero : f32
+  func.return %r : f32
+}
+
+// ====
+
+func.def @mul_div_identities(%x: f32) -> (f32, f32, f32) {
+  %zero = scalar.constant 0.0 : f32
+  %one = scalar.constant 1.0 : f32
+  %mul = scalar.mulf %x, %one : f32
+  %div = scalar.divf %x, %one : f32
+  %zeroed = scalar.mulf<nnan|ninf|nsz> %x, %zero : f32
+  func.return %mul, %div, %zeroed : f32, f32, f32
+}
+
+// ----
+func.def @mul_div_identities(%x: f32) -> (f32, f32, f32) {
+  %zeroed = scalar.constant 0.0 : f32
+  func.return %x, %x, %zeroed : f32, f32, f32
+}
+
+// ====
+
+func.def @mulf_absorbs_negated_input_constant(%x: f32) -> (f32) {
+  %zero = scalar.constant 0.0 : f32
+  %neg = scalar.subf<nnan|nsz> %zero, %x : f32
+  %scale = scalar.constant 1.4426950408889634 : f32
+  %scaled = scalar.mulf<nnan|ninf|nsz> %neg, %scale : f32
+  func.return %scaled : f32
+}
+
+// ----
+func.def @mulf_absorbs_negated_input_constant(%x: f32) -> (f32) {
+  %7 = scalar.constant -1.4426950408889634 : f32
+  %scaled = scalar.mulf<nnan|ninf|nsz> %x, %7 : f32
+  func.return %scaled : f32
+}
+
+// ====
+
+func.def @neg_abs_copysign_structural(%x: f32) -> (f32, f32, f32, f32) {
+  %neg = scalar.negf %x : f32
+  %double = scalar.negf %neg : f32
+  %abs = scalar.absf %x : f32
+  %abs_abs = scalar.absf %abs : f32
+  %abs_neg = scalar.absf %neg : f32
+  %copy_self = scalar.copysignf %x, %x : f32
+  func.return %double, %abs_abs, %abs_neg, %copy_self : f32, f32, f32, f32
+}
+
+// ----
+func.def @neg_abs_copysign_structural(%x: f32) -> (f32, f32, f32, f32) {
+  %abs = scalar.absf %x : f32
+  %abs_neg = scalar.absf %x : f32
+  func.return %x, %abs, %abs_neg, %x : f32, f32, f32, f32
+}
+
+// ====
+
+func.def @fmaf_preserves_fastmath_flags(%a: f32, %b: f32, %c: f32) -> (f32, f32, f32) {
+  %zero = scalar.constant 0.0 : f32
+  %one = scalar.constant 1.0 : f32
+  %to_c = scalar.fmaf<nnan|ninf|nsz> %zero, %b, %c : f32
+  %to_mul = scalar.fmaf<nsz> %a, %b, %zero : f32
+  %to_add = scalar.fmaf<reassoc> %one, %b, %c : f32
+  func.return %to_c, %to_mul, %to_add : f32, f32, f32
+}
+
+// ----
+func.def @fmaf_preserves_fastmath_flags(%a: f32, %b: f32, %c: f32) -> (f32, f32, f32) {
+  %to_mul = scalar.mulf<nsz> %a, %b : f32
+  %to_add = scalar.addf<reassoc> %b, %c : f32
+  func.return %c, %to_mul, %to_add : f32, f32, f32
+}

@@ -1,0 +1,74 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+)
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_LLVM_TOOL_VISIBILITY = ["//loom/src/loom/target/emit/llvmir:__pkg__"]
+
+_SPIRV_TOOL_VISIBILITY = ["//loom/src/loom/target/emit/spirv:__pkg__"]
+
+_WASM_TOOL_VISIBILITY = ["//loom/src/loom/target/emit/wasm:__pkg__"]
+
+#===------------------------------------------------------------------------===#
+# External tool runners
+#===------------------------------------------------------------------------===#
+
+loom_cc_library(
+    name = "process",
+    srcs = ["process.c"],
+    hdrs = ["process.h"],
+    deps = [
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "llvm",
+    srcs = ["llvm.c"],
+    hdrs = ["llvm.h"],
+    visibility = _LLVM_TOOL_VISIBILITY,
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:path",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/io:stream",
+    ],
+)
+
+loom_cc_library(
+    name = "spirv",
+    srcs = ["spirv.c"],
+    hdrs = ["spirv.h"],
+    visibility = _SPIRV_TOOL_VISIBILITY,
+    deps = [
+        ":process",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:path",
+        "//runtime/src/iree/io:file_handle",
+    ],
+)
+
+loom_cc_library(
+    name = "wasm",
+    srcs = ["wasm.c"],
+    hdrs = ["wasm.h"],
+    visibility = _WASM_TOOL_VISIBILITY,
+    deps = [
+        ":process",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:path",
+        "//runtime/src/iree/io:file_handle",
+    ],
+)

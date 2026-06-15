@@ -41,9 +41,7 @@ class SequenceNormalizerTest : public ::testing::Test {
     iree_status_t status = iree_tokenizer_normalizer_sequence_allocate(
         raw_children.data(), raw_children.size(), iree_allocator_system(),
         &raw_normalizer);
-    if (!iree_status_is_ok(status)) {
-      return ScopedNormalizer(nullptr);
-    }
+    IREE_CHECK_OK(status);
 
     // Success: release all children to sequence ownership.
     for (auto& child : children) {
@@ -57,9 +55,7 @@ class SequenceNormalizerTest : public ::testing::Test {
     iree_tokenizer_normalizer_t* raw = nullptr;
     iree_status_t status = iree_tokenizer_normalizer_passthrough_allocate(
         iree_allocator_system(), &raw);
-    if (!iree_status_is_ok(status)) {
-      return ScopedNormalizer(nullptr);
-    }
+    IREE_CHECK_OK(status);
     return ScopedNormalizer(raw);
   }
 
@@ -68,9 +64,7 @@ class SequenceNormalizerTest : public ::testing::Test {
     iree_tokenizer_normalizer_t* raw = nullptr;
     iree_status_t status = iree_tokenizer_normalizer_deferred_allocate(
         iree_allocator_system(), &raw);
-    if (!iree_status_is_ok(status)) {
-      return ScopedNormalizer(nullptr);
-    }
+    IREE_CHECK_OK(status);
     return ScopedNormalizer(raw);
   }
 
@@ -79,9 +73,7 @@ class SequenceNormalizerTest : public ::testing::Test {
     iree_tokenizer_normalizer_t* raw = nullptr;
     iree_status_t status = iree_tokenizer_normalizer_strip_allocate(
         left, right, iree_allocator_system(), &raw);
-    if (!iree_status_is_ok(status)) {
-      return ScopedNormalizer(nullptr);
-    }
+    IREE_CHECK_OK(status);
     return ScopedNormalizer(raw);
   }
 
@@ -91,9 +83,7 @@ class SequenceNormalizerTest : public ::testing::Test {
     // U+2581 LOWER ONE EIGHTH BLOCK = 0xE2 0x96 0x81 in UTF-8.
     iree_status_t status = iree_tokenizer_normalizer_replace_allocate(
         IREE_SV(" "), IREE_SV("\xE2\x96\x81"), iree_allocator_system(), &raw);
-    if (!iree_status_is_ok(status)) {
-      return ScopedNormalizer(nullptr);
-    }
+    IREE_CHECK_OK(status);
     return ScopedNormalizer(raw);
   }
 
@@ -103,9 +93,7 @@ class SequenceNormalizerTest : public ::testing::Test {
     iree_status_t status = iree_tokenizer_normalizer_prepend_allocate(
         IREE_SV("\xE2\x96\x81"), skip_if_prefix_matches,
         iree_allocator_system(), &raw);
-    if (!iree_status_is_ok(status)) {
-      return ScopedNormalizer(nullptr);
-    }
+    IREE_CHECK_OK(status);
     return ScopedNormalizer(raw);
   }
 };

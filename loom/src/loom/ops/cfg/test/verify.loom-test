@@ -1,0 +1,49 @@
+// RUN: verify
+
+// cfg.br can terminate the function entry block and jump to a later block.
+func.def @cfg_branch_forward(%arg: i32) -> (i32) {
+  cfg.br ^exit(%arg: i32)
+^exit(%value: i32):
+  func.return %value : i32
+}
+
+// ====
+
+// cfg.br must pass one argument per destination block argument.
+func.def @cfg_successor_arg_count(%arg: i32) {
+  // ERROR@+1: STRUCTURE/025 {op_name="cfg.br", successor_index="0", actual_count="0", expected_count="1"}
+  cfg.br ^exit
+^exit(%value: i32):
+  func.return
+}
+
+// ====
+
+// cfg.br successor argument types must match destination block arguments.
+func.def @cfg_successor_arg_type(%arg: f32) {
+  // ERROR@+1: STRUCTURE/026 {op_name="cfg.br", successor_index="0", argument_index="0", actual_type="f32", expected_type="i32"}
+  cfg.br ^exit(%arg: f32)
+^exit(%value: i32):
+  func.return
+}
+
+// ====
+
+// cfg.cond_br currently carries no per-edge payloads.
+func.def @cfg_cond_successor_payload(%condition: i1) {
+  // ERROR@+1: STRUCTURE/025 {op_name="cfg.cond_br", successor_index="1", actual_count="0", expected_count="1"}
+  cfg.cond_br %condition, ^then, ^else
+^then:
+  func.return
+^else(%value: i32):
+  func.return
+}
+
+// ====
+
+// Dependent types may be remapped through branch successor arguments.
+func.def @cfg_branch_dependent_type(%source_layout: encoding<layout>, %source_view: view<4xf32, %source_layout>) {
+  cfg.br ^exit(%source_layout: encoding<layout>, %source_view: view<4xf32, %source_layout>)
+^exit(%target_layout: encoding<layout>, %target_view: view<4xf32, %target_layout>):
+  func.return
+}

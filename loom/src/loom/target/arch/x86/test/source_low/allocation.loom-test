@@ -1,0 +1,19 @@
+// RUN: emit low-allocation-json @x86_gpr_alias_classes_share_storage x86.gpr32=1 diagnostics=predicted-spills output=none
+
+x86.target<scalar> @target
+
+// WARNING@+1: BACKEND/008 {function_name="x86_gpr_alias_classes_share_storage", value_name="narrow", value_class="x86.gpr32", spill_cause="register-budget-conflict"}
+low.func.def target(@target) @x86_gpr_alias_classes_share_storage(%wide: reg<x86.gpr64>, %narrow: reg<x86.gpr32>) -> (reg<x86.gpr64>, reg<x86.gpr32>) asm<x86.scalar.core> {
+  return %wide, %narrow
+}
+
+// ====
+
+// RUN: emit low-allocation-json @x86_vector_alias_classes_share_storage x86.xmm=1 diagnostics=predicted-spills output=none
+
+x86.target<avx512> @target
+
+// WARNING@+1: BACKEND/008 {function_name="x86_vector_alias_classes_share_storage", value_name="narrow", value_class="x86.xmm", spill_cause="register-budget-conflict"}
+low.func.def target(@target) @x86_vector_alias_classes_share_storage(%wide: reg<x86.zmm>, %narrow: reg<x86.xmm>) -> (reg<x86.zmm>, reg<x86.xmm>) asm<x86.avx512.core> {
+  return %wide, %narrow
+}

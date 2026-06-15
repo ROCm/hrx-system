@@ -253,6 +253,18 @@ enum {
 // Ends the current zone. Must be passed the |zone_id| from the _BEGIN.
 #define IREE_TRACE_ZONE_END(zone_id) (void)(zone_id)
 
+// Adopts ownership of an already-active trace zone from another owner.
+// This is used when zone ownership crosses coroutine, stack-frame, or async
+// suspension boundaries. It does not begin a provider zone: it only documents
+// that the current scope is now responsible for ending or transferring the
+// adopted |zone_id|.
+#define IREE_TRACE_ZONE_ADOPT(zone_id) (void)(zone_id)
+
+// Transfers ownership of an active trace zone to another owner without ending
+// it. The local |zone_id| is cleared so later cleanup cannot accidentally end
+// a zone owned by the callee, wait frame, or continuation storage.
+#define IREE_TRACE_ZONE_TRANSFER(zone_id) (zone_id) = 0
+
 // Ends the current zone before returning on a failure.
 // Sugar for IREE_TRACE_ZONE_END + IREE_RETURN_IF_ERROR.
 #define IREE_RETURN_AND_END_ZONE_IF_ERROR(zone_id, ...) \

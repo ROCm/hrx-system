@@ -18,7 +18,8 @@ void iree_task_scope_initialize(iree_string_view_t name,
   IREE_TRACE_ZONE_BEGIN(z0);
 
   memset(out_scope, 0, sizeof(*out_scope));
-  iree_atomic_ref_count_init_value(&out_scope->pending_submissions, 0);
+  iree_atomic_store(&out_scope->pending_submissions, 0,
+                    iree_memory_order_relaxed);
 
   iree_host_size_t name_length =
       iree_min(name.size, IREE_ARRAYSIZE(out_scope->name) - 1);
@@ -129,8 +130,9 @@ void iree_task_scope_fail(iree_task_scope_t* scope, iree_status_t status) {
 }
 
 void iree_task_scope_begin(iree_task_scope_t* scope) {
-  iree_atomic_ref_count_inc(&scope->pending_submissions);
-  // relaxed because this 'begin' call will be paired with a 'end' call that
+  iree_atomic_fetch_add(&scope->pending_submissions, 1,
+                        iree_memory_order_relaxed);
+  // relaxed because this 'begin' call will be paired with an 'end' call that
   // will perform the release-store, and this value is only read by
   // 'deinitialize'.
   iree_atomic_store(&scope->pending_idle_notification_posts, 1,
@@ -138,7 +140,8 @@ void iree_task_scope_begin(iree_task_scope_t* scope) {
 }
 
 void iree_task_scope_end(iree_task_scope_t* scope) {
-  if (iree_atomic_ref_count_dec(&scope->pending_submissions) == 1) {
+  if (iree_atomic_fetch_sub(&scope->pending_submissions, 1,
+                            iree_memory_order_acq_rel) == 1) {
     // All submissions have completed in this scope - notify any waiters.
     iree_notification_post(&scope->idle_notification, IREE_ALL_WAITERS);
     iree_atomic_store(&scope->pending_idle_notification_posts, 0,
@@ -147,7 +150,8 @@ void iree_task_scope_end(iree_task_scope_t* scope) {
 }
 
 bool iree_task_scope_is_idle(iree_task_scope_t* scope) {
-  return (iree_atomic_ref_count_load(&scope->pending_submissions) == 0);
+  return iree_atomic_load(&scope->pending_submissions,
+                          iree_memory_order_acquire) == 0;
 }
 static bool iree_task_scope_is_idle_thunk(void* arg) {
   return iree_task_scope_is_idle((iree_task_scope_t*)arg);

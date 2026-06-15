@@ -1370,7 +1370,6 @@ TEST(LinkTest, FailurePropagation) {
   // Target should be failed with the same status code.
   iree_status_t target_failure = (iree_status_t)iree_atomic_load(
       &target->failure_status, iree_memory_order_acquire);
-  EXPECT_FALSE(iree_status_is_ok(target_failure));
   EXPECT_EQ(iree_status_code(target_failure), IREE_STATUS_INTERNAL);
 
   iree_async_semaphore_release(source);
@@ -1482,7 +1481,6 @@ TEST(LinkTest, SourceDestroyPropagatesCancelled) {
   // Target should have been failed with CANCELLED.
   iree_status_t target_failure = (iree_status_t)iree_atomic_load(
       &target->failure_status, iree_memory_order_acquire);
-  EXPECT_FALSE(iree_status_is_ok(target_failure));
   EXPECT_EQ(iree_status_code(target_failure), IREE_STATUS_CANCELLED);
 
   iree_async_semaphore_release(target);
@@ -1508,7 +1506,6 @@ TEST(LinkTest, AlreadyFailedSourcePropagatesImmediately) {
   // Target should be failed immediately.
   iree_status_t target_failure = (iree_status_t)iree_atomic_load(
       &target->failure_status, iree_memory_order_acquire);
-  EXPECT_FALSE(iree_status_is_ok(target_failure));
   EXPECT_EQ(iree_status_code(target_failure), IREE_STATUS_ABORTED);
 
   iree_async_semaphore_release(source);

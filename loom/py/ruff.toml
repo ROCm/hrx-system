@@ -1,0 +1,70 @@
+# Ruff configuration for the loom Python package.
+# https://docs.astral.sh/ruff/configuration/
+
+target-version = "py312"
+line-length = 88
+
+[format]
+quote-style = "double"
+docstring-code-format = true
+
+[lint]
+select = [
+    # Core quality.
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "UP",     # pyupgrade (modernize syntax)
+    "B",      # bugbear (common gotchas)
+    "SIM",    # simplify (unnecessarily verbose patterns)
+    "RET",    # return (unnecessary else-after-return, etc.)
+    "C901",   # mccabe complexity
+    "PIE",    # misc lints (unnecessary pass, etc.)
+    "PERF",   # performance anti-patterns
+    "PGH",    # pygrep-hooks (blanket type:ignore, etc.)
+    "RUF",    # ruff-specific rules
+    "T20",    # print statements in library code
+    "ERA",    # commented-out code
+    "FA",     # future annotations
+    "PT",     # pytest style
+]
+ignore = [
+    # Conflicts with ruff format.
+    "COM812",  # trailing comma (formatter handles this)
+    "ISC001",  # implicit string concat (formatter handles this)
+
+    # Overzealous or wrong for this codebase.
+    "RUF022",  # __all__ not sorted (we group by category, not alphabetically)
+    "RUF023",  # __slots__ not sorted (same reason)
+    "SIM300",  # yoda conditions (stylistic preference, not a bug)
+    "RET504",  # unnecessary assignment before return (often clearer with name)
+    "PT018",   # composite assert (splitting makes test output worse, not better)
+    "SIM103",  # return-bool-cond — parser early-return chains are more readable
+    "SIM108",  # ternary — if/else blocks are often clearer for multi-line values
+]
+
+[lint.mccabe]
+# Parsers, printers, and code generators dispatch on many format element
+# types via match/case — high cyclomatic complexity is structural, not a
+# sign of poor decomposition. Default (10) flags every match block.
+max-complexity = 35
+
+[lint.per-file-ignores]
+# Dialect files have intentionally long one-op-per-line declarations
+# and generated builder signatures. Line length is by design.
+"loom/dialect/**" = ["E501"]
+# The package root is a deliberate public re-export facade.
+"loom/__init__.py" = ["F401", "I001"]
+# Code generators emit long strings, use print for progress, and have
+# inherently high cyclomatic complexity from match/case dispatch.
+"loom/gen/**" = ["E501", "T201", "C901"]
+# Format walkers dispatch on all format element types via match/case.
+# High cyclomatic complexity is structural (19 element types).
+"loom/format/text/printer.py" = ["C901"]
+"loom/format/text/parser.py" = ["C901"]
+# Test files use assert (pytest), magic numbers, and long IR strings.
+"*_test.py" = ["S101", "PLR2004", "E501"]
+
+[lint.isort]
+known-first-party = ["loom"]

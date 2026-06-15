@@ -1,0 +1,232 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:python.bzl", "iree_py_library", "iree_py_test")
+load("//loom/build_tools/bazel:build_defs.bzl", "iree_cmake_extra_content", "iree_select")
+
+package(
+    default_visibility = ["//visibility:public"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_TILELANG_IMPORTER_COMPATIBLE = iree_select({
+    "//loom/config/import:tilelang": [],
+    "//conditions:default": ["@platforms//:incompatible"],
+})
+
+_TILELANG_PACKAGE_DATA = [
+    "@importer_pip//apache_tvm_ffi:data",
+    "@importer_pip//cuda_bindings:data",
+    "@importer_pip//nvidia_cublas:data",
+    "@importer_pip//nvidia_cuda_cupti:data",
+    "@importer_pip//nvidia_cuda_nvrtc:data",
+    "@importer_pip//nvidia_cuda_runtime:data",
+    "@importer_pip//nvidia_cudnn_cu13:data",
+    "@importer_pip//nvidia_cufft:data",
+    "@importer_pip//nvidia_cufile:data",
+    "@importer_pip//nvidia_curand:data",
+    "@importer_pip//nvidia_cusolver:data",
+    "@importer_pip//nvidia_cusparse:data",
+    "@importer_pip//nvidia_cusparselt_cu13:data",
+    "@importer_pip//nvidia_nccl_cu13:data",
+    "@importer_pip//nvidia_nvjitlink:data",
+    "@importer_pip//nvidia_nvshmem_cu13:data",
+    "@importer_pip//nvidia_nvtx:data",
+    "@importer_pip//tilelang:data",
+    "@importer_pip//torch:data",
+    "@importer_pip//torch_c_dlpack_ext:data",
+    "@importer_pip//triton:data",
+    "@importer_pip//z3_solver:data",
+]
+
+iree_py_library(
+    name = "core",
+    srcs = [
+        "abi.py",
+        "analysis.py",
+        "buffers.py",
+        "context.py",
+        "converter.py",
+        "coverage.py",
+        "model.py",
+        "nodes.py",
+        "types.py",
+    ],
+    deps = [
+        "//loom/py/loom:core",
+        "//loom/py/loom:package",
+        "//loom/py/loom/importers/core",
+    ],
+)
+
+iree_py_library(
+    name = "oracle",
+    srcs = [
+        "oracle.py",
+    ],
+    deps = [
+        ":core",
+        "//loom/py/loom/tools:amdgpu_asm",
+    ],
+)
+
+# Keep oracle capture out of the minimal importer library. Source/code-object
+# oracle paths may need local TileLang codegen hooks and ROCm/LLVM tools; the
+# semantic importer must remain usable without those capabilities.
+iree_py_library(
+    name = "tilelang",
+    srcs = [
+        "__init__.py",
+        "defaults.py",
+        "importer.py",
+    ],
+    deps = [
+        ":core",
+        "//loom/py/loom/importers/tilelang/ops",
+    ],
+)
+
+iree_py_library(
+    name = "tilelang_packages",
+    data = iree_select({
+        "//loom/config/import:tilelang": _TILELANG_PACKAGE_DATA,
+        "//conditions:default": [],
+    }),
+    deps = iree_select({
+        "//loom/config/import:tilelang": [
+            "@importer_pip//apache_tvm_ffi",
+            "@importer_pip//cloudpickle",
+            "@importer_pip//cuda_bindings",
+            "@importer_pip//cuda_pathfinder",
+            "@importer_pip//cuda_toolkit",
+            "@importer_pip//filelock",
+            "@importer_pip//fsspec",
+            "@importer_pip//jinja2",
+            "@importer_pip//markupsafe",
+            "@importer_pip//ml_dtypes",
+            "@importer_pip//mpmath",
+            "@importer_pip//networkx",
+            "@importer_pip//numpy",
+            "@importer_pip//nvidia_cublas",
+            "@importer_pip//nvidia_cuda_cupti",
+            "@importer_pip//nvidia_cuda_nvrtc",
+            "@importer_pip//nvidia_cuda_runtime",
+            "@importer_pip//nvidia_cudnn_cu13",
+            "@importer_pip//nvidia_cufft",
+            "@importer_pip//nvidia_cufile",
+            "@importer_pip//nvidia_curand",
+            "@importer_pip//nvidia_cusolver",
+            "@importer_pip//nvidia_cusparse",
+            "@importer_pip//nvidia_cusparselt_cu13",
+            "@importer_pip//nvidia_nccl_cu13",
+            "@importer_pip//nvidia_nvjitlink",
+            "@importer_pip//nvidia_nvshmem_cu13",
+            "@importer_pip//nvidia_nvtx",
+            "@importer_pip//psutil",
+            "@importer_pip//setuptools",
+            "@importer_pip//sympy",
+            "@importer_pip//tilelang",
+            "@importer_pip//torch",
+            "@importer_pip//torch_c_dlpack_ext",
+            "@importer_pip//tqdm",
+            "@importer_pip//triton",
+            "@importer_pip//typing_extensions",
+            "@importer_pip//z3_solver",
+        ],
+        "//conditions:default": [],
+    }),
+)
+
+iree_cmake_extra_content(
+    content = """
+if(LOOM_IMPORT_TILELANG)
+""",
+    inline = True,
+)
+
+iree_py_test(
+    name = "tilelang_test",
+    srcs = [
+        "analysis_test.py",
+        "context_test.py",
+        "coverage_test.py",
+        "oracle_test.py",
+        "types_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = [
+        "loom.importers.tilelang.analysis_test",
+        "loom.importers.tilelang.context_test",
+        "loom.importers.tilelang.coverage_test",
+        "loom.importers.tilelang.oracle_test",
+        "loom.importers.tilelang.types_test",
+    ],
+    main = "pytest_style_runner.py",
+    target_compatible_with = _TILELANG_IMPORTER_COMPATIBLE,
+    deps = [
+        ":oracle",
+        ":tilelang",
+        ":tilelang_packages",
+        "//loom/py/loom/importers/check/tilelang",
+    ],
+)
+
+filegroup(
+    name = "import_tests",
+    srcs = [
+        "testdata/allocations.py",
+        "testdata/analysis.py",
+        "testdata/control_flow.py",
+        "testdata/diagnostics.py",
+        "testdata/lowered_metadata.py",
+        "testdata/memory_effects.py",
+        "testdata/scalar_calls.py",
+        "testdata/tilekernels/engram.py",
+        "testdata/tilekernels/mhc.py",
+        "testdata/tilekernels/moe_expand.py",
+        "testdata/tilekernels/moe_gate.py",
+        "testdata/tilekernels/moe_histogram.py",
+        "testdata/tilekernels/moe_normalize.py",
+        "testdata/tilekernels/moe_reduce.py",
+        "testdata/tilekernels/moe_routing.py",
+        "testdata/tilekernels/transpose.py",
+        "testdata/tileops.py",
+        "testdata/topology.py",
+        "testdata/vector_arithmetic.py",
+        "testdata/vector_casts.py",
+        "testdata/vector_memory.py",
+    ],
+)
+
+iree_py_test(
+    name = "tilelang_import_test",
+    srcs = ["//loom/py/loom/importers/check:import_test.py"],
+    args = [
+        "tilelang",
+        "--fail-on-skip",
+        "--loom-opt=$(location //loom/src/loom/tools/loom-opt:loom-opt)",
+        "$(locations :import_tests)",
+    ],
+    data = [
+        ":import_tests",
+        "//loom/src/loom/tools/loom-opt",
+    ],
+    main = "import_test.py",
+    target_compatible_with = _TILELANG_IMPORTER_COMPATIBLE,
+    deps = [
+        ":tilelang_packages",
+        "//loom/py/loom/importers/check",
+        "//loom/py/loom/importers/check/mlir",
+        "//loom/py/loom/importers/check/tilelang",
+    ],
+)
+
+iree_cmake_extra_content(
+    content = """
+endif()
+""",
+    inline = True,
+)

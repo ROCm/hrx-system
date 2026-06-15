@@ -20,9 +20,19 @@ package(
 #===------------------------------------------------------------------------===#
 
 iree_runtime_cc_library(
+    name = "archive",
+    srcs = ["archive.c"],
+    hdrs = ["archive.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal/flatcc:parsing",
+        "//runtime/src/iree/schemas:bytecode_module_def_c_fbs",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "module",
     srcs = [
-        "archive.c",
         "disassembler.c",
         "disassembler.h",
         "dispatch.c",
@@ -33,10 +43,10 @@ iree_runtime_cc_library(
         "verifier.h",
     ],
     hdrs = [
-        "archive.h",
         "module.h",
     ],
     deps = [
+        ":archive",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/schemas:bytecode_module_def_c_fbs",

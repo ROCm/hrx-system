@@ -1,0 +1,357 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_f32_memory.loom-test
+// RUN: emit source-low output=low
+
+llvmir.target<object> @target {
+  triple = "amdgcn-amd-amdhsa"
+}
+kernel.def target(@target) @f32_arith() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {
+  %tid0 = kernel.workitem.id<x> : index
+  %tid = index.assume %tid0 [range(%tid0, 0, 63)] : index
+  %zero = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs_buffer[%zero] : buffer -> view<64xf32, #dense>
+  %rhs_view = buffer.view %rhs_buffer[%zero] : buffer -> view<64xf32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<64xf32, #dense>
+  %lhs = vector.load %lhs_view[%tid] : view<64xf32, #dense> -> vector<1xf32>
+  %rhs = vector.load %rhs_view[%tid] : view<64xf32, #dense> -> vector<1xf32>
+  %sum = vector.addf %lhs, %rhs : vector<1xf32>
+  %product = vector.mulf %sum, %rhs : vector<1xf32>
+  %negated = vector.negf %product : vector<1xf32>
+  %absolute = vector.absf %negated : vector<1xf32>
+  vector.store %absolute, %output_view[%tid] : vector<1xf32>, view<64xf32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(1, 1, 1) @f32_arith() asm<llvmir.generic.core> {
+  %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
+  %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
+  %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<llvmir.ptr>
+  %lhs = load.f32 %lhs_view, 0
+  %rhs = load.f32 %rhs_view, 0
+  %sum = add.f32 %lhs, %rhs
+  %product = mul.f32 %sum, %rhs
+  %negated = neg.f32 %product
+  %absolute = abs.f32 %negated
+  store.f32 %absolute, %output_view, 0
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "amdgcn-amd-amdhsa"
+}
+kernel.def target(@target) @f32_fma() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {
+  %tid0 = kernel.workitem.id<x> : index
+  %tid = index.assume %tid0 [range(%tid0, 0, 63)] : index
+  %zero = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs_buffer[%zero] : buffer -> view<64xf32, #dense>
+  %rhs_view = buffer.view %rhs_buffer[%zero] : buffer -> view<64xf32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<64xf32, #dense>
+  %lhs = vector.load %lhs_view[%tid] : view<64xf32, #dense> -> vector<1xf32>
+  %rhs = vector.load %rhs_view[%tid] : view<64xf32, #dense> -> vector<1xf32>
+  %bias = vector.constant 0.5 : vector<1xf32>
+  %fma = vector.fmaf %lhs, %rhs, %bias : vector<1xf32>
+  %result = vector.subf %fma, %bias : vector<1xf32>
+  vector.store %result, %output_view[%tid] : vector<1xf32>, view<64xf32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(1, 1, 1) @f32_fma() asm<llvmir.generic.core> {
+  %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
+  %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
+  %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<llvmir.ptr>
+  %lhs = load.f32 %lhs_view, 0
+  %rhs = load.f32 %rhs_view, 0
+  %bias = const.f32 1056964608
+  %fma = fma.f32 %lhs, %rhs, %bias
+  %result = sub.f32 %fma, %bias
+  store.f32 %result, %output_view, 0
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "amdgcn-amd-amdhsa"
+}
+kernel.def target(@target) @f32_arcp_div() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {
+  %tid0 = kernel.workitem.id<x> : index
+  %tid = index.assume %tid0 [range(%tid0, 0, 63)] : index
+  %zero = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs_buffer[%zero] : buffer -> view<64x4xf32, #dense>
+  %rhs_view = buffer.view %rhs_buffer[%zero] : buffer -> view<64x4xf32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<64x4xf32, #dense>
+  %lhs = vector.load %lhs_view[%tid, 0] : view<64x4xf32, #dense> -> vector<4xf32>
+  %rhs = vector.load %rhs_view[%tid, 0] : view<64x4xf32, #dense> -> vector<4xf32>
+  %quotient = vector.divf<nnan|ninf|nsz|arcp> %lhs, %rhs : vector<4xf32>
+  vector.store %quotient, %output_view[%tid, 0] : vector<4xf32>, view<64x4xf32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(1, 1, 1) @f32_arcp_div() asm<llvmir.generic.core> {
+  %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
+  %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
+  %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<llvmir.ptr>
+  %lhs = load.v4f32 %lhs_view, 0
+  %rhs = load.v4f32 %rhs_view, 0
+  %quotient = div.v4f32 %lhs, %rhs {fast_math_flags = 30}
+  store.v4f32 %quotient, %output_view, 0
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "amdgcn-amd-amdhsa"
+}
+kernel.def target(@target) @f32_scalarized() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {
+  %tid0 = kernel.workitem.id<x> : index
+  %tid = index.assume %tid0 [range(%tid0, 0, 63)] : index
+  %zero = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs_buffer[%zero] : buffer -> view<64x4xf32, #dense>
+  %rhs_view = buffer.view %rhs_buffer[%zero] : buffer -> view<64x4xf32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<64x4xf32, #dense>
+  %lhs = vector.load %lhs_view[%tid, 0] : view<64x4xf32, #dense> -> vector<4xf32>
+  %rhs = vector.load %rhs_view[%tid, 0] : view<64x4xf32, #dense> -> vector<4xf32>
+  %lhs0 = vector.extract %lhs[0] : vector<4xf32> -> f32
+  %rhs0 = vector.extract %rhs[0] : vector<4xf32> -> f32
+  %lane0 = scalar.addf %lhs0, %rhs0 : f32
+  %lhs1 = vector.extract %lhs[1] : vector<4xf32> -> f32
+  %rhs1 = vector.extract %rhs[1] : vector<4xf32> -> f32
+  %lane1 = scalar.mulf %lhs1, %rhs1 : f32
+  %lhs2 = vector.extract %lhs[2] : vector<4xf32> -> f32
+  %rhs2 = vector.extract %rhs[2] : vector<4xf32> -> f32
+  %difference = scalar.subf %lhs2, %rhs2 : f32
+  %negated = scalar.negf %difference : f32
+  %lane2 = scalar.absf %negated : f32
+  %lhs3 = vector.extract %lhs[3] : vector<4xf32> -> f32
+  %rhs3 = vector.extract %rhs[3] : vector<4xf32> -> f32
+  %bias = scalar.constant 0.5 : f32
+  %lane3 = scalar.fmaf %lhs3, %rhs3, %bias : f32
+  %result = vector.from_elements %lane0, %lane1, %lane2, %lane3 : vector<4xf32>
+  vector.store %result, %output_view[%tid, 0] : vector<4xf32>, view<64x4xf32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(1, 1, 1) @f32_scalarized() asm<llvmir.generic.core> {
+  %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
+  %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
+  %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<llvmir.ptr>
+  %lhs = load.v4f32 %lhs_view, 0
+  %rhs = load.v4f32 %rhs_view, 0
+  %lhs0 = extract.v4f32 %lhs, 0
+  %rhs0 = extract.v4f32 %rhs, 0
+  %lane0 = add.f32 %lhs0, %rhs0
+  %lhs1 = extract.v4f32 %lhs, 1
+  %rhs1 = extract.v4f32 %rhs, 1
+  %lane1 = mul.f32 %lhs1, %rhs1
+  %lhs2 = extract.v4f32 %lhs, 2
+  %rhs2 = extract.v4f32 %rhs, 2
+  %difference = sub.f32 %lhs2, %rhs2
+  %lane2 = abs.f32 %difference
+  %lhs3 = extract.v4f32 %lhs, 3
+  %rhs3 = extract.v4f32 %rhs, 3
+  %bias = const.f32 1056964608
+  %lane3 = fma.f32 %lhs3, %rhs3, %bias
+  %result = from_elements.v4f32 %lane0, %lane1, %lane2, %lane3
+  store.v4f32 %result, %output_view, 0
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @f32_uniform_vector_bitops(%input: buffer) -> (vector<4xf32>) {
+  %base = index.constant 0 : offset
+  %input_global = buffer.assume.memory_space<global> %input : buffer
+  %input_noalias = buffer.assume.noalias %input_global : buffer
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<4xf32, #dense>
+  %loaded = vector.load %input_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %negated = vector.negf %loaded : vector<4xf32>
+  %absolute = vector.absf %loaded : vector<4xf32>
+  %result = vector.addf %negated, %absolute : vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f32_uniform_vector_bitops(%input_view: reg<llvmir.ptr>) -> (reg<llvmir.f32 x4>) asm<llvmir.generic.core> {
+  %loaded = load.v4f32 %input_view, 0
+  %negated = neg.v4f32 %loaded
+  %absolute = abs.v4f32 %loaded
+  %result = add.v4f32 %negated, %absolute
+  return %result
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @f32_uniform_vector_binary(%lhs_buffer: buffer, %rhs_buffer: buffer) -> (vector<4xf32>) {
+  %base = index.constant 0 : offset
+  %lhs_global = buffer.assume.memory_space<global> %lhs_buffer : buffer
+  %rhs_global = buffer.assume.memory_space<global> %rhs_buffer : buffer
+  %lhs_noalias, %rhs_noalias = buffer.assume.noalias %lhs_global, %rhs_global : buffer, buffer
+  %lhs_view = buffer.view %lhs_noalias[%base] : buffer -> view<4xf32, #dense>
+  %rhs_view = buffer.view %rhs_noalias[%base] : buffer -> view<4xf32, #dense>
+  %lhs = vector.load %lhs_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %rhs = vector.load %rhs_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %product = vector.mulf %lhs, %rhs : vector<4xf32>
+  %sum = vector.addf %lhs, %rhs : vector<4xf32>
+  %difference = vector.subf %lhs, %rhs : vector<4xf32>
+  %combined = vector.addf %product, %sum : vector<4xf32>
+  %two = vector.constant 2.0 : vector<4xf32>
+  %scaled = vector.mulf %lhs, %two : vector<4xf32>
+  %with_difference = vector.addf %combined, %difference : vector<4xf32>
+  %result = vector.addf %with_difference, %scaled : vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f32_uniform_vector_binary(%lhs_view: reg<llvmir.ptr>, %rhs_view: reg<llvmir.ptr>) -> (reg<llvmir.f32 x4>) asm<llvmir.generic.core> {
+  %lhs = load.v4f32 %lhs_view, 0
+  %rhs = load.v4f32 %rhs_view, 0
+  %product = mul.v4f32 %lhs, %rhs
+  %sum = add.v4f32 %lhs, %rhs
+  %difference = sub.v4f32 %lhs, %rhs
+  %combined = add.v4f32 %product, %sum
+  %two = const.v4f32 1073741824
+  %scaled = mul.v4f32 %lhs, %two
+  %with_difference = add.v4f32 %combined, %difference
+  %result = add.v4f32 %with_difference, %scaled
+  return %result
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @f32_uniform_scalar_binary(%lhs_buffer: buffer, %rhs_buffer: buffer) -> (f32) {
+  %base = index.constant 0 : offset
+  %lhs_global = buffer.assume.memory_space<global> %lhs_buffer : buffer
+  %rhs_global = buffer.assume.memory_space<global> %rhs_buffer : buffer
+  %lhs_noalias, %rhs_noalias = buffer.assume.noalias %lhs_global, %rhs_global : buffer, buffer
+  %lhs_view = buffer.view %lhs_noalias[%base] : buffer -> view<1xf32, #dense>
+  %rhs_view = buffer.view %rhs_noalias[%base] : buffer -> view<1xf32, #dense>
+  %lhs = view.load %lhs_view[0] : view<1xf32, #dense> -> f32
+  %rhs = view.load %rhs_view[0] : view<1xf32, #dense> -> f32
+  %sum = scalar.addf %lhs, %rhs : f32
+  func.return %sum : f32
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f32_uniform_scalar_binary(%lhs_view: reg<llvmir.ptr>, %rhs_view: reg<llvmir.ptr>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+  %lhs = load.f32 %lhs_view, 0
+  %rhs = load.f32 %rhs_view, 0
+  %sum = add.f32 %lhs, %rhs
+  return %sum
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @f32_uniform_scalar_fma(%a_buffer: buffer, %b_buffer: buffer, %c_buffer: buffer) -> (f32) {
+  %base = index.constant 0 : offset
+  %a_global = buffer.assume.memory_space<global> %a_buffer : buffer
+  %b_global = buffer.assume.memory_space<global> %b_buffer : buffer
+  %c_global = buffer.assume.memory_space<global> %c_buffer : buffer
+  %a_noalias, %b_noalias, %c_noalias = buffer.assume.noalias %a_global, %b_global, %c_global : buffer, buffer, buffer
+  %a_view = buffer.view %a_noalias[%base] : buffer -> view<1xf32, #dense>
+  %b_view = buffer.view %b_noalias[%base] : buffer -> view<1xf32, #dense>
+  %c_view = buffer.view %c_noalias[%base] : buffer -> view<1xf32, #dense>
+  %a = view.load %a_view[0] : view<1xf32, #dense> -> f32
+  %b = view.load %b_view[0] : view<1xf32, #dense> -> f32
+  %c = view.load %c_view[0] : view<1xf32, #dense> -> f32
+  %result = scalar.fmaf %a, %b, %c : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f32_uniform_scalar_fma(%a_view: reg<llvmir.ptr>, %b_view: reg<llvmir.ptr>, %c_view: reg<llvmir.ptr>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+  %a = load.f32 %a_view, 0
+  %b = load.f32 %b_view, 0
+  %c = load.f32 %c_view, 0
+  %result = fma.f32 %a, %b, %c
+  return %result
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @f32_uniform_vector_fma(%a_buffer: buffer, %b_buffer: buffer, %c_buffer: buffer) -> (vector<4xf32>) {
+  %base = index.constant 0 : offset
+  %a_global = buffer.assume.memory_space<global> %a_buffer : buffer
+  %b_global = buffer.assume.memory_space<global> %b_buffer : buffer
+  %c_global = buffer.assume.memory_space<global> %c_buffer : buffer
+  %a_noalias, %b_noalias, %c_noalias = buffer.assume.noalias %a_global, %b_global, %c_global : buffer, buffer, buffer
+  %a_view = buffer.view %a_noalias[%base] : buffer -> view<4xf32, #dense>
+  %b_view = buffer.view %b_noalias[%base] : buffer -> view<4xf32, #dense>
+  %c_view = buffer.view %c_noalias[%base] : buffer -> view<4xf32, #dense>
+  %a = vector.load %a_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %b = vector.load %b_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %c = vector.load %c_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %result = vector.fmaf %a, %b, %c : vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f32_uniform_vector_fma(%a_view: reg<llvmir.ptr>, %b_view: reg<llvmir.ptr>, %c_view: reg<llvmir.ptr>) -> (reg<llvmir.f32 x4>) asm<llvmir.generic.core> {
+  %a = load.v4f32 %a_view, 0
+  %b = load.v4f32 %b_view, 0
+  %c = load.v4f32 %c_view, 0
+  %result = fma.v4f32 %a, %b, %c
+  return %result
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "amdgcn-amd-amdhsa"
+}
+kernel.def target(@target) @f32_direct_arg_scale() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%output: buffer, %scale: f32) {
+  %zero_offset = index.constant 0 : offset
+  %zero_index = index.constant 0 : index
+  %output_view = buffer.view %output[%zero_offset] : buffer -> view<1xf32, #dense>
+  %unit = scalar.constant 1.0 : f32
+  %scaled = scalar.mulf %unit, %scale : f32
+  view.store %scaled, %output_view[%zero_index] : f32, view<1xf32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(1, 1, 1) @f32_direct_arg_scale(%scale: reg<llvmir.f32>) asm<llvmir.generic.core> {
+  %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
+  store.f32 %scale, %output_view, 0
+  return
+}

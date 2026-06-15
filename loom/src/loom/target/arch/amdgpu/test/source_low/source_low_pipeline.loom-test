@@ -1,0 +1,175 @@
+// RUN: emit source-low output=pipeline
+
+amdgpu.target<gfx1100> @target
+
+func.def target(@target) @pipeline_probe(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+// ----
+pass.pipeline<module> @__loom_check_source_low pipeline {
+  for func {
+    where target {
+      legalize-math
+      normalize-kernel-resources
+      promote-private-fragments
+      canonicalize
+      cse
+    }
+  }
+  select-templates(mode = "final")
+  inline-callables
+  target-legalize(mode = "eager")
+  for func {
+    where target {
+      vector-gather-to-scalar
+      linearize-view-accesses
+      canonicalize
+      cse
+      unroll-scf-for
+      canonicalize
+      cse
+      scf-to-cfg
+      cfg-simplify
+      canonicalize
+      cse
+      branch-sink
+    }
+  }
+  target-legalize(mode = "eager")
+  source-to-low
+  for func {
+    where target {
+      cfg-simplify
+      canonicalize
+      cse
+      low-dce
+    }
+  }
+}
+
+// ====
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1100> @gfx11
+amdgpu.target<gfx1200> @gfx12
+
+func.template<demo.target_prune> target(@gfx12) priority(20) @gfx12_provider(%codes: vector<8xi32>) -> (vector<4xi8>) {
+  %packed = vector.bitpack<4> %codes : vector<8xi32> -> vector<4xi8>
+  func.return %packed : vector<4xi8>
+}
+
+func.template<demo.target_prune> target(@gfx11) priority(10) @gfx11_provider(%codes: vector<4xi32>) -> (vector<4xi8>) {
+  %packed = vector.bitpack<8> %codes : vector<4xi32> -> vector<4xi8>
+  func.return %packed : vector<4xi8>
+}
+
+func.template<demo.target_prune> priority(1) @fallback_provider(%codes: vector<4xi32>) -> (vector<4xi8>) {
+  %packed = vector.bitpack<8> %codes : vector<4xi32> -> vector<4xi8>
+  func.return %packed : vector<4xi8>
+}
+
+func.def target(@gfx11) @target_template_prunes_nonmatching_provider(%codes: vector<4xi32>) -> (vector<4xi8>) {
+  %packed = func.apply<demo.target_prune>(%codes) : (vector<4xi32>) -> (vector<4xi8>)
+  func.return %packed : vector<4xi8>
+}
+
+// ----
+low.func.def target(@gfx11) abi(hal_kernel) @target_template_prunes_nonmatching_provider(%codes: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %15 = slice %codes[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %16 = v_and_b32_lit %15, 255
+  %17 = slice %codes[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %18 = v_and_b32_lit %17, 255
+  %19 = v_lshl_add_u32_shift_imm %18, %16, 8
+  %20 = slice %codes[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %21 = v_and_b32_lit %20, 255
+  %22 = v_lshl_add_u32_shift_imm %21, %19, 16
+  %23 = slice %codes[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %24 = v_and_b32_lit %23, 255
+  %packed = v_lshl_add_u32_shift_imm %24, %22, 24
+  return %packed
+}
+
+// ====
+// RUN: emit source-low output=prepared-pipeline
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @prepared_pipeline_probe() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%arg: buffer) {
+  kernel.return
+}
+
+// ----
+pass.pipeline<module> @__loom_check_prepared_low pipeline {
+  for func {
+    where target {
+      legalize-math
+      normalize-kernel-resources
+      promote-private-fragments
+      canonicalize
+      cse
+    }
+  }
+  select-templates(mode = "final")
+  inline-callables
+  target-legalize(mode = "eager")
+  for func {
+    where target {
+      vector-gather-to-scalar
+      linearize-view-accesses
+      canonicalize
+      cse
+      unroll-scf-for
+      canonicalize
+      cse
+      scf-to-cfg
+      cfg-simplify
+      canonicalize
+      cse
+      branch-sink
+    }
+  }
+  target-legalize(mode = "eager")
+  source-to-low
+  for func {
+    where target {
+      cfg-simplify
+      canonicalize
+      cse
+      low-dce
+    }
+  }
+  for func {
+    where target {
+      where target(abi = "hal_kernel", codegen = "low_native", target_op = "amdgpu.target") {
+        amdgpu-materialize-hal-kernel-abi
+      }
+      canonicalize
+      cse
+      cse
+      low-select-operand-forms
+      low-dce
+    }
+  }
+}
+
+// ====
+// RUN: emit source-low output=module
+
+amdgpu.target<gfx1100> @target
+
+func.def target(@target) @module_output_prints_low_asm(%lhs: i32, %rhs: i32) -> (i32) {
+  %product = scalar.muli %lhs, %rhs : i32
+  func.return %product : i32
+}
+
+// ----
+amdgpu.target<gfx1100> @target
+
+low.func.def target(@target) abi(hal_kernel) @module_output_prints_low_asm(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+  %product = s_mul_i32 %lhs, %rhs
+  return %product
+}

@@ -1,0 +1,91 @@
+// RUN: pass canonicalize
+
+// Any float rounding op applied to an already-rounded value is redundant.
+func.def @rounding_chain(%x: f32) -> (f32, f32) {
+  %floor = scalar.floorf %x : f32
+  %ceil_floor = scalar.ceilf %floor : f32
+  %round = scalar.roundf %x : f32
+  %trunc_round = scalar.truncf %round : f32
+  func.return %ceil_floor, %trunc_round : f32, f32
+}
+// ----
+func.def @rounding_chain(%x: f32) -> (f32, f32) {
+  %floor = scalar.floorf %x : f32
+  %round = scalar.roundf %x : f32
+  func.return %floor, %round : f32, f32
+}
+
+// ====
+
+// powf handles structural exponent identities without requiring exact lhs.
+func.def @powf_special_exponents(%x: f32) -> (f32, f32, f32) {
+  %zero = scalar.constant 0.0 : f32
+  %one = scalar.constant 1.0 : f32
+  %two = scalar.constant 2.0 : f32
+  %pow0 = scalar.powf %x, %zero : f32
+  %pow1 = scalar.powf %x, %one : f32
+  %pow2 = scalar.powf<nnan|ninf|nsz> %x, %two : f32
+  func.return %pow0, %pow1, %pow2 : f32, f32, f32
+}
+// ----
+func.def @powf_special_exponents(%x: f32) -> (f32, f32, f32) {
+  %pow0 = scalar.constant 1.0 : f32
+  %pow2 = scalar.mulf<nnan|ninf|nsz> %x, %x : f32
+  func.return %pow0, %x, %pow2 : f32, f32, f32
+}
+
+// ====
+
+// nnan alone does not prove log(exp(x)) is safe to cancel: exp can overflow.
+func.def @log_exp_keeps_domain_and_overflow_semantics(%x: f32) -> (f32) {
+  %exp = scalar.expf<nnan> %x : f32
+  %log = scalar.logf<nnan> %exp : f32
+  func.return %log : f32
+}
+
+// ====
+
+// Semantic activation facts fold exact constants without erasing the named op
+// surface for dynamic values.
+func.def @activation_exact_zero() -> (f32, f32, f32, f32, f32, f32) {
+  %zero = scalar.constant 0.0 : f32
+  %logistic = scalar.logisticf %zero : f32
+  %silu = scalar.siluf %zero : f32
+  %softplus = scalar.softplusf %zero : f32
+  %gelu_erf = scalar.geluf<erf> %zero : f32
+  %gelu_tanh = scalar.geluf<tanh> %zero : f32
+  %gelu_logistic = scalar.geluf<logistic> %zero {scale = 1.702} : f32
+  func.return %logistic, %silu, %softplus, %gelu_erf, %gelu_tanh, %gelu_logistic : f32, f32, f32, f32, f32, f32
+}
+
+// ----
+func.def @activation_exact_zero() -> (f32, f32, f32, f32, f32, f32) {
+  %logistic = scalar.constant 0.5 : f32
+  %silu = scalar.constant 0.0 : f32
+  %softplus = scalar.constant 0.69314718055994529 : f32
+  %gelu_erf = scalar.constant 0.0 : f32
+  %gelu_tanh = scalar.constant 0.0 : f32
+  %gelu_logistic = scalar.constant 0.0 : f32
+  func.return %logistic, %silu, %softplus, %gelu_erf, %gelu_tanh, %gelu_logistic : f32, f32, f32, f32, f32, f32
+}
+
+// ====
+
+// Turn-domain trig facts fold exact turns directly.
+func.def @turn_trig_exact_quadrants() -> (f32, f32, f32, f32) {
+  %zero = scalar.constant 0.0 : f32
+  %quarter = scalar.constant 0.25 : f32
+  %sin_zero = scalar.sinturnsf %zero : f32
+  %cos_zero = scalar.costurnsf %zero : f32
+  %sin_quarter = scalar.sinturnsf %quarter : f32
+  %cos_quarter = scalar.costurnsf %quarter : f32
+  func.return %sin_zero, %cos_zero, %sin_quarter, %cos_quarter : f32, f32, f32, f32
+}
+// ----
+func.def @turn_trig_exact_quadrants() -> (f32, f32, f32, f32) {
+  %sin_zero = scalar.constant 0.0 : f32
+  %cos_zero = scalar.constant 1.0 : f32
+  %sin_quarter = scalar.constant 1.0 : f32
+  %cos_quarter = scalar.constant 6.123233995736766e-17 : f32
+  func.return %sin_zero, %cos_zero, %sin_quarter, %cos_quarter : f32, f32, f32, f32
+}

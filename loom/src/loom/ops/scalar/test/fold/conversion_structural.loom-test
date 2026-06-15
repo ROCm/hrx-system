@@ -1,0 +1,82 @@
+// RUN: pass canonicalize
+
+// Extension chains collapse to the final width.
+func.def @integer_extension_chain(%x: i8) -> (i32) {
+  %wide1 = scalar.extsi %x : i8 to i16
+  %wide2 = scalar.extsi %wide1 : i16 to i32
+  func.return %wide2 : i32
+}
+// ----
+func.def @integer_extension_chain(%x: i8) -> (i32) {
+  %wide2 = scalar.extsi %x : i8 to i32
+  func.return %wide2 : i32
+}
+
+// ====
+
+// Truncating back to the original width after extension returns the source.
+func.def @integer_trunc_extension_roundtrip(%x: i8) -> (i8) {
+  %wide = scalar.extui %x : i8 to i32
+  %back = scalar.trunci %wide : i32 to i8
+  func.return %back : i8
+}
+// ----
+func.def @integer_trunc_extension_roundtrip(%x: i8) -> (i8) {
+  func.return %x : i8
+}
+
+// ====
+
+// Truncation chains collapse to one truncation from the original value.
+func.def @integer_truncation_chain(%x: i64) -> (i8) {
+  %narrow1 = scalar.trunci %x : i64 to i32
+  %narrow2 = scalar.trunci %narrow1 : i32 to i8
+  func.return %narrow2 : i8
+}
+// ----
+func.def @integer_truncation_chain(%x: i64) -> (i8) {
+  %narrow2 = scalar.trunci %x : i64 to i8
+  func.return %narrow2 : i8
+}
+
+// ====
+
+// A zero-extend after a non-negative sign-extend can use the original value.
+func.def @mixed_extension_non_negative(%x: i8) -> (i32) {
+  %x2 = scalar.assume %x [range(%x, 0, 127)] : i8
+  %signed = scalar.extsi %x2 : i8 to i16
+  %unsigned = scalar.extui %signed : i16 to i32
+  func.return %unsigned : i32
+}
+// ----
+func.def @mixed_extension_non_negative(%x: i8) -> (i32) {
+  %x2 = scalar.assume %x [range(%x, 0, 127)] : i8
+  %unsigned = scalar.extui %x2 : i8 to i32
+  func.return %unsigned : i32
+}
+
+// ====
+
+// Bitcast round-trips cancel when the final type is the original type.
+func.def @bitcast_roundtrip(%x: f32) -> (f32) {
+  %bits = scalar.bitcast %x : f32 to i32
+  %roundtrip = scalar.bitcast %bits : i32 to f32
+  func.return %roundtrip : f32
+}
+// ----
+func.def @bitcast_roundtrip(%x: f32) -> (f32) {
+  func.return %x : f32
+}
+
+// ====
+
+// Float extension and truncation round-trips collapse through the source.
+func.def @float_resize_roundtrip(%x: f16) -> (f16) {
+  %wide = scalar.extf %x : f16 to f32
+  %back = scalar.fptrunc %wide : f32 to f16
+  func.return %back : f16
+}
+// ----
+func.def @float_resize_roundtrip(%x: f16) -> (f16) {
+  func.return %x : f16
+}

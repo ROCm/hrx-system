@@ -1,0 +1,342 @@
+// RUN: verify
+
+// scf.for with fewer iter_args than results: count check fires and
+// emits a single STRUCTURE/013, then short-circuits per-position
+// type checks so no cascading TYPE/001s appear. The diagnostic must
+// mention both field names so the user can locate the mismatch.
+func.def @for_iter_args_too_few(%lo: index, %hi: index, %step: index, %init: f32) -> (f32, f32) {
+  // ERROR@+1: STRUCTURE/013 "iter_args" "results"
+  %a, %b = scf.for %iv = [%lo to %hi step %step](%acc = %init : f32) -> (f32, f32) {
+    scf.yield %acc, %acc : f32, f32
+  }
+  func.return %a, %b : f32, f32
+}
+
+// ====
+
+// scf.for with more iter_args than results: count check fires the
+// other direction.
+func.def @for_iter_args_too_many(%lo: index, %hi: index, %step: index, %a: f32, %b: f32) -> (f32) {
+  // ERROR@+1: STRUCTURE/013 "iter_args" "results"
+  %r = scf.for %iv = [%lo to %hi step %step](%fa = %a : f32, %fb = %b : f32) -> (f32) {
+    scf.yield %fa : f32
+  }
+  func.return %r : f32
+}
+
+// ====
+
+// scf.for with one iter_arg whose type does not match the result.
+// Count matches (1 == 1) so the per-position type check fires and
+// emits TYPE/001 referencing both indexed field positions.
+func.def @for_iter_args_type_mismatch(%lo: index, %hi: index, %step: index, %init: f32) -> (i32) {
+  %c = scalar.constant 0 : i32
+  // ERROR@+1: TYPE/001 "iter_args[0]" "results[0]"
+  %r = scf.for %iv = [%lo to %hi step %step](%acc = %init : f32) -> (i32) {
+    scf.yield %c : i32
+  }
+  func.return %r : i32
+}
+
+// ====
+
+// scf.for with two iter_args where the first matches but the second
+// has a wrong type. The diagnostic points at the offending position
+// on both sides — element index [1] within both variadic fields.
+func.def @for_iter_args_second_type_mismatch(%lo: index, %hi: index, %step: index, %a: f32, %b: f32) -> (f32, i32) {
+  %c = scalar.constant 0 : i32
+  // ERROR@+1: TYPE/001 "iter_args[1]" "results[1]"
+  %x, %y = scf.for %iv = [%lo to %hi step %step](%fa = %a : f32, %fb = %b : f32) -> (f32, i32) {
+    scf.yield %fa, %c : f32, i32
+  }
+  func.return %x, %y : f32, i32
+}
+
+// ====
+
+// Bare unroll and SSA unroll factor are mutually exclusive policies.
+func.def @for_unroll_policy_is_exclusive(%lo: index, %hi: index, %step: index, %factor: index) {
+  // ERROR@+1: STRUCTURE/014 {attr_name="unroll", actual_value="2", expected_constraint="either bare unroll or unroll factor, not both"}
+  scf.for %iv = [%lo to %hi step %step] unroll(%factor) unroll {
+  }
+  func.return
+}
+
+// ====
+
+// Yield/result type matching remaps parent result references to the values
+// yielded by each region. This keeps co-result-shaped types valid without
+// forcing branch-local layouts to escape their region.
+func.def @if_yield_type_refs_forwarded_results(%cond: i1, %buffer: buffer, %offset: offset) {
+  %layout, %view = scf.if %cond -> (encoding<layout>, view<4xf32, %layout>) {
+    %dense = encoding.layout.dense : encoding<layout>
+    %then_view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %dense>
+    scf.yield %dense, %then_view : encoding<layout>, view<4xf32, %dense>
+  } else {
+    %else_layout = encoding.layout.dense : encoding<layout>
+    %else_view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %else_layout>
+    scf.yield %else_layout, %else_view : encoding<layout>, view<4xf32, %else_layout>
+  }
+  test.use %view : view<4xf32, %layout>
+  func.return
+}
+
+// ====
+
+// Result-producing scf.if requires an else region so every result has a total
+// definition.
+func.def @if_result_missing_else(%cond: i1, %a: i32) -> (i32) {
+  // ERROR@+1: STRUCTURE/013 "else_region" "0" "present when scf.if has results" "1"
+  %r = scf.if %cond -> (i32) {
+    scf.yield %a : i32
+  }
+  func.return %r : i32
+}
+
+// ====
+
+// Loop-carried iter_arg/result type matching uses the same result-to-yield
+// forwarding rule as scf.yield. The init view is tied to the init layout, while
+// the loop result view is tied to the sibling loop result layout.
+func.def @for_iter_arg_result_type_refs_forwarded_results(%n: index, %buffer: buffer, %offset: offset) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %base_layout = encoding.layout.dense : encoding<layout>
+  %base_view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %base_layout>
+  %layout, %view = scf.for %i = [%zero to %n step %one](%layout_acc = %base_layout : encoding<layout>, %view_acc = %base_view : view<4xf32, %base_layout>) -> (encoding<layout>, view<4xf32, %layout>) {
+    %next_layout = encoding.layout.dense : encoding<layout>
+    %next_view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %next_layout>
+    scf.yield %next_layout, %next_view : encoding<layout>, view<4xf32, %next_layout>
+  }
+  test.use %view : view<4xf32, %layout>
+  func.return
+}
+
+// ====
+
+// scf.while after-region block args must match the loop-carried input types.
+func.def @while_after_arg_type_mismatch(%cond: i1, %init: index) -> (index) {
+  // ERROR@+1: TYPE/013
+  %r = scf.while(%before = %init : index) -> (index) {
+    scf.condition %cond, %before : i1, index
+  } do(%body: f32) {
+    scf.yield %init : index
+  }
+  func.return %r : index
+}
+
+// ====
+
+// scf.condition forwards one value for each after-region entry block arg.
+func.def @while_condition_forward_count_mismatch(%cond: i1, %init: index) -> (index) {
+  %r = scf.while(%before = %init : index) -> (index) {
+    // ERROR@+1: STRUCTURE/013 "forwarded" "0" "after block args" "1"
+    scf.condition %cond : i1
+  } do(%body: index) {
+    scf.yield %body : index
+  }
+  func.return %r : index
+}
+
+// ====
+
+// scf.condition forwarded values must match the after-region block arg types.
+func.def @while_condition_forward_type_mismatch(%cond: i1, %init: index, %wrong: f32) -> (index) {
+  %r = scf.while(%before = %init : index) -> (index) {
+    // ERROR@+1: TYPE/001 "forwarded[0]" "after[0]"
+    scf.condition %cond, %wrong : i1, f32
+  } do(%body: index) {
+    scf.yield %body : index
+  }
+  func.return %r : index
+}
+
+// ====
+
+// The before region must terminate with scf.condition, not the generic
+// scf.yield used by ordinary result-producing scf regions.
+func.def @while_wrong_before_terminator(%cond: i1, %init: index) -> (index) {
+  // ERROR@+1: STRUCTURE/018 "scf.while" "0" "scf.condition" "scf.yield"
+  %r = scf.while(%before = %init : index) -> (index) {
+    scf.yield %before : index
+  } do(%body: index) {
+    scf.yield %body : index
+  }
+  func.return %r : index
+}
+
+// ====
+
+// scf.lookup case keys are sorted and unique. The parser preserves source key
+// order so the verifier owns the structured key-order diagnostic.
+func.def @lookup_unsorted_case_keys(%variant: index, %a: index, %b: index, %fallback: index) -> (index) {
+  // ERROR@+1: STRUCTURE/014 "case_keys" "1" "strictly increasing sorted unique case key"
+  %r = scf.lookup %variant {
+    2 = (%a),
+    1 = (%b)
+  } default(%fallback) : index
+  func.return %r : index
+}
+
+// ====
+
+// Duplicate keys violate the same strict-increase contract as unsorted keys.
+func.def @lookup_duplicate_case_keys(%variant: index, %a: index, %b: index, %fallback: index) -> (index) {
+  // ERROR@+1: STRUCTURE/014 "case_keys" "1" "strictly increasing sorted unique case key"
+  %r = scf.lookup %variant {
+    1 = (%a),
+    1 = (%b)
+  } default(%fallback) : index
+  func.return %r : index
+}
+
+// ====
+
+// The table contains one row per case key plus one default row. With two
+// result columns and two explicit keys, six payload operands are required.
+func.def @lookup_wrong_payload_count(%variant: index, %a: index, %b: index, %c: index, %d: index) -> (index, index) {
+  // ERROR@+1: STRUCTURE/013 "table" "3" "(case key count + default row) * result count" "6"
+  %x, %y = scf.lookup %variant {
+    0 = (%a),
+    1 = (%b)
+  } default(%c) : index, index
+  func.return %x, %y : index, index
+}
+
+// ====
+
+// The grouped assembly rejects ragged source rows before the verifier sees the
+// flattened payload operands.
+func.def @lookup_ragged_case_row(%variant: index, %a: index, %b: index) -> (index, index) {
+  %x, %y = scf.lookup %variant {
+    0 = (%a, %b),
+    // ERROR@+1: PARSE/030 "1" "2"
+    1 = (%a)
+  } default(%a, %b) : index, index
+  func.return %x, %y : index, index
+}
+
+// ====
+
+func.def @lookup_ragged_default_row(%variant: index, %a: index, %b: index) -> (index, index) {
+  %x, %y = scf.lookup %variant {
+    0 = (%a, %b)
+    // ERROR@+1: PARSE/030 "1" "2"
+  } default(%a) : index, index
+  func.return %x, %y : index, index
+}
+
+// ====
+
+// Each payload column must match the corresponding result type. This catches
+// refactors that accidentally swap one row element across typed columns.
+func.def @lookup_payload_type_mismatch(%variant: index, %a: index, %b: f32, %fallback: index, %fallback_i32: i32) -> (index, i32) {
+  // ERROR@+1: TYPE/001 "table[1]" "results[1]"
+  %x, %y = scf.lookup %variant {
+    0 = (%a, %b)
+  } default(%fallback, %fallback_i32) : index, i32
+  func.return %x, %y : index, i32
+}
+
+// ====
+
+// scf.switch uses the same sorted unique key contract as scf.lookup.
+func.def @switch_unsorted_case_keys(%variant: index, %a: index, %b: index, %fallback: index) -> (index) {
+  // ERROR@+1: STRUCTURE/014 "case_keys" "1" "strictly increasing sorted unique case key"
+  %r = scf.switch %variant -> (index) {
+    case 2 {
+      scf.yield %a : index
+    }
+    case 1 {
+      scf.yield %b : index
+    }
+    default {
+      scf.yield %fallback : index
+    }
+  }
+  func.return %r : index
+}
+
+// ====
+
+// Every switch region must yield exactly the parent result tuple.
+func.def @switch_yield_count_mismatch(%variant: index, %a: index, %fallback: index) -> (index) {
+  // ERROR@+1: STRUCTURE/013 "case_regions" "0" "results" "1"
+  %r = scf.switch %variant -> (index) {
+    case 0 {
+      scf.yield
+    }
+    default {
+      scf.yield %fallback : index
+    }
+  }
+  func.return %r : index
+}
+
+// ====
+
+// Yielded values must have the same type as the corresponding switch result.
+func.def @switch_yield_type_mismatch(%variant: index, %a: f32, %fallback: index) -> (index) {
+  // ERROR@+1: TYPE/001 "case_regions[0].yield[0]" "results[0]"
+  %r = scf.switch %variant -> (index) {
+    case 0 {
+      scf.yield %a : f32
+    }
+    default {
+      scf.yield %fallback : index
+    }
+  }
+  func.return %r : index
+}
+
+// ====
+
+// The custom switch verifier uses the same result-to-yield type forwarding
+// rule as generic scf.yield constraints.
+func.def @switch_yield_type_refs_forwarded_results(%variant: index, %buffer: buffer, %offset: offset) {
+  %layout, %view = scf.switch %variant -> (encoding<layout>, view<4xf32, %layout>) {
+    case 0 {
+      %dense = encoding.layout.dense : encoding<layout>
+      %case_view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %dense>
+      scf.yield %dense, %case_view : encoding<layout>, view<4xf32, %dense>
+    }
+    default {
+      %default_layout = encoding.layout.dense : encoding<layout>
+      %default_view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %default_layout>
+      scf.yield %default_layout, %default_view : encoding<layout>, view<4xf32, %default_layout>
+    }
+  }
+  test.use %view : view<4xf32, %layout>
+  func.return
+}
+
+// ====
+
+// scf regions require scf.yield specifically, not just any terminator with the
+// right operand shape.
+func.def @if_wrong_terminator(%cond: i1, %a: index) -> (index) {
+  // ERROR@+1: STRUCTURE/018 "scf.if" "0" "scf.yield" "func.return"
+  %r = scf.if %cond -> (index) {
+    func.return %a : index
+  } else {
+    scf.yield %a : index
+  }
+  func.return %r : index
+}
+
+// ====
+
+// Variadic region tables use the same descriptor for every case region, so a
+// wrong case terminator is diagnosed on the actual expanded region index.
+func.def @switch_wrong_case_terminator(%variant: index, %a: index) -> (index) {
+  // ERROR@+1: STRUCTURE/018 "scf.switch" "1" "scf.yield" "func.return"
+  %r = scf.switch %variant -> (index) {
+    case 0 {
+      func.return %a : index
+    }
+    default {
+      scf.yield %a : index
+    }
+  }
+  func.return %r : index
+}

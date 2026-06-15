@@ -38,9 +38,9 @@ iree_cc_library(
   NAME
     isa
   HDRS
-    ":encoding_table.h"
-    ":op_table.h"
+    "encoding_table.h"
     "isa.h"
+    "op_table.h"
   SRCS
     "encoding_table.c"
   DEPS

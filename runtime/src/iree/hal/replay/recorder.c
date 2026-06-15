@@ -104,25 +104,23 @@ static iree_status_t iree_hal_replay_recorder_check_open_locked(
 }
 
 static void iree_hal_replay_recorder_fail_locked(
-    iree_hal_replay_recorder_t* recorder, iree_status_t status) {
+    iree_hal_replay_recorder_t* recorder, iree_status_code_t status_code) {
   IREE_ASSERT_ARGUMENT(recorder);
-  if (IREE_UNLIKELY(!iree_status_is_ok(status) &&
+  if (IREE_UNLIKELY(status_code != IREE_STATUS_OK &&
                     recorder->terminal_status_code == IREE_STATUS_OK)) {
-    recorder->terminal_status_code = iree_status_code(status);
+    recorder->terminal_status_code = status_code;
   }
 }
 
 void iree_hal_replay_recorder_fail(iree_hal_replay_recorder_t* recorder,
-                                   iree_status_t status) {
+                                   iree_status_code_t status_code) {
   IREE_ASSERT_ARGUMENT(recorder);
-  if (iree_status_is_ok(status)) return;
-  iree_status_code_t status_code = iree_status_code(status);
+  if (status_code == IREE_STATUS_OK) return;
   iree_slim_mutex_lock(&recorder->mutex);
   if (recorder->terminal_status_code == IREE_STATUS_OK) {
     recorder->terminal_status_code = status_code;
   }
   iree_slim_mutex_unlock(&recorder->mutex);
-  iree_status_free(status);
 }
 
 static iree_status_t iree_hal_replay_recorder_append_record_locked(
@@ -135,7 +133,7 @@ static iree_status_t iree_hal_replay_recorder_append_record_locked(
   metadata.thread_id = iree_hal_replay_current_thread_id();
   iree_status_t status = iree_hal_replay_file_writer_append_record(
       recorder->writer, &metadata, iovec_count, iovecs, out_payload_range);
-  iree_hal_replay_recorder_fail_locked(recorder, status);
+  iree_hal_replay_recorder_fail_locked(recorder, iree_status_code(status));
   return status;
 }
 
@@ -351,7 +349,8 @@ iree_status_t iree_hal_replay_recorder_end_operation_with_payload(
       (uint32_t)iree_status_code(operation_status);
   iree_status_t record_status = iree_hal_replay_file_writer_append_record(
       recorder->writer, &pending_record->metadata, iovec_count, iovecs, NULL);
-  iree_hal_replay_recorder_fail_locked(recorder, record_status);
+  iree_hal_replay_recorder_fail_locked(recorder,
+                                       iree_status_code(record_status));
   iree_slim_mutex_unlock(&recorder->mutex);
   return iree_status_join(record_status, operation_status);
 }
@@ -384,7 +383,8 @@ iree_status_t iree_hal_replay_recorder_end_creation_operation(
         created_object_type, object_payload_type, object_iovec_count,
         object_iovecs);
   }
-  iree_hal_replay_recorder_fail_locked(recorder, record_status);
+  iree_hal_replay_recorder_fail_locked(recorder,
+                                       iree_status_code(record_status));
   iree_slim_mutex_unlock(&recorder->mutex);
   return iree_status_join(record_status, operation_status);
 }
@@ -455,9 +455,7 @@ IREE_API_EXPORT iree_status_t iree_hal_replay_recorder_create(
   if (iree_status_is_ok(status)) {
     *out_recorder = recorder;
   } else {
-    if (recorder) {
-      iree_hal_replay_recorder_release(recorder);
-    }
+    iree_hal_replay_recorder_release(recorder);
   }
   iree_hal_replay_file_writer_free(writer);
   IREE_TRACE_ZONE_END(z0);
@@ -506,7 +504,7 @@ iree_hal_replay_recorder_close(iree_hal_replay_recorder_t* recorder) {
     if (iree_status_is_ok(status)) {
       recorder->closed = true;
     } else {
-      iree_hal_replay_recorder_fail_locked(recorder, status);
+      iree_hal_replay_recorder_fail_locked(recorder, iree_status_code(status));
     }
   }
   iree_slim_mutex_unlock(&recorder->mutex);
@@ -661,7 +659,8 @@ static void iree_hal_replay_replace_device_allocator(
       device->recorder, device->device_id, base_device, new_allocator,
       device->host_allocator, &new_replay_allocator);
   if (!iree_status_is_ok(status)) {
-    iree_hal_replay_recorder_fail(device->recorder, status);
+    iree_hal_replay_recorder_fail(device->recorder, iree_status_code(status));
+    iree_status_ignore(status);
     return;
   }
   iree_hal_device_replace_allocator(device->base_device, new_allocator);
@@ -1667,7 +1666,7 @@ static iree_status_t iree_hal_replay_device_queue_dispatch(
         device->recorder, signal_semaphore_list, device->host_allocator,
         &signal_payloads, &signal_payloads_size);
   }
-  if (bindings.count) {
+  if (iree_status_is_ok(status) && bindings.count) {
     iree_host_size_t binding_storage_size = 0;
     iree_host_size_t temporary_buffers_size = 0;
     if (IREE_UNLIKELY(!iree_host_size_checked_mul(bindings.count,
@@ -1788,7 +1787,7 @@ static iree_status_t iree_hal_replay_device_queue_execute(
         device->recorder, signal_semaphore_list, device->host_allocator,
         &signal_payloads, &signal_payloads_size);
   }
-  if (binding_table.count) {
+  if (iree_status_is_ok(status) && binding_table.count) {
     iree_host_size_t binding_storage_size = 0;
     iree_host_size_t temporary_buffers_size = 0;
     if (IREE_UNLIKELY(!iree_host_size_checked_mul(binding_table.count,

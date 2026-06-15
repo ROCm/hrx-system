@@ -1,0 +1,138 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:python.bzl", "iree_py_binary", "iree_py_library", "iree_py_test")
+load("//loom/build_tools/bazel:build_defs.bzl", "iree_cmake_extra_content", "iree_select")
+
+package(
+    default_visibility = ["//visibility:public"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_MLIR_IMPORTER_COMPATIBLE = iree_select({
+    "//loom/config/import:mlir": [],
+    "//conditions:default": ["@platforms//:incompatible"],
+})
+
+iree_py_library(
+    name = "mlir",
+    srcs = [
+        "__init__.py",
+        "api.py",
+        "attrs.py",
+        "convert_affine.py",
+        "convert_amdgpu.py",
+        "convert_arith.py",
+        "convert_func.py",
+        "convert_gpu.py",
+        "convert_hal.py",
+        "convert_iree_codegen.py",
+        "convert_memref.py",
+        "convert_scf.py",
+        "convert_vector.py",
+        "converter.py",
+        "importer.py",
+        "locations.py",
+        "model.py",
+        "names.py",
+        "types.py",
+    ],
+    deps = [
+        "//loom/py/loom:core",
+        "//loom/py/loom:package",
+        "//loom/py/loom/format/text",
+        "//loom/py/loom/importers/core",
+    ],
+)
+
+iree_py_library(
+    name = "mlir_packages",
+    deps = iree_select({
+        "//loom/config/import:mlir": [
+            "@importer_pip//iree_base_compiler",
+        ],
+        "//conditions:default": [],
+    }),
+)
+
+iree_cmake_extra_content(
+    content = """
+if(LOOM_IMPORT_MLIR)
+""",
+    inline = True,
+)
+
+iree_py_binary(
+    name = "loom_import_mlir",
+    srcs = ["__main__.py"],
+    main = "__main__.py",
+    target_compatible_with = _MLIR_IMPORTER_COMPATIBLE,
+    deps = [
+        ":mlir",
+        ":mlir_packages",
+    ],
+)
+
+iree_py_test(
+    name = "mlir_test",
+    srcs = [
+        "attrs_test.py",
+        "importer_test.py",
+        "locations_test.py",
+        "model_test.py",
+        "names_test.py",
+        "types_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = [
+        "loom.importers.mlir.attrs_test",
+        "loom.importers.mlir.importer_test",
+        "loom.importers.mlir.locations_test",
+        "loom.importers.mlir.model_test",
+        "loom.importers.mlir.names_test",
+        "loom.importers.mlir.types_test",
+    ],
+    main = "pytest_style_runner.py",
+    target_compatible_with = _MLIR_IMPORTER_COMPATIBLE,
+    deps = [":mlir"],
+)
+
+filegroup(
+    name = "import_tests",
+    srcs = [
+        "testdata/vector_reduce_amdgpu.mlir",
+    ],
+)
+
+iree_py_test(
+    name = "mlir_import_test",
+    srcs = ["//loom/py/loom/importers/check:import_test.py"],
+    args = [
+        "mlir",
+        "--fail-on-skip",
+        "--loom-opt=$(location //loom/src/loom/tools/loom-opt:loom-opt)",
+        "$(locations :import_tests)",
+    ],
+    data = [
+        ":import_tests",
+        "//loom/src/loom/tools/loom-opt",
+    ],
+    main = "import_test.py",
+    target_compatible_with = _MLIR_IMPORTER_COMPATIBLE,
+    deps = [
+        ":mlir_packages",
+        "//loom/py/loom/importers/check",
+        "//loom/py/loom/importers/check/mlir",
+        "//loom/py/loom/importers/check/tilelang",
+    ],
+)
+
+iree_cmake_extra_content(
+    content = """
+endif()
+""",
+    inline = True,
+)

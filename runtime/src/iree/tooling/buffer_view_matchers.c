@@ -637,8 +637,8 @@ iree_status_t iree_hal_buffer_view_matcher_match(
       IREE_HAL_MAPPING_MODE_SCOPED, IREE_HAL_MEMORY_ACCESS_READ, 0,
       IREE_HAL_WHOLE_BUFFER, &expected_mapping);
   if (!iree_status_is_ok(status)) {
-    iree_hal_buffer_unmap_range(&actual_mapping);
-    return status;
+    return iree_status_join(status,
+                            iree_hal_buffer_unmap_range(&actual_mapping));
   }
   iree_const_byte_span_t actual_contents = iree_make_const_byte_span(
       actual_mapping.contents.data, actual_mapping.contents.data_length);
@@ -655,8 +655,11 @@ iree_status_t iree_hal_buffer_view_matcher_match(
   iree_hal_buffer_element_t expected_element = iree_hal_buffer_element_at(
       iree_hal_buffer_view_element_type(matchee), expected_contents, i);
 
-  IREE_RETURN_IF_ERROR(iree_hal_buffer_unmap_range(&actual_mapping));
-  IREE_RETURN_IF_ERROR(iree_hal_buffer_unmap_range(&expected_mapping));
+  status =
+      iree_status_join(status, iree_hal_buffer_unmap_range(&actual_mapping));
+  status =
+      iree_status_join(status, iree_hal_buffer_unmap_range(&expected_mapping));
+  IREE_RETURN_IF_ERROR(status);
 
   if (!all_match) {
     IREE_RETURN_IF_ERROR(iree_hal_append_element_mismatch_string(

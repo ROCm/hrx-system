@@ -1,0 +1,60 @@
+// RUN: emit source-low output=low
+
+x86.target<scalar> @target
+
+func.def target(@target) @scalar_i32_compare_predicates(%lhs: i32, %rhs: i32) -> (i1, i1, i1, i1, i1, i1, i1, i1, i1, i1) {
+  %eq = scalar.cmpi eq, %lhs, %rhs : i32
+  %ne = scalar.cmpi ne, %lhs, %rhs : i32
+  %slt = scalar.cmpi slt, %lhs, %rhs : i32
+  %sle = scalar.cmpi sle, %lhs, %rhs : i32
+  %sgt = scalar.cmpi sgt, %lhs, %rhs : i32
+  %sge = scalar.cmpi sge, %lhs, %rhs : i32
+  %ult = scalar.cmpi ult, %lhs, %rhs : i32
+  %ule = scalar.cmpi ule, %lhs, %rhs : i32
+  %ugt = scalar.cmpi ugt, %lhs, %rhs : i32
+  %uge = scalar.cmpi uge, %lhs, %rhs : i32
+  func.return %eq, %ne, %slt, %sle, %sgt, %sge, %ult, %ule, %ugt, %uge : i1, i1, i1, i1, i1, i1, i1, i1, i1, i1
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @scalar_i32_compare_predicates(%lhs: reg<x86.gpr32>, %rhs: reg<x86.gpr32>) -> (reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>) asm<x86.scalar.core> {
+  %eq = cmp.eq.gpr32 %lhs, %rhs
+  %ne = cmp.ne.gpr32 %lhs, %rhs
+  %slt = cmp.slt.gpr32 %lhs, %rhs
+  %sle = cmp.sle.gpr32 %lhs, %rhs
+  %sgt = cmp.sgt.gpr32 %lhs, %rhs
+  %sge = cmp.sge.gpr32 %lhs, %rhs
+  %ult = cmp.ult.gpr32 %lhs, %rhs
+  %ule = cmp.ule.gpr32 %lhs, %rhs
+  %ugt = cmp.ugt.gpr32 %lhs, %rhs
+  %uge = cmp.uge.gpr32 %lhs, %rhs
+  return %eq, %ne, %slt, %sle, %sgt, %sge, %ult, %ule, %ugt, %uge
+}
+
+// ====
+
+x86.target<scalar> @target
+
+func.def target(@target) @scalar_i32_compare_control(%lhs: i32, %rhs: i32, %true_value: i32, %false_value: i32) -> (i32) {
+  %signed = scalar.cmpi slt, %lhs, %rhs : i32
+  %unsigned = scalar.cmpi uge, %lhs, %rhs : i32
+  %condition = scalar.xori %signed, %unsigned : i1
+  cfg.cond_br %condition, ^then, ^else
+^then:
+  func.return %true_value : i32
+^else:
+  func.return %false_value : i32
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @scalar_i32_compare_control(%lhs: reg<x86.gpr32>, %rhs: reg<x86.gpr32>, %true_value: reg<x86.gpr32>, %false_value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm<x86.scalar.core> {
+  %signed = cmp.slt.gpr32 %lhs, %rhs
+  %unsigned = cmp.uge.gpr32 %lhs, %rhs
+  %15 = copy %signed : reg<x86.gpr32> -> reg<x86.gpr32>
+  %condition = xor.gpr32 %15, %unsigned
+  low.cond_br %condition, ^then, ^else : reg<x86.gpr32>
+^then:
+  return %true_value
+^else:
+  return %false_value
+}

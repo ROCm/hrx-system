@@ -91,13 +91,13 @@ hrx_status_t hrx_status_from_iree(iree_status_t iree_status) {
   iree_host_size_t msg_len = 0;
   if (!iree_status_to_string(iree_status, &allocator, &iree_msg, &msg_len)) {
     // Failed to get message — use generic.
-    iree_status_ignore(iree_status);
+    iree_status_free(iree_status);
     return hrx_make_status(hrx_code, "IREE error (could not format message)");
   }
 
   hrx_status_t result = hrx_make_status(hrx_code, iree_msg);
   iree_allocator_free(allocator, iree_msg);
-  iree_status_ignore(iree_status);
+  iree_status_free(iree_status);
   return result;
 }
 

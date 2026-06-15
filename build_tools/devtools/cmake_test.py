@@ -6,17 +6,45 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import tempfile
 import unittest
 from pathlib import Path
 
 from build_tools.devtools import cmake as cmake_dev
-from build_tools.devtools import cmake_file_api, cmake_fuzz, cmake_try, fuzz
+from build_tools.devtools import (
+    cmake_file_api,
+    cmake_fuzz,
+    cmake_try,
+    environment,
+    fuzz,
+)
 from build_tools.devtools.environment import REPO_ROOT, ToolEnvironment, ToolMode
 
 
 class CMakeTest(unittest.TestCase):
+    def test_local_tmp_root_defaults_to_repo_tmp(self):
+        self.assertEqual(
+            environment.local_tmp_root(environ={}),
+            REPO_ROOT / ".tmp",
+        )
+
+    def test_local_tmp_root_uses_environment_override(self):
+        self.assertEqual(
+            environment.local_tmp_root(
+                environ={environment.DEVTOOLS_TMP_ENV: "/tmp/iree-x"}
+            ),
+            Path("/tmp/iree-x"),
+        )
+        self.assertEqual(
+            environment.local_tmp_root(
+                environ={environment.DEVTOOLS_TMP_ENV: "scratch/dev"}
+            ),
+            REPO_ROOT / "scratch/dev",
+        )
+
     def test_build_dir_defaults_to_repo_local_cmake_tree(self):
         self.assertEqual(
             cmake_dev.build_dir(
@@ -177,6 +205,59 @@ class CMakeTest(unittest.TestCase):
         self.assertTrue(command.print_path)
         self.assertEqual(command.target, "iree-run-module")
 
+    def test_compile_commands_plan_prints_configured_database_path(self):
+        tool_env = ToolEnvironment(ToolMode.SYSTEM, None)
+
+        plan = cmake_dev.compile_commands_plan(
+            tool_env,
+            configured_build_dir=Path("build/cmake-debug"),
+            backend_args=[],
+        )
+
+        description = plan.describe()
+        self.assertIn("# cmake compile-commands", description)
+        self.assertIn("build/cmake-debug/compile_commands.json", description)
+        self.assertIn("print", description)
+
+    def test_compile_commands_step_prints_existing_database_path(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            build_dir = Path(temporary_dir) / "build"
+            compile_commands = build_dir / "compile_commands.json"
+            compile_commands.parent.mkdir()
+            compile_commands.write_text("[]\n", encoding="utf-8")
+            step = cmake_dev.CMakeCompileCommandsStep(
+                cmake_dev.CMakeCompileCommandsCommand(),
+                build_dir,
+            )
+            output = io.StringIO()
+
+            with contextlib.redirect_stdout(output):
+                result = step.run()
+
+            self.assertEqual(result, 0)
+            self.assertEqual(str(compile_commands), output.getvalue().strip())
+
+    def test_compile_commands_step_copies_to_requested_output_path(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            build_dir = root / "build"
+            compile_commands = build_dir / "compile_commands.json"
+            destination = root / "out" / "compile_commands.json"
+            compile_commands.parent.mkdir()
+            compile_commands.write_text("[{}]\n", encoding="utf-8")
+            step = cmake_dev.CMakeCompileCommandsStep(
+                cmake_dev.CMakeCompileCommandsCommand(output=destination),
+                build_dir,
+            )
+            output = io.StringIO()
+
+            with contextlib.redirect_stdout(output):
+                result = step.run()
+
+            self.assertEqual(result, 0)
+            self.assertEqual(str(destination), output.getvalue().strip())
+            self.assertEqual("[{}]\n", destination.read_text(encoding="utf-8"))
+
     def test_fuzz_parse_splits_build_and_fuzzer_args(self):
         command = cmake_fuzz.parse_fuzz_args(
             [
@@ -273,7 +354,7 @@ class CMakeTest(unittest.TestCase):
         )
         description = plan.describe()
 
-        self.assertIn(".iree-cmake-try/run-<pid>/try.cmake", description)
+        self.assertIn(".tmp/iree-cmake-try/run-<pid>/try.cmake", description)
         self.assertIn("-DIREE_CMAKE_TRY_FILE=", description)
         self.assertIn("--target iree_cmake_try_snippet", description)
         self.assertIn("# compile only", description)

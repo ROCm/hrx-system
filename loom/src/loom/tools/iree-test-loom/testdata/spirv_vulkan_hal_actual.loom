@@ -1,0 +1,28 @@
+spirv.target<vulkan1_3> @target {abi = hal_kernel}
+
+kernel.def target(@target) @double_i32_at_byte_offset() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %byte_offset: offset) {
+  %byte_offset_aligned = index.assume %byte_offset [mul(%byte_offset, 4)] : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%byte_offset_aligned] : buffer -> view<1xi32, #dense>
+  %loaded = view.load %input_view[0] : view<1xi32, #dense> -> i32
+  %doubled = scalar.addi %loaded, %loaded : i32
+  %output_view = buffer.view %output_aligned[%byte_offset_aligned] : buffer -> view<1xi32, #dense>
+  view.store %doubled, %output_view[0] : i32, view<1xi32, #dense>
+  kernel.return
+}
+
+check.case @double_i32_at_byte_offset_case {
+  %input = check.generate.iota offset(7) step(3) : tensor<2xi32>
+  %output = check.generate.fill value(0) : tensor<2xi32>
+  %byte_offset = check.literal value(4) : offset
+  func.call @double_i32_at_byte_offset(%input, %output, %byte_offset) : (tensor<2xi32>, tensor<2xi32>, offset)
+  %expected = check.generate.iota offset(0) step(20) : tensor<2xi32>
+  check.expect.equal actual(%output) expected(%expected) : tensor<2xi32>
+  check.return
+}
+
+check.benchmark<@double_i32_at_byte_offset_case>

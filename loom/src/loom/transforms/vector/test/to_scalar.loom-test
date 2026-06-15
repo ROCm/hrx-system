@@ -1,0 +1,670 @@
+// RUN: pass vector-to-scalar,canonicalize
+
+// A specialized zero vector extent erases the scalarized load/store loops. This
+// is the optional-feature shape we want to be boring: valid dynamic IR enters
+// lowering and disappears when facts say there are no lanes.
+func.def @zero_extent_vector_memory_erases(%features: index, %buffer: buffer, %byte_offset: offset, %origin: index) {
+  %disabled = index.assume %features [range(%features, 0, 0)] : index
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%byte_offset] : buffer -> view<[%disabled]xf32, %layout>
+  %loaded = vector.load %view[%origin] : view<[%disabled]xf32, %layout> -> vector<[%disabled]xf32>
+  vector.store %loaded, %view[%origin] : vector<[%disabled]xf32>, view<[%disabled]xf32, %layout>
+  func.return
+}
+
+// ----
+func.def @zero_extent_vector_memory_erases(%features: index, %buffer: buffer, %byte_offset: offset, %origin: index) {
+  func.return
+}
+
+// ====
+
+func.def @scalarizes_dense_f16_f32_mma(%lhs_data: vector<4xf16>, %rhs_data: vector<4xf16>, %init_data: vector<4xf32>) -> (vector<4xf32>) {
+  %m = index.constant 2 : index
+  %n = index.constant 2 : index
+  %k = index.constant 2 : index
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] : vector<4xf16>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] : vector<4xf16>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<4xf16>, vector<4xf16>, vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ----
+func.def @scalarizes_dense_f16_f32_mma(%lhs_data: vector<4xf16>, %rhs_data: vector<4xf16>, %init_data: vector<4xf32>) -> (vector<4xf32>) {
+  %m = index.constant 2 : index
+  %n = index.constant 2 : index
+  %11 = vector.extract %init_data[0] : vector<4xf32> -> f32
+  %12 = vector.extract %lhs_data[0] : vector<4xf16> -> f16
+  %13 = vector.extract %rhs_data[0] : vector<4xf16> -> f16
+  %14 = scalar.extf %12 : f16 to f32
+  %15 = scalar.extf %13 : f16 to f32
+  %16 = scalar.fmaf %14, %15, %11 : f32
+  %17 = vector.extract %lhs_data[1] : vector<4xf16> -> f16
+  %18 = vector.extract %rhs_data[2] : vector<4xf16> -> f16
+  %19 = scalar.extf %17 : f16 to f32
+  %20 = scalar.extf %18 : f16 to f32
+  %21 = scalar.fmaf %19, %20, %16 : f32
+  %22 = vector.extract %init_data[1] : vector<4xf32> -> f32
+  %23 = vector.extract %lhs_data[0] : vector<4xf16> -> f16
+  %24 = vector.extract %rhs_data[1] : vector<4xf16> -> f16
+  %25 = scalar.extf %23 : f16 to f32
+  %26 = scalar.extf %24 : f16 to f32
+  %27 = scalar.fmaf %25, %26, %22 : f32
+  %28 = vector.extract %lhs_data[1] : vector<4xf16> -> f16
+  %29 = vector.extract %rhs_data[3] : vector<4xf16> -> f16
+  %30 = scalar.extf %28 : f16 to f32
+  %31 = scalar.extf %29 : f16 to f32
+  %32 = scalar.fmaf %30, %31, %27 : f32
+  %33 = vector.extract %init_data[2] : vector<4xf32> -> f32
+  %34 = vector.extract %lhs_data[2] : vector<4xf16> -> f16
+  %35 = vector.extract %rhs_data[0] : vector<4xf16> -> f16
+  %36 = scalar.extf %34 : f16 to f32
+  %37 = scalar.extf %35 : f16 to f32
+  %38 = scalar.fmaf %36, %37, %33 : f32
+  %39 = vector.extract %lhs_data[3] : vector<4xf16> -> f16
+  %40 = vector.extract %rhs_data[2] : vector<4xf16> -> f16
+  %41 = scalar.extf %39 : f16 to f32
+  %42 = scalar.extf %40 : f16 to f32
+  %43 = scalar.fmaf %41, %42, %38 : f32
+  %44 = vector.extract %init_data[3] : vector<4xf32> -> f32
+  %45 = vector.extract %lhs_data[2] : vector<4xf16> -> f16
+  %46 = vector.extract %rhs_data[1] : vector<4xf16> -> f16
+  %47 = scalar.extf %45 : f16 to f32
+  %48 = scalar.extf %46 : f16 to f32
+  %49 = scalar.fmaf %47, %48, %44 : f32
+  %50 = vector.extract %lhs_data[3] : vector<4xf16> -> f16
+  %51 = vector.extract %rhs_data[3] : vector<4xf16> -> f16
+  %52 = scalar.extf %50 : f16 to f32
+  %53 = scalar.extf %51 : f16 to f32
+  %54 = scalar.fmaf %52, %53, %49 : f32
+  %55 = vector.from_elements %21, %32, %43, %54 : vector<4xf32>
+  %result = vector.fragment<result> %55 shape [%m, %n] : vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ====
+
+func.def @scalarizes_block_scaled_f8_mma(%lhs_data: vector<4xf8E4M3>, %rhs_data: vector<4xf8E4M3>, %init_data: vector<4xf32>, %lhs_scale: vector<2xf32>, %rhs_scale: vector<2xf32>) -> (vector<4xf32>) {
+  %m = index.constant 2 : index
+  %n = index.constant 2 : index
+  %k = index.constant 2 : index
+  %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_packing=dense_lanes, payload_elements=4, payload_registers=0, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d, affine=scale_only> : encoding<schema>
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {scale = %lhs_scale : vector<2xf32>, schema = %schema : encoding<schema>} : vector<4xf8E4M3>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {scale = %rhs_scale : vector<2xf32>, schema = %schema : encoding<schema>} : vector<4xf8E4M3>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<4xf8E4M3>, vector<4xf8E4M3>, vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ----
+func.def @scalarizes_block_scaled_f8_mma(%lhs_data: vector<4xf8E4M3>, %rhs_data: vector<4xf8E4M3>, %init_data: vector<4xf32>, %lhs_scale: vector<2xf32>, %rhs_scale: vector<2xf32>) -> (vector<4xf32>) {
+  %m = index.constant 2 : index
+  %n = index.constant 2 : index
+  %14 = vector.extract %init_data[0] : vector<4xf32> -> f32
+  %15 = vector.extract %lhs_data[0] : vector<4xf8E4M3> -> f8E4M3
+  %16 = scalar.extf %15 : f8E4M3 to f32
+  %17 = vector.extract %lhs_scale[0] : vector<2xf32> -> f32
+  %18 = scalar.mulf %16, %17 : f32
+  %19 = vector.extract %rhs_data[0] : vector<4xf8E4M3> -> f8E4M3
+  %20 = scalar.extf %19 : f8E4M3 to f32
+  %21 = vector.extract %rhs_scale[0] : vector<2xf32> -> f32
+  %22 = scalar.mulf %20, %21 : f32
+  %23 = scalar.fmaf %18, %22, %14 : f32
+  %24 = vector.extract %lhs_data[1] : vector<4xf8E4M3> -> f8E4M3
+  %25 = scalar.extf %24 : f8E4M3 to f32
+  %26 = vector.extract %lhs_scale[0] : vector<2xf32> -> f32
+  %27 = scalar.mulf %25, %26 : f32
+  %28 = vector.extract %rhs_data[2] : vector<4xf8E4M3> -> f8E4M3
+  %29 = scalar.extf %28 : f8E4M3 to f32
+  %30 = vector.extract %rhs_scale[1] : vector<2xf32> -> f32
+  %31 = scalar.mulf %29, %30 : f32
+  %32 = scalar.fmaf %27, %31, %23 : f32
+  %33 = vector.extract %init_data[1] : vector<4xf32> -> f32
+  %34 = vector.extract %lhs_data[0] : vector<4xf8E4M3> -> f8E4M3
+  %35 = scalar.extf %34 : f8E4M3 to f32
+  %36 = vector.extract %lhs_scale[0] : vector<2xf32> -> f32
+  %37 = scalar.mulf %35, %36 : f32
+  %38 = vector.extract %rhs_data[1] : vector<4xf8E4M3> -> f8E4M3
+  %39 = scalar.extf %38 : f8E4M3 to f32
+  %40 = vector.extract %rhs_scale[0] : vector<2xf32> -> f32
+  %41 = scalar.mulf %39, %40 : f32
+  %42 = scalar.fmaf %37, %41, %33 : f32
+  %43 = vector.extract %lhs_data[1] : vector<4xf8E4M3> -> f8E4M3
+  %44 = scalar.extf %43 : f8E4M3 to f32
+  %45 = vector.extract %lhs_scale[0] : vector<2xf32> -> f32
+  %46 = scalar.mulf %44, %45 : f32
+  %47 = vector.extract %rhs_data[3] : vector<4xf8E4M3> -> f8E4M3
+  %48 = scalar.extf %47 : f8E4M3 to f32
+  %49 = vector.extract %rhs_scale[1] : vector<2xf32> -> f32
+  %50 = scalar.mulf %48, %49 : f32
+  %51 = scalar.fmaf %46, %50, %42 : f32
+  %52 = vector.extract %init_data[2] : vector<4xf32> -> f32
+  %53 = vector.extract %lhs_data[2] : vector<4xf8E4M3> -> f8E4M3
+  %54 = scalar.extf %53 : f8E4M3 to f32
+  %55 = vector.extract %lhs_scale[1] : vector<2xf32> -> f32
+  %56 = scalar.mulf %54, %55 : f32
+  %57 = vector.extract %rhs_data[0] : vector<4xf8E4M3> -> f8E4M3
+  %58 = scalar.extf %57 : f8E4M3 to f32
+  %59 = vector.extract %rhs_scale[0] : vector<2xf32> -> f32
+  %60 = scalar.mulf %58, %59 : f32
+  %61 = scalar.fmaf %56, %60, %52 : f32
+  %62 = vector.extract %lhs_data[3] : vector<4xf8E4M3> -> f8E4M3
+  %63 = scalar.extf %62 : f8E4M3 to f32
+  %64 = vector.extract %lhs_scale[1] : vector<2xf32> -> f32
+  %65 = scalar.mulf %63, %64 : f32
+  %66 = vector.extract %rhs_data[2] : vector<4xf8E4M3> -> f8E4M3
+  %67 = scalar.extf %66 : f8E4M3 to f32
+  %68 = vector.extract %rhs_scale[1] : vector<2xf32> -> f32
+  %69 = scalar.mulf %67, %68 : f32
+  %70 = scalar.fmaf %65, %69, %61 : f32
+  %71 = vector.extract %init_data[3] : vector<4xf32> -> f32
+  %72 = vector.extract %lhs_data[2] : vector<4xf8E4M3> -> f8E4M3
+  %73 = scalar.extf %72 : f8E4M3 to f32
+  %74 = vector.extract %lhs_scale[1] : vector<2xf32> -> f32
+  %75 = scalar.mulf %73, %74 : f32
+  %76 = vector.extract %rhs_data[1] : vector<4xf8E4M3> -> f8E4M3
+  %77 = scalar.extf %76 : f8E4M3 to f32
+  %78 = vector.extract %rhs_scale[0] : vector<2xf32> -> f32
+  %79 = scalar.mulf %77, %78 : f32
+  %80 = scalar.fmaf %75, %79, %71 : f32
+  %81 = vector.extract %lhs_data[3] : vector<4xf8E4M3> -> f8E4M3
+  %82 = scalar.extf %81 : f8E4M3 to f32
+  %83 = vector.extract %lhs_scale[1] : vector<2xf32> -> f32
+  %84 = scalar.mulf %82, %83 : f32
+  %85 = vector.extract %rhs_data[3] : vector<4xf8E4M3> -> f8E4M3
+  %86 = scalar.extf %85 : f8E4M3 to f32
+  %87 = vector.extract %rhs_scale[1] : vector<2xf32> -> f32
+  %88 = scalar.mulf %86, %87 : f32
+  %89 = scalar.fmaf %84, %88, %80 : f32
+  %90 = vector.from_elements %32, %51, %70, %89 : vector<4xf32>
+  %result = vector.fragment<result> %90 shape [%m, %n] : vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ====
+
+func.def @scalarizes_quant_i8_zero_point_mma(%lhs_data: vector<4xi8>, %rhs_data: vector<4xi8>, %init_data: vector<4xf32>, %lhs_scale: vector<2xf32>, %rhs_scale: vector<2xf32>, %lhs_zero_point: vector<2xi8>, %rhs_zero_point: vector<2xi8>) -> (vector<4xf32>) {
+  %m = index.constant 2 : index
+  %n = index.constant 2 : index
+  %k = index.constant 2 : index
+  %schema = encoding.define #matrix_operand<element_format=quant_i8, payload_packing=dense_lanes, payload_elements=4, payload_registers=0, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d, affine=scale_plus_zero_point> : encoding<schema>
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {scale = %lhs_scale : vector<2xf32>, zero_point = %lhs_zero_point : vector<2xi8>, schema = %schema : encoding<schema>} : vector<4xi8>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {scale = %rhs_scale : vector<2xf32>, zero_point = %rhs_zero_point : vector<2xi8>, schema = %schema : encoding<schema>} : vector<4xi8>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<4xi8>, vector<4xi8>, vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ----
+func.def @scalarizes_quant_i8_zero_point_mma(%lhs_data: vector<4xi8>, %rhs_data: vector<4xi8>, %init_data: vector<4xf32>, %lhs_scale: vector<2xf32>, %rhs_scale: vector<2xf32>, %lhs_zero_point: vector<2xi8>, %rhs_zero_point: vector<2xi8>) -> (vector<4xf32>) {
+  %m = index.constant 2 : index
+  %n = index.constant 2 : index
+  %16 = vector.extract %init_data[0] : vector<4xf32> -> f32
+  %17 = vector.extract %lhs_data[0] : vector<4xi8> -> i8
+  %18 = scalar.sitofp %17 : i8 to f32
+  %19 = vector.extract %lhs_zero_point[0] : vector<2xi8> -> i8
+  %20 = scalar.sitofp %19 : i8 to f32
+  %21 = scalar.subf %18, %20 : f32
+  %22 = vector.extract %lhs_scale[0] : vector<2xf32> -> f32
+  %23 = scalar.mulf %21, %22 : f32
+  %24 = vector.extract %rhs_data[0] : vector<4xi8> -> i8
+  %25 = scalar.sitofp %24 : i8 to f32
+  %26 = vector.extract %rhs_zero_point[0] : vector<2xi8> -> i8
+  %27 = scalar.sitofp %26 : i8 to f32
+  %28 = scalar.subf %25, %27 : f32
+  %29 = vector.extract %rhs_scale[0] : vector<2xf32> -> f32
+  %30 = scalar.mulf %28, %29 : f32
+  %31 = scalar.fmaf %23, %30, %16 : f32
+  %32 = vector.extract %lhs_data[1] : vector<4xi8> -> i8
+  %33 = scalar.sitofp %32 : i8 to f32
+  %34 = vector.extract %lhs_zero_point[0] : vector<2xi8> -> i8
+  %35 = scalar.sitofp %34 : i8 to f32
+  %36 = scalar.subf %33, %35 : f32
+  %37 = vector.extract %lhs_scale[0] : vector<2xf32> -> f32
+  %38 = scalar.mulf %36, %37 : f32
+  %39 = vector.extract %rhs_data[2] : vector<4xi8> -> i8
+  %40 = scalar.sitofp %39 : i8 to f32
+  %41 = vector.extract %rhs_zero_point[1] : vector<2xi8> -> i8
+  %42 = scalar.sitofp %41 : i8 to f32
+  %43 = scalar.subf %40, %42 : f32
+  %44 = vector.extract %rhs_scale[1] : vector<2xf32> -> f32
+  %45 = scalar.mulf %43, %44 : f32
+  %46 = scalar.fmaf %38, %45, %31 : f32
+  %47 = vector.extract %init_data[1] : vector<4xf32> -> f32
+  %48 = vector.extract %lhs_data[0] : vector<4xi8> -> i8
+  %49 = scalar.sitofp %48 : i8 to f32
+  %50 = vector.extract %lhs_zero_point[0] : vector<2xi8> -> i8
+  %51 = scalar.sitofp %50 : i8 to f32
+  %52 = scalar.subf %49, %51 : f32
+  %53 = vector.extract %lhs_scale[0] : vector<2xf32> -> f32
+  %54 = scalar.mulf %52, %53 : f32
+  %55 = vector.extract %rhs_data[1] : vector<4xi8> -> i8
+  %56 = scalar.sitofp %55 : i8 to f32
+  %57 = vector.extract %rhs_zero_point[0] : vector<2xi8> -> i8
+  %58 = scalar.sitofp %57 : i8 to f32
+  %59 = scalar.subf %56, %58 : f32
+  %60 = vector.extract %rhs_scale[0] : vector<2xf32> -> f32
+  %61 = scalar.mulf %59, %60 : f32
+  %62 = scalar.fmaf %54, %61, %47 : f32
+  %63 = vector.extract %lhs_data[1] : vector<4xi8> -> i8
+  %64 = scalar.sitofp %63 : i8 to f32
+  %65 = vector.extract %lhs_zero_point[0] : vector<2xi8> -> i8
+  %66 = scalar.sitofp %65 : i8 to f32
+  %67 = scalar.subf %64, %66 : f32
+  %68 = vector.extract %lhs_scale[0] : vector<2xf32> -> f32
+  %69 = scalar.mulf %67, %68 : f32
+  %70 = vector.extract %rhs_data[3] : vector<4xi8> -> i8
+  %71 = scalar.sitofp %70 : i8 to f32
+  %72 = vector.extract %rhs_zero_point[1] : vector<2xi8> -> i8
+  %73 = scalar.sitofp %72 : i8 to f32
+  %74 = scalar.subf %71, %73 : f32
+  %75 = vector.extract %rhs_scale[1] : vector<2xf32> -> f32
+  %76 = scalar.mulf %74, %75 : f32
+  %77 = scalar.fmaf %69, %76, %62 : f32
+  %78 = vector.extract %init_data[2] : vector<4xf32> -> f32
+  %79 = vector.extract %lhs_data[2] : vector<4xi8> -> i8
+  %80 = scalar.sitofp %79 : i8 to f32
+  %81 = vector.extract %lhs_zero_point[1] : vector<2xi8> -> i8
+  %82 = scalar.sitofp %81 : i8 to f32
+  %83 = scalar.subf %80, %82 : f32
+  %84 = vector.extract %lhs_scale[1] : vector<2xf32> -> f32
+  %85 = scalar.mulf %83, %84 : f32
+  %86 = vector.extract %rhs_data[0] : vector<4xi8> -> i8
+  %87 = scalar.sitofp %86 : i8 to f32
+  %88 = vector.extract %rhs_zero_point[0] : vector<2xi8> -> i8
+  %89 = scalar.sitofp %88 : i8 to f32
+  %90 = scalar.subf %87, %89 : f32
+  %91 = vector.extract %rhs_scale[0] : vector<2xf32> -> f32
+  %92 = scalar.mulf %90, %91 : f32
+  %93 = scalar.fmaf %85, %92, %78 : f32
+  %94 = vector.extract %lhs_data[3] : vector<4xi8> -> i8
+  %95 = scalar.sitofp %94 : i8 to f32
+  %96 = vector.extract %lhs_zero_point[1] : vector<2xi8> -> i8
+  %97 = scalar.sitofp %96 : i8 to f32
+  %98 = scalar.subf %95, %97 : f32
+  %99 = vector.extract %lhs_scale[1] : vector<2xf32> -> f32
+  %100 = scalar.mulf %98, %99 : f32
+  %101 = vector.extract %rhs_data[2] : vector<4xi8> -> i8
+  %102 = scalar.sitofp %101 : i8 to f32
+  %103 = vector.extract %rhs_zero_point[1] : vector<2xi8> -> i8
+  %104 = scalar.sitofp %103 : i8 to f32
+  %105 = scalar.subf %102, %104 : f32
+  %106 = vector.extract %rhs_scale[1] : vector<2xf32> -> f32
+  %107 = scalar.mulf %105, %106 : f32
+  %108 = scalar.fmaf %100, %107, %93 : f32
+  %109 = vector.extract %init_data[3] : vector<4xf32> -> f32
+  %110 = vector.extract %lhs_data[2] : vector<4xi8> -> i8
+  %111 = scalar.sitofp %110 : i8 to f32
+  %112 = vector.extract %lhs_zero_point[1] : vector<2xi8> -> i8
+  %113 = scalar.sitofp %112 : i8 to f32
+  %114 = scalar.subf %111, %113 : f32
+  %115 = vector.extract %lhs_scale[1] : vector<2xf32> -> f32
+  %116 = scalar.mulf %114, %115 : f32
+  %117 = vector.extract %rhs_data[1] : vector<4xi8> -> i8
+  %118 = scalar.sitofp %117 : i8 to f32
+  %119 = vector.extract %rhs_zero_point[0] : vector<2xi8> -> i8
+  %120 = scalar.sitofp %119 : i8 to f32
+  %121 = scalar.subf %118, %120 : f32
+  %122 = vector.extract %rhs_scale[0] : vector<2xf32> -> f32
+  %123 = scalar.mulf %121, %122 : f32
+  %124 = scalar.fmaf %116, %123, %109 : f32
+  %125 = vector.extract %lhs_data[3] : vector<4xi8> -> i8
+  %126 = scalar.sitofp %125 : i8 to f32
+  %127 = vector.extract %lhs_zero_point[1] : vector<2xi8> -> i8
+  %128 = scalar.sitofp %127 : i8 to f32
+  %129 = scalar.subf %126, %128 : f32
+  %130 = vector.extract %lhs_scale[1] : vector<2xf32> -> f32
+  %131 = scalar.mulf %129, %130 : f32
+  %132 = vector.extract %rhs_data[3] : vector<4xi8> -> i8
+  %133 = scalar.sitofp %132 : i8 to f32
+  %134 = vector.extract %rhs_zero_point[1] : vector<2xi8> -> i8
+  %135 = scalar.sitofp %134 : i8 to f32
+  %136 = scalar.subf %133, %135 : f32
+  %137 = vector.extract %rhs_scale[1] : vector<2xf32> -> f32
+  %138 = scalar.mulf %136, %137 : f32
+  %139 = scalar.fmaf %131, %138, %124 : f32
+  %140 = vector.from_elements %46, %77, %108, %139 : vector<4xf32>
+  %result = vector.fragment<result> %140 shape [%m, %n] : vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ====
+
+func.def @scalarizes_codebook_mma(%lhs_codes: vector<4xi8>, %rhs_codes: vector<4xi8>, %init_data: vector<4xf32>, %lhs_codebook: vector<16xf32>, %rhs_codebook: vector<16xf32>) -> (vector<4xf32>) {
+  %m = index.constant 2 : index
+  %n = index.constant 2 : index
+  %k = index.constant 2 : index
+  %schema = encoding.define #matrix_operand<element_format=codebook_index, payload_packing=dense_lanes, payload_elements=4, payload_registers=0, codebook=dynamic_table_operand> : encoding<schema>
+  %lhs = vector.fragment<lhs> %lhs_codes shape [%m, %k] using {codebook = %lhs_codebook : vector<16xf32>, schema = %schema : encoding<schema>} : vector<4xi8>
+  %rhs = vector.fragment<rhs> %rhs_codes shape [%k, %n] using {codebook = %rhs_codebook : vector<16xf32>, schema = %schema : encoding<schema>} : vector<4xi8>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<4xi8>, vector<4xi8>, vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ----
+func.def @scalarizes_codebook_mma(%lhs_codes: vector<4xi8>, %rhs_codes: vector<4xi8>, %init_data: vector<4xf32>, %lhs_codebook: vector<16xf32>, %rhs_codebook: vector<16xf32>) -> (vector<4xf32>) {
+  %m = index.constant 2 : index
+  %n = index.constant 2 : index
+  %14 = vector.extract %init_data[0] : vector<4xf32> -> f32
+  %15 = vector.extract %lhs_codes[0] : vector<4xi8> -> i8
+  %16 = index.cast %15 : i8 to index
+  %17 = vector.extract %lhs_codebook[%16] : vector<16xf32> -> f32
+  %18 = vector.extract %rhs_codes[0] : vector<4xi8> -> i8
+  %19 = index.cast %18 : i8 to index
+  %20 = vector.extract %rhs_codebook[%19] : vector<16xf32> -> f32
+  %21 = scalar.fmaf %17, %20, %14 : f32
+  %22 = vector.extract %lhs_codes[1] : vector<4xi8> -> i8
+  %23 = index.cast %22 : i8 to index
+  %24 = vector.extract %lhs_codebook[%23] : vector<16xf32> -> f32
+  %25 = vector.extract %rhs_codes[2] : vector<4xi8> -> i8
+  %26 = index.cast %25 : i8 to index
+  %27 = vector.extract %rhs_codebook[%26] : vector<16xf32> -> f32
+  %28 = scalar.fmaf %24, %27, %21 : f32
+  %29 = vector.extract %init_data[1] : vector<4xf32> -> f32
+  %30 = vector.extract %lhs_codes[0] : vector<4xi8> -> i8
+  %31 = index.cast %30 : i8 to index
+  %32 = vector.extract %lhs_codebook[%31] : vector<16xf32> -> f32
+  %33 = vector.extract %rhs_codes[1] : vector<4xi8> -> i8
+  %34 = index.cast %33 : i8 to index
+  %35 = vector.extract %rhs_codebook[%34] : vector<16xf32> -> f32
+  %36 = scalar.fmaf %32, %35, %29 : f32
+  %37 = vector.extract %lhs_codes[1] : vector<4xi8> -> i8
+  %38 = index.cast %37 : i8 to index
+  %39 = vector.extract %lhs_codebook[%38] : vector<16xf32> -> f32
+  %40 = vector.extract %rhs_codes[3] : vector<4xi8> -> i8
+  %41 = index.cast %40 : i8 to index
+  %42 = vector.extract %rhs_codebook[%41] : vector<16xf32> -> f32
+  %43 = scalar.fmaf %39, %42, %36 : f32
+  %44 = vector.extract %init_data[2] : vector<4xf32> -> f32
+  %45 = vector.extract %lhs_codes[2] : vector<4xi8> -> i8
+  %46 = index.cast %45 : i8 to index
+  %47 = vector.extract %lhs_codebook[%46] : vector<16xf32> -> f32
+  %48 = vector.extract %rhs_codes[0] : vector<4xi8> -> i8
+  %49 = index.cast %48 : i8 to index
+  %50 = vector.extract %rhs_codebook[%49] : vector<16xf32> -> f32
+  %51 = scalar.fmaf %47, %50, %44 : f32
+  %52 = vector.extract %lhs_codes[3] : vector<4xi8> -> i8
+  %53 = index.cast %52 : i8 to index
+  %54 = vector.extract %lhs_codebook[%53] : vector<16xf32> -> f32
+  %55 = vector.extract %rhs_codes[2] : vector<4xi8> -> i8
+  %56 = index.cast %55 : i8 to index
+  %57 = vector.extract %rhs_codebook[%56] : vector<16xf32> -> f32
+  %58 = scalar.fmaf %54, %57, %51 : f32
+  %59 = vector.extract %init_data[3] : vector<4xf32> -> f32
+  %60 = vector.extract %lhs_codes[2] : vector<4xi8> -> i8
+  %61 = index.cast %60 : i8 to index
+  %62 = vector.extract %lhs_codebook[%61] : vector<16xf32> -> f32
+  %63 = vector.extract %rhs_codes[1] : vector<4xi8> -> i8
+  %64 = index.cast %63 : i8 to index
+  %65 = vector.extract %rhs_codebook[%64] : vector<16xf32> -> f32
+  %66 = scalar.fmaf %62, %65, %59 : f32
+  %67 = vector.extract %lhs_codes[3] : vector<4xi8> -> i8
+  %68 = index.cast %67 : i8 to index
+  %69 = vector.extract %lhs_codebook[%68] : vector<16xf32> -> f32
+  %70 = vector.extract %rhs_codes[3] : vector<4xi8> -> i8
+  %71 = index.cast %70 : i8 to index
+  %72 = vector.extract %rhs_codebook[%71] : vector<16xf32> -> f32
+  %73 = scalar.fmaf %69, %72, %66 : f32
+  %74 = vector.from_elements %28, %43, %58, %73 : vector<4xf32>
+  %result = vector.fragment<result> %74 shape [%m, %n] : vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ====
+
+func.def @scalarizes_dense_i8_i32_mma(%lhs_data: vector<4xi8>, %rhs_data: vector<4xi8>, %init_data: vector<4xi32>) -> (vector<4xi32>) {
+  %m = index.constant 2 : index
+  %n = index.constant 2 : index
+  %k = index.constant 2 : index
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] : vector<4xi8>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] : vector<4xi8>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xi32>
+  %result = vector.mma %lhs, %rhs, %init : vector<4xi8>, vector<4xi8>, vector<4xi32>
+  func.return %result : vector<4xi32>
+}
+
+// ----
+func.def @scalarizes_dense_i8_i32_mma(%lhs_data: vector<4xi8>, %rhs_data: vector<4xi8>, %init_data: vector<4xi32>) -> (vector<4xi32>) {
+  %m = index.constant 2 : index
+  %n = index.constant 2 : index
+  %11 = vector.extract %init_data[0] : vector<4xi32> -> i32
+  %12 = vector.extract %lhs_data[0] : vector<4xi8> -> i8
+  %13 = vector.extract %rhs_data[0] : vector<4xi8> -> i8
+  %14 = scalar.extsi %12 : i8 to i32
+  %15 = scalar.extsi %13 : i8 to i32
+  %16 = scalar.fmai %14, %15, %11 : i32
+  %17 = vector.extract %lhs_data[1] : vector<4xi8> -> i8
+  %18 = vector.extract %rhs_data[2] : vector<4xi8> -> i8
+  %19 = scalar.extsi %17 : i8 to i32
+  %20 = scalar.extsi %18 : i8 to i32
+  %21 = scalar.fmai %19, %20, %16 : i32
+  %22 = vector.extract %init_data[1] : vector<4xi32> -> i32
+  %23 = vector.extract %lhs_data[0] : vector<4xi8> -> i8
+  %24 = vector.extract %rhs_data[1] : vector<4xi8> -> i8
+  %25 = scalar.extsi %23 : i8 to i32
+  %26 = scalar.extsi %24 : i8 to i32
+  %27 = scalar.fmai %25, %26, %22 : i32
+  %28 = vector.extract %lhs_data[1] : vector<4xi8> -> i8
+  %29 = vector.extract %rhs_data[3] : vector<4xi8> -> i8
+  %30 = scalar.extsi %28 : i8 to i32
+  %31 = scalar.extsi %29 : i8 to i32
+  %32 = scalar.fmai %30, %31, %27 : i32
+  %33 = vector.extract %init_data[2] : vector<4xi32> -> i32
+  %34 = vector.extract %lhs_data[2] : vector<4xi8> -> i8
+  %35 = vector.extract %rhs_data[0] : vector<4xi8> -> i8
+  %36 = scalar.extsi %34 : i8 to i32
+  %37 = scalar.extsi %35 : i8 to i32
+  %38 = scalar.fmai %36, %37, %33 : i32
+  %39 = vector.extract %lhs_data[3] : vector<4xi8> -> i8
+  %40 = vector.extract %rhs_data[2] : vector<4xi8> -> i8
+  %41 = scalar.extsi %39 : i8 to i32
+  %42 = scalar.extsi %40 : i8 to i32
+  %43 = scalar.fmai %41, %42, %38 : i32
+  %44 = vector.extract %init_data[3] : vector<4xi32> -> i32
+  %45 = vector.extract %lhs_data[2] : vector<4xi8> -> i8
+  %46 = vector.extract %rhs_data[1] : vector<4xi8> -> i8
+  %47 = scalar.extsi %45 : i8 to i32
+  %48 = scalar.extsi %46 : i8 to i32
+  %49 = scalar.fmai %47, %48, %44 : i32
+  %50 = vector.extract %lhs_data[3] : vector<4xi8> -> i8
+  %51 = vector.extract %rhs_data[3] : vector<4xi8> -> i8
+  %52 = scalar.extsi %50 : i8 to i32
+  %53 = scalar.extsi %51 : i8 to i32
+  %54 = scalar.fmai %52, %53, %49 : i32
+  %55 = vector.from_elements %21, %32, %43, %54 : vector<4xi32>
+  %result = vector.fragment<result> %55 shape [%m, %n] : vector<4xi32>
+  func.return %result : vector<4xi32>
+}
+
+// ====
+
+func.def @scalarizes_static_dense_rank2_f32_mma(%lhs_data: vector<1x2xf32>, %rhs_data: vector<2x1xf32>, %init_data: vector<1x1xf32>) -> (vector<1x1xf32>) {
+  %m = index.constant 1 : index
+  %n = index.constant 1 : index
+  %k = index.constant 2 : index
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] : vector<1x2xf32>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] : vector<2x1xf32>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<1x1xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<1x2xf32>, vector<2x1xf32>, vector<1x1xf32>
+  func.return %result : vector<1x1xf32>
+}
+
+// ----
+func.def @scalarizes_static_dense_rank2_f32_mma(%lhs_data: vector<1x2xf32>, %rhs_data: vector<2x1xf32>, %init_data: vector<1x1xf32>) -> (vector<1x1xf32>) {
+  %m = index.constant 1 : index
+  %n = index.constant 1 : index
+  %11 = vector.extract %init_data[0, 0] : vector<1x1xf32> -> f32
+  %12 = vector.extract %lhs_data[0, 0] : vector<1x2xf32> -> f32
+  %13 = vector.extract %rhs_data[0, 0] : vector<2x1xf32> -> f32
+  %14 = scalar.fmaf %12, %13, %11 : f32
+  %15 = vector.extract %lhs_data[0, 1] : vector<1x2xf32> -> f32
+  %16 = vector.extract %rhs_data[1, 0] : vector<2x1xf32> -> f32
+  %17 = scalar.fmaf %15, %16, %14 : f32
+  %20 = vector.splat %17 : vector<1x1xf32>
+  %result = vector.fragment<result> %20 shape [%m, %n] : vector<1x1xf32>
+  func.return %result : vector<1x1xf32>
+}
+
+// ====
+
+func.def @scalarizes_static_zero_dense_mma(%lhs_data: vector<0x2xf32>, %rhs_data: vector<2x1xf32>, %init_data: vector<0x1xf32>) -> (vector<0x1xf32>) {
+  %m = index.constant 0 : index
+  %n = index.constant 1 : index
+  %k = index.constant 2 : index
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] : vector<0x2xf32>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] : vector<2x1xf32>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<0x1xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<0x2xf32>, vector<2x1xf32>, vector<0x1xf32>
+  func.return %result : vector<0x1xf32>
+}
+
+// ----
+func.def @scalarizes_static_zero_dense_mma(%lhs_data: vector<0x2xf32>, %rhs_data: vector<2x1xf32>, %init_data: vector<0x1xf32>) -> (vector<0x1xf32>) {
+  %result = vector.empty : vector<0x1xf32>
+  func.return %result : vector<0x1xf32>
+}
+
+// ====
+
+func.def @scalarizes_dynamic_dense_rank2_f32_mma(%m: index, %n: index, %k: index, %lhs_data: vector<[%m]x[%k]xf32>, %rhs_data: vector<[%k]x[%n]xf32>, %init_data: vector<[%m]x[%n]xf32>) -> (vector<[%m]x[%n]xf32>) {
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] : vector<[%m]x[%k]xf32>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] : vector<[%k]x[%n]xf32>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<[%m]x[%n]xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<[%m]x[%k]xf32>, vector<[%k]x[%n]xf32>, vector<[%m]x[%n]xf32>
+  func.return %result : vector<[%m]x[%n]xf32>
+}
+
+// ----
+func.def @scalarizes_dynamic_dense_rank2_f32_mma(%m: index, %n: index, %k: index, %lhs_data: vector<[%m]x[%k]xf32>, %rhs_data: vector<[%k]x[%n]xf32>, %init_data: vector<[%m]x[%n]xf32>) -> (vector<[%m]x[%n]xf32>) {
+  %11 = index.constant 0 : index
+  %12 = index.constant 1 : index
+  %15 = scf.for %13 = [%11 to %m step %12](%14 = %init_data : vector<[%m]x[%n]xf32>) -> (vector<[%m]x[%n]xf32>) {
+    %16 = index.constant 0 : index
+    %17 = index.constant 1 : index
+    %20 = scf.for %18 = [%16 to %n step %17](%19 = %14 : vector<[%m]x[%n]xf32>) -> (vector<[%m]x[%n]xf32>) {
+      %21 = vector.extract %init_data[%13, %18] : vector<[%m]x[%n]xf32> -> f32
+      %22 = index.constant 0 : index
+      %23 = index.constant 1 : index
+      %26 = scf.for %24 = [%22 to %k step %23](%25 = %21 : f32) -> (f32) {
+        %27 = vector.extract %lhs_data[%13, %24] : vector<[%m]x[%k]xf32> -> f32
+        %28 = vector.extract %rhs_data[%24, %18] : vector<[%k]x[%n]xf32> -> f32
+        %29 = scalar.fmaf %27, %28, %25 : f32
+        scf.yield %29 : f32
+      }
+      %30 = vector.insert %26 into %19[%13, %18] : f32, vector<[%m]x[%n]xf32>
+      scf.yield %30 : vector<[%m]x[%n]xf32>
+    }
+    scf.yield %20 : vector<[%m]x[%n]xf32>
+  }
+  %result = vector.fragment<result> %15 shape [%m, %n] : vector<[%m]x[%n]xf32>
+  func.return %result : vector<[%m]x[%n]xf32>
+}
+
+// ====
+
+func.def @scalarizes_dynamic_flat_product_f32_mma(%m: index, %n: index, %k: index, %lhs0: f32, %rhs0: f32, %init0: f32) {
+  %mk = index.mul %m, %k : index
+  %kn = index.mul %k, %n : index
+  %mn = index.mul %m, %n : index
+  %lhs_data = vector.splat %lhs0 : vector<[%mk]xf32>
+  %rhs_data = vector.splat %rhs0 : vector<[%kn]xf32>
+  %init_data = vector.splat %init0 : vector<[%mn]xf32>
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] : vector<[%mk]xf32>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] : vector<[%kn]xf32>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<[%mn]xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<[%mk]xf32>, vector<[%kn]xf32>, vector<[%mn]xf32>
+  test.use %result : vector<[%mn]xf32>
+  func.return
+}
+
+// ----
+func.def @scalarizes_dynamic_flat_product_f32_mma(%m: index, %n: index, %k: index, %lhs0: f32, %rhs0: f32, %init0: f32) {
+  %mn = index.mul %m, %n : index
+  %42 = vector.constant 0.0 : vector<[%mn]xf32>
+  %43 = index.constant 0 : index
+  %44 = index.constant 1 : index
+  %init_data = scf.for %45 = [%43 to %mn step %44](%46 = %42 : vector<[%mn]xf32>) -> (vector<[%mn]xf32>) {
+    %48 = vector.insert %init0 into %46[%45] : f32, vector<[%mn]xf32>
+    scf.yield %48 : vector<[%mn]xf32>
+  }
+  %16 = index.constant 0 : index
+  %17 = index.constant 1 : index
+  %20 = scf.for %18 = [%16 to %m step %17](%19 = %init_data : vector<[%mn]xf32>) -> (vector<[%mn]xf32>) {
+    %21 = index.constant 0 : index
+    %22 = index.constant 1 : index
+    %25 = scf.for %23 = [%21 to %n step %22](%24 = %19 : vector<[%mn]xf32>) -> (vector<[%mn]xf32>) {
+      %28 = index.constant 0 : index
+      %29 = index.constant 1 : index
+      %32 = scf.for %30 = [%28 to %k step %29](%31 = %init0 : f32) -> (f32) {
+        %37 = scalar.fmaf %lhs0, %rhs0, %31 : f32
+        scf.yield %37 : f32
+      }
+      %38 = index.mul %18, %n : index
+      %39 = index.add %38, %23 : index
+      %40 = vector.insert %32 into %24[%39] : f32, vector<[%mn]xf32>
+      scf.yield %40 : vector<[%mn]xf32>
+    }
+    scf.yield %25 : vector<[%mn]xf32>
+  }
+  %result = vector.fragment<result> %20 shape [%m, %n] : vector<[%mn]xf32>
+  test.use %result : vector<[%mn]xf32>
+  func.return
+}
+
+// ====
+
+func.def @rejects_unrepresentable_static_lane_count() {
+  // ERROR@+1: SHAPE/007 "vector.poison" "vector-to-scalar" "vector<4294967296x4294967296xi32>"
+  %value = vector.poison : vector<4294967296x4294967296xi32>
+  test.use %value : vector<4294967296x4294967296xi32>
+  func.return
+}
+
+// ====
+
+func.def @rejects_static_lane_count_beyond_value_slice() {
+  // ERROR@+1: SHAPE/007 "vector.poison" "vector-to-scalar" "vector<65536xi32>"
+  %value = vector.poison : vector<65536xi32>
+  test.use %value : vector<65536xi32>
+  func.return
+}
+
+// ====
+
+func.def @rejects_out_of_bounds_transform_iota_permutation(%v: vector<2xf32>, %signs: vector<2xi1>) -> (vector<2xf32>) {
+  %one = index.constant 1 : index
+  %permutation = vector.iota %one step %one : vector<2xindex>
+  %xf = encoding.define #numeric_transform<family="sign_permute_hadamard", input_elems=2, output_elems=2> {permutation = %permutation : vector<2xindex>, signs = %signs : vector<2xi1>} : encoding<transform>
+  // ERROR@+1: ENCODING/020 {op_name="vector.transform", pass_name="vector-to-scalar"}
+  %r = vector.transform %v, %xf : vector<2xf32>, encoding<transform> -> vector<2xf32>
+  func.return %r : vector<2xf32>
+}
+
+// ====
+
+func.def @rejects_duplicate_transform_uniform_permutation(%v: vector<2xf32>, %signs: vector<2xi1>) -> (vector<2xf32>) {
+  %permutation = vector.constant 0 : vector<2xindex>
+  %xf = encoding.define #numeric_transform<family="sign_permute_hadamard", input_elems=2, output_elems=2> {permutation = %permutation : vector<2xindex>, signs = %signs : vector<2xi1>} : encoding<transform>
+  // ERROR@+1: ENCODING/019 {op_name="vector.transform", pass_name="vector-to-scalar"}
+  %r = vector.transform %v, %xf : vector<2xf32>, encoding<transform> -> vector<2xf32>
+  func.return %r : vector<2xf32>
+}
+
+// ====
+
+func.def @rejects_nonlocal_transform_descriptor(%v: vector<2xf32>, %xf: encoding<transform>) -> (vector<2xf32>) {
+  // ERROR@+1: ENCODING/017 {op_name="vector.transform", pass_name="vector-to-scalar"}
+  %r = vector.transform %v, %xf : vector<2xf32>, encoding<transform> -> vector<2xf32>
+  func.return %r : vector<2xf32>
+}
+
+// ====
+
+func.def @rejects_dynamic_transform_last_axis(%n: index, %v: vector<[%n]xf32>) -> (vector<[%n]xf32>) {
+  %xf = encoding.define #numeric_transform<family="hadamard"> {input_elems = %n : index, output_elems = %n : index} : encoding<transform>
+  // ERROR@+1: SHAPE/006 {op_name="vector.transform", pass_name="vector-to-scalar"}
+  %r = vector.transform %v, %xf : vector<[%n]xf32>, encoding<transform> -> vector<[%n]xf32>
+  func.return %r : vector<[%n]xf32>
+}

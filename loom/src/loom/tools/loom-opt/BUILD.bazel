@@ -1,0 +1,59 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_binary")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+loom_cc_binary(
+    name = "loom-opt",
+    srcs = ["loom-opt.c"],
+    deps = [
+        "//loom/src/loom/codegen/low:text_asm",
+        "//loom/src/loom/codegen/low:verify",
+        "//loom/src/loom/codegen/low/pipeline:pass_environment",
+        "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/error:json_sink",
+        "//loom/src/loom/format/text:printer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/pass:builtin_registry",
+        "//loom/src/loom/pass:pipeline",
+        "//loom/src/loom/pass:registry",
+        "//loom/src/loom/pass:report",
+        "//loom/src/loom/pass:tooling",
+        "//loom/src/loom/target:math_policy",
+        "//loom/src/loom/target:pipeline",
+        "//loom/src/loom/target:predicate",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target/configured:provider",
+        "//loom/src/loom/tooling/cli:help",
+        "//loom/src/loom/tooling/config",
+        "//loom/src/loom/tooling/context",
+        "//loom/src/loom/tooling/execution:session",
+        "//loom/src/loom/tooling/io:file",
+        "//loom/src/loom/tooling/pass:trace_cli",
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/io:file_handle",
+    ],
+)
+
+iree_execution_test_suite(
+    name = "execution_test",
+    manifests = ["loom-opt.test.json"],
+    tags = ["hostonly"],
+    tools = {
+        "loom-opt": ":loom-opt",
+    },
+)

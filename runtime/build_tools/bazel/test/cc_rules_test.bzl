@@ -172,7 +172,7 @@ def _test_runtime_test_adds_runtime_include_root(name, **kwargs):
         srcs = [name + "_subject.cc"],
         resource_group = "gpu",
         tags = [
-            "driver=amdgpu",
+            "requires-gpu-amd",
             "manual",
         ],
     )
@@ -191,7 +191,7 @@ def _test_runtime_test_adds_runtime_include_root_impl(env, target):
     _expect_path_suffix(env, paths, "runtime/src")
     tags = target[TestingAspectInfo].attrs.tags
     for expected_tag in [
-        "driver=amdgpu",
+        "requires-gpu-amd",
         "exclusive-if-local",
         "resource_group:gpu",
     ]:

@@ -1,0 +1,3 @@
+// RUN: roundtrip
+// REQUIRES: loom-check-test-unavailable
+this.is.invalid.ir

@@ -133,6 +133,9 @@ typedef struct iree_hal_amdgpu_logical_device_t {
   iree_hal_amdgpu_pm4_command_buffer_publication_mode_t
       pm4_command_buffer_publication_mode;
 
+  // True when GPU-local fine memory pools are suppressed for this device.
+  uint32_t suppress_device_fine_memory : 1;
+
   // Logical allocator.
   iree_hal_allocator_t* device_allocator;
 

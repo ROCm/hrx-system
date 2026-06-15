@@ -1,0 +1,55 @@
+// RUN: emit source-low output=low
+
+x86.target<scalar> @target
+
+func.def target(@target) @scalar_i32_bitwise(%lhs: i32, %rhs: i32) -> (i32) {
+  %mask = scalar.constant 255 : i32
+  %masked = scalar.andi %lhs, %mask : i32
+  %tag = scalar.constant 240 : i32
+  %tagged = scalar.ori %masked, %tag : i32
+  %invert = scalar.constant -1 : i32
+  %inverted = scalar.xori %tagged, %invert : i32
+  %result = scalar.xori %inverted, %rhs : i32
+  func.return %result : i32
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @scalar_i32_bitwise(%lhs: reg<x86.gpr32>, %rhs: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm<x86.scalar.core> {
+  %mask = mov.imm32 255
+  %14 = copy %lhs : reg<x86.gpr32> -> reg<x86.gpr32>
+  %masked = and.gpr32 %14, %mask
+  %tag = mov.imm32 240
+  %17 = copy %masked : reg<x86.gpr32> -> reg<x86.gpr32>
+  %tagged = or.gpr32 %17, %tag
+  %invert = mov.imm32 -1
+  %20 = copy %tagged : reg<x86.gpr32> -> reg<x86.gpr32>
+  %inverted = xor.gpr32 %20, %invert
+  %22 = copy %inverted : reg<x86.gpr32> -> reg<x86.gpr32>
+  %result = xor.gpr32 %22, %rhs
+  return %result
+}
+
+// ====
+
+x86.target<scalar> @target
+
+func.def target(@target) @scalar_i32_shift_immediates(%value: i32) -> (i32) {
+  %left_amount = scalar.constant 3 : i32
+  %left = scalar.shli %value, %left_amount : i32
+  %arithmetic_amount = scalar.constant 1 : i32
+  %arithmetic = scalar.shrsi %left, %arithmetic_amount : i32
+  %logical_amount = scalar.constant 2 : i32
+  %result = scalar.shrui %arithmetic, %logical_amount : i32
+  func.return %result : i32
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @scalar_i32_shift_immediates(%value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm<x86.scalar.core> {
+  %10 = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
+  %left = shl.imm.gpr32 %10 {shift = 3}
+  %12 = copy %left : reg<x86.gpr32> -> reg<x86.gpr32>
+  %arithmetic = sar.imm.gpr32 %12 {shift = 1}
+  %14 = copy %arithmetic : reg<x86.gpr32> -> reg<x86.gpr32>
+  %result = shr.imm.gpr32 %14 {shift = 2}
+  return %result
+}

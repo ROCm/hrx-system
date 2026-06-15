@@ -1,0 +1,218 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/ml_attention.loom-test
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @online_softmax_update(%old_max: f32, %old_sum: f32, %old_acc: vector<4xf32>, %score: f32, %value: vector<4xf32>) -> (f32, f32, vector<4xf32>) {
+  %new_max = scalar.maxnumf %old_max, %score : f32
+  %old_delta = scalar.subf %old_max, %new_max : f32
+  %score_delta = scalar.subf %score, %new_max : f32
+  %old_scale = scalar.expf<afn> %old_delta : f32
+  %score_weight = scalar.expf<afn> %score_delta : f32
+  %scaled_sum = scalar.mulf<reassoc|nnan|nsz|contract> %old_sum, %old_scale : f32
+  %new_sum = scalar.addf<reassoc|nnan|nsz> %scaled_sum, %score_weight : f32
+  %old_scale_vector = vector.splat %old_scale : vector<4xf32>
+  %score_weight_vector = vector.splat %score_weight : vector<4xf32>
+  %rescaled_acc = vector.mulf<reassoc|nnan|nsz|contract> %old_acc, %old_scale_vector : vector<4xf32>
+  %weighted_value = vector.mulf<reassoc|nnan|nsz|contract> %value, %score_weight_vector : vector<4xf32>
+  %new_acc = vector.addf<reassoc|nnan|nsz> %rescaled_acc, %weighted_value : vector<4xf32>
+  func.return %new_max, %new_sum, %new_acc : f32, f32, vector<4xf32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @online_softmax_update(%old_max: reg<amdgpu.vgpr>, %old_sum: reg<amdgpu.vgpr>, %old_acc: reg<amdgpu.vgpr x4>, %score: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x4>) asm<amdgpu.rdna3.core> {
+  %new_max = v_max_f32 %old_max, %score
+  %old_delta = v_sub_f32 %old_max, %new_max
+  %score_delta = v_sub_f32 %score, %new_max
+  %37 = v_mul_f32_lit %old_delta, 1069066811
+  %old_scale = v_exp_f32 %37
+  %39 = v_mul_f32_lit %score_delta, 1069066811
+  %score_weight = v_exp_f32 %39
+  %scaled_sum = v_mul_f32 %old_sum, %old_scale
+  %new_sum = v_add_f32 %scaled_sum, %score_weight
+  %45 = slice %old_acc[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %47 = v_mul_f32 %45, %old_scale
+  %48 = slice %old_acc[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %50 = v_mul_f32 %48, %old_scale
+  %51 = slice %old_acc[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %53 = v_mul_f32 %51, %old_scale
+  %54 = slice %old_acc[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %56 = v_mul_f32 %54, %old_scale
+  %58 = slice %value[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %60 = v_mul_f32 %58, %score_weight
+  %61 = slice %value[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %63 = v_mul_f32 %61, %score_weight
+  %64 = slice %value[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %66 = v_mul_f32 %64, %score_weight
+  %67 = slice %value[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %69 = v_mul_f32 %67, %score_weight
+  %73 = v_add_f32 %47, %60
+  %76 = v_add_f32 %50, %63
+  %79 = v_add_f32 %53, %66
+  %82 = v_add_f32 %56, %69
+  %new_acc = concat(%73, %76, %79, %82) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  return %new_max, %new_sum, %new_acc
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @tail_masked_score_block(%scores: vector<4xf32>, %valid_count: i32) -> (f32, f32) {
+  %start = scalar.constant 0 : i32
+  %step = scalar.constant 1 : i32
+  %lanes = vector.iota %start step %step : vector<4xi32>
+  %valid_limits = vector.splat %valid_count : vector<4xi32>
+  %valid = vector.cmpi slt, %lanes, %valid_limits : vector<4xi32> -> vector<4xi1>
+  %negative_large = scalar.constant -1000000000.0 : f32
+  %sentinels = vector.splat %negative_large : vector<4xf32>
+  %masked_scores = vector.select %valid, %scores, %sentinels : vector<4xf32>
+  %block_max = vector.reduce<maxnumf, reassoc|nnan|nsz> %masked_scores, %negative_large : vector<4xf32>, f32
+  %zero = scalar.constant 0.0 : f32
+  %zeros = vector.splat %zero : vector<4xf32>
+  %sum_scores = vector.select %valid, %scores, %zeros : vector<4xf32>
+  %block_sum = vector.reduce<addf, reassoc|nnan|nsz> %sum_scores, %zero : vector<4xf32>, f32
+  func.return %block_max, %block_sum : f32, f32
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @tail_masked_score_block(%scores: reg<amdgpu.vgpr x4>, %valid_count: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %37 = v_mov_b32_copy %valid_count
+  %40 = v_cmp_lt_i32_src0_inline %37 {lhs = 0}
+  %42 = v_cmp_lt_i32_src0_inline %37 {lhs = 1}
+  %44 = v_cmp_lt_i32_src0_inline %37 {lhs = 2}
+  %46 = v_cmp_lt_i32_src0_inline %37 {lhs = 3}
+  %54 = slice %scores[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %55 = v_cndmask_b32_src0_lit %54, %40, 3463342888
+  %57 = slice %scores[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %58 = v_cndmask_b32_src0_lit %57, %42, 3463342888
+  %60 = slice %scores[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %61 = v_cndmask_b32_src0_lit %60, %44, 3463342888
+  %63 = slice %scores[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %64 = v_cndmask_b32_src0_lit %63, %46, 3463342888
+  %67 = v_max_f32_lit %55, 3463342888
+  %71 = v_max_f32 %67, %58
+  %72 = v_max_f32 %61, %64
+  %block_max = v_max_f32 %71, %72
+  %81 = v_cndmask_b32_src0_inline %54, %40 {false_value = 0}
+  %84 = v_cndmask_b32_src0_inline %57, %42 {false_value = 0}
+  %87 = v_cndmask_b32_src0_inline %60, %44 {false_value = 0}
+  %90 = v_cndmask_b32_src0_inline %63, %46 {false_value = 0}
+  %96 = v_add_f32 %81, %84
+  %97 = v_add_f32 %87, %90
+  %block_sum = v_add_f32 %96, %97
+  return %block_max, %block_sum
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @paged_kv_cache_block_load(%page_table: buffer, %page_pool: buffer, %sequence0: index, %block0: index, %lane0: index) -> (i32, vector<4xbf16>) {
+  %sequence = index.assume %sequence0 [range(%sequence0, 0, 63)] : index
+  %block = index.assume %block0 [range(%block0, 0, 127)] : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 15)] : index
+  %page_entry_byte_stride = index.constant 4 : offset
+  %page_table_row_byte_stride = index.constant 512 : offset
+  %page_byte_stride = index.constant 4096 : offset
+  %lane_byte_stride = index.constant 8 : offset
+  %row_base = index.scale %sequence, %page_table_row_byte_stride : index, offset -> offset
+  %block_entry_offset = index.scale %block, %page_entry_byte_stride : index, offset -> offset
+  %page_entry_offset = index.add %row_base, %block_entry_offset : offset
+  %page_table_global = buffer.assume.memory_space<global> %page_table : buffer
+  %page_entry_view = buffer.view %page_table_global[%page_entry_offset] : buffer -> view<1xi32, #dense>
+  %page_i32 = view.load %page_entry_view[0] : view<1xi32, #dense> -> i32
+  %page0 = index.cast %page_i32 : i32 to index
+  %page = index.assume %page0 [range(%page0, 0, 4095)] : index
+  %page_base = index.scale %page, %page_byte_stride : index, offset -> offset
+  %lane_offset = index.scale %lane, %lane_byte_stride : index, offset -> offset
+  %kv_offset = index.add %page_base, %lane_offset : offset
+  %page_pool_global = buffer.assume.memory_space<global> %page_pool : buffer
+  %kv_view = buffer.view %page_pool_global[%kv_offset] : buffer -> view<4xbf16, #dense>
+  %key_values = vector.load %kv_view[0] : view<4xbf16, #dense> -> vector<4xbf16>
+  func.return %page_i32, %key_values : i32, vector<4xbf16>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @paged_kv_cache_block_load(%sequence: reg<amdgpu.sgpr>, %block: reg<amdgpu.sgpr>, %lane: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>) asm<amdgpu.rdna3.core> {
+  %page_entry_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %kv_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %page_entry_byte_stride = s_mov_b32 4
+  %page_table_row_byte_stride = s_mov_b32 512
+  %lane_byte_stride = s_mov_b32 8
+  %row_base = s_mul_i32 %sequence, %page_table_row_byte_stride
+  %block_entry_offset = s_mul_i32 %block, %page_entry_byte_stride
+  %page_entry_offset = s_add_u32 %row_base, %block_entry_offset
+  %42 = v_mov_b32 0
+  %43 = slice %page_entry_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %44 = slice %page_entry_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %45 = s_mov_b32 0
+  %46 = s_add_u32 %43, %page_entry_offset
+  %47 = s_addc_u32 %44, %45
+  %48 = concat(%46, %47) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %page = global_load_b32_saddr %42, %48
+  %50 = v_mov_b32 4096
+  %page_base = v_mul_lo_u32 %page, %50
+  %lane_offset = s_mul_i32 %lane, %lane_byte_stride
+  %53 = v_mov_b32_copy %lane_offset
+  %kv_offset = v_add_u32 %page_base, %53
+  %key_values = global_load_b64_saddr %kv_offset, %kv_view
+  return %page, %key_values
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @rope_pair_rotate(%even: f32, %odd: f32, %angle: f32) -> (f32, f32) {
+  %sine = scalar.sinf<afn> %angle : f32
+  %cosine = scalar.cosf<afn> %angle : f32
+  %even_cos = scalar.mulf<reassoc|nnan|nsz|contract> %even, %cosine : f32
+  %odd_sin = scalar.mulf<reassoc|nnan|nsz|contract> %odd, %sine : f32
+  %rotated_even = scalar.subf<reassoc|nnan|nsz> %even_cos, %odd_sin : f32
+  %even_sin = scalar.mulf<reassoc|nnan|nsz|contract> %even, %sine : f32
+  %odd_cos = scalar.mulf<reassoc|nnan|nsz|contract> %odd, %cosine : f32
+  %rotated_odd = scalar.addf<reassoc|nnan|nsz> %even_sin, %odd_cos : f32
+  func.return %rotated_even, %rotated_odd : f32, f32
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @rope_pair_rotate(%even: reg<amdgpu.vgpr>, %odd: reg<amdgpu.vgpr>, %angle: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %24 = v_mul_f32_lit %angle, 1042479491
+  %sine = v_sin_f32 %24
+  %cosine = v_cos_f32 %24
+  %even_cos = v_mul_f32 %even, %cosine
+  %odd_sin = v_mul_f32 %odd, %sine
+  %rotated_even = v_sub_f32 %even_cos, %odd_sin
+  %even_sin = v_mul_f32 %even, %sine
+  %odd_cos = v_mul_f32 %odd, %cosine
+  %rotated_odd = v_add_f32 %even_sin, %odd_cos
+  return %rotated_even, %rotated_odd
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @routing_top2_update(%score: f32, %expert: i32, %best_score: f32, %best_expert: i32, %second_score: f32, %second_expert: i32) -> (f32, i32, f32, i32) {
+  %beats_best = scalar.cmpf olt, %best_score, %score : f32
+  %beats_second = scalar.cmpf olt, %second_score, %score : f32
+  %candidate_second_score = scf.select %beats_second, %score, %second_score : f32
+  %candidate_second_expert = scf.select %beats_second, %expert, %second_expert : i32
+  %new_best_score = scf.select %beats_best, %score, %best_score : f32
+  %new_best_expert = scf.select %beats_best, %expert, %best_expert : i32
+  %new_second_score = scf.select %beats_best, %best_score, %candidate_second_score : f32
+  %new_second_expert = scf.select %beats_best, %best_expert, %candidate_second_expert : i32
+  func.return %new_best_score, %new_best_expert, %new_second_score, %new_second_expert : f32, i32, f32, i32
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @routing_top2_update(%score: reg<amdgpu.vgpr>, %expert: reg<amdgpu.sgpr>, %best_score: reg<amdgpu.vgpr>, %best_expert: reg<amdgpu.sgpr>, %second_score: reg<amdgpu.vgpr>, %second_expert: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %beats_best = v_cmp_lt_f32 %best_score, %score
+  %beats_second = v_cmp_lt_f32 %second_score, %score
+  %candidate_second_score = v_cndmask_b32 %second_score, %score, %beats_second
+  %31 = v_mov_b32_copy %expert
+  %32 = v_mov_b32_copy %second_expert
+  %candidate_second_expert = v_cndmask_b32 %32, %31, %beats_second
+  %new_best_score = v_cndmask_b32 %best_score, %score, %beats_best
+  %36 = v_mov_b32_copy %best_expert
+  %new_best_expert = v_cndmask_b32 %36, %31, %beats_best
+  %new_second_score = v_cndmask_b32 %candidate_second_score, %best_score, %beats_best
+  %new_second_expert = v_cndmask_b32 %candidate_second_expert, %36, %beats_best
+  return %new_best_score, %new_best_expert, %new_second_score, %new_second_expert
+}

@@ -303,12 +303,12 @@ IREE_API_EXPORT iree_status_t iree_vm_invocation_create(
     iree_vm_invocation_t** out_invocation);
 
 // Retains the given |invocation| for the caller.
-IREE_API_EXPORT iree_status_t
-iree_vm_invocation_retain(iree_vm_invocation_t* invocation);
+IREE_API_EXPORT void iree_vm_invocation_retain(
+    iree_vm_invocation_t* invocation);
 
 // Releases the given |invocation| from the caller.
-IREE_API_EXPORT iree_status_t
-iree_vm_invocation_release(iree_vm_invocation_t* invocation);
+IREE_API_EXPORT void iree_vm_invocation_release(
+    iree_vm_invocation_t* invocation);
 
 // Queries the completion status of the invocation.
 // Returns one of the following:

@@ -44,9 +44,7 @@ class SequenceSegmenterTest : public ::testing::Test {
     iree_status_t status = iree_tokenizer_segmenter_sequence_allocate(
         raw_children.data(), raw_children.size(), iree_allocator_system(),
         &raw_segmenter);
-    if (!iree_status_is_ok(status)) {
-      return ScopedSegmenter(nullptr);
-    }
+    IREE_CHECK_OK(status);
 
     // Success: release all children to sequence ownership.
     for (auto& child : children) {
@@ -60,9 +58,7 @@ class SequenceSegmenterTest : public ::testing::Test {
     iree_tokenizer_segmenter_t* raw = nullptr;
     iree_status_t status = iree_tokenizer_segmenter_metaspace_allocate(
         0, /*split_enabled=*/true, iree_allocator_system(), &raw);
-    if (!iree_status_is_ok(status)) {
-      return ScopedSegmenter(nullptr);
-    }
+    IREE_CHECK_OK(status);
     return ScopedSegmenter(raw);
   }
 
@@ -71,9 +67,7 @@ class SequenceSegmenterTest : public ::testing::Test {
     iree_tokenizer_segmenter_t* raw = nullptr;
     iree_status_t status = iree_tokenizer_segmenter_whitespace_allocate(
         iree_allocator_system(), &raw);
-    if (!iree_status_is_ok(status)) {
-      return ScopedSegmenter(nullptr);
-    }
+    IREE_CHECK_OK(status);
     return ScopedSegmenter(raw);
   }
 
@@ -87,10 +81,7 @@ class SequenceSegmenterTest : public ::testing::Test {
     iree_tokenizer_segmenter_t* raw = nullptr;
     iree_status_t status = iree_tokenizer_segmenter_punctuation_allocate(
         behavior, iree_allocator_system(), &raw);
-    if (!iree_status_is_ok(status)) {
-      iree_status_ignore(status);
-      return ScopedSegmenter(nullptr);
-    }
+    IREE_CHECK_OK(status);
     return ScopedSegmenter(raw);
   }
 
@@ -105,10 +96,7 @@ class SequenceSegmenterTest : public ::testing::Test {
         iree_make_cstring_view(pattern),
         IREE_TOKENIZER_UTIL_REGEX_COMPILE_FLAG_NONE, iree_allocator_system(),
         &dfa, &dfa_storage, &error);
-    if (!iree_status_is_ok(status)) {
-      iree_status_ignore(status);
-      return ScopedSegmenter(nullptr);
-    }
+    IREE_CHECK_OK(status);
 
     iree_tokenizer_segmenter_t* raw = nullptr;
     status = iree_tokenizer_segmenter_split_allocate(
@@ -116,8 +104,7 @@ class SequenceSegmenterTest : public ::testing::Test {
         &raw);
     if (!iree_status_is_ok(status)) {
       iree_allocator_free(iree_allocator_system(), dfa_storage);
-      iree_status_ignore(status);
-      return ScopedSegmenter(nullptr);
+      IREE_CHECK_OK(status);
     }
     // Ownership of dfa_storage transferred to segmenter.
     return ScopedSegmenter(raw);

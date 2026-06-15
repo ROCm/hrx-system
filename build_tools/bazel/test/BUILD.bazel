@@ -11,6 +11,7 @@ load(":cc_benchmark_rules_test.bzl", "cc_benchmark_rules_test_suite")
 load(":cc_fuzz_rules_test.bzl", "cc_fuzz_rules_test_suite")
 load(":cc_link_test.bzl", "cc_link_test_suite")
 load(":cc_rules_test.bzl", "cc_rules_test_suite")
+load(":compile_commands_rules_test.bzl", "compile_commands_rules_test_suite")
 load(":executable_rules_test.bzl", "executable_rules_test_suite")
 load(":generate_rules_test.bzl", "generate_rules_test_suite")
 load(":glob_rules_test.bzl", "glob_rules_test_suite")
@@ -35,6 +36,8 @@ cc_fuzz_rules_test_suite(name = "cc_fuzz_tests")
 cc_rules_test_suite(name = "cc_tests")
 
 cc_link_test_suite(name = "cc_link_tests")
+
+compile_commands_rules_test_suite(name = "compile_commands_tests")
 
 executable_rules_test_suite(name = "executable_tests")
 

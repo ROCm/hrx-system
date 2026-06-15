@@ -1,0 +1,49 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_generated_cc_library",
+)
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_X86_ROOT_VISIBILITY = ["//loom/src/loom/target/arch/x86:__pkg__"]
+
+loom_generated_cc_library(
+    name = "ops",
+    srcs = [
+        "registry.c",
+    ],
+    hdrs = [
+        "ops.h",
+        "registry.h",
+    ],
+    args = ["--dialect=x86"],
+    generated_src_flags = [
+        "--builders",
+        "--tables",
+    ],
+    generated_srcs = [
+        "builders.c",
+        "tables.c",
+    ],
+    generator = "//loom/py/loom/gen/ops:c_tables_x86_generator",
+    visibility = _X86_ROOT_VISIBILITY,
+    deps = [
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/target:types",
+        "//loom/src/loom/target/arch/x86/records:target_records",
+        "//runtime/src/iree/base",
+    ],
+)

@@ -26,7 +26,7 @@ class LibmpiTest : public ::testing::Test {
 
     if (!iree_status_is_ok(status)) {
       iree_status_fprint(stderr, status);
-      iree_status_ignore(status);
+      iree_status_free(status);
     } else {
       EXPECT_EQ(symbols.MPI_Init(NULL, NULL), MPI_SUCCESS);
     }
@@ -55,7 +55,7 @@ class LibmpiTest : public ::testing::Test {
         MPI_RESULT_TO_STATUS(&symbols, MPI_Finalize(), "MPI_Finalize"));
 
     memset(&symbols, 0, sizeof(symbols));
-    if (library) iree_dynamic_library_release(library);
+    iree_dynamic_library_release(library);
   }
 
  protected:

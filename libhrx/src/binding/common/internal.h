@@ -421,7 +421,7 @@ typedef struct iree_hal_streaming_stream_t {
 
   // Semaphore chain for synchronization.
   iree_hal_semaphore_t* timeline_semaphore;
-  uint64_t pending_value;    // Next value to be used for signaling
+  uint64_t pending_value;    // Last stream timeline value reserved.
   uint64_t submitted_value;  // Last value that was actually submitted (for
                              // wait_submitted)
   uint64_t completed_value;  // Last value we've verified as completed
@@ -542,7 +542,13 @@ typedef struct iree_hal_streaming_symbol_t {
   iree_hal_streaming_parameter_info_t parameters;
 
   // Global/data attributes (only valid for GLOBAL/DATA types).
+  // HAL executable global handle, when backed by an executable global.
+  iree_hal_executable_global_t global_handle;
+  // Cached streaming wrapper around the executable-owned global buffer.
+  iree_hal_streaming_buffer_t* global_buffer;
+  // HIP/CUDA-visible device pointer for the global storage.
   iree_hal_streaming_deviceptr_t device_address;
+  // Byte length of the global storage.
   iree_device_size_t size_bytes;
 } iree_hal_streaming_symbol_t;
 
@@ -560,6 +566,15 @@ typedef struct iree_hal_streaming_module_t {
   // Symbol metadata.
   iree_hal_streaming_symbol_t* symbols;
   iree_host_size_t symbol_count;
+
+  // Synchronizes lazy executable global resolution and cache access.
+  iree_slim_mutex_t global_mutex;
+  // Cached executable global symbols keyed by name.
+  iree_hal_streaming_symbol_t** globals;
+  // Number of cached executable global symbols.
+  iree_host_size_t global_count;
+  // Capacity of the cached executable global symbols array.
+  iree_host_size_t global_capacity;
 
   // File mapping if loaded from file.
   iree_io_file_mapping_t* file_mapping;
@@ -631,6 +646,14 @@ typedef enum iree_hal_streaming_host_register_flag_bits_e {
   IREE_HAL_STREAMING_HOST_REGISTER_FLAG_READ_ONLY = 1ull << 3,
 } iree_hal_streaming_host_register_flags_t;
 
+// Describes how a streaming buffer wrapper keeps its context alive.
+typedef enum iree_hal_streaming_buffer_context_ownership_e {
+  // The containing context owns the wrapper and must outlive it.
+  IREE_HAL_STREAMING_BUFFER_CONTEXT_BORROWED = 0,
+  // The wrapper owns a reference to its context.
+  IREE_HAL_STREAMING_BUFFER_CONTEXT_RETAINED = 1,
+} iree_hal_streaming_buffer_context_ownership_t;
+
 // Buffer wrapper for device memory.
 typedef struct iree_hal_streaming_buffer_t {
   // Device address obtained from the buffer handle.
@@ -650,8 +673,11 @@ typedef struct iree_hal_streaming_buffer_t {
   // alias pointing to hrx_buf->hal_buffer.
   hrx_buffer_t hrx_buf;
 
-  // Owning context.
+  // Context used for allocation, table lookup, and device accounting.
   iree_hal_streaming_context_t* context;
+
+  // Whether this wrapper owns a reference to |context|.
+  iree_hal_streaming_buffer_context_ownership_t context_ownership;
 
   // Platform-specific memory type.
   int memory_type;
@@ -985,7 +1011,7 @@ iree_hal_streaming_context_flags_t iree_hal_streaming_context_flags(
 iree_hal_streaming_context_t* iree_hal_streaming_context_current(void);
 
 // Synchronization: none (thread-local modification).
-iree_status_t iree_hal_streaming_context_set_current(
+void iree_hal_streaming_context_set_current(
     iree_hal_streaming_context_t* context);
 
 // Synchronization: none (thread-local stack operation).
@@ -1088,7 +1114,23 @@ iree_status_t iree_hal_streaming_module_function(
     iree_hal_streaming_module_t* module, const char* name,
     iree_hal_streaming_symbol_t** out_function);
 
-// Synchronization: none (queries global metadata).
+// Tries to resolve a global symbol by name, lazily querying HAL executable
+// globals. Returned storage is owned by |module| and remains valid while it is
+// live.
+// Synchronization: module (global cache).
+iree_status_t iree_hal_streaming_module_try_lookup_global_symbol(
+    iree_hal_streaming_module_t* module, const char* name, bool* out_found,
+    iree_hal_streaming_symbol_t** out_global);
+
+// Resolves a required global symbol by name, lazily querying HAL executable
+// globals. Returned storage is owned by |module| and remains valid while it is
+// live.
+// Synchronization: module (global cache).
+iree_status_t iree_hal_streaming_module_global_symbol(
+    iree_hal_streaming_module_t* module, const char* name,
+    iree_hal_streaming_symbol_t** out_global);
+
+// Synchronization: module (global cache).
 iree_status_t iree_hal_streaming_module_global(
     iree_hal_streaming_module_t* module, const char* name,
     iree_hal_streaming_deviceptr_t* out_device_ptr,
@@ -1274,6 +1316,20 @@ iree_status_t iree_hal_streaming_memory_free_host(
 // Synchronization: none; called during context destruction after streams idle.
 void iree_hal_streaming_memory_release_pageable_staging(
     iree_hal_streaming_context_t* context);
+
+// Wraps an existing HAL buffer and registers it in the context pointer map.
+// The wrapper retains |buffer| for HRX interop, but callers must still ensure
+// the backing owner remains live for the duration required by the HAL API.
+// Synchronization: none (registers existing memory).
+iree_status_t iree_hal_streaming_memory_wrap_buffer(
+    iree_hal_streaming_context_t* context, iree_hal_buffer_t* buffer,
+    iree_hal_streaming_buffer_context_ownership_t context_ownership,
+    iree_hal_streaming_buffer_t** out_buffer);
+
+// Releases a wrapper created with iree_hal_streaming_memory_wrap_buffer.
+// Synchronization: none (unregisters existing memory).
+void iree_hal_streaming_memory_release_wrapped_buffer(
+    iree_hal_streaming_buffer_t* buffer);
 
 // Synchronization: none (registers existing memory).
 iree_status_t iree_hal_streaming_memory_register_host(

@@ -1,0 +1,142 @@
+// RUN: verify
+
+// Dead poison computations are valid until their value reaches an observation
+// boundary.
+func.def @dead_poison_not_observed(%x: i32) {
+  %p = scalar.poison : i32
+  %dead = scalar.addi %p, %x : i32
+  func.return
+}
+
+// ====
+
+// Return-like boundaries observe poison escaping ordinary SSA propagation.
+func.def @return_poison() -> (i32) {
+  %p = scalar.poison : i32
+  // ERROR@+1: TYPE/012 "poison" "observation boundary" "func.return"
+  func.return %p : i32
+}
+
+// ====
+
+// Integer constants require integer literal payloads.
+func.def @integer_constant_value_kind() -> (i32) {
+  // ERROR@+1: TYPE/005 "value"
+  %c = scalar.constant 1.0 : i32
+  func.return %c : i32
+}
+
+// ====
+
+// Floating-point constants require floating-point literal payloads.
+func.def @float_constant_value_kind() -> (f32) {
+  // ERROR@+1: TYPE/005 "value"
+  %c = scalar.constant 1 : f32
+  func.return %c : f32
+}
+
+// ====
+
+// Boolean integer literals must be 0 or 1.
+func.def @boolean_constant_value_range() -> (i1) {
+  // ERROR@+1: TYPE/005 "value"
+  %c = scalar.constant 2 : i1
+  func.return %c : i1
+}
+
+// ====
+
+// Logical coordinate constants must be authored with index.constant so that
+// address-domain values are structurally unambiguous.
+func.def @index_constant_requires_index_dialect() -> (index) {
+  // ERROR@+1: TYPE/004 "result" "index" "integer or floating-point scalar; use index.constant"
+  %c = scalar.constant 0 : index
+  func.return %c : index
+}
+
+// ====
+
+// Physical byte offset constants use the index dialect too.
+func.def @offset_constant_requires_index_dialect() -> (offset) {
+  // ERROR@+1: TYPE/004 "result" "offset" "integer or floating-point scalar; use index.constant"
+  %c = scalar.constant 0 : offset
+  func.return %c : offset
+}
+
+// ====
+
+// scalar.assume constrains integer payload values; address-domain facts use
+// index.assume.
+func.def @assume_rejects_index_payload(%x: index) -> (i64) {
+  // ERROR@+1: TYPE/003 "values[0]" "index" "integer"
+  %r = scalar.assume %x [] : i64
+  func.return %r : i64
+}
+
+// ====
+
+func.def @assume_rejects_result_type_mismatch(%x: i32) -> (i64) {
+  // ERROR@+1: TYPE/001 "values[0]" "i32" "results[0]" "i64"
+  %r = scalar.assume %x [] : i64
+  func.return %r : i64
+}
+
+// ====
+
+func.def @assume_rejects_count_mismatch(%x: i64, %y: i64) -> (i64) {
+  // ERROR@+1: STRUCTURE/013 "values" "2" "results" "1"
+  %r = scalar.assume %x, %y [] : i64
+  func.return %r : i64
+}
+
+// ====
+
+// Bitfield extraction requires positive field widths.
+func.def @bitfield_extract_zero_width(%x: i8) {
+  // ERROR@+1: STRUCTURE/014 "width" "0" "positive bitfield width"
+  %r = scalar.bitfield.extractu %x {offset = 0, width = 0} : i8 -> i32
+  func.return
+}
+
+// ====
+
+// Bitfield offsets are least-significant bit positions and cannot be negative.
+func.def @bitfield_extract_negative_offset(%x: i8) {
+  // ERROR@+1: STRUCTURE/014 "offset" "-1" "non-negative bit offset"
+  %r = scalar.bitfield.extractu %x {offset = -1, width = 4} : i8 -> i32
+  func.return
+}
+
+// ====
+
+// Bitfield ranges must fit inside the source scalar.
+func.def @bitfield_extract_range_overflow(%x: i8) {
+  // ERROR@+1: STRUCTURE/014 "width" "4" "bitfield range within storage element width"
+  %r = scalar.bitfield.extracts %x {offset = 6, width = 4} : i8 -> i32
+  func.return
+}
+
+// ====
+
+// Extract results must be wide enough to hold the selected field.
+func.def @bitfield_extract_result_too_narrow(%x: i8) {
+  // ERROR@+1: TYPE/004 "result" "element bit width at least width"
+  %r = scalar.bitfield.extractu %x {offset = 0, width = 4} : i8 -> i1
+  func.return
+}
+
+// ====
+
+func.def @geluf_logistic_requires_scale(%x: f32) -> (f32) {
+  // ERROR@+1: TYPE/005 {attr_name="scale", actual_kind="0", expected_kind="2"}
+  %r = scalar.geluf<logistic> %x : f32
+  func.return %r : f32
+}
+
+// ====
+
+func.def @geluf_non_logistic_rejects_scale(%x: f32) -> (f32) {
+  // ERROR@+1: TYPE/005 {attr_name="scale", actual_kind="2", expected_kind="0"}
+  %r = scalar.geluf<erf> %x {scale = 1.702} : f32
+  func.return %r : f32
+}

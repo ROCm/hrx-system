@@ -89,21 +89,23 @@ hrx_status_t hrx_device_get_type(hrx_device_t device,
 }
 
 void hrx_device_retain(hrx_device_t device) {
+  if (!device) return;
   iree_hal_device_retain(device->hal_device);
   iree_hal_device_group_retain(device->hal_device_group);
   iree_atomic_ref_count_inc(&device->ref_count);
 }
 
 void hrx_device_release(hrx_device_t device) {
+  if (!device) return;
   iree_hal_device_t* hal_device = device->hal_device;
   iree_hal_device_group_t* hal_device_group = device->hal_device_group;
   if (iree_atomic_ref_count_dec(&device->ref_count) == 1) {
     iree_hal_allocator_release(device->allocator.hal_allocator);
-    iree_hal_device_group_release(hal_device_group);
     device->allocator.hal_allocator = NULL;
     device->hal_device = NULL;
     device->hal_device_group = NULL;
   }
+  iree_hal_device_group_release(hal_device_group);
   iree_hal_device_release(hal_device);
 }
 

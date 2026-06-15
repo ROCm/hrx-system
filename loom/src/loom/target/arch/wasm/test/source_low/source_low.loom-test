@@ -1,0 +1,318 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/vector_v4.loom-test
+// RUN: emit source-low output=low
+
+wasm.target<simd128> @target
+func.def target(@target) @i32x4_arith(%lhs: vector<4xi32>, %rhs: vector<4xi32>) -> (vector<4xi32>) {
+  %sum = vector.addi %lhs, %rhs : vector<4xi32>
+  %diff = vector.subi %sum, %rhs : vector<4xi32>
+  func.return %diff : vector<4xi32>
+}
+
+// ----
+low.func.def target(@target) abi(wasm_function) @i32x4_arith(%lhs: reg<wasm.v128>, %rhs: reg<wasm.v128>) -> (reg<wasm.v128>) asm<wasm.core.simd128> {
+  %sum = i32x4.add %lhs, %rhs
+  %diff = i32x4.sub %sum, %rhs
+  return %diff
+}
+
+// ====
+
+wasm.target<simd128> @target
+func.def target(@target) @f32x4_arith(%lhs: vector<4xf32>, %rhs: vector<4xf32>) -> (vector<4xf32>) {
+  %sum = vector.addf %lhs, %rhs : vector<4xf32>
+  %product = vector.mulf %sum, %rhs : vector<4xf32>
+  func.return %product : vector<4xf32>
+}
+
+// ----
+low.func.def target(@target) abi(wasm_function) @f32x4_arith(%lhs: reg<wasm.v128>, %rhs: reg<wasm.v128>) -> (reg<wasm.v128>) asm<wasm.core.simd128> {
+  %sum = f32x4.add %lhs, %rhs
+  %product = f32x4.mul %sum, %rhs
+  return %product
+}
+
+// ====
+
+wasm.target<simd128> @target
+func.def target(@target) @f32x4_lane_extract(%v: vector<4xf32>, %x: f32) -> (f32) {
+  %lane = vector.extract %v[2] : vector<4xf32> -> f32
+  %sum = scalar.addf %lane, %x : f32
+  func.return %sum : f32
+}
+
+// ----
+low.func.def target(@target) abi(wasm_function) @f32x4_lane_extract(%v: reg<wasm.v128>, %x: reg<wasm.f32>) -> (reg<wasm.f32>) asm<wasm.core.simd128> {
+  %lane = f32x4.extract_lane %v, 2
+  %sum = f32.add %lane, %x
+  return %sum
+}
+
+// ====
+
+wasm.target<simd128> @target
+func.def target(@target) @f32x4_lane_edit(%v: vector<4xf32>, %x: f32) -> (vector<4xf32>) {
+  %lane = vector.extract %v[1] : vector<4xf32> -> f32
+  %sum = scalar.addf %lane, %x : f32
+  %updated = vector.insert %sum into %v[2] : f32, vector<4xf32>
+  func.return %updated : vector<4xf32>
+}
+
+// ----
+low.func.def target(@target) abi(wasm_function) @f32x4_lane_edit(%v: reg<wasm.v128>, %x: reg<wasm.f32>) -> (reg<wasm.v128>) asm<wasm.core.simd128> {
+  %lane = f32x4.extract_lane %v, 1
+  %sum = f32.add %lane, %x
+  %updated = f32x4.replace_lane %v, %sum, 2
+  return %updated
+}
+
+// ====
+
+wasm.target<simd128> @target
+func.def target(@target) @i32x4_splat_add(%value: i32, %rhs: vector<4xi32>) -> (vector<4xi32>) {
+  %splat = vector.splat %value : vector<4xi32>
+  %sum = vector.addi %splat, %rhs : vector<4xi32>
+  func.return %sum : vector<4xi32>
+}
+
+// ----
+low.func.def target(@target) abi(wasm_function) @i32x4_splat_add(%value: reg<wasm.i32>, %rhs: reg<wasm.v128>) -> (reg<wasm.v128>) asm<wasm.core.simd128> {
+  %splat = i32x4.splat %value
+  %sum = i32x4.add %splat, %rhs
+  return %sum
+}
+
+// ====
+
+wasm.target<simd128> @target
+func.def target(@target) @i32x4_lane_edit(%v: vector<4xi32>, %x: i32) -> (vector<4xi32>) {
+  %lane = vector.extract %v[1] : vector<4xi32> -> i32
+  %sum = scalar.addi %lane, %x : i32
+  %updated = vector.insert %sum into %v[2] : i32, vector<4xi32>
+  func.return %updated : vector<4xi32>
+}
+
+// ----
+low.func.def target(@target) abi(wasm_function) @i32x4_lane_edit(%v: reg<wasm.v128>, %x: reg<wasm.i32>) -> (reg<wasm.v128>) asm<wasm.core.simd128> {
+  %lane = i32x4.extract_lane %v, 1
+  %sum = i32.add %lane, %x
+  %updated = i32x4.replace_lane %v, %sum, 2
+  return %updated
+}
+
+// ====
+
+wasm.target<simd128> @target
+func.def target(@target) @i32x4_shuffle(%v: vector<4xi32>) -> (vector<4xi32>) {
+  %shuffled = vector.shuffle<[3, 2, 1, 0]> %v : vector<4xi32>
+  func.return %shuffled : vector<4xi32>
+}
+
+// ----
+low.func.def target(@target) abi(wasm_function) @i32x4_shuffle(%v: reg<wasm.v128>) -> (reg<wasm.v128>) asm<wasm.core.simd128> {
+  %shuffled = i8x16.shuffle %v, %v, 12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3
+  return %shuffled
+}
+
+// ====
+
+wasm.target<simd128> @target
+func.def target(@target) @i32x4_shuffle_reduce(%v: vector<4xi32>, %init: i32) -> (i32) {
+  %reversed = vector.shuffle<[3, 2, 1, 0]> %v : vector<4xi32>
+  %sum = vector.reduce<addi> %reversed, %init : vector<4xi32>, i32
+  func.return %sum : i32
+}
+
+// ----
+low.func.def target(@target) abi(wasm_function) @i32x4_shuffle_reduce(%v: reg<wasm.v128>, %init: reg<wasm.i32>) -> (reg<wasm.i32>) asm<wasm.core.simd128> {
+  %reversed = i8x16.shuffle %v, %v, 12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3
+  %9 = i32x4.extract_lane %reversed, 0
+  %10 = i32.add %init, %9
+  %11 = i32x4.extract_lane %reversed, 1
+  %12 = i32.add %10, %11
+  %13 = i32x4.extract_lane %reversed, 2
+  %14 = i32.add %12, %13
+  %15 = i32x4.extract_lane %reversed, 3
+  %sum = i32.add %14, %15
+  return %sum
+}
+
+// ====
+
+wasm.target<simd128> @target
+func.def target(@target) @f32x4_shuffle(%v: vector<4xf32>) -> (vector<4xf32>) {
+  %shuffled = vector.shuffle<[3, 1, 2, 0]> %v : vector<4xf32>
+  func.return %shuffled : vector<4xf32>
+}
+
+// ----
+low.func.def target(@target) abi(wasm_function) @f32x4_shuffle(%v: reg<wasm.v128>) -> (reg<wasm.v128>) asm<wasm.core.simd128> {
+  %shuffled = i8x16.shuffle %v, %v, 12, 13, 14, 15, 4, 5, 6, 7, 8, 9, 10, 11, 0, 1, 2, 3
+  return %shuffled
+}
+
+// ====
+
+wasm.target<simd128> @target
+func.def target(@target) @f32x4_shuffle_reduce(%v: vector<4xf32>, %init: f32) -> (f32) {
+  %shuffled = vector.shuffle<[3, 1, 2, 0]> %v : vector<4xf32>
+  %sum = vector.reduce<addf> %shuffled, %init : vector<4xf32>, f32
+  func.return %sum : f32
+}
+
+// ----
+low.func.def target(@target) abi(wasm_function) @f32x4_shuffle_reduce(%v: reg<wasm.v128>, %init: reg<wasm.f32>) -> (reg<wasm.f32>) asm<wasm.core.simd128> {
+  %shuffled = i8x16.shuffle %v, %v, 12, 13, 14, 15, 4, 5, 6, 7, 8, 9, 10, 11, 0, 1, 2, 3
+  %9 = f32x4.extract_lane %shuffled, 0
+  %10 = f32.add %init, %9
+  %11 = f32x4.extract_lane %shuffled, 1
+  %12 = f32.add %10, %11
+  %13 = f32x4.extract_lane %shuffled, 2
+  %14 = f32.add %12, %13
+  %15 = f32x4.extract_lane %shuffled, 3
+  %sum = f32.add %14, %15
+  return %sum
+}
+
+// ====
+
+wasm.target<simd128> @target
+func.def target(@target) @i32x4_select(%lhs: vector<4xi32>, %rhs: vector<4xi32>, %true_value: vector<4xi32>, %false_value: vector<4xi32>) -> (vector<4xi32>) {
+  %mask = vector.cmpi slt, %lhs, %rhs : vector<4xi32> -> vector<4xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<4xi32>
+  func.return %selected : vector<4xi32>
+}
+
+// ----
+low.func.def target(@target) abi(wasm_function) @i32x4_select(%lhs: reg<wasm.v128>, %rhs: reg<wasm.v128>, %true_value: reg<wasm.v128>, %false_value: reg<wasm.v128>) -> (reg<wasm.v128>) asm<wasm.core.simd128> {
+  %mask = i32x4.lt_s %lhs, %rhs
+  %selected = v128.bitselect %true_value, %false_value, %mask
+  return %selected
+}
+
+// ====
+
+wasm.target<simd128> @target
+func.def target(@target) @f32x4_select(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %true_value: vector<4xf32>, %false_value: vector<4xf32>) -> (vector<4xf32>) {
+  %mask = vector.cmpf olt, %lhs, %rhs : vector<4xf32> -> vector<4xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<4xf32>
+  func.return %selected : vector<4xf32>
+}
+
+// ----
+low.func.def target(@target) abi(wasm_function) @f32x4_select(%lhs: reg<wasm.v128>, %rhs: reg<wasm.v128>, %true_value: reg<wasm.v128>, %false_value: reg<wasm.v128>) -> (reg<wasm.v128>) asm<wasm.core.simd128> {
+  %mask = f32x4.lt %lhs, %rhs
+  %selected = v128.bitselect %true_value, %false_value, %mask
+  return %selected
+}
+
+// ====
+
+wasm.target<simd128> @target
+func.def target(@target) @i32x4_memory_copy(%input: buffer, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<4xi32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<4xi32, #dense>
+  %loaded = vector.load %input_view[0] : view<4xi32, #dense> -> vector<4xi32>
+  vector.store %loaded, %output_view[0] : vector<4xi32>, view<4xi32, #dense>
+  func.return
+}
+
+// ----
+low.func.def target(@target) abi(wasm_function) @i32x4_memory_copy(%input_view: reg<wasm.i32>, %output_view: reg<wasm.i32>) asm<wasm.core.simd128> {
+  %loaded = v128.load %input_view
+  v128.store %output_view, %loaded
+  return
+}
+
+// ====
+
+wasm.target<simd128> @target
+func.def target(@target) @i32x4_memory_indexed(%input: buffer, %output: buffer, %i: index) {
+  %bounded_i = index.assume %i [range(%i, 0, 12)] : index
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<16xi32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<16xi32, #dense>
+  %loaded = vector.load %input_view[%bounded_i] : view<16xi32, #dense> -> vector<4xi32>
+  vector.store %loaded, %output_view[%bounded_i] : vector<4xi32>, view<16xi32, #dense>
+  func.return
+}
+
+// ----
+low.func.def target(@target) abi(wasm_function) @i32x4_memory_indexed(%input_view: reg<wasm.i32>, %output_view: reg<wasm.i32>, %bounded_i: reg<wasm.i32>) asm<wasm.core.simd128> {
+  %11 = i32.const 4
+  %12 = i32.mul %bounded_i, %11
+  %13 = i32.add %input_view, %12
+  %loaded = v128.load %13
+  %17 = i32.add %output_view, %12
+  v128.store %17, %loaded
+  return
+}
+
+// ====
+
+wasm.target<simd128> @target
+func.def target(@target) @i32x4_memory_wasm32_address_boundary(%input: buffer, %i: index) -> (vector<4xi32>) {
+  %bounded_i = index.assume %i [range(%i, 0, 1073741820)] : index
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<1073741824xi32, #dense>
+  %loaded = vector.load %input_view[%bounded_i] : view<1073741824xi32, #dense> -> vector<4xi32>
+  func.return %loaded : vector<4xi32>
+}
+
+// ----
+low.func.def target(@target) abi(wasm_function) @i32x4_memory_wasm32_address_boundary(%input_view: reg<wasm.i32>, %bounded_i: reg<wasm.i32>) -> (reg<wasm.v128>) asm<wasm.core.simd128> {
+  %10 = i32.const 4
+  %11 = i32.mul %bounded_i, %10
+  %12 = i32.add %input_view, %11
+  %loaded = v128.load %12
+  return %loaded
+}
+
+// ====
+
+wasm.target<simd128> @target
+func.def target(@target) @f32x4_memory_copy(%input: buffer, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<4xf32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<4xf32, #dense>
+  %loaded = vector.load %input_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  vector.store %loaded, %output_view[0] : vector<4xf32>, view<4xf32, #dense>
+  func.return
+}
+
+// ----
+low.func.def target(@target) abi(wasm_function) @f32x4_memory_copy(%input_view: reg<wasm.i32>, %output_view: reg<wasm.i32>) asm<wasm.core.simd128> {
+  %loaded = v128.load %input_view
+  v128.store %output_view, %loaded
+  return
+}
+
+// ====
+
+wasm.target<simd128> @target
+func.def target(@target) @f32x4_memory_indexed_add(%lhs: buffer, %rhs: buffer, %output: buffer, %i: index) {
+  %bounded_i = index.assume %i [range(%i, 0, 12)] : index
+  %zero = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs[%zero] : buffer -> view<16xf32, #dense>
+  %rhs_view = buffer.view %rhs[%zero] : buffer -> view<16xf32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<16xf32, #dense>
+  %lhs_v = vector.load %lhs_view[%bounded_i] : view<16xf32, #dense> -> vector<4xf32>
+  %rhs_v = vector.load %rhs_view[%bounded_i] : view<16xf32, #dense> -> vector<4xf32>
+  %sum = vector.addf %lhs_v, %rhs_v : vector<4xf32>
+  vector.store %sum, %output_view[%bounded_i] : vector<4xf32>, view<16xf32, #dense>
+  func.return
+}
+
+// ----
+low.func.def target(@target) abi(wasm_function) @f32x4_memory_indexed_add(%lhs_view: reg<wasm.i32>, %rhs_view: reg<wasm.i32>, %output_view: reg<wasm.i32>, %bounded_i: reg<wasm.i32>) asm<wasm.core.simd128> {
+  %16 = i32.const 4
+  %17 = i32.mul %bounded_i, %16
+  %18 = i32.add %lhs_view, %17
+  %lhs_v = v128.load %18
+  %22 = i32.add %rhs_view, %17
+  %rhs_v = v128.load %22
+  %sum = f32x4.add %lhs_v, %rhs_v
+  %27 = i32.add %output_view, %17
+  v128.store %27, %sum
+  return
+}

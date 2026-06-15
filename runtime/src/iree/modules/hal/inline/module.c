@@ -87,6 +87,10 @@ static iree_status_t iree_hal_inline_storage_buffer_create(
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_allocator_malloc(host_allocator, sizeof(*storage),
                                 (void**)&storage));
+  memset(storage, 0, sizeof(*storage));
+  storage->host_allocator = host_allocator;
+  storage->hal_buffer = hal_buffer;
+  iree_hal_buffer_retain(storage->hal_buffer);
 
   // Map the HAL buffer into host-accessible memory. It almost always is but
   // it's possible the buffer we were passed was allocated on a real device that
@@ -122,7 +126,7 @@ static void iree_hal_inline_storage_buffer_destroy(
     iree_hal_inline_storage_buffer_t* storage) {
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_allocator_t host_allocator = storage->host_allocator;
-  iree_hal_buffer_unmap_range(&storage->mapping);
+  iree_status_ignore(iree_hal_buffer_unmap_range(&storage->mapping));
   iree_hal_buffer_release(storage->hal_buffer);
   iree_allocator_free(host_allocator, storage);
   IREE_TRACE_ZONE_END(z0);

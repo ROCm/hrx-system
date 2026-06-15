@@ -1,0 +1,75 @@
+// RUN: pass canonicalize
+
+// IEEE minimumf propagates NaN instead of selecting the non-NaN operand.
+func.def @minimumf_propagates_nan() -> (i1) {
+  %neg = scalar.constant -1.0 : f32
+  %nan = scalar.logf %neg : f32
+  %three = scalar.constant 3.0 : f32
+  %min = scalar.minimumf %nan, %three : f32
+  %r = scalar.isnanf %min : f32
+  func.return %r : i1
+}
+// ----
+func.def @minimumf_propagates_nan() -> (i1) {
+  %r = scalar.constant true : i1
+  func.return %r : i1
+}
+
+// ====
+
+// IEEE maximumf propagates NaN instead of selecting the non-NaN operand.
+func.def @maximumf_propagates_nan() -> (i1) {
+  %neg = scalar.constant -1.0 : f32
+  %nan = scalar.logf %neg : f32
+  %three = scalar.constant 3.0 : f32
+  %max = scalar.maximumf %three, %nan : f32
+  %r = scalar.isnanf %max : f32
+  func.return %r : i1
+}
+// ----
+func.def @maximumf_propagates_nan() -> (i1) {
+  %r = scalar.constant true : i1
+  func.return %r : i1
+}
+
+// ====
+
+// minnumf intentionally has C fmin-style NaN-skipping behavior.
+func.def @minnumf_skips_nan() -> (i1) {
+  %neg = scalar.constant -1.0 : f32
+  %nan = scalar.logf %neg : f32
+  %three = scalar.constant 3.0 : f32
+  %min = scalar.minnumf %nan, %three : f32
+  %r = scalar.isnanf %min : f32
+  func.return %r : i1
+}
+// ----
+func.def @minnumf_skips_nan() -> (i1) {
+  %r = scalar.constant false : i1
+  func.return %r : i1
+}
+
+// ====
+
+// clampf names its NaN semantics explicitly so legalization can choose native
+// minnum/maxnum packets only when that behavior is requested.
+func.def @clampf_modes_name_nan_semantics() -> (i1, i1, i1) {
+  %neg = scalar.constant -1.0 : f32
+  %nan = scalar.logf %neg : f32
+  %zero = scalar.constant 0.0 : f32
+  %one = scalar.constant 1.0 : f32
+  %ordered = scalar.clampf<ordered> %nan, %zero, %one : f32
+  %number = scalar.clampf<number> %nan, %zero, %one : f32
+  %ieee = scalar.clampf<ieee> %nan, %zero, %one : f32
+  %ordered_is_nan = scalar.isnanf %ordered : f32
+  %number_is_nan = scalar.isnanf %number : f32
+  %ieee_is_nan = scalar.isnanf %ieee : f32
+  func.return %ordered_is_nan, %number_is_nan, %ieee_is_nan : i1, i1, i1
+}
+// ----
+func.def @clampf_modes_name_nan_semantics() -> (i1, i1, i1) {
+  %ordered_is_nan = scalar.constant true : i1
+  %number_is_nan = scalar.constant false : i1
+  %ieee_is_nan = scalar.constant true : i1
+  func.return %ordered_is_nan, %number_is_nan, %ieee_is_nan : i1, i1, i1
+}

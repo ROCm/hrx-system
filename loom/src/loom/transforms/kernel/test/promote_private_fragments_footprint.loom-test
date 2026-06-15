@@ -1,0 +1,43 @@
+// RUN: pass promote-private-fragments,dce,vector-memory-footprint
+
+func.def @promoted_fragment_preserves_assume_predicates(%input: buffer, %output: buffer, %row: index, %n: i32, %value: vector<4xf32>) {
+  %zero_bytes = index.constant 0 : offset
+  %n_idx = index.cast %n : i32 to index
+  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<[%n_idx]x2xi32, #dense>
+  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<[%n_idx]x4xf32, #dense>
+  %row_in_bounds, %n_idx_assumed = index.assume %row, %n_idx [ge(%row, 0), lt(%row, %n_idx)] : index, index
+  %fragment_bytes = index.constant 8 : offset
+  %fragment_buffer = buffer.alloca %fragment_bytes {base_alignment = 4, memory_space = private} : buffer
+  %fragment = buffer.view %fragment_buffer[%zero_bytes] : buffer -> view<2xi32, #dense>
+  %start = index.constant 0 : index
+  %end = index.constant 2 : index
+  %step = index.constant 1 : index
+  scf.for %lane = [%start to %end step %step] {
+    %copy = view.load %input_view[%row_in_bounds, %lane] : view<[%n_idx]x2xi32, #dense> -> i32
+    view.store %copy, %fragment[%lane] : i32, view<2xi32, #dense>
+  }
+  %lane_zero = index.constant 0 : index
+  %selected = view.load %fragment[%lane_zero] : view<2xi32, #dense> -> i32
+  %selected_bounded, %n_bounded = scalar.assume %selected, %n [lt(%selected, %n)] : i32, i32
+  %selected_nonnegative = scalar.assume %selected_bounded [ge(%selected_bounded, 0)] : i32
+  %selected_idx = index.cast %selected_nonnegative : i32 to index
+  vector.store %value, %output_view[%selected_idx, 0] : vector<4xf32>, view<[%n_idx]x4xf32, #dense>
+  func.return
+}
+
+// ----
+func.def @promoted_fragment_preserves_assume_predicates(%input: buffer, %output: buffer, %row: index, %n: i32, %value: vector<4xf32>) {
+  %zero_bytes = index.constant 0 : offset
+  %n_idx = index.cast %n : i32 to index
+  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<[%n_idx]x2xi32, #dense>
+  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<[%n_idx]x4xf32, #dense>
+  %row_in_bounds, %n_idx_assumed = index.assume %row, %n_idx [ge(%row, 0), lt(%row, %n_idx)] : index, index
+  %fragment_vector = vector.load %input_view[%row_in_bounds, 0] : view<[%n_idx]x2xi32, #dense> -> vector<2xi32>
+  %lane_zero = index.constant 0 : index
+  %selected = vector.extract %fragment_vector[%lane_zero] : vector<2xi32> -> i32
+  %selected_bounded, %n_bounded = scalar.assume %selected, %n [lt(%selected, %n)] : i32, i32
+  %selected_nonnegative = scalar.assume %selected_bounded [ge(%selected_bounded, 0)] : i32
+  %selected_idx = index.cast %selected_nonnegative : i32 to index
+  vector.store %value, %output_view[%selected_idx, 0] : vector<4xf32>, view<[%n_idx]x4xf32, #dense>
+  func.return
+}

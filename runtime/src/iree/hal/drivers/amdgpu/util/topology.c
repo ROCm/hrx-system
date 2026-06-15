@@ -537,10 +537,11 @@ static iree_status_t iree_hal_amdgpu_query_available_agents(
       case HSA_DEVICE_TYPE_CPU:
         if (out_agents->cpu_agent_count ==
             IREE_ARRAYSIZE(out_agents->cpu_agents)) {
-          return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                                  "max CPU agent count reached (limit %" PRIhsz
-                                  ")",
-                                  IREE_ARRAYSIZE(out_agents->cpu_agents));
+          IREE_RETURN_AND_END_ZONE(
+              z0, iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                   "max CPU agent count reached (limit %" PRIhsz
+                                   ")",
+                                   IREE_ARRAYSIZE(out_agents->cpu_agents)));
         }
         out_agents->cpu_agents[out_agents->cpu_agent_count++] =
             out_agents->all_agents[i];
@@ -548,10 +549,11 @@ static iree_status_t iree_hal_amdgpu_query_available_agents(
       case HSA_DEVICE_TYPE_GPU:
         if (out_agents->gpu_agent_count ==
             IREE_ARRAYSIZE(out_agents->gpu_agents)) {
-          return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                                  "max GPU agent count reached (limit %" PRIhsz
-                                  ")",
-                                  IREE_ARRAYSIZE(out_agents->gpu_agents));
+          IREE_RETURN_AND_END_ZONE(
+              z0, iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                   "max GPU agent count reached (limit %" PRIhsz
+                                   ")",
+                                   IREE_ARRAYSIZE(out_agents->gpu_agents)));
         }
         out_agents->gpu_agents[out_agents->gpu_agent_count++] =
             out_agents->all_agents[i];

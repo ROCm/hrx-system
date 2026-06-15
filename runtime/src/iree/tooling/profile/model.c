@@ -1107,7 +1107,7 @@ static iree_status_t iree_profile_model_process_function_records(
           .executable_id = record_value.executable_id,
           .flags = record_value.flags,
           .function_ordinal = record_value.function_ordinal,
-          .constant_count = record_value.constant_count,
+          .constant_byte_length = record_value.constant_byte_length,
           .binding_count = record_value.binding_count,
           .parameter_count = record_value.parameter_count,
           .workgroup_size = {record_value.workgroup_size[0],

@@ -1401,8 +1401,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
       IREE_RETURN_IF_ERROR(iree_vm_buffer_create(
           IREE_VM_BUFFER_ACCESS_MUTABLE | IREE_VM_BUFFER_ACCESS_ORIGIN_GUEST,
           length, alignment, module_state->allocator, &buffer));
-      IREE_RETURN_IF_ERROR(
-          iree_vm_ref_wrap_assign(buffer, iree_vm_buffer_type(), result_ref));
+      iree_vm_ref_wrap_assign(buffer, iree_vm_buffer_type(), result_ref);
     });
 
     IREE_VM_ISA_DISPATCH_OP(CORE, BufferClone, {
@@ -1420,8 +1419,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
       IREE_RETURN_IF_ERROR(iree_vm_buffer_clone(
           IREE_VM_BUFFER_ACCESS_MUTABLE | IREE_VM_BUFFER_ACCESS_ORIGIN_GUEST,
           source, offset, length, alignment, module_state->allocator, &result));
-      IREE_RETURN_IF_ERROR(
-          iree_vm_ref_wrap_assign(result, iree_vm_buffer_type(), result_ref));
+      iree_vm_ref_wrap_assign(result, iree_vm_buffer_type(), result_ref);
     });
 
     IREE_VM_ISA_DISPATCH_OP(CORE, BufferLength, {
@@ -1681,8 +1679,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
       iree_vm_list_t* list = NULL;
       IREE_RETURN_IF_ERROR(iree_vm_list_create(
           element_type_def, initial_capacity, module_state->allocator, &list));
-      IREE_RETURN_IF_ERROR(
-          iree_vm_ref_wrap_assign(list, iree_vm_list_type(), result));
+      iree_vm_ref_wrap_assign(list, iree_vm_list_type(), result);
     });
 
     IREE_VM_ISA_DISPATCH_OP(CORE, ListReserve, {

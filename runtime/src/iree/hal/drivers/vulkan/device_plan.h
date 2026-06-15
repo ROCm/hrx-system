@@ -80,9 +80,6 @@ typedef struct iree_hal_vulkan_device_plan_t {
   // Recognized Vulkan device extension bits enabled on the logical device.
   iree_hal_vulkan_device_extensions_t enabled_extensions;
 
-  // Executable dispatch ABI bits enabled for the logical device.
-  iree_hal_vulkan_dispatch_abis_t enabled_dispatch_abis;
-
   // Vulkan extension names enabled during driver-owned VkDevice creation.
   const char*
       enabled_extension_names[IREE_HAL_VULKAN_MAX_DEVICE_EXTENSION_NAMES];

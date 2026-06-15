@@ -99,9 +99,8 @@ IREE_API_EXPORT void iree_vm_ref_object_release(void* ptr,
   }
 }
 
-IREE_API_EXPORT iree_status_t iree_vm_ref_wrap_assign(void* ptr,
-                                                      iree_vm_ref_type_t type,
-                                                      iree_vm_ref_t* out_ref) {
+IREE_API_EXPORT void iree_vm_ref_wrap_assign(void* ptr, iree_vm_ref_type_t type,
+                                             iree_vm_ref_t* out_ref) {
   IREE_VM_REF_ASSERT(ptr);
   IREE_VM_REF_ASSERT(type);
   IREE_VM_REF_ASSERT(out_ref);
@@ -118,12 +117,10 @@ IREE_API_EXPORT iree_status_t iree_vm_ref_wrap_assign(void* ptr,
   out_ref->type = type;
 
   iree_vm_ref_trace("WRAP ASSIGN", out_ref);
-  return iree_ok_status();
 }
 
-IREE_API_EXPORT iree_status_t iree_vm_ref_wrap_retain(void* ptr,
-                                                      iree_vm_ref_type_t type,
-                                                      iree_vm_ref_t* out_ref) {
+IREE_API_EXPORT void iree_vm_ref_wrap_retain(void* ptr, iree_vm_ref_type_t type,
+                                             iree_vm_ref_t* out_ref) {
   IREE_VM_REF_ASSERT(ptr);
   IREE_VM_REF_ASSERT(type);
   IREE_VM_REF_ASSERT(out_ref);
@@ -131,7 +128,7 @@ IREE_API_EXPORT iree_status_t iree_vm_ref_wrap_retain(void* ptr,
 
   if (out_ref->ptr == ptr) {
     // No-op - effectively a retain+release of the same value.
-    return iree_ok_status();
+    return;
   } else if (out_ref->ptr != NULL) {
     // Release existing value.
     iree_vm_ref_release(out_ref);
@@ -144,8 +141,6 @@ IREE_API_EXPORT iree_status_t iree_vm_ref_wrap_retain(void* ptr,
     iree_atomic_ref_count_inc(counter);
     iree_vm_ref_trace("WRAP RETAIN", out_ref);
   }
-
-  return iree_ok_status();
 }
 
 IREE_API_EXPORT void iree_vm_ref_retain_inplace(iree_vm_ref_t* ref) {

@@ -54,7 +54,7 @@ typedef enum {
 static const iree_async_proactor_vtable_t iree_async_proactor_posix_vtable;
 static iree_host_size_t iree_async_proactor_posix_dispatch_linked_continuation(
     iree_async_proactor_posix_t* proactor, iree_async_operation_t* operation,
-    iree_status_t trigger_status);
+    iree_status_code_t trigger_status_code);
 static void iree_async_proactor_posix_process_notification_waits(
     iree_async_proactor_posix_t* proactor,
     iree_async_notification_t* notification);
@@ -726,7 +726,7 @@ static void iree_async_proactor_posix_drain_pending_queue(
         iree_status_ignore(push_status);
         iree_async_operation_release_resources(operation);
         iree_async_proactor_posix_dispatch_linked_continuation(
-            proactor, operation, iree_status_from_code(IREE_STATUS_CANCELLED));
+            proactor, operation, IREE_STATUS_CANCELLED);
         iree_async_proactor_complete_operation(
             operation, iree_status_from_code(IREE_STATUS_CANCELLED),
             IREE_ASYNC_COMPLETION_FLAG_NONE);
@@ -809,7 +809,7 @@ static void iree_async_proactor_posix_drain_pending_queue(
         iree_status_ignore(push_status);
         iree_async_operation_release_resources(operation);
         iree_async_proactor_posix_dispatch_linked_continuation(
-            proactor, operation, status);
+            proactor, operation, iree_status_code(status));
         iree_async_proactor_complete_operation(operation, status,
                                                IREE_ASYNC_COMPLETION_FLAG_NONE);
       }
@@ -1278,7 +1278,7 @@ static iree_status_t iree_async_proactor_posix_submit_message(
     // Fire-and-forget: no source completion callback. Dispatch linked
     // continuation directly with the send status.
     iree_async_proactor_posix_dispatch_linked_continuation(
-        proactor, &message->base, send_status);
+        proactor, &message->base, iree_status_code(send_status));
     iree_status_ignore(send_status);
     return iree_ok_status();
   }
@@ -1366,7 +1366,8 @@ static iree_status_t iree_async_proactor_posix_submit_operation(
         return iree_ok_status();
       }
       if (!iree_status_is_ok(send_status)) {
-        iree_async_socket_set_failure(send_op->socket, send_status);
+        iree_async_socket_set_failure(send_op->socket,
+                                      iree_status_code(send_status));
       }
       return iree_async_proactor_posix_complete_on_submit(
           proactor, operation, send_status, IREE_ASYNC_COMPLETION_FLAG_NONE);
@@ -1404,7 +1405,8 @@ static iree_status_t iree_async_proactor_posix_submit_operation(
         return iree_ok_status();
       }
       if (!iree_status_is_ok(sendto_status)) {
-        iree_async_socket_set_failure(sendto_op->socket, sendto_status);
+        iree_async_socket_set_failure(sendto_op->socket,
+                                      iree_status_code(sendto_status));
       }
       return iree_async_proactor_posix_complete_on_submit(
           proactor, operation, sendto_status, IREE_ASYNC_COMPLETION_FLAG_NONE);
@@ -1593,14 +1595,14 @@ static void iree_async_proactor_posix_submit_continuation_chain(
 // Returns the number of directly-invoked callbacks (for completion counting).
 static iree_host_size_t iree_async_proactor_posix_dispatch_linked_continuation(
     iree_async_proactor_posix_t* proactor, iree_async_operation_t* operation,
-    iree_status_t trigger_status) {
+    iree_status_code_t trigger_status_code) {
   iree_async_operation_t* continuation = operation->linked_next;
   if (!continuation) return 0;
 
   // Detach the chain before potentially recursive submit.
   operation->linked_next = NULL;
 
-  if (iree_status_is_ok(trigger_status)) {
+  if (trigger_status_code == IREE_STATUS_OK) {
     iree_async_proactor_posix_submit_continuation_chain(proactor, continuation);
     return 0;  // Submitted ops produce completions counted by the drain loop.
   } else {
@@ -1695,7 +1697,7 @@ static iree_host_size_t iree_async_proactor_posix_process_expired_timers(
     } else {
       // Pool exhausted — dispatch directly (same as drain_completion_queue).
       iree_async_proactor_posix_dispatch_linked_continuation(
-          proactor, &timer->base, status);
+          proactor, &timer->base, iree_status_code(status));
       iree_async_operation_release_resources(&timer->base);
       iree_async_proactor_complete_operation(&timer->base, status,
                                              IREE_ASYNC_COMPLETION_FLAG_NONE);
@@ -1775,7 +1777,7 @@ static iree_host_size_t iree_async_proactor_posix_drain_completion_queue(
     // count is added directly here.
     if (operation) {
       count += iree_async_proactor_posix_dispatch_linked_continuation(
-          proactor, operation, status);
+          proactor, operation, iree_status_code(status));
     }
 
     // Release resources retained during submission for final completions.
@@ -2400,7 +2402,7 @@ static void iree_async_proactor_posix_process_operation_chain(
         iree_status_ignore(push_status);
         iree_async_operation_release_resources(current);
         iree_async_proactor_posix_dispatch_linked_continuation(
-            proactor, current, iree_status_from_code(IREE_STATUS_CANCELLED));
+            proactor, current, IREE_STATUS_CANCELLED);
         iree_async_proactor_complete_operation(
             current, iree_status_from_code(IREE_STATUS_CANCELLED),
             IREE_ASYNC_COMPLETION_FLAG_NONE);
@@ -2429,7 +2431,7 @@ static void iree_async_proactor_posix_process_operation_chain(
       iree_async_socket_t* socket =
           iree_async_proactor_posix_socket_from_io_operation(current);
       if (socket) {
-        iree_async_socket_set_failure(socket, op_status);
+        iree_async_socket_set_failure(socket, iree_status_code(op_status));
       }
     }
 
@@ -2493,8 +2495,8 @@ static void iree_async_proactor_posix_process_operation_chain(
                              &completion->slist_entry);
     } else {
       // Pool exhausted — dispatch directly (same pattern as cancel fallback).
-      iree_async_proactor_posix_dispatch_linked_continuation(proactor, current,
-                                                             op_status);
+      iree_async_proactor_posix_dispatch_linked_continuation(
+          proactor, current, iree_status_code(op_status));
       iree_async_operation_release_resources(current);
       iree_async_proactor_complete_operation(current, op_status,
                                              completion_flags);
@@ -2603,7 +2605,7 @@ static void iree_async_proactor_posix_process_notification_waits(
         // Pool exhausted — release resources and dispatch directly.
         iree_async_operation_release_resources(&wait->base);
         iree_async_proactor_posix_dispatch_linked_continuation(
-            proactor, &wait->base, status);
+            proactor, &wait->base, iree_status_code(status));
         iree_async_proactor_complete_operation(&wait->base, status,
                                                IREE_ASYNC_COMPLETION_FLAG_NONE);
       }
@@ -2665,7 +2667,7 @@ static void iree_async_proactor_posix_drain_pending_timer_cancellations(
     } else {
       // Pool exhausted — dispatch directly (same as drain_completion_queue).
       iree_async_proactor_posix_dispatch_linked_continuation(
-          proactor, &timer->base, iree_status_from_code(IREE_STATUS_CANCELLED));
+          proactor, &timer->base, IREE_STATUS_CANCELLED);
       iree_async_operation_release_resources(&timer->base);
       iree_async_proactor_complete_operation(
           &timer->base, iree_status_from_code(IREE_STATUS_CANCELLED),
@@ -2769,7 +2771,7 @@ static void iree_async_proactor_posix_drain_pending_fd_cancellations(
           iree_status_ignore(push_status);
           iree_async_operation_release_resources(op);
           iree_async_proactor_posix_dispatch_linked_continuation(
-              proactor, op, iree_status_from_code(IREE_STATUS_CANCELLED));
+              proactor, op, IREE_STATUS_CANCELLED);
           iree_async_proactor_complete_operation(
               op, iree_status_from_code(IREE_STATUS_CANCELLED),
               IREE_ASYNC_COMPLETION_FLAG_NONE);

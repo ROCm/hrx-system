@@ -17,6 +17,7 @@
 #include "iree/base/threading/numa.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/hal/api.h"
+#include "iree/hal/cts/util/registry.h"
 #include "iree/hal/drivers/amdgpu/aql_command_buffer.h"
 #include "iree/hal/drivers/amdgpu/buffer.h"
 #include "iree/hal/drivers/amdgpu/device/dispatch.h"
@@ -30,8 +31,6 @@
 #include "iree/hal/drivers/amdgpu/util/benchmark_flags.h"
 #include "iree/hal/memory/tlsf_pool.h"
 #include "iree/io/file_contents.h"
-#include "runtime/src/iree/hal/drivers/amdgpu/cts/testdata_amdgpu.h"
-#include "runtime/src/iree/hal/drivers/amdgpu/util/testdata_amdgpu_queue_benchmark.h"
 
 IREE_FLAG(
     string, binding_count_executable_file, "",
@@ -161,10 +160,10 @@ static iree_status_t QueueBenchmarkDiscardProfileSinkEndSession(
 
 static const iree_hal_profile_sink_vtable_t
     kQueueBenchmarkDiscardProfileSinkVtable = {
-        .destroy = QueueBenchmarkDiscardProfileSinkDestroy,
-        .begin_session = QueueBenchmarkDiscardProfileSinkBeginSession,
-        .write = QueueBenchmarkDiscardProfileSinkWrite,
-        .end_session = QueueBenchmarkDiscardProfileSinkEndSession,
+        /*.destroy=*/QueueBenchmarkDiscardProfileSinkDestroy,
+        /*.begin_session=*/QueueBenchmarkDiscardProfileSinkBeginSession,
+        /*.write=*/QueueBenchmarkDiscardProfileSinkWrite,
+        /*.end_session=*/QueueBenchmarkDiscardProfileSinkEndSession,
 };
 
 iree_status_t QueueBenchmarkDiscardProfileSinkCreate(
@@ -438,10 +437,10 @@ class QueueBenchmark : public benchmark::Fixture {
     auto* logical_device =
         reinterpret_cast<iree_hal_amdgpu_logical_device_t*>(device_);
     const iree_hal_amdgpu_queue_affinity_domain_t domain = {
-        .supported_affinity = logical_device->queue_affinity_mask,
-        .physical_device_count = logical_device->physical_device_count,
-        .queue_count_per_physical_device =
-            logical_device->system->topology.gpu_agent_queue_count,
+        /*.supported_affinity=*/logical_device->queue_affinity_mask,
+        /*.physical_device_count=*/logical_device->physical_device_count,
+        /*.queue_count_per_physical_device=*/
+        logical_device->system->topology.gpu_agent_queue_count,
     };
     iree_hal_amdgpu_queue_affinity_resolved_t resolved;
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_queue_affinity_resolve(
@@ -1413,22 +1412,82 @@ class QueueBenchmark : public benchmark::Fixture {
     return status;
   }
 
+  iree_status_t LoadExecutableFromRegisteredData(
+      iree_string_view_t format_name_prefix, iree_string_view_t file_name,
+      iree_hal_executable_cache_t** out_executable_cache,
+      iree_hal_executable_t** out_executable) {
+    *out_executable_cache = nullptr;
+    *out_executable = nullptr;
+
+    const auto formats =
+        iree::hal::cts::CtsRegistry::ListExecutableFormats("amdgpu");
+    iree_status_t candidate_status = iree_ok_status();
+    bool found_format = false;
+    bool found_executable_data = false;
+    for (const auto& format : formats) {
+      if (format.format == nullptr || format.data_fn == nullptr) continue;
+      if (!iree_string_view_starts_with(
+              iree_make_string_view(format.name.data(), format.name.size()),
+              format_name_prefix)) {
+        continue;
+      }
+      found_format = true;
+      iree_const_byte_span_t executable_data = format.data_fn(file_name);
+      if (executable_data.data_length == 0) continue;
+      found_executable_data = true;
+
+      iree_hal_executable_cache_t* executable_cache = nullptr;
+      iree_hal_executable_t* executable = nullptr;
+      iree_status_t status = iree_hal_executable_cache_create(
+          device_, iree_make_cstring_view("default"), &executable_cache);
+      if (iree_status_is_ok(status)) {
+        iree_hal_executable_params_t executable_params;
+        iree_hal_executable_params_initialize(&executable_params);
+        executable_params.caching_mode =
+            IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA;
+        executable_params.executable_format =
+            iree_make_cstring_view(format.format);
+        executable_params.executable_data = executable_data;
+        status = iree_hal_executable_cache_prepare_executable(
+            executable_cache, &executable_params, &executable);
+      }
+      if (iree_status_is_ok(status)) {
+        *out_executable_cache = executable_cache;
+        *out_executable = executable;
+        return iree_ok_status();
+      }
+      iree_hal_executable_release(executable);
+      iree_hal_executable_cache_release(executable_cache);
+      candidate_status = iree_status_join(candidate_status, status);
+    }
+    if (!iree_status_is_ok(candidate_status)) {
+      return candidate_status;
+    }
+    if (!found_format) {
+      return iree_make_status(IREE_STATUS_NOT_FOUND,
+                              "no registered AMDGPU executable formats matched "
+                              "'%.*s'",
+                              (int)format_name_prefix.size,
+                              format_name_prefix.data);
+    }
+    if (!found_executable_data) {
+      return iree_make_status(
+          IREE_STATUS_NOT_FOUND,
+          "no registered AMDGPU executable data matched '%.*s'",
+          (int)file_name.size, file_name.data);
+    }
+    return iree_make_status(
+        IREE_STATUS_NOT_FOUND,
+        "registered AMDGPU executable data was not accepted by the device");
+  }
+
   bool EnsureDispatchExecutable(benchmark::State& state) {
     if (dispatch_executable_) return true;
 
-    iree_const_byte_span_t executable_data = iree_const_byte_span_empty();
-    iree_status_t status = iree_ok_status();
-    executable_data = FindCtsExecutableData(iree_make_cstring_view(
-        "command_buffer_dispatch_constants_bindings_test.bin"));
-    if (executable_data.data_length == 0) {
-      status = iree_make_status(IREE_STATUS_NOT_FOUND,
-                                "AMDGPU CTS dispatch executable not found");
-    }
-
-    if (iree_status_is_ok(status)) {
-      status = LoadExecutableFromData(
-          executable_data, &dispatch_executable_cache_, &dispatch_executable_);
-    }
+    iree_status_t status = LoadExecutableFromRegisteredData(
+        IREE_SV("amdgpu_"),
+        IREE_SV("command_buffer_dispatch_constants_bindings_test.bin"),
+        &dispatch_executable_cache_, &dispatch_executable_);
     return HandleStatus(state, status, "failed to load dispatch executable");
   }
 
@@ -1447,15 +1506,13 @@ class QueueBenchmark : public benchmark::Fixture {
         executable_data = executable_file_contents->const_buffer;
       }
     } else {
-      executable_data = FindQueueBenchmarkExecutableData(
-          iree_make_cstring_view("queue_benchmark_testdata.bin"));
-      if (executable_data.data_length == 0) {
-        status = iree_make_status(
-            IREE_STATUS_NOT_FOUND,
-            "AMDGPU queue benchmark dispatch executable not found");
-      }
+      status = LoadExecutableFromRegisteredData(
+          IREE_SV("amdgpu_queue_benchmark_"),
+          IREE_SV("queue_benchmark_testdata.bin"),
+          &binding_count_executable_cache_, &binding_count_executable_);
     }
-    if (iree_status_is_ok(status)) {
+    if (iree_status_is_ok(status) &&
+        !iree_string_view_is_empty(executable_file)) {
       status = LoadExecutableFromData(executable_data,
                                       &binding_count_executable_cache_,
                                       &binding_count_executable_);
@@ -1537,7 +1594,7 @@ class QueueBenchmark : public benchmark::Fixture {
 
     const uint32_t workgroup_count[3] = {1, 1, 1};
     const uint32_t dynamic_workgroup_local_memory = 0;
-    const uint32_t kernarg_block_count = descriptor->hal_kernarg_block_count;
+    const uint32_t kernarg_block_count = descriptor->kernarg_block_count;
 
     iree_host_size_t kernarg_length = 0;
     if (IREE_UNLIKELY(!iree_host_size_checked_mul(
@@ -1554,12 +1611,29 @@ class QueueBenchmark : public benchmark::Fixture {
     std::memset(kernargs, 0, kernarg_length);
 
     const uint32_t constant_data[] = {3, 10};
-    iree_hal_amdgpu_device_dispatch_emplace_hal_kernargs(
-        kernel_args, &descriptor->hal_kernarg_layout, binding_ptrs,
-        constant_data, kernargs);
-    iree_hal_amdgpu_device_dispatch_emplace_implicit_args(
-        kernel_args, workgroup_count, dynamic_workgroup_local_memory,
-        &descriptor->hal_kernarg_layout, kernargs);
+    const iree_hal_amdgpu_kernarg_layout_t* kernarg_layout =
+        descriptor->kernarg_layout;
+    iree_hal_amdgpu_kernarg_layout_emplace_explicit_args(
+        kernarg_layout, binding_ptrs,
+        iree_make_const_byte_span(
+            reinterpret_cast<const uint8_t*>(constant_data),
+            sizeof(constant_data)),
+        kernargs);
+    if (iree_any_bit_set(kernarg_layout->flags,
+                         IREE_HAL_AMDGPU_KERNARG_LAYOUT_FLAG_IMPLICIT_ARGS)) {
+      auto* implicit_args =
+          reinterpret_cast<iree_amdgpu_kernel_implicit_args_t*>(
+              kernargs + kernarg_layout->implicit_args_byte_offset);
+      std::memset(implicit_args, 0, IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE);
+      implicit_args->block_count[0] = workgroup_count[0];
+      implicit_args->block_count[1] = workgroup_count[1];
+      implicit_args->block_count[2] = workgroup_count[2];
+      implicit_args->group_size[0] = kernel_args->workgroup_size[0];
+      implicit_args->group_size[1] = kernel_args->workgroup_size[1];
+      implicit_args->group_size[2] = kernel_args->workgroup_size[2];
+      implicit_args->grid_dims = 3;
+      implicit_args->dynamic_lds_size = dynamic_workgroup_local_memory;
+    }
     std::memset(&pre_resolved_dispatch_packet_template_, 0,
                 sizeof(pre_resolved_dispatch_packet_template_));
     iree_hal_amdgpu_device_dispatch_emplace_packet(
@@ -1919,8 +1993,8 @@ class QueueBenchmark : public benchmark::Fixture {
                     command;
         const uint64_t kernarg_bytes =
             (uint64_t)dispatch_command->kernarg_length_qwords * 8u;
-        if (dispatch_command->kernarg_strategy ==
-            IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STRATEGY_PREPUBLISHED) {
+        if (dispatch_command->kernarg_storage_mode ==
+            IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STORAGE_MODE_PREPUBLISHED) {
           ++prepublished_kernarg.dispatch_count;
           prepublished_kernarg.payload_bytes += kernarg_bytes;
           const uint64_t storage_end =
@@ -2031,29 +2105,6 @@ class QueueBenchmark : public benchmark::Fixture {
   }
 
  private:
-  static iree_const_byte_span_t FindExecutableData(
-      const iree_file_toc_t* toc, iree_string_view_t file_name) {
-    for (iree_host_size_t i = 0; toc[i].name != nullptr; ++i) {
-      if (iree_string_view_equal(file_name,
-                                 iree_make_cstring_view(toc[i].name))) {
-        return iree_make_const_byte_span(
-            reinterpret_cast<const uint8_t*>(toc[i].data), toc[i].size);
-      }
-    }
-    return iree_const_byte_span_empty();
-  }
-
-  static iree_const_byte_span_t FindCtsExecutableData(
-      iree_string_view_t file_name) {
-    return FindExecutableData(iree_cts_testdata_amdgpu_create(), file_name);
-  }
-
-  static iree_const_byte_span_t FindQueueBenchmarkExecutableData(
-      iree_string_view_t file_name) {
-    return FindExecutableData(iree_queue_benchmark_testdata_amdgpu_create(),
-                              file_name);
-  }
-
   bool AllocatePayloadBuffers(benchmark::State& state) {
     iree_hal_allocator_t* allocator = iree_hal_device_allocator(device_);
     iree_hal_buffer_params_t params = {0};

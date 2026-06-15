@@ -1,0 +1,683 @@
+// RUN: pass refine-boundaries
+
+// A private callee sees exact facts from all internal callers. Its simplified
+// return facts then seed call results, letting callers fold ordinary local code.
+func.def @private_extent_identity(%n: index) -> (index) {
+  %tile = index.constant 16 : index
+  %zero = index.constant 0 : index
+  %remainder = index.rem %n, %tile : index
+  %is_aligned = index.cmp eq, %remainder, %zero : index
+  %result = scf.if %is_aligned -> (index) {
+    scf.yield %n : index
+  } else {
+    %rounded = index.add %n, %tile : index
+    scf.yield %rounded : index
+  }
+  func.return %result : index
+}
+
+func.def public @entry() -> (index) {
+  %n = index.constant 32 : index
+  %result = func.call @private_extent_identity(%n) : (index) -> (index)
+  %two = index.constant 2 : index
+  %scaled = index.mul %result, %two : index
+  func.return %scaled : index
+}
+
+// ----
+func.def @private_extent_identity() {
+  func.return
+}
+
+func.def public @entry() -> (index) {
+  %scaled = index.constant 64 : index
+  func.return %scaled : index
+}
+
+// ====
+
+// Public callees do not receive argument facts from internal callers because
+// external callers may pass different values.
+func.def public @public_extent_identity(%n: index) -> (index) {
+  %tile = index.constant 16 : index
+  %zero = index.constant 0 : index
+  %remainder = index.rem %n, %tile : index
+  %is_aligned = index.cmp eq, %remainder, %zero : index
+  %result = scf.if %is_aligned -> (index) {
+    scf.yield %n : index
+  } else {
+    %rounded = index.add %n, %tile : index
+    scf.yield %rounded : index
+  }
+  func.return %result : index
+}
+
+func.def public @calls_public() -> (index) {
+  %n = index.constant 32 : index
+  %result = func.call @public_extent_identity(%n) : (index) -> (index)
+  %two = index.constant 2 : index
+  %scaled = index.mul %result, %two : index
+  func.return %scaled : index
+}
+
+// ----
+func.def public @public_extent_identity(%n: index) -> (index) {
+  %tile = index.constant 16 : index
+  %zero = index.constant 0 : index
+  %remainder = index.rem %n, %tile : index
+  %is_aligned = index.cmp eq, %remainder, %zero : index
+  %result = scf.if %is_aligned -> (index) {
+    scf.yield %n : index
+  } else {
+    %rounded = index.add %n, %tile : index
+    scf.yield %rounded : index
+  }
+  func.return %result : index
+}
+
+func.def public @calls_public() -> (index) {
+  %n = index.constant 32 : index
+  %result = func.call pure @public_extent_identity(%n) : (index) -> (index)
+  %13 = index.constant 1 : index
+  %scaled = index.shli %result, %13 : index
+  func.return %scaled : index
+}
+
+// ====
+
+// When private callers disagree on the exact value, the boundary join keeps
+// useful weaker facts such as divisibility. That is enough to prune alignment
+// checks without pretending both calls returned the same constant.
+func.def @private_joined_extent(%n: index) -> (index) {
+  %tile = index.constant 16 : index
+  %zero = index.constant 0 : index
+  %remainder = index.rem %n, %tile : index
+  %is_aligned = index.cmp eq, %remainder, %zero : index
+  %result = scf.if %is_aligned -> (index) {
+    scf.yield %n : index
+  } else {
+    %rounded = index.add %n, %tile : index
+    scf.yield %rounded : index
+  }
+  func.return %result : index
+}
+
+func.def public @joined_call_result_divisibility() -> (index) {
+  %a = index.constant 32 : index
+  %b = index.constant 48 : index
+  %ra = func.call @private_joined_extent(%a) : (index) -> (index)
+  %rb = func.call @private_joined_extent(%b) : (index) -> (index)
+  %tile = index.constant 16 : index
+  %rem_a = index.rem %ra, %tile : index
+  %rem_b = index.rem %rb, %tile : index
+  %sum = index.add %rem_a, %rem_b : index
+  func.return %sum : index
+}
+
+// ----
+func.def @private_joined_extent() {
+  func.return
+}
+
+func.def public @joined_call_result_divisibility() -> (index) {
+  %sum = index.constant 0 : index
+  func.return %sum : index
+}
+
+// ====
+
+// If every direct call to a private callee passes the same SSA value to two
+// argument slots, the callee can treat those slots as equal and simplify with
+// ordinary local canonicalization.
+func.def @same_actual_arguments(%lhs: index, %rhs: index) -> (index) {
+  %delta = index.sub %lhs, %rhs : index
+  func.return %delta : index
+}
+
+func.def public @call_same_actual(%n: index) -> (index) {
+  %result = func.call @same_actual_arguments(%n, %n) : (index, index) -> (index)
+  %one = index.constant 1 : index
+  %biased = index.add %result, %one : index
+  func.return %biased : index
+}
+
+// ----
+func.def @same_actual_arguments() {
+  func.return
+}
+
+func.def public @call_same_actual(%n: index) -> (index) {
+  %biased = index.constant 1 : index
+  func.return %biased : index
+}
+
+// ====
+
+// Exact facts can materialize directly at private callee argument boundaries,
+// even when there is no local consumer op to force ordinary constant folding.
+func.def @private_exact_arg_return(%n: index) -> (index) {
+  func.return %n : index
+}
+
+func.def public @call_private_exact_arg_return() -> (index) {
+  %n = index.constant 7 : index
+  %result = func.call @private_exact_arg_return(%n) : (index) -> (index)
+  func.return %result : index
+}
+
+// ----
+func.def @private_exact_arg_return() {
+  func.return
+}
+
+func.def public @call_private_exact_arg_return() -> (index) {
+  %n = index.constant 7 : index
+  func.return %n : index
+}
+
+// ====
+
+// Exact return facts materialize at direct call results so naked forwarded
+// values become ordinary constants without requiring a downstream arithmetic op.
+func.def @same_actual_direct_return(%lhs: index, %rhs: index) -> (index) {
+  %delta = index.sub %lhs, %rhs : index
+  func.return %delta : index
+}
+
+func.def public @call_same_actual_direct_return(%n: index) -> (index) {
+  %result = func.call @same_actual_direct_return(%n, %n) : (index, index) -> (index)
+  func.return %result : index
+}
+
+// ----
+func.def @same_actual_direct_return() {
+  func.return
+}
+
+func.def public @call_same_actual_direct_return(%n: index) -> (index) {
+  %8 = index.constant 0 : index
+  func.return %8 : index
+}
+
+// ====
+
+// Return forwarding is body-intrinsic, so it applies even for public callees
+// whose argument facts cannot be inferred from only the local module callers.
+func.def public @public_forward_first(%x: index, %y: index) -> (index) {
+  func.return %x : index
+}
+
+func.def public @call_public_forwarded_dynamic(%x: index, %y: index) -> (index) {
+  %result = func.call @public_forward_first(%x, %y) : (index, index) -> (index)
+  %sum = index.add %result, %y : index
+  func.return %sum : index
+}
+
+// ----
+func.def public @public_forward_first(%x: index, %y: index) -> (index) {
+  func.return %x : index
+}
+
+func.def public @call_public_forwarded_dynamic(%x: index, %y: index) -> (index) {
+  %sum = index.add %x, %y : index
+  func.return %sum : index
+}
+
+// ====
+
+// Replacement application walks nested regions, so a forwarded result inside a
+// branch can still expose the branch to ordinary selectification.
+func.def public @public_forward_first(%x: index, %y: index) -> (index) {
+  func.return %x : index
+}
+
+func.def public @call_public_forwarded_nested(%cond: i1, %x: index, %y: index) -> (index) {
+  %chosen = scf.if %cond -> (index) {
+    %result = func.call @public_forward_first(%x, %y) : (index, index) -> (index)
+    scf.yield %result : index
+  } else {
+    scf.yield %y : index
+  }
+  func.return %chosen : index
+}
+
+// ----
+func.def public @public_forward_first(%x: index, %y: index) -> (index) {
+  func.return %x : index
+}
+
+func.def public @call_public_forwarded_nested(%cond: i1, %x: index, %y: index) -> (index) {
+  %chosen = scf.select %cond, %x, %y : index
+  func.return %chosen : index
+}
+
+// ====
+
+// A single disagreeing direct call blocks argument equality. This keeps the
+// callee valid for all call sites instead of over-specializing from one lucky
+// caller.
+func.def @conflicting_actual_arguments(%lhs: index, %rhs: index) -> (index) {
+  %delta = index.sub %lhs, %rhs : index
+  func.return %delta : index
+}
+
+func.def public @call_conflicting_actuals(%x: index, %y: index) -> (index, index) {
+  %same = func.call @conflicting_actual_arguments(%x, %x) : (index, index) -> (index)
+  %different = func.call @conflicting_actual_arguments(%x, %y) : (index, index) -> (index)
+  func.return %same, %different : index, index
+}
+
+// ----
+func.def @conflicting_actual_arguments(%lhs: index, %rhs: index) -> (index) {
+  %delta = index.sub %lhs, %rhs : index
+  func.return %delta : index
+}
+
+func.def public @call_conflicting_actuals(%x: index, %y: index) -> (index, index) {
+  %same = func.call pure @conflicting_actual_arguments(%x, %x) : (index, index) -> (index)
+  %different = func.call pure @conflicting_actual_arguments(%x, %y) : (index, index) -> (index)
+  func.return %same, %different : index, index
+}
+
+// ====
+
+// Unused private callee arguments are removed from both the callee entry block
+// and every direct call site. The side effect keeps the call live so the test
+// exercises operand filtering instead of only DCE of the call.
+func.def @effectful_use_first(%x: index, %dead: index) {
+  test.use %x : index
+  func.return
+}
+
+func.def public @call_effectful_use_first(%x: index, %y: index) {
+  func.call @effectful_use_first(%x, %y) : (index, index)
+  func.return
+}
+
+// ----
+func.def @effectful_use_first(%x: index) {
+  test.use %x : index
+  func.return
+}
+
+func.def public @call_effectful_use_first(%x: index, %y: index) {
+  func.call @effectful_use_first(%x) : (index)
+  func.return
+}
+
+// ====
+
+// Tied call operands are not pruned, and their operand indices are remapped
+// when earlier arguments disappear. Return forwarding must not replace the tied
+// result with the consumed operand value.
+func.def @effectful_return_buffer(%dead: index, %buffer: buffer) -> (buffer) {
+  test.use %buffer : buffer
+  func.return %buffer : buffer
+}
+
+func.def public @call_effectful_return_buffer(%dead: index, %buffer: buffer) -> (buffer) {
+  %result = func.call @effectful_return_buffer(%dead, %buffer) : (index, buffer) -> (%buffer as buffer)
+  func.return %result : buffer
+}
+
+// ----
+func.def @effectful_return_buffer(%buffer: buffer) -> (buffer) {
+  test.use %buffer : buffer
+  func.return %buffer : buffer
+}
+
+func.def public @call_effectful_return_buffer(%dead: index, %buffer: buffer) -> (buffer) {
+  %result = func.call @effectful_return_buffer(%buffer) : (buffer) -> (%buffer as buffer)
+  func.return %result : buffer
+}
+
+// ====
+
+// Unused private callee results are removed from both the callee signature and
+// every direct call site. This can expose newly-unused arguments for pruning in
+// the same boundary cleanup round.
+func.def @effectful_return_first(%x: index, %dead: index) -> (index, index) {
+  test.use %x : index
+  func.return %x, %dead : index, index
+}
+
+func.def public @call_effectful_return_first(%x: index, %y: index) -> (index) {
+  %kept, %dead = func.call @effectful_return_first(%x, %y) : (index, index) -> (index, index)
+  func.return %kept : index
+}
+
+// ----
+func.def @effectful_return_first(%x: index) {
+  test.use %x : index
+  func.return
+}
+
+func.def public @call_effectful_return_first(%x: index, %y: index) -> (index) {
+  func.call @effectful_return_first(%x) : (index)
+  func.return %x : index
+}
+
+// ====
+
+// Tied result slots are preserved, and their result ordinals are remapped when
+// earlier unused result slots disappear.
+func.def @effectful_return_tied_after_dead(%dead: index, %buffer: buffer) -> (index, buffer) {
+  test.use %buffer : buffer
+  func.return %dead, %buffer : index, buffer
+}
+
+func.def public @call_effectful_return_tied_after_dead(%dead: index, %buffer: buffer) -> (buffer) {
+  %dead_result, %result = func.call @effectful_return_tied_after_dead(%dead, %buffer) : (index, buffer) -> (index, %buffer as buffer)
+  func.return %result : buffer
+}
+
+// ----
+func.def @effectful_return_tied_after_dead(%buffer: buffer) -> (buffer) {
+  test.use %buffer : buffer
+  func.return %buffer : buffer
+}
+
+func.def public @call_effectful_return_tied_after_dead(%dead: index, %buffer: buffer) -> (buffer) {
+  %result = func.call @effectful_return_tied_after_dead(%buffer) : (buffer) -> (%buffer as buffer)
+  func.return %result : buffer
+}
+
+// ====
+
+// When an internal callee always returns the same computed SSA value through
+// two result slots, callers can use one call result and the duplicate boundary
+// slot is pruned. This is weaker than argument forwarding: the value cannot be
+// named by the caller until the call executes.
+func.def @effectful_return_duplicate_computed(%x: index) -> (index, index) {
+  %one = index.constant 1 : index
+  %sum = index.add %x, %one : index
+  test.use %x : index
+  func.return %sum, %sum : index, index
+}
+
+func.def public @call_effectful_return_duplicate_computed(%x: index) -> (index) {
+  %lhs, %rhs = func.call @effectful_return_duplicate_computed(%x) : (index) -> (index, index)
+  %total = index.add %lhs, %rhs : index
+  func.return %total : index
+}
+
+// ----
+func.def @effectful_return_duplicate_computed(%x: index) -> (index) {
+  %one = index.constant 1 : index
+  %sum = index.add %x, %one : index
+  test.use %x : index
+  func.return %sum : index
+}
+
+func.def public @call_effectful_return_duplicate_computed(%x: index) -> (index) {
+  %lhs = func.call @effectful_return_duplicate_computed(%x) : (index) -> (index)
+  %total = index.add %lhs, %lhs : index
+  func.return %total : index
+}
+
+// ====
+
+// Exact boundary facts refine dynamic dimensions carried only through private
+// function signatures. Once the view extent is static, the size argument is
+// ordinary dead boundary state and can be pruned with the call operand.
+func.def @private_extent_view(%buffer: buffer, %n: index) -> (view<[%n]xf32, #dense>) {
+  %offset = index.constant 0 : offset
+  %view = buffer.view %buffer[%offset] : buffer -> view<[%n]xf32, #dense>
+  func.return %view : view<[%n]xf32, #dense>
+}
+
+func.def public @call_private_extent_view(%buffer: buffer) {
+  %n = index.constant 4 : index
+  %view = func.call @private_extent_view(%buffer, %n) : (buffer, index) -> (view<[%n]xf32, #dense>)
+  test.use %view : view<[%n]xf32, #dense>
+  func.return
+}
+
+// ----
+func.def @private_extent_view(%buffer: buffer) -> (view<4xf32, #dense>) {
+  %offset = index.constant 0 : offset
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, #dense>
+  func.return %view : view<4xf32, #dense>
+}
+
+func.def public @call_private_extent_view(%buffer: buffer) {
+  %view = func.call pure @private_extent_view(%buffer) : (buffer) -> (view<4xf32, #dense>)
+  test.use %view : view<4xf32, #dense>
+  func.return
+}
+
+// ====
+
+// Extension-backed encoding facts are cloned into boundary summaries instead of
+// being stripped. That lets private callees refine dynamic type attachments
+// supplied by every internal caller.
+func.def @private_dense_view(%buffer: buffer, %layout: encoding<layout>) -> (view<4xf32, %layout>) {
+  %offset = index.constant 0 : offset
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %layout>
+  func.return %view : view<4xf32, %layout>
+}
+
+func.def public @call_private_dense_view(%buffer: buffer) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %dense = encoding.assume.spec %layout, #dense : encoding<layout>
+  %view = func.call @private_dense_view(%buffer, %dense) : (buffer, encoding<layout>) -> (view<4xf32, %dense>)
+  test.use %view : view<4xf32, %dense>
+  func.return
+}
+
+// ----
+func.def @private_dense_view(%buffer: buffer) -> (view<4xf32, #dense>) {
+  %offset = index.constant 0 : offset
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, #dense>
+  func.return %view : view<4xf32, #dense>
+}
+
+func.def public @call_private_dense_view(%buffer: buffer) {
+  %view = func.call pure @private_dense_view(%buffer) : (buffer) -> (view<4xf32, #dense>)
+  test.use %view : view<4xf32, #dense>
+  func.return
+}
+
+// ====
+
+// Static strided extension payloads survive boundary joins when multiple call
+// sites provide semantically identical facts with independently-interned
+// extension IDs.
+func.def @private_strided_view(%buffer: buffer, %layout: encoding<layout>) -> (view<4xf32, %layout>) {
+  %offset = index.constant 0 : offset
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %layout>
+  func.return %view : view<4xf32, %layout>
+}
+
+func.def public @call_private_strided_view(%buffer: buffer) {
+  %base0 = encoding.layout.strided [8] : encoding<layout>
+  %layout0 = encoding.assume.spec %base0, #strided<stride=8> : encoding<layout>
+  %base1 = encoding.layout.strided [8] : encoding<layout>
+  %layout1 = encoding.assume.spec %base1, #strided<stride=8> : encoding<layout>
+  %view0 = func.call @private_strided_view(%buffer, %layout0) : (buffer, encoding<layout>) -> (view<4xf32, %layout0>)
+  %view1 = func.call @private_strided_view(%buffer, %layout1) : (buffer, encoding<layout>) -> (view<4xf32, %layout1>)
+  test.use %view0, %view1 : view<4xf32, %layout0>, view<4xf32, %layout1>
+  func.return
+}
+
+// ----
+func.def @private_strided_view(%buffer: buffer) -> (view<4xf32, #strided<stride=8>>) {
+  %offset = index.constant 0 : offset
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, #strided<stride=8>>
+  func.return %view : view<4xf32, #strided<stride=8>>
+}
+
+func.def public @call_private_strided_view(%buffer: buffer) {
+  %view0 = func.call pure @private_strided_view(%buffer) : (buffer) -> (view<4xf32, #strided<stride=8>>)
+  %view1 = func.call pure @private_strided_view(%buffer) : (buffer) -> (view<4xf32, #strided<stride=8>>)
+  test.use %view0, %view1 : view<4xf32, #strided<stride=8>>, view<4xf32, #strided<stride=8>>
+  func.return
+}
+
+// ====
+
+// Conflicting extension payloads fork private callees into static-layout
+// specializations instead of forcing one dynamic signature to serve incompatible
+// exact layouts.
+func.def @private_conflicting_layout_view(%buffer: buffer, %layout: encoding<layout>) -> (view<4xf32, %layout>) {
+  %offset = index.constant 0 : offset
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %layout>
+  func.return %view : view<4xf32, %layout>
+}
+
+func.def public @call_private_conflicting_layout_view(%buffer: buffer) {
+  %dense_base = encoding.layout.dense : encoding<layout>
+  %dense = encoding.assume.spec %dense_base, #dense : encoding<layout>
+  %strided_base = encoding.layout.strided [8] : encoding<layout>
+  %strided = encoding.assume.spec %strided_base, #strided<stride=8> : encoding<layout>
+  %view0 = func.call @private_conflicting_layout_view(%buffer, %dense) : (buffer, encoding<layout>) -> (view<4xf32, %dense>)
+  %view1 = func.call @private_conflicting_layout_view(%buffer, %strided) : (buffer, encoding<layout>) -> (view<4xf32, %strided>)
+  test.use %view0, %view1 : view<4xf32, %dense>, view<4xf32, %strided>
+  func.return
+}
+
+// ----
+func.def @private_conflicting_layout_view() {
+  func.return
+}
+
+func.def @private_conflicting_layout_view_spec0(%buffer: buffer) -> (view<4xf32, #dense>) {
+  %offset = index.constant 0 : offset
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, #dense>
+  func.return %view : view<4xf32, #dense>
+}
+
+func.def @private_conflicting_layout_view_spec1(%buffer: buffer) -> (view<4xf32, #strided<stride=8>>) {
+  %offset = index.constant 0 : offset
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, #strided<stride=8>>
+  func.return %view : view<4xf32, #strided<stride=8>>
+}
+
+func.def public @call_private_conflicting_layout_view(%buffer: buffer) {
+  %view0 = func.call pure @private_conflicting_layout_view_spec0(%buffer) : (buffer) -> (view<4xf32, #dense>)
+  %view1 = func.call pure @private_conflicting_layout_view_spec1(%buffer) : (buffer) -> (view<4xf32, #strided<stride=8>>)
+  test.use %view0, %view1 : view<4xf32, #dense>, view<4xf32, #strided<stride=8>>
+  func.return
+}
+
+// ====
+
+// Projected function-like regions share one logical signature. Exact caller
+// facts materialize as separate constants in each isolated projection so body
+// and config rewrite independently without crossing region SSA boundaries.
+test.split_func @projected_exact_constant(%n: index) {
+  %cfg_one = index.constant 1 : index
+  %cfg_sum = index.add %n, %cfg_one : index
+  test.use %cfg_sum : index
+  test.yield
+} launch {
+  %one = index.constant 1 : index
+  %sum = index.add %n, %one : index
+  test.use %sum : index
+  test.yield
+}
+
+func.def public @call_projected_exact_constant() {
+  %n = index.constant 7 : index
+  test.invoke @projected_exact_constant(%n) : (index)
+  func.return
+}
+
+// ----
+test.split_func @projected_exact_constant() {
+  %cfg_sum = index.constant 8 : index
+  test.use %cfg_sum : index
+  test.yield
+} launch {
+  %sum = index.constant 8 : index
+  test.use %sum : index
+  test.yield
+}
+
+func.def public @call_projected_exact_constant() {
+  test.invoke @projected_exact_constant() : ()
+  func.return
+}
+
+// ====
+
+// Argument equality is also logical: replacing one duplicate argument with
+// another must happen independently in every projected root region before local
+// canonicalization sees the simplified expressions.
+test.split_func @projected_equal_arguments(%lhs: index, %rhs: index) {
+  %cfg_delta = index.sub %lhs, %rhs : index
+  test.use %cfg_delta : index
+  test.yield
+} launch {
+  %delta = index.sub %lhs, %rhs : index
+  test.use %delta : index
+  test.yield
+}
+
+func.def public @call_projected_equal_arguments(%n: index) {
+  test.invoke @projected_equal_arguments(%n, %n) : (index, index)
+  func.return
+}
+
+// ----
+test.split_func @projected_equal_arguments() {
+  %cfg_delta = index.constant 0 : index
+  test.use %cfg_delta : index
+  test.yield
+} launch {
+  %delta = index.constant 0 : index
+  test.use %delta : index
+  test.yield
+}
+
+func.def public @call_projected_equal_arguments(%n: index) {
+  test.invoke @projected_equal_arguments() : ()
+  func.return
+}
+
+// ====
+
+// A logical argument is prunable only when every projection drops its matching
+// entry argument. The rewrite then removes the same argument index from each
+// projected region and from all semantic call-like edges.
+test.split_func @projected_dead_argument(%kept: index, %dead: index) {
+  test.use %kept : index
+  test.yield
+} launch {
+  test.use %kept : index
+  test.yield
+}
+
+func.def public @call_projected_dead_argument(%kept: index, %dead: index) {
+  test.invoke @projected_dead_argument(%kept, %dead) : (index, index)
+  func.return
+}
+
+// ----
+test.split_func @projected_dead_argument(%kept: index) {
+  test.use %kept : index
+  test.yield
+} launch {
+  test.use %kept : index
+  test.yield
+}
+
+func.def public @call_projected_dead_argument(%kept: index, %dead: index) {
+  test.invoke @projected_dead_argument(%kept) : (index)
+  func.return
+}
+
+// ====
+
+// RUN: pass refine-boundaries{max-iterations=1}
+
+// ERROR@+1: LOWERING/043 {pass_name="refine-boundaries", max_iterations="1"}
+func.def @identity(%value: index) -> (index) {
+  func.return %value : index
+}
+
+func.def public @caller() -> (index) {
+  %zero = index.constant 0 : index
+  %result = func.call @identity(%zero) : (index) -> (index)
+  func.return %result : index
+}

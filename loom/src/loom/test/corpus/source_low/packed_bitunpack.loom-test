@@ -1,0 +1,48 @@
+// RUN: roundtrip
+
+func.def @i32_to_u8x4_bitunpack(%packed: vector<1xi32>) -> (vector<4xi32>) {
+  %unpacked = vector.bitunpacku<8> %packed : vector<1xi32> -> vector<4xi32>
+  func.return %unpacked : vector<4xi32>
+}
+
+// ====
+
+func.def @i32_to_s8x4_bitunpack(%packed: vector<1xi32>) -> (vector<4xi32>) {
+  %unpacked = vector.bitunpacks<8> %packed : vector<1xi32> -> vector<4xi32>
+  func.return %unpacked : vector<4xi32>
+}
+
+// ====
+
+func.def @i32_to_u4x8_bitunpack(%packed: vector<1xi32>) -> (vector<8xi32>) {
+  %unpacked = vector.bitunpacku<4> %packed : vector<1xi32> -> vector<8xi32>
+  func.return %unpacked : vector<8xi32>
+}
+
+// ====
+
+func.def @i8x2_to_u2x8_bitunpack(%packed: vector<2xi8>) -> (vector<8xi32>) {
+  %unpacked = vector.bitunpacku<2> %packed : vector<2xi8> -> vector<8xi32>
+  func.return %unpacked : vector<8xi32>
+}
+
+// ====
+
+func.def @i32_to_u8x4_bitunpack_i8_result(%packed: vector<1xi32>) -> (vector<4xi8>) {
+  %unpacked = vector.bitunpacku<8> %packed : vector<1xi32> -> vector<4xi8>
+  func.return %unpacked : vector<4xi8>
+}
+
+// ====
+
+func.def @i8x2_to_u4x4_bitunpack_i8_result(%packed: vector<2xi8>) -> (vector<4xi8>) {
+  %unpacked = vector.bitunpacku<4> %packed : vector<2xi8> -> vector<4xi8>
+  func.return %unpacked : vector<4xi8>
+}
+
+// ====
+
+func.def @i8x2_to_s4x4_bitunpack_i8_result(%packed: vector<2xi8>) -> (vector<4xi8>) {
+  %unpacked = vector.bitunpacks<4> %packed : vector<2xi8> -> vector<4xi8>
+  func.return %unpacked : vector<4xi8>
+}

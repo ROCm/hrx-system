@@ -192,6 +192,7 @@ static iree_status_t iree_hal_streaming_query_device_info(
 // Initializes a single device from a pyre device handle.
 static iree_status_t iree_hal_streaming_initialize_device(
     iree_hal_streaming_device_registry_t* registry, hrx_device_t hrx_dev,
+    iree_hal_streaming_device_ordinal_t ordinal,
     iree_hal_streaming_device_t* out_device) {
   IREE_ASSERT_ARGUMENT(registry);
   IREE_ASSERT_ARGUMENT(hrx_dev);
@@ -199,6 +200,10 @@ static iree_status_t iree_hal_streaming_initialize_device(
   IREE_TRACE_ZONE_BEGIN(z0);
 
   memset(out_device, 0, sizeof(*out_device));
+  // The entry was just zeroed, so the ordinal MUST be (re)assigned here.
+  // Per-device pools, peer lookups, and context->device_ordinal all key off
+  // it; if it stays 0 every device aliases device 0.
+  out_device->ordinal = ordinal;
 
   // Store pyre device and extract HAL device for direct HAL usage.
   out_device->hrx_device = hrx_dev;
@@ -306,20 +311,14 @@ static void iree_hal_streaming_deinitialize_device(
   device->info.name = iree_string_view_empty();
 
   // Release memory pools.
-  if (device->current_mem_pool) {
-    hrx_mem_pool_release(device->current_mem_pool);
-    device->current_mem_pool = NULL;
-  }
-  if (device->default_mem_pool) {
-    hrx_mem_pool_release(device->default_mem_pool);
-    device->default_mem_pool = NULL;
-  }
+  hrx_mem_pool_release(device->current_mem_pool);
+  device->current_mem_pool = NULL;
+  hrx_mem_pool_release(device->default_mem_pool);
+  device->default_mem_pool = NULL;
 
   // Release primary context (may not exist if never accessed).
-  if (device->primary_context) {
-    iree_hal_streaming_context_release(device->primary_context);
-    device->primary_context = NULL;
-  }
+  iree_hal_streaming_context_release(device->primary_context);
+  device->primary_context = NULL;
 
   // Deinitialize primary context mutex.
   iree_slim_mutex_deinitialize(&device->primary_context_mutex);
@@ -344,9 +343,9 @@ static iree_status_t iree_hal_streaming_query_p2p_capabilities(
   registry->p2p_link_count = registry->device_count * registry->device_count;
   const iree_host_size_t topology_size =
       registry->p2p_link_count * sizeof(iree_hal_streaming_p2p_link_t);
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(registry->host_allocator,
-                                             topology_size,
-                                             (void**)&registry->p2p_topology));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_allocator_malloc(registry->host_allocator, topology_size,
+                                (void**)&registry->p2p_topology));
   memset(registry->p2p_topology, 0, topology_size);
 
   // Populate P2P links for all device pairs.
@@ -522,10 +521,9 @@ iree_status_t iree_hal_streaming_init_global(
 
       iree_hal_streaming_device_t* device =
           &device_registry->devices[device_registry->device_count];
-      device->ordinal = device_registry->device_count;
 
-      dev_status = iree_hal_streaming_initialize_device(device_registry,
-                                                        hrx_dev, device);
+      dev_status = iree_hal_streaming_initialize_device(
+          device_registry, hrx_dev, device_registry->device_count, device);
       if (!iree_status_is_ok(dev_status)) {
         iree_status_ignore(dev_status);
         continue;

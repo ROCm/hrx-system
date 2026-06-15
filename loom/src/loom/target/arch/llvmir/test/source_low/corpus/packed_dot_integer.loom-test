@@ -1,0 +1,504 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/packed_dot_integer.loom-test
+// RUN: emit source-low output=low
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @dot4i_s8s8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %dot = vector.dot4i<s8s8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @dot4i_s8s8(%lhs: reg<llvmir.i8 x4>, %rhs: reg<llvmir.i8 x4>, %acc: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {
+  %36 = extract.v4i8 %lhs, 0
+  %37 = extract.v4i8 %rhs, 0
+  %38 = sext.i8.i32 %36
+  %39 = sext.i8.i32 %37
+  %40 = mul.i32 %38, %39
+  %41 = add.i32 %acc, %40
+  %42 = extract.v4i8 %lhs, 1
+  %43 = extract.v4i8 %rhs, 1
+  %44 = sext.i8.i32 %42
+  %45 = sext.i8.i32 %43
+  %46 = mul.i32 %44, %45
+  %47 = add.i32 %41, %46
+  %48 = extract.v4i8 %lhs, 2
+  %49 = extract.v4i8 %rhs, 2
+  %50 = sext.i8.i32 %48
+  %51 = sext.i8.i32 %49
+  %52 = mul.i32 %50, %51
+  %53 = add.i32 %47, %52
+  %54 = extract.v4i8 %lhs, 3
+  %55 = extract.v4i8 %rhs, 3
+  %56 = sext.i8.i32 %54
+  %57 = sext.i8.i32 %55
+  %58 = mul.i32 %56, %57
+  %dot = add.i32 %53, %58
+  return %dot
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @dot4i_u8u8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %dot = vector.dot4i<u8u8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @dot4i_u8u8(%lhs: reg<llvmir.i8 x4>, %rhs: reg<llvmir.i8 x4>, %acc: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {
+  %36 = extract.v4i8 %lhs, 0
+  %37 = extract.v4i8 %rhs, 0
+  %38 = zext.i8.i32 %36
+  %39 = zext.i8.i32 %37
+  %40 = mul.i32 %38, %39
+  %41 = add.i32 %acc, %40
+  %42 = extract.v4i8 %lhs, 1
+  %43 = extract.v4i8 %rhs, 1
+  %44 = zext.i8.i32 %42
+  %45 = zext.i8.i32 %43
+  %46 = mul.i32 %44, %45
+  %47 = add.i32 %41, %46
+  %48 = extract.v4i8 %lhs, 2
+  %49 = extract.v4i8 %rhs, 2
+  %50 = zext.i8.i32 %48
+  %51 = zext.i8.i32 %49
+  %52 = mul.i32 %50, %51
+  %53 = add.i32 %47, %52
+  %54 = extract.v4i8 %lhs, 3
+  %55 = extract.v4i8 %rhs, 3
+  %56 = zext.i8.i32 %54
+  %57 = zext.i8.i32 %55
+  %58 = mul.i32 %56, %57
+  %dot = add.i32 %53, %58
+  return %dot
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @dot8i4_u4u4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %dot = vector.dot8i4<u4u4> %lhs, %rhs, %acc : vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @dot8i4_u4u4(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>, %acc: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {
+  %68 = const.i32 15
+  %69 = const.i32 4
+  %70 = const.i32 8
+  %71 = const.i32 12
+  %72 = const.i32 16
+  %73 = const.i32 20
+  %74 = const.i32 24
+  %75 = const.i32 28
+  %76 = and.i32 %lhs, %68
+  %77 = and.i32 %rhs, %68
+  %78 = mul.i32 %76, %77
+  %79 = add.i32 %acc, %78
+  %80 = lshr.i32 %lhs, %69
+  %81 = and.i32 %80, %68
+  %82 = lshr.i32 %rhs, %69
+  %83 = and.i32 %82, %68
+  %84 = mul.i32 %81, %83
+  %85 = add.i32 %79, %84
+  %86 = lshr.i32 %lhs, %70
+  %87 = and.i32 %86, %68
+  %88 = lshr.i32 %rhs, %70
+  %89 = and.i32 %88, %68
+  %90 = mul.i32 %87, %89
+  %91 = add.i32 %85, %90
+  %92 = lshr.i32 %lhs, %71
+  %93 = and.i32 %92, %68
+  %94 = lshr.i32 %rhs, %71
+  %95 = and.i32 %94, %68
+  %96 = mul.i32 %93, %95
+  %97 = add.i32 %91, %96
+  %98 = lshr.i32 %lhs, %72
+  %99 = and.i32 %98, %68
+  %100 = lshr.i32 %rhs, %72
+  %101 = and.i32 %100, %68
+  %102 = mul.i32 %99, %101
+  %103 = add.i32 %97, %102
+  %104 = lshr.i32 %lhs, %73
+  %105 = and.i32 %104, %68
+  %106 = lshr.i32 %rhs, %73
+  %107 = and.i32 %106, %68
+  %108 = mul.i32 %105, %107
+  %109 = add.i32 %103, %108
+  %110 = lshr.i32 %lhs, %74
+  %111 = and.i32 %110, %68
+  %112 = lshr.i32 %rhs, %74
+  %113 = and.i32 %112, %68
+  %114 = mul.i32 %111, %113
+  %115 = add.i32 %109, %114
+  %116 = lshr.i32 %lhs, %75
+  %117 = and.i32 %116, %68
+  %118 = lshr.i32 %rhs, %75
+  %119 = and.i32 %118, %68
+  %120 = mul.i32 %117, %119
+  %dot = add.i32 %115, %120
+  return %dot
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @dot4i_u8s8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %dot = vector.dot4i<u8s8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @dot4i_u8s8(%lhs: reg<llvmir.i8 x4>, %rhs: reg<llvmir.i8 x4>, %acc: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {
+  %36 = extract.v4i8 %lhs, 0
+  %37 = extract.v4i8 %rhs, 0
+  %38 = zext.i8.i32 %36
+  %39 = sext.i8.i32 %37
+  %40 = mul.i32 %38, %39
+  %41 = add.i32 %acc, %40
+  %42 = extract.v4i8 %lhs, 1
+  %43 = extract.v4i8 %rhs, 1
+  %44 = zext.i8.i32 %42
+  %45 = sext.i8.i32 %43
+  %46 = mul.i32 %44, %45
+  %47 = add.i32 %41, %46
+  %48 = extract.v4i8 %lhs, 2
+  %49 = extract.v4i8 %rhs, 2
+  %50 = zext.i8.i32 %48
+  %51 = sext.i8.i32 %49
+  %52 = mul.i32 %50, %51
+  %53 = add.i32 %47, %52
+  %54 = extract.v4i8 %lhs, 3
+  %55 = extract.v4i8 %rhs, 3
+  %56 = zext.i8.i32 %54
+  %57 = sext.i8.i32 %55
+  %58 = mul.i32 %56, %57
+  %dot = add.i32 %53, %58
+  return %dot
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @dot4i_s8u8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %dot = vector.dot4i<s8u8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @dot4i_s8u8(%lhs: reg<llvmir.i8 x4>, %rhs: reg<llvmir.i8 x4>, %acc: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {
+  %36 = extract.v4i8 %lhs, 0
+  %37 = extract.v4i8 %rhs, 0
+  %38 = sext.i8.i32 %36
+  %39 = zext.i8.i32 %37
+  %40 = mul.i32 %38, %39
+  %41 = add.i32 %acc, %40
+  %42 = extract.v4i8 %lhs, 1
+  %43 = extract.v4i8 %rhs, 1
+  %44 = sext.i8.i32 %42
+  %45 = zext.i8.i32 %43
+  %46 = mul.i32 %44, %45
+  %47 = add.i32 %41, %46
+  %48 = extract.v4i8 %lhs, 2
+  %49 = extract.v4i8 %rhs, 2
+  %50 = sext.i8.i32 %48
+  %51 = zext.i8.i32 %49
+  %52 = mul.i32 %50, %51
+  %53 = add.i32 %47, %52
+  %54 = extract.v4i8 %lhs, 3
+  %55 = extract.v4i8 %rhs, 3
+  %56 = sext.i8.i32 %54
+  %57 = zext.i8.i32 %55
+  %58 = mul.i32 %56, %57
+  %dot = add.i32 %53, %58
+  return %dot
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @dot8i4_s4s4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %dot = vector.dot8i4<s4s4> %lhs, %rhs, %acc : vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @dot8i4_s4s4(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>, %acc: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {
+  %100 = const.i32 15
+  %101 = const.i32 4
+  %102 = const.i32 8
+  %103 = const.i32 12
+  %104 = const.i32 16
+  %105 = const.i32 20
+  %106 = const.i32 24
+  %107 = const.i32 28
+  %108 = and.i32 %lhs, %100
+  %109 = shl.i32 %108, %107
+  %110 = ashr.i32 %109, %107
+  %111 = and.i32 %rhs, %100
+  %112 = shl.i32 %111, %107
+  %113 = ashr.i32 %112, %107
+  %114 = mul.i32 %110, %113
+  %115 = add.i32 %acc, %114
+  %116 = lshr.i32 %lhs, %101
+  %117 = and.i32 %116, %100
+  %118 = shl.i32 %117, %107
+  %119 = ashr.i32 %118, %107
+  %120 = lshr.i32 %rhs, %101
+  %121 = and.i32 %120, %100
+  %122 = shl.i32 %121, %107
+  %123 = ashr.i32 %122, %107
+  %124 = mul.i32 %119, %123
+  %125 = add.i32 %115, %124
+  %126 = lshr.i32 %lhs, %102
+  %127 = and.i32 %126, %100
+  %128 = shl.i32 %127, %107
+  %129 = ashr.i32 %128, %107
+  %130 = lshr.i32 %rhs, %102
+  %131 = and.i32 %130, %100
+  %132 = shl.i32 %131, %107
+  %133 = ashr.i32 %132, %107
+  %134 = mul.i32 %129, %133
+  %135 = add.i32 %125, %134
+  %136 = lshr.i32 %lhs, %103
+  %137 = and.i32 %136, %100
+  %138 = shl.i32 %137, %107
+  %139 = ashr.i32 %138, %107
+  %140 = lshr.i32 %rhs, %103
+  %141 = and.i32 %140, %100
+  %142 = shl.i32 %141, %107
+  %143 = ashr.i32 %142, %107
+  %144 = mul.i32 %139, %143
+  %145 = add.i32 %135, %144
+  %146 = lshr.i32 %lhs, %104
+  %147 = and.i32 %146, %100
+  %148 = shl.i32 %147, %107
+  %149 = ashr.i32 %148, %107
+  %150 = lshr.i32 %rhs, %104
+  %151 = and.i32 %150, %100
+  %152 = shl.i32 %151, %107
+  %153 = ashr.i32 %152, %107
+  %154 = mul.i32 %149, %153
+  %155 = add.i32 %145, %154
+  %156 = lshr.i32 %lhs, %105
+  %157 = and.i32 %156, %100
+  %158 = shl.i32 %157, %107
+  %159 = ashr.i32 %158, %107
+  %160 = lshr.i32 %rhs, %105
+  %161 = and.i32 %160, %100
+  %162 = shl.i32 %161, %107
+  %163 = ashr.i32 %162, %107
+  %164 = mul.i32 %159, %163
+  %165 = add.i32 %155, %164
+  %166 = lshr.i32 %lhs, %106
+  %167 = and.i32 %166, %100
+  %168 = shl.i32 %167, %107
+  %169 = ashr.i32 %168, %107
+  %170 = lshr.i32 %rhs, %106
+  %171 = and.i32 %170, %100
+  %172 = shl.i32 %171, %107
+  %173 = ashr.i32 %172, %107
+  %174 = mul.i32 %169, %173
+  %175 = add.i32 %165, %174
+  %176 = lshr.i32 %lhs, %107
+  %177 = and.i32 %176, %100
+  %178 = shl.i32 %177, %107
+  %179 = ashr.i32 %178, %107
+  %180 = lshr.i32 %rhs, %107
+  %181 = and.i32 %180, %100
+  %182 = shl.i32 %181, %107
+  %183 = ashr.i32 %182, %107
+  %184 = mul.i32 %179, %183
+  %dot = add.i32 %175, %184
+  return %dot
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @dot8i4_u4s4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %dot = vector.dot8i4<u4s4> %lhs, %rhs, %acc : vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @dot8i4_u4s4(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>, %acc: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {
+  %84 = const.i32 15
+  %85 = const.i32 4
+  %86 = const.i32 8
+  %87 = const.i32 12
+  %88 = const.i32 16
+  %89 = const.i32 20
+  %90 = const.i32 24
+  %91 = const.i32 28
+  %92 = and.i32 %lhs, %84
+  %93 = and.i32 %rhs, %84
+  %94 = shl.i32 %93, %91
+  %95 = ashr.i32 %94, %91
+  %96 = mul.i32 %92, %95
+  %97 = add.i32 %acc, %96
+  %98 = lshr.i32 %lhs, %85
+  %99 = and.i32 %98, %84
+  %100 = lshr.i32 %rhs, %85
+  %101 = and.i32 %100, %84
+  %102 = shl.i32 %101, %91
+  %103 = ashr.i32 %102, %91
+  %104 = mul.i32 %99, %103
+  %105 = add.i32 %97, %104
+  %106 = lshr.i32 %lhs, %86
+  %107 = and.i32 %106, %84
+  %108 = lshr.i32 %rhs, %86
+  %109 = and.i32 %108, %84
+  %110 = shl.i32 %109, %91
+  %111 = ashr.i32 %110, %91
+  %112 = mul.i32 %107, %111
+  %113 = add.i32 %105, %112
+  %114 = lshr.i32 %lhs, %87
+  %115 = and.i32 %114, %84
+  %116 = lshr.i32 %rhs, %87
+  %117 = and.i32 %116, %84
+  %118 = shl.i32 %117, %91
+  %119 = ashr.i32 %118, %91
+  %120 = mul.i32 %115, %119
+  %121 = add.i32 %113, %120
+  %122 = lshr.i32 %lhs, %88
+  %123 = and.i32 %122, %84
+  %124 = lshr.i32 %rhs, %88
+  %125 = and.i32 %124, %84
+  %126 = shl.i32 %125, %91
+  %127 = ashr.i32 %126, %91
+  %128 = mul.i32 %123, %127
+  %129 = add.i32 %121, %128
+  %130 = lshr.i32 %lhs, %89
+  %131 = and.i32 %130, %84
+  %132 = lshr.i32 %rhs, %89
+  %133 = and.i32 %132, %84
+  %134 = shl.i32 %133, %91
+  %135 = ashr.i32 %134, %91
+  %136 = mul.i32 %131, %135
+  %137 = add.i32 %129, %136
+  %138 = lshr.i32 %lhs, %90
+  %139 = and.i32 %138, %84
+  %140 = lshr.i32 %rhs, %90
+  %141 = and.i32 %140, %84
+  %142 = shl.i32 %141, %91
+  %143 = ashr.i32 %142, %91
+  %144 = mul.i32 %139, %143
+  %145 = add.i32 %137, %144
+  %146 = lshr.i32 %lhs, %91
+  %147 = and.i32 %146, %84
+  %148 = lshr.i32 %rhs, %91
+  %149 = and.i32 %148, %84
+  %150 = shl.i32 %149, %91
+  %151 = ashr.i32 %150, %91
+  %152 = mul.i32 %147, %151
+  %dot = add.i32 %145, %152
+  return %dot
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @dot8i4_s4u4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %dot = vector.dot8i4<s4u4> %lhs, %rhs, %acc : vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @dot8i4_s4u4(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>, %acc: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {
+  %84 = const.i32 15
+  %85 = const.i32 4
+  %86 = const.i32 8
+  %87 = const.i32 12
+  %88 = const.i32 16
+  %89 = const.i32 20
+  %90 = const.i32 24
+  %91 = const.i32 28
+  %92 = and.i32 %lhs, %84
+  %93 = shl.i32 %92, %91
+  %94 = ashr.i32 %93, %91
+  %95 = and.i32 %rhs, %84
+  %96 = mul.i32 %94, %95
+  %97 = add.i32 %acc, %96
+  %98 = lshr.i32 %lhs, %85
+  %99 = and.i32 %98, %84
+  %100 = shl.i32 %99, %91
+  %101 = ashr.i32 %100, %91
+  %102 = lshr.i32 %rhs, %85
+  %103 = and.i32 %102, %84
+  %104 = mul.i32 %101, %103
+  %105 = add.i32 %97, %104
+  %106 = lshr.i32 %lhs, %86
+  %107 = and.i32 %106, %84
+  %108 = shl.i32 %107, %91
+  %109 = ashr.i32 %108, %91
+  %110 = lshr.i32 %rhs, %86
+  %111 = and.i32 %110, %84
+  %112 = mul.i32 %109, %111
+  %113 = add.i32 %105, %112
+  %114 = lshr.i32 %lhs, %87
+  %115 = and.i32 %114, %84
+  %116 = shl.i32 %115, %91
+  %117 = ashr.i32 %116, %91
+  %118 = lshr.i32 %rhs, %87
+  %119 = and.i32 %118, %84
+  %120 = mul.i32 %117, %119
+  %121 = add.i32 %113, %120
+  %122 = lshr.i32 %lhs, %88
+  %123 = and.i32 %122, %84
+  %124 = shl.i32 %123, %91
+  %125 = ashr.i32 %124, %91
+  %126 = lshr.i32 %rhs, %88
+  %127 = and.i32 %126, %84
+  %128 = mul.i32 %125, %127
+  %129 = add.i32 %121, %128
+  %130 = lshr.i32 %lhs, %89
+  %131 = and.i32 %130, %84
+  %132 = shl.i32 %131, %91
+  %133 = ashr.i32 %132, %91
+  %134 = lshr.i32 %rhs, %89
+  %135 = and.i32 %134, %84
+  %136 = mul.i32 %133, %135
+  %137 = add.i32 %129, %136
+  %138 = lshr.i32 %lhs, %90
+  %139 = and.i32 %138, %84
+  %140 = shl.i32 %139, %91
+  %141 = ashr.i32 %140, %91
+  %142 = lshr.i32 %rhs, %90
+  %143 = and.i32 %142, %84
+  %144 = mul.i32 %141, %143
+  %145 = add.i32 %137, %144
+  %146 = lshr.i32 %lhs, %91
+  %147 = and.i32 %146, %84
+  %148 = shl.i32 %147, %91
+  %149 = ashr.i32 %148, %91
+  %150 = lshr.i32 %rhs, %91
+  %151 = and.i32 %150, %84
+  %152 = mul.i32 %149, %151
+  %dot = add.i32 %145, %152
+  return %dot
+}

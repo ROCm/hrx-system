@@ -106,7 +106,7 @@ iree_status_t iree_hal_streaming_context_create(
   // Initialize symbol map with global registry as the backing store.
   iree_hal_streaming_global_symbol_registry_t* registry =
       iree_hal_streaming_global_symbol_registry();
-  if (!registry) {
+  if (iree_status_is_ok(status) && !registry) {
     status = iree_make_status(IREE_STATUS_INTERNAL,
                               "global symbol registry failed to initialize");
   }
@@ -152,9 +152,7 @@ static void iree_hal_streaming_context_destroy(
   // Clean up peer contexts array.
   if (context->peer_contexts) {
     for (iree_host_size_t i = 0; i < context->peer_count; ++i) {
-      if (context->peer_contexts[i]) {
-        iree_hal_streaming_context_release(context->peer_contexts[i]);
-      }
+      iree_hal_streaming_context_release(context->peer_contexts[i]);
     }
     iree_allocator_free(context->host_allocator, context->peer_contexts);
   }
@@ -196,9 +194,7 @@ static void iree_hal_streaming_context_destroy(
   }
 
   // Now release the context's reference to default stream.
-  if (default_stream) {
-    iree_hal_streaming_stream_release(default_stream);
-  }
+  iree_hal_streaming_stream_release(default_stream);
 
   // Free stream tracking resources.
   if (context->streams) {
@@ -244,7 +240,7 @@ iree_hal_streaming_context_t* iree_hal_streaming_context_current(void) {
   return context;
 }
 
-iree_status_t iree_hal_streaming_context_set_current(
+void iree_hal_streaming_context_set_current(
     iree_hal_streaming_context_t* context) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
@@ -255,12 +251,9 @@ iree_status_t iree_hal_streaming_context_set_current(
     iree_hal_streaming_context_retain(context);
   }
   iree_hal_streaming_current_context = context;
-  if (old_context) {
-    iree_hal_streaming_context_release(old_context);
-  }
+  iree_hal_streaming_context_release(old_context);
 
   IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
 }
 
 iree_status_t iree_hal_streaming_context_push(
@@ -535,6 +528,8 @@ iree_status_t iree_hal_streaming_context_disable_peer_access(
   // Find and remove peer.
   for (iree_host_size_t i = 0; i < context->peer_count; ++i) {
     if (context->peer_contexts[i] == peer_context) {
+      const iree_host_size_t dst_ordinal = peer_context->device_ordinal;
+
       // Release peer context.
       iree_hal_streaming_context_release(peer_context);
 
@@ -549,7 +544,6 @@ iree_status_t iree_hal_streaming_context_disable_peer_access(
           iree_hal_streaming_device_registry();
       if (device_registry && device_registry->p2p_topology) {
         const iree_host_size_t src_ordinal = context->device_ordinal;
-        const iree_host_size_t dst_ordinal = peer_context->device_ordinal;
         const iree_host_size_t device_count = device_registry->device_count;
         if (src_ordinal < device_count && dst_ordinal < device_count) {
           // Find the link in topology.

@@ -1,0 +1,78 @@
+// HIP concept: `threadIdx.x` is per-workitem data. In AMDGPU terms this is
+// usually the source shape that later maps to VGPR-dependent address or dot
+// operands.
+//
+// Loom spelling: start from `kernel.workitem.id<x>`. The value is lane-varying
+// by construction, and arithmetic that depends on it remains lane-varying.
+kernel.def @lane_distribution_contract() {
+  %unit = index.constant 1 : index
+  %workgroups = index.constant 4 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%lhs: i32, %rhs: i32) {
+  %zero_index = index.constant 0 : index
+  %workgroup_size = index.constant 64 : index
+
+  // HIP concept: `blockIdx.x`, `blockDim.x`, grid constants, and scalar kernel
+  // arguments are uniform across the workgroup/subgroup.
+  //
+  // Loom spelling: `kernel.workgroup.id<x>` and `kernel.workgroup.size<x>` are
+  // uniform facts. They are useful for base addresses and loop bounds, but they
+  // are not enough to keep a value lane-varying by themselves.
+  %block = kernel.workgroup.id<x> : index
+  %size = kernel.workgroup.size<x> : index
+  %block_base = index.mul %block, %size : index
+  %block_is_uniform = test.fact_uniform %block : index -> i1
+  %block_is_varying = test.fact_lane_varying %block : index -> i1
+  %base_is_uniform = test.fact_uniform %block_base : index -> i1
+  %base_is_varying = test.fact_lane_varying %block_base : index -> i1
+
+  // HIP concept: `threadIdx.x` participates in global address math:
+  //   element_index = blockIdx.x * blockDim.x + threadIdx.x;
+  //
+  // Loom spelling: `index.madd` keeps the multiply-add address form explicit
+  // and the result remains lane-varying because `%thread` is lane-varying.
+  %thread = kernel.workitem.id<x> : index
+  %element_index = index.madd %block, %workgroup_size, %thread : index
+  %thread_is_varying = test.fact_lane_varying %thread : index -> i1
+  %thread_is_uniform = test.fact_uniform %thread : index -> i1
+  %element_is_varying = test.fact_lane_varying %element_index : index -> i1
+  %element_is_uniform = test.fact_uniform %element_index : index -> i1
+
+  // HIP concept: `lane_id`, `warp lane`, `wavefront lane`, or an inline asm
+  // operand constrained so every lane carries a distinct value.
+  //
+  // Loom spelling: `kernel.subgroup.lane.id` is the subgroup lane-varying root.
+  // Source-level Loom names this a lane-distribution fact; target lowering is
+  // where AMDGPU decides the concrete SGPR/VGPR placement.
+  %lane = kernel.subgroup.lane.id : index
+  %lane_is_varying = test.fact_lane_varying %lane : index -> i1
+  %lane_is_uniform = test.fact_uniform %lane : index -> i1
+
+  // HIP concept: `if (lane == 0)` or use of EXEC-controlled predicates.
+  //
+  // Loom spelling: a comparison that depends on the lane id is a lane predicate.
+  // Selecting between uniform scalar arguments with such a predicate produces
+  // lane-varying data.
+  %is_lane_zero = index.cmp eq, %lane, %zero_index : index
+  %selected = scf.select %is_lane_zero, %lhs, %rhs : i32
+  %predicate_is_lane = test.fact_lane_predicate %is_lane_zero : i1 -> i1
+  %predicate_is_uniform = test.fact_uniform %is_lane_zero : i1 -> i1
+  %selected_is_varying = test.fact_lane_varying %selected : i32 -> i1
+  %selected_is_uniform = test.fact_uniform %selected : i32 -> i1
+
+  // HIP concept: a dot/load operand that should not collapse to a scalar value
+  // must depend on lane-varying data in the source graph.
+  //
+  // Loom spelling: keep the operand dataflow rooted in `%lane`/`%thread` and
+  // use fact probes in authoring tests to prove the distribution before target
+  // lowering. Production kernels omit `test.fact_*`; diagnostics/reports are the
+  // product channel when a backend cannot honor a target-specific contract.
+  %lane_i32 = index.cast %lane : index to i32
+  %dot_operand = scalar.addi %lane_i32, %lhs : i32
+  %dot_operand_is_varying = test.fact_lane_varying %dot_operand : i32 -> i1
+  %dot_operand_is_uniform = test.fact_uniform %dot_operand : i32 -> i1
+
+  test.use %block_is_uniform, %block_is_varying, %base_is_uniform, %base_is_varying, %thread_is_varying, %thread_is_uniform, %element_is_varying, %element_is_uniform, %lane_is_varying, %lane_is_uniform, %predicate_is_lane, %predicate_is_uniform, %selected_is_varying, %selected_is_uniform, %dot_operand_is_varying, %dot_operand_is_uniform : i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1
+  kernel.return
+}

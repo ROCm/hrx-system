@@ -70,9 +70,9 @@ class LargeTransferTest : public SocketTestBase<> {
       iree_status_t status =
           iree_async_proactor_submit_one(proactor_, &send_op.base);
       if (!iree_status_is_ok(status)) {
+        iree::Status submit_status(std::move(status));
         ADD_FAILURE() << "SendAll: submit_one failed at offset " << total_sent
-                      << "/" << total_size << ": "
-                      << iree::Status(std::move(status)).ToString();
+                      << "/" << total_size << ": " << submit_status.ToString();
         return 0;
       }
 
@@ -114,9 +114,10 @@ class LargeTransferTest : public SocketTestBase<> {
       iree_status_t status =
           iree_async_proactor_submit_one(proactor_, &recv_op.base);
       if (!iree_status_is_ok(status)) {
+        iree::Status submit_status(std::move(status));
         ADD_FAILURE() << "RecvAll: submit_one failed at offset "
                       << total_received << "/" << total_size << ": "
-                      << iree::Status(std::move(status)).ToString();
+                      << submit_status.ToString();
         return 0;
       }
 

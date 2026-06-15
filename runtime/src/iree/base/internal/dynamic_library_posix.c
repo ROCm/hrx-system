@@ -241,10 +241,11 @@ iree_status_t iree_dynamic_library_load_from_memory(
                  iree_dynamic_library_init_temp_dir);
 
   if (!iree_dynamic_library_temp_dir_valid_) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "path of dylib temp files (%s) is not the path of a directory",
-        iree_dynamic_library_temp_dir_path_);
+    IREE_RETURN_AND_END_ZONE(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "path of dylib temp files (%s) is not the path "
+                             "of a directory",
+                             iree_dynamic_library_temp_dir_path_));
   }
 
   // Extract the library to a temp file.

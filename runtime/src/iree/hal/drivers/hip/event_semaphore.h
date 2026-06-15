@@ -49,21 +49,13 @@ iree_status_t iree_hal_hip_semaphore_notify_work(
 iree_status_t iree_hal_hip_semaphore_notify_forward_progress_to(
     iree_hal_semaphore_t* base_semaphore, uint64_t value);
 
-// Returns the hip event that needs to be signaled in order
-// for the semaphore to reach a given value.
-// This event *must* have been previously notified for
-// forward progress by iree_hal_hip_semaphore_notify_forward_progress_to.
-// If the return status is iree_ok_status(), and the out_hip_event is NULL,
-// it is because the event has already been signaled, and the result
-// is visible on the host.
-// The refcount for the event is incremented here, and the caller
-// must decrement when no longer needed.
+// Records waits on |stream| for HIP events required to observe |value|.
 iree_status_t iree_hal_hip_semaphore_wait_hip_events(
     iree_hal_semaphore_t* base_semaphore, uint64_t value, hipStream_t stream);
 
 // Waits until all exported timepoints (up to value) have been
 // submitted to the dispatch thread.
-iree_status_t iree_hal_hip_semaphore_for_exported_timepoints(
+void iree_hal_hip_semaphore_for_exported_timepoints(
     iree_hal_semaphore_t* base_semaphore, uint64_t value);
 
 iree_status_t iree_hal_hip_semaphore_create_event_and_record_if_necessary(

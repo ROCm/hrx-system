@@ -46,6 +46,15 @@ class SetupPlanTest(unittest.TestCase):
                 any("requirements-dev.lock.txt" in step.describe() for step in commands)
             )
             self.assertTrue(
+                any(
+                    "requirements-analysis.lock.txt" in step.describe()
+                    for step in commands
+                )
+            )
+            self.assertTrue(
+                any("--only-binary=:all:" in step.describe() for step in commands)
+            )
+            self.assertTrue(
                 any("--group bazel" in step.describe() for step in commands)
             )
 

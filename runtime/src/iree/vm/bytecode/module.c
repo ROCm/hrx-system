@@ -970,7 +970,13 @@ IREE_API_EXPORT iree_status_t iree_vm_bytecode_module_create(
     return resolve_status;
   }
 
-  iree_vm_module_initialize(&module->interface, module);
+  iree_status_t initialize_status =
+      iree_vm_module_initialize(&module->interface, module);
+  if (!iree_status_is_ok(initialize_status)) {
+    iree_allocator_free(allocator, module);
+    IREE_TRACE_ZONE_END(z0);
+    return initialize_status;
+  }
   module->interface.destroy = iree_vm_bytecode_module_destroy;
   module->interface.name = iree_vm_bytecode_module_name;
   module->interface.signature = iree_vm_bytecode_module_signature;

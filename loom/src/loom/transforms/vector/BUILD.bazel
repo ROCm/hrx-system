@@ -1,0 +1,123 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+    "loom_cc_test",
+)
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+loom_cc_library(
+    name = "memory_footprint",
+    srcs = ["memory_footprint.c"],
+    hdrs = ["memory_footprint.h"],
+    deps = [
+        "//loom/src/loom/analysis:vector_memory_footprint",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/pass:value_facts",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "to_scalar",
+    srcs = [
+        "to_scalar.c",
+        "to_scalar_aggregates.c",
+        "to_scalar_aggregates.h",
+        "to_scalar_core.h",
+        "to_scalar_descriptors.c",
+        "to_scalar_descriptors.h",
+        "to_scalar_encoding.c",
+        "to_scalar_encoding.h",
+        "to_scalar_lanes.c",
+        "to_scalar_lanes.h",
+        "to_scalar_memory.c",
+        "to_scalar_memory.h",
+        "to_scalar_mma.c",
+        "to_scalar_mma.h",
+        "to_scalar_options.h",
+        "to_scalar_quantized.c",
+        "to_scalar_quantized.h",
+        "to_scalar_reductions.c",
+        "to_scalar_reductions.h",
+        "to_scalar_structural.c",
+        "to_scalar_structural.h",
+        "to_scalar_tables.c",
+        "to_scalar_tables.h",
+        "to_scalar_terms.c",
+        "to_scalar_terms.h",
+        "to_scalar_transforms.c",
+        "to_scalar_transforms.h",
+    ],
+    hdrs = ["to_scalar.h"],
+    deps = [
+        "//loom/src/loom/analysis:contract",
+        "//loom/src/loom/analysis:matrix_fragment_layout",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:combining",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/encoding",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/ops/view",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/pass:value_facts",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/util:math",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "target_legalization",
+    srcs = ["target_legalization.c"],
+    hdrs = ["target_legalization.h"],
+    deps = [
+        ":to_scalar",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/target:legalization",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "to_scalar_test",
+    srcs = ["to_scalar_test.cc"],
+    deps = [
+        ":to_scalar",
+        "//loom/src/loom/analysis:contract",
+        "//loom/src/loom/analysis:matrix_fragment_layout",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/pass:value_facts",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

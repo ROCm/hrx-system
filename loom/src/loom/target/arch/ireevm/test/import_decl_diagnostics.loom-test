@@ -1,0 +1,36 @@
+// RUN: verify
+
+ireevm.target<core> @vm_target
+
+// ERROR@+1: STRUCTURE/027 {attr_name="symbol", actual_value="", expected_constraint="non-empty import symbol"}
+ireevm.import.decl target(@vm_target) symbol("") @empty_import_symbol(%buffer: i32) -> (i64)
+
+// ====
+
+ireevm.target<core> @vm_target
+
+func.def target(@vm_target) @reject_hal_buffer_ref(%buffer: ireevm.ref<hal.buffer>, %offset: i64) -> (i32) {
+  // ERROR@+1: TYPE/003 "buffer" "ireevm.ref<hal.buffer>" "ireevm.ref<ireevm.buffer>"
+  %value = ireevm.buffer.load.i32 %buffer[%offset] : ireevm.ref<hal.buffer>, i64 -> i32
+  func.return %value : i32
+}
+
+// ====
+
+ireevm.target<core> @vm_target
+
+func.def target(@vm_target) @reject_buffer_offset(%buffer: ireevm.ref<ireevm.buffer>, %offset: index) -> (i32) {
+  // ERROR@+1: TYPE/003 "element_offset" "index" "i64"
+  %value = ireevm.buffer.load.i32 %buffer[%offset] : ireevm.ref<ireevm.buffer>, index -> i32
+  func.return %value : i32
+}
+
+// ====
+
+ireevm.target<core> @vm_target
+
+func.def target(@vm_target) @reject_store_value(%buffer: ireevm.ref<ireevm.buffer>, %offset: i64, %value: i64) {
+  // ERROR@+1: TYPE/003 "value" "i64" "i32"
+  ireevm.buffer.store.i32 %value, %buffer[%offset] : i64, ireevm.ref<ireevm.buffer>, i64
+  func.return
+}

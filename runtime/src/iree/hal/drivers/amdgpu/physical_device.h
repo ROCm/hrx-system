@@ -159,6 +159,9 @@ typedef struct iree_hal_amdgpu_physical_device_options_t {
   // Enables PM4 dispatch command-buffer capabilities on unvalidated gfx9-gfx12
   // targets for hardware bring-up experiments.
   uint32_t enable_experimental_pm4_command_buffers : 1;
+
+  // Suppresses fine-grained GPU-local memory pools even if HSA reports them.
+  uint32_t suppress_device_fine_memory : 1;
 } iree_hal_amdgpu_physical_device_options_t;
 
 // Initializes |out_options| to its default values.
@@ -224,9 +227,9 @@ typedef struct iree_hal_amdgpu_physical_device_t {
   iree_hal_amdgpu_aql_prepublished_kernarg_storage_t
       prepublished_kernarg_storage;
 
-  // Fine-grained block pools for device memory blocks of various sizes.
+  // Optional fine-grained block pools for host-coherent device memory.
   iree_hal_amdgpu_block_pools_t fine_block_pools;
-  // Fine-grained block pool-based allocators for small transient allocations.
+  // Optional fine-grained block pool-based allocators for small transients.
   iree_hal_amdgpu_block_allocators_t fine_block_allocators;
   // Coarse-grained block pools for device memory blocks of various sizes.
   iree_hal_amdgpu_block_pools_t coarse_block_pools;

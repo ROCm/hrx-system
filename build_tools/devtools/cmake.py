@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -22,10 +23,10 @@ from build_tools.devtools.command_plan import (
     WriteFileStep,
     quote_command,
 )
-from build_tools.devtools.environment import REPO_ROOT, ToolEnvironment
+from build_tools.devtools.environment import LOCAL_TMP_ROOT, REPO_ROOT, ToolEnvironment
 
 CMAKE_BUILD_DIR_ENV = "IREE_CMAKE_BUILD_DIR"
-CMAKE_STATE_DIR = REPO_ROOT / ".iree"
+CMAKE_STATE_DIR = LOCAL_TMP_ROOT / "iree"
 CMAKE_BUILD_DIR_FILE = CMAKE_STATE_DIR / "cmake_build_dir"
 DEFAULT_CMAKE_BUILD_DIR = REPO_ROOT / "build" / "cmake"
 
@@ -35,6 +36,12 @@ class CMakeRunCommand:
     target: str
     print_path: bool = False
     program_args: list[str] = field(default_factory=list)
+    run_cwd: Path = field(default_factory=Path.cwd)
+
+
+@dataclass(frozen=True)
+class CMakeCompileCommandsCommand:
+    output: Path | None = None
     run_cwd: Path = field(default_factory=Path.cwd)
 
 
@@ -69,6 +76,37 @@ def parse_run_args(
         print_path=print_path,
         program_args=program_args,
         run_cwd=run_cwd or Path.cwd(),
+    )
+
+
+def parse_compile_commands_args(
+    arguments: list[str],
+    *,
+    run_cwd: Path | None = None,
+) -> CMakeCompileCommandsCommand:
+    output = None
+    command_cwd = run_cwd or Path.cwd()
+
+    index = 0
+    while index < len(arguments):
+        arg = arguments[index]
+        if arg in ("-o", "--output"):
+            index += 1
+            if index >= len(arguments):
+                raise ValueError(f"{arg} requires a path")
+            output = Path(arguments[index])
+        elif arg.startswith("--output="):
+            output = Path(arg.split("=", 1)[1])
+        else:
+            raise ValueError(f"unexpected cmake compile-commands argument {arg!r}")
+        index += 1
+
+    if output is not None and not output.is_absolute():
+        output = command_cwd / output
+
+    return CMakeCompileCommandsCommand(
+        output=output,
+        run_cwd=command_cwd,
     )
 
 
@@ -264,6 +302,64 @@ def fuzz_plan(
         tool_env,
         configured_build_dir=build_dir(configured_build_dir),
         backend_args=backend_args,
+    )
+
+
+@dataclass(frozen=True)
+class CMakeCompileCommandsStep:
+    command: CMakeCompileCommandsCommand
+    build_dir: Path
+
+    @property
+    def source(self) -> Path:
+        return self.build_dir / "compile_commands.json"
+
+    @property
+    def output_path(self) -> Path:
+        return (self.command.output or self.source).resolve()
+
+    def describe(self) -> str:
+        lines = [f"# cmake compile-commands from {self.build_dir}"]
+        if self.command.output is not None:
+            lines.append(
+                "cp " + quote_command([str(self.source), str(self.command.output)])
+            )
+        lines.append("print " + quote_command([str(self.output_path)]))
+        return "\n".join(lines)
+
+    def run(self, verbose: bool = False) -> int:
+        if not self.source.is_file():
+            print(
+                f"dev.py: CMake compile_commands.json is missing: {self.source}",
+                file=sys.stderr,
+            )
+            print("dev.py: run python dev.py cmake configure first", file=sys.stderr)
+            return 1
+        if self.command.output is not None:
+            self.command.output.parent.mkdir(parents=True, exist_ok=True)
+            if self.command.output.exists():
+                self.command.output.chmod(self.command.output.stat().st_mode | 0o200)
+            shutil.copyfile(self.source, self.command.output)
+        print(self.output_path)
+        return 0
+
+
+def compile_commands_plan(
+    tool_env: ToolEnvironment,
+    *,
+    configured_build_dir: Path | None,
+    backend_args: list[str],
+    run_cwd: Path | None = None,
+) -> CommandPlan:
+    del tool_env
+    command = parse_compile_commands_args(backend_args, run_cwd=run_cwd)
+    return CommandPlan(
+        [
+            CMakeCompileCommandsStep(
+                command,
+                build_dir(configured_build_dir),
+            )
+        ]
     )
 
 

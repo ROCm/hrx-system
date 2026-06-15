@@ -1,0 +1,1735 @@
+// RUN: verify
+
+// Floating-point lanewise ops require floating-point vector elements.
+func.def @addf_integer(%a: vector<4xi32>, %b: vector<4xi32>) {
+  // ERROR@+1: TYPE/004 "float_element"
+  %r = vector.addf %a, %b : vector<4xi32>
+  func.return
+}
+
+// ====
+
+// Integer bit-count ops require integer vector elements.
+func.def @ctpopi_float(%v: vector<4xf32>) {
+  // ERROR@+1: TYPE/004 "integer_element"
+  %r = vector.ctpopi %v : vector<4xf32>
+  func.return
+}
+
+// ====
+
+// Population count keeps the scalar.ctpopi same-type result contract.
+func.def @ctpopi_result_type_mismatch(%v: vector<4xi32>) {
+  // ERROR@+1: TYPE/001
+  %r = vector.ctpopi %v : vector<4xi64>
+  func.return
+}
+
+// ====
+
+// Bitwise lanewise ops require integer vector elements.
+func.def @xori_float(%a: vector<4xf32>, %b: vector<4xf32>) {
+  // ERROR@+1: TYPE/004 "integer_element"
+  %r = vector.xori %a, %b : vector<4xf32>
+  func.return
+}
+
+// ====
+
+// Floating-point comparisons require floating-point vector inputs.
+func.def @cmpf_integer(%a: vector<4xi32>, %b: vector<4xi32>) {
+  // ERROR@+1: TYPE/003 "float_element"
+  %m = vector.cmpf olt, %a, %b : vector<4xi32> -> vector<4xi1>
+  func.return
+}
+
+// ====
+
+// Comparison masks must have i1 elements.
+func.def @cmpf_result_not_i1(%a: vector<4xf32>, %b: vector<4xf32>) {
+  // ERROR@+1: TYPE/004 "i1_element"
+  %m = vector.cmpf olt, %a, %b : vector<4xf32> -> vector<4xi32>
+  func.return
+}
+
+// ====
+
+// Select masks must have i1 elements.
+func.def @select_mask_not_i1(%mask: vector<4xi32>, %a: vector<4xf32>, %b: vector<4xf32>) {
+  // ERROR@+1: TYPE/003 "i1_element"
+  %r = vector.select %mask, %a, %b : vector<4xf32>
+  func.return
+}
+
+// ====
+
+// Select masks must have the same vector shape as the selected values.
+func.def @select_shape_mismatch(%mask: vector<8xi1>, %a: vector<4xf32>, %b: vector<4xf32>) {
+  // ERROR@+1: SHAPE/002
+  %r = vector.select %mask, %a, %b : vector<4xf32>
+  func.return
+}
+
+// ====
+
+// Reductions keep the vector element type tied to the scalar accumulator/result.
+func.def @reduce_element_mismatch(%v: vector<4xf32>, %zero: i32) {
+  // ERROR@+1: TYPE/002
+  %r = vector.reduce<addf> %v, %zero : vector<4xf32>, i32
+  func.return
+}
+
+// ====
+
+// Reduction fastmath flags only apply to floating-point element domains.
+func.def @reduce_fastmath_reject_integer(%v: vector<4xi32>, %zero: i32) {
+  // ERROR@+1: TYPE/003 "input" "vector<4xi32>" "floating-point element type when float flags are present"
+  %r = vector.reduce<addi, nsz> %v, %zero : vector<4xi32>, i32
+  func.return
+}
+
+// ====
+
+// Reductions spell the accumulator/result type in the colon list, not as an
+// independent arrow result.
+func.def @reduce_reject_arrow_result(%v: vector<4xf32>, %zero: f32) {
+  // ERROR@+1: PARSE/003
+  %r = vector.reduce<addf> %v, %zero : vector<4xf32> -> f32
+  func.return
+}
+
+// ====
+
+func.def @geluf_logistic_requires_scale(%x: vector<4xf32>) {
+  // ERROR@+1: TYPE/005 {attr_name="scale", actual_kind="0", expected_kind="2"}
+  %r = vector.geluf<logistic> %x : vector<4xf32>
+  func.return
+}
+
+// ====
+
+func.def @geluf_non_logistic_rejects_scale(%x: vector<4xf32>) {
+  // ERROR@+1: TYPE/005 {attr_name="scale", actual_kind="2", expected_kind="0"}
+  %r = vector.geluf<tanh> %x {scale = 1.702} : vector<4xf32>
+  func.return
+}
+
+// ====
+
+// Axis-preserving reductions require at least one reduced axis.
+func.def @reduce_axes_empty_axes(%v: vector<2x3xf32>, %init: vector<3xf32>) {
+  // ERROR@+1: STRUCTURE/014 "axes" "non-empty axes list"
+  %r = vector.reduce.axes<addf> %v, %init axes [] : vector<2x3xf32>, vector<3xf32>
+  func.return
+}
+
+// ====
+
+// Reduced axes are stored canonically as sorted unique source-rank dimensions.
+func.def @reduce_axes_unsorted(%v: vector<2x3xf32>, %init: vector<3xf32>) {
+  // ERROR@+1: STRUCTURE/014 "axes" "strictly sorted unique axes"
+  %r = vector.reduce.axes<addf> %v, %init axes [1, 0] : vector<2x3xf32>, vector<3xf32>
+  func.return
+}
+
+// ====
+
+func.def @reduce_axes_duplicate(%v: vector<2x3xf32>, %init: vector<3xf32>) {
+  // ERROR@+1: STRUCTURE/014 "axes" "strictly sorted unique axes"
+  %r = vector.reduce.axes<addf> %v, %init axes [0, 0] : vector<2x3xf32>, vector<3xf32>
+  func.return
+}
+
+// ====
+
+func.def @reduce_axes_out_of_bounds(%v: vector<2x3xf32>, %init: vector<3xf32>) {
+  // ERROR@+1: STRUCTURE/014 "axes" "axis in input rank bounds"
+  %r = vector.reduce.axes<addf> %v, %init axes [2] : vector<2x3xf32>, vector<3xf32>
+  func.return
+}
+
+// ====
+
+// Removing the reduced axes from the input shape must produce the result shape.
+func.def @reduce_axes_wrong_result_shape(%v: vector<2x3xf32>, %init: vector<2xf32>) {
+  // ERROR@+1: SHAPE/002
+  %r = vector.reduce.axes<addf> %v, %init axes [0] : vector<2x3xf32>, vector<2xf32>
+  func.return
+}
+
+// ====
+
+// All axes reduced means the accumulator/result must be scalar.
+func.def @reduce_axes_all_axes_vector_result(%v: vector<2x3xf32>, %init: vector<1xf32>) {
+  // ERROR@+1: TYPE/004 "scalar result when all axes are reduced"
+  %r = vector.reduce.axes<addf> %v, %init axes [0, 1] : vector<2x3xf32>, vector<1xf32>
+  func.return
+}
+
+// ====
+
+// The accumulator and result are the same logical value shape.
+func.def @reduce_axes_init_result_mismatch(%v: vector<2x3xf32>, %init: vector<3xf32>) {
+  // ERROR@+1: TYPE/001
+  %r = vector.reduce.axes<addf> %v, %init axes [0] : vector<2x3xf32>, vector<2xf32>
+  func.return
+}
+
+// ====
+
+// Combining kinds still live in the same element family as scalar reductions.
+func.def @reduce_axes_integer_with_float_kind(%v: vector<2x3xi32>, %init: vector<3xi32>) {
+  // ERROR@+1: TYPE/003 "floating-point element type for reduce kind"
+  %r = vector.reduce.axes<minimumf> %v, %init axes [0] : vector<2x3xi32>, vector<3xi32>
+  func.return
+}
+
+// ====
+
+// Vector constants use a scalar literal payload matching the vector element type.
+func.def @constant_payload_mismatch() {
+  // ERROR@+1: TYPE/005 "value"
+  %r = vector.constant 0 : vector<4xf32>
+  func.return
+}
+
+// ====
+
+func.def @constant_i1_payload_mismatch() {
+  // ERROR@+1: TYPE/005 "value"
+  %r = vector.constant 2 : vector<4xi1>
+  func.return
+}
+
+// ====
+
+// Static zero-lane vectors are empty aggregates, not poison.
+func.def @poison_static_zero_lane() {
+  // ERROR@+1: TYPE/004 "use vector.empty"
+  %r = vector.poison : vector<0xf32>
+  func.return
+}
+
+// ====
+
+// vector.empty is only the static zero-lane aggregate materializer.
+func.def @empty_non_zero_lane() {
+  // ERROR@+1: TYPE/004 "static zero-lane vector type"
+  %r = vector.empty : vector<4xf32>
+  func.return
+}
+
+// ====
+
+// Vector broadcast rejects statically provable shape mismatches.
+func.def @broadcast_static_mismatch(%v: vector<4xf32>) {
+  // ERROR@+1: SHAPE/004
+  %r = vector.broadcast %v : vector<4xf32> -> vector<8xf32>
+  func.return
+}
+
+// ====
+
+// Vector broadcast cannot drop source dimensions.
+func.def @broadcast_rank_mismatch(%v: vector<4x4xf32>) {
+  // ERROR@+1: SHAPE/001
+  %r = vector.broadcast %v : vector<4x4xf32> -> vector<4xf32>
+  func.return
+}
+
+// ====
+
+// Vector construction from scalars must provide every static lane.
+func.def @from_elements_count_mismatch(%x: f32) {
+  // ERROR@+1: STRUCTURE/013 "elements"
+  %r = vector.from_elements %x, %x, %x : vector<4xf32>
+  func.return
+}
+
+// ====
+
+// The result vector type is the only type annotation for vector.from_elements.
+func.def @from_elements_reject_old_operand_type_list(%x: f32) {
+  // ERROR@+1: PARSE/003
+  %r = vector.from_elements %x, %x : f32, f32 -> vector<2xf32>
+  func.return
+}
+
+// ====
+
+// Scalar element operands must match the result vector element type.
+func.def @from_elements_element_mismatch(%x: f32, %y: i32) {
+  // ERROR@+1: TYPE/002
+  %r = vector.from_elements %x, %y : vector<2xf32>
+  func.return
+}
+
+// ====
+
+// Vector construction from scalars needs an all-static lane count.
+func.def @from_elements_dynamic_result(%x: f32, %n: index) {
+  // ERROR@+1: TYPE/004 "all-static vector shape"
+  %r = vector.from_elements %x, %x, %x, %x : vector<[%n]xf32>
+  func.return
+}
+
+// ====
+
+// vector.iota constructs coordinate vectors, not arbitrary floating-point lanes.
+func.def @iota_float_domain(%base: f32, %step: f32) {
+  // ERROR@+1: TYPE/003 "base" "index or non-i1 integer scalar"
+  %r = vector.iota %base step %step : vector<4xf32>
+  func.return
+}
+
+// ====
+
+// vector.iota does not use i1 lanes as coordinate payloads.
+func.def @iota_i1_domain(%base: i1, %step: i1) {
+  // ERROR@+1: TYPE/003 "base" "index or non-i1 integer scalar"
+  %r = vector.iota %base step %step : vector<4xi1>
+  func.return
+}
+
+// ====
+
+// offset is a scalar byte-count domain, not a vector element-offset payload.
+func.def @iota_offset_domain(%base: offset, %step: offset) {
+  // ERROR@+1: TYPE/003 "base" "index or non-i1 integer scalar"
+  %r = vector.iota %base step %step : vector<4xoffset>
+  func.return
+}
+
+// ====
+
+// vector.iota ties the scalar coordinate domain to the result element type.
+func.def @iota_element_mismatch(%base: index, %step: index) {
+  // ERROR@+1: TYPE/002
+  %r = vector.iota %base step %step : vector<4xi32>
+  func.return
+}
+
+// ====
+
+// Range masks use coordinate domains and produce i1 vector masks.
+func.def @mask_range_float_domain(%lo: f32, %hi: f32, %step: f32) {
+  // ERROR@+1: TYPE/003 "lower_bound" "index or non-i1 integer scalar"
+  %r = vector.mask.range [%lo to %hi step %step] : f32 -> vector<4xi1>
+  func.return
+}
+
+// ====
+
+// Range masks do not treat scalar byte offsets as lane-coordinate payloads.
+func.def @mask_range_offset_domain(%lo: offset, %hi: offset, %step: offset) {
+  // ERROR@+1: TYPE/003 "lower_bound" "index or non-i1 integer scalar"
+  %r = vector.mask.range [%lo to %hi step %step] : offset -> vector<4xi1>
+  func.return
+}
+
+// ====
+
+// Range mask bounds and step all live in the same coordinate domain.
+func.def @mask_range_type_mismatch(%lo: index, %hi: i32, %step: index) {
+  // ERROR@+1: TYPE/001
+  %r = vector.mask.range [%lo to %hi step %step] : index -> vector<4xi1>
+  func.return
+}
+
+// ====
+
+// Range masks are boolean lane masks.
+func.def @mask_range_result_not_i1(%lo: index, %hi: index, %step: index) {
+  // ERROR@+1: TYPE/004 "i1_element"
+  %r = vector.mask.range [%lo to %hi step %step] : index -> vector<4xi32>
+  func.return
+}
+
+// ====
+
+// Vector memory ops require one logical origin index per view rank.
+func.def @load_index_count_mismatch(%buffer: buffer, %offset: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4x4xf32, %layout>
+  // ERROR@+1: SUBRANGE/001 "view" "1" "2"
+  %r = vector.load %view[0] : view<4x4xf32, %layout> -> vector<4xf32>
+  func.return
+}
+
+// ====
+
+// The vector lane footprint rank cannot exceed the view rank.
+func.def @load_vector_rank_too_large(%buffer: buffer, %offset: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %layout>
+  // ERROR@+1: TYPE/004 "rank no greater than view rank"
+  %r = vector.load %view[0] : view<4xf32, %layout> -> vector<2x2xf32>
+  func.return
+}
+
+// ====
+
+// Static vector memory footprints must fit inside statically known view bounds.
+func.def @load_static_footprint_out_of_bounds(%buffer: buffer, %offset: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4x4xf32, %layout>
+  // ERROR@+1: SUBRANGE/004
+  %r = vector.load %view[2, 1] : view<4x4xf32, %layout> -> vector<3x4xf32>
+  func.return
+}
+
+// ====
+
+// A static origin past a static view bound is invalid even if the vector
+// footprint has dynamic extent.
+func.def @load_static_offset_past_bound(%buffer: buffer, %offset: offset, %n: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %layout>
+  // ERROR@+1: SUBRANGE/004
+  %r = vector.load %view[5] : view<4xf32, %layout> -> vector<[%n]xf32>
+  func.return
+}
+
+// ====
+
+// Vector memory element types match the view element type.
+func.def @load_element_mismatch(%buffer: buffer, %offset: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %layout>
+  // ERROR@+1: TYPE/002
+  %r = vector.load %view[0] : view<4xf32, %layout> -> vector<4xi32>
+  func.return
+}
+
+// ====
+
+// Masked vector loads require an i1 mask vector.
+func.def @load_mask_not_i1(%buffer: buffer, %offset: offset, %mask: vector<4xi32>, %old: vector<4xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %layout>
+  // ERROR@+1: TYPE/003 "i1_element"
+  %r = vector.load.mask %view[0], %mask, %old : view<4xf32, %layout>, vector<4xi32>, vector<4xf32>
+  func.return
+}
+
+// ====
+
+// Masked vector stores require mask and value shapes to match.
+func.def @store_mask_shape_mismatch(%buffer: buffer, %offset: offset, %mask: vector<8xi1>, %value: vector<4xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %layout>
+  // ERROR@+1: SHAPE/002
+  vector.store.mask %value, %view[0], %mask : vector<4xf32>, view<4xf32, %layout>, vector<8xi1>
+  func.return
+}
+
+// ====
+
+// Expand loads are rank-1: the mask selects a compact memory run, not a
+// multi-dimensional register footprint.
+func.def @load_expand_rank_mismatch(%buffer: buffer, %offset: offset, %mask: vector<2x2xi1>, %old: vector<2x2xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4x4xf32, %layout>
+  // ERROR@+1: TYPE/004 "rank-1 vector"
+  %r = vector.load.expand %view[0, 0], %mask, %old : view<4x4xf32, %layout>, vector<2x2xi1>, vector<2x2xf32>
+  func.return
+}
+
+// ====
+
+// Compress stores are rank-1 for the same active-lane memory cursor reason.
+func.def @store_compress_rank_mismatch(%buffer: buffer, %offset: offset, %mask: vector<2x2xi1>, %value: vector<2x2xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4x4xf32, %layout>
+  // ERROR@+1: TYPE/003 "rank-1 vector"
+  vector.store.compress %value, %view[0, 0], %mask : vector<2x2xf32>, view<4x4xf32, %layout>, vector<2x2xi1>
+  func.return
+}
+
+// ====
+
+// Expand-load mask and passthrough shapes follow the result shape.
+func.def @load_expand_mask_shape_mismatch(%buffer: buffer, %offset: offset, %mask: vector<8xi1>, %old: vector<4xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  // ERROR@+1: SHAPE/002
+  %r = vector.load.expand %view[0], %mask, %old : view<16xf32, %layout>, vector<8xi1>, vector<4xf32>
+  func.return
+}
+
+// ====
+
+// Until mask facts prove a smaller popcount, static checks conservatively use
+// the full rank-1 vector length as the maximum compact memory footprint.
+func.def @store_compress_static_footprint_out_of_bounds(%buffer: buffer, %offset: offset, %mask: vector<4xi1>, %value: vector<4xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %layout>
+  // ERROR@+1: SUBRANGE/004
+  vector.store.compress %value, %view[2], %mask : vector<4xf32>, view<4xf32, %layout>, vector<4xi1>
+  func.return
+}
+
+// ====
+
+// Vector gathers require one logical origin index per view rank.
+func.def @gather_index_count_mismatch(%buffer: buffer, %offset: offset, %offsets: vector<4xindex>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4x4xf32, %layout>
+  // ERROR@+1: SUBRANGE/001 "view" "1" "2"
+  %r = vector.gather %view[0][%offsets] : view<4x4xf32, %layout>, vector<4xindex> -> vector<4xf32>
+  func.return
+}
+
+// ====
+
+// Gather/scatter offset lanes must be address-sized indices or explicit
+// non-i1 integers, not masks or floating-point data.
+func.def @gather_offsets_i1(%buffer: buffer, %offset: offset, %offsets: vector<4xi1>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %layout>
+  // ERROR@+1: TYPE/003 "offsets" "index or non-i1 integer element type"
+  %r = vector.gather %view[0][%offsets] : view<4xf32, %layout>, vector<4xi1> -> vector<4xf32>
+  func.return
+}
+
+// ====
+
+// Gather offset vector shape follows the gathered value shape.
+func.def @gather_offsets_shape_mismatch(%buffer: buffer, %offset: offset, %offsets: vector<8xindex>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  // ERROR@+1: SHAPE/002
+  %r = vector.gather %view[0][%offsets] : view<16xf32, %layout>, vector<8xindex> -> vector<4xf32>
+  func.return
+}
+
+// ====
+
+// Static gather base origins must be inside static view bounds.
+func.def @gather_static_origin_out_of_bounds(%buffer: buffer, %offset: offset, %offsets: vector<4xindex>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %layout>
+  // ERROR@+1: SUBRANGE/004
+  %r = vector.gather %view[5][%offsets] : view<4xf32, %layout>, vector<4xindex> -> vector<4xf32>
+  func.return
+}
+
+// ====
+
+// Gather/scatter offsets adjust the final logical view axis, so a scalar view
+// cannot provide the origin axis they need.
+func.def @gather_rank_zero_view(%buffer: buffer, %offset: offset, %offsets: vector<4xindex>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<f32, %layout>
+  // ERROR@+1: TYPE/003 "view" "rank >= 1 view"
+  %r = vector.gather %view[][%offsets] : view<f32, %layout>, vector<4xindex> -> vector<4xf32>
+  func.return
+}
+
+// ====
+
+// Masked scatters require mask and value shapes to match; masked-off lanes
+// leave memory unchanged, and active non-atomic scatter lanes must be distinct.
+func.def @scatter_mask_shape_mismatch(%buffer: buffer, %offset: offset, %offsets: vector<4xindex>, %mask: vector<8xi1>, %value: vector<4xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  // ERROR@+1: SHAPE/002
+  vector.scatter.mask %value, %view[0][%offsets], %mask : vector<4xf32>, view<16xf32, %layout>, vector<4xindex>, vector<8xi1>
+  func.return
+}
+
+// ====
+
+// Cache policies are optional, but when present the scope and temporal policy
+// are a pair so no lowering path has to infer the missing half.
+func.def @load_cache_policy_missing_scope(%buffer: buffer, %offset: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  // ERROR@+1: STRUCTURE/014 "cache_scope" "0" "present when cache_temporal is present"
+  %r = vector.load %view[0] {cache_temporal = non_temporal} : view<16xf32, %layout> -> vector<4xf32>
+  func.return
+}
+
+// ====
+
+// Store-only temporal policies cannot be attached to vector loads.
+func.def @load_rejects_writeback_cache_policy(%buffer: buffer, %offset: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  // ERROR@+1: STRUCTURE/014 "cache_temporal" "4" "load-compatible temporal hint"
+  %r = vector.load %view[0] {cache_scope = device, cache_temporal = writeback} : view<16xf32, %layout> -> vector<4xf32>
+  func.return
+}
+
+// ====
+
+// Load-only temporal policies cannot be attached to vector stores.
+func.def @store_rejects_last_use_cache_policy(%buffer: buffer, %offset: offset, %value: vector<4xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  // ERROR@+1: STRUCTURE/014 "cache_temporal" "3" "store-compatible temporal hint"
+  vector.store %value, %view[0] {cache_scope = device, cache_temporal = last_use} : vector<4xf32>, view<16xf32, %layout>
+  func.return
+}
+
+// ====
+
+// Atomics currently accept only the cache-policy subset that preserves atomic
+// synchronization semantics across all required lowering targets.
+func.def @atomic_rejects_high_temporal_cache_policy(%buffer: buffer, %offset: offset, %value: vector<4xi32>, %offsets: vector<4xindex>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xi32, %layout>
+  // ERROR@+1: STRUCTURE/014 "cache_temporal" "2" "regular or non_temporal temporal hint"
+  vector.atomic.reduce<addi> %value, %view[0][%offsets] {cache_scope = device, cache_temporal = high_temporal, ordering = relaxed, scope = workgroup} : vector<4xi32>, view<16xi32, %layout>, vector<4xindex>
+  func.return
+}
+
+// ====
+
+// Vector extract cannot index more dimensions than the source has.
+func.def @extract_too_many_indices(%v: vector<4xf32>) {
+  // ERROR@+1: STRUCTURE/013 "static_indices"
+  %r = vector.extract %v[0, 0] : vector<4xf32> -> f32
+  func.return
+}
+
+// ====
+
+// Partial vector extract returns the unindexed vector tail, not a scalar.
+func.def @extract_tail_type_mismatch(%v: vector<4x4xf32>) {
+  // ERROR@+1: TYPE/004 "vector tail value"
+  %r = vector.extract %v[0] : vector<4x4xf32> -> f32
+  func.return
+}
+
+// ====
+
+// Partial vector insert expects the inserted value to match the unindexed tail.
+func.def @insert_tail_type_mismatch(%x: f32, %v: vector<4x4xf32>) {
+  // ERROR@+1: TYPE/003 "vector tail value"
+  %r = vector.insert %x into %v[0] : f32, vector<4x4xf32>
+  func.return
+}
+
+// ====
+
+// Static vector indices must be within statically known bounds.
+func.def @extract_static_index_out_of_bounds(%v: vector<4xf32>) {
+  // ERROR@+1: SUBRANGE/004
+  %r = vector.extract %v[5] : vector<4xf32> -> f32
+  func.return
+}
+
+// ====
+
+// Register slices preserve rank.
+func.def @slice_rank_mismatch(%v: vector<4x4xf32>) {
+  // ERROR@+1: SHAPE/001
+  %r = vector.slice %v[0, 0] : vector<4x4xf32> -> vector<4xf32>
+  func.return
+}
+
+// ====
+
+// Register slices require one offset per source rank.
+func.def @slice_offset_count_mismatch(%v: vector<4x4xf32>) {
+  // ERROR@+1: SUBRANGE/001 "source" "1" "2"
+  %r = vector.slice %v[0] : vector<4x4xf32> -> vector<2x2xf32>
+  func.return
+}
+
+// ====
+
+// Static register slices must fit inside statically known source bounds.
+func.def @slice_static_out_of_bounds(%v: vector<4xf32>) {
+  // ERROR@+1: SUBRANGE/004
+  %r = vector.slice %v[3] : vector<4xf32> -> vector<2xf32>
+  func.return
+}
+
+// ====
+
+// A static slice offset past a static source bound is invalid even if the result
+// extent is dynamic.
+func.def @slice_offset_past_bound(%v: vector<4xf32>, %n: index) {
+  // ERROR@+1: SUBRANGE/004
+  %r = vector.slice %v[5] : vector<4xf32> -> vector<[%n]xf32>
+  func.return
+}
+
+// ====
+
+// Concat axes must refer to an existing result dimension.
+func.def @concat_axis_out_of_range(%a: vector<4xf32>, %b: vector<4xf32>) {
+  // ERROR@+1: SUBRANGE/002 "1" "1"
+  %r = vector.concat<1> %a, %b : vector<4xf32>, vector<4xf32> -> vector<8xf32>
+  func.return
+}
+
+// ====
+
+// Concat inputs match result shape on every non-concatenated axis.
+func.def @concat_non_axis_shape_mismatch(%a: vector<2x4xf32>, %b: vector<2x8xf32>) {
+  // ERROR@+1: SHAPE/002
+  %r = vector.concat<0> %a, %b : vector<2x4xf32>, vector<2x8xf32> -> vector<4x4xf32>
+  func.return
+}
+
+// ====
+
+// Static concat axis extents must sum to the result axis extent.
+func.def @concat_axis_sum_mismatch(%a: vector<4xf32>, %b: vector<4xf32>) {
+  // ERROR@+1: TYPE/004 "concat axis extent"
+  %r = vector.concat<0> %a, %b : vector<4xf32>, vector<4xf32> -> vector<7xf32>
+  func.return
+}
+
+// ====
+
+// Transpose permutations must have one entry per source rank.
+func.def @transpose_permutation_count_mismatch(%v: vector<4x8xf32>) {
+  // ERROR@+1: STRUCTURE/013 "permutation"
+  %r = vector.transpose<[1]> %v : vector<4x8xf32> -> vector<8x4xf32>
+  func.return
+}
+
+// ====
+
+// Transpose permutations name each source axis exactly once.
+func.def @transpose_duplicate_axis(%v: vector<4x8xf32>) {
+  // ERROR@+1: STRUCTURE/014 "permutation"
+  %r = vector.transpose<[0, 0]> %v : vector<4x8xf32> -> vector<4x4xf32>
+  func.return
+}
+
+// ====
+
+// Transpose result shape follows the explicit result-axis to source-axis map.
+func.def @transpose_result_shape_mismatch(%v: vector<4x8xf32>) {
+  // ERROR@+1: SHAPE/002
+  %r = vector.transpose<[1, 0]> %v : vector<4x8xf32> -> vector<4x8xf32>
+  func.return
+}
+
+// ====
+
+// Static shuffle is a rank-1 lane remap.
+func.def @shuffle_rank_mismatch(%v: vector<2x2xf32>) {
+  // ERROR@+1: TYPE/003 "all-static rank-1 vector"
+  %r = vector.shuffle<[0, 1, 2, 3]> %v : vector<2x2xf32>
+  func.return
+}
+
+// ====
+
+// Static shuffle needs one source lane entry per result/source lane.
+func.def @shuffle_lane_count_mismatch(%v: vector<4xf32>) {
+  // ERROR@+1: STRUCTURE/013 "source_lanes"
+  %r = vector.shuffle<[0, 1, 2]> %v : vector<4xf32>
+  func.return
+}
+
+// ====
+
+// Static shuffle lane references must be in bounds; duplicate lanes are allowed.
+func.def @shuffle_lane_out_of_bounds(%v: vector<4xf32>) {
+  // ERROR@+1: SUBRANGE/004
+  %r = vector.shuffle<[0, 4, 2, 3]> %v : vector<4xf32>
+  func.return
+}
+
+// ====
+
+// Static shuffle cannot prove a complete lane remap for dynamic vector extents.
+func.def @shuffle_dynamic_shape(%n: index, %v: vector<[%n]xf32>) {
+  // ERROR@+1: TYPE/003 "all-static rank-1 vector"
+  %r = vector.shuffle<[0]> %v : vector<[%n]xf32>
+  func.return
+}
+
+// ====
+
+// Interleave axis must refer to an existing vector axis.
+func.def @interleave_axis_out_of_bounds(%a: vector<4xi8>, %b: vector<4xi8>) {
+  // ERROR@+1: SUBRANGE/002 "1" "1"
+  %r = vector.interleave<1> %a, %b : vector<4xi8>, vector<4xi8> -> vector<8xi8>
+  func.return
+}
+
+// ====
+
+// Interleave is rank-preserving except for doubling one axis extent.
+func.def @interleave_rank_mismatch(%a: vector<4xi8>, %b: vector<4xi8>) {
+  // ERROR@+1: SHAPE/001
+  %r = vector.interleave<0> %a, %b : vector<4xi8>, vector<4xi8> -> vector<2x4xi8>
+  func.return
+}
+
+// ====
+
+// Interleave non-axis dimensions must match the inputs exactly.
+func.def @interleave_non_axis_shape_mismatch(%a: vector<4x8xi8>, %b: vector<4x8xi8>) {
+  // ERROR@+1: SHAPE/002
+  %r = vector.interleave<1> %a, %b : vector<4x8xi8>, vector<4x8xi8> -> vector<5x16xi8>
+  func.return
+}
+
+// ====
+
+// Interleave doubles the selected static axis extent.
+func.def @interleave_axis_shape_mismatch(%a: vector<4xi8>, %b: vector<4xi8>) {
+  // ERROR@+1: TYPE/004 "interleave axis extent"
+  %r = vector.interleave<0> %a, %b : vector<4xi8>, vector<4xi8> -> vector<7xi8>
+  func.return
+}
+
+// ====
+
+// Deinterleave source axes must be evenly splittable when statically known.
+func.def @deinterleave_odd_source_axis(%source: vector<5xi8>) {
+  // ERROR@+1: TYPE/003 "even deinterleave axis extent"
+  %even, %odd = vector.deinterleave<0> %source : vector<5xi8> -> vector<2xi8>, vector<2xi8>
+  func.return
+}
+
+// ====
+
+// Deinterleave results have half the selected static source axis extent.
+func.def @deinterleave_axis_shape_mismatch(%source: vector<8xi8>) {
+  // ERROR@+1: TYPE/004 "deinterleave axis extent"
+  %even, %odd = vector.deinterleave<0> %source : vector<8xi8> -> vector<5xi8>, vector<5xi8>
+  func.return
+}
+
+// ====
+
+// Register table lookup uses a rank-1 table vector.
+func.def @table_lookup_table_rank_mismatch(%table: vector<2x2xf32>, %indices: vector<4xi8>) {
+  // ERROR@+1: TYPE/003 "table" "rank-1 vector"
+  %r = vector.table.lookup %table[%indices] : vector<2x2xf32>, vector<4xi8> -> vector<4xf32>
+  func.return
+}
+
+// ====
+
+// Lookup index lanes are explicit index/non-i1 integer lanes, not masks.
+func.def @table_lookup_indices_i1(%table: vector<4xf32>, %indices: vector<4xi1>) {
+  // ERROR@+1: TYPE/003 "indices" "index or non-i1 integer element type"
+  %r = vector.table.lookup %table[%indices] : vector<4xf32>, vector<4xi1> -> vector<4xf32>
+  func.return
+}
+
+// ====
+
+// Lookup result lanes follow the index vector shape.
+func.def @table_lookup_shape_mismatch(%table: vector<4xf32>, %indices: vector<4xi8>) {
+  // ERROR@+1: SHAPE/002
+  %r = vector.table.lookup %table[%indices] : vector<4xf32>, vector<4xi8> -> vector<8xf32>
+  func.return
+}
+
+// ====
+
+// Lookup result element type follows the table element type.
+func.def @table_lookup_element_mismatch(%table: vector<4xf32>, %indices: vector<4xi8>) {
+  // ERROR@+1: TYPE/002
+  %r = vector.table.lookup %table[%indices] : vector<4xf32>, vector<4xi8> -> vector<4xi32>
+  func.return
+}
+
+// ====
+
+// Splat constant indices are rejected when statically outside the table range.
+func.def @table_lookup_static_index_out_of_bounds() {
+  %table = vector.constant 0.0 : vector<4xf32>
+  %indices = vector.constant 4 : vector<8xi8>
+  // ERROR@+1: SUBRANGE/004
+  %r = vector.table.lookup %table[%indices] : vector<4xf32>, vector<8xi8> -> vector<8xf32>
+  func.return
+}
+
+// ====
+
+// Negative splat constant indices are also statically invalid.
+func.def @table_lookup_static_negative_index() {
+  %table = vector.constant 0.0 : vector<4xf32>
+  %indices = vector.constant -1 : vector<8xi8>
+  // ERROR@+1: SUBRANGE/004
+  %r = vector.table.lookup %table[%indices] : vector<4xf32>, vector<8xi8> -> vector<8xf32>
+  func.return
+}
+
+// ====
+
+// Table quantize threshold tables are rank-1 register vectors.
+func.def @table_quantize_threshold_rank_mismatch(%values: vector<4xf32>, %thresholds: vector<2x2xf32>) {
+  // ERROR@+1: TYPE/003 "thresholds" "rank-1 vector"
+  %codes = vector.table.quantize %values, %thresholds {nan = zero, tie = lower} : vector<4xf32>, vector<2x2xf32> -> vector<4xi8>
+  func.return
+}
+
+// ====
+
+// Quantize input and threshold lanes must be floating-point lanes.
+func.def @table_quantize_integer_operands(%values: vector<4xi32>, %thresholds: vector<2xi32>) {
+  // ERROR@+2: TYPE/003 "input" "vector<4xi32>" "float_element"
+  // ERROR@+1: TYPE/003 "thresholds" "vector<2xi32>" "float_element"
+  %codes = vector.table.quantize %values, %thresholds {nan = zero, tie = lower} : vector<4xi32>, vector<2xi32> -> vector<4xi8>
+  func.return
+}
+
+// ====
+
+// Quantize result lanes are integer storage codes, not decoded floats.
+func.def @table_quantize_result_float(%values: vector<4xf32>, %thresholds: vector<2xf32>) {
+  // ERROR@+1: TYPE/004 "integer_element"
+  %codes = vector.table.quantize %values, %thresholds {nan = zero, tie = lower} : vector<4xf32>, vector<2xf32> -> vector<4xf32>
+  func.return
+}
+
+// ====
+
+// Quantize result shape follows the input lanes.
+func.def @table_quantize_shape_mismatch(%values: vector<4xf32>, %thresholds: vector<2xf32>) {
+  // ERROR@+1: SHAPE/002
+  %codes = vector.table.quantize %values, %thresholds {nan = zero, tie = lower} : vector<4xf32>, vector<2xf32> -> vector<8xi8>
+  func.return
+}
+
+// ====
+
+// The threshold table element type follows the input element type.
+func.def @table_quantize_threshold_element_mismatch(%values: vector<4xf32>, %thresholds: vector<2xf16>) {
+  // ERROR@+1: TYPE/002
+  %codes = vector.table.quantize %values, %thresholds {nan = zero, tie = lower} : vector<4xf32>, vector<2xf16> -> vector<4xi8>
+  func.return
+}
+
+// ====
+
+// NaN and threshold tie policy are required so edge behavior is never inferred.
+func.def @table_quantize_missing_policy(%values: vector<4xf32>, %thresholds: vector<2xf32>) {
+  // ERROR@+2: TYPE/005 "nan"
+  // ERROR@+1: TYPE/005 "tie"
+  %codes = vector.table.quantize %values, %thresholds : vector<4xf32>, vector<2xf32> -> vector<4xi8>
+  func.return
+}
+
+// ====
+
+// Static result code lanes must have enough bit capacity for all bins.
+func.def @table_quantize_result_capacity(%values: vector<4xf32>, %thresholds: vector<2xf32>) {
+  // ERROR@+1: TYPE/011 "result" "vector<4xi1>" "2" "2"
+  %codes = vector.table.quantize %values, %thresholds {nan = zero, tie = lower} : vector<4xf32>, vector<2xf32> -> vector<4xi1>
+  func.return
+}
+
+// ====
+
+// Decoding requires a schema witness, not a numeric-transform descriptor.
+func.def @decode_requires_schema_role(%payload: vector<4xi32>, %xf: encoding<transform>) {
+  // ERROR@+1: TYPE/003 "encoding<schema>"
+  %values = vector.decode %payload using %xf : vector<4xi32>, encoding<transform> -> vector<32xf32>
+  func.return
+}
+
+// ====
+
+// Encoding uses the same schema witness boundary as decoding.
+func.def @encode_requires_schema_role(%values: vector<32xf32>, %xf: encoding<transform>) {
+  // ERROR@+1: TYPE/003 "encoding<schema>"
+  %payload = vector.encode %values using %xf : vector<32xf32>, encoding<transform> -> vector<4xi32>
+  func.return
+}
+
+// ====
+
+// Auxiliary operands are keyed by a small vector-owned vocabulary so lowering
+// can resolve a compact bitset instead of matching arbitrary strings later.
+func.def @decode_rejects_unknown_auxiliary_key(%payload: vector<6xi32>, %scale: vector<1xf16>) {
+  %schema = encoding.define #matrix_operand<element_format=f6e3m2, payload_elements=32, payload_registers=6, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  // ERROR@+1: ENCODING/015 "vector.decode" "mystery"
+  %values = vector.decode %payload using %schema {mystery = %scale : vector<1xf16>} : vector<6xi32>, encoding<schema> -> vector<32xf32>
+  func.return
+}
+
+// ====
+
+// Static encoded matrix schemas can require named auxiliary operands.
+func.def @decode_requires_schema_scale_auxiliary(%payload: vector<6xi32>) {
+  %schema = encoding.define #matrix_operand<element_format=f6e3m2, payload_elements=32, payload_registers=6, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  // ERROR@+1: ENCODING/016 "vector.decode" "scale"
+  %values = vector.decode %payload using %schema : vector<6xi32>, encoding<schema> -> vector<32xf32>
+  func.return
+}
+
+// ====
+
+// Fragment shapes are dynamic SSA index values, not early static attributes.
+func.def @fragment_requires_index_shape(%payload: vector<6xi32>, %m: i32, %n: index) {
+  // ERROR@+1: TYPE/003 "rows" "index"
+  %fragment = vector.fragment<lhs> %payload shape [%m, %n] : vector<6xi32>
+  func.return
+}
+
+// ====
+
+// Fragment roles are a closed target-independent role enum.
+func.def @fragment_rejects_unknown_role(%payload: vector<6xi32>, %m: index, %k: index) {
+  // ERROR@+1: PARSE/017 "role"
+  %fragment = vector.fragment<side> %payload shape [%m, %k] : vector<6xi32>
+  func.return
+}
+
+// ====
+
+// Fragment load shape operands are the same dynamic SSA index values consumed
+// by vector.fragment and vector.mma lowering.
+func.def @fragment_load_requires_index_shape(%buffer: buffer, %offset: offset, %row: index, %m: i32, %k: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16x16xf16, %layout>
+  // ERROR@+1: TYPE/003 "rows" "index"
+  %lhs = vector.fragment.load<lhs> %view[%row, 0] shape [%m, %k] : view<16x16xf16, %layout> -> vector<16xf16>
+  func.return
+}
+
+// ====
+
+// Fragment movement origins address a full-rank logical view origin. The
+// payload vector is target-shaped, but the origin still belongs to the view.
+func.def @fragment_load_requires_full_rank_origin(%buffer: buffer, %offset: offset, %row: index, %m: index, %k: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16x16xf16, %layout>
+  // ERROR@+1: SUBRANGE/001 "view" "1" "2"
+  %lhs = vector.fragment.load<lhs> %view[%row] shape [%m, %k] : view<16x16xf16, %layout> -> vector<16xf16>
+  func.return
+}
+
+// ====
+
+// Dense fragment movement keeps the logical view element type on the physical
+// fragment payload.
+func.def @fragment_load_requires_matching_element_type(%buffer: buffer, %offset: offset, %row: index, %m: index, %k: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16x16xf32, %layout>
+  // ERROR@+1: TYPE/002 "view" "result"
+  %lhs = vector.fragment.load<lhs> %view[%row, 0] shape [%m, %k] : view<16x16xf32, %layout> -> vector<16xf16>
+  func.return
+}
+
+// ====
+
+// Dense fragment stores preserve the same element-type boundary as dense
+// fragment loads.
+func.def @fragment_store_requires_matching_element_type(%buffer: buffer, %offset: offset, %row: index, %col: index, %m: index, %n: index, %value: vector<8xf16>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16x16xf32, %layout>
+  // ERROR@+1: TYPE/002 "value" "view"
+  vector.fragment.store<result> %value, %view[%row, %col] shape [%m, %n] : vector<8xf16>, view<16x16xf32, %layout>
+  func.return
+}
+
+// ====
+
+// Auxiliary fragment operands require the schema that interprets them.
+func.def @fragment_auxiliary_requires_schema(%payload: vector<6xi32>, %m: index, %k: index, %scale: vector<1xf16>) {
+  // ERROR@+1: ENCODING/016 "vector.fragment" "schema"
+  %fragment = vector.fragment<lhs> %payload shape [%m, %k] using {scale = %scale : vector<1xf16>} : vector<6xi32>
+  func.return
+}
+
+// ====
+
+// Fragment schema parameters must be storage schemas, not other encodings.
+func.def @fragment_requires_schema_role(%payload: vector<6xi32>, %m: index, %k: index, %xf: encoding<transform>) {
+  // ERROR@+1: TYPE/003 "schema" "encoding<schema>"
+  %fragment = vector.fragment<lhs> %payload shape [%m, %k] using {schema = %xf : encoding<transform>} : vector<6xi32>
+  func.return
+}
+
+// ====
+
+// Fragment parameter keys share the vector auxiliary vocabulary.
+func.def @fragment_rejects_unknown_auxiliary_key(%payload: vector<6xi32>, %m: index, %k: index, %scale: vector<1xf16>) {
+  %schema = encoding.define #matrix_operand<element_format=f6e3m2, payload_elements=32, payload_registers=6, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  // ERROR@+1: ENCODING/015 "vector.fragment" "mystery"
+  %fragment = vector.fragment<lhs> %payload shape [%m, %k] using {mystery = %scale : vector<1xf16>, schema = %schema : encoding<schema>} : vector<6xi32>
+  func.return
+}
+
+// ====
+
+// Static encoded fragment schemas can require named auxiliary operands.
+func.def @fragment_requires_schema_scale_auxiliary(%payload: vector<6xi32>, %m: index, %k: index) {
+  %schema = encoding.define #matrix_operand<element_format=f6e3m2, payload_elements=32, payload_registers=6, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  // ERROR@+1: ENCODING/016 "vector.fragment" "scale"
+  %fragment = vector.fragment<lhs> %payload shape [%m, %k] using {schema = %schema : encoding<schema>} : vector<6xi32>
+  func.return
+}
+
+// ====
+
+// Matrix MMA preserves the physical init/result vector type. Fragment
+// interpretation compatibility is a fact-backed lowering contract.
+func.def @mma_result_type_must_match_init(%lhs: vector<8xf16>, %rhs: vector<8xf16>, %init: vector<8xf32>) {
+  // ERROR@+1: TYPE/001 "init" "result"
+  %result = vector.mma %lhs, %rhs, %init : vector<8xf16>, vector<8xf16>, vector<4xf32>
+  func.return
+}
+
+// ====
+
+// Fully static threshold tables must be nondecreasing.
+func.def @table_quantize_unsorted_thresholds(%values: vector<4xf32>) {
+  %t0 = scalar.constant 0.0 : f32
+  %t1 = scalar.constant -1.0 : f32
+  %thresholds = vector.from_elements %t0, %t1 : vector<2xf32>
+  // ERROR@+1: STRUCTURE/015 "thresholds" "0" "1"
+  %codes = vector.table.quantize %values, %thresholds {nan = zero, tie = lower} : vector<4xf32>, vector<2xf32> -> vector<4xi8>
+  func.return
+}
+
+// ====
+
+// Numeric transforms require an encoding with the numeric-transform role, not
+// an arbitrary storage schema.
+func.def @transform_role_mismatch(%v: vector<128xf32>) {
+  %schema = encoding.define #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
+  // ERROR@+1: TYPE/003 "encoding<transform>"
+  %r = vector.transform %v, %schema : vector<128xf32>, encoding<schema> -> vector<128xf32>
+  func.return
+}
+
+// ====
+
+// Numeric transform descriptors spell their family explicitly.
+func.def @transform_missing_family(%v: vector<128xf32>) {
+  // ERROR@+1: ENCODING/007 "numeric_transform" "family"
+  %xf = encoding.define #numeric_transform<input_elems=128, output_elems=128> : encoding<transform>
+  %r = vector.transform %v, %xf : vector<128xf32>, encoding<transform> -> vector<128xf32>
+  func.return
+}
+
+// ====
+
+// Numeric transform descriptors carry input and output extents.
+func.def @transform_missing_extent(%v: vector<128xf32>) {
+  // ERROR@+1: ENCODING/007 "numeric_transform" "input_elems"
+  %xf = encoding.define #numeric_transform<family="hadamard", output_elems=128> : encoding<transform>
+  %r = vector.transform %v, %xf : vector<128xf32>, encoding<transform> -> vector<128xf32>
+  func.return
+}
+
+// ====
+
+// Unknown transform descriptor parameters are rejected instead of flowing
+// through as target-specific magic.
+func.def @transform_unknown_param(%v: vector<128xf32>) {
+  // ERROR@+1: ENCODING/008 "numeric_transform" "window"
+  %xf = encoding.define #numeric_transform<family="hadamard", input_elems=128, output_elems=128, window=8> : encoding<transform>
+  %r = vector.transform %v, %xf : vector<128xf32>, encoding<transform> -> vector<128xf32>
+  func.return
+}
+
+// ====
+
+// Transform extent parameters must be positive integer attributes when static.
+func.def @transform_static_extent_kind_mismatch(%v: vector<128xf32>) {
+  // ERROR@+1: ENCODING/010 "numeric_transform" "input_elems"
+  %xf = encoding.define #numeric_transform<family="hadamard", input_elems="128", output_elems=128> : encoding<transform>
+  %r = vector.transform %v, %xf : vector<128xf32>, encoding<transform> -> vector<128xf32>
+  func.return
+}
+
+// ====
+
+// Static transform extents describe lane counts and must be positive.
+func.def @transform_static_extent_not_positive(%v: vector<128xf32>) {
+  // ERROR@+1: STRUCTURE/014 "input_elems" "0" "positive extent"
+  %xf = encoding.define #numeric_transform<family="hadamard", input_elems=0, output_elems=128> : encoding<transform>
+  %r = vector.transform %v, %xf : vector<128xf32>, encoding<transform> -> vector<128xf32>
+  func.return
+}
+
+// ====
+
+// Transform input extent must match the source last axis.
+func.def @transform_input_extent_mismatch(%v: vector<64xf32>) {
+  %matrix = vector.constant 0.0 : vector<64x64xf32>
+  %xf = encoding.define #numeric_transform<family="jl_dense", input_elems=128, output_elems=64> {matrix = %matrix : vector<64x64xf32>} : encoding<transform>
+  // ERROR@+1: TYPE/003 "last axis matching static transform extent"
+  %r = vector.transform %v, %xf : vector<64xf32>, encoding<transform> -> vector<64xf32>
+  func.return
+}
+
+// ====
+
+// Transform output extent must match the result last axis.
+func.def @transform_output_extent_mismatch(%v: vector<128xf32>) {
+  %matrix = vector.constant 0.0 : vector<32x128xf32>
+  %xf = encoding.define #numeric_transform<family="jl_dense", input_elems=128, output_elems=64> {matrix = %matrix : vector<32x128xf32>} : encoding<transform>
+  // ERROR@+1: TYPE/004 "last axis matching static transform extent"
+  %r = vector.transform %v, %xf : vector<128xf32>, encoding<transform> -> vector<32xf32>
+  func.return
+}
+
+// ====
+
+// Dynamic transform extents must use the same SSA value as the corresponding
+// dynamic vector dimension.
+func.def @transform_dynamic_extent_mismatch(%n: index, %m: index, %v: vector<[%n]xf32>) {
+  %xf = encoding.define #numeric_transform<family="hadamard"> {input_elems = %m : index, output_elems = %n : index} : encoding<transform>
+  // ERROR@+1: TYPE/003 "last axis matching dynamic transform extent"
+  %r = vector.transform %v, %xf : vector<[%n]xf32>, encoding<transform> -> vector<[%n]xf32>
+  func.return
+}
+
+// ====
+
+// Hadamard-style transforms are square transforms over a power-of-two last
+// axis when the extent is statically known.
+func.def @transform_hadamard_non_power_of_two(%v: vector<96xf32>) {
+  %xf = encoding.define #numeric_transform<family="hadamard", input_elems=96, output_elems=96> : encoding<transform>
+  // ERROR@+1: TYPE/003 "power-of-two last axis extent for Hadamard transform"
+  %r = vector.transform %v, %xf : vector<96xf32>, encoding<transform> -> vector<96xf32>
+  func.return
+}
+
+// ====
+
+// Hadamard-style transforms preserve shape.
+func.def @transform_hadamard_shape_mismatch(%v: vector<128xf32>) {
+  %xf = encoding.define #numeric_transform<family="hadamard", input_elems=128, output_elems=64> : encoding<transform>
+  // ERROR@+1: SHAPE/002
+  %r = vector.transform %v, %xf : vector<128xf32>, encoding<transform> -> vector<64xf32>
+  func.return
+}
+
+// ====
+
+// Sign vectors must match the source shape and have i1 lanes.
+func.def @transform_signs_shape_mismatch(%v: vector<128xf32>, %signs: vector<64xi1>) {
+  // ERROR@+1: ENCODING/009 "numeric_transform" "signs"
+  %xf = encoding.define #numeric_transform<family="hadamard_sign", input_elems=128, output_elems=128> {signs = %signs : vector<64xi1>} : encoding<transform>
+  %r = vector.transform %v, %xf : vector<128xf32>, encoding<transform> -> vector<128xf32>
+  func.return
+}
+
+// ====
+
+// Static permutation maps must name in-bounds source lanes.
+func.def @transform_permutation_out_of_bounds(%v: vector<2xf32>, %signs: vector<2xi1>) {
+  %p0 = scalar.constant 0 : i64
+  %p2 = scalar.constant 2 : i64
+  %permutation = vector.from_elements %p0, %p2 : vector<2xi64>
+  %xf = encoding.define #numeric_transform<family="sign_permute_hadamard", input_elems=2, output_elems=2> {permutation = %permutation : vector<2xi64>, signs = %signs : vector<2xi1>} : encoding<transform>
+  // ERROR@+1: SUBRANGE/004
+  %r = vector.transform %v, %xf : vector<2xf32>, encoding<transform> -> vector<2xf32>
+  func.return
+}
+
+// ====
+
+// Static permutation maps must name each source lane once.
+func.def @transform_permutation_duplicate(%v: vector<2xf32>, %signs: vector<2xi1>) {
+  %p0 = scalar.constant 0 : i64
+  %permutation = vector.from_elements %p0, %p0 : vector<2xi64>
+  %xf = encoding.define #numeric_transform<family="sign_permute_hadamard", input_elems=2, output_elems=2> {permutation = %permutation : vector<2xi64>, signs = %signs : vector<2xi1>} : encoding<transform>
+  // ERROR@+1: STRUCTURE/014 "permutation" "0" "unique lane indices"
+  %r = vector.transform %v, %xf : vector<2xf32>, encoding<transform> -> vector<2xf32>
+  func.return
+}
+
+// ====
+
+// Numeric transform families are intentionally enumerated.
+func.def @transform_unknown_family(%v: vector<128xf32>) {
+  // ERROR@+1: ENCODING/013 "numeric_transform" "family" "mystery"
+  %xf = encoding.define #numeric_transform<family="mystery", input_elems=128, output_elems=128> : encoding<transform>
+  %r = vector.transform %v, %xf : vector<128xf32>, encoding<transform> -> vector<128xf32>
+  func.return
+}
+
+// ====
+
+// Extension and truncation ops encode their width direction in the op name.
+func.def @extf_wrong_width(%v: vector<4xf32>) {
+  // ERROR@+1: TYPE/004 "result" "element bit width greater than input"
+  %r = vector.extf %v : vector<4xf32> to vector<4xf16>
+  func.return
+}
+
+// ====
+
+// Floating-point truncation must narrow, not widen.
+func.def @fptrunc_wrong_width(%v: vector<4xf16>) {
+  // ERROR@+1: TYPE/004 "result" "element bit width less than input"
+  %r = vector.fptrunc %v : vector<4xf16> to vector<4xf32>
+  func.return
+}
+
+// ====
+
+// Integer extension must widen, not narrow.
+func.def @extsi_wrong_width(%v: vector<4xi32>) {
+  // ERROR@+1: TYPE/004 "result" "element bit width greater than input"
+  %r = vector.extsi %v : vector<4xi32> to vector<4xi8>
+  func.return
+}
+
+// ====
+
+// Integer truncation must narrow, not widen.
+func.def @trunci_wrong_width(%v: vector<4xi8>) {
+  // ERROR@+1: TYPE/004 "result" "element bit width less than input"
+  %r = vector.trunci %v : vector<4xi8> to vector<4xi32>
+  func.return
+}
+
+// ====
+
+// Bitcasts require provable total register bit preservation.
+func.def @bitcast_width_mismatch(%v: vector<4xf32>) {
+  // ERROR@+1: TYPE/004 "provably same total bit count as input"
+  %r = vector.bitcast %v : vector<4xf32> to vector<4xi16>
+  func.return
+}
+
+// ====
+
+// Aggregate bitcasts can reinterpret packed bytes as narrower element counts.
+func.def @bitcast_aggregate_width_mismatch(%v: vector<3xi8>) {
+  // ERROR@+1: TYPE/004 "provably same total bit count as input"
+  %r = vector.bitcast %v : vector<3xi8> to vector<1xf16>
+  func.return
+}
+
+// ====
+
+// Dynamic shape-changing bitcasts require the same symbolic total bit count.
+func.def @bitcast_dynamic_symbol_mismatch(%n: index, %m: index, %v: vector<[%n]x2xi8>) {
+  // ERROR@+1: TYPE/004 "provably same total bit count as input"
+  %r = vector.bitcast %v : vector<[%n]x2xi8> to vector<[%m]xf16>
+  func.return
+}
+
+// ====
+
+// Bitfield extraction requires positive field widths.
+func.def @bitfield_extract_zero_width(%v: vector<4xi8>) {
+  // ERROR@+1: STRUCTURE/014 "width" "0" "positive bitfield width"
+  %r = vector.bitfield.extractu %v {offset = 0, width = 0} : vector<4xi8> -> vector<4xi32>
+  func.return
+}
+
+// ====
+
+// Bitfield offsets are least-significant bit positions and cannot be negative.
+func.def @bitfield_extract_negative_offset(%v: vector<4xi8>) {
+  // ERROR@+1: STRUCTURE/014 "offset" "-1" "non-negative bit offset"
+  %r = vector.bitfield.extractu %v {offset = -1, width = 4} : vector<4xi8> -> vector<4xi32>
+  func.return
+}
+
+// ====
+
+// Bitfield ranges must fit inside each source lane.
+func.def @bitfield_extract_range_overflow(%v: vector<4xi8>) {
+  // ERROR@+1: STRUCTURE/014 "width" "4" "bitfield range within storage element width"
+  %r = vector.bitfield.extracts %v {offset = 6, width = 4} : vector<4xi8> -> vector<4xi32>
+  func.return
+}
+
+// ====
+
+// Extract result lanes must be wide enough to hold the selected field.
+func.def @bitfield_extract_result_too_narrow(%v: vector<4xi8>) {
+  // ERROR@+1: TYPE/004 "result" "element bit width at least width"
+  %r = vector.bitfield.extractu %v {offset = 0, width = 4} : vector<4xi8> -> vector<4xi1>
+  func.return
+}
+
+// ====
+
+// Insert source field lanes must be wide enough to provide the selected bits.
+func.def @bitfield_insert_field_too_narrow(%field: vector<4xi1>, %base: vector<4xi8>) {
+  // ERROR@+1: TYPE/003 "field" "element bit width at least width"
+  %r = vector.bitfield.insert %field into %base {offset = 0, width = 4} : vector<4xi1>, vector<4xi8>
+  func.return
+}
+
+// ====
+
+// Insert ranges must fit inside each base lane.
+func.def @bitfield_insert_range_overflow(%field: vector<4xi32>, %base: vector<4xi8>) {
+  // ERROR@+1: STRUCTURE/014 "width" "4" "bitfield range within storage element width"
+  %r = vector.bitfield.insert %field into %base {offset = 6, width = 4} : vector<4xi32>, vector<4xi8>
+  func.return
+}
+
+// ====
+
+// Bitpack widths must be positive.
+func.def @bitpack_zero_width(%v: vector<4xi8>) {
+  // ERROR@+1: STRUCTURE/014 "width" "0" "positive bit width"
+  %r = vector.bitpack<0> %v : vector<4xi8> -> vector<1xi8>
+  func.return
+}
+
+// ====
+
+// Bitpack consumes low bits already present in each source lane.
+func.def @bitpack_source_too_narrow(%v: vector<8xi1>) {
+  // ERROR@+1: TYPE/003 "source" "element bit width at least width"
+  %r = vector.bitpack<2> %v : vector<8xi1> -> vector<2xi8>
+  func.return
+}
+
+// ====
+
+// Bitpack fills the result storage exactly when both sides are static.
+func.def @bitpack_static_count_mismatch(%v: vector<4xi8>) {
+  // ERROR@+1: TYPE/004 "packed payload bit count equal to result storage bit count"
+  %r = vector.bitpack<4> %v : vector<4xi8> -> vector<3xi8>
+  func.return
+}
+
+// ====
+
+// Bitunpack result lanes must be wide enough to hold each recovered field.
+func.def @bitunpack_result_too_narrow(%v: vector<1xi8>) {
+  // ERROR@+1: TYPE/004 "result" "element bit width at least width"
+  %r = vector.bitunpacku<2> %v : vector<1xi8> -> vector<4xi1>
+  func.return
+}
+
+// ====
+
+// Bitunpack consumes the source storage exactly when both sides are static.
+func.def @bitunpack_static_count_mismatch(%v: vector<1xi8>) {
+  // ERROR@+1: TYPE/004 "unpacked payload bit count equal to source storage bit count"
+  %r = vector.bitunpacks<3> %v : vector<1xi8> -> vector<3xi8>
+  func.return
+}
+
+// ====
+
+// Floating dot products consume floating source lanes.
+func.def @dotf_source_not_float(%lhs: vector<4xi32>, %rhs: vector<4xi32>, %acc: i32) {
+  // ERROR@+1: TYPE/003 "float_element"
+  %r = vector.dotf %lhs, %rhs, %acc : vector<4xi32>, vector<4xi32>, i32
+  func.return
+}
+
+// ====
+
+// Floating dot products require same-shaped source vectors.
+func.def @dotf_source_shape_mismatch(%lhs: vector<4xf32>, %rhs: vector<8xf32>, %acc: f32) {
+  // ERROR@+1: SHAPE/002
+  %r = vector.dotf %lhs, %rhs, %acc : vector<4xf32>, vector<8xf32>, f32
+  func.return
+}
+
+// ====
+
+// Plain dotf is a same-element operation; widened target-shaped dots use
+// explicit conversion or dedicated target-specific grouped dot ops.
+func.def @dotf_acc_element_mismatch(%lhs: vector<4xf16>, %rhs: vector<4xf16>, %acc: f32) {
+  // ERROR@+1: TYPE/002
+  %r = vector.dotf %lhs, %rhs, %acc : vector<4xf16>, vector<4xf16>, f32
+  func.return
+}
+
+// ====
+
+// The explicit init and scalar result are the same accumulator type.
+func.def @dotf_result_type_mismatch(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %acc: f32) {
+  // ERROR@+1: TYPE/001
+  %r = vector.dotf %lhs, %rhs, %acc : vector<4xf32>, vector<4xf32>, f64
+  func.return
+}
+
+// ====
+
+// Dot products spell the accumulator/result type in the colon list, not as an
+// independent arrow result.
+func.def @dotf_reject_arrow_result(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %acc: f32) {
+  // ERROR@+1: PARSE/003
+  %r = vector.dotf %lhs, %rhs, %acc : vector<4xf32>, vector<4xf32> -> f32
+  func.return
+}
+
+// ====
+
+// Dot2 source lanes are f16/bf16 lanes because the op spells a widened
+// two-lane hardware-shaped floating dot.
+func.def @dot2f_source_not_f16_or_bf16(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %acc: vector<2xf32>) {
+  // ERROR@+2: TYPE/003 "lhs" "f16 or bf16 element type"
+  // ERROR@+1: TYPE/003 "rhs" "f16 or bf16 element type"
+  %r = vector.dot2f %lhs, %rhs, %acc : vector<4xf32>, vector<4xf32>, vector<2xf32>
+  func.return
+}
+
+// ====
+
+// Dot2 accumulates into f32 lanes, not into the source lane width.
+func.def @dot2f_acc_not_f32(%lhs: vector<4xf16>, %rhs: vector<4xf16>, %acc: vector<2xf16>) {
+  // ERROR@+1: TYPE/003 "f32 element type"
+  %r = vector.dot2f %lhs, %rhs, %acc : vector<4xf16>, vector<4xf16>, vector<2xf16>
+  func.return
+}
+
+// ====
+
+// The last source axis is grouped by pairs.
+func.def @dot2f_source_last_axis_not_multiple_of_two(%lhs: vector<5xf16>, %rhs: vector<5xf16>, %acc: vector<2xf32>) {
+  // ERROR@+1: TYPE/003 "last axis extent divisible by 2"
+  %r = vector.dot2f %lhs, %rhs, %acc : vector<5xf16>, vector<5xf16>, vector<2xf32>
+  func.return
+}
+
+// ====
+
+// Static accumulator/result lanes must be the grouped last-axis source extent.
+func.def @dot2f_result_axis_mismatch(%lhs: vector<6xbf16>, %rhs: vector<6xbf16>, %acc: vector<4xf32>) {
+  // ERROR@+1: TYPE/004 "last axis extent equal to source last axis extent divided by 2"
+  %r = vector.dot2f %lhs, %rhs, %acc : vector<6xbf16>, vector<6xbf16>, vector<4xf32>
+  func.return
+}
+
+// ====
+
+// Leading axes are preserved while the last axis is grouped.
+func.def @dot2f_leading_axis_mismatch(%lhs: vector<2x4xf16>, %rhs: vector<2x4xf16>, %acc: vector<3x2xf32>) {
+  // ERROR@+1: SHAPE/002
+  %r = vector.dot2f %lhs, %rhs, %acc : vector<2x4xf16>, vector<2x4xf16>, vector<3x2xf32>
+  func.return
+}
+
+// ====
+
+// Dot4 source lanes are byte lanes; larger integer lanes are not silently
+// reinterpreted.
+func.def @dot4i_source_not_i8(%lhs: vector<16xi32>, %rhs: vector<16xi8>, %acc: vector<4xi32>) {
+  // ERROR@+1: TYPE/003 "i8 element type"
+  %r = vector.dot4i<s8s8> %lhs, %rhs, %acc : vector<16xi32>, vector<16xi8>, vector<4xi32>
+  func.return
+}
+
+// ====
+
+// Dot4 accumulates into i32 lanes, not into the source lane width.
+func.def @dot4i_acc_not_i32(%lhs: vector<16xi8>, %rhs: vector<16xi8>, %acc: vector<4xi16>) {
+  // ERROR@+1: TYPE/003 "i32 element type"
+  %r = vector.dot4i<s8s8> %lhs, %rhs, %acc : vector<16xi8>, vector<16xi8>, vector<4xi16>
+  func.return
+}
+
+// ====
+
+// The last source axis is grouped by fours.
+func.def @dot4i_source_last_axis_not_multiple_of_four(%lhs: vector<10xi8>, %rhs: vector<10xi8>, %acc: vector<2xi32>) {
+  // ERROR@+1: TYPE/003 "last axis extent divisible by 4"
+  %r = vector.dot4i<s8s8> %lhs, %rhs, %acc : vector<10xi8>, vector<10xi8>, vector<2xi32>
+  func.return
+}
+
+// ====
+
+// Static accumulator/result lanes must be the grouped last-axis source extent.
+func.def @dot4i_result_axis_mismatch(%lhs: vector<16xi8>, %rhs: vector<16xi8>, %acc: vector<5xi32>) {
+  // ERROR@+1: TYPE/004 "last axis extent equal to source last axis extent divided by 4"
+  %r = vector.dot4i<s8s8> %lhs, %rhs, %acc : vector<16xi8>, vector<16xi8>, vector<5xi32>
+  func.return
+}
+
+// ====
+
+// Leading axes are preserved while the last axis is grouped.
+func.def @dot4i_leading_axis_mismatch(%lhs: vector<2x16xi8>, %rhs: vector<2x16xi8>, %acc: vector<3x4xi32>) {
+  // ERROR@+1: SHAPE/002
+  %r = vector.dot4i<s8s8> %lhs, %rhs, %acc : vector<2x16xi8>, vector<2x16xi8>, vector<3x4xi32>
+  func.return
+}
+
+// ====
+
+// Dot8i4 consumes packed i32 storage lanes; unpacked byte lanes must be
+// packed explicitly with vector.bitpack<4> first.
+func.def @dot8i4_source_not_i32(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<4xi8>) {
+  // ERROR@+1: TYPE/003 "i32 element type"
+  %r = vector.dot8i4<s4s4> %lhs, %rhs, %acc : vector<4xi8>
+  func.return
+}
+
+// ====
+
+// Dot8i4 is lane-wise over packed storage words, so all vector shapes match.
+func.def @dot8i4_shape_mismatch(%lhs: vector<4xi32>, %rhs: vector<8xi32>, %acc: vector<4xi32>) {
+  // ERROR@+1: TYPE/001
+  %r = vector.dot8i4<s4s4> %lhs, %rhs, %acc : vector<4xi32>
+  func.return
+}
+
+// ====
+
+// Dot4f8 consumes packed i32 storage lanes; use vector.bitpack/bitcast first
+// when starting from byte vectors.
+func.def @dot4f8_source_not_i32(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<4xf32>) {
+  // ERROR@+1: TYPE/003 "i32 element type"
+  %r = vector.dot4f8<fp8bf8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xf32>
+  func.return
+}
+
+// ====
+
+// Dot4f8 accumulates into f32 lanes even though the packed source fields are
+// only eight bits wide.
+func.def @dot4f8_acc_not_f32(%lhs: vector<4xi32>, %rhs: vector<4xi32>, %acc: vector<4xf16>) {
+  // ERROR@+1: TYPE/003 "f32 element type"
+  %r = vector.dot4f8<bf8bf8> %lhs, %rhs, %acc : vector<4xi32>, vector<4xf16>
+  func.return
+}
+
+// ====
+
+// Dot4f8 is lane-wise over packed storage words, so source and accumulator
+// vector shapes match.
+func.def @dot4f8_shape_mismatch(%lhs: vector<4xi32>, %rhs: vector<4xi32>, %acc: vector<8xf32>) {
+  // ERROR@+1: SHAPE/002
+  %r = vector.dot4f8<fp8fp8> %lhs, %rhs, %acc : vector<4xi32>, vector<8xf32>
+  func.return
+}
+
+// ====
+
+// Reduce template parameters are tied to the vector element family.
+func.def @reduce_kind_mismatch(%v: vector<4xi32>, %zero: i32) {
+  // ERROR@+1: TYPE/003 "floating-point element type for reduce kind"
+  %r = vector.reduce<minimumf> %v, %zero : vector<4xi32>, i32
+  func.return
+}
+
+// ====
+
+// Stores observe the value that reaches memory, so poison must be diagnosed
+// before target lowering.
+func.def @store_observes_poison(%buffer: buffer, %base: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%base] : buffer -> view<4xf32, %layout>
+  %p = vector.poison : vector<4xf32>
+  // ERROR@+1: TYPE/012 "poison" "effectful operation" "vector.store"
+  vector.store %p, %view[0] : vector<4xf32>, view<4xf32, %layout>
+  func.return
+}
+
+// ====
+
+// Atomic reductions observe their update value through the memory system.
+func.def @atomic_reduce_observes_poison(%buffer: buffer, %base: offset, %row: index, %col: index, %offsets: vector<4xindex>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%base] : buffer -> view<8x8xi32, %layout>
+  %p = vector.poison : vector<4xi32>
+  // ERROR@+1: TYPE/012 "poison" "effectful operation" "vector.atomic.reduce"
+  vector.atomic.reduce<addi> %p, %view[%row, %col][%offsets] {ordering = relaxed, scope = workgroup} : vector<4xi32>, view<8x8xi32, %layout>, vector<4xindex>
+  func.return
+}
+
+// ====
+
+// Atomic address vectors are also observed because they select memory lanes.
+func.def @atomic_reduce_observes_poison_offsets(%buffer: buffer, %base: offset, %row: index, %col: index, %v: vector<4xi32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%base] : buffer -> view<8x8xi32, %layout>
+  %offsets = vector.poison : vector<4xindex>
+  // ERROR@+1: TYPE/012 "poison" "effectful operation" "vector.atomic.reduce"
+  vector.atomic.reduce<addi> %v, %view[%row, %col][%offsets] {ordering = relaxed, scope = workgroup} : vector<4xi32>, view<8x8xi32, %layout>, vector<4xindex>
+  func.return
+}
+
+// ====
+
+// Atomic memory order and scope are required explicit attributes.
+func.def @atomic_missing_ordering_and_scope(%buffer: buffer, %base: offset, %row: index, %col: index, %offsets: vector<4xindex>, %v: vector<4xi32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%base] : buffer -> view<8x8xi32, %layout>
+  // ERROR@+2: TYPE/005 "ordering"
+  // ERROR@+1: TYPE/005 "scope"
+  vector.atomic.reduce<addi> %v, %view[%row, %col][%offsets] : vector<4xi32>, view<8x8xi32, %layout>, vector<4xindex>
+  func.return
+}
+
+// ====
+
+// Atomic ordering values are parsed as a typed enum, not arbitrary strings.
+func.def @atomic_invalid_ordering(%buffer: buffer, %base: offset, %row: index, %col: index, %offsets: vector<4xindex>, %v: vector<4xi32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%base] : buffer -> view<8x8xi32, %layout>
+  // ERROR@+1: PARSE/017 "ordering"
+  vector.atomic.reduce<addi> %v, %view[%row, %col][%offsets] {ordering = unordered, scope = workgroup} : vector<4xi32>, view<8x8xi32, %layout>, vector<4xindex>
+  func.return
+}
+
+// ====
+
+// Compare-exchange failure ordering cannot include release semantics.
+func.def @atomic_cmpxchg_failure_rejects_release(%buffer: buffer, %base: offset, %row: index, %col: index, %offsets: vector<4xindex>, %v: vector<4xi32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%base] : buffer -> view<8x8xi32, %layout>
+  // ERROR@+1: STRUCTURE/014 "failure_ordering" "2" "relaxed, acquire, or seq_cst failure ordering"
+  %old = vector.atomic.cmpxchg %v, %v, %view[%row, %col][%offsets] {success_ordering = acq_rel, failure_ordering = release, scope = workgroup} : vector<4xi32>, view<8x8xi32, %layout>, vector<4xindex> -> vector<4xi32>
+  func.return
+}
+
+// ====
+
+// Compare-exchange failure ordering must not be stronger than success.
+func.def @atomic_cmpxchg_failure_not_stronger_than_success(%buffer: buffer, %base: offset, %row: index, %col: index, %offsets: vector<4xindex>, %v: vector<4xi32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%base] : buffer -> view<8x8xi32, %layout>
+  // ERROR@+1: STRUCTURE/014 "failure_ordering" "1" "failure ordering no stronger than success ordering"
+  %old = vector.atomic.cmpxchg %v, %v, %view[%row, %col][%offsets] {success_ordering = relaxed, failure_ordering = acquire, scope = workgroup} : vector<4xi32>, view<8x8xi32, %layout>, vector<4xindex> -> vector<4xi32>
+  func.return
+}
+
+// ====
+
+// Atomic kind spelling is tied to the vector element family.
+func.def @atomic_kind_mismatch(%buffer: buffer, %base: offset, %row: index, %col: index, %offsets: vector<4xindex>, %v: vector<4xi32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%base] : buffer -> view<8x8xi32, %layout>
+  // ERROR@+1: TYPE/003 "floating-point element type for atomic kind"
+  vector.atomic.reduce<addf> %v, %view[%row, %col][%offsets] {ordering = relaxed, scope = workgroup} : vector<4xi32>, view<8x8xi32, %layout>, vector<4xindex>
+  func.return
+}
+
+// ====
+
+// Exchange is an RMW operation, not a no-result reduction/update.
+func.def @atomic_reduce_rejects_exchange(%buffer: buffer, %base: offset, %row: index, %col: index, %offsets: vector<4xindex>, %v: vector<4xi32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%base] : buffer -> view<8x8xi32, %layout>
+  // ERROR@+1: STRUCTURE/014 "non-exchange atomic reduce kind"
+  vector.atomic.reduce<xchgi> %v, %view[%row, %col][%offsets] {ordering = relaxed, scope = workgroup} : vector<4xi32>, view<8x8xi32, %layout>, vector<4xindex>
+  func.return
+}
+
+// ====
+
+// Atomic offset vectors accept index or non-i1 integer elements.
+func.def @atomic_offsets_reject_i1(%buffer: buffer, %base: offset, %row: index, %col: index, %offsets: vector<4xi1>, %v: vector<4xi32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%base] : buffer -> view<8x8xi32, %layout>
+  // ERROR@+1: TYPE/003 "offsets" "index or non-i1 integer element type"
+  %old = vector.atomic.rmw<addi> %v, %view[%row, %col][%offsets] {ordering = relaxed, scope = workgroup} : vector<4xi32>, view<8x8xi32, %layout>, vector<4xi1>
+  func.return
+}
+
+// ====
+
+// Lanewise vector float flags use the scalar fastmath vocabulary.
+func.def @mulf_rejects_integer_overflow_flag(%a: vector<4xf32>, %b: vector<4xf32>) {
+  // ERROR@+1: PARSE/018 "nuw"
+  %r = vector.mulf<nuw> %a, %b : vector<4xf32>
+  func.return
+}

@@ -138,24 +138,27 @@ iree_status_t iree_tokenizer_segmenter_sequence_allocate(
 
   // Validate child count (must be at least 2, tokenizer uses singles directly).
   if (child_count < 2) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "sequence child count %" PRIhsz
-        " is less than minimum 2; use single segmenters directly",
-        child_count);
+    IREE_RETURN_AND_END_ZONE(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "sequence child count %" PRIhsz
+                             " is less than minimum 2; use single segmenters "
+                             "directly",
+                             child_count));
   }
   if (child_count > IREE_TOKENIZER_SEGMENTER_SEQUENCE_MAX_DEPTH) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "sequence child count %" PRIhsz " exceeds maximum %d", child_count,
-        IREE_TOKENIZER_SEGMENTER_SEQUENCE_MAX_DEPTH);
+    IREE_RETURN_AND_END_ZONE(
+        z0, iree_make_status(
+                IREE_STATUS_INVALID_ARGUMENT,
+                "sequence child count %" PRIhsz " exceeds maximum %d",
+                child_count, IREE_TOKENIZER_SEGMENTER_SEQUENCE_MAX_DEPTH));
   }
 
   // Validate all children are non-NULL.
   for (iree_host_size_t i = 0; i < child_count; ++i) {
     if (!children[i]) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "sequence child %" PRIhsz " is NULL", i);
+      IREE_RETURN_AND_END_ZONE(
+          z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                               "sequence child %" PRIhsz " is NULL", i));
     }
   }
 

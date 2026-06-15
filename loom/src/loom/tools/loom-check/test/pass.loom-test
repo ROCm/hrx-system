@@ -1,0 +1,5 @@
+// RUN: pass dce
+
+func.def @pass_mode_smoke(%value: i32) -> (i32) {
+  func.return %value : i32
+}

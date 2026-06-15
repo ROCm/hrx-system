@@ -1,0 +1,254 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+    "loom_cc_test",
+)
+load(
+    "//loom/build_tools/bazel:loom_check.bzl",
+    "loom_check_test_suite",
+)
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_SPIRV_C_API_VISIBILITY = ["//loom/binding/c/target/spirv:__pkg__"]
+
+_SPIRV_CHECK_VISIBILITY = ["//loom/src/loom/tools/loom-check:__pkg__"]
+
+_SPIRV_TOOLING_VISIBILITY = ["//loom/src/loom/tooling/target/spirv:__pkg__"]
+
+_SPIRV_TOOL_DATA = [
+    "//third_party:spirv_dis",
+    "//third_party:spirv_val",
+]
+
+_SPIRV_TOOL_ENV = {
+    "LOOM_SPIRV_DIS": "$(rootpath //third_party:spirv_dis)",
+    "LOOM_SPIRV_VAL": "$(rootpath //third_party:spirv_val)",
+}
+
+#===------------------------------------------------------------------------===#
+# SPIR-V emission
+#===------------------------------------------------------------------------===#
+
+loom_cc_library(
+    name = "binary_format",
+    hdrs = ["binary_format.h"],
+    deps = ["//loom/src/loom/target/arch/spirv:isa"],
+)
+
+loom_cc_library(
+    name = "binary_writer",
+    srcs = ["binary_writer.c"],
+    hdrs = ["binary_writer.h"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_library(
+    name = "module_builder",
+    srcs = ["module_builder.c"],
+    hdrs = ["module_builder.h"],
+    visibility = _SPIRV_TOOLING_VISIBILITY,
+    deps = [
+        ":binary_format",
+        ":binary_writer",
+        "//loom/src/loom/target:types",
+        "//loom/src/loom/target/arch/spirv:features",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "module_types",
+    srcs = ["module_types.c"],
+    hdrs = ["module_types.h"],
+    deps = [
+        ":binary_format",
+        ":module_builder",
+        "//loom/src/loom/target/arch/spirv:scalar_types",
+        "//loom/src/loom/target/arch/spirv:value_types",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "module_values",
+    srcs = ["module_values.c"],
+    hdrs = ["module_values.h"],
+    deps = [
+        ":module_builder",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/target/arch/spirv:value_types",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "module_instructions",
+    srcs = ["module_instructions.c"],
+    hdrs = ["module_instructions.h"],
+    deps = [
+        ":binary_format",
+        ":module_builder",
+        "//loom/src/loom/target/arch/spirv:isa",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "module_abi",
+    srcs = ["module_abi.c"],
+    hdrs = ["module_abi.h"],
+    deps = [
+        ":binary_format",
+        ":module_builder",
+        ":module_instructions",
+        ":module_types",
+        ":module_values",
+        "//loom/src/loom/codegen/low:target_binding",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/arch/spirv:abi",
+        "//loom/src/loom/target/arch/spirv:registers",
+        "//loom/src/loom/target/arch/spirv:scalar_types",
+        "//loom/src/loom/target/arch/spirv:value_types",
+        "//loom/src/loom/target/arch/spirv/descriptors:descriptors_ids",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "module_storage",
+    srcs = ["module_storage.c"],
+    hdrs = ["module_storage.h"],
+    deps = [
+        ":binary_format",
+        ":module_builder",
+        ":module_types",
+        ":module_values",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/arch/spirv:isa",
+        "//loom/src/loom/target/arch/spirv:registers",
+        "//loom/src/loom/target/arch/spirv:scalar_types",
+        "//loom/src/loom/target/arch/spirv:value_types",
+        "//loom/src/loom/target/arch/spirv/descriptors",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "module_emitter",
+    srcs = ["module_emitter.c"],
+    hdrs = ["module_emitter.h"],
+    visibility = _SPIRV_C_API_VISIBILITY + _SPIRV_TOOLING_VISIBILITY,
+    deps = [
+        ":binary_format",
+        ":module_abi",
+        ":module_builder",
+        ":module_instructions",
+        ":module_storage",
+        ":module_types",
+        ":module_values",
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/codegen/low:function",
+        "//loom/src/loom/codegen/low:target_binding",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:low_descriptor_registry",
+        "//loom/src/loom/target:types",
+        "//loom/src/loom/target/arch/spirv:features",
+        "//loom/src/loom/target/arch/spirv:module_contract",
+        "//loom/src/loom/target/arch/spirv:packet_rows",
+        "//loom/src/loom/target/arch/spirv/descriptors:descriptors_ids",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "loom_check",
+    testonly = True,
+    srcs = ["check/loom_check.c"],
+    hdrs = ["check/loom_check.h"],
+    deps = [
+        ":module_emitter",
+        "//loom/src/loom/target:entry_selection",
+        "//loom/src/loom/target/tool:spirv",
+        "//loom/src/loom/tooling/compile:pipeline",
+        "//loom/src/loom/tools/loom-check:execute",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "check_provider",
+    testonly = True,
+    srcs = ["check/provider.c"],
+    hdrs = ["check/provider.h"],
+    visibility = _SPIRV_CHECK_VISIBILITY,
+    deps = [
+        ":loom_check",
+        "//loom/src/loom/tools/loom-check:provider",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "module_builder_test",
+    srcs = ["module_builder_test.cc"],
+    deps = [
+        ":binary_format",
+        ":module_builder",
+        "//loom/src/loom/target/arch/spirv:features",
+        "//loom/src/loom/target/arch/spirv/records:target_records",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "module_values_test",
+    srcs = ["module_values_test.cc"],
+    deps = [
+        ":module_builder",
+        ":module_values",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/target/arch/spirv:scalar_types",
+        "//loom/src/loom/target/arch/spirv/records:target_records",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_check_test_suite(
+    name = "loom_check_file_test",
+    srcs = [
+        "test/barrier.loom-test",
+        "test/emit.loom-test",
+        "test/source_structured_control.loom-test",
+        "test/workgroup_storage.loom-test",
+    ],
+    data = _SPIRV_TOOL_DATA,
+    env = _SPIRV_TOOL_ENV,
+    test_name_prefix_to_strip = "test/",
+)

@@ -1,0 +1,80 @@
+// RUN: verify
+
+// Undefined config reference.
+func.def @undefined_get() {
+  // ERROR@+1: SYMBOL/002 "missing"
+  %v = config.get @missing : index
+  func.return
+}
+
+// ====
+
+// Reading from a function symbol is a kind mismatch.
+func.def @callee(%x: index) -> (index) {
+  func.return %x : index
+}
+
+func.def @get_from_function() {
+  // ERROR@+1: SYMBOL/003 "expected config"
+  %v = config.get @callee : index
+  func.return
+}
+
+// ====
+
+// Config symbols serialize through the global bytecode payload shape, but they
+// must not implement the global interface in IR.
+config.def @not_a_global = 42 : index
+
+func.def @global_load_from_config() {
+  // ERROR@+1: SYMBOL/003 "expected global"
+  %v = global.load @not_a_global : index
+  func.return
+}
+
+// ====
+
+// Reads must use the exact declared config type.
+config.def @answer = 42 : index
+
+func.def @get_type_mismatch() {
+  // ERROR@+1: TYPE/001 "referenced config"
+  %v = config.get @answer : i32
+  func.return
+}
+
+// ====
+
+// i1 configs accept bool values or integer values 0 and 1, but not arbitrary
+// integers.
+// ERROR@+1: TYPE/005 "value"
+config.def @bad_flag = 2 : i1
+
+// ====
+
+// Float configs require float literal values.
+// ERROR@+1: TYPE/005 "value"
+config.def @bad_float = 1 : f32
+
+// ====
+
+// Encoding configs require static encoding attributes.
+// ERROR@+1: TYPE/005 "value"
+config.def @bad_schema = 1 : encoding<schema>
+
+// ====
+
+// Config values deliberately model compile-time scalars and first-class
+// encoding values, not shaped payloads.
+// ERROR@+1: TYPE/004 "scalar or encoding"
+config.decl @bad_shape : tile<4xf32>
+
+// ====
+
+// A declaration is a valid unresolved provider before specialization.
+config.decl @batch_size : index
+
+func.def @get_from_decl() -> (index) {
+  %v = config.get @batch_size : index
+  func.return %v : index
+}

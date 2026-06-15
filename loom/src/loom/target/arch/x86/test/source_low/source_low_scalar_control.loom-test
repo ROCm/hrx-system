@@ -1,0 +1,47 @@
+// RUN: emit source-low output=low
+
+x86.target<scalar> @target
+
+func.def target(@target) @scalar_i1_constant(%value: i1) -> (i1) {
+  %true = scalar.constant 1 : i1
+  %result = scalar.xori %value, %true : i1
+  func.return %result : i1
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @scalar_i1_constant(%value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm<x86.scalar.core> {
+  %true = mov.imm32 1
+  %7 = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
+  %result = xor.gpr32 %7, %true
+  return %result
+}
+
+// ====
+
+x86.target<scalar> @target
+
+func.def target(@target) @scalar_i1_bitwise_control(%lhs: i1, %rhs: i1, %true_value: i32, %false_value: i32) -> (i32) {
+  %both = scalar.andi %lhs, %rhs : i1
+  %either = scalar.ori %lhs, %rhs : i1
+  %condition = scalar.xori %either, %both : i1
+  cfg.cond_br %condition, ^then, ^else
+^then:
+  func.return %true_value : i32
+^else:
+  func.return %false_value : i32
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @scalar_i1_bitwise_control(%lhs: reg<x86.gpr32>, %rhs: reg<x86.gpr32>, %true_value: reg<x86.gpr32>, %false_value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm<x86.scalar.core> {
+  %13 = copy %lhs : reg<x86.gpr32> -> reg<x86.gpr32>
+  %both = and.gpr32 %13, %rhs
+  %15 = copy %lhs : reg<x86.gpr32> -> reg<x86.gpr32>
+  %either = or.gpr32 %15, %rhs
+  %17 = copy %either : reg<x86.gpr32> -> reg<x86.gpr32>
+  %condition = xor.gpr32 %17, %both
+  low.cond_br %condition, ^then, ^else : reg<x86.gpr32>
+^then:
+  return %true_value
+^else:
+  return %false_value
+}

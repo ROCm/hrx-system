@@ -1,0 +1,47 @@
+// RUN: emit source-low diagnostics=all output=low
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @f32_fmaak_literal_addend_diagnostics(%a: f32, %b: f32) -> (f32) {
+  %bias = scalar.constant 0.5 : f32
+  // REMARK@+1: AMDGPU/030 {descriptor_name="amdgpu.v_fmaak_f32", operand_form="fmaak", source_operand_index="2", literal_role="addend", descriptor_set_name="amdgpu.rdna3.core", constant_form="exact_f32_literal", decision="selected", reason="literal_descriptor_selected"}
+  %result = scalar.fmaf %a, %b, %bias : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @f32_fmaak_literal_addend_diagnostics(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %result = v_fmaak_f32 %a, %b, 1056964608
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @f32_fmamk_literal_multiply_rhs_diagnostics(%a: f32, %c: f32) -> (f32) {
+  %scale = scalar.constant 2.0 : f32
+  // REMARK@+1: AMDGPU/030 {descriptor_name="amdgpu.v_fmamk_f32", operand_form="fmamk", source_operand_index="1", literal_role="multiply_rhs", descriptor_set_name="amdgpu.rdna3.core", constant_form="exact_f32_literal", decision="selected", reason="literal_descriptor_selected"}
+  %result = scalar.fmaf %a, %scale, %c : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @f32_fmamk_literal_multiply_rhs_diagnostics(%a: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %result = v_fmamk_f32 %a, %c, 1073741824
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @f32_fmamk_literal_multiply_lhs_diagnostics(%b: f32, %c: f32) -> (f32) {
+  %scale = scalar.constant 2.0 : f32
+  // REMARK@+1: AMDGPU/030 {descriptor_name="amdgpu.v_fmamk_f32", operand_form="fmamk", source_operand_index="0", literal_role="multiply_lhs", descriptor_set_name="amdgpu.rdna3.core", constant_form="exact_f32_literal", decision="selected", reason="literal_descriptor_selected"}
+  %result = scalar.fmaf %scale, %b, %c : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @f32_fmamk_literal_multiply_lhs_diagnostics(%b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %result = v_fmamk_f32 %b, %c, 1073741824
+  return %result
+}

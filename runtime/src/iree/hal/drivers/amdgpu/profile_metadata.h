@@ -10,7 +10,6 @@
 #include "iree/base/api.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/hal/api.h"
-#include "iree/hal/drivers/amdgpu/abi/kernel_args.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -120,8 +119,8 @@ void iree_hal_amdgpu_profile_metadata_hash_code_object(
 // When |code_object_hash| is provided, each function receives an AMDGPU
 // pipeline hash. Inputs are appended in this order: code_object_hash[0] and
 // code_object_hash[1] as little-endian u64 values, function ordinal as a
-// little-endian u32 value, HAL ABI constant count and binding count as
-// little-endian u16 values, static workgroup size x/y/z as little-endian u32
+// little-endian u32 value, HAL dispatch constant byte length and binding count
+// as little-endian u32 values, static workgroup size x/y/z as little-endian u32
 // values, and function name byte length as a little-endian u64 value followed
 // by the exact function name bytes.
 //
@@ -133,9 +132,7 @@ iree_status_t iree_hal_amdgpu_profile_metadata_register_executable(
     iree_host_size_t function_count,
     const iree_hal_executable_function_info_t* function_infos,
     const iree_host_size_t* function_parameter_offsets,
-    const uint64_t code_object_hash[2],
-    const iree_hal_amdgpu_device_kernel_args_t* host_kernel_args,
-    uint64_t* out_executable_id);
+    const uint64_t code_object_hash[2], uint64_t* out_executable_id);
 
 // Registers code-object image and load-range artifacts for an executable
 // previously registered with

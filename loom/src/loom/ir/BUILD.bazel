@@ -1,0 +1,174 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_benchmark", "loom_cc_library", "loom_cc_test")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+loom_cc_library(
+    name = "facts",
+    srcs = ["facts.c"],
+    hdrs = ["facts.h"],
+    deps = [
+        ":ir",
+        "//loom/src/loom/util:math",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "facts_test",
+    srcs = ["facts_test.cc"],
+    deps = [
+        ":facts",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "ir",
+    srcs = [
+        "attribute.c",
+        "context.c",
+        "encoding.c",
+        "local_value_domain.c",
+        "location.c",
+        "module.c",
+        "scalar_type.c",
+        "types.c",
+    ],
+    hdrs = [
+        "attribute.h",
+        "context.h",
+        "encoding.h",
+        "ir.h",
+        "local_value_domain.h",
+        "location.h",
+        "module.h",
+        "scalar_type.h",
+        "semantics.h",
+        "types.h",
+    ],
+    deps = [
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/util:bstring",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "type_refinement",
+    srcs = ["type_refinement.c"],
+    hdrs = ["type_refinement.h"],
+    deps = [
+        ":ir",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "type_refinement_test",
+    srcs = ["type_refinement_test.cc"],
+    deps = [
+        ":ir",
+        ":type_refinement",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "context_test",
+    srcs = ["context_test.cc"],
+    deps = [
+        ":ir",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "encoding_test",
+    srcs = ["encoding_test.cc"],
+    deps = [
+        ":ir",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "module_test",
+    srcs = ["module_test.cc"],
+    deps = [
+        ":ir",
+        "//loom/src/loom/ops/test",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "types_test",
+    srcs = ["types_test.cc"],
+    deps = [
+        ":ir",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "symbol_map",
+    srcs = ["symbol_map.c"],
+    hdrs = ["symbol_map.h"],
+    deps = [
+        ":ir",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "scalar_type_test",
+    srcs = ["scalar_type_test.cc"],
+    deps = [
+        ":ir",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "symbol_map_test",
+    srcs = ["symbol_map_test.cc"],
+    deps = [
+        ":symbol_map",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_benchmark(
+    name = "symbol_map_benchmark",
+    srcs = ["symbol_map_benchmark.cc"],
+    deps = [
+        ":symbol_map",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:benchmark_main",
+    ],
+)

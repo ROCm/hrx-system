@@ -27,3 +27,12 @@ amdgpu_device_toolchain_repo = use_repo_rule(
 amdgpu_device_toolchain_repo(
     name = "iree_amdgpu_device_toolchain",
 )
+
+clang_tidy_llvm_repo = use_repo_rule(
+    "//build_tools/clang_tidy:llvm_repo.bzl",
+    "clang_tidy_llvm_repo",
+)
+
+clang_tidy_llvm_repo(
+    name = "iree_clang_tidy_llvm",
+)

@@ -85,21 +85,23 @@ typedef iree_status_t (*iree_async_continuation_submit_fn_t)(
 // Dispatches continuation operations based on the triggering operation's
 // result.
 //
-// On success (|status| is OK):
+// On success (|status_code| is OK):
 //   Submits continuation operations via |submit_fn|. If submit fails, invokes
 //   callbacks directly with the submit error.
 //
-// On failure (|status| is not OK):
+// On failure (|status_code| is not OK):
 //   Invokes all continuation callbacks directly with CANCELLED.
 //
-// IMPORTANT: This function does NOT consume |status|. The caller retains
-// ownership and must pass it to the triggering operation's completion callback.
-// Continuations receive fresh CANCELLED statuses, not the original error.
+// The triggering operation's status is intentionally represented as a status
+// code because dispatch only needs to branch on success/failure. The caller
+// retains ownership of any original status and passes it to the triggering
+// operation's completion callback. Continuations receive fresh CANCELLED
+// statuses, not the original error.
 //
 // |submit_fn|: Backend's submit function.
 // |submit_context|: Context for submit_fn (typically proactor pointer).
 // |continuations|: List of continuations (count cleared before dispatch).
-// |status|: Result of the triggering operation (not consumed).
+// |status_code|: Result code of the triggering operation.
 //
 // Returns the number of callbacks invoked directly (not via CQE). This is used
 // for completion counting on backends that track completions.
@@ -107,7 +109,8 @@ typedef iree_status_t (*iree_async_continuation_submit_fn_t)(
 // Thread-safety: Must be called from the proactor's poll thread.
 iree_host_size_t iree_async_continuation_dispatch(
     iree_async_continuation_submit_fn_t submit_fn, void* submit_context,
-    iree_async_continuation_list_t* continuations, iree_status_t status);
+    iree_async_continuation_list_t* continuations,
+    iree_status_code_t status_code);
 
 #ifdef __cplusplus
 }  // extern "C"

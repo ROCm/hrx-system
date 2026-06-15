@@ -1,0 +1,226 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "prints agent documentation",
+      "run": {
+        "tool": "loom-link",
+        "args": ["--agents_md"]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "## loom-link",
+            "--library=providers.loombc",
+            "--root=@entry",
+            "--print-plan",
+            "--list-symbols",
+            "--strip-check"
+          ]
+        }
+      }
+    },
+    {
+      "name": "links text corpus into harness",
+      "steps": [
+        {
+          "name": "write-harness",
+          "write": {
+            "path": "{tmp}/harness.loom",
+            "text": "func.decl @identity(%x: i32) -> (i32)\n\nfunc.def @caller(%x: i32) -> (i32) {\n  %y = func.call @identity(%x) : (i32) -> (i32)\n  func.return %y : i32\n}\n"
+          }
+        },
+        {
+          "name": "write-corpus",
+          "write": {
+            "path": "{tmp}/corpus.loom",
+            "text": "func.def @identity(%x: i32) -> (i32) {\n  func.return %x : i32\n}\n"
+          }
+        },
+        {
+          "name": "link",
+          "run": {
+            "tool": "loom-link",
+            "args": [
+              "{tmp}/harness.loom",
+              "{tmp}/corpus.loom"
+            ]
+          },
+          "stdout": {
+            "contains": [
+              "func.def @identity(%x: i32) -> (i32) {",
+              "func.def @caller(%x: i32) -> (i32) {",
+              "%y = func.call @identity(%x) : (i32) -> (i32)",
+              "func.return %y : i32"
+            ],
+            "not_contains": ["func.decl @identity"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "links bytecode library",
+      "steps": [
+        {
+          "name": "write-harness",
+          "write": {
+            "path": "{tmp}/harness.loom",
+            "text": "func.decl @identity(%x: i32) -> (i32)\n\nfunc.def @caller(%x: i32) -> (i32) {\n  %y = func.call @identity(%x) : (i32) -> (i32)\n  func.return %y : i32\n}\n"
+          }
+        },
+        {
+          "name": "write-library",
+          "write": {
+            "path": "{tmp}/library.loom",
+            "text": "func.def @unused(%x: i32) -> (i32) {\n  func.return %x : i32\n}\n\nfunc.def @identity(%x: i32) -> (i32) {\n  func.return %x : i32\n}\n"
+          }
+        },
+        {
+          "name": "encode-library",
+          "run": {
+            "tool": "loom-format",
+            "args": [
+              "--from=text",
+              "--to=bc",
+              "--output={tmp}/library.loombc",
+              "{tmp}/library.loom"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/library.loombc",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "link",
+          "run": {
+            "tool": "loom-link",
+            "args": [
+              "{tmp}/harness.loom",
+              "--library={tmp}/library.loombc",
+              "--root=@caller"
+            ]
+          },
+          "stdout": {
+            "contains": [
+              "func.def @identity(%x: i32) -> (i32) {",
+              "func.def @caller(%x: i32) -> (i32) {"
+            ],
+            "not_contains": [
+              "func.def @unused",
+              "func.decl @identity"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "rejects duplicate globals",
+      "steps": [
+        {
+          "name": "write-duplicate-a",
+          "write": {
+            "path": "{tmp}/duplicate_a.loom",
+            "text": "func.def public @duplicate(%x: i32) -> (i32) {\n  func.return %x : i32\n}\n"
+          }
+        },
+        {
+          "name": "write-duplicate-b",
+          "write": {
+            "path": "{tmp}/duplicate_b.loom",
+            "text": "func.def public @duplicate(%x: i32) -> (i32) {\n  func.return %x : i32\n}\n"
+          }
+        },
+        {
+          "name": "link",
+          "run": {
+            "tool": "loom-link",
+            "args": [
+              "{tmp}/duplicate_a.loom",
+              "{tmp}/duplicate_b.loom"
+            ]
+          },
+          "exit": {
+            "nonzero": true
+          },
+          "stderr": {
+            "contains": [
+              "global symbol '@duplicate'",
+              "conflicts with provider"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "strips check records",
+      "steps": [
+        {
+          "name": "write-checks",
+          "write": {
+            "path": "{tmp}/checks.loom",
+            "text": "func.def @kernel(%x: i32) -> (i32) {\n  func.return %x : i32\n}\n\ncheck.case public @kernel_case {\n  %input = check.literal value(1) : i32\n  %actual = func.call @kernel(%input) : (i32) -> (i32)\n  check.expect.equal actual(%actual) expected(%input) : i32\n  check.return\n}\n\ncheck.benchmark<@kernel_case> @kernel_bench\n"
+          }
+        },
+        {
+          "name": "link",
+          "run": {
+            "tool": "loom-link",
+            "args": [
+              "{tmp}/checks.loom",
+              "--strip-check"
+            ]
+          },
+          "stdout": {
+            "contains": ["func.def @kernel(%x: i32) -> (i32) {"],
+            "not_contains": [
+              "check.case",
+              "check.benchmark"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "materializes linked config",
+      "steps": [
+        {
+          "name": "write-config-a",
+          "write": {
+            "path": "{tmp}/config_a.loom",
+            "text": "config.decl @model36.model.hidden_size : %value: index where [range(%value, 0, 8192)]\n\nfunc.def @read_config() -> (index) {\n  %hidden = config.get @model36.model.hidden_size : index\n  func.return %hidden : index\n}\n"
+          }
+        },
+        {
+          "name": "write-config-b",
+          "write": {
+            "path": "{tmp}/config_b.loom",
+            "text": "config.decl @model36.model.hidden_size : %value: index where [mul(%value, 16)]\n\nfunc.def @also_reads_config() -> (index) {\n  %hidden = config.get @model36.model.hidden_size : index\n  func.return %hidden : index\n}\n"
+          }
+        },
+        {
+          "name": "link",
+          "run": {
+            "tool": "loom-link",
+            "args": [
+              "{tmp}/config_a.loom",
+              "{tmp}/config_b.loom",
+              "--config=model36.model.hidden_size=4096",
+              "--require-resolved-config"
+            ]
+          },
+          "stdout": {
+            "contains": [
+              "config.def @model36.model.hidden_size = 4096 : index",
+              "func.def @read_config() -> (index) {",
+              "func.def @also_reads_config() -> (index) {"
+            ],
+            "not_contains": ["config.decl @model36.model.hidden_size"]
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,136 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_fuzz", "loom_cc_library", "loom_cc_test")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+loom_cc_library(
+    name = "context",
+    testonly = True,
+    srcs = ["context.c"],
+    hdrs = ["context.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/tooling/context",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "diagnostic_matchers",
+    testonly = True,
+    hdrs = ["diagnostic_matchers.h"],
+    deps = [
+        "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+    ],
+)
+
+loom_cc_library(
+    name = "module_ptr",
+    testonly = True,
+    hdrs = ["module_ptr.h"],
+    deps = [
+        "//loom/src/loom/ir",
+    ],
+)
+
+loom_cc_library(
+    name = "gen",
+    testonly = True,
+    srcs = [
+        "gen.c",
+        "gen_test_dialect.c",
+    ],
+    hdrs = ["gen.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/test",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:prng",
+    ],
+)
+
+loom_cc_library(
+    name = "gen_scalar_hooks",
+    testonly = True,
+    srcs = ["gen_scalar_dialect.c"],
+    deps = [
+        ":gen",
+        "//loom/src/loom/ops/scalar",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "gen_vector_hooks",
+    testonly = True,
+    srcs = ["gen_vector_dialect.c"],
+    deps = [
+        ":gen",
+        "//loom/src/loom/ops/vector",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "gen_test",
+    srcs = ["gen_test.cc"],
+    deps = [
+        ":gen",
+        "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/format/text:printer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/util:stream",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "gen_dialect_profiles_test",
+    srcs = ["gen_dialect_profiles_test.cc"],
+    deps = [
+        ":gen",
+        ":gen_scalar_hooks",
+        ":gen_vector_hooks",
+        "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_fuzz(
+    name = "gen_fuzz",
+    srcs = ["gen_fuzz.cc"],
+    deps = [
+        ":gen",
+        "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base",
+    ],
+)

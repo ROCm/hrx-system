@@ -1,0 +1,115 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+    "loom_cc_test",
+)
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+loom_cc_library(
+    name = "candidate",
+    srcs = ["candidate.c"],
+    hdrs = ["candidate.h"],
+    deps = [
+        "//loom/src/loom/target/emit/ireevm:archive_emitter",
+        "//loom/src/loom/target/emit/ireevm:module_archive",
+        "//loom/src/loom/tooling/execution:compile_options",
+        "//loom/src/loom/tooling/execution:session",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "invocation",
+    srcs = ["invocation.c"],
+    hdrs = ["invocation.h"],
+    deps = [
+        "//loom/src/loom/target/emit/ireevm:module_archive",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/tooling:comparison",
+        "//runtime/src/iree/tooling:context_util",
+        "//runtime/src/iree/tooling:function_io",
+        "//runtime/src/iree/tooling:function_util",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode:module",
+    ],
+)
+
+loom_cc_library(
+    name = "backend",
+    srcs = ["backend.c"],
+    hdrs = ["backend.h"],
+    deps = [
+        ":candidate",
+        ":invocation",
+        "//loom/src/loom/tooling/execution:compile_report_capture",
+        "//loom/src/loom/tooling/execution:execution_backend",
+        "//loom/src/loom/tooling/execution:one_shot",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "provider",
+    srcs = ["provider.c"],
+    hdrs = ["provider.h"],
+    deps = [
+        ":backend",
+        "//loom/src/loom/target/arch/ireevm:provider",
+        "//loom/src/loom/tooling/execution:execution_provider",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "candidate_test",
+    srcs = ["candidate_test.cc"],
+    deps = [
+        ":candidate",
+        ":invocation",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target/arch/ireevm:provider",
+        "//loom/src/loom/target/arch/ireevm/descriptors",
+        "//loom/src/loom/target/arch/ireevm/ops",
+        "//loom/src/loom/target/emit/ireevm:function_bytecode",
+        "//loom/src/loom/tooling/compile:pipeline",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal/flatcc:parsing",
+        "//runtime/src/iree/schemas:bytecode_module_def_c_fbs",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm:impl",
+        "//runtime/src/iree/vm/bytecode:archive",
+        "//runtime/src/iree/vm/bytecode:module",
+    ],
+)
+
+loom_cc_test(
+    name = "invocation_test",
+    srcs = ["invocation_test.cc"],
+    deps = [
+        ":candidate",
+        ":invocation",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/target/arch/ireevm/descriptors:low_registry",
+        "//loom/src/loom/target/arch/ireevm/ops",
+        "//loom/src/loom/tooling/execution:session",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

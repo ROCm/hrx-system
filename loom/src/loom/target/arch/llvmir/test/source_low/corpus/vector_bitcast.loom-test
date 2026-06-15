@@ -1,0 +1,85 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/vector_bitcast.loom-test
+// RUN: emit source-low output=low
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @i32_to_i8x4_bitcast(%word: vector<1xi32>) -> (vector<4xi8>) {
+  %bytes = vector.bitcast %word : vector<1xi32> to vector<4xi8>
+  func.return %bytes : vector<4xi8>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i32_to_i8x4_bitcast(%word: reg<llvmir.i32>) -> (reg<llvmir.i8 x4>) asm<llvmir.generic.core> {
+  %bytes = bitcast.i32.v4i8 %word
+  return %bytes
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @i32x2_to_i8x8_bitcast(%words: vector<2xi32>) -> (vector<8xi8>) {
+  %bytes = vector.bitcast %words : vector<2xi32> to vector<8xi8>
+  func.return %bytes : vector<8xi8>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i32x2_to_i8x8_bitcast(%words: reg<llvmir.i32 x2>) -> (reg<llvmir.i8 x8>) asm<llvmir.generic.core> {
+  %bytes = bitcast.v2i32.v8i8 %words
+  return %bytes
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @f32x2_to_i32x2_bitcast(%floats: vector<2xf32>) -> (vector<2xi32>) {
+  %bits = vector.bitcast %floats : vector<2xf32> to vector<2xi32>
+  func.return %bits : vector<2xi32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f32x2_to_i32x2_bitcast(%floats: reg<llvmir.f32 x2>) -> (reg<llvmir.i32 x2>) asm<llvmir.generic.core> {
+  %bits = bitcast.v2f32.v2i32 %floats
+  return %bits
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @f16x2_to_i32_bitcast(%halves: vector<2xf16>) -> (vector<1xi32>) {
+  %bits = vector.bitcast %halves : vector<2xf16> to vector<1xi32>
+  func.return %bits : vector<1xi32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @f16x2_to_i32_bitcast(%halves: reg<llvmir.f16 x2>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {
+  %bits = bitcast.v2f16.i32 %halves
+  return %bits
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @bf16x2_to_i32_bitcast(%halves: vector<2xbf16>) -> (vector<1xi32>) {
+  %bits = vector.bitcast %halves : vector<2xbf16> to vector<1xi32>
+  func.return %bits : vector<1xi32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @bf16x2_to_i32_bitcast(%halves: reg<llvmir.bf16 x2>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {
+  %bits = bitcast.v2bf16.i32 %halves
+  return %bits
+}

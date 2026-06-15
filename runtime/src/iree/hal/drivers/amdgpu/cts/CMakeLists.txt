@@ -35,23 +35,34 @@ iree_cc_library(
 endif()
 
 if(IREE_HAL_DRIVER_AMDGPU)
-iree_hal_cts_testdata(
+iree_amdgpu_hal_cts_testdata(
+  NAME
+    testdata_amdgpu
+  TARGET
+    amdgcn-amd-amdhsa
+  TARGETS
+    ${IREE_HAL_AMDGPU_TARGETS}
   FORMAT_NAME
     amdgpu
-  FORMAT_VARIANT_TOKEN
-    "{AMDGPU_TARGET}"
-  FORMAT_VARIANTS
-    ${_IREE_HAL_AMDGPU_EXACT_TARGETS}
-  TARGET_DEVICE
-    "amdgpu"
+  FORMAT_STRING
+    [=["amdgcn-amd-amdhsa--{AMDGPU_TARGET}"]=]
   IDENTIFIER
     "iree_cts_testdata_amdgpu"
   BACKEND_NAME
     "amdgpu"
-  FORMAT_STRING
-    [=["amdgcn-amd-amdhsa--{AMDGPU_TARGET}"]=]
-  TESTDATA_DIR
-    "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/testdata"
+  INTERNAL_HDRS
+    "${PROJECT_BINARY_DIR}/runtime/src/iree/hal/drivers/amdgpu/abi/amdgpu_abi_bitcode_hdrs.stamp"
+    "${PROJECT_BINARY_DIR}/runtime/src/iree/hal/drivers/amdgpu/device/bitcode_hdrs.stamp"
+  SRCS
+    "testdata/command_buffer_dispatch_constants_bindings_test.c"
+    "testdata/command_buffer_dispatch_constants_test.c"
+    "testdata/command_buffer_dispatch_indirect_parameters_test.c"
+    "testdata/command_buffer_dispatch_multi_entrypoint_test.c"
+    "testdata/command_buffer_dispatch_multi_workgroup_test.c"
+    "testdata/command_buffer_dispatch_test.c"
+    "testdata/executable_cache_test.c"
+    "testdata/executable_test.c"
+  TESTONLY
 )
 endif()
 
@@ -59,6 +70,8 @@ if(IREE_HAL_DRIVER_AMDGPU)
 iree_hal_cts_test_suite(
   BACKENDS_LIB
     ::backends
+  TESTDATA_LIBS
+    ::testdata_amdgpu
   LABELS
     "iree-build-requirement=runtime.hal.amdgpu"
     "iree-run-requirement=runtime.resource.amd_gpu"

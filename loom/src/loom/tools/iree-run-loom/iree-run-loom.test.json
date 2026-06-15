@@ -1,0 +1,209 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "prints agent documentation",
+      "run": {
+        "tool": "iree-run-loom",
+        "args": ["--agents_md"]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "## iree-run-loom",
+            "--backend=vm",
+            "--backend=amdgpu",
+            "--binding=64xf32=0",
+            "--emit-target-artifact=kernel.hsaco",
+            "--compile-report=summary"
+          ]
+        }
+      }
+    },
+    {
+      "name": "runs branchy true path",
+      "steps": [
+        {
+          "name": "write-source",
+          "write": {
+            "path": "{tmp}/branchy.loom",
+            "text": "ireevm.target<core> @vm_target\n\nfunc.def public target(@vm_target) @branchy(%lhs: i32, %rhs: i32) -> (i32) {\n  %c0 = scalar.constant 0 : i32\n  %is_zero = scalar.cmpi eq, %lhs, %c0 : i32\n  cfg.cond_br %is_zero, ^then, ^else\n^then:\n  %sum = scalar.addi %rhs, %rhs : i32\n  func.return %sum : i32\n^else:\n  %diff = scalar.subi %lhs, %rhs : i32\n  func.return %diff : i32\n}\n"
+          }
+        },
+        {
+          "name": "run",
+          "run": {
+            "tool": "iree-run-loom",
+            "args": [
+              "{tmp}/branchy.loom",
+              "--function=branchy",
+              "--input=0",
+              "--input=21",
+              "--expected-output=42"
+            ]
+          },
+          "stdout": {
+            "contains": [
+              "EXEC @branchy",
+              "[SUCCESS] all function outputs matched their expected values."
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "runs branchy false path",
+      "steps": [
+        {
+          "name": "write-source",
+          "write": {
+            "path": "{tmp}/branchy.loom",
+            "text": "ireevm.target<core> @vm_target\n\nfunc.def public target(@vm_target) @branchy(%lhs: i32, %rhs: i32) -> (i32) {\n  %c0 = scalar.constant 0 : i32\n  %is_zero = scalar.cmpi eq, %lhs, %c0 : i32\n  cfg.cond_br %is_zero, ^then, ^else\n^then:\n  %sum = scalar.addi %rhs, %rhs : i32\n  func.return %sum : i32\n^else:\n  %diff = scalar.subi %lhs, %rhs : i32\n  func.return %diff : i32\n}\n"
+          }
+        },
+        {
+          "name": "run",
+          "run": {
+            "tool": "iree-run-loom",
+            "args": [
+              "{tmp}/branchy.loom",
+              "--function=branchy",
+              "--input=50",
+              "--input=8",
+              "--expected-output=42"
+            ]
+          },
+          "stdout": {
+            "contains": [
+              "EXEC @branchy",
+              "[SUCCESS] all function outputs matched their expected values."
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "prints raw output",
+      "steps": [
+        {
+          "name": "write-source",
+          "write": {
+            "path": "{tmp}/branchy.loom",
+            "text": "ireevm.target<core> @vm_target\n\nfunc.def public target(@vm_target) @branchy(%lhs: i32, %rhs: i32) -> (i32) {\n  %c0 = scalar.constant 0 : i32\n  %is_zero = scalar.cmpi eq, %lhs, %c0 : i32\n  cfg.cond_br %is_zero, ^then, ^else\n^then:\n  %sum = scalar.addi %rhs, %rhs : i32\n  func.return %sum : i32\n^else:\n  %diff = scalar.subi %lhs, %rhs : i32\n  func.return %diff : i32\n}\n"
+          }
+        },
+        {
+          "name": "run",
+          "run": {
+            "tool": "iree-run-loom",
+            "args": [
+              "{tmp}/branchy.loom",
+              "--function=branchy",
+              "--input=50",
+              "--input=8",
+              "--output=-"
+            ]
+          },
+          "stdout": {
+            "contains": ["EXEC @branchy", "i32=42"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "reports compilation summary",
+      "steps": [
+        {
+          "name": "write-source",
+          "write": {
+            "path": "{tmp}/branchy.loom",
+            "text": "ireevm.target<core> @vm_target\n\nfunc.def public target(@vm_target) @branchy(%lhs: i32, %rhs: i32) -> (i32) {\n  %c0 = scalar.constant 0 : i32\n  %is_zero = scalar.cmpi eq, %lhs, %c0 : i32\n  cfg.cond_br %is_zero, ^then, ^else\n^then:\n  %sum = scalar.addi %rhs, %rhs : i32\n  func.return %sum : i32\n^else:\n  %diff = scalar.subi %lhs, %rhs : i32\n  func.return %diff : i32\n}\n"
+          }
+        },
+        {
+          "name": "run",
+          "run": {
+            "tool": "iree-run-loom",
+            "args": [
+              "{tmp}/branchy.loom",
+              "--function=branchy",
+              "--input=0",
+              "--input=21",
+              "--expected-output=42",
+              "--compile-report=summary"
+            ]
+          },
+          "stdout": {
+            "contains": [
+              "EXEC @branchy",
+              "\"artifact_kind\":\"vm-archive\"",
+              "\"status_code\":0",
+              "\"status\":\"OK\""
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "rejects missing vm low lowering",
+      "steps": [
+        {
+          "name": "write-source",
+          "write": {
+            "path": "{tmp}/branchy.loom",
+            "text": "ireevm.target<core> @vm_target\n\nfunc.def public target(@vm_target) @branchy(%lhs: i32, %rhs: i32) -> (i32) {\n  %c0 = scalar.constant 0 : i32\n  %is_zero = scalar.cmpi eq, %lhs, %c0 : i32\n  cfg.cond_br %is_zero, ^then, ^else\n^then:\n  %sum = scalar.addi %rhs, %rhs : i32\n  func.return %sum : i32\n^else:\n  %diff = scalar.subi %lhs, %rhs : i32\n  func.return %diff : i32\n}\n"
+          }
+        },
+        {
+          "name": "run",
+          "run": {
+            "tool": "iree-run-loom",
+            "args": [
+              "{tmp}/branchy.loom",
+              "--pipeline=none",
+              "--function=branchy",
+              "--input=0",
+              "--input=21",
+              "--expected-output=42"
+            ]
+          },
+          "exit": {
+            "nonzero": true
+          },
+          "stderr": {
+            "contains": [
+              "IREE VM archive emission requires at least one VM low.func.def"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "rejects emit-only without hal backend",
+      "steps": [
+        {
+          "name": "write-source",
+          "write": {
+            "path": "{tmp}/branchy.loom",
+            "text": "ireevm.target<core> @vm_target\n\nfunc.def public target(@vm_target) @branchy(%lhs: i32, %rhs: i32) -> (i32) {\n  %c0 = scalar.constant 0 : i32\n  %is_zero = scalar.cmpi eq, %lhs, %c0 : i32\n  cfg.cond_br %is_zero, ^then, ^else\n^then:\n  %sum = scalar.addi %rhs, %rhs : i32\n  func.return %sum : i32\n^else:\n  %diff = scalar.subi %lhs, %rhs : i32\n  func.return %diff : i32\n}\n"
+          }
+        },
+        {
+          "name": "run",
+          "run": {
+            "tool": "iree-run-loom",
+            "args": ["{tmp}/branchy.loom", "--emit-only"]
+          },
+          "exit": {
+            "nonzero": true
+          },
+          "stderr": {
+            "contains": [
+              "--emit-target-artifact, --emit-hal-executable, and --emit-only require a HAL backend"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,104 @@
+// RUN: pass canonicalize
+
+// A scalar global.constant with an inline initializer is an exact fact source.
+// Loading it folds through ordinary scalar/index arithmetic and erases the
+// load because every load result is exact.
+global.constant @answer : index = 40
+
+func.def @load_scalar_constant_global() -> (index) {
+  %value = global.load @answer : index
+  %two = index.constant 2 : index
+  %result = index.add %value, %two : index
+  func.return %result : index
+}
+
+// ----
+global.constant @answer : index = 40
+
+func.def @load_scalar_constant_global() -> (index) {
+  %result = index.constant 42 : index
+  func.return %result : index
+}
+
+// ====
+
+// Boolean scalar constants seed exact i1 facts. Consumers should see an ordinary
+// exact condition, not a special global-shaped case.
+global.constant @feature_enabled : i1 = true
+
+func.def @load_boolean_constant_global() -> (i32) {
+  %cond = global.load @feature_enabled : i1
+  %enabled = scalar.constant 1 : i32
+  %disabled = scalar.constant 0 : i32
+  %result = scf.select %cond, %enabled, %disabled : i32
+  func.return %result : i32
+}
+
+// ----
+global.constant @feature_enabled : i1 = true
+
+func.def @load_boolean_constant_global() -> (i32) {
+  %result = scalar.constant 1 : i32
+  func.return %result : i32
+}
+
+// ====
+
+// Floating-point scalar constants seed exact f64 facts for floating consumers.
+global.constant @threshold : f32 = 1.5
+
+func.def @load_float_constant_global() -> (i32) {
+  %value = global.load @threshold : f32
+  %one = scalar.constant 1.0 : f32
+  %cond = scalar.cmpf ogt, %value, %one : f32
+  %high = scalar.constant 1 : i32
+  %low = scalar.constant 0 : i32
+  %result = scf.select %cond, %high, %low : i32
+  func.return %result : i32
+}
+
+// ----
+global.constant @threshold : f32 = 1.5
+
+func.def @load_float_constant_global() -> (i32) {
+  %result = scalar.constant 1 : i32
+  func.return %result : i32
+}
+
+// ====
+
+// global.variable inline defaults are initial state, not universal facts.
+// Store/order analysis owns stronger mutable-global propagation.
+global.variable @mutable_default : index = 40
+
+func.def @mutable_default_does_not_fold() -> (index) {
+  %value = global.load @mutable_default : index
+  %two = index.constant 2 : index
+  %result = index.add %value, %two : index
+  func.return %result : index
+}
+
+// ====
+
+// Declaration predicates on a shaped global remap to the corresponding load
+// co-results. The shaped value itself remains unknown, but facts on %m are
+// strong enough for local canonicalization.
+global.constant @weights : tile<[%n]xf32> where [mul(%n, 16)]
+
+func.def @load_global_predicate() -> (index) {
+  %tile, %m = global.load @weights : tile<[%m]xf32>
+  test.use %tile : tile<[%m]xf32>
+  %sixteen = index.constant 16 : index
+  %remainder = index.rem %m, %sixteen : index
+  func.return %remainder : index
+}
+
+// ----
+global.constant @weights : tile<[%n]xf32> where [mul(%n, 16)]
+
+func.def @load_global_predicate() -> (index) {
+  %tile, %m = global.load @weights : tile<[%m]xf32>
+  test.use %tile : tile<[%m]xf32>
+  %remainder = index.constant 0 : index
+  func.return %remainder : index
+}

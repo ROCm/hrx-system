@@ -11,6 +11,7 @@ _INCOMPATIBLE_TARGET = ["@platforms//:incompatible"]
 def package_policy(
         packages,
         build_requirements = [],
+        forbidden_deps = [],
         run_requirements = [],
         resource_group = None):
     """Defines requirements that apply to matching package prefixes.
@@ -18,6 +19,8 @@ def package_policy(
     Args:
       packages: Exact package names or package prefixes ending in "/...".
       build_requirements: Build requirements applied to matching packages.
+      forbidden_deps: Direct dependency labels or package prefixes ending in
+        "/..." that matching packages must not reference.
       run_requirements: Run requirements applied to matching packages.
       resource_group: Optional local resource group for matching tests.
 
@@ -26,6 +29,7 @@ def package_policy(
     """
     return struct(
         build_requirements = build_requirements,
+        forbidden_deps = forbidden_deps,
         packages = packages,
         resource_group = resource_group,
         run_requirements = run_requirements,
@@ -49,6 +53,13 @@ def _append_unique_requirements(target, requirements):
             target.append(requirement)
             ids[requirement.id] = True
 
+def _append_unique_strings(target, values):
+    seen = {value: True for value in target}
+    for value in values:
+        if value not in seen:
+            target.append(value)
+            seen[value] = True
+
 def collect_package_policy(package_name, policies):
     """Returns the merged policy for a package.
 
@@ -61,6 +72,7 @@ def collect_package_policy(package_name, policies):
       resource_group fields.
     """
     build_requirements = []
+    forbidden_deps = []
     run_requirements = []
     resource_group = None
     resource_group_specificity = -1
@@ -73,6 +85,7 @@ def collect_package_policy(package_name, policies):
         if not matching_patterns:
             continue
         _append_unique_requirements(build_requirements, policy.build_requirements)
+        _append_unique_strings(forbidden_deps, policy.forbidden_deps)
         _append_unique_requirements(run_requirements, policy.run_requirements)
         if policy.resource_group:
             specificity = max([_specificity(pattern) for pattern in matching_patterns])
@@ -81,6 +94,7 @@ def collect_package_policy(package_name, policies):
                 resource_group_specificity = specificity
     return struct(
         build_requirements = build_requirements,
+        forbidden_deps = forbidden_deps,
         resource_group = resource_group,
         run_requirements = run_requirements,
     )
@@ -96,17 +110,67 @@ def _append(values, appended_values):
         values = []
     return values + appended_values
 
-def apply_target_policy(kwargs, policy):
+def _canonical_label(label, package_name):
+    if label.startswith(":"):
+        return "//%s%s" % (package_name, label)
+    if not label.startswith("//") or label.endswith("/..."):
+        return label
+    if ":" in label:
+        return label
+    package_path = label[2:]
+    return "%s:%s" % (label, package_path.rsplit("/", 1)[-1])
+
+def _label_package(canonical_label):
+    if not canonical_label.startswith("//"):
+        return None
+    return canonical_label[2:].split(":", 1)[0]
+
+def _dependency_matches_forbidden_pattern(dependency, pattern, package_name):
+    canonical_dependency = _canonical_label(dependency, package_name)
+    if pattern.endswith("/..."):
+        dependency_package = _label_package(canonical_dependency)
+        if dependency_package == None:
+            return False
+        return _matches(pattern[2:], dependency_package)
+    return canonical_dependency == _canonical_label(pattern, package_name)
+
+def _check_forbidden_deps(package_name, name, deps, forbidden_deps):
+    if type(deps) != type([]):
+        return
+    for dependency in deps:
+        if type(dependency) != type(""):
+            continue
+        for forbidden_dep in forbidden_deps:
+            if _dependency_matches_forbidden_pattern(
+                dependency,
+                forbidden_dep,
+                package_name,
+            ):
+                fail(
+                    "%s may not depend on %s from package policy pattern %s" %
+                    (name, dependency, forbidden_dep),
+                )
+
+def apply_target_policy(kwargs, policy, name = None):
     """Applies build requirements to a target kwargs dictionary.
 
     Args:
       kwargs: Rule or macro keyword arguments.
       policy: Merged package policy for the current package.
+      name: Optional target name used in forbidden dependency diagnostics.
 
     Returns:
       New kwargs dictionary with target compatibility and audit tags applied.
     """
     result = dict(kwargs)
+    package_name = native.package_name()
+    for deps_attr in ["deps", "implementation_deps"]:
+        _check_forbidden_deps(
+            package_name,
+            name or result.get("name", "<unnamed>"),
+            result.get(deps_attr, []),
+            policy.forbidden_deps,
+        )
     target_compatible_with = result.get("target_compatible_with")
     if target_compatible_with == None:
         target_compatible_with = []
@@ -122,18 +186,19 @@ def apply_target_policy(kwargs, policy):
     )
     return result
 
-def apply_test_policy(kwargs, policy):
+def apply_test_policy(kwargs, policy, name = None):
     """Applies build and run requirements to a test-like target.
 
     Args:
       kwargs: Rule or macro keyword arguments.
       policy: Merged package policy for the current package.
+      name: Optional target name used in forbidden dependency diagnostics.
 
     Returns:
       New kwargs dictionary with target compatibility, audit tags, and resource
       group applied.
     """
-    result = apply_target_policy(kwargs, policy)
+    result = apply_target_policy(kwargs, policy, name = name)
     result["tags"] = _append(
         result.get("tags"),
         _requirement_tags("run", policy.run_requirements),

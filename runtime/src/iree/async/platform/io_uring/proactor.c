@@ -1247,7 +1247,7 @@ static iree_host_size_t iree_async_proactor_io_uring_process_cqe(
     iree_async_socket_t* socket =
         iree_async_proactor_io_uring_socket_from_io_operation(operation);
     if (socket) {
-      iree_async_socket_set_failure(socket, status);
+      iree_async_socket_set_failure(socket, iree_status_code(status));
     }
   }
 

@@ -1,0 +1,37 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:python.bzl", "iree_py_library", "iree_py_test")
+
+package(
+    default_visibility = ["//visibility:public"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_py_library(
+    name = "target_info",
+    srcs = [
+        "__init__.py",
+        "target_info.py",
+    ],
+    deps = [
+        "//loom/py/loom/target/arch/x86:target_info",
+        "//loom/py/loom/target/emit/llvmir:package",
+    ],
+)
+
+iree_py_test(
+    name = "target_info_test",
+    srcs = [
+        "target_info_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.emit.llvmir.x86.target_info_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":target_info",
+    ],
+)

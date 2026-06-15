@@ -14,3 +14,4 @@ module(
 
 include("//build_tools/bazel:deps.MODULE.bazel")
 include("//build_tools/third_party:deps.MODULE.bazel")
+include("//loom/build_tools/bazel:deps.MODULE.bazel")

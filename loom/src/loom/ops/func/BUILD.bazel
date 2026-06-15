@@ -1,0 +1,80 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_test", "loom_generated_cc_library")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_FUNC_VISIBILITY = [
+    "//loom/binding/c:__pkg__",
+    "//loom/src/loom/analysis:__pkg__",
+    "//loom/src/loom/codegen/low:__pkg__",
+    "//loom/src/loom/codegen/low/testing:__pkg__",
+    "//loom/src/loom/codegen/low/transforms:__subpackages__",
+    "//loom/src/loom/codegen/low/lower:__pkg__",
+    "//loom/src/loom/format/bytecode:__pkg__",
+    "//loom/src/loom/format/text:__pkg__",
+    "//loom/src/loom/format/text/test:__pkg__",
+    "//loom/src/loom/link:__pkg__",
+    "//loom/src/loom/ops:__pkg__",
+    "//loom/src/loom/ops/encoding:__pkg__",
+    "//loom/src/loom/ops/low:__pkg__",
+    "//loom/src/loom/rewrite:__pkg__",
+    "//loom/src/loom/target:__pkg__",
+    "//loom/src/loom/target/arch:__subpackages__",
+    "//loom/src/loom/target/emit:__subpackages__",
+    "//loom/src/loom/tooling/execution/hal:__pkg__",
+    "//loom/src/loom/tools/loom-check:__pkg__",
+    "//loom/src/loom/tools/loom-format:__pkg__",
+    "//loom/src/loom/transforms/kernel:__pkg__",
+    "//loom/src/loom/transforms/symbol:__pkg__",
+]
+
+loom_generated_cc_library(
+    name = "func",
+    srcs = [
+        "canonicalize.c",
+        "verify.c",
+    ],
+    hdrs = ["ops.h"],
+    args = ["--dialect=func"],
+    generated_src_flags = [
+        "--builders",
+        "--tables",
+    ],
+    generated_srcs = [
+        "builders.c",
+        "tables.c",
+    ],
+    generator = "//loom/py/loom/gen/ops:c_tables_func_generator",
+    visibility = _FUNC_VISIBILITY,
+    deps = [
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:func_symbol_facts",
+        "//loom/src/loom/ops:function_contract_verify",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/target:types",
+    ],
+)
+
+loom_cc_test(
+    name = "print_test",
+    srcs = ["print_test.cc"],
+    deps = [
+        ":func",
+        "//loom/src/loom/format/text:printer",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

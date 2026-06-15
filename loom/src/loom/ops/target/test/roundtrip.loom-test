@@ -1,0 +1,6 @@
+// RUN: roundtrip
+
+// Generic target record.
+target.generic<reference> @reference
+
+target.generic<reference> @host {subgroup_size = 0}

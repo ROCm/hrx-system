@@ -1,0 +1,176 @@
+// RUN: emit source-low output=low control-flow=structured-low
+
+wasm.target<simd128> @target
+
+func.def target(@target) @if_without_results(%control: i32, %limit: i32, %lhs: vector<4xi32>, %rhs: vector<4xi32>, %output: buffer) {
+  %cond = scalar.cmpi ult, %control, %limit : i32
+  %zero = index.constant 0 : offset
+  %output_view = buffer.view %output[%zero] : buffer -> view<4xi32, #dense>
+  scf.if %cond {
+    %sum = vector.addi %lhs, %rhs : vector<4xi32>
+    vector.store %sum, %output_view[0] : vector<4xi32>, view<4xi32, #dense>
+    scf.yield
+  }
+  func.return
+}
+
+// ----
+low.func.def target(@target) abi(wasm_function) @if_without_results(%control: reg<wasm.i32>, %limit: reg<wasm.i32>, %lhs: reg<wasm.v128>, %rhs: reg<wasm.v128>, %output_view: reg<wasm.i32>) asm<wasm.core.simd128> {
+  %cond = i32.lt_u %control, %limit
+  low.scf.if %cond {
+    %sum = i32x4.add %lhs, %rhs
+    v128.store %output_view, %sum
+  }
+  return
+}
+
+// ====
+
+wasm.target<simd128> @target
+
+func.def target(@target) @if_with_results(%control: i32, %limit: i32, %lhs: vector<4xi32>, %rhs: vector<4xi32>, %fallback: vector<4xi32>) -> (vector<4xi32>) {
+  %cond = scalar.cmpi ult, %control, %limit : i32
+  %result = scf.if %cond -> (vector<4xi32>) {
+    %then = vector.addi %lhs, %rhs : vector<4xi32>
+    scf.yield %then : vector<4xi32>
+  } else {
+    %else = vector.subi %fallback, %rhs : vector<4xi32>
+    scf.yield %else : vector<4xi32>
+  }
+  func.return %result : vector<4xi32>
+}
+
+// ----
+low.func.def target(@target) abi(wasm_function) @if_with_results(%control: reg<wasm.i32>, %limit: reg<wasm.i32>, %lhs: reg<wasm.v128>, %rhs: reg<wasm.v128>, %fallback: reg<wasm.v128>) -> (reg<wasm.v128>) asm<wasm.core.simd128> {
+  %cond = i32.lt_u %control, %limit
+  %result = low.scf.if %cond -> (reg<wasm.v128>) {
+    %then = i32x4.add %lhs, %rhs
+    low.scf.yield %then : reg<wasm.v128>
+  } else {
+    %else = i32x4.sub %fallback, %rhs
+    low.scf.yield %else : reg<wasm.v128>
+  }
+  return %result
+}
+
+// ====
+
+wasm.target<simd128> @target
+
+func.def target(@target) @for_without_iter_args(%lo: index, %hi: index, %step: index, %lhs: vector<4xi32>, %rhs: vector<4xi32>, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %output_view = buffer.view %output[%zero] : buffer -> view<4xi32, #dense>
+  scf.for %iv = [%lo to %hi step %step] {
+    %sum = vector.addi %lhs, %rhs : vector<4xi32>
+    vector.store %sum, %output_view[0] : vector<4xi32>, view<4xi32, #dense>
+    scf.yield
+  }
+  func.return
+}
+
+// ----
+low.func.def target(@target) abi(wasm_function) @for_without_iter_args(%lo: reg<wasm.i32>, %hi: reg<wasm.i32>, %step: reg<wasm.i32>, %lhs: reg<wasm.v128>, %rhs: reg<wasm.v128>, %output_view: reg<wasm.i32>) asm<wasm.core.simd128> {
+  low.scf.for [%lo to %hi step %step] do(%iv: reg<wasm.i32>) {
+    %sum = i32x4.add %lhs, %rhs
+    v128.store %output_view, %sum
+  }
+  return
+}
+
+// ====
+
+wasm.target<simd128> @target
+
+func.def target(@target) @for_with_iter_args(%lo: index, %hi: index, %step: index, %unroll: index, %seed: vector<4xf32>, %bias: vector<4xf32>) -> (vector<4xf32>) {
+  %result = scf.for %iv = [%lo to %hi step %step](%acc = %seed : vector<4xf32>) -> (vector<4xf32>) unroll(%unroll) {
+    %next = vector.addf %acc, %bias : vector<4xf32>
+    scf.yield %next : vector<4xf32>
+  }
+  func.return %result : vector<4xf32>
+}
+
+// ----
+low.func.def target(@target) abi(wasm_function) @for_with_iter_args(%lo: reg<wasm.i32>, %hi: reg<wasm.i32>, %step: reg<wasm.i32>, %unroll: reg<wasm.i32>, %seed: reg<wasm.v128>, %bias: reg<wasm.v128>) -> (reg<wasm.v128>) asm<wasm.core.simd128> {
+  %result = low.scf.for [%lo to %hi step %step] iter_args(%seed: reg<wasm.v128>) -> (reg<wasm.v128>) unroll(%unroll) do(%iv: reg<wasm.i32>, %acc: reg<wasm.v128>) {
+    %next = f32x4.add %acc, %bias
+    low.scf.yield %next : reg<wasm.v128>
+  }
+  return %result
+}
+
+// ====
+
+wasm.target<simd128> @target
+
+func.def target(@target) @nested_if_inside_for(%lo: index, %hi: index, %step: index, %seed: vector<4xi32>, %bias: vector<4xi32>) -> (vector<4xi32>) {
+  %cond = index.cmp ult, %lo, %hi : index
+  %result = scf.for %iv = [%lo to %hi step %step](%acc = %seed : vector<4xi32>) -> (vector<4xi32>) {
+    %next = scf.if %cond -> (vector<4xi32>) {
+      %then = vector.addi %acc, %bias : vector<4xi32>
+      scf.yield %then : vector<4xi32>
+    } else {
+      scf.yield %acc : vector<4xi32>
+    }
+    scf.yield %next : vector<4xi32>
+  }
+  func.return %result : vector<4xi32>
+}
+
+// ----
+low.func.def target(@target) abi(wasm_function) @nested_if_inside_for(%lo: reg<wasm.i32>, %hi: reg<wasm.i32>, %step: reg<wasm.i32>, %seed: reg<wasm.v128>, %bias: reg<wasm.v128>) -> (reg<wasm.v128>) asm<wasm.core.simd128> {
+  %cond = i32.lt_u %lo, %hi
+  %result = low.scf.for [%lo to %hi step %step] iter_args(%seed: reg<wasm.v128>) -> (reg<wasm.v128>) do(%iv: reg<wasm.i32>, %acc: reg<wasm.v128>) {
+    %next = low.scf.if %cond -> (reg<wasm.v128>) {
+      %then = i32x4.add %acc, %bias
+      low.scf.yield %then : reg<wasm.v128>
+    } else {
+      low.scf.yield %acc : reg<wasm.v128>
+    }
+    low.scf.yield %next : reg<wasm.v128>
+  }
+  return %result
+}
+
+// ====
+
+// RUN: verify
+
+wasm.target<simd128> @target
+
+low.func.def target(@target) @scf_if_condition_requires_i32(%condition: reg<wasm.v128>) asm<wasm.core.simd128> {
+  // ERROR@+1: TARGET/035 {target_key="target", export_name="scf_if_condition_requires_i32", config_key="target", function_name="scf_if_condition_requires_i32", op_name="low.scf.if", actual_type="reg<wasm.v128>", type_constraint="reg<wasm.i32>"}
+  low.scf.if %condition {
+  }
+  return
+}
+
+// ====
+
+// RUN: verify
+
+wasm.target<simd128> @target
+
+low.func.def target(@target) @scf_for_counter_requires_i32(%lo: reg<wasm.v128>, %hi: reg<wasm.v128>, %step: reg<wasm.v128>) asm<wasm.core.simd128> {
+  // ERROR@+1: TARGET/031 {target_key="target", export_name="scf_for_counter_requires_i32", config_key="target", function_name="scf_for_counter_requires_i32", op_name="low.scf.for", actual_type="reg<wasm.v128>", type_constraint="reg<wasm.i32>"}
+  low.scf.for [%lo to %hi step %step] do(%iv: reg<wasm.v128>) {
+  }
+  return
+}
+
+// ====
+// RUN: pass source-to-low{control-flow=structured-low}
+
+wasm.target<simd128> @target
+
+func.def target(@target) @rejects_unsupported_structured_region_op(%selector: index, %a: vector<4xi32>, %b: vector<4xi32>) -> (vector<4xi32>) {
+  // ERROR@+1: TARGET/030 {op_name="scf.switch", region_count="2"}
+  %result = scf.switch %selector -> (vector<4xi32>) {
+    case 0 {
+      scf.yield %a : vector<4xi32>
+    }
+    default {
+      scf.yield %b : vector<4xi32>
+    }
+  }
+  func.return %result : vector<4xi32>
+}

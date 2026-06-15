@@ -901,7 +901,7 @@ static iree_status_t iree_hal_replay_executor_make_function_map_from_metadata(
     }
     if (iree_status_is_ok(status) &&
         (captured->flags != loaded_info.flags ||
-         captured->constant_count != loaded_info.constant_count ||
+         captured->constant_byte_length != loaded_info.constant_byte_length ||
          captured->binding_count != loaded_info.binding_count ||
          captured->parameter_count != loaded_info.parameter_count ||
          captured->workgroup_size[0] != loaded_info.workgroup_size[0] ||
@@ -911,14 +911,17 @@ static iree_status_t iree_hal_replay_executor_make_function_map_from_metadata(
           IREE_STATUS_FAILED_PRECONDITION,
           "replay executable %" PRIu64 " function %" PRIhsz
           " ABI mismatch: captured=(flags=0x%016" PRIx64
-          " constants=%u bindings=%u parameters=%u workgroup_size=[%u,%u,%u]) "
+          " constant_bytes=%u bindings=%u parameters=%u "
+          "workgroup_size=[%u,%u,%u]) "
           "loaded=(flags=0x%016" PRIx64
-          " constants=%u bindings=%u parameters=%u workgroup_size=[%u,%u,%u])",
-          executable_id, i, captured->flags, (uint32_t)captured->constant_count,
+          " constant_bytes=%u bindings=%u parameters=%u "
+          "workgroup_size=[%u,%u,%u])",
+          executable_id, i, captured->flags,
+          (uint32_t)captured->constant_byte_length,
           (uint32_t)captured->binding_count,
           (uint32_t)captured->parameter_count, captured->workgroup_size[0],
           captured->workgroup_size[1], captured->workgroup_size[2],
-          loaded_info.flags, (uint32_t)loaded_info.constant_count,
+          loaded_info.flags, (uint32_t)loaded_info.constant_byte_length,
           (uint32_t)loaded_info.binding_count,
           (uint32_t)loaded_info.parameter_count, loaded_info.workgroup_size[0],
           loaded_info.workgroup_size[1], loaded_info.workgroup_size[2]);

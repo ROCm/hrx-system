@@ -1,0 +1,16 @@
+// RUN: pass strip-hints
+
+func.def @strip_prefetch(%buffer: buffer, %offset: offset, %row: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %layout>
+  view.prefetch %view[%row] {intent = read, locality = l1} : view<4xf32, %layout>
+  func.return
+}
+
+// ----
+
+func.def @strip_prefetch(%buffer: buffer, %offset: offset, %row: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %layout>
+  func.return
+}

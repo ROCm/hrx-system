@@ -1,0 +1,118 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+    "loom_cc_test",
+)
+load(
+    "//loom/build_tools/bazel:loom_check.bzl",
+    "loom_check_test_suite",
+)
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_LLVMIR_PROVIDER_VISIBILITY = [
+    "//loom/binding/c/target/llvmir:__pkg__",
+    "//loom/src/loom/target/arch/llvmir/check:__pkg__",
+    "//loom/src/loom/target/configured:__pkg__",
+    "//loom/src/loom/tools/loom-compile:__pkg__",
+]
+
+loom_cc_library(
+    name = "math_policy",
+    srcs = ["math_policy.c"],
+    hdrs = ["math_policy.h"],
+    textual_hdrs = ["math_policy_tables.inl"],
+    deps = [
+        "//loom/src/loom/target:math_policy",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "provider",
+    srcs = ["provider.c"],
+    hdrs = ["provider.h"],
+    visibility = _LLVMIR_PROVIDER_VISIBILITY,
+    deps = [
+        ":math_policy",
+        "//loom/src/loom/ops/llvmir",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target/arch/llvmir/descriptors:low_registry",
+        "//loom/src/loom/target/arch/llvmir/lower",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "provider_test",
+    srcs = ["provider_test.cc"],
+    deps = [
+        ":provider",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/llvmir",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target/arch/llvmir/descriptors:low_registry",
+        "//loom/src/loom/target/arch/llvmir/lower",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_check_test_suite(
+    name = "loom_check_file_test",
+    srcs = [
+        "test/source_low/corpus/async_empty.loom-test",
+        "test/source_low/corpus/async_gather.loom-test",
+        "test/source_low/corpus/index_addressing.loom-test",
+        "test/source_low/corpus/lookup_table.loom-test",
+        "test/source_low/corpus/memory_cache_policy_non_temporal.loom-test",
+        "test/source_low/corpus/memory_cache_policy_scopes.loom-test",
+        "test/source_low/corpus/memory_generic_atomic.loom-test",
+        "test/source_low/corpus/memory_global.loom-test",
+        "test/source_low/corpus/memory_global_atomic.loom-test",
+        "test/source_low/corpus/memory_global_atomic_ordering.loom-test",
+        "test/source_low/corpus/memory_prefetch.loom-test",
+        "test/source_low/corpus/memory_workgroup_atomic.loom-test",
+        "test/source_low/corpus/memory_workgroup_b128.loom-test",
+        "test/source_low/corpus/memory_workgroup_indexed.loom-test",
+        "test/source_low/corpus/memory_workgroup_packed16.loom-test",
+        "test/source_low/corpus/numeric_conversion.loom-test",
+        "test/source_low/corpus/numeric_f32_memory.loom-test",
+        "test/source_low/corpus/numeric_i32_memory.loom-test",
+        "test/source_low/corpus/numeric_minmax.loom-test",
+        "test/source_low/corpus/numeric_reduce.loom-test",
+        "test/source_low/corpus/numeric_scalar_f32.loom-test",
+        "test/source_low/corpus/numeric_scalar_i32.loom-test",
+        "test/source_low/corpus/packed_bitfield.loom-test",
+        "test/source_low/corpus/packed_bitpack.loom-test",
+        "test/source_low/corpus/packed_bitunpack.loom-test",
+        "test/source_low/corpus/packed_dot_float8.loom-test",
+        "test/source_low/corpus/packed_dot_i4_mixed.loom-test",
+        "test/source_low/corpus/packed_dot_integer.loom-test",
+        "test/source_low/corpus/packed_dot_wide.loom-test",
+        "test/source_low/corpus/sync_barrier.loom-test",
+        "test/source_low/corpus/vector_bitcast.loom-test",
+        "test/source_low/corpus/vector_dot.loom-test",
+        "test/source_low/corpus/vector_mask_select.loom-test",
+        "test/source_low/corpus/vector_slice.loom-test",
+        "test/source_low/corpus/vector_v16.loom-test",
+        "test/source_low/corpus/vector_v4.loom-test",
+        "test/source_low/source_low.loom-test",
+        "test/source_low/source_low_diagnostics.loom-test",
+    ],
+    test_name_prefix_to_strip = "test/source_low/",
+)

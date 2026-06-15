@@ -77,7 +77,8 @@ IREE_API_EXPORT iree_status_t iree_hal_device_query_capabilities(
   IREE_ASSERT_ARGUMENT(device);
   IREE_ASSERT_ARGUMENT(out_capabilities);
   IREE_TRACE_ZONE_BEGIN(z0);
-  IREE_RETURN_IF_ERROR(
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0,
       _VTABLE_DISPATCH(device, query_capabilities)(device, out_capabilities));
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();

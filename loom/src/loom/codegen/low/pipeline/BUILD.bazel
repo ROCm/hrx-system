@@ -1,0 +1,87 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_LOW_PASS_ENVIRONMENT_VISIBILITY = [
+    "//loom/binding/c:__pkg__",
+    "//loom/src/loom/codegen/low/testing:__pkg__",
+    "//loom/src/loom/codegen/low/transforms:__pkg__",
+    "//loom/src/loom/codegen/low/transforms/pipeline:__pkg__",
+    "//loom/src/loom/pass:__pkg__",
+    "//loom/src/loom/target/arch/amdgpu:__pkg__",
+    "//loom/src/loom/target/arch/amdgpu/hal:__pkg__",
+    "//loom/src/loom/transforms/cleanup:__pkg__",
+    "//loom/src/loom/tooling/compile:__pkg__",
+    "//loom/src/loom/tools/loom-check:__pkg__",
+    "//loom/src/loom/tools/loom-opt:__pkg__",
+]
+
+_LOW_PASS_REQUIREMENTS_VISIBILITY = [
+    "//loom/src/loom/pass:__pkg__",
+    "//loom/src/loom/target/arch/amdgpu:__pkg__",
+]
+
+_LOW_PIPELINE_VISIBILITY = [
+    "//loom/src/loom/codegen/low/testing:__pkg__",
+    "//loom/src/loom/target:__pkg__",
+]
+
+loom_cc_library(
+    name = "pass_requirements",
+    hdrs = ["pass_requirements.h"],
+    visibility = _LOW_PASS_REQUIREMENTS_VISIBILITY,
+)
+
+loom_cc_library(
+    name = "pass_environment",
+    srcs = ["pass_environment.c"],
+    hdrs = ["pass_environment.h"],
+    visibility = _LOW_PASS_ENVIRONMENT_VISIBILITY,
+    deps = [
+        ":pass_requirements",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/pass:environment",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/target:math_policy",
+        "//loom/src/loom/target:selection",
+        "//loom/src/loom/target:types",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "pipeline",
+    srcs = ["pipeline.c"],
+    hdrs = ["pipeline.h"],
+    visibility = _LOW_PIPELINE_VISIBILITY,
+    deps = [
+        "//loom/src/loom/pass:builder",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "pipeline_test",
+    srcs = ["pipeline_test.cc"],
+    deps = [
+        ":pipeline",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/ops/pass",
+        "//loom/src/loom/pass:builder",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

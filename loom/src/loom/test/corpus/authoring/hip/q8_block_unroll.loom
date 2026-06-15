@@ -1,0 +1,132 @@
+// HIP concept: `__global__ void q8_kernel(...)` plus launch bounds/grid shape.
+// Loom spelling: `kernel.def` owns the ABI and `kernel.launch.config` owns
+// grid/workgroup geometry. Keep these facts in the source so compile, check,
+// benchmark, and JIT flows see the same launch contract.
+kernel.def @q8_block_unroll_wg64() {
+  %unit = index.constant 1 : index
+  %row_groups = index.constant 64 : index
+  %cols = index.constant 8 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%row_groups, %cols, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%src0: buffer, %src1: buffer, %dst: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %four = index.constant 4 : index
+  %four_bytes = index.constant 4 : offset
+  %eight = index.constant 8 : index
+  %qk = index.constant 32 : index
+  %block_bytes = index.constant 34 : offset
+  %block_f16s = index.constant 17 : index
+  %qs_offset = index.constant 2 : offset
+  %k = index.constant 512 : index
+  %rows = index.constant 64 : index
+  %blocks_per_row = index.constant 16 : index
+  %workgroup_size = index.constant 64 : index
+
+  // HIP concept: `blockIdx.x`, `blockIdx.y`, and `threadIdx.x`.
+  // Loom spelling: read workgroup/workitem IDs explicitly. The launch config
+  // above publishes the grid and workgroup range facts used below.
+  %row = kernel.workgroup.id<x> : index
+  %col = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %zero_f32 = scalar.constant 0.0 : f32
+  %zero_i32 = scalar.constant 0 : i32
+
+  // HIP concept: split a 64-lane workgroup into eight lanes per q8 block:
+  //   block_lane = threadIdx.x & 7;
+  //   block_slot = threadIdx.x >> 3;
+  //   block_step = blockDim.x / 8;
+  // Loom spelling: index math plus value facts. These facts let full-unroll
+  // prove every lane visits exactly two blocks below.
+  %block_lane = index.rem %lane, %eight : index
+  %block_slot = index.div %lane, %eight : index
+  %in_block_base = index.mul %block_lane, %four : index
+  %block_step = index.div %workgroup_size, %eight : index
+
+  // HIP concept: `const block_q8_0 *__restrict__`, `float *__restrict__`.
+  // Loom spelling: kernel ABI buffers already carry global memory-space facts.
+  // State the noalias fact from `__restrict__`, then form typed views at the
+  // point where pointer arithmetic becomes typed.
+  %src0_noalias, %src1_noalias, %dst_noalias = buffer.assume.noalias %src0, %src1, %dst : buffer, buffer, buffer
+  %src0_f16_view = buffer.view %src0_noalias[%base] : buffer -> view<17408xf16, #dense>
+  %src1_view = buffer.view %src1_noalias[%base] : buffer -> view<4096xf32, #dense>
+  %dst_view = buffer.view %dst_noalias[%base] : buffer -> view<512xf32, #dense>
+
+  %src1_col_base = index.mul %col, %k : index
+  %dst_col_base = index.mul %col, %rows : index
+  %row_block_base = index.mul %row, %blocks_per_row : index
+
+  // HIP concept:
+  //   #pragma unroll
+  //   for (int block = block_slot; block < blocks_per_row; block += block_step)
+  // Loom spelling: `scf.for ... unroll`. The lower bound is lane-dependent,
+  // but facts prove `%block_slot in [0,7]`, upper `16`, and step `8`, so
+  // `unroll-scf-for` reports a dynamic-lower proof with trip_count = 2.
+  %sum = scf.for %block_idx_raw = [%block_slot to %blocks_per_row step %block_step](%acc = %zero_f32 : f32) -> (f32) unroll {
+    // HIP concept: local block index stays in the q8 row domain.
+    // Loom spelling: attach the post-IV range fact so address math and later
+    // lowering know the packed block index is bounded.
+    %block_idx = index.assume %block_idx_raw [range(%block_idx_raw, 0, 15)] : index
+    %src_base_block = index.mul %block_idx, %qk : index
+    %src_base = index.add %src_base_block, %in_block_base : index
+    %linear_block = index.add %row_block_base, %block_idx : index
+    %block_byte_base = index.scale %linear_block, %block_bytes : index, offset -> offset
+    %q_byte_payload = index.add %block_byte_base, %qs_offset : offset
+    %in_block_byte = index.scale %block_lane, %four_bytes : index, offset -> offset
+    %q_byte_offset = index.add %q_byte_payload, %in_block_byte : offset
+
+    // HIP concept: `global_load_b32` of four packed q8 bytes.
+    // Loom spelling: build an i32 view at the byte offset, then vector-load one
+    // i32 lane and unpack bytes explicitly. Adjacent scalar loads are not a
+    // request for coalescing; source load width is part of the contract.
+    %q_word_view = buffer.view %src0_noalias[%q_byte_offset] : buffer -> view<1xi32, #dense>
+    %q_packed = vector.load %q_word_view[%zero] : view<1xi32, #dense> -> vector<1xi32>
+    %q_i32 = vector.bitunpacks<8> %q_packed : vector<1xi32> -> vector<4xi32>
+    %q_f32 = vector.sitofp %q_i32 : vector<4xi32> to vector<4xf32>
+
+    // HIP concept: load four RHS f32 values, load the q8 scale, then accumulate
+    // `sum = dot(float(q) * d, rhs, sum)`.
+    // Loom spelling: explicit vector load, scalar scale load/extend/splat,
+    // fast-math multiply, and `vector.dotf` as the dot-shaped source op.
+    %src1_index = index.add %src1_col_base, %src_base : index
+    %rhs = vector.load %src1_view[%src1_index] : view<4096xf32, #dense> -> vector<4xf32>
+    %block_f16_base = index.mul %linear_block, %block_f16s : index
+    %d_f16 = view.load %src0_f16_view[%block_f16_base] : view<17408xf16, #dense> -> f16
+    %d = scalar.extf %d_f16 : f16 to f32
+    %d_vec = vector.splat %d : vector<4xf32>
+    %q_scaled = vector.mulf<reassoc|nnan|ninf|nsz|contract> %q_f32, %d_vec : vector<4xf32>
+    %next = vector.dotf %q_scaled, %rhs, %acc : vector<4xf32>, vector<4xf32>, f32
+    scf.yield %next : f32
+  }
+
+  // HIP concept: wave/workgroup reduction and lane-zero store.
+  // Loom spelling: use the kernel reduction op, then guard the output store
+  // with an explicit lane-zero predicate.
+  %dot = kernel.workgroup.reduce<addf> %sum : f32
+  %dst_index = index.add %dst_col_base, %row : index
+  %lane_i32 = index.cast %lane : index to i32
+  %is_lane0 = scalar.cmpi eq, %lane_i32, %zero_i32 : i32
+  scf.if %is_lane0 {
+    view.store %dot, %dst_view[%dst_index] : f32, view<512xf32, #dense>
+  }
+  kernel.return
+}
+
+// HIP concept: a tiny correctness harness around the kernel before measuring.
+// Loom spelling: `check.case` is the checked execution unit. Zero inputs make
+// the expected tensor simple while still exercising launch, unpack, dot,
+// reduction, and store. `check.benchmark` below reuses this same case.
+check.case @case_q8_block_unroll_wg64 {
+  %src0 = check.generate.fill value(0) : tensor<34816xi8>
+  %src1 = check.generate.fill value(0.0) : tensor<4096xf32>
+  %dst = check.generate.fill value(1.0) : tensor<512xf32>
+  %expected = check.generate.fill value(0.0) : tensor<512xf32>
+  func.call @q8_block_unroll_wg64(%src0, %src1, %dst) : (tensor<34816xi8>, tensor<4096xf32>, tensor<512xf32>)
+  check.expect.close actual(%dst) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<512xf32>
+  check.return
+}
+
+// HIP concept: benchmark the same scenario after correctness is spelled.
+// Loom spelling: named benchmark rows are attached to check cases so sweeps can
+// vary parameters later without cloning the kernel source.
+check.benchmark<@case_q8_block_unroll_wg64> @bench_q8_block_unroll_wg64

@@ -235,23 +235,23 @@ void iree_hal_amdgpu_profile_metadata_hash_code_object(
 
 static void iree_hal_amdgpu_profile_metadata_hash_pipeline(
     const uint64_t code_object_hash[2], uint32_t function_ordinal,
-    const iree_hal_amdgpu_device_kernel_args_t* host_kernel_args,
+    const iree_hal_executable_function_info_t* function_info,
     iree_string_view_t function_name, uint64_t out_hash[2]) {
   iree_hal_amdgpu_profile_hash64_state_t states[2];
   iree_hal_amdgpu_profile_hash128_initialize(states);
   iree_hal_amdgpu_profile_hash128_append_u64(states, code_object_hash[0]);
   iree_hal_amdgpu_profile_hash128_append_u64(states, code_object_hash[1]);
   iree_hal_amdgpu_profile_hash128_append_u32(states, function_ordinal);
-  iree_hal_amdgpu_profile_hash128_append_u16(states,
-                                             host_kernel_args->constant_count);
-  iree_hal_amdgpu_profile_hash128_append_u16(states,
-                                             host_kernel_args->binding_count);
   iree_hal_amdgpu_profile_hash128_append_u32(
-      states, host_kernel_args->workgroup_size[0]);
-  iree_hal_amdgpu_profile_hash128_append_u32(
-      states, host_kernel_args->workgroup_size[1]);
-  iree_hal_amdgpu_profile_hash128_append_u32(
-      states, host_kernel_args->workgroup_size[2]);
+      states, (uint32_t)function_info->constant_byte_length);
+  iree_hal_amdgpu_profile_hash128_append_u32(states,
+                                             function_info->binding_count);
+  iree_hal_amdgpu_profile_hash128_append_u32(states,
+                                             function_info->workgroup_size[0]);
+  iree_hal_amdgpu_profile_hash128_append_u32(states,
+                                             function_info->workgroup_size[1]);
+  iree_hal_amdgpu_profile_hash128_append_u32(states,
+                                             function_info->workgroup_size[2]);
   const uint64_t function_name_length = function_name.size;
   iree_hal_amdgpu_profile_hash128_append_u64(states, function_name_length);
   iree_hal_amdgpu_profile_hash128_append(states, function_name.data,
@@ -318,9 +318,7 @@ static iree_status_t iree_hal_amdgpu_profile_metadata_append_function_records(
     uint64_t executable_id, iree_host_size_t function_count,
     const iree_hal_executable_function_info_t* function_infos,
     const iree_host_size_t* function_parameter_offsets,
-    const uint64_t code_object_hash[2],
-    const iree_hal_amdgpu_device_kernel_args_t* host_kernel_args,
-    uint8_t* target_data) {
+    const uint64_t code_object_hash[2], uint8_t* target_data) {
   uint8_t* cursor = target_data;
   for (iree_host_size_t i = 0; i < function_count; ++i) {
     const iree_string_view_t name = function_infos[i].name;
@@ -334,17 +332,17 @@ static iree_status_t iree_hal_amdgpu_profile_metadata_append_function_records(
     record.record_length = (uint32_t)record_length;
     record.executable_id = executable_id;
     record.function_ordinal = (uint32_t)i;
-    record.constant_count = host_kernel_args[i].constant_count;
-    record.binding_count = host_kernel_args[i].binding_count;
+    record.constant_byte_length = function_infos[i].constant_byte_length;
+    record.binding_count = function_infos[i].binding_count;
     record.parameter_count = (uint32_t)(function_parameter_offsets[i + 1] -
                                         function_parameter_offsets[i]);
-    record.workgroup_size[0] = host_kernel_args[i].workgroup_size[0];
-    record.workgroup_size[1] = host_kernel_args[i].workgroup_size[1];
-    record.workgroup_size[2] = host_kernel_args[i].workgroup_size[2];
+    record.workgroup_size[0] = function_infos[i].workgroup_size[0];
+    record.workgroup_size[1] = function_infos[i].workgroup_size[1];
+    record.workgroup_size[2] = function_infos[i].workgroup_size[2];
     if (code_object_hash) {
       record.flags |= IREE_HAL_PROFILE_EXECUTABLE_FUNCTION_FLAG_FUNCTION_HASH;
       iree_hal_amdgpu_profile_metadata_hash_pipeline(
-          code_object_hash, record.function_ordinal, &host_kernel_args[i], name,
+          code_object_hash, record.function_ordinal, &function_infos[i], name,
           record.function_hash);
     }
     record.name_length = (uint32_t)name.size;
@@ -452,14 +450,11 @@ iree_status_t iree_hal_amdgpu_profile_metadata_register_executable(
     iree_host_size_t function_count,
     const iree_hal_executable_function_info_t* function_infos,
     const iree_host_size_t* function_parameter_offsets,
-    const uint64_t code_object_hash[2],
-    const iree_hal_amdgpu_device_kernel_args_t* host_kernel_args,
-    uint64_t* out_executable_id) {
+    const uint64_t code_object_hash[2], uint64_t* out_executable_id) {
   IREE_ASSERT_ARGUMENT(out_executable_id);
   *out_executable_id = 0;
   if (IREE_UNLIKELY(function_count > 0 &&
-                    (!function_infos || !function_parameter_offsets ||
-                     !host_kernel_args))) {
+                    (!function_infos || !function_parameter_offsets))) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "profile executable metadata is incomplete");
   }
@@ -531,8 +526,7 @@ iree_status_t iree_hal_amdgpu_profile_metadata_register_executable(
             : NULL;
     status = iree_hal_amdgpu_profile_metadata_append_function_records(
         executable_id, function_count, function_infos,
-        function_parameter_offsets, code_object_hash, host_kernel_args,
-        function_data);
+        function_parameter_offsets, code_object_hash, function_data);
     if (iree_status_is_ok(status)) {
       registry->executable_records[registry->executable_record_count++] =
           record;

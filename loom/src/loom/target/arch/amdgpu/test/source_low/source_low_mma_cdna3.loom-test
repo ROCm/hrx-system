@@ -1,0 +1,533 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx942> @target
+func.def target(@target) @bf16_mfma(%lhs_data: vector<4xbf16>, %rhs_data: vector<4xbf16>, %init_data: vector<4xf32>) -> (vector<4xf32>) {
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] : vector<4xbf16>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] : vector<4xbf16>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<4xbf16>, vector<4xbf16>, vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @bf16_mfma(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %init: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.cdna3.core> {
+  %15 = copy %init : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %result = v_mfma_f32_16x16x16_bf16 %lhs, %rhs, %15
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+func.def target(@target) @bf16_mfma_preserves_accumulator(%lhs_data: vector<4xbf16>, %rhs_data: vector<4xbf16>, %init_data: vector<4xf32>) -> (vector<4xf32>, vector<4xf32>) {
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] : vector<4xbf16>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] : vector<4xbf16>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<4xbf16>, vector<4xbf16>, vector<4xf32>
+  func.return %result, %init : vector<4xf32>, vector<4xf32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @bf16_mfma_preserves_accumulator(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %init: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) asm<amdgpu.cdna3.core> {
+  %17 = copy %init : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %result = v_mfma_f32_16x16x16_bf16 %lhs, %rhs, %17
+  return %result, %init
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+func.def target(@target) @f32_mfma(%lhs_data: vector<1xf32>, %rhs_data: vector<1xf32>, %init_data: vector<4xf32>) -> (vector<4xf32>) {
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 4 : index
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] : vector<1xf32>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] : vector<1xf32>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<1xf32>, vector<1xf32>, vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @f32_mfma(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %init: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.cdna3.core> {
+  %15 = copy %init : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %result = v_mfma_f32_16x16x4_f32 %lhs, %rhs, %15
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @bf16_mfma_fragment_memory() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %init_buffer: buffer, %out_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %rhs_layout = encoding.layout.strided [1, 16] : encoding<layout>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x16xbf16, #dense>
+  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<16x16xbf16, %rhs_layout>
+  %init_view = buffer.view %init_buffer[%base] : buffer -> view<16x16xf32, #dense>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32, #dense>
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xbf16, #dense> -> vector<4xbf16>
+  %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<16x16xbf16, %rhs_layout> -> vector<4xbf16>
+  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xf32, #dense> -> vector<4xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<4xbf16>, vector<4xbf16>, vector<4xf32>
+  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) @bf16_mfma_fragment_memory() asm<amdgpu.cdna3.core> {
+  %19 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
+  %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %init_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
+  %out_view = resource<hal_binding> {index = 3, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
+  %25 = v_and_b32_src0_inline %19, 15
+  %26 = v_lshrrev_b32_src0_inline %19, 4
+  %27 = v_lshlrev_b32_src0_inline %26, 3
+  %28 = v_lshlrev_b32_src0_inline %25, 5
+  %29 = v_add_u32 %27, %28
+  %30 = s_mov_b32_m0_imm 0
+  %lhs = global_load_dwordx2_saddr %29, %lhs_view, %30
+  %rhs = global_load_dwordx2_saddr %29, %rhs_view, %30
+  %41 = v_lshlrev_b32_src0_inline %26, 8
+  %42 = v_lshlrev_b32_src0_inline %25, 2
+  %43 = v_add_u32 %41, %42
+  %45 = global_load_dword_saddr %43, %init_view, %30
+  %50 = global_load_dword_saddr %43, %init_view, %30 {offset = 64}
+  %55 = global_load_dword_saddr %43, %init_view, %30 {offset = 128}
+  %60 = global_load_dword_saddr %43, %init_view, %30 {offset = 192}
+  %init = concat(%45, %50, %55, %60) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %62 = copy %init : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %result = v_mfma_f32_16x16x16_bf16 %lhs, %rhs, %62
+  %66 = slice %result[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  global_store_dword_saddr %43, %66, %out_view, %30
+  %71 = slice %result[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  global_store_dword_saddr %43, %71, %out_view, %30 {offset = 64}
+  %76 = slice %result[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  global_store_dword_saddr %43, %76, %out_view, %30 {offset = 128}
+  %81 = slice %result[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  global_store_dword_saddr %43, %81, %out_view, %30 {offset = 192}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @bf16_mfma_fragment_memory_bf16_output() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %init_buffer: buffer, %out_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %rhs_layout = encoding.layout.strided [1, 16] : encoding<layout>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x16xbf16, #dense>
+  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<16x16xbf16, %rhs_layout>
+  %init_view = buffer.view %init_buffer[%base] : buffer -> view<16x16xf32, #dense>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xbf16, #dense>
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xbf16, #dense> -> vector<4xbf16>
+  %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<16x16xbf16, %rhs_layout> -> vector<4xbf16>
+  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xf32, #dense> -> vector<4xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<4xbf16>, vector<4xbf16>, vector<4xf32>
+  %rounded = vector.fptrunc %result : vector<4xf32> to vector<4xbf16>
+  vector.fragment.store<result> %rounded, %out_view[0, 0] shape [%m, %n] : vector<4xbf16>, view<16x16xbf16, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) @bf16_mfma_fragment_memory_bf16_output() asm<amdgpu.cdna3.core> {
+  %20 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
+  %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %init_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
+  %out_view = resource<hal_binding> {index = 3, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
+  %26 = v_and_b32_src0_inline %20, 15
+  %27 = v_lshrrev_b32_src0_inline %20, 4
+  %28 = v_lshlrev_b32_src0_inline %27, 3
+  %29 = v_lshlrev_b32_src0_inline %26, 5
+  %30 = v_add_u32 %28, %29
+  %31 = s_mov_b32_m0_imm 0
+  %lhs = global_load_dwordx2_saddr %30, %lhs_view, %31
+  %rhs = global_load_dwordx2_saddr %30, %rhs_view, %31
+  %42 = v_lshlrev_b32_src0_inline %27, 8
+  %43 = v_lshlrev_b32_src0_inline %26, 2
+  %44 = v_add_u32 %42, %43
+  %46 = global_load_dword_saddr %44, %init_view, %31
+  %51 = global_load_dword_saddr %44, %init_view, %31 {offset = 64}
+  %56 = global_load_dword_saddr %44, %init_view, %31 {offset = 128}
+  %61 = global_load_dword_saddr %44, %init_view, %31 {offset = 192}
+  %init = concat(%46, %51, %56, %61) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %63 = copy %init : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %result = v_mfma_f32_16x16x16_bf16 %lhs, %rhs, %63
+  %94 = slice %result[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %95 = v_lshrrev_b32_src0_inline %94, 16
+  %96 = v_and_b32_src0_inline %95, 1
+  %97 = v_add_u32_lit %96, 32767
+  %98 = v_add_u32 %94, %97
+  %99 = v_lshrrev_b32_src0_inline %98, 16
+  %100 = v_lshlrev_b32_src0_inline %27, 7
+  %101 = v_lshlrev_b32_src0_inline %26, 1
+  %102 = v_add_u32 %100, %101
+  global_store_short_saddr %102, %99, %out_view, %31
+  %104 = slice %result[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %105 = v_lshrrev_b32_src0_inline %104, 16
+  %106 = v_and_b32_src0_inline %105, 1
+  %107 = v_add_u32_lit %106, 32767
+  %108 = v_add_u32 %104, %107
+  %109 = v_lshrrev_b32_src0_inline %108, 16
+  global_store_short_saddr %102, %109, %out_view, %31 {offset = 32}
+  %114 = slice %result[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %115 = v_lshrrev_b32_src0_inline %114, 16
+  %116 = v_and_b32_src0_inline %115, 1
+  %117 = v_add_u32_lit %116, 32767
+  %118 = v_add_u32 %114, %117
+  %119 = v_lshrrev_b32_src0_inline %118, 16
+  global_store_short_saddr %102, %119, %out_view, %31 {offset = 64}
+  %124 = slice %result[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %125 = v_lshrrev_b32_src0_inline %124, 16
+  %126 = v_and_b32_src0_inline %125, 1
+  %127 = v_add_u32_lit %126, 32767
+  %128 = v_add_u32 %124, %127
+  %129 = v_lshrrev_b32_src0_inline %128, 16
+  global_store_short_saddr %102, %129, %out_view, %31 {offset = 96}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @bf16_mfma_fragment_memory_bf16_column_major_output() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %init_buffer: buffer, %out_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %rhs_layout = encoding.layout.strided [1, 16] : encoding<layout>
+  %out_layout = encoding.layout.strided [1, 16] : encoding<layout>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x16xbf16, #dense>
+  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<16x16xbf16, %rhs_layout>
+  %init_view = buffer.view %init_buffer[%base] : buffer -> view<16x16xf32, #dense>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xbf16, %out_layout>
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xbf16, #dense> -> vector<4xbf16>
+  %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<16x16xbf16, %rhs_layout> -> vector<4xbf16>
+  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xf32, #dense> -> vector<4xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<4xbf16>, vector<4xbf16>, vector<4xf32>
+  %rounded = vector.fptrunc %result : vector<4xf32> to vector<4xbf16>
+  vector.fragment.store<result> %rounded, %out_view[0, 0] shape [%m, %n] : vector<4xbf16>, view<16x16xbf16, %out_layout>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) @bf16_mfma_fragment_memory_bf16_column_major_output() asm<amdgpu.cdna3.core> {
+  %21 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
+  %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %init_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
+  %out_view = resource<hal_binding> {index = 3, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %27 = v_and_b32_src0_inline %21, 15
+  %28 = v_lshrrev_b32_src0_inline %21, 4
+  %29 = v_lshlrev_b32_src0_inline %28, 3
+  %30 = v_lshlrev_b32_src0_inline %27, 5
+  %31 = v_add_u32 %29, %30
+  %32 = s_mov_b32_m0_imm 0
+  %lhs = global_load_dwordx2_saddr %31, %lhs_view, %32
+  %rhs = global_load_dwordx2_saddr %31, %rhs_view, %32
+  %43 = v_lshlrev_b32_src0_inline %28, 8
+  %44 = v_lshlrev_b32_src0_inline %27, 2
+  %45 = v_add_u32 %43, %44
+  %47 = global_load_dword_saddr %45, %init_view, %32
+  %52 = global_load_dword_saddr %45, %init_view, %32 {offset = 64}
+  %57 = global_load_dword_saddr %45, %init_view, %32 {offset = 128}
+  %62 = global_load_dword_saddr %45, %init_view, %32 {offset = 192}
+  %init = concat(%47, %52, %57, %62) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %64 = copy %init : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %result = v_mfma_f32_16x16x16_bf16 %lhs, %rhs, %64
+  %95 = slice %result[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %96 = slice %result[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %97 = v_lshrrev_b32_src0_inline %95, 16
+  %98 = v_and_b32_src0_inline %97, 1
+  %99 = v_add_u32_lit %98, 32767
+  %100 = v_add_u32 %95, %99
+  %101 = v_lshrrev_b32_src0_inline %100, 16
+  %102 = v_lshrrev_b32_src0_inline %96, 16
+  %103 = v_and_b32_src0_inline %102, 1
+  %104 = v_add_u32_lit %103, 32767
+  %105 = v_add_u32 %96, %104
+  %106 = v_lshrrev_b32_src0_inline %105, 16
+  %107 = v_cvt_pk_u16_u32 %101, %106
+  %108 = slice %result[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %109 = slice %result[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %110 = v_lshrrev_b32_src0_inline %108, 16
+  %111 = v_and_b32_src0_inline %110, 1
+  %112 = v_add_u32_lit %111, 32767
+  %113 = v_add_u32 %108, %112
+  %114 = v_lshrrev_b32_src0_inline %113, 16
+  %115 = v_lshrrev_b32_src0_inline %109, 16
+  %116 = v_and_b32_src0_inline %115, 1
+  %117 = v_add_u32_lit %116, 32767
+  %118 = v_add_u32 %109, %117
+  %119 = v_lshrrev_b32_src0_inline %118, 16
+  %120 = v_cvt_pk_u16_u32 %114, %119
+  %121 = concat(%107, %120) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_dwordx2_saddr %31, %121, %out_view, %32
+  return
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @f32_mfma_fragment_memory() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %init_buffer: buffer, %out_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 4 : index
+  %rhs_layout = encoding.layout.strided [1, 4] : encoding<layout>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x4xf32, #dense>
+  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<4x16xf32, %rhs_layout>
+  %init_view = buffer.view %init_buffer[%base] : buffer -> view<16x16xf32, #dense>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32, #dense>
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x4xf32, #dense> -> vector<1xf32>
+  %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<4x16xf32, %rhs_layout> -> vector<1xf32>
+  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xf32, #dense> -> vector<4xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<1xf32>, vector<1xf32>, vector<4xf32>
+  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) @f32_mfma_fragment_memory() asm<amdgpu.cdna3.core> {
+  %19 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
+  %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %init_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
+  %out_view = resource<hal_binding> {index = 3, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
+  %26 = v_and_b32_src0_inline %19, 15
+  %27 = v_lshrrev_b32_src0_inline %19, 4
+  %28 = v_lshlrev_b32_src0_inline %27, 2
+  %29 = v_lshlrev_b32_src0_inline %26, 4
+  %30 = v_add_u32 %28, %29
+  %31 = s_mov_b32_m0_imm 0
+  %lhs = global_load_dword_saddr %30, %lhs_view, %31
+  %rhs = global_load_dword_saddr %30, %rhs_view, %31
+  %42 = v_lshlrev_b32_src0_inline %27, 8
+  %43 = v_lshlrev_b32_src0_inline %26, 2
+  %44 = v_add_u32 %42, %43
+  %46 = global_load_dword_saddr %44, %init_view, %31
+  %51 = global_load_dword_saddr %44, %init_view, %31 {offset = 64}
+  %56 = global_load_dword_saddr %44, %init_view, %31 {offset = 128}
+  %61 = global_load_dword_saddr %44, %init_view, %31 {offset = 192}
+  %init = concat(%46, %51, %56, %61) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %63 = copy %init : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %result = v_mfma_f32_16x16x4_f32 %lhs, %rhs, %63
+  %67 = slice %result[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  global_store_dword_saddr %44, %67, %out_view, %31
+  %72 = slice %result[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  global_store_dword_saddr %44, %72, %out_view, %31 {offset = 64}
+  %77 = slice %result[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  global_store_dword_saddr %44, %77, %out_view, %31 {offset = 128}
+  %82 = slice %result[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  global_store_dword_saddr %44, %82, %out_view, %31 {offset = 192}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @f32_fragment_memory_dynamic_lds_base() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%input_buffer: buffer, %out_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %sixty_four = index.constant 64 : index
+  %wave_stride_bytes = index.constant 1024 : index
+  %scratch_bytes = index.constant 4096 : offset
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %tid = kernel.workitem.id<x> : index
+  %wave = index.div %tid, %sixty_four : index
+  %wave_offset_index = index.mul %wave, %wave_stride_bytes : index
+  %wave_offset = index.cast %wave_offset_index : index to offset
+  %input_view = buffer.view %input_buffer[%base] : buffer -> view<16x16xf32, #dense>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32, #dense>
+  %scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch_view = buffer.view %scratch[%wave_offset] : buffer -> view<16x16xf32, #dense>
+  %input_fragment = vector.fragment.load<init> %input_view[0, 0] shape [%m, %n] : view<16x16xf32, #dense> -> vector<4xf32>
+  vector.fragment.store<result> %input_fragment, %scratch_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32, #dense>
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  %scratch_fragment = vector.fragment.load<init> %scratch_view[0, 0] shape [%m, %n] : view<16x16xf32, #dense> -> vector<4xf32>
+  vector.fragment.store<result> %scratch_fragment, %out_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(256, 1, 1) @f32_fragment_memory_dynamic_lds_base() asm<amdgpu.cdna3.core> {
+  %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
+  %out_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
+  %wave = v_lshrrev_b32_lit %tid, 6
+  %wave_offset = v_lshlrev_b32_lit %wave, 10
+  %31 = storage {byte_alignment = 16, byte_length = 4096} : low.storage<workgroup>
+  %33 = v_and_b32_src0_inline %tid, 63
+  %34 = v_and_b32_src0_inline %33, 15
+  %35 = v_lshrrev_b32_src0_inline %33, 4
+  %36 = v_lshlrev_b32_src0_inline %35, 8
+  %37 = v_lshlrev_b32_src0_inline %34, 2
+  %38 = v_add_u32 %36, %37
+  %39 = s_mov_b32_m0_imm 0
+  %40 = global_load_dword_saddr %38, %input_view, %39
+  %45 = global_load_dword_saddr %38, %input_view, %39 {offset = 64}
+  %50 = global_load_dword_saddr %38, %input_view, %39 {offset = 128}
+  %55 = global_load_dword_saddr %38, %input_view, %39 {offset = 192}
+  %62 = v_add_u32 %wave_offset, %36
+  %64 = v_add_u32 %62, %37
+  ds_write_b32 %64, %40
+  ds_write_b32 %64, %45 {offset = 64}
+  ds_write_b32 %64, %50 {offset = 128}
+  ds_write_b32 %64, %55 {offset = 192}
+  s_barrier
+  %80 = v_and_b32_src0_inline %tid, 63
+  %81 = v_and_b32_src0_inline %80, 15
+  %82 = v_lshrrev_b32_src0_inline %80, 4
+  %83 = v_lshlrev_b32_src0_inline %82, 8
+  %84 = v_add_u32 %wave_offset, %83
+  %85 = v_lshlrev_b32_src0_inline %81, 2
+  %86 = v_add_u32 %84, %85
+  %87 = ds_read_b32 %86
+  %92 = ds_read_b32 %86 {offset = 64}
+  %97 = ds_read_b32 %86 {offset = 128}
+  %102 = ds_read_b32 %86 {offset = 192}
+  %110 = v_add_u32 %83, %85
+  %111 = s_mov_b32_m0_imm 0
+  global_store_dword_saddr %110, %87, %out_view, %111
+  global_store_dword_saddr %110, %92, %out_view, %111 {offset = 64}
+  global_store_dword_saddr %110, %97, %out_view, %111 {offset = 128}
+  global_store_dword_saddr %110, %102, %out_view, %111 {offset = 192}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @f16_mfma_fragment_memory() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %init_buffer: buffer, %out_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %rhs_layout = encoding.layout.strided [1, 16] : encoding<layout>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x16xf16, #dense>
+  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<16x16xf16, %rhs_layout>
+  %init_view = buffer.view %init_buffer[%base] : buffer -> view<16x16xf32, #dense>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32, #dense>
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xf16, #dense> -> vector<4xf16>
+  %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<16x16xf16, %rhs_layout> -> vector<4xf16>
+  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xf32, #dense> -> vector<4xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<4xf16>, vector<4xf16>, vector<4xf32>
+  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) @f16_mfma_fragment_memory() asm<amdgpu.cdna3.core> {
+  %19 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
+  %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %init_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
+  %out_view = resource<hal_binding> {index = 3, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
+  %25 = v_and_b32_src0_inline %19, 15
+  %26 = v_lshrrev_b32_src0_inline %19, 4
+  %27 = v_lshlrev_b32_src0_inline %26, 3
+  %28 = v_lshlrev_b32_src0_inline %25, 5
+  %29 = v_add_u32 %27, %28
+  %30 = s_mov_b32_m0_imm 0
+  %lhs = global_load_dwordx2_saddr %29, %lhs_view, %30
+  %rhs = global_load_dwordx2_saddr %29, %rhs_view, %30
+  %41 = v_lshlrev_b32_src0_inline %26, 8
+  %42 = v_lshlrev_b32_src0_inline %25, 2
+  %43 = v_add_u32 %41, %42
+  %45 = global_load_dword_saddr %43, %init_view, %30
+  %50 = global_load_dword_saddr %43, %init_view, %30 {offset = 64}
+  %55 = global_load_dword_saddr %43, %init_view, %30 {offset = 128}
+  %60 = global_load_dword_saddr %43, %init_view, %30 {offset = 192}
+  %init = concat(%45, %50, %55, %60) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %62 = copy %init : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %result = v_mfma_f32_16x16x16_f16 %lhs, %rhs, %62
+  %66 = slice %result[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  global_store_dword_saddr %43, %66, %out_view, %30
+  %71 = slice %result[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  global_store_dword_saddr %43, %71, %out_view, %30 {offset = 64}
+  %76 = slice %result[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  global_store_dword_saddr %43, %76, %out_view, %30 {offset = 128}
+  %81 = slice %result[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  global_store_dword_saddr %43, %81, %out_view, %30 {offset = 192}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+func.def target(@target) @bf16_smfmac(%lhs_data: vector<2xi32>, %rhs_data: vector<4xi32>, %init_data: vector<4xf32>, %sparsity: vector<1xi32>) -> (vector<4xf32>) {
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 32 : index
+  %lhs_schema = encoding.define #matrix_operand<element_format=bf16, payload_elements=4, payload_registers=2, sparsity=n_m_structured> : encoding<schema>
+  %rhs_schema = encoding.define #matrix_operand<element_format=bf16, payload_elements=8, payload_registers=4> : encoding<schema>
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {sparsity = %sparsity : vector<1xi32>, schema = %lhs_schema : encoding<schema>} : vector<2xi32>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<4xi32>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<2xi32>, vector<4xi32>, vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @bf16_smfmac(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x4>, %init: reg<amdgpu.vgpr x4>, %sparsity: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.cdna3.core> {
+  %19 = copy %init : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %result = v_smfmac_f32_16x16x32_bf16 %19, %lhs, %rhs, %sparsity
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+func.def target(@target) @bf16_mfma_wrong_tile(%lhs_data: vector<4xbf16>, %rhs_data: vector<4xbf16>, %init_data: vector<4xf32>) -> (vector<4xf32>) {
+  %m = index.constant 17 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] : vector<4xbf16>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] : vector<4xbf16>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xf32>
+  // ERROR@+1: AMDGPU/021 {matrix_constraint="tile_shape"}
+  %result = vector.mma %lhs, %rhs, %init : vector<4xbf16>, vector<4xbf16>, vector<4xf32>
+  func.return %result : vector<4xf32>
+}

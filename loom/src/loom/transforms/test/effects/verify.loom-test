@@ -1,0 +1,44 @@
+// RUN: verify
+
+// Pure functions cannot hide observable work inside nested regions. This is a
+// function-level contract: the body may contain structured control flow, but
+// its transitive effect summary must still be empty.
+// ERROR@+1: STRUCTURE/017
+func.def pure @pure_body_rejects_nested_store(%cond: i1, %buffer: buffer, %offset: offset, %value: f32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<1xf32, %layout>
+  scf.if %cond {
+    view.store %value, %view[0] : f32, view<1xf32, %layout>
+    scf.yield
+  } else {
+    scf.yield
+  }
+  func.return
+}
+
+// ====
+
+// The purity check relies on transitive region effect summaries rather than
+// scf.if-specific structure, so writes hidden in scf.while are rejected too.
+// ERROR@+1: STRUCTURE/017
+func.def pure @pure_body_rejects_nested_while_store(%cond: i1, %buffer: buffer, %offset: offset, %value: f32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<1xf32, %layout>
+  %unused = scf.while(%before = %value : f32) -> (f32) {
+    scf.condition %cond, %before : i1, f32
+  } do(%body: f32) {
+    view.store %body, %view[0] : f32, view<1xf32, %layout>
+    scf.yield %body : f32
+  }
+  func.return
+}
+
+// ====
+
+// Convergent pure value ops are still observable at the function purity
+// boundary: a pure function must be freely callable as a value transform.
+// ERROR@+1: STRUCTURE/017
+func.def pure @pure_body_rejects_convergent(%value: i32) {
+  %dead = test.convergent %value : i32
+  func.return
+}

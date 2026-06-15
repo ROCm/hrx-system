@@ -76,14 +76,14 @@ static void iree_async_proactor_js_cancel_continuation_chain(
 // On failure: cancels the entire chain with CANCELLED callbacks.
 static void iree_async_proactor_js_dispatch_linked_continuation(
     iree_async_proactor_js_t* proactor, iree_async_operation_t* operation,
-    iree_status_t trigger_status) {
+    iree_status_code_t trigger_status_code) {
   iree_async_operation_t* continuation = operation->linked_next;
   if (!continuation) return;
 
   // Detach the chain before potentially recursive submit.
   operation->linked_next = NULL;
 
-  if (iree_status_is_ok(trigger_status)) {
+  if (trigger_status_code == IREE_STATUS_OK) {
     // Success: submit the continuation (which may itself have linked_next).
     iree_status_t status =
         iree_async_proactor_js_submit_one(proactor, continuation);
@@ -116,7 +116,7 @@ static void iree_async_proactor_js_complete(
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_async_operation_release_resources(operation);
   iree_async_proactor_js_dispatch_linked_continuation(proactor, operation,
-                                                      status);
+                                                      iree_status_code(status));
   operation->completion_fn(operation->user_data, operation, status, flags);
   IREE_TRACE_ZONE_END(z0);
 }

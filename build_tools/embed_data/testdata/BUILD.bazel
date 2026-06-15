@@ -27,6 +27,14 @@ iree_c_embed_data(
 )
 
 iree_c_embed_data(
+    name = "empty_embed",
+    testonly = True,
+    srcs = [],
+    c_file_output = "empty_embed.c",
+    h_file_output = "empty_embed.h",
+)
+
+iree_c_embed_data(
     name = "path_embed",
     testonly = True,
     srcs = [

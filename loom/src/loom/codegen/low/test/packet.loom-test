@@ -1,0 +1,10 @@
+// RUN: emit low-packet-json @packet
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @packet(%value: reg<test.i32>) -> (reg<test.i32>) asm<test.low.core> {
+  return %value
+}
+
+// ----
+{"format":"loom.low.packet.v0","function":"packet","target":"test_target","descriptor_set":"test.low.core","allocation_mode":"virtual","block_count":1,"packet_count":1,"assignment_count":1,"spill_count":0,"hazard_gap_count":0,"blocks":[{"index":0,"label":null,"packet_start":0,"packet_count":1,"args":[{"id":0,"name":"value","type":"reg<test.i32>","location":{"assignment":0,"kind":"target_id","base":0,"count":1}}]}],"packets":[{"index":0,"node":0,"block":0,"source_ordinal":0,"scheduled_ordinal":0,"kind":"terminator","op":"low.return","descriptor":null,"mnemonic":null,"encoding_id":null,"descriptor_flags":null,"schedule_class":null,"latency_cycles":0,"latency_kind":"unknown","model_quality":"unknown","issue_use_count":0,"hazard_count":0,"effect_count":0,"results":[],"operands":[{"id":0,"name":"value","type":"reg<test.i32>","location":{"assignment":0,"kind":"target_id","base":0,"count":1}}],"attributes":{},"immediates":[],"successors":[]}]}

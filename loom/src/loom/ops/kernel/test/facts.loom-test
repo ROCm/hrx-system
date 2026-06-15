@@ -1,0 +1,506 @@
+// RUN: pass canonicalize
+
+kernel.def @fixed_workgroup_query_facts() {
+  %c1 = index.constant 1 : index
+  %c8 = index.constant 8 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c8, %c1) : index
+} launch() {
+  %tid_x = kernel.workitem.id<x> : index
+  %size_x = kernel.workgroup.size<x> : index
+  %lane = kernel.subgroup.lane.id : index
+  %subgroup_count = kernel.subgroup.count : index
+  %byte_count = index.constant 4 : index
+  %byte_offset = index.mul %tid_x, %byte_count : index
+  %tid_i32 = index.cast %tid_x : index to i32
+  %c4_i32 = scalar.constant 4 : i32
+  %scaled_i32 = scalar.muli %tid_i32, %c4_i32 : i32
+  %sum_i32 = scalar.addi %scaled_i32, %c4_i32 : i32
+  %tid_hi = test.fact_range_hi %tid_x : index -> i64
+  %size_lo = test.fact_range_lo %size_x : index -> i64
+  %size_hi = test.fact_range_hi %size_x : index -> i64
+  %size_divisor = test.fact_divisor %size_x : index -> i64
+  %size_power_of_two = test.fact_power_of_two %size_x : index -> i1
+  %lane_hi = test.fact_range_hi %lane : index -> i64
+  %subgroup_count_lo = test.fact_range_lo %subgroup_count : index -> i64
+  %subgroup_count_hi = test.fact_range_hi %subgroup_count : index -> i64
+  %subgroup_count_positive = test.fact_positive %subgroup_count : index -> i1
+  %byte_offset_divisor = test.fact_divisor %byte_offset : index -> i64
+  %byte_offset_hi = test.fact_range_hi %byte_offset : index -> i64
+  %byte_offset_is_varying = test.fact_lane_varying %byte_offset : index -> i1
+  %sum_i32_is_varying = test.fact_lane_varying %sum_i32 : i32 -> i1
+  test.use %tid_hi, %size_lo, %size_hi, %size_divisor, %size_power_of_two, %lane_hi, %subgroup_count_lo, %subgroup_count_hi, %subgroup_count_positive, %byte_offset_divisor, %byte_offset_hi, %byte_offset_is_varying, %sum_i32_is_varying : i64, i64, i64, i64, i1, i64, i64, i64, i1, i64, i64, i1, i1
+  kernel.return
+}
+
+// ----
+kernel.def @fixed_workgroup_query_facts() {
+  %c1 = index.constant 1 : index
+  %c8 = index.constant 8 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c8, %c1) : index
+} launch() {
+  %tid_hi = scalar.constant 63 : i64
+  %size_lo = scalar.constant 64 : i64
+  %size_hi = scalar.constant 64 : i64
+  %size_divisor = scalar.constant 64 : i64
+  %size_power_of_two = scalar.constant true : i1
+  %lane_hi = scalar.constant 127 : i64
+  %subgroup_count_lo = scalar.constant 4 : i64
+  %subgroup_count_hi = scalar.constant 512 : i64
+  %subgroup_count_positive = scalar.constant true : i1
+  %byte_offset_divisor = scalar.constant 4 : i64
+  %byte_offset_hi = scalar.constant 252 : i64
+  %byte_offset_is_varying = scalar.constant true : i1
+  %sum_i32_is_varying = scalar.constant true : i1
+  test.use %tid_hi, %size_lo, %size_hi, %size_divisor, %size_power_of_two, %lane_hi, %subgroup_count_lo, %subgroup_count_hi, %subgroup_count_positive, %byte_offset_divisor, %byte_offset_hi, %byte_offset_is_varying, %sum_i32_is_varying : i64, i64, i64, i64, i1, i64, i64, i64, i1, i64, i64, i1, i1
+  kernel.return
+}
+
+// ====
+
+kernel.def @computed_launch_config_facts_seed_body() {
+  %c1 = index.constant 1 : index
+  %c8 = index.constant 8 : index
+  %c64 = index.constant 64 : index
+  %size_x = index.mul %c8, %c8 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%size_x, %c1, %c1) : index
+} launch() {
+  %tid_x = kernel.workitem.id<x> : index
+  %tid_hi = test.fact_range_hi %tid_x : index -> i64
+  test.use %tid_hi : i64
+  kernel.return
+}
+
+// ----
+kernel.def @computed_launch_config_facts_seed_body() {
+  %c1 = index.constant 1 : index
+  %size_x = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%size_x, %c1, %c1) : index
+} launch() {
+  %tid_hi = scalar.constant 63 : i64
+  test.use %tid_hi : i64
+  kernel.return
+}
+
+// ====
+
+kernel.def @dynamic_launch_config_facts_seed_body(%count: index) {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  %bounded_count = index.assume %count [range(%count, 1, 128)] : index
+  kernel.launch.config workgroups(%bounded_count, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %tile = index.constant 64 : index
+  %bid = kernel.workgroup.id<x> : index
+  %count_query = kernel.workgroup.count<x> : index
+  %tid = kernel.workitem.id<x> : index
+  %dispatch_id = kernel.workitem.dispatch.id<x> : index
+  %linear = index.madd %bid, %tile, %tid : index
+  %bid_hi = test.fact_range_hi %bid : index -> i64
+  %count_lo = test.fact_range_lo %count_query : index -> i64
+  %count_hi = test.fact_range_hi %count_query : index -> i64
+  %tid_hi = test.fact_range_hi %tid : index -> i64
+  %dispatch_hi = test.fact_range_hi %dispatch_id : index -> i64
+  %linear_non_negative = test.fact_non_negative %linear : index -> i1
+  %linear_hi = test.fact_range_hi %linear : index -> i64
+  %linear_is_varying = test.fact_lane_varying %linear : index -> i1
+  test.use %bid_hi, %count_lo, %count_hi, %tid_hi, %dispatch_hi, %linear_non_negative, %linear_hi, %linear_is_varying : i64, i64, i64, i64, i64, i1, i64, i1
+  kernel.return
+}
+
+// ----
+kernel.def @dynamic_launch_config_facts_seed_body(%count: index) {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  %bounded_count = index.assume %count [range(%count, 1, 128)] : index
+  kernel.launch.config workgroups(%bounded_count, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %bid_hi = scalar.constant 127 : i64
+  %count_lo = scalar.constant 1 : i64
+  %count_hi = scalar.constant 128 : i64
+  %tid_hi = scalar.constant 63 : i64
+  %dispatch_hi = scalar.constant 8191 : i64
+  %linear_non_negative = scalar.constant true : i1
+  %linear_hi = scalar.constant 8191 : i64
+  %linear_is_varying = scalar.constant true : i1
+  test.use %bid_hi, %count_lo, %count_hi, %tid_hi, %dispatch_hi, %linear_non_negative, %linear_hi, %linear_is_varying : i64, i64, i64, i64, i64, i1, i64, i1
+  kernel.return
+}
+
+// ====
+
+kernel.def @fixed_multidim_launch_config_facts_seed_body() {
+  %c1 = index.constant 1 : index
+  %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c8, %c4, %c1) : index
+} launch() {
+  %x = kernel.workitem.id<x> : index
+  %y = kernel.workitem.id<y> : index
+  %row_stride = index.constant 8 : index
+  %linear = index.madd %y, %row_stride, %x : index
+  %x_hi = test.fact_range_hi %x : index -> i64
+  %y_hi = test.fact_range_hi %y : index -> i64
+  %linear_hi = test.fact_range_hi %linear : index -> i64
+  %linear_is_varying = test.fact_lane_varying %linear : index -> i1
+  test.use %x_hi, %y_hi, %linear_hi, %linear_is_varying : i64, i64, i64, i1
+  kernel.return
+}
+
+// ----
+kernel.def @fixed_multidim_launch_config_facts_seed_body() {
+  %c1 = index.constant 1 : index
+  %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c8, %c4, %c1) : index
+} launch() {
+  %x_hi = scalar.constant 7 : i64
+  %y_hi = scalar.constant 3 : i64
+  %linear_hi = scalar.constant 31 : i64
+  %linear_is_varying = scalar.constant true : i1
+  test.use %x_hi, %y_hi, %linear_hi, %linear_is_varying : i64, i64, i64, i1
+  kernel.return
+}
+
+// ====
+
+kernel.def @rounded_dynamic_launch_config_facts_seed_body(%element_count: index) {
+  %c1 = index.constant 1 : index
+  %c63 = index.constant 63 : index
+  %c64 = index.constant 64 : index
+  %bounded_count = index.assume %element_count [range(%element_count, 1, 4096)] : index
+  %rounded = index.add %bounded_count, %c63 : index
+  %workgroups = index.div %rounded, %c64 : index
+  kernel.launch.config workgroups(%workgroups, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %tile = index.constant 64 : index
+  %bid = kernel.workgroup.id<x> : index
+  %tid = kernel.workitem.id<x> : index
+  %dispatch_id = kernel.workitem.dispatch.id<x> : index
+  %manual_linear = index.madd %bid, %tile, %tid : index
+  %bid_hi = test.fact_range_hi %bid : index -> i64
+  %dispatch_hi = test.fact_range_hi %dispatch_id : index -> i64
+  %manual_hi = test.fact_range_hi %manual_linear : index -> i64
+  %manual_is_varying = test.fact_lane_varying %manual_linear : index -> i1
+  test.use %bid_hi, %dispatch_hi, %manual_hi, %manual_is_varying : i64, i64, i64, i1
+  kernel.return
+}
+
+// ----
+kernel.def @rounded_dynamic_launch_config_facts_seed_body(%element_count: index) {
+  %c1 = index.constant 1 : index
+  %c63 = index.constant 63 : index
+  %c64 = index.constant 64 : index
+  %bounded_count = index.assume %element_count [range(%element_count, 1, 4096)] : index
+  %rounded = index.add %bounded_count, %c63 : index
+  %16 = index.constant 6 : index
+  %workgroups = index.shrui %rounded, %16 : index
+  kernel.launch.config workgroups(%workgroups, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %bid_hi = scalar.constant 63 : i64
+  %dispatch_hi = scalar.constant 4095 : i64
+  %manual_hi = scalar.constant 4095 : i64
+  %manual_is_varying = scalar.constant true : i1
+  test.use %bid_hi, %dispatch_hi, %manual_hi, %manual_is_varying : i64, i64, i64, i1
+  kernel.return
+}
+
+// ====
+
+config.decl @runtime.element_count : %value: index where [range(%value, 1, 4096)]
+
+kernel.def @config_decl_rounded_launch_config_facts_seed_body() {
+  %c1 = index.constant 1 : index
+  %c63 = index.constant 63 : index
+  %c64 = index.constant 64 : index
+  %element_count = config.get @runtime.element_count : index
+  %rounded = index.add %element_count, %c63 : index
+  %workgroups = index.div %rounded, %c64 : index
+  kernel.launch.config workgroups(%workgroups, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %tile = index.constant 64 : index
+  %bid = kernel.workgroup.id<x> : index
+  %tid = kernel.workitem.id<x> : index
+  %dispatch_id = kernel.workitem.dispatch.id<x> : index
+  %manual_linear = index.madd %bid, %tile, %tid : index
+  %bid_hi = test.fact_range_hi %bid : index -> i64
+  %dispatch_hi = test.fact_range_hi %dispatch_id : index -> i64
+  %manual_hi = test.fact_range_hi %manual_linear : index -> i64
+  test.use %bid_hi, %dispatch_hi, %manual_hi : i64, i64, i64
+  kernel.return
+}
+
+// ----
+config.decl @runtime.element_count : %value: index where [range(%value, 1, 4096)]
+
+kernel.def @config_decl_rounded_launch_config_facts_seed_body() {
+  %c1 = index.constant 1 : index
+  %c63 = index.constant 63 : index
+  %c64 = index.constant 64 : index
+  %element_count = config.get @runtime.element_count : index
+  %rounded = index.add %element_count, %c63 : index
+  %15 = index.constant 6 : index
+  %workgroups = index.shrui %rounded, %15 : index
+  kernel.launch.config workgroups(%workgroups, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %bid_hi = scalar.constant 63 : i64
+  %dispatch_hi = scalar.constant 4095 : i64
+  %manual_hi = scalar.constant 4095 : i64
+  test.use %bid_hi, %dispatch_hi, %manual_hi : i64, i64, i64
+  kernel.return
+}
+
+// ====
+
+kernel.def @small_workgroup_lane_facts() {
+  %c1 = index.constant 1 : index
+  %c8 = index.constant 8 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c8, %c1, %c1) : index
+} launch() {
+  %lane = kernel.subgroup.lane.id : index
+  %lane_lo = test.fact_range_lo %lane : index -> i64
+  %lane_hi = test.fact_range_hi %lane : index -> i64
+  test.use %lane_lo, %lane_hi : i64, i64
+  kernel.return
+}
+
+// ----
+kernel.def @small_workgroup_lane_facts() {
+  %c1 = index.constant 1 : index
+  %c8 = index.constant 8 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c8, %c1, %c1) : index
+} launch() {
+  %lane_lo = scalar.constant 0 : i64
+  %lane_hi = scalar.constant 7 : i64
+  test.use %lane_lo, %lane_hi : i64, i64
+  kernel.return
+}
+
+// ====
+
+kernel.def @subgroup_mask_distribution_facts() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%arg: i32) {
+  %lane = kernel.subgroup.lane.id : index
+  %lane_i32 = index.cast %lane : index to i32
+  %predicate = scalar.cmpi eq, %lane_i32, %arg : i32
+  %any = kernel.subgroup.vote.any %predicate : i1
+  %all = kernel.subgroup.vote.all %predicate : i1
+  %ballot = kernel.subgroup.vote.ballot %predicate : i1 -> i64
+  %active = kernel.subgroup.active.mask : i64
+  %match_any = kernel.subgroup.match.any %lane_i32 : i32 -> i64
+  %match_all_mask, %match_all = kernel.subgroup.match.all %lane_i32 : i32 -> i64, i1
+  %predicate_is_lane = test.fact_lane_predicate %predicate : i1 -> i1
+  %any_is_uniform = test.fact_uniform %any : i1 -> i1
+  %any_is_lane = test.fact_lane_predicate %any : i1 -> i1
+  %all_is_uniform = test.fact_uniform %all : i1 -> i1
+  %ballot_is_mask = test.fact_subgroup_lane_mask %ballot : i64 -> i1
+  %ballot_is_uniform = test.fact_uniform %ballot : i64 -> i1
+  %ballot_is_varying = test.fact_lane_varying %ballot : i64 -> i1
+  %active_is_mask = test.fact_subgroup_lane_mask %active : i64 -> i1
+  %active_is_uniform = test.fact_uniform %active : i64 -> i1
+  %match_any_is_mask = test.fact_subgroup_lane_mask %match_any : i64 -> i1
+  %match_any_is_varying = test.fact_lane_varying %match_any : i64 -> i1
+  %match_all_mask_is_mask = test.fact_subgroup_lane_mask %match_all_mask : i64 -> i1
+  %match_all_mask_is_uniform = test.fact_uniform %match_all_mask : i64 -> i1
+  %match_all_is_uniform = test.fact_uniform %match_all : i1 -> i1
+  test.use %predicate_is_lane, %any_is_uniform, %any_is_lane, %all_is_uniform, %ballot_is_mask, %ballot_is_uniform, %ballot_is_varying, %active_is_mask, %active_is_uniform, %match_any_is_mask, %match_any_is_varying, %match_all_mask_is_mask, %match_all_mask_is_uniform, %match_all_is_uniform : i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1
+  kernel.return
+}
+
+// ----
+kernel.def @subgroup_mask_distribution_facts() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%arg: i32) {
+  %lane = kernel.subgroup.lane.id : index
+  %lane_i32 = index.cast %lane : index to i32
+  %predicate = scalar.cmpi eq, %lane_i32, %arg : i32
+  %any = kernel.subgroup.vote.any %predicate : i1
+  %all = kernel.subgroup.vote.all %predicate : i1
+  %ballot = kernel.subgroup.vote.ballot %predicate : i1 -> i64
+  %active = kernel.subgroup.active.mask : i64
+  %match_any = kernel.subgroup.match.any %lane_i32 : i32 -> i64
+  %match_all_mask, %match_all = kernel.subgroup.match.all %lane_i32 : i32 -> i64, i1
+  %predicate_is_lane = scalar.constant true : i1
+  %any_is_uniform = scalar.constant true : i1
+  %any_is_lane = scalar.constant false : i1
+  %all_is_uniform = scalar.constant true : i1
+  %ballot_is_mask = scalar.constant true : i1
+  %ballot_is_uniform = scalar.constant true : i1
+  %ballot_is_varying = scalar.constant false : i1
+  %active_is_mask = scalar.constant true : i1
+  %active_is_uniform = scalar.constant true : i1
+  %match_any_is_mask = scalar.constant true : i1
+  %match_any_is_varying = scalar.constant true : i1
+  %match_all_mask_is_mask = scalar.constant true : i1
+  %match_all_mask_is_uniform = scalar.constant true : i1
+  %match_all_is_uniform = scalar.constant true : i1
+  test.use %predicate_is_lane, %any_is_uniform, %any_is_lane, %all_is_uniform, %ballot_is_mask, %ballot_is_uniform, %ballot_is_varying, %active_is_mask, %active_is_uniform, %match_any_is_mask, %match_any_is_varying, %match_all_mask_is_mask, %match_all_mask_is_uniform, %match_all_is_uniform : i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1
+  kernel.return
+}
+
+// ====
+
+kernel.def @lane_predicate_bitwise_facts() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%arg: i32, %limit: index) {
+  %lane = kernel.subgroup.lane.id : index
+  %lane_i32 = index.cast %lane : index to i32
+  %scalar_predicate = scalar.cmpi eq, %lane_i32, %arg : i32
+  %index_predicate = index.cmp slt, %lane, %limit : index
+  %both = scalar.andi %scalar_predicate, %index_predicate : i1
+  %either = scalar.ori %scalar_predicate, %index_predicate : i1
+  %one = scalar.xori %scalar_predicate, %index_predicate : i1
+  %scalar_is_predicate = test.fact_lane_predicate %scalar_predicate : i1 -> i1
+  %index_is_predicate = test.fact_lane_predicate %index_predicate : i1 -> i1
+  %both_is_predicate = test.fact_lane_predicate %both : i1 -> i1
+  %either_is_predicate = test.fact_lane_predicate %either : i1 -> i1
+  %one_is_predicate = test.fact_lane_predicate %one : i1 -> i1
+  %both_is_uniform = test.fact_uniform %both : i1 -> i1
+  %either_hi = test.fact_range_hi %either : i1 -> i64
+  test.use %scalar_is_predicate, %index_is_predicate, %both_is_predicate, %either_is_predicate, %one_is_predicate, %both_is_uniform, %either_hi : i1, i1, i1, i1, i1, i1, i64
+  kernel.return
+}
+
+// ----
+kernel.def @lane_predicate_bitwise_facts() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%arg: i32, %limit: index) {
+  %scalar_is_predicate = scalar.constant true : i1
+  %index_is_predicate = scalar.constant true : i1
+  %both_is_predicate = scalar.constant true : i1
+  %either_is_predicate = scalar.constant true : i1
+  %one_is_predicate = scalar.constant true : i1
+  %both_is_uniform = scalar.constant false : i1
+  %either_hi = scalar.constant 1 : i64
+  test.use %scalar_is_predicate, %index_is_predicate, %both_is_predicate, %either_is_predicate, %one_is_predicate, %both_is_uniform, %either_hi : i1, i1, i1, i1, i1, i1, i64
+  kernel.return
+}
+
+// ====
+
+kernel.def @lane_predicate_cmpf_facts() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%lhs: f32, %rhs: f32) {
+  %lane = kernel.subgroup.lane.id : index
+  %zero = index.constant 0 : index
+  %condition = index.cmp eq, %lane, %zero : index
+  %varying = scf.select %condition, %lhs, %rhs : f32
+  %predicate = scalar.cmpf olt, %varying, %lhs : f32
+  %predicate_is_lane = test.fact_lane_predicate %predicate : i1 -> i1
+  %predicate_is_uniform = test.fact_uniform %predicate : i1 -> i1
+  test.use %predicate_is_lane, %predicate_is_uniform : i1, i1
+  kernel.return
+}
+
+// ----
+kernel.def @lane_predicate_cmpf_facts() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%lhs: f32, %rhs: f32) {
+  %predicate_is_lane = scalar.constant true : i1
+  %predicate_is_uniform = scalar.constant false : i1
+  test.use %predicate_is_lane, %predicate_is_uniform : i1, i1
+  kernel.return
+}
+
+// ====
+
+kernel.def @scalar_conversion_lane_distribution_facts() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %lane = kernel.subgroup.lane.id : index
+  %zero = index.constant 0 : index
+  %condition = index.cmp eq, %lane, %zero : index
+  %wide_a = scalar.constant 300 : i32
+  %wide_b = scalar.constant 4 : i32
+  %wide = scf.select %condition, %wide_a, %wide_b : i32
+  %narrow = scalar.trunci %wide : i32 to i8
+  %byte_a = scalar.constant -1 : i8
+  %byte_b = scalar.constant 1 : i8
+  %byte = scf.select %condition, %byte_a, %byte_b : i8
+  %extended = scalar.extui %byte : i8 to i32
+  %narrow_is_varying = test.fact_lane_varying %narrow : i8 -> i1
+  %narrow_lo = test.fact_range_lo %narrow : i8 -> i64
+  %narrow_hi = test.fact_range_hi %narrow : i8 -> i64
+  %extended_is_varying = test.fact_lane_varying %extended : i32 -> i1
+  %extended_lo = test.fact_range_lo %extended : i32 -> i64
+  %extended_hi = test.fact_range_hi %extended : i32 -> i64
+  test.use %narrow_is_varying, %narrow_lo, %narrow_hi, %extended_is_varying, %extended_lo, %extended_hi : i1, i64, i64, i1, i64, i64
+  kernel.return
+}
+
+// ----
+kernel.def @scalar_conversion_lane_distribution_facts() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %narrow_is_varying = scalar.constant true : i1
+  %narrow_lo = scalar.constant -128 : i64
+  %narrow_hi = scalar.constant 127 : i64
+  %extended_is_varying = scalar.constant true : i1
+  %extended_lo = scalar.constant 0 : i64
+  %extended_hi = scalar.constant 255 : i64
+  test.use %narrow_is_varying, %narrow_lo, %narrow_hi, %extended_is_varying, %extended_lo, %extended_hi : i1, i64, i64, i1, i64, i64
+  kernel.return
+}
+
+// ====
+
+kernel.def @default_hal_query_facts() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  %workgroup_size = kernel.workgroup.size<y> : index
+  %workgroup_count = kernel.workgroup.count<z> : index
+  %dispatch_id = kernel.workitem.dispatch.id<x> : index
+  %subgroup_size = kernel.subgroup.size : index
+  %workgroup_size_lo = test.fact_range_lo %workgroup_size : index -> i64
+  %workgroup_size_hi = test.fact_range_hi %workgroup_size : index -> i64
+  %workgroup_count_lo = test.fact_range_lo %workgroup_count : index -> i64
+  %workgroup_count_hi = test.fact_range_hi %workgroup_count : index -> i64
+  %dispatch_id_lo = test.fact_range_lo %dispatch_id : index -> i64
+  %dispatch_id_hi = test.fact_range_hi %dispatch_id : index -> i64
+  %subgroup_size_lo = test.fact_range_lo %subgroup_size : index -> i64
+  %subgroup_size_hi = test.fact_range_hi %subgroup_size : index -> i64
+  %workgroup_size_positive = test.fact_positive %workgroup_size : index -> i1
+  %workgroup_count_positive = test.fact_positive %workgroup_count : index -> i1
+  %subgroup_size_positive = test.fact_positive %subgroup_size : index -> i1
+  test.use %workgroup_size_lo, %workgroup_size_hi, %workgroup_count_lo, %workgroup_count_hi, %dispatch_id_lo, %dispatch_id_hi, %subgroup_size_lo, %subgroup_size_hi, %workgroup_size_positive, %workgroup_count_positive, %subgroup_size_positive : i64, i64, i64, i64, i64, i64, i64, i64, i1, i1, i1
+  kernel.return
+}
+
+// ----
+kernel.def @default_hal_query_facts() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  %workgroup_size_lo = scalar.constant 1 : i64
+  %workgroup_size_hi = scalar.constant 1 : i64
+  %workgroup_count_lo = scalar.constant 1 : i64
+  %workgroup_count_hi = scalar.constant 1 : i64
+  %dispatch_id_lo = scalar.constant 0 : i64
+  %dispatch_id_hi = scalar.constant 0 : i64
+  %subgroup_size_lo = scalar.constant 1 : i64
+  %subgroup_size_hi = scalar.constant 1 : i64
+  %workgroup_size_positive = scalar.constant true : i1
+  %workgroup_count_positive = scalar.constant true : i1
+  %subgroup_size_positive = scalar.constant true : i1
+  test.use %workgroup_size_lo, %workgroup_size_hi, %workgroup_count_lo, %workgroup_count_hi, %dispatch_id_lo, %dispatch_id_hi, %subgroup_size_lo, %subgroup_size_hi, %workgroup_size_positive, %workgroup_count_positive, %subgroup_size_positive : i64, i64, i64, i64, i64, i64, i64, i64, i1, i1, i1
+  kernel.return
+}

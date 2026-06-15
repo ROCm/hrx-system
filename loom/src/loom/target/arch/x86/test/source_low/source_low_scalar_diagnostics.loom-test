@@ -1,0 +1,61 @@
+// RUN: emit source-low output=low
+
+x86.target<avx2> @target
+
+func.def target(@target) @scalar_powf_rejected_by_math_policy(%base: f32, %exponent: f32) -> (f32) {
+  // ERROR@+1: LOWERING/036 {op_name="scalar.powf", phase_name="legalize-math", policy_name="x86-math", math_op="powf", lane_domain="scalar", element_type="f32", constraint_key="math.op.supported"}
+  %result = scalar.powf<afn> %base, %exponent : f32
+  func.return %result : f32
+}
+
+// ====
+
+x86.target<avx2> @target
+
+func.def target(@target) @scalar_tanhf_rejected_by_math_policy(%input: f32) -> (f32) {
+  // ERROR@+1: LOWERING/036 {op_name="scalar.tanhf", phase_name="legalize-math", policy_name="x86-math", math_op="tanhf", lane_domain="scalar", element_type="f32", constraint_key="math.op.supported"}
+  %result = scalar.tanhf<afn> %input : f32
+  func.return %result : f32
+}
+
+// ====
+
+x86.target<scalar> @target
+
+func.def target(@target) @scalar_i64_dynamic_shift_rejected(%value: i64, %amount: i64) -> (i64) {
+  // ERROR@+1: TARGET/003
+  %result = scalar.shli %value, %amount : i64
+  func.return %result : i64
+}
+
+// ====
+
+x86.target<scalar> @target
+
+func.def target(@target) @scalar_i64_wide_shift_rejected(%value: i64) -> (i64) {
+  %amount = scalar.constant 64 : i64
+  // ERROR@+1: TARGET/005
+  %result = scalar.shrui %value, %amount : i64
+  func.return %result : i64
+}
+
+// ====
+
+x86.target<scalar> @target
+
+func.def target(@target) @index_dynamic_shift_rejected(%value: index, %amount: index) -> (index) {
+  // ERROR@+1: TARGET/003
+  %result = index.shli %value, %amount : index
+  func.return %result : index
+}
+
+// ====
+
+x86.target<scalar> @target
+
+func.def target(@target) @index_scale_16_shift_rejected(%value: index) -> (index) {
+  %amount = index.constant 4 : index
+  // ERROR@+1: TARGET/003
+  %result = index.shli %value, %amount : index
+  func.return %result : index
+}

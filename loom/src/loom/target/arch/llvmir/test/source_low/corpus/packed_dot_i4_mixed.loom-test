@@ -1,0 +1,86 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/packed_dot_i4_mixed.loom-test
+// RUN: emit source-low output=low
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @dot8i4_u4s4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %dot = vector.dot8i4<u4s4> %lhs, %rhs, %acc : vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @dot8i4_u4s4(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>, %acc: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {
+  %84 = const.i32 15
+  %85 = const.i32 4
+  %86 = const.i32 8
+  %87 = const.i32 12
+  %88 = const.i32 16
+  %89 = const.i32 20
+  %90 = const.i32 24
+  %91 = const.i32 28
+  %92 = and.i32 %lhs, %84
+  %93 = and.i32 %rhs, %84
+  %94 = shl.i32 %93, %91
+  %95 = ashr.i32 %94, %91
+  %96 = mul.i32 %92, %95
+  %97 = add.i32 %acc, %96
+  %98 = lshr.i32 %lhs, %85
+  %99 = and.i32 %98, %84
+  %100 = lshr.i32 %rhs, %85
+  %101 = and.i32 %100, %84
+  %102 = shl.i32 %101, %91
+  %103 = ashr.i32 %102, %91
+  %104 = mul.i32 %99, %103
+  %105 = add.i32 %97, %104
+  %106 = lshr.i32 %lhs, %86
+  %107 = and.i32 %106, %84
+  %108 = lshr.i32 %rhs, %86
+  %109 = and.i32 %108, %84
+  %110 = shl.i32 %109, %91
+  %111 = ashr.i32 %110, %91
+  %112 = mul.i32 %107, %111
+  %113 = add.i32 %105, %112
+  %114 = lshr.i32 %lhs, %87
+  %115 = and.i32 %114, %84
+  %116 = lshr.i32 %rhs, %87
+  %117 = and.i32 %116, %84
+  %118 = shl.i32 %117, %91
+  %119 = ashr.i32 %118, %91
+  %120 = mul.i32 %115, %119
+  %121 = add.i32 %113, %120
+  %122 = lshr.i32 %lhs, %88
+  %123 = and.i32 %122, %84
+  %124 = lshr.i32 %rhs, %88
+  %125 = and.i32 %124, %84
+  %126 = shl.i32 %125, %91
+  %127 = ashr.i32 %126, %91
+  %128 = mul.i32 %123, %127
+  %129 = add.i32 %121, %128
+  %130 = lshr.i32 %lhs, %89
+  %131 = and.i32 %130, %84
+  %132 = lshr.i32 %rhs, %89
+  %133 = and.i32 %132, %84
+  %134 = shl.i32 %133, %91
+  %135 = ashr.i32 %134, %91
+  %136 = mul.i32 %131, %135
+  %137 = add.i32 %129, %136
+  %138 = lshr.i32 %lhs, %90
+  %139 = and.i32 %138, %84
+  %140 = lshr.i32 %rhs, %90
+  %141 = and.i32 %140, %84
+  %142 = shl.i32 %141, %91
+  %143 = ashr.i32 %142, %91
+  %144 = mul.i32 %139, %143
+  %145 = add.i32 %137, %144
+  %146 = lshr.i32 %lhs, %91
+  %147 = and.i32 %146, %84
+  %148 = lshr.i32 %rhs, %91
+  %149 = and.i32 %148, %84
+  %150 = shl.i32 %149, %91
+  %151 = ashr.i32 %150, %91
+  %152 = mul.i32 %147, %151
+  %dot = add.i32 %145, %152
+  return %dot
+}
