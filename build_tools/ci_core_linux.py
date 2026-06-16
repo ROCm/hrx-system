@@ -755,7 +755,7 @@ def build_core(args: argparse.Namespace) -> None:
         f"CMAKE_BUILD_TYPE={args.build_type}",
         f"IREE_BUILD_TESTS={'ON' if ctest_enabled else 'OFF'}",
         "IREE_BUILD_BENCHMARKS=ON",
-        "LOOM_BUILD=OFF",
+        "LOOM_BUILD=ON",
         f"LIBHRX_BUILD_CTS={'ON' if ctest_enabled else 'OFF'}",
         f"HRX_INSTALL_TESTS={'ON' if ctest_enabled else 'OFF'}",
         f"LIBHRX_BUILD_PASSTHROUGH={'ON' if args.passthrough else 'OFF'}",
@@ -823,6 +823,7 @@ def test_core(args: argparse.Namespace) -> None:
 
     require_path(installed_tests_dir / "CTestTestfile.cmake", "installed CTest file")
     require_path(install_root / "lib" / "libhrx.so", "installed libhrx.so")
+    require_path(install_root / "lib" / "libloomc.so", "installed libloomc.so")
     require_path(install_root / "bin" / "hrx-info", "installed hrx-info")
 
     if rocm_root.exists():
@@ -885,30 +886,49 @@ def test_core(args: argparse.Namespace) -> None:
             f"-DCMAKE_C_FLAGS={sanitizer_link_flag}",
             f"-DCMAKE_CXX_FLAGS={sanitizer_link_flag}",
         ]
+    hrx_smoke_build_dir = smoke_build_dir / "hrx"
+    loomc_smoke_build_dir = smoke_build_dir / "loomc"
+    smoke_cmake_options = [
+        "-GNinja",
+        f"-DCMAKE_PREFIX_PATH={install_root};{rocm_root}",
+        f"-DCMAKE_C_COMPILER={rocm_tool(rocm_root, 'clang')}",
+        f"-DCMAKE_CXX_COMPILER={rocm_tool(rocm_root, 'clang++')}",
+        f"-DCMAKE_AR={rocm_tool(rocm_root, 'llvm-ar')}",
+        f"-DCMAKE_RANLIB={rocm_tool(rocm_root, 'llvm-ranlib')}",
+        *smoke_sanitizer_options,
+        f"-DCMAKE_EXE_LINKER_FLAGS={smoke_link_flags}",
+        f"-DCMAKE_SHARED_LINKER_FLAGS={smoke_link_flags}",
+        f"-DCMAKE_MODULE_LINKER_FLAGS={smoke_link_flags}",
+    ]
     run(
         [
             "cmake",
             "-S",
             REPO_ROOT / "libhrx" / "cts" / "package_smoke",
             "-B",
-            smoke_build_dir,
-            "-GNinja",
-            f"-DCMAKE_PREFIX_PATH={install_root};{rocm_root}",
-            f"-DCMAKE_C_COMPILER={rocm_tool(rocm_root, 'clang')}",
-            f"-DCMAKE_CXX_COMPILER={rocm_tool(rocm_root, 'clang++')}",
-            f"-DCMAKE_AR={rocm_tool(rocm_root, 'llvm-ar')}",
-            f"-DCMAKE_RANLIB={rocm_tool(rocm_root, 'llvm-ranlib')}",
-            *smoke_sanitizer_options,
-            f"-DCMAKE_EXE_LINKER_FLAGS={smoke_link_flags}",
-            f"-DCMAKE_SHARED_LINKER_FLAGS={smoke_link_flags}",
-            f"-DCMAKE_MODULE_LINKER_FLAGS={smoke_link_flags}",
+            hrx_smoke_build_dir,
+            *smoke_cmake_options,
         ],
         cwd=REPO_ROOT,
         env=env,
     )
-    run(["cmake", "--build", smoke_build_dir], cwd=REPO_ROOT, env=env)
-    run([smoke_build_dir / "hrx_package_smoke"], cwd=REPO_ROOT, env=env)
-    run([smoke_build_dir / "hrx_package_smoke_cxx"], cwd=REPO_ROOT, env=env)
+    run(["cmake", "--build", hrx_smoke_build_dir], cwd=REPO_ROOT, env=env)
+    run([hrx_smoke_build_dir / "hrx_package_smoke"], cwd=REPO_ROOT, env=env)
+    run([hrx_smoke_build_dir / "hrx_package_smoke_cxx"], cwd=REPO_ROOT, env=env)
+    run(
+        [
+            "cmake",
+            "-S",
+            REPO_ROOT / "loom" / "binding" / "c" / "package_smoke",
+            "-B",
+            loomc_smoke_build_dir,
+            *smoke_cmake_options,
+        ],
+        cwd=REPO_ROOT,
+        env=env,
+    )
+    run(["cmake", "--build", loomc_smoke_build_dir], cwd=REPO_ROOT, env=env)
+    run([loomc_smoke_build_dir / "loomc_package_smoke"], cwd=REPO_ROOT, env=env)
 
 
 ROCM_BUILDENV_EXCLUDE_PATHS = {
@@ -919,18 +939,24 @@ ROCM_BUILDENV_EXCLUDE_PATHS = {
     "hrx-tests-linux-x86_64-env.sh",
     "hrx-rocm-buildenv-linux-x86_64-env.sh",
     "include/hrx",
+    "include/loomc",
     "include/passthrough",
     "lib/cmake/hrx",
+    "lib/cmake/loomc",
     "lib/libhrx.so",
+    "lib/libloomc.so",
     "share/hrx-cts",
     "share/hrx-system",
 }
 
 ROCM_BUILDENV_EXCLUDE_PREFIXES = (
     "include/hrx/",
+    "include/loomc/",
     "include/passthrough/",
     "lib/cmake/hrx/",
+    "lib/cmake/loomc/",
     "lib/libhrx.so.",
+    "lib/libloomc.so.",
     "share/hrx-cts/",
     "share/hrx-system/",
 )
@@ -1182,6 +1208,10 @@ def package_core(args: argparse.Namespace) -> None:
         args.public_install_dir.resolve() / "lib" / "libhrx.so", "public libhrx.so"
     )
     require_path(
+        args.public_install_dir.resolve() / "lib" / "libloomc.so",
+        "public libloomc.so",
+    )
+    require_path(
         args.public_install_dir.resolve() / "bin" / "hrx-info", "public hrx-info"
     )
     require_path(
@@ -1191,6 +1221,14 @@ def package_core(args: argparse.Namespace) -> None:
         / "hrx"
         / "hrx-config.cmake",
         "public hrx CMake package",
+    )
+    require_path(
+        args.public_install_dir.resolve()
+        / "lib"
+        / "cmake"
+        / "loomc"
+        / "loomc-config.cmake",
+        "public loomc CMake package",
     )
     require_path(
         args.tests_install_dir.resolve()

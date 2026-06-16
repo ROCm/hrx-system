@@ -1,0 +1,6 @@
+{
+  global:
+    loomc_*;
+  local:
+    *;
+};

@@ -24,16 +24,14 @@ extern "C" {
 #endif
 
 /// Exports a public Loom C API symbol from a shared library build.
-#if defined(_WIN32)
-#if defined(LOOMC_BUILDING_SHARED_LIBRARY)
+#if defined(_WIN32) && defined(LOOMC_BUILDING_SHARED_LIBRARY)
 #define LOOMC_API_EXPORT __declspec(dllexport)
-#elif defined(LOOMC_USING_SHARED_LIBRARY)
+#elif defined(_WIN32) && defined(LOOMC_USING_SHARED_LIBRARY)
 #define LOOMC_API_EXPORT __declspec(dllimport)
+#elif defined(LOOMC_BUILDING_SHARED_LIBRARY)
+#define LOOMC_API_EXPORT __attribute__((visibility("default")))
 #else
 #define LOOMC_API_EXPORT
-#endif
-#else
-#define LOOMC_API_EXPORT __attribute__((visibility("default")))
 #endif
 
 /// Marks a public callback function pointer type.
