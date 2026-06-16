@@ -57,6 +57,7 @@ Running `target_map.py` emits generated fragments consumed by multiple layers:
 | --- | --- |
 | `build_tools/amdgpu/target_map.bzl` | Bazel selector helpers. |
 | `build_tools/amdgpu/target_map.cmake` | CMake selector helpers. |
+| `build_tools/amdgpu/elf_machine_map.inl` | C/C++ ELF machine decode tables for runtime, libhrx, and Loom. |
 | `build_tools/amdgpu/target_map.h` | C/C++ tests that need exact-to-code-object lookup. |
 | `runtime/src/iree/hal/drivers/amdgpu/util/target_id_map.inl` | Runtime AMDGPU device-library lookup. |
 
@@ -80,7 +81,10 @@ buildifier build_tools/amdgpu/BUILD.bazel build_tools/amdgpu/*.bzl
 ```
 
 The runtime `target_id_map.inl` is generated from the same map so the loader and
-build rules agree about exact-to-code-object compatibility.
+build rules agree about exact-to-code-object compatibility. The
+`elf_machine_map.inl` fragment is generated from a separate ELF decode table:
+it may recognize legacy AMDGPU machine values that are not exposed as build
+selectors.
 
 ## Bazel Integration
 

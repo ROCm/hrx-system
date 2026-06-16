@@ -1186,6 +1186,7 @@ def run_bazel_to_cmake(fix: bool, verbose: bool) -> bool:
 
 def run_amdgpu_target_map(paths: list[str], fix: bool, verbose: bool) -> bool:
     relevant_prefixes = (
+        "build_tools/amdgpu/elf_machine_map.inl",
         "build_tools/amdgpu/target_map.",
         "runtime/src/iree/hal/drivers/amdgpu/util/target_id_map.inl",
     )
@@ -1198,6 +1199,7 @@ def run_amdgpu_target_map(paths: list[str], fix: bool, verbose: bool) -> bool:
     if fix and ok:
         ok = stage_files(
             [
+                "build_tools/amdgpu/elf_machine_map.inl",
                 "build_tools/amdgpu/target_map.bzl",
                 "build_tools/amdgpu/target_map.cmake",
                 "build_tools/amdgpu/target_map.h",

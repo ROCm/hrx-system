@@ -237,6 +237,7 @@ iree_runtime_cc_library(
     name = "code_object_target",
     srcs = ["code_object_target.c"],
     hdrs = ["code_object_target.h"],
+    textual_hdrs = ["//build_tools/amdgpu:elf_machine_map.inl"],
     deps = [
         ":target_id",
         "//runtime/src/iree/base",

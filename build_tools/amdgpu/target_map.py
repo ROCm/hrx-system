@@ -97,6 +97,79 @@ TARGET_FEATURE_SUPPORT = {
     "gfx1013": (FEATURE_XNACK,),
 }
 
+ELF_MACHINE_PROCESSORS = (
+    (0x020, "gfx600"),
+    (0x021, "gfx601"),
+    (0x022, "gfx700"),
+    (0x023, "gfx701"),
+    (0x024, "gfx702"),
+    (0x025, "gfx703"),
+    (0x026, "gfx704"),
+    (0x028, "gfx801"),
+    (0x029, "gfx802"),
+    (0x02A, "gfx803"),
+    (0x02B, "gfx810"),
+    (0x02C, "gfx900"),
+    (0x02D, "gfx902"),
+    (0x02E, "gfx904"),
+    (0x02F, "gfx906"),
+    (0x030, "gfx908"),
+    (0x031, "gfx909"),
+    (0x032, "gfx90c"),
+    (0x033, "gfx1010"),
+    (0x034, "gfx1011"),
+    (0x035, "gfx1012"),
+    (0x036, "gfx1030"),
+    (0x037, "gfx1031"),
+    (0x038, "gfx1032"),
+    (0x039, "gfx1033"),
+    (0x03A, "gfx602"),
+    (0x03B, "gfx705"),
+    (0x03C, "gfx805"),
+    (0x03D, "gfx1035"),
+    (0x03E, "gfx1034"),
+    (0x03F, "gfx90a"),
+    (0x040, "gfx940"),
+    (0x041, "gfx1100"),
+    (0x042, "gfx1013"),
+    (0x043, "gfx1150"),
+    (0x044, "gfx1103"),
+    (0x045, "gfx1036"),
+    (0x046, "gfx1101"),
+    (0x047, "gfx1102"),
+    (0x048, "gfx1200"),
+    (0x049, "gfx1250"),
+    (0x04A, "gfx1151"),
+    (0x04B, "gfx941"),
+    (0x04C, "gfx942"),
+    (0x04E, "gfx1201"),
+    (0x04F, "gfx950"),
+    (0x050, "gfx1310"),
+    (0x051, "gfx9-generic"),
+    (0x052, "gfx10-1-generic"),
+    (0x053, "gfx10-3-generic"),
+    (0x054, "gfx11-generic"),
+    (0x055, "gfx1152"),
+    (0x058, "gfx1153"),
+    (0x059, "gfx12-generic"),
+    (0x05A, "gfx1251"),
+    (0x05B, "gfx12-5-generic"),
+    (0x05C, "gfx1172"),
+    (0x05D, "gfx1170"),
+    (0x05E, "gfx1171"),
+    (0x05F, "gfx9-4-generic"),
+)
+
+# Feature support for ELF machine processors that are not exact build targets.
+# This includes legacy decode-only processors and generic code-object processors.
+ELF_MACHINE_FEATURE_SUPPORT = {
+    "gfx801": (FEATURE_XNACK,),
+    "gfx810": (FEATURE_XNACK,),
+    "gfx9-generic": (FEATURE_SRAMECC, FEATURE_XNACK),
+    "gfx10-1-generic": (FEATURE_XNACK,),
+    "gfx9-4-generic": (FEATURE_SRAMECC, FEATURE_XNACK),
+}
+
 ALL_EXACT_TARGETS = object()
 
 TARGET_FAMILIES = (
@@ -217,6 +290,16 @@ def target_family_names():
     return [family for family, _ in TARGET_FAMILIES]
 
 
+def elf_machine_targets():
+    values = []
+    for machine, processor in ELF_MACHINE_PROCESSORS:
+        features = TARGET_FEATURE_SUPPORT.get(
+            processor, ELF_MACHINE_FEATURE_SUPPORT.get(processor, ())
+        )
+        values.append((machine, processor, features))
+    return values
+
+
 def validate_target_map():
     exact = exact_targets()
     if len(set(exact)) != len(exact):
@@ -233,6 +316,61 @@ def validate_target_map():
         raise ValueError(
             "target feature support references unknown exact targets: {}".format(
                 ", ".join(unknown_feature_targets)
+            )
+        )
+
+    elf_machine_feature_targets = set(ELF_MACHINE_FEATURE_SUPPORT)
+    elf_machine_processors = [processor for _, processor in ELF_MACHINE_PROCESSORS]
+    elf_machine_processor_set = set(elf_machine_processors)
+    unknown_elf_machine_feature_targets = sorted(
+        elf_machine_feature_targets - elf_machine_processor_set
+    )
+    if unknown_elf_machine_feature_targets:
+        raise ValueError(
+            "ELF machine feature support references unknown processors: {}".format(
+                ", ".join(unknown_elf_machine_feature_targets)
+            )
+        )
+    duplicate_elf_machine_processors = sorted(
+        processor
+        for processor in elf_machine_processor_set
+        if elf_machine_processors.count(processor) > 1
+    )
+    if duplicate_elf_machine_processors:
+        raise ValueError(
+            "duplicate AMDGPU ELF machine processors: {}".format(
+                ", ".join(duplicate_elf_machine_processors)
+            )
+        )
+    elf_machine_values = [machine for machine, _ in ELF_MACHINE_PROCESSORS]
+    duplicate_elf_machine_values = sorted(
+        machine
+        for machine in set(elf_machine_values)
+        if elf_machine_values.count(machine) > 1
+    )
+    if duplicate_elf_machine_values:
+        raise ValueError(
+            "duplicate AMDGPU ELF machine values: {}".format(
+                ", ".join(
+                    "0x{:03x}".format(machine)
+                    for machine in duplicate_elf_machine_values
+                )
+            )
+        )
+    missing_exact_machine_processors = sorted(exact_set - elf_machine_processor_set)
+    if missing_exact_machine_processors:
+        raise ValueError(
+            "exact targets missing ELF machine processors: {}".format(
+                ", ".join(missing_exact_machine_processors)
+            )
+        )
+    missing_code_object_machine_processors = sorted(
+        set(code_object_targets()) - elf_machine_processor_set
+    )
+    if missing_code_object_machine_processors:
+        raise ValueError(
+            "code-object targets missing ELF machine processors: {}".format(
+                ", ".join(missing_code_object_machine_processors)
             )
         )
 
@@ -393,6 +531,35 @@ def render_target_id_inl():
     return "\n".join(lines)
 
 
+def render_elf_machine_map_inl():
+    output_path = "build_tools/amdgpu/elf_machine_map.inl"
+    lines = [
+        generated_header("//", output_path),
+        "//",
+        "// Define IREE_AMDGPU_ELF_MACHINE_TARGET(machine, processor, "
+        "sramecc_supported, xnack_supported)",
+        "// before including this file.",
+        "",
+        "// clang-format off",
+        "#if defined(IREE_AMDGPU_ELF_MACHINE_TARGET)",
+    ]
+    for machine, processor, features in elf_machine_targets():
+        sramecc = "true" if FEATURE_SRAMECC in features else "false"
+        xnack = "true" if FEATURE_XNACK in features else "false"
+        lines.append(
+            'IREE_AMDGPU_ELF_MACHINE_TARGET(0x{:03x}u, "{}", {}, {})'.format(
+                machine, processor, sramecc, xnack
+            )
+        )
+    lines.extend(
+        [
+            "#endif  // IREE_AMDGPU_ELF_MACHINE_TARGET",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def render_header():
     output_path = "build_tools/amdgpu/target_map.h"
     lines = [
@@ -449,6 +616,7 @@ def generated_outputs(repo_root):
     return {
         build_tools_output_dir / "target_map.bzl": render_bzl(),
         build_tools_output_dir / "target_map.cmake": render_cmake(),
+        build_tools_output_dir / "elf_machine_map.inl": render_elf_machine_map_inl(),
         build_tools_output_dir / "target_map.h": render_header(),
         util_output_dir / "target_id_map.inl": render_target_id_inl(),
     }

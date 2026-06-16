@@ -310,6 +310,8 @@ iree_cc_library(
     code_object_target
   HDRS
     "code_object_target.h"
+  TEXTUAL_HDRS
+    "${PROJECT_SOURCE_DIR}/build_tools/amdgpu/elf_machine_map.inl"
   SRCS
     "code_object_target.c"
   DEPS
