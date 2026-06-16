@@ -211,14 +211,15 @@ static iree_status_t iree_hal_amdgpu_asan_state_select_shadow_backing(
       }
       return iree_ok_status();
     case IREE_HAL_AMDGPU_ASAN_SHADOW_BACKING_HOST_LOCAL:
-      out_selection->memory_pool = physical_device->host_memory_pools.fine_pool;
+      out_selection->memory_pool =
+          physical_device->coarse_block_pools.large.memory_pool;
       out_selection->memory_type = IREE_HAL_AMDGPU_VMEM_MEMORY_TYPE_PINNED_HOST;
       out_selection->name = "host-local";
       if (IREE_UNLIKELY(!out_selection->memory_pool.handle)) {
         return iree_make_status(
             IREE_STATUS_FAILED_PRECONDITION,
-            "AMDGPU ASAN host-local shadow backing requires a fine-grained "
-            "host memory pool");
+            "AMDGPU ASAN host-local shadow backing requires a "
+            "coarse-grained device-local memory pool");
       }
       return iree_ok_status();
     default:

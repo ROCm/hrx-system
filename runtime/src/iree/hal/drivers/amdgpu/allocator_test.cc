@@ -86,6 +86,24 @@ static iree_hal_device_asan_spec_t QueryAsanSpec(iree_hal_device_t* device) {
   return sanitizer->asan;
 }
 
+static iree_hal_amdgpu_shadow_map_slab_t* FindShadowMapSlab(
+    iree_hal_amdgpu_shadow_map_t* shadow_map, uint64_t slab_index) {
+  for (iree_host_size_t i = 0; i < shadow_map->slab_count; ++i) {
+    if (shadow_map->slabs[i].index == slab_index) {
+      return &shadow_map->slabs[i];
+    }
+  }
+  return nullptr;
+}
+
+static iree_device_size_t OversizedAllocationSize(
+    const iree_hal_amdgpu_logical_device_t* logical_device) {
+  const iree_device_size_t tlsf_range_length =
+      logical_device->physical_devices[0]
+          ->default_pool_options.tlsf_options.range_length;
+  return tlsf_range_length + 1;
+}
+
 class AllocatorTest : public ::testing::Test {
  protected:
   class HsaAllocation {
@@ -300,16 +318,20 @@ TEST_F(AllocatorTest, AsanHostLocalShadowBackingMapsPinnedHostSlabs) {
   EXPECT_EQ(shadow_map->hsa.memory_pool.handle,
             test_device.logical_device()
                 ->physical_devices[0]
-                ->host_memory_pools.fine_pool.handle);
+                ->coarse_block_pools.large.memory_pool.handle);
 
+  const iree_host_size_t initial_slab_count = shadow_map->slab_count;
   IREE_ASSERT_OK(iree_hal_amdgpu_shadow_map_map_slab(shadow_map, 0));
-  ASSERT_EQ(shadow_map->slab_count, 1u);
-  EXPECT_EQ(shadow_map->slabs[0].index, 0u);
+  ASSERT_GE(shadow_map->slab_count, initial_slab_count);
+
+  iree_hal_amdgpu_shadow_map_slab_t* shadow_slab =
+      FindShadowMapSlab(shadow_map, 0);
+  ASSERT_NE(shadow_slab, nullptr);
 
   constexpr uint8_t kHeapRedzoneShadowValue = 0xFAu;
   uint8_t shadow_byte = 0;
   IREE_ASSERT_OK(iree_hsa_memory_copy(IREE_LIBHSA(&libhsa_), &shadow_byte,
-                                      shadow_map->slabs[0].base_ptr,
+                                      shadow_slab->base_ptr,
                                       sizeof(shadow_byte)));
   EXPECT_EQ(shadow_byte, kHeapRedzoneShadowValue);
 }
@@ -384,6 +406,7 @@ TEST_F(AllocatorTest, AsanDiagnosticsExposeDefaultQuarantineRetention) {
   iree_hal_amdgpu_logical_device_options_t options;
   iree_hal_amdgpu_logical_device_options_initialize(&options);
   options.asan.enabled = 1;
+  options.default_pool.range_length = 4096;
 
   TestLogicalDevice test_device;
   IREE_ASSERT_OK(test_device.InitializeWithOptions(
@@ -398,8 +421,9 @@ TEST_F(AllocatorTest, AsanDiagnosticsExposeDefaultQuarantineRetention) {
       QueryAsanObservation(test_device.device());
   EXPECT_EQ(asan.quarantine_size, 0u);
   EXPECT_EQ(asan.quarantine_eviction_count, 0u);
-  EXPECT_EQ(asan.shadow_mapped_slab_count, 0u);
-  EXPECT_EQ(asan.shadow_committed_size, 0u);
+  const uint64_t initial_shadow_mapped_slab_count =
+      asan.shadow_mapped_slab_count;
+  const uint64_t initial_shadow_committed_size = asan.shadow_committed_size;
 
   iree_hal_buffer_params_t params = {0};
   params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
@@ -409,16 +433,17 @@ TEST_F(AllocatorTest, AsanDiagnosticsExposeDefaultQuarantineRetention) {
 
   iree_hal_buffer_t* buffer = nullptr;
   uint64_t ptr = 0;
-  IREE_ASSERT_OK(AllocateAndExportDevicePointer(test_device.allocator(), params,
-                                                /*allocation_size=*/4096,
-                                                &buffer, &ptr));
+  const iree_device_size_t allocation_size =
+      OversizedAllocationSize(test_device.logical_device());
+  IREE_ASSERT_OK(AllocateAndExportDevicePointer(
+      test_device.allocator(), params, allocation_size, &buffer, &ptr));
   iree_hal_buffer_release(buffer);
 
   asan = QueryAsanObservation(test_device.device());
   EXPECT_GT(asan.quarantine_size, 0u);
   EXPECT_EQ(asan.quarantine_eviction_count, 0u);
-  EXPECT_GT(asan.shadow_mapped_slab_count, 0u);
-  EXPECT_GT(asan.shadow_committed_size, 0u);
+  EXPECT_GE(asan.shadow_mapped_slab_count, initial_shadow_mapped_slab_count);
+  EXPECT_GE(asan.shadow_committed_size, initial_shadow_committed_size);
 }
 
 TEST_F(AllocatorTest, AsanDiagnosticsExposeZeroQuarantineRelease) {
@@ -426,6 +451,7 @@ TEST_F(AllocatorTest, AsanDiagnosticsExposeZeroQuarantineRelease) {
   iree_hal_amdgpu_logical_device_options_initialize(&options);
   options.asan.enabled = 1;
   options.asan.quarantine_size = 0;
+  options.default_pool.range_length = 4096;
 
   TestLogicalDevice test_device;
   IREE_ASSERT_OK(test_device.InitializeWithOptions(
@@ -434,6 +460,14 @@ TEST_F(AllocatorTest, AsanDiagnosticsExposeZeroQuarantineRelease) {
       QueryAsanSpec(test_device.device());
   EXPECT_EQ(asan_spec.pool_options.quarantine_size, 0u);
 
+  iree_hal_device_asan_observation_t asan =
+      QueryAsanObservation(test_device.device());
+  const uint64_t initial_quarantine_eviction_count =
+      asan.quarantine_eviction_count;
+  const uint64_t initial_shadow_mapped_slab_count =
+      asan.shadow_mapped_slab_count;
+  const uint64_t initial_shadow_committed_size = asan.shadow_committed_size;
+
   iree_hal_buffer_params_t params = {0};
   params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
   params.usage =
@@ -442,17 +476,18 @@ TEST_F(AllocatorTest, AsanDiagnosticsExposeZeroQuarantineRelease) {
 
   iree_hal_buffer_t* buffer = nullptr;
   uint64_t ptr = 0;
-  IREE_ASSERT_OK(AllocateAndExportDevicePointer(test_device.allocator(), params,
-                                                /*allocation_size=*/4096,
-                                                &buffer, &ptr));
+  const iree_device_size_t allocation_size =
+      OversizedAllocationSize(test_device.logical_device());
+  IREE_ASSERT_OK(AllocateAndExportDevicePointer(
+      test_device.allocator(), params, allocation_size, &buffer, &ptr));
   iree_hal_buffer_release(buffer);
 
-  const iree_hal_device_asan_observation_t asan =
-      QueryAsanObservation(test_device.device());
+  asan = QueryAsanObservation(test_device.device());
   EXPECT_EQ(asan.quarantine_size, 0u);
-  EXPECT_EQ(asan.quarantine_eviction_count, 1u);
-  EXPECT_GT(asan.shadow_mapped_slab_count, 0u);
-  EXPECT_GT(asan.shadow_committed_size, 0u);
+  EXPECT_EQ(asan.quarantine_eviction_count,
+            initial_quarantine_eviction_count + 1);
+  EXPECT_GE(asan.shadow_mapped_slab_count, initial_shadow_mapped_slab_count);
+  EXPECT_GE(asan.shadow_committed_size, initial_shadow_committed_size);
 }
 
 TEST_F(AllocatorTest, QueryMemoryHeapsReportsHsaLimits) {

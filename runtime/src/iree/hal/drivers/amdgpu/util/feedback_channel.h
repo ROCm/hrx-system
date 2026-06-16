@@ -26,7 +26,7 @@ typedef struct iree_hal_amdgpu_feedback_channel_params_t {
   hsa_agent_t device_agent;
   // CPU fine-grained memory pool used for the control block.
   hsa_amd_memory_pool_t control_memory_pool;
-  // Device fine-grained memory pool used for the pinned VMM packet ring.
+  // GPU global memory pool used to create the pinned VMM packet ring.
   hsa_amd_memory_pool_t ring_memory_pool;
   // Topology used to grant ring access to CPU and GPU agents.
   const iree_hal_amdgpu_topology_t* topology;
@@ -44,7 +44,7 @@ typedef struct iree_hal_amdgpu_feedback_channel_t {
   hsa_signal_t notify_signal;
   // Device-visible control block allocated from host fine-grained memory.
   iree_hal_amdgpu_feedback_channel_header_t* control;
-  // Mirrored VMM packet ring allocated from pinned device-visible memory.
+  // Mirrored VMM packet ring allocated from pinned host memory.
   iree_hal_amdgpu_vmem_ringbuffer_t ringbuffer;
 } iree_hal_amdgpu_feedback_channel_t;
 

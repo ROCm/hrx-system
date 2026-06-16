@@ -355,11 +355,12 @@ static iree_status_t iree_hal_amdgpu_feedback_state_initialize_device(
   }
 
   hsa_amd_memory_pool_t ring_memory_pool =
-      physical_device->fine_block_pools.large.memory_pool;
+      physical_device->coarse_block_pools.large.memory_pool;
   if (IREE_UNLIKELY(!ring_memory_pool.handle)) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU feedback requires a device fine-grained ring memory pool");
+        "AMDGPU feedback requires a coarse-grained device-local ring memory "
+        "pool");
   }
 
   out_device_state->parent = state;

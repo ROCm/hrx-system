@@ -118,10 +118,10 @@ typedef enum iree_hal_amdgpu_asan_shadow_backing_e {
   // device. This keeps instrumented shadow reads local to the GPU and is the
   // default production policy.
   IREE_HAL_AMDGPU_ASAN_SHADOW_BACKING_DEVICE_LOCAL = 0,
-  // Back shadow slabs with nearest-CPU fine-grained host memory mapped for the
-  // logical-device topology. Host-local shadow updates must happen before
-  // queue submissions whose dispatches read them, or after waited work retires
-  // before release poisoning mutates them.
+  // Back shadow slabs with pinned host memory mapped for the logical-device
+  // topology. Host-local shadow updates must happen before queue submissions
+  // whose dispatches read them, or after waited work retires before release
+  // poisoning mutates them.
   IREE_HAL_AMDGPU_ASAN_SHADOW_BACKING_HOST_LOCAL = 1,
 } iree_hal_amdgpu_asan_shadow_backing_t;
 

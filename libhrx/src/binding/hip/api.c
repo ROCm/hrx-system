@@ -417,6 +417,19 @@ static hipError_t iree_status_to_fixed_hip_result(iree_status_t status,
   return error;
 }
 
+static hipError_t iree_module_status_to_hip_result(iree_status_t status) {
+  if (iree_status_is_ok(status)) {
+    return hipSuccess;
+  }
+
+  const iree_status_code_t code = iree_status_code(status);
+  if (code == IREE_STATUS_INCOMPATIBLE) {
+    iree_status_free(status);
+    return hipErrorNoBinaryForGpu;
+  }
+  return iree_status_to_hip_result(status);
+}
+
 static hipError_t hrx_status_to_hip_result(hrx_status_t status) {
   if (hrx_status_is_ok(status)) {
     return hipSuccess;
@@ -6747,6 +6760,7 @@ HIPAPI hipError_t hipEventElapsedTime(float* ms, hipEvent_t start,
 //  - hipErrorInvalidContext: No active HIP context.
 //  - hipErrorFileNotFound: Module file does not exist.
 //  - hipErrorInvalidImage: File is not a valid module format.
+//  - hipErrorNoBinaryForGpu: Module has no binary for the current device.
 //  - hipErrorNotInitialized: HIP runtime not initialized.
 //  - hipErrorOutOfMemory: Insufficient memory to load module.
 //
@@ -6794,7 +6808,7 @@ HIPAPI hipError_t hipModuleLoad(hipModule_t* module, const char* fname) {
     *module = (hipModule_t)stream_module;
   }
 
-  hipError_t result = iree_status_to_hip_result(status);
+  hipError_t result = iree_module_status_to_hip_result(status);
   IREE_TRACE_ZONE_END(z0);
   return result;
 }
@@ -6810,6 +6824,7 @@ HIPAPI hipError_t hipModuleLoad(hipModule_t* module, const char* fname) {
 //  - hipErrorInvalidValue: module or image is NULL.
 //  - hipErrorInvalidContext: No active HIP context.
 //  - hipErrorInvalidImage: Data is not a valid module format.
+//  - hipErrorNoBinaryForGpu: Module has no binary for the current device.
 //  - hipErrorNotInitialized: HIP runtime not initialized.
 //  - hipErrorOutOfMemory: Insufficient memory to load module.
 //
@@ -6988,7 +7003,7 @@ HIPAPI hipError_t hipModuleLoadDataEx(hipModule_t* module, const void* image,
     fflush(stderr);
   }
 
-  hipError_t result = iree_status_to_hip_result(status);
+  hipError_t result = iree_module_status_to_hip_result(status);
   IREE_TRACE_ZONE_END(z0);
   return result;
 }

@@ -160,5 +160,30 @@ TEST_F(VMemTest, RingbufferWrap) {
   iree_hal_amdgpu_vmem_ringbuffer_deinitialize(&libhsa, &ringbuffer);
 }
 
+TEST_F(VMemTest, RingbufferPinnedHostWithCoarseDevicePool) {
+  IREE_TRACE_SCOPE();
+  ASSERT_GE(topology.gpu_agent_count, 1);
+
+  hsa_agent_t gpu_agent = topology.gpu_agents[0];
+  hsa_amd_memory_pool_t memory_pool = {0};
+  IREE_ASSERT_OK(iree_hal_amdgpu_find_coarse_global_memory_pool(
+      &libhsa, gpu_agent, &memory_pool));
+
+  const iree_device_size_t min_capacity = 1 * 1024 * 1024;
+  iree_hal_amdgpu_vmem_ringbuffer_t ringbuffer = {0};
+  IREE_ASSERT_OK(iree_hal_amdgpu_vmem_ringbuffer_initialize_with_topology(
+      &libhsa, gpu_agent, memory_pool,
+      IREE_HAL_AMDGPU_VMEM_MEMORY_TYPE_PINNED_HOST, min_capacity, &topology,
+      IREE_HAL_AMDGPU_ACCESS_MODE_SHARED, &ringbuffer));
+
+  EXPECT_GE(ringbuffer.capacity, min_capacity);
+  EXPECT_EQ(ringbuffer.ring_base_ptr,
+            (uint8_t*)ringbuffer.va_base_ptr + ringbuffer.capacity);
+  EXPECT_TRUE(iree_device_size_has_alignment(
+      (iree_device_size_t)ringbuffer.ring_base_ptr, 64));
+
+  iree_hal_amdgpu_vmem_ringbuffer_deinitialize(&libhsa, &ringbuffer);
+}
+
 }  // namespace
 }  // namespace iree::hal::amdgpu

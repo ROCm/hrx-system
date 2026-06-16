@@ -81,13 +81,8 @@ class FeedbackChannelTest : public ::testing::Test {
   void SetUp() override {
     IREE_ASSERT_OK(iree_hal_amdgpu_find_fine_global_memory_pool(
         &libhsa, topology.cpu_agents[0], &control_memory_pool_));
-    bool ring_memory_pool_available = false;
-    IREE_ASSERT_OK(iree_hal_amdgpu_query_fine_global_memory_pool(
-        &libhsa, topology.gpu_agents[0], &ring_memory_pool_available,
-        &ring_memory_pool_));
-    if (!ring_memory_pool_available) {
-      GTEST_SKIP() << "fine-grained GPU memory pool is not available";
-    }
+    IREE_ASSERT_OK(iree_hal_amdgpu_find_coarse_global_memory_pool(
+        &libhsa, topology.gpu_agents[0], &ring_memory_pool_));
 
     iree_hal_amdgpu_feedback_channel_params_t params = {};
     params.libhsa = &libhsa;
@@ -109,7 +104,7 @@ class FeedbackChannelTest : public ::testing::Test {
   static iree_hal_amdgpu_topology_t topology;
   // CPU fine-grained pool used for the channel control block.
   hsa_amd_memory_pool_t control_memory_pool_ = {};
-  // Device fine-grained pool used for the pinned VMM packet ring.
+  // GPU global memory pool used to create the pinned VMM packet ring.
   hsa_amd_memory_pool_t ring_memory_pool_ = {};
   // Feedback channel under test.
   iree_hal_amdgpu_feedback_channel_t channel_ = {};

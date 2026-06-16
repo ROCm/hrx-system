@@ -299,12 +299,8 @@ TEST_F(FeedbackChannelLiveTest, DeviceProducerSignalsHost) {
   IREE_ASSERT_OK(iree_hal_amdgpu_find_fine_global_memory_pool(
       &libhsa, cpu_agent, &control_memory_pool));
   hsa_amd_memory_pool_t ring_memory_pool = {};
-  bool ring_memory_pool_available = false;
-  IREE_ASSERT_OK(iree_hal_amdgpu_query_fine_global_memory_pool(
-      &libhsa, gpu_agent, &ring_memory_pool_available, &ring_memory_pool));
-  if (!ring_memory_pool_available) {
-    GTEST_SKIP() << "fine-grained GPU memory pool is not available";
-  }
+  IREE_ASSERT_OK(iree_hal_amdgpu_find_coarse_global_memory_pool(
+      &libhsa, gpu_agent, &ring_memory_pool));
 
   iree_hal_amdgpu_feedback_channel_t channel = {};
   iree_hal_amdgpu_feedback_channel_params_t channel_params = {};

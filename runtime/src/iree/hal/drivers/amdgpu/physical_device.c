@@ -1079,6 +1079,7 @@ static iree_status_t iree_hal_amdgpu_physical_device_create_pool_pair(
             oversized_pool_trace_name,
             IREE_ARRAYSIZE(oversized_pool_trace_name), oversized_pool_name,
             physical_device->device_ordinal),
+        .asan = pool_options.asan,
     };
     status = iree_hal_passthrough_pool_create(
         oversized_pool_options, slab_provider,
