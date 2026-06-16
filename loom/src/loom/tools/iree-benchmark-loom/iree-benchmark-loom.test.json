@@ -151,10 +151,12 @@
           "default output is a compact JSON snapshot",
           "work_items",
           "--output-format=jsonl",
+          "compile_report",
           "compile_report_path",
           "artifact_manifest_path",
           "target_artifact_path"
-        ]
+        ],
+        "not_contains": ["static_summary"]
       }
     },
     {
@@ -169,10 +171,12 @@
           "Snapshot output (default)",
           "JSONL event stream (--output-format=jsonl)",
           "results.json in snapshot mode",
+          "compile_report",
           "compile_report_path",
           "artifact_manifest_path",
           "target_artifact_path"
-        ]
+        ],
+        "not_contains": ["static_summary"]
       }
     }
   ]

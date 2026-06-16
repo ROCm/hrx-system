@@ -63,8 +63,9 @@ IREE_FLAG(bool, agents_md, false,
           "Prints a compact Markdown snippet suitable for AGENTS.md and "
           "exits.");
 IREE_FLAG_NAMED(string, compile_report, "compile-report", "summary",
-                "Structured compile report embedded in benchmark rows. Use "
-                "'summary', 'details', or empty/'none'.");
+                "Structured compile_report payload embedded in compile rows "
+                "and benchmark results. Use 'summary', 'details', or "
+                "empty/'none'.");
 IREE_FLAG_NAMED(
     string, artifact_manifest, "artifact-manifest", "none",
     "Target-neutral artifact manifest sidecar mode for debug/full artifact "

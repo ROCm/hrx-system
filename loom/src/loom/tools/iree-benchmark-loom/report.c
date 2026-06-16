@@ -921,22 +921,6 @@ static iree_status_t iree_benchmark_loom_write_benchmark_failure_json(
   return iree_ok_status();
 }
 
-static iree_string_view_t iree_benchmark_loom_compile_artifact_kind_name(
-    loom_target_compile_artifact_kind_t kind) {
-  switch (kind) {
-    case LOOM_TARGET_COMPILE_ARTIFACT_KIND_NONE:
-      return IREE_SV("none");
-    case LOOM_TARGET_COMPILE_ARTIFACT_KIND_VM_ARCHIVE:
-      return IREE_SV("vm-archive");
-    case LOOM_TARGET_COMPILE_ARTIFACT_KIND_HAL_EXECUTABLE:
-      return IREE_SV("hal-executable");
-    case LOOM_TARGET_COMPILE_ARTIFACT_KIND_HAL_KERNEL_LIBRARY:
-      return IREE_SV("hal-kernel-library");
-    default:
-      return IREE_SV("unknown");
-  }
-}
-
 iree_status_t iree_benchmark_loom_write_json_object_field_name(
     loom_output_stream_t* stream, bool* first_field, const char* name) {
   if (!*first_field) {
@@ -1167,246 +1151,6 @@ iree_status_t iree_benchmark_loom_write_hal_timing_interpretation_json(
       stream, &first_field, "warnings"));
   IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_hal_timing_warnings_json(
       policy, benchmark_result, stream));
-  return loom_output_stream_write_cstring(stream, "}");
-}
-
-static void iree_benchmark_loom_compile_report_move_cause_totals(
-    const loom_target_compile_report_t* report, uint64_t* out_kind_count,
-    uint64_t* out_packet_count, uint64_t* out_unit_count) {
-  *out_kind_count = 0;
-  *out_packet_count = 0;
-  *out_unit_count = 0;
-  for (iree_host_size_t i = 1; i < LOOM_TARGET_COMPILE_REPORT_MOVE_CAUSE_COUNT;
-       ++i) {
-    const loom_target_compile_report_move_cause_counts_t* counts =
-        &report->move_causes[i];
-    if (counts->packet_count == 0 && counts->unit_count == 0) {
-      continue;
-    }
-    ++*out_kind_count;
-    *out_packet_count += counts->packet_count;
-    *out_unit_count += counts->unit_count;
-  }
-}
-
-static iree_status_t iree_benchmark_loom_write_static_summary_json(
-    const loom_run_compile_report_capture_t* compile_report_capture,
-    loom_output_stream_t* stream) {
-  if (compile_report_capture == NULL ||
-      !loom_run_compile_report_capture_is_enabled(compile_report_capture)) {
-    return iree_ok_status();
-  }
-  const loom_target_compile_report_t* report = &compile_report_capture->report;
-  IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, ",\"static_summary\":{"));
-  bool first_field = true;
-  IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_string_field(
-      stream, &first_field, "artifact_kind",
-      iree_benchmark_loom_compile_artifact_kind_name(report->artifact_kind)));
-  IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_string_field(
-      stream, &first_field, "status",
-      iree_make_cstring_view(iree_status_code_string(report->status_code))));
-  IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u32_field(
-      stream, &first_field, "detail_flags", report->detail_flags));
-  IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_optional_string_field(
-      stream, &first_field, "backend", report->backend_name));
-  IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_optional_string_field(
-      stream, &first_field, "target_family", report->target_family_name));
-  IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_optional_string_field(
-      stream, &first_field, "target_key", report->target_key));
-  IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_optional_string_field(
-      stream, &first_field, "function", report->function_name));
-  IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_optional_string_field(
-      stream, &first_field, "target_bundle", report->target_bundle_name));
-  IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_optional_string_field(
-      stream, &first_field, "target_export", report->target_export_name));
-  IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_optional_string_field(
-      stream, &first_field, "target_export_symbol",
-      report->target_export_symbol));
-  IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_optional_string_field(
-      stream, &first_field, "target_config", report->target_config_name));
-  IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_optional_string_field(
-      stream, &first_field, "lowered", report->lowered_symbol));
-  IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_optional_string_field(
-      stream, &first_field, "executable_format", report->executable_format));
-  if (iree_any_bit_set(report->detail_flags,
-                       LOOM_TARGET_COMPILE_REPORT_DETAIL_ARTIFACT_SIZE)) {
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "artifact_size", report->artifact_size));
-  }
-  if (iree_any_bit_set(report->detail_flags,
-                       LOOM_TARGET_COMPILE_REPORT_DETAIL_ENTRIES)) {
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_size_field(
-        stream, &first_field, "entry_count", report->entry_rows.count));
-  }
-  if (iree_any_bit_set(report->detail_flags,
-                       LOOM_TARGET_COMPILE_REPORT_DETAIL_EMISSION)) {
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "instruction_count",
-        report->emitted_instruction_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "code_byte_count",
-        report->emitted_code_byte_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "code_storage_byte_count",
-        report->emitted_code_storage_byte_count));
-  }
-  if (iree_any_bit_set(report->detail_flags,
-                       LOOM_TARGET_COMPILE_REPORT_DETAIL_MEMORY)) {
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "private_memory_bytes",
-        report->private_memory_bytes));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "local_memory_bytes",
-        report->local_memory_bytes));
-  }
-  if (iree_any_bit_set(report->detail_flags,
-                       LOOM_TARGET_COMPILE_REPORT_DETAIL_ALLOCATION)) {
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "allocation_assignment_count",
-        report->allocation_assignment_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "allocation_spill_count",
-        report->allocation_spill_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "allocation_spill_plan_count",
-        report->allocation_spill_plan_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "allocation_coalesced_copy_count",
-        report->allocation_coalesced_copy_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "allocation_materialized_copy_count",
-        report->allocation_materialized_copy_count));
-  }
-  if (iree_any_bit_set(report->detail_flags,
-                       LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE)) {
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "schedule_node_count",
-        report->schedule_node_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "scheduled_node_count",
-        report->scheduled_node_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "register_pressure_summary_count",
-        report->register_pressure_summary_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "register_pressure_peak_live_units",
-        report->register_pressure_peak_live_units));
-  }
-  if (iree_any_bit_set(
-          report->detail_flags,
-          LOOM_TARGET_COMPILE_REPORT_DETAIL_STATIC_INSTRUCTION_MIX)) {
-    const loom_target_compile_report_static_instruction_mix_t* mix =
-        &report->static_instruction_mix;
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "descriptor_count", mix->descriptor_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "unknown_descriptor_count", mix->unknown_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "scalar_alu_count", mix->scalar_alu_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "vector_alu_count", mix->vector_alu_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "matrix_count", mix->matrix_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "mfma_count", mix->mfma_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "wmma_count", mix->wmma_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "dot_count", mix->dot_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "global_memory_count", mix->global_memory_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "local_memory_count", mix->local_memory_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "scalar_memory_count", mix->scalar_memory_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "generic_memory_count",
-        mix->generic_memory_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "atomic_count", mix->atomic_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "branch_count", mix->branch_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "barrier_count", mix->barrier_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "control_count", mix->control_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "conversion_count", mix->conversion_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "cache_count", mix->cache_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "register_move_count", mix->register_move_count));
-  }
-  if (iree_any_bit_set(report->detail_flags,
-                       LOOM_TARGET_COMPILE_REPORT_DETAIL_SOURCE_LOW_ROWS)) {
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "source_low_selected_op_count",
-        report->source_low_selected_op_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "source_low_emitted_op_count",
-        report->source_low_emitted_op_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_size_field(
-        stream, &first_field, "source_low_row_count",
-        report->source_low_rows.count));
-  }
-  if (iree_any_bit_set(
-          report->detail_flags,
-          LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_LEGALIZATION_ROWS)) {
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "target_legalization_legal_op_count",
-        report->target_legalization_legal_op_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "target_legalization_rewritten_op_count",
-        report->target_legalization_rewritten_op_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "target_legalization_target_rewritten_op_count",
-        report->target_legalization_target_rewritten_op_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field,
-        "target_legalization_reference_rewritten_op_count",
-        report->target_legalization_reference_rewritten_op_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "target_legalization_deferred_op_count",
-        report->target_legalization_deferred_op_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "target_legalization_invalid_ir_op_count",
-        report->target_legalization_invalid_ir_op_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "target_legalization_unsupported_op_count",
-        report->target_legalization_unsupported_op_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "target_legalization_unhandled_op_count",
-        report->target_legalization_unhandled_op_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_size_field(
-        stream, &first_field, "target_legalization_row_count",
-        report->target_legalization_rows.count));
-  }
-  if (iree_any_bit_set(report->detail_flags,
-                       LOOM_TARGET_COMPILE_REPORT_DETAIL_PRESSURE_ROWS)) {
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_size_field(
-        stream, &first_field, "pressure_row_count",
-        report->pressure_rows.count));
-  }
-  if (iree_any_bit_set(report->detail_flags,
-                       LOOM_TARGET_COMPILE_REPORT_DETAIL_SPILL_ROWS)) {
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_size_field(
-        stream, &first_field, "spill_row_count", report->spill_rows.count));
-  }
-  if (iree_any_bit_set(report->detail_flags,
-                       LOOM_TARGET_COMPILE_REPORT_DETAIL_MOVE_CAUSES)) {
-    uint64_t kind_count = 0;
-    uint64_t packet_count = 0;
-    uint64_t unit_count = 0;
-    iree_benchmark_loom_compile_report_move_cause_totals(
-        report, &kind_count, &packet_count, &unit_count);
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "move_cause_kind_count", kind_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "move_cause_packet_count", packet_count));
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_u64_field(
-        stream, &first_field, "move_cause_unit_count", unit_count));
-  }
   return loom_output_stream_write_cstring(stream, "}");
 }
 
@@ -1733,8 +1477,6 @@ static iree_status_t iree_benchmark_loom_append_compile_report_artifact_json(
       loom_output_stream_write_cstring(&stream, ",\"diagnostics\":"));
   IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_diagnostic_array_json(
       &provider->diagnostics, &stream));
-  IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_static_summary_json(
-      &provider->compile_report_capture, &stream));
   IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_compile_report_json(
       &provider->compile_report_capture, &stream));
   IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, "}\n"));
@@ -1997,8 +1739,6 @@ iree_status_t iree_benchmark_loom_write_benchmark_result_json(
   if (benchmark_result->compile_report_capture != NULL &&
       loom_run_compile_report_capture_is_enabled(
           benchmark_result->compile_report_capture)) {
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_static_summary_json(
-        benchmark_result->compile_report_capture, stream));
     IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_compile_report_json(
         benchmark_result->compile_report_capture, stream));
   }
@@ -2106,8 +1846,6 @@ iree_status_t iree_benchmark_loom_append_compile_row(
   IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_diagnostic_array_json(
       &provider->diagnostics, &stream));
   if (provider->execution.compile_report_available) {
-    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_static_summary_json(
-        &provider->compile_report_capture, &stream));
     IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_compile_report_json(
         &provider->compile_report_capture, &stream));
   }

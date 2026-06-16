@@ -40,6 +40,12 @@ static iree_string_view_t TryLookupObject(iree_string_view_t object,
   return value;
 }
 
+static void ExpectObjectValueEquals(iree_string_view_t object,
+                                    iree_string_view_t key,
+                                    iree_string_view_t expected) {
+  EXPECT_TRUE(iree_string_view_equal(LookupObject(object, key), expected));
+}
+
 static bool JsonArrayContainsString(iree_string_view_t array,
                                     iree_string_view_t expected) {
   iree_host_size_t count = 0;
@@ -52,6 +58,112 @@ static bool JsonArrayContainsString(iree_string_view_t array,
     }
   }
   return false;
+}
+
+TEST(BenchmarkReportTest, WritesCanonicalCompileReportTree) {
+  iree_allocator_t allocator = iree_allocator_system();
+  loom_run_compile_report_capture_options_t capture_options = {};
+  loom_run_compile_report_capture_options_initialize(&capture_options);
+  capture_options.sink_format = LOOM_RUN_COMPILE_REPORT_SINK_FORMAT_JSON;
+  capture_options.detail_mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY;
+  loom_run_compile_report_capture_t capture = {};
+  IREE_ASSERT_OK(loom_run_compile_report_capture_initialize(
+      &capture_options, allocator, &capture));
+
+  loom_target_compile_report_t* report = &capture.report;
+  report->artifact_kind = LOOM_TARGET_COMPILE_ARTIFACT_KIND_VM_ARCHIVE;
+  report->backend_name = IREE_SV("amdgpu-hal");
+  report->target_family_name = IREE_SV("amdgpu");
+  report->target_key = IREE_SV("gfx1100");
+  report->function_name = IREE_SV("candidate_kernel");
+  loom_target_compile_report_record_status(report, IREE_STATUS_OK);
+  loom_target_compile_report_record_schedule(
+      report, /*node_count=*/31, /*scheduled_node_count=*/29,
+      /*dependency_count=*/17, /*resource_use_count=*/13,
+      /*hazard_gap_count=*/7, /*model_summary_count=*/5,
+      /*pressure_summary_count=*/3, /*peak_live_units=*/128);
+  loom_target_compile_report_static_instruction_mix_t mix = {};
+  mix.descriptor_count = 11;
+  mix.vector_alu_count = 9;
+  mix.local_memory_count = 4;
+  loom_target_compile_report_record_static_instruction_mix(report, &mix);
+  loom_target_compile_report_record_allocation(
+      report, /*assignment_count=*/23, /*spill_count=*/2,
+      /*spill_plan_count=*/1, /*coalesced_copy_count=*/8,
+      /*materialized_copy_count=*/3);
+  loom_target_compile_report_record_emission(report, /*instruction_count=*/37,
+                                             /*code_byte_count=*/148,
+                                             /*code_storage_byte_count=*/160);
+  loom_target_compile_report_record_memory(report, /*private_memory_bytes=*/64,
+                                           /*local_memory_bytes=*/256);
+
+  loom_testbench_benchmark_plan_t benchmark_plan = {};
+  benchmark_plan.name = IREE_SV("kernel_latency");
+  loom_testbench_case_plan_t case_plan = {};
+  case_plan.name = IREE_SV("kernel_case");
+  iree_benchmark_loom_benchmark_policy_t policy = {};
+  policy.measure = IREE_SV("case_end_to_end");
+  iree_benchmark_loom_benchmark_result_t result = {};
+  result.executed = true;
+  result.passed = true;
+  result.samples_per_iteration = 1;
+  result.timing.count = 1;
+  result.timing.total_ns = 10;
+  result.timing.minimum_ns = 10;
+  result.timing.maximum_ns = 10;
+  result.timing.mean_ns = 10.0;
+  result.timing.p50_ns = 10;
+  result.timing.p90_ns = 10;
+  result.compile_report_capture = &capture;
+
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(allocator, &builder);
+  loom_output_stream_t stream;
+  loom_output_stream_for_builder(&builder, &stream);
+  IREE_ASSERT_OK(iree_benchmark_loom_write_benchmark_result_json(
+      &benchmark_plan, &case_plan, &policy, &result,
+      /*correctness_sample_count=*/1,
+      /*correctness_failed_sample_count=*/0, &stream));
+
+  iree_string_view_t root =
+      ParseJsonDocument(iree_string_builder_view(&builder));
+  EXPECT_TRUE(iree_string_view_is_empty(
+      TryLookupObject(root, IREE_SV("static_summary"))));
+  iree_string_view_t compile_report =
+      LookupObject(root, IREE_SV("compile_report"));
+  ExpectObjectValueEquals(compile_report, IREE_SV("artifact_kind"),
+                          IREE_SV("vm-archive"));
+  ExpectObjectValueEquals(compile_report, IREE_SV("backend"),
+                          IREE_SV("amdgpu-hal"));
+  ExpectObjectValueEquals(compile_report, IREE_SV("target_family"),
+                          IREE_SV("amdgpu"));
+  ExpectObjectValueEquals(compile_report, IREE_SV("target_key"),
+                          IREE_SV("gfx1100"));
+  ExpectObjectValueEquals(compile_report, IREE_SV("function"),
+                          IREE_SV("candidate_kernel"));
+
+  iree_string_view_t schedule =
+      LookupObject(compile_report, IREE_SV("schedule"));
+  ExpectObjectValueEquals(schedule, IREE_SV("node_count"), IREE_SV("31"));
+  ExpectObjectValueEquals(
+      schedule, IREE_SV("register_pressure_peak_live_units"), IREE_SV("128"));
+  iree_string_view_t mix_json =
+      LookupObject(compile_report, IREE_SV("static_instruction_mix"));
+  ExpectObjectValueEquals(mix_json, IREE_SV("descriptor_count"), IREE_SV("11"));
+  ExpectObjectValueEquals(mix_json, IREE_SV("vector_alu_count"), IREE_SV("9"));
+  ExpectObjectValueEquals(mix_json, IREE_SV("local_memory_count"),
+                          IREE_SV("4"));
+  iree_string_view_t allocation =
+      LookupObject(compile_report, IREE_SV("allocation"));
+  ExpectObjectValueEquals(allocation, IREE_SV("spill_count"), IREE_SV("2"));
+  iree_string_view_t emission =
+      LookupObject(compile_report, IREE_SV("emission"));
+  ExpectObjectValueEquals(emission, IREE_SV("code_byte_count"), IREE_SV("148"));
+  iree_string_view_t memory = LookupObject(compile_report, IREE_SV("memory"));
+  ExpectObjectValueEquals(memory, IREE_SV("local_bytes"), IREE_SV("256"));
+
+  iree_string_builder_deinitialize(&builder);
+  loom_run_compile_report_capture_deinitialize(&capture);
 }
 
 TEST(BenchmarkReportTest, WritesHalTimingCountsAndWarnings) {

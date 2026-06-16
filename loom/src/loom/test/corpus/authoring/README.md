@@ -215,9 +215,30 @@ Debug/full bundles keep per-candidate compile reports under
 `compile_reports/`, artifact manifests under `artifact_manifests/`, native
 artifacts under `target_artifacts/`, target-owned listings under
 `target_listings/`, and HAL executable artifacts under `hal_executables/`.
-JSONL compile and benchmark rows link those files with
+JSONL compile rows link those files with
 `compile_report_path`, `artifact_manifest_path`, `target_artifact_path`,
-`target_listing_path`, and `hal_executable_path`.
+`target_listing_path`, and `hal_executable_path`; benchmark rows expose the
+same links under `benchmark_result`. Rows with embedded reports use the same
+`compile_report` JSON tree as standalone `loom-compile`, so jq recipes can move
+between tools without changing the report fields:
+
+```bash
+jq 'select(.row=="compile" and .compile_report) |
+  {candidate_id,
+   code:.compile_report.emission.code_byte_count,
+   spills:.compile_report.allocation.spill_count,
+   local:.compile_report.memory.local_bytes,
+   pressure:.compile_report.schedule.register_pressure_peak_live_units}' \
+  /tmp/loom-q6q8-run/results.jsonl
+
+jq 'select(.row=="benchmark" and .benchmark_result.compile_report) |
+  .benchmark_result |
+  {benchmark,
+   code:.compile_report.emission.code_byte_count,
+   spills:.compile_report.allocation.spill_count,
+   local:.compile_report.memory.local_bytes}' \
+  /tmp/loom-q6q8-run/results.jsonl
+```
 
 For quick object-level disassembly of a standalone HSACO, use the LLVM object
 tools on the emitted sidecar:
