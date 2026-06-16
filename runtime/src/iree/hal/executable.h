@@ -40,20 +40,33 @@ typedef struct iree_hal_executable_function_t {
 // Returns an invalid executable function value.
 static inline iree_hal_executable_function_t
 iree_hal_executable_function_invalid(void) {
+#ifdef __cplusplus
+  return iree_hal_executable_function_t{
+      IREE_HAL_EXECUTABLE_FUNCTION_INVALID_VALUE};
+#else
   return (iree_hal_executable_function_t){
       IREE_HAL_EXECUTABLE_FUNCTION_INVALID_VALUE};
+#endif
 }
 
 // Returns a function value for the given executable-local table index.
 static inline iree_hal_executable_function_t
 iree_hal_executable_function_from_index(uint32_t index) {
+#ifdef __cplusplus
+  return iree_hal_executable_function_t{index};
+#else
   return (iree_hal_executable_function_t){index};
+#endif
 }
 
 // Returns a function value for a raw executable-local token.
 static inline iree_hal_executable_function_t
 iree_hal_executable_function_from_value(uint64_t value) {
+#ifdef __cplusplus
+  return iree_hal_executable_function_t{value};
+#else
   return (iree_hal_executable_function_t){value};
+#endif
 }
 
 // Returns true if |function| contains a valid executable-local token.

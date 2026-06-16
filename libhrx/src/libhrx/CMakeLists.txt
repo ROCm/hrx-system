@@ -84,6 +84,16 @@ if(IREE_HAL_DRIVER_AMDGPU)
     HRX_HAS_IREE_AMDGPU_DRIVER
   )
 endif()
+if(IREE_HAL_DRIVER_AMDXDNA)
+  target_link_libraries(libhrx_src_libhrx_hrx PRIVATE
+    iree::hal::drivers::amdxdna::registration
+    iree::hal::drivers::amdxdna
+    iree::base::tooling::flags
+  )
+  target_compile_definitions(libhrx_src_libhrx_hrx.objects PRIVATE
+    HRX_HAS_IREE_AMDXDNA_DRIVER
+  )
+endif()
 # IREE's allocator selector is exposed as a compile definition on the base
 # library target. libhrx is compiled through IREE's object-library wrapper, so
 # forward that definition to the object target that actually compiles the

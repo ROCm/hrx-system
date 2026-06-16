@@ -185,6 +185,13 @@ ctest --test-dir build/hrx-tests/share/hrx-system/tests \
   --output-on-failure -L runtime-resource=amd-gpu
 ```
 
+NPU runners use the AMD NPU resource label:
+
+```bash
+ctest --test-dir build/hrx-tests/share/hrx-system/tests \
+  --output-on-failure -L runtime-resource=amd-npu
+```
+
 ## Release Artifacts
 
 Tagged releases publish one tarball per artifact, plus manifests and environment

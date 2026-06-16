@@ -1,0 +1,123 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (C) 2022-2024, Advanced Micro Devices, Inc. All rights reserved.
+
+#ifndef _BO_XDNA_H_
+#define _BO_XDNA_H_
+
+#include <string>
+
+#include "../../ert.h"
+#include "amdxdna_accel.h"
+#include "bo_flags.h"
+#include "device.h"
+#include "hwctx.h"
+
+namespace shim_xdna {
+
+// direction - direction of sync operation
+enum class direction {
+  host2device = AMDXDNA_BO_SYNC_TO_DEVICE,
+  device2host = AMDXDNA_BO_SYNC_FROM_DEVICE,
+};
+
+// properties - buffer details
+struct properties {
+  shim_amdxdna_bo_flags flags;  // flags of bo
+  uint64_t size;                // size of bo
+  uint64_t paddr;               // physical address
+  uint64_t kmhdl;               // kernel mode handle
+};
+
+struct drm_bo {
+  bo& m_parent;
+  uint32_t m_handle = AMDXDNA_INVALID_BO_HANDLE;
+  off_t m_map_offset = AMDXDNA_INVALID_ADDR;
+  uint64_t m_xdna_addr = AMDXDNA_INVALID_ADDR;
+  uint64_t m_vaddr = AMDXDNA_INVALID_ADDR;
+
+  drm_bo(bo& parent, const amdxdna_drm_get_bo_info& bo_info);
+  // no copying
+  drm_bo(const drm_bo&) = delete;
+  drm_bo& operator=(const drm_bo&) = delete;
+  ~drm_bo();
+};
+
+struct bo {
+  const pdev& m_pdev;
+  void* m_parent = nullptr;
+  void* m_aligned = nullptr;
+  size_t m_parent_size = 0;
+  size_t m_aligned_size = 0;
+  shim_amdxdna_bo_flags m_flags{};
+  amdxdna_bo_type m_type = AMDXDNA_BO_INVALID;
+  std::unique_ptr<drm_bo> m_drm_bo;
+  const shared_handle m_import;
+  // Only for AMDXDNA_BO_CMD type
+  std::map<size_t, uint32_t> m_args_map;
+  mutable std::mutex m_args_map_lock;
+  int m_init_errno = 0;
+
+  // Command ID in the queue after command submission.
+  // Only valid for cmd BO.
+  uint64_t m_cmd_id = -1;
+
+  // Used when exclusively assigned to a HW context. By default, BO is shared
+  // among all HW contexts.
+  uint32_t m_owner_ctx_id = AMDXDNA_INVALID_CTX_HANDLE;
+
+  bo(const pdev& p, uint32_t ctx_id, size_t size, shim_amdxdna_bo_flags flags,
+     amdxdna_bo_type type);
+  bo(const pdev& p, uint32_t ctx_id, size_t size, shim_amdxdna_bo_flags flags);
+  bo(const pdev& p, uint32_t ctx_id, size_t size, uint32_t flags);
+  bo(const pdev& p, int ehdl);
+  // Support BO creation from internal
+  bo(const pdev& p, size_t size, amdxdna_bo_type type);
+  ~bo();
+  // no copying
+  bo(const bo&) = delete;
+  bo& operator=(const bo&) = delete;
+
+  void* map() const;
+  void unmap(void* addr);
+  int init_errno() const;
+  static int create(const pdev& p, uint32_t ctx_id, size_t size,
+                    shim_amdxdna_bo_flags flags, std::unique_ptr<bo>* out_bo);
+  static int create(const pdev& p, uint32_t ctx_id, size_t size, uint32_t flags,
+                    std::unique_ptr<bo>* out_bo);
+  static int create(const pdev& p, size_t size, amdxdna_bo_type type,
+                    std::unique_ptr<bo>* out_bo);
+  static int create_imported(const pdev& p, int ehdl,
+                             std::unique_ptr<bo>* out_bo);
+  int sync(direction, size_t size, size_t offset);
+  int sync(direction);
+  properties get_properties() const;
+  size_t size();
+
+  int share(std::unique_ptr<shared_handle>* out_handle) const;
+  // For cmd BO only
+  void set_cmd_id(uint64_t id);
+  // For cmd BO only
+  uint64_t get_cmd_id() const;
+  uint32_t get_drm_bo_handle() const;
+  amdxdna_bo_type get_type() const;
+  // DRM BO managed by driver.
+  int bind_at(size_t pos, const bo& bh, size_t offset, size_t size);
+  std::string describe() const;
+  // Import DRM BO from m_import shared object
+  int import_bo();
+  // Free DRM BO in driver
+  void free_bo();
+  int mmap_bo(size_t align = 0);
+  void munmap_bo();
+  uint64_t get_paddr() const;
+  std::string type_to_name() const;
+  int attach_to_ctx();
+  int detach_from_ctx();
+  // Obtain array of arg BO handles, returns real number of handles
+  int get_arg_bo_handles(uint32_t* handles, size_t num,
+                         uint32_t* out_count) const;
+};
+
+}  // namespace shim_xdna
+
+#endif

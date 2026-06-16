@@ -70,14 +70,21 @@ option(IREE_ENABLE_ASSERTIONS "Force unset of NDEBUG compile option." OFF)
 option(IREE_DEV_MODE
   "Configure settings optimized for IREE development instead of CI/release."
   OFF)
+option(IREE_HAL_DRIVER_AMDXDNA
+  "Enables the amdxdna runtime HAL driver."
+  OFF)
 option(LIBHRX_BUILD
   "Build libhrx and HRX compatibility targets." ON)
 if(LIBHRX_BUILD)
-  if(DEFINED IREE_HAL_DRIVER_AMDGPU AND NOT IREE_HAL_DRIVER_AMDGPU)
+  if(NOT DEFINED IREE_HAL_DRIVER_AMDGPU)
+    if(NOT IREE_HAL_DRIVER_AMDXDNA)
+      set(IREE_HAL_DRIVER_AMDGPU_DEFAULT ON)
+    endif()
+  elseif(NOT IREE_HAL_DRIVER_AMDGPU AND NOT IREE_HAL_DRIVER_AMDXDNA)
     message(FATAL_ERROR
-      "LIBHRX_BUILD=ON requires IREE_HAL_DRIVER_AMDGPU=ON.")
+      "LIBHRX_BUILD=ON requires at least one accelerator driver "
+      "(IREE_HAL_DRIVER_AMDGPU=ON or IREE_HAL_DRIVER_AMDXDNA=ON).")
   endif()
-  set(IREE_HAL_DRIVER_AMDGPU_DEFAULT ON)
 endif()
 
 set(IREE_USE_LINKER "" CACHE STRING "")
@@ -186,6 +193,9 @@ if(IREE_HAL_DRIVER_AMDGPU)
 endif()
 if(IREE_HAL_DRIVER_HIP)
   message(STATUS "  - hip")
+endif()
+if(IREE_HAL_DRIVER_AMDXDNA)
+  message(STATUS "  - amdxdna")
 endif()
 if(IREE_HAL_DRIVER_LOCAL_SYNC)
   message(STATUS "  - local-sync")
