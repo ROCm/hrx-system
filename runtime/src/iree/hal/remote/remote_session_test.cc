@@ -391,6 +391,22 @@ TEST_F(RemoteSessionTest, ConnectSucceeds) {
             IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_CONNECTED);
 }
 
+TEST_F(RemoteSessionTest, ConnectAdvertisesServerDeviceSpec) {
+  CreateAndStartServer();
+  CreateClientDevice();
+
+  ASSERT_EQ(ConnectAndWait(), IREE_STATUS_OK);
+
+  const iree_hal_device_spec_t* client_spec =
+      iree_hal_device_spec(client_device_);
+  const iree_hal_device_spec_t* server_spec =
+      iree_hal_device_spec(mock_device_);
+  ASSERT_NE(client_spec, nullptr);
+  ASSERT_NE(server_spec, nullptr);
+  EXPECT_EQ(iree_hal_device_spec_digest(client_spec),
+            iree_hal_device_spec_digest(server_spec));
+}
+
 TEST_F(RemoteSessionTest, ReusesSingleServerSlotAfterClientDisconnect) {
   CreateAndStartServer(/*max_connections=*/1);
   CreateClientDevice();
@@ -601,30 +617,21 @@ TEST_F(RemoteSessionTest, QueueOpsFailWhenDisconnected) {
   iree_status_ignore(status);
 }
 
-TEST_F(RemoteSessionTest, DeviceQueriesWorkWithoutConnection) {
+TEST_F(RemoteSessionTest, DeviceSpecAvailableWithoutConnection) {
   CreateAndStartServer();
   CreateClientDevice();
 
-  // Remote devices are transparent proxies: device ID and executable format
-  // queries match locally before connection; server-side compatibility is
-  // checked when executable uploads reach the real device.
-  int64_t value = -1;
-  IREE_ASSERT_OK(iree_hal_device_query_i64(
-      client_device_, IREE_SV("hal.device.id"), IREE_SV("remote"), &value));
-  EXPECT_EQ(value, 1);
+  const iree_hal_device_spec_t* client_spec =
+      iree_hal_device_spec(client_device_);
+  ASSERT_NE(client_spec, nullptr);
 
-  IREE_ASSERT_OK(iree_hal_device_query_i64(
-      client_device_, IREE_SV("hal.device.id"), IREE_SV("local"), &value));
-  EXPECT_EQ(value, 1);
-
-  IREE_ASSERT_OK(iree_hal_device_query_i64(
-      client_device_, IREE_SV("hal.executable.format"),
-      IREE_SV("vmvx-bytecode-fb"), &value));
-  EXPECT_EQ(value, 1);
-
-  IREE_ASSERT_OK(iree_hal_device_query_i64(
-      client_device_, IREE_SV("hal.unknown"), IREE_SV("anything"), &value));
-  EXPECT_EQ(value, 0);
+  const iree_hal_device_identity_spec_t* identity =
+      iree_hal_device_spec_identity(client_spec);
+  ASSERT_NE(identity, nullptr);
+  EXPECT_TRUE(
+      iree_string_view_equal(identity->logical_device_id, IREE_SV("remote")));
+  EXPECT_TRUE(iree_string_view_equal(identity->driver_id, IREE_SV("remote")));
+  EXPECT_TRUE(iree_string_view_equal(identity->backend_id, IREE_SV("remote")));
 }
 
 //===----------------------------------------------------------------------===//

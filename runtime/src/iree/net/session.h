@@ -118,6 +118,9 @@ typedef struct iree_net_session_topology_t {
   // Number of entries in |axes| and |current_epochs|.
   uint32_t axis_count;
 
+  // Opaque application-defined bytes exchanged with the topology.
+  iree_const_byte_span_t application_data;
+
   // Machine index for this side (0-255, encoded in axis identifiers).
   uint8_t machine_index;
 

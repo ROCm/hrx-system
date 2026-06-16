@@ -51,6 +51,9 @@ typedef struct iree_hal_remote_client_device_t {
   iree_allocator_t host_allocator;
   iree_hal_allocator_t* device_allocator;
 
+  // Cached immutable device spec exposed through the HAL device vtable.
+  iree_hal_device_spec_t* device_spec;
+
   // Block pool used for remote command buffer resource sets.
   iree_arena_block_pool_t resource_set_block_pool;
 

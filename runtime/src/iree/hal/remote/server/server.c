@@ -6,6 +6,8 @@
 
 #include "iree/hal/remote/server/server.h"
 
+#include "iree/hal/device_spec.h"
+#include "iree/hal/remote/protocol/bootstrap.h"
 #include "iree/hal/remote/protocol/common.h"
 #include "iree/hal/remote/server/bulk.h"
 #include "iree/hal/remote/server/bulk_session.h"
@@ -107,6 +109,116 @@ static iree_status_t iree_hal_remote_server_options_verify(
 //===----------------------------------------------------------------------===//
 // iree_hal_remote_server_t
 //===----------------------------------------------------------------------===//
+
+static iree_status_t iree_hal_remote_server_create_device_catalog(
+    iree_hal_device_t* const* devices, iree_host_size_t device_count,
+    iree_allocator_t host_allocator, iree_byte_span_t* out_catalog) {
+  *out_catalog = iree_byte_span_empty();
+
+  if (device_count > UINT32_MAX) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "remote device catalog supports at most %u "
+                            "devices but got %" PRIhsz,
+                            UINT32_MAX, device_count);
+  }
+
+  iree_byte_span_t* serialized_specs = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(host_allocator, device_count,
+                                                   sizeof(*serialized_specs),
+                                                   (void**)&serialized_specs));
+  memset(serialized_specs, 0, device_count * sizeof(*serialized_specs));
+
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < device_count && iree_status_is_ok(status);
+       ++i) {
+    const iree_hal_device_spec_t* device_spec =
+        iree_hal_device_spec(devices[i]);
+    if (!device_spec) {
+      status = iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "remote device %" PRIhsz " does not expose a HAL device spec", i);
+    } else {
+      status = iree_hal_device_spec_serialize(device_spec, host_allocator,
+                                              &serialized_specs[i]);
+    }
+  }
+
+  iree_host_size_t entry_table_offset = 0;
+  iree_host_size_t spec_data_offset = 0;
+  if (iree_status_is_ok(status)) {
+    status = IREE_STRUCT_LAYOUT(
+        sizeof(iree_hal_remote_bootstrap_device_catalog_header_t),
+        &spec_data_offset,
+        IREE_STRUCT_FIELD(device_count,
+                          iree_hal_remote_bootstrap_device_spec_entry_t,
+                          &entry_table_offset));
+  }
+
+  iree_host_size_t total_size = spec_data_offset;
+  for (iree_host_size_t i = 0; i < device_count && iree_status_is_ok(status);
+       ++i) {
+    iree_host_size_t padded_spec_length = 0;
+    if (!iree_host_size_checked_align(serialized_specs[i].data_length, 8,
+                                      &padded_spec_length) ||
+        !iree_host_size_checked_add(total_size, padded_spec_length,
+                                    &total_size)) {
+      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                "remote device catalog size overflow");
+    }
+  }
+
+  iree_byte_span_t catalog = iree_byte_span_empty();
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc(host_allocator, total_size,
+                                   (void**)&catalog.data);
+    catalog.data_length = total_size;
+  }
+
+  if (iree_status_is_ok(status)) {
+    memset(catalog.data, 0, catalog.data_length);
+
+    iree_hal_remote_bootstrap_device_catalog_header_t* header =
+        (iree_hal_remote_bootstrap_device_catalog_header_t*)catalog.data;
+    header->magic = IREE_HAL_REMOTE_BOOTSTRAP_DEVICE_CATALOG_MAGIC;
+    header->version = IREE_HAL_REMOTE_BOOTSTRAP_DEVICE_CATALOG_VERSION;
+    header->flags = IREE_HAL_REMOTE_BOOTSTRAP_DEVICE_CATALOG_FLAG_NONE;
+    header->device_count = (uint32_t)device_count;
+
+    iree_hal_remote_bootstrap_device_spec_entry_t* entries =
+        (iree_hal_remote_bootstrap_device_spec_entry_t*)(catalog.data +
+                                                         entry_table_offset);
+    iree_host_size_t write_offset = spec_data_offset;
+    for (iree_host_size_t i = 0; i < device_count; ++i) {
+      entries[i].device_ordinal = (uint32_t)i;
+      entries[i].flags = IREE_HAL_REMOTE_BOOTSTRAP_DEVICE_SPEC_ENTRY_FLAG_NONE;
+      entries[i].spec_offset = (uint64_t)write_offset;
+      entries[i].spec_length = (uint64_t)serialized_specs[i].data_length;
+      memcpy(catalog.data + write_offset, serialized_specs[i].data,
+             serialized_specs[i].data_length);
+
+      iree_host_size_t padded_spec_length = 0;
+      if (!iree_host_size_checked_align(serialized_specs[i].data_length, 8,
+                                        &padded_spec_length)) {
+        status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                  "remote device catalog size overflow");
+        break;
+      }
+      write_offset += padded_spec_length;
+    }
+
+    if (iree_status_is_ok(status)) {
+      *out_catalog = catalog;
+      catalog = iree_byte_span_empty();
+    }
+  }
+
+  iree_allocator_free(host_allocator, catalog.data);
+  for (iree_host_size_t i = 0; i < device_count; ++i) {
+    iree_allocator_free(host_allocator, serialized_specs[i].data);
+  }
+  iree_allocator_free(host_allocator, serialized_specs);
+  return status;
+}
 
 IREE_API_EXPORT iree_status_t iree_hal_remote_server_create(
     const iree_hal_remote_server_options_t* options,
@@ -211,6 +323,14 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_server_create(
       server->devices[i] = devices[i];
       iree_hal_device_retain(devices[i]);
     }
+    status = iree_hal_remote_server_create_device_catalog(
+        server->devices, server->device_count, host_allocator,
+        &server->bootstrap_device_catalog);
+  }
+
+  if (iree_status_is_ok(status)) {
+    server->local_topology.application_data =
+        iree_const_cast_byte_span(server->bootstrap_device_catalog);
 
     // Borrow infrastructure.
     server->proactor = proactor;
@@ -324,6 +444,7 @@ static void iree_hal_remote_server_destroy(iree_hal_remote_server_t* server) {
   for (iree_host_size_t i = 0; i < server->device_count; ++i) {
     iree_hal_device_release(server->devices[i]);
   }
+  iree_allocator_free(host_allocator, server->bootstrap_device_catalog.data);
 
   iree_slim_mutex_deinitialize(&server->session_mutex);
   iree_allocator_free(host_allocator, server);

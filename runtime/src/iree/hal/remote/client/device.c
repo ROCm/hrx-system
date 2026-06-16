@@ -19,9 +19,11 @@
 #include "iree/hal/remote/client/queue.h"
 #include "iree/hal/remote/client/semaphore.h"
 #include "iree/hal/remote/client/slab_provider.h"
+#include "iree/hal/remote/protocol/bootstrap.h"
 #include "iree/hal/remote/protocol/control.h"
 #include "iree/hal/remote/protocol/queue.h"
 #include "iree/hal/remote/util/recv_pool.h"
+#include "iree/hal/utils/device_spec_builder.h"
 #include "iree/net/bootstrap.h"
 #include "iree/net/channel/bulk/bulk_channel.h"
 #include "iree/net/channel/queue/queue_channel.h"
@@ -188,6 +190,12 @@ IREE_API_EXPORT iree_status_t iree_hal_remote_client_device_create(
         IREE_HAL_REMOTE_CLIENT_RESOURCE_SET_BLOCK_SIZE, host_allocator,
         &device->resource_set_block_pool);
 
+    status = iree_hal_device_spec_create_minimal(
+        identifier, identifier, IREE_SV("remote"), IREE_SV("remote"),
+        host_allocator, &device->device_spec);
+  }
+
+  if (iree_status_is_ok(status)) {
     device->recv_pool = recv_pool;
     iree_hal_remote_recv_pool_retain(recv_pool);
     device->proactor = iree_hal_remote_recv_pool_proactor(recv_pool);
@@ -384,6 +392,7 @@ static void iree_hal_remote_client_device_destroy(
   iree_hal_remote_recv_pool_release(device->recv_pool);
   iree_async_frontier_tracker_release(device->frontier_tracker);
   iree_async_proactor_release(device->proactor);
+  iree_hal_device_spec_release(device->device_spec);
   iree_arena_block_pool_deinitialize(&device->resource_set_block_pool);
 
   iree_slim_mutex_deinitialize(&device->rpc_mutex);
@@ -413,13 +422,14 @@ static iree_hal_allocator_t* iree_hal_remote_client_device_allocator(
   return device->device_allocator;
 }
 
-static void iree_hal_remote_client_replace_device_allocator(
+static iree_status_t iree_hal_remote_client_replace_device_allocator(
     iree_hal_device_t* base_device, iree_hal_allocator_t* new_allocator) {
   iree_hal_remote_client_device_t* device =
       iree_hal_remote_client_device_cast(base_device);
   iree_hal_allocator_retain(new_allocator);
   iree_hal_allocator_release(device->device_allocator);
   device->device_allocator = new_allocator;
+  return iree_ok_status();
 }
 
 static void iree_hal_remote_client_replace_channel_provider(
@@ -441,32 +451,25 @@ static iree_status_t iree_hal_remote_client_device_trim(
   return iree_ok_status();
 }
 
-static iree_status_t iree_hal_remote_client_device_query_i64(
-    iree_hal_device_t* base_device, iree_string_view_t category,
-    iree_string_view_t key, int64_t* out_value) {
-  (void)base_device;
-  *out_value = 0;
-
-  // The remote device is a transparent proxy — it matches any device ID and
-  // executable format pattern. The server validates actual compatibility at
-  // executable upload time. This allows compiled modules to find the remote
-  // device regardless of which backend the server wraps.
-  if (iree_string_view_equal(category, IREE_SV("hal.device.id")) ||
-      iree_string_view_equal(category, IREE_SV("hal.executable.format"))) {
-    *out_value = 1;
-    return iree_ok_status();
-  }
-
-  // Other queries return 0 (unsupported/unknown). This is the standard
-  // behavior for queries the device doesn't recognize — not an error.
-  *out_value = 0;
-  return iree_ok_status();
+static const iree_hal_device_spec_t* iree_hal_remote_client_device_spec(
+    iree_hal_device_t* base_device) {
+  iree_hal_remote_client_device_t* device =
+      iree_hal_remote_client_device_cast(base_device);
+  return device->device_spec;
 }
 
-static iree_status_t iree_hal_remote_client_device_query_capabilities(
+static iree_status_t iree_hal_remote_client_device_sample_observation(
     iree_hal_device_t* base_device,
-    iree_hal_device_capabilities_t* out_capabilities) {
-  memset(out_capabilities, 0, sizeof(*out_capabilities));
+    iree_hal_device_observation_flags_t requested_flags,
+    iree_hal_device_observation_t* out_observation) {
+  iree_hal_remote_client_device_t* device =
+      iree_hal_remote_client_device_cast(base_device);
+  if (iree_any_bit_set(requested_flags,
+                       IREE_HAL_DEVICE_OBSERVATION_FLAG_MEMORY)) {
+    IREE_RETURN_IF_ERROR(
+        iree_hal_device_observation_populate_memory_total_from_spec(
+            device->device_spec, out_observation));
+  }
   return iree_ok_status();
 }
 
@@ -953,6 +956,27 @@ static void iree_hal_remote_client_device_on_session_ready(
       (iree_hal_remote_client_device_t*)user_data;
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  iree_hal_device_spec_t* remote_device_spec = NULL;
+  iree_status_t status = iree_hal_remote_bootstrap_device_catalog_parse_spec(
+      remote_topology->application_data, /*device_ordinal=*/0,
+      device->host_allocator, &remote_device_spec);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_remote_client_device_store_state(
+        device, IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_ERROR);
+    status = iree_status_join(
+        status,
+        iree_net_session_shutdown(session, IREE_STATUS_INVALID_ARGUMENT,
+                                  IREE_SV("invalid remote device catalog")));
+    iree_hal_remote_client_device_complete_connect(device, status);
+    IREE_TRACE_ZONE_END(z0);
+    return;
+  }
+
+  iree_hal_device_spec_t* old_device_spec = device->device_spec;
+  device->device_spec = remote_device_spec;
+  remote_device_spec = NULL;
+  iree_hal_device_spec_release(old_device_spec);
+
   // Save the remote queue axis for building signal frontiers.
   // The server's topology must have at least one axis (the queue axis).
   if (remote_topology->axis_count > 0) {
@@ -974,8 +998,7 @@ static void iree_hal_remote_client_device_on_session_ready(
       .fn = iree_hal_remote_client_device_on_queue_endpoint_ready,
       .user_data = device,
   };
-  iree_status_t status =
-      iree_net_session_open_endpoint(session, endpoint_callback);
+  status = iree_net_session_open_endpoint(session, endpoint_callback);
   if (!iree_status_is_ok(status)) {
     iree_hal_remote_client_device_store_state(
         device, IREE_HAL_REMOTE_CLIENT_DEVICE_STATE_ERROR);
@@ -1610,8 +1633,8 @@ static const iree_hal_device_vtable_t iree_hal_remote_client_device_vtable = {
     .replace_device_allocator = iree_hal_remote_client_replace_device_allocator,
     .replace_channel_provider = iree_hal_remote_client_replace_channel_provider,
     .trim = iree_hal_remote_client_device_trim,
-    .query_i64 = iree_hal_remote_client_device_query_i64,
-    .query_capabilities = iree_hal_remote_client_device_query_capabilities,
+    .device_spec = iree_hal_remote_client_device_spec,
+    .sample_observation = iree_hal_remote_client_device_sample_observation,
     .topology_info = iree_hal_remote_client_device_topology_info,
     .refine_topology_edge = iree_hal_remote_client_device_refine_topology_edge,
     .assign_topology_info = iree_hal_remote_client_device_assign_topology_info,

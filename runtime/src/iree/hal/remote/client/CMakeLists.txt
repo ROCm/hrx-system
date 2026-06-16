@@ -59,6 +59,7 @@ iree_cc_library(
     iree::base::threading
     iree::hal
     iree::hal::memory::slab_provider
+    iree::hal::remote::protocol::bootstrap
     iree::hal::remote::protocol::commands
     iree::hal::remote::protocol::common
     iree::hal::remote::protocol::control
@@ -68,6 +69,7 @@ iree_cc_library(
     iree::hal::remote::util::bulk_transfer_tracker
     iree::hal::remote::util::queue_header_pool
     iree::hal::remote::util::recv_pool
+    iree::hal::utils::device_spec_builder
     iree::hal::utils::files
     iree::hal::utils::resource_set
     iree::io::file_handle

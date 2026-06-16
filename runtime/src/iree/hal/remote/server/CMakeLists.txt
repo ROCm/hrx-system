@@ -94,6 +94,7 @@ iree_cc_library(
     iree::base::internal::path
     iree::base::threading
     iree::hal
+    iree::hal::remote::protocol::bootstrap
     iree::hal::remote::protocol::commands
     iree::hal::remote::protocol::common
     iree::hal::remote::protocol::control

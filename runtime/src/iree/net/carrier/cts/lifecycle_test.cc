@@ -144,7 +144,7 @@ TEST_P(LifecycleTest, ProactorReuse) {
 
   // Now create a second carrier pair on the SAME proactor. If the first pair's
   // io_uring operations weren't fully drained, stale CQEs will fire here and
-  // dereference freed memory (the original bd-hajy bug).
+  // dereference freed memory.
   auto result = backend.factory(shared_proactor);
   if (!result.ok()) {
     // Some backends may not support proactor reuse; skip gracefully.

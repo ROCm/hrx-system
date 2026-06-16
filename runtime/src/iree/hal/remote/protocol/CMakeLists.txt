@@ -11,6 +11,30 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
+    bootstrap
+  HDRS
+    "bootstrap.h"
+  SRCS
+    "bootstrap.c"
+  DEPS
+    iree::base
+    iree::hal
+  PUBLIC
+)
+
+iree_cc_fuzz(
+  NAME
+    bootstrap_fuzz
+  SRCS
+    "bootstrap_fuzz.cc"
+  DEPS
+    ::bootstrap
+    iree::base
+    iree::hal
+)
+
+iree_cc_library(
+  NAME
     commands
   HDRS
     "commands.h"

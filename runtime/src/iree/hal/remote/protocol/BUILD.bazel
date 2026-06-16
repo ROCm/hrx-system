@@ -8,11 +8,32 @@
 # structs for control messages, queue operations, and command buffer commands.
 
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:cc_fuzz.bzl", "iree_runtime_cc_fuzz")
 
 package(
     default_visibility = ["//visibility:public"],
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
+)
+
+iree_runtime_cc_library(
+    name = "bootstrap",
+    srcs = ["bootstrap.c"],
+    hdrs = ["bootstrap.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_fuzz(
+    name = "bootstrap_fuzz",
+    srcs = ["bootstrap_fuzz.cc"],
+    deps = [
+        ":bootstrap",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
 )
 
 iree_runtime_cc_library(

@@ -111,7 +111,7 @@ extern "C" {
 //===----------------------------------------------------------------------===//
 
 // Current bootstrap protocol version.
-#define IREE_NET_BOOTSTRAP_PROTOCOL_VERSION 1
+#define IREE_NET_BOOTSTRAP_PROTOCOL_VERSION 2
 
 //===----------------------------------------------------------------------===//
 // Bootstrap message types
@@ -191,7 +191,8 @@ static_assert(sizeof(iree_net_bootstrap_axis_entry_t) == 16, "");
 //
 // Followed by |axis_count| iree_net_bootstrap_axis_entry_t entries describing
 // the client's local axes (device queues, host contexts, etc.) that the server
-// needs to track for causal ordering.
+// needs to track for causal ordering. Opaque application data follows the axis
+// entries and is padded to 8-byte alignment.
 typedef struct iree_net_bootstrap_hello_t {
   // Must be IREE_NET_BOOTSTRAP_TYPE_HELLO.
   iree_net_bootstrap_header_t header;
@@ -214,8 +215,11 @@ typedef struct iree_net_bootstrap_hello_t {
 
   // Must be zero.
   uint32_t reserved;
+
+  // Number of application-defined bytes following the axis entries.
+  uint64_t application_data_length;
 } iree_net_bootstrap_hello_t;
-static_assert(sizeof(iree_net_bootstrap_hello_t) == 24, "");
+static_assert(sizeof(iree_net_bootstrap_hello_t) == 32, "");
 
 //===----------------------------------------------------------------------===//
 // HELLO_ACK (server -> client)
@@ -225,7 +229,8 @@ static_assert(sizeof(iree_net_bootstrap_hello_t) == 24, "");
 //
 // Followed by |axis_count| iree_net_bootstrap_axis_entry_t entries describing
 // the server's axes that the client needs to track. The client creates proxy
-// semaphores for each and registers them in its frontier_tracker.
+// semaphores for each and registers them in its frontier_tracker. Opaque
+// application data follows the axis entries and is padded to 8-byte alignment.
 typedef struct iree_net_bootstrap_hello_ack_t {
   // Must be IREE_NET_BOOTSTRAP_TYPE_HELLO_ACK.
   iree_net_bootstrap_header_t header;
@@ -233,6 +238,9 @@ typedef struct iree_net_bootstrap_hello_ack_t {
   // Server-generated session identifier. Opaque to the client. Would be used
   // with JOIN messages for multi-connection sessions (future).
   uint64_t session_id;
+
+  // Number of application-defined bytes following the axis entries.
+  uint64_t application_data_length;
 
   // Intersection of client and server capabilities. The session operates with
   // only these features enabled.
@@ -247,7 +255,7 @@ typedef struct iree_net_bootstrap_hello_ack_t {
   // Number of axis entries following this struct.
   uint16_t axis_count;
 } iree_net_bootstrap_hello_ack_t;
-static_assert(sizeof(iree_net_bootstrap_hello_ack_t) == 24, "");
+static_assert(sizeof(iree_net_bootstrap_hello_ack_t) == 32, "");
 
 //===----------------------------------------------------------------------===//
 // REJECT (server -> client)

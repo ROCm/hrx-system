@@ -81,6 +81,9 @@ struct iree_hal_remote_server_t {
   // Used to populate session options for each accepted connection.
   iree_net_session_topology_t local_topology;
 
+  // Serialized device catalog advertised in session bootstrap application data.
+  iree_byte_span_t bootstrap_device_catalog;
+
   // Trailing storage layout:
   //   char bind_address_storage[options.bind_address.size]
   //   iree_async_axis_t local_axes[local_topology.axis_count]

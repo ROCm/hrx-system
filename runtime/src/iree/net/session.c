@@ -176,6 +176,8 @@ struct iree_net_session_t {
   uint32_t local_axis_count;
   uint8_t local_machine_index;
   uint8_t local_session_epoch;
+  uint8_t* local_application_data;
+  iree_host_size_t local_application_data_length;
 
   // Remote topology (allocated during bootstrap).
   iree_async_axis_t* remote_axes;
@@ -226,6 +228,46 @@ static iree_status_t iree_net_session_validate_required_capabilities(
       "negotiated=0x%08x missing=0x%08x",
       session->required_capabilities, session->negotiated_capabilities,
       missing_capabilities);
+}
+
+static iree_status_t iree_net_session_bootstrap_payload_layout(
+    iree_host_size_t header_size, uint32_t axis_count,
+    iree_host_size_t application_data_length,
+    iree_host_size_t* out_application_data_offset,
+    iree_host_size_t* out_payload_size) {
+  iree_host_size_t axis_entries_size = 0;
+  if (!iree_host_size_checked_mul(axis_count,
+                                  sizeof(iree_net_bootstrap_axis_entry_t),
+                                  &axis_entries_size)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "bootstrap axis entry size overflow");
+  }
+
+  iree_host_size_t application_data_offset = 0;
+  if (!iree_host_size_checked_add(header_size, axis_entries_size,
+                                  &application_data_offset)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "bootstrap payload header size overflow");
+  }
+
+  iree_host_size_t padded_application_data_length = 0;
+  if (!iree_host_size_checked_align(application_data_length, 8,
+                                    &padded_application_data_length)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "bootstrap application data size overflow");
+  }
+
+  iree_host_size_t payload_size = 0;
+  if (!iree_host_size_checked_add(application_data_offset,
+                                  padded_application_data_length,
+                                  &payload_size)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "bootstrap payload size overflow");
+  }
+
+  *out_application_data_offset = application_data_offset;
+  *out_payload_size = payload_size;
+  return iree_ok_status();
 }
 
 //===----------------------------------------------------------------------===//
@@ -477,22 +519,28 @@ static void iree_net_session_cleanup_remote_axes(iree_net_session_t* session) {
 static iree_status_t iree_net_session_send_hello(iree_net_session_t* session) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  iree_host_size_t payload_size =
-      sizeof(iree_net_bootstrap_hello_t) +
-      session->local_axis_count * sizeof(iree_net_bootstrap_axis_entry_t);
+  iree_host_size_t application_data_offset = 0;
+  iree_host_size_t payload_size = 0;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_net_session_bootstrap_payload_layout(
+              sizeof(iree_net_bootstrap_hello_t), session->local_axis_count,
+              session->local_application_data_length, &application_data_offset,
+              &payload_size));
   uint8_t* buffer = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_allocator_malloc(session->host_allocator, payload_size,
                                 (void**)&buffer));
+  memset(buffer, 0, payload_size);
 
   iree_net_bootstrap_hello_t* hello = (iree_net_bootstrap_hello_t*)buffer;
-  memset(hello, 0, sizeof(*hello));
   hello->header.type = IREE_NET_BOOTSTRAP_TYPE_HELLO;
   hello->protocol_version = session->protocol_version;
   hello->capabilities = session->capabilities;
   hello->machine_index = session->local_machine_index;
   hello->session_epoch = session->local_session_epoch;
   hello->axis_count = (uint16_t)session->local_axis_count;
+  hello->application_data_length =
+      (uint64_t)session->local_application_data_length;
 
   iree_net_bootstrap_axis_entry_t* entries =
       (iree_net_bootstrap_axis_entry_t*)(buffer +
@@ -500,6 +548,10 @@ static iree_status_t iree_net_session_send_hello(iree_net_session_t* session) {
   for (uint32_t i = 0; i < session->local_axis_count; ++i) {
     entries[i].axis = (uint64_t)session->local_axes[i];
     entries[i].current_epoch = session->local_epochs[i];
+  }
+  if (session->local_application_data_length > 0) {
+    memcpy(buffer + application_data_offset, session->local_application_data,
+           session->local_application_data_length);
   }
 
   // Send with zero-copy payload. The buffer must remain valid until the
@@ -532,22 +584,28 @@ static iree_status_t iree_net_session_send_hello_ack(
     iree_net_session_t* session) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  iree_host_size_t payload_size =
-      sizeof(iree_net_bootstrap_hello_ack_t) +
-      session->local_axis_count * sizeof(iree_net_bootstrap_axis_entry_t);
+  iree_host_size_t application_data_offset = 0;
+  iree_host_size_t payload_size = 0;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_net_session_bootstrap_payload_layout(
+              sizeof(iree_net_bootstrap_hello_ack_t), session->local_axis_count,
+              session->local_application_data_length, &application_data_offset,
+              &payload_size));
   uint8_t* buffer = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_allocator_malloc(session->host_allocator, payload_size,
                                 (void**)&buffer));
+  memset(buffer, 0, payload_size);
 
   iree_net_bootstrap_hello_ack_t* ack = (iree_net_bootstrap_hello_ack_t*)buffer;
-  memset(ack, 0, sizeof(*ack));
   ack->header.type = IREE_NET_BOOTSTRAP_TYPE_HELLO_ACK;
   ack->session_id = session->session_id;
   ack->negotiated_capabilities = session->negotiated_capabilities;
   ack->machine_index = session->local_machine_index;
   ack->session_epoch = session->local_session_epoch;
   ack->axis_count = (uint16_t)session->local_axis_count;
+  ack->application_data_length =
+      (uint64_t)session->local_application_data_length;
 
   iree_net_bootstrap_axis_entry_t* entries =
       (iree_net_bootstrap_axis_entry_t*)(buffer +
@@ -556,6 +614,10 @@ static iree_status_t iree_net_session_send_hello_ack(
   for (uint32_t i = 0; i < session->local_axis_count; ++i) {
     entries[i].axis = (uint64_t)session->local_axes[i];
     entries[i].current_epoch = session->local_epochs[i];
+  }
+  if (session->local_application_data_length > 0) {
+    memcpy(buffer + application_data_offset, session->local_application_data,
+           session->local_application_data_length);
   }
 
   // Send with zero-copy payload. Buffer is freed on completion.
@@ -581,7 +643,7 @@ static iree_status_t iree_net_session_send_hello_ack(
 static void iree_net_session_complete_bootstrap(
     iree_net_session_t* session, const iree_net_bootstrap_axis_entry_t* entries,
     uint32_t axis_count, uint8_t remote_machine_index,
-    uint8_t remote_session_epoch) {
+    uint8_t remote_session_epoch, iree_const_byte_span_t application_data) {
   // Guard: if the session was failed during bootstrap (e.g., bootstrap timeout
   // expired while messages were in flight), do not transition to OPERATIONAL.
   if (iree_net_session_load_state(session) == IREE_NET_SESSION_STATE_ERROR) {
@@ -609,6 +671,7 @@ static void iree_net_session_complete_bootstrap(
   remote_topology.axes = session->remote_axes;
   remote_topology.current_epochs = session->remote_epochs;
   remote_topology.axis_count = session->remote_axis_count;
+  remote_topology.application_data = application_data;
   remote_topology.machine_index = session->remote_machine_index;
   remote_topology.session_epoch = session->remote_session_epoch;
 
@@ -646,17 +709,30 @@ static iree_status_t iree_net_session_handle_hello(
                             IREE_NET_BOOTSTRAP_PROTOCOL_VERSION);
   }
 
-  // Validate axis entries fit in the payload.
-  iree_host_size_t expected_size = sizeof(iree_net_bootstrap_hello_t) +
-                                   (iree_host_size_t)hello.axis_count *
-                                       sizeof(iree_net_bootstrap_axis_entry_t);
+  if (hello.application_data_length > (uint64_t)IREE_HOST_SIZE_MAX) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "HELLO application data length exceeds host size: %" PRIu64,
+        hello.application_data_length);
+  }
+
+  iree_host_size_t application_data_offset = 0;
+  iree_host_size_t expected_size = 0;
+  IREE_RETURN_IF_ERROR(iree_net_session_bootstrap_payload_layout(
+      sizeof(iree_net_bootstrap_hello_t), hello.axis_count,
+      (iree_host_size_t)hello.application_data_length, &application_data_offset,
+      &expected_size));
   if (payload.data_length < expected_size) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "HELLO payload too short for %u axes: %" PRIhsz
-                            " bytes (need %" PRIhsz ")",
-                            hello.axis_count, payload.data_length,
-                            expected_size);
+                            "HELLO payload too short: %" PRIhsz
+                            " bytes (need %" PRIhsz " for %u axes and %" PRIu64
+                            " application bytes)",
+                            payload.data_length, expected_size,
+                            hello.axis_count, hello.application_data_length);
   }
+  iree_const_byte_span_t application_data = iree_make_const_byte_span(
+      payload.data + application_data_offset,
+      (iree_host_size_t)hello.application_data_length);
 
   // Negotiate capabilities.
   session->negotiated_capabilities = hello.capabilities & session->capabilities;
@@ -675,7 +751,8 @@ static iree_status_t iree_net_session_handle_hello(
                                                sizeof(
                                                    iree_net_bootstrap_hello_t));
   iree_net_session_complete_bootstrap(session, entries, hello.axis_count,
-                                      hello.machine_index, hello.session_epoch);
+                                      hello.machine_index, hello.session_epoch,
+                                      application_data);
 
   // complete_bootstrap may have called fail() internally. Propagate the error
   // so the control channel knows to shut down.
@@ -706,16 +783,30 @@ static iree_status_t iree_net_session_handle_hello_ack(
   iree_net_bootstrap_hello_ack_t ack;
   memcpy(&ack, payload.data, sizeof(ack));
 
-  // Validate axis entries fit in the payload.
-  iree_host_size_t expected_size = sizeof(iree_net_bootstrap_hello_ack_t) +
-                                   (iree_host_size_t)ack.axis_count *
-                                       sizeof(iree_net_bootstrap_axis_entry_t);
+  if (ack.application_data_length > (uint64_t)IREE_HOST_SIZE_MAX) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "HELLO_ACK application data length exceeds host size: %" PRIu64,
+        ack.application_data_length);
+  }
+
+  iree_host_size_t application_data_offset = 0;
+  iree_host_size_t expected_size = 0;
+  IREE_RETURN_IF_ERROR(iree_net_session_bootstrap_payload_layout(
+      sizeof(iree_net_bootstrap_hello_ack_t), ack.axis_count,
+      (iree_host_size_t)ack.application_data_length, &application_data_offset,
+      &expected_size));
   if (payload.data_length < expected_size) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "HELLO_ACK payload too short for %u axes: %" PRIhsz
-                            " bytes (need %" PRIhsz ")",
-                            ack.axis_count, payload.data_length, expected_size);
+                            "HELLO_ACK payload too short: %" PRIhsz
+                            " bytes (need %" PRIhsz " for %u axes and %" PRIu64
+                            " application bytes)",
+                            payload.data_length, expected_size, ack.axis_count,
+                            ack.application_data_length);
   }
+  iree_const_byte_span_t application_data =
+      iree_make_const_byte_span(payload.data + application_data_offset,
+                                (iree_host_size_t)ack.application_data_length);
 
   session->session_id = ack.session_id;
   session->negotiated_capabilities = ack.negotiated_capabilities;
@@ -728,7 +819,8 @@ static iree_status_t iree_net_session_handle_hello_ack(
                                                sizeof(
                                                    iree_net_bootstrap_hello_ack_t));
   iree_net_session_complete_bootstrap(session, entries, ack.axis_count,
-                                      ack.machine_index, ack.session_epoch);
+                                      ack.machine_index, ack.session_epoch,
+                                      application_data);
 
   // complete_bootstrap may have called fail() internally.
   if (iree_net_session_load_state(session) == IREE_NET_SESSION_STATE_ERROR) {
@@ -1117,13 +1209,28 @@ static iree_status_t iree_net_session_create_common(
         "local axis count %u exceeds wire format maximum %u", local_axis_count,
         (uint32_t)UINT16_MAX);
   }
+  iree_host_size_t local_application_data_length =
+      options->local_topology.application_data.data_length;
+  if (local_application_data_length > 0 &&
+      !options->local_topology.application_data.data) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "local application data must have storage when "
+                            "data_length is nonzero");
+  }
 
   // Compute allocation size for session + local topology arrays.
-  iree_host_size_t local_axes_size =
-      local_axis_count * sizeof(iree_async_axis_t);
-  iree_host_size_t local_epochs_size = local_axis_count * sizeof(uint64_t);
-  iree_host_size_t total_size =
-      sizeof(iree_net_session_t) + local_axes_size + local_epochs_size;
+  iree_host_size_t local_axes_offset = 0;
+  iree_host_size_t local_epochs_offset = 0;
+  iree_host_size_t local_application_data_offset = 0;
+  iree_host_size_t total_size = 0;
+  IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
+      sizeof(iree_net_session_t), &total_size,
+      IREE_STRUCT_FIELD_ALIGNED(local_axis_count, iree_async_axis_t,
+                                iree_alignof(iree_async_axis_t),
+                                &local_axes_offset),
+      IREE_STRUCT_FIELD(local_axis_count, uint64_t, &local_epochs_offset),
+      IREE_STRUCT_FIELD(local_application_data_length, uint8_t,
+                        &local_application_data_offset)));
 
   iree_net_session_t* session = NULL;
   IREE_RETURN_IF_ERROR(
@@ -1151,17 +1258,26 @@ static iree_status_t iree_net_session_create_common(
   session->bootstrap_timeout_ns = options->bootstrap_timeout_ns;
 
   // Copy local topology into trailing storage.
-  uint8_t* trailing = (uint8_t*)session + sizeof(iree_net_session_t);
-  session->local_axes = (iree_async_axis_t*)trailing;
-  session->local_epochs = (uint64_t*)(trailing + local_axes_size);
+  session->local_axes =
+      (iree_async_axis_t*)((uint8_t*)session + local_axes_offset);
+  session->local_epochs = (uint64_t*)((uint8_t*)session + local_epochs_offset);
   session->local_axis_count = local_axis_count;
   session->local_machine_index = options->local_topology.machine_index;
   session->local_session_epoch = options->local_topology.session_epoch;
+  session->local_application_data =
+      (uint8_t*)session + local_application_data_offset;
+  session->local_application_data_length = local_application_data_length;
 
   if (local_axis_count > 0) {
-    memcpy(session->local_axes, options->local_topology.axes, local_axes_size);
+    memcpy(session->local_axes, options->local_topology.axes,
+           local_axis_count * sizeof(iree_async_axis_t));
     memcpy(session->local_epochs, options->local_topology.current_epochs,
-           local_epochs_size);
+           local_axis_count * sizeof(uint64_t));
+  }
+  if (local_application_data_length > 0) {
+    memcpy(session->local_application_data,
+           options->local_topology.application_data.data,
+           local_application_data_length);
   }
 
   *out_session = session;
