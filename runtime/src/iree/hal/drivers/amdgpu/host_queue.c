@@ -1371,6 +1371,50 @@ static iree_status_t iree_hal_amdgpu_host_queue_fill(
   return iree_hal_amdgpu_host_queue_op_submission_end(&submission, status);
 }
 
+static iree_status_t iree_hal_amdgpu_host_queue_capture_timestamp(
+    iree_hal_amdgpu_virtual_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_capture_timestamp_flags_t flags) {
+  iree_hal_amdgpu_host_queue_t* queue =
+      (iree_hal_amdgpu_host_queue_t*)base_queue;
+
+  // Device-side timestamps require a PM4 GPU-clock copy. If the queue cannot
+  // emit one there is no device path; report UNIMPLEMENTED before deferring so
+  // callers can fall back to a host-observed timestamp.
+  if (!queue->pm4_ib_slots ||
+      iree_hal_amdgpu_pm4_copy_timestamp_control(
+          queue->pm4_timestamp_strategy) == 0) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "queue does not support device-side timestamp capture");
+  }
+
+  iree_hal_amdgpu_host_queue_op_submission_t submission;
+  iree_hal_amdgpu_host_queue_op_submission_begin(queue, wait_semaphore_list,
+                                                 &submission);
+  iree_status_t status = iree_ok_status();
+  if (submission.resolution.needs_deferral) {
+    status = iree_hal_amdgpu_host_queue_defer_capture_timestamp(
+        queue, &wait_semaphore_list, &signal_semaphore_list, target_buffer,
+        target_offset, flags, &submission.deferred_op);
+  } else {
+    status = iree_hal_amdgpu_host_queue_submit_capture_timestamp(
+        queue, &submission.resolution, signal_semaphore_list, target_buffer,
+        target_offset, flags,
+        IREE_HAL_AMDGPU_HOST_QUEUE_SUBMISSION_FLAG_RETAIN_RESOURCES,
+        &submission.ready);
+    if (iree_status_is_ok(status) && !submission.ready) {
+      status = iree_hal_amdgpu_host_queue_defer_capture_timestamp(
+          queue, &wait_semaphore_list, &signal_semaphore_list, target_buffer,
+          target_offset, flags, &submission.deferred_op);
+      iree_hal_amdgpu_host_queue_op_submission_defer_for_capacity(&submission);
+    }
+  }
+  return iree_hal_amdgpu_host_queue_op_submission_end(&submission, status);
+}
+
 iree_status_t iree_hal_amdgpu_host_queue_copy_buffer(
     iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -1682,5 +1726,6 @@ static const iree_hal_amdgpu_virtual_queue_vtable_t
         .host_call = iree_hal_amdgpu_host_queue_host_call,
         .dispatch = iree_hal_amdgpu_host_queue_dispatch,
         .execute = iree_hal_amdgpu_host_queue_execute,
+        .capture_timestamp = iree_hal_amdgpu_host_queue_capture_timestamp,
         .flush = iree_hal_amdgpu_host_queue_flush,
 };

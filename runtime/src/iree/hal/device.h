@@ -939,6 +939,35 @@ IREE_API_EXPORT iree_status_t iree_hal_device_queue_barrier(
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_execute_flags_t flags);
 
+// Flags controlling iree_hal_device_queue_capture_timestamp behavior.
+typedef uint64_t iree_hal_capture_timestamp_flags_t;
+enum iree_hal_capture_timestamp_flag_bits_t {
+  IREE_HAL_CAPTURE_TIMESTAMP_FLAG_NONE = 0u,
+};
+
+// Enqueues a device-side timestamp capture at the point in the |queue_affinity|
+// timeline reached after |wait_semaphore_list| is satisfied, signaling
+// |signal_semaphore_list| when that point is reached. A single 64-bit device
+// timestamp tick is written by the device into |target_buffer| at
+// |target_offset|. The target must be 8-byte aligned and have at least 8 bytes
+// of host-visible storage usable as a transfer target.
+//
+// The captured value is in the device timestamp domain. Convert a delta between
+// two captures to nanoseconds by dividing by the tick frequency reported in
+// iree_hal_device_spec_timing()->timestamp_frequency_hz (populated when the
+// IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DEVICE_TIMESTAMPS capability is set). Callers
+// must wait on |signal_semaphore_list| before reading the tick back from
+// |target_buffer|.
+//
+// Returns IREE_STATUS_UNIMPLEMENTED if the device does not support device-side
+// timestamp capture; callers should fall back to a host-observed timestamp.
+IREE_API_EXPORT iree_status_t iree_hal_device_queue_capture_timestamp(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_capture_timestamp_flags_t flags);
+
 // Flushes any locally-pending submissions in the queue.
 // When submitting many queue operations this can be used to eagerly flush
 // earlier submissions while later ones are still being constructed.
@@ -1219,6 +1248,15 @@ typedef struct iree_hal_device_vtable_t {
 
   iree_status_t(IREE_API_PTR* queue_flush)(
       iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity);
+
+  // Optional: may be NULL if the device does not support device-side timestamp
+  // capture. The generic wrapper returns IREE_STATUS_UNIMPLEMENTED when unset.
+  iree_status_t(IREE_API_PTR* queue_capture_timestamp)(
+      iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+      const iree_hal_semaphore_list_t wait_semaphore_list,
+      const iree_hal_semaphore_list_t signal_semaphore_list,
+      iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+      iree_hal_capture_timestamp_flags_t flags);
 
   iree_status_t(IREE_API_PTR* profiling_begin)(
       iree_hal_device_t* device,
