@@ -699,6 +699,7 @@ HRX_API hrx_status_t hrx_stream_execution_barrier(hrx_stream_t stream);
 // Load native executable packages and inspect export metadata for direct
 // dispatch. Kernel tensor/storage arguments should be passed as bindings;
 // scalars, strides, and sizes should be packed into the constants block.
+// Callers must pass the exact HAL executable format for the package.
 //===----------------------------------------------------------------------===//
 
 HRX_API hrx_status_t hrx_executable_load_data(hrx_device_t device,

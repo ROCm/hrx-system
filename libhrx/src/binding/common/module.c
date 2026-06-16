@@ -415,9 +415,10 @@ iree_status_t iree_hal_streaming_module_create_from_memory(
   // HIP / CUDA hand us anything the toolchain emits — raw AMDGPU ELFs,
   // __CLANG_OFFLOAD_BUNDLE__ archives, CCOB (zstd-compressed bundles), and
   // __hipFatBinaryWrapper-wrapped combinations of all of the above. Unwrap
-  // everything here and only forward a raw ELF (or native flatbuffer) to
-  // the HAL executable cache, which knows how to deal with just those two.
+  // everything here and only forward raw ELF plus an explicit executable
+  // format to the HAL executable cache.
   iree_const_byte_span_t executable_data = image;
+  const char* executable_format = NULL;
   const bool try_fat_unwrap = context->device_entry != NULL &&
                               iree_hal_streaming_fat_binary_is_supported(image);
   iree_status_t status = iree_ok_status();
@@ -436,18 +437,12 @@ iree_status_t iree_hal_streaming_module_create_from_memory(
       // kernels). Load all of them below and merge their exports into one HIP
       // module namespace.
       executable_data = module->fat_extract.matches[0].data;
+      executable_format = module->fat_extract.matches[0].executable_format;
     }
-  }
-
-  // Attempt to infer the file format and size.
-  // A good API would take that in as otherwise we're trusting arbitrary user
-  // data.
-  char executable_format[64];
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_executable_cache_infer_format(
-        context->executable_cache, caching_mode, executable_data,
-        sizeof(executable_format), executable_format,
-        &executable_data.data_length);
+  } else {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "module binary is not a supported HRX AMDGPU "
+                              "ELF, offload bundle, CCOB, or HIP fat binary");
   }
 
   // Create HAL executable from binary.
@@ -478,16 +473,12 @@ iree_status_t iree_hal_streaming_module_create_from_memory(
     for (iree_host_size_t i = 1;
          iree_status_is_ok(status) && i < module->executable_count; ++i) {
       iree_const_byte_span_t match_data = module->fat_extract.matches[i].data;
-      char match_format[64];
-      status = iree_hal_executable_cache_infer_format(
-          context->executable_cache, caching_mode, match_data,
-          sizeof(match_format), match_format, &match_data.data_length);
-      if (!iree_status_is_ok(status)) break;
 
       iree_hal_executable_params_t params;
       iree_hal_executable_params_initialize(&params);
       params.caching_mode = caching_mode;
-      params.executable_format = iree_make_cstring_view(match_format);
+      params.executable_format = iree_make_cstring_view(
+          module->fat_extract.matches[i].executable_format);
       params.executable_data = match_data;
       status = iree_hal_executable_cache_prepare_executable(
           module->cache, &params, &module->executables[i]);

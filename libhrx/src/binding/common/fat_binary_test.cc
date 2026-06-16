@@ -49,7 +49,8 @@ struct Elf64Header {
 
 static_assert(sizeof(Elf64Header) == 64, "ELF64 header must be 64 bytes");
 
-std::vector<uint8_t> MakeMinimalAmdgpuElf() {
+std::vector<uint8_t> MakeMinimalAmdgpuElf(uint32_t machine = 0x041,
+                                          uint32_t generic_version = 0) {
   Elf64Header header = {};
   header.magic[0] = 0x7f;
   header.magic[1] = 'E';
@@ -57,11 +58,20 @@ std::vector<uint8_t> MakeMinimalAmdgpuElf() {
   header.magic[3] = 'F';
   header.elf_class = 2;
   header.elf_data = 1;
+  header.elf_version = 1;
+  header.osabi = 64;
+  header.abiversion = 4;
   header.machine = 224;
+  header.version = 1;
   header.shoff = sizeof(Elf64Header);
+  header.flags = machine | (generic_version << 24);
   std::vector<uint8_t> elf(sizeof(header), 0);
   memcpy(elf.data(), &header, sizeof(header));
   return elf;
+}
+
+std::vector<uint8_t> MakeMinimalGenericAmdgpuElf(uint32_t machine) {
+  return MakeMinimalAmdgpuElf(machine, /*generic_version=*/1);
 }
 
 void AppendBytes(std::vector<uint8_t>& buffer, const void* data,
@@ -110,10 +120,11 @@ std::string TripleString(const iree_hal_streaming_fat_binary_elf_t& match) {
 }
 
 TEST(FatBinaryTest, SelectsExactTargetBeforeGeneric) {
-  const auto elf = MakeMinimalAmdgpuElf();
+  const auto generic_elf = MakeMinimalGenericAmdgpuElf(/*machine=*/0x054);
+  const auto exact_elf = MakeMinimalAmdgpuElf(/*machine=*/0x041);
   std::vector<uint8_t> bundle = MakeBundle({
-      {"hipv4-amdgcn-amd-amdhsa--gfx11-generic", elf},
-      {"hipv4-amdgcn-amd-amdhsa--gfx1100", elf},
+      {"hipv4-amdgcn-amd-amdhsa--gfx11-generic", generic_elf},
+      {"hipv4-amdgcn-amd-amdhsa--gfx1100", exact_elf},
   });
 
   const iree_hal_streaming_fat_binary_target_t targets[] = {
@@ -128,11 +139,12 @@ TEST(FatBinaryTest, SelectsExactTargetBeforeGeneric) {
   EXPECT_EQ(extract.match_count, 1);
   EXPECT_EQ(TripleString(extract.matches[0]),
             "hipv4-amdgcn-amd-amdhsa--gfx1100");
+  EXPECT_STREQ(extract.matches[0].executable_format, "gfx1100");
   iree_hal_streaming_fat_binary_extract_reset(&extract);
 }
 
 TEST(FatBinaryTest, FallsBackToGenericTarget) {
-  const auto elf = MakeMinimalAmdgpuElf();
+  const auto elf = MakeMinimalGenericAmdgpuElf(/*machine=*/0x054);
   std::vector<uint8_t> bundle =
       MakeBundle({{"hipv4-amdgcn-amd-amdhsa--gfx11-generic", elf}});
 
@@ -148,11 +160,12 @@ TEST(FatBinaryTest, FallsBackToGenericTarget) {
   EXPECT_EQ(extract.match_count, 1);
   EXPECT_EQ(TripleString(extract.matches[0]),
             "hipv4-amdgcn-amd-amdhsa--gfx11-generic");
+  EXPECT_STREQ(extract.matches[0].executable_format, "gfx11-generic");
   iree_hal_streaming_fat_binary_extract_reset(&extract);
 }
 
 TEST(FatBinaryTest, MatchesBareGenericTarget) {
-  const auto elf = MakeMinimalAmdgpuElf();
+  const auto elf = MakeMinimalGenericAmdgpuElf(/*machine=*/0x054);
   std::vector<uint8_t> bundle = MakeBundle({{"gfx11-generic", elf}});
 
   const iree_hal_streaming_fat_binary_target_t targets[] = {
@@ -166,6 +179,7 @@ TEST(FatBinaryTest, MatchesBareGenericTarget) {
 
   EXPECT_EQ(extract.match_count, 1);
   EXPECT_EQ(TripleString(extract.matches[0]), "gfx11-generic");
+  EXPECT_STREQ(extract.matches[0].executable_format, "gfx11-generic");
   iree_hal_streaming_fat_binary_extract_reset(&extract);
 }
 

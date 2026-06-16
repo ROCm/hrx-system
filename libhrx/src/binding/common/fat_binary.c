@@ -12,6 +12,9 @@
 #include <zstd.h>
 #endif
 
+#define HRX_FAT_EXECUTABLE_FORMAT_CAPACITY \
+  IREE_HAL_STREAMING_FAT_BINARY_FORMAT_CAPACITY
+
 //===----------------------------------------------------------------------===//
 // Format magic & on-disk structures
 //===----------------------------------------------------------------------===//
@@ -36,7 +39,30 @@
 #define HRX_ELF_MAGIC_INT 0x464c457fu  // 0x7f 'E' 'L' 'F'
 #define HRX_ELFCLASS64 2
 #define HRX_ELFDATA2LSB 1
+#define HRX_ELFOSABI_HSA 64
 #define HRX_EM_AMDGPU 224
+#define HRX_EV_CURRENT 1
+
+#define HRX_ELF_HSA_ABI_VERSION_V3 1
+#define HRX_ELF_HSA_ABI_VERSION_V4 2
+#define HRX_ELF_HSA_ABI_VERSION_V5 3
+#define HRX_ELF_HSA_ABI_VERSION_V6 4
+
+#define HRX_EF_AMDGPU_MACH 0x0FFu
+#define HRX_EF_AMDGPU_FEATURE_XNACK_V3 0x100u
+#define HRX_EF_AMDGPU_FEATURE_SRAMECC_V3 0x200u
+#define HRX_EF_AMDGPU_FEATURE_XNACK_V4 0x300u
+#define HRX_EF_AMDGPU_FEATURE_XNACK_UNSUPPORTED_V4 0x000u
+#define HRX_EF_AMDGPU_FEATURE_XNACK_ANY_V4 0x100u
+#define HRX_EF_AMDGPU_FEATURE_XNACK_OFF_V4 0x200u
+#define HRX_EF_AMDGPU_FEATURE_XNACK_ON_V4 0x300u
+#define HRX_EF_AMDGPU_FEATURE_SRAMECC_V4 0xC00u
+#define HRX_EF_AMDGPU_FEATURE_SRAMECC_UNSUPPORTED_V4 0x000u
+#define HRX_EF_AMDGPU_FEATURE_SRAMECC_ANY_V4 0x400u
+#define HRX_EF_AMDGPU_FEATURE_SRAMECC_OFF_V4 0x800u
+#define HRX_EF_AMDGPU_FEATURE_SRAMECC_ON_V4 0xC00u
+#define HRX_EF_AMDGPU_GENERIC_VERSION 0xFF000000u
+#define HRX_EF_AMDGPU_GENERIC_VERSION_OFFSET 24
 
 #define HRX_CCOB_METHOD_ZLIB 0
 #define HRX_CCOB_METHOD_ZSTD 1
@@ -104,6 +130,34 @@ typedef struct hrx_elf64_header_t {
   uint16_t shnum;
   uint16_t shstrndx;
 } hrx_elf64_header_t;
+static_assert(sizeof(hrx_elf64_header_t) == 64,
+              "ELF64 header must be 64 bytes");
+
+typedef enum hrx_amdgpu_feature_state_e {
+  HRX_AMDGPU_FEATURE_STATE_ANY = 0,
+  HRX_AMDGPU_FEATURE_STATE_UNSUPPORTED,
+  HRX_AMDGPU_FEATURE_STATE_OFF,
+  HRX_AMDGPU_FEATURE_STATE_ON,
+} hrx_amdgpu_feature_state_t;
+
+typedef struct hrx_amdgpu_elf_machine_target_t {
+  // AMDGPU EF_AMDGPU_MACH_* value.
+  uint32_t machine;
+  // Processor string represented by |machine|.
+  iree_string_view_t processor;
+  // True if old V3 e_flags can explicitly encode SRAM ECC off for this target.
+  bool sramecc_supported;
+  // True if old V3 e_flags can explicitly encode XNACK off for this target.
+  bool xnack_supported;
+} hrx_amdgpu_elf_machine_target_t;
+
+static const hrx_amdgpu_elf_machine_target_t hrx_amdgpu_elf_machine_targets[] =
+    {
+#define IREE_AMDGPU_ELF_MACHINE_TARGET(machine, processor, sramecc, xnack) \
+  {machine, IREE_SVL(processor), sramecc, xnack},
+#include "build_tools/amdgpu/elf_machine_map.inl"
+#undef IREE_AMDGPU_ELF_MACHINE_TARGET
+};
 
 //===----------------------------------------------------------------------===//
 // Format sniffers
@@ -160,33 +214,204 @@ bool iree_hal_streaming_fat_binary_is_supported(iree_const_byte_span_t data) {
 // ELF / CCOB header validation
 //===----------------------------------------------------------------------===//
 
-// Validates an AMDGPU ELF header and computes the total on-disk ELF size
-// from the section-header table. The streaming layer only cares that the
-// image is the expected flavour; any semantic validation beyond this is
-// the HAL's job.
-static iree_status_t hrx_fat_validate_elf(iree_const_byte_span_t elf,
-                                          iree_host_size_t* out_size) {
+static const hrx_amdgpu_elf_machine_target_t*
+hrx_amdgpu_lookup_elf_machine_target(uint32_t machine) {
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(hrx_amdgpu_elf_machine_targets); ++i) {
+    if (hrx_amdgpu_elf_machine_targets[i].machine == machine) {
+      return &hrx_amdgpu_elf_machine_targets[i];
+    }
+  }
+  return NULL;
+}
+
+static hrx_amdgpu_feature_state_t hrx_amdgpu_decode_v4_feature(
+    uint32_t flags, uint32_t mask, uint32_t any_value, uint32_t off_value,
+    uint32_t on_value) {
+  const uint32_t value = flags & mask;
+  if (value == any_value) {
+    return HRX_AMDGPU_FEATURE_STATE_ANY;
+  } else if (value == off_value) {
+    return HRX_AMDGPU_FEATURE_STATE_OFF;
+  } else if (value == on_value) {
+    return HRX_AMDGPU_FEATURE_STATE_ON;
+  }
+  return HRX_AMDGPU_FEATURE_STATE_UNSUPPORTED;
+}
+
+static bool hrx_amdgpu_processor_is_generic(iree_string_view_t processor) {
+  return iree_string_view_ends_with(processor, IREE_SV("-generic"));
+}
+
+static iree_status_t hrx_fat_append_format_string(
+    iree_host_size_t executable_format_capacity, char* executable_format,
+    iree_host_size_t* length, iree_string_view_t value) {
+  if (*length + value.size >= executable_format_capacity) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "AMDGPU executable format buffer too small");
+  }
+  memcpy(executable_format + *length, value.data, value.size);
+  *length += value.size;
+  executable_format[*length] = '\0';
+  return iree_ok_status();
+}
+
+static iree_status_t hrx_fat_append_format_feature(
+    iree_host_size_t executable_format_capacity, char* executable_format,
+    iree_host_size_t* length, iree_string_view_t name,
+    hrx_amdgpu_feature_state_t state) {
+  if (state != HRX_AMDGPU_FEATURE_STATE_OFF &&
+      state != HRX_AMDGPU_FEATURE_STATE_ON) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(hrx_fat_append_format_string(
+      executable_format_capacity, executable_format, length, IREE_SV(":")));
+  IREE_RETURN_IF_ERROR(hrx_fat_append_format_string(
+      executable_format_capacity, executable_format, length, name));
+  return hrx_fat_append_format_string(
+      executable_format_capacity, executable_format, length,
+      state == HRX_AMDGPU_FEATURE_STATE_ON ? IREE_SV("+") : IREE_SV("-"));
+}
+
+static iree_status_t hrx_fat_format_amdgpu_executable_format(
+    const hrx_amdgpu_elf_machine_target_t* machine_target,
+    hrx_amdgpu_feature_state_t sramecc, hrx_amdgpu_feature_state_t xnack,
+    iree_host_size_t executable_format_capacity, char* executable_format) {
+  if (executable_format_capacity == 0 || executable_format == NULL) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "executable format output buffer is empty");
+  }
+  executable_format[0] = '\0';
+  iree_host_size_t length = 0;
+  IREE_RETURN_IF_ERROR(hrx_fat_append_format_string(executable_format_capacity,
+                                                    executable_format, &length,
+                                                    machine_target->processor));
+  IREE_RETURN_IF_ERROR(hrx_fat_append_format_feature(
+      executable_format_capacity, executable_format, &length,
+      IREE_SV("sramecc"), sramecc));
+  return hrx_fat_append_format_feature(executable_format_capacity,
+                                       executable_format, &length,
+                                       IREE_SV("xnack"), xnack);
+}
+
+// Validates an AMDGPU ELF header, computes the total on-disk ELF size from the
+// section-header table, and derives the AMDGPU HAL executable format string.
+iree_status_t iree_hal_streaming_fat_binary_describe_amdgpu_elf(
+    iree_const_byte_span_t elf, iree_host_size_t executable_format_capacity,
+    char* executable_format, iree_host_size_t* out_size) {
   if (!hrx_fat_length_at_least(elf, sizeof(hrx_elf64_header_t))) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "ELF data too small (got %" PRIhsz ")",
                             elf.data_length);
   }
-  const hrx_elf64_header_t* h = (const hrx_elf64_header_t*)elf.data;
-  if (h->elf_class != HRX_ELFCLASS64) {
+  hrx_elf64_header_t h;
+  memcpy(&h, elf.data, sizeof(h));
+  if (h.elf_class != HRX_ELFCLASS64) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "ELF class must be 64-bit, got %u", h->elf_class);
+                            "ELF class must be 64-bit, got %u", h.elf_class);
   }
-  if (h->elf_data != HRX_ELFDATA2LSB) {
+  if (h.elf_data != HRX_ELFDATA2LSB) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "ELF must be little-endian, got %u", h->elf_data);
+                            "ELF must be little-endian, got %u", h.elf_data);
   }
-  if (h->machine != HRX_EM_AMDGPU) {
+  if (h.elf_version != HRX_EV_CURRENT) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported ELF ident version %u", h.elf_version);
+  }
+  if (h.osabi != HRX_ELFOSABI_HSA) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "ELF OSABI must be HSA (%u), got %u",
+                            HRX_ELFOSABI_HSA, h.osabi);
+  }
+  if (h.machine != HRX_EM_AMDGPU) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "ELF machine must be AMDGPU (%u), got %u",
-                            HRX_EM_AMDGPU, h->machine);
+                            HRX_EM_AMDGPU, h.machine);
   }
-  iree_host_size_t size =
-      (iree_host_size_t)(h->shoff + h->shentsize * h->shnum);
+  if (h.version != HRX_EV_CURRENT) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported ELF version %u", h.version);
+  }
+
+  const uint32_t machine = h.flags & HRX_EF_AMDGPU_MACH;
+  const hrx_amdgpu_elf_machine_target_t* machine_target =
+      hrx_amdgpu_lookup_elf_machine_target(machine);
+  if (machine_target == NULL) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported AMDGPU ELF machine value 0x%x",
+                            machine);
+  }
+
+  hrx_amdgpu_feature_state_t sramecc = HRX_AMDGPU_FEATURE_STATE_UNSUPPORTED;
+  hrx_amdgpu_feature_state_t xnack = HRX_AMDGPU_FEATURE_STATE_UNSUPPORTED;
+  if (h.abiversion == HRX_ELF_HSA_ABI_VERSION_V3) {
+    sramecc = iree_all_bits_set(h.flags, HRX_EF_AMDGPU_FEATURE_SRAMECC_V3)
+                  ? HRX_AMDGPU_FEATURE_STATE_ON
+              : machine_target->sramecc_supported
+                  ? HRX_AMDGPU_FEATURE_STATE_OFF
+                  : HRX_AMDGPU_FEATURE_STATE_UNSUPPORTED;
+    xnack = iree_all_bits_set(h.flags, HRX_EF_AMDGPU_FEATURE_XNACK_V3)
+                ? HRX_AMDGPU_FEATURE_STATE_ON
+            : machine_target->xnack_supported
+                ? HRX_AMDGPU_FEATURE_STATE_OFF
+                : HRX_AMDGPU_FEATURE_STATE_UNSUPPORTED;
+  } else if (h.abiversion == HRX_ELF_HSA_ABI_VERSION_V4 ||
+             h.abiversion == HRX_ELF_HSA_ABI_VERSION_V5 ||
+             h.abiversion == HRX_ELF_HSA_ABI_VERSION_V6) {
+    sramecc =
+        hrx_amdgpu_decode_v4_feature(h.flags, HRX_EF_AMDGPU_FEATURE_SRAMECC_V4,
+                                     HRX_EF_AMDGPU_FEATURE_SRAMECC_ANY_V4,
+                                     HRX_EF_AMDGPU_FEATURE_SRAMECC_OFF_V4,
+                                     HRX_EF_AMDGPU_FEATURE_SRAMECC_ON_V4);
+    xnack = hrx_amdgpu_decode_v4_feature(
+        h.flags, HRX_EF_AMDGPU_FEATURE_XNACK_V4,
+        HRX_EF_AMDGPU_FEATURE_XNACK_ANY_V4, HRX_EF_AMDGPU_FEATURE_XNACK_OFF_V4,
+        HRX_EF_AMDGPU_FEATURE_XNACK_ON_V4);
+  } else {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported AMDGPU HSA code object ABI version %u",
+                            h.abiversion);
+  }
+
+  const bool is_generic =
+      hrx_amdgpu_processor_is_generic(machine_target->processor);
+  const uint32_t generic_version = (h.flags & HRX_EF_AMDGPU_GENERIC_VERSION) >>
+                                   HRX_EF_AMDGPU_GENERIC_VERSION_OFFSET;
+  if (is_generic && h.abiversion != HRX_ELF_HSA_ABI_VERSION_V6) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "generic AMDGPU code object target requires HSA ABI v6");
+  }
+  if (is_generic && generic_version == 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "generic AMDGPU code object target has no generic version");
+  }
+  if (!is_generic && generic_version != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "non-generic AMDGPU code object target has generic version %u",
+        generic_version);
+  }
+
+  IREE_RETURN_IF_ERROR(hrx_fat_format_amdgpu_executable_format(
+      machine_target, sramecc, xnack, executable_format_capacity,
+      executable_format));
+
+  if (h.shoff > IREE_HOST_SIZE_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "ELF section table offset is out of range");
+  }
+  iree_host_size_t section_table_size = 0;
+  iree_host_size_t size = 0;
+  if (!iree_host_size_checked_mul((iree_host_size_t)h.shentsize,
+                                  (iree_host_size_t)h.shnum,
+                                  &section_table_size) ||
+      !iree_host_size_checked_add((iree_host_size_t)h.shoff, section_table_size,
+                                  &size)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "ELF section table size overflow");
+  }
   if (elf.data_length != 0 && size > elf.data_length) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "ELF claims size %" PRIhsz " but only %" PRIhsz
@@ -351,7 +576,8 @@ static void hrx_fat_extract_clear_matches(
 
 static iree_status_t hrx_fat_extract_push(
     iree_hal_streaming_fat_binary_extract_t* extract,
-    iree_const_byte_span_t elf_data, iree_string_view_t triple) {
+    iree_const_byte_span_t elf_data, iree_string_view_t triple,
+    const char* executable_format) {
   if (extract->match_count == extract->match_capacity) {
     iree_host_size_t new_capacity =
         extract->match_capacity ? extract->match_capacity * 2 : 4;
@@ -369,6 +595,8 @@ static iree_status_t hrx_fat_extract_push(
   }
   extract->matches[extract->match_count].data = elf_data;
   extract->matches[extract->match_count].triple = triple;
+  memcpy(extract->matches[extract->match_count].executable_format,
+         executable_format, HRX_FAT_EXECUTABLE_FORMAT_CAPACITY);
   extract->match_count++;
   return iree_ok_status();
 }
@@ -441,11 +669,14 @@ static iree_status_t hrx_fat_extract_from_bundle(
                               "] (triple '%.*s') is not an AMDGPU ELF",
                               i, (int)triple.size, triple.data);
     }
+    char executable_format[HRX_FAT_EXECUTABLE_FORMAT_CAPACITY] = {0};
     iree_host_size_t elf_size = 0;
-    IREE_RETURN_IF_ERROR(hrx_fat_validate_elf(entry_bytes, &elf_size));
+    IREE_RETURN_IF_ERROR(iree_hal_streaming_fat_binary_describe_amdgpu_elf(
+        entry_bytes, sizeof(executable_format), executable_format, &elf_size));
     iree_const_byte_span_t tight_elf =
         iree_make_const_byte_span(entry_bytes.data, elf_size);
-    IREE_RETURN_IF_ERROR(hrx_fat_extract_push(extract, tight_elf, triple));
+    IREE_RETURN_IF_ERROR(
+        hrx_fat_extract_push(extract, tight_elf, triple, executable_format));
   }
   return iree_ok_status();
 }
@@ -470,8 +701,10 @@ static iree_status_t hrx_fat_extract_concatenated_elves(
       }
       break;
     }
+    char executable_format[HRX_FAT_EXECUTABLE_FORMAT_CAPACITY] = {0};
     iree_host_size_t elf_size = 0;
-    IREE_RETURN_IF_ERROR(hrx_fat_validate_elf(remaining, &elf_size));
+    IREE_RETURN_IF_ERROR(iree_hal_streaming_fat_binary_describe_amdgpu_elf(
+        remaining, sizeof(executable_format), executable_format, &elf_size));
     if (elf_size == 0) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "ELF at offset %" PRIhsz " has zero size",
@@ -479,7 +712,7 @@ static iree_status_t hrx_fat_extract_concatenated_elves(
     }
     IREE_RETURN_IF_ERROR(hrx_fat_extract_push(
         extract, iree_make_const_byte_span(remaining.data, elf_size),
-        iree_string_view_empty()));
+        iree_string_view_empty(), executable_format));
     offset += elf_size;
   }
   return extract->match_count > initial_match_count
@@ -625,13 +858,15 @@ iree_status_t iree_hal_streaming_fat_binary_extract_for_targets(
     status =
         hrx_fat_extract_from_bundle(inner, target_count, targets, out_extract);
   } else if (hrx_fat_is_elf(inner)) {
+    char executable_format[HRX_FAT_EXECUTABLE_FORMAT_CAPACITY] = {0};
     iree_host_size_t elf_size = 0;
-    status = hrx_fat_validate_elf(inner, &elf_size);
+    status = iree_hal_streaming_fat_binary_describe_amdgpu_elf(
+        inner, sizeof(executable_format), executable_format, &elf_size);
     if (iree_status_is_ok(status)) {
       iree_const_byte_span_t tight =
           iree_make_const_byte_span(inner.data, elf_size);
-      status =
-          hrx_fat_extract_push(out_extract, tight, iree_string_view_empty());
+      status = hrx_fat_extract_push(
+          out_extract, tight, iree_string_view_empty(), executable_format);
     }
   } else {
     const uint8_t* head =

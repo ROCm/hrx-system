@@ -49,6 +49,7 @@ hrx_cc_library(
         "../../../include",
         "../../libhrx",
     ],
+    textual_hdrs = ["//build_tools/amdgpu:elf_machine_map.inl"],
     deps = [
         "//libhrx/src/libhrx:hrx_static",
         "//runtime/src/iree/async",

@@ -3,14 +3,13 @@
 //
 // Streaming-layer fat-binary / offload-bundle unpacker.
 //
-// AMDGPU HAL accepts raw AMD HSACO ELF images (or wrapped flatbuffers),
-// nothing fancier. Anything the HIP / CUDA compiler toolchain produces
-// wrapped around those ELFs — fat-binary wrappers, Clang offload bundles,
-// and CCOB (compressed Clang offload bundles, zstd-compressed) — is
-// unwrapped here, at the streaming layer, and only matching raw ELF data
-// is forwarded down to the HAL. This keeps the HAL minimal and lets the
-// streaming layer be the single source of truth for "what formats does
-// HIP/CUDA hand us".
+// AMDGPU HAL accepts raw AMD HSACO ELF images, nothing fancier. Anything the
+// HIP / CUDA compiler toolchain produces wrapped around those ELFs —
+// fat-binary wrappers, Clang offload bundles, and CCOB (compressed Clang
+// offload bundles, zstd-compressed) — is unwrapped here, at the streaming
+// layer, and only matching raw ELF data plus explicit target metadata is
+// forwarded down to the HAL. This keeps the HAL minimal and lets the streaming
+// layer be the single source of truth for "what formats does HIP/CUDA hand us".
 
 #ifndef IREE_HAL_STREAMING_FAT_BINARY_H_
 #define IREE_HAL_STREAMING_FAT_BINARY_H_
@@ -21,6 +20,10 @@
 extern "C" {
 #endif  // __cplusplus
 
+enum {
+  IREE_HAL_STREAMING_FAT_BINARY_FORMAT_CAPACITY = 64,
+};
+
 // One ELF image matched out of a fat-binary / offload bundle.
 // The span's lifetime is owned by iree_hal_streaming_fat_binary_extract_t
 // and remains valid until that object is reset/deinitialized.
@@ -29,6 +32,8 @@ typedef struct iree_hal_streaming_fat_binary_elf_t {
   iree_const_byte_span_t data;
   // Bundle entry triple (empty for raw-ELF inputs). Borrowed.
   iree_string_view_t triple;
+  // NUL-terminated HAL AMDGPU executable format derived from the ELF header.
+  char executable_format[IREE_HAL_STREAMING_FAT_BINARY_FORMAT_CAPACITY];
 } iree_hal_streaming_fat_binary_elf_t;
 
 // Ranked fat-binary target candidate.
@@ -59,6 +64,13 @@ typedef struct iree_hal_streaming_fat_binary_extract_t {
 // streaming-layer fat-binary unpacker knows how to crack open.
 // Raw ELF also counts as "supported" (trivially passthrough).
 bool iree_hal_streaming_fat_binary_is_supported(iree_const_byte_span_t data);
+
+// Validates a raw AMDGPU HSACO ELF and derives the HAL AMDGPU executable
+// format string from its code-object target metadata.
+iree_status_t iree_hal_streaming_fat_binary_describe_amdgpu_elf(
+    iree_const_byte_span_t elf_data,
+    iree_host_size_t executable_format_capacity, char* executable_format,
+    iree_host_size_t* out_elf_size);
 
 // Unwraps a fat-binary / offload-bundle / CCOB / raw ELF blob and returns
 // every contained ELF whose bundle triple matches the best-ranked target

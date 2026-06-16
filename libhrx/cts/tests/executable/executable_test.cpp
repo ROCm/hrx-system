@@ -28,6 +28,11 @@ std::string base_gpu_target(std::string arch) {
   return arch;
 }
 
+struct HsacoImage {
+  const iree_file_toc_t* file = nullptr;
+  std::string executable_format;
+};
+
 const iree_file_toc_t* find_hsaco_for_target(const std::string& target) {
   char fragment[64] = {};
   if (!iree_amdgpu_target_label_fragment(target.c_str(), fragment,
@@ -45,16 +50,19 @@ const iree_file_toc_t* find_hsaco_for_target(const std::string& target) {
   return nullptr;
 }
 
-const iree_file_toc_t* find_hsaco(const std::string& arch) {
+HsacoImage find_hsaco(const std::string& arch) {
   if (const iree_file_toc_t* file = find_hsaco_for_target(arch)) {
-    return file;
+    return HsacoImage{file, arch};
   }
   const char* code_object_target =
       iree_amdgpu_code_object_target_for_exact(arch.c_str());
   if (code_object_target && arch != code_object_target) {
-    return find_hsaco_for_target(code_object_target);
+    if (const iree_file_toc_t* file =
+            find_hsaco_for_target(code_object_target)) {
+      return HsacoImage{file, code_object_target};
+    }
   }
-  return nullptr;
+  return {};
 }
 
 }  // namespace
@@ -71,15 +79,16 @@ TEST_CASE_METHOD(HrxTestFixture, "executable_load_lookup_dispatch") {
     return;
   }
 
-  const iree_file_toc_t* hsaco = find_hsaco(arch);
-  if (!hsaco) {
+  HsacoImage hsaco = find_hsaco(arch);
+  if (!hsaco.file) {
     SUCCEED("Skipping native executable CTS: no build-time HSACO test asset");
     return;
   }
 
   hrx_executable_t executable = nullptr;
-  REQUIRE_OK(hrx().executable_load_data(device_, hsaco->data, hsaco->size,
-                                        nullptr, &executable));
+  REQUIRE_OK(
+      hrx().executable_load_data(device_, hsaco.file->data, hsaco.file->size,
+                                 hsaco.executable_format.c_str(), &executable));
   REQUIRE(executable != nullptr);
 
   hrx().executable_retain(executable);

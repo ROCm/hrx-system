@@ -122,6 +122,10 @@ hrx_status_t hrx_executable_load_data(hrx_device_t device,
                            "device, executable_data, or executable is invalid");
   }
   *executable = NULL;
+  if (!executable_format || executable_format[0] == '\0') {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "executable_format is required");
+  }
 
   iree_hal_executable_cache_t* hal_executable_cache = NULL;
   iree_status_t status = iree_hal_executable_cache_create(
@@ -130,25 +134,11 @@ hrx_status_t hrx_executable_load_data(hrx_device_t device,
     return hrx_status_from_iree(status);
   }
 
-  char inferred_format[64] = {0};
-  iree_host_size_t inferred_size = executable_data_size;
-  if (!executable_format || executable_format[0] == '\0') {
-    status = iree_hal_executable_cache_infer_format(
-        hal_executable_cache, /*caching_mode=*/0,
-        iree_make_const_byte_span(executable_data, executable_data_size),
-        sizeof(inferred_format), inferred_format, &inferred_size);
-    if (!iree_status_is_ok(status)) {
-      iree_hal_executable_cache_release(hal_executable_cache);
-      return hrx_status_from_iree(status);
-    }
-    executable_format = inferred_format;
-  }
-
   iree_hal_executable_params_t params;
   iree_hal_executable_params_initialize(&params);
   params.executable_format = iree_make_cstring_view(executable_format);
   params.executable_data =
-      iree_make_const_byte_span(executable_data, inferred_size);
+      iree_make_const_byte_span(executable_data, executable_data_size);
   params.caching_mode = 0;
 
   iree_hal_executable_t* hal_executable = NULL;
