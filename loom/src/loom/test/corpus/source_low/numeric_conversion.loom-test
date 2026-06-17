@@ -131,6 +131,17 @@ func.def @vector_quantize_round_f32_to_i8x4(%values: vector<4xf32>, %inverse_sca
 
 // ====
 
+func.def @vector_quantize_roundeven_f32_to_i8x4(%values: vector<4xf32>, %inverse_scale: f32) -> (vector<4xi8>) {
+  %scale = vector.splat %inverse_scale : vector<4xf32>
+  %scaled = vector.mulf %values, %scale : vector<4xf32>
+  %rounded = vector.roundevenf %scaled : vector<4xf32>
+  %i32 = vector.fptosi %rounded : vector<4xf32> to vector<4xi32>
+  %packed = vector.trunci %i32 : vector<4xi32> to vector<4xi8>
+  func.return %packed : vector<4xi8>
+}
+
+// ====
+
 func.def @scalar_uitofp_i32(%input: i32) -> (f32) {
   %converted = scalar.uitofp %input : i32 to f32
   func.return %converted : f32
