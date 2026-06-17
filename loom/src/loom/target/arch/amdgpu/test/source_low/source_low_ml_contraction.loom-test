@@ -198,6 +198,62 @@ low.func.def target(@target) abi(hal_kernel) @i4_dot8_two_k_blocks(%lhs0: reg<am
 // ====
 
 amdgpu.target<gfx1100> @target
+kernel.def target(@target) @workgroup_cached_dot4i_u8s8_tile() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output_buffer: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 1024 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %lhs_view = buffer.view %lhs_buffer[%zero] : buffer -> view<64x16xi8, #dense>
+  %rhs_view = buffer.view %rhs_buffer[%zero] : buffer -> view<64x16xi8, #dense>
+  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64x16xi8, #dense>
+  %output_view = buffer.view %output_buffer[%zero] : buffer -> view<64x4xi32, #dense>
+  %lhs = vector.load %lhs_view[%lane, 0] : view<64x16xi8, #dense> -> vector<16xi8>
+  vector.store %lhs, %scratch_view[%lane, 0] : vector<16xi8>, view<64x16xi8, #dense>
+  %lhs_cached = vector.load %scratch_view[%lane, 0] : view<64x16xi8, #dense> -> vector<16xi8>
+  %rhs = vector.load %rhs_view[%lane, 0] : view<64x16xi8, #dense> -> vector<16xi8>
+  %acc = vector.constant 0 : vector<4xi32>
+  %dot = vector.dot4i<u8s8> %lhs_cached, %rhs, %acc : vector<16xi8>, vector<16xi8>, vector<4xi32>
+  vector.store %dot, %output_view[%lane, 0] : vector<4xi32>, view<64x4xi32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) @workgroup_cached_dot4i_u8s8_tile() asm<amdgpu.rdna3.core> {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
+  %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
+  %49 = storage {byte_alignment = 16, byte_length = 1024} : low.storage<workgroup>
+  %51 = v_lshlrev_b32_src0_inline %lane, 4
+  %lhs = global_load_b128_saddr %51, %lhs_view
+  ds_write_b128 %51, %lhs
+  %lhs_cached = ds_read_b128 %51
+  %rhs = global_load_b128_saddr %51, %rhs_view
+  %58 = v_mov_b32 0
+  %63 = slice %lhs_cached[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %64 = slice %rhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %66 = v_dot4_i32_iu8_u8s8 %63, %64, %58
+  %67 = slice %lhs_cached[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %68 = slice %rhs[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %70 = v_dot4_i32_iu8_u8s8 %67, %68, %58
+  %71 = slice %lhs_cached[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %72 = slice %rhs[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %74 = v_dot4_i32_iu8_u8s8 %71, %72, %58
+  %75 = slice %lhs_cached[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %76 = slice %rhs[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %78 = v_dot4_i32_iu8_u8s8 %75, %76, %58
+  %dot = concat(%66, %70, %74, %78) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  global_store_b128_saddr %51, %dot, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
 func.def target(@target) @tail_selected_f32_dot(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %acc: f32, %lane: i32, %limit: i32) -> (f32) {
   %dot = vector.dotf %lhs, %rhs, %acc : vector<4xf32>, vector<4xf32>, f32
   %inside = scalar.cmpi slt, %lane, %limit : i32

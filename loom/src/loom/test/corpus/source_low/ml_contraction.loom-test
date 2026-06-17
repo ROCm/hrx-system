@@ -55,6 +55,31 @@ func.def @i4_dot8_two_k_blocks(%lhs0: vector<2xi32>, %rhs0: vector<2xi32>, %lhs1
 
 // ====
 
+kernel.def @workgroup_cached_dot4i_u8s8_tile() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output_buffer: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 1024 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %lhs_view = buffer.view %lhs_buffer[%zero] : buffer -> view<64x16xi8, #dense>
+  %rhs_view = buffer.view %rhs_buffer[%zero] : buffer -> view<64x16xi8, #dense>
+  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64x16xi8, #dense>
+  %output_view = buffer.view %output_buffer[%zero] : buffer -> view<64x4xi32, #dense>
+  %lhs = vector.load %lhs_view[%lane, 0] : view<64x16xi8, #dense> -> vector<16xi8>
+  vector.store %lhs, %scratch_view[%lane, 0] : vector<16xi8>, view<64x16xi8, #dense>
+  %lhs_cached = vector.load %scratch_view[%lane, 0] : view<64x16xi8, #dense> -> vector<16xi8>
+  %rhs = vector.load %rhs_view[%lane, 0] : view<64x16xi8, #dense> -> vector<16xi8>
+  %acc = vector.constant 0 : vector<4xi32>
+  %dot = vector.dot4i<u8s8> %lhs_cached, %rhs, %acc : vector<16xi8>, vector<16xi8>, vector<4xi32>
+  vector.store %dot, %output_view[%lane, 0] : vector<4xi32>, view<64x4xi32, #dense>
+  kernel.return
+}
+
+// ====
+
 func.def @tail_selected_f32_dot(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %acc: f32, %lane: i32, %limit: i32) -> (f32) {
   %dot = vector.dotf %lhs, %rhs, %acc : vector<4xf32>, vector<4xf32>, f32
   %inside = scalar.cmpi slt, %lane, %limit : i32
