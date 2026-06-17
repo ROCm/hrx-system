@@ -201,161 +201,155 @@ configure_file(
 set(_loomc_cmake_package_dir "${CMAKE_INSTALL_LIBDIR}/cmake/loomc")
 set(_loomc_build_package_dir "${CMAKE_CURRENT_BINARY_DIR}/cmake/loomc")
 
-function(_loomc_collect_shared_library_objects target_name)
+function(_loomc_add_shared_component target_name)
   if(NOT TARGET "${target_name}")
-    return()
+    message(FATAL_ERROR
+      "loomc shared package expected enabled binding target: ${target_name}")
   endif()
-  get_target_property(_aliased_target "${target_name}" ALIASED_TARGET)
-  if(_aliased_target)
-    set(target_name "${_aliased_target}")
+  if(NOT TARGET "${target_name}.objects")
+    message(FATAL_ERROR
+      "loomc shared package expected object target: ${target_name}.objects")
   endif()
+  list(APPEND _loomc_component_targets "${target_name}")
+  list(APPEND _loomc_object_sources "$<TARGET_OBJECTS:${target_name}.objects>")
+  list(APPEND _loomc_object_targets "${target_name}.objects")
+  set(_loomc_component_targets "${_loomc_component_targets}" PARENT_SCOPE)
+  set(_loomc_object_sources "${_loomc_object_sources}" PARENT_SCOPE)
+  set(_loomc_object_targets "${_loomc_object_targets}" PARENT_SCOPE)
+endfunction()
 
-  get_property(_visited GLOBAL PROPERTY LOOMC_SHARED_LIBRARY_VISITED_TARGETS)
-  if(target_name IN_LIST _visited)
-    return()
-  endif()
-  set_property(GLOBAL APPEND PROPERTY
-    LOOMC_SHARED_LIBRARY_VISITED_TARGETS "${target_name}")
-
-  if(TARGET "${target_name}.objects")
-    set_property(GLOBAL APPEND PROPERTY
-      LOOMC_SHARED_LIBRARY_OBJECT_TARGETS "${target_name}.objects")
-    set_property(GLOBAL APPEND PROPERTY
-      LOOMC_SHARED_LIBRARY_OBJECTS "$<TARGET_OBJECTS:${target_name}.objects>")
-  endif()
-
+function(_loomc_collect_shared_component_deps target_name)
   get_target_property(_link_libraries "${target_name}" LINK_LIBRARIES)
   get_target_property(
     _interface_link_libraries "${target_name}" INTERFACE_LINK_LIBRARIES)
   foreach(_dep IN LISTS _link_libraries _interface_link_libraries)
-    if(NOT _dep OR _dep MATCHES "^\\$<")
+    if(NOT _dep OR _dep MATCHES "^\\$<TARGET_OBJECTS:")
       continue()
     endif()
     if(TARGET "${_dep}")
-      get_target_property(_dep_aliased_target "${_dep}" ALIASED_TARGET)
-      if(_dep_aliased_target)
-        set(_dep_target "${_dep_aliased_target}")
+      get_target_property(_aliased_target "${_dep}" ALIASED_TARGET)
+      if(_aliased_target)
+        set(_dep_target "${_aliased_target}")
       else()
         set(_dep_target "${_dep}")
       endif()
-      if(_dep_target MATCHES "^(iree|loom)_")
-        _loomc_collect_shared_library_objects("${_dep_target}")
-      else()
-        set_property(GLOBAL APPEND PROPERTY
-          LOOMC_SHARED_LIBRARY_EXTERNAL_LIBS "${_dep}")
+      if(_dep_target IN_LIST _loomc_component_targets)
+        continue()
       endif()
-    else()
-      set_property(GLOBAL APPEND PROPERTY
-        LOOMC_SHARED_LIBRARY_EXTERNAL_LIBS "${_dep}")
     endif()
+    list(APPEND _loomc_direct_deps "${_dep}")
   endforeach()
+  set(_loomc_direct_deps "${_loomc_direct_deps}" PARENT_SCOPE)
 endfunction()
 
-if(TARGET loom_binding_c_loomc)
-  set_property(GLOBAL PROPERTY LOOMC_SHARED_LIBRARY_VISITED_TARGETS)
-  set_property(GLOBAL PROPERTY LOOMC_SHARED_LIBRARY_OBJECT_TARGETS)
-  set_property(GLOBAL PROPERTY LOOMC_SHARED_LIBRARY_OBJECTS)
-  set_property(GLOBAL PROPERTY LOOMC_SHARED_LIBRARY_EXTERNAL_LIBS)
-
-  set(_loomc_public_binding_targets
-    loom_binding_c_loomc
-    loom_binding_c_target_iree_hal_iree_hal
-    loom_binding_c_target_llvmir_llvmir
-    loom_binding_c_target_spirv_spirv
-    loom_binding_c_target_spirv_iree_hal_iree_hal
-    loom_binding_c_target_spirv_vulkan_vulkan
-    loom_binding_c_target_spirv_vulkaninfo_vulkaninfo
-    loom_binding_c_target_amdgpu_amdgpu)
-  foreach(_loomc_binding_target IN LISTS _loomc_public_binding_targets)
-    if(TARGET "${_loomc_binding_target}")
-      _loomc_collect_shared_library_objects("${_loomc_binding_target}")
-    endif()
-  endforeach()
-
-  get_property(_loomc_objects GLOBAL PROPERTY LOOMC_SHARED_LIBRARY_OBJECTS)
-  get_property(_loomc_object_targets GLOBAL PROPERTY
-    LOOMC_SHARED_LIBRARY_OBJECT_TARGETS)
-  get_property(_loomc_external_libs GLOBAL PROPERTY
-    LOOMC_SHARED_LIBRARY_EXTERNAL_LIBS)
-  if(_loomc_object_targets)
-    list(REMOVE_DUPLICATES _loomc_object_targets)
-  endif()
-  if(_loomc_external_libs)
-    list(REMOVE_DUPLICATES _loomc_external_libs)
-  endif()
-
-  foreach(_loomc_object_target IN LISTS _loomc_object_targets)
-    target_compile_definitions("${_loomc_object_target}" PRIVATE
-      LOOMC_BUILDING_SHARED_LIBRARY
-      LOOMC_VERSION_MAJOR=${LOOMC_VERSION_MAJOR}
-      LOOMC_VERSION_MINOR=${LOOMC_VERSION_MINOR}
-      LOOMC_VERSION_PATCH=${LOOMC_VERSION_PATCH})
-  endforeach()
-
-  add_library(loomc_shared SHARED ${_loomc_objects})
-  target_include_directories(loomc_shared PUBLIC
-    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
-    "$<BUILD_INTERFACE:${_loomc_generated_include_dir}>"
-    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
-  target_compile_definitions(loomc_shared INTERFACE
-    LOOMC_USING_SHARED_LIBRARY)
-  target_link_libraries(loomc_shared PRIVATE ${_loomc_external_libs})
-  set_target_properties(loomc_shared PROPERTIES
-    OUTPUT_NAME loomc
-    EXPORT_NAME loomc
-    VERSION ${LOOMC_VERSION}
-    SOVERSION ${LOOMC_VERSION_MAJOR}
-    POSITION_INDEPENDENT_CODE ON
-    LINKER_LANGUAGE CXX
-    INTERFACE_LINK_LIBRARIES "")
-  if(NOT WIN32)
-    set_target_properties(loomc_shared PROPERTIES
-      C_VISIBILITY_PRESET hidden
-      CXX_VISIBILITY_PRESET hidden
-      VISIBILITY_INLINES_HIDDEN ON
-      LINK_FLAGS "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/cmake/loomc_exports.lds")
-  endif()
-
-  if(NOT TARGET loomc::loomc)
-    add_library(loomc::loomc ALIAS loomc_shared)
-  endif()
-
-  install(TARGETS loomc_shared EXPORT loomc-targets
-    LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-      COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}"
-      NAMELINK_COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}"
-    ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-      COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}"
-    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
-      COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}"
-    INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
-  install(DIRECTORY include/loomc
-    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-    COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}"
-    FILES_MATCHING PATTERN "*.h")
-  install(FILES "${_loomc_generated_include_dir}/loomc/version.h"
-    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/loomc"
-    COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}")
-  install(EXPORT loomc-targets
-    NAMESPACE loomc::
-    DESTINATION "${_loomc_cmake_package_dir}"
-    COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}")
-
-  configure_package_config_file(
-    cmake/loomc-config.cmake.in
-    "${_loomc_build_package_dir}/loomc-config.cmake"
-    INSTALL_DESTINATION "${_loomc_cmake_package_dir}")
-  write_basic_package_version_file(
-    "${_loomc_build_package_dir}/loomc-config-version.cmake"
-    VERSION "${LOOMC_VERSION}"
-    COMPATIBILITY SameMajorVersion)
-  export(EXPORT loomc-targets
-    NAMESPACE loomc::
-    FILE "${_loomc_build_package_dir}/loomc-targets.cmake")
-
-  install(FILES
-    "${_loomc_build_package_dir}/loomc-config.cmake"
-    "${_loomc_build_package_dir}/loomc-config-version.cmake"
-    DESTINATION "${_loomc_cmake_package_dir}"
-    COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}")
+if(NOT TARGET loom_binding_c_loomc)
+  message(FATAL_ERROR "loomc shared package requires loom_binding_c_loomc")
 endif()
+
+set(_loomc_component_targets)
+set(_loomc_object_sources)
+set(_loomc_object_targets)
+_loomc_add_shared_component(loom_binding_c_loomc)
+_loomc_add_shared_component(loom_binding_c_target_iree_hal_iree_hal)
+if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR)
+  _loomc_add_shared_component(loom_binding_c_target_llvmir_llvmir)
+endif()
+if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)
+  _loomc_add_shared_component(loom_binding_c_target_spirv_spirv)
+  _loomc_add_shared_component(loom_binding_c_target_spirv_vulkaninfo_vulkaninfo)
+  if(IREE_HAL_DRIVER_VULKAN)
+    _loomc_add_shared_component(loom_binding_c_target_spirv_iree_hal_iree_hal)
+  endif()
+  if(LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN)
+    _loomc_add_shared_component(loom_binding_c_target_spirv_vulkan_vulkan)
+  endif()
+endif()
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+  _loomc_add_shared_component(loom_binding_c_target_amdgpu_amdgpu)
+endif()
+
+foreach(_loomc_object_target IN LISTS _loomc_object_targets)
+  target_compile_definitions("${_loomc_object_target}" PRIVATE
+    LOOMC_BUILDING_SHARED_LIBRARY
+    LOOMC_VERSION_MAJOR=${LOOMC_VERSION_MAJOR}
+    LOOMC_VERSION_MINOR=${LOOMC_VERSION_MINOR}
+    LOOMC_VERSION_PATCH=${LOOMC_VERSION_PATCH})
+endforeach()
+
+# Link the shared library from the selected public binding objects directly.
+# Their immediate non-selected deps provide the ordinary link libraries; selected
+# components are skipped to avoid ALWAYSLINK interface deps re-adding objects.
+set(_loomc_direct_deps)
+foreach(_loomc_component_target IN LISTS _loomc_component_targets)
+  _loomc_collect_shared_component_deps("${_loomc_component_target}")
+endforeach()
+if(_loomc_direct_deps)
+  list(REMOVE_DUPLICATES _loomc_direct_deps)
+endif()
+
+add_library(loomc_shared SHARED ${_loomc_object_sources})
+target_link_libraries(loomc_shared PRIVATE ${_loomc_direct_deps})
+target_include_directories(loomc_shared PUBLIC
+  "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+  "$<BUILD_INTERFACE:${_loomc_generated_include_dir}>"
+  "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
+target_compile_definitions(loomc_shared INTERFACE
+  LOOMC_USING_SHARED_LIBRARY)
+set_target_properties(loomc_shared PROPERTIES
+  OUTPUT_NAME loomc
+  EXPORT_NAME loomc
+  VERSION ${LOOMC_VERSION}
+  SOVERSION ${LOOMC_VERSION_MAJOR}
+  POSITION_INDEPENDENT_CODE ON
+  LINKER_LANGUAGE CXX
+  INTERFACE_LINK_LIBRARIES "")
+if(NOT WIN32)
+  set_target_properties(loomc_shared PROPERTIES
+    C_VISIBILITY_PRESET hidden
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON
+    LINK_FLAGS "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/cmake/loomc_exports.lds")
+endif()
+
+if(NOT TARGET loomc::loomc)
+  add_library(loomc::loomc ALIAS loomc_shared)
+endif()
+
+install(TARGETS loomc_shared EXPORT loomc-targets
+  LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}"
+    NAMELINK_COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}"
+  ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}"
+  RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+    COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}"
+  INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+install(DIRECTORY include/loomc
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+  COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}"
+  FILES_MATCHING PATTERN "*.h")
+install(FILES "${_loomc_generated_include_dir}/loomc/version.h"
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/loomc"
+  COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}")
+install(EXPORT loomc-targets
+  NAMESPACE loomc::
+  DESTINATION "${_loomc_cmake_package_dir}"
+  COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}")
+
+configure_package_config_file(
+  cmake/loomc-config.cmake.in
+  "${_loomc_build_package_dir}/loomc-config.cmake"
+  INSTALL_DESTINATION "${_loomc_cmake_package_dir}")
+write_basic_package_version_file(
+  "${_loomc_build_package_dir}/loomc-config-version.cmake"
+  VERSION "${LOOMC_VERSION}"
+  COMPATIBILITY SameMajorVersion)
+export(EXPORT loomc-targets
+  NAMESPACE loomc::
+  FILE "${_loomc_build_package_dir}/loomc-targets.cmake")
+
+install(FILES
+  "${_loomc_build_package_dir}/loomc-config.cmake"
+  "${_loomc_build_package_dir}/loomc-config-version.cmake"
+  DESTINATION "${_loomc_cmake_package_dir}"
+  COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}")
