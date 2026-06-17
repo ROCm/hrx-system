@@ -213,6 +213,19 @@ static iree_status_t loom_amdgpu_dotf_emit_fmac(
   return iree_ok_status();
 }
 
+static iree_status_t loom_amdgpu_dotf_materialize_init(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_dotf_plan_t* plan, loom_type_t lane_type,
+    loom_value_id_t* out_low_init) {
+  *out_low_init = LOOM_VALUE_ID_INVALID;
+  if (plan->init_kind == LOOM_AMDGPU_DOTF_INIT_ZERO) {
+    return loom_amdgpu_emit_const_u32(context, source_op,
+                                      LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32, 0,
+                                      lane_type, out_low_init);
+  }
+  return loom_low_lower_lookup_value(context, plan->init, out_low_init);
+}
+
 static iree_string_view_t loom_amdgpu_dotf_descriptor_set_key(
     const loom_low_descriptor_set_t* descriptor_set) {
   if (descriptor_set == NULL) {
@@ -446,12 +459,12 @@ iree_status_t loom_amdgpu_lower_vector_dotf(
   loom_value_id_t low_rhs = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(
       loom_low_lower_lookup_value(context, plan->rhs, &low_rhs));
-  loom_value_id_t low_init = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(
-      loom_low_lower_lookup_value(context, plan->init, &low_init));
 
   loom_type_t lane_type = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_amdgpu_make_vgpr_type(context, &lane_type));
+  loom_value_id_t low_init = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_dotf_materialize_init(
+      context, source_op, plan, lane_type, &low_init));
 
   loom_value_id_t result = LOOM_VALUE_ID_INVALID;
   switch (plan->accumulation_kind) {

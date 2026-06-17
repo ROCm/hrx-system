@@ -144,6 +144,63 @@ low.func.def target(@target) abi(hal_kernel) @index_uniform_div_rem_magic_mul(%b
 // ====
 
 amdgpu.target<gfx1100> @target
+kernel.def target(@target) @index_matvec_block_lane_range_global_b32() {
+  %unit = index.constant 1 : index
+  %lane_count = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%lane_count, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base_offset = index.constant 0 : offset
+  %block_begin = index.constant 0 : index
+  %block_end = index.constant 12 : index
+  %block_step = index.constant 4 : index
+  %lanes_per_group = index.constant 16 : index
+  %block_stride = index.constant 105 : index
+  %input_view = buffer.view %input[%base_offset] : buffer -> view<1260xi32, #dense>
+  %output_view = buffer.view %output[%base_offset] : buffer -> view<1260xi32, #dense>
+  scf.for %block_base = [%block_begin to %block_end step %block_step] {
+    %lane_group = index.div %lane, %lanes_per_group : index
+    %lane_offset = index.rem %lane, %lanes_per_group : index
+    %block = index.add %block_base, %lane_group : index
+    %block_origin = index.mul %block, %block_stride : index
+    %linear = index.add %block_origin, %lane_offset : index
+    %loaded = vector.load %input_view[%linear] : view<1260xi32, #dense> -> vector<1xi32>
+    vector.store %loaded, %output_view[%linear] : vector<1xi32>, view<1260xi32, #dense>
+  }
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) @index_matvec_block_lane_range_global_b32() asm<amdgpu.rdna3.core> {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 5040} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 5040} : reg<amdgpu.sgpr x2>
+  %block_begin = s_mov_b32 0
+  %block_end = s_mov_b32 12
+  %block_step = s_mov_b32 4
+  low.br ^_bb1(%block_begin: reg<amdgpu.sgpr>)
+^_bb1(%block_base: reg<amdgpu.sgpr>):
+  %36 = s_cmp_lt_i32 %block_base, %block_end
+  low.cond_br %36, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+^_bb2:
+  %lane_group = v_lshrrev_b32_lit %lane, 4
+  %39 = v_mov_b32 15
+  %lane_offset = v_and_b32 %lane, %39
+  %41 = v_mov_b32_copy %block_base
+  %block = v_add_u32 %41, %lane_group
+  %linear = v_mad_u32_u24_src1_lit %block, %lane_offset, 105
+  %44 = v_lshlrev_b32_src0_inline %linear, 2
+  %loaded = global_load_b32_saddr %44, %input_view
+  global_store_b32_saddr %44, %loaded, %output_view
+  %47 = s_add_u32 %block_base, %block_step
+  low.br ^_bb1(%47: reg<amdgpu.sgpr>)
+^_bb3:
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
 func.def target(@target) @index_divergent_shift_mask(%values: vector<2xi32>) {
   %lane_i32 = vector.extract %values[0] : vector<2xi32> -> i32
   %lane = index.cast %lane_i32 : i32 to index

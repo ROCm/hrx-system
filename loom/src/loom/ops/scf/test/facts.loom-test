@@ -70,6 +70,49 @@ func.def @for_iv_assumed_upper_bound(%n: index) -> (i64, i64, i64, i1) {
 
 // ====
 
+// Matvec-style lane grouping composes counted-loop IV facts with div/rem lane
+// facts without requiring local assumptions on every address intermediate.
+func.def @for_iv_matvec_lane_address_range(%lane0: index) -> (i64, i64, i1) {
+  %lane = index.assume %lane0 [range(%lane0, 0, 63)] : index
+  %block_begin = index.constant 0 : index
+  %block_end = index.constant 12 : index
+  %block_step = index.constant 4 : index
+  %lanes_per_group = index.constant 16 : index
+  %block_stride = index.constant 105 : index
+  %zero = scalar.constant 0 : i64
+  %false = scalar.constant false : i1
+  %linear_lo, %linear_hi, %linear_non_negative = scf.for %block_base = [%block_begin to %block_end step %block_step](%carry_lo = %zero : i64, %carry_hi = %zero : i64, %carry_non_negative = %false : i1) -> (i64, i64, i1) {
+    %lane_group = index.div %lane, %lanes_per_group : index
+    %lane_offset = index.rem %lane, %lanes_per_group : index
+    %block = index.add %block_base, %lane_group : index
+    %block_origin = index.mul %block, %block_stride : index
+    %linear = index.add %block_origin, %lane_offset : index
+    %fact_lo = test.fact_range_lo %linear : index -> i64
+    %fact_hi = test.fact_range_hi %linear : index -> i64
+    %fact_non_negative = test.fact_non_negative %linear : index -> i1
+    scf.yield %fact_lo, %fact_hi, %fact_non_negative : i64, i64, i1
+  }
+  func.return %linear_lo, %linear_hi, %linear_non_negative : i64, i64, i1
+}
+
+// ----
+func.def @for_iv_matvec_lane_address_range(%lane0: index) -> (i64, i64, i1) {
+  %block_begin = index.constant 0 : index
+  %block_end = index.constant 12 : index
+  %block_step = index.constant 4 : index
+  %zero = scalar.constant 0 : i64
+  %false = scalar.constant false : i1
+  %linear_lo, %linear_hi, %linear_non_negative = scf.for %block_base = [%block_begin to %block_end step %block_step](%carry_lo = %zero : i64, %carry_hi = %zero : i64, %carry_non_negative = %false : i1) -> (i64, i64, i1) {
+    %fact_lo = scalar.constant 0 : i64
+    %fact_hi = scalar.constant 1170 : i64
+    %fact_non_negative = scalar.constant true : i1
+    scf.yield %fact_lo, %fact_hi, %fact_non_negative : i64, i64, i1
+  }
+  func.return %linear_lo, %linear_hi, %linear_non_negative : i64, i64, i1
+}
+
+// ====
+
 // Projection-style dot loops use a two-element vector footprint at every
 // stepped IV. The IV high fact is the last reachable origin, not upper - 1.
 func.def @for_iv_projection_pair_origins() -> (i64, i64, i64) {

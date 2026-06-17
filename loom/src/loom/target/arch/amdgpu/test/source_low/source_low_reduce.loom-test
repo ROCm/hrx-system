@@ -133,20 +133,20 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @f32_configured_width_sq
   %linear = v_lshlrev_b32_lit %lane, 2
   %28 = v_lshlrev_b32_src0_inline %linear, 2
   %loaded = global_load_b128_saddr %28, %input_view
-  %zero_f32 = v_mov_b32 0
-  %31 = slice %loaded[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %33 = v_fmac_f32 %zero_f32, %31, %31
-  %34 = slice %loaded[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %36 = v_mul_f32 %34, %34
-  %37 = slice %loaded[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %39 = v_mul_f32 %37, %37
-  %40 = slice %loaded[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %42 = v_mul_f32 %40, %40
-  %43 = v_add_f32 %33, %36
-  %44 = v_add_f32 %39, %42
-  %stored = v_add_f32 %43, %44
-  %46 = v_mov_b32 0
-  global_store_b32_saddr %46, %stored, %output_view
+  %31 = v_mov_b32 0
+  %32 = slice %loaded[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %34 = v_fmac_f32 %31, %32, %32
+  %35 = slice %loaded[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %37 = v_mul_f32 %35, %35
+  %38 = slice %loaded[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %40 = v_mul_f32 %38, %38
+  %41 = slice %loaded[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %43 = v_mul_f32 %41, %41
+  %44 = v_add_f32 %34, %37
+  %45 = v_add_f32 %40, %43
+  %stored = v_add_f32 %44, %45
+  %47 = v_mov_b32 0
+  global_store_b32_saddr %47, %stored, %output_view
   return
 }
 

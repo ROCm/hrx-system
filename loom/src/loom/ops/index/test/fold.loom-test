@@ -233,6 +233,33 @@ func.def @rem_dynamic_divisor_uses_dividend_bound(%x0: index, %d0: index) -> (i6
 
 // ====
 
+// Matvec-style lane grouping keeps non-negative finite facts without local
+// assumptions on every intermediate address expression.
+func.def @matvec_block_lane_linear_range(%lane0: index, %block_base0: index) -> (i64, i64, i1) {
+  %lane = index.assume %lane0 [range(%lane0, 0, 63)] : index
+  %block_base = index.assume %block_base0 [range(%block_base0, 0, 8), mul(%block_base0, 4)] : index
+  %lanes_per_group = index.constant 16 : index
+  %block_stride = index.constant 105 : index
+  %lane_group = index.div %lane, %lanes_per_group : index
+  %lane_offset = index.rem %lane, %lanes_per_group : index
+  %block = index.add %block_base, %lane_group : index
+  %block_origin = index.mul %block, %block_stride : index
+  %linear = index.add %block_origin, %lane_offset : index
+  %lo = test.fact_range_lo %linear : index -> i64
+  %hi = test.fact_range_hi %linear : index -> i64
+  %non_negative = test.fact_non_negative %linear : index -> i1
+  func.return %lo, %hi, %non_negative : i64, i64, i1
+}
+// ----
+func.def @matvec_block_lane_linear_range(%lane0: index, %block_base0: index) -> (i64, i64, i1) {
+  %lo = scalar.constant 0 : i64
+  %hi = scalar.constant 1170 : i64
+  %non_negative = scalar.constant true : i1
+  func.return %lo, %hi, %non_negative : i64, i64, i1
+}
+
+// ====
+
 // index.cast preserves facts across address/integer boundaries.
 func.def @cast_preserves_exact() -> (i64) {
   %a = index.constant 100 : index

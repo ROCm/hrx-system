@@ -101,15 +101,15 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @q8_packed_word_global_d
   %69 = v_fma_mix_f32_f16lo_f32_f32_src2_lit %scale, %60, 0
   %71 = v_fma_mix_f32_f16lo_f32_f32_src2_lit %scale, %62, 0
   %73 = v_fma_mix_f32_f16lo_f32_f32_src2_lit %scale, %64, 0
-  %acc = v_mov_b32 0
-  %77 = slice %rhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %78 = v_fmac_f32 %acc, %67, %77
-  %80 = slice %rhs[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %81 = v_fmac_f32 %78, %69, %80
-  %83 = slice %rhs[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %84 = v_fmac_f32 %81, %71, %83
-  %86 = slice %rhs[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %dot = v_fmac_f32 %84, %73, %86
+  %76 = v_mov_b32 0
+  %78 = slice %rhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %79 = v_fmac_f32 %76, %67, %78
+  %81 = slice %rhs[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %82 = v_fmac_f32 %79, %69, %81
+  %84 = slice %rhs[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %85 = v_fmac_f32 %82, %71, %84
+  %87 = slice %rhs[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %dot = v_fmac_f32 %85, %73, %87
   global_store_b32_saddr %46, %dot, %output_view
   return
 }
