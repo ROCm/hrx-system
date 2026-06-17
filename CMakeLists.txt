@@ -208,6 +208,9 @@ if(LOOM_BUILD)
   add_subdirectory(loom/py/loom)
   add_subdirectory(loom/src)
   add_subdirectory(loom/binding/c)
+  hrx_installed_tests_install_source_tree(
+    "${PROJECT_SOURCE_DIR}/loom/src/loom" "loom/src/loom"
+    _HRX_INSTALLED_LOOM_SOURCE_TREE)
 endif()
 
 if(LIBHRX_BUILD)

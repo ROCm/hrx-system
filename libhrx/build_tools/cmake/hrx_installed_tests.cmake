@@ -249,6 +249,33 @@ function(hrx_installed_tests_source_relative_path SOURCE_PATH OUT_VAR)
   set(${OUT_VAR} "${_REL_PATH}" PARENT_SCOPE)
 endfunction()
 
+function(hrx_installed_tests_python_package_relative_path PACKAGE_DIR OUT_VAR)
+  get_filename_component(_ABS_PACKAGE_DIR "${PACKAGE_DIR}" ABSOLUTE)
+  set(_PROJECT_SOURCE_DIR "${PROJECT_SOURCE_DIR}")
+  set(_BINARY_DIR "${CMAKE_BINARY_DIR}")
+  cmake_path(IS_PREFIX _BINARY_DIR "${_ABS_PACKAGE_DIR}"
+    NORMALIZE _IN_BINARY_TREE)
+  if(_IN_BINARY_TREE)
+    cmake_path(RELATIVE_PATH _ABS_PACKAGE_DIR
+      BASE_DIRECTORY "${CMAKE_BINARY_DIR}"
+      OUTPUT_VARIABLE _REL_PATH)
+    set(_REL_PATH "build/${_REL_PATH}")
+  else()
+    cmake_path(IS_PREFIX _PROJECT_SOURCE_DIR "${_ABS_PACKAGE_DIR}"
+      NORMALIZE _IN_PROJECT)
+    if(_IN_PROJECT)
+      cmake_path(RELATIVE_PATH _ABS_PACKAGE_DIR
+        BASE_DIRECTORY "${PROJECT_SOURCE_DIR}"
+        OUTPUT_VARIABLE _REL_PATH)
+    else()
+      iree_package_path(_PACKAGE_PATH)
+      get_filename_component(_SOURCE_NAME "${_ABS_PACKAGE_DIR}" NAME)
+      set(_REL_PATH "${_PACKAGE_PATH}/${_SOURCE_NAME}")
+    endif()
+  endif()
+  set(${OUT_VAR} "${_REL_PATH}" PARENT_SCOPE)
+endfunction()
+
 function(hrx_installed_tests_resolve_data DATA OUT_SOURCE_PATH OUT_REL_PATH)
   if(IS_ABSOLUTE "${DATA}")
     set(_SOURCE_PATH "${DATA}")
@@ -570,13 +597,24 @@ function(hrx_register_installed_python_test)
     "${_SOURCE_PATH}" "${_SRC_REL_PATH}" _INSTALLED_SRC)
 
   set(_PYTHONPATH_MODS)
+  set(_INSTALLED_PACKAGE_DIRS)
   foreach(_PACKAGE_DIR IN LISTS _RULE_PACKAGE_DIRS)
     if(NOT IS_ABSOLUTE "${_PACKAGE_DIR}")
       set(_PACKAGE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/${_PACKAGE_DIR}")
     endif()
-    hrx_installed_tests_project_relative_path("${_PACKAGE_DIR}" _PACKAGE_REL_PATH)
+    hrx_installed_tests_python_package_relative_path(
+      "${_PACKAGE_DIR}" _PACKAGE_REL_PATH)
     hrx_installed_tests_install_source_tree(
       "${_PACKAGE_DIR}" "${_PACKAGE_REL_PATH}" _INSTALLED_PACKAGE_DIR)
+    list(APPEND _INSTALLED_PACKAGE_DIRS "${_INSTALLED_PACKAGE_DIR}")
+  endforeach()
+  # CTest applies ENVIRONMENT_MODIFICATION entries sequentially. Since each
+  # package path is prepended to PYTHONPATH, emit them in reverse so the final
+  # installed test environment preserves the PACKAGE_DIRS order used by the
+  # build-tree test. This matters when a generated tree contains partial Python
+  # packages that must not shadow the source tree.
+  list(REVERSE _INSTALLED_PACKAGE_DIRS)
+  foreach(_INSTALLED_PACKAGE_DIR IN LISTS _INSTALLED_PACKAGE_DIRS)
     list(APPEND _PYTHONPATH_MODS
       "PYTHONPATH=path_list_prepend:${_INSTALLED_PACKAGE_DIR}")
   endforeach()

@@ -18,7 +18,10 @@ def find_repo_root(start: str | Path | None = None) -> Path:
     if current.is_file():
         current = current.parent
     for candidate in (current, *current.parents):
-        if (candidate / "build_tools").is_dir() and (candidate / "loom" / "py" / "loom").is_dir() and (candidate / "loom" / "src" / "loom").is_dir():
+        if (
+            (candidate / "loom" / "py" / "loom").is_dir()
+            and (candidate / "loom" / "src" / "loom").is_dir()
+        ):
             return candidate
     raise RuntimeError(f"could not find Loom repository root from {current}")
 
