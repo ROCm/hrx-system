@@ -48,6 +48,10 @@ host-tool directories such as
 For ROCm installs the script searches standard layouts such as `llvm/bin`,
 `lib/llvm/bin`, and `bin`; after finding `clang` or `amdclang` it also asks
 that compiler where its companion LLVM tools live with `--print-prog-name`.
+When the discovered compiler is a ROCm launcher shim with a matching versioned
+driver next to it, the generator uses the versioned driver. This matches the
+Bazel source-build path and avoids depending on shim-relative sibling lookup
+after another build system has wrapped or symlinked the executable.
 
 By default the generator keeps only the `.kd` kernel descriptor symbols in the
 regular symbol tables. `llvm-strip --strip-all` and

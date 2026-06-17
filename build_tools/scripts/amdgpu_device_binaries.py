@@ -283,6 +283,26 @@ def run_capture(args: Sequence[str]) -> str:
     return result.stdout.strip()
 
 
+def clang_resource_dir(clang: Path) -> Path:
+    resource_dir = Path(run_capture([str(clang), "-print-resource-dir"]))
+    if not resource_dir.name:
+        raise RuntimeError(
+            f"clang resource directory query returned an empty path: {clang}"
+        )
+    return resource_dir
+
+
+def select_invocable_clang(clang: Path) -> Path:
+    resource_version = clang_resource_dir(clang).name
+    if clang.name.endswith(f"-{resource_version}"):
+        return clang
+
+    versioned_clang = clang.with_name(f"{clang.name}-{resource_version}")
+    if executable := executable_path(versioned_clang):
+        return executable.resolve()
+    return clang
+
+
 def clang_tool_candidates(clang: Path, names: Sequence[str]) -> list[Path]:
     candidates: list[Path] = []
     for name in names:
@@ -310,10 +330,13 @@ def detect_clang_resource_include(clang: Path, explicit_path: str | None) -> Pat
     elif os.environ.get("IREE_CLANG_BUILTIN_HEADERS_PATH"):
         path = Path(os.environ["IREE_CLANG_BUILTIN_HEADERS_PATH"])
     else:
-        resource_dir = Path(run_capture([str(clang), "-print-resource-dir"]))
-        path = resource_dir / "include"
+        path = clang_resource_dir(clang) / "include"
     if not path.is_dir():
         raise RuntimeError(f"clang resource include directory not found: {path}")
+    if not (path / "stddef.h").is_file():
+        raise RuntimeError(
+            f"clang resource include marker not found: {path / 'stddef.h'}"
+        )
     return path.resolve()
 
 
@@ -330,6 +353,7 @@ def detect_toolchain(args: argparse.Namespace) -> Toolchain:
         tool_dirs=dirs,
         description="clang with AMDGPU support",
     )
+    clang = select_invocable_clang(clang)
     llvm_link = find_tool(
         explicit_path=args.llvm_link,
         env_vars=(

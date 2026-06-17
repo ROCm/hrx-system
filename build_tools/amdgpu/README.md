@@ -125,6 +125,11 @@ repository. It is inert by default. A real producer is selected with:
 Useful path overrides include `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_ROCM_PATH`,
 `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLVM_TOOLS_DIR`, `IREE_ROCM_PATH`, and
 per-tool overrides such as `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_CLANG_BINARY`.
+ROCm distributions may expose `clang`/`amdclang` launcher shims that exec a
+versioned driver next to their observed `argv[0]` path. The repository resolves
+those shims to the matching versioned driver before exposing a Bazel executable
+target, because Bazel wraps local tools through generated symlinks and must not
+change the driver's sibling lookup behavior.
 When the toolchain repository is inert, selected source-built binaries are
 incompatible instead of referencing missing tool labels.
 

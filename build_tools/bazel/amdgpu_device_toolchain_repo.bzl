@@ -321,6 +321,31 @@ def _clang_tool_candidates(repository_ctx, clang, names):
             ])
     return candidates
 
+def _detect_clang_resource_dir(repository_ctx, clang):
+    result = repository_ctx.execute([clang, "-print-resource-dir"], quiet = True)
+    if result.return_code != 0:
+        fail("Failed to query clang resource directory from {}:\n{}".format(
+            clang,
+            result.stderr,
+        ))
+    resource_dir = result.stdout.strip()
+    if not resource_dir:
+        fail("clang resource directory query returned an empty path from {}".format(clang))
+    return resource_dir
+
+def _select_invocable_clang(repository_ctx, clang):
+    resource_dir = _detect_clang_resource_dir(repository_ctx, clang)
+    resource_version = _basename(resource_dir)
+    if not resource_version:
+        return clang
+    clang_basename = _basename(clang)
+    if clang_basename.endswith("-" + resource_version):
+        return clang
+    versioned_clang = _join_path(_dirname(clang), clang_basename + "-" + resource_version)
+    if _is_executable(repository_ctx, versioned_clang):
+        return str(repository_ctx.path(versioned_clang))
+    return clang
+
 def _detect_clang_resource_include(repository_ctx, clang):
     explicit = repository_ctx.getenv("IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_CLANG_RESOURCE_INCLUDE")
     if not explicit:
@@ -331,19 +356,19 @@ def _detect_clang_resource_include(repository_ctx, clang):
             fail("Configured clang resource include directory does not exist: {}".format(explicit))
         return str(path)
 
-    result = repository_ctx.execute([clang, "-print-resource-dir"], quiet = True)
-    if result.return_code != 0:
-        fail("Failed to query clang resource directory from {}:\n{}".format(
-            clang,
-            result.stderr,
-        ))
-    include_dir = _join_path(result.stdout.strip(), "include")
+    include_dir = _join_path(_detect_clang_resource_dir(repository_ctx, clang), "include")
     path = repository_ctx.path(include_dir)
     if not path.exists:
         fail("clang resource include directory does not exist: {}".format(include_dir))
     return str(path)
 
+def _validate_clang_resource_include(repository_ctx, clang_resource_include):
+    marker = _join_path(clang_resource_include, "stddef.h")
+    if not repository_ctx.path(marker).exists:
+        fail("clang resource include marker does not exist: {}".format(marker))
+
 def _write_local_toolchain_repo(repository_ctx, tools, clang_resource_include):
+    _validate_clang_resource_include(repository_ctx, clang_resource_include)
     repository_ctx.file("prebuilt_tool.bzl", _PREBUILT_TOOL_BZL)
     repository_ctx.file("bin/.keep", "")
     for name, path in tools.items():
@@ -381,6 +406,7 @@ def _amdgpu_device_toolchain_repo_impl(repository_ctx):
         ["IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_CLANG_BINARY", "IREE_CLANG_BINARY", "CLANG"],
         "clang with AMDGPU support",
     )
+    clang = _select_invocable_clang(repository_ctx, clang)
     llvm_ar = _find_tool(
         repository_ctx,
         ["llvm-ar"],
