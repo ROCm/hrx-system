@@ -21,14 +21,14 @@ kernel.def target(@target) @report_workgroup_reduce_scalar_publication() {
 
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
-COMPILE-REPORT: source_low selected_ops=7 emitted_ops=41 rows=7
+COMPILE-REPORT: source_low selected_ops=7 emitted_ops=37 rows=7
 COMPILE-REPORT: target_legalization legal=0 rewritten=1 target_rewritten=0 reference_rewritten=1 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=1
 COMPILE-REPORT: source_low[0] function=report_workgroup_reduce_scalar_publication source_op=kernel.workitem.id selection=plan plan=4112 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[1] function=report_workgroup_reduce_scalar_publication source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[2] function=report_workgroup_reduce_scalar_publication source_op=buffer.view selection=rule rule_set=1 rule=0 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[3] function=report_workgroup_reduce_scalar_publication source_op=buffer.view selection=rule rule_set=1 rule=0 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[4] function=report_workgroup_reduce_scalar_publication source_op=view.load selection=plan plan=3330 descriptor=0 emitted_ops=2
-COMPILE-REPORT: source_low[5] function=report_workgroup_reduce_scalar_publication source_op=kernel.workgroup.reduce selection=plan plan=4132 plan_key=amdgpu.workgroup_reduce.publication.redundant_subgroup descriptor=0 emitted_ops=37
+COMPILE-REPORT: source_low[5] function=report_workgroup_reduce_scalar_publication source_op=kernel.workgroup.reduce selection=plan plan=4132 plan_key=amdgpu.workgroup_reduce.publication.redundant_subgroup descriptor=0 emitted_ops=33
 COMPILE-REPORT: source_low[6] function=report_workgroup_reduce_scalar_publication source_op=view.store selection=plan plan=3331 descriptor=0 emitted_ops=2
 COMPILE-REPORT: target_legalization[0] function=report_workgroup_reduce_scalar_publication source_op=vector.store mode=final policy=prefer-native action=rewritten outcome=reference-fallback contract=unhandled legalizer=vector strategy=reference bundle=target config=target binding=65535 case=65535 rule_set=65535 rule=65535 diagnostic=65535 descriptor=18446744073709551615 source_rejections=0x00000000 source_rejection_detail=0 target_rejections=0x00000000 missing_features=0x00000000 missing_facts=0x00000000 created_ops=1 erased_ops=1
 
@@ -61,7 +61,7 @@ kernel.def target(@target) @report_workgroup_reduce_scalar_leader_publication() 
 
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
-COMPILE-REPORT: source_low selected_ops=9 emitted_ops=40 rows=9
+COMPILE-REPORT: source_low selected_ops=9 emitted_ops=36 rows=9
 COMPILE-REPORT: target_legalization legal=0 rewritten=1 target_rewritten=0 reference_rewritten=1 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=1
 COMPILE-REPORT: source_low[0] function=report_workgroup_reduce_scalar_leader_publication source_op=kernel.workitem.id selection=plan plan=4112 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[1] function=report_workgroup_reduce_scalar_leader_publication source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
@@ -69,7 +69,7 @@ COMPILE-REPORT: source_low[2] function=report_workgroup_reduce_scalar_leader_pub
 COMPILE-REPORT: source_low[3] function=report_workgroup_reduce_scalar_leader_publication source_op=buffer.view selection=rule rule_set=1 rule=0 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[4] function=report_workgroup_reduce_scalar_leader_publication source_op=buffer.view selection=rule rule_set=1 rule=0 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[5] function=report_workgroup_reduce_scalar_leader_publication source_op=view.load selection=plan plan=3330 descriptor=0 emitted_ops=2
-COMPILE-REPORT: source_low[6] function=report_workgroup_reduce_scalar_leader_publication source_op=kernel.workgroup.reduce selection=plan plan=4132 plan_key=amdgpu.workgroup_reduce.publication.leader_workitem descriptor=0 emitted_ops=35
+COMPILE-REPORT: source_low[6] function=report_workgroup_reduce_scalar_leader_publication source_op=kernel.workgroup.reduce selection=plan plan=4132 plan_key=amdgpu.workgroup_reduce.publication.leader_workitem descriptor=0 emitted_ops=31
 COMPILE-REPORT: source_low[7] function=report_workgroup_reduce_scalar_leader_publication source_op=index.cmp selection=rule rule_set=4 rule=75 descriptor=4582905300084092641 emitted_ops=1
 COMPILE-REPORT: source_low[8] function=report_workgroup_reduce_scalar_leader_publication source_op=view.store selection=plan plan=3331 descriptor=0 emitted_ops=2
 COMPILE-REPORT: target_legalization[0] function=report_workgroup_reduce_scalar_leader_publication source_op=vector.store mode=final policy=prefer-native action=rewritten outcome=reference-fallback contract=unhandled legalizer=vector strategy=reference bundle=target config=target binding=65535 case=65535 rule_set=65535 rule=65535 diagnostic=65535 descriptor=18446744073709551615 source_rejections=0x00000000 source_rejection_detail=0 target_rejections=0x00000000 missing_features=0x00000000 missing_facts=0x00000000 created_ops=1 erased_ops=1
@@ -104,7 +104,7 @@ kernel.def target(@target) @report_workgroup_reduce_scalar_wave_leader_publicati
 
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
-COMPILE-REPORT: source_low selected_ops=10 emitted_ops=41 rows=10
+COMPILE-REPORT: source_low selected_ops=10 emitted_ops=37 rows=10
 COMPILE-REPORT: target_legalization legal=0 rewritten=1 target_rewritten=0 reference_rewritten=1 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=1
 COMPILE-REPORT: source_low[0] function=report_workgroup_reduce_scalar_wave_leader_publication source_op=kernel.workitem.id selection=plan plan=4112 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[1] function=report_workgroup_reduce_scalar_wave_leader_publication source_op=kernel.subgroup.lane.id selection=plan plan=4120 descriptor=0 emitted_ops=1
@@ -113,7 +113,7 @@ COMPILE-REPORT: source_low[3] function=report_workgroup_reduce_scalar_wave_leade
 COMPILE-REPORT: source_low[4] function=report_workgroup_reduce_scalar_wave_leader_publication source_op=buffer.view selection=rule rule_set=1 rule=0 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[5] function=report_workgroup_reduce_scalar_wave_leader_publication source_op=buffer.view selection=rule rule_set=1 rule=0 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[6] function=report_workgroup_reduce_scalar_wave_leader_publication source_op=view.load selection=plan plan=3330 descriptor=0 emitted_ops=2
-COMPILE-REPORT: source_low[7] function=report_workgroup_reduce_scalar_wave_leader_publication source_op=kernel.workgroup.reduce selection=plan plan=4132 plan_key=amdgpu.workgroup_reduce.publication.redundant_subgroup_leader_lane descriptor=0 emitted_ops=35
+COMPILE-REPORT: source_low[7] function=report_workgroup_reduce_scalar_wave_leader_publication source_op=kernel.workgroup.reduce selection=plan plan=4132 plan_key=amdgpu.workgroup_reduce.publication.redundant_subgroup_leader_lane descriptor=0 emitted_ops=31
 COMPILE-REPORT: source_low[8] function=report_workgroup_reduce_scalar_wave_leader_publication source_op=index.cmp selection=rule rule_set=4 rule=75 descriptor=4582905300084092641 emitted_ops=1
 COMPILE-REPORT: source_low[9] function=report_workgroup_reduce_scalar_wave_leader_publication source_op=view.store selection=plan plan=3331 descriptor=0 emitted_ops=2
 COMPILE-REPORT: target_legalization[0] function=report_workgroup_reduce_scalar_wave_leader_publication source_op=vector.store mode=final policy=prefer-native action=rewritten outcome=reference-fallback contract=unhandled legalizer=vector strategy=reference bundle=target config=target binding=65535 case=65535 rule_set=65535 rule=65535 diagnostic=65535 descriptor=18446744073709551615 source_rejections=0x00000000 source_rejection_detail=0 target_rejections=0x00000000 missing_features=0x00000000 missing_facts=0x00000000 created_ops=1 erased_ops=1
@@ -139,14 +139,14 @@ kernel.def target(@target) @report_workgroup_reduce_vector_publication() {
 
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
-COMPILE-REPORT: source_low selected_ops=18 emitted_ops=129 rows=18
+COMPILE-REPORT: source_low selected_ops=18 emitted_ops=113 rows=18
 COMPILE-REPORT: target_legalization legal=0 rewritten=1 target_rewritten=0 reference_rewritten=1 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=1
 COMPILE-REPORT: source_low[0] function=report_workgroup_reduce_vector_publication source_op=kernel.workitem.id selection=plan plan=4112 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[1] function=report_workgroup_reduce_vector_publication source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[2] function=report_workgroup_reduce_vector_publication source_op=buffer.view selection=rule rule_set=1 rule=0 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[3] function=report_workgroup_reduce_vector_publication source_op=buffer.view selection=rule rule_set=1 rule=0 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[4] function=report_workgroup_reduce_vector_publication source_op=vector.load selection=plan plan=3605 descriptor=0 emitted_ops=2
-COMPILE-REPORT: source_low[5] function=report_workgroup_reduce_vector_publication source_op=kernel.workgroup.reduce selection=plan plan=4132 plan_key=amdgpu.workgroup_reduce.publication.lds descriptor=0 emitted_ops=115
+COMPILE-REPORT: source_low[5] function=report_workgroup_reduce_vector_publication source_op=kernel.workgroup.reduce selection=plan plan=4132 plan_key=amdgpu.workgroup_reduce.publication.lds descriptor=0 emitted_ops=99
 COMPILE-REPORT: source_low[6] function=report_workgroup_reduce_vector_publication source_op=vector.extract selection=plan plan=3592 descriptor=0 emitted_ops=1
 COMPILE-REPORT: source_low[7] function=report_workgroup_reduce_vector_publication source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[8] function=report_workgroup_reduce_vector_publication source_op=view.store selection=plan plan=3331 descriptor=0 emitted_ops=2

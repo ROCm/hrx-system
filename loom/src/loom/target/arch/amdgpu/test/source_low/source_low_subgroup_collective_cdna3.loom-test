@@ -163,3 +163,75 @@ low.kernel.def target(@target) workgroup_size(128, 1, 1) @workgroup_reduce_then_
   s_mov_b64_exec %134
   return
 }
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @subgroup_reduce_addf_f32_cluster8_cdna3() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%input: buffer, %output: buffer) {
+  %tid = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<64xf32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<64xf32, #dense>
+  %value = view.load %input_view[%tid] : view<64xf32, #dense> -> f32
+  %sum = kernel.subgroup.reduce<addf> %value {cluster_size = 8} : f32
+  view.store %sum, %output_view[%tid] : f32, view<64xf32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) @subgroup_reduce_addf_f32_cluster8_cdna3() asm<amdgpu.cdna3.core> {
+  %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
+  %13 = v_lshlrev_b32_src0_inline %tid, 2
+  %14 = s_mov_b32_m0_imm 0
+  %value = global_load_dword_saddr %13, %input_view, %14
+  %16 = v_add_f32_dpp %value, %value {dpp_ctrl = 177}
+  %17 = v_add_f32_dpp %16, %16 {dpp_ctrl = 78}
+  %sum = v_add_f32_dpp %17, %17 {dpp_ctrl = 321}
+  %19 = v_lshlrev_b32_src0_inline %tid, 2
+  %20 = s_mov_b32_m0_imm 0
+  global_store_dword_saddr %19, %sum, %output_view, %20
+  return
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @subgroup_reduce_maxnumf_f32_cluster8_cdna3() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%input: buffer, %output: buffer) {
+  %tid = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<64xf32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<64xf32, #dense>
+  %value = view.load %input_view[%tid] : view<64xf32, #dense> -> f32
+  %max = kernel.subgroup.reduce<maxnumf> %value {cluster_size = 8} : f32
+  view.store %max, %output_view[%tid] : f32, view<64xf32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) @subgroup_reduce_maxnumf_f32_cluster8_cdna3() asm<amdgpu.cdna3.core> {
+  %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
+  %13 = v_lshlrev_b32_src0_inline %tid, 2
+  %14 = s_mov_b32_m0_imm 0
+  %value = global_load_dword_saddr %13, %input_view, %14
+  %16 = v_max_f32_dpp %value, %value {dpp_ctrl = 177}
+  %17 = v_max_f32_dpp %16, %16 {dpp_ctrl = 78}
+  %max = v_max_f32_dpp %17, %17 {dpp_ctrl = 321}
+  %19 = v_lshlrev_b32_src0_inline %tid, 2
+  %20 = s_mov_b32_m0_imm 0
+  global_store_dword_saddr %19, %max, %output_view, %20
+  return
+}

@@ -1909,6 +1909,87 @@ def _v_binary_f32_overlay(
     )
 
 
+def _v_binary_f32_dpp_overlay(
+    *,
+    descriptor_key: str,
+    instruction_name: str,
+    mnemonic: str,
+    semantic_tag: str,
+    encoding_name: str,
+    encoding_condition: str,
+) -> AmdgpuDescriptorOverlay:
+    return AmdgpuDescriptorOverlay(
+        descriptor_key=descriptor_key,
+        instruction_name=instruction_name,
+        mnemonic=mnemonic,
+        encoding_name=encoding_name,
+        encoding_condition=encoding_condition,
+        semantic_tag=semantic_tag,
+        schedule_class=_SCHEDULE_VALU,
+        operands=(
+            AmdgpuOperandOverlay("VDST", _vgpr_result()),
+            AmdgpuOperandOverlay("VSRC0", _vgpr_operand("lhs")),
+            AmdgpuOperandOverlay("VSRC1", _vgpr_operand("rhs")),
+        ),
+        asm_forms=_asm(
+            mnemonic=f"{mnemonic}_{descriptor_key.rsplit('.', 1)[1]}",
+            results=("dst",),
+            operands=("lhs", "rhs"),
+            immediates=("dpp_ctrl",),
+            named_immediates=True,
+        ),
+        immediate_fields=("DPP_CTRL",),
+        immediates=(_DPP_CTRL_IMMEDIATE,),
+        fixed_encoding_fields=(
+            ("SRC0", 250),
+            ("ROW_MASK", 0xF),
+            ("BANK_MASK", 0xF),
+            ("BOUND_CTRL", 1),
+        ),
+        effects=(_CONVERGENT_EFFECT,),
+    )
+
+
+def _v_binary_f32_dpp_variant_overlays(
+    *,
+    descriptor_suffix: str,
+    encoding_name: str,
+    encoding_condition: str,
+) -> tuple[AmdgpuDescriptorOverlay, ...]:
+    return tuple(
+        _v_binary_f32_dpp_overlay(
+            descriptor_key=f"amdgpu.v_{operation}_f32.{descriptor_suffix}",
+            instruction_name=f"V_{operation.upper()}_F32",
+            mnemonic=f"v_{operation}_f32",
+            semantic_tag=f"float.{semantic}.f32",
+            encoding_name=encoding_name,
+            encoding_condition=encoding_condition,
+        )
+        for operation, semantic in (
+            ("add", "add"),
+            ("mul", "mul"),
+            ("min", "minnum"),
+            ("max", "maxnum"),
+        )
+    )
+
+
+def _v_binary_f32_dpp_legacy_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
+    return _v_binary_f32_dpp_variant_overlays(
+        descriptor_suffix="dpp",
+        encoding_name="VOP2_VOP_DPP",
+        encoding_condition="has_dpp",
+    )
+
+
+def _v_binary_f32_dpp16_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
+    return _v_binary_f32_dpp_variant_overlays(
+        descriptor_suffix="dpp16",
+        encoding_name="VOP2_VOP_DPP16",
+        encoding_condition="has_dpp16",
+    )
+
+
 def _v_add_f32_overlay() -> AmdgpuDescriptorOverlay:
     return _v_binary_f32_overlay(
         descriptor_key="amdgpu.v_add_f32",
@@ -4332,6 +4413,10 @@ __all__ = (
     "_v_bfe_u32_offset_0_width_16_low16_overlay",
     "_v_bfe_width_immediate",
     "_v_bfi_b32_src0_literal_overlay",
+    "_v_binary_f32_dpp16_overlays",
+    "_v_binary_f32_dpp_legacy_overlays",
+    "_v_binary_f32_dpp_overlay",
+    "_v_binary_f32_dpp_variant_overlays",
     "_v_binary_f32_overlay",
     "_v_binary_f32_operand_forms",
     "_v_binary_f32_overlays",

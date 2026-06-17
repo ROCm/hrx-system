@@ -646,6 +646,8 @@ typedef struct loom_amdgpu_subgroup_reduce_plan_t {
   loom_low_lower_resolved_descriptor_t bpermute_descriptor;
   // Descriptor row selected for all-lane DPP row moves.
   loom_low_lower_resolved_descriptor_t dpp_descriptor;
+  // Descriptor row selected for fused DPP row moves and lane combines.
+  loom_low_lower_resolved_descriptor_t dpp_combine_descriptor;
   // Descriptor row selected for each native lane combine.
   loom_low_lower_resolved_descriptor_t combine_descriptor;
   // Descriptor row selected to guard inactive source lanes.
@@ -703,6 +705,8 @@ typedef struct loom_amdgpu_workgroup_reduce_plan_t {
   loom_low_lower_resolved_descriptor_t bpermute_descriptor;
   // Descriptor row selected for all-lane DPP row moves.
   loom_low_lower_resolved_descriptor_t dpp_descriptor;
+  // Descriptor row selected for fused DPP row moves and lane combines.
+  loom_low_lower_resolved_descriptor_t dpp_combine_descriptor;
   // Descriptor row selected for each native lane combine.
   loom_low_lower_resolved_descriptor_t combine_descriptor;
   // Descriptor row selected to guard inactive source lanes.

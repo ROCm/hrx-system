@@ -8,7 +8,41 @@
 
 #include <stdint.h>
 
+#include "iree/base/api.h"
 #include "loom/target/arch/amdgpu/lower/collective_payload.h"
+
+typedef struct loom_amdgpu_collective_dpp_combine_descriptor_row_t {
+  // Source combining kind lowered by this native DPP packet row.
+  loom_combining_kind_t kind;
+  // Legacy VOP2 DPP descriptor reference for pre-DPP16 targets.
+  loom_amdgpu_descriptor_ref_t legacy_descriptor_ref;
+  // DPP16 descriptor reference for RDNA3 and newer targets.
+  loom_amdgpu_descriptor_ref_t dpp16_descriptor_ref;
+} loom_amdgpu_collective_dpp_combine_descriptor_row_t;
+
+static const loom_amdgpu_collective_dpp_combine_descriptor_row_t
+    kLoomAmdgpuCollectiveDppCombineDescriptorRows[] = {
+        {
+            .kind = LOOM_COMBINING_KIND_ADDF,
+            .legacy_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_ADD_F32_DPP,
+            .dpp16_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_ADD_F32_DPP16,
+        },
+        {
+            .kind = LOOM_COMBINING_KIND_MULF,
+            .legacy_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_MUL_F32_DPP,
+            .dpp16_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_MUL_F32_DPP16,
+        },
+        {
+            .kind = LOOM_COMBINING_KIND_MINNUMF,
+            .legacy_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_MIN_F32_DPP,
+            .dpp16_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_MIN_F32_DPP16,
+        },
+        {
+            .kind = LOOM_COMBINING_KIND_MAXNUMF,
+            .legacy_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_MAX_F32_DPP,
+            .dpp16_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_MAX_F32_DPP16,
+        },
+};
 
 bool loom_amdgpu_collective_combine_descriptor_ref(
     loom_combining_kind_t kind,
@@ -97,6 +131,36 @@ bool loom_amdgpu_collective_combine_descriptor_ref(
     default:
       return false;
   }
+}
+
+bool loom_amdgpu_collective_combine_dpp_descriptor_ref(
+    loom_combining_kind_t kind,
+    loom_amdgpu_subgroup_payload_kind_t payload_kind,
+    loom_amdgpu_collective_combine_dpp_form_t dpp_form,
+    loom_amdgpu_descriptor_ref_t* out_descriptor_ref) {
+  *out_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
+  if (!loom_amdgpu_collective_payload_is_float(payload_kind)) {
+    return false;
+  }
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(kLoomAmdgpuCollectiveDppCombineDescriptorRows); ++i) {
+    const loom_amdgpu_collective_dpp_combine_descriptor_row_t* row =
+        &kLoomAmdgpuCollectiveDppCombineDescriptorRows[i];
+    if (row->kind != kind) {
+      continue;
+    }
+    switch (dpp_form) {
+      case LOOM_AMDGPU_COLLECTIVE_COMBINE_DPP_FORM_LEGACY:
+        *out_descriptor_ref = row->legacy_descriptor_ref;
+        return true;
+      case LOOM_AMDGPU_COLLECTIVE_COMBINE_DPP_FORM_DPP16:
+        *out_descriptor_ref = row->dpp16_descriptor_ref;
+        return true;
+      default:
+        return false;
+    }
+  }
+  return false;
 }
 
 bool loom_amdgpu_collective_combine_identity_bits(loom_combining_kind_t kind,

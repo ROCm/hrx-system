@@ -67,6 +67,24 @@ low.func.def target(@gfx11_target) @vop2_fmamk_literal_multiply_slot(%a: reg<amd
 // ====
 
 amdgpu.target<gfx1100> @gfx11_target
+low.func.def target(@gfx11_target) @rdna3_vop2_dpp_f32_forms(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %sum = v_add_f32_dpp16 %lhs, %rhs {dpp_ctrl = 177}
+  %max = v_max_f32_dpp16 %sum, %rhs {dpp_ctrl = 78}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx942> @gfx942_target
+low.func.def target(@gfx942_target) @cdna3_vop2_dpp_f32_forms(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm<amdgpu.cdna3.core> {
+  %sum = v_add_f32_dpp %lhs, %rhs {dpp_ctrl = 177}
+  %max = v_max_f32_dpp %sum, %rhs {dpp_ctrl = 78}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @gfx11_target
 low.func.def target(@gfx11_target) @rdna_scalar_f16_fma_forms(%acc: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
   %fma = v_fma_f16 %a, %b, %c
   %fmac = v_fmac_f16 %acc, %a, %b

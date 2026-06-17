@@ -127,22 +127,64 @@ static bool loom_amdgpu_subgroup_reduce_cluster_active_lane_count(
 
 static bool loom_amdgpu_subgroup_reduce_dpp_row_is_applicable(
     uint32_t wavefront_size, uint32_t active_lane_count) {
-  // Keep the DPP row strategy on wave32. Wave64 targets use the lane-addressed
-  // bpermute tree so full-wave reductions do not depend on family-specific DPP
-  // row-control behavior.
+  if (active_lane_count == 0 || active_lane_count > wavefront_size) {
+    return false;
+  }
+  if (active_lane_count <= LOOM_AMDGPU_DPP_ROW_LANE_COUNT) {
+    return true;
+  }
+  // Keep full-wave DPP row strategy on wave32. Wave64 targets use the
+  // lane-addressed bpermute tree for full-wave reductions so they do not depend
+  // on family-specific DPP row-control behavior.
   return active_lane_count == wavefront_size && wavefront_size == 32;
+}
+
+static iree_status_t loom_amdgpu_resolve_subgroup_reduce_dpp_combine_descriptor(
+    loom_low_lower_context_t* context, loom_combining_kind_t kind,
+    loom_amdgpu_subgroup_payload_kind_t payload_kind,
+    loom_low_lower_resolved_descriptor_t* out_descriptor, bool* out_present) {
+  *out_descriptor = (loom_low_lower_resolved_descriptor_t){0};
+  *out_present = false;
+  const loom_amdgpu_collective_combine_dpp_form_t dpp_forms[] = {
+      LOOM_AMDGPU_COLLECTIVE_COMBINE_DPP_FORM_DPP16,
+      LOOM_AMDGPU_COLLECTIVE_COMBINE_DPP_FORM_LEGACY,
+  };
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(dpp_forms); ++i) {
+    loom_amdgpu_descriptor_ref_t descriptor_ref =
+        LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
+    if (!loom_amdgpu_collective_combine_dpp_descriptor_ref(
+            kind, payload_kind, dpp_forms[i], &descriptor_ref)) {
+      continue;
+    }
+    IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
+        context, descriptor_ref, out_descriptor, out_present));
+    if (*out_present) {
+      return iree_ok_status();
+    }
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_select_subgroup_reduce_crosslane_kind(
     loom_low_lower_context_t* context, uint32_t wavefront_size,
-    uint32_t active_lane_count, loom_low_lower_resolved_descriptor_t* dpp_move,
+    uint32_t active_lane_count, loom_combining_kind_t kind,
+    loom_amdgpu_subgroup_payload_kind_t payload_kind,
+    loom_low_lower_resolved_descriptor_t* dpp_move,
+    loom_low_lower_resolved_descriptor_t* dpp_combine,
     loom_amdgpu_subgroup_reduce_crosslane_kind_t* out_crosslane_kind) {
   *dpp_move = (loom_low_lower_resolved_descriptor_t){0};
+  *dpp_combine = (loom_low_lower_resolved_descriptor_t){0};
   *out_crosslane_kind = LOOM_AMDGPU_SUBGROUP_REDUCE_CROSSLANE_BPERMUTE;
   if (!loom_amdgpu_subgroup_reduce_dpp_row_is_applicable(wavefront_size,
                                                          active_lane_count)) {
     return iree_ok_status();
   }
+
+  bool dpp_combine_descriptor_present = false;
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_resolve_subgroup_reduce_dpp_combine_descriptor(
+          context, kind, payload_kind, dpp_combine,
+          &dpp_combine_descriptor_present));
 
   bool dpp_descriptor_present = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
@@ -153,7 +195,7 @@ static iree_status_t loom_amdgpu_select_subgroup_reduce_crosslane_kind(
         context, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32_DPP, dpp_move,
         &dpp_descriptor_present));
   }
-  if (dpp_descriptor_present) {
+  if (dpp_combine_descriptor_present || dpp_descriptor_present) {
     *out_crosslane_kind =
         LOOM_AMDGPU_SUBGROUP_REDUCE_CROSSLANE_DPP_ROW_BPERMUTE;
   }
@@ -618,7 +660,8 @@ iree_status_t loom_amdgpu_select_kernel_subgroup_reduce_plan(
   }
 
   IREE_RETURN_IF_ERROR(loom_amdgpu_select_subgroup_reduce_crosslane_kind(
-      context, wavefront_size, active_lane_count, &out_plan->dpp_descriptor,
+      context, wavefront_size, active_lane_count, kind, payload_kind,
+      &out_plan->dpp_descriptor, &out_plan->dpp_combine_descriptor,
       &out_plan->crosslane_kind));
 
   uint32_t identity_bits = 0;
@@ -739,8 +782,9 @@ iree_status_t loom_amdgpu_select_kernel_workgroup_reduce_plan(
       flat_workgroup_size > wavefront_size ? wavefront_size
                                            : flat_workgroup_size;
   IREE_RETURN_IF_ERROR(loom_amdgpu_select_subgroup_reduce_crosslane_kind(
-      context, wavefront_size, per_wave_active_lane_count,
-      &out_plan->dpp_descriptor, &out_plan->crosslane_kind));
+      context, wavefront_size, per_wave_active_lane_count, kind, payload_kind,
+      &out_plan->dpp_descriptor, &out_plan->dpp_combine_descriptor,
+      &out_plan->crosslane_kind));
 
   uint32_t identity_bits = 0;
   if (needs_identity_guard) {
@@ -848,6 +892,31 @@ static iree_status_t loom_amdgpu_emit_subgroup_dpp_register(
   loom_op_t* low_op = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_op(
       context, descriptor, &low_source_value, 1,
+      loom_make_named_attr_slice(attrs, attr_count), &lane_type, 1,
+      /*tied_results=*/NULL, /*tied_result_count=*/0, source_op->location,
+      &low_op));
+  *out_low_result = loom_value_slice_get(loom_low_op_results(low_op), 0);
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_emit_subgroup_dpp_combine_register(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_low_lower_resolved_descriptor_t* descriptor, loom_value_id_t lhs,
+    loom_value_id_t rhs, uint32_t dpp_ctrl, loom_type_t lane_type,
+    loom_value_id_t* out_low_result) {
+  *out_low_result = LOOM_VALUE_ID_INVALID;
+  loom_named_attr_t attrs[1];
+  iree_host_size_t attr_count = 0;
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_append_i64_attr(context, IREE_SV("dpp_ctrl"), dpp_ctrl, attrs,
+                                  IREE_ARRAYSIZE(attrs), &attr_count));
+  const loom_value_id_t operands[] = {
+      lhs,
+      rhs,
+  };
+  loom_op_t* low_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_op(
+      context, descriptor, operands, IREE_ARRAYSIZE(operands),
       loom_make_named_attr_slice(attrs, attr_count), &lane_type, 1,
       /*tied_results=*/NULL, /*tied_result_count=*/0, source_op->location,
       &low_op));
@@ -1076,10 +1145,19 @@ static iree_status_t loom_amdgpu_emit_subgroup_reduce_dpp_row_tree(
     loom_type_t lane_type, loom_value_id_t* inout_registers) {
   for (uint32_t i = 0; i < plan->register_count; ++i) {
     loom_value_id_t accumulator = inout_registers[i];
-    for (uint32_t lane_count = 2; lane_count <= LOOM_AMDGPU_DPP_ROW_LANE_COUNT;
+    const uint32_t row_lane_count =
+        iree_min(plan->active_lane_count, LOOM_AMDGPU_DPP_ROW_LANE_COUNT);
+    for (uint32_t lane_count = 2; lane_count <= row_lane_count;
          lane_count <<= 1) {
       const uint32_t dpp_ctrl =
           loom_amdgpu_subgroup_reduce_dpp_ctrl(lane_count);
+      if (plan->dpp_combine_descriptor.descriptor != NULL) {
+        IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_dpp_combine_register(
+            context, source_op, &plan->dpp_combine_descriptor, accumulator,
+            accumulator, dpp_ctrl, lane_type, &accumulator));
+        continue;
+      }
+      IREE_ASSERT(plan->dpp_descriptor.descriptor != NULL);
       loom_value_id_t peer = LOOM_VALUE_ID_INVALID;
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_dpp_register(
           context, source_op, &plan->dpp_descriptor, accumulator, dpp_ctrl,
@@ -1356,6 +1434,7 @@ iree_status_t loom_amdgpu_lower_kernel_workgroup_reduce(
     const loom_amdgpu_subgroup_reduce_plan_t subgroup_plan = {
         .bpermute_descriptor = plan->bpermute_descriptor,
         .dpp_descriptor = plan->dpp_descriptor,
+        .dpp_combine_descriptor = plan->dpp_combine_descriptor,
         .combine_descriptor = plan->combine_descriptor,
         .guard_descriptor = plan->guard_descriptor,
         .select_descriptor = plan->select_descriptor,
@@ -1451,6 +1530,7 @@ iree_status_t loom_amdgpu_lower_kernel_workgroup_reduce(
     const loom_amdgpu_subgroup_reduce_plan_t per_wave_plan = {
         .bpermute_descriptor = plan->bpermute_descriptor,
         .dpp_descriptor = plan->dpp_descriptor,
+        .dpp_combine_descriptor = plan->dpp_combine_descriptor,
         .combine_descriptor = plan->combine_descriptor,
         .guard_descriptor = plan->guard_descriptor,
         .select_descriptor = plan->select_descriptor,
