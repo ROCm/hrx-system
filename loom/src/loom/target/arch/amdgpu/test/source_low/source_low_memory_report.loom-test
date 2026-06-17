@@ -66,3 +66,46 @@ COMPILE-REPORT: source_low[8] function=report_lds_read2_write2_bank_fields sourc
 COMPILE-REPORT: source_low[9] function=report_lds_read2_write2_bank_fields source_op=vector.store selection=plan plan=3606 descriptor=0 emitted_ops=2
 COMPILE-REPORT: source_low_memory[0] function=report_lds_read2_write2_bank_fields source_op=vector.store memory_space=workgroup operation=store packet=amdgpu.ds_write2_b32 descriptor=2245861438422952198 element_bytes=4 vector_lanes=2 dynamic_stride_bytes=32 vector_lane_stride_bytes=8 bank_stride_words=8 bank_conflict_degree=8 bank_conflict_kind=bank-conflict-risk
 COMPILE-REPORT: source_low_memory[1] function=report_lds_read2_write2_bank_fields source_op=vector.load memory_space=workgroup operation=load packet=amdgpu.ds_read2_b32 descriptor=211090682926363697 element_bytes=4 vector_lanes=2 dynamic_stride_bytes=32 vector_lane_stride_bytes=8 bank_stride_words=8 bank_conflict_degree=8 bank_conflict_kind=bank-conflict-risk
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @report_lds_b128_single_lane_extract() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%input: buffer, %output: buffer) {
+  %tid = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 1024 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %input_view = buffer.view %input[%zero] : buffer -> view<64x4xi32, #dense>
+  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64x4xi32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<64xi32, #dense>
+  %loaded = vector.load %input_view[%tid, 0] : view<64x4xi32, #dense> -> vector<4xi32>
+  vector.store %loaded, %scratch_view[%tid, 0] : vector<4xi32>, view<64x4xi32, #dense>
+  %roundtrip = vector.load %scratch_view[%tid, 0] : view<64x4xi32, #dense> -> vector<4xi32>
+  %lane2 = vector.extract %roundtrip[2] : vector<4xi32> -> i32
+  view.store %lane2, %output_view[%tid] : i32, view<64xi32, #dense>
+  kernel.return
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=12 emitted_ops=11 rows=12
+COMPILE-REPORT: source_low_memory rows=2
+COMPILE-REPORT: source_low[0] function=report_lds_b128_single_lane_extract source_op=kernel.workitem.id selection=plan plan=4112 descriptor=0 emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_lds_b128_single_lane_extract source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
+COMPILE-REPORT: source_low[2] function=report_lds_b128_single_lane_extract source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
+COMPILE-REPORT: source_low[3] function=report_lds_b128_single_lane_extract source_op=buffer.alloca selection=plan plan=3072 descriptor=0 emitted_ops=2
+COMPILE-REPORT: source_low[4] function=report_lds_b128_single_lane_extract source_op=buffer.view selection=rule rule_set=1 rule=0 descriptor=0 emitted_ops=0
+COMPILE-REPORT: source_low[5] function=report_lds_b128_single_lane_extract source_op=buffer.view selection=rule rule_set=1 rule=0 descriptor=0 emitted_ops=0
+COMPILE-REPORT: source_low[6] function=report_lds_b128_single_lane_extract source_op=buffer.view selection=rule rule_set=1 rule=0 descriptor=0 emitted_ops=0
+COMPILE-REPORT: source_low[7] function=report_lds_b128_single_lane_extract source_op=vector.load selection=plan plan=3605 descriptor=0 emitted_ops=2
+COMPILE-REPORT: source_low[8] function=report_lds_b128_single_lane_extract source_op=vector.store selection=plan plan=3606 descriptor=0 emitted_ops=2
+COMPILE-REPORT: source_low[9] function=report_lds_b128_single_lane_extract source_op=vector.load selection=plan plan=3605 descriptor=0 emitted_ops=2
+COMPILE-REPORT: source_low[10] function=report_lds_b128_single_lane_extract source_op=vector.extract selection=plan plan=3592 descriptor=0 emitted_ops=1
+COMPILE-REPORT: source_low[11] function=report_lds_b128_single_lane_extract source_op=view.store selection=plan plan=3331 descriptor=0 emitted_ops=2
+COMPILE-REPORT: source_low_memory[0] function=report_lds_b128_single_lane_extract source_op=vector.store memory_space=workgroup operation=store packet=amdgpu.ds_write_b128 descriptor=135153244011467798 element_bytes=4 vector_lanes=4 dynamic_stride_bytes=16 vector_lane_stride_bytes=4 bank_stride_words=4 bank_conflict_degree=4 bank_conflict_kind=bank-conflict-risk
+COMPILE-REPORT: source_low_memory[1] function=report_lds_b128_single_lane_extract source_op=vector.load memory_space=workgroup operation=load packet=amdgpu.ds_read_b128 descriptor=8908758602290675705 element_bytes=4 vector_lanes=4 dynamic_stride_bytes=16 vector_lane_stride_bytes=4 bank_stride_words=4 bank_conflict_degree=4 bank_conflict_kind=bank-conflict-risk
