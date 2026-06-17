@@ -1753,10 +1753,41 @@ def _v_perm_b32_overlay() -> AmdgpuDescriptorOverlay:
             AmdgpuOperandOverlay("SRC1", _sgpr_vgpr_operand("src1")),
             AmdgpuOperandOverlay("SRC2", _sgpr_vgpr_operand("selectors")),
         ),
+        operand_forms=(
+            _literal_operand_form(
+                replacement_descriptor="amdgpu.v_perm_b32.src2_lit",
+                source_operand="selectors",
+            ),
+        ),
         asm_forms=_asm(
             results=("dst",),
             operands=("src0", "src1", "selectors"),
         ),
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
+def _v_perm_b32_src2_literal_overlay() -> AmdgpuDescriptorOverlay:
+    return AmdgpuDescriptorOverlay(
+        descriptor_key="amdgpu.v_perm_b32.src2_lit",
+        instruction_name="V_PERM_B32",
+        mnemonic="v_perm_b32_src2_lit",
+        encoding_name="ENC_VOP3",
+        encoding_format_id=AMDGPU_ENCODING_FORMAT_VOP3_LITERAL,
+        semantic_tag="integer.byte.permute.u32",
+        schedule_class=_SCHEDULE_VALU,
+        operands=(
+            AmdgpuOperandOverlay("VDST", _vgpr_result()),
+            AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand("src0")),
+            AmdgpuOperandOverlay("SRC1", _sgpr_vgpr_operand("src1")),
+        ),
+        asm_forms=_asm(
+            results=("dst",),
+            operands=("src0", "src1"),
+            immediates=("imm32",),
+        ),
+        immediates=(_LITERAL_U32_IMMEDIATE,),
+        fixed_encoding_fields=(("SRC2", _predefined("SRC_LITERAL", "OPR_SRC")),),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
@@ -1877,7 +1908,7 @@ def _integer_bitwise_shift_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
 
 
 def _integer_bitwise_permute_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
-    return (_v_perm_b32_overlay(),)
+    return (_v_perm_b32_overlay(), _v_perm_b32_src2_literal_overlay())
 
 
 def _v_binary_f32_overlay(
@@ -4482,6 +4513,7 @@ __all__ = (
     "_v_pk_mad_u16_literal_overlays",
     "_v_pk_ternary_overlay",
     "_v_perm_b32_overlay",
+    "_v_perm_b32_src2_literal_overlay",
     "_v_lshl_add_u32_shift_immediate_overlay",
     "_v_lshlrev_b32_literal_overlay",
     "_v_lshlrev_b32_overlay",

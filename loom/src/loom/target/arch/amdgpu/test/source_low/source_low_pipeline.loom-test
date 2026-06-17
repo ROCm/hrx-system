@@ -139,16 +139,12 @@ func.def target(@gfx11) @target_template_prunes_nonmatching_provider(%codes: vec
 // ----
 low.func.def target(@gfx11) abi(hal_kernel) @target_template_prunes_nonmatching_provider(%codes: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
   %15 = slice %codes[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %16 = v_and_b32_lit %15, 255
-  %17 = slice %codes[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %18 = v_and_b32_lit %17, 255
-  %19 = v_lshl_add_u32_shift_imm %18, %16, 8
-  %20 = slice %codes[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %21 = v_and_b32_lit %20, 255
-  %22 = v_lshl_add_u32_shift_imm %21, %19, 16
-  %23 = slice %codes[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %24 = v_and_b32_lit %23, 255
-  %packed = v_lshl_add_u32_shift_imm %24, %22, 24
+  %16 = slice %codes[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %17 = slice %codes[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %18 = slice %codes[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %19 = v_perm_b32_src2_lit %15, %16, 1024
+  %20 = v_perm_b32_src2_lit %17, %18, 1024
+  %packed = v_perm_b32_src2_lit %19, %20, 84148480
   return %packed
 }
 

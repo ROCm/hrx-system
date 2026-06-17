@@ -10,16 +10,12 @@ func.def target(@target) @i32x4_to_i8x4_bitpack(%codes: vector<4xi32>) -> (vecto
 // ----
 low.func.def target(@target) abi(hal_kernel) @i32x4_to_i8x4_bitpack(%codes: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
   %5 = slice %codes[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %6 = v_and_b32_lit %5, 255
-  %7 = slice %codes[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %8 = v_and_b32_lit %7, 255
-  %9 = v_lshl_add_u32_shift_imm %8, %6, 8
-  %10 = slice %codes[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %11 = v_and_b32_lit %10, 255
-  %12 = v_lshl_add_u32_shift_imm %11, %9, 16
-  %13 = slice %codes[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %14 = v_and_b32_lit %13, 255
-  %packed = v_lshl_add_u32_shift_imm %14, %12, 24
+  %6 = slice %codes[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %7 = slice %codes[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %8 = slice %codes[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %9 = v_perm_b32_src2_lit %5, %6, 1024
+  %10 = v_perm_b32_src2_lit %7, %8, 1024
+  %packed = v_perm_b32_src2_lit %9, %10, 84148480
   return %packed
 }
 

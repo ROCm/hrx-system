@@ -38,6 +38,14 @@ iree_status_t loom_amdgpu_pack_lane_bits_into_register(
     loom_value_id_t source_lane, uint32_t width, uint32_t bit_offset,
     loom_type_t lane_type, loom_value_id_t* inout_packed);
 
+// Packs complete groups of four 32-bit source lanes to i8 bytes using
+// literal-selector byte permutes.
+iree_status_t loom_amdgpu_pack_i8_lanes_with_permute(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_low_lower_resolved_descriptor_t* descriptor,
+    const loom_value_id_t* source_lanes, uint32_t source_lane_count,
+    loom_type_t lane_type, loom_value_id_t* out_packed_registers);
+
 // Selects an AMDGPU vector.bitunpack plan for a dispatch-row-owned bitunpack
 // op.
 iree_status_t loom_amdgpu_select_vector_bitunpack_plan(

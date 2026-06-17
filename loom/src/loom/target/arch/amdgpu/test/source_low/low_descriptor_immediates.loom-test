@@ -18,6 +18,14 @@ low.func.def target(@gfx11_target) @vop3_bfe_offset_width_inline(%value: reg<amd
 // ====
 
 amdgpu.target<gfx1100> @gfx11_target
+low.func.def target(@gfx11_target) @vop3_perm_b32_selector_literal(%low: reg<amdgpu.vgpr>, %high: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %packed = v_perm_b32_src2_lit %low, %high, 84148480
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @gfx11_target
 low.func.def target(@gfx11_target) @vop3_cmp_f32_inline_sources(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
   %below = v_cmp_lt_f32_src1_inline %lhs {rhs = 1065353216}
   %above = v_cmp_gt_f32_src0_inline %rhs {lhs = 3212836864}

@@ -217,6 +217,24 @@ low.func.def target(@target) @vop3p_packed_mad_u16_source0_literal(%b: reg<amdgp
 
 amdgpu.target<gfx1100> @target
 
+low.func.def target(@target) @vop3_perm_source2_literal(%src0: reg<amdgpu.vgpr>, %src1: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) {
+  %selector = low.const<amdgpu.v_mov_b32> {imm32 = 84148480} : reg<amdgpu.vgpr>
+  %result = low.op<amdgpu.v_perm_b32>(%src0, %src1, %selector) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  low.return %result : reg<amdgpu.vgpr>
+}
+
+// ----
+amdgpu.target<gfx1100> @target
+
+low.func.def target(@target) @vop3_perm_source2_literal(%src0: reg<amdgpu.vgpr>, %src1: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) {
+  %result = low.op<amdgpu.v_perm_b32.src2_lit>(%src0, %src1) {imm32 = 84148480} : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  low.return %result : reg<amdgpu.vgpr>
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
 low.func.def target(@target) @vop3_compare_inline(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr x2>) {
   %limit = low.const<amdgpu.v_mov_b32> {imm32 = 19} : reg<amdgpu.vgpr>
   %result = low.op<amdgpu.v_cmp_slt_i32>(%value, %limit) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.sgpr x2>
