@@ -109,7 +109,9 @@ jobs:
           - name: Linux / CMake / GPU gfx1201
             chip: gfx1201
             runner_label: gpu_navi4x
-            ctest_exclude_regex: ""
+            # TODO(#110): Re-enable after the ASAN HAL shadow probe lowering
+            # no longer references a missing AMDGPU descriptor ref on gfx1201.
+            ctest_exclude_regex: "^loom/target/arch/amdgpu/sanitizer_feedback_test$"
             experimental: false
     uses: ./.github/workflows/test_core_linux_gpu.yml
     permissions:
