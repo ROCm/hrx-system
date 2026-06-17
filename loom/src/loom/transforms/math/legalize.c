@@ -275,6 +275,16 @@ static loom_target_math_op_t loom_math_legalize_scalar_op_kind(
       return LOOM_TARGET_MATH_OP_TANHF;
     case LOOM_OP_SCALAR_POWF:
       return LOOM_TARGET_MATH_OP_POWF;
+    case LOOM_OP_SCALAR_CEILF:
+      return LOOM_TARGET_MATH_OP_CEILF;
+    case LOOM_OP_SCALAR_FLOORF:
+      return LOOM_TARGET_MATH_OP_FLOORF;
+    case LOOM_OP_SCALAR_ROUNDF:
+      return LOOM_TARGET_MATH_OP_ROUNDF;
+    case LOOM_OP_SCALAR_ROUNDEVENF:
+      return LOOM_TARGET_MATH_OP_ROUNDEVENF;
+    case LOOM_OP_SCALAR_TRUNCF:
+      return LOOM_TARGET_MATH_OP_TRUNCF;
     case LOOM_OP_SCALAR_SINF:
       return LOOM_TARGET_MATH_OP_SINF;
     case LOOM_OP_SCALAR_COSF:
@@ -315,6 +325,16 @@ static loom_target_math_op_t loom_math_legalize_vector_op_kind(
       return LOOM_TARGET_MATH_OP_TANHF;
     case LOOM_OP_VECTOR_POWF:
       return LOOM_TARGET_MATH_OP_POWF;
+    case LOOM_OP_VECTOR_CEILF:
+      return LOOM_TARGET_MATH_OP_CEILF;
+    case LOOM_OP_VECTOR_FLOORF:
+      return LOOM_TARGET_MATH_OP_FLOORF;
+    case LOOM_OP_VECTOR_ROUNDF:
+      return LOOM_TARGET_MATH_OP_ROUNDF;
+    case LOOM_OP_VECTOR_ROUNDEVENF:
+      return LOOM_TARGET_MATH_OP_ROUNDEVENF;
+    case LOOM_OP_VECTOR_TRUNCF:
+      return LOOM_TARGET_MATH_OP_TRUNCF;
     case LOOM_OP_VECTOR_SINF:
       return LOOM_TARGET_MATH_OP_SINF;
     case LOOM_OP_VECTOR_COSF:

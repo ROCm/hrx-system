@@ -9,6 +9,7 @@
 #include "loom/ir/attribute.h"
 #include "loom/ir/module.h"
 #include "loom/ops/scalar/ops.h"
+#include "loom/ops/scf/ops.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/transforms/math/patterns.h"
@@ -25,6 +26,16 @@ typedef iree_status_t (*loom_math_legalize_binary_build_fn_t)(
     loom_builder_t* builder, uint8_t instance_flags, loom_value_id_t lhs,
     loom_value_id_t rhs, loom_type_t result_type, loom_location_id_t location,
     loom_op_t** out_op);
+
+typedef iree_status_t (*loom_math_legalize_cmpf_build_fn_t)(
+    loom_builder_t* builder, uint8_t instance_flags, uint8_t predicate,
+    loom_value_id_t lhs, loom_value_id_t rhs, loom_type_t operand_type,
+    loom_type_t result_type, loom_location_id_t location, loom_op_t** out_op);
+
+typedef iree_status_t (*loom_math_legalize_select_build_fn_t)(
+    loom_builder_t* builder, loom_value_id_t condition,
+    loom_value_id_t true_value, loom_value_id_t false_value,
+    loom_type_t result_type, loom_location_id_t location, loom_op_t** out_op);
 
 typedef iree_status_t (*loom_math_legalize_ternary_build_fn_t)(
     loom_builder_t* builder, uint8_t instance_flags, loom_value_id_t a,
@@ -45,6 +56,8 @@ typedef struct loom_math_legalize_lane_builders_t {
   loom_math_legalize_constant_build_fn_t constant;
   // Builds a lane-wise addition in the source lane domain.
   loom_math_legalize_binary_build_fn_t addf;
+  // Builds a lane-wise subtraction in the source lane domain.
+  loom_math_legalize_binary_build_fn_t subf;
   // Builds a lane-wise multiplication in the source lane domain.
   loom_math_legalize_binary_build_fn_t mulf;
   // Builds a lane-wise division in the source lane domain.
@@ -53,6 +66,16 @@ typedef struct loom_math_legalize_lane_builders_t {
   loom_math_legalize_ternary_build_fn_t fmaf;
   // Builds a lane-wise clamp in the source lane domain.
   loom_math_legalize_clampf_build_fn_t clampf;
+  // Builds a lane-wise ordered floating-point comparison.
+  loom_math_legalize_cmpf_build_fn_t cmpf;
+  // Ordered-greater-or-equal predicate for the source cmpf dialect.
+  uint8_t cmpf_ordered_greater_equal_predicate;
+  // Builds a scalar or lane-wise value select.
+  loom_math_legalize_select_build_fn_t select;
+  // Builds a lane-wise absolute value in the source lane domain.
+  loom_math_legalize_unary_build_fn_t absf;
+  // Builds a lane-wise copysign in the source lane domain.
+  loom_math_legalize_binary_build_fn_t copysignf;
   // Builds a lane-wise base-2 exponential in the source lane domain.
   loom_math_legalize_unary_build_fn_t exp2f;
   // Builds a lane-wise base-2 logarithm in the source lane domain.
@@ -63,6 +86,8 @@ typedef struct loom_math_legalize_lane_builders_t {
   loom_math_legalize_unary_build_fn_t costurnsf;
   // Builds a lane-wise logistic op in the source lane domain.
   loom_math_legalize_unary_build_fn_t logisticf;
+  // Builds a lane-wise round toward zero in the source lane domain.
+  loom_math_legalize_unary_build_fn_t truncf;
   // Builds a lane-wise floating-point precision extension.
   loom_math_legalize_cast_build_fn_t extf;
   // Builds a lane-wise floating-point precision truncation.
@@ -120,18 +145,43 @@ static iree_status_t loom_math_legalize_vector_clampf_build(
                                   result_type, location, out_op);
 }
 
+static iree_status_t loom_math_legalize_scalar_copysignf_build(
+    loom_builder_t* builder, uint8_t instance_flags, loom_value_id_t lhs,
+    loom_value_id_t rhs, loom_type_t result_type, loom_location_id_t location,
+    loom_op_t** out_op) {
+  (void)instance_flags;
+  return loom_scalar_copysignf_build(builder, lhs, rhs, result_type, location,
+                                     out_op);
+}
+
+static iree_status_t loom_math_legalize_vector_cmpf_build(
+    loom_builder_t* builder, uint8_t instance_flags, uint8_t predicate,
+    loom_value_id_t lhs, loom_value_id_t rhs, loom_type_t operand_type,
+    loom_type_t result_type, loom_location_id_t location, loom_op_t** out_op) {
+  (void)instance_flags;
+  return loom_vector_cmpf_build(builder, predicate, lhs, rhs, operand_type,
+                                result_type, location, out_op);
+}
+
 static const loom_math_legalize_lane_builders_t kScalarLaneBuilders = {
     .constant = loom_scalar_constant_build,
     .addf = loom_scalar_addf_build,
+    .subf = loom_scalar_subf_build,
     .mulf = loom_scalar_mulf_build,
     .divf = loom_scalar_divf_build,
     .fmaf = loom_scalar_fmaf_build,
     .clampf = loom_math_legalize_scalar_clampf_build,
+    .cmpf = loom_scalar_cmpf_build,
+    .cmpf_ordered_greater_equal_predicate = LOOM_SCALAR_CMPF_PREDICATE_OGE,
+    .select = loom_scf_select_build,
+    .absf = loom_scalar_absf_build,
+    .copysignf = loom_math_legalize_scalar_copysignf_build,
     .exp2f = loom_scalar_exp2f_build,
     .log2f = loom_scalar_log2f_build,
     .sinturnsf = loom_scalar_sinturnsf_build,
     .costurnsf = loom_scalar_costurnsf_build,
     .logisticf = loom_scalar_logisticf_build,
+    .truncf = loom_scalar_truncf_build,
     .extf = loom_scalar_extf_build,
     .fptrunc = loom_scalar_fptrunc_build,
 };
@@ -139,15 +189,22 @@ static const loom_math_legalize_lane_builders_t kScalarLaneBuilders = {
 static const loom_math_legalize_lane_builders_t kVectorLaneBuilders = {
     .constant = loom_vector_constant_build,
     .addf = loom_vector_addf_build,
+    .subf = loom_vector_subf_build,
     .mulf = loom_vector_mulf_build,
     .divf = loom_vector_divf_build,
     .fmaf = loom_vector_fmaf_build,
     .clampf = loom_math_legalize_vector_clampf_build,
+    .cmpf = loom_math_legalize_vector_cmpf_build,
+    .cmpf_ordered_greater_equal_predicate = LOOM_VECTOR_CMPF_PREDICATE_OGE,
+    .select = loom_vector_select_build,
+    .absf = loom_vector_absf_build,
+    .copysignf = loom_vector_copysignf_build,
     .exp2f = loom_vector_exp2f_build,
     .log2f = loom_vector_log2f_build,
     .sinturnsf = loom_vector_sinturnsf_build,
     .costurnsf = loom_vector_costurnsf_build,
     .logisticf = loom_vector_logisticf_build,
+    .truncf = loom_vector_truncf_build,
     .extf = loom_vector_extf_build,
     .fptrunc = loom_vector_fptrunc_build,
 };
@@ -676,6 +733,73 @@ static loom_type_t loom_math_legalize_type_with_element(
   return result_type;
 }
 
+static iree_status_t loom_math_legalize_build_cmpf(
+    loom_builder_t* builder, const loom_math_legalize_source_t* source,
+    uint8_t predicate, loom_value_id_t lhs, loom_value_id_t rhs,
+    loom_value_id_t* out_value) {
+  loom_op_t* op = NULL;
+  const loom_type_t mask_type = loom_math_legalize_type_with_element(
+      source->result_type, LOOM_SCALAR_TYPE_I1);
+  IREE_RETURN_IF_ERROR(source->lane_builders->cmpf(
+      builder, source->fastmath_flags, predicate, lhs, rhs, source->result_type,
+      mask_type, source->location, &op));
+  *out_value = loom_op_results(op)[0];
+  return iree_ok_status();
+}
+
+static iree_status_t loom_math_legalize_build_select(
+    loom_builder_t* builder, const loom_math_legalize_source_t* source,
+    loom_value_id_t condition, loom_value_id_t true_value,
+    loom_value_id_t false_value, loom_value_id_t* out_value) {
+  loom_op_t* op = NULL;
+  IREE_RETURN_IF_ERROR(source->lane_builders->select(
+      builder, condition, true_value, false_value, source->result_type,
+      source->location, &op));
+  *out_value = loom_op_results(op)[0];
+  return iree_ok_status();
+}
+
+static iree_status_t loom_math_legalize_build_round_away(
+    loom_builder_t* builder, const loom_math_legalize_source_t* source,
+    loom_value_id_t* out_value) {
+  loom_value_id_t zero = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t half = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t one = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t truncated = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t fraction = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t fraction_magnitude = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t needs_adjustment = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t adjustment_magnitude = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t signed_adjustment = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(
+      loom_math_legalize_build_constant(builder, source, 0.0, &zero));
+  IREE_RETURN_IF_ERROR(
+      loom_math_legalize_build_constant(builder, source, 0.5, &half));
+  IREE_RETURN_IF_ERROR(
+      loom_math_legalize_build_constant(builder, source, 1.0, &one));
+  IREE_RETURN_IF_ERROR(loom_math_legalize_build_unary(
+      builder, source, source->lane_builders->truncf, source->input,
+      &truncated));
+  IREE_RETURN_IF_ERROR(loom_math_legalize_build_binary(
+      builder, source, source->lane_builders->subf, source->input, truncated,
+      &fraction));
+  IREE_RETURN_IF_ERROR(loom_math_legalize_build_unary(
+      builder, source, source->lane_builders->absf, fraction,
+      &fraction_magnitude));
+  IREE_RETURN_IF_ERROR(loom_math_legalize_build_cmpf(
+      builder, source,
+      source->lane_builders->cmpf_ordered_greater_equal_predicate,
+      fraction_magnitude, half, &needs_adjustment));
+  IREE_RETURN_IF_ERROR(loom_math_legalize_build_select(
+      builder, source, needs_adjustment, one, zero, &adjustment_magnitude));
+  IREE_RETURN_IF_ERROR(loom_math_legalize_build_binary(
+      builder, source, source->lane_builders->copysignf, adjustment_magnitude,
+      source->input, &signed_adjustment));
+  return loom_math_legalize_build_binary(builder, source,
+                                         source->lane_builders->addf, truncated,
+                                         signed_adjustment, out_value);
+}
+
 static iree_status_t loom_math_legalize_binary_source_initialize(
     const loom_math_legalize_recipe_context_t* context, const loom_op_t* op,
     loom_math_legalize_binary_source_t* out_source) {
@@ -793,6 +917,9 @@ static iree_status_t loom_math_legalize_build_recipe(
     case LOOM_TARGET_MATH_RECIPE_POW_LOG2_EXP2_F32:
       return loom_math_legalize_build_pow_log2_exp2(&rewriter->builder, &source,
                                                     out_value);
+    case LOOM_TARGET_MATH_RECIPE_ROUND_AWAY_F32:
+      return loom_math_legalize_build_round_away(&rewriter->builder, &source,
+                                                 out_value);
     case LOOM_TARGET_MATH_RECIPE_SIN_TURNS_F32:
       return loom_math_legalize_build_sin_turns(&rewriter->builder, &source,
                                                 out_value);
@@ -854,6 +981,7 @@ static bool loom_math_legalize_elementwise_recipe_is_supported(
     case LOOM_TARGET_MATH_RECIPE_COS_TURNS_F32:
     case LOOM_TARGET_MATH_RECIPE_TANH_LOGISTIC_F32:
     case LOOM_TARGET_MATH_RECIPE_POW_LOG2_EXP2_F32:
+    case LOOM_TARGET_MATH_RECIPE_ROUND_AWAY_F32:
     case LOOM_TARGET_MATH_RECIPE_ERF_RATIONAL_F32:
     case LOOM_TARGET_MATH_RECIPE_LOGISTIC_EXP2_F32:
     case LOOM_TARGET_MATH_RECIPE_SILU_LOGISTIC_F32:

@@ -128,6 +128,17 @@ static void loom_amdgpu_math_policy_query(
           IREE_SV("math.recipe.pow_log2_exp2_f32"),
           IREE_SV("math.pow.exact_f32"));
       return;
+    case LOOM_TARGET_MATH_OP_ROUNDF:
+      *out_decision =
+          loom_amdgpu_math_rewrite(LOOM_TARGET_MATH_RECIPE_ROUND_AWAY_F32,
+                                   IREE_SV("math.recipe.round_away_f32"));
+      return;
+    case LOOM_TARGET_MATH_OP_CEILF:
+    case LOOM_TARGET_MATH_OP_FLOORF:
+    case LOOM_TARGET_MATH_OP_ROUNDEVENF:
+    case LOOM_TARGET_MATH_OP_TRUNCF:
+      *out_decision = loom_amdgpu_math_keep(IREE_SV("math.op.native_f32"));
+      return;
     case LOOM_TARGET_MATH_OP_SINF:
       *out_decision = loom_amdgpu_math_rewrite_if_afn(
           query, LOOM_TARGET_MATH_RECIPE_SIN_TURNS_F32,

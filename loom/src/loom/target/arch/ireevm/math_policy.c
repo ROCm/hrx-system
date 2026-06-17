@@ -35,6 +35,10 @@ static bool loom_ireevm_math_op_is_native_scalar(
     case LOOM_TARGET_MATH_OP_TANHF:
     case LOOM_TARGET_MATH_OP_POWF:
     case LOOM_TARGET_MATH_OP_ERFF:
+    case LOOM_TARGET_MATH_OP_CEILF:
+    case LOOM_TARGET_MATH_OP_FLOORF:
+    case LOOM_TARGET_MATH_OP_ROUNDF:
+    case LOOM_TARGET_MATH_OP_ROUNDEVENF:
       return true;
     case LOOM_TARGET_MATH_OP_LOGISTICF:
     case LOOM_TARGET_MATH_OP_SILUF:
@@ -44,6 +48,7 @@ static bool loom_ireevm_math_op_is_native_scalar(
     case LOOM_TARGET_MATH_OP_GELUF_LOGISTIC:
     case LOOM_TARGET_MATH_OP_SINTURNSF:
     case LOOM_TARGET_MATH_OP_COSTURNSF:
+    case LOOM_TARGET_MATH_OP_TRUNCF:
     case LOOM_TARGET_MATH_OP_UNKNOWN:
       return false;
   }

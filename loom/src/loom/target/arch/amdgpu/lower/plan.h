@@ -586,8 +586,10 @@ typedef struct loom_amdgpu_subgroup_shuffle_plan_t {
   loom_kernel_subgroup_shuffle_mode_t mode;
   // Exact lane offset or lane index interpreted by mode.
   uint32_t offset;
-  // Exact subgroup width selected by the active target bundle.
+  // Exact shuffle segment width from the source op.
   uint32_t width;
+  // Exact subgroup width selected by the active target bundle.
+  uint32_t wavefront_size;
 } loom_amdgpu_subgroup_shuffle_plan_t;
 
 typedef enum loom_amdgpu_subgroup_reduce_crosslane_kind_e {

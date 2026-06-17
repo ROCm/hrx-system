@@ -28,6 +28,7 @@ loom_cc_library(
     loom::ops::func_symbol_facts
     loom::ops::op_defs
     loom::ops::scalar
+    loom::ops::scf
     loom::ops::target
     loom::ops::vector
     loom::pass::pipeline

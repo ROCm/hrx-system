@@ -87,15 +87,15 @@ kernel.def target(@target) @subgroup_shuffle_dynamic_offset_rejected() {
 
 amdgpu.target<gfx1100> @target
 
-kernel.def target(@target) @subgroup_shuffle_partial_width_rejected() {
+kernel.def target(@target) @subgroup_shuffle_non_power_of_two_width_rejected() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
 } launch() {
   %value = scalar.constant 1 : i32
   %offset = scalar.constant 1 : i32
-  %width = scalar.constant 16 : i32
-  // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_shuffle.full_wave_width"}
+  %width = scalar.constant 24 : i32
+  // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_shuffle.power_of_two_width"}
   %shuffle, %valid = kernel.subgroup.shuffle<down> %value, %offset, %width : i32, i32, i32
   kernel.return
 }
@@ -138,14 +138,14 @@ kernel.def target(@target) @subgroup_shuffle_payload_rejected() {
 
 amdgpu.target<gfx1100> @target
 
-kernel.def target(@target) @subgroup_reduce_cluster_rejected() {
+kernel.def target(@target) @subgroup_reduce_cluster_stride_rejected() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
 } launch() {
   %value = scalar.constant 1 : i32
-  // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_reduce.full_subgroup"}
-  %sum = kernel.subgroup.reduce<addi> %value {cluster_size = 16} : i32
+  // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_reduce.cluster_stride"}
+  %sum = kernel.subgroup.reduce<addi> %value {cluster_size = 16, cluster_stride = 2} : i32
   kernel.return
 }
 

@@ -1,6 +1,127 @@
 // RUN: emit source-low output=low
 
 amdgpu.target<gfx1100> @target
+func.def target(@target) @scalar_roundf_round_away(%input: f32) -> (f32) {
+  %result = scalar.roundf %input : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @scalar_roundf_round_away(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %16 = v_mov_b32 1056964608
+  %18 = v_trunc_f32 %input
+  %19 = v_sub_f32 %input, %18
+  %20 = v_and_b32_lit %19, 2147483647
+  %21 = v_cmp_ge_f32 %20, %16
+  %22 = v_cndmask_b32_src1_lit_src0_inline %21 {imm32 = 1065353216, false_value = 0}
+  %23 = v_bfi_b32_src0_lit %22, %input, 2147483647
+  %result = v_add_f32 %18, %23
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @vector_roundf_round_away(%input: vector<2xf32>) -> (vector<2xf32>) {
+  %result = vector.roundf %input : vector<2xf32>
+  func.return %result : vector<2xf32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_roundf_round_away(%input: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.rdna3.core> {
+  %18 = v_mov_b32 1056964608
+  %24 = slice %input[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %25 = v_trunc_f32 %24
+  %26 = slice %input[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %27 = v_trunc_f32 %26
+  %31 = v_sub_f32 %24, %25
+  %34 = v_sub_f32 %26, %27
+  %37 = v_and_b32_lit %31, 2147483647
+  %39 = v_and_b32_lit %34, 2147483647
+  %43 = v_cmp_ge_f32 %37, %18
+  %46 = v_cmp_ge_f32 %39, %18
+  %49 = v_cndmask_b32_src1_lit_src0_inline %43 {imm32 = 1065353216, false_value = 0}
+  %51 = v_cndmask_b32_src1_lit_src0_inline %46 {imm32 = 1065353216, false_value = 0}
+  %55 = v_bfi_b32_src0_lit %49, %24, 2147483647
+  %58 = v_bfi_b32_src0_lit %51, %26, 2147483647
+  %62 = v_add_f32 %25, %55
+  %65 = v_add_f32 %27, %58
+  %result = concat(%62, %65) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @scalar_rounding_native(%input: f32, %sign: f32) -> (f32) {
+  %ceiled = scalar.ceilf %input : f32
+  %floored = scalar.floorf %sign : f32
+  %even = scalar.roundevenf %input : f32
+  %truncated = scalar.truncf %sign : f32
+  %signed = scalar.copysignf %ceiled, %sign : f32
+  %sum0 = scalar.addf %floored, %even : f32
+  %sum1 = scalar.addf %truncated, %signed : f32
+  %result = scalar.addf %sum0, %sum1 : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @scalar_rounding_native(%input: reg<amdgpu.vgpr>, %sign: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %ceiled = v_ceil_f32 %input
+  %floored = v_floor_f32 %sign
+  %even = v_rndne_f32 %input
+  %truncated = v_trunc_f32 %sign
+  %signed = v_bfi_b32_src0_lit %ceiled, %sign, 2147483647
+  %sum0 = v_add_f32 %floored, %even
+  %sum1 = v_add_f32 %truncated, %signed
+  %result = v_add_f32 %sum0, %sum1
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @vector_rounding_native(%input: vector<2xf32>, %sign: vector<2xf32>) -> (vector<2xf32>) {
+  %ceiled = vector.ceilf %input : vector<2xf32>
+  %floored = vector.floorf %sign : vector<2xf32>
+  %even = vector.roundevenf %input : vector<2xf32>
+  %truncated = vector.truncf %sign : vector<2xf32>
+  %signed = vector.copysignf %ceiled, %sign : vector<2xf32>
+  %sum0 = vector.addf %floored, %even : vector<2xf32>
+  %sum1 = vector.addf %truncated, %signed : vector<2xf32>
+  %result = vector.addf %sum0, %sum1 : vector<2xf32>
+  func.return %result : vector<2xf32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_rounding_native(%input: reg<amdgpu.vgpr x2>, %sign: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.rdna3.core> {
+  %14 = slice %input[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %15 = v_ceil_f32 %14
+  %16 = slice %input[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %17 = v_ceil_f32 %16
+  %19 = slice %sign[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %20 = v_floor_f32 %19
+  %21 = slice %sign[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %22 = v_floor_f32 %21
+  %25 = v_rndne_f32 %14
+  %27 = v_rndne_f32 %16
+  %30 = v_trunc_f32 %19
+  %32 = v_trunc_f32 %21
+  %36 = v_bfi_b32_src0_lit %15, %19, 2147483647
+  %39 = v_bfi_b32_src0_lit %17, %21, 2147483647
+  %43 = v_add_f32 %20, %25
+  %46 = v_add_f32 %22, %27
+  %50 = v_add_f32 %30, %36
+  %53 = v_add_f32 %32, %39
+  %57 = v_add_f32 %43, %50
+  %60 = v_add_f32 %46, %53
+  %result = concat(%57, %60) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
 func.def target(@target) @vector_logistic_exp2(%input: vector<4xf32>) -> (vector<4xf32>) {
   %result = vector.logisticf %input : vector<4xf32>
   func.return %result : vector<4xf32>

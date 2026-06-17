@@ -67,6 +67,10 @@ _DESCRIPTOR_KEYS = (
     "amdgpu.v_log_f32",
     "amdgpu.v_sin_f32",
     "amdgpu.v_cos_f32",
+    "amdgpu.v_floor_f32",
+    "amdgpu.v_ceil_f32",
+    "amdgpu.v_rndne_f32",
+    "amdgpu.v_trunc_f32",
     "amdgpu.v_sqrt_f32",
     "amdgpu.v_rsq_f32",
     "amdgpu.v_rcp_f32",
@@ -602,6 +606,33 @@ def _f32_abs_rule(
                     "rhs": _f32_vgpr_operand("input")
                     if f32_operand
                     else ValueRef.operand("input")
+                },
+                results={"dst": ValueRef.result("result")},
+                immediates={"imm32": _F32_ABS_MASK},
+                form=_emit_form(type_pattern),
+            ),
+        ),
+    )
+
+
+def _f32_copysign_rule(
+    source_op: Op,
+    type_pattern: TypePattern,
+) -> DescriptorRule:
+    descriptor = _descriptor("amdgpu.v_bfi_b32.src0_lit")
+    return DescriptorRule(
+        source_op=source_op,
+        descriptor=descriptor,
+        guards=(
+            *_typed_guards(("lhs", "rhs", "result"), type_pattern),
+            Guard.descriptor_available(descriptor),
+        ),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=descriptor,
+                operands={
+                    "insert": _f32_vgpr_operand("lhs"),
+                    "base": _f32_vgpr_operand("rhs"),
                 },
                 results={"dst": ValueRef.result("result")},
                 immediates={"imm32": _F32_ABS_MASK},
@@ -2740,6 +2771,7 @@ def _rules() -> tuple[ContractCase, ...]:
             ),
             _f32_neg_rule(vector.vector_negf, _VEC_F32, f32_operand=True),
             _f32_abs_rule(vector.vector_absf, _VEC_F32, f32_operand=True),
+            _f32_copysign_rule(vector.vector_copysignf, _VEC_F32),
             _divf_arcp_one_rule(vector.vector_divf, _VEC_F32),
             _divf_arcp_rule(vector.vector_divf, _VEC_F32),
             _divf_exact_rule(vector.vector_divf, _VEC_F32),
@@ -2763,6 +2795,10 @@ def _rules() -> tuple[ContractCase, ...]:
             _unary_rule(vector.vector_log2f, _VEC_F32, "amdgpu.v_log_f32"),
             _unary_rule(vector.vector_sinturnsf, _VEC_F32, "amdgpu.v_sin_f32"),
             _unary_rule(vector.vector_costurnsf, _VEC_F32, "amdgpu.v_cos_f32"),
+            _unary_rule(vector.vector_floorf, _VEC_F32, "amdgpu.v_floor_f32"),
+            _unary_rule(vector.vector_ceilf, _VEC_F32, "amdgpu.v_ceil_f32"),
+            _unary_rule(vector.vector_roundevenf, _VEC_F32, "amdgpu.v_rndne_f32"),
+            _unary_rule(vector.vector_truncf, _VEC_F32, "amdgpu.v_trunc_f32"),
             _unary_rule(vector.vector_sqrtf, _VEC_F32, "amdgpu.v_sqrt_f32"),
             _unary_rule(vector.vector_rsqrtf, _VEC_F32, "amdgpu.v_rsq_f32"),
         )
@@ -2947,6 +2983,7 @@ def _rules() -> tuple[ContractCase, ...]:
             ),
             _f32_neg_rule(scalar_arithmetic.scalar_negf, _F32, f32_operand=True),
             _f32_abs_rule(scalar_arithmetic.scalar_absf, _F32, f32_operand=True),
+            _f32_copysign_rule(scalar_arithmetic.scalar_copysignf, _F32),
             _divf_arcp_one_rule(scalar_arithmetic.scalar_divf, _F32),
             _divf_arcp_rule(scalar_arithmetic.scalar_divf, _F32),
             _divf_exact_rule(scalar_arithmetic.scalar_divf, _F32),
@@ -2985,6 +3022,10 @@ def _rules() -> tuple[ContractCase, ...]:
             _unary_rule(scalar_math.scalar_log2f, _F32, "amdgpu.v_log_f32"),
             _unary_rule(scalar_math.scalar_sinturnsf, _F32, "amdgpu.v_sin_f32"),
             _unary_rule(scalar_math.scalar_costurnsf, _F32, "amdgpu.v_cos_f32"),
+            _unary_rule(scalar_math.scalar_floorf, _F32, "amdgpu.v_floor_f32"),
+            _unary_rule(scalar_math.scalar_ceilf, _F32, "amdgpu.v_ceil_f32"),
+            _unary_rule(scalar_math.scalar_roundevenf, _F32, "amdgpu.v_rndne_f32"),
+            _unary_rule(scalar_math.scalar_truncf, _F32, "amdgpu.v_trunc_f32"),
             _unary_rule(scalar_math.scalar_sqrtf, _F32, "amdgpu.v_sqrt_f32"),
             _unary_rule(scalar_math.scalar_rsqrtf, _F32, "amdgpu.v_rsq_f32"),
             _cast_rule(
