@@ -10,13 +10,6 @@
 
 #include "iree/base/api.h"
 #include "loomc/status.h"
-#include "loomc/version.h"
-
-void loomc_version(int* major, int* minor, int* patch) {
-  if (major) *major = LOOMC_VERSION_MAJOR;
-  if (minor) *minor = LOOMC_VERSION_MINOR;
-  if (patch) *patch = LOOMC_VERSION_PATCH;
-}
 
 static loomc_status_t loomc_allocator_validate(loomc_allocator_t allocator) {
   if (!loomc_allocator_is_valid(allocator)) {

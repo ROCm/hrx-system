@@ -192,12 +192,6 @@ set(LOOMC_VERSION_MAJOR "${CMAKE_MATCH_1}")
 set(LOOMC_VERSION_MINOR "${CMAKE_MATCH_2}")
 set(LOOMC_VERSION_PATCH "${CMAKE_MATCH_3}")
 
-set(_loomc_generated_include_dir "${CMAKE_CURRENT_BINARY_DIR}/include")
-configure_file(
-  include/loomc/version.h.in
-  "${_loomc_generated_include_dir}/loomc/version.h"
-  @ONLY)
-
 set(_loomc_cmake_package_dir "${CMAKE_INSTALL_LIBDIR}/cmake/loomc")
 set(_loomc_build_package_dir "${CMAKE_CURRENT_BINARY_DIR}/cmake/loomc")
 
@@ -270,10 +264,7 @@ endif()
 
 foreach(_loomc_object_target IN LISTS _loomc_object_targets)
   target_compile_definitions("${_loomc_object_target}" PRIVATE
-    LOOMC_BUILDING_SHARED_LIBRARY
-    LOOMC_VERSION_MAJOR=${LOOMC_VERSION_MAJOR}
-    LOOMC_VERSION_MINOR=${LOOMC_VERSION_MINOR}
-    LOOMC_VERSION_PATCH=${LOOMC_VERSION_PATCH})
+    LOOMC_BUILDING_SHARED_LIBRARY)
 endforeach()
 
 # Link the shared library from the selected public binding objects directly.
@@ -291,7 +282,6 @@ add_library(loomc_shared SHARED ${_loomc_object_sources})
 target_link_libraries(loomc_shared PRIVATE ${_loomc_direct_deps})
 target_include_directories(loomc_shared PUBLIC
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
-  "$<BUILD_INTERFACE:${_loomc_generated_include_dir}>"
   "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 target_compile_definitions(loomc_shared INTERFACE
   LOOMC_USING_SHARED_LIBRARY)
@@ -328,9 +318,6 @@ install(DIRECTORY include/loomc
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
   COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}"
   FILES_MATCHING PATTERN "*.h")
-install(FILES "${_loomc_generated_include_dir}/loomc/version.h"
-  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/loomc"
-  COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}")
 install(EXPORT loomc-targets
   NAMESPACE loomc::
   DESTINATION "${_loomc_cmake_package_dir}"

@@ -32,7 +32,6 @@
 #include "loomc/source.h"
 #include "loomc/status.h"
 #include "loomc/target.h"
-#include "loomc/version.h"
 #include "loomc/workspace.h"
 
 #endif  // LOOMC_LOOMC_H_
