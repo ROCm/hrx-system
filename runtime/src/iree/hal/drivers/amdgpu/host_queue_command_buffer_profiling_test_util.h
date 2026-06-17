@@ -880,6 +880,16 @@ static iree_status_t BeginHardwareCounterProfiling(
   return profiling->Begin(&profiling_options);
 }
 
+static iree_status_t BeginDefaultHardwareCounterProfiling(
+    DeviceProfilingScope* profiling, CommandBufferProfileSink* sink) {
+  iree_hal_device_profiling_options_t profiling_options = {0};
+  profiling_options.data_families =
+      IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS |
+      IREE_HAL_DEVICE_PROFILING_DATA_COUNTER_SAMPLES;
+  profiling_options.sink = CommandBufferProfileSinkAsBase(sink);
+  return profiling->Begin(&profiling_options);
+}
+
 static iree_status_t BeginSqWavesProfiling(DeviceProfilingScope* profiling,
                                            CommandBufferProfileSink* sink) {
   iree_string_view_t counter_names[] = {
@@ -909,13 +919,21 @@ static iree_status_t BeginSqWavesCounterRangeProfiling(
   return profiling->Begin(&profiling_options);
 }
 
-static iree_status_t BeginSqWaveWidthProfiling(DeviceProfilingScope* profiling,
-                                               CommandBufferProfileSink* sink) {
+static iree_status_t BeginMultipleSqCounterProfiling(
+    DeviceProfilingScope* profiling, CommandBufferProfileSink* sink) {
   iree_string_view_t counter_names[] = {
       IREE_SV("SQ_WAVES"),
-      IREE_SV("SQ_WAVES_32"),
-      IREE_SV("SQ_WAVES_64"),
+      IREE_SV("SQ_INSTS_VALU"),
       IREE_SV("SQ_BUSY_CYCLES"),
+  };
+  return BeginHardwareCounterProfiling(
+      profiling, sink, IREE_ARRAYSIZE(counter_names), counter_names);
+}
+
+static iree_status_t BeginUnsupportedHardwareCounterProfiling(
+    DeviceProfilingScope* profiling, CommandBufferProfileSink* sink) {
+  iree_string_view_t counter_names[] = {
+      IREE_SV("NO_SUCH_COUNTER"),
   };
   return BeginHardwareCounterProfiling(
       profiling, sink, IREE_ARRAYSIZE(counter_names), counter_names);

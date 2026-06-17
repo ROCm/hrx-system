@@ -10,6 +10,8 @@
 #include "iree/hal/device.h"
 #include "iree/hal/drivers/amdgpu/util/aql_emitter.h"
 #include "iree/hal/drivers/amdgpu/util/aql_ring.h"
+#include "iree/hal/drivers/amdgpu/util/libaqlprofile.h"
+#include "iree/hal/drivers/amdgpu/util/target_id.h"
 #include "iree/hal/profile_schema.h"
 #include "iree/hal/profile_sink.h"
 
@@ -28,6 +30,15 @@ typedef struct iree_hal_amdgpu_profile_counter_session_t
     iree_hal_amdgpu_profile_counter_session_t;
 typedef struct iree_hal_amdgpu_profile_dispatch_event_reservation_t
     iree_hal_amdgpu_profile_dispatch_event_reservation_t;
+
+// Returns a comma-separated list of supported counter names.
+iree_string_view_t iree_hal_amdgpu_profile_counter_supported_names(void);
+
+// Resolves a supported counter name to the aqlprofile event for
+// |gfxip_version|.
+iree_status_t iree_hal_amdgpu_profile_counter_resolve_named_event(
+    iree_string_view_t name, iree_hal_amdgpu_gfxip_version_t gfxip_version,
+    iree_hal_amdgpu_aqlprofile_pmc_event_t* out_event);
 
 // Flags selecting which counter resources to enable on a host queue.
 typedef uint32_t iree_hal_amdgpu_profile_counter_enable_flags_t;

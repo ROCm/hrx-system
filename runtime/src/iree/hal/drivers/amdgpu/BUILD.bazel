@@ -356,6 +356,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/drivers/amdgpu/util:device_library",
         "//runtime/src/iree/hal/drivers/amdgpu/util:feedback_channel",
         "//runtime/src/iree/hal/drivers/amdgpu/util:info",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:libaqlprofile",
         "//runtime/src/iree/hal/drivers/amdgpu/util:libhsa",
         "//runtime/src/iree/hal/drivers/amdgpu/util:packet",
         "//runtime/src/iree/hal/drivers/amdgpu/util:pm4_dispatch",
@@ -719,6 +720,19 @@ iree_runtime_cc_test(
 iree_runtime_cc_test(
     name = "physical_device_capabilities_test",
     srcs = ["physical_device_capabilities_test.cc"],
+    deps = [
+        ":amdgpu",
+        ":headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "profile_counters_test",
+    srcs = ["profile_counters_test.cc"],
     deps = [
         ":amdgpu",
         ":headers",

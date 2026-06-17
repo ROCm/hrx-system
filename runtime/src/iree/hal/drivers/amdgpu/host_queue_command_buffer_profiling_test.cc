@@ -92,6 +92,41 @@ TEST_F(HostQueueCommandBufferProfilingTest,
 }
 
 TEST_F(HostQueueCommandBufferProfilingTest,
+       DefaultHardwareCounterSelectionDoesNotFailWhenUnavailable) {
+  iree_hal_amdgpu_logical_device_options_t options;
+  iree_hal_amdgpu_logical_device_options_initialize(&options);
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(
+      test_device.Initialize(&options, &libhsa_, &topology_, host_allocator_));
+
+  CommandBufferProfileSink sink = {};
+  CommandBufferProfileSinkInitialize(&sink);
+  DeviceProfilingScope profiling(test_device.base_device());
+  IREE_ASSERT_OK(BeginDefaultHardwareCounterProfiling(&profiling, &sink));
+  IREE_ASSERT_OK(profiling.End());
+
+  EXPECT_EQ(1, sink.begin_count);
+  EXPECT_EQ(1, sink.end_count);
+}
+
+TEST_F(HostQueueCommandBufferProfilingTest,
+       ExplicitUnavailableHardwareCounterSelectionFails) {
+  iree_hal_amdgpu_logical_device_options_t options;
+  iree_hal_amdgpu_logical_device_options_initialize(&options);
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(
+      test_device.Initialize(&options, &libhsa_, &topology_, host_allocator_));
+
+  CommandBufferProfileSink sink = {};
+  CommandBufferProfileSinkInitialize(&sink);
+  DeviceProfilingScope profiling(test_device.base_device());
+  iree_status_t status =
+      BeginUnsupportedHardwareCounterProfiling(&profiling, &sink);
+  EXPECT_FALSE(iree_status_is_ok(status));
+  iree_status_free(status);
+}
+
+TEST_F(HostQueueCommandBufferProfilingTest,
        MultipleHardwareCounterSelectionEmitsLayoutWhenAvailable) {
   iree_hal_amdgpu_logical_device_options_t options;
   iree_hal_amdgpu_logical_device_options_initialize(&options);
@@ -102,7 +137,8 @@ TEST_F(HostQueueCommandBufferProfilingTest,
   CommandBufferProfileSink sink = {};
   CommandBufferProfileSinkInitialize(&sink);
   DeviceProfilingScope profiling(test_device.base_device());
-  iree_status_t profiling_status = BeginSqWaveWidthProfiling(&profiling, &sink);
+  iree_status_t profiling_status =
+      BeginMultipleSqCounterProfiling(&profiling, &sink);
   if (IsHardwareCounterProfilingUnavailable(
           iree_status_code(profiling_status))) {
     iree_status_free(profiling_status);
@@ -116,16 +152,15 @@ TEST_F(HostQueueCommandBufferProfilingTest,
   EXPECT_EQ(1, sink.counter_set_metadata_count);
   EXPECT_EQ(1, sink.counter_metadata_count);
   ASSERT_FALSE(sink.counter_set_records.empty());
-  ASSERT_EQ(sink.counter_set_records.size() * 4u, sink.counter_records.size());
+  ASSERT_EQ(sink.counter_set_records.size() * 3u, sink.counter_records.size());
   const iree_hal_profile_counter_unit_t expected_units[] = {
-      IREE_HAL_PROFILE_COUNTER_UNIT_COUNT,
       IREE_HAL_PROFILE_COUNTER_UNIT_COUNT,
       IREE_HAL_PROFILE_COUNTER_UNIT_COUNT,
       IREE_HAL_PROFILE_COUNTER_UNIT_CYCLES,
   };
   iree_host_size_t counter_record_index = 0;
   for (const auto& counter_set_record : sink.counter_set_records) {
-    ASSERT_EQ(4u, counter_set_record.counter_count);
+    ASSERT_EQ(3u, counter_set_record.counter_count);
     uint32_t sample_value_count = 0;
     for (uint32_t i = 0; i < counter_set_record.counter_count; ++i) {
       const auto& counter_record = sink.counter_records[counter_record_index++];

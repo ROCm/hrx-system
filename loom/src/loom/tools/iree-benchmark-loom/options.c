@@ -82,7 +82,8 @@ IREE_FLAG_LIST_NAMED(
     string, profile_counter, "profile-counter",
     "Implementation-specific hardware counter name to request during the final "
     "profiled batch. May be repeated and requires --profile-data to include "
-    "counters or counter-ranges.");
+    "counters or counter-ranges. If omitted, the target's default supported "
+    "counter set is selected.");
 IREE_FLAG_NAMED(
     string, profile_artifacts_dir, "profile-artifacts-dir", "",
     "Directory receiving raw IREE HAL profile bundles from final profiled "

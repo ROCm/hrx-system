@@ -44,6 +44,7 @@ iree_cc_library(
     iree::base::internal::dynamic_library
     iree::base::internal::path
     iree::hal::drivers::amdgpu::abi
+    iree::third_party::aqlprofile_sdk_headers
     iree::third_party::hsa_runtime_headers
   PUBLIC
 )

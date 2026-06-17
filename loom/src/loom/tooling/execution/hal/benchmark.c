@@ -170,6 +170,15 @@ static iree_status_t loom_run_hal_benchmark_options_validate(
   return iree_ok_status();
 }
 
+static bool loom_run_hal_benchmark_options_request_explicit_profile_counters(
+    const loom_run_hal_benchmark_options_t* options) {
+  if (!options->profile_counter_sets) return false;
+  for (iree_host_size_t i = 0; i < options->profile_counter_set_count; ++i) {
+    if (options->profile_counter_sets[i].counter_name_count != 0) return true;
+  }
+  return false;
+}
+
 typedef struct loom_run_hal_benchmark_batch_context_t {
   // HAL runtime that owns the device used for dispatch.
   const loom_run_hal_runtime_t* runtime;
@@ -399,7 +408,8 @@ static iree_status_t loom_run_hal_benchmark_run_profiled_batch(
                              .fn = loom_run_hal_profile_summary_capture_row,
                              .user_data = &context,
                          });
-  } else {
+  } else if (!loom_run_hal_benchmark_options_request_explicit_profile_counters(
+                 options)) {
     loom_run_hal_profile_summary_record_error(out_profile, status);
     iree_status_free(status);
     status = iree_ok_status();

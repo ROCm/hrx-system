@@ -389,6 +389,7 @@ iree_cc_library(
     iree::hal::drivers::amdgpu::util::device_library
     iree::hal::drivers::amdgpu::util::feedback_channel
     iree::hal::drivers::amdgpu::util::info
+    iree::hal::drivers::amdgpu::util::libaqlprofile
     iree::hal::drivers::amdgpu::util::libhsa
     iree::hal::drivers::amdgpu::util::packet
     iree::hal::drivers::amdgpu::util::pm4_dispatch
@@ -933,6 +934,28 @@ iree_cc_test(
     physical_device_capabilities_test
   SRCS
     "physical_device_capabilities_test.cc"
+  DEPS
+    ::amdgpu
+    ::headers
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    profile_counters_test
+  SRCS
+    "profile_counters_test.cc"
   DEPS
     ::amdgpu
     ::headers

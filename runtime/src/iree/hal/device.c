@@ -620,10 +620,14 @@ IREE_API_EXPORT iree_status_t iree_hal_device_profiling_begin(
     for (iree_host_size_t i = 0; i < options->counter_set_count; ++i) {
       const iree_hal_profile_counter_set_selection_t* counter_set =
           &options->counter_sets[i];
-      if (counter_set->counter_name_count == 0 || !counter_set->counter_names) {
+      if (counter_set->counter_name_count == 0) {
+        continue;
+      }
+      if (!counter_set->counter_names) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "hardware counter set %" PRIhsz
-                                " must request at least one counter name",
+                                " names counters but has no counter_names "
+                                "array",
                                 i);
       }
       for (iree_host_size_t j = 0; j < counter_set->counter_name_count; ++j) {
@@ -637,12 +641,6 @@ IREE_API_EXPORT iree_status_t iree_hal_device_profiling_begin(
         }
       }
     }
-  }
-  if (iree_hal_device_profiling_options_requests_counters(options) &&
-      options->counter_set_count == 0) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "counter profiling requires at least one counter set selection");
   }
 
   const bool data_requested =
