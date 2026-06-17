@@ -8,6 +8,129 @@ func.def @vector_sitofp_i32x2(%input: vector<2xi32>, %scale: vector<2xf32>) -> (
 
 // ====
 
+func.def @vector_sitofp_i8x4(%input: vector<4xi8>) -> (vector<4xf32>) {
+  %converted = vector.sitofp %input : vector<4xi8> to vector<4xf32>
+  func.return %converted : vector<4xf32>
+}
+
+// ====
+
+func.def @vector_uitofp_i8x4(%input: vector<4xi8>) -> (vector<4xf32>) {
+  %converted = vector.uitofp %input : vector<4xi8> to vector<4xf32>
+  func.return %converted : vector<4xf32>
+}
+
+// ====
+
+func.def @vector_sitofp_i16x2(%input: vector<2xi16>) -> (vector<2xf32>) {
+  %converted = vector.sitofp %input : vector<2xi16> to vector<2xf32>
+  func.return %converted : vector<2xf32>
+}
+
+// ====
+
+func.def @vector_uitofp_i16x2(%input: vector<2xi16>) -> (vector<2xf32>) {
+  %converted = vector.uitofp %input : vector<2xi16> to vector<2xf32>
+  func.return %converted : vector<2xf32>
+}
+
+// ====
+
+func.def @vector_fptosi_i32x4(%input: vector<4xf32>) -> (vector<4xi32>) {
+  %converted = vector.fptosi %input : vector<4xf32> to vector<4xi32>
+  func.return %converted : vector<4xi32>
+}
+
+// ====
+
+func.def @vector_fptoui_i32x4(%input: vector<4xf32>) -> (vector<4xi32>) {
+  %converted = vector.fptoui %input : vector<4xf32> to vector<4xi32>
+  func.return %converted : vector<4xi32>
+}
+
+// ====
+
+func.def @vector_fptosi_i8x4(%input: vector<4xf32>) -> (vector<4xi8>) {
+  %converted = vector.fptosi %input : vector<4xf32> to vector<4xi8>
+  func.return %converted : vector<4xi8>
+}
+
+// ====
+
+func.def @vector_fptoui_i8x4(%input: vector<4xf32>) -> (vector<4xi8>) {
+  %converted = vector.fptoui %input : vector<4xf32> to vector<4xi8>
+  func.return %converted : vector<4xi8>
+}
+
+// ====
+
+func.def @vector_fptosi_i16x2(%input: vector<2xf32>) -> (vector<2xi16>) {
+  %converted = vector.fptosi %input : vector<2xf32> to vector<2xi16>
+  func.return %converted : vector<2xi16>
+}
+
+// ====
+
+func.def @vector_fptoui_i16x2(%input: vector<2xf32>) -> (vector<2xi16>) {
+  %converted = vector.fptoui %input : vector<2xf32> to vector<2xi16>
+  func.return %converted : vector<2xi16>
+}
+
+// ====
+
+func.def @vector_trunci_i32_to_i8x4(%input: vector<4xi32>) -> (vector<4xi8>) {
+  %converted = vector.trunci %input : vector<4xi32> to vector<4xi8>
+  func.return %converted : vector<4xi8>
+}
+
+// ====
+
+func.def @vector_trunci_i32_to_i16x2(%input: vector<2xi32>) -> (vector<2xi16>) {
+  %converted = vector.trunci %input : vector<2xi32> to vector<2xi16>
+  func.return %converted : vector<2xi16>
+}
+
+// ====
+
+func.def @vector_trunci_i16_to_i8x4(%input: vector<4xi16>) -> (vector<4xi8>) {
+  %converted = vector.trunci %input : vector<4xi16> to vector<4xi8>
+  func.return %converted : vector<4xi8>
+}
+
+// ====
+
+func.def @vector_trunci_i64_to_i32x2(%input: vector<2xi64>) -> (vector<2xi32>) {
+  %converted = vector.trunci %input : vector<2xi64> to vector<2xi32>
+  func.return %converted : vector<2xi32>
+}
+
+// ====
+
+func.def @vector_trunci_i64_to_i16x2(%input: vector<2xi64>) -> (vector<2xi16>) {
+  %converted = vector.trunci %input : vector<2xi64> to vector<2xi16>
+  func.return %converted : vector<2xi16>
+}
+
+// ====
+
+func.def @vector_trunci_i64_to_i8x4(%input: vector<4xi64>) -> (vector<4xi8>) {
+  %converted = vector.trunci %input : vector<4xi64> to vector<4xi8>
+  func.return %converted : vector<4xi8>
+}
+
+// ====
+
+func.def @vector_quantize_round_f32_to_i8x4(%values: vector<4xf32>, %inverse_scale: f32) -> (vector<4xi8>) {
+  %scale = vector.splat %inverse_scale : vector<4xf32>
+  %scaled = vector.mulf %values, %scale : vector<4xf32>
+  %rounded = vector.roundf %scaled : vector<4xf32>
+  %i32 = vector.fptosi %rounded : vector<4xf32> to vector<4xi32>
+  %packed = vector.trunci %i32 : vector<4xi32> to vector<4xi8>
+  func.return %packed : vector<4xi8>
+}
+
+// ====
+
 func.def @scalar_uitofp_i32(%input: i32) -> (f32) {
   %converted = scalar.uitofp %input : i32 to f32
   func.return %converted : f32

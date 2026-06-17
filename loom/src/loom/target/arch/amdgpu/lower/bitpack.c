@@ -131,7 +131,7 @@ static uint32_t loom_amdgpu_low_mask(uint32_t width) {
   return width == 32 ? UINT32_MAX : (UINT32_C(1) << width) - 1u;
 }
 
-static iree_status_t loom_amdgpu_pack_bits_into_register(
+iree_status_t loom_amdgpu_pack_bits_into_register(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t low_bits, uint32_t bit_offset, loom_type_t lane_type,
     loom_value_id_t* inout_packed) {
@@ -171,7 +171,7 @@ static iree_status_t loom_amdgpu_pack_bits_into_register(
       shifted, lane_type, inout_packed);
 }
 
-static iree_status_t loom_amdgpu_pack_lane_bits_into_register(
+iree_status_t loom_amdgpu_pack_lane_bits_into_register(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t source_lane, uint32_t width, uint32_t bit_offset,
     loom_type_t lane_type, loom_value_id_t* inout_packed) {

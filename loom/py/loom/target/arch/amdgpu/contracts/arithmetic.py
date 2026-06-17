@@ -2965,6 +2965,20 @@ def _rules() -> tuple[ContractCase, ...]:
                 _VEC_F32,
                 "amdgpu.v_cvt_f32_u32",
             ),
+            _cast_rule(
+                vector.vector_fptosi,
+                _VEC_F32,
+                _VEC_I32,
+                "amdgpu.v_cvt_i32_f32",
+                f32_input=True,
+            ),
+            _cast_rule(
+                vector.vector_fptoui,
+                _VEC_F32,
+                _VEC_I32,
+                "amdgpu.v_cvt_u32_f32",
+                f32_input=True,
+            ),
             *_commutative_f32_binary_rules(
                 scalar_arithmetic.scalar_addf,
                 _F32,

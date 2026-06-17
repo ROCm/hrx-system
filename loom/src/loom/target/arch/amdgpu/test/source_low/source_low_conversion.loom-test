@@ -25,6 +25,419 @@ low.func.def target(@target) abi(hal_kernel) @vector_sitofp_i32x2(%input: reg<am
 // ====
 
 amdgpu.target<gfx1100> @target
+func.def target(@target) @vector_sitofp_i8x4(%input: vector<4xi8>) -> (vector<4xf32>) {
+  %converted = vector.sitofp %input : vector<4xi8> to vector<4xf32>
+  func.return %converted : vector<4xf32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_sitofp_i8x4(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.rdna3.core> {
+  %5 = v_bfe_i32_offset_width_inline %input {offset = 0, width = 8}
+  %6 = v_cvt_f32_i32 %5
+  %7 = v_bfe_i32_offset_width_inline %input {offset = 8, width = 8}
+  %8 = v_cvt_f32_i32 %7
+  %9 = v_bfe_i32_offset_width_inline %input {offset = 16, width = 8}
+  %10 = v_cvt_f32_i32 %9
+  %11 = v_bfe_i32_offset_width_inline %input {offset = 24, width = 8}
+  %12 = v_cvt_f32_i32 %11
+  %converted = concat(%6, %8, %10, %12) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  return %converted
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @vector_uitofp_i8x4(%input: vector<4xi8>) -> (vector<4xf32>) {
+  %converted = vector.uitofp %input : vector<4xi8> to vector<4xf32>
+  func.return %converted : vector<4xf32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_uitofp_i8x4(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.rdna3.core> {
+  %5 = v_and_b32_lit %input, 255
+  %6 = v_cvt_f32_u32 %5
+  %7 = v_lshrrev_b32_src0_inline %input, 8
+  %8 = v_and_b32_lit %7, 255
+  %9 = v_cvt_f32_u32 %8
+  %10 = v_lshrrev_b32_src0_inline %input, 16
+  %11 = v_and_b32_lit %10, 255
+  %12 = v_cvt_f32_u32 %11
+  %13 = v_lshrrev_b32_src0_inline %input, 24
+  %14 = v_and_b32_lit %13, 255
+  %15 = v_cvt_f32_u32 %14
+  %converted = concat(%6, %9, %12, %15) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  return %converted
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @vector_sitofp_i16x2(%input: vector<2xi16>) -> (vector<2xf32>) {
+  %converted = vector.sitofp %input : vector<2xi16> to vector<2xf32>
+  func.return %converted : vector<2xf32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_sitofp_i16x2(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.rdna3.core> {
+  %5 = v_bfe_i32_offset_width_inline %input {offset = 0, width = 16}
+  %6 = v_cvt_f32_i32 %5
+  %7 = v_bfe_i32_offset_width_inline %input {offset = 16, width = 16}
+  %8 = v_cvt_f32_i32 %7
+  %converted = concat(%6, %8) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %converted
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @vector_uitofp_i16x2(%input: vector<2xi16>) -> (vector<2xf32>) {
+  %converted = vector.uitofp %input : vector<2xi16> to vector<2xf32>
+  func.return %converted : vector<2xf32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_uitofp_i16x2(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.rdna3.core> {
+  %5 = v_and_b32_lit %input, 65535
+  %6 = v_cvt_f32_u32 %5
+  %7 = v_lshrrev_b32_src0_inline %input, 16
+  %8 = v_and_b32_lit %7, 65535
+  %9 = v_cvt_f32_u32 %8
+  %converted = concat(%6, %9) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %converted
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @vector_fptosi_i32x4(%input: vector<4xf32>) -> (vector<4xi32>) {
+  %converted = vector.fptosi %input : vector<4xf32> to vector<4xi32>
+  func.return %converted : vector<4xi32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_fptosi_i32x4(%input: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.rdna3.core> {
+  %5 = slice %input[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %6 = v_cvt_i32_f32 %5
+  %7 = slice %input[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %8 = v_cvt_i32_f32 %7
+  %9 = slice %input[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %10 = v_cvt_i32_f32 %9
+  %11 = slice %input[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %12 = v_cvt_i32_f32 %11
+  %converted = concat(%6, %8, %10, %12) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  return %converted
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @vector_fptoui_i32x4(%input: vector<4xf32>) -> (vector<4xi32>) {
+  %converted = vector.fptoui %input : vector<4xf32> to vector<4xi32>
+  func.return %converted : vector<4xi32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_fptoui_i32x4(%input: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.rdna3.core> {
+  %5 = slice %input[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %6 = v_cvt_u32_f32 %5
+  %7 = slice %input[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %8 = v_cvt_u32_f32 %7
+  %9 = slice %input[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %10 = v_cvt_u32_f32 %9
+  %11 = slice %input[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %12 = v_cvt_u32_f32 %11
+  %converted = concat(%6, %8, %10, %12) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  return %converted
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @vector_fptosi_i8x4(%input: vector<4xf32>) -> (vector<4xi8>) {
+  %converted = vector.fptosi %input : vector<4xf32> to vector<4xi8>
+  func.return %converted : vector<4xi8>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_fptosi_i8x4(%input: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %5 = slice %input[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %6 = v_cvt_i32_f32 %5
+  %7 = v_and_b32_lit %6, 255
+  %8 = slice %input[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %9 = v_cvt_i32_f32 %8
+  %10 = v_and_b32_lit %9, 255
+  %11 = v_lshl_add_u32_shift_imm %10, %7, 8
+  %12 = slice %input[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %13 = v_cvt_i32_f32 %12
+  %14 = v_and_b32_lit %13, 255
+  %15 = v_lshl_add_u32_shift_imm %14, %11, 16
+  %16 = slice %input[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %17 = v_cvt_i32_f32 %16
+  %18 = v_and_b32_lit %17, 255
+  %converted = v_lshl_add_u32_shift_imm %18, %15, 24
+  return %converted
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @vector_fptoui_i8x4(%input: vector<4xf32>) -> (vector<4xi8>) {
+  %converted = vector.fptoui %input : vector<4xf32> to vector<4xi8>
+  func.return %converted : vector<4xi8>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_fptoui_i8x4(%input: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %5 = slice %input[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %6 = v_cvt_u32_f32 %5
+  %7 = v_and_b32_lit %6, 255
+  %8 = slice %input[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %9 = v_cvt_u32_f32 %8
+  %10 = v_and_b32_lit %9, 255
+  %11 = v_lshl_add_u32_shift_imm %10, %7, 8
+  %12 = slice %input[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %13 = v_cvt_u32_f32 %12
+  %14 = v_and_b32_lit %13, 255
+  %15 = v_lshl_add_u32_shift_imm %14, %11, 16
+  %16 = slice %input[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %17 = v_cvt_u32_f32 %16
+  %18 = v_and_b32_lit %17, 255
+  %converted = v_lshl_add_u32_shift_imm %18, %15, 24
+  return %converted
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @vector_fptosi_i16x2(%input: vector<2xf32>) -> (vector<2xi16>) {
+  %converted = vector.fptosi %input : vector<2xf32> to vector<2xi16>
+  func.return %converted : vector<2xi16>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_fptosi_i16x2(%input: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %5 = slice %input[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %6 = v_cvt_i32_f32 %5
+  %7 = v_and_b32_lit %6, 65535
+  %8 = slice %input[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %9 = v_cvt_i32_f32 %8
+  %10 = v_and_b32_lit %9, 65535
+  %converted = v_lshl_add_u32_shift_imm %10, %7, 16
+  return %converted
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @vector_fptoui_i16x2(%input: vector<2xf32>) -> (vector<2xi16>) {
+  %converted = vector.fptoui %input : vector<2xf32> to vector<2xi16>
+  func.return %converted : vector<2xi16>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_fptoui_i16x2(%input: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %5 = slice %input[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %6 = v_cvt_u32_f32 %5
+  %7 = v_and_b32_lit %6, 65535
+  %8 = slice %input[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %9 = v_cvt_u32_f32 %8
+  %10 = v_and_b32_lit %9, 65535
+  %converted = v_lshl_add_u32_shift_imm %10, %7, 16
+  return %converted
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @vector_trunci_i32_to_i8x4(%input: vector<4xi32>) -> (vector<4xi8>) {
+  %converted = vector.trunci %input : vector<4xi32> to vector<4xi8>
+  func.return %converted : vector<4xi8>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_trunci_i32_to_i8x4(%input: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %5 = slice %input[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %6 = v_and_b32_lit %5, 255
+  %7 = slice %input[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %8 = v_and_b32_lit %7, 255
+  %9 = v_lshl_add_u32_shift_imm %8, %6, 8
+  %10 = slice %input[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %11 = v_and_b32_lit %10, 255
+  %12 = v_lshl_add_u32_shift_imm %11, %9, 16
+  %13 = slice %input[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %14 = v_and_b32_lit %13, 255
+  %converted = v_lshl_add_u32_shift_imm %14, %12, 24
+  return %converted
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @vector_trunci_i32_to_i16x2(%input: vector<2xi32>) -> (vector<2xi16>) {
+  %converted = vector.trunci %input : vector<2xi32> to vector<2xi16>
+  func.return %converted : vector<2xi16>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_trunci_i32_to_i16x2(%input: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %5 = slice %input[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %6 = v_and_b32_lit %5, 65535
+  %7 = slice %input[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %8 = v_and_b32_lit %7, 65535
+  %converted = v_lshl_add_u32_shift_imm %8, %6, 16
+  return %converted
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @vector_trunci_i16_to_i8x4(%input: vector<4xi16>) -> (vector<4xi8>) {
+  %converted = vector.trunci %input : vector<4xi16> to vector<4xi8>
+  func.return %converted : vector<4xi8>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_trunci_i16_to_i8x4(%input: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %5 = slice %input[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %6 = v_and_b32_lit %5, 255
+  %8 = v_lshrrev_b32_src0_inline %5, 16
+  %9 = v_and_b32_lit %8, 255
+  %10 = v_lshl_add_u32_shift_imm %9, %6, 8
+  %11 = slice %input[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %12 = v_and_b32_lit %11, 255
+  %13 = v_lshl_add_u32_shift_imm %12, %10, 16
+  %15 = v_lshrrev_b32_src0_inline %11, 16
+  %16 = v_and_b32_lit %15, 255
+  %converted = v_lshl_add_u32_shift_imm %16, %13, 24
+  return %converted
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @vector_trunci_i64_to_i32x2(%input: vector<2xi64>) -> (vector<2xi32>) {
+  %converted = vector.trunci %input : vector<2xi64> to vector<2xi32>
+  func.return %converted : vector<2xi32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_trunci_i64_to_i32x2(%input: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.rdna3.core> {
+  %5 = slice %input[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %6 = slice %input[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %converted = concat(%5, %6) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %converted
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @vector_trunci_i64_to_i16x2(%input: vector<2xi64>) -> (vector<2xi16>) {
+  %converted = vector.trunci %input : vector<2xi64> to vector<2xi16>
+  func.return %converted : vector<2xi16>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_trunci_i64_to_i16x2(%input: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %5 = slice %input[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %6 = v_and_b32_lit %5, 65535
+  %7 = slice %input[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %8 = v_and_b32_lit %7, 65535
+  %converted = v_lshl_add_u32_shift_imm %8, %6, 16
+  return %converted
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @vector_trunci_i64_to_i8x4(%input: vector<4xi64>) -> (vector<4xi8>) {
+  %converted = vector.trunci %input : vector<4xi64> to vector<4xi8>
+  func.return %converted : vector<4xi8>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_trunci_i64_to_i8x4(%input: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %5 = slice %input[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %6 = v_and_b32_lit %5, 255
+  %7 = slice %input[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %8 = v_and_b32_lit %7, 255
+  %9 = v_lshl_add_u32_shift_imm %8, %6, 8
+  %10 = slice %input[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %11 = v_and_b32_lit %10, 255
+  %12 = v_lshl_add_u32_shift_imm %11, %9, 16
+  %13 = slice %input[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %14 = v_and_b32_lit %13, 255
+  %converted = v_lshl_add_u32_shift_imm %14, %12, 24
+  return %converted
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @vector_quantize_round_f32_to_i8x4(%values: vector<4xf32>, %inverse_scale: f32) -> (vector<4xi8>) {
+  %scale = vector.splat %inverse_scale : vector<4xf32>
+  %scaled = vector.mulf %values, %scale : vector<4xf32>
+  %rounded = vector.roundf %scaled : vector<4xf32>
+  %i32 = vector.fptosi %rounded : vector<4xf32> to vector<4xi32>
+  %packed = vector.trunci %i32 : vector<4xi32> to vector<4xi8>
+  func.return %packed : vector<4xi8>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_quantize_round_f32_to_i8x4(%values: reg<amdgpu.vgpr x4>, %inverse_scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %22 = slice %values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %24 = v_mul_f32 %22, %inverse_scale
+  %25 = slice %values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %27 = v_mul_f32 %25, %inverse_scale
+  %28 = slice %values[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %30 = v_mul_f32 %28, %inverse_scale
+  %31 = slice %values[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %33 = v_mul_f32 %31, %inverse_scale
+  %40 = v_mov_b32 1056964608
+  %51 = v_trunc_f32 %24
+  %53 = v_trunc_f32 %27
+  %55 = v_trunc_f32 %30
+  %57 = v_trunc_f32 %33
+  %61 = v_sub_f32 %24, %51
+  %64 = v_sub_f32 %27, %53
+  %67 = v_sub_f32 %30, %55
+  %70 = v_sub_f32 %33, %57
+  %73 = v_and_b32_lit %61, 2147483647
+  %75 = v_and_b32_lit %64, 2147483647
+  %77 = v_and_b32_lit %67, 2147483647
+  %79 = v_and_b32_lit %70, 2147483647
+  %83 = v_cmp_ge_f32 %73, %40
+  %86 = v_cmp_ge_f32 %75, %40
+  %89 = v_cmp_ge_f32 %77, %40
+  %92 = v_cmp_ge_f32 %79, %40
+  %95 = v_cndmask_b32_src1_lit_src0_inline %83 {imm32 = 1065353216, false_value = 0}
+  %97 = v_cndmask_b32_src1_lit_src0_inline %86 {imm32 = 1065353216, false_value = 0}
+  %99 = v_cndmask_b32_src1_lit_src0_inline %89 {imm32 = 1065353216, false_value = 0}
+  %101 = v_cndmask_b32_src1_lit_src0_inline %92 {imm32 = 1065353216, false_value = 0}
+  %105 = v_bfi_b32_src0_lit %95, %24, 2147483647
+  %108 = v_bfi_b32_src0_lit %97, %27, 2147483647
+  %111 = v_bfi_b32_src0_lit %99, %30, 2147483647
+  %114 = v_bfi_b32_src0_lit %101, %33, 2147483647
+  %118 = v_add_f32 %51, %105
+  %121 = v_add_f32 %53, %108
+  %124 = v_add_f32 %55, %111
+  %127 = v_add_f32 %57, %114
+  %130 = v_cvt_i32_f32 %118
+  %132 = v_cvt_i32_f32 %121
+  %134 = v_cvt_i32_f32 %124
+  %136 = v_cvt_i32_f32 %127
+  %139 = v_and_b32_lit %130, 255
+  %141 = v_and_b32_lit %132, 255
+  %142 = v_lshl_add_u32_shift_imm %141, %139, 8
+  %144 = v_and_b32_lit %134, 255
+  %145 = v_lshl_add_u32_shift_imm %144, %142, 16
+  %147 = v_and_b32_lit %136, 255
+  %packed = v_lshl_add_u32_shift_imm %147, %145, 24
+  return %packed
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
 func.def target(@target) @scalar_uitofp_i32(%input: i32) -> (f32) {
   %converted = scalar.uitofp %input : i32 to f32
   func.return %converted : f32

@@ -268,6 +268,41 @@ static const loom_amdgpu_lower_dispatch_row_t
                 loom_amdgpu_select_vector_packed_fmai_dispatch,
                 loom_amdgpu_emit_vector_packed_ternary_dispatch, NULL, 3,
                 LOOM_AMDGPU_PRESELECT_TARGET_PLAN),
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_VECTOR_TRUNCI)] =
+            LOOM_AMDGPU_VALUE_DATA_SOURCE_POLICY_ROW(
+                LOOM_OP_VECTOR_TRUNCI, loom_amdgpu_vector_conversion_plan_t,
+                loom_amdgpu_select_vector_conversion_dispatch,
+                loom_amdgpu_emit_vector_conversion_dispatch,
+                loom_amdgpu_low_legality_verify_vector_conversion, 1,
+                LOOM_AMDGPU_PRESELECT_TARGET_PLAN),
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_VECTOR_SITOFP)] =
+            LOOM_AMDGPU_GENERATED_PRESELECT_DATA_SOURCE_POLICY_ROW(
+                LOOM_OP_VECTOR_SITOFP, loom_amdgpu_vector_conversion_plan_t,
+                loom_amdgpu_select_vector_conversion_dispatch,
+                loom_amdgpu_emit_vector_conversion_dispatch,
+                loom_amdgpu_low_legality_verify_vector_conversion, 1,
+                LOOM_AMDGPU_PRESELECT_TARGET_PLAN),
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_VECTOR_UITOFP)] =
+            LOOM_AMDGPU_GENERATED_PRESELECT_DATA_SOURCE_POLICY_ROW(
+                LOOM_OP_VECTOR_UITOFP, loom_amdgpu_vector_conversion_plan_t,
+                loom_amdgpu_select_vector_conversion_dispatch,
+                loom_amdgpu_emit_vector_conversion_dispatch,
+                loom_amdgpu_low_legality_verify_vector_conversion, 1,
+                LOOM_AMDGPU_PRESELECT_TARGET_PLAN),
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_VECTOR_FPTOSI)] =
+            LOOM_AMDGPU_GENERATED_PRESELECT_DATA_SOURCE_POLICY_ROW(
+                LOOM_OP_VECTOR_FPTOSI, loom_amdgpu_vector_conversion_plan_t,
+                loom_amdgpu_select_vector_conversion_dispatch,
+                loom_amdgpu_emit_vector_conversion_dispatch,
+                loom_amdgpu_low_legality_verify_vector_conversion, 1,
+                LOOM_AMDGPU_PRESELECT_TARGET_PLAN),
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_VECTOR_FPTOUI)] =
+            LOOM_AMDGPU_GENERATED_PRESELECT_DATA_SOURCE_POLICY_ROW(
+                LOOM_OP_VECTOR_FPTOUI, loom_amdgpu_vector_conversion_plan_t,
+                loom_amdgpu_select_vector_conversion_dispatch,
+                loom_amdgpu_emit_vector_conversion_dispatch,
+                loom_amdgpu_low_legality_verify_vector_conversion, 1,
+                LOOM_AMDGPU_PRESELECT_TARGET_PLAN),
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_VECTOR_CMPI)] =
             LOOM_AMDGPU_RECIPE_DATA_SOURCE_ROW(
                 LOOM_OP_VECTOR_CMPI, loom_amdgpu_vector_compare_plan_t,

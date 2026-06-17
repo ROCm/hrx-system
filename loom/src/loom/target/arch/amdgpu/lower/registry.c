@@ -281,6 +281,14 @@ LOOM_AMDGPU_DEFINE_DATA_EMIT(loom_amdgpu_emit_scalar_conversion_dispatch,
                              loom_amdgpu_scalar_conversion_plan_t,
                              loom_amdgpu_lower_scalar_conversion)
 
+LOOM_AMDGPU_DEFINE_DATA_SELECT(loom_amdgpu_select_vector_conversion_dispatch,
+                               loom_amdgpu_vector_conversion_plan_t,
+                               loom_amdgpu_select_vector_conversion_plan)
+
+LOOM_AMDGPU_DEFINE_DATA_EMIT(loom_amdgpu_emit_vector_conversion_dispatch,
+                             loom_amdgpu_vector_conversion_plan_t,
+                             loom_amdgpu_lower_vector_conversion)
+
 LOOM_AMDGPU_DEFINE_DATA_SELECT(loom_amdgpu_select_vector_extract_dispatch,
                                loom_amdgpu_vector_extract_plan_t,
                                loom_amdgpu_select_vector_extract_plan)
@@ -994,6 +1002,8 @@ LOOM_AMDGPU_ASSERT_LEADING_SOURCE_FIELD(loom_amdgpu_scalar_i64_alu_plan_t, lhs,
 LOOM_AMDGPU_ASSERT_LEADING_SOURCE_FIELD(loom_amdgpu_scalar_i64_alu_plan_t, rhs,
                                         1);
 LOOM_AMDGPU_ASSERT_LEADING_SOURCE_FIELD(loom_amdgpu_scalar_conversion_plan_t,
+                                        source, 0);
+LOOM_AMDGPU_ASSERT_LEADING_SOURCE_FIELD(loom_amdgpu_vector_conversion_plan_t,
                                         source, 0);
 LOOM_AMDGPU_ASSERT_LEADING_SOURCE_FIELD(
     loom_amdgpu_vector_bf16_conversion_plan_t, source, 0);

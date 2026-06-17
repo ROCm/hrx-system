@@ -18,6 +18,7 @@
 #include "loom/codegen/low/lower/lower.h"
 #include "loom/codegen/low/source_memory_plan.h"
 #include "loom/ir/ir.h"
+#include "loom/ir/scalar_type.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/target/arch/amdgpu/lower/kinds.h"
 #include "loom/target/arch/amdgpu/matrix/contract.h"
@@ -166,6 +167,45 @@ typedef struct loom_amdgpu_scalar_conversion_plan_t {
   // Descriptor selected for conversion packets used by the strategy.
   loom_amdgpu_descriptor_ref_t convert_descriptor_ref;
 } loom_amdgpu_scalar_conversion_plan_t;
+
+typedef enum loom_amdgpu_vector_conversion_kind_e {
+  LOOM_AMDGPU_VECTOR_CONVERSION_KIND_NONE = 0,
+  LOOM_AMDGPU_VECTOR_CONVERSION_KIND_FULL_32_TO_FULL_32,
+  LOOM_AMDGPU_VECTOR_CONVERSION_KIND_FULL_64_TO_FULL_32,
+  LOOM_AMDGPU_VECTOR_CONVERSION_KIND_FULL_32_TO_PACKED_INTEGER,
+  LOOM_AMDGPU_VECTOR_CONVERSION_KIND_FULL_64_TO_PACKED_INTEGER,
+  LOOM_AMDGPU_VECTOR_CONVERSION_KIND_PACKED_INTEGER_TO_FULL_32,
+  LOOM_AMDGPU_VECTOR_CONVERSION_KIND_PACKED_INTEGER_TO_PACKED_INTEGER,
+} loom_amdgpu_vector_conversion_kind_t;
+
+typedef struct loom_amdgpu_vector_conversion_plan_t {
+  // Source vector value being converted.
+  loom_value_id_t source;
+  // Result vector value receiving the converted payload.
+  loom_value_id_t result;
+  // Lowering strategy selected for the source/result storage pair.
+  loom_amdgpu_vector_conversion_kind_t kind;
+  // Source scalar element type.
+  loom_scalar_type_t source_element_type;
+  // Result scalar element type.
+  loom_scalar_type_t result_element_type;
+  // Static source lane payload bit count.
+  uint32_t source_bit_count;
+  // Static result lane payload bit count.
+  uint32_t result_bit_count;
+  // Static vector lane count shared by source and result.
+  uint32_t lane_count;
+  // Number of 32-bit source registers occupied by the source vector.
+  uint32_t source_register_count;
+  // Number of 32-bit result registers occupied by the result vector.
+  uint32_t result_register_count;
+  // Number of 32-bit source registers occupied by one source lane.
+  uint32_t source_element_register_count;
+  // Descriptor selected for conversion packets used by the strategy.
+  loom_amdgpu_descriptor_ref_t convert_descriptor_ref;
+  // True when packed integer source lanes require sign extension.
+  bool sign_extend_packed_source;
+} loom_amdgpu_vector_conversion_plan_t;
 
 typedef struct loom_amdgpu_bitpack_plan_t {
   // Source vector value containing unpacked i32 lanes.
