@@ -177,6 +177,27 @@ func.def @extract_single_use_load_to_view_load(%input: buffer, %offset: offset) 
 
 // ====
 
+// Workgroup vector loads preserve their footprint even when only one scalar
+// lane is consumed. Backends use the vector memory operation as a scheduling
+// contract for LDS packet selection.
+kernel.def @extract_single_use_workgroup_load_keeps_wide_load() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch() {
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 64 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %view = buffer.view %scratch[%zero] : buffer -> view<4xi32, #dense>
+  %seed = vector.constant 1 : vector<4xi32>
+  vector.store %seed, %view[0] : vector<4xi32>, view<4xi32, #dense>
+  %wide = vector.load %view[0] : view<4xi32, #dense> -> vector<4xi32>
+  %lane2 = vector.extract %wide[2] : vector<4xi32> -> i32
+  view.store %lane2, %view[0] : i32, view<4xi32, #dense>
+  kernel.return
+}
+
+// ====
+
 // When multiple scalar lanes are extracted, the wide vector load is still the
 // better canonical form: target lowering can select one coalesced memory op and
 // slice registers instead of scalarizing into several smaller loads.

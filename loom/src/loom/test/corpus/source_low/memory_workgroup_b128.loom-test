@@ -21,6 +21,28 @@ kernel.def @lds_b128_roundtrip() {
 
 // ====
 
+kernel.def @lds_b128_single_lane_extract() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 1024 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %input_view = buffer.view %input[%zero] : buffer -> view<64x4xi32, #dense>
+  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64x4xi32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<64xi32, #dense>
+  %loaded = vector.load %input_view[%lane, 0] : view<64x4xi32, #dense> -> vector<4xi32>
+  vector.store %loaded, %scratch_view[%lane, 0] : vector<4xi32>, view<64x4xi32, #dense>
+  %roundtrip = vector.load %scratch_view[%lane, 0] : view<64x4xi32, #dense> -> vector<4xi32>
+  %lane2 = vector.extract %roundtrip[2] : vector<4xi32> -> i32
+  view.store %lane2, %output_view[%lane] : i32, view<64xi32, #dense>
+  kernel.return
+}
+
+// ====
+
 kernel.def @lds_b128_xor_swizzle_roundtrip() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index

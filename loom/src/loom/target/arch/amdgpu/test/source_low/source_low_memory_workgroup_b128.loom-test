@@ -38,6 +38,45 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @lds_b128_roundtrip() as
 // ====
 
 amdgpu.target<gfx1100> @target
+kernel.def target(@target) @lds_b128_single_lane_extract() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 1024 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %input_view = buffer.view %input[%zero] : buffer -> view<64x4xi32, #dense>
+  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64x4xi32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<64xi32, #dense>
+  %loaded = vector.load %input_view[%lane, 0] : view<64x4xi32, #dense> -> vector<4xi32>
+  vector.store %loaded, %scratch_view[%lane, 0] : vector<4xi32>, view<64x4xi32, #dense>
+  %roundtrip = vector.load %scratch_view[%lane, 0] : view<64x4xi32, #dense> -> vector<4xi32>
+  %lane2 = vector.extract %roundtrip[2] : vector<4xi32> -> i32
+  view.store %lane2, %output_view[%lane] : i32, view<64xi32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) @lds_b128_single_lane_extract() asm<amdgpu.rdna3.core> {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
+  %33 = storage {byte_alignment = 16, byte_length = 1024} : low.storage<workgroup>
+  %35 = v_lshlrev_b32_src0_inline %lane, 4
+  %loaded = global_load_b128_saddr %35, %input_view
+  ds_write_b128 %35, %loaded
+  %roundtrip = ds_read_b128 %35
+  %lane2 = slice %roundtrip[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %41 = v_lshlrev_b32_src0_inline %lane, 2
+  global_store_b32_saddr %41, %lane2, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
 kernel.def target(@target) @lds_b128_xor_swizzle_roundtrip() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index

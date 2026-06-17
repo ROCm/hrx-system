@@ -136,6 +136,18 @@ static bool loom_vector_value_is_all_bool(const loom_rewriter_t* rewriter,
                                             expected ? 1 : 0);
 }
 
+static bool loom_vector_value_is_workgroup_view(const loom_rewriter_t* rewriter,
+                                                loom_value_id_t value_id) {
+  if (!rewriter->fact_table) return false;
+  loom_value_fact_view_reference_t reference = {0};
+  if (!loom_value_facts_query_view_reference(
+          &rewriter->fact_table->context,
+          loom_rewriter_value_facts(rewriter, value_id), &reference)) {
+    return false;
+  }
+  return reference.memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP;
+}
+
 static bool loom_vector_facts_to_constant_attr(loom_value_facts_t facts,
                                                loom_scalar_type_t element_type,
                                                loom_attribute_t* out_attr) {
@@ -718,6 +730,10 @@ static iree_status_t loom_vector_canonicalize_extract_from_load(
   }
 
   const loom_value_id_t view = loom_vector_load_view(source_def_op);
+  if (loom_vector_value_is_workgroup_view(rewriter, view)) {
+    return iree_ok_status();
+  }
+
   const loom_type_t view_type = loom_module_value_type(rewriter->module, view);
   const loom_fact_context_t* fact_context =
       rewriter->fact_table ? &rewriter->fact_table->context : NULL;
