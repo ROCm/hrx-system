@@ -135,6 +135,7 @@ include(iree_cc_binary_benchmark)
 include(iree_genrule)
 include(iree_python)
 include(iree_setup_toolchain)
+include(hrx_optimization)
 
 include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/googletest/googletest.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/google_benchmark/google_benchmark.cmake")
@@ -146,6 +147,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/vulkan_headers/vulkan
 include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/catch2/catch2.cmake")
 
 iree_setup_toolchain()
+hrx_configure_ipo()
 if(IREE_BUILD_TESTS)
   iree_configure_googletest()
 endif()

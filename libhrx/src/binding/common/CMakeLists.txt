@@ -95,7 +95,6 @@ iree_cc_binary_benchmark(
 
 set_target_properties(libhrx_src_binding_common_common PROPERTIES
   POSITION_INDEPENDENT_CODE ON
-  INTERPROCEDURAL_OPTIMIZATION TRUE
 )
 
 # CCOB fat binaries use zstd for compression (used by rocBLAS/hipBLAS and

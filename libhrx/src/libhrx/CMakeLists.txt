@@ -116,16 +116,6 @@ endif()
 set_property(TARGET libhrx_src_libhrx_hrx PROPERTY
   INTERFACE_LINK_LIBRARIES ""
 )
-include(CheckIPOSupported)
-check_ipo_supported(RESULT _hrx_ipo_supported OUTPUT _hrx_ipo_error)
-if(_hrx_ipo_supported)
-  set_target_properties(libhrx_src_libhrx_hrx PROPERTIES
-    INTERPROCEDURAL_OPTIMIZATION TRUE
-  )
-  message(STATUS "hrx-runtime: LTO enabled for libhrx.so")
-else()
-  message(WARNING "hrx-runtime: LTO not supported: ${_hrx_ipo_error}")
-endif()
 if(NOT TARGET hrx)
   add_custom_target(hrx DEPENDS libhrx_src_libhrx_hrx)
 endif()

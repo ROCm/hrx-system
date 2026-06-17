@@ -316,16 +316,6 @@ if(TARGET loom_binding_c_loomc)
       LINK_FLAGS "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/cmake/loomc_exports.lds")
   endif()
 
-  include(CheckIPOSupported)
-  check_ipo_supported(RESULT _loomc_ipo_supported OUTPUT _loomc_ipo_error)
-  if(_loomc_ipo_supported)
-    set_target_properties(loomc_shared PROPERTIES
-      INTERPROCEDURAL_OPTIMIZATION TRUE)
-    message(STATUS "loomc: LTO enabled for libloomc.so")
-  else()
-    message(WARNING "loomc: LTO not supported: ${_loomc_ipo_error}")
-  endif()
-
   if(NOT TARGET loomc::loomc)
     add_library(loomc::loomc ALIAS loomc_shared)
   endif()

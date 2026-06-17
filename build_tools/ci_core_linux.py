@@ -919,7 +919,7 @@ def test_core(args: argparse.Namespace) -> None:
         [
             "cmake",
             "-S",
-            REPO_ROOT / "loom" / "binding" / "c" / "package_smoke",
+            REPO_ROOT / "loom" / "binding" / "c" / "packaging" / "package_smoke",
             "-B",
             loomc_smoke_build_dir,
             *smoke_cmake_options,
