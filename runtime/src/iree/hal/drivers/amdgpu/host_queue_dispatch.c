@@ -160,11 +160,18 @@ static iree_status_t iree_hal_amdgpu_host_queue_validate_dispatch_shape(
 
 static iree_status_t iree_hal_amdgpu_host_queue_validate_dispatch_binding(
     const iree_hal_buffer_ref_t* binding) {
-  if (IREE_UNLIKELY(binding->reserved != 0 || binding->buffer_slot != 0 ||
-                    !binding->buffer)) {
+  if (IREE_UNLIKELY(binding->reserved != 0 || binding->buffer_slot != 0)) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "queue_dispatch bindings must be direct non-null buffer references");
+        "queue_dispatch bindings must be direct buffer references");
+  }
+  if (!binding->buffer) {
+    if (IREE_UNLIKELY(binding->offset != 0 || binding->length != 0)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "queue_dispatch null bindings must have zero offset and length");
+    }
+    return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_memory_type(
       iree_hal_buffer_memory_type(binding->buffer),
@@ -367,6 +374,9 @@ static iree_status_t iree_hal_amdgpu_host_queue_prepare_dispatch_plan(
 static iree_status_t iree_hal_amdgpu_host_queue_resolve_validated_binding_ptr(
     const iree_hal_buffer_ref_t* binding, uint64_t* out_binding_ptr) {
   *out_binding_ptr = 0;
+  if (!binding->buffer) {
+    return iree_ok_status();
+  }
   iree_hal_buffer_t* allocated_buffer =
       iree_hal_buffer_allocated_buffer(binding->buffer);
   void* device_ptr = iree_hal_amdgpu_buffer_device_pointer(allocated_buffer);

@@ -6,6 +6,7 @@
 
 #include <stdatomic.h>
 
+#include "common/graph.h"
 #include "common/internal.h"
 #include "iree/hal/buffer_transfer.h"
 
@@ -30,6 +31,18 @@ static iree_status_t iree_hal_streaming_command_buffer_barrier(
       IREE_HAL_EXECUTION_STAGE_DISPATCH | IREE_HAL_EXECUTION_STAGE_TRANSFER,
       IREE_HAL_EXECUTION_STAGE_DISPATCH | IREE_HAL_EXECUTION_STAGE_TRANSFER,
       IREE_HAL_EXECUTION_BARRIER_FLAG_NONE, 1, &memory_barrier, 0, NULL);
+}
+
+typedef struct iree_hal_streaming_host_memcpy_callback_data_t {
+  void* dst;
+  const void* src;
+  iree_device_size_t count;
+} iree_hal_streaming_host_memcpy_callback_data_t;
+
+static void iree_hal_streaming_host_memcpy_callback(void* user_data) {
+  iree_hal_streaming_host_memcpy_callback_data_t* callback_data =
+      (iree_hal_streaming_host_memcpy_callback_data_t*)user_data;
+  memcpy(callback_data->dst, callback_data->src, callback_data->count);
 }
 
 static void iree_hal_streaming_buffer_set_context(
@@ -737,13 +750,14 @@ iree_status_t iree_hal_streaming_memory_memset(
           iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                            "unsupported pattern length %zu", pattern_length));
     }
+    iree_hal_streaming_graph_node_t* node = NULL;
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
         z0, iree_hal_streaming_graph_add_memset_node(
                 stream->capture_graph, stream->capture_dependencies,
                 stream->capture_dependency_count, dst, pattern_value,
-                pattern_length, length / pattern_length, NULL));
-    // Clear dependencies after adding the node.
-    stream->capture_dependency_count = 0;
+                pattern_length, length / pattern_length, &node));
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_hal_streaming_capture_set_last_node(stream, node));
     IREE_TRACE_ZONE_END(z0);
     return iree_ok_status();
   }
@@ -808,12 +822,13 @@ iree_status_t iree_hal_streaming_memory_memcpy(
   // Check if we're capturing to a graph.
   if (stream->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE) {
     // Add memcpy node to the graph instead of recording to command buffer.
+    iree_hal_streaming_graph_node_t* node = NULL;
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
         z0, iree_hal_streaming_graph_add_memcpy_node(
                 stream->capture_graph, stream->capture_dependencies,
-                stream->capture_dependency_count, dst, src, size, NULL));
-    // Clear dependencies after adding the node.
-    stream->capture_dependency_count = 0;
+                stream->capture_dependency_count, dst, src, size, &node));
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_hal_streaming_capture_set_last_node(stream, node));
     IREE_TRACE_ZONE_END(z0);
     return iree_ok_status();
   }
@@ -918,6 +933,43 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device(
   IREE_ASSERT_ARGUMENT(dst);
   IREE_ASSERT_ARGUMENT(src);
   IREE_TRACE_ZONE_BEGIN(z0);
+
+  if (stream &&
+      stream->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE) {
+    iree_hal_streaming_buffer_t* staging = NULL;
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_hal_streaming_graph_allocate_host_staging(
+                stream->capture_graph, size, &staging));
+
+    iree_hal_streaming_host_memcpy_callback_data_t* callback_data = NULL;
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_arena_allocate(&stream->capture_graph->arena,
+                                sizeof(*callback_data),
+                                (void**)&callback_data));
+    callback_data->dst = staging->host_ptr;
+    callback_data->src = src;
+    callback_data->count = size;
+
+    iree_hal_streaming_graph_node_t* callback_node = NULL;
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_hal_streaming_graph_add_host_call_node(
+                stream->capture_graph, stream->capture_dependencies,
+                stream->capture_dependency_count,
+                iree_hal_streaming_host_memcpy_callback, callback_data,
+                &callback_node));
+    callback_node->flags |= IREE_HAL_STREAMING_GRAPH_NODE_FLAG_HIDDEN;
+
+    iree_hal_streaming_graph_node_t* copy_deps[] = {callback_node};
+    iree_hal_streaming_graph_node_t* copy_node = NULL;
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_hal_streaming_graph_add_memcpy_node(
+                stream->capture_graph, copy_deps, IREE_ARRAYSIZE(copy_deps),
+                dst, staging->device_ptr, size, &copy_node));
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_hal_streaming_capture_set_last_node(stream, copy_node));
+    IREE_TRACE_ZONE_END(z0);
+    return iree_ok_status();
+  }
 
   // Look up destination buffer from device pointer.
   iree_hal_streaming_buffer_ref_t dst_ref;
@@ -1050,6 +1102,43 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host(
   IREE_ASSERT_ARGUMENT(dst);
   IREE_ASSERT_ARGUMENT(src);
   IREE_TRACE_ZONE_BEGIN(z0);
+
+  if (stream &&
+      stream->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE) {
+    iree_hal_streaming_buffer_t* staging = NULL;
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_hal_streaming_graph_allocate_host_staging(
+                stream->capture_graph, size, &staging));
+
+    iree_hal_streaming_graph_node_t* copy_node = NULL;
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_hal_streaming_graph_add_memcpy_node(
+                stream->capture_graph, stream->capture_dependencies,
+                stream->capture_dependency_count, staging->device_ptr, src,
+                size, &copy_node));
+
+    iree_hal_streaming_host_memcpy_callback_data_t* callback_data = NULL;
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_arena_allocate(&stream->capture_graph->arena,
+                                sizeof(*callback_data),
+                                (void**)&callback_data));
+    callback_data->dst = dst;
+    callback_data->src = staging->host_ptr;
+    callback_data->count = size;
+
+    iree_hal_streaming_graph_node_t* copy_deps[] = {copy_node};
+    iree_hal_streaming_graph_node_t* callback_node = NULL;
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_hal_streaming_graph_add_host_call_node(
+                stream->capture_graph, copy_deps, IREE_ARRAYSIZE(copy_deps),
+                iree_hal_streaming_host_memcpy_callback, callback_data,
+                &callback_node));
+    callback_node->flags |= IREE_HAL_STREAMING_GRAPH_NODE_FLAG_HIDDEN;
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_hal_streaming_capture_set_last_node(stream, callback_node));
+    IREE_TRACE_ZONE_END(z0);
+    return iree_ok_status();
+  }
 
   // Look up source buffer from device pointer.
   iree_hal_streaming_buffer_ref_t src_ref;

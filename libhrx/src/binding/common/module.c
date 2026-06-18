@@ -190,8 +190,6 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
                                    (void**)&parameters);
   }
 
-  iree_host_size_t constants_size = 0;
-
   // Analyze each export to determine operation counts.
   // We count the total operations per symbol with copy coalescing.
   iree_host_size_t total_ops = 0;
@@ -211,8 +209,14 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
     for (uint16_t j = 0; j < parameter_count; ++j) {
       const iree_hal_executable_export_parameter_t* parameter =
           &parameters[parameter_base + j];
-      if (parameter->type ==
-          IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_BINDING) {
+      const bool is_binding_parameter =
+          parameter->type ==
+          IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_BINDING;
+      const bool is_buffer_binding_parameter =
+          parameter->type ==
+              IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_BUFFER_PTR &&
+          symbol_op_counts[i].resolve_count < export_infos[i].binding_count;
+      if (is_binding_parameter || is_buffer_binding_parameter) {
         ++symbol_op_counts[i].resolve_count;
         ++total_ops;
         // src_offset += parameter->size;
@@ -224,15 +228,6 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
         //  New copy operation needed.
         ++symbol_op_counts[i].copy_count;
         ++total_ops;
-
-        if (parameters[parameter_base + j].offset +
-                parameters[parameter_base + j].size >
-            constants_size) {
-          // Track the maximum extent needed for the constants buffer.
-          // Constants are packed at their kernarg offsets within the buffer.
-          constants_size = parameters[parameter_base + j].offset +
-                           parameters[parameter_base + j].size;
-        }
         //}
         // src_offset += parameter->size;
         // last_constant_end = src_offset;
@@ -296,7 +291,7 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
     // Copy ops go first, then resolve ops.
     uint16_t src_offset = 0;
     uint16_t buffer_size = 0;
-    size_t this_kernel_constants_size = 0;  // Per-kernel constants size
+    size_t this_kernel_direct_arg_size = 0;  // Native direct-arg prefix size.
     iree_hal_streaming_parameter_op_t* copy_ops_start = current_ops;
     iree_hal_streaming_parameter_op_t* resolve_ops_start =
         current_ops + symbol_op_counts[i].copy_count;
@@ -305,8 +300,14 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
     for (uint16_t j = 0; j < parameter_count; ++j) {
       const iree_hal_executable_export_parameter_t* parameter =
           &parameters[parameter_base + j];
-      if (parameter->type ==
-          IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_BINDING) {
+      const bool is_binding_parameter =
+          parameter->type ==
+          IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_BINDING;
+      const bool is_buffer_binding_parameter =
+          parameter->type ==
+              IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_BUFFER_PTR &&
+          resolve_count < export_infos[i].binding_count;
+      if (is_binding_parameter || is_buffer_binding_parameter) {
         // Update offsets. Bindings are passed as pointers.
         // |parameter->offset| is the kernarg byte offset for all parameter
         // types when the backend populates it (e.g. AMDGPU HSACO). The
@@ -318,16 +319,21 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
         op->src_offset = src_offset;
         op->dst_ordinal = resolve_count;
         op->src_ordinal = j;
-        op->dst_offset = parameter->offset;
+        // For HIP/CUDA native launches using CUSTOM_DIRECT_ARGUMENTS we need
+        // to place raw device pointers at their kernarg ABI offset. Binding
+        // export parameter offsets are binding-list ordinals in some IREE HAL
+        // backends, not byte offsets, so use the packed source offset we
+        // calculate from the full parameter sequence. AMDGPU BUFFER_PTR
+        // parameters already carry native kernarg byte offsets.
+        op->dst_offset =
+            is_buffer_binding_parameter ? parameter->offset : src_offset;
         src_offset += parameter->size;
         buffer_size = src_offset;
         ++resolve_count;
 
-        // For native kernels with CUSTOM_DIRECT_ARGUMENTS, bindings are also
-        // part of the constants buffer. Track their extent as well.
-        size_t param_extent = (size_t)parameter->offset + parameter->size;
-        if (param_extent > this_kernel_constants_size) {
-          this_kernel_constants_size = param_extent;
+        size_t param_extent = (size_t)op->dst_offset + parameter->size;
+        if (param_extent > this_kernel_direct_arg_size) {
+          this_kernel_direct_arg_size = param_extent;
         }
       } else {
         // TODO: fix coalescing. It does not work when we have
@@ -345,6 +351,7 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
         op->size = parameter->size;
         op->src_offset = src_offset;
         op->src_ordinal = j;
+        op->direct_dst_offset = src_offset;
         op->dst_offset = parameter->offset;  // offset in constants
         ++copy_count;
         // active_copy = op;
@@ -352,24 +359,19 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
         src_offset += parameter->size;
         buffer_size = src_offset;
 
-        // Track per-kernel constants size based on actual parameter extent
-        size_t param_extent = parameter->offset + parameter->size;
-        if (param_extent > this_kernel_constants_size) {
-          this_kernel_constants_size = param_extent;
+        size_t direct_arg_extent =
+            (size_t)op->direct_dst_offset + parameter->size;
+        if (direct_arg_extent > this_kernel_direct_arg_size) {
+          this_kernel_direct_arg_size = direct_arg_extent;
         }
       }
     }
     parameter_info->buffer_size = buffer_size;
-    // The HAL expects the constants buffer to span the entire kernarg
-    // segment reported by the export (includes padding between args and
-    // trailing alignment). The per-parameter extent we tracked above
-    // typically matches, but pad up to the export's declared size to
-    // satisfy the strict length check in the dispatch code path.
-    size_t export_constant_bytes = export_infos[i].constant_byte_length;
-    if (export_constant_bytes > this_kernel_constants_size) {
-      this_kernel_constants_size = export_constant_bytes;
+    parameter_info->constant_bytes = export_infos[i].constant_byte_length;
+    if (buffer_size > this_kernel_direct_arg_size) {
+      this_kernel_direct_arg_size = buffer_size;
     }
-    parameter_info->constant_bytes = this_kernel_constants_size;
+    parameter_info->direct_arg_bytes = this_kernel_direct_arg_size;
 
     // Advance to next symbol's ops.
     parameter_base += parameter_count;

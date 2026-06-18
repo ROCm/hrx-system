@@ -419,6 +419,9 @@ static iree_uint32x2_t iree_hal_streaming_graph_partition_with_streams(
         case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_HOST_CALL:
           partition_type = IREE_HAL_STREAMING_GRAPH_PARTITION_TYPE_HOST_CALL;
           break;
+        case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_GRAPH:
+          partition_type = IREE_HAL_STREAMING_GRAPH_PARTITION_TYPE_GRAPH;
+          break;
         default:
           partition_type = IREE_HAL_STREAMING_GRAPH_PARTITION_TYPE_EMPTY;
           break;

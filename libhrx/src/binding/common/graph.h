@@ -33,6 +33,14 @@ typedef struct iree_hal_streaming_graph_edge_t {
   iree_hal_streaming_graph_node_t* to;    // Dependent (waits for 'from')
 } iree_hal_streaming_graph_edge_t;
 
+// Graph-owned host allocation that backs staged host/device copy nodes.
+typedef struct iree_hal_streaming_graph_owned_host_allocation_t {
+  // Next allocation in the graph-owned singly-linked list.
+  struct iree_hal_streaming_graph_owned_host_allocation_t* next;
+  // Host pointer returned by the streaming host allocation.
+  void* host_ptr;
+} iree_hal_streaming_graph_owned_host_allocation_t;
+
 // Graph structure (template).
 typedef struct iree_hal_streaming_graph_t {
   iree_atomic_ref_count_t ref_count;
@@ -45,6 +53,8 @@ typedef struct iree_hal_streaming_graph_t {
   iree_hal_streaming_node_block_t* node_blocks;
   iree_hal_streaming_node_block_t* current_node_block;
   iree_host_size_t node_count;
+  // Next stable source ID assigned to graph nodes created in this template.
+  uint32_t next_clone_source_node_index;
 
   // Root nodes stored in chained blocks.
   iree_hal_streaming_node_block_t* root_blocks;
@@ -55,9 +65,15 @@ typedef struct iree_hal_streaming_graph_t {
   iree_hal_streaming_graph_edge_t* additional_edges;
   iree_host_size_t additional_edge_count;
 
+  // Host allocations owned by this graph template.
+  iree_hal_streaming_graph_owned_host_allocation_t* owned_host_allocations;
+
+  // Graph creation flags.
   uint32_t flags;
+  // Streaming context that owns graph resources.
   iree_hal_streaming_context_t* context;
 
+  // Host allocator used for graph object allocation.
   iree_allocator_t host_allocator;
 } iree_hal_streaming_graph_t;
 
@@ -67,6 +83,8 @@ enum iree_hal_streaming_graph_partition_type_e {
   IREE_HAL_STREAMING_GRAPH_PARTITION_TYPE_RECORDABLE = 0,
   // Must be separate host call.
   IREE_HAL_STREAMING_GRAPH_PARTITION_TYPE_HOST_CALL,
+  // Must be launched as a nested executable graph.
+  IREE_HAL_STREAMING_GRAPH_PARTITION_TYPE_GRAPH,
   // Barrier node.
   IREE_HAL_STREAMING_GRAPH_PARTITION_TYPE_EMPTY,
 };
@@ -165,6 +183,11 @@ iree_status_t iree_hal_streaming_graph_add_dependencies(
     iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t** from_nodes,
     iree_hal_streaming_graph_node_t** to_nodes, iree_host_size_t count);
+
+// Allocates a host-visible staging buffer owned by |graph|.
+iree_status_t iree_hal_streaming_graph_allocate_host_staging(
+    iree_hal_streaming_graph_t* graph, iree_device_size_t size,
+    iree_hal_streaming_buffer_t** out_buffer);
 
 #ifdef __cplusplus
 }

@@ -50,7 +50,8 @@ typedef enum hipMemcpyKind {
   hipMemcpyHostToDevice = 1,
   hipMemcpyDeviceToHost = 2,
   hipMemcpyDeviceToDevice = 3,
-  hipMemcpyDefault = 4
+  hipMemcpyDefault = 4,
+  hipMemcpyDeviceToDeviceNoCU = 1024
 } hipMemcpyKind;
 
 typedef struct hipDeviceProp_t hipDeviceProp_t;

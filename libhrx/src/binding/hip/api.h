@@ -375,7 +375,8 @@ typedef enum hipMemcpyKind {
   hipMemcpyHostToDevice = 1,
   hipMemcpyDeviceToHost = 2,
   hipMemcpyDeviceToDevice = 3,
-  hipMemcpyDefault = 4
+  hipMemcpyDefault = 4,
+  hipMemcpyDeviceToDeviceNoCU = 1024
 } hipMemcpyKind;
 
 typedef struct hipIpcEventHandle_st {
@@ -816,12 +817,12 @@ typedef enum hipGraphInstantiate_flags {
 
 // Kernel node parameters.
 typedef struct hipKernelNodeParams {
+  dim3 blockDim;                // Block dimensions.
+  void** extra;                 // Extra options.
   void* func;                   // Kernel function pointer.
   dim3 gridDim;                 // Grid dimensions.
-  dim3 blockDim;                // Block dimensions.
-  unsigned int sharedMemBytes;  // Dynamic shared memory size.
   void** kernelParams;          // Array of kernel parameters.
-  void** extra;                 // Extra options.
+  unsigned int sharedMemBytes;  // Dynamic shared memory size.
 } hipKernelNodeParams;
 
 typedef enum hipChannelFormatKind {
