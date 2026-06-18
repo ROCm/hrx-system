@@ -16,6 +16,26 @@ using ::iree::testing::status::IsOk;
 using ::iree::testing::status::StatusIs;
 
 //===----------------------------------------------------------------------===//
+// Byte span tests
+//===----------------------------------------------------------------------===//
+
+TEST(ByteSpanTest, Empty) {
+  uint8_t storage[1] = {0};
+  EXPECT_TRUE(iree_byte_span_is_empty(iree_byte_span_empty()));
+  EXPECT_TRUE(iree_byte_span_is_empty(iree_make_byte_span(storage, 0)));
+  EXPECT_FALSE(iree_byte_span_is_empty(iree_make_byte_span(NULL, 1)));
+}
+
+TEST(ConstByteSpanTest, Empty) {
+  const uint8_t storage[1] = {0};
+  EXPECT_TRUE(iree_const_byte_span_is_empty(iree_const_byte_span_empty()));
+  EXPECT_TRUE(
+      iree_const_byte_span_is_empty(iree_make_const_byte_span(storage, 0)));
+  EXPECT_FALSE(
+      iree_const_byte_span_is_empty(iree_make_const_byte_span(NULL, 1)));
+}
+
+//===----------------------------------------------------------------------===//
 // Checked arithmetic tests - iree_host_size_t
 //===----------------------------------------------------------------------===//
 

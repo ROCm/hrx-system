@@ -203,7 +203,7 @@ TEST(UvarintEncode, BufferExactSize) {
 }
 
 TEST(UvarintEncode, ZeroLengthBuffer) {
-  iree_byte_span_t buffer = {NULL, 0};
+  iree_byte_span_t buffer = iree_byte_span_empty();
   iree_host_size_t length = 0;
   // Even value 0 needs 1 byte.
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -395,7 +395,7 @@ TEST(CursorReadSpan, Basic) {
   loom_bytecode_cursor_t cursor;
   loom_bytecode_cursor_initialize(data, sizeof(data), &cursor);
 
-  iree_const_byte_span_t span = {0};
+  iree_const_byte_span_t span = iree_const_byte_span_empty();
   IREE_ASSERT_OK(loom_bytecode_cursor_read_span(&cursor, 3, &span));
   EXPECT_EQ(span.data, data);
   EXPECT_EQ(span.data_length, 3u);
@@ -406,7 +406,7 @@ TEST(CursorReadSpan, PastEnd) {
   uint8_t data[] = {0x01};
   loom_bytecode_cursor_t cursor;
   loom_bytecode_cursor_initialize(data, sizeof(data), &cursor);
-  iree_const_byte_span_t span = {0};
+  iree_const_byte_span_t span = iree_const_byte_span_empty();
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
                         loom_bytecode_cursor_read_span(&cursor, 2, &span));
   EXPECT_EQ(cursor.position, 0u);

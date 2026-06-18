@@ -24,6 +24,23 @@ static std::string ToString(iree_string_view_t value) {
   return std::string(value.data, value.size);
 }
 
+TEST(StringViewTest, Empty) {
+  const char storage[1] = {0};
+  EXPECT_TRUE(iree_string_view_is_empty(iree_string_view_empty()));
+  EXPECT_TRUE(iree_string_view_is_empty(iree_make_string_view(storage, 0)));
+  EXPECT_FALSE(iree_string_view_is_empty(iree_make_string_view(NULL, 1)));
+}
+
+TEST(MutableStringViewTest, Empty) {
+  char storage[1] = {0};
+  EXPECT_TRUE(
+      iree_mutable_string_view_is_empty(iree_mutable_string_view_empty()));
+  EXPECT_TRUE(iree_mutable_string_view_is_empty(
+      iree_make_mutable_string_view(storage, 0)));
+  EXPECT_FALSE(iree_mutable_string_view_is_empty(
+      iree_make_mutable_string_view(NULL, 1)));
+}
+
 TEST(StringViewTest, Equal) {
   auto equal = [](const char* lhs, const char* rhs) -> bool {
     return iree_string_view_equal(iree_make_cstring_view(lhs),
@@ -580,7 +597,7 @@ TEST(StringViewTest, ToCStringTruncate) {
 TEST(StringViewTest, AppendToBuffer) {
   char buffer[6] = {0, 1, 2, 3, 4, 5};
   iree_string_view_t source = iree_make_cstring_view("test");
-  iree_string_view_t target = {};
+  iree_string_view_t target = iree_string_view_empty();
   const iree_host_size_t size =
       iree_string_view_append_to_buffer(source, &target, buffer);
   EXPECT_EQ(size, source.size);
@@ -593,7 +610,7 @@ TEST(StringViewTest, AppendToBuffer) {
 TEST(StringViewTest, AppendToBufferEmptySource) {
   char buffer[4] = {0, 1, 2, 3};
   iree_string_view_t source = iree_make_string_view(nullptr, 0);
-  iree_string_view_t target = {};
+  iree_string_view_t target = iree_string_view_empty();
   const iree_host_size_t size =
       iree_string_view_append_to_buffer(source, &target, buffer);
   EXPECT_EQ(size, 0u);
@@ -605,7 +622,7 @@ TEST(StringViewTest, AppendToBufferEmptySource) {
 
 TEST(StringViewTest, AppendToBufferEmptySourceAndBuffer) {
   iree_string_view_t source = iree_make_string_view(nullptr, 0);
-  iree_string_view_t target = {};
+  iree_string_view_t target = iree_string_view_empty();
   const iree_host_size_t size =
       iree_string_view_append_to_buffer(source, &target, nullptr);
   EXPECT_EQ(size, 0u);

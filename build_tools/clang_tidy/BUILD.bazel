@@ -51,6 +51,8 @@ py_binary(
 cc_binary(
     name = "IREEClangTidyPlugin.so",
     srcs = [
+        "iree/ExtentChecks.cc",
+        "iree/ExtentChecks.h",
         "iree/IreeTidyModule.cc",
         "iree/LifecycleChecks.cc",
         "iree/LifecycleChecks.h",
@@ -73,6 +75,28 @@ cc_binary(
     deps = [
         "@iree_clang_tidy_llvm//:llvm_headers",
     ],
+)
+
+py_test(
+    name = "extent_checks_test",
+    srcs = [
+        "test/clang_tidy_test.py",
+        "test/extent_checks_test.py",
+    ],
+    args = [
+        "--clang-tidy=$(location @iree_clang_tidy_llvm//:clang-tidy)",
+        "--plugin=$(location :IREEClangTidyPlugin.so)",
+    ],
+    data = [
+        "test/extent_checks.c",
+        "test/extent_checks.cc",
+        ":IREEClangTidyPlugin.so",
+        "@iree_clang_tidy_llvm//:clang-tidy",
+    ],
+    imports = ["test"],
+    main = "test/extent_checks_test.py",
+    tags = ["manual"],
+    target_compatible_with = CLANG_TIDY_LLVM_TARGET_COMPATIBLE_WITH,
 )
 
 py_test(

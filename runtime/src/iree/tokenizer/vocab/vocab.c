@@ -83,7 +83,7 @@ iree_host_size_t iree_tokenizer_vocab_merge_count(
 iree_const_byte_span_t iree_tokenizer_vocab_string_table(
     const iree_tokenizer_vocab_t* vocab) {
   if (!vocab) {
-    iree_const_byte_span_t empty = {NULL, 0};
+    iree_const_byte_span_t empty = iree_const_byte_span_empty();
     return empty;
   }
   iree_const_byte_span_t span = {vocab->string_data, vocab->string_size};

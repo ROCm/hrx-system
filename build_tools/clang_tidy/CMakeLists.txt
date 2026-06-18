@@ -16,6 +16,7 @@ find_package(LLVM REQUIRED CONFIG)
 find_package(Clang REQUIRED CONFIG)
 
 add_library(IREEClangTidyPlugin MODULE
+  iree/ExtentChecks.cc
   iree/IreeTidyModule.cc
   iree/LifecycleChecks.cc
   iree/RefCountChecks.cc
@@ -63,6 +64,15 @@ find_program(CLANG_TIDY_EXECUTABLE
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
 enable_testing()
+add_test(
+  NAME iree-clang-tidy-extent-checks
+  COMMAND
+    Python3::Interpreter
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/extent_checks_test.py"
+    "--clang-tidy=${CLANG_TIDY_EXECUTABLE}"
+    "--plugin=$<TARGET_FILE:IREEClangTidyPlugin>"
+)
+
 add_test(
   NAME iree-clang-tidy-plugin-smoke
   COMMAND

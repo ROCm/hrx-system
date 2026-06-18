@@ -95,7 +95,7 @@ TEST_P(NopTest, CallbackReceivesOperationPointer) {
 
 // Empty submit list: should succeed with no completions.
 TEST_P(NopTest, EmptySubmit) {
-  iree_async_operation_list_t empty_list = {nullptr, 0};
+  iree_async_operation_list_t empty_list = iree_async_operation_list_empty();
   IREE_ASSERT_OK(iree_async_proactor_submit(proactor_, empty_list));
 
   // Poll should return immediately with no completions (deadline exceeded).

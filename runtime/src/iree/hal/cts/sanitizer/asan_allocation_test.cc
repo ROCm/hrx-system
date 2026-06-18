@@ -90,10 +90,7 @@ static iree_status_t DispatchAsanAllocationRawAddress(
 
   SemaphoreList empty_wait;
   SemaphoreList dispatch_signal(device, {0}, {1});
-  iree_hal_buffer_ref_list_t empty_bindings = {
-      /*.count=*/0,
-      /*.values=*/nullptr,
-  };
+  iree_hal_buffer_ref_list_t empty_bindings = iree_hal_buffer_ref_list_empty();
   IREE_RETURN_IF_ERROR(iree_hal_device_queue_dispatch(
       device, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, dispatch_signal,
       executable,

@@ -408,7 +408,8 @@ static iree_hal_amdgpu_aql_block_processor_t MakeProcessor(
     const iree_hal_amdgpu_device_buffer_transfer_context_t* transfer_context =
         nullptr,
     iree_hal_command_buffer_t* command_buffer = nullptr,
-    iree_hal_buffer_binding_table_t binding_table = {0, nullptr}) {
+    iree_hal_buffer_binding_table_t binding_table =
+        iree_hal_buffer_binding_table_empty()) {
   iree_hal_amdgpu_aql_block_processor_t processor = {};
   processor.transfer_context = transfer_context;
   processor.command_buffer = command_buffer;

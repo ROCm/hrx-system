@@ -250,6 +250,45 @@ update the macro definition. For macro arguments, rewrite the argument at the
 callsite or use zero-initialization plus field assignment when the initializer
 is intentionally sparse.
 
+### `iree-extent-empty-initializer`
+
+`iree-extent-empty-initializer` diagnoses aggregate zero initialization of known
+IREE extent-value structs when a named empty constructor exists. These structs
+are small non-owning values that describe a bounded extent: string views, byte
+spans, span/list structs, semaphore lists, and buffer binding tables. The empty
+constructor is the canonical spelling for the empty value and avoids fragile
+field-order knowledge at call sites.
+
+Examples:
+
+```c
+iree_string_view_t name = iree_string_view_empty();
+iree_const_byte_span_t bytes = iree_const_byte_span_empty();
+iree_hal_semaphore_list_t semaphores = iree_hal_semaphore_list_empty();
+```
+
+### `iree-extent-empty-predicate`
+
+`iree-extent-empty-predicate` diagnoses hand-written empty tests that combine a
+data pointer check with a zero length check for known IREE extent values.
+Emptiness is defined only by the extent field (`size`, `data_length`, `count`,
+or `length`). A NULL pointer with a non-zero extent is malformed and should be
+rejected at API boundaries as validation, not treated as empty.
+Malformed-or-empty guards before access still spell both conditions explicitly;
+only pure empty predicates collapse to the named helper.
+
+Examples:
+
+```c
+if (iree_string_view_is_empty(name)) return iree_ok_status();
+if (iree_const_byte_span_is_empty(bytes)) return iree_ok_status();
+
+if (name.size > 0 && name.data == NULL) {
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "non-empty name has no storage");
+}
+```
+
 ### `iree-lifecycle-naming`
 
 `iree-lifecycle-naming` diagnoses caller-owned output records that use

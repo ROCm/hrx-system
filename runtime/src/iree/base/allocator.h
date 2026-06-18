@@ -46,6 +46,10 @@ extern "C" {
 //===----------------------------------------------------------------------===//
 
 // A span of mutable bytes (ala std::span of uint8_t).
+//
+// Spans are empty when data_length is zero. Empty spans may have NULL or
+// non-NULL data pointers. A span with non-zero data_length and NULL data is
+// malformed and must be rejected at API boundaries before data is accessed.
 typedef struct iree_byte_span_t {
   uint8_t* data;
   iree_host_size_t data_length;
@@ -63,10 +67,14 @@ static inline iree_byte_span_t iree_byte_span_empty() {
 }
 
 static inline bool iree_byte_span_is_empty(iree_byte_span_t span) {
-  return span.data == NULL || span.data_length == 0;
+  return span.data_length == 0;
 }
 
 // A span of constant bytes (ala std::span of const uint8_t).
+//
+// Spans are empty when data_length is zero. Empty spans may have NULL or
+// non-NULL data pointers. A span with non-zero data_length and NULL data is
+// malformed and must be rejected at API boundaries before data is accessed.
 typedef struct iree_const_byte_span_t {
   const uint8_t* data;
   iree_host_size_t data_length;
@@ -84,7 +92,7 @@ static inline iree_const_byte_span_t iree_const_byte_span_empty() {
 }
 
 static inline bool iree_const_byte_span_is_empty(iree_const_byte_span_t span) {
-  return span.data == NULL || span.data_length == 0;
+  return span.data_length == 0;
 }
 
 static inline iree_const_byte_span_t iree_const_cast_byte_span(

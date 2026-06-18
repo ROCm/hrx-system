@@ -136,7 +136,8 @@ hrx_status_t hrx_stream_flush(hrx_stream_t stream) {
       .payload_values = &signal_value,
   };
 
-  iree_hal_buffer_binding_table_t binding_table = {0};
+  iree_hal_buffer_binding_table_t binding_table =
+      iree_hal_buffer_binding_table_empty();
   status = iree_hal_device_queue_execute(
       stream->device->hal_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_list,
       signal_list, stream->pending_cb, binding_table, /*flags=*/0);

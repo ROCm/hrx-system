@@ -503,7 +503,7 @@ static iree_status_t hrx_device_profile_end(hrx_device_s* device) {
     return iree_ok_status();
   }
 
-  iree_hal_semaphore_list_t empty = {0};
+  iree_hal_semaphore_list_t empty = iree_hal_semaphore_list_empty();
   iree_status_t status = iree_hal_device_wait_semaphores(
       device->hal_device, IREE_ASYNC_WAIT_MODE_ALL, empty,
       iree_infinite_timeout(), /*flags=*/0);

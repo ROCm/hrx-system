@@ -79,7 +79,7 @@ static bool StringViewBelongsToCodeObjectData(
     iree_const_byte_span_t code_object_data, iree_string_view_t view) {
   const uintptr_t code_object_begin = (uintptr_t)code_object_data.data;
   const uintptr_t view_begin = (uintptr_t)view.data;
-  if (view.size == 0 && !view.data) return true;
+  if (iree_string_view_is_empty(view)) return true;
   if (!view.data || view_begin < code_object_begin) return false;
   const uintptr_t view_offset = view_begin - code_object_begin;
   return view_offset <= code_object_data.data_length &&

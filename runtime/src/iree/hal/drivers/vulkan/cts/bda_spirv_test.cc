@@ -432,7 +432,7 @@ TEST_P(BdaSpirvTest, QueueDispatchExecutesUnverifiedBdaNoop) {
           IREE_HAL_EXECUTABLE_CACHING_MODE_DISABLE_VERIFICATION,
       executable.out()));
 
-  iree_hal_buffer_ref_list_t bindings = {};
+  iree_hal_buffer_ref_list_t bindings = iree_hal_buffer_ref_list_empty();
   SemaphoreList dispatch_signal(device_, {0}, {1});
   IREE_ASSERT_OK(iree_hal_device_queue_dispatch(
       device_, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),

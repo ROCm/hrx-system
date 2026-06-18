@@ -260,7 +260,8 @@ static void ExpectDispatchSubmissionPlan(
     const DispatchSubmissionPlanCase& plan_case) {
   iree_hal_amdgpu_wait_resolution_t resolution = {0};
   resolution.barrier_count = plan_case.barrier_count;
-  const iree_hal_semaphore_list_t empty_signal_list = {0};
+  const iree_hal_semaphore_list_t empty_signal_list =
+      iree_hal_semaphore_list_empty();
   iree_hal_amdgpu_profile_dispatch_event_reservation_t profile_events = {0};
   iree_hal_amdgpu_host_queue_profile_event_info_t profile_queue_event_info = {
       /*.type=*/IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_DISPATCH,
@@ -363,7 +364,8 @@ static void ExpectPm4IbSubmissionPlan(
     const Pm4IbSubmissionPlanCase& plan_case) {
   iree_hal_amdgpu_wait_resolution_t resolution = {0};
   resolution.barrier_count = plan_case.barrier_count;
-  const iree_hal_semaphore_list_t empty_signal_list = {0};
+  const iree_hal_semaphore_list_t empty_signal_list =
+      iree_hal_semaphore_list_empty();
   iree_hal_amdgpu_host_queue_profile_event_info_t profile_queue_event_info = {
       /*.type=*/IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_UPDATE,
       /*.flags=*/{},

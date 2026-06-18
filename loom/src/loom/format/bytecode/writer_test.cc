@@ -576,7 +576,7 @@ TEST_F(WriterTest, StringsSectionContainsModuleName) {
   uint64_t second_length = 0;
   IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &second_length));
   EXPECT_EQ(second_length, 5u);
-  iree_const_byte_span_t span = {0};
+  iree_const_byte_span_t span = iree_const_byte_span_empty();
   IREE_ASSERT_OK(loom_bytecode_cursor_read_span(&cursor, 5, &span));
   EXPECT_EQ(memcmp(span.data, "hello", 5), 0);
 
@@ -712,7 +712,7 @@ TEST_F(WriterTest, FunctionSymbolKindUsesDenseWireEnum) {
   ASSERT_EQ(import_count, 0u);
   ASSERT_EQ(export_count, 1u);
 
-  iree_const_byte_span_t export_table = {};
+  iree_const_byte_span_t export_table = iree_const_byte_span_empty();
   IREE_ASSERT_OK(loom_bytecode_cursor_read_span(&cursor, 8, &export_table));
   EXPECT_EQ(export_table.data_length, 8u);
 

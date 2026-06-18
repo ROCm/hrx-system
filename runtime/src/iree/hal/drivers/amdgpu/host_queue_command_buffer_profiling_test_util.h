@@ -213,7 +213,7 @@ struct CommandBufferProfileSink {
   iree_status_code_t fail_begin_session_status_code = IREE_STATUS_OK;
 
   // Content type whose write callback should fail, or empty when disabled.
-  iree_string_view_t fail_write_content_type = {nullptr, 0};
+  iree_string_view_t fail_write_content_type = iree_string_view_empty();
 
   // Number of matching write callbacks that should fail.
   int fail_write_remaining = 0;
