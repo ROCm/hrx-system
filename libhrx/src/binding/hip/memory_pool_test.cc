@@ -176,6 +176,30 @@ TEST(HipMemoryPoolAllocationTrackerTest, LiveSizeTracksOnlyLiveSlots) {
   EXPECT_EQ(iree_hip_pool_allocation_tracker_live_size(&tracker), 0x300u);
 }
 
+TEST(HipMemoryPoolAllocationTrackerTest,
+     FindReportsRequestedSizeForAlignedSlots) {
+  std::array<Slot, 2> slots;
+  Tracker tracker;
+  iree_hip_pool_allocation_tracker_initialize(&tracker, slots.data(),
+                                              slots.size());
+
+  EXPECT_TRUE(iree_hip_pool_allocation_tracker_insert_sized(
+      &tracker, 0x1000, 0x100, 0x4));
+  EXPECT_EQ(iree_hip_pool_allocation_tracker_live_size(&tracker), 0x100u);
+
+  uintptr_t base = 0;
+  size_t size = 0;
+  EXPECT_TRUE(
+      iree_hip_pool_allocation_tracker_find(&tracker, 0x1000, &base, &size));
+  EXPECT_EQ(base, 0x1000u);
+  EXPECT_EQ(size, 0x4u);
+
+  size_t released_size = 0;
+  EXPECT_TRUE(iree_hip_pool_allocation_tracker_release(&tracker, 0x1000,
+                                                       &released_size));
+  EXPECT_EQ(released_size, 0x100u);
+}
+
 TEST(HipMemoryPoolSizeTest, AlignsPowerOfTwoSizes) {
   size_t aligned_size = 0;
   EXPECT_TRUE(iree_hip_pool_align_size(1, 256, &aligned_size));

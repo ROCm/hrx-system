@@ -23,6 +23,8 @@ typedef struct iree_hip_pool_allocation_slot_t {
   uintptr_t address;
   // Aligned byte length of this sub-allocation.
   size_t size;
+  // Byte length requested by the HIP caller.
+  size_t requested_size;
   // Whether this slot currently represents a live allocation.
   bool live;
 } iree_hip_pool_allocation_slot_t;
@@ -58,6 +60,15 @@ bool iree_hip_pool_allocation_tracker_insert(
     iree_hip_pool_allocation_tracker_t* tracker, uintptr_t address,
     size_t size);
 
+// Tracks a new live allocation with separate physical and requested sizes.
+//
+// |size| is the aligned allocator extent used for overlap and free-memory
+// accounting. |requested_size| is the HIP-visible extent returned by
+// iree_hip_pool_allocation_tracker_find.
+bool iree_hip_pool_allocation_tracker_insert_sized(
+    iree_hip_pool_allocation_tracker_t* tracker, uintptr_t address,
+    size_t size, size_t requested_size);
+
 // Marks the allocation starting at |address| dead.
 //
 // Returns false when no live allocation starts at |address|. If |out_size| is
@@ -69,8 +80,15 @@ bool iree_hip_pool_allocation_tracker_release(
 // Finds the live allocation containing |address|.
 //
 // Returns false when |address| is outside all live allocations. If non-NULL,
-// |out_base| and |out_size| receive the containing allocation's base and size.
+// |out_base| and |out_size| receive the containing allocation's base and
+// HIP-visible requested size.
 bool iree_hip_pool_allocation_tracker_find(
+    const iree_hip_pool_allocation_tracker_t* tracker, uintptr_t address,
+    uintptr_t* out_base, size_t* out_size);
+
+// Finds the live allocation containing |address| and returns the physical
+// aligned sub-allocation extent used by the slab allocator.
+bool iree_hip_pool_allocation_tracker_find_physical(
     const iree_hip_pool_allocation_tracker_t* tracker, uintptr_t address,
     uintptr_t* out_base, size_t* out_size);
 

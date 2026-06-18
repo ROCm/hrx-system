@@ -210,6 +210,9 @@ struct iree_hal_streaming_context_t {
   // initialization).
   iree_hal_streaming_stream_t* default_stream;
 
+  // Next non-zero stream identifier assigned under |stream_list_mutex|.
+  unsigned long long next_stream_id;
+
   // Peer access list.
   iree_hal_streaming_context_t** peer_contexts;
   iree_host_size_t peer_count;
@@ -417,6 +420,8 @@ typedef struct iree_hal_streaming_stream_t {
   // Stream properties.
   iree_hal_streaming_stream_flags_t flags;
   int priority;
+  // Stable HIP stream identifier, unique within this context.
+  unsigned long long stream_id;
 
   // Command buffer for batching operations.
   iree_hal_command_buffer_t* command_buffer;
@@ -1196,6 +1201,11 @@ void iree_hal_streaming_stream_release(iree_hal_streaming_stream_t* stream);
 // Begins command buffer recording.
 // Synchronization: none (begins recording).
 iree_status_t iree_hal_streaming_stream_begin(
+    iree_hal_streaming_stream_t* stream);
+
+// Ensures a stream command buffer is recording while the caller holds
+// stream->mutex. Use this when appending commands under the stream lock.
+iree_status_t iree_hal_streaming_stream_begin_locked(
     iree_hal_streaming_stream_t* stream);
 
 // Flushes pending commands.

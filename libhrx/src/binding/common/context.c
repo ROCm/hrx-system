@@ -60,6 +60,7 @@ iree_status_t iree_hal_streaming_context_create(
   context->executable_cache = NULL;
   context->flags = flags;
   context->default_stream = NULL;
+  context->next_stream_id = 1;
   context->peer_contexts = NULL;
   context->peer_count = 0;
   context->peer_capacity = 0;
@@ -589,6 +590,18 @@ iree_status_t iree_hal_streaming_context_register_stream(
         (void**)&context->streams);
     if (iree_status_is_ok(status)) {
       context->stream_capacity = new_capacity;
+    }
+  }
+
+  if (iree_status_is_ok(status)) {
+    if (context->next_stream_id == 0 ||
+        context->next_stream_id > UINT32_MAX) {
+      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                "stream identifier space exhausted");
+    } else {
+      const unsigned long long device_id =
+          ((unsigned long long)context->device_ordinal + 1ull) << 32;
+      stream->stream_id = device_id | context->next_stream_id++;
     }
   }
 

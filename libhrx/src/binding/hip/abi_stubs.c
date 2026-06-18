@@ -1670,13 +1670,6 @@ HIPAPI hipError_t hipStreamGetAttribute(hipStream_t stream,
   return hipErrorNotSupported;
 }
 
-HIPAPI hipError_t hipStreamGetId(hipStream_t stream,
-                                 unsigned long long* streamId) {
-  (void)stream;
-  (void)streamId;
-  return hipErrorNotSupported;
-}
-
 HIPAPI hipError_t hipStreamGetDevResource(hipStream_t stream,
                                           hipDevResource* resource,
                                           hipDevResourceType type) {

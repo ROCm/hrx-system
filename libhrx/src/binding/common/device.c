@@ -311,6 +311,10 @@ iree_status_t iree_hal_streaming_device_get_or_create_primary_context(
     };
     status = HRX_CALL(hrx_mem_pool_create(device->hrx_device, &props,
                                           &device->default_mem_pool));
+    if (iree_status_is_ok(status)) {
+      device->current_mem_pool = device->default_mem_pool;
+      hrx_mem_pool_retain(device->current_mem_pool);
+    }
   }
 
   if (iree_status_is_ok(status)) {

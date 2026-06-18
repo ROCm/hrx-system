@@ -37,8 +37,18 @@ void iree_hip_pool_allocation_tracker_reset(
 bool iree_hip_pool_allocation_tracker_insert(
     iree_hip_pool_allocation_tracker_t* tracker, uintptr_t address,
     size_t size) {
+  return iree_hip_pool_allocation_tracker_insert_sized(tracker, address, size,
+                                                       size);
+}
+
+bool iree_hip_pool_allocation_tracker_insert_sized(
+    iree_hip_pool_allocation_tracker_t* tracker, uintptr_t address,
+    size_t size, size_t requested_size) {
   IREE_ASSERT_ARGUMENT(tracker);
-  if (!tracker->slots || address == 0 || size == 0) return false;
+  if (!tracker->slots || address == 0 || size == 0 || requested_size == 0) {
+    return false;
+  }
+  if (requested_size > size) return false;
   if (size - 1 > UINTPTR_MAX - address) return false;
   if (tracker->live_count >= tracker->capacity) return false;
 
@@ -64,6 +74,7 @@ bool iree_hip_pool_allocation_tracker_insert(
 
   tracker->slots[slot_index].address = address;
   tracker->slots[slot_index].size = size;
+  tracker->slots[slot_index].requested_size = requested_size;
   tracker->slots[slot_index].live = true;
   ++tracker->live_count;
   if (slot_index >= tracker->high_water_mark) {
@@ -87,6 +98,7 @@ bool iree_hip_pool_allocation_tracker_release(
     slot->live = false;
     slot->address = 0;
     slot->size = 0;
+    slot->requested_size = 0;
     --tracker->live_count;
     tracker->free_hint = i;
     return true;
@@ -95,6 +107,25 @@ bool iree_hip_pool_allocation_tracker_release(
 }
 
 bool iree_hip_pool_allocation_tracker_find(
+    const iree_hip_pool_allocation_tracker_t* tracker, uintptr_t address,
+    uintptr_t* out_base, size_t* out_size) {
+  IREE_ASSERT_ARGUMENT(tracker);
+  if (!tracker->slots || address == 0) return false;
+
+  for (size_t i = 0; i < tracker->high_water_mark; ++i) {
+    const iree_hip_pool_allocation_slot_t* slot = &tracker->slots[i];
+    if (!slot->live) continue;
+    if (address < slot->address) continue;
+    const uintptr_t offset = address - slot->address;
+    if (offset >= slot->size) continue;
+    if (out_base) *out_base = slot->address;
+    if (out_size) *out_size = slot->requested_size;
+    return true;
+  }
+  return false;
+}
+
+bool iree_hip_pool_allocation_tracker_find_physical(
     const iree_hip_pool_allocation_tracker_t* tracker, uintptr_t address,
     uintptr_t* out_base, size_t* out_size) {
   IREE_ASSERT_ARGUMENT(tracker);

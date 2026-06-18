@@ -85,6 +85,17 @@ static iree_hal_streaming_stream_flags_t iree_hip_stream_flags_to_internal(
   return flags;
 }
 
+static int iree_hip_clamp_stream_priority(int priority) {
+  int least_priority = 0;
+  int greatest_priority = 0;
+  hipError_t result =
+      hipDeviceGetStreamPriorityRange(&least_priority, &greatest_priority);
+  if (result != hipSuccess) return priority;
+  if (priority < greatest_priority) return greatest_priority;
+  if (priority > least_priority) return least_priority;
+  return priority;
+}
+
 static iree_hal_streaming_event_flags_t iree_hip_event_flags_to_internal(
     unsigned int hip_flags) {
   iree_hal_streaming_event_flags_t flags = IREE_HAL_STREAMING_EVENT_FLAG_NONE;
@@ -271,6 +282,12 @@ static iree_thread_local struct {
   hipError_t last_error;
   bool sticky;
 } iree_hip_thread_error = {hipSuccess, false};
+
+static pthread_mutex_t iree_hip_global_init_mutex = PTHREAD_MUTEX_INITIALIZER;
+static iree_thread_local iree_hal_streaming_context_t*
+    iree_hip_per_thread_stream_context = NULL;
+static iree_thread_local iree_hal_streaming_stream_t*
+    iree_hip_per_thread_stream = NULL;
 
 static void iree_hip_thread_error_set(hipError_t error, bool sticky) {
   iree_hip_thread_error.last_error = error;
@@ -650,6 +667,7 @@ static hipError_t iree_hip_ensure_initialized(void) {
     return hipErrorNoDevice;
   }
 
+  pthread_mutex_lock(&iree_hip_global_init_mutex);
   iree_hal_streaming_device_registry_t* device_registry =
       iree_hal_streaming_device_registry();
   if (!device_registry) {
@@ -659,14 +677,17 @@ static hipError_t iree_hip_ensure_initialized(void) {
     if (!iree_status_is_ok(status)) {
       const iree_status_code_t status_code = iree_status_code(status);
       iree_status_free(status);
+      pthread_mutex_unlock(&iree_hip_global_init_mutex);
       return status_code == IREE_STATUS_NOT_FOUND ? hipErrorNoDevice
                                                   : hipErrorNotInitialized;
     }
     device_registry = iree_hal_streaming_device_registry();
   }
   if (!device_registry || device_registry->device_count == 0) {
+    pthread_mutex_unlock(&iree_hip_global_init_mutex);
     return hipErrorNoDevice;
   }
+  pthread_mutex_unlock(&iree_hip_global_init_mutex);
   return hipSuccess;
 }
 
@@ -713,6 +734,45 @@ static hipError_t iree_hip_ensure_context(
   return hipSuccess;
 }
 
+static void iree_hip_clear_per_thread_stream(
+    iree_hal_streaming_context_t* context) {
+  if (iree_hip_per_thread_stream &&
+      (!context || iree_hip_per_thread_stream_context == context)) {
+    iree_hal_streaming_stream_release(iree_hip_per_thread_stream);
+    iree_hip_per_thread_stream = NULL;
+    iree_hip_per_thread_stream_context = NULL;
+  }
+}
+
+static hipError_t iree_hip_resolve_per_thread_stream(
+    iree_hal_streaming_context_t* context,
+    iree_hal_streaming_stream_t** out_stream) {
+  IREE_ASSERT_ARGUMENT(context);
+  IREE_ASSERT_ARGUMENT(out_stream);
+  if (iree_hip_per_thread_stream &&
+      iree_hip_per_thread_stream_context == context) {
+    *out_stream = iree_hip_per_thread_stream;
+    return hipSuccess;
+  }
+
+  iree_hip_clear_per_thread_stream(NULL);
+
+  iree_hal_streaming_stream_t* stream = NULL;
+  iree_status_t status = iree_hal_streaming_stream_create(
+      context, context->default_stream->flags, context->default_stream->priority,
+      context->host_allocator, &stream);
+  if (!iree_status_is_ok(status)) {
+    iree_status_free(status);
+    *out_stream = NULL;
+    return hipErrorOutOfMemory;
+  }
+
+  iree_hip_per_thread_stream_context = context;
+  iree_hip_per_thread_stream = stream;
+  *out_stream = stream;
+  return hipSuccess;
+}
+
 static hipError_t iree_hip_resolve_stream(
     hipStream_t stream, iree_hal_streaming_stream_t** out_stream) {
   IREE_ASSERT_ARGUMENT(out_stream);
@@ -723,7 +783,9 @@ static hipError_t iree_hip_resolve_stream(
     return init_result;
   }
 
-  if (!stream || stream == hipStreamLegacy || stream == hipStreamPerThread) {
+  if (stream == hipStreamPerThread) {
+    return iree_hip_resolve_per_thread_stream(context, out_stream);
+  } else if (!stream || stream == hipStreamLegacy) {
     *out_stream = context->default_stream;
   } else {
     *out_stream = (iree_hal_streaming_stream_t*)stream;
@@ -769,14 +831,7 @@ HIPAPI hipError_t hipInit(unsigned int flags) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  iree_status_t status = iree_hal_streaming_init_global(
-      IREE_HAL_STREAMING_INIT_FLAG_NONE, iree_allocator_system());
-  if (!iree_status_is_ok(status)) {
-    HIP_DEBUG_LOG("[HIP_API] hipInit FAILED: ");
-    iree_status_fprint(stderr, status);
-    HIP_DEBUG_LOG("\n");
-  }
-  hipError_t result = iree_status_to_hip_result(status);
+  hipError_t result = iree_hip_ensure_initialized();
   IREE_TRACE_ZONE_END(z0);
   return result;
 }
@@ -2059,6 +2114,7 @@ HIPAPI hipError_t hipDeviceReset(void) {
 
   // Reset the primary context for the current device.
   hipDevice_t current_device = context->device_ordinal;
+  iree_hip_clear_per_thread_stream(context);
   hipError_t result = hipDevicePrimaryCtxReset(current_device);
 
   IREE_TRACE_ZONE_END(z0);
@@ -4275,22 +4331,57 @@ static hipError_t iree_hip_resolve_memcpy_kind(
 }
 
 static hipError_t iree_hip_validate_known_memcpy_range(
-    iree_hal_streaming_context_t* context, const void* ptr, size_t count) {
-  (void)context;
-  hipDeviceptr_t base = 0;
-  size_t size = 0;
-  hipError_t range_result =
-      hipMemGetAddressRange(&base, &size, (hipDeviceptr_t)(uintptr_t)ptr);
-  if (range_result != hipSuccess) {
+    iree_hal_streaming_context_t* context, const void* ptr, size_t count,
+    bool use_hip_visible_pool_size) {
+  (void)use_hip_visible_pool_size;
+  if (count == 0) return hipSuccess;
+
+  iree_hal_streaming_buffer_ref_t range_ref;
+  iree_status_t status = iree_hal_streaming_memory_lookup_range(
+      context, (iree_hal_streaming_deviceptr_t)ptr, count, &range_ref);
+  if (iree_status_is_ok(status)) {
     return hipSuccess;
   }
+  const iree_status_code_t code = iree_status_code(status);
+  if (code != IREE_STATUS_NOT_FOUND) {
+    return iree_status_to_hip_result(status);
+  }
+  iree_status_ignore(status);
 
-  const uintptr_t address = (uintptr_t)ptr;
-  const uintptr_t base_address = (uintptr_t)base;
-  if (address < base_address) return hipErrorInvalidValue;
-  const uint64_t offset = (uint64_t)(address - base_address);
-  if (offset > size || count > size - offset) return hipErrorInvalidValue;
+  iree_hal_streaming_buffer_ref_t buffer_ref;
+  status = iree_hal_streaming_memory_lookup(
+      context, (iree_hal_streaming_deviceptr_t)ptr, &buffer_ref);
+  if (iree_status_is_ok(status)) {
+    return hipErrorInvalidValue;
+  }
+  iree_status_ignore(status);
   return hipSuccess;
+}
+
+static hipError_t iree_hip_validate_memcpy_ranges(
+    iree_hal_streaming_context_t* context, const void* dst, const void* src,
+    size_t count, hipMemcpyKind kind, bool use_hip_visible_pool_size) {
+  hipError_t result = hipSuccess;
+  switch (kind) {
+    case hipMemcpyHostToDevice:
+      return iree_hip_validate_known_memcpy_range(
+          context, dst, count, use_hip_visible_pool_size);
+    case hipMemcpyDeviceToHost:
+      return iree_hip_validate_known_memcpy_range(
+          context, src, count, use_hip_visible_pool_size);
+    case hipMemcpyDeviceToDevice:
+      result = iree_hip_validate_known_memcpy_range(
+          context, dst, count, use_hip_visible_pool_size);
+      if (result == hipSuccess) {
+        result = iree_hip_validate_known_memcpy_range(
+            context, src, count, use_hip_visible_pool_size);
+      }
+      return result;
+    case hipMemcpyHostToHost:
+      return hipSuccess;
+    default:
+      return hipErrorInvalidValue;
+  }
 }
 
 // Copies data between host and device.
@@ -4331,7 +4422,12 @@ static hipError_t iree_hip_validate_known_memcpy_range(
 HIPAPI hipError_t hipMemcpy(void* dst, const void* src, size_t sizeBytes,
                             hipMemcpyKind kind) {
   IREE_TRACE_ZONE_BEGIN(z0);
-  // Validate pointers (zero-size copies still require valid pointers in HIP).
+  if (sizeBytes == 0) {
+    IREE_TRACE_ZONE_END(z0);
+    return hipSuccess;
+  }
+
+  // Validate pointers.
   if (!dst || !src) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
@@ -4355,6 +4451,13 @@ HIPAPI hipError_t hipMemcpy(void* dst, const void* src, size_t sizeBytes,
   if (kind_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(kind_result);
+  }
+  hipError_t range_result =
+      iree_hip_validate_memcpy_ranges(context, dst, src, sizeBytes, kind,
+                                      false);
+  if (range_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(range_result);
   }
 
   iree_status_t status = iree_ok_status();
@@ -4436,22 +4539,37 @@ HIPAPI hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes,
       "stream=%p)\n",
       dst, src, sizeBytes, (int)kind, (void*)stream);
   IREE_TRACE_ZONE_BEGIN(z0);
+  if (sizeBytes == 0) {
+    IREE_TRACE_ZONE_END(z0);
+    return hipSuccess;
+  }
+
   // Validate pointers.
   if (!dst || !src) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  // Ensure initialization and get context.
+  // Explicit streams carry their owning context and can be used from worker
+  // threads that have no current context set.
   iree_hal_streaming_context_t* context = NULL;
-  hipError_t init_result = iree_hip_ensure_context(&context);
-  if (init_result != hipSuccess) {
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(init_result);
-  }
-
   iree_hal_streaming_stream_t* stream_obj = NULL;
-  init_result = iree_hip_resolve_stream(stream, &stream_obj);
+  hipError_t init_result = hipSuccess;
+  if (stream && stream != hipStreamLegacy && stream != hipStreamPerThread) {
+    init_result = iree_hip_ensure_initialized();
+    if (init_result == hipSuccess) {
+      stream_obj = (iree_hal_streaming_stream_t*)stream;
+      context = stream_obj->context;
+      if (!context) {
+        init_result = hipErrorContextIsDestroyed;
+      }
+    }
+  } else {
+    init_result = iree_hip_ensure_context(&context);
+    if (init_result == hipSuccess) {
+      init_result = iree_hip_resolve_stream(stream, &stream_obj);
+    }
+  }
   if (init_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(init_result);
@@ -4463,27 +4581,45 @@ HIPAPI hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes,
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(kind_result);
   }
+  hipError_t range_result =
+      iree_hip_validate_memcpy_ranges(context, dst, src, sizeBytes, kind,
+                                      false);
+  if (range_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(range_result);
+  }
 
   iree_status_t status = iree_ok_status();
+  if (!stream || stream == hipStreamLegacy || stream == hipStreamPerThread) {
+    status = iree_hal_streaming_context_synchronize(context);
+  }
   switch (kind) {
     case hipMemcpyHostToDevice:
-      status = iree_hal_streaming_memcpy_host_to_device(
-          context, (iree_hal_streaming_deviceptr_t)dst, src, sizeBytes,
-          stream_obj);
+      if (iree_status_is_ok(status)) {
+        status = iree_hal_streaming_memcpy_host_to_device(
+            context, (iree_hal_streaming_deviceptr_t)dst, src, sizeBytes,
+            stream_obj);
+      }
       break;
     case hipMemcpyDeviceToHost:
-      status = iree_hal_streaming_memcpy_device_to_host(
-          context, dst, (iree_hal_streaming_deviceptr_t)src, sizeBytes,
-          stream_obj);
+      if (iree_status_is_ok(status)) {
+        status = iree_hal_streaming_memcpy_device_to_host(
+            context, dst, (iree_hal_streaming_deviceptr_t)src, sizeBytes,
+            stream_obj);
+      }
       break;
     case hipMemcpyDeviceToDevice:
-      status = iree_hal_streaming_memcpy_device_to_device(
-          context, (iree_hal_streaming_deviceptr_t)dst,
-          (iree_hal_streaming_deviceptr_t)src, sizeBytes, stream_obj);
+      if (iree_status_is_ok(status)) {
+        status = iree_hal_streaming_memcpy_device_to_device(
+            context, (iree_hal_streaming_deviceptr_t)dst,
+            (iree_hal_streaming_deviceptr_t)src, sizeBytes, stream_obj);
+      }
       break;
     case hipMemcpyHostToHost:
       // Host-to-host copies are synchronous.
-      memcpy(dst, src, sizeBytes);
+      if (iree_status_is_ok(status)) {
+        memcpy(dst, src, sizeBytes);
+      }
       break;
     default:
       status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT);
@@ -5471,6 +5607,11 @@ HIPAPI hipError_t hipMemset(void* dst, int value, size_t sizeBytes) {
   IREE_TRACE_ZONE_BEGIN(z0);
   HIP_DEBUG_LOG("[HIP_API] hipMemset(dst=%p, value=%d, size=%zu) ENTRY\n", dst,
                 value, sizeBytes);
+  if (sizeBytes == 0) {
+    IREE_TRACE_ZONE_END(z0);
+    return hipSuccess;
+  }
+
   // Validate dst pointer.
   if (!dst) {
     IREE_TRACE_ZONE_END(z0);
@@ -5545,6 +5686,11 @@ HIPAPI hipError_t hipMemsetAsync(void* dst, int value, size_t sizeBytes,
   HIP_DEBUG_LOG(
       "[HIP_API] hipMemsetAsync(dst=%p, value=%d, size=%zu, stream=%p) ENTRY\n",
       dst, value, sizeBytes, (void*)stream);
+  if (sizeBytes == 0) {
+    IREE_TRACE_ZONE_END(z0);
+    return hipSuccess;
+  }
+
   // Validate dst pointer.
   if (!dst) {
     IREE_TRACE_ZONE_END(z0);
@@ -5603,6 +5749,11 @@ HIPAPI hipError_t hipMemsetAsync(void* dst, int value, size_t sizeBytes,
 HIPAPI hipError_t hipMemsetD8(hipDeviceptr_t dstDevice, unsigned char uc,
                               size_t N) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  if (N == 0) {
+    IREE_TRACE_ZONE_END(z0);
+    return hipSuccess;
+  }
+
   // Validate dstDevice pointer.
   if (!dstDevice) {
     IREE_TRACE_ZONE_END(z0);
@@ -5661,6 +5812,11 @@ HIPAPI hipError_t hipMemsetD8(hipDeviceptr_t dstDevice, unsigned char uc,
 HIPAPI hipError_t hipMemsetD16(hipDeviceptr_t dstDevice, unsigned short us,
                                size_t N) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  if (N == 0) {
+    IREE_TRACE_ZONE_END(z0);
+    return hipSuccess;
+  }
+
   // Validate dstDevice pointer.
   if (!dstDevice) {
     IREE_TRACE_ZONE_END(z0);
@@ -5718,6 +5874,11 @@ HIPAPI hipError_t hipMemsetD16(hipDeviceptr_t dstDevice, unsigned short us,
 // See also: hipMemset, hipMemsetD32Async, hipMemsetD8, hipMemsetD16.
 HIPAPI hipError_t hipMemsetD32(hipDeviceptr_t dstDevice, int i, size_t N) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  if (N == 0) {
+    IREE_TRACE_ZONE_END(z0);
+    return hipSuccess;
+  }
+
   // Validate dstDevice pointer.
   if (!dstDevice) {
     IREE_TRACE_ZONE_END(z0);
@@ -5779,6 +5940,11 @@ HIPAPI hipError_t hipMemsetD32(hipDeviceptr_t dstDevice, int i, size_t N) {
 HIPAPI hipError_t hipMemsetD8Async(hipDeviceptr_t dstDevice, unsigned char uc,
                                    size_t N, hipStream_t stream) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  if (N == 0) {
+    IREE_TRACE_ZONE_END(z0);
+    return hipSuccess;
+  }
+
   // Validate dstDevice pointer.
   if (!dstDevice) {
     IREE_TRACE_ZONE_END(z0);
@@ -5841,6 +6007,11 @@ HIPAPI hipError_t hipMemsetD8Async(hipDeviceptr_t dstDevice, unsigned char uc,
 HIPAPI hipError_t hipMemsetD16Async(hipDeviceptr_t dstDevice, unsigned short us,
                                     size_t N, hipStream_t stream) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  if (N == 0) {
+    IREE_TRACE_ZONE_END(z0);
+    return hipSuccess;
+  }
+
   // Validate dstDevice pointer.
   if (!dstDevice) {
     IREE_TRACE_ZONE_END(z0);
@@ -5904,6 +6075,11 @@ HIPAPI hipError_t hipMemsetD16Async(hipDeviceptr_t dstDevice, unsigned short us,
 HIPAPI hipError_t hipMemsetD32Async(hipDeviceptr_t dstDevice, int i, size_t N,
                                     hipStream_t stream) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  if (N == 0) {
+    IREE_TRACE_ZONE_END(z0);
+    return hipSuccess;
+  }
+
   // Validate dstDevice pointer.
   if (!dstDevice) {
     IREE_TRACE_ZONE_END(z0);
@@ -6121,8 +6297,9 @@ HIPAPI hipError_t hipStreamCreateWithPriority(hipStream_t* stream,
 
   iree_hal_streaming_stream_t* stream_obj = NULL;
   iree_status_t status = iree_hal_streaming_stream_create(
-      context, iree_hip_stream_flags_to_internal(flags), priority,
-      context->host_allocator, &stream_obj);
+      context, iree_hip_stream_flags_to_internal(flags),
+      iree_hip_clamp_stream_priority(priority), context->host_allocator,
+      &stream_obj);
 
   if (iree_status_is_ok(status)) {
     *stream = (hipStream_t)stream_obj;
@@ -6160,8 +6337,7 @@ HIPAPI hipError_t hipStreamCreateWithPriority(hipStream_t* stream,
 //           hipStreamCreateWithPriority.
 HIPAPI hipError_t hipStreamDestroy(hipStream_t stream) {
   IREE_TRACE_ZONE_BEGIN(z0);
-  // NULL stream (default stream) cannot be destroyed.
-  if (!stream) {
+  if (!stream || stream == hipStreamLegacy || stream == hipStreamPerThread) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidResourceHandle);
   }
@@ -6199,19 +6375,12 @@ HIPAPI hipError_t hipStreamGetPriority(hipStream_t stream, int* priority) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  // Resolve NULL stream to default stream.
-  if (!stream) {
-    // Ensure initialization and get context.
-    iree_hal_streaming_context_t* context = NULL;
-    hipError_t init_result = iree_hip_ensure_context(&context);
-    if (init_result != hipSuccess) {
-      HIP_RETURN_ERROR(init_result);
-    }
-    stream = (hipStream_t)context->default_stream;
+  iree_hal_streaming_stream_t* stream_obj = NULL;
+  hipError_t init_result = iree_hip_resolve_stream(stream, &stream_obj);
+  if (init_result != hipSuccess) {
+    HIP_RETURN_ERROR(init_result);
   }
 
-  iree_hal_streaming_stream_t* stream_obj =
-      (iree_hal_streaming_stream_t*)stream;
   *priority = stream_obj->priority;
   return hipSuccess;
 }
@@ -6247,20 +6416,20 @@ HIPAPI hipError_t hipStreamGetFlags(hipStream_t stream, unsigned int* flags) {
   if (!flags) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-
-  // Resolve NULL stream to default stream.
   if (!stream) {
-    // Ensure initialization and get context.
-    iree_hal_streaming_context_t* context = NULL;
-    hipError_t init_result = iree_hip_ensure_context(&context);
+    hipError_t init_result = iree_hip_ensure_initialized();
     if (init_result != hipSuccess) {
       HIP_RETURN_ERROR(init_result);
     }
-    stream = (hipStream_t)context->default_stream;
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  iree_hal_streaming_stream_t* stream_obj =
-      (iree_hal_streaming_stream_t*)stream;
+  iree_hal_streaming_stream_t* stream_obj = NULL;
+  hipError_t init_result = iree_hip_resolve_stream(stream, &stream_obj);
+  if (init_result != hipSuccess) {
+    HIP_RETURN_ERROR(init_result);
+  }
+
   *flags = stream_obj->flags;
   return hipSuccess;
 }
@@ -6298,23 +6467,32 @@ HIPAPI hipError_t hipStreamGetDevice(hipStream_t stream, hipDevice_t* device) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  // Resolve NULL stream to default stream.
-  if (!stream) {
-    // Ensure initialization and get context.
-    iree_hal_streaming_context_t* context = NULL;
-    hipError_t init_result = iree_hip_ensure_context(&context);
-    if (init_result != hipSuccess) {
-      IREE_TRACE_ZONE_END(z0);
-      HIP_RETURN_ERROR(init_result);
-    }
-    stream = (hipStream_t)context->default_stream;
+  iree_hal_streaming_stream_t* stream_obj = NULL;
+  hipError_t init_result = iree_hip_resolve_stream(stream, &stream_obj);
+  if (init_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(init_result);
   }
 
-  iree_hal_streaming_stream_t* stream_obj =
-      (iree_hal_streaming_stream_t*)stream;
   *device = (hipDevice_t)stream_obj->context->device_ordinal;
 
   IREE_TRACE_ZONE_END(z0);
+  return hipSuccess;
+}
+
+HIPAPI hipError_t hipStreamGetId(hipStream_t stream,
+                                 unsigned long long* stream_id) {
+  if (!stream_id) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  iree_hal_streaming_stream_t* stream_obj = NULL;
+  hipError_t init_result = iree_hip_resolve_stream(stream, &stream_obj);
+  if (init_result != hipSuccess) {
+    HIP_RETURN_ERROR(init_result);
+  }
+
+  *stream_id = stream_obj->stream_id;
   return hipSuccess;
 }
 
@@ -6339,21 +6517,14 @@ HIPAPI hipError_t hipStreamGetDevice(hipStream_t stream, hipDevice_t* device) {
 HIPAPI int hipGetStreamDeviceId(hipStream_t stream) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  // Resolve NULL stream to default stream.
-  if (!stream) {
-    // Ensure initialization and get context.
-    iree_hal_streaming_context_t* context = NULL;
-    hipError_t init_result = iree_hip_ensure_context(&context);
-    if (init_result != hipSuccess) {
-      IREE_TRACE_ZONE_END(z0);
-      iree_hip_thread_error_set(init_result, false);
-      return -1;
-    }
-    stream = (hipStream_t)context->default_stream;
+  iree_hal_streaming_stream_t* stream_obj = NULL;
+  hipError_t init_result = iree_hip_resolve_stream(stream, &stream_obj);
+  if (init_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    iree_hip_thread_error_set(init_result, false);
+    return -1;
   }
 
-  iree_hal_streaming_stream_t* stream_obj =
-      (iree_hal_streaming_stream_t*)stream;
   int device_id = (int)stream_obj->context->device_ordinal;
 
   IREE_TRACE_ZONE_END(z0);
@@ -6401,6 +6572,19 @@ HIPAPI hipError_t hipStreamSynchronize(hipStream_t stream) {
   if (init_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(init_result);
+  }
+
+  if (!stream || stream == hipStreamLegacy) {
+    iree_hal_streaming_context_t* context = streaming_stream->context;
+    if (iree_hip_context_invalidate_visible_captures(context)) {
+      IREE_TRACE_ZONE_END(z0);
+      HIP_RETURN_ERROR(hipErrorStreamCaptureUnsupported);
+    }
+
+    iree_status_t status = iree_hal_streaming_context_synchronize(context);
+    hipError_t result = iree_status_to_hip_result(status);
+    IREE_TRACE_ZONE_END(z0);
+    return result;
   }
 
   if (iree_hip_context_invalidate_stream_blocking_capture(
@@ -10476,13 +10660,12 @@ HIPAPI hipError_t hipGraphAddMemcpyNode1D(hipGraphNode_t* pGraphNode,
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(kind_result);
   }
-  hipError_t dst_range_result =
-      iree_hip_validate_known_memcpy_range(stream_graph->context, dst, count);
-  hipError_t src_range_result =
-      iree_hip_validate_known_memcpy_range(stream_graph->context, src, count);
-  if (dst_range_result != hipSuccess || src_range_result != hipSuccess) {
+  hipError_t range_result =
+      iree_hip_validate_memcpy_ranges(stream_graph->context, dst, src, count,
+                                      kind, true);
+  if (range_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
+    HIP_RETURN_ERROR(range_result);
   }
 
   // Convert dependencies.
@@ -12008,11 +12191,12 @@ HIPAPI hipError_t hipStreamBeginCapture(hipStream_t stream,
     HIP_RETURN_ERROR(hipErrorStreamCaptureUnsupported);
   }
 
-  if (stream == hipStreamPerThread) {
-    stream = (hipStream_t)context->default_stream;
+  iree_hal_streaming_stream_t* stream_obj = NULL;
+  init_result = iree_hip_resolve_stream(stream, &stream_obj);
+  if (init_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(init_result);
   }
-  iree_hal_streaming_stream_t* stream_obj =
-      (iree_hal_streaming_stream_t*)stream;
 
   // Map HIP capture mode to internal mode.
   iree_hal_streaming_capture_mode_t capture_mode;
@@ -12182,21 +12366,17 @@ HIPAPI hipError_t hipStreamEndCapture(hipStream_t stream, hipGraph_t* pGraph) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  if (stream == hipStreamPerThread) {
-    iree_hal_streaming_context_t* context = NULL;
-    hipError_t init_result = iree_hip_ensure_context(&context);
-    if (init_result != hipSuccess) {
-      IREE_TRACE_ZONE_END(z0);
-      HIP_RETURN_ERROR(init_result);
-    }
-    stream = (hipStream_t)context->default_stream;
-  } else if (stream == hipStreamLegacy) {
+  if (stream == hipStreamLegacy) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorStreamCaptureUnsupported);
   }
 
-  iree_hal_streaming_stream_t* stream_obj =
-      (iree_hal_streaming_stream_t*)stream;
+  iree_hal_streaming_stream_t* stream_obj = NULL;
+  hipError_t init_result = iree_hip_resolve_stream(stream, &stream_obj);
+  if (init_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(init_result);
+  }
   iree_hal_streaming_graph_t* graph = NULL;
   iree_status_t status = iree_hal_streaming_end_capture(stream_obj, &graph);
 
@@ -12285,18 +12465,14 @@ HIPAPI hipError_t hipStreamIsCapturing(hipStream_t stream,
       return hipSuccess;
     }
     stream = (hipStream_t)context->default_stream;
-  } else if (stream == hipStreamPerThread) {
-    iree_hal_streaming_context_t* context = NULL;
-    hipError_t init_result = iree_hip_ensure_context(&context);
-    if (init_result != hipSuccess) {
-      IREE_TRACE_ZONE_END(z0);
-      HIP_RETURN_ERROR(init_result);
-    }
-    stream = (hipStream_t)context->default_stream;
   }
 
-  iree_hal_streaming_stream_t* stream_obj =
-      (iree_hal_streaming_stream_t*)stream;
+  iree_hal_streaming_stream_t* stream_obj = NULL;
+  hipError_t init_result = iree_hip_resolve_stream(stream, &stream_obj);
+  if (init_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(init_result);
+  }
   bool is_capturing = false;
   iree_status_t status =
       iree_hal_streaming_is_capturing(stream_obj, &is_capturing);
@@ -12374,18 +12550,14 @@ HIPAPI hipError_t hipStreamGetCaptureInfo(
       return hipSuccess;
     }
     stream = (hipStream_t)context->default_stream;
-  } else if (stream == hipStreamPerThread) {
-    iree_hal_streaming_context_t* context = NULL;
-    hipError_t init_result = iree_hip_ensure_context(&context);
-    if (init_result != hipSuccess) {
-      IREE_TRACE_ZONE_END(z0);
-      HIP_RETURN_ERROR(init_result);
-    }
-    stream = (hipStream_t)context->default_stream;
   }
 
-  iree_hal_streaming_stream_t* stream_obj =
-      (iree_hal_streaming_stream_t*)stream;
+  iree_hal_streaming_stream_t* stream_obj = NULL;
+  hipError_t init_result = iree_hip_resolve_stream(stream, &stream_obj);
+  if (init_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(init_result);
+  }
   iree_hal_streaming_capture_status_t status_internal;
   unsigned long long capture_id;
   iree_status_t status = iree_hal_streaming_capture_status(

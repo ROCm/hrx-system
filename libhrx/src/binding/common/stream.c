@@ -201,6 +201,7 @@ iree_status_t iree_hal_streaming_stream_create(
   stream->context = context;
   stream->flags = flags;
   stream->priority = priority;
+  stream->stream_id = 0;
   stream->command_buffer = NULL;
   stream->pending_launch_count = 0;
   stream->timeline_semaphore = NULL;
@@ -304,18 +305,15 @@ void iree_hal_streaming_stream_release(iree_hal_streaming_stream_t* stream) {
   }
 }
 
-iree_status_t iree_hal_streaming_stream_begin(
+iree_status_t iree_hal_streaming_stream_begin_locked(
     iree_hal_streaming_stream_t* stream) {
   IREE_ASSERT_ARGUMENT(stream);
-  IREE_TRACE_ZONE_BEGIN(z0);
-  iree_slim_mutex_lock(&stream->mutex);
-
-  iree_status_t status = iree_ok_status();
 
   // Create command buffer if not already created.
   // Note that we set UNRETAINED as we ensure the resources we have to track are
   // retained at the graph exec level and CUDA/HIP don't make any statements
   // about resource lifetime.
+  iree_status_t status = iree_ok_status();
   if (!stream->command_buffer) {
     status = iree_hal_command_buffer_create(
         stream->context->device,
@@ -323,16 +321,19 @@ iree_status_t iree_hal_streaming_stream_begin(
             IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED,
         IREE_HAL_COMMAND_CATEGORY_ANY, stream->queue_affinity,
         /*binding_capacity=*/0, &stream->command_buffer);
-    if (!iree_status_is_ok(status)) {
-      iree_slim_mutex_unlock(&stream->mutex);
-      IREE_TRACE_ZONE_END(z0);
-      return status;
-    }
+    if (!iree_status_is_ok(status)) return status;
+    status = iree_hal_command_buffer_begin(stream->command_buffer);
   }
 
-  // Begin recording.
-  status = iree_hal_command_buffer_begin(stream->command_buffer);
+  return status;
+}
 
+iree_status_t iree_hal_streaming_stream_begin(
+    iree_hal_streaming_stream_t* stream) {
+  IREE_ASSERT_ARGUMENT(stream);
+  IREE_TRACE_ZONE_BEGIN(z0);
+  iree_slim_mutex_lock(&stream->mutex);
+  iree_status_t status = iree_hal_streaming_stream_begin_locked(stream);
   iree_slim_mutex_unlock(&stream->mutex);
   IREE_TRACE_ZONE_END(z0);
   return status;
@@ -810,16 +811,6 @@ iree_status_t iree_hal_streaming_launch_kernel(
     IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, flush_status);
   }
 
-  // Ensure command buffer is recording for the existing batched path.
-  if (!direct_queue_dispatch_requested && !stream->command_buffer) {
-    uint64_t timing_step_ns = timing_enabled ? hrx_launch_timing_now_ns() : 0;
-    iree_status_t begin_status = iree_hal_streaming_stream_begin(stream);
-    if (timing_enabled) {
-      timing_begin_ns += hrx_launch_timing_now_ns() - timing_step_ns;
-    }
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, begin_status);
-  }
-
   // Stack allocate arrays based on cached sizes.
   // Zero-initialize constants to prevent uninitialized padding bytes from
   // being misinterpreted as device pointers by the overlay scan.
@@ -1019,6 +1010,8 @@ iree_status_t iree_hal_streaming_launch_kernel(
 
   uint64_t timing_step_ns = timing_enabled ? hrx_launch_timing_now_ns() : 0;
   iree_status_t status = iree_ok_status();
+  bool should_flush = false;
+  iree_slim_mutex_lock(&stream->mutex);
   if (dispatch_directly) {
     uint64_t wait_value = stream->pending_value;
     uint64_t signal_value = wait_value + 1;
@@ -1047,63 +1040,73 @@ iree_status_t iree_hal_streaming_launch_kernel(
       stream->submitted_value = signal_value;
     }
   } else {
-    status = iree_hal_command_buffer_dispatch(
-        stream->command_buffer, symbol->executable,
-        iree_hal_executable_function_from_index(symbol->export_ordinal), config,
-        iree_make_const_byte_span(constants, constants_size), binding_list,
-        flags);
+    uint64_t timing_begin_step_ns =
+        timing_enabled ? hrx_launch_timing_now_ns() : 0;
+    status = iree_hal_streaming_stream_begin_locked(stream);
+    if (timing_enabled) {
+      timing_begin_ns += hrx_launch_timing_now_ns() - timing_begin_step_ns;
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_command_buffer_dispatch(
+          stream->command_buffer, symbol->executable,
+          iree_hal_executable_function_from_index(symbol->export_ordinal),
+          config, iree_make_const_byte_span(constants, constants_size),
+          binding_list, flags);
+    }
+
+    // Insert an execution + memory barrier after each dispatch to enforce
+    // serial ordering within the command buffer, emulating HIP stream
+    // semantics. This allows batching multiple dispatches per CB submission
+    // while maintaining correctness. Inter-CB ordering is handled by timeline
+    // semaphore chaining in iree_hal_streaming_stream_flush.
+    //
+    // The memory barrier with non-host (DISPATCH/TRANSFER) access scopes is
+    // important: under the AMDGPU HAL backend it resolves to an AGENT-scoped
+    // AQL release+acquire fence between this dispatch and the next, which
+    // flushes the GPU L1/L2 caches so the next dispatch sees this dispatch's
+    // writes. A bare execution barrier with no memory_barriers (count=0)
+    // resolves to NONE/NONE scopes after upstream IREE commit 48af1651a1
+    // ("Preserve command-buffer barrier scopes") and lets later dispatches
+    // launch with stale cache state, producing garbage output (e.g. NaN
+    // logits in GPT-2 forward).
+    if (iree_status_is_ok(status) && !hrx_disable_dispatch_barrier_enabled()) {
+      static const iree_hal_memory_barrier_t memory_barrier = {
+          .source_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
+                          IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
+                          IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
+                          IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+          .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
+                          IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
+                          IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
+                          IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+      };
+      uint64_t timing_barrier_step_ns =
+          timing_enabled ? hrx_launch_timing_now_ns() : 0;
+      status = iree_hal_command_buffer_execution_barrier(
+          stream->command_buffer,
+          IREE_HAL_EXECUTION_STAGE_DISPATCH | IREE_HAL_EXECUTION_STAGE_TRANSFER,
+          IREE_HAL_EXECUTION_STAGE_DISPATCH | IREE_HAL_EXECUTION_STAGE_TRANSFER,
+          IREE_HAL_EXECUTION_BARRIER_FLAG_NONE, 1, &memory_barrier, 0, NULL);
+      if (timing_enabled) {
+        timing_barrier_ns +=
+            hrx_launch_timing_now_ns() - timing_barrier_step_ns;
+      }
+    }
+
+    if (iree_status_is_ok(status)) {
+      ++stream->pending_launch_count;
+      const int flush_interval = hrx_flush_interval();
+      should_flush =
+          hrx_flush_each_launch_enabled() ||
+          (flush_interval > 0 &&
+           stream->pending_launch_count >= (uint32_t)flush_interval);
+    }
   }
+  iree_slim_mutex_unlock(&stream->mutex);
   if (timing_enabled) {
     timing_dispatch_ns += hrx_launch_timing_now_ns() - timing_step_ns;
   }
-
-  // Insert an execution + memory barrier after each dispatch to enforce
-  // serial ordering within the command buffer, emulating HIP stream
-  // semantics. This allows batching multiple dispatches per CB submission
-  // while maintaining correctness. Inter-CB ordering is handled by timeline
-  // semaphore chaining in iree_hal_streaming_stream_flush.
-  //
-  // The memory barrier with non-host (DISPATCH/TRANSFER) access scopes is
-  // important: under the AMDGPU HAL backend it resolves to an AGENT-scoped
-  // AQL release+acquire fence between this dispatch and the next, which
-  // flushes the GPU L1/L2 caches so the next dispatch sees this dispatch's
-  // writes. A bare execution barrier with no memory_barriers (count=0)
-  // resolves to NONE/NONE scopes after upstream IREE commit 48af1651a1
-  // ("Preserve command-buffer barrier scopes") and lets later dispatches
-  // launch with stale cache state, producing garbage output (e.g. NaN
-  // logits in GPT-2 forward).
-  if (!dispatch_directly && iree_status_is_ok(status) &&
-      !hrx_disable_dispatch_barrier_enabled()) {
-    static const iree_hal_memory_barrier_t memory_barrier = {
-        .source_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
-                        IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
-                        IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
-                        IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
-        .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
-                        IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
-                        IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
-                        IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
-    };
-    timing_step_ns = timing_enabled ? hrx_launch_timing_now_ns() : 0;
-    status = iree_hal_command_buffer_execution_barrier(
-        stream->command_buffer,
-        IREE_HAL_EXECUTION_STAGE_DISPATCH | IREE_HAL_EXECUTION_STAGE_TRANSFER,
-        IREE_HAL_EXECUTION_STAGE_DISPATCH | IREE_HAL_EXECUTION_STAGE_TRANSFER,
-        IREE_HAL_EXECUTION_BARRIER_FLAG_NONE, 1, &memory_barrier, 0, NULL);
-    if (timing_enabled) {
-      timing_barrier_ns += hrx_launch_timing_now_ns() - timing_step_ns;
-    }
-  }
-
-  if (!dispatch_directly && iree_status_is_ok(status)) {
-    ++stream->pending_launch_count;
-  }
-
-  const int flush_interval = hrx_flush_interval();
-  if (!dispatch_directly && iree_status_is_ok(status) &&
-      (hrx_flush_each_launch_enabled() ||
-       (flush_interval > 0 &&
-        stream->pending_launch_count >= (uint32_t)flush_interval))) {
+  if (!dispatch_directly && iree_status_is_ok(status) && should_flush) {
     status = iree_hal_streaming_stream_flush(stream);
   }
 
