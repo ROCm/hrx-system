@@ -54,7 +54,6 @@ class HrxLoader {
 
   // Runtime version.
   decltype(&hrx_runtime_version) runtime_version;
-  decltype(&hrx_runtime_set_device_event_sink) runtime_set_device_event_sink;
 
   // Status API.
   decltype(&hrx_make_status) make_status;

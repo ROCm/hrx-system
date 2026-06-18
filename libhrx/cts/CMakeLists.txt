@@ -30,31 +30,6 @@ iree_amdgpu_binary_variants_embed_data(
   PUBLIC
 )
 
-iree_amdgpu_binary_variants_embed_data(
-  NAME
-    amdgpu_asan_hip_module_test_kernels
-  TARGET
-    amdgcn-amd-amdhsa
-  TARGETS
-    ${IREE_HAL_AMDGPU_TARGETS}
-  BINARY_NAME_PREFIX
-    hrx_cts_asan_kernel
-  C_FILE_OUTPUT
-    "amdgpu_asan_hip_module_test_kernels.c"
-  H_FILE_OUTPUT
-    "amdgpu_asan_hip_module_test_kernels.h"
-  IDENTIFIER
-    "hrx_cts_amdgpu_asan_test_kernels"
-  SRCS
-    "tests/asan/hip_asan_kernels.c"
-  DEPS
-    runtime::src::iree::hal::drivers::amdgpu::device::asanrtl_{AMDGPU_CODE_OBJECT_TARGET_FRAGMENT}
-  INTERNALIZE
-    OFF
-  TESTONLY
-  PUBLIC
-)
-
 iree_cc_library(
   NAME
     core
@@ -253,32 +228,6 @@ hrx_cc_test(
   ARGS
     "--hrx-library"
     "$<TARGET_FILE:libhrx::src::libhrx::hrx>"
-  LABELS
-    "runtime-resource=amd-gpu"
-)
-
-hrx_cc_test(
-  NAME
-    hrx_cts_hip_asan
-  SRCS
-    "tests/asan/hip_asan_test.cpp"
-  DATA
-    libhrx::src::binding::hip::amdhip64
-    libhrx::src::libhrx::hrx
-  DEPS
-    ::amdgpu_asan_hip_module_test_kernels
-    ::core
-    iree::third_party::catch2
-    libhrx_defs
-  ARGS
-    "--hrx-library"
-    "$<TARGET_FILE:libhrx::src::libhrx::hrx>"
-    "--hrx-device"
-    "none"
-    "--hip-library"
-    "$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>"
-  ENV
-    "HRX_HAL_SANITIZER=asan"
   LABELS
     "runtime-resource=amd-gpu"
 )

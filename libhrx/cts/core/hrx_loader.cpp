@@ -104,7 +104,6 @@ void HrxLoader::load(const std::string& path) {
   LOAD(host_allocator_free_aligned);
 
   LOAD_FULL(runtime_version, hrx_runtime_version);
-  LOAD_FULL(runtime_set_device_event_sink, hrx_runtime_set_device_event_sink);
   LOAD_FULL(make_status, hrx_make_status);
   LOAD_FULL(status_code, hrx_status_code);
   LOAD_FULL(status_to_string, hrx_status_to_string);
