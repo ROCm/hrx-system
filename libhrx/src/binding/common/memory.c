@@ -71,14 +71,14 @@ static void iree_hal_streaming_buffer_release_context(
   }
 }
 
-// Wraps a HAL buffer in a stream buffer and caches information.
-static iree_status_t iree_hal_streaming_buffer_wrap(
-    iree_hal_streaming_context_t* context, iree_hal_buffer_t* buffer,
+// Wraps an HRX buffer in a stream buffer and caches exported pointer metadata.
+static iree_status_t iree_hal_streaming_buffer_wrap_hrx_buffer(
+    iree_hal_streaming_context_t* context, hrx_buffer_t hrx_buf,
     int memory_type, void* imported_host_ptr, hrx_mem_pool_t allocation_pool,
     iree_hal_streaming_buffer_context_ownership_t context_ownership,
     iree_hal_streaming_buffer_t** out_wrapper) {
   IREE_ASSERT_ARGUMENT(context);
-  IREE_ASSERT_ARGUMENT(buffer);
+  IREE_ASSERT_ARGUMENT(hrx_buf);
   IREE_ASSERT_ARGUMENT(out_wrapper);
   *out_wrapper = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -89,21 +89,9 @@ static iree_status_t iree_hal_streaming_buffer_wrap(
                                 (void**)&wrapper));
   memset(wrapper, 0, sizeof(*wrapper));
 
-  // Create the pyre buffer that wraps the HAL buffer.
-  hrx_buffer_t hrx_buf = NULL;
-  hrx_device_t hrx_dev =
-      context->device_entry ? context->device_entry->hrx_device : NULL;
-  iree_status_t hrx_stat = hrx_buffer_create_from_hal(
-      buffer, hrx_dev, (hrx_memory_type_t)memory_type,
-      (size_t)iree_hal_buffer_byte_length(buffer), NULL, &hrx_buf);
-  if (!iree_status_is_ok(hrx_stat)) {
-    iree_allocator_free(context->host_allocator, wrapper);
-    IREE_TRACE_ZONE_END(z0);
-    return hrx_stat;
-  }
-
   // Initialize wrapper.
   wrapper->hrx_buf = hrx_buf;
+  hrx_buffer_retain(wrapper->hrx_buf);
   wrapper->buffer = hrx_buf->hal_buffer;
   iree_hal_streaming_buffer_set_context(wrapper, context, context_ownership);
   wrapper->allocation_pool = allocation_pool;
@@ -113,7 +101,7 @@ static iree_status_t iree_hal_streaming_buffer_wrap(
   wrapper->memory_type = memory_type;
   wrapper->host_register_flags = IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT;
   wrapper->ipc_handle = NULL;
-  wrapper->size = iree_hal_buffer_byte_length(buffer);
+  wrapper->size = hrx_buf->size;
 
   // Initialize unified memory attributes.
   wrapper->read_mostly_hint = false;
@@ -127,23 +115,25 @@ static iree_status_t iree_hal_streaming_buffer_wrap(
 
   // Try to export as device allocation (works for device-local memory
   // and mapped host memory).
-  iree_status_t device_status = iree_hal_allocator_export_buffer(
-      context->device_allocator, buffer,
-      IREE_HAL_EXTERNAL_BUFFER_TYPE_DEVICE_ALLOCATION,
-      IREE_HAL_EXTERNAL_BUFFER_FLAG_NONE, &external_ptr);
-  if (iree_status_is_ok(device_status)) {
-    wrapper->device_ptr = (iree_hal_streaming_deviceptr_t)
-                              external_ptr.handle.device_allocation.ptr;
-    have_device_ptr = true;
-  } else {
-    iree_status_ignore(device_status);
+  if (wrapper->buffer) {
+    iree_status_t device_status = iree_hal_allocator_export_buffer(
+        context->device_allocator, wrapper->buffer,
+        IREE_HAL_EXTERNAL_BUFFER_TYPE_DEVICE_ALLOCATION,
+        IREE_HAL_EXTERNAL_BUFFER_FLAG_NONE, &external_ptr);
+    if (iree_status_is_ok(device_status)) {
+      wrapper->device_ptr = (iree_hal_streaming_deviceptr_t)
+                                external_ptr.handle.device_allocation.ptr;
+      have_device_ptr = true;
+    } else {
+      iree_status_ignore(device_status);
+    }
   }
 
   // For host-local memory, also export as host allocation.
   // This is needed for hipHostMalloc which returns host pointers.
-  if (memory_type & IREE_HAL_MEMORY_TYPE_HOST_LOCAL) {
+  if (wrapper->buffer && (memory_type & IREE_HAL_MEMORY_TYPE_HOST_LOCAL)) {
     iree_status_t host_status = iree_hal_allocator_export_buffer(
-        context->device_allocator, buffer,
+        context->device_allocator, wrapper->buffer,
         IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION,
         IREE_HAL_EXTERNAL_BUFFER_FLAG_NONE, &external_ptr);
     if (iree_status_is_ok(host_status)) {
@@ -173,12 +163,17 @@ static iree_status_t iree_hal_streaming_buffer_wrap(
         "registered host allocation did not export a device-visible pointer");
   } else if (!have_device_ptr) {
     static atomic_uintptr_t g_next_synthetic = 0xDEAD000000000000ULL;
-    iree_device_size_t buf_size = iree_hal_buffer_byte_length(buffer);
-    iree_device_size_t aligned_size =
-        (buf_size + 255) & ~(iree_device_size_t)255;
-    uintptr_t synthetic = atomic_fetch_add(&g_next_synthetic, aligned_size);
-    wrapper->device_ptr = (iree_hal_streaming_deviceptr_t)synthetic;
-    have_device_ptr = true;
+    iree_device_size_t aligned_size = 0;
+    if (IREE_UNLIKELY(!iree_device_size_checked_mul_add(
+            wrapper->size, 1, 255, &aligned_size))) {
+      status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "buffer size overflows synthetic alignment");
+    } else {
+      aligned_size &= ~(iree_device_size_t)255;
+      uintptr_t synthetic = atomic_fetch_add(&g_next_synthetic, aligned_size);
+      wrapper->device_ptr = (iree_hal_streaming_deviceptr_t)synthetic;
+      have_device_ptr = true;
+    }
   }
   (void)have_host_ptr;
 
@@ -202,6 +197,35 @@ static iree_status_t iree_hal_streaming_buffer_wrap(
     hrx_mem_pool_release(wrapper->allocation_pool);
     iree_allocator_free(context->host_allocator, wrapper);
   }
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+// Wraps a HAL buffer in a stream buffer and caches information.
+static iree_status_t iree_hal_streaming_buffer_wrap(
+    iree_hal_streaming_context_t* context, iree_hal_buffer_t* buffer,
+    int memory_type, void* imported_host_ptr, hrx_mem_pool_t allocation_pool,
+    iree_hal_streaming_buffer_context_ownership_t context_ownership,
+    iree_hal_streaming_buffer_t** out_wrapper) {
+  IREE_ASSERT_ARGUMENT(context);
+  IREE_ASSERT_ARGUMENT(buffer);
+  IREE_ASSERT_ARGUMENT(out_wrapper);
+  *out_wrapper = NULL;
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  hrx_buffer_t hrx_buf = NULL;
+  hrx_device_t hrx_dev =
+      context->device_entry ? context->device_entry->hrx_device : NULL;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, hrx_buffer_create_from_hal(
+              buffer, hrx_dev, (hrx_memory_type_t)memory_type,
+              (size_t)iree_hal_buffer_byte_length(buffer), NULL, &hrx_buf));
+
+  iree_status_t status = iree_hal_streaming_buffer_wrap_hrx_buffer(
+      context, hrx_buf, memory_type, imported_host_ptr, allocation_pool,
+      context_ownership, out_wrapper);
+  hrx_buffer_release(hrx_buf);
+
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -394,9 +418,8 @@ iree_status_t iree_hal_streaming_memory_allocate_device_from_pool(
                                                 &hrx_buffer)));
 
   iree_hal_streaming_buffer_t* wrapper = NULL;
-  iree_status_t status = iree_hal_streaming_buffer_wrap(
-      context, hrx_buffer->hal_buffer, (int)params.type,
-      /*imported_host_ptr=*/NULL, pool,
+  iree_status_t status = iree_hal_streaming_buffer_wrap_hrx_buffer(
+      context, hrx_buffer, (int)params.type, /*imported_host_ptr=*/NULL, pool,
       IREE_HAL_STREAMING_BUFFER_CONTEXT_RETAINED, &wrapper);
   hrx_buffer_release(hrx_buffer);
 
@@ -428,14 +451,26 @@ iree_status_t iree_hal_streaming_memory_allocate_device_pitched(
   // Calculate pitch with 128-byte alignment for optimal memory access.
   // This is typical for both CUDA and HIP.
   const iree_device_size_t alignment = 128;
-  iree_device_size_t pitch =
-      (width_bytes + alignment - 1) / alignment * alignment;
+  iree_device_size_t pitch = 0;
+  if (IREE_UNLIKELY(!iree_device_size_checked_mul_add(
+          width_bytes, 1, alignment - 1, &pitch))) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "pitched allocation width overflows");
+  }
+  pitch = pitch / alignment * alignment;
 
   // For CUDA, element_size_bytes should be 4, 8, or 16 for coalesced access.
   // We don't enforce this but could warn if needed.
 
   // Calculate total size.
-  iree_device_size_t total_size = pitch * height;
+  iree_device_size_t total_size = 0;
+  if (IREE_UNLIKELY(!iree_device_size_checked_mul(pitch, height,
+                                                  &total_size))) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "pitched allocation size overflows");
+  }
 
   // Allocate the buffer with the calculated total size.
   iree_hal_streaming_buffer_t* buffer = NULL;

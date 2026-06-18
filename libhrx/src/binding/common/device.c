@@ -319,6 +319,13 @@ iree_status_t iree_hal_streaming_device_get_or_create_primary_context(
 
   if (iree_status_is_ok(status)) {
     *out_context = device->primary_context;
+  } else {
+    iree_hal_streaming_context_release(device->primary_context);
+    device->primary_context = NULL;
+    hrx_mem_pool_release(device->current_mem_pool);
+    device->current_mem_pool = NULL;
+    hrx_mem_pool_release(device->default_mem_pool);
+    device->default_mem_pool = NULL;
   }
 
   iree_slim_mutex_unlock(&device->primary_context_mutex);
