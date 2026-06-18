@@ -172,13 +172,17 @@ class CommitMessageTest(unittest.TestCase):
         long_line = "This body line is intentionally too long for commit prose " + (
             "because it should be wrapped."
         )
+        diagnostics = commit_msg.validate_commit_message_text(
+            f"[Infra] Subject\n\n{long_line}\n"
+        )
         self.assertEqual(
-            self.diagnostic_messages(f"[Infra] Subject\n\n{long_line}\n"),
+            [diagnostic.message for diagnostic in diagnostics],
             [
-                f"line is {len(long_line)} characters; keep commit message "
-                "body lines at or below 72"
+                f"commit message body line is {len(long_line)} characters; "
+                "wrap prose to 72 columns"
             ],
         )
+        self.assertEqual([diagnostic.autofixable for diagnostic in diagnostics], [True])
 
     def test_allows_long_lines_inside_code_blocks(self):
         long_line = "x" * 120
@@ -188,6 +192,111 @@ class CommitMessageTest(unittest.TestCase):
             ),
             [],
         )
+
+    def test_allows_long_structured_body_lines(self):
+        long_url = "See https://example.com/" + "x" * 90
+        long_table = "| Column | " + "x" * 90 + " |"
+        long_code = "    git commit -m " + "x" * 90
+        long_trailer = "Co-authored-by: " + "x" * 90
+        long_trailer_continuation = " " + "x" * 90
+
+        self.assertEqual(
+            self.diagnostic_messages(
+                "[Infra] Subject\n"
+                "\n"
+                f"{long_url}\n"
+                f"{long_table}\n"
+                f"{long_code}\n"
+                "\n"
+                f"{long_trailer}\n"
+                f"{long_trailer_continuation}\n"
+            ),
+            [],
+        )
+
+    def test_rejects_long_bullet_body_lines(self):
+        long_bullet = (
+            "- This bullet list item is intentionally too long for the commit "
+            "message body width."
+        )
+        diagnostics = commit_msg.validate_commit_message_text(
+            f"[Infra] Subject\n\n{long_bullet}\n"
+        )
+        self.assertEqual(
+            [diagnostic.message for diagnostic in diagnostics],
+            [
+                f"commit message body line is {len(long_bullet)} characters; "
+                "wrap prose to 72 columns"
+            ],
+        )
+        self.assertEqual(
+            [diagnostic.autofixable for diagnostic in diagnostics], [False]
+        )
+
+    def test_reflows_ordinary_body_paragraphs(self):
+        self.assertEqual(
+            commit_msg.reflow_commit_message_text(
+                "[Infra] Subject\n"
+                "\n"
+                "This body paragraph is intentionally long enough to require "
+                "wrapping while preserving all words in the original order.\n"
+            ),
+            "[Infra] Subject\n"
+            "\n"
+            "This body paragraph is intentionally long enough to require wrapping\n"
+            "while preserving all words in the original order.\n",
+        )
+
+    def test_reflow_preserves_structured_body_lines(self):
+        long_bullet = (
+            "- This bullet list item is intentionally too long for automatic "
+            "reflow because list indentation needs human intent."
+        )
+        long_url = "See https://example.com/" + "x" * 90
+        long_code = "    git commit -m " + "x" * 90
+        long_trailer = "Change-Id: " + "x" * 90
+        message = (
+            "[Infra] Subject\n"
+            "\n"
+            f"{long_bullet}\n"
+            f"{long_url}\n"
+            "```text\n"
+            f"{'x' * 90}\n"
+            "```\n"
+            f"{long_code}\n"
+            "\n"
+            f"{long_trailer}\n"
+        )
+
+        self.assertEqual(commit_msg.reflow_commit_message_text(message), message)
+
+    def test_writes_reflow_suggestion(self):
+        message = (
+            "[Infra] Subject\n"
+            "\n"
+            "This body paragraph is intentionally long enough to require "
+            "wrapping while preserving all words in the original order.\n"
+        )
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            old_repo_root = commit_msg.REPO_ROOT
+            commit_msg.REPO_ROOT = Path(temporary_directory)
+            try:
+                suggestion_path = commit_msg.write_reflow_suggestion(
+                    Path("COMMIT_EDITMSG"),
+                    message,
+                )
+            finally:
+                commit_msg.REPO_ROOT = old_repo_root
+
+            self.assertIsNotNone(suggestion_path)
+            assert suggestion_path is not None
+            self.assertEqual(
+                suggestion_path.read_text(encoding="utf-8"),
+                "[Infra] Subject\n"
+                "\n"
+                "This body paragraph is intentionally long enough to require wrapping\n"
+                "while preserving all words in the original order.\n",
+            )
 
     def test_ranks_tag_suggestions_from_paths(self):
         self.assertEqual(

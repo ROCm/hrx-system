@@ -48,8 +48,22 @@ Git autosquash subjects such as `fixup! [Loom] ...`, `squash! [Loom] ...`,
 and `amend! [Loom] ...` are accepted. The hook strips the autosquash wrapper
 and validates the target subject with the same tag and subject-length policy.
 
-Subjects and prose body lines must stay at or below 72 characters. Long lines
-inside fenced code blocks are accepted so literal examples can remain faithful.
+Subjects and prose body lines must stay at or below 72 characters. This is a
+formatting policy for readable Git log output, not a request to shorten or
+fragment useful commit-message prose. Long fenced code blocks, indented
+examples, Markdown tables, URLs, and final Git trailers are preserved as
+structured text.
+
+When body prose is too long, the hook writes a reflowed suggestion under
+`.tmp/commit-msg/` and prints a `git commit -F ...` retry command. The
+suggestion reflows ordinary prose paragraphs only: subject lines, trailers,
+fenced blocks, indented examples, tables, URLs, block quotes, and list items are
+left untouched. The same formatter is available directly:
+
+```bash
+python build_tools/lefthook/commit_msg.py --format .git/COMMIT_EDITMSG
+```
+
 When a tag is missing, the hook ranks suggested tags from the staged paths and
 prints the paths used for the suggestion so the next edit is obvious.
 
