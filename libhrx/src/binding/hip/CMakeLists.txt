@@ -11,6 +11,24 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
+    memory_pool
+  HDRS
+    "memory_pool.h"
+  SRCS
+    "memory_pool.c"
+  DEPS
+    iree::base
+    libhrx_defs
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../../include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../../../include>"
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     amdhip64
   COPTS
     "-DIREE_HAL_STREAMING_HIP_EXPORTS"
@@ -22,6 +40,7 @@ iree_cc_library(
     "abi_stubs.c"
     "api.c"
   DEPS
+    ::memory_pool
     iree::base
     iree::hal
     libhrx::src::binding::common
@@ -38,6 +57,18 @@ iree_cc_library(
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../libhrx>"
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../../libhrx>"
   PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    memory_pool_test
+  SRCS
+    "memory_pool_test.cc"
+  DEPS
+    ::memory_pool
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
