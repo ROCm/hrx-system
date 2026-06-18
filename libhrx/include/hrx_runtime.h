@@ -591,6 +591,27 @@ HRX_API hrx_status_t hrx_buffer_map(hrx_buffer_t buffer, hrx_map_flags_t flags,
 
 HRX_API hrx_status_t hrx_buffer_unmap(hrx_buffer_t buffer);
 
+// Maps the whole buffer persistently (map once, keep the pointer for the
+// buffer's lifetime). The returned pointer stays valid until the buffer is
+// released; callers must use hrx_buffer_flush_range /
+// hrx_buffer_invalidate_range to maintain host<->device cache coherence around
+// device work instead of re-mapping. The buffer must be allocated with
+// HRX_BUFFER_USAGE_MAPPING_PERSISTENT.
+HRX_API hrx_status_t hrx_buffer_map_persistent(hrx_buffer_t buffer,
+                                               hrx_map_flags_t flags,
+                                               void** mapped_ptr);
+
+// Flushes host writes in [offset, offset+size) out to the device (host->device
+// cache management). Cheap (no copy); the buffer must be currently mapped.
+HRX_API hrx_status_t hrx_buffer_flush_range(hrx_buffer_t buffer, size_t offset,
+                                            size_t size);
+
+// Invalidates the host cache for [offset, offset+size) so subsequent host reads
+// observe device writes (device->host cache management). Cheap (no copy); the
+// buffer must be currently mapped.
+HRX_API hrx_status_t hrx_buffer_invalidate_range(hrx_buffer_t buffer,
+                                                 size_t offset, size_t size);
+
 HRX_API hrx_status_t hrx_buffer_get_device_ptr(hrx_buffer_t buffer,
                                                void** device_ptr);
 
