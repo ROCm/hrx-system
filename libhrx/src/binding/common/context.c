@@ -158,13 +158,9 @@ static void iree_hal_streaming_context_destroy(
     iree_allocator_free(context->host_allocator, context->peer_contexts);
   }
 
-  // Synchronize all streams before cleanup to ensure all operations complete.
-  // This is particularly important for the default stream which may have
-  // pending command buffers with allocated arena blocks.
-  if (context->default_stream) {
-    iree_status_ignore(
-        iree_hal_streaming_stream_synchronize(context->default_stream));
-  }
+  // Synchronize all streams before detaching them from the context; pending
+  // command buffers require the context/device to flush correctly.
+  iree_status_ignore(iree_hal_streaming_context_synchronize(context));
 
   iree_hal_streaming_memory_release_pageable_staging(context);
 
@@ -184,8 +180,7 @@ static void iree_hal_streaming_context_destroy(
   // This releases the list's references, which may trigger stream destruction.
   while (context->stream_count > 0) {
     iree_hal_streaming_stream_t* stream = context->streams[0];
-    // Clear context pointer to prevent unregister from being called again
-    // during stream destruction.
+    // Detach surviving user-owned streams from the context being destroyed.
     stream->context = NULL;
     // Remove from list (swap with last).
     context->streams[0] = context->streams[context->stream_count - 1];
@@ -583,11 +578,19 @@ iree_status_t iree_hal_streaming_context_register_stream(
 
   // Grow array if needed (double capacity).
   if (context->stream_count >= context->stream_capacity) {
-    iree_host_size_t new_capacity = context->stream_capacity * 2;
-    status = iree_allocator_realloc(
-        context->host_allocator,
-        sizeof(iree_hal_streaming_stream_t*) * new_capacity,
-        (void**)&context->streams);
+    iree_host_size_t new_capacity = 0;
+    iree_host_size_t allocation_size = 0;
+    if (IREE_UNLIKELY(!iree_host_size_checked_mul(
+                          context->stream_capacity, 2, &new_capacity) ||
+                      !iree_host_size_checked_mul(
+                          new_capacity, sizeof(context->streams[0]),
+                          &allocation_size))) {
+      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                "stream list capacity overflow");
+    } else {
+      status = iree_allocator_realloc(context->host_allocator, allocation_size,
+                                      (void**)&context->streams);
+    }
     if (iree_status_is_ok(status)) {
       context->stream_capacity = new_capacity;
     }
@@ -638,9 +641,9 @@ void iree_hal_streaming_context_unregister_stream(
 
   iree_slim_mutex_unlock(&context->stream_list_mutex);
 
-  // Release the list's reference to the stream.
-  // This is safe because stream->context was cleared before calling unregister,
-  // so if this release triggers destroy, it won't try to unregister again.
+  // Release the list's reference after unlinking. The caller holds another
+  // reference while requesting unregister, so the stream cannot be destroyed
+  // out from under this operation.
   if (found) {
     iree_hal_streaming_stream_release(stream);
   }

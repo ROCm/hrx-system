@@ -6341,7 +6341,15 @@ HIPAPI hipError_t hipStreamDestroy(hipStream_t stream) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidResourceHandle);
   }
-  iree_hal_streaming_stream_release((iree_hal_streaming_stream_t*)stream);
+
+  iree_hal_streaming_stream_t* streaming_stream =
+      (iree_hal_streaming_stream_t*)stream;
+  HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_streaming_stream_synchronize(streaming_stream));
+  iree_hal_streaming_context_unregister_stream(streaming_stream->context,
+                                               streaming_stream);
+  streaming_stream->context = NULL;
+  iree_hal_streaming_stream_release(streaming_stream);
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
 }

@@ -180,17 +180,26 @@ static void iree_hal_streaming_graph_renumber_nodes(
   }
 }
 
+static iree_hal_streaming_graph_node_t* iree_hal_streaming_graph_node_at_index(
+    const iree_hal_streaming_graph_t* graph, uint32_t node_index) {
+  iree_host_size_t skipped_count = 0;
+  for (iree_hal_streaming_node_block_t* block = graph->node_blocks; block;
+       block = block->next) {
+    if (node_index < skipped_count + block->count) {
+      return block->nodes[node_index - skipped_count];
+    }
+    skipped_count += block->count;
+  }
+  return NULL;
+}
+
 static bool iree_hal_streaming_graph_node_is_active_in_graph(
     const iree_hal_streaming_graph_t* graph,
     const iree_hal_streaming_graph_node_t* node) {
   if (!node || node->graph != graph) return false;
-  for (iree_hal_streaming_node_block_t* block = graph->node_blocks; block;
-       block = block->next) {
-    for (iree_host_size_t i = 0; i < block->count; ++i) {
-      if (block->nodes[i] == node) return true;
-    }
-  }
-  return false;
+  if (node->node_index >= graph->node_count) return false;
+  return iree_hal_streaming_graph_node_at_index(graph, node->node_index) ==
+         node;
 }
 
 static bool iree_hal_streaming_graph_dependency_exists(
@@ -819,13 +828,29 @@ iree_status_t iree_hal_streaming_graph_add_memcpy_node(
               graph, dependencies, dependency_count));
 
   iree_hal_streaming_buffer_ref_t dst_ref;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_streaming_memory_lookup(graph->context, dst, &dst_ref),
-      "resolving `dst` buffer ref %p", (void*)dst);
+  if (size > 0) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0,
+        iree_hal_streaming_memory_lookup_range(graph->context, dst, size,
+                                               &dst_ref),
+        "resolving `dst` buffer ref %p with size %" PRIhsz, (void*)dst, size);
+  } else {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_hal_streaming_memory_lookup(graph->context, dst, &dst_ref),
+        "resolving `dst` buffer ref %p", (void*)dst);
+  }
   iree_hal_streaming_buffer_ref_t src_ref;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_streaming_memory_lookup(graph->context, src, &src_ref),
-      "resolving `src` buffer ref %p", (void*)src);
+  if (size > 0) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0,
+        iree_hal_streaming_memory_lookup_range(graph->context, src, size,
+                                               &src_ref),
+        "resolving `src` buffer ref %p with size %" PRIhsz, (void*)src, size);
+  } else {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_hal_streaming_memory_lookup(graph->context, src, &src_ref),
+        "resolving `src` buffer ref %p", (void*)src);
+  }
 
   // Allocate node with dependencies in a single allocation.
   iree_hal_streaming_graph_node_t* node = NULL;
@@ -868,10 +893,27 @@ iree_status_t iree_hal_streaming_graph_add_memset_node(
       z0, iree_hal_streaming_graph_validate_dependencies(
               graph, dependencies, dependency_count));
 
+  iree_device_size_t total_size = 0;
+  if (IREE_UNLIKELY(
+          !iree_device_size_checked_mul(pattern_size, count, &total_size))) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "memset size overflows device size");
+  }
+
   iree_hal_streaming_buffer_ref_t dst_ref;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_streaming_memory_lookup(graph->context, dst, &dst_ref),
-      "resolving `dst` buffer ref %p", (void*)dst);
+  if (total_size > 0) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0,
+        iree_hal_streaming_memory_lookup_range(graph->context, dst, total_size,
+                                               &dst_ref),
+        "resolving `dst` buffer ref %p with size %" PRIu64, (void*)dst,
+        total_size);
+  } else {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_hal_streaming_memory_lookup(graph->context, dst, &dst_ref),
+        "resolving `dst` buffer ref %p", (void*)dst);
+  }
 
   // Allocate node with dependencies in a single allocation.
   iree_hal_streaming_graph_node_t* node = NULL;

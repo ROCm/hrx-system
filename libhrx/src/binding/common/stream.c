@@ -249,18 +249,10 @@ static void iree_hal_streaming_stream_destroy(
     iree_hal_streaming_stream_t* stream) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  // Capture and clear context pointer to prevent re-entry during unregister.
   iree_hal_streaming_context_t* context = stream->context;
-  stream->context = NULL;
-
-  // Synchronize stream before cleanup to ensure all operations complete.
-  // This is important to avoid leaking resources from pending operations.
-  iree_status_ignore(iree_hal_streaming_stream_synchronize(stream));
-
-  // Unregister from context before cleanup.
-  // Note: We already cleared stream->context, so if unregister tries to
-  // release and that triggers another destroy, it will be a no-op.
   if (context) {
+    iree_status_ignore(iree_hal_streaming_stream_synchronize(stream));
+    stream->context = NULL;
     iree_hal_streaming_context_unregister_stream(context, stream);
   }
 

@@ -6,28 +6,13 @@
 
 load(
     "//libhrx/build_tools/bazel:cc.bzl",
-    "hrx_cc_library",
     "hrx_cc_shared_library",
-    "hrx_cc_test",
 )
 
 package(
     default_visibility = ["//visibility:public"],
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
-)
-
-hrx_cc_library(
-    name = "memory_pool",
-    srcs = ["memory_pool.c"],
-    hdrs = ["memory_pool.h"],
-    includes = [
-        "../..",
-        "../../../include",
-    ],
-    deps = [
-        "//runtime/src/iree/base",
-    ],
 )
 
 hrx_cc_shared_library(
@@ -53,19 +38,8 @@ hrx_cc_shared_library(
         "-Wl,--version-script=$(location :amdhip64.map)",
     ],
     deps = [
-        ":memory_pool",
         "//libhrx/src/binding/common",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
-    ],
-)
-
-hrx_cc_test(
-    name = "memory_pool_test",
-    srcs = ["memory_pool_test.cc"],
-    deps = [
-        ":memory_pool",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
     ],
 )
