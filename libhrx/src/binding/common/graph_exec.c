@@ -797,10 +797,17 @@ static iree_status_t iree_hal_streaming_graph_record_partition(
       case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEMSET: {
         const iree_hal_streaming_graph_memset_node_attrs_t* attrs =
             &node->attrs.memset;
+        iree_device_size_t fill_length = 0;
+        if (IREE_UNLIKELY(!iree_device_size_checked_mul(
+                attrs->pattern_size, attrs->count, &fill_length))) {
+          status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                    "memset node size overflows device size");
+          break;
+        }
         status = iree_hal_command_buffer_fill_buffer(
             command_buffer,
-            iree_hal_streaming_convert_range_buffer_ref(
-                attrs->dst_ref, attrs->pattern_size * attrs->count),
+            iree_hal_streaming_convert_range_buffer_ref(attrs->dst_ref,
+                                                        fill_length),
             &attrs->pattern, attrs->pattern_size, attrs->flags);
         break;
       }
