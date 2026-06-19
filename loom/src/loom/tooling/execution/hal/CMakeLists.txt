@@ -100,6 +100,7 @@ loom_cc_library(
     loom::error::diagnostic
     loom::ir
     loom::ir::facts
+    loom::link::linker
     loom::ops::kernel
     loom::ops::special_values
     loom::pass::types
@@ -214,7 +215,9 @@ loom_cc_test(
     loom::ir
     loom::ops::index
     loom::ops::kernel
+    loom::ops::op_registry
     loom::ops::test
+    loom::target::low_descriptor_registry_core_test
     loom::testing::module_ptr
 )
 

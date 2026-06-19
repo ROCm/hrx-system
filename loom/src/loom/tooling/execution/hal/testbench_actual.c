@@ -12,6 +12,7 @@
 #include "loom/error/diagnostic.h"
 #include "loom/ir/facts.h"
 #include "loom/ir/module.h"
+#include "loom/link/linker.h"
 #include "loom/ops/kernel/launch_config.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/special_values.h"
@@ -197,6 +198,42 @@ iree_status_t loom_run_hal_testbench_count_actual_invocations(
         case_plan, invocation));
     ++*out_actual_invocation_count;
   }
+  return iree_ok_status();
+}
+
+iree_status_t loom_run_hal_testbench_focus_compile_module(
+    loom_run_session_t* session, loom_run_module_t* run_module,
+    iree_string_view_t root_symbol, iree_allocator_t allocator) {
+  if (iree_string_view_is_empty(root_symbol)) {
+    return iree_ok_status();
+  }
+  if (run_module->module == NULL) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "HAL actual compile module must be parsed before root selection");
+  }
+
+  const loom_module_t* const source_modules[] = {run_module->module};
+  iree_string_view_t module_name = iree_string_view_empty();
+  if (run_module->module->name_id < run_module->module->strings.count) {
+    module_name =
+        run_module->module->strings.entries[run_module->module->name_id];
+  }
+  const iree_string_view_list_t root_symbols = {
+      .count = 1,
+      .values = &root_symbol,
+  };
+  loom_module_t* linked_module = NULL;
+  IREE_RETURN_IF_ERROR(loom_link_materialized_modules(
+      source_modules, IREE_ARRAYSIZE(source_modules),
+      &(loom_link_options_t){
+          .module_name = module_name,
+          .root_symbols = root_symbols,
+      },
+      loom_run_session_block_pool(session), allocator, &linked_module));
+
+  loom_module_free(run_module->module);
+  run_module->module = linked_module;
   return iree_ok_status();
 }
 
@@ -623,6 +660,9 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
   provider->compile_module_initialized = true;
   IREE_RETURN_IF_ERROR(
       loom_run_hal_testbench_apply_sample_constants(provider, entry_symbol));
+  IREE_RETURN_IF_ERROR(loom_run_hal_testbench_focus_compile_module(
+      provider->session, &provider->compile_module, entry_symbol,
+      provider->context->host_allocator));
 
   loom_func_like_t entry_func = {0};
   IREE_RETURN_IF_ERROR(loom_run_hal_testbench_resolve_compile_func(

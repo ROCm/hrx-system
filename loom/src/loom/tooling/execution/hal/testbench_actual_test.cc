@@ -8,6 +8,8 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/ops/op_registry.h"
+#include "loom/target/low_descriptor_registry_core_test.h"
 
 namespace loom {
 namespace {
@@ -15,7 +17,57 @@ namespace {
 using ::iree::testing::status::StatusIs;
 using ::testing::HasSubstr;
 
-class HalTestbenchActualTest : public ::testing::Test {};
+iree_status_t RegisterContext(void* user_data, loom_context_t* context) {
+  (void)user_data;
+  return loom_op_registry_register_all_dialects(context);
+}
+
+iree_status_t InitializeLowDescriptorRegistry(
+    void* user_data, loom_target_low_descriptor_registry_t* out_registry) {
+  (void)user_data;
+  loom_target_core_test_low_descriptor_registry_initialize(out_registry);
+  return iree_ok_status();
+}
+
+class HalTestbenchActualTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    loom_run_session_options_t options = {};
+    loom_run_session_options_initialize(&options);
+    options.register_context = (loom_run_register_context_callback_t){
+        /*.fn=*/RegisterContext,
+    };
+    options.initialize_low_descriptor_registry =
+        (loom_run_initialize_low_descriptor_registry_callback_t){
+            /*.fn=*/InitializeLowDescriptorRegistry,
+        };
+    IREE_ASSERT_OK(loom_run_session_initialize(&options, &session_));
+  }
+
+  void TearDown() override { loom_run_session_deinitialize(&session_); }
+
+  iree_status_t Parse(iree_string_view_t source,
+                      loom_run_module_t* out_module) {
+    loom_run_module_parse_options_t options = {};
+    loom_run_module_parse_options_initialize(&options);
+    options.filename = IREE_SV("testbench_actual_test.loom");
+    options.source = source;
+    return loom_run_module_parse(&session_, &options, out_module);
+  }
+
+  loom_run_session_t session_ = {};
+};
+
+static bool ModuleHasSymbol(const loom_module_t* module,
+                            iree_string_view_t name) {
+  const loom_string_id_t name_id = loom_module_lookup_string(module, name);
+  if (name_id == LOOM_STRING_ID_INVALID) {
+    return false;
+  }
+  const loom_symbol_id_t symbol_id = loom_module_find_symbol(module, name_id);
+  return symbol_id != LOOM_SYMBOL_ID_INVALID &&
+         symbol_id < module->symbols.count;
+}
 
 static loom_testbench_value_t I32Value(int32_t value) {
   loom_testbench_value_t result = {};
@@ -66,6 +118,40 @@ TEST_F(HalTestbenchActualTest, RequiresExplicitDeviceWhenHalProviderExists) {
   EXPECT_THAT(status.ToString(), HasSubstr("fake-hal"));
 
   loom_run_hal_testbench_context_deinitialize(&context);
+}
+
+TEST_F(HalTestbenchActualTest, FocusCompileModuleKeepsSelectedRootOnly) {
+  static const char kSource[] =
+      "kernel.def @selected() {\n"
+      "  %one = index.constant 1 : index\n"
+      "  kernel.launch.config workgroups(%one, %one, %one) "
+      "workgroup_size(%one, %one, %one) : index\n"
+      "} launch() {\n"
+      "  kernel.return\n"
+      "}\n"
+      "\n"
+      "kernel.def @sibling() {\n"
+      "  %two = index.constant 2 : index\n"
+      "  kernel.launch.config workgroups(%two, %two, %two) "
+      "workgroup_size(%two, %two, %two) : index\n"
+      "} launch() {\n"
+      "  kernel.return\n"
+      "}\n";
+
+  loom_run_module_t module = {};
+  IREE_ASSERT_OK(Parse(IREE_SV(kSource), &module));
+  ASSERT_EQ(module.module->symbols.count, 2u);
+  ASSERT_TRUE(ModuleHasSymbol(module.module, IREE_SV("selected")));
+  ASSERT_TRUE(ModuleHasSymbol(module.module, IREE_SV("sibling")));
+
+  IREE_ASSERT_OK(loom_run_hal_testbench_focus_compile_module(
+      &session_, &module, IREE_SV("selected"), iree_allocator_system()));
+
+  EXPECT_EQ(module.module->symbols.count, 1u);
+  EXPECT_TRUE(ModuleHasSymbol(module.module, IREE_SV("selected")));
+  EXPECT_FALSE(ModuleHasSymbol(module.module, IREE_SV("sibling")));
+
+  loom_run_module_deinitialize(&module);
 }
 
 TEST_F(HalTestbenchActualTest, ScalarInputsPackDispatchConstantWords) {

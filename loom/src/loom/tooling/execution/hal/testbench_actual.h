@@ -87,6 +87,16 @@ iree_status_t loom_run_hal_testbench_count_actual_invocations(
     const loom_testbench_case_plan_t* case_plan,
     iree_host_size_t* out_actual_invocation_count);
 
+// Contracts |run_module| to the symbols reachable from |root_symbol|.
+//
+// HAL actual benchmarks compile one selected invocation at a time. This helper
+// applies the same materialized-module root linking used by focused compile
+// tools so sibling kernels cannot change pass diagnostics, reports, or artifact
+// emission for the selected actual root.
+iree_status_t loom_run_hal_testbench_focus_compile_module(
+    loom_run_session_t* session, loom_run_module_t* run_module,
+    iree_string_view_t root_symbol, iree_allocator_t allocator);
+
 typedef struct loom_run_hal_testbench_actual_provider_options_t {
   // Shared HAL context used to prepare and dispatch the candidate.
   loom_run_hal_testbench_context_t* context;
