@@ -217,6 +217,8 @@ iree_status_t iree_hal_streaming_stream_create(
   stream->capture_mode = IREE_HAL_STREAMING_CAPTURE_MODE_GLOBAL;
   stream->capture_graph = NULL;
   stream->capture_graph_owned = false;
+  stream->capture_origin = false;
+  stream->capture_joined_to_origin = false;
   stream->capture_id = 0;
   stream->capture_owner_thread_id = 0;
   stream->capture_dependencies = NULL;
@@ -305,10 +307,10 @@ iree_status_t iree_hal_streaming_stream_begin_locked(
     iree_hal_streaming_stream_t* stream) {
   IREE_ASSERT_ARGUMENT(stream);
 
-  // Create command buffer if not already created.
-  // Note that we set UNRETAINED as we ensure the resources we have to track are
-  // retained at the graph exec level and CUDA/HIP don't make any statements
-  // about resource lifetime.
+  // Create command buffer if not already created. HIP pointer lifetime is
+  // enforced by free/unregister ordering, not by launch-time pointer discovery:
+  // synchronous destruction waits for active streams, and asynchronous
+  // destruction queues the release after prior stream work.
   iree_status_t status = iree_ok_status();
   if (!stream->command_buffer) {
     status = iree_hal_command_buffer_create(
@@ -434,6 +436,8 @@ iree_status_t iree_hal_streaming_stream_query(
   IREE_ASSERT_ARGUMENT(stream);
   IREE_ASSERT_ARGUMENT(status);
 
+  IREE_RETURN_IF_ERROR(iree_hal_streaming_stream_flush(stream));
+
   uint64_t current_value = 0;
   iree_status_t query_status =
       iree_hal_semaphore_query(stream->timeline_semaphore, &current_value);
@@ -467,6 +471,17 @@ iree_status_t iree_hal_streaming_stream_synchronize(
 
   int status = 0;
   uint64_t timing_step_ns = timing_enabled ? hrx_launch_timing_now_ns() : 0;
+  // HIP launches are logically submitted work even when HRX batches command
+  // buffer recording. Before waiting on one stream, submit other pending
+  // streams so cross-stream or cross-device spin/wait kernels can make forward
+  // progress.
+  iree_status_t flush_all_status = iree_hal_streaming_context_flush_all();
+  if (timing_enabled) {
+    timing_flush_ns += hrx_launch_timing_now_ns() - timing_step_ns;
+  }
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, flush_all_status);
+
+  timing_step_ns = timing_enabled ? hrx_launch_timing_now_ns() : 0;
   iree_status_t flush_status = iree_hal_streaming_stream_flush(stream);
   if (timing_enabled) {
     timing_flush_ns += hrx_launch_timing_now_ns() - timing_step_ns;
@@ -557,10 +572,19 @@ iree_status_t iree_hal_streaming_stream_wait_event(
       IREE_RETURN_AND_END_ZONE_IF_ERROR(
           z0, iree_hal_streaming_stream_flush(stream));
 
+      unsigned long long capture_id = 0;
+      if (!event->recording_stream) {
+        IREE_RETURN_AND_END_ZONE_IF_ERROR(
+            z0, iree_hal_streaming_context_allocate_capture_id(
+                    stream->context, &capture_id));
+      }
+
       iree_slim_mutex_lock(&stream->mutex);
       if (stream->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_NONE) {
         stream->capture_graph = event->capture_graph;
         stream->capture_graph_owned = true;
+        stream->capture_origin = false;
+        stream->capture_joined_to_origin = false;
         if (event->recording_stream) {
           stream->capture_mode = event->recording_stream->capture_mode;
           stream->capture_id = event->recording_stream->capture_id;
@@ -568,7 +592,7 @@ iree_status_t iree_hal_streaming_stream_wait_event(
               event->recording_stream->capture_owner_thread_id;
         } else {
           stream->capture_mode = IREE_HAL_STREAMING_CAPTURE_MODE_GLOBAL;
-          stream->capture_id = stream->capture_id + 1;
+          stream->capture_id = capture_id;
           stream->capture_owner_thread_id = 0;
         }
         iree_hal_streaming_graph_retain(stream->capture_graph);
@@ -589,6 +613,11 @@ iree_status_t iree_hal_streaming_stream_wait_event(
                 stream, event->capture_dependencies,
                 event->capture_dependency_count,
                 IREE_HAL_STREAMING_CAPTURE_DEPENDENCIES_ADD));
+    if (event->recording_stream && stream->capture_origin &&
+        event->recording_stream != stream &&
+        event->recording_stream->capture_graph == stream->capture_graph) {
+      event->recording_stream->capture_joined_to_origin = true;
+    }
     IREE_TRACE_ZONE_END(z0);
     return iree_ok_status();
   }
@@ -630,6 +659,151 @@ iree_status_t iree_hal_streaming_stream_wait_event(
 // Execution control
 //===----------------------------------------------------------------------===//
 
+static bool iree_hal_streaming_buffer_can_import_for_context(
+    const iree_hal_streaming_buffer_t* buffer) {
+  if (!buffer) return false;
+  if (buffer->is_managed) return true;
+  return iree_all_bits_set((iree_hal_memory_type_t)buffer->memory_type,
+                           IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+                               IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE);
+}
+
+static iree_status_t iree_hal_streaming_device_buffer_for_context(
+    iree_hal_streaming_context_t* context,
+    iree_hal_streaming_buffer_t* buffer, iree_hal_buffer_t** out_buffer,
+    iree_hal_streaming_deviceptr_t* out_device_ptr) {
+  IREE_ASSERT_ARGUMENT(context);
+  IREE_ASSERT_ARGUMENT(buffer);
+  IREE_ASSERT_ARGUMENT(out_buffer);
+  *out_buffer = NULL;
+  if (out_device_ptr) *out_device_ptr = 0;
+
+  if (buffer->context == context) {
+    *out_buffer = buffer->buffer;
+    if (out_device_ptr) *out_device_ptr = buffer->device_ptr;
+    return iree_ok_status();
+  }
+  if (!iree_hal_streaming_buffer_can_import_for_context(buffer)) {
+    return iree_status_from_code(IREE_STATUS_NOT_FOUND);
+  }
+  if (buffer->is_managed &&
+      (!buffer->host_ptr ||
+       (iree_hal_streaming_deviceptr_t)(uintptr_t)buffer->host_ptr !=
+           buffer->device_ptr)) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "cross-device managed memory requires one stable host/device address");
+  }
+  if (!buffer->buffer || buffer->device_ptr == 0 || buffer->size == 0) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "allocation is missing device import metadata");
+  }
+  iree_status_t status = iree_ok_status();
+  iree_slim_mutex_lock(&buffer->context_import_mutex);
+  for (iree_hal_streaming_context_import_t* import = buffer->context_imports;
+       import; import = import->next) {
+    if (import->context == context) {
+      *out_buffer = import->buffer;
+      if (out_device_ptr) *out_device_ptr = buffer->device_ptr;
+      iree_slim_mutex_unlock(&buffer->context_import_mutex);
+      return iree_ok_status();
+    }
+  }
+
+  iree_hal_buffer_t* imported_buffer = NULL;
+  const bool import_host_allocation =
+      iree_all_bits_set((iree_hal_memory_type_t)buffer->memory_type,
+                        IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+                            IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE);
+  iree_hal_buffer_params_t params = {
+      .usage = iree_hal_buffer_allowed_usage(buffer->buffer),
+      .access = iree_hal_buffer_allowed_access(buffer->buffer),
+      .type = (iree_hal_memory_type_t)buffer->memory_type,
+      .queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY,
+      .min_alignment = 0,
+  };
+  iree_hal_external_buffer_t external_buffer = {
+      .type = import_host_allocation
+                  ? IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION
+                  : IREE_HAL_EXTERNAL_BUFFER_TYPE_DEVICE_ALLOCATION,
+      .flags = IREE_HAL_EXTERNAL_BUFFER_FLAG_NONE,
+      .size = buffer->size,
+  };
+  if (import_host_allocation) {
+    external_buffer.handle.host_allocation.ptr = buffer->host_ptr;
+  } else {
+    external_buffer.handle.device_allocation.ptr = buffer->device_ptr;
+  }
+  status = iree_hal_allocator_import_buffer(
+      context->device_allocator, params, &external_buffer,
+      iree_hal_buffer_release_callback_null(), &imported_buffer);
+
+  iree_hal_streaming_context_import_t* import = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc(buffer->context->host_allocator,
+                                   sizeof(*import), (void**)&import);
+  }
+  if (iree_status_is_ok(status)) {
+    import->next = buffer->context_imports;
+    import->context = context;
+    iree_hal_streaming_context_retain(context);
+    import->buffer = imported_buffer;
+    buffer->context_imports = import;
+    imported_buffer = NULL;
+    *out_buffer = import->buffer;
+    if (out_device_ptr) *out_device_ptr = buffer->device_ptr;
+  }
+  iree_slim_mutex_unlock(&buffer->context_import_mutex);
+  iree_hal_buffer_release(imported_buffer);
+  return status;
+}
+
+static iree_status_t iree_hal_streaming_lookup_kernel_buffer_ref(
+    iree_hal_streaming_context_t* context, void* device_ptr,
+    iree_hal_buffer_ref_t* out_ref) {
+  IREE_ASSERT_ARGUMENT(context);
+  IREE_ASSERT_ARGUMENT(device_ptr);
+  IREE_ASSERT_ARGUMENT(out_ref);
+  *out_ref = (iree_hal_buffer_ref_t){0};
+
+  // This resolves explicit pointer arguments described by kernel metadata into
+  // HAL buffer bindings. It is not a lifetime analysis: HIP device pointers can
+  // be hidden in opaque kernarg bytes or device memory, so free/unregister paths
+  // must conservatively order destruction without relying on lookup coverage.
+  iree_hal_streaming_buffer_ref_t stream_ref;
+  iree_status_t status = iree_hal_streaming_memory_lookup(
+      context, (iree_hal_streaming_deviceptr_t)(uintptr_t)device_ptr,
+      &stream_ref);
+  if (iree_status_is_ok(status) ||
+      iree_status_code(status) != IREE_STATUS_NOT_FOUND) {
+    if (!iree_status_is_ok(status)) return status;
+  } else {
+    iree_status_ignore(status);
+    iree_hal_streaming_context_t* owner_context = NULL;
+    status = iree_hal_streaming_memory_lookup_range_across_contexts(
+        (iree_hal_streaming_deviceptr_t)(uintptr_t)device_ptr, 1,
+        &owner_context, &stream_ref);
+    if (!iree_status_is_ok(status)) return status;
+
+    if (!iree_hal_streaming_buffer_can_import_for_context(stream_ref.buffer)) {
+      iree_hal_streaming_context_release(owner_context);
+      return iree_status_from_code(IREE_STATUS_NOT_FOUND);
+    }
+    iree_hal_streaming_context_release(owner_context);
+  }
+
+  iree_hal_buffer_t* device_buffer = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_streaming_device_buffer_for_context(
+      context, stream_ref.buffer, &device_buffer, NULL));
+  const iree_device_size_t length =
+      stream_ref.offset < stream_ref.buffer->size
+          ? stream_ref.buffer->size - stream_ref.offset
+          : 0;
+  *out_ref = iree_hal_make_buffer_ref(device_buffer, stream_ref.offset, length);
+  return iree_ok_status();
+}
+
 iree_status_t iree_hal_streaming_unpack_parameters(
     iree_hal_streaming_context_t* context,
     const iree_hal_streaming_parameter_info_t* parameters,
@@ -666,25 +840,23 @@ iree_status_t iree_hal_streaming_unpack_parameters(
   for (uint32_t i = 0; i < parameters->binding_count; ++i, ++op) {
     const iree_hal_streaming_parameter_resolve_op_t resolve_op = op->resolve;
     void* device_ptr = *(void**)(parameter_buffer + resolve_op.src_offset);
-    // TODO(benvanik): possibly calculate proper range here? We could easily
-    // (at only the cost of a cache miss) get the total buffer size and then
-    // subtract the offset to get the remaining size.
+    // Kernel metadata identifies pointer slots but not the dynamic object
+    // extent. Resolve with an unknown length; the HAL buffer reference owns
+    // the allocation for dispatch.
 
     if (!device_ptr) {
       bindings[resolve_op.dst_ordinal] = (iree_hal_buffer_ref_t){0};
       continue;
     }
 
-    iree_hal_streaming_buffer_ref_t stream_ref;
-    iree_status_t lookup_status = iree_hal_streaming_memory_lookup(
-        context, (iree_hal_streaming_deviceptr_t)device_ptr, &stream_ref);
+    iree_status_t lookup_status =
+        iree_hal_streaming_lookup_kernel_buffer_ref(
+            context, device_ptr, &bindings[resolve_op.dst_ordinal]);
     // If lookup fails, the kernel uses external device pointers.
     // Return NOT_FOUND to signal that this kernel needs raw argument passing.
     if (!iree_status_is_ok(lookup_status)) {
       return lookup_status;
     }
-    bindings[resolve_op.dst_ordinal] =
-        iree_hal_streaming_convert_buffer_ref(stream_ref);
   }
 
   return iree_ok_status();
@@ -704,8 +876,8 @@ iree_status_t iree_hal_streaming_unpack_parameter_list(
   IREE_ASSERT_ARGUMENT(out_bindings);
 
   // When parameters are provided as an array of pointers, each element in the
-  // array points to the actual parameter value. We need to dereference each
-  // pointer and handle buffer translation.
+  // array points to the actual parameter value. Metadata-described pointer
+  // slots can be resolved to HAL bindings; arbitrary bytes stay raw.
 
   // Copy constant data spans.
   // For each copy operation, we read from the parameter list at the source
@@ -734,25 +906,78 @@ iree_status_t iree_hal_streaming_unpack_parameter_list(
     void* param_ptr = parameter_list[resolve_op.src_ordinal];
     // The parameter points to a device pointer (void*)
     void* device_ptr = *(void**)param_ptr;
-    // TODO(benvanik): possibly calculate proper range here? We could easily
-    // (at only the cost of a cache miss) get the total buffer size and then
-    // subtract the offset to get the remaining size.
+    // Kernel metadata identifies pointer slots but not the dynamic object
+    // extent. Resolve with an unknown length; the HAL buffer reference owns
+    // the allocation for dispatch.
 
     if (!device_ptr) {
       bindings[resolve_op.dst_ordinal] = (iree_hal_buffer_ref_t){0};
       continue;
     }
 
-    iree_hal_streaming_buffer_ref_t stream_ref;
-    iree_status_t lookup_status = iree_hal_streaming_memory_lookup(
-        context, (iree_hal_streaming_deviceptr_t)device_ptr, &stream_ref);
+    iree_status_t lookup_status =
+        iree_hal_streaming_lookup_kernel_buffer_ref(
+            context, device_ptr, &bindings[resolve_op.dst_ordinal]);
     // If lookup fails, the kernel uses external device pointers.
     // Return NOT_FOUND to signal that this kernel needs raw argument passing.
     if (!iree_status_is_ok(lookup_status)) {
       return lookup_status;
     }
-    bindings[resolve_op.dst_ordinal] =
-        iree_hal_streaming_convert_buffer_ref(stream_ref);
+  }
+
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_streaming_pack_raw_argument_list(
+    const iree_hal_streaming_parameter_info_t* parameters,
+    void** parameter_list, void* out_constants,
+    iree_host_size_t* out_constants_size) {
+  IREE_ASSERT_ARGUMENT(parameters);
+  IREE_ASSERT_ARGUMENT(out_constants_size);
+
+  *out_constants_size = parameters->direct_arg_bytes
+                            ? parameters->direct_arg_bytes
+                            : parameters->constant_bytes;
+  if (*out_constants_size == 0) return iree_ok_status();
+  if (!parameter_list || !out_constants) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "raw kernel arguments require parameter storage");
+  }
+
+  uint8_t* constants = (uint8_t*)out_constants;
+  const iree_hal_streaming_parameter_op_t* op = &parameters->ops[0];
+  for (uint32_t i = 0; i < parameters->copy_count; ++i, ++op) {
+    const iree_hal_streaming_parameter_copy_op_t copy_op = op->copy;
+    void* param_ptr = parameter_list[copy_op.src_ordinal];
+    if (!param_ptr) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "kernel argument %" PRIu32 " is NULL",
+                              (uint32_t)copy_op.src_ordinal);
+    }
+    if ((iree_host_size_t)copy_op.direct_dst_offset > *out_constants_size ||
+        (iree_host_size_t)copy_op.size >
+            *out_constants_size - copy_op.direct_dst_offset) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "kernel argument copy exceeds kernarg size");
+    }
+    memcpy(constants + copy_op.direct_dst_offset, param_ptr, copy_op.size);
+  }
+
+  for (uint32_t i = 0; i < parameters->binding_count; ++i, ++op) {
+    const iree_hal_streaming_parameter_resolve_op_t resolve_op = op->resolve;
+    void* param_ptr = parameter_list[resolve_op.src_ordinal];
+    if (!param_ptr) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "kernel argument %" PRIu32 " is NULL",
+                              (uint32_t)resolve_op.src_ordinal);
+    }
+    void* device_ptr = *(void**)param_ptr;
+    if ((iree_host_size_t)resolve_op.dst_offset > *out_constants_size ||
+        sizeof(device_ptr) > *out_constants_size - resolve_op.dst_offset) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "kernel pointer argument exceeds kernarg size");
+    }
+    memcpy(constants + resolve_op.dst_offset, &device_ptr, sizeof(void*));
   }
 
   return iree_ok_status();
@@ -785,16 +1010,17 @@ iree_status_t iree_hal_streaming_launch_kernel(
 
   // Check if cooperative launch is requested.
   if (params->flags & IREE_HAL_STREAMING_DISPATCH_FLAG_COOPERATIVE) {
-    // TODO: Add HAL dispatch flag for cooperative kernel support and pass
-    // through to the backend. For now, return unimplemented.
+    // Cooperative launch requires a backend dispatch mode that reserves the
+    // full grid concurrently. The HAL dispatch path does not expose that
+    // contract, so fail loudly.
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
         "cooperative kernel launch not yet implemented in HAL layer");
   }
 
-  // Verify parameter buffer.
-  // TODO(benvanik): pass size when we have it so we can check it.
+  // Verify parameter buffer. Native launches provide a parameter buffer
+  // without a trusted byte length; unpacking is bounded by symbol metadata.
   if (!params->buffer && symbol->parameters.buffer_size > 0) {
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
@@ -829,8 +1055,7 @@ iree_status_t iree_hal_streaming_launch_kernel(
   }
 
   // Stack allocate arrays based on cached sizes.
-  // Zero-initialize constants to prevent uninitialized padding bytes from
-  // being misinterpreted as device pointers by the overlay scan.
+  // Zero-initialize constants so ABI padding is deterministic.
   void* constants = symbol->parameters.constant_bytes
                         ? iree_alloca(symbol->parameters.constant_bytes)
                         : NULL;
@@ -853,8 +1078,8 @@ iree_status_t iree_hal_streaming_launch_kernel(
   bool use_raw_arguments = false;
 
   // Check if this is a pre-packed buffer (HIP_LAUNCH_PARAM_BUFFER format).
-  // Pre-packed buffers are already in the kernel's native ABI format and should
-  // be passed directly without any unpacking or translation.
+  // Pre-packed buffers are already in the kernel's native ABI format and must
+  // be passed directly without unpacking or pointer rewriting.
   bool is_pre_packed =
       (params->flags & IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED) != 0;
 
@@ -879,16 +1104,13 @@ iree_status_t iree_hal_streaming_launch_kernel(
     }
     binding_list.count = 0;  // No IREE bindings, using raw pointers.
     use_raw_arguments = true;
-  } else if (is_native_kernel && params->buffer) {
-    // Native kernel with pre-packed buffer: pass raw arguments directly.
-    // For native kernels, params->buffer contains the pre-packed kernel
-    // arguments that should be passed as-is to the GPU.
-    constants = params->buffer;
-    if (params->buffer_size > 0) {
-      constants_size = params->buffer_size;
-    }
-    use_raw_arguments = true;
   } else if (params->flags & IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY) {
+    if (is_native_kernel && params->buffer) {
+      IREE_TRACE_ZONE_END(z0);
+      return iree_make_status(
+          IREE_STATUS_UNIMPLEMENTED,
+          "args-array kernel launch requires parameter metadata");
+    }
     // Unpack parameters from array of pointers (void**).
     iree_status_t unpack_status = iree_hal_streaming_unpack_parameter_list(
         stream->context, &symbol->parameters, (void**)params->buffer, constants,
@@ -916,33 +1138,11 @@ iree_status_t iree_hal_streaming_launch_kernel(
                              : params_info->constant_bytes;
         constants = iree_alloca(constants_size);
         memset(constants, 0, constants_size);
-
-        // Process all copy operations (constants/scalars).
-        const iree_hal_streaming_parameter_op_t* op = &params_info->ops[0];
-        for (uint32_t i = 0; i < params_info->copy_count; ++i, ++op) {
-          const iree_hal_streaming_parameter_copy_op_t copy_op = op->copy;
-          // Dereference the arg pointer to get the value.
-          void* param_ptr = args_array[copy_op.src_ordinal];
-          memcpy((uint8_t*)constants + copy_op.direct_dst_offset, param_ptr,
-                 copy_op.size);
-        }
-
-        // Process all resolve operations (bindings/pointers) - copy the raw
-        // pointer. For native kernels, we pass the device pointer value
-        // directly.
-        for (uint32_t i = 0; i < params_info->binding_count; ++i, ++op) {
-          const iree_hal_streaming_parameter_resolve_op_t resolve_op =
-              op->resolve;
-          void* param_ptr = args_array[resolve_op.src_ordinal];
-          // The parameter points to a device pointer (void*)
-          void* device_ptr = *(void**)param_ptr;
-          // Copy the raw device pointer value into the constants buffer at the
-          // correct kernel ABI offset. dst_offset is the kernel's argument
-          // offset (from the code object metadata), NOT src_offset (which is a
-          // running total used for source buffer layout in non-args-array
-          // mode).
-          memcpy((uint8_t*)constants + resolve_op.dst_offset, &device_ptr,
-                 sizeof(void*));
+        iree_status_t pack_status = iree_hal_streaming_pack_raw_argument_list(
+            params_info, args_array, constants, &constants_size);
+        if (!iree_status_is_ok(pack_status)) {
+          IREE_TRACE_ZONE_END(z0);
+          return pack_status;
         }
 
         binding_list.count = 0;  // No IREE bindings, using raw pointers.
@@ -952,6 +1152,15 @@ iree_status_t iree_hal_streaming_launch_kernel(
         return unpack_status;
       }
     }
+  } else if (is_native_kernel && params->buffer) {
+    // Native kernel with pre-packed buffer: pass raw arguments directly. This
+    // path is only valid when the caller did not declare the buffer as a HIP
+    // args array, because a void** parameter list is not a native kernarg pack.
+    constants = params->buffer;
+    if (params->buffer_size > 0) {
+      constants_size = params->buffer_size;
+    }
+    use_raw_arguments = true;
   } else {
     // Unpack parameters from packed buffer.
     iree_status_t unpack_status = iree_hal_streaming_unpack_parameters(
@@ -1125,7 +1334,6 @@ iree_status_t iree_hal_streaming_launch_kernel(
   if (!dispatch_directly && iree_status_is_ok(status) && should_flush) {
     status = iree_hal_streaming_stream_flush(stream);
   }
-
   if (timing_enabled) {
     ++g_hrx_launch_timing.launch_count;
     g_hrx_launch_timing.launch_total_ns +=
@@ -1139,13 +1347,13 @@ iree_status_t iree_hal_streaming_launch_kernel(
   return status;
 }
 
-// Host callback wrapper structure to adapt CUDA/HIP callbacks to HAL callbacks.
+// Host callback wrapper structure to adapt HIP callbacks to HAL callbacks.
 typedef struct iree_hal_streaming_host_callback_t {
   void (*fn)(void* user_data);
   void* user_data;
 } iree_hal_streaming_host_callback_t;
 
-// HAL host call function that invokes the CUDA/HIP style callback.
+// HAL host call function that invokes the HIP-style callback.
 static iree_status_t iree_hal_streaming_host_callback_thunk(
     void* user_data, const uint64_t args[4],
     iree_hal_host_call_context_t* context) {
@@ -1176,11 +1384,10 @@ iree_status_t iree_hal_streaming_launch_host_function(
     return iree_ok_status();
   }
 
-  // Flush any pending operations in the stream's command buffer.
-  if (stream->command_buffer) {
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(z0,
-                                      iree_hal_streaming_stream_flush(stream));
-  }
+  // Flush any pending command-buffer work so the host call can sit at a
+  // concrete point on the stream timeline.
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0,
+                                    iree_hal_streaming_stream_flush(stream));
 
   // Allocate a wrapper structure to hold the callback and user data.
   iree_hal_streaming_host_callback_t* callback = NULL;
@@ -1190,37 +1397,32 @@ iree_status_t iree_hal_streaming_launch_host_function(
   callback->fn = fn;
   callback->user_data = user_data;
 
-  // Set up semaphores for the host call.
-  // Wait for the current stream position.
+  uint64_t args[4] = {0, 0, 0, 0};
+  iree_hal_host_call_t call =
+      iree_hal_make_host_call(iree_hal_streaming_host_callback_thunk, callback);
+
+  iree_slim_mutex_lock(&stream->mutex);
   uint64_t wait_value = stream->pending_value;
+  uint64_t signal_value = wait_value + 1;
   iree_hal_semaphore_list_t wait_semaphores = {
       .count = wait_value > 0 ? 1 : 0,
       .semaphores = &stream->timeline_semaphore,
       .payload_values = &wait_value,
   };
-
-  // Signal the next value after the host call completes.
-  uint64_t signal_value = stream->pending_value + 1;
-  stream->pending_value = signal_value;
   iree_hal_semaphore_list_t signal_semaphores = {
       .count = 1,
       .semaphores = &stream->timeline_semaphore,
       .payload_values = &signal_value,
   };
 
-  // Create the host call with our wrapper function.
-  iree_hal_host_call_t call =
-      iree_hal_make_host_call(iree_hal_streaming_host_callback_thunk, callback);
-
-  // Empty args array (not used by CUDA/HIP callbacks).
-  uint64_t args[4] = {0, 0, 0, 0};
-
-  // Enqueue the host call on the device queue.
-  // Use blocking mode so that stream synchronization waits for the host
-  // function to complete before returning.
   iree_status_t status = iree_hal_device_queue_host_call(
       stream->context->device, stream->queue_affinity, wait_semaphores,
       signal_semaphores, call, args, /*flags=*/0);
+  if (iree_status_is_ok(status)) {
+    stream->pending_value = signal_value;
+    stream->submitted_value = signal_value;
+  }
+  iree_slim_mutex_unlock(&stream->mutex);
 
   if (!iree_status_is_ok(status)) {
     iree_allocator_free(iree_allocator_system(), callback);

@@ -9,7 +9,9 @@
 // preserving a loud unsupported result if one of these paths is executed.
 
 #include <dlfcn.h>
+#include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "libhrx/src/binding/hip/api.h"
@@ -26,7 +28,6 @@ typedef struct textureReference textureReference;
 typedef struct HIP_ARRAY_DESCRIPTOR HIP_ARRAY_DESCRIPTOR;
 typedef struct HIP_ARRAY3D_DESCRIPTOR HIP_ARRAY3D_DESCRIPTOR;
 typedef struct HIP_LAUNCH_CONFIG_st HIP_LAUNCH_CONFIG;
-typedef struct HIP_MEMCPY3D HIP_MEMCPY3D;
 typedef struct HIP_RESOURCE_DESC HIP_RESOURCE_DESC;
 typedef struct HIP_RESOURCE_VIEW_DESC HIP_RESOURCE_VIEW_DESC;
 typedef struct HIP_TEXTURE_DESC HIP_TEXTURE_DESC;
@@ -57,28 +58,73 @@ typedef struct hipLaunchConfig_st hipLaunchConfig_t;
 typedef struct hipLaunchParams_t hipLaunchParams;
 typedef struct hipLibrary_st* hipLibrary_t;
 typedef struct ihipLinkState_t* hipLinkState_t;
-typedef struct hipMemAllocNodeParams hipMemAllocNodeParams;
-typedef struct hipMemcpy3DBatchOp hipMemcpy3DBatchOp;
 typedef struct hipMemcpy3DPeerParms hipMemcpy3DPeerParms;
-typedef struct hipMemcpyAttributes hipMemcpyAttributes;
+typedef enum hipMemcpyFlags {
+  hipMemcpyFlagDefault = 0x0,
+  hipMemcpyFlagPreferOverlapWithCompute = 0x1,
+  hipMemcpyFlagExtPreferCE = 0x100,
+  hipMemcpyFlagExtOpSwap = 0x200,
+  hipMemcpyFlagExtOpIndirectSrc = 0x400,
+  hipMemcpyFlagExtOpIndirectDst = 0x800,
+} hipMemcpyFlags;
+typedef enum hipMemcpySrcAccessOrder {
+  hipMemcpySrcAccessOrderInvalid = 0x0,
+  hipMemcpySrcAccessOrderStream = 0x1,
+  hipMemcpySrcAccessOrderDuringApiCall = 0x2,
+  hipMemcpySrcAccessOrderAny = 0x3,
+  hipMemcpySrcAccessOrderMax = 0x7fffffff,
+} hipMemcpySrcAccessOrder;
+typedef struct hipMemcpyAttributes {
+  hipMemcpySrcAccessOrder srcAccessOrder;
+  hipMemLocation srcLocHint;
+  hipMemLocation dstLocHint;
+  unsigned int flags;
+} hipMemcpyAttributes;
+typedef enum hipMemcpy3DOperandType {
+  hipMemcpyOperandTypePointer = 0x1,
+  hipMemcpyOperandTypeArray = 0x2,
+  hipMemcpyOperandTypeMax = 0x7fffffff,
+} hipMemcpy3DOperandType;
+typedef struct hipOffset3D {
+  size_t x;
+  size_t y;
+  size_t z;
+} hipOffset3D;
+typedef struct hipMemcpy3DOperand {
+  hipMemcpy3DOperandType type;
+  union {
+    struct {
+      void* ptr;
+      size_t rowLength;
+      size_t layerHeight;
+      hipMemLocation locHint;
+    } ptr;
+    struct {
+      hipArray_t array;
+      hipOffset3D offset;
+    } array;
+  } op;
+} hipMemcpy3DOperand;
+typedef struct hipMemcpy3DBatchOp {
+  hipMemcpy3DOperand src;
+  hipMemcpy3DOperand dst;
+  hipExtent extent;
+  hipMemcpySrcAccessOrder srcAccessOrder;
+  unsigned int flags;
+} hipMemcpy3DBatchOp;
 typedef struct hipResourceDesc hipResourceDesc;
 typedef struct hipResourceViewDesc hipResourceViewDesc;
 typedef struct hipStreamBatchMemOpParams hipStreamBatchMemOpParams;
 typedef struct hipTextureDesc hipTextureDesc;
-typedef struct hip_Memcpy2D hip_Memcpy2D;
 typedef struct hipDevResource_st hipDevResource;
 typedef struct hipDevSmResourceGroupParams_st hipDevSmResourceGroupParams;
 typedef int hipArray_Format;
 typedef int hipDevResourceType;
 typedef int hipDriverEntryPointQueryResult;
 typedef int hipFunction_attribute;
-typedef int hipGraphMemAttributeType;
 typedef int hipJitInputType;
-typedef int hipKernelNodeAttrID;
-typedef int hipKernelNodeAttrValue;
 typedef int hipLibraryOption;
 typedef int hipMemRangeHandleType;
-typedef int hipMemoryAdvise;
 typedef int hipStreamAttrID;
 typedef int hipStreamAttrValue;
 typedef void (*hipStreamCallback_t)(hipStream_t stream, hipError_t status,
@@ -142,6 +188,22 @@ static hipError_t hrx_hip_spt_lookup(const char* symbol, void** function,
   *function = found;
   if (symbol_status) *(int*)symbol_status = found ? 0 : 1;
   return found ? hipSuccess : hipErrorNotFound;
+}
+
+typedef struct hrx_hip_stream_callback_thunk_t {
+  hipStreamCallback_t callback;
+  hipStream_t stream;
+  void* user_data;
+} hrx_hip_stream_callback_thunk_t;
+
+static void hrx_hip_stream_callback_host_fn(void* user_data) {
+  hrx_hip_stream_callback_thunk_t* thunk =
+      (hrx_hip_stream_callback_thunk_t*)user_data;
+  hipStreamCallback_t callback = thunk->callback;
+  hipStream_t stream = thunk->stream;
+  void* callback_user_data = thunk->user_data;
+  free(thunk);
+  callback(stream, hipSuccess, callback_user_data);
 }
 
 HIPAPI const char* hipApiName(uint32_t id) {
@@ -394,54 +456,6 @@ HIPAPI hipError_t hipDeviceGetTexture1DLinearMaxWidth(
   return hipErrorNotSupported;
 }
 
-HIPAPI hipError_t hipDeviceSetGraphMemAttribute(int device,
-                                                hipGraphMemAttributeType attr,
-                                                void* value) {
-  (void)device;
-  (void)attr;
-  (void)value;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipDrvGraphAddMemsetNode(hipGraphNode_t* phGraphNode,
-                                           hipGraph_t hGraph,
-                                           const hipGraphNode_t* dependencies,
-                                           size_t numDependencies,
-                                           const hipMemsetParams* memsetParams,
-                                           hipCtx_t ctx) {
-  (void)phGraphNode;
-  (void)hGraph;
-  (void)dependencies;
-  (void)numDependencies;
-  (void)memsetParams;
-  (void)ctx;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipDrvGraphExecMemsetNodeSetParams(
-    hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
-    const hipMemsetParams* memsetParams, hipCtx_t ctx) {
-  (void)hGraphExec;
-  (void)hNode;
-  (void)memsetParams;
-  (void)ctx;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipDrvGraphMemcpyNodeGetParams(hipGraphNode_t hNode,
-                                                 HIP_MEMCPY3D* nodeParams) {
-  (void)hNode;
-  (void)nodeParams;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipDrvGraphMemcpyNodeSetParams(
-    hipGraphNode_t hNode, const HIP_MEMCPY3D* nodeParams) {
-  (void)hNode;
-  (void)nodeParams;
-  return hipErrorNotSupported;
-}
-
 HIPAPI hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config,
                                        hipFunction_t f, void** params,
                                        void** extra) {
@@ -453,20 +467,75 @@ HIPAPI hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config,
 }
 
 HIPAPI hipError_t hipDrvMemcpy2DUnaligned(const hip_Memcpy2D* pCopy) {
-  (void)pCopy;
-  return hipErrorNotSupported;
-}
+  if (!pCopy) return hipErrorInvalidValue;
+  if (pCopy->srcMemoryType == hipMemoryTypeArray) {
+    return pCopy->srcArray ? hipErrorNotSupported : hipErrorInvalidValue;
+  }
+  if (pCopy->dstMemoryType == hipMemoryTypeArray) {
+    return pCopy->dstArray ? hipErrorNotSupported : hipErrorInvalidValue;
+  }
 
-HIPAPI hipError_t hipDrvMemcpy3D(const HIP_MEMCPY3D* pCopy) {
-  (void)pCopy;
-  return hipErrorNotSupported;
-}
+  const void* src = NULL;
+  switch (pCopy->srcMemoryType) {
+    case hipMemoryTypeHost:
+      src = pCopy->srcHost;
+      break;
+    case hipMemoryTypeDevice:
+    case hipMemoryTypeUnified:
+      src = pCopy->srcDevice;
+      break;
+    default:
+      return hipErrorInvalidValue;
+  }
+  void* dst = NULL;
+  switch (pCopy->dstMemoryType) {
+    case hipMemoryTypeHost:
+      dst = pCopy->dstHost;
+      break;
+    case hipMemoryTypeDevice:
+    case hipMemoryTypeUnified:
+      dst = pCopy->dstDevice;
+      break;
+    default:
+      return hipErrorInvalidValue;
+  }
+  if (!src || !dst) return hipErrorInvalidValue;
+  if ((pCopy->WidthInBytes != 0 &&
+       (pCopy->srcXInBytes > pCopy->srcPitch ||
+        pCopy->dstXInBytes > pCopy->dstPitch ||
+        pCopy->WidthInBytes > pCopy->srcPitch - pCopy->srcXInBytes ||
+        pCopy->WidthInBytes > pCopy->dstPitch - pCopy->dstXInBytes))) {
+    return hipErrorInvalidValue;
+  }
+  const size_t max_size = (size_t)-1;
+  if ((pCopy->srcY != 0 &&
+       pCopy->srcPitch > (max_size - pCopy->srcXInBytes) / pCopy->srcY) ||
+      (pCopy->dstY != 0 &&
+       pCopy->dstPitch > (max_size - pCopy->dstXInBytes) / pCopy->dstY)) {
+    return hipErrorInvalidValue;
+  }
 
-HIPAPI hipError_t hipDrvMemcpy3DAsync(const HIP_MEMCPY3D* pCopy,
-                                      hipStream_t stream) {
-  (void)pCopy;
-  (void)stream;
-  return hipErrorNotSupported;
+  hipMemcpyKind kind = hipMemcpyDefault;
+  if (pCopy->srcMemoryType == hipMemoryTypeHost &&
+      pCopy->dstMemoryType == hipMemoryTypeHost) {
+    kind = hipMemcpyHostToHost;
+  } else if (pCopy->srcMemoryType == hipMemoryTypeHost) {
+    kind = hipMemcpyHostToDevice;
+  } else if (pCopy->dstMemoryType == hipMemoryTypeHost) {
+    kind = hipMemcpyDeviceToHost;
+  } else if (pCopy->srcMemoryType == hipMemoryTypeDevice &&
+             pCopy->dstMemoryType == hipMemoryTypeDevice) {
+    kind = hipMemcpyDeviceToDevice;
+  }
+
+  const char* src_base = (const char*)src + pCopy->srcY * pCopy->srcPitch +
+                         pCopy->srcXInBytes;
+  char* dst_base =
+      (char*)dst + pCopy->dstY * pCopy->dstPitch + pCopy->dstXInBytes;
+  hipError_t result =
+      hipMemcpy2D(dst_base, pCopy->dstPitch, src_base, pCopy->srcPitch,
+                  pCopy->WidthInBytes, pCopy->Height, kind);
+  return result == hipErrorNotFound ? hipErrorInvalidValue : result;
 }
 
 HIPAPI hipError_t hipEventRecordWithFlags(hipEvent_t event, hipStream_t stream,
@@ -664,79 +733,6 @@ HIPAPI hipError_t hipGetTextureReference(const textureReference** texref,
   return hipErrorNotSupported;
 }
 
-HIPAPI hipError_t hipGraphExecChildGraphNodeSetParams(hipGraphExec_t hGraphExec,
-                                                      hipGraphNode_t node,
-                                                      hipGraph_t childGraph) {
-  (void)hGraphExec;
-  (void)node;
-  (void)childGraph;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipGraphExecEventWaitNodeSetEvent(hipGraphExec_t hGraphExec,
-                                                    hipGraphNode_t hNode,
-                                                    hipEvent_t event) {
-  (void)hGraphExec;
-  (void)hNode;
-  (void)event;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t
-hipGraphExecKernelNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t node,
-                                const hipKernelNodeParams* pNodeParams) {
-  (void)hGraphExec;
-  (void)node;
-  (void)pNodeParams;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipGraphHostNodeGetParams(hipGraphNode_t node,
-                                            hipHostNodeParams* pNodeParams) {
-  (void)node;
-  (void)pNodeParams;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipGraphKernelNodeCopyAttributes(hipGraphNode_t hSrc,
-                                                   hipGraphNode_t hDst) {
-  (void)hSrc;
-  (void)hDst;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t
-hipGraphKernelNodeGetAttribute(hipGraphNode_t hNode, hipKernelNodeAttrID attr,
-                               hipKernelNodeAttrValue* value) {
-  (void)hNode;
-  (void)attr;
-  (void)value;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t
-hipGraphKernelNodeSetAttribute(hipGraphNode_t hNode, hipKernelNodeAttrID attr,
-                               const hipKernelNodeAttrValue* value) {
-  (void)hNode;
-  (void)attr;
-  (void)value;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipGraphMemAllocNodeGetParams(
-    hipGraphNode_t node, hipMemAllocNodeParams* pNodeParams) {
-  (void)node;
-  (void)pNodeParams;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipGraphMemcpyNodeSetParams(
-    hipGraphNode_t node, const hipMemcpy3DParms* pNodeParams) {
-  (void)node;
-  (void)pNodeParams;
-  return hipErrorNotSupported;
-}
-
 HIPAPI hipError_t hipGraphExternalSemaphoresSignalNodeGetParams(
     hipGraphNode_t hNode, hipExternalSemaphoreSignalNodeParams* params_out) {
   (void)hNode;
@@ -782,30 +778,6 @@ HIPAPI hipError_t hipGraphExecExternalSemaphoresWaitNodeSetParams(
   (void)hGraphExec;
   (void)hNode;
   (void)nodeParams;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipGraphNodeGetEnabled(hipGraphExec_t hGraphExec,
-                                         hipGraphNode_t hNode,
-                                         unsigned int* isEnabled) {
-  (void)hGraphExec;
-  (void)hNode;
-  (void)isEnabled;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipGraphNodeSetEnabled(hipGraphExec_t hGraphExec,
-                                         hipGraphNode_t hNode,
-                                         unsigned int isEnabled) {
-  (void)hGraphExec;
-  (void)hNode;
-  (void)isEnabled;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipGraphUpload(hipGraphExec_t graphExec, hipStream_t stream) {
-  (void)graphExec;
-  (void)stream;
   return hipErrorNotSupported;
 }
 
@@ -1112,17 +1084,6 @@ HIPAPI hipError_t hipLinkDestroy(hipLinkState_t state) {
   return hipErrorNotSupported;
 }
 
-HIPAPI hipError_t hipMallocArray(hipArray_t* array,
-                                 const hipChannelFormatDesc* desc, size_t width,
-                                 size_t height, unsigned int flags) {
-  (void)array;
-  (void)desc;
-  (void)width;
-  (void)height;
-  (void)flags;
-  return hipErrorNotSupported;
-}
-
 HIPAPI hipError_t hipMallocMipmappedArray(
     hipMipmappedArray_t* mipmappedArray,
     const struct hipChannelFormatDesc* desc, struct hipExtent extent,
@@ -1135,31 +1096,15 @@ HIPAPI hipError_t hipMallocMipmappedArray(
   return hipErrorNotSupported;
 }
 
-HIPAPI hipError_t hipMemAdvise_v2(const void* dev_ptr, size_t count,
-                                  hipMemoryAdvise advice,
-                                  hipMemLocation device) {
-  (void)dev_ptr;
-  (void)count;
-  (void)advice;
-  (void)device;
-  return hipErrorNotSupported;
-}
-
 HIPAPI hipError_t hipMemAllocHost(void** ptr, size_t size) {
-  (void)ptr;
-  (void)size;
-  return hipErrorNotSupported;
+  return hipMallocHost(ptr, size);
 }
 
 HIPAPI hipError_t hipMemAllocPitch(hipDeviceptr_t* dptr, size_t* pitch,
                                    size_t widthInBytes, size_t height,
                                    unsigned int elementSizeBytes) {
-  (void)dptr;
-  (void)pitch;
-  (void)widthInBytes;
-  (void)height;
   (void)elementSizeBytes;
-  return hipErrorNotSupported;
+  return hipMallocPitch((void**)dptr, pitch, widthInBytes, height);
 }
 
 HIPAPI hipError_t hipMemGetHandleForAddressRange(
@@ -1181,33 +1126,6 @@ HIPAPI hipError_t hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* location,
   return hipErrorNotSupported;
 }
 
-HIPAPI hipError_t hipMemPrefetchAsync_v2(const void* dev_ptr, size_t count,
-                                         hipMemLocation location,
-                                         unsigned int flags,
-                                         hipStream_t stream) {
-  (void)dev_ptr;
-  (void)count;
-  (void)location;
-  (void)flags;
-  (void)stream;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipMemPrefetchBatchAsync(
-    void** dev_ptrs, size_t* sizes, size_t count, hipMemLocation* prefetch_locs,
-    size_t* prefetch_loc_idxs, size_t num_prefetch_locs,
-    unsigned long long flags, hipStream_t stream) {
-  (void)dev_ptrs;
-  (void)sizes;
-  (void)count;
-  (void)prefetch_locs;
-  (void)prefetch_loc_idxs;
-  (void)num_prefetch_locs;
-  (void)flags;
-  (void)stream;
-  return hipErrorNotSupported;
-}
-
 HIPAPI hipError_t hipMemSetMemPool(hipMemLocation* location,
                                    hipMemAllocationType type,
                                    hipMemPool_t pool) {
@@ -1217,94 +1135,60 @@ HIPAPI hipError_t hipMemSetMemPool(hipMemLocation* location,
   return hipErrorNotSupported;
 }
 
-HIPAPI hipError_t hipMemcpy2DArrayToArray(hipArray_t dst, size_t wOffsetDst,
-                                          size_t hOffsetDst,
-                                          hipArray_const_t src,
-                                          size_t wOffsetSrc, size_t hOffsetSrc,
-                                          size_t width, size_t height,
-                                          hipMemcpyKind kind) {
-  (void)dst;
-  (void)wOffsetDst;
-  (void)hOffsetDst;
-  (void)src;
-  (void)wOffsetSrc;
-  (void)hOffsetSrc;
-  (void)width;
-  (void)height;
-  (void)kind;
-  return hipErrorNotSupported;
+static bool hrx_hip_batch_access_order_valid(hipMemcpySrcAccessOrder order) {
+  return order == hipMemcpySrcAccessOrderInvalid ||
+         order == hipMemcpySrcAccessOrderStream ||
+         order == hipMemcpySrcAccessOrderDuringApiCall ||
+         order == hipMemcpySrcAccessOrderAny;
 }
 
-HIPAPI hipError_t hipMemcpy2DFromArray(void* dst, size_t dpitch,
-                                       hipArray_const_t src, size_t wOffset,
-                                       size_t hOffset, size_t width,
-                                       size_t height, hipMemcpyKind kind) {
-  (void)dst;
-  (void)dpitch;
-  (void)src;
-  (void)wOffset;
-  (void)hOffset;
-  (void)width;
-  (void)height;
-  (void)kind;
-  return hipErrorNotSupported;
+static hipError_t hrx_hip_batch_set_pointer_operand(
+    const hipMemcpy3DOperand* operand, bool source, const hipExtent* extent,
+    hipMemcpy3DParms* params) {
+  if (operand->type == hipMemcpyOperandTypeArray) return hipErrorNotSupported;
+  if (operand->type != hipMemcpyOperandTypePointer) return hipErrorInvalidValue;
+  if (!operand->op.ptr.ptr &&
+      extent->width != 0 && extent->height != 0 && extent->depth != 0) {
+    return hipErrorInvalidValue;
+  }
+
+  const size_t pitch =
+      operand->op.ptr.rowLength ? operand->op.ptr.rowLength : extent->width;
+  const size_t layer_height = operand->op.ptr.layerHeight
+                                  ? operand->op.ptr.layerHeight
+                                  : extent->height;
+  hipPitchedPtr pointer = {
+      .ptr = operand->op.ptr.ptr,
+      .pitch = pitch,
+      .xsize = pitch,
+      .ysize = layer_height,
+  };
+  if (source) {
+    params->srcPtr = pointer;
+  } else {
+    params->dstPtr = pointer;
+  }
+  return hipSuccess;
 }
 
-HIPAPI hipError_t hipMemcpy2DFromArrayAsync(void* dst, size_t dpitch,
-                                            hipArray_const_t src,
-                                            size_t wOffset, size_t hOffset,
-                                            size_t width, size_t height,
-                                            hipMemcpyKind kind,
-                                            hipStream_t stream) {
-  (void)dst;
-  (void)dpitch;
-  (void)src;
-  (void)wOffset;
-  (void)hOffset;
-  (void)width;
-  (void)height;
-  (void)kind;
-  (void)stream;
-  return hipErrorNotSupported;
-}
+static hipError_t hrx_hip_batch_make_3d_params(
+    const hipMemcpy3DBatchOp* op, hipMemcpy3DParms* params) {
+  if (!hrx_hip_batch_access_order_valid(op->srcAccessOrder) ||
+      op->flags != hipMemcpyFlagDefault) {
+    return hipErrorInvalidValue;
+  }
 
-HIPAPI hipError_t hipMemcpy2DToArray(hipArray_t dst, size_t wOffset,
-                                     size_t hOffset, const void* src,
-                                     size_t spitch, size_t width, size_t height,
-                                     hipMemcpyKind kind) {
-  (void)dst;
-  (void)wOffset;
-  (void)hOffset;
-  (void)src;
-  (void)spitch;
-  (void)width;
-  (void)height;
-  (void)kind;
-  return hipErrorNotSupported;
-}
+  memset(params, 0, sizeof(*params));
+  params->extent.width = op->extent.width;
+  params->extent.height = op->extent.height;
+  params->extent.depth = op->extent.depth;
+  params->kind = hipMemcpyDefault;
 
-HIPAPI hipError_t hipMemcpy2DToArrayAsync(hipArray_t dst, size_t wOffset,
-                                          size_t hOffset, const void* src,
-                                          size_t spitch, size_t width,
-                                          size_t height, hipMemcpyKind kind,
-                                          hipStream_t stream) {
-  (void)dst;
-  (void)wOffset;
-  (void)hOffset;
-  (void)src;
-  (void)spitch;
-  (void)width;
-  (void)height;
-  (void)kind;
-  (void)stream;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipMemcpy3DAsync(const struct hipMemcpy3DParms* p,
-                                   hipStream_t stream) {
-  (void)p;
-  (void)stream;
-  return hipErrorNotSupported;
+  hipError_t result =
+      hrx_hip_batch_set_pointer_operand(&op->src, true, &op->extent, params);
+  if (result != hipSuccess) return result;
+  return hrx_hip_batch_set_pointer_operand(&op->dst, false, &op->extent,
+                                           params);
 }
 
 HIPAPI hipError_t hipMemcpy3DBatchAsync(size_t numOps,
@@ -1312,12 +1196,19 @@ HIPAPI hipError_t hipMemcpy3DBatchAsync(size_t numOps,
                                         size_t* failIdx,
                                         unsigned long long flags,
                                         hipStream_t stream) {
-  (void)numOps;
-  (void)opList;
-  (void)failIdx;
-  (void)flags;
-  (void)stream;
-  return hipErrorNotSupported;
+  if (numOps == 0 || flags != 0 || !opList) {
+    return hipErrorInvalidValue;
+  }
+  for (size_t i = 0; i < numOps; ++i) {
+    hipMemcpy3DParms params;
+    hipError_t result = hrx_hip_batch_make_3d_params(&opList[i], &params);
+    if (result == hipSuccess) result = hipMemcpy3DAsync(&params, stream);
+    if (result != hipSuccess) {
+      if (failIdx) *failIdx = i;
+      return result;
+    }
+  }
+  return hipSuccess;
 }
 
 HIPAPI hipError_t hipMemcpy3DPeer(hipMemcpy3DPeerParms* p) {
@@ -1332,211 +1223,124 @@ HIPAPI hipError_t hipMemcpy3DPeerAsync(hipMemcpy3DPeerParms* p,
   return hipErrorNotSupported;
 }
 
-HIPAPI hipError_t hipMemcpyAtoA(hipArray_t dstArray, size_t dstOffset,
-                                hipArray_t srcArray, size_t srcOffset,
-                                size_t ByteCount) {
-  (void)dstArray;
-  (void)dstOffset;
-  (void)srcArray;
-  (void)srcOffset;
-  (void)ByteCount;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipMemcpyAtoD(hipDeviceptr_t dstDevice, hipArray_t srcArray,
-                                size_t srcOffset, size_t ByteCount) {
-  (void)dstDevice;
-  (void)srcArray;
-  (void)srcOffset;
-  (void)ByteCount;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipMemcpyAtoH(void* dst, hipArray_t srcArray,
-                                size_t srcOffset, size_t count) {
-  (void)dst;
-  (void)srcArray;
-  (void)srcOffset;
-  (void)count;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipMemcpyAtoHAsync(void* dstHost, hipArray_t srcArray,
-                                     size_t srcOffset, size_t ByteCount,
-                                     hipStream_t stream) {
-  (void)dstHost;
-  (void)srcArray;
-  (void)srcOffset;
-  (void)ByteCount;
-  (void)stream;
-  return hipErrorNotSupported;
-}
-
 HIPAPI hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes,
                                       size_t count, hipMemcpyAttributes* attrs,
                                       size_t* attrsIdxs, size_t numAttrs,
                                       size_t* failIdx, hipStream_t stream) {
-  (void)dsts;
-  (void)srcs;
-  (void)sizes;
-  (void)count;
-  (void)attrs;
   (void)attrsIdxs;
-  (void)numAttrs;
-  (void)failIdx;
-  (void)stream;
-  return hipErrorNotSupported;
+  if (!dsts || !srcs || !sizes || count == 0) return hipErrorInvalidValue;
+  if ((attrs && numAttrs == 0) || (!attrs && numAttrs != 0)) {
+    return hipErrorInvalidValue;
+  }
+  if (numAttrs != 0) return hipErrorNotSupported;
+
+  for (size_t i = 0; i < count; ++i) {
+    if (sizes[i] == 0) continue;
+    if (!dsts[i] || !srcs[i]) {
+      if (failIdx) *failIdx = i;
+      return hipErrorInvalidValue;
+    }
+    hipError_t result =
+        hipMemcpyAsync(dsts[i], srcs[i], sizes[i], hipMemcpyDefault, stream);
+    if (result != hipSuccess) {
+      if (failIdx) *failIdx = i;
+      return result;
+    }
+  }
+  return hipSuccess;
 }
 
-HIPAPI hipError_t hipMemcpyDtoA(hipArray_t dstArray, size_t dstOffset,
-                                hipDeviceptr_t srcDevice, size_t ByteCount) {
-  (void)dstArray;
-  (void)dstOffset;
-  (void)srcDevice;
-  (void)ByteCount;
-  return hipErrorNotSupported;
+static hipError_t iree_hip_memset_d2d_async_rows(hipDeviceptr_t dst,
+                                                 size_t dstPitch,
+                                                 const void* value,
+                                                 size_t element_size,
+                                                 size_t width, size_t height,
+                                                 hipStream_t stream) {
+  if (width == 0 || height == 0) return hipSuccess;
+  if (!dst || !value || element_size == 0 || width > dstPitch ||
+      width % element_size != 0) {
+    return hipErrorInvalidValue;
+  }
+  const size_t max_size = (size_t)-1;
+  if (height > 1 && dstPitch > (max_size - width) / (height - 1)) {
+    return hipErrorInvalidValue;
+  }
+  const size_t row_elements = width / element_size;
+  for (size_t row = 0; row < height; ++row) {
+    hipError_t result = hipSuccess;
+    hipDeviceptr_t row_dst = (hipDeviceptr_t)((uintptr_t)dst + row * dstPitch);
+    switch (element_size) {
+      case 1:
+        result = hipMemsetD8Async(row_dst, *(const unsigned char*)value,
+                                  row_elements, stream);
+        break;
+      case 2:
+        result = hipMemsetD16Async(row_dst, *(const unsigned short*)value,
+                                   row_elements, stream);
+        break;
+      case 4:
+        result = hipMemsetD32Async(row_dst, *(const int*)value, row_elements,
+                                   stream);
+        break;
+      default:
+        return hipErrorInvalidValue;
+    }
+    if (result == hipErrorNotFound) return hipErrorInvalidValue;
+    if (result != hipSuccess) return result;
+  }
+  return hipSuccess;
 }
 
-HIPAPI hipError_t hipMemcpyFromArray(void* dst, hipArray_const_t srcArray,
-                                     size_t wOffset, size_t hOffset,
-                                     size_t count, hipMemcpyKind kind) {
-  (void)dst;
-  (void)srcArray;
-  (void)wOffset;
-  (void)hOffset;
-  (void)count;
-  (void)kind;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipMemcpyHtoA(hipArray_t dstArray, size_t dstOffset,
-                                const void* srcHost, size_t count) {
-  (void)dstArray;
-  (void)dstOffset;
-  (void)srcHost;
-  (void)count;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipMemcpyHtoAAsync(hipArray_t dstArray, size_t dstOffset,
-                                     const void* srcHost, size_t ByteCount,
-                                     hipStream_t stream) {
-  (void)dstArray;
-  (void)dstOffset;
-  (void)srcHost;
-  (void)ByteCount;
-  (void)stream;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipMemcpyParam2D(const hip_Memcpy2D* pCopy) {
-  (void)pCopy;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipMemcpyParam2DAsync(const hip_Memcpy2D* pCopy,
-                                        hipStream_t stream) {
-  (void)pCopy;
-  (void)stream;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipMemcpyToArray(hipArray_t dst, size_t wOffset,
-                                   size_t hOffset, const void* src,
-                                   size_t count, hipMemcpyKind kind) {
-  (void)dst;
-  (void)wOffset;
-  (void)hOffset;
-  (void)src;
-  (void)count;
-  (void)kind;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipMemset3D(hipPitchedPtr pitchedDevPtr, int value,
-                              hipExtent extent) {
-  (void)pitchedDevPtr;
-  (void)value;
-  (void)extent;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipMemset3DAsync(hipPitchedPtr pitchedDevPtr, int value,
-                                   hipExtent extent, hipStream_t stream) {
-  (void)pitchedDevPtr;
-  (void)value;
-  (void)extent;
-  (void)stream;
-  return hipErrorNotSupported;
+static hipError_t iree_hip_memset_d2d_rows(hipDeviceptr_t dst, size_t dstPitch,
+                                           const void* value,
+                                           size_t element_size, size_t width,
+                                           size_t height) {
+  hipError_t result = iree_hip_memset_d2d_async_rows(
+      dst, dstPitch, value, element_size, width, height, NULL);
+  if (result == hipSuccess) result = hipDeviceSynchronize();
+  return result;
 }
 
 HIPAPI hipError_t hipMemsetD2D16(hipDeviceptr_t dst, size_t dstPitch,
                                  unsigned short value, size_t width,
                                  size_t height) {
-  (void)dst;
-  (void)dstPitch;
-  (void)value;
-  (void)width;
-  (void)height;
-  return hipErrorNotSupported;
+  return iree_hip_memset_d2d_rows(dst, dstPitch, &value, sizeof(value), width,
+                                  height);
 }
 
 HIPAPI hipError_t hipMemsetD2D16Async(hipDeviceptr_t dst, size_t dstPitch,
                                       unsigned short value, size_t width,
                                       size_t height, hipStream_t stream) {
-  (void)dst;
-  (void)dstPitch;
-  (void)value;
-  (void)width;
-  (void)height;
-  (void)stream;
-  return hipErrorNotSupported;
+  return iree_hip_memset_d2d_async_rows(dst, dstPitch, &value, sizeof(value),
+                                        width, height, stream);
 }
 
 HIPAPI hipError_t hipMemsetD2D32(hipDeviceptr_t dst, size_t dstPitch,
                                  unsigned int value, size_t width,
                                  size_t height) {
-  (void)dst;
-  (void)dstPitch;
-  (void)value;
-  (void)width;
-  (void)height;
-  return hipErrorNotSupported;
+  return iree_hip_memset_d2d_rows(dst, dstPitch, &value, sizeof(value), width,
+                                  height);
 }
 
 HIPAPI hipError_t hipMemsetD2D32Async(hipDeviceptr_t dst, size_t dstPitch,
                                       unsigned int value, size_t width,
                                       size_t height, hipStream_t stream) {
-  (void)dst;
-  (void)dstPitch;
-  (void)value;
-  (void)width;
-  (void)height;
-  (void)stream;
-  return hipErrorNotSupported;
+  return iree_hip_memset_d2d_async_rows(dst, dstPitch, &value, sizeof(value),
+                                        width, height, stream);
 }
 
 HIPAPI hipError_t hipMemsetD2D8(hipDeviceptr_t dst, size_t dstPitch,
                                 unsigned char value, size_t width,
                                 size_t height) {
-  (void)dst;
-  (void)dstPitch;
-  (void)value;
-  (void)width;
-  (void)height;
-  return hipErrorNotSupported;
+  return iree_hip_memset_d2d_rows(dst, dstPitch, &value, sizeof(value), width,
+                                  height);
 }
 
 HIPAPI hipError_t hipMemsetD2D8Async(hipDeviceptr_t dst, size_t dstPitch,
                                      unsigned char value, size_t width,
                                      size_t height, hipStream_t stream) {
-  (void)dst;
-  (void)dstPitch;
-  (void)value;
-  (void)width;
-  (void)height;
-  (void)stream;
-  return hipErrorNotSupported;
+  return iree_hip_memset_d2d_async_rows(dst, dstPitch, &value, sizeof(value),
+                                        width, height, stream);
 }
 
 HIPAPI hipError_t hipMipmappedArrayCreate(
@@ -1629,20 +1433,50 @@ HIPAPI hipError_t hipSignalExternalSemaphoresAsync(
 HIPAPI hipError_t hipStreamAddCallback(hipStream_t stream,
                                        hipStreamCallback_t callback,
                                        void* userData, unsigned int flags) {
-  (void)stream;
-  (void)callback;
-  (void)userData;
-  (void)flags;
-  return hipErrorNotSupported;
+  if (!callback || flags != 0) return hipErrorInvalidValue;
+
+  hrx_hip_stream_callback_thunk_t* thunk =
+      (hrx_hip_stream_callback_thunk_t*)malloc(sizeof(*thunk));
+  if (!thunk) return hipErrorOutOfMemory;
+  thunk->callback = callback;
+  thunk->stream = stream;
+  thunk->user_data = userData;
+
+  hipError_t result =
+      hipLaunchHostFunc(stream, hrx_hip_stream_callback_host_fn, thunk);
+  if (result != hipSuccess) {
+    free(thunk);
+  }
+  return result;
 }
 
 HIPAPI hipError_t hipStreamAttachMemAsync(hipStream_t stream, void* dev_ptr,
                                           size_t length, unsigned int flags) {
-  (void)stream;
-  (void)dev_ptr;
-  (void)length;
-  (void)flags;
-  return hipErrorNotSupported;
+  if (!dev_ptr) return hipErrorInvalidValue;
+  if (flags != hipMemAttachGlobal && flags != hipMemAttachHost &&
+      flags != hipMemAttachSingle) {
+    return hipErrorInvalidValue;
+  }
+  if (!stream && flags == hipMemAttachSingle) {
+    return hipErrorInvalidValue;
+  }
+
+  hipMemoryType memory_type = hipMemoryTypeUnregistered;
+  hipError_t result = hipPointerGetAttribute(
+      &memory_type, HIP_POINTER_ATTRIBUTE_MEMORY_TYPE, dev_ptr);
+  if (result != hipSuccess || memory_type != hipMemoryTypeManaged) {
+    return hipErrorInvalidValue;
+  }
+
+  if (length != 0) {
+    size_t allocation_size = 0;
+    result = hipPointerGetAttribute(&allocation_size,
+                                    HIP_POINTER_ATTRIBUTE_RANGE_SIZE, dev_ptr);
+    if (result != hipSuccess || length != allocation_size) {
+      return hipErrorInvalidValue;
+    }
+  }
+  return hipSuccess;
 }
 
 HIPAPI hipError_t hipStreamBatchMemOp(hipStream_t stream, unsigned int count,

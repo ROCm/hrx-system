@@ -262,6 +262,37 @@ iree_status_t iree_hal_streaming_device_primary_context_state(
   return iree_ok_status();
 }
 
+iree_status_t iree_hal_streaming_device_ensure_default_mem_pool(
+    iree_hal_streaming_device_t* device) {
+  IREE_ASSERT_ARGUMENT(device);
+  if (device->default_mem_pool && device->current_mem_pool) {
+    return iree_ok_status();
+  }
+
+  if (!iree_hal_streaming_device_registry()) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "device registry not initialized");
+  }
+
+  hrx_mem_pool_t default_mem_pool = NULL;
+  if (!device->default_mem_pool) {
+    hrx_mem_pool_props_t props = {
+        .alloc_handle_type = 0,
+        .location_type = 1,  // device
+        .location_id = (int)device->ordinal,
+    };
+    IREE_RETURN_IF_ERROR(HRX_CALL(hrx_mem_pool_create(
+        device->hrx_device, &props, &default_mem_pool)));
+    device->default_mem_pool = default_mem_pool;
+  }
+
+  if (!device->current_mem_pool) {
+    device->current_mem_pool = device->default_mem_pool;
+    hrx_mem_pool_retain(device->current_mem_pool);
+  }
+  return iree_ok_status();
+}
+
 iree_status_t iree_hal_streaming_device_get_or_create_primary_context(
     iree_hal_streaming_device_t* device,
     iree_hal_streaming_context_t** out_context) {
@@ -301,20 +332,9 @@ iree_status_t iree_hal_streaming_device_get_or_create_primary_context(
       device, device->primary_context_flags, device_registry->host_allocator,
       &device->primary_context);
 
-  // Create default memory pool via pyre.
+  // Ensure runtime allocations have a backing pool for this device.
   if (iree_status_is_ok(status)) {
-    iree_host_size_t device_ordinal = device - device_registry->devices;
-    hrx_mem_pool_props_t props = {
-        .alloc_handle_type = 0,
-        .location_type = 1,  // device
-        .location_id = (int)device_ordinal,
-    };
-    status = HRX_CALL(hrx_mem_pool_create(device->hrx_device, &props,
-                                          &device->default_mem_pool));
-    if (iree_status_is_ok(status)) {
-      device->current_mem_pool = device->default_mem_pool;
-      hrx_mem_pool_retain(device->current_mem_pool);
-    }
+    status = iree_hal_streaming_device_ensure_default_mem_pool(device);
   }
 
   if (iree_status_is_ok(status)) {
@@ -361,20 +381,9 @@ iree_status_t iree_hal_streaming_device_retain_primary_context(
         device, device->primary_context_flags, device_registry->host_allocator,
         &device->primary_context);
 
-    // Create default memory pool via pyre if context was created successfully.
-    if (iree_status_is_ok(status) && !device->default_mem_pool) {
-      iree_host_size_t device_ordinal = device - device_registry->devices;
-      hrx_mem_pool_props_t props = {
-          .alloc_handle_type = 0,
-          .location_type = 1,  // device
-          .location_id = (int)device_ordinal,
-      };
-      status = HRX_CALL(hrx_mem_pool_create(device->hrx_device, &props,
-                                            &device->default_mem_pool));
-      if (iree_status_is_ok(status)) {
-        device->current_mem_pool = device->default_mem_pool;
-        hrx_mem_pool_retain(device->current_mem_pool);
-      }
+    // Ensure runtime allocations have a backing pool for this device.
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_streaming_device_ensure_default_mem_pool(device);
     }
 
     if (!iree_status_is_ok(status)) {

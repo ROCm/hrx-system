@@ -310,14 +310,17 @@ iree_status_t iree_hal_streaming_global_symbol_registry_insert_function(
   return status;
 }
 
-iree_status_t iree_hal_streaming_global_symbol_registry_insert_variable(
+static iree_status_t iree_hal_streaming_global_symbol_registry_insert_variable_with_type(
     iree_hal_streaming_global_symbol_registry_t* registry,
     iree_hal_streaming_module_registration_t* module, void* host_variable,
-    const char* device_name, size_t size, uint32_t alignment) {
+    const char* device_name, size_t size, uint32_t alignment,
+    iree_hal_streaming_symbol_type_t symbol_type) {
   IREE_ASSERT_ARGUMENT(registry);
   IREE_ASSERT_ARGUMENT(module);
   IREE_ASSERT_ARGUMENT(host_variable);
   IREE_ASSERT_ARGUMENT(device_name);
+  IREE_ASSERT_ARGUMENT(symbol_type == IREE_HAL_STREAMING_SYMBOL_TYPE_GLOBAL ||
+                       symbol_type == IREE_HAL_STREAMING_SYMBOL_TYPE_DATA);
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_slim_mutex_lock(&registry->mutex);
@@ -338,7 +341,7 @@ iree_status_t iree_hal_streaming_global_symbol_registry_insert_variable(
 
     // Fill in registration (device_name points directly to fat binary string).
     symbol->host_pointer = host_variable;
-    symbol->type = IREE_HAL_STREAMING_SYMBOL_TYPE_GLOBAL;
+    symbol->type = symbol_type;
     symbol->device_name = device_name;  // direct pointer, no copy
     symbol->module = module;
     symbol->params.variable.size = size;
@@ -348,6 +351,54 @@ iree_status_t iree_hal_streaming_global_symbol_registry_insert_variable(
   iree_slim_mutex_unlock(&registry->mutex);
   IREE_TRACE_ZONE_END(z0);
   return status;
+}
+
+iree_status_t iree_hal_streaming_global_symbol_registry_insert_variable(
+    iree_hal_streaming_global_symbol_registry_t* registry,
+    iree_hal_streaming_module_registration_t* module, void* host_variable,
+    const char* device_name, size_t size, uint32_t alignment) {
+  return iree_hal_streaming_global_symbol_registry_insert_variable_with_type(
+      registry, module, host_variable, device_name, size, alignment,
+      IREE_HAL_STREAMING_SYMBOL_TYPE_GLOBAL);
+}
+
+iree_status_t iree_hal_streaming_global_symbol_registry_insert_managed_variable(
+    iree_hal_streaming_global_symbol_registry_t* registry,
+    iree_hal_streaming_module_registration_t* module, void* host_variable,
+    const char* device_name, size_t size, uint32_t alignment) {
+  return iree_hal_streaming_global_symbol_registry_insert_variable_with_type(
+      registry, module, host_variable, device_name, size, alignment,
+      IREE_HAL_STREAMING_SYMBOL_TYPE_DATA);
+}
+
+bool iree_hal_streaming_global_symbol_registry_query_variable(
+    iree_hal_streaming_global_symbol_registry_t* registry, void* host_variable,
+    iree_hal_streaming_symbol_type_t* out_type, size_t* out_size) {
+  if (out_type) *out_type = IREE_HAL_STREAMING_SYMBOL_TYPE_UNDEFINED;
+  if (out_size) *out_size = 0;
+  if (!registry || !host_variable) return false;
+
+  bool found = false;
+  iree_slim_mutex_lock(&registry->mutex);
+  for (iree_host_size_t i = 0; i < registry->module_count && !found; ++i) {
+    iree_hal_streaming_module_registration_t* module = registry->modules[i];
+    if (!module) continue;
+    for (iree_host_size_t j = 0; j < module->symbol_count; ++j) {
+      const iree_hal_streaming_symbol_registration_t* symbol =
+          &module->symbols[j];
+      if (symbol->host_pointer != host_variable ||
+          (symbol->type != IREE_HAL_STREAMING_SYMBOL_TYPE_GLOBAL &&
+           symbol->type != IREE_HAL_STREAMING_SYMBOL_TYPE_DATA)) {
+        continue;
+      }
+      if (out_type) *out_type = symbol->type;
+      if (out_size) *out_size = symbol->params.variable.size;
+      found = true;
+      break;
+    }
+  }
+  iree_slim_mutex_unlock(&registry->mutex);
+  return found;
 }
 
 // Slowly looks up a registration by host pointer.
@@ -672,7 +723,7 @@ static iree_status_t iree_hal_streaming_context_symbol_map_prepare_module(
 
 // Removes all symbols from a module and unloads it from the context map.
 // Called when a module is unregistered from the global registry.
-// No-op if the module was never registered.
+// Returns without mutation if the module was never registered.
 static void iree_hal_streaming_context_symbol_map_expunge_module(
     iree_hal_streaming_context_symbol_map_t* map,
     iree_hal_streaming_module_registration_t* registration) {
