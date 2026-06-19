@@ -1038,7 +1038,10 @@ static iree_status_t iree_hal_streaming_pack_raw_argument_list(
   if (*out_constants_size == 0) {
     return iree_ok_status();
   }
-  if (!parameter_list || !out_constants) {
+  if (!out_constants ||
+      (!parameter_list &&
+       (parameters->buffer_size > 0 || parameters->binding_count > 0 ||
+        parameters->copy_count > 0))) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "raw kernel arguments require parameter storage");
   }
@@ -1082,6 +1085,13 @@ static iree_status_t iree_hal_streaming_pack_raw_argument_list(
   return iree_ok_status();
 }
 
+static bool iree_hal_streaming_parameter_info_is_empty(
+    const iree_hal_streaming_parameter_info_t* parameters) {
+  return parameters->buffer_size == 0 && parameters->constant_bytes == 0 &&
+         parameters->direct_arg_bytes == 0 &&
+         parameters->binding_count == 0 && parameters->copy_count == 0;
+}
+
 iree_status_t iree_hal_streaming_graph_add_kernel_node(
     iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t** dependencies,
@@ -1109,11 +1119,14 @@ iree_status_t iree_hal_streaming_graph_add_kernel_node(
       (params->flags & IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY) != 0;
   const bool is_native_kernel = symbol->parameters.binding_count == 0 &&
                                 symbol->parameters.copy_count == 0;
-  if (is_args_array && is_native_kernel && params->buffer) {
+  const bool is_empty_native_kernel =
+      is_native_kernel &&
+      iree_hal_streaming_parameter_info_is_empty(&symbol->parameters);
+  if (is_args_array && is_native_kernel && !is_empty_native_kernel) {
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
-        "args-array graph kernel launch requires parameter metadata");
+        "non-empty args-array graph kernel launch requires parameter metadata");
   }
 
   iree_host_size_t constants_capacity = symbol->parameters.constant_bytes;
@@ -1179,8 +1192,10 @@ iree_status_t iree_hal_streaming_graph_add_kernel_node(
       iree_make_const_byte_span(constants, symbol->parameters.constant_bytes);
   attrs->constants_capacity = constants_capacity;
   attrs->bindings.count = symbol->parameters.binding_count;
-  attrs->bindings.values =
-      (iree_hal_buffer_ref_t*)(extra_data + constants_size);
+  attrs->bindings.values = symbol->parameters.binding_count
+                               ? (iree_hal_buffer_ref_t*)(extra_data +
+                                                          constants_size)
+                               : NULL;
   attrs->binding_capacity = symbol->parameters.binding_count;
   iree_status_t unpack_status = iree_ok_status();
   if (is_pre_packed && params->buffer) {
@@ -1195,6 +1210,10 @@ iree_status_t iree_hal_streaming_graph_add_kernel_node(
     }
     attrs->constants = iree_make_const_byte_span(constants, captured_size);
     attrs->bindings = iree_hal_buffer_ref_list_empty();
+  } else if (is_args_array && is_empty_native_kernel) {
+    // HIP host stubs may pass a {NULL} args array for no-argument kernels.
+    attrs->constants = iree_make_const_byte_span(constants, 0);
+    attrs->bindings = iree_hal_buffer_ref_list_empty();
   } else if (is_args_array) {
     unpack_status = iree_hal_streaming_unpack_parameter_list(
         graph->context, &symbol->parameters, (void**)params->buffer, constants,
@@ -1204,7 +1223,8 @@ iree_status_t iree_hal_streaming_graph_add_kernel_node(
       memset(constants, 0, constants_capacity);
       iree_host_size_t captured_size = 0;
       unpack_status = iree_hal_streaming_pack_raw_argument_list(
-          &symbol->parameters, (void**)params->buffer, constants,
+          &symbol->parameters, (void**)params->buffer,
+          constants,
           &captured_size);
       attrs->constants = iree_make_const_byte_span(constants, captured_size);
       attrs->bindings = iree_hal_buffer_ref_list_empty();
@@ -1273,10 +1293,13 @@ iree_status_t iree_hal_streaming_graph_set_kernel_node_params(
       (params->flags & IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY) != 0;
   const bool is_native_kernel = symbol->parameters.binding_count == 0 &&
                                 symbol->parameters.copy_count == 0;
-  if (is_args_array && is_native_kernel && params->buffer) {
+  const bool is_empty_native_kernel =
+      is_native_kernel &&
+      iree_hal_streaming_parameter_info_is_empty(&symbol->parameters);
+  if (is_args_array && is_native_kernel && !is_empty_native_kernel) {
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
-        "args-array graph kernel launch requires parameter metadata");
+        "non-empty args-array graph kernel launch requires parameter metadata");
   }
 
   iree_host_size_t constants_capacity = symbol->parameters.constant_bytes;
@@ -1316,6 +1339,10 @@ iree_status_t iree_hal_streaming_graph_set_kernel_node_params(
     }
     constants_span = iree_make_const_byte_span(constants, captured_size);
     bindings = iree_hal_buffer_ref_list_empty();
+  } else if (is_args_array && is_empty_native_kernel) {
+    // HIP host stubs may pass a {NULL} args array for no-argument kernels.
+    constants_span = iree_make_const_byte_span(constants, 0);
+    bindings = iree_hal_buffer_ref_list_empty();
   } else if (is_args_array) {
     unpack_status = iree_hal_streaming_unpack_parameter_list(
         node->graph->context, &symbol->parameters, (void**)params->buffer,
@@ -1353,8 +1380,8 @@ iree_status_t iree_hal_streaming_graph_set_kernel_node_params(
     bindings = iree_hal_buffer_ref_list_empty();
   } else {
     unpack_status = iree_hal_streaming_unpack_parameters(
-        node->graph->context, &symbol->parameters, params->buffer, constants,
-        &bindings);
+        node->graph->context, &symbol->parameters, params->buffer,
+        constants, &bindings);
     if (iree_status_code(unpack_status) == IREE_STATUS_NOT_FOUND) {
       iree_status_ignore(unpack_status);
       const iree_host_size_t captured_size =

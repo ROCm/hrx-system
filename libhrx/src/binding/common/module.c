@@ -255,6 +255,7 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
   for (iree_host_size_t i = 0, parameter_base = 0;
        iree_status_is_ok(status) && i < module->symbol_count; ++i) {
     iree_hal_streaming_symbol_t* symbol = &module->symbols[i];
+    memset(symbol, 0, sizeof(*symbol));
     symbol->module = module;
     symbol->name = export_infos[i].name;
     symbol->type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION;
@@ -272,6 +273,12 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
 
     // Initialize parameter info.
     iree_hal_streaming_parameter_info_t* parameter_info = &symbol->parameters;
+    if (export_infos[i].constant_byte_length > UINT16_MAX) {
+      status = iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "function constant metadata exceeds supported parameter size");
+      continue;
+    }
     // Executable binding_count describes normal HAL dispatch bindings. HRX's
     // unpacker needs the number of reflected BINDING parameters it will
     // resolve from the HIP launch ABI.
@@ -289,6 +296,8 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
     // Build operations with coalescing.
     // Copy ops go first, then resolve ops.
     uint16_t src_offset = 0;
+    uint16_t src_ordinal = 0;
+    size_t direct_arg_offset = 0;
     uint16_t buffer_size = 0;
     size_t this_kernel_direct_arg_size = 0;  // Native direct-arg prefix size.
     iree_hal_streaming_parameter_op_t* copy_ops_start = current_ops;
@@ -296,7 +305,7 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
         current_ops + symbol_op_counts[i].copy_count;
     uint16_t copy_count = 0;
     uint16_t resolve_count = 0;
-    for (uint16_t j = 0; j < parameter_count; ++j) {
+    for (uint16_t j = 0; iree_status_is_ok(status) && j < parameter_count; ++j) {
       const iree_hal_executable_export_parameter_t* parameter =
           &parameters[parameter_base + j];
       const bool is_binding_parameter =
@@ -305,6 +314,19 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
           parameter->type ==
               IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_BUFFER_PTR &&
           resolve_count < export_infos[i].binding_count;
+      size_t native_dst_offset = direct_arg_offset;
+      if (is_buffer_binding_parameter) {
+        native_dst_offset = parameter->offset;
+      }
+      const size_t source_extent = (size_t)src_offset + parameter->size;
+      const size_t native_extent = native_dst_offset + parameter->size;
+      if (source_extent > UINT16_MAX || native_dst_offset > UINT16_MAX ||
+          native_extent > UINT16_MAX) {
+        status = iree_make_status(
+            IREE_STATUS_OUT_OF_RANGE,
+            "function parameter metadata exceeds supported argument size");
+        break;
+      }
       if (is_binding_parameter || is_buffer_binding_parameter) {
         // Update offsets. Bindings are passed as pointers.
         // |parameter->offset| is the kernarg byte offset for all parameter
@@ -314,25 +336,28 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
         // exactly the index of this parameter in the bindings list.
         iree_hal_streaming_parameter_resolve_op_t* op =
             &resolve_ops_start[resolve_count].resolve;
+        op->reserved = 0;
         op->src_offset = src_offset;
         op->dst_ordinal = resolve_count;
-        op->src_ordinal = j;
-        // For HIP/CUDA native launches using CUSTOM_DIRECT_ARGUMENTS we need
+        op->src_ordinal = src_ordinal;
+        // For HIP native launches using CUSTOM_DIRECT_ARGUMENTS we need
         // to place raw device pointers at their kernarg ABI offset. Binding
         // export parameter offsets are binding-list ordinals in some IREE HAL
         // backends, not byte offsets, so use the packed source offset we
         // calculate from the full parameter sequence. AMDGPU BUFFER_PTR
         // parameters already carry native kernarg byte offsets.
-        op->dst_offset =
-            is_buffer_binding_parameter ? parameter->offset : src_offset;
-        src_offset += parameter->size;
+        op->dst_offset = (uint16_t)native_dst_offset;
+        src_offset = (uint16_t)source_extent;
         buffer_size = src_offset;
+        ++src_ordinal;
         ++resolve_count;
 
-        size_t param_extent = (size_t)op->dst_offset + parameter->size;
+        size_t param_extent = native_extent;
         if (param_extent > this_kernel_direct_arg_size) {
           this_kernel_direct_arg_size = param_extent;
         }
+        direct_arg_offset =
+            iree_max(param_extent, direct_arg_offset + parameter->size);
       } else {
         // TODO: fix coalescing. It does not work when we have
         // parameter arrays because each constant comes in as a
@@ -348,28 +373,33 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
             &copy_ops_start[copy_count].copy;
         op->size = parameter->size;
         op->src_offset = src_offset;
-        op->src_ordinal = j;
-        op->direct_dst_offset = src_offset;
+        op->src_ordinal = src_ordinal;
+        op->direct_dst_offset = (uint16_t)native_dst_offset;
         op->dst_offset = parameter->offset;  // offset in constants
         ++copy_count;
         // active_copy = op;
         // }
-        src_offset += parameter->size;
+        src_offset = (uint16_t)source_extent;
         buffer_size = src_offset;
+        ++src_ordinal;
 
-        size_t direct_arg_extent =
-            (size_t)op->direct_dst_offset + parameter->size;
+        size_t direct_arg_extent = native_extent;
         if (direct_arg_extent > this_kernel_direct_arg_size) {
           this_kernel_direct_arg_size = direct_arg_extent;
         }
+        direct_arg_offset =
+            iree_max(direct_arg_extent, direct_arg_offset + parameter->size);
       }
     }
-    parameter_info->buffer_size = buffer_size;
-    parameter_info->constant_bytes = export_infos[i].constant_byte_length;
-    if (buffer_size > this_kernel_direct_arg_size) {
-      this_kernel_direct_arg_size = buffer_size;
+    if (iree_status_is_ok(status)) {
+      parameter_info->buffer_size = buffer_size;
+      parameter_info->constant_bytes =
+          (uint16_t)export_infos[i].constant_byte_length;
+      if (buffer_size > this_kernel_direct_arg_size) {
+        this_kernel_direct_arg_size = buffer_size;
+      }
+      parameter_info->direct_arg_bytes = (uint16_t)this_kernel_direct_arg_size;
     }
-    parameter_info->direct_arg_bytes = this_kernel_direct_arg_size;
 
     // Advance to next symbol's ops.
     parameter_base += parameter_count;
@@ -412,11 +442,11 @@ iree_status_t iree_hal_streaming_module_create_from_memory(
   module->cache = context->executable_cache;
   iree_hal_executable_cache_retain(module->cache);
 
-  // HIP / CUDA hand us anything the toolchain emits — raw AMDGPU ELFs,
+  // HIP toolchains hand us several container formats: raw AMDGPU ELFs,
   // __CLANG_OFFLOAD_BUNDLE__ archives, CCOB (zstd-compressed bundles), and
-  // __hipFatBinaryWrapper-wrapped combinations of all of the above. Unwrap
-  // everything here and only forward raw ELF plus an explicit executable
-  // format to the HAL executable cache.
+  // __hipFatBinaryWrapper-wrapped combinations of those. Unwrap everything here
+  // and only forward raw ELF plus an explicit executable format to the HAL
+  // executable cache.
   iree_const_byte_span_t executable_data = image;
   const char* executable_format = NULL;
   const bool try_fat_unwrap = context->device_entry != NULL &&

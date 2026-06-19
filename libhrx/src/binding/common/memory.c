@@ -907,27 +907,14 @@ static iree_status_t iree_hal_streaming_memory_allocate_host_with_context_mode(
       .min_alignment = host_alignment,
   };
 
-  void* host_ptr = NULL;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_allocator_malloc_aligned(context->host_allocator,
-                                        allocation_size, host_alignment,
-                                        /*offset=*/0, &host_ptr));
-
   iree_hal_buffer_t* buffer = NULL;
-  iree_hal_external_buffer_t external_buffer = {
-      .type = IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION,
-      .flags = IREE_HAL_EXTERNAL_BUFFER_FLAG_NONE,
-      .size = (iree_device_size_t)allocation_size,
-      .handle.host_allocation.ptr = host_ptr,
-  };
-  iree_status_t status = iree_hal_allocator_import_buffer(
-      context->device_allocator, params, &external_buffer,
-      iree_hal_buffer_release_callback_null(), &buffer);
+  iree_status_t status = iree_hal_allocator_allocate_buffer(
+      context->device_allocator, params, allocation_size, &buffer);
 
   iree_hal_streaming_buffer_t* wrapper = NULL;
   if (iree_status_is_ok(status)) {
     status = iree_hal_streaming_buffer_wrap(
-        context, buffer, (int)memory_type, host_ptr,
+        context, buffer, (int)memory_type, /*imported_host_ptr=*/NULL,
         /*allocation_pool=*/NULL, context_ownership, &wrapper);
   }
   iree_hal_buffer_release(buffer);
@@ -939,17 +926,14 @@ static iree_status_t iree_hal_streaming_memory_allocate_host_with_context_mode(
   }
 
   if (iree_status_is_ok(status)) {
-    wrapper->owns_host_ptr = true;
     wrapper->imported_host_allocation = false;
     wrapper->host_register_flags = flags;
     *out_buffer = wrapper;
-    host_ptr = NULL;
   } else {
     if (wrapper) {
       hrx_buffer_table_remove(&context->buffer_table, wrapper->device_ptr);
       iree_hal_streaming_buffer_free(wrapper);
     }
-    iree_allocator_free_aligned(context->host_allocator, host_ptr);
   }
   IREE_TRACE_ZONE_END(z0);
   return status;
