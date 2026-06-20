@@ -81,6 +81,8 @@ iree_cc_test(
     iree::hal
     iree::hal::drivers::local_sync::sync_driver
     iree::hal::testing::mock_device
+    iree::io::parameter_index
+    iree::io::parameter_index_provider
     iree::testing::gtest
     iree::testing::gtest_main
 )

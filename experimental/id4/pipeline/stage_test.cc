@@ -17,6 +17,8 @@
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/local_sync/sync_device.h"
 #include "iree/hal/testing/mock_device.h"
+#include "iree/io/parameter_index.h"
+#include "iree/io/parameter_index_provider.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -276,7 +278,8 @@ static iree_status_t SmokeStagePlan(
   slab.scope = IREE_SV("smoke");
   slab.placement_id = 0;
   slab.target_params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-  slab.target_params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET |
+  slab.target_params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER |
+                             IREE_HAL_BUFFER_USAGE_MAPPING |
                              IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE_READ;
   slab.byte_length = 16;
   slab.alignment = 16;
@@ -611,6 +614,94 @@ TEST(PipelineStage, PrepareLoadsParameterSlabsWhenProviderIsSupplied) {
   EXPECT_EQ(provider.spans[0].length, 16u);
 
   id4_pipeline_bundle_release(bundle);
+  id4_pipeline_plan_release(plan);
+  id4_pipeline_stage_release(stage);
+}
+
+TEST(PipelineStage, PrepareLoadsParameterSlabsFromParameterIndexProvider) {
+  iree_hal_device_group_t* device_group = CreateLocalSyncDeviceGroup();
+  id4_pipeline_stage_t* stage = NULL;
+  IREE_ASSERT_OK(SmokeStageCreate(device_group, &stage));
+  iree_hal_device_group_release(device_group);
+
+  IREE_ASSERT_OK(id4_pipeline_stage_load(stage, NULL));
+
+  id4_pipeline_stage_plan_options_t plan_options;
+  memset(&plan_options, 0, sizeof(plan_options));
+  plan_options.structure_size = sizeof(plan_options);
+  plan_options.default_queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+
+  id4_pipeline_plan_t* plan = NULL;
+  IREE_ASSERT_OK(id4_pipeline_stage_plan(stage, &plan_options, &plan));
+
+  iree_io_parameter_index_t* index = NULL;
+  IREE_ASSERT_OK(
+      iree_io_parameter_index_create(iree_allocator_system(), &index));
+  iree_io_parameter_index_entry_t entry;
+  memset(&entry, 0, sizeof(entry));
+  entry.key = IREE_SV("smoke.weight");
+  entry.length = 16;
+  entry.type = IREE_IO_PARAMETER_INDEX_ENTRY_STORAGE_TYPE_SPLAT;
+  entry.storage.splat.pattern_length = 4;
+  entry.storage.splat.pattern[0] = 0x11;
+  entry.storage.splat.pattern[1] = 0x22;
+  entry.storage.splat.pattern[2] = 0x33;
+  entry.storage.splat.pattern[3] = 0x44;
+  IREE_ASSERT_OK(iree_io_parameter_index_add(index, &entry));
+
+  iree_io_parameter_provider_t* provider = NULL;
+  IREE_ASSERT_OK(iree_io_parameter_index_provider_create(
+      IREE_SV("smoke"), index,
+      IREE_IO_PARAMETER_INDEX_PROVIDER_DEFAULT_MAX_CONCURRENT_OPERATIONS,
+      iree_allocator_system(), &provider));
+  iree_io_parameter_index_release(index);
+
+  iree_hal_device_t* device =
+      iree_hal_device_group_device_at(id4_pipeline_plan_device_group(plan), 0);
+  iree_hal_semaphore_t* ready_semaphore = NULL;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &ready_semaphore));
+  uint64_t ready_value = 1;
+  iree_hal_semaphore_list_t signal_list = {
+      /*.count=*/1,
+      /*.semaphores=*/&ready_semaphore,
+      /*.payload_values=*/&ready_value,
+  };
+
+  id4_pipeline_stage_prepare_options_t prepare_options;
+  memset(&prepare_options, 0, sizeof(prepare_options));
+  prepare_options.structure_size = sizeof(prepare_options);
+  prepare_options.parameter_provider = provider;
+  prepare_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
+  prepare_options.signal_semaphore_list = signal_list;
+
+  id4_pipeline_bundle_t* bundle = NULL;
+  IREE_ASSERT_OK(
+      id4_pipeline_stage_prepare(stage, plan, &prepare_options, &bundle));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(ready_semaphore, ready_value,
+                                         iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
+
+  id4_pipeline_parameter_slab_set_t* slab_set =
+      id4_pipeline_bundle_parameter_slabs(bundle);
+  ASSERT_NE(slab_set, nullptr);
+  iree_hal_buffer_t* slab_buffer =
+      id4_pipeline_parameter_slab_set_buffer_at(slab_set, 0);
+  ASSERT_NE(slab_buffer, nullptr);
+  uint8_t actual[16] = {0};
+  IREE_ASSERT_OK(
+      iree_hal_buffer_map_read(slab_buffer, 0, actual, sizeof(actual)));
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(actual); i += 4) {
+    EXPECT_EQ(actual[i + 0], 0x11);
+    EXPECT_EQ(actual[i + 1], 0x22);
+    EXPECT_EQ(actual[i + 2], 0x33);
+    EXPECT_EQ(actual[i + 3], 0x44);
+  }
+
+  id4_pipeline_bundle_release(bundle);
+  iree_hal_semaphore_release(ready_semaphore);
+  iree_io_parameter_provider_release(provider);
   id4_pipeline_plan_release(plan);
   id4_pipeline_stage_release(stage);
 }
