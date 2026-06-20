@@ -930,7 +930,7 @@ def add_lane_commands(subparsers: argparse._SubParsersAction, lane: str) -> None
         dest="project_tests",
         action="store_false",
         default=True,
-        help="Skip runtime/libhrx/loom project tests while still running root devtools tests.",
+        help="Skip project tests while still running root devtools tests.",
     )
     presubmit_parser.set_defaults(handler=handle_presubmit, lane=lane)
 

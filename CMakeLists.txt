@@ -196,6 +196,7 @@ endif()
 add_subdirectory(build_tools/embed_data)
 add_subdirectory(build_tools/spirv)
 add_subdirectory(runtime/src)
+add_subdirectory(experimental/id4)
 
 if(LOOM_BUILD)
   add_subdirectory(loom/py/loom)

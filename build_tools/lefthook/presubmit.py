@@ -76,6 +76,7 @@ SEMGREP_PATH_PREFIXES = (
     "runtime/src/iree/",
     "loom/src/loom/",
     "libhrx/",
+    "experimental/id4/",
 )
 SEMGREP_DEFAULT_MAX_JOBS = 14
 CLANG_TIDY_DEFAULT_CORE_DIVISOR = 2
@@ -169,6 +170,11 @@ PROJECTS = (
         name="loom",
         root="loom/",
         script="loom/build_tools/presubmit.py",
+    ),
+    Project(
+        name="id4",
+        root="experimental/id4/",
+        script="experimental/id4/build_tools/presubmit.py",
     ),
 )
 
@@ -308,7 +314,7 @@ def parse_arguments() -> argparse.Namespace:
         dest="project_tests",
         action="store_false",
         default=True,
-        help="Skip runtime/libhrx/loom project tests while still running root devtools tests.",
+        help="Skip project tests while still running root devtools tests.",
     )
     parser.add_argument(
         "--static-analysis",
