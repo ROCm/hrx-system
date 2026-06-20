@@ -293,6 +293,52 @@ const id4_pipeline_parameter_slab_plan_t* id4_pipeline_plan_parameter_slab_at(
   return &plan->parameter_slabs[index];
 }
 
+iree_status_t id4_pipeline_plan_load_parameter_slabs(
+    const id4_pipeline_plan_t* plan, iree_io_parameter_provider_t* provider,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_allocator_t host_allocator,
+    id4_pipeline_parameter_slab_set_t** out_slab_set) {
+  IREE_ASSERT_ARGUMENT(plan);
+  IREE_ASSERT_ARGUMENT(provider);
+  IREE_ASSERT_ARGUMENT(out_slab_set);
+  *out_slab_set = NULL;
+
+  id4_pipeline_parameter_slab_load_t* loads = NULL;
+  if (plan->parameter_slab_count != 0) {
+    IREE_RETURN_IF_ERROR(iree_allocator_malloc(
+        host_allocator, plan->parameter_slab_count * sizeof(loads[0]),
+        (void**)&loads));
+    memset(loads, 0, plan->parameter_slab_count * sizeof(loads[0]));
+  }
+
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < plan->parameter_slab_count && iree_status_is_ok(status); ++i) {
+    const id4_pipeline_parameter_slab_plan_t* slab = &plan->parameter_slabs[i];
+    const id4_pipeline_device_placement_t* placement =
+        id4_pipeline_plan_placement_at(plan, slab->placement_id);
+    if (!placement) {
+      status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "parameter slab %" PRIhsz
+                                " references missing placement %u",
+                                i, slab->placement_id);
+      break;
+    }
+    loads[i].slab = slab;
+    loads[i].device = iree_hal_device_group_device_at(plan->device_group,
+                                                      placement->device_index);
+    loads[i].queue_affinity = placement->queue_affinity;
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_pipeline_parameter_slab_set_load(
+        provider, wait_semaphore_list, signal_semaphore_list,
+        plan->parameter_slab_count, loads, host_allocator, out_slab_set);
+  }
+  iree_allocator_free(host_allocator, loads);
+  return status;
+}
+
 static iree_status_t id4_pipeline_plan_append_json_string(
     iree_string_builder_t* builder, iree_string_view_t value) {
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\""));
@@ -365,11 +411,18 @@ iree_status_t id4_pipeline_plan_format_json(const id4_pipeline_plan_t* plan,
         id4_pipeline_plan_append_json_string(builder, slab->scope));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder,
-        ",\"placement_id\":%u,\"byte_length\":%" PRIu64
-        ",\"alignment\":%" PRIu64 ",\"request_count\":%" PRIhsz
-        ",\"requests\":[",
-        slab->placement_id, (uint64_t)slab->byte_length,
-        (uint64_t)slab->alignment, slab->request_count));
+        ",\"placement_id\":%u,\"target_params\":{\"type\":%" PRIu64
+        ",\"access\":%" PRIu64 ",\"usage\":%" PRIu64
+        ",\"queue_affinity\":%" PRIu64 ",\"min_alignment\":%" PRIu64
+        "},\"byte_length\":%" PRIu64 ",\"alignment\":%" PRIu64
+        ",\"request_count\":%" PRIhsz ",\"requests\":[",
+        slab->placement_id, (uint64_t)slab->target_params.type,
+        (uint64_t)slab->target_params.access,
+        (uint64_t)slab->target_params.usage,
+        (uint64_t)slab->target_params.queue_affinity,
+        (uint64_t)slab->target_params.min_alignment,
+        (uint64_t)slab->byte_length, (uint64_t)slab->alignment,
+        slab->request_count));
     for (iree_host_size_t j = 0; j < slab->request_count; ++j) {
       const id4_pipeline_parameter_request_t* request = &slab->requests[j];
       if (j != 0) {

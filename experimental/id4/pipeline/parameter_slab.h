@@ -55,6 +55,20 @@ typedef struct id4_pipeline_parameter_slab_enumerator_state_t {
   const id4_pipeline_parameter_slab_plan_t* slab;
 } id4_pipeline_parameter_slab_enumerator_state_t;
 
+// Resolved parameter slab load work for one planned slab.
+typedef struct id4_pipeline_parameter_slab_load_t {
+  // Planned slab metadata to load.
+  const id4_pipeline_parameter_slab_plan_t* slab;
+  // HAL device where the slab buffer is allocated and populated.
+  iree_hal_device_t* device;
+  // Queue affinity used for the provider gather operation.
+  iree_hal_queue_affinity_t queue_affinity;
+} id4_pipeline_parameter_slab_load_t;
+
+// Loaded parameter slab buffers owned by a prepared bundle.
+typedef struct id4_pipeline_parameter_slab_set_t
+    id4_pipeline_parameter_slab_set_t;
+
 // Validates that a parameter slab references valid placements and byte ranges.
 iree_status_t id4_pipeline_parameter_slab_validate(
     const id4_pipeline_parameter_slab_plan_t* slab,
@@ -68,6 +82,32 @@ iree_status_t id4_pipeline_parameter_slab_enumerate(
 // Returns an IREE parameter enumerator for |state|.
 iree_io_parameter_enumerator_t id4_pipeline_parameter_slab_enumerator(
     id4_pipeline_parameter_slab_enumerator_state_t* state);
+
+// Allocates and asynchronously gathers all planned slabs from |provider|.
+iree_status_t id4_pipeline_parameter_slab_set_load(
+    iree_io_parameter_provider_t* provider,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_host_size_t load_count,
+    const id4_pipeline_parameter_slab_load_t* loads,
+    iree_allocator_t host_allocator,
+    id4_pipeline_parameter_slab_set_t** out_slab_set);
+
+// Retains |slab_set| for the caller.
+void id4_pipeline_parameter_slab_set_retain(
+    id4_pipeline_parameter_slab_set_t* slab_set);
+
+// Releases |slab_set| from the caller.
+void id4_pipeline_parameter_slab_set_release(
+    id4_pipeline_parameter_slab_set_t* slab_set);
+
+// Returns the number of loaded slabs in |slab_set|.
+iree_host_size_t id4_pipeline_parameter_slab_set_count(
+    const id4_pipeline_parameter_slab_set_t* slab_set);
+
+// Returns loaded slab buffer |index| or NULL when out of range.
+iree_hal_buffer_t* id4_pipeline_parameter_slab_set_buffer_at(
+    const id4_pipeline_parameter_slab_set_t* slab_set, iree_host_size_t index);
 
 #ifdef __cplusplus
 }  // extern "C"

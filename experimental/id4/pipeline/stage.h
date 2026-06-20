@@ -163,10 +163,11 @@ iree_status_t id4_pipeline_stage_issue(
     id4_pipeline_stage_t* stage, id4_pipeline_bundle_t* bundle,
     const id4_pipeline_stage_issue_options_t* options);
 
-// Creates a metadata-only bundle retaining |plan|.
-iree_status_t id4_pipeline_bundle_create(const id4_pipeline_plan_t* plan,
-                                         iree_allocator_t host_allocator,
-                                         id4_pipeline_bundle_t** out_bundle);
+// Creates a bundle retaining |plan| and optional loaded parameter slabs.
+iree_status_t id4_pipeline_bundle_create(
+    const id4_pipeline_plan_t* plan,
+    id4_pipeline_parameter_slab_set_t* parameter_slabs,
+    iree_allocator_t host_allocator, id4_pipeline_bundle_t** out_bundle);
 
 // Retains |bundle| for the caller.
 void id4_pipeline_bundle_retain(id4_pipeline_bundle_t* bundle);
@@ -176,6 +177,10 @@ void id4_pipeline_bundle_release(id4_pipeline_bundle_t* bundle);
 
 // Returns the plan retained by |bundle|.
 const id4_pipeline_plan_t* id4_pipeline_bundle_plan(
+    const id4_pipeline_bundle_t* bundle);
+
+// Returns the parameter slab set retained by |bundle|, if any.
+id4_pipeline_parameter_slab_set_t* id4_pipeline_bundle_parameter_slabs(
     const id4_pipeline_bundle_t* bundle);
 
 #ifdef __cplusplus

@@ -59,6 +59,7 @@ iree_cc_library(
     "stage.c"
   DEPS
     ::diagnostics
+    ::parameter_slab
     ::plan
     iree::base
     iree::hal
@@ -75,8 +76,10 @@ iree_cc_test(
     ::parameter_slab
     ::stage
     iree::async
+    iree::async::util::proactor_pool
     iree::base
     iree::hal
+    iree::hal::drivers::local_sync::sync_driver
     iree::hal::testing::mock_device
     iree::testing::gtest
     iree::testing::gtest_main

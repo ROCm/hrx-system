@@ -90,6 +90,14 @@ iree_host_size_t id4_pipeline_plan_parameter_slab_count(
 const id4_pipeline_parameter_slab_plan_t* id4_pipeline_plan_parameter_slab_at(
     const id4_pipeline_plan_t* plan, iree_host_size_t index);
 
+// Loads all planned parameter slabs through |provider|.
+iree_status_t id4_pipeline_plan_load_parameter_slabs(
+    const id4_pipeline_plan_t* plan, iree_io_parameter_provider_t* provider,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_allocator_t host_allocator,
+    id4_pipeline_parameter_slab_set_t** out_slab_set);
+
 // Appends deterministic JSON describing the plan.
 iree_status_t id4_pipeline_plan_format_json(const id4_pipeline_plan_t* plan,
                                             iree_string_builder_t* builder);

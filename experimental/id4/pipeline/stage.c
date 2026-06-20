@@ -16,6 +16,8 @@ struct id4_pipeline_bundle_t {
   iree_allocator_t host_allocator;
   // Retained plan used to prepare this bundle.
   id4_pipeline_plan_t* plan;
+  // Optional loaded parameter slabs retained by this bundle.
+  id4_pipeline_parameter_slab_set_t* parameter_slabs;
 };
 
 static iree_status_t id4_pipeline_validate_options_size(
@@ -177,9 +179,10 @@ iree_status_t id4_pipeline_stage_issue(
   return stage->vtable->issue(stage, bundle, options);
 }
 
-iree_status_t id4_pipeline_bundle_create(const id4_pipeline_plan_t* plan,
-                                         iree_allocator_t host_allocator,
-                                         id4_pipeline_bundle_t** out_bundle) {
+iree_status_t id4_pipeline_bundle_create(
+    const id4_pipeline_plan_t* plan,
+    id4_pipeline_parameter_slab_set_t* parameter_slabs,
+    iree_allocator_t host_allocator, id4_pipeline_bundle_t** out_bundle) {
   IREE_ASSERT_ARGUMENT(plan);
   IREE_ASSERT_ARGUMENT(out_bundle);
   *out_bundle = NULL;
@@ -192,12 +195,15 @@ iree_status_t id4_pipeline_bundle_create(const id4_pipeline_plan_t* plan,
   bundle->host_allocator = host_allocator;
   bundle->plan = (id4_pipeline_plan_t*)plan;
   id4_pipeline_plan_retain(bundle->plan);
+  bundle->parameter_slabs = parameter_slabs;
+  id4_pipeline_parameter_slab_set_retain(bundle->parameter_slabs);
   *out_bundle = bundle;
   return iree_ok_status();
 }
 
 static void id4_pipeline_bundle_destroy(id4_pipeline_bundle_t* bundle) {
   iree_allocator_t host_allocator = bundle->host_allocator;
+  id4_pipeline_parameter_slab_set_release(bundle->parameter_slabs);
   id4_pipeline_plan_release(bundle->plan);
   iree_allocator_free(host_allocator, bundle);
 }
@@ -216,4 +222,9 @@ void id4_pipeline_bundle_release(id4_pipeline_bundle_t* bundle) {
 const id4_pipeline_plan_t* id4_pipeline_bundle_plan(
     const id4_pipeline_bundle_t* bundle) {
   return bundle ? bundle->plan : NULL;
+}
+
+id4_pipeline_parameter_slab_set_t* id4_pipeline_bundle_parameter_slabs(
+    const id4_pipeline_bundle_t* bundle) {
+  return bundle ? bundle->parameter_slabs : NULL;
 }
