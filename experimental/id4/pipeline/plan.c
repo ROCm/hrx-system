@@ -39,8 +39,8 @@ static iree_status_t id4_pipeline_string_clone(iree_string_view_t source,
                             "string is too large to clone");
   }
   char* storage = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_allocator_malloc(host_allocator, source.size + 1, (void**)&storage));
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      host_allocator, source.size + 1, sizeof(storage[0]), (void**)&storage));
   memcpy(storage, source.data, source.size);
   storage[source.size] = 0;
   *out_target = iree_make_string_view(storage, source.size);
@@ -93,23 +93,18 @@ static void id4_pipeline_plan_destroy(id4_pipeline_plan_t* plan) {
 static iree_status_t id4_pipeline_plan_copy_placements(
     id4_pipeline_plan_t* plan,
     const id4_pipeline_plan_create_options_t* options) {
-  plan->placement_count =
-      options->placement_count ? options->placement_count : 1;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-      plan->host_allocator, plan->placement_count * sizeof(plan->placements[0]),
-      (void**)&plan->placements));
-  memset(plan->placements, 0,
-         plan->placement_count * sizeof(plan->placements[0]));
   if (options->placement_count == 0) {
-    plan->placements[0].device_index = options->default_device_index;
-    plan->placements[0].queue_affinity = options->default_queue_affinity;
-    return id4_pipeline_string_clone(IREE_SV("default"), plan->host_allocator,
-                                     &plan->placements[0].role);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "at least one placement is required");
   }
   if (!options->placements) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "placement array is required");
   }
+  plan->placement_count = options->placement_count;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      plan->host_allocator, plan->placement_count, sizeof(plan->placements[0]),
+      (void**)&plan->placements));
   for (iree_host_size_t i = 0; i < options->placement_count; ++i) {
     const id4_pipeline_device_placement_t* source = &options->placements[i];
     if (source->device_index >=
@@ -138,12 +133,9 @@ static iree_status_t id4_pipeline_plan_copy_parameter_slabs(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "parameter slab array is required");
   }
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-      plan->host_allocator,
-      plan->parameter_slab_count * sizeof(plan->parameter_slabs[0]),
-      (void**)&plan->parameter_slabs));
-  memset(plan->parameter_slabs, 0,
-         plan->parameter_slab_count * sizeof(plan->parameter_slabs[0]));
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      plan->host_allocator, plan->parameter_slab_count,
+      sizeof(plan->parameter_slabs[0]), (void**)&plan->parameter_slabs));
   for (iree_host_size_t i = 0; i < plan->parameter_slab_count; ++i) {
     const id4_pipeline_parameter_slab_plan_t* source =
         &options->parameter_slabs[i];
@@ -159,10 +151,9 @@ static iree_status_t id4_pipeline_plan_copy_parameter_slabs(
         source->scope, plan->host_allocator, &target->scope));
     if (target->request_count == 0) continue;
     id4_pipeline_parameter_request_t* requests = NULL;
-    IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-        plan->host_allocator, target->request_count * sizeof(requests[0]),
-        (void**)&requests));
-    memset(requests, 0, target->request_count * sizeof(requests[0]));
+    IREE_RETURN_IF_ERROR(
+        iree_allocator_malloc_array(plan->host_allocator, target->request_count,
+                                    sizeof(requests[0]), (void**)&requests));
     target->requests = requests;
     for (iree_host_size_t j = 0; j < target->request_count; ++j) {
       requests[j].span = source->requests[j].span;
@@ -180,8 +171,7 @@ iree_status_t id4_pipeline_plan_create(
   IREE_ASSERT_ARGUMENT(out_plan);
   *out_plan = NULL;
 
-  if (options->structure_size != 0 &&
-      options->structure_size < sizeof(*options)) {
+  if (options->structure_size < sizeof(*options)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "plan options structure size %" PRIhsz
                             " is smaller than expected %" PRIhsz,
@@ -201,14 +191,6 @@ iree_status_t id4_pipeline_plan_create(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "device group must not be empty");
   }
-  if (options->placement_count == 0 &&
-      options->default_device_index >= device_count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "default device index %" PRIhsz
-                            " outside device group count %" PRIhsz,
-                            options->default_device_index, device_count);
-  }
-
   id4_pipeline_plan_t* plan = NULL;
   iree_status_t status =
       iree_allocator_malloc(host_allocator, sizeof(*plan), (void**)&plan);
@@ -306,10 +288,9 @@ iree_status_t id4_pipeline_plan_load_parameter_slabs(
 
   id4_pipeline_parameter_slab_load_t* loads = NULL;
   if (plan->parameter_slab_count != 0) {
-    IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-        host_allocator, plan->parameter_slab_count * sizeof(loads[0]),
-        (void**)&loads));
-    memset(loads, 0, plan->parameter_slab_count * sizeof(loads[0]));
+    IREE_RETURN_IF_ERROR(
+        iree_allocator_malloc_array(host_allocator, plan->parameter_slab_count,
+                                    sizeof(loads[0]), (void**)&loads));
   }
 
   iree_status_t status = iree_ok_status();

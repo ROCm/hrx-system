@@ -60,13 +60,19 @@ static void BM_PipelinePlanCreateAndFormatJson(benchmark::State& state) {
     slab.request_count = 1;
     slab.requests = &request;
 
+    id4_pipeline_device_placement_t placement;
+    memset(&placement, 0, sizeof(placement));
+    placement.role = IREE_SV("benchmark");
+    placement.device_index = 0;
+    placement.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+
     id4_pipeline_plan_create_options_t create_options;
     memset(&create_options, 0, sizeof(create_options));
     create_options.structure_size = sizeof(create_options);
     create_options.stage_name = IREE_SV("benchmark");
     create_options.device_group = device_group;
-    create_options.default_device_index = 0;
-    create_options.default_queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+    create_options.placement_count = 1;
+    create_options.placements = &placement;
     create_options.parameter_slab_count = 1;
     create_options.parameter_slabs = &slab;
 

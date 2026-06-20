@@ -50,10 +50,10 @@ typedef struct id4_pipeline_stage_plan_options_t {
   iree_host_size_t structure_size;
   // Extension structure chain; must be NULL for now.
   const void* next;
-  // Default device index used by single-device plans.
-  iree_host_size_t default_device_index;
-  // Default queue affinity used by single-device plans.
-  iree_hal_queue_affinity_t default_queue_affinity;
+  // Device index used by single-device stage plans.
+  iree_host_size_t device_index;
+  // Queue affinity used by single-device stage plans.
+  iree_hal_queue_affinity_t queue_affinity;
   // Optional diagnostics sink for plan events.
   id4_pipeline_diagnostics_sink_t* diagnostics_sink;
 } id4_pipeline_stage_plan_options_t;
@@ -167,6 +167,7 @@ iree_status_t id4_pipeline_stage_issue(
 iree_status_t id4_pipeline_bundle_create(
     const id4_pipeline_plan_t* plan,
     id4_pipeline_parameter_slab_set_t* parameter_slabs,
+    iree_hal_semaphore_list_t readiness_semaphore_list,
     iree_allocator_t host_allocator, id4_pipeline_bundle_t** out_bundle);
 
 // Retains |bundle| for the caller.
@@ -181,6 +182,10 @@ const id4_pipeline_plan_t* id4_pipeline_bundle_plan(
 
 // Returns the parameter slab set retained by |bundle|, if any.
 id4_pipeline_parameter_slab_set_t* id4_pipeline_bundle_parameter_slabs(
+    const id4_pipeline_bundle_t* bundle);
+
+// Returns semaphores that must be reached before |bundle| contents are ready.
+iree_hal_semaphore_list_t id4_pipeline_bundle_readiness_semaphore_list(
     const id4_pipeline_bundle_t* bundle);
 
 #ifdef __cplusplus

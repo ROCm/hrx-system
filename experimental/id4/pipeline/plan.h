@@ -39,10 +39,6 @@ typedef struct id4_pipeline_plan_create_options_t {
   iree_string_view_t stage_name;
   // Device group retained by the plan.
   iree_hal_device_group_t* device_group;
-  // Default device index used when no placement array is provided.
-  iree_host_size_t default_device_index;
-  // Default queue affinity used when no placement array is provided.
-  iree_hal_queue_affinity_t default_queue_affinity;
   // Number of explicit placements.
   iree_host_size_t placement_count;
   // Explicit placements to copy into the plan.

@@ -114,12 +114,9 @@ static iree_status_t id4_pipeline_parameter_slab_set_create_empty(
     slab_set->count = count;
   }
   if (iree_status_is_ok(status) && count != 0) {
-    status = iree_allocator_malloc(host_allocator,
-                                   count * sizeof(slab_set->buffers[0]),
-                                   (void**)&slab_set->buffers);
-  }
-  if (iree_status_is_ok(status) && count != 0) {
-    memset(slab_set->buffers, 0, count * sizeof(slab_set->buffers[0]));
+    status = iree_allocator_malloc_array(host_allocator, count,
+                                         sizeof(slab_set->buffers[0]),
+                                         (void**)&slab_set->buffers);
   }
   if (iree_status_is_ok(status)) {
     *out_slab_set = slab_set;
@@ -148,6 +145,29 @@ static iree_status_t id4_pipeline_parameter_slab_allocate_buffer(
       load->slab->byte_length, out_buffer);
 }
 
+static iree_status_t id4_pipeline_parameter_slab_validate_semaphore_list(
+    iree_hal_semaphore_list_t semaphore_list, iree_string_view_t list_name) {
+  if (semaphore_list.count == 0) return iree_ok_status();
+  if (!semaphore_list.semaphores) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "%.*s semaphore array is required",
+                            (int)list_name.size, list_name.data);
+  }
+  if (!semaphore_list.payload_values) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "%.*s payload value array is required",
+                            (int)list_name.size, list_name.data);
+  }
+  for (iree_host_size_t i = 0; i < semaphore_list.count; ++i) {
+    if (!semaphore_list.semaphores[i]) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "%.*s semaphore %" PRIhsz " is NULL",
+                              (int)list_name.size, list_name.data, i);
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t id4_pipeline_parameter_slab_create_chain_semaphores(
     iree_host_size_t load_count,
     const id4_pipeline_parameter_slab_load_t* loads,
@@ -160,12 +180,9 @@ static iree_status_t id4_pipeline_parameter_slab_create_chain_semaphores(
   if (*out_semaphore_count == 0) return iree_ok_status();
 
   iree_hal_semaphore_t** semaphores = NULL;
-  iree_status_t status = iree_allocator_malloc(
-      host_allocator, *out_semaphore_count * sizeof(semaphores[0]),
-      (void**)&semaphores);
-  if (iree_status_is_ok(status)) {
-    memset(semaphores, 0, *out_semaphore_count * sizeof(semaphores[0]));
-  }
+  iree_status_t status =
+      iree_allocator_malloc_array(host_allocator, *out_semaphore_count,
+                                  sizeof(semaphores[0]), (void**)&semaphores);
   for (iree_host_size_t i = 0;
        i < *out_semaphore_count && iree_status_is_ok(status); ++i) {
     const id4_pipeline_parameter_slab_load_t* load = &loads[i];
@@ -207,6 +224,15 @@ iree_status_t id4_pipeline_parameter_slab_set_load(
   if (load_count != 0 && !loads) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "parameter slab load array is required");
+  }
+  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_slab_validate_semaphore_list(
+      wait_semaphore_list, IREE_SV("parameter slab wait")));
+  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_slab_validate_semaphore_list(
+      signal_semaphore_list, IREE_SV("parameter slab signal")));
+  if (load_count != 0 && signal_semaphore_list.count == 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter slab loading requires a signal semaphore list");
   }
 
   id4_pipeline_parameter_slab_set_t* slab_set = NULL;

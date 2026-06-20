@@ -253,8 +253,7 @@ static iree_status_t SmokeStageLoad(
   event.stage_name = IREE_SV("smoke");
   event.key = IREE_SV("stage.load");
   event.message = IREE_SV("loaded smoke stage");
-  return id4_pipeline_diagnostics_emit(
-      options ? options->diagnostics_sink : NULL, &event);
+  return id4_pipeline_diagnostics_emit(options->diagnostics_sink, &event);
 }
 
 static iree_status_t SmokeStagePlan(
@@ -286,18 +285,22 @@ static iree_status_t SmokeStagePlan(
   slab.request_count = 1;
   slab.requests = &request;
 
+  id4_pipeline_device_placement_t placement;
+  memset(&placement, 0, sizeof(placement));
+  placement.role = IREE_SV("default");
+  placement.device_index = options->device_index;
+  placement.queue_affinity = options->queue_affinity;
+
   id4_pipeline_plan_create_options_t create_options;
   memset(&create_options, 0, sizeof(create_options));
   create_options.structure_size = sizeof(create_options);
   create_options.stage_name = IREE_SV("smoke");
   create_options.device_group = stage->services.device_group;
-  create_options.default_device_index =
-      options ? options->default_device_index : 0;
-  create_options.default_queue_affinity =
-      options ? options->default_queue_affinity : IREE_HAL_QUEUE_AFFINITY_ANY;
+  create_options.placement_count = 1;
+  create_options.placements = &placement;
   create_options.parameter_slab_count = 1;
   create_options.parameter_slabs = &slab;
-  create_options.diagnostics_sink = options ? options->diagnostics_sink : NULL;
+  create_options.diagnostics_sink = options->diagnostics_sink;
   return id4_pipeline_plan_create(&create_options,
                                   stage->services.host_allocator, out_plan);
 }
@@ -313,8 +316,11 @@ static iree_status_t SmokeStagePrepare(
                             "smoke stage must be loaded before preparation");
   }
   id4_pipeline_parameter_slab_set_t* parameter_slabs = NULL;
+  const bool has_parameter_load =
+      options->parameter_provider &&
+      id4_pipeline_plan_parameter_slab_count(plan) != 0;
   iree_status_t status = iree_ok_status();
-  if (options && options->parameter_provider) {
+  if (has_parameter_load) {
     status = id4_pipeline_plan_load_parameter_slabs(
         plan, options->parameter_provider, options->wait_semaphore_list,
         options->signal_semaphore_list, stage->services.host_allocator,
@@ -322,8 +328,12 @@ static iree_status_t SmokeStagePrepare(
   }
   id4_pipeline_bundle_t* bundle = NULL;
   if (iree_status_is_ok(status)) {
+    iree_hal_semaphore_list_t readiness_semaphore_list =
+        has_parameter_load ? options->signal_semaphore_list
+                           : iree_hal_semaphore_list_empty();
     status = id4_pipeline_bundle_create(
-        plan, parameter_slabs, stage->services.host_allocator, &bundle);
+        plan, parameter_slabs, readiness_semaphore_list,
+        stage->services.host_allocator, &bundle);
   }
   id4_pipeline_parameter_slab_set_release(parameter_slabs);
   if (iree_status_is_ok(status)) {
@@ -333,8 +343,7 @@ static iree_status_t SmokeStagePrepare(
     event.stage_name = id4_pipeline_plan_stage_name(plan);
     event.key = IREE_SV("stage.prepare");
     event.message = IREE_SV("prepared smoke bundle");
-    status = id4_pipeline_diagnostics_emit(
-        options ? options->diagnostics_sink : NULL, &event);
+    status = id4_pipeline_diagnostics_emit(options->diagnostics_sink, &event);
   }
   if (iree_status_is_ok(status)) {
     *out_bundle = bundle;
@@ -360,8 +369,8 @@ static iree_status_t SmokeStageIssue(
   event.stage_name = id4_pipeline_plan_stage_name(plan);
   event.key = IREE_SV("stage.issue");
   event.message = IREE_SV("issued smoke bundle");
-  IREE_RETURN_IF_ERROR(id4_pipeline_diagnostics_emit(
-      options ? options->diagnostics_sink : NULL, &event));
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_diagnostics_emit(options->diagnostics_sink, &event));
   smoke_stage->is_issued = true;
   return iree_ok_status();
 }
@@ -429,8 +438,8 @@ TEST(PipelineStage, PlanCopiesPlacementAndParameterSlabMetadata) {
   id4_pipeline_stage_plan_options_t plan_options;
   memset(&plan_options, 0, sizeof(plan_options));
   plan_options.structure_size = sizeof(plan_options);
-  plan_options.default_device_index = 0;
-  plan_options.default_queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  plan_options.device_index = 0;
+  plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
   plan_options.diagnostics_sink = &diagnostics_sink;
 
   id4_pipeline_plan_t* plan = NULL;
@@ -486,25 +495,73 @@ TEST(PipelineStage, PlanCopiesPlacementAndParameterSlabMetadata) {
   id4_pipeline_stage_release(stage);
 }
 
-TEST(PipelineStage, PlanRejectsInvalidDefaultDevice) {
+TEST(PipelineStage, PlanRejectsInvalidDevice) {
   iree_hal_device_group_t* device_group = CreateMockDeviceGroup();
   id4_pipeline_stage_t* stage = NULL;
   IREE_ASSERT_OK(SmokeStageCreate(device_group, &stage));
   iree_hal_device_group_release(device_group);
 
-  IREE_ASSERT_OK(id4_pipeline_stage_load(stage, NULL));
+  id4_pipeline_stage_load_options_t load_options;
+  memset(&load_options, 0, sizeof(load_options));
+  load_options.structure_size = sizeof(load_options);
+  IREE_ASSERT_OK(id4_pipeline_stage_load(stage, &load_options));
 
   id4_pipeline_stage_plan_options_t plan_options;
   memset(&plan_options, 0, sizeof(plan_options));
   plan_options.structure_size = sizeof(plan_options);
-  plan_options.default_device_index = 1;
-  plan_options.default_queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  plan_options.device_index = 1;
+  plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
 
   id4_pipeline_plan_t* plan = NULL;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
                         id4_pipeline_stage_plan(stage, &plan_options, &plan));
   EXPECT_EQ(plan, nullptr);
 
+  id4_pipeline_stage_release(stage);
+}
+
+TEST(PipelineStage, LifecycleRejectsMissingOptions) {
+  iree_hal_device_group_t* device_group = CreateMockDeviceGroup();
+  id4_pipeline_stage_t* stage = NULL;
+  IREE_ASSERT_OK(SmokeStageCreate(device_group, &stage));
+  iree_hal_device_group_release(device_group);
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        id4_pipeline_stage_load(stage, NULL));
+
+  id4_pipeline_stage_load_options_t load_options;
+  memset(&load_options, 0, sizeof(load_options));
+  load_options.structure_size = sizeof(load_options);
+  IREE_ASSERT_OK(id4_pipeline_stage_load(stage, &load_options));
+
+  id4_pipeline_plan_t* plan = NULL;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        id4_pipeline_stage_plan(stage, NULL, &plan));
+
+  id4_pipeline_stage_plan_options_t plan_options;
+  memset(&plan_options, 0, sizeof(plan_options));
+  plan_options.structure_size = sizeof(plan_options);
+  plan_options.device_index = 0;
+  plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  IREE_ASSERT_OK(id4_pipeline_stage_plan(stage, &plan_options, &plan));
+
+  id4_pipeline_bundle_t* bundle = NULL;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        id4_pipeline_stage_prepare(stage, plan, NULL, &bundle));
+
+  id4_pipeline_stage_prepare_options_t prepare_options;
+  memset(&prepare_options, 0, sizeof(prepare_options));
+  prepare_options.structure_size = sizeof(prepare_options);
+  prepare_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
+  prepare_options.signal_semaphore_list = iree_hal_semaphore_list_empty();
+  IREE_ASSERT_OK(
+      id4_pipeline_stage_prepare(stage, plan, &prepare_options, &bundle));
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        id4_pipeline_stage_issue(stage, bundle, NULL));
+
+  id4_pipeline_bundle_release(bundle);
+  id4_pipeline_plan_release(plan);
   id4_pipeline_stage_release(stage);
 }
 
@@ -527,7 +584,8 @@ TEST(PipelineStage, PrepareAndIssueSmokeBundle) {
   id4_pipeline_stage_plan_options_t plan_options;
   memset(&plan_options, 0, sizeof(plan_options));
   plan_options.structure_size = sizeof(plan_options);
-  plan_options.default_queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  plan_options.device_index = 0;
+  plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
   plan_options.diagnostics_sink = &diagnostics_sink;
 
   id4_pipeline_plan_t* plan = NULL;
@@ -544,6 +602,7 @@ TEST(PipelineStage, PrepareAndIssueSmokeBundle) {
   IREE_ASSERT_OK(
       id4_pipeline_stage_prepare(stage, plan, &prepare_options, &bundle));
   EXPECT_EQ(id4_pipeline_bundle_plan(bundle), plan);
+  EXPECT_EQ(id4_pipeline_bundle_readiness_semaphore_list(bundle).count, 0u);
 
   id4_pipeline_stage_issue_options_t issue_options;
   memset(&issue_options, 0, sizeof(issue_options));
@@ -564,18 +623,22 @@ TEST(PipelineStage, PrepareAndIssueSmokeBundle) {
   id4_pipeline_stage_release(stage);
 }
 
-TEST(PipelineStage, PrepareLoadsParameterSlabsWhenProviderIsSupplied) {
+TEST(PipelineStage, PrepareRejectsParameterSlabLoadWithoutSignal) {
   iree_hal_device_group_t* device_group = CreateLocalSyncDeviceGroup();
   id4_pipeline_stage_t* stage = NULL;
   IREE_ASSERT_OK(SmokeStageCreate(device_group, &stage));
   iree_hal_device_group_release(device_group);
 
-  IREE_ASSERT_OK(id4_pipeline_stage_load(stage, NULL));
+  id4_pipeline_stage_load_options_t load_options;
+  memset(&load_options, 0, sizeof(load_options));
+  load_options.structure_size = sizeof(load_options);
+  IREE_ASSERT_OK(id4_pipeline_stage_load(stage, &load_options));
 
   id4_pipeline_stage_plan_options_t plan_options;
   memset(&plan_options, 0, sizeof(plan_options));
   plan_options.structure_size = sizeof(plan_options);
-  plan_options.default_queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  plan_options.device_index = 0;
+  plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
 
   id4_pipeline_plan_t* plan = NULL;
   IREE_ASSERT_OK(id4_pipeline_stage_plan(stage, &plan_options, &plan));
@@ -591,8 +654,69 @@ TEST(PipelineStage, PrepareLoadsParameterSlabsWhenProviderIsSupplied) {
   prepare_options.signal_semaphore_list = iree_hal_semaphore_list_empty();
 
   id4_pipeline_bundle_t* bundle = NULL;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_pipeline_stage_prepare(stage, plan, &prepare_options, &bundle));
+  EXPECT_EQ(bundle, nullptr);
+
+  id4_pipeline_plan_release(plan);
+  id4_pipeline_stage_release(stage);
+}
+
+TEST(PipelineStage, PrepareLoadsParameterSlabsWhenProviderIsSupplied) {
+  iree_hal_device_group_t* device_group = CreateLocalSyncDeviceGroup();
+  id4_pipeline_stage_t* stage = NULL;
+  IREE_ASSERT_OK(SmokeStageCreate(device_group, &stage));
+  iree_hal_device_group_release(device_group);
+
+  id4_pipeline_stage_load_options_t load_options;
+  memset(&load_options, 0, sizeof(load_options));
+  load_options.structure_size = sizeof(load_options);
+  IREE_ASSERT_OK(id4_pipeline_stage_load(stage, &load_options));
+
+  id4_pipeline_stage_plan_options_t plan_options;
+  memset(&plan_options, 0, sizeof(plan_options));
+  plan_options.structure_size = sizeof(plan_options);
+  plan_options.device_index = 0;
+  plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+
+  id4_pipeline_plan_t* plan = NULL;
+  IREE_ASSERT_OK(id4_pipeline_stage_plan(stage, &plan_options, &plan));
+
+  id4_pipeline_test_parameter_provider_t provider;
+  TestParameterProviderInitialize(&provider);
+
+  iree_hal_device_t* device =
+      iree_hal_device_group_device_at(id4_pipeline_plan_device_group(plan), 0);
+  iree_hal_semaphore_t* ready_semaphore = NULL;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &ready_semaphore));
+  uint64_t ready_value = 1;
+  iree_hal_semaphore_list_t signal_list = {
+      /*.count=*/1,
+      /*.semaphores=*/&ready_semaphore,
+      /*.payload_values=*/&ready_value,
+  };
+
+  id4_pipeline_stage_prepare_options_t prepare_options;
+  memset(&prepare_options, 0, sizeof(prepare_options));
+  prepare_options.structure_size = sizeof(prepare_options);
+  prepare_options.parameter_provider = &provider.base;
+  prepare_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
+  prepare_options.signal_semaphore_list = signal_list;
+
+  id4_pipeline_bundle_t* bundle = NULL;
   IREE_ASSERT_OK(
       id4_pipeline_stage_prepare(stage, plan, &prepare_options, &bundle));
+  iree_hal_semaphore_list_t readiness_list =
+      id4_pipeline_bundle_readiness_semaphore_list(bundle);
+  ASSERT_EQ(readiness_list.count, 1u);
+  EXPECT_EQ(readiness_list.semaphores[0], ready_semaphore);
+  EXPECT_EQ(readiness_list.payload_values[0], ready_value);
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(
+      readiness_list.semaphores[0], readiness_list.payload_values[0],
+      iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
 
   id4_pipeline_parameter_slab_set_t* slab_set =
       id4_pipeline_bundle_parameter_slabs(bundle);
@@ -614,6 +738,7 @@ TEST(PipelineStage, PrepareLoadsParameterSlabsWhenProviderIsSupplied) {
   EXPECT_EQ(provider.spans[0].length, 16u);
 
   id4_pipeline_bundle_release(bundle);
+  iree_hal_semaphore_release(ready_semaphore);
   id4_pipeline_plan_release(plan);
   id4_pipeline_stage_release(stage);
 }
@@ -624,12 +749,16 @@ TEST(PipelineStage, PrepareLoadsParameterSlabsFromParameterIndexProvider) {
   IREE_ASSERT_OK(SmokeStageCreate(device_group, &stage));
   iree_hal_device_group_release(device_group);
 
-  IREE_ASSERT_OK(id4_pipeline_stage_load(stage, NULL));
+  id4_pipeline_stage_load_options_t load_options;
+  memset(&load_options, 0, sizeof(load_options));
+  load_options.structure_size = sizeof(load_options);
+  IREE_ASSERT_OK(id4_pipeline_stage_load(stage, &load_options));
 
   id4_pipeline_stage_plan_options_t plan_options;
   memset(&plan_options, 0, sizeof(plan_options));
   plan_options.structure_size = sizeof(plan_options);
-  plan_options.default_queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  plan_options.device_index = 0;
+  plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
 
   id4_pipeline_plan_t* plan = NULL;
   IREE_ASSERT_OK(id4_pipeline_stage_plan(stage, &plan_options, &plan));
@@ -679,6 +808,11 @@ TEST(PipelineStage, PrepareLoadsParameterSlabsFromParameterIndexProvider) {
   id4_pipeline_bundle_t* bundle = NULL;
   IREE_ASSERT_OK(
       id4_pipeline_stage_prepare(stage, plan, &prepare_options, &bundle));
+  iree_hal_semaphore_list_t readiness_list =
+      id4_pipeline_bundle_readiness_semaphore_list(bundle);
+  ASSERT_EQ(readiness_list.count, 1u);
+  EXPECT_EQ(readiness_list.semaphores[0], ready_semaphore);
+  EXPECT_EQ(readiness_list.payload_values[0], ready_value);
   IREE_ASSERT_OK(iree_hal_semaphore_wait(ready_semaphore, ready_value,
                                          iree_infinite_timeout(),
                                          IREE_ASYNC_WAIT_FLAG_NONE));
