@@ -1,0 +1,86 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:cc_benchmark.bzl", "iree_runtime_cc_benchmark")
+load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_runtime_cc_library(
+    name = "diagnostics",
+    srcs = ["diagnostics.c"],
+    hdrs = ["diagnostics.h"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+iree_runtime_cc_library(
+    name = "parameter_slab",
+    srcs = ["parameter_slab.c"],
+    hdrs = ["parameter_slab.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:parameter_provider",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "plan",
+    srcs = ["plan.c"],
+    hdrs = ["plan.h"],
+    deps = [
+        ":diagnostics",
+        ":parameter_slab",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "stage",
+    srcs = ["stage.c"],
+    hdrs = ["stage.h"],
+    deps = [
+        ":diagnostics",
+        ":plan",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:parameter_provider",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "stage_test",
+    srcs = ["stage_test.cc"],
+    deps = [
+        ":parameter_slab",
+        ":stage",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/testing:mock_device",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_benchmark(
+    name = "stage_benchmark",
+    srcs = ["stage_benchmark.cc"],
+    deps = [
+        ":plan",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/testing:mock_device",
+        "//runtime/src/iree/testing:gbenchmark_harness",
+    ],
+)
