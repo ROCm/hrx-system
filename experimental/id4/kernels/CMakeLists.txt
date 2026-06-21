@@ -12,6 +12,7 @@ iree_add_all_subdirs()
 add_custom_command(OUTPUT loom_sources.stamp
     COMMAND ${CMAKE_COMMAND} -E touch loom_sources.stamp
   DEPENDS
+    "sampler_cfg_denoise_f32.loom"
     "smoke_configured.loom"
 )
 
@@ -35,6 +36,38 @@ iree_native_test(
     "hostonly"
 )
 
+iree_native_test(
+  NAME
+    "sampler_cfg_denoise_f32_small_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/sampler_cfg_denoise_f32.loom}}"
+    "--benchmark=@id4_sampler_cfg_denoise_f32_small"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.sampler.element_count=257"
+    "--config=id4.sampler.workgroup_size_x=256"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "sampler_cfg_denoise_f32_full_latent_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/sampler_cfg_denoise_f32.loom}}"
+    "--benchmark=@id4_sampler_cfg_denoise_f32_full_latent"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.sampler.element_count=524288"
+    "--config=id4.sampler.workgroup_size_x=256"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
@@ -45,6 +78,46 @@ iree_native_test(
     "--device=amdgpu://0"
     "--config=id4.smoke.workgroups_x=1"
     "--config=id4.smoke.workgroup_size_x=64"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "sampler_cfg_denoise_f32_small_amdgpu_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/sampler_cfg_denoise_f32.loom}}"
+    "--case=@id4_sampler_cfg_denoise_f32_small_case"
+    "--device=amdgpu://0"
+    "--config=id4.sampler.element_count=257"
+    "--config=id4.sampler.workgroup_size_x=256"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "sampler_cfg_denoise_f32_full_latent_amdgpu_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/sampler_cfg_denoise_f32.loom}}"
+    "--case=@id4_sampler_cfg_denoise_f32_full_latent_case"
+    "--device=amdgpu://0"
+    "--config=id4.sampler.element_count=524288"
+    "--config=id4.sampler.workgroup_size_x=256"
   SRC
     loom::tools::iree-test-loom
   LABELS
