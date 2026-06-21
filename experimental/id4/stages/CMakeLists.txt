@@ -185,4 +185,27 @@ iree_cc_binary_benchmark(
   TESTONLY
 )
 
+iree_cc_binary_benchmark(
+  NAME
+    qwen3_vl_benchmark
+  SRCS
+    "qwen3_vl_benchmark.cc"
+  DEPS
+    ::hal_integration_util
+    ::qwen3_vl
+    iree::base
+    iree::experimental::id4::pipeline::plan
+    iree::experimental::id4::pipeline::stage
+    iree::hal
+    iree::io::parameter_provider
+    iree::testing::benchmark
+    iree::testing::benchmark_main
+    iree::third_party::google_benchmark
+  TESTONLY
+  LABELS
+    "benchmark"
+    "manual"
+    "requires-gpu"
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
