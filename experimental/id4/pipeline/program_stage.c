@@ -178,6 +178,11 @@ static iree_status_t id4_pipeline_program_stage_make_binding_layout(
   const iree_host_size_t diagnostic_tap_count =
       captures_diagnostic_taps ? counts.tap_count : 0;
 
+  if (counts.parameter_count == 0 && options->boundary_binding_slot_base != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter-free program stages must start boundary bindings at slot 0");
+  }
   if (counts.import_count > UINT32_MAX ||
       options->boundary_binding_slot_base >
           UINT32_MAX - (uint32_t)counts.import_count) {

@@ -32,6 +32,34 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "sampler",
+    srcs = ["sampler.c"],
+    hdrs = ["sampler.h"],
+    deps = [
+        ":sampler_program",
+        "//experimental/id4/pipeline:diagnostics",
+        "//experimental/id4/pipeline:kernel_cache",
+        "//experimental/id4/pipeline:program",
+        "//experimental/id4/pipeline:program_stage",
+        "//experimental/id4/pipeline:stage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "sampler_program",
+    srcs = ["sampler_program.c"],
+    hdrs = ["sampler_program.h"],
+    deps = [
+        "//experimental/id4/pipeline:program",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "qwen3_vl_program",
     srcs = ["qwen3_vl_program.c"],
     hdrs = ["qwen3_vl_program.h"],
@@ -109,6 +137,54 @@ iree_runtime_cc_test(
         "//experimental/id4/pipeline:stage",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "sampler_test",
+    srcs = ["sampler_test.cc"],
+    deps = [
+        ":sampler",
+        ":test_util",
+        "//experimental/id4/pipeline:plan",
+        "//experimental/id4/pipeline:stage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "sampler_program_test",
+    srcs = ["sampler_program_test.cc"],
+    deps = [
+        ":sampler_program",
+        "//experimental/id4/pipeline:program",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "sampler_integration_test",
+    srcs = ["sampler_integration_test.cc"],
+    tags = [
+        "manual",
+        "requires-gpu",
+    ],
+    deps = [
+        ":hal_integration_util",
+        ":sampler",
+        "//experimental/id4/pipeline:plan",
+        "//experimental/id4/pipeline:stage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:file_handle",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

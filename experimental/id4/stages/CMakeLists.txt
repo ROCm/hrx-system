@@ -31,6 +31,40 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    sampler
+  HDRS
+    "sampler.h"
+  SRCS
+    "sampler.c"
+  DEPS
+    ::sampler_program
+    iree::base
+    iree::base::internal::arena
+    iree::experimental::id4::pipeline::diagnostics
+    iree::experimental::id4::pipeline::kernel_cache
+    iree::experimental::id4::pipeline::program
+    iree::experimental::id4::pipeline::program_stage
+    iree::experimental::id4::pipeline::stage
+    iree::hal
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
+    sampler_program
+  HDRS
+    "sampler_program.h"
+  SRCS
+    "sampler_program.c"
+  DEPS
+    iree::base
+    iree::experimental::id4::pipeline::program
+    iree::hal
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     qwen3_vl_program
   HDRS
     "qwen3_vl_program.h"
@@ -123,6 +157,56 @@ iree_cc_test(
     iree::hal
     iree::testing::gtest
     iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    sampler_test
+  SRCS
+    "sampler_test.cc"
+  DEPS
+    ::sampler
+    ::test_util
+    iree::base
+    iree::experimental::id4::pipeline::plan
+    iree::experimental::id4::pipeline::stage
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    sampler_program_test
+  SRCS
+    "sampler_program_test.cc"
+  DEPS
+    ::sampler_program
+    iree::base
+    iree::base::internal::arena
+    iree::experimental::id4::pipeline::program
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    sampler_integration_test
+  SRCS
+    "sampler_integration_test.cc"
+  DEPS
+    ::hal_integration_util
+    ::sampler
+    iree::base
+    iree::experimental::id4::pipeline::plan
+    iree::experimental::id4::pipeline::stage
+    iree::hal
+    iree::io::file_handle
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "manual"
+    "requires-gpu"
 )
 
 iree_cc_test(

@@ -6,6 +6,7 @@
 
 #include "experimental/id4/pipeline/program_stage.h"
 
+#include <cstring>
 #include <string>
 
 #include "iree/async/frontier_tracker.h"
@@ -185,6 +186,34 @@ static std::string ToString(iree_string_view_t value) {
   return std::string(value.data, value.size);
 }
 
+static id4_pipeline_stage_plan_options_t MakeStagePlanOptions(
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
+  id4_pipeline_stage_plan_options_t options;
+  std::memset(&options, 0, sizeof(options));
+  options.structure_size = sizeof(options);
+  options.device_index = 0;
+  options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  options.diagnostics_sink = diagnostics_sink;
+  return options;
+}
+
+static id4_pipeline_program_stage_plan_options_t MakeProgramStagePlanOptions(
+    id4_pipeline_stage_plan_options_t* stage_options,
+    id4_pipeline_program_t* program, iree_hal_device_group_t* device_group) {
+  id4_pipeline_program_stage_plan_options_t options;
+  std::memset(&options, 0, sizeof(options));
+  options.structure_size = sizeof(options);
+  options.stage_name = IREE_SV("sampler.loop");
+  options.stage_options = stage_options;
+  options.program = program;
+  options.device_group = device_group;
+  options.parameter_scope = iree_string_view_empty();
+  options.alignment = 16;
+  options.parameter_slab_binding_slot = 0;
+  options.boundary_binding_slot_base = 0;
+  return options;
+}
+
 TEST(ProgramStage, PlansParameterFreeProgramStage) {
   iree_hal_device_group_t* device_group = CreateLocalSyncDeviceGroup();
   id4_pipeline_program_t* program = CreateSamplerProgram();
@@ -192,24 +221,10 @@ TEST(ProgramStage, PlansParameterFreeProgramStage) {
   id4_pipeline_diagnostics_sink_t diagnostics_sink;
   id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
 
-  id4_pipeline_stage_plan_options_t stage_options;
-  memset(&stage_options, 0, sizeof(stage_options));
-  stage_options.structure_size = sizeof(stage_options);
-  stage_options.device_index = 0;
-  stage_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
-  stage_options.diagnostics_sink = &diagnostics_sink;
-
-  id4_pipeline_program_stage_plan_options_t options;
-  memset(&options, 0, sizeof(options));
-  options.structure_size = sizeof(options);
-  options.stage_name = IREE_SV("sampler.loop");
-  options.stage_options = &stage_options;
-  options.program = program;
-  options.device_group = device_group;
-  options.parameter_scope = iree_string_view_empty();
-  options.alignment = 16;
-  options.parameter_slab_binding_slot = 0;
-  options.boundary_binding_slot_base = 0;
+  id4_pipeline_stage_plan_options_t stage_options =
+      MakeStagePlanOptions(&diagnostics_sink);
+  id4_pipeline_program_stage_plan_options_t options =
+      MakeProgramStagePlanOptions(&stage_options, program, device_group);
 
   id4_pipeline_plan_t* plan = nullptr;
   IREE_ASSERT_OK(id4_pipeline_program_stage_create_plan(
@@ -222,6 +237,29 @@ TEST(ProgramStage, PlansParameterFreeProgramStage) {
   EXPECT_EQ(id4_pipeline_plan_region_count(plan), 1u);
 
   id4_pipeline_plan_release(plan);
+  id4_pipeline_program_release(program);
+  iree_hal_device_group_release(device_group);
+}
+
+TEST(ProgramStage, RejectsSparseParameterFreeBindingLayout) {
+  iree_hal_device_group_t* device_group = CreateLocalSyncDeviceGroup();
+  id4_pipeline_program_t* program = CreateSamplerProgram();
+
+  id4_pipeline_diagnostics_sink_t diagnostics_sink;
+  id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
+
+  id4_pipeline_stage_plan_options_t stage_options =
+      MakeStagePlanOptions(&diagnostics_sink);
+  id4_pipeline_program_stage_plan_options_t options =
+      MakeProgramStagePlanOptions(&stage_options, program, device_group);
+  options.boundary_binding_slot_base = 1;
+
+  id4_pipeline_plan_t* plan = nullptr;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        id4_pipeline_program_stage_create_plan(
+                            &options, iree_allocator_system(), &plan));
+  EXPECT_EQ(plan, nullptr);
+
   id4_pipeline_program_release(program);
   iree_hal_device_group_release(device_group);
 }

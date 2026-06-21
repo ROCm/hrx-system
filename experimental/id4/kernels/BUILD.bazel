@@ -30,7 +30,7 @@ _KERNEL_CASES = [
         "configs": [
             "--config=id4.sampler.element_count=257",
         ],
-        "source": "sampler_cfg_denoise_f32.loom",
+        "source": "sampler/cfg_denoise_f32.loom",
         "target_name": "sampler_cfg_denoise_f32_small",
     },
     {
@@ -39,7 +39,7 @@ _KERNEL_CASES = [
         "configs": [
             "--config=id4.sampler.element_count=524288",
         ],
-        "source": "sampler_cfg_denoise_f32.loom",
+        "source": "sampler/cfg_denoise_f32.loom",
         "target_name": "sampler_cfg_denoise_f32_full_latent",
     },
     {
@@ -263,7 +263,7 @@ _KERNEL_SOURCES = [
     "qwen3_vl/selected_hidden_pack_f32.loom",
     "qwen3_vl/silu_gate_f32.loom",
     "qwen3_vl/token_embedding.loom",
-    "sampler_cfg_denoise_f32.loom",
+    "sampler/cfg_denoise_f32.loom",
     "smoke_configured.loom",
 ]
 

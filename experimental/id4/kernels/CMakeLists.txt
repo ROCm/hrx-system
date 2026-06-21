@@ -21,7 +21,7 @@ add_custom_command(OUTPUT loom_sources.stamp
     "qwen3_vl/selected_hidden_pack_f32.loom"
     "qwen3_vl/silu_gate_f32.loom"
     "qwen3_vl/token_embedding.loom"
-    "sampler_cfg_denoise_f32.loom"
+    "sampler/cfg_denoise_f32.loom"
     "smoke_configured.loom"
 )
 
@@ -42,7 +42,7 @@ iree_c_embed_data(
     "qwen3_vl/selected_hidden_pack_f32.loom"
     "qwen3_vl/silu_gate_f32.loom"
     "qwen3_vl/token_embedding.loom"
-    "sampler_cfg_denoise_f32.loom"
+    "sampler/cfg_denoise_f32.loom"
     "smoke_configured.loom"
   C_FILE_OUTPUT
     "embedded_loom_sources.c"
@@ -73,7 +73,7 @@ iree_native_test(
   NAME
     "sampler_cfg_denoise_f32_small_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/sampler_cfg_denoise_f32.loom}}"
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/sampler/cfg_denoise_f32.loom}}"
     "--benchmark=@id4_sampler_cfg_denoise_f32_small"
     "--dry-run"
     "--output-format=jsonl"
@@ -88,7 +88,7 @@ iree_native_test(
   NAME
     "sampler_cfg_denoise_f32_full_latent_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/sampler_cfg_denoise_f32.loom}}"
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/sampler/cfg_denoise_f32.loom}}"
     "--benchmark=@id4_sampler_cfg_denoise_f32_full_latent"
     "--dry-run"
     "--output-format=jsonl"
@@ -446,7 +446,7 @@ iree_native_test(
   NAME
     "sampler_cfg_denoise_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/sampler_cfg_denoise_f32.loom}}"
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/sampler/cfg_denoise_f32.loom}}"
     "--case=@id4_sampler_cfg_denoise_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.sampler.element_count=257"
@@ -465,7 +465,7 @@ iree_native_test(
   NAME
     "sampler_cfg_denoise_f32_full_latent_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/sampler_cfg_denoise_f32.loom}}"
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/sampler/cfg_denoise_f32.loom}}"
     "--case=@id4_sampler_cfg_denoise_f32_full_latent_case"
     "--device=amdgpu://0"
     "--config=id4.sampler.element_count=524288"
