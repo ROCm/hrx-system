@@ -77,7 +77,8 @@ iree_native_test(
     "--benchmark=@id4_qwen3_vl_condition_forward_f32_small"
     "--dry-run"
     "--output-format=jsonl"
-    "--config=id4.qwen3_vl.condition.element_count=257"
+    "--config=id4.qwen3_vl.condition.hidden_row_count=1"
+    "--config=id4.qwen3_vl.condition.token_count=4"
     "--config=id4.qwen3_vl.condition.workgroup_size_x=256"
   SRC
     loom::tools::iree-benchmark-loom
@@ -93,7 +94,8 @@ iree_native_test(
     "--benchmark=@id4_qwen3_vl_condition_forward_f32_fixture_slice"
     "--dry-run"
     "--output-format=jsonl"
-    "--config=id4.qwen3_vl.condition.element_count=2048"
+    "--config=id4.qwen3_vl.condition.hidden_row_count=32"
+    "--config=id4.qwen3_vl.condition.token_count=64"
     "--config=id4.qwen3_vl.condition.workgroup_size_x=256"
   SRC
     loom::tools::iree-benchmark-loom
@@ -169,7 +171,8 @@ iree_native_test(
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl_condition_f32.loom}}"
     "--case=@id4_qwen3_vl_condition_forward_f32_small_case"
     "--device=amdgpu://0"
-    "--config=id4.qwen3_vl.condition.element_count=257"
+    "--config=id4.qwen3_vl.condition.hidden_row_count=1"
+    "--config=id4.qwen3_vl.condition.token_count=4"
     "--config=id4.qwen3_vl.condition.workgroup_size_x=256"
   SRC
     loom::tools::iree-test-loom
@@ -189,7 +192,8 @@ iree_native_test(
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl_condition_f32.loom}}"
     "--case=@id4_qwen3_vl_condition_forward_f32_fixture_slice_case"
     "--device=amdgpu://0"
-    "--config=id4.qwen3_vl.condition.element_count=2048"
+    "--config=id4.qwen3_vl.condition.hidden_row_count=32"
+    "--config=id4.qwen3_vl.condition.token_count=64"
     "--config=id4.qwen3_vl.condition.workgroup_size_x=256"
   SRC
     loom::tools::iree-test-loom

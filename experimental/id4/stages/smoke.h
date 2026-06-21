@@ -29,11 +29,11 @@ typedef struct id4_smoke_stage_create_options_t {
   const void* next;
   // Services retained by the base pipeline stage.
   id4_pipeline_stage_services_t services;
-  // Loom kernel cache used to compile and prepare the smoke executable.
+  // Loom kernel cache used when preparing the smoke executable.
   id4_pipeline_kernel_cache_t* kernel_cache;
   // Source identifier copied into stage-owned storage.
   iree_string_view_t source_identifier;
-  // Textual Loom source contents copied into stage-owned storage.
+  // Textual Loom source contents copied for kernel preparation.
   iree_const_byte_span_t source_contents;
   // Loom module name passed to the compiler.
   iree_string_view_t module_name;

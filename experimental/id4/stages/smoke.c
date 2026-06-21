@@ -142,22 +142,9 @@ static iree_status_t id4_smoke_stage_validate_create_options(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "smoke stage device group is required");
   }
-  if (!options->services.executable_cache) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "smoke stage HAL executable cache is required");
-  }
-  if (!options->kernel_cache) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "smoke stage kernel cache is required");
-  }
   if (iree_string_view_is_empty(options->source_identifier)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "smoke stage source identifier is required");
-  }
-  if (!options->source_contents.data ||
-      options->source_contents.data_length == 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "smoke stage source contents are required");
   }
   if (iree_string_view_is_empty(options->module_name)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -672,6 +659,21 @@ static iree_status_t id4_smoke_stage_prepare(
   if (!options->parameter_provider) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "smoke stage parameter provider is required");
+  }
+  if (!stage->kernel_cache) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "smoke stage kernel cache is required for "
+                            "preparation");
+  }
+  if (!stage->base.services.executable_cache) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "smoke stage HAL executable cache is required for "
+                            "preparation");
+  }
+  if (!stage->source_contents.data || stage->source_contents.data_length == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "smoke stage source contents are required for "
+                            "preparation");
   }
 
   const id4_pipeline_device_placement_t* placement =

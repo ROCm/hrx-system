@@ -202,7 +202,7 @@ typedef struct id4_pipeline_prepared_region_create_options_t {
   iree_host_size_t device_index;
   // Queue affinity used for alloca, execute, and dealloca operations.
   iree_hal_queue_affinity_t queue_affinity;
-  // Allocation pool used for the local transient slab. NULL selects default.
+  // HAL allocation-pool operand passed to queue_alloca for the local slab.
   iree_hal_pool_t* local_slab_pool;
   // HAL buffer parameters used for the local transient slab.
   iree_hal_buffer_params_t local_slab_params;

@@ -17,11 +17,13 @@
 #include "experimental/id4/pipeline/region.h"
 #include "iree/base/internal/arena.h"
 
-#define ID4_QWEN3_VL_STAGE_BINDING_COUNT 3
+#define ID4_QWEN3_VL_STAGE_BINDING_COUNT 4
 #define ID4_QWEN3_VL_STAGE_SELECTED_HIDDEN_STATES_BINDING_SLOT 0
-#define ID4_QWEN3_VL_STAGE_CONDITION_BINDING_SLOT 1
-#define ID4_QWEN3_VL_STAGE_LOCAL_BINDING_SLOT 2
+#define ID4_QWEN3_VL_STAGE_TOKEN_WEIGHTS_BINDING_SLOT 1
+#define ID4_QWEN3_VL_STAGE_CONDITION_BINDING_SLOT 2
+#define ID4_QWEN3_VL_STAGE_LOCAL_BINDING_SLOT 3
 #define ID4_QWEN3_VL_STAGE_MAX_CONDITION_ELEMENT_COUNT ((uint64_t)1048576)
+#define ID4_QWEN3_VL_STAGE_STATS_BYTE_LENGTH 8
 
 typedef struct id4_qwen3_vl_stage_t {
   // Base stage; must be the first field.
@@ -38,12 +40,14 @@ typedef struct id4_qwen3_vl_stage_t {
   iree_string_view_t module_name;
   // HAL executable identifier owned by the stage.
   iree_string_view_t executable_identifier;
-  // Exported HAL function name owned by the stage.
-  iree_string_view_t forward_function_name;
-  // Number of selected text tokens copied into the condition tensor.
-  uint32_t condition_token_count;
-  // Hidden-state element count per selected text token.
-  uint32_t hidden_size;
+  // Exported apply-token-weights HAL function name owned by the stage.
+  iree_string_view_t apply_token_weights_function_name;
+  // Exported normalize-token-weights HAL function name owned by the stage.
+  iree_string_view_t normalize_token_weights_function_name;
+  // Number of hidden rows in stable-diffusion.cpp tensor order.
+  uint32_t hidden_row_count;
+  // Number of token columns in stable-diffusion.cpp tensor order.
+  uint32_t token_count;
   // Configured X workgroup size.
   uint32_t workgroup_size_x;
   // True after load has completed.
@@ -57,8 +61,12 @@ typedef struct id4_qwen3_vl_stage_bundle_payload_t {
   id4_pipeline_prepared_region_t* prepared_region;
   // Selected-hidden-states input buffer retained for issue-time binding.
   iree_hal_buffer_t* selected_hidden_states_buffer;
+  // Token-weights input buffer retained for issue-time binding.
+  iree_hal_buffer_t* token_weights_buffer;
   // Condition output buffer retained for issue-time binding and readback.
   iree_hal_buffer_t* condition_buffer;
+  // Token-weights tensor byte length.
+  iree_device_size_t token_weights_byte_length;
   // Condition tensor byte length.
   iree_device_size_t condition_byte_length;
   // Fixed issue-time binding table storage.
@@ -133,16 +141,27 @@ static void id4_qwen3_vl_stage_free_bytes(iree_const_byte_span_t* value,
 
 static uint64_t id4_qwen3_vl_stage_condition_element_count(
     const id4_qwen3_vl_stage_t* stage) {
-  return (uint64_t)stage->condition_token_count * stage->hidden_size;
+  return (uint64_t)stage->hidden_row_count * stage->token_count;
 }
 
 static iree_status_t id4_qwen3_vl_stage_condition_byte_length(
     uint64_t element_count, iree_device_size_t* out_byte_length) {
-  if (!iree_device_size_checked_mul(
-          element_count, ID4_QWEN3_VL_STAGE_CONDITION_ELEMENT_BYTE_LENGTH,
-          out_byte_length)) {
+  if (!iree_device_size_checked_mul(element_count,
+                                    ID4_QWEN3_VL_STAGE_F32_ELEMENT_BYTE_LENGTH,
+                                    out_byte_length)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "Qwen3-VL condition byte length overflow");
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_qwen3_vl_stage_token_weights_byte_length(
+    uint32_t token_count, iree_device_size_t* out_byte_length) {
+  if (!iree_device_size_checked_mul(token_count,
+                                    ID4_QWEN3_VL_STAGE_F32_ELEMENT_BYTE_LENGTH,
+                                    out_byte_length)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "Qwen3-VL token weights byte length overflow");
   }
   return iree_ok_status();
 }
@@ -178,22 +197,9 @@ static iree_status_t id4_qwen3_vl_stage_validate_create_options(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Qwen3-VL stage device group is required");
   }
-  if (!options->services.executable_cache) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "Qwen3-VL stage HAL executable cache is required");
-  }
-  if (!options->kernel_cache) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "Qwen3-VL stage kernel cache is required");
-  }
   if (iree_string_view_is_empty(options->source_identifier)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Qwen3-VL stage source identifier is required");
-  }
-  if (!options->source_contents.data ||
-      options->source_contents.data_length == 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "Qwen3-VL stage source contents are required");
   }
   if (iree_string_view_is_empty(options->module_name)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -203,20 +209,27 @@ static iree_status_t id4_qwen3_vl_stage_validate_create_options(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Qwen3-VL stage executable identifier is required");
   }
-  if (iree_string_view_is_empty(options->forward_function_name)) {
+  if (iree_string_view_is_empty(options->apply_token_weights_function_name)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "Qwen3-VL stage forward function name is required");
+                            "Qwen3-VL stage apply-token-weights function name "
+                            "is required");
   }
-  if (options->condition_token_count == 0) {
+  if (iree_string_view_is_empty(
+          options->normalize_token_weights_function_name)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "Qwen3-VL condition token count must be nonzero");
+                            "Qwen3-VL stage normalize-token-weights function "
+                            "name is required");
   }
-  if (options->hidden_size == 0) {
+  if (options->hidden_row_count == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "Qwen3-VL hidden size must be nonzero");
+                            "Qwen3-VL hidden row count must be nonzero");
+  }
+  if (options->token_count == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Qwen3-VL token count must be nonzero");
   }
   const uint64_t element_count =
-      (uint64_t)options->condition_token_count * options->hidden_size;
+      (uint64_t)options->hidden_row_count * options->token_count;
   if (element_count > ID4_QWEN3_VL_STAGE_MAX_CONDITION_ELEMENT_COUNT) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
@@ -228,7 +241,10 @@ static iree_status_t id4_qwen3_vl_stage_validate_create_options(
                             "Qwen3-VL workgroup size must be nonzero");
   }
   iree_device_size_t byte_length = 0;
-  return id4_qwen3_vl_stage_condition_byte_length(element_count, &byte_length);
+  IREE_RETURN_IF_ERROR(
+      id4_qwen3_vl_stage_condition_byte_length(element_count, &byte_length));
+  return id4_qwen3_vl_stage_token_weights_byte_length(options->token_count,
+                                                      &byte_length);
 }
 
 static iree_status_t id4_qwen3_vl_stage_format_u64(
@@ -283,31 +299,53 @@ static id4_pipeline_tensor_shape_t id4_qwen3_vl_stage_make_condition_shape(
   id4_pipeline_tensor_shape_t shape;
   memset(&shape, 0, sizeof(shape));
   shape.rank = 2;
-  shape.dims[0] = stage->condition_token_count;
-  shape.dims[1] = stage->hidden_size;
+  shape.dims[0] = stage->hidden_row_count;
+  shape.dims[1] = stage->token_count;
+  return shape;
+}
+
+static id4_pipeline_tensor_shape_t id4_qwen3_vl_stage_make_token_shape(
+    const id4_qwen3_vl_stage_t* stage) {
+  id4_pipeline_tensor_shape_t shape;
+  memset(&shape, 0, sizeof(shape));
+  shape.rank = 1;
+  shape.dims[0] = stage->token_count;
+  return shape;
+}
+
+static id4_pipeline_tensor_shape_t id4_qwen3_vl_stage_make_stats_shape(void) {
+  id4_pipeline_tensor_shape_t shape;
+  memset(&shape, 0, sizeof(shape));
+  shape.rank = 1;
+  shape.dims[0] = 2;
   return shape;
 }
 
 static iree_status_t id4_qwen3_vl_stage_author_region(
     id4_qwen3_vl_stage_t* stage, id4_pipeline_region_builder_t* builder,
     iree_hal_executable_t* hal_executable,
-    iree_hal_executable_function_t function) {
+    iree_hal_executable_function_t apply_function,
+    iree_hal_executable_function_t normalize_function) {
   const uint64_t element_count =
       id4_qwen3_vl_stage_condition_element_count(stage);
-  iree_device_size_t byte_length = 0;
-  IREE_RETURN_IF_ERROR(
-      id4_qwen3_vl_stage_condition_byte_length(element_count, &byte_length));
+  iree_device_size_t condition_byte_length = 0;
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_stage_condition_byte_length(
+      element_count, &condition_byte_length));
+  iree_device_size_t token_weights_byte_length = 0;
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_stage_token_weights_byte_length(
+      stage->token_count, &token_weights_byte_length));
 
   id4_pipeline_tensor_shape_t condition_shape =
       id4_qwen3_vl_stage_make_condition_shape(stage);
+  id4_pipeline_tensor_shape_t token_shape =
+      id4_qwen3_vl_stage_make_token_shape(stage);
   id4_pipeline_tensor_import_t selected_import;
   memset(&selected_import, 0, sizeof(selected_import));
   selected_import.layout.name =
       IREE_SV("qwen3_vl.encoder.selected_hidden_states");
   selected_import.layout.shape = condition_shape;
-  selected_import.layout.byte_length = byte_length;
-  selected_import.layout.alignment =
-      ID4_QWEN3_VL_STAGE_CONDITION_ELEMENT_BYTE_LENGTH;
+  selected_import.layout.byte_length = condition_byte_length;
+  selected_import.layout.alignment = ID4_QWEN3_VL_STAGE_F32_ELEMENT_BYTE_LENGTH;
   selected_import.binding_slot =
       ID4_QWEN3_VL_STAGE_SELECTED_HIDDEN_STATES_BINDING_SLOT;
   selected_import.offset = 0;
@@ -317,13 +355,29 @@ static iree_status_t id4_qwen3_vl_stage_author_region(
   IREE_RETURN_IF_ERROR(id4_pipeline_region_import_tensor(
       builder, &selected_import, &selected_tensor));
 
+  id4_pipeline_tensor_import_t token_weights_import;
+  memset(&token_weights_import, 0, sizeof(token_weights_import));
+  token_weights_import.layout.name = IREE_SV("qwen3_vl.prompt.token_weights");
+  token_weights_import.layout.shape = token_shape;
+  token_weights_import.layout.byte_length = token_weights_byte_length;
+  token_weights_import.layout.alignment =
+      ID4_QWEN3_VL_STAGE_F32_ELEMENT_BYTE_LENGTH;
+  token_weights_import.binding_slot =
+      ID4_QWEN3_VL_STAGE_TOKEN_WEIGHTS_BINDING_SLOT;
+  token_weights_import.offset = 0;
+  token_weights_import.flags = ID4_PIPELINE_TENSOR_IMPORT_FLAG_INITIALIZED;
+
+  id4_pipeline_tensor_t token_weights_tensor;
+  IREE_RETURN_IF_ERROR(id4_pipeline_region_import_tensor(
+      builder, &token_weights_import, &token_weights_tensor));
+
   id4_pipeline_tensor_import_t condition_import;
   memset(&condition_import, 0, sizeof(condition_import));
   condition_import.layout.name = IREE_SV("qwen3_vl.encoder.condition");
   condition_import.layout.shape = condition_shape;
-  condition_import.layout.byte_length = byte_length;
+  condition_import.layout.byte_length = condition_byte_length;
   condition_import.layout.alignment =
-      ID4_QWEN3_VL_STAGE_CONDITION_ELEMENT_BYTE_LENGTH;
+      ID4_QWEN3_VL_STAGE_F32_ELEMENT_BYTE_LENGTH;
   condition_import.binding_slot = ID4_QWEN3_VL_STAGE_CONDITION_BINDING_SLOT;
   condition_import.offset = 0;
 
@@ -331,40 +385,112 @@ static iree_status_t id4_qwen3_vl_stage_author_region(
   IREE_RETURN_IF_ERROR(id4_pipeline_region_import_tensor(
       builder, &condition_import, &condition_tensor));
 
-  id4_pipeline_region_kernel_t kernel;
-  memset(&kernel, 0, sizeof(kernel));
-  kernel.name = stage->forward_function_name;
-  kernel.executable = hal_executable;
-  kernel.function = function;
-  kernel.binding_count = 2;
-  kernel.constant_byte_length = 0;
+  id4_pipeline_tensor_layout_t stats_layout;
+  memset(&stats_layout, 0, sizeof(stats_layout));
+  stats_layout.name = IREE_SV("qwen3_vl.condition.stats");
+  stats_layout.shape = id4_qwen3_vl_stage_make_stats_shape();
+  stats_layout.byte_length = ID4_QWEN3_VL_STAGE_STATS_BYTE_LENGTH;
+  stats_layout.alignment = 8;
 
-  uint32_t workgroups_x = 0;
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_stage_workgroups_x(
-      element_count, stage->workgroup_size_x, &workgroups_x));
-  iree_hal_dispatch_config_t dispatch_config =
-      iree_hal_make_static_dispatch_config(workgroups_x, 1, 1);
-  dispatch_config.workgroup_size[0] = stage->workgroup_size_x;
-  dispatch_config.workgroup_size[1] = 1;
-  dispatch_config.workgroup_size[2] = 1;
+  id4_pipeline_tensor_t stats_tensor;
+  IREE_RETURN_IF_ERROR(id4_pipeline_region_acquire_tensor(
+      builder, &stats_layout, &stats_tensor));
 
-  id4_pipeline_region_dispatch_binding_t bindings[] = {
+  id4_pipeline_region_kernel_t apply_kernel;
+  memset(&apply_kernel, 0, sizeof(apply_kernel));
+  apply_kernel.name = stage->apply_token_weights_function_name;
+  apply_kernel.executable = hal_executable;
+  apply_kernel.function = apply_function;
+  apply_kernel.binding_count = 4;
+  apply_kernel.constant_byte_length = 0;
+
+  iree_hal_dispatch_config_t apply_dispatch_config =
+      iree_hal_make_static_dispatch_config(1, 1, 1);
+  apply_dispatch_config.workgroup_size[0] = stage->workgroup_size_x;
+  apply_dispatch_config.workgroup_size[1] = 1;
+  apply_dispatch_config.workgroup_size[2] = 1;
+
+  id4_pipeline_region_dispatch_binding_t apply_bindings[] = {
       {
-          // Selected hidden states are read by the condition copy kernel.
+          // Selected hidden states are read by the token-weight kernel.
           .tensor = selected_tensor,
           // The dispatch reads selected hidden states.
           .access = ID4_PIPELINE_TENSOR_ACCESS_READ,
       },
       {
-          // Condition tensor is written by the condition copy kernel.
+          // Token weights are read by the token-weight kernel.
+          .tensor = token_weights_tensor,
+          // The dispatch reads token weights.
+          .access = ID4_PIPELINE_TENSOR_ACCESS_READ,
+      },
+      {
+          // Condition tensor is written by the token-weight kernel.
           .tensor = condition_tensor,
           // The dispatch writes the condition tensor.
           .access = ID4_PIPELINE_TENSOR_ACCESS_WRITE,
       },
+      {
+          // Stats tensor receives original and weighted sums.
+          .tensor = stats_tensor,
+          // The dispatch writes token-weight normalization stats.
+          .access = ID4_PIPELINE_TENSOR_ACCESS_WRITE,
+      },
   };
-  return id4_pipeline_region_dispatch(
-      builder, &kernel, dispatch_config, iree_const_byte_span_empty(),
-      IREE_ARRAYSIZE(bindings), bindings, IREE_HAL_DISPATCH_FLAG_NONE);
+  IREE_RETURN_IF_ERROR(id4_pipeline_region_dispatch(
+      builder, &apply_kernel, apply_dispatch_config,
+      iree_const_byte_span_empty(), IREE_ARRAYSIZE(apply_bindings),
+      apply_bindings, IREE_HAL_DISPATCH_FLAG_NONE));
+
+  iree_hal_memory_barrier_t dispatch_barrier = {
+      // Prior dispatch writes condition and stats.
+      .source_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
+      // The next dispatch reads stats and reads/writes condition.
+      .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
+                      IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
+  };
+  IREE_RETURN_IF_ERROR(id4_pipeline_region_barrier(
+      builder, IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      IREE_HAL_EXECUTION_STAGE_DISPATCH, IREE_HAL_EXECUTION_BARRIER_FLAG_NONE,
+      /*memory_barrier_count=*/1, &dispatch_barrier,
+      /*buffer_barrier_count=*/0, NULL));
+
+  id4_pipeline_region_kernel_t normalize_kernel;
+  memset(&normalize_kernel, 0, sizeof(normalize_kernel));
+  normalize_kernel.name = stage->normalize_token_weights_function_name;
+  normalize_kernel.executable = hal_executable;
+  normalize_kernel.function = normalize_function;
+  normalize_kernel.binding_count = 2;
+  normalize_kernel.constant_byte_length = 0;
+
+  uint32_t workgroups_x = 0;
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_stage_workgroups_x(
+      element_count, stage->workgroup_size_x, &workgroups_x));
+  iree_hal_dispatch_config_t normalize_dispatch_config =
+      iree_hal_make_static_dispatch_config(workgroups_x, 1, 1);
+  normalize_dispatch_config.workgroup_size[0] = stage->workgroup_size_x;
+  normalize_dispatch_config.workgroup_size[1] = 1;
+  normalize_dispatch_config.workgroup_size[2] = 1;
+
+  id4_pipeline_region_dispatch_binding_t normalize_bindings[] = {
+      {
+          // Condition is read and rewritten by normalization.
+          .tensor = condition_tensor,
+          // The dispatch reads and writes the condition tensor.
+          .access = ID4_PIPELINE_TENSOR_ACCESS_READ |
+                    ID4_PIPELINE_TENSOR_ACCESS_WRITE,
+      },
+      {
+          // Stats are read by normalization.
+          .tensor = stats_tensor,
+          // The dispatch reads token-weight normalization stats.
+          .access = ID4_PIPELINE_TENSOR_ACCESS_READ,
+      },
+  };
+  IREE_RETURN_IF_ERROR(id4_pipeline_region_dispatch(
+      builder, &normalize_kernel, normalize_dispatch_config,
+      iree_const_byte_span_empty(), IREE_ARRAYSIZE(normalize_bindings),
+      normalize_bindings, IREE_HAL_DISPATCH_FLAG_NONE));
+  return id4_pipeline_region_release_tensor(builder, stats_tensor);
 }
 
 static iree_status_t id4_qwen3_vl_stage_dry_run_region(
@@ -388,7 +514,8 @@ static iree_status_t id4_qwen3_vl_stage_dry_run_region(
       &builder_options, stage->host_allocator, &builder);
   if (iree_status_is_ok(status)) {
     status = id4_qwen3_vl_stage_author_region(
-        stage, builder, NULL, iree_hal_executable_function_invalid());
+        stage, builder, NULL, iree_hal_executable_function_invalid(),
+        iree_hal_executable_function_invalid());
   }
   if (iree_status_is_ok(status)) {
     id4_pipeline_region_builder_statistics(builder, out_statistics);
@@ -402,13 +529,11 @@ static iree_status_t id4_qwen3_vl_stage_dry_run_region(
 static iree_status_t id4_qwen3_vl_stage_format_specialization_key(
     const id4_qwen3_vl_stage_t* stage, char* buffer,
     iree_host_size_t buffer_capacity, iree_string_view_t* out_string) {
-  const uint64_t element_count =
-      id4_qwen3_vl_stage_condition_element_count(stage);
-  int length =
-      snprintf(buffer, buffer_capacity,
-               "id4_qwen3_vl_condition_forward_f32:element_count=%" PRIu64
-               ":workgroup_size_x=%" PRIu32,
-               element_count, stage->workgroup_size_x);
+  int length = snprintf(buffer, buffer_capacity,
+                        "id4_qwen3_vl_condition_f32:hidden_row_count=%" PRIu32
+                        ":token_count=%" PRIu32 ":workgroup_size_x=%" PRIu32,
+                        stage->hidden_row_count, stage->token_count,
+                        stage->workgroup_size_x);
   if (length < 0 || (iree_host_size_t)length >= buffer_capacity) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "failed to format Qwen3-VL specialization key");
@@ -427,7 +552,7 @@ static void id4_qwen3_vl_stage_make_tensor_buffer_params(
   out_params->access = IREE_HAL_MEMORY_ACCESS_ALL;
   out_params->usage = usage | IREE_HAL_BUFFER_USAGE_MAPPING;
   out_params->queue_affinity = queue_affinity;
-  out_params->min_alignment = ID4_QWEN3_VL_STAGE_CONDITION_ELEMENT_BYTE_LENGTH;
+  out_params->min_alignment = ID4_QWEN3_VL_STAGE_F32_ELEMENT_BYTE_LENGTH;
 }
 
 static iree_status_t id4_qwen3_vl_stage_create_plan(
@@ -445,16 +570,24 @@ static iree_status_t id4_qwen3_vl_stage_create_plan(
   iree_device_size_t condition_byte_length = 0;
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_stage_condition_byte_length(
       element_count, &condition_byte_length));
+  iree_device_size_t token_weights_byte_length = 0;
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_stage_token_weights_byte_length(
+      stage->token_count, &token_weights_byte_length));
 
-  char element_count_value_buffer[32];
+  char hidden_row_count_value_buffer[16];
+  char token_count_value_buffer[16];
   char workgroup_size_x_value_buffer[16];
   char specialization_key_buffer[160];
-  iree_string_view_t element_count_value = iree_string_view_empty();
+  iree_string_view_t hidden_row_count_value = iree_string_view_empty();
+  iree_string_view_t token_count_value = iree_string_view_empty();
   iree_string_view_t workgroup_size_x_value = iree_string_view_empty();
   iree_string_view_t specialization_key = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_stage_format_u64(
-      element_count, element_count_value_buffer,
-      IREE_ARRAYSIZE(element_count_value_buffer), &element_count_value));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_stage_format_u32(
+      stage->hidden_row_count, hidden_row_count_value_buffer,
+      IREE_ARRAYSIZE(hidden_row_count_value_buffer), &hidden_row_count_value));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_stage_format_u32(
+      stage->token_count, token_count_value_buffer,
+      IREE_ARRAYSIZE(token_count_value_buffer), &token_count_value));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_stage_format_u32(
       stage->workgroup_size_x, workgroup_size_x_value_buffer,
       IREE_ARRAYSIZE(workgroup_size_x_value_buffer), &workgroup_size_x_value));
@@ -474,12 +607,25 @@ static iree_status_t id4_qwen3_vl_stage_create_plan(
       IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET |
           IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE,
       &selected_params);
+  iree_hal_buffer_params_t token_weights_params;
+  id4_qwen3_vl_stage_make_tensor_buffer_params(
+      options->queue_affinity,
+      IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET |
+          IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE,
+      &token_weights_params);
   iree_hal_buffer_params_t condition_params;
   id4_qwen3_vl_stage_make_tensor_buffer_params(
       options->queue_affinity,
       IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE |
           IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE,
       &condition_params);
+  iree_hal_buffer_params_t local_slab_params;
+  memset(&local_slab_params, 0, sizeof(local_slab_params));
+  local_slab_params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+  local_slab_params.access = IREE_HAL_MEMORY_ACCESS_ALL;
+  local_slab_params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE;
+  local_slab_params.queue_affinity = options->queue_affinity;
+  local_slab_params.min_alignment = 16;
 
   id4_pipeline_memory_slab_plan_t memory_slabs[] = {
       {
@@ -495,9 +641,25 @@ static iree_status_t id4_qwen3_vl_stage_create_plan(
           // Selected-hidden-states tensor byte length.
           .byte_length = condition_byte_length,
           // Selected-hidden-states base alignment.
-          .alignment = ID4_QWEN3_VL_STAGE_CONDITION_ELEMENT_BYTE_LENGTH,
+          .alignment = ID4_QWEN3_VL_STAGE_F32_ELEMENT_BYTE_LENGTH,
           // Selected-hidden-states live byte count.
           .high_water_mark = condition_byte_length,
+      },
+      {
+          // Input tensor slab for per-token prompt weights.
+          .name = IREE_SV("qwen3_vl.token_weights"),
+          // Plan-local placement identifier.
+          .placement_id = 0,
+          // Issue-time binding-table slot for token weights.
+          .binding_slot = ID4_QWEN3_VL_STAGE_TOKEN_WEIGHTS_BINDING_SLOT,
+          // HAL buffer parameters for token weights.
+          .params = token_weights_params,
+          // Token-weights tensor byte length.
+          .byte_length = token_weights_byte_length,
+          // Token-weights base alignment.
+          .alignment = ID4_QWEN3_VL_STAGE_F32_ELEMENT_BYTE_LENGTH,
+          // Token-weights live byte count.
+          .high_water_mark = token_weights_byte_length,
       },
       {
           // Output tensor slab for the Qwen condition tensor.
@@ -511,18 +673,40 @@ static iree_status_t id4_qwen3_vl_stage_create_plan(
           // Condition tensor byte length.
           .byte_length = condition_byte_length,
           // Condition tensor base alignment.
-          .alignment = ID4_QWEN3_VL_STAGE_CONDITION_ELEMENT_BYTE_LENGTH,
+          .alignment = ID4_QWEN3_VL_STAGE_F32_ELEMENT_BYTE_LENGTH,
           // Condition tensor live byte count.
           .high_water_mark = condition_byte_length,
+      },
+      {
+          // Local transient slab for Qwen condition epilogue temporaries.
+          .name = IREE_SV("qwen3_vl.local"),
+          // Plan-local placement identifier.
+          .placement_id = 0,
+          // Issue-time binding-table slot for the local transient slab.
+          .binding_slot = ID4_QWEN3_VL_STAGE_LOCAL_BINDING_SLOT,
+          // HAL buffer parameters for local transients.
+          .params = local_slab_params,
+          // Required local slab byte length.
+          .byte_length = region_statistics.local_slab_byte_length,
+          // Local slab base alignment.
+          .alignment = 16,
+          // Peak local transient byte count.
+          .high_water_mark = region_statistics.local_slab_high_water_mark,
       },
   };
 
   id4_pipeline_plan_config_binding_t config_bindings[] = {
       {
-          // Config key for the condition element count.
-          .key = IREE_SV("id4.qwen3_vl.condition.element_count"),
-          // Config value for the condition element count.
-          .value = element_count_value,
+          // Config key for the hidden row count.
+          .key = IREE_SV("id4.qwen3_vl.condition.hidden_row_count"),
+          // Config value for the hidden row count.
+          .value = hidden_row_count_value,
+      },
+      {
+          // Config key for the token count.
+          .key = IREE_SV("id4.qwen3_vl.condition.token_count"),
+          // Config value for the token count.
+          .value = token_count_value,
       },
       {
           // Config key for the X workgroup size.
@@ -531,16 +715,24 @@ static iree_status_t id4_qwen3_vl_stage_create_plan(
           .value = workgroup_size_x_value,
       },
   };
-  id4_pipeline_kernel_plan_t kernel;
-  memset(&kernel, 0, sizeof(kernel));
-  kernel.specialization_key = specialization_key;
-  kernel.source_identifier = stage->source_identifier;
-  kernel.module_name = stage->module_name;
-  kernel.executable_identifier = stage->executable_identifier;
-  kernel.function_name = stage->forward_function_name;
-  kernel.placement_id = 0;
-  kernel.config_binding_count = IREE_ARRAYSIZE(config_bindings);
-  kernel.config_bindings = config_bindings;
+  id4_pipeline_kernel_plan_t kernels[2];
+  memset(kernels, 0, sizeof(kernels));
+  kernels[0].specialization_key = specialization_key;
+  kernels[0].source_identifier = stage->source_identifier;
+  kernels[0].module_name = stage->module_name;
+  kernels[0].executable_identifier = stage->executable_identifier;
+  kernels[0].function_name = stage->apply_token_weights_function_name;
+  kernels[0].placement_id = 0;
+  kernels[0].config_binding_count = IREE_ARRAYSIZE(config_bindings);
+  kernels[0].config_bindings = config_bindings;
+  kernels[1].specialization_key = specialization_key;
+  kernels[1].source_identifier = stage->source_identifier;
+  kernels[1].module_name = stage->module_name;
+  kernels[1].executable_identifier = stage->executable_identifier;
+  kernels[1].function_name = stage->normalize_token_weights_function_name;
+  kernels[1].placement_id = 0;
+  kernels[1].config_binding_count = IREE_ARRAYSIZE(config_bindings);
+  kernels[1].config_bindings = config_bindings;
 
   id4_pipeline_region_plan_t region;
   memset(&region, 0, sizeof(region));
@@ -562,12 +754,23 @@ static iree_status_t id4_qwen3_vl_stage_create_plan(
           .target_name = IREE_SV("qwen3_vl.encoder.selected_hidden_states"),
       },
       {
+          // Tap for inspecting token weights entering the epilogue.
+          .name = IREE_SV("qwen3_vl.token_weights.before_forward"),
+          // Region containing the tapped value.
+          .region_id = 0,
+          // Operation ordinal before the input is consumed.
+          .after_operation_ordinal = 0,
+          // Tensor name exposed by the tap.
+          .target_name = IREE_SV("qwen3_vl.prompt.token_weights"),
+      },
+      {
           // Tap for inspecting the condition tensor produced by the stage.
           .name = IREE_SV("qwen3_vl.condition.after_forward"),
           // Region containing the tapped value.
           .region_id = 0,
-          // Operation ordinal after which the output can be inspected.
-          .after_operation_ordinal = 0,
+          // Operation ordinal after which the normalized output can be
+          // inspected.
+          .after_operation_ordinal = 2,
           // Tensor name exposed by the tap.
           .target_name = IREE_SV("qwen3_vl.encoder.condition"),
       },
@@ -584,8 +787,8 @@ static iree_status_t id4_qwen3_vl_stage_create_plan(
   create_options.parameter_slabs = NULL;
   create_options.memory_slab_count = IREE_ARRAYSIZE(memory_slabs);
   create_options.memory_slabs = memory_slabs;
-  create_options.kernel_count = 1;
-  create_options.kernels = &kernel;
+  create_options.kernel_count = IREE_ARRAYSIZE(kernels);
+  create_options.kernels = kernels;
   create_options.region_count = 1;
   create_options.regions = &region;
   create_options.diagnostic_tap_count = IREE_ARRAYSIZE(taps);
@@ -598,25 +801,50 @@ static iree_status_t id4_qwen3_vl_stage_prepare_kernel_executable(
     id4_qwen3_vl_stage_t* stage, iree_hal_queue_affinity_t queue_affinity,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink,
     id4_pipeline_kernel_executable_t** out_executable) {
-  const uint64_t element_count =
-      id4_qwen3_vl_stage_condition_element_count(stage);
-  char element_count_value_buffer[32];
+  if (!stage->kernel_cache) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Qwen3-VL stage kernel cache is required for "
+                            "preparation");
+  }
+  if (!stage->base.services.executable_cache) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Qwen3-VL stage HAL executable cache is required "
+                            "for preparation");
+  }
+  if (!stage->source_contents.data || stage->source_contents.data_length == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Qwen3-VL stage source contents are required for "
+                            "preparation");
+  }
+
+  char hidden_row_count_value_buffer[16];
+  char token_count_value_buffer[16];
   char workgroup_size_x_value_buffer[16];
-  iree_string_view_t element_count_value = iree_string_view_empty();
+  iree_string_view_t hidden_row_count_value = iree_string_view_empty();
+  iree_string_view_t token_count_value = iree_string_view_empty();
   iree_string_view_t workgroup_size_x_value = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_stage_format_u64(
-      element_count, element_count_value_buffer,
-      IREE_ARRAYSIZE(element_count_value_buffer), &element_count_value));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_stage_format_u32(
+      stage->hidden_row_count, hidden_row_count_value_buffer,
+      IREE_ARRAYSIZE(hidden_row_count_value_buffer), &hidden_row_count_value));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_stage_format_u32(
+      stage->token_count, token_count_value_buffer,
+      IREE_ARRAYSIZE(token_count_value_buffer), &token_count_value));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_stage_format_u32(
       stage->workgroup_size_x, workgroup_size_x_value_buffer,
       IREE_ARRAYSIZE(workgroup_size_x_value_buffer), &workgroup_size_x_value));
 
   id4_pipeline_kernel_config_binding_t config_bindings[] = {
       {
-          // Config key for the condition element count.
-          .key = IREE_SV("id4.qwen3_vl.condition.element_count"),
-          // Config value for the condition element count.
-          .value = element_count_value,
+          // Config key for the hidden row count.
+          .key = IREE_SV("id4.qwen3_vl.condition.hidden_row_count"),
+          // Config value for the hidden row count.
+          .value = hidden_row_count_value,
+      },
+      {
+          // Config key for the token count.
+          .key = IREE_SV("id4.qwen3_vl.condition.token_count"),
+          // Config value for the token count.
+          .value = token_count_value,
       },
       {
           // Config key for the X workgroup size.
@@ -659,6 +887,19 @@ static iree_status_t id4_qwen3_vl_stage_allocate_selected_hidden_states_buffer(
                                             params, byte_length, out_buffer);
 }
 
+static iree_status_t id4_qwen3_vl_stage_allocate_token_weights_buffer(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    iree_device_size_t byte_length, iree_hal_buffer_t** out_buffer) {
+  iree_hal_buffer_params_t params;
+  id4_qwen3_vl_stage_make_tensor_buffer_params(
+      queue_affinity,
+      IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET |
+          IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE,
+      &params);
+  return iree_hal_allocator_allocate_buffer(iree_hal_device_allocator(device),
+                                            params, byte_length, out_buffer);
+}
+
 static iree_status_t id4_qwen3_vl_stage_allocate_condition_buffer(
     iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
     iree_device_size_t byte_length, iree_hal_buffer_t** out_buffer) {
@@ -686,10 +927,16 @@ static iree_status_t id4_qwen3_vl_stage_record_region(
 
   iree_hal_executable_t* hal_executable =
       id4_pipeline_kernel_executable_hal_executable(executable);
-  iree_hal_executable_function_t function =
+  iree_hal_executable_function_t apply_function =
       iree_hal_executable_function_invalid();
   IREE_RETURN_IF_ERROR(iree_hal_executable_lookup_function_by_name(
-      hal_executable, stage->forward_function_name, &function));
+      hal_executable, stage->apply_token_weights_function_name,
+      &apply_function));
+  iree_hal_executable_function_t normalize_function =
+      iree_hal_executable_function_invalid();
+  IREE_RETURN_IF_ERROR(iree_hal_executable_lookup_function_by_name(
+      hal_executable, stage->normalize_token_weights_function_name,
+      &normalize_function));
 
   iree_hal_command_buffer_t* command_buffer = NULL;
   id4_pipeline_region_builder_t* builder = NULL;
@@ -718,8 +965,8 @@ static iree_status_t id4_qwen3_vl_stage_record_region(
         &builder_options, stage->host_allocator, &builder);
   }
   if (iree_status_is_ok(status)) {
-    status = id4_qwen3_vl_stage_author_region(stage, builder, hal_executable,
-                                              function);
+    status = id4_qwen3_vl_stage_author_region(
+        stage, builder, hal_executable, apply_function, normalize_function);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_command_buffer_end(command_buffer);
@@ -760,6 +1007,7 @@ static void id4_qwen3_vl_stage_bundle_payload_destroy(
   id4_pipeline_prepared_region_release(payload->prepared_region);
   id4_pipeline_kernel_executable_release(payload->executable);
   iree_hal_buffer_release(payload->condition_buffer);
+  iree_hal_buffer_release(payload->token_weights_buffer);
   iree_hal_buffer_release(payload->selected_hidden_states_buffer);
 }
 
@@ -767,7 +1015,10 @@ static void id4_qwen3_vl_stage_destroy(id4_pipeline_stage_t* base_stage) {
   id4_qwen3_vl_stage_t* stage = id4_qwen3_vl_stage_cast(base_stage);
   iree_allocator_t host_allocator = stage->host_allocator;
   id4_pipeline_kernel_cache_release(stage->kernel_cache);
-  id4_qwen3_vl_stage_free_string(&stage->forward_function_name, host_allocator);
+  id4_qwen3_vl_stage_free_string(&stage->normalize_token_weights_function_name,
+                                 host_allocator);
+  id4_qwen3_vl_stage_free_string(&stage->apply_token_weights_function_name,
+                                 host_allocator);
   id4_qwen3_vl_stage_free_string(&stage->executable_identifier, host_allocator);
   id4_qwen3_vl_stage_free_string(&stage->module_name, host_allocator);
   id4_qwen3_vl_stage_free_bytes(&stage->source_contents, host_allocator);
@@ -816,9 +1067,9 @@ static iree_status_t id4_qwen3_vl_stage_validate_prepare_inputs(
                             "Qwen3-VL condition plan must not have parameter "
                             "slabs");
   }
-  if (id4_pipeline_plan_memory_slab_count(plan) != 2) {
+  if (id4_pipeline_plan_memory_slab_count(plan) != 4) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "Qwen3-VL condition plan must have two memory "
+                            "Qwen3-VL condition plan must have four memory "
                             "slabs");
   }
   if (options->parameter_provider) {
@@ -863,10 +1114,14 @@ static iree_status_t id4_qwen3_vl_stage_prepare(
   iree_device_size_t condition_byte_length = 0;
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_stage_condition_byte_length(
       element_count, &condition_byte_length));
+  iree_device_size_t token_weights_byte_length = 0;
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_stage_token_weights_byte_length(
+      stage->token_count, &token_weights_byte_length));
 
   id4_pipeline_kernel_executable_t* executable = NULL;
   id4_pipeline_prepared_region_t* prepared_region = NULL;
   iree_hal_buffer_t* selected_hidden_states_buffer = NULL;
+  iree_hal_buffer_t* token_weights_buffer = NULL;
   iree_hal_buffer_t* condition_buffer = NULL;
   id4_pipeline_bundle_t* bundle = NULL;
 
@@ -876,6 +1131,11 @@ static iree_status_t id4_qwen3_vl_stage_prepare(
     status = id4_qwen3_vl_stage_allocate_selected_hidden_states_buffer(
         device, placement->queue_affinity, condition_byte_length,
         &selected_hidden_states_buffer);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_qwen3_vl_stage_allocate_token_weights_buffer(
+        device, placement->queue_affinity, token_weights_byte_length,
+        &token_weights_buffer);
   }
   if (iree_status_is_ok(status)) {
     status = id4_qwen3_vl_stage_allocate_condition_buffer(
@@ -915,8 +1175,11 @@ static iree_status_t id4_qwen3_vl_stage_prepare(
     prepared_region = NULL;
     payload->selected_hidden_states_buffer = selected_hidden_states_buffer;
     selected_hidden_states_buffer = NULL;
+    payload->token_weights_buffer = token_weights_buffer;
+    token_weights_buffer = NULL;
     payload->condition_buffer = condition_buffer;
     condition_buffer = NULL;
+    payload->token_weights_byte_length = token_weights_byte_length;
     payload->condition_byte_length = condition_byte_length;
     payload->bindings[ID4_QWEN3_VL_STAGE_SELECTED_HIDDEN_STATES_BINDING_SLOT] =
         (iree_hal_buffer_binding_t){
@@ -936,9 +1199,18 @@ static iree_status_t id4_qwen3_vl_stage_prepare(
             // Full condition tensor byte length.
             .length = condition_byte_length,
         };
+    payload->bindings[ID4_QWEN3_VL_STAGE_TOKEN_WEIGHTS_BINDING_SLOT] =
+        (iree_hal_buffer_binding_t){
+            // Token-weights input buffer read by the kernel.
+            .buffer = payload->token_weights_buffer,
+            // Token-weights tensor starts at byte zero.
+            .offset = 0,
+            // Full token-weights tensor byte length.
+            .length = token_weights_byte_length,
+        };
     payload->bindings[ID4_QWEN3_VL_STAGE_LOCAL_BINDING_SLOT] =
         (iree_hal_buffer_binding_t){
-            // Local slab slot is unused by this first Qwen boundary.
+            // Local slab slot is filled by prepared-region issue.
             .buffer = NULL,
             // No caller-provided local slab offset.
             .offset = 0,
@@ -958,6 +1230,7 @@ static iree_status_t id4_qwen3_vl_stage_prepare(
     id4_pipeline_prepared_region_release(prepared_region);
     id4_pipeline_kernel_executable_release(executable);
     iree_hal_buffer_release(condition_buffer);
+    iree_hal_buffer_release(token_weights_buffer);
     iree_hal_buffer_release(selected_hidden_states_buffer);
   }
   return status;
@@ -1067,8 +1340,8 @@ iree_status_t id4_qwen3_vl_stage_create(
   if (iree_status_is_ok(status)) {
     stage->kernel_cache = options->kernel_cache;
     id4_pipeline_kernel_cache_retain(stage->kernel_cache);
-    stage->condition_token_count = options->condition_token_count;
-    stage->hidden_size = options->hidden_size;
+    stage->hidden_row_count = options->hidden_row_count;
+    stage->token_count = options->token_count;
     stage->workgroup_size_x = options->workgroup_size_x;
   }
   if (iree_status_is_ok(status)) {
@@ -1089,9 +1362,14 @@ iree_status_t id4_qwen3_vl_stage_create(
                                             &stage->executable_identifier);
   }
   if (iree_status_is_ok(status)) {
-    status = id4_qwen3_vl_stage_copy_string(options->forward_function_name,
-                                            host_allocator,
-                                            &stage->forward_function_name);
+    status = id4_qwen3_vl_stage_copy_string(
+        options->apply_token_weights_function_name, host_allocator,
+        &stage->apply_token_weights_function_name);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_qwen3_vl_stage_copy_string(
+        options->normalize_token_weights_function_name, host_allocator,
+        &stage->normalize_token_weights_function_name);
   }
   if (iree_status_is_ok(status)) {
     *out_stage = &stage->base;
@@ -1112,11 +1390,26 @@ iree_hal_buffer_t* id4_qwen3_vl_stage_bundle_selected_hidden_states_buffer(
   return payload ? payload->selected_hidden_states_buffer : NULL;
 }
 
+iree_hal_buffer_t* id4_qwen3_vl_stage_bundle_token_weights_buffer(
+    id4_pipeline_bundle_t* bundle) {
+  id4_qwen3_vl_stage_bundle_payload_t* payload =
+      (id4_qwen3_vl_stage_bundle_payload_t*)id4_pipeline_bundle_payload(bundle);
+  return payload ? payload->token_weights_buffer : NULL;
+}
+
 iree_hal_buffer_t* id4_qwen3_vl_stage_bundle_condition_buffer(
     id4_pipeline_bundle_t* bundle) {
   id4_qwen3_vl_stage_bundle_payload_t* payload =
       (id4_qwen3_vl_stage_bundle_payload_t*)id4_pipeline_bundle_payload(bundle);
   return payload ? payload->condition_buffer : NULL;
+}
+
+iree_device_size_t id4_qwen3_vl_stage_bundle_token_weights_byte_length(
+    const id4_pipeline_bundle_t* bundle) {
+  const id4_qwen3_vl_stage_bundle_payload_t* payload =
+      (const id4_qwen3_vl_stage_bundle_payload_t*)
+          id4_pipeline_bundle_const_payload(bundle);
+  return payload ? payload->token_weights_byte_length : 0;
 }
 
 iree_device_size_t id4_qwen3_vl_stage_bundle_condition_byte_length(

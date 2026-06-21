@@ -11,7 +11,6 @@
 #include <vector>
 
 #include "experimental/id4/pipeline/diagnostics.h"
-#include "experimental/id4/pipeline/kernel_cache.h"
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
 
@@ -33,11 +32,6 @@ bool ContainsKey(const std::vector<std::string>& keys, const char* key);
 id4_pipeline_diagnostics_sink_t DiagnosticsSink(StageDiagnostics* diagnostics);
 
 iree_hal_device_group_t* CreateLocalSyncDeviceGroup();
-
-iree_hal_semaphore_t* CreateSemaphore(iree_hal_device_t* device);
-
-iree_status_t CreateKernelCache(iree_allocator_t host_allocator,
-                                id4_pipeline_kernel_cache_t** out_kernel_cache);
 
 }  // namespace id4::test
 

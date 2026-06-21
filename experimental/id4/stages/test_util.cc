@@ -7,7 +7,6 @@
 #include "experimental/id4/stages/test_util.h"
 
 #include <algorithm>
-#include <cstring>
 
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
@@ -83,25 +82,6 @@ iree_hal_device_group_t* CreateLocalSyncDeviceGroup() {
   iree_hal_device_release(device);
   IREE_CHECK_OK(status);
   return device_group;
-}
-
-iree_hal_semaphore_t* CreateSemaphore(iree_hal_device_t* device) {
-  iree_hal_semaphore_t* semaphore = nullptr;
-  IREE_CHECK_OK(iree_hal_semaphore_create(
-      device, IREE_HAL_QUEUE_AFFINITY_ANY,
-      /*initial_value=*/0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore));
-  return semaphore;
-}
-
-iree_status_t CreateKernelCache(
-    iree_allocator_t host_allocator,
-    id4_pipeline_kernel_cache_t** out_kernel_cache) {
-  id4_pipeline_kernel_cache_create_options_t options;
-  std::memset(&options, 0, sizeof(options));
-  options.structure_size = sizeof(options);
-  options.amdgpu_processor = IREE_SV("gfx1100");
-  return id4_pipeline_kernel_cache_create(&options, host_allocator,
-                                          out_kernel_cache);
 }
 
 }  // namespace id4::test

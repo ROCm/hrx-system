@@ -59,7 +59,6 @@ iree_cc_library(
     iree::async::util::proactor_pool
     iree::base
     iree::experimental::id4::pipeline::diagnostics
-    iree::experimental::id4::pipeline::kernel_cache
     iree::hal
     iree::hal::drivers::local_sync::sync_driver
   TESTONLY
@@ -68,42 +67,18 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
-    qwen3_vl_test_util
+    hal_integration_util
   HDRS
-    "qwen3_vl_test_util.h"
+    "hal_integration_util.h"
   SRCS
-    "qwen3_vl_test_util.cc"
+    "hal_integration_util.cc"
   DEPS
-    ::qwen3_vl
-    ::test_util
-    iree::base
-    iree::experimental::id4::pipeline::kernel_cache
-    iree::experimental::id4::pipeline::stage
-    iree::hal
-    iree::hal::local::executable_loader
-  TESTONLY
-  PUBLIC
-)
-
-iree_cc_library(
-  NAME
-    smoke_test_util
-  HDRS
-    "smoke_test_util.h"
-  SRCS
-    "smoke_test_util.cc"
-  DEPS
-    ::smoke
-    ::test_util
+    iree::async
+    iree::async::util::proactor_pool
     iree::base
     iree::experimental::id4::pipeline::diagnostics
-    iree::experimental::id4::pipeline::kernel_cache
-    iree::experimental::id4::pipeline::stage
     iree::hal
-    iree::hal::local::executable_loader
-    iree::io::parameter_index
-    iree::io::parameter_index_provider
-    iree::io::parameter_provider
+    iree::hal::drivers
   TESTONLY
   PUBLIC
 )
@@ -115,18 +90,48 @@ iree_cc_test(
     "qwen3_vl_test.cc"
   DEPS
     ::qwen3_vl
-    ::qwen3_vl_test_util
     ::test_util
     iree::base
     iree::experimental::id4::pipeline::plan
     iree::experimental::id4::pipeline::stage
     iree::hal
-    iree::io::file_handle
-    iree::io::stream
     iree::testing::gtest
     iree::testing::gtest_main
-    iree::tooling::numpy_io
 )
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    qwen3_vl_amdgpu_integration_test
+  SRCS
+    "qwen3_vl_amdgpu_integration_test.cc"
+  DATA
+    iree::experimental::id4::kernels::qwen3_vl_condition_f32.loom
+  DEPS
+    ::hal_integration_util
+    ::qwen3_vl
+    iree::async
+    iree::async::util::proactor_pool
+    iree::base
+    iree::experimental::id4::pipeline::diagnostics
+    iree::experimental::id4::pipeline::kernel_cache
+    iree::experimental::id4::pipeline::plan
+    iree::experimental::id4::pipeline::stage
+    iree::hal
+    iree::hal::drivers
+    iree::io::file_handle
+    iree::testing::gtest
+  ARGS
+    "--loom_source=${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl_condition_f32.loom"
+    "--device_uri=amdgpu://0"
+    "--amdgpu_processor=gfx1100"
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
 
 iree_cc_test(
   NAME
@@ -135,12 +140,11 @@ iree_cc_test(
     "smoke_test.cc"
   DEPS
     ::smoke
-    ::smoke_test_util
+    ::test_util
     iree::base
     iree::experimental::id4::pipeline::plan
     iree::experimental::id4::pipeline::stage
     iree::hal
-    iree::io::parameter_provider
     iree::testing::gtest
     iree::testing::gtest_main
 )
@@ -152,7 +156,6 @@ iree_cc_binary_benchmark(
     "qwen3_vl_benchmark.cc"
   DEPS
     ::qwen3_vl
-    ::qwen3_vl_test_util
     ::test_util
     iree::base
     iree::experimental::id4::pipeline::plan
@@ -163,6 +166,40 @@ iree_cc_binary_benchmark(
   TESTONLY
 )
 
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_cc_binary_benchmark(
+  NAME
+    qwen3_vl_amdgpu_benchmark
+  SRCS
+    "qwen3_vl_amdgpu_benchmark.cc"
+  DATA
+    iree::experimental::id4::kernels::qwen3_vl_condition_f32.loom
+  DEPS
+    ::hal_integration_util
+    ::qwen3_vl
+    iree::base
+    iree::experimental::id4::pipeline::kernel_cache
+    iree::experimental::id4::pipeline::plan
+    iree::experimental::id4::pipeline::stage
+    iree::hal
+    iree::io::file_handle
+    iree::testing::gbenchmark_harness
+    iree::third_party::google_benchmark
+  ARGS
+    "--loom_source=${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl_condition_f32.loom"
+    "--device_uri=amdgpu://0"
+    "--amdgpu_processor=gfx1100"
+  TESTONLY
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    amd-gpu
+)
+endif()
+
 iree_cc_binary_benchmark(
   NAME
     smoke_benchmark
@@ -170,12 +207,11 @@ iree_cc_binary_benchmark(
     "smoke_benchmark.cc"
   DEPS
     ::smoke
-    ::smoke_test_util
+    ::test_util
     iree::base
     iree::experimental::id4::pipeline::plan
     iree::experimental::id4::pipeline::stage
     iree::hal
-    iree::io::parameter_provider
     iree::testing::gbenchmark_harness
     iree::third_party::google_benchmark
   TESTONLY

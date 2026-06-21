@@ -18,8 +18,8 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Byte length of one f32 condition element.
-#define ID4_QWEN3_VL_STAGE_CONDITION_ELEMENT_BYTE_LENGTH 4
+// Byte length of one f32 tensor element.
+#define ID4_QWEN3_VL_STAGE_F32_ELEMENT_BYTE_LENGTH 4
 
 // Options for creating the concrete Qwen3-VL forward pipeline stage.
 typedef struct id4_qwen3_vl_stage_create_options_t {
@@ -29,22 +29,24 @@ typedef struct id4_qwen3_vl_stage_create_options_t {
   const void* next;
   // Services retained by the base pipeline stage.
   id4_pipeline_stage_services_t services;
-  // Loom kernel cache used to compile and prepare Qwen3-VL kernels.
+  // Loom kernel cache used when preparing Qwen3-VL kernels.
   id4_pipeline_kernel_cache_t* kernel_cache;
   // Source identifier copied into stage-owned storage.
   iree_string_view_t source_identifier;
-  // Textual Loom source contents copied into stage-owned storage.
+  // Textual Loom source contents copied for kernel preparation.
   iree_const_byte_span_t source_contents;
   // Loom module name passed to the compiler.
   iree_string_view_t module_name;
   // HAL executable identifier assigned to the emitted artifact.
   iree_string_view_t executable_identifier;
-  // Exported HAL function name resolved for the forward condition kernel.
-  iree_string_view_t forward_function_name;
-  // Number of selected text tokens copied into the condition tensor.
-  uint32_t condition_token_count;
-  // Hidden-state element count per selected text token.
-  uint32_t hidden_size;
+  // Exported HAL function that applies token weights and records sums.
+  iree_string_view_t apply_token_weights_function_name;
+  // Exported HAL function that normalizes weighted condition values.
+  iree_string_view_t normalize_token_weights_function_name;
+  // Number of hidden rows in stable-diffusion.cpp tensor order.
+  uint32_t hidden_row_count;
+  // Number of token columns in stable-diffusion.cpp tensor order.
+  uint32_t token_count;
   // Configured X workgroup size for the condition forward kernel.
   uint32_t workgroup_size_x;
 } id4_qwen3_vl_stage_create_options_t;
@@ -58,9 +60,17 @@ iree_status_t id4_qwen3_vl_stage_create(
 iree_hal_buffer_t* id4_qwen3_vl_stage_bundle_selected_hidden_states_buffer(
     id4_pipeline_bundle_t* bundle);
 
+// Returns the token-weights input buffer owned by a prepared bundle.
+iree_hal_buffer_t* id4_qwen3_vl_stage_bundle_token_weights_buffer(
+    id4_pipeline_bundle_t* bundle);
+
 // Returns the condition output buffer owned by a prepared bundle.
 iree_hal_buffer_t* id4_qwen3_vl_stage_bundle_condition_buffer(
     id4_pipeline_bundle_t* bundle);
+
+// Returns the token-weights tensor byte length owned by a prepared bundle.
+iree_device_size_t id4_qwen3_vl_stage_bundle_token_weights_byte_length(
+    const id4_pipeline_bundle_t* bundle);
 
 // Returns the condition tensor byte length owned by a prepared bundle.
 iree_device_size_t id4_qwen3_vl_stage_bundle_condition_byte_length(
