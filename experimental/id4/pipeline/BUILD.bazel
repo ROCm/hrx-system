@@ -25,6 +25,19 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "kernel_cache",
+    srcs = ["kernel_cache.c"],
+    hdrs = ["kernel_cache.h"],
+    deps = [
+        ":diagnostics",
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/amdgpu",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "parameter_slab",
     srcs = ["parameter_slab.c"],
     hdrs = ["parameter_slab.h"],
@@ -59,6 +72,18 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/io:parameter_provider",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "kernel_cache_test",
+    srcs = ["kernel_cache_test.cc"],
+    deps = [
+        ":kernel_cache",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

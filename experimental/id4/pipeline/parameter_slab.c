@@ -289,6 +289,8 @@ iree_status_t id4_pipeline_parameter_slab_set_load(
   IREE_ASSERT_ARGUMENT(provider);
   IREE_ASSERT_ARGUMENT(out_slab_set);
   *out_slab_set = NULL;
+  IREE_RETURN_IF_ERROR(id4_pipeline_diagnostics_validate_sink(
+      diagnostics_sink, IREE_SV("parameter slab load")));
   if (load_count != 0 && !loads) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "parameter slab load array is required");

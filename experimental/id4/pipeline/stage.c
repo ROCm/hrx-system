@@ -52,6 +52,8 @@ static iree_status_t id4_pipeline_validate_load_options(
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                             "load extension structures are not supported");
   }
+  IREE_RETURN_IF_ERROR(id4_pipeline_diagnostics_validate_sink(
+      options->diagnostics_sink, IREE_SV("load")));
   return iree_ok_status();
 }
 
@@ -67,6 +69,8 @@ static iree_status_t id4_pipeline_validate_plan_options(
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                             "plan extension structures are not supported");
   }
+  IREE_RETURN_IF_ERROR(id4_pipeline_diagnostics_validate_sink(
+      options->diagnostics_sink, IREE_SV("plan")));
   return iree_ok_status();
 }
 
@@ -109,6 +113,8 @@ static iree_status_t id4_pipeline_validate_prepare_options(
       options->wait_semaphore_list, IREE_SV("prepare wait")));
   IREE_RETURN_IF_ERROR(id4_pipeline_validate_semaphore_list(
       options->signal_semaphore_list, IREE_SV("prepare signal")));
+  IREE_RETURN_IF_ERROR(id4_pipeline_diagnostics_validate_sink(
+      options->diagnostics_sink, IREE_SV("prepare")));
   return iree_ok_status();
 }
 
@@ -128,6 +134,8 @@ static iree_status_t id4_pipeline_validate_issue_options(
       options->wait_semaphore_list, IREE_SV("issue wait")));
   IREE_RETURN_IF_ERROR(id4_pipeline_validate_semaphore_list(
       options->signal_semaphore_list, IREE_SV("issue signal")));
+  IREE_RETURN_IF_ERROR(id4_pipeline_diagnostics_validate_sink(
+      options->diagnostics_sink, IREE_SV("issue")));
   return iree_ok_status();
 }
 

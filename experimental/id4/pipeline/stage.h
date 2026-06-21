@@ -40,7 +40,7 @@ typedef struct id4_pipeline_stage_load_options_t {
   iree_host_size_t structure_size;
   // Extension structure chain; must be NULL for now.
   const void* next;
-  // Optional diagnostics sink for load events.
+  // Diagnostics sink for load events.
   id4_pipeline_diagnostics_sink_t* diagnostics_sink;
 } id4_pipeline_stage_load_options_t;
 
@@ -54,7 +54,7 @@ typedef struct id4_pipeline_stage_plan_options_t {
   iree_host_size_t device_index;
   // Queue affinity used by single-device stage plans.
   iree_hal_queue_affinity_t queue_affinity;
-  // Optional diagnostics sink for plan events.
+  // Diagnostics sink for plan events.
   id4_pipeline_diagnostics_sink_t* diagnostics_sink;
 } id4_pipeline_stage_plan_options_t;
 
@@ -70,7 +70,7 @@ typedef struct id4_pipeline_stage_prepare_options_t {
   iree_hal_semaphore_list_t wait_semaphore_list;
   // Semaphores signaled when parameter loading and preparation complete.
   iree_hal_semaphore_list_t signal_semaphore_list;
-  // Optional diagnostics sink for prepare events.
+  // Diagnostics sink for prepare events.
   id4_pipeline_diagnostics_sink_t* diagnostics_sink;
 } id4_pipeline_stage_prepare_options_t;
 
@@ -84,7 +84,7 @@ typedef struct id4_pipeline_stage_issue_options_t {
   iree_hal_semaphore_list_t wait_semaphore_list;
   // Semaphores signaled when execution completes.
   iree_hal_semaphore_list_t signal_semaphore_list;
-  // Optional diagnostics sink for issue events.
+  // Diagnostics sink for issue events.
   id4_pipeline_diagnostics_sink_t* diagnostics_sink;
 } id4_pipeline_stage_issue_options_t;
 

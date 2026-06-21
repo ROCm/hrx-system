@@ -41,6 +41,8 @@ static iree_hal_device_group_t* CreateMockDeviceGroup() {
 
 static void BM_PipelinePlanCreateAndFormatJson(benchmark::State& state) {
   iree_hal_device_group_t* device_group = CreateMockDeviceGroup();
+  id4_pipeline_diagnostics_sink_t diagnostics_sink;
+  id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
 
   for (auto _ : state) {
     id4_pipeline_parameter_request_t request;
@@ -75,6 +77,7 @@ static void BM_PipelinePlanCreateAndFormatJson(benchmark::State& state) {
     create_options.placements = &placement;
     create_options.parameter_slab_count = 1;
     create_options.parameter_slabs = &slab;
+    create_options.diagnostics_sink = &diagnostics_sink;
 
     id4_pipeline_plan_t* plan = NULL;
     IREE_CHECK_OK(id4_pipeline_plan_create(&create_options,

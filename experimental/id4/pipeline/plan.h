@@ -47,7 +47,7 @@ typedef struct id4_pipeline_plan_create_options_t {
   iree_host_size_t parameter_slab_count;
   // Parameter slabs to copy into the plan.
   const id4_pipeline_parameter_slab_plan_t* parameter_slabs;
-  // Optional diagnostics sink for plan creation events.
+  // Diagnostics sink for plan creation events.
   id4_pipeline_diagnostics_sink_t* diagnostics_sink;
 } id4_pipeline_plan_create_options_t;
 

@@ -24,6 +24,8 @@ typedef enum id4_pipeline_diagnostic_event_kind_e {
   ID4_PIPELINE_DIAGNOSTIC_EVENT_KIND_PLAN = 1,
   // Parameter slab planning or loading event.
   ID4_PIPELINE_DIAGNOSTIC_EVENT_KIND_PARAMETER_SLAB = 2,
+  // Kernel compilation, emission, or HAL preparation event.
+  ID4_PIPELINE_DIAGNOSTIC_EVENT_KIND_KERNEL = 3,
 } id4_pipeline_diagnostic_event_kind_t;
 
 // Parameter slab payload attached to parameter-slab diagnostic events.
@@ -56,6 +58,39 @@ typedef struct id4_pipeline_parameter_slab_diagnostic_t {
   iree_host_size_t request_count;
 } id4_pipeline_parameter_slab_diagnostic_t;
 
+// Kernel payload attached to kernel diagnostic events.
+typedef struct id4_pipeline_kernel_diagnostic_t {
+  // Kernel-cache phase associated with the event.
+  iree_string_view_t phase;
+  // Source identifier passed to Loom.
+  iree_string_view_t source_identifier;
+  // Runtime module name passed to Loom.
+  iree_string_view_t module_name;
+  // AMDGPU processor selected by the kernel cache.
+  iree_string_view_t amdgpu_processor;
+  // Primary executable artifact identifier.
+  iree_string_view_t executable_identifier;
+  // Loom artifact format emitted by the target backend.
+  iree_string_view_t loom_artifact_format;
+  // HAL executable format inferred from artifact bytes.
+  iree_string_view_t hal_executable_format;
+  // Number of Loom config bindings applied to the compile invocation.
+  iree_host_size_t config_binding_count;
+  // Primary executable artifact byte length.
+  iree_host_size_t artifact_byte_length;
+  // Valid executable byte length inferred by the HAL executable cache.
+  iree_host_size_t inferred_executable_byte_length;
+  // Result diagnostic index, or IREE_HOST_SIZE_MAX when not
+  // diagnostic-specific.
+  iree_host_size_t diagnostic_index;
+  // Loom diagnostic severity, or -1 when not diagnostic-specific.
+  int32_t diagnostic_severity;
+  // Queue affinity used to prepare the HAL executable.
+  iree_hal_queue_affinity_t queue_affinity;
+  // HAL executable caching mode used during preparation.
+  iree_hal_executable_caching_mode_t caching_mode;
+} id4_pipeline_kernel_diagnostic_t;
+
 // Structured diagnostic event emitted by pipeline infrastructure.
 typedef struct id4_pipeline_diagnostic_event_t {
   // Kind of event being emitted.
@@ -68,6 +103,8 @@ typedef struct id4_pipeline_diagnostic_event_t {
   iree_string_view_t message;
   // Optional parameter slab payload valid only during the emit callback.
   const id4_pipeline_parameter_slab_diagnostic_t* parameter_slab;
+  // Optional kernel payload valid only during the emit callback.
+  const id4_pipeline_kernel_diagnostic_t* kernel;
 } id4_pipeline_diagnostic_event_t;
 
 // Function pointer used to consume a diagnostic event.
@@ -82,7 +119,15 @@ typedef struct id4_pipeline_diagnostics_sink_t {
   void* user_data;
 } id4_pipeline_diagnostics_sink_t;
 
-// Emits a diagnostic event if |sink| has a callback.
+// Initializes |out_sink| to explicitly ignore all diagnostic events.
+void id4_pipeline_diagnostics_sink_initialize_ignore(
+    id4_pipeline_diagnostics_sink_t* out_sink);
+
+// Validates that |sink| can receive diagnostic events for |usage_name|.
+iree_status_t id4_pipeline_diagnostics_validate_sink(
+    const id4_pipeline_diagnostics_sink_t* sink, iree_string_view_t usage_name);
+
+// Emits a diagnostic event through a validated sink.
 iree_status_t id4_pipeline_diagnostics_emit(
     id4_pipeline_diagnostics_sink_t* sink,
     const id4_pipeline_diagnostic_event_t* event);

@@ -438,6 +438,12 @@ static id4_pipeline_diagnostics_sink_t DiagnosticsSink(
   return sink;
 }
 
+static id4_pipeline_diagnostics_sink_t IgnoreDiagnosticsSink() {
+  id4_pipeline_diagnostics_sink_t sink;
+  id4_pipeline_diagnostics_sink_initialize_ignore(&sink);
+  return sink;
+}
+
 TEST(PipelineStage, PlanCopiesPlacementAndParameterSlabMetadata) {
   iree_hal_device_group_t* device_group = CreateMockDeviceGroup();
   id4_pipeline_stage_t* stage = NULL;
@@ -533,9 +539,12 @@ TEST(PipelineStage, PlanRejectsInvalidDevice) {
   IREE_ASSERT_OK(SmokeStageCreate(device_group, &stage));
   iree_hal_device_group_release(device_group);
 
+  id4_pipeline_diagnostics_sink_t diagnostics_sink = IgnoreDiagnosticsSink();
+
   id4_pipeline_stage_load_options_t load_options;
   memset(&load_options, 0, sizeof(load_options));
   load_options.structure_size = sizeof(load_options);
+  load_options.diagnostics_sink = &diagnostics_sink;
   IREE_ASSERT_OK(id4_pipeline_stage_load(stage, &load_options));
 
   id4_pipeline_stage_plan_options_t plan_options;
@@ -543,6 +552,7 @@ TEST(PipelineStage, PlanRejectsInvalidDevice) {
   plan_options.structure_size = sizeof(plan_options);
   plan_options.device_index = 1;
   plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  plan_options.diagnostics_sink = &diagnostics_sink;
 
   id4_pipeline_plan_t* plan = NULL;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
@@ -561,9 +571,21 @@ TEST(PipelineStage, LifecycleRejectsMissingOptions) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         id4_pipeline_stage_load(stage, NULL));
 
+  id4_pipeline_stage_load_options_t missing_diagnostics_load_options;
+  memset(&missing_diagnostics_load_options, 0,
+         sizeof(missing_diagnostics_load_options));
+  missing_diagnostics_load_options.structure_size =
+      sizeof(missing_diagnostics_load_options);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_pipeline_stage_load(stage, &missing_diagnostics_load_options));
+
+  id4_pipeline_diagnostics_sink_t diagnostics_sink = IgnoreDiagnosticsSink();
+
   id4_pipeline_stage_load_options_t load_options;
   memset(&load_options, 0, sizeof(load_options));
   load_options.structure_size = sizeof(load_options);
+  load_options.diagnostics_sink = &diagnostics_sink;
   IREE_ASSERT_OK(id4_pipeline_stage_load(stage, &load_options));
 
   id4_pipeline_plan_t* plan = NULL;
@@ -575,6 +597,7 @@ TEST(PipelineStage, LifecycleRejectsMissingOptions) {
   plan_options.structure_size = sizeof(plan_options);
   plan_options.device_index = 0;
   plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  plan_options.diagnostics_sink = &diagnostics_sink;
   IREE_ASSERT_OK(id4_pipeline_stage_plan(stage, &plan_options, &plan));
 
   id4_pipeline_bundle_t* bundle = NULL;
@@ -586,6 +609,7 @@ TEST(PipelineStage, LifecycleRejectsMissingOptions) {
   prepare_options.structure_size = sizeof(prepare_options);
   prepare_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
   prepare_options.signal_semaphore_list = iree_hal_semaphore_list_empty();
+  prepare_options.diagnostics_sink = &diagnostics_sink;
   IREE_ASSERT_OK(
       id4_pipeline_stage_prepare(stage, plan, &prepare_options, &bundle));
 
@@ -662,9 +686,12 @@ TEST(PipelineStage, PrepareRejectsParameterSlabLoadWithoutSignal) {
   IREE_ASSERT_OK(SmokeStageCreate(device_group, &stage));
   iree_hal_device_group_release(device_group);
 
+  id4_pipeline_diagnostics_sink_t diagnostics_sink = IgnoreDiagnosticsSink();
+
   id4_pipeline_stage_load_options_t load_options;
   memset(&load_options, 0, sizeof(load_options));
   load_options.structure_size = sizeof(load_options);
+  load_options.diagnostics_sink = &diagnostics_sink;
   IREE_ASSERT_OK(id4_pipeline_stage_load(stage, &load_options));
 
   id4_pipeline_stage_plan_options_t plan_options;
@@ -672,6 +699,7 @@ TEST(PipelineStage, PrepareRejectsParameterSlabLoadWithoutSignal) {
   plan_options.structure_size = sizeof(plan_options);
   plan_options.device_index = 0;
   plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  plan_options.diagnostics_sink = &diagnostics_sink;
 
   id4_pipeline_plan_t* plan = NULL;
   IREE_ASSERT_OK(id4_pipeline_stage_plan(stage, &plan_options, &plan));
@@ -685,6 +713,7 @@ TEST(PipelineStage, PrepareRejectsParameterSlabLoadWithoutSignal) {
   prepare_options.parameter_provider = &provider.base;
   prepare_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
   prepare_options.signal_semaphore_list = iree_hal_semaphore_list_empty();
+  prepare_options.diagnostics_sink = &diagnostics_sink;
 
   id4_pipeline_bundle_t* bundle = NULL;
   IREE_EXPECT_STATUS_IS(
@@ -702,9 +731,13 @@ TEST(PipelineStage, PrepareEmitsParameterSlabLoadFailureDiagnostic) {
   IREE_ASSERT_OK(SmokeStageCreate(device_group, &stage));
   iree_hal_device_group_release(device_group);
 
+  id4_pipeline_diagnostics_sink_t setup_diagnostics_sink =
+      IgnoreDiagnosticsSink();
+
   id4_pipeline_stage_load_options_t load_options;
   memset(&load_options, 0, sizeof(load_options));
   load_options.structure_size = sizeof(load_options);
+  load_options.diagnostics_sink = &setup_diagnostics_sink;
   IREE_ASSERT_OK(id4_pipeline_stage_load(stage, &load_options));
 
   id4_pipeline_stage_plan_options_t plan_options;
@@ -712,6 +745,7 @@ TEST(PipelineStage, PrepareEmitsParameterSlabLoadFailureDiagnostic) {
   plan_options.structure_size = sizeof(plan_options);
   plan_options.device_index = 0;
   plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  plan_options.diagnostics_sink = &setup_diagnostics_sink;
 
   id4_pipeline_plan_t* plan = NULL;
   IREE_ASSERT_OK(id4_pipeline_stage_plan(stage, &plan_options, &plan));
@@ -774,9 +808,13 @@ TEST(PipelineStage, PrepareLoadsParameterSlabsWhenProviderIsSupplied) {
   IREE_ASSERT_OK(SmokeStageCreate(device_group, &stage));
   iree_hal_device_group_release(device_group);
 
+  id4_pipeline_diagnostics_sink_t setup_diagnostics_sink =
+      IgnoreDiagnosticsSink();
+
   id4_pipeline_stage_load_options_t load_options;
   memset(&load_options, 0, sizeof(load_options));
   load_options.structure_size = sizeof(load_options);
+  load_options.diagnostics_sink = &setup_diagnostics_sink;
   IREE_ASSERT_OK(id4_pipeline_stage_load(stage, &load_options));
 
   id4_pipeline_stage_plan_options_t plan_options;
@@ -784,6 +822,7 @@ TEST(PipelineStage, PrepareLoadsParameterSlabsWhenProviderIsSupplied) {
   plan_options.structure_size = sizeof(plan_options);
   plan_options.device_index = 0;
   plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  plan_options.diagnostics_sink = &setup_diagnostics_sink;
 
   id4_pipeline_plan_t* plan = NULL;
   IREE_ASSERT_OK(id4_pipeline_stage_plan(stage, &plan_options, &plan));
@@ -879,9 +918,12 @@ TEST(PipelineStage, PrepareLoadsParameterSlabsFromParameterIndexProvider) {
   IREE_ASSERT_OK(SmokeStageCreate(device_group, &stage));
   iree_hal_device_group_release(device_group);
 
+  id4_pipeline_diagnostics_sink_t diagnostics_sink = IgnoreDiagnosticsSink();
+
   id4_pipeline_stage_load_options_t load_options;
   memset(&load_options, 0, sizeof(load_options));
   load_options.structure_size = sizeof(load_options);
+  load_options.diagnostics_sink = &diagnostics_sink;
   IREE_ASSERT_OK(id4_pipeline_stage_load(stage, &load_options));
 
   id4_pipeline_stage_plan_options_t plan_options;
@@ -889,6 +931,7 @@ TEST(PipelineStage, PrepareLoadsParameterSlabsFromParameterIndexProvider) {
   plan_options.structure_size = sizeof(plan_options);
   plan_options.device_index = 0;
   plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  plan_options.diagnostics_sink = &diagnostics_sink;
 
   id4_pipeline_plan_t* plan = NULL;
   IREE_ASSERT_OK(id4_pipeline_stage_plan(stage, &plan_options, &plan));
@@ -934,6 +977,7 @@ TEST(PipelineStage, PrepareLoadsParameterSlabsFromParameterIndexProvider) {
   prepare_options.parameter_provider = provider;
   prepare_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
   prepare_options.signal_semaphore_list = signal_list;
+  prepare_options.diagnostics_sink = &diagnostics_sink;
 
   id4_pipeline_bundle_t* bundle = NULL;
   IREE_ASSERT_OK(

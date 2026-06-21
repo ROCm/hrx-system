@@ -24,6 +24,22 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    kernel_cache
+  HDRS
+    "kernel_cache.h"
+  SRCS
+    "kernel_cache.c"
+  DEPS
+    ::diagnostics
+    iree::base
+    iree::hal
+    loom::binding::c::loomc
+    loom::binding::c::target::amdgpu
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     parameter_slab
   HDRS
     "parameter_slab.h"
@@ -67,6 +83,19 @@ iree_cc_library(
     iree::hal
     iree::io::parameter_provider
   PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    kernel_cache_test
+  SRCS
+    "kernel_cache_test.cc"
+  DEPS
+    ::kernel_cache
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 iree_cc_test(

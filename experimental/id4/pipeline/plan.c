@@ -240,6 +240,8 @@ iree_status_t id4_pipeline_plan_create(
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                             "plan extension structures are not supported");
   }
+  IREE_RETURN_IF_ERROR(id4_pipeline_diagnostics_validate_sink(
+      options->diagnostics_sink, IREE_SV("plan create")));
   if (!options->device_group) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "device group is required");
@@ -349,6 +351,8 @@ iree_status_t id4_pipeline_plan_load_parameter_slabs(
   IREE_ASSERT_ARGUMENT(provider);
   IREE_ASSERT_ARGUMENT(out_slab_set);
   *out_slab_set = NULL;
+  IREE_RETURN_IF_ERROR(id4_pipeline_diagnostics_validate_sink(
+      diagnostics_sink, IREE_SV("parameter slab load")));
 
   id4_pipeline_parameter_slab_load_t* loads = NULL;
   if (plan->parameter_slab_count != 0) {
