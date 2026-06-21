@@ -4,11 +4,22 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("@rules_python//python:defs.bzl", "py_test")
+load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
 
 package(
     default_visibility = ["//visibility:public"],
     licenses = ["notice"],
+)
+
+py_library(
+    name = "trace_reduce_lib",
+    srcs = ["trace_reduce.py"],
+    imports = ["."],
+)
+
+py_binary(
+    name = "trace_reduce",
+    srcs = ["trace_reduce.py"],
 )
 
 py_test(
@@ -17,4 +28,10 @@ py_test(
         "presubmit.py",
         "presubmit_test.py",
     ],
+)
+
+py_test(
+    name = "trace_reduce_test",
+    srcs = ["trace_reduce_test.py"],
+    deps = [":trace_reduce_lib"],
 )
