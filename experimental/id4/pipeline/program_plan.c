@@ -76,6 +76,10 @@ static iree_status_t id4_pipeline_program_plan_validate_options(
                             "unsupported program plan flags 0x%x",
                             options->flags);
   }
+  if (iree_string_view_is_empty(options->stage_name)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "program plan stage name is required");
+  }
   if (options->placement_count == 0 || !options->placements) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "program plan placements are required");
@@ -844,7 +848,7 @@ iree_status_t id4_pipeline_program_create_plan(
     id4_pipeline_plan_create_options_t create_options;
     memset(&create_options, 0, sizeof(create_options));
     create_options.structure_size = sizeof(create_options);
-    create_options.stage_name = id4_pipeline_program_name(options->program);
+    create_options.stage_name = options->stage_name;
     create_options.device_group = options->device_group;
     create_options.placement_count = options->placement_count;
     create_options.placements = options->placements;

@@ -127,6 +127,8 @@ static id4_pipeline_program_plan_options_t MakePlanOptions(
       /*.next=*/nullptr,
       // Planning behavior flags.
       /*.flags=*/0,
+      // Stage boundary name copied into the plan.
+      /*.stage_name=*/IREE_SV("qwen.encoder"),
       // Semantic program to lower.
       /*.program=*/program,
       // Retained HAL device group.

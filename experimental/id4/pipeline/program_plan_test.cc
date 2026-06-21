@@ -240,6 +240,7 @@ static id4_pipeline_program_plan_options_t MakePlanOptions(
       /*.structure_size=*/sizeof(options),
       /*.next=*/nullptr,
       /*.flags=*/ID4_PIPELINE_PROGRAM_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS,
+      /*.stage_name=*/IREE_SV("test.stage"),
       /*.program=*/program,
       /*.device_group=*/device_group,
       /*.placement_count=*/1,
@@ -282,7 +283,7 @@ TEST(PipelineProgramPlan, DerivesParameterKernelRegionAndTapPlans) {
       &options, iree_allocator_system(), &plan));
 
   ExpectStringViewEqual(id4_pipeline_plan_stage_name(plan),
-                        IREE_SV("test.forward"));
+                        IREE_SV("test.stage"));
   ASSERT_EQ(id4_pipeline_plan_parameter_slab_count(plan), 1u);
   const id4_pipeline_parameter_slab_plan_t* parameter_slab =
       id4_pipeline_plan_parameter_slab_at(plan, 0);

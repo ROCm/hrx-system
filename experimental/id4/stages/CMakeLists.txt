@@ -22,10 +22,8 @@ iree_cc_library(
     iree::base::internal::arena
     iree::experimental::id4::pipeline::diagnostics
     iree::experimental::id4::pipeline::kernel_cache
-    iree::experimental::id4::pipeline::parameter_slab
     iree::experimental::id4::pipeline::program
-    iree::experimental::id4::pipeline::program_plan
-    iree::experimental::id4::pipeline::program_prepare
+    iree::experimental::id4::pipeline::program_stage
     iree::experimental::id4::pipeline::stage
     iree::hal
   PUBLIC

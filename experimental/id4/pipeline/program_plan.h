@@ -35,6 +35,8 @@ typedef struct id4_pipeline_program_plan_options_t {
   const void* next;
   // Planning behavior flags.
   id4_pipeline_program_plan_flags_t flags;
+  // Stage name copied into the created plan.
+  iree_string_view_t stage_name;
   // Semantic program to lower into plan metadata.
   const id4_pipeline_program_t* program;
   // Device group retained by the created plan.

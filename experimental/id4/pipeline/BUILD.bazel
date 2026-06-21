@@ -121,6 +121,22 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "program_stage",
+    srcs = ["program_stage.c"],
+    hdrs = ["program_stage.h"],
+    deps = [
+        ":kernel_cache",
+        ":parameter_slab",
+        ":program",
+        ":program_plan",
+        ":program_prepare",
+        ":stage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "program_region",
     srcs = ["program_region.c"],
     hdrs = ["program_region.h"],
@@ -218,6 +234,22 @@ iree_runtime_cc_test(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "program_stage_test",
+    srcs = ["program_stage_test.cc"],
+    deps = [
+        ":program_stage",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/local_sync:sync_driver",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
