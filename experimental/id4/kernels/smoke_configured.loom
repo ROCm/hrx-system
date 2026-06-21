@@ -1,7 +1,7 @@
 config.decl @id4.smoke.workgroups_x : %value: index where [range(%value, 1, 8)]
 config.decl @id4.smoke.workgroup_size_x : %value: index where [range(%value, 1, 256)]
 
-kernel.def @id4_configured_smoke() {
+kernel.def export("id4_smoke_configured") @id4_configured_smoke() {
   %unit = index.constant 1 : index
   %workgroups_x = config.get @id4.smoke.workgroups_x : index
   %workgroup_size_x = config.get @id4.smoke.workgroup_size_x : index

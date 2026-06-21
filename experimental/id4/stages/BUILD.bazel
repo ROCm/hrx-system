@@ -1,0 +1,84 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:cc_benchmark.bzl", "iree_runtime_cc_benchmark")
+load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_runtime_cc_library(
+    name = "smoke",
+    srcs = ["smoke.c"],
+    hdrs = ["smoke.h"],
+    deps = [
+        "//experimental/id4/pipeline:diagnostics",
+        "//experimental/id4/pipeline:kernel_cache",
+        "//experimental/id4/pipeline:plan",
+        "//experimental/id4/pipeline:region",
+        "//experimental/id4/pipeline:stage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "smoke_test_util",
+    testonly = True,
+    srcs = ["smoke_test_util.cc"],
+    hdrs = ["smoke_test_util.h"],
+    deps = [
+        ":smoke",
+        "//experimental/id4/pipeline:diagnostics",
+        "//experimental/id4/pipeline:kernel_cache",
+        "//experimental/id4/pipeline:stage",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/local_sync:sync_driver",
+        "//runtime/src/iree/hal/local:executable_loader",
+        "//runtime/src/iree/io:parameter_index",
+        "//runtime/src/iree/io:parameter_index_provider",
+        "//runtime/src/iree/io:parameter_provider",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "smoke_test",
+    srcs = ["smoke_test.cc"],
+    deps = [
+        ":smoke",
+        ":smoke_test_util",
+        "//experimental/id4/pipeline:plan",
+        "//experimental/id4/pipeline:stage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:parameter_provider",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_benchmark(
+    name = "smoke_benchmark",
+    srcs = ["smoke_benchmark.cc"],
+    deps = [
+        ":smoke",
+        ":smoke_test_util",
+        "//experimental/id4/pipeline:plan",
+        "//experimental/id4/pipeline:stage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:parameter_provider",
+        "//runtime/src/iree/testing:gbenchmark_harness",
+    ],
+)
