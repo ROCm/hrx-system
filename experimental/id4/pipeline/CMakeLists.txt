@@ -70,6 +70,20 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    region
+  HDRS
+    "region.h"
+  SRCS
+    "region.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    iree::hal
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     stage
   HDRS
     "stage.h"
@@ -94,6 +108,22 @@ iree_cc_test(
     ::kernel_cache
     iree::base
     iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    region_test
+  SRCS
+    "region_test.cc"
+  DEPS
+    ::region
+    iree::async::util::proactor_pool
+    iree::base
+    iree::base::internal::arena
+    iree::hal
+    iree::hal::drivers::local_sync::sync_driver
     iree::testing::gtest
     iree::testing::gtest_main
 )
