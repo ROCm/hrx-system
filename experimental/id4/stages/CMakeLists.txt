@@ -128,11 +128,14 @@ iree_cc_library(
     iree::async
     iree::async::util::proactor_pool
     iree::base
+    iree::base::internal::json
     iree::experimental::id4::kernels::embedded_loom_sources
     iree::experimental::id4::pipeline::diagnostics
     iree::experimental::id4::pipeline::kernel_cache
     iree::experimental::id4::pipeline::kernel_library
+    iree::experimental::id4::pipeline::plan
     iree::hal
+    iree::io::file_handle
     iree::io::parameter_index
     iree::io::parameter_index_provider
     iree::io::parameter_provider
@@ -201,7 +204,6 @@ iree_cc_test(
     iree::experimental::id4::pipeline::plan
     iree::experimental::id4::pipeline::stage
     iree::hal
-    iree::io::file_handle
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS
@@ -235,7 +237,6 @@ iree_cc_test(
     ::hal_integration_util
     ::qwen3_vl
     iree::base
-    iree::base::internal::json
     iree::base::tooling::flags
     iree::experimental::id4::pipeline::plan
     iree::experimental::id4::pipeline::stage

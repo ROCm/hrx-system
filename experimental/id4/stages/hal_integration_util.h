@@ -7,9 +7,13 @@
 #ifndef EXPERIMENTAL_ID4_STAGES_HAL_INTEGRATION_UTIL_H_
 #define EXPERIMENTAL_ID4_STAGES_HAL_INTEGRATION_UTIL_H_
 
+#include <string>
+#include <vector>
+
 #include "experimental/id4/pipeline/diagnostics.h"
 #include "experimental/id4/pipeline/kernel_cache.h"
 #include "experimental/id4/pipeline/kernel_library.h"
+#include "experimental/id4/pipeline/plan.h"
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/api.h"
@@ -58,6 +62,58 @@ using KernelLibraryRef = OwningRef<id4_pipeline_kernel_library_t,
 using ProactorPoolRef =
     OwningRef<iree_async_proactor_pool_t, iree_async_proactor_pool_release>;
 
+struct SemaphoreListStorage {
+  // Semaphore carried by this single-entry list.
+  iree_hal_semaphore_t* semaphore = nullptr;
+  // Payload value paired with the semaphore.
+  uint64_t payload_value = 0;
+
+  // Returns a HAL semaphore list backed by this storage.
+  iree_hal_semaphore_list_t list();
+};
+
+class BufferBindingSet {
+ public:
+  BufferBindingSet() = default;
+  BufferBindingSet(const BufferBindingSet&) = delete;
+  BufferBindingSet& operator=(const BufferBindingSet&) = delete;
+
+  ~BufferBindingSet();
+
+  // Releases all owned buffers and binding arrays.
+  void reset();
+
+  // Number of bindings allocated from the plan.
+  iree_host_size_t count = 0;
+  // Owned HAL buffers backing each binding.
+  iree_hal_buffer_t** buffers = nullptr;
+  // Binding table entries in plan order.
+  iree_hal_buffer_binding_t* bindings = nullptr;
+};
+
+typedef struct FixtureTensor {
+  // Stable tensor name from the fixture manifest.
+  std::string name;
+  // Relative NPY payload path from the fixture manifest.
+  std::string file;
+  // Tensor dtype declared by the fixture manifest and validated against NPY.
+  id4_pipeline_tensor_dtype_t dtype = ID4_PIPELINE_TENSOR_DTYPE_INVALID;
+  // Tensor shape declared by the fixture manifest and validated against NPY.
+  id4_pipeline_tensor_shape_t shape = {};
+  // Raw dense tensor bytes parsed from the NPY payload.
+  std::vector<uint8_t> payload;
+} FixtureTensor;
+
+typedef struct FixtureInputSet {
+  // Fixture directory containing manifest.json and payload files.
+  std::string directory;
+  // Input tensor payloads available for boundary initialization.
+  std::vector<FixtureTensor> tensors;
+
+  // Returns the loaded tensor with |name| or NULL when absent.
+  const FixtureTensor* FindTensor(iree_string_view_t name) const;
+} FixtureInputSet;
+
 typedef struct LiveStageContext {
   // Proactor pool used by the live HAL device.
   ProactorPoolRef proactor_pool;
@@ -93,6 +149,95 @@ iree_status_t CreateEmbeddedKernelLibrary(
 // Creates a parameter provider for |scope| from parsed --parameters flags.
 iree_status_t CreateParameterProviderFromFlags(
     iree_string_view_t scope, iree_io_parameter_provider_t** out_provider);
+
+// Allocates device-local buffers for every boundary tensor in |plan|.
+iree_status_t AllocateBoundaryBindings(iree_hal_device_t* device,
+                                       iree_hal_queue_affinity_t queue_affinity,
+                                       const id4_pipeline_plan_t* plan,
+                                       BufferBindingSet* out_binding_set);
+
+// Allocates device-local buffers for every diagnostic tap tensor in |plan|.
+iree_status_t AllocateDiagnosticTapBindings(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const id4_pipeline_plan_t* plan, BufferBindingSet* out_binding_set);
+
+// Finds a boundary binding by planned boundary tensor name.
+iree_status_t FindBoundaryBinding(const id4_pipeline_plan_t* plan,
+                                  const BufferBindingSet& binding_set,
+                                  iree_string_view_t name,
+                                  iree_hal_buffer_binding_t* out_binding);
+
+// Finds a diagnostic tap binding by planned tap name.
+iree_status_t FindDiagnosticTapBinding(const id4_pipeline_plan_t* plan,
+                                       const BufferBindingSet& binding_set,
+                                       iree_string_view_t name,
+                                       iree_hal_buffer_binding_t* out_binding);
+
+// Queues a direct update into |binding| and advances |inout_payload_value|.
+iree_status_t QueueUpdateBinding(iree_hal_device_t* device,
+                                 iree_hal_queue_affinity_t queue_affinity,
+                                 const iree_hal_buffer_binding_t* binding,
+                                 const void* source_data,
+                                 iree_host_size_t source_length,
+                                 iree_hal_semaphore_t* semaphore,
+                                 uint64_t* inout_payload_value);
+
+// Queues a fill of |binding| and advances |inout_payload_value|.
+iree_status_t QueueFillBinding(iree_hal_device_t* device,
+                               iree_hal_queue_affinity_t queue_affinity,
+                               const iree_hal_buffer_binding_t* binding,
+                               const void* pattern,
+                               iree_host_size_t pattern_length,
+                               iree_hal_semaphore_t* semaphore,
+                               uint64_t* inout_payload_value);
+
+// Queues fills for boundary tensors whose flags contain |required_flags|.
+iree_status_t QueueFillBoundaryTensors(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const id4_pipeline_plan_t* plan, const BufferBindingSet& binding_set,
+    id4_pipeline_boundary_tensor_flags_t required_flags, const void* pattern,
+    iree_host_size_t pattern_length, iree_hal_semaphore_t* fill_semaphore,
+    uint64_t* out_fill_value);
+
+// Queues fills for all diagnostic tap tensors.
+iree_status_t QueueFillDiagnosticTapTensors(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const BufferBindingSet& binding_set, const void* pattern,
+    iree_host_size_t pattern_length, iree_hal_semaphore_t* fill_semaphore,
+    uint64_t* out_fill_value);
+
+// Reads |binding| into a host byte vector after |wait_list| is satisfied.
+iree_status_t ReadBindingToHost(iree_hal_device_t* device,
+                                iree_hal_queue_affinity_t queue_affinity,
+                                const iree_hal_buffer_binding_t* binding,
+                                iree_hal_semaphore_list_t wait_list,
+                                std::vector<uint8_t>* out_bytes);
+
+// Loads fixture input tensors from a fixture manifest directory.
+iree_status_t LoadFixtureInputs(iree_string_view_t fixture_directory,
+                                FixtureInputSet* out_fixture_inputs);
+
+// Reads a uint32-compatible length from a rank-1 fixture tensor.
+iree_status_t InferRank1TensorLengthFromFixture(
+    const FixtureInputSet& fixture_inputs, iree_string_view_t tensor_name,
+    id4_pipeline_tensor_dtype_t dtype, uint32_t* out_length);
+
+// Queues updates for all initialized boundary tensors from fixture inputs.
+iree_status_t QueueUpdateInitializedBoundaryTensorsFromFixture(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const id4_pipeline_plan_t* plan, const BufferBindingSet& binding_set,
+    const FixtureInputSet& fixture_inputs, iree_hal_semaphore_t* fill_semaphore,
+    uint64_t* out_fill_value);
+
+// Verifies exported boundary capture payloads differ from |sentinel|.
+iree_status_t VerifyCapturedExportedBoundaryTensorsWereWritten(
+    const id4_pipeline_plan_t* plan, iree_string_view_t capture_directory,
+    uint8_t sentinel);
+
+// Verifies diagnostic tap capture payloads differ from |sentinel|.
+iree_status_t VerifyCapturedDiagnosticTapTensorsWereWritten(
+    const id4_pipeline_plan_t* plan, iree_string_view_t capture_directory,
+    uint8_t sentinel);
 
 }  // namespace id4::test
 
