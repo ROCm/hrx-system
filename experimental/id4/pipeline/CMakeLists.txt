@@ -119,6 +119,7 @@ iree_cc_test(
     "region_test.cc"
   DEPS
     ::region
+    iree::async
     iree::async::util::proactor_pool
     iree::base
     iree::base::internal::arena

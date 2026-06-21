@@ -6,6 +6,7 @@
 
 #include "experimental/id4/pipeline/region.h"
 
+#include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
@@ -47,7 +48,7 @@ static id4_pipeline_region_kernel_t MakeDryKernel(
   };
 }
 
-static iree_hal_device_t* CreateLocalSyncDevice() {
+static iree_hal_device_group_t* CreateLocalSyncDeviceGroup() {
   iree_async_proactor_pool_t* proactor_pool = nullptr;
   IREE_CHECK_OK(iree_async_proactor_pool_create(
       /*node_count=*/1, /*node_ids=*/nullptr,
@@ -73,7 +74,28 @@ static iree_hal_device_t* CreateLocalSyncDevice() {
   iree_hal_allocator_release(device_allocator);
   iree_async_proactor_pool_release(proactor_pool);
   IREE_CHECK_OK(status);
-  return device;
+
+  iree_async_frontier_tracker_options_t tracker_options =
+      iree_async_frontier_tracker_options_default();
+  iree_async_frontier_tracker_t* frontier_tracker = nullptr;
+  IREE_CHECK_OK(iree_async_frontier_tracker_create(
+      tracker_options, iree_allocator_system(), &frontier_tracker));
+
+  iree_hal_device_group_t* device_group = nullptr;
+  status = iree_hal_device_group_create_from_device(
+      device, frontier_tracker, iree_allocator_system(), &device_group);
+  iree_async_frontier_tracker_release(frontier_tracker);
+  iree_hal_device_release(device);
+  IREE_CHECK_OK(status);
+  return device_group;
+}
+
+static iree_hal_semaphore_t* CreateSemaphore(iree_hal_device_t* device) {
+  iree_hal_semaphore_t* semaphore = nullptr;
+  IREE_CHECK_OK(iree_hal_semaphore_create(
+      device, IREE_HAL_QUEUE_AFFINITY_ANY,
+      /*initial_value=*/0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore));
+  return semaphore;
 }
 
 class RegionBuilderTest : public ::testing::Test {
@@ -326,7 +348,8 @@ TEST_F(RegionBuilderTest, RecordModeRequiresCommandBuffer) {
 }
 
 TEST_F(RegionBuilderTest, RecordModeRecordsBarrierIntoHalCommandBuffer) {
-  iree_hal_device_t* device = CreateLocalSyncDevice();
+  iree_hal_device_group_t* device_group = CreateLocalSyncDeviceGroup();
+  iree_hal_device_t* device = iree_hal_device_group_device_at(device_group, 0);
   iree_hal_command_buffer_t* command_buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
       device, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
@@ -362,11 +385,12 @@ TEST_F(RegionBuilderTest, RecordModeRecordsBarrierIntoHalCommandBuffer) {
 
   id4_pipeline_region_builder_destroy(builder);
   iree_hal_command_buffer_release(command_buffer);
-  iree_hal_device_release(device);
+  iree_hal_device_group_release(device_group);
 }
 
 TEST_F(RegionBuilderTest, RecordModeDispatchRequiresHalExecutable) {
-  iree_hal_device_t* device = CreateLocalSyncDevice();
+  iree_hal_device_group_t* device_group = CreateLocalSyncDeviceGroup();
+  iree_hal_device_t* device = iree_hal_device_group_device_at(device_group, 0);
   iree_hal_command_buffer_t* command_buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
       device, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
@@ -414,7 +438,160 @@ TEST_F(RegionBuilderTest, RecordModeDispatchRequiresHalExecutable) {
 
   id4_pipeline_region_builder_destroy(builder);
   iree_hal_command_buffer_release(command_buffer);
-  iree_hal_device_release(device);
+  iree_hal_device_group_release(device_group);
+}
+
+TEST_F(RegionBuilderTest, PreparedRegionIssuesLocalSlabEnvelope) {
+  iree_hal_device_group_t* device_group = CreateLocalSyncDeviceGroup();
+  iree_hal_device_t* device = iree_hal_device_group_device_at(device_group, 0);
+  iree_hal_command_buffer_t* command_buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_command_buffer_create(
+      device, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+      IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
+      /*binding_capacity=*/4, &command_buffer));
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
+
+  id4_pipeline_region_builder_create_options_t builder_options = {
+      /*.structure_size=*/sizeof(builder_options),
+      /*.next=*/nullptr,
+      /*.region_name=*/IREE_SV("prepared_region"),
+      /*.mode=*/ID4_PIPELINE_REGION_BUILDER_MODE_RECORD,
+      /*.flags=*/0,
+      /*.block_pool=*/&block_pool_,
+      /*.command_buffer=*/command_buffer,
+      /*.binding_capacity=*/4,
+      /*.local_binding_slot=*/1,
+  };
+  id4_pipeline_region_builder_t* builder = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_region_builder_create(
+      &builder_options, iree_allocator_system(), &builder));
+
+  id4_pipeline_tensor_layout_t layout =
+      MakeTensorLayout(IREE_SV("scratch"), 256);
+  id4_pipeline_tensor_t tensor;
+  IREE_ASSERT_OK(id4_pipeline_region_acquire_tensor(builder, &layout, &tensor));
+  EXPECT_EQ(tensor.binding_slot, 1u);
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
+
+  iree_hal_buffer_params_t local_slab_params = {};
+  local_slab_params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+  local_slab_params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE_READ |
+                            IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE_WRITE;
+  id4_pipeline_prepared_region_create_options_t create_options = {
+      /*.structure_size=*/sizeof(create_options),
+      /*.next=*/nullptr,
+      /*.device_group=*/device_group,
+      /*.device_index=*/0,
+      /*.queue_affinity=*/IREE_HAL_QUEUE_AFFINITY_ANY,
+      /*.local_slab_pool=*/nullptr,
+      /*.local_slab_params=*/local_slab_params,
+      /*.local_slab_alloca_flags=*/IREE_HAL_ALLOCA_FLAG_NONE,
+      /*.local_slab_dealloca_flags=*/IREE_HAL_DEALLOCA_FLAG_NONE,
+  };
+  id4_pipeline_prepared_region_t* prepared_region = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_prepared_region_create(
+      builder, &create_options, iree_allocator_system(), &prepared_region));
+
+  iree_hal_semaphore_t* signal_semaphore = CreateSemaphore(device);
+  iree_hal_device_group_release(device_group);
+  device_group = nullptr;
+
+  iree_hal_buffer_binding_t bindings[4] = {};
+  iree_hal_buffer_binding_table_t binding_table = {
+      /*.count=*/IREE_ARRAYSIZE(bindings),
+      /*.bindings=*/bindings,
+  };
+  uint64_t signal_payload_value = 1;
+  iree_hal_semaphore_list_t signal_list = {
+      /*.count=*/1,
+      /*.semaphores=*/&signal_semaphore,
+      /*.payload_values=*/&signal_payload_value,
+  };
+  id4_pipeline_prepared_region_issue_options_t issue_options = {
+      /*.structure_size=*/sizeof(issue_options),
+      /*.next=*/nullptr,
+      /*.wait_semaphore_list=*/iree_hal_semaphore_list_empty(),
+      /*.signal_semaphore_list=*/signal_list,
+      /*.binding_table=*/binding_table,
+      /*.execute_flags=*/IREE_HAL_EXECUTE_FLAG_NONE,
+  };
+  IREE_ASSERT_OK(
+      id4_pipeline_prepared_region_issue(prepared_region, &issue_options));
+  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
+      signal_list, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+
+  id4_pipeline_region_statistics_t statistics;
+  id4_pipeline_prepared_region_statistics(prepared_region, &statistics);
+  EXPECT_EQ(statistics.local_slab_byte_length, 256u);
+
+  iree_hal_semaphore_release(signal_semaphore);
+  id4_pipeline_region_builder_destroy(builder);
+  iree_hal_command_buffer_release(command_buffer);
+  id4_pipeline_prepared_region_release(prepared_region);
+}
+
+TEST_F(RegionBuilderTest, PreparedRegionIssueRequiresFinalSignal) {
+  iree_hal_device_group_t* device_group = CreateLocalSyncDeviceGroup();
+  iree_hal_device_t* device = iree_hal_device_group_device_at(device_group, 0);
+  iree_hal_command_buffer_t* command_buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_command_buffer_create(
+      device, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+      IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
+      /*binding_capacity=*/4, &command_buffer));
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
+
+  id4_pipeline_region_builder_create_options_t builder_options = {
+      /*.structure_size=*/sizeof(builder_options),
+      /*.next=*/nullptr,
+      /*.region_name=*/IREE_SV("prepared_region"),
+      /*.mode=*/ID4_PIPELINE_REGION_BUILDER_MODE_RECORD,
+      /*.flags=*/0,
+      /*.block_pool=*/&block_pool_,
+      /*.command_buffer=*/command_buffer,
+      /*.binding_capacity=*/4,
+      /*.local_binding_slot=*/1,
+  };
+  id4_pipeline_region_builder_t* builder = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_region_builder_create(
+      &builder_options, iree_allocator_system(), &builder));
+
+  id4_pipeline_prepared_region_create_options_t create_options = {
+      /*.structure_size=*/sizeof(create_options),
+      /*.next=*/nullptr,
+      /*.device_group=*/device_group,
+      /*.device_index=*/0,
+      /*.queue_affinity=*/IREE_HAL_QUEUE_AFFINITY_ANY,
+      /*.local_slab_pool=*/nullptr,
+      /*.local_slab_params=*/{},
+      /*.local_slab_alloca_flags=*/IREE_HAL_ALLOCA_FLAG_NONE,
+      /*.local_slab_dealloca_flags=*/IREE_HAL_DEALLOCA_FLAG_NONE,
+  };
+  id4_pipeline_prepared_region_t* prepared_region = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_prepared_region_create(
+      builder, &create_options, iree_allocator_system(), &prepared_region));
+
+  iree_hal_buffer_binding_t bindings[4] = {};
+  iree_hal_buffer_binding_table_t binding_table = {
+      /*.count=*/IREE_ARRAYSIZE(bindings),
+      /*.bindings=*/bindings,
+  };
+  id4_pipeline_prepared_region_issue_options_t issue_options = {
+      /*.structure_size=*/sizeof(issue_options),
+      /*.next=*/nullptr,
+      /*.wait_semaphore_list=*/iree_hal_semaphore_list_empty(),
+      /*.signal_semaphore_list=*/iree_hal_semaphore_list_empty(),
+      /*.binding_table=*/binding_table,
+      /*.execute_flags=*/IREE_HAL_EXECUTE_FLAG_NONE,
+  };
+  EXPECT_THAT(Status(id4_pipeline_prepared_region_issue(prepared_region,
+                                                        &issue_options)),
+              StatusIs(StatusCode::kInvalidArgument));
+
+  id4_pipeline_prepared_region_release(prepared_region);
+  id4_pipeline_region_builder_destroy(builder);
+  iree_hal_command_buffer_release(command_buffer);
+  iree_hal_device_group_release(device_group);
 }
 
 }  // namespace

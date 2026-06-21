@@ -77,6 +77,35 @@ struct id4_pipeline_region_builder_t {
   iree_device_size_t local_next_offset;
 };
 
+struct id4_pipeline_prepared_region_t {
+  // Reference count for shared prepared-region ownership.
+  iree_atomic_ref_count_t ref_count;
+  // Host allocator used for prepared-region storage.
+  iree_allocator_t host_allocator;
+  // Retained device group that keeps topology state valid.
+  iree_hal_device_group_t* device_group;
+  // Borrowed device selected from the retained device group.
+  iree_hal_device_t* device;
+  // Retained command buffer recorded by the source builder.
+  iree_hal_command_buffer_t* command_buffer;
+  // Retained allocation pool for the local transient slab.
+  iree_hal_pool_t* local_slab_pool;
+  // Queue affinity used by all region queue operations.
+  iree_hal_queue_affinity_t queue_affinity;
+  // HAL buffer parameters for the local transient slab.
+  iree_hal_buffer_params_t local_slab_params;
+  // HAL queue-alloca flags for the local transient slab.
+  iree_hal_alloca_flags_t local_slab_alloca_flags;
+  // HAL queue-dealloca flags for the local transient slab.
+  iree_hal_dealloca_flags_t local_slab_dealloca_flags;
+  // Exact issue-time binding-table capacity.
+  iree_host_size_t binding_capacity;
+  // Binding-table slot reserved for the local transient slab.
+  uint32_t local_binding_slot;
+  // Realized region statistics copied from the source builder.
+  id4_pipeline_region_statistics_t statistics;
+};
+
 static iree_status_t id4_pipeline_region_validate_options_size(
     iree_host_size_t actual_size, iree_host_size_t expected_size,
     iree_string_view_t options_name) {
@@ -86,6 +115,29 @@ static iree_status_t id4_pipeline_region_validate_options_size(
                           " is smaller than expected %" PRIhsz,
                           (int)options_name.size, options_name.data,
                           actual_size, expected_size);
+}
+
+static iree_status_t id4_pipeline_region_validate_semaphore_list(
+    iree_hal_semaphore_list_t semaphore_list, iree_string_view_t list_name) {
+  if (semaphore_list.count == 0) return iree_ok_status();
+  if (!semaphore_list.semaphores) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "%.*s semaphore array is required",
+                            (int)list_name.size, list_name.data);
+  }
+  if (!semaphore_list.payload_values) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "%.*s payload value array is required",
+                            (int)list_name.size, list_name.data);
+  }
+  for (iree_host_size_t i = 0; i < semaphore_list.count; ++i) {
+    if (!semaphore_list.semaphores[i]) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "%.*s semaphore %" PRIhsz " is NULL",
+                              (int)list_name.size, list_name.data, i);
+    }
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t id4_pipeline_region_copy_string(
@@ -794,4 +846,307 @@ iree_status_t id4_pipeline_region_barrier(
   ++builder->statistics.barrier_count;
   ++builder->statistics.current_epoch;
   return id4_pipeline_region_publish_released_ranges(builder);
+}
+
+static iree_status_t id4_pipeline_prepared_region_validate_create_options(
+    const id4_pipeline_region_builder_t* builder,
+    const id4_pipeline_prepared_region_create_options_t* options) {
+  if (!builder) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "region builder is required");
+  }
+  if (builder->mode != ID4_PIPELINE_REGION_BUILDER_MODE_RECORD) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "prepared regions require a record-mode builder");
+  }
+  if (!options) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "prepared region create options are required");
+  }
+  IREE_RETURN_IF_ERROR(id4_pipeline_region_validate_options_size(
+      options->structure_size, sizeof(*options), IREE_SV("prepared region")));
+  if (options->next) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "prepared region extension structures are not "
+                            "supported");
+  }
+  if (!options->device_group) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "prepared region device group is required");
+  }
+  iree_host_size_t device_count =
+      iree_hal_device_group_device_count(options->device_group);
+  if (options->device_index >= device_count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "prepared region device index %" PRIhsz
+                            " out of range for device group with %" PRIhsz
+                            " devices",
+                            options->device_index, device_count);
+  }
+  if (!iree_hal_device_group_device_at(options->device_group,
+                                       options->device_index)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "prepared region device is required");
+  }
+  if (!builder->command_buffer) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "prepared region command buffer is required");
+  }
+  return iree_ok_status();
+}
+
+iree_status_t id4_pipeline_prepared_region_create(
+    const id4_pipeline_region_builder_t* builder,
+    const id4_pipeline_prepared_region_create_options_t* options,
+    iree_allocator_t host_allocator,
+    id4_pipeline_prepared_region_t** out_prepared_region) {
+  IREE_ASSERT_ARGUMENT(out_prepared_region);
+  *out_prepared_region = NULL;
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_prepared_region_validate_create_options(builder, options));
+
+  id4_pipeline_prepared_region_t* prepared_region = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
+      host_allocator, sizeof(*prepared_region), (void**)&prepared_region));
+  memset(prepared_region, 0, sizeof(*prepared_region));
+  iree_atomic_ref_count_init(&prepared_region->ref_count);
+  prepared_region->host_allocator = host_allocator;
+  prepared_region->device_group = options->device_group;
+  iree_hal_device_group_retain(prepared_region->device_group);
+  prepared_region->device = iree_hal_device_group_device_at(
+      options->device_group, options->device_index);
+  prepared_region->command_buffer = builder->command_buffer;
+  iree_hal_command_buffer_retain(prepared_region->command_buffer);
+  prepared_region->local_slab_pool = options->local_slab_pool;
+  iree_hal_pool_retain(prepared_region->local_slab_pool);
+  prepared_region->queue_affinity = options->queue_affinity;
+  prepared_region->local_slab_params = options->local_slab_params;
+  prepared_region->local_slab_alloca_flags = options->local_slab_alloca_flags;
+  prepared_region->local_slab_dealloca_flags =
+      options->local_slab_dealloca_flags;
+  prepared_region->binding_capacity = builder->binding_capacity;
+  prepared_region->local_binding_slot = builder->local_binding_slot;
+  prepared_region->statistics = builder->statistics;
+  *out_prepared_region = prepared_region;
+  return iree_ok_status();
+}
+
+static void id4_pipeline_prepared_region_destroy(
+    id4_pipeline_prepared_region_t* prepared_region) {
+  iree_allocator_t host_allocator = prepared_region->host_allocator;
+  iree_hal_pool_release(prepared_region->local_slab_pool);
+  iree_hal_command_buffer_release(prepared_region->command_buffer);
+  iree_hal_device_group_release(prepared_region->device_group);
+  iree_allocator_free(host_allocator, prepared_region);
+}
+
+void id4_pipeline_prepared_region_retain(
+    id4_pipeline_prepared_region_t* prepared_region) {
+  if (!prepared_region) return;
+  iree_atomic_ref_count_inc(&prepared_region->ref_count);
+}
+
+void id4_pipeline_prepared_region_release(
+    id4_pipeline_prepared_region_t* prepared_region) {
+  if (prepared_region &&
+      iree_atomic_ref_count_dec(&prepared_region->ref_count) == 1) {
+    id4_pipeline_prepared_region_destroy(prepared_region);
+  }
+}
+
+static iree_status_t id4_pipeline_prepared_region_validate_issue_options(
+    const id4_pipeline_prepared_region_t* prepared_region,
+    const id4_pipeline_prepared_region_issue_options_t* options) {
+  if (!options) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "prepared region issue options are required");
+  }
+  IREE_RETURN_IF_ERROR(id4_pipeline_region_validate_options_size(
+      options->structure_size, sizeof(*options),
+      IREE_SV("prepared region issue")));
+  if (options->next) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "prepared region issue extension structures are "
+                            "not supported");
+  }
+  IREE_RETURN_IF_ERROR(id4_pipeline_region_validate_semaphore_list(
+      options->wait_semaphore_list, IREE_SV("prepared region wait")));
+  IREE_RETURN_IF_ERROR(id4_pipeline_region_validate_semaphore_list(
+      options->signal_semaphore_list, IREE_SV("prepared region signal")));
+  if (options->signal_semaphore_list.count == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "prepared region final signal is required");
+  }
+  if (options->binding_table.count != prepared_region->binding_capacity) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "prepared region expected %" PRIhsz " bindings but got %" PRIhsz,
+        prepared_region->binding_capacity, options->binding_table.count);
+  }
+  if (options->binding_table.count != 0 && !options->binding_table.bindings) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "prepared region binding table is required");
+  }
+  if (prepared_region->statistics.local_slab_byte_length != 0) {
+    const iree_hal_buffer_binding_t local_binding =
+        options->binding_table.bindings[prepared_region->local_binding_slot];
+    if (local_binding.buffer || local_binding.offset != 0 ||
+        local_binding.length != 0) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "prepared region local binding slot must be "
+                              "empty");
+    }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_prepared_region_copy_binding_table(
+    const id4_pipeline_prepared_region_t* prepared_region,
+    iree_hal_buffer_binding_table_t source_table,
+    iree_hal_buffer_t* local_slab_buffer, iree_allocator_t host_allocator,
+    iree_hal_buffer_binding_table_t* out_binding_table) {
+  out_binding_table->count = 0;
+  out_binding_table->bindings = NULL;
+  if (source_table.count == 0) return iree_ok_status();
+
+  iree_hal_buffer_binding_t* bindings = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc_array(host_allocator, source_table.count,
+                                  sizeof(bindings[0]), (void**)&bindings));
+  memcpy(bindings, source_table.bindings,
+         source_table.count * sizeof(*bindings));
+  if (local_slab_buffer) {
+    bindings[prepared_region->local_binding_slot] = (iree_hal_buffer_binding_t){
+        // Local transient slab buffer for this issue.
+        .buffer = local_slab_buffer,
+        // The local slab binding starts at byte zero.
+        .offset = 0,
+        // Full local slab length visible to recorded binding refs.
+        .length = prepared_region->statistics.local_slab_byte_length,
+    };
+  }
+  out_binding_table->count = source_table.count;
+  out_binding_table->bindings = bindings;
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_prepared_region_create_semaphore(
+    id4_pipeline_prepared_region_t* prepared_region,
+    iree_hal_semaphore_t** out_semaphore) {
+  return iree_hal_semaphore_create(
+      prepared_region->device, prepared_region->queue_affinity,
+      /*initial_value=*/0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT, out_semaphore);
+}
+
+static iree_hal_semaphore_list_t id4_pipeline_region_one_semaphore_list(
+    iree_hal_semaphore_t** semaphore, uint64_t* payload_value) {
+  return (iree_hal_semaphore_list_t){
+      // Number of semaphores in the list.
+      .count = 1,
+      // Semaphore pointer array.
+      .semaphores = semaphore,
+      // Payload value pointer array.
+      .payload_values = payload_value,
+  };
+}
+
+static iree_status_t id4_pipeline_prepared_region_issue_without_local_slab(
+    id4_pipeline_prepared_region_t* prepared_region,
+    const id4_pipeline_prepared_region_issue_options_t* options) {
+  return iree_hal_device_queue_execute(
+      prepared_region->device, prepared_region->queue_affinity,
+      options->wait_semaphore_list, options->signal_semaphore_list,
+      prepared_region->command_buffer, options->binding_table,
+      options->execute_flags);
+}
+
+static iree_status_t id4_pipeline_prepared_region_issue_with_local_slab(
+    id4_pipeline_prepared_region_t* prepared_region,
+    const id4_pipeline_prepared_region_issue_options_t* options) {
+  iree_hal_semaphore_t* alloca_semaphore = NULL;
+  iree_hal_semaphore_t* execute_semaphore = NULL;
+  iree_hal_buffer_t* local_slab_buffer = NULL;
+  iree_hal_buffer_binding_table_t binding_table =
+      iree_hal_buffer_binding_table_empty();
+
+  iree_status_t status = id4_pipeline_prepared_region_create_semaphore(
+      prepared_region, &alloca_semaphore);
+  if (iree_status_is_ok(status)) {
+    status = id4_pipeline_prepared_region_create_semaphore(prepared_region,
+                                                           &execute_semaphore);
+  }
+
+  uint64_t alloca_payload_value = 1;
+  uint64_t execute_payload_value = 1;
+  iree_hal_semaphore_list_t alloca_signal_list =
+      id4_pipeline_region_one_semaphore_list(&alloca_semaphore,
+                                             &alloca_payload_value);
+  iree_hal_semaphore_list_t execute_signal_list =
+      id4_pipeline_region_one_semaphore_list(&execute_semaphore,
+                                             &execute_payload_value);
+
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_device_queue_alloca(
+        prepared_region->device, prepared_region->queue_affinity,
+        options->wait_semaphore_list, alloca_signal_list,
+        prepared_region->local_slab_pool, prepared_region->local_slab_params,
+        prepared_region->statistics.local_slab_byte_length,
+        prepared_region->local_slab_alloca_flags, &local_slab_buffer);
+  }
+  const bool alloca_submitted = iree_status_is_ok(status);
+  if (iree_status_is_ok(status)) {
+    status = id4_pipeline_prepared_region_copy_binding_table(
+        prepared_region, options->binding_table, local_slab_buffer,
+        prepared_region->host_allocator, &binding_table);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_device_queue_execute(
+        prepared_region->device, prepared_region->queue_affinity,
+        alloca_signal_list, execute_signal_list,
+        prepared_region->command_buffer, binding_table, options->execute_flags);
+  }
+  const bool execute_submitted = alloca_submitted && iree_status_is_ok(status);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_device_queue_dealloca(
+        prepared_region->device, prepared_region->queue_affinity,
+        execute_signal_list, options->signal_semaphore_list, local_slab_buffer,
+        prepared_region->local_slab_dealloca_flags);
+  } else if (alloca_submitted && local_slab_buffer) {
+    iree_hal_semaphore_list_t cleanup_wait_list =
+        execute_submitted ? execute_signal_list : alloca_signal_list;
+    iree_status_t cleanup_status = iree_hal_device_queue_dealloca(
+        prepared_region->device, prepared_region->queue_affinity,
+        cleanup_wait_list, iree_hal_semaphore_list_empty(), local_slab_buffer,
+        prepared_region->local_slab_dealloca_flags);
+    status = iree_status_join(status, cleanup_status);
+  }
+
+  iree_allocator_free(prepared_region->host_allocator,
+                      (void*)binding_table.bindings);
+  iree_hal_buffer_release(local_slab_buffer);
+  iree_hal_semaphore_release(execute_semaphore);
+  iree_hal_semaphore_release(alloca_semaphore);
+  return status;
+}
+
+iree_status_t id4_pipeline_prepared_region_issue(
+    id4_pipeline_prepared_region_t* prepared_region,
+    const id4_pipeline_prepared_region_issue_options_t* options) {
+  IREE_ASSERT_ARGUMENT(prepared_region);
+  IREE_RETURN_IF_ERROR(id4_pipeline_prepared_region_validate_issue_options(
+      prepared_region, options));
+  if (prepared_region->statistics.local_slab_byte_length == 0) {
+    return id4_pipeline_prepared_region_issue_without_local_slab(
+        prepared_region, options);
+  }
+  return id4_pipeline_prepared_region_issue_with_local_slab(prepared_region,
+                                                            options);
+}
+
+void id4_pipeline_prepared_region_statistics(
+    const id4_pipeline_prepared_region_t* prepared_region,
+    id4_pipeline_region_statistics_t* out_statistics) {
+  IREE_ASSERT_ARGUMENT(prepared_region);
+  IREE_ASSERT_ARGUMENT(out_statistics);
+  *out_statistics = prepared_region->statistics;
 }

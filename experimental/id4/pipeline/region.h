@@ -23,6 +23,9 @@ extern "C" {
 // Ephemeral authoring context for an executable pipeline region.
 typedef struct id4_pipeline_region_builder_t id4_pipeline_region_builder_t;
 
+// Sealed executable region prepared from a recording region builder.
+typedef struct id4_pipeline_prepared_region_t id4_pipeline_prepared_region_t;
+
 // Region builder mode.
 typedef enum id4_pipeline_region_builder_mode_e {
   // Runs planning, lifetime validation, and statistics without HAL recording.
@@ -187,6 +190,44 @@ typedef struct id4_pipeline_region_builder_create_options_t {
   uint32_t local_binding_slot;
 } id4_pipeline_region_builder_create_options_t;
 
+// Options for sealing a record-mode builder as a prepared region.
+typedef struct id4_pipeline_prepared_region_create_options_t {
+  // Size of this structure for versioning.
+  iree_host_size_t structure_size;
+  // Extension structure chain; must be NULL for now.
+  const void* next;
+  // Device group retained while the prepared region can be issued.
+  iree_hal_device_group_t* device_group;
+  // Device-group index used to issue the prepared region.
+  iree_host_size_t device_index;
+  // Queue affinity used for alloca, execute, and dealloca operations.
+  iree_hal_queue_affinity_t queue_affinity;
+  // Allocation pool used for the local transient slab. NULL selects default.
+  iree_hal_pool_t* local_slab_pool;
+  // HAL buffer parameters used for the local transient slab.
+  iree_hal_buffer_params_t local_slab_params;
+  // HAL queue-alloca flags for the local transient slab.
+  iree_hal_alloca_flags_t local_slab_alloca_flags;
+  // HAL queue-dealloca flags for the local transient slab.
+  iree_hal_dealloca_flags_t local_slab_dealloca_flags;
+} id4_pipeline_prepared_region_create_options_t;
+
+// Options for issuing a prepared region once.
+typedef struct id4_pipeline_prepared_region_issue_options_t {
+  // Size of this structure for versioning.
+  iree_host_size_t structure_size;
+  // Extension structure chain; must be NULL for now.
+  const void* next;
+  // Timeline semaphores that must be reached before region issue begins.
+  iree_hal_semaphore_list_t wait_semaphore_list;
+  // Timeline semaphores signaled after local transient deallocation completes.
+  iree_hal_semaphore_list_t signal_semaphore_list;
+  // Issue-time binding table. The local slab slot must be empty.
+  iree_hal_buffer_binding_table_t binding_table;
+  // HAL queue-execute flags.
+  iree_hal_execute_flags_t execute_flags;
+} id4_pipeline_prepared_region_issue_options_t;
+
 // Creates an ephemeral region builder.
 iree_status_t id4_pipeline_region_builder_create(
     const id4_pipeline_region_builder_create_options_t* options,
@@ -245,6 +286,31 @@ iree_status_t id4_pipeline_region_barrier(
     const iree_hal_memory_barrier_t* memory_barriers,
     iree_host_size_t buffer_barrier_count,
     const iree_hal_buffer_barrier_t* buffer_barriers);
+
+// Seals a record-mode builder into an immutable prepared region.
+iree_status_t id4_pipeline_prepared_region_create(
+    const id4_pipeline_region_builder_t* builder,
+    const id4_pipeline_prepared_region_create_options_t* options,
+    iree_allocator_t host_allocator,
+    id4_pipeline_prepared_region_t** out_prepared_region);
+
+// Retains |prepared_region| for the caller.
+void id4_pipeline_prepared_region_retain(
+    id4_pipeline_prepared_region_t* prepared_region);
+
+// Releases |prepared_region| from the caller.
+void id4_pipeline_prepared_region_release(
+    id4_pipeline_prepared_region_t* prepared_region);
+
+// Issues |prepared_region| with explicit caller waits and final signals.
+iree_status_t id4_pipeline_prepared_region_issue(
+    id4_pipeline_prepared_region_t* prepared_region,
+    const id4_pipeline_prepared_region_issue_options_t* options);
+
+// Copies realized region statistics into |out_statistics|.
+void id4_pipeline_prepared_region_statistics(
+    const id4_pipeline_prepared_region_t* prepared_region,
+    id4_pipeline_region_statistics_t* out_statistics);
 
 #ifdef __cplusplus
 }  // extern "C"
