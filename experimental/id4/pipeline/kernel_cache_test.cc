@@ -27,7 +27,13 @@ kernel.def export("id4_smoke_configured") @id4_smoke_configured() {
   %workgroup_size_x = config.get @id4.smoke.workgroup_size_x : index
   %one = index.constant 1 : index
   kernel.launch.config workgroups(%workgroups_x, %one, %one) workgroup_size(%workgroup_size_x, %one, %one) : index
-} launch() {
+} launch(%output: buffer) {
+  %zero_offset = index.constant 0 : offset
+  %zero_index = index.constant 0 : index
+  %value = scalar.constant 7 : i32
+  %global = buffer.assume.memory_space<global> %output : buffer
+  %view = buffer.view %global[%zero_offset] : buffer -> view<1xi32, #dense>
+  view.store %value, %view[%zero_index] : i32, view<1xi32, #dense>
   kernel.return
 }
 )";
