@@ -18,8 +18,24 @@ py_library(
 )
 
 py_binary(
+    name = "generate_fixture",
+    srcs = ["generate_fixture.py"],
+    data = ["//experimental/id4/reference:fixture_plans"],
+    deps = [":trace_reduce_lib"],
+)
+
+py_binary(
     name = "trace_reduce",
     srcs = ["trace_reduce.py"],
+)
+
+py_test(
+    name = "generate_fixture_test",
+    srcs = [
+        "generate_fixture.py",
+        "generate_fixture_test.py",
+    ],
+    deps = [":trace_reduce_lib"],
 )
 
 py_test(

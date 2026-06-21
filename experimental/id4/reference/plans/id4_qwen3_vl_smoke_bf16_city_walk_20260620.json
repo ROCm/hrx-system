@@ -1,0 +1,103 @@
+{
+  "fixture_id": "id4_qwen3_vl_smoke_bf16_city_walk_20260620",
+  "source_label": "stable-diffusion.cpp BF16 city-walk trace, 1024px, one Euler step, seed 20260623",
+  "source_trace_id": "stage-bf16-city-walk-1024-1step-raw-20260620",
+  "texts": [
+    {
+      "name": "wrapped_prompt",
+      "output": "qwen/wrapped_prompt.txt",
+      "role": "metadata",
+      "stage": "qwen.prompt"
+    }
+  ],
+  "tensors": [
+    {
+      "name": "token_ids",
+      "output": "qwen/token_ids_0_64.npy",
+      "role": "input",
+      "slice": [
+        {
+          "length": 64,
+          "start": 0
+        }
+      ],
+      "stage": "qwen.prompt"
+    },
+    {
+      "name": "token_weights",
+      "output": "qwen/token_weights_0_64.npy",
+      "role": "input",
+      "slice": [
+        {
+          "length": 64,
+          "start": 0
+        }
+      ],
+      "stage": "qwen.prompt"
+    },
+    {
+      "name": "token_mask",
+      "output": "qwen/token_mask_0_64.npy",
+      "role": "input",
+      "slice": [
+        {
+          "length": 64,
+          "start": 0
+        }
+      ],
+      "stage": "qwen.prompt"
+    },
+    {
+      "name": "attention_mask",
+      "output": "qwen/attention_mask_0_64x0_64.npy",
+      "role": "input",
+      "slice": [
+        {
+          "length": 64,
+          "start": 0
+        },
+        {
+          "length": 64,
+          "start": 0
+        }
+      ],
+      "stage": "qwen.prompt"
+    },
+    {
+      "name": "selected_hidden_states",
+      "output": "qwen/selected_hidden_states_0_32x0_64.npy",
+      "role": "input",
+      "slice": [
+        {
+          "length": 32,
+          "start": 0
+        },
+        {
+          "length": 64,
+          "start": 0
+        }
+      ],
+      "stage": "qwen.encoder"
+    },
+    {
+      "name": "condition",
+      "output": "qwen/condition_0_32x0_64.npy",
+      "role": "expected",
+      "slice": [
+        {
+          "length": 32,
+          "start": 0
+        },
+        {
+          "length": 64,
+          "start": 0
+        }
+      ],
+      "stage": "qwen.encoder",
+      "tolerance": {
+        "atol": 0.0005,
+        "rtol": 0.0005
+      }
+    }
+  ]
+}

@@ -221,14 +221,14 @@ separate from presubmit. A missing external root is a configuration error for
 that explicitly requested target, not a reason to search the source tree or
 download artifacts implicitly.
 
-The trace reducer is the canonical path from a raw reference trace to compact
-fixtures:
+Checked-in reduction plans live under `reference/plans/`. The fixture generator
+is the canonical path from a raw reference trace to compact fixtures:
 
 ```bash
-bazel run //experimental/id4/build_tools:trace_reduce -- \
-  --trace-dir="${ID4_REFERENCE_TRACE_ROOT}/<trace-id>" \
-  --plan=path/to/reduction_plan.json \
-  --output-dir="${ID4_REFERENCE_FIXTURE_ROOT}/<fixture-id>"
+bazel run //experimental/id4/build_tools:generate_fixture -- \
+  --fixture-id=<fixture-id> \
+  --trace-root="${ID4_REFERENCE_TRACE_ROOT}" \
+  --fixture-root="${ID4_REFERENCE_FIXTURE_ROOT}"
 ```
 
 Generated fixture directories contain payload files plus `manifest.json` and
