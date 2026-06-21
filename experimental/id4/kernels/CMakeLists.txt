@@ -13,6 +13,7 @@ add_custom_command(OUTPUT loom_sources.stamp
     COMMAND ${CMAKE_COMMAND} -E touch loom_sources.stamp
   DEPENDS
     "qwen3_vl_condition_f32.loom"
+    "qwen3_vl_rmsnorm_f32.loom"
     "sampler_cfg_denoise_f32.loom"
     "smoke_configured.loom"
 )
@@ -97,6 +98,40 @@ iree_native_test(
     "--config=id4.qwen3_vl.condition.hidden_row_count=32"
     "--config=id4.qwen3_vl.condition.token_count=64"
     "--config=id4.qwen3_vl.condition.workgroup_size_x=256"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "qwen3_vl_rmsnorm_f32_small_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl_rmsnorm_f32.loom}}"
+    "--benchmark=@id4_qwen3_vl_rmsnorm_f32_small"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.qwen3_vl.rmsnorm.token_count=1"
+    "--config=id4.qwen3_vl.rmsnorm.hidden_size=4"
+    "--config=id4.qwen3_vl.rmsnorm.workgroup_size_x=256"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "qwen3_vl_rmsnorm_f32_qwen_slice_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl_rmsnorm_f32.loom}}"
+    "--benchmark=@id4_qwen3_vl_rmsnorm_f32_qwen_slice"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.qwen3_vl.rmsnorm.token_count=64"
+    "--config=id4.qwen3_vl.rmsnorm.hidden_size=4096"
+    "--config=id4.qwen3_vl.rmsnorm.workgroup_size_x=256"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -195,6 +230,48 @@ iree_native_test(
     "--config=id4.qwen3_vl.condition.hidden_row_count=32"
     "--config=id4.qwen3_vl.condition.token_count=64"
     "--config=id4.qwen3_vl.condition.workgroup_size_x=256"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "qwen3_vl_rmsnorm_f32_small_amdgpu_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl_rmsnorm_f32.loom}}"
+    "--case=@id4_qwen3_vl_rmsnorm_f32_small_case"
+    "--device=amdgpu://0"
+    "--config=id4.qwen3_vl.rmsnorm.token_count=1"
+    "--config=id4.qwen3_vl.rmsnorm.hidden_size=4"
+    "--config=id4.qwen3_vl.rmsnorm.workgroup_size_x=256"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "qwen3_vl_rmsnorm_f32_qwen_slice_amdgpu_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl_rmsnorm_f32.loom}}"
+    "--case=@id4_qwen3_vl_rmsnorm_f32_qwen_slice_case"
+    "--device=amdgpu://0"
+    "--config=id4.qwen3_vl.rmsnorm.token_count=64"
+    "--config=id4.qwen3_vl.rmsnorm.hidden_size=4096"
+    "--config=id4.qwen3_vl.rmsnorm.workgroup_size_x=256"
   SRC
     loom::tools::iree-test-loom
   LABELS
