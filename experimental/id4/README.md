@@ -236,6 +236,21 @@ Generated fixture directories contain payload files plus `manifest.json` and
 The inventory is the compact stage/role/shape view intended for planning stage
 tests, benchmark harnesses, and kernel-family triage.
 
+Raw traces can also be inventoried without reducing payloads:
+
+```bash
+bazel run //experimental/id4/build_tools:trace_inventory -- \
+  --trace-dir="${ID4_REFERENCE_TRACE_ROOT}/<trace-id>" \
+  --output="<inventory-output>.json" \
+  --hash-payloads
+```
+
+The raw-trace inventory records stage order, tensor shapes, dtypes, payload
+sizes, operation-family groupings, optional payload hashes, and coverage facts.
+It is the first pass for deciding which kernel families have enough oracle
+material to become `.loom` cases and which seams still need reference
+instrumentation.
+
 `.loom` tests should keep their checked-in data tiny. Inlined values should be
 synthetic or small representative extractions that exercise the operation
 class. Larger oracle comparisons belong in explicit external fixture tests once

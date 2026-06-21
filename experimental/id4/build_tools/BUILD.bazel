@@ -29,6 +29,12 @@ py_binary(
     srcs = ["trace_reduce.py"],
 )
 
+py_binary(
+    name = "trace_inventory",
+    srcs = ["trace_inventory.py"],
+    deps = [":trace_reduce_lib"],
+)
+
 py_test(
     name = "generate_fixture_test",
     srcs = [
@@ -49,5 +55,14 @@ py_test(
 py_test(
     name = "trace_reduce_test",
     srcs = ["trace_reduce_test.py"],
+    deps = [":trace_reduce_lib"],
+)
+
+py_test(
+    name = "trace_inventory_test",
+    srcs = [
+        "trace_inventory.py",
+        "trace_inventory_test.py",
+    ],
     deps = [":trace_reduce_lib"],
 )
