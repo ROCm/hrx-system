@@ -12,10 +12,14 @@
 #include "experimental/id4/pipeline/stage.h"
 #include "experimental/id4/stages/hal_integration_util.h"
 #include "experimental/id4/stages/ideogram4_dit.h"
+#include "experimental/id4/tooling/capture.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
+IREE_FLAG(string, id4_capture_dir, "",
+          "Directory that receives exported ID4 DiT boundary and diagnostic "
+          "tap tensor captures.");
 IREE_FLAG(
     string, id4_fixture_dir, "",
     "Directory containing an ID4 DiT fixture manifest and tensor "
@@ -321,6 +325,30 @@ TEST(Ideogram4DitStageIntegration, PrepareAndIssueForwardPreludeFixture) {
   id4::test::SemaphoreListStorage read_wait;
   read_wait.semaphore = issue_semaphore.get();
   read_wait.payload_value = issue_signal.payload_value;
+  iree_string_view_t capture_directory =
+      iree_make_cstring_view(FLAG_id4_capture_dir);
+  if (!iree_string_view_is_empty(capture_directory)) {
+    id4_tooling_capture_execution_options_t capture_options;
+    std::memset(&capture_options, 0, sizeof(capture_options));
+    capture_options.structure_size = sizeof(capture_options);
+    capture_options.run_id = IREE_SV("ideogram4_dit_forward_integration");
+    capture_options.output_directory = capture_directory;
+    capture_options.plan = plan.get();
+    capture_options.device = context.device.get();
+    capture_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+    capture_options.boundary_binding_count = boundary_bindings.count;
+    capture_options.boundary_bindings = boundary_bindings.bindings;
+    capture_options.diagnostic_tap_binding_count =
+        diagnostic_tap_bindings.count;
+    capture_options.diagnostic_tap_bindings = diagnostic_tap_bindings.bindings;
+    capture_options.wait_semaphore_list = read_wait.list();
+    capture_options.host_allocator = iree_allocator_system();
+    IREE_ASSERT_OK(id4_tooling_capture_execution(&capture_options));
+    IREE_ASSERT_OK(id4::test::VerifyCapturedExportedBoundaryTensorsWereWritten(
+        plan.get(), capture_directory, kOutputSentinel));
+    IREE_ASSERT_OK(id4::test::VerifyCapturedDiagnosticTapTensorsWereWritten(
+        plan.get(), capture_directory, kOutputSentinel));
+  }
   IREE_ASSERT_OK(CompareExpectedDiagnosticTaps(
       context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
       diagnostic_tap_bindings, fixture_tensors, read_wait.list()));

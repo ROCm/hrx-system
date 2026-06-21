@@ -232,6 +232,7 @@ iree_runtime_cc_test(
         ":ideogram4_dit",
         "//experimental/id4/pipeline:plan",
         "//experimental/id4/pipeline:stage",
+        "//experimental/id4/tooling:capture",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal",

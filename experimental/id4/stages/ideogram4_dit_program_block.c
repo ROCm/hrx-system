@@ -85,6 +85,8 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
       &after_adaln_modulation_name));
   IREE_RETURN_IF_ERROR(
       id4_ideogram4_dit_program_barrier(builder, after_adaln_modulation_name));
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_tap(
+      builder, adaln_modulation_name, raw_modulation));
 
   char scale_msa_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
   char gate_msa_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
@@ -716,7 +718,7 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
   iree_string_view_t layer_output_name = iree_string_view_empty();
   iree_string_view_t mlp_residual_dispatch_name = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
-      branch_name, layer_ordinal, IREE_SV("output"), layer_output_name_buffer,
+      branch_name, layer_ordinal, IREE_SV("hidden"), layer_output_name_buffer,
       IREE_ARRAYSIZE(layer_output_name_buffer), &layer_output_name));
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
       branch_name, layer_ordinal, IREE_SV("ffn.gated_residual"),
