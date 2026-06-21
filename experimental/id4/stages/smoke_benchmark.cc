@@ -100,10 +100,10 @@ static id4_pipeline_bundle_t* PrepareSmokeBundle(
   return bundle;
 }
 
-static void IssueSmokeBundle(SmokeBenchmarkContext* context,
-                             id4_pipeline_bundle_t* bundle,
-                             iree_hal_semaphore_t* issue_semaphore,
-                             uint64_t issue_value) {
+static void SubmitSmokeBundle(SmokeBenchmarkContext* context,
+                              id4_pipeline_bundle_t* bundle,
+                              iree_hal_semaphore_t* issue_semaphore,
+                              uint64_t issue_value) {
   iree_hal_semaphore_list_t issue_signal_list = {
       // Number of semaphores signaled by issue.
       /*.count=*/1,
@@ -120,6 +120,13 @@ static void IssueSmokeBundle(SmokeBenchmarkContext* context,
   issue_options.diagnostics_sink = &context->diagnostics_sink;
   IREE_CHECK_OK(
       id4_pipeline_stage_issue(context->stage, bundle, &issue_options));
+}
+
+static void IssueSmokeBundleEndToEnd(SmokeBenchmarkContext* context,
+                                     id4_pipeline_bundle_t* bundle,
+                                     iree_hal_semaphore_t* issue_semaphore,
+                                     uint64_t issue_value) {
+  SubmitSmokeBundle(context, bundle, issue_semaphore, issue_value);
   IREE_CHECK_OK(iree_hal_semaphore_wait(issue_semaphore, issue_value,
                                         iree_infinite_timeout(),
                                         IREE_ASYNC_WAIT_FLAG_NONE));
@@ -158,6 +165,38 @@ static void BM_SmokeStagePrepareEndToEnd(benchmark::State& state) {
 }
 BENCHMARK(BM_SmokeStagePrepareEndToEnd);
 
+static void BM_SmokeStageIssueSubmitOnly(benchmark::State& state) {
+  SmokeBenchmarkContext context = CreateLoadedSmokeStage();
+  id4_pipeline_plan_t* plan = CreateSmokePlan(&context);
+  iree_io_parameter_provider_t* provider =
+      id4::test::CreateSmokeParameterProvider();
+  iree_hal_device_t* device =
+      iree_hal_device_group_device_at(id4_pipeline_plan_device_group(plan), 0);
+  iree_hal_semaphore_t* ready_semaphore = id4::test::CreateSemaphore(device);
+  id4_pipeline_bundle_t* bundle =
+      PrepareSmokeBundle(&context, plan, provider, ready_semaphore, 1);
+
+  iree_hal_semaphore_t* issue_semaphore = id4::test::CreateSemaphore(device);
+  uint64_t issue_value = 0;
+  for (auto _ : state) {
+    SubmitSmokeBundle(&context, bundle, issue_semaphore, ++issue_value);
+    benchmark::DoNotOptimize(bundle);
+    state.PauseTiming();
+    IREE_CHECK_OK(iree_hal_semaphore_wait(issue_semaphore, issue_value,
+                                          iree_infinite_timeout(),
+                                          IREE_ASYNC_WAIT_FLAG_NONE));
+    state.ResumeTiming();
+  }
+
+  iree_hal_semaphore_release(issue_semaphore);
+  id4_pipeline_bundle_release(bundle);
+  iree_hal_semaphore_release(ready_semaphore);
+  iree_io_parameter_provider_release(provider);
+  id4_pipeline_plan_release(plan);
+  DestroyLoadedSmokeStage(&context);
+}
+BENCHMARK(BM_SmokeStageIssueSubmitOnly);
+
 static void BM_SmokeStageIssueEndToEnd(benchmark::State& state) {
   SmokeBenchmarkContext context = CreateLoadedSmokeStage();
   id4_pipeline_plan_t* plan = CreateSmokePlan(&context);
@@ -172,7 +211,7 @@ static void BM_SmokeStageIssueEndToEnd(benchmark::State& state) {
   iree_hal_semaphore_t* issue_semaphore = id4::test::CreateSemaphore(device);
   uint64_t issue_value = 0;
   for (auto _ : state) {
-    IssueSmokeBundle(&context, bundle, issue_semaphore, ++issue_value);
+    IssueSmokeBundleEndToEnd(&context, bundle, issue_semaphore, ++issue_value);
     benchmark::DoNotOptimize(bundle);
   }
 
@@ -184,5 +223,30 @@ static void BM_SmokeStageIssueEndToEnd(benchmark::State& state) {
   DestroyLoadedSmokeStage(&context);
 }
 BENCHMARK(BM_SmokeStageIssueEndToEnd);
+
+static void BM_SmokeStageFullLifecycleEndToEnd(benchmark::State& state) {
+  for (auto _ : state) {
+    SmokeBenchmarkContext context = CreateLoadedSmokeStage();
+    id4_pipeline_plan_t* plan = CreateSmokePlan(&context);
+    iree_io_parameter_provider_t* provider =
+        id4::test::CreateSmokeParameterProvider();
+    iree_hal_device_t* device = iree_hal_device_group_device_at(
+        id4_pipeline_plan_device_group(plan), 0);
+    iree_hal_semaphore_t* ready_semaphore = id4::test::CreateSemaphore(device);
+    id4_pipeline_bundle_t* bundle =
+        PrepareSmokeBundle(&context, plan, provider, ready_semaphore, 1);
+    iree_hal_semaphore_t* issue_semaphore = id4::test::CreateSemaphore(device);
+    IssueSmokeBundleEndToEnd(&context, bundle, issue_semaphore, 1);
+    benchmark::DoNotOptimize(bundle);
+
+    iree_hal_semaphore_release(issue_semaphore);
+    id4_pipeline_bundle_release(bundle);
+    iree_hal_semaphore_release(ready_semaphore);
+    iree_io_parameter_provider_release(provider);
+    id4_pipeline_plan_release(plan);
+    DestroyLoadedSmokeStage(&context);
+  }
+}
+BENCHMARK(BM_SmokeStageFullLifecycleEndToEnd);
 
 }  // namespace

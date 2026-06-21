@@ -63,6 +63,7 @@ iree_cc_library(
   DEPS
     ::diagnostics
     ::parameter_slab
+    ::region
     iree::base
     iree::hal
   PUBLIC

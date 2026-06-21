@@ -222,10 +222,129 @@ static id4_pipeline_tensor_shape_t id4_smoke_stage_make_vector_shape(
   return shape;
 }
 
-static iree_status_t id4_smoke_stage_plan_parameter_slabs(
+static iree_status_t id4_smoke_stage_author_region(
+    id4_smoke_stage_t* stage, id4_pipeline_region_builder_t* builder,
+    iree_hal_executable_t* hal_executable,
+    iree_hal_executable_function_t function) {
+  id4_pipeline_tensor_import_t output_import;
+  memset(&output_import, 0, sizeof(output_import));
+  output_import.layout.name = IREE_SV("smoke.output");
+  output_import.layout.shape = id4_smoke_stage_make_vector_shape(1);
+  output_import.layout.byte_length = ID4_SMOKE_STAGE_OUTPUT_BYTE_LENGTH;
+  output_import.layout.alignment = 4;
+  output_import.binding_slot = ID4_SMOKE_STAGE_OUTPUT_BINDING_SLOT;
+  output_import.offset = 0;
+
+  id4_pipeline_tensor_t output_tensor;
+  IREE_RETURN_IF_ERROR(id4_pipeline_region_import_tensor(
+      builder, &output_import, &output_tensor));
+
+  id4_pipeline_tensor_layout_t scratch_layout;
+  memset(&scratch_layout, 0, sizeof(scratch_layout));
+  scratch_layout.name = IREE_SV("smoke.scratch");
+  scratch_layout.shape = id4_smoke_stage_make_vector_shape(16);
+  scratch_layout.byte_length = 16;
+  scratch_layout.alignment = 16;
+  id4_pipeline_tensor_t scratch_tensor;
+  IREE_RETURN_IF_ERROR(id4_pipeline_region_acquire_tensor(
+      builder, &scratch_layout, &scratch_tensor));
+
+  id4_pipeline_region_kernel_t kernel;
+  memset(&kernel, 0, sizeof(kernel));
+  kernel.name = stage->function_name;
+  kernel.executable = hal_executable;
+  kernel.function = function;
+  kernel.binding_count = 1;
+  kernel.constant_byte_length = 0;
+
+  iree_hal_dispatch_config_t dispatch_config =
+      iree_hal_make_static_dispatch_config(stage->workgroups_x, 1, 1);
+  dispatch_config.workgroup_size[0] = stage->workgroup_size_x;
+  dispatch_config.workgroup_size[1] = 1;
+  dispatch_config.workgroup_size[2] = 1;
+
+  id4_pipeline_region_dispatch_binding_t binding;
+  memset(&binding, 0, sizeof(binding));
+  binding.tensor = output_tensor;
+  binding.access = ID4_PIPELINE_TENSOR_ACCESS_WRITE;
+  return id4_pipeline_region_dispatch(
+      builder, &kernel, dispatch_config, iree_const_byte_span_empty(),
+      /*binding_count=*/1, &binding, IREE_HAL_DISPATCH_FLAG_NONE);
+}
+
+static iree_status_t id4_smoke_stage_dry_run_region(
+    id4_smoke_stage_t* stage,
+    id4_pipeline_region_statistics_t* out_statistics) {
+  iree_arena_block_pool_t block_pool;
+  iree_arena_block_pool_initialize(/*total_block_size=*/4096,
+                                   stage->host_allocator, &block_pool);
+
+  id4_pipeline_region_builder_t* builder = NULL;
+  id4_pipeline_region_builder_create_options_t builder_options;
+  memset(&builder_options, 0, sizeof(builder_options));
+  builder_options.structure_size = sizeof(builder_options);
+  builder_options.region_name = IREE_SV("smoke.region");
+  builder_options.mode = ID4_PIPELINE_REGION_BUILDER_MODE_DRY_RUN;
+  builder_options.block_pool = &block_pool;
+  builder_options.binding_capacity = ID4_SMOKE_STAGE_BINDING_COUNT;
+  builder_options.local_binding_slot = ID4_SMOKE_STAGE_LOCAL_BINDING_SLOT;
+
+  iree_status_t status = id4_pipeline_region_builder_create(
+      &builder_options, stage->host_allocator, &builder);
+  if (iree_status_is_ok(status)) {
+    status = id4_smoke_stage_author_region(
+        stage, builder, NULL, iree_hal_executable_function_invalid());
+  }
+  if (iree_status_is_ok(status)) {
+    id4_pipeline_region_builder_statistics(builder, out_statistics);
+  }
+
+  id4_pipeline_region_builder_destroy(builder);
+  iree_arena_block_pool_deinitialize(&block_pool);
+  return status;
+}
+
+static iree_status_t id4_smoke_stage_format_specialization_key(
+    const id4_smoke_stage_t* stage, char* buffer,
+    iree_host_size_t buffer_capacity, iree_string_view_t* out_string) {
+  int length = snprintf(buffer, buffer_capacity,
+                        "id4_smoke_configured:workgroups_x=%" PRIu32
+                        ":workgroup_size_x=%" PRIu32,
+                        stage->workgroups_x, stage->workgroup_size_x);
+  if (length < 0 || (iree_host_size_t)length >= buffer_capacity) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "failed to format smoke specialization key");
+  }
+  *out_string = iree_make_string_view(buffer, (iree_host_size_t)length);
+  return iree_ok_status();
+}
+
+static iree_status_t id4_smoke_stage_create_plan(
     const id4_pipeline_stage_plan_options_t* options,
     iree_allocator_t host_allocator, id4_pipeline_plan_t** out_plan,
     id4_pipeline_stage_t* base_stage) {
+  id4_smoke_stage_t* stage = id4_smoke_stage_cast(base_stage);
+  id4_pipeline_region_statistics_t region_statistics;
+  memset(&region_statistics, 0, sizeof(region_statistics));
+  IREE_RETURN_IF_ERROR(
+      id4_smoke_stage_dry_run_region(stage, &region_statistics));
+
+  char workgroups_x_value_buffer[16];
+  char workgroup_size_x_value_buffer[16];
+  char specialization_key_buffer[128];
+  iree_string_view_t workgroups_x_value = iree_string_view_empty();
+  iree_string_view_t workgroup_size_x_value = iree_string_view_empty();
+  iree_string_view_t specialization_key = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(id4_smoke_stage_format_u32(
+      stage->workgroups_x, workgroups_x_value_buffer,
+      IREE_ARRAYSIZE(workgroups_x_value_buffer), &workgroups_x_value));
+  IREE_RETURN_IF_ERROR(id4_smoke_stage_format_u32(
+      stage->workgroup_size_x, workgroup_size_x_value_buffer,
+      IREE_ARRAYSIZE(workgroup_size_x_value_buffer), &workgroup_size_x_value));
+  IREE_RETURN_IF_ERROR(id4_smoke_stage_format_specialization_key(
+      stage, specialization_key_buffer,
+      IREE_ARRAYSIZE(specialization_key_buffer), &specialization_key));
+
   id4_pipeline_parameter_request_t request;
   memset(&request, 0, sizeof(request));
   request.key = IREE_SV("smoke.weight");
@@ -254,6 +373,64 @@ static iree_status_t id4_smoke_stage_plan_parameter_slabs(
   placement.device_index = options->device_index;
   placement.queue_affinity = options->queue_affinity;
 
+  iree_hal_buffer_params_t local_slab_params;
+  memset(&local_slab_params, 0, sizeof(local_slab_params));
+  local_slab_params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+  local_slab_params.access = IREE_HAL_MEMORY_ACCESS_ALL;
+  local_slab_params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE;
+  local_slab_params.queue_affinity = options->queue_affinity;
+  local_slab_params.min_alignment = 16;
+
+  id4_pipeline_memory_slab_plan_t memory_slab;
+  memset(&memory_slab, 0, sizeof(memory_slab));
+  memory_slab.name = IREE_SV("smoke.local");
+  memory_slab.placement_id = 0;
+  memory_slab.binding_slot = ID4_SMOKE_STAGE_LOCAL_BINDING_SLOT;
+  memory_slab.params = local_slab_params;
+  memory_slab.byte_length = region_statistics.local_slab_byte_length;
+  memory_slab.alignment = 16;
+  memory_slab.high_water_mark = region_statistics.local_slab_high_water_mark;
+
+  id4_pipeline_plan_config_binding_t config_bindings[] = {
+      {
+          // Config key for the X workgroup count.
+          .key = IREE_SV("id4.smoke.workgroups_x"),
+          // Config value for the X workgroup count.
+          .value = workgroups_x_value,
+      },
+      {
+          // Config key for the X workgroup size.
+          .key = IREE_SV("id4.smoke.workgroup_size_x"),
+          // Config value for the X workgroup size.
+          .value = workgroup_size_x_value,
+      },
+  };
+  id4_pipeline_kernel_plan_t kernel;
+  memset(&kernel, 0, sizeof(kernel));
+  kernel.specialization_key = specialization_key;
+  kernel.source_identifier = stage->source_identifier;
+  kernel.module_name = stage->module_name;
+  kernel.executable_identifier = stage->executable_identifier;
+  kernel.function_name = stage->function_name;
+  kernel.placement_id = 0;
+  kernel.config_binding_count = IREE_ARRAYSIZE(config_bindings);
+  kernel.config_bindings = config_bindings;
+
+  id4_pipeline_region_plan_t region;
+  memset(&region, 0, sizeof(region));
+  region.name = IREE_SV("smoke.region");
+  region.placement_id = 0;
+  region.binding_capacity = ID4_SMOKE_STAGE_BINDING_COUNT;
+  region.local_binding_slot = ID4_SMOKE_STAGE_LOCAL_BINDING_SLOT;
+  region.statistics = region_statistics;
+
+  id4_pipeline_diagnostic_tap_plan_t tap;
+  memset(&tap, 0, sizeof(tap));
+  tap.name = IREE_SV("smoke.output.after_dispatch");
+  tap.region_id = 0;
+  tap.after_operation_ordinal = 0;
+  tap.target_name = IREE_SV("smoke.output");
+
   id4_pipeline_plan_create_options_t create_options;
   memset(&create_options, 0, sizeof(create_options));
   create_options.structure_size = sizeof(create_options);
@@ -263,6 +440,14 @@ static iree_status_t id4_smoke_stage_plan_parameter_slabs(
   create_options.placements = &placement;
   create_options.parameter_slab_count = 1;
   create_options.parameter_slabs = &slab;
+  create_options.memory_slab_count = 1;
+  create_options.memory_slabs = &memory_slab;
+  create_options.kernel_count = 1;
+  create_options.kernels = &kernel;
+  create_options.region_count = 1;
+  create_options.regions = &region;
+  create_options.diagnostic_tap_count = 1;
+  create_options.diagnostic_taps = &tap;
   create_options.diagnostics_sink = options->diagnostics_sink;
   return id4_pipeline_plan_create(&create_options, host_allocator, out_plan);
 }
@@ -382,52 +567,8 @@ static iree_status_t id4_smoke_stage_record_region(
         &builder_options, stage->host_allocator, &builder);
   }
   if (iree_status_is_ok(status)) {
-    id4_pipeline_tensor_import_t output_import;
-    memset(&output_import, 0, sizeof(output_import));
-    output_import.layout.name = IREE_SV("smoke.output");
-    output_import.layout.shape = id4_smoke_stage_make_vector_shape(1);
-    output_import.layout.byte_length = ID4_SMOKE_STAGE_OUTPUT_BYTE_LENGTH;
-    output_import.layout.alignment = 4;
-    output_import.binding_slot = ID4_SMOKE_STAGE_OUTPUT_BINDING_SLOT;
-    output_import.offset = 0;
-
-    id4_pipeline_tensor_t output_tensor;
-    status = id4_pipeline_region_import_tensor(builder, &output_import,
-                                               &output_tensor);
-    if (iree_status_is_ok(status)) {
-      id4_pipeline_tensor_layout_t scratch_layout;
-      memset(&scratch_layout, 0, sizeof(scratch_layout));
-      scratch_layout.name = IREE_SV("smoke.scratch");
-      scratch_layout.shape = id4_smoke_stage_make_vector_shape(16);
-      scratch_layout.byte_length = 16;
-      scratch_layout.alignment = 16;
-      id4_pipeline_tensor_t scratch_tensor;
-      status = id4_pipeline_region_acquire_tensor(builder, &scratch_layout,
-                                                  &scratch_tensor);
-    }
-    if (iree_status_is_ok(status)) {
-      id4_pipeline_region_kernel_t kernel;
-      memset(&kernel, 0, sizeof(kernel));
-      kernel.name = stage->function_name;
-      kernel.executable = hal_executable;
-      kernel.function = function;
-      kernel.binding_count = 1;
-      kernel.constant_byte_length = 0;
-
-      iree_hal_dispatch_config_t dispatch_config =
-          iree_hal_make_static_dispatch_config(stage->workgroups_x, 1, 1);
-      dispatch_config.workgroup_size[0] = stage->workgroup_size_x;
-      dispatch_config.workgroup_size[1] = 1;
-      dispatch_config.workgroup_size[2] = 1;
-
-      id4_pipeline_region_dispatch_binding_t binding;
-      memset(&binding, 0, sizeof(binding));
-      binding.tensor = output_tensor;
-      binding.access = ID4_PIPELINE_TENSOR_ACCESS_WRITE;
-      status = id4_pipeline_region_dispatch(
-          builder, &kernel, dispatch_config, iree_const_byte_span_empty(),
-          /*binding_count=*/1, &binding, IREE_HAL_DISPATCH_FLAG_NONE);
-    }
+    status =
+        id4_smoke_stage_author_region(stage, builder, hal_executable, function);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_command_buffer_end(command_buffer);
@@ -502,8 +643,8 @@ static iree_status_t id4_smoke_stage_plan(
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "smoke stage must be loaded before planning");
   }
-  return id4_smoke_stage_plan_parameter_slabs(options, stage->host_allocator,
-                                              out_plan, base_stage);
+  return id4_smoke_stage_create_plan(options, stage->host_allocator, out_plan,
+                                     base_stage);
 }
 
 static iree_status_t id4_smoke_stage_prepare(
