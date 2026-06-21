@@ -45,22 +45,19 @@ static void BM_PipelinePlanCreateAndFormatJson(benchmark::State& state) {
   id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
 
   for (auto _ : state) {
-    id4_pipeline_parameter_request_t request;
-    memset(&request, 0, sizeof(request));
-    request.key = IREE_SV("benchmark.weight");
-    request.span.length = 16;
+    id4_pipeline_parameter_request_t request = id4_pipeline_parameter_request(
+        IREE_SV("benchmark.weight"),
+        id4_pipeline_parameter_span(/*parameter_offset=*/0,
+                                    /*buffer_offset=*/0, /*length=*/16));
 
-    id4_pipeline_parameter_slab_plan_t slab;
-    memset(&slab, 0, sizeof(slab));
-    slab.scope = IREE_SV("benchmark");
-    slab.placement_id = 0;
-    slab.target_params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-    slab.target_params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET |
-                               IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE_READ;
-    slab.byte_length = 16;
-    slab.alignment = 16;
-    slab.request_count = 1;
-    slab.requests = &request;
+    id4_pipeline_parameter_slab_plan_t slab =
+        id4_pipeline_make_device_local_parameter_slab_plan(
+            IREE_SV("benchmark"), /*placement_id=*/0,
+            IREE_HAL_QUEUE_AFFINITY_ANY,
+            IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET |
+                IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE_READ,
+            /*byte_length=*/16, /*alignment=*/16, /*request_count=*/1,
+            &request);
 
     id4_pipeline_device_placement_t placement;
     memset(&placement, 0, sizeof(placement));

@@ -31,20 +31,10 @@ typedef struct id4_smoke_stage_create_options_t {
   id4_pipeline_stage_services_t services;
   // Loom kernel cache used when preparing the smoke executable.
   id4_pipeline_kernel_cache_t* kernel_cache;
-  // Source identifier copied into stage-owned storage.
-  iree_string_view_t source_identifier;
-  // Textual Loom source contents copied for kernel preparation.
-  iree_const_byte_span_t source_contents;
-  // Loom module name passed to the compiler.
-  iree_string_view_t module_name;
-  // HAL executable identifier assigned to the emitted artifact.
-  iree_string_view_t executable_identifier;
+  // Loom module path resolved through the prepare-time kernel library.
+  iree_string_view_t module_path;
   // Exported HAL function name resolved after executable preparation.
   iree_string_view_t function_name;
-  // Configured X workgroup count.
-  uint32_t workgroups_x;
-  // Configured X workgroup size.
-  uint32_t workgroup_size_x;
 } id4_smoke_stage_create_options_t;
 
 // Creates a concrete smoke stage that exercises the shared pipeline lifecycle.

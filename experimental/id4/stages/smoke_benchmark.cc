@@ -36,12 +36,8 @@ static id4_pipeline_stage_t* CreatePlanningSmokeStage(
   std::memset(&options, 0, sizeof(options));
   options.structure_size = sizeof(options);
   options.services = services;
-  options.source_identifier = IREE_SV("smoke_configured.loom");
-  options.module_name = IREE_SV("id4_smoke_configured");
-  options.executable_identifier = IREE_SV("id4_smoke_configured.hsaco");
+  options.module_path = IREE_SV("smoke/configured");
   options.function_name = IREE_SV("id4_smoke_configured");
-  options.workgroups_x = 1;
-  options.workgroup_size_x = 64;
 
   id4_pipeline_stage_t* stage = nullptr;
   IREE_CHECK_OK(

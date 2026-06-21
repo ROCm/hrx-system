@@ -32,6 +32,46 @@ typedef struct id4_pipeline_parameter_request_t {
   iree_io_parameter_span_t span;
 } id4_pipeline_parameter_request_t;
 
+// Returns a source-to-target byte span for parameter gathers.
+static inline iree_io_parameter_span_t id4_pipeline_parameter_span(
+    uint64_t parameter_offset, iree_device_size_t buffer_offset,
+    iree_device_size_t length) {
+  iree_io_parameter_span_t span;
+  span.parameter_offset = parameter_offset;
+  span.buffer_offset = buffer_offset;
+  span.length = length;
+  return span;
+}
+
+// Returns a parameter request for gathering |key| into |span|.
+static inline id4_pipeline_parameter_request_t id4_pipeline_parameter_request(
+    iree_string_view_t key, iree_io_parameter_span_t span) {
+  id4_pipeline_parameter_request_t request;
+  request.key = key;
+  request.span = span;
+  return request;
+}
+
+// Appends a packed gather span to a parameter slab under construction.
+iree_status_t id4_pipeline_parameter_slab_pack_span(
+    iree_device_size_t byte_length, iree_device_size_t alignment,
+    iree_device_size_t* io_slab_byte_length,
+    iree_io_parameter_span_t* out_span);
+
+// Returns HAL buffer parameters for a device-local parameter slab.
+static inline iree_hal_buffer_params_t
+id4_pipeline_parameter_slab_device_local_params(
+    iree_hal_queue_affinity_t queue_affinity, iree_hal_buffer_usage_t usage,
+    iree_device_size_t min_alignment) {
+  iree_hal_buffer_params_t params = {0};
+  params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+  params.access = IREE_HAL_MEMORY_ACCESS_ALL;
+  params.usage = usage;
+  params.queue_affinity = queue_affinity;
+  params.min_alignment = min_alignment;
+  return params;
+}
+
 // Planned parameter slab populated during prepare.
 typedef struct id4_pipeline_parameter_slab_plan_t {
   // Provider scope containing all request keys in this slab.
@@ -49,6 +89,39 @@ typedef struct id4_pipeline_parameter_slab_plan_t {
   // Parameter requests in gather enumeration order.
   const id4_pipeline_parameter_request_t* requests;
 } id4_pipeline_parameter_slab_plan_t;
+
+// Returns a parameter slab plan value for |requests|.
+static inline id4_pipeline_parameter_slab_plan_t
+id4_pipeline_make_parameter_slab_plan(
+    iree_string_view_t scope, id4_pipeline_device_placement_id_t placement_id,
+    iree_hal_buffer_params_t target_params, iree_device_size_t byte_length,
+    iree_device_size_t alignment, iree_host_size_t request_count,
+    const id4_pipeline_parameter_request_t* requests) {
+  id4_pipeline_parameter_slab_plan_t plan;
+  plan.scope = scope;
+  plan.placement_id = placement_id;
+  plan.target_params = target_params;
+  plan.byte_length = byte_length;
+  plan.alignment = alignment;
+  plan.request_count = request_count;
+  plan.requests = requests;
+  return plan;
+}
+
+// Returns a device-local parameter slab plan value for |requests|.
+static inline id4_pipeline_parameter_slab_plan_t
+id4_pipeline_make_device_local_parameter_slab_plan(
+    iree_string_view_t scope, id4_pipeline_device_placement_id_t placement_id,
+    iree_hal_queue_affinity_t queue_affinity, iree_hal_buffer_usage_t usage,
+    iree_device_size_t byte_length, iree_device_size_t alignment,
+    iree_host_size_t request_count,
+    const id4_pipeline_parameter_request_t* requests) {
+  return id4_pipeline_make_parameter_slab_plan(
+      scope, placement_id,
+      id4_pipeline_parameter_slab_device_local_params(queue_affinity, usage,
+                                                      alignment),
+      byte_length, alignment, request_count, requests);
+}
 
 // State passed to the IREE parameter provider enumerator callback.
 typedef struct id4_pipeline_parameter_slab_enumerator_state_t {

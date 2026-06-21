@@ -1,10 +1,12 @@
-config.decl @id4.smoke.workgroups_x : %value: index where [range(%value, 1, 8)]
-config.decl @id4.smoke.workgroup_size_x : %value: index where [range(%value, 1, 256)]
+config.decl @id4.smoke.element_count : %value: index where [range(%value, 1, 8)]
 
 kernel.def export("id4_smoke_configured") @id4_configured_smoke() {
   %unit = index.constant 1 : index
-  %workgroups_x = config.get @id4.smoke.workgroups_x : index
-  %workgroup_size_x = config.get @id4.smoke.workgroup_size_x : index
+  %workgroup_size_x = index.constant 64 : index
+  %element_count = config.get @id4.smoke.element_count : index
+  %rounding = index.sub %workgroup_size_x, %unit : index
+  %rounded = index.add %element_count, %rounding : index
+  %workgroups_x = index.div %rounded, %workgroup_size_x : index
   kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
 } launch(%output: buffer) {
   %zero_offset = index.constant 0 : offset

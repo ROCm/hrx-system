@@ -11,16 +11,18 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
-    qwen3_vl_condition
+    qwen3_vl_prefill
   HDRS
-    "qwen3_vl_condition.h"
+    "qwen3_vl_prefill.h"
   SRCS
-    "qwen3_vl_condition.c"
+    "qwen3_vl_prefill.c"
   DEPS
     iree::base
     iree::base::internal::arena
     iree::experimental::id4::pipeline::diagnostics
     iree::experimental::id4::pipeline::kernel_cache
+    iree::experimental::id4::pipeline::kernel_library
+    iree::experimental::id4::pipeline::parameter_slab
     iree::experimental::id4::pipeline::plan
     iree::experimental::id4::pipeline::region
     iree::experimental::id4::pipeline::stage
@@ -40,6 +42,8 @@ iree_cc_library(
     iree::base::internal::arena
     iree::experimental::id4::pipeline::diagnostics
     iree::experimental::id4::pipeline::kernel_cache
+    iree::experimental::id4::pipeline::kernel_library
+    iree::experimental::id4::pipeline::parameter_slab
     iree::experimental::id4::pipeline::plan
     iree::experimental::id4::pipeline::region
     iree::experimental::id4::pipeline::stage
@@ -79,50 +83,46 @@ iree_cc_library(
     iree::experimental::id4::pipeline::diagnostics
     iree::hal
     iree::hal::drivers
+    iree::io::parameter_index
+    iree::io::parameter_index_provider
+    iree::io::parameter_provider
+    iree::io::scope_map
+    iree::tooling::parameter_util
   TESTONLY
   PUBLIC
-)
-
-iree_cc_test(
-  NAME
-    qwen3_vl_condition_test
-  SRCS
-    "qwen3_vl_condition_test.cc"
-  DEPS
-    ::qwen3_vl_condition
-    ::test_util
-    iree::base
-    iree::experimental::id4::pipeline::plan
-    iree::experimental::id4::pipeline::stage
-    iree::hal
-    iree::testing::gtest
-    iree::testing::gtest_main
 )
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_cc_test(
   NAME
-    qwen3_vl_condition_amdgpu_integration_test
+    qwen3_vl_prefill_amdgpu_integration_test
   SRCS
-    "qwen3_vl_condition_amdgpu_integration_test.cc"
+    "qwen3_vl_prefill_amdgpu_integration_test.cc"
   DATA
-    iree::experimental::id4::kernels::qwen3_vl_condition_f32.loom
+    iree::experimental::id4::kernels::qwen3_vl::linear_bf16_f32.loom
+    iree::experimental::id4::kernels::qwen3_vl::rmsnorm.loom
   DEPS
     ::hal_integration_util
-    ::qwen3_vl_condition
+    ::qwen3_vl_prefill
     iree::async
     iree::async::util::proactor_pool
     iree::base
+    iree::base::internal
+    iree::base::tooling::flags
     iree::experimental::id4::pipeline::diagnostics
     iree::experimental::id4::pipeline::kernel_cache
+    iree::experimental::id4::pipeline::kernel_library
+    iree::experimental::id4::pipeline::parameter_slab
     iree::experimental::id4::pipeline::plan
     iree::experimental::id4::pipeline::stage
     iree::hal
     iree::hal::drivers
     iree::io::file_handle
+    iree::io::parameter_provider
     iree::testing::gtest
   ARGS
-    "--loom_source=${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl_condition_f32.loom"
+    "--rmsnorm_loom_source=${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/rmsnorm.loom"
+    "--linear_loom_source=${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_f32.loom"
     "--device_uri=amdgpu://0"
     "--amdgpu_processor=gfx1100"
   LABELS
@@ -133,29 +133,13 @@ iree_cc_test(
 )
 endif()
 
-iree_cc_test(
-  NAME
-    smoke_test
-  SRCS
-    "smoke_test.cc"
-  DEPS
-    ::smoke
-    ::test_util
-    iree::base
-    iree::experimental::id4::pipeline::plan
-    iree::experimental::id4::pipeline::stage
-    iree::hal
-    iree::testing::gtest
-    iree::testing::gtest_main
-)
-
 iree_cc_binary_benchmark(
   NAME
-    qwen3_vl_condition_benchmark
+    qwen3_vl_prefill_benchmark
   SRCS
-    "qwen3_vl_condition_benchmark.cc"
+    "qwen3_vl_prefill_benchmark.cc"
   DEPS
-    ::qwen3_vl_condition
+    ::qwen3_vl_prefill
     ::test_util
     iree::base
     iree::experimental::id4::pipeline::plan
@@ -169,16 +153,19 @@ iree_cc_binary_benchmark(
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_cc_binary_benchmark(
   NAME
-    qwen3_vl_condition_amdgpu_benchmark
+    qwen3_vl_prefill_amdgpu_benchmark
   SRCS
-    "qwen3_vl_condition_amdgpu_benchmark.cc"
+    "qwen3_vl_prefill_amdgpu_benchmark.cc"
   DATA
-    iree::experimental::id4::kernels::qwen3_vl_condition_f32.loom
+    iree::experimental::id4::kernels::qwen3_vl::linear_bf16_f32.loom
+    iree::experimental::id4::kernels::qwen3_vl::rmsnorm.loom
   DEPS
     ::hal_integration_util
-    ::qwen3_vl_condition
+    ::qwen3_vl_prefill
     iree::base
+    iree::base::tooling::flags
     iree::experimental::id4::pipeline::kernel_cache
+    iree::experimental::id4::pipeline::kernel_library
     iree::experimental::id4::pipeline::plan
     iree::experimental::id4::pipeline::stage
     iree::hal
@@ -186,7 +173,8 @@ iree_cc_binary_benchmark(
     iree::testing::gbenchmark_harness
     iree::third_party::google_benchmark
   ARGS
-    "--loom_source=${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl_condition_f32.loom"
+    "--rmsnorm_loom_source=${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/rmsnorm.loom"
+    "--linear_loom_source=${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_f32.loom"
     "--device_uri=amdgpu://0"
     "--amdgpu_processor=gfx1100"
   TESTONLY

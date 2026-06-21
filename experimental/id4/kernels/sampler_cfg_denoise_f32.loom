@@ -1,20 +1,19 @@
-config.decl @id4.sampler.workgroup_size_x : %value: index where [range(%value, 1, 1024)]
 config.decl @id4.sampler.element_count : %value: index where [range(%value, 1, 1048576)]
 
 kernel.def @id4_sampler_cfg_denoise_f32() {
   %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
   %rounding = index.constant 255 : index
   %element_count = config.get @id4.sampler.element_count : index
-  %workgroup_size_x = config.get @id4.sampler.workgroup_size_x : index
   %rounded = index.add %element_count, %rounding : index
   %workgroups_x = index.div %rounded, %workgroup_size_x : index
   kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
 } launch(%cond: buffer, %uncond: buffer, %x_t: buffer, %guided_pred: buffer, %denoised: buffer, %txt_cfg: f32, %c_skip: f32, %c_out: f32) {
   %base = index.constant 0 : offset
+  %workgroup_size_x = index.constant 256 : index
   %workgroup = kernel.workgroup.id<x> : index
   %lane = kernel.workitem.id<x> : index
   %element_count = config.get @id4.sampler.element_count : index
-  %workgroup_size_x = config.get @id4.sampler.workgroup_size_x : index
   %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
   %in_bounds = index.cmp ult, %element_index, %element_count : index
 

@@ -7,13 +7,12 @@
 #ifndef EXPERIMENTAL_ID4_STAGES_HAL_INTEGRATION_UTIL_H_
 #define EXPERIMENTAL_ID4_STAGES_HAL_INTEGRATION_UTIL_H_
 
-#include <string>
-
 #include "experimental/id4/pipeline/diagnostics.h"
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
+#include "iree/io/parameter_provider.h"
 
 namespace id4::test {
 
@@ -69,9 +68,6 @@ typedef struct StageDiagnostics {
   iree_host_size_t kernel_event_count;
 } StageDiagnostics;
 
-// Returns |value| as an IREE string view.
-iree_string_view_t StringView(const std::string& value);
-
 // Returns a diagnostics sink that counts lifecycle and kernel events.
 id4_pipeline_diagnostics_sink_t DiagnosticsSink(StageDiagnostics* diagnostics);
 
@@ -79,9 +75,9 @@ id4_pipeline_diagnostics_sink_t DiagnosticsSink(StageDiagnostics* diagnostics);
 iree_status_t CreateLiveHalDevice(iree_string_view_t device_uri,
                                   LiveHalDevice* out_device);
 
-// Extracts a required --name=value style argument into |out_value|.
-bool ParseStringArgument(int argc, char** argv, const char* prefix,
-                         std::string* out_value);
+// Creates a parameter provider for |scope| from parsed --parameters flags.
+iree_status_t CreateParameterProviderFromFlags(
+    iree_string_view_t scope, iree_io_parameter_provider_t** out_provider);
 
 }  // namespace id4::test
 

@@ -170,13 +170,9 @@ static iree_status_t id4_pipeline_kernel_cache_validate_prepare_options(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "source contents are required");
   }
-  if (iree_string_view_is_empty(options->module_name)) {
+  if (iree_string_view_is_empty(options->module_path)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "module name is required");
-  }
-  if (iree_string_view_is_empty(options->executable_identifier)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "executable identifier is required");
+                            "module path is required");
   }
   if (options->config_binding_count != 0 && !options->config_bindings) {
     return iree_make_status(
@@ -289,12 +285,10 @@ static iree_status_t id4_pipeline_kernel_cache_emit_loom_diagnostics(
         .phase = phase,
         // Source identifier borrowed from the prepare options.
         .source_identifier = options->source_identifier,
-        // Module name borrowed from the prepare options.
-        .module_name = options->module_name,
+        // Module path borrowed from the prepare options.
+        .module_path = options->module_path,
         // AMDGPU processor owned by the cache.
         .amdgpu_processor = kernel_cache->amdgpu_processor,
-        // Executable identifier borrowed from the prepare options.
-        .executable_identifier = options->executable_identifier,
         // Loom artifact format is not specific to a result diagnostic.
         .loom_artifact_format = iree_string_view_empty(),
         // HAL executable format is not known for compile diagnostics.
@@ -721,8 +715,8 @@ iree_status_t id4_pipeline_kernel_cache_prepare_executable(
         .structure_size = sizeof(compile_options),
         // Target-selection extension.
         .next = &target_options,
-        // Runtime module name for diagnostics and emitted objects.
-        .module_name = loomc_string_view_from_iree(options->module_name),
+        // Runtime module path for diagnostics and emitted objects.
+        .module_name = loomc_string_view_from_iree(options->module_path),
         // Optional diagnostic artifacts requested by the caller.
         .artifact_flags = id4_pipeline_kernel_cache_compile_artifact_flags(
             options->diagnostic_artifact_flags),
@@ -797,9 +791,8 @@ iree_status_t id4_pipeline_kernel_cache_prepare_executable(
         // Request AMDGPU HSACO bytes from Loom.
         .artifact_format =
             loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO),
-        // Primary artifact identifier selected by the caller.
-        .identifier =
-            loomc_string_view_from_iree(options->executable_identifier),
+        // Empty selects the target's in-memory default artifact identifier.
+        .identifier = loomc_string_view_empty(),
         // Request the primary executable artifact.
         .artifact_flags = LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
     };
@@ -854,12 +847,10 @@ iree_status_t id4_pipeline_kernel_cache_prepare_executable(
         .phase = IREE_SV("hal.infer_format"),
         // Source identifier borrowed from the prepare options.
         .source_identifier = options->source_identifier,
-        // Module name borrowed from the prepare options.
-        .module_name = options->module_name,
+        // Module path borrowed from the prepare options.
+        .module_path = options->module_path,
         // AMDGPU processor owned by the cache.
         .amdgpu_processor = kernel_cache->amdgpu_processor,
-        // Executable identifier borrowed from the prepare options.
-        .executable_identifier = options->executable_identifier,
         // Loom primary artifact format.
         .loom_artifact_format =
             iree_string_view_from_loomc(primary_artifact->format),
@@ -915,12 +906,10 @@ iree_status_t id4_pipeline_kernel_cache_prepare_executable(
         .phase = IREE_SV("prepare"),
         // Source identifier borrowed from the prepare options.
         .source_identifier = options->source_identifier,
-        // Module name borrowed from the prepare options.
-        .module_name = options->module_name,
+        // Module path borrowed from the prepare options.
+        .module_path = options->module_path,
         // AMDGPU processor owned by the cache.
         .amdgpu_processor = kernel_cache->amdgpu_processor,
-        // Executable identifier borrowed from the prepare options.
-        .executable_identifier = options->executable_identifier,
         // Loom primary artifact format.
         .loom_artifact_format =
             iree_string_view_from_loomc(primary_artifact->format),

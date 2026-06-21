@@ -20,6 +20,39 @@ struct id4_pipeline_parameter_slab_set_t {
   iree_hal_buffer_t** buffers;
 };
 
+iree_status_t id4_pipeline_parameter_slab_pack_span(
+    iree_device_size_t byte_length, iree_device_size_t alignment,
+    iree_device_size_t* io_slab_byte_length,
+    iree_io_parameter_span_t* out_span) {
+  IREE_ASSERT_ARGUMENT(io_slab_byte_length);
+  IREE_ASSERT_ARGUMENT(out_span);
+  if (byte_length == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter span byte length must be nonzero");
+  }
+  if (alignment != 0 && !iree_device_size_is_power_of_two(alignment)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter span alignment must be a power of two");
+  }
+  const iree_device_size_t effective_alignment = alignment == 0 ? 1 : alignment;
+  iree_device_size_t buffer_offset = 0;
+  if (!iree_device_size_checked_align(*io_slab_byte_length, effective_alignment,
+                                      &buffer_offset)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "parameter span alignment overflow");
+  }
+  iree_device_size_t slab_byte_length = 0;
+  if (!iree_device_size_checked_add(buffer_offset, byte_length,
+                                    &slab_byte_length)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "parameter slab byte length overflow");
+  }
+  *io_slab_byte_length = slab_byte_length;
+  *out_span = id4_pipeline_parameter_span(/*parameter_offset=*/0, buffer_offset,
+                                          byte_length);
+  return iree_ok_status();
+}
+
 iree_status_t id4_pipeline_parameter_slab_validate(
     const id4_pipeline_parameter_slab_plan_t* slab,
     iree_host_size_t placement_count) {

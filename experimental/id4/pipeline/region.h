@@ -9,6 +9,7 @@
 
 #include <stdint.h>
 
+#include "experimental/id4/pipeline/kernel_library.h"
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "iree/hal/api.h"
@@ -135,6 +136,42 @@ typedef struct id4_pipeline_region_kernel_t {
   iree_host_size_t constant_byte_length;
 } id4_pipeline_region_kernel_t;
 
+// Loom kernel dispatch descriptor consumed by model authoring code.
+typedef struct id4_pipeline_region_loom_kernel_t {
+  // Stable specialization key for diagnostics, plans, and executable lookup.
+  iree_string_view_t specialization_key;
+  // Stable module path resolved through the kernel library.
+  iree_string_view_t module_path;
+  // Exported kernel function name inside the module.
+  iree_string_view_t function_name;
+  // HAL executable required when the builder is in RECORD mode.
+  iree_hal_executable_t* executable;
+  // HAL executable function required when the builder is in RECORD mode.
+  iree_hal_executable_function_t function;
+  // Exact tensor binding count expected by the kernel ABI.
+  iree_host_size_t binding_count;
+  // Exact constant byte length expected by the kernel ABI.
+  iree_host_size_t constant_byte_length;
+  // Number of Loom config bindings used for this specialization.
+  iree_host_size_t config_binding_count;
+  // Loom config bindings borrowed for the dispatch call.
+  const id4_pipeline_kernel_config_binding_t* config_bindings;
+} id4_pipeline_region_loom_kernel_t;
+
+// Planned Loom kernel specialization authored into a region.
+typedef struct id4_pipeline_region_kernel_plan_t {
+  // Stable specialization key.
+  iree_string_view_t specialization_key;
+  // Stable module path resolved through the kernel library.
+  iree_string_view_t module_path;
+  // Exported kernel function name inside the module.
+  iree_string_view_t function_name;
+  // Number of copied Loom config bindings.
+  iree_host_size_t config_binding_count;
+  // Copied Loom config bindings.
+  const id4_pipeline_kernel_config_binding_t* config_bindings;
+} id4_pipeline_region_kernel_plan_t;
+
 // Tensor binding passed to one region dispatch.
 typedef struct id4_pipeline_region_dispatch_binding_t {
   // Tensor bound to the dispatch argument.
@@ -251,6 +288,15 @@ void id4_pipeline_region_builder_statistics(
     const id4_pipeline_region_builder_t* builder,
     id4_pipeline_region_statistics_t* out_statistics);
 
+// Returns the number of authored Loom kernel specializations.
+iree_host_size_t id4_pipeline_region_builder_kernel_count(
+    const id4_pipeline_region_builder_t* builder);
+
+// Returns authored Loom kernel specialization |index| or NULL when out of
+// range.
+const id4_pipeline_region_kernel_plan_t* id4_pipeline_region_builder_kernel_at(
+    const id4_pipeline_region_builder_t* builder, iree_host_size_t index);
+
 // Acquires an uninitialized local transient tensor from the region slab.
 iree_status_t id4_pipeline_region_acquire_tensor(
     id4_pipeline_region_builder_t* builder,
@@ -271,6 +317,15 @@ iree_status_t id4_pipeline_region_release_tensor(
 iree_status_t id4_pipeline_region_dispatch(
     id4_pipeline_region_builder_t* builder,
     const id4_pipeline_region_kernel_t* kernel,
+    iree_hal_dispatch_config_t dispatch_config,
+    iree_const_byte_span_t constants, iree_host_size_t binding_count,
+    const id4_pipeline_region_dispatch_binding_t* bindings,
+    iree_hal_dispatch_flags_t flags);
+
+// Authors a Loom dispatch and records the specialization in the region plan.
+iree_status_t id4_pipeline_region_dispatch_loom(
+    id4_pipeline_region_builder_t* builder,
+    const id4_pipeline_region_loom_kernel_t* kernel,
     iree_hal_dispatch_config_t dispatch_config,
     iree_const_byte_span_t constants, iree_host_size_t binding_count,
     const id4_pipeline_region_dispatch_binding_t* bindings,

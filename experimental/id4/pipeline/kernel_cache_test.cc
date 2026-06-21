@@ -57,8 +57,7 @@ TEST(KernelCacheTest, PrepareRequiresRealExecutableCache) {
   prepare_options.structure_size = sizeof(prepare_options);
   prepare_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
   prepare_options.source_identifier = IREE_SV("kernel.loom");
-  prepare_options.module_name = IREE_SV("kernel");
-  prepare_options.executable_identifier = IREE_SV("kernel.hsaco");
+  prepare_options.module_path = IREE_SV("test/kernel");
   id4_pipeline_diagnostics_sink_t diagnostics_sink;
   id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
   prepare_options.diagnostics_sink = &diagnostics_sink;

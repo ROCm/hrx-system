@@ -40,6 +40,22 @@ schedule files as runtime machinery.
 The public C API should own loading, preparation, execution, progress sinks,
 diagnostics sinks, and teardown. The CLI and any server wrapper stay thin.
 
+Stage boundaries are coarse scheduling contracts. A stage should correspond to
+a user-visible or reference-comparable unit such as Qwen3-VL prefill/forward,
+decode, a sampler loop, VAE decode, or a full model slice. Internal kernels,
+layer fragments, condition epilogues, RMSNorms, linears, and attention
+projections belong inside a stage; they get Loom `check.case` and
+`check.benchmark` coverage, not standalone C stage lifecycles or HAL
+integration tests.
+
+Loom config values describe model, tensor, dtype, and shape facts. Launch
+geometry is not public stage configuration and should not be passed as generic
+config knobs. Put workgroup-count and workgroup-size arithmetic in the
+`kernel.launch.config` region and mirror it in C only where the current runtime
+cannot yet execute that region directly. That mirror must stay local to the
+dispatch authoring code so future VM-backed launch evaluation can replace it
+without changing stage APIs.
+
 Every struct field added in C headers or runtime structs needs its own adjacent
 field comment. Use full words in identifiers unless an external API forces a
 short spelling.

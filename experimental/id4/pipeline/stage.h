@@ -8,6 +8,7 @@
 #define EXPERIMENTAL_ID4_PIPELINE_STAGE_H_
 
 #include "experimental/id4/pipeline/diagnostics.h"
+#include "experimental/id4/pipeline/kernel_library.h"
 #include "experimental/id4/pipeline/plan.h"
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
@@ -70,6 +71,8 @@ typedef struct id4_pipeline_stage_prepare_options_t {
   const void* next;
   // Parameter provider used to populate planned parameter slabs.
   iree_io_parameter_provider_t* parameter_provider;
+  // Kernel library used to resolve planned Loom module paths.
+  id4_pipeline_kernel_library_t* kernel_library;
   // Semaphores that parameter loading and command-buffer preparation wait on.
   iree_hal_semaphore_list_t wait_semaphore_list;
   // Semaphores signaled when parameter loading and preparation complete.

@@ -8,6 +8,7 @@
 #define EXPERIMENTAL_ID4_PIPELINE_PLAN_H_
 
 #include "experimental/id4/pipeline/diagnostics.h"
+#include "experimental/id4/pipeline/kernel_library.h"
 #include "experimental/id4/pipeline/parameter_slab.h"
 #include "experimental/id4/pipeline/region.h"
 #include "iree/base/api.h"
@@ -31,12 +32,7 @@ typedef struct id4_pipeline_device_placement_t {
 } id4_pipeline_device_placement_t;
 
 // Config key/value pair used to specialize a planned kernel.
-typedef struct id4_pipeline_plan_config_binding_t {
-  // Config key consumed by the kernel compiler.
-  iree_string_view_t key;
-  // Config value consumed by the kernel compiler.
-  iree_string_view_t value;
-} id4_pipeline_plan_config_binding_t;
+typedef id4_pipeline_kernel_config_binding_t id4_pipeline_plan_config_binding_t;
 
 // Planned memory slab outside of parameter slab storage.
 typedef struct id4_pipeline_memory_slab_plan_t {
@@ -60,12 +56,8 @@ typedef struct id4_pipeline_memory_slab_plan_t {
 typedef struct id4_pipeline_kernel_plan_t {
   // Stable kernel selection key.
   iree_string_view_t specialization_key;
-  // Source identifier passed to the kernel compiler.
-  iree_string_view_t source_identifier;
-  // Runtime module name passed to the kernel compiler.
-  iree_string_view_t module_name;
-  // HAL executable identifier assigned to the emitted artifact.
-  iree_string_view_t executable_identifier;
+  // Stable module path resolved through the kernel library.
+  iree_string_view_t module_path;
   // Exported HAL function name resolved during preparation.
   iree_string_view_t function_name;
   // Plan-local placement identifier.

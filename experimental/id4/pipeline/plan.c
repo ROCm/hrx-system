@@ -106,9 +106,7 @@ static void id4_pipeline_plan_destroy(id4_pipeline_plan_t* plan) {
     }
     iree_allocator_free(host_allocator, config_bindings);
     id4_pipeline_string_release(kernel->function_name, host_allocator);
-    id4_pipeline_string_release(kernel->executable_identifier, host_allocator);
-    id4_pipeline_string_release(kernel->module_name, host_allocator);
-    id4_pipeline_string_release(kernel->source_identifier, host_allocator);
+    id4_pipeline_string_release(kernel->module_path, host_allocator);
     id4_pipeline_string_release(kernel->specialization_key, host_allocator);
   }
   iree_allocator_free(host_allocator, plan->kernels);
@@ -340,9 +338,7 @@ static iree_status_t id4_pipeline_plan_copy_kernels(
           IREE_STATUS_INVALID_ARGUMENT,
           "kernel %" PRIhsz " specialization key is required", i);
     }
-    if (iree_string_view_is_empty(source->source_identifier) ||
-        iree_string_view_is_empty(source->module_name) ||
-        iree_string_view_is_empty(source->executable_identifier) ||
+    if (iree_string_view_is_empty(source->module_path) ||
         iree_string_view_is_empty(source->function_name)) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "kernel %.*s identity fields are required",
@@ -356,14 +352,8 @@ static iree_status_t id4_pipeline_plan_copy_kernels(
     IREE_RETURN_IF_ERROR(id4_pipeline_string_clone(
         source->specialization_key, plan->host_allocator,
         &target->specialization_key));
-    IREE_RETURN_IF_ERROR(id4_pipeline_string_clone(source->source_identifier,
-                                                   plan->host_allocator,
-                                                   &target->source_identifier));
     IREE_RETURN_IF_ERROR(id4_pipeline_string_clone(
-        source->module_name, plan->host_allocator, &target->module_name));
-    IREE_RETURN_IF_ERROR(id4_pipeline_string_clone(
-        source->executable_identifier, plan->host_allocator,
-        &target->executable_identifier));
+        source->module_path, plan->host_allocator, &target->module_path));
     IREE_RETURN_IF_ERROR(id4_pipeline_string_clone(
         source->function_name, plan->host_allocator, &target->function_name));
     IREE_RETURN_IF_ERROR(
@@ -919,17 +909,9 @@ iree_status_t id4_pipeline_plan_format_json(const id4_pipeline_plan_t* plan,
     IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_json_string(
         builder, kernel->specialization_key));
     IREE_RETURN_IF_ERROR(
-        iree_string_builder_append_cstring(builder, ",\"source_identifier\":"));
-    IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_json_string(
-        builder, kernel->source_identifier));
+        iree_string_builder_append_cstring(builder, ",\"module_path\":"));
     IREE_RETURN_IF_ERROR(
-        iree_string_builder_append_cstring(builder, ",\"module_name\":"));
-    IREE_RETURN_IF_ERROR(
-        id4_pipeline_plan_append_json_string(builder, kernel->module_name));
-    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
-        builder, ",\"executable_identifier\":"));
-    IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_json_string(
-        builder, kernel->executable_identifier));
+        id4_pipeline_plan_append_json_string(builder, kernel->module_path));
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_cstring(builder, ",\"function_name\":"));
     IREE_RETURN_IF_ERROR(

@@ -31,10 +31,24 @@ iree_cc_library(
     "kernel_cache.c"
   DEPS
     ::diagnostics
+    ::kernel_library
     iree::base
     iree::hal
     loom::binding::c::loomc
     loom::binding::c::target::amdgpu
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
+    kernel_library
+  HDRS
+    "kernel_library.h"
+  SRCS
+    "kernel_library.c"
+  DEPS
+    iree::base
+    iree::base::internal
   PUBLIC
 )
 
@@ -62,6 +76,7 @@ iree_cc_library(
     "plan.c"
   DEPS
     ::diagnostics
+    ::kernel_library
     ::parameter_slab
     ::region
     iree::base
@@ -77,6 +92,7 @@ iree_cc_library(
   SRCS
     "region.c"
   DEPS
+    ::kernel_library
     iree::base
     iree::base::internal::arena
     iree::hal
@@ -92,6 +108,7 @@ iree_cc_library(
     "stage.c"
   DEPS
     ::diagnostics
+    ::kernel_library
     ::parameter_slab
     ::plan
     iree::base
@@ -107,6 +124,19 @@ iree_cc_test(
     "kernel_cache_test.cc"
   DEPS
     ::kernel_cache
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    parameter_slab_test
+  SRCS
+    "parameter_slab_test.cc"
+  DEPS
+    ::parameter_slab
     iree::base
     iree::hal
     iree::testing::gtest

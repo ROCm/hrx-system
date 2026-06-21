@@ -7,6 +7,7 @@
 #include "experimental/id4/pipeline/stage.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -242,6 +243,50 @@ static void TestParameterProviderInitialize(
   provider->last_target_byte_length = 0;
 }
 
+static iree_status_t CreateSplatParameterIndexProvider(
+    iree_string_view_t scope, iree_string_view_t key, uint64_t length,
+    iree_const_byte_span_t pattern,
+    iree_io_parameter_provider_t** out_provider) {
+  IREE_ASSERT_ARGUMENT(out_provider);
+  *out_provider = NULL;
+  if (iree_string_view_is_empty(key)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "splat parameter key is required");
+  }
+  if (length == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "splat parameter byte length must be nonzero");
+  }
+  if (pattern.data_length == 0 ||
+      pattern.data_length > IREE_IO_PARAMETER_MAX_SPLAT_PATTERN_LENGTH) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "splat parameter pattern length %" PRIhsz
+                            " is outside the supported range",
+                            pattern.data_length);
+  }
+
+  iree_io_parameter_index_t* index = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_io_parameter_index_create(iree_allocator_system(), &index));
+  iree_io_parameter_index_entry_t entry;
+  memset(&entry, 0, sizeof(entry));
+  entry.key = key;
+  entry.length = length;
+  entry.type = IREE_IO_PARAMETER_INDEX_ENTRY_STORAGE_TYPE_SPLAT;
+  entry.storage.splat.pattern_length =
+      static_cast<uint8_t>(pattern.data_length);
+  std::memcpy(entry.storage.splat.pattern, pattern.data, pattern.data_length);
+  iree_status_t status = iree_io_parameter_index_add(index, &entry);
+  if (iree_status_is_ok(status)) {
+    status = iree_io_parameter_index_provider_create(
+        scope, index,
+        IREE_IO_PARAMETER_INDEX_PROVIDER_DEFAULT_MAX_CONCURRENT_OPERATIONS,
+        iree_allocator_system(), out_provider);
+  }
+  iree_io_parameter_index_release(index);
+  return status;
+}
+
 static iree_status_t CaptureDiagnostic(
     void* user_data, const id4_pipeline_diagnostic_event_t* event) {
   id4_pipeline_test_diagnostics_log_t* log =
@@ -301,23 +346,17 @@ static iree_status_t SmokeStagePlan(
                             "smoke stage must be loaded before planning");
   }
 
-  id4_pipeline_parameter_request_t request;
-  memset(&request, 0, sizeof(request));
-  request.key = IREE_SV("smoke.weight");
-  request.span.length = 16;
+  id4_pipeline_parameter_request_t request = id4_pipeline_parameter_request(
+      IREE_SV("smoke.weight"),
+      id4_pipeline_parameter_span(/*parameter_offset=*/0,
+                                  /*buffer_offset=*/0, /*length=*/16));
 
-  id4_pipeline_parameter_slab_plan_t slab;
-  memset(&slab, 0, sizeof(slab));
-  slab.scope = IREE_SV("smoke");
-  slab.placement_id = 0;
-  slab.target_params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-  slab.target_params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER |
-                             IREE_HAL_BUFFER_USAGE_MAPPING |
-                             IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE_READ;
-  slab.byte_length = 16;
-  slab.alignment = 16;
-  slab.request_count = 1;
-  slab.requests = &request;
+  id4_pipeline_parameter_slab_plan_t slab =
+      id4_pipeline_make_device_local_parameter_slab_plan(
+          IREE_SV("smoke"), /*placement_id=*/0, options->queue_affinity,
+          IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING |
+              IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE_READ,
+          /*byte_length=*/16, /*alignment=*/16, /*request_count=*/1, &request);
 
   id4_pipeline_device_placement_t placement;
   memset(&placement, 0, sizeof(placement));
@@ -521,6 +560,8 @@ TEST(PipelineStage, PlanCopiesPlacementAndParameterSlabMetadata) {
   EXPECT_EQ(ToString(slab->scope), "smoke");
   EXPECT_EQ(slab->byte_length, 16u);
   EXPECT_EQ(slab->alignment, 16u);
+  EXPECT_EQ(slab->target_params.queue_affinity, IREE_HAL_QUEUE_AFFINITY_ANY);
+  EXPECT_EQ(slab->target_params.min_alignment, 16u);
   EXPECT_EQ(slab->request_count, 1u);
 
   id4_pipeline_parameter_slab_enumerator_state_t enumerator_state;
@@ -542,7 +583,6 @@ TEST(PipelineStage, PlanCopiesPlacementAndParameterSlabMetadata) {
   EXPECT_NE(json.find("\"stage\":\"smoke\""), std::string::npos);
   EXPECT_NE(json.find("\"parameter_slabs\""), std::string::npos);
   EXPECT_NE(json.find("\"target_params\""), std::string::npos);
-  EXPECT_NE(json.find("\"queue_affinity\":0"), std::string::npos);
   EXPECT_NE(json.find("\"smoke.weight\""), std::string::npos);
   iree_string_builder_deinitialize(&builder);
 
@@ -1071,27 +1111,12 @@ TEST(PipelineStage, PrepareLoadsParameterSlabsFromParameterIndexProvider) {
   id4_pipeline_plan_t* plan = NULL;
   IREE_ASSERT_OK(id4_pipeline_stage_plan(stage, &plan_options, &plan));
 
-  iree_io_parameter_index_t* index = NULL;
-  IREE_ASSERT_OK(
-      iree_io_parameter_index_create(iree_allocator_system(), &index));
-  iree_io_parameter_index_entry_t entry;
-  memset(&entry, 0, sizeof(entry));
-  entry.key = IREE_SV("smoke.weight");
-  entry.length = 16;
-  entry.type = IREE_IO_PARAMETER_INDEX_ENTRY_STORAGE_TYPE_SPLAT;
-  entry.storage.splat.pattern_length = 4;
-  entry.storage.splat.pattern[0] = 0x11;
-  entry.storage.splat.pattern[1] = 0x22;
-  entry.storage.splat.pattern[2] = 0x33;
-  entry.storage.splat.pattern[3] = 0x44;
-  IREE_ASSERT_OK(iree_io_parameter_index_add(index, &entry));
-
   iree_io_parameter_provider_t* provider = NULL;
-  IREE_ASSERT_OK(iree_io_parameter_index_provider_create(
-      IREE_SV("smoke"), index,
-      IREE_IO_PARAMETER_INDEX_PROVIDER_DEFAULT_MAX_CONCURRENT_OPERATIONS,
-      iree_allocator_system(), &provider));
-  iree_io_parameter_index_release(index);
+  static const uint8_t kWeightPattern[] = {0x11, 0x22, 0x33, 0x44};
+  IREE_ASSERT_OK(CreateSplatParameterIndexProvider(
+      IREE_SV("smoke"), IREE_SV("smoke.weight"), /*length=*/16,
+      iree_make_const_byte_span(kWeightPattern, sizeof(kWeightPattern)),
+      &provider));
 
   iree_hal_device_t* device =
       iree_hal_device_group_device_at(id4_pipeline_plan_device_group(plan), 0);

@@ -1,10 +1,9 @@
 config.decl @id4.qwen3_vl.condition.hidden_row_count : %value: index where [range(%value, 1, 65536)]
 config.decl @id4.qwen3_vl.condition.token_count : %value: index where [range(%value, 1, 65536)]
-config.decl @id4.qwen3_vl.condition.workgroup_size_x : %value: index where [range(%value, 1, 1024)]
 
 kernel.def export("id4_qwen3_vl_condition_apply_token_weights_f32") @id4_qwen3_vl_condition_apply_token_weights_f32() {
   %unit = index.constant 1 : index
-  %workgroup_size_x = config.get @id4.qwen3_vl.condition.workgroup_size_x : index
+  %workgroup_size_x = index.constant 256 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
 } launch(%selected_hidden_states: buffer, %token_weights: buffer, %condition: buffer, %stats: buffer) {
   %base = index.constant 0 : offset
@@ -13,7 +12,7 @@ kernel.def export("id4_qwen3_vl_condition_apply_token_weights_f32") @id4_qwen3_v
   %lane = kernel.workitem.id<x> : index
   %hidden_row_count = config.get @id4.qwen3_vl.condition.hidden_row_count : index
   %token_count = config.get @id4.qwen3_vl.condition.token_count : index
-  %workgroup_size_x = config.get @id4.qwen3_vl.condition.workgroup_size_x : index
+  %workgroup_size_x = index.constant 256 : index
   %element_count = index.mul %hidden_row_count, %token_count : index
   %zero_f32 = scalar.constant 0.0 : f32
 
@@ -56,9 +55,9 @@ kernel.def export("id4_qwen3_vl_condition_apply_token_weights_f32") @id4_qwen3_v
 
 kernel.def export("id4_qwen3_vl_condition_normalize_token_weights_f32") @id4_qwen3_vl_condition_normalize_token_weights_f32() {
   %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
   %hidden_row_count = config.get @id4.qwen3_vl.condition.hidden_row_count : index
   %token_count = config.get @id4.qwen3_vl.condition.token_count : index
-  %workgroup_size_x = config.get @id4.qwen3_vl.condition.workgroup_size_x : index
   %element_count = index.mul %hidden_row_count, %token_count : index
   %rounding = index.sub %workgroup_size_x, %unit : index
   %rounded = index.add %element_count, %rounding : index
@@ -74,7 +73,7 @@ kernel.def export("id4_qwen3_vl_condition_normalize_token_weights_f32") @id4_qwe
   %lane = kernel.workitem.id<x> : index
   %hidden_row_count = config.get @id4.qwen3_vl.condition.hidden_row_count : index
   %token_count = config.get @id4.qwen3_vl.condition.token_count : index
-  %workgroup_size_x = config.get @id4.qwen3_vl.condition.workgroup_size_x : index
+  %workgroup_size_x = index.constant 256 : index
   %element_count = index.mul %hidden_row_count, %token_count : index
   %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
   %in_bounds = index.cmp ult, %element_index, %element_count : index

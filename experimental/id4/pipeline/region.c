@@ -67,6 +67,12 @@ struct id4_pipeline_region_builder_t {
   iree_host_size_t tensor_record_count;
   // Allocated tensor record capacity.
   iree_host_size_t tensor_record_capacity;
+  // Authored Loom kernel specialization records allocated from the arena.
+  id4_pipeline_region_kernel_plan_t* kernel_plans;
+  // Number of authored Loom kernel specialization records.
+  iree_host_size_t kernel_plan_count;
+  // Allocated Loom kernel specialization record capacity.
+  iree_host_size_t kernel_plan_capacity;
   // Reusable local slab ranges allocated from the arena.
   id4_pipeline_region_free_range_t* free_ranges;
   // Number of reusable local slab ranges.
@@ -235,6 +241,15 @@ static iree_status_t id4_pipeline_region_reserve_tensor_records(
                                capacity, sizeof(builder->tensor_records[0]),
                                &builder->tensor_record_capacity,
                                (void**)&builder->tensor_records);
+}
+
+static iree_status_t id4_pipeline_region_reserve_kernel_plans(
+    id4_pipeline_region_builder_t* builder, iree_host_size_t capacity) {
+  if (capacity <= builder->kernel_plan_capacity) return iree_ok_status();
+  return iree_arena_grow_array(&builder->arena, builder->kernel_plan_count,
+                               capacity, sizeof(builder->kernel_plans[0]),
+                               &builder->kernel_plan_capacity,
+                               (void**)&builder->kernel_plans);
 }
 
 static iree_status_t id4_pipeline_region_reserve_free_ranges(
@@ -545,6 +560,17 @@ void id4_pipeline_region_builder_statistics(
   *out_statistics = builder->statistics;
 }
 
+iree_host_size_t id4_pipeline_region_builder_kernel_count(
+    const id4_pipeline_region_builder_t* builder) {
+  return builder ? builder->kernel_plan_count : 0;
+}
+
+const id4_pipeline_region_kernel_plan_t* id4_pipeline_region_builder_kernel_at(
+    const id4_pipeline_region_builder_t* builder, iree_host_size_t index) {
+  if (!builder || index >= builder->kernel_plan_count) return NULL;
+  return &builder->kernel_plans[index];
+}
+
 iree_status_t id4_pipeline_region_acquire_tensor(
     id4_pipeline_region_builder_t* builder,
     const id4_pipeline_tensor_layout_t* layout,
@@ -713,6 +739,69 @@ static void id4_pipeline_region_apply_dispatch_binding_access(
   }
 }
 
+static iree_status_t id4_pipeline_region_collect_dispatch_records(
+    id4_pipeline_region_builder_t* builder,
+    const id4_pipeline_region_kernel_t* kernel, iree_host_size_t binding_count,
+    const id4_pipeline_region_dispatch_binding_t* bindings,
+    id4_pipeline_region_tensor_record_t*** out_records) {
+  *out_records = NULL;
+  if (binding_count != 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        &builder->arena, binding_count, sizeof((*out_records)[0]),
+        (void**)out_records));
+  }
+  for (iree_host_size_t i = 0; i < binding_count; ++i) {
+    IREE_RETURN_IF_ERROR(id4_pipeline_region_validate_dispatch_binding(
+        builder, kernel, &bindings[i], i, &(*out_records)[i]));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_region_record_dispatch(
+    id4_pipeline_region_builder_t* builder,
+    const id4_pipeline_region_kernel_t* kernel,
+    iree_hal_dispatch_config_t dispatch_config,
+    iree_const_byte_span_t constants, iree_host_size_t binding_count,
+    const id4_pipeline_region_dispatch_binding_t* bindings,
+    iree_hal_dispatch_flags_t flags) {
+  if (builder->mode != ID4_PIPELINE_REGION_BUILDER_MODE_RECORD) {
+    return iree_ok_status();
+  }
+
+  iree_hal_buffer_ref_t* hal_bindings = NULL;
+  if (binding_count != 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        &builder->arena, binding_count, sizeof(hal_bindings[0]),
+        (void**)&hal_bindings));
+  }
+  for (iree_host_size_t i = 0; i < binding_count; ++i) {
+    hal_bindings[i] = iree_hal_make_indirect_buffer_ref(
+        bindings[i].tensor.binding_slot, bindings[i].tensor.offset,
+        bindings[i].tensor.length);
+  }
+  iree_hal_buffer_ref_list_t hal_binding_list = {
+      // Number of HAL buffer references.
+      .count = binding_count,
+      // HAL buffer references allocated from the builder arena.
+      .values = hal_bindings,
+  };
+  return iree_hal_command_buffer_dispatch(
+      builder->command_buffer, kernel->executable, kernel->function,
+      dispatch_config, constants, hal_binding_list, flags);
+}
+
+static void id4_pipeline_region_commit_dispatch(
+    id4_pipeline_region_builder_t* builder, iree_host_size_t binding_count,
+    id4_pipeline_region_tensor_record_t** records,
+    const id4_pipeline_region_dispatch_binding_t* bindings) {
+  for (iree_host_size_t i = 0; i < binding_count; ++i) {
+    id4_pipeline_region_apply_dispatch_binding_access(builder, records[i],
+                                                      bindings[i].access);
+  }
+  ++builder->statistics.operation_count;
+  ++builder->statistics.dispatch_count;
+}
+
 static iree_status_t id4_pipeline_region_validate_kernel(
     const id4_pipeline_region_builder_t* builder,
     const id4_pipeline_region_kernel_t* kernel,
@@ -762,6 +851,93 @@ static iree_status_t id4_pipeline_region_validate_kernel(
   return iree_ok_status();
 }
 
+static iree_status_t id4_pipeline_region_validate_loom_kernel(
+    const id4_pipeline_region_builder_t* builder,
+    const id4_pipeline_region_loom_kernel_t* kernel,
+    iree_const_byte_span_t constants, iree_host_size_t binding_count,
+    const id4_pipeline_region_dispatch_binding_t* bindings) {
+  if (!kernel) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "region Loom dispatch kernel is required");
+  }
+  if (iree_string_view_is_empty(kernel->specialization_key)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "region Loom dispatch specialization key is "
+                            "required");
+  }
+  if (iree_string_view_is_empty(kernel->module_path)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "region Loom dispatch module path is required");
+  }
+  if (iree_string_view_is_empty(kernel->function_name)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "region Loom dispatch function name is required");
+  }
+  if (kernel->config_binding_count != 0 && !kernel->config_bindings) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "region Loom dispatch config bindings are required when count is "
+        "nonzero");
+  }
+  for (iree_host_size_t i = 0; i < kernel->config_binding_count; ++i) {
+    if (iree_string_view_is_empty(kernel->config_bindings[i].key)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "region Loom dispatch config binding %" PRIhsz " key is required", i);
+    }
+    if (iree_string_view_is_empty(kernel->config_bindings[i].value)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "region Loom dispatch config binding %" PRIhsz
+                              " value is required",
+                              i);
+    }
+  }
+  id4_pipeline_region_kernel_t hal_kernel;
+  memset(&hal_kernel, 0, sizeof(hal_kernel));
+  hal_kernel.name = kernel->function_name;
+  hal_kernel.executable = kernel->executable;
+  hal_kernel.function = kernel->function;
+  hal_kernel.binding_count = kernel->binding_count;
+  hal_kernel.constant_byte_length = kernel->constant_byte_length;
+  return id4_pipeline_region_validate_kernel(builder, &hal_kernel, constants,
+                                             binding_count, bindings);
+}
+
+static iree_status_t id4_pipeline_region_append_loom_kernel_plan(
+    id4_pipeline_region_builder_t* builder,
+    const id4_pipeline_region_loom_kernel_t* kernel) {
+  IREE_RETURN_IF_ERROR(id4_pipeline_region_reserve_kernel_plans(
+      builder, builder->kernel_plan_count + 1));
+  id4_pipeline_region_kernel_plan_t* target =
+      &builder->kernel_plans[builder->kernel_plan_count];
+  memset(target, 0, sizeof(*target));
+  IREE_RETURN_IF_ERROR(id4_pipeline_region_copy_string(
+      builder, kernel->specialization_key, &target->specialization_key));
+  IREE_RETURN_IF_ERROR(id4_pipeline_region_copy_string(
+      builder, kernel->module_path, &target->module_path));
+  IREE_RETURN_IF_ERROR(id4_pipeline_region_copy_string(
+      builder, kernel->function_name, &target->function_name));
+  target->config_binding_count = kernel->config_binding_count;
+  if (kernel->config_binding_count != 0) {
+    id4_pipeline_kernel_config_binding_t* config_bindings = NULL;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        &builder->arena, kernel->config_binding_count,
+        sizeof(config_bindings[0]), (void**)&config_bindings));
+    memset(config_bindings, 0,
+           kernel->config_binding_count * sizeof(config_bindings[0]));
+    target->config_bindings = config_bindings;
+    for (iree_host_size_t i = 0; i < kernel->config_binding_count; ++i) {
+      IREE_RETURN_IF_ERROR(id4_pipeline_region_copy_string(
+          builder, kernel->config_bindings[i].key, &config_bindings[i].key));
+      IREE_RETURN_IF_ERROR(id4_pipeline_region_copy_string(
+          builder, kernel->config_bindings[i].value,
+          &config_bindings[i].value));
+    }
+  }
+  ++builder->kernel_plan_count;
+  return iree_ok_status();
+}
+
 iree_status_t id4_pipeline_region_dispatch(
     id4_pipeline_region_builder_t* builder,
     const id4_pipeline_region_kernel_t* kernel,
@@ -774,44 +950,45 @@ iree_status_t id4_pipeline_region_dispatch(
       builder, kernel, constants, binding_count, bindings));
 
   id4_pipeline_region_tensor_record_t** records = NULL;
-  if (binding_count != 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        &builder->arena, binding_count, sizeof(records[0]), (void**)&records));
-  }
-  for (iree_host_size_t i = 0; i < binding_count; ++i) {
-    IREE_RETURN_IF_ERROR(id4_pipeline_region_validate_dispatch_binding(
-        builder, kernel, &bindings[i], i, &records[i]));
-  }
+  IREE_RETURN_IF_ERROR(id4_pipeline_region_collect_dispatch_records(
+      builder, kernel, binding_count, bindings, &records));
+  IREE_RETURN_IF_ERROR(id4_pipeline_region_record_dispatch(
+      builder, kernel, dispatch_config, constants, binding_count, bindings,
+      flags));
+  id4_pipeline_region_commit_dispatch(builder, binding_count, records,
+                                      bindings);
+  return iree_ok_status();
+}
 
-  if (builder->mode == ID4_PIPELINE_REGION_BUILDER_MODE_RECORD) {
-    iree_hal_buffer_ref_t* hal_bindings = NULL;
-    if (binding_count != 0) {
-      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-          &builder->arena, binding_count, sizeof(hal_bindings[0]),
-          (void**)&hal_bindings));
-    }
-    for (iree_host_size_t i = 0; i < binding_count; ++i) {
-      hal_bindings[i] = iree_hal_make_indirect_buffer_ref(
-          bindings[i].tensor.binding_slot, bindings[i].tensor.offset,
-          bindings[i].tensor.length);
-    }
-    iree_hal_buffer_ref_list_t hal_binding_list = {
-        // Number of HAL buffer references.
-        .count = binding_count,
-        // HAL buffer references allocated from the builder arena.
-        .values = hal_bindings,
-    };
-    IREE_RETURN_IF_ERROR(iree_hal_command_buffer_dispatch(
-        builder->command_buffer, kernel->executable, kernel->function,
-        dispatch_config, constants, hal_binding_list, flags));
-  }
+iree_status_t id4_pipeline_region_dispatch_loom(
+    id4_pipeline_region_builder_t* builder,
+    const id4_pipeline_region_loom_kernel_t* kernel,
+    iree_hal_dispatch_config_t dispatch_config,
+    iree_const_byte_span_t constants, iree_host_size_t binding_count,
+    const id4_pipeline_region_dispatch_binding_t* bindings,
+    iree_hal_dispatch_flags_t flags) {
+  IREE_ASSERT_ARGUMENT(builder);
+  IREE_RETURN_IF_ERROR(id4_pipeline_region_validate_loom_kernel(
+      builder, kernel, constants, binding_count, bindings));
 
-  for (iree_host_size_t i = 0; i < binding_count; ++i) {
-    id4_pipeline_region_apply_dispatch_binding_access(builder, records[i],
-                                                      bindings[i].access);
-  }
-  ++builder->statistics.operation_count;
-  ++builder->statistics.dispatch_count;
+  id4_pipeline_region_kernel_t hal_kernel;
+  memset(&hal_kernel, 0, sizeof(hal_kernel));
+  hal_kernel.name = kernel->function_name;
+  hal_kernel.executable = kernel->executable;
+  hal_kernel.function = kernel->function;
+  hal_kernel.binding_count = kernel->binding_count;
+  hal_kernel.constant_byte_length = kernel->constant_byte_length;
+
+  id4_pipeline_region_tensor_record_t** records = NULL;
+  IREE_RETURN_IF_ERROR(id4_pipeline_region_collect_dispatch_records(
+      builder, &hal_kernel, binding_count, bindings, &records));
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_region_append_loom_kernel_plan(builder, kernel));
+  IREE_RETURN_IF_ERROR(id4_pipeline_region_record_dispatch(
+      builder, &hal_kernel, dispatch_config, constants, binding_count, bindings,
+      flags));
+  id4_pipeline_region_commit_dispatch(builder, binding_count, records,
+                                      bindings);
   return iree_ok_status();
 }
 

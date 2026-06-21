@@ -114,8 +114,22 @@ The target product surface is a C library plus thin applications around it:
 
 The shared stage lifecycle should separate static model loading, deterministic
 planning, prepared executable bundles, and asynchronous issue. That boundary is
-the contract for the C API, diagnostics, memory planning, stage benchmarks, and
-the first Qwen3-VL conditioning and forward-stage implementations.
+the contract for the C API, diagnostics, memory planning, and stage benchmarks.
+Stages are coarse user-visible scheduling units, not internal kernel or layer
+fragments: each stage boundary implies queue submissions, memory scopes,
+readiness edges, and benchmark/reporting semantics that should be notable when
+compared against external references. Qwen3-VL prefill/forward, decode,
+sampler loops, VAE decode, and full model slices are plausible stages;
+condition epilogues, RMSNorms, linears, attention projections, and fused layer
+fragments are kernel families authored inside those stages.
+
+Kernel configuration should describe model and tensor facts such as token
+counts, hidden sizes, dtype lanes, layout choices, and optional feature paths.
+Launch geometry belongs in Loom launch-config regions. Until the C runtime can
+execute those regions through the VM, stage authoring code may mirror the same
+workgroup-count and workgroup-size arithmetic locally when recording HAL
+dispatches, but that mirror is not part of the stage API or plan
+configuration.
 
 The CPU should eventually own only prompt ingestion, tokenization, high-level
 request control, and final result delivery. The diffusion loop, CFG,
@@ -158,9 +172,10 @@ but the ownership split should remain stable:
 - `kernels/` owns hand-authored Loom kernel families and their source-local
   `check.case` and `check.benchmark` coverage. The internal folder structure is
   deliberately open until the kernel family boundaries are known.
-- `stages/` owns concrete pipeline stage implementations such as Qwen3-VL,
-  DiT blocks, sampler, and VAE decode. Stage packages depend on `pipeline/`,
-  `tooling/` only where appropriate, and `kernels/`.
+- `stages/` owns concrete pipeline stage implementations such as Qwen3-VL
+  prefill/forward, sampler loops, VAE decode, and full model slices. Stage
+  packages depend on `pipeline/`, `tooling/` only where appropriate, and
+  `kernels/`.
 - `ideogram4/` owns the assembled model configuration and execution API that
   wires stages into the full Ideogram 4 pipeline.
 - `binding/cli/` owns the thin one-shot command-line program using

@@ -10,6 +10,7 @@
 #include <stdint.h>
 
 #include "experimental/id4/pipeline/diagnostics.h"
+#include "experimental/id4/pipeline/kernel_library.h"
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
 
@@ -47,14 +48,6 @@ typedef struct id4_pipeline_kernel_artifact_t {
   // Artifact bytes.
   iree_const_byte_span_t contents;
 } id4_pipeline_kernel_artifact_t;
-
-// Compile-time configuration binding passed to Loom config resolution.
-typedef struct id4_pipeline_kernel_config_binding_t {
-  // Config symbol key, with or without a leading at-sign.
-  iree_string_view_t key;
-  // Config value spelling.
-  iree_string_view_t value;
-} id4_pipeline_kernel_config_binding_t;
 
 // Diagnostic artifacts requested from the Loom compiler path.
 typedef uint32_t id4_pipeline_kernel_diagnostic_artifact_flags_t;
@@ -97,10 +90,8 @@ typedef struct id4_pipeline_kernel_cache_prepare_options_t {
   iree_string_view_t source_identifier;
   // Textual Loom source contents.
   iree_const_byte_span_t source_contents;
-  // Runtime module name passed to the Loom compile invocation.
-  iree_string_view_t module_name;
-  // Identifier assigned to the primary emitted executable artifact.
-  iree_string_view_t executable_identifier;
+  // Runtime module path passed to the Loom compile invocation.
+  iree_string_view_t module_path;
   // Number of Loom config bindings.
   iree_host_size_t config_binding_count;
   // Loom config bindings borrowed for the prepare call.
