@@ -184,6 +184,22 @@ iree_cc_library(
 
 iree_cc_test(
   NAME
+    hal_integration_util_test
+  SRCS
+    "hal_integration_util_test.cc"
+  DEPS
+    ::hal_integration_util
+    iree::async
+    iree::async::util::proactor_pool
+    iree::base
+    iree::hal
+    iree::hal::drivers::local_sync::sync_driver
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
     ideogram4_dit_test
   SRCS
     "ideogram4_dit_test.cc"

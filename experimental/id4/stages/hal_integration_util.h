@@ -102,6 +102,10 @@ typedef struct FixtureTensor {
   id4_pipeline_tensor_dtype_t dtype = ID4_PIPELINE_TENSOR_DTYPE_INVALID;
   // Tensor shape declared by the fixture manifest and validated against NPY.
   id4_pipeline_tensor_shape_t shape = {};
+  // Full source tensor shape before fixture slicing.
+  id4_pipeline_tensor_shape_t source_shape = {};
+  // Per-dimension source offsets for this payload slice.
+  id4_pipeline_tensor_shape_t slice_offsets = {};
   // Absolute tolerance used when this tensor is an expected value.
   double absolute_tolerance = 0.0;
   // Relative tolerance used when this tensor is an expected value.

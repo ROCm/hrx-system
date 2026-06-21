@@ -201,6 +201,58 @@ static iree_status_t ParseFixtureTolerance(iree_string_view_t record,
   return iree_ok_status();
 }
 
+static iree_status_t ParseFixtureSlice(iree_string_view_t record,
+                                       FixtureTensor* tensor) {
+  iree_string_view_t slice_array = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(
+      iree_json_lookup_object_value(record, IREE_SV("slice"), &slice_array));
+  iree_host_size_t slice_rank = 0;
+  IREE_RETURN_IF_ERROR(iree_json_array_length(slice_array, &slice_rank));
+  if (slice_rank != tensor->shape.rank) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "fixture tensor `%s` slice rank %" PRIhsz
+                            " does not match tensor rank %u",
+                            tensor->name.c_str(), slice_rank,
+                            tensor->shape.rank);
+  }
+  tensor->slice_offsets = id4_pipeline_tensor_shape_t{};
+  tensor->slice_offsets.rank = tensor->shape.rank;
+  for (iree_host_size_t i = 0; i < slice_rank; ++i) {
+    iree_string_view_t slice = iree_string_view_empty();
+    IREE_RETURN_IF_ERROR(iree_json_array_get(slice_array, i, &slice));
+
+    iree_string_view_t start_value = iree_string_view_empty();
+    IREE_RETURN_IF_ERROR(
+        iree_json_lookup_object_value(slice, IREE_SV("start"), &start_value));
+    uint64_t start = 0;
+    IREE_RETURN_IF_ERROR(iree_json_parse_uint64(start_value, &start));
+
+    iree_string_view_t length_value = iree_string_view_empty();
+    IREE_RETURN_IF_ERROR(
+        iree_json_lookup_object_value(slice, IREE_SV("length"), &length_value));
+    uint64_t length = 0;
+    IREE_RETURN_IF_ERROR(iree_json_parse_uint64(length_value, &length));
+    if (length != tensor->shape.dims[i]) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "fixture tensor `%s` slice dimension %" PRIhsz " length %" PRIu64
+          " does not match tensor dimension %" PRIu64,
+          tensor->name.c_str(), i, length, tensor->shape.dims[i]);
+    }
+    if (start > tensor->source_shape.dims[i] ||
+        length > tensor->source_shape.dims[i] - start) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "fixture tensor `%s` slice dimension %" PRIhsz
+                              " [%" PRIu64 ", %" PRIu64
+                              ") exceeds source dimension %" PRIu64,
+                              tensor->name.c_str(), i, start, start + length,
+                              tensor->source_shape.dims[i]);
+    }
+    tensor->slice_offsets.dims[i] = start;
+  }
+  return iree_ok_status();
+}
+
 static bool ShapeEquals(id4_pipeline_tensor_shape_t lhs,
                         id4_pipeline_tensor_shape_t rhs) {
   if (lhs.rank != rhs.rank) return false;
@@ -379,6 +431,18 @@ static iree_status_t LoadFixtureTensorRecord(
   IREE_RETURN_IF_ERROR(
       iree_json_lookup_object_value(record, IREE_SV("shape"), &shape_value));
   IREE_RETURN_IF_ERROR(ParseFixtureShape(shape_value, &tensor.shape));
+  iree_string_view_t source_shape_value = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(iree_json_lookup_object_value(
+      record, IREE_SV("source_shape"), &source_shape_value));
+  IREE_RETURN_IF_ERROR(
+      ParseFixtureShape(source_shape_value, &tensor.source_shape));
+  if (tensor.source_shape.rank != tensor.shape.rank) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "fixture tensor `%s` source rank %u does not match tensor rank %u",
+        tensor.name.c_str(), tensor.source_shape.rank, tensor.shape.rank);
+  }
+  IREE_RETURN_IF_ERROR(ParseFixtureSlice(record, &tensor));
   IREE_RETURN_IF_ERROR(ParseFixtureTolerance(record, &tensor));
   IREE_RETURN_IF_ERROR(
       LoadNpyTensorPayload(JoinPath(fixture_tensors->directory, tensor.file),
@@ -862,6 +926,116 @@ static float LoadF32(const uint8_t* bytes) {
   return value;
 }
 
+static iree_status_t ShapeElementCount(id4_pipeline_tensor_shape_t shape,
+                                       iree_host_size_t* out_element_count) {
+  IREE_ASSERT_ARGUMENT(out_element_count);
+  iree_host_size_t element_count = 1;
+  for (uint32_t i = 0; i < shape.rank; ++i) {
+    if (shape.dims[i] > std::numeric_limits<iree_host_size_t>::max()) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "tensor dimension %u exceeds host size", i);
+    }
+    iree_host_size_t dim = static_cast<iree_host_size_t>(shape.dims[i]);
+    if (dim == 0) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "tensor dimension %u is zero", i);
+    }
+    if (element_count > std::numeric_limits<iree_host_size_t>::max() / dim) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "tensor element count overflow");
+    }
+    element_count *= dim;
+  }
+  *out_element_count = element_count;
+  return iree_ok_status();
+}
+
+static iree_status_t ShapeRowMajorStrides(
+    id4_pipeline_tensor_shape_t shape,
+    iree_host_size_t out_strides[ID4_PIPELINE_TENSOR_MAX_RANK]) {
+  if (shape.rank == 0) return iree_ok_status();
+  out_strides[shape.rank - 1] = 1;
+  for (uint32_t i = shape.rank - 1; i > 0; --i) {
+    if (shape.dims[i] > std::numeric_limits<iree_host_size_t>::max()) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "tensor dimension %u exceeds host size", i);
+    }
+    iree_host_size_t dim = static_cast<iree_host_size_t>(shape.dims[i]);
+    if (dim == 0) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "tensor dimension %u is zero", i);
+    }
+    if (out_strides[i] > std::numeric_limits<iree_host_size_t>::max() / dim) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "tensor stride overflow");
+    }
+    out_strides[i - 1] = out_strides[i] * dim;
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t CompareF32Element(const FixtureTensor& expected_tensor,
+                                       iree_host_size_t expected_index,
+                                       iree_host_size_t actual_index,
+                                       const std::vector<uint8_t>& actual) {
+  const float actual_value = LoadF32(&actual[actual_index * sizeof(float)]);
+  const float expected_value =
+      LoadF32(&expected_tensor.payload[expected_index * sizeof(float)]);
+  const double tolerance =
+      expected_tensor.absolute_tolerance +
+      expected_tensor.relative_tolerance * std::fabs((double)expected_value);
+  const double absolute_error =
+      std::fabs((double)actual_value - (double)expected_value);
+  if (absolute_error <= tolerance) return iree_ok_status();
+  return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                          "tensor `%s` mismatch at element %" PRIhsz
+                          ": actual=%g expected=%g abs_error=%g tolerance=%g",
+                          expected_tensor.name.c_str(), expected_index,
+                          (double)actual_value, (double)expected_value,
+                          absolute_error, tolerance);
+}
+
+static iree_status_t CompareF32DensePayload(
+    const FixtureTensor& expected_tensor, const std::vector<uint8_t>& actual) {
+  iree_host_size_t element_count = 0;
+  IREE_RETURN_IF_ERROR(
+      ShapeElementCount(expected_tensor.shape, &element_count));
+  for (iree_host_size_t i = 0; i < element_count; ++i) {
+    IREE_RETURN_IF_ERROR(CompareF32Element(expected_tensor, i, i, actual));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t CompareF32SourceSlice(const FixtureTensor& expected_tensor,
+                                           const std::vector<uint8_t>& actual) {
+  iree_host_size_t expected_strides[ID4_PIPELINE_TENSOR_MAX_RANK] = {};
+  IREE_RETURN_IF_ERROR(
+      ShapeRowMajorStrides(expected_tensor.shape, expected_strides));
+  iree_host_size_t actual_strides[ID4_PIPELINE_TENSOR_MAX_RANK] = {};
+  IREE_RETURN_IF_ERROR(
+      ShapeRowMajorStrides(expected_tensor.source_shape, actual_strides));
+
+  iree_host_size_t element_count = 0;
+  IREE_RETURN_IF_ERROR(
+      ShapeElementCount(expected_tensor.shape, &element_count));
+  for (iree_host_size_t expected_index = 0; expected_index < element_count;
+       ++expected_index) {
+    iree_host_size_t remaining = expected_index;
+    iree_host_size_t actual_index = 0;
+    for (uint32_t dim = 0; dim < expected_tensor.shape.rank; ++dim) {
+      const iree_host_size_t coordinate = remaining / expected_strides[dim];
+      remaining = remaining % expected_strides[dim];
+      actual_index += (static_cast<iree_host_size_t>(
+                           expected_tensor.slice_offsets.dims[dim]) +
+                       coordinate) *
+                      actual_strides[dim];
+    }
+    IREE_RETURN_IF_ERROR(CompareF32Element(expected_tensor, expected_index,
+                                           actual_index, actual));
+  }
+  return iree_ok_status();
+}
+
 iree_status_t CompareF32BindingWithFixtureTensor(
     iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_buffer_binding_t* binding,
@@ -881,37 +1055,60 @@ iree_status_t CompareF32BindingWithFixtureTensor(
   std::vector<uint8_t> actual_bytes;
   IREE_RETURN_IF_ERROR(ReadBindingToHost(device, queue_affinity, binding,
                                          wait_list, &actual_bytes));
-  if (actual_bytes.size() != expected_tensor.payload.size()) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "expected tensor `%s` byte length %zu does not match actual length %zu",
-        expected_tensor.name.c_str(), expected_tensor.payload.size(),
-        actual_bytes.size());
-  }
-  if ((actual_bytes.size() % sizeof(float)) != 0) {
+  if ((expected_tensor.payload.size() % sizeof(float)) != 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "expected tensor `%s` byte length is not f32 element-aligned",
         expected_tensor.name.c_str());
   }
-  const iree_host_size_t element_count = actual_bytes.size() / sizeof(float);
-  for (iree_host_size_t i = 0; i < element_count; ++i) {
-    const float actual = LoadF32(&actual_bytes[i * sizeof(float)]);
-    const float expected = LoadF32(&expected_tensor.payload[i * sizeof(float)]);
-    const double tolerance =
-        expected_tensor.absolute_tolerance +
-        expected_tensor.relative_tolerance * std::fabs((double)expected);
-    const double absolute_error = std::fabs((double)actual - (double)expected);
-    if (absolute_error > tolerance) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "tensor `%s` mismatch at element %" PRIhsz
-          ": actual=%g expected=%g abs_error=%g tolerance=%g",
-          expected_tensor.name.c_str(), i, (double)actual, (double)expected,
-          absolute_error, tolerance);
-    }
+  iree_host_size_t expected_element_count = 0;
+  IREE_RETURN_IF_ERROR(
+      ShapeElementCount(expected_tensor.shape, &expected_element_count));
+  if (expected_element_count >
+      std::numeric_limits<iree_host_size_t>::max() / sizeof(float)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "expected tensor `%s` byte length overflow",
+                            expected_tensor.name.c_str());
   }
-  return iree_ok_status();
+  const iree_host_size_t expected_byte_count =
+      expected_element_count * sizeof(float);
+  if (expected_byte_count != expected_tensor.payload.size()) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "expected tensor `%s` byte length %zu does not match shape byte length "
+        "%" PRIhsz,
+        expected_tensor.name.c_str(), expected_tensor.payload.size(),
+        expected_byte_count);
+  }
+  if ((actual_bytes.size() % sizeof(float)) != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "actual tensor `%s` byte length is not f32 element-aligned",
+        expected_tensor.name.c_str());
+  }
+  if (actual_bytes.size() == expected_tensor.payload.size()) {
+    return CompareF32DensePayload(expected_tensor, actual_bytes);
+  }
+  iree_host_size_t source_element_count = 0;
+  IREE_RETURN_IF_ERROR(
+      ShapeElementCount(expected_tensor.source_shape, &source_element_count));
+  if (source_element_count >
+      std::numeric_limits<iree_host_size_t>::max() / sizeof(float)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "source tensor `%s` byte length overflow",
+                            expected_tensor.name.c_str());
+  }
+  const iree_host_size_t source_byte_count =
+      source_element_count * sizeof(float);
+  if (actual_bytes.size() == source_byte_count) {
+    return CompareF32SourceSlice(expected_tensor, actual_bytes);
+  }
+  return iree_make_status(
+      IREE_STATUS_INVALID_ARGUMENT,
+      "actual tensor `%s` byte length %zu matches neither expected length %zu "
+      "nor source length %" PRIhsz,
+      expected_tensor.name.c_str(), actual_bytes.size(),
+      expected_tensor.payload.size(), source_byte_count);
 }
 
 iree_status_t LoadFixtureTensors(iree_string_view_t fixture_directory,
