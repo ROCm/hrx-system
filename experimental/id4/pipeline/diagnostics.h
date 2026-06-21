@@ -7,7 +7,10 @@
 #ifndef EXPERIMENTAL_ID4_PIPELINE_DIAGNOSTICS_H_
 #define EXPERIMENTAL_ID4_PIPELINE_DIAGNOSTICS_H_
 
+#include <stdint.h>
+
 #include "iree/base/api.h"
+#include "iree/hal/api.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -23,6 +26,36 @@ typedef enum id4_pipeline_diagnostic_event_kind_e {
   ID4_PIPELINE_DIAGNOSTIC_EVENT_KIND_PARAMETER_SLAB = 2,
 } id4_pipeline_diagnostic_event_kind_t;
 
+// Parameter slab payload attached to parameter-slab diagnostic events.
+typedef struct id4_pipeline_parameter_slab_diagnostic_t {
+  // Plan-local slab index.
+  iree_host_size_t slab_index;
+  // Request index, or IREE_HOST_SIZE_MAX when the event describes the slab.
+  iree_host_size_t request_index;
+  // Provider scope used by the parameter request.
+  iree_string_view_t scope;
+  // Parameter key for request-level events.
+  iree_string_view_t parameter_key;
+  // Source parameter byte offset for request-level events.
+  uint64_t parameter_offset;
+  // Target slab byte offset for request-level events.
+  uint64_t buffer_offset;
+  // Byte length for request-level events.
+  uint64_t length;
+  // Plan-local placement identifier.
+  uint32_t placement_id;
+  // Device index within the plan device group.
+  iree_host_size_t device_index;
+  // Queue affinity used by loading work.
+  iree_hal_queue_affinity_t queue_affinity;
+  // Total slab byte length.
+  iree_device_size_t slab_byte_length;
+  // Required slab base alignment in bytes.
+  iree_device_size_t slab_alignment;
+  // Number of parameter requests in the slab.
+  iree_host_size_t request_count;
+} id4_pipeline_parameter_slab_diagnostic_t;
+
 // Structured diagnostic event emitted by pipeline infrastructure.
 typedef struct id4_pipeline_diagnostic_event_t {
   // Kind of event being emitted.
@@ -33,6 +66,8 @@ typedef struct id4_pipeline_diagnostic_event_t {
   iree_string_view_t key;
   // Human-readable event message.
   iree_string_view_t message;
+  // Optional parameter slab payload valid only during the emit callback.
+  const id4_pipeline_parameter_slab_diagnostic_t* parameter_slab;
 } id4_pipeline_diagnostic_event_t;
 
 // Function pointer used to consume a diagnostic event.

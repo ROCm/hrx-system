@@ -104,11 +104,19 @@ typedef struct id4_pipeline_test_diagnostics_log_t {
   iree_host_size_t count;
   // Event keys observed in order.
   std::vector<std::string> keys;
+  // Parameter slab events copied from diagnostic payloads.
+  std::vector<id4_pipeline_parameter_slab_diagnostic_t> parameter_slabs;
+  // Provider scopes copied for parameter slab events.
+  std::vector<std::string> parameter_slab_scopes;
+  // Parameter keys copied for parameter slab request events.
+  std::vector<std::string> parameter_slab_keys;
 } id4_pipeline_test_diagnostics_log_t;
 
 typedef struct id4_pipeline_test_parameter_provider_t {
   // Base provider interface.
   iree_io_parameter_provider_t base;
+  // True when the provider reports support for the smoke scope.
+  bool supports_scope;
   // Number of gather operations observed.
   iree_host_size_t gather_count;
   // Scope passed to the last gather.
@@ -137,7 +145,10 @@ static iree_status_t TestParameterProviderNotify(
 
 static bool TestParameterProviderQuerySupport(
     iree_io_parameter_provider_t* provider, iree_string_view_t scope) {
-  return iree_string_view_equal(scope, IREE_SV("smoke"));
+  id4_pipeline_test_parameter_provider_t* test_provider =
+      TestParameterProviderCast(provider);
+  return test_provider->supports_scope &&
+         iree_string_view_equal(scope, IREE_SV("smoke"));
 }
 
 static iree_status_t TestParameterProviderLoad(
@@ -208,6 +219,7 @@ static void TestParameterProviderInitialize(
   provider->base = {};
   iree_atomic_ref_count_init(&provider->base.ref_count);
   provider->base.vtable = &kTestParameterProviderVTable;
+  provider->supports_scope = true;
   provider->gather_count = 0;
   provider->last_scope.clear();
   provider->keys.clear();
@@ -221,6 +233,13 @@ static iree_status_t CaptureDiagnostic(
       static_cast<id4_pipeline_test_diagnostics_log_t*>(user_data);
   ++log->count;
   log->keys.push_back(ToString(event->key));
+  if (event->parameter_slab) {
+    log->parameter_slabs.push_back(*event->parameter_slab);
+    log->parameter_slab_scopes.push_back(
+        ToString(event->parameter_slab->scope));
+    log->parameter_slab_keys.push_back(
+        ToString(event->parameter_slab->parameter_key));
+  }
   return iree_ok_status();
 }
 
@@ -323,8 +342,8 @@ static iree_status_t SmokeStagePrepare(
   if (has_parameter_load) {
     status = id4_pipeline_plan_load_parameter_slabs(
         plan, options->parameter_provider, options->wait_semaphore_list,
-        options->signal_semaphore_list, stage->services.host_allocator,
-        &parameter_slabs);
+        options->signal_semaphore_list, options->diagnostics_sink,
+        stage->services.host_allocator, &parameter_slabs);
   }
   id4_pipeline_bundle_t* bundle = NULL;
   if (iree_status_is_ok(status)) {
@@ -486,10 +505,23 @@ TEST(PipelineStage, PlanCopiesPlacementAndParameterSlabMetadata) {
   EXPECT_NE(json.find("\"smoke.weight\""), std::string::npos);
   iree_string_builder_deinitialize(&builder);
 
-  EXPECT_EQ(diagnostics_log.count, 2u);
-  ASSERT_EQ(diagnostics_log.keys.size(), 2u);
+  EXPECT_EQ(diagnostics_log.count, 3u);
+  ASSERT_EQ(diagnostics_log.keys.size(), 3u);
   EXPECT_EQ(diagnostics_log.keys[0], "stage.load");
   EXPECT_EQ(diagnostics_log.keys[1], "plan.create");
+  EXPECT_EQ(diagnostics_log.keys[2], "parameter_slab.plan");
+  ASSERT_EQ(diagnostics_log.parameter_slabs.size(), 1u);
+  EXPECT_EQ(diagnostics_log.parameter_slabs[0].slab_index, 0u);
+  EXPECT_EQ(diagnostics_log.parameter_slabs[0].request_index,
+            IREE_HOST_SIZE_MAX);
+  EXPECT_EQ(diagnostics_log.parameter_slab_scopes[0], "smoke");
+  EXPECT_EQ(diagnostics_log.parameter_slabs[0].placement_id, 0u);
+  EXPECT_EQ(diagnostics_log.parameter_slabs[0].device_index, 0u);
+  EXPECT_EQ(diagnostics_log.parameter_slabs[0].queue_affinity,
+            IREE_HAL_QUEUE_AFFINITY_ANY);
+  EXPECT_EQ(diagnostics_log.parameter_slabs[0].slab_byte_length, 16u);
+  EXPECT_EQ(diagnostics_log.parameter_slabs[0].slab_alignment, 16u);
+  EXPECT_EQ(diagnostics_log.parameter_slabs[0].request_count, 1u);
 
   id4_pipeline_plan_release(plan);
   id4_pipeline_stage_release(stage);
@@ -612,11 +644,12 @@ TEST(PipelineStage, PrepareAndIssueSmokeBundle) {
   issue_options.diagnostics_sink = &diagnostics_sink;
   IREE_ASSERT_OK(id4_pipeline_stage_issue(stage, bundle, &issue_options));
 
-  ASSERT_EQ(diagnostics_log.keys.size(), 4u);
+  ASSERT_EQ(diagnostics_log.keys.size(), 5u);
   EXPECT_EQ(diagnostics_log.keys[0], "stage.load");
   EXPECT_EQ(diagnostics_log.keys[1], "plan.create");
-  EXPECT_EQ(diagnostics_log.keys[2], "stage.prepare");
-  EXPECT_EQ(diagnostics_log.keys[3], "stage.issue");
+  EXPECT_EQ(diagnostics_log.keys[2], "parameter_slab.plan");
+  EXPECT_EQ(diagnostics_log.keys[3], "stage.prepare");
+  EXPECT_EQ(diagnostics_log.keys[4], "stage.issue");
 
   id4_pipeline_bundle_release(bundle);
   id4_pipeline_plan_release(plan);
@@ -663,6 +696,78 @@ TEST(PipelineStage, PrepareRejectsParameterSlabLoadWithoutSignal) {
   id4_pipeline_stage_release(stage);
 }
 
+TEST(PipelineStage, PrepareEmitsParameterSlabLoadFailureDiagnostic) {
+  iree_hal_device_group_t* device_group = CreateLocalSyncDeviceGroup();
+  id4_pipeline_stage_t* stage = NULL;
+  IREE_ASSERT_OK(SmokeStageCreate(device_group, &stage));
+  iree_hal_device_group_release(device_group);
+
+  id4_pipeline_stage_load_options_t load_options;
+  memset(&load_options, 0, sizeof(load_options));
+  load_options.structure_size = sizeof(load_options);
+  IREE_ASSERT_OK(id4_pipeline_stage_load(stage, &load_options));
+
+  id4_pipeline_stage_plan_options_t plan_options;
+  memset(&plan_options, 0, sizeof(plan_options));
+  plan_options.structure_size = sizeof(plan_options);
+  plan_options.device_index = 0;
+  plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+
+  id4_pipeline_plan_t* plan = NULL;
+  IREE_ASSERT_OK(id4_pipeline_stage_plan(stage, &plan_options, &plan));
+
+  id4_pipeline_test_parameter_provider_t provider;
+  TestParameterProviderInitialize(&provider);
+  provider.supports_scope = false;
+
+  iree_hal_device_t* device =
+      iree_hal_device_group_device_at(id4_pipeline_plan_device_group(plan), 0);
+  iree_hal_semaphore_t* ready_semaphore = NULL;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &ready_semaphore));
+  uint64_t ready_value = 1;
+  iree_hal_semaphore_list_t signal_list = {
+      /*.count=*/1,
+      /*.semaphores=*/&ready_semaphore,
+      /*.payload_values=*/&ready_value,
+  };
+
+  id4_pipeline_test_diagnostics_log_t diagnostics_log = {};
+  id4_pipeline_diagnostics_sink_t diagnostics_sink =
+      DiagnosticsSink(&diagnostics_log);
+
+  id4_pipeline_stage_prepare_options_t prepare_options;
+  memset(&prepare_options, 0, sizeof(prepare_options));
+  prepare_options.structure_size = sizeof(prepare_options);
+  prepare_options.parameter_provider = &provider.base;
+  prepare_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
+  prepare_options.signal_semaphore_list = signal_list;
+  prepare_options.diagnostics_sink = &diagnostics_sink;
+
+  id4_pipeline_bundle_t* bundle = NULL;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_NOT_FOUND,
+      id4_pipeline_stage_prepare(stage, plan, &prepare_options, &bundle));
+  EXPECT_EQ(bundle, nullptr);
+  EXPECT_EQ(provider.gather_count, 0u);
+
+  ASSERT_EQ(diagnostics_log.keys.size(), 1u);
+  EXPECT_EQ(diagnostics_log.keys[0], "parameter_slab.load.error");
+  ASSERT_EQ(diagnostics_log.parameter_slabs.size(), 1u);
+  EXPECT_EQ(diagnostics_log.parameter_slabs[0].slab_index, 0u);
+  EXPECT_EQ(diagnostics_log.parameter_slabs[0].request_index,
+            IREE_HOST_SIZE_MAX);
+  EXPECT_EQ(diagnostics_log.parameter_slab_scopes[0], "smoke");
+  EXPECT_EQ(diagnostics_log.parameter_slabs[0].device_index, 0u);
+  EXPECT_EQ(diagnostics_log.parameter_slabs[0].slab_byte_length, 16u);
+  EXPECT_EQ(diagnostics_log.parameter_slabs[0].request_count, 1u);
+
+  iree_hal_semaphore_release(ready_semaphore);
+  id4_pipeline_plan_release(plan);
+  id4_pipeline_stage_release(stage);
+}
+
 TEST(PipelineStage, PrepareLoadsParameterSlabsWhenProviderIsSupplied) {
   iree_hal_device_group_t* device_group = CreateLocalSyncDeviceGroup();
   id4_pipeline_stage_t* stage = NULL;
@@ -686,6 +791,10 @@ TEST(PipelineStage, PrepareLoadsParameterSlabsWhenProviderIsSupplied) {
   id4_pipeline_test_parameter_provider_t provider;
   TestParameterProviderInitialize(&provider);
 
+  id4_pipeline_test_diagnostics_log_t diagnostics_log = {};
+  id4_pipeline_diagnostics_sink_t diagnostics_sink =
+      DiagnosticsSink(&diagnostics_log);
+
   iree_hal_device_t* device =
       iree_hal_device_group_device_at(id4_pipeline_plan_device_group(plan), 0);
   iree_hal_semaphore_t* ready_semaphore = NULL;
@@ -705,6 +814,7 @@ TEST(PipelineStage, PrepareLoadsParameterSlabsWhenProviderIsSupplied) {
   prepare_options.parameter_provider = &provider.base;
   prepare_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
   prepare_options.signal_semaphore_list = signal_list;
+  prepare_options.diagnostics_sink = &diagnostics_sink;
 
   id4_pipeline_bundle_t* bundle = NULL;
   IREE_ASSERT_OK(
@@ -736,6 +846,26 @@ TEST(PipelineStage, PrepareLoadsParameterSlabsWhenProviderIsSupplied) {
   EXPECT_EQ(provider.spans[0].parameter_offset, 0u);
   EXPECT_EQ(provider.spans[0].buffer_offset, 0u);
   EXPECT_EQ(provider.spans[0].length, 16u);
+
+  ASSERT_EQ(diagnostics_log.keys.size(), 3u);
+  EXPECT_EQ(diagnostics_log.keys[0], "parameter_slab.load");
+  EXPECT_EQ(diagnostics_log.keys[1], "parameter_slab.gather");
+  EXPECT_EQ(diagnostics_log.keys[2], "stage.prepare");
+  ASSERT_EQ(diagnostics_log.parameter_slabs.size(), 2u);
+  EXPECT_EQ(diagnostics_log.parameter_slabs[0].slab_index, 0u);
+  EXPECT_EQ(diagnostics_log.parameter_slabs[0].request_index,
+            IREE_HOST_SIZE_MAX);
+  EXPECT_EQ(diagnostics_log.parameter_slab_scopes[0], "smoke");
+  EXPECT_EQ(diagnostics_log.parameter_slabs[0].device_index, 0u);
+  EXPECT_EQ(diagnostics_log.parameter_slabs[0].slab_byte_length, 16u);
+  EXPECT_EQ(diagnostics_log.parameter_slabs[0].request_count, 1u);
+  EXPECT_EQ(diagnostics_log.parameter_slabs[1].slab_index, 0u);
+  EXPECT_EQ(diagnostics_log.parameter_slabs[1].request_index, 0u);
+  EXPECT_EQ(diagnostics_log.parameter_slab_scopes[1], "smoke");
+  EXPECT_EQ(diagnostics_log.parameter_slab_keys[1], "smoke.weight");
+  EXPECT_EQ(diagnostics_log.parameter_slabs[1].parameter_offset, 0u);
+  EXPECT_EQ(diagnostics_log.parameter_slabs[1].buffer_offset, 0u);
+  EXPECT_EQ(diagnostics_log.parameter_slabs[1].length, 16u);
 
   id4_pipeline_bundle_release(bundle);
   iree_hal_semaphore_release(ready_semaphore);

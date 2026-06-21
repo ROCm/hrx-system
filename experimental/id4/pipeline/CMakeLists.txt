@@ -18,6 +18,7 @@ iree_cc_library(
     "diagnostics.c"
   DEPS
     iree::base
+    iree::hal
   PUBLIC
 )
 
@@ -29,6 +30,7 @@ iree_cc_library(
   SRCS
     "parameter_slab.c"
   DEPS
+    ::diagnostics
     iree::base
     iree::hal
     iree::io::parameter_provider

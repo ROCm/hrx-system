@@ -164,6 +164,65 @@ static iree_status_t id4_pipeline_plan_copy_parameter_slabs(
   return iree_ok_status();
 }
 
+static iree_status_t id4_pipeline_plan_emit_parameter_slab_diagnostics(
+    const id4_pipeline_plan_t* plan,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
+  for (iree_host_size_t i = 0; i < plan->parameter_slab_count; ++i) {
+    const id4_pipeline_parameter_slab_plan_t* slab = &plan->parameter_slabs[i];
+    const id4_pipeline_device_placement_t* placement =
+        id4_pipeline_plan_placement_at(plan, slab->placement_id);
+    if (!placement) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "parameter slab %" PRIhsz
+                              " references missing placement %u",
+                              i, slab->placement_id);
+    }
+    id4_pipeline_parameter_slab_diagnostic_t parameter_slab = {
+        // Plan-local slab index.
+        .slab_index = i,
+        // This event describes the slab instead of one request.
+        .request_index = IREE_HOST_SIZE_MAX,
+        // Provider scope used by the slab.
+        .scope = slab->scope,
+        // No request key is associated with this slab-level event.
+        .parameter_key = iree_string_view_empty(),
+        // No request source offset is associated with this slab-level event.
+        .parameter_offset = 0,
+        // No request target offset is associated with this slab-level event.
+        .buffer_offset = 0,
+        // No request byte length is associated with this slab-level event.
+        .length = 0,
+        // Placement selected for this slab.
+        .placement_id = slab->placement_id,
+        // Device index selected by the placement.
+        .device_index = placement->device_index,
+        // Queue affinity selected by the placement.
+        .queue_affinity = placement->queue_affinity,
+        // Total slab byte length.
+        .slab_byte_length = slab->byte_length,
+        // Required slab base alignment.
+        .slab_alignment = slab->alignment,
+        // Number of requests in the slab.
+        .request_count = slab->request_count,
+    };
+    id4_pipeline_diagnostic_event_t event = {
+        // Event kind for parameter slab diagnostics.
+        .kind = ID4_PIPELINE_DIAGNOSTIC_EVENT_KIND_PARAMETER_SLAB,
+        // Stage name copied into the plan.
+        .stage_name = plan->stage_name,
+        // Stable key for planned slab records.
+        .key = IREE_SV("parameter_slab.plan"),
+        // Short event summary.
+        .message = IREE_SV("planned parameter slab"),
+        // Structured slab payload.
+        .parameter_slab = &parameter_slab,
+    };
+    IREE_RETURN_IF_ERROR(
+        id4_pipeline_diagnostics_emit(diagnostics_sink, &event));
+  }
+  return iree_ok_status();
+}
+
 iree_status_t id4_pipeline_plan_create(
     const id4_pipeline_plan_create_options_t* options,
     iree_allocator_t host_allocator, id4_pipeline_plan_t** out_plan) {
@@ -225,6 +284,10 @@ iree_status_t id4_pipeline_plan_create(
     status = id4_pipeline_diagnostics_emit(options->diagnostics_sink, &event);
   }
   if (iree_status_is_ok(status)) {
+    status = id4_pipeline_plan_emit_parameter_slab_diagnostics(
+        plan, options->diagnostics_sink);
+  }
+  if (iree_status_is_ok(status)) {
     *out_plan = plan;
   } else if (plan) {
     id4_pipeline_plan_destroy(plan);
@@ -279,6 +342,7 @@ iree_status_t id4_pipeline_plan_load_parameter_slabs(
     const id4_pipeline_plan_t* plan, iree_io_parameter_provider_t* provider,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink,
     iree_allocator_t host_allocator,
     id4_pipeline_parameter_slab_set_t** out_slab_set) {
   IREE_ASSERT_ARGUMENT(plan);
@@ -306,7 +370,9 @@ iree_status_t id4_pipeline_plan_load_parameter_slabs(
                                 i, slab->placement_id);
       break;
     }
+    loads[i].slab_index = i;
     loads[i].slab = slab;
+    loads[i].device_index = placement->device_index;
     loads[i].device = iree_hal_device_group_device_at(plan->device_group,
                                                       placement->device_index);
     loads[i].queue_affinity = placement->queue_affinity;
@@ -314,7 +380,8 @@ iree_status_t id4_pipeline_plan_load_parameter_slabs(
   if (iree_status_is_ok(status)) {
     status = id4_pipeline_parameter_slab_set_load(
         provider, wait_semaphore_list, signal_semaphore_list,
-        plan->parameter_slab_count, loads, host_allocator, out_slab_set);
+        plan->parameter_slab_count, loads, plan->stage_name, diagnostics_sink,
+        host_allocator, out_slab_set);
   }
   iree_allocator_free(host_allocator, loads);
   return status;

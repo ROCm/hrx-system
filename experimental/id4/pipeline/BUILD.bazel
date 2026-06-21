@@ -18,7 +18,10 @@ iree_runtime_cc_library(
     name = "diagnostics",
     srcs = ["diagnostics.c"],
     hdrs = ["diagnostics.h"],
-    deps = ["//runtime/src/iree/base"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
 )
 
 iree_runtime_cc_library(
@@ -26,6 +29,7 @@ iree_runtime_cc_library(
     srcs = ["parameter_slab.c"],
     hdrs = ["parameter_slab.h"],
     deps = [
+        ":diagnostics",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/io:parameter_provider",

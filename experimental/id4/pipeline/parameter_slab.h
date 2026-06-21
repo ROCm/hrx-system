@@ -9,6 +9,7 @@
 
 #include <stdint.h>
 
+#include "experimental/id4/pipeline/diagnostics.h"
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
 #include "iree/io/parameter_provider.h"
@@ -57,8 +58,12 @@ typedef struct id4_pipeline_parameter_slab_enumerator_state_t {
 
 // Resolved parameter slab load work for one planned slab.
 typedef struct id4_pipeline_parameter_slab_load_t {
+  // Plan-local slab index.
+  iree_host_size_t slab_index;
   // Planned slab metadata to load.
   const id4_pipeline_parameter_slab_plan_t* slab;
+  // Device index within the plan device group.
+  iree_host_size_t device_index;
   // HAL device where the slab buffer is allocated and populated.
   iree_hal_device_t* device;
   // Queue affinity used for the provider gather operation.
@@ -90,6 +95,8 @@ iree_status_t id4_pipeline_parameter_slab_set_load(
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_host_size_t load_count,
     const id4_pipeline_parameter_slab_load_t* loads,
+    iree_string_view_t stage_name,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink,
     iree_allocator_t host_allocator,
     id4_pipeline_parameter_slab_set_t** out_slab_set);
 

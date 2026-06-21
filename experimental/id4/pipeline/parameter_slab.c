@@ -168,6 +168,72 @@ static iree_status_t id4_pipeline_parameter_slab_validate_semaphore_list(
   return iree_ok_status();
 }
 
+static id4_pipeline_parameter_slab_diagnostic_t
+id4_pipeline_parameter_slab_make_diagnostic(
+    const id4_pipeline_parameter_slab_load_t* load,
+    iree_host_size_t request_index) {
+  const id4_pipeline_parameter_slab_plan_t* slab = load->slab;
+  id4_pipeline_parameter_slab_diagnostic_t diagnostic = {
+      // Plan-local slab index.
+      .slab_index = load->slab_index,
+      // Request index or IREE_HOST_SIZE_MAX for slab-level events.
+      .request_index = request_index,
+      // Provider scope used by the slab.
+      .scope = slab->scope,
+      // Parameter key populated below for request-level events.
+      .parameter_key = iree_string_view_empty(),
+      // Source parameter byte offset populated below for request events.
+      .parameter_offset = 0,
+      // Target slab byte offset populated below for request events.
+      .buffer_offset = 0,
+      // Byte length populated below for request events.
+      .length = 0,
+      // Plan-local placement identifier.
+      .placement_id = slab->placement_id,
+      // Device index within the plan device group.
+      .device_index = load->device_index,
+      // Queue affinity used by loading work.
+      .queue_affinity = load->queue_affinity,
+      // Total slab byte length.
+      .slab_byte_length = slab->byte_length,
+      // Required slab base alignment.
+      .slab_alignment = slab->alignment,
+      // Number of requests in the slab.
+      .request_count = slab->request_count,
+  };
+  if (request_index < slab->request_count) {
+    const id4_pipeline_parameter_request_t* request =
+        &slab->requests[request_index];
+    diagnostic.parameter_key = request->key;
+    diagnostic.parameter_offset = request->span.parameter_offset;
+    diagnostic.buffer_offset = request->span.buffer_offset;
+    diagnostic.length = request->span.length;
+  }
+  return diagnostic;
+}
+
+static iree_status_t id4_pipeline_parameter_slab_emit_diagnostic(
+    const id4_pipeline_parameter_slab_load_t* load,
+    iree_string_view_t stage_name, iree_string_view_t key,
+    iree_string_view_t message, iree_host_size_t request_index,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
+  id4_pipeline_parameter_slab_diagnostic_t parameter_slab =
+      id4_pipeline_parameter_slab_make_diagnostic(load, request_index);
+  id4_pipeline_diagnostic_event_t event = {
+      // Event kind for parameter slab diagnostics.
+      .kind = ID4_PIPELINE_DIAGNOSTIC_EVENT_KIND_PARAMETER_SLAB,
+      // Stage name associated with the load.
+      .stage_name = stage_name,
+      // Stable parameter slab event key.
+      .key = key,
+      // Short event summary.
+      .message = message,
+      // Structured slab payload.
+      .parameter_slab = &parameter_slab,
+  };
+  return id4_pipeline_diagnostics_emit(diagnostics_sink, &event);
+}
+
 static iree_status_t id4_pipeline_parameter_slab_create_chain_semaphores(
     iree_host_size_t load_count,
     const id4_pipeline_parameter_slab_load_t* loads,
@@ -216,6 +282,8 @@ iree_status_t id4_pipeline_parameter_slab_set_load(
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_host_size_t load_count,
     const id4_pipeline_parameter_slab_load_t* loads,
+    iree_string_view_t stage_name,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink,
     iree_allocator_t host_allocator,
     id4_pipeline_parameter_slab_set_t** out_slab_set) {
   IREE_ASSERT_ARGUMENT(provider);
@@ -242,6 +310,14 @@ iree_status_t id4_pipeline_parameter_slab_set_load(
        ++i) {
     status = id4_pipeline_parameter_slab_allocate_buffer(&loads[i],
                                                          &slab_set->buffers[i]);
+    if (!iree_status_is_ok(status)) {
+      status = iree_status_join(
+          status,
+          id4_pipeline_parameter_slab_emit_diagnostic(
+              &loads[i], stage_name, IREE_SV("parameter_slab.load.error"),
+              IREE_SV("parameter slab allocation failed"), IREE_HOST_SIZE_MAX,
+              diagnostics_sink));
+    }
   }
 
   iree_host_size_t chain_semaphore_count = 0;
@@ -260,8 +336,24 @@ iree_status_t id4_pipeline_parameter_slab_set_load(
           iree_make_status(IREE_STATUS_NOT_FOUND,
                            "parameter provider does not support scope '%.*s'",
                            (int)load->slab->scope.size, load->slab->scope.data);
+      status = iree_status_join(
+          status, id4_pipeline_parameter_slab_emit_diagnostic(
+                      load, stage_name, IREE_SV("parameter_slab.load.error"),
+                      IREE_SV("parameter provider does not support scope"),
+                      IREE_HOST_SIZE_MAX, diagnostics_sink));
       break;
     }
+    status = id4_pipeline_parameter_slab_emit_diagnostic(
+        load, stage_name, IREE_SV("parameter_slab.load"),
+        IREE_SV("loading parameter slab"), IREE_HOST_SIZE_MAX,
+        diagnostics_sink);
+    for (iree_host_size_t j = 0;
+         j < load->slab->request_count && iree_status_is_ok(status); ++j) {
+      status = id4_pipeline_parameter_slab_emit_diagnostic(
+          load, stage_name, IREE_SV("parameter_slab.gather"),
+          IREE_SV("gathering parameter request"), j, diagnostics_sink);
+    }
+    if (!iree_status_is_ok(status)) break;
     id4_pipeline_parameter_slab_enumerator_state_t enumerator_state = {
         // Slab plan supplying request keys and spans.
         .slab = load->slab,
@@ -300,6 +392,13 @@ iree_status_t id4_pipeline_parameter_slab_set_load(
         gather_wait_semaphore_list, gather_signal_semaphore_list,
         load->slab->scope, slab_set->buffers[i], load->slab->request_count,
         enumerator);
+    if (!iree_status_is_ok(status)) {
+      status = iree_status_join(
+          status, id4_pipeline_parameter_slab_emit_diagnostic(
+                      load, stage_name, IREE_SV("parameter_slab.load.error"),
+                      IREE_SV("parameter gather submission failed"),
+                      IREE_HOST_SIZE_MAX, diagnostics_sink));
+    }
   }
   id4_pipeline_parameter_slab_release_chain_semaphores(
       chain_semaphores, chain_semaphore_count, host_allocator);
