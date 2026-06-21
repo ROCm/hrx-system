@@ -55,6 +55,15 @@ class ProgramBuilderScope {
   id4_pipeline_program_builder_t* builder_ = nullptr;
 };
 
+static iree_hal_dispatch_config_t MakeTestDispatchConfig() {
+  iree_hal_dispatch_config_t config =
+      iree_hal_make_static_dispatch_config(1, 1, 1);
+  config.workgroup_size[0] = 1;
+  config.workgroup_size[1] = 1;
+  config.workgroup_size[2] = 1;
+  return config;
+}
+
 static iree_hal_device_group_t* CreateLocalSyncDeviceGroup() {
   iree_async_proactor_pool_t* proactor_pool = nullptr;
   IREE_CHECK_OK(iree_async_proactor_pool_create(
@@ -105,6 +114,7 @@ static id4_pipeline_program_t* CreateLinearProgram() {
   id4_pipeline_program_import_tensor_options_t input_options = {
       /*.structure_size=*/sizeof(input_options),
       /*.next=*/nullptr,
+      /*.flags=*/ID4_PIPELINE_PROGRAM_IMPORT_TENSOR_FLAG_INITIALIZED,
       /*.name=*/IREE_SV("hidden_states.input"),
       /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
       /*.shape=*/id4_pipeline_program_make_shape_rank2(1, 4),
@@ -124,15 +134,16 @@ static id4_pipeline_program_t* CreateLinearProgram() {
       id4_pipeline_program_parameter(builder, &weight_options, &weight));
 
   id4_pipeline_program_tensor_t output = id4_pipeline_program_tensor_invalid();
-  id4_pipeline_program_acquire_tensor_options_t output_options = {
+  id4_pipeline_program_import_tensor_options_t output_options = {
       /*.structure_size=*/sizeof(output_options),
       /*.next=*/nullptr,
+      /*.flags=*/0,
       /*.name=*/IREE_SV("hidden_states.linear"),
       /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
       /*.shape=*/id4_pipeline_program_make_shape_rank2(1, 4),
   };
   IREE_CHECK_OK(
-      id4_pipeline_program_acquire_tensor(builder, &output_options, &output));
+      id4_pipeline_program_import_tensor(builder, &output_options, &output));
 
   id4_pipeline_kernel_config_binding_t config_bindings[] = {
       id4_pipeline_make_kernel_config_binding(IREE_SV("@batch"), IREE_SV("1")),
@@ -150,6 +161,7 @@ static id4_pipeline_program_t* CreateLinearProgram() {
       /*.name=*/IREE_SV("block0.linear.first"),
       /*.kernel=*/
       id4_pipeline_make_kernel_ref(IREE_SV("test/linear"), IREE_SV("linear")),
+      /*.dispatch_config=*/MakeTestDispatchConfig(),
       /*.config_binding_count=*/IREE_ARRAYSIZE(config_bindings),
       /*.config_bindings=*/config_bindings,
       /*.binding_count=*/IREE_ARRAYSIZE(first_bindings),
@@ -157,6 +169,13 @@ static id4_pipeline_program_t* CreateLinearProgram() {
   };
   IREE_CHECK_OK(
       id4_pipeline_program_dispatch_loom(builder, &first_dispatch_options));
+
+  id4_pipeline_program_barrier_options_t barrier_options = {
+      /*.structure_size=*/sizeof(barrier_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("block0.linear.after_first"),
+  };
+  IREE_CHECK_OK(id4_pipeline_program_barrier(builder, &barrier_options));
 
   id4_pipeline_program_dispatch_binding_t second_bindings[] = {
       id4_pipeline_program_read_write(output),
@@ -168,6 +187,7 @@ static id4_pipeline_program_t* CreateLinearProgram() {
       /*.name=*/IREE_SV("block0.linear.second"),
       /*.kernel=*/
       id4_pipeline_make_kernel_ref(IREE_SV("test/linear"), IREE_SV("linear")),
+      /*.dispatch_config=*/MakeTestDispatchConfig(),
       /*.config_binding_count=*/IREE_ARRAYSIZE(config_bindings),
       /*.config_bindings=*/config_bindings,
       /*.binding_count=*/IREE_ARRAYSIZE(second_bindings),
@@ -210,22 +230,35 @@ static id4_pipeline_program_plan_options_t MakePlanOptions(
           IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET |
               IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE,
           /*min_alignment=*/16);
+  iree_hal_buffer_params_t local_params = {};
+  local_params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+  local_params.access = IREE_HAL_MEMORY_ACCESS_ALL;
+  local_params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE;
+  local_params.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  local_params.min_alignment = 16;
   id4_pipeline_program_plan_options_t options = {
       /*.structure_size=*/sizeof(options),
       /*.next=*/nullptr,
+      /*.flags=*/ID4_PIPELINE_PROGRAM_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS,
       /*.program=*/program,
       /*.device_group=*/device_group,
       /*.placement_count=*/1,
       /*.placements=*/placement,
       /*.parameter_scope=*/IREE_SV(""),
       /*.parameter_slab_placement_id=*/0,
+      /*.parameter_slab_binding_slot=*/0,
       /*.parameter_slab_target_params=*/parameter_params,
       /*.parameter_slab_alignment=*/16,
       /*.parameter_request_alignment=*/16,
       /*.kernel_placement_id=*/0,
       /*.region_placement_id=*/0,
-      /*.region_binding_capacity=*/4,
-      /*.region_local_binding_slot=*/3,
+      /*.region_local_slab_params=*/local_params,
+      /*.region_local_slab_alignment=*/16,
+      /*.region_local_tensor_alignment=*/16,
+      /*.region_binding_capacity=*/5,
+      /*.region_local_binding_slot=*/4,
+      /*.region_boundary_binding_slot_base=*/1,
+      /*.diagnostic_tap_binding_slot_base=*/3,
       /*.diagnostics_sink=*/diagnostics_sink,
   };
   return options;
@@ -255,11 +288,34 @@ TEST(PipelineProgramPlan, DerivesParameterKernelRegionAndTapPlans) {
       id4_pipeline_plan_parameter_slab_at(plan, 0);
   ASSERT_NE(parameter_slab, nullptr);
   EXPECT_EQ(parameter_slab->byte_length, 32u);
+  EXPECT_EQ(parameter_slab->binding_slot, 0u);
   ASSERT_EQ(parameter_slab->request_count, 1u);
   ExpectStringViewEqual(parameter_slab->requests[0].key,
                         IREE_SV("model.layers.0.linear.weight"));
   EXPECT_EQ(parameter_slab->requests[0].span.buffer_offset, 0u);
   EXPECT_EQ(parameter_slab->requests[0].span.length, 32u);
+  EXPECT_EQ(id4_pipeline_plan_memory_slab_count(plan), 0u);
+
+  ASSERT_EQ(id4_pipeline_plan_boundary_tensor_count(plan), 2u);
+  const id4_pipeline_boundary_tensor_plan_t* input_boundary =
+      id4_pipeline_plan_boundary_tensor_at(plan, 0);
+  ASSERT_NE(input_boundary, nullptr);
+  ExpectStringViewEqual(input_boundary->layout.name,
+                        IREE_SV("hidden_states.input"));
+  EXPECT_EQ(input_boundary->binding_slot, 1u);
+  EXPECT_TRUE(
+      iree_all_bits_set(input_boundary->flags,
+                        ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_IMPORTED |
+                            ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_INITIALIZED));
+  const id4_pipeline_boundary_tensor_plan_t* output_boundary =
+      id4_pipeline_plan_boundary_tensor_at(plan, 1);
+  ASSERT_NE(output_boundary, nullptr);
+  ExpectStringViewEqual(output_boundary->layout.name,
+                        IREE_SV("hidden_states.linear"));
+  EXPECT_EQ(output_boundary->binding_slot, 2u);
+  EXPECT_TRUE(iree_all_bits_set(
+      output_boundary->flags, ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_IMPORTED |
+                                  ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_EXPORTED));
 
   ASSERT_EQ(id4_pipeline_plan_kernel_count(plan), 1u);
   const id4_pipeline_kernel_plan_t* kernel =
@@ -277,9 +333,11 @@ TEST(PipelineProgramPlan, DerivesParameterKernelRegionAndTapPlans) {
       id4_pipeline_plan_region_at(plan, 0);
   ASSERT_NE(region, nullptr);
   ExpectStringViewEqual(region->name, IREE_SV("test.forward"));
-  EXPECT_EQ(region->statistics.operation_count, 2u);
+  EXPECT_EQ(region->statistics.operation_count, 6u);
   EXPECT_EQ(region->statistics.dispatch_count, 2u);
-  EXPECT_EQ(region->statistics.barrier_count, 0u);
+  EXPECT_EQ(region->statistics.copy_count, 1u);
+  EXPECT_EQ(region->statistics.barrier_count, 3u);
+  EXPECT_EQ(region->statistics.current_epoch, 3u);
 
   ASSERT_EQ(id4_pipeline_plan_diagnostic_tap_count(plan), 1u);
   const id4_pipeline_diagnostic_tap_plan_t* tap =
@@ -287,8 +345,13 @@ TEST(PipelineProgramPlan, DerivesParameterKernelRegionAndTapPlans) {
   ASSERT_NE(tap, nullptr);
   ExpectStringViewEqual(tap->name, IREE_SV("block0.linear.output"));
   EXPECT_EQ(tap->region_id, 0u);
-  EXPECT_EQ(tap->after_operation_ordinal, 1u);
+  EXPECT_EQ(tap->placement_id, 0u);
+  EXPECT_EQ(tap->binding_slot, 3u);
+  EXPECT_EQ(tap->after_operation_ordinal, 2u);
   ExpectStringViewEqual(tap->target_name, IREE_SV("hidden_states.linear"));
+  ExpectStringViewEqual(tap->layout.name, IREE_SV("block0.linear.output"));
+  EXPECT_EQ(tap->layout.dtype, ID4_PIPELINE_TENSOR_DTYPE_F32);
+  EXPECT_EQ(tap->layout.byte_length, 16u);
 
   id4_pipeline_plan_release(plan);
   iree_hal_device_group_release(device_group);
@@ -302,6 +365,7 @@ TEST(PipelineProgramPlan, RejectsTapBeforeExecutableRegionOperation) {
   id4_pipeline_program_import_tensor_options_t input_options = {
       /*.structure_size=*/sizeof(input_options),
       /*.next=*/nullptr,
+      /*.flags=*/ID4_PIPELINE_PROGRAM_IMPORT_TENSOR_FLAG_INITIALIZED,
       /*.name=*/IREE_SV("hidden_states.input"),
       /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
       /*.shape=*/id4_pipeline_program_make_shape_rank2(1, 4),

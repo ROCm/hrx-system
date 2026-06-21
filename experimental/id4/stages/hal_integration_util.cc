@@ -6,12 +6,11 @@
 
 #include "experimental/id4/stages/hal_integration_util.h"
 
-#include <mutex>
-
-#include "iree/hal/drivers/init.h"
+#include "experimental/id4/kernels/embedded_loom_sources.h"
 #include "iree/io/parameter_index.h"
 #include "iree/io/parameter_index_provider.h"
 #include "iree/io/scope_map.h"
+#include "iree/tooling/device_util.h"
 #include "iree/tooling/parameter_util.h"
 
 namespace id4::test {
@@ -35,20 +34,19 @@ id4_pipeline_diagnostics_sink_t DiagnosticsSink(StageDiagnostics* diagnostics) {
   };
 }
 
-static iree_status_t RegisterHalDriversOnce() {
-  static std::mutex mutex;
-  static bool is_registered = false;
-  std::lock_guard<std::mutex> lock(mutex);
-  if (is_registered) return iree_ok_status();
-  IREE_RETURN_IF_ERROR(iree_hal_register_all_available_drivers(
-      iree_hal_driver_registry_default()));
-  is_registered = true;
-  return iree_ok_status();
+static iree_status_t RequireSingleDeviceFlag() {
+  iree_string_view_list_t devices = iree_hal_device_flag_list();
+  if (devices.count == 1) return iree_ok_status();
+  return iree_make_status(
+      IREE_STATUS_INVALID_ARGUMENT,
+      "live stage integration tests require exactly one --device= flag; "
+      "received %" PRIhsz,
+      devices.count);
 }
 
-iree_status_t CreateLiveHalDevice(iree_string_view_t device_uri,
-                                  LiveHalDevice* out_device) {
-  IREE_RETURN_IF_ERROR(RegisterHalDriversOnce());
+iree_status_t CreateLiveStageContextFromFlags(LiveStageContext* out_context) {
+  IREE_ASSERT_ARGUMENT(out_context);
+  IREE_RETURN_IF_ERROR(RequireSingleDeviceFlag());
 
   iree_async_proactor_pool_t* proactor_pool = nullptr;
   iree_status_t status = iree_async_proactor_pool_create(
@@ -56,20 +54,20 @@ iree_status_t CreateLiveHalDevice(iree_string_view_t device_uri,
       iree_async_proactor_pool_options_default(), iree_allocator_system(),
       &proactor_pool);
   if (iree_status_is_ok(status)) {
-    out_device->proactor_pool.reset(proactor_pool);
+    out_context->proactor_pool.reset(proactor_pool);
   }
 
   iree_hal_device_create_params_t create_params =
       iree_hal_device_create_params_default();
-  create_params.proactor_pool = out_device->proactor_pool.get();
+  create_params.proactor_pool = out_context->proactor_pool.get();
   iree_hal_device_t* device = nullptr;
   if (iree_status_is_ok(status)) {
-    status = iree_hal_create_device(iree_hal_driver_registry_default(),
-                                    device_uri, &create_params,
-                                    iree_allocator_system(), &device);
+    status = iree_hal_create_device_from_flags(
+        iree_hal_available_driver_registry(), iree_string_view_empty(),
+        &create_params, iree_allocator_system(), &device);
   }
   if (iree_status_is_ok(status)) {
-    out_device->device.reset(device);
+    out_context->device.reset(device);
   }
 
   iree_async_frontier_tracker_options_t tracker_options =
@@ -80,18 +78,73 @@ iree_status_t CreateLiveHalDevice(iree_string_view_t device_uri,
         tracker_options, iree_allocator_system(), &frontier_tracker);
   }
   if (iree_status_is_ok(status)) {
-    out_device->frontier_tracker.reset(frontier_tracker);
+    out_context->frontier_tracker.reset(frontier_tracker);
   }
 
   iree_hal_device_group_t* device_group = nullptr;
   if (iree_status_is_ok(status)) {
     status = iree_hal_device_group_create_from_device(
-        out_device->device.get(), out_device->frontier_tracker.get(),
+        out_context->device.get(), out_context->frontier_tracker.get(),
         iree_allocator_system(), &device_group);
   }
   if (iree_status_is_ok(status)) {
-    out_device->device_group.reset(device_group);
+    out_context->device_group.reset(device_group);
   }
+
+  iree_hal_executable_cache_t* executable_cache = nullptr;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_executable_cache_create(
+        out_context->device.get(), IREE_SV("id4.stage"), &executable_cache);
+  }
+  if (iree_status_is_ok(status)) {
+    out_context->executable_cache.reset(executable_cache);
+  }
+
+  id4_pipeline_kernel_cache_create_options_t kernel_cache_options;
+  memset(&kernel_cache_options, 0, sizeof(kernel_cache_options));
+  kernel_cache_options.structure_size = sizeof(kernel_cache_options);
+  kernel_cache_options.target_processor =
+      id4_pipeline_kernel_cache_default_target_processor();
+  id4_pipeline_kernel_cache_t* kernel_cache = nullptr;
+  if (iree_status_is_ok(status)) {
+    status = id4_pipeline_kernel_cache_create(
+        &kernel_cache_options, iree_allocator_system(), &kernel_cache);
+  }
+  if (iree_status_is_ok(status)) {
+    out_context->kernel_cache.reset(kernel_cache);
+  }
+  return status;
+}
+
+iree_status_t CreateEmbeddedKernelLibrary(
+    id4_pipeline_kernel_library_t** out_library) {
+  IREE_ASSERT_ARGUMENT(out_library);
+  *out_library = nullptr;
+
+  const iree_file_toc_t* toc = id4_kernel_embedded_loom_sources_create();
+  const iree_host_size_t file_count = id4_kernel_embedded_loom_sources_size();
+  id4_pipeline_kernel_source_file_t* source_files = nullptr;
+  iree_status_t status = iree_ok_status();
+  if (file_count != 0) {
+    status = iree_allocator_malloc_array(
+        iree_allocator_system(), file_count, sizeof(source_files[0]),
+        reinterpret_cast<void**>(&source_files));
+  }
+  for (iree_host_size_t i = 0; i < file_count && iree_status_is_ok(status);
+       ++i) {
+    source_files[i] = id4_pipeline_kernel_source_file_t{
+        // Source identifier formatted as <module_path>.loom.
+        /*.source_identifier=*/iree_make_cstring_view(toc[i].name),
+        // Embedded Loom source payload.
+        /*.source_contents=*/
+        iree_make_const_byte_span(toc[i].data, toc[i].size),
+    };
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_pipeline_kernel_library_create_from_source_files(
+        file_count, source_files, iree_allocator_system(), out_library);
+  }
+  iree_allocator_free(iree_allocator_system(), source_files);
   return status;
 }
 

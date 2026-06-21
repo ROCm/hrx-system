@@ -78,6 +78,8 @@ typedef struct id4_pipeline_parameter_slab_plan_t {
   iree_string_view_t scope;
   // Placement where the slab is allocated.
   id4_pipeline_device_placement_id_t placement_id;
+  // Issue-time binding-table slot used for this slab.
+  uint32_t binding_slot;
   // HAL buffer parameters used for slab allocation.
   iree_hal_buffer_params_t target_params;
   // Total slab byte length.
@@ -94,12 +96,14 @@ typedef struct id4_pipeline_parameter_slab_plan_t {
 static inline id4_pipeline_parameter_slab_plan_t
 id4_pipeline_make_parameter_slab_plan(
     iree_string_view_t scope, id4_pipeline_device_placement_id_t placement_id,
-    iree_hal_buffer_params_t target_params, iree_device_size_t byte_length,
-    iree_device_size_t alignment, iree_host_size_t request_count,
+    uint32_t binding_slot, iree_hal_buffer_params_t target_params,
+    iree_device_size_t byte_length, iree_device_size_t alignment,
+    iree_host_size_t request_count,
     const id4_pipeline_parameter_request_t* requests) {
   id4_pipeline_parameter_slab_plan_t plan;
   plan.scope = scope;
   plan.placement_id = placement_id;
+  plan.binding_slot = binding_slot;
   plan.target_params = target_params;
   plan.byte_length = byte_length;
   plan.alignment = alignment;
@@ -112,12 +116,12 @@ id4_pipeline_make_parameter_slab_plan(
 static inline id4_pipeline_parameter_slab_plan_t
 id4_pipeline_make_device_local_parameter_slab_plan(
     iree_string_view_t scope, id4_pipeline_device_placement_id_t placement_id,
-    iree_hal_queue_affinity_t queue_affinity, iree_hal_buffer_usage_t usage,
-    iree_device_size_t byte_length, iree_device_size_t alignment,
-    iree_host_size_t request_count,
+    uint32_t binding_slot, iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_buffer_usage_t usage, iree_device_size_t byte_length,
+    iree_device_size_t alignment, iree_host_size_t request_count,
     const id4_pipeline_parameter_request_t* requests) {
   return id4_pipeline_make_parameter_slab_plan(
-      scope, placement_id,
+      scope, placement_id, binding_slot,
       id4_pipeline_parameter_slab_device_local_params(queue_affinity, usage,
                                                       alignment),
       byte_length, alignment, request_count, requests);

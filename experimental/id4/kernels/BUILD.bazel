@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/bazel:executable.bzl", "iree_executable_test")
+load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 
 package(
@@ -42,6 +43,67 @@ _KERNEL_CASES = [
         "target_name": "sampler_cfg_denoise_f32_full_latent",
     },
     {
+        "actual_case": "@id4_qwen3_vl_attention_f32_single_token_case",
+        "benchmark": "@id4_qwen3_vl_attention_f32_single_token",
+        "configs": [
+            "--config=id4.qwen3_vl.attention.token_count=1",
+            "--config=id4.qwen3_vl.attention.hidden_size=2",
+            "--config=id4.qwen3_vl.attention.attention_head_count=1",
+            "--config=id4.qwen3_vl.attention.key_value_head_count=1",
+            "--config=id4.qwen3_vl.attention.head_size=2",
+        ],
+        "source": "qwen3_vl/attention_f32.loom",
+        "target_name": "qwen3_vl_attention_f32_single_token",
+    },
+    {
+        "actual_case": "@id4_qwen3_vl_attention_f32_uniform_softmax_case",
+        "benchmark": "@id4_qwen3_vl_attention_f32_uniform_softmax",
+        "configs": [
+            "--config=id4.qwen3_vl.attention.token_count=2",
+            "--config=id4.qwen3_vl.attention.hidden_size=1",
+            "--config=id4.qwen3_vl.attention.attention_head_count=1",
+            "--config=id4.qwen3_vl.attention.key_value_head_count=1",
+            "--config=id4.qwen3_vl.attention.head_size=1",
+        ],
+        "source": "qwen3_vl/attention_f32.loom",
+        "target_name": "qwen3_vl_attention_f32_uniform_softmax",
+    },
+    {
+        "actual_case": "@id4_qwen3_vl_attention_f32_qwen_slice_case",
+        "benchmark": "@id4_qwen3_vl_attention_f32_qwen_slice",
+        "configs": [
+            "--config=id4.qwen3_vl.attention.token_count=64",
+            "--config=id4.qwen3_vl.attention.hidden_size=4096",
+            "--config=id4.qwen3_vl.attention.attention_head_count=32",
+            "--config=id4.qwen3_vl.attention.key_value_head_count=8",
+            "--config=id4.qwen3_vl.attention.head_size=128",
+        ],
+        "source": "qwen3_vl/attention_f32.loom",
+        "target_name": "qwen3_vl_attention_f32_qwen_slice",
+    },
+    {
+        "actual_case": "@id4_qwen3_vl_token_embedding_bf16_f32_small_case",
+        "benchmark": "@id4_qwen3_vl_token_embedding_bf16_f32_small",
+        "configs": [
+            "--config=id4.qwen3_vl.token_embedding.token_count=2",
+            "--config=id4.qwen3_vl.token_embedding.hidden_size=4",
+            "--config=id4.qwen3_vl.token_embedding.vocab_size=3",
+        ],
+        "source": "qwen3_vl/token_embedding.loom",
+        "target_name": "qwen3_vl_token_embedding_bf16_f32_small",
+    },
+    {
+        "actual_case": "@id4_qwen3_vl_token_embedding_bf16_f32_qwen_slice_case",
+        "benchmark": "@id4_qwen3_vl_token_embedding_bf16_f32_qwen_slice",
+        "configs": [
+            "--config=id4.qwen3_vl.token_embedding.token_count=64",
+            "--config=id4.qwen3_vl.token_embedding.hidden_size=4096",
+            "--config=id4.qwen3_vl.token_embedding.vocab_size=151936",
+        ],
+        "source": "qwen3_vl/token_embedding.loom",
+        "target_name": "qwen3_vl_token_embedding_bf16_f32_qwen_slice",
+    },
+    {
         "actual_case": "@id4_qwen3_vl_condition_forward_f32_small_case",
         "benchmark": "@id4_qwen3_vl_condition_forward_f32_small",
         "configs": [
@@ -62,6 +124,30 @@ _KERNEL_CASES = [
         "target_name": "qwen3_vl_condition_f32_fixture_slice",
     },
     {
+        "actual_case": "@id4_qwen3_vl_selected_hidden_pack_f32_small_case",
+        "benchmark": "@id4_qwen3_vl_selected_hidden_pack_f32_small",
+        "configs": [
+            "--config=id4.qwen3_vl.selected_hidden_pack.token_count=4",
+            "--config=id4.qwen3_vl.selected_hidden_pack.hidden_size=1",
+            "--config=id4.qwen3_vl.selected_hidden_pack.hidden_row_count=1",
+            "--config=id4.qwen3_vl.selected_hidden_pack.selected_layer_index=0",
+        ],
+        "source": "qwen3_vl/selected_hidden_pack_f32.loom",
+        "target_name": "qwen3_vl_selected_hidden_pack_f32_small",
+    },
+    {
+        "actual_case": "@id4_qwen3_vl_selected_hidden_pack_f32_qwen_slice_case",
+        "benchmark": "@id4_qwen3_vl_selected_hidden_pack_f32_qwen_slice",
+        "configs": [
+            "--config=id4.qwen3_vl.selected_hidden_pack.token_count=64",
+            "--config=id4.qwen3_vl.selected_hidden_pack.hidden_size=4096",
+            "--config=id4.qwen3_vl.selected_hidden_pack.hidden_row_count=53248",
+            "--config=id4.qwen3_vl.selected_hidden_pack.selected_layer_index=0",
+        ],
+        "source": "qwen3_vl/selected_hidden_pack_f32.loom",
+        "target_name": "qwen3_vl_selected_hidden_pack_f32_qwen_slice",
+    },
+    {
         "actual_case": "@id4_qwen3_vl_rmsnorm_f32_small_case",
         "benchmark": "@id4_qwen3_vl_rmsnorm_f32_small",
         "configs": [
@@ -80,6 +166,68 @@ _KERNEL_CASES = [
         ],
         "source": "qwen3_vl/rmsnorm.loom",
         "target_name": "qwen3_vl_rmsnorm_f32_qwen_slice",
+    },
+    {
+        "actual_case": "@id4_qwen3_vl_rotary_embedding_f32_identity_case",
+        "benchmark": "@id4_qwen3_vl_rotary_embedding_f32_identity",
+        "configs": [
+            "--config=id4.qwen3_vl.rotary.token_count=1",
+            "--config=id4.qwen3_vl.rotary.output_size=4",
+            "--config=id4.qwen3_vl.rotary.head_size=4",
+        ],
+        "source": "qwen3_vl/rotary_embedding.loom",
+        "target_name": "qwen3_vl_rotary_embedding_f32_identity",
+    },
+    {
+        "actual_case": "@id4_qwen3_vl_rotary_embedding_f32_qwen_slice_case",
+        "benchmark": "@id4_qwen3_vl_rotary_embedding_f32_qwen_slice",
+        "configs": [
+            "--config=id4.qwen3_vl.rotary.token_count=64",
+            "--config=id4.qwen3_vl.rotary.output_size=4096",
+            "--config=id4.qwen3_vl.rotary.head_size=128",
+        ],
+        "source": "qwen3_vl/rotary_embedding.loom",
+        "target_name": "qwen3_vl_rotary_embedding_f32_qwen_slice",
+    },
+    {
+        "actual_case": "@id4_qwen3_vl_silu_gate_f32_small_case",
+        "benchmark": "@id4_qwen3_vl_silu_gate_f32_small",
+        "configs": [
+            "--config=id4.qwen3_vl.silu_gate.token_count=2",
+            "--config=id4.qwen3_vl.silu_gate.intermediate_size=3",
+        ],
+        "source": "qwen3_vl/silu_gate_f32.loom",
+        "target_name": "qwen3_vl_silu_gate_f32_small",
+    },
+    {
+        "actual_case": "@id4_qwen3_vl_silu_gate_f32_qwen_slice_case",
+        "benchmark": "@id4_qwen3_vl_silu_gate_f32_qwen_slice",
+        "configs": [
+            "--config=id4.qwen3_vl.silu_gate.token_count=64",
+            "--config=id4.qwen3_vl.silu_gate.intermediate_size=12288",
+        ],
+        "source": "qwen3_vl/silu_gate_f32.loom",
+        "target_name": "qwen3_vl_silu_gate_f32_qwen_slice",
+    },
+    {
+        "actual_case": "@id4_qwen3_vl_residual_add_f32_small_case",
+        "benchmark": "@id4_qwen3_vl_residual_add_f32_small",
+        "configs": [
+            "--config=id4.qwen3_vl.residual_add.token_count=2",
+            "--config=id4.qwen3_vl.residual_add.hidden_size=3",
+        ],
+        "source": "qwen3_vl/residual_add_f32.loom",
+        "target_name": "qwen3_vl_residual_add_f32_small",
+    },
+    {
+        "actual_case": "@id4_qwen3_vl_residual_add_f32_qwen_slice_case",
+        "benchmark": "@id4_qwen3_vl_residual_add_f32_qwen_slice",
+        "configs": [
+            "--config=id4.qwen3_vl.residual_add.token_count=64",
+            "--config=id4.qwen3_vl.residual_add.hidden_size=4096",
+        ],
+        "source": "qwen3_vl/residual_add_f32.loom",
+        "target_name": "qwen3_vl_residual_add_f32_qwen_slice",
     },
     {
         "actual_case": "@id4_qwen3_vl_linear_bf16_f32_small_case",
@@ -106,9 +254,15 @@ _KERNEL_CASES = [
 ]
 
 _KERNEL_SOURCES = [
+    "qwen3_vl/attention_f32.loom",
     "qwen3_vl/condition.loom",
     "qwen3_vl/linear_bf16_f32.loom",
+    "qwen3_vl/residual_add_f32.loom",
+    "qwen3_vl/rotary_embedding.loom",
     "qwen3_vl/rmsnorm.loom",
+    "qwen3_vl/selected_hidden_pack_f32.loom",
+    "qwen3_vl/silu_gate_f32.loom",
+    "qwen3_vl/token_embedding.loom",
     "sampler_cfg_denoise_f32.loom",
     "smoke_configured.loom",
 ]
@@ -120,9 +274,20 @@ filegroup(
     srcs = _KERNEL_SOURCES,
 )
 
-_AMDGPU_HAL_COMPATIBLE_WITH = loom_config_compatible_with([
+iree_c_embed_data(
+    name = "embedded_loom_sources",
+    srcs = _KERNEL_SOURCES,
+    c_file_output = "embedded_loom_sources.c",
+    h_file_output = "embedded_loom_sources.h",
+    identifier = "id4_kernel_embedded_loom_sources",
+    strip_prefix = "experimental/id4/kernels/",
+)
+
+_HAL_EXECUTION_COMPATIBLE_WITH = loom_config_compatible_with([
     "//loom/config/execute:amdgpu_hal",
 ])
+
+_HAL_EXECUTION_DEVICE = "amdgpu://0"
 
 [
     iree_executable_test(
@@ -144,12 +309,12 @@ _AMDGPU_HAL_COMPATIBLE_WITH = loom_config_compatible_with([
 
 [
     iree_executable_test(
-        name = _case["target_name"] + "_amdgpu_test",
+        name = _case["target_name"] + "_hal_test",
         src = "//loom/src/loom/tools/iree-test-loom",
         args = [
             "$(location %s)" % _case["source"],
             "--case=%s" % _case["actual_case"],
-            "--device=amdgpu://0",
+            "--device=%s" % _HAL_EXECUTION_DEVICE,
         ] + _case["configs"],
         data = [
             _case["source"],
@@ -160,7 +325,7 @@ _AMDGPU_HAL_COMPATIBLE_WITH = loom_config_compatible_with([
             "requires-gpu-amd",
             "runtime-resource=amd-gpu",
         ],
-        target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
+        target_compatible_with = _HAL_EXECUTION_COMPATIBLE_WITH,
     )
     for _case in _KERNEL_CASES
 ]

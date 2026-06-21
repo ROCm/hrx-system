@@ -69,9 +69,11 @@ static iree_status_t id4_pipeline_validate_plan_options(
   }
   IREE_RETURN_IF_ERROR(id4_pipeline_validate_options_size(
       options->structure_size, sizeof(*options), IREE_SV("plan")));
-  if (options->next) {
-    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                            "plan extension structures are not supported");
+  const id4_pipeline_stage_plan_flags_t allowed_flags =
+      ID4_PIPELINE_STAGE_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS;
+  if (iree_any_bit_set(options->flags, ~allowed_flags)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported plan flags 0x%x", options->flags);
   }
   IREE_RETURN_IF_ERROR(id4_pipeline_diagnostics_validate_sink(
       options->diagnostics_sink, IREE_SV("plan")));
@@ -122,7 +124,150 @@ static iree_status_t id4_pipeline_validate_prepare_options(
   return iree_ok_status();
 }
 
+static iree_status_t id4_pipeline_validate_issue_boundary_binding(
+    const id4_pipeline_boundary_tensor_plan_t* boundary_tensor,
+    const iree_hal_buffer_binding_t* binding, iree_host_size_t binding_index) {
+  if (!binding->buffer) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "issue boundary binding %" PRIhsz " for tensor %.*s has no buffer",
+        binding_index, (int)boundary_tensor->layout.name.size,
+        boundary_tensor->layout.name.data);
+  }
+  if (binding->length < boundary_tensor->layout.byte_length) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "issue boundary binding %" PRIhsz " for tensor %.*s has length %" PRIu64
+        " but requires %" PRIu64,
+        binding_index, (int)boundary_tensor->layout.name.size,
+        boundary_tensor->layout.name.data, binding->length,
+        boundary_tensor->layout.byte_length);
+  }
+  const iree_device_size_t alignment =
+      boundary_tensor->layout.alignment ? boundary_tensor->layout.alignment : 1;
+  if ((binding->offset % alignment) != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "issue boundary binding %" PRIhsz " for tensor %.*s has offset %" PRIu64
+        " that is not aligned to %" PRIu64,
+        binding_index, (int)boundary_tensor->layout.name.size,
+        boundary_tensor->layout.name.data, binding->offset, alignment);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_validate_issue_boundary_bindings(
+    const id4_pipeline_plan_t* plan,
+    const id4_pipeline_stage_issue_options_t* options) {
+  const iree_host_size_t boundary_tensor_count =
+      id4_pipeline_plan_boundary_tensor_count(plan);
+  if (boundary_tensor_count == 0) {
+    if (options->boundary_binding_count != 0) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "issue boundary binding count %" PRIhsz
+                              " is present for a plan with no boundary tensors",
+                              options->boundary_binding_count);
+    }
+    if (options->boundary_bindings) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "issue boundary bindings are present for a plan with no boundary "
+          "tensors");
+    }
+    return iree_ok_status();
+  }
+  if (options->boundary_binding_count != boundary_tensor_count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "issue expected %" PRIhsz " boundary bindings but got %" PRIhsz,
+        boundary_tensor_count, options->boundary_binding_count);
+  }
+  if (!options->boundary_bindings) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "issue boundary binding array is required");
+  }
+  for (iree_host_size_t i = 0; i < boundary_tensor_count; ++i) {
+    const id4_pipeline_boundary_tensor_plan_t* boundary_tensor =
+        id4_pipeline_plan_boundary_tensor_at(plan, i);
+    IREE_RETURN_IF_ERROR(id4_pipeline_validate_issue_boundary_binding(
+        boundary_tensor, &options->boundary_bindings[i], i));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_validate_issue_diagnostic_tap_binding(
+    const id4_pipeline_diagnostic_tap_plan_t* diagnostic_tap,
+    const iree_hal_buffer_binding_t* binding, iree_host_size_t binding_index) {
+  if (!binding->buffer) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "issue diagnostic tap binding %" PRIhsz
+                            " for tap %.*s has no buffer",
+                            binding_index, (int)diagnostic_tap->name.size,
+                            diagnostic_tap->name.data);
+  }
+  if (binding->length < diagnostic_tap->layout.byte_length) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "issue diagnostic tap binding %" PRIhsz
+                            " for tap %.*s has length "
+                            "%" PRIu64 " but requires %" PRIu64,
+                            binding_index, (int)diagnostic_tap->name.size,
+                            diagnostic_tap->name.data, binding->length,
+                            diagnostic_tap->layout.byte_length);
+  }
+  const iree_device_size_t alignment =
+      diagnostic_tap->layout.alignment ? diagnostic_tap->layout.alignment : 1;
+  if ((binding->offset % alignment) != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "issue diagnostic tap binding %" PRIhsz
+        " for tap %.*s has offset %" PRIu64 " that is not aligned to %" PRIu64,
+        binding_index, (int)diagnostic_tap->name.size,
+        diagnostic_tap->name.data, binding->offset, alignment);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_validate_issue_diagnostic_tap_bindings(
+    const id4_pipeline_plan_t* plan,
+    const id4_pipeline_stage_issue_options_t* options) {
+  const iree_host_size_t diagnostic_tap_count =
+      id4_pipeline_plan_diagnostic_tap_count(plan);
+  if (diagnostic_tap_count == 0) {
+    if (options->diagnostic_tap_binding_count != 0) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "issue diagnostic tap binding count %" PRIhsz
+                              " is present for a plan with no diagnostic taps",
+                              options->diagnostic_tap_binding_count);
+    }
+    if (options->diagnostic_tap_bindings) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "issue diagnostic tap bindings are present for a plan with no "
+          "diagnostic taps");
+    }
+    return iree_ok_status();
+  }
+  if (options->diagnostic_tap_binding_count != diagnostic_tap_count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "issue expected %" PRIhsz " diagnostic tap bindings but got %" PRIhsz,
+        diagnostic_tap_count, options->diagnostic_tap_binding_count);
+  }
+  if (!options->diagnostic_tap_bindings) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "issue diagnostic tap binding array is required");
+  }
+  for (iree_host_size_t i = 0; i < diagnostic_tap_count; ++i) {
+    const id4_pipeline_diagnostic_tap_plan_t* diagnostic_tap =
+        id4_pipeline_plan_diagnostic_tap_at(plan, i);
+    IREE_RETURN_IF_ERROR(id4_pipeline_validate_issue_diagnostic_tap_binding(
+        diagnostic_tap, &options->diagnostic_tap_bindings[i], i));
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t id4_pipeline_validate_issue_options(
+    id4_pipeline_bundle_t* bundle,
     const id4_pipeline_stage_issue_options_t* options) {
   if (!options) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -142,6 +287,10 @@ static iree_status_t id4_pipeline_validate_issue_options(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "issue final signal is required");
   }
+  IREE_RETURN_IF_ERROR(id4_pipeline_validate_issue_boundary_bindings(
+      id4_pipeline_bundle_plan(bundle), options));
+  IREE_RETURN_IF_ERROR(id4_pipeline_validate_issue_diagnostic_tap_bindings(
+      id4_pipeline_bundle_plan(bundle), options));
   IREE_RETURN_IF_ERROR(id4_pipeline_diagnostics_validate_sink(
       options->diagnostics_sink, IREE_SV("issue")));
   return iree_ok_status();
@@ -335,7 +484,7 @@ iree_status_t id4_pipeline_stage_issue(
     const id4_pipeline_stage_issue_options_t* options) {
   IREE_ASSERT_ARGUMENT(stage);
   IREE_ASSERT_ARGUMENT(bundle);
-  IREE_RETURN_IF_ERROR(id4_pipeline_validate_issue_options(options));
+  IREE_RETURN_IF_ERROR(id4_pipeline_validate_issue_options(bundle, options));
   return stage->vtable->issue(stage, bundle, options);
 }
 

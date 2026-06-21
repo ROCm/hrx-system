@@ -1,0 +1,66 @@
+config.decl @id4.qwen3_vl.silu_gate.token_count : %value: index where [range(%value, 1, 65536)]
+config.decl @id4.qwen3_vl.silu_gate.intermediate_size : %value: index where [range(%value, 1, 65536)]
+
+kernel.def export("id4_qwen3_vl_silu_gate_f32") @id4_qwen3_vl_silu_gate_f32() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %token_count = config.get @id4.qwen3_vl.silu_gate.token_count : index
+  %intermediate_size = config.get @id4.qwen3_vl.silu_gate.intermediate_size : index
+  %element_count = index.mul %token_count, %intermediate_size : index
+  %rounding = index.sub %workgroup_size_x, %unit : index
+  %rounded = index.add %element_count, %rounding : index
+  %workgroups_x = index.div %rounded, %workgroup_size_x : index
+  kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%gate: buffer, %up: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size_x = index.constant 256 : index
+  %token_count = config.get @id4.qwen3_vl.silu_gate.token_count : index
+  %intermediate_size = config.get @id4.qwen3_vl.silu_gate.intermediate_size : index
+  %element_count = index.mul %token_count, %intermediate_size : index
+  %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
+  %in_bounds = index.cmp ult, %element_index, %element_count : index
+
+  %gate_noalias, %up_noalias, %output_noalias = buffer.assume.noalias %gate, %up, %output : buffer, buffer, buffer
+  %gate_global = buffer.assume.memory_space<global> %gate_noalias : buffer
+  %up_global = buffer.assume.memory_space<global> %up_noalias : buffer
+  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
+  %gate_view = buffer.view %gate_global[%base] : buffer -> view<[%token_count]x[%intermediate_size]xf32, #dense>
+  %up_view = buffer.view %up_global[%base] : buffer -> view<[%token_count]x[%intermediate_size]xf32, #dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<[%token_count]x[%intermediate_size]xf32, #dense>
+
+  scf.if %in_bounds {
+    %token = index.div %element_index, %intermediate_size : index
+    %channel = index.rem %element_index, %intermediate_size : index
+    %gate_value = view.load %gate_view[%token, %channel] : view<[%token_count]x[%intermediate_size]xf32, #dense> -> f32
+    %up_value = view.load %up_view[%token, %channel] : view<[%token_count]x[%intermediate_size]xf32, #dense> -> f32
+    %gate_silu = scalar.siluf %gate_value : f32
+    %value = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu, %up_value : f32
+    view.store %value, %output_view[%token, %channel] : f32, view<[%token_count]x[%intermediate_size]xf32, #dense>
+  }
+  kernel.return
+}
+
+check.case public @id4_qwen3_vl_silu_gate_f32_small_case {
+  %gate = check.generate.fill value(1.0) : tensor<2x3xf32>
+  %up = check.generate.fill value(2.0) : tensor<2x3xf32>
+  %output = check.generate.fill value(0.0) : tensor<2x3xf32>
+  %expected = check.generate.fill value(1.4621171572600098) : tensor<2x3xf32>
+  func.call @id4_qwen3_vl_silu_gate_f32(%gate, %up, %output) : (tensor<2x3xf32>, tensor<2x3xf32>, tensor<2x3xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.00001) rtol(0.00001) nan(same) : tensor<2x3xf32>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_silu_gate_f32_qwen_slice_case {
+  %gate = check.generate.fill value(0.0) : tensor<64x12288xf32>
+  %up = check.generate.fill value(7.0) : tensor<64x12288xf32>
+  %output = check.generate.fill value(1.0) : tensor<64x12288xf32>
+  %expected = check.generate.fill value(0.0) : tensor<64x12288xf32>
+  func.call @id4_qwen3_vl_silu_gate_f32(%gate, %up, %output) : (tensor<64x12288xf32>, tensor<64x12288xf32>, tensor<64x12288xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<64x12288xf32>
+  check.return
+}
+
+check.benchmark<@id4_qwen3_vl_silu_gate_f32_small_case> @id4_qwen3_vl_silu_gate_f32_small
+check.benchmark<@id4_qwen3_vl_silu_gate_f32_qwen_slice_case> @id4_qwen3_vl_silu_gate_f32_qwen_slice

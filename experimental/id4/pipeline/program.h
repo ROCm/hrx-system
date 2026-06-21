@@ -12,13 +12,14 @@
 #include "experimental/id4/pipeline/kernel_library.h"
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "iree/hal/command_buffer.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif  // __cplusplus
 
-// Maximum tensor rank represented inline in semantic pipeline programs.
-#define ID4_PIPELINE_PROGRAM_TENSOR_MAX_RANK 4
+// Current inline tensor rank storage limit for semantic pipeline programs.
+#define ID4_PIPELINE_PROGRAM_TENSOR_MAX_RANK 5
 
 // Invalid semantic program tensor ordinal.
 #define ID4_PIPELINE_PROGRAM_TENSOR_ORDINAL_INVALID UINT32_MAX
@@ -49,7 +50,7 @@ typedef enum id4_pipeline_program_dtype_e {
 typedef enum id4_pipeline_program_op_kind_e {
   // Invalid operation kind.
   ID4_PIPELINE_PROGRAM_OP_KIND_INVALID = 0,
-  // External initialized tensor imported by the stage caller.
+  // External tensor imported by the stage caller.
   ID4_PIPELINE_PROGRAM_OP_KIND_IMPORT = 1,
   // Initialized tensor loaded from the model parameter provider.
   ID4_PIPELINE_PROGRAM_OP_KIND_PARAMETER = 2,
@@ -61,7 +62,7 @@ typedef enum id4_pipeline_program_op_kind_e {
   ID4_PIPELINE_PROGRAM_OP_KIND_BARRIER = 5,
   // Diagnostic capture point for a tensor value.
   ID4_PIPELINE_PROGRAM_OP_KIND_TAP = 6,
-  // External initialized tensor exported by the stage.
+  // External initialized tensor exported by the stage after producer writes.
   ID4_PIPELINE_PROGRAM_OP_KIND_EXPORT = 7,
 } id4_pipeline_program_op_kind_t;
 
@@ -76,11 +77,20 @@ typedef enum id4_pipeline_program_tensor_access_flag_bits_e {
   ID4_PIPELINE_PROGRAM_TENSOR_ACCESS_WRITE = 1u << 1,
 } id4_pipeline_program_tensor_access_flag_bits_t;
 
-// Fixed-rank tensor shape used by semantic program values.
+// External tensor import flags.
+typedef uint32_t id4_pipeline_program_import_tensor_flags_t;
+
+// External tensor import flag bits.
+typedef enum id4_pipeline_program_import_tensor_flag_bits_e {
+  // Imported tensor contents are initialized before stage execution begins.
+  ID4_PIPELINE_PROGRAM_IMPORT_TENSOR_FLAG_INITIALIZED = 1u << 0,
+} id4_pipeline_program_import_tensor_flag_bits_t;
+
+// Inline tensor shape used by semantic program values.
 typedef struct id4_pipeline_program_shape_t {
   // Number of used dimensions in dims.
   uint32_t rank;
-  // Dimension extents for ranks up to ID4_PIPELINE_PROGRAM_TENSOR_MAX_RANK.
+  // Dimension extents stored inline up to the current rank limit.
   uint64_t dims[ID4_PIPELINE_PROGRAM_TENSOR_MAX_RANK];
 } id4_pipeline_program_shape_t;
 
@@ -114,7 +124,9 @@ typedef struct id4_pipeline_program_dispatch_binding_t {
 
 // Imported tensor operation payload.
 typedef struct id4_pipeline_program_import_op_t {
-  // Imported initialized tensor.
+  // Import flags describing the external tensor boundary contract.
+  id4_pipeline_program_import_tensor_flags_t flags;
+  // Imported external tensor.
   id4_pipeline_program_tensor_t tensor;
 } id4_pipeline_program_import_op_t;
 
@@ -136,6 +148,8 @@ typedef struct id4_pipeline_program_dispatch_loom_op_t {
   iree_string_view_t name;
   // Exported Loom kernel selected by the program.
   id4_pipeline_kernel_ref_t kernel;
+  // HAL dispatch geometry mirrored from the Loom launch config region.
+  iree_hal_dispatch_config_t dispatch_config;
   // Number of copied Loom config bindings.
   iree_host_size_t config_binding_count;
   // Copied Loom config bindings.
@@ -205,12 +219,14 @@ typedef struct id4_pipeline_program_builder_create_options_t {
   iree_arena_block_pool_t* block_pool;
 } id4_pipeline_program_builder_create_options_t;
 
-// Options for importing an initialized external tensor.
+// Options for importing an external stage-boundary tensor.
 typedef struct id4_pipeline_program_import_tensor_options_t {
   // Size of this structure for versioning.
   iree_host_size_t structure_size;
   // Extension structure chain; must be NULL for now.
   const void* next;
+  // Import flags describing the external tensor boundary contract.
+  id4_pipeline_program_import_tensor_flags_t flags;
   // Stable tensor name used by the stage boundary.
   iree_string_view_t name;
   // Scalar element type.
@@ -257,6 +273,8 @@ typedef struct id4_pipeline_program_dispatch_loom_options_t {
   iree_string_view_t name;
   // Exported Loom kernel selected by the program.
   id4_pipeline_kernel_ref_t kernel;
+  // HAL dispatch geometry mirrored from the Loom launch config region.
+  iree_hal_dispatch_config_t dispatch_config;
   // Number of Loom config bindings.
   iree_host_size_t config_binding_count;
   // Loom config bindings borrowed for the dispatch call.
@@ -367,6 +385,21 @@ id4_pipeline_program_make_shape_rank4(uint64_t dim0, uint64_t dim1,
   return shape;
 }
 
+// Returns a rank-5 tensor shape.
+static inline id4_pipeline_program_shape_t
+id4_pipeline_program_make_shape_rank5(uint64_t dim0, uint64_t dim1,
+                                      uint64_t dim2, uint64_t dim3,
+                                      uint64_t dim4) {
+  id4_pipeline_program_shape_t shape = {0};
+  shape.rank = 5;
+  shape.dims[0] = dim0;
+  shape.dims[1] = dim1;
+  shape.dims[2] = dim2;
+  shape.dims[3] = dim3;
+  shape.dims[4] = dim4;
+  return shape;
+}
+
 // Returns a dispatch binding with explicit tensor access flags.
 static inline id4_pipeline_program_dispatch_binding_t
 id4_pipeline_program_dispatch_binding(
@@ -424,7 +457,7 @@ iree_status_t id4_pipeline_program_builder_create(
 void id4_pipeline_program_builder_destroy(
     id4_pipeline_program_builder_t* builder);
 
-// Imports an initialized external tensor from the stage boundary.
+// Imports an external tensor from the stage boundary.
 iree_status_t id4_pipeline_program_import_tensor(
     id4_pipeline_program_builder_t* builder,
     const id4_pipeline_program_import_tensor_options_t* options,

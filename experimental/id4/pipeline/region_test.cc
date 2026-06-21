@@ -17,8 +17,6 @@
 namespace iree {
 namespace {
 
-using ::iree::testing::status::StatusIs;
-
 static id4_pipeline_tensor_shape_t MakeVectorShape(uint64_t element_count) {
   id4_pipeline_tensor_shape_t shape = {};
   shape.rank = 1;
@@ -31,7 +29,8 @@ static id4_pipeline_tensor_layout_t MakeTensorLayout(
     iree_device_size_t alignment = 16) {
   return (id4_pipeline_tensor_layout_t){
       /*.name=*/name,
-      /*.shape=*/MakeVectorShape(byte_length),
+      /*.dtype=*/ID4_PIPELINE_TENSOR_DTYPE_U32,
+      /*.shape=*/MakeVectorShape(byte_length / sizeof(uint32_t)),
       /*.byte_length=*/byte_length,
       /*.alignment=*/alignment,
   };
@@ -224,12 +223,12 @@ TEST_F(RegionBuilderTest, ReadsFromAcquiredTensorRequirePriorWrite) {
       /*.tensor=*/tensor,
       /*.access=*/ID4_PIPELINE_TENSOR_ACCESS_READ,
   };
-  EXPECT_THAT(
-      Status(id4_pipeline_region_dispatch(
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      id4_pipeline_region_dispatch(
           builder, &read_kernel, iree_hal_make_static_dispatch_config(1, 1, 1),
           iree_const_byte_span_empty(), /*binding_count=*/1, &read_binding,
-          IREE_HAL_DISPATCH_FLAG_NONE)),
-      StatusIs(StatusCode::kFailedPrecondition));
+          IREE_HAL_DISPATCH_FLAG_NONE));
 
   id4_pipeline_region_builder_destroy(builder);
 }
@@ -257,12 +256,12 @@ TEST_F(RegionBuilderTest, SameEpochReadAfterWriteRequiresBarrier) {
       /*.tensor=*/tensor,
       /*.access=*/ID4_PIPELINE_TENSOR_ACCESS_READ,
   };
-  EXPECT_THAT(
-      Status(id4_pipeline_region_dispatch(
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      id4_pipeline_region_dispatch(
           builder, &read_kernel, iree_hal_make_static_dispatch_config(1, 1, 1),
           iree_const_byte_span_empty(), /*binding_count=*/1, &read_binding,
-          IREE_HAL_DISPATCH_FLAG_NONE)),
-      StatusIs(StatusCode::kFailedPrecondition));
+          IREE_HAL_DISPATCH_FLAG_NONE));
 
   IREE_ASSERT_OK(id4_pipeline_region_barrier(
       builder, IREE_HAL_EXECUTION_STAGE_DISPATCH,
@@ -321,9 +320,9 @@ TEST_F(RegionBuilderTest, ImportCannotUseLocalBindingSlot) {
       /*.flags=*/ID4_PIPELINE_TENSOR_IMPORT_FLAG_INITIALIZED,
   };
   id4_pipeline_tensor_t tensor;
-  EXPECT_THAT(
-      Status(id4_pipeline_region_import_tensor(builder, &import, &tensor)),
-      StatusIs(StatusCode::kInvalidArgument));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_pipeline_region_import_tensor(builder, &import, &tensor));
 
   id4_pipeline_region_builder_destroy(builder);
 }
@@ -341,9 +340,9 @@ TEST_F(RegionBuilderTest, RecordModeRequiresCommandBuffer) {
       /*.local_binding_slot=*/1,
   };
   id4_pipeline_region_builder_t* builder = nullptr;
-  EXPECT_THAT(Status(id4_pipeline_region_builder_create(
-                  &options, iree_allocator_system(), &builder)),
-              StatusIs(StatusCode::kInvalidArgument));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        id4_pipeline_region_builder_create(
+                            &options, iree_allocator_system(), &builder));
   EXPECT_EQ(builder, nullptr);
 }
 
@@ -428,12 +427,12 @@ TEST_F(RegionBuilderTest, RecordModeDispatchRequiresHalExecutable) {
       /*.tensor=*/tensor,
       /*.access=*/ID4_PIPELINE_TENSOR_ACCESS_WRITE,
   };
-  EXPECT_THAT(
-      Status(id4_pipeline_region_dispatch(
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_pipeline_region_dispatch(
           builder, &kernel, iree_hal_make_static_dispatch_config(1, 1, 1),
           iree_const_byte_span_empty(), /*binding_count=*/1, &binding,
-          IREE_HAL_DISPATCH_FLAG_NONE)),
-      StatusIs(StatusCode::kInvalidArgument));
+          IREE_HAL_DISPATCH_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
 
   id4_pipeline_region_builder_destroy(builder);
@@ -584,9 +583,9 @@ TEST_F(RegionBuilderTest, PreparedRegionIssueRequiresFinalSignal) {
       /*.binding_table=*/binding_table,
       /*.execute_flags=*/IREE_HAL_EXECUTE_FLAG_NONE,
   };
-  EXPECT_THAT(Status(id4_pipeline_prepared_region_issue(prepared_region,
-                                                        &issue_options)),
-              StatusIs(StatusCode::kInvalidArgument));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_pipeline_prepared_region_issue(prepared_region, &issue_options));
 
   id4_pipeline_prepared_region_release(prepared_region);
   id4_pipeline_region_builder_destroy(builder);

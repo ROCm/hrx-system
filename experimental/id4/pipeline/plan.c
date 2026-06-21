@@ -30,6 +30,10 @@ struct id4_pipeline_plan_t {
   iree_host_size_t memory_slab_count;
   // Planned non-parameter memory slabs owned by this plan.
   id4_pipeline_memory_slab_plan_t* memory_slabs;
+  // Number of planned external boundary tensors.
+  iree_host_size_t boundary_tensor_count;
+  // Planned external boundary tensors owned by this plan.
+  id4_pipeline_boundary_tensor_plan_t* boundary_tensors;
   // Number of planned kernel specializations.
   iree_host_size_t kernel_count;
   // Planned kernel specializations owned by this plan.
@@ -88,6 +92,7 @@ static void id4_pipeline_plan_destroy(id4_pipeline_plan_t* plan) {
   iree_allocator_t host_allocator = plan->host_allocator;
   for (iree_host_size_t i = 0; i < plan->diagnostic_tap_count; ++i) {
     id4_pipeline_diagnostic_tap_plan_t* tap = &plan->diagnostic_taps[i];
+    id4_pipeline_string_release(tap->layout.name, host_allocator);
     id4_pipeline_string_release(tap->target_name, host_allocator);
     id4_pipeline_string_release(tap->name, host_allocator);
   }
@@ -96,6 +101,11 @@ static void id4_pipeline_plan_destroy(id4_pipeline_plan_t* plan) {
     id4_pipeline_string_release(plan->regions[i].name, host_allocator);
   }
   iree_allocator_free(host_allocator, plan->regions);
+  for (iree_host_size_t i = 0; i < plan->boundary_tensor_count; ++i) {
+    id4_pipeline_string_release(plan->boundary_tensors[i].layout.name,
+                                host_allocator);
+  }
+  iree_allocator_free(host_allocator, plan->boundary_tensors);
   for (iree_host_size_t i = 0; i < plan->kernel_count; ++i) {
     id4_pipeline_kernel_plan_t* kernel = &plan->kernels[i];
     id4_pipeline_plan_config_binding_t* config_bindings =
@@ -191,6 +201,7 @@ static iree_status_t id4_pipeline_plan_copy_parameter_slabs(
         id4_pipeline_parameter_slab_validate(source, plan->placement_count));
     id4_pipeline_parameter_slab_plan_t* target = &plan->parameter_slabs[i];
     target->placement_id = source->placement_id;
+    target->binding_slot = source->binding_slot;
     target->target_params = source->target_params;
     target->byte_length = source->byte_length;
     target->alignment = source->alignment;
@@ -396,10 +407,18 @@ static iree_status_t id4_pipeline_plan_copy_regions(
                               source->local_binding_slot,
                               source->binding_capacity);
     }
+    if (source->local_tensor_alignment != 0 &&
+        !iree_device_size_is_power_of_two(source->local_tensor_alignment)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "region %.*s local tensor alignment must be a power of two",
+          (int)source->name.size, source->name.data);
+    }
     id4_pipeline_region_plan_t* target = &plan->regions[i];
     target->placement_id = source->placement_id;
     target->binding_capacity = source->binding_capacity;
     target->local_binding_slot = source->local_binding_slot;
+    target->local_tensor_alignment = source->local_tensor_alignment;
     target->statistics = source->statistics;
     IREE_RETURN_IF_ERROR(id4_pipeline_string_clone(
         source->name, plan->host_allocator, &target->name));
@@ -407,21 +426,264 @@ static iree_status_t id4_pipeline_plan_copy_regions(
   return iree_ok_status();
 }
 
+static iree_status_t id4_pipeline_plan_validate_region_binding_slot(
+    const id4_pipeline_plan_t* plan, uint32_t region_id, uint32_t binding_slot,
+    iree_string_view_t binding_name) {
+  if ((iree_host_size_t)region_id >= plan->region_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "%.*s region id %u exceeds region count %" PRIhsz,
+                            (int)binding_name.size, binding_name.data,
+                            region_id, plan->region_count);
+  }
+  const id4_pipeline_region_plan_t* region = &plan->regions[region_id];
+  if (binding_slot >= region->binding_capacity) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "%.*s binding slot %u exceeds region binding "
+                            "capacity %" PRIhsz,
+                            (int)binding_name.size, binding_name.data,
+                            binding_slot, region->binding_capacity);
+  }
+  if (binding_slot == region->local_binding_slot) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "%.*s binding slot must not match the local slab "
+                            "binding slot",
+                            (int)binding_name.size, binding_name.data);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_plan_validate_storage_binding_slots(
+    const id4_pipeline_plan_t* plan) {
+  if (plan->region_count == 0) return iree_ok_status();
+  for (iree_host_size_t region_index = 0; region_index < plan->region_count;
+       ++region_index) {
+    const uint32_t region_id = (uint32_t)region_index;
+    for (iree_host_size_t i = 0; i < plan->parameter_slab_count; ++i) {
+      IREE_RETURN_IF_ERROR(id4_pipeline_plan_validate_region_binding_slot(
+          plan, region_id, plan->parameter_slabs[i].binding_slot,
+          IREE_SV("parameter slab")));
+    }
+    for (iree_host_size_t i = 0; i < plan->memory_slab_count; ++i) {
+      const id4_pipeline_memory_slab_plan_t* slab = &plan->memory_slabs[i];
+      if (slab->binding_slot >= plan->regions[region_index].binding_capacity) {
+        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "memory slab %.*s binding slot %u exceeds "
+                                "region binding capacity %" PRIhsz,
+                                (int)slab->name.size, slab->name.data,
+                                slab->binding_slot,
+                                plan->regions[region_index].binding_capacity);
+      }
+      for (iree_host_size_t j = i + 1; j < plan->memory_slab_count; ++j) {
+        if (slab->binding_slot == plan->memory_slabs[j].binding_slot) {
+          return iree_make_status(
+              IREE_STATUS_ALREADY_EXISTS,
+              "memory slab %.*s binding slot %u is already planned",
+              (int)slab->name.size, slab->name.data, slab->binding_slot);
+        }
+      }
+      for (iree_host_size_t j = 0; j < plan->parameter_slab_count; ++j) {
+        if (slab->binding_slot == plan->parameter_slabs[j].binding_slot) {
+          return iree_make_status(
+              IREE_STATUS_ALREADY_EXISTS,
+              "memory slab %.*s binding slot %u conflicts with parameter slab",
+              (int)slab->name.size, slab->name.data, slab->binding_slot);
+        }
+      }
+    }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_plan_validate_boundary_tensor_shape(
+    id4_pipeline_tensor_shape_t shape, iree_string_view_t tensor_name) {
+  if (shape.rank > ID4_PIPELINE_TENSOR_MAX_RANK) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "boundary tensor %.*s rank %u exceeds max rank %u",
+                            (int)tensor_name.size, tensor_name.data, shape.rank,
+                            ID4_PIPELINE_TENSOR_MAX_RANK);
+  }
+  for (uint32_t i = 0; i < shape.rank; ++i) {
+    if (shape.dims[i] == 0) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "boundary tensor %.*s dimension %u is zero",
+                              (int)tensor_name.size, tensor_name.data, i);
+    }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_plan_validate_boundary_tensor_layout(
+    const id4_pipeline_tensor_layout_t* layout) {
+  if (iree_string_view_is_empty(layout->name)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "boundary tensor name is required");
+  }
+  const iree_device_size_t element_byte_length =
+      id4_pipeline_tensor_dtype_byte_length(layout->dtype);
+  if (element_byte_length == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "boundary tensor %.*s dtype is invalid",
+                            (int)layout->name.size, layout->name.data);
+  }
+  if (layout->byte_length == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "boundary tensor %.*s byte length is zero",
+                            (int)layout->name.size, layout->name.data);
+  }
+  if (layout->alignment != 0 &&
+      !iree_device_size_is_power_of_two(layout->alignment)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "boundary tensor %.*s alignment must be a power "
+                            "of two",
+                            (int)layout->name.size, layout->name.data);
+  }
+  IREE_RETURN_IF_ERROR(id4_pipeline_plan_validate_boundary_tensor_shape(
+      layout->shape, layout->name));
+  uint64_t element_count = 1;
+  for (uint32_t i = 0; i < layout->shape.rank; ++i) {
+    if (element_count > UINT64_MAX / layout->shape.dims[i]) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "boundary tensor %.*s element count overflow",
+                              (int)layout->name.size, layout->name.data);
+    }
+    element_count *= layout->shape.dims[i];
+  }
+  if (element_count > UINT64_MAX / element_byte_length) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "boundary tensor %.*s byte length overflow",
+                            (int)layout->name.size, layout->name.data);
+  }
+  const iree_device_size_t expected_byte_length =
+      (iree_device_size_t)(element_count * element_byte_length);
+  if (layout->byte_length != expected_byte_length) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "boundary tensor %.*s byte length %" PRIu64
+                            " does not match dtype/shape byte length %" PRIu64,
+                            (int)layout->name.size, layout->name.data,
+                            (uint64_t)layout->byte_length,
+                            (uint64_t)expected_byte_length);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_plan_validate_boundary_tensor_flags(
+    const id4_pipeline_boundary_tensor_plan_t* tensor) {
+  const id4_pipeline_boundary_tensor_flags_t allowed_flags =
+      ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_IMPORTED |
+      ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_EXPORTED |
+      ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_INITIALIZED;
+  if (iree_any_bit_set(tensor->flags, ~allowed_flags)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "boundary tensor %.*s has unsupported flags 0x%x",
+                            (int)tensor->layout.name.size,
+                            tensor->layout.name.data, tensor->flags);
+  }
+  if (!iree_all_bits_set(tensor->flags,
+                         ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_IMPORTED)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT, "boundary tensor %.*s must be imported",
+        (int)tensor->layout.name.size, tensor->layout.name.data);
+  }
+  return iree_ok_status();
+}
+
+static bool id4_pipeline_plan_boundary_binding_conflicts(
+    const id4_pipeline_plan_t* plan, uint32_t region_id,
+    uint32_t binding_slot) {
+  for (iree_host_size_t i = 0; i < plan->parameter_slab_count; ++i) {
+    if (plan->parameter_slabs[i].binding_slot == binding_slot) return true;
+  }
+  for (iree_host_size_t i = 0; i < plan->memory_slab_count; ++i) {
+    if (plan->memory_slabs[i].binding_slot == binding_slot) return true;
+  }
+  for (iree_host_size_t i = 0; i < plan->boundary_tensor_count; ++i) {
+    const id4_pipeline_boundary_tensor_plan_t* tensor =
+        &plan->boundary_tensors[i];
+    if (tensor->region_id == region_id &&
+        tensor->binding_slot == binding_slot) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool id4_pipeline_plan_diagnostic_tap_binding_conflicts(
+    const id4_pipeline_plan_t* plan, uint32_t region_id,
+    uint32_t binding_slot) {
+  if (id4_pipeline_plan_boundary_binding_conflicts(plan, region_id,
+                                                   binding_slot)) {
+    return true;
+  }
+  for (iree_host_size_t i = 0; i < plan->diagnostic_tap_count; ++i) {
+    const id4_pipeline_diagnostic_tap_plan_t* tap = &plan->diagnostic_taps[i];
+    if (tap->region_id == region_id && tap->binding_slot == binding_slot) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static iree_status_t id4_pipeline_plan_copy_boundary_tensors(
+    id4_pipeline_plan_t* plan,
+    const id4_pipeline_plan_create_options_t* options) {
+  const iree_host_size_t boundary_tensor_count = options->boundary_tensor_count;
+  if (boundary_tensor_count == 0) return iree_ok_status();
+  if (!options->boundary_tensors) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "boundary tensor array is required");
+  }
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      plan->host_allocator, boundary_tensor_count,
+      sizeof(plan->boundary_tensors[0]), (void**)&plan->boundary_tensors));
+  memset(plan->boundary_tensors, 0,
+         boundary_tensor_count * sizeof(plan->boundary_tensors[0]));
+  for (iree_host_size_t i = 0; i < boundary_tensor_count; ++i) {
+    const id4_pipeline_boundary_tensor_plan_t* source =
+        &options->boundary_tensors[i];
+    IREE_RETURN_IF_ERROR(
+        id4_pipeline_plan_validate_boundary_tensor_layout(&source->layout));
+    IREE_RETURN_IF_ERROR(
+        id4_pipeline_plan_validate_boundary_tensor_flags(source));
+    IREE_RETURN_IF_ERROR(id4_pipeline_plan_validate_placement_id(
+        plan, source->placement_id, IREE_SV("boundary tensor")));
+    IREE_RETURN_IF_ERROR(id4_pipeline_plan_validate_region_binding_slot(
+        plan, source->region_id, source->binding_slot, source->layout.name));
+    if (id4_pipeline_plan_boundary_binding_conflicts(plan, source->region_id,
+                                                     source->binding_slot)) {
+      return iree_make_status(IREE_STATUS_ALREADY_EXISTS,
+                              "boundary tensor %.*s binding slot %u is "
+                              "already planned",
+                              (int)source->layout.name.size,
+                              source->layout.name.data, source->binding_slot);
+    }
+    id4_pipeline_boundary_tensor_plan_t* target = &plan->boundary_tensors[i];
+    target->layout = source->layout;
+    target->flags = source->flags;
+    target->region_id = source->region_id;
+    target->placement_id = source->placement_id;
+    target->binding_slot = source->binding_slot;
+    IREE_RETURN_IF_ERROR(id4_pipeline_string_clone(
+        source->layout.name, plan->host_allocator, &target->layout.name));
+    ++plan->boundary_tensor_count;
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t id4_pipeline_plan_copy_diagnostic_taps(
     id4_pipeline_plan_t* plan,
     const id4_pipeline_plan_create_options_t* options) {
-  plan->diagnostic_tap_count = options->diagnostic_tap_count;
-  if (plan->diagnostic_tap_count == 0) return iree_ok_status();
+  const iree_host_size_t diagnostic_tap_count = options->diagnostic_tap_count;
+  if (diagnostic_tap_count == 0) return iree_ok_status();
   if (!options->diagnostic_taps) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "diagnostic tap array is required");
   }
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
-      plan->host_allocator, plan->diagnostic_tap_count,
+      plan->host_allocator, diagnostic_tap_count,
       sizeof(plan->diagnostic_taps[0]), (void**)&plan->diagnostic_taps));
   memset(plan->diagnostic_taps, 0,
-         plan->diagnostic_tap_count * sizeof(plan->diagnostic_taps[0]));
-  for (iree_host_size_t i = 0; i < plan->diagnostic_tap_count; ++i) {
+         diagnostic_tap_count * sizeof(plan->diagnostic_taps[0]));
+  for (iree_host_size_t i = 0; i < diagnostic_tap_count; ++i) {
     const id4_pipeline_diagnostic_tap_plan_t* source =
         &options->diagnostic_taps[i];
     if (iree_string_view_is_empty(source->name)) {
@@ -433,12 +695,26 @@ static iree_status_t id4_pipeline_plan_copy_diagnostic_taps(
                               "diagnostic tap %.*s target name is required",
                               (int)source->name.size, source->name.data);
     }
+    IREE_RETURN_IF_ERROR(
+        id4_pipeline_plan_validate_boundary_tensor_layout(&source->layout));
+    IREE_RETURN_IF_ERROR(id4_pipeline_plan_validate_placement_id(
+        plan, source->placement_id, IREE_SV("diagnostic tap")));
     if ((iree_host_size_t)source->region_id >= plan->region_count) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "diagnostic tap %.*s region id %u exceeds "
                               "region count %" PRIhsz,
                               (int)source->name.size, source->name.data,
                               source->region_id, plan->region_count);
+    }
+    IREE_RETURN_IF_ERROR(id4_pipeline_plan_validate_region_binding_slot(
+        plan, source->region_id, source->binding_slot, source->name));
+    if (id4_pipeline_plan_diagnostic_tap_binding_conflicts(
+            plan, source->region_id, source->binding_slot)) {
+      return iree_make_status(IREE_STATUS_ALREADY_EXISTS,
+                              "diagnostic tap %.*s binding slot %u is already "
+                              "planned",
+                              (int)source->name.size, source->name.data,
+                              source->binding_slot);
     }
     const id4_pipeline_region_plan_t* region =
         &plan->regions[source->region_id];
@@ -452,11 +728,17 @@ static iree_status_t id4_pipeline_plan_copy_diagnostic_taps(
     }
     id4_pipeline_diagnostic_tap_plan_t* target = &plan->diagnostic_taps[i];
     target->region_id = source->region_id;
+    target->placement_id = source->placement_id;
+    target->binding_slot = source->binding_slot;
     target->after_operation_ordinal = source->after_operation_ordinal;
+    target->layout = source->layout;
     IREE_RETURN_IF_ERROR(id4_pipeline_string_clone(
         source->name, plan->host_allocator, &target->name));
     IREE_RETURN_IF_ERROR(id4_pipeline_string_clone(
         source->target_name, plan->host_allocator, &target->target_name));
+    IREE_RETURN_IF_ERROR(id4_pipeline_string_clone(
+        source->layout.name, plan->host_allocator, &target->layout.name));
+    ++plan->diagnostic_tap_count;
   }
   return iree_ok_status();
 }
@@ -579,6 +861,12 @@ iree_status_t id4_pipeline_plan_create(
     status = id4_pipeline_plan_copy_regions(plan, options);
   }
   if (iree_status_is_ok(status)) {
+    status = id4_pipeline_plan_validate_storage_binding_slots(plan);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_pipeline_plan_copy_boundary_tensors(plan, options);
+  }
+  if (iree_status_is_ok(status)) {
     status = id4_pipeline_plan_copy_diagnostic_taps(plan, options);
   }
   if (iree_status_is_ok(status)) {
@@ -658,6 +946,17 @@ const id4_pipeline_memory_slab_plan_t* id4_pipeline_plan_memory_slab_at(
     const id4_pipeline_plan_t* plan, iree_host_size_t index) {
   if (!plan || index >= plan->memory_slab_count) return NULL;
   return &plan->memory_slabs[index];
+}
+
+iree_host_size_t id4_pipeline_plan_boundary_tensor_count(
+    const id4_pipeline_plan_t* plan) {
+  return plan ? plan->boundary_tensor_count : 0;
+}
+
+const id4_pipeline_boundary_tensor_plan_t* id4_pipeline_plan_boundary_tensor_at(
+    const id4_pipeline_plan_t* plan, iree_host_size_t index) {
+  if (!plan || index >= plan->boundary_tensor_count) return NULL;
+  return &plan->boundary_tensors[index];
 }
 
 iree_host_size_t id4_pipeline_plan_kernel_count(
@@ -790,14 +1089,14 @@ static iree_status_t id4_pipeline_plan_append_region_statistics_json(
   return iree_string_builder_append_format(
       builder,
       "{\"operation_count\":%" PRIhsz ",\"dispatch_count\":%" PRIhsz
-      ",\"barrier_count\":%" PRIhsz
+      ",\"copy_count\":%" PRIhsz ",\"barrier_count\":%" PRIhsz
       ",\"current_epoch\":%u"
       ",\"local_acquire_count\":%" PRIhsz ",\"local_release_count\":%" PRIhsz
       ",\"local_reuse_count\":%" PRIhsz ",\"bound_import_count\":%" PRIhsz
       ",\"local_slab_byte_length\":%" PRIu64
       ",\"local_slab_high_water_mark\":%" PRIu64 "}",
       statistics.operation_count, statistics.dispatch_count,
-      statistics.barrier_count, statistics.current_epoch,
+      statistics.copy_count, statistics.barrier_count, statistics.current_epoch,
       statistics.local_acquire_count, statistics.local_release_count,
       statistics.local_reuse_count, statistics.bound_import_count,
       (uint64_t)statistics.local_slab_byte_length,
@@ -845,8 +1144,8 @@ iree_status_t id4_pipeline_plan_format_json(const id4_pipeline_plan_t* plan,
     IREE_RETURN_IF_ERROR(
         id4_pipeline_plan_append_json_string(builder, slab->scope));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-        builder,
-        ",\"placement_id\":%u,\"target_params\":", slab->placement_id));
+        builder, ",\"placement_id\":%u,\"binding_slot\":%u,\"target_params\":",
+        slab->placement_id, slab->binding_slot));
     IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_buffer_params_json(
         builder, slab->target_params));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
@@ -896,6 +1195,39 @@ iree_status_t id4_pipeline_plan_format_json(const id4_pipeline_plan_t* plan,
         ",\"high_water_mark\":%" PRIu64 "}",
         (uint64_t)slab->byte_length, (uint64_t)slab->alignment,
         (uint64_t)slab->high_water_mark));
+  }
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(builder, "],\"boundary_tensors\":["));
+  for (iree_host_size_t i = 0; i < plan->boundary_tensor_count; ++i) {
+    const id4_pipeline_boundary_tensor_plan_t* tensor =
+        &plan->boundary_tensors[i];
+    if (i != 0) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+    }
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, "{\"id\":%" PRIhsz ",\"name\":", i));
+    IREE_RETURN_IF_ERROR(
+        id4_pipeline_plan_append_json_string(builder, tensor->layout.name));
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_cstring(builder, ",\"dtype\":"));
+    IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_json_string(
+        builder, id4_pipeline_tensor_dtype_format(tensor->layout.dtype)));
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder,
+        ",\"flags\":%u,\"region_id\":%u,\"placement_id\":%u"
+        ",\"binding_slot\":%u,\"byte_length\":%" PRIu64
+        ",\"alignment\":%" PRIu64 ",\"shape\":[",
+        tensor->flags, tensor->region_id, tensor->placement_id,
+        tensor->binding_slot, (uint64_t)tensor->layout.byte_length,
+        (uint64_t)tensor->layout.alignment));
+    for (uint32_t j = 0; j < tensor->layout.shape.rank; ++j) {
+      if (j != 0) {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+      }
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder, "%" PRIu64, tensor->layout.shape.dims[j]));
+    }
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "]}"));
   }
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(builder, "],\"kernels\":["));
@@ -951,9 +1283,10 @@ iree_status_t id4_pipeline_plan_format_json(const id4_pipeline_plan_t* plan,
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder,
         ",\"placement_id\":%u,\"binding_capacity\":%" PRIhsz
-        ",\"local_binding_slot\":%u,\"statistics\":",
+        ",\"local_binding_slot\":%u,\"local_tensor_alignment\":%" PRIu64
+        ",\"statistics\":",
         region->placement_id, region->binding_capacity,
-        region->local_binding_slot));
+        region->local_binding_slot, (uint64_t)region->local_tensor_alignment));
     IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_region_statistics_json(
         builder, region->statistics));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "}"));
@@ -972,10 +1305,27 @@ iree_status_t id4_pipeline_plan_format_json(const id4_pipeline_plan_t* plan,
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder,
         ",\"region_id\":%u,\"after_operation_ordinal\":%" PRIhsz
-        ",\"target_name\":",
-        tap->region_id, tap->after_operation_ordinal));
+        ",\"placement_id\":%u,\"binding_slot\":%u,\"target_name\":",
+        tap->region_id, tap->after_operation_ordinal, tap->placement_id,
+        tap->binding_slot));
     IREE_RETURN_IF_ERROR(
         id4_pipeline_plan_append_json_string(builder, tap->target_name));
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_cstring(builder, ",\"dtype\":"));
+    IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_json_string(
+        builder, id4_pipeline_tensor_dtype_format(tap->layout.dtype)));
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder,
+        ",\"byte_length\":%" PRIu64 ",\"alignment\":%" PRIu64 ",\"shape\":[",
+        (uint64_t)tap->layout.byte_length, (uint64_t)tap->layout.alignment));
+    for (uint32_t j = 0; j < tap->layout.shape.rank; ++j) {
+      if (j != 0) {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+      }
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder, "%" PRIu64, tap->layout.shape.dims[j]));
+    }
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "]"));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "}"));
   }
   return iree_string_builder_append_cstring(builder, "]}");

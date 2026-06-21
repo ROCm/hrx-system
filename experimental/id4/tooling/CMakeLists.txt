@@ -9,4 +9,36 @@
 
 iree_add_all_subdirs()
 
+iree_cc_library(
+  NAME
+    capture
+  HDRS
+    "capture.h"
+  SRCS
+    "capture.c"
+  DEPS
+    iree::base
+    iree::experimental::id4::pipeline::plan
+    iree::experimental::id4::pipeline::region
+    iree::hal
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    capture_test
+  SRCS
+    "capture_test.cc"
+  DEPS
+    ::capture
+    iree::base
+    iree::experimental::id4::pipeline::diagnostics
+    iree::experimental::id4::pipeline::plan
+    iree::experimental::id4::stages::test_util
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::testing::temp_file
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

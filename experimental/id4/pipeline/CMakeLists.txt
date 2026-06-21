@@ -96,6 +96,7 @@ iree_cc_library(
     iree::base
     iree::base::internal
     iree::base::internal::arena
+    iree::hal
   PUBLIC
 )
 
@@ -109,6 +110,45 @@ iree_cc_library(
   DEPS
     ::plan
     ::program
+    ::program_region
+    iree::base
+    iree::base::internal::arena
+    iree::hal
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
+    program_prepare
+  HDRS
+    "program_prepare.h"
+  SRCS
+    "program_prepare.c"
+  DEPS
+    ::kernel_cache
+    ::kernel_library
+    ::parameter_slab
+    ::plan
+    ::program
+    ::program_region
+    ::region
+    ::stage
+    iree::base
+    iree::base::internal::arena
+    iree::hal
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
+    program_region
+  HDRS
+    "program_region.h"
+  SRCS
+    "program_region.c"
+  DEPS
+    ::program
+    ::region
     iree::base
     iree::hal
   PUBLIC
@@ -162,6 +202,18 @@ iree_cc_test(
 
 iree_cc_test(
   NAME
+    kernel_library_test
+  SRCS
+    "kernel_library_test.cc"
+  DEPS
+    ::kernel_library
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
     parameter_slab_test
   SRCS
     "parameter_slab_test.cc"
@@ -199,6 +251,7 @@ iree_cc_test(
     ::program
     iree::base
     iree::base::internal::arena
+    iree::hal
     iree::testing::gtest
     iree::testing::gtest_main
 )

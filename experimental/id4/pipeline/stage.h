@@ -28,6 +28,15 @@ typedef struct id4_pipeline_stage_t id4_pipeline_stage_t;
 typedef void(IREE_API_PTR* id4_pipeline_bundle_payload_destroy_fn_t)(
     id4_pipeline_bundle_t* bundle, void* payload);
 
+// Stage planning behavior flags.
+typedef uint32_t id4_pipeline_stage_plan_flags_t;
+
+// Stage planning behavior flag bits.
+typedef enum id4_pipeline_stage_plan_flag_bits_e {
+  // Plans device-side diagnostic tap copies into caller-provided buffers.
+  ID4_PIPELINE_STAGE_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS = 1u << 0,
+} id4_pipeline_stage_plan_flag_bits_t;
+
 // Shared services available to all pipeline stages.
 typedef struct id4_pipeline_stage_services_t {
   // Device group inspected during planning and used during execution.
@@ -53,8 +62,10 @@ typedef struct id4_pipeline_stage_load_options_t {
 typedef struct id4_pipeline_stage_plan_options_t {
   // Size of this structure for versioning.
   iree_host_size_t structure_size;
-  // Extension structure chain; must be NULL for now.
+  // Stage-specific extension structure chain.
   const void* next;
+  // Planning behavior flags.
+  id4_pipeline_stage_plan_flags_t flags;
   // Device index used by single-device stage plans.
   iree_host_size_t device_index;
   // Queue affinity used by single-device stage plans.
@@ -87,6 +98,14 @@ typedef struct id4_pipeline_stage_issue_options_t {
   iree_host_size_t structure_size;
   // Extension structure chain; must be NULL for now.
   const void* next;
+  // Number of caller-owned boundary tensor bindings.
+  iree_host_size_t boundary_binding_count;
+  // Caller-owned boundary tensor bindings in plan boundary tensor order.
+  const iree_hal_buffer_binding_t* boundary_bindings;
+  // Number of caller-owned diagnostic tap bindings.
+  iree_host_size_t diagnostic_tap_binding_count;
+  // Caller-owned diagnostic tap bindings in plan diagnostic tap order.
+  const iree_hal_buffer_binding_t* diagnostic_tap_bindings;
   // Semaphores that execution waits on.
   iree_hal_semaphore_list_t wait_semaphore_list;
   // Semaphores signaled when execution completes.

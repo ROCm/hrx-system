@@ -70,8 +70,8 @@ typedef struct id4_pipeline_kernel_cache_create_options_t {
   iree_host_size_t structure_size;
   // Extension structure chain; must be NULL for now.
   const void* next;
-  // Explicit AMDGPU processor key used to build the Loom target profile.
-  iree_string_view_t amdgpu_processor;
+  // Explicit target processor key used to build the Loom target profile.
+  iree_string_view_t target_processor;
 } id4_pipeline_kernel_cache_create_options_t;
 
 // Options for preparing one kernel executable through Loom and the HAL.
@@ -102,11 +102,15 @@ typedef struct id4_pipeline_kernel_cache_prepare_options_t {
   id4_pipeline_diagnostics_sink_t* diagnostics_sink;
 } id4_pipeline_kernel_cache_prepare_options_t;
 
-// Creates reusable Loom compiler state for AMDGPU pipeline kernels.
+// Creates reusable Loom compiler state for pipeline kernels.
 iree_status_t id4_pipeline_kernel_cache_create(
     const id4_pipeline_kernel_cache_create_options_t* options,
     iree_allocator_t host_allocator,
     id4_pipeline_kernel_cache_t** out_kernel_cache);
+
+// Returns the temporary target processor used until HAL target enumeration is
+// available.
+iree_string_view_t id4_pipeline_kernel_cache_default_target_processor(void);
 
 // Retains |kernel_cache| for the caller.
 void id4_pipeline_kernel_cache_retain(
@@ -116,8 +120,8 @@ void id4_pipeline_kernel_cache_retain(
 void id4_pipeline_kernel_cache_release(
     id4_pipeline_kernel_cache_t* kernel_cache);
 
-// Returns the AMDGPU processor selected for |kernel_cache|.
-iree_string_view_t id4_pipeline_kernel_cache_amdgpu_processor(
+// Returns the target processor selected for |kernel_cache|.
+iree_string_view_t id4_pipeline_kernel_cache_target_processor(
     const id4_pipeline_kernel_cache_t* kernel_cache);
 
 // Compiles, emits, and prepares one kernel executable.

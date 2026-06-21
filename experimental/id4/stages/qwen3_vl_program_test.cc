@@ -15,6 +15,7 @@
 namespace {
 
 static constexpr iree_host_size_t kProgramBuilderBlockSize = 64 * 1024;
+static constexpr uint32_t kSelectedLayerOrdinals[] = {0, 1};
 
 static id4_qwen3_vl_program_options_t MakeProgramOptions(uint32_t layer_count) {
   id4_qwen3_vl_program_options_t options = {
@@ -39,6 +40,10 @@ static id4_qwen3_vl_program_options_t MakeProgramOptions(uint32_t layer_count) {
           /*.key_value_head_count=*/1,
           // Channel count per attention head.
           /*.head_size=*/4,
+          // Number of selected layer outputs.
+          /*.selected_layer_count=*/IREE_ARRAYSIZE(kSelectedLayerOrdinals),
+          // Selected layer output ordinals.
+          /*.selected_layer_ordinals=*/kSelectedLayerOrdinals,
       },
       // Dynamic request dimensions.
       /*.request=*/
@@ -109,11 +114,19 @@ static id4_pipeline_program_plan_options_t MakePlanOptions(
           IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET |
               IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE,
           /*min_alignment=*/16);
+  iree_hal_buffer_params_t local_params = {};
+  local_params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+  local_params.access = IREE_HAL_MEMORY_ACCESS_ALL;
+  local_params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE;
+  local_params.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  local_params.min_alignment = 16;
   id4_pipeline_program_plan_options_t options = {
       // Size of this structure for versioning.
       /*.structure_size=*/sizeof(options),
       // Extension structure chain.
       /*.next=*/nullptr,
+      // Planning behavior flags.
+      /*.flags=*/0,
       // Semantic program to lower.
       /*.program=*/program,
       // Retained HAL device group.
@@ -126,6 +139,8 @@ static id4_pipeline_program_plan_options_t MakePlanOptions(
       /*.parameter_scope=*/IREE_SV(""),
       // Placement for the packed parameter slab.
       /*.parameter_slab_placement_id=*/0,
+      // Binding table slot for the packed parameter slab.
+      /*.parameter_slab_binding_slot=*/0,
       // HAL buffer parameters for the parameter slab.
       /*.parameter_slab_target_params=*/parameter_params,
       // Base alignment for the packed parameter slab.
@@ -136,10 +151,20 @@ static id4_pipeline_program_plan_options_t MakePlanOptions(
       /*.kernel_placement_id=*/0,
       // Placement for the executable region.
       /*.region_placement_id=*/0,
+      // HAL buffer parameters for the local transient slab.
+      /*.region_local_slab_params=*/local_params,
+      // Base alignment for the local transient slab.
+      /*.region_local_slab_alignment=*/16,
+      // Per-tensor alignment inside the local transient slab.
+      /*.region_local_tensor_alignment=*/16,
       // Binding table capacity for the derived region.
       /*.region_binding_capacity=*/8,
       // Local transient slab binding slot.
       /*.region_local_binding_slot=*/7,
+      // First external boundary tensor binding slot.
+      /*.region_boundary_binding_slot_base=*/1,
+      // First diagnostic tap binding slot.
+      /*.diagnostic_tap_binding_slot_base=*/0,
       // Diagnostics sink used during plan creation.
       /*.diagnostics_sink=*/diagnostics_sink,
   };
@@ -181,8 +206,9 @@ TEST(Qwen3VlProgram, AuthorsForwardContractAndDerivedPlan) {
 
   EXPECT_TRUE(ProgramExportsTensorWithShape(
       program, ID4_PIPELINE_PROGRAM_DTYPE_F32,
-      id4_pipeline_program_make_shape_rank2(options.request.token_count,
-                                            options.model.hidden_size)));
+      id4_pipeline_program_make_shape_rank2(
+          options.model.selected_layer_count * options.model.hidden_size,
+          options.request.token_count)));
 
   iree_hal_device_group_t* device_group =
       id4::test::CreateLocalSyncDeviceGroup();
@@ -204,8 +230,15 @@ TEST(Qwen3VlProgram, AuthorsForwardContractAndDerivedPlan) {
       &plan_options, iree_allocator_system(), &plan));
 
   EXPECT_GT(id4_pipeline_plan_parameter_slab_count(plan), 0u);
+  EXPECT_GT(id4_pipeline_plan_memory_slab_count(plan), 0u);
+  EXPECT_GT(id4_pipeline_plan_boundary_tensor_count(plan), 0u);
   EXPECT_GT(id4_pipeline_plan_kernel_count(plan), 0u);
   EXPECT_GT(id4_pipeline_plan_region_count(plan), 0u);
+  const id4_pipeline_region_plan_t* region =
+      id4_pipeline_plan_region_at(plan, 0);
+  ASSERT_NE(region, nullptr);
+  EXPECT_GT(region->statistics.local_acquire_count, 0u);
+  EXPECT_GT(region->statistics.local_slab_byte_length, 0u);
 
   id4_pipeline_plan_release(plan);
   iree_hal_device_group_release(device_group);
@@ -236,6 +269,39 @@ TEST(Qwen3VlProgram, RejectsMissingLayerCount) {
   ProgramBuilderScope builder_scope;
   id4_qwen3_vl_program_options_t options = MakeProgramOptions(
       /*layer_count=*/0);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_qwen3_vl_program_author_forward(&options, builder_scope.builder()));
+}
+
+TEST(Qwen3VlProgram, RejectsMissingSelectedLayers) {
+  ProgramBuilderScope builder_scope;
+  id4_qwen3_vl_program_options_t options = MakeProgramOptions(
+      /*layer_count=*/1);
+  options.model.selected_layer_count = 0;
+  options.model.selected_layer_ordinals = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_qwen3_vl_program_author_forward(&options, builder_scope.builder()));
+}
+
+TEST(Qwen3VlProgram, RejectsInvalidSelectedLayerOrdinal) {
+  ProgramBuilderScope builder_scope;
+  static constexpr uint32_t kInvalidSelectedLayerOrdinals[] = {0, 2};
+  id4_qwen3_vl_program_options_t options = MakeProgramOptions(
+      /*layer_count=*/2);
+  options.model.selected_layer_ordinals = kInvalidSelectedLayerOrdinals;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_qwen3_vl_program_author_forward(&options, builder_scope.builder()));
+}
+
+TEST(Qwen3VlProgram, RejectsUnsortedSelectedLayerOrdinals) {
+  ProgramBuilderScope builder_scope;
+  static constexpr uint32_t kUnsortedSelectedLayerOrdinals[] = {1, 0};
+  id4_qwen3_vl_program_options_t options = MakeProgramOptions(
+      /*layer_count=*/2);
+  options.model.selected_layer_ordinals = kUnsortedSelectedLayerOrdinals;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       id4_qwen3_vl_program_author_forward(&options, builder_scope.builder()));

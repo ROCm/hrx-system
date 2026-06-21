@@ -22,14 +22,12 @@ Primary public references:
   https://github.com/ideogram-oss/ideogram4
 - `stable-diffusion.cpp`:
   https://github.com/leejet/stable-diffusion.cpp
-- Ideogram 4 GGUF weights for `stable-diffusion.cpp`:
-  https://huggingface.co/leejet/ideogram-4-GGUF
 - Experimental Ideogram 4 LoRAs:
   https://huggingface.co/DeverStyle/Ideogram-4.0-Loras
 
 The original model weights are gated and governed by the Ideogram 4
-non-commercial license. GGUF weights, LoRA files, generated images, and large
-tensor dumps are external artifacts and must not be checked in here. Verify
+non-commercial license. Model weights, LoRA files, generated images, and large
+tensor dumps are external artifacts that live outside the repository. Verify
 redistribution terms from the model cards and upstream sources before adding
 any reduced fixtures.
 
@@ -62,11 +60,9 @@ Important model facts for the first port:
 
 ## Precision And Weight Strategy
 
-Dense BF16 is the correctness baseline. The first Loom kernels and C/HAL
-sub-pipelines should match a high-quality BF16 reference run before taking on
-compressed weight representations. This gives the project one stable model
-quality oracle and avoids baking quantization artifacts into the earliest
-kernel contracts.
+Dense BF16 is the first correctness lane. The first Loom kernels and C/HAL
+sub-pipelines should match a high-quality BF16 reference run, giving the
+project one stable model-quality oracle and tensor-golden source.
 
 The logical kernel contracts should be written around operation semantics, not
 one storage format. For a linear layer, the durable contract is the input,
@@ -88,16 +84,11 @@ The planned precision sequence is:
 - Later FP8 targets, including gfx12-class machines, should fit the same model:
   target-specific internals behind stable kernel I/O and comparison fixtures.
 
-FP8 emulation on gfx1100 is not just a compatibility fallback. It is an
-important bandwidth and capacity experiment: a good schedule can overlap weight
-loads, scale application, and BF16 conversion with the surrounding matrix work,
-while preserving numerics close to the BF16-expanded model. Native FP8 on
-gfx942 then becomes a second implementation of the same semantic kernel family,
-not a separate model port.
-
-Q8 and other quantized diffusion weights remain useful for comparison,
-bring-up, and possible later optimization work, but they are no longer the
-baseline for authoring the first Ideogram 4 Loom kernels.
+FP8 emulation on gfx1100 is an important bandwidth and capacity experiment: a
+good schedule can overlap weight loads, scale application, and BF16 conversion
+with the surrounding matrix work while preserving numerics close to the
+BF16-expanded model. Native FP8 on gfx942 then becomes a second implementation
+of the same semantic kernel family.
 
 ## Product Goal
 
@@ -138,20 +129,17 @@ decode preparation, and tensor diagnostics should run on the device whenever
 that is technically possible. Early versions may keep the outer loop on the
 host while issuing asynchronous HAL work through timeline semaphores.
 
-## Non-Goals
+## Program Shape
 
-This is not a GGML backend, a general `stable-diffusion.cpp` integration, a
-model router, or a JSON schedule replay system.
+The C code is an ordinary model program with direct HAL scheduling and Loom
+kernel dispatches. Repeated layers are expressed as loops over model,
+parameter, and memory-plan tables. Reference traces are oracles for behavior
+and configuration discovery, while the authored C program is the schedule
+representation.
 
-The C code should be an ordinary program. Repeated layers should be expressed as
-loops over model and memory-plan tables, not thousands of pasted HAL calls.
-Reference traces are oracles for behavior and configuration discovery; they are
-not the program representation.
-
-This is not a performance-first port. Performance matters because the design
-choices here affect future fusion and scheduling, but correctness and coverage
-gate the work. Slow correct kernels with good evidence are useful. Fast kernels
-without golden coverage are noise.
+Correctness and coverage gate the work. Performance matters because the design
+choices here affect future fusion and scheduling, and that optimization work is
+grounded in tensor goldens, kernel checks, and benchmarkable stage boundaries.
 
 ## Repository Layout
 
@@ -203,13 +191,13 @@ build, matching the runtime and Loom style:
 
 When a `BUILD.bazel` file changes, regenerate generated CMake metadata with the
 repository Bazel-to-CMake tool. Generated `CMakeLists.txt` files should mirror
-the Bazel package layout rather than defining a second build structure.
+the Bazel package layout as the single checked-in build structure.
 
-Use existing `loom_*` Bazel rules when they match the desired test shape. If
-the existing rules are too tied to older authoring workflows or cannot express a
-folder-level `.loom` test suite cleanly, add focused rules rather than weakening
-the testing strategy. Build infrastructure is part of the project when it
-removes friction from repeatable correctness work.
+Use existing `loom_*` Bazel rules when they match the desired test shape. When
+the existing rules are tied to older authoring workflows or cannot express a
+folder-level `.loom` test suite cleanly, add focused rules that preserve the
+testing strategy. Build infrastructure is part of the project when it removes
+friction from repeatable correctness work.
 
 The checked build must not depend on downloaded full model weights. Small,
 purpose-built fixtures are allowed when they are license-compatible and useful
@@ -300,16 +288,15 @@ The runtime has four major pieces:
 
 ### Model Loading
 
-The loader should treat GGUF and other weight formats as model artifact inputs,
-not as scheduler descriptions. The loader extracts tensor metadata, validates
-required tensors, uploads weight data into device-visible slabs, and produces
-typed model tables used by the scheduler.
+The loader treats BF16 and FP8 model artifacts as parameter sources. It
+extracts tensor metadata, validates required tensors, uploads weight data into
+device-visible slabs, and produces typed model tables used by the scheduler.
 
 The first quality reference configuration uses:
 
 - main Ideogram 4 diffusion weights expanded to dense BF16;
 - unconditional Ideogram 4 diffusion weights expanded to dense BF16;
-- Qwen3-VL-8B-Instruct GGUF for text conditioning;
+- Qwen3-VL-8B-Instruct text encoder weights in dense BF16 or F16 form;
 - FLUX-family KL VAE weights compatible with the reference pipeline;
 - optional LoRA adapters.
 
@@ -345,8 +332,7 @@ The AMDGPU target is the product target. SPIR-V/Vulkan is a reference and
 debugging aid because it gives a second backend, RADV tooling, and a useful ISA
 comparison path. If the current `loomc` API cannot route an IREE HAL AMDGPU
 device to an AMDGPU target profile or cannot hand an AMDGPU HSACO artifact to
-the HAL executable cache, that gap should be closed as part of this project
-rather than bypassed with shell calls.
+the HAL executable cache, that integration gap is part of this project.
 
 ### HAL Scheduling
 
@@ -381,7 +367,7 @@ A command buffer should normally see:
 
 The local transient slab is suballocated by a C memory plan. If a command
 buffer touches hundreds of temporary tensors, it still queues one allocation
-for the slab rather than one allocation per tensor. Slab offsets become binding
+for the slab. Slab offsets become binding
 reference offsets or dispatch constants.
 
 The memory planner must make lifetimes and aliasing explicit. A tensor range
@@ -432,20 +418,19 @@ the device.
 
 ## Reference Oracle Plan
 
-The reference baseline is a known-good `stable-diffusion.cpp` run using dense
-BF16 Ideogram 4 diffusion weights, unconditional BF16 weights, Qwen3-VL GGUF,
-VAE, and a full JSON prompt. Q8/GGUF diffusion runs are useful comparison
-points and early bring-up evidence, but the BF16 path is the quality oracle for
-kernel and sub-pipeline goldens. Vulkan/RADV is useful early because it
-provides a portable debugging backend and ISA-dump workflow; AMDGPU HAL remains
-the product path.
+The reference oracle is a known-good `stable-diffusion.cpp` run using dense
+BF16 Ideogram 4 diffusion weights, unconditional BF16 weights, dense
+Qwen3-VL-8B-Instruct text encoder weights, VAE, and a full JSON prompt. The
+BF16 path is the quality oracle for kernel and sub-pipeline goldens.
+Vulkan/RADV is useful early because it provides a portable debugging backend
+and ISA-dump workflow; AMDGPU HAL remains the product path.
 
 The original Python implementation is also useful even when it is not the
 fastest or most stable execution path. It exposes semantic structure, fusion
 opportunities, and clean submodel boundaries that may be obscured by
 `stable-diffusion.cpp` execution details. The Qwen3-VL text encoder is a good
 example: it can be treated as a substantial sub-pipeline with a crisp
-input/output golden boundary rather than as a pile of traced dispatches.
+input/output golden boundary.
 
 The reference checkout should be instrumented at these seams:
 
@@ -462,9 +447,10 @@ The reference checkout should be instrumented at these seams:
 - final pixel conversion.
 
 Trace extraction should emit deterministic records with tensor names, shapes,
-types, strides, quantization metadata, parameter values, seeds, schedule values,
-and enough binary tensor data to build reduced golden fixtures. The trace is an
-oracle and inventory source, not the runtime schedule representation.
+types, strides, FP8 scale metadata where present, parameter values, seeds,
+schedule values, and enough binary tensor data to build reduced golden
+fixtures. The trace is an oracle and inventory source, not the runtime schedule
+representation.
 
 ## Kernel Porting Strategy
 
@@ -480,7 +466,7 @@ be proved:
 
 Important expected kernel families include:
 
-- quantized and dense linear/matmul variants used by Qwen3-VL, DiT, and VAE;
+- BF16 and FP8 linear/matmul variants used by Qwen3-VL, DiT, and VAE;
 - RMSNorm and LayerNorm;
 - QKV projection and splitting;
 - RoPE/MRoPE construction or application;
@@ -617,8 +603,7 @@ numbers remain the per-kernel Loom benchmarks and the end-to-end API benchmark.
 ## Initial Milestones
 
 1. Establish BF16 reference execution with `stable-diffusion.cpp` and one fixed
-   JSON prompt, keeping Q8 runs as comparison evidence rather than the quality
-   baseline.
+   JSON prompt.
 2. Add reference instrumentation that can dump tensor metadata, per-stage
    tensors, and operation configuration for the Ideogram 4 path.
 3. Build a kernel inventory from the trace and group operations into reusable

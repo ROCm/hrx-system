@@ -66,8 +66,8 @@ typedef struct id4_pipeline_kernel_diagnostic_t {
   iree_string_view_t source_identifier;
   // Runtime module path passed to Loom.
   iree_string_view_t module_path;
-  // AMDGPU processor selected by the kernel cache.
-  iree_string_view_t amdgpu_processor;
+  // Target processor selected by the kernel cache.
+  iree_string_view_t target_processor;
   // Loom artifact format emitted by the target backend.
   iree_string_view_t loom_artifact_format;
   // HAL executable format inferred from artifact bytes.

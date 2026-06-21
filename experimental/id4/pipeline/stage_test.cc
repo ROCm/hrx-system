@@ -353,7 +353,8 @@ static iree_status_t SmokeStagePlan(
 
   id4_pipeline_parameter_slab_plan_t slab =
       id4_pipeline_make_device_local_parameter_slab_plan(
-          IREE_SV("smoke"), /*placement_id=*/0, options->queue_affinity,
+          IREE_SV("smoke"), /*placement_id=*/0, /*binding_slot=*/0,
+          options->queue_affinity,
           IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING |
               IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE_READ,
           /*byte_length=*/16, /*alignment=*/16, /*request_count=*/1, &request);
@@ -659,6 +660,120 @@ TEST(PipelineStage, BundlePayloadIsInlineAndDestroyed) {
   EXPECT_EQ(destroy_count, 1);
 
   id4_pipeline_plan_release(plan);
+  iree_hal_device_group_release(device_group);
+}
+
+TEST(PipelineStage, IssueRequiresPlannedBoundaryBindings) {
+  iree_hal_device_group_t* device_group = CreateLocalSyncDeviceGroup();
+  id4_pipeline_stage_t* stage = NULL;
+  IREE_ASSERT_OK(SmokeStageCreate(device_group, &stage));
+
+  id4_pipeline_diagnostics_sink_t diagnostics_sink = IgnoreDiagnosticsSink();
+
+  id4_pipeline_device_placement_t placement;
+  memset(&placement, 0, sizeof(placement));
+  placement.role = IREE_SV("default");
+  placement.device_index = 0;
+  placement.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+
+  id4_pipeline_region_plan_t region;
+  memset(&region, 0, sizeof(region));
+  region.name = IREE_SV("boundary.region");
+  region.placement_id = 0;
+  region.binding_capacity = 2;
+  region.local_binding_slot = 1;
+
+  id4_pipeline_boundary_tensor_plan_t boundary_tensor;
+  memset(&boundary_tensor, 0, sizeof(boundary_tensor));
+  boundary_tensor.layout.name = IREE_SV("boundary.input");
+  boundary_tensor.layout.dtype = ID4_PIPELINE_TENSOR_DTYPE_U32;
+  boundary_tensor.layout.shape.rank = 1;
+  boundary_tensor.layout.shape.dims[0] = 4;
+  boundary_tensor.layout.byte_length = 16;
+  boundary_tensor.layout.alignment = 4;
+  boundary_tensor.flags = ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_IMPORTED |
+                          ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_INITIALIZED;
+  boundary_tensor.region_id = 0;
+  boundary_tensor.placement_id = 0;
+  boundary_tensor.binding_slot = 0;
+
+  id4_pipeline_plan_create_options_t plan_options;
+  memset(&plan_options, 0, sizeof(plan_options));
+  plan_options.structure_size = sizeof(plan_options);
+  plan_options.stage_name = IREE_SV("boundary");
+  plan_options.device_group = device_group;
+  plan_options.placement_count = 1;
+  plan_options.placements = &placement;
+  plan_options.boundary_tensor_count = 1;
+  plan_options.boundary_tensors = &boundary_tensor;
+  plan_options.region_count = 1;
+  plan_options.regions = &region;
+  plan_options.diagnostics_sink = &diagnostics_sink;
+
+  id4_pipeline_plan_t* plan = NULL;
+  IREE_ASSERT_OK(
+      id4_pipeline_plan_create(&plan_options, iree_allocator_system(), &plan));
+
+  id4_pipeline_bundle_create_options_t bundle_options;
+  memset(&bundle_options, 0, sizeof(bundle_options));
+  bundle_options.structure_size = sizeof(bundle_options);
+  bundle_options.plan = plan;
+
+  id4_pipeline_bundle_t* bundle = NULL;
+  IREE_ASSERT_OK(id4_pipeline_bundle_create(&bundle_options,
+                                            iree_allocator_system(), &bundle));
+
+  iree_hal_device_t* device = iree_hal_device_group_device_at(device_group, 0);
+  iree_hal_semaphore_t* issue_semaphore = CreateSemaphore(device);
+  uint64_t issue_value = 1;
+  iree_hal_semaphore_list_t issue_signal_list = {
+      /*.count=*/1,
+      /*.semaphores=*/&issue_semaphore,
+      /*.payload_values=*/&issue_value,
+  };
+
+  id4_pipeline_stage_issue_options_t issue_options;
+  memset(&issue_options, 0, sizeof(issue_options));
+  issue_options.structure_size = sizeof(issue_options);
+  issue_options.signal_semaphore_list = issue_signal_list;
+  issue_options.diagnostics_sink = &diagnostics_sink;
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_pipeline_stage_issue(stage, bundle, &issue_options));
+
+  iree_hal_buffer_params_t buffer_params;
+  memset(&buffer_params, 0, sizeof(buffer_params));
+  buffer_params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+                       IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE |
+                       IREE_HAL_MEMORY_TYPE_HOST_COHERENT;
+  buffer_params.access = IREE_HAL_MEMORY_ACCESS_ALL;
+  buffer_params.usage =
+      IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE | IREE_HAL_BUFFER_USAGE_MAPPING;
+  buffer_params.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  buffer_params.min_alignment = 4;
+
+  iree_hal_buffer_t* boundary_buffer = NULL;
+  IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
+      iree_hal_device_allocator(device), buffer_params, 16, &boundary_buffer));
+  iree_hal_buffer_binding_t boundary_bindings[1];
+  memset(boundary_bindings, 0, sizeof(boundary_bindings));
+  boundary_bindings[0].buffer = boundary_buffer;
+  boundary_bindings[0].offset = 0;
+  boundary_bindings[0].length = 16;
+
+  issue_options.boundary_binding_count = 1;
+  issue_options.boundary_bindings = boundary_bindings;
+  IREE_ASSERT_OK(id4_pipeline_stage_issue(stage, bundle, &issue_options));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(issue_semaphore, issue_value,
+                                         iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
+
+  iree_hal_buffer_release(boundary_buffer);
+  iree_hal_semaphore_release(issue_semaphore);
+  id4_pipeline_bundle_release(bundle);
+  id4_pipeline_plan_release(plan);
+  id4_pipeline_stage_release(stage);
   iree_hal_device_group_release(device_group);
 }
 

@@ -14,18 +14,19 @@
 
 namespace {
 
-TEST(KernelCacheTest, CreatesAmdgpuCompilerState) {
+TEST(KernelCacheTest, CreatesCompilerState) {
   id4_pipeline_kernel_cache_create_options_t options;
   std::memset(&options, 0, sizeof(options));
   options.structure_size = sizeof(options);
-  options.amdgpu_processor = IREE_SV("gfx1100");
+  options.target_processor =
+      id4_pipeline_kernel_cache_default_target_processor();
 
   id4_pipeline_kernel_cache_t* kernel_cache = nullptr;
   IREE_ASSERT_OK(id4_pipeline_kernel_cache_create(
       &options, iree_allocator_system(), &kernel_cache));
   EXPECT_TRUE(iree_string_view_equal(
-      id4_pipeline_kernel_cache_amdgpu_processor(kernel_cache),
-      IREE_SV("gfx1100")));
+      id4_pipeline_kernel_cache_target_processor(kernel_cache),
+      id4_pipeline_kernel_cache_default_target_processor()));
   id4_pipeline_kernel_cache_release(kernel_cache);
 }
 
@@ -45,7 +46,8 @@ TEST(KernelCacheTest, PrepareRequiresRealExecutableCache) {
   id4_pipeline_kernel_cache_create_options_t create_options;
   std::memset(&create_options, 0, sizeof(create_options));
   create_options.structure_size = sizeof(create_options);
-  create_options.amdgpu_processor = IREE_SV("gfx1100");
+  create_options.target_processor =
+      id4_pipeline_kernel_cache_default_target_processor();
 
   id4_pipeline_kernel_cache_t* kernel_cache = nullptr;
   IREE_ASSERT_OK(id4_pipeline_kernel_cache_create(

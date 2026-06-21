@@ -8,6 +8,8 @@
 #define EXPERIMENTAL_ID4_STAGES_HAL_INTEGRATION_UTIL_H_
 
 #include "experimental/id4/pipeline/diagnostics.h"
+#include "experimental/id4/pipeline/kernel_cache.h"
+#include "experimental/id4/pipeline/kernel_library.h"
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/api.h"
@@ -47,19 +49,29 @@ using FrontierTrackerRef = OwningRef<iree_async_frontier_tracker_t,
 using HalDeviceRef = OwningRef<iree_hal_device_t, iree_hal_device_release>;
 using HalDeviceGroupRef =
     OwningRef<iree_hal_device_group_t, iree_hal_device_group_release>;
+using HalExecutableCacheRef =
+    OwningRef<iree_hal_executable_cache_t, iree_hal_executable_cache_release>;
+using KernelCacheRef =
+    OwningRef<id4_pipeline_kernel_cache_t, id4_pipeline_kernel_cache_release>;
+using KernelLibraryRef = OwningRef<id4_pipeline_kernel_library_t,
+                                   id4_pipeline_kernel_library_release>;
 using ProactorPoolRef =
     OwningRef<iree_async_proactor_pool_t, iree_async_proactor_pool_release>;
 
-typedef struct LiveHalDevice {
+typedef struct LiveStageContext {
   // Proactor pool used by the live HAL device.
   ProactorPoolRef proactor_pool;
   // Frontier tracker retained by the HAL device group.
   FrontierTrackerRef frontier_tracker;
   // Device group passed through the ID4 stage API.
   HalDeviceGroupRef device_group;
-  // HAL device selected from the requested device URI.
+  // HAL device selected by the parsed --device= flag.
   HalDeviceRef device;
-} LiveHalDevice;
+  // HAL executable cache used by prepared stage kernels.
+  HalExecutableCacheRef executable_cache;
+  // Loom kernel cache configured for the selected live device.
+  KernelCacheRef kernel_cache;
+} LiveStageContext;
 
 typedef struct StageDiagnostics {
   // Number of diagnostic events observed.
@@ -71,9 +83,12 @@ typedef struct StageDiagnostics {
 // Returns a diagnostics sink that counts lifecycle and kernel events.
 id4_pipeline_diagnostics_sink_t DiagnosticsSink(StageDiagnostics* diagnostics);
 
-// Creates a live HAL device and device group for integration tests.
-iree_status_t CreateLiveHalDevice(iree_string_view_t device_uri,
-                                  LiveHalDevice* out_device);
+// Creates a live HAL context from the standard --device= flag.
+iree_status_t CreateLiveStageContextFromFlags(LiveStageContext* out_context);
+
+// Creates a kernel library from embedded ID4 Loom source files.
+iree_status_t CreateEmbeddedKernelLibrary(
+    id4_pipeline_kernel_library_t** out_library);
 
 // Creates a parameter provider for |scope| from parsed --parameters flags.
 iree_status_t CreateParameterProviderFromFlags(

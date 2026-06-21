@@ -9,9 +9,9 @@ only after their invariants are stable enough to serve as public archaeology.
 ## Project Frame
 
 This directory is a whole-model scheduling prototype for Ideogram 4 using Loom
-kernels and the IREE HAL. The implementation should be a clear C model program,
-not a general diffusion framework, not a GGML backend, and not a replay of a
-captured trace.
+kernels and the IREE HAL. The implementation is a clear C model program with
+direct HAL scheduling, Loom kernels, typed model tables, reusable plans, and
+reference traces used as semantic oracle material.
 
 The north star is correctness with evidence. Performance work is valuable only
 after the represented tensor behavior is locked down with narrow tests and
@@ -85,7 +85,7 @@ Infrastructure changes outside `experimental/id4/` should be reviewable on
 their own. Keep those commits clean and separable so they can be moved into the
 main Loom, HAL, or infrastructure history after the experiment. Use the
 subsystem tag that explains the change, such as `[Loom]`, `[HAL]`, or `[Infra]`,
-rather than hiding shared infrastructure work inside an `[ID4]` commit.
+so shared infrastructure work has clear ownership history.
 
 ## Loom Integration
 
@@ -104,15 +104,13 @@ diagnostic sink over in-memory results.
 
 AMDGPU via the IREE HAL is the product target. SPIR-V/Vulkan is a debugging and
 oracle target. If a missing `loomc` or HAL API prevents clean AMDGPU artifact
-handoff, treat that as a first-class integration gap rather than bypassing the
-embedding boundary.
+handoff, treat that as a first-class integration gap in the embedding boundary.
 
 ## Precision And Targets
 
 BF16 is the first correctness lane for Ideogram 4 kernels and sub-pipelines.
 Start new tensor-producing kernel families from dense BF16 goldens unless the
-operation is inherently about a compressed representation. Q8 diffusion weights
-are comparison and later optimization evidence, not the initial kernel baseline.
+operation is inherently about FP8 storage or expansion.
 
 Keep logical kernel contracts target-independent: operation inputs, outputs,
 configuration facts, accumulation behavior, and tolerance model should remain
@@ -184,8 +182,8 @@ the exact request configuration. The smoke test is for human inspection and
 triage; it is not a substitute for narrow tensor-level correctness tests.
 
 Do not loosen tests to accommodate unclear math. If a tolerance needs to be
-wider than expected, identify the dtype, reduction order, quantization, or
-reference mismatch that explains it.
+wider than expected, identify the dtype conversion, reduction order, FP8 scale
+application, or reference mismatch that explains it.
 
 Reference traces are semantic evidence and oracle material. They are not a
 requirement to preserve the `stable-diffusion.cpp` dispatch schedule. Use the

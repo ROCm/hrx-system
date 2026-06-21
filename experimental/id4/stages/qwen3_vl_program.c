@@ -11,8 +11,43 @@
 #include <string.h>
 
 #include "experimental/id4/pipeline/program.h"
+#include "iree/hal/command_buffer.h"
 
 #define ID4_QWEN3_VL_FORMAT_BUFFER_CAPACITY 192
+
+enum {
+  ID4_QWEN3_VL_WORKGROUP_SIZE_X = 256,
+  ID4_QWEN3_VL_CONFIG_VALUE_BUFFER_CAPACITY = 16,
+  ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT = 8,
+};
+
+static const uint32_t id4_qwen3_vl_program_ideogram4_selected_layers[] = {
+    0, 3, 6, 9, 12, 15, 18, 21, 24, 27, 30, 33, 35,
+};
+
+static const id4_qwen3_vl_model_config_t
+    id4_qwen3_vl_program_ideogram4_model_config_value = {
+        // Number of decoder layers.
+        .layer_count = 36,
+        // Vocabulary row count in the token embedding table.
+        .vocab_size = 151936,
+        // Hidden-state channel count.
+        .hidden_size = 4096,
+        // MLP intermediate channel count.
+        .intermediate_size = 12288,
+        // Number of query attention heads.
+        .attention_head_count = 32,
+        // Number of key/value attention heads.
+        .key_value_head_count = 8,
+        // Channel count per attention head.
+        .head_size = 128,
+        // Number of post-layer hidden states used by Ideogram 4 conditioning.
+        .selected_layer_count =
+            IREE_ARRAYSIZE(id4_qwen3_vl_program_ideogram4_selected_layers),
+        // Zero-based selected layer ordinals.
+        .selected_layer_ordinals =
+            id4_qwen3_vl_program_ideogram4_selected_layers,
+};
 
 static iree_status_t id4_qwen3_vl_program_validate_options_size(
     iree_host_size_t actual_size, iree_host_size_t expected_size,
@@ -54,6 +89,81 @@ static bool id4_qwen3_vl_program_checked_mul_u32(uint32_t lhs, uint32_t rhs,
   return true;
 }
 
+static uint32_t id4_qwen3_vl_program_ceil_div_u32(uint32_t dividend,
+                                                  uint32_t divisor) {
+  return dividend / divisor + (dividend % divisor != 0 ? 1 : 0);
+}
+
+static iree_hal_dispatch_config_t id4_qwen3_vl_program_make_dispatch_config(
+    uint32_t workgroup_count_x, uint32_t workgroup_count_y,
+    uint32_t workgroup_count_z) {
+  iree_hal_dispatch_config_t dispatch_config =
+      iree_hal_make_static_dispatch_config(workgroup_count_x, workgroup_count_y,
+                                           workgroup_count_z);
+  dispatch_config.workgroup_size[0] = ID4_QWEN3_VL_WORKGROUP_SIZE_X;
+  dispatch_config.workgroup_size[1] = 1;
+  dispatch_config.workgroup_size[2] = 1;
+  return dispatch_config;
+}
+
+static iree_hal_dispatch_config_t
+id4_qwen3_vl_program_make_linear_dispatch_config(uint32_t token_count,
+                                                 uint32_t output_size) {
+  return id4_qwen3_vl_program_make_dispatch_config(token_count, output_size, 1);
+}
+
+static iree_hal_dispatch_config_t id4_qwen3_vl_program_make_row_dispatch_config(
+    uint32_t row_count) {
+  return id4_qwen3_vl_program_make_dispatch_config(row_count, 1, 1);
+}
+
+static iree_hal_dispatch_config_t
+id4_qwen3_vl_program_make_reduction_dispatch_config(void) {
+  return id4_qwen3_vl_program_make_dispatch_config(1, 1, 1);
+}
+
+static iree_status_t id4_qwen3_vl_program_make_element_dispatch_config(
+    uint32_t element_count, iree_hal_dispatch_config_t* out_dispatch_config) {
+  if (element_count == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Qwen3-VL dispatch element count must be "
+                            "nonzero");
+  }
+  const uint32_t workgroup_count_x = id4_qwen3_vl_program_ceil_div_u32(
+      element_count, ID4_QWEN3_VL_WORKGROUP_SIZE_X);
+  *out_dispatch_config =
+      id4_qwen3_vl_program_make_dispatch_config(workgroup_count_x, 1, 1);
+  return iree_ok_status();
+}
+
+static iree_status_t id4_qwen3_vl_program_make_matrix_element_dispatch_config(
+    uint32_t row_count, uint32_t column_count,
+    iree_hal_dispatch_config_t* out_dispatch_config) {
+  uint32_t element_count = 0;
+  if (!id4_qwen3_vl_program_checked_mul_u32(row_count, column_count,
+                                            &element_count)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "Qwen3-VL dispatch element count overflow");
+  }
+  return id4_qwen3_vl_program_make_element_dispatch_config(element_count,
+                                                           out_dispatch_config);
+}
+
+static uint32_t id4_qwen3_vl_program_query_width(
+    const id4_qwen3_vl_model_config_t* config) {
+  return config->attention_head_count * config->head_size;
+}
+
+static uint32_t id4_qwen3_vl_program_key_value_width(
+    const id4_qwen3_vl_model_config_t* config) {
+  return config->key_value_head_count * config->head_size;
+}
+
+static uint32_t id4_qwen3_vl_program_selected_hidden_row_count(
+    const id4_qwen3_vl_model_config_t* config) {
+  return config->selected_layer_count * config->hidden_size;
+}
+
 static iree_status_t id4_qwen3_vl_program_validate_model_config(
     const id4_qwen3_vl_model_config_t* config) {
   if (config->layer_count == 0) {
@@ -84,6 +194,45 @@ static iree_status_t id4_qwen3_vl_program_validate_model_config(
   if (config->head_size == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Qwen3-VL head size must be nonzero");
+  }
+  if ((config->head_size & 1u) != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Qwen3-VL head size must be even");
+  }
+  if (config->selected_layer_count == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Qwen3-VL selected layer count must be nonzero");
+  }
+  if (!config->selected_layer_ordinals) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Qwen3-VL selected layer ordinal array is "
+                            "required");
+  }
+  uint32_t selected_hidden_row_count = 0;
+  if (!id4_qwen3_vl_program_checked_mul_u32(config->selected_layer_count,
+                                            config->hidden_size,
+                                            &selected_hidden_row_count)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "Qwen3-VL selected hidden row count overflow");
+  }
+  if (selected_hidden_row_count == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Qwen3-VL selected hidden row count must be "
+                            "nonzero");
+  }
+  for (uint32_t i = 0; i < config->selected_layer_count; ++i) {
+    const uint32_t layer_ordinal = config->selected_layer_ordinals[i];
+    if (layer_ordinal >= config->layer_count) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "Qwen3-VL selected layer ordinal %" PRIu32
+                              " exceeds layer count %" PRIu32,
+                              layer_ordinal, config->layer_count);
+    }
+    if (i > 0 && layer_ordinal <= config->selected_layer_ordinals[i - 1]) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "Qwen3-VL selected layer ordinals must be "
+                              "strictly increasing");
+    }
   }
   uint32_t query_width = 0;
   if (!id4_qwen3_vl_program_checked_mul_u32(config->attention_head_count,
@@ -129,16 +278,6 @@ static iree_status_t id4_qwen3_vl_program_validate_options(
   return id4_qwen3_vl_program_validate_model_config(&options->model);
 }
 
-static uint32_t id4_qwen3_vl_program_query_width(
-    const id4_qwen3_vl_model_config_t* config) {
-  return config->attention_head_count * config->head_size;
-}
-
-static uint32_t id4_qwen3_vl_program_key_value_width(
-    const id4_qwen3_vl_model_config_t* config) {
-  return config->key_value_head_count * config->head_size;
-}
-
 typedef enum id4_qwen3_vl_parameter_kind_e {
   // Token embedding table.
   ID4_QWEN3_VL_PARAMETER_TOKEN_EMBEDDING = 0,
@@ -148,63 +287,79 @@ typedef enum id4_qwen3_vl_parameter_kind_e {
   ID4_QWEN3_VL_PARAMETER_LAYER_Q_PROJECTION = 2,
   // Per-layer key projection weight.
   ID4_QWEN3_VL_PARAMETER_LAYER_K_PROJECTION = 3,
+  // Per-layer query head RMSNorm weight.
+  ID4_QWEN3_VL_PARAMETER_LAYER_Q_NORM = 4,
+  // Per-layer key head RMSNorm weight.
+  ID4_QWEN3_VL_PARAMETER_LAYER_K_NORM = 5,
   // Per-layer value projection weight.
-  ID4_QWEN3_VL_PARAMETER_LAYER_V_PROJECTION = 4,
+  ID4_QWEN3_VL_PARAMETER_LAYER_V_PROJECTION = 6,
   // Per-layer attention output projection weight.
-  ID4_QWEN3_VL_PARAMETER_LAYER_O_PROJECTION = 5,
+  ID4_QWEN3_VL_PARAMETER_LAYER_O_PROJECTION = 7,
   // Per-layer post-attention RMSNorm weight.
-  ID4_QWEN3_VL_PARAMETER_LAYER_POST_ATTENTION_NORM = 6,
+  ID4_QWEN3_VL_PARAMETER_LAYER_POST_ATTENTION_NORM = 8,
   // Per-layer gated MLP gate projection weight.
-  ID4_QWEN3_VL_PARAMETER_LAYER_GATE_PROJECTION = 7,
+  ID4_QWEN3_VL_PARAMETER_LAYER_GATE_PROJECTION = 9,
   // Per-layer gated MLP up projection weight.
-  ID4_QWEN3_VL_PARAMETER_LAYER_UP_PROJECTION = 8,
+  ID4_QWEN3_VL_PARAMETER_LAYER_UP_PROJECTION = 10,
   // Per-layer gated MLP down projection weight.
-  ID4_QWEN3_VL_PARAMETER_LAYER_DOWN_PROJECTION = 9,
+  ID4_QWEN3_VL_PARAMETER_LAYER_DOWN_PROJECTION = 11,
   // Final decoder RMSNorm weight.
-  ID4_QWEN3_VL_PARAMETER_FINAL_NORM = 10,
+  ID4_QWEN3_VL_PARAMETER_FINAL_NORM = 12,
 } id4_qwen3_vl_parameter_kind_t;
 
 typedef enum id4_qwen3_vl_tensor_kind_e {
   // Imported token id vector.
   ID4_QWEN3_VL_TENSOR_TOKEN_IDS = 0,
-  // Imported position id vector.
-  ID4_QWEN3_VL_TENSOR_POSITION_IDS = 1,
+  // Imported additive attention mask matrix.
+  ID4_QWEN3_VL_TENSOR_ATTENTION_MASK = 1,
+  // Imported token weight vector.
+  ID4_QWEN3_VL_TENSOR_TOKEN_WEIGHTS = 2,
   // Hidden states produced by token embedding.
-  ID4_QWEN3_VL_TENSOR_EMBEDDED_HIDDEN_STATES = 2,
+  ID4_QWEN3_VL_TENSOR_EMBEDDED_HIDDEN_STATES = 3,
   // Per-layer input RMSNorm output.
-  ID4_QWEN3_VL_TENSOR_LAYER_INPUT_NORM = 3,
+  ID4_QWEN3_VL_TENSOR_LAYER_INPUT_NORM = 4,
   // Per-layer query projection output.
-  ID4_QWEN3_VL_TENSOR_LAYER_Q = 4,
+  ID4_QWEN3_VL_TENSOR_LAYER_Q = 5,
   // Per-layer key projection output.
-  ID4_QWEN3_VL_TENSOR_LAYER_K = 5,
+  ID4_QWEN3_VL_TENSOR_LAYER_K = 6,
   // Per-layer value projection output.
-  ID4_QWEN3_VL_TENSOR_LAYER_V = 6,
+  ID4_QWEN3_VL_TENSOR_LAYER_V = 7,
+  // Per-layer query head RMSNorm output.
+  ID4_QWEN3_VL_TENSOR_LAYER_Q_NORM = 8,
+  // Per-layer key head RMSNorm output.
+  ID4_QWEN3_VL_TENSOR_LAYER_K_NORM = 9,
   // Per-layer rotary-applied query tensor.
-  ID4_QWEN3_VL_TENSOR_LAYER_Q_ROTARY = 7,
+  ID4_QWEN3_VL_TENSOR_LAYER_Q_ROTARY = 10,
   // Per-layer rotary-applied key tensor.
-  ID4_QWEN3_VL_TENSOR_LAYER_K_ROTARY = 8,
+  ID4_QWEN3_VL_TENSOR_LAYER_K_ROTARY = 11,
   // Per-layer attention context tensor.
-  ID4_QWEN3_VL_TENSOR_LAYER_ATTENTION_CONTEXT = 9,
+  ID4_QWEN3_VL_TENSOR_LAYER_ATTENTION_CONTEXT = 12,
   // Per-layer attention output projection tensor.
-  ID4_QWEN3_VL_TENSOR_LAYER_ATTENTION_OUTPUT = 10,
+  ID4_QWEN3_VL_TENSOR_LAYER_ATTENTION_OUTPUT = 13,
   // Per-layer post-attention residual output.
-  ID4_QWEN3_VL_TENSOR_LAYER_AFTER_ATTENTION = 11,
+  ID4_QWEN3_VL_TENSOR_LAYER_AFTER_ATTENTION = 14,
   // Per-layer post-attention RMSNorm output.
-  ID4_QWEN3_VL_TENSOR_LAYER_POST_ATTENTION_NORM = 12,
+  ID4_QWEN3_VL_TENSOR_LAYER_POST_ATTENTION_NORM = 15,
   // Per-layer MLP gate projection output.
-  ID4_QWEN3_VL_TENSOR_LAYER_MLP_GATE = 13,
+  ID4_QWEN3_VL_TENSOR_LAYER_MLP_GATE = 16,
   // Per-layer MLP up projection output.
-  ID4_QWEN3_VL_TENSOR_LAYER_MLP_UP = 14,
+  ID4_QWEN3_VL_TENSOR_LAYER_MLP_UP = 17,
   // Per-layer SiLU-gated activation output.
-  ID4_QWEN3_VL_TENSOR_LAYER_MLP_ACTIVATION = 15,
+  ID4_QWEN3_VL_TENSOR_LAYER_MLP_ACTIVATION = 18,
   // Per-layer MLP down projection output.
-  ID4_QWEN3_VL_TENSOR_LAYER_MLP_DOWN = 16,
+  ID4_QWEN3_VL_TENSOR_LAYER_MLP_DOWN = 19,
   // Per-layer decoder output after MLP residual.
-  ID4_QWEN3_VL_TENSOR_LAYER_OUTPUT = 17,
+  ID4_QWEN3_VL_TENSOR_LAYER_OUTPUT = 20,
+  // Concatenated selected post-layer hidden states.
+  ID4_QWEN3_VL_TENSOR_SELECTED_HIDDEN_STATES = 21,
+  // Token-weighted condition output.
+  ID4_QWEN3_VL_TENSOR_CONDITION = 22,
+  // Two-scalar condition normalization statistics buffer.
+  ID4_QWEN3_VL_TENSOR_CONDITION_STATS = 23,
   // Final decoder RMSNorm output.
-  ID4_QWEN3_VL_TENSOR_FINAL_NORM = 18,
-  // Exported forward hidden states.
-  ID4_QWEN3_VL_TENSOR_OUTPUT = 19,
+  ID4_QWEN3_VL_TENSOR_FINAL_NORM = 24,
+  // Exported condition tensor.
+  ID4_QWEN3_VL_TENSOR_OUTPUT = 25,
 } id4_qwen3_vl_tensor_kind_t;
 
 typedef enum id4_qwen3_vl_operation_kind_e {
@@ -222,10 +377,16 @@ typedef enum id4_qwen3_vl_operation_kind_e {
   ID4_QWEN3_VL_OPERATION_SILU_GATE = 5,
   // Residual add operation.
   ID4_QWEN3_VL_OPERATION_RESIDUAL_ADD = 6,
+  // Selected hidden-state packing operation.
+  ID4_QWEN3_VL_OPERATION_SELECTED_HIDDEN_PACK = 7,
+  // Condition token-weight application operation.
+  ID4_QWEN3_VL_OPERATION_CONDITION_APPLY_TOKEN_WEIGHTS = 8,
+  // Condition token-weight normalization operation.
+  ID4_QWEN3_VL_OPERATION_CONDITION_NORMALIZE_TOKEN_WEIGHTS = 9,
   // Execution barrier operation.
-  ID4_QWEN3_VL_OPERATION_BARRIER = 7,
+  ID4_QWEN3_VL_OPERATION_BARRIER = 10,
   // Diagnostic tap operation.
-  ID4_QWEN3_VL_OPERATION_TAP = 8,
+  ID4_QWEN3_VL_OPERATION_TAP = 11,
 } id4_qwen3_vl_operation_kind_t;
 
 typedef enum id4_qwen3_vl_operation_site_e {
@@ -245,48 +406,66 @@ typedef enum id4_qwen3_vl_operation_site_e {
   ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION_V_PROJECTION = 6,
   // Barrier after per-layer QKV projections.
   ID4_QWEN3_VL_OPERATION_SITE_AFTER_QKV_PROJECTION = 7,
+  // Per-layer query head RMSNorm site.
+  ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION_Q_NORM = 8,
+  // Per-layer key head RMSNorm site.
+  ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION_K_NORM = 9,
+  // Barrier after per-layer Q/K head RMSNorm.
+  ID4_QWEN3_VL_OPERATION_SITE_AFTER_QK_NORM = 10,
   // Per-layer query rotary site.
-  ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION_Q = 8,
+  ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION_Q = 11,
   // Per-layer key rotary site.
-  ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION_K = 9,
+  ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION_K = 12,
   // Barrier after per-layer rotary embedding.
-  ID4_QWEN3_VL_OPERATION_SITE_AFTER_ROTARY_EMBEDDING = 10,
+  ID4_QWEN3_VL_OPERATION_SITE_AFTER_ROTARY_EMBEDDING = 13,
   // Per-layer self-attention site.
-  ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION = 11,
+  ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION = 14,
   // Barrier after per-layer attention.
-  ID4_QWEN3_VL_OPERATION_SITE_AFTER_ATTENTION = 12,
+  ID4_QWEN3_VL_OPERATION_SITE_AFTER_ATTENTION = 15,
   // Per-layer attention output projection site.
-  ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION_O_PROJECTION = 13,
+  ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION_O_PROJECTION = 16,
   // Barrier after per-layer attention output projection.
-  ID4_QWEN3_VL_OPERATION_SITE_AFTER_ATTENTION_OUTPUT_PROJECTION = 14,
+  ID4_QWEN3_VL_OPERATION_SITE_AFTER_ATTENTION_OUTPUT_PROJECTION = 17,
   // Barrier after per-layer attention residual.
-  ID4_QWEN3_VL_OPERATION_SITE_AFTER_ATTENTION_RESIDUAL = 15,
+  ID4_QWEN3_VL_OPERATION_SITE_AFTER_ATTENTION_RESIDUAL = 18,
   // Per-layer post-attention RMSNorm site.
-  ID4_QWEN3_VL_OPERATION_SITE_POST_ATTENTION_LAYERNORM = 16,
+  ID4_QWEN3_VL_OPERATION_SITE_POST_ATTENTION_LAYERNORM = 19,
   // Barrier after per-layer post-attention RMSNorm.
-  ID4_QWEN3_VL_OPERATION_SITE_AFTER_POST_ATTENTION_LAYERNORM = 17,
+  ID4_QWEN3_VL_OPERATION_SITE_AFTER_POST_ATTENTION_LAYERNORM = 20,
   // Per-layer MLP gate projection site.
-  ID4_QWEN3_VL_OPERATION_SITE_MLP_GATE_PROJECTION = 18,
+  ID4_QWEN3_VL_OPERATION_SITE_MLP_GATE_PROJECTION = 21,
   // Per-layer MLP up projection site.
-  ID4_QWEN3_VL_OPERATION_SITE_MLP_UP_PROJECTION = 19,
+  ID4_QWEN3_VL_OPERATION_SITE_MLP_UP_PROJECTION = 22,
   // Barrier after per-layer MLP up/gate projections.
-  ID4_QWEN3_VL_OPERATION_SITE_AFTER_MLP_UP_GATE_PROJECTION = 20,
+  ID4_QWEN3_VL_OPERATION_SITE_AFTER_MLP_UP_GATE_PROJECTION = 23,
   // Per-layer MLP activation site.
-  ID4_QWEN3_VL_OPERATION_SITE_MLP = 21,
+  ID4_QWEN3_VL_OPERATION_SITE_MLP = 24,
   // Barrier after per-layer MLP activation.
-  ID4_QWEN3_VL_OPERATION_SITE_AFTER_MLP_ACTIVATION = 22,
+  ID4_QWEN3_VL_OPERATION_SITE_AFTER_MLP_ACTIVATION = 25,
   // Per-layer MLP down projection site.
-  ID4_QWEN3_VL_OPERATION_SITE_MLP_DOWN_PROJECTION = 23,
+  ID4_QWEN3_VL_OPERATION_SITE_MLP_DOWN_PROJECTION = 26,
   // Barrier after per-layer MLP down projection.
-  ID4_QWEN3_VL_OPERATION_SITE_AFTER_MLP_DOWN_PROJECTION = 24,
+  ID4_QWEN3_VL_OPERATION_SITE_AFTER_MLP_DOWN_PROJECTION = 27,
   // Barrier after per-layer decoder output.
-  ID4_QWEN3_VL_OPERATION_SITE_AFTER_LAYER_OUTPUT = 25,
+  ID4_QWEN3_VL_OPERATION_SITE_AFTER_LAYER_OUTPUT = 28,
+  // Per-layer selected hidden-state pack site.
+  ID4_QWEN3_VL_OPERATION_SITE_SELECTED_HIDDEN_PACK = 29,
+  // Barrier after all selected hidden states are packed.
+  ID4_QWEN3_VL_OPERATION_SITE_AFTER_SELECTED_HIDDEN_PACK = 30,
+  // Global condition token-weight application site.
+  ID4_QWEN3_VL_OPERATION_SITE_CONDITION_APPLY_TOKEN_WEIGHTS = 31,
+  // Barrier after condition token-weight application.
+  ID4_QWEN3_VL_OPERATION_SITE_AFTER_CONDITION_APPLY_TOKEN_WEIGHTS = 32,
+  // Global condition token-weight normalization site.
+  ID4_QWEN3_VL_OPERATION_SITE_CONDITION_NORMALIZE_TOKEN_WEIGHTS = 33,
+  // Barrier after the exported condition tensor is complete.
+  ID4_QWEN3_VL_OPERATION_SITE_AFTER_CONDITION = 34,
   // Final decoder RMSNorm site.
-  ID4_QWEN3_VL_OPERATION_SITE_FINAL_NORM = 26,
+  ID4_QWEN3_VL_OPERATION_SITE_FINAL_NORM = 35,
   // Barrier after final decoder RMSNorm.
-  ID4_QWEN3_VL_OPERATION_SITE_AFTER_FINAL_NORM = 27,
+  ID4_QWEN3_VL_OPERATION_SITE_AFTER_FINAL_NORM = 36,
   // Forward output diagnostic site.
-  ID4_QWEN3_VL_OPERATION_SITE_OUTPUT = 28,
+  ID4_QWEN3_VL_OPERATION_SITE_OUTPUT = 37,
 } id4_qwen3_vl_operation_site_t;
 
 typedef enum id4_qwen3_vl_kernel_kind_e {
@@ -304,6 +483,12 @@ typedef enum id4_qwen3_vl_kernel_kind_e {
   ID4_QWEN3_VL_KERNEL_SILU_GATE = 5,
   // Residual add kernel.
   ID4_QWEN3_VL_KERNEL_RESIDUAL_ADD = 6,
+  // Selected hidden-state packing kernel.
+  ID4_QWEN3_VL_KERNEL_SELECTED_HIDDEN_PACK = 7,
+  // Condition token-weight application kernel.
+  ID4_QWEN3_VL_KERNEL_CONDITION_APPLY_TOKEN_WEIGHTS = 8,
+  // Condition token-weight normalization kernel.
+  ID4_QWEN3_VL_KERNEL_CONDITION_NORMALIZE_TOKEN_WEIGHTS = 9,
 } id4_qwen3_vl_kernel_kind_t;
 
 typedef enum id4_qwen3_vl_config_key_e {
@@ -325,6 +510,10 @@ typedef enum id4_qwen3_vl_config_key_e {
   ID4_QWEN3_VL_CONFIG_HEAD_SIZE = 7,
   // Vocabulary row count config key.
   ID4_QWEN3_VL_CONFIG_VOCAB_SIZE = 8,
+  // Selected hidden-state row count config key.
+  ID4_QWEN3_VL_CONFIG_HIDDEN_ROW_COUNT = 9,
+  // Selected-layer output slot config key.
+  ID4_QWEN3_VL_CONFIG_SELECTED_LAYER_INDEX = 10,
 } id4_qwen3_vl_config_key_t;
 
 enum {
@@ -332,8 +521,9 @@ enum {
   ID4_QWEN3_VL_TENSOR_KIND_COUNT = ID4_QWEN3_VL_TENSOR_OUTPUT + 1,
   ID4_QWEN3_VL_OPERATION_KIND_COUNT = ID4_QWEN3_VL_OPERATION_TAP + 1,
   ID4_QWEN3_VL_OPERATION_SITE_COUNT = ID4_QWEN3_VL_OPERATION_SITE_OUTPUT + 1,
-  ID4_QWEN3_VL_KERNEL_KIND_COUNT = ID4_QWEN3_VL_KERNEL_RESIDUAL_ADD + 1,
-  ID4_QWEN3_VL_CONFIG_KEY_COUNT = ID4_QWEN3_VL_CONFIG_VOCAB_SIZE + 1,
+  ID4_QWEN3_VL_KERNEL_KIND_COUNT =
+      ID4_QWEN3_VL_KERNEL_CONDITION_NORMALIZE_TOKEN_WEIGHTS + 1,
+  ID4_QWEN3_VL_CONFIG_KEY_COUNT = ID4_QWEN3_VL_CONFIG_SELECTED_LAYER_INDEX + 1,
 };
 
 typedef enum id4_qwen3_vl_program_operation_name_pattern_kind_e {
@@ -368,6 +558,13 @@ typedef struct id4_qwen3_vl_program_operation_site_entry_t {
   iree_string_view_t site_name;
 } id4_qwen3_vl_program_operation_site_entry_t;
 
+typedef struct id4_qwen3_vl_program_config_value_t {
+  // Loom config key selected from the kernel-specific config table.
+  id4_qwen3_vl_config_key_t key;
+  // Unsigned integer config value formatted for loomc.
+  uint32_t value;
+} id4_qwen3_vl_program_config_value_t;
+
 static const char* const id4_qwen3_vl_program_operation_name_patterns
     [ID4_QWEN3_VL_PROGRAM_OPERATION_NAME_PATTERN_COUNT] = {
         [ID4_QWEN3_VL_PROGRAM_OPERATION_NAME_TOKEN_EMBEDDING] = "qwen3_vl.%.*s",
@@ -381,47 +578,51 @@ static const id4_qwen3_vl_program_format_pattern_t
     id4_qwen3_vl_program_parameter_patterns[ID4_QWEN3_VL_PARAMETER_KIND_COUNT] =
         {
             [ID4_QWEN3_VL_PARAMETER_TOKEN_EMBEDDING] =
-                {false,
-                 IREE_SVL("text_encoders.llm.model.embed_tokens.weight")},
+                {false, IREE_SVL("model.language_model.embed_tokens.weight")},
             [ID4_QWEN3_VL_PARAMETER_LAYER_INPUT_NORM] =
-                {true, IREE_SVL("text_encoders.llm.model.layers.%" PRIu32
+                {true, IREE_SVL("model.language_model.layers.%" PRIu32
                                 ".input_layernorm.weight")},
             [ID4_QWEN3_VL_PARAMETER_LAYER_Q_PROJECTION] =
-                {true, IREE_SVL("text_encoders.llm.model.layers.%" PRIu32
+                {true, IREE_SVL("model.language_model.layers.%" PRIu32
                                 ".self_attn.q_proj.weight")},
             [ID4_QWEN3_VL_PARAMETER_LAYER_K_PROJECTION] =
-                {true, IREE_SVL("text_encoders.llm.model.layers.%" PRIu32
+                {true, IREE_SVL("model.language_model.layers.%" PRIu32
                                 ".self_attn.k_proj.weight")},
+            [ID4_QWEN3_VL_PARAMETER_LAYER_Q_NORM] =
+                {true, IREE_SVL("model.language_model.layers.%" PRIu32
+                                ".self_attn.q_norm.weight")},
+            [ID4_QWEN3_VL_PARAMETER_LAYER_K_NORM] =
+                {true, IREE_SVL("model.language_model.layers.%" PRIu32
+                                ".self_attn.k_norm.weight")},
             [ID4_QWEN3_VL_PARAMETER_LAYER_V_PROJECTION] =
-                {true, IREE_SVL("text_encoders.llm.model.layers.%" PRIu32
+                {true, IREE_SVL("model.language_model.layers.%" PRIu32
                                 ".self_attn.v_proj.weight")},
             [ID4_QWEN3_VL_PARAMETER_LAYER_O_PROJECTION] =
-                {true, IREE_SVL("text_encoders.llm.model.layers.%" PRIu32
+                {true, IREE_SVL("model.language_model.layers.%" PRIu32
                                 ".self_attn.o_proj.weight")},
             [ID4_QWEN3_VL_PARAMETER_LAYER_POST_ATTENTION_NORM] =
-                {true, IREE_SVL("text_encoders.llm.model.layers.%" PRIu32
+                {true, IREE_SVL("model.language_model.layers.%" PRIu32
                                 ".post_attention_layernorm.weight")},
             [ID4_QWEN3_VL_PARAMETER_LAYER_GATE_PROJECTION] =
-                {true, IREE_SVL("text_encoders.llm.model.layers.%" PRIu32
+                {true, IREE_SVL("model.language_model.layers.%" PRIu32
                                 ".mlp.gate_proj.weight")},
             [ID4_QWEN3_VL_PARAMETER_LAYER_UP_PROJECTION] =
-                {true, IREE_SVL("text_encoders.llm.model.layers.%" PRIu32
+                {true, IREE_SVL("model.language_model.layers.%" PRIu32
                                 ".mlp.up_proj.weight")},
             [ID4_QWEN3_VL_PARAMETER_LAYER_DOWN_PROJECTION] =
-                {true, IREE_SVL("text_encoders.llm.model.layers.%" PRIu32
+                {true, IREE_SVL("model.language_model.layers.%" PRIu32
                                 ".mlp.down_proj.weight")},
             [ID4_QWEN3_VL_PARAMETER_FINAL_NORM] =
-                {false, IREE_SVL("text_encoders.llm.model.norm.weight")},
+                {false, IREE_SVL("model.language_model.norm.weight")},
 };
 
 static const id4_qwen3_vl_program_format_pattern_t
     id4_qwen3_vl_program_tensor_patterns[ID4_QWEN3_VL_TENSOR_KIND_COUNT] = {
-        [ID4_QWEN3_VL_TENSOR_TOKEN_IDS] = {false,
-                                           IREE_SVL(
-                                               "qwen3_vl.input_token_ids")},
-        [ID4_QWEN3_VL_TENSOR_POSITION_IDS] = {false,
-                                              IREE_SVL(
-                                                  "qwen3_vl.position_ids")},
+        [ID4_QWEN3_VL_TENSOR_TOKEN_IDS] = {false, IREE_SVL("token_ids")},
+        [ID4_QWEN3_VL_TENSOR_ATTENTION_MASK] = {false,
+                                                IREE_SVL("attention_mask")},
+        [ID4_QWEN3_VL_TENSOR_TOKEN_WEIGHTS] = {false,
+                                               IREE_SVL("token_weights")},
         [ID4_QWEN3_VL_TENSOR_EMBEDDED_HIDDEN_STATES] =
             {false, IREE_SVL("qwen3_vl.embedded_hidden_states")},
         [ID4_QWEN3_VL_TENSOR_LAYER_INPUT_NORM] =
@@ -435,6 +636,10 @@ static const id4_qwen3_vl_program_format_pattern_t
         [ID4_QWEN3_VL_TENSOR_LAYER_V] = {true,
                                          IREE_SVL("qwen3_vl.layers.%" PRIu32
                                                   ".self_attn.v")},
+        [ID4_QWEN3_VL_TENSOR_LAYER_Q_NORM] =
+            {true, IREE_SVL("qwen3_vl.layers.%" PRIu32 ".self_attn.q_norm")},
+        [ID4_QWEN3_VL_TENSOR_LAYER_K_NORM] =
+            {true, IREE_SVL("qwen3_vl.layers.%" PRIu32 ".self_attn.k_norm")},
         [ID4_QWEN3_VL_TENSOR_LAYER_Q_ROTARY] =
             {true, IREE_SVL("qwen3_vl.layers.%" PRIu32 ".self_attn.q_rotary")},
         [ID4_QWEN3_VL_TENSOR_LAYER_K_ROTARY] =
@@ -458,9 +663,15 @@ static const id4_qwen3_vl_program_format_pattern_t
             {true, IREE_SVL("qwen3_vl.layers.%" PRIu32 ".mlp.down")},
         [ID4_QWEN3_VL_TENSOR_LAYER_OUTPUT] =
             {true, IREE_SVL("qwen3_vl.layers.%" PRIu32 ".output")},
+        [ID4_QWEN3_VL_TENSOR_SELECTED_HIDDEN_STATES] =
+            {false, IREE_SVL("selected_hidden_states")},
+        [ID4_QWEN3_VL_TENSOR_CONDITION] = {false,
+                                           IREE_SVL("qwen3_vl.condition")},
+        [ID4_QWEN3_VL_TENSOR_CONDITION_STATS] =
+            {false, IREE_SVL("qwen3_vl.condition_stats")},
         [ID4_QWEN3_VL_TENSOR_FINAL_NORM] = {false,
                                             IREE_SVL("qwen3_vl.final_norm")},
-        [ID4_QWEN3_VL_TENSOR_OUTPUT] = {false, IREE_SVL("qwen3_vl.output")},
+        [ID4_QWEN3_VL_TENSOR_OUTPUT] = {false, IREE_SVL("condition")},
 };
 
 static const id4_qwen3_vl_program_operation_site_entry_t
@@ -481,6 +692,13 @@ static const id4_qwen3_vl_program_operation_site_entry_t
             {true, IREE_SVL("self_attn.v_proj")},
         [ID4_QWEN3_VL_OPERATION_SITE_AFTER_QKV_PROJECTION] =
             {true, IREE_SVL("after_qkv_projection")},
+        [ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION_Q_NORM] =
+            {true, IREE_SVL("self_attn.q_norm")},
+        [ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION_K_NORM] =
+            {true, IREE_SVL("self_attn.k_norm")},
+        [ID4_QWEN3_VL_OPERATION_SITE_AFTER_QK_NORM] = {true,
+                                                       IREE_SVL(
+                                                           "after_qk_norm")},
         [ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION_Q] = {true,
                                                           IREE_SVL(
                                                               "self_attn.q")},
@@ -519,6 +737,18 @@ static const id4_qwen3_vl_program_operation_site_entry_t
             {true, IREE_SVL("after_mlp_down_projection")},
         [ID4_QWEN3_VL_OPERATION_SITE_AFTER_LAYER_OUTPUT] =
             {true, IREE_SVL("after_layer_output")},
+        [ID4_QWEN3_VL_OPERATION_SITE_SELECTED_HIDDEN_PACK] =
+            {true, IREE_SVL("selected_hidden_pack")},
+        [ID4_QWEN3_VL_OPERATION_SITE_AFTER_SELECTED_HIDDEN_PACK] =
+            {false, IREE_SVL("after_selected_hidden_pack")},
+        [ID4_QWEN3_VL_OPERATION_SITE_CONDITION_APPLY_TOKEN_WEIGHTS] =
+            {false, IREE_SVL("condition.apply_token_weights")},
+        [ID4_QWEN3_VL_OPERATION_SITE_AFTER_CONDITION_APPLY_TOKEN_WEIGHTS] =
+            {false, IREE_SVL("after_condition_apply_token_weights")},
+        [ID4_QWEN3_VL_OPERATION_SITE_CONDITION_NORMALIZE_TOKEN_WEIGHTS] =
+            {false, IREE_SVL("condition.normalize_token_weights")},
+        [ID4_QWEN3_VL_OPERATION_SITE_AFTER_CONDITION] =
+            {false, IREE_SVL("after_condition")},
         [ID4_QWEN3_VL_OPERATION_SITE_FINAL_NORM] = {false,
                                                     IREE_SVL("final_norm")},
         [ID4_QWEN3_VL_OPERATION_SITE_AFTER_FINAL_NORM] =
@@ -536,6 +766,12 @@ static const id4_qwen3_vl_program_operation_kind_entry_t
         [ID4_QWEN3_VL_OPERATION_SILU_GATE] = {true, IREE_SVL("silu_gate")},
         [ID4_QWEN3_VL_OPERATION_RESIDUAL_ADD] = {true,
                                                  IREE_SVL("residual_add")},
+        [ID4_QWEN3_VL_OPERATION_SELECTED_HIDDEN_PACK] = {true,
+                                                         IREE_SVL("pack")},
+        [ID4_QWEN3_VL_OPERATION_CONDITION_APPLY_TOKEN_WEIGHTS] =
+            {true, IREE_SVL("apply_token_weights")},
+        [ID4_QWEN3_VL_OPERATION_CONDITION_NORMALIZE_TOKEN_WEIGHTS] =
+            {true, IREE_SVL("normalize_token_weights")},
         [ID4_QWEN3_VL_OPERATION_BARRIER] = {true, IREE_SVL("barrier")},
         [ID4_QWEN3_VL_OPERATION_TAP] = {true, IREE_SVL("tap")},
 };
@@ -562,6 +798,15 @@ static const id4_pipeline_kernel_ref_t
         [ID4_QWEN3_VL_KERNEL_RESIDUAL_ADD] =
             {IREE_SVL("qwen3_vl/residual_add_f32"),
              IREE_SVL("id4_qwen3_vl_residual_add_f32")},
+        [ID4_QWEN3_VL_KERNEL_SELECTED_HIDDEN_PACK] =
+            {IREE_SVL("qwen3_vl/selected_hidden_pack_f32"),
+             IREE_SVL("id4_qwen3_vl_selected_hidden_pack_f32")},
+        [ID4_QWEN3_VL_KERNEL_CONDITION_APPLY_TOKEN_WEIGHTS] =
+            {IREE_SVL("qwen3_vl/condition"),
+             IREE_SVL("id4_qwen3_vl_condition_apply_token_weights_f32")},
+        [ID4_QWEN3_VL_KERNEL_CONDITION_NORMALIZE_TOKEN_WEIGHTS] =
+            {IREE_SVL("qwen3_vl/condition"),
+             IREE_SVL("id4_qwen3_vl_condition_normalize_token_weights_f32")},
 };
 
 static const iree_string_view_t id4_qwen3_vl_program_config_keys
@@ -597,10 +842,6 @@ static const iree_string_view_t id4_qwen3_vl_program_config_keys
                     IREE_SVL("id4.qwen3_vl.rotary.token_count"),
                 [ID4_QWEN3_VL_CONFIG_OUTPUT_SIZE] =
                     IREE_SVL("id4.qwen3_vl.rotary.output_size"),
-                [ID4_QWEN3_VL_CONFIG_ATTENTION_HEAD_COUNT] =
-                    IREE_SVL("id4.qwen3_vl.rotary.attention_head_count"),
-                [ID4_QWEN3_VL_CONFIG_KEY_VALUE_HEAD_COUNT] =
-                    IREE_SVL("id4.qwen3_vl.rotary.key_value_head_count"),
                 [ID4_QWEN3_VL_CONFIG_HEAD_SIZE] =
                     IREE_SVL("id4.qwen3_vl.rotary.head_size"),
             },
@@ -630,6 +871,32 @@ static const iree_string_view_t id4_qwen3_vl_program_config_keys
                     IREE_SVL("id4.qwen3_vl.residual_add.token_count"),
                 [ID4_QWEN3_VL_CONFIG_HIDDEN_SIZE] =
                     IREE_SVL("id4.qwen3_vl.residual_add.hidden_size"),
+            },
+        [ID4_QWEN3_VL_KERNEL_SELECTED_HIDDEN_PACK] =
+            {
+                [ID4_QWEN3_VL_CONFIG_TOKEN_COUNT] =
+                    IREE_SVL("id4.qwen3_vl.selected_hidden_pack.token_count"),
+                [ID4_QWEN3_VL_CONFIG_HIDDEN_SIZE] =
+                    IREE_SVL("id4.qwen3_vl.selected_hidden_pack.hidden_size"),
+                [ID4_QWEN3_VL_CONFIG_HIDDEN_ROW_COUNT] = IREE_SVL(
+                    "id4.qwen3_vl.selected_hidden_pack.hidden_row_count"),
+                [ID4_QWEN3_VL_CONFIG_SELECTED_LAYER_INDEX] =
+                    IREE_SVL("id4.qwen3_vl.selected_hidden_pack.selected_layer_"
+                             "index"),
+            },
+        [ID4_QWEN3_VL_KERNEL_CONDITION_APPLY_TOKEN_WEIGHTS] =
+            {
+                [ID4_QWEN3_VL_CONFIG_TOKEN_COUNT] =
+                    IREE_SVL("id4.qwen3_vl.condition.token_count"),
+                [ID4_QWEN3_VL_CONFIG_HIDDEN_ROW_COUNT] =
+                    IREE_SVL("id4.qwen3_vl.condition.hidden_row_count"),
+            },
+        [ID4_QWEN3_VL_KERNEL_CONDITION_NORMALIZE_TOKEN_WEIGHTS] =
+            {
+                [ID4_QWEN3_VL_CONFIG_TOKEN_COUNT] =
+                    IREE_SVL("id4.qwen3_vl.condition.token_count"),
+                [ID4_QWEN3_VL_CONFIG_HIDDEN_ROW_COUNT] =
+                    IREE_SVL("id4.qwen3_vl.condition.hidden_row_count"),
             },
 };
 
@@ -865,8 +1132,38 @@ static iree_status_t id4_qwen3_vl_program_make_config_binding(
   return iree_ok_status();
 }
 
+static iree_status_t id4_qwen3_vl_program_make_config_bindings(
+    id4_qwen3_vl_kernel_kind_t kernel_kind, iree_host_size_t config_value_count,
+    const id4_qwen3_vl_program_config_value_t* config_values,
+    char value_buffers[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT]
+                      [ID4_QWEN3_VL_CONFIG_VALUE_BUFFER_CAPACITY],
+    id4_pipeline_kernel_config_binding_t* out_bindings) {
+  if (config_value_count != 0 && !config_values) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Qwen3-VL config value array is required");
+  }
+  if (config_value_count > ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "Qwen3-VL config binding count %" PRIhsz " exceeds max count %u",
+        config_value_count, ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT);
+  }
+  if (config_value_count != 0 && !out_bindings) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Qwen3-VL config binding output is required");
+  }
+  for (iree_host_size_t i = 0; i < config_value_count; ++i) {
+    IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_binding(
+        kernel_kind, config_values[i].key, config_values[i].value,
+        value_buffers[i], ID4_QWEN3_VL_CONFIG_VALUE_BUFFER_CAPACITY,
+        &out_bindings[i]));
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t id4_qwen3_vl_program_import_tensor(
     id4_pipeline_program_builder_t* builder, id4_qwen3_vl_tensor_kind_t kind,
+    id4_pipeline_program_import_tensor_flags_t flags,
     id4_pipeline_program_dtype_t dtype, id4_pipeline_program_shape_t shape,
     id4_pipeline_program_tensor_t* out_tensor) {
   char name_buffer[ID4_QWEN3_VL_FORMAT_BUFFER_CAPACITY];
@@ -875,6 +1172,7 @@ static iree_status_t id4_qwen3_vl_program_import_tensor(
       kind, UINT32_MAX, name_buffer, IREE_ARRAYSIZE(name_buffer), &name));
   id4_pipeline_program_import_tensor_options_t options = {
       .structure_size = sizeof(options),
+      .flags = flags,
       .name = name,
       .dtype = dtype,
       .shape = shape,
@@ -922,6 +1220,7 @@ static iree_status_t id4_qwen3_vl_program_dispatch(
     id4_pipeline_program_builder_t* builder,
     id4_qwen3_vl_operation_kind_t operation_kind, uint32_t layer_ordinal,
     id4_qwen3_vl_operation_site_t site, id4_qwen3_vl_kernel_kind_t kernel_kind,
+    iree_hal_dispatch_config_t dispatch_config,
     iree_host_size_t config_binding_count,
     const id4_pipeline_kernel_config_binding_t* config_bindings,
     iree_host_size_t binding_count,
@@ -938,6 +1237,7 @@ static iree_status_t id4_qwen3_vl_program_dispatch(
       .structure_size = sizeof(options),
       .name = name,
       .kernel = kernel_ref,
+      .dispatch_config = dispatch_config,
       .config_binding_count = config_binding_count,
       .config_bindings = config_bindings,
       .binding_count = binding_count,
@@ -977,21 +1277,47 @@ static iree_status_t id4_qwen3_vl_program_tap(
   return id4_pipeline_program_tap(builder, &options);
 }
 
+static iree_status_t id4_qwen3_vl_program_tap_tensor(
+    id4_pipeline_program_builder_t* builder, id4_qwen3_vl_tensor_kind_t kind,
+    uint32_t layer_ordinal, id4_pipeline_program_tensor_t tensor) {
+  char name_buffer[ID4_QWEN3_VL_FORMAT_BUFFER_CAPACITY];
+  iree_string_view_t name = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_format_tensor_name(
+      kind, layer_ordinal, name_buffer, IREE_ARRAYSIZE(name_buffer), &name));
+  id4_pipeline_program_tap_options_t options = {
+      .structure_size = sizeof(options),
+      .name = name,
+      .tensor = tensor,
+  };
+  return id4_pipeline_program_tap(builder, &options);
+}
+
 static iree_status_t id4_qwen3_vl_program_author_token_embedding(
     const id4_qwen3_vl_program_options_t* options,
     id4_pipeline_program_builder_t* builder,
     id4_pipeline_program_tensor_t* out_hidden_states,
-    id4_pipeline_program_tensor_t* out_position_ids) {
+    id4_pipeline_program_tensor_t* out_attention_mask,
+    id4_pipeline_program_tensor_t* out_token_weights) {
   const uint32_t token_count = options->request.token_count;
   const uint32_t hidden_size = options->model.hidden_size;
   id4_pipeline_program_tensor_t token_ids =
       id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_import_tensor(
-      builder, ID4_QWEN3_VL_TENSOR_TOKEN_IDS, ID4_PIPELINE_PROGRAM_DTYPE_I32,
+      builder, ID4_QWEN3_VL_TENSOR_TOKEN_IDS,
+      ID4_PIPELINE_PROGRAM_IMPORT_TENSOR_FLAG_INITIALIZED,
+      ID4_PIPELINE_PROGRAM_DTYPE_I32,
       id4_pipeline_program_make_shape_rank1(token_count), &token_ids));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_import_tensor(
-      builder, ID4_QWEN3_VL_TENSOR_POSITION_IDS, ID4_PIPELINE_PROGRAM_DTYPE_I32,
-      id4_pipeline_program_make_shape_rank1(token_count), out_position_ids));
+      builder, ID4_QWEN3_VL_TENSOR_ATTENTION_MASK,
+      ID4_PIPELINE_PROGRAM_IMPORT_TENSOR_FLAG_INITIALIZED,
+      ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      id4_pipeline_program_make_shape_rank2(token_count, token_count),
+      out_attention_mask));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_import_tensor(
+      builder, ID4_QWEN3_VL_TENSOR_TOKEN_WEIGHTS,
+      ID4_PIPELINE_PROGRAM_IMPORT_TENSOR_FLAG_INITIALIZED,
+      ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      id4_pipeline_program_make_shape_rank1(token_count), out_token_weights));
   id4_pipeline_program_tensor_t embedding =
       id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_parameter(
@@ -1006,32 +1332,78 @@ static iree_status_t id4_qwen3_vl_program_author_token_embedding(
       id4_pipeline_program_make_shape_rank2(token_count, hidden_size),
       out_hidden_states));
 
-  char value_buffers[3][16];
-  id4_pipeline_kernel_config_binding_t config_bindings[3];
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_binding(
-      ID4_QWEN3_VL_KERNEL_TOKEN_EMBEDDING, ID4_QWEN3_VL_CONFIG_TOKEN_COUNT,
-      token_count, value_buffers[0], IREE_ARRAYSIZE(value_buffers[0]),
-      &config_bindings[0]));
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_binding(
-      ID4_QWEN3_VL_KERNEL_TOKEN_EMBEDDING, ID4_QWEN3_VL_CONFIG_HIDDEN_SIZE,
-      hidden_size, value_buffers[1], IREE_ARRAYSIZE(value_buffers[1]),
-      &config_bindings[1]));
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_binding(
-      ID4_QWEN3_VL_KERNEL_TOKEN_EMBEDDING, ID4_QWEN3_VL_CONFIG_VOCAB_SIZE,
-      options->model.vocab_size, value_buffers[2],
-      IREE_ARRAYSIZE(value_buffers[2]), &config_bindings[2]));
+  const id4_qwen3_vl_program_config_value_t config_values[] = {
+      {ID4_QWEN3_VL_CONFIG_TOKEN_COUNT, token_count},
+      {ID4_QWEN3_VL_CONFIG_HIDDEN_SIZE, hidden_size},
+      {ID4_QWEN3_VL_CONFIG_VOCAB_SIZE, options->model.vocab_size},
+  };
+  char value_buffers[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT]
+                    [ID4_QWEN3_VL_CONFIG_VALUE_BUFFER_CAPACITY];
+  id4_pipeline_kernel_config_binding_t
+      config_bindings[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT];
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_bindings(
+      ID4_QWEN3_VL_KERNEL_TOKEN_EMBEDDING, IREE_ARRAYSIZE(config_values),
+      config_values, value_buffers, config_bindings));
   id4_pipeline_program_dispatch_binding_t bindings[] = {
       id4_pipeline_program_read(token_ids),
       id4_pipeline_program_read(embedding),
       id4_pipeline_program_write(*out_hidden_states),
   };
+  iree_hal_dispatch_config_t dispatch_config;
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_matrix_element_dispatch_config(
+      token_count, hidden_size, &dispatch_config));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_dispatch(
       builder, ID4_QWEN3_VL_OPERATION_TOKEN_EMBEDDING, UINT32_MAX,
       ID4_QWEN3_VL_OPERATION_SITE_TOKEN_EMBEDDING,
-      ID4_QWEN3_VL_KERNEL_TOKEN_EMBEDDING, IREE_ARRAYSIZE(config_bindings),
-      config_bindings, IREE_ARRAYSIZE(bindings), bindings));
+      ID4_QWEN3_VL_KERNEL_TOKEN_EMBEDDING, dispatch_config,
+      IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
+      bindings));
+
   return id4_qwen3_vl_program_barrier(
       builder, UINT32_MAX, ID4_QWEN3_VL_OPERATION_SITE_AFTER_TOKEN_EMBEDDING);
+}
+
+static iree_status_t id4_qwen3_vl_program_author_rmsnorm_rows(
+    const id4_qwen3_vl_program_options_t* options,
+    id4_pipeline_program_builder_t* builder, uint32_t layer_ordinal,
+    id4_qwen3_vl_operation_site_t site,
+    id4_qwen3_vl_parameter_kind_t parameter_kind,
+    id4_qwen3_vl_tensor_kind_t output_kind, id4_pipeline_program_tensor_t input,
+    uint32_t row_count, uint32_t channel_count, uint32_t output_width,
+    id4_pipeline_program_tensor_t* out_output) {
+  id4_pipeline_program_tensor_t weight = id4_pipeline_program_tensor_invalid();
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_parameter(
+      builder, parameter_kind, layer_ordinal, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      id4_pipeline_program_make_shape_rank1(channel_count), &weight));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
+      builder, output_kind, layer_ordinal, ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      id4_pipeline_program_make_shape_rank2(options->request.token_count,
+                                            output_width),
+      out_output));
+
+  const id4_qwen3_vl_program_config_value_t config_values[] = {
+      {ID4_QWEN3_VL_CONFIG_TOKEN_COUNT, row_count},
+      {ID4_QWEN3_VL_CONFIG_HIDDEN_SIZE, channel_count},
+  };
+  char value_buffers[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT]
+                    [ID4_QWEN3_VL_CONFIG_VALUE_BUFFER_CAPACITY];
+  id4_pipeline_kernel_config_binding_t
+      config_bindings[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT];
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_bindings(
+      ID4_QWEN3_VL_KERNEL_RMSNORM, IREE_ARRAYSIZE(config_values), config_values,
+      value_buffers, config_bindings));
+  id4_pipeline_program_dispatch_binding_t bindings[] = {
+      id4_pipeline_program_read(input),
+      id4_pipeline_program_read(weight),
+      id4_pipeline_program_write(*out_output),
+  };
+  const iree_hal_dispatch_config_t dispatch_config =
+      id4_qwen3_vl_program_make_row_dispatch_config(row_count);
+  return id4_qwen3_vl_program_dispatch(
+      builder, ID4_QWEN3_VL_OPERATION_RMSNORM, layer_ordinal, site,
+      ID4_QWEN3_VL_KERNEL_RMSNORM, dispatch_config,
+      IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
+      bindings);
 }
 
 static iree_status_t id4_qwen3_vl_program_author_rmsnorm(
@@ -1041,34 +1413,10 @@ static iree_status_t id4_qwen3_vl_program_author_rmsnorm(
     id4_qwen3_vl_parameter_kind_t parameter_kind,
     id4_qwen3_vl_tensor_kind_t output_kind, id4_pipeline_program_tensor_t input,
     id4_pipeline_program_tensor_t* out_output) {
-  const uint32_t token_count = options->request.token_count;
-  const uint32_t hidden_size = options->model.hidden_size;
-  id4_pipeline_program_tensor_t weight = id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_parameter(
-      builder, parameter_kind, layer_ordinal, ID4_PIPELINE_PROGRAM_DTYPE_F32,
-      id4_pipeline_program_make_shape_rank1(hidden_size), &weight));
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
-      builder, output_kind, layer_ordinal, ID4_PIPELINE_PROGRAM_DTYPE_F32,
-      id4_pipeline_program_make_shape_rank2(token_count, hidden_size),
-      out_output));
-
-  char value_buffers[2][16];
-  id4_pipeline_kernel_config_binding_t config_bindings[2];
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_binding(
-      ID4_QWEN3_VL_KERNEL_RMSNORM, ID4_QWEN3_VL_CONFIG_TOKEN_COUNT, token_count,
-      value_buffers[0], IREE_ARRAYSIZE(value_buffers[0]), &config_bindings[0]));
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_binding(
-      ID4_QWEN3_VL_KERNEL_RMSNORM, ID4_QWEN3_VL_CONFIG_HIDDEN_SIZE, hidden_size,
-      value_buffers[1], IREE_ARRAYSIZE(value_buffers[1]), &config_bindings[1]));
-  id4_pipeline_program_dispatch_binding_t bindings[] = {
-      id4_pipeline_program_read(input),
-      id4_pipeline_program_read(weight),
-      id4_pipeline_program_write(*out_output),
-  };
-  return id4_qwen3_vl_program_dispatch(
-      builder, ID4_QWEN3_VL_OPERATION_RMSNORM, layer_ordinal, site,
-      ID4_QWEN3_VL_KERNEL_RMSNORM, IREE_ARRAYSIZE(config_bindings),
-      config_bindings, IREE_ARRAYSIZE(bindings), bindings);
+  return id4_qwen3_vl_program_author_rmsnorm_rows(
+      options, builder, layer_ordinal, site, parameter_kind, output_kind, input,
+      options->request.token_count, options->model.hidden_size,
+      options->model.hidden_size, out_output);
 }
 
 static iree_status_t id4_qwen3_vl_program_author_linear(
@@ -1083,75 +1431,74 @@ static iree_status_t id4_qwen3_vl_program_author_linear(
   id4_pipeline_program_tensor_t weight = id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_parameter(
       builder, parameter_kind, layer_ordinal, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
-      id4_pipeline_program_make_shape_rank2(input_size, output_size), &weight));
+      id4_pipeline_program_make_shape_rank2(output_size, input_size), &weight));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
       builder, output_kind, layer_ordinal, ID4_PIPELINE_PROGRAM_DTYPE_F32,
       id4_pipeline_program_make_shape_rank2(token_count, output_size),
       out_output));
 
-  char value_buffers[3][16];
-  id4_pipeline_kernel_config_binding_t config_bindings[3];
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_binding(
-      ID4_QWEN3_VL_KERNEL_LINEAR_BF16_F32, ID4_QWEN3_VL_CONFIG_TOKEN_COUNT,
-      token_count, value_buffers[0], IREE_ARRAYSIZE(value_buffers[0]),
-      &config_bindings[0]));
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_binding(
-      ID4_QWEN3_VL_KERNEL_LINEAR_BF16_F32, ID4_QWEN3_VL_CONFIG_INPUT_SIZE,
-      input_size, value_buffers[1], IREE_ARRAYSIZE(value_buffers[1]),
-      &config_bindings[1]));
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_binding(
-      ID4_QWEN3_VL_KERNEL_LINEAR_BF16_F32, ID4_QWEN3_VL_CONFIG_OUTPUT_SIZE,
-      output_size, value_buffers[2], IREE_ARRAYSIZE(value_buffers[2]),
-      &config_bindings[2]));
+  const id4_qwen3_vl_program_config_value_t config_values[] = {
+      {ID4_QWEN3_VL_CONFIG_TOKEN_COUNT, token_count},
+      {ID4_QWEN3_VL_CONFIG_INPUT_SIZE, input_size},
+      {ID4_QWEN3_VL_CONFIG_OUTPUT_SIZE, output_size},
+  };
+  char value_buffers[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT]
+                    [ID4_QWEN3_VL_CONFIG_VALUE_BUFFER_CAPACITY];
+  id4_pipeline_kernel_config_binding_t
+      config_bindings[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT];
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_bindings(
+      ID4_QWEN3_VL_KERNEL_LINEAR_BF16_F32, IREE_ARRAYSIZE(config_values),
+      config_values, value_buffers, config_bindings));
   id4_pipeline_program_dispatch_binding_t bindings[] = {
       id4_pipeline_program_read(input),
       id4_pipeline_program_read(weight),
       id4_pipeline_program_write(*out_output),
   };
+  const iree_hal_dispatch_config_t dispatch_config =
+      id4_qwen3_vl_program_make_linear_dispatch_config(token_count,
+                                                       output_size);
   return id4_qwen3_vl_program_dispatch(
       builder, ID4_QWEN3_VL_OPERATION_LINEAR, layer_ordinal, site,
-      ID4_QWEN3_VL_KERNEL_LINEAR_BF16_F32, IREE_ARRAYSIZE(config_bindings),
-      config_bindings, IREE_ARRAYSIZE(bindings), bindings);
+      ID4_QWEN3_VL_KERNEL_LINEAR_BF16_F32, dispatch_config,
+      IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
+      bindings);
 }
 
 static iree_status_t id4_qwen3_vl_program_author_rotary(
     const id4_qwen3_vl_program_options_t* options,
     id4_pipeline_program_builder_t* builder, uint32_t layer_ordinal,
     id4_qwen3_vl_operation_site_t site, id4_pipeline_program_tensor_t input,
-    id4_pipeline_program_tensor_t position_ids, uint32_t channel_count,
-    id4_qwen3_vl_config_key_t head_count_key, uint32_t head_count,
-    id4_qwen3_vl_tensor_kind_t output_kind,
+    uint32_t channel_count, id4_qwen3_vl_tensor_kind_t output_kind,
     id4_pipeline_program_tensor_t* out_output) {
   const uint32_t token_count = options->request.token_count;
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
       builder, output_kind, layer_ordinal, ID4_PIPELINE_PROGRAM_DTYPE_F32,
       id4_pipeline_program_make_shape_rank2(token_count, channel_count),
       out_output));
-  char value_buffers[4][16];
-  id4_pipeline_kernel_config_binding_t config_bindings[4];
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_binding(
-      ID4_QWEN3_VL_KERNEL_ROTARY, ID4_QWEN3_VL_CONFIG_TOKEN_COUNT, token_count,
-      value_buffers[0], IREE_ARRAYSIZE(value_buffers[0]), &config_bindings[0]));
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_binding(
-      ID4_QWEN3_VL_KERNEL_ROTARY, ID4_QWEN3_VL_CONFIG_OUTPUT_SIZE,
-      channel_count, value_buffers[1], IREE_ARRAYSIZE(value_buffers[1]),
-      &config_bindings[1]));
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_binding(
-      ID4_QWEN3_VL_KERNEL_ROTARY, ID4_QWEN3_VL_CONFIG_HEAD_SIZE,
-      options->model.head_size, value_buffers[2],
-      IREE_ARRAYSIZE(value_buffers[2]), &config_bindings[2]));
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_binding(
-      ID4_QWEN3_VL_KERNEL_ROTARY, head_count_key, head_count, value_buffers[3],
-      IREE_ARRAYSIZE(value_buffers[3]), &config_bindings[3]));
+  const id4_qwen3_vl_program_config_value_t config_values[] = {
+      {ID4_QWEN3_VL_CONFIG_TOKEN_COUNT, token_count},
+      {ID4_QWEN3_VL_CONFIG_OUTPUT_SIZE, channel_count},
+      {ID4_QWEN3_VL_CONFIG_HEAD_SIZE, options->model.head_size},
+  };
+  char value_buffers[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT]
+                    [ID4_QWEN3_VL_CONFIG_VALUE_BUFFER_CAPACITY];
+  id4_pipeline_kernel_config_binding_t
+      config_bindings[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT];
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_bindings(
+      ID4_QWEN3_VL_KERNEL_ROTARY, IREE_ARRAYSIZE(config_values), config_values,
+      value_buffers, config_bindings));
   id4_pipeline_program_dispatch_binding_t bindings[] = {
       id4_pipeline_program_read(input),
-      id4_pipeline_program_read(position_ids),
       id4_pipeline_program_write(*out_output),
   };
+  iree_hal_dispatch_config_t dispatch_config;
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_matrix_element_dispatch_config(
+      token_count, channel_count, &dispatch_config));
   return id4_qwen3_vl_program_dispatch(
       builder, ID4_QWEN3_VL_OPERATION_ROTARY, layer_ordinal, site,
-      ID4_QWEN3_VL_KERNEL_ROTARY, IREE_ARRAYSIZE(config_bindings),
-      config_bindings, IREE_ARRAYSIZE(bindings), bindings);
+      ID4_QWEN3_VL_KERNEL_ROTARY, dispatch_config,
+      IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
+      bindings);
 }
 
 static iree_status_t id4_qwen3_vl_program_author_attention(
@@ -1159,6 +1506,7 @@ static iree_status_t id4_qwen3_vl_program_author_attention(
     id4_pipeline_program_builder_t* builder, uint32_t layer_ordinal,
     id4_pipeline_program_tensor_t query, id4_pipeline_program_tensor_t key,
     id4_pipeline_program_tensor_t value,
+    id4_pipeline_program_tensor_t attention_mask,
     id4_pipeline_program_tensor_t* out_context) {
   const uint32_t token_count = options->request.token_count;
   const uint32_t hidden_size = options->model.hidden_size;
@@ -1167,38 +1515,36 @@ static iree_status_t id4_qwen3_vl_program_author_attention(
       ID4_PIPELINE_PROGRAM_DTYPE_F32,
       id4_pipeline_program_make_shape_rank2(token_count, hidden_size),
       out_context));
-  char value_buffers[5][16];
-  id4_pipeline_kernel_config_binding_t config_bindings[5];
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_binding(
-      ID4_QWEN3_VL_KERNEL_ATTENTION, ID4_QWEN3_VL_CONFIG_TOKEN_COUNT,
-      token_count, value_buffers[0], IREE_ARRAYSIZE(value_buffers[0]),
-      &config_bindings[0]));
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_binding(
-      ID4_QWEN3_VL_KERNEL_ATTENTION, ID4_QWEN3_VL_CONFIG_HIDDEN_SIZE,
-      hidden_size, value_buffers[1], IREE_ARRAYSIZE(value_buffers[1]),
-      &config_bindings[1]));
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_binding(
-      ID4_QWEN3_VL_KERNEL_ATTENTION, ID4_QWEN3_VL_CONFIG_ATTENTION_HEAD_COUNT,
-      options->model.attention_head_count, value_buffers[2],
-      IREE_ARRAYSIZE(value_buffers[2]), &config_bindings[2]));
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_binding(
-      ID4_QWEN3_VL_KERNEL_ATTENTION, ID4_QWEN3_VL_CONFIG_KEY_VALUE_HEAD_COUNT,
-      options->model.key_value_head_count, value_buffers[3],
-      IREE_ARRAYSIZE(value_buffers[3]), &config_bindings[3]));
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_binding(
-      ID4_QWEN3_VL_KERNEL_ATTENTION, ID4_QWEN3_VL_CONFIG_HEAD_SIZE,
-      options->model.head_size, value_buffers[4],
-      IREE_ARRAYSIZE(value_buffers[4]), &config_bindings[4]));
+  const id4_qwen3_vl_program_config_value_t config_values[] = {
+      {ID4_QWEN3_VL_CONFIG_TOKEN_COUNT, token_count},
+      {ID4_QWEN3_VL_CONFIG_HIDDEN_SIZE, hidden_size},
+      {ID4_QWEN3_VL_CONFIG_ATTENTION_HEAD_COUNT,
+       options->model.attention_head_count},
+      {ID4_QWEN3_VL_CONFIG_KEY_VALUE_HEAD_COUNT,
+       options->model.key_value_head_count},
+      {ID4_QWEN3_VL_CONFIG_HEAD_SIZE, options->model.head_size},
+  };
+  char value_buffers[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT]
+                    [ID4_QWEN3_VL_CONFIG_VALUE_BUFFER_CAPACITY];
+  id4_pipeline_kernel_config_binding_t
+      config_bindings[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT];
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_bindings(
+      ID4_QWEN3_VL_KERNEL_ATTENTION, IREE_ARRAYSIZE(config_values),
+      config_values, value_buffers, config_bindings));
   id4_pipeline_program_dispatch_binding_t bindings[] = {
       id4_pipeline_program_read(query),
       id4_pipeline_program_read(key),
       id4_pipeline_program_read(value),
+      id4_pipeline_program_read(attention_mask),
       id4_pipeline_program_write(*out_context),
   };
+  iree_hal_dispatch_config_t dispatch_config;
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_matrix_element_dispatch_config(
+      token_count, hidden_size, &dispatch_config));
   return id4_qwen3_vl_program_dispatch(
       builder, ID4_QWEN3_VL_OPERATION_ATTENTION, layer_ordinal,
       ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION, ID4_QWEN3_VL_KERNEL_ATTENTION,
-      IREE_ARRAYSIZE(config_bindings), config_bindings,
+      dispatch_config, IREE_ARRAYSIZE(config_values), config_bindings,
       IREE_ARRAYSIZE(bindings), bindings);
 }
 
@@ -1214,25 +1560,29 @@ static iree_status_t id4_qwen3_vl_program_author_silu_gate(
       ID4_PIPELINE_PROGRAM_DTYPE_F32,
       id4_pipeline_program_make_shape_rank2(token_count, intermediate_size),
       out_activation));
-  char value_buffers[2][16];
-  id4_pipeline_kernel_config_binding_t config_bindings[2];
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_binding(
-      ID4_QWEN3_VL_KERNEL_SILU_GATE, ID4_QWEN3_VL_CONFIG_TOKEN_COUNT,
-      token_count, value_buffers[0], IREE_ARRAYSIZE(value_buffers[0]),
-      &config_bindings[0]));
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_binding(
-      ID4_QWEN3_VL_KERNEL_SILU_GATE, ID4_QWEN3_VL_CONFIG_INTERMEDIATE_SIZE,
-      intermediate_size, value_buffers[1], IREE_ARRAYSIZE(value_buffers[1]),
-      &config_bindings[1]));
+  const id4_qwen3_vl_program_config_value_t config_values[] = {
+      {ID4_QWEN3_VL_CONFIG_TOKEN_COUNT, token_count},
+      {ID4_QWEN3_VL_CONFIG_INTERMEDIATE_SIZE, intermediate_size},
+  };
+  char value_buffers[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT]
+                    [ID4_QWEN3_VL_CONFIG_VALUE_BUFFER_CAPACITY];
+  id4_pipeline_kernel_config_binding_t
+      config_bindings[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT];
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_bindings(
+      ID4_QWEN3_VL_KERNEL_SILU_GATE, IREE_ARRAYSIZE(config_values),
+      config_values, value_buffers, config_bindings));
   id4_pipeline_program_dispatch_binding_t bindings[] = {
       id4_pipeline_program_read(gate),
       id4_pipeline_program_read(up),
       id4_pipeline_program_write(*out_activation),
   };
+  iree_hal_dispatch_config_t dispatch_config;
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_matrix_element_dispatch_config(
+      token_count, intermediate_size, &dispatch_config));
   return id4_qwen3_vl_program_dispatch(
       builder, ID4_QWEN3_VL_OPERATION_SILU_GATE, layer_ordinal,
       ID4_QWEN3_VL_OPERATION_SITE_MLP, ID4_QWEN3_VL_KERNEL_SILU_GATE,
-      IREE_ARRAYSIZE(config_bindings), config_bindings,
+      dispatch_config, IREE_ARRAYSIZE(config_values), config_bindings,
       IREE_ARRAYSIZE(bindings), bindings);
 }
 
@@ -1248,38 +1598,174 @@ static iree_status_t id4_qwen3_vl_program_author_residual_add(
       builder, output_kind, layer_ordinal, ID4_PIPELINE_PROGRAM_DTYPE_F32,
       id4_pipeline_program_make_shape_rank2(token_count, hidden_size),
       out_output));
-  char value_buffers[2][16];
-  id4_pipeline_kernel_config_binding_t config_bindings[2];
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_binding(
-      ID4_QWEN3_VL_KERNEL_RESIDUAL_ADD, ID4_QWEN3_VL_CONFIG_TOKEN_COUNT,
-      token_count, value_buffers[0], IREE_ARRAYSIZE(value_buffers[0]),
-      &config_bindings[0]));
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_binding(
-      ID4_QWEN3_VL_KERNEL_RESIDUAL_ADD, ID4_QWEN3_VL_CONFIG_HIDDEN_SIZE,
-      hidden_size, value_buffers[1], IREE_ARRAYSIZE(value_buffers[1]),
-      &config_bindings[1]));
+  const id4_qwen3_vl_program_config_value_t config_values[] = {
+      {ID4_QWEN3_VL_CONFIG_TOKEN_COUNT, token_count},
+      {ID4_QWEN3_VL_CONFIG_HIDDEN_SIZE, hidden_size},
+  };
+  char value_buffers[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT]
+                    [ID4_QWEN3_VL_CONFIG_VALUE_BUFFER_CAPACITY];
+  id4_pipeline_kernel_config_binding_t
+      config_bindings[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT];
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_bindings(
+      ID4_QWEN3_VL_KERNEL_RESIDUAL_ADD, IREE_ARRAYSIZE(config_values),
+      config_values, value_buffers, config_bindings));
   id4_pipeline_program_dispatch_binding_t bindings[] = {
       id4_pipeline_program_read(lhs),
       id4_pipeline_program_read(rhs),
       id4_pipeline_program_write(*out_output),
   };
+  iree_hal_dispatch_config_t dispatch_config;
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_matrix_element_dispatch_config(
+      token_count, hidden_size, &dispatch_config));
   return id4_qwen3_vl_program_dispatch(
       builder, ID4_QWEN3_VL_OPERATION_RESIDUAL_ADD, layer_ordinal, site,
-      ID4_QWEN3_VL_KERNEL_RESIDUAL_ADD, IREE_ARRAYSIZE(config_bindings),
-      config_bindings, IREE_ARRAYSIZE(bindings), bindings);
+      ID4_QWEN3_VL_KERNEL_RESIDUAL_ADD, dispatch_config,
+      IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
+      bindings);
+}
+
+static iree_status_t id4_qwen3_vl_program_author_selected_hidden_pack(
+    const id4_qwen3_vl_program_options_t* options,
+    id4_pipeline_program_builder_t* builder, uint32_t layer_ordinal,
+    uint32_t selected_layer_index, id4_pipeline_program_tensor_t hidden_states,
+    id4_pipeline_program_tensor_t selected_hidden_states) {
+  const uint32_t token_count = options->request.token_count;
+  const uint32_t hidden_size = options->model.hidden_size;
+  const uint32_t selected_hidden_row_count =
+      id4_qwen3_vl_program_selected_hidden_row_count(&options->model);
+  const id4_qwen3_vl_program_config_value_t config_values[] = {
+      {ID4_QWEN3_VL_CONFIG_TOKEN_COUNT, token_count},
+      {ID4_QWEN3_VL_CONFIG_HIDDEN_SIZE, hidden_size},
+      {ID4_QWEN3_VL_CONFIG_HIDDEN_ROW_COUNT, selected_hidden_row_count},
+      {ID4_QWEN3_VL_CONFIG_SELECTED_LAYER_INDEX, selected_layer_index},
+  };
+  char value_buffers[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT]
+                    [ID4_QWEN3_VL_CONFIG_VALUE_BUFFER_CAPACITY];
+  id4_pipeline_kernel_config_binding_t
+      config_bindings[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT];
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_bindings(
+      ID4_QWEN3_VL_KERNEL_SELECTED_HIDDEN_PACK, IREE_ARRAYSIZE(config_values),
+      config_values, value_buffers, config_bindings));
+  id4_pipeline_program_dispatch_binding_t bindings[] = {
+      id4_pipeline_program_read(hidden_states),
+      id4_pipeline_program_write(selected_hidden_states),
+  };
+  iree_hal_dispatch_config_t dispatch_config;
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_matrix_element_dispatch_config(
+      token_count, hidden_size, &dispatch_config));
+  return id4_qwen3_vl_program_dispatch(
+      builder, ID4_QWEN3_VL_OPERATION_SELECTED_HIDDEN_PACK, layer_ordinal,
+      ID4_QWEN3_VL_OPERATION_SITE_SELECTED_HIDDEN_PACK,
+      ID4_QWEN3_VL_KERNEL_SELECTED_HIDDEN_PACK, dispatch_config,
+      IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
+      bindings);
+}
+
+static iree_status_t id4_qwen3_vl_program_author_condition(
+    const id4_qwen3_vl_program_options_t* options,
+    id4_pipeline_program_builder_t* builder,
+    id4_pipeline_program_tensor_t selected_hidden_states,
+    id4_pipeline_program_tensor_t token_weights,
+    id4_pipeline_program_tensor_t* out_condition) {
+  const uint32_t token_count = options->request.token_count;
+  const uint32_t hidden_row_count =
+      id4_qwen3_vl_program_selected_hidden_row_count(&options->model);
+  id4_pipeline_program_tensor_t stats = id4_pipeline_program_tensor_invalid();
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
+      builder, ID4_QWEN3_VL_TENSOR_CONDITION_STATS, UINT32_MAX,
+      ID4_PIPELINE_PROGRAM_DTYPE_F32, id4_pipeline_program_make_shape_rank1(2),
+      &stats));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_import_tensor(
+      builder, ID4_QWEN3_VL_TENSOR_OUTPUT, /*flags=*/0,
+      ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      id4_pipeline_program_make_shape_rank2(hidden_row_count, token_count),
+      out_condition));
+
+  const id4_qwen3_vl_program_config_value_t apply_config_values[] = {
+      {ID4_QWEN3_VL_CONFIG_HIDDEN_ROW_COUNT, hidden_row_count},
+      {ID4_QWEN3_VL_CONFIG_TOKEN_COUNT, token_count},
+  };
+  char apply_value_buffers[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT]
+                          [ID4_QWEN3_VL_CONFIG_VALUE_BUFFER_CAPACITY];
+  id4_pipeline_kernel_config_binding_t
+      apply_config_bindings[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT];
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_bindings(
+      ID4_QWEN3_VL_KERNEL_CONDITION_APPLY_TOKEN_WEIGHTS,
+      IREE_ARRAYSIZE(apply_config_values), apply_config_values,
+      apply_value_buffers, apply_config_bindings));
+  id4_pipeline_program_dispatch_binding_t apply_bindings[] = {
+      id4_pipeline_program_read(selected_hidden_states),
+      id4_pipeline_program_read(token_weights),
+      id4_pipeline_program_write(*out_condition),
+      id4_pipeline_program_write(stats),
+  };
+  const iree_hal_dispatch_config_t apply_dispatch_config =
+      id4_qwen3_vl_program_make_reduction_dispatch_config();
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_dispatch(
+      builder, ID4_QWEN3_VL_OPERATION_CONDITION_APPLY_TOKEN_WEIGHTS, UINT32_MAX,
+      ID4_QWEN3_VL_OPERATION_SITE_CONDITION_APPLY_TOKEN_WEIGHTS,
+      ID4_QWEN3_VL_KERNEL_CONDITION_APPLY_TOKEN_WEIGHTS, apply_dispatch_config,
+      IREE_ARRAYSIZE(apply_config_values), apply_config_bindings,
+      IREE_ARRAYSIZE(apply_bindings), apply_bindings));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_barrier(
+      builder, UINT32_MAX,
+      ID4_QWEN3_VL_OPERATION_SITE_AFTER_CONDITION_APPLY_TOKEN_WEIGHTS));
+
+  const id4_qwen3_vl_program_config_value_t normalize_config_values[] = {
+      {ID4_QWEN3_VL_CONFIG_HIDDEN_ROW_COUNT, hidden_row_count},
+      {ID4_QWEN3_VL_CONFIG_TOKEN_COUNT, token_count},
+  };
+  char normalize_value_buffers[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT]
+                              [ID4_QWEN3_VL_CONFIG_VALUE_BUFFER_CAPACITY];
+  id4_pipeline_kernel_config_binding_t
+      normalize_config_bindings[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT];
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_bindings(
+      ID4_QWEN3_VL_KERNEL_CONDITION_NORMALIZE_TOKEN_WEIGHTS,
+      IREE_ARRAYSIZE(normalize_config_values), normalize_config_values,
+      normalize_value_buffers, normalize_config_bindings));
+  id4_pipeline_program_dispatch_binding_t normalize_bindings[] = {
+      id4_pipeline_program_read_write(*out_condition),
+      id4_pipeline_program_read(stats),
+  };
+  iree_hal_dispatch_config_t normalize_dispatch_config;
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_matrix_element_dispatch_config(
+      hidden_row_count, token_count, &normalize_dispatch_config));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_dispatch(
+      builder, ID4_QWEN3_VL_OPERATION_CONDITION_NORMALIZE_TOKEN_WEIGHTS,
+      UINT32_MAX, ID4_QWEN3_VL_OPERATION_SITE_CONDITION_NORMALIZE_TOKEN_WEIGHTS,
+      ID4_QWEN3_VL_KERNEL_CONDITION_NORMALIZE_TOKEN_WEIGHTS,
+      normalize_dispatch_config, IREE_ARRAYSIZE(normalize_config_values),
+      normalize_config_bindings, IREE_ARRAYSIZE(normalize_bindings),
+      normalize_bindings));
+  return id4_qwen3_vl_program_barrier(
+      builder, UINT32_MAX, ID4_QWEN3_VL_OPERATION_SITE_AFTER_CONDITION);
 }
 
 static iree_status_t id4_qwen3_vl_program_author_layer(
     const id4_qwen3_vl_program_options_t* options,
     id4_pipeline_program_builder_t* builder, uint32_t layer_ordinal,
     id4_pipeline_program_tensor_t input,
-    id4_pipeline_program_tensor_t position_ids,
+    id4_pipeline_program_tensor_t attention_mask,
     id4_pipeline_program_tensor_t* out_output) {
   const uint32_t hidden_size = options->model.hidden_size;
   const uint32_t query_width =
       id4_qwen3_vl_program_query_width(&options->model);
   const uint32_t key_value_width =
       id4_qwen3_vl_program_key_value_width(&options->model);
+  uint32_t query_row_count = 0;
+  if (!id4_qwen3_vl_program_checked_mul_u32(options->request.token_count,
+                                            options->model.attention_head_count,
+                                            &query_row_count)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "Qwen3-VL query RMSNorm row count overflow");
+  }
+  uint32_t key_row_count = 0;
+  if (!id4_qwen3_vl_program_checked_mul_u32(options->request.token_count,
+                                            options->model.key_value_head_count,
+                                            &key_row_count)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "Qwen3-VL key RMSNorm row count overflow");
+  }
   id4_pipeline_program_tensor_t input_norm =
       id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_rmsnorm(
@@ -1313,22 +1799,37 @@ static iree_status_t id4_qwen3_vl_program_author_layer(
       builder, layer_ordinal,
       ID4_QWEN3_VL_OPERATION_SITE_AFTER_QKV_PROJECTION));
 
+  id4_pipeline_program_tensor_t query_norm =
+      id4_pipeline_program_tensor_invalid();
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_rmsnorm_rows(
+      options, builder, layer_ordinal,
+      ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION_Q_NORM,
+      ID4_QWEN3_VL_PARAMETER_LAYER_Q_NORM, ID4_QWEN3_VL_TENSOR_LAYER_Q_NORM,
+      query, query_row_count, options->model.head_size, query_width,
+      &query_norm));
+  id4_pipeline_program_tensor_t key_norm =
+      id4_pipeline_program_tensor_invalid();
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_rmsnorm_rows(
+      options, builder, layer_ordinal,
+      ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION_K_NORM,
+      ID4_QWEN3_VL_PARAMETER_LAYER_K_NORM, ID4_QWEN3_VL_TENSOR_LAYER_K_NORM,
+      key, key_row_count, options->model.head_size, key_value_width,
+      &key_norm));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_barrier(
+      builder, layer_ordinal, ID4_QWEN3_VL_OPERATION_SITE_AFTER_QK_NORM));
+
   id4_pipeline_program_tensor_t query_rotary =
       id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_rotary(
       options, builder, layer_ordinal,
-      ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION_Q, query, position_ids,
-      query_width, ID4_QWEN3_VL_CONFIG_ATTENTION_HEAD_COUNT,
-      options->model.attention_head_count, ID4_QWEN3_VL_TENSOR_LAYER_Q_ROTARY,
-      &query_rotary));
+      ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION_Q, query_norm, query_width,
+      ID4_QWEN3_VL_TENSOR_LAYER_Q_ROTARY, &query_rotary));
   id4_pipeline_program_tensor_t key_rotary =
       id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_rotary(
       options, builder, layer_ordinal,
-      ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION_K, key, position_ids,
-      key_value_width, ID4_QWEN3_VL_CONFIG_KEY_VALUE_HEAD_COUNT,
-      options->model.key_value_head_count, ID4_QWEN3_VL_TENSOR_LAYER_K_ROTARY,
-      &key_rotary));
+      ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION_K, key_norm, key_value_width,
+      ID4_QWEN3_VL_TENSOR_LAYER_K_ROTARY, &key_rotary));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_barrier(
       builder, layer_ordinal,
       ID4_QWEN3_VL_OPERATION_SITE_AFTER_ROTARY_EMBEDDING));
@@ -1336,7 +1837,7 @@ static iree_status_t id4_qwen3_vl_program_author_layer(
   id4_pipeline_program_tensor_t context = id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_attention(
       options, builder, layer_ordinal, query_rotary, key_rotary, value,
-      &context));
+      attention_mask, &context));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_barrier(
       builder, layer_ordinal, ID4_QWEN3_VL_OPERATION_SITE_AFTER_ATTENTION));
 
@@ -1426,29 +1927,57 @@ iree_status_t id4_qwen3_vl_program_author_forward(
 
   id4_pipeline_program_tensor_t hidden_states =
       id4_pipeline_program_tensor_invalid();
-  id4_pipeline_program_tensor_t position_ids =
+  id4_pipeline_program_tensor_t attention_mask =
+      id4_pipeline_program_tensor_invalid();
+  id4_pipeline_program_tensor_t token_weights =
       id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_token_embedding(
-      options, builder, &hidden_states, &position_ids));
+      options, builder, &hidden_states, &attention_mask, &token_weights));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_tap_tensor(
+      builder, ID4_QWEN3_VL_TENSOR_EMBEDDED_HIDDEN_STATES, UINT32_MAX,
+      hidden_states));
 
+  const uint32_t selected_hidden_row_count =
+      id4_qwen3_vl_program_selected_hidden_row_count(&options->model);
+  id4_pipeline_program_tensor_t selected_hidden_states =
+      id4_pipeline_program_tensor_invalid();
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
+      builder, ID4_QWEN3_VL_TENSOR_SELECTED_HIDDEN_STATES, UINT32_MAX,
+      ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      id4_pipeline_program_make_shape_rank2(selected_hidden_row_count,
+                                            options->request.token_count),
+      &selected_hidden_states));
+
+  uint32_t selected_layer_index = 0;
   for (uint32_t i = 0; i < options->model.layer_count; ++i) {
     id4_pipeline_program_tensor_t layer_output =
         id4_pipeline_program_tensor_invalid();
     IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_layer(
-        options, builder, i, hidden_states, position_ids, &layer_output));
+        options, builder, i, hidden_states, attention_mask, &layer_output));
     hidden_states = layer_output;
+    if (selected_layer_index < options->model.selected_layer_count &&
+        options->model.selected_layer_ordinals[selected_layer_index] == i) {
+      IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_tap_tensor(
+          builder, ID4_QWEN3_VL_TENSOR_LAYER_OUTPUT, i, hidden_states));
+      IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_selected_hidden_pack(
+          options, builder, i, selected_layer_index, hidden_states,
+          selected_hidden_states));
+      ++selected_layer_index;
+    }
   }
-
-  id4_pipeline_program_tensor_t final_norm =
-      id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_rmsnorm(
-      options, builder, UINT32_MAX, ID4_QWEN3_VL_OPERATION_SITE_FINAL_NORM,
-      ID4_QWEN3_VL_PARAMETER_FINAL_NORM, ID4_QWEN3_VL_TENSOR_FINAL_NORM,
-      hidden_states, &final_norm));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_barrier(
-      builder, UINT32_MAX, ID4_QWEN3_VL_OPERATION_SITE_AFTER_FINAL_NORM));
+      builder, UINT32_MAX,
+      ID4_QWEN3_VL_OPERATION_SITE_AFTER_SELECTED_HIDDEN_PACK));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_tap_tensor(
+      builder, ID4_QWEN3_VL_TENSOR_SELECTED_HIDDEN_STATES, UINT32_MAX,
+      selected_hidden_states));
+
+  id4_pipeline_program_tensor_t condition =
+      id4_pipeline_program_tensor_invalid();
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_condition(
+      options, builder, selected_hidden_states, token_weights, &condition));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_tap(
-      builder, UINT32_MAX, ID4_QWEN3_VL_OPERATION_SITE_OUTPUT, final_norm));
+      builder, UINT32_MAX, ID4_QWEN3_VL_OPERATION_SITE_OUTPUT, condition));
   char export_name_buffer[ID4_QWEN3_VL_FORMAT_BUFFER_CAPACITY];
   iree_string_view_t export_name = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_format_tensor_name(
@@ -1457,7 +1986,17 @@ iree_status_t id4_qwen3_vl_program_author_forward(
   id4_pipeline_program_export_options_t export_options = {
       .structure_size = sizeof(export_options),
       .name = export_name,
-      .tensor = final_norm,
+      .tensor = condition,
   };
   return id4_pipeline_program_export(builder, &export_options);
+}
+
+const id4_qwen3_vl_model_config_t* id4_qwen3_vl_program_ideogram4_model_config(
+    void) {
+  return &id4_qwen3_vl_program_ideogram4_model_config_value;
+}
+
+iree_string_view_t id4_qwen3_vl_program_token_ids_boundary_name(void) {
+  return id4_qwen3_vl_program_tensor_patterns[ID4_QWEN3_VL_TENSOR_TOKEN_IDS]
+      .pattern;
 }

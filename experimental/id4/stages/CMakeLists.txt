@@ -11,6 +11,28 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
+    qwen3_vl
+  HDRS
+    "qwen3_vl.h"
+  SRCS
+    "qwen3_vl.c"
+  DEPS
+    ::qwen3_vl_program
+    iree::base
+    iree::base::internal::arena
+    iree::experimental::id4::pipeline::diagnostics
+    iree::experimental::id4::pipeline::kernel_cache
+    iree::experimental::id4::pipeline::parameter_slab
+    iree::experimental::id4::pipeline::program
+    iree::experimental::id4::pipeline::program_plan
+    iree::experimental::id4::pipeline::program_prepare
+    iree::experimental::id4::pipeline::stage
+    iree::hal
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     qwen3_vl_program
   HDRS
     "qwen3_vl_program.h"
@@ -20,6 +42,7 @@ iree_cc_library(
     iree::base
     iree::experimental::id4::pipeline::kernel_library
     iree::experimental::id4::pipeline::program
+    iree::hal
   PUBLIC
 )
 
@@ -73,16 +96,35 @@ iree_cc_library(
     iree::async
     iree::async::util::proactor_pool
     iree::base
+    iree::experimental::id4::kernels::embedded_loom_sources
     iree::experimental::id4::pipeline::diagnostics
+    iree::experimental::id4::pipeline::kernel_cache
+    iree::experimental::id4::pipeline::kernel_library
     iree::hal
-    iree::hal::drivers
     iree::io::parameter_index
     iree::io::parameter_index_provider
     iree::io::parameter_provider
     iree::io::scope_map
+    iree::tooling::device_util
     iree::tooling::parameter_util
   TESTONLY
   PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    qwen3_vl_test
+  SRCS
+    "qwen3_vl_test.cc"
+  DEPS
+    ::qwen3_vl
+    ::test_util
+    iree::base
+    iree::experimental::id4::pipeline::plan
+    iree::experimental::id4::pipeline::stage
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 iree_cc_test(
@@ -100,6 +142,30 @@ iree_cc_test(
     iree::hal
     iree::testing::gtest
     iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    qwen3_vl_integration_test
+  SRCS
+    "qwen3_vl_integration_test.cc"
+  DEPS
+    ::hal_integration_util
+    ::qwen3_vl
+    iree::base
+    iree::base::internal::json
+    iree::base::tooling::flags
+    iree::experimental::id4::pipeline::plan
+    iree::experimental::id4::pipeline::stage
+    iree::experimental::id4::tooling::capture
+    iree::hal
+    iree::io::parameter_provider
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::testing::temp_file
+  LABELS
+    "manual"
+    "requires-gpu"
 )
 
 iree_cc_binary_benchmark(

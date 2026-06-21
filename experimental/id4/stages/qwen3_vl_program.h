@@ -34,6 +34,10 @@ typedef struct id4_qwen3_vl_model_config_t {
   uint32_t key_value_head_count;
   // Channel count per attention head.
   uint32_t head_size;
+  // Number of post-layer hidden states concatenated into the condition output.
+  uint32_t selected_layer_count;
+  // Zero-based layer ordinals selected after the layer output residual.
+  const uint32_t* selected_layer_ordinals;
 } id4_qwen3_vl_model_config_t;
 
 // Dynamic request dimensions used when authoring the forward program.
@@ -58,6 +62,13 @@ typedef struct id4_qwen3_vl_program_options_t {
 iree_status_t id4_qwen3_vl_program_author_forward(
     const id4_qwen3_vl_program_options_t* options,
     id4_pipeline_program_builder_t* builder);
+
+// Returns the Ideogram 4 Qwen3-VL text encoder model configuration.
+const id4_qwen3_vl_model_config_t* id4_qwen3_vl_program_ideogram4_model_config(
+    void);
+
+// Returns the stable stage boundary tensor name for input token ids.
+iree_string_view_t id4_qwen3_vl_program_token_ids_boundary_name(void);
 
 #ifdef __cplusplus
 }  // extern "C"

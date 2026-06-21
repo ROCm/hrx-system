@@ -5,10 +5,40 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
 
 package(
     default_visibility = ["//visibility:public"],
     licenses = ["notice"],
+)
+
+iree_runtime_cc_library(
+    name = "capture",
+    srcs = ["capture.c"],
+    hdrs = ["capture.h"],
+    deps = [
+        "//experimental/id4/pipeline:plan",
+        "//experimental/id4/pipeline:region",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "capture_test",
+    srcs = ["capture_test.cc"],
+    deps = [
+        ":capture",
+        "//experimental/id4/pipeline:diagnostics",
+        "//experimental/id4/pipeline:plan",
+        "//experimental/id4/stages:test_util",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/testing:temp_file",
+    ],
 )
 
 py_library(

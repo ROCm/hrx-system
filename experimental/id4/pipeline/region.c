@@ -112,6 +112,39 @@ struct id4_pipeline_prepared_region_t {
   id4_pipeline_region_statistics_t statistics;
 };
 
+iree_device_size_t id4_pipeline_tensor_dtype_byte_length(
+    id4_pipeline_tensor_dtype_t dtype) {
+  switch (dtype) {
+    case ID4_PIPELINE_TENSOR_DTYPE_F32:
+    case ID4_PIPELINE_TENSOR_DTYPE_I32:
+    case ID4_PIPELINE_TENSOR_DTYPE_U32:
+      return 4;
+    case ID4_PIPELINE_TENSOR_DTYPE_F16:
+    case ID4_PIPELINE_TENSOR_DTYPE_BF16:
+      return 2;
+    default:
+      return 0;
+  }
+}
+
+iree_string_view_t id4_pipeline_tensor_dtype_format(
+    id4_pipeline_tensor_dtype_t dtype) {
+  switch (dtype) {
+    case ID4_PIPELINE_TENSOR_DTYPE_F32:
+      return IREE_SV("f32");
+    case ID4_PIPELINE_TENSOR_DTYPE_F16:
+      return IREE_SV("f16");
+    case ID4_PIPELINE_TENSOR_DTYPE_BF16:
+      return IREE_SV("bf16");
+    case ID4_PIPELINE_TENSOR_DTYPE_I32:
+      return IREE_SV("i32");
+    case ID4_PIPELINE_TENSOR_DTYPE_U32:
+      return IREE_SV("u32");
+    default:
+      return IREE_SV("invalid");
+  }
+}
+
 static iree_status_t id4_pipeline_region_validate_options_size(
     iree_host_size_t actual_size, iree_host_size_t expected_size,
     iree_string_view_t options_name) {
@@ -189,6 +222,13 @@ static iree_status_t id4_pipeline_region_validate_layout(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "tensor layout name is required");
   }
+  const iree_device_size_t element_byte_length =
+      id4_pipeline_tensor_dtype_byte_length(layout->dtype);
+  if (element_byte_length == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "tensor %.*s dtype is invalid",
+                            (int)layout->name.size, layout->name.data);
+  }
   if (layout->byte_length == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "tensor %.*s byte length is zero",
@@ -200,7 +240,33 @@ static iree_status_t id4_pipeline_region_validate_layout(
                             "tensor %.*s alignment must be a power of two",
                             (int)layout->name.size, layout->name.data);
   }
-  return id4_pipeline_region_validate_shape(layout->shape, layout->name);
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_region_validate_shape(layout->shape, layout->name));
+  uint64_t element_count = 1;
+  for (uint32_t i = 0; i < layout->shape.rank; ++i) {
+    if (element_count > UINT64_MAX / layout->shape.dims[i]) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "tensor %.*s element count overflow",
+                              (int)layout->name.size, layout->name.data);
+    }
+    element_count *= layout->shape.dims[i];
+  }
+  if (element_count > UINT64_MAX / element_byte_length) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "tensor %.*s byte length overflow",
+                            (int)layout->name.size, layout->name.data);
+  }
+  const iree_device_size_t expected_byte_length =
+      (iree_device_size_t)(element_count * element_byte_length);
+  if (layout->byte_length != expected_byte_length) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "tensor %.*s byte length %" PRIu64
+                            " does not match dtype/shape byte length %" PRIu64,
+                            (int)layout->name.size, layout->name.data,
+                            (uint64_t)layout->byte_length,
+                            (uint64_t)expected_byte_length);
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t id4_pipeline_region_validate_binding_slot(
@@ -957,6 +1023,92 @@ iree_status_t id4_pipeline_region_dispatch(
       flags));
   id4_pipeline_region_commit_dispatch(builder, binding_count, records,
                                       bindings);
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_region_validate_copy_tensor(
+    id4_pipeline_region_builder_t* builder, id4_pipeline_tensor_t source,
+    id4_pipeline_tensor_t target,
+    id4_pipeline_region_tensor_record_t** out_source_record,
+    id4_pipeline_region_tensor_record_t** out_target_record) {
+  IREE_RETURN_IF_ERROR(id4_pipeline_region_lookup_tensor_record(
+      builder, source, out_source_record));
+  IREE_RETURN_IF_ERROR(id4_pipeline_region_lookup_tensor_record(
+      builder, target, out_target_record));
+  id4_pipeline_region_tensor_record_t* source_record = *out_source_record;
+  id4_pipeline_region_tensor_record_t* target_record = *out_target_record;
+  if (source_record->released) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION, "copy reads released tensor %.*s",
+        (int)source_record->name.size, source_record->name.data);
+  }
+  if (target_record->released) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION, "copy writes released tensor %.*s",
+        (int)target_record->name.size, target_record->name.data);
+  }
+  if (!source_record->initialized) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION, "copy reads uninitialized tensor %.*s",
+        (int)source_record->name.size, source_record->name.data);
+  }
+  if (source.length != target.length) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "copy length mismatch between %.*s and %.*s",
+        (int)source_record->name.size, source_record->name.data,
+        (int)target_record->name.size, target_record->name.data);
+  }
+  if (source_record->access_epoch == builder->statistics.current_epoch &&
+      iree_any_bit_set(source_record->epoch_access,
+                       ID4_PIPELINE_TENSOR_ACCESS_WRITE)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "copy reads tensor %.*s written in the same epoch",
+                            (int)source_record->name.size,
+                            source_record->name.data);
+  }
+  if (target_record->access_epoch == builder->statistics.current_epoch &&
+      target_record->epoch_access != 0) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "copy writes tensor %.*s already used in the same "
+                            "epoch",
+                            (int)target_record->name.size,
+                            target_record->name.data);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_region_record_copy_tensor(
+    id4_pipeline_region_builder_t* builder, id4_pipeline_tensor_t source,
+    id4_pipeline_tensor_t target, iree_hal_copy_flags_t flags) {
+  if (builder->mode != ID4_PIPELINE_REGION_BUILDER_MODE_RECORD) {
+    return iree_ok_status();
+  }
+  return iree_hal_command_buffer_copy_buffer(
+      builder->command_buffer,
+      iree_hal_make_indirect_buffer_ref(source.binding_slot, source.offset,
+                                        source.length),
+      iree_hal_make_indirect_buffer_ref(target.binding_slot, target.offset,
+                                        target.length),
+      flags);
+}
+
+iree_status_t id4_pipeline_region_copy_tensor(
+    id4_pipeline_region_builder_t* builder, id4_pipeline_tensor_t source,
+    id4_pipeline_tensor_t target, iree_hal_copy_flags_t flags) {
+  IREE_ASSERT_ARGUMENT(builder);
+  id4_pipeline_region_tensor_record_t* source_record = NULL;
+  id4_pipeline_region_tensor_record_t* target_record = NULL;
+  IREE_RETURN_IF_ERROR(id4_pipeline_region_validate_copy_tensor(
+      builder, source, target, &source_record, &target_record));
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_region_record_copy_tensor(builder, source, target, flags));
+  id4_pipeline_region_apply_dispatch_binding_access(
+      builder, source_record, ID4_PIPELINE_TENSOR_ACCESS_READ);
+  id4_pipeline_region_apply_dispatch_binding_access(
+      builder, target_record, ID4_PIPELINE_TENSOR_ACCESS_WRITE);
+  ++builder->statistics.operation_count;
+  ++builder->statistics.copy_count;
   return iree_ok_status();
 }
 

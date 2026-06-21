@@ -20,6 +20,15 @@ static void ExpectStringViewEqual(iree_string_view_t actual,
       << ", expected: " << std::string(expected.data, expected.size);
 }
 
+static iree_hal_dispatch_config_t MakeTestDispatchConfig() {
+  iree_hal_dispatch_config_t config =
+      iree_hal_make_static_dispatch_config(1, 1, 1);
+  config.workgroup_size[0] = 1;
+  config.workgroup_size[1] = 1;
+  config.workgroup_size[2] = 1;
+  return config;
+}
+
 class ProgramBuilderScope {
  public:
   ProgramBuilderScope() {
@@ -88,6 +97,7 @@ TEST(PipelineProgram, AuthorsProgramAndSealsImmutableCopies) {
   id4_pipeline_program_import_tensor_options_t input_options = {
       /*.structure_size=*/sizeof(input_options),
       /*.next=*/nullptr,
+      /*.flags=*/ID4_PIPELINE_PROGRAM_IMPORT_TENSOR_FLAG_INITIALIZED,
       /*.name=*/IREE_SV("hidden_states.input"),
       /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
       /*.shape=*/id4_pipeline_program_make_shape_rank2(1, 4),
@@ -133,6 +143,7 @@ TEST(PipelineProgram, AuthorsProgramAndSealsImmutableCopies) {
       /*.name=*/IREE_SV("block0.linear"),
       /*.kernel=*/
       id4_pipeline_make_kernel_ref(IREE_SV("test/linear"), IREE_SV("linear")),
+      /*.dispatch_config=*/MakeTestDispatchConfig(),
       /*.config_binding_count=*/IREE_ARRAYSIZE(config_bindings),
       /*.config_bindings=*/config_bindings,
       /*.binding_count=*/IREE_ARRAYSIZE(bindings),
@@ -201,6 +212,10 @@ TEST(PipelineProgram, AuthorsProgramAndSealsImmutableCopies) {
                         IREE_SV("test/linear"));
   ExpectStringViewEqual(dispatch->payload.dispatch_loom.kernel.function_name,
                         IREE_SV("linear"));
+  EXPECT_EQ(dispatch->payload.dispatch_loom.dispatch_config.workgroup_size[0],
+            1u);
+  EXPECT_EQ(dispatch->payload.dispatch_loom.dispatch_config.workgroup_count[0],
+            1u);
   ASSERT_EQ(dispatch->payload.dispatch_loom.config_binding_count, 2u);
   ExpectStringViewEqual(dispatch->payload.dispatch_loom.config_bindings[0].key,
                         IREE_SV("@batch"));
@@ -246,6 +261,7 @@ TEST(PipelineProgram, RejectsUninitializedReadsAndCaptures) {
       /*.name=*/IREE_SV("read_scratch"),
       /*.kernel=*/
       id4_pipeline_make_kernel_ref(IREE_SV("test/read"), IREE_SV("read")),
+      /*.dispatch_config=*/MakeTestDispatchConfig(),
       /*.config_binding_count=*/0,
       /*.config_bindings=*/nullptr,
       /*.binding_count=*/1,
@@ -281,6 +297,7 @@ TEST(PipelineProgram, RejectsUninitializedReadsAndCaptures) {
       /*.name=*/IREE_SV("write_scratch"),
       /*.kernel=*/
       id4_pipeline_make_kernel_ref(IREE_SV("test/write"), IREE_SV("write")),
+      /*.dispatch_config=*/MakeTestDispatchConfig(),
       /*.config_binding_count=*/0,
       /*.config_bindings=*/nullptr,
       /*.binding_count=*/1,
@@ -294,6 +311,107 @@ TEST(PipelineProgram, RejectsUninitializedReadsAndCaptures) {
   builder_scope.DestroyBuilder();
 }
 
+TEST(PipelineProgram, ExternalOutputImportRequiresWriteBeforeExport) {
+  ProgramBuilderScope builder_scope;
+  id4_pipeline_program_builder_t* builder = builder_scope.builder();
+
+  id4_pipeline_program_tensor_t output = id4_pipeline_program_tensor_invalid();
+  id4_pipeline_program_import_tensor_options_t output_options = {
+      /*.structure_size=*/sizeof(output_options),
+      /*.next=*/nullptr,
+      /*.flags=*/0,
+      /*.name=*/IREE_SV("stage.output"),
+      /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      /*.shape=*/id4_pipeline_program_make_shape_rank1(4),
+  };
+  IREE_ASSERT_OK(
+      id4_pipeline_program_import_tensor(builder, &output_options, &output));
+
+  id4_pipeline_program_dispatch_binding_t read_binding =
+      id4_pipeline_program_read(output);
+  id4_pipeline_program_dispatch_loom_options_t read_dispatch_options = {
+      /*.structure_size=*/sizeof(read_dispatch_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("read_output"),
+      /*.kernel=*/
+      id4_pipeline_make_kernel_ref(IREE_SV("test/read"), IREE_SV("read")),
+      /*.dispatch_config=*/MakeTestDispatchConfig(),
+      /*.config_binding_count=*/0,
+      /*.config_bindings=*/nullptr,
+      /*.binding_count=*/1,
+      /*.bindings=*/&read_binding,
+  };
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      id4_pipeline_program_dispatch_loom(builder, &read_dispatch_options));
+
+  id4_pipeline_program_export_options_t export_options = {
+      /*.structure_size=*/sizeof(export_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("stage.output"),
+      /*.tensor=*/output,
+  };
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        id4_pipeline_program_export(builder, &export_options));
+
+  id4_pipeline_program_dispatch_binding_t write_binding =
+      id4_pipeline_program_write(output);
+  id4_pipeline_program_dispatch_loom_options_t write_dispatch_options = {
+      /*.structure_size=*/sizeof(write_dispatch_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("write_output"),
+      /*.kernel=*/
+      id4_pipeline_make_kernel_ref(IREE_SV("test/write"), IREE_SV("write")),
+      /*.dispatch_config=*/MakeTestDispatchConfig(),
+      /*.config_binding_count=*/0,
+      /*.config_bindings=*/nullptr,
+      /*.binding_count=*/1,
+      /*.bindings=*/&write_binding,
+  };
+  IREE_ASSERT_OK(
+      id4_pipeline_program_dispatch_loom(builder, &write_dispatch_options));
+  IREE_ASSERT_OK(id4_pipeline_program_export(builder, &export_options));
+
+  builder_scope.DestroyBuilder();
+}
+
+TEST(PipelineProgram, RejectsMissingDispatchConfig) {
+  ProgramBuilderScope builder_scope;
+  id4_pipeline_program_builder_t* builder = builder_scope.builder();
+
+  id4_pipeline_program_tensor_t input = id4_pipeline_program_tensor_invalid();
+  id4_pipeline_program_import_tensor_options_t input_options = {
+      /*.structure_size=*/sizeof(input_options),
+      /*.next=*/nullptr,
+      /*.flags=*/ID4_PIPELINE_PROGRAM_IMPORT_TENSOR_FLAG_INITIALIZED,
+      /*.name=*/IREE_SV("stage.input"),
+      /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      /*.shape=*/id4_pipeline_program_make_shape_rank1(4),
+  };
+  IREE_ASSERT_OK(
+      id4_pipeline_program_import_tensor(builder, &input_options, &input));
+
+  id4_pipeline_program_dispatch_binding_t read_binding =
+      id4_pipeline_program_read(input);
+  id4_pipeline_program_dispatch_loom_options_t dispatch_options = {
+      /*.structure_size=*/sizeof(dispatch_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("read_input"),
+      /*.kernel=*/
+      id4_pipeline_make_kernel_ref(IREE_SV("test/read"), IREE_SV("read")),
+      /*.dispatch_config=*/iree_hal_dispatch_config_t{},
+      /*.config_binding_count=*/0,
+      /*.config_bindings=*/nullptr,
+      /*.binding_count=*/1,
+      /*.bindings=*/&read_binding,
+  };
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_pipeline_program_dispatch_loom(builder, &dispatch_options));
+
+  builder_scope.DestroyBuilder();
+}
+
 TEST(PipelineProgram, RejectsAmbiguousIdentitiesAndInvalidHandles) {
   ProgramBuilderScope builder_scope;
   id4_pipeline_program_builder_t* builder = builder_scope.builder();
@@ -302,6 +420,7 @@ TEST(PipelineProgram, RejectsAmbiguousIdentitiesAndInvalidHandles) {
   id4_pipeline_program_import_tensor_options_t input_options = {
       /*.structure_size=*/sizeof(input_options),
       /*.next=*/nullptr,
+      /*.flags=*/ID4_PIPELINE_PROGRAM_IMPORT_TENSOR_FLAG_INITIALIZED,
       /*.name=*/IREE_SV("hidden_states"),
       /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
       /*.shape=*/id4_pipeline_program_make_shape_rank1(4),

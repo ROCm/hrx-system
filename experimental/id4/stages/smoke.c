@@ -17,11 +17,18 @@
 #include "experimental/id4/pipeline/region.h"
 #include "iree/base/internal/arena.h"
 
-#define ID4_SMOKE_STAGE_BINDING_COUNT 3
+#define ID4_SMOKE_STAGE_BINDING_COUNT 4
 #define ID4_SMOKE_STAGE_OUTPUT_BINDING_SLOT 0
 #define ID4_SMOKE_STAGE_LOCAL_BINDING_SLOT 1
 #define ID4_SMOKE_STAGE_PARAMETER_BINDING_SLOT 2
+#define ID4_SMOKE_STAGE_TAP_BINDING_SLOT 3
 #define ID4_SMOKE_STAGE_OUTPUT_ELEMENT_COUNT 1
+
+typedef uint32_t id4_smoke_stage_region_flags_t;
+enum id4_smoke_stage_region_flag_bits_e {
+  // Records the post-dispatch output tensor copy into the diagnostic tap slot.
+  ID4_SMOKE_STAGE_REGION_FLAG_CAPTURE_DIAGNOSTIC_TAP = 1u << 0,
+};
 
 typedef struct id4_smoke_stage_t {
   // Base stage; must be the first field.
@@ -197,11 +204,13 @@ static iree_hal_dispatch_config_t id4_smoke_stage_make_dispatch_config(void) {
 
 static iree_status_t id4_smoke_stage_author_region(
     id4_smoke_stage_t* stage, id4_pipeline_region_builder_t* builder,
+    id4_smoke_stage_region_flags_t region_flags,
     iree_hal_executable_t* hal_executable,
     iree_hal_executable_function_t function) {
   id4_pipeline_tensor_import_t output_import;
   memset(&output_import, 0, sizeof(output_import));
   output_import.layout.name = IREE_SV("smoke.output");
+  output_import.layout.dtype = ID4_PIPELINE_TENSOR_DTYPE_I32;
   output_import.layout.shape = id4_smoke_stage_make_vector_shape(1);
   output_import.layout.byte_length = ID4_SMOKE_STAGE_OUTPUT_BYTE_LENGTH;
   output_import.layout.alignment = 4;
@@ -215,7 +224,8 @@ static iree_status_t id4_smoke_stage_author_region(
   id4_pipeline_tensor_layout_t scratch_layout;
   memset(&scratch_layout, 0, sizeof(scratch_layout));
   scratch_layout.name = IREE_SV("smoke.scratch");
-  scratch_layout.shape = id4_smoke_stage_make_vector_shape(16);
+  scratch_layout.dtype = ID4_PIPELINE_TENSOR_DTYPE_I32;
+  scratch_layout.shape = id4_smoke_stage_make_vector_shape(4);
   scratch_layout.byte_length = 16;
   scratch_layout.alignment = 16;
   id4_pipeline_tensor_t scratch_tensor;
@@ -260,13 +270,45 @@ static iree_status_t id4_smoke_stage_author_region(
   memset(&binding, 0, sizeof(binding));
   binding.tensor = output_tensor;
   binding.access = ID4_PIPELINE_TENSOR_ACCESS_WRITE;
-  return id4_pipeline_region_dispatch_loom(
+  IREE_RETURN_IF_ERROR(id4_pipeline_region_dispatch_loom(
       builder, &kernel, dispatch_config, iree_const_byte_span_empty(),
-      /*binding_count=*/1, &binding, IREE_HAL_DISPATCH_FLAG_NONE);
+      /*binding_count=*/1, &binding, IREE_HAL_DISPATCH_FLAG_NONE));
+
+  if (!iree_all_bits_set(region_flags,
+                         ID4_SMOKE_STAGE_REGION_FLAG_CAPTURE_DIAGNOSTIC_TAP)) {
+    return iree_ok_status();
+  }
+
+  id4_pipeline_tensor_import_t tap_import;
+  memset(&tap_import, 0, sizeof(tap_import));
+  tap_import.layout.name = IREE_SV("smoke.output.after_dispatch");
+  tap_import.layout.dtype = ID4_PIPELINE_TENSOR_DTYPE_I32;
+  tap_import.layout.shape = id4_smoke_stage_make_vector_shape(1);
+  tap_import.layout.byte_length = ID4_SMOKE_STAGE_OUTPUT_BYTE_LENGTH;
+  tap_import.layout.alignment = 4;
+  tap_import.binding_slot = ID4_SMOKE_STAGE_TAP_BINDING_SLOT;
+  tap_import.offset = 0;
+
+  id4_pipeline_tensor_t tap_tensor;
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_region_import_tensor(builder, &tap_import, &tap_tensor));
+  IREE_RETURN_IF_ERROR(id4_pipeline_region_barrier(
+      builder, IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      IREE_HAL_EXECUTION_STAGE_TRANSFER, IREE_HAL_EXECUTION_BARRIER_FLAG_NONE,
+      /*memory_barrier_count=*/0, /*memory_barriers=*/NULL,
+      /*buffer_barrier_count=*/0, /*buffer_barriers=*/NULL));
+  IREE_RETURN_IF_ERROR(id4_pipeline_region_copy_tensor(
+      builder, output_tensor, tap_tensor, IREE_HAL_COPY_FLAG_NONE));
+  return id4_pipeline_region_barrier(
+      builder, IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      IREE_HAL_EXECUTION_STAGE_DISPATCH, IREE_HAL_EXECUTION_BARRIER_FLAG_NONE,
+      /*memory_barrier_count=*/0, /*memory_barriers=*/NULL,
+      /*buffer_barrier_count=*/0, /*buffer_barriers=*/NULL);
 }
 
 static iree_status_t id4_smoke_stage_create_dry_run_builder(
     id4_smoke_stage_t* stage, iree_arena_block_pool_t* block_pool,
+    id4_smoke_stage_region_flags_t region_flags,
     id4_pipeline_region_builder_t** out_builder) {
   id4_pipeline_region_builder_create_options_t builder_options;
   memset(&builder_options, 0, sizeof(builder_options));
@@ -281,8 +323,9 @@ static iree_status_t id4_smoke_stage_create_dry_run_builder(
   iree_status_t status = id4_pipeline_region_builder_create(
       &builder_options, stage->host_allocator, &builder);
   if (iree_status_is_ok(status)) {
-    status = id4_smoke_stage_author_region(
-        stage, builder, NULL, iree_hal_executable_function_invalid());
+    status =
+        id4_smoke_stage_author_region(stage, builder, region_flags, NULL,
+                                      iree_hal_executable_function_invalid());
   }
   if (iree_status_is_ok(status)) {
     *out_builder = builder;
@@ -300,9 +343,14 @@ static iree_status_t id4_smoke_stage_create_plan(
   iree_arena_block_pool_t block_pool;
   iree_arena_block_pool_initialize(/*total_block_size=*/4096,
                                    stage->host_allocator, &block_pool);
+  id4_smoke_stage_region_flags_t region_flags = 0;
+  if (iree_all_bits_set(options->flags,
+                        ID4_PIPELINE_STAGE_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS)) {
+    region_flags |= ID4_SMOKE_STAGE_REGION_FLAG_CAPTURE_DIAGNOSTIC_TAP;
+  }
   id4_pipeline_region_builder_t* builder = NULL;
-  iree_status_t status =
-      id4_smoke_stage_create_dry_run_builder(stage, &block_pool, &builder);
+  iree_status_t status = id4_smoke_stage_create_dry_run_builder(
+      stage, &block_pool, region_flags, &builder);
 
   id4_pipeline_region_statistics_t region_statistics;
   memset(&region_statistics, 0, sizeof(region_statistics));
@@ -343,9 +391,10 @@ static iree_status_t id4_smoke_stage_create_plan(
 
   id4_pipeline_parameter_slab_plan_t slab =
       id4_pipeline_make_device_local_parameter_slab_plan(
-          IREE_SV("smoke"), /*placement_id=*/0, options->queue_affinity,
+          IREE_SV("smoke"), /*placement_id=*/0,
+          ID4_SMOKE_STAGE_PARAMETER_BINDING_SLOT, options->queue_affinity,
           IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET |
-              IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE_READ,
+              IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE,
           /*byte_length=*/16, /*alignment=*/16, /*request_count=*/1, &request);
 
   id4_pipeline_device_placement_t placement;
@@ -384,8 +433,15 @@ static iree_status_t id4_smoke_stage_create_plan(
   memset(&tap, 0, sizeof(tap));
   tap.name = IREE_SV("smoke.output.after_dispatch");
   tap.region_id = 0;
+  tap.placement_id = 0;
+  tap.binding_slot = ID4_SMOKE_STAGE_TAP_BINDING_SLOT;
   tap.after_operation_ordinal = 0;
   tap.target_name = IREE_SV("smoke.output");
+  tap.layout.name = IREE_SV("smoke.output.after_dispatch");
+  tap.layout.dtype = ID4_PIPELINE_TENSOR_DTYPE_I32;
+  tap.layout.shape = id4_smoke_stage_make_vector_shape(1);
+  tap.layout.byte_length = ID4_SMOKE_STAGE_OUTPUT_BYTE_LENGTH;
+  tap.layout.alignment = 4;
 
   if (iree_status_is_ok(status)) {
     id4_pipeline_plan_create_options_t create_options;
@@ -403,8 +459,11 @@ static iree_status_t id4_smoke_stage_create_plan(
     create_options.kernels = kernels;
     create_options.region_count = 1;
     create_options.regions = &region;
-    create_options.diagnostic_tap_count = 1;
-    create_options.diagnostic_taps = &tap;
+    if (iree_all_bits_set(region_flags,
+                          ID4_SMOKE_STAGE_REGION_FLAG_CAPTURE_DIAGNOSTIC_TAP)) {
+      create_options.diagnostic_tap_count = 1;
+      create_options.diagnostic_taps = &tap;
+    }
     create_options.diagnostics_sink = options->diagnostics_sink;
     status =
         id4_pipeline_plan_create(&create_options, host_allocator, out_plan);
@@ -487,6 +546,7 @@ static iree_status_t id4_smoke_stage_join_prepare_readiness(
 static iree_status_t id4_smoke_stage_record_region(
     id4_smoke_stage_t* stage, iree_hal_device_group_t* device_group,
     iree_host_size_t device_index, iree_hal_queue_affinity_t queue_affinity,
+    id4_smoke_stage_region_flags_t region_flags,
     id4_pipeline_kernel_executable_t* executable,
     id4_pipeline_prepared_region_t** out_prepared_region) {
   iree_hal_device_t* device =
@@ -509,10 +569,15 @@ static iree_status_t id4_smoke_stage_record_region(
   iree_arena_block_pool_initialize(/*total_block_size=*/4096,
                                    stage->host_allocator, &block_pool);
 
+  iree_hal_command_category_t command_categories =
+      IREE_HAL_COMMAND_CATEGORY_DISPATCH;
+  if (iree_all_bits_set(region_flags,
+                        ID4_SMOKE_STAGE_REGION_FLAG_CAPTURE_DIAGNOSTIC_TAP)) {
+    command_categories = IREE_HAL_COMMAND_CATEGORY_ANY;
+  }
   iree_status_t status = iree_hal_command_buffer_create(
-      device, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-      IREE_HAL_COMMAND_CATEGORY_DISPATCH, queue_affinity,
-      ID4_SMOKE_STAGE_BINDING_COUNT, &command_buffer);
+      device, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, command_categories,
+      queue_affinity, ID4_SMOKE_STAGE_BINDING_COUNT, &command_buffer);
   if (iree_status_is_ok(status)) {
     status = iree_hal_command_buffer_begin(command_buffer);
   }
@@ -530,8 +595,8 @@ static iree_status_t id4_smoke_stage_record_region(
         &builder_options, stage->host_allocator, &builder);
   }
   if (iree_status_is_ok(status)) {
-    status =
-        id4_smoke_stage_author_region(stage, builder, hal_executable, function);
+    status = id4_smoke_stage_author_region(stage, builder, region_flags,
+                                           hal_executable, function);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_command_buffer_end(command_buffer);
@@ -603,6 +668,11 @@ static iree_status_t id4_smoke_stage_plan(
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "smoke stage must be loaded before planning");
   }
+  if (options->next) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "smoke stage plan extension structures are not supported");
+  }
   return id4_smoke_stage_create_plan(options, stage->host_allocator, out_plan,
                                      base_stage);
 }
@@ -663,6 +733,10 @@ static iree_status_t id4_smoke_stage_prepare(
   iree_hal_buffer_t* output_buffer = NULL;
   id4_pipeline_bundle_t* bundle = NULL;
   bool parameter_load_submitted = false;
+  id4_smoke_stage_region_flags_t region_flags = 0;
+  if (id4_pipeline_plan_diagnostic_tap_count(plan) != 0) {
+    region_flags |= ID4_SMOKE_STAGE_REGION_FLAG_CAPTURE_DIAGNOSTIC_TAP;
+  }
 
   iree_status_t status = id4_pipeline_plan_load_parameter_slabs(
       plan, options->parameter_provider, options->wait_semaphore_list,
@@ -685,7 +759,7 @@ static iree_status_t id4_smoke_stage_prepare(
   if (iree_status_is_ok(status)) {
     status = id4_smoke_stage_record_region(
         stage, device_group, placement->device_index, placement->queue_affinity,
-        executable, &prepared_region);
+        region_flags, executable, &prepared_region);
   }
   if (iree_status_is_ok(status)) {
     id4_pipeline_bundle_create_options_t create_options;
@@ -737,6 +811,15 @@ static iree_status_t id4_smoke_stage_prepare(
             .offset = 0,
             // Full parameter slab byte length.
             .length = 16,
+        };
+    payload->bindings[ID4_SMOKE_STAGE_TAP_BINDING_SLOT] =
+        (iree_hal_buffer_binding_t){
+            // Diagnostic tap slot patched from issue options when planned.
+            .buffer = NULL,
+            // No caller-provided tap offset at prepare time.
+            .offset = 0,
+            // No caller-provided tap length at prepare time.
+            .length = 0,
         };
   }
   if (iree_status_is_ok(status)) {
@@ -811,11 +894,20 @@ static iree_status_t id4_smoke_stage_issue(
       .payload_values = wait_payload_values,
   };
 
+  iree_hal_buffer_binding_t bindings[ID4_SMOKE_STAGE_BINDING_COUNT];
+  memcpy(bindings, payload->bindings, sizeof(bindings));
+  const iree_host_size_t diagnostic_tap_count =
+      id4_pipeline_plan_diagnostic_tap_count(id4_pipeline_bundle_plan(bundle));
+  if (diagnostic_tap_count != 0) {
+    bindings[ID4_SMOKE_STAGE_TAP_BINDING_SLOT] =
+        options->diagnostic_tap_bindings[0];
+  }
+
   iree_hal_buffer_binding_table_t binding_table = {
       // Number of issue-time binding table slots.
       .count = ID4_SMOKE_STAGE_BINDING_COUNT,
-      // Fixed binding storage owned by the bundle payload.
-      .bindings = payload->bindings,
+      // Per-issue binding table containing caller-owned tap bindings.
+      .bindings = bindings,
   };
   id4_pipeline_prepared_region_issue_options_t issue_options;
   memset(&issue_options, 0, sizeof(issue_options));

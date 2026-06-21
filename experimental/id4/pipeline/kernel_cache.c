@@ -27,19 +27,19 @@ struct id4_pipeline_kernel_cache_t {
   iree_atomic_ref_count_t ref_count;
   // Allocator used for cache-owned metadata.
   iree_allocator_t host_allocator;
-  // Explicit AMDGPU processor used to create the Loom target profile.
-  iree_string_view_t amdgpu_processor;
-  // AMDGPU target package linked into this embedding binary.
+  // Explicit target processor used to create the Loom target profile.
+  iree_string_view_t target_processor;
+  // Target package linked into this embedding binary.
   loomc_target_environment_t* target_environment;
-  // Shared Loom API context with AMDGPU target dialects registered.
+  // Shared Loom API context with target dialects registered.
   loomc_context_t* context;
-  // AMDGPU processor target profile.
+  // Processor target profile.
   loomc_target_profile_t* target_profile;
-  // Invocation-ready target selection derived from the AMDGPU profile.
+  // Invocation-ready target selection derived from the profile.
   loomc_target_selection_t* target_selection;
   // Immutable prepared compiler handle.
   loomc_compiler_t* compiler;
-  // Prepared source-to-AMDGPU-low pass program shared by invocations.
+  // Prepared source-to-target-low pass program shared by invocations.
   loomc_pass_program_t* pass_program;
 };
 
@@ -132,9 +132,9 @@ static iree_status_t id4_pipeline_kernel_cache_validate_create_options(
         IREE_STATUS_UNIMPLEMENTED,
         "kernel cache create extension structures are not supported");
   }
-  if (iree_string_view_is_empty(options->amdgpu_processor)) {
+  if (iree_string_view_is_empty(options->target_processor)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU processor is required");
+                            "target processor is required");
   }
   return iree_ok_status();
 }
@@ -287,8 +287,8 @@ static iree_status_t id4_pipeline_kernel_cache_emit_loom_diagnostics(
         .source_identifier = options->source_identifier,
         // Module path borrowed from the prepare options.
         .module_path = options->module_path,
-        // AMDGPU processor owned by the cache.
-        .amdgpu_processor = kernel_cache->amdgpu_processor,
+        // Target processor owned by the cache.
+        .target_processor = kernel_cache->target_processor,
         // Loom artifact format is not specific to a result diagnostic.
         .loom_artifact_format = iree_string_view_empty(),
         // HAL executable format is not known for compile diagnostics.
@@ -474,7 +474,7 @@ static void id4_pipeline_kernel_cache_destroy(
   loomc_target_profile_release(kernel_cache->target_profile);
   loomc_context_release(kernel_cache->context);
   loomc_target_environment_release(kernel_cache->target_environment);
-  id4_pipeline_kernel_cache_free_string(&kernel_cache->amdgpu_processor,
+  id4_pipeline_kernel_cache_free_string(&kernel_cache->target_processor,
                                         host_allocator);
   iree_allocator_free(host_allocator, kernel_cache);
 }
@@ -496,8 +496,8 @@ iree_status_t id4_pipeline_kernel_cache_create(
     iree_atomic_ref_count_init(&kernel_cache->ref_count);
     kernel_cache->host_allocator = host_allocator;
     status = id4_pipeline_kernel_cache_copy_string(
-        options->amdgpu_processor, host_allocator,
-        &kernel_cache->amdgpu_processor);
+        options->target_processor, host_allocator,
+        &kernel_cache->target_processor);
   }
 
   if (iree_status_is_ok(status)) {
@@ -507,7 +507,7 @@ iree_status_t id4_pipeline_kernel_cache_create(
   }
   if (iree_status_is_ok(status)) {
     loomc_context_target_options_t target_options = {
-        // Registers the AMDGPU target environment with the context.
+        // Registers the target environment with the context.
         .type = LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
         // Size of this extension descriptor.
         .structure_size = sizeof(target_options),
@@ -530,18 +530,18 @@ iree_status_t id4_pipeline_kernel_cache_create(
   }
   if (iree_status_is_ok(status)) {
     loomc_amdgpu_profile_options_t profile_options = {
-        // AMDGPU target profile descriptor type.
+        // Target profile descriptor type.
         .type = LOOMC_STRUCTURE_TYPE_AMDGPU_PROFILE_OPTIONS,
         // Size of this descriptor.
         .structure_size = sizeof(profile_options),
-        // No AMDGPU profile extensions are used.
+        // No target profile extensions are used.
         .next = NULL,
         // Use the explicit processor as the profile identifier.
         .identifier =
-            loomc_string_view_from_iree(kernel_cache->amdgpu_processor),
-        // Explicit AMDGPU processor selected by the caller.
+            loomc_string_view_from_iree(kernel_cache->target_processor),
+        // Explicit target processor selected by the caller.
         .processor =
-            loomc_string_view_from_iree(kernel_cache->amdgpu_processor),
+            loomc_string_view_from_iree(kernel_cache->target_processor),
     };
     status = iree_status_from_loomc(loomc_target_profile_create_amdgpu(
         kernel_cache->target_environment, &profile_options,
@@ -566,7 +566,7 @@ iree_status_t id4_pipeline_kernel_cache_create(
         .structure_size = sizeof(target_options),
         // No additional target-selection extensions are used.
         .next = NULL,
-        // Concrete AMDGPU selection borrowed by pipeline creation.
+        // Concrete target selection borrowed by pipeline creation.
         .target_selection = kernel_cache->target_selection,
     };
     loomc_target_pipeline_options_t pipeline_options = {
@@ -577,7 +577,7 @@ iree_status_t id4_pipeline_kernel_cache_create(
         // Target-selection extension.
         .next = &target_options,
         // Stable identifier for diagnostics.
-        .identifier = loomc_make_cstring_view("id4-amdgpu-prepared-low"),
+        .identifier = loomc_make_cstring_view("id4-target-prepared-low"),
         // Lower source/kernel IR to target-low IR ready for emission.
         .kind = LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW,
         // Lower structured source control flow to CFG for now.
@@ -593,7 +593,7 @@ iree_status_t id4_pipeline_kernel_cache_create(
             &kernel_cache->pass_program, &result));
     if (iree_status_is_ok(status) && !loomc_result_succeeded(result)) {
       status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                                "AMDGPU target pipeline preparation failed");
+                                "target pipeline preparation failed");
     }
     loomc_result_release(result);
   }
@@ -620,9 +620,13 @@ void id4_pipeline_kernel_cache_release(
   }
 }
 
-iree_string_view_t id4_pipeline_kernel_cache_amdgpu_processor(
+iree_string_view_t id4_pipeline_kernel_cache_default_target_processor(void) {
+  return IREE_SV("gfx1100");
+}
+
+iree_string_view_t id4_pipeline_kernel_cache_target_processor(
     const id4_pipeline_kernel_cache_t* kernel_cache) {
-  return kernel_cache ? kernel_cache->amdgpu_processor
+  return kernel_cache ? kernel_cache->target_processor
                       : iree_string_view_empty();
 }
 
@@ -705,7 +709,7 @@ iree_status_t id4_pipeline_kernel_cache_prepare_executable(
         .structure_size = sizeof(target_options),
         // No additional target-selection extensions are used.
         .next = NULL,
-        // Concrete AMDGPU selection borrowed by the compile invocation.
+        // Concrete target selection borrowed by the compile invocation.
         .target_selection = kernel_cache->target_selection,
     };
     loomc_compile_options_t compile_options = {
@@ -752,11 +756,11 @@ iree_status_t id4_pipeline_kernel_cache_prepare_executable(
         .structure_size = sizeof(target_options),
         // No additional target-selection extensions are used.
         .next = NULL,
-        // Concrete AMDGPU selection borrowed by the emit invocation.
+        // Concrete target selection borrowed by the emit invocation.
         .target_selection = kernel_cache->target_selection,
     };
     loomc_amdgpu_emit_options_t amdgpu_options = {
-        // AMDGPU emit descriptor type.
+        // Target emit descriptor type.
         .type = LOOMC_STRUCTURE_TYPE_AMDGPU_EMIT_OPTIONS,
         // Size of this descriptor.
         .structure_size = sizeof(amdgpu_options),
@@ -770,7 +774,7 @@ iree_status_t id4_pipeline_kernel_cache_prepare_executable(
         .type = LOOMC_STRUCTURE_TYPE_ARTIFACT_MANIFEST_OPTIONS,
         // Size of this descriptor.
         .structure_size = sizeof(manifest_options),
-        // AMDGPU emission extension follows the manifest descriptor.
+        // Target emission extension follows the manifest descriptor.
         .next = &amdgpu_options,
         // Detailed manifests are useful for executable diagnostics.
         .mode = LOOMC_ARTIFACT_MANIFEST_MODE_DETAILS,
@@ -785,10 +789,10 @@ iree_status_t id4_pipeline_kernel_cache_prepare_executable(
         .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
         // Size of this descriptor.
         .structure_size = sizeof(emit_options),
-        // Optional artifact manifest extension, then AMDGPU emission options.
+        // Optional artifact manifest extension, then target emission options.
         .next = request_manifest ? (const void*)&manifest_options
                                  : (const void*)&amdgpu_options,
-        // Request AMDGPU HSACO bytes from Loom.
+        // Request target executable bytes from Loom.
         .artifact_format =
             loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO),
         // Empty selects the target's in-memory default artifact identifier.
@@ -811,8 +815,9 @@ iree_status_t id4_pipeline_kernel_cache_prepare_executable(
         emit_result, LOOMC_ARTIFACT_KIND_EXECUTABLE,
         loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO));
     if (!primary_artifact) {
-      status = iree_make_status(IREE_STATUS_NOT_FOUND,
-                                "Loom did not emit an AMDGPU HSACO artifact");
+      status =
+          iree_make_status(IREE_STATUS_NOT_FOUND,
+                           "Loom did not emit a target executable artifact");
     }
   }
 
@@ -849,8 +854,8 @@ iree_status_t id4_pipeline_kernel_cache_prepare_executable(
         .source_identifier = options->source_identifier,
         // Module path borrowed from the prepare options.
         .module_path = options->module_path,
-        // AMDGPU processor owned by the cache.
-        .amdgpu_processor = kernel_cache->amdgpu_processor,
+        // Target processor owned by the cache.
+        .target_processor = kernel_cache->target_processor,
         // Loom primary artifact format.
         .loom_artifact_format =
             iree_string_view_from_loomc(primary_artifact->format),
@@ -908,8 +913,8 @@ iree_status_t id4_pipeline_kernel_cache_prepare_executable(
         .source_identifier = options->source_identifier,
         // Module path borrowed from the prepare options.
         .module_path = options->module_path,
-        // AMDGPU processor owned by the cache.
-        .amdgpu_processor = kernel_cache->amdgpu_processor,
+        // Target processor owned by the cache.
+        .target_processor = kernel_cache->target_processor,
         // Loom primary artifact format.
         .loom_artifact_format =
             iree_string_view_from_loomc(primary_artifact->format),

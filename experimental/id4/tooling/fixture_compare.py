@@ -38,6 +38,12 @@ class TensorPayload:
     values: tuple[Any, ...]
 
 
+@dataclass(frozen=True)
+class SliceSpec:
+    start: int
+    length: int
+
+
 def _require_string(value: Any, field_name: str) -> str:
     if not isinstance(value, str) or not value:
         raise FixtureCompareError(f"{field_name} must be a non-empty string")
@@ -173,6 +179,88 @@ def _read_npy_tensor(path: Path) -> TensorPayload:
         value[0] for value in struct.iter_unpack(str(info["struct_format"]), data)
     )
     return TensorPayload(dtype=dtype, shape=shape, values=values)
+
+
+def _row_major_strides(shape: tuple[int, ...]) -> tuple[int, ...]:
+    strides = [1] * len(shape)
+    running = 1
+    for dim_index in range(len(shape) - 1, -1, -1):
+        strides[dim_index] = running
+        running *= shape[dim_index]
+    return tuple(strides)
+
+
+def _normalize_slice(
+    record: dict[str, Any],
+    actual_shape: tuple[int, ...],
+    expected_shape: tuple[int, ...],
+) -> tuple[SliceSpec, ...] | None:
+    slice_value = record.get("slice")
+    if slice_value is None:
+        return None
+    slice_entries = _require_list(slice_value, "expected.slice")
+    if len(slice_entries) != len(actual_shape):
+        raise FixtureCompareError(
+            f"{record['stage']}/{record['name']} slice rank {len(slice_entries)} "
+            f"does not match actual rank {len(actual_shape)}"
+        )
+    normalized = []
+    for dim_index, (entry, dim_size) in enumerate(zip(slice_entries, actual_shape)):
+        if not isinstance(entry, dict):
+            raise FixtureCompareError(
+                f"{record['stage']}/{record['name']} slice[{dim_index}] "
+                "must be an object"
+            )
+        start = _require_int(entry.get("start"), f"slice[{dim_index}].start")
+        length = _require_int(entry.get("length"), f"slice[{dim_index}].length")
+        if start < 0:
+            raise FixtureCompareError(
+                f"{record['stage']}/{record['name']} slice[{dim_index}].start "
+                "must be non-negative"
+            )
+        if length <= 0:
+            raise FixtureCompareError(
+                f"{record['stage']}/{record['name']} slice[{dim_index}].length "
+                "must be positive"
+            )
+        if start + length > dim_size:
+            raise FixtureCompareError(
+                f"{record['stage']}/{record['name']} slice[{dim_index}] "
+                f"[{start}, {start + length}) exceeds actual dimension {dim_size}"
+            )
+        normalized.append(SliceSpec(start=start, length=length))
+    slice_shape = tuple(spec.length for spec in normalized)
+    if slice_shape != expected_shape:
+        raise FixtureCompareError(
+            f"{record['stage']}/{record['name']} slice shape {list(slice_shape)} "
+            f"does not match expected shape {list(expected_shape)}"
+        )
+    return tuple(normalized)
+
+
+def _slice_tensor(
+    tensor: TensorPayload,
+    slices: tuple[SliceSpec, ...],
+) -> TensorPayload:
+    strides = _row_major_strides(tensor.shape)
+    values = []
+
+    def copy_from_dimension(dim_index: int, base_index: int) -> None:
+        spec = slices[dim_index]
+        if dim_index == len(tensor.shape) - 1:
+            start_index = base_index + spec.start * strides[dim_index]
+            end_index = start_index + spec.length
+            values.extend(tensor.values[start_index:end_index])
+            return
+        for index in range(spec.start, spec.start + spec.length):
+            copy_from_dimension(dim_index + 1, base_index + index * strides[dim_index])
+
+    copy_from_dimension(0, 0)
+    return TensorPayload(
+        dtype=tensor.dtype,
+        shape=tuple(spec.length for spec in slices),
+        values=tuple(values),
+    )
 
 
 def _record_tensor(
@@ -330,19 +418,29 @@ def _compare_tensors(
             }
         )
         return comparison
+    actual_for_comparison = actual
     if actual.shape != expected.shape:
-        comparison.update(
-            {
-                "status": "fail",
-                "reason": "shape_mismatch",
-                "actual_shape": list(actual.shape),
-            }
-        )
-        return comparison
+        actual_slice = _normalize_slice(expected_record, actual.shape, expected.shape)
+        if actual_slice is None:
+            comparison.update(
+                {
+                    "status": "fail",
+                    "reason": "shape_mismatch",
+                    "actual_shape": list(actual.shape),
+                }
+            )
+            return comparison
+        actual_for_comparison = _slice_tensor(actual, actual_slice)
+        comparison["actual_shape"] = list(actual.shape)
+        comparison["slice"] = [
+            {"start": spec.start, "length": spec.length} for spec in actual_slice
+        ]
     if trace_reduce.DTYPE_TABLE[expected.dtype]["floating"]:
-        metrics = _compare_float_values(expected, actual, expected_record)
+        metrics = _compare_float_values(
+            expected, actual_for_comparison, expected_record
+        )
     else:
-        metrics = _compare_exact_values(expected, actual)
+        metrics = _compare_exact_values(expected, actual_for_comparison)
     comparison.update(metrics)
     comparison["status"] = "pass" if metrics["mismatch_count"] == 0 else "fail"
     return comparison

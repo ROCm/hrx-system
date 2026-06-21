@@ -52,10 +52,10 @@ static void BM_PipelinePlanCreateAndFormatJson(benchmark::State& state) {
 
     id4_pipeline_parameter_slab_plan_t slab =
         id4_pipeline_make_device_local_parameter_slab_plan(
-            IREE_SV("benchmark"), /*placement_id=*/0,
+            IREE_SV("benchmark"), /*placement_id=*/0, /*binding_slot=*/0,
             IREE_HAL_QUEUE_AFFINITY_ANY,
             IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET |
-                IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE_READ,
+                IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE,
             /*byte_length=*/16, /*alignment=*/16, /*request_count=*/1,
             &request);
 

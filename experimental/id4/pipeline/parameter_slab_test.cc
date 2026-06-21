@@ -51,10 +51,12 @@ TEST(PipelineParameterSlab, MakeDeviceLocalPlanUsesSlabAlignment) {
                                   /*length=*/16));
   id4_pipeline_parameter_slab_plan_t plan =
       id4_pipeline_make_device_local_parameter_slab_plan(
-          IREE_SV("scope"), /*placement_id=*/2, IREE_HAL_QUEUE_AFFINITY_ANY,
+          IREE_SV("scope"), /*placement_id=*/2, /*binding_slot=*/3,
+          IREE_HAL_QUEUE_AFFINITY_ANY,
           IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE_READ, /*byte_length=*/16,
           /*alignment=*/64, /*request_count=*/1, &request);
   EXPECT_EQ(plan.placement_id, 2u);
+  EXPECT_EQ(plan.binding_slot, 3u);
   EXPECT_EQ(plan.byte_length, 16u);
   EXPECT_EQ(plan.alignment, 64u);
   EXPECT_EQ(plan.target_params.type, IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL);

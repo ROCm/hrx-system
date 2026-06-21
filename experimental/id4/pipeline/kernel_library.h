@@ -61,6 +61,14 @@ typedef struct id4_pipeline_kernel_module_t {
   iree_const_byte_span_t source_contents;
 } id4_pipeline_kernel_module_t;
 
+// Borrowed Loom source file entry used to create a kernel library.
+typedef struct id4_pipeline_kernel_source_file_t {
+  // Source identifier formatted as "<module_path>.loom".
+  iree_string_view_t source_identifier;
+  // In-memory Loom source contents.
+  iree_const_byte_span_t source_contents;
+} id4_pipeline_kernel_source_file_t;
+
 // Options for creating an in-memory kernel library.
 typedef struct id4_pipeline_kernel_library_create_options_t {
   // Size of this structure for versioning.
@@ -76,6 +84,13 @@ typedef struct id4_pipeline_kernel_library_create_options_t {
 // Creates a kernel library by copying module metadata and source contents.
 iree_status_t id4_pipeline_kernel_library_create(
     const id4_pipeline_kernel_library_create_options_t* options,
+    iree_allocator_t host_allocator,
+    id4_pipeline_kernel_library_t** out_library);
+
+// Creates a kernel library from source files named "<module_path>.loom".
+iree_status_t id4_pipeline_kernel_library_create_from_source_files(
+    iree_host_size_t source_file_count,
+    const id4_pipeline_kernel_source_file_t* source_files,
     iree_allocator_t host_allocator,
     id4_pipeline_kernel_library_t** out_library);
 

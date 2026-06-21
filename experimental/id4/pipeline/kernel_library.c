@@ -202,6 +202,77 @@ iree_status_t id4_pipeline_kernel_library_create(
   return status;
 }
 
+static iree_status_t id4_pipeline_kernel_library_source_file_to_module(
+    const id4_pipeline_kernel_source_file_t* source_file,
+    iree_host_size_t index, id4_pipeline_kernel_module_t* out_module) {
+  memset(out_module, 0, sizeof(*out_module));
+  if (!source_file) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "kernel source file %" PRIhsz " is NULL", index);
+  }
+  if (iree_string_view_is_empty(source_file->source_identifier)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "kernel source file %" PRIhsz " source identifier is required", index);
+  }
+  if (!iree_string_view_ends_with(source_file->source_identifier,
+                                  IREE_SV(".loom"))) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "kernel source file %.*s must be named <module_path>.loom",
+        (int)source_file->source_identifier.size,
+        source_file->source_identifier.data);
+  }
+  if (!source_file->source_contents.data ||
+      source_file->source_contents.data_length == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "kernel source file %.*s contents are required",
+                            (int)source_file->source_identifier.size,
+                            source_file->source_identifier.data);
+  }
+  out_module->module_path = iree_string_view_strip_suffix(
+      source_file->source_identifier, IREE_SV(".loom"));
+  out_module->source_identifier = source_file->source_identifier;
+  out_module->source_contents = source_file->source_contents;
+  return iree_ok_status();
+}
+
+iree_status_t id4_pipeline_kernel_library_create_from_source_files(
+    iree_host_size_t source_file_count,
+    const id4_pipeline_kernel_source_file_t* source_files,
+    iree_allocator_t host_allocator,
+    id4_pipeline_kernel_library_t** out_library) {
+  IREE_ASSERT_ARGUMENT(out_library);
+  *out_library = NULL;
+  if (source_file_count != 0 && !source_files) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "kernel source file array is required");
+  }
+
+  id4_pipeline_kernel_module_t* modules = NULL;
+  iree_status_t status = iree_ok_status();
+  if (source_file_count != 0) {
+    status = iree_allocator_malloc_array(host_allocator, source_file_count,
+                                         sizeof(modules[0]), (void**)&modules);
+  }
+  for (iree_host_size_t i = 0;
+       i < source_file_count && iree_status_is_ok(status); ++i) {
+    status = id4_pipeline_kernel_library_source_file_to_module(&source_files[i],
+                                                               i, &modules[i]);
+  }
+  if (iree_status_is_ok(status)) {
+    id4_pipeline_kernel_library_create_options_t options;
+    memset(&options, 0, sizeof(options));
+    options.structure_size = sizeof(options);
+    options.module_count = source_file_count;
+    options.modules = modules;
+    status = id4_pipeline_kernel_library_create(&options, host_allocator,
+                                                out_library);
+  }
+  iree_allocator_free(host_allocator, modules);
+  return status;
+}
+
 void id4_pipeline_kernel_library_retain(
     id4_pipeline_kernel_library_t* library) {
   if (!library) return;

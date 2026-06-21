@@ -141,6 +141,17 @@ static iree_status_t id4_pipeline_program_validate_access(
   return iree_ok_status();
 }
 
+static iree_status_t id4_pipeline_program_validate_import_flags(
+    id4_pipeline_program_import_tensor_flags_t flags,
+    iree_string_view_t tensor_name) {
+  const id4_pipeline_program_import_tensor_flags_t allowed_flags =
+      ID4_PIPELINE_PROGRAM_IMPORT_TENSOR_FLAG_INITIALIZED;
+  if (!iree_any_bit_set(flags, ~allowed_flags)) return iree_ok_status();
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "import tensor %.*s has unsupported flags 0x%x",
+                          (int)tensor_name.size, tensor_name.data, flags);
+}
+
 static iree_status_t id4_pipeline_program_validate_kernel_ref(
     id4_pipeline_kernel_ref_t kernel, iree_string_view_t dispatch_name) {
   if (iree_string_view_is_empty(kernel.module_path)) {
@@ -151,6 +162,41 @@ static iree_status_t id4_pipeline_program_validate_kernel_ref(
   if (iree_string_view_is_empty(kernel.function_name)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "dispatch %.*s function name is required",
+                            (int)dispatch_name.size, dispatch_name.data);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_program_validate_dispatch_config(
+    iree_hal_dispatch_config_t dispatch_config,
+    iree_string_view_t dispatch_name) {
+  if (dispatch_config.workgroup_count_ref.buffer) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "dispatch %.*s indirect workgroup counts are not "
+                            "supported by semantic programs",
+                            (int)dispatch_name.size, dispatch_name.data);
+  }
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(dispatch_config.workgroup_count); ++i) {
+    if (dispatch_config.workgroup_count[i] == 0) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "dispatch %.*s workgroup count dimension %" PRIhsz
+                              " is zero",
+                              (int)dispatch_name.size, dispatch_name.data, i);
+    }
+  }
+  bool has_workgroup_size_override = false;
+  bool has_partial_workgroup_size_override = false;
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(dispatch_config.workgroup_size); ++i) {
+    has_workgroup_size_override |= dispatch_config.workgroup_size[i] != 0;
+    has_partial_workgroup_size_override |=
+        dispatch_config.workgroup_size[i] == 0;
+  }
+  if (has_workgroup_size_override && has_partial_workgroup_size_override) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "dispatch %.*s workgroup size override must be "
+                            "fully specified or fully omitted",
                             (int)dispatch_name.size, dispatch_name.data);
   }
   return iree_ok_status();
@@ -328,6 +374,8 @@ static iree_status_t id4_pipeline_program_copy_op(
     case ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM:
       target->payload.dispatch_loom.binding_count =
           source->payload.dispatch_loom.binding_count;
+      target->payload.dispatch_loom.dispatch_config =
+          source->payload.dispatch_loom.dispatch_config;
       target->payload.dispatch_loom.kernel.module_path =
           iree_string_view_empty();
       target->payload.dispatch_loom.kernel.function_name =
@@ -660,16 +708,24 @@ iree_status_t id4_pipeline_program_import_tensor(
         IREE_STATUS_UNIMPLEMENTED,
         "program import tensor extension structures are not supported");
   }
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_validate_import_flags(
+      options->flags, options->name));
 
   iree_host_size_t operation_ordinal = builder->operation_count;
   id4_pipeline_program_tensor_t tensor = id4_pipeline_program_tensor_invalid();
+  const bool initialized = iree_all_bits_set(
+      options->flags, ID4_PIPELINE_PROGRAM_IMPORT_TENSOR_FLAG_INITIALIZED);
   IREE_RETURN_IF_ERROR(id4_pipeline_program_builder_add_tensor(
       builder, options->name, options->dtype, options->shape, operation_ordinal,
-      /*initialized=*/true, &tensor));
+      initialized, &tensor));
   id4_pipeline_program_op_t op = {
       .kind = ID4_PIPELINE_PROGRAM_OP_KIND_IMPORT,
       .ordinal = operation_ordinal,
-      .payload.import_value.tensor = tensor,
+      .payload.import_value =
+          {
+              .flags = options->flags,
+              .tensor = tensor,
+          },
   };
   iree_status_t status = id4_pipeline_program_builder_append_op(builder, &op);
   if (iree_status_is_ok(status)) {
@@ -793,6 +849,8 @@ iree_status_t id4_pipeline_program_dispatch_loom(
   }
   IREE_RETURN_IF_ERROR(
       id4_pipeline_program_validate_kernel_ref(options->kernel, options->name));
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_validate_dispatch_config(
+      options->dispatch_config, options->name));
   IREE_RETURN_IF_ERROR(id4_pipeline_program_validate_config_bindings(
       options->name, options->config_binding_count, options->config_bindings));
   if (options->binding_count == 0 || !options->bindings) {
@@ -824,6 +882,7 @@ iree_status_t id4_pipeline_program_dispatch_loom(
           {
               .name = options->name,
               .kernel = options->kernel,
+              .dispatch_config = options->dispatch_config,
               .config_binding_count = options->config_binding_count,
               .config_bindings = options->config_bindings,
               .binding_count = options->binding_count,

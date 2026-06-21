@@ -83,6 +83,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/hal",
     ],
 )
 
@@ -93,6 +94,39 @@ iree_runtime_cc_library(
     deps = [
         ":plan",
         ":program",
+        ":program_region",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "program_prepare",
+    srcs = ["program_prepare.c"],
+    hdrs = ["program_prepare.h"],
+    deps = [
+        ":kernel_cache",
+        ":kernel_library",
+        ":parameter_slab",
+        ":plan",
+        ":program",
+        ":program_region",
+        ":region",
+        ":stage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "program_region",
+    srcs = ["program_region.c"],
+    hdrs = ["program_region.h"],
+    deps = [
+        ":program",
+        ":region",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
     ],
@@ -138,6 +172,17 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "kernel_library_test",
+    srcs = ["kernel_library_test.cc"],
+    deps = [
+        ":kernel_library",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "parameter_slab_test",
     srcs = ["parameter_slab_test.cc"],
     deps = [
@@ -172,6 +217,7 @@ iree_runtime_cc_test(
         ":program",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

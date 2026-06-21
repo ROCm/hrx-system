@@ -199,6 +199,81 @@ class FixtureCompareTest(unittest.TestCase):
             self.assertEqual(comparison["mismatch_count"], 1)
             self.assertEqual(comparison["first_mismatch"]["index"], 0)
 
+    def test_compares_expected_slice_against_full_actual_tensor(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            fixture_dir = root / "fixture"
+            actual_dir = root / "actual"
+            _write_tensor_fixture(
+                fixture_dir,
+                "condition_slice.npy",
+                "i32",
+                [2, 2],
+                b"\x03\x00\x00\x00\x04\x00\x00\x00\x05\x00\x00\x00\x06\x00\x00\x00",
+            )
+            _write_tensor_fixture(
+                actual_dir,
+                "condition.npy",
+                "i32",
+                [3, 2],
+                b"\x01\x00\x00\x00\x02\x00\x00\x00"
+                b"\x03\x00\x00\x00\x04\x00\x00\x00"
+                b"\x05\x00\x00\x00\x06\x00\x00\x00",
+            )
+            _write_json(
+                fixture_dir / "manifest.json",
+                {
+                    "fixture_id": "unit_fixture",
+                    "records": [
+                        {
+                            "dtype": "i32",
+                            "file": "condition_slice.npy",
+                            "kind": "tensor",
+                            "name": "condition",
+                            "role": "expected",
+                            "shape": [2, 2],
+                            "slice": [
+                                {"start": 1, "length": 2},
+                                {"start": 0, "length": 2},
+                            ],
+                            "stage": "qwen.encoder",
+                        }
+                    ],
+                    "schema_version": 1,
+                },
+            )
+            _write_json(
+                actual_dir / "manifest.json",
+                {
+                    "records": [
+                        {
+                            "dtype": "i32",
+                            "file": "condition.npy",
+                            "kind": "tensor",
+                            "name": "condition",
+                            "role": "actual",
+                            "shape": [3, 2],
+                            "stage": "qwen.encoder",
+                        }
+                    ],
+                    "schema_version": 1,
+                },
+            )
+
+            report = fixture_compare.compare_fixtures(fixture_dir, actual_dir)
+
+            comparison = report["comparisons"][0]
+            self.assertEqual(comparison["status"], "pass")
+            self.assertEqual(comparison["mismatch_count"], 0)
+            self.assertEqual(comparison["actual_shape"], [3, 2])
+            self.assertEqual(
+                comparison["slice"],
+                [
+                    {"start": 1, "length": 2},
+                    {"start": 0, "length": 2},
+                ],
+            )
+
     def test_reports_missing_actual_record(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

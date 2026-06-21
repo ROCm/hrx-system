@@ -18,8 +18,8 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Maximum tensor rank represented inline in pipeline planning structures.
-#define ID4_PIPELINE_TENSOR_MAX_RANK 4
+// Current inline tensor rank storage limit in pipeline planning structures.
+#define ID4_PIPELINE_TENSOR_MAX_RANK 5
 
 // Ephemeral authoring context for an executable pipeline region.
 typedef struct id4_pipeline_region_builder_t id4_pipeline_region_builder_t;
@@ -74,11 +74,27 @@ typedef enum id4_pipeline_tensor_import_flag_bits_e {
   ID4_PIPELINE_TENSOR_IMPORT_FLAG_INITIALIZED = 1u << 0,
 } id4_pipeline_tensor_import_flag_bits_t;
 
-// Fixed-rank tensor shape used by region planning.
+// Scalar element type for planned tensor values.
+typedef enum id4_pipeline_tensor_dtype_e {
+  // Invalid element type.
+  ID4_PIPELINE_TENSOR_DTYPE_INVALID = 0,
+  // IEEE 754 single-precision floating point.
+  ID4_PIPELINE_TENSOR_DTYPE_F32 = 1,
+  // IEEE 754 half-precision floating point.
+  ID4_PIPELINE_TENSOR_DTYPE_F16 = 2,
+  // Brain floating point 16-bit value.
+  ID4_PIPELINE_TENSOR_DTYPE_BF16 = 3,
+  // Signed 32-bit integer.
+  ID4_PIPELINE_TENSOR_DTYPE_I32 = 4,
+  // Unsigned 32-bit integer.
+  ID4_PIPELINE_TENSOR_DTYPE_U32 = 5,
+} id4_pipeline_tensor_dtype_t;
+
+// Inline tensor shape used by region planning.
 typedef struct id4_pipeline_tensor_shape_t {
   // Number of used dimensions in dims.
   uint32_t rank;
-  // Dimension extents for ranks up to ID4_PIPELINE_TENSOR_MAX_RANK.
+  // Dimension extents stored inline up to the current rank limit.
   uint64_t dims[ID4_PIPELINE_TENSOR_MAX_RANK];
 } id4_pipeline_tensor_shape_t;
 
@@ -86,6 +102,8 @@ typedef struct id4_pipeline_tensor_shape_t {
 typedef struct id4_pipeline_tensor_layout_t {
   // Human-readable tensor name borrowed for the call and copied by the builder.
   iree_string_view_t name;
+  // Scalar element type.
+  id4_pipeline_tensor_dtype_t dtype;
   // Tensor shape.
   id4_pipeline_tensor_shape_t shape;
   // Tensor byte length.
@@ -93,6 +111,14 @@ typedef struct id4_pipeline_tensor_layout_t {
   // Required base alignment in bytes. Zero selects byte alignment.
   iree_device_size_t alignment;
 } id4_pipeline_tensor_layout_t;
+
+// Returns the dense byte length for one element of |dtype|, or zero if invalid.
+iree_device_size_t id4_pipeline_tensor_dtype_byte_length(
+    id4_pipeline_tensor_dtype_t dtype);
+
+// Returns the canonical lower-case fixture spelling for |dtype|.
+iree_string_view_t id4_pipeline_tensor_dtype_format(
+    id4_pipeline_tensor_dtype_t dtype);
 
 // Value handle for a tensor known to a region builder.
 typedef struct id4_pipeline_tensor_t {
@@ -186,6 +212,8 @@ typedef struct id4_pipeline_region_statistics_t {
   iree_host_size_t operation_count;
   // Number of dispatch operations authored.
   iree_host_size_t dispatch_count;
+  // Number of tensor copy operations authored.
+  iree_host_size_t copy_count;
   // Number of barrier operations authored.
   iree_host_size_t barrier_count;
   // Current epoch after authored barriers.
@@ -330,6 +358,11 @@ iree_status_t id4_pipeline_region_dispatch_loom(
     iree_const_byte_span_t constants, iree_host_size_t binding_count,
     const id4_pipeline_region_dispatch_binding_t* bindings,
     iree_hal_dispatch_flags_t flags);
+
+// Authors a tensor-to-tensor copy and optionally records it.
+iree_status_t id4_pipeline_region_copy_tensor(
+    id4_pipeline_region_builder_t* builder, id4_pipeline_tensor_t source,
+    id4_pipeline_tensor_t target, iree_hal_copy_flags_t flags);
 
 // Authors an execution barrier, advances the epoch, and optionally records it.
 iree_status_t id4_pipeline_region_barrier(

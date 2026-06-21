@@ -34,6 +34,19 @@ typedef struct id4_pipeline_device_placement_t {
 // Config key/value pair used to specialize a planned kernel.
 typedef id4_pipeline_kernel_config_binding_t id4_pipeline_plan_config_binding_t;
 
+// Stage boundary tensor behavior flags.
+typedef uint32_t id4_pipeline_boundary_tensor_flags_t;
+
+// Stage boundary tensor behavior flag bits.
+typedef enum id4_pipeline_boundary_tensor_flag_bits_e {
+  // Tensor is supplied by the stage caller in the issue-time binding table.
+  ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_IMPORTED = 1u << 0,
+  // Tensor is exposed as a stage output after execution completes.
+  ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_EXPORTED = 1u << 1,
+  // Tensor contents are initialized before stage execution begins.
+  ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_INITIALIZED = 1u << 2,
+} id4_pipeline_boundary_tensor_flag_bits_t;
+
 // Planned memory slab outside of parameter slab storage.
 typedef struct id4_pipeline_memory_slab_plan_t {
   // Human-readable slab name for diagnostics.
@@ -51,6 +64,20 @@ typedef struct id4_pipeline_memory_slab_plan_t {
   // Peak live bytes packed into the slab.
   iree_device_size_t high_water_mark;
 } id4_pipeline_memory_slab_plan_t;
+
+// Planned external tensor bound at a stage boundary.
+typedef struct id4_pipeline_boundary_tensor_plan_t {
+  // Tensor layout and stable diagnostic name.
+  id4_pipeline_tensor_layout_t layout;
+  // Boundary behavior flags.
+  id4_pipeline_boundary_tensor_flags_t flags;
+  // Region index whose binding table contains this tensor.
+  uint32_t region_id;
+  // Plan-local placement identifier.
+  uint32_t placement_id;
+  // Issue-time binding-table slot containing this tensor.
+  uint32_t binding_slot;
+} id4_pipeline_boundary_tensor_plan_t;
 
 // Planned kernel specialization emitted by a stage.
 typedef struct id4_pipeline_kernel_plan_t {
@@ -78,6 +105,8 @@ typedef struct id4_pipeline_region_plan_t {
   iree_host_size_t binding_capacity;
   // Binding-table slot reserved for the local transient slab.
   uint32_t local_binding_slot;
+  // Required alignment for local tensor suballocations in the region slab.
+  iree_device_size_t local_tensor_alignment;
   // Dry-run region statistics used for diagnostics and memory planning.
   id4_pipeline_region_statistics_t statistics;
 } id4_pipeline_region_plan_t;
@@ -88,10 +117,16 @@ typedef struct id4_pipeline_diagnostic_tap_plan_t {
   iree_string_view_t name;
   // Region index containing the tapped value.
   uint32_t region_id;
+  // Plan-local placement identifier.
+  uint32_t placement_id;
+  // Issue-time binding-table slot receiving the captured tensor copy.
+  uint32_t binding_slot;
   // Operation ordinal after which the tap can be captured.
   iree_host_size_t after_operation_ordinal;
   // Tensor or value name exposed by the tap.
   iree_string_view_t target_name;
+  // Tensor layout and stable capture record name.
+  id4_pipeline_tensor_layout_t layout;
 } id4_pipeline_diagnostic_tap_plan_t;
 
 // Options for creating an inspectable plan.
@@ -116,6 +151,10 @@ typedef struct id4_pipeline_plan_create_options_t {
   iree_host_size_t memory_slab_count;
   // Planned non-parameter memory slabs to copy into the plan.
   const id4_pipeline_memory_slab_plan_t* memory_slabs;
+  // Number of planned external boundary tensors.
+  iree_host_size_t boundary_tensor_count;
+  // Planned external boundary tensors to copy into the plan.
+  const id4_pipeline_boundary_tensor_plan_t* boundary_tensors;
   // Number of planned kernel specializations.
   iree_host_size_t kernel_count;
   // Planned kernel specializations to copy into the plan.
@@ -173,6 +212,14 @@ iree_host_size_t id4_pipeline_plan_memory_slab_count(
 
 // Returns memory slab |index| or NULL when out of range.
 const id4_pipeline_memory_slab_plan_t* id4_pipeline_plan_memory_slab_at(
+    const id4_pipeline_plan_t* plan, iree_host_size_t index);
+
+// Returns the number of boundary tensors in |plan|.
+iree_host_size_t id4_pipeline_plan_boundary_tensor_count(
+    const id4_pipeline_plan_t* plan);
+
+// Returns boundary tensor |index| or NULL when out of range.
+const id4_pipeline_boundary_tensor_plan_t* id4_pipeline_plan_boundary_tensor_at(
     const id4_pipeline_plan_t* plan, iree_host_size_t index);
 
 // Returns the number of kernel specializations in |plan|.
