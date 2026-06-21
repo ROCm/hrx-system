@@ -4,7 +4,6 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
 load("//runtime/build_tools/bazel:cc_benchmark.bzl", "iree_runtime_cc_benchmark")
 load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
@@ -15,25 +14,14 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
-_AMDGPU_HAL_COMPATIBLE_WITH = loom_config_compatible_with([
-    "//loom/config/execute:amdgpu_hal",
-])
-
 iree_runtime_cc_library(
-    name = "qwen3_vl_prefill",
-    srcs = ["qwen3_vl_prefill.c"],
-    hdrs = ["qwen3_vl_prefill.h"],
+    name = "qwen3_vl_program",
+    srcs = ["qwen3_vl_program.c"],
+    hdrs = ["qwen3_vl_program.h"],
     deps = [
-        "//experimental/id4/pipeline:diagnostics",
-        "//experimental/id4/pipeline:kernel_cache",
         "//experimental/id4/pipeline:kernel_library",
-        "//experimental/id4/pipeline:parameter_slab",
-        "//experimental/id4/pipeline:plan",
-        "//experimental/id4/pipeline:region",
-        "//experimental/id4/pipeline:stage",
+        "//experimental/id4/pipeline:program",
         "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/hal",
     ],
 )
 
@@ -91,94 +79,18 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_test(
-    name = "qwen3_vl_prefill_amdgpu_integration_test",
-    srcs = ["qwen3_vl_prefill_amdgpu_integration_test.cc"],
-    args = [
-        "--rmsnorm_loom_source=$(location //experimental/id4/kernels:qwen3_vl/rmsnorm.loom)",
-        "--linear_loom_source=$(location //experimental/id4/kernels:qwen3_vl/linear_bf16_f32.loom)",
-        "--device_uri=amdgpu://0",
-        "--amdgpu_processor=gfx1100",
-    ],
-    data = [
-        "//experimental/id4/kernels:qwen3_vl/linear_bf16_f32.loom",
-        "//experimental/id4/kernels:qwen3_vl/rmsnorm.loom",
-    ],
-    tags = [
-        "iree-run-requirement=runtime.resource.amd_gpu",
-        "manual",
-        "requires-gpu-amd",
-        "runtime-resource=amd-gpu",
-    ],
-    target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
+    name = "qwen3_vl_program_test",
+    srcs = ["qwen3_vl_program_test.cc"],
     deps = [
-        ":hal_integration_util",
-        ":qwen3_vl_prefill",
-        "//experimental/id4/pipeline:diagnostics",
-        "//experimental/id4/pipeline:kernel_cache",
-        "//experimental/id4/pipeline:kernel_library",
-        "//experimental/id4/pipeline:parameter_slab",
-        "//experimental/id4/pipeline:plan",
-        "//experimental/id4/pipeline:stage",
-        "//runtime/src/iree/async",
-        "//runtime/src/iree/async/util:proactor_pool",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal",
-        "//runtime/src/iree/base/tooling:flags",
-        "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers",
-        "//runtime/src/iree/io:file_handle",
-        "//runtime/src/iree/io:parameter_provider",
-        "//runtime/src/iree/testing:gtest",
-    ],
-)
-
-iree_runtime_cc_benchmark(
-    name = "qwen3_vl_prefill_benchmark",
-    srcs = ["qwen3_vl_prefill_benchmark.cc"],
-    deps = [
-        ":qwen3_vl_prefill",
+        ":qwen3_vl_program",
         ":test_util",
-        "//experimental/id4/pipeline:plan",
-        "//experimental/id4/pipeline:stage",
+        "//experimental/id4/pipeline:program",
+        "//experimental/id4/pipeline:program_plan",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/testing:gbenchmark_harness",
-    ],
-)
-
-iree_runtime_cc_benchmark(
-    name = "qwen3_vl_prefill_amdgpu_benchmark",
-    srcs = ["qwen3_vl_prefill_amdgpu_benchmark.cc"],
-    args = [
-        "--rmsnorm_loom_source=$(location //experimental/id4/kernels:qwen3_vl/rmsnorm.loom)",
-        "--linear_loom_source=$(location //experimental/id4/kernels:qwen3_vl/linear_bf16_f32.loom)",
-        "--device_uri=amdgpu://0",
-        "--amdgpu_processor=gfx1100",
-    ],
-    data = [
-        "//experimental/id4/kernels:qwen3_vl/linear_bf16_f32.loom",
-        "//experimental/id4/kernels:qwen3_vl/rmsnorm.loom",
-    ],
-    resource_group = "amd-gpu",
-    tags = [
-        "iree-run-requirement=runtime.resource.amd_gpu",
-        "manual",
-        "requires-gpu-amd",
-        "runtime-resource=amd-gpu",
-    ],
-    target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
-    deps = [
-        ":hal_integration_util",
-        ":qwen3_vl_prefill",
-        "//experimental/id4/pipeline:kernel_cache",
-        "//experimental/id4/pipeline:kernel_library",
-        "//experimental/id4/pipeline:plan",
-        "//experimental/id4/pipeline:stage",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/tooling:flags",
-        "//runtime/src/iree/hal",
-        "//runtime/src/iree/io:file_handle",
-        "//runtime/src/iree/testing:gbenchmark_harness",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

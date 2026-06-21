@@ -26,11 +26,30 @@ typedef struct id4_pipeline_kernel_config_binding_t {
 
 // Exported Loom kernel function selected by model authoring code.
 typedef struct id4_pipeline_kernel_ref_t {
-  // Stable module path such as "qwen3_vl/rmsnorm".
+  // Stable module path such as "model_family/kernel_family".
   iree_string_view_t module_path;
   // Exported kernel function name inside the module.
   iree_string_view_t function_name;
 } id4_pipeline_kernel_ref_t;
+
+// Returns a compile-time configuration binding value.
+static inline id4_pipeline_kernel_config_binding_t
+id4_pipeline_make_kernel_config_binding(iree_string_view_t key,
+                                        iree_string_view_t value) {
+  id4_pipeline_kernel_config_binding_t binding;
+  binding.key = key;
+  binding.value = value;
+  return binding;
+}
+
+// Returns an exported Loom kernel reference value.
+static inline id4_pipeline_kernel_ref_t id4_pipeline_make_kernel_ref(
+    iree_string_view_t module_path, iree_string_view_t function_name) {
+  id4_pipeline_kernel_ref_t ref;
+  ref.module_path = module_path;
+  ref.function_name = function_name;
+  return ref;
+}
 
 // Borrowed module source entry used to create a kernel library.
 typedef struct id4_pipeline_kernel_module_t {

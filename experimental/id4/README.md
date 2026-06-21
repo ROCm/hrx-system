@@ -251,6 +251,24 @@ Generated fixture directories contain payload files plus `manifest.json` and
 The inventory is the compact stage/role/shape view intended for planning stage
 tests, benchmark harnesses, and kernel-family triage.
 
+Actual stage captures use the same manifest record shape with `role` values
+such as `actual` or `output`. The fixture comparator matches `expected`
+fixture records against actual capture records by semantic `stage` and `name`,
+then applies the per-record tolerance from the fixture manifest:
+
+```bash
+bazel run //experimental/id4/tooling:fixture_compare -- \
+  --fixture-dir="${ID4_REFERENCE_FIXTURE_ROOT}/<fixture-id>" \
+  --actual-dir="<actual-capture-dir>" \
+  --output="<comparison-report>.json"
+```
+
+Comparison reports are machine-readable JSON with manifest hashes, pass/fail
+counts, shape and dtype mismatches, tolerance failures, maximum absolute and
+relative errors, and first mismatch coordinates. They are meant for opt-in
+regression runs and human diagnostics over external artifacts, not ordinary
+presubmit.
+
 Raw traces can also be inventoried without reducing payloads:
 
 ```bash

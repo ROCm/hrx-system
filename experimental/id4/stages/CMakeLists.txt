@@ -11,22 +11,15 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
-    qwen3_vl_prefill
+    qwen3_vl_program
   HDRS
-    "qwen3_vl_prefill.h"
+    "qwen3_vl_program.h"
   SRCS
-    "qwen3_vl_prefill.c"
+    "qwen3_vl_program.c"
   DEPS
     iree::base
-    iree::base::internal::arena
-    iree::experimental::id4::pipeline::diagnostics
-    iree::experimental::id4::pipeline::kernel_cache
     iree::experimental::id4::pipeline::kernel_library
-    iree::experimental::id4::pipeline::parameter_slab
-    iree::experimental::id4::pipeline::plan
-    iree::experimental::id4::pipeline::region
-    iree::experimental::id4::pipeline::stage
-    iree::hal
+    iree::experimental::id4::pipeline::program
   PUBLIC
 )
 
@@ -92,101 +85,22 @@ iree_cc_library(
   PUBLIC
 )
 
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_cc_test(
   NAME
-    qwen3_vl_prefill_amdgpu_integration_test
+    qwen3_vl_program_test
   SRCS
-    "qwen3_vl_prefill_amdgpu_integration_test.cc"
-  DATA
-    iree::experimental::id4::kernels::qwen3_vl::linear_bf16_f32.loom
-    iree::experimental::id4::kernels::qwen3_vl::rmsnorm.loom
+    "qwen3_vl_program_test.cc"
   DEPS
-    ::hal_integration_util
-    ::qwen3_vl_prefill
-    iree::async
-    iree::async::util::proactor_pool
-    iree::base
-    iree::base::internal
-    iree::base::tooling::flags
-    iree::experimental::id4::pipeline::diagnostics
-    iree::experimental::id4::pipeline::kernel_cache
-    iree::experimental::id4::pipeline::kernel_library
-    iree::experimental::id4::pipeline::parameter_slab
-    iree::experimental::id4::pipeline::plan
-    iree::experimental::id4::pipeline::stage
-    iree::hal
-    iree::hal::drivers
-    iree::io::file_handle
-    iree::io::parameter_provider
-    iree::testing::gtest
-  ARGS
-    "--rmsnorm_loom_source=${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/rmsnorm.loom"
-    "--linear_loom_source=${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_f32.loom"
-    "--device_uri=amdgpu://0"
-    "--amdgpu_processor=gfx1100"
-  LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "manual"
-    "requires-gpu-amd"
-    "runtime-resource=amd-gpu"
-)
-endif()
-
-iree_cc_binary_benchmark(
-  NAME
-    qwen3_vl_prefill_benchmark
-  SRCS
-    "qwen3_vl_prefill_benchmark.cc"
-  DEPS
-    ::qwen3_vl_prefill
+    ::qwen3_vl_program
     ::test_util
     iree::base
-    iree::experimental::id4::pipeline::plan
-    iree::experimental::id4::pipeline::stage
+    iree::base::internal::arena
+    iree::experimental::id4::pipeline::program
+    iree::experimental::id4::pipeline::program_plan
     iree::hal
-    iree::testing::gbenchmark_harness
-    iree::third_party::google_benchmark
-  TESTONLY
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-iree_cc_binary_benchmark(
-  NAME
-    qwen3_vl_prefill_amdgpu_benchmark
-  SRCS
-    "qwen3_vl_prefill_amdgpu_benchmark.cc"
-  DATA
-    iree::experimental::id4::kernels::qwen3_vl::linear_bf16_f32.loom
-    iree::experimental::id4::kernels::qwen3_vl::rmsnorm.loom
-  DEPS
-    ::hal_integration_util
-    ::qwen3_vl_prefill
-    iree::base
-    iree::base::tooling::flags
-    iree::experimental::id4::pipeline::kernel_cache
-    iree::experimental::id4::pipeline::kernel_library
-    iree::experimental::id4::pipeline::plan
-    iree::experimental::id4::pipeline::stage
-    iree::hal
-    iree::io::file_handle
-    iree::testing::gbenchmark_harness
-    iree::third_party::google_benchmark
-  ARGS
-    "--rmsnorm_loom_source=${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/rmsnorm.loom"
-    "--linear_loom_source=${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_f32.loom"
-    "--device_uri=amdgpu://0"
-    "--amdgpu_processor=gfx1100"
-  TESTONLY
-  LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "manual"
-    "requires-gpu-amd"
-    "runtime-resource=amd-gpu"
-  RESOURCE_GROUP
-    amd-gpu
-)
-endif()
 
 iree_cc_binary_benchmark(
   NAME

@@ -35,10 +35,9 @@ TEST(KernelCacheTest, CreateRequiresProcessor) {
   options.structure_size = sizeof(options);
 
   id4_pipeline_kernel_cache_t* kernel_cache = nullptr;
-  iree_status_t status = id4_pipeline_kernel_cache_create(
-      &options, iree_allocator_system(), &kernel_cache);
-  EXPECT_EQ(iree_status_code(status), IREE_STATUS_INVALID_ARGUMENT);
-  iree_status_free(status);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        id4_pipeline_kernel_cache_create(
+                            &options, iree_allocator_system(), &kernel_cache));
   EXPECT_EQ(kernel_cache, nullptr);
 }
 
@@ -63,10 +62,9 @@ TEST(KernelCacheTest, PrepareRequiresRealExecutableCache) {
   prepare_options.diagnostics_sink = &diagnostics_sink;
 
   id4_pipeline_kernel_executable_t* executable = nullptr;
-  iree_status_t status = id4_pipeline_kernel_cache_prepare_executable(
-      kernel_cache, &prepare_options, &executable);
-  EXPECT_EQ(iree_status_code(status), IREE_STATUS_INVALID_ARGUMENT);
-  iree_status_free(status);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        id4_pipeline_kernel_cache_prepare_executable(
+                            kernel_cache, &prepare_options, &executable));
   EXPECT_EQ(executable, nullptr);
 
   id4_pipeline_kernel_cache_release(kernel_cache);
