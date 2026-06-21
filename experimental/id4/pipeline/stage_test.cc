@@ -99,6 +99,14 @@ static iree_hal_device_group_t* CreateLocalSyncDeviceGroup() {
   return device_group;
 }
 
+static iree_hal_semaphore_t* CreateSemaphore(iree_hal_device_t* device) {
+  iree_hal_semaphore_t* semaphore = nullptr;
+  IREE_CHECK_OK(iree_hal_semaphore_create(
+      device, IREE_HAL_QUEUE_AFFINITY_ANY,
+      /*initial_value=*/0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore));
+  return semaphore;
+}
+
 typedef struct id4_pipeline_test_diagnostics_log_t {
   // Number of diagnostic events observed.
   iree_host_size_t count;
@@ -128,6 +136,13 @@ typedef struct id4_pipeline_test_parameter_provider_t {
   // Byte length of the last target buffer.
   iree_device_size_t last_target_byte_length;
 } id4_pipeline_test_parameter_provider_t;
+
+typedef struct id4_pipeline_test_bundle_payload_t {
+  // Value written through the mutable bundle payload accessor.
+  int value;
+  // Counter incremented when the payload destructor runs.
+  int* destroy_count;
+} id4_pipeline_test_bundle_payload_t;
 
 static id4_pipeline_test_parameter_provider_t* TestParameterProviderCast(
     iree_io_parameter_provider_t* provider) {
@@ -335,24 +350,35 @@ static iree_status_t SmokeStagePrepare(
                             "smoke stage must be loaded before preparation");
   }
   id4_pipeline_parameter_slab_set_t* parameter_slabs = NULL;
-  const bool has_parameter_load =
-      options->parameter_provider &&
-      id4_pipeline_plan_parameter_slab_count(plan) != 0;
+  const iree_host_size_t parameter_slab_count =
+      id4_pipeline_plan_parameter_slab_count(plan);
+  if (parameter_slab_count != 0 && !options->parameter_provider) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "smoke parameter provider is required");
+  }
   iree_status_t status = iree_ok_status();
-  if (has_parameter_load) {
+  if (parameter_slab_count != 0) {
     status = id4_pipeline_plan_load_parameter_slabs(
         plan, options->parameter_provider, options->wait_semaphore_list,
         options->signal_semaphore_list, options->diagnostics_sink,
         stage->services.host_allocator, &parameter_slabs);
+  } else if (options->signal_semaphore_list.count != 0) {
+    status = iree_hal_semaphore_list_signal(options->signal_semaphore_list,
+                                            /*frontier=*/NULL);
   }
   id4_pipeline_bundle_t* bundle = NULL;
   if (iree_status_is_ok(status)) {
-    iree_hal_semaphore_list_t readiness_semaphore_list =
-        has_parameter_load ? options->signal_semaphore_list
-                           : iree_hal_semaphore_list_empty();
+    id4_pipeline_bundle_create_options_t create_options;
+    memset(&create_options, 0, sizeof(create_options));
+    create_options.structure_size = sizeof(create_options);
+    create_options.plan = plan;
+    create_options.parameter_slabs = parameter_slabs;
+    create_options.readiness_semaphore_list =
+        options->signal_semaphore_list.count != 0
+            ? options->signal_semaphore_list
+            : iree_hal_semaphore_list_empty();
     status = id4_pipeline_bundle_create(
-        plan, parameter_slabs, readiness_semaphore_list,
-        stage->services.host_allocator, &bundle);
+        &create_options, stage->services.host_allocator, &bundle);
   }
   id4_pipeline_parameter_slab_set_release(parameter_slabs);
   if (iree_status_is_ok(status)) {
@@ -391,7 +417,8 @@ static iree_status_t SmokeStageIssue(
   IREE_RETURN_IF_ERROR(
       id4_pipeline_diagnostics_emit(options->diagnostics_sink, &event));
   smoke_stage->is_issued = true;
-  return iree_ok_status();
+  return iree_hal_semaphore_list_signal(options->signal_semaphore_list,
+                                        /*frontier=*/NULL);
 }
 
 static const id4_pipeline_stage_vtable_t kSmokeStageVTable = {
@@ -442,6 +469,14 @@ static id4_pipeline_diagnostics_sink_t IgnoreDiagnosticsSink() {
   id4_pipeline_diagnostics_sink_t sink;
   id4_pipeline_diagnostics_sink_initialize_ignore(&sink);
   return sink;
+}
+
+static void DestroyTestBundlePayload(id4_pipeline_bundle_t* bundle,
+                                     void* payload) {
+  (void)bundle;
+  auto* test_payload =
+      static_cast<id4_pipeline_test_bundle_payload_t*>(payload);
+  ++*test_payload->destroy_count;
 }
 
 TEST(PipelineStage, PlanCopiesPlacementAndParameterSlabMetadata) {
@@ -533,6 +568,60 @@ TEST(PipelineStage, PlanCopiesPlacementAndParameterSlabMetadata) {
   id4_pipeline_stage_release(stage);
 }
 
+TEST(PipelineStage, BundlePayloadIsInlineAndDestroyed) {
+  iree_hal_device_group_t* device_group = CreateMockDeviceGroup();
+  id4_pipeline_diagnostics_sink_t diagnostics_sink = IgnoreDiagnosticsSink();
+
+  id4_pipeline_device_placement_t placement;
+  memset(&placement, 0, sizeof(placement));
+  placement.role = IREE_SV("default");
+  placement.device_index = 0;
+  placement.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+
+  id4_pipeline_plan_create_options_t plan_options;
+  memset(&plan_options, 0, sizeof(plan_options));
+  plan_options.structure_size = sizeof(plan_options);
+  plan_options.stage_name = IREE_SV("payload");
+  plan_options.device_group = device_group;
+  plan_options.placement_count = 1;
+  plan_options.placements = &placement;
+  plan_options.diagnostics_sink = &diagnostics_sink;
+
+  id4_pipeline_plan_t* plan = NULL;
+  IREE_ASSERT_OK(
+      id4_pipeline_plan_create(&plan_options, iree_allocator_system(), &plan));
+
+  int destroy_count = 0;
+  id4_pipeline_bundle_create_options_t bundle_options;
+  memset(&bundle_options, 0, sizeof(bundle_options));
+  bundle_options.structure_size = sizeof(bundle_options);
+  bundle_options.plan = plan;
+  bundle_options.payload_size = sizeof(id4_pipeline_test_bundle_payload_t);
+  bundle_options.payload_alignment =
+      iree_alignof(id4_pipeline_test_bundle_payload_t);
+  bundle_options.payload_destroy = DestroyTestBundlePayload;
+
+  id4_pipeline_bundle_t* bundle = NULL;
+  IREE_ASSERT_OK(id4_pipeline_bundle_create(&bundle_options,
+                                            iree_allocator_system(), &bundle));
+  auto* payload = static_cast<id4_pipeline_test_bundle_payload_t*>(
+      id4_pipeline_bundle_payload(bundle));
+  ASSERT_NE(payload, nullptr);
+  payload->value = 42;
+  payload->destroy_count = &destroy_count;
+  const auto* const_payload =
+      static_cast<const id4_pipeline_test_bundle_payload_t*>(
+          id4_pipeline_bundle_const_payload(bundle));
+  ASSERT_NE(const_payload, nullptr);
+  EXPECT_EQ(const_payload->value, 42);
+
+  id4_pipeline_bundle_release(bundle);
+  EXPECT_EQ(destroy_count, 1);
+
+  id4_pipeline_plan_release(plan);
+  iree_hal_device_group_release(device_group);
+}
+
 TEST(PipelineStage, PlanRejectsInvalidDevice) {
   iree_hal_device_group_t* device_group = CreateMockDeviceGroup();
   id4_pipeline_stage_t* stage = NULL;
@@ -563,7 +652,7 @@ TEST(PipelineStage, PlanRejectsInvalidDevice) {
 }
 
 TEST(PipelineStage, LifecycleRejectsMissingOptions) {
-  iree_hal_device_group_t* device_group = CreateMockDeviceGroup();
+  iree_hal_device_group_t* device_group = CreateLocalSyncDeviceGroup();
   id4_pipeline_stage_t* stage = NULL;
   IREE_ASSERT_OK(SmokeStageCreate(device_group, &stage));
   iree_hal_device_group_release(device_group);
@@ -604,11 +693,24 @@ TEST(PipelineStage, LifecycleRejectsMissingOptions) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         id4_pipeline_stage_prepare(stage, plan, NULL, &bundle));
 
+  id4_pipeline_test_parameter_provider_t provider;
+  TestParameterProviderInitialize(&provider);
+  iree_hal_device_t* device =
+      iree_hal_device_group_device_at(id4_pipeline_plan_device_group(plan), 0);
+  iree_hal_semaphore_t* ready_semaphore = CreateSemaphore(device);
+  uint64_t ready_value = 1;
+  iree_hal_semaphore_list_t prepare_signal_list = {
+      /*.count=*/1,
+      /*.semaphores=*/&ready_semaphore,
+      /*.payload_values=*/&ready_value,
+  };
+
   id4_pipeline_stage_prepare_options_t prepare_options;
   memset(&prepare_options, 0, sizeof(prepare_options));
   prepare_options.structure_size = sizeof(prepare_options);
+  prepare_options.parameter_provider = &provider.base;
   prepare_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
-  prepare_options.signal_semaphore_list = iree_hal_semaphore_list_empty();
+  prepare_options.signal_semaphore_list = prepare_signal_list;
   prepare_options.diagnostics_sink = &diagnostics_sink;
   IREE_ASSERT_OK(
       id4_pipeline_stage_prepare(stage, plan, &prepare_options, &bundle));
@@ -617,12 +719,13 @@ TEST(PipelineStage, LifecycleRejectsMissingOptions) {
                         id4_pipeline_stage_issue(stage, bundle, NULL));
 
   id4_pipeline_bundle_release(bundle);
+  iree_hal_semaphore_release(ready_semaphore);
   id4_pipeline_plan_release(plan);
   id4_pipeline_stage_release(stage);
 }
 
 TEST(PipelineStage, PrepareAndIssueSmokeBundle) {
-  iree_hal_device_group_t* device_group = CreateMockDeviceGroup();
+  iree_hal_device_group_t* device_group = CreateLocalSyncDeviceGroup();
   id4_pipeline_stage_t* stage = NULL;
   IREE_ASSERT_OK(SmokeStageCreate(device_group, &stage));
   iree_hal_device_group_release(device_group);
@@ -647,35 +750,67 @@ TEST(PipelineStage, PrepareAndIssueSmokeBundle) {
   id4_pipeline_plan_t* plan = NULL;
   IREE_ASSERT_OK(id4_pipeline_stage_plan(stage, &plan_options, &plan));
 
+  id4_pipeline_test_parameter_provider_t provider;
+  TestParameterProviderInitialize(&provider);
+  iree_hal_device_t* device =
+      iree_hal_device_group_device_at(id4_pipeline_plan_device_group(plan), 0);
+  iree_hal_semaphore_t* ready_semaphore = CreateSemaphore(device);
+  uint64_t ready_value = 1;
+  iree_hal_semaphore_list_t prepare_signal_list = {
+      /*.count=*/1,
+      /*.semaphores=*/&ready_semaphore,
+      /*.payload_values=*/&ready_value,
+  };
+
   id4_pipeline_stage_prepare_options_t prepare_options;
   memset(&prepare_options, 0, sizeof(prepare_options));
   prepare_options.structure_size = sizeof(prepare_options);
+  prepare_options.parameter_provider = &provider.base;
   prepare_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
-  prepare_options.signal_semaphore_list = iree_hal_semaphore_list_empty();
+  prepare_options.signal_semaphore_list = prepare_signal_list;
   prepare_options.diagnostics_sink = &diagnostics_sink;
 
   id4_pipeline_bundle_t* bundle = NULL;
   IREE_ASSERT_OK(
       id4_pipeline_stage_prepare(stage, plan, &prepare_options, &bundle));
   EXPECT_EQ(id4_pipeline_bundle_plan(bundle), plan);
-  EXPECT_EQ(id4_pipeline_bundle_readiness_semaphore_list(bundle).count, 0u);
+  iree_hal_semaphore_list_t readiness_list =
+      id4_pipeline_bundle_readiness_semaphore_list(bundle);
+  ASSERT_EQ(readiness_list.count, 1u);
+  EXPECT_EQ(readiness_list.semaphores[0], ready_semaphore);
+  EXPECT_EQ(readiness_list.payload_values[0], ready_value);
+
+  iree_hal_semaphore_t* issue_semaphore = CreateSemaphore(device);
+  uint64_t issue_value = 1;
+  iree_hal_semaphore_list_t issue_signal_list = {
+      /*.count=*/1,
+      /*.semaphores=*/&issue_semaphore,
+      /*.payload_values=*/&issue_value,
+  };
 
   id4_pipeline_stage_issue_options_t issue_options;
   memset(&issue_options, 0, sizeof(issue_options));
   issue_options.structure_size = sizeof(issue_options);
-  issue_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
-  issue_options.signal_semaphore_list = iree_hal_semaphore_list_empty();
+  issue_options.wait_semaphore_list = readiness_list;
+  issue_options.signal_semaphore_list = issue_signal_list;
   issue_options.diagnostics_sink = &diagnostics_sink;
   IREE_ASSERT_OK(id4_pipeline_stage_issue(stage, bundle, &issue_options));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(issue_semaphore, issue_value,
+                                         iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
 
-  ASSERT_EQ(diagnostics_log.keys.size(), 5u);
+  ASSERT_EQ(diagnostics_log.keys.size(), 7u);
   EXPECT_EQ(diagnostics_log.keys[0], "stage.load");
   EXPECT_EQ(diagnostics_log.keys[1], "plan.create");
   EXPECT_EQ(diagnostics_log.keys[2], "parameter_slab.plan");
-  EXPECT_EQ(diagnostics_log.keys[3], "stage.prepare");
-  EXPECT_EQ(diagnostics_log.keys[4], "stage.issue");
+  EXPECT_EQ(diagnostics_log.keys[3], "parameter_slab.load");
+  EXPECT_EQ(diagnostics_log.keys[4], "parameter_slab.gather");
+  EXPECT_EQ(diagnostics_log.keys[5], "stage.prepare");
+  EXPECT_EQ(diagnostics_log.keys[6], "stage.issue");
 
   id4_pipeline_bundle_release(bundle);
+  iree_hal_semaphore_release(issue_semaphore);
+  iree_hal_semaphore_release(ready_semaphore);
   id4_pipeline_plan_release(plan);
   id4_pipeline_stage_release(stage);
 }

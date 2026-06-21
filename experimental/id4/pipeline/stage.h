@@ -23,6 +23,10 @@ typedef struct id4_pipeline_bundle_t id4_pipeline_bundle_t;
 // Pipeline stage base object embedded by concrete stages.
 typedef struct id4_pipeline_stage_t id4_pipeline_stage_t;
 
+// Destroys stage-specific bundle payload storage.
+typedef void(IREE_API_PTR* id4_pipeline_bundle_payload_destroy_fn_t)(
+    id4_pipeline_bundle_t* bundle, void* payload);
+
 // Shared services available to all pipeline stages.
 typedef struct id4_pipeline_stage_services_t {
   // Device group inspected during planning and used during execution.
@@ -64,7 +68,7 @@ typedef struct id4_pipeline_stage_prepare_options_t {
   iree_host_size_t structure_size;
   // Extension structure chain; must be NULL for now.
   const void* next;
-  // Optional parameter provider used to populate planned parameter slabs.
+  // Parameter provider used to populate planned parameter slabs.
   iree_io_parameter_provider_t* parameter_provider;
   // Semaphores that parameter loading and command-buffer preparation wait on.
   iree_hal_semaphore_list_t wait_semaphore_list;
@@ -87,6 +91,26 @@ typedef struct id4_pipeline_stage_issue_options_t {
   // Diagnostics sink for issue events.
   id4_pipeline_diagnostics_sink_t* diagnostics_sink;
 } id4_pipeline_stage_issue_options_t;
+
+// Options for creating a prepared execution bundle.
+typedef struct id4_pipeline_bundle_create_options_t {
+  // Size of this structure for versioning.
+  iree_host_size_t structure_size;
+  // Extension structure chain; must be NULL for now.
+  const void* next;
+  // Plan retained by the bundle.
+  const id4_pipeline_plan_t* plan;
+  // Loaded parameter slabs retained by the bundle, if the plan uses them.
+  id4_pipeline_parameter_slab_set_t* parameter_slabs;
+  // Semaphores that must be reached before bundle contents are ready.
+  iree_hal_semaphore_list_t readiness_semaphore_list;
+  // Stage-specific payload byte length stored inline with the bundle.
+  iree_host_size_t payload_size;
+  // Stage-specific payload alignment. Zero selects pointer alignment.
+  iree_host_size_t payload_alignment;
+  // Optional destructor for initialized stage-specific payload storage.
+  id4_pipeline_bundle_payload_destroy_fn_t payload_destroy;
+} id4_pipeline_bundle_create_options_t;
 
 // Vtable implemented by concrete pipeline stages.
 typedef struct id4_pipeline_stage_vtable_t {
@@ -163,11 +187,10 @@ iree_status_t id4_pipeline_stage_issue(
     id4_pipeline_stage_t* stage, id4_pipeline_bundle_t* bundle,
     const id4_pipeline_stage_issue_options_t* options);
 
-// Creates a bundle retaining |plan| and optional loaded parameter slabs.
+// Creates a bundle retaining its plan, parameter slabs, readiness semaphores,
+// and optional stage-specific payload storage.
 iree_status_t id4_pipeline_bundle_create(
-    const id4_pipeline_plan_t* plan,
-    id4_pipeline_parameter_slab_set_t* parameter_slabs,
-    iree_hal_semaphore_list_t readiness_semaphore_list,
+    const id4_pipeline_bundle_create_options_t* options,
     iree_allocator_t host_allocator, id4_pipeline_bundle_t** out_bundle);
 
 // Retains |bundle| for the caller.
@@ -186,6 +209,13 @@ id4_pipeline_parameter_slab_set_t* id4_pipeline_bundle_parameter_slabs(
 
 // Returns semaphores that must be reached before |bundle| contents are ready.
 iree_hal_semaphore_list_t id4_pipeline_bundle_readiness_semaphore_list(
+    const id4_pipeline_bundle_t* bundle);
+
+// Returns mutable stage-specific payload storage, if present.
+void* id4_pipeline_bundle_payload(id4_pipeline_bundle_t* bundle);
+
+// Returns immutable stage-specific payload storage, if present.
+const void* id4_pipeline_bundle_const_payload(
     const id4_pipeline_bundle_t* bundle);
 
 #ifdef __cplusplus

@@ -15,6 +15,10 @@ struct id4_pipeline_bundle_t {
   iree_atomic_ref_count_t ref_count;
   // Allocator used for bundle storage.
   iree_allocator_t host_allocator;
+  // Stage-specific payload storage inside the bundle allocation.
+  void* payload;
+  // Destroys initialized stage-specific payload storage.
+  id4_pipeline_bundle_payload_destroy_fn_t payload_destroy;
   // Retained plan used to prepare this bundle.
   id4_pipeline_plan_t* plan;
   // Optional loaded parameter slabs retained by this bundle.
@@ -134,8 +138,55 @@ static iree_status_t id4_pipeline_validate_issue_options(
       options->wait_semaphore_list, IREE_SV("issue wait")));
   IREE_RETURN_IF_ERROR(id4_pipeline_validate_semaphore_list(
       options->signal_semaphore_list, IREE_SV("issue signal")));
+  if (options->signal_semaphore_list.count == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "issue final signal is required");
+  }
   IREE_RETURN_IF_ERROR(id4_pipeline_diagnostics_validate_sink(
       options->diagnostics_sink, IREE_SV("issue")));
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_validate_bundle_create_options(
+    const id4_pipeline_bundle_create_options_t* options) {
+  if (!options) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "bundle create options are required");
+  }
+  IREE_RETURN_IF_ERROR(id4_pipeline_validate_options_size(
+      options->structure_size, sizeof(*options), IREE_SV("bundle create")));
+  if (options->next) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "bundle create extension structures are not "
+                            "supported");
+  }
+  if (!options->plan) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "bundle plan is required");
+  }
+  const iree_host_size_t parameter_slab_count =
+      id4_pipeline_plan_parameter_slab_count(options->plan);
+  if (parameter_slab_count != 0 && !options->parameter_slabs) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "bundle parameter slabs are required by the plan");
+  }
+  if (parameter_slab_count == 0 && options->parameter_slabs) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "bundle parameter slabs are present for a plan with no slabs");
+  }
+  IREE_RETURN_IF_ERROR(id4_pipeline_validate_semaphore_list(
+      options->readiness_semaphore_list, IREE_SV("bundle readiness")));
+  if (options->payload_size == 0 && options->payload_destroy) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "bundle payload destructor requires payload storage");
+  }
+  if (options->payload_alignment != 0 &&
+      !iree_host_size_is_power_of_two(options->payload_alignment)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "bundle payload alignment must be a power of two");
+  }
   return iree_ok_status();
 }
 
@@ -290,6 +341,9 @@ iree_status_t id4_pipeline_stage_issue(
 
 static void id4_pipeline_bundle_destroy(id4_pipeline_bundle_t* bundle) {
   iree_allocator_t host_allocator = bundle->host_allocator;
+  if (bundle->payload_destroy) {
+    bundle->payload_destroy(bundle, bundle->payload);
+  }
   id4_pipeline_bundle_release_readiness(bundle);
   id4_pipeline_parameter_slab_set_release(bundle->parameter_slabs);
   id4_pipeline_plan_release(bundle->plan);
@@ -297,26 +351,38 @@ static void id4_pipeline_bundle_destroy(id4_pipeline_bundle_t* bundle) {
 }
 
 iree_status_t id4_pipeline_bundle_create(
-    const id4_pipeline_plan_t* plan,
-    id4_pipeline_parameter_slab_set_t* parameter_slabs,
-    iree_hal_semaphore_list_t readiness_semaphore_list,
+    const id4_pipeline_bundle_create_options_t* options,
     iree_allocator_t host_allocator, id4_pipeline_bundle_t** out_bundle) {
-  IREE_ASSERT_ARGUMENT(plan);
   IREE_ASSERT_ARGUMENT(out_bundle);
   *out_bundle = NULL;
+  IREE_RETURN_IF_ERROR(id4_pipeline_validate_bundle_create_options(options));
+
+  const iree_host_size_t payload_alignment = options->payload_alignment
+                                                 ? options->payload_alignment
+                                                 : iree_alignof(void*);
+  iree_host_size_t payload_offset = 0;
+  iree_host_size_t total_size = 0;
+  IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
+      sizeof(id4_pipeline_bundle_t), &total_size,
+      IREE_STRUCT_FIELD_ALIGNED(options->payload_size, uint8_t,
+                                payload_alignment, &payload_offset)));
 
   id4_pipeline_bundle_t* bundle = NULL;
   IREE_RETURN_IF_ERROR(
-      iree_allocator_malloc(host_allocator, sizeof(*bundle), (void**)&bundle));
-  memset(bundle, 0, sizeof(*bundle));
+      iree_allocator_malloc(host_allocator, total_size, (void**)&bundle));
+  memset(bundle, 0, total_size);
   iree_atomic_ref_count_init(&bundle->ref_count);
   bundle->host_allocator = host_allocator;
-  bundle->plan = (id4_pipeline_plan_t*)plan;
+  if (options->payload_size != 0) {
+    bundle->payload = (uint8_t*)bundle + payload_offset;
+    bundle->payload_destroy = options->payload_destroy;
+  }
+  bundle->plan = (id4_pipeline_plan_t*)options->plan;
   id4_pipeline_plan_retain(bundle->plan);
-  bundle->parameter_slabs = parameter_slabs;
+  bundle->parameter_slabs = options->parameter_slabs;
   id4_pipeline_parameter_slab_set_retain(bundle->parameter_slabs);
-  iree_status_t status =
-      id4_pipeline_bundle_copy_readiness(bundle, readiness_semaphore_list);
+  iree_status_t status = id4_pipeline_bundle_copy_readiness(
+      bundle, options->readiness_semaphore_list);
   if (iree_status_is_ok(status)) {
     *out_bundle = bundle;
   } else {
@@ -359,4 +425,13 @@ iree_hal_semaphore_list_t id4_pipeline_bundle_readiness_semaphore_list(
       // Payload values paired with the readiness semaphores.
       .payload_values = bundle->readiness_payload_values,
   };
+}
+
+void* id4_pipeline_bundle_payload(id4_pipeline_bundle_t* bundle) {
+  return bundle ? bundle->payload : NULL;
+}
+
+const void* id4_pipeline_bundle_const_payload(
+    const id4_pipeline_bundle_t* bundle) {
+  return bundle ? bundle->payload : NULL;
 }
