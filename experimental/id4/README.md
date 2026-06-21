@@ -201,6 +201,46 @@ purpose-built fixtures are allowed when they are license-compatible and useful
 for automated correctness. Large model files, generated images, and full tensor
 captures remain outside the repository.
 
+## Reference Artifacts
+
+Reference traces and reduced tensor fixtures are generated artifacts. The
+checked-in repository surface should contain the tools, reduction plans,
+schemas, small synthetic unit tests, and hand-authored `.loom` cases needed to
+create and consume those artifacts, not the heavyweight payloads themselves.
+
+The normal checked build should stay independent of model downloads, full
+activation dumps, generated images, and multi-megabyte golden tensors. Optional
+heavyweight validation may use explicit external artifact roots, for example:
+
+- `ID4_REFERENCE_TRACE_ROOT` for raw reference traces;
+- `ID4_REFERENCE_FIXTURE_ROOT` for reduced fixture directories generated from
+  those traces.
+
+Targets that consume external fixture roots should be opt-in and clearly
+separate from presubmit. A missing external root is a configuration error for
+that explicitly requested target, not a reason to search the source tree or
+download artifacts implicitly.
+
+The trace reducer is the canonical path from a raw reference trace to compact
+fixtures:
+
+```bash
+bazel run //experimental/id4/build_tools:trace_reduce -- \
+  --trace-dir="${ID4_REFERENCE_TRACE_ROOT}/<trace-id>" \
+  --plan=path/to/reduction_plan.json \
+  --output-dir="${ID4_REFERENCE_FIXTURE_ROOT}/<fixture-id>"
+```
+
+Generated fixture directories contain payload files plus `manifest.json` and
+`inventory.json`. The manifest is the detailed provenance and checksum record.
+The inventory is the compact stage/role/shape view intended for planning stage
+tests, benchmark harnesses, and kernel-family triage.
+
+`.loom` tests should keep their checked-in data tiny. Inlined values should be
+synthetic or small representative extractions that exercise the operation
+class. Larger oracle comparisons belong in explicit external fixture tests once
+the relevant stage has a stable load/compare harness.
+
 ## Runtime Architecture
 
 The runtime has four major pieces:

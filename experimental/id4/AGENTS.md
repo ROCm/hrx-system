@@ -139,6 +139,17 @@ Each `.loom` file should carry meaningful `check.case` coverage and benchmark
 rows for the configuration classes it represents. Start from reduced oracle
 tensors, prove the behavior, then wire the kernel into C.
 
+Checked-in `.loom` cases should use synthetic values or small representative
+extractions that make the operation behavior obvious. Large activation dumps,
+full weight slices, generated images, and multi-megabyte tensor goldens live in
+external artifact roots, not in git.
+
+Reference trace tooling is checked in; reference payloads are not. Use explicit
+artifact roots such as `ID4_REFERENCE_TRACE_ROOT` for raw traces and
+`ID4_REFERENCE_FIXTURE_ROOT` for reduced fixtures when adding opt-in
+heavyweight validation. Default presubmit and ordinary build targets should not
+depend on those roots.
+
 When a kernel covers an operation family, keep it parameterized with Loom
 configuration facts instead of cloning one source per dispatch shape. LoRA
 optional math should be controlled by configuration so no-adapter paths can

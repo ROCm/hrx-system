@@ -151,6 +151,38 @@ class TraceReduceTest(unittest.TestCase):
                 json.loads((output_dir / "manifest.json").read_text()),
                 manifest,
             )
+            inventory = json.loads((output_dir / "inventory.json").read_text())
+            self.assertEqual(
+                inventory["fixture_id"],
+                "unit_qwen_slice",
+            )
+            self.assertEqual(inventory["kind_counts"], {"tensor": 2, "text": 1})
+            self.assertEqual(
+                inventory["role_counts"],
+                {
+                    "expected": 1,
+                    "input": 1,
+                    "metadata": 1,
+                },
+            )
+            self.assertEqual(
+                [stage["stage"] for stage in inventory["stages"]],
+                ["qwen.encoder", "qwen.prompt"],
+            )
+            encoder_record = inventory["stages"][0]["records"][0]
+            self.assertEqual(encoder_record["name"], "condition")
+            self.assertEqual(encoder_record["dtype"], "f32")
+            self.assertEqual(encoder_record["shape"], [2, 2])
+            self.assertEqual(encoder_record["source_shape"], [4, 5])
+            self.assertEqual(
+                encoder_record["tolerance"],
+                {"atol": 0.0, "rtol": 0.0},
+            )
+            prompt_records = inventory["stages"][1]["records"]
+            self.assertEqual(
+                [(record["kind"], record["name"]) for record in prompt_records],
+                [("text", "wrapped_prompt"), ("tensor", "token_ids")],
+            )
 
     def test_rejects_floating_expected_tensor_without_tolerance(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

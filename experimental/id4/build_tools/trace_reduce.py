@@ -414,6 +414,82 @@ def _reduce_text(
     }
 
 
+def _empty_role_counts() -> dict[str, int]:
+    return {role: 0 for role in sorted(VALID_ROLES)}
+
+
+def _increment_count(counts: dict[str, int], key: str) -> None:
+    counts[key] = counts.get(key, 0) + 1
+
+
+def _inventory_record(record: dict[str, Any]) -> dict[str, Any]:
+    kind = _require_string(record.get("kind"), "inventory record kind")
+    if kind not in ("tensor", "text"):
+        raise TraceReduceError(f"unsupported inventory record kind: {kind}")
+    inventory = {
+        "kind": kind,
+        "role": record["role"],
+        "stage": record["stage"],
+        "name": record["name"],
+        "file": record["file"],
+    }
+    if kind == "text":
+        inventory["bytes"] = record["bytes"]
+        return inventory
+    inventory.update(
+        {
+            "dtype": record["dtype"],
+            "shape": record["shape"],
+            "source_dtype": record["source_dtype"],
+            "source_shape": record["source_shape"],
+        }
+    )
+    if "tolerance" in record:
+        inventory["tolerance"] = record["tolerance"]
+    return inventory
+
+
+def build_fixture_inventory(manifest: dict[str, Any]) -> dict[str, Any]:
+    stage_map: dict[str, dict[str, Any]] = {}
+    role_counts = _empty_role_counts()
+    kind_counts: dict[str, int] = {}
+    for record in _require_list(manifest.get("records"), "manifest.records"):
+        if not isinstance(record, dict):
+            raise TraceReduceError("manifest.records entries must be objects")
+        stage = _require_string(record.get("stage"), "manifest record stage")
+        role = _require_role(record, "manifest record")
+        kind = _require_string(record.get("kind"), "manifest record kind")
+        _increment_count(role_counts, role)
+        _increment_count(kind_counts, kind)
+        stage_entry = stage_map.get(stage)
+        if stage_entry is None:
+            stage_entry = {
+                "stage": stage,
+                "role_counts": _empty_role_counts(),
+                "records": [],
+            }
+            stage_map[stage] = stage_entry
+        _increment_count(stage_entry["role_counts"], role)
+        stage_entry["records"].append(_inventory_record(record))
+    return {
+        "schema_version": 1,
+        "fixture_id": _require_string(manifest.get("fixture_id"), "fixture_id"),
+        "record_count": len(manifest["records"]),
+        "kind_counts": dict(sorted(kind_counts.items())),
+        "role_counts": role_counts,
+        "stages": [
+            {
+                "stage": stage_entry["stage"],
+                "role_counts": stage_entry["role_counts"],
+                "records": stage_entry["records"],
+            }
+            for stage_entry in sorted(
+                stage_map.values(), key=lambda item: item["stage"]
+            )
+        ],
+    }
+
+
 def reduce_trace(
     trace_dir: Path, output_dir: Path, plan: dict[str, Any]
 ) -> dict[str, Any]:
@@ -449,6 +525,10 @@ def reduce_trace(
     with (output_dir / "manifest.json").open("w", encoding="utf-8") as manifest_file:
         json.dump(output_manifest, manifest_file, indent=2, sort_keys=True)
         manifest_file.write("\n")
+    inventory = build_fixture_inventory(output_manifest)
+    with (output_dir / "inventory.json").open("w", encoding="utf-8") as inventory_file:
+        json.dump(inventory, inventory_file, indent=2, sort_keys=True)
+        inventory_file.write("\n")
     return output_manifest
 
 
