@@ -13,7 +13,7 @@
 #include "experimental/id4/pipeline/plan.h"
 #include "experimental/id4/pipeline/stage.h"
 #include "experimental/id4/stages/hal_integration_util.h"
-#include "experimental/id4/stages/qwen3_vl.h"
+#include "experimental/id4/stages/qwen3_vl_condition.h"
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
 #include "iree/io/file_contents.h"
@@ -52,20 +52,20 @@ bool ParseIntegrationArguments(int argc, char** argv) {
     return true;
   }
   std::fprintf(stderr,
-               "usage: qwen3_vl_amdgpu_integration_test "
+               "usage: qwen3_vl_condition_amdgpu_integration_test "
                "--loom_source=<path> --device_uri=<uri> "
                "--amdgpu_processor=<processor>\n");
   return false;
 }
 
-TEST(Qwen3VlAmdgpuIntegrationTest, PrepareIssueConditionForward) {
+TEST(Qwen3VlConditionAmdgpuIntegrationTest, PrepareIssueConditionForward) {
   id4::test::LiveHalDevice live_device;
   IREE_ASSERT_OK(id4::test::CreateLiveHalDevice(
       id4::test::StringView(g_device_uri), &live_device));
 
   ExecutableCacheRef executable_cache;
   IREE_ASSERT_OK(iree_hal_executable_cache_create(
-      live_device.device.get(), IREE_SV("id4-qwen3-vl-integration"),
+      live_device.device.get(), IREE_SV("id4-qwen3-vl-condition-integration"),
       executable_cache.out()));
 
   KernelCacheRef kernel_cache;
@@ -88,7 +88,7 @@ TEST(Qwen3VlAmdgpuIntegrationTest, PrepareIssueConditionForward) {
   services.executable_cache = executable_cache.get();
   services.host_allocator = iree_allocator_system();
 
-  id4_qwen3_vl_stage_create_options_t create_options;
+  id4_qwen3_vl_condition_stage_create_options_t create_options;
   std::memset(&create_options, 0, sizeof(create_options));
   create_options.structure_size = sizeof(create_options);
   create_options.services = services;
@@ -107,7 +107,7 @@ TEST(Qwen3VlAmdgpuIntegrationTest, PrepareIssueConditionForward) {
   create_options.workgroup_size_x = 256;
 
   StageRef stage;
-  IREE_ASSERT_OK(id4_qwen3_vl_stage_create(
+  IREE_ASSERT_OK(id4_qwen3_vl_condition_stage_create(
       &create_options, iree_allocator_system(), stage.out()));
 
   id4::test::StageDiagnostics diagnostics = {};
@@ -146,12 +146,13 @@ TEST(Qwen3VlAmdgpuIntegrationTest, PrepareIssueConditionForward) {
   std::array<float, 4> token_weights = {0.5f, 1.0f, 1.5f, 2.0f};
   IREE_ASSERT_OK(iree_hal_device_transfer_h2d(
       live_device.device.get(), selected_hidden_states.data(),
-      id4_qwen3_vl_stage_bundle_selected_hidden_states_buffer(bundle.get()),
+      id4_qwen3_vl_condition_stage_bundle_selected_hidden_states_buffer(
+          bundle.get()),
       /*target_offset=*/0, sizeof(selected_hidden_states),
       IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout()));
   IREE_ASSERT_OK(iree_hal_device_transfer_h2d(
       live_device.device.get(), token_weights.data(),
-      id4_qwen3_vl_stage_bundle_token_weights_buffer(bundle.get()),
+      id4_qwen3_vl_condition_stage_bundle_token_weights_buffer(bundle.get()),
       /*target_offset=*/0, sizeof(token_weights),
       IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout()));
 
@@ -186,7 +187,7 @@ TEST(Qwen3VlAmdgpuIntegrationTest, PrepareIssueConditionForward) {
   std::array<float, 4> actual_condition = {};
   IREE_ASSERT_OK(iree_hal_device_transfer_d2h(
       live_device.device.get(),
-      id4_qwen3_vl_stage_bundle_condition_buffer(bundle.get()),
+      id4_qwen3_vl_condition_stage_bundle_condition_buffer(bundle.get()),
       /*source_offset=*/0, actual_condition.data(), sizeof(actual_condition),
       IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout()));
 

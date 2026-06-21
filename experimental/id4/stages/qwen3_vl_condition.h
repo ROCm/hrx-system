@@ -4,8 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef EXPERIMENTAL_ID4_STAGES_QWEN3_VL_H_
-#define EXPERIMENTAL_ID4_STAGES_QWEN3_VL_H_
+#ifndef EXPERIMENTAL_ID4_STAGES_QWEN3_VL_CONDITION_H_
+#define EXPERIMENTAL_ID4_STAGES_QWEN3_VL_CONDITION_H_
 
 #include <stdint.h>
 
@@ -19,10 +19,10 @@ extern "C" {
 #endif  // __cplusplus
 
 // Byte length of one f32 tensor element.
-#define ID4_QWEN3_VL_STAGE_F32_ELEMENT_BYTE_LENGTH 4
+#define ID4_QWEN3_VL_CONDITION_STAGE_F32_ELEMENT_BYTE_LENGTH 4
 
-// Options for creating the concrete Qwen3-VL forward pipeline stage.
-typedef struct id4_qwen3_vl_stage_create_options_t {
+// Options for creating the Qwen3-VL conditioning epilogue stage.
+typedef struct id4_qwen3_vl_condition_stage_create_options_t {
   // Size of this structure for versioning.
   iree_host_size_t structure_size;
   // Extension structure chain; must be NULL for now.
@@ -49,35 +49,37 @@ typedef struct id4_qwen3_vl_stage_create_options_t {
   uint32_t token_count;
   // Configured X workgroup size for the condition forward kernel.
   uint32_t workgroup_size_x;
-} id4_qwen3_vl_stage_create_options_t;
+} id4_qwen3_vl_condition_stage_create_options_t;
 
-// Creates a concrete Qwen3-VL forward stage.
-iree_status_t id4_qwen3_vl_stage_create(
-    const id4_qwen3_vl_stage_create_options_t* options,
+// Creates a Qwen3-VL conditioning epilogue stage.
+iree_status_t id4_qwen3_vl_condition_stage_create(
+    const id4_qwen3_vl_condition_stage_create_options_t* options,
     iree_allocator_t host_allocator, id4_pipeline_stage_t** out_stage);
 
 // Returns the selected-hidden-states input buffer owned by a prepared bundle.
-iree_hal_buffer_t* id4_qwen3_vl_stage_bundle_selected_hidden_states_buffer(
+iree_hal_buffer_t*
+id4_qwen3_vl_condition_stage_bundle_selected_hidden_states_buffer(
     id4_pipeline_bundle_t* bundle);
 
 // Returns the token-weights input buffer owned by a prepared bundle.
-iree_hal_buffer_t* id4_qwen3_vl_stage_bundle_token_weights_buffer(
+iree_hal_buffer_t* id4_qwen3_vl_condition_stage_bundle_token_weights_buffer(
     id4_pipeline_bundle_t* bundle);
 
 // Returns the condition output buffer owned by a prepared bundle.
-iree_hal_buffer_t* id4_qwen3_vl_stage_bundle_condition_buffer(
+iree_hal_buffer_t* id4_qwen3_vl_condition_stage_bundle_condition_buffer(
     id4_pipeline_bundle_t* bundle);
 
 // Returns the token-weights tensor byte length owned by a prepared bundle.
-iree_device_size_t id4_qwen3_vl_stage_bundle_token_weights_byte_length(
+iree_device_size_t
+id4_qwen3_vl_condition_stage_bundle_token_weights_byte_length(
     const id4_pipeline_bundle_t* bundle);
 
 // Returns the condition tensor byte length owned by a prepared bundle.
-iree_device_size_t id4_qwen3_vl_stage_bundle_condition_byte_length(
+iree_device_size_t id4_qwen3_vl_condition_stage_bundle_condition_byte_length(
     const id4_pipeline_bundle_t* bundle);
 
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus
 
-#endif  // EXPERIMENTAL_ID4_STAGES_QWEN3_VL_H_
+#endif  // EXPERIMENTAL_ID4_STAGES_QWEN3_VL_CONDITION_H_

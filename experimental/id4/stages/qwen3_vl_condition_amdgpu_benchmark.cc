@@ -13,7 +13,7 @@
 #include "experimental/id4/pipeline/plan.h"
 #include "experimental/id4/pipeline/stage.h"
 #include "experimental/id4/stages/hal_integration_util.h"
-#include "experimental/id4/stages/qwen3_vl.h"
+#include "experimental/id4/stages/qwen3_vl_condition.h"
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
 #include "iree/io/file_contents.h"
@@ -41,14 +41,14 @@ using SemaphoreRef =
 using StageRef =
     id4::test::OwningRef<id4_pipeline_stage_t, id4_pipeline_stage_release>;
 
-typedef struct Qwen3VlAmdgpuBenchmarkContext {
+typedef struct Qwen3VlConditionAmdgpuBenchmarkContext {
   // Live HAL device and device group used by the benchmark.
   id4::test::LiveHalDevice live_device;
   // HAL executable cache used by the ID4 kernel cache.
   ExecutableCacheRef executable_cache;
   // ID4 Loom kernel cache used by stage preparation.
   KernelCacheRef kernel_cache;
-  // Loaded Qwen3-VL stage under benchmark.
+  // Loaded Qwen3-VL condition stage under benchmark.
   StageRef stage;
   // Plan produced once for the current benchmark configuration.
   PlanRef plan;
@@ -56,7 +56,7 @@ typedef struct Qwen3VlAmdgpuBenchmarkContext {
   id4::test::StageDiagnostics diagnostics = {};
   // Diagnostics sink pointing at diagnostics.
   id4_pipeline_diagnostics_sink_t diagnostics_sink = {};
-} Qwen3VlAmdgpuBenchmarkContext;
+} Qwen3VlConditionAmdgpuBenchmarkContext;
 
 static bool ArgumentHasPrefix(const char* argument, const char* prefix) {
   const iree_host_size_t prefix_length = std::strlen(prefix);
@@ -73,7 +73,7 @@ static bool ParseBenchmarkArguments(int argc, char** argv) {
     return true;
   }
   std::fprintf(stderr,
-               "usage: qwen3_vl_amdgpu_benchmark "
+               "usage: qwen3_vl_condition_amdgpu_benchmark "
                "--loom_source=<path> --device_uri=<uri> "
                "--amdgpu_processor=<processor>\n");
   return false;
@@ -92,12 +92,14 @@ static void RemoveBenchmarkArguments(int* argc, char** argv) {
   *argc = target_index;
 }
 
-static void InitializeQwen3VlContext(Qwen3VlAmdgpuBenchmarkContext* context) {
+static void InitializeQwen3VlConditionContext(
+    Qwen3VlConditionAmdgpuBenchmarkContext* context) {
   context->diagnostics_sink = id4::test::DiagnosticsSink(&context->diagnostics);
   IREE_CHECK_OK(id4::test::CreateLiveHalDevice(
       id4::test::StringView(g_device_uri), &context->live_device));
   IREE_CHECK_OK(iree_hal_executable_cache_create(
-      context->live_device.device.get(), IREE_SV("id4-qwen3-vl-benchmark"),
+      context->live_device.device.get(),
+      IREE_SV("id4-qwen3-vl-condition-benchmark"),
       context->executable_cache.out()));
 
   id4_pipeline_kernel_cache_create_options_t kernel_cache_options;
@@ -120,7 +122,7 @@ static void InitializeQwen3VlContext(Qwen3VlAmdgpuBenchmarkContext* context) {
   services.executable_cache = context->executable_cache.get();
   services.host_allocator = iree_allocator_system();
 
-  id4_qwen3_vl_stage_create_options_t create_options;
+  id4_qwen3_vl_condition_stage_create_options_t create_options;
   std::memset(&create_options, 0, sizeof(create_options));
   create_options.structure_size = sizeof(create_options);
   create_options.services = services;
@@ -137,7 +139,7 @@ static void InitializeQwen3VlContext(Qwen3VlAmdgpuBenchmarkContext* context) {
   create_options.hidden_row_count = 1;
   create_options.token_count = 4;
   create_options.workgroup_size_x = 256;
-  IREE_CHECK_OK(id4_qwen3_vl_stage_create(
+  IREE_CHECK_OK(id4_qwen3_vl_condition_stage_create(
       &create_options, iree_allocator_system(), context->stage.out()));
 
   id4_pipeline_stage_load_options_t load_options;
@@ -156,8 +158,8 @@ static void InitializeQwen3VlContext(Qwen3VlAmdgpuBenchmarkContext* context) {
                                         context->plan.out()));
 }
 
-static id4_pipeline_bundle_t* PrepareQwen3VlBundle(
-    Qwen3VlAmdgpuBenchmarkContext* context) {
+static id4_pipeline_bundle_t* PrepareQwen3VlConditionBundle(
+    Qwen3VlConditionAmdgpuBenchmarkContext* context) {
   id4_pipeline_stage_prepare_options_t prepare_options;
   std::memset(&prepare_options, 0, sizeof(prepare_options));
   prepare_options.structure_size = sizeof(prepare_options);
@@ -170,39 +172,40 @@ static id4_pipeline_bundle_t* PrepareQwen3VlBundle(
   return bundle;
 }
 
-static void FillQwen3VlInputs(Qwen3VlAmdgpuBenchmarkContext* context,
-                              id4_pipeline_bundle_t* bundle) {
+static void FillQwen3VlConditionInputs(
+    Qwen3VlConditionAmdgpuBenchmarkContext* context,
+    id4_pipeline_bundle_t* bundle) {
   std::array<float, 4> selected_hidden_states = {1.0f, 2.0f, 3.0f, 4.0f};
   std::array<float, 4> token_weights = {0.5f, 1.0f, 1.5f, 2.0f};
   IREE_CHECK_OK(iree_hal_device_transfer_h2d(
       context->live_device.device.get(), selected_hidden_states.data(),
-      id4_qwen3_vl_stage_bundle_selected_hidden_states_buffer(bundle),
+      id4_qwen3_vl_condition_stage_bundle_selected_hidden_states_buffer(bundle),
       /*target_offset=*/0, sizeof(selected_hidden_states),
       IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout()));
   IREE_CHECK_OK(iree_hal_device_transfer_h2d(
       context->live_device.device.get(), token_weights.data(),
-      id4_qwen3_vl_stage_bundle_token_weights_buffer(bundle),
+      id4_qwen3_vl_condition_stage_bundle_token_weights_buffer(bundle),
       /*target_offset=*/0, sizeof(token_weights),
       IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout()));
 }
 
-static void BM_Qwen3VlAmdgpuPrepare(State& state) {
-  Qwen3VlAmdgpuBenchmarkContext context;
-  InitializeQwen3VlContext(&context);
+static void BM_Qwen3VlConditionAmdgpuPrepare(State& state) {
+  Qwen3VlConditionAmdgpuBenchmarkContext context;
+  InitializeQwen3VlConditionContext(&context);
   for (auto _ : state) {
-    id4_pipeline_bundle_t* bundle = PrepareQwen3VlBundle(&context);
+    id4_pipeline_bundle_t* bundle = PrepareQwen3VlConditionBundle(&context);
     benchmark::DoNotOptimize(bundle);
     id4_pipeline_bundle_release(bundle);
   }
 }
-BENCHMARK(BM_Qwen3VlAmdgpuPrepare);
+BENCHMARK(BM_Qwen3VlConditionAmdgpuPrepare);
 
-static void BM_Qwen3VlAmdgpuIssueEndToEnd(State& state) {
-  Qwen3VlAmdgpuBenchmarkContext context;
-  InitializeQwen3VlContext(&context);
+static void BM_Qwen3VlConditionAmdgpuIssueEndToEnd(State& state) {
+  Qwen3VlConditionAmdgpuBenchmarkContext context;
+  InitializeQwen3VlConditionContext(&context);
   BundleRef bundle;
-  bundle.reset(PrepareQwen3VlBundle(&context));
-  FillQwen3VlInputs(&context, bundle.get());
+  bundle.reset(PrepareQwen3VlConditionBundle(&context));
+  FillQwen3VlConditionInputs(&context, bundle.get());
 
   SemaphoreRef completion_semaphore;
   IREE_CHECK_OK(iree_hal_semaphore_create(
@@ -237,7 +240,7 @@ static void BM_Qwen3VlAmdgpuIssueEndToEnd(State& state) {
         IREE_ASYNC_WAIT_FLAG_NONE));
   }
 }
-BENCHMARK(BM_Qwen3VlAmdgpuIssueEndToEnd);
+BENCHMARK(BM_Qwen3VlConditionAmdgpuIssueEndToEnd);
 
 }  // namespace
 

@@ -20,9 +20,9 @@ _AMDGPU_HAL_COMPATIBLE_WITH = loom_config_compatible_with([
 ])
 
 iree_runtime_cc_library(
-    name = "qwen3_vl",
-    srcs = ["qwen3_vl.c"],
-    hdrs = ["qwen3_vl.h"],
+    name = "qwen3_vl_condition",
+    srcs = ["qwen3_vl_condition.c"],
+    hdrs = ["qwen3_vl_condition.h"],
     deps = [
         "//experimental/id4/pipeline:diagnostics",
         "//experimental/id4/pipeline:kernel_cache",
@@ -82,10 +82,10 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_test(
-    name = "qwen3_vl_test",
-    srcs = ["qwen3_vl_test.cc"],
+    name = "qwen3_vl_condition_test",
+    srcs = ["qwen3_vl_condition_test.cc"],
     deps = [
-        ":qwen3_vl",
+        ":qwen3_vl_condition",
         ":test_util",
         "//experimental/id4/pipeline:plan",
         "//experimental/id4/pipeline:stage",
@@ -97,8 +97,8 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
-    name = "qwen3_vl_amdgpu_integration_test",
-    srcs = ["qwen3_vl_amdgpu_integration_test.cc"],
+    name = "qwen3_vl_condition_amdgpu_integration_test",
+    srcs = ["qwen3_vl_condition_amdgpu_integration_test.cc"],
     args = [
         "--loom_source=$(location //experimental/id4/kernels:qwen3_vl_condition_f32.loom)",
         "--device_uri=amdgpu://0",
@@ -116,7 +116,7 @@ iree_runtime_cc_test(
     target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
     deps = [
         ":hal_integration_util",
-        ":qwen3_vl",
+        ":qwen3_vl_condition",
         "//experimental/id4/pipeline:diagnostics",
         "//experimental/id4/pipeline:kernel_cache",
         "//experimental/id4/pipeline:plan",
@@ -147,10 +147,10 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_benchmark(
-    name = "qwen3_vl_benchmark",
-    srcs = ["qwen3_vl_benchmark.cc"],
+    name = "qwen3_vl_condition_benchmark",
+    srcs = ["qwen3_vl_condition_benchmark.cc"],
     deps = [
-        ":qwen3_vl",
+        ":qwen3_vl_condition",
         ":test_util",
         "//experimental/id4/pipeline:plan",
         "//experimental/id4/pipeline:stage",
@@ -161,8 +161,8 @@ iree_runtime_cc_benchmark(
 )
 
 iree_runtime_cc_benchmark(
-    name = "qwen3_vl_amdgpu_benchmark",
-    srcs = ["qwen3_vl_amdgpu_benchmark.cc"],
+    name = "qwen3_vl_condition_amdgpu_benchmark",
+    srcs = ["qwen3_vl_condition_amdgpu_benchmark.cc"],
     args = [
         "--loom_source=$(location //experimental/id4/kernels:qwen3_vl_condition_f32.loom)",
         "--device_uri=amdgpu://0",
@@ -181,7 +181,7 @@ iree_runtime_cc_benchmark(
     target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
     deps = [
         ":hal_integration_util",
-        ":qwen3_vl",
+        ":qwen3_vl_condition",
         "//experimental/id4/pipeline:kernel_cache",
         "//experimental/id4/pipeline:plan",
         "//experimental/id4/pipeline:stage",

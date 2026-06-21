@@ -11,11 +11,11 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
-    qwen3_vl
+    qwen3_vl_condition
   HDRS
-    "qwen3_vl.h"
+    "qwen3_vl_condition.h"
   SRCS
-    "qwen3_vl.c"
+    "qwen3_vl_condition.c"
   DEPS
     iree::base
     iree::base::internal::arena
@@ -85,11 +85,11 @@ iree_cc_library(
 
 iree_cc_test(
   NAME
-    qwen3_vl_test
+    qwen3_vl_condition_test
   SRCS
-    "qwen3_vl_test.cc"
+    "qwen3_vl_condition_test.cc"
   DEPS
-    ::qwen3_vl
+    ::qwen3_vl_condition
     ::test_util
     iree::base
     iree::experimental::id4::pipeline::plan
@@ -102,14 +102,14 @@ iree_cc_test(
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_cc_test(
   NAME
-    qwen3_vl_amdgpu_integration_test
+    qwen3_vl_condition_amdgpu_integration_test
   SRCS
-    "qwen3_vl_amdgpu_integration_test.cc"
+    "qwen3_vl_condition_amdgpu_integration_test.cc"
   DATA
     iree::experimental::id4::kernels::qwen3_vl_condition_f32.loom
   DEPS
     ::hal_integration_util
-    ::qwen3_vl
+    ::qwen3_vl_condition
     iree::async
     iree::async::util::proactor_pool
     iree::base
@@ -151,11 +151,11 @@ iree_cc_test(
 
 iree_cc_binary_benchmark(
   NAME
-    qwen3_vl_benchmark
+    qwen3_vl_condition_benchmark
   SRCS
-    "qwen3_vl_benchmark.cc"
+    "qwen3_vl_condition_benchmark.cc"
   DEPS
-    ::qwen3_vl
+    ::qwen3_vl_condition
     ::test_util
     iree::base
     iree::experimental::id4::pipeline::plan
@@ -169,14 +169,14 @@ iree_cc_binary_benchmark(
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_cc_binary_benchmark(
   NAME
-    qwen3_vl_amdgpu_benchmark
+    qwen3_vl_condition_amdgpu_benchmark
   SRCS
-    "qwen3_vl_amdgpu_benchmark.cc"
+    "qwen3_vl_condition_amdgpu_benchmark.cc"
   DATA
     iree::experimental::id4::kernels::qwen3_vl_condition_f32.loom
   DEPS
     ::hal_integration_util
-    ::qwen3_vl
+    ::qwen3_vl_condition
     iree::base
     iree::experimental::id4::pipeline::kernel_cache
     iree::experimental::id4::pipeline::plan

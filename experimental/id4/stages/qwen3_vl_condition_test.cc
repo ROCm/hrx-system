@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "experimental/id4/stages/qwen3_vl.h"
+#include "experimental/id4/stages/qwen3_vl_condition.h"
 
 #include <cstring>
 #include <string>
@@ -19,14 +19,14 @@
 
 namespace {
 
-static id4_pipeline_stage_t* CreatePlanningQwen3VlStage(
+static id4_pipeline_stage_t* CreatePlanningQwen3VlConditionStage(
     iree_hal_device_group_t* device_group) {
   id4_pipeline_stage_services_t services;
   std::memset(&services, 0, sizeof(services));
   services.device_group = device_group;
   services.host_allocator = iree_allocator_system();
 
-  id4_qwen3_vl_stage_create_options_t options;
+  id4_qwen3_vl_condition_stage_create_options_t options;
   std::memset(&options, 0, sizeof(options));
   options.structure_size = sizeof(options);
   options.services = services;
@@ -42,15 +42,16 @@ static id4_pipeline_stage_t* CreatePlanningQwen3VlStage(
   options.workgroup_size_x = 256;
 
   id4_pipeline_stage_t* stage = nullptr;
-  IREE_CHECK_OK(
-      id4_qwen3_vl_stage_create(&options, iree_allocator_system(), &stage));
+  IREE_CHECK_OK(id4_qwen3_vl_condition_stage_create(
+      &options, iree_allocator_system(), &stage));
   return stage;
 }
 
-TEST(Qwen3VlStage, PlansConditionForwardRegion) {
+TEST(Qwen3VlConditionStage, PlansConditionForwardRegion) {
   iree_hal_device_group_t* device_group =
       id4::test::CreateLocalSyncDeviceGroup();
-  id4_pipeline_stage_t* stage = CreatePlanningQwen3VlStage(device_group);
+  id4_pipeline_stage_t* stage =
+      CreatePlanningQwen3VlConditionStage(device_group);
 
   id4::test::StageDiagnostics diagnostics = {};
   id4_pipeline_diagnostics_sink_t diagnostics_sink =
@@ -72,7 +73,7 @@ TEST(Qwen3VlStage, PlansConditionForwardRegion) {
   IREE_ASSERT_OK(id4_pipeline_stage_plan(stage, &plan_options, &plan));
 
   EXPECT_EQ(id4::test::ToString(id4_pipeline_plan_stage_name(plan)),
-            "qwen3_vl");
+            "qwen3_vl.condition");
   EXPECT_EQ(id4_pipeline_plan_parameter_slab_count(plan), 0u);
   EXPECT_EQ(id4_pipeline_plan_memory_slab_count(plan), 4u);
 
@@ -80,7 +81,7 @@ TEST(Qwen3VlStage, PlansConditionForwardRegion) {
       id4_pipeline_plan_memory_slab_at(plan, 0);
   ASSERT_NE(selected_slab, nullptr);
   EXPECT_EQ(id4::test::ToString(selected_slab->name),
-            "qwen3_vl.selected_hidden_states");
+            "qwen3_vl.condition.selected_hidden_states");
   EXPECT_EQ(selected_slab->binding_slot, 0u);
   EXPECT_EQ(selected_slab->byte_length, 8192u);
   EXPECT_EQ(selected_slab->high_water_mark, 8192u);
@@ -89,7 +90,7 @@ TEST(Qwen3VlStage, PlansConditionForwardRegion) {
       id4_pipeline_plan_memory_slab_at(plan, 1);
   ASSERT_NE(token_weights_slab, nullptr);
   EXPECT_EQ(id4::test::ToString(token_weights_slab->name),
-            "qwen3_vl.token_weights");
+            "qwen3_vl.condition.token_weights");
   EXPECT_EQ(token_weights_slab->binding_slot, 1u);
   EXPECT_EQ(token_weights_slab->byte_length, 256u);
   EXPECT_EQ(token_weights_slab->high_water_mark, 256u);
@@ -97,7 +98,8 @@ TEST(Qwen3VlStage, PlansConditionForwardRegion) {
   const id4_pipeline_memory_slab_plan_t* condition_slab =
       id4_pipeline_plan_memory_slab_at(plan, 2);
   ASSERT_NE(condition_slab, nullptr);
-  EXPECT_EQ(id4::test::ToString(condition_slab->name), "qwen3_vl.condition");
+  EXPECT_EQ(id4::test::ToString(condition_slab->name),
+            "qwen3_vl.condition.output");
   EXPECT_EQ(condition_slab->binding_slot, 2u);
   EXPECT_EQ(condition_slab->byte_length, 8192u);
   EXPECT_EQ(condition_slab->high_water_mark, 8192u);
@@ -105,7 +107,7 @@ TEST(Qwen3VlStage, PlansConditionForwardRegion) {
   const id4_pipeline_memory_slab_plan_t* local_slab =
       id4_pipeline_plan_memory_slab_at(plan, 3);
   ASSERT_NE(local_slab, nullptr);
-  EXPECT_EQ(id4::test::ToString(local_slab->name), "qwen3_vl.local");
+  EXPECT_EQ(id4::test::ToString(local_slab->name), "qwen3_vl.condition.local");
   EXPECT_EQ(local_slab->binding_slot, 3u);
   EXPECT_EQ(local_slab->byte_length, 8u);
   EXPECT_EQ(local_slab->high_water_mark, 8u);
@@ -153,7 +155,7 @@ TEST(Qwen3VlStage, PlansConditionForwardRegion) {
   const id4_pipeline_region_plan_t* region =
       id4_pipeline_plan_region_at(plan, 0);
   ASSERT_NE(region, nullptr);
-  EXPECT_EQ(id4::test::ToString(region->name), "qwen3_vl.condition_forward");
+  EXPECT_EQ(id4::test::ToString(region->name), "qwen3_vl.condition.forward");
   EXPECT_EQ(region->binding_capacity, 4u);
   EXPECT_EQ(region->local_binding_slot, 3u);
   EXPECT_EQ(region->statistics.operation_count, 3u);
@@ -171,21 +173,21 @@ TEST(Qwen3VlStage, PlansConditionForwardRegion) {
       id4_pipeline_plan_diagnostic_tap_at(plan, 0);
   ASSERT_NE(selected_tap, nullptr);
   EXPECT_EQ(id4::test::ToString(selected_tap->name),
-            "qwen3_vl.selected_hidden_states.before_forward");
+            "qwen3_vl.condition.selected_hidden_states.before");
   EXPECT_EQ(id4::test::ToString(selected_tap->target_name),
             "qwen3_vl.encoder.selected_hidden_states");
   const id4_pipeline_diagnostic_tap_plan_t* token_weights_tap =
       id4_pipeline_plan_diagnostic_tap_at(plan, 1);
   ASSERT_NE(token_weights_tap, nullptr);
   EXPECT_EQ(id4::test::ToString(token_weights_tap->name),
-            "qwen3_vl.token_weights.before_forward");
+            "qwen3_vl.condition.token_weights.before");
   EXPECT_EQ(id4::test::ToString(token_weights_tap->target_name),
             "qwen3_vl.prompt.token_weights");
   const id4_pipeline_diagnostic_tap_plan_t* condition_tap =
       id4_pipeline_plan_diagnostic_tap_at(plan, 2);
   ASSERT_NE(condition_tap, nullptr);
   EXPECT_EQ(id4::test::ToString(condition_tap->name),
-            "qwen3_vl.condition.after_forward");
+            "qwen3_vl.condition.output.after");
   EXPECT_EQ(condition_tap->after_operation_ordinal, 2u);
   EXPECT_EQ(id4::test::ToString(condition_tap->target_name),
             "qwen3_vl.encoder.condition");
@@ -195,7 +197,7 @@ TEST(Qwen3VlStage, PlansConditionForwardRegion) {
   IREE_ASSERT_OK(id4_pipeline_plan_format_json(plan, &plan_json_builder));
   const std::string plan_json =
       id4::test::ToString(iree_string_builder_view(&plan_json_builder));
-  EXPECT_NE(plan_json.find("\"qwen3_vl\""), std::string::npos);
+  EXPECT_NE(plan_json.find("\"qwen3_vl.condition\""), std::string::npos);
   EXPECT_NE(plan_json.find("\"memory_slabs\""), std::string::npos);
   EXPECT_NE(plan_json.find("\"kernels\""), std::string::npos);
   EXPECT_NE(plan_json.find("\"regions\""), std::string::npos);

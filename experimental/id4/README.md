@@ -115,7 +115,7 @@ The target product surface is a C library plus thin applications around it:
 The shared stage lifecycle should separate static model loading, deterministic
 planning, prepared executable bundles, and asynchronous issue. That boundary is
 the contract for the C API, diagnostics, memory planning, stage benchmarks, and
-the first `id4_qwen3_vl_stage_t` implementation.
+the first Qwen3-VL conditioning and forward-stage implementations.
 
 The CPU should eventually own only prompt ingestion, tokenization, high-level
 request control, and final result delivery. The diffusion loop, CFG,

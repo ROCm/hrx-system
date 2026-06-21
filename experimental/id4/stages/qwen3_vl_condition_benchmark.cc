@@ -8,7 +8,7 @@
 
 #include "experimental/id4/pipeline/plan.h"
 #include "experimental/id4/pipeline/stage.h"
-#include "experimental/id4/stages/qwen3_vl.h"
+#include "experimental/id4/stages/qwen3_vl_condition.h"
 #include "experimental/id4/stages/test_util.h"
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
@@ -16,23 +16,23 @@
 
 namespace {
 
-typedef struct Qwen3VlBenchmarkContext {
-  // Device group retained by the loaded Qwen3-VL stage.
+typedef struct Qwen3VlConditionBenchmarkContext {
+  // Device group retained by the loaded Qwen3-VL condition stage.
   iree_hal_device_group_t* device_group;
-  // Loaded Qwen3-VL planning stage.
+  // Loaded Qwen3-VL condition planning stage.
   id4_pipeline_stage_t* stage;
   // Diagnostics sink used by benchmark lifecycle calls.
   id4_pipeline_diagnostics_sink_t diagnostics_sink;
-} Qwen3VlBenchmarkContext;
+} Qwen3VlConditionBenchmarkContext;
 
-static id4_pipeline_stage_t* CreatePlanningQwen3VlStage(
+static id4_pipeline_stage_t* CreatePlanningQwen3VlConditionStage(
     iree_hal_device_group_t* device_group) {
   id4_pipeline_stage_services_t services;
   std::memset(&services, 0, sizeof(services));
   services.device_group = device_group;
   services.host_allocator = iree_allocator_system();
 
-  id4_qwen3_vl_stage_create_options_t options;
+  id4_qwen3_vl_condition_stage_create_options_t options;
   std::memset(&options, 0, sizeof(options));
   options.structure_size = sizeof(options);
   options.services = services;
@@ -48,16 +48,16 @@ static id4_pipeline_stage_t* CreatePlanningQwen3VlStage(
   options.workgroup_size_x = 256;
 
   id4_pipeline_stage_t* stage = nullptr;
-  IREE_CHECK_OK(
-      id4_qwen3_vl_stage_create(&options, iree_allocator_system(), &stage));
+  IREE_CHECK_OK(id4_qwen3_vl_condition_stage_create(
+      &options, iree_allocator_system(), &stage));
   return stage;
 }
 
-static Qwen3VlBenchmarkContext CreateLoadedQwen3VlStage() {
-  Qwen3VlBenchmarkContext context;
+static Qwen3VlConditionBenchmarkContext CreateLoadedQwen3VlConditionStage() {
+  Qwen3VlConditionBenchmarkContext context;
   std::memset(&context, 0, sizeof(context));
   context.device_group = id4::test::CreateLocalSyncDeviceGroup();
-  context.stage = CreatePlanningQwen3VlStage(context.device_group);
+  context.stage = CreatePlanningQwen3VlConditionStage(context.device_group);
   id4_pipeline_diagnostics_sink_initialize_ignore(&context.diagnostics_sink);
 
   id4_pipeline_stage_load_options_t load_options;
@@ -68,14 +68,15 @@ static Qwen3VlBenchmarkContext CreateLoadedQwen3VlStage() {
   return context;
 }
 
-static void DestroyLoadedQwen3VlStage(Qwen3VlBenchmarkContext* context) {
+static void DestroyLoadedQwen3VlConditionStage(
+    Qwen3VlConditionBenchmarkContext* context) {
   id4_pipeline_stage_release(context->stage);
   iree_hal_device_group_release(context->device_group);
   std::memset(context, 0, sizeof(*context));
 }
 
-static id4_pipeline_plan_t* CreateQwen3VlPlan(
-    Qwen3VlBenchmarkContext* context) {
+static id4_pipeline_plan_t* CreateQwen3VlConditionPlan(
+    Qwen3VlConditionBenchmarkContext* context) {
   id4_pipeline_stage_plan_options_t plan_options;
   std::memset(&plan_options, 0, sizeof(plan_options));
   plan_options.structure_size = sizeof(plan_options);
@@ -87,15 +88,16 @@ static id4_pipeline_plan_t* CreateQwen3VlPlan(
   return plan;
 }
 
-static void BM_Qwen3VlStagePlan(benchmark::State& state) {
-  Qwen3VlBenchmarkContext context = CreateLoadedQwen3VlStage();
+static void BM_Qwen3VlConditionStagePlan(benchmark::State& state) {
+  Qwen3VlConditionBenchmarkContext context =
+      CreateLoadedQwen3VlConditionStage();
   for (auto _ : state) {
-    id4_pipeline_plan_t* plan = CreateQwen3VlPlan(&context);
+    id4_pipeline_plan_t* plan = CreateQwen3VlConditionPlan(&context);
     benchmark::DoNotOptimize(plan);
     id4_pipeline_plan_release(plan);
   }
-  DestroyLoadedQwen3VlStage(&context);
+  DestroyLoadedQwen3VlConditionStage(&context);
 }
-BENCHMARK(BM_Qwen3VlStagePlan);
+BENCHMARK(BM_Qwen3VlConditionStagePlan);
 
 }  // namespace
