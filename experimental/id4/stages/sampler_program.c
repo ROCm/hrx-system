@@ -28,52 +28,6 @@ static iree_status_t id4_sampler_program_validate_options_size(
                           actual_size, expected_size);
 }
 
-iree_string_view_t id4_sampler_program_cond_out_boundary_name(void) {
-  return IREE_SV("cond_out");
-}
-
-iree_string_view_t id4_sampler_program_uncond_out_boundary_name(void) {
-  return IREE_SV("uncond_out");
-}
-
-iree_string_view_t id4_sampler_program_x_t_boundary_name(void) {
-  return IREE_SV("x_t");
-}
-
-iree_string_view_t id4_sampler_program_scalings_boundary_name(void) {
-  return IREE_SV("scalings");
-}
-
-iree_string_view_t id4_sampler_program_guidance_boundary_name(void) {
-  return IREE_SV("guidance");
-}
-
-iree_string_view_t id4_sampler_program_denoised_boundary_name(void) {
-  return IREE_SV("denoised");
-}
-
-iree_string_view_t id4_sampler_program_guided_pred_tap_name(void) {
-  return IREE_SV("guided_pred");
-}
-
-static iree_string_view_t id4_sampler_program_guided_pred_tensor_name(void) {
-  return IREE_SV("guided_pred");
-}
-
-static iree_string_view_t id4_sampler_program_dispatch_name(void) {
-  return IREE_SV("sampler.denoise_step.cfg_denoise");
-}
-
-static iree_string_view_t id4_sampler_program_element_count_config_key(void) {
-  return IREE_SV("id4.sampler.element_count");
-}
-
-static id4_pipeline_kernel_ref_t id4_sampler_program_cfg_denoise_kernel_ref(
-    void) {
-  return id4_pipeline_make_kernel_ref(IREE_SV("sampler/cfg_denoise_f32"),
-                                      IREE_SV("id4_sampler_cfg_denoise_f32"));
-}
-
 static iree_status_t id4_sampler_program_format_u64(
     uint64_t value, char* buffer, iree_host_size_t buffer_capacity,
     iree_string_view_t* out_string) {
@@ -181,46 +135,47 @@ iree_status_t id4_sampler_program_author_denoise_step(
   IREE_RETURN_IF_ERROR(
       id4_sampler_program_validate_options(options, builder, &element_count));
 
+  const iree_string_view_t guided_pred_name = IREE_SV("guided_pred");
+  const iree_string_view_t denoised_name = IREE_SV("denoised");
+
   id4_pipeline_program_tensor_t cond_out =
       id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_sampler_program_import_tensor(
-      builder, id4_sampler_program_cond_out_boundary_name(),
+      builder, IREE_SV("cond_out"),
       ID4_PIPELINE_PROGRAM_IMPORT_TENSOR_FLAG_INITIALIZED,
       options->request.latent_shape, &cond_out));
   id4_pipeline_program_tensor_t uncond_out =
       id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_sampler_program_import_tensor(
-      builder, id4_sampler_program_uncond_out_boundary_name(),
+      builder, IREE_SV("uncond_out"),
       ID4_PIPELINE_PROGRAM_IMPORT_TENSOR_FLAG_INITIALIZED,
       options->request.latent_shape, &uncond_out));
   id4_pipeline_program_tensor_t x_t = id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_sampler_program_import_tensor(
-      builder, id4_sampler_program_x_t_boundary_name(),
+      builder, IREE_SV("x_t"),
       ID4_PIPELINE_PROGRAM_IMPORT_TENSOR_FLAG_INITIALIZED,
       options->request.latent_shape, &x_t));
   id4_pipeline_program_tensor_t scalings =
       id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_sampler_program_import_tensor(
-      builder, id4_sampler_program_scalings_boundary_name(),
+      builder, IREE_SV("scalings"),
       ID4_PIPELINE_PROGRAM_IMPORT_TENSOR_FLAG_INITIALIZED,
       id4_pipeline_program_make_shape_rank1(3), &scalings));
   id4_pipeline_program_tensor_t guidance =
       id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_sampler_program_import_tensor(
-      builder, id4_sampler_program_guidance_boundary_name(),
+      builder, IREE_SV("guidance"),
       ID4_PIPELINE_PROGRAM_IMPORT_TENSOR_FLAG_INITIALIZED,
       id4_pipeline_program_make_shape_rank1(3), &guidance));
 
   id4_pipeline_program_tensor_t guided_pred =
       id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_sampler_program_acquire_tensor(
-      builder, id4_sampler_program_guided_pred_tensor_name(),
-      options->request.latent_shape, &guided_pred));
+      builder, guided_pred_name, options->request.latent_shape, &guided_pred));
   id4_pipeline_program_tensor_t denoised =
       id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_sampler_program_import_tensor(
-      builder, id4_sampler_program_denoised_boundary_name(), 0,
-      options->request.latent_shape, &denoised));
+      builder, denoised_name, 0, options->request.latent_shape, &denoised));
 
   char element_count_buffer[ID4_SAMPLER_CONFIG_VALUE_BUFFER_CAPACITY];
   iree_string_view_t element_count_string = iree_string_view_empty();
@@ -229,7 +184,7 @@ iree_status_t id4_sampler_program_author_denoise_step(
       &element_count_string));
   id4_pipeline_kernel_config_binding_t config_bindings[] = {
       id4_pipeline_make_kernel_config_binding(
-          id4_sampler_program_element_count_config_key(), element_count_string),
+          IREE_SV("id4.sampler.element_count"), element_count_string),
   };
   id4_pipeline_program_dispatch_binding_t bindings[] = {
       id4_pipeline_program_read(cond_out),
@@ -244,8 +199,10 @@ iree_status_t id4_sampler_program_author_denoise_step(
   id4_pipeline_program_dispatch_loom_options_t dispatch_options;
   memset(&dispatch_options, 0, sizeof(dispatch_options));
   dispatch_options.structure_size = sizeof(dispatch_options);
-  dispatch_options.name = id4_sampler_program_dispatch_name();
-  dispatch_options.kernel = id4_sampler_program_cfg_denoise_kernel_ref();
+  dispatch_options.name = IREE_SV("sampler.denoise_step.cfg_denoise");
+  dispatch_options.kernel =
+      id4_pipeline_make_kernel_ref(IREE_SV("sampler/cfg_denoise_f32"),
+                                   IREE_SV("id4_sampler_cfg_denoise_f32"));
   dispatch_options.dispatch_config =
       id4_sampler_program_make_dispatch_config((uint32_t)element_count);
   dispatch_options.config_binding_count = IREE_ARRAYSIZE(config_bindings);
@@ -258,14 +215,14 @@ iree_status_t id4_sampler_program_author_denoise_step(
   id4_pipeline_program_tap_options_t tap_options;
   memset(&tap_options, 0, sizeof(tap_options));
   tap_options.structure_size = sizeof(tap_options);
-  tap_options.name = id4_sampler_program_guided_pred_tap_name();
+  tap_options.name = guided_pred_name;
   tap_options.tensor = guided_pred;
   IREE_RETURN_IF_ERROR(id4_pipeline_program_tap(builder, &tap_options));
 
   id4_pipeline_program_export_options_t export_options;
   memset(&export_options, 0, sizeof(export_options));
   export_options.structure_size = sizeof(export_options);
-  export_options.name = id4_sampler_program_denoised_boundary_name();
+  export_options.name = denoised_name;
   export_options.tensor = denoised;
   return id4_pipeline_program_export(builder, &export_options);
 }

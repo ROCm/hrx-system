@@ -1,0 +1,88 @@
+config.decl @id4.ideogram4.unpatchify_scale.width : %value: index where [range(%value, 1, 65536)]
+config.decl @id4.ideogram4.unpatchify_scale.height : %value: index where [range(%value, 1, 65536)]
+config.decl @id4.ideogram4.unpatchify_scale.input_channel_count : %value: index where [range(%value, 4, 1024)]
+config.decl @id4.ideogram4.unpatchify_scale.total_token_count : %value: index where [range(%value, 1, 131072)]
+config.decl @id4.ideogram4.unpatchify_scale.output_token_offset : %value: index where [range(%value, 0, 65536)]
+
+kernel.def export("id4_ideogram4_unpatchify_scale_f32") @id4_ideogram4_unpatchify_scale_f32() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %width = config.get @id4.ideogram4.unpatchify_scale.width : index
+  %height = config.get @id4.ideogram4.unpatchify_scale.height : index
+  %input_channel_count = config.get @id4.ideogram4.unpatchify_scale.input_channel_count : index
+  %spatial_count = index.mul %width, %height : index
+  %element_count = index.mul %spatial_count, %input_channel_count : index
+  %rounding = index.sub %workgroup_size_x, %unit : index
+  %rounded = index.add %element_count, %rounding : index
+  %workgroups_x = index.div %rounded, %workgroup_size_x : index
+  kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%projected: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %unit = index.constant 1 : index
+  %two = index.constant 2 : index
+  %four = index.constant 4 : index
+  %zero = index.constant 0 : index
+  %minus_one = scalar.constant -1.0 : f32
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size_x = index.constant 256 : index
+  %width = config.get @id4.ideogram4.unpatchify_scale.width : index
+  %height = config.get @id4.ideogram4.unpatchify_scale.height : index
+  %input_channel_count_unaligned = config.get @id4.ideogram4.unpatchify_scale.input_channel_count : index
+  %input_channel_count = index.assume %input_channel_count_unaligned [mul(%input_channel_count_unaligned, 4)] : index
+  %total_token_count = config.get @id4.ideogram4.unpatchify_scale.total_token_count : index
+  %output_token_offset = config.get @id4.ideogram4.unpatchify_scale.output_token_offset : index
+  %spatial_count = index.mul %width, %height : index
+  %element_count = index.mul %spatial_count, %input_channel_count : index
+  %ae_channel_count = index.div %input_channel_count, %four : index
+  %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
+  %in_bounds = index.cmp ult, %element_index, %element_count : index
+
+  %projected_noalias, %output_noalias = buffer.assume.noalias %projected, %output : buffer, buffer
+  %projected_global = buffer.assume.memory_space<global> %projected_noalias : buffer
+  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
+  %projected_view = buffer.view %projected_global[%base] : buffer -> view<[%input_channel_count]x[%total_token_count]xf32, #dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<[%width]x[%height]x[%input_channel_count]x1xf32, #dense>
+
+  scf.if %in_bounds {
+    %token = index.div %element_index, %input_channel_count : index
+    %latent_channel = index.rem %element_index, %input_channel_count : index
+    %x = index.rem %token, %width : index
+    %y = index.div %token, %width : index
+    %patch_h = index.rem %latent_channel, %two : index
+    %patch_channel = index.div %latent_channel, %two : index
+    %patch_w = index.rem %patch_channel, %two : index
+    %ae_channel = index.div %latent_channel, %four : index
+    %token_channel_h = index.mul %ae_channel_count, %patch_h : index
+    %token_channel_w_factor = index.mul %ae_channel_count, %two : index
+    %token_channel_w = index.mul %token_channel_w_factor, %patch_w : index
+    %token_channel_hw = index.add %token_channel_h, %token_channel_w : index
+    %token_channel = index.add %ae_channel, %token_channel_hw : index
+    %input_token = index.add %output_token_offset, %token : index
+    %projected_value = view.load %projected_view[%token_channel, %input_token] : view<[%input_channel_count]x[%total_token_count]xf32, #dense> -> f32
+    %output_value = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %projected_value, %minus_one : f32
+    view.store %output_value, %output_view[%x, %y, %latent_channel, %zero] : f32, view<[%width]x[%height]x[%input_channel_count]x1xf32, #dense>
+  }
+  kernel.return
+}
+
+check.case public @id4_ideogram4_unpatchify_scale_f32_small_case {
+  %projected = check.generate.iota offset(1.0) step(1.0) : tensor<4x1xf32>
+  %output = check.generate.fill value(0.0) : tensor<1x1x4x1xf32>
+  %expected = check.generate.iota offset(-1.0) step(-1.0) : tensor<1x1x4x1xf32>
+  func.call @id4_ideogram4_unpatchify_scale_f32(%projected, %output) : (tensor<4x1xf32>, tensor<1x1x4x1xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1x1x4x1xf32>
+  check.return
+}
+
+check.case public @id4_ideogram4_unpatchify_scale_f32_conditioned_slice_case {
+  %projected = check.generate.iota offset(1.0) step(1.0) : tensor<4x2xf32>
+  %output = check.generate.fill value(0.0) : tensor<1x1x4x1xf32>
+  %expected = check.generate.iota offset(-2.0) step(-2.0) : tensor<1x1x4x1xf32>
+  func.call @id4_ideogram4_unpatchify_scale_f32(%projected, %output) : (tensor<4x2xf32>, tensor<1x1x4x1xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1x1x4x1xf32>
+  check.return
+}
+
+check.benchmark<@id4_ideogram4_unpatchify_scale_f32_small_case> @id4_ideogram4_unpatchify_scale_f32_small
+check.benchmark<@id4_ideogram4_unpatchify_scale_f32_conditioned_slice_case> @id4_ideogram4_unpatchify_scale_f32_conditioned_slice

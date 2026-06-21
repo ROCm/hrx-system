@@ -38,27 +38,6 @@ iree_status_t id4_sampler_program_author_denoise_step(
     const id4_sampler_program_options_t* options,
     id4_pipeline_program_builder_t* builder);
 
-// Returns the stable boundary name for the conditional model prediction.
-iree_string_view_t id4_sampler_program_cond_out_boundary_name(void);
-
-// Returns the stable boundary name for the unconditional model prediction.
-iree_string_view_t id4_sampler_program_uncond_out_boundary_name(void);
-
-// Returns the stable boundary name for the input latent.
-iree_string_view_t id4_sampler_program_x_t_boundary_name(void);
-
-// Returns the stable boundary name for sampler scaling constants.
-iree_string_view_t id4_sampler_program_scalings_boundary_name(void);
-
-// Returns the stable boundary name for sampler guidance constants.
-iree_string_view_t id4_sampler_program_guidance_boundary_name(void);
-
-// Returns the stable boundary name for the denoised output latent.
-iree_string_view_t id4_sampler_program_denoised_boundary_name(void);
-
-// Returns the diagnostic tap name for the guided prediction tensor.
-iree_string_view_t id4_sampler_program_guided_pred_tap_name(void);
-
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

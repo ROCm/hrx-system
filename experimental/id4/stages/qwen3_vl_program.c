@@ -1995,8 +1995,3 @@ const id4_qwen3_vl_model_config_t* id4_qwen3_vl_program_ideogram4_model_config(
     void) {
   return &id4_qwen3_vl_program_ideogram4_model_config_value;
 }
-
-iree_string_view_t id4_qwen3_vl_program_token_ids_boundary_name(void) {
-  return id4_qwen3_vl_program_tensor_patterns[ID4_QWEN3_VL_TENSOR_TOKEN_IDS]
-      .pattern;
-}

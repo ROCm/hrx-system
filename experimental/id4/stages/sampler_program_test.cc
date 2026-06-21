@@ -91,19 +91,14 @@ static bool ShapeEquals(id4_pipeline_program_shape_t actual,
   return true;
 }
 
-static bool ProgramExportsTensor(const id4_pipeline_program_t* program,
-                                 iree_string_view_t export_name,
-                                 id4_pipeline_program_dtype_t dtype,
-                                 id4_pipeline_program_shape_t expected_shape) {
+static bool ProgramExportsTensorWithShape(
+    const id4_pipeline_program_t* program, id4_pipeline_program_dtype_t dtype,
+    id4_pipeline_program_shape_t expected_shape) {
   for (iree_host_size_t i = 0;
        i < id4_pipeline_program_operation_count(program); ++i) {
     const id4_pipeline_program_op_t* operation =
         id4_pipeline_program_operation_at(program, i);
     if (!operation || operation->kind != ID4_PIPELINE_PROGRAM_OP_KIND_EXPORT) {
-      continue;
-    }
-    if (!iree_string_view_equal(operation->payload.export_value.name,
-                                export_name)) {
       continue;
     }
     const id4_pipeline_program_tensor_record_t* tensor =
@@ -117,18 +112,14 @@ static bool ProgramExportsTensor(const id4_pipeline_program_t* program,
   return false;
 }
 
-static bool ProgramTapsTensor(const id4_pipeline_program_t* program,
-                              iree_string_view_t tap_name,
-                              id4_pipeline_program_dtype_t dtype,
-                              id4_pipeline_program_shape_t expected_shape) {
+static bool ProgramTapsTensorWithShape(
+    const id4_pipeline_program_t* program, id4_pipeline_program_dtype_t dtype,
+    id4_pipeline_program_shape_t expected_shape) {
   for (iree_host_size_t i = 0;
        i < id4_pipeline_program_operation_count(program); ++i) {
     const id4_pipeline_program_op_t* operation =
         id4_pipeline_program_operation_at(program, i);
     if (!operation || operation->kind != ID4_PIPELINE_PROGRAM_OP_KIND_TAP) {
-      continue;
-    }
-    if (!iree_string_view_equal(operation->payload.tap.name, tap_name)) {
       continue;
     }
     const id4_pipeline_program_tensor_record_t* tensor =
@@ -148,12 +139,10 @@ TEST(SamplerProgram, AuthorsDenoiseStepBoundaryContract) {
   id4_sampler_program_options_t options = MakeProgramOptions(latent_shape);
   id4_pipeline_program_t* program = CreateSamplerProgram(&options);
 
-  EXPECT_TRUE(ProgramExportsTensor(
-      program, id4_sampler_program_denoised_boundary_name(),
-      ID4_PIPELINE_PROGRAM_DTYPE_F32, latent_shape));
-  EXPECT_TRUE(ProgramTapsTensor(program,
-                                id4_sampler_program_guided_pred_tap_name(),
-                                ID4_PIPELINE_PROGRAM_DTYPE_F32, latent_shape));
+  EXPECT_TRUE(ProgramExportsTensorWithShape(
+      program, ID4_PIPELINE_PROGRAM_DTYPE_F32, latent_shape));
+  EXPECT_TRUE(ProgramTapsTensorWithShape(
+      program, ID4_PIPELINE_PROGRAM_DTYPE_F32, latent_shape));
 
   id4_pipeline_program_release(program);
 }

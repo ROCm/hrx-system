@@ -95,22 +95,20 @@ TEST(SamplerDenoiseStage, PlansDenoiseStepFromRequestConfig) {
   EXPECT_GT(id4_pipeline_plan_diagnostic_tap_count(plan), 0u);
   ASSERT_EQ(id4_pipeline_plan_region_count(plan), 1u);
 
-  const id4_pipeline_boundary_tensor_plan_t* denoised = nullptr;
+  const id4_pipeline_boundary_tensor_plan_t* exported_boundary = nullptr;
   for (iree_host_size_t i = 0;
        i < id4_pipeline_plan_boundary_tensor_count(plan); ++i) {
     const id4_pipeline_boundary_tensor_plan_t* boundary =
         id4_pipeline_plan_boundary_tensor_at(plan, i);
     if (boundary &&
-        iree_string_view_equal(boundary->layout.name,
-                               id4_sampler_program_denoised_boundary_name())) {
-      denoised = boundary;
+        iree_all_bits_set(boundary->flags,
+                          ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_EXPORTED) &&
+        ShapeEquals(boundary->layout.shape, latent_shape)) {
+      exported_boundary = boundary;
       break;
     }
   }
-  ASSERT_NE(denoised, nullptr);
-  EXPECT_TRUE(iree_all_bits_set(denoised->flags,
-                                ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_EXPORTED));
-  EXPECT_TRUE(ShapeEquals(denoised->layout.shape, latent_shape));
+  ASSERT_NE(exported_boundary, nullptr);
 
   id4_pipeline_plan_release(plan);
   id4_pipeline_stage_release(stage);

@@ -170,12 +170,15 @@ def _normalize_slice(shape: list[int], slice_specs: list[Any]) -> list[tuple[int
     return normalized
 
 
-def _row_major_strides(shape: list[int]) -> list[int]:
+def _trace_payload_strides(shape: list[int]) -> list[int]:
+    # Reference traces are emitted from sd::Tensor/ggml buffers, where
+    # dimension 0 is contiguous. The reduced NPY payload is written in row-major
+    # order so fixture consumers do not inherit that storage convention.
     strides = [1] * len(shape)
     running = 1
-    for dim_index in range(len(shape) - 1, -1, -1):
+    for dim_index, dim_size in enumerate(shape):
         strides[dim_index] = running
-        running *= shape[dim_index]
+        running *= dim_size
     return strides
 
 
@@ -187,7 +190,7 @@ def _read_tensor_slice(
 ) -> bytes:
     dtype_info = DTYPE_TABLE[dtype]
     element_byte_count = int(dtype_info["byte_count"])
-    strides = _row_major_strides(shape)
+    strides = _trace_payload_strides(shape)
     output = bytearray()
 
     with tensor_path.open("rb") as tensor_file:
@@ -198,21 +201,20 @@ def _read_tensor_slice(
                 f"tensor payload size mismatch for {tensor_path}: expected "
                 f"{expected_byte_count} bytes, found {actual_byte_count}"
             )
+        source_payload = tensor_file.read()
 
-        def copy_from_dimension(dim_index: int, base_offset: int) -> None:
-            start, length = slices[dim_index]
-            if dim_index == len(shape) - 1:
-                tensor_file.seek(
-                    (base_offset + start * strides[dim_index]) * element_byte_count
-                )
-                output.extend(tensor_file.read(length * element_byte_count))
-                return
-            for index in range(start, start + length):
-                copy_from_dimension(
-                    dim_index + 1, base_offset + index * strides[dim_index]
-                )
+    def copy_from_dimension(dim_index: int, base_offset: int) -> None:
+        if dim_index == len(shape):
+            byte_offset = base_offset * element_byte_count
+            output.extend(
+                source_payload[byte_offset : byte_offset + element_byte_count]
+            )
+            return
+        start, length = slices[dim_index]
+        for index in range(start, start + length):
+            copy_from_dimension(dim_index + 1, base_offset + index * strides[dim_index])
 
-        copy_from_dimension(0, 0)
+    copy_from_dimension(0, 0)
     return bytes(output)
 
 

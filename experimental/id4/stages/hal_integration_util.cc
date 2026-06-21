@@ -7,6 +7,7 @@
 #include "experimental/id4/stages/hal_integration_util.h"
 
 #include <cerrno>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -853,6 +854,64 @@ iree_status_t ReadBindingToHost(iree_hal_device_t* device,
   }
   iree_hal_file_release(file);
   return status;
+}
+
+static float LoadF32(const uint8_t* bytes) {
+  float value = 0.0f;
+  std::memcpy(&value, bytes, sizeof(value));
+  return value;
+}
+
+iree_status_t CompareF32BindingWithFixtureTensor(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_buffer_binding_t* binding,
+    iree_hal_semaphore_list_t wait_list, const FixtureTensor& expected_tensor) {
+  if (expected_tensor.dtype != ID4_PIPELINE_TENSOR_DTYPE_F32) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "expected tensor `%s` must be f32 for F32 comparison",
+        expected_tensor.name.c_str());
+  }
+  if (!expected_tensor.has_tolerance) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "expected tensor `%s` is missing comparison tolerance",
+        expected_tensor.name.c_str());
+  }
+  std::vector<uint8_t> actual_bytes;
+  IREE_RETURN_IF_ERROR(ReadBindingToHost(device, queue_affinity, binding,
+                                         wait_list, &actual_bytes));
+  if (actual_bytes.size() != expected_tensor.payload.size()) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "expected tensor `%s` byte length %zu does not match actual length %zu",
+        expected_tensor.name.c_str(), expected_tensor.payload.size(),
+        actual_bytes.size());
+  }
+  if ((actual_bytes.size() % sizeof(float)) != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "expected tensor `%s` byte length is not f32 element-aligned",
+        expected_tensor.name.c_str());
+  }
+  const iree_host_size_t element_count = actual_bytes.size() / sizeof(float);
+  for (iree_host_size_t i = 0; i < element_count; ++i) {
+    const float actual = LoadF32(&actual_bytes[i * sizeof(float)]);
+    const float expected = LoadF32(&expected_tensor.payload[i * sizeof(float)]);
+    const double tolerance =
+        expected_tensor.absolute_tolerance +
+        expected_tensor.relative_tolerance * std::fabs((double)expected);
+    const double absolute_error = std::fabs((double)actual - (double)expected);
+    if (absolute_error > tolerance) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "tensor `%s` mismatch at element %" PRIhsz
+          ": actual=%g expected=%g abs_error=%g tolerance=%g",
+          expected_tensor.name.c_str(), i, (double)actual, (double)expected,
+          absolute_error, tolerance);
+    }
+  }
+  return iree_ok_status();
 }
 
 iree_status_t LoadFixtureTensors(iree_string_view_t fixture_directory,

@@ -1,0 +1,55 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#ifndef EXPERIMENTAL_ID4_STAGES_IDEOGRAM4_DIT_H_
+#define EXPERIMENTAL_ID4_STAGES_IDEOGRAM4_DIT_H_
+
+#include "experimental/id4/pipeline/kernel_cache.h"
+#include "experimental/id4/pipeline/stage.h"
+#include "experimental/id4/stages/ideogram4_dit_program.h"
+#include "iree/base/api.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif  // __cplusplus
+
+// Stable reference-comparable stage name for Ideogram4 DiT forward execution.
+#define ID4_IDEOGRAM4_DIT_STAGE_NAME "ideogram4.dit"
+
+// Options for creating a concrete Ideogram4 DiT forward stage.
+typedef struct id4_ideogram4_dit_stage_create_options_t {
+  // Size of this structure for versioning.
+  iree_host_size_t structure_size;
+  // Extension structure chain; must be NULL for now.
+  const void* next;
+  // Services retained by the base pipeline stage.
+  id4_pipeline_stage_services_t services;
+  // Loom kernel cache used when preparing Ideogram4 DiT kernels.
+  id4_pipeline_kernel_cache_t* kernel_cache;
+  // Static Ideogram4 DiT model dimensions.
+  id4_ideogram4_dit_model_config_t model;
+} id4_ideogram4_dit_stage_create_options_t;
+
+// Stage-specific plan extension carrying dynamic Ideogram4 DiT dimensions.
+typedef struct id4_ideogram4_dit_stage_plan_options_t {
+  // Size of this structure for versioning.
+  iree_host_size_t structure_size;
+  // Extension structure chain; must be NULL for now.
+  const void* next;
+  // Dynamic request dimensions for this plan.
+  id4_ideogram4_dit_request_config_t request;
+} id4_ideogram4_dit_stage_plan_options_t;
+
+// Creates an Ideogram4 DiT forward stage.
+iree_status_t id4_ideogram4_dit_stage_create(
+    const id4_ideogram4_dit_stage_create_options_t* options,
+    iree_allocator_t host_allocator, id4_pipeline_stage_t** out_stage);
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif  // __cplusplus
+
+#endif  // EXPERIMENTAL_ID4_STAGES_IDEOGRAM4_DIT_H_

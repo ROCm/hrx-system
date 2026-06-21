@@ -1,0 +1,84 @@
+config.decl @id4.ideogram4.adaln_split.hidden_size : %value: index where [range(%value, 1, 65536)]
+
+kernel.def export("id4_ideogram4_adaln_split_f32") @id4_ideogram4_adaln_split_f32() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %hidden_size = config.get @id4.ideogram4.adaln_split.hidden_size : index
+  %rounding = index.sub %workgroup_size_x, %unit : index
+  %rounded = index.add %hidden_size, %rounding : index
+  %workgroup_count_x = index.div %rounded, %workgroup_size_x : index
+  kernel.launch.config workgroups(%workgroup_count_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%raw_modulation: buffer, %scale_msa: buffer, %gate_msa: buffer, %scale_mlp: buffer, %gate_mlp: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %unit = index.constant 1 : index
+  %two = index.constant 2 : index
+  %three = index.constant 3 : index
+  %workgroup_size_x = index.constant 256 : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %hidden_size = config.get @id4.ideogram4.adaln_split.hidden_size : index
+  %workgroup_base = index.mul %workgroup, %workgroup_size_x : index
+  %hidden = index.add %workgroup_base, %lane : index
+  %in_bounds = index.cmp ult, %hidden, %hidden_size : index
+
+  %raw_modulation_noalias, %scale_msa_noalias, %gate_msa_noalias, %scale_mlp_noalias, %gate_mlp_noalias = buffer.assume.noalias %raw_modulation, %scale_msa, %gate_msa, %scale_mlp, %gate_mlp : buffer, buffer, buffer, buffer, buffer
+  %raw_modulation_global = buffer.assume.memory_space<global> %raw_modulation_noalias : buffer
+  %scale_msa_global = buffer.assume.memory_space<global> %scale_msa_noalias : buffer
+  %gate_msa_global = buffer.assume.memory_space<global> %gate_msa_noalias : buffer
+  %scale_mlp_global = buffer.assume.memory_space<global> %scale_mlp_noalias : buffer
+  %gate_mlp_global = buffer.assume.memory_space<global> %gate_mlp_noalias : buffer
+  %raw_modulation_view = buffer.view %raw_modulation_global[%base] : buffer -> view<4x[%hidden_size]xf32, #dense>
+  %scale_msa_view = buffer.view %scale_msa_global[%base] : buffer -> view<[%hidden_size]xf32, #dense>
+  %gate_msa_view = buffer.view %gate_msa_global[%base] : buffer -> view<[%hidden_size]xf32, #dense>
+  %scale_mlp_view = buffer.view %scale_mlp_global[%base] : buffer -> view<[%hidden_size]xf32, #dense>
+  %gate_mlp_view = buffer.view %gate_mlp_global[%base] : buffer -> view<[%hidden_size]xf32, #dense>
+
+  scf.if %in_bounds {
+    %scale_msa_value = view.load %raw_modulation_view[%zero, %hidden] : view<4x[%hidden_size]xf32, #dense> -> f32
+    %gate_msa_raw = view.load %raw_modulation_view[%unit, %hidden] : view<4x[%hidden_size]xf32, #dense> -> f32
+    %scale_mlp_value = view.load %raw_modulation_view[%two, %hidden] : view<4x[%hidden_size]xf32, #dense> -> f32
+    %gate_mlp_raw = view.load %raw_modulation_view[%three, %hidden] : view<4x[%hidden_size]xf32, #dense> -> f32
+    %gate_msa_value = scalar.tanhf<nnan|ninf|nsz|afn> %gate_msa_raw : f32
+    %gate_mlp_value = scalar.tanhf<nnan|ninf|nsz|afn> %gate_mlp_raw : f32
+    view.store %scale_msa_value, %scale_msa_view[%hidden] : f32, view<[%hidden_size]xf32, #dense>
+    view.store %gate_msa_value, %gate_msa_view[%hidden] : f32, view<[%hidden_size]xf32, #dense>
+    view.store %scale_mlp_value, %scale_mlp_view[%hidden] : f32, view<[%hidden_size]xf32, #dense>
+    view.store %gate_mlp_value, %gate_mlp_view[%hidden] : f32, view<[%hidden_size]xf32, #dense>
+  }
+  kernel.return
+}
+
+check.case public @id4_ideogram4_adaln_split_f32_small_case {
+  %raw_modulation = check.generate.fill value(1.0) : tensor<4x2xf32>
+  %scale_msa = check.generate.fill value(0.0) : tensor<2xf32>
+  %gate_msa = check.generate.fill value(0.0) : tensor<2xf32>
+  %scale_mlp = check.generate.fill value(0.0) : tensor<2xf32>
+  %gate_mlp = check.generate.fill value(0.0) : tensor<2xf32>
+  %expected_scale = check.generate.fill value(1.0) : tensor<2xf32>
+  %expected_gate = check.generate.fill value(0.7615941559557649) : tensor<2xf32>
+  func.call @id4_ideogram4_adaln_split_f32(%raw_modulation, %scale_msa, %gate_msa, %scale_mlp, %gate_mlp) : (tensor<4x2xf32>, tensor<2xf32>, tensor<2xf32>, tensor<2xf32>, tensor<2xf32>)
+  check.expect.close actual(%scale_msa) expected(%expected_scale) atol(0.00001) rtol(0.00001) nan(same) : tensor<2xf32>
+  check.expect.close actual(%gate_msa) expected(%expected_gate) atol(0.00001) rtol(0.00001) nan(same) : tensor<2xf32>
+  check.expect.close actual(%scale_mlp) expected(%expected_scale) atol(0.00001) rtol(0.00001) nan(same) : tensor<2xf32>
+  check.expect.close actual(%gate_mlp) expected(%expected_gate) atol(0.00001) rtol(0.00001) nan(same) : tensor<2xf32>
+  check.return
+}
+
+check.case public @id4_ideogram4_adaln_split_f32_ideogram_shape_case {
+  %raw_modulation = check.generate.fill value(0.0) : tensor<4x4608xf32>
+  %scale_msa = check.generate.fill value(1.0) : tensor<4608xf32>
+  %gate_msa = check.generate.fill value(1.0) : tensor<4608xf32>
+  %scale_mlp = check.generate.fill value(1.0) : tensor<4608xf32>
+  %gate_mlp = check.generate.fill value(1.0) : tensor<4608xf32>
+  %expected = check.generate.fill value(0.0) : tensor<4608xf32>
+  func.call @id4_ideogram4_adaln_split_f32(%raw_modulation, %scale_msa, %gate_msa, %scale_mlp, %gate_mlp) : (tensor<4x4608xf32>, tensor<4608xf32>, tensor<4608xf32>, tensor<4608xf32>, tensor<4608xf32>)
+  check.expect.close actual(%scale_msa) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4608xf32>
+  check.expect.close actual(%gate_msa) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4608xf32>
+  check.expect.close actual(%scale_mlp) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4608xf32>
+  check.expect.close actual(%gate_mlp) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4608xf32>
+  check.return
+}
+
+check.benchmark<@id4_ideogram4_adaln_split_f32_small_case> @id4_ideogram4_adaln_split_f32_small
+check.benchmark<@id4_ideogram4_adaln_split_f32_ideogram_shape_case> @id4_ideogram4_adaln_split_f32_ideogram_shape

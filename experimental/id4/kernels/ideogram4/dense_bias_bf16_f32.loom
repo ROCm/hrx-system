@@ -1,0 +1,106 @@
+config.decl @id4.ideogram4.dense_bias.input_size : %value: index where [range(%value, 4, 65536)]
+config.decl @id4.ideogram4.dense_bias.output_size : %value: index where [range(%value, 1, 65536)]
+config.decl @id4.ideogram4.dense_bias.activation_kind : %value: index where [range(%value, 0, 2)]
+
+func.def inline @id4_ideogram4_dense_bias_bf16_f32_dot4(%input_values: vector<4xf32>, %weight_values: vector<4xbf16>) -> (f32) {
+  %zero_f32 = scalar.constant 0.0 : f32
+  %weight_f32 = vector.extf %weight_values : vector<4xbf16> to vector<4xf32>
+  %products = vector.mulf<reassoc|nnan|ninf|nsz|contract> %input_values, %weight_f32 : vector<4xf32>
+  %sum = vector.reduce<addf, reassoc|nnan|ninf|nsz> %products, %zero_f32 : vector<4xf32>, f32
+  func.return %sum : f32
+}
+
+kernel.def export("id4_ideogram4_dense_bias_bf16_f32") @id4_ideogram4_dense_bias_bf16_f32() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %output_size = config.get @id4.ideogram4.dense_bias.output_size : index
+  kernel.launch.config workgroups(%output_size, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %vector_width = index.constant 4 : index
+  %output_row = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %input_size_unaligned = config.get @id4.ideogram4.dense_bias.input_size : index
+  %input_size = index.assume %input_size_unaligned [mul(%input_size_unaligned, 4)] : index
+  %output_size = config.get @id4.ideogram4.dense_bias.output_size : index
+  %activation_kind = config.get @id4.ideogram4.dense_bias.activation_kind : index
+  %vector_step0 = index.mul %workgroup_size_x, %vector_width : index
+  %vector_step = index.assume %vector_step0 [mul(%vector_step0, 4)] : index
+  %input_base0 = index.mul %lane, %vector_width : index
+  %input_base = index.assume %input_base0 [mul(%input_base0, 4)] : index
+  %zero_f32 = scalar.constant 0.0 : f32
+
+  %input_noalias, %weight_noalias, %bias_noalias, %output_noalias = buffer.assume.noalias %input, %weight, %bias, %output : buffer, buffer, buffer, buffer
+  %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
+  %weight_global = buffer.assume.memory_space<global> %weight_noalias : buffer
+  %bias_global = buffer.assume.memory_space<global> %bias_noalias : buffer
+  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
+  %input_view = buffer.view %input_global[%base] : buffer -> view<1x[%input_size]xf32, #dense>
+  %weight_view = buffer.view %weight_global[%base] : buffer -> view<[%output_size]x[%input_size]xbf16, #dense>
+  %bias_view = buffer.view %bias_global[%base] : buffer -> view<[%output_size]xbf16, #dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<[%output_size]xf32, #dense>
+
+  %lane_dot = scf.for %input_column = [%input_base to %input_size step %vector_step](%acc = %zero_f32 : f32) -> (f32) {
+    %input_values = vector.load %input_view[%zero, %input_column] : view<1x[%input_size]xf32, #dense> -> vector<4xf32>
+    %weight_values = vector.load %weight_view[%output_row, %input_column] : view<[%output_size]x[%input_size]xbf16, #dense> -> vector<4xbf16>
+    %partial = func.call @id4_ideogram4_dense_bias_bf16_f32_dot4(%input_values, %weight_values) : (vector<4xf32>, vector<4xbf16>) -> (f32)
+    %next = scalar.addf<reassoc|nnan|ninf|nsz> %acc, %partial : f32
+    scf.yield %next : f32
+  }
+  %dot = kernel.workgroup.reduce<addf> %lane_dot : f32
+  %is_leader = index.cmp eq, %lane, %zero : index
+  scf.if %is_leader {
+    %bias_bf16 = view.load %bias_view[%output_row] : view<[%output_size]xbf16, #dense> -> bf16
+    %bias_f32 = scalar.extf %bias_bf16 : bf16 to f32
+    %with_bias = scalar.addf<reassoc|nnan|ninf|nsz> %dot, %bias_f32 : f32
+    %applies_silu = index.cmp eq, %activation_kind, %one : index
+    %value = scf.if %applies_silu -> (f32) {
+      %activated = scalar.siluf %with_bias : f32
+      scf.yield %activated : f32
+    } else {
+      scf.yield %with_bias : f32
+    }
+    view.store %value, %output_view[%output_row] : f32, view<[%output_size]xf32, #dense>
+  }
+  kernel.return
+}
+
+check.case public @id4_ideogram4_dense_bias_bf16_f32_identity_case {
+  %input = check.generate.iota offset(1.0) step(1.0) : tensor<4xf32>
+  %weight = check.generate.iota offset(0.5) step(0.5) : tensor<2x4xbf16>
+  %bias = check.generate.fill value(1.0) : tensor<2xbf16>
+  %output = check.generate.fill value(0.0) : tensor<2xf32>
+  %expected = check.generate.iota offset(16.0) step(20.0) : tensor<2xf32>
+  func.call @id4_ideogram4_dense_bias_bf16_f32(%input, %weight, %bias, %output) : (tensor<4xf32>, tensor<2x4xbf16>, tensor<2xbf16>, tensor<2xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.return
+}
+
+check.case public @id4_ideogram4_dense_bias_bf16_f32_silu_case {
+  %input = check.generate.fill value(1.0) : tensor<4xf32>
+  %weight = check.generate.fill value(0.0) : tensor<2x4xbf16>
+  %bias = check.generate.fill value(1.0) : tensor<2xbf16>
+  %output = check.generate.fill value(0.0) : tensor<2xf32>
+  %expected = check.generate.fill value(0.7310585786300049) : tensor<2xf32>
+  func.call @id4_ideogram4_dense_bias_bf16_f32(%input, %weight, %bias, %output) : (tensor<4xf32>, tensor<2x4xbf16>, tensor<2xbf16>, tensor<2xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.00001) rtol(0.00001) nan(same) : tensor<2xf32>
+  check.return
+}
+
+check.case public @id4_ideogram4_dense_bias_bf16_f32_adaln_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<4608xf32>
+  %weight = check.generate.fill value(0.0) : tensor<512x4608xbf16>
+  %bias = check.generate.fill value(0.0) : tensor<512xbf16>
+  %output = check.generate.fill value(1.0) : tensor<512xf32>
+  %expected = check.generate.fill value(0.0) : tensor<512xf32>
+  func.call @id4_ideogram4_dense_bias_bf16_f32(%input, %weight, %bias, %output) : (tensor<4608xf32>, tensor<512x4608xbf16>, tensor<512xbf16>, tensor<512xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<512xf32>
+  check.return
+}
+
+check.benchmark<@id4_ideogram4_dense_bias_bf16_f32_identity_case> @id4_ideogram4_dense_bias_bf16_f32_identity
+check.benchmark<@id4_ideogram4_dense_bias_bf16_f32_silu_case> @id4_ideogram4_dense_bias_bf16_f32_silu
+check.benchmark<@id4_ideogram4_dense_bias_bf16_f32_adaln_shape_case> @id4_ideogram4_dense_bias_bf16_f32_adaln_shape

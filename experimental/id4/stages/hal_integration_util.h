@@ -224,6 +224,12 @@ iree_status_t ReadBindingToHost(iree_hal_device_t* device,
                                 iree_hal_semaphore_list_t wait_list,
                                 std::vector<uint8_t>* out_bytes);
 
+// Reads |binding| and verifies it matches an expected F32 fixture tensor.
+iree_status_t CompareF32BindingWithFixtureTensor(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_buffer_binding_t* binding,
+    iree_hal_semaphore_list_t wait_list, const FixtureTensor& expected_tensor);
+
 // Loads fixture tensors from a fixture manifest directory.
 iree_status_t LoadFixtureTensors(iree_string_view_t fixture_directory,
                                  FixtureTensorSet* out_fixture_tensors);

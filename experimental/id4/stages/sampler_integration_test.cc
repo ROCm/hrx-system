@@ -70,6 +70,11 @@ static iree_status_t MakeProgramShape(
   return iree_ok_status();
 }
 
+static iree_string_view_t FixtureTensorName(
+    const id4::test::FixtureTensor& tensor) {
+  return iree_make_string_view(tensor.name.data(), tensor.name.size());
+}
+
 static std::vector<float> ToF32Vector(const std::vector<uint8_t>& bytes) {
   std::vector<float> values(bytes.size() / sizeof(float));
   std::memcpy(values.data(), bytes.data(), bytes.size());
@@ -105,19 +110,17 @@ TEST(SamplerDenoiseStageIntegration, PrepareAndIssueDenoiseStepFixture) {
 
   const id4::test::FixtureTensor* cond_out = nullptr;
   IREE_ASSERT_OK(FindFixtureTensor(fixture_tensors, IREE_SV("input"),
-                                   id4_sampler_program_cond_out_boundary_name(),
-                                   &cond_out));
+                                   IREE_SV("cond_out"), &cond_out));
   id4_pipeline_program_shape_t latent_shape;
   IREE_ASSERT_OK(MakeProgramShape(cond_out->shape, &latent_shape));
 
   const id4::test::FixtureTensor* expected_guided_pred = nullptr;
   IREE_ASSERT_OK(FindFixtureTensor(fixture_tensors, IREE_SV("expected"),
-                                   id4_sampler_program_guided_pred_tap_name(),
+                                   IREE_SV("guided_pred"),
                                    &expected_guided_pred));
   const id4::test::FixtureTensor* expected_denoised = nullptr;
   IREE_ASSERT_OK(FindFixtureTensor(fixture_tensors, IREE_SV("expected"),
-                                   id4_sampler_program_denoised_boundary_name(),
-                                   &expected_denoised));
+                                   IREE_SV("denoised"), &expected_denoised));
 
   id4::test::LiveStageContext context;
   IREE_ASSERT_OK(id4::test::CreateLiveStageContextFromFlags(&context));
@@ -192,8 +195,8 @@ TEST(SamplerDenoiseStageIntegration, PrepareAndIssueDenoiseStepFixture) {
   const uint8_t sentinel = 0xA5;
   iree_hal_buffer_binding_t denoised_binding = {};
   IREE_ASSERT_OK(id4::test::FindBoundaryBinding(
-      plan.get(), boundary_bindings,
-      id4_sampler_program_denoised_boundary_name(), &denoised_binding));
+      plan.get(), boundary_bindings, FixtureTensorName(*expected_denoised),
+      &denoised_binding));
   IREE_ASSERT_OK(id4::test::QueueFillBinding(
       context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, &denoised_binding,
       &sentinel, sizeof(sentinel), update_semaphore.get(), &update_value));
@@ -201,7 +204,7 @@ TEST(SamplerDenoiseStageIntegration, PrepareAndIssueDenoiseStepFixture) {
   iree_hal_buffer_binding_t guided_pred_binding = {};
   IREE_ASSERT_OK(id4::test::FindDiagnosticTapBinding(
       plan.get(), diagnostic_tap_bindings,
-      id4_sampler_program_guided_pred_tap_name(), &guided_pred_binding));
+      FixtureTensorName(*expected_guided_pred), &guided_pred_binding));
   IREE_ASSERT_OK(id4::test::QueueFillBinding(
       context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, &guided_pred_binding,
       &sentinel, sizeof(sentinel), update_semaphore.get(), &update_value));

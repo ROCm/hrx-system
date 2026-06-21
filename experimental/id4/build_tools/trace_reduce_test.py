@@ -141,12 +141,12 @@ class TraceReduceTest(unittest.TestCase):
             descr, shape, data = _read_npy(output_dir / "qwen" / "condition.npy")
             self.assertEqual(descr, "<f4")
             self.assertEqual(shape, (2, 2))
-            self.assertEqual(struct.unpack("<4f", data), (7.0, 8.0, 12.0, 13.0))
+            self.assertEqual(struct.unpack("<4f", data), (9.0, 13.0, 10.0, 14.0))
 
             condition_record = manifest["records"][2]
             self.assertEqual(condition_record["summary"]["finite_count"], 4)
-            self.assertEqual(condition_record["summary"]["min"], 7.0)
-            self.assertEqual(condition_record["summary"]["max"], 13.0)
+            self.assertEqual(condition_record["summary"]["min"], 9.0)
+            self.assertEqual(condition_record["summary"]["max"], 14.0)
             self.assertEqual(
                 json.loads((output_dir / "manifest.json").read_text()),
                 manifest,

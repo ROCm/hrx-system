@@ -11,6 +11,26 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
+    ideogram4_dit
+  HDRS
+    "ideogram4_dit.h"
+  SRCS
+    "ideogram4_dit.c"
+  DEPS
+    ::ideogram4_dit_program
+    iree::base
+    iree::base::internal::arena
+    iree::experimental::id4::pipeline::diagnostics
+    iree::experimental::id4::pipeline::kernel_cache
+    iree::experimental::id4::pipeline::program
+    iree::experimental::id4::pipeline::program_stage
+    iree::experimental::id4::pipeline::stage
+    iree::hal
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     qwen3_vl
   HDRS
     "qwen3_vl.h"
@@ -45,6 +65,22 @@ iree_cc_library(
     iree::experimental::id4::pipeline::program
     iree::experimental::id4::pipeline::program_stage
     iree::experimental::id4::pipeline::stage
+    iree::hal
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
+    ideogram4_dit_program
+  HDRS
+    "ideogram4_dit_program.h"
+  SRCS
+    "ideogram4_dit_program.c"
+    "ideogram4_dit_program_block.c"
+    "ideogram4_dit_program_block.h"
+  DEPS
+    iree::base
+    iree::experimental::id4::pipeline::program
     iree::hal
   PUBLIC
 )
@@ -148,6 +184,22 @@ iree_cc_library(
 
 iree_cc_test(
   NAME
+    ideogram4_dit_test
+  SRCS
+    "ideogram4_dit_test.cc"
+  DEPS
+    ::ideogram4_dit
+    ::test_util
+    iree::base
+    iree::experimental::id4::pipeline::plan
+    iree::experimental::id4::pipeline::stage
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
     qwen3_vl_test
   SRCS
     "qwen3_vl_test.cc"
@@ -176,6 +228,41 @@ iree_cc_test(
     iree::hal
     iree::testing::gtest
     iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    ideogram4_dit_program_test
+  SRCS
+    "ideogram4_dit_program_test.cc"
+  DEPS
+    ::ideogram4_dit_program
+    iree::base
+    iree::base::internal::arena
+    iree::experimental::id4::pipeline::program
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    ideogram4_dit_integration_test
+  SRCS
+    "ideogram4_dit_integration_test.cc"
+  DEPS
+    ::hal_integration_util
+    ::ideogram4_dit
+    iree::base
+    iree::base::tooling::flags
+    iree::experimental::id4::pipeline::plan
+    iree::experimental::id4::pipeline::stage
+    iree::hal
+    iree::io::parameter_provider
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "manual"
+    "requires-gpu"
 )
 
 iree_cc_test(

@@ -1,0 +1,102 @@
+config.decl @id4.ideogram4.rotary_apply.token_count : %value: index where [range(%value, 1, 131072)]
+config.decl @id4.ideogram4.rotary_apply.attention_head_count : %value: index where [range(%value, 1, 1024)]
+config.decl @id4.ideogram4.rotary_apply.head_size : %value: index where [range(%value, 2, 1024)]
+
+kernel.def export("id4_ideogram4_rotary_apply_f32") @id4_ideogram4_rotary_apply_f32() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %token_count = config.get @id4.ideogram4.rotary_apply.token_count : index
+  %attention_head_count = config.get @id4.ideogram4.rotary_apply.attention_head_count : index
+  kernel.launch.config workgroups(%token_count, %attention_head_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%query: buffer, %key: buffer, %position_embedding: buffer, %rotated_query: buffer, %rotated_key: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %workgroup_size_x = index.constant 256 : index
+  %token = kernel.workgroup.id<x> : index
+  %head = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %token_count = config.get @id4.ideogram4.rotary_apply.token_count : index
+  %attention_head_count = config.get @id4.ideogram4.rotary_apply.attention_head_count : index
+  %head_size = config.get @id4.ideogram4.rotary_apply.head_size : index
+  %half_size = index.div %head_size, %two : index
+  %hidden_size = index.mul %attention_head_count, %head_size : index
+  %head_base = index.mul %head, %head_size : index
+  %upper_base = index.add %head_base, %half_size : index
+
+  %query_noalias, %key_noalias, %position_embedding_noalias, %rotated_query_noalias, %rotated_key_noalias = buffer.assume.noalias %query, %key, %position_embedding, %rotated_query, %rotated_key : buffer, buffer, buffer, buffer, buffer
+  %query_global = buffer.assume.memory_space<global> %query_noalias : buffer
+  %key_global = buffer.assume.memory_space<global> %key_noalias : buffer
+  %position_embedding_global = buffer.assume.memory_space<global> %position_embedding_noalias : buffer
+  %rotated_query_global = buffer.assume.memory_space<global> %rotated_query_noalias : buffer
+  %rotated_key_global = buffer.assume.memory_space<global> %rotated_key_noalias : buffer
+  %query_view = buffer.view %query_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xf32, #dense>
+  %key_view = buffer.view %key_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xf32, #dense>
+  %position_embedding_view = buffer.view %position_embedding_global[%base] : buffer -> view<2x2x[%half_size]x[%token_count]xf32, #dense>
+  %rotated_query_view = buffer.view %rotated_query_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xf32, #dense>
+  %rotated_key_view = buffer.view %rotated_key_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xf32, #dense>
+
+  scf.for %half_channel = [%lane to %half_size step %workgroup_size_x] {
+    %lower_channel = index.add %head_base, %half_channel : index
+    %upper_channel = index.add %upper_base, %half_channel : index
+    %cos0 = view.load %position_embedding_view[%zero, %zero, %half_channel, %token] : view<2x2x[%half_size]x[%token_count]xf32, #dense> -> f32
+    %negative_sin = view.load %position_embedding_view[%one, %zero, %half_channel, %token] : view<2x2x[%half_size]x[%token_count]xf32, #dense> -> f32
+    %sin = view.load %position_embedding_view[%zero, %one, %half_channel, %token] : view<2x2x[%half_size]x[%token_count]xf32, #dense> -> f32
+    %cos1 = view.load %position_embedding_view[%one, %one, %half_channel, %token] : view<2x2x[%half_size]x[%token_count]xf32, #dense> -> f32
+
+    %query_lower = view.load %query_view[%token, %lower_channel] : view<[%token_count]x[%hidden_size]xf32, #dense> -> f32
+    %query_upper = view.load %query_view[%token, %upper_channel] : view<[%token_count]x[%hidden_size]xf32, #dense> -> f32
+    %query_lower_cos = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %query_lower, %cos0 : f32
+    %query_upper_neg_sin = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %query_upper, %negative_sin : f32
+    %rotated_query_lower = scalar.addf<reassoc|nnan|ninf|nsz> %query_lower_cos, %query_upper_neg_sin : f32
+    %query_lower_sin = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %query_lower, %sin : f32
+    %query_upper_cos = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %query_upper, %cos1 : f32
+    %rotated_query_upper = scalar.addf<reassoc|nnan|ninf|nsz> %query_lower_sin, %query_upper_cos : f32
+    view.store %rotated_query_lower, %rotated_query_view[%token, %lower_channel] : f32, view<[%token_count]x[%hidden_size]xf32, #dense>
+    view.store %rotated_query_upper, %rotated_query_view[%token, %upper_channel] : f32, view<[%token_count]x[%hidden_size]xf32, #dense>
+
+    %key_lower = view.load %key_view[%token, %lower_channel] : view<[%token_count]x[%hidden_size]xf32, #dense> -> f32
+    %key_upper = view.load %key_view[%token, %upper_channel] : view<[%token_count]x[%hidden_size]xf32, #dense> -> f32
+    %key_lower_cos = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %key_lower, %cos0 : f32
+    %key_upper_neg_sin = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %key_upper, %negative_sin : f32
+    %rotated_key_lower = scalar.addf<reassoc|nnan|ninf|nsz> %key_lower_cos, %key_upper_neg_sin : f32
+    %key_lower_sin = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %key_lower, %sin : f32
+    %key_upper_cos = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %key_upper, %cos1 : f32
+    %rotated_key_upper = scalar.addf<reassoc|nnan|ninf|nsz> %key_lower_sin, %key_upper_cos : f32
+    view.store %rotated_key_lower, %rotated_key_view[%token, %lower_channel] : f32, view<[%token_count]x[%hidden_size]xf32, #dense>
+    view.store %rotated_key_upper, %rotated_key_view[%token, %upper_channel] : f32, view<[%token_count]x[%hidden_size]xf32, #dense>
+  }
+  kernel.return
+}
+
+check.case public @id4_ideogram4_rotary_apply_f32_small_case {
+  %query = check.generate.fill value(2.0) : tensor<1x2xf32>
+  %key = check.generate.fill value(3.0) : tensor<1x2xf32>
+  %position_embedding = check.generate.fill value(1.0) : tensor<2x2x1x1xf32>
+  %rotated_query = check.generate.fill value(0.0) : tensor<1x2xf32>
+  %rotated_key = check.generate.fill value(0.0) : tensor<1x2xf32>
+  %expected_query = check.generate.fill value(4.0) : tensor<1x2xf32>
+  %expected_key = check.generate.fill value(6.0) : tensor<1x2xf32>
+  func.call @id4_ideogram4_rotary_apply_f32(%query, %key, %position_embedding, %rotated_query, %rotated_key) : (tensor<1x2xf32>, tensor<1x2xf32>, tensor<2x2x1x1xf32>, tensor<1x2xf32>, tensor<1x2xf32>)
+  check.expect.close actual(%rotated_query) expected(%expected_query) atol(0.0) rtol(0.0) nan(same) : tensor<1x2xf32>
+  check.expect.close actual(%rotated_key) expected(%expected_key) atol(0.0) rtol(0.0) nan(same) : tensor<1x2xf32>
+  check.return
+}
+
+check.case public @id4_ideogram4_rotary_apply_f32_ideogram_shape_case {
+  %query = check.generate.fill value(1.0) : tensor<2x4608xf32>
+  %key = check.generate.fill value(2.0) : tensor<2x4608xf32>
+  %position_embedding = check.generate.fill value(1.0) : tensor<2x2x128x2xf32>
+  %rotated_query = check.generate.fill value(0.0) : tensor<2x4608xf32>
+  %rotated_key = check.generate.fill value(0.0) : tensor<2x4608xf32>
+  %expected_query = check.generate.fill value(2.0) : tensor<2x4608xf32>
+  %expected_key = check.generate.fill value(4.0) : tensor<2x4608xf32>
+  func.call @id4_ideogram4_rotary_apply_f32(%query, %key, %position_embedding, %rotated_query, %rotated_key) : (tensor<2x4608xf32>, tensor<2x4608xf32>, tensor<2x2x128x2xf32>, tensor<2x4608xf32>, tensor<2x4608xf32>)
+  check.expect.close actual(%rotated_query) expected(%expected_query) atol(0.0) rtol(0.0) nan(same) : tensor<2x4608xf32>
+  check.expect.close actual(%rotated_key) expected(%expected_key) atol(0.0) rtol(0.0) nan(same) : tensor<2x4608xf32>
+  check.return
+}
+
+check.benchmark<@id4_ideogram4_rotary_apply_f32_small_case> @id4_ideogram4_rotary_apply_f32_small
+check.benchmark<@id4_ideogram4_rotary_apply_f32_ideogram_shape_case> @id4_ideogram4_rotary_apply_f32_ideogram_shape

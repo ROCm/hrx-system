@@ -224,27 +224,37 @@ static iree_status_t id4_sampler_denoise_stage_request_from_plan(
     const id4_pipeline_plan_t* plan,
     id4_sampler_denoise_request_config_t* out_request) {
   memset(out_request, 0, sizeof(*out_request));
-  const iree_string_view_t x_t_name = id4_sampler_program_x_t_boundary_name();
-  const id4_pipeline_boundary_tensor_plan_t* x_t = NULL;
-  const iree_host_size_t boundary_tensor_count =
-      id4_pipeline_plan_boundary_tensor_count(plan);
-  for (iree_host_size_t i = 0; i < boundary_tensor_count; ++i) {
-    const id4_pipeline_boundary_tensor_plan_t* boundary_tensor =
-        id4_pipeline_plan_boundary_tensor_at(plan, i);
-    if (boundary_tensor &&
-        iree_string_view_equal(boundary_tensor->layout.name, x_t_name)) {
-      x_t = boundary_tensor;
-      break;
-    }
-  }
-  if (!x_t) {
+  if (id4_pipeline_plan_boundary_tensor_count(plan) == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "sampler denoise plan has no %.*s boundary tensor",
-                            (int)x_t_name.size, x_t_name.data);
+                            "sampler denoise plan has no boundary tensors");
   }
-  out_request->latent_shape.rank = x_t->layout.shape.rank;
+  const id4_pipeline_boundary_tensor_plan_t* latent_boundary =
+      id4_pipeline_plan_boundary_tensor_at(plan, 0);
+  if (!latent_boundary) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "sampler denoise plan boundary tensor is missing");
+  }
+  if (!iree_all_bits_set(latent_boundary->flags,
+                         ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_IMPORTED |
+                             ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_INITIALIZED)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "sampler denoise plan first boundary tensor is not an initialized "
+        "import");
+  }
+  if (latent_boundary->layout.dtype != ID4_PIPELINE_TENSOR_DTYPE_F32) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "sampler denoise plan first boundary tensor is not f32");
+  }
+  if (latent_boundary->layout.shape.rank == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "sampler denoise latent shape rank must be "
+                            "nonzero");
+  }
+  out_request->latent_shape.rank = latent_boundary->layout.shape.rank;
   for (uint32_t i = 0; i < out_request->latent_shape.rank; ++i) {
-    out_request->latent_shape.dims[i] = x_t->layout.shape.dims[i];
+    out_request->latent_shape.dims[i] = latent_boundary->layout.shape.dims[i];
   }
   return iree_ok_status();
 }

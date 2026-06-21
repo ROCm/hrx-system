@@ -1,0 +1,83 @@
+config.decl @id4.ideogram4.qkv_split.token_count : %value: index where [range(%value, 1, 131072)]
+config.decl @id4.ideogram4.qkv_split.hidden_size : %value: index where [range(%value, 1, 65536)]
+
+kernel.def export("id4_ideogram4_qkv_split_f32") @id4_ideogram4_qkv_split_f32() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %token_count = config.get @id4.ideogram4.qkv_split.token_count : index
+  %hidden_size = config.get @id4.ideogram4.qkv_split.hidden_size : index
+  %element_count = index.mul %token_count, %hidden_size : index
+  %rounding = index.sub %workgroup_size_x, %unit : index
+  %rounded = index.add %element_count, %rounding : index
+  %workgroup_count_x = index.div %rounded, %workgroup_size_x : index
+  kernel.launch.config workgroups(%workgroup_count_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%qkv: buffer, %query: buffer, %key: buffer, %value: buffer) {
+  %base = index.constant 0 : offset
+  %two = index.constant 2 : index
+  %three = index.constant 3 : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size_x = index.constant 256 : index
+  %token_count = config.get @id4.ideogram4.qkv_split.token_count : index
+  %hidden_size = config.get @id4.ideogram4.qkv_split.hidden_size : index
+  %qkv_size = index.mul %hidden_size, %three : index
+  %element_count = index.mul %token_count, %hidden_size : index
+  %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
+  %in_bounds = index.cmp ult, %element_index, %element_count : index
+
+  %qkv_noalias, %query_noalias, %key_noalias, %value_noalias = buffer.assume.noalias %qkv, %query, %key, %value : buffer, buffer, buffer, buffer
+  %qkv_global = buffer.assume.memory_space<global> %qkv_noalias : buffer
+  %query_global = buffer.assume.memory_space<global> %query_noalias : buffer
+  %key_global = buffer.assume.memory_space<global> %key_noalias : buffer
+  %value_global = buffer.assume.memory_space<global> %value_noalias : buffer
+  %qkv_view = buffer.view %qkv_global[%base] : buffer -> view<[%qkv_size]x[%token_count]xf32, #dense>
+  %query_view = buffer.view %query_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xf32, #dense>
+  %key_view = buffer.view %key_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xf32, #dense>
+  %value_view = buffer.view %value_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xf32, #dense>
+
+  scf.if %in_bounds {
+    %token = index.div %element_index, %hidden_size : index
+    %channel = index.rem %element_index, %hidden_size : index
+    %key_row = index.add %channel, %hidden_size : index
+    %value_base = index.mul %hidden_size, %two : index
+    %value_row = index.add %channel, %value_base : index
+    %query_value = view.load %qkv_view[%channel, %token] : view<[%qkv_size]x[%token_count]xf32, #dense> -> f32
+    %key_value = view.load %qkv_view[%key_row, %token] : view<[%qkv_size]x[%token_count]xf32, #dense> -> f32
+    %value_value = view.load %qkv_view[%value_row, %token] : view<[%qkv_size]x[%token_count]xf32, #dense> -> f32
+    view.store %query_value, %query_view[%token, %channel] : f32, view<[%token_count]x[%hidden_size]xf32, #dense>
+    view.store %key_value, %key_view[%token, %channel] : f32, view<[%token_count]x[%hidden_size]xf32, #dense>
+    view.store %value_value, %value_view[%token, %channel] : f32, view<[%token_count]x[%hidden_size]xf32, #dense>
+  }
+  kernel.return
+}
+
+check.case public @id4_ideogram4_qkv_split_f32_small_case {
+  %qkv = check.generate.iota offset(1.0) step(1.0) : tensor<6x1xf32>
+  %query = check.generate.fill value(0.0) : tensor<1x2xf32>
+  %key = check.generate.fill value(0.0) : tensor<1x2xf32>
+  %value = check.generate.fill value(0.0) : tensor<1x2xf32>
+  %expected_query = check.generate.iota offset(1.0) step(1.0) : tensor<1x2xf32>
+  %expected_key = check.generate.iota offset(3.0) step(1.0) : tensor<1x2xf32>
+  %expected_value = check.generate.iota offset(5.0) step(1.0) : tensor<1x2xf32>
+  func.call @id4_ideogram4_qkv_split_f32(%qkv, %query, %key, %value) : (tensor<6x1xf32>, tensor<1x2xf32>, tensor<1x2xf32>, tensor<1x2xf32>)
+  check.expect.close actual(%query) expected(%expected_query) atol(0.0) rtol(0.0) nan(same) : tensor<1x2xf32>
+  check.expect.close actual(%key) expected(%expected_key) atol(0.0) rtol(0.0) nan(same) : tensor<1x2xf32>
+  check.expect.close actual(%value) expected(%expected_value) atol(0.0) rtol(0.0) nan(same) : tensor<1x2xf32>
+  check.return
+}
+
+check.case public @id4_ideogram4_qkv_split_f32_ideogram_shape_case {
+  %qkv = check.generate.fill value(3.0) : tensor<13824x2xf32>
+  %query = check.generate.fill value(0.0) : tensor<2x4608xf32>
+  %key = check.generate.fill value(0.0) : tensor<2x4608xf32>
+  %value = check.generate.fill value(0.0) : tensor<2x4608xf32>
+  %expected = check.generate.fill value(3.0) : tensor<2x4608xf32>
+  func.call @id4_ideogram4_qkv_split_f32(%qkv, %query, %key, %value) : (tensor<13824x2xf32>, tensor<2x4608xf32>, tensor<2x4608xf32>, tensor<2x4608xf32>)
+  check.expect.close actual(%query) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x4608xf32>
+  check.expect.close actual(%key) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x4608xf32>
+  check.expect.close actual(%value) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x4608xf32>
+  check.return
+}
+
+check.benchmark<@id4_ideogram4_qkv_split_f32_small_case> @id4_ideogram4_qkv_split_f32_small
+check.benchmark<@id4_ideogram4_qkv_split_f32_ideogram_shape_case> @id4_ideogram4_qkv_split_f32_ideogram_shape

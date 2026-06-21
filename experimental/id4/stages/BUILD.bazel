@@ -15,6 +15,23 @@ package(
 )
 
 iree_runtime_cc_library(
+    name = "ideogram4_dit",
+    srcs = ["ideogram4_dit.c"],
+    hdrs = ["ideogram4_dit.h"],
+    deps = [
+        ":ideogram4_dit_program",
+        "//experimental/id4/pipeline:diagnostics",
+        "//experimental/id4/pipeline:kernel_cache",
+        "//experimental/id4/pipeline:program",
+        "//experimental/id4/pipeline:program_stage",
+        "//experimental/id4/pipeline:stage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "qwen3_vl",
     srcs = ["qwen3_vl.c"],
     hdrs = ["qwen3_vl.h"],
@@ -44,6 +61,21 @@ iree_runtime_cc_library(
         "//experimental/id4/pipeline:stage",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "ideogram4_dit_program",
+    srcs = [
+        "ideogram4_dit_program.c",
+        "ideogram4_dit_program_block.c",
+        "ideogram4_dit_program_block.h",
+    ],
+    hdrs = ["ideogram4_dit_program.h"],
+    deps = [
+        "//experimental/id4/pipeline:program",
+        "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
     ],
 )
@@ -131,6 +163,21 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_test(
+    name = "ideogram4_dit_test",
+    srcs = ["ideogram4_dit_test.cc"],
+    deps = [
+        ":ideogram4_dit",
+        ":test_util",
+        "//experimental/id4/pipeline:plan",
+        "//experimental/id4/pipeline:stage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "qwen3_vl_test",
     srcs = ["qwen3_vl_test.cc"],
     deps = [
@@ -155,6 +202,40 @@ iree_runtime_cc_test(
         "//experimental/id4/pipeline:stage",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "ideogram4_dit_program_test",
+    srcs = ["ideogram4_dit_program_test.cc"],
+    deps = [
+        ":ideogram4_dit_program",
+        "//experimental/id4/pipeline:program",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "ideogram4_dit_integration_test",
+    srcs = ["ideogram4_dit_integration_test.cc"],
+    tags = [
+        "manual",
+        "requires-gpu",
+    ],
+    deps = [
+        ":hal_integration_util",
+        ":ideogram4_dit",
+        "//experimental/id4/pipeline:plan",
+        "//experimental/id4/pipeline:stage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:parameter_provider",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

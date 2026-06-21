@@ -252,24 +252,27 @@ static iree_status_t id4_qwen3_vl_stage_request_from_plan(
     const id4_pipeline_plan_t* plan,
     id4_qwen3_vl_request_config_t* out_request) {
   memset(out_request, 0, sizeof(*out_request));
-  const iree_string_view_t token_ids_name =
-      id4_qwen3_vl_program_token_ids_boundary_name();
-  const id4_pipeline_boundary_tensor_plan_t* token_ids = NULL;
-  const iree_host_size_t boundary_tensor_count =
-      id4_pipeline_plan_boundary_tensor_count(plan);
-  for (iree_host_size_t i = 0; i < boundary_tensor_count; ++i) {
-    const id4_pipeline_boundary_tensor_plan_t* boundary_tensor =
-        id4_pipeline_plan_boundary_tensor_at(plan, i);
-    if (boundary_tensor &&
-        iree_string_view_equal(boundary_tensor->layout.name, token_ids_name)) {
-      token_ids = boundary_tensor;
-      break;
-    }
+  if (id4_pipeline_plan_boundary_tensor_count(plan) == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Qwen3-VL plan has no boundary tensors");
   }
+  const id4_pipeline_boundary_tensor_plan_t* token_ids =
+      id4_pipeline_plan_boundary_tensor_at(plan, 0);
   if (!token_ids) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "Qwen3-VL plan has no %.*s boundary tensor",
-                            (int)token_ids_name.size, token_ids_name.data);
+                            "Qwen3-VL plan boundary tensor is missing");
+  }
+  if (!iree_all_bits_set(token_ids->flags,
+                         ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_IMPORTED |
+                             ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_INITIALIZED)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Qwen3-VL plan first boundary tensor is not an initialized import");
+  }
+  if (token_ids->layout.dtype != ID4_PIPELINE_TENSOR_DTYPE_I32) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Qwen3-VL token-id boundary dtype does not match expected i32");
   }
   if (token_ids->layout.shape.rank != 1) {
     return iree_make_status(

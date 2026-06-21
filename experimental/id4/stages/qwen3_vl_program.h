@@ -67,9 +67,6 @@ iree_status_t id4_qwen3_vl_program_author_forward(
 const id4_qwen3_vl_model_config_t* id4_qwen3_vl_program_ideogram4_model_config(
     void);
 
-// Returns the stable stage boundary tensor name for input token ids.
-iree_string_view_t id4_qwen3_vl_program_token_ids_boundary_name(void);
-
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus
