@@ -68,12 +68,12 @@ TEST(Qwen3VlStageIntegration, PrepareAndIssueForwardWithDenseParameters) {
       iree_make_cstring_view(FLAG_id4_fixture_dir);
   ASSERT_FALSE(iree_string_view_is_empty(fixture_directory))
       << "--id4_fixture_dir is required for Qwen integration correctness";
-  id4::test::FixtureInputSet fixture_inputs;
+  id4::test::FixtureTensorSet fixture_tensors;
   IREE_ASSERT_OK(
-      id4::test::LoadFixtureInputs(fixture_directory, &fixture_inputs));
+      id4::test::LoadFixtureTensors(fixture_directory, &fixture_tensors));
   uint32_t token_count = 0;
   IREE_ASSERT_OK(id4::test::InferRank1TensorLengthFromFixture(
-      fixture_inputs, IREE_SV("token_ids"), ID4_PIPELINE_TENSOR_DTYPE_I32,
+      fixture_tensors, IREE_SV("token_ids"), ID4_PIPELINE_TENSOR_DTYPE_I32,
       &token_count));
 
   id4::test::StageDiagnostics diagnostics = {};
@@ -144,7 +144,7 @@ TEST(Qwen3VlStageIntegration, PrepareAndIssueForwardWithDenseParameters) {
   uint64_t fill_value = 0;
   IREE_ASSERT_OK(id4::test::QueueUpdateInitializedBoundaryTensorsFromFixture(
       context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
-      boundary_bindings, fixture_inputs, fill_semaphore.get(), &fill_value));
+      boundary_bindings, fixture_tensors, fill_semaphore.get(), &fill_value));
   IREE_ASSERT_OK(id4::test::QueueFillBoundaryTensors(
       context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
       boundary_bindings, ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_EXPORTED,

@@ -50,10 +50,25 @@ void BufferBindingSet::reset() {
   bindings = nullptr;
 }
 
-const FixtureTensor* FixtureInputSet::FindTensor(
+const FixtureTensor* FixtureTensorSet::FindTensor(
     iree_string_view_t name) const {
   for (const FixtureTensor& tensor : tensors) {
     if (iree_string_view_equal(
+            iree_make_string_view(tensor.name.data(), tensor.name.size()),
+            name)) {
+      return &tensor;
+    }
+  }
+  return nullptr;
+}
+
+const FixtureTensor* FixtureTensorSet::FindTensor(
+    iree_string_view_t role, iree_string_view_t name) const {
+  for (const FixtureTensor& tensor : tensors) {
+    if (iree_string_view_equal(
+            iree_make_string_view(tensor.role.data(), tensor.role.size()),
+            role) &&
+        iree_string_view_equal(
             iree_make_string_view(tensor.name.data(), tensor.name.size()),
             name)) {
       return &tensor;
@@ -147,6 +162,41 @@ static iree_status_t ParseFixtureShape(iree_string_view_t shape_array,
     IREE_RETURN_IF_ERROR(iree_json_parse_uint64(dim_value, &dim));
     out_shape->dims[i] = dim;
   }
+  return iree_ok_status();
+}
+
+static iree_status_t ParseFixtureTolerance(iree_string_view_t record,
+                                           FixtureTensor* tensor) {
+  iree_string_view_t tolerance = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(iree_json_try_lookup_object_value(
+      record, IREE_SV("tolerance"), &tolerance));
+  if (iree_string_view_is_empty(tolerance)) return iree_ok_status();
+
+  iree_string_view_t absolute_tolerance = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(iree_json_lookup_object_value(tolerance, IREE_SV("atol"),
+                                                     &absolute_tolerance));
+  double parsed_absolute_tolerance = 0.0;
+  IREE_RETURN_IF_ERROR(
+      iree_json_parse_double(absolute_tolerance, &parsed_absolute_tolerance));
+  if (parsed_absolute_tolerance < 0.0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "fixture tolerance atol must be non-negative");
+  }
+
+  iree_string_view_t relative_tolerance = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(iree_json_lookup_object_value(tolerance, IREE_SV("rtol"),
+                                                     &relative_tolerance));
+  double parsed_relative_tolerance = 0.0;
+  IREE_RETURN_IF_ERROR(
+      iree_json_parse_double(relative_tolerance, &parsed_relative_tolerance));
+  if (parsed_relative_tolerance < 0.0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "fixture tolerance rtol must be non-negative");
+  }
+
+  tensor->absolute_tolerance = parsed_absolute_tolerance;
+  tensor->relative_tolerance = parsed_relative_tolerance;
+  tensor->has_tolerance = true;
   return iree_ok_status();
 }
 
@@ -306,15 +356,15 @@ static iree_status_t LoadNpyTensorPayload(
   return iree_ok_status();
 }
 
-static iree_status_t LoadFixtureInputRecord(iree_string_view_t record,
-                                            FixtureInputSet* fixture_inputs) {
+static iree_status_t LoadFixtureTensorRecord(
+    iree_string_view_t record, FixtureTensorSet* fixture_tensors) {
   std::string kind;
   IREE_RETURN_IF_ERROR(JsonLookupSimpleString(record, IREE_SV("kind"), &kind));
-  std::string role;
-  IREE_RETURN_IF_ERROR(JsonLookupSimpleString(record, IREE_SV("role"), &role));
-  if (kind != "tensor" || role != "input") return iree_ok_status();
+  if (kind != "tensor") return iree_ok_status();
 
   FixtureTensor tensor;
+  IREE_RETURN_IF_ERROR(
+      JsonLookupSimpleString(record, IREE_SV("role"), &tensor.role));
   IREE_RETURN_IF_ERROR(
       JsonLookupSimpleString(record, IREE_SV("name"), &tensor.name));
   IREE_RETURN_IF_ERROR(
@@ -328,10 +378,11 @@ static iree_status_t LoadFixtureInputRecord(iree_string_view_t record,
   IREE_RETURN_IF_ERROR(
       iree_json_lookup_object_value(record, IREE_SV("shape"), &shape_value));
   IREE_RETURN_IF_ERROR(ParseFixtureShape(shape_value, &tensor.shape));
+  IREE_RETURN_IF_ERROR(ParseFixtureTolerance(record, &tensor));
   IREE_RETURN_IF_ERROR(
-      LoadNpyTensorPayload(JoinPath(fixture_inputs->directory, tensor.file),
+      LoadNpyTensorPayload(JoinPath(fixture_tensors->directory, tensor.file),
                            tensor.dtype, tensor.shape, &tensor.payload));
-  fixture_inputs->tensors.push_back(std::move(tensor));
+  fixture_tensors->tensors.push_back(std::move(tensor));
   return iree_ok_status();
 }
 
@@ -804,11 +855,11 @@ iree_status_t ReadBindingToHost(iree_hal_device_t* device,
   return status;
 }
 
-iree_status_t LoadFixtureInputs(iree_string_view_t fixture_directory,
-                                FixtureInputSet* out_fixture_inputs) {
-  out_fixture_inputs->directory.assign(fixture_directory.data,
-                                       fixture_directory.size);
-  out_fixture_inputs->tensors.clear();
+iree_status_t LoadFixtureTensors(iree_string_view_t fixture_directory,
+                                 FixtureTensorSet* out_fixture_tensors) {
+  out_fixture_tensors->directory.assign(fixture_directory.data,
+                                        fixture_directory.size);
+  out_fixture_tensors->tensors.clear();
 
   std::vector<uint8_t> manifest_file;
   IREE_RETURN_IF_ERROR(ReadBinaryFile(
@@ -824,15 +875,16 @@ iree_status_t LoadFixtureInputs(iree_string_view_t fixture_directory,
   for (iree_host_size_t i = 0; i < record_count; ++i) {
     iree_string_view_t record = iree_string_view_empty();
     IREE_RETURN_IF_ERROR(iree_json_array_get(records, i, &record));
-    IREE_RETURN_IF_ERROR(LoadFixtureInputRecord(record, out_fixture_inputs));
+    IREE_RETURN_IF_ERROR(LoadFixtureTensorRecord(record, out_fixture_tensors));
   }
   return iree_ok_status();
 }
 
 iree_status_t InferRank1TensorLengthFromFixture(
-    const FixtureInputSet& fixture_inputs, iree_string_view_t tensor_name,
+    const FixtureTensorSet& fixture_tensors, iree_string_view_t tensor_name,
     id4_pipeline_tensor_dtype_t dtype, uint32_t* out_length) {
-  const FixtureTensor* tensor = fixture_inputs.FindTensor(tensor_name);
+  const FixtureTensor* tensor =
+      fixture_tensors.FindTensor(IREE_SV("input"), tensor_name);
   if (!tensor) {
     return iree_make_status(
         IREE_STATUS_NOT_FOUND, "fixture is missing required `%.*s` input",
@@ -857,8 +909,8 @@ iree_status_t InferRank1TensorLengthFromFixture(
 iree_status_t QueueUpdateInitializedBoundaryTensorsFromFixture(
     iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
     const id4_pipeline_plan_t* plan, const BufferBindingSet& binding_set,
-    const FixtureInputSet& fixture_inputs, iree_hal_semaphore_t* fill_semaphore,
-    uint64_t* out_fill_value) {
+    const FixtureTensorSet& fixture_tensors,
+    iree_hal_semaphore_t* fill_semaphore, uint64_t* out_fill_value) {
   IREE_ASSERT_ARGUMENT(out_fill_value);
   for (iree_host_size_t i = 0; i < binding_set.count; ++i) {
     const id4_pipeline_boundary_tensor_plan_t* boundary =
@@ -869,7 +921,7 @@ iree_status_t QueueUpdateInitializedBoundaryTensorsFromFixture(
       continue;
     }
     const FixtureTensor* fixture_tensor =
-        fixture_inputs.FindTensor(boundary->layout.name);
+        fixture_tensors.FindTensor(IREE_SV("input"), boundary->layout.name);
     if (!fixture_tensor) {
       return iree_make_status(
           IREE_STATUS_NOT_FOUND,

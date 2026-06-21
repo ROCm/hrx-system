@@ -94,25 +94,36 @@ class BufferBindingSet {
 typedef struct FixtureTensor {
   // Stable tensor name from the fixture manifest.
   std::string name;
+  // Fixture tensor role such as input or expected.
+  std::string role;
   // Relative NPY payload path from the fixture manifest.
   std::string file;
   // Tensor dtype declared by the fixture manifest and validated against NPY.
   id4_pipeline_tensor_dtype_t dtype = ID4_PIPELINE_TENSOR_DTYPE_INVALID;
   // Tensor shape declared by the fixture manifest and validated against NPY.
   id4_pipeline_tensor_shape_t shape = {};
+  // Absolute tolerance used when this tensor is an expected value.
+  double absolute_tolerance = 0.0;
+  // Relative tolerance used when this tensor is an expected value.
+  double relative_tolerance = 0.0;
+  // True when tolerance metadata was present in the fixture manifest.
+  bool has_tolerance = false;
   // Raw dense tensor bytes parsed from the NPY payload.
   std::vector<uint8_t> payload;
 } FixtureTensor;
 
-typedef struct FixtureInputSet {
+typedef struct FixtureTensorSet {
   // Fixture directory containing manifest.json and payload files.
   std::string directory;
-  // Input tensor payloads available for boundary initialization.
+  // Tensor payloads loaded from the fixture manifest.
   std::vector<FixtureTensor> tensors;
 
   // Returns the loaded tensor with |name| or NULL when absent.
   const FixtureTensor* FindTensor(iree_string_view_t name) const;
-} FixtureInputSet;
+  // Returns the loaded tensor with |role| and |name| or NULL when absent.
+  const FixtureTensor* FindTensor(iree_string_view_t role,
+                                  iree_string_view_t name) const;
+} FixtureTensorSet;
 
 typedef struct LiveStageContext {
   // Proactor pool used by the live HAL device.
@@ -213,21 +224,21 @@ iree_status_t ReadBindingToHost(iree_hal_device_t* device,
                                 iree_hal_semaphore_list_t wait_list,
                                 std::vector<uint8_t>* out_bytes);
 
-// Loads fixture input tensors from a fixture manifest directory.
-iree_status_t LoadFixtureInputs(iree_string_view_t fixture_directory,
-                                FixtureInputSet* out_fixture_inputs);
+// Loads fixture tensors from a fixture manifest directory.
+iree_status_t LoadFixtureTensors(iree_string_view_t fixture_directory,
+                                 FixtureTensorSet* out_fixture_tensors);
 
 // Reads a uint32-compatible length from a rank-1 fixture tensor.
 iree_status_t InferRank1TensorLengthFromFixture(
-    const FixtureInputSet& fixture_inputs, iree_string_view_t tensor_name,
+    const FixtureTensorSet& fixture_tensors, iree_string_view_t tensor_name,
     id4_pipeline_tensor_dtype_t dtype, uint32_t* out_length);
 
 // Queues updates for all initialized boundary tensors from fixture inputs.
 iree_status_t QueueUpdateInitializedBoundaryTensorsFromFixture(
     iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
     const id4_pipeline_plan_t* plan, const BufferBindingSet& binding_set,
-    const FixtureInputSet& fixture_inputs, iree_hal_semaphore_t* fill_semaphore,
-    uint64_t* out_fill_value);
+    const FixtureTensorSet& fixture_tensors,
+    iree_hal_semaphore_t* fill_semaphore, uint64_t* out_fill_value);
 
 // Verifies exported boundary capture payloads differ from |sentinel|.
 iree_status_t VerifyCapturedExportedBoundaryTensorsWereWritten(

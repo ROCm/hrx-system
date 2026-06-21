@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <cmath>
 #include <cstring>
 #include <vector>
 
@@ -11,8 +12,13 @@
 #include "experimental/id4/pipeline/stage.h"
 #include "experimental/id4/stages/hal_integration_util.h"
 #include "experimental/id4/stages/sampler.h"
+#include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+
+IREE_FLAG(string, id4_fixture_dir, "",
+          "Directory containing an ID4 sampler fixture manifest and tensor "
+          "payloads used to initialize stage inputs and verify outputs.");
 
 namespace {
 
@@ -37,10 +43,31 @@ static iree_status_t CreateSamplerStage(
                                           iree_allocator_system(), out_stage);
 }
 
-static std::vector<uint8_t> ToBytes(const std::vector<float>& values) {
-  std::vector<uint8_t> bytes(values.size() * sizeof(values[0]));
-  std::memcpy(bytes.data(), values.data(), bytes.size());
-  return bytes;
+static iree_status_t FindFixtureTensor(
+    const id4::test::FixtureTensorSet& fixture_tensors, iree_string_view_t role,
+    iree_string_view_t name, const id4::test::FixtureTensor** out_tensor) {
+  *out_tensor = fixture_tensors.FindTensor(role, name);
+  if (*out_tensor) return iree_ok_status();
+  return iree_make_status(IREE_STATUS_NOT_FOUND,
+                          "fixture tensor `%.*s` with role `%.*s` not found",
+                          static_cast<int>(name.size), name.data,
+                          static_cast<int>(role.size), role.data);
+}
+
+static iree_status_t MakeProgramShape(
+    id4_pipeline_tensor_shape_t tensor_shape,
+    id4_pipeline_program_shape_t* out_program_shape) {
+  if (tensor_shape.rank > IREE_ARRAYSIZE(out_program_shape->dims)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "fixture tensor rank %u exceeds program max rank",
+                            tensor_shape.rank);
+  }
+  std::memset(out_program_shape, 0, sizeof(*out_program_shape));
+  out_program_shape->rank = tensor_shape.rank;
+  for (uint32_t i = 0; i < tensor_shape.rank; ++i) {
+    out_program_shape->dims[i] = tensor_shape.dims[i];
+  }
+  return iree_ok_status();
 }
 
 static std::vector<float> ToF32Vector(const std::vector<uint8_t>& bytes) {
@@ -49,7 +76,49 @@ static std::vector<float> ToF32Vector(const std::vector<uint8_t>& bytes) {
   return values;
 }
 
-TEST(SamplerDenoiseStageIntegration, PrepareAndIssueDenoiseStep) {
+static void ExpectF32TensorNear(const std::vector<uint8_t>& actual_bytes,
+                                const id4::test::FixtureTensor& expected) {
+  ASSERT_EQ(expected.dtype, ID4_PIPELINE_TENSOR_DTYPE_F32);
+  ASSERT_TRUE(expected.has_tolerance);
+  ASSERT_EQ(actual_bytes.size(), expected.payload.size());
+
+  std::vector<float> actual = ToF32Vector(actual_bytes);
+  std::vector<float> expected_values = ToF32Vector(expected.payload);
+  ASSERT_EQ(actual.size(), expected_values.size());
+  for (iree_host_size_t i = 0; i < actual.size(); ++i) {
+    const double tolerance =
+        expected.absolute_tolerance +
+        expected.relative_tolerance * std::fabs((double)expected_values[i]);
+    EXPECT_NEAR(actual[i], expected_values[i], tolerance) << "element " << i;
+  }
+}
+
+TEST(SamplerDenoiseStageIntegration, PrepareAndIssueDenoiseStepFixture) {
+  iree_string_view_t fixture_directory =
+      iree_make_cstring_view(FLAG_id4_fixture_dir);
+  ASSERT_FALSE(iree_string_view_is_empty(fixture_directory))
+      << "--id4_fixture_dir is required for sampler integration correctness";
+
+  id4::test::FixtureTensorSet fixture_tensors;
+  IREE_ASSERT_OK(
+      id4::test::LoadFixtureTensors(fixture_directory, &fixture_tensors));
+
+  const id4::test::FixtureTensor* cond_out = nullptr;
+  IREE_ASSERT_OK(FindFixtureTensor(fixture_tensors, IREE_SV("input"),
+                                   id4_sampler_program_cond_out_boundary_name(),
+                                   &cond_out));
+  id4_pipeline_program_shape_t latent_shape;
+  IREE_ASSERT_OK(MakeProgramShape(cond_out->shape, &latent_shape));
+
+  const id4::test::FixtureTensor* expected_guided_pred = nullptr;
+  IREE_ASSERT_OK(FindFixtureTensor(fixture_tensors, IREE_SV("expected"),
+                                   id4_sampler_program_guided_pred_tap_name(),
+                                   &expected_guided_pred));
+  const id4::test::FixtureTensor* expected_denoised = nullptr;
+  IREE_ASSERT_OK(FindFixtureTensor(fixture_tensors, IREE_SV("expected"),
+                                   id4_sampler_program_denoised_boundary_name(),
+                                   &expected_denoised));
+
   id4::test::LiveStageContext context;
   IREE_ASSERT_OK(id4::test::CreateLiveStageContextFromFlags(&context));
 
@@ -69,12 +138,10 @@ TEST(SamplerDenoiseStageIntegration, PrepareAndIssueDenoiseStep) {
   load_options.diagnostics_sink = &diagnostics_sink;
   IREE_ASSERT_OK(id4_pipeline_stage_load(stage.get(), &load_options));
 
-  constexpr uint32_t kElementCount = 257;
   id4_sampler_denoise_stage_plan_options_t sampler_options;
   std::memset(&sampler_options, 0, sizeof(sampler_options));
   sampler_options.structure_size = sizeof(sampler_options);
-  sampler_options.request.latent_shape =
-      id4_pipeline_program_make_shape_rank1(kElementCount);
+  sampler_options.request.latent_shape = latent_shape;
 
   id4_pipeline_stage_plan_options_t plan_options;
   std::memset(&plan_options, 0, sizeof(plan_options));
@@ -111,71 +178,15 @@ TEST(SamplerDenoiseStageIntegration, PrepareAndIssueDenoiseStep) {
       context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
       &diagnostic_tap_bindings));
 
-  std::vector<float> cond_out(kElementCount);
-  std::vector<float> uncond_out(kElementCount);
-  std::vector<float> x_t(kElementCount, 10.0f);
-  for (uint32_t i = 0; i < kElementCount; ++i) {
-    cond_out[i] = static_cast<float>(i + 1);
-    uncond_out[i] = static_cast<float>(i);
-  }
-  const std::vector<float> scalings = {1.0f, -1.0f, 0.0f};
-  const std::vector<float> guidance = {7.0f, 0.0f, 0.0f};
-
   id4::test::OwningRef<iree_hal_semaphore_t, iree_hal_semaphore_release>
       update_semaphore;
   IREE_ASSERT_OK(iree_hal_semaphore_create(
       context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, 0,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, update_semaphore.out()));
   uint64_t update_value = 0;
-
-  iree_hal_buffer_binding_t cond_binding = {};
-  IREE_ASSERT_OK(id4::test::FindBoundaryBinding(
-      plan.get(), boundary_bindings,
-      id4_sampler_program_cond_out_boundary_name(), &cond_binding));
-  std::vector<uint8_t> cond_bytes = ToBytes(cond_out);
-  IREE_ASSERT_OK(id4::test::QueueUpdateBinding(
-      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, &cond_binding,
-      cond_bytes.data(), cond_bytes.size(), update_semaphore.get(),
-      &update_value));
-
-  iree_hal_buffer_binding_t uncond_binding = {};
-  IREE_ASSERT_OK(id4::test::FindBoundaryBinding(
-      plan.get(), boundary_bindings,
-      id4_sampler_program_uncond_out_boundary_name(), &uncond_binding));
-  std::vector<uint8_t> uncond_bytes = ToBytes(uncond_out);
-  IREE_ASSERT_OK(id4::test::QueueUpdateBinding(
-      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, &uncond_binding,
-      uncond_bytes.data(), uncond_bytes.size(), update_semaphore.get(),
-      &update_value));
-
-  iree_hal_buffer_binding_t x_t_binding = {};
-  IREE_ASSERT_OK(id4::test::FindBoundaryBinding(
-      plan.get(), boundary_bindings, id4_sampler_program_x_t_boundary_name(),
-      &x_t_binding));
-  std::vector<uint8_t> x_t_bytes = ToBytes(x_t);
-  IREE_ASSERT_OK(id4::test::QueueUpdateBinding(
-      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, &x_t_binding,
-      x_t_bytes.data(), x_t_bytes.size(), update_semaphore.get(),
-      &update_value));
-
-  iree_hal_buffer_binding_t scalings_binding = {};
-  IREE_ASSERT_OK(id4::test::FindBoundaryBinding(
-      plan.get(), boundary_bindings,
-      id4_sampler_program_scalings_boundary_name(), &scalings_binding));
-  std::vector<uint8_t> scalings_bytes = ToBytes(scalings);
-  IREE_ASSERT_OK(id4::test::QueueUpdateBinding(
-      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, &scalings_binding,
-      scalings_bytes.data(), scalings_bytes.size(), update_semaphore.get(),
-      &update_value));
-
-  iree_hal_buffer_binding_t guidance_binding = {};
-  IREE_ASSERT_OK(id4::test::FindBoundaryBinding(
-      plan.get(), boundary_bindings,
-      id4_sampler_program_guidance_boundary_name(), &guidance_binding));
-  std::vector<uint8_t> guidance_bytes = ToBytes(guidance);
-  IREE_ASSERT_OK(id4::test::QueueUpdateBinding(
-      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, &guidance_binding,
-      guidance_bytes.data(), guidance_bytes.size(), update_semaphore.get(),
+  IREE_ASSERT_OK(id4::test::QueueUpdateInitializedBoundaryTensorsFromFixture(
+      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
+      boundary_bindings, fixture_tensors, update_semaphore.get(),
       &update_value));
 
   const uint8_t sentinel = 0xA5;
@@ -233,14 +244,8 @@ TEST(SamplerDenoiseStageIntegration, PrepareAndIssueDenoiseStep) {
       context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, &guided_pred_binding,
       read_wait.list(), &guided_pred_bytes));
 
-  std::vector<float> denoised = ToF32Vector(denoised_bytes);
-  std::vector<float> guided_pred = ToF32Vector(guided_pred_bytes);
-  for (uint32_t i = 0; i < kElementCount; ++i) {
-    const float expected_guided_pred = static_cast<float>(i + 7);
-    const float expected_denoised = static_cast<float>(3 - (int32_t)i);
-    EXPECT_FLOAT_EQ(guided_pred[i], expected_guided_pred);
-    EXPECT_FLOAT_EQ(denoised[i], expected_denoised);
-  }
+  ExpectF32TensorNear(guided_pred_bytes, *expected_guided_pred);
+  ExpectF32TensorNear(denoised_bytes, *expected_denoised);
 }
 
 }  // namespace

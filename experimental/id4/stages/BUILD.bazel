@@ -186,6 +186,7 @@ iree_runtime_cc_test(
         "//experimental/id4/pipeline:plan",
         "//experimental/id4/pipeline:stage",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

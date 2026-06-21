@@ -201,6 +201,7 @@ iree_cc_test(
     ::hal_integration_util
     ::sampler
     iree::base
+    iree::base::tooling::flags
     iree::experimental::id4::pipeline::plan
     iree::experimental::id4::pipeline::stage
     iree::hal
