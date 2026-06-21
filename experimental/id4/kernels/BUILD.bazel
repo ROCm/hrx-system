@@ -44,9 +44,30 @@ _KERNEL_CASES = [
         "source": "sampler_cfg_denoise_f32.loom",
         "target_name": "sampler_cfg_denoise_f32_full_latent",
     },
+    {
+        "actual_case": "@id4_qwen3_vl_condition_forward_f32_small_case",
+        "benchmark": "@id4_qwen3_vl_condition_forward_f32_small",
+        "configs": [
+            "--config=id4.qwen3_vl.condition.element_count=257",
+            "--config=id4.qwen3_vl.condition.workgroup_size_x=256",
+        ],
+        "source": "qwen3_vl_condition_f32.loom",
+        "target_name": "qwen3_vl_condition_f32_small",
+    },
+    {
+        "actual_case": "@id4_qwen3_vl_condition_forward_f32_fixture_slice_case",
+        "benchmark": "@id4_qwen3_vl_condition_forward_f32_fixture_slice",
+        "configs": [
+            "--config=id4.qwen3_vl.condition.element_count=2048",
+            "--config=id4.qwen3_vl.condition.workgroup_size_x=256",
+        ],
+        "source": "qwen3_vl_condition_f32.loom",
+        "target_name": "qwen3_vl_condition_f32_fixture_slice",
+    },
 ]
 
 _KERNEL_SOURCES = [
+    "qwen3_vl_condition_f32.loom",
     "sampler_cfg_denoise_f32.loom",
     "smoke_configured.loom",
 ]

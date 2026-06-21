@@ -15,6 +15,22 @@ package(
 )
 
 iree_runtime_cc_library(
+    name = "qwen3_vl",
+    srcs = ["qwen3_vl.c"],
+    hdrs = ["qwen3_vl.h"],
+    deps = [
+        "//experimental/id4/pipeline:diagnostics",
+        "//experimental/id4/pipeline:kernel_cache",
+        "//experimental/id4/pipeline:plan",
+        "//experimental/id4/pipeline:region",
+        "//experimental/id4/pipeline:stage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "smoke",
     srcs = ["smoke.c"],
     hdrs = ["smoke.h"],
@@ -31,24 +47,73 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "test_util",
+    testonly = True,
+    srcs = ["test_util.cc"],
+    hdrs = ["test_util.h"],
+    deps = [
+        "//experimental/id4/pipeline:diagnostics",
+        "//experimental/id4/pipeline:kernel_cache",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/local_sync:sync_driver",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "qwen3_vl_test_util",
+    testonly = True,
+    srcs = ["qwen3_vl_test_util.cc"],
+    hdrs = ["qwen3_vl_test_util.h"],
+    deps = [
+        ":qwen3_vl",
+        ":test_util",
+        "//experimental/id4/pipeline:kernel_cache",
+        "//experimental/id4/pipeline:stage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/local:executable_loader",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "smoke_test_util",
     testonly = True,
     srcs = ["smoke_test_util.cc"],
     hdrs = ["smoke_test_util.h"],
     deps = [
         ":smoke",
+        ":test_util",
         "//experimental/id4/pipeline:diagnostics",
         "//experimental/id4/pipeline:kernel_cache",
         "//experimental/id4/pipeline:stage",
-        "//runtime/src/iree/async",
-        "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers/local_sync:sync_driver",
         "//runtime/src/iree/hal/local:executable_loader",
         "//runtime/src/iree/io:parameter_index",
         "//runtime/src/iree/io:parameter_index_provider",
         "//runtime/src/iree/io:parameter_provider",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "qwen3_vl_test",
+    srcs = ["qwen3_vl_test.cc"],
+    deps = [
+        ":qwen3_vl",
+        ":qwen3_vl_test_util",
+        ":test_util",
+        "//experimental/id4/pipeline:plan",
+        "//experimental/id4/pipeline:stage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/tooling:numpy_io",
     ],
 )
 
@@ -65,6 +130,21 @@ iree_runtime_cc_test(
         "//runtime/src/iree/io:parameter_provider",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_benchmark(
+    name = "qwen3_vl_benchmark",
+    srcs = ["qwen3_vl_benchmark.cc"],
+    deps = [
+        ":qwen3_vl",
+        ":qwen3_vl_test_util",
+        ":test_util",
+        "//experimental/id4/pipeline:plan",
+        "//experimental/id4/pipeline:stage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gbenchmark_harness",
     ],
 )
 

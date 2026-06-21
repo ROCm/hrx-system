@@ -1,0 +1,51 @@
+config.decl @id4.qwen3_vl.condition.element_count : %value: index where [range(%value, 1, 1048576)]
+config.decl @id4.qwen3_vl.condition.workgroup_size_x : %value: index where [range(%value, 1, 1024)]
+
+kernel.def export("id4_qwen3_vl_condition_forward_f32") @id4_qwen3_vl_condition_forward_f32() {
+  %unit = index.constant 1 : index
+  %element_count = config.get @id4.qwen3_vl.condition.element_count : index
+  %workgroup_size_x = config.get @id4.qwen3_vl.condition.workgroup_size_x : index
+  %rounding = index.sub %workgroup_size_x, %unit : index
+  %rounded = index.add %element_count, %rounding : index
+  %workgroups_x = index.div %rounded, %workgroup_size_x : index
+  kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%selected_hidden_states: buffer, %condition: buffer) {
+  %base = index.constant 0 : offset
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %element_count = config.get @id4.qwen3_vl.condition.element_count : index
+  %workgroup_size_x = config.get @id4.qwen3_vl.condition.workgroup_size_x : index
+  %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
+  %in_bounds = index.cmp ult, %element_index, %element_count : index
+
+  %selected_noalias, %condition_noalias = buffer.assume.noalias %selected_hidden_states, %condition : buffer, buffer
+  %selected_global = buffer.assume.memory_space<global> %selected_noalias : buffer
+  %condition_global = buffer.assume.memory_space<global> %condition_noalias : buffer
+  %selected_view = buffer.view %selected_global[%base] : buffer -> view<[%element_count]xf32, #dense>
+  %condition_view = buffer.view %condition_global[%base] : buffer -> view<[%element_count]xf32, #dense>
+
+  scf.if %in_bounds {
+    %value = view.load %selected_view[%element_index] : view<[%element_count]xf32, #dense> -> f32
+    view.store %value, %condition_view[%element_index] : f32, view<[%element_count]xf32, #dense>
+  }
+  kernel.return
+}
+
+check.case public @id4_qwen3_vl_condition_forward_f32_small_case {
+  %selected_hidden_states = check.generate.iota offset(-3.5) step(0.25) : tensor<257xf32>
+  %condition = check.generate.fill value(0.0) : tensor<257xf32>
+  func.call @id4_qwen3_vl_condition_forward_f32(%selected_hidden_states, %condition) : (tensor<257xf32>, tensor<257xf32>)
+  check.expect.close actual(%condition) expected(%selected_hidden_states) atol(0.0) rtol(0.0) nan(same) : tensor<257xf32>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_condition_forward_f32_fixture_slice_case {
+  %selected_hidden_states = check.generate.iota offset(1.0) step(1.0) : tensor<2048xf32>
+  %condition = check.generate.fill value(0.0) : tensor<2048xf32>
+  func.call @id4_qwen3_vl_condition_forward_f32(%selected_hidden_states, %condition) : (tensor<2048xf32>, tensor<2048xf32>)
+  check.expect.close actual(%condition) expected(%selected_hidden_states) atol(0.0) rtol(0.0) nan(same) : tensor<2048xf32>
+  check.return
+}
+
+check.benchmark<@id4_qwen3_vl_condition_forward_f32_small_case> @id4_qwen3_vl_condition_forward_f32_small
+check.benchmark<@id4_qwen3_vl_condition_forward_f32_fixture_slice_case> @id4_qwen3_vl_condition_forward_f32_fixture_slice

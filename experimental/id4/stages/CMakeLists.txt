@@ -11,6 +11,25 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
+    qwen3_vl
+  HDRS
+    "qwen3_vl.h"
+  SRCS
+    "qwen3_vl.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    iree::experimental::id4::pipeline::diagnostics
+    iree::experimental::id4::pipeline::kernel_cache
+    iree::experimental::id4::pipeline::plan
+    iree::experimental::id4::pipeline::region
+    iree::experimental::id4::pipeline::stage
+    iree::hal
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     smoke
   HDRS
     "smoke.h"
@@ -30,6 +49,44 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    test_util
+  HDRS
+    "test_util.h"
+  SRCS
+    "test_util.cc"
+  DEPS
+    iree::async
+    iree::async::util::proactor_pool
+    iree::base
+    iree::experimental::id4::pipeline::diagnostics
+    iree::experimental::id4::pipeline::kernel_cache
+    iree::hal
+    iree::hal::drivers::local_sync::sync_driver
+  TESTONLY
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
+    qwen3_vl_test_util
+  HDRS
+    "qwen3_vl_test_util.h"
+  SRCS
+    "qwen3_vl_test_util.cc"
+  DEPS
+    ::qwen3_vl
+    ::test_util
+    iree::base
+    iree::experimental::id4::pipeline::kernel_cache
+    iree::experimental::id4::pipeline::stage
+    iree::hal
+    iree::hal::local::executable_loader
+  TESTONLY
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     smoke_test_util
   HDRS
     "smoke_test_util.h"
@@ -37,20 +94,38 @@ iree_cc_library(
     "smoke_test_util.cc"
   DEPS
     ::smoke
-    iree::async
-    iree::async::util::proactor_pool
+    ::test_util
     iree::base
     iree::experimental::id4::pipeline::diagnostics
     iree::experimental::id4::pipeline::kernel_cache
     iree::experimental::id4::pipeline::stage
     iree::hal
-    iree::hal::drivers::local_sync::sync_driver
     iree::hal::local::executable_loader
     iree::io::parameter_index
     iree::io::parameter_index_provider
     iree::io::parameter_provider
   TESTONLY
   PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    qwen3_vl_test
+  SRCS
+    "qwen3_vl_test.cc"
+  DEPS
+    ::qwen3_vl
+    ::qwen3_vl_test_util
+    ::test_util
+    iree::base
+    iree::experimental::id4::pipeline::plan
+    iree::experimental::id4::pipeline::stage
+    iree::hal
+    iree::io::file_handle
+    iree::io::stream
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::tooling::numpy_io
 )
 
 iree_cc_test(
@@ -68,6 +143,24 @@ iree_cc_test(
     iree::io::parameter_provider
     iree::testing::gtest
     iree::testing::gtest_main
+)
+
+iree_cc_binary_benchmark(
+  NAME
+    qwen3_vl_benchmark
+  SRCS
+    "qwen3_vl_benchmark.cc"
+  DEPS
+    ::qwen3_vl
+    ::qwen3_vl_test_util
+    ::test_util
+    iree::base
+    iree::experimental::id4::pipeline::plan
+    iree::experimental::id4::pipeline::stage
+    iree::hal
+    iree::testing::gbenchmark_harness
+    iree::third_party::google_benchmark
+  TESTONLY
 )
 
 iree_cc_binary_benchmark(

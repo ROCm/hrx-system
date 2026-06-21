@@ -6,13 +6,9 @@
 
 #include "experimental/id4/stages/smoke_test_util.h"
 
-#include <algorithm>
 #include <cstring>
 
 #include "experimental/id4/stages/smoke.h"
-#include "iree/async/frontier_tracker.h"
-#include "iree/async/util/proactor_pool.h"
-#include "iree/hal/drivers/local_sync/sync_device.h"
 #include "iree/hal/local/local_executable.h"
 #include "iree/io/parameter_index.h"
 #include "iree/io/parameter_index_provider.h"
@@ -38,84 +34,6 @@ kernel.def export("id4_smoke_configured") @id4_configured_smoke() {
   kernel.return
 }
 )";
-
-std::string ToString(iree_string_view_t value) {
-  return value.data ? std::string(value.data, value.size) : std::string();
-}
-
-bool ContainsKey(const std::vector<std::string>& keys, const char* key) {
-  return std::find(keys.begin(), keys.end(), key) != keys.end();
-}
-
-static iree_status_t CaptureDiagnostics(
-    void* user_data, const id4_pipeline_diagnostic_event_t* event) {
-  SmokeDiagnostics* diagnostics = static_cast<SmokeDiagnostics*>(user_data);
-  ++diagnostics->count;
-  diagnostics->keys.push_back(ToString(event->key));
-  if (event->kind == ID4_PIPELINE_DIAGNOSTIC_EVENT_KIND_KERNEL) {
-    ++diagnostics->kernel_event_count;
-  }
-  return iree_ok_status();
-}
-
-id4_pipeline_diagnostics_sink_t DiagnosticsSink(SmokeDiagnostics* diagnostics) {
-  return (id4_pipeline_diagnostics_sink_t){
-      // Callback used to capture events into SmokeDiagnostics.
-      /*.emit=*/CaptureDiagnostics,
-      // Caller-owned diagnostics structure.
-      /*.user_data=*/diagnostics,
-  };
-}
-
-iree_hal_device_group_t* CreateLocalSyncDeviceGroup() {
-  iree_async_proactor_pool_t* proactor_pool = nullptr;
-  IREE_CHECK_OK(iree_async_proactor_pool_create(
-      /*node_count=*/1, /*node_ids=*/nullptr,
-      iree_async_proactor_pool_options_default(), iree_allocator_system(),
-      &proactor_pool));
-
-  iree_hal_allocator_t* device_allocator = nullptr;
-  IREE_CHECK_OK(iree_hal_allocator_create_heap(
-      IREE_SV("id4-smoke-local-sync"), iree_allocator_system(),
-      iree_allocator_system(), &device_allocator));
-
-  iree_hal_sync_device_params_t sync_params;
-  iree_hal_sync_device_params_initialize(&sync_params);
-  iree_hal_device_create_params_t create_params =
-      iree_hal_device_create_params_default();
-  create_params.proactor_pool = proactor_pool;
-
-  iree_hal_device_t* device = nullptr;
-  iree_status_t status = iree_hal_sync_device_create(
-      IREE_SV("id4-smoke-local-sync"), &sync_params, &create_params,
-      /*loader_count=*/0, /*loaders=*/nullptr, device_allocator,
-      iree_allocator_system(), &device);
-  iree_hal_allocator_release(device_allocator);
-  iree_async_proactor_pool_release(proactor_pool);
-  IREE_CHECK_OK(status);
-
-  iree_async_frontier_tracker_options_t tracker_options =
-      iree_async_frontier_tracker_options_default();
-  iree_async_frontier_tracker_t* frontier_tracker = nullptr;
-  IREE_CHECK_OK(iree_async_frontier_tracker_create(
-      tracker_options, iree_allocator_system(), &frontier_tracker));
-
-  iree_hal_device_group_t* device_group = nullptr;
-  status = iree_hal_device_group_create_from_device(
-      device, frontier_tracker, iree_allocator_system(), &device_group);
-  iree_async_frontier_tracker_release(frontier_tracker);
-  iree_hal_device_release(device);
-  IREE_CHECK_OK(status);
-  return device_group;
-}
-
-iree_hal_semaphore_t* CreateSemaphore(iree_hal_device_t* device) {
-  iree_hal_semaphore_t* semaphore = nullptr;
-  IREE_CHECK_OK(iree_hal_semaphore_create(
-      device, IREE_HAL_QUEUE_AFFINITY_ANY,
-      /*initial_value=*/0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore));
-  return semaphore;
-}
 
 typedef struct SmokeExecutable {
   // Local HAL executable base.
@@ -390,17 +308,6 @@ iree_status_t CreateExecutableCache(iree_allocator_t host_allocator,
   cache->host_allocator = host_allocator;
   *out_cache = cache;
   return iree_ok_status();
-}
-
-iree_status_t CreateKernelCache(
-    iree_allocator_t host_allocator,
-    id4_pipeline_kernel_cache_t** out_kernel_cache) {
-  id4_pipeline_kernel_cache_create_options_t options;
-  std::memset(&options, 0, sizeof(options));
-  options.structure_size = sizeof(options);
-  options.amdgpu_processor = IREE_SV("gfx1100");
-  return id4_pipeline_kernel_cache_create(&options, host_allocator,
-                                          out_kernel_cache);
 }
 
 iree_status_t CreateSmokeStage(iree_hal_device_group_t* device_group,
