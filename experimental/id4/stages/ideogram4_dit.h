@@ -29,6 +29,9 @@ typedef struct id4_ideogram4_dit_stage_create_options_t {
   id4_pipeline_stage_services_t services;
   // Loom kernel cache used when preparing Ideogram4 DiT kernels.
   id4_pipeline_kernel_cache_t* kernel_cache;
+  // Parameter provider scope containing Ideogram4 DiT weights; empty selects
+  // the anonymous scope. The stage copies this string during creation.
+  iree_string_view_t parameter_scope;
   // Static Ideogram4 DiT model dimensions.
   id4_ideogram4_dit_model_config_t model;
 } id4_ideogram4_dit_stage_create_options_t;

@@ -29,6 +29,9 @@ typedef struct id4_vae_stage_create_options_t {
   id4_pipeline_stage_services_t services;
   // Loom kernel cache used when preparing VAE kernels.
   id4_pipeline_kernel_cache_t* kernel_cache;
+  // Parameter provider scope containing VAE weights; empty selects the
+  // anonymous scope. The stage copies this string during creation.
+  iree_string_view_t parameter_scope;
   // Static VAE implementation capabilities.
   id4_vae_model_config_t model;
 } id4_vae_stage_create_options_t;

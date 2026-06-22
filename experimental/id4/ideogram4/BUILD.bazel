@@ -1,0 +1,36 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_runtime_cc_test(
+    name = "one_step_integration_test",
+    srcs = ["one_step_integration_test.cc"],
+    tags = [
+        "manual",
+        "requires-gpu",
+    ],
+    deps = [
+        "//experimental/id4/pipeline:plan",
+        "//experimental/id4/pipeline:stage",
+        "//experimental/id4/stages:hal_integration_util",
+        "//experimental/id4/stages:ideogram4_dit",
+        "//experimental/id4/stages:qwen3_vl",
+        "//experimental/id4/stages:sampler",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:parameter_provider",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

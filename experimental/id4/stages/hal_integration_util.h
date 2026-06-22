@@ -72,6 +72,21 @@ struct SemaphoreListStorage {
   iree_hal_semaphore_list_t list();
 };
 
+struct FixedSemaphoreListStorage {
+  // Number of live semaphore edges in this storage.
+  iree_host_size_t count = 0;
+  // Stack-owned semaphore handles.
+  iree_hal_semaphore_t* semaphores[4] = {};
+  // Stack-owned payload values.
+  uint64_t payload_values[4] = {};
+
+  // Appends a semaphore edge to this stack-backed list.
+  iree_status_t push(iree_hal_semaphore_t* semaphore, uint64_t payload_value);
+
+  // Returns a HAL semaphore list backed by this storage.
+  iree_hal_semaphore_list_t list();
+};
+
 class BufferBindingSet {
  public:
   BufferBindingSet() = default;

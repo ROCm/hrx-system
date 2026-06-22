@@ -27,6 +27,8 @@ typedef struct id4_qwen3_vl_stage_t {
   iree_allocator_t host_allocator;
   // Kernel cache used for Loom compilation and HAL executable preparation.
   id4_pipeline_kernel_cache_t* kernel_cache;
+  // Parameter provider scope containing Qwen3-VL weights.
+  iree_string_view_t parameter_scope;
   // Static model configuration owned by the stage.
   id4_qwen3_vl_model_config_t model;
   // Selected layer ordinal storage owned by the stage.
@@ -106,6 +108,18 @@ static iree_status_t id4_qwen3_vl_stage_copy_model_config(
       stage->selected_layer_ordinals, source->selected_layer_ordinals,
       source->selected_layer_count * sizeof(stage->selected_layer_ordinals[0]));
   stage->model.selected_layer_ordinals = stage->selected_layer_ordinals;
+  return iree_ok_status();
+}
+
+static iree_status_t id4_qwen3_vl_stage_copy_parameter_scope(
+    iree_string_view_t source, id4_qwen3_vl_stage_t* stage) {
+  stage->parameter_scope = iree_string_view_empty();
+  if (iree_string_view_is_empty(source)) return iree_ok_status();
+  char* storage = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(stage->host_allocator, source.size,
+                                             (void**)&storage));
+  memcpy(storage, source.data, source.size);
+  stage->parameter_scope = iree_make_string_view(storage, source.size);
   return iree_ok_status();
 }
 
@@ -204,7 +218,7 @@ static iree_status_t id4_qwen3_vl_stage_create_program_plan(
   plan_options.stage_options = options;
   plan_options.program = program;
   plan_options.device_group = stage->base.services.device_group;
-  plan_options.parameter_scope = iree_string_view_empty();
+  plan_options.parameter_scope = stage->parameter_scope;
   plan_options.parameter_slab_binding_slot =
       ID4_QWEN3_VL_STAGE_PARAMETER_BINDING_SLOT;
   plan_options.boundary_binding_slot_base =
@@ -284,6 +298,7 @@ static void id4_qwen3_vl_stage_destroy(id4_pipeline_stage_t* base_stage) {
   iree_allocator_t host_allocator = stage->host_allocator;
   id4_pipeline_kernel_cache_release(stage->kernel_cache);
   iree_allocator_free(host_allocator, stage->selected_layer_ordinals);
+  iree_allocator_free(host_allocator, (void*)stage->parameter_scope.data);
   id4_pipeline_stage_deinitialize(base_stage);
   iree_allocator_free(host_allocator, stage);
 }
@@ -320,6 +335,10 @@ iree_status_t id4_qwen3_vl_stage_create(
   if (iree_status_is_ok(status)) {
     stage->kernel_cache = options->kernel_cache;
     id4_pipeline_kernel_cache_retain(stage->kernel_cache);
+    status = id4_qwen3_vl_stage_copy_parameter_scope(options->parameter_scope,
+                                                     stage);
+  }
+  if (iree_status_is_ok(status)) {
     status = id4_qwen3_vl_stage_copy_model_config(&options->model, stage);
   }
   if (iree_status_is_ok(status)) {

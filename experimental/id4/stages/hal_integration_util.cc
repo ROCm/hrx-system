@@ -36,6 +36,33 @@ iree_hal_semaphore_list_t SemaphoreListStorage::list() {
   };
 }
 
+iree_status_t FixedSemaphoreListStorage::push(iree_hal_semaphore_t* semaphore,
+                                              uint64_t payload_value) {
+  if (!semaphore) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "fixed semaphore list edge requires a semaphore");
+  }
+  if (count == IREE_ARRAYSIZE(semaphores)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "fixed semaphore list capacity exceeded");
+  }
+  semaphores[count] = semaphore;
+  payload_values[count] = payload_value;
+  ++count;
+  return iree_ok_status();
+}
+
+iree_hal_semaphore_list_t FixedSemaphoreListStorage::list() {
+  return iree_hal_semaphore_list_t{
+      // Number of semaphore edges in the list.
+      /*.count=*/count,
+      // Stack-backed semaphore handles.
+      /*.semaphores=*/count == 0 ? nullptr : semaphores,
+      // Stack-backed payload values.
+      /*.payload_values=*/count == 0 ? nullptr : payload_values,
+  };
+}
+
 BufferBindingSet::~BufferBindingSet() { reset(); }
 
 void BufferBindingSet::reset() {
@@ -201,11 +228,32 @@ static iree_status_t ParseFixtureTolerance(iree_string_view_t record,
   return iree_ok_status();
 }
 
+static bool ShapeEquals(id4_pipeline_tensor_shape_t lhs,
+                        id4_pipeline_tensor_shape_t rhs) {
+  if (lhs.rank != rhs.rank) return false;
+  for (uint32_t i = 0; i < lhs.rank; ++i) {
+    if (lhs.dims[i] != rhs.dims[i]) return false;
+  }
+  return true;
+}
+
 static iree_status_t ParseFixtureSlice(iree_string_view_t record,
                                        FixtureTensor* tensor) {
   iree_string_view_t slice_array = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(
-      iree_json_lookup_object_value(record, IREE_SV("slice"), &slice_array));
+  IREE_RETURN_IF_ERROR(iree_json_try_lookup_object_value(
+      record, IREE_SV("slice"), &slice_array));
+  if (iree_string_view_is_empty(slice_array) ||
+      iree_string_view_equal(slice_array, IREE_SV("null"))) {
+    if (!ShapeEquals(tensor->source_shape, tensor->shape)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "fixture tensor `%s` omits slice metadata but source shape differs",
+          tensor->name.c_str());
+    }
+    tensor->slice_offsets = id4_pipeline_tensor_shape_t{};
+    tensor->slice_offsets.rank = tensor->shape.rank;
+    return iree_ok_status();
+  }
   iree_host_size_t slice_rank = 0;
   IREE_RETURN_IF_ERROR(iree_json_array_length(slice_array, &slice_rank));
   if (slice_rank != tensor->shape.rank) {
@@ -251,15 +299,6 @@ static iree_status_t ParseFixtureSlice(iree_string_view_t record,
     tensor->slice_offsets.dims[i] = start;
   }
   return iree_ok_status();
-}
-
-static bool ShapeEquals(id4_pipeline_tensor_shape_t lhs,
-                        id4_pipeline_tensor_shape_t rhs) {
-  if (lhs.rank != rhs.rank) return false;
-  for (uint32_t i = 0; i < lhs.rank; ++i) {
-    if (lhs.dims[i] != rhs.dims[i]) return false;
-  }
-  return true;
 }
 
 static iree_status_t ParseNpyShapeToken(iree_string_view_t token,
@@ -432,10 +471,15 @@ static iree_status_t LoadFixtureTensorRecord(
       iree_json_lookup_object_value(record, IREE_SV("shape"), &shape_value));
   IREE_RETURN_IF_ERROR(ParseFixtureShape(shape_value, &tensor.shape));
   iree_string_view_t source_shape_value = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(iree_json_lookup_object_value(
+  IREE_RETURN_IF_ERROR(iree_json_try_lookup_object_value(
       record, IREE_SV("source_shape"), &source_shape_value));
-  IREE_RETURN_IF_ERROR(
-      ParseFixtureShape(source_shape_value, &tensor.source_shape));
+  if (iree_string_view_is_empty(source_shape_value) ||
+      iree_string_view_equal(source_shape_value, IREE_SV("null"))) {
+    tensor.source_shape = tensor.shape;
+  } else {
+    IREE_RETURN_IF_ERROR(
+        ParseFixtureShape(source_shape_value, &tensor.source_shape));
+  }
   if (tensor.source_shape.rank != tensor.shape.rank) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,

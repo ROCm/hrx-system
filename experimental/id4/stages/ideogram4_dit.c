@@ -28,6 +28,8 @@ typedef struct id4_ideogram4_dit_stage_t {
   iree_allocator_t host_allocator;
   // Kernel cache used for Loom compilation and HAL executable preparation.
   id4_pipeline_kernel_cache_t* kernel_cache;
+  // Parameter provider scope containing Ideogram4 DiT weights.
+  iree_string_view_t parameter_scope;
   // Static model configuration owned by the stage.
   id4_ideogram4_dit_model_config_t model;
   // True after load has completed.
@@ -189,6 +191,18 @@ static iree_status_t id4_ideogram4_dit_stage_validate_create_options(
   return id4_ideogram4_dit_stage_validate_model_config(&options->model);
 }
 
+static iree_status_t id4_ideogram4_dit_stage_copy_parameter_scope(
+    iree_string_view_t source, id4_ideogram4_dit_stage_t* stage) {
+  stage->parameter_scope = iree_string_view_empty();
+  if (iree_string_view_is_empty(source)) return iree_ok_status();
+  char* storage = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(stage->host_allocator, source.size,
+                                             (void**)&storage));
+  memcpy(storage, source.data, source.size);
+  stage->parameter_scope = iree_make_string_view(storage, source.size);
+  return iree_ok_status();
+}
+
 static id4_pipeline_diagnostic_event_t id4_ideogram4_dit_stage_lifecycle_event(
     iree_string_view_t key, iree_string_view_t message) {
   id4_pipeline_diagnostic_event_t event = {
@@ -285,7 +299,7 @@ static iree_status_t id4_ideogram4_dit_stage_create_program_plan(
   plan_options.stage_options = options;
   plan_options.program = program;
   plan_options.device_group = stage->base.services.device_group;
-  plan_options.parameter_scope = iree_string_view_empty();
+  plan_options.parameter_scope = stage->parameter_scope;
   plan_options.parameter_slab_binding_slot =
       ID4_IDEOGRAM4_DIT_STAGE_PARAMETER_BINDING_SLOT;
   plan_options.boundary_binding_slot_base =
@@ -366,6 +380,7 @@ static void id4_ideogram4_dit_stage_destroy(id4_pipeline_stage_t* base_stage) {
   id4_ideogram4_dit_stage_t* stage = id4_ideogram4_dit_stage_cast(base_stage);
   iree_allocator_t host_allocator = stage->host_allocator;
   id4_pipeline_kernel_cache_release(stage->kernel_cache);
+  iree_allocator_free(host_allocator, (void*)stage->parameter_scope.data);
   id4_pipeline_stage_deinitialize(base_stage);
   iree_allocator_free(host_allocator, stage);
 }
@@ -404,6 +419,10 @@ iree_status_t id4_ideogram4_dit_stage_create(
   if (iree_status_is_ok(status)) {
     stage->kernel_cache = options->kernel_cache;
     id4_pipeline_kernel_cache_retain(stage->kernel_cache);
+    status = id4_ideogram4_dit_stage_copy_parameter_scope(
+        options->parameter_scope, stage);
+  }
+  if (iree_status_is_ok(status)) {
     *out_stage = &stage->base;
   } else if (stage) {
     id4_ideogram4_dit_stage_destroy(&stage->base);

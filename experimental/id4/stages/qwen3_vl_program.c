@@ -1471,6 +1471,10 @@ static iree_status_t id4_qwen3_vl_program_author_rotary(
     uint32_t channel_count, id4_qwen3_vl_tensor_kind_t output_kind,
     id4_pipeline_program_tensor_t* out_output) {
   const uint32_t token_count = options->request.token_count;
+  if ((channel_count % 2) != 0 || (options->model.head_size % 2) != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Qwen3-VL rotary dimensions must be even");
+  }
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
       builder, output_kind, layer_ordinal, ID4_PIPELINE_PROGRAM_DTYPE_F32,
       id4_pipeline_program_make_shape_rank2(token_count, channel_count),
@@ -1492,8 +1496,9 @@ static iree_status_t id4_qwen3_vl_program_author_rotary(
       id4_pipeline_program_write(*out_output),
   };
   iree_hal_dispatch_config_t dispatch_config;
+  const uint32_t pair_count = channel_count / 2;
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_matrix_element_dispatch_config(
-      token_count, channel_count, &dispatch_config));
+      token_count, pair_count, &dispatch_config));
   return id4_qwen3_vl_program_dispatch(
       builder, ID4_QWEN3_VL_OPERATION_ROTARY, layer_ordinal, site,
       ID4_QWEN3_VL_KERNEL_ROTARY, dispatch_config,

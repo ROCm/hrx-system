@@ -427,7 +427,7 @@ iree_status_t id4_pipeline_program_stage_prepare(
     prepare_options.kernel_library = options->stage_options->kernel_library;
     prepare_options.executable_cache = options->executable_cache;
     prepare_options.executable_caching_mode =
-        IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA;
+        IREE_HAL_EXECUTABLE_CACHING_MODE_NONE;
     prepare_options.diagnostic_artifact_flags =
         ID4_PIPELINE_KERNEL_DIAGNOSTIC_ARTIFACT_FLAG_MODULE_TEXT |
         ID4_PIPELINE_KERNEL_DIAGNOSTIC_ARTIFACT_FLAG_COMPILE_REPORT_JSON |
