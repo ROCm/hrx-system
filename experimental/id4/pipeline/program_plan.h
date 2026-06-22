@@ -73,6 +73,8 @@ typedef struct id4_pipeline_program_plan_options_t {
   uint32_t region_local_binding_slot;
   // First binding-table slot assigned to external boundary tensors.
   uint32_t region_boundary_binding_slot_base;
+  // Caller-owned diagnostic tap names to capture.
+  iree_string_view_list_t diagnostic_tap_names;
   // First binding-table slot assigned to diagnostic tap tensors.
   uint32_t diagnostic_tap_binding_slot_base;
   // Diagnostics sink for plan creation events.

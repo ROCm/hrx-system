@@ -150,7 +150,14 @@ TEST(SamplerDenoiseStageIntegration, PrepareAndIssueDenoiseStepFixture) {
   std::memset(&plan_options, 0, sizeof(plan_options));
   plan_options.structure_size = sizeof(plan_options);
   plan_options.next = &sampler_options;
+  const iree_string_view_t diagnostic_tap_names[] = {
+      IREE_SV("guided_pred"),
+  };
   plan_options.flags = ID4_PIPELINE_STAGE_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS;
+  plan_options.diagnostic_tap_names = (iree_string_view_list_t){
+      IREE_ARRAYSIZE(diagnostic_tap_names),
+      diagnostic_tap_names,
+  };
   plan_options.device_index = 0;
   plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
   plan_options.diagnostics_sink = &diagnostics_sink;

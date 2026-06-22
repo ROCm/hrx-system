@@ -14,6 +14,7 @@
 #include "experimental/id4/stages/ideogram4_dit.h"
 #include "experimental/id4/tooling/capture.h"
 #include "iree/base/tooling/flags.h"
+#include "iree/io/file_contents.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -24,6 +25,9 @@ IREE_FLAG(
     string, id4_fixture_dir, "",
     "Directory containing an ID4 DiT fixture manifest and tensor "
     "payloads used to initialize stage inputs and verify reference taps.");
+IREE_FLAG(string, id4_plan_output, "",
+          "Path that receives the planned ID4 DiT stage JSON before "
+          "preparation.");
 
 namespace {
 
@@ -118,6 +122,23 @@ static iree_status_t ConfigureRequestFromFixture(
   out_request->text_token_count =
       static_cast<uint32_t>(condition->shape.dims[1]);
   return iree_ok_status();
+}
+
+static iree_status_t WritePlanJsonIfRequested(const id4_pipeline_plan_t* plan) {
+  iree_string_view_t plan_output = iree_make_cstring_view(FLAG_id4_plan_output);
+  if (iree_string_view_is_empty(plan_output)) return iree_ok_status();
+
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  iree_status_t status = id4_pipeline_plan_format_json(plan, &builder);
+  if (iree_status_is_ok(status)) {
+    iree_string_view_t json = iree_string_builder_view(&builder);
+    status = iree_io_file_contents_write(
+        plan_output, iree_make_const_byte_span(json.data, json.size),
+        iree_allocator_system());
+  }
+  iree_string_builder_deinitialize(&builder);
+  return status;
 }
 
 static iree_status_t CompareExpectedDiagnosticTaps(
@@ -230,11 +251,25 @@ TEST(Ideogram4DitStageIntegration, PrepareAndIssueForwardPreludeFixture) {
   dit_options.structure_size = sizeof(dit_options);
   dit_options.request = request;
 
+  std::vector<iree_string_view_t> diagnostic_tap_names;
+  for (const id4::test::FixtureTensor& tensor : fixture_tensors.tensors) {
+    if (iree_string_view_equal(FixtureTensorRole(tensor),
+                               IREE_SV("expected"))) {
+      diagnostic_tap_names.push_back(FixtureTensorName(tensor));
+    }
+  }
+  ASSERT_FALSE(diagnostic_tap_names.empty())
+      << "DiT fixture contains no expected tensors";
+
   id4_pipeline_stage_plan_options_t plan_options;
   std::memset(&plan_options, 0, sizeof(plan_options));
   plan_options.structure_size = sizeof(plan_options);
   plan_options.next = &dit_options;
   plan_options.flags = ID4_PIPELINE_STAGE_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS;
+  plan_options.diagnostic_tap_names = (iree_string_view_list_t){
+      diagnostic_tap_names.size(),
+      diagnostic_tap_names.data(),
+  };
   plan_options.device_index = 0;
   plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
   plan_options.diagnostics_sink = &diagnostics_sink;
@@ -242,6 +277,7 @@ TEST(Ideogram4DitStageIntegration, PrepareAndIssueForwardPreludeFixture) {
   id4::test::OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release> plan;
   IREE_ASSERT_OK(
       id4_pipeline_stage_plan(stage.get(), &plan_options, plan.out()));
+  IREE_ASSERT_OK(WritePlanJsonIfRequested(plan.get()));
 
   id4::test::OwningRef<iree_hal_semaphore_t, iree_hal_semaphore_release>
       prepare_semaphore;

@@ -76,6 +76,48 @@ static iree_status_t id4_pipeline_program_plan_validate_options(
                             "unsupported program plan flags 0x%x",
                             options->flags);
   }
+  if (iree_all_bits_set(
+          options->flags,
+          ID4_PIPELINE_PROGRAM_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS)) {
+    if (options->diagnostic_tap_names.count == 0) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "program diagnostic tap capture requires at least one tap name");
+    }
+    if (!options->diagnostic_tap_names.values) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "program diagnostic tap capture requires a tap name list");
+    }
+    for (iree_host_size_t i = 0; i < options->diagnostic_tap_names.count; ++i) {
+      iree_string_view_t name = options->diagnostic_tap_names.values[i];
+      if (iree_string_view_is_empty(name)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "program diagnostic tap capture name %" PRIhsz " is empty", i);
+      }
+      for (iree_host_size_t j = 0; j < i; ++j) {
+        if (iree_string_view_equal(name,
+                                   options->diagnostic_tap_names.values[j])) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "program diagnostic tap capture name `%.*s` is duplicated",
+              (int)name.size, name.data);
+        }
+      }
+    }
+  } else {
+    if (options->diagnostic_tap_names.count != 0) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "program diagnostic tap names require diagnostic tap capture");
+    }
+    if (options->diagnostic_tap_names.values) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "program diagnostic tap name list requires diagnostic tap capture");
+    }
+  }
   if (iree_string_view_is_empty(options->stage_name)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "program plan stage name is required");
@@ -112,15 +154,35 @@ static iree_status_t id4_pipeline_program_plan_validate_options(
   return iree_ok_status();
 }
 
+static bool id4_pipeline_program_plan_captures_diagnostic_taps(
+    const id4_pipeline_program_plan_options_t* options) {
+  return iree_all_bits_set(
+      options->flags, ID4_PIPELINE_PROGRAM_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS);
+}
+
+static bool id4_pipeline_program_plan_tap_name_requested(
+    const id4_pipeline_program_plan_options_t* options,
+    iree_string_view_t name) {
+  if (!id4_pipeline_program_plan_captures_diagnostic_taps(options)) {
+    return false;
+  }
+  for (iree_host_size_t i = 0; i < options->diagnostic_tap_names.count; ++i) {
+    if (iree_string_view_equal(options->diagnostic_tap_names.values[i], name)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 static id4_pipeline_program_plan_counts_t id4_pipeline_program_plan_count_ops(
-    const id4_pipeline_program_t* program) {
+    const id4_pipeline_program_plan_options_t* options) {
   id4_pipeline_program_plan_counts_t counts;
   memset(&counts, 0, sizeof(counts));
   const iree_host_size_t operation_count =
-      id4_pipeline_program_operation_count(program);
+      id4_pipeline_program_operation_count(options->program);
   for (iree_host_size_t i = 0; i < operation_count; ++i) {
     const id4_pipeline_program_op_t* op =
-        id4_pipeline_program_operation_at(program, i);
+        id4_pipeline_program_operation_at(options->program, i);
     if (!op) continue;
     switch (op->kind) {
       case ID4_PIPELINE_PROGRAM_OP_KIND_IMPORT:
@@ -138,7 +200,10 @@ static id4_pipeline_program_plan_counts_t id4_pipeline_program_plan_count_ops(
         ++counts.region_operation_count;
         break;
       case ID4_PIPELINE_PROGRAM_OP_KIND_TAP:
-        ++counts.tap_count;
+        if (id4_pipeline_program_plan_tap_name_requested(
+                options, op->payload.tap.name)) {
+          ++counts.tap_count;
+        }
         break;
       default:
         break;
@@ -254,12 +319,6 @@ static bool id4_pipeline_program_plan_tensor_is_exported(
   return false;
 }
 
-static bool id4_pipeline_program_plan_captures_diagnostic_taps(
-    const id4_pipeline_program_plan_options_t* options) {
-  return iree_all_bits_set(
-      options->flags, ID4_PIPELINE_PROGRAM_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS);
-}
-
 static iree_status_t id4_pipeline_program_plan_validate_exports(
     const id4_pipeline_program_t* program) {
   const iree_host_size_t operation_count =
@@ -285,6 +344,38 @@ static iree_status_t id4_pipeline_program_plan_validate_exports(
                               "boundary tensor",
                               (int)op->payload.export_value.name.size,
                               op->payload.export_value.name.data);
+    }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_program_plan_validate_diagnostic_tap_names(
+    const id4_pipeline_program_plan_options_t* options) {
+  if (!id4_pipeline_program_plan_captures_diagnostic_taps(options)) {
+    return iree_ok_status();
+  }
+  for (iree_host_size_t i = 0; i < options->diagnostic_tap_names.count; ++i) {
+    iree_string_view_t requested_name = options->diagnostic_tap_names.values[i];
+    iree_host_size_t match_count = 0;
+    const iree_host_size_t operation_count =
+        id4_pipeline_program_operation_count(options->program);
+    for (iree_host_size_t j = 0; j < operation_count; ++j) {
+      const id4_pipeline_program_op_t* op =
+          id4_pipeline_program_operation_at(options->program, j);
+      if (!op || op->kind != ID4_PIPELINE_PROGRAM_OP_KIND_TAP) continue;
+      if (iree_string_view_equal(requested_name, op->payload.tap.name)) {
+        ++match_count;
+      }
+    }
+    if (match_count == 0) {
+      return iree_make_status(IREE_STATUS_NOT_FOUND,
+                              "program diagnostic tap `%.*s` was not found",
+                              (int)requested_name.size, requested_name.data);
+    }
+    if (match_count > 1) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "program diagnostic tap `%.*s` is ambiguous",
+                              (int)requested_name.size, requested_name.data);
     }
   }
   return iree_ok_status();
@@ -493,6 +584,10 @@ static iree_status_t id4_pipeline_program_plan_build_taps(
         ++region_operation_count;
         break;
       case ID4_PIPELINE_PROGRAM_OP_KIND_TAP: {
+        if (!id4_pipeline_program_plan_tap_name_requested(
+                options, op->payload.tap.name)) {
+          break;
+        }
         if (region_operation_count == 0) {
           return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                                   "program tap %.*s has no preceding "
@@ -658,6 +753,8 @@ static iree_status_t id4_pipeline_program_plan_dry_run_region(
         .tap_mode = id4_pipeline_program_plan_captures_diagnostic_taps(options)
                         ? ID4_PIPELINE_PROGRAM_REGION_TAP_MODE_CAPTURE
                         : ID4_PIPELINE_PROGRAM_REGION_TAP_MODE_IGNORE,
+        // Selected diagnostic tap names.
+        .captured_tap_names = options->diagnostic_tap_names,
         // Required local tensor alignment.
         .local_tensor_alignment = options->region_local_tensor_alignment,
         // Planner resolver context.
@@ -708,9 +805,11 @@ iree_status_t id4_pipeline_program_create_plan(
   IREE_RETURN_IF_ERROR(id4_pipeline_program_plan_validate_options(options));
 
   id4_pipeline_program_plan_counts_t counts =
-      id4_pipeline_program_plan_count_ops(options->program);
+      id4_pipeline_program_plan_count_ops(options);
   IREE_RETURN_IF_ERROR(
       id4_pipeline_program_plan_validate_exports(options->program));
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_program_plan_validate_diagnostic_tap_names(options));
   if (counts.parameter_count != 0) {
     if (options->parameter_slab_binding_slot >=
         options->region_binding_capacity) {
@@ -738,7 +837,7 @@ iree_status_t id4_pipeline_program_create_plan(
   id4_pipeline_diagnostic_tap_plan_t* taps = NULL;
   const iree_host_size_t planned_tap_count =
       id4_pipeline_program_plan_captures_diagnostic_taps(options)
-          ? counts.tap_count
+          ? options->diagnostic_tap_names.count
           : 0;
   iree_status_t status = iree_ok_status();
   if (counts.parameter_count != 0) {

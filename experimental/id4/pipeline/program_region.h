@@ -73,6 +73,8 @@ typedef struct id4_pipeline_program_region_lower_options_t {
   id4_pipeline_region_builder_t* builder;
   // Diagnostic tap lowering mode.
   id4_pipeline_program_region_tap_mode_t tap_mode;
+  // Caller-owned diagnostic tap names to capture.
+  iree_string_view_list_t captured_tap_names;
   // Required alignment for local tensor suballocations.
   iree_device_size_t local_tensor_alignment;
   // Opaque pointer passed to resolver callbacks.

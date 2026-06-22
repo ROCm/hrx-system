@@ -409,16 +409,41 @@ static iree_status_t id4_pipeline_program_prepare_record_region(
         (uint64_t)region->statistics.local_slab_byte_length);
   }
 
+  iree_string_view_t* planned_tap_names = NULL;
+  const iree_host_size_t diagnostic_tap_count =
+      id4_pipeline_plan_diagnostic_tap_count(options->plan);
+  iree_status_t status = iree_ok_status();
+  if (diagnostic_tap_count != 0) {
+    status = iree_allocator_malloc_array(
+        prepared->host_allocator, diagnostic_tap_count,
+        sizeof(planned_tap_names[0]), (void**)&planned_tap_names);
+  }
+  if (iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 0; i < diagnostic_tap_count; ++i) {
+      const id4_pipeline_diagnostic_tap_plan_t* tap =
+          id4_pipeline_plan_diagnostic_tap_at(options->plan, i);
+      if (!tap) {
+        status = iree_make_status(
+            IREE_STATUS_OUT_OF_RANGE,
+            "program diagnostic tap %" PRIhsz " is missing from the plan", i);
+        break;
+      }
+      planned_tap_names[i] = tap->name;
+    }
+  }
+
   iree_hal_command_buffer_t* command_buffer = NULL;
   id4_pipeline_region_builder_t* builder = NULL;
   iree_arena_block_pool_t block_pool;
   iree_arena_block_pool_initialize(/*total_block_size=*/4096,
                                    prepared->host_allocator, &block_pool);
 
-  iree_status_t status = iree_hal_command_buffer_create(
-      device, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-      IREE_HAL_COMMAND_CATEGORY_ANY, placement->queue_affinity,
-      region->binding_capacity, &command_buffer);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_command_buffer_create(
+        device, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+        IREE_HAL_COMMAND_CATEGORY_ANY, placement->queue_affinity,
+        region->binding_capacity, &command_buffer);
+  }
   if (iree_status_is_ok(status)) {
     status = iree_hal_command_buffer_begin(command_buffer);
   }
@@ -447,10 +472,15 @@ static iree_status_t id4_pipeline_program_prepare_record_region(
     lower_options.structure_size = sizeof(lower_options);
     lower_options.program = options->program;
     lower_options.builder = builder;
-    lower_options.tap_mode =
-        id4_pipeline_plan_diagnostic_tap_count(options->plan) == 0
-            ? ID4_PIPELINE_PROGRAM_REGION_TAP_MODE_IGNORE
-            : ID4_PIPELINE_PROGRAM_REGION_TAP_MODE_CAPTURE;
+    lower_options.tap_mode = diagnostic_tap_count == 0
+                                 ? ID4_PIPELINE_PROGRAM_REGION_TAP_MODE_IGNORE
+                                 : ID4_PIPELINE_PROGRAM_REGION_TAP_MODE_CAPTURE;
+    lower_options.captured_tap_names = (iree_string_view_list_t){
+        // Number of diagnostic taps selected by the plan.
+        .count = diagnostic_tap_count,
+        // Plan-owned tap names copied into prepare transient storage.
+        .values = planned_tap_names,
+    };
     lower_options.local_tensor_alignment = region->local_tensor_alignment;
     lower_options.user_data = &context;
     lower_options.resolve_import = id4_pipeline_program_prepare_resolve_import;
@@ -483,6 +513,7 @@ static iree_status_t id4_pipeline_program_prepare_record_region(
 
   id4_pipeline_region_builder_destroy(builder);
   iree_hal_command_buffer_release(command_buffer);
+  iree_allocator_free(prepared->host_allocator, planned_tap_names);
   iree_arena_block_pool_deinitialize(&block_pool);
   return status;
 }

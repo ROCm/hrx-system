@@ -176,7 +176,9 @@ static iree_status_t id4_pipeline_program_stage_make_binding_layout(
       iree_all_bits_set(options->stage_options->flags,
                         ID4_PIPELINE_STAGE_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS);
   const iree_host_size_t diagnostic_tap_count =
-      captures_diagnostic_taps ? counts.tap_count : 0;
+      captures_diagnostic_taps
+          ? options->stage_options->diagnostic_tap_names.count
+          : 0;
 
   if (counts.parameter_count == 0 && options->boundary_binding_slot_base != 0) {
     return iree_make_status(
@@ -319,6 +321,8 @@ iree_status_t id4_pipeline_program_stage_create_plan(
   plan_options.region_local_binding_slot = binding_layout.local_binding_slot;
   plan_options.region_boundary_binding_slot_base =
       options->boundary_binding_slot_base;
+  plan_options.diagnostic_tap_names =
+      options->stage_options->diagnostic_tap_names;
   plan_options.diagnostic_tap_binding_slot_base =
       binding_layout.diagnostic_tap_binding_slot_base;
   plan_options.diagnostics_sink = options->stage_options->diagnostics_sink;

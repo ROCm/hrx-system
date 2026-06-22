@@ -20,6 +20,12 @@ typedef struct id4_pipeline_program_region_context_t {
   id4_pipeline_tensor_t* tensor_map;
   // Number of entries in tensor_map.
   iree_host_size_t tensor_map_count;
+  // Last semantic operation ordinal that uses each tensor.
+  iree_host_size_t* last_use_ordinals;
+  // True for tensors introduced by semantic acquire operations.
+  uint8_t* local_tensor_bits;
+  // True after lowering has released the corresponding local tensor.
+  uint8_t* released_tensor_bits;
   // Reusable dispatch binding scratch for one operation.
   id4_pipeline_region_dispatch_binding_t* dispatch_bindings;
   // Host allocator used for temporary specialization keys.
@@ -73,6 +79,12 @@ static iree_status_t id4_pipeline_program_region_validate_options(
   }
   switch (options->tap_mode) {
     case ID4_PIPELINE_PROGRAM_REGION_TAP_MODE_IGNORE:
+      if (options->captured_tap_names.count != 0 ||
+          options->captured_tap_names.values) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "program region captured tap names require capture mode");
+      }
       return iree_ok_status();
     case ID4_PIPELINE_PROGRAM_REGION_TAP_MODE_CAPTURE:
       if (!options->resolve_tap) {
@@ -80,12 +92,43 @@ static iree_status_t id4_pipeline_program_region_validate_options(
             IREE_STATUS_INVALID_ARGUMENT,
             "program region tap resolver is required in capture mode");
       }
+      if (options->captured_tap_names.count == 0) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "program region capture mode requires captured tap names");
+      }
+      if (!options->captured_tap_names.values) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "program region capture mode requires a captured tap name list");
+      }
+      for (iree_host_size_t i = 0; i < options->captured_tap_names.count; ++i) {
+        if (iree_string_view_is_empty(options->captured_tap_names.values[i])) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "program region captured tap name %" PRIhsz " is empty", i);
+        }
+      }
       return iree_ok_status();
     default:
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "unsupported program region tap mode %d",
                               (int)options->tap_mode);
   }
+}
+
+static bool id4_pipeline_program_region_captures_tap(
+    const id4_pipeline_program_region_lower_options_t* options,
+    iree_string_view_t name) {
+  if (options->tap_mode != ID4_PIPELINE_PROGRAM_REGION_TAP_MODE_CAPTURE) {
+    return false;
+  }
+  for (iree_host_size_t i = 0; i < options->captured_tap_names.count; ++i) {
+    if (iree_string_view_equal(options->captured_tap_names.values[i], name)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 static id4_pipeline_program_region_counts_t
@@ -105,6 +148,73 @@ id4_pipeline_program_region_count_ops(const id4_pipeline_program_t* program) {
                  op->payload.dispatch_loom.binding_count);
   }
   return counts;
+}
+
+static iree_status_t id4_pipeline_program_region_note_tensor_last_use(
+    id4_pipeline_program_tensor_t tensor, iree_host_size_t operation_ordinal,
+    iree_host_size_t tensor_count, iree_host_size_t* last_use_ordinals) {
+  if ((iree_host_size_t)tensor.ordinal >= tensor_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "program tensor %u exceeds tensor count %" PRIhsz,
+                            tensor.ordinal, tensor_count);
+  }
+  last_use_ordinals[tensor.ordinal] = operation_ordinal;
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_program_region_build_liveness(
+    const id4_pipeline_program_region_lower_options_t* options,
+    iree_host_size_t tensor_count, iree_host_size_t* last_use_ordinals,
+    uint8_t* local_tensor_bits) {
+  for (iree_host_size_t i = 0; i < tensor_count; ++i) {
+    last_use_ordinals[i] = IREE_HOST_SIZE_MAX;
+    local_tensor_bits[i] = 0;
+  }
+
+  const iree_host_size_t operation_count =
+      id4_pipeline_program_operation_count(options->program);
+  for (iree_host_size_t i = 0; i < operation_count; ++i) {
+    const id4_pipeline_program_op_t* op =
+        id4_pipeline_program_operation_at(options->program, i);
+    if (!op) continue;
+    switch (op->kind) {
+      case ID4_PIPELINE_PROGRAM_OP_KIND_ACQUIRE:
+        if ((iree_host_size_t)op->payload.acquire.tensor.ordinal >=
+            tensor_count) {
+          return iree_make_status(
+              IREE_STATUS_OUT_OF_RANGE,
+              "program acquire tensor %u exceeds tensor count %" PRIhsz,
+              op->payload.acquire.tensor.ordinal, tensor_count);
+        }
+        local_tensor_bits[op->payload.acquire.tensor.ordinal] = 1;
+        break;
+      case ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM:
+        for (iree_host_size_t j = 0;
+             j < op->payload.dispatch_loom.binding_count; ++j) {
+          IREE_RETURN_IF_ERROR(id4_pipeline_program_region_note_tensor_last_use(
+              op->payload.dispatch_loom.bindings[j].tensor, op->ordinal,
+              tensor_count, last_use_ordinals));
+        }
+        break;
+      case ID4_PIPELINE_PROGRAM_OP_KIND_TAP:
+        if (id4_pipeline_program_region_captures_tap(options,
+                                                     op->payload.tap.name)) {
+          IREE_RETURN_IF_ERROR(id4_pipeline_program_region_note_tensor_last_use(
+              op->payload.tap.tensor, op->ordinal, tensor_count,
+              last_use_ordinals));
+        }
+        break;
+      case ID4_PIPELINE_PROGRAM_OP_KIND_EXPORT: {
+        IREE_RETURN_IF_ERROR(id4_pipeline_program_region_note_tensor_last_use(
+            op->payload.export_value.tensor, op->ordinal, tensor_count,
+            last_use_ordinals));
+        break;
+      }
+      default:
+        break;
+    }
+  }
+  return iree_ok_status();
 }
 
 iree_status_t id4_pipeline_program_format_dispatch_specialization_key(
@@ -289,6 +399,60 @@ static iree_status_t id4_pipeline_program_region_load_tensor(
   return iree_ok_status();
 }
 
+static iree_status_t id4_pipeline_program_region_release_last_use_tensor(
+    id4_pipeline_program_region_context_t* context,
+    id4_pipeline_program_tensor_t program_tensor,
+    iree_host_size_t operation_ordinal) {
+  if ((iree_host_size_t)program_tensor.ordinal >= context->tensor_map_count) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "program tensor %u exceeds tensor map count %" PRIhsz,
+        program_tensor.ordinal, context->tensor_map_count);
+  }
+  if (!context->local_tensor_bits[program_tensor.ordinal] ||
+      context->released_tensor_bits[program_tensor.ordinal] ||
+      context->last_use_ordinals[program_tensor.ordinal] != operation_ordinal) {
+    return iree_ok_status();
+  }
+  id4_pipeline_tensor_t region_tensor =
+      id4_pipeline_program_region_invalid_tensor();
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_region_load_tensor(
+      context, program_tensor, &region_tensor));
+  IREE_RETURN_IF_ERROR(id4_pipeline_region_release_tensor(
+      context->options->builder, region_tensor));
+  context->released_tensor_bits[program_tensor.ordinal] = 1;
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_program_region_release_last_uses(
+    id4_pipeline_program_region_context_t* context,
+    const id4_pipeline_program_op_t* op) {
+  switch (op->kind) {
+    case ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM:
+      for (iree_host_size_t i = 0; i < op->payload.dispatch_loom.binding_count;
+           ++i) {
+        IREE_RETURN_IF_ERROR(
+            id4_pipeline_program_region_release_last_use_tensor(
+                context, op->payload.dispatch_loom.bindings[i].tensor,
+                op->ordinal));
+      }
+      return iree_ok_status();
+    case ID4_PIPELINE_PROGRAM_OP_KIND_TAP:
+      if (id4_pipeline_program_region_captures_tap(context->options,
+                                                   op->payload.tap.name)) {
+        IREE_RETURN_IF_ERROR(
+            id4_pipeline_program_region_release_last_use_tensor(
+                context, op->payload.tap.tensor, op->ordinal));
+      }
+      return iree_ok_status();
+    case ID4_PIPELINE_PROGRAM_OP_KIND_EXPORT:
+      return id4_pipeline_program_region_release_last_use_tensor(
+          context, op->payload.export_value.tensor, op->ordinal);
+    default:
+      return iree_ok_status();
+  }
+}
+
 static iree_status_t id4_pipeline_program_region_lower_import(
     id4_pipeline_program_region_context_t* context,
     const id4_pipeline_program_import_op_t* import_op,
@@ -433,10 +597,18 @@ static iree_status_t id4_pipeline_program_region_lower_dispatch(
 
 static iree_status_t id4_pipeline_program_region_lower_barrier(
     id4_pipeline_program_region_context_t* context) {
+  const iree_hal_memory_barrier_t memory_barrier = {
+      // Prior dispatch reads/writes that must complete before the next epoch.
+      .source_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
+                      IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
+      // Following dispatch reads/writes in the next epoch.
+      .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
+                      IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
+  };
   return id4_pipeline_region_barrier(
       context->options->builder, IREE_HAL_EXECUTION_STAGE_DISPATCH,
       IREE_HAL_EXECUTION_STAGE_DISPATCH, IREE_HAL_EXECUTION_BARRIER_FLAG_NONE,
-      /*memory_barrier_count=*/0, /*memory_barriers=*/NULL,
+      /*memory_barrier_count=*/1, /*memory_barriers=*/&memory_barrier,
       /*buffer_barrier_count=*/0, /*buffer_barriers=*/NULL);
 }
 
@@ -445,6 +617,10 @@ static iree_status_t id4_pipeline_program_region_lower_tap(
     const id4_pipeline_program_tap_op_t* tap_op, iree_host_size_t tap_ordinal) {
   if (context->options->tap_mode ==
       ID4_PIPELINE_PROGRAM_REGION_TAP_MODE_IGNORE) {
+    return iree_ok_status();
+  }
+  if (!id4_pipeline_program_region_captures_tap(context->options,
+                                                tap_op->name)) {
     return iree_ok_status();
   }
   const id4_pipeline_program_tensor_record_t* tensor = NULL;
@@ -465,18 +641,33 @@ static iree_status_t id4_pipeline_program_region_lower_tap(
       id4_pipeline_program_region_invalid_tensor();
   IREE_RETURN_IF_ERROR(id4_pipeline_region_import_tensor(
       context->options->builder, &import, &target_tensor));
+  const iree_hal_memory_barrier_t dispatch_to_transfer_barrier = {
+      // Prior dispatch writes that make the tapped tensor readable.
+      .source_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
+      // The diagnostic copy reads the tapped tensor.
+      .target_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_READ,
+  };
   IREE_RETURN_IF_ERROR(id4_pipeline_region_barrier(
       context->options->builder, IREE_HAL_EXECUTION_STAGE_DISPATCH,
       IREE_HAL_EXECUTION_STAGE_TRANSFER, IREE_HAL_EXECUTION_BARRIER_FLAG_NONE,
-      /*memory_barrier_count=*/0, /*memory_barriers=*/NULL,
+      /*memory_barrier_count=*/1,
+      /*memory_barriers=*/&dispatch_to_transfer_barrier,
       /*buffer_barrier_count=*/0, /*buffer_barriers=*/NULL));
   IREE_RETURN_IF_ERROR(
       id4_pipeline_region_copy_tensor(context->options->builder, source_tensor,
                                       target_tensor, IREE_HAL_COPY_FLAG_NONE));
+  const iree_hal_memory_barrier_t transfer_to_dispatch_barrier = {
+      // The diagnostic copy writes the capture buffer before following work.
+      .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+      // Following dispatches may read or write tensors in the next epoch.
+      .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
+                      IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
+  };
   return id4_pipeline_region_barrier(
       context->options->builder, IREE_HAL_EXECUTION_STAGE_TRANSFER,
       IREE_HAL_EXECUTION_STAGE_DISPATCH, IREE_HAL_EXECUTION_BARRIER_FLAG_NONE,
-      /*memory_barrier_count=*/0, /*memory_barriers=*/NULL,
+      /*memory_barrier_count=*/1,
+      /*memory_barriers=*/&transfer_to_dispatch_barrier,
       /*buffer_barrier_count=*/0, /*buffer_barriers=*/NULL);
 }
 
@@ -489,14 +680,38 @@ iree_status_t id4_pipeline_program_region_lower(
       id4_pipeline_program_region_count_ops(options->program);
   id4_pipeline_tensor_t* tensor_map = NULL;
   id4_pipeline_region_dispatch_binding_t* dispatch_bindings = NULL;
+  iree_host_size_t* last_use_ordinals = NULL;
+  uint8_t* local_tensor_bits = NULL;
+  uint8_t* released_tensor_bits = NULL;
+  const iree_host_size_t tensor_count =
+      id4_pipeline_program_tensor_count(options->program);
   iree_status_t status = iree_allocator_malloc_array(
-      host_allocator, id4_pipeline_program_tensor_count(options->program),
-      sizeof(tensor_map[0]), (void**)&tensor_map);
+      host_allocator, tensor_count, sizeof(tensor_map[0]), (void**)&tensor_map);
   if (iree_status_is_ok(status)) {
-    for (iree_host_size_t i = 0;
-         i < id4_pipeline_program_tensor_count(options->program); ++i) {
+    for (iree_host_size_t i = 0; i < tensor_count; ++i) {
       tensor_map[i] = id4_pipeline_program_region_invalid_tensor();
     }
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_array(host_allocator, tensor_count,
+                                         sizeof(last_use_ordinals[0]),
+                                         (void**)&last_use_ordinals);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_array(host_allocator, tensor_count,
+                                         sizeof(local_tensor_bits[0]),
+                                         (void**)&local_tensor_bits);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_array(host_allocator, tensor_count,
+                                         sizeof(released_tensor_bits[0]),
+                                         (void**)&released_tensor_bits);
+  }
+  if (iree_status_is_ok(status)) {
+    memset(released_tensor_bits, 0,
+           tensor_count * sizeof(released_tensor_bits[0]));
+    status = id4_pipeline_program_region_build_liveness(
+        options, tensor_count, last_use_ordinals, local_tensor_bits);
   }
   if (iree_status_is_ok(status) && counts.max_dispatch_binding_count != 0) {
     status = iree_allocator_malloc_array(
@@ -510,7 +725,13 @@ iree_status_t id4_pipeline_program_region_lower(
       // Semantic tensor to region tensor map.
       .tensor_map = tensor_map,
       // Number of semantic tensor map entries.
-      .tensor_map_count = id4_pipeline_program_tensor_count(options->program),
+      .tensor_map_count = tensor_count,
+      // Last operation that uses each semantic tensor.
+      .last_use_ordinals = last_use_ordinals,
+      // Local-acquire origin marker for each semantic tensor.
+      .local_tensor_bits = local_tensor_bits,
+      // Lowering-time release marker for each semantic tensor.
+      .released_tensor_bits = released_tensor_bits,
       // Reusable dispatch binding scratch.
       .dispatch_bindings = dispatch_bindings,
       // Host allocator used for temporary specialization keys.
@@ -549,8 +770,11 @@ iree_status_t id4_pipeline_program_region_lower(
         status = id4_pipeline_program_region_lower_barrier(&context);
         break;
       case ID4_PIPELINE_PROGRAM_OP_KIND_TAP:
-        status = id4_pipeline_program_region_lower_tap(
-            &context, &op->payload.tap, tap_ordinal++);
+        if (id4_pipeline_program_region_captures_tap(options,
+                                                     op->payload.tap.name)) {
+          status = id4_pipeline_program_region_lower_tap(
+              &context, &op->payload.tap, tap_ordinal++);
+        }
         break;
       case ID4_PIPELINE_PROGRAM_OP_KIND_EXPORT:
         break;
@@ -560,8 +784,14 @@ iree_status_t id4_pipeline_program_region_lower(
                                   (int)op->kind);
         break;
     }
+    if (iree_status_is_ok(status)) {
+      status = id4_pipeline_program_region_release_last_uses(&context, op);
+    }
   }
 
+  iree_allocator_free(host_allocator, released_tensor_bits);
+  iree_allocator_free(host_allocator, local_tensor_bits);
+  iree_allocator_free(host_allocator, last_use_ordinals);
   iree_allocator_free(host_allocator, dispatch_bindings);
   iree_allocator_free(host_allocator, tensor_map);
   return status;

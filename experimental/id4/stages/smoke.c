@@ -343,9 +343,20 @@ static iree_status_t id4_smoke_stage_create_plan(
   iree_arena_block_pool_t block_pool;
   iree_arena_block_pool_initialize(/*total_block_size=*/4096,
                                    stage->host_allocator, &block_pool);
+  const iree_string_view_t smoke_tap_name =
+      IREE_SV("smoke.output.after_dispatch");
   id4_smoke_stage_region_flags_t region_flags = 0;
   if (iree_all_bits_set(options->flags,
                         ID4_PIPELINE_STAGE_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS)) {
+    if (options->diagnostic_tap_names.count != 1 ||
+        !iree_string_view_equal(options->diagnostic_tap_names.values[0],
+                                smoke_tap_name)) {
+      iree_arena_block_pool_deinitialize(&block_pool);
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "smoke stage diagnostic tap capture requires tap `%.*s`",
+          (int)smoke_tap_name.size, smoke_tap_name.data);
+    }
     region_flags |= ID4_SMOKE_STAGE_REGION_FLAG_CAPTURE_DIAGNOSTIC_TAP;
   }
   id4_pipeline_region_builder_t* builder = NULL;
@@ -431,13 +442,13 @@ static iree_status_t id4_smoke_stage_create_plan(
 
   id4_pipeline_diagnostic_tap_plan_t tap;
   memset(&tap, 0, sizeof(tap));
-  tap.name = IREE_SV("smoke.output.after_dispatch");
+  tap.name = smoke_tap_name;
   tap.region_id = 0;
   tap.placement_id = 0;
   tap.binding_slot = ID4_SMOKE_STAGE_TAP_BINDING_SLOT;
   tap.after_operation_ordinal = 0;
   tap.target_name = IREE_SV("smoke.output");
-  tap.layout.name = IREE_SV("smoke.output.after_dispatch");
+  tap.layout.name = smoke_tap_name;
   tap.layout.dtype = ID4_PIPELINE_TENSOR_DTYPE_I32;
   tap.layout.shape = id4_smoke_stage_make_vector_shape(1);
   tap.layout.byte_length = ID4_SMOKE_STAGE_OUTPUT_BYTE_LENGTH;

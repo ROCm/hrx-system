@@ -70,6 +70,8 @@ typedef struct id4_pipeline_stage_plan_options_t {
   iree_host_size_t device_index;
   // Queue affinity used by single-device stage plans.
   iree_hal_queue_affinity_t queue_affinity;
+  // Caller-owned diagnostic tap names to capture.
+  iree_string_view_list_t diagnostic_tap_names;
   // Diagnostics sink for plan events.
   id4_pipeline_diagnostics_sink_t* diagnostics_sink;
 } id4_pipeline_stage_plan_options_t;

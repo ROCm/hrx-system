@@ -165,6 +165,8 @@ static id4_pipeline_program_plan_options_t MakePlanOptions(
       /*.region_local_binding_slot=*/7,
       // First external boundary tensor binding slot.
       /*.region_boundary_binding_slot_base=*/1,
+      // Selected diagnostic tap names.
+      /*.diagnostic_tap_names=*/iree_string_view_list_empty(),
       // First diagnostic tap binding slot.
       /*.diagnostic_tap_binding_slot_base=*/0,
       // Diagnostics sink used during plan creation.

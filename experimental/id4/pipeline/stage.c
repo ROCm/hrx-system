@@ -75,6 +75,37 @@ static iree_status_t id4_pipeline_validate_plan_options(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "unsupported plan flags 0x%x", options->flags);
   }
+  if (iree_all_bits_set(options->flags,
+                        ID4_PIPELINE_STAGE_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS)) {
+    if (options->diagnostic_tap_names.count == 0) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "diagnostic tap capture requires at least one tap name");
+    }
+    if (!options->diagnostic_tap_names.values) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "diagnostic tap capture requires a tap name list");
+    }
+    for (iree_host_size_t i = 0; i < options->diagnostic_tap_names.count; ++i) {
+      if (iree_string_view_is_empty(options->diagnostic_tap_names.values[i])) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "diagnostic tap capture name %" PRIhsz " is empty", i);
+      }
+    }
+  } else {
+    if (options->diagnostic_tap_names.count != 0) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "diagnostic tap names require diagnostic tap capture");
+    }
+    if (options->diagnostic_tap_names.values) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "diagnostic tap name list requires diagnostic tap capture");
+    }
+  }
   IREE_RETURN_IF_ERROR(id4_pipeline_diagnostics_validate_sink(
       options->diagnostics_sink, IREE_SV("plan")));
   return iree_ok_status();

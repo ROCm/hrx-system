@@ -219,6 +219,133 @@ static id4_pipeline_program_t* CreateLinearProgram() {
   return program;
 }
 
+static id4_pipeline_program_t* CreateLocalReuseProgram() {
+  ProgramBuilderScope builder_scope;
+  id4_pipeline_program_builder_t* builder = builder_scope.builder();
+
+  id4_pipeline_program_tensor_t input = id4_pipeline_program_tensor_invalid();
+  id4_pipeline_program_import_tensor_options_t input_options = {
+      /*.structure_size=*/sizeof(input_options),
+      /*.next=*/nullptr,
+      /*.flags=*/ID4_PIPELINE_PROGRAM_IMPORT_TENSOR_FLAG_INITIALIZED,
+      /*.name=*/IREE_SV("hidden_states.input"),
+      /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      /*.shape=*/id4_pipeline_program_make_shape_rank2(1, 4),
+  };
+  IREE_CHECK_OK(
+      id4_pipeline_program_import_tensor(builder, &input_options, &input));
+
+  id4_pipeline_program_tensor_t first = id4_pipeline_program_tensor_invalid();
+  id4_pipeline_program_acquire_tensor_options_t first_options = {
+      /*.structure_size=*/sizeof(first_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("hidden_states.first"),
+      /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      /*.shape=*/id4_pipeline_program_make_shape_rank2(1, 4),
+  };
+  IREE_CHECK_OK(
+      id4_pipeline_program_acquire_tensor(builder, &first_options, &first));
+
+  id4_pipeline_program_dispatch_binding_t first_bindings[] = {
+      id4_pipeline_program_read(input),
+      id4_pipeline_program_write(first),
+  };
+  id4_pipeline_program_dispatch_loom_options_t first_dispatch_options = {
+      /*.structure_size=*/sizeof(first_dispatch_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("reuse.first"),
+      /*.kernel=*/
+      id4_pipeline_make_kernel_ref(IREE_SV("test/reuse"), IREE_SV("reuse")),
+      /*.dispatch_config=*/MakeTestDispatchConfig(),
+      /*.config_binding_count=*/0,
+      /*.config_bindings=*/nullptr,
+      /*.binding_count=*/IREE_ARRAYSIZE(first_bindings),
+      /*.bindings=*/first_bindings,
+  };
+  IREE_CHECK_OK(
+      id4_pipeline_program_dispatch_loom(builder, &first_dispatch_options));
+
+  id4_pipeline_program_barrier_options_t first_barrier_options = {
+      /*.structure_size=*/sizeof(first_barrier_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("reuse.after_first"),
+  };
+  IREE_CHECK_OK(id4_pipeline_program_barrier(builder, &first_barrier_options));
+
+  id4_pipeline_program_tensor_t second = id4_pipeline_program_tensor_invalid();
+  id4_pipeline_program_acquire_tensor_options_t second_options = {
+      /*.structure_size=*/sizeof(second_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("hidden_states.second"),
+      /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      /*.shape=*/id4_pipeline_program_make_shape_rank2(1, 4),
+  };
+  IREE_CHECK_OK(
+      id4_pipeline_program_acquire_tensor(builder, &second_options, &second));
+
+  id4_pipeline_program_dispatch_binding_t second_bindings[] = {
+      id4_pipeline_program_read(first),
+      id4_pipeline_program_write(second),
+  };
+  id4_pipeline_program_dispatch_loom_options_t second_dispatch_options = {
+      /*.structure_size=*/sizeof(second_dispatch_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("reuse.second"),
+      /*.kernel=*/
+      id4_pipeline_make_kernel_ref(IREE_SV("test/reuse"), IREE_SV("reuse")),
+      /*.dispatch_config=*/MakeTestDispatchConfig(),
+      /*.config_binding_count=*/0,
+      /*.config_bindings=*/nullptr,
+      /*.binding_count=*/IREE_ARRAYSIZE(second_bindings),
+      /*.bindings=*/second_bindings,
+  };
+  IREE_CHECK_OK(
+      id4_pipeline_program_dispatch_loom(builder, &second_dispatch_options));
+
+  id4_pipeline_program_barrier_options_t second_barrier_options = {
+      /*.structure_size=*/sizeof(second_barrier_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("reuse.after_second"),
+  };
+  IREE_CHECK_OK(id4_pipeline_program_barrier(builder, &second_barrier_options));
+
+  id4_pipeline_program_tensor_t third = id4_pipeline_program_tensor_invalid();
+  id4_pipeline_program_acquire_tensor_options_t third_options = {
+      /*.structure_size=*/sizeof(third_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("hidden_states.third"),
+      /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      /*.shape=*/id4_pipeline_program_make_shape_rank2(1, 4),
+  };
+  IREE_CHECK_OK(
+      id4_pipeline_program_acquire_tensor(builder, &third_options, &third));
+
+  id4_pipeline_program_dispatch_binding_t third_bindings[] = {
+      id4_pipeline_program_read(input),
+      id4_pipeline_program_write(third),
+  };
+  id4_pipeline_program_dispatch_loom_options_t third_dispatch_options = {
+      /*.structure_size=*/sizeof(third_dispatch_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("reuse.third"),
+      /*.kernel=*/
+      id4_pipeline_make_kernel_ref(IREE_SV("test/reuse"), IREE_SV("reuse")),
+      /*.dispatch_config=*/MakeTestDispatchConfig(),
+      /*.config_binding_count=*/0,
+      /*.config_bindings=*/nullptr,
+      /*.binding_count=*/IREE_ARRAYSIZE(third_bindings),
+      /*.bindings=*/third_bindings,
+  };
+  IREE_CHECK_OK(
+      id4_pipeline_program_dispatch_loom(builder, &third_dispatch_options));
+
+  id4_pipeline_program_t* program = nullptr;
+  IREE_CHECK_OK(id4_pipeline_program_builder_seal(
+      builder, iree_allocator_system(), &program));
+  builder_scope.DestroyBuilder();
+  return program;
+}
+
 static id4_pipeline_program_plan_options_t MakePlanOptions(
     const id4_pipeline_program_t* program,
     iree_hal_device_group_t* device_group,
@@ -239,7 +366,7 @@ static id4_pipeline_program_plan_options_t MakePlanOptions(
   id4_pipeline_program_plan_options_t options = {
       /*.structure_size=*/sizeof(options),
       /*.next=*/nullptr,
-      /*.flags=*/ID4_PIPELINE_PROGRAM_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS,
+      /*.flags=*/0,
       /*.stage_name=*/IREE_SV("test.stage"),
       /*.program=*/program,
       /*.device_group=*/device_group,
@@ -259,6 +386,7 @@ static id4_pipeline_program_plan_options_t MakePlanOptions(
       /*.region_binding_capacity=*/5,
       /*.region_local_binding_slot=*/4,
       /*.region_boundary_binding_slot_base=*/1,
+      /*.diagnostic_tap_names=*/iree_string_view_list_empty(),
       /*.diagnostic_tap_binding_slot_base=*/3,
       /*.diagnostics_sink=*/diagnostics_sink,
   };
@@ -277,6 +405,14 @@ TEST(PipelineProgramPlan, DerivesParameterKernelRegionAndTapPlans) {
   id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
   id4_pipeline_program_plan_options_t options =
       MakePlanOptions(program, device_group, &placement, &diagnostics_sink);
+  const iree_string_view_t diagnostic_tap_names[] = {
+      IREE_SV("block0.linear.output"),
+  };
+  options.flags = ID4_PIPELINE_PROGRAM_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS;
+  options.diagnostic_tap_names = (iree_string_view_list_t){
+      IREE_ARRAYSIZE(diagnostic_tap_names),
+      diagnostic_tap_names,
+  };
 
   id4_pipeline_plan_t* plan = nullptr;
   IREE_ASSERT_OK(id4_pipeline_program_create_plan(
@@ -359,6 +495,45 @@ TEST(PipelineProgramPlan, DerivesParameterKernelRegionAndTapPlans) {
   id4_pipeline_program_release(program);
 }
 
+TEST(PipelineProgramPlan, ReleasesLocalTensorsAtLastUse) {
+  id4_pipeline_program_t* program = CreateLocalReuseProgram();
+  iree_hal_device_group_t* device_group = CreateLocalSyncDeviceGroup();
+  id4_pipeline_device_placement_t placement = {
+      /*.role=*/IREE_SV("default"),
+      /*.device_index=*/0,
+      /*.queue_affinity=*/IREE_HAL_QUEUE_AFFINITY_ANY,
+  };
+  id4_pipeline_diagnostics_sink_t diagnostics_sink;
+  id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
+  id4_pipeline_program_plan_options_t options =
+      MakePlanOptions(program, device_group, &placement, &diagnostics_sink);
+
+  id4_pipeline_plan_t* plan = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_program_create_plan(
+      &options, iree_allocator_system(), &plan));
+
+  ASSERT_EQ(id4_pipeline_plan_memory_slab_count(plan), 1u);
+  const id4_pipeline_memory_slab_plan_t* slab =
+      id4_pipeline_plan_memory_slab_at(plan, 0);
+  ASSERT_NE(slab, nullptr);
+  EXPECT_EQ(slab->byte_length, 32u);
+  EXPECT_EQ(slab->high_water_mark, 32u);
+
+  ASSERT_EQ(id4_pipeline_plan_region_count(plan), 1u);
+  const id4_pipeline_region_plan_t* region =
+      id4_pipeline_plan_region_at(plan, 0);
+  ASSERT_NE(region, nullptr);
+  EXPECT_EQ(region->statistics.local_acquire_count, 3u);
+  EXPECT_EQ(region->statistics.local_release_count, 3u);
+  EXPECT_EQ(region->statistics.local_reuse_count, 1u);
+  EXPECT_EQ(region->statistics.local_slab_byte_length, 32u);
+  EXPECT_EQ(region->statistics.local_slab_high_water_mark, 32u);
+
+  id4_pipeline_plan_release(plan);
+  iree_hal_device_group_release(device_group);
+  id4_pipeline_program_release(program);
+}
+
 TEST(PipelineProgramPlan, RejectsTapBeforeExecutableRegionOperation) {
   ProgramBuilderScope builder_scope;
   id4_pipeline_program_builder_t* builder = builder_scope.builder();
@@ -396,6 +571,14 @@ TEST(PipelineProgramPlan, RejectsTapBeforeExecutableRegionOperation) {
   id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
   id4_pipeline_program_plan_options_t options =
       MakePlanOptions(program, device_group, &placement, &diagnostics_sink);
+  const iree_string_view_t diagnostic_tap_names[] = {
+      IREE_SV("input.tap"),
+  };
+  options.flags = ID4_PIPELINE_PROGRAM_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS;
+  options.diagnostic_tap_names = (iree_string_view_list_t){
+      IREE_ARRAYSIZE(diagnostic_tap_names),
+      diagnostic_tap_names,
+  };
   id4_pipeline_plan_t* plan = nullptr;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
                         id4_pipeline_program_create_plan(

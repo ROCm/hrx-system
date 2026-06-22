@@ -274,6 +274,7 @@ iree_cc_test(
     iree::experimental::id4::pipeline::stage
     iree::experimental::id4::tooling::capture
     iree::hal
+    iree::io::file_handle
     iree::io::parameter_provider
     iree::testing::gtest
     iree::testing::gtest_main
