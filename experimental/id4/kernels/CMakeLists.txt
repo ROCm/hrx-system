@@ -41,6 +41,7 @@ add_custom_command(OUTPUT loom_sources.stamp
     "qwen3_vl/token_embedding.loom"
     "sampler/cfg_denoise_f32.loom"
     "smoke_configured.loom"
+    "vae/decode_nearest_f32.loom"
 )
 
 add_custom_target(loom_sources
@@ -80,6 +81,7 @@ iree_c_embed_data(
     "qwen3_vl/token_embedding.loom"
     "sampler/cfg_denoise_f32.loom"
     "smoke_configured.loom"
+    "vae/decode_nearest_f32.loom"
   C_FILE_OUTPUT
     "embedded_loom_sources.c"
   H_FILE_OUTPUT
@@ -377,6 +379,64 @@ iree_native_test(
     "--config=id4.ideogram4.head_rmsnorm.token_count=2"
     "--config=id4.ideogram4.head_rmsnorm.attention_head_count=18"
     "--config=id4.ideogram4.head_rmsnorm.head_size=256"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "vae_decode_nearest_f32_scale2_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/decode_nearest_f32.loom}}"
+    "--benchmark=@id4_vae_decode_nearest_f32_scale2"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.vae.decode.output_element_count=16"
+    "--config=id4.vae.decode.latent_element_count=4"
+    "--config=id4.vae.decode.latent_height=2"
+    "--config=id4.vae.decode.latent_width=2"
+    "--config=id4.vae.decode.latent_channel_count=1"
+    "--config=id4.vae.decode.decoded_height=4"
+    "--config=id4.vae.decode.decoded_width=4"
+    "--config=id4.vae.decode.decoded_channel_count=1"
+    "--config=id4.vae.decode.scale_x=2"
+    "--config=id4.vae.decode.scale_y=2"
+    "--config=id4.vae.decode.tile_width=2"
+    "--config=id4.vae.decode.tile_height=2"
+    "--config=id4.vae.decode.tile_count_x=1"
+    "--config=id4.vae.decode.tile_count_y=1"
+    "--config=id4.vae.decode.overlap_milli=0"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "vae_decode_nearest_f32_flux2_tile_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/decode_nearest_f32.loom}}"
+    "--benchmark=@id4_vae_decode_nearest_f32_flux2_tile"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.vae.decode.output_element_count=786432"
+    "--config=id4.vae.decode.latent_element_count=32768"
+    "--config=id4.vae.decode.latent_height=32"
+    "--config=id4.vae.decode.latent_width=32"
+    "--config=id4.vae.decode.latent_channel_count=32"
+    "--config=id4.vae.decode.decoded_height=512"
+    "--config=id4.vae.decode.decoded_width=512"
+    "--config=id4.vae.decode.decoded_channel_count=3"
+    "--config=id4.vae.decode.scale_x=16"
+    "--config=id4.vae.decode.scale_y=16"
+    "--config=id4.vae.decode.tile_width=32"
+    "--config=id4.vae.decode.tile_height=32"
+    "--config=id4.vae.decode.tile_count_x=1"
+    "--config=id4.vae.decode.tile_count_y=1"
+    "--config=id4.vae.decode.overlap_milli=0"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -1462,6 +1522,72 @@ iree_native_test(
     "--config=id4.ideogram4.head_rmsnorm.token_count=2"
     "--config=id4.ideogram4.head_rmsnorm.attention_head_count=18"
     "--config=id4.ideogram4.head_rmsnorm.head_size=256"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "vae_decode_nearest_f32_scale2_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/decode_nearest_f32.loom}}"
+    "--case=@id4_vae_decode_nearest_f32_scale2_case"
+    "--device=amdgpu://0"
+    "--config=id4.vae.decode.output_element_count=16"
+    "--config=id4.vae.decode.latent_element_count=4"
+    "--config=id4.vae.decode.latent_height=2"
+    "--config=id4.vae.decode.latent_width=2"
+    "--config=id4.vae.decode.latent_channel_count=1"
+    "--config=id4.vae.decode.decoded_height=4"
+    "--config=id4.vae.decode.decoded_width=4"
+    "--config=id4.vae.decode.decoded_channel_count=1"
+    "--config=id4.vae.decode.scale_x=2"
+    "--config=id4.vae.decode.scale_y=2"
+    "--config=id4.vae.decode.tile_width=2"
+    "--config=id4.vae.decode.tile_height=2"
+    "--config=id4.vae.decode.tile_count_x=1"
+    "--config=id4.vae.decode.tile_count_y=1"
+    "--config=id4.vae.decode.overlap_milli=0"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "vae_decode_nearest_f32_flux2_tile_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/decode_nearest_f32.loom}}"
+    "--case=@id4_vae_decode_nearest_f32_flux2_tile_case"
+    "--device=amdgpu://0"
+    "--config=id4.vae.decode.output_element_count=786432"
+    "--config=id4.vae.decode.latent_element_count=32768"
+    "--config=id4.vae.decode.latent_height=32"
+    "--config=id4.vae.decode.latent_width=32"
+    "--config=id4.vae.decode.latent_channel_count=32"
+    "--config=id4.vae.decode.decoded_height=512"
+    "--config=id4.vae.decode.decoded_width=512"
+    "--config=id4.vae.decode.decoded_channel_count=3"
+    "--config=id4.vae.decode.scale_x=16"
+    "--config=id4.vae.decode.scale_y=16"
+    "--config=id4.vae.decode.tile_width=32"
+    "--config=id4.vae.decode.tile_height=32"
+    "--config=id4.vae.decode.tile_count_x=1"
+    "--config=id4.vae.decode.tile_count_y=1"
+    "--config=id4.vae.decode.overlap_milli=0"
   SRC
     loom::tools::iree-test-loom
   LABELS

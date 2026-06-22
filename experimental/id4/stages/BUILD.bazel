@@ -66,6 +66,23 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "vae",
+    srcs = ["vae.c"],
+    hdrs = ["vae.h"],
+    deps = [
+        ":vae_program",
+        "//experimental/id4/pipeline:diagnostics",
+        "//experimental/id4/pipeline:kernel_cache",
+        "//experimental/id4/pipeline:program",
+        "//experimental/id4/pipeline:program_stage",
+        "//experimental/id4/pipeline:stage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "ideogram4_dit_program",
     srcs = [
         "ideogram4_dit_program.c",
@@ -85,6 +102,18 @@ iree_runtime_cc_library(
     srcs = ["sampler_program.c"],
     hdrs = ["sampler_program.h"],
     deps = [
+        "//experimental/id4/pipeline:program",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "vae_program",
+    srcs = ["vae_program.c"],
+    hdrs = ["vae_program.h"],
+    deps = [
+        "//experimental/id4/pipeline:kernel_library",
         "//experimental/id4/pipeline:program",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
@@ -223,6 +252,21 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "vae_test",
+    srcs = ["vae_test.cc"],
+    deps = [
+        ":test_util",
+        ":vae",
+        "//experimental/id4/pipeline:plan",
+        "//experimental/id4/pipeline:stage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "ideogram4_dit_program_test",
     srcs = ["ideogram4_dit_program_test.cc"],
     deps = [
@@ -272,6 +316,19 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "vae_program_test",
+    srcs = ["vae_program_test.cc"],
+    deps = [
+        ":vae_program",
+        "//experimental/id4/pipeline:program",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "sampler_integration_test",
     srcs = ["sampler_integration_test.cc"],
     tags = [
@@ -281,6 +338,26 @@ iree_runtime_cc_test(
     deps = [
         ":hal_integration_util",
         ":sampler",
+        "//experimental/id4/pipeline:plan",
+        "//experimental/id4/pipeline:stage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "vae_integration_test",
+    srcs = ["vae_integration_test.cc"],
+    tags = [
+        "manual",
+        "requires-gpu",
+    ],
+    deps = [
+        ":hal_integration_util",
+        ":vae",
         "//experimental/id4/pipeline:plan",
         "//experimental/id4/pipeline:stage",
         "//runtime/src/iree/base",
@@ -360,6 +437,26 @@ iree_runtime_cc_benchmark(
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/io:parameter_provider",
+        "//runtime/src/iree/testing:benchmark",
+        "//runtime/src/iree/testing:benchmark_main",
+    ],
+)
+
+iree_runtime_cc_benchmark(
+    name = "vae_benchmark",
+    srcs = ["vae_benchmark.cc"],
+    tags = [
+        "benchmark",
+        "manual",
+        "requires-gpu",
+    ],
+    deps = [
+        ":hal_integration_util",
+        ":vae",
+        "//experimental/id4/pipeline:plan",
+        "//experimental/id4/pipeline:stage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:benchmark",
         "//runtime/src/iree/testing:benchmark_main",
     ],

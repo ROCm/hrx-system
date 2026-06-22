@@ -528,6 +528,35 @@ TEST(PipelineProgramPlan, ReleasesLocalTensorsAtLastUse) {
   EXPECT_EQ(region->statistics.local_reuse_count, 1u);
   EXPECT_EQ(region->statistics.local_slab_byte_length, 32u);
   EXPECT_EQ(region->statistics.local_slab_high_water_mark, 32u);
+  ASSERT_EQ(region->local_lifetime_count, 3u);
+  const id4_pipeline_region_local_lifetime_t* first =
+      &region->local_lifetimes[0];
+  ExpectStringViewEqual(first->name, IREE_SV("hidden_states.first"));
+  EXPECT_EQ(first->offset, 0u);
+  EXPECT_EQ(first->byte_length, 16u);
+  EXPECT_EQ(first->acquire_operation_ordinal, 0u);
+  EXPECT_EQ(first->release_operation_ordinal, 3u);
+  const id4_pipeline_region_local_lifetime_t* second =
+      &region->local_lifetimes[1];
+  ExpectStringViewEqual(second->name, IREE_SV("hidden_states.second"));
+  EXPECT_EQ(second->offset, 16u);
+  EXPECT_EQ(second->release_operation_ordinal, 3u);
+  const id4_pipeline_region_local_lifetime_t* third =
+      &region->local_lifetimes[2];
+  ExpectStringViewEqual(third->name, IREE_SV("hidden_states.third"));
+  EXPECT_EQ(third->offset, 0u);
+  EXPECT_TRUE(iree_all_bits_set(
+      third->flags, ID4_PIPELINE_REGION_LOCAL_LIFETIME_FLAG_REUSED));
+
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  IREE_ASSERT_OK(id4_pipeline_plan_format_json(plan, &builder));
+  std::string json = std::string(iree_string_builder_view(&builder).data,
+                                 iree_string_builder_view(&builder).size);
+  EXPECT_NE(json.find("\"local_lifetimes\""), std::string::npos);
+  EXPECT_NE(json.find("\"hidden_states.first\""), std::string::npos);
+  EXPECT_NE(json.find("\"release_operation_ordinal\":3"), std::string::npos);
+  iree_string_builder_deinitialize(&builder);
 
   id4_pipeline_plan_release(plan);
   iree_hal_device_group_release(device_group);

@@ -112,13 +112,14 @@ static iree_status_t id4_pipeline_program_stage_validate_prepare_options(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "program stage prepare stage options are required");
   }
-  if (!options->program) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "program stage prepare program is required");
-  }
   if (!options->plan) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "program stage prepare plan is required");
+  }
+  if (!id4_pipeline_plan_source_program(options->plan)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "program stage prepare requires a program-backed plan");
   }
   if (!options->device_group) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -420,7 +421,7 @@ iree_status_t id4_pipeline_program_stage_prepare(
     id4_pipeline_program_prepare_options_t prepare_options;
     memset(&prepare_options, 0, sizeof(prepare_options));
     prepare_options.structure_size = sizeof(prepare_options);
-    prepare_options.program = options->program;
+    prepare_options.program = id4_pipeline_plan_source_program(options->plan);
     prepare_options.plan = options->plan;
     prepare_options.kernel_cache = options->kernel_cache;
     prepare_options.kernel_library = options->stage_options->kernel_library;

@@ -248,46 +248,6 @@ static iree_status_t id4_qwen3_vl_stage_plan(
   return status;
 }
 
-static iree_status_t id4_qwen3_vl_stage_request_from_plan(
-    const id4_pipeline_plan_t* plan,
-    id4_qwen3_vl_request_config_t* out_request) {
-  memset(out_request, 0, sizeof(*out_request));
-  if (id4_pipeline_plan_boundary_tensor_count(plan) == 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "Qwen3-VL plan has no boundary tensors");
-  }
-  const id4_pipeline_boundary_tensor_plan_t* token_ids =
-      id4_pipeline_plan_boundary_tensor_at(plan, 0);
-  if (!token_ids) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "Qwen3-VL plan boundary tensor is missing");
-  }
-  if (!iree_all_bits_set(token_ids->flags,
-                         ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_IMPORTED |
-                             ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_INITIALIZED)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "Qwen3-VL plan first boundary tensor is not an initialized import");
-  }
-  if (token_ids->layout.dtype != ID4_PIPELINE_TENSOR_DTYPE_I32) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "Qwen3-VL token-id boundary dtype does not match expected i32");
-  }
-  if (token_ids->layout.shape.rank != 1) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "Qwen3-VL token-id boundary rank %u does not match expected rank 1",
-        token_ids->layout.shape.rank);
-  }
-  if (token_ids->layout.shape.dims[0] > UINT32_MAX) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "Qwen3-VL token count exceeds uint32 range");
-  }
-  out_request->token_count = (uint32_t)token_ids->layout.shape.dims[0];
-  return iree_ok_status();
-}
-
 static iree_status_t id4_qwen3_vl_stage_prepare(
     id4_pipeline_stage_t* base_stage, const id4_pipeline_plan_t* plan,
     const id4_pipeline_stage_prepare_options_t* options,
@@ -298,28 +258,17 @@ static iree_status_t id4_qwen3_vl_stage_prepare(
                             "Qwen3-VL stage must be loaded before preparation");
   }
 
-  id4_qwen3_vl_request_config_t request;
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_stage_request_from_plan(plan, &request));
-
-  id4_pipeline_program_t* program = NULL;
-  iree_status_t status = id4_qwen3_vl_stage_author_program(
-      stage, request, stage->host_allocator, &program);
-  if (iree_status_is_ok(status)) {
-    id4_pipeline_program_stage_prepare_options_t prepare_options;
-    memset(&prepare_options, 0, sizeof(prepare_options));
-    prepare_options.structure_size = sizeof(prepare_options);
-    prepare_options.stage_name = IREE_SV(ID4_QWEN3_VL_STAGE_NAME);
-    prepare_options.stage_options = options;
-    prepare_options.program = program;
-    prepare_options.plan = plan;
-    prepare_options.device_group = stage->base.services.device_group;
-    prepare_options.kernel_cache = stage->kernel_cache;
-    prepare_options.executable_cache = stage->base.services.executable_cache;
-    status = id4_pipeline_program_stage_prepare(
-        &prepare_options, stage->host_allocator, out_bundle);
-  }
-  id4_pipeline_program_release(program);
-  return status;
+  id4_pipeline_program_stage_prepare_options_t prepare_options;
+  memset(&prepare_options, 0, sizeof(prepare_options));
+  prepare_options.structure_size = sizeof(prepare_options);
+  prepare_options.stage_name = IREE_SV(ID4_QWEN3_VL_STAGE_NAME);
+  prepare_options.stage_options = options;
+  prepare_options.plan = plan;
+  prepare_options.device_group = stage->base.services.device_group;
+  prepare_options.kernel_cache = stage->kernel_cache;
+  prepare_options.executable_cache = stage->base.services.executable_cache;
+  return id4_pipeline_program_stage_prepare(&prepare_options,
+                                            stage->host_allocator, out_bundle);
 }
 
 static iree_status_t id4_qwen3_vl_stage_issue(

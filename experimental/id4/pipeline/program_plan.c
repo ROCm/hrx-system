@@ -705,8 +705,12 @@ static iree_status_t id4_pipeline_program_plan_dry_run_region(
     const id4_pipeline_boundary_tensor_plan_t* boundary_tensors,
     const id4_pipeline_diagnostic_tap_plan_t* diagnostic_taps,
     iree_allocator_t host_allocator,
-    id4_pipeline_region_statistics_t* out_statistics) {
+    id4_pipeline_region_statistics_t* out_statistics,
+    iree_host_size_t* out_local_lifetime_count,
+    id4_pipeline_region_local_lifetime_t** out_local_lifetimes) {
   memset(out_statistics, 0, sizeof(*out_statistics));
+  *out_local_lifetime_count = 0;
+  *out_local_lifetimes = NULL;
   if (counts.region_operation_count == 0) return iree_ok_status();
 
   iree_arena_block_pool_t block_pool;
@@ -770,6 +774,10 @@ static iree_status_t id4_pipeline_program_plan_dry_run_region(
   }
   if (iree_status_is_ok(status)) {
     id4_pipeline_region_builder_statistics(builder, out_statistics);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_pipeline_region_builder_clone_local_lifetimes(
+        builder, host_allocator, out_local_lifetime_count, out_local_lifetimes);
   }
 
   id4_pipeline_region_builder_destroy(builder);
@@ -882,11 +890,14 @@ iree_status_t id4_pipeline_program_create_plan(
 
   id4_pipeline_region_statistics_t region_statistics;
   memset(&region_statistics, 0, sizeof(region_statistics));
+  iree_host_size_t local_lifetime_count = 0;
+  id4_pipeline_region_local_lifetime_t* local_lifetimes = NULL;
   const bool has_region = counts.region_operation_count != 0;
   if (iree_status_is_ok(status) && has_region) {
     status = id4_pipeline_program_plan_dry_run_region(
         options, counts, parameter_requests, boundary_tensors, taps,
-        host_allocator, &region_statistics);
+        host_allocator, &region_statistics, &local_lifetime_count,
+        &local_lifetimes);
   } else if (iree_status_is_ok(status) && planned_tap_count != 0) {
     status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                               "program has diagnostic taps but no executable "
@@ -927,7 +938,7 @@ iree_status_t id4_pipeline_program_create_plan(
         .byte_length = region_statistics.local_slab_byte_length,
         // Required local slab base alignment.
         .alignment = options->region_local_slab_alignment,
-        // Peak live local slab bytes observed by dry-run lowering.
+        // Peak concurrently live local tensor bytes observed by dry-run.
         .high_water_mark = region_statistics.local_slab_high_water_mark,
     };
   }
@@ -941,6 +952,8 @@ iree_status_t id4_pipeline_program_create_plan(
     region.local_binding_slot = options->region_local_binding_slot;
     region.local_tensor_alignment = options->region_local_tensor_alignment;
     region.statistics = region_statistics;
+    region.local_lifetime_count = local_lifetime_count;
+    region.local_lifetimes = local_lifetimes;
   }
 
   if (iree_status_is_ok(status)) {
@@ -948,6 +961,7 @@ iree_status_t id4_pipeline_program_create_plan(
     memset(&create_options, 0, sizeof(create_options));
     create_options.structure_size = sizeof(create_options);
     create_options.stage_name = options->stage_name;
+    create_options.source_program = options->program;
     create_options.device_group = options->device_group;
     create_options.placement_count = options->placement_count;
     create_options.placements = options->placements;
@@ -971,6 +985,8 @@ iree_status_t id4_pipeline_program_create_plan(
   }
 
   iree_allocator_free(host_allocator, (void*)local_slab_name.data);
+  id4_pipeline_region_local_lifetime_list_release(
+      local_lifetime_count, local_lifetimes, host_allocator);
   id4_pipeline_program_plan_release_specialization_keys(kernel_count, kernels,
                                                         host_allocator);
   iree_allocator_free(host_allocator, taps);

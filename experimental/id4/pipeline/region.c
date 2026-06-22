@@ -22,6 +22,10 @@ typedef struct id4_pipeline_region_tensor_record_t {
   id4_pipeline_tensor_t tensor;
   // Tensor name copied into the builder arena.
   iree_string_view_t name;
+  // Scalar element type.
+  id4_pipeline_tensor_dtype_t dtype;
+  // Required base alignment in bytes.
+  iree_device_size_t alignment;
   // Operation ordinal where the tensor was acquired or imported.
   iree_host_size_t acquire_operation_ordinal;
   // Epoch where the tensor was acquired or imported.
@@ -40,6 +44,8 @@ typedef struct id4_pipeline_region_tensor_record_t {
   bool released;
   // True after a released local range has been returned to the free list.
   bool range_published;
+  // Local lifetime flags used for memory diagnostics.
+  id4_pipeline_region_local_lifetime_flags_t lifetime_flags;
 } id4_pipeline_region_tensor_record_t;
 
 struct id4_pipeline_region_builder_t {
@@ -81,6 +87,8 @@ struct id4_pipeline_region_builder_t {
   iree_host_size_t free_range_capacity;
   // Next bump-pointer offset in the local slab.
   iree_device_size_t local_next_offset;
+  // Current sum of live local tensor byte lengths.
+  iree_device_size_t local_live_byte_length;
 };
 
 struct id4_pipeline_prepared_region_t {
@@ -335,6 +343,31 @@ static void id4_pipeline_region_remove_free_range(
   --builder->free_range_count;
 }
 
+static iree_status_t id4_pipeline_region_string_clone(
+    iree_string_view_t source, iree_allocator_t host_allocator,
+    iree_string_view_t* out_target) {
+  *out_target = iree_string_view_empty();
+  if (iree_string_view_is_empty(source)) return iree_ok_status();
+  if (source.size == IREE_HOST_SIZE_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "region string is too large to clone");
+  }
+  char* storage = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      host_allocator, source.size + 1, sizeof(storage[0]), (void**)&storage));
+  memcpy(storage, source.data, source.size);
+  storage[source.size] = 0;
+  *out_target = iree_make_string_view(storage, source.size);
+  return iree_ok_status();
+}
+
+static void id4_pipeline_region_string_release(
+    iree_string_view_t value, iree_allocator_t host_allocator) {
+  if (value.data) {
+    iree_allocator_free(host_allocator, (void*)value.data);
+  }
+}
+
 static iree_status_t id4_pipeline_region_append_free_range(
     id4_pipeline_region_builder_t* builder, iree_device_size_t offset,
     iree_device_size_t length) {
@@ -348,6 +381,33 @@ static iree_status_t id4_pipeline_region_append_free_range(
           // Byte length of the reusable range.
           .length = length,
       };
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_region_note_local_live_acquire(
+    id4_pipeline_region_builder_t* builder, iree_device_size_t byte_length) {
+  iree_device_size_t live_byte_length = 0;
+  if (!iree_device_size_checked_add(builder->local_live_byte_length,
+                                    byte_length, &live_byte_length)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "local live byte length overflow");
+  }
+  builder->local_live_byte_length = live_byte_length;
+  builder->statistics.local_slab_high_water_mark = iree_max(
+      builder->statistics.local_slab_high_water_mark, live_byte_length);
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_region_note_local_live_release(
+    id4_pipeline_region_builder_t* builder, iree_device_size_t byte_length,
+    iree_string_view_t tensor_name) {
+  if (byte_length > builder->local_live_byte_length) {
+    return iree_make_status(
+        IREE_STATUS_INTERNAL,
+        "tensor %.*s release underflows local live byte length",
+        (int)tensor_name.size, tensor_name.data);
+  }
+  builder->local_live_byte_length -= byte_length;
   return iree_ok_status();
 }
 
@@ -421,8 +481,6 @@ static iree_status_t id4_pipeline_region_bump_local_range(
   builder->local_next_offset = allocation_end;
   builder->statistics.local_slab_byte_length =
       iree_max(builder->statistics.local_slab_byte_length, allocation_end);
-  builder->statistics.local_slab_high_water_mark =
-      builder->statistics.local_slab_byte_length;
   *out_offset = aligned_offset;
   return iree_ok_status();
 }
@@ -459,6 +517,8 @@ static iree_status_t id4_pipeline_region_make_tensor_record(
   };
   IREE_RETURN_IF_ERROR(
       id4_pipeline_region_copy_string(builder, layout->name, &record->name));
+  record->dtype = layout->dtype;
+  record->alignment = layout->alignment;
   record->acquire_operation_ordinal = builder->statistics.operation_count;
   record->acquire_epoch = builder->statistics.current_epoch;
   record->release_operation_ordinal = IREE_HOST_SIZE_MAX;
@@ -637,6 +697,86 @@ const id4_pipeline_region_kernel_plan_t* id4_pipeline_region_builder_kernel_at(
   return &builder->kernel_plans[index];
 }
 
+iree_host_size_t id4_pipeline_region_builder_local_lifetime_count(
+    const id4_pipeline_region_builder_t* builder) {
+  if (!builder) return 0;
+  iree_host_size_t lifetime_count = 0;
+  for (iree_host_size_t i = 0; i < builder->tensor_record_count; ++i) {
+    if (builder->tensor_records[i].tensor.storage_class ==
+        ID4_PIPELINE_TENSOR_STORAGE_CLASS_LOCAL) {
+      ++lifetime_count;
+    }
+  }
+  return lifetime_count;
+}
+
+iree_status_t id4_pipeline_region_builder_clone_local_lifetimes(
+    const id4_pipeline_region_builder_t* builder,
+    iree_allocator_t host_allocator, iree_host_size_t* out_lifetime_count,
+    id4_pipeline_region_local_lifetime_t** out_lifetimes) {
+  IREE_ASSERT_ARGUMENT(builder);
+  IREE_ASSERT_ARGUMENT(out_lifetime_count);
+  IREE_ASSERT_ARGUMENT(out_lifetimes);
+  *out_lifetime_count = 0;
+  *out_lifetimes = NULL;
+
+  const iree_host_size_t lifetime_count =
+      id4_pipeline_region_builder_local_lifetime_count(builder);
+  if (lifetime_count == 0) return iree_ok_status();
+
+  id4_pipeline_region_local_lifetime_t* lifetimes = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc_array(host_allocator, lifetime_count,
+                                  sizeof(lifetimes[0]), (void**)&lifetimes));
+  memset(lifetimes, 0, lifetime_count * sizeof(lifetimes[0]));
+
+  iree_status_t status = iree_ok_status();
+  iree_host_size_t lifetime_index = 0;
+  for (iree_host_size_t i = 0;
+       i < builder->tensor_record_count && iree_status_is_ok(status); ++i) {
+    const id4_pipeline_region_tensor_record_t* record =
+        &builder->tensor_records[i];
+    if (record->tensor.storage_class !=
+        ID4_PIPELINE_TENSOR_STORAGE_CLASS_LOCAL) {
+      continue;
+    }
+    id4_pipeline_region_local_lifetime_t* lifetime =
+        &lifetimes[lifetime_index++];
+    lifetime->ordinal = record->tensor.ordinal;
+    lifetime->flags = record->lifetime_flags;
+    lifetime->dtype = record->dtype;
+    lifetime->shape = record->tensor.shape;
+    lifetime->byte_length = record->tensor.length;
+    lifetime->alignment = record->alignment;
+    lifetime->offset = record->tensor.offset;
+    lifetime->acquire_operation_ordinal = record->acquire_operation_ordinal;
+    lifetime->acquire_epoch = record->acquire_epoch;
+    lifetime->release_operation_ordinal = record->release_operation_ordinal;
+    lifetime->release_epoch = record->release_epoch;
+    status = id4_pipeline_region_string_clone(record->name, host_allocator,
+                                              &lifetime->name);
+  }
+  if (iree_status_is_ok(status)) {
+    *out_lifetime_count = lifetime_count;
+    *out_lifetimes = lifetimes;
+  } else {
+    id4_pipeline_region_local_lifetime_list_release(lifetime_count, lifetimes,
+                                                    host_allocator);
+  }
+  return status;
+}
+
+void id4_pipeline_region_local_lifetime_list_release(
+    iree_host_size_t lifetime_count,
+    id4_pipeline_region_local_lifetime_t* lifetimes,
+    iree_allocator_t host_allocator) {
+  if (!lifetimes) return;
+  for (iree_host_size_t i = 0; i < lifetime_count; ++i) {
+    id4_pipeline_region_string_release(lifetimes[i].name, host_allocator);
+  }
+  iree_allocator_free(host_allocator, lifetimes);
+}
+
 iree_status_t id4_pipeline_region_acquire_tensor(
     id4_pipeline_region_builder_t* builder,
     const id4_pipeline_tensor_layout_t* layout,
@@ -668,6 +808,11 @@ iree_status_t id4_pipeline_region_acquire_tensor(
   IREE_RETURN_IF_ERROR(id4_pipeline_region_make_tensor_record(
       builder, ID4_PIPELINE_TENSOR_STORAGE_CLASS_LOCAL, layout,
       builder->local_binding_slot, offset, /*initialized=*/false, &record));
+  if (found_reusable_range) {
+    record->lifetime_flags |= ID4_PIPELINE_REGION_LOCAL_LIFETIME_FLAG_REUSED;
+  }
+  IREE_RETURN_IF_ERROR(id4_pipeline_region_note_local_live_acquire(
+      builder, layout->byte_length));
   ++builder->statistics.local_acquire_count;
   *out_tensor = record->tensor;
   return iree_ok_status();
@@ -735,6 +880,8 @@ iree_status_t id4_pipeline_region_release_tensor(
   record->released = true;
   record->release_operation_ordinal = builder->statistics.operation_count;
   record->release_epoch = builder->statistics.current_epoch;
+  IREE_RETURN_IF_ERROR(id4_pipeline_region_note_local_live_release(
+      builder, record->tensor.length, record->name));
   ++builder->statistics.local_release_count;
   return iree_ok_status();
 }

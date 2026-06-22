@@ -68,6 +68,7 @@ iree_runtime_cc_library(
         ":diagnostics",
         ":kernel_library",
         ":parameter_slab",
+        ":program",
         ":region",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",

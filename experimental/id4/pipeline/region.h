@@ -74,6 +74,15 @@ typedef enum id4_pipeline_tensor_import_flag_bits_e {
   ID4_PIPELINE_TENSOR_IMPORT_FLAG_INITIALIZED = 1u << 0,
 } id4_pipeline_tensor_import_flag_bits_t;
 
+// Local tensor lifetime behavior flags.
+typedef uint32_t id4_pipeline_region_local_lifetime_flags_t;
+
+// Local tensor lifetime behavior flag bits.
+typedef enum id4_pipeline_region_local_lifetime_flag_bits_e {
+  // Tensor storage was acquired from a previously released local slab range.
+  ID4_PIPELINE_REGION_LOCAL_LIFETIME_FLAG_REUSED = 1u << 0,
+} id4_pipeline_region_local_lifetime_flag_bits_t;
+
 // Scalar element type for planned tensor values.
 typedef enum id4_pipeline_tensor_dtype_e {
   // Invalid element type.
@@ -147,6 +156,34 @@ typedef struct id4_pipeline_tensor_import_t {
   // Import behavior flags.
   id4_pipeline_tensor_import_flags_t flags;
 } id4_pipeline_tensor_import_t;
+
+// Local tensor lifetime record emitted by a region builder.
+typedef struct id4_pipeline_region_local_lifetime_t {
+  // Human-readable tensor name owned by the containing record.
+  iree_string_view_t name;
+  // Builder-local tensor ordinal.
+  uint32_t ordinal;
+  // Lifetime behavior flags.
+  id4_pipeline_region_local_lifetime_flags_t flags;
+  // Scalar element type.
+  id4_pipeline_tensor_dtype_t dtype;
+  // Tensor shape.
+  id4_pipeline_tensor_shape_t shape;
+  // Tensor byte length.
+  iree_device_size_t byte_length;
+  // Required base alignment in bytes.
+  iree_device_size_t alignment;
+  // Byte offset into the local slab binding.
+  iree_device_size_t offset;
+  // Operation ordinal where the tensor was acquired.
+  iree_host_size_t acquire_operation_ordinal;
+  // Epoch where the tensor was acquired.
+  uint32_t acquire_epoch;
+  // Operation ordinal where the tensor was released, or IREE_HOST_SIZE_MAX.
+  iree_host_size_t release_operation_ordinal;
+  // Epoch where the tensor was released, or UINT32_MAX.
+  uint32_t release_epoch;
+} id4_pipeline_region_local_lifetime_t;
 
 // Kernel descriptor consumed by region dispatch.
 typedef struct id4_pipeline_region_kernel_t {
@@ -228,7 +265,7 @@ typedef struct id4_pipeline_region_statistics_t {
   iree_host_size_t bound_import_count;
   // Local slab byte length required by the region.
   iree_device_size_t local_slab_byte_length;
-  // Peak local slab byte length reached by the region.
+  // Peak concurrently live local tensor bytes.
   iree_device_size_t local_slab_high_water_mark;
 } id4_pipeline_region_statistics_t;
 
@@ -324,6 +361,22 @@ iree_host_size_t id4_pipeline_region_builder_kernel_count(
 // range.
 const id4_pipeline_region_kernel_plan_t* id4_pipeline_region_builder_kernel_at(
     const id4_pipeline_region_builder_t* builder, iree_host_size_t index);
+
+// Returns the number of local tensor lifetime records.
+iree_host_size_t id4_pipeline_region_builder_local_lifetime_count(
+    const id4_pipeline_region_builder_t* builder);
+
+// Clones local tensor lifetime records into |host_allocator|.
+iree_status_t id4_pipeline_region_builder_clone_local_lifetimes(
+    const id4_pipeline_region_builder_t* builder,
+    iree_allocator_t host_allocator, iree_host_size_t* out_lifetime_count,
+    id4_pipeline_region_local_lifetime_t** out_lifetimes);
+
+// Releases local tensor lifetime records cloned from a region builder.
+void id4_pipeline_region_local_lifetime_list_release(
+    iree_host_size_t lifetime_count,
+    id4_pipeline_region_local_lifetime_t* lifetimes,
+    iree_allocator_t host_allocator);
 
 // Acquires an uninitialized local transient tensor from the region slab.
 iree_status_t id4_pipeline_region_acquire_tensor(

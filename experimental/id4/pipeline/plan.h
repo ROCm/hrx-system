@@ -21,6 +21,9 @@ extern "C" {
 // Opaque planned execution object.
 typedef struct id4_pipeline_plan_t id4_pipeline_plan_t;
 
+// Opaque semantic pipeline program retained by program-backed plans.
+typedef struct id4_pipeline_program_t id4_pipeline_program_t;
+
 // Device placement selected during planning.
 typedef struct id4_pipeline_device_placement_t {
   // Human-readable role for diagnostics.
@@ -61,7 +64,7 @@ typedef struct id4_pipeline_memory_slab_plan_t {
   iree_device_size_t byte_length;
   // Required slab base alignment in bytes.
   iree_device_size_t alignment;
-  // Peak live bytes packed into the slab.
+  // Peak concurrently live bytes represented in the slab.
   iree_device_size_t high_water_mark;
 } id4_pipeline_memory_slab_plan_t;
 
@@ -109,6 +112,10 @@ typedef struct id4_pipeline_region_plan_t {
   iree_device_size_t local_tensor_alignment;
   // Dry-run region statistics used for diagnostics and memory planning.
   id4_pipeline_region_statistics_t statistics;
+  // Number of local tensor lifetime records.
+  iree_host_size_t local_lifetime_count;
+  // Local tensor lifetime records owned by the containing plan.
+  const id4_pipeline_region_local_lifetime_t* local_lifetimes;
 } id4_pipeline_region_plan_t;
 
 // Planned diagnostics tap.
@@ -137,6 +144,8 @@ typedef struct id4_pipeline_plan_create_options_t {
   const void* next;
   // Stage name used in diagnostics.
   iree_string_view_t stage_name;
+  // Optional immutable source program retained by program-backed plans.
+  const id4_pipeline_program_t* source_program;
   // Device group retained by the plan.
   iree_hal_device_group_t* device_group;
   // Number of explicit placements.
@@ -197,6 +206,10 @@ iree_host_size_t id4_pipeline_plan_placement_count(
 // Returns placement |index| or NULL when out of range.
 const id4_pipeline_device_placement_t* id4_pipeline_plan_placement_at(
     const id4_pipeline_plan_t* plan, iree_host_size_t index);
+
+// Returns the retained immutable source program for program-backed plans.
+const id4_pipeline_program_t* id4_pipeline_plan_source_program(
+    const id4_pipeline_plan_t* plan);
 
 // Returns the number of parameter slabs in |plan|.
 iree_host_size_t id4_pipeline_plan_parameter_slab_count(

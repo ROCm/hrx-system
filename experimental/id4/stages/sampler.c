@@ -220,45 +220,6 @@ static iree_status_t id4_sampler_denoise_stage_plan(
   return status;
 }
 
-static iree_status_t id4_sampler_denoise_stage_request_from_plan(
-    const id4_pipeline_plan_t* plan,
-    id4_sampler_denoise_request_config_t* out_request) {
-  memset(out_request, 0, sizeof(*out_request));
-  if (id4_pipeline_plan_boundary_tensor_count(plan) == 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "sampler denoise plan has no boundary tensors");
-  }
-  const id4_pipeline_boundary_tensor_plan_t* latent_boundary =
-      id4_pipeline_plan_boundary_tensor_at(plan, 0);
-  if (!latent_boundary) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "sampler denoise plan boundary tensor is missing");
-  }
-  if (!iree_all_bits_set(latent_boundary->flags,
-                         ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_IMPORTED |
-                             ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_INITIALIZED)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "sampler denoise plan first boundary tensor is not an initialized "
-        "import");
-  }
-  if (latent_boundary->layout.dtype != ID4_PIPELINE_TENSOR_DTYPE_F32) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "sampler denoise plan first boundary tensor is not f32");
-  }
-  if (latent_boundary->layout.shape.rank == 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "sampler denoise latent shape rank must be "
-                            "nonzero");
-  }
-  out_request->latent_shape.rank = latent_boundary->layout.shape.rank;
-  for (uint32_t i = 0; i < out_request->latent_shape.rank; ++i) {
-    out_request->latent_shape.dims[i] = latent_boundary->layout.shape.dims[i];
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t id4_sampler_denoise_stage_prepare(
     id4_pipeline_stage_t* base_stage, const id4_pipeline_plan_t* plan,
     const id4_pipeline_stage_prepare_options_t* options,
@@ -271,29 +232,17 @@ static iree_status_t id4_sampler_denoise_stage_prepare(
         "sampler denoise stage must be loaded before preparation");
   }
 
-  id4_sampler_denoise_request_config_t request;
-  IREE_RETURN_IF_ERROR(
-      id4_sampler_denoise_stage_request_from_plan(plan, &request));
-
-  id4_pipeline_program_t* program = NULL;
-  iree_status_t status = id4_sampler_denoise_stage_author_program(
-      request, stage->host_allocator, &program);
-  if (iree_status_is_ok(status)) {
-    id4_pipeline_program_stage_prepare_options_t prepare_options;
-    memset(&prepare_options, 0, sizeof(prepare_options));
-    prepare_options.structure_size = sizeof(prepare_options);
-    prepare_options.stage_name = IREE_SV(ID4_SAMPLER_DENOISE_STAGE_NAME);
-    prepare_options.stage_options = options;
-    prepare_options.program = program;
-    prepare_options.plan = plan;
-    prepare_options.device_group = stage->base.services.device_group;
-    prepare_options.kernel_cache = stage->kernel_cache;
-    prepare_options.executable_cache = stage->base.services.executable_cache;
-    status = id4_pipeline_program_stage_prepare(
-        &prepare_options, stage->host_allocator, out_bundle);
-  }
-  id4_pipeline_program_release(program);
-  return status;
+  id4_pipeline_program_stage_prepare_options_t prepare_options;
+  memset(&prepare_options, 0, sizeof(prepare_options));
+  prepare_options.structure_size = sizeof(prepare_options);
+  prepare_options.stage_name = IREE_SV(ID4_SAMPLER_DENOISE_STAGE_NAME);
+  prepare_options.stage_options = options;
+  prepare_options.plan = plan;
+  prepare_options.device_group = stage->base.services.device_group;
+  prepare_options.kernel_cache = stage->kernel_cache;
+  prepare_options.executable_cache = stage->base.services.executable_cache;
+  return id4_pipeline_program_stage_prepare(&prepare_options,
+                                            stage->host_allocator, out_bundle);
 }
 
 static iree_status_t id4_sampler_denoise_stage_issue(

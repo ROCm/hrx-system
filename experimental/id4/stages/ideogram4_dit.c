@@ -330,206 +330,6 @@ static iree_status_t id4_ideogram4_dit_stage_plan(
   return status;
 }
 
-static iree_status_t id4_ideogram4_dit_stage_request_from_plan(
-    const id4_ideogram4_dit_stage_t* stage, const id4_pipeline_plan_t* plan,
-    id4_ideogram4_dit_request_config_t* out_request) {
-  memset(out_request, 0, sizeof(*out_request));
-  const iree_host_size_t boundary_count =
-      id4_pipeline_plan_boundary_tensor_count(plan);
-  if (boundary_count != 5 && boundary_count != 6) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "Ideogram4 DiT plan boundary tensor count %" PRIhsz
-                            " is invalid",
-                            boundary_count);
-  }
-  const id4_pipeline_boundary_tensor_plan_t* latent =
-      id4_pipeline_plan_boundary_tensor_at(plan, 0);
-  if (!latent) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "Ideogram4 DiT plan boundary tensor is missing");
-  }
-  if (!iree_all_bits_set(latent->flags,
-                         ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_IMPORTED |
-                             ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_INITIALIZED)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "Ideogram4 DiT plan first boundary tensor is not an initialized "
-        "import");
-  }
-  if (latent->layout.dtype != ID4_PIPELINE_TENSOR_DTYPE_F32) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "Ideogram4 DiT latent boundary dtype does not match expected f32");
-  }
-  if (latent->layout.shape.rank != 4) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "Ideogram4 DiT latent boundary rank does not match expected rank 4");
-  }
-  const id4_pipeline_boundary_tensor_plan_t* timestep =
-      id4_pipeline_plan_boundary_tensor_at(plan, 1);
-  if (!timestep) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "Ideogram4 DiT plan timestep boundary tensor is "
-                            "missing");
-  }
-  if (!iree_all_bits_set(timestep->flags,
-                         ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_IMPORTED |
-                             ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_INITIALIZED)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "Ideogram4 DiT plan second boundary tensor is not an initialized "
-        "import");
-  }
-  if (timestep->layout.dtype != ID4_PIPELINE_TENSOR_DTYPE_F32 ||
-      timestep->layout.shape.rank != 1 || timestep->layout.shape.dims[0] != 1) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "Ideogram4 DiT timestep boundary does not match expected f32[1]");
-  }
-  const id4_pipeline_boundary_tensor_plan_t* image_indicator =
-      id4_pipeline_plan_boundary_tensor_at(plan, 2);
-  if (!image_indicator) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "Ideogram4 DiT plan image indicator boundary "
-                            "tensor is missing");
-  }
-  if (!iree_all_bits_set(image_indicator->flags,
-                         ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_IMPORTED |
-                             ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_INITIALIZED)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "Ideogram4 DiT plan third boundary tensor is not an initialized "
-        "import");
-  }
-  uint64_t image_token_count = 0;
-  if (latent->layout.shape.dims[0] != 0 &&
-      latent->layout.shape.dims[1] >
-          UINT64_MAX / latent->layout.shape.dims[0]) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "Ideogram4 DiT boundary token count overflow");
-  }
-  image_token_count =
-      latent->layout.shape.dims[0] * latent->layout.shape.dims[1];
-  uint64_t text_token_count = 0;
-  if (boundary_count == 6) {
-    const id4_pipeline_boundary_tensor_plan_t* condition =
-        id4_pipeline_plan_boundary_tensor_at(plan, 4);
-    if (!condition) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "Ideogram4 DiT plan condition boundary tensor "
-                              "is missing");
-    }
-    if (!iree_all_bits_set(condition->flags,
-                           ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_IMPORTED |
-                               ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_INITIALIZED)) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "Ideogram4 DiT plan fifth boundary tensor is not an initialized "
-          "import");
-    }
-    if (condition->layout.dtype != ID4_PIPELINE_TENSOR_DTYPE_F32 ||
-        condition->layout.shape.rank != 2 ||
-        condition->layout.shape.dims[0] != stage->model.llm_feature_count ||
-        condition->layout.shape.dims[1] == 0 ||
-        condition->layout.shape.dims[1] > UINT32_MAX) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "Ideogram4 DiT condition boundary does not match expected "
-          "f32[llm_feature_count,text_token_count]");
-    }
-    text_token_count = condition->layout.shape.dims[1];
-  }
-  uint64_t total_token_count = image_token_count + text_token_count;
-  if (total_token_count > ID4_IDEOGRAM4_DIT_PRELUDE_MAX_TOKEN_COUNT) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "Ideogram4 DiT boundary combined token count exceeds max count %u",
-        ID4_IDEOGRAM4_DIT_PRELUDE_MAX_TOKEN_COUNT);
-  }
-  if (image_indicator->layout.dtype != ID4_PIPELINE_TENSOR_DTYPE_I32 ||
-      image_indicator->layout.shape.rank != 2 ||
-      image_indicator->layout.shape.dims[0] != total_token_count ||
-      image_indicator->layout.shape.dims[1] != 1) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "Ideogram4 DiT image indicator boundary does not match expected "
-        "i32[total_token_count,1]");
-  }
-  const id4_pipeline_boundary_tensor_plan_t* position_embedding =
-      id4_pipeline_plan_boundary_tensor_at(plan, 3);
-  if (!position_embedding) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "Ideogram4 DiT plan position embedding boundary "
-                            "tensor is missing");
-  }
-  if (!iree_all_bits_set(position_embedding->flags,
-                         ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_IMPORTED |
-                             ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_INITIALIZED)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "Ideogram4 DiT plan fourth boundary tensor is not an initialized "
-        "import");
-  }
-  const uint32_t head_size =
-      stage->model.hidden_size / stage->model.attention_head_count;
-  if (position_embedding->layout.dtype != ID4_PIPELINE_TENSOR_DTYPE_F32 ||
-      position_embedding->layout.shape.rank != 4 ||
-      position_embedding->layout.shape.dims[0] != 2 ||
-      position_embedding->layout.shape.dims[1] != 2 ||
-      position_embedding->layout.shape.dims[2] != head_size / 2 ||
-      position_embedding->layout.shape.dims[3] != total_token_count) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "Ideogram4 DiT position embedding boundary does not match expected "
-        "f32[2,2,head_size/2,total_token_count]");
-  }
-  const id4_pipeline_boundary_tensor_plan_t* velocity =
-      id4_pipeline_plan_boundary_tensor_at(plan, boundary_count - 1);
-  if (!velocity) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "Ideogram4 DiT plan velocity boundary tensor is "
-                            "missing");
-  }
-  if (!iree_all_bits_set(velocity->flags,
-                         ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_IMPORTED |
-                             ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_EXPORTED)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "Ideogram4 DiT plan final boundary tensor is not an exported output");
-  }
-  if (iree_any_bit_set(velocity->flags,
-                       ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_INITIALIZED)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "Ideogram4 DiT velocity boundary must be uninitialized at stage entry");
-  }
-  if (velocity->layout.dtype != ID4_PIPELINE_TENSOR_DTYPE_F32 ||
-      velocity->layout.shape.rank != latent->layout.shape.rank) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "Ideogram4 DiT velocity boundary does not match latent boundary "
-        "layout");
-  }
-  for (uint32_t i = 0; i < latent->layout.shape.rank; ++i) {
-    if (velocity->layout.shape.dims[i] != latent->layout.shape.dims[i]) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "Ideogram4 DiT velocity boundary does not match latent boundary "
-          "shape");
-    }
-  }
-  out_request->latent_shape.rank = latent->layout.shape.rank;
-  for (uint32_t i = 0; i < out_request->latent_shape.rank; ++i) {
-    out_request->latent_shape.dims[i] = latent->layout.shape.dims[i];
-  }
-  out_request->conditioning_mode =
-      boundary_count == 6 ? ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_CONDITIONED
-                          : ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_UNCONDITIONED;
-  out_request->text_token_count = (uint32_t)text_token_count;
-  return id4_ideogram4_dit_stage_validate_request(&stage->model, *out_request);
-}
-
 static iree_status_t id4_ideogram4_dit_stage_prepare(
     id4_pipeline_stage_t* base_stage, const id4_pipeline_plan_t* plan,
     const id4_pipeline_stage_prepare_options_t* options,
@@ -541,29 +341,17 @@ static iree_status_t id4_ideogram4_dit_stage_prepare(
         "Ideogram4 DiT stage must be loaded before preparation");
   }
 
-  id4_ideogram4_dit_request_config_t request;
-  IREE_RETURN_IF_ERROR(
-      id4_ideogram4_dit_stage_request_from_plan(stage, plan, &request));
-
-  id4_pipeline_program_t* program = NULL;
-  iree_status_t status = id4_ideogram4_dit_stage_author_program(
-      stage, request, stage->host_allocator, &program);
-  if (iree_status_is_ok(status)) {
-    id4_pipeline_program_stage_prepare_options_t prepare_options;
-    memset(&prepare_options, 0, sizeof(prepare_options));
-    prepare_options.structure_size = sizeof(prepare_options);
-    prepare_options.stage_name = IREE_SV(ID4_IDEOGRAM4_DIT_STAGE_NAME);
-    prepare_options.stage_options = options;
-    prepare_options.program = program;
-    prepare_options.plan = plan;
-    prepare_options.device_group = stage->base.services.device_group;
-    prepare_options.kernel_cache = stage->kernel_cache;
-    prepare_options.executable_cache = stage->base.services.executable_cache;
-    status = id4_pipeline_program_stage_prepare(
-        &prepare_options, stage->host_allocator, out_bundle);
-  }
-  id4_pipeline_program_release(program);
-  return status;
+  id4_pipeline_program_stage_prepare_options_t prepare_options;
+  memset(&prepare_options, 0, sizeof(prepare_options));
+  prepare_options.structure_size = sizeof(prepare_options);
+  prepare_options.stage_name = IREE_SV(ID4_IDEOGRAM4_DIT_STAGE_NAME);
+  prepare_options.stage_options = options;
+  prepare_options.plan = plan;
+  prepare_options.device_group = stage->base.services.device_group;
+  prepare_options.kernel_cache = stage->kernel_cache;
+  prepare_options.executable_cache = stage->base.services.executable_cache;
+  return id4_pipeline_program_stage_prepare(&prepare_options,
+                                            stage->host_allocator, out_bundle);
 }
 
 static iree_status_t id4_ideogram4_dit_stage_issue(

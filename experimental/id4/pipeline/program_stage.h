@@ -53,9 +53,7 @@ typedef struct id4_pipeline_program_stage_prepare_options_t {
   iree_string_view_t stage_name;
   // Generic stage prepare options carrying providers, semaphores, and sinks.
   const id4_pipeline_stage_prepare_options_t* stage_options;
-  // Semantic program authored from the same request used to create the plan.
-  const id4_pipeline_program_t* program;
-  // Plan derived from |program|.
+  // Program-backed plan retaining the immutable source program.
   const id4_pipeline_plan_t* plan;
   // Device group owned by the concrete stage.
   iree_hal_device_group_t* device_group;

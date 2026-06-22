@@ -179,6 +179,27 @@ TEST_F(RegionBuilderTest, AcquireReleaseReusesOnlyAfterEpochAdvance) {
   EXPECT_EQ(statistics.local_slab_byte_length, 128u);
   EXPECT_EQ(statistics.local_slab_high_water_mark, 128u);
 
+  iree_host_size_t lifetime_count = 0;
+  id4_pipeline_region_local_lifetime_t* lifetimes = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_region_builder_clone_local_lifetimes(
+      builder, iree_allocator_system(), &lifetime_count, &lifetimes));
+  ASSERT_EQ(lifetime_count, 3u);
+  EXPECT_TRUE(iree_string_view_equal(lifetimes[0].name, IREE_SV("a")));
+  EXPECT_EQ(lifetimes[0].offset, 0u);
+  EXPECT_EQ(lifetimes[0].byte_length, 64u);
+  EXPECT_EQ(lifetimes[0].acquire_epoch, 0u);
+  EXPECT_EQ(lifetimes[0].release_epoch, 0u);
+  EXPECT_EQ(lifetimes[0].release_operation_ordinal, 1u);
+  EXPECT_TRUE(iree_string_view_equal(lifetimes[1].name, IREE_SV("b")));
+  EXPECT_EQ(lifetimes[1].offset, 64u);
+  EXPECT_EQ(lifetimes[1].release_operation_ordinal, IREE_HOST_SIZE_MAX);
+  EXPECT_TRUE(iree_string_view_equal(lifetimes[2].name, IREE_SV("c")));
+  EXPECT_EQ(lifetimes[2].offset, 0u);
+  EXPECT_TRUE(iree_all_bits_set(
+      lifetimes[2].flags, ID4_PIPELINE_REGION_LOCAL_LIFETIME_FLAG_REUSED));
+  id4_pipeline_region_local_lifetime_list_release(lifetime_count, lifetimes,
+                                                  iree_allocator_system());
+
   id4_pipeline_region_builder_destroy(builder);
 }
 

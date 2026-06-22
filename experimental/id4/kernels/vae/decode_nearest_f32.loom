@@ -1,0 +1,105 @@
+config.decl @id4.vae.decode.output_element_count : %value: index where [range(%value, 1, 268435456)]
+config.decl @id4.vae.decode.latent_element_count : %value: index where [range(%value, 1, 268435456)]
+config.decl @id4.vae.decode.latent_height : %value: index where [range(%value, 1, 65536)]
+config.decl @id4.vae.decode.latent_width : %value: index where [range(%value, 1, 65536)]
+config.decl @id4.vae.decode.latent_channel_count : %value: index where [range(%value, 1, 4096)]
+config.decl @id4.vae.decode.decoded_height : %value: index where [range(%value, 1, 1048576)]
+config.decl @id4.vae.decode.decoded_width : %value: index where [range(%value, 1, 1048576)]
+config.decl @id4.vae.decode.decoded_channel_count : %value: index where [range(%value, 1, 4096)]
+config.decl @id4.vae.decode.scale_x : %value: index where [range(%value, 1, 256)]
+config.decl @id4.vae.decode.scale_y : %value: index where [range(%value, 1, 256)]
+config.decl @id4.vae.decode.tile_width : %value: index where [range(%value, 1, 65536)]
+config.decl @id4.vae.decode.tile_height : %value: index where [range(%value, 1, 65536)]
+config.decl @id4.vae.decode.tile_count_x : %value: index where [range(%value, 1, 65536)]
+config.decl @id4.vae.decode.tile_count_y : %value: index where [range(%value, 1, 65536)]
+config.decl @id4.vae.decode.overlap_milli : %value: index where [range(%value, 0, 500)]
+
+kernel.def @id4_vae_decode_nearest_f32() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %rounding = index.constant 255 : index
+  %element_count = config.get @id4.vae.decode.output_element_count : index
+  %rounded = index.add %element_count, %rounding : index
+  %workgroups_x = index.div %rounded, %workgroup_size_x : index
+  kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%latent: buffer, %decoded_tile: buffer, %decoded_image: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %workgroup_size_x = index.constant 256 : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %output_element_count = config.get @id4.vae.decode.output_element_count : index
+  %latent_element_count = config.get @id4.vae.decode.latent_element_count : index
+  %latent_height = config.get @id4.vae.decode.latent_height : index
+  %latent_width = config.get @id4.vae.decode.latent_width : index
+  %latent_channel_count = config.get @id4.vae.decode.latent_channel_count : index
+  %decoded_height = config.get @id4.vae.decode.decoded_height : index
+  %decoded_width = config.get @id4.vae.decode.decoded_width : index
+  %decoded_channel_count = config.get @id4.vae.decode.decoded_channel_count : index
+  %scale_x = config.get @id4.vae.decode.scale_x : index
+  %scale_y = config.get @id4.vae.decode.scale_y : index
+  %tile_width = config.get @id4.vae.decode.tile_width : index
+  %tile_height = config.get @id4.vae.decode.tile_height : index
+  %tile_output_width = index.mul %tile_width, %scale_x : index
+  %tile_output_height = index.mul %tile_height, %scale_y : index
+  %tile_pixel_count = index.mul %tile_output_width, %tile_output_height : index
+  %tile_element_count = index.mul %tile_pixel_count, %decoded_channel_count : index
+  %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
+  %in_bounds = index.cmp ult, %element_index, %output_element_count : index
+
+  %latent_noalias, %decoded_tile_noalias, %decoded_image_noalias = buffer.assume.noalias %latent, %decoded_tile, %decoded_image : buffer, buffer, buffer
+  %latent_view = buffer.view %latent_noalias[%base] : buffer -> view<[%latent_element_count]xf32, #dense>
+  %decoded_tile_view = buffer.view %decoded_tile_noalias[%base] : buffer -> view<[%tile_element_count]xf32, #dense>
+  %decoded_image_view = buffer.view %decoded_image_noalias[%base] : buffer -> view<[%output_element_count]xf32, #dense>
+
+  scf.if %in_bounds {
+    %decoded_pixel = index.div %element_index, %decoded_channel_count : index
+    %decoded_channel = index.rem %element_index, %decoded_channel_count : index
+    %decoded_x = index.rem %decoded_pixel, %decoded_width : index
+    %decoded_row = index.div %decoded_pixel, %decoded_width : index
+    %decoded_y = index.rem %decoded_row, %decoded_height : index
+    %batch = index.div %decoded_row, %decoded_height : index
+    %latent_x = index.div %decoded_x, %scale_x : index
+    %latent_y = index.div %decoded_y, %scale_y : index
+    %latent_channel = index.rem %decoded_channel, %latent_channel_count : index
+    %latent_row_offset = index.mul %batch, %latent_height : index
+    %latent_row = index.add %latent_row_offset, %latent_y : index
+    %latent_pixel_base = index.mul %latent_row, %latent_width : index
+    %latent_pixel = index.add %latent_pixel_base, %latent_x : index
+    %latent_element_base = index.mul %latent_pixel, %latent_channel_count : index
+    %latent_element = index.add %latent_element_base, %latent_channel : index
+    %value = view.load %latent_view[%latent_element] : view<[%latent_element_count]xf32, #dense> -> f32
+    view.store %value, %decoded_image_view[%element_index] : f32, view<[%output_element_count]xf32, #dense>
+
+    %tile_index = index.rem %element_index, %tile_element_count : index
+    %tile_in_bounds = index.cmp ult, %tile_index, %tile_element_count : index
+    scf.if %tile_in_bounds {
+      view.store %value, %decoded_tile_view[%tile_index] : f32, view<[%tile_element_count]xf32, #dense>
+    }
+  }
+  kernel.return
+}
+
+check.case public @id4_vae_decode_nearest_f32_scale2_case {
+  %latent = check.generate.fill value(2.0) : tensor<1x2x2x1xf32>
+  %decoded_tile = check.generate.fill value(0.0) : tensor<1x4x4x1xf32>
+  %decoded_image = check.generate.fill value(0.0) : tensor<1x4x4x1xf32>
+  %expected = check.generate.fill value(2.0) : tensor<1x4x4x1xf32>
+  func.call @id4_vae_decode_nearest_f32(%latent, %decoded_tile, %decoded_image) : (tensor<1x2x2x1xf32>, tensor<1x4x4x1xf32>, tensor<1x4x4x1xf32>)
+  check.expect.close actual(%decoded_image) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1x4x4x1xf32>
+  check.expect.close actual(%decoded_tile) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1x4x4x1xf32>
+  check.return
+}
+
+check.case public @id4_vae_decode_nearest_f32_flux2_tile_case {
+  %latent = check.generate.fill value(1.0) : tensor<1x32x32x32xf32>
+  %decoded_tile = check.generate.fill value(0.0) : tensor<1x512x512x3xf32>
+  %decoded_image = check.generate.fill value(0.0) : tensor<1x512x512x3xf32>
+  %expected = check.generate.fill value(1.0) : tensor<1x512x512x3xf32>
+  func.call @id4_vae_decode_nearest_f32(%latent, %decoded_tile, %decoded_image) : (tensor<1x32x32x32xf32>, tensor<1x512x512x3xf32>, tensor<1x512x512x3xf32>)
+  check.expect.close actual(%decoded_image) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1x512x512x3xf32>
+  check.return
+}
+
+check.benchmark<@id4_vae_decode_nearest_f32_scale2_case> @id4_vae_decode_nearest_f32_scale2
+check.benchmark<@id4_vae_decode_nearest_f32_flux2_tile_case> @id4_vae_decode_nearest_f32_flux2_tile

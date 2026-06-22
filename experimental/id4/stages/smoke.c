@@ -368,6 +368,12 @@ static iree_status_t id4_smoke_stage_create_plan(
   if (iree_status_is_ok(status)) {
     id4_pipeline_region_builder_statistics(builder, &region_statistics);
   }
+  iree_host_size_t local_lifetime_count = 0;
+  id4_pipeline_region_local_lifetime_t* local_lifetimes = NULL;
+  if (iree_status_is_ok(status)) {
+    status = id4_pipeline_region_builder_clone_local_lifetimes(
+        builder, host_allocator, &local_lifetime_count, &local_lifetimes);
+  }
   iree_host_size_t kernel_count = 0;
   if (iree_status_is_ok(status)) {
     kernel_count = id4_pipeline_region_builder_kernel_count(builder);
@@ -439,6 +445,8 @@ static iree_status_t id4_smoke_stage_create_plan(
   region.binding_capacity = ID4_SMOKE_STAGE_BINDING_COUNT;
   region.local_binding_slot = ID4_SMOKE_STAGE_LOCAL_BINDING_SLOT;
   region.statistics = region_statistics;
+  region.local_lifetime_count = local_lifetime_count;
+  region.local_lifetimes = local_lifetimes;
 
   id4_pipeline_diagnostic_tap_plan_t tap;
   memset(&tap, 0, sizeof(tap));
@@ -479,6 +487,8 @@ static iree_status_t id4_smoke_stage_create_plan(
     status =
         id4_pipeline_plan_create(&create_options, host_allocator, out_plan);
   }
+  id4_pipeline_region_local_lifetime_list_release(
+      local_lifetime_count, local_lifetimes, host_allocator);
   id4_pipeline_region_builder_destroy(builder);
   iree_arena_block_pool_deinitialize(&block_pool);
   return status;

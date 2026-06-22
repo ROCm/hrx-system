@@ -78,6 +78,7 @@ iree_cc_library(
     ::diagnostics
     ::kernel_library
     ::parameter_slab
+    ::program
     ::region
     iree::base
     iree::hal

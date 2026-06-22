@@ -9,6 +9,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "experimental/id4/pipeline/program.h"
+
 struct id4_pipeline_plan_t {
   // Reference count for shared plan ownership.
   iree_atomic_ref_count_t ref_count;
@@ -16,6 +18,8 @@ struct id4_pipeline_plan_t {
   iree_allocator_t host_allocator;
   // Stage name owned by this plan.
   iree_string_view_t stage_name;
+  // Optional immutable semantic program retained by program-backed plans.
+  id4_pipeline_program_t* source_program;
   // Retained device group used for placement resolution.
   iree_hal_device_group_t* device_group;
   // Number of planned device placements.
@@ -98,7 +102,14 @@ static void id4_pipeline_plan_destroy(id4_pipeline_plan_t* plan) {
   }
   iree_allocator_free(host_allocator, plan->diagnostic_taps);
   for (iree_host_size_t i = 0; i < plan->region_count; ++i) {
-    id4_pipeline_string_release(plan->regions[i].name, host_allocator);
+    id4_pipeline_region_plan_t* region = &plan->regions[i];
+    id4_pipeline_region_local_lifetime_t* lifetimes =
+        (id4_pipeline_region_local_lifetime_t*)region->local_lifetimes;
+    for (iree_host_size_t j = 0; j < region->local_lifetime_count; ++j) {
+      id4_pipeline_string_release(lifetimes[j].name, host_allocator);
+    }
+    iree_allocator_free(host_allocator, lifetimes);
+    id4_pipeline_string_release(region->name, host_allocator);
   }
   iree_allocator_free(host_allocator, plan->regions);
   for (iree_host_size_t i = 0; i < plan->boundary_tensor_count; ++i) {
@@ -140,6 +151,7 @@ static void id4_pipeline_plan_destroy(id4_pipeline_plan_t* plan) {
   }
   iree_allocator_free(host_allocator, plan->placements);
   iree_hal_device_group_release(plan->device_group);
+  id4_pipeline_program_release(plan->source_program);
   id4_pipeline_string_release(plan->stage_name, host_allocator);
   iree_allocator_free(host_allocator, plan);
 }
@@ -414,6 +426,20 @@ static iree_status_t id4_pipeline_plan_copy_regions(
           "region %.*s local tensor alignment must be a power of two",
           (int)source->name.size, source->name.data);
     }
+    if (source->local_lifetime_count != 0 && !source->local_lifetimes) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "region %.*s local lifetime array is required",
+                              (int)source->name.size, source->name.data);
+    }
+    if (source->local_lifetime_count !=
+        source->statistics.local_acquire_count) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "region %.*s local lifetime count %" PRIhsz
+                              " does not match local acquire count %" PRIhsz,
+                              (int)source->name.size, source->name.data,
+                              source->local_lifetime_count,
+                              source->statistics.local_acquire_count);
+    }
     id4_pipeline_region_plan_t* target = &plan->regions[i];
     target->placement_id = source->placement_id;
     target->binding_capacity = source->binding_capacity;
@@ -422,6 +448,65 @@ static iree_status_t id4_pipeline_plan_copy_regions(
     target->statistics = source->statistics;
     IREE_RETURN_IF_ERROR(id4_pipeline_string_clone(
         source->name, plan->host_allocator, &target->name));
+    target->local_lifetime_count = source->local_lifetime_count;
+    if (target->local_lifetime_count == 0) continue;
+    id4_pipeline_region_local_lifetime_t* lifetimes = NULL;
+    IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+        plan->host_allocator, target->local_lifetime_count,
+        sizeof(lifetimes[0]), (void**)&lifetimes));
+    memset(lifetimes, 0, target->local_lifetime_count * sizeof(lifetimes[0]));
+    target->local_lifetimes = lifetimes;
+    for (iree_host_size_t j = 0; j < target->local_lifetime_count; ++j) {
+      const id4_pipeline_region_local_lifetime_t* source_lifetime =
+          &source->local_lifetimes[j];
+      if (iree_string_view_is_empty(source_lifetime->name)) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "region %.*s local lifetime %" PRIhsz
+                                " name is required",
+                                (int)source->name.size, source->name.data, j);
+      }
+      if (id4_pipeline_tensor_dtype_byte_length(source_lifetime->dtype) == 0) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "region %.*s local lifetime %.*s dtype is "
+                                "invalid",
+                                (int)source->name.size, source->name.data,
+                                (int)source_lifetime->name.size,
+                                source_lifetime->name.data);
+      }
+      if (source_lifetime->byte_length == 0) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "region %.*s local lifetime %.*s byte length "
+                                "is zero",
+                                (int)source->name.size, source->name.data,
+                                (int)source_lifetime->name.size,
+                                source_lifetime->name.data);
+      }
+      iree_device_size_t lifetime_end = 0;
+      if (!iree_device_size_checked_add(source_lifetime->offset,
+                                        source_lifetime->byte_length,
+                                        &lifetime_end)) {
+        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "region %.*s local lifetime %.*s range "
+                                "overflow",
+                                (int)source->name.size, source->name.data,
+                                (int)source_lifetime->name.size,
+                                source_lifetime->name.data);
+      }
+      if (lifetime_end > source->statistics.local_slab_byte_length) {
+        return iree_make_status(
+            IREE_STATUS_OUT_OF_RANGE,
+            "region %.*s local lifetime %.*s end offset %" PRIu64
+            " exceeds local slab byte length %" PRIu64,
+            (int)source->name.size, source->name.data,
+            (int)source_lifetime->name.size, source_lifetime->name.data,
+            (uint64_t)lifetime_end,
+            (uint64_t)source->statistics.local_slab_byte_length);
+      }
+      id4_pipeline_region_local_lifetime_t* target_lifetime = &lifetimes[j];
+      *target_lifetime = *source_lifetime;
+      IREE_RETURN_IF_ERROR(id4_pipeline_string_clone(
+          source_lifetime->name, plan->host_allocator, &target_lifetime->name));
+    }
   }
   return iree_ok_status();
 }
@@ -838,6 +923,8 @@ iree_status_t id4_pipeline_plan_create(
     memset(plan, 0, sizeof(*plan));
     iree_atomic_ref_count_init(&plan->ref_count);
     plan->host_allocator = host_allocator;
+    plan->source_program = (id4_pipeline_program_t*)options->source_program;
+    id4_pipeline_program_retain(plan->source_program);
     plan->device_group = options->device_group;
     iree_hal_device_group_retain(plan->device_group);
   }
@@ -924,6 +1011,11 @@ const id4_pipeline_device_placement_t* id4_pipeline_plan_placement_at(
     const id4_pipeline_plan_t* plan, iree_host_size_t index) {
   if (!plan || index >= plan->placement_count) return NULL;
   return &plan->placements[index];
+}
+
+const id4_pipeline_program_t* id4_pipeline_plan_source_program(
+    const id4_pipeline_plan_t* plan) {
+  return plan ? plan->source_program : NULL;
 }
 
 iree_host_size_t id4_pipeline_plan_parameter_slab_count(
@@ -1103,6 +1195,19 @@ static iree_status_t id4_pipeline_plan_append_region_statistics_json(
       (uint64_t)statistics.local_slab_high_water_mark);
 }
 
+static iree_status_t id4_pipeline_plan_append_shape_json(
+    iree_string_builder_t* builder, id4_pipeline_tensor_shape_t shape) {
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "["));
+  for (uint32_t i = 0; i < shape.rank; ++i) {
+    if (i != 0) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+    }
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_format(builder, "%" PRIu64, shape.dims[i]));
+  }
+  return iree_string_builder_append_cstring(builder, "]");
+}
+
 iree_status_t id4_pipeline_plan_format_json(const id4_pipeline_plan_t* plan,
                                             iree_string_builder_t* builder) {
   IREE_ASSERT_ARGUMENT(plan);
@@ -1216,18 +1321,13 @@ iree_status_t id4_pipeline_plan_format_json(const id4_pipeline_plan_t* plan,
         builder,
         ",\"flags\":%u,\"region_id\":%u,\"placement_id\":%u"
         ",\"binding_slot\":%u,\"byte_length\":%" PRIu64
-        ",\"alignment\":%" PRIu64 ",\"shape\":[",
+        ",\"alignment\":%" PRIu64 ",\"shape\":",
         tensor->flags, tensor->region_id, tensor->placement_id,
         tensor->binding_slot, (uint64_t)tensor->layout.byte_length,
         (uint64_t)tensor->layout.alignment));
-    for (uint32_t j = 0; j < tensor->layout.shape.rank; ++j) {
-      if (j != 0) {
-        IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
-      }
-      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-          builder, "%" PRIu64, tensor->layout.shape.dims[j]));
-    }
-    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "]}"));
+    IREE_RETURN_IF_ERROR(
+        id4_pipeline_plan_append_shape_json(builder, tensor->layout.shape));
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "}"));
   }
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(builder, "],\"kernels\":["));
@@ -1289,6 +1389,51 @@ iree_status_t id4_pipeline_plan_format_json(const id4_pipeline_plan_t* plan,
         region->local_binding_slot, (uint64_t)region->local_tensor_alignment));
     IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_region_statistics_json(
         builder, region->statistics));
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_cstring(builder, ",\"local_lifetimes\":["));
+    for (iree_host_size_t j = 0; j < region->local_lifetime_count; ++j) {
+      const id4_pipeline_region_local_lifetime_t* lifetime =
+          &region->local_lifetimes[j];
+      if (j != 0) {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+      }
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder, "{\"id\":%" PRIhsz ",\"name\":", j));
+      IREE_RETURN_IF_ERROR(
+          id4_pipeline_plan_append_json_string(builder, lifetime->name));
+      IREE_RETURN_IF_ERROR(
+          iree_string_builder_append_cstring(builder, ",\"dtype\":"));
+      IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_json_string(
+          builder, id4_pipeline_tensor_dtype_format(lifetime->dtype)));
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder,
+          ",\"ordinal\":%u,\"flags\":%u,\"offset\":%" PRIu64
+          ",\"byte_length\":%" PRIu64 ",\"alignment\":%" PRIu64
+          ",\"acquire_operation_ordinal\":%" PRIhsz ",\"acquire_epoch\":%u",
+          lifetime->ordinal, lifetime->flags, (uint64_t)lifetime->offset,
+          (uint64_t)lifetime->byte_length, (uint64_t)lifetime->alignment,
+          lifetime->acquire_operation_ordinal, lifetime->acquire_epoch));
+      if (lifetime->release_operation_ordinal == IREE_HOST_SIZE_MAX) {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
+            builder, ",\"release_operation_ordinal\":null"));
+      } else {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+            builder, ",\"release_operation_ordinal\":%" PRIhsz,
+            lifetime->release_operation_ordinal));
+      }
+      if (lifetime->release_epoch == UINT32_MAX) {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
+            builder, ",\"release_epoch\":null,\"shape\":"));
+      } else {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+            builder,
+            ",\"release_epoch\":%u,\"shape\":", lifetime->release_epoch));
+      }
+      IREE_RETURN_IF_ERROR(
+          id4_pipeline_plan_append_shape_json(builder, lifetime->shape));
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "}"));
+    }
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "]"));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "}"));
   }
   IREE_RETURN_IF_ERROR(
@@ -1316,16 +1461,10 @@ iree_status_t id4_pipeline_plan_format_json(const id4_pipeline_plan_t* plan,
         builder, id4_pipeline_tensor_dtype_format(tap->layout.dtype)));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder,
-        ",\"byte_length\":%" PRIu64 ",\"alignment\":%" PRIu64 ",\"shape\":[",
+        ",\"byte_length\":%" PRIu64 ",\"alignment\":%" PRIu64 ",\"shape\":",
         (uint64_t)tap->layout.byte_length, (uint64_t)tap->layout.alignment));
-    for (uint32_t j = 0; j < tap->layout.shape.rank; ++j) {
-      if (j != 0) {
-        IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
-      }
-      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-          builder, "%" PRIu64, tap->layout.shape.dims[j]));
-    }
-    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "]"));
+    IREE_RETURN_IF_ERROR(
+        id4_pipeline_plan_append_shape_json(builder, tap->layout.shape));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "}"));
   }
   return iree_string_builder_append_cstring(builder, "]}");

@@ -71,6 +71,26 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    vae
+  HDRS
+    "vae.h"
+  SRCS
+    "vae.c"
+  DEPS
+    ::vae_program
+    iree::base
+    iree::base::internal::arena
+    iree::experimental::id4::pipeline::diagnostics
+    iree::experimental::id4::pipeline::kernel_cache
+    iree::experimental::id4::pipeline::program
+    iree::experimental::id4::pipeline::program_stage
+    iree::experimental::id4::pipeline::stage
+    iree::hal
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     ideogram4_dit_program
   HDRS
     "ideogram4_dit_program.h"
@@ -94,6 +114,21 @@ iree_cc_library(
     "sampler_program.c"
   DEPS
     iree::base
+    iree::experimental::id4::pipeline::program
+    iree::hal
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
+    vae_program
+  HDRS
+    "vae_program.h"
+  SRCS
+    "vae_program.c"
+  DEPS
+    iree::base
+    iree::experimental::id4::pipeline::kernel_library
     iree::experimental::id4::pipeline::program
     iree::hal
   PUBLIC
@@ -248,6 +283,22 @@ iree_cc_test(
 
 iree_cc_test(
   NAME
+    vae_test
+  SRCS
+    "vae_test.cc"
+  DEPS
+    ::test_util
+    ::vae
+    iree::base
+    iree::experimental::id4::pipeline::plan
+    iree::experimental::id4::pipeline::stage
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
     ideogram4_dit_program_test
   SRCS
     "ideogram4_dit_program_test.cc"
@@ -299,12 +350,46 @@ iree_cc_test(
 
 iree_cc_test(
   NAME
+    vae_program_test
+  SRCS
+    "vae_program_test.cc"
+  DEPS
+    ::vae_program
+    iree::base
+    iree::base::internal::arena
+    iree::experimental::id4::pipeline::program
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
     sampler_integration_test
   SRCS
     "sampler_integration_test.cc"
   DEPS
     ::hal_integration_util
     ::sampler
+    iree::base
+    iree::base::tooling::flags
+    iree::experimental::id4::pipeline::plan
+    iree::experimental::id4::pipeline::stage
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "manual"
+    "requires-gpu"
+)
+
+iree_cc_test(
+  NAME
+    vae_integration_test
+  SRCS
+    "vae_integration_test.cc"
+  DEPS
+    ::hal_integration_util
+    ::vae
     iree::base
     iree::base::tooling::flags
     iree::experimental::id4::pipeline::plan
@@ -387,6 +472,28 @@ iree_cc_binary_benchmark(
     iree::experimental::id4::pipeline::stage
     iree::hal
     iree::io::parameter_provider
+    iree::testing::benchmark
+    iree::testing::benchmark_main
+    iree::third_party::google_benchmark
+  TESTONLY
+  LABELS
+    "benchmark"
+    "manual"
+    "requires-gpu"
+)
+
+iree_cc_binary_benchmark(
+  NAME
+    vae_benchmark
+  SRCS
+    "vae_benchmark.cc"
+  DEPS
+    ::hal_integration_util
+    ::vae
+    iree::base
+    iree::experimental::id4::pipeline::plan
+    iree::experimental::id4::pipeline::stage
+    iree::hal
     iree::testing::benchmark
     iree::testing::benchmark_main
     iree::third_party::google_benchmark
