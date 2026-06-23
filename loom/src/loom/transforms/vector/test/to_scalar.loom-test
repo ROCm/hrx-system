@@ -80,6 +80,53 @@ func.def @scalarizes_fragment_store_loaded_source(%source_buffer: buffer, %targe
 
 // ====
 
+func.def @scalarizes_fragment_store_bf16_epilogue_source(%source_buffer: buffer, %gate_buffer: buffer, %target_buffer: buffer, %source_base: offset, %gate_base: offset, %target_base: offset, %row: index, %column: index, %m: index, %n: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %source = buffer.view %source_buffer[%source_base] : buffer -> view<[%m]x[%n]xbf16, %layout>
+  %gate = buffer.view %gate_buffer[%gate_base] : buffer -> view<[%m]x[%n]xf32, %layout>
+  %target = buffer.view %target_buffer[%target_base] : buffer -> view<[%m]x[%n]xbf16, %layout>
+  %source_bf16 = vector.fragment.load<result> %source[%row, %column] shape [%m, %n] : view<[%m]x[%n]xbf16, %layout> -> vector<[%m]x[%n]xbf16>
+  %source_f32 = vector.extf %source_bf16 : vector<[%m]x[%n]xbf16> to vector<[%m]x[%n]xf32>
+  %gate_f32 = vector.fragment.load<result> %gate[%row, %column] shape [%m, %n] : view<[%m]x[%n]xf32, %layout> -> vector<[%m]x[%n]xf32>
+  %activated = vector.siluf %source_f32 : vector<[%m]x[%n]xf32>
+  %product = vector.mulf %activated, %gate_f32 : vector<[%m]x[%n]xf32>
+  %narrow = vector.fptrunc %product : vector<[%m]x[%n]xf32> to vector<[%m]x[%n]xbf16>
+  vector.fragment.store<result> %narrow, %target[%row, %column] shape [%m, %n] : vector<[%m]x[%n]xbf16>, view<[%m]x[%n]xbf16, %layout>
+  func.return
+}
+
+// ----
+func.def @scalarizes_fragment_store_bf16_epilogue_source(%source_buffer: buffer, %gate_buffer: buffer, %target_buffer: buffer, %source_base: offset, %gate_base: offset, %target_base: offset, %row: index, %column: index, %m: index, %n: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %source = buffer.view %source_buffer[%source_base] : buffer -> view<[%m]x[%n]xbf16, %layout>
+  %gate = buffer.view %gate_buffer[%gate_base] : buffer -> view<[%m]x[%n]xf32, %layout>
+  %target = buffer.view %target_buffer[%target_base] : buffer -> view<[%m]x[%n]xbf16, %layout>
+  %20 = index.constant 0 : index
+  %21 = index.constant 1 : index
+  scf.for %22 = [%20 to %m step %21] {
+    %23 = index.constant 0 : index
+    %24 = index.constant 1 : index
+    scf.for %25 = [%23 to %n step %24] {
+      %26 = index.add %row, %22 : index
+      %27 = index.add %column, %25 : index
+      %28 = view.load %source[%26, %27] : view<[%m]x[%n]xbf16, %layout> -> bf16
+      %29 = scalar.extf %28 : bf16 to f32
+      %30 = scalar.siluf %29 : f32
+      %31 = index.add %row, %22 : index
+      %32 = index.add %column, %25 : index
+      %33 = view.load %gate[%31, %32] : view<[%m]x[%n]xf32, %layout> -> f32
+      %34 = scalar.mulf %30, %33 : f32
+      %35 = scalar.fptrunc %34 : f32 to bf16
+      %36 = index.add %row, %22 : index
+      %37 = index.add %column, %25 : index
+      view.store %35, %target[%36, %37] : bf16, view<[%m]x[%n]xbf16, %layout>
+    }
+  }
+  func.return
+}
+
+// ====
+
 func.def @scalarizes_dense_f16_f32_mma(%lhs_data: vector<4xf16>, %rhs_data: vector<4xf16>, %init_data: vector<4xf32>) -> (vector<4xf32>) {
   %m = index.constant 2 : index
   %n = index.constant 2 : index
