@@ -207,6 +207,8 @@ _I8 = Scalar("i8")
 _I16 = Scalar("i16")
 _I32 = Scalar("i32")
 _I64 = Scalar("i64")
+_F8E4M3 = Scalar("f8E4M3")
+_F8E5M2 = Scalar("f8E5M2")
 _F16 = Scalar("f16")
 _BF16 = Scalar("bf16")
 _F32 = Scalar("f32")
@@ -300,6 +302,11 @@ _I16_DIAGNOSTIC = GuardDiagnostic(
     subject_role="type",
     subject_name="i16",
     constraint_key="amdgpu.arithmetic.i16",
+)
+_F8_DIAGNOSTIC = GuardDiagnostic(
+    subject_role="type",
+    subject_name="f8",
+    constraint_key="amdgpu.arithmetic.f8",
 )
 _F16_DIAGNOSTIC = GuardDiagnostic(
     subject_role="type",
@@ -447,6 +454,8 @@ def _type_diagnostic(type_pattern: TypePattern) -> GuardDiagnostic:
         return _I8_DIAGNOSTIC
     if type_pattern == _I16:
         return _I16_DIAGNOSTIC
+    if type_pattern in (_F8E4M3, _F8E5M2):
+        return _F8_DIAGNOSTIC
     if type_pattern == _F16:
         return _F16_DIAGNOSTIC
     if type_pattern == _BF16:
@@ -3470,6 +3479,10 @@ def _rules() -> tuple[ContractCase, ...]:
             _bitcast_alias_rule(_F16, _I16),
             _bitcast_alias_rule(_I16, _BF16),
             _bitcast_alias_rule(_BF16, _I16),
+            _bitcast_alias_rule(_I8, _F8E4M3),
+            _bitcast_alias_rule(_F8E4M3, _I8),
+            _bitcast_alias_rule(_I8, _F8E5M2),
+            _bitcast_alias_rule(_F8E5M2, _I8),
             _index_madd_power_of_two_rule(
                 scale_source="a",
                 value_source="b",

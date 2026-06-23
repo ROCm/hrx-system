@@ -367,7 +367,7 @@ static bool loom_amdgpu_select_scalar_storage(
     return true;
   }
   if (loom_amdgpu_type_is_i8(type) || loom_amdgpu_type_is_i16(type) ||
-      loom_amdgpu_type_is_16bit_float(type)) {
+      loom_amdgpu_type_is_f16_or_bf16(type)) {
     *out_register_count = 1;
     return true;
   }

@@ -1197,7 +1197,7 @@ iree_status_t loom_amdgpu_select_scalar_constant_plan(
     return loom_amdgpu_select_f32_constant_plan(
         context, value, result, /*register_count=*/1, out_plan, out_selected);
   }
-  if (loom_amdgpu_value_is_16bit_float(context, result)) {
+  if (loom_amdgpu_value_is_f16_or_bf16(context, result)) {
     if (!loom_amdgpu_attr_is_16bit_float_immediate(value)) {
       return iree_ok_status();
     }

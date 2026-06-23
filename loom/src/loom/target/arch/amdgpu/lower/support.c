@@ -95,7 +95,7 @@ bool loom_amdgpu_type_is_f64(loom_type_t type) {
          loom_type_element_type(type) == LOOM_SCALAR_TYPE_F64;
 }
 
-bool loom_amdgpu_type_is_16bit_float(loom_type_t type) {
+bool loom_amdgpu_type_is_f16_or_bf16(loom_type_t type) {
   if (!loom_type_is_scalar(type)) {
     return false;
   }
@@ -488,9 +488,9 @@ bool loom_amdgpu_value_is_f32(loom_low_lower_context_t* context,
       loom_module_value_type(loom_low_lower_context_module(context), value_id));
 }
 
-bool loom_amdgpu_value_is_16bit_float(loom_low_lower_context_t* context,
+bool loom_amdgpu_value_is_f16_or_bf16(loom_low_lower_context_t* context,
                                       loom_value_id_t value_id) {
-  return loom_amdgpu_type_is_16bit_float(
+  return loom_amdgpu_type_is_f16_or_bf16(
       loom_module_value_type(loom_low_lower_context_module(context), value_id));
 }
 
@@ -580,6 +580,229 @@ iree_status_t loom_amdgpu_low_value_is_register_class_count(
   return loom_amdgpu_low_type_is_register_class_count(
       context, loom_module_value_type(module, low_value), reg_class_id,
       register_unit_count, out_match);
+}
+
+typedef struct loom_amdgpu_register_shape_t {
+  // AMDGPU descriptor-set register class selected for the value.
+  uint16_t class_id;
+  // Number of 32-bit register units occupied by the value.
+  uint32_t unit_count;
+} loom_amdgpu_register_shape_t;
+
+static loom_amdgpu_register_shape_t loom_amdgpu_register_shape(
+    uint16_t class_id, uint32_t unit_count) {
+  return (loom_amdgpu_register_shape_t){
+      .class_id = class_id,
+      .unit_count = unit_count,
+  };
+}
+
+#define LOOM_AMDGPU_TYPE_REGISTER_SHAPE(reg_class_id, register_unit_count) \
+  {                                                                        \
+      .class_id = reg_class_id,                                            \
+      .unit_count = register_unit_count,                                   \
+  }
+
+static const loom_amdgpu_register_shape_t
+    loom_amdgpu_scalar_type_register_shapes[LOOM_SCALAR_TYPE_COUNT_] = {
+        [LOOM_SCALAR_TYPE_INDEX] =
+            LOOM_AMDGPU_TYPE_REGISTER_SHAPE(LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1),
+        [LOOM_SCALAR_TYPE_OFFSET] =
+            LOOM_AMDGPU_TYPE_REGISTER_SHAPE(LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1),
+        [LOOM_SCALAR_TYPE_I1] =
+            LOOM_AMDGPU_TYPE_REGISTER_SHAPE(LOOM_AMDGPU_REG_CLASS_ID_SCC, 1),
+        [LOOM_SCALAR_TYPE_I8] =
+            LOOM_AMDGPU_TYPE_REGISTER_SHAPE(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1),
+        [LOOM_SCALAR_TYPE_I16] =
+            LOOM_AMDGPU_TYPE_REGISTER_SHAPE(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1),
+        [LOOM_SCALAR_TYPE_I32] =
+            LOOM_AMDGPU_TYPE_REGISTER_SHAPE(LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1),
+        [LOOM_SCALAR_TYPE_I64] =
+            LOOM_AMDGPU_TYPE_REGISTER_SHAPE(LOOM_AMDGPU_REG_CLASS_ID_SGPR, 2),
+        [LOOM_SCALAR_TYPE_F8E4M3] =
+            LOOM_AMDGPU_TYPE_REGISTER_SHAPE(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1),
+        [LOOM_SCALAR_TYPE_F8E5M2] =
+            LOOM_AMDGPU_TYPE_REGISTER_SHAPE(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1),
+        [LOOM_SCALAR_TYPE_F16] =
+            LOOM_AMDGPU_TYPE_REGISTER_SHAPE(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1),
+        [LOOM_SCALAR_TYPE_BF16] =
+            LOOM_AMDGPU_TYPE_REGISTER_SHAPE(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1),
+        [LOOM_SCALAR_TYPE_F32] =
+            LOOM_AMDGPU_TYPE_REGISTER_SHAPE(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1),
+        [LOOM_SCALAR_TYPE_F64] =
+            LOOM_AMDGPU_TYPE_REGISTER_SHAPE(LOOM_AMDGPU_REG_CLASS_ID_SGPR, 2),
+};
+
+#undef LOOM_AMDGPU_TYPE_REGISTER_SHAPE
+
+static bool loom_amdgpu_scalar_type_register_shape(
+    loom_type_t source_type, loom_amdgpu_register_shape_t* out_shape) {
+  *out_shape = (loom_amdgpu_register_shape_t){0};
+  if (!loom_type_is_scalar(source_type)) {
+    return false;
+  }
+  const loom_scalar_type_t element_type = loom_type_element_type(source_type);
+  if (element_type >= LOOM_SCALAR_TYPE_COUNT_) {
+    return false;
+  }
+  const loom_amdgpu_register_shape_t shape =
+      loom_amdgpu_scalar_type_register_shapes[element_type];
+  if (shape.unit_count == 0) {
+    return false;
+  }
+  *out_shape = shape;
+  return true;
+}
+
+typedef enum loom_amdgpu_scalar_value_register_policy_e {
+  LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_NONE = 0,
+  LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_FIXED = 1,
+  LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_I1 = 2,
+  LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_PREFERRED_BANK = 3,
+  LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_OFFSET_WIDTH = 4,
+} loom_amdgpu_scalar_value_register_policy_t;
+
+typedef uint32_t loom_amdgpu_scalar_value_register_flags_t;
+
+enum loom_amdgpu_scalar_value_register_flag_bits_e {
+  LOOM_AMDGPU_SCALAR_VALUE_REGISTER_FLAG_NATURALLY_PREFERS_VGPR = 1u << 0,
+  LOOM_AMDGPU_SCALAR_VALUE_REGISTER_FLAG_OP_RESULT_PREFERS_VGPR = 1u << 1,
+  LOOM_AMDGPU_SCALAR_VALUE_REGISTER_FLAG_FALLBACK_RESULT_PREFERS_VGPR = 1u << 2,
+};
+
+typedef struct loom_amdgpu_scalar_value_register_mapping_t {
+  // Default register class before value-specific facts adjust placement.
+  uint16_t default_class_id;
+  // Default number of 32-bit register units before value-specific facts apply.
+  uint32_t default_unit_count;
+  // Value-sensitive placement policy for this scalar type.
+  loom_amdgpu_scalar_value_register_policy_t policy;
+  // Placement flags that do not require inspecting the defining operation.
+  loom_amdgpu_scalar_value_register_flags_t flags;
+} loom_amdgpu_scalar_value_register_mapping_t;
+
+#define LOOM_AMDGPU_SCALAR_VALUE_REGISTER(reg_class_id, register_unit_count, \
+                                          selected_policy, selected_flags)   \
+  {                                                                          \
+      .default_class_id = reg_class_id,                                      \
+      .default_unit_count = register_unit_count,                             \
+      .policy = selected_policy,                                             \
+      .flags = selected_flags,                                               \
+  }
+
+#define LOOM_AMDGPU_SCALAR_VALUE_REGISTER_NATURAL_VGPR \
+  LOOM_AMDGPU_SCALAR_VALUE_REGISTER_FLAG_NATURALLY_PREFERS_VGPR
+
+#define LOOM_AMDGPU_SCALAR_VALUE_REGISTER_OP_RESULT_VGPR \
+  LOOM_AMDGPU_SCALAR_VALUE_REGISTER_FLAG_OP_RESULT_PREFERS_VGPR
+
+#define LOOM_AMDGPU_SCALAR_VALUE_REGISTER_FALLBACK_RESULT_VGPR \
+  LOOM_AMDGPU_SCALAR_VALUE_REGISTER_FLAG_FALLBACK_RESULT_PREFERS_VGPR
+
+static const loom_amdgpu_scalar_value_register_mapping_t
+    loom_amdgpu_scalar_value_register_mappings[LOOM_SCALAR_TYPE_COUNT_] = {
+        [LOOM_SCALAR_TYPE_INDEX] = LOOM_AMDGPU_SCALAR_VALUE_REGISTER(
+            LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1,
+            LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_OFFSET_WIDTH, 0),
+        [LOOM_SCALAR_TYPE_OFFSET] = LOOM_AMDGPU_SCALAR_VALUE_REGISTER(
+            LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1,
+            LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_OFFSET_WIDTH, 0),
+        [LOOM_SCALAR_TYPE_I1] = LOOM_AMDGPU_SCALAR_VALUE_REGISTER(
+            LOOM_AMDGPU_REG_CLASS_ID_SCC, 1,
+            LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_I1, 0),
+        [LOOM_SCALAR_TYPE_I8] = LOOM_AMDGPU_SCALAR_VALUE_REGISTER(
+            LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1,
+            LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_FIXED,
+            LOOM_AMDGPU_SCALAR_VALUE_REGISTER_NATURAL_VGPR),
+        [LOOM_SCALAR_TYPE_I16] = LOOM_AMDGPU_SCALAR_VALUE_REGISTER(
+            LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1,
+            LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_FIXED,
+            LOOM_AMDGPU_SCALAR_VALUE_REGISTER_NATURAL_VGPR),
+        [LOOM_SCALAR_TYPE_I32] = LOOM_AMDGPU_SCALAR_VALUE_REGISTER(
+            LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1,
+            LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_PREFERRED_BANK, 0),
+        [LOOM_SCALAR_TYPE_I64] = LOOM_AMDGPU_SCALAR_VALUE_REGISTER(
+            LOOM_AMDGPU_REG_CLASS_ID_SGPR, 2,
+            LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_PREFERRED_BANK, 0),
+        [LOOM_SCALAR_TYPE_F8E4M3] = LOOM_AMDGPU_SCALAR_VALUE_REGISTER(
+            LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1,
+            LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_FIXED,
+            LOOM_AMDGPU_SCALAR_VALUE_REGISTER_NATURAL_VGPR |
+                LOOM_AMDGPU_SCALAR_VALUE_REGISTER_OP_RESULT_VGPR),
+        [LOOM_SCALAR_TYPE_F8E5M2] = LOOM_AMDGPU_SCALAR_VALUE_REGISTER(
+            LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1,
+            LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_FIXED,
+            LOOM_AMDGPU_SCALAR_VALUE_REGISTER_NATURAL_VGPR |
+                LOOM_AMDGPU_SCALAR_VALUE_REGISTER_OP_RESULT_VGPR),
+        [LOOM_SCALAR_TYPE_F16] = LOOM_AMDGPU_SCALAR_VALUE_REGISTER(
+            LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1,
+            LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_FIXED,
+            LOOM_AMDGPU_SCALAR_VALUE_REGISTER_NATURAL_VGPR |
+                LOOM_AMDGPU_SCALAR_VALUE_REGISTER_OP_RESULT_VGPR),
+        [LOOM_SCALAR_TYPE_BF16] = LOOM_AMDGPU_SCALAR_VALUE_REGISTER(
+            LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1,
+            LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_FIXED,
+            LOOM_AMDGPU_SCALAR_VALUE_REGISTER_NATURAL_VGPR |
+                LOOM_AMDGPU_SCALAR_VALUE_REGISTER_OP_RESULT_VGPR),
+        [LOOM_SCALAR_TYPE_F32] = LOOM_AMDGPU_SCALAR_VALUE_REGISTER(
+            LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1,
+            LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_PREFERRED_BANK,
+            LOOM_AMDGPU_SCALAR_VALUE_REGISTER_NATURAL_VGPR |
+                LOOM_AMDGPU_SCALAR_VALUE_REGISTER_FALLBACK_RESULT_VGPR),
+        [LOOM_SCALAR_TYPE_F64] = LOOM_AMDGPU_SCALAR_VALUE_REGISTER(
+            LOOM_AMDGPU_REG_CLASS_ID_SGPR, 2,
+            LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_PREFERRED_BANK,
+            LOOM_AMDGPU_SCALAR_VALUE_REGISTER_NATURAL_VGPR |
+                LOOM_AMDGPU_SCALAR_VALUE_REGISTER_OP_RESULT_VGPR),
+};
+
+#undef LOOM_AMDGPU_SCALAR_VALUE_REGISTER_FALLBACK_RESULT_VGPR
+#undef LOOM_AMDGPU_SCALAR_VALUE_REGISTER_OP_RESULT_VGPR
+#undef LOOM_AMDGPU_SCALAR_VALUE_REGISTER_NATURAL_VGPR
+#undef LOOM_AMDGPU_SCALAR_VALUE_REGISTER
+
+static const loom_amdgpu_scalar_value_register_mapping_t*
+loom_amdgpu_scalar_value_register_mapping_for_type(loom_type_t source_type) {
+  if (!loom_type_is_scalar(source_type)) {
+    return NULL;
+  }
+  const loom_scalar_type_t element_type = loom_type_element_type(source_type);
+  if (element_type >= LOOM_SCALAR_TYPE_COUNT_) {
+    return NULL;
+  }
+  const loom_amdgpu_scalar_value_register_mapping_t* mapping =
+      &loom_amdgpu_scalar_value_register_mappings[element_type];
+  return mapping->policy == LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_NONE
+             ? NULL
+             : mapping;
+}
+
+static bool loom_amdgpu_scalar_type_has_register_flag(
+    loom_type_t source_type, loom_amdgpu_scalar_value_register_flags_t flag) {
+  const loom_amdgpu_scalar_value_register_mapping_t* mapping =
+      loom_amdgpu_scalar_value_register_mapping_for_type(source_type);
+  return mapping != NULL && iree_any_bit_set(mapping->flags, flag);
+}
+
+static bool loom_amdgpu_scalar_type_naturally_prefers_vgpr(
+    loom_type_t source_type) {
+  return loom_amdgpu_scalar_type_has_register_flag(
+      source_type,
+      LOOM_AMDGPU_SCALAR_VALUE_REGISTER_FLAG_NATURALLY_PREFERS_VGPR);
+}
+
+static bool loom_amdgpu_scalar_type_op_result_prefers_vgpr(
+    loom_type_t source_type) {
+  return loom_amdgpu_scalar_type_has_register_flag(
+      source_type,
+      LOOM_AMDGPU_SCALAR_VALUE_REGISTER_FLAG_OP_RESULT_PREFERS_VGPR);
+}
+
+static bool loom_amdgpu_scalar_type_fallback_result_prefers_vgpr(
+    loom_type_t source_type) {
+  return loom_amdgpu_scalar_type_has_register_flag(
+      source_type,
+      LOOM_AMDGPU_SCALAR_VALUE_REGISTER_FLAG_FALLBACK_RESULT_PREFERS_VGPR);
 }
 
 static bool loom_amdgpu_source_memory_root_is_read_only(
@@ -675,14 +898,12 @@ static bool loom_amdgpu_source_value_naturally_prefers_vgpr(
     const loom_module_t* module, loom_value_id_t source_value_id) {
   const loom_type_t source_type =
       loom_module_value_type(module, source_value_id);
+  if (loom_amdgpu_scalar_type_naturally_prefers_vgpr(source_type)) {
+    return true;
+  }
   loom_amdgpu_vector_storage_t vector_storage = {0};
-  return loom_amdgpu_type_is_i8(source_type) ||
-         loom_amdgpu_type_is_i16(source_type) ||
-         loom_amdgpu_type_is_f32(source_type) ||
-         loom_amdgpu_type_is_f64(source_type) ||
-         loom_amdgpu_type_is_16bit_float(source_type) ||
-         (loom_amdgpu_type_vector_storage(source_type, &vector_storage) &&
-          vector_storage.kind != LOOM_AMDGPU_VECTOR_STORAGE_KIND_I1_MASK);
+  return loom_amdgpu_type_vector_storage(source_type, &vector_storage) &&
+         vector_storage.kind != LOOM_AMDGPU_VECTOR_STORAGE_KIND_I1_MASK;
 }
 
 static bool loom_amdgpu_source_value_facts_prefer_vgpr(
@@ -1908,8 +2129,7 @@ bool loom_amdgpu_source_value_prefers_vgpr(
                                                  view_regions, input_value_id);
   }
 
-  if (loom_amdgpu_type_is_f64(source_type) ||
-      loom_amdgpu_type_is_16bit_float(source_type)) {
+  if (loom_amdgpu_scalar_type_op_result_prefers_vgpr(source_type)) {
     return true;
   }
 
@@ -1984,7 +2204,7 @@ bool loom_amdgpu_source_value_prefers_vgpr(
       }
       if (loom_amdgpu_scalar_conversion_result_requires_vgpr(
               module, source_value_id, defining_op) ||
-          loom_amdgpu_type_is_f32(source_type) ||
+          loom_amdgpu_scalar_type_fallback_result_prefers_vgpr(source_type) ||
           loom_amdgpu_type_is_vector_32bit_register_range(source_type)) {
         return true;
       }
@@ -2023,108 +2243,14 @@ iree_status_t loom_amdgpu_context_value_is_native_i1_mask(
   return iree_ok_status();
 }
 
-typedef struct loom_amdgpu_register_shape_t {
-  // AMDGPU descriptor-set register class selected for the value.
-  uint16_t class_id;
-  // Number of 32-bit register units occupied by the value.
-  uint32_t unit_count;
-} loom_amdgpu_register_shape_t;
-
-static loom_amdgpu_register_shape_t loom_amdgpu_register_shape(
-    uint16_t class_id, uint32_t unit_count) {
-  return (loom_amdgpu_register_shape_t){
-      .class_id = class_id,
-      .unit_count = unit_count,
-  };
-}
-
-typedef enum loom_amdgpu_scalar_value_register_policy_e {
-  LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_NONE = 0,
-  LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_FIXED = 1,
-  LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_I1 = 2,
-  LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_PREFERRED_BANK = 3,
-  LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_OFFSET_WIDTH = 4,
-} loom_amdgpu_scalar_value_register_policy_t;
-
-typedef struct loom_amdgpu_scalar_value_register_mapping_t {
-  // True when this scalar type has an AMDGPU source-value placement policy.
-  bool is_valid;
-  // Default register class before value-specific facts adjust placement.
-  uint16_t default_class_id;
-  // Default number of 32-bit register units before value-specific facts apply.
-  uint32_t default_unit_count;
-  // Value-sensitive placement policy for this scalar type.
-  loom_amdgpu_scalar_value_register_policy_t policy;
-} loom_amdgpu_scalar_value_register_mapping_t;
-
-#define LOOM_AMDGPU_SCALAR_VALUE_REGISTER_FIXED(class_id, unit_count) \
-  {                                                                   \
-      .is_valid = true,                                               \
-      .default_class_id = class_id,                                   \
-      .default_unit_count = unit_count,                               \
-      .policy = LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_FIXED,       \
-  }
-
-#define LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY(class_id, unit_count, \
-                                                 selected_policy)      \
-  {                                                                    \
-      .is_valid = true,                                                \
-      .default_class_id = class_id,                                    \
-      .default_unit_count = unit_count,                                \
-      .policy = selected_policy,                                       \
-  }
-
-static const loom_amdgpu_scalar_value_register_mapping_t
-    loom_amdgpu_scalar_value_register_mappings[LOOM_SCALAR_TYPE_COUNT_] = {
-        [LOOM_SCALAR_TYPE_INDEX] = LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY(
-            LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1,
-            LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_OFFSET_WIDTH),
-        [LOOM_SCALAR_TYPE_OFFSET] = LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY(
-            LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1,
-            LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_OFFSET_WIDTH),
-        [LOOM_SCALAR_TYPE_I1] = LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY(
-            LOOM_AMDGPU_REG_CLASS_ID_SCC, 1,
-            LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_I1),
-        [LOOM_SCALAR_TYPE_I8] = LOOM_AMDGPU_SCALAR_VALUE_REGISTER_FIXED(
-            LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1),
-        [LOOM_SCALAR_TYPE_I16] = LOOM_AMDGPU_SCALAR_VALUE_REGISTER_FIXED(
-            LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1),
-        [LOOM_SCALAR_TYPE_I32] = LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY(
-            LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1,
-            LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_PREFERRED_BANK),
-        [LOOM_SCALAR_TYPE_I64] = LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY(
-            LOOM_AMDGPU_REG_CLASS_ID_SGPR, 2,
-            LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_PREFERRED_BANK),
-        [LOOM_SCALAR_TYPE_F16] = LOOM_AMDGPU_SCALAR_VALUE_REGISTER_FIXED(
-            LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1),
-        [LOOM_SCALAR_TYPE_BF16] = LOOM_AMDGPU_SCALAR_VALUE_REGISTER_FIXED(
-            LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1),
-        [LOOM_SCALAR_TYPE_F32] = LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY(
-            LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1,
-            LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_PREFERRED_BANK),
-        [LOOM_SCALAR_TYPE_F64] = LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY(
-            LOOM_AMDGPU_REG_CLASS_ID_SGPR, 2,
-            LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_PREFERRED_BANK),
-};
-
-#undef LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY
-#undef LOOM_AMDGPU_SCALAR_VALUE_REGISTER_FIXED
-
 static bool loom_amdgpu_source_scalar_value_register_shape(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_view_region_table_t* view_regions,
     loom_value_id_t source_value_id, loom_type_t source_type,
     loom_amdgpu_register_shape_t* out_shape) {
-  if (!loom_type_is_scalar(source_type)) {
-    return false;
-  }
-  const loom_scalar_type_t element_type = loom_type_element_type(source_type);
-  if (element_type >= LOOM_SCALAR_TYPE_COUNT_) {
-    return false;
-  }
   const loom_amdgpu_scalar_value_register_mapping_t* mapping =
-      &loom_amdgpu_scalar_value_register_mappings[element_type];
-  if (!mapping->is_valid) {
+      loom_amdgpu_scalar_value_register_mapping_for_type(source_type);
+  if (mapping == NULL) {
     return false;
   }
   *out_shape = loom_amdgpu_register_shape(mapping->default_class_id,
@@ -2202,12 +2328,11 @@ static bool loom_amdgpu_source_vector_value_register_shape(
 static bool loom_amdgpu_source_value_register_shape_needs_analysis(
     loom_type_t source_type) {
   if (loom_type_is_scalar(source_type)) {
-    const loom_scalar_type_t element_type = loom_type_element_type(source_type);
-    if (element_type >= LOOM_SCALAR_TYPE_COUNT_) {
+    const loom_amdgpu_scalar_value_register_mapping_t* mapping =
+        loom_amdgpu_scalar_value_register_mapping_for_type(source_type);
+    if (mapping == NULL) {
       return false;
     }
-    const loom_amdgpu_scalar_value_register_mapping_t* mapping =
-        &loom_amdgpu_scalar_value_register_mappings[element_type];
     switch (mapping->policy) {
       case LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_I1:
       case LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_PREFERRED_BANK:
@@ -2247,30 +2372,10 @@ iree_status_t loom_amdgpu_map_type(void* user_data,
                                    loom_type_t source_type,
                                    loom_type_t* out_low_type) {
   (void)user_data;
-  if (loom_amdgpu_type_is_i1(source_type)) {
-    return loom_amdgpu_make_scc_type(context, out_low_type);
-  }
-  if (loom_amdgpu_type_is_i32(source_type)) {
-    return loom_amdgpu_make_sgpr_type(context, out_low_type);
-  }
-  if (loom_amdgpu_type_is_i8(source_type)) {
-    return loom_amdgpu_make_vgpr_type(context, out_low_type);
-  }
-  if (loom_amdgpu_type_is_i16(source_type)) {
-    return loom_amdgpu_make_vgpr_type(context, out_low_type);
-  }
-  if (loom_amdgpu_type_is_i64(source_type) ||
-      loom_amdgpu_type_is_f64(source_type)) {
-    return loom_amdgpu_make_sgpr_range_type(context, 2, out_low_type);
-  }
-  if (loom_amdgpu_type_is_address_scalar(source_type)) {
-    return loom_amdgpu_make_sgpr_type(context, out_low_type);
-  }
-  if (loom_amdgpu_type_is_f32(source_type)) {
-    return loom_amdgpu_make_vgpr_type(context, out_low_type);
-  }
-  if (loom_amdgpu_type_is_16bit_float(source_type)) {
-    return loom_amdgpu_make_vgpr_type(context, out_low_type);
+  loom_amdgpu_register_shape_t scalar_shape = {0};
+  if (loom_amdgpu_scalar_type_register_shape(source_type, &scalar_shape)) {
+    return loom_amdgpu_make_register_type(
+        context, scalar_shape.class_id, scalar_shape.unit_count, out_low_type);
   }
   loom_amdgpu_vector_storage_t vector_storage = {0};
   if (loom_amdgpu_type_vector_storage(source_type, &vector_storage)) {

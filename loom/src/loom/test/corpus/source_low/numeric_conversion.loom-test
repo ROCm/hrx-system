@@ -691,6 +691,40 @@ kernel.def @scalar_bitcast_lane_byte_decode_select_tree_store() {
 
 // ====
 
+kernel.def @scalar_extf_direct_f8e4m3_load_store() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %input_view = buffer.view %input[%base] : buffer -> view<64xf8E4M3, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xf32, #dense>
+  %packed = view.load %input_view[%lane] : view<64xf8E4M3, #dense> -> f8E4M3
+  %value = scalar.extf %packed : f8E4M3 to f32
+  view.store %value, %output_view[%lane] : f32, view<64xf32, #dense>
+  kernel.return
+}
+
+// ====
+
+kernel.def @scalar_extf_direct_f8e5m2_load_store() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %input_view = buffer.view %input[%base] : buffer -> view<64xf8E5M2, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xf32, #dense>
+  %packed = view.load %input_view[%lane] : view<64xf8E5M2, #dense> -> f8E5M2
+  %value = scalar.extf %packed : f8E5M2 to f32
+  view.store %value, %output_view[%lane] : f32, view<64xf32, #dense>
+  kernel.return
+}
+
+// ====
+
 func.def @vector_uitofp_i32x2(%input: vector<2xi32>) -> (vector<2xf32>) {
   %converted = vector.uitofp %input : vector<2xi32> to vector<2xf32>
   func.return %converted : vector<2xf32>

@@ -1612,6 +1612,131 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @scalar_bitcast_lane_byt
 // ====
 
 amdgpu.target<gfx1100> @target
+kernel.def target(@target) @scalar_extf_direct_f8e4m3_load_store() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %input_view = buffer.view %input[%base] : buffer -> view<64xf8E4M3, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xf32, #dense>
+  %packed = view.load %input_view[%lane] : view<64xf8E4M3, #dense> -> f8E4M3
+  %value = scalar.extf %packed : f8E4M3 to f32
+  view.store %value, %output_view[%lane] : f32, view<64xf32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) @scalar_extf_direct_f8e4m3_load_store() asm<amdgpu.rdna3.core> {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 64} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
+  %packed = global_load_i8_saddr %lane, %input_view
+  %73 = v_and_b32_lit %packed, 255
+  %74 = v_and_b32_lit %73, 128
+  %75 = v_lshlrev_b32_lit %74, 24
+  %77 = v_and_b32_lit %73, 120
+  %78 = v_lshrrev_b32_lit %77, 3
+  %79 = v_and_b32_lit %73, 7
+  %80 = v_mov_b32 120
+  %81 = v_add_u32 %78, %80
+  %83 = v_lshlrev_b32_lit %81, 23
+  %84 = v_lshlrev_b32_lit %79, 20
+  %85 = v_or_b32 %75, %83
+  %86 = v_or_b32 %85, %84
+  %89 = v_and_b32_lit %79, 2
+  %90 = v_cmp_ne_i32_src1_inline %89 {rhs = 0}
+  %92 = v_cndmask_b32_src0_lit_src1_inline %90 {imm32 = 0, true_value = 1}
+  %93 = v_and_b32_lit %79, 4
+  %94 = v_cmp_ne_i32_src1_inline %93 {rhs = 0}
+  %95 = v_cndmask_b32_src1_inline %92, %94 {true_value = 2}
+  %97 = v_mov_b32 118
+  %98 = v_add_u32 %95, %97
+  %99 = v_lshlrev_b32_lit %98, 23
+  %100 = v_mov_b32 23
+  %101 = v_sub_nc_u32 %100, %95
+  %102 = v_lshlrev_b32 %101, %79
+  %103 = v_and_b32_lit %102, 8388607
+  %104 = v_or_b32 %75, %99
+  %105 = v_or_b32 %104, %103
+  %106 = v_cmp_eq_i32_src1_inline %79 {rhs = 0}
+  %107 = v_cndmask_b32 %105, %75, %106
+  %108 = v_cmp_eq_i32_src1_inline %78 {rhs = 0}
+  %109 = v_cndmask_b32 %86, %107, %108
+  %110 = v_cmp_eq_i32_src1_inline %78 {rhs = 15}
+  %112 = v_cmp_eq_i32_src1_inline %79 {rhs = 7}
+  %115 = s_and_b64 %110, %112
+  %value = v_cndmask_b32_src1_lit %109, %115, 2143289344
+  %117 = v_lshlrev_b32_src0_inline %lane, 2
+  global_store_b32_saddr %117, %value, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+kernel.def target(@target) @scalar_extf_direct_f8e5m2_load_store() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %input_view = buffer.view %input[%base] : buffer -> view<64xf8E5M2, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xf32, #dense>
+  %packed = view.load %input_view[%lane] : view<64xf8E5M2, #dense> -> f8E5M2
+  %value = scalar.extf %packed : f8E5M2 to f32
+  view.store %value, %output_view[%lane] : f32, view<64xf32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) @scalar_extf_direct_f8e5m2_load_store() asm<amdgpu.rdna3.core> {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 64} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
+  %packed = global_load_i8_saddr %lane, %input_view
+  %68 = v_and_b32_lit %packed, 255
+  %69 = v_and_b32_lit %68, 128
+  %70 = v_lshlrev_b32_lit %69, 24
+  %71 = v_and_b32_lit %68, 124
+  %72 = v_lshrrev_b32_lit %71, 2
+  %73 = v_and_b32_lit %68, 3
+  %75 = v_mov_b32 112
+  %76 = v_add_u32 %72, %75
+  %78 = v_lshlrev_b32_lit %76, 23
+  %79 = v_lshlrev_b32_lit %73, 21
+  %80 = v_or_b32 %70, %78
+  %81 = v_or_b32 %80, %79
+  %83 = v_and_b32_lit %73, 2
+  %84 = v_cmp_ne_i32_src1_inline %83 {rhs = 0}
+  %86 = v_cndmask_b32_src0_lit_src1_inline %84 {imm32 = 0, true_value = 1}
+  %88 = v_mov_b32 111
+  %89 = v_add_u32 %86, %88
+  %90 = v_lshlrev_b32_lit %89, 23
+  %91 = v_mov_b32 23
+  %92 = v_sub_nc_u32 %91, %86
+  %93 = v_lshlrev_b32 %92, %73
+  %94 = v_and_b32_lit %93, 8388607
+  %95 = v_or_b32 %70, %90
+  %96 = v_or_b32 %95, %94
+  %97 = v_cmp_eq_i32_src1_inline %73 {rhs = 0}
+  %98 = v_cndmask_b32 %96, %70, %97
+  %99 = v_cmp_eq_i32_src1_inline %72 {rhs = 0}
+  %100 = v_cndmask_b32 %81, %98, %99
+  %101 = v_cmp_eq_i32_src1_inline %72 {rhs = 31}
+  %103 = v_or_b32_lit %70, 2139095040
+  %104 = v_cndmask_b32_src0_lit %103, %97, 2143289344
+  %value = v_cndmask_b32 %100, %104, %101
+  %106 = v_lshlrev_b32_src0_inline %lane, 2
+  global_store_b32_saddr %106, %value, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
 func.def target(@target) @vector_uitofp_i32x2(%input: vector<2xi32>) -> (vector<2xf32>) {
   %converted = vector.uitofp %input : vector<2xi32> to vector<2xf32>
   func.return %converted : vector<2xf32>

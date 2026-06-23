@@ -61,7 +61,7 @@ bool loom_amdgpu_type_is_f32(loom_type_t type);
 bool loom_amdgpu_type_is_f64(loom_type_t type);
 
 // Returns true when the source type is a scalar f16 or bf16.
-bool loom_amdgpu_type_is_16bit_float(loom_type_t type);
+bool loom_amdgpu_type_is_f16_or_bf16(loom_type_t type);
 
 typedef enum loom_amdgpu_vector_storage_kind_e {
   LOOM_AMDGPU_VECTOR_STORAGE_KIND_NONE = 0,
@@ -176,7 +176,7 @@ bool loom_amdgpu_value_is_f32(loom_low_lower_context_t* context,
                               loom_value_id_t value_id);
 
 // Returns true when a source value has scalar f16 or bf16 type.
-bool loom_amdgpu_value_is_16bit_float(loom_low_lower_context_t* context,
+bool loom_amdgpu_value_is_f16_or_bf16(loom_low_lower_context_t* context,
                                       loom_value_id_t value_id);
 
 // Returns true when a source value has a byte-addressable view type.

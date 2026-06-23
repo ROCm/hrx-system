@@ -34,6 +34,16 @@ static bool loom_amdgpu_memory_access_static_byte_offset_is_usable(
   return true;
 }
 
+static bool loom_amdgpu_memory_access_is_single_byte_payload(
+    loom_type_t vector_type) {
+  if (!loom_type_is_vector(vector_type) || loom_type_rank(vector_type) != 1 ||
+      !loom_type_is_all_static(vector_type) ||
+      loom_type_dim_static_size_at(vector_type, 0) != 1) {
+    return false;
+  }
+  return loom_scalar_type_bitwidth(loom_type_element_type(vector_type)) == 8;
+}
+
 static loom_amdgpu_memory_access_rejection_flags_t
 loom_amdgpu_memory_access_alloca_root_rejection_bit(
     loom_value_fact_memory_space_t memory_space) {
@@ -85,8 +95,7 @@ static bool loom_amdgpu_memory_access_register_footprint(
     loom_type_t vector_type, loom_amdgpu_memory_access_t* access,
     loom_amdgpu_memory_access_diagnostic_t* diagnostic) {
   access->payload_format = LOOM_AMDGPU_MEMORY_PAYLOAD_FORMAT_GENERIC;
-  if (loom_amdgpu_static_vector_lane_count(vector_type, LOOM_SCALAR_TYPE_I8,
-                                           1) == 1) {
+  if (loom_amdgpu_memory_access_is_single_byte_payload(vector_type)) {
     access->payload_register_class =
         LOOM_AMDGPU_MEMORY_PAYLOAD_REGISTER_CLASS_VGPR;
     access->payload_register_count = 1;

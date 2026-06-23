@@ -360,6 +360,18 @@ static iree_status_t loom_scalar_legalize_build_fp8_to_f32(
   return iree_ok_status();
 }
 
+static iree_status_t loom_scalar_legalize_build_fp8_storage_byte(
+    loom_builder_t* builder, loom_location_id_t location,
+    loom_value_id_t fp8_value, loom_type_t fp8_type,
+    loom_value_id_t* out_byte_value) {
+  loom_op_t* bitcast_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_scalar_bitcast_build(
+      builder, fp8_value, fp8_type, loom_type_scalar(LOOM_SCALAR_TYPE_I8),
+      location, &bitcast_op));
+  *out_byte_value = loom_scalar_bitcast_result(bitcast_op);
+  return iree_ok_status();
+}
+
 static iree_status_t loom_scalar_legalize_extf(
     const loom_target_legalizer_entry_t* entry,
     loom_target_legalization_context_t* context, loom_op_t* op,
@@ -380,23 +392,15 @@ static iree_status_t loom_scalar_legalize_extf(
       !loom_type_equal(result_type, loom_type_scalar(LOOM_SCALAR_TYPE_F32))) {
     return iree_ok_status();
   }
-  const loom_value_t* input_value =
-      loom_module_value(context->module, loom_scalar_extf_input(op));
-  if (loom_value_is_block_arg(input_value)) return iree_ok_status();
-  loom_op_t* bitcast_op = loom_value_def_op(input_value);
-  if (!bitcast_op || !loom_scalar_bitcast_isa(bitcast_op)) {
-    return iree_ok_status();
-  }
-  const loom_value_id_t byte_value = loom_scalar_bitcast_input(bitcast_op);
-  if (!loom_type_equal(loom_module_value_type(context->module, byte_value),
-                       loom_type_scalar(LOOM_SCALAR_TYPE_I8))) {
-    return iree_ok_status();
-  }
 
   loom_rewriter_t* rewriter = context->rewriter;
   loom_builder_set_before(&rewriter->builder, op);
   const loom_value_id_t value_checkpoint =
       loom_rewriter_value_checkpoint(rewriter);
+  loom_value_id_t byte_value = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_scalar_legalize_build_fp8_storage_byte(
+      &rewriter->builder, op->location, loom_scalar_extf_input(op), input_type,
+      &byte_value));
   loom_value_id_t replacement = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_scalar_legalize_build_fp8_to_f32(
       &rewriter->builder, op->location, byte_value, &format, &replacement));
