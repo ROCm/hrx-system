@@ -2418,6 +2418,19 @@ static iree_string_view_t loom_amdgpu_fragment_memory_packet_fallback_reason(
     const loom_amdgpu_matrix_fragment_layout_t* layout,
     const loom_amdgpu_fragment_memory_plan_t* plan,
     const loom_amdgpu_fragment_memory_packet_plan_t* packet) {
+  if (plan->payload_form ==
+          LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_LOAD_PACKED_16BIT_RESULT &&
+      packet->result_register_count == 1 && plan->register_count > 1) {
+    const uint16_t remaining = plan->register_count - packet->register_index;
+    if (remaining > 1 &&
+        !loom_amdgpu_fragment_memory_register_group_is_contiguous(
+            layout, plan, packet->register_index, 2,
+            plan->element_byte_count)) {
+      return IREE_SV("fragment_noncontiguous_registers");
+    }
+    return iree_string_view_empty();
+  }
+
   if (plan->payload_form !=
           LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16 ||
       packet->result_register_count != 1 || plan->register_count <= 1) {
