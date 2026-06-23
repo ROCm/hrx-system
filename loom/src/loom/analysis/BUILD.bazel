@@ -69,6 +69,40 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "cfg_condition_facts",
+    srcs = ["cfg_condition_facts.c"],
+    hdrs = ["cfg_condition_facts.h"],
+    deps = [
+        ":condition_facts",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/cfg",
+        "//loom/src/loom/util:cfg_graph",
+        "//loom/src/loom/util:dominance",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "cfg_condition_facts_test",
+    srcs = ["cfg_condition_facts_test.cc"],
+    deps = [
+        ":cfg_condition_facts",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/cfg",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/util:cfg_graph",
+        "//loom/src/loom/util:dominance",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "func_provider_catalog",
     srcs = ["func_provider_catalog.c"],
     hdrs = ["func_provider_catalog.h"],
@@ -204,14 +238,20 @@ loom_cc_library(
     srcs = ["vector_memory_footprint.c"],
     hdrs = ["vector_memory_footprint.h"],
     deps = [
+        ":cfg_condition_facts",
+        ":condition_facts",
         ":symbolic_expr",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:type_registry",
+        "//loom/src/loom/ops/cfg",
         "//loom/src/loom/ops/config",
+        "//loom/src/loom/ops/scf",
         "//loom/src/loom/ops/vector",
         "//loom/src/loom/ops/view",
+        "//loom/src/loom/util:cfg_graph",
+        "//loom/src/loom/util:dominance",
         "//loom/src/loom/util:fact_table",
         "//loom/src/loom/util:math",
         "//runtime/src/iree/base",

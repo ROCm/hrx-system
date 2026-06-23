@@ -48,6 +48,7 @@ loom_cc_library(
     srcs = ["cfg_simplify.c"],
     hdrs = ["cfg_simplify.h"],
     deps = [
+        "//loom/src/loom/analysis:cfg_condition_facts",
         "//loom/src/loom/analysis:condition_facts",
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:facts",

@@ -55,6 +55,7 @@ loom_cc_library(
     "cfg_simplify.c"
   DEPS
     iree::base
+    loom::analysis::cfg_condition_facts
     loom::analysis::condition_facts
     loom::ir
     loom::ir::facts

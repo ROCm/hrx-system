@@ -479,6 +479,85 @@ kernel.def @dynamic_unit_axis_proven_by_workgroup_id_launch_config(%rows: index)
 
 // ====
 
+kernel.def @scalar_store_origin_proven_by_launch_product_quotient_remainder() {
+  %c1 = index.constant 1 : index
+  %workgroup_size = index.constant 256 : index
+  %head_count = index.constant 24 : index
+  %token_count = index.constant 512 : index
+  %row_count = index.mul %head_count, %token_count : index
+  kernel.launch.config workgroups(%row_count, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
+} launch(%buffer: buffer, %base: offset, %value: f32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %head_count = index.constant 24 : index
+  %token_count = index.constant 512 : index
+  %head_stride = index.constant 128 : index
+  %tail = index.constant 127 : index
+  %token_stride = index.constant 3072 : index
+  %row0 = kernel.workgroup.id<x> : index
+  %row = index.assume %row0 [range(%row0, 0, 1048575)] : index
+  %view_count = index.mul %token_stride, %token_count : index
+  %head = index.rem %row, %head_count : index
+  %token = index.div %row, %head_count : index
+  %head_base = index.mul %head, %head_stride : index
+  %token_base = index.mul %token, %token_stride : index
+  %base_index = index.add %token_base, %head_base : index
+  %origin = index.add %base_index, %tail : index
+  %view = buffer.view %buffer[%base] : buffer -> view<[%view_count]xf32, %layout>
+  view.store %value, %view[%origin] : f32, view<[%view_count]xf32, %layout>
+  kernel.return
+}
+
+// ====
+
+kernel.def @scalar_store_tail_origin_proven_by_launch_product_quotient_remainder() {
+  %c1 = index.constant 1 : index
+  %workgroup_size = index.constant 256 : index
+  %head_count = index.constant 24 : index
+  %token_count = index.constant 512 : index
+  %row_count = index.mul %head_count, %token_count : index
+  kernel.launch.config workgroups(%row_count, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
+} launch(%buffer: buffer, %base: offset, %value: f32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %head_count = index.constant 24 : index
+  %token_count = index.constant 512 : index
+  %half_cols = index.constant 64 : index
+  %half_dims = index.constant 48 : index
+  %n_dims = index.constant 96 : index
+  %head_stride = index.constant 128 : index
+  %token_stride = index.constant 3072 : index
+  %row0 = kernel.workgroup.id<x> : index
+  %row = index.assume %row0 [range(%row0, 0, 1048575)] : index
+  %lane0 = kernel.workitem.id<x> : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 1023)] : index
+  %view_count = index.mul %token_stride, %token_count : index
+  %in_bounds = index.cmp ult, %lane, %half_cols : index
+  %view = buffer.view %buffer[%base] : buffer -> view<[%view_count]xf32, %layout>
+  scf.if %in_bounds {
+    %pair = index.assume %lane [range(%lane, 0, 1023)] : index
+    %head = index.rem %row, %head_count : index
+    %token = index.div %row, %head_count : index
+    %head_base = index.mul %head, %head_stride : index
+    %token_base = index.mul %token, %token_stride : index
+    %dst_base0 = index.add %head_base, %token_base : index
+    %dst_base = index.assume %dst_base0 [range(%dst_base0, 0, 1073741823)] : index
+    %pair_in_rot = index.cmp ult, %pair, %half_dims : index
+    scf.if %pair_in_rot {
+    } else {
+      %tail_pair = index.sub %pair, %half_dims : index
+      %tail_pair2 = index.mul %tail_pair, %two : index
+      %tail0 = index.add %n_dims, %tail_pair2 : index
+      %tail1 = index.add %tail0, %one : index
+      %origin = index.add %dst_base, %tail1 : index
+      view.store %value, %view[%origin] : f32, view<[%view_count]xf32, %layout>
+    }
+  }
+  kernel.return
+}
+
+// ====
+
 kernel.def @dynamic_unit_axis_proven_by_workitem_id_launch_config(%columns: index) {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%columns, %c1, %c1) : index
@@ -790,4 +869,99 @@ func.def @unresolved_layout(%buffer: buffer, %base: offset, %layout: encoding<la
   // ERROR@+1: SUBRANGE/007 "vector.load" "requires a resolved view layout"
   %loaded = vector.load %view[0] : view<4xf32, %layout> -> vector<4xf32>
   func.return
+}
+
+// ====
+
+// RUN: pass scf-to-cfg,vector-memory-footprint
+kernel.def @scalar_store_tail_origin_proven_after_scf_to_cfg() {
+  %c1 = index.constant 1 : index
+  %workgroup_size = index.constant 256 : index
+  %head_count = index.constant 24 : index
+  %token_count = index.constant 512 : index
+  %row_count = index.mul %head_count, %token_count : index
+  kernel.launch.config workgroups(%row_count, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
+} launch(%buffer: buffer, %base: offset, %value: f32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %head_count = index.constant 24 : index
+  %token_count = index.constant 512 : index
+  %half_cols = index.constant 64 : index
+  %half_dims = index.constant 48 : index
+  %n_dims = index.constant 96 : index
+  %head_stride = index.constant 128 : index
+  %token_stride = index.constant 3072 : index
+  %row = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %view_count = index.mul %token_stride, %token_count : index
+  %in_bounds = index.cmp ult, %lane, %half_cols : index
+  %view = buffer.view %buffer[%base] : buffer -> view<[%view_count]xf32, %layout>
+  scf.if %in_bounds {
+    %head = index.rem %row, %head_count : index
+    %token = index.div %row, %head_count : index
+    %head_base = index.mul %head, %head_stride : index
+    %token_base = index.mul %token, %token_stride : index
+    %dst_base = index.add %head_base, %token_base : index
+    %pair_in_rot = index.cmp ult, %lane, %half_dims : index
+    scf.if %pair_in_rot {
+    } else {
+      %tail_pair = index.sub %lane, %half_dims : index
+      %tail_pair2 = index.mul %tail_pair, %two : index
+      %tail0 = index.add %n_dims, %tail_pair2 : index
+      %tail1 = index.add %tail0, %one : index
+      %origin = index.add %dst_base, %tail1 : index
+      view.store %value, %view[%origin] : f32, view<[%view_count]xf32, %layout>
+    }
+  }
+  kernel.return
+}
+
+// ----
+kernel.def @scalar_store_tail_origin_proven_after_scf_to_cfg() {
+  %c1 = index.constant 1 : index
+  %workgroup_size = index.constant 256 : index
+  %head_count = index.constant 24 : index
+  %token_count = index.constant 512 : index
+  %row_count = index.mul %head_count, %token_count : index
+  kernel.launch.config workgroups(%row_count, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
+} launch(%buffer: buffer, %base: offset, %value: f32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %head_count = index.constant 24 : index
+  %token_count = index.constant 512 : index
+  %half_cols = index.constant 64 : index
+  %half_dims = index.constant 48 : index
+  %n_dims = index.constant 96 : index
+  %head_stride = index.constant 128 : index
+  %token_stride = index.constant 3072 : index
+  %row = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %view_count = index.mul %token_stride, %token_count : index
+  %in_bounds = index.cmp ult, %lane, %half_cols : index
+  %view = buffer.view %buffer[%base] : buffer -> view<[%view_count]xf32, %layout>
+  cfg.cond_br %in_bounds, ^_bb1, ^_bb5
+^_bb1:
+  %head = index.rem %row, %head_count : index
+  %token = index.div %row, %head_count : index
+  %head_base = index.mul %head, %head_stride : index
+  %token_base = index.mul %token, %token_stride : index
+  %dst_base = index.add %head_base, %token_base : index
+  %pair_in_rot = index.cmp ult, %lane, %half_dims : index
+  cfg.cond_br %pair_in_rot, ^_bb2, ^_bb3
+^_bb2:
+  cfg.br ^_bb4
+^_bb3:
+  %tail_pair = index.sub %lane, %half_dims : index
+  %tail_pair2 = index.mul %tail_pair, %two : index
+  %tail0 = index.add %n_dims, %tail_pair2 : index
+  %tail1 = index.add %tail0, %one : index
+  %origin = index.add %dst_base, %tail1 : index
+  view.store %value, %view[%origin] : f32, view<[%view_count]xf32, %layout>
+  cfg.br ^_bb4
+^_bb4:
+  cfg.br ^_bb5
+^_bb5:
+  kernel.return
 }

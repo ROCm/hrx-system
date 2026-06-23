@@ -756,3 +756,74 @@ bool loom_condition_fact_set_apply_to_value_facts(
   }
   return applied;
 }
+
+bool loom_condition_integer_operands_equal(
+    loom_condition_integer_operand_t left,
+    loom_condition_integer_operand_t right) {
+  if (left.kind != right.kind) return false;
+  switch (left.kind) {
+    case LOOM_CONDITION_INTEGER_OPERAND_VALUE:
+      return left.value_id == right.value_id;
+    case LOOM_CONDITION_INTEGER_OPERAND_CONSTANT:
+      return left.constant == right.constant;
+    default:
+      return false;
+  }
+}
+
+bool loom_condition_integer_relation_implies(
+    const loom_condition_integer_relation_t* known,
+    const loom_condition_integer_relation_t* queried, bool* out_result) {
+  if (loom_condition_integer_operands_equal(known->left, queried->left) &&
+      loom_condition_integer_operands_equal(known->right, queried->right)) {
+    return loom_symbolic_integer_relation_implies(
+        known->relation, queried->relation, out_result);
+  }
+
+  if (loom_condition_integer_operands_equal(known->left, queried->right) &&
+      loom_condition_integer_operands_equal(known->right, queried->left)) {
+    return loom_symbolic_integer_relation_implies(
+        loom_symbolic_integer_relation_swap(known->relation), queried->relation,
+        out_result);
+  }
+
+  return false;
+}
+
+bool loom_condition_integer_relations_equivalent(
+    const loom_condition_integer_relation_t* left,
+    const loom_condition_integer_relation_t* right) {
+  bool left_implies_right = false;
+  if (!loom_condition_integer_relation_implies(left, right,
+                                               &left_implies_right) ||
+      !left_implies_right) {
+    return false;
+  }
+
+  bool right_implies_left = false;
+  return loom_condition_integer_relation_implies(right, left,
+                                                 &right_implies_left) &&
+         right_implies_left;
+}
+
+bool loom_condition_integer_relation_meet(
+    const loom_condition_integer_relation_t* left,
+    const loom_condition_integer_relation_t* right,
+    loom_condition_integer_relation_t* out_relation) {
+  bool implication_result = false;
+  if (loom_condition_integer_relation_implies(right, left,
+                                              &implication_result) &&
+      implication_result) {
+    *out_relation = *left;
+    return true;
+  }
+
+  if (loom_condition_integer_relation_implies(left, right,
+                                              &implication_result) &&
+      implication_result) {
+    *out_relation = *right;
+    return true;
+  }
+
+  return false;
+}

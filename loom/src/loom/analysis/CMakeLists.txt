@@ -75,6 +75,44 @@ loom_cc_test(
 
 loom_cc_library(
   NAME
+    cfg_condition_facts
+  HDRS
+    "cfg_condition_facts.h"
+  SRCS
+    "cfg_condition_facts.c"
+  DEPS
+    ::condition_facts
+    iree::base
+    iree::base::internal::arena
+    loom::ir
+    loom::ops::cfg
+    loom::util::cfg_graph
+    loom::util::dominance
+    loom::util::fact_table
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    cfg_condition_facts_test
+  SRCS
+    "cfg_condition_facts_test.cc"
+  DEPS
+    ::cfg_condition_facts
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
+    loom::ops::cfg
+    loom::ops::index
+    loom::ops::test
+    loom::util::cfg_graph
+    loom::util::dominance
+    loom::util::fact_table
+)
+
+loom_cc_library(
+  NAME
     func_provider_catalog
   HDRS
     "func_provider_catalog.h"
@@ -233,16 +271,22 @@ loom_cc_library(
   SRCS
     "vector_memory_footprint.c"
   DEPS
+    ::cfg_condition_facts
+    ::condition_facts
     ::symbolic_expr
     iree::base
     iree::base::internal::arena
     loom::error::emitter
     loom::error::error_defs
     loom::ir
+    loom::ops::cfg
     loom::ops::config
+    loom::ops::scf
     loom::ops::type_registry
     loom::ops::vector
     loom::ops::view
+    loom::util::cfg_graph
+    loom::util::dominance
     loom::util::fact_table
     loom::util::math
   PUBLIC

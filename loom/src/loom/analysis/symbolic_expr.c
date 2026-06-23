@@ -1811,6 +1811,17 @@ static iree_status_t loom_symbolic_expr_values_match(
     return iree_ok_status();
   }
 
+  int64_t left_exact = 0;
+  int64_t right_exact = 0;
+  if (loom_symbolic_expr_exact_integer_facts(
+          loom_symbolic_expr_lookup_facts(context, left_value), &left_exact) &&
+      loom_symbolic_expr_exact_integer_facts(
+          loom_symbolic_expr_lookup_facts(context, right_value),
+          &right_exact)) {
+    *out_match = left_exact == right_exact;
+    return iree_ok_status();
+  }
+
   loom_symbolic_value_difference_t difference = {0};
   IREE_RETURN_IF_ERROR(loom_symbolic_expr_simplify_value_difference(
       context, left_value, right_value, &difference));
@@ -1831,6 +1842,31 @@ static iree_status_t loom_symbolic_expr_value_matches_constant(
       loom_symbolic_expr_constant_value(&expression, &expression_constant) &&
       expression_constant == constant;
   return iree_ok_status();
+}
+
+static loom_value_id_t loom_symbolic_expr_assumption_source_value(
+    const loom_symbolic_expr_context_t* context, loom_value_id_t value_id) {
+  if (!context->module) return value_id;
+  uint8_t remaining_steps = LOOM_SYMBOLIC_EXPR_IDENTITY_CHAIN_LIMIT;
+  while (remaining_steps-- > 0) {
+    if (value_id >= context->module->values.count) return value_id;
+    const loom_op_t* defining_op =
+        loom_symbolic_expr_value_defining_op(context, value_id);
+    if (!defining_op) return value_id;
+    loom_value_slice_t values = {.values = NULL, .count = 0};
+    if (loom_index_assume_isa(defining_op)) {
+      values = loom_index_assume_values(defining_op);
+    } else if (loom_scalar_assume_isa(defining_op)) {
+      values = loom_scalar_assume_values(defining_op);
+    } else {
+      return value_id;
+    }
+    const loom_value_t* value = loom_module_value(context->module, value_id);
+    uint16_t result_index = loom_value_def_index(value);
+    if (result_index >= values.count) return value_id;
+    value_id = values.values[result_index];
+  }
+  return value_id;
 }
 
 typedef enum loom_symbolic_kernel_bound_kind_e {
@@ -1935,8 +1971,8 @@ static iree_status_t loom_symbolic_expr_kernel_coordinate_proves_relation(
     loom_symbolic_proof_result_t* out_result) {
   *out_matched = false;
 
-  const loom_op_t* left_op =
-      loom_symbolic_expr_value_defining_op(context, left_value);
+  const loom_op_t* left_op = loom_symbolic_expr_value_defining_op(
+      context, loom_symbolic_expr_assumption_source_value(context, left_value));
   loom_symbolic_kernel_bound_kind_t left_kind = 0;
   loom_kernel_dimension_t left_dimension = 0;
   if (left_op && loom_symbolic_expr_kernel_coordinate_bound(left_op, &left_kind,
@@ -1956,8 +1992,9 @@ static iree_status_t loom_symbolic_expr_kernel_coordinate_proves_relation(
     }
   }
 
-  const loom_op_t* right_op =
-      loom_symbolic_expr_value_defining_op(context, right_value);
+  const loom_op_t* right_op = loom_symbolic_expr_value_defining_op(
+      context,
+      loom_symbolic_expr_assumption_source_value(context, right_value));
   loom_symbolic_kernel_bound_kind_t right_kind = 0;
   loom_kernel_dimension_t right_dimension = 0;
   if (right_op && loom_symbolic_expr_kernel_coordinate_bound(
@@ -1978,6 +2015,22 @@ static iree_status_t loom_symbolic_expr_kernel_coordinate_proves_relation(
   return iree_ok_status();
 }
 
+static bool loom_symbolic_expr_unsigned_quotient_def(
+    const loom_op_t* op, loom_value_id_t* out_dividend,
+    loom_value_id_t* out_divisor) {
+  if (loom_index_div_isa(op)) {
+    *out_dividend = loom_index_div_lhs(op);
+    *out_divisor = loom_index_div_rhs(op);
+    return true;
+  }
+  if (loom_scalar_divui_isa(op)) {
+    *out_dividend = loom_scalar_divui_lhs(op);
+    *out_divisor = loom_scalar_divui_rhs(op);
+    return true;
+  }
+  return false;
+}
+
 static bool loom_symbolic_expr_value_facts_are_non_negative(
     const loom_symbolic_expr_context_t* context, loom_value_id_t value_id) {
   return loom_value_facts_is_non_negative(
@@ -1988,6 +2041,160 @@ static bool loom_symbolic_expr_value_facts_are_positive(
     const loom_symbolic_expr_context_t* context, loom_value_id_t value_id) {
   return loom_value_facts_is_positive(
       loom_symbolic_expr_lookup_facts(context, value_id));
+}
+
+static bool loom_symbolic_expr_multiply_def(const loom_op_t* op,
+                                            loom_value_id_t* out_lhs,
+                                            loom_value_id_t* out_rhs) {
+  if (loom_index_mul_isa(op)) {
+    *out_lhs = loom_index_mul_lhs(op);
+    *out_rhs = loom_index_mul_rhs(op);
+    return true;
+  }
+  if (loom_scalar_muli_isa(op)) {
+    *out_lhs = loom_scalar_muli_lhs(op);
+    *out_rhs = loom_scalar_muli_rhs(op);
+    return true;
+  }
+  return false;
+}
+
+static iree_status_t loom_symbolic_expr_value_matches_product(
+    loom_symbolic_expr_context_t* context, loom_value_id_t product_value,
+    loom_value_id_t left_factor, loom_value_id_t right_factor,
+    bool* out_match) {
+  *out_match = false;
+  loom_value_id_t product_source =
+      loom_symbolic_expr_assumption_source_value(context, product_value);
+  const loom_op_t* product_op =
+      loom_symbolic_expr_value_defining_op(context, product_source);
+  loom_value_id_t product_lhs = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t product_rhs = LOOM_VALUE_ID_INVALID;
+  if (!product_op || !loom_symbolic_expr_multiply_def(product_op, &product_lhs,
+                                                      &product_rhs)) {
+    return iree_ok_status();
+  }
+
+  bool lhs_matches_left = false;
+  bool rhs_matches_right = false;
+  IREE_RETURN_IF_ERROR(loom_symbolic_expr_values_match(
+      context, product_lhs, left_factor, &lhs_matches_left));
+  IREE_RETURN_IF_ERROR(loom_symbolic_expr_values_match(
+      context, product_rhs, right_factor, &rhs_matches_right));
+  if (lhs_matches_left && rhs_matches_right) {
+    *out_match = true;
+    return iree_ok_status();
+  }
+
+  bool lhs_matches_right = false;
+  bool rhs_matches_left = false;
+  IREE_RETURN_IF_ERROR(loom_symbolic_expr_values_match(
+      context, product_lhs, right_factor, &lhs_matches_right));
+  IREE_RETURN_IF_ERROR(loom_symbolic_expr_values_match(
+      context, product_rhs, left_factor, &rhs_matches_left));
+  *out_match = lhs_matches_right && rhs_matches_left;
+  return iree_ok_status();
+}
+
+static bool loom_symbolic_expr_kernel_coordinate_launch_bound_value(
+    loom_symbolic_expr_context_t* context, loom_value_id_t value_id,
+    loom_value_id_t* out_bound_value) {
+  *out_bound_value = LOOM_VALUE_ID_INVALID;
+  const loom_op_t* op = loom_symbolic_expr_value_defining_op(
+      context, loom_symbolic_expr_assumption_source_value(context, value_id));
+  loom_symbolic_kernel_bound_kind_t kind = 0;
+  loom_kernel_dimension_t dimension = 0;
+  if (!op ||
+      !loom_symbolic_expr_kernel_coordinate_bound(op, &kind, &dimension)) {
+    return false;
+  }
+  if (!context->fact_table) return false;
+  loom_func_like_t function = context->fact_table->context.function;
+  if (!loom_kernel_def_isa(function.op)) return false;
+  const loom_op_t* launch_config =
+      loom_kernel_def_launch_config_op(function.op);
+  *out_bound_value = loom_symbolic_expr_kernel_launch_bound_operand(
+      launch_config, kind, dimension);
+  return *out_bound_value != LOOM_VALUE_ID_INVALID;
+}
+
+static bool loom_symbolic_expr_quotient_bound_relation(
+    loom_symbolic_integer_relation_t relation,
+    loom_symbolic_proof_result_t product_relation_result,
+    loom_symbolic_proof_result_t* out_result) {
+  loom_symbolic_integer_relation_t implied_relation =
+      LOOM_SYMBOLIC_INTEGER_RELATION_LT;
+  if (product_relation_result == LOOM_SYMBOLIC_PROOF_FALSE) {
+    implied_relation = LOOM_SYMBOLIC_INTEGER_RELATION_GE;
+  } else if (product_relation_result != LOOM_SYMBOLIC_PROOF_TRUE) {
+    return false;
+  }
+
+  bool result = false;
+  if (!loom_symbolic_integer_relation_implies(implied_relation, relation,
+                                              &result)) {
+    return false;
+  }
+  *out_result = result ? LOOM_SYMBOLIC_PROOF_TRUE : LOOM_SYMBOLIC_PROOF_FALSE;
+  return true;
+}
+
+static iree_status_t loom_symbolic_expr_quotient_launch_bound_proves_relation(
+    loom_symbolic_expr_context_t* context,
+    loom_symbolic_integer_relation_t relation, loom_value_id_t dividend,
+    loom_value_id_t divisor, loom_value_id_t bound_value, bool* out_matched,
+    loom_symbolic_proof_result_t* out_result) {
+  *out_matched = false;
+  if (!loom_symbolic_expr_value_facts_are_non_negative(context, dividend) ||
+      !loom_symbolic_expr_value_facts_are_positive(context, divisor) ||
+      !loom_symbolic_expr_value_facts_are_non_negative(context, bound_value)) {
+    return iree_ok_status();
+  }
+
+  loom_value_id_t product_bound = LOOM_VALUE_ID_INVALID;
+  if (!loom_symbolic_expr_kernel_coordinate_launch_bound_value(
+          context, dividend, &product_bound)) {
+    return iree_ok_status();
+  }
+
+  bool product_matches = false;
+  IREE_RETURN_IF_ERROR(loom_symbolic_expr_value_matches_product(
+      context, product_bound, divisor, bound_value, &product_matches));
+  if (!product_matches) return iree_ok_status();
+
+  loom_symbolic_proof_result_t product_relation = LOOM_SYMBOLIC_PROOF_UNKNOWN;
+  bool product_relation_matched = false;
+  IREE_RETURN_IF_ERROR(loom_symbolic_expr_kernel_coordinate_proves_relation(
+      context, LOOM_SYMBOLIC_INTEGER_RELATION_LT, dividend, product_bound,
+      &product_relation_matched, &product_relation));
+  if (!product_relation_matched) return iree_ok_status();
+  if (loom_symbolic_expr_quotient_bound_relation(relation, product_relation,
+                                                 out_result)) {
+    *out_matched = true;
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_symbolic_expr_quotient_bound_proves_relation(
+    loom_symbolic_expr_context_t* context,
+    loom_symbolic_integer_relation_t relation, loom_value_id_t quotient_value,
+    loom_value_id_t bound_value, bool* out_matched,
+    loom_symbolic_proof_result_t* out_result) {
+  *out_matched = false;
+  loom_value_id_t quotient_source =
+      loom_symbolic_expr_assumption_source_value(context, quotient_value);
+  const loom_op_t* quotient_op =
+      loom_symbolic_expr_value_defining_op(context, quotient_source);
+  loom_value_id_t dividend = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t divisor = LOOM_VALUE_ID_INVALID;
+  if (!quotient_op || !loom_symbolic_expr_unsigned_quotient_def(
+                          quotient_op, &dividend, &divisor)) {
+    return iree_ok_status();
+  }
+
+  return loom_symbolic_expr_quotient_launch_bound_proves_relation(
+      context, relation, dividend, divisor, bound_value, out_matched,
+      out_result);
 }
 
 static bool loom_symbolic_expr_unsigned_remainder_def(
@@ -2004,31 +2211,6 @@ static bool loom_symbolic_expr_unsigned_remainder_def(
     return true;
   }
   return false;
-}
-
-static loom_value_id_t loom_symbolic_expr_assumption_source_value(
-    const loom_symbolic_expr_context_t* context, loom_value_id_t value_id) {
-  if (!context->module) return value_id;
-  uint8_t remaining_steps = LOOM_SYMBOLIC_EXPR_IDENTITY_CHAIN_LIMIT;
-  while (remaining_steps-- > 0) {
-    if (value_id >= context->module->values.count) return value_id;
-    const loom_op_t* defining_op =
-        loom_symbolic_expr_value_defining_op(context, value_id);
-    if (!defining_op) return value_id;
-    loom_value_slice_t values = {.values = NULL, .count = 0};
-    if (loom_index_assume_isa(defining_op)) {
-      values = loom_index_assume_values(defining_op);
-    } else if (loom_scalar_assume_isa(defining_op)) {
-      values = loom_scalar_assume_values(defining_op);
-    } else {
-      return value_id;
-    }
-    const loom_value_t* value = loom_module_value(context->module, value_id);
-    uint16_t result_index = loom_value_def_index(value);
-    if (result_index >= values.count) return value_id;
-    value_id = values.values[result_index];
-  }
-  return value_id;
 }
 
 static bool loom_symbolic_expr_remainder_bound_relation(
@@ -2554,6 +2736,16 @@ static iree_status_t loom_symbolic_expr_prove_direct_value_relation(
       out_result));
   if (kernel_relation_matched) return iree_ok_status();
 
+  bool quotient_bound_matched = false;
+  IREE_RETURN_IF_ERROR(loom_symbolic_expr_quotient_bound_proves_relation(
+      context, relation, left_value, right_value, &quotient_bound_matched,
+      out_result));
+  if (quotient_bound_matched) return iree_ok_status();
+  IREE_RETURN_IF_ERROR(loom_symbolic_expr_quotient_bound_proves_relation(
+      context, loom_symbolic_integer_relation_swap(relation), right_value,
+      left_value, &quotient_bound_matched, out_result));
+  if (quotient_bound_matched) return iree_ok_status();
+
   bool remainder_bound_matched = false;
   IREE_RETURN_IF_ERROR(loom_symbolic_expr_remainder_bound_proves_relation(
       context, relation, left_value, right_value, &remainder_bound_matched,
@@ -2977,38 +3169,53 @@ static void loom_symbolic_expr_collect_identity_chain_select_conditions(
   }
 }
 
-static void loom_symbolic_expr_collect_dependency_select_conditions(
-    const loom_symbolic_expr_context_t* context, loom_value_id_t value_id,
-    iree_host_size_t* remaining_values, loom_value_id_t* conditions,
-    uint8_t* inout_condition_count) {
-  if (!context->module || value_id == LOOM_VALUE_ID_INVALID ||
-      value_id >= context->module->values.count || *remaining_values == 0) {
+static void loom_symbolic_expr_push_dependency_value(
+    loom_value_id_t value_id, loom_value_id_t* worklist,
+    iree_host_size_t* inout_worklist_count) {
+  if (value_id == LOOM_VALUE_ID_INVALID ||
+      *inout_worklist_count >=
+          LOOM_SYMBOLIC_EXPR_SELECT_DEPENDENCY_SEARCH_LIMIT) {
     return;
   }
-  --*remaining_values;
+  worklist[(*inout_worklist_count)++] = value_id;
+}
 
-  loom_value_id_t condition = LOOM_VALUE_ID_INVALID;
-  if (loom_symbolic_expr_select_condition_from_value(context, value_id,
-                                                     &condition)) {
-    loom_symbolic_expr_append_select_condition(condition, conditions,
-                                               inout_condition_count);
-  }
-  loom_symbolic_expr_collect_identity_chain_select_conditions(
-      context, value_id, conditions, inout_condition_count);
+static void loom_symbolic_expr_collect_dependency_select_conditions(
+    const loom_symbolic_expr_context_t* context, loom_value_id_t root_value_id,
+    iree_host_size_t* inout_remaining_value_count, loom_value_id_t* conditions,
+    uint8_t* inout_condition_count) {
+  if (!context->module || *inout_remaining_value_count == 0) return;
 
-  const loom_value_t* value = loom_module_value(context->module, value_id);
-  if (loom_value_is_block_arg(value)) return;
-  const loom_op_t* defining_op = loom_value_def_op(value);
-  if (!defining_op) return;
+  loom_value_id_t worklist[LOOM_SYMBOLIC_EXPR_SELECT_DEPENDENCY_SEARCH_LIMIT];
+  iree_host_size_t worklist_count = 0;
+  loom_symbolic_expr_push_dependency_value(root_value_id, worklist,
+                                           &worklist_count);
+  while (worklist_count > 0 && *inout_remaining_value_count > 0 &&
+         *inout_condition_count <
+             LOOM_SYMBOLIC_EXPR_SELECT_CASE_CONDITION_LIMIT) {
+    loom_value_id_t value_id = worklist[--worklist_count];
+    if (value_id >= context->module->values.count) continue;
+    --*inout_remaining_value_count;
 
-  const loom_value_id_t* operands = loom_op_const_operands(defining_op);
-  for (uint16_t i = 0;
-       i < defining_op->operand_count &&
-       *inout_condition_count < LOOM_SYMBOLIC_EXPR_SELECT_CASE_CONDITION_LIMIT;
-       ++i) {
-    loom_symbolic_expr_collect_dependency_select_conditions(
-        context, operands[i], remaining_values, conditions,
-        inout_condition_count);
+    loom_value_id_t condition = LOOM_VALUE_ID_INVALID;
+    if (loom_symbolic_expr_select_condition_from_value(context, value_id,
+                                                       &condition)) {
+      loom_symbolic_expr_append_select_condition(condition, conditions,
+                                                 inout_condition_count);
+    }
+    loom_symbolic_expr_collect_identity_chain_select_conditions(
+        context, value_id, conditions, inout_condition_count);
+
+    const loom_value_t* value = loom_module_value(context->module, value_id);
+    if (loom_value_is_block_arg(value)) continue;
+    const loom_op_t* defining_op = loom_value_def_op(value);
+    if (!defining_op) continue;
+
+    const loom_value_id_t* operands = loom_op_const_operands(defining_op);
+    for (uint16_t i = defining_op->operand_count; i > 0; --i) {
+      loom_symbolic_expr_push_dependency_value(operands[i - 1], worklist,
+                                               &worklist_count);
+    }
   }
 }
 
@@ -3040,15 +3247,18 @@ static iree_status_t loom_symbolic_expr_collect_select_conditions_for_le(
         context, term.relation_value_id, conditions, out_condition_count);
   }
 
-  iree_host_size_t remaining_values =
+  iree_host_size_t remaining_value_count =
       LOOM_SYMBOLIC_EXPR_SELECT_DEPENDENCY_SEARCH_LIMIT;
-  for (iree_host_size_t i = 0; i < term_count && remaining_values > 0; ++i) {
+  for (iree_host_size_t i = 0;
+       i < term_count && remaining_value_count > 0 &&
+       *out_condition_count < LOOM_SYMBOLIC_EXPR_SELECT_CASE_CONDITION_LIMIT;
+       ++i) {
     const loom_symbolic_term_t term = context->scratch_terms[i];
     loom_symbolic_expr_collect_dependency_select_conditions(
-        context, term.value_id, &remaining_values, conditions,
+        context, term.value_id, &remaining_value_count, conditions,
         out_condition_count);
     loom_symbolic_expr_collect_dependency_select_conditions(
-        context, term.relation_value_id, &remaining_values, conditions,
+        context, term.relation_value_id, &remaining_value_count, conditions,
         out_condition_count);
   }
   return iree_ok_status();
