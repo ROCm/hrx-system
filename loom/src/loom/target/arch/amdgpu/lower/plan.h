@@ -1035,9 +1035,9 @@ typedef struct loom_amdgpu_memory_access_plan_t {
 } loom_amdgpu_memory_access_plan_t;
 
 typedef struct loom_amdgpu_fragment_memory_packet_plan_t {
-  // First fragment payload register consumed or produced by this packet.
+  // First target fragment coordinate register covered by this packet.
   uint16_t register_index;
-  // Number of fragment payload registers covered by this packet.
+  // Number of target fragment coordinate registers covered by this packet.
   uint16_t result_register_count;
   // Number of 32-bit memory packet registers moved by the descriptor.
   uint16_t packet_register_count;
@@ -1045,15 +1045,16 @@ typedef struct loom_amdgpu_fragment_memory_packet_plan_t {
   loom_amdgpu_descriptor_ref_t descriptor_ref;
 } loom_amdgpu_fragment_memory_packet_plan_t;
 
-typedef enum loom_amdgpu_fragment_memory_store_conversion_kind_e {
-  // Store payload and destination view elements match the selected fragment
-  // layout element type.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_STORE_CONVERSION_NONE = 0,
+typedef enum loom_amdgpu_fragment_memory_payload_form_e {
+  // Payload storage matches the selected fragment role layout.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_NATIVE = 0,
+  // A 16-bit float vector is loaded with f32 result-fragment coordinates.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_LOAD_PACKED_16BIT_RESULT = 1,
   // A f32 result fragment is rounded to BF16 lanes before a 16-bit store.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_STORE_CONVERSION_NARROW_F32_TO_BF16 = 1,
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16 = 2,
   // A f16 low-subword result fragment is widened to f32 lanes before store.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_STORE_CONVERSION_EXTEND_F16_TO_F32 = 2,
-} loom_amdgpu_fragment_memory_store_conversion_kind_t;
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_EXTEND_F16_TO_F32 = 3,
+} loom_amdgpu_fragment_memory_payload_form_t;
 
 typedef struct loom_amdgpu_fragment_memory_plan_t {
   // Direction of the fragment memory movement.
@@ -1070,8 +1071,10 @@ typedef struct loom_amdgpu_fragment_memory_plan_t {
   uint32_t axis_byte_strides[LOOM_ENCODING_ADDRESS_LAYOUT_MAX_RANK];
   // Rank of the typed view.
   uint8_t view_rank;
-  // Number of 32-bit registers in the fragment payload.
+  // Number of target fragment coordinate registers in the selected layout.
   uint16_t register_count;
+  // Number of 32-bit registers used by the lowered payload storage value.
+  uint16_t payload_register_count;
   // Logical elements packed in each 32-bit fragment register.
   uint16_t elements_per_register;
   // Byte count of one logical fragment element.
@@ -1081,8 +1084,8 @@ typedef struct loom_amdgpu_fragment_memory_plan_t {
       packets[LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS];
   // Number of populated packet plans.
   uint16_t packet_count;
-  // Store-boundary payload/view conversion selected for result fragments.
-  loom_amdgpu_fragment_memory_store_conversion_kind_t store_conversion_kind;
+  // Payload storage form selected for the fragment movement.
+  loom_amdgpu_fragment_memory_payload_form_t payload_form;
   // Optional f32 fragment source to round directly for narrowed stores.
   loom_value_id_t narrowed_result_round_source;
 } loom_amdgpu_fragment_memory_plan_t;

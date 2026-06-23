@@ -328,30 +328,56 @@ static bool loom_amdgpu_fragment_memory_can_extend_result_store(
          payload_element_type == LOOM_SCALAR_TYPE_F16;
 }
 
-static bool loom_amdgpu_fragment_memory_store_conversion_select(
+static bool loom_amdgpu_fragment_memory_scalar_type_is_16bit_float(
+    loom_scalar_type_t element_type) {
+  return element_type == LOOM_SCALAR_TYPE_F16 ||
+         element_type == LOOM_SCALAR_TYPE_BF16;
+}
+
+static bool loom_amdgpu_fragment_memory_can_load_packed_16bit_result(
+    loom_amdgpu_memory_operation_kind_t operation_kind,
+    loom_contract_operand_role_t role, loom_scalar_type_t expected_element_type,
+    loom_scalar_type_t payload_element_type,
+    loom_scalar_type_t view_element_type) {
+  return operation_kind == LOOM_AMDGPU_MEMORY_OPERATION_LOAD &&
+         loom_amdgpu_fragment_memory_role_is_result_like(role) &&
+         expected_element_type == LOOM_SCALAR_TYPE_F32 &&
+         payload_element_type == view_element_type &&
+         loom_amdgpu_fragment_memory_scalar_type_is_16bit_float(
+             payload_element_type);
+}
+
+static bool loom_amdgpu_fragment_memory_payload_form_select(
     loom_amdgpu_memory_operation_kind_t operation_kind,
     loom_contract_operand_role_t role, loom_scalar_type_t expected_element_type,
     loom_scalar_type_t payload_element_type,
     loom_scalar_type_t view_element_type,
-    loom_amdgpu_fragment_memory_store_conversion_kind_t* out_conversion_kind) {
-  *out_conversion_kind = LOOM_AMDGPU_FRAGMENT_MEMORY_STORE_CONVERSION_NONE;
+    loom_amdgpu_fragment_memory_payload_form_t* out_payload_form) {
+  *out_payload_form = LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_NATIVE;
   if (payload_element_type == expected_element_type &&
       view_element_type == expected_element_type) {
+    return true;
+  }
+  if (loom_amdgpu_fragment_memory_can_load_packed_16bit_result(
+          operation_kind, role, expected_element_type, payload_element_type,
+          view_element_type)) {
+    *out_payload_form =
+        LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_LOAD_PACKED_16BIT_RESULT;
     return true;
   }
   if ((payload_element_type == expected_element_type ||
        payload_element_type == view_element_type) &&
       loom_amdgpu_fragment_memory_can_narrow_result_store(
           operation_kind, role, expected_element_type, view_element_type)) {
-    *out_conversion_kind =
-        LOOM_AMDGPU_FRAGMENT_MEMORY_STORE_CONVERSION_NARROW_F32_TO_BF16;
+    *out_payload_form =
+        LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16;
     return true;
   }
   if (view_element_type == expected_element_type &&
       loom_amdgpu_fragment_memory_can_extend_result_store(
           operation_kind, role, expected_element_type, payload_element_type)) {
-    *out_conversion_kind =
-        LOOM_AMDGPU_FRAGMENT_MEMORY_STORE_CONVERSION_EXTEND_F16_TO_F32;
+    *out_payload_form =
+        LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_EXTEND_F16_TO_F32;
     return true;
   }
   return false;
@@ -391,11 +417,11 @@ static bool loom_amdgpu_fragment_memory_role_uses_scalar_b16_packets(
 static bool loom_amdgpu_fragment_memory_requires_native_payload_storage(
     loom_amdgpu_memory_operation_kind_t operation_kind,
     const loom_amdgpu_matrix_fragment_role_layout_t* role_layout,
-    loom_amdgpu_fragment_memory_store_conversion_kind_t store_conversion_kind) {
+    loom_amdgpu_fragment_memory_payload_form_t payload_form) {
   return operation_kind == LOOM_AMDGPU_MEMORY_OPERATION_STORE &&
          (loom_amdgpu_fragment_memory_role_uses_low_subword(role_layout) ||
-          store_conversion_kind ==
-              LOOM_AMDGPU_FRAGMENT_MEMORY_STORE_CONVERSION_EXTEND_F16_TO_F32);
+          payload_form ==
+              LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_EXTEND_F16_TO_F32);
 }
 
 static bool loom_amdgpu_fragment_memory_payload_has_native_storage(
@@ -440,6 +466,50 @@ static bool loom_amdgpu_fragment_memory_payload_matches_role_storage(
                                   (uint32_t)role_layout->element_bit_count;
 }
 
+static bool
+loom_amdgpu_fragment_memory_payload_matches_packed_16bit_result_load(
+    loom_type_t payload_type,
+    loom_amdgpu_memory_operation_kind_t operation_kind,
+    loom_scalar_type_t expected_element_type,
+    const loom_amdgpu_matrix_fragment_role_layout_t* role_layout) {
+  if (operation_kind != LOOM_AMDGPU_MEMORY_OPERATION_LOAD ||
+      !loom_amdgpu_fragment_memory_role_is_result_like(role_layout->role) ||
+      expected_element_type != LOOM_SCALAR_TYPE_F32 ||
+      role_layout->element_bit_count != 32 ||
+      role_layout->elements_per_register != 1) {
+    return false;
+  }
+  uint32_t payload_bit_count = 0;
+  uint32_t register_count = 0;
+  return loom_amdgpu_type_packed_16bit_float_storage(
+             payload_type, &payload_bit_count, &register_count) &&
+         payload_bit_count == (uint32_t)role_layout->register_count * 16u &&
+         register_count == ((uint32_t)role_layout->register_count + 1u) / 2u;
+}
+
+static bool loom_amdgpu_fragment_memory_payload_storage_register_count(
+    loom_type_t payload_type, uint16_t* out_register_count) {
+  *out_register_count = 0;
+  if (loom_type_element_type(payload_type) == LOOM_SCALAR_TYPE_F32) {
+    const uint32_t register_count =
+        loom_amdgpu_vector_f32_lane_count(payload_type);
+    if (register_count == 0 || register_count > UINT16_MAX) {
+      return false;
+    }
+    *out_register_count = (uint16_t)register_count;
+    return true;
+  }
+  uint32_t unused_payload_bit_count = 0;
+  uint32_t register_count = 0;
+  if (!loom_amdgpu_type_packed_16bit_float_storage(
+          payload_type, &unused_payload_bit_count, &register_count) ||
+      register_count == 0 || register_count > UINT16_MAX) {
+    return false;
+  }
+  *out_register_count = (uint16_t)register_count;
+  return true;
+}
+
 static bool loom_amdgpu_fragment_memory_payload_matches(
     loom_type_t payload_type,
     loom_amdgpu_memory_operation_kind_t operation_kind,
@@ -461,6 +531,11 @@ static bool loom_amdgpu_fragment_memory_payload_matches(
     case LOOM_CONTRACT_OPERAND_ROLE_RESULT: {
       if (loom_amdgpu_fragment_memory_payload_matches_role_storage(
               payload_type, expected_element_type, role_layout)) {
+        return true;
+      }
+      if (loom_amdgpu_fragment_memory_payload_matches_packed_16bit_result_load(
+              payload_type, operation_kind, expected_element_type,
+              role_layout)) {
         return true;
       }
       const loom_scalar_type_t payload_element_type =
@@ -551,7 +626,7 @@ static bool loom_amdgpu_fragment_memory_descriptor_role_element_type(
 
 typedef enum loom_amdgpu_fragment_memory_element_match_e {
   LOOM_AMDGPU_FRAGMENT_MEMORY_ELEMENT_MATCH_NONE = 0,
-  LOOM_AMDGPU_FRAGMENT_MEMORY_ELEMENT_MATCH_CONVERTED_STORE = 1,
+  LOOM_AMDGPU_FRAGMENT_MEMORY_ELEMENT_MATCH_ADAPTED = 1,
   LOOM_AMDGPU_FRAGMENT_MEMORY_ELEMENT_MATCH_EXACT = 2,
 } loom_amdgpu_fragment_memory_element_match_t;
 
@@ -560,10 +635,8 @@ loom_amdgpu_fragment_memory_payload_element_match(
     loom_amdgpu_memory_operation_kind_t operation_kind,
     loom_contract_operand_role_t role, loom_type_t payload_type,
     loom_type_t view_type, loom_scalar_type_t expected_element_type,
-    loom_amdgpu_fragment_memory_store_conversion_kind_t*
-        out_store_conversion_kind) {
-  *out_store_conversion_kind =
-      LOOM_AMDGPU_FRAGMENT_MEMORY_STORE_CONVERSION_NONE;
+    loom_amdgpu_fragment_memory_payload_form_t* out_payload_form) {
+  *out_payload_form = LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_NATIVE;
   if (!loom_type_is_vector(payload_type)) {
     return LOOM_AMDGPU_FRAGMENT_MEMORY_ELEMENT_MATCH_EXACT;
   }
@@ -576,15 +649,14 @@ loom_amdgpu_fragment_memory_payload_element_match(
       loom_type_element_type(payload_type);
   const loom_scalar_type_t view_element_type =
       loom_type_element_type(view_type);
-  if (!loom_amdgpu_fragment_memory_store_conversion_select(
+  if (!loom_amdgpu_fragment_memory_payload_form_select(
           operation_kind, role, expected_element_type, payload_element_type,
-          view_element_type, out_store_conversion_kind)) {
+          view_element_type, out_payload_form)) {
     return LOOM_AMDGPU_FRAGMENT_MEMORY_ELEMENT_MATCH_NONE;
   }
-  return *out_store_conversion_kind ==
-                 LOOM_AMDGPU_FRAGMENT_MEMORY_STORE_CONVERSION_NONE
+  return *out_payload_form == LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_NATIVE
              ? LOOM_AMDGPU_FRAGMENT_MEMORY_ELEMENT_MATCH_EXACT
-             : LOOM_AMDGPU_FRAGMENT_MEMORY_ELEMENT_MATCH_CONVERTED_STORE;
+             : LOOM_AMDGPU_FRAGMENT_MEMORY_ELEMENT_MATCH_ADAPTED;
 }
 
 static bool loom_amdgpu_fragment_memory_target_layout(
@@ -594,13 +666,11 @@ static bool loom_amdgpu_fragment_memory_target_layout(
     loom_type_t payload_type, loom_type_t view_type,
     const loom_amdgpu_matrix_fragment_layout_t** out_layout,
     loom_scalar_type_t* out_expected_element_type,
-    loom_amdgpu_fragment_memory_store_conversion_kind_t*
-        out_store_conversion_kind,
+    loom_amdgpu_fragment_memory_payload_form_t* out_payload_form,
     loom_amdgpu_fragment_memory_diagnostic_t* diagnostic) {
   *out_layout = NULL;
   *out_expected_element_type = LOOM_SCALAR_TYPE_COUNT_;
-  *out_store_conversion_kind =
-      LOOM_AMDGPU_FRAGMENT_MEMORY_STORE_CONVERSION_NONE;
+  *out_payload_form = LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_NATIVE;
   if (environment->bundle == NULL || environment->bundle->snapshot == NULL ||
       environment->descriptor_set == NULL) {
     return loom_amdgpu_fragment_memory_reject(
@@ -612,13 +682,12 @@ static bool loom_amdgpu_fragment_memory_target_layout(
   const uint32_t wave_size = environment->bundle->snapshot->subgroup_size;
   const loom_amdgpu_matrix_fragment_layout_t* best_layout = NULL;
   loom_scalar_type_t best_element_type = LOOM_SCALAR_TYPE_COUNT_;
-  loom_amdgpu_fragment_memory_store_conversion_kind_t
-      best_store_conversion_kind =
-          LOOM_AMDGPU_FRAGMENT_MEMORY_STORE_CONVERSION_NONE;
+  loom_amdgpu_fragment_memory_payload_form_t best_payload_form =
+      LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_NATIVE;
   loom_amdgpu_fragment_memory_element_match_t best_match =
       LOOM_AMDGPU_FRAGMENT_MEMORY_ELEMENT_MATCH_NONE;
   bool rejected_payload_layout = false;
-  bool rejected_store_conversion = false;
+  bool rejected_payload_form = false;
   for (iree_host_size_t i = 0; i < descriptor_count; ++i) {
     const loom_amdgpu_matrix_contract_descriptor_t* descriptor =
         loom_amdgpu_matrix_contract_descriptor_at(i);
@@ -643,25 +712,24 @@ static bool loom_amdgpu_fragment_memory_target_layout(
     }
     if (!loom_amdgpu_fragment_memory_payload_matches(
             payload_type, operation_kind, expected_element_type, role_layout)) {
-      loom_amdgpu_fragment_memory_store_conversion_kind_t
-          store_conversion_kind =
-              LOOM_AMDGPU_FRAGMENT_MEMORY_STORE_CONVERSION_NONE;
+      loom_amdgpu_fragment_memory_payload_form_t payload_form =
+          LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_NATIVE;
       if (loom_amdgpu_fragment_memory_payload_element_match(
               operation_kind, role, payload_type, view_type,
-              expected_element_type, &store_conversion_kind) !=
+              expected_element_type, &payload_form) !=
           LOOM_AMDGPU_FRAGMENT_MEMORY_ELEMENT_MATCH_NONE) {
         rejected_payload_layout = true;
       }
       continue;
     }
-    loom_amdgpu_fragment_memory_store_conversion_kind_t store_conversion_kind =
-        LOOM_AMDGPU_FRAGMENT_MEMORY_STORE_CONVERSION_NONE;
+    loom_amdgpu_fragment_memory_payload_form_t payload_form =
+        LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_NATIVE;
     const loom_amdgpu_fragment_memory_element_match_t match =
         loom_amdgpu_fragment_memory_payload_element_match(
             operation_kind, role, payload_type, view_type,
-            expected_element_type, &store_conversion_kind);
+            expected_element_type, &payload_form);
     if (match == LOOM_AMDGPU_FRAGMENT_MEMORY_ELEMENT_MATCH_NONE) {
-      rejected_store_conversion = true;
+      rejected_payload_form = true;
       continue;
     }
     if (match <= best_match) {
@@ -669,7 +737,7 @@ static bool loom_amdgpu_fragment_memory_target_layout(
     }
     best_layout = layout;
     best_element_type = expected_element_type;
-    best_store_conversion_kind = store_conversion_kind;
+    best_payload_form = payload_form;
     best_match = match;
     if (match == LOOM_AMDGPU_FRAGMENT_MEMORY_ELEMENT_MATCH_EXACT) {
       break;
@@ -678,13 +746,15 @@ static bool loom_amdgpu_fragment_memory_target_layout(
   if (best_layout != NULL) {
     *out_layout = best_layout;
     *out_expected_element_type = best_element_type;
-    *out_store_conversion_kind = best_store_conversion_kind;
+    *out_payload_form = best_payload_form;
     return true;
   }
 
   return loom_amdgpu_fragment_memory_reject(
-      diagnostic, rejected_store_conversion
-                      ? IREE_SV("fragment_memory.store_conversion")
+      diagnostic, rejected_payload_form
+                      ? (operation_kind == LOOM_AMDGPU_MEMORY_OPERATION_STORE
+                             ? IREE_SV("fragment_memory.store_conversion")
+                             : IREE_SV("fragment_memory.payload_form"))
                       : (rejected_payload_layout
                              ? IREE_SV("fragment_memory.payload_layout")
                              : IREE_SV("fragment_memory.target_layout")));
@@ -696,7 +766,7 @@ static bool loom_amdgpu_fragment_memory_view_matches(
     loom_amdgpu_memory_operation_kind_t operation_kind,
     loom_scalar_type_t expected_element_type,
     const loom_amdgpu_matrix_fragment_role_layout_t* role_layout,
-    loom_amdgpu_fragment_memory_store_conversion_kind_t store_conversion_kind,
+    loom_amdgpu_fragment_memory_payload_form_t payload_form,
     loom_vector_memory_access_t* out_access) {
   *out_access = (loom_vector_memory_access_t){0};
   if (!loom_type_is_view(view_type) ||
@@ -709,11 +779,14 @@ static bool loom_amdgpu_fragment_memory_view_matches(
   const loom_scalar_type_t payload_element_type =
       loom_type_element_type(payload_type);
   const bool view_is_narrowed =
-      store_conversion_kind ==
-      LOOM_AMDGPU_FRAGMENT_MEMORY_STORE_CONVERSION_NARROW_F32_TO_BF16;
+      payload_form ==
+      LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16;
   const bool view_is_extended =
-      store_conversion_kind ==
-      LOOM_AMDGPU_FRAGMENT_MEMORY_STORE_CONVERSION_EXTEND_F16_TO_F32;
+      payload_form ==
+      LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_EXTEND_F16_TO_F32;
+  const bool view_is_packed_16bit_result =
+      payload_form ==
+      LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_LOAD_PACKED_16BIT_RESULT;
   if (loom_type_is_vector(payload_type) &&
       payload_element_type != view_element_type &&
       !(view_is_narrowed && payload_element_type == expected_element_type) &&
@@ -737,7 +810,8 @@ static bool loom_amdgpu_fragment_memory_view_matches(
               role_layout->element_bit_count) {
         return false;
       }
-      if (view_element_type != expected_element_type && !view_is_narrowed) {
+      if (view_element_type != expected_element_type && !view_is_narrowed &&
+          !view_is_packed_16bit_result) {
         return false;
       }
       break;
@@ -745,7 +819,8 @@ static bool loom_amdgpu_fragment_memory_view_matches(
     default:
       return false;
   }
-  if (view_element_type != expected_element_type && !view_is_narrowed) {
+  if (view_element_type != expected_element_type && !view_is_narrowed &&
+      !view_is_packed_16bit_result) {
     return false;
   }
 
@@ -917,7 +992,7 @@ static bool loom_amdgpu_fragment_memory_space_supports_access(
     loom_amdgpu_memory_operation_kind_t operation_kind,
     loom_value_fact_memory_space_t memory_space,
     const loom_amdgpu_matrix_fragment_role_layout_t* role_layout,
-    loom_amdgpu_fragment_memory_store_conversion_kind_t store_conversion_kind) {
+    loom_amdgpu_fragment_memory_payload_form_t payload_form) {
   if (loom_amdgpu_fragment_memory_role_uses_scalar_b16_packets(role_layout)) {
     loom_amdgpu_descriptor_ref_t descriptor_ref =
         LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
@@ -925,8 +1000,16 @@ static bool loom_amdgpu_fragment_memory_space_supports_access(
         operation_kind, memory_space, &descriptor_ref);
   }
 
-  if (store_conversion_kind ==
-      LOOM_AMDGPU_FRAGMENT_MEMORY_STORE_CONVERSION_NARROW_F32_TO_BF16) {
+  if (payload_form ==
+      LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_LOAD_PACKED_16BIT_RESULT) {
+    loom_amdgpu_descriptor_ref_t descriptor_ref =
+        LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
+    return loom_amdgpu_fragment_memory_16bit_descriptor_ref(
+        LOOM_AMDGPU_MEMORY_OPERATION_LOAD, memory_space, &descriptor_ref);
+  }
+
+  if (payload_form ==
+      LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16) {
     for (iree_host_size_t i = 0;
          i < IREE_ARRAYSIZE(kLoomAmdgpuFragmentMemoryNarrowedStoreCandidates);
          ++i) {
@@ -955,14 +1038,15 @@ static bool loom_amdgpu_fragment_memory_space_supports_access(
   return false;
 }
 
-static bool loom_amdgpu_fragment_memory_store_conversion_has_descriptors(
+static bool loom_amdgpu_fragment_memory_payload_form_has_descriptors(
     const loom_low_descriptor_set_t* descriptor_set,
-    loom_amdgpu_fragment_memory_store_conversion_kind_t store_conversion_kind) {
-  switch (store_conversion_kind) {
-    case LOOM_AMDGPU_FRAGMENT_MEMORY_STORE_CONVERSION_NONE:
-    case LOOM_AMDGPU_FRAGMENT_MEMORY_STORE_CONVERSION_NARROW_F32_TO_BF16:
+    loom_amdgpu_fragment_memory_payload_form_t payload_form) {
+  switch (payload_form) {
+    case LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_NATIVE:
+    case LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_LOAD_PACKED_16BIT_RESULT:
+    case LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16:
       return true;
-    case LOOM_AMDGPU_FRAGMENT_MEMORY_STORE_CONVERSION_EXTEND_F16_TO_F32:
+    case LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_EXTEND_F16_TO_F32:
       return loom_amdgpu_descriptor_set_has_ref(
           descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_F32_F16);
   }
@@ -1097,11 +1181,11 @@ static bool loom_amdgpu_fragment_memory_analyze(
       loom_module_value_type(environment->module, source->view);
   const loom_amdgpu_matrix_fragment_layout_t* layout = NULL;
   loom_scalar_type_t expected_element_type = LOOM_SCALAR_TYPE_COUNT_;
-  loom_amdgpu_fragment_memory_store_conversion_kind_t store_conversion_kind =
-      LOOM_AMDGPU_FRAGMENT_MEMORY_STORE_CONVERSION_NONE;
+  loom_amdgpu_fragment_memory_payload_form_t payload_form =
+      LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_NATIVE;
   if (!loom_amdgpu_fragment_memory_target_layout(
           environment, role, operation_kind, payload_type, view_type, &layout,
-          &expected_element_type, &store_conversion_kind, diagnostic)) {
+          &expected_element_type, &payload_form, diagnostic)) {
     return false;
   }
   if (!loom_amdgpu_fragment_memory_shape_matches(environment->fact_table,
@@ -1123,8 +1207,14 @@ static bool loom_amdgpu_fragment_memory_analyze(
     return loom_amdgpu_fragment_memory_reject(
         diagnostic, IREE_SV("fragment_memory.payload"));
   }
+  uint16_t payload_register_count = 0;
+  if (!loom_amdgpu_fragment_memory_payload_storage_register_count(
+          payload_type, &payload_register_count)) {
+    return loom_amdgpu_fragment_memory_reject(
+        diagnostic, IREE_SV("fragment_memory.payload_storage"));
+  }
   if (loom_amdgpu_fragment_memory_requires_native_payload_storage(
-          operation_kind, role_layout, store_conversion_kind) &&
+          operation_kind, role_layout, payload_form) &&
       !loom_amdgpu_fragment_memory_payload_has_native_storage(
           environment->fact_table, source->payload)) {
     return loom_amdgpu_fragment_memory_reject(
@@ -1134,8 +1224,8 @@ static bool loom_amdgpu_fragment_memory_analyze(
   loom_vector_memory_access_t access = {0};
   if (!loom_amdgpu_fragment_memory_view_matches(
           environment->module, environment->fact_table, view_type, payload_type,
-          operation_kind, expected_element_type, role_layout,
-          store_conversion_kind, &access)) {
+          operation_kind, expected_element_type, role_layout, payload_form,
+          &access)) {
     return loom_amdgpu_fragment_memory_reject(diagnostic,
                                               IREE_SV("fragment_memory.view"));
   }
@@ -1176,13 +1266,13 @@ static bool loom_amdgpu_fragment_memory_analyze(
   }
 
   const loom_value_id_t narrowed_result_round_source =
-      store_conversion_kind ==
-              LOOM_AMDGPU_FRAGMENT_MEMORY_STORE_CONVERSION_NARROW_F32_TO_BF16
+      payload_form ==
+              LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16
           ? loom_amdgpu_fragment_memory_narrowed_result_round_source(
                 environment->module, source->payload, role_layout)
           : LOOM_VALUE_ID_INVALID;
-  if (!loom_amdgpu_fragment_memory_store_conversion_has_descriptors(
-          environment->descriptor_set, store_conversion_kind)) {
+  if (!loom_amdgpu_fragment_memory_payload_form_has_descriptors(
+          environment->descriptor_set, payload_form)) {
     return loom_amdgpu_fragment_memory_reject(
         diagnostic, IREE_SV("fragment_memory.store_conversion"));
   }
@@ -1210,7 +1300,7 @@ static bool loom_amdgpu_fragment_memory_analyze(
 
   if (!loom_amdgpu_fragment_memory_space_supports_access(
           operation_kind, source_access.memory_space, role_layout,
-          store_conversion_kind)) {
+          payload_form)) {
     return loom_amdgpu_fragment_memory_reject(
         diagnostic, IREE_SV("fragment_memory.memory_space"));
   }
@@ -1224,9 +1314,10 @@ static bool loom_amdgpu_fragment_memory_analyze(
         .payload = source->payload,
         .view_rank = access.view_rank,
         .register_count = role_layout->register_count,
+        .payload_register_count = payload_register_count,
         .elements_per_register = role_layout->elements_per_register,
         .element_byte_count = (uint16_t)source_access.element_byte_count,
-        .store_conversion_kind = store_conversion_kind,
+        .payload_form = payload_form,
         .narrowed_result_round_source = narrowed_result_round_source,
     };
     for (uint8_t axis = 0; axis < access.view_rank; ++axis) {
@@ -1579,6 +1670,28 @@ static bool loom_amdgpu_fragment_memory_select_low_subword_packet(
   return true;
 }
 
+static bool loom_amdgpu_fragment_memory_select_packed_16bit_result_load_packet(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_amdgpu_fragment_memory_plan_t* plan, uint16_t register_index,
+    loom_amdgpu_fragment_memory_packet_plan_t* out_packet) {
+  *out_packet = (loom_amdgpu_fragment_memory_packet_plan_t){0};
+  loom_amdgpu_descriptor_ref_t descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
+  if (!loom_amdgpu_fragment_memory_16bit_descriptor_ref(
+          LOOM_AMDGPU_MEMORY_OPERATION_LOAD, plan->source.memory_space,
+          &descriptor_ref) ||
+      !loom_amdgpu_descriptor_set_has_ref(descriptor_set, descriptor_ref)) {
+    return false;
+  }
+  const uint16_t remaining = plan->register_count - register_index;
+  *out_packet = (loom_amdgpu_fragment_memory_packet_plan_t){
+      .register_index = register_index,
+      .result_register_count = remaining >= 2 ? 2 : 1,
+      .packet_register_count = 1,
+      .descriptor_ref = descriptor_ref,
+  };
+  return true;
+}
+
 static bool loom_amdgpu_fragment_memory_can_use_packed_payload_slice(
     const loom_amdgpu_fragment_memory_plan_t* plan, uint16_t register_index,
     uint16_t result_register_count) {
@@ -1648,14 +1761,20 @@ static bool loom_amdgpu_fragment_memory_plan_packets(
       loom_amdgpu_matrix_fragment_role_layout(layout, plan->role);
   const bool scalar_b16_packets =
       loom_amdgpu_fragment_memory_role_uses_scalar_b16_packets(role_layout);
+  const bool load_packed_16bit_result =
+      plan->payload_form ==
+      LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_LOAD_PACKED_16BIT_RESULT;
   for (uint16_t register_index = 0; register_index < plan->register_count;) {
     loom_amdgpu_fragment_memory_packet_plan_t packet = {0};
     const bool selected =
         scalar_b16_packets
             ? loom_amdgpu_fragment_memory_select_low_subword_packet(
                   descriptor_set, plan, register_index, &packet)
-        : plan->store_conversion_kind ==
-                LOOM_AMDGPU_FRAGMENT_MEMORY_STORE_CONVERSION_NARROW_F32_TO_BF16
+        : load_packed_16bit_result
+            ? loom_amdgpu_fragment_memory_select_packed_16bit_result_load_packet(
+                  descriptor_set, plan, register_index, &packet)
+        : plan->payload_form ==
+                LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16
             ? loom_amdgpu_fragment_memory_select_narrowed_store_packet(
                   descriptor_set, layout, plan, register_index, &packet)
             : loom_amdgpu_fragment_memory_select_packet(
@@ -1895,19 +2014,17 @@ static iree_status_t loom_amdgpu_emit_fragment_memory_packed_16bit_packet(
           context, source_op, low_payload, plan->register_count, register_index,
           vgpr_type, out_packet);
     }
-    const uint16_t payload_register_count = (plan->register_count + 1u) / 2u;
     return loom_amdgpu_emit_fragment_memory_packed_16bit_lane(
-        context, source_op, low_payload, payload_register_count, register_index,
-        vgpr_type, out_packet);
+        context, source_op, low_payload, plan->payload_register_count,
+        register_index, vgpr_type, out_packet);
   }
 
   if (plan->narrowed_result_round_source == LOOM_VALUE_ID_INVALID) {
     loom_type_t packet_type = vgpr_type;
     IREE_RETURN_IF_ERROR(loom_amdgpu_fragment_memory_packet_type(
         context, packet_register_count, vgpr_type, &packet_type));
-    const uint16_t payload_register_count = (plan->register_count + 1u) / 2u;
     if (register_index == 0 &&
-        packet_register_count == payload_register_count) {
+        packet_register_count == plan->payload_register_count) {
       *out_packet = low_payload;
       return iree_ok_status();
     }
@@ -2377,6 +2494,46 @@ static iree_status_t loom_amdgpu_emit_fragment_memory_packed_b16_load_packet(
       high_element, vgpr_type, out_low_packet);
 }
 
+static iree_status_t
+loom_amdgpu_emit_fragment_memory_packed_16bit_result_load_packet(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_matrix_fragment_layout_t* layout,
+    const loom_amdgpu_fragment_memory_plan_t* plan,
+    const loom_amdgpu_fragment_memory_packet_plan_t* packet,
+    const loom_amdgpu_fragment_lane_ids_t* lane_ids,
+    loom_value_id_t low_address_resource, loom_value_id_t low_packet_resource,
+    loom_type_t vgpr_type, loom_value_id_t low_soffset,
+    loom_value_id_t* out_low_packet) {
+  *out_low_packet = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t low_elements[LOOM_AMDGPU_FRAGMENT_PACKED_B16_ELEMENT_COUNT] =
+      {0};
+  for (uint16_t i = 0; i < packet->result_register_count; ++i) {
+    loom_amdgpu_fragment_memory_address_t address;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_memory_vaddr(
+        context, source_op, layout, plan, packet->register_index + i,
+        /*element_index=*/0, packet->descriptor_ref, lane_ids,
+        low_address_resource, vgpr_type, &address));
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_load_packet(
+        context, source_op, plan, packet->descriptor_ref, vgpr_type, &address,
+        low_packet_resource, low_soffset, &low_elements[i]));
+    IREE_RETURN_IF_ERROR(
+        loom_amdgpu_emit_fragment_memory_low_subword_load_packet(
+            context, source_op, low_elements[i], vgpr_type, &low_elements[i]));
+  }
+  if (packet->result_register_count == 1) {
+    *out_low_packet = low_elements[0];
+    return iree_ok_status();
+  }
+
+  loom_value_id_t high_element = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_shift(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHLREV_B32_LIT, 16,
+      low_elements[1], vgpr_type, &high_element));
+  return loom_amdgpu_emit_vgpr_binary(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_OR_B32, low_elements[0],
+      high_element, vgpr_type, out_low_packet);
+}
+
 static iree_status_t loom_amdgpu_emit_fragment_memory_packed_b16_store_element(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t low_payload_register, uint16_t element_index,
@@ -2502,6 +2659,9 @@ iree_status_t loom_amdgpu_lower_vector_fragment_load(
       loom_amdgpu_fragment_memory_role_uses_low_subword(role_layout);
   const bool packed_b16_elements =
       loom_amdgpu_fragment_memory_role_uses_packed_b16_elements(role_layout);
+  const bool load_packed_16bit_result =
+      plan->payload_form ==
+      LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_LOAD_PACKED_16BIT_RESULT;
 
   loom_value_id_t low_resource = LOOM_VALUE_ID_INVALID;
   loom_value_id_t low_packet_resource = LOOM_VALUE_ID_INVALID;
@@ -2519,6 +2679,14 @@ iree_status_t loom_amdgpu_lower_vector_fragment_load(
        ++packet_index) {
     const loom_amdgpu_fragment_memory_packet_plan_t* packet =
         &plan->packets[packet_index];
+    if (load_packed_16bit_result) {
+      IREE_RETURN_IF_ERROR(
+          loom_amdgpu_emit_fragment_memory_packed_16bit_result_load_packet(
+              context, source_op, layout, plan, packet, &lane_ids, low_resource,
+              low_packet_resource, vgpr_type, low_soffset,
+              &low_packets[packet_index]));
+      continue;
+    }
     if (packed_b16_elements) {
       IREE_RETURN_IF_ERROR(
           loom_amdgpu_emit_fragment_memory_packed_b16_load_packet(
@@ -2551,7 +2719,7 @@ iree_status_t loom_amdgpu_lower_vector_fragment_load(
   }
   loom_type_t result_type = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_amdgpu_make_vgpr_range_type(
-      context, plan->register_count, &result_type));
+      context, plan->payload_register_count, &result_type));
   loom_op_t* concat_op = NULL;
   IREE_RETURN_IF_ERROR(loom_low_concat_build(
       loom_low_lower_context_builder(context), low_packets, plan->packet_count,
@@ -2591,8 +2759,8 @@ iree_status_t loom_amdgpu_lower_vector_fragment_store(
         context, source_op, plan, low_resource, &low_packet_resource,
         &low_soffset));
   }
-  if (plan->store_conversion_kind ==
-      LOOM_AMDGPU_FRAGMENT_MEMORY_STORE_CONVERSION_NARROW_F32_TO_BF16) {
+  if (plan->payload_form ==
+      LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16) {
     loom_value_id_t low_payload = LOOM_VALUE_ID_INVALID;
     if (plan->narrowed_result_round_source != LOOM_VALUE_ID_INVALID) {
       IREE_RETURN_IF_ERROR(loom_low_lower_lookup_value(
@@ -2645,8 +2813,8 @@ iree_status_t loom_amdgpu_lower_vector_fragment_store(
     const loom_amdgpu_fragment_memory_packet_plan_t* packet =
         &plan->packets[packet_index];
     loom_value_id_t low_payload_packet = low_payload;
-    if (plan->store_conversion_kind ==
-        LOOM_AMDGPU_FRAGMENT_MEMORY_STORE_CONVERSION_EXTEND_F16_TO_F32) {
+    if (plan->payload_form ==
+        LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_EXTEND_F16_TO_F32) {
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_memory_f16_to_f32_packet(
           context, source_op, plan, low_payload, packet, vgpr_type,
           &low_payload_packet));

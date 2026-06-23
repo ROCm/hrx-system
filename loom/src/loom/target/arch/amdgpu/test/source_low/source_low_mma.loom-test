@@ -507,6 +507,115 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @bf16_wmmar3_fragment_me
 
 // ====
 
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @bf16_result_fragment_load_to_f32_epilogue() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input_buffer: buffer, %out_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %input_view = buffer.view %input_buffer[%base] : buffer -> view<16x16xbf16, #dense>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xbf16, #dense>
+  %packed = vector.fragment.load<result> %input_view[0, 0] shape [%m, %n] : view<16x16xbf16, #dense> -> vector<8xbf16>
+  %wide = vector.extf %packed : vector<8xbf16> to vector<8xf32>
+  vector.fragment.store<result> %wide, %out_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xbf16, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(32, 1, 1) @bf16_result_fragment_load_to_f32_epilogue() asm<amdgpu.rdna3.core> {
+  %11 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
+  %out_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
+  %16 = v_lshlrev_b32_src0_inline %11, 1
+  %17 = global_load_d16_b16_saddr %16, %input_view
+  %18 = v_bfe_u32_offset_0_width_16_low16 %17
+  %20 = global_load_d16_b16_saddr %16, %input_view {offset = 64}
+  %21 = v_bfe_u32_offset_0_width_16_low16 %20
+  %22 = v_lshlrev_b32_src0_inline %21, 16
+  %23 = v_or_b32 %18, %22
+  %25 = global_load_d16_b16_saddr %16, %input_view {offset = 128}
+  %26 = v_bfe_u32_offset_0_width_16_low16 %25
+  %28 = global_load_d16_b16_saddr %16, %input_view {offset = 192}
+  %29 = v_bfe_u32_offset_0_width_16_low16 %28
+  %30 = v_lshlrev_b32_src0_inline %29, 16
+  %31 = v_or_b32 %26, %30
+  %33 = global_load_d16_b16_saddr %16, %input_view {offset = 256}
+  %34 = v_bfe_u32_offset_0_width_16_low16 %33
+  %36 = global_load_d16_b16_saddr %16, %input_view {offset = 320}
+  %37 = v_bfe_u32_offset_0_width_16_low16 %36
+  %38 = v_lshlrev_b32_src0_inline %37, 16
+  %39 = v_or_b32 %34, %38
+  %41 = global_load_d16_b16_saddr %16, %input_view {offset = 384}
+  %42 = v_bfe_u32_offset_0_width_16_low16 %41
+  %44 = global_load_d16_b16_saddr %16, %input_view {offset = 448}
+  %45 = v_bfe_u32_offset_0_width_16_low16 %44
+  %46 = v_lshlrev_b32_src0_inline %45, 16
+  %47 = v_or_b32 %42, %46
+  %50 = v_lshlrev_b32_src0_inline %23, 16
+  %52 = v_and_b32_lit %23, 4294901760
+  %54 = v_lshlrev_b32_src0_inline %31, 16
+  %56 = v_and_b32_lit %31, 4294901760
+  %58 = v_lshlrev_b32_src0_inline %39, 16
+  %60 = v_and_b32_lit %39, 4294901760
+  %62 = v_lshlrev_b32_src0_inline %47, 16
+  %64 = v_and_b32_lit %47, 4294901760
+  %69 = v_lshrrev_b32_src0_inline %50, 16
+  %70 = v_and_b32_src0_inline %69, 1
+  %71 = v_add_u32_lit %70, 32767
+  %72 = v_add_u32 %50, %71
+  %73 = v_lshrrev_b32_src0_inline %72, 16
+  global_store_short_saddr %16, %73, %out_view
+  %76 = v_lshrrev_b32_src0_inline %52, 16
+  %77 = v_and_b32_src0_inline %76, 1
+  %78 = v_add_u32_lit %77, 32767
+  %79 = v_add_u32 %52, %78
+  %80 = v_lshrrev_b32_src0_inline %79, 16
+  global_store_short_saddr %16, %80, %out_view {offset = 64}
+  %83 = v_lshrrev_b32_src0_inline %54, 16
+  %84 = v_and_b32_src0_inline %83, 1
+  %85 = v_add_u32_lit %84, 32767
+  %86 = v_add_u32 %54, %85
+  %87 = v_lshrrev_b32_src0_inline %86, 16
+  global_store_short_saddr %16, %87, %out_view {offset = 128}
+  %90 = v_lshrrev_b32_src0_inline %56, 16
+  %91 = v_and_b32_src0_inline %90, 1
+  %92 = v_add_u32_lit %91, 32767
+  %93 = v_add_u32 %56, %92
+  %94 = v_lshrrev_b32_src0_inline %93, 16
+  global_store_short_saddr %16, %94, %out_view {offset = 192}
+  %97 = v_lshrrev_b32_src0_inline %58, 16
+  %98 = v_and_b32_src0_inline %97, 1
+  %99 = v_add_u32_lit %98, 32767
+  %100 = v_add_u32 %58, %99
+  %101 = v_lshrrev_b32_src0_inline %100, 16
+  global_store_short_saddr %16, %101, %out_view {offset = 256}
+  %104 = v_lshrrev_b32_src0_inline %60, 16
+  %105 = v_and_b32_src0_inline %104, 1
+  %106 = v_add_u32_lit %105, 32767
+  %107 = v_add_u32 %60, %106
+  %108 = v_lshrrev_b32_src0_inline %107, 16
+  global_store_short_saddr %16, %108, %out_view {offset = 320}
+  %111 = v_lshrrev_b32_src0_inline %62, 16
+  %112 = v_and_b32_src0_inline %111, 1
+  %113 = v_add_u32_lit %112, 32767
+  %114 = v_add_u32 %62, %113
+  %115 = v_lshrrev_b32_src0_inline %114, 16
+  global_store_short_saddr %16, %115, %out_view {offset = 384}
+  %118 = v_lshrrev_b32_src0_inline %64, 16
+  %119 = v_and_b32_src0_inline %118, 1
+  %120 = v_add_u32_lit %119, 32767
+  %121 = v_add_u32 %64, %120
+  %122 = v_lshrrev_b32_src0_inline %121, 16
+  global_store_short_saddr %16, %122, %out_view {offset = 448}
+  return
+}
+
+// ====
+
 amdgpu.target<gfx1100> @target {subgroup_size = 64}
 
 kernel.def target(@target) @f16_wmmar3_wave64_fragment_memory() {
