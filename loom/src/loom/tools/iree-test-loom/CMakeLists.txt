@@ -18,8 +18,9 @@ loom_cc_library(
     "main.c"
   DEPS
     iree::base
+    iree::base::internal::path
     iree::base::tooling::flags
-    iree::io::file_handle
+    iree::io::stream
     loom::sanitizer::options
     loom::target::provider
     loom::tooling::cli::help

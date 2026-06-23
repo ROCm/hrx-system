@@ -108,8 +108,9 @@ loom_cc_library(
         "//loom/src/loom/util:json",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:path",
         "//runtime/src/iree/base/tooling:flags",
-        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/io:stream",
     ],
 )
 
