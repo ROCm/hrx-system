@@ -1088,18 +1088,24 @@ static bool loom_vector_to_scalar_mma_role_layouts_match(
          lhs->coordinate_flags == rhs->coordinate_flags;
 }
 
-static bool loom_vector_to_scalar_mma_result_layout_is_supported(
+bool loom_vector_to_scalar_result_fragment_layout_is_supported(
     const loom_matrix_fragment_layout_t* layout) {
+  if (layout == NULL) {
+    return false;
+  }
   const loom_matrix_fragment_role_layout_t* result = &layout->result;
   if (result->coordinate_flags != (LOOM_MATRIX_FRAGMENT_COORDINATE_ROW |
                                    LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN) ||
-      layout->tile_shape.result_column_count == 0) {
+      layout->tile_shape.result_column_count == 0 ||
+      result->register_count == 0) {
     return false;
   }
   switch (result->map_kind) {
     case LOOM_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN:
     case LOOM_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN_LOW_SUBWORD:
+      return layout->tile_shape.result_row_count % result->register_count == 0;
     case LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN:
+    case LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN_LOW_SUBWORD:
       return true;
     case LOOM_MATRIX_FRAGMENT_MAP_UNKNOWN:
     case LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_PACKED_REDUCTION:
@@ -1203,7 +1209,7 @@ static bool loom_vector_to_scalar_mma_distributed_static_is_supported(
   }
   if (!loom_vector_to_scalar_mma_role_layouts_match(&layout->accumulator,
                                                     &layout->result) ||
-      !loom_vector_to_scalar_mma_result_layout_is_supported(layout) ||
+      !loom_vector_to_scalar_result_fragment_layout_is_supported(layout) ||
       !loom_vector_to_scalar_mma_reduction_role_layout_is_supported(
           layout, &layout->lhs) ||
       !loom_vector_to_scalar_mma_reduction_role_layout_is_supported(
@@ -1214,9 +1220,10 @@ static bool loom_vector_to_scalar_mma_distributed_static_is_supported(
   return true;
 }
 
-static iree_status_t loom_vector_to_scalar_mma_build_result_coordinate_terms(
+iree_status_t loom_vector_to_scalar_build_result_fragment_coordinate_terms(
     loom_vector_to_scalar_state_t* state,
-    loom_vector_to_scalar_index_term_t lane_id, uint16_t register_index,
+    loom_vector_to_scalar_index_term_t lane_id,
+    loom_vector_to_scalar_index_term_t register_index,
     loom_vector_to_scalar_index_term_t* out_row,
     loom_vector_to_scalar_index_term_t* out_column) {
   const loom_matrix_fragment_layout_t* layout = state->matrix_fragment_layout;
@@ -1233,15 +1240,27 @@ static iree_status_t loom_vector_to_scalar_mma_build_result_coordinate_terms(
       &lane_group));
   switch (result_layout->map_kind) {
     case LOOM_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN: {
-      const loom_vector_to_scalar_index_term_t register_base =
-          loom_vector_to_scalar_static_term((int64_t)register_index * 2);
+      const loom_vector_to_scalar_index_term_t rows_per_register =
+          loom_vector_to_scalar_static_term(
+              layout->tile_shape.result_row_count /
+              result_layout->register_count);
+      loom_vector_to_scalar_index_term_t register_base = {0};
+      IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_term_binary(
+          state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_MUL, register_index,
+          rows_per_register, &register_base));
       return loom_vector_to_scalar_build_term_binary(
           state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_ADD, register_base,
           lane_group, out_row);
     }
     case LOOM_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN_LOW_SUBWORD: {
-      const loom_vector_to_scalar_index_term_t register_base =
-          loom_vector_to_scalar_static_term((int64_t)register_index * 2);
+      const loom_vector_to_scalar_index_term_t rows_per_register =
+          loom_vector_to_scalar_static_term(
+              layout->tile_shape.result_row_count /
+              result_layout->register_count);
+      loom_vector_to_scalar_index_term_t register_base = {0};
+      IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_term_binary(
+          state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_MUL, register_index,
+          rows_per_register, &register_base));
       return loom_vector_to_scalar_build_term_binary(
           state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_ADD, register_base,
           lane_group, out_row);
@@ -1253,11 +1272,20 @@ static iree_status_t loom_vector_to_scalar_mma_build_result_coordinate_terms(
       IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_term_binary(
           state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_MUL, lane_group,
           register_count, &group_base));
-      const loom_vector_to_scalar_index_term_t register_offset =
-          loom_vector_to_scalar_static_term(register_index);
       return loom_vector_to_scalar_build_term_binary(
           state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_ADD, group_base,
-          register_offset, out_row);
+          register_index, out_row);
+    }
+    case LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN_LOW_SUBWORD: {
+      const loom_vector_to_scalar_index_term_t register_count =
+          loom_vector_to_scalar_static_term(result_layout->register_count);
+      loom_vector_to_scalar_index_term_t group_base = {0};
+      IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_term_binary(
+          state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_MUL, lane_group,
+          register_count, &group_base));
+      return loom_vector_to_scalar_build_term_binary(
+          state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_ADD, group_base,
+          register_index, out_row);
     }
     case LOOM_MATRIX_FRAGMENT_MAP_UNKNOWN:
     case LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_PACKED_REDUCTION:
@@ -1389,8 +1417,10 @@ static iree_status_t loom_vector_to_scalar_mma_build_distributed_lane(
   const loom_matrix_fragment_layout_t* layout = state->matrix_fragment_layout;
   loom_vector_to_scalar_index_term_t row = {0};
   loom_vector_to_scalar_index_term_t column = {0};
-  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_build_result_coordinate_terms(
-      state, lane_id, register_index, &row, &column));
+  IREE_RETURN_IF_ERROR(
+      loom_vector_to_scalar_build_result_fragment_coordinate_terms(
+          state, lane_id, loom_vector_to_scalar_static_term(register_index),
+          &row, &column));
 
   loom_type_t accumulator_type =
       loom_type_scalar(loom_type_element_type(init->type));

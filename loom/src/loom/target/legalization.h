@@ -77,6 +77,12 @@ typedef enum loom_target_legalizer_strategy_e {
   LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE = 2,
 } loom_target_legalizer_strategy_t;
 
+enum loom_target_legalizer_entry_flag_bits_e {
+  // Calls this legalizer even when the target contract already accepts the op.
+  LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REWRITE_LEGAL = 1u << 0,
+};
+typedef uint32_t loom_target_legalizer_entry_flags_t;
+
 typedef struct loom_target_legalizer_result_t {
   // Outcome selected by the legalizer.
   loom_target_legalizer_action_t action;
@@ -132,6 +138,8 @@ typedef iree_status_t (*loom_target_legalizer_fn_t)(
     loom_target_legalizer_result_t* out_result);
 
 struct loom_target_legalizer_entry_t {
+  // Entry-specific behavior flags.
+  loom_target_legalizer_entry_flags_t flags;
   // Op kind this legalizer can rewrite.
   loom_op_kind_t root_kind;
   // Stable provider name attached while composing the dense registry.

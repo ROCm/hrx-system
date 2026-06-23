@@ -527,90 +527,29 @@ kernel.def target(@target) @bf16_result_fragment_load_to_f32_epilogue() {
 
 // ----
 low.kernel.def target(@target) workgroup_size(32, 1, 1) @bf16_result_fragment_load_to_f32_epilogue() asm<amdgpu.rdna3.core> {
-  %11 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %56 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %out_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
-  %16 = v_lshlrev_b32_src0_inline %11, 1
-  %17 = global_load_d16_b16_saddr %16, %input_view
-  %18 = v_bfe_u32_offset_0_width_16_low16 %17
-  %19 = global_load_d16_b16_saddr %16, %input_view {offset = 64}
-  %20 = v_bfe_u32_offset_0_width_16_low16 %19
-  %21 = v_lshlrev_b32_src0_inline %20, 16
-  %22 = v_or_b32 %18, %21
-  %23 = global_load_d16_b16_saddr %16, %input_view {offset = 128}
-  %24 = v_bfe_u32_offset_0_width_16_low16 %23
-  %25 = global_load_d16_b16_saddr %16, %input_view {offset = 192}
-  %26 = v_bfe_u32_offset_0_width_16_low16 %25
-  %27 = v_lshlrev_b32_src0_inline %26, 16
-  %28 = v_or_b32 %24, %27
-  %29 = global_load_d16_b16_saddr %16, %input_view {offset = 256}
-  %30 = v_bfe_u32_offset_0_width_16_low16 %29
-  %31 = global_load_d16_b16_saddr %16, %input_view {offset = 320}
-  %32 = v_bfe_u32_offset_0_width_16_low16 %31
-  %33 = v_lshlrev_b32_src0_inline %32, 16
-  %34 = v_or_b32 %30, %33
-  %35 = global_load_d16_b16_saddr %16, %input_view {offset = 384}
-  %36 = v_bfe_u32_offset_0_width_16_low16 %35
-  %37 = global_load_d16_b16_saddr %16, %input_view {offset = 448}
-  %38 = v_bfe_u32_offset_0_width_16_low16 %37
-  %39 = v_lshlrev_b32_src0_inline %38, 16
-  %40 = v_or_b32 %36, %39
-  %43 = v_lshlrev_b32_src0_inline %22, 16
-  %45 = v_and_b32_lit %22, 4294901760
-  %47 = v_lshlrev_b32_src0_inline %28, 16
-  %49 = v_and_b32_lit %28, 4294901760
-  %51 = v_lshlrev_b32_src0_inline %34, 16
-  %53 = v_and_b32_lit %34, 4294901760
-  %55 = v_lshlrev_b32_src0_inline %40, 16
-  %57 = v_and_b32_lit %40, 4294901760
-  %63 = v_lshrrev_b32_src0_inline %43, 16
-  %64 = v_and_b32_src0_inline %63, 1
-  %65 = v_add_u32_lit %64, 32767
-  %66 = v_add_u32 %43, %65
-  %67 = v_lshrrev_b32_src0_inline %66, 16
-  global_store_short_saddr %16, %67, %out_view
-  %69 = v_lshrrev_b32_src0_inline %45, 16
-  %70 = v_and_b32_src0_inline %69, 1
-  %71 = v_add_u32_lit %70, 32767
-  %72 = v_add_u32 %45, %71
-  %73 = v_lshrrev_b32_src0_inline %72, 16
-  global_store_short_saddr %16, %73, %out_view {offset = 64}
-  %75 = v_lshrrev_b32_src0_inline %47, 16
-  %76 = v_and_b32_src0_inline %75, 1
-  %77 = v_add_u32_lit %76, 32767
-  %78 = v_add_u32 %47, %77
-  %79 = v_lshrrev_b32_src0_inline %78, 16
-  global_store_short_saddr %16, %79, %out_view {offset = 128}
-  %81 = v_lshrrev_b32_src0_inline %49, 16
-  %82 = v_and_b32_src0_inline %81, 1
-  %83 = v_add_u32_lit %82, 32767
-  %84 = v_add_u32 %49, %83
-  %85 = v_lshrrev_b32_src0_inline %84, 16
-  global_store_short_saddr %16, %85, %out_view {offset = 192}
-  %87 = v_lshrrev_b32_src0_inline %51, 16
-  %88 = v_and_b32_src0_inline %87, 1
-  %89 = v_add_u32_lit %88, 32767
-  %90 = v_add_u32 %51, %89
-  %91 = v_lshrrev_b32_src0_inline %90, 16
-  global_store_short_saddr %16, %91, %out_view {offset = 256}
-  %93 = v_lshrrev_b32_src0_inline %53, 16
-  %94 = v_and_b32_src0_inline %93, 1
-  %95 = v_add_u32_lit %94, 32767
-  %96 = v_add_u32 %53, %95
-  %97 = v_lshrrev_b32_src0_inline %96, 16
-  global_store_short_saddr %16, %97, %out_view {offset = 320}
-  %99 = v_lshrrev_b32_src0_inline %55, 16
-  %100 = v_and_b32_src0_inline %99, 1
-  %101 = v_add_u32_lit %100, 32767
-  %102 = v_add_u32 %55, %101
-  %103 = v_lshrrev_b32_src0_inline %102, 16
-  global_store_short_saddr %16, %103, %out_view {offset = 384}
-  %105 = v_lshrrev_b32_src0_inline %57, 16
-  %106 = v_and_b32_src0_inline %105, 1
-  %107 = v_add_u32_lit %106, 32767
-  %108 = v_add_u32 %57, %107
-  %109 = v_lshrrev_b32_src0_inline %108, 16
-  global_store_short_saddr %16, %109, %out_view {offset = 448}
+  %59 = s_mov_b32 0
+  %60 = s_mov_b32 8
+  %61 = s_mov_b32 1
+  low.br ^_bb1(%59: reg<amdgpu.sgpr>)
+^_bb1(%55: reg<amdgpu.sgpr>):
+  %62 = s_cmp_lt_i32 %55, %60
+  low.cond_br %62, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+^_bb2:
+  %64 = v_mov_b32 15
+  %65 = v_and_b32 %56, %64
+  %66 = v_lshrrev_b32_lit %56, 4
+  %67 = v_lshl_add_u32_shift_imm %55, %66, 1
+  %68 = v_lshl_add_u32_shift_imm %67, %65, 4
+  %69 = v_lshlrev_b32_src0_inline %68, 1
+  %70 = global_load_d16_b16_saddr %69, %input_view
+  %71 = v_bfe_u32_offset_0_width_16_low16 %70
+  global_store_short_saddr %69, %71, %out_view
+  %73 = s_add_u32 %55, %61
+  low.br ^_bb1(%73: reg<amdgpu.sgpr>)
+^_bb3:
   return
 }
 

@@ -838,9 +838,31 @@ static bool loom_low_target_legalize_op_has_reference_legalizer(
   return false;
 }
 
+static bool loom_low_target_legalize_op_has_legal_rewrite_entry(
+    const loom_low_target_legalize_function_state_t* state,
+    loom_target_legalizer_op_entry_t op_entry) {
+  for (uint16_t i = 0; i < op_entry.entry_count; ++i) {
+    const loom_target_legalizer_entry_t* entry =
+        &state->legalizer_registry->entries[op_entry.entry_start + i];
+    if (state->legalization_context.policy ==
+            LOOM_TARGET_LEGALIZATION_POLICY_REFERENCE_ONLY &&
+        entry->provider_strategy == LOOM_TARGET_LEGALIZER_STRATEGY_TARGET) {
+      continue;
+    }
+    if (iree_any_bit_set(entry->flags,
+                         LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REWRITE_LEGAL)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 static bool loom_low_target_legalize_should_accept_legal_contract(
     const loom_low_target_legalize_function_state_t* state,
     loom_target_legalizer_op_entry_t op_entry) {
+  if (loom_low_target_legalize_op_has_legal_rewrite_entry(state, op_entry)) {
+    return false;
+  }
   return state->legalization_context.policy !=
              LOOM_TARGET_LEGALIZATION_POLICY_REFERENCE_ONLY ||
          !loom_low_target_legalize_op_has_reference_legalizer(

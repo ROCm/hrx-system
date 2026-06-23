@@ -189,6 +189,7 @@ loom_cc_library(
     "legalization.c"
   DEPS
     iree::base
+    loom::analysis::symbolic_expr
     loom::ir
     loom::ops::index
     loom::ops::kernel
@@ -196,9 +197,12 @@ loom_cc_library(
     loom::ops::scf
     loom::ops::vector
     loom::rewrite::rewriter
+    loom::target::arch::amdgpu::lower
     loom::target::arch::amdgpu::lower::kinds
+    loom::target::arch::amdgpu::matrix::contract
     loom::target::arch::amdgpu::target_info_defs
     loom::target::legalization
+    loom::transforms::vector::to_scalar
   PUBLIC
 )
 endif()

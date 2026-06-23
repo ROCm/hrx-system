@@ -210,6 +210,7 @@ loom_cc_library(
     srcs = ["legalization.c"],
     hdrs = ["legalization.h"],
     deps = [
+        "//loom/src/loom/analysis:symbolic_expr",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/kernel",
@@ -219,7 +220,10 @@ loom_cc_library(
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/target:legalization",
         "//loom/src/loom/target/arch/amdgpu:target_info_defs",
+        "//loom/src/loom/target/arch/amdgpu/lower",
         "//loom/src/loom/target/arch/amdgpu/lower:kinds",
+        "//loom/src/loom/target/arch/amdgpu/matrix:contract",
+        "//loom/src/loom/transforms/vector:to_scalar",
         "//runtime/src/iree/base",
     ],
 )

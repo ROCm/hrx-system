@@ -9,6 +9,7 @@
 #include "loom/ir/module.h"
 #include "loom/ir/scalar_type.h"
 #include "loom/ops/index/ops.h"
+#include "loom/ops/kernel/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
@@ -224,6 +225,79 @@ iree_status_t loom_vector_to_scalar_cast_integer_lane(
                                                  state->location, &cast_op));
   *out_result = loom_scalar_bitcast_result(cast_op);
   return iree_ok_status();
+}
+
+static iree_status_t loom_vector_to_scalar_cast_float_lane(
+    loom_vector_to_scalar_state_t* state, loom_value_id_t input,
+    loom_type_t input_type, loom_type_t result_type,
+    loom_value_id_t* out_result) {
+  if (loom_type_equal(input_type, result_type)) {
+    *out_result = input;
+    return iree_ok_status();
+  }
+  const int32_t input_width =
+      loom_scalar_type_bitwidth(loom_type_element_type(input_type));
+  const int32_t result_width =
+      loom_scalar_type_bitwidth(loom_type_element_type(result_type));
+  if (input_width <= 0 || result_width <= 0 || input_width == result_width) {
+    return iree_make_status(IREE_STATUS_INTERNAL,
+                            "unsupported vector-to-scalar float lane cast");
+  }
+  loom_op_t* cast_op = NULL;
+  if (input_width < result_width) {
+    IREE_RETURN_IF_ERROR(loom_scalar_extf_build(&state->rewriter->builder,
+                                                input, input_type, result_type,
+                                                state->location, &cast_op));
+    *out_result = loom_scalar_extf_result(cast_op);
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(loom_scalar_fptrunc_build(&state->rewriter->builder,
+                                                 input, input_type, result_type,
+                                                 state->location, &cast_op));
+  *out_result = loom_scalar_fptrunc_result(cast_op);
+  return iree_ok_status();
+}
+
+iree_status_t loom_vector_to_scalar_cast_numeric_lane(
+    loom_vector_to_scalar_state_t* state, loom_value_id_t input,
+    loom_type_t input_type, loom_type_t result_type, bool unsigned_input,
+    loom_value_id_t* out_result) {
+  if (loom_type_equal(input_type, result_type)) {
+    *out_result = input;
+    return iree_ok_status();
+  }
+  const loom_scalar_type_t input_scalar_type =
+      loom_type_element_type(input_type);
+  const loom_scalar_type_t result_scalar_type =
+      loom_type_element_type(result_type);
+  if (loom_scalar_type_is_float(input_scalar_type) &&
+      loom_scalar_type_is_float(result_scalar_type)) {
+    return loom_vector_to_scalar_cast_float_lane(state, input, input_type,
+                                                 result_type, out_result);
+  }
+  if (loom_scalar_type_is_integer(input_scalar_type) &&
+      loom_scalar_type_is_integer(result_scalar_type)) {
+    return loom_vector_to_scalar_cast_integer_lane(
+        state, input, input_type, result_type, !unsigned_input, out_result);
+  }
+  if (loom_scalar_type_is_integer(input_scalar_type) &&
+      loom_scalar_type_is_float(result_scalar_type)) {
+    loom_op_t* cast_op = NULL;
+    if (unsigned_input) {
+      IREE_RETURN_IF_ERROR(
+          loom_scalar_uitofp_build(&state->rewriter->builder, input, input_type,
+                                   result_type, state->location, &cast_op));
+      *out_result = loom_scalar_uitofp_result(cast_op);
+      return iree_ok_status();
+    }
+    IREE_RETURN_IF_ERROR(
+        loom_scalar_sitofp_build(&state->rewriter->builder, input, input_type,
+                                 result_type, state->location, &cast_op));
+    *out_result = loom_scalar_sitofp_result(cast_op);
+    return iree_ok_status();
+  }
+  return iree_make_status(IREE_STATUS_INTERNAL,
+                          "unsupported vector-to-scalar numeric lane cast");
 }
 
 static bool loom_vector_to_scalar_lookup_cached_static_integer_lane(
@@ -673,6 +747,55 @@ static bool loom_vector_to_scalar_try_from_elements_lane(
   return true;
 }
 
+static iree_status_t
+loom_vector_to_scalar_try_physical_result_fragment_load_lane(
+    loom_vector_to_scalar_state_t* state, loom_op_t* def_op,
+    loom_type_t vector_type, loom_vector_to_scalar_index_list_t indices,
+    bool* out_materialized, loom_value_id_t* out_lane) {
+  *out_materialized = false;
+  if (!loom_vector_fragment_load_isa(def_op) ||
+      loom_vector_fragment_load_role(def_op) != LOOM_VECTOR_ROLE_RESULT ||
+      indices.rank != 1 ||
+      !loom_vector_to_scalar_result_fragment_layout_is_supported(
+          state->matrix_fragment_layout)) {
+    return iree_ok_status();
+  }
+
+  loom_vector_to_scalar_state_t def_state = {
+      .pass = state->pass,
+      .statistics = state->statistics,
+      .rewriter = state->rewriter,
+      .op = def_op,
+      .value_checkpoint = state->value_checkpoint,
+      .vector_type = vector_type,
+      .result_scalar_type = loom_vector_to_scalar_lane_type(vector_type),
+      .matrix_fragment_layout = state->matrix_fragment_layout,
+      .location = def_op->location,
+  };
+
+  loom_op_t* lane_id_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_kernel_subgroup_lane_id_build(
+      &state->rewriter->builder, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
+      state->location, &lane_id_op));
+  const loom_vector_to_scalar_index_term_t lane_id =
+      loom_vector_to_scalar_dynamic_term(
+          loom_kernel_subgroup_lane_id_result(lane_id_op));
+  const loom_vector_to_scalar_index_term_t register_index =
+      loom_vector_to_scalar_lane_term(&def_state, indices, 0);
+
+  loom_vector_to_scalar_index_term_t terms[2] = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_vector_to_scalar_build_result_fragment_coordinate_terms(
+          &def_state, lane_id, register_index, &terms[0], &terms[1]));
+  loom_vector_to_scalar_index_list_t logical_indices = {0};
+  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_terms_to_index_list(
+      &def_state, terms, IREE_ARRAYSIZE(terms), &logical_indices));
+  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_load_lane(
+      &def_state, logical_indices, out_lane));
+  *out_materialized = true;
+  return iree_ok_status();
+}
+
 iree_status_t loom_vector_to_scalar_try_materialize_def_lane(
     loom_vector_to_scalar_state_t* state, loom_value_id_t value,
     loom_type_t vector_type, loom_vector_to_scalar_index_list_t indices,
@@ -711,6 +834,7 @@ iree_status_t loom_vector_to_scalar_try_materialize_def_lane(
         .value_checkpoint = state->value_checkpoint,
         .vector_type = vector_type,
         .result_scalar_type = loom_vector_to_scalar_lane_type(vector_type),
+        .matrix_fragment_layout = state->matrix_fragment_layout,
         .location = def_op->location,
     };
     IREE_RETURN_IF_ERROR(
@@ -727,6 +851,7 @@ iree_status_t loom_vector_to_scalar_try_materialize_def_lane(
         .value_checkpoint = state->value_checkpoint,
         .vector_type = vector_type,
         .result_scalar_type = loom_vector_to_scalar_lane_type(vector_type),
+        .matrix_fragment_layout = state->matrix_fragment_layout,
         .location = def_op->location,
     };
     IREE_RETURN_IF_ERROR(
@@ -735,6 +860,12 @@ iree_status_t loom_vector_to_scalar_try_materialize_def_lane(
     return iree_ok_status();
   }
   if (loom_vector_fragment_load_isa(def_op)) {
+    IREE_RETURN_IF_ERROR(
+        loom_vector_to_scalar_try_physical_result_fragment_load_lane(
+            state, def_op, vector_type, indices, out_materialized, out_lane));
+    if (*out_materialized) {
+      return iree_ok_status();
+    }
     if (indices.rank != 2) {
       return iree_ok_status();
     }
@@ -746,6 +877,7 @@ iree_status_t loom_vector_to_scalar_try_materialize_def_lane(
         .value_checkpoint = state->value_checkpoint,
         .vector_type = vector_type,
         .result_scalar_type = loom_vector_to_scalar_lane_type(vector_type),
+        .matrix_fragment_layout = state->matrix_fragment_layout,
         .location = def_op->location,
     };
     IREE_RETURN_IF_ERROR(
@@ -778,6 +910,7 @@ iree_status_t loom_vector_to_scalar_try_materialize_def_lane(
       .result_scalar_type = descriptor->result_is_i1
                                 ? loom_type_scalar(LOOM_SCALAR_TYPE_I1)
                                 : loom_vector_to_scalar_lane_type(result_type),
+      .matrix_fragment_layout = state->matrix_fragment_layout,
       .location = def_op->location,
   };
   IREE_RETURN_IF_ERROR(

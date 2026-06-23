@@ -1853,21 +1853,24 @@ loom_amdgpu_fragment_memory_feature_bits_from_target_ref(
   return feature_bits;
 }
 
-static iree_status_t loom_amdgpu_fragment_memory_select(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
+iree_status_t loom_amdgpu_analyze_vector_fragment_memory_plan(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    const loom_target_bundle_t* bundle,
+    const loom_low_descriptor_set_t* descriptor_set,
+    loom_symbol_ref_t target_ref, loom_func_like_t source_function,
+    const loom_op_t* source_op,
     loom_amdgpu_memory_operation_kind_t operation_kind,
     loom_amdgpu_fragment_memory_plan_t* out_plan, bool* out_selected) {
   *out_plan = (loom_amdgpu_fragment_memory_plan_t){0};
   *out_selected = false;
-  const loom_module_t* module = loom_low_lower_context_module(context);
   const loom_amdgpu_fragment_memory_environment_t environment = {
       .module = module,
-      .fact_table = loom_low_lower_context_fact_table(context),
-      .bundle = loom_low_lower_context_bundle(context),
-      .descriptor_set = loom_low_lower_context_descriptor_set(context),
+      .fact_table = fact_table,
+      .bundle = bundle,
+      .descriptor_set = descriptor_set,
       .feature_bits = loom_amdgpu_fragment_memory_feature_bits_from_target_ref(
-          module, loom_low_lower_context_target_ref(context)),
-      .source_function = loom_low_lower_context_source_function(context),
+          module, target_ref),
+      .source_function = source_function,
   };
   loom_amdgpu_fragment_memory_source_t source = {0};
   loom_amdgpu_fragment_memory_source_from_op(source_op, operation_kind,
@@ -1886,6 +1889,20 @@ static iree_status_t loom_amdgpu_fragment_memory_select(
   }
   *out_selected = true;
   return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_fragment_memory_select(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_amdgpu_memory_operation_kind_t operation_kind,
+    loom_amdgpu_fragment_memory_plan_t* out_plan, bool* out_selected) {
+  const loom_module_t* module = loom_low_lower_context_module(context);
+  return loom_amdgpu_analyze_vector_fragment_memory_plan(
+      module, loom_low_lower_context_fact_table(context),
+      loom_low_lower_context_bundle(context),
+      loom_low_lower_context_descriptor_set(context),
+      loom_low_lower_context_target_ref(context),
+      loom_low_lower_context_source_function(context), source_op,
+      operation_kind, out_plan, out_selected);
 }
 
 iree_status_t loom_amdgpu_select_vector_fragment_load_plan(

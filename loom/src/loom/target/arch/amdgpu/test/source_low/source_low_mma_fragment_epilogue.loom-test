@@ -1,0 +1,82 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1100> @target
+kernel.def target(@target) @bf16_result_fragment_epilogue_two_tiles() {
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%gate: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %sixteen = index.constant 16 : index
+  %thirty_two = index.constant 32 : index
+  %token_tile = kernel.workgroup.id<x> : index
+  %row_pair = kernel.workgroup.id<y> : index
+  %token_origin = index.mul %token_tile, %sixteen : index
+  %row_origin0 = index.mul %row_pair, %thirty_two : index
+  %row_origin1 = index.add %row_origin0, %sixteen : index
+  %gate_global = buffer.assume.memory_space<global> %gate : buffer
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %gate_noalias, %output_noalias = buffer.assume.noalias %gate_global, %output_global : buffer, buffer
+  %gate_aligned = buffer.assume.alignment %gate_noalias {minimum_alignment = 16} : buffer
+  %output_aligned = buffer.assume.alignment %output_noalias {minimum_alignment = 16} : buffer
+  %gate_view = buffer.view %gate_aligned[%base] : buffer -> view<64x64xbf16, #dense>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<64x64xbf16, #dense>
+  %gate0_bf16 = vector.fragment.load<result> %gate_view[%token_origin, %row_origin0] shape [%sixteen, %sixteen] : view<64x64xbf16, #dense> -> vector<8xbf16>
+  %gate1_bf16 = vector.fragment.load<result> %gate_view[%token_origin, %row_origin1] shape [%sixteen, %sixteen] : view<64x64xbf16, #dense> -> vector<8xbf16>
+  %gate0 = vector.extf %gate0_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate1 = vector.extf %gate1_bf16 : vector<8xbf16> to vector<8xf32>
+  %scale = vector.constant 2.0 : vector<8xf32>
+  %product0 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate0, %scale : vector<8xf32>
+  %product1 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate1, %scale : vector<8xf32>
+  vector.fragment.store<result> %product0, %output_view[%token_origin, %row_origin0] shape [%sixteen, %sixteen] : vector<8xf32>, view<64x64xbf16, #dense>
+  vector.fragment.store<result> %product1, %output_view[%token_origin, %row_origin1] shape [%sixteen, %sixteen] : vector<8xf32>, view<64x64xbf16, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(32, 1, 1) @bf16_result_fragment_epilogue_two_tiles() asm<amdgpu.rdna3.core> {
+  %117 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %gate_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 8192} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 8192} : reg<amdgpu.sgpr x2>
+  %120 = s_mov_b32 0
+  %121 = s_mov_b32 8
+  %122 = s_mov_b32 1
+  low.br ^_bb1(%120: reg<amdgpu.sgpr>)
+^_bb1(%116: reg<amdgpu.sgpr>):
+  %123 = s_cmp_lt_i32 %116, %121
+  low.cond_br %123, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+^_bb2:
+  %125 = v_mov_b32 15
+  %126 = v_and_b32 %117, %125
+  %127 = v_lshrrev_b32_lit %117, 4
+  %128 = v_lshl_add_u32_shift_imm %116, %127, 1
+  %129 = v_lshl_add_u32_shift_imm %128, %126, 6
+  %130 = v_lshlrev_b32_src0_inline %129, 1
+  %131 = global_load_d16_b16_saddr %130, %gate_view
+  %132 = v_lshlrev_b32_src0_16_low16 %131
+  %133 = v_mul_f32_src0_inline %132, 1073741824
+  %134 = v_lshrrev_b32_lit %133, 16
+  %135 = v_and_b32_lit %134, 1
+  %136 = v_add_u32_lit %135, 32767
+  %137 = v_add_u32 %133, %136
+  %138 = v_lshrrev_b32_lit %137, 16
+  global_store_short_saddr %130, %138, %output_view
+  %141 = v_mov_b32 16
+  %142 = v_add_u32 %141, %126
+  %143 = v_lshl_add_u32_shift_imm %128, %142, 6
+  %144 = v_lshlrev_b32_src0_inline %143, 1
+  %145 = global_load_d16_b16_saddr %144, %gate_view
+  %146 = v_lshlrev_b32_src0_16_low16 %145
+  %147 = v_mul_f32_src0_inline %146, 1073741824
+  %148 = v_lshrrev_b32_lit %147, 16
+  %149 = v_and_b32_lit %148, 1
+  %150 = v_add_u32_lit %149, 32767
+  %151 = v_add_u32 %147, %150
+  %152 = v_lshrrev_b32_lit %151, 16
+  global_store_short_saddr %144, %152, %output_view
+  %154 = s_add_u32 %116, %122
+  low.br ^_bb1(%154: reg<amdgpu.sgpr>)
+^_bb3:
+  return
+}

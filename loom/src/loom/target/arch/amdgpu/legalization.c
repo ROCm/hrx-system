@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "loom/analysis/symbolic_expr.h"
 #include "loom/ir/module.h"
 #include "loom/ir/scalar_type.h"
 #include "loom/ops/index/ops.h"
@@ -17,7 +18,10 @@
 #include "loom/ops/vector/memory.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/target/arch/amdgpu/lower/kinds.h"
+#include "loom/target/arch/amdgpu/lower/matrix_fragment.h"
+#include "loom/target/arch/amdgpu/matrix/contract.h"
 #include "loom/target/arch/amdgpu/target_info_defs.h"
+#include "loom/transforms/vector/to_scalar.h"
 
 static bool loom_amdgpu_legalizer_descriptor_set_is_amdgpu(
     const loom_low_descriptor_set_t* descriptor_set) {
@@ -988,6 +992,387 @@ static iree_status_t loom_amdgpu_vector_packet_erase_dead_sources(
   return iree_ok_status();
 }
 
+static bool loom_amdgpu_fragment_epilogue_plan_needs_physical_loop(
+    const loom_amdgpu_fragment_memory_plan_t* plan) {
+  if (plan->operation_kind != LOOM_AMDGPU_MEMORY_OPERATION_STORE ||
+      plan->role != LOOM_CONTRACT_OPERAND_ROLE_RESULT ||
+      plan->register_count <= 1 || plan->packet_count == 0) {
+    return false;
+  }
+  switch (plan->payload_form) {
+    case LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16:
+    case LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_EXTEND_F16_TO_F32:
+      break;
+    case LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_NATIVE:
+    case LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_LOAD_PACKED_16BIT_RESULT:
+    default:
+      return false;
+  }
+  for (uint16_t i = 0; i < plan->packet_count; ++i) {
+    if (plan->packets[i].result_register_count != 1) {
+      return false;
+    }
+  }
+  return true;
+}
+
+enum {
+  LOOM_AMDGPU_FRAGMENT_EPILOGUE_LOOP_MIN_REGISTER_ITERATIONS = 8,
+};
+
+static bool loom_amdgpu_fragment_epilogue_group_wants_physical_loop(
+    const loom_amdgpu_fragment_memory_plan_t* plan,
+    iree_host_size_t group_count) {
+  return plan->register_count * group_count >=
+         LOOM_AMDGPU_FRAGMENT_EPILOGUE_LOOP_MIN_REGISTER_ITERATIONS;
+}
+
+typedef struct loom_amdgpu_fragment_store_rectangle_t {
+  // Destination view value for the fragment store.
+  loom_value_id_t view;
+  // Symbolic inclusive begin coordinates for the rank-2 logical footprint.
+  loom_symbolic_expr_t begin[2];
+  // Symbolic exclusive end coordinates for the rank-2 logical footprint.
+  loom_symbolic_expr_t end[2];
+} loom_amdgpu_fragment_store_rectangle_t;
+
+static iree_status_t loom_amdgpu_fragment_store_origin_expression(
+    loom_symbolic_expr_context_t* expression_context,
+    loom_attribute_t static_indices, loom_value_slice_t dynamic_indices,
+    uint8_t axis, uint16_t* dynamic_index_ordinal,
+    loom_symbolic_expr_t* out_expression, bool* out_selected) {
+  *out_selected = false;
+  if (static_indices.kind != LOOM_ATTR_I64_ARRAY ||
+      axis >= static_indices.count) {
+    return iree_ok_status();
+  }
+  const int64_t static_index = static_indices.i64_array[axis];
+  if (static_index == INT64_MIN) {
+    if (*dynamic_index_ordinal >= dynamic_indices.count) {
+      return iree_ok_status();
+    }
+    IREE_RETURN_IF_ERROR(loom_symbolic_expr_from_value(
+        expression_context, dynamic_indices.values[*dynamic_index_ordinal],
+        out_expression));
+    ++*dynamic_index_ordinal;
+  } else {
+    loom_symbolic_expr_constant(static_index, out_expression);
+  }
+  *out_selected = true;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_fragment_store_rectangle_from_op(
+    loom_symbolic_expr_context_t* expression_context, const loom_op_t* op,
+    loom_amdgpu_fragment_store_rectangle_t* out_rectangle, bool* out_selected) {
+  *out_selected = false;
+  if (!loom_vector_fragment_store_isa(op)) {
+    return iree_ok_status();
+  }
+  loom_attribute_t static_indices =
+      loom_vector_fragment_store_static_indices(op);
+  loom_value_slice_t dynamic_indices = loom_vector_fragment_store_indices(op);
+  if (static_indices.kind != LOOM_ATTR_I64_ARRAY ||
+      static_indices.count != IREE_ARRAYSIZE(out_rectangle->begin)) {
+    return iree_ok_status();
+  }
+
+  loom_value_id_t extents[2] = {
+      loom_vector_fragment_store_rows(op),
+      loom_vector_fragment_store_columns(op),
+  };
+  *out_rectangle = (loom_amdgpu_fragment_store_rectangle_t){
+      .view = loom_vector_fragment_store_view(op),
+  };
+  uint16_t dynamic_index_ordinal = 0;
+  for (uint8_t axis = 0; axis < IREE_ARRAYSIZE(out_rectangle->begin); ++axis) {
+    bool selected = false;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_fragment_store_origin_expression(
+        expression_context, static_indices, dynamic_indices, axis,
+        &dynamic_index_ordinal, &out_rectangle->begin[axis], &selected));
+    if (!selected) {
+      return iree_ok_status();
+    }
+    loom_symbolic_expr_t extent = {0};
+    IREE_RETURN_IF_ERROR(loom_symbolic_expr_from_value(expression_context,
+                                                       extents[axis], &extent));
+    IREE_RETURN_IF_ERROR(
+        loom_symbolic_expr_add(expression_context, &out_rectangle->begin[axis],
+                               &extent, &out_rectangle->end[axis]));
+  }
+  if (dynamic_index_ordinal != dynamic_indices.count) {
+    return iree_ok_status();
+  }
+  *out_selected = true;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_fragment_store_rectangles_are_disjoint(
+    loom_symbolic_expr_context_t* expression_context,
+    const loom_amdgpu_fragment_store_rectangle_t* left,
+    const loom_amdgpu_fragment_store_rectangle_t* right, bool* out_disjoint) {
+  *out_disjoint = false;
+  if (left->view != right->view) {
+    return iree_ok_status();
+  }
+  for (uint8_t axis = 0; axis < IREE_ARRAYSIZE(left->begin); ++axis) {
+    loom_symbolic_proof_result_t result = LOOM_SYMBOLIC_PROOF_UNKNOWN;
+    IREE_RETURN_IF_ERROR(loom_symbolic_expr_prove_le(
+        expression_context, &left->end[axis], &right->begin[axis], &result));
+    if (result == LOOM_SYMBOLIC_PROOF_TRUE) {
+      *out_disjoint = true;
+      return iree_ok_status();
+    }
+    IREE_RETURN_IF_ERROR(loom_symbolic_expr_prove_le(
+        expression_context, &right->end[axis], &left->begin[axis], &result));
+    if (result == LOOM_SYMBOLIC_PROOF_TRUE) {
+      *out_disjoint = true;
+      return iree_ok_status();
+    }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_fragment_store_group_reserve(
+    loom_target_legalization_context_t* context, loom_op_t*** group_ops,
+    loom_amdgpu_fragment_store_rectangle_t** rectangles,
+    iree_host_size_t current_count, iree_host_size_t* capacity,
+    iree_host_size_t minimum_capacity) {
+  if (minimum_capacity <= *capacity) {
+    return iree_ok_status();
+  }
+  iree_host_size_t new_capacity = *capacity * 2;
+  if (new_capacity < minimum_capacity) {
+    new_capacity = minimum_capacity;
+  }
+  loom_op_t** new_group_ops = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(context->arena, new_capacity,
+                                                 sizeof(*new_group_ops),
+                                                 (void**)&new_group_ops));
+  loom_amdgpu_fragment_store_rectangle_t* new_rectangles = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(context->arena, new_capacity,
+                                                 sizeof(*new_rectangles),
+                                                 (void**)&new_rectangles));
+  memcpy(new_group_ops, *group_ops, current_count * sizeof(*new_group_ops));
+  memcpy(new_rectangles, *rectangles, current_count * sizeof(*new_rectangles));
+  *group_ops = new_group_ops;
+  *rectangles = new_rectangles;
+  *capacity = new_capacity;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_fragment_store_plan_can_join_group(
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_amdgpu_matrix_fragment_layout_kind_t layout_kind,
+    uint16_t register_count, loom_amdgpu_fragment_memory_plan_t* out_plan,
+    bool* out_selected) {
+  *out_selected = false;
+  bool selected = false;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_analyze_vector_fragment_memory_plan(
+      context->module, context->fact_table, context->bundle,
+      context->descriptor_set, context->target_ref, context->function, op,
+      LOOM_AMDGPU_MEMORY_OPERATION_STORE, out_plan, &selected));
+  if (!selected ||
+      !loom_amdgpu_fragment_epilogue_plan_needs_physical_loop(out_plan) ||
+      out_plan->view_rank != 2 || out_plan->layout_kind != layout_kind ||
+      out_plan->register_count != register_count) {
+    return iree_ok_status();
+  }
+  *out_selected = true;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_collect_fragment_store_epilogue_group(
+    loom_target_legalization_context_t* context, loom_op_t* current_op,
+    const loom_amdgpu_fragment_memory_plan_t* first_plan,
+    loom_op_t*** out_group_ops, iree_host_size_t* out_group_count) {
+  *out_group_ops = NULL;
+  *out_group_count = 0;
+
+  loom_op_t* local_ops[8] = {0};
+  loom_amdgpu_fragment_store_rectangle_t local_rectangles[8] = {0};
+  loom_op_t** group_ops = local_ops;
+  loom_amdgpu_fragment_store_rectangle_t* rectangles = local_rectangles;
+  iree_host_size_t group_count = 1;
+  iree_host_size_t capacity = IREE_ARRAYSIZE(local_ops);
+  group_ops[0] = current_op;
+
+  bool selected = false;
+  loom_amdgpu_fragment_memory_plan_t neighbor_plan = {0};
+  if (current_op->prev_op != NULL) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_fragment_store_plan_can_join_group(
+        context, current_op->prev_op, first_plan->layout_kind,
+        first_plan->register_count, &neighbor_plan, &selected));
+  }
+  if (!selected && current_op->next_op != NULL) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_fragment_store_plan_can_join_group(
+        context, current_op->next_op, first_plan->layout_kind,
+        first_plan->register_count, &neighbor_plan, &selected));
+  }
+  if (!selected) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(context->arena, group_count,
+                                                   sizeof(*group_ops),
+                                                   (void**)out_group_ops));
+    (*out_group_ops)[0] = current_op;
+    *out_group_count = group_count;
+    return iree_ok_status();
+  }
+
+  loom_symbolic_expr_context_t expression_context = {0};
+  loom_symbolic_expr_context_initialize(context->module, context->fact_table,
+                                        context->arena, &expression_context);
+  IREE_RETURN_IF_ERROR(loom_amdgpu_fragment_store_rectangle_from_op(
+      &expression_context, current_op, &rectangles[0], &selected));
+  if (!selected) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(context->arena, group_count,
+                                                   sizeof(*group_ops),
+                                                   (void**)out_group_ops));
+    (*out_group_ops)[0] = current_op;
+    *out_group_count = group_count;
+    return iree_ok_status();
+  }
+
+  for (loom_op_t* candidate = current_op->prev_op; candidate != NULL;
+       candidate = candidate->prev_op) {
+    loom_amdgpu_fragment_memory_plan_t candidate_plan = {0};
+    IREE_RETURN_IF_ERROR(loom_amdgpu_fragment_store_plan_can_join_group(
+        context, candidate, first_plan->layout_kind, first_plan->register_count,
+        &candidate_plan, &selected));
+    if (!selected) {
+      break;
+    }
+
+    loom_amdgpu_fragment_store_rectangle_t candidate_rectangle = {0};
+    IREE_RETURN_IF_ERROR(loom_amdgpu_fragment_store_rectangle_from_op(
+        &expression_context, candidate, &candidate_rectangle, &selected));
+    if (!selected) {
+      break;
+    }
+
+    for (iree_host_size_t i = 0; i < group_count; ++i) {
+      bool disjoint = false;
+      IREE_RETURN_IF_ERROR(loom_amdgpu_fragment_store_rectangles_are_disjoint(
+          &expression_context, &rectangles[i], &candidate_rectangle,
+          &disjoint));
+      if (!disjoint) {
+        selected = false;
+        break;
+      }
+    }
+    if (!selected) {
+      break;
+    }
+
+    IREE_RETURN_IF_ERROR(loom_amdgpu_fragment_store_group_reserve(
+        context, &group_ops, &rectangles, group_count, &capacity,
+        group_count + 1));
+    memmove(&group_ops[1], group_ops, group_count * sizeof(*group_ops));
+    memmove(&rectangles[1], rectangles, group_count * sizeof(*rectangles));
+    group_ops[0] = candidate;
+    rectangles[0] = candidate_rectangle;
+    ++group_count;
+  }
+
+  for (loom_op_t* candidate = current_op->next_op; candidate != NULL;
+       candidate = candidate->next_op) {
+    loom_amdgpu_fragment_memory_plan_t candidate_plan = {0};
+    IREE_RETURN_IF_ERROR(loom_amdgpu_fragment_store_plan_can_join_group(
+        context, candidate, first_plan->layout_kind, first_plan->register_count,
+        &candidate_plan, &selected));
+    if (!selected) {
+      break;
+    }
+
+    loom_amdgpu_fragment_store_rectangle_t candidate_rectangle = {0};
+    IREE_RETURN_IF_ERROR(loom_amdgpu_fragment_store_rectangle_from_op(
+        &expression_context, candidate, &candidate_rectangle, &selected));
+    if (!selected) {
+      break;
+    }
+
+    for (iree_host_size_t i = 0; i < group_count; ++i) {
+      bool disjoint = false;
+      IREE_RETURN_IF_ERROR(loom_amdgpu_fragment_store_rectangles_are_disjoint(
+          &expression_context, &rectangles[i], &candidate_rectangle,
+          &disjoint));
+      if (!disjoint) {
+        selected = false;
+        break;
+      }
+    }
+    if (!selected) {
+      break;
+    }
+
+    IREE_RETURN_IF_ERROR(loom_amdgpu_fragment_store_group_reserve(
+        context, &group_ops, &rectangles, group_count, &capacity,
+        group_count + 1));
+    group_ops[group_count] = candidate;
+    rectangles[group_count] = candidate_rectangle;
+    ++group_count;
+  }
+
+  if (group_ops == local_ops) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(context->arena, group_count,
+                                                   sizeof(*group_ops),
+                                                   (void**)out_group_ops));
+    memcpy(*out_group_ops, group_ops, group_count * sizeof(*group_ops));
+  } else {
+    *out_group_ops = group_ops;
+  }
+  *out_group_count = group_count;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_legalize_result_fragment_store_epilogue_loop(
+    const loom_target_legalizer_entry_t* entry,
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_target_legalizer_result_t* out_result) {
+  (void)entry;
+  *out_result = (loom_target_legalizer_result_t){
+      .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
+  };
+  if (!loom_amdgpu_legalizer_descriptor_set_is_amdgpu(
+          context->descriptor_set)) {
+    return iree_ok_status();
+  }
+
+  loom_amdgpu_fragment_memory_plan_t plan = {0};
+  bool selected = false;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_analyze_vector_fragment_memory_plan(
+      context->module, context->fact_table, context->bundle,
+      context->descriptor_set, context->target_ref, context->function, op,
+      LOOM_AMDGPU_MEMORY_OPERATION_STORE, &plan, &selected));
+  if (!selected ||
+      !loom_amdgpu_fragment_epilogue_plan_needs_physical_loop(&plan) ||
+      plan.view_rank != 2) {
+    return iree_ok_status();
+  }
+
+  const loom_matrix_fragment_layout_t* layout =
+      loom_amdgpu_matrix_fragment_layout_for_kind(plan.layout_kind);
+  loom_op_t** group_ops = NULL;
+  iree_host_size_t group_count = 0;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_collect_fragment_store_epilogue_group(
+      context, op, &plan, &group_ops, &group_count));
+  if (!loom_amdgpu_fragment_epilogue_group_wants_physical_loop(&plan,
+                                                               group_count)) {
+    return iree_ok_status();
+  }
+  bool rewritten = false;
+  IREE_RETURN_IF_ERROR(
+      loom_vector_fragment_store_to_scalar_physical_result_loop_rewrite_ops(
+          context->pass, context->rewriter, group_ops, group_count, layout,
+          plan.register_count, &rewritten));
+  if (!rewritten) {
+    return iree_ok_status();
+  }
+  *out_result = (loom_target_legalizer_result_t){
+      .action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN,
+  };
+  return iree_ok_status();
+}
+
 static iree_status_t loom_amdgpu_legalize_oversized_vector_store(
     const loom_target_legalizer_entry_t* entry,
     loom_target_legalization_context_t* context, loom_op_t* op,
@@ -1103,6 +1488,11 @@ static iree_status_t loom_amdgpu_legalize_oversized_vector_reduce(
 }
 
 static const loom_target_legalizer_entry_t kAmdgpuLegalizerEntries[] = {
+    {
+        .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REWRITE_LEGAL,
+        .root_kind = LOOM_OP_VECTOR_FRAGMENT_STORE,
+        .legalize = loom_amdgpu_legalize_result_fragment_store_epilogue_loop,
+    },
     {
         .root_kind = LOOM_OP_VECTOR_STORE,
         .legalize = loom_amdgpu_legalize_oversized_vector_store,
