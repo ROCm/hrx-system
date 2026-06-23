@@ -13,6 +13,7 @@
 #include "experimental/id4/pipeline/diagnostics.h"
 #include "experimental/id4/pipeline/program.h"
 #include "experimental/id4/pipeline/program_stage.h"
+#include "experimental/id4/stages/vae_parameters.h"
 #include "iree/base/internal/arena.h"
 
 #define ID4_VAE_STAGE_ALIGNMENT 16
@@ -236,17 +237,44 @@ static iree_status_t id4_vae_stage_prepare(
                             "VAE stage must be loaded before preparation");
   }
 
+  iree_io_parameter_provider_t* parameter_provider = NULL;
+  id4_pipeline_stage_prepare_options_t wrapped_stage_options;
+  const id4_pipeline_stage_prepare_options_t* stage_options = options;
+  iree_status_t status = iree_ok_status();
+  if (options && options->parameter_provider) {
+    id4_vae_parameter_provider_create_options_t parameter_options;
+    memset(&parameter_options, 0, sizeof(parameter_options));
+    parameter_options.structure_size = sizeof(parameter_options);
+    parameter_options.source_provider = options->parameter_provider;
+    parameter_options.plan = plan;
+    parameter_options.kernel_library = options->kernel_library;
+    parameter_options.kernel_cache = stage->kernel_cache;
+    parameter_options.executable_cache = stage->base.services.executable_cache;
+    parameter_options.diagnostics_sink = options->diagnostics_sink;
+    status = id4_vae_parameter_provider_create(
+        &parameter_options, stage->host_allocator, &parameter_provider);
+    if (iree_status_is_ok(status)) {
+      wrapped_stage_options = *options;
+      wrapped_stage_options.parameter_provider = parameter_provider;
+      stage_options = &wrapped_stage_options;
+    }
+  }
+
   id4_pipeline_program_stage_prepare_options_t prepare_options;
   memset(&prepare_options, 0, sizeof(prepare_options));
   prepare_options.structure_size = sizeof(prepare_options);
   prepare_options.stage_name = IREE_SV(ID4_VAE_DECODE_STAGE_NAME);
-  prepare_options.stage_options = options;
+  prepare_options.stage_options = stage_options;
   prepare_options.plan = plan;
   prepare_options.device_group = stage->base.services.device_group;
   prepare_options.kernel_cache = stage->kernel_cache;
   prepare_options.executable_cache = stage->base.services.executable_cache;
-  return id4_pipeline_program_stage_prepare(&prepare_options,
-                                            stage->host_allocator, out_bundle);
+  if (iree_status_is_ok(status)) {
+    status = id4_pipeline_program_stage_prepare(
+        &prepare_options, stage->host_allocator, out_bundle);
+  }
+  iree_io_parameter_provider_release(parameter_provider);
+  return status;
 }
 
 static iree_status_t id4_vae_stage_issue(

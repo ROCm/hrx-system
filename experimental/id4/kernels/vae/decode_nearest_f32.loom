@@ -14,7 +14,7 @@ config.decl @id4.vae.decode.tile_count_x : %value: index where [range(%value, 1,
 config.decl @id4.vae.decode.tile_count_y : %value: index where [range(%value, 1, 65536)]
 config.decl @id4.vae.decode.overlap_milli : %value: index where [range(%value, 0, 500)]
 
-kernel.def @id4_vae_decode_nearest_f32() {
+kernel.def export("id4_vae_decode_nearest_f32") @id4_vae_decode_nearest_f32() {
   %unit = index.constant 1 : index
   %workgroup_size_x = index.constant 256 : index
   %rounding = index.constant 255 : index

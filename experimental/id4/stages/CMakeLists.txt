@@ -97,6 +97,7 @@ iree_cc_library(
   SRCS
     "vae.c"
   DEPS
+    ::vae_parameters
     ::vae_program
     iree::base
     iree::base::internal::arena
@@ -106,6 +107,25 @@ iree_cc_library(
     iree::experimental::id4::pipeline::program_stage
     iree::experimental::id4::pipeline::stage
     iree::hal
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
+    vae_parameters
+  HDRS
+    "vae_parameters.h"
+  SRCS
+    "vae_parameters.c"
+  DEPS
+    iree::base
+    iree::experimental::id4::pipeline::diagnostics
+    iree::experimental::id4::pipeline::kernel_cache
+    iree::experimental::id4::pipeline::kernel_library
+    iree::experimental::id4::pipeline::plan
+    iree::experimental::id4::pipeline::program
+    iree::hal
+    iree::io::parameter_provider
   PUBLIC
 )
 
@@ -163,6 +183,7 @@ iree_cc_library(
   SRCS
     "vae_program.c"
   DEPS
+    ::vae_parameters
     iree::base
     iree::experimental::id4::pipeline::kernel_library
     iree::experimental::id4::pipeline::program

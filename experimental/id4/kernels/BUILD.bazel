@@ -904,6 +904,31 @@ _KERNEL_CASES = [
         "target_name": "vae_conv3x3_bias_wg_reduce_f32_iota_center",
     },
     {
+        "actual_case": "@id4_vae_pack_conv3x3_weight_f32_small_case",
+        "benchmark": "@id4_vae_pack_conv3x3_weight_f32_small",
+        "configs": [
+            "--config=id4.vae.pack_conv3x3_weight.input_channel_count=2",
+            "--config=id4.vae.pack_conv3x3_weight.output_channel_count=2",
+            "--config=id4.vae.pack_conv3x3_weight.element_count=36",
+        ],
+        "data": [
+            "vae/testdata/vae_pack_conv3x3_weight_f32_small_expected.npy",
+        ],
+        "source": "vae/pack_conv3x3_weight_f32.loom",
+        "target_name": "vae_pack_conv3x3_weight_f32_small",
+    },
+    {
+        "actual_case": "@id4_vae_pack_conv3x3_weight_f32_flux2_mid_shape_case",
+        "benchmark": "@id4_vae_pack_conv3x3_weight_f32_flux2_mid_shape",
+        "configs": [
+            "--config=id4.vae.pack_conv3x3_weight.input_channel_count=512",
+            "--config=id4.vae.pack_conv3x3_weight.output_channel_count=512",
+            "--config=id4.vae.pack_conv3x3_weight.element_count=2359296",
+        ],
+        "source": "vae/pack_conv3x3_weight_f32.loom",
+        "target_name": "vae_pack_conv3x3_weight_f32_flux2_mid_shape",
+    },
+    {
         "actual_case": "@id4_vae_group_norm_f32_small_case",
         "benchmark": "@id4_vae_group_norm_f32_small",
         "configs": [
@@ -2398,6 +2423,7 @@ _KERNEL_SOURCES = [
     "vae/decode_nearest_f32.loom",
     "vae/flux2_affine_pixel_shuffle_f32.loom",
     "vae/group_norm_f32.loom",
+    "vae/pack_conv3x3_weight_f32.loom",
     "vae/spatial_attention_f32.loom",
     "vae/upsample_conv3x3_bias_f32.loom",
 ]

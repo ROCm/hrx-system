@@ -87,6 +87,7 @@ iree_runtime_cc_library(
     srcs = ["vae.c"],
     hdrs = ["vae.h"],
     deps = [
+        ":vae_parameters",
         ":vae_program",
         "//experimental/id4/pipeline:diagnostics",
         "//experimental/id4/pipeline:kernel_cache",
@@ -96,6 +97,22 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "vae_parameters",
+    srcs = ["vae_parameters.c"],
+    hdrs = ["vae_parameters.h"],
+    deps = [
+        "//experimental/id4/pipeline:diagnostics",
+        "//experimental/id4/pipeline:kernel_cache",
+        "//experimental/id4/pipeline:kernel_library",
+        "//experimental/id4/pipeline:plan",
+        "//experimental/id4/pipeline:program",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:parameter_provider",
     ],
 )
 
@@ -143,6 +160,7 @@ iree_runtime_cc_library(
     srcs = ["vae_program.c"],
     hdrs = ["vae_program.h"],
     deps = [
+        ":vae_parameters",
         "//experimental/id4/pipeline:kernel_library",
         "//experimental/id4/pipeline:program",
         "//runtime/src/iree/base",

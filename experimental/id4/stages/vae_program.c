@@ -10,12 +10,13 @@
 #include <string.h>
 
 #include "experimental/id4/pipeline/kernel_library.h"
+#include "experimental/id4/stages/vae_parameters.h"
 #include "iree/hal/command_buffer.h"
 
 enum {
   ID4_VAE_DECODE_WORKGROUP_SIZE_X = 256,
   ID4_VAE_CONFIG_VALUE_BUFFER_CAPACITY = 24,
-  ID4_VAE_DECODE_CONFIG_CAPACITY = 15,
+  ID4_VAE_DECODE_CONFIG_CAPACITY = 12,
   ID4_VAE_PROGRAM_NAME_BUFFER_CAPACITY = 128,
   ID4_VAE_FLUX2_DECODER_LEVEL_COUNT = 4,
   ID4_VAE_FLUX2_DECODER_RESNET_BLOCK_COUNT = 3,
@@ -36,6 +37,13 @@ enum id4_vae_program_group_norm_flag_bits_e {
   ID4_VAE_PROGRAM_GROUP_NORM_FLAG_NONE = 0u,
   ID4_VAE_PROGRAM_GROUP_NORM_FLAG_APPLY_SILU = 1u << 0,
 };
+
+typedef enum id4_vae_program_conv3x3_weight_layout_e {
+  // Original source layout: OCxICxKYxKX.
+  ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_SOURCE = 0,
+  // Packed consumer layout: ICxKYxKXxOC.
+  ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_IC_KY_KX_OC,
+} id4_vae_program_conv3x3_weight_layout_t;
 
 static const float id4_vae_flux2_latent_mean[128] = {
     -0.0676f, -0.0715f, -0.0753f, -0.0745f, 0.0223f,  0.0180f,  0.0142f,
@@ -503,6 +511,30 @@ static iree_status_t id4_vae_program_parameter_tensor(
   return id4_pipeline_program_parameter(builder, &options, out_tensor);
 }
 
+static iree_status_t id4_vae_program_resolve_conv3x3_weight(
+    iree_string_view_t source_key, uint32_t input_channel_count,
+    uint32_t output_channel_count,
+    id4_vae_program_conv3x3_weight_layout_t layout, char* key_storage,
+    iree_host_size_t key_storage_capacity, iree_string_view_t* out_key,
+    id4_pipeline_program_shape_t* out_shape) {
+  *out_key = source_key;
+  *out_shape = id4_pipeline_program_make_shape_rank4(output_channel_count,
+                                                     input_channel_count, 3, 3);
+  switch (layout) {
+    case ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_SOURCE:
+      return iree_ok_status();
+    case ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_IC_KY_KX_OC:
+      *out_shape = id4_pipeline_program_make_shape_rank4(
+          input_channel_count, 3, 3, output_channel_count);
+      return id4_vae_parameter_format_packed_conv3x3_weight_key(
+          source_key, key_storage, key_storage_capacity, out_key);
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "VAE conv3x3 weight layout %d is invalid",
+                              (int)layout);
+  }
+}
+
 static iree_status_t id4_vae_program_tap_tensor(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
     id4_pipeline_program_tensor_t tensor) {
@@ -578,18 +610,9 @@ static iree_status_t id4_vae_program_build_decode_configs(
   IREE_RETURN_IF_ERROR(id4_vae_program_config_list_add_u64(
       out_config_list, IREE_SV("id4.vae.decode.tile_width"),
       tiling_plan.tile_size_x));
-  IREE_RETURN_IF_ERROR(id4_vae_program_config_list_add_u64(
-      out_config_list, IREE_SV("id4.vae.decode.tile_height"),
-      tiling_plan.tile_size_y));
-  IREE_RETURN_IF_ERROR(id4_vae_program_config_list_add_u64(
-      out_config_list, IREE_SV("id4.vae.decode.tile_count_x"),
-      tiling_plan.tile_count_x));
-  IREE_RETURN_IF_ERROR(id4_vae_program_config_list_add_u64(
-      out_config_list, IREE_SV("id4.vae.decode.tile_count_y"),
-      tiling_plan.tile_count_y));
   return id4_vae_program_config_list_add_u64(
-      out_config_list, IREE_SV("id4.vae.decode.overlap_milli"),
-      tiling_plan.overlap_milli);
+      out_config_list, IREE_SV("id4.vae.decode.tile_height"),
+      tiling_plan.tile_size_y);
 }
 
 static iree_status_t id4_vae_program_build_conv1x1_bias_configs(
@@ -932,36 +955,17 @@ static iree_status_t id4_vae_program_dispatch_conv3x3_bias(
         output_element_count, ID4_VAE_DECODE_MAX_ELEMENT_COUNT);
   }
 
-  id4_pipeline_program_tensor_t weight = id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_vae_program_parameter_tensor(
-      builder, weight_key,
-      id4_pipeline_program_make_shape_rank4(output_channel_count,
-                                            input_channel_count, 3, 3),
-      &weight));
-  id4_pipeline_program_tensor_t bias = id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_vae_program_parameter_tensor(
-      builder, bias_key,
-      id4_pipeline_program_make_shape_rank1(output_channel_count), &bias));
-
-  id4_vae_program_config_list_t config_list;
-  id4_pipeline_program_dispatch_binding_t bindings[] = {
-      id4_pipeline_program_read(input),
-      id4_pipeline_program_read(weight),
-      id4_pipeline_program_read(bias),
-      id4_pipeline_program_write(output),
-  };
-  id4_pipeline_program_dispatch_loom_options_t dispatch_options;
-  memset(&dispatch_options, 0, sizeof(dispatch_options));
-  dispatch_options.structure_size = sizeof(dispatch_options);
-  dispatch_options.name = dispatch_name;
   iree_string_view_t function_name = IREE_SV("id4_vae_conv3x3_bias_f32");
   uint32_t dispatch_element_count = (uint32_t)output_element_count;
   uint32_t output_channel_tile_width = 1;
+  id4_vae_program_conv3x3_weight_layout_t weight_layout =
+      ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_SOURCE;
   if (batch_count == 1 && input_channel_count >= 4 &&
       input_channel_count % 4 == 0 && output_channel_count >= 8 &&
       output_channel_count % 8 == 0) {
-    function_name = IREE_SV("id4_vae_conv3x3_bias_ic4_oc8_f32");
+    function_name = IREE_SV("id4_vae_conv3x3_bias_ic4_oc8_packed_f32");
     output_channel_tile_width = 8;
+    weight_layout = ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_IC_KY_KX_OC;
     dispatch_element_count =
         (uint32_t)(output_element_count / output_channel_tile_width);
   } else if (batch_count == 1 && input_channel_count >= 4 &&
@@ -975,6 +979,7 @@ static iree_status_t id4_vae_program_dispatch_conv3x3_bias(
              input_channel_count % 4 == 0) {
     function_name = IREE_SV("id4_vae_conv3x3_bias_ic4_f32");
   }
+  id4_vae_program_config_list_t config_list;
   IREE_RETURN_IF_ERROR(id4_vae_program_build_conv3x3_bias_configs(
       width, height, input_channel_count, output_channel_count, batch_count,
       output_element_count, &config_list));
@@ -983,6 +988,32 @@ static iree_status_t id4_vae_program_dispatch_conv3x3_bias(
         output_channel_count, output_channel_tile_width, output_element_count,
         &config_list));
   }
+
+  iree_string_view_t resolved_weight_key = iree_string_view_empty();
+  id4_pipeline_program_shape_t weight_shape;
+  char packed_weight_key_storage[ID4_VAE_PROGRAM_NAME_BUFFER_CAPACITY];
+  IREE_RETURN_IF_ERROR(id4_vae_program_resolve_conv3x3_weight(
+      weight_key, input_channel_count, output_channel_count, weight_layout,
+      packed_weight_key_storage, sizeof(packed_weight_key_storage),
+      &resolved_weight_key, &weight_shape));
+  id4_pipeline_program_tensor_t weight = id4_pipeline_program_tensor_invalid();
+  IREE_RETURN_IF_ERROR(id4_vae_program_parameter_tensor(
+      builder, resolved_weight_key, weight_shape, &weight));
+  id4_pipeline_program_tensor_t bias = id4_pipeline_program_tensor_invalid();
+  IREE_RETURN_IF_ERROR(id4_vae_program_parameter_tensor(
+      builder, bias_key,
+      id4_pipeline_program_make_shape_rank1(output_channel_count), &bias));
+
+  id4_pipeline_program_dispatch_binding_t bindings[] = {
+      id4_pipeline_program_read(input),
+      id4_pipeline_program_read(weight),
+      id4_pipeline_program_read(bias),
+      id4_pipeline_program_write(output),
+  };
+  id4_pipeline_program_dispatch_loom_options_t dispatch_options;
+  memset(&dispatch_options, 0, sizeof(dispatch_options));
+  dispatch_options.structure_size = sizeof(dispatch_options);
+  dispatch_options.name = dispatch_name;
   dispatch_options.kernel = id4_pipeline_make_kernel_ref(
       IREE_SV("vae/conv3x3_bias_f32"), function_name);
   dispatch_options.dispatch_config =
@@ -1038,11 +1069,27 @@ static iree_status_t id4_vae_program_author_conv3x3_bias_add(
                             ID4_VAE_DECODE_MAX_ELEMENT_COUNT);
   }
 
+  iree_string_view_t function_name =
+      IREE_SV("id4_vae_conv3x3_bias_add_ic4_oc4_f32");
+  uint32_t output_channel_tile_width = 4;
+  id4_vae_program_conv3x3_weight_layout_t weight_layout =
+      ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_SOURCE;
+  if (channel_count >= 8 && channel_count % 8 == 0) {
+    function_name = IREE_SV("id4_vae_conv3x3_bias_add_ic4_oc8_packed_f32");
+    output_channel_tile_width = 8;
+    weight_layout = ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_IC_KY_KX_OC;
+  }
+
+  iree_string_view_t resolved_weight_key = iree_string_view_empty();
+  id4_pipeline_program_shape_t weight_shape;
+  char packed_weight_key_storage[ID4_VAE_PROGRAM_NAME_BUFFER_CAPACITY];
+  IREE_RETURN_IF_ERROR(id4_vae_program_resolve_conv3x3_weight(
+      weight_key, channel_count, channel_count, weight_layout,
+      packed_weight_key_storage, sizeof(packed_weight_key_storage),
+      &resolved_weight_key, &weight_shape));
   id4_pipeline_program_tensor_t weight = id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_vae_program_parameter_tensor(
-      builder, weight_key,
-      id4_pipeline_program_make_shape_rank4(channel_count, channel_count, 3, 3),
-      &weight));
+      builder, resolved_weight_key, weight_shape, &weight));
   id4_pipeline_program_tensor_t bias = id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_vae_program_parameter_tensor(
       builder, bias_key, id4_pipeline_program_make_shape_rank1(channel_count),
@@ -1059,13 +1106,6 @@ static iree_status_t id4_vae_program_author_conv3x3_bias_add(
   IREE_RETURN_IF_ERROR(id4_vae_program_build_conv3x3_bias_configs(
       width, height, channel_count, channel_count, batch_count,
       output_element_count, &config_list));
-  iree_string_view_t function_name =
-      IREE_SV("id4_vae_conv3x3_bias_add_ic4_oc4_f32");
-  uint32_t output_channel_tile_width = 4;
-  if (channel_count >= 8 && channel_count % 8 == 0) {
-    function_name = IREE_SV("id4_vae_conv3x3_bias_add_ic4_oc8_f32");
-    output_channel_tile_width = 8;
-  }
   IREE_RETURN_IF_ERROR(id4_vae_program_add_conv3x3_bias_output_tile_configs(
       channel_count, output_channel_tile_width, output_element_count,
       &config_list));
