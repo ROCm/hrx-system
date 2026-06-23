@@ -430,6 +430,14 @@ iree_status_t iree_hal_amdxdna_make_npu_cmd(
       binding_device_addrs, arg_offsets, arg_lengths, arg_count);
   iree_allocator_free(command_buffer->host_allocator, binding_device_addrs);
   IREE_RETURN_IF_ERROR(status);
+  // The signature setter copies and then frees any prior command-owned arrays;
+  // the input pointers may alias those arrays when a deferred descriptor is
+  // materialized in place. Use the copied command-owned arrays after this
+  // point.
+  arg_buffers = out_cmd->binding_buffers;
+  args = out_cmd->binding_device_addrs;
+  arg_offsets = out_cmd->binding_offsets;
+  arg_lengths = out_cmd->binding_lengths;
   IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_buffer_c_sync_all(
       out_cmd->ctrl_code, IREE_HAL_AMDXDNA_NATIVE_BUFFER_SYNC_HOST_TO_DEVICE));
   const iree_hal_amdxdna_native_c_command_opcode_t command_opcode =
@@ -486,19 +494,6 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_emit_chain_cmd(
     iree_hal_amdxdna_native_c_cu_index_t cu_idx,
     iree_const_byte_span_t constants, bool use_native_partial_elf,
     bool defer_build) {
-  if (defer_build && group->cmd_count != 0 &&
-      iree_hal_amdxdna_chain_cmd_matches_raw_descriptor(
-          &group->cmds[group->cmd_count - 1], control_code, patch_table, cu_idx,
-          constants, use_native_partial_elf, args, arg_buffers, arg_offsets,
-          arg_lengths, arg_count)) {
-    if (IREE_UNLIKELY(group->cmds[group->cmd_count - 1].repeat_count ==
-                      IREE_HOST_SIZE_MAX)) {
-      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                              "amdxdna cmd-chain repeat count overflow");
-    }
-    ++group->cmds[group->cmd_count - 1].repeat_count;
-    return iree_ok_status();
-  }
   iree_hal_amdxdna_chain_cmd_t cmd;
   iree_hal_amdxdna_chain_cmd_initialize(&cmd);
   iree_status_t status = iree_hal_amdxdna_chain_cmd_set_deferred_descriptor(
@@ -666,8 +661,7 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_accumulate_chained(
       const iree_device_size_t reconf_offset = 0;
       const iree_device_size_t reconf_length = (iree_device_size_t)seq_bytes;
       for (uint32_t r = 0;
-           iree_status_is_ok(status) && r < plan->data_payload_repeat_count;
-           r++) {
+           iree_status_is_ok(status) && r < plan->data_payload_run_count; r++) {
         status = iree_hal_amdxdna_direct_command_buffer_emit_chain_cmd(
             command_buffer, group, &plan->control_codes[2 * i],
             &plan->patch_tables[2 * i], &reconf_arg, &reconf_buffer,
@@ -796,8 +790,7 @@ static iree_status_t iree_hal_amdxdna_prepare_chain(
 
 static bool iree_hal_amdxdna_chain_group_requires_parent_chain(
     const iree_hal_amdxdna_chain_group_t* group) {
-  return iree_hal_amdxdna_chain_group_logical_command_count(group) > 1 ||
-         group->reconf_buffer_count != 0;
+  return group->cmd_count > 1 || group->reconf_buffer_count != 0;
 }
 
 static iree_status_t iree_hal_amdxdna_rebuild_cached_parent_chains(
@@ -1078,10 +1071,6 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_flush_chains(
         // ctrl_words-based device/shape/miss logic below can match, update, or
         // cache them.
         if (!chain_cache) {
-          status = iree_hal_amdxdna_expand_repeated_chain_descriptors(
-              command_buffer->host_allocator, group);
-        }
-        if (!chain_cache && iree_status_is_ok(status)) {
           for (iree_host_size_t i = 0;
                i < group->cmd_count && iree_status_is_ok(status); ++i) {
             iree_hal_amdxdna_chain_cmd_t* cmd = &group->cmds[i];
@@ -1690,7 +1679,7 @@ iree_status_t iree_hal_amdxdna_dispatch_plan_initialize(
   out_plan->patch_tables = kernel_params->patch_runlist;
   out_plan->data_payload_count = kernel_params->reconf_data_runlist_count;
   out_plan->data_payloads = kernel_params->reconf_data_runlist;
-  out_plan->data_payload_repeat_count = kernel_params->n_reconfigure_runs;
+  out_plan->data_payload_run_count = kernel_params->n_reconfigure_runs;
   out_plan->pdi_span = iree_make_const_byte_span(kernel_params->pdi.data,
                                                  kernel_params->pdi.count);
   out_plan->xclbin_span = iree_make_const_byte_span(
@@ -1873,7 +1862,7 @@ iree_status_t iree_hal_amdxdna_direct_command_buffer_dispatch_plan(
            iree_status_is_ok(status) && i < plan->data_payload_count; i++) {
         // Reconfigure the device.
         status = iree_hal_amdxdna_direct_command_buffer_reconfigure(
-            command_buffer, queue, cu_idx, plan->data_payload_repeat_count,
+            command_buffer, queue, cu_idx, plan->data_payload_run_count,
             &plan->control_codes[2 * i], &plan->data_payloads[i], constants);
         if (iree_status_is_ok(status)) {
           // Dispatch the new kernel.

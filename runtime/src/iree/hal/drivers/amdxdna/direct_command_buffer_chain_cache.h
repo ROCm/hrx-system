@@ -58,9 +58,6 @@ typedef struct iree_hal_amdxdna_chain_cmd_t {
   iree_hal_amdxdna_native_c_cu_index_t src_cu_idx;
   bool src_use_native_partial_elf;
   bool built;
-  // Number of consecutive logical child commands represented by this
-  // descriptor during late-bound replay.
-  iree_host_size_t repeat_count;
   // False when metadata was refreshed for a device-visible hit but the native
   // child command still holds older bound-buffer pointers. Safe until the next
   // packet rewrite, which must rebind before BO-table generation dereferences.
@@ -142,10 +139,6 @@ iree_status_t iree_hal_amdxdna_chain_cmd_set_deferred_descriptor(
     const uint64_t* binding_device_addrs,
     const iree_device_size_t* binding_offsets,
     const iree_device_size_t* binding_lengths, iree_host_size_t binding_count);
-iree_status_t iree_hal_amdxdna_chain_cmd_clone_unbuilt_descriptor(
-    iree_allocator_t host_allocator, const iree_hal_amdxdna_chain_cmd_t* src,
-    iree_hal_amdxdna_chain_cmd_t* out_cmd);
-
 void iree_hal_amdxdna_chain_group_initialize(
     iree_hal_amdxdna_chain_group_t* group);
 void iree_hal_amdxdna_chain_group_deinitialize(
@@ -178,26 +171,9 @@ iree_status_t iree_hal_amdxdna_chain_accum_append_group(
 iree_hal_amdxdna_device_chain_command_cache_t*
 iree_hal_amdxdna_get_chain_command_cache(iree_hal_amdxdna_device* device);
 
-iree_host_size_t iree_hal_amdxdna_chain_group_logical_command_count(
-    const iree_hal_amdxdna_chain_group_t* group);
-
-iree_status_t iree_hal_amdxdna_expand_repeated_chain_descriptors(
-    iree_allocator_t host_allocator, iree_hal_amdxdna_chain_group_t* group);
-
 bool iree_hal_amdxdna_chain_cmd_descriptor_matches(
     const iree_hal_amdxdna_chain_cmd_t* lhs,
     const iree_hal_amdxdna_chain_cmd_t* rhs);
-
-bool iree_hal_amdxdna_chain_cmd_matches_raw_descriptor(
-    const iree_hal_amdxdna_chain_cmd_t* cmd,
-    const iree_hal_amdxdna_u32_list_t* asm_inst,
-    const iree_hal_amdxdna_u32_list_t* patches,
-    iree_hal_amdxdna_native_c_cu_index_t cu_idx,
-    iree_const_byte_span_t constants, bool use_native_partial_elf,
-    const uint64_t* binding_device_addrs,
-    iree_hal_amdxdna_native_buffer_t* const* binding_buffers,
-    const iree_device_size_t* binding_offsets,
-    const iree_device_size_t* binding_lengths, iree_host_size_t binding_count);
 
 bool iree_hal_amdxdna_chain_command_cache_device_matches(
     const iree_hal_amdxdna_chain_command_cache_entry_t* cache,

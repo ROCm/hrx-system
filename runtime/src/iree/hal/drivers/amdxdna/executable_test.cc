@@ -425,7 +425,7 @@ TEST(ExecutableTest, DispatchPlanPrecomputesEntryPointPolicy) {
   EXPECT_EQ(plan.data_payload_count, 1u);
   EXPECT_EQ(plan.data_payloads,
             executable->entry_points[0].reconf_data_runlist);
-  EXPECT_EQ(plan.data_payload_repeat_count, 1u);
+  EXPECT_EQ(plan.data_payload_run_count, 1u);
   EXPECT_EQ(plan.pdi_span.data_length, 4u);
   EXPECT_EQ(plan.xclbin_span.data_length, 0u);
   EXPECT_TRUE(iree_string_view_equal(plan.kernel_name, IREE_SV("entry0")));

@@ -43,7 +43,7 @@ typedef struct iree_hal_amdxdna_dispatch_plan_t {
   const iree_hal_amdxdna_u32_list_t* patch_tables;
   iree_host_size_t data_payload_count;
   const iree_hal_amdxdna_u32_list_t* data_payloads;
-  uint32_t data_payload_repeat_count;
+  uint32_t data_payload_run_count;
   iree_const_byte_span_t pdi_span;
   iree_const_byte_span_t xclbin_span;
   iree_string_view_t kernel_name;

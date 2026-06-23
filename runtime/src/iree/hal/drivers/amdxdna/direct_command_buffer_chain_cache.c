@@ -12,11 +12,6 @@
 #include "iree/hal/drivers/amdxdna/device.h"
 #include "iree/hal/drivers/amdxdna/direct_command_buffer.h"
 
-static iree_host_size_t iree_hal_amdxdna_max_host_size(iree_host_size_t lhs,
-                                                       iree_host_size_t rhs) {
-  return lhs > rhs ? lhs : rhs;
-}
-
 static iree_status_t iree_hal_amdxdna_reserve_array(
     iree_allocator_t host_allocator, iree_host_size_t element_size,
     iree_host_size_t min_capacity, void** inout_data,
@@ -97,12 +92,10 @@ static void iree_hal_amdxdna_chain_cmd_free_deferred(
   cmd->src_constant_count = 0;
   memset(&cmd->src_cu_idx, 0, sizeof(cmd->src_cu_idx));
   cmd->src_use_native_partial_elf = false;
-  cmd->repeat_count = 1;
 }
 
 void iree_hal_amdxdna_chain_cmd_initialize(iree_hal_amdxdna_chain_cmd_t* cmd) {
   memset(cmd, 0, sizeof(*cmd));
-  cmd->repeat_count = 1;
   cmd->native_bindings_current = true;
 }
 
@@ -221,21 +214,7 @@ iree_status_t iree_hal_amdxdna_chain_cmd_set_deferred_descriptor(
   cmd->src_patches = patches;
   cmd->src_cu_idx = cu_idx;
   cmd->src_use_native_partial_elf = use_native_partial_elf;
-  cmd->repeat_count = 1;
   return iree_ok_status();
-}
-
-iree_status_t iree_hal_amdxdna_chain_cmd_clone_unbuilt_descriptor(
-    iree_allocator_t host_allocator, const iree_hal_amdxdna_chain_cmd_t* src,
-    iree_hal_amdxdna_chain_cmd_t* out_cmd) {
-  iree_hal_amdxdna_chain_cmd_initialize(out_cmd);
-  return iree_hal_amdxdna_chain_cmd_set_deferred_descriptor(
-      host_allocator, out_cmd, src->src_asm_inst, src->src_patches,
-      src->src_cu_idx,
-      iree_make_const_byte_span(src->src_constants, src->src_constant_count),
-      src->src_use_native_partial_elf, src->binding_buffers,
-      src->binding_device_addrs, src->binding_offsets, src->binding_lengths,
-      src->binding_count);
 }
 
 void iree_hal_amdxdna_chain_group_initialize(
@@ -452,80 +431,6 @@ static bool iree_hal_amdxdna_chain_cmd_shape_matches(
              lhs->binding_lengths, rhs->binding_lengths, lhs->binding_count);
 }
 
-iree_host_size_t iree_hal_amdxdna_chain_group_logical_command_count(
-    const iree_hal_amdxdna_chain_group_t* group) {
-  iree_host_size_t total = 0;
-  for (iree_host_size_t i = 0; i < group->cmd_count; ++i) {
-    const iree_host_size_t repeat_count =
-        iree_hal_amdxdna_max_host_size(group->cmds[i].repeat_count, 1);
-    if (repeat_count > IREE_HOST_SIZE_MAX - total) return IREE_HOST_SIZE_MAX;
-    total += repeat_count;
-  }
-  return total;
-}
-
-static const iree_hal_amdxdna_chain_cmd_t*
-iree_hal_amdxdna_chain_group_cmd_at_logical_index(
-    const iree_hal_amdxdna_chain_group_t* group,
-    iree_host_size_t logical_index) {
-  iree_host_size_t cursor = 0;
-  for (iree_host_size_t i = 0; i < group->cmd_count; ++i) {
-    const iree_host_size_t repeat_count =
-        iree_hal_amdxdna_max_host_size(group->cmds[i].repeat_count, 1);
-    if (logical_index < cursor + repeat_count) return &group->cmds[i];
-    cursor += repeat_count;
-  }
-  return NULL;
-}
-
-iree_status_t iree_hal_amdxdna_expand_repeated_chain_descriptors(
-    iree_allocator_t host_allocator, iree_hal_amdxdna_chain_group_t* group) {
-  const iree_host_size_t logical_count =
-      iree_hal_amdxdna_chain_group_logical_command_count(group);
-  if (logical_count == group->cmd_count) return iree_ok_status();
-  iree_hal_amdxdna_chain_cmd_t* expanded = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
-      host_allocator, logical_count, sizeof(*expanded), (void**)&expanded));
-  iree_host_size_t cursor = 0;
-  for (iree_host_size_t i = 0; i < group->cmd_count; ++i) {
-    iree_hal_amdxdna_chain_cmd_t* cmd = &group->cmds[i];
-    if (cmd->built && cmd->repeat_count > 1) {
-      iree_allocator_free(host_allocator, expanded);
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "amdxdna cmd-chain cannot expand a repeated built descriptor");
-    }
-    const iree_host_size_t repeat_count =
-        iree_hal_amdxdna_max_host_size(cmd->repeat_count, 1);
-    for (iree_host_size_t j = 1; j < repeat_count; ++j) {
-      iree_status_t status =
-          iree_hal_amdxdna_chain_cmd_clone_unbuilt_descriptor(
-              host_allocator, cmd, &expanded[cursor + j]);
-      if (!iree_status_is_ok(status)) {
-        for (iree_host_size_t k = 0; k < cursor + j; ++k) {
-          iree_hal_amdxdna_chain_cmd_deinitialize(host_allocator, &expanded[k]);
-        }
-        iree_allocator_free(host_allocator, expanded);
-        return status;
-      }
-    }
-    cursor += repeat_count;
-  }
-  cursor = 0;
-  for (iree_host_size_t i = 0; i < group->cmd_count; ++i) {
-    iree_host_size_t repeat_count =
-        iree_hal_amdxdna_max_host_size(group->cmds[i].repeat_count, 1);
-    group->cmds[i].repeat_count = 1;
-    iree_hal_amdxdna_chain_cmd_move(&expanded[cursor], &group->cmds[i]);
-    cursor += repeat_count;
-  }
-  iree_allocator_free(host_allocator, group->cmds);
-  group->cmds = expanded;
-  group->cmd_count = logical_count;
-  group->cmd_capacity = logical_count;
-  return iree_ok_status();
-}
-
 bool iree_hal_amdxdna_chain_command_cache_device_matches(
     const iree_hal_amdxdna_chain_command_cache_entry_t* cache,
     const iree_hal_amdxdna_chain_group_t* group, uint32_t max_slots) {
@@ -589,61 +494,20 @@ bool iree_hal_amdxdna_chain_cmd_descriptor_matches(
              lhs->binding_lengths, rhs->binding_lengths, lhs->binding_count);
 }
 
-bool iree_hal_amdxdna_chain_cmd_matches_raw_descriptor(
-    const iree_hal_amdxdna_chain_cmd_t* cmd,
-    const iree_hal_amdxdna_u32_list_t* asm_inst,
-    const iree_hal_amdxdna_u32_list_t* patches,
-    iree_hal_amdxdna_native_c_cu_index_t cu_idx,
-    iree_const_byte_span_t constants, bool use_native_partial_elf,
-    const uint64_t* binding_device_addrs,
-    iree_hal_amdxdna_native_buffer_t* const* binding_buffers,
-    const iree_device_size_t* binding_offsets,
-    const iree_device_size_t* binding_lengths, iree_host_size_t binding_count) {
-  if (cmd->built || cmd->src_asm_inst != asm_inst ||
-      cmd->src_patches != patches ||
-      cmd->src_use_native_partial_elf != use_native_partial_elf ||
-      cmd->src_cu_idx.index != cu_idx.index ||
-      cmd->src_constant_count != constants.data_length) {
-    return false;
-  }
-  if (constants.data_length != 0 &&
-      memcmp(cmd->src_constants, constants.data, constants.data_length) != 0) {
-    return false;
-  }
-  return cmd->binding_count == binding_count &&
-         iree_hal_amdxdna_ptr_span_equal(
-             (const void* const*)cmd->binding_buffers,
-             (const void* const*)binding_buffers, binding_count) &&
-         iree_hal_amdxdna_u64_span_equal(cmd->binding_device_addrs,
-                                         binding_device_addrs, binding_count) &&
-         iree_hal_amdxdna_device_size_span_equal(
-             cmd->binding_offsets, binding_offsets, binding_count) &&
-         iree_hal_amdxdna_device_size_span_equal(
-             cmd->binding_lengths, binding_lengths, binding_count);
-}
-
 bool iree_hal_amdxdna_chain_command_cache_descriptor_matches(
     const iree_hal_amdxdna_chain_command_cache_entry_t* cache,
     const iree_hal_amdxdna_chain_group_t* group, uint32_t max_slots) {
-  const iree_host_size_t cache_logical_count =
-      iree_hal_amdxdna_chain_group_logical_command_count(&cache->group);
-  const iree_host_size_t group_logical_count =
-      iree_hal_amdxdna_chain_group_logical_command_count(group);
   if (cache->chain_count == 0 || cache->max_slots != max_slots ||
       cache->group.queue != group->queue ||
       cache->group.native_partial_elf != group->native_partial_elf ||
-      cache_logical_count != group_logical_count ||
+      cache->group.cmd_count != group->cmd_count ||
       cache->group.reconf_buffer_count != 0 ||
       group->reconf_buffer_count != 0) {
     return false;
   }
-  for (iree_host_size_t i = 0; i < group_logical_count; ++i) {
-    const iree_hal_amdxdna_chain_cmd_t* cache_cmd =
-        iree_hal_amdxdna_chain_group_cmd_at_logical_index(&cache->group, i);
-    const iree_hal_amdxdna_chain_cmd_t* group_cmd =
-        iree_hal_amdxdna_chain_group_cmd_at_logical_index(group, i);
-    if (!cache_cmd || !group_cmd) return false;
-    if (!iree_hal_amdxdna_chain_cmd_descriptor_matches(cache_cmd, group_cmd)) {
+  for (iree_host_size_t i = 0; i < group->cmd_count; ++i) {
+    if (!iree_hal_amdxdna_chain_cmd_descriptor_matches(&cache->group.cmds[i],
+                                                       &group->cmds[i])) {
       return false;
     }
   }

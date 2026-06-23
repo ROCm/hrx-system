@@ -81,10 +81,11 @@ namespace {
 constexpr size_t kMaxExecBoSize = 4096;
 
 // The exec BO is large enough to hold ~500 chain slots, but the npu4 KMQ
-// firmware/queue path fails to execute a single ERT_CMD_CHAIN much longer than
-// this (a chain of 128 returns INTERNAL at wait; 64 is reliable). Cap the
-// reported slot count so the shared flush chunks longer command buffers into
-// several firmware-sized chains instead of one oversized chain.
+// firmware/queue path does not reliably execute a single ERT_CMD_CHAIN much
+// longer than this: some oversized chains fail explicitly, and some can
+// complete implausibly fast without proving that every child ran. Cap the
+// reported slot count so shared flushing chunks longer command buffers into
+// firmware-sized chains instead of one oversized chain.
 constexpr uint32_t kMaxReliableChainSlots = 64;
 
 std::string string_view_to_string(iree_string_view_t value) {
@@ -772,19 +773,44 @@ iree_status_t iree_hal_amdxdna_native_queue_submit_all_and_wait(
     iree_hal_amdxdna_native_queue_t* queue,
     iree_hal_amdxdna_native_command_t* const* commands,
     iree_host_size_t command_count, iree_string_view_t label) {
+  if (command_count == 0) return iree_ok_status();
   // Issue every command before waiting so a command buffer that chunked into
   // several ERT_CMD_CHAINs runs them back-to-back on the in-order queue instead
-  // of stalling on a host round-trip between chunks. The queue completes in
-  // submit order, so once the first wait returns the later chunks are already
-  // running or done and their waits return immediately.
-  for (iree_host_size_t i = 0; i < command_count; ++i) {
-    IREE_RETURN_IF_ERROR(
-        iree_hal_amdxdna_native_queue_issue(queue, commands[i]));
+  // of stalling on a host round-trip between chunks.
+  iree_status_t issue_status = iree_ok_status();
+  iree_host_size_t issued_count = 0;
+  for (; issued_count < command_count; ++issued_count) {
+    issue_status =
+        iree_hal_amdxdna_native_queue_issue(queue, commands[issued_count]);
+    if (!iree_status_is_ok(issue_status)) break;
   }
-  for (iree_host_size_t i = 0; i < command_count; ++i) {
-    IREE_RETURN_IF_ERROR(
-        iree_hal_amdxdna_native_queue_wait_issued(queue, commands[i], label));
+  if (issued_count == 0) return issue_status;
+
+  // Wait on the final issued chunk first: the queue completes in submit order,
+  // so once the final parent has completed every earlier parent has too. This
+  // is the only blocking wait on the steady-state success path.
+  iree_status_t wait_status = iree_hal_amdxdna_native_queue_wait_issued(
+      queue, commands[issued_count - 1], label);
+  // Then verify/drain the earlier chunks. On success these are cheap -- the
+  // chunks are already complete, so wait_issued returns on the first poll
+  // without blocking -- but they still surface an earlier chunk that completed
+  // with an error (the final chunk succeeding does not by itself prove every
+  // earlier chunk did). On the failure path the same loop keeps their command
+  // resources live until the kernel/firmware is done with them.
+  for (iree_host_size_t i = 0; i + 1 < issued_count; ++i) {
+    iree_status_t earlier_status =
+        iree_hal_amdxdna_native_queue_wait_issued(queue, commands[i], label);
+    if (!iree_status_is_ok(earlier_status)) {
+      iree_status_ignore(wait_status);
+      if (!iree_status_is_ok(issue_status)) iree_status_ignore(issue_status);
+      return earlier_status;
+    }
   }
+  if (!iree_status_is_ok(wait_status)) {
+    if (!iree_status_is_ok(issue_status)) iree_status_ignore(issue_status);
+    return wait_status;
+  }
+  if (!iree_status_is_ok(issue_status)) return issue_status;
   return iree_ok_status();
 }
 

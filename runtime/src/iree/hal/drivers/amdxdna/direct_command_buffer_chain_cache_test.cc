@@ -8,7 +8,6 @@
 
 #include <cstdint>
 #include <cstring>
-#include <limits>
 
 #include "iree/testing/gtest.h"
 
@@ -29,8 +28,7 @@ const iree_hal_amdxdna_u32_list_t* FakeU32List(uintptr_t value) {
 }
 
 iree_hal_amdxdna_chain_cmd_t MakeCmd(iree_hal_amdxdna_native_buffer_t* buffer,
-                                     uint64_t device_addr,
-                                     size_t repeat_count = 1) {
+                                     uint64_t device_addr) {
   iree_hal_amdxdna_chain_cmd_t cmd;
   iree_hal_amdxdna_chain_cmd_initialize(&cmd);
   const uint32_t ctrl_words[] = {0xA, 0xB, 0xC};
@@ -52,7 +50,6 @@ iree_hal_amdxdna_chain_cmd_t MakeCmd(iree_hal_amdxdna_native_buffer_t* buffer,
   cmd.src_patches = FakeU32List(0x2000);
   cmd.src_cu_idx.index = 7;
   cmd.src_use_native_partial_elf = true;
-  cmd.repeat_count = repeat_count;
   return cmd;
 }
 
@@ -139,10 +136,14 @@ TEST(ChainCommandCacheTest, SignatureRewritePreservesSelfAliasedBindings) {
   iree_hal_amdxdna_chain_cmd_deinitialize(TestAllocator(), &cmd);
 }
 
-TEST(ChainCommandCacheTest, DescriptorMatchExpandsRepeatCounts) {
-  auto compact_cmd = MakeCmd(FakeBuffer(0x10), /*device_addr=*/0x80000000,
-                             /*repeat_count=*/3);
-  auto cached_group = MakeGroup1(&compact_cmd);
+TEST(ChainCommandCacheTest, DescriptorMatchAcceptsEqualMultiCommandGroup) {
+  auto cached_cmd0 = MakeCmd(FakeBuffer(0x10), /*device_addr=*/0x80000000);
+  auto cached_cmd1 = MakeCmd(FakeBuffer(0x10), /*device_addr=*/0x80000000);
+  auto cached_cmd2 = MakeCmd(FakeBuffer(0x10), /*device_addr=*/0x80000000);
+  auto cached_group = MakeEmptyGroup();
+  AppendCmd(&cached_group, &cached_cmd0);
+  AppendCmd(&cached_group, &cached_cmd1);
+  AppendCmd(&cached_group, &cached_cmd2);
   auto entry = MakeCacheEntry(&cached_group);
   auto group = MakeEmptyGroup();
   auto cmd0 = MakeCmd(FakeBuffer(0x10), /*device_addr=*/0x80000000);
@@ -157,9 +158,13 @@ TEST(ChainCommandCacheTest, DescriptorMatchExpandsRepeatCounts) {
 }
 
 TEST(ChainCommandCacheTest, DescriptorMatchRejectsChangedBindings) {
-  auto compact_cmd = MakeCmd(FakeBuffer(0x10), /*device_addr=*/0x80000000,
-                             /*repeat_count=*/3);
-  auto cached_group = MakeGroup1(&compact_cmd);
+  auto cached_cmd0 = MakeCmd(FakeBuffer(0x10), /*device_addr=*/0x80000000);
+  auto cached_cmd1 = MakeCmd(FakeBuffer(0x10), /*device_addr=*/0x80000000);
+  auto cached_cmd2 = MakeCmd(FakeBuffer(0x10), /*device_addr=*/0x80000000);
+  auto cached_group = MakeEmptyGroup();
+  AppendCmd(&cached_group, &cached_cmd0);
+  AppendCmd(&cached_group, &cached_cmd1);
+  AppendCmd(&cached_group, &cached_cmd2);
   auto entry = MakeCacheEntry(&cached_group);
   auto group = MakeEmptyGroup();
   auto cmd0 = MakeCmd(FakeBuffer(0x10), /*device_addr=*/0x80000000);
@@ -171,18 +176,6 @@ TEST(ChainCommandCacheTest, DescriptorMatchRejectsChangedBindings) {
 
   EXPECT_FALSE(iree_hal_amdxdna_chain_command_cache_descriptor_matches(
       &entry, &group, /*max_slots=*/24));
-}
-
-TEST(ChainCommandCacheTest, LogicalCommandCountSaturatesOnOverflow) {
-  auto first = MakeCmd(FakeBuffer(0x10), /*device_addr=*/0x80000000,
-                       std::numeric_limits<size_t>::max());
-  auto second = MakeCmd(FakeBuffer(0x10), /*device_addr=*/0x80000000, 2);
-  auto group = MakeEmptyGroup();
-  AppendCmd(&group, &first);
-  AppendCmd(&group, &second);
-
-  EXPECT_EQ(iree_hal_amdxdna_chain_group_logical_command_count(&group),
-            std::numeric_limits<size_t>::max());
 }
 
 }  // namespace
