@@ -2436,6 +2436,40 @@ low.func.def target(@gfx11_target) @gfx11_mask_select_inline(%lhs: reg<amdgpu.vg
 
 // ====
 
+// RUN: emit amdgpu-assembly @gfx11_mask_select_src0_lit_src1_inline waits=none
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target(@gfx11_target) @gfx11_mask_select_src0_lit_src1_inline(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+  %mask = v_cmp_lt_i32 %lhs, %rhs
+  %selected = v_cndmask_b32_src0_lit_src1_inline %mask {imm32 = 2147483647, true_value = 1}
+  buffer_store_dword %selected, %resource, %vaddr, %soffset
+  return
+}
+
+// ----
+  v_cmp_lt_i32 s[6:7], v0, v1
+  v_cndmask_b32 v0, 2147483647, 1, s[6:7]
+  buffer_store_dword v0, v2, s[0:3], s4 offen offset:0
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx11_mask_select_src1_lit_src0_inline waits=none
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target(@gfx11_target) @gfx11_mask_select_src1_lit_src0_inline(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+  %mask = v_cmp_lt_i32 %lhs, %rhs
+  %selected = v_cndmask_b32_src1_lit_src0_inline %mask {imm32 = 2147483647, false_value = 1}
+  buffer_store_dword %selected, %resource, %vaddr, %soffset
+  return
+}
+
+// ----
+  v_cmp_lt_i32 s[6:7], v0, v1
+  v_cndmask_b32 v0, 1, 2147483647, s[6:7]
+  buffer_store_dword v0, v2, s[0:3], s4 offen offset:0
+  s_endpgm
+
+// ====
+
 // RUN: emit amdgpu-assembly @gfx11_global_pointer waits=none
 amdgpu.target<gfx1100> @gfx11_target
 low.func.def target(@gfx11_target) @gfx11_global_pointer(%addr: reg<amdgpu.vgpr x2>) {
