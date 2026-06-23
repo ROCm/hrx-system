@@ -55,6 +55,7 @@ iree_status_t iree_hal_streaming_graph_create(
   graph->node_blocks = NULL;
   graph->current_node_block = NULL;
   graph->node_count = 0;
+  graph->child_graph_node_count = 0;
   graph->next_clone_source_node_index = 0;
   graph->root_blocks = NULL;
   graph->current_root_block = NULL;
@@ -294,6 +295,9 @@ static iree_status_t iree_hal_streaming_graph_validate_child_graph(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "child graph must belong to the parent context");
   }
+  if (child_graph->child_graph_node_count == 0) {
+    return iree_ok_status();
+  }
 
   iree_hal_streaming_graph_t** graphs = NULL;
   iree_host_size_t graph_count = 0;
@@ -312,6 +316,7 @@ static iree_status_t iree_hal_streaming_graph_validate_child_graph(
           "child graph would create recursive graph containment");
       break;
     }
+    if (graph->child_graph_node_count == 0) continue;
 
     for (iree_hal_streaming_node_block_t* block = graph->node_blocks; block;
          block = block->next) {
@@ -646,6 +651,9 @@ iree_status_t iree_hal_streaming_graph_clone(
       if (!iree_status_is_ok(status)) {
         iree_hal_streaming_graph_node_deinitialize_attrs(clone_node);
         break;
+      }
+      if (clone_node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_GRAPH) {
+        ++clone_graph->child_graph_node_count;
       }
       clone_node->clone_source_node_index =
           source_node->clone_source_node_index;
@@ -1125,9 +1133,9 @@ iree_status_t iree_hal_streaming_graph_add_event_node(
   iree_hal_streaming_event_retain(event);
 
   iree_status_t status = iree_hal_streaming_graph_add_node(graph, node);
-  if (iree_status_is_ok(status) && out_node) {
-    *out_node = node;
-  } else if (!iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status)) {
+    if (out_node) *out_node = node;
+  } else {
     iree_hal_streaming_graph_node_deinitialize_attrs(node);
   }
   IREE_TRACE_ZONE_END(z0);
@@ -1163,9 +1171,10 @@ iree_status_t iree_hal_streaming_graph_add_child_graph_node(
   iree_hal_streaming_graph_retain(child_graph);
 
   iree_status_t status = iree_hal_streaming_graph_add_node(graph, node);
-  if (iree_status_is_ok(status) && out_node) {
-    *out_node = node;
-  } else if (!iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status)) {
+    ++graph->child_graph_node_count;
+    if (out_node) *out_node = node;
+  } else {
     iree_hal_streaming_graph_node_deinitialize_attrs(node);
   }
   IREE_TRACE_ZONE_END(z0);
@@ -1261,6 +1270,9 @@ iree_status_t iree_hal_streaming_graph_destroy_node(
       iree_hal_streaming_graph_remove_from_blocks(graph->node_blocks, node);
   if (removed_from_nodes) {
     --graph->node_count;
+    if (node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_GRAPH) {
+      --graph->child_graph_node_count;
+    }
   }
   if (iree_hal_streaming_graph_remove_from_blocks(graph->root_blocks, node)) {
     --graph->root_count;

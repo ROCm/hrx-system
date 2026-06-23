@@ -53,6 +53,8 @@ typedef struct iree_hal_streaming_graph_t {
   iree_hal_streaming_node_block_t* node_blocks;
   iree_hal_streaming_node_block_t* current_node_block;
   iree_host_size_t node_count;
+  // Number of direct child graph nodes in this graph template.
+  iree_host_size_t child_graph_node_count;
   // Next stable source ID assigned to graph nodes created in this template.
   uint32_t next_clone_source_node_index;
 
