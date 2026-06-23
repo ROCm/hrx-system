@@ -14,6 +14,7 @@ iree_cc_library(
     "graph.h"
     "hrx_bridge.h"
     "internal.h"
+    "tls.h"
   SRCS
     "context.c"
     "device.c"
@@ -29,6 +30,7 @@ iree_cc_library(
     "peer.c"
     "registry.c"
     "stream.c"
+    "tls.c"
   DEPS
     flatcc::parsing
     iree::async
@@ -49,6 +51,19 @@ iree_cc_library(
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../../include>"
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../../../include>"
   PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    tls_test
+  SRCS
+    "tls_test.cc"
+  DEPS
+    ::common
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
 )
 
 iree_cc_test(

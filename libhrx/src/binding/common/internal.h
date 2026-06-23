@@ -1171,6 +1171,12 @@ iree_status_t iree_hal_streaming_context_wait_idle(
 iree_status_t iree_hal_streaming_context_synchronize(
     iree_hal_streaming_context_t* context);
 
+// Synchronizes streams that participate in legacy default stream ordering.
+// Non-blocking streams are excluded. The legacy default stream itself is always
+// synchronized.
+iree_status_t iree_hal_streaming_context_synchronize_legacy_default(
+    iree_hal_streaming_context_t* context);
+
 // Wait for all already-submitted work on all streams to complete.
 // Unlike context_synchronize, this does NOT flush in-progress recordings.
 // Safe to call from any thread without interfering with other threads.

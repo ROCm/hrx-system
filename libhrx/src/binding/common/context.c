@@ -748,8 +748,9 @@ iree_status_t iree_hal_streaming_context_wait_idle(
   return status;
 }
 
-iree_status_t iree_hal_streaming_context_synchronize(
-    iree_hal_streaming_context_t* context) {
+static iree_status_t iree_hal_streaming_context_synchronize_streams(
+    iree_hal_streaming_context_t* context,
+    bool include_non_blocking_streams) {
   IREE_ASSERT_ARGUMENT(context);
   IREE_TRACE_ZONE_BEGIN(z0);
 
@@ -762,13 +763,18 @@ iree_status_t iree_hal_streaming_context_synchronize(
     return status;
   }
 
-  // Synchronize all streams (now safe since we hold references).
+  // Synchronize streams from the retained snapshot. Legacy default stream
+  // ordering excludes non-blocking streams, while device/context-wide
+  // synchronization includes them.
   for (iree_host_size_t i = 0; i < count; ++i) {
-    if (streams_copy[i]) {
-      if (iree_status_is_ok(status)) {
-        status = iree_hal_streaming_stream_synchronize(streams_copy[i]);
-      }
+    if (!iree_status_is_ok(status)) break;
+    iree_hal_streaming_stream_t* stream = streams_copy[i];
+    if (!stream) continue;
+    if (!include_non_blocking_streams &&
+        (stream->flags & IREE_HAL_STREAMING_STREAM_FLAG_NON_BLOCKING)) {
+      continue;
     }
+    status = iree_hal_streaming_stream_synchronize(stream);
   }
 
   iree_hal_streaming_context_release_stream_snapshot(context, streams_copy,
@@ -779,7 +785,8 @@ iree_status_t iree_hal_streaming_context_synchronize(
     return status;
   }
 
-  // Also synchronize the default stream (which may not be in the streams list).
+  // Also synchronize the default stream, which may not be in the streams list.
+  // The legacy default stream always participates in its own ordering.
   if (context->default_stream) {
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
         z0, iree_hal_streaming_stream_synchronize(context->default_stream));
@@ -787,6 +794,18 @@ iree_status_t iree_hal_streaming_context_synchronize(
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
+}
+
+iree_status_t iree_hal_streaming_context_synchronize(
+    iree_hal_streaming_context_t* context) {
+  return iree_hal_streaming_context_synchronize_streams(
+      context, /*include_non_blocking_streams=*/true);
+}
+
+iree_status_t iree_hal_streaming_context_synchronize_legacy_default(
+    iree_hal_streaming_context_t* context) {
+  return iree_hal_streaming_context_synchronize_streams(
+      context, /*include_non_blocking_streams=*/false);
 }
 
 iree_status_t iree_hal_streaming_context_wait_all_submitted(

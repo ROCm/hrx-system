@@ -12,6 +12,7 @@
 
 #include "common/graph.h"
 #include "common/internal.h"
+#include "common/tls.h"
 #include "iree/base/threading/call_once.h"
 #include "hrx_runtime.h"
 
@@ -286,13 +287,81 @@ static iree_thread_local struct {
 static iree_slim_mutex_t iree_hip_global_init_mutex;
 static iree_once_flag iree_hip_global_init_mutex_once = IREE_ONCE_FLAG_INIT;
 
-static iree_thread_local iree_hal_streaming_context_t*
-    iree_hip_per_thread_stream_context = NULL;
-static iree_thread_local iree_hal_streaming_stream_t*
-    iree_hip_per_thread_stream = NULL;
+typedef struct iree_hip_per_thread_stream_state_t {
+  // Context associated with the cached per-thread stream.
+  iree_hal_streaming_context_t* context;
+  // Cached stream used for hipStreamPerThread on the current thread.
+  iree_hal_streaming_stream_t* stream;
+} iree_hip_per_thread_stream_state_t;
+
+static iree_once_flag iree_hip_per_thread_stream_key_once =
+    IREE_ONCE_FLAG_INIT;
+static iree_hal_streaming_tls_key_t iree_hip_per_thread_stream_key =
+    IREE_HAL_STREAMING_TLS_KEY_INVALID;
+static iree_status_code_t iree_hip_per_thread_stream_key_status =
+    IREE_STATUS_OK;
 
 static void iree_hip_initialize_global_init_mutex(void) {
   iree_slim_mutex_initialize(&iree_hip_global_init_mutex);
+}
+
+static void iree_hip_per_thread_stream_state_destroy(void* value) {
+  iree_hip_per_thread_stream_state_t* state =
+      (iree_hip_per_thread_stream_state_t*)value;
+  if (state->stream) {
+    iree_hal_streaming_stream_release(state->stream);
+  }
+  iree_allocator_free(iree_allocator_system(), state);
+}
+
+static void iree_hip_initialize_per_thread_stream_key(void) {
+  iree_status_t status = iree_hal_streaming_tls_key_create(
+      &iree_hip_per_thread_stream_key,
+      iree_hip_per_thread_stream_state_destroy);
+  iree_hip_per_thread_stream_key_status = iree_status_code(status);
+  iree_status_ignore(status);
+}
+
+static hipError_t iree_hip_get_per_thread_stream_state(
+    bool create_state, iree_hip_per_thread_stream_state_t** out_state) {
+  IREE_ASSERT_ARGUMENT(out_state);
+  iree_call_once(&iree_hip_per_thread_stream_key_once,
+                 iree_hip_initialize_per_thread_stream_key);
+  if (IREE_UNLIKELY(iree_hip_per_thread_stream_key_status !=
+                    IREE_STATUS_OK)) {
+    *out_state = NULL;
+    return iree_hip_per_thread_stream_key_status ==
+                   IREE_STATUS_RESOURCE_EXHAUSTED
+               ? hipErrorOutOfMemory
+               : hipErrorUnknown;
+  }
+
+  iree_hip_per_thread_stream_state_t* state =
+      (iree_hip_per_thread_stream_state_t*)iree_hal_streaming_tls_get(
+          iree_hip_per_thread_stream_key);
+  if (!state && create_state) {
+    iree_status_t status =
+        iree_allocator_malloc(iree_allocator_system(), sizeof(*state),
+                              (void**)&state);
+    if (!iree_status_is_ok(status)) {
+      const iree_status_code_t status_code = iree_status_code(status);
+      iree_status_free(status);
+      *out_state = NULL;
+      return status_code == IREE_STATUS_RESOURCE_EXHAUSTED ? hipErrorOutOfMemory
+                                                           : hipErrorUnknown;
+    }
+    status = iree_hal_streaming_tls_set(iree_hip_per_thread_stream_key, state);
+    if (!iree_status_is_ok(status)) {
+      const iree_status_code_t status_code = iree_status_code(status);
+      iree_status_free(status);
+      iree_allocator_free(iree_allocator_system(), state);
+      *out_state = NULL;
+      return status_code == IREE_STATUS_INVALID_ARGUMENT ? hipErrorInvalidValue
+                                                         : hipErrorUnknown;
+    }
+  }
+  *out_state = state;
+  return hipSuccess;
 }
 
 static void iree_hip_thread_error_set(hipError_t error, bool sticky) {
@@ -752,13 +821,16 @@ static hipError_t iree_hip_ensure_context(
 
 static void iree_hip_clear_per_thread_stream(
     iree_hal_streaming_context_t* context) {
-  if (!iree_hip_per_thread_stream) {
+  iree_hip_per_thread_stream_state_t* state = NULL;
+  if (iree_hip_get_per_thread_stream_state(/*create_state=*/false, &state) !=
+          hipSuccess ||
+      !state || !state->stream) {
     return;
   }
-  if (!context || iree_hip_per_thread_stream_context == context) {
-    iree_hal_streaming_stream_release(iree_hip_per_thread_stream);
-    iree_hip_per_thread_stream = NULL;
-    iree_hip_per_thread_stream_context = NULL;
+  if (!context || state->context == context) {
+    iree_hal_streaming_stream_release(state->stream);
+    state->stream = NULL;
+    state->context = NULL;
   }
 }
 
@@ -767,9 +839,15 @@ static hipError_t iree_hip_resolve_per_thread_stream(
     iree_hal_streaming_stream_t** out_stream) {
   IREE_ASSERT_ARGUMENT(context);
   IREE_ASSERT_ARGUMENT(out_stream);
-  if (iree_hip_per_thread_stream &&
-      iree_hip_per_thread_stream_context == context) {
-    *out_stream = iree_hip_per_thread_stream;
+  iree_hip_per_thread_stream_state_t* state = NULL;
+  hipError_t result =
+      iree_hip_get_per_thread_stream_state(/*create_state=*/true, &state);
+  if (result != hipSuccess) {
+    *out_stream = NULL;
+    return result;
+  }
+  if (state->stream && state->context == context) {
+    *out_stream = state->stream;
     return hipSuccess;
   }
 
@@ -777,16 +855,16 @@ static hipError_t iree_hip_resolve_per_thread_stream(
 
   iree_hal_streaming_stream_t* stream = NULL;
   iree_status_t status = iree_hal_streaming_stream_create(
-      context, context->default_stream->flags, context->default_stream->priority,
-      context->host_allocator, &stream);
+      context, IREE_HAL_STREAMING_STREAM_FLAG_NONE,
+      context->default_stream->priority, context->host_allocator, &stream);
   if (!iree_status_is_ok(status)) {
     iree_status_free(status);
     *out_stream = NULL;
     return hipErrorOutOfMemory;
   }
 
-  iree_hip_per_thread_stream_context = context;
-  iree_hip_per_thread_stream = stream;
+  state->context = context;
+  state->stream = stream;
   *out_stream = stream;
   return hipSuccess;
 }
@@ -4609,7 +4687,7 @@ HIPAPI hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes,
 
   iree_status_t status = iree_ok_status();
   if (!stream || stream == hipStreamLegacy) {
-    status = iree_hal_streaming_context_synchronize(context);
+    status = iree_hal_streaming_context_synchronize_legacy_default(context);
   }
   switch (kind) {
     case hipMemcpyHostToDevice:
@@ -6607,7 +6685,8 @@ HIPAPI hipError_t hipStreamSynchronize(hipStream_t stream) {
       HIP_RETURN_ERROR(hipErrorStreamCaptureUnsupported);
     }
 
-    iree_status_t status = iree_hal_streaming_context_synchronize(context);
+    iree_status_t status =
+        iree_hal_streaming_context_synchronize_legacy_default(context);
     hipError_t result = iree_status_to_hip_result(status);
     IREE_TRACE_ZONE_END(z0);
     return result;

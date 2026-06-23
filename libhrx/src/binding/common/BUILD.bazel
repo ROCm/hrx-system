@@ -34,12 +34,14 @@ hrx_cc_library(
         "peer.c",
         "registry.c",
         "stream.c",
+        "tls.c",
     ],
     hdrs = [
         "fat_binary.h",
         "graph.h",
         "hrx_bridge.h",
         "internal.h",
+        "tls.h",
     ],
     copts = [
         "-Wno-unused-variable",
@@ -51,6 +53,7 @@ hrx_cc_library(
     ],
     textual_hdrs = ["//build_tools/amdgpu:elf_machine_map.inl"],
     deps = [
+        "//build_tools:pthreads",
         "//libhrx/src/libhrx:hrx_static",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
@@ -61,6 +64,17 @@ hrx_cc_library(
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/utils:resource_set",
         "//runtime/src/iree/io:file_handle",
+    ],
+)
+
+hrx_cc_test(
+    name = "tls_test",
+    srcs = ["tls_test.cc"],
+    deps = [
+        ":common",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
