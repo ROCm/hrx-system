@@ -103,8 +103,8 @@ iree_hal_streaming_tls_set(iree_hal_streaming_tls_key_t key, void* value) {
 
 #elif defined(IREE_PLATFORM_WINDOWS)
 
-static __declspec(thread) void* iree_hal_streaming_tls_values
-    [IREE_HAL_STREAMING_TLS_KEY_CAPACITY] = {0};
+static __declspec(thread) void*
+    iree_hal_streaming_tls_values[IREE_HAL_STREAMING_TLS_KEY_CAPACITY] = {0};
 
 static void iree_hal_streaming_tls_cleanup_current_thread(void) {
   for (int iteration = 0; iteration < 4; ++iteration) {
