@@ -55,6 +55,24 @@ func.def @has_body(%x: i32) -> (i32) {
 
 // RUN: pass dce
 
+// Unused plain loads have read effects but no semantic writeback, so they are
+// dead when their results have no uses.
+func.def @dead_view_load(%input: buffer) {
+  %offset = index.constant 0 : offset
+  %index = index.constant 0 : index
+  %view = buffer.view %input[%offset] : buffer -> view<4xf32, #dense>
+  %dead = view.load %view[%index] : view<4xf32, #dense> -> f32
+  func.return
+}
+// ----
+func.def @dead_view_load(%input: buffer) {
+  func.return
+}
+
+// ====
+
+// RUN: pass dce
+
 // No-op: all code is live.
 func.def @all_live(%a: i32, %b: i32) -> (i32) {
   %c = test.addi %a, %b : i32
