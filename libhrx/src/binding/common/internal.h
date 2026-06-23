@@ -1103,6 +1103,9 @@ iree_hal_streaming_context_flags_t iree_hal_streaming_context_flags(
 // Synchronization: none (thread-local access).
 iree_hal_streaming_context_t* iree_hal_streaming_context_current(void);
 
+// Synchronization: none (thread-local access).
+uintptr_t iree_hal_streaming_current_thread_token(void);
+
 // Synchronization: none (thread-local modification).
 void iree_hal_streaming_context_set_current(
     iree_hal_streaming_context_t* context);

@@ -7,12 +7,12 @@
 #include "binding/hip/api.h"
 
 #include <dlfcn.h>
-#include <pthread.h>
 #include <stdint.h>
 #include <string.h>
 
 #include "common/graph.h"
 #include "common/internal.h"
+#include "iree/base/threading/call_once.h"
 #include "hrx_runtime.h"
 
 //===----------------------------------------------------------------------===//
@@ -283,61 +283,16 @@ static iree_thread_local struct {
   bool sticky;
 } iree_hip_thread_error = {hipSuccess, false};
 
-static pthread_mutex_t iree_hip_global_init_mutex = PTHREAD_MUTEX_INITIALIZER;
+static iree_slim_mutex_t iree_hip_global_init_mutex;
+static iree_once_flag iree_hip_global_init_mutex_once = IREE_ONCE_FLAG_INIT;
 
-typedef struct iree_hip_per_thread_stream_state_t {
-  iree_hal_streaming_context_t* context;
-  iree_hal_streaming_stream_t* stream;
-} iree_hip_per_thread_stream_state_t;
+static iree_thread_local iree_hal_streaming_context_t*
+    iree_hip_per_thread_stream_context = NULL;
+static iree_thread_local iree_hal_streaming_stream_t*
+    iree_hip_per_thread_stream = NULL;
 
-static pthread_once_t iree_hip_per_thread_stream_key_once = PTHREAD_ONCE_INIT;
-static pthread_key_t iree_hip_per_thread_stream_key;
-static int iree_hip_per_thread_stream_key_status = 0;
-
-static void iree_hip_per_thread_stream_state_destroy(void* value) {
-  iree_hip_per_thread_stream_state_t* state =
-      (iree_hip_per_thread_stream_state_t*)value;
-  if (!state) return;
-  iree_hal_streaming_stream_release(state->stream);
-  iree_allocator_free(iree_allocator_system(), state);
-}
-
-static void iree_hip_create_per_thread_stream_key(void) {
-  iree_hip_per_thread_stream_key_status =
-      pthread_key_create(&iree_hip_per_thread_stream_key,
-                         iree_hip_per_thread_stream_state_destroy);
-}
-
-static hipError_t iree_hip_get_per_thread_stream_state(
-    bool create, iree_hip_per_thread_stream_state_t** out_state) {
-  pthread_once(&iree_hip_per_thread_stream_key_once,
-               iree_hip_create_per_thread_stream_key);
-  if (iree_hip_per_thread_stream_key_status != 0) {
-    *out_state = NULL;
-    return hipErrorOutOfMemory;
-  }
-
-  iree_hip_per_thread_stream_state_t* state =
-      (iree_hip_per_thread_stream_state_t*)pthread_getspecific(
-          iree_hip_per_thread_stream_key);
-  if (!state && create) {
-    iree_status_t status = iree_allocator_malloc(
-        iree_allocator_system(), sizeof(*state), (void**)&state);
-    if (!iree_status_is_ok(status)) {
-      iree_status_free(status);
-      *out_state = NULL;
-      return hipErrorOutOfMemory;
-    }
-    memset(state, 0, sizeof(*state));
-    if (pthread_setspecific(iree_hip_per_thread_stream_key, state) != 0) {
-      iree_allocator_free(iree_allocator_system(), state);
-      *out_state = NULL;
-      return hipErrorOutOfMemory;
-    }
-  }
-
-  *out_state = state;
-  return hipSuccess;
+static void iree_hip_initialize_global_init_mutex(void) {
+  iree_slim_mutex_initialize(&iree_hip_global_init_mutex);
 }
 
 static void iree_hip_thread_error_set(hipError_t error, bool sticky) {
@@ -595,7 +550,7 @@ static bool iree_hip_status_to_capture_invalidation_failure(
 static bool iree_hip_context_invalidate_visible_captures(
     iree_hal_streaming_context_t* context) {
   if (!iree_hal_streaming_context_has_capture_streams(context)) return false;
-  const uintptr_t thread_id = (uintptr_t)pthread_self();
+  const uintptr_t thread_id = iree_hal_streaming_current_thread_token();
   iree_hal_streaming_stream_t** streams = NULL;
   iree_host_size_t stream_count = 0;
   iree_status_t status =
@@ -649,7 +604,7 @@ static bool iree_hip_context_invalidate_stream_blocking_capture(
     iree_hal_streaming_context_t* context,
     iree_hal_streaming_stream_t* target_stream) {
   if (!iree_hal_streaming_context_has_capture_streams(context)) return false;
-  const uintptr_t thread_id = (uintptr_t)pthread_self();
+  const uintptr_t thread_id = iree_hal_streaming_current_thread_token();
   iree_hal_streaming_stream_t** streams = NULL;
   iree_host_size_t stream_count = 0;
   iree_status_t status =
@@ -726,7 +681,9 @@ static hipError_t iree_hip_ensure_initialized(void) {
     return hipErrorNoDevice;
   }
 
-  pthread_mutex_lock(&iree_hip_global_init_mutex);
+  iree_call_once(&iree_hip_global_init_mutex_once,
+                 iree_hip_initialize_global_init_mutex);
+  iree_slim_mutex_lock(&iree_hip_global_init_mutex);
   iree_hal_streaming_device_registry_t* device_registry =
       iree_hal_streaming_device_registry();
   if (!device_registry) {
@@ -736,17 +693,17 @@ static hipError_t iree_hip_ensure_initialized(void) {
     if (!iree_status_is_ok(status)) {
       const iree_status_code_t status_code = iree_status_code(status);
       iree_status_free(status);
-      pthread_mutex_unlock(&iree_hip_global_init_mutex);
+      iree_slim_mutex_unlock(&iree_hip_global_init_mutex);
       return status_code == IREE_STATUS_NOT_FOUND ? hipErrorNoDevice
                                                   : hipErrorNotInitialized;
     }
     device_registry = iree_hal_streaming_device_registry();
   }
   if (!device_registry || device_registry->device_count == 0) {
-    pthread_mutex_unlock(&iree_hip_global_init_mutex);
+    iree_slim_mutex_unlock(&iree_hip_global_init_mutex);
     return hipErrorNoDevice;
   }
-  pthread_mutex_unlock(&iree_hip_global_init_mutex);
+  iree_slim_mutex_unlock(&iree_hip_global_init_mutex);
   return hipSuccess;
 }
 
@@ -795,16 +752,13 @@ static hipError_t iree_hip_ensure_context(
 
 static void iree_hip_clear_per_thread_stream(
     iree_hal_streaming_context_t* context) {
-  iree_hip_per_thread_stream_state_t* state = NULL;
-  if (iree_hip_get_per_thread_stream_state(/*create=*/false, &state) !=
-          hipSuccess ||
-      !state || !state->stream) {
+  if (!iree_hip_per_thread_stream) {
     return;
   }
-  if (!context || state->context == context) {
-    iree_hal_streaming_stream_release(state->stream);
-    state->stream = NULL;
-    state->context = NULL;
+  if (!context || iree_hip_per_thread_stream_context == context) {
+    iree_hal_streaming_stream_release(iree_hip_per_thread_stream);
+    iree_hip_per_thread_stream = NULL;
+    iree_hip_per_thread_stream_context = NULL;
   }
 }
 
@@ -813,16 +767,9 @@ static hipError_t iree_hip_resolve_per_thread_stream(
     iree_hal_streaming_stream_t** out_stream) {
   IREE_ASSERT_ARGUMENT(context);
   IREE_ASSERT_ARGUMENT(out_stream);
-  iree_hip_per_thread_stream_state_t* state = NULL;
-  hipError_t state_result =
-      iree_hip_get_per_thread_stream_state(/*create=*/true, &state);
-  if (state_result != hipSuccess) {
-    *out_stream = NULL;
-    return state_result;
-  }
-
-  if (state->stream && state->context == context) {
-    *out_stream = state->stream;
+  if (iree_hip_per_thread_stream &&
+      iree_hip_per_thread_stream_context == context) {
+    *out_stream = iree_hip_per_thread_stream;
     return hipSuccess;
   }
 
@@ -838,8 +785,8 @@ static hipError_t iree_hip_resolve_per_thread_stream(
     return hipErrorOutOfMemory;
   }
 
-  state->context = context;
-  state->stream = stream;
+  iree_hip_per_thread_stream_context = context;
+  iree_hip_per_thread_stream = stream;
   *out_stream = stream;
   return hipSuccess;
 }

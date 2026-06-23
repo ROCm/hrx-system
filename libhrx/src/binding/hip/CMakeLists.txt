@@ -23,6 +23,7 @@ iree_cc_library(
     "api.c"
   DEPS
     iree::base
+    iree::base::threading
     iree::hal
     libhrx::src::binding::common
     libhrx_defs

@@ -40,6 +40,7 @@ hrx_cc_shared_library(
     deps = [
         "//libhrx/src/binding/common",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
     ],
 )

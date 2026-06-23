@@ -8,8 +8,6 @@
 
 #include "common/internal.h"
 
-#include <pthread.h>
-
 //===----------------------------------------------------------------------===//
 // iree_hal_streaming_graph_t (template)
 //===----------------------------------------------------------------------===//
@@ -1360,7 +1358,8 @@ iree_status_t iree_hal_streaming_begin_capture(
   stream->capture_mode = mode;
   stream->capture_graph_owned = true;
   stream->capture_id++;  // Increment capture ID.
-  stream->capture_owner_thread_id = (uintptr_t)pthread_self();
+  stream->capture_owner_thread_id =
+      iree_hal_streaming_current_thread_token();
   iree_hal_streaming_stream_set_capture_status(
       stream, IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE);
 
@@ -1413,7 +1412,8 @@ iree_status_t iree_hal_streaming_begin_capture_to_graph(
   stream->capture_graph = graph;
   stream->capture_graph_owned = false;
   stream->capture_id++;
-  stream->capture_owner_thread_id = (uintptr_t)pthread_self();
+  stream->capture_owner_thread_id =
+      iree_hal_streaming_current_thread_token();
   stream->capture_dependency_count = dependency_count;
   iree_hal_streaming_stream_set_capture_status(
       stream, IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE);

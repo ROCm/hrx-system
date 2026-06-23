@@ -15,6 +15,7 @@
 // Thread-local current context.
 static iree_thread_local iree_hal_streaming_context_t*
     iree_hal_streaming_current_context = NULL;
+static iree_thread_local int iree_hal_streaming_thread_token_storage;
 
 typedef struct iree_hal_streaming_context_stack_t {
   iree_hal_streaming_context_t** contexts;
@@ -243,6 +244,10 @@ iree_hal_streaming_context_flags_t iree_hal_streaming_context_flags(
 iree_hal_streaming_context_t* iree_hal_streaming_context_current(void) {
   iree_hal_streaming_context_t* context = iree_hal_streaming_current_context;
   return context;
+}
+
+uintptr_t iree_hal_streaming_current_thread_token(void) {
+  return (uintptr_t)&iree_hal_streaming_thread_token_storage;
 }
 
 void iree_hal_streaming_context_set_current(
